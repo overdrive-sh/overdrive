@@ -1,0 +1,63 @@
+{
+ "results": [
+  {
+   "item": "errno",
+   "verdict": "done",
+   "elapsed_s": 2.0,
+   "pass": 42,
+   "fail": 0,
+   "kernel_fault": false,
+   "suite_done": [
+    "SUITE_DONE suite=errno rc=0"
+   ],
+   "guest_uname": [
+    "7.0.0-29-generic"
+   ]
+  },
+  {
+   "item": "misc",
+   "verdict": "done",
+   "elapsed_s": 2.0,
+   "pass": 41,
+   "fail": 0,
+   "kernel_fault": false,
+   "suite_done": [
+    "SUITE_DONE suite=misc rc=0"
+   ],
+   "guest_uname": [
+    "7.0.0-29-generic"
+   ]
+  },
+  {
+   "item": "unload",
+   "verdict": "done",
+   "elapsed_s": 1.0,
+   "pass": 27,
+   "fail": 0,
+   "kernel_fault": false,
+   "suite_done": [
+    "SUITE_DONE suite=unload rc=0"
+   ],
+   "guest_uname": [
+    "7.0.0-29-generic"
+   ]
+  },
+  {
+   "item": "tls",
+   "verdict": "done",
+   "elapsed_s": 3.0,
+   "pass": 18,
+   "fail": 0,
+   "kernel_fault": false,
+   "suite_done": [
+    "SUITE_DONE suite=tls rc=0"
+   ],
+   "guest_uname": [
+    "7.0.0-29-generic"
+   ]
+  }
+ ],
+ "ovd_fwd_in_physical_kernel_after": false,
+ "physical_modules_added": [],
+ "physical_modules_ok": true
+}

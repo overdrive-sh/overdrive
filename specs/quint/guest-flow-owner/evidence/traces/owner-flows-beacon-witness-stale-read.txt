@@ -1,4 +1,4 @@
-# owner-flows-beacon-witness-stale-read: counterexample, 11 state(s) (from the TLC trace)
+# owner-flows-beacon-witness-stale-read: counterexample, 8 state(s) (from the TLC trace)
 
 State 1
   vmUp = FALSE
@@ -6,8 +6,10 @@ State 1
   phantom = FALSE
   toHostRefused = {}
   toGuestAbort = {}
+  gSess = 0
   quiesced = FALSE
   bHeldByOther = FALSE
+  conf_step = [InitWith |-> [o |-> "g"]]
   dl = [ res |-> <<"none">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
   toHostAbort = {}
   alloc = "Absent"
@@ -44,24 +46,15 @@ State 4 [step]
 
 State 5 [VmStop]
   vmUp = FALSE
-
-State 6 [Teardown]
-  alloc = "Retiring"
-
-State 7 [step]
-  bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
-
-State 8 [step]
   drvLive = FALSE
 
-State 9 [Release]
-  alloc = "Absent"
-
-State 10 [Provision]
-  alloc = "Provisioned"
+State 6 [Provision]
   gen = 2
 
-State 11 [VmStart]
+State 7 [VmStart]
   vmUp = TRUE
   drvLive = TRUE
   vmGen = 2
+
+State 8 [step]
+  bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>

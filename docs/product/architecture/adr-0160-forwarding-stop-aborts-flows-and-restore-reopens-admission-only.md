@@ -17,11 +17,12 @@ application as an error, using `SO_LINGER{1,0}`.
 
 ## Context
 
-With SockHash forwarding, a TCP socket has already acknowledged any byte the
-verdict receives. If the verdict then drops it, both ends see a healthy stream
-that has silently lost data, and TCP cannot recover it. Containment by
-bringing an interface down and restoring it later, which TCP recovers end to
-end, is therefore not available.
+With kernel forwarding between two sockets (ADR-0197), each socket's TCP has
+already acknowledged the bytes it received from its own peer. A stop that
+drops those bytes leaves both ends with a healthy stream that has silently
+lost data, and TCP cannot recover it. Containment by bringing an interface
+down and restoring it later, which TCP recovers end to end, is therefore not
+available.
 
 The guest-capture spike (`spike/guest-vsock-capture-findings.md`) showed that
 closing an owner's sockets normally gives the in-flight application, or a
@@ -32,7 +33,8 @@ The two owners end differently:
 
 - **Host owner.** The guest-flow owner runs in `overdrive serve`; when that
   process exits, its files close, so a linger set on its sockets resets their
-  far ends. The guest then receives `0x3` for every flow and aborts them
+  far ends, and its forwarder context's release aborts every attached pair
+  (ADR-0199). The guest then receives `0x3` for every flow and aborts them
   (ADR-0180).
 - **Guest owner.** The guest owner runs in `overdrive-init`, PID 1. When the
   last thread of the global init exits, the guest kernel panics
@@ -47,13 +49,13 @@ The two owners end differently:
 ## Decision
 
 - **Stop aborts the whole flow.** Quiescence, teardown, removal after an
-  error, a `Refused` or `Abort` control message, a classified abort
-  (ADR-0180), a refused redirect or a lost ring record (ADR-0183), and owner
-  loss each abort the affected flow: both sides close all of the flow's
-  sockets, and TCP sockets close with reset semantics so both ends observe
-  failure.
-- **No partial drops.** A pair is never left installed with its routes
-  removed.
+  error, a `Refused` or `Abort` control message, a classified abort or a
+  socket error the forwarder reports in a pair's end record (ADR-0180,
+  ADR-0202), and owner loss each abort the affected flow: both sides close
+  all of the flow's sockets, and TCP sockets close with reset semantics so
+  both ends observe failure.
+- **No partial drops.** A pair is never left attached with one direction
+  stopped; an abort ends both directions.
 - **Failure visibility, both ends.** Every TCP socket an owner holds whose
   far end is outside that owner carries `SO_LINGER{1,0}` from creation, so an
   abort, or on the host the owner's exit, resets it rather than ending it
@@ -73,10 +75,10 @@ The two owners end differently:
 
 ## Alternatives considered
 
-- **Remove routes and keep the sockets, then restore routes.** Bytes are lost
-  silently mid-stream. Rejected.
-- **Hold redirected data in the kernel during quiescence.** SK_SKB has no
-  holding primitive. Rejected.
+- **Detach the pairs and keep the sockets, then reattach.** Bytes queued at
+  the detach would be read by no one until the reattach, and the far ends
+  would see a stall rather than a failure for the length of a recovery.
+  Rejected.
 - **Let an owner's sockets close normally on exit.** The far end sees a clean
   EOF on a truncated stream. Rejected.
 

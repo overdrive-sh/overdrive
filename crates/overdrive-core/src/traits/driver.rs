@@ -259,12 +259,11 @@ pub enum DriverError {
     /// (ADR-0082 §D4 Amendment 2026-08-18.)
     #[error("driver {driver} does not support resize for allocation {alloc}: {detail}")]
     ResizeUnsupported { driver: DriverType, alloc: AllocationId, detail: String },
-    /// A VM start whose spec has no [`GuestTransportAssignment`], or whose
-    /// claim was already taken (D16-CLAIM). Non-terminal start failure; it
-    /// arises only from a composition error or a second start of the same
-    /// allocation, which placement never issues.
-    #[error("allocation {alloc} has no claimed guest CID to hand to the VMM")]
-    VsockClaimUnavailable { alloc: AllocationId },
+    /// A VM start whose spec has no [`GuestTransportAssignment`].
+    /// Non-terminal start failure; it arises only from a composition error,
+    /// which placement never issues.
+    #[error("allocation {alloc} has no guest transport assignment for the VMM")]
+    GuestTransportMissing { alloc: AllocationId },
 }
 
 /// Resource envelope for an allocation — cgroup limits for processes,

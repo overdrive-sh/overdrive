@@ -9,15 +9,19 @@ State 1: <Initial predicate>
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE,
   dropped |-> FALSE,
-  refusedBoot |-> FALSE ]
+  refusedBoot |-> FALSE,
+  foreignChanged |-> FALSE ]
 /\ quiesce_bugBootContinues_quiescence_latch = FALSE
 /\ quiesce_bugBootContinues_quiescence_flowsOpen = 0
+/\ quiesce_bugBootContinues_quiescence_leaked = 0
+/\ quiesce_bugBootContinues_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
+/\ quiesce_bugBootContinues_quiescence_foreign = FALSE
 /\ quiesce_bugBootContinues_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
 /\ quiesce_bugBootContinues_quiescence_stop = "crash"
 /\ quiesce_bugBootContinues_quiescence_cnt = 0
 /\ quiesce_bugBootContinues_quiescence_up = FALSE
 
-State 2: <quiesce_bugBootContinues_quiescence_RestartWith line 692, col 3 to line 725, col 7 of module quiesce_bugBootContinues>
+State 2: <quiesce_bugBootContinues_quiescence_RestartWith line 883, col 3 to line 925, col 57 of module quiesce_bugBootContinues>
 /\ quiesce_bugBootContinues_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
 /\ quiesce_bugBootContinues_quiescence_repLeft = 1
 /\ quiesce_bugBootContinues_quiescence_table = FALSE
@@ -28,9 +32,13 @@ State 2: <quiesce_bugBootContinues_quiescence_RestartWith line 692, col 3 to lin
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE,
   dropped |-> FALSE,
-  refusedBoot |-> TRUE ]
+  refusedBoot |-> TRUE,
+  foreignChanged |-> FALSE ]
 /\ quiesce_bugBootContinues_quiescence_latch = FALSE
 /\ quiesce_bugBootContinues_quiescence_flowsOpen = 0
+/\ quiesce_bugBootContinues_quiescence_leaked = 0
+/\ quiesce_bugBootContinues_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
+/\ quiesce_bugBootContinues_quiescence_foreign = FALSE
 /\ quiesce_bugBootContinues_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
 /\ quiesce_bugBootContinues_quiescence_stop = "none"
 /\ quiesce_bugBootContinues_quiescence_cnt = 0

@@ -1,0 +1,34 @@
+# udp-slots-witness-discard-at-end: counterexample, 4 state(s) (from the TLC trace)
+
+State 1
+  host = << [sock |-> 0, dest |-> 0, st |-> "none", slot |-> 0], [sock |-> 0, dest |-> 0, st |-> "none", slot |-> 0] >>
+  toGuestPaired = {}
+  nextFid = 1
+  toHostEnd = {}
+  toHostAbort = {}
+  picks = {}
+  releasePending = <<FALSE, FALSE>>
+  slots = ( 0 :> [ owned |-> FALSE, sock |-> 0, dest |-> 0, fid |-> 0, attached |-> FALSE, parked |-> {}, holders |-> 0 ] @@ 1 :> [ owned |-> FALSE, sock |-> 0, dest |-> 0, fid |-> 0, attached |-> FALSE, parked |-> {}, holders |-> 0 ] )
+  toGuestRefused = {}
+  staleReassoc = FALSE
+  endedNoNew = {}
+  conf_step = [init |-> [tag |-> "UNIT"]]
+  guestEnded = {}
+  sockAlive = <<TRUE, TRUE>>
+  lateIgnored = FALSE
+  misdelivered = FALSE
+  toGuestAbort = {}
+
+State 2 [AppClaim]
+  slots = ( 0 :> [ owned |-> TRUE, sock |-> 1, dest |-> 1, fid |-> 0, attached |-> FALSE, parked |-> {<<1, 1>>}, holders |-> 1 ] @@ 1 :> [ owned |-> FALSE, sock |-> 0, dest |-> 0, fid |-> 0, attached |-> FALSE, parked |-> {}, holders |-> 0 ] )
+
+State 3 [GuestReady]
+  host = << [sock |-> 1, dest |-> 1, st |-> "req", slot |-> 0], [sock |-> 0, dest |-> 0, st |-> "none", slot |-> 0] >>
+  nextFid = 2
+  slots = ( 0 :> [ owned |-> TRUE, sock |-> 1, dest |-> 1, fid |-> 1, attached |-> FALSE, parked |-> {<<1, 1>>}, holders |-> 1 ] @@ 1 :> [ owned |-> FALSE, sock |-> 0, dest |-> 0, fid |-> 0, attached |-> FALSE, parked |-> {}, holders |-> 0 ] )
+
+State 4 [GuestPairingTimeout]
+  toHostAbort = {1}
+  slots = ( 0 :> [ owned |-> TRUE, sock |-> 1, dest |-> 1, fid |-> 0, attached |-> FALSE, parked |-> {}, holders |-> 1 ] @@ 1 :> [ owned |-> FALSE, sock |-> 0, dest |-> 0, fid |-> 0, attached |-> FALSE, parked |-> {}, holders |-> 0 ] )
+  endedNoNew = {0}
+  guestEnded = {1}

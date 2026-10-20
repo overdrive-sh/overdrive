@@ -46,17 +46,21 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use overdrive_control_plane::{ServerConfig, ServerHandle, dataplane_config::DataplaneConfig};
-use overdrive_host::RealCgroupFs;
+use overdrive_control_plane::{
+    HostDataplaneComposer, ServerConfig, ServerHandle, dataplane_config::DataplaneConfig,
+};
 use tempfile::TempDir;
 
-/// Builds the standard test-time `Arc<dyn CgroupFs>` adapter — real
-/// `tokio::fs::*` against `/sys/fs/cgroup` per step 01-06 of the
-/// `cgroup-fs-port` migration. Wraps a `RealCgroupFs::new()` in `Arc`
-/// at the call site so each test that boots a server has its own
-/// `Arc<dyn CgroupFs>` instance.
-fn test_cgroup_fs() -> std::sync::Arc<dyn overdrive_core::traits::cgroup_fs::CgroupFs> {
-    std::sync::Arc::new(RealCgroupFs::new())
+/// Boots `run_server` over the host bundle with the production
+/// `HostDataplaneComposer` (the real `EbpfDataplane`, its XDP attach and its
+/// bpffs pins under `config.dataplane_pin_dir`) and the non-VM fixtures'
+/// simulated intercept and DNS factory (NO-OVERRIDE-SEAMS; the replacement
+/// table's `dataplane_override: None` row).
+async fn boot_with_host_dataplane(
+    config: ServerConfig,
+) -> Result<ServerHandle, overdrive_control_plane::error::ControlPlaneError> {
+    let adapters = super::super::node_adapters::node_adapters_with_host_dataplane(&config);
+    overdrive_control_plane::run_server(config, adapters).await
 }
 
 // ----------------------------------------------------------------------------
@@ -237,16 +241,11 @@ fn server_config_with(
     operator_config_dir: &Path,
 ) -> ServerConfig {
     ServerConfig {
-        bind: "127.0.0.1:0".parse().expect("parse bind"),
-        data_dir: data_dir.to_path_buf(),
-        operator_config_dir: operator_config_dir.to_path_buf(),
         dataplane: Some(fx.dataplane_config()),
         dataplane_pin_dir: Some(fx.pin_dir.clone()),
-        // Step 02-02 (C1-AMEND) — hermetic in-process boot KEK.
-        ..ServerConfig::new(
-            std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-            std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
-            std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
+        ..super::super::node_adapters::test_config(
+            data_dir.to_path_buf(),
+            operator_config_dir.to_path_buf(),
         )
     }
 }
@@ -308,8 +307,7 @@ async fn boot_composes_ebpf_dataplane_and_attaches_xdp_to_both_ifaces() {
     let config = server_config_with(&fx, &data_dir, &cfg_dir);
     let pin_path = fx.pin_dir.join("SERVICE_MAP");
 
-    let handle: ServerHandle =
-        overdrive_control_plane::run_server(config, test_cgroup_fs()).await.expect("run_server");
+    let handle: ServerHandle = boot_with_host_dataplane(config).await.expect("run_server");
 
     // Both ifaces must carry an XDP attachment.
     assert!(
@@ -370,9 +368,8 @@ async fn boot_resolves_host_ipv4_via_getifaddrs_on_client_iface() {
     );
 
     // Production-path: boot must succeed end-to-end with this iface.
-    let handle: ServerHandle = overdrive_control_plane::run_server(config, test_cgroup_fs())
-        .await
-        .expect("run_server with IPv4-bearing client_iface");
+    let handle: ServerHandle =
+        boot_with_host_dataplane(config).await.expect("run_server with IPv4-bearing client_iface");
     handle.shutdown(std::time::Duration::from_secs(2)).await.expect("clean server shutdown");
 }
 
@@ -404,8 +401,7 @@ async fn graceful_shutdown_detaches_xdp_and_removes_bpffs_pin() {
     let client_name = fx.client_iface.clone();
     let backend_name = fx.backend_iface.clone();
 
-    let handle: ServerHandle =
-        overdrive_control_plane::run_server(config, test_cgroup_fs()).await.expect("run_server");
+    let handle: ServerHandle = boot_with_host_dataplane(config).await.expect("run_server");
 
     // Pre-condition: both ifaces have XDP + pin exists. If this fails
     // we are testing the wrong property (the happy path didn't run);
@@ -534,23 +530,15 @@ async fn boot_refuses_when_client_iface_does_not_exist() {
     std::fs::create_dir_all(&data_dir).expect("mkdir data");
     std::fs::create_dir_all(&cfg_dir).expect("mkdir cfg");
     let config = ServerConfig {
-        bind: "127.0.0.1:0".parse().expect("parse bind"),
-        data_dir,
-        operator_config_dir: cfg_dir,
         dataplane: Some(DataplaneConfig {
             client_iface: nonexistent_client.clone(),
             backend_iface: nonexistent_client.clone(),
         }),
         dataplane_pin_dir: Some(bpffs_root.path().to_path_buf()),
-        // Step 02-02 (C1-AMEND) — hermetic in-process boot KEK.
-        ..ServerConfig::new(
-            std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-            std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
-            std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
-        )
+        ..super::super::node_adapters::test_config(data_dir, cfg_dir)
     };
 
-    let result = overdrive_control_plane::run_server(config, test_cgroup_fs()).await;
+    let result = boot_with_host_dataplane(config).await;
 
     use overdrive_control_plane::error::{ControlPlaneError, DataplaneBootError};
     let err = result.expect_err("expected boot refusal for nonexistent iface");
@@ -605,7 +593,7 @@ async fn boot_refuses_when_iface_has_no_ipv4_address() {
     let config = server_config_with(&fx, &data_dir, &cfg_dir);
     let client_name = fx.client_iface.clone();
 
-    let result = overdrive_control_plane::run_server(config, test_cgroup_fs()).await;
+    let result = boot_with_host_dataplane(config).await;
 
     use overdrive_control_plane::error::{ControlPlaneError, DataplaneBootError};
     let err = result.expect_err("expected boot refusal for IPv4-less iface");
@@ -765,7 +753,7 @@ async fn attach_mode_fallback_emits_structured_event_on_dummy_iface() {
 
     let client_name = fx.client_iface.clone();
     let backend_name = fx.backend_iface.clone();
-    let boot_result = overdrive_control_plane::run_server(config, test_cgroup_fs()).await;
+    let boot_result = boot_with_host_dataplane(config).await;
 
     // Boot must succeed — fallback should have retried successfully.
     let handle = boot_result.expect("expected boot to succeed via SKB fallback on dummy iface");
@@ -812,8 +800,12 @@ async fn attach_mode_fallback_emits_structured_event_on_dummy_iface() {
 ///
 /// `EbpfDataplane::new` succeeds (load + attach OK), then
 /// `EbpfDataplane::probe` returns `Err(DataplaneError::LoadFailed(...))`
-/// — we drive this via the `#[cfg(any(test, feature = "integration-tests"))]`
-/// `dataplane_probe_fault` injection seam on `ServerConfig`. The boot
+/// — we drive this through the production composer armed with the fault,
+/// `HostDataplaneComposer::with_probe_fault` (`integration-tests` only; the
+/// fault is on the adapter, not a `ServerConfig` field). This is the
+/// real-kernel evidence for `DataplaneComposer::compose`'s "nothing the call
+/// created survives an Err" on the production composer: the pin under the
+/// fixture's pin directory is gone after `run_server` returns. The boot
 /// path maps the probe error to
 /// `ControlPlaneError::DataplaneBoot(DataplaneBootError::Probe { source })`
 /// and emits a structured `health.startup.refused` event with
@@ -832,35 +824,30 @@ async fn boot_refuses_when_earned_trust_probe_fails() {
     std::fs::create_dir_all(&data_dir).expect("mkdir data");
     std::fs::create_dir_all(&cfg_dir).expect("mkdir cfg");
 
-    // Inject the probe-fault message. The verbatim text tracks the
-    // architecture.md § 5.4 contract — the boot path reconstructs
-    // `DataplaneError::LoadFailed(msg)` from this string and the
-    // error chain surfaces "probe: round-trip mismatch" OR
-    // "probe: BACKEND_MAP" through `Display`. See the
-    // `ServerConfig::dataplane_probe_fault` docstring for why the
-    // seam is `String`-shaped at this boundary.
+    // The fault is armed on the production dataplane composer itself
+    // (`HostDataplaneComposer::with_probe_fault`, `integration-tests` only;
+    // NO-OVERRIDE-SEAMS round 13): `compose` constructs the real
+    // `EbpfDataplane` over the fixture's veth pair and pin directory, arms
+    // `fault` on it, runs its real probe, and takes its real `Err` path —
+    // `DataplaneBoot(Probe { source: fault })`, the dataplane dropped. The
+    // verbatim text tracks the architecture.md § 5.4 contract.
     let fault_msg = "probe: round-trip mismatch (injected by S-BDB-14 fixture)".to_owned();
     let config = ServerConfig {
-        bind: "127.0.0.1:0".parse().expect("parse bind"),
-        data_dir,
-        operator_config_dir: cfg_dir,
         dataplane: Some(fx.dataplane_config()),
         dataplane_pin_dir: Some(fx.pin_dir.clone()),
-        dataplane_probe_fault: Some(fault_msg),
-        // Step 02-02 (C1-AMEND) — hermetic in-process boot KEK.
-        ..ServerConfig::new(
-            std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-            std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
-            std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
-        )
+        ..super::super::node_adapters::test_config(data_dir, cfg_dir)
     };
+    let mut adapters = super::super::node_adapters::node_adapters_with_host_dataplane(&config);
+    adapters.boot.dataplane = std::sync::Arc::new(HostDataplaneComposer::with_probe_fault(
+        overdrive_core::traits::dataplane::DataplaneError::LoadFailed(fault_msg),
+    ));
     let pin_path = fx.pin_dir.join("SERVICE_MAP");
 
     let collector = event_capture::EventCollector::default();
     let subscriber = tracing_subscriber::registry().with(collector.clone());
     let _guard = tracing::subscriber::set_default(subscriber);
 
-    let result = overdrive_control_plane::run_server(config, test_cgroup_fs()).await;
+    let result = overdrive_control_plane::run_server(config, adapters).await;
 
     use overdrive_control_plane::error::{ControlPlaneError, DataplaneBootError};
     let err = result.expect_err("expected boot refusal when probe fault is injected");
@@ -931,9 +918,8 @@ async fn boot_succeeds_when_earned_trust_probe_round_trips_backend_map() {
     let config = server_config_with(&fx, &data_dir, &cfg_dir);
 
     // No probe-fault injected → production probe path runs end-to-end.
-    let handle: ServerHandle = overdrive_control_plane::run_server(config, test_cgroup_fs())
-        .await
-        .expect("run_server with probe success");
+    let handle: ServerHandle =
+        boot_with_host_dataplane(config).await.expect("run_server with probe success");
 
     handle.shutdown(std::time::Duration::from_secs(2)).await.expect("clean server shutdown");
 }

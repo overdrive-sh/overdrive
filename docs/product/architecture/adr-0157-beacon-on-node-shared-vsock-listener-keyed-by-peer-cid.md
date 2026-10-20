@@ -2,7 +2,9 @@
 
 ## Status
 
-**Accepted — decision D17 approved by user 2026-10-05.** GH #295. Recorded in
+**Accepted — decision D17 approved by user 2026-10-05**; D-UP-9 (a VMM exit
+ends the launch's liveness in the same per-CID step as the driver's stop)
+approved by user 2026-10-14. Not yet implemented. GH #295. Recorded in
 the #295 feature delta, § *[REF] vsock Attachment Replacement DESIGN*. Depends
 on ADR-0146.
 
@@ -51,12 +53,17 @@ with `EADDRNOTAVAIL` (guest-capture spike, increment a); binding
   its READY is read, which requires both that READY's token equals the token of
   the CID's live launch (started, not yet stopped) and that the claim is
   free (ATTR-LIVE-CLAIM, ADR-0177). The live-launch check at accept only
-  closes connections early; the driver's stop ends the launch's liveness in
-  the step that closes its session and releases its claim. So two
-  concurrent sessions from one CID cannot both be accepted, a session a
-  dead launch left queued can never hold the claim, and a connection
-  accepted before a stop and read after it takes nothing; the claim is
-  released when the session ends.
+  closes connections early.
+- **A launch ends in one per-CID step, by the driver's stop or by its VMM's
+  exit.** The driver's stop, and the driver's observation that the launch's
+  VMM has exited (a guest reset included, ADR-0182), each end the launch's
+  liveness, close its beacon sessions and release its claim in one per-CID
+  step. So two concurrent sessions from one CID cannot both be accepted, a
+  session a dead launch left queued can never hold the claim, a connection
+  accepted before the launch ended and read after it takes nothing, and the
+  claim of a launch whose VMM exited is free for the CID's next launch
+  without waiting for the driver's stop; otherwise the claim is released
+  when the session ends.
 - **Protocol.** The beacon message set and its semantics are unchanged;
   READY's line carries the launch token (ADR-0177).
 
@@ -72,6 +79,9 @@ with `EADDRNOTAVAIL` (guest-capture spike, increment a); binding
   launches apart.)
 - **Bind on CID 2.** Fails before the vhost transport module is loaded.
   Rejected.
+- **Only the driver's stop ends a launch.** After a VMM exit the CID would
+  stay live with its claim held until the stop, so the next launch on that
+  CID would have its READY refused for a claim no live VM holds. Rejected.
 
 ## Consequences
 

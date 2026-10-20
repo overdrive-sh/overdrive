@@ -1,0 +1,25 @@
+
+  lease_conf_bugTerminalBeforeRelease
+    1) lease_conf_bugTerminalBeforeRelease::cid_lease::FailureAtCeilingExhaustsTheBudget failed after 1 test(s)
+
+  1 failed
+
+  1) lease_conf_bugTerminalBeforeRelease::cid_lease::FailureAtCeilingExhaustsTheBudget:
+       Error [QNT508]: Expect condition does not hold true
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/cid_lease.qnt:723:43
+        723:   run FailureAtCeilingExhaustsTheBudget = FifthCrashAtCeilingBoundaryIsPlacedAgain
+                                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        724:     .then(Launch(1)).then(Release(1)).expect(Safety and st(1) == "running" and pstOf(1) == "none")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        725:     .then(VmmCrash(1))
+             ^^^^^^^^^^^^^^^^^^^^^^
+        726:     .expect(Safety and st(1) == "ended" and not(al.get(1).retry) and al.get(1).ex and att.get(1) == CEIL)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        727:     .then(Finalize(1)).expect(Safety and st(1) == "retiring" and al.get(1).ex)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Use --seed=0x5efb26b6ef628ea4 --match=lease_conf_bugTerminalBeforeRelease::cid_lease::FailureAtCeilingExhaustsTheBudget to repeat.
+
+
+  Use --verbosity=3 to show executions.
+  Further debug with: quint test --verbosity=3 /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/hazard/cid_lease_hazards.qnt
+error: Tests failed

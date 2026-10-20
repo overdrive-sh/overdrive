@@ -12,9 +12,12 @@ Related decisions, each its own ADR: how the VM probe runner reaches a VM
 port (ADR-0173, INB-1, accepted), the probe-socket mark for exec and process
 targets (ADR-0094), the per-role probe supervisor (ADR-0080), node forwarding
 quiescence (ADR-0169), the flow quota and node flow-slot capacity
-(ADR-0147), the single restart authority that acts on liveness
+(ADR-0208), the single restart authority that acts on liveness
 (ADR-0087), how a probe sample is counted (ADR-0191), and the event a
-probe run that records no sample emits (ADR-0192).
+probe run that records no sample emits (ADR-0192). Decision 1's bound — one
+probe dial per probe task — holds because ADR-0209 releases a dial's places
+when its stream is dropped or aborted, so no probe flow is held past its
+stream.
 
 ## Context
 
@@ -22,11 +25,11 @@ A VM probe dials the guest through the guest-flow owner (ADR-0173). Two of
 the dial's typed refusals can describe a condition of the node rather than of
 the VM being probed:
 
-- **Capacity.** A dial takes one forwarder slot from the node's flow-slot
-  space, and a relay dial also counts against its allocation's flow quota
-  (ADR-0147, ADR-0173). The node's slots are shared by every VM on it:
-  sixteen VMs at their per-allocation quota fill the node, and flows held
-  open by a guest that withholds credit keep their slots while they drain. A
+- **Capacity.** A dial takes one slot of the node's flow capacity, and a
+  relay dial also counts against its allocation's flow quota (ADR-0208,
+  ADR-0173). The node's slots are shared by every VM on it: sixteen VMs at
+  their per-allocation quota fill the node, and half-closed flows held open
+  by a guest that withholds credit keep their slots until they end. A
   dial at a full node is refused although the probed VM may hold few flows.
 - **Quiesced.** Node forwarding is quiesced while Overdrive recovers its own
   shared network state (ADR-0169). Every dial on the node is refused for the

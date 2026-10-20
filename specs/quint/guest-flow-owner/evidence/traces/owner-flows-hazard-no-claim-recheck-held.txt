@@ -1,6 +1,7 @@
 # owner-flows-hazard-no-claim-recheck-held: counterexample, 14 state(s) (from the TLC trace)
 
 State 1
+  conf_step = [InitWith |-> [o |-> "g"]]
   gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
   phantom = FALSE
   hf = <<[st |-> "none", gen |-> 0]>>
@@ -22,6 +23,7 @@ State 1
   bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
   crossMsg = FALSE
   sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+  gSess = 0
   toGuestAbort = {}
   alloc = "Absent"
   toHostAbort = {}
@@ -40,8 +42,10 @@ State 3 [VmStart]
 
 State 4 [step]
   sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+  gSess = 1
 
 State 5 [VmStop]
+  gSess = 0
   vmUp = FALSE
 
 State 6 [step]
@@ -67,6 +71,7 @@ State 11 [VmStart]
 
 State 12 [step]
   sess = <<[st |-> "dead", gen |-> 1], [st |-> "pending", gen |-> 2]>>
+  gSess = 2
 
 State 13 [step]
   sess = <<[st |-> "dead", gen |-> 1], [st |-> "reading", gen |-> 2]>>

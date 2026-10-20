@@ -9,8 +9,11 @@ State 1
   dmg = [C1 |-> FALSE, C2 |-> FALSE]
   att = [C1 |-> 0, C2 |-> 0]
   flowsOpen = 1
-  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE ]
+  conf_step = [InitDown |-> [tag |-> "UNIT"]]
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+  foreign = FALSE
   rec = [C1 |-> "idle", C2 |-> "idle"]
+  leaked = 0
   table = TRUE
 
 State 2 [Damage]

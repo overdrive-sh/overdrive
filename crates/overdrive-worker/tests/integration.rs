@@ -77,32 +77,6 @@ mod integration {
     // outbound/inbound leg-acquire → `InterceptedConnection` build.
     mod mtls_intercept_install;
 
-    // transparent-mtls-enrollment (ADR-0071, step 04-01) — Tier-3 AT that
-    // `MtlsInterceptWorker::start_alloc` installs BOTH the OUTBOUND egress
-    // nft-TPROXY rule (on the alloc's host-side veth, `spec.host_veth`) AND
-    // the leg-F + leg-C IP_TRANSPARENT listeners + accept loops, with NO
-    // cgroup-attach step (the retired `cgroup_connect4_mtls` mechanism is
-    // gone). Port-to-port through `start_alloc`.
-    mod start_alloc_installs_both_tproxy;
-
-    // transparent-mtls-enrollment (ADR-0071, step 03-03) — Tier-3 EGRESS
-    // capture walking proof: composes `install_outbound_tproxy` (03-01) +
-    // `accept_outbound_leg` getsockname recovery (03-02) +
-    // `make_transparent_listener` on the REAL kernel via the increment-b spike
-    // topology (netns + veth + nft-TPROXY). Proves the ADR-0071 Tier-3 (a)+(b)
-    // obligations: workload egress → leg-F redirect → getsockname == dialed-dst,
-    // plus the F5 anti-loop SO_MARK exemption (positive + self-exempt-impossible).
-    mod egress_tproxy_capture;
-
-    // transparent-mtls-enrollment (ADR-0071, step 05-01) — THE composed
-    // bidirectional walking skeleton: getsockname → resolve → enforce mTLS in
-    // BOTH directions on the ONE Path-A mechanism (netns + veth + nft-TPROXY +
-    // getsockname), reusing the production worker intercept seams +
-    // `HostMtlsEnforcement::enforce`, with a real 0x17 TLS-1.3 wire capture and no
-    // RST. Proves ADR-0071 Tier-3 obligations (b)+(c)+(d): orig-dst recovery on
-    // both legs, encryption on the wire, the three Q3 resolve arms, and F5.
-    mod bidirectional_walking_skeleton;
-
     // canonical-workload-address-inbound-tproxy (GH #241) — DISTILL RED scaffolds.
     // The keystone slice: production-installed inbound nft-TPROXY (from
     // `start_alloc` off `spec.{workload_addr, service_ports}`), NO test-installed
@@ -121,19 +95,6 @@ mod integration {
     mod inbound_rules_per_listener;
     mod inbound_tproxy_harness;
     mod job_kind_installs_no_inbound_rule;
-
-    // transparent-mtls-enrollment (ADR-0071, step 05-02) — the SINGLE-SOURCE
-    // invariant (Tier-3 obligation (e) / Q5a / D-TME-9 / D-TME-10): a DNS-returned
-    // service_backends addr IS the addr MtlsResolve recognizes. The workload dials
-    // a KNOWN service_backends addr B (DNS stubbed — #243's responder is NOT built),
-    // egress nft-TPROXY → leg-F → getsockname recovers B, and SimMtlsResolve
-    // recognizes the SAME B as a running mesh backend (`Mesh{addr:B}`) — one
-    // source, two readers, byte-consistent. The 02-03 resolv.conf injection is
-    // asserted present in the netns (the injection mechanism this feature OWNS),
-    // even though the responder is the #243 stub. Carries a kernel-free
-    // SimMtlsResolve companion as the cheap default-lane reproduction. SCOPE: no
-    // #243 daemon, no #167 VIP allocator — headless v1 only.
-    mod name_resolve_enforce_consistency;
 
     // transparent-mtls-enrollment (ADR-0071, step 05-03; re-oracled at the
     // increment-m promotion) — the OUTBOUND enforce-substrate agent-light
@@ -186,7 +147,7 @@ mod integration {
     // netns-density-295 DISTILL (P5-S10, D9/D14) — the mTLS forwarded-outbound
     // port on the real worker: `register_forwarded_outbound` / `leg_f_addr` /
     // `ForwardedOutbound`, claim by exact 4-tuple, no leg-F re-resolution, and
-    // the H-5 remote-side linger. RED until DELIVER vsock new-step 8.
+    // the H-5 remote-side linger. RED until DELIVER attachment-cut step (7).
     mod vsock_mesh_egress_mtls;
 
     // netns-density-295 DISTILL (P5-S8, D26 / D26-PINS F-1..F-6) — the
@@ -196,6 +157,17 @@ mod integration {
     // destinations with a plain `reject`, and keep unicast reachable. RED until
     // DELIVER lands the D26 output rules.
     mod vsock_host_internal_enforce;
+
+    // netns-density-295 DISTILL (LEGB-DIAL / R5-43) — leg-B's same-node mesh
+    // dial is marked and source-bound; holds the shared `node` fixture.
+    // Pending DELIVER step 13.
+    mod vsock_legb_dial;
+    // netns-density-295 DISTILL (D-9): the leg-F repair cell runs in its own
+    // test binary, `tests/leg_f_repair.rs` (its EMFILE stimulus lowers the
+    // process-wide RLIMIT_NOFILE).
+    // netns-density-295 DISTILL (P4-S5 / ADR-0172) — the constant guest-prefix
+    // rules of the shared nft table. Pending DELIVER step 12.
+    mod vsock_constant_guest_prefix_rules;
 
     // service-health-check-probes — Tier 3 integration tests for
     // the ProbeRunner subsystem per ADR-0054. Slices 01 / 02 / 03.

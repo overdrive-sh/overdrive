@@ -34,10 +34,6 @@ pub mod ca;
 // a real `tokio::fs::read` over `memory.events`.
 pub mod cgroup_accounting;
 pub mod cgroup_fs;
-// netns-density-295 DG-6 (D16-CLAIM) — `VhostVsockCidClaim`, the production
-// `overdrive_core::guest_transport::GuestCidClaim` binding over
-// `/dev/vhost-vsock`.
-pub mod cid_claim;
 pub mod clock;
 pub mod entropy;
 pub mod transport;
@@ -55,10 +51,9 @@ pub mod vmm;
 pub mod vm_host_state;
 
 pub use beacon_io::VsockBeaconIo;
-pub use ca::RcgenCa;
+pub use ca::{RcgenCa, RcgenCaFactory};
 pub use cgroup_accounting::RealCgroupAccounting;
 pub use cgroup_fs::RealCgroupFs;
-pub use cid_claim::{VHOST_VSOCK_DEVICE, VhostVsockCidClaim};
 pub use clock::SystemClock;
 pub use entropy::{CountingOsEntropy, OsEntropy};
 pub use transport::TcpTransport;

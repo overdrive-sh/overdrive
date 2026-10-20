@@ -11,6 +11,7 @@ State 1: <Initial predicate>
 /\ streak_bugNoSampleFail_probe_count_pst = ""
 /\ streak_bugNoSampleFail_probe_count_rst = ""
 /\ streak_bugNoSampleFail_probe_count_tseqs = {}
+/\ streak_bugNoSampleFail_probe_count_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ streak_bugNoSampleFail_probe_count_rsame = 0
 /\ streak_bugNoSampleFail_probe_count_A = 0
 /\ streak_bugNoSampleFail_probe_count_runs = 0
@@ -24,7 +25,7 @@ State 1: <Initial predicate>
   stoppedTerm |-> FALSE,
   missed |-> FALSE ]
 
-State 2: <streak_bugNoSampleFail_probe_count_ProbeRun line 348, col 3 to line 413, col 49 of module streak_bugNoSampleFail>
+State 2: <streak_bugNoSampleFail_probe_count_ProbeRun line 369, col 3 to line 440, col 56 of module streak_bugNoSampleFail>
 /\ streak_bugNoSampleFail_probe_count_terms = 0
 /\ streak_bugNoSampleFail_probe_count_rseq = 1
 /\ streak_bugNoSampleFail_probe_count_running = TRUE
@@ -37,6 +38,7 @@ State 2: <streak_bugNoSampleFail_probe_count_ProbeRun line 348, col 3 to line 41
 /\ streak_bugNoSampleFail_probe_count_pst = "Fail"
 /\ streak_bugNoSampleFail_probe_count_rst = "Fail"
 /\ streak_bugNoSampleFail_probe_count_tseqs = {}
+/\ streak_bugNoSampleFail_probe_count_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ streak_bugNoSampleFail_probe_count_rsame = 1
 /\ streak_bugNoSampleFail_probe_count_A = 0
 /\ streak_bugNoSampleFail_probe_count_runs = 1

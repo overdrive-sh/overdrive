@@ -1,0 +1,43 @@
+# fwd-pair-witness-guest-abort-after-stream-abort: counterexample, 4 state(s) (from the TLC trace)
+
+State 1
+  ctl = [gh |-> <<>>, hg |-> <<>>]
+  ctx = [g |-> "open", h |-> "open"]
+  attRes = [g |-> "none", h |-> "ok"]
+  vs = [ g |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ], h |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ] ]
+  tcpErr = [g |-> "0", h |-> "0"]
+  guestAbortSent = FALSE
+  attEnded = [g |-> 0, h |-> 0]
+  terr = [g |-> FALSE, h |-> FALSE]
+  mode = "watch"
+  dg = [ gh |-> [ got |-> <<>>, n |-> 0, sizes |-> <<>>, dq0 |-> <<>>, foff |-> 0, blk |-> FALSE, dq2 |-> <<>>, sdrop |-> {}, rdrop |-> {}, fdrop |-> {} ], hg |-> [ got |-> <<>>, n |-> 0, sizes |-> <<>>, dq0 |-> <<>>, foff |-> 0, blk |-> FALSE, dq2 |-> <<>>, sdrop |-> {}, rdrop |-> {}, fdrop |-> {} ] ]
+  conf_step = [InitWith |-> [m |-> "watch"]]
+  ep = [g |-> "alive", h |-> "alive"]
+  gen = [g |-> 0, h |-> 0]
+  strmAbort = FALSE
+  gh = [ fwdAfterEnd |-> FALSE, fwdOld |-> FALSE, unclassified |-> FALSE, rstOpen |-> {}, holderReadAfterAbort |-> FALSE, trail |-> {}, faults |-> 0, hobs |-> "none", woken |-> FALSE, recPend |-> FALSE, vhTouched |-> FALSE, dropped |-> FALSE, hostDead |-> FALSE, hresCls |-> "none" ]
+  oldCtx = [g |-> "none", h |-> "none"]
+  vmUp = TRUE
+  dir = [ gh |-> [ wr |-> 0, wfin |-> FALSE, q0 |-> <<>>, h0 |-> <<>>, q1 |-> <<>>, h1 |-> <<>>, q2 |-> <<>>, srcEnd |-> "none", srcShut |-> FALSE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> FALSE, shutRd |-> FALSE, loss |-> FALSE, lost |-> 0 ], hg |-> [ wr |-> 0, wfin |-> FALSE, q0 |-> <<>>, h0 |-> <<>>, q1 |-> <<>>, h1 |-> <<>>, q2 |-> <<>>, srcEnd |-> "none", srcShut |-> FALSE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> FALSE, shutRd |-> FALSE, loss |-> FALSE, lost |-> 0 ] ]
+  pr = [ g |-> [ ph |-> "unattached", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ], h |-> [ ph |-> "live", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ] ]
+  hres = "none"
+
+State 2 [Attach]
+  attRes = [g |-> "ok", h |-> "ok"]
+  vs = [ g |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "noend", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ], h |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ] ]
+  pr = [ g |-> [ ph |-> "live", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ], h |-> [ ph |-> "live", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ] ]
+
+State 3 [Abort]
+  guestAbortSent = TRUE
+  strmAbort = TRUE
+  gh = [ fwdAfterEnd |-> FALSE, fwdOld |-> FALSE, unclassified |-> FALSE, rstOpen |-> {}, holderReadAfterAbort |-> FALSE, trail |-> {}, faults |-> 1, hobs |-> "none", woken |-> FALSE, recPend |-> FALSE, vhTouched |-> FALSE, dropped |-> FALSE, hostDead |-> FALSE, hresCls |-> "none" ]
+  dir = [ gh |-> [ wr |-> 0, wfin |-> FALSE, q0 |-> <<>>, h0 |-> <<>>, q1 |-> <<>>, h1 |-> <<>>, q2 |-> <<>>, srcEnd |-> "none", srcShut |-> FALSE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> FALSE, shutRd |-> FALSE, loss |-> TRUE, lost |-> 0 ], hg |-> [ wr |-> 0, wfin |-> FALSE, q0 |-> <<>>, h0 |-> <<>>, q1 |-> <<>>, h1 |-> <<>>, q2 |-> <<>>, srcEnd |-> "none", srcShut |-> FALSE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> FALSE, shutRd |-> FALSE, loss |-> TRUE, lost |-> 0 ] ]
+  pr = [ g |-> [ ph |-> "live", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ], h |-> [ ph |-> "ended", rec |-> "queued", out |-> "aborted", cause |-> "Detached", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 1, cgen |-> 0 ] ]
+
+State 4 [GuestAbort]
+  ctl = [gh |-> <<{"S", "R"}>>, hg |-> <<>>]
+  vs = [ g |-> [ ps |-> {}, sent |-> {"S", "R"}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "noend", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> TRUE, misc |-> FALSE, st |-> "est" ], h |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ] ]
+  guestAbortSent = FALSE
+  ep = [g |-> "reset", h |-> "alive"]
+  dir = [ gh |-> [ wr |-> 0, wfin |-> FALSE, q0 |-> <<>>, h0 |-> <<>>, q1 |-> <<>>, h1 |-> <<>>, q2 |-> <<>>, srcEnd |-> "none", srcShut |-> FALSE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> FALSE, shutRd |-> FALSE, loss |-> TRUE, lost |-> 0 ], hg |-> [ wr |-> 0, wfin |-> FALSE, q0 |-> <<>>, h0 |-> <<>>, q1 |-> <<>>, h1 |-> <<>>, q2 |-> <<>>, srcEnd |-> "none", srcShut |-> FALSE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> TRUE, shutRd |-> FALSE, loss |-> TRUE, lost |-> 0 ] ]
+  pr = [ g |-> [ ph |-> "ended", rec |-> "queued", out |-> "aborted", cause |-> "Detached", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 1, cgen |-> 0 ], h |-> [ ph |-> "ended", rec |-> "queued", out |-> "aborted", cause |-> "Detached", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 1, cgen |-> 0 ] ]

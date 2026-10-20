@@ -20,7 +20,7 @@ composite key gains `role`) and completes
 § D2's carry-through containment (§ D5).
 
 **Amended 2026-10-13 by
-[ADR-0191](adr-0191-every-probe-run-counts-once-through-a-run-sequence-in-the-probe-row.md)**
+[ADR-0191](adr-0191-the-probe-runner-records-each-runs-streak-and-servicelifecycle-applies-thresholds-at-read.md)**
 (#295, PROBE-RUN-COUNT, approved by user 2026-10-13; not yet implemented,
 and § D5 / Stage 2 is not yet implemented either). No reconciler keeps a
 probe streak: the probe runner records each row's `same_status_runs`, and a
@@ -31,6 +31,27 @@ readiness row is a `Pass` whose `same_status_runs` reaches
 `readiness_consecutive_successes` to `BackendDiscoveryBridgeView` is
 withdrawn, and that View stays field-less. Which reconciler owns readiness →
 backend membership is unchanged by this amendment (§ D5).
+
+**Amended 2026-10-14** (#295, decision D-UP-12, approved by the user
+2026-10-14; not yet implemented). § D1's per-role `ProbeIdx` and the
+`(alloc_id, role, probe_idx)` key are unchanged, and a role may still declare
+several probes. Both ingresses § D1 names — the TOML parser and
+`ServiceV1::from_submit` — additionally refuse a spec whose startup,
+readiness and liveness probes together exceed the per-allocation cap
+`GUEST_PROBE_SLOTS` (8; the inferred default startup probe counts), with one
+validation error per ingress, before any intent write: a VM probe dial is
+exempt from the allocation's flow quota and holds a node flow slot
+(ADR-0145, ADR-0187), and each probe task holds at most one dial in flight,
+so the cap bounds the quota-exempt dials one allocation holds (a
+node-capacity bulkhead; #295 EVMOD-AB, approved by the user 2026-10-17).
+The error and constant are
+pinned in the #295 feature delta (§ *[REF] Core vocabulary*). An intent
+persisted above the cap by an earlier build is not migrated; the Phase-1
+upgrade path deletes the intent store (greenfield single cut; user ruling
+2026-10-15). The
+multi-probe consultation gap this ADR leaves open (§ "A fourth, pre-existing
+gap", § A8) is unchanged and tracked by
+[GH #319](https://github.com/overdrive-sh/overdrive/issues/319).
 
 **Scope boundary.** This ADR fixes the defect that readiness and liveness probe
 **0** is never consulted. It deliberately does **not** fix the separate,

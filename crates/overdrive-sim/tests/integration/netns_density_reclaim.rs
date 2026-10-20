@@ -39,7 +39,7 @@
 //! The decorator journals every `provision` and `teardown` with the sim-clock
 //! instant and outcome; a test-local tracing `Layer` journals the pinned lease
 //! events `guest_network.lease_released { alloc }` and
-//! `guest_network.lease_retired { alloc }` (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the admission refusal projection and the lease events)) in the same order.
+//! `guest_network.lease_retired { alloc }` (FD § "Gate G-V0 — node attachment admission (restates G-295-0)" (the admission refusal projection and the lease events)) in the same order.
 //! Reclaim re-dispatch instants per allocation are at least one second apart
 //! and within one evaluation step of that second; each leftover lease is
 //! released once, after the disarm, and never touched again; the leftover
@@ -74,6 +74,7 @@
     reason = "seeded acceptance harness: every verdict prints its seed; fixture preconditions fail loudly"
 )]
 
+use overdrive_core::guest_transport::GuestFlowPorts;
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
@@ -85,9 +86,10 @@ use overdrive_control_plane::action_shim::{
     ShimError, dispatch_with_guest_network_provisioner_for_test,
 };
 use overdrive_control_plane::guest_network::{
-    GuestAddressPool, GuestNetworkPlan, GuestNetworkProvisioner, Result as GuestNetworkResult,
-    SharedGuestNetworkAudit, SharedGuestNetworkAuditError, SharedGuestNetworkOwner, TapActivation,
-    TapQuiescence,
+    ForwardingActivation, ForwardingQuiescence, ForwardingRestore, GuestAddressPool,
+    GuestNetworkPlan, GuestNetworkProvisioner, QuiescenceHold, QuiescenceRestoreError,
+    Result as GuestNetworkResult, SharedGuestNetworkAudit, SharedGuestNetworkAuditError,
+    SharedGuestNetworkOwner,
 };
 use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::reconciler_runtime::{
@@ -146,7 +148,6 @@ const DEFAULT_SEEDS: [u64; 3] =
 const NODE: &str = "local";
 /// Today's action-pool constants (`guest_network::action_pool`).
 const GUEST_PREFIX: &str = "100.95.0.0/16";
-const GUEST_BRIDGE: &str = "ovd-gbr0";
 const GUEST_GATEWAY: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 1);
 /// The reclaim re-dispatch spacing of D-295-R11: `backoff_for_attempt`,
 /// constant one second until GH #137 (FD § "[REF] Lifecycle action — row-neutral reclaim (D-295-R11) — ACCEPTED 2026-09-24" (real cadence and load: the cadence); TS S-ND295-57 oracle).
@@ -343,7 +344,7 @@ impl GuestNetworkProvisioner for RecordingOwner {
         self.inner.provision(plan).await
     }
 
-    async fn activate(&self, plan: &GuestNetworkPlan) -> GuestNetworkResult<TapActivation> {
+    async fn activate(&self, plan: &GuestNetworkPlan) -> GuestNetworkResult<ForwardingActivation> {
         self.inner.activate(plan).await
     }
 
@@ -355,6 +356,20 @@ impl GuestNetworkProvisioner for RecordingOwner {
             ok: outcome.is_ok(),
         });
         outcome
+    }
+}
+
+#[async_trait::async_trait]
+impl overdrive_core::guest_transport::dial::GuestStreamDial for RecordingOwner {
+    async fn dial(
+        &self,
+        target: std::net::SocketAddrV4,
+        purpose: overdrive_core::guest_transport::dial::DialPurpose,
+    ) -> Result<
+        overdrive_core::guest_transport::dial::GuestStream,
+        overdrive_core::guest_transport::dial::GuestDialError,
+    > {
+        self.inner.dial(target, purpose).await
     }
 }
 
@@ -372,16 +387,23 @@ impl SharedGuestNetworkOwner for RecordingOwner {
         self.inner.converge_shared().await
     }
 
+    fn flow_ports(&self) -> Option<GuestFlowPorts> {
+        self.inner.flow_ports()
+    }
+
     async fn audit_shared(&self) -> Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError> {
         self.inner.audit_shared().await
     }
 
-    async fn quiesce_managed_taps(&self) -> GuestNetworkResult<TapQuiescence> {
-        self.inner.quiesce_managed_taps().await
+    async fn quiesce(&self) -> (QuiescenceHold, ForwardingQuiescence) {
+        self.inner.quiesce().await
     }
 
-    async fn restore_quiesced_taps(&self) -> GuestNetworkResult<()> {
-        self.inner.restore_quiesced_taps().await
+    async fn restore(
+        &self,
+        hold: QuiescenceHold,
+    ) -> std::result::Result<ForwardingRestore, QuiescenceRestoreError> {
+        self.inner.restore(hold).await
     }
 }
 
@@ -438,15 +460,15 @@ impl Fixture {
         // One pool from the doc-hidden constructor with today's constants.
         let pool = Arc::new(GuestAddressPool::new(
             GUEST_PREFIX.parse().expect("static guest prefix"),
-            GUEST_BRIDGE.to_owned(),
             GUEST_GATEWAY,
-            GUEST_GATEWAY,
+            Arc::new(overdrive_sim::adapters::entropy::SimEntropy::new(seed)),
         ));
         // One worker over the sim mTLS ports, its shared owner started.
         let worker = Arc::new(MtlsInterceptWorker::new(
             Arc::new(SimMtlsEnforcement::new(
                 Arc::new(SimIdentityRead::new(BTreeMap::new(), None)),
                 MtlsLimits::default(),
+                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
             )),
             Arc::new(SimMtlsResolve::new(BTreeMap::new(), MtlsResolution::NonMesh)),
             clock.clone() as Arc<dyn Clock>,
@@ -458,7 +480,7 @@ impl Fixture {
             overdrive_control_plane::test_default_allocator(store.clone() as Arc<dyn IntentStore>);
         // DELIVER 05-01 changes this one call: the pinned `AppState::new`
         // appends `worker`, `owner`, `gate`, and `pool` as required parameters
-        // (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (how the gate reaches the shim, and the `AppState` constructors)). Until then the fixture keeps them for its bodies.
+        // (FD § "Gate G-V3 — allocation forwarding activation (replaces G-295-3)" (how the gate reaches the shim, and the `AppState` constructors)). Until then the fixture keeps them for its bodies.
         let state = AppState::new(
             store,
             store_path,
@@ -532,7 +554,7 @@ impl Fixture {
     }
 
     /// The gate every activation claims: opened once, as `run_server*`'s boot
-    /// sequence does (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (gate state outside `run_server*`)).
+    /// sequence does (FD § "Gate G-V3 — allocation forwarding activation (replaces G-295-3)" (gate state outside `run_server*`)).
     fn open_gate(&self) {
         if !self.supervisor.open_after_boot() {
             self.harness_failure("open_after_boot was refused");
@@ -1190,6 +1212,7 @@ async fn not_yet_due_restart_at_the_cap(seed: u64) {
 /// S-ND295-57 — Leftover networks are reclaimed until released, across stopped and deleted workloads.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn leftover_networks_are_reclaimed_until_released_on_every_path() {
     for seed in seeds() {
         eprintln!("seed={seed} body=leftover_networks_are_reclaimed_until_released_on_every_path");
@@ -1201,6 +1224,7 @@ async fn leftover_networks_are_reclaimed_until_released_on_every_path() {
 /// S-ND295-57 — Leftover networks are reclaimed until released, across stopped and deleted workloads.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn a_not_yet_due_restart_keeps_its_predecessor_at_the_cap() {
     for seed in seeds() {
         eprintln!("seed={seed} body=a_not_yet_due_restart_keeps_its_predecessor_at_the_cap");

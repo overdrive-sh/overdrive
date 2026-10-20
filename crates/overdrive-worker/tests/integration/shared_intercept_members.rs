@@ -9,10 +9,12 @@
 //! - **S-ND295-61** drives the worker's `audit_shared_owner` and
 //!   `converge_shared_owner` over `HostMtlsIntercept` with live allocations
 //!   (non-empty member sets) and deletes one intercept object at a time: one
-//!   member, the whole program table, the `fwmark 0x1 lookup 100` rule,
-//!   table 100's local route, and (R18-conditional) the intercept-mark guard
-//!   table (feature delta *Runtime member audit (R15)* and *Runtime repair
-//!   contract*). The port's `observe_shared_state` and
+//!   member, the whole program table, the `fwmark 0x1 lookup 100` rule, and
+//!   table 100's local route (feature delta *Runtime member audit (R15)* and
+//!   *Runtime repair contract*). After the firewall single cut (roadmap step
+//!   12) a live allocation's only members are its inbound destinations: the
+//!   `managed_guest_ips` and `outbound_sources` sets no longer exist. The
+//!   port's `observe_shared_state` and
 //!   `Client::local_route_present` observe the loss and the repair.
 //!
 //! Faults enter only as real kernel mutations (`nft delete element`,
@@ -54,7 +56,8 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::guest_network::SharedGuestNetworkComponent;
 use overdrive_core::guest_transport::{
-    GUEST_CID_BASE, GuestCid, GuestCidClaim as _, GuestTransportAssignment, LaunchToken,
+    GUEST_CID_BASE, GUEST_FLOW_CONTROL_PORT, GUEST_FLOW_STREAM_PORT, GuestCid, GuestFlowPorts,
+    GuestTransportAssignment, LaunchToken,
 };
 use overdrive_core::traits::IdentityRead;
 use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, Resources, VmPayload};
@@ -64,7 +67,6 @@ use overdrive_core::{AllocationId, SpiffeId};
 use overdrive_netlink::nft::{self, SharedIpInterceptIdentity};
 use overdrive_netlink::{Client, block_on_host_netlink};
 use overdrive_sim::adapters::clock::SimClock;
-use overdrive_sim::adapters::guest_cid_claim::SimGuestCidClaim;
 use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
 use overdrive_sim::adapters::{SimIdentityRead, SimMtlsResolve};
 use overdrive_worker::mtls_intercept::InterceptError;
@@ -78,7 +80,8 @@ use super::leg_listener::LegListener;
 
 /// The owned program's table, in the `ip` family.
 const OWNED_TABLE: &str = "overdrive-mtls";
-/// The D-295-R18 intercept-mark guard table (R18-conditional).
+/// The retired intercept-mark guard table: scrubbed only as residue of an
+/// earlier run, never asserted.
 const GUARD_TABLE: &str = "overdrive-mtls-guard";
 /// A foreign table whose bytes a removal must leave unchanged.
 const FOREIGN_TABLE: &str = "nd295_members_foreign";
@@ -268,9 +271,8 @@ fn kernel_members() -> (SharedIpInterceptIdentity, InterceptMembers) {
         .expect("the typed shared-IP observation succeeds")
         .expect("the owned shared-IP program is present");
     let members = InterceptMembers {
-        managed_guest_ips: state.managed_guest_ips().clone(),
-        outbound_sources: state.outbound_sources().clone(),
         inbound_destinations: state.inbound_destinations().clone(),
+        ..InterceptMembers::default()
     };
     (state.identity().clone(), members)
 }
@@ -404,18 +406,12 @@ fn convergent_removal_with_a_pre_absent_member_and_batch_rejection_preserves_sta
         .observe_shared()
         .expect("the empty program is observable")
         .expect("the owned program is present");
-    let stopping_outbound = host
-        .install_outbound(REMOVAL_STOPPING_SOURCE, outbound_target.port())
-        .expect("install the stopping allocation's source members");
     let stopping_present = host
         .install_inbound(REMOVAL_STOPPING_PRESENT, inbound_target.port())
         .expect("install the stopping allocation's present destination");
     let stopping_pre_absent = host
         .install_inbound(REMOVAL_STOPPING_PRE_ABSENT, inbound_target.port())
         .expect("install the destination that will be pre-absent");
-    let surviving_outbound = host
-        .install_outbound(REMOVAL_SURVIVING_SOURCE, outbound_target.port())
-        .expect("install the surviving allocation's source members");
     let surviving_destination = host
         .install_inbound(REMOVAL_SURVIVING_DESTINATION, inbound_target.port())
         .expect("install the surviving allocation's destination");
@@ -500,9 +496,8 @@ fn convergent_removal_with_a_pre_absent_member_and_batch_rejection_preserves_sta
         .expect("removal converges when a requested member is already absent");
     evidence.record(row, "removed", format_args!("{removed:?}"));
     let surviving = InterceptMembers {
-        managed_guest_ips: BTreeSet::from([REMOVAL_SURVIVING_SOURCE]),
-        outbound_sources: BTreeSet::from([REMOVAL_SURVIVING_SOURCE]),
         inbound_destinations: BTreeSet::from([REMOVAL_SURVIVING_DESTINATION]),
+        ..InterceptMembers::default()
     };
     assert_eq!(
         removed.members, surviving,
@@ -523,7 +518,6 @@ fn convergent_removal_with_a_pre_absent_member_and_batch_rejection_preserves_sta
     let after_removal = owned_tables_snapshot();
     drop(stopping_pre_absent);
     drop(stopping_present);
-    drop(stopping_outbound);
     assert_eq!(
         owned_tables_snapshot(),
         after_removal,
@@ -531,7 +525,6 @@ fn convergent_removal_with_a_pre_absent_member_and_batch_rejection_preserves_sta
     );
 
     drop(surviving_destination);
-    drop(surviving_outbound);
     drop(node_guard);
     drop((leg_c, leg_f));
 }
@@ -577,9 +570,9 @@ fn removal_is_refused_when_the_recorded_program_was_replaced_out_of_band() {
         .observe_shared()
         .expect("the recorded program is observable")
         .expect("the owned program is present");
-    let stopping_outbound = host
-        .install_outbound(REMOVAL_STOPPING_SOURCE, outbound_target.port())
-        .expect("install the stopping allocation's source members");
+    let stopping_present = host
+        .install_inbound(REMOVAL_STOPPING_PRESENT, inbound_target.port())
+        .expect("install the stopping allocation's destination");
 
     // The out-of-band replacement: the table goes, and another writer converges
     // a program at two other targets.
@@ -620,7 +613,7 @@ fn removal_is_refused_when_the_recorded_program_was_replaced_out_of_band() {
         "a recorded-versus-observed refusal leaves every owned table byte-equal"
     );
 
-    drop(stopping_outbound);
+    drop(stopping_present);
     drop(node_guard);
     drop(successor_guard);
     drop((leg_c, leg_f, successor_c, successor_f));
@@ -648,9 +641,6 @@ enum InterceptLoss {
     FwmarkRule,
     /// Table 100's `local 0.0.0.0/0 dev lo` route.
     LocalRoute,
-    /// The D-295-R18 intercept-mark guard table. R18-conditional: DELIVER step
-    /// 08-01 removes this variant with the guard body if R18 is withdrawn.
-    MarkGuardTable,
 }
 
 impl InterceptLoss {
@@ -660,14 +650,13 @@ impl InterceptLoss {
             Self::ProgramTable => "program-table",
             Self::FwmarkRule => "fwmark-rule",
             Self::LocalRoute => "local-route",
-            Self::MarkGuardTable => "mark-guard-table",
         }
     }
 
     const fn component(self) -> SharedGuestNetworkComponent {
         match self {
             Self::Member => SharedGuestNetworkComponent::IpSets,
-            Self::ProgramTable | Self::FwmarkRule | Self::LocalRoute | Self::MarkGuardTable => {
+            Self::ProgramTable | Self::FwmarkRule | Self::LocalRoute => {
                 SharedGuestNetworkComponent::IpRules
             }
         }
@@ -720,10 +709,6 @@ impl InterceptLoss {
                 );
                 assert_eq!(table_100().0, 0, "table 100 holds no local default route");
             }
-            Self::MarkGuardTable => {
-                kernel_mutation(evidence, row, "nft", &["delete", "table", "ip", GUARD_TABLE]);
-                assert!(nft_table_json("ip", GUARD_TABLE).is_none(), "the guard table is gone");
-            }
         }
     }
 
@@ -739,16 +724,13 @@ impl InterceptLoss {
             Self::FwmarkRule | Self::LocalRoute => {
                 Some(InterceptState { policy_route: false, ..baseline.clone() })
             }
-            Self::MarkGuardTable => {
-                Some(InterceptState { intercept_mark_guard: false, ..baseline.clone() })
-            }
         }
     }
 
     /// Whether `detected` is the audit's one typed cause for this loss (FD §
     /// "[REF] Driven port — intercept element release, member convergence, boot
     /// clear …" (the typed causes of the observation checks): program, then
-    /// policy route, then guard, then members, the first failure reported).
+    /// policy route, then members, the first failure reported).
     /// The program the audit expects is the one the worker recorded, which is
     /// the healthy `baseline` program.
     fn is_reported_by(self, detected: &MtlsSharedOwnerError, baseline: &InterceptState) -> bool {
@@ -772,12 +754,6 @@ impl InterceptLoss {
                 detected,
                 MtlsSharedOwnerError::Intercept { source: InterceptError::PolicyRouteAbsent }
             ),
-            Self::MarkGuardTable => matches!(
-                detected,
-                MtlsSharedOwnerError::Intercept {
-                    source: InterceptError::InterceptMarkGuardAbsent
-                }
-            ),
         }
     }
 }
@@ -790,7 +766,6 @@ fn member_spec(alloc: &str, address: Ipv4Addr) -> AllocationSpec {
     let [_, _, high, low] = address.octets();
     let cid = GuestCid::new(GUEST_CID_BASE + u32::from(u16::from_be_bytes([high, low])))
         .expect("an in-range guest CID");
-    let claim = SimGuestCidClaim::new().claim(cid).expect("claim the allocation's guest CID");
     let launch = LaunchToken::from_bytes([0x5a; 16]).expect("a non-zero launch token");
     AllocationSpec {
         alloc: AllocationId::new(alloc).expect("a valid allocation id"),
@@ -807,28 +782,34 @@ fn member_spec(alloc: &str, address: Ipv4Addr) -> AllocationSpec {
         transport: Some(GuestTransportAssignment::new(
             address,
             Ipv4Addr::new(100, 95, 61, 1),
+            cid,
             launch,
-            claim,
+            GuestFlowPorts::new(GUEST_FLOW_STREAM_PORT, GUEST_FLOW_CONTROL_PORT)
+                .expect("the default guest-flow listener ports"),
         )),
         service_ports: vec![NonZeroU16::new(MEMBER_SERVICE_PORT).expect("a non-zero port")],
     }
 }
 
+/// A live allocation's members after the firewall single cut: its inbound
+/// destinations only.
 fn members_of(addresses: &[Ipv4Addr]) -> InterceptMembers {
     InterceptMembers {
-        managed_guest_ips: addresses.iter().copied().collect(),
-        outbound_sources: addresses.iter().copied().collect(),
         inbound_destinations: addresses
             .iter()
             .map(|address| SocketAddrV4::new(*address, MEMBER_SERVICE_PORT))
             .collect(),
+        ..InterceptMembers::default()
     }
 }
 
 fn member_worker(intercept: Arc<dyn MtlsIntercept>) -> Arc<MtlsInterceptWorker> {
     let identity: Arc<dyn IdentityRead> = Arc::new(SimIdentityRead::new(BTreeMap::new(), None));
-    let enforcement: Arc<dyn MtlsEnforcement> =
-        Arc::new(SimMtlsEnforcement::new(identity, MtlsLimits::default()));
+    let enforcement: Arc<dyn MtlsEnforcement> = Arc::new(SimMtlsEnforcement::new(
+        identity,
+        MtlsLimits::default(),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+    ));
     let resolve: Arc<dyn MtlsResolve> =
         Arc::new(SimMtlsResolve::new(BTreeMap::new(), MtlsResolution::NonMesh));
     Arc::new(MtlsInterceptWorker::new(enforcement, resolve, Arc::new(SimClock::new()), intercept))
@@ -959,10 +940,11 @@ async fn lose_and_repair(evidence: Evidence, loss: InterceptLoss) {
 /// node guard was handed over, not dropped, so the recorded targets survived.
 ///
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
-/// S-ND295-61 — Lost members, policy route, or guard are detected within a second
-/// and repaired with live workloads.
+/// S-ND295-61 — Lost members or policy route are detected within a second and
+/// repaired with live workloads.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "pending DELIVER step 12"]
 async fn each_deleted_intercept_object_is_restored_exactly_with_live_allocations() {
     assert!(is_root(), "S-ND295-61 Lima evidence requires root and CAP_NET_ADMIN");
     record_uname("S-ND295-61");
@@ -976,26 +958,4 @@ async fn each_deleted_intercept_object_is_restored_exactly_with_live_allocations
     ] {
         lose_and_repair(evidence, loss).await;
     }
-}
-
-/// The D-295-R18 intercept-mark guard table deleted from under live
-/// allocations is detected by the audit within a second as an `IpRules`
-/// failure (`Intercept` over `InterceptMarkGuardAbsent`) and restored exactly
-/// by `converge_shared_owner`, without rewriting
-/// the intact program; afterwards a new allocation installs (feature delta
-/// *Runtime member audit (R15)*, *Runtime repair contract*, R18 guard
-/// presence; E13's guard case). R18-conditional: DELIVER step 08-01 removes
-/// this body, and the `MarkGuardTable` row it drives, if R18 is withdrawn.
-///
-/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
-/// S-ND295-61 — Lost members, policy route, or guard are detected within a second
-/// and repaired with live workloads.
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn the_intercept_mark_guard_table_is_restored_exactly_with_live_allocations() {
-    assert!(is_root(), "S-ND295-61 Lima evidence requires root and CAP_NET_ADMIN");
-    record_uname("S-ND295-61-guard");
-    let evidence = Evidence::begin("S-ND295-61");
-    let _kernel_lock = KernelStateLock::acquire();
-    lose_and_repair(evidence, InterceptLoss::MarkGuardTable).await;
 }

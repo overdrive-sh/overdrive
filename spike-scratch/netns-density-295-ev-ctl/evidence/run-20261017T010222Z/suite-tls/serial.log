@@ -1,0 +1,46 @@
+GUEST_BOOT uname_r=7.0.0-29-generic suite=tls arg= modparams=
+GUEST_MODULES:
+ovd_fwd 36864 0 [permanent], Live 0xffffffffc0436000 (OE)
+aesni_intel 98304 0 - Live 0xffffffffc0426000
+tls 163840 0 - Live 0xffffffffc0412000
+vsock_diag 12288 0 - Live 0xffffffffc0410000
+vsock_loopback 12288 0 - Live 0xffffffffc040e000
+vmw_vsock_virtio_transport 20480 0 - Live 0xffffffffc040c000
+vmw_vsock_virtio_transport_common 57344 2 vsock_loopback,vmw_vsock_virtio_transport, Live 0xffffffffc0408000
+vsock 73728 4 vsock_diag,vsock_loopback,vmw_vsock_virtio_transport,vmw_vsock_virtio_transport_common, Live 0xffffffffc0400000
+crw-------    1 0        0          10, 263 Oct 17 01:02 /dev/ovd_fwd
+CTLTEST suite=tls strict=0
+CHECK PASS version :: ok
+CHECK PASS tls-after: vsock->kTLS direction byte-exact :: case 'pair completes cleanly': 8192/8192
+CHECK PASS tls-after: kTLS->vsock direction byte-exact :: case 'pair completes cleanly': 8192/8192
+CHECK PASS tls-after: one end record :: case 'pair completes cleanly': kind=1 cause=0 moved_ab=8192 moved_ba=8192
+CHECK PASS no kernel oops/warn after case :: case 0
+CHECK PASS tls-after: vsock->kTLS direction byte-exact :: case 'owner ABORT': 8192/8192
+CHECK PASS tls-after: kTLS->vsock direction byte-exact :: case 'owner ABORT': 8192/8192
+CHECK PASS tls-after: one end record :: case 'owner ABORT': kind=2 cause=4 moved_ab=8192 moved_ba=8192
+CHECK PASS no kernel oops/warn after case :: case 1
+CHECK PASS tls-after: vsock->kTLS direction byte-exact :: case 'context release': 8192/8192
+CHECK PASS tls-after: kTLS->vsock direction byte-exact :: case 'context release': 8192/8192
+CHECK PASS no kernel oops/warn after case :: case 2
+CHECK PASS tls-after: vsock->kTLS direction byte-exact :: case 'peer RST': 8192/8192
+CHECK PASS tls-after: kTLS->vsock direction byte-exact :: case 'peer RST': 8192/8192
+CHECK PASS tls-after: one end record :: case 'peer RST': kind=2 cause=2 moved_ab=8192 moved_ba=8192
+CHECK PASS no kernel oops/warn after case :: case 3
+CHECK PASS P-68 panic sequence: delete_module with kTLS-after stalled pair is refused :: EBUSY for rmmod and rmmod -f
+CHECK PASS no kernel oops/warn :: final scan
+RESULT suite=tls pass=18 fail=0
+SUITE_DONE suite=tls rc=0
+[    0.037501] rcu: Preemptible hierarchical RCU implementation.
+[    0.037503] rcu: 	RCU restricting CPUs from NR_CPUS=8192 to nr_cpu_ids=4.
+[    0.037505] 	Trampoline variant of Tasks RCU enabled.
+[    0.037505] 	Rude variant of Tasks RCU enabled.
+[    0.037506] 	Tracing variant of Tasks RCU enabled.
+[    0.037507] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.037517] RCU Tasks: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.037519] RCU Tasks Rude: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.046413] rcu: Hierarchical SRCU implementation.
+[    0.337816] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.337822] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+[    0.338649] ovd_fwd: loaded (spike, permanent: no module_exit)
+GUEST_END
+[    2.172059] reboot: Power down

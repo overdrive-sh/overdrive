@@ -1,0 +1,19 @@
+{
+ "qemu_exit": 0,
+ "host_done": false,
+ "elapsed_s": 900.0791177749634,
+ "scenarios": [
+  "g-rst-both-dirs:100",
+  "r-rst-both-dirs:100",
+  "host-abort:100",
+  "guest-abort:100",
+  "g-close-unread:100",
+  "dial-watch-reset:100",
+  "vmm-kill:5",
+  "clean-g-first:100"
+ ],
+ "hazard_host": 1,
+ "hazard_guest": 1,
+ "physical_module_names_unchanged": true,
+ "module_on_physical_host": []
+}

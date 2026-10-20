@@ -56,7 +56,7 @@ lease derives the CID (ADR-0156).
 
 - The attachment cost model is restated as CID, device, two tasks and
   sockets, with no netdevices.
-- Concurrent flows are a separate, workload-driven dimension (ADR-0147) with
+- Concurrent flows are a separate, workload-driven dimension (ADR-0208) with
   their own pinned capacity, sized at four concurrent flows per attachment at
   the target. Exhausting it refuses individual flows, never attachments. A
   draining (half-closed, not yet completed) flow counts against its

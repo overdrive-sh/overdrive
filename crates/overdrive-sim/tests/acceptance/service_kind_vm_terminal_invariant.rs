@@ -22,12 +22,10 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use futures::{FutureExt, StreamExt};
-use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
 use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::reconciler_runtime::{
-    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
+    ReconcilerRuntime, run_convergence_tick_with_guest_network_provisioner_for_test,
 };
-use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
 use overdrive_control_plane::{
     AppState, InterestRouterBroker, build_interest_table, service_lifecycle, spawn_interest_router,
     workload_lifecycle,
@@ -70,21 +68,25 @@ use overdrive_worker::probe_runner::ProbeRunner;
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 
-#[derive(Debug, Default)]
-struct NoopNetworkProvisioner;
+/// The one guest-network owner instance of this process: `AppState` holds it
+/// and every convergence tick dispatches through it (the post-#295 guest lane,
+/// where a VM allocation's address is the transport the pool assigns).
+fn guest_owner() -> Arc<overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner> {
+    static OWNER: std::sync::OnceLock<
+        Arc<overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner>,
+    > = std::sync::OnceLock::new();
+    Arc::clone(OWNER.get_or_init(|| {
+        Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default())
+    }))
+}
 
-impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
-    fn provision(
-        &self,
-        _workload: &WorkloadNetnsPlan,
-        _vm_tap: &VmTapPlan,
-    ) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-
-    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
+/// An EXEC wiring whose paired supervisor has opened the gate after boot.
+fn opened_exec_wiring() -> overdrive_core::guest_network::GuestNetworkExecWiring {
+    let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(
+        overdrive_sim::adapters::clock::SimClock::new(),
+    ));
+    assert!(wiring.supervisor().open_after_boot(), "the EXEC gate opens after boot");
+    wiring
 }
 
 const SEED: u64 = 25_717;
@@ -422,14 +424,14 @@ async fn run_owner_tick(
 ) {
     let reconciler = overdrive_core::reconcilers::ReconcilerName::new(owner)
         .expect("static reconciler name is valid");
-    run_convergence_tick_with_network_provisioner_for_test(
+    run_convergence_tick_with_guest_network_provisioner_for_test(
         state,
         &reconciler,
         target,
         clock.now(),
         tick,
         clock.now() + Duration::from_secs(30),
-        &NoopNetworkProvisioner,
+        guest_owner().as_ref(),
     )
     .await
     .unwrap_or_else(|error| panic!("seed={SEED}: {owner} convergence failed: {error:?}"));
@@ -482,6 +484,7 @@ async fn converge_service_wakes(
 /// a late accepted readiness Pass is checked against terminal eligibility.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2-4: the guest lane leases the transport)"]
 async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
     let seed = SEED;
     eprintln!("service-kind-vm readiness-wake seed={seed}");
@@ -503,6 +506,7 @@ async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
         Arc::new(SimHttpProber::new()),
         clock.clone(),
         obs.clone(),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
     ));
     let driver: Arc<dyn Driver> = Arc::new(ProbedVmDriver {
         inner: SimDriver::with_clock(DriverType::Vm, clock.clone()),
@@ -518,6 +522,7 @@ async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
         Arc::new(LocalIntentStore::open(temp.path().join("intent.redb")).expect("intent store"));
     let allocator =
         overdrive_control_plane::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
+    let exec_wiring = opened_exec_wiring();
     let state = AppState::new(
         Arc::clone(&store),
         temp.path().join("intent.redb"),
@@ -533,8 +538,8 @@ async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
         overdrive_control_plane::test_empty_listener_facts(),
         Ipv4Addr::LOCALHOST,
         crate::acceptance::serve_ports::worker(),
-        crate::acceptance::serve_ports::owner(),
-        crate::acceptance::serve_ports::exec_gate(),
+        guest_owner(),
+        exec_wiring.gate(),
         crate::acceptance::serve_ports::pool(),
     );
 

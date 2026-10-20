@@ -1,0 +1,29 @@
+[23:25:44] === preflight (fail closed)
+[23:25:44] substrate: {"host_uname_r": "7.0.0-38-generic", "vm_kernel_modules_from": "7.0.0-29-generic", "machine": "x86_64", "systemd_detect_virt": "none", "cpu": "AMD EPYC 8024P 8-Core Processor", "nproc": 16, "meminfo_head": ["MemTotal:       65401732 kB", "MemFree:        58751316 kB", "MemAvailable:   64114600 kB"], "loadavg": "1.04 0.51 0.24 1/332 38332", "failures": []}
+[23:25:44] pins: {"dgprobe": "f337a34124f7", "dg-bpf.o": "942d749c5cc1", "evmod.ko": "07386712462c", "evmod.c": "327f666961ff", "initramfs": "e6560bc8ae7d"}
+[23:25:45] launch VM: /var/tmp/ev-dgram-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /var/tmp/ev-dgram-work/out/initramfs-c.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=4 --memory size=1024M --serial file=/var/tmp/ev-dgram-work/out/vm-20261016T232544Z/serial.log --console off --vsock cid=3372,backend=vhost-kernel --log-file /var/tmp/ev-dgram-work/out/vm-20261016T232544Z/ch.log -v
+[23:25:47] host peer sizes-0-u done: [{"ev": "case", "env": "h", "case": "sizes-0-u", "pass": true, "detail": {"rx_ok": 1500, "rx_lost": 0, "rx_reorder_dup": 0, "rx_corrupt": 0, "rx_extra": 0, "rx_gaps": 0, "rx_eof": false, "rx_read_errno": 0, "tx_sent": 1500, "tx_err": 0, "rx_peak_unread_bytes": 0, "rx_ms": 319}}]
+[23:25:51] host peer sizes-1431-c done: [{"ev": "case", "env": "h", "case": "sizes-1431-c", "pass": true, "detail": {"rx_ok": 1500, "rx_lost": 0, "rx_reorder_dup": 0, "rx_corrupt": 0, "rx_extra": 0, "rx_gaps": 0, "rx_eof": false, "rx_read_errno": 0, "tx_sent": 1500, "tx_err": 0, "rx_peak_unread_bytes": 738, "rx_ms": 336}}]
+[23:25:55] host peer sizes-59000-u done: [{"ev": "case", "env": "h", "case": "sizes-59000-u", "pass": true, "detail": {"rx_ok": 300, "rx_lost": 0, "rx_reorder_dup": 0, "rx_corrupt": 0, "rx_extra": 0, "rx_gaps": 0, "rx_eof": false, "rx_read_errno": 0, "tx_sent": 300, "tx_err": 0, "rx_peak_unread_bytes": 58496, "rx_ms": 319}}]
+[23:25:58] host peer mixed-c done: []
+[23:26:14] host peer credit done: [{"ev": "case", "env": "h", "case": "credit", "pass": true, "detail": {"rx_ok": 1500, "rx_lost": 0, "rx_reorder_dup": 0, "rx_corrupt": 0, "rx_extra": 0, "rx_gaps": 0, "rx_eof": true, "rx_read_errno": 0, "tx_sent": 0, "tx_err": 0, "rx_peak_unread_bytes": 58966, "rx_ms": 2403}}]
+[23:26:19] host peer chunked done: [{"ev": "case", "env": "h", "case": "chunked", "pass": true, "detail": {"rx_ok": 0, "rx_lost": 0, "rx_reorder_dup": 0, "rx_corrupt": 0, "rx_extra": 0, "rx_gaps": 0, "rx_eof": true, "rx_read_errno": 0, "tx_sent": 1200, "tx_err": 0, "rx_peak_unread_bytes": 0, "rx_ms": 0}}]
+[23:26:22] host peer oversize done: [{"ev": "case", "env": "h", "case": "oversize", "pass": true, "detail": {"rx_ok": 200, "rx_lost": 0, "rx_reorder_dup": 0, "rx_corrupt": 0, "rx_extra": 0, "rx_gaps": 0, "rx_eof": false, "rx_read_errno": 0, "tx_sent": 0, "tx_err": 0, "rx_peak_unread_bytes": 6744, "rx_ms": 312}}]
+[23:26:26] host peer badframe-len done: [{"ev": "case", "env": "h", "case": "badframe-len", "pass": true, "detail": {"rx_ok": 0, "rx_lost": 0, "rx_reorder_dup": 0, "rx_corrupt": 0, "rx_extra": 0, "rx_gaps": 0, "rx_eof": true, "rx_read_errno": 0, "tx_sent": 10, "tx_err": 0, "rx_peak_unread_bytes": 0, "rx_ms": 0}}]
+[23:26:30] host peer badframe-magic done: [{"ev": "case", "env": "h", "case": "badframe-magic", "pass": true, "detail": {"rx_ok": 0, "rx_lost": 0, "rx_reorder_dup": 0, "rx_corrupt": 0, "rx_extra": 0, "rx_gaps": 0, "rx_eof": true, "rx_read_errno": 0, "tx_sent": 10, "tx_err": 0, "rx_peak_unread_bytes": 0, "rx_ms": 0}}]
+[23:26:33] host peer eof done: [{"ev": "case", "env": "h", "case": "eof", "pass": true, "detail": {"rx_ok": 0, "rx_lost": 0, "rx_reorder_dup": 0, "rx_corrupt": 0, "rx_extra": 0, "rx_gaps": 0, "rx_eof": true, "rx_read_errno": 0, "tx_sent": 20, "tx_err": 0, "rx_peak_unread_bytes": 0, "rx_ms": 0}}]
+[23:26:50] host peer stall done: [{"ev": "case", "env": "h", "case": "stall", "pass": true, "detail": {"rx_ok": 325, "rx_lost": 107, "rx_reorder_dup": 0, "rx_corrupt": 0, "rx_extra": 0, "rx_gaps": 107, "rx_eof": true, "rx_read_errno": 0, "tx_sent": 0, "tx_err": 0, "rx_peak_unread_bytes": 246, "rx_ms": 13529}}]
+[23:26:52] SUMMARY {"uname_r_guest": "7.0.0-29-generic", "done_marker": true, "oops_lines": [], "cases": [{"case": "sizes-0-u", "pass": true}, {"case": "sizes-1431-c", "pass": true}, {"case": "sizes-59000-u", "pass": true}, {"case": "mixed-c", "pass": false}, {"case": "credit", "pass": true}, {"case": "chunked", "pass": true}, {"case": "oversize", "pass": true}, {"case": "badframe-len", "pass": true}, {"case": "badframe-magic", "pass": true}, {"case": "eof", "pass": true}, {"case": "stall", "pass": true}], "all_pass": false}
+[23:26:52]   PASS  sizes-0-u
+[23:26:52]   PASS  sizes-1431-c
+[23:26:52]   PASS  sizes-59000-u
+[23:26:52]   FAIL  mixed-c
+[23:26:52]   PASS  credit
+[23:26:52]   PASS  chunked
+[23:26:52]   PASS  oversize
+[23:26:52]   PASS  badframe-len
+[23:26:52]   PASS  badframe-magic
+[23:26:52]   PASS  eof
+[23:26:52]   PASS  stall
+[23:26:52] physical host modules after: added=[] removed=[] forbidden=[] ok=True
+[23:26:52] RESULT all_pass=False physical_ok=True

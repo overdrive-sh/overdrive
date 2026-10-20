@@ -1,0 +1,13 @@
+{
+ "qemu_exit": 0,
+ "done_marker": true,
+ "uname_r": "7.0.0-29-generic",
+ "cases": [
+  {
+   "case": "churn",
+   "pass": true
+  }
+ ],
+ "all_pass": true,
+ "oops_lines": []
+}

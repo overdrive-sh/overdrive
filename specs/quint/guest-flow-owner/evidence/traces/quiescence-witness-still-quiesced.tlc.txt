@@ -1,9 +1,11 @@
 State 1: <Initial predicate>
 /\ quiesce_ok_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
-/\ quiesce_ok_quiescence_flowsOpen = 1
+/\ quiesce_ok_quiescence_flowsOpen = 0
+/\ quiesce_ok_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
 /\ quiesce_ok_quiescence_repLeft = 1
 /\ quiesce_ok_quiescence_att = [C1 |-> 0, C2 |-> 0]
 /\ quiesce_ok_quiescence_up = TRUE
+/\ quiesce_ok_quiescence_foreign = FALSE
 /\ quiesce_ok_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
 /\ quiesce_ok_quiescence_table = TRUE
 /\ quiesce_ok_quiescence_stop = "none"
@@ -14,34 +16,42 @@ State 1: <Initial predicate>
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE,
   dropped |-> FALSE,
-  refusedBoot |-> FALSE ]
+  refusedBoot |-> FALSE,
+  foreignChanged |-> FALSE ]
 /\ quiesce_ok_quiescence_latch = FALSE
+/\ quiesce_ok_quiescence_leaked = 0
 
-State 2: <quiesce_ok_quiescence_Damage line 220, col 3 to line 236, col 58 of module quiesce_ok>
-/\ quiesce_ok_quiescence_dmg = [C1 |-> TRUE, C2 |-> FALSE]
-/\ quiesce_ok_quiescence_flowsOpen = 1
-/\ quiesce_ok_quiescence_repLeft = 1
-/\ quiesce_ok_quiescence_att = [C1 |-> 0, C2 |-> 0]
-/\ quiesce_ok_quiescence_up = TRUE
-/\ quiesce_ok_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
-/\ quiesce_ok_quiescence_table = TRUE
-/\ quiesce_ok_quiescence_stop = "none"
-/\ quiesce_ok_quiescence_cnt = 0
-/\ quiesce_ok_quiescence_g = [ reopenEarly |-> FALSE,
-  repairNoHold |-> FALSE,
-  overlapped |-> FALSE,
-  stillQuiesced |-> FALSE,
-  failStopped |-> FALSE,
-  dropped |-> FALSE,
-  refusedBoot |-> FALSE ]
-/\ quiesce_ok_quiescence_latch = FALSE
-
-State 3: <quiesce_ok_quiescence_RecQuiesce line 293, col 3 to line 317, col 7 of module quiesce_ok>
+State 2: <quiesce_ok_quiescence_Damage line 254, col 3 to line 276, col 43 of module quiesce_ok>
 /\ quiesce_ok_quiescence_dmg = [C1 |-> TRUE, C2 |-> FALSE]
 /\ quiesce_ok_quiescence_flowsOpen = 0
+/\ quiesce_ok_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
 /\ quiesce_ok_quiescence_repLeft = 1
 /\ quiesce_ok_quiescence_att = [C1 |-> 0, C2 |-> 0]
 /\ quiesce_ok_quiescence_up = TRUE
+/\ quiesce_ok_quiescence_foreign = FALSE
+/\ quiesce_ok_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
+/\ quiesce_ok_quiescence_table = TRUE
+/\ quiesce_ok_quiescence_stop = "none"
+/\ quiesce_ok_quiescence_cnt = 0
+/\ quiesce_ok_quiescence_g = [ reopenEarly |-> FALSE,
+  repairNoHold |-> FALSE,
+  overlapped |-> FALSE,
+  stillQuiesced |-> FALSE,
+  failStopped |-> FALSE,
+  dropped |-> FALSE,
+  refusedBoot |-> FALSE,
+  foreignChanged |-> FALSE ]
+/\ quiesce_ok_quiescence_latch = FALSE
+/\ quiesce_ok_quiescence_leaked = 0
+
+State 3: <quiesce_ok_quiescence_RecQuiesce line 343, col 3 to line 373, col 43 of module quiesce_ok>
+/\ quiesce_ok_quiescence_dmg = [C1 |-> TRUE, C2 |-> FALSE]
+/\ quiesce_ok_quiescence_flowsOpen = 0
+/\ quiesce_ok_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
+/\ quiesce_ok_quiescence_repLeft = 1
+/\ quiesce_ok_quiescence_att = [C1 |-> 0, C2 |-> 0]
+/\ quiesce_ok_quiescence_up = TRUE
+/\ quiesce_ok_quiescence_foreign = FALSE
 /\ quiesce_ok_quiescence_rec = [C1 |-> "held", C2 |-> "idle"]
 /\ quiesce_ok_quiescence_table = TRUE
 /\ quiesce_ok_quiescence_stop = "none"
@@ -52,15 +62,19 @@ State 3: <quiesce_ok_quiescence_RecQuiesce line 293, col 3 to line 317, col 7 of
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE,
   dropped |-> FALSE,
-  refusedBoot |-> FALSE ]
+  refusedBoot |-> FALSE,
+  foreignChanged |-> FALSE ]
 /\ quiesce_ok_quiescence_latch = TRUE
+/\ quiesce_ok_quiescence_leaked = 0
 
-State 4: <quiesce_ok_quiescence_RecRepair line 149, col 3 to line 171, col 58 of module quiesce_ok>
+State 4: <quiesce_ok_quiescence_RecRepair line 181, col 3 to line 209, col 43 of module quiesce_ok>
 /\ quiesce_ok_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
 /\ quiesce_ok_quiescence_flowsOpen = 0
+/\ quiesce_ok_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
 /\ quiesce_ok_quiescence_repLeft = 1
 /\ quiesce_ok_quiescence_att = [C1 |-> 0, C2 |-> 0]
 /\ quiesce_ok_quiescence_up = TRUE
+/\ quiesce_ok_quiescence_foreign = FALSE
 /\ quiesce_ok_quiescence_rec = [C1 |-> "repaired", C2 |-> "idle"]
 /\ quiesce_ok_quiescence_table = TRUE
 /\ quiesce_ok_quiescence_stop = "none"
@@ -71,35 +85,20 @@ State 4: <quiesce_ok_quiescence_RecRepair line 149, col 3 to line 171, col 58 of
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE,
   dropped |-> FALSE,
-  refusedBoot |-> FALSE ]
+  refusedBoot |-> FALSE,
+  foreignChanged |-> FALSE ]
 /\ quiesce_ok_quiescence_latch = TRUE
+/\ quiesce_ok_quiescence_leaked = 0
 
-State 5: <quiesce_ok_quiescence_Damage line 220, col 3 to line 236, col 58 of module quiesce_ok>
-/\ quiesce_ok_quiescence_dmg = [C1 |-> FALSE, C2 |-> TRUE]
+State 5: <quiesce_ok_quiescence_LeakHold line 574, col 3 to line 611, col 43 of module quiesce_ok>
+/\ quiesce_ok_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
 /\ quiesce_ok_quiescence_flowsOpen = 0
+/\ quiesce_ok_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
 /\ quiesce_ok_quiescence_repLeft = 1
 /\ quiesce_ok_quiescence_att = [C1 |-> 0, C2 |-> 0]
 /\ quiesce_ok_quiescence_up = TRUE
+/\ quiesce_ok_quiescence_foreign = FALSE
 /\ quiesce_ok_quiescence_rec = [C1 |-> "repaired", C2 |-> "idle"]
-/\ quiesce_ok_quiescence_table = TRUE
-/\ quiesce_ok_quiescence_stop = "none"
-/\ quiesce_ok_quiescence_cnt = 1
-/\ quiesce_ok_quiescence_g = [ reopenEarly |-> FALSE,
-  repairNoHold |-> FALSE,
-  overlapped |-> FALSE,
-  stillQuiesced |-> FALSE,
-  failStopped |-> FALSE,
-  dropped |-> FALSE,
-  refusedBoot |-> FALSE ]
-/\ quiesce_ok_quiescence_latch = TRUE
-
-State 6: <quiesce_ok_quiescence_RecQuiesce line 293, col 3 to line 317, col 7 of module quiesce_ok>
-/\ quiesce_ok_quiescence_dmg = [C1 |-> FALSE, C2 |-> TRUE]
-/\ quiesce_ok_quiescence_flowsOpen = 0
-/\ quiesce_ok_quiescence_repLeft = 1
-/\ quiesce_ok_quiescence_att = [C1 |-> 0, C2 |-> 0]
-/\ quiesce_ok_quiescence_up = TRUE
-/\ quiesce_ok_quiescence_rec = [C1 |-> "repaired", C2 |-> "held"]
 /\ quiesce_ok_quiescence_table = TRUE
 /\ quiesce_ok_quiescence_stop = "none"
 /\ quiesce_ok_quiescence_cnt = 2
@@ -108,17 +107,21 @@ State 6: <quiesce_ok_quiescence_RecQuiesce line 293, col 3 to line 317, col 7 of
   overlapped |-> TRUE,
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE,
-  dropped |-> FALSE,
-  refusedBoot |-> FALSE ]
+  dropped |-> TRUE,
+  refusedBoot |-> FALSE,
+  foreignChanged |-> FALSE ]
 /\ quiesce_ok_quiescence_latch = TRUE
+/\ quiesce_ok_quiescence_leaked = 1
 
-State 7: <quiesce_ok_quiescence_RecRestore line 349, col 3 to line 412, col 36 of module quiesce_ok>
-/\ quiesce_ok_quiescence_dmg = [C1 |-> FALSE, C2 |-> TRUE]
+State 6: <quiesce_ok_quiescence_RecRestore line 411, col 3 to line 481, col 43 of module quiesce_ok>
+/\ quiesce_ok_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
 /\ quiesce_ok_quiescence_flowsOpen = 0
+/\ quiesce_ok_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
 /\ quiesce_ok_quiescence_repLeft = 1
 /\ quiesce_ok_quiescence_att = [C1 |-> 0, C2 |-> 0]
 /\ quiesce_ok_quiescence_up = TRUE
-/\ quiesce_ok_quiescence_rec = [C1 |-> "idle", C2 |-> "held"]
+/\ quiesce_ok_quiescence_foreign = FALSE
+/\ quiesce_ok_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
 /\ quiesce_ok_quiescence_table = TRUE
 /\ quiesce_ok_quiescence_stop = "none"
 /\ quiesce_ok_quiescence_cnt = 1
@@ -127,6 +130,8 @@ State 7: <quiesce_ok_quiescence_RecRestore line 349, col 3 to line 412, col 36 o
   overlapped |-> TRUE,
   stillQuiesced |-> TRUE,
   failStopped |-> FALSE,
-  dropped |-> FALSE,
-  refusedBoot |-> FALSE ]
+  dropped |-> TRUE,
+  refusedBoot |-> FALSE,
+  foreignChanged |-> FALSE ]
 /\ quiesce_ok_quiescence_latch = TRUE
+/\ quiesce_ok_quiescence_leaked = 1

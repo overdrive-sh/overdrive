@@ -1,0 +1,2 @@
+{"ev":"host-listening","case":"stall"}
+{"ev":"case","env":"h","case":"stall","pass":true,"detail":{"rx_ok":325,"rx_lost":59,"rx_reorder_dup":0,"rx_corrupt":0,"rx_extra":0,"rx_gaps":59,"rx_eof":true,"rx_read_errno":0,"tx_sent":0,"tx_err":0,"rx_peak_unread_bytes":246,"rx_ms":13540,"peer_vsock_buffer_size":262144}}

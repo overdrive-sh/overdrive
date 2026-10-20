@@ -305,7 +305,7 @@ pub fn default_staging_root() -> PathBuf {
 /// acquired (never for lock *contention*, which blocks rather than
 /// erroring).
 #[clippy::msrv = "1.89"]
-fn acquire_provision_lock(staging_root: &Path) -> Result<fs::File, VmFixtureError> {
+pub(crate) fn acquire_provision_lock(staging_root: &Path) -> Result<fs::File, VmFixtureError> {
     fs::create_dir_all(staging_root).map_err(|source| {
         VmFixtureError::staging_dir_unusable(staging_root.to_path_buf(), source)
     })?;
@@ -643,7 +643,7 @@ fn read_header(path: &Path) -> io::Result<Vec<u8>> {
 
 /// `uname -r`'s trimmed output — the running kernel release, used to
 /// locate `/boot/vmlinuz-<release>`.
-fn host_kernel_release() -> Result<String, VmFixtureError> {
+pub(crate) fn host_kernel_release() -> Result<String, VmFixtureError> {
     let output = Command::new("uname")
         .arg("-r")
         .output()
@@ -828,7 +828,10 @@ fn build_staging_tree(
 /// cannot be created, or [`VmFixtureError::Spawn`] /
 /// [`VmFixtureError::RootfsStagingFailed`] if `zstd -d` cannot be run
 /// or exits non-zero on a source that DOES exist.
-fn stage_vsock_modules(stage_dir: &Path, kernel_release: &str) -> Result<(), VmFixtureError> {
+pub(crate) fn stage_vsock_modules(
+    stage_dir: &Path,
+    kernel_release: &str,
+) -> Result<(), VmFixtureError> {
     let module_dir = stage_dir.join(GUEST_VSOCK_MODULE_DIR.trim_start_matches('/'));
     fs::create_dir_all(&module_dir).map_err(|source| {
         VmFixtureError::rootfs_staging_failed(
@@ -947,7 +950,7 @@ fn mkfs_rootfs_image(stage_dir: &Path, rootfs_path: &Path) -> Result<(), VmFixtu
 /// `chmod 0755` — `fs::copy` preserves the source's permission bits, but
 /// the built `overdrive-init` release binary is not guaranteed executable
 /// by every umask, so this is asserted explicitly rather than assumed.
-fn set_executable(path: &Path) -> Result<(), VmFixtureError> {
+pub(crate) fn set_executable(path: &Path) -> Result<(), VmFixtureError> {
     let mut perms = fs::metadata(path)
         .map_err(|source| {
             VmFixtureError::rootfs_staging_failed(
@@ -970,7 +973,12 @@ fn set_executable(path: &Path) -> Result<(), VmFixtureError> {
 /// (`/dev/console` as PID 1's fd 0/1/2; `/dev/null` as a general sink).
 /// Matches `spike-scratch/increment-a/build.sh`'s proven-working shape
 /// exactly.
-fn mknod_char_device(path: &Path, major: u32, minor: u32, mode: u32) -> Result<(), VmFixtureError> {
+pub(crate) fn mknod_char_device(
+    path: &Path,
+    major: u32,
+    minor: u32,
+    mode: u32,
+) -> Result<(), VmFixtureError> {
     let status = Command::new("mknod")
         .arg(path)
         .arg("c")
@@ -1020,7 +1028,7 @@ fn mknod_char_device(path: &Path, major: u32, minor: u32, mode: u32) -> Result<(
 ///
 /// [`VmFixtureError::UnsupportedHostArch`], [`VmFixtureError::Spawn`], or
 /// [`VmFixtureError::OverdriveInitBuildFailed`].
-fn build_overdrive_init_static() -> Result<PathBuf, VmFixtureError> {
+pub(crate) fn build_overdrive_init_static() -> Result<PathBuf, VmFixtureError> {
     let target = musl_target_triple()?;
     let root = workspace_root();
     let output = Command::new("cargo")
@@ -1052,7 +1060,7 @@ fn build_overdrive_init_static() -> Result<PathBuf, VmFixtureError> {
 /// the WRONG tree entirely — the exact class documented in
 /// `.claude/rules/development.md` § "Stale Lima xtask test artifacts
 /// across workspaces".
-fn workspace_root() -> PathBuf {
+pub(crate) fn workspace_root() -> PathBuf {
     locate_workspace_root_via_cargo().unwrap_or_else(compile_time_workspace_root_fallback)
 }
 
@@ -1088,7 +1096,7 @@ fn compile_time_workspace_root_fallback() -> PathBuf {
 /// Honors an already-set `CARGO_TARGET_DIR` (the Lima/metal wrappers
 /// re-inject it — `.claude/rules/testing.md` § "Running tests — Lima
 /// VM"), falling back to `<workspace_root>/target`.
-fn cargo_target_dir(workspace_root: &Path) -> PathBuf {
+pub(crate) fn cargo_target_dir(workspace_root: &Path) -> PathBuf {
     std::env::var_os("CARGO_TARGET_DIR")
         .map_or_else(|| workspace_root.join("target"), PathBuf::from)
 }
@@ -1105,7 +1113,7 @@ fn host_arch() -> Result<HostArch, VmFixtureError> {
 
 /// The static-musl target triple `overdrive-init` is cross-built for on
 /// this host (ADR-0082 §D7 / §D1's `{x86_64,aarch64}-unknown-linux-musl`).
-fn musl_target_triple() -> Result<&'static str, VmFixtureError> {
+pub(crate) fn musl_target_triple() -> Result<&'static str, VmFixtureError> {
     match host_arch()? {
         HostArch::X86_64 => Ok("x86_64-unknown-linux-musl"),
         HostArch::Aarch64 => Ok("aarch64-unknown-linux-musl"),

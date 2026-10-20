@@ -217,6 +217,7 @@ async fn given_probe_runner_writes_pass_row_when_service_lifecycle_reconciles_th
         http,
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
     );
 
     let alloc = alloc_id("alloc-probe-to-stable");

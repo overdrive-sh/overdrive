@@ -1,0 +1,35 @@
+GUEST_BOOT uname_r=7.0.0-29-generic suite=exec arg= modparams=
+GUEST_MODULES:
+ovd_fwd 36864 0 [permanent], Live 0xffffffffc0435000 (OE)
+aesni_intel 98304 0 - Live 0xffffffffc0426000
+tls 163840 0 - Live 0xffffffffc0412000
+vsock_diag 12288 0 - Live 0xffffffffc0410000
+vsock_loopback 12288 0 - Live 0xffffffffc040e000
+vmw_vsock_virtio_transport 20480 0 - Live 0xffffffffc040c000
+vmw_vsock_virtio_transport_common 57344 2 vsock_loopback,vmw_vsock_virtio_transport, Live 0xffffffffc0408000
+vsock 73728 4 vsock_diag,vsock_loopback,vmw_vsock_virtio_transport,vmw_vsock_virtio_transport_common, Live 0xffffffffc0400000
+crw-------    1 0        0          10, 263 Oct 17 01:53 /dev/ovd_fwd
+CTLTEST suite=exec strict=0
+DATA exec[O_CLOEXEC]: 600 ms after the owner was killed, 0 of 8 far TCP ends are still open, module live ids = 0 (before: 0)
+CHECK PASS ctx opened with O_CLOEXEC: the owner's death releases it although a child exec'd :: still_open=0 live=0
+DATA exec[no O_CLOEXEC]: 600 ms after the owner was killed, 8 of 8 far TCP ends are still open, module live ids = 8 (before: 0)
+CHECK PASS ctx opened WITHOUT O_CLOEXEC: an exec'd child keeps the context alive after the owner died (pairs keep forwarding) :: still_open=8 live=8 (ghost pairs held by a process that never touched the device)
+CHECK PASS and the ghost pair still forwards bytes :: n=512
+CHECK PASS killing the exec'd holder finally releases the context :: still_open=0 live=0
+CHECK PASS no kernel oops/warn :: dmesg scan
+RESULT suite=exec pass=5 fail=0
+SUITE_DONE suite=exec rc=0
+[    0.037292] rcu: Preemptible hierarchical RCU implementation.
+[    0.037293] rcu: 	RCU restricting CPUs from NR_CPUS=8192 to nr_cpu_ids=4.
+[    0.037295] 	Trampoline variant of Tasks RCU enabled.
+[    0.037296] 	Rude variant of Tasks RCU enabled.
+[    0.037296] 	Tracing variant of Tasks RCU enabled.
+[    0.037297] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.037308] RCU Tasks: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.037310] RCU Tasks Rude: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.046076] rcu: Hierarchical SRCU implementation.
+[    0.345360] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.345367] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+[    0.345996] ovd_fwd: loaded (spike, permanent: no module_exit)
+GUEST_END
+[    3.128489] reboot: Power down

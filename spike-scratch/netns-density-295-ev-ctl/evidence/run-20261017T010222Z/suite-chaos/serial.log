@@ -1,0 +1,37 @@
+GUEST_BOOT uname_r=7.0.0-29-generic suite=chaos arg= modparams=
+GUEST_MODULES:
+ovd_fwd 36864 0 [permanent], Live 0xffffffffc0435000 (OE)
+aesni_intel 98304 0 - Live 0xffffffffc0426000
+tls 163840 0 - Live 0xffffffffc0412000
+vsock_diag 12288 0 - Live 0xffffffffc0410000
+vsock_loopback 12288 0 - Live 0xffffffffc040e000
+vmw_vsock_virtio_transport 20480 0 - Live 0xffffffffc040c000
+vmw_vsock_virtio_transport_common 57344 2 vsock_loopback,vmw_vsock_virtio_transport, Live 0xffffffffc0408000
+vsock 73728 4 vsock_diag,vsock_loopback,vmw_vsock_virtio_transport,vmw_vsock_virtio_transport_common, Live 0xffffffffc0400000
+crw-------    1 0        0          10, 263 Oct 17 01:14 /dev/ovd_fwd
+CTLTEST suite=chaos strict=0
+CHECK PASS version :: ok
+CHECK PASS every pair whose attach returned is reset by the owner's death :: 120 trials, kill after 0..20 ms; attached-and-recorded pairs 27740 (of which owner-aborted 9534); violations 0
+CHECK PASS no never-attached pair was reset :: spurious=0
+DATA pairs in flight (attach started, not recorded) at the kill: reset=11 eof=0 open=0
+CHECK PASS no live id after any kill :: sum of live after each trial = 0
+DATA audit[end] ctx_open=121 ctx_rel=121 ctx_free=121 pair_new=27751 pair_free=27751 rec_new=27751 rec_queued=27704 rec_read=0 rec_discard=47 rec_free_unread=27704 rel_won=47 live=0 bytes=0
+CHECK PASS every pair object was freed (no leak) :: pair_new=27751 pair_free=27751
+CHECK PASS every context object was freed (no leak) :: opened=121 released=121 freed=121
+CHECK PASS no kernel oops/warn :: dmesg scan
+RESULT suite=chaos pass=7 fail=0
+SUITE_DONE suite=chaos rc=0
+[    0.037919] rcu: Preemptible hierarchical RCU implementation.
+[    0.037920] rcu: 	RCU restricting CPUs from NR_CPUS=8192 to nr_cpu_ids=4.
+[    0.037922] 	Trampoline variant of Tasks RCU enabled.
+[    0.037923] 	Rude variant of Tasks RCU enabled.
+[    0.037923] 	Tracing variant of Tasks RCU enabled.
+[    0.037924] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.037933] RCU Tasks: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.037934] RCU Tasks Rude: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.046745] rcu: Hierarchical SRCU implementation.
+[    0.378863] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.378871] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+[    0.379820] ovd_fwd: loaded (spike, permanent: no module_exit)
+GUEST_END
+[    5.015065] reboot: Power down

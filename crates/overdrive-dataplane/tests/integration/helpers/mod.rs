@@ -9,12 +9,10 @@
 // walking-skeleton netns/veth + cgroup-isolated-workload topology fixture
 // (single-consumer; step 01-01). Promote to `overdrive-testing` only if a
 // second consumer appears.
+// A `GuestStreamDial` that serves no VM, for `HostMtlsEnforcement::new`'s
+// required `guest_dial` (LEGS-DIAL) in fixtures with no guest-prefix target.
+pub mod guest_dial;
 pub mod mtls_netns_topology;
-// netns-density-295 (vsock attachment replacement) — owner cgroup, veth-to-
-// namespace links addressed from a `TestCidrLease`, AF_VSOCK loopback pairs
-// and datagram associations shared by `vsock_guest_steering`,
-// `vsock_egress_unframe` and `vsock_fragment_map`.
-pub mod guest_net;
 // Shared transparent-mTLS test fixtures — the PKI (root→intermediate→leaf chain
 // minting) and the WORKER/peer/workload/server role harness. Promoted out of the
 // 01-01 walking-skeleton subdir so BOTH the composed walking skeleton AND the

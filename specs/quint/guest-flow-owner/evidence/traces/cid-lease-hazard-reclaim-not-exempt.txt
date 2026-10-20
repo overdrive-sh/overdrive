@@ -1,0 +1,63 @@
+# cid-lease-hazard-reclaim-not-exempt: counterexample, 11 state(s) (from the TLC trace)
+
+State 1
+  conf_step = [init |-> [tag |-> "UNIT"]]
+  bootLeft = -1
+  att = <<0, 0>>
+  cursor = 0
+  up = TRUE
+  reclaimed = TRUE
+  dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
+  al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+
+State 2 [Assign]
+  cursor = 1
+  lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "leased", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+
+State 3 [Launch]
+  dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "running", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+
+State 4 [VmmCrash]
+  dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"crash", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
+  al = << [ st |-> "ended", off |-> 0, retry |-> TRUE, ex |-> FALSE, chg |-> TRUE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+
+State 5 [Assign]
+  att = <<1, 0>>
+  cursor = 2
+  lease = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
+  al = << [ st |-> "leased", off |-> 1, retry |-> FALSE, ex |-> FALSE, chg |-> TRUE, pred |-> 0, pst |-> "held" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+
+State 6 [Launch]
+  dev = (0 :> 0 @@ 1 :> 1 @@ 2 :> 0)
+  al = << [ st |-> "running", off |-> 1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> 0, pst |-> "retiring" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+
+State 7 [VmmCrash]
+  dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "ended", off |-> 1, retry |-> TRUE, ex |-> FALSE, chg |-> TRUE, pred |-> 0, pst |-> "retiring" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+
+State 8 [Release]
+  lease = (0 :> 0 @@ 1 :> 1 @@ 2 :> 0)
+  al = << [ st |-> "ended", off |-> 1, retry |-> TRUE, ex |-> FALSE, chg |-> TRUE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+
+State 9 [Assign]
+  att = <<2, 0>>
+  cursor = 0
+  lease = (0 :> 0 @@ 1 :> 1 @@ 2 :> 1)
+  al = << [ st |-> "leased", off |-> 2, retry |-> FALSE, ex |-> FALSE, chg |-> TRUE, pred |-> 1, pst |-> "held" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+
+State 10 [Launch]
+  dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 1)
+  al = << [ st |-> "running", off |-> 2, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> 1, pst |-> "retiring" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+
+State 11 [Crash]
+  up = FALSE
+  reclaimed = FALSE
+  dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> -2)
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"reclaim", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
+  al = << [ st |-> "failed", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>

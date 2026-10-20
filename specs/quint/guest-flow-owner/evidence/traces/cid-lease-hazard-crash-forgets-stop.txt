@@ -1,0 +1,34 @@
+# cid-lease-hazard-crash-forgets-stop: counterexample, 5 state(s) (from the TLC trace)
+
+State 1
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  reclaimed = TRUE
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
+  att = <<0, 0>>
+  up = TRUE
+  bootLeft = -1
+  dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  cursor = 0
+  conf_step = [init |-> [tag |-> "UNIT"]]
+  al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+
+State 2 [Assign]
+  lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  cursor = 1
+  al = << [ st |-> "leased", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+
+State 3 [Launch]
+  dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "running", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+
+State 4 [Stop]
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {1}, lastEnd |-> <<"stop", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
+  dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "retiring", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+
+State 5 [Crash]
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  reclaimed = FALSE
+  up = FALSE
+  cursor = 0
+  al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>

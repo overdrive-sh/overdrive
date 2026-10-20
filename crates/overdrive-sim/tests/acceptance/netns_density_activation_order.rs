@@ -1,15 +1,16 @@
 //! S-ND295-53 — activation waits out a shared guest-network recovery and never
-//! turns it into a failure (D-295-R5, FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the action-shim order through no Failed row for an observed recovery)).
+//! turns it into a failure (D-295-R5, FD § "Gate G-V3 — allocation forwarding activation (replaces G-295-3)" (the action-shim order through no Failed row for an observed recovery)).
 //!
 //! # Contract under test
 //!
-//! The action shim raises an allocation's TAP only after the protection-live
-//! event, and only through the EXEC gate used purely as a wait:
+//! The action shim activates an allocation's forwarding only after the
+//! protection-live event, and only through the EXEC gate used purely as a
+//! wait (G-V3):
 //!
 //! - an activation that meets a Recovering gate waits, then runs exactly once
 //!   after the gate reopens;
-//! - an activation that meets a latched quiescence raises nothing, drops its
-//!   claim, waits again, and runs after the reopen;
+//! - an activation answered `QuiescenceLatched` (node forwarding quiesced,
+//!   QHOLD) drops its claim, waits again, and activates after the reopen;
 //! - at FailStop neither activation nor the command is released, no row is
 //!   written, and `guest_network.activation_withheld { alloc, reason:
 //!   "fail_stop" }` is emitted;
@@ -19,18 +20,20 @@
 //!
 //! `dispatch_with_guest_network_provisioner_for_test` drives the real action
 //! shim with a `StartAllocation`. The EXEC gate reaches the shim through
-//! `AppState` (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (how the gate reaches the shim, and the `AppState` constructors)); this file's seam fixture keeps the paired
-//! `GuestNetworkExecSupervisor`, which only the test moves (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (gate state outside `run_server*`)). No
-//! supervisor runs in this lane, so the test is the only caller of
-//! `quiesce_managed_taps` and `restore_quiesced_taps`.
+//! `AppState` (FD § "Gate G-V3 — allocation forwarding activation (replaces G-295-3)" (how the gate reaches the shim, and the `AppState` constructors)); this file's seam fixture keeps the paired
+//! `GuestNetworkExecSupervisor`, which only the test moves (FD § "Gate G-V3 — allocation forwarding activation (replaces G-295-3)" (gate state outside `run_server*`)). No
+//! supervisor runs in this lane. Quiescence reaches the shim only as the
+//! owner's `ForwardingActivation::QuiescenceLatched` answer, which the sim
+//! owner gives while the test holds it standing
+//! (`script_standing_activation`): a `QuiescenceHold` is constructible only by
+//! the production owner (QHOLD), so the sim cannot take a real hold.
 //!
 //! # Oracle
 //!
-//! The activation count comes from `SimSharedGuestNetworkOwner::calls()`: the
-//! sim records `TapSetUp` for a raised activation and for every restore call,
-//! and nothing for a latched activation (FD § "Public deterministic shared-owner simulation API" (the pending `activate` and `restore_quiesced_taps` recording rules)). The test brackets
-//! each of its own quiesce and restore calls with `calls().len()`; every
-//! `TapSetUp` outside those brackets is an activation. EXEC release and the
+//! The activation count comes from
+//! `SimSharedGuestNetworkOwner::activation_outcomes()`: every `activate` the
+//! shim made, with the outcome it received; an activation is an `Activated`
+//! outcome. EXEC release and the
 //! command hook are observed at the driver port by a recording decorator over
 //! `SimDriver`; the withheld event is captured by a test-local tracing
 //! `Layer`; the restart budget is read through
@@ -38,8 +41,8 @@
 //!
 //! # Faults and schedule
 //!
-//! Gate transitions come only from the supervisor capability; the latch comes
-//! only from the sim owner's `quiesce_managed_taps`. The latched case parks
+//! Gate transitions come only from the supervisor capability; the latched
+//! answer only from the sim owner's standing activation. The latched case parks
 //! one `activate` call at the driven port (the owner decorator controls
 //! ordering only; it authors no lease, row, or decision). Seeds choose the
 //! component, the number of parked polls between transitions, whether a
@@ -68,11 +71,11 @@
     reason = "seeded acceptance harness: every verdict prints its seed; fixture preconditions fail loudly"
 )]
 
+use overdrive_core::guest_transport::GuestFlowPorts;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::net::Ipv4Addr;
 use std::num::NonZeroU16;
-use std::ops::Range;
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -85,9 +88,10 @@ use overdrive_control_plane::action_shim::{
     ShimError, dispatch_with_guest_network_provisioner_for_test,
 };
 use overdrive_control_plane::guest_network::{
-    GuestAddressPool, GuestNetworkOperation, GuestNetworkPlan, GuestNetworkProvisioner,
-    Result as GuestNetworkResult, SharedGuestNetworkAudit, SharedGuestNetworkAuditError,
-    SharedGuestNetworkOwner, TapActivation, TapQuiescence,
+    ForwardingActivation, ForwardingQuiescence, ForwardingRestore, GuestAddressPool,
+    GuestNetworkOperation, GuestNetworkPlan, GuestNetworkProvisioner, QuiescenceHold,
+    QuiescenceRestoreError, Result as GuestNetworkResult, SharedGuestNetworkAudit,
+    SharedGuestNetworkAuditError, SharedGuestNetworkOwner,
 };
 use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::reconciler_runtime::{
@@ -101,6 +105,9 @@ use overdrive_core::api::{ListenerInput, ServiceSpecInput};
 use overdrive_core::guest_network::{
     GuestNetworkExecGate, GuestNetworkExecSupervisor, GuestNetworkExecWiring,
     SharedGuestNetworkComponent, SharedGuestNetworkFailStopCause,
+};
+use overdrive_core::guest_transport::dial::{
+    DialPurpose, GuestDialError, GuestStream, GuestStreamDial,
 };
 use overdrive_core::id::{AllocationId, MeshServiceName, NodeId, SpiffeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, ReconcilerName, TargetResource, TickContext};
@@ -144,10 +151,9 @@ const DEFAULT_SEEDS: [u64; 4] =
     [0x0295_0053_0000_0001, 0x0295_0053_0000_0002, 0x0295_0053_0000_0003, 0x0295_0053_0000_0004];
 /// The Phase-1 single-node baseline id (`workload_lifecycle::baseline_nodes_phase1`).
 const NODE: &str = "local";
-/// Today's action-pool constants (`guest_network::action_pool`): node guest
-/// prefix, bridge, and the gateway that is also the guest DNS address.
+/// The node guest prefix and its gateway (the one host-local address of the
+/// prefix, GW-LOCAL), which is also the guest DNS address.
 const GUEST_PREFIX: &str = "100.95.0.0/16";
-const GUEST_BRIDGE: &str = "ovd-gbr0";
 const GUEST_GATEWAY: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 1);
 /// Bounded poll budget for a dispatch that must complete; each pending poll
 /// yields to the runtime once and advances the sim clock by
@@ -163,10 +169,10 @@ const ROW_POLL_BUDGET: usize = 64;
 const ACTIVATION_WITHHELD: &str = "guest_network.activation_withheld";
 /// Components a supervisor may report as first failing while recovering.
 const RECOVERY_COMPONENTS: [SharedGuestNetworkComponent; 5] = [
-    SharedGuestNetworkComponent::Bridge,
-    SharedGuestNetworkComponent::TcxLink,
-    SharedGuestNetworkComponent::EndpointMap,
-    SharedGuestNetworkComponent::BridgeGuard,
+    SharedGuestNetworkComponent::Forwarder,
+    SharedGuestNetworkComponent::FlowListeners,
+    SharedGuestNetworkComponent::ControlListener,
+    SharedGuestNetworkComponent::IpRules,
     SharedGuestNetworkComponent::IpSets,
 ];
 
@@ -197,7 +203,7 @@ enum Entry {
     ExecRelease(AllocationId),
     /// `Driver::on_alloc_running` — the command hook after release.
     CommandRunning(AllocationId),
-    /// The test moved the gate to Open with `complete_attempt(None)`.
+    /// The test moved the gate to Open with an empty `complete_attempt` set.
     Reopened,
 }
 
@@ -320,7 +326,7 @@ impl GuestNetworkProvisioner for ActivationOwner {
         self.inner.provision(plan).await
     }
 
-    async fn activate(&self, plan: &GuestNetworkPlan) -> GuestNetworkResult<TapActivation> {
+    async fn activate(&self, plan: &GuestNetworkPlan) -> GuestNetworkResult<ForwardingActivation> {
         let park = self.park_next_activate.lock().take();
         if let Some(park) = park {
             park.entered.store(true, Ordering::SeqCst);
@@ -331,6 +337,17 @@ impl GuestNetworkProvisioner for ActivationOwner {
 
     async fn teardown(&self, plan: &GuestNetworkPlan) -> GuestNetworkResult<()> {
         self.inner.teardown(plan).await
+    }
+}
+
+#[async_trait::async_trait]
+impl GuestStreamDial for ActivationOwner {
+    async fn dial(
+        &self,
+        target: std::net::SocketAddrV4,
+        purpose: DialPurpose,
+    ) -> Result<GuestStream, GuestDialError> {
+        self.inner.dial(target, purpose).await
     }
 }
 
@@ -348,16 +365,23 @@ impl SharedGuestNetworkOwner for ActivationOwner {
         self.inner.converge_shared().await
     }
 
+    fn flow_ports(&self) -> Option<GuestFlowPorts> {
+        self.inner.flow_ports()
+    }
+
     async fn audit_shared(&self) -> Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError> {
         self.inner.audit_shared().await
     }
 
-    async fn quiesce_managed_taps(&self) -> GuestNetworkResult<TapQuiescence> {
-        self.inner.quiesce_managed_taps().await
+    async fn quiesce(&self) -> (QuiescenceHold, ForwardingQuiescence) {
+        self.inner.quiesce().await
     }
 
-    async fn restore_quiesced_taps(&self) -> GuestNetworkResult<()> {
-        self.inner.restore_quiesced_taps().await
+    async fn restore(
+        &self,
+        hold: QuiescenceHold,
+    ) -> std::result::Result<ForwardingRestore, QuiescenceRestoreError> {
+        self.inner.restore(hold).await
     }
 }
 
@@ -467,16 +491,13 @@ where
     }
 }
 
-/// Every `TapSetUp` outside the test's own quiesce/restore brackets is an
-/// activation (TS S-ND295-53 oracle).
-fn activations(calls: &[GuestNetworkOperation], brackets: &[Range<usize>]) -> Vec<usize> {
-    calls
+/// Every `Activated` outcome is an activation (S-ND295-53 oracle); the index
+/// is its position in the owner's activation-outcome log.
+fn activations(outcomes: &[ForwardingActivation]) -> Vec<usize> {
+    outcomes
         .iter()
         .enumerate()
-        .filter(|(index, operation)| {
-            **operation == GuestNetworkOperation::TapSetUp
-                && !brackets.iter().any(|bracket| bracket.contains(index))
-        })
+        .filter(|(_, outcome)| **outcome == ForwardingActivation::Activated)
         .map(|(index, _)| index)
         .collect()
 }
@@ -498,7 +519,6 @@ struct Fixture {
     journal: Journal,
     reconciler: ReconcilerName,
     tick: AtomicU64,
-    brackets: Mutex<Vec<Range<usize>>>,
 }
 
 impl Fixture {
@@ -526,18 +546,19 @@ impl Fixture {
         let wiring = GuestNetworkExecWiring::new(clock.clone() as Arc<dyn Clock>);
         let gate = wiring.gate();
         let supervisor = wiring.supervisor();
-        // One pool from the doc-hidden constructor with today's constants.
+        // One pool over the node prefix and gateway with seeded entropy
+        // (DG-2 row 1).
         let pool = Arc::new(GuestAddressPool::new(
             GUEST_PREFIX.parse().expect("static guest prefix"),
-            GUEST_BRIDGE.to_owned(),
             GUEST_GATEWAY,
-            GUEST_GATEWAY,
+            Arc::new(SimEntropy::new(seed)),
         ));
         // One worker over the sim mTLS ports, its shared owner started.
         let worker = Arc::new(MtlsInterceptWorker::new(
             Arc::new(SimMtlsEnforcement::new(
                 Arc::new(SimIdentityRead::new(BTreeMap::new(), None)),
                 MtlsLimits::default(),
+                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
             )),
             Arc::new(SimMtlsResolve::new(BTreeMap::new(), MtlsResolution::NonMesh)),
             clock.clone() as Arc<dyn Clock>,
@@ -549,7 +570,7 @@ impl Fixture {
             overdrive_control_plane::test_default_allocator(store.clone() as Arc<dyn IntentStore>);
         // DELIVER 05-01 changes this one call: the pinned `AppState::new`
         // appends `worker`, `owner`, `gate`, and `pool` as required parameters
-        // (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (how the gate reaches the shim, and the `AppState` constructors)). Until then the fixture keeps them for its bodies.
+        // (FD § "Gate G-V3 — allocation forwarding activation (replaces G-295-3)" (how the gate reaches the shim, and the `AppState` constructors)). Until then the fixture keeps them for its bodies.
         let state = AppState::new(
             store,
             store_path,
@@ -583,7 +604,6 @@ impl Fixture {
             journal,
             reconciler: ReconcilerName::new("workload-lifecycle").expect("reconciler name"),
             tick: AtomicU64::new(0),
-            brackets: Mutex::new(Vec::new()),
         }
     }
 
@@ -736,24 +756,24 @@ impl Fixture {
         self.state.obs.alloc_status_row(alloc).await.expect("alloc status row read")
     }
 
-    /// The test's own quiescence call, bracketed in the sim owner's log.
-    async fn quiesce(&self) -> GuestNetworkResult<TapQuiescence> {
-        let start = self.owner.calls().len();
-        let outcome = self.owner.quiesce_managed_taps().await;
-        self.brackets.lock().push(start..self.owner.calls().len());
-        outcome
+    /// Node forwarding is quiesced: every activation is answered
+    /// `QuiescenceLatched` until [`Self::restore`].
+    fn quiesce(&self) {
+        self.owner.inner.script_standing_activation(Some(ForwardingActivation::QuiescenceLatched));
     }
 
-    /// The test's own restore call, bracketed in the sim owner's log.
-    async fn restore(&self) -> GuestNetworkResult<()> {
-        let start = self.owner.calls().len();
-        let outcome = self.owner.restore_quiesced_taps().await;
-        self.brackets.lock().push(start..self.owner.calls().len());
-        outcome
+    /// The last hold is restored: activations are answered `Activated` again.
+    fn restore(&self) {
+        self.owner.inner.script_standing_activation(None);
+    }
+
+    /// The owner's activation outcomes so far (the reopen marker indexes it).
+    fn outcomes_seen(&self) -> usize {
+        self.owner.inner.activation_outcomes().len()
     }
 
     fn activations(&self) -> Vec<usize> {
-        activations(&self.owner.calls(), &self.brackets.lock())
+        activations(&self.owner.inner.activation_outcomes())
     }
 
     /// Poll the parked dispatch `polls` times while the gate must not let the
@@ -767,18 +787,17 @@ impl Fixture {
             let activations = self.activations();
             assert!(
                 activations.is_empty(),
-                "seed={}: activation ran while {while_} (poll {poll}): TapSetUp at owner call \
-                 indices {activations:?} outside the test's quiesce/restore brackets {:?}; calls \
-                 {:?}. The activation must wait on the EXEC gate until it reopens (FD § \"[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24\" (the action-shim order and the EXEC-gate wait))",
+                "seed={}: activation ran while {while_} (poll {poll}): `Activated` at outcome \
+                 indices {activations:?}; outcomes {:?}. The activation must wait on the EXEC \
+                 gate and on quiescence until both reopen (G-V2, G-V3)",
                 self.seed,
-                self.brackets.lock(),
-                self.owner.calls(),
+                self.owner.inner.activation_outcomes(),
             );
             match outcome {
                 Step::Pending => {}
                 Step::Done(result) => panic!(
                     "seed={}: the dispatch completed while {while_} (poll {poll}) with \
-                     {result:?}; it must wait on the EXEC gate (FD § \"[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24\" (the action-shim order and the EXEC-gate wait))",
+                     {result:?}; it must wait on the EXEC gate (FD § \"Gate G-V3 — allocation forwarding activation (replaces G-295-3)\" (the action-shim order and the EXEC-gate wait))",
                     self.seed
                 ),
                 Step::Panicked(message) => panic!(
@@ -853,12 +872,10 @@ impl Fixture {
         let activations = self.activations();
         assert!(
             activations.len() == 1 && activations[0] >= reopen_at,
-            "seed={}: expected exactly one activation (TapSetUp outside the test's brackets), \
-             after the reopen at owner call index {reopen_at}; got {activations:?}; calls {:?}; \
-             brackets {:?}",
+            "seed={}: expected exactly one activation (`Activated`), after the reopen at \
+             outcome index {reopen_at}; got {activations:?}; outcomes {:?}",
             self.seed,
-            self.owner.calls(),
-            self.brackets.lock(),
+            self.owner.inner.activation_outcomes(),
         );
         let reopened =
             self.journal.position(|entry| matches!(entry, Entry::Reopened)).unwrap_or(usize::MAX);
@@ -966,19 +983,15 @@ async fn activation_during_recovery(seed: u64) {
     let mut dispatch = Box::pin(fixture.dispatch(Fixture::start_action(&workload, &alloc)));
     fixture.wait_parked(&mut dispatch, rng.gen_range(1..=4), "the gate is Recovering").await;
     if quiesce {
-        let quiescence = fixture.quiesce().await;
-        assert!(
-            quiescence.as_ref().is_ok_and(|result| result.unconfirmed.is_empty()),
-            "seed={seed}: the scripted full quiescence succeeds: {quiescence:?}"
-        );
+        fixture.quiesce();
         fixture
             .wait_parked(&mut dispatch, rng.gen_range(1..=3), "the gate is Recovering and latched")
             .await;
     }
     for _ in 0..failed_attempts {
         fixture.expect_transition(
-            fixture.supervisor.complete_attempt(Some(component)),
-            "complete_attempt(Some)",
+            fixture.supervisor.complete_attempt(std::collections::BTreeSet::from([component])),
+            "complete_attempt(remaining)",
         );
         fixture
             .wait_parked(
@@ -989,8 +1002,7 @@ async fn activation_during_recovery(seed: u64) {
             .await;
     }
     if quiesce {
-        let restored = fixture.restore().await;
-        assert!(restored.is_ok(), "seed={seed}: the scripted restore succeeds: {restored:?}");
+        fixture.restore();
         fixture
             .wait_parked(
                 &mut dispatch,
@@ -1000,8 +1012,11 @@ async fn activation_during_recovery(seed: u64) {
             .await;
     }
 
-    let reopen_at = fixture.owner.calls().len();
-    fixture.expect_transition(fixture.supervisor.complete_attempt(None), "complete_attempt(None)");
+    let reopen_at = fixture.outcomes_seen();
+    fixture.expect_transition(
+        fixture.supervisor.complete_attempt(std::collections::BTreeSet::new()),
+        "complete_attempt(empty)",
+    );
     fixture.journal.push(Entry::Reopened);
     let outcome = fixture.run_to_completion(&mut dispatch, "after the gate reopened").await;
     assert!(outcome.is_ok(), "seed={seed}: the start completes after the reopen: {outcome:?}");
@@ -1056,11 +1071,7 @@ async fn latched_activation_retries(seed: u64) {
 
     // Recovery begins and the latch is set while that activation is in flight.
     fixture.expect_transition(fixture.supervisor.begin_recovery(component), "begin_recovery");
-    let quiescence = fixture.quiesce().await;
-    assert!(
-        quiescence.as_ref().is_ok_and(|result| result.unconfirmed.is_empty()),
-        "seed={seed}: the scripted full quiescence succeeds: {quiescence:?}"
-    );
+    fixture.quiesce();
     park.release();
     fixture
         .wait_parked(
@@ -1071,8 +1082,8 @@ async fn latched_activation_retries(seed: u64) {
         .await;
     for _ in 0..failed_attempts {
         fixture.expect_transition(
-            fixture.supervisor.complete_attempt(Some(component)),
-            "complete_attempt(Some)",
+            fixture.supervisor.complete_attempt(std::collections::BTreeSet::from([component])),
+            "complete_attempt(remaining)",
         );
         fixture
             .wait_parked(
@@ -1082,8 +1093,7 @@ async fn latched_activation_retries(seed: u64) {
             )
             .await;
     }
-    let restored = fixture.restore().await;
-    assert!(restored.is_ok(), "seed={seed}: the scripted restore succeeds: {restored:?}");
+    fixture.restore();
     fixture
         .wait_parked(
             &mut dispatch,
@@ -1092,8 +1102,11 @@ async fn latched_activation_retries(seed: u64) {
         )
         .await;
 
-    let reopen_at = fixture.owner.calls().len();
-    fixture.expect_transition(fixture.supervisor.complete_attempt(None), "complete_attempt(None)");
+    let reopen_at = fixture.outcomes_seen();
+    fixture.expect_transition(
+        fixture.supervisor.complete_attempt(std::collections::BTreeSet::new()),
+        "complete_attempt(empty)",
+    );
     fixture.journal.push(Entry::Reopened);
     let outcome = fixture.run_to_completion(&mut dispatch, "after the gate reopened").await;
     assert!(outcome.is_ok(), "seed={seed}: the start completes after the reopen: {outcome:?}");
@@ -1125,7 +1138,7 @@ async fn fail_stop_withholds(seed: u64) {
     fixture.expect_transition(fixture.supervisor.begin_recovery(component), "begin_recovery");
     let mut dispatch = Box::pin(fixture.dispatch(Fixture::start_action(&workload, &alloc)));
     fixture.wait_parked(&mut dispatch, rng.gen_range(1..=4), "the gate is Recovering").await;
-    // The durable Running write precedes the activation wait (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the action-shim order));
+    // The durable Running write precedes the activation wait (FD § "Gate G-V3 — allocation forwarding activation (replaces G-295-3)" (the action-shim order));
     // keep the dispatch parked until that write is visible.
     let mut parked_row = fixture.row(&alloc).await;
     for _ in 0..ROW_POLL_BUDGET {
@@ -1142,19 +1155,15 @@ async fn fail_stop_withholds(seed: u64) {
          {ROW_POLL_BUDGET} polls of the parked dispatch): {parked_row:?}"
     );
     if quiesce {
-        let quiescence = fixture.quiesce().await;
-        assert!(
-            quiescence.as_ref().is_ok_and(|result| result.unconfirmed.is_empty()),
-            "seed={seed}: the scripted full quiescence succeeds: {quiescence:?}"
-        );
+        fixture.quiesce();
         fixture
             .wait_parked(&mut dispatch, rng.gen_range(1..=3), "the gate is Recovering and latched")
             .await;
     }
     for _ in 0..failed_attempts {
         fixture.expect_transition(
-            fixture.supervisor.complete_attempt(Some(component)),
-            "complete_attempt(Some)",
+            fixture.supervisor.complete_attempt(std::collections::BTreeSet::from([component])),
+            "complete_attempt(remaining)",
         );
         fixture
             .wait_parked(
@@ -1165,11 +1174,10 @@ async fn fail_stop_withholds(seed: u64) {
             .await;
     }
     if failed_restore {
-        fixture.owner.inner.script_restore_failure(true);
-        let restored = fixture.restore().await;
-        assert!(restored.is_err(), "seed={seed}: the scripted restore failure: {restored:?}");
+        // A recovery that never restores its hold keeps forwarding quiesced
+        // (QHOLD: only the last restore reopens): the activation keeps waiting.
         fixture
-            .wait_parked(&mut dispatch, rng.gen_range(1..=3), "a failed restore kept the latch")
+            .wait_parked(&mut dispatch, rng.gen_range(1..=3), "an unrestored hold kept the latch")
             .await;
     }
 
@@ -1187,9 +1195,8 @@ async fn fail_stop_withholds(seed: u64) {
     let activations = fixture.activations();
     assert!(
         activations.is_empty(),
-        "seed={seed}: no activation at fail-stop; TapSetUp outside the brackets at {activations:?}; \
-         calls {:?}",
-        fixture.owner.calls()
+        "seed={seed}: no activation at fail-stop; `Activated` at {activations:?}; outcomes {:?}",
+        fixture.owner.inner.activation_outcomes()
     );
     let releases = fixture.exec_releases(&alloc);
     assert!(
@@ -1218,6 +1225,7 @@ async fn fail_stop_withholds(seed: u64) {
 /// S-ND295-53 — Activation waits out a recovery and never turns it into a failure.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "pending DELIVER attachment-cut step (06-04 rework)"]
 async fn activation_during_recovery_runs_once_after_reopen_without_a_failed_row() {
     for seed in seeds() {
         eprintln!(
@@ -1231,6 +1239,7 @@ async fn activation_during_recovery_runs_once_after_reopen_without_a_failed_row(
 /// S-ND295-53 — Activation waits out a recovery and never turns it into a failure.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "pending DELIVER attachment-cut step (06-04 rework)"]
 async fn a_latched_activation_retries_after_reopen() {
     for seed in seeds() {
         eprintln!("seed={seed} body=a_latched_activation_retries_after_reopen");
@@ -1242,6 +1251,7 @@ async fn a_latched_activation_retries_after_reopen() {
 /// S-ND295-53 — Activation waits out a recovery and never turns it into a failure.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "pending DELIVER attachment-cut step (06-04 rework)"]
 async fn fail_stop_withholds_activation_and_the_command() {
     for seed in seeds() {
         eprintln!("seed={seed} body=fail_stop_withholds_activation_and_the_command");

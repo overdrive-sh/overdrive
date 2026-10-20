@@ -144,6 +144,7 @@ async fn http_connection_refused_outcome_flows_through_probe_runner_to_store() {
         Arc::new(SimClock::default()) as Arc<dyn Clock>,
         Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0))
             as Arc<dyn ObservationStore>,
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
     );
     let clock = SimClock::default();
     let obs = SimObservationStore::single_peer(node_id_for_obs_store(), 0);
@@ -187,6 +188,7 @@ async fn http_pass_outcome_flows_through_probe_runner_to_store() {
         Arc::new(SimClock::default()) as Arc<dyn Clock>,
         Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0))
             as Arc<dyn ObservationStore>,
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
     );
     let clock = SimClock::default();
     let obs = SimObservationStore::single_peer(node_id_for_obs_store(), 0);

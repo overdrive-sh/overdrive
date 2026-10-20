@@ -24,8 +24,8 @@
 use std::sync::Arc;
 
 use overdrive_core::traits::ca::{
-    Ca, CaCertDer, CaCertPem, CaError, CaKeyPem, IntermediateHandle, RootCaHandle, SvidMaterial,
-    SvidRequest, TrustBundle,
+    Ca, CaCertDer, CaCertPem, CaError, CaFactory, CaKeyPem, IntermediateHandle, RootCaHandle,
+    SvidMaterial, SvidRequest, TrustBundle,
 };
 use overdrive_core::traits::entropy::Entropy;
 use overdrive_core::{CertSerial, CertSpec};
@@ -262,6 +262,18 @@ const SERIAL_BYTES: usize = 16;
 /// the sibling sim adapters, so it can be shared across async tasks.
 pub struct SimCa {
     entropy: Arc<dyn Entropy>,
+}
+
+/// The simulation [`CaFactory`] (STORES-IN, ADR-0219): `build` returns
+/// `SimCa::new(entropy)`, so a boot over seeded entropy draws its serials
+/// from that seed.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SimCaFactory;
+
+impl CaFactory for SimCaFactory {
+    fn build(&self, entropy: Arc<dyn Entropy>) -> Arc<dyn Ca> {
+        Arc::new(SimCa::new(entropy))
+    }
 }
 
 impl SimCa {

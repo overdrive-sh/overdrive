@@ -1,0 +1,34 @@
+# fwd-pair-hazard-tcp-no-error-report: counterexample, 3 state(s) (from the TLC trace)
+
+State 1
+  mode = "stream"
+  vs = [ g |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ], h |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ] ]
+  dir = [ gh |-> [ wr |-> 0, wfin |-> FALSE, q0 |-> <<>>, h0 |-> <<>>, q1 |-> <<>>, h1 |-> <<>>, q2 |-> <<>>, srcEnd |-> "none", srcShut |-> FALSE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> FALSE, shutRd |-> FALSE, loss |-> FALSE, lost |-> 0 ], hg |-> [ wr |-> 0, wfin |-> FALSE, q0 |-> <<>>, h0 |-> <<>>, q1 |-> <<>>, h1 |-> <<>>, q2 |-> <<>>, srcEnd |-> "none", srcShut |-> FALSE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> FALSE, shutRd |-> FALSE, loss |-> FALSE, lost |-> 0 ] ]
+  oldCtx = [g |-> "none", h |-> "none"]
+  ctl = [gh |-> <<>>, hg |-> <<>>]
+  dg = [ gh |-> [ got |-> <<>>, n |-> 0, sizes |-> <<>>, dq0 |-> <<>>, foff |-> 0, blk |-> FALSE, dq2 |-> <<>>, sdrop |-> {}, rdrop |-> {}, fdrop |-> {} ], hg |-> [ got |-> <<>>, n |-> 0, sizes |-> <<>>, dq0 |-> <<>>, foff |-> 0, blk |-> FALSE, dq2 |-> <<>>, sdrop |-> {}, rdrop |-> {}, fdrop |-> {} ] ]
+  ctx = [g |-> "open", h |-> "open"]
+  guestAbortSent = FALSE
+  conf_step = [InitWith |-> [m |-> "stream"]]
+  ep = [g |-> "alive", h |-> "alive"]
+  vmUp = TRUE
+  strmAbort = FALSE
+  gh = [ fwdAfterEnd |-> FALSE, fwdOld |-> FALSE, unclassified |-> FALSE, rstOpen |-> {}, holderReadAfterAbort |-> FALSE, trail |-> {}, faults |-> 0, hobs |-> "none", woken |-> FALSE, recPend |-> FALSE, vhTouched |-> FALSE, dropped |-> FALSE, hostDead |-> FALSE, hresCls |-> "none" ]
+  attRes = [g |-> "none", h |-> "none"]
+  attEnded = [g |-> 0, h |-> 0]
+  hres = "none"
+  gen = [g |-> 0, h |-> 0]
+  pr = [ g |-> [ ph |-> "unattached", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ], h |-> [ ph |-> "unattached", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ] ]
+  tcpErr = [g |-> "0", h |-> "0"]
+  terr = [g |-> FALSE, h |-> FALSE]
+
+State 2 [Attach]
+  vs = [ g |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ], h |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "noend", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ] ]
+  attRes = [g |-> "none", h |-> "ok"]
+  pr = [ g |-> [ ph |-> "unattached", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ], h |-> [ ph |-> "live", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ] ]
+
+State 3 [TcpRst]
+  dir = [ gh |-> [ wr |-> 0, wfin |-> FALSE, q0 |-> <<>>, h0 |-> <<>>, q1 |-> <<>>, h1 |-> <<>>, q2 |-> <<>>, srcEnd |-> "none", srcShut |-> FALSE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> FALSE, shutRd |-> FALSE, loss |-> TRUE, lost |-> 0 ], hg |-> [ wr |-> 0, wfin |-> FALSE, q0 |-> <<>>, h0 |-> <<>>, q1 |-> <<>>, h1 |-> <<>>, q2 |-> <<>>, srcEnd |-> "none", srcShut |-> FALSE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> FALSE, shutRd |-> FALSE, loss |-> TRUE, lost |-> 0 ] ]
+  ep = [g |-> "alive", h |-> "dead"]
+  gh = [ fwdAfterEnd |-> FALSE, fwdOld |-> FALSE, unclassified |-> FALSE, rstOpen |-> {"h"}, holderReadAfterAbort |-> FALSE, trail |-> {}, faults |-> 1, hobs |-> "none", woken |-> FALSE, recPend |-> FALSE, vhTouched |-> FALSE, dropped |-> FALSE, hostDead |-> FALSE, hresCls |-> "none" ]
+  tcpErr = [g |-> "0", h |-> "ECONNRESET"]

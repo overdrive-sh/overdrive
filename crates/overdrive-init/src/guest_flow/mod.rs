@@ -1,47 +1,51 @@
 //! Guest flow owner — the guest half of the vsock attachment replacement
 //! (GH #295): the control session, the flow table and the UDP slot pool of
-//! `overdrive-init`, over the guest-owner seam [`GuestOwnerIo`].
+//! `overdrive-init`, over the guest-owner seam [`GuestOwnerIo`] and the guest
+//! forwarder context (`FlowForwarder`, EVMOD-PORT).
 //!
 //! Interface contract: `docs/feature/netns-density-295/feature-delta.md`
-//! § DG-5 ("Guest flow owner", module `guest_flow`), § *Per-kind total orders*
-//! (TcpConnect, datagram association, UDP slot release, end-of-association
-//! order, TcpAccept), § *Control session* (D18a), § *Flow end*
-//! (HALFCLOSE-SIGNAL) and QPROJ-5 (the read-only `guest_observation`). Every
-//! item below is the one those sections pin.
+//! § DG-5 ("Guest flow owner", module `guest_flow`; DG-5-A, DG-5-D, DG-5-E,
+//! DG-5-F, DG-5-Q), § *Guest adaptation contract* (guest intake model,
+//! TcpAccept guest side, flow end, QPROJ-5 `guest_observation`), § *[REF] vsock
+//! data path* ("Owners' use of the forwarder", "Owner response to an ended half
+//! at attach", EVMOD-PAIR, EVMOD-REC, EVMOD-DGRAM), § *Per-kind total orders*
+//! and § *Control session*. Every item below is the one those sections pin.
 //!
-//! RED scaffold (DISTILL, Mandate 7): the owner (`GuestFlowOwner`), the newtype
-//! constructors and codecs, and the production seam `KernelGuestOwnerIo` panic
-//! until DELIVER vsock new-step 5 lands them. Plain data (the event, handle and
-//! label vocabulary, the observation types, `GuestOwnerFatal` with its pinned
-//! `Display`, the production clock) is written for real. The simulation seam
-//! [`sim`] (`#[cfg(test)]`) is a fully functional fixture.
+//! RED scaffold (DISTILL, Mandate 7): the owner ([`GuestFlowOwner`]), the
+//! [`SocketCookie`] constructors and codecs, and the production seam
+//! [`KernelGuestOwnerIo`] panic until DELIVER step 5 lands them. Plain data
+//! (the event, handle and label vocabulary, the observation types,
+//! [`GuestOwnerFatal`] with its pinned `Display`, the production clock) is
+//! written for real. The simulation seam [`sim`] (`#[cfg(test)]`) is a fully
+//! functional test fixture over `overdrive-sim`'s sim sockets and its
+//! `SimFlowForwarder` (decision B-1).
 
-// SCAFFOLD: true — netns-density-295 DISTILL (vsock new-step 5).
+// SCAFFOLD: true — netns-density-295 DISTILL (DELIVER step 5).
 #![cfg_attr(
     not(test),
-    expect(dead_code, reason = "RED scaffold — DELIVER vsock new-step 5 wires it into main")
+    expect(dead_code, reason = "RED scaffold — DELIVER step 5 wires it into main")
 )]
-#![cfg_attr(
-    test,
-    allow(dead_code, reason = "RED scaffold — DELIVER vsock new-step 5 wires it into main")
-)]
+#![cfg_attr(test, allow(dead_code, reason = "RED scaffold — DELIVER step 5 wires it into main"))]
 #![allow(
     clippy::redundant_pub_crate,
     reason = "DG-5 pins `pub(crate)` visibility for these binary-crate items"
 )]
 #![allow(
     clippy::doc_markdown,
-    reason = "protocol leg names (V_g, T_g, Q_g, …) and kernel names are prose, not code"
+    reason = "protocol leg names (V_g, V_h, I, C, S) and kernel names are prose, not code"
 )]
 
 #[cfg(all(test, feature = "integration-tests"))]
-mod quint_flows_half;
+mod quint_fwd_pair;
 #[cfg(all(test, feature = "integration-tests"))]
 mod quint_itf;
 #[cfg(all(test, feature = "integration-tests"))]
 mod quint_owner_flows;
 #[cfg(all(test, feature = "integration-tests"))]
 mod quint_udp_slots;
+// In-guest real-kernel cells (D-UP-18): the native metal microVM lane only.
+#[cfg(all(test, feature = "integration-tests", feature = "kvm-tests"))]
+mod real_kernel;
 #[cfg(test)]
 pub(crate) mod sim;
 #[cfg(test)]
@@ -58,15 +62,17 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
+use overdrive_core::guest_transport::forwarder::{
+    AbortResult, ForwardEnd, ForwardId, ForwarderError, ForwarderInventory, PairState,
+};
 use overdrive_core::guest_transport::wire::{FLOW_REQUEST_LEN, FlowId};
-use overdrive_core::net::ListenPort;
 
 use crate::transport::{GuestTransportToken, KernelGuestTransportOps};
 
 const SCAFFOLD: &str = "Not yet implemented -- RED scaffold";
 
 // ---------------------------------------------------------------------------
-// Newtypes (QPROJ-5 types, DG-5)
+// Newtypes
 // ---------------------------------------------------------------------------
 
 /// Kernel socket cookie of a guest socket; never 0.
@@ -74,7 +80,7 @@ const SCAFFOLD: &str = "Not yet implemented -- RED scaffold";
 pub(crate) struct SocketCookie(NonZeroU64);
 
 impl SocketCookie {
-    /// Validates a raw cookie: 0 is `SocketCookieError::Zero`.
+    /// Validates a raw cookie (`0` is never a kernel cookie).
     pub(crate) fn new(_raw: u64) -> Result<Self, SocketCookieError> {
         panic!("{SCAFFOLD}")
     }
@@ -105,53 +111,11 @@ impl FromStr for SocketCookie {
 /// Why a value is not a [`SocketCookie`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum SocketCookieError {
-    /// The kernel never issues cookie 0.
+    /// `0` is never a kernel socket cookie.
     #[error("socket cookie is zero")]
     Zero,
     /// Not a decimal integer.
     #[error("socket cookie is not a decimal integer")]
-    Unparseable,
-}
-
-/// Readiness-registration generation of one UDP slot's cells (CELL-RECREATE).
-/// 0 at boot; +1 at each recreate; `u64`, never wraps in practice.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct CellGeneration(u64);
-
-impl CellGeneration {
-    /// Validates a raw generation.
-    pub(crate) fn new(_raw: u64) -> Result<Self, CellGenerationError> {
-        panic!("{SCAFFOLD}")
-    }
-
-    /// The raw generation.
-    pub(crate) fn get(self) -> u64 {
-        let _ = self;
-        panic!("{SCAFFOLD}")
-    }
-}
-
-/// Decimal form.
-impl fmt::Display for CellGeneration {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        panic!("{SCAFFOLD}")
-    }
-}
-
-/// Decimal form; validated by [`CellGeneration::new`].
-impl FromStr for CellGeneration {
-    type Err = CellGenerationError;
-
-    fn from_str(_s: &str) -> Result<Self, Self::Err> {
-        panic!("{SCAFFOLD}")
-    }
-}
-
-/// Why a value is not a [`CellGeneration`].
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum CellGenerationError {
-    /// Not a decimal integer.
-    #[error("cell generation is not a decimal integer")]
     Unparseable,
 }
 
@@ -182,52 +146,56 @@ impl SeamInstance {
 }
 
 /// vsock to the host on a [`HostChannel`]: the control session, a TcpConnect
-/// V_g, T_g, Q_g.
+/// V_g, a datagram V_g.
 #[must_use]
 #[derive(Debug)]
 pub(crate) struct HostConn(Handle);
-/// V_g accepted on `GUEST_INBOUND_PORT`.
+/// V_g accepted on `GUEST_INBOUND_PORT` (a dial).
 #[must_use]
 #[derive(Debug)]
 pub(crate) struct InboundConn(Handle);
-/// I: the TCP intake's child for an application's captured `connect()`.
+/// I: the TCP intake's child for an application's captured `connect()`,
+/// unattached, observed only for its error.
 #[must_use]
 #[derive(Debug)]
 pub(crate) struct CapturedConn(Handle);
-/// A flow V_g installed (TcpConnect: route V_g → I; TcpAccept: no route yet).
-#[must_use]
-#[derive(Debug)]
-pub(crate) struct InstalledConn(Handle);
-/// C: armed toward an installed V_g, connecting.
+/// C: connecting toward the application (TcpAccept).
 #[must_use]
 #[derive(Debug)]
 pub(crate) struct AppConn(Handle);
-/// T_g and Q_g of one slot's association, installed.
-#[must_use]
-#[derive(Debug)]
-pub(crate) struct SlotLegs(Handle);
-/// Routed: terminal readiness, shutdown, linger, abort, close only.
+/// A half attached to the forwarder: linger, abort, close only.
 #[must_use]
 #[derive(Debug)]
 pub(crate) struct GuestPairSocket(Handle);
 
-/// Names one routed TCP pair for `drained` / `remove_pair`; no capability.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct GuestPairKey(u64);
-
-/// A routed guest TCP pair: the flow vsock and the outer (application) leg.
+/// A pair the guest forwarder accepted: its id and the two attached halves.
 #[must_use]
+#[derive(Debug)]
 pub(crate) struct GuestPair {
-    /// Names the pair.
-    pub(crate) key: GuestPairKey,
+    /// The forwarder's id of the pair.
+    pub(crate) id: ForwardId,
     /// V_g.
     pub(crate) vsock: GuestPairSocket,
     /// I (TcpConnect) or C (TcpAccept).
     pub(crate) outer: GuestPairSocket,
 }
 
+/// An attach the forwarder refused, with both halves handed back unattached.
+#[must_use]
+#[derive(Debug)]
+pub(crate) struct GuestAttachRefused {
+    /// The forwarder's refusal (`HalfEnded` is the end of the flow,
+    /// EVMOD-ATTACH-END).
+    pub(crate) error: ForwarderError,
+    /// The vsock half, unattached.
+    pub(crate) vsock: GuestOwnedSocket,
+    /// The outer half, unattached.
+    pub(crate) outer: GuestOwnedSocket,
+}
+
 /// Any guest socket handle, for `abort` / `close`.
 #[must_use]
+#[derive(Debug)]
 pub(crate) enum GuestOwnedSocket {
     /// A host channel connection.
     Host(HostConn),
@@ -235,13 +203,9 @@ pub(crate) enum GuestOwnedSocket {
     Inbound(InboundConn),
     /// A captured intake child.
     Captured(CapturedConn),
-    /// An installed V_g.
-    Installed(InstalledConn),
     /// An application connection.
     App(AppConn),
-    /// A slot's legs.
-    Legs(SlotLegs),
-    /// A routed pair socket.
+    /// An attached half.
     Pair(GuestPairSocket),
 }
 
@@ -268,9 +232,7 @@ handle_impls!(
     HostConn => Host,
     InboundConn => Inbound,
     CapturedConn => Captured,
-    InstalledConn => Installed,
     AppConn => App,
-    SlotLegs => Legs,
     GuestPairSocket => Pair,
 );
 
@@ -281,19 +243,17 @@ impl GuestOwnedSocket {
             Self::Host(h) => h.id(),
             Self::Inbound(h) => h.id(),
             Self::Captured(h) => h.id(),
-            Self::Installed(h) => h.id(),
             Self::App(h) => h.id(),
-            Self::Legs(h) => h.id(),
             Self::Pair(h) => h.id(),
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// Event vocabulary
+// Event and value vocabulary
 // ---------------------------------------------------------------------------
 
-/// Terminal readiness (never `POLLIN` / `POLLOUT`).
+/// Terminal readiness of an unattached socket (never `POLLIN` / `POLLOUT`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum GuestHangup {
     /// `POLLRDHUP`: the peer ended its writes.
@@ -304,24 +264,13 @@ pub(crate) enum GuestHangup {
     Error(std::io::ErrorKind),
 }
 
-/// Outcome of the end-of-association order for one slot (CELL-RECREATE).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SlotEnd {
-    /// Both cells recreated; the slot's new generation.
-    Recreated(CellGeneration),
-    /// Creating a new cell failed: the slot is quarantined (no association,
-    /// detached from its owner, not in the pool; steps 4–5 ran).
-    Quarantined,
-}
-
-/// The host vsock channels the guest opens (CID 2), with their socket types.
+/// The host vsock channels the guest opens (CID 2); both `SOCK_STREAM`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum HostChannel {
-    /// `GUEST_FLOW_STREAM_PORT` (1240), `SOCK_STREAM`.
+    /// The boot token's `stream=` port (GUEST-PORTS, ADR-0217; default 1240):
+    /// TcpConnect and datagram flows.
     FlowStream,
-    /// `GUEST_FLOW_DATAGRAM_PORT` (1241), `SOCK_SEQPACKET`.
-    FlowSeqpacket,
-    /// `GUEST_FLOW_CONTROL_PORT` (1243), `SOCK_STREAM`.
+    /// The boot token's `control=` port (default 1243).
     Control,
 }
 
@@ -332,15 +281,6 @@ pub(crate) enum GuestRecord {
     ControlMessage,
     /// `FLOW_REQUEST_LEN` (32), on V_g.
     FlowRequest,
-}
-
-/// Direction of a guest TCP pair for `drained`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum GuestFlowDirection {
-    /// Toward the outer (application) leg.
-    TowardOuter,
-    /// Toward the host (the flow vsock).
-    TowardHost,
 }
 
 /// The guest's listeners whose failure the owner cannot repair.
@@ -375,9 +315,10 @@ pub(crate) enum GuestIoEvent {
         /// The accepted V_g.
         conn: InboundConn,
     },
-    /// The TCP intake accepted an application's captured `connect()`; the
-    /// kernel already installed it with route I → a parking cell (or, with no
-    /// free cell, did not: `parked = false`, and the owner resets it).
+    /// The TCP intake accepted an application's captured `connect()`. The
+    /// child I is not attached; the application's early bytes wait in its
+    /// receive queue (EVMOD-PAIR). The owner resets it at once when it
+    /// already holds `GUEST_TCP_PENDING_MAX` pending flows.
     OutboundCaptured {
         /// I.
         child: CapturedConn,
@@ -385,35 +326,39 @@ pub(crate) enum GuestIoEvent {
         original_destination: SocketAddrV4,
         /// The application socket's cookie.
         cookie: SocketCookie,
-        /// I is installed toward a parking cell.
-        parked: bool,
     },
-    /// Terminal readiness on a watched socket: the control session's
-    /// `HostConn`, a `CapturedConn` before `Paired`, and every
-    /// `GuestPairSocket` are watched from issue (level-triggered: reported
-    /// once per socket per kind until the socket ends).
+    /// Terminal readiness on an unattached socket: the control session's
+    /// `HostConn`, a `CapturedConn` before `Paired`, a flow V_g before its
+    /// attach (an `InboundConn` or a flow `HostConn`, DG-5-E) are watched
+    /// from issue (level-triggered: reported once per socket per kind until
+    /// the socket ends). An attached socket is not watched: its end is its
+    /// pair's `ForwardEnd`.
     Hangup {
         /// The socket.
         socket: SocketId,
         /// The readiness kind.
         hangup: GuestHangup,
     },
-    /// A slot's framing cell became readable, as registered at `generation`.
+    /// A slot socket became readable (no read; the first datagram of an
+    /// association, or of the next one after an end, U-2).
     SlotReady {
         /// The slot socket's bound address.
         slot: SocketAddrV4,
-        /// The registration's cell generation.
-        generation: CellGeneration,
     },
     /// A `sock_release` report (ring buffer).
     SocketReleased {
         /// The released socket.
         cookie: SocketCookie,
     },
-    /// The listener map changed (`fexit` wake record).
-    ListenerMapWake,
+    /// An end record of the guest forwarder context (`ForwardEnd`,
+    /// EVMOD-REC).
+    ForwardEnded {
+        /// The record.
+        end: ForwardEnd,
+    },
     /// A listener's accept failed with an error other than a per-connection
-    /// one (`ECONNABORTED`, and `EMFILE` / `ENFILE`, which the seam retries).
+    /// one (a connection aborted before it was accepted, and `EMFILE` /
+    /// `ENFILE`, which the seam retries).
     ListenerFailed {
         /// The listener.
         listener: GuestListener,
@@ -426,33 +371,40 @@ pub(crate) enum GuestIoEvent {
 // The guest-owner seam
 // ---------------------------------------------------------------------------
 
-/// Synchronous: `overdrive-init` has no async runtime (std + nix).
+/// The guest owner's effect seam (DG-5). Synchronous: `overdrive-init` has no
+/// async runtime (std + nix).
 ///
 /// Contract (every method):
 ///
 /// - **Preconditions are types.** Handles are move-only and exist from the
 ///   call or event that issued them to the call that consumed them; the
 ///   per-kind orders of § *Per-kind total orders* are the only orders the
-///   types admit (TcpConnect: captured → rearm → connect host →
-///   `install_outbound` → `write_request` → `route_outbound`; TcpAccept:
-///   inbound → read → `inbound_ended` → `install_inbound` → `start_connect_app`
-///   → `route_inbound`; datagram: two host connects → `install_slot_legs` →
-///   `write_slot_requests` → `route_slot` → `end_association`). An operation
-///   on a `HostConn` / `AppConn` before its `Connected` event fails with the
-///   kernel's `NotConnected`, which the owner never issues. A handle from
-///   another seam instance is unreachable (`unreachable!`).
-/// - **Consuming calls are all-or-nothing.** A call that consumes handles and
-///   returns `Err` has aborted every consumed socket and removed every entry
-///   it wrote.
-/// - **Writes** (`write_host`, `write_request`, `write_slot_requests`) write the
-///   whole record or fail; a failed write may have sent a prefix the peer
-///   reads as a truncated record — which every peer treats as a read failure
-///   of that connection — so the owner ends that connection (or, on the
-///   session, takes the session-loss path).
-/// - **Events.** Each `GuestIoEvent` is delivered once; `Connected` / `Read`
-///   name a handle the owner still holds or one it has since consumed (the
-///   owner discards the latter). A `Hangup` is level-triggered and reported
-///   once per socket per kind.
+///   types admit (TcpConnect: captured → connect host → `write_request` →
+///   `Paired` → `attach_outbound`; TcpAccept: inbound → read →
+///   `inbound_ended` → `start_connect_app` → `Connected` → `attach_inbound`
+///   → `Paired`; datagram: slot ready → connect host → `write_slot_request`
+///   → `Paired` → `attach_slot` → end record or abort → `end_association` →
+///   `release_slot`). An operation on a `HostConn` / `AppConn` before its
+///   `Connected` event fails with the kernel's `NotConnected`, which the owner
+///   never issues. A handle from another seam instance is unreachable
+///   (`unreachable!`).
+/// - **Attaches are all-or-nothing.** Ok: the guest forwarder holds both
+///   halves. Err: it holds neither, and the halves come back in
+///   [`GuestAttachRefused`] for the owner to close by "Owner response to an
+///   ended half at attach".
+/// - **Writes** (`write_host`, `write_request`, `write_slot_request`) write
+///   the whole record or fail; a failed write may have sent a prefix the peer
+///   reads as a truncated record, so the owner ends that connection (or, on
+///   the session, takes the session-loss path).
+/// - **Events.** Each [`GuestIoEvent`] is delivered once; `Connected` /
+///   `Read` name a handle the owner still holds or one it has since consumed
+///   (the owner discards the latter). A `Hangup` is level-triggered and
+///   reported once per socket per kind. A `ForwardEnded` names an id of the
+///   guest's one context; each id's record is delivered once (EVMOD-REC).
+/// - **An accepted, unattached V_g is observed (DG-5-E).** A `Hangup` on a
+///   flow V_g before its attach ends the flow in the dispatch that receives
+///   it: an error or reset aborts it and sends `Abort`; `ReadHangup` is the
+///   host's close of V_h, so the flow ends with no message.
 /// - **No payload.** Only `HostConn` (session and request records) and
 ///   `InboundConn` (the request) are ever read, and only whole fixed records.
 pub(crate) trait GuestOwnerIo: Send {
@@ -471,63 +423,60 @@ pub(crate) trait GuestOwnerIo: Send {
     fn start_read_host(&mut self, conn: &HostConn, record: GuestRecord) -> std::io::Result<()>;
     /// Starts reading the 32-byte `TcpAccept` request on V_g.
     fn start_read_inbound(&mut self, conn: &InboundConn) -> std::io::Result<()>;
-    /// Writes one whole `ControlOpen` or control message on the session.
+    /// Writes one whole `ControlOpen` or control message on the session
+    /// (`Paired`, `Refused { errno }`, `TimedOut { errno }`, `Abort`).
     fn write_host(&mut self, conn: &HostConn, bytes: &[u8]) -> std::io::Result<()>;
     /// TCPACCEPT-END: after the request read, `true` iff V_g already reports
     /// `POLLRDHUP` or EOF (the host closed V_h). Non-blocking; reads no byte.
     fn inbound_ended(&mut self, conn: &InboundConn) -> std::io::Result<bool>;
 
-    // --- TcpConnect (guest opens; § Per-kind total orders steps 2, 7) ---
-    /// Re-arms I (`SO_RCVLOWAT`) after its `OutboundCaptured` event.
-    fn rearm_captured(&mut self, child: &CapturedConn) -> std::io::Result<()>;
-    /// Installs the connected V_g with route V_g → I.
-    fn install_outbound(
-        &mut self,
-        vsock: HostConn,
-        child: &CapturedConn,
-    ) -> std::io::Result<InstalledConn>;
-    /// Writes the 32-byte flow request on an installed V_g, once.
+    // --- TcpConnect (guest opens; § Per-kind total orders) ---
+    /// Writes the 32-byte flow request on a connected flow V_g, once.
     fn write_request(
         &mut self,
-        vsock: &InstalledConn,
+        vsock: &HostConn,
         request: &[u8; FLOW_REQUEST_LEN],
     ) -> std::io::Result<()>;
-    /// On `Paired`: routes I's parking cell → V_g and re-arms the cell.
-    fn route_outbound(
+    /// On `Paired`: `FlowForwarder::attach(I, V_g, Stream)` (EVMOD-PAIR).
+    /// Consumes both; `Err` hands both back unattached.
+    fn attach_outbound(
         &mut self,
-        vsock: InstalledConn,
         child: CapturedConn,
-    ) -> std::io::Result<GuestPair>;
+        vsock: HostConn,
+    ) -> Result<GuestPair, GuestAttachRefused>;
 
-    // --- TcpAccept (host opens; steps 3–5) ---
-    /// Installs V_g after a matching request and `inbound_ended == false`
-    /// (no route yet).
-    fn install_inbound(&mut self, vsock: InboundConn) -> std::io::Result<InstalledConn>;
+    // --- TcpAccept (a dial; the host opens) ---
     /// Creates C with `SO_LINGER{1,0}`, `IP_TRANSPARENT` bound to `client`
-    /// and the platform `SO_MARK`; arms C with route C → V_g; starts the
+    /// (the request's peer: the guest gateway with port 0, so the kernel
+    /// picks the port, ADR-0174) and the platform `SO_MARK`; starts the
     /// non-blocking connect to `destination` (`workload_addr:listen_port`).
-    /// Completion is a `Connected` event; refused → `ApplicationNotListening`.
+    /// Completion is a `Connected` event; the owner bounds it by
+    /// `GUEST_INBOUND_CONNECT_TIMEOUT`.
     fn start_connect_app(
         &mut self,
-        vsock: &InstalledConn,
         client: SocketAddrV4,
         destination: SocketAddrV4,
     ) -> std::io::Result<AppConn>;
-    /// Routes V_g → C (C installed at establishment by guest `sock_ops`).
-    fn route_inbound(&mut self, vsock: InstalledConn, app: AppConn) -> std::io::Result<GuestPair>;
-
-    // --- pairs ---
-    /// Whether the pair's `direction` has drained.
-    fn drained(
+    /// After C connected and before `Paired` is written:
+    /// `FlowForwarder::attach(V_g, C, Stream)`. Consumes both; `Err` hands
+    /// both back unattached.
+    fn attach_inbound(
         &mut self,
-        pair: GuestPairKey,
-        direction: GuestFlowDirection,
-    ) -> std::io::Result<bool>;
-    /// Convergent: an absent pair counts as removed.
-    fn remove_pair(&mut self, pair: GuestPairKey) -> std::io::Result<()>;
-    /// `shutdown(SHUT_WR)` on a pair socket.
-    fn shutdown_write(&mut self, socket: &GuestPairSocket) -> std::io::Result<()>;
-    /// Clears `SO_LINGER{1,0}` before a clean close.
+        vsock: InboundConn,
+        app: AppConn,
+    ) -> Result<GuestPair, GuestAttachRefused>;
+
+    // --- the guest forwarder context (`FlowForwarder`, EVMOD-PORT) ---
+    /// `FlowForwarder::abort(id)` (an `Abort { flow }` for a paired flow,
+    /// session loss, a slot release).
+    fn abort_forward(&mut self, id: ForwardId) -> Result<AbortResult, ForwarderError>;
+    /// `FlowForwarder::pair_state(id)`; read-only.
+    fn pair_state(&mut self, id: ForwardId) -> Result<Option<PairState>, ForwarderError>;
+    /// `FlowForwarder::inventory()`; read-only.
+    fn inventory(&mut self) -> Result<ForwarderInventory, ForwarderError>;
+
+    // --- ends of sockets ---
+    /// Clears `SO_LINGER` on a completed TCP half before its close.
     fn clear_linger(&mut self, socket: &GuestPairSocket) -> std::io::Result<()>;
     /// Close with `SO_LINGER{1,0}`. Consumes the handle.
     fn abort(&mut self, socket: GuestOwnedSocket);
@@ -540,32 +489,30 @@ pub(crate) trait GuestOwnerIo: Send {
         &mut self,
         slot: SocketAddrV4,
     ) -> std::io::Result<Option<(SocketCookie, SocketAddrV4)>>;
-    /// Step 2: installs connected T_g (route T_g → reassembly cell → U) and Q_g.
-    fn install_slot_legs(
+    /// Step 2: writes the `DatagramStream` request on the association's V_g,
+    /// once.
+    fn write_slot_request(
+        &mut self,
+        vsock: &HostConn,
+        request: &[u8; FLOW_REQUEST_LEN],
+    ) -> std::io::Result<()>;
+    /// Step 5, on `Paired`: `FlowForwarder::attach(S, V_g, Datagram { udp: A
+    /// })`. Consumes V_g; `Err` hands it back unattached (S stays the slot's).
+    fn attach_slot(
         &mut self,
         slot: SocketAddrV4,
-        stream: HostConn,
-        seqpacket: HostConn,
-    ) -> std::io::Result<SlotLegs>;
-    /// Step 2: writes `DatagramStream` on T_g and `DatagramSeqpacket` on Q_g, once.
-    fn write_slot_requests(
-        &mut self,
-        legs: &SlotLegs,
-        stream: &[u8; FLOW_REQUEST_LEN],
-        seqpacket: &[u8; FLOW_REQUEST_LEN],
-    ) -> std::io::Result<()>;
-    /// Step 5, on `Paired`: routes the framing cell → Q_g; re-arms.
-    fn route_slot(&mut self, legs: &SlotLegs) -> std::io::Result<()>;
-    /// The whole end-of-association order (CELL-RECREATE) as one call,
-    /// consuming the legs if any. Never fails: a cell-creation failure is
-    /// `SlotEnd::Quarantined`, and the other steps still run.
-    fn end_association(&mut self, slot: SocketAddrV4, legs: Option<SlotLegs>) -> SlotEnd;
-    /// Returns a slot whose association ended (`Recreated`) to the pool.
+        vsock: HostConn,
+    ) -> Result<ForwardId, GuestAttachRefused>;
+    /// The end-of-association order after the pair's abort or end record (or
+    /// V_g's close before `Paired`): discards S's receive queue without
+    /// reading payload, then disconnects S (EVMOD-DGRAM, P-72). Never fails in
+    /// a way the owner can act on: an error is counted and the slot is still
+    /// returned.
+    fn end_association(&mut self, slot: SocketAddrV4);
+    /// Returns a slot whose association ended to the pool.
     fn release_slot(&mut self, slot: SocketAddrV4);
-    /// Audit: retries a quarantined slot's cell creation; `Ok` returns it to
-    /// the pool.
-    fn retry_quarantined(&mut self, slot: SocketAddrV4) -> std::io::Result<CellGeneration>;
-    /// Exact per-slot counters in both directions (idle release).
+    /// Exact per-slot counters in both directions (idle release): the pair's
+    /// `moved_ab` / `moved_ba` (`pair_state`) while attached.
     fn slot_counters(&mut self, slot: SocketAddrV4) -> std::io::Result<(u64, u64)>;
 
     // --- audits ---
@@ -574,8 +521,6 @@ pub(crate) trait GuestOwnerIo: Send {
         &mut self,
         cookies: &BTreeSet<SocketCookie>,
     ) -> std::io::Result<BTreeSet<SocketCookie>>;
-    /// The listener map: application ports listening on `0.0.0.0` / `workload_addr`.
-    fn listener_map(&mut self) -> std::io::Result<BTreeSet<ListenPort>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -609,7 +554,12 @@ pub(crate) struct GuestFlowOwner {
 }
 
 impl GuestFlowOwner {
-    /// Takes the setup's results through `io`; opens nothing yet.
+    /// Takes the setup's results through `io`; opens nothing yet. Arms one
+    /// deadline, the session-open deadline at `clock.now()` (the reconnect
+    /// deadline with no backoff), so `next_deadline()` is `Some(now)` after
+    /// `new` and the first `dispatch_next` is that deadline's dispatch: it
+    /// starts the control-session connect and arms the first audit tick
+    /// (D-UP-7). Production and the drivers take the same first step.
     pub(crate) fn new(
         _token: GuestTransportToken,
         _io: Box<dyn GuestOwnerIo>,
@@ -619,8 +569,11 @@ impl GuestFlowOwner {
     }
 
     /// Driving port: handles exactly one input — the next event, or the
-    /// earliest due deadline (request, pairing, drain, reconnect backoff,
-    /// slot idle, audit tick) computed from `clock.now()` — then returns.
+    /// earliest due deadline (request, pairing, the inbound connect timeout,
+    /// reconnect backoff, audit tick) computed from `clock.now()` — then
+    /// returns. It passes `next_deadline()` to `GuestOwnerIo::next_event`;
+    /// an event pending at the call is handled before a due deadline, and of
+    /// two due deadlines the earlier is handled (ties: the one armed first).
     /// The first dispatch with no session starts the control-session
     /// connect. Per-flow failures end that flow and return `Ok`. Blocking.
     #[expect(
@@ -644,18 +597,31 @@ impl GuestFlowOwner {
     /// - **Preconditions:** none. Infallible; callable on a constructed owner
     ///   at any time, before and after the control session.
     /// - **Postconditions:** the call accepts, routes, releases and closes
-    ///   nothing and changes no state; no lock is held on return.
-    /// - **Consistency point:** between two owner steps (one dispatch).
+    ///   nothing and changes no state.
+    /// - **Consistency point:** between two owner steps (one dispatch of the
+    ///   owner's serialized event handling).
     /// - **Edge cases:** before the session opens, `session = false` and every
     ///   table is empty except `slots`, which lists every slot with
     ///   `owner = None`. A slot with an `owner` and no `association` has not
-    ///   started pairing; `routed` implies `association` is `Some`. After the
-    ///   session ends, `session = false` and the tables hold only what the
-    ///   owner has not yet ended.
+    ///   started pairing; `attached` being `Some` implies `association` is
+    ///   `Some`. A flow the guest ended (closed, aborted, refused, timed out,
+    ///   or a V_g torn down in its accept queue) is absent. After the session
+    ///   ends, `session = false` and the tables hold only what the owner has
+    ///   not yet ended.
     /// - **Observable invariants:** a `FlowId` in `awaiting_paired` is in
-    ///   neither `accepted` nor `flows`; a repeated call with no intervening
-    ///   owner step returns an equal value.
+    ///   neither `accepted` nor `flows`; an `accepted` entry in
+    ///   `Paired { pair }` is in `flows` with the same `pair`; a repeated
+    ///   call with no intervening owner step returns an equal value.
     pub(crate) fn guest_observation(&self) -> GuestSideObservation {
+        let _ = self;
+        panic!("{SCAFFOLD}")
+    }
+
+    /// The earliest deadline the owner has armed, or `None` when none is
+    /// armed (DG-5-Q). Pure read; compiled in every build: it is the value
+    /// `dispatch_next` passes to `next_event`. Its only reader besides
+    /// `dispatch_next` is test support (the drivers' quiescence check).
+    pub(crate) fn next_deadline(&self) -> Option<Instant> {
         let _ = self;
         panic!("{SCAFFOLD}")
     }
@@ -682,20 +648,29 @@ pub(crate) enum GuestOwnerFatal {
         /// The accept error.
         kind: std::io::ErrorKind,
     },
+    /// The guest forwarder context failed (`ForwarderError::Io` or
+    /// `EndDecode`).
+    #[error("the guest forwarder failed: {source}")]
+    Forwarder {
+        /// The forwarder's error.
+        #[source]
+        source: ForwarderError,
+    },
 }
 
 // ---------------------------------------------------------------------------
 // Production seam
 // ---------------------------------------------------------------------------
 
-/// Production [`GuestOwnerIo`] over the guest kernel, built from the sockets
-/// and programs `configure_guest_transport` set up.
+/// Production [`GuestOwnerIo`] over the guest kernel, built from the sockets,
+/// programs and forwarder context `configure_guest_transport` set up (the
+/// context's `readiness_fd` joins the seam's readiness wait).
 pub(crate) struct KernelGuestOwnerIo {
     _scaffold: (),
 }
 
 impl KernelGuestOwnerIo {
-    /// Takes ownership of the setup's sockets and programs.
+    /// Takes ownership of the setup's sockets, programs and forwarder context.
     pub(crate) fn new(_ops: KernelGuestTransportOps) -> Self {
         panic!("{SCAFFOLD}")
     }
@@ -720,59 +695,41 @@ impl GuestOwnerIo for KernelGuestOwnerIo {
     fn inbound_ended(&mut self, _conn: &InboundConn) -> std::io::Result<bool> {
         panic!("{SCAFFOLD}")
     }
-    fn rearm_captured(&mut self, _child: &CapturedConn) -> std::io::Result<()> {
-        panic!("{SCAFFOLD}")
-    }
-    fn install_outbound(
-        &mut self,
-        _vsock: HostConn,
-        _child: &CapturedConn,
-    ) -> std::io::Result<InstalledConn> {
-        panic!("{SCAFFOLD}")
-    }
     fn write_request(
         &mut self,
-        _vsock: &InstalledConn,
+        _vsock: &HostConn,
         _request: &[u8; FLOW_REQUEST_LEN],
     ) -> std::io::Result<()> {
         panic!("{SCAFFOLD}")
     }
-    fn route_outbound(
+    fn attach_outbound(
         &mut self,
-        _vsock: InstalledConn,
         _child: CapturedConn,
-    ) -> std::io::Result<GuestPair> {
-        panic!("{SCAFFOLD}")
-    }
-    fn install_inbound(&mut self, _vsock: InboundConn) -> std::io::Result<InstalledConn> {
+        _vsock: HostConn,
+    ) -> Result<GuestPair, GuestAttachRefused> {
         panic!("{SCAFFOLD}")
     }
     fn start_connect_app(
         &mut self,
-        _vsock: &InstalledConn,
         _client: SocketAddrV4,
         _destination: SocketAddrV4,
     ) -> std::io::Result<AppConn> {
         panic!("{SCAFFOLD}")
     }
-    fn route_inbound(
+    fn attach_inbound(
         &mut self,
-        _vsock: InstalledConn,
+        _vsock: InboundConn,
         _app: AppConn,
-    ) -> std::io::Result<GuestPair> {
+    ) -> Result<GuestPair, GuestAttachRefused> {
         panic!("{SCAFFOLD}")
     }
-    fn drained(
-        &mut self,
-        _pair: GuestPairKey,
-        _direction: GuestFlowDirection,
-    ) -> std::io::Result<bool> {
+    fn abort_forward(&mut self, _id: ForwardId) -> Result<AbortResult, ForwarderError> {
         panic!("{SCAFFOLD}")
     }
-    fn remove_pair(&mut self, _pair: GuestPairKey) -> std::io::Result<()> {
+    fn pair_state(&mut self, _id: ForwardId) -> Result<Option<PairState>, ForwarderError> {
         panic!("{SCAFFOLD}")
     }
-    fn shutdown_write(&mut self, _socket: &GuestPairSocket) -> std::io::Result<()> {
+    fn inventory(&mut self) -> Result<ForwarderInventory, ForwarderError> {
         panic!("{SCAFFOLD}")
     }
     fn clear_linger(&mut self, _socket: &GuestPairSocket) -> std::io::Result<()> {
@@ -790,32 +747,24 @@ impl GuestOwnerIo for KernelGuestOwnerIo {
     ) -> std::io::Result<Option<(SocketCookie, SocketAddrV4)>> {
         panic!("{SCAFFOLD}")
     }
-    fn install_slot_legs(
+    fn write_slot_request(
         &mut self,
-        _slot: SocketAddrV4,
-        _stream: HostConn,
-        _seqpacket: HostConn,
-    ) -> std::io::Result<SlotLegs> {
-        panic!("{SCAFFOLD}")
-    }
-    fn write_slot_requests(
-        &mut self,
-        _legs: &SlotLegs,
-        _stream: &[u8; FLOW_REQUEST_LEN],
-        _seqpacket: &[u8; FLOW_REQUEST_LEN],
+        _vsock: &HostConn,
+        _request: &[u8; FLOW_REQUEST_LEN],
     ) -> std::io::Result<()> {
         panic!("{SCAFFOLD}")
     }
-    fn route_slot(&mut self, _legs: &SlotLegs) -> std::io::Result<()> {
+    fn attach_slot(
+        &mut self,
+        _slot: SocketAddrV4,
+        _vsock: HostConn,
+    ) -> Result<ForwardId, GuestAttachRefused> {
         panic!("{SCAFFOLD}")
     }
-    fn end_association(&mut self, _slot: SocketAddrV4, _legs: Option<SlotLegs>) -> SlotEnd {
+    fn end_association(&mut self, _slot: SocketAddrV4) {
         panic!("{SCAFFOLD}")
     }
     fn release_slot(&mut self, _slot: SocketAddrV4) {
-        panic!("{SCAFFOLD}")
-    }
-    fn retry_quarantined(&mut self, _slot: SocketAddrV4) -> std::io::Result<CellGeneration> {
         panic!("{SCAFFOLD}")
     }
     fn slot_counters(&mut self, _slot: SocketAddrV4) -> std::io::Result<(u64, u64)> {
@@ -827,9 +776,6 @@ impl GuestOwnerIo for KernelGuestOwnerIo {
     ) -> std::io::Result<BTreeSet<SocketCookie>> {
         panic!("{SCAFFOLD}")
     }
-    fn listener_map(&mut self) -> std::io::Result<BTreeSet<ListenPort>> {
-        panic!("{SCAFFOLD}")
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -839,27 +785,51 @@ impl GuestOwnerIo for KernelGuestOwnerIo {
 /// The guest flow owner's observable state (QPROJ-5).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GuestSideObservation {
-    /// The guest's control session is live.
+    /// The guest owner holds a control-session connection it has not
+    /// observed lost (D-UP-8): true from the dispatch that starts its connect
+    /// until the dispatch that observes the loss (DG-5-F). The owner holds at
+    /// most one such connection.
     pub session: bool,
-    /// TcpAccept flows the guest holds, by host-origin flow id.
+    /// Host-opened (TcpAccept) flows the guest holds, by host-origin flow id.
     pub accepted: BTreeMap<FlowId, GuestAcceptPhase>,
-    /// Paired TCP flows the guest holds (either opener), by flow id.
-    pub flows: BTreeMap<FlowId, FlowEndObservation>,
-    /// TcpConnect flows the guest opened that are not yet Paired: the
-    /// application leg's EOF recorded before `Paired`.
-    pub awaiting_paired: BTreeMap<FlowId, bool /* outer_eof */>,
+    /// Paired TCP flows the guest holds (either opener), by flow id, each with
+    /// its attached pair; per-direction state through
+    /// `FlowForwarder::pair_state` (EVMOD-PORT). A flow leaves the map in the
+    /// dispatch that reads its pair's end record.
+    pub flows: BTreeMap<FlowId, ForwardId>,
+    /// TcpConnect flows the guest opened that are not yet Paired; their
+    /// intake children are unattached and observed only for an error.
+    pub awaiting_paired: BTreeSet<FlowId>,
     /// Every UDP slot, by the slot socket's bound address
     /// (`workload_addr:GUEST_UDP_SLOT_BASE + n`).
     pub slots: BTreeMap<SocketAddrV4, SlotObservation>,
+    /// Cumulative attaches the forwarder refused `HalfEnded`, each ended by
+    /// the guest owner as a flow abort (EVMOD-ATTACH-END; QPROJ-8). Never
+    /// decremented.
+    pub forwarder_attach_ended: u64,
+    /// Cumulative attaches the forwarder accepted (`Ok`), raised in the
+    /// dispatch that made the call (QPROJ-8, `attRes`). Never decremented.
+    pub forwarder_attached: u64,
+    /// The last end record the guest owner consumed in a dispatch (its
+    /// pair's `take_end`, EVMOD-REC): depth 1, replaced at each consumption,
+    /// `None` until the first (D-11).
+    pub last_consumed_end: Option<ForwardEnd>,
+    /// Cumulative end records the guest owner consumed. Never decremented.
+    pub consumed_ends: u64,
 }
 
-/// Phase of a TcpAccept flow the guest holds.
+/// Phase of a host-opened (TcpAccept) flow the guest holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuestAcceptPhase {
-    /// V_g accepted and installed; C not yet routed.
+    /// V_g accepted, request read and token matched; V_g unattached and
+    /// observed only for its end; the connect to the application is issued or
+    /// pending.
     Accepted,
-    /// V_g routed to C; `Paired` sent.
-    Routed,
+    /// (V_g, C) attached and `Paired` sent in one dispatch (EVMOD-PAIR).
+    Paired {
+        /// The attached pair.
+        pair: ForwardId,
+    },
 }
 
 /// One UDP slot (QPROJ-5).
@@ -869,33 +839,6 @@ pub struct SlotObservation {
     pub owner: Option<(SocketCookie, SocketAddrV4)>,
     /// The slot's current association, if any.
     pub association: Option<FlowId>,
-    /// The framing cell is routed to the association's Q_g.
-    pub routed: bool,
-    /// The slot's current cell generation (CELL-RECREATE).
-    pub generation: CellGeneration,
-}
-
-/// HALFCLOSE-SIGNAL state of one direction pair of a paired TCP flow, at this
-/// owner (mirrors QPROJ-3's).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FlowEndObservation {
-    /// The outer leg read EOF.
-    pub outer_eof: bool,
-    /// This side's announcement of its direction.
-    pub announce: HalfCloseAnnounce,
-    /// This side acknowledged the peer's `HalfClose`.
-    pub peer_announced: bool,
-    /// This side shut its outer leg down for writing.
-    pub outer_shut: bool,
-}
-
-/// This side's announcement of its direction (mirrors QPROJ-3's).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HalfCloseAnnounce {
-    /// Not announced.
-    None,
-    /// `HalfClose` sent, `HalfCloseAck` not yet received (HalfClosing).
-    Pending,
-    /// Acknowledged; the flow vsock is shut down for writing.
-    Done,
+    /// The association's datagram pair (S, V_g) is attached (EVMOD-DGRAM).
+    pub attached: Option<ForwardId>,
 }

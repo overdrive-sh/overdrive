@@ -1,0 +1,2834 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * ctltest: guest-side test program for V-EV-CTL (spike). One static binary, one suite per VM boot:
+ *   errno | release | storm | ids | watch | unload | tls | misc
+ * Output: "CHECK PASS|FAIL <name> :: <detail>" plus "DATA ..." lines. The driver prints SUITE_DONE.
+ * Everything here talks to /dev/ovd_fwd; sockets are TCP over 127.0.0.1 and AF_VSOCK over the loopback transport
+ * (VMADDR_CID_LOCAL), both ends inside the guest.
+ */
+#define _GNU_SOURCE
+#include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <linux/tls.h>
+#include <net/if.h>
+#include <linux/vm_sockets.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <poll.h>
+#include <pthread.h>
+#include <sched.h>
+#include <signal.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/epoll.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <sys/resource.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <sys/un.h>
+#include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
+#include "ovd_fwd.h"
+
+#ifndef SOL_TLS
+#define SOL_TLS 282
+#endif
+#ifndef TCP_ULP
+#define TCP_ULP 31
+#endif
+
+typedef unsigned long long u64;
+
+static int g_pass, g_fail;
+
+static double now_ms(void)
+{
+	struct timespec t;
+
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	return t.tv_sec * 1e3 + t.tv_nsec / 1e6;
+}
+
+static void rep(int ok, const char *name, const char *fmt, ...)
+{
+	va_list ap;
+
+	printf("CHECK %s %s :: ", ok ? "PASS" : "FAIL", name);
+	va_start(ap, fmt);
+	vprintf(fmt, ap);
+	va_end(ap);
+	printf("\n");
+	fflush(stdout);
+	if (ok)
+		g_pass++;
+	else
+		g_fail++;
+}
+
+static void data(const char *fmt, ...)
+{
+	va_list ap;
+
+	printf("DATA ");
+	va_start(ap, fmt);
+	vprintf(fmt, ap);
+	va_end(ap);
+	printf("\n");
+	fflush(stdout);
+}
+
+/* ---- audit ---------------------------------------------------------------------------------------------------------- */
+static long long audit(const char *key)
+{
+	char buf[1024], pat[64];
+	FILE *f = fopen("/proc/ovd_fwd_audit", "r");
+	char *p;
+	size_t n;
+
+	if (!f)
+		return -1;
+	n = fread(buf, 1, sizeof(buf) - 1, f);
+	buf[n] = 0;
+	fclose(f);
+	snprintf(pat, sizeof(pat), "%s=", key);
+	p = strstr(buf, pat);
+	if (!p) {
+		return -2;
+	}
+	while (p > buf && p[-1] != ' ')
+		p--;
+	/* make sure we matched a whole key (e.g. rec_read vs rec_free_unread) */
+	p = strstr(buf, pat);
+	for (;;) {
+		if (!p)
+			return -2;
+		if (p == buf || p[-1] == ' ')
+			break;
+		p = strstr(p + 1, pat);
+	}
+	return atoll(p + strlen(pat));
+}
+
+static void audit_dump(const char *tag)
+{
+	char buf[1024];
+	FILE *f = fopen("/proc/ovd_fwd_audit", "r");
+	size_t n = 0;
+
+	if (f) {
+		n = fread(buf, 1, sizeof(buf) - 1, f);
+		fclose(f);
+	}
+	buf[n] = 0;
+	while (n && (buf[n - 1] == '\n'))
+		buf[--n] = 0;
+	data("audit[%s] %s", tag, buf);
+}
+
+static int dmesg_bad(void)
+{
+	static char buf[1 << 20];
+	long n = syscall(SYS_syslog, 3, buf, sizeof(buf) - 1);
+	int bad = 0;
+	char *p, *line;
+
+	if (n <= 0)
+		return 0;
+	buf[n] = 0;
+	for (line = strtok_r(buf, "\n", &p); line; line = strtok_r(NULL, "\n", &p)) {
+		if (strstr(line, "BUG:") || strstr(line, "Oops") || strstr(line, "WARNING:") || strstr(line, "general protection") ||
+		    strstr(line, "Call Trace") || strstr(line, "kernel BUG") || strstr(line, "KASAN") || strstr(line, "RCU stall") ||
+		    strstr(line, "rcu_sched self-detected") || strstr(line, "hung task") || strstr(line, "soft lockup")) {
+			printf("DMESG_BAD %s\n", line);
+			bad++;
+		}
+	}
+	return bad;
+}
+
+/* ---- sockets ------------------------------------------------------------------------------------------------------- */
+static void lo_up(void)
+{
+	struct ifreq ifr;
+	int s = socket(AF_INET, SOCK_DGRAM, 0);
+
+	memset(&ifr, 0, sizeof(ifr));
+	strcpy(ifr.ifr_name, "lo");
+	if (ioctl(s, SIOCGIFFLAGS, &ifr) || (ifr.ifr_flags |= IFF_UP, ioctl(s, SIOCSIFFLAGS, &ifr)))
+		perror("lo up");
+	close(s);
+}
+
+static int g_tl = -1, g_vl = -1, g_tport, g_vport;
+
+static void fx_init(void)
+{
+	struct sockaddr_in a = { .sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK) };
+	struct sockaddr_vm v = { .svm_family = AF_VSOCK, .svm_cid = VMADDR_CID_ANY, .svm_port = VMADDR_PORT_ANY };
+	socklen_t l = sizeof(a), vl = sizeof(v);
+	int one = 1;
+
+	if (g_tl >= 0)
+		return;
+	lo_up();
+	g_tl = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	setsockopt(g_tl, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+	if (bind(g_tl, (void *)&a, sizeof(a)) || listen(g_tl, 65535)) {
+		perror("tcp listen");
+		exit(2);
+	}
+	getsockname(g_tl, (void *)&a, &l);
+	g_tport = ntohs(a.sin_port);
+	g_vl = socket(AF_VSOCK, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	if (g_vl < 0 || bind(g_vl, (void *)&v, sizeof(v)) || listen(g_vl, 65535)) {
+		perror("vsock listen (is vsock_loopback loaded?)");
+		exit(2);
+	}
+	getsockname(g_vl, (void *)&v, &vl);
+	g_vport = v.svm_port;
+}
+
+static void nodelay(int fd)
+{
+	int one = 1;
+
+	setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+}
+
+static int mk_tcp(int *far, int *near)
+{
+	struct sockaddr_in a = { .sin_family = AF_INET, .sin_port = htons(g_tport), .sin_addr.s_addr = htonl(INADDR_LOOPBACK) };
+	int c = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0), n;
+
+	if (c < 0 || connect(c, (void *)&a, sizeof(a))) {
+		printf("FATAL mk_tcp connect: %s\n", strerror(errno));
+		exit(2);
+	}
+	n = accept4(g_tl, NULL, NULL, SOCK_CLOEXEC);
+	if (n < 0) {
+		printf("FATAL mk_tcp accept: %s\n", strerror(errno));
+		exit(2);
+	}
+	nodelay(c);
+	nodelay(n);
+	*far = c;
+	*near = n;
+	return 0;
+}
+
+static int mk_vsock(int *far, int *near)
+{
+	struct sockaddr_vm a = { .svm_family = AF_VSOCK, .svm_cid = VMADDR_CID_LOCAL, .svm_port = g_vport };
+	int c = socket(AF_VSOCK, SOCK_STREAM | SOCK_CLOEXEC, 0), n;
+
+	if (c < 0 || connect(c, (void *)&a, sizeof(a))) {
+		printf("FATAL mk_vsock connect: %s\n", strerror(errno));
+		exit(2);
+	}
+	n = accept4(g_vl, NULL, NULL, SOCK_CLOEXEC);
+	if (n < 0) {
+		printf("FATAL mk_vsock accept: %s\n", strerror(errno));
+		exit(2);
+	}
+	*far = c;
+	*near = n;
+	return 0;
+}
+
+struct ps { int tfar, tnear, vfar, vnear; };
+
+static int mk_ps(struct ps *p)
+{
+	if (mk_tcp(&p->tfar, &p->tnear))
+		return -1;
+	if (mk_vsock(&p->vfar, &p->vnear)) {
+		close(p->tfar);
+		close(p->tnear);
+		return -1;
+	}
+	return 0;
+}
+
+static void rst_close(int fd)
+{
+	struct linger l = { 1, 0 };
+
+	if (fd < 0)
+		return;
+	setsockopt(fd, SOL_SOCKET, SO_LINGER, &l, sizeof(l));
+	close(fd);
+}
+
+static void free_ps(struct ps *p)
+{
+	rst_close(p->tfar);
+	rst_close(p->tnear);
+	if (p->vfar >= 0)
+		close(p->vfar);
+	if (p->vnear >= 0)
+		close(p->vnear);
+	p->tfar = p->tnear = p->vfar = p->vnear = -1;
+}
+
+/* ---- the device ----------------------------------------------------------------------------------------------------- */
+static int cx_open(int fl)
+{
+	int fd = open("/dev/ovd_fwd", O_RDWR | O_CLOEXEC | fl);
+
+	if (fd < 0) {
+		perror("open /dev/ovd_fwd");
+		exit(2);
+	}
+	return fd;
+}
+
+/* attach(vsock, tcp): half A is the vsock */
+static int cx_attach(int cx, int a, int b, unsigned mode, u64 *id, int *bad)
+{
+	struct ovd_fwd_attach t;
+	int r;
+
+	memset(&t, 0, sizeof(t));
+	t.fd_a = a;
+	t.fd_b = b;
+	t.mode = mode;
+	t.bad_side = 0xee;
+	r = ioctl(cx, OVD_FWD_ATTACH, &t);
+	if (id)
+		*id = t.id;
+	if (bad)
+		*bad = t.bad_side;
+	return r ? -errno : 0;
+}
+
+static int cx_attach_f(int cx, int a, int b, unsigned flags, u64 *id)
+{
+	struct ovd_fwd_attach t;
+	int r;
+
+	memset(&t, 0, sizeof(t));
+	t.fd_a = a;
+	t.fd_b = b;
+	t.flags = flags;
+	r = ioctl(cx, OVD_FWD_ATTACH, &t);
+	if (id)
+		*id = t.id;
+	return r ? -errno : 0;
+}
+
+static int cx_watch(int cx, int fd, u64 *id)
+{
+	struct ovd_fwd_watch t;
+	int r;
+
+	memset(&t, 0, sizeof(t));
+	t.fd = fd;
+	r = ioctl(cx, OVD_FWD_WATCH, &t);
+	if (id)
+		*id = t.id;
+	return r ? -errno : 0;
+}
+
+static int cx_abort(int cx, u64 id)
+{
+	struct ovd_fwd_id t = { id };
+
+	return ioctl(cx, OVD_FWD_ABORT, &t) ? -errno : 0;
+}
+
+static int cx_abort_all(int cx, unsigned *n)
+{
+	struct ovd_fwd_count t = {};
+	int r = ioctl(cx, OVD_FWD_ABORT_ALL, &t);
+
+	*n = t.n;
+	return r ? -errno : 0;
+}
+
+static int cx_inv(int cx, struct ovd_fwd_inventory *v)
+{
+	memset(v, 0, sizeof(*v));
+	return ioctl(cx, OVD_FWD_INVENTORY, v) ? -errno : 0;
+}
+
+/* returns number of whole records, or -errno */
+static int cx_read(int cx, struct ovd_fwd_end *buf, int max)
+{
+	ssize_t n = read(cx, buf, (size_t)max * sizeof(*buf));
+
+	if (n < 0)
+		return -errno;
+	return (int)(n / sizeof(*buf));
+}
+
+static int cx_state(int cx, u64 id, struct ovd_fwd_pair_state *s)
+{
+	memset(s, 0, sizeof(*s));
+	s->id = id;
+	return ioctl(cx, OVD_FWD_PAIR_STATE, s) ? -errno : 0;
+}
+
+static int nb(int fd)
+{
+	return fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
+}
+
+static const char *ename(int e)
+{
+	static __thread char b[32];
+
+	if (e < 0)
+		e = -e;
+	switch (e) {
+	case 0: return "OK";
+	case EBADF: return "EBADF";
+	case ENOTSOCK: return "ENOTSOCK";
+	case ESOCKTNOSUPPORT: return "ESOCKTNOSUPPORT";
+	case EPROTONOSUPPORT: return "EPROTONOSUPPORT";
+	case ENOTCONN: return "ENOTCONN";
+	case EBUSY: return "EBUSY";
+	case EINVAL: return "EINVAL";
+	case ENOENT: return "ENOENT";
+	case EAGAIN: return "EAGAIN";
+	case EFAULT: return "EFAULT";
+	case ENOTTY: return "ENOTTY";
+	case EOPNOTSUPP: return "EOPNOTSUPP";
+	case ECONNRESET: return "ECONNRESET";
+	case EPIPE: return "EPIPE";
+	case ETIMEDOUT: return "ETIMEDOUT";
+	case EWOULDBLOCK + 1000: return "?";
+	}
+	snprintf(b, sizeof(b), "errno%d", e);
+	return b;
+}
+
+/* drain a far TCP socket: 'R' = ended by ECONNRESET, 'E' = clean EOF, '.' = still open, 'x' other error */
+static char far_state(int fd)
+{
+	char buf[65536];
+
+	for (;;) {
+		ssize_t n = recv(fd, buf, sizeof(buf), MSG_DONTWAIT);
+
+		if (n > 0)
+			continue;
+		if (n == 0)
+			return 'E';
+		if (errno == EAGAIN)
+			return '.';
+		if (errno == ECONNRESET)
+			return 'R';
+		return 'x';
+	}
+}
+
+static char far_wait(int fd, int ms)
+{
+	double dl = now_ms() + ms;
+	char s;
+
+	for (;;) {
+		s = far_state(fd);
+		if (s != '.' || now_ms() > dl)
+			return s;
+		usleep(500);
+	}
+}
+
+static void raise_nofile(void)
+{
+	struct rlimit rl = { 1048576, 1048576 };
+
+	if (setrlimit(RLIMIT_NOFILE, &rl))
+		perror("setrlimit");
+}
+
+static int module_ok(int cx)
+{
+	struct ovd_fwd_version v = {};
+	int r = ioctl(cx, OVD_FWD_VERSION, &v);
+
+	return r == 0 && v.abi_version == OVD_FWD_ABI_VERSION && (v.flags & OVD_FWD_FLAG_PERMANENT);
+}
+
+/* ======================================================================================================================
+ * suite: errno  (V-EV-CTL e)
+ * ==================================================================================================================== */
+static int g_strict;
+
+static void att(int cx, const char *name, int a, int b, unsigned mode, int exp_err, int exp_bad)
+{
+	u64 id = 0;
+	int bad = -1, r = cx_attach(cx, a, b, mode, &id, &bad);
+	int ok = (exp_err == 0) ? r == 0 : (r == -exp_err && (exp_bad < 0 || bad == exp_bad));
+
+	rep(ok, name, "got %s bad_side=%d (want %s bad_side=%d)%s", ename(r), r ? bad : -1, ename(exp_err), exp_bad,
+	    r == 0 ? " id" : "");
+	if (r == 0) {
+		cx_abort(cx, id);
+	}
+	data("errno-case %s -> %s bad=%d", name, ename(r), r ? bad : -1);
+}
+
+static void s_errno(void)
+{
+	int cx = cx_open(0);
+	struct ps p, p2, p3;
+	int pfd[2], un[2], u, fresh_t, lis_t, fresh_v, lis_v, i;
+	struct ovd_fwd_inventory inv;
+	u64 id;
+
+	fx_init();
+	rep(module_ok(cx), "version", "abi=%d permanent flag", OVD_FWD_ABI_VERSION);
+
+	/* 1 EBADF / ENOTSOCK */
+	mk_ps(&p);
+	att(cx, "badfd-A", -1, p.tnear, 0, EBADF, 0);
+	att(cx, "badfd-B", p.vnear, 9999, 0, EBADF, 1);
+	i = dup(p.tfar);
+	close(i);
+	att(cx, "closedfd-B", p.vnear, i, 0, EBADF, 1);
+	pipe(pfd);
+	att(cx, "pipe-A", pfd[0], p.tnear, 0, ENOTSOCK, 0);
+	att(cx, "devnull-B", p.vnear, open("/dev/null", O_RDWR), 0, ENOTSOCK, 1);
+
+	/* 2 ESOCKTNOSUPPORT: not exactly one vsock STREAM half and one TCP half */
+	mk_ps(&p2);
+	att(cx, "tcp+tcp", p.tnear, p2.tnear, 0, ESOCKTNOSUPPORT, 1);
+	att(cx, "vsock+vsock", p.vnear, p2.vnear, 0, ESOCKTNOSUPPORT, 1);
+	u = socket(AF_INET, SOCK_DGRAM, 0);
+	att(cx, "udp+tcp(A=udp)", u, p.tnear, 0, ESOCKTNOSUPPORT, 0);
+	socketpair(AF_UNIX, SOCK_STREAM, 0, un);
+	att(cx, "vsock+unix(B=unix)", p.vnear, un[0], 0, ESOCKTNOSUPPORT, 1);
+	{
+		int sp = socket(AF_VSOCK, SOCK_SEQPACKET, 0);
+
+		if (sp >= 0) {
+			att(cx, "vsock-seqpacket+tcp", sp, p.tnear, 0, ESOCKTNOSUPPORT, 0);
+			close(sp);
+		}
+	}
+	{
+		/* IPv6 TCP is accepted by this spike (the contract says "a TCP half"): record what happens */
+		struct sockaddr_in6 a6 = { .sin6_family = AF_INET6, .sin6_addr = IN6ADDR_LOOPBACK_INIT };
+		socklen_t l = sizeof(a6);
+		int l6 = socket(AF_INET6, SOCK_STREAM, 0), c6 = socket(AF_INET6, SOCK_STREAM, 0), n6 = -1;
+		struct ps pv;
+
+		if (l6 >= 0 && !bind(l6, (void *)&a6, sizeof(a6)) && !listen(l6, 8) && !getsockname(l6, (void *)&a6, &l) &&
+		    !connect(c6, (void *)&a6, sizeof(a6))) {
+			n6 = accept(l6, NULL, NULL);
+			mk_ps(&pv);
+			att(cx, "ipv6-tcp+vsock", pv.vnear, n6, 0, 0, -1);
+			free_ps(&pv);
+		} else {
+			data("errno-case ipv6-tcp+vsock -> skipped (no ::1)");
+		}
+		close(n6);
+		close(c6);
+		close(l6);
+	}
+
+	/* 3 EPROTONOSUPPORT: a TCP half with an upper-layer protocol */
+	{
+		struct ps pt;
+		unsigned char key[16] = "0123456789abcdef", salt[4] = "salt", iv[8] = "ivivivi!", seq[8] = {0};
+		struct tls12_crypto_info_aes_gcm_128 ci = { .info = { .version = TLS_1_2_VERSION, .cipher_type = TLS_CIPHER_AES_GCM_128 } };
+
+		mk_ps(&pt);
+		memcpy(ci.key, key, 16);
+		memcpy(ci.salt, salt, 4);
+		memcpy(ci.iv, iv, 8);
+		memcpy(ci.rec_seq, seq, 8);
+		if (setsockopt(pt.tnear, SOL_TCP, TCP_ULP, "tls", sizeof("tls"))) {
+			rep(0, "tls-ulp-setup", "TCP_ULP tls failed: %s", ename(errno));
+		} else {
+			att(cx, "tcp-with-ulp-only(B)", pt.vnear, pt.tnear, 0, EPROTONOSUPPORT, 1);
+			setsockopt(pt.tnear, SOL_TLS, TLS_TX, &ci, sizeof(ci));
+			setsockopt(pt.tnear, SOL_TLS, TLS_RX, &ci, sizeof(ci));
+			att(cx, "tcp-with-ktls-tx+rx(B)", pt.vnear, pt.tnear, 0, EPROTONOSUPPORT, 1);
+			att(cx, "tcp-with-ktls(A) swapped sides", pt.tnear, pt.vnear, 0, EPROTONOSUPPORT, 0);
+			/* the failed attach left the vsock half unhooked */
+			rep(cx_watch(cx, pt.vnear, &id) == 0, "ulp-refusal-leaves-vsock-unhooked", "watch of the vsock afterwards succeeded");
+			cx_abort(cx, id);
+		}
+		free_ps(&pt);
+	}
+
+	/* 4 ENOTCONN */
+	fresh_t = socket(AF_INET, SOCK_STREAM, 0);
+	att(cx, "tcp-never-connected(B)", p.vnear, fresh_t, 0, ENOTCONN, 1);
+	lis_t = socket(AF_INET, SOCK_STREAM, 0);
+	{
+		struct sockaddr_in a = { .sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK) };
+
+		bind(lis_t, (void *)&a, sizeof(a));
+		listen(lis_t, 4);
+	}
+	att(cx, "tcp-listener(B)", p.vnear, lis_t, 0, ENOTCONN, 1);
+	fresh_v = socket(AF_VSOCK, SOCK_STREAM, 0);
+	att(cx, "vsock-never-connected(A)", fresh_v, p.tnear, 0, ENOTCONN, 0);
+	lis_v = socket(AF_VSOCK, SOCK_STREAM, 0);
+	{
+		struct sockaddr_vm v = { .svm_family = AF_VSOCK, .svm_cid = VMADDR_CID_ANY, .svm_port = VMADDR_PORT_ANY };
+
+		bind(lis_v, (void *)&v, sizeof(v));
+		listen(lis_v, 4);
+	}
+	att(cx, "vsock-listener(A)", lis_v, p.tnear, 0, ENOTCONN, 0);
+	{
+		struct ps pr;
+
+		mk_ps(&pr);
+		rst_close(pr.tfar);                  /* RST to near: near moves to CLOSE */
+		pr.tfar = -1;
+		usleep(50000);
+		att(cx, "tcp-after-peer-RST(B)", pr.vnear, pr.tnear, 0, ENOTCONN, 1);
+		free_ps(&pr);
+		mk_ps(&pr);
+		shutdown(pr.tnear, SHUT_WR);         /* near FIN_WAIT2 once the far end acks */
+		usleep(50000);
+		att(cx, "tcp-FIN_WAIT2(B)", pr.vnear, pr.tnear, 0, ENOTCONN, 1);
+		free_ps(&pr);
+		mk_ps(&pr);
+		shutdown(pr.tfar, SHUT_WR);          /* near receives a FIN: CLOSE_WAIT, bytes/EOF queued before the attach */
+		usleep(50000);
+		{
+			struct tcp_info ti;
+			socklen_t l = sizeof(ti);
+
+			getsockopt(pr.tnear, IPPROTO_TCP, TCP_INFO, &ti, &l);
+			data("close-wait-state tcpi_state=%d (1=ESTABLISHED 8=CLOSE_WAIT)", ti.tcpi_state);
+		}
+		att(cx, g_strict ? "tcp-CLOSE_WAIT(B) STRICT module" : "tcp-CLOSE_WAIT(B)", pr.vnear, pr.tnear, 0,
+		    g_strict ? ENOTCONN : 0, g_strict ? 1 : -1);
+		free_ps(&pr);
+		mk_ps(&pr);
+		close(pr.vfar);                      /* peer closes the vsock with no data: near is CLOSING */
+		pr.vfar = -1;
+		usleep(100000);
+		att(cx, "vsock-after-peer-close(A)", pr.vnear, pr.tnear, 0, ENOTCONN, 0);
+		free_ps(&pr);
+	}
+
+	/* 5 EBUSY */
+	mk_ps(&p3);
+	if (cx_attach(cx, p3.vnear, p3.tnear, 0, &id, NULL) == 0) {
+		struct ps q;
+
+		mk_ps(&q);
+		att(cx, "vsock-already-attached(A)", p3.vnear, q.tnear, 0, EBUSY, 0);
+		att(cx, "tcp-already-attached(B)", q.vnear, p3.tnear, 0, EBUSY, 1);
+		att(cx, "same-pair-twice(A)", p3.vnear, p3.tnear, 0, EBUSY, 0);
+		{
+			u64 wid;
+			int r = cx_watch(cx, p3.vnear, &wid);
+
+			rep(r == -EBUSY, "watch-of-attached-vsock", "got %s", ename(r));
+		}
+		/* failed attach with B busy must leave A (a fresh vsock) unhooked */
+		rep(cx_watch(cx, q.vnear, &id) == 0, "busy-refusal-leaves-A-unhooked", "watch of A afterwards succeeded");
+		free_ps(&q);
+	}
+	{
+		struct ps q;
+		u64 w1;
+		int r;
+
+		mk_ps(&q);
+		r = cx_watch(cx, q.vnear, &w1);
+		rep(r == 0, "watch-ok", "got %s", ename(r));
+		r = cx_watch(cx, q.vnear, &id);
+		rep(r == -EBUSY, "watch-twice", "got %s", ename(r));
+		att(cx, "attach-of-watched-vsock(A)", q.vnear, q.tnear, 0, EBUSY, 0);
+		free_ps(&q);
+	}
+
+	/* 6 EINVAL */
+	att(cx, "same-fd-twice", p.vnear, p.vnear, 0, EINVAL, 1);
+	att(cx, "dup-of-same-socket", p.vnear, dup(p.vnear), 0, EINVAL, 1);
+	att(cx, "dup-of-same-tcp-socket", dup(p.tnear), p.tnear, 0, EINVAL, 1);
+	att(cx, "unknown-mode-3", p.vnear, p.tnear, 3, EINVAL, -1);
+	{
+		int r = cx_attach_f(cx, p.vnear, p.tnear, 1, NULL);
+
+		rep(r == -EINVAL, "unknown-flag-bit", "got %s", ename(r));
+	}
+	att(cx, "mode-1-datagram(spike: not forwarded)", p.vnear, p.tnear, 1, EOPNOTSUPP, -1);
+
+	/* 7 precedence when several refusals apply (the module checks: fd < same-socket < kind < ULP < state < busy) */
+	{
+		struct ps pu;
+		unsigned char z[16] = {0};
+		(void)z;
+
+		mk_ps(&pu);
+		setsockopt(pu.tnear, SOL_TCP, TCP_ULP, "tls", sizeof("tls"));
+		att(cx, "precedence: ULP-tcp + never-connected-vsock", fresh_v, pu.tnear, 0, EPROTONOSUPPORT, 1);
+		att(cx, "precedence: dup-vsock beats two-vsock-kind", pu.vnear, dup(pu.vnear), 0, EINVAL, 1);
+		free_ps(&pu);
+	}
+
+	/* the contract's classes must be pairwise distinct */
+	{
+		int classes[] = { ESOCKTNOSUPPORT, EPROTONOSUPPORT, ENOTCONN, EBUSY, EINVAL, EBADF, ENOTSOCK };
+		int j, dist = 1;
+
+		for (i = 0; i < 7; i++)
+			for (j = i + 1; j < 7; j++)
+				if (classes[i] == classes[j])
+					dist = 0;
+		rep(dist, "errno-classes-pairwise-distinct", "ESOCKTNOSUPPORT EPROTONOSUPPORT ENOTCONN EBUSY EINVAL EBADF ENOTSOCK");
+	}
+
+	/* nothing leaked: every refused attach left no live id */
+	cx_inv(cx, &inv);
+	data("errno suite inventory before cleanup: live_pairs=%u live_watches=%u queued=%u", inv.live_pairs, inv.live_watches, inv.queued_ends);
+	{
+		unsigned n;
+
+		cx_abort_all(cx, &n);
+		cx_inv(cx, &inv);
+		rep(inv.live_pairs == 0 && inv.live_watches == 0, "no-live-ids-after-abort_all", "aborted %u, live now %u/%u", n,
+		    inv.live_pairs, inv.live_watches);
+	}
+}
+
+/* ======================================================================================================================
+ * suite: release (V-EV-CTL a)
+ * ==================================================================================================================== */
+struct relcfg { int how; int parent_holds; int traffic; };
+#define REL_N 48
+#define REL_M 16
+
+static void pump_stall(int fd)
+{
+	char buf[65536];
+	long total = 0;
+
+	memset(buf, 'x', sizeof(buf));
+	for (;;) {
+		ssize_t n = send(fd, buf, sizeof(buf), MSG_DONTWAIT | MSG_NOSIGNAL);
+
+		if (n <= 0)
+			break;
+		total += n;
+		if (total > (8 << 20))
+			break;
+	}
+}
+
+static void run_release(const struct relcfg *c)
+{
+	static const char *hows[] = { "close", "kill-9", "exit" };
+	struct ps P[REL_N];
+	struct ps W[REL_M];
+	int cxB = cx_open(0), go[2], ack[2], i, ready[2];
+	u64 widB[REL_N + REL_M];
+	pid_t pid;
+	double t_ret = 0;
+	int tcp_reset_imm = 0, tcp_reset_final = 0, tcp_eof = 0, tcp_open = 0, vw_abort = 0, vw_clean = 0, vw_other = 0;
+	char label[96];
+	long long q0, d0, rw0;
+	struct ovd_fwd_end rec[REL_N + REL_M + 8];
+	int got = 0;
+	double deadline, lat_max = 0;
+	char st[REL_N];
+	int settled[REL_N] = {0};
+
+	snprintf(label, sizeof(label), "release/%s/parent_holds_near=%d/traffic=%d", hows[c->how], c->parent_holds, c->traffic);
+	for (i = 0; i < REL_N; i++)
+		if (mk_ps(&P[i]))
+			exit(3);
+	for (i = 0; i < REL_M; i++) {
+		if (mk_vsock(&W[i].vfar, &W[i].vnear))
+			exit(3);
+		W[i].tfar = W[i].tnear = -1;
+	}
+	/* classifiers for the far vsock ends: ctx B watches every far vsock */
+	for (i = 0; i < REL_N; i++)
+		if (cx_watch(cxB, P[i].vfar, &widB[i]))
+			exit(4);
+	for (i = 0; i < REL_M; i++)
+		if (cx_watch(cxB, W[i].vfar, &widB[REL_N + i]))
+			exit(4);
+	pipe(go);
+	pipe(ack);
+	pipe(ready);
+	q0 = audit("rec_queued");
+	d0 = audit("rec_discard");
+	rw0 = audit("rel_won");
+	pid = fork();
+	if (pid == 0) {
+		int cx;
+		char b;
+
+		for (i = 0; i < REL_N; i++) {
+			close(P[i].tfar);
+			close(P[i].vfar);
+		}
+		for (i = 0; i < REL_M; i++)
+			close(W[i].vfar);
+		cx = cx_open(0);
+		for (i = 0; i < REL_N; i++)
+			if (cx_attach(cx, P[i].vnear, P[i].tnear, 0, NULL, NULL))
+				_exit(10);
+		for (i = 0; i < REL_M; i++)
+			if (cx_watch(cx, W[i].vnear, NULL))
+				_exit(11);
+		b = 'r';
+		write(ready[1], &b, 1);
+		read(go[0], &b, 1);
+		if (c->how == 0) {
+			close(cx);
+			b = 'c';
+			write(ack[1], &b, 1);
+			pause();
+		}
+		_exit(0);
+	}
+	{
+		char b;
+
+		read(ready[0], &b, 1);
+	}
+	if (!c->parent_holds) {
+		for (i = 0; i < REL_N; i++) {
+			close(P[i].tnear);
+			close(P[i].vnear);
+			P[i].tnear = P[i].vnear = -1;
+		}
+		for (i = 0; i < REL_M; i++) {
+			close(W[i].vnear);
+			W[i].vnear = -1;
+		}
+	}
+	if (c->traffic) {
+		for (i = 0; i < REL_N; i++) {
+			nb(P[i].tfar);
+			nb(P[i].vfar);
+			pump_stall(P[i].tfar);
+			pump_stall(P[i].vfar);
+		}
+		usleep(200000);
+	}
+	for (i = 0; i < REL_N; i++)
+		nb(P[i].tfar);
+	/* sanity: before the release every far end is still open */
+	for (i = 0; i < REL_N; i++)
+		st[i] = far_state(P[i].tfar);
+	{
+		int open_before = 0;
+
+		for (i = 0; i < REL_N; i++)
+			open_before += st[i] == '.';
+		rep(open_before == REL_N, "pre-release far TCP ends open", "%s: %d/%d open", label, open_before, REL_N);
+	}
+	{
+		char b = 'g';
+
+		if (c->how == 0) {
+			write(go[1], &b, 1);
+			read(ack[0], &b, 1);
+			t_ret = now_ms();
+		} else if (c->how == 1) {
+			kill(pid, SIGKILL);
+			waitpid(pid, NULL, 0);
+			t_ret = now_ms();
+		} else {
+			write(go[1], &b, 1);
+			waitpid(pid, NULL, 0);
+			t_ret = now_ms();
+		}
+	}
+	/* instantaneous view, then settle */
+	for (i = 0; i < REL_N; i++) {
+		st[i] = far_state(P[i].tfar);
+		if (st[i] == 'R') {
+			tcp_reset_imm++;
+			settled[i] = 1;
+		}
+	}
+	deadline = t_ret + 3000;
+	while (now_ms() < deadline) {
+		int n = 0;
+
+		for (i = 0; i < REL_N; i++) {
+			if (!settled[i]) {
+				st[i] = far_state(P[i].tfar);
+				if (st[i] != '.') {
+					settled[i] = 1;
+					if (now_ms() - t_ret > lat_max)
+						lat_max = now_ms() - t_ret;
+				}
+			}
+			n += settled[i];
+		}
+		if (n == REL_N)
+			break;
+		usleep(500);
+	}
+	for (i = 0; i < REL_N; i++) {
+		tcp_reset_final += st[i] == 'R';
+		tcp_eof += st[i] == 'E';
+		tcp_open += st[i] == '.';
+	}
+	/* vsock far ends: ctx B must hold exactly one record per watch: Aborted(PeerAbort) */
+	nb(cxB);
+	deadline = now_ms() + 3000;
+	while (got < REL_N + REL_M && now_ms() < deadline) {
+		int k = cx_read(cxB, rec + got, REL_N + REL_M + 8 - got);
+
+		if (k > 0)
+			got += k;
+		else
+			usleep(1000);
+	}
+	for (i = 0; i < got; i++) {
+		if (rec[i].kind == 4 && rec[i].cause == 1)
+			vw_abort++;
+		else if (rec[i].kind == 3)
+			vw_clean++;
+		else
+			vw_other++;
+	}
+	{
+		long long dq = audit("rec_queued") - q0, dd = audit("rec_discard") - d0, dw = audit("rel_won") - rw0;
+		long long live = audit("live");
+		int ok_tcp = tcp_reset_final == REL_N && tcp_eof == 0 && tcp_open == 0;
+		int ok_v = vw_abort == REL_N + REL_M && vw_clean == 0 && vw_other == 0 && got == REL_N + REL_M;
+
+		/* the released context queued nothing: only ctx B's classified watches produced records */
+		rep(ok_tcp, "far TCP ends all ECONNRESET", "%s: reset=%d (at release return %d) eof=%d open=%d, last settled %.1f ms after release returned",
+		    label, tcp_reset_final, tcp_reset_imm, tcp_eof, tcp_open, lat_max);
+		rep(ok_v, "far vsock ends all classify abort (ctx B watch)", "%s: abort=%d clean=%d other=%d of %d", label, vw_abort,
+		    vw_clean, vw_other, REL_N + REL_M);
+		rep(dq == REL_N + REL_M, "release queued no record", "%s: rec_queued delta=%lld (== ctxB watch records %d), rec_discard delta=%lld, won=%lld, live=%lld",
+		    label, dq, REL_N + REL_M, dd, dw, live);
+		(void)live;
+	}
+	close(cxB);
+	usleep(200000);
+	rep(audit("live") == 0, "after the released context and the classifier context are both gone no id is live", "%s: global live=%lld", label, audit("live"));
+	for (i = 0; i < REL_N; i++)
+		free_ps(&P[i]);
+	for (i = 0; i < REL_M; i++) {
+		if (W[i].vfar >= 0)
+			close(W[i].vfar);
+		if (W[i].vnear >= 0)
+			close(W[i].vnear);
+	}
+	{
+		int s;
+
+		if (c->how == 0)
+			kill(pid, SIGKILL);
+		waitpid(pid, &s, 0);
+	}
+	usleep(300000);
+}
+
+static void s_release(void)
+{
+	struct relcfg c;
+	int cx;
+
+	fx_init();
+	raise_nofile();
+	cx = cx_open(0);
+	rep(module_ok(cx), "version", "ok");
+	close(cx);
+	for (c.how = 0; c.how < 3; c.how++)
+		for (c.parent_holds = 0; c.parent_holds < 2; c.parent_holds++)
+			for (c.traffic = 0; c.traffic < 2; c.traffic++)
+				run_release(&c);
+	/* the live counter returns to zero once every ctx B is gone too */
+	usleep(500000);
+	rep(audit("live") == 0, "global live ids zero at the end", "live=%lld", audit("live"));
+	audit_dump("end");
+
+	/* inherited descriptor: a forked child shares the open file description, so killing one holder does NOT release */
+	{
+		struct ps p;
+		int cxs = cx_open(0), pp[2];
+		pid_t ch;
+		u64 id;
+		char cmd;
+
+		mk_ps(&p);
+		cx_attach(cxs, p.vnear, p.tnear, 0, &id, NULL);
+		nb(p.tfar);
+		pipe(pp);
+		ch = fork();
+		if (ch == 0) {
+			read(pp[0], &cmd, 1);
+			_exit(0);
+		}
+		close(cxs);                       /* the parent's copy */
+		/* only the child holds the open file description now; and the parent's fd table no longer has it */
+		kill(ch, SIGKILL);
+		waitpid(ch, NULL, 0);
+		usleep(100000);
+		rep(far_state(p.tfar) == 'R', "sole holder killed -> release", "far TCP reset after the last holder died");
+		free_ps(&p);
+	}
+	{
+		struct ps p;
+		int cxs = cx_open(0), dupfd;
+		u64 id;
+		struct ovd_fwd_inventory inv;
+
+		mk_ps(&p);
+		cx_attach(cxs, p.vnear, p.tnear, 0, &id, NULL);
+		nb(p.tfar);
+		dupfd = dup(cxs);
+		close(cxs);
+		usleep(100000);
+		cx_inv(dupfd, &inv);
+		rep(far_state(p.tfar) == '.' && inv.live_pairs == 1, "close of one of two descriptors does not release",
+		    "far TCP still open, live_pairs=%u", inv.live_pairs);
+		close(dupfd);
+		usleep(100000);
+		rep(far_state(p.tfar) == 'R', "last descriptor close releases", "far TCP reset");
+		free_ps(&p);
+	}
+	{
+		/* fork() after open: killing the forked child changes nothing, killing/closing the parent's last fd releases */
+		struct ps p;
+		int cxs = cx_open(0);
+		u64 id;
+		pid_t ch;
+		struct ovd_fwd_inventory inv;
+
+		mk_ps(&p);
+		cx_attach(cxs, p.vnear, p.tnear, 0, &id, NULL);
+		nb(p.tfar);
+		ch = fork();
+		if (ch == 0) {
+			pause();
+			_exit(0);
+		}
+		kill(ch, SIGKILL);
+		waitpid(ch, NULL, 0);
+		usleep(100000);
+		cx_inv(cxs, &inv);
+		rep(far_state(p.tfar) == '.' && inv.live_pairs == 1, "kill of a forked inheritor does not release",
+		    "far TCP open, live_pairs=%u", inv.live_pairs);
+		close(cxs);
+		usleep(100000);
+		rep(far_state(p.tfar) == 'R', "parent close then releases", "far TCP reset");
+		free_ps(&p);
+	}
+	rep(dmesg_bad() == 0, "no kernel oops/warn", "dmesg scan");
+}
+
+/* ======================================================================================================================
+ * suite: storm (V-EV-CTL b)
+ * ==================================================================================================================== */
+#define STORM_N 16384
+
+struct stormctx { struct ps *P; int lo, hi; int mode; };
+
+static void *storm_far_rst(void *arg)
+{
+	struct stormctx *s = arg;
+	int i;
+
+	for (i = s->lo; i < s->hi; i++) {
+		if (s->mode & 4) {            /* clean: shutdown(WR) of both far ends */
+			shutdown(s->P[i].tfar, SHUT_WR);
+			shutdown(s->P[i].vfar, SHUT_WR);
+		}
+		if (s->mode & 2)              /* the far vsock goes away with a full shutdown */
+			shutdown(s->P[i].vfar, SHUT_RDWR);
+		if (s->mode & 1) {            /* the far TCP end resets */
+			rst_close(s->P[i].tfar);
+			s->P[i].tfar = -1;
+		}
+	}
+	return NULL;
+}
+
+struct drain { int cx; volatile int stop; int total; unsigned char *seen; int dup, bad; };
+
+static void *drain_thread(void *arg)
+{
+	struct drain *d = arg;
+	struct ovd_fwd_end buf[64];
+
+	while (!d->stop) {
+		int k = cx_read(d->cx, buf, 64), i;
+
+		if (k <= 0) {
+			usleep(200);
+			continue;
+		}
+		for (i = 0; i < k; i++) {
+			if (buf[i].id < 1 || buf[i].id > STORM_N) {
+				d->bad++;
+				continue;
+			}
+			if (d->seen[buf[i].id])
+				d->dup++;
+			d->seen[buf[i].id] = 1;
+			d->total++;
+		}
+	}
+	return NULL;
+}
+
+struct verify { int total, dup, bad, missing, kinds[5], causes[5]; };
+
+static void verify_records(int cx, int n, struct verify *v, unsigned char *seen)
+{
+	struct ovd_fwd_end *buf = malloc(sizeof(*buf) * 4096);
+	int k;
+
+	memset(v, 0, sizeof(*v));
+	for (;;) {
+		int i;
+
+		k = cx_read(cx, buf, 4096);
+		if (k <= 0)
+			break;
+		for (i = 0; i < k; i++) {
+			if (buf[i].id < 1 || buf[i].id > (u64)n) {
+				v->bad++;
+				continue;
+			}
+			if (seen[buf[i].id])
+				v->dup++;
+			seen[buf[i].id] = 1;
+			v->total++;
+			if (buf[i].kind < 5)
+				v->kinds[buf[i].kind]++;
+			if (buf[i].cause < 5)
+				v->causes[buf[i].cause]++;
+		}
+	}
+	for (k = 1; k <= n; k++)
+		if (!seen[k])
+			v->missing++;
+	free(buf);
+}
+
+static struct ps *build_pairs(int n, int cx, double *t_build, double *t_attach, int watch_far_cx, u64 *widB)
+{
+	struct ps *P = calloc(n, sizeof(*P));
+	double t0 = now_ms(), t1;
+	int i;
+
+	for (i = 0; i < n; i++)
+		if (mk_ps(&P[i])) {
+			printf("build_pairs failed at %d: %s\n", i, strerror(errno));
+			exit(3);
+		}
+	t1 = now_ms();
+	*t_build = t1 - t0;
+	if (watch_far_cx >= 0)
+		for (i = 0; i < n; i++)
+			if (cx_watch(watch_far_cx, P[i].vfar, &widB[i])) {
+				printf("far watch failed at %d\n", i);
+				exit(4);
+			}
+	t1 = now_ms();
+	for (i = 0; cx >= 0 && i < n; i++) {
+		u64 id;
+		int r = cx_attach(cx, P[i].vnear, P[i].tnear, 0, &id, NULL);
+
+		if (r || id != (u64)i + 1) {
+			printf("attach %d: r=%d id=%llu\n", i, r, id);
+			exit(5);
+		}
+	}
+	*t_attach = now_ms() - t1;
+	return P;
+}
+
+static void free_pairs(struct ps *P, int n)
+{
+	int i;
+
+	for (i = 0; i < n; i++)
+		free_ps(&P[i]);
+	free(P);
+}
+
+static int count_far_reset(struct ps *P, int n, int *eof, int *open)
+{
+	int i, r = 0;
+
+	*eof = *open = 0;
+	for (i = 0; i < n; i++) {
+		char s;
+
+		if (P[i].tfar < 0)
+			continue;
+		s = far_state(P[i].tfar);
+		r += s == 'R';
+		*eof += s == 'E';
+		*open += s == '.';
+	}
+	return r;
+}
+
+static void storm_variant(const char *name, int variant)
+{
+	struct ps *P;
+	int cx = cx_open(0), cxB = -1, i, nthreads = 4;
+	double tb, ta, t0, t_storm, t_settle;
+	u64 *widB = NULL;
+	pthread_t th[8], dth;
+	struct stormctx sc[8];
+	struct drain dr = { 0 };
+	unsigned char *seen = calloc(STORM_N + 2, 1);
+	struct verify v;
+	struct ovd_fwd_inventory inv;
+	long long q0 = audit("rec_queued"), n0 = audit("rec_new");
+	int reset, eof, open_;
+	int use_B = (variant == 0);
+
+	nb(cx);                           /* the drains below read until EAGAIN: a blocking descriptor would wait for a record that never comes */
+	if (use_B) {
+		cxB = cx_open(0);
+		widB = calloc(STORM_N, sizeof(u64));
+	}
+	P = build_pairs(STORM_N, cx, &tb, &ta, use_B ? cxB : -1, widB);
+	data("storm[%s] built %d pairs in %.0f ms, attached in %.0f ms (%.1f us each)", name, STORM_N, tb, ta, ta * 1000 / STORM_N);
+	for (i = 0; i < STORM_N; i++)
+		nb(P[i].tfar);
+	cx_inv(cx, &inv);
+	rep(inv.live_pairs == STORM_N, "all pairs live before the storm", "%s: live_pairs=%u", name, inv.live_pairs);
+	if (variant == 4) {               /* a concurrent reader during the storm */
+		dr.cx = cx;
+		dr.seen = seen;
+		nb(cx);
+		pthread_create(&dth, NULL, drain_thread, &dr);
+	}
+	t0 = now_ms();
+	switch (variant) {
+	case 0: case 1: case 4: case 5: {
+		for (i = 0; i < nthreads; i++) {
+			sc[i] = (struct stormctx){ P, i * (STORM_N / nthreads), (i + 1) * (STORM_N / nthreads),
+						   variant == 1 ? 4 : variant == 0 ? 1 : 3 };
+			pthread_create(&th[i], NULL, storm_far_rst, &sc[i]);
+		}
+		if (variant == 5) {       /* race the owner's ABORT_ALL against the far ends going away */
+			unsigned n;
+
+			cx_abort_all(cx, &n);
+			data("storm[%s] ABORT_ALL won %u", name, n);
+		}
+		for (i = 0; i < nthreads; i++)
+			pthread_join(th[i], NULL);
+		break;
+	}
+	case 2: {
+		unsigned n;
+		int r = cx_abort_all(cx, &n);
+
+		rep(r == 0 && n == STORM_N, "ABORT_ALL returns the number of ids aborted", "%s: r=%d n=%u", name, r, n);
+		break;
+	}
+	case 3: {
+		close(cx);                /* context release at scale */
+		cx = -1;
+		break;
+	}
+	}
+	t_storm = now_ms() - t0;
+	/* wait until the module has no live ids (storm settled) */
+	if (cx >= 0) {
+		double dl = now_ms() + 20000;
+
+		for (;;) {
+			cx_inv(cx, &inv);
+			if (inv.live_pairs == 0 || now_ms() > dl)
+				break;
+			usleep(2000);
+		}
+		t_settle = now_ms() - t0;
+		data("storm[%s] storm issued in %.0f ms, module settled (live=0) after %.0f ms, live now %u, queued_ends %u", name, t_storm,
+		     t_settle, inv.live_pairs, inv.queued_ends);
+		if (variant == 4) {
+			usleep(300000);
+			dr.stop = 1;
+			pthread_join(dth, NULL);
+			/* the rest after the reader stops */
+			nb(cx);
+		}
+		cx_inv(cx, &inv);
+		if (variant != 4) {
+			rep(inv.live_pairs == 0 && inv.queued_ends == STORM_N, "bounded queue holds one unread record per id, none dropped",
+			    "%s: live=%u queued_ends=%u (N=%d) attached=%llu completed=%llu aborted(peer=%llu sockerr=%llu detached=%llu)", name,
+			    inv.live_pairs, inv.queued_ends, STORM_N, inv.attached, inv.completed, inv.aborted_peer, inv.aborted_sockerr,
+			    inv.aborted_detached);
+			verify_records(cx, STORM_N, &v, seen);
+		} else {
+			unsigned char *seen2 = calloc(STORM_N + 2, 1);
+
+			verify_records(cx, STORM_N, &v, seen2);
+			/* merge the reader thread's view and the tail */
+			for (i = 1; i <= STORM_N; i++) {
+				if (seen2[i] && dr.seen[i] && dr.seen[i] != 2)
+					v.dup++;
+			}
+			v.total += dr.total;
+			v.dup += dr.dup;
+			v.bad += dr.bad;
+			v.missing = 0;
+			for (i = 1; i <= STORM_N; i++)
+				if (!seen2[i] && !dr.seen[i])
+					v.missing++;
+			free(seen2);
+			data("storm[%s] reader thread consumed %d during the storm", name, dr.total);
+		}
+		rep(v.total == STORM_N && v.dup == 0 && v.bad == 0 && v.missing == 0, "exactly one record per id, none lost or duplicated",
+		    "%s: total=%d dup=%d bad_id=%d missing=%d | kinds completed=%d aborted=%d wh/c=%d wh/a=%d | causes peer=%d sockerr=%d detached=%d",
+		    name, v.total, v.dup, v.bad, v.missing, v.kinds[1], v.kinds[2], v.kinds[3], v.kinds[4], v.causes[1], v.causes[2], v.causes[4]);
+		{
+			struct ovd_fwd_end one;
+			int r = cx_read(cx, &one, 1);
+
+			rep(r == -EAGAIN, "second read is EAGAIN (no extra record)", "%s: r=%d", name, r);
+		}
+		cx_inv(cx, &inv);
+		rep(inv.queued_ends == 0 && inv.live_pairs == 0, "inventory zero after the drain", "%s: queued=%u live=%u", name, inv.queued_ends,
+		    inv.live_pairs);
+	} else {
+		usleep(1500000);
+		t_settle = now_ms() - t0;
+		data("storm[%s] release returned in %.0f ms", name, t_storm);
+	}
+	usleep(200000);
+	reset = count_far_reset(P, STORM_N, &eof, &open_);
+	if (variant == 3 || variant == 2) {
+		rep(reset == STORM_N, "all 16,384 far TCP ends reset", "%s: reset=%d eof=%d open=%d", name, reset, eof, open_);
+	}
+	if (variant == 1) {
+		rep(inv.completed == STORM_N, "clean storm: every pair completed", "%s: completed=%llu", name, inv.completed);
+	}
+	if (variant == 3) {
+		long long dq = audit("rec_queued") - q0;
+
+		rep(dq == 0 && audit("live") == 0, "release at scale: no record queued, no live id left", "%s: rec_queued delta=%lld live=%lld",
+		    name, dq, audit("live"));
+	}
+	if (variant == 0) {
+		/* ctx B: every far vsock peer classifies an abort */
+		struct ovd_fwd_end *buf = malloc(sizeof(*buf) * 4096);
+		int kab = 0, kcl = 0, kother = 0, tot = 0;
+		double dl = now_ms() + 20000;
+
+		nb(cxB);
+		while (tot < STORM_N && now_ms() < dl) {
+			int k = cx_read(cxB, buf, 4096), j;
+
+			if (k <= 0) {
+				usleep(2000);
+				continue;
+			}
+			for (j = 0; j < k; j++) {
+				tot++;
+				if (buf[j].kind == 4 && buf[j].cause == 1)
+					kab++;
+				else if (buf[j].kind == 3)
+					kcl++;
+				else
+					kother++;
+			}
+		}
+		rep(kab == STORM_N, "far-end storm: every far vsock watch classifies Aborted(PeerAbort)", "%s: abort=%d clean=%d other=%d of %d", name,
+		    kab, kcl, kother, STORM_N);
+		free(buf);
+	}
+	(void)n0;
+	if (cx >= 0)
+		close(cx);
+	if (cxB >= 0)
+		close(cxB);
+	free_pairs(P, STORM_N);
+	free(seen);
+	free(widB);
+	usleep(500000);
+}
+
+
+/* the owner of 16,384 attached pairs is killed with SIGKILL: its context release ends them all */
+static void storm_kill(void)
+{
+	struct ps *P;
+	double tb, ta, t0;
+	int i, ready[2], reset, eof, open_;
+	pid_t pid;
+	long long q0 = audit("rec_queued"), d0 = audit("rec_discard");
+	char b;
+	double dl, lat = 0;
+
+	P = build_pairs(STORM_N, -1, &tb, &ta, -1, NULL);
+	pipe(ready);
+	pid = fork();
+	if (pid == 0) {
+		int cx;
+
+		for (i = 0; i < STORM_N; i++) {
+			close(P[i].tfar);
+			close(P[i].vfar);
+		}
+		cx = cx_open(0);
+		for (i = 0; i < STORM_N; i++)
+			if (cx_attach(cx, P[i].vnear, P[i].tnear, 0, NULL, NULL))
+				_exit(10);
+		b = 'r';
+		write(ready[1], &b, 1);
+		pause();
+		_exit(0);
+	}
+	read(ready[0], &b, 1);
+	for (i = 0; i < STORM_N; i++)
+		nb(P[i].tfar);
+	reset = count_far_reset(P, STORM_N, &eof, &open_);
+	rep(open_ == STORM_N, "kill-9 storm: all far TCP ends open before the kill", "open=%d reset=%d eof=%d", open_, reset, eof);
+	kill(pid, SIGKILL);
+	t0 = now_ms();
+	waitpid(pid, NULL, 0);
+	data("storm[kill-9] waitpid returned %.0f ms after SIGKILL (release runs inside the exit path, before the zombie is reapable)", now_ms() - t0);
+	reset = count_far_reset(P, STORM_N, &eof, &open_);
+	data("storm[kill-9] far TCP ends reset at waitpid return: %d of %d", reset, STORM_N);
+	dl = now_ms() + 20000;
+	while (reset < STORM_N && now_ms() < dl) {
+		usleep(2000);
+		reset = count_far_reset(P, STORM_N, &eof, &open_);
+		lat = now_ms() - t0;
+	}
+	rep(reset == STORM_N, "kill -9 of the owner: all 16,384 far TCP ends reset", "reset=%d eof=%d open=%d (settled %.0f ms after the kill)", reset, eof, open_, lat);
+	usleep(500000);
+	rep(audit("rec_queued") - q0 == 0 && audit("live") == 0, "kill-9 release queued no record and left no live id",
+	    "rec_queued delta=%lld rec_discard delta=%lld live=%lld", audit("rec_queued") - q0, audit("rec_discard") - d0, audit("live"));
+	free_pairs(P, STORM_N);
+}
+
+static void s_storm(void)
+{
+	int cx;
+
+	fx_init();
+	raise_nofile();
+	cx = cx_open(0);
+	rep(module_ok(cx), "version", "ok");
+	close(cx);
+	storm_variant("far-reset+watch", 0);
+	audit_dump("after-v0");
+	storm_variant("far-clean", 1);
+	audit_dump("after-v1");
+	storm_variant("owner-ABORT_ALL", 2);
+	audit_dump("after-v2");
+	storm_variant("release", 3);
+	audit_dump("after-v3");
+	storm_variant("far-reset+concurrent-reader", 4);
+	audit_dump("after-v4");
+	storm_variant("far-reset-races-ABORT_ALL", 5);
+	audit_dump("after-v5");
+	storm_kill();
+	audit_dump("end");
+	rep(audit("live") == 0, "global live ids zero", "live=%lld", audit("live"));
+	rep(dmesg_bad() == 0, "no kernel oops/warn", "dmesg scan");
+}
+
+/* ======================================================================================================================
+ * suite: ids (V-EV-CTL b, ids)
+ * ==================================================================================================================== */
+#define IDS_TOTAL 1000000
+#define IDS_PAIRS 20000
+
+static void s_ids(void)
+{
+	int cx = cx_open(0), cx2 = cx_open(0);
+	unsigned char *issued = calloc(IDS_TOTAL * 2 + 16, 1), *got = calloc(IDS_TOTAL * 2 + 16, 1);
+	u64 last = 0, id, maxid = 0;
+	long n_att = 0, n_watch = 0, viol_order = 0, viol_dup = 0, viol_other = 0, rec_dup = 0, rec_unissued = 0, rec_total = 0;
+	struct ovd_fwd_end buf[512];
+	struct ps p;
+	int wv_far, wv_near, i;
+	double t0 = now_ms();
+	long long rn0, rq0;
+
+	fx_init();
+	raise_nofile();
+	rep(module_ok(cx), "version", "ok");
+	nb(cx);
+	rn0 = audit("rec_new");
+	rq0 = audit("rec_queued");
+	/* a fresh context starts at id 1 */
+	mk_ps(&p);
+	cx_attach(cx, p.vnear, p.tnear, 0, &id, NULL);
+	rep(id == 1, "first id of a fresh context is 1", "id=%llu", id);
+	issued[id] = 1;
+	last = id;
+	n_att++;
+	cx_abort(cx, id);
+	free_ps(&p);
+	/* one connected vsock socket is watched and unwatched 980,000 times; 20,000 real pairs are interleaved */
+	mk_vsock(&wv_far, &wv_near);
+	for (i = 0; i < IDS_TOTAL; i++) {
+		int r;
+
+		if (i % (IDS_TOTAL / IDS_PAIRS) == 0) {
+			struct ps q;
+
+			if (mk_ps(&q)) {
+				printf("mk_ps failed at %d: %s\n", i, strerror(errno));
+				break;
+			}
+			r = cx_attach(cx, q.vnear, q.tnear, 0, &id, NULL);
+			free_ps(&q);                 /* closing is not an end: the module holds references; ABORT ends it */
+			if (r == 0) {
+				n_att++;
+				cx_abort(cx, id);
+			}
+		} else {
+			r = cx_watch(cx, wv_near, &id);
+			if (r == 0) {
+				n_watch++;
+				cx_abort(cx, id);
+			}
+		}
+		if (r) {
+			viol_other++;
+			continue;
+		}
+		if (id > (u64)IDS_TOTAL * 2) {
+			viol_other++;
+			continue;
+		}
+		if (issued[id])
+			viol_dup++;
+		issued[id] = 1;
+		if (id <= last)
+			viol_order++;
+		last = id;
+		if (id > maxid)
+			maxid = id;
+		if ((i & 1023) == 0) {
+			for (;;) {
+				int k = cx_read(cx, buf, 512), j;
+
+				if (k <= 0)
+					break;
+				for (j = 0; j < k; j++) {
+					rec_total++;
+					if (buf[j].id > (u64)IDS_TOTAL * 2 || !issued[buf[j].id])
+						rec_unissued++;
+					else if (got[buf[j].id])
+						rec_dup++;
+					got[buf[j].id] = 1;
+				}
+			}
+		}
+	}
+	for (;;) {
+		int k = cx_read(cx, buf, 512), j;
+
+		if (k <= 0)
+			break;
+		for (j = 0; j < k; j++) {
+			rec_total++;
+			if (buf[j].id > (u64)IDS_TOTAL * 2 || !issued[buf[j].id])
+				rec_unissued++;
+			else if (got[buf[j].id])
+				rec_dup++;
+			got[buf[j].id] = 1;
+		}
+	}
+	{
+		long missing = 0, issued_n = 0;
+		u64 k;
+
+		for (k = 1; k <= maxid; k++) {
+			if (issued[k]) {
+				issued_n++;
+				if (!got[k])
+					missing++;
+			}
+		}
+		data("ids: %ld pair attaches + %ld watches succeeded in %.1f s; max id %llu", n_att, n_watch, (now_ms() - t0) / 1000, maxid);
+		rep(viol_dup == 0 && viol_order == 0 && viol_other == 0, "ids strictly increasing, never reused, within one context",
+		    "attaches+watches=%ld dup=%ld out-of-order=%ld other-failures=%ld", n_att + n_watch, viol_dup, viol_order, viol_other);
+		rep(n_att + n_watch >= IDS_TOTAL - 1, "10^6 successful attach/watch operations", "%ld", n_att + n_watch);
+		rep(rec_dup == 0 && rec_unissued == 0 && missing == 0 && rec_total == issued_n,
+		    "exactly one record per issued id across 10^6 ids", "records=%ld issued=%ld dup=%ld unissued=%ld missing=%ld", rec_total, issued_n,
+		    rec_dup, rec_unissued, missing);
+	}
+	/* the id space is per context: a second context starts at 1 again, and cannot see or abort the first one's ids */
+	{
+		struct ps q;
+		u64 a1, b1;
+		int r;
+
+		mk_ps(&q);
+		cx_attach(cx, q.vnear, q.tnear, 0, &a1, NULL);
+		struct ps q2;
+
+		mk_ps(&q2);
+		cx_attach(cx2, q2.vnear, q2.tnear, 0, &b1, NULL);
+		data("ids: ctx1 next id %llu, ctx2 first id %llu", a1, b1);
+		rep(b1 == 1, "second context starts at 1", "id=%llu", b1);
+		r = cx_abort(cx2, a1);          /* ctx1's live id, from ctx2 */
+		rep(r == -ENOENT || a1 == b1, "an id of another context is ENOENT", "abort of ctx1 id %llu from ctx2 -> %s", a1, ename(r));
+		{
+			struct ovd_fwd_pair_state s;
+
+			r = cx_state(cx2, a1, &s);
+			rep(r == -ENOENT || a1 == b1, "pair_state of another context's id is ENOENT", "-> %s", ename(r));
+		}
+		rep(cx_abort(cx, 0) == -ENOENT, "id 0 is ENOENT", "");
+		rep(cx_abort(cx, ~0ULL) == -ENOENT, "id 2^64-1 is ENOENT", "");
+		rep(cx_abort(cx, a1) == 0, "abort of own live id", "");
+		rep(cx_abort(cx, a1) == -ENOENT, "abort twice: second is ENOENT", "");
+		free_ps(&q);
+		free_ps(&q2);
+	}
+	data("ids: records module-wide: rec_new delta=%lld rec_queued delta=%lld", audit("rec_new") - rn0, audit("rec_queued") - rq0);
+	audit_dump("end");
+	rep(dmesg_bad() == 0, "no kernel oops/warn", "dmesg scan");
+	free(issued);
+	free(got);
+}
+
+/* ======================================================================================================================
+ * suite: watch (V-EV-CTL c): the record precedes the end
+ * ==================================================================================================================== */
+struct loadctx { struct ps *P; int n; volatile int stop; long moved; };
+
+static void *load_thread(void *arg)
+{
+	struct loadctx *l = arg;
+	char buf[65536];
+	int i;
+	long mv = 0;
+
+	memset(buf, 'L', sizeof(buf));
+	while (!l->stop) {
+		for (i = 0; i < l->n && !l->stop; i++) {
+			ssize_t n;
+
+			n = send(l->P[i].tfar, buf, sizeof(buf), MSG_DONTWAIT | MSG_NOSIGNAL);
+			if (n > 0)
+				mv += n;
+			n = send(l->P[i].vfar, buf, sizeof(buf), MSG_DONTWAIT | MSG_NOSIGNAL);
+			if (n > 0)
+				mv += n;
+			recv(l->P[i].tfar, buf, sizeof(buf), MSG_DONTWAIT);
+			recv(l->P[i].vfar, buf, sizeof(buf), MSG_DONTWAIT);
+		}
+		usleep(300);
+	}
+	l->moved = mv;
+	return NULL;
+}
+
+enum { W_CLEAN, W_FULL, W_CLOSE, W_RD, W_CLEAN_THEN_FULL, W_NCLASS };
+static const char *wname[] = { "peer SHUT_WR (0x2)", "peer SHUT_RDWR (0x3)", "peer close()", "peer SHUT_RD", "0x2 then 0x3" };
+
+static void s_watch(void)
+{
+	int cxL = cx_open(0), cxW = cx_open(0), cls, i, nL = 100, nth = 2;
+	struct ps *L = calloc(nL, sizeof(*L));
+	struct loadctx lc[4];
+	pthread_t th[4];
+	long viol[W_NCLASS] = {0}, pass[W_NCLASS] = {0}, wrongkind[W_NCLASS] = {0}, abort_succeeds[W_NCLASS] = {0}, extra[W_NCLASS] = {0};
+	int M = 400;
+	long rd0[W_NCLASS] = {0}, rdn[W_NCLASS] = {0};
+	int rd_err[W_NCLASS] = {0};
+	double tcls;
+	struct ovd_fwd_end e[8];
+
+	fx_init();
+	raise_nofile();
+	rep(module_ok(cxW), "version", "ok");
+	for (i = 0; i < nL; i++) {
+		if (mk_ps(&L[i]))
+			exit(3);
+		nb(L[i].tfar);
+		nb(L[i].vfar);
+		if (cx_attach(cxL, L[i].vnear, L[i].tnear, 0, NULL, NULL))
+			exit(4);
+	}
+	for (i = 0; i < nth; i++) {
+		lc[i] = (struct loadctx){ L + i * (nL / nth), nL / nth, 0, 0 };
+		pthread_create(&th[i], NULL, load_thread, &lc[i]);
+	}
+	nb(cxW);
+	for (cls = 0; cls < W_NCLASS; cls++) {
+		tcls = now_ms();
+		for (i = 0; i < M; i++) {
+			int vfar, vnear, r;
+			u64 id;
+			char c;
+			int k;
+
+			if (mk_vsock(&vfar, &vnear))
+				exit(5);
+			if (cx_watch(cxW, vnear, &id))
+				exit(6);
+			switch (cls) {
+			case W_CLEAN: shutdown(vfar, SHUT_WR); break;
+			case W_FULL: shutdown(vfar, SHUT_RDWR); break;
+			case W_CLOSE: close(vfar); vfar = -1; break;
+			case W_RD: shutdown(vfar, SHUT_RD); break;
+			case W_CLEAN_THEN_FULL: shutdown(vfar, SHUT_WR); break;
+			}
+			if (cls == W_RD) {
+				/* the holder only learns by writing: wait for EPIPE */
+				double dl = now_ms() + 500;
+
+				for (;;) {
+					ssize_t w = send(vnear, "x", 1, MSG_NOSIGNAL | MSG_DONTWAIT);
+
+					if (w < 0 && errno != EAGAIN)
+						break;
+					if (now_ms() > dl)
+						break;
+					usleep(20);
+				}
+			} else {
+				struct pollfd pf = { vnear, POLLIN, 0 };
+
+				poll(&pf, 1, 2000);
+				r = read(vnear, &c, 1);            /* the holder's read of the end */
+				if (r == 0)
+					rd0[cls]++;
+				else {
+					rdn[cls]++;
+					rd_err[cls] = errno;
+				}
+			}
+			k = cx_read(cxW, e, 8);                    /* IMMEDIATELY after the holder saw the end */
+			if (k == 1 && e[0].id == id &&
+			    ((cls == W_CLEAN || cls == W_CLEAN_THEN_FULL) ? (e[0].kind == 3 && e[0].cause == 0) : (e[0].kind == 4 && e[0].cause == 1))) {
+				pass[cls]++;
+			} else if (k == 1 && e[0].id == id) {
+				wrongkind[cls]++;
+				if (wrongkind[cls] < 3)
+					printf("wrong kind: class=%s kind=%d cause=%d\n", wname[cls], e[0].kind, e[0].cause);
+			} else {
+				viol[cls]++;
+				if (viol[cls] < 3)
+					printf("ORDER VIOLATION class=%s k=%d id=%llu\n", wname[cls], k, id);
+			}
+			r = cx_abort(cxW, id);
+			if (r == 0)
+				abort_succeeds[cls]++;            /* the watch was still live after its end was seen */
+			if (cls == W_CLEAN_THEN_FULL) {
+				close(vfar);
+				vfar = -1;
+				usleep(300);
+				k = cx_read(cxW, e, 8);
+				if (k > 0)
+					extra[cls]++;
+			}
+			if (vfar >= 0)
+				close(vfar);
+			close(vnear);
+		}
+		data("watch class '%s': holder read() returned 0 (EOF) %ld times, an error %ld times (last errno %s)", wname[cls], rd0[cls], rdn[cls], rdn[cls] ? ename(rd_err[cls]) : "-");
+		rep(viol[cls] == 0 && wrongkind[cls] == 0 && pass[cls] == M && abort_succeeds[cls] == 0 && extra[cls] == 0,
+		    "watch record queued before the holder sees the end", "%s under load: %ld/%d correct, order-violations=%ld wrong-kind=%ld live-after-end=%ld extra-records=%ld (%.1f ms per trial)",
+		    wname[cls], pass[cls], M, viol[cls], wrongkind[cls], abort_succeeds[cls], extra[cls], (now_ms() - tcls) / M);
+	}
+	/* parallel: P watches ended at once, holders find their ends via epoll and probe with ABORT */
+	{
+		int P = 4096, nh = 4, j;
+		int *vf = calloc(P, sizeof(int)), *vn = calloc(P, sizeof(int));
+		u64 *ids = calloc(P, sizeof(u64));
+		int cxP = cx_open(0);
+		int ep[4];
+		long par_viol = 0, par_done = 0, par_eof = 0, par_err = 0;
+		struct epoll_event ev;
+
+		for (i = 0; i < P; i++) {
+			mk_vsock(&vf[i], &vn[i]);
+			cx_watch(cxP, vn[i], &ids[i]);
+			nb(vn[i]);
+		}
+		for (j = 0; j < nh; j++)
+			ep[j] = epoll_create1(0);
+		for (i = 0; i < P; i++) {
+			ev.events = EPOLLIN;
+			ev.data.u32 = i;
+			epoll_ctl(ep[i % nh], EPOLL_CTL_ADD, vn[i], &ev);
+		}
+		/* trigger all at once: a mix of clean and full */
+		for (i = 0; i < P; i++) {
+			if (i % 2)
+				shutdown(vf[i], SHUT_WR);
+			else
+				shutdown(vf[i], SHUT_RDWR);
+		}
+		for (j = 0; j < nh; j++) {
+			struct epoll_event evs[256];
+			double dl = now_ms() + 15000;
+			int left = P / nh;
+
+			while (left > 0 && now_ms() < dl) {
+				int n = epoll_wait(ep[j], evs, 256, 200), q;
+
+				for (q = 0; q < n; q++) {
+					int idx = evs[q].data.u32;
+					char c;
+					ssize_t r = read(vn[idx], &c, 1);
+
+					if (r == 0 || (r < 0 && errno != EAGAIN && errno != EINTR)) {
+						if (r == 0)
+							par_eof++;
+						else
+							par_err++;
+						par_done++;
+						left--;
+						epoll_ctl(ep[j], EPOLL_CTL_DEL, vn[idx], NULL);
+						if (cx_abort(cxP, ids[idx]) == 0)
+							par_viol++;       /* still live although the holder read the end */
+					}
+				}
+			}
+		}
+		data("parallel: holder read() = 0 (EOF) for %ld watches, an error for %ld", par_eof, par_err);
+		rep(par_done == P && par_viol == 0, "4096 concurrent watches: no holder reads an end before its watch decided",
+		    "holders saw %ld/%d ends; live-after-end (ABORT succeeded) = %ld", par_done, P, par_viol);
+		{
+			struct ovd_fwd_end *rb = malloc(sizeof(*rb) * 8192);
+			int tot = 0, k, kc = 0, ka = 0, kd = 0;
+
+			nb(cxP);
+			while ((k = cx_read(cxP, rb, 8192)) > 0) {
+				int z;
+
+				tot += k;
+				for (z = 0; z < k; z++) {
+					kc += rb[z].kind == 3;
+					ka += rb[z].kind == 4 && rb[z].cause == 1;
+					kd += rb[z].kind == 4 && rb[z].cause == 4;
+				}
+			}
+			data("parallel watches: %d records: half-close=%d peer-abort=%d detached=%d (detached are records of ABORT calls that WON, if any)", tot, kc, ka, kd);
+			rep(tot == P, "one record per watch", "records=%d of %d", tot, P);
+			free(rb);
+		}
+		/* poll-first window (informational): act on EPOLLRDHUP/HUP alone, without read(), then ask whether the watch has decided */
+		{
+			int Q = 2048, win = 0, seen_q = 0;
+			int *qf = calloc(Q, sizeof(int)), *qn = calloc(Q, sizeof(int));
+			u64 *qi = calloc(Q, sizeof(u64));
+			int cxQ = cx_open(0), epq = epoll_create1(0);
+			struct epoll_event evs[256];
+
+			for (i = 0; i < Q; i++) {
+				mk_vsock(&qf[i], &qn[i]);
+				cx_watch(cxQ, qn[i], &qi[i]);
+				ev.events = EPOLLRDHUP | EPOLLHUP | EPOLLERR;
+				ev.data.u32 = i;
+				epoll_ctl(epq, EPOLL_CTL_ADD, qn[i], &ev);
+			}
+			for (i = 0; i < Q; i++)
+				shutdown(qf[i], SHUT_RDWR);
+			{
+				double dl = now_ms() + 15000;
+
+				while (seen_q < Q && now_ms() < dl) {
+					int n = epoll_wait(epq, evs, 256, 200), z;
+
+					for (z = 0; z < n; z++) {
+						int idx = evs[z].data.u32;
+
+						seen_q++;
+						epoll_ctl(epq, EPOLL_CTL_DEL, qn[idx], NULL);
+						if (cx_abort(cxQ, qi[idx]) == 0)
+							win++;
+					}
+				}
+			}
+			data("INFORMATIONAL poll-first window: %d of %d holders that acted on EPOLLRDHUP/HUP alone (no read) found the watch still undecided", win, Q);
+			close(cxQ);
+			for (i = 0; i < Q; i++) {
+				close(qf[i]);
+				close(qn[i]);
+			}
+			free(qf); free(qn); free(qi);
+		}
+		close(cxP);
+		for (i = 0; i < P; i++) {
+			close(vf[i]);
+			close(vn[i]);
+		}
+		free(vf); free(vn); free(ids);
+	}
+	for (i = 0; i < nth; i++)
+		lc[i].stop = 1;
+	for (i = 0; i < nth; i++)
+		pthread_join(th[i], NULL);
+	{
+		long mv = 0;
+
+		for (i = 0; i < nth; i++)
+			mv += lc[i].moved;
+		data("load: %ld bytes written by the load threads; forwarded by module so far %lld", mv, audit("bytes"));
+	}
+	{
+		struct ovd_fwd_inventory inv;
+
+		cx_inv(cxL, &inv);
+		rep(inv.live_pairs == nL && inv.queued_ends == 0, "load pairs stayed live and quiet throughout", "live=%u queued=%u aborted: peer=%llu sockerr=%llu",
+		    inv.live_pairs, inv.queued_ends, inv.aborted_peer, inv.aborted_sockerr);
+	}
+	rep(dmesg_bad() == 0, "no kernel oops/warn", "dmesg scan");
+}
+
+/* ======================================================================================================================
+ * suite: unload (V-EV-CTL d)
+ * ==================================================================================================================== */
+static int delmod(const char *name, unsigned flags)
+{
+	return syscall(SYS_delete_module, name, flags) ? -errno : 0;
+}
+
+static void unload_attempts(const char *state)
+{
+	static const struct { unsigned f; const char *n; } F[] = {
+		{ 0, "flags=0" }, { O_NONBLOCK, "O_NONBLOCK (rmmod)" }, { O_TRUNC, "O_TRUNC (rmmod -f)" }, { O_TRUNC | O_NONBLOCK, "O_TRUNC|O_NONBLOCK (rmmod -f)" },
+	};
+	int i;
+
+	for (i = 0; i < 4; i++) {
+		int r = delmod("ovd_fwd", F[i].f);
+
+		rep(r == -EBUSY, "delete_module refused", "%s, %s -> %s", state, F[i].n, ename(r));
+	}
+}
+
+static void s_unload(void)
+{
+	int cx0, cx;
+	struct ps p;
+	char buf[256], rb[64];
+	u64 id;
+	FILE *f;
+	int r;
+
+	fx_init();
+	/* control: the syscall path works and a loadable module with an exit function does unload */
+	r = delmod("no_such_module", O_NONBLOCK);
+	rep(r == -ENOENT, "control: unknown module -> ENOENT", "%s", ename(r));
+	f = fopen("/proc/modules", "r");
+	while (f && fgets(buf, sizeof(buf), f))
+		if (!strncmp(buf, "ovd_fwd ", 8) || !strncmp(buf, "vsock_diag ", 11))
+			data("proc/modules: %s", strtok(buf, "\n"));
+	if (f)
+		fclose(f);
+	r = delmod("vsock_diag", O_NONBLOCK);
+	rep(r == 0, "control: a module with module_exit (vsock_diag) unloads", "delete_module -> %s", ename(r));
+
+	unload_attempts("no context open, no pairs");
+	cx0 = cx_open(0);
+	rep(module_ok(cx0), "version", "device still works after the attempts");
+	unload_attempts("context open, no pairs");
+	mk_ps(&p);
+	r = cx_attach(cx0, p.vnear, p.tnear, 0, &id, NULL);
+	rep(r == 0, "attach", "id=%llu", id);
+	nb(p.tfar);
+	unload_attempts("live pair");
+	{
+		struct ps w;
+		u64 wid;
+
+		mk_ps(&w);
+		cx_watch(cx0, w.vnear, &wid);
+		unload_attempts("live pair + live watch");
+		free_ps(&w);
+	}
+	/* the pair still carries bytes after the attempts */
+	{
+		char out[4096], in[4096];
+		int i, ok = 1;
+		ssize_t n;
+
+		for (i = 0; i < 4096; i++)
+			out[i] = (char)(i * 7 + 3);
+		send(p.vfar, out, 4096, 0);
+		n = recv(p.tfar, in, 4096, MSG_WAITALL);
+		for (i = 0; i < 4096 && n == 4096; i++)
+			ok &= in[i] == out[i];
+		rep(n == 4096 && ok, "live pair still forwards byte-exact after the unload attempts", "%zd bytes", n);
+	}
+	close(cx0);
+	free_ps(&p);
+	usleep(200000);
+	cx = cx_open(0);
+	rep(module_ok(cx), "version", "device usable after every context was released");
+	unload_attempts("after all contexts released, no pairs");
+	/* a second insmod of the same module is refused (EEXIST), which the loaders rely on */
+	f = fopen("/proc/modules", "r");
+	while (f && fgets(buf, sizeof(buf), f))
+		if (!strncmp(buf, "ovd_fwd ", 8)) {
+			data("final /proc/modules: %s", strtok(buf, "\n"));
+			snprintf(rb, sizeof(rb), "%s", buf);
+		}
+	if (f)
+		fclose(f);
+	f = fopen("/proc/sys/kernel/tainted", "r");
+	if (f) {
+		fgets(buf, sizeof(buf), f);
+		fclose(f);
+		data("kernel.tainted=%s", strtok(buf, "\n"));
+	}
+	rep(dmesg_bad() == 0, "no kernel oops/warn", "dmesg scan");
+}
+
+/* ======================================================================================================================
+ * suite: tls (V-EV-CTL f): a TLS ULP installed on a socket after attach
+ * ==================================================================================================================== */
+static void ktls_on(int fd, const unsigned char *key_tx, const unsigned char *key_rx)
+{
+	struct tls12_crypto_info_aes_gcm_128 tx = { .info = { .version = TLS_1_2_VERSION, .cipher_type = TLS_CIPHER_AES_GCM_128 } };
+	struct tls12_crypto_info_aes_gcm_128 rx = tx;
+	unsigned char salt[4] = "slt", iv[8] = "ivivivi", seq[8] = {0};
+
+	if (setsockopt(fd, SOL_TCP, TCP_ULP, "tls", sizeof("tls"))) {
+		printf("TCP_ULP failed: %s\n", strerror(errno));
+		return;
+	}
+	memcpy(tx.key, key_tx, 16);
+	memcpy(tx.salt, salt, 4);
+	memcpy(tx.iv, iv, 8);
+	memcpy(tx.rec_seq, seq, 8);
+	memcpy(rx.key, key_rx, 16);
+	memcpy(rx.salt, salt, 4);
+	memcpy(rx.iv, iv, 8);
+	memcpy(rx.rec_seq, seq, 8);
+	if (setsockopt(fd, SOL_TLS, TLS_TX, &tx, sizeof(tx)))
+		printf("TLS_TX failed: %s\n", strerror(errno));
+	if (setsockopt(fd, SOL_TLS, TLS_RX, &rx, sizeof(rx)))
+		printf("TLS_RX failed: %s\n", strerror(errno));
+}
+
+static const unsigned char KA[16] = "keyAkeyAkeyAkeyA", KB[16] = "keyBkeyBkeyBkeyB";
+
+struct tls_case { const char *name; int how; };
+
+static ssize_t rd_to(int fd, void *b, size_t n, int ms)
+{
+	struct pollfd pf = { fd, POLLIN, 0 };
+
+	if (poll(&pf, 1, ms) <= 0)
+		return -2;
+	return read(fd, b, n);
+}
+
+static ssize_t wr_all_to(int fd, const char *b, size_t n, int ms)
+{
+	size_t done = 0;
+	double dl = now_ms() + ms;
+
+	while (done < n) {
+		struct pollfd pf = { fd, POLLOUT, 0 };
+		ssize_t w;
+
+		if (now_ms() > dl)
+			return -2;
+		poll(&pf, 1, 100);
+		w = send(fd, b + done, n - done, MSG_DONTWAIT | MSG_NOSIGNAL);
+		if (w > 0)
+			done += w;
+		else if (w < 0 && errno != EAGAIN)
+			return -1;
+	}
+	return done;
+}
+
+static void tls_case(int how)
+{
+	static const char *hn[] = { "pair completes cleanly", "owner ABORT", "context release", "peer RST" };
+	struct ps p;
+	int cx = cx_open(0);
+	u64 id;
+	char out[8192], in[8192];
+	int i, ok = 1;
+	ssize_t n;
+	struct ovd_fwd_end e;
+	int k;
+
+	mk_ps(&p);
+	if (cx_attach(cx, p.vnear, p.tnear, 0, &id, NULL)) {
+		rep(0, "tls-after: attach", "failed");
+		return;
+	}
+	/* install kTLS on the attached TCP half AFTER the attach (the P-68 panic shape), and on the far end */
+	ktls_on(p.tnear, KB, KA);
+	ktls_on(p.tfar, KA, KB);
+	for (i = 0; i < 8192; i++)
+		out[i] = (char)(i * 13 + how);
+	/* vsock far -> forwarder -> kTLS near (encrypts) -> kTLS far (decrypts) */
+	send(p.vfar, out, 8192, 0);
+	n = 0;
+	{
+		double dl = now_ms() + 3000;
+
+		while (n < 8192 && now_ms() < dl) {
+			ssize_t r = rd_to(p.tfar, in + n, 8192 - n, 200);
+
+			if (r > 0)
+				n += r;
+		}
+	}
+	for (i = 0; i < 8192 && n == 8192; i++)
+		ok &= in[i] == out[i];
+	rep(n == 8192 && ok, "tls-after: vsock->kTLS direction byte-exact", "case '%s': %zd/8192", hn[how], n);
+	/* kTLS far -> kTLS near (decrypts, forwarder peeks plaintext) -> vsock far */
+	send(p.tfar, out, 8192, 0);
+	n = 0;
+	{
+		double dl = now_ms() + 3000;
+
+		while (n < 8192 && now_ms() < dl) {
+			ssize_t r = rd_to(p.vfar, in + n, 8192 - n, 200);
+
+			if (r > 0)
+				n += r;
+		}
+	}
+	ok = 1;
+	for (i = 0; i < 8192 && n == 8192; i++)
+		ok &= in[i] == out[i];
+	rep(n == 8192 && ok, "tls-after: kTLS->vsock direction byte-exact", "case '%s': %zd/8192", hn[how], n);
+
+	switch (how) {
+	case 0:
+		shutdown(p.tfar, SHUT_WR);
+		shutdown(p.vfar, SHUT_WR);
+		usleep(300000);
+		break;
+	case 1:
+		cx_abort(cx, id);
+		break;
+	case 2:
+		nb(cx);
+		close(cx);
+		cx = -1;
+		break;
+	case 3:
+		rst_close(p.tfar);
+		p.tfar = -1;
+		usleep(300000);
+		break;
+	}
+	if (cx >= 0) {
+		nb(cx);
+		k = cx_read(cx, &e, 1);
+		rep(k == 1 && e.id == id, "tls-after: one end record", "case '%s': kind=%d cause=%d moved_ab=%llu moved_ba=%llu", hn[how], k == 1 ? e.kind : -1,
+		    k == 1 ? e.cause : -1, k == 1 ? e.moved_ab : 0, k == 1 ? e.moved_ba : 0);
+	}
+	if (cx >= 0)
+		close(cx);
+	free_ps(&p);
+	usleep(100000);
+}
+
+static void s_tls(void)
+{
+	int h;
+	int cx;
+
+	fx_init();
+	cx = cx_open(0);
+	rep(module_ok(cx), "version", "ok");
+	close(cx);
+	for (h = 0; h < 4; h++) {
+		tls_case(h);
+		rep(dmesg_bad() == 0, "no kernel oops/warn after case", "case %d", h);
+	}
+	/* the delete_module attempt with a kTLS-after pair stalled (the exact P-68 panic sequence, rmmod with live pair) */
+	{
+		struct ps p;
+		int c = cx_open(0);
+		u64 id;
+		char buf[65536];
+
+		mk_ps(&p);
+		cx_attach(c, p.vnear, p.tnear, 0, &id, NULL);
+		ktls_on(p.tnear, KB, KA);
+		ktls_on(p.tfar, KA, KB);
+		memset(buf, 's', sizeof(buf));
+		nb(p.vfar);
+		for (int i = 0; i < 64; i++)
+			send(p.vfar, buf, sizeof(buf), MSG_DONTWAIT | MSG_NOSIGNAL);       /* stalled: far TLS end does not read */
+		usleep(300000);
+		rep(delmod("ovd_fwd", O_NONBLOCK) == -EBUSY && delmod("ovd_fwd", O_TRUNC | O_NONBLOCK) == -EBUSY, "P-68 panic sequence: delete_module with kTLS-after stalled pair is refused",
+		    "EBUSY for rmmod and rmmod -f");
+		/* now drain and finish: the pair survives the attempt and completes */
+		nb(p.tfar);
+		for (int i = 0; i < 200; i++) {
+			recv(p.tfar, buf, sizeof(buf), MSG_DONTWAIT);
+			usleep(2000);
+		}
+		cx_abort(c, id);
+		close(c);
+		free_ps(&p);
+	}
+	rep(dmesg_bad() == 0, "no kernel oops/warn", "final scan");
+}
+
+/* ======================================================================================================================
+ * suite: misc  (record framing, read/poll, abort semantics, watch semantics, early data)
+ * ==================================================================================================================== */
+static void s_misc(void)
+{
+	struct ps p, q;
+	int cx = cx_open(0), cx2 = cx_open(0), r, i;
+	u64 id, id2;
+	struct ovd_fwd_end e[16];
+	struct ovd_fwd_inventory inv;
+	struct stat st;
+
+	fx_init();
+	rep(module_ok(cx), "version", "abi %d, PERMANENT flag", OVD_FWD_ABI_VERSION);
+	r = stat("/dev/ovd_fwd", &st);
+	rep(r == 0 && S_ISCHR(st.st_mode) && (st.st_mode & 07777) == 0600 && st.st_uid == 0, "device is a root-owned 0600 character device",
+	    "mode %o uid %d", st.st_mode & 07777, st.st_uid);
+	rep(sizeof(struct ovd_fwd_end) == 32 && __builtin_offsetof(struct ovd_fwd_end, kind) == 8 &&
+		    __builtin_offsetof(struct ovd_fwd_end, cause) == 9 && __builtin_offsetof(struct ovd_fwd_end, side) == 10 &&
+		    __builtin_offsetof(struct ovd_fwd_end, err) == 12 && __builtin_offsetof(struct ovd_fwd_end, moved_ab) == 16 &&
+		    __builtin_offsetof(struct ovd_fwd_end, moved_ba) == 24,
+	    "end record layout is the pinned 32-byte layout", "sizeof=%zu", sizeof(struct ovd_fwd_end));
+	{
+		struct ovd_fwd_inventory v;
+
+		r = ioctl(cx, _IO('F', 99), &v);
+		rep(r < 0 && errno == ENOTTY, "unknown ioctl is ENOTTY", "%s", ename(errno));
+		r = ioctl(cx, OVD_FWD_VERSION, (void *)1);
+		rep(r < 0 && errno == EFAULT, "bad user pointer is EFAULT", "%s", ename(errno));
+	}
+
+	/* read(): EINVAL for a short buffer, EAGAIN when empty and non-blocking, blocking read wakes on a record */
+	nb(cx);
+	{
+		char sm[31];
+
+		r = read(cx, sm, sizeof(sm));
+		rep(r < 0 && errno == EINVAL, "read of a buffer shorter than one record is EINVAL", "%s", ename(errno));
+	}
+	r = cx_read(cx, e, 4);
+	rep(r == -EAGAIN, "read with no record is EAGAIN (non-blocking)", "%s", ename(r));
+	{
+		struct pollfd pf = { cx, POLLIN, 0 };
+
+		rep(poll(&pf, 1, 0) == 0, "poll: not readable while no record is queued", "");
+	}
+
+	/* ABORT: Aborted with the Detached record queued before it returns */
+	mk_ps(&p);
+	nb(p.tfar);
+	cx_attach(cx, p.vnear, p.tnear, 0, &id, NULL);
+	{
+		struct ovd_fwd_pair_state s;
+
+		r = cx_state(cx, id, &s);
+		rep(r == 0 && s.source_end[0] == 0 && s.source_end[1] == 0, "pair_state of a live pair", "r=%s src_end=%d/%d moved=%llu/%llu", ename(r),
+		    s.source_end[0], s.source_end[1], s.moved[0], s.moved[1]);
+	}
+	r = cx_abort(cx, id);
+	rep(r == 0, "ABORT of a live id returns 0", "%s", ename(r));
+	r = cx_read(cx, e, 4);
+	rep(r == 1 && e[0].id == id && e[0].kind == 2 && e[0].cause == 4, "Detached record is already queued when ABORT returns", "records=%d kind=%d cause=%d", r,
+	    r == 1 ? e[0].kind : -1, r == 1 ? e[0].cause : -1);
+	{
+		struct pollfd pf = { cx, POLLIN, 0 };
+
+		rep(poll(&pf, 1, 0) == 0, "poll: not readable once drained", "");
+	}
+	r = cx_abort(cx, id);
+	rep(r == -ENOENT, "ABORT of an id whose record was read is ENOENT", "%s", ename(r));
+	rep(far_wait(p.tfar, 500) == 'R', "ABORT reset the far TCP end", "");
+	{
+		struct ovd_fwd_pair_state s;
+
+		rep(cx_state(cx, id, &s) == -ENOENT, "pair_state of an ended id is ENOENT", "");
+	}
+	free_ps(&p);
+
+	/* poll becomes readable on a record; blocking read returns it */
+	mk_ps(&p);
+	cx_attach(cx, p.vnear, p.tnear, 0, &id, NULL);
+	{
+		struct pollfd pf = { cx, POLLIN, 0 };
+
+		shutdown(p.tfar, SHUT_WR);
+		shutdown(p.vfar, SHUT_WR);
+		r = poll(&pf, 1, 3000);
+		rep(r == 1 && (pf.revents & POLLIN), "poll: EPOLLIN when a record is queued (clean completion)", "poll=%d", r);
+		r = cx_read(cx, e, 4);
+		rep(r == 1 && e[0].kind == 1 && e[0].cause == 0, "completed pair: kind 1, cause 0", "kind=%d cause=%d moved=%llu/%llu", r == 1 ? e[0].kind : -1,
+		    r == 1 ? e[0].cause : -1, r == 1 ? e[0].moved_ab : 0, r == 1 ? e[0].moved_ba : 0);
+	}
+	free_ps(&p);
+	{
+		/* blocking read */
+		int cxb = cx_open(0), pp[2];
+		pid_t ch;
+		struct ps pb;
+		struct ovd_fwd_end one;
+		double t0;
+
+		mk_ps(&pb);
+		cx_attach(cxb, pb.vnear, pb.tnear, 0, &id, NULL);
+		pipe(pp);
+		ch = fork();
+		if (ch == 0) {
+			usleep(300000);
+			shutdown(pb.tfar, SHUT_WR);
+			shutdown(pb.vfar, SHUT_WR);
+			_exit(0);
+		}
+		t0 = now_ms();
+		r = read(cxb, &one, sizeof(one));
+		rep(r == 32 && one.id == id && now_ms() - t0 >= 250, "blocking read waits for the record", "read=%d after %.0f ms", r, now_ms() - t0);
+		waitpid(ch, NULL, 0);
+		close(cxb);
+		free_ps(&pb);
+	}
+	/* many ends, read with odd buffer sizes: whole records only, oldest first */
+	{
+		struct ps pp_[10];
+		u64 ids[10];
+
+		for (i = 0; i < 10; i++) {
+			mk_ps(&pp_[i]);
+			cx_attach(cx, pp_[i].vnear, pp_[i].tnear, 0, &ids[i], NULL);
+		}
+		for (i = 0; i < 10; i++)
+			cx_abort(cx, ids[i]);
+		{
+			char big[1000];
+			ssize_t n = read(cx, big, 100);                  /* 100 bytes: three whole records, not 3.125 */
+			struct ovd_fwd_end *rr = (void *)big;
+
+			rep(n == 96 && rr[0].id == ids[0] && rr[1].id == ids[1] && rr[2].id == ids[2], "read(100) returns 3 whole records, oldest first", "n=%zd", n);
+			n = read(cx, big, 1000);
+			rep(n == 7 * 32 && rr[0].id == ids[3] && rr[6].id == ids[9], "the rest, in order", "n=%zd", n);
+		}
+		for (i = 0; i < 10; i++)
+			free_ps(&pp_[i]);
+	}
+	/* ABORT_ALL */
+	{
+		unsigned n;
+		struct ps pp_[5];
+		u64 ids[5];
+
+		r = cx_abort_all(cx, &n);
+		rep(r == 0 && n == 0, "ABORT_ALL with nothing live returns 0", "n=%u", n);
+		for (i = 0; i < 5; i++) {
+			mk_ps(&pp_[i]);
+			cx_attach(cx, pp_[i].vnear, pp_[i].tnear, 0, &ids[i], NULL);
+		}
+		r = cx_abort_all(cx, &n);
+		rep(r == 0 && n == 5, "ABORT_ALL returns the number aborted", "n=%u", n);
+		cx_inv(cx, &inv);
+		rep(inv.queued_ends == 5 && inv.live_pairs == 0, "ABORT_ALL: five Detached records queued before it returns", "queued=%u live=%u", inv.queued_ends,
+		    inv.live_pairs);
+		while (cx_read(cx, e, 16) > 0)
+			;
+		for (i = 0; i < 5; i++)
+			free_ps(&pp_[i]);
+	}
+	/* contexts are isolated: ctx2 cannot touch ctx1's pair and its release does not end it */
+	mk_ps(&p);
+	nb(p.tfar);
+	cx_attach(cx, p.vnear, p.tnear, 0, &id, NULL);
+	mk_ps(&q);
+	cx_attach(cx2, q.vnear, q.tnear, 0, &id2, NULL);
+	if (id != id2) {
+		rep(cx_abort(cx2, id) == -ENOENT, "ctx2 cannot abort ctx1's id", "ctx1 id %llu, ctx2 id %llu", id, id2);
+		cx_inv(cx, &inv);
+		rep(inv.live_pairs == 1, "and ctx1's pair is untouched", "live_pairs=%u", inv.live_pairs);
+	} else {
+		data("ctx1 and ctx2 hold the same numeric id %llu: two different pairs (ids are per context)", id);
+	}
+	close(cx2);
+	usleep(100000);
+	cx_inv(cx, &inv);
+	rep(far_state(p.tfar) == '.' && inv.live_pairs >= 1, "releasing one context leaves the other's pair running", "live_pairs=%u", inv.live_pairs);
+	free_ps(&q);
+	free_ps(&p);
+	{
+		unsigned n;
+
+		cx_abort_all(cx, &n);
+		while (cx_read(cx, e, 16) > 0)
+			;
+	}
+
+	/* watch semantics */
+	{
+		struct ps w;
+		u64 wid;
+		struct ovd_fwd_end one;
+
+		/* (1) watch of a vsock whose guest direction already ended queues its record at once */
+		mk_vsock(&w.vfar, &w.vnear);
+		shutdown(w.vfar, SHUT_WR);
+		usleep(50000);
+		r = cx_watch(cx, w.vnear, &wid);
+		i = cx_read(cx, &one, 1);
+		rep(r == 0 && i == 1 && one.id == wid && one.kind == 3, "watch on a vsock whose peer already half-closed queues the record at once", "watch=%s read=%d kind=%d", ename(r),
+		    i, i == 1 ? one.kind : -1);
+		close(w.vfar);
+		close(w.vnear);
+		/* (2) a watch whose holder closes its fd is NOT ended: the module's reference keeps the socket and the watch live */
+		mk_vsock(&w.vfar, &w.vnear);
+		cx_watch(cx, w.vnear, &wid);
+		close(w.vnear);
+		usleep(100000);
+		cx_inv(cx, &inv);
+		{
+			struct pollfd pf = { w.vfar, POLLIN | POLLHUP, 0 };
+
+			rep(inv.live_watches == 1 && poll(&pf, 1, 100) == 0, "holder close() alone does not end a watch and the far end sees nothing",
+			    "live_watches=%u (the owner must ABORT the id when it drops the stream)", inv.live_watches);
+		}
+		r = cx_abort(cx, wid);
+		rep(r == 0, "ABORT ends it", "%s", ename(r));
+		i = cx_read(cx, &one, 1);
+		rep(i == 1 && one.kind == 4 && one.cause == 4, "Detached watch record", "kind=%d cause=%d", i == 1 ? one.kind : -1, i == 1 ? one.cause : -1);
+		{
+			struct pollfd pf = { w.vfar, POLLIN | POLLHUP, 0 };
+
+			r = poll(&pf, 1, 300);
+			data("after ABORT of a watch whose holder had closed: far end poll=%d revents=0x%x (the vsock stays open until the module's reference is dropped)", r,
+			     pf.revents);
+		}
+		close(w.vfar);
+		/* (3) ABORT of a watch does not shut the held socket */
+		mk_vsock(&w.vfar, &w.vnear);
+		cx_watch(cx, w.vnear, &wid);
+		cx_abort(cx, wid);
+		cx_read(cx, &one, 1);
+		r = send(w.vnear, "ok", 2, MSG_DONTWAIT);
+		i = recv(w.vfar, e, 2, MSG_WAITALL);
+		rep(r == 2 && i == 2, "after ABORT of a watch the holder's socket still carries data (spike choice; the contract does not say)", "send=%d recv=%d", r, i);
+		close(w.vfar);
+		close(w.vnear);
+	}
+
+	/* early data and an early end wait in the source queue and are forwarded by the attach-time run (EVMOD-PAIR flavour) */
+	{
+		struct ps pe;
+		char out[3000], in[3000];
+		ssize_t n;
+
+		for (i = 0; i < 3000; i++)
+			out[i] = (char)(i * 3 + 1);
+		mk_ps(&pe);
+		send(pe.tfar, out, 3000, 0);
+		shutdown(pe.tfar, SHUT_WR);          /* the TCP source has queued 3000 bytes and a FIN before the attach */
+		send(pe.vfar, out, 1000, 0);
+		shutdown(pe.vfar, SHUT_WR);          /* the vsock source: 1000 bytes and 0x2 before the attach */
+		usleep(100000);
+		r = cx_attach(cx, pe.vnear, pe.tnear, 0, &id, NULL);
+		rep(r == (g_strict ? -ENOTCONN : 0), g_strict ? "STRICT module refuses the early-FIN TCP half (ENOTCONN)" : "attach after data+FIN on both halves succeeds", "%s", ename(r));
+		if (r == 0) {
+			n = recv(pe.vfar, in, 3000, MSG_WAITALL);
+			rep(n == 3000 && !memcmp(in, out, 3000), "TCP-source bytes queued before attach arrive byte-exact", "n=%zd", n);
+			n = recv(pe.vfar, in, 1, 0);
+			rep(n == 0, "and the early FIN arrives as EOF at the vsock far end", "n=%zd", n);
+			n = recv(pe.tfar, in, 1000, MSG_WAITALL);
+			rep(n == 1000 && !memcmp(in, out, 1000), "vsock-source bytes queued before attach arrive byte-exact", "n=%zd", n);
+			n = recv(pe.tfar, in, 1, 0);
+			rep(n == 0, "and the early 0x2 arrives as FIN at the TCP far end", "n=%zd", n);
+			usleep(100000);
+			i = cx_read(cx, e, 4);
+			rep(i == 1 && e[0].kind == 1, "pair completed in its first runs: kind 1", "kind=%d moved=%llu/%llu", i == 1 ? e[0].kind : -1, i == 1 ? e[0].moved_ab : 0,
+			    i == 1 ? e[0].moved_ba : 0);
+		}
+		free_ps(&pe);
+	}
+	/* a chained end record carries the cause the classification pinned */
+	{
+		struct ps pc;
+		int k;
+
+		mk_ps(&pc);
+		cx_attach(cx, pc.vnear, pc.tnear, 0, &id, NULL);
+		rst_close(pc.tfar);                  /* TCP half resets */
+		pc.tfar = -1;
+		usleep(100000);
+		k = cx_read(cx, e, 4);
+		rep(k == 1 && e[0].kind == 2 && e[0].cause == 2 && e[0].err == ECONNRESET && e[0].side == 1, "TCP reset -> Aborted(SocketError, side B, ECONNRESET)", "kind=%d cause=%d side=%d err=%d",
+		    k == 1 ? e[0].kind : -1, k == 1 ? e[0].cause : -1, k == 1 ? e[0].side : -1, k == 1 ? e[0].err : -1);
+		free_ps(&pc);
+		mk_ps(&pc);
+		cx_attach(cx, pc.vnear, pc.tnear, 0, &id, NULL);
+		shutdown(pc.vfar, SHUT_RDWR);
+		usleep(100000);
+		k = cx_read(cx, e, 4);
+		rep(k == 1 && e[0].kind == 2 && e[0].cause == 1 && e[0].side == 0, "vsock 0x3 -> Aborted(PeerAbort, side A)", "kind=%d cause=%d side=%d", k == 1 ? e[0].kind : -1,
+		    k == 1 ? e[0].cause : -1, k == 1 ? e[0].side : -1);
+		rep(far_wait(pc.tfar, 500) == 'R', "and the TCP far end was reset", "");
+		free_ps(&pc);
+	}
+	cx_inv(cx, &inv);
+	data("final inventory: live %u/%u queued %u attached=%llu watched=%llu completed=%llu half_closed=%llu aborted peer=%llu sockerr=%llu detached=%llu unclassified=%llu",
+	     inv.live_pairs, inv.live_watches, inv.queued_ends, inv.attached, inv.watched, inv.completed, inv.half_closed, inv.aborted_peer, inv.aborted_sockerr,
+	     inv.aborted_detached, inv.unclassified_eof);
+	audit_dump("end");
+	rep(dmesg_bad() == 0, "no kernel oops/warn", "dmesg scan");
+}
+
+/* ====================================================================================================================== */
+
+/* ======================================================================================================================
+ * suite: chaos  (V-EV-CTL a): SIGKILL of an owner whose threads are inside attach / abort ioctls
+ * ==================================================================================================================== */
+#define CH_PAIRS 256
+#define CH_TRIALS 120
+
+struct chaos_shared { volatile int st[CH_PAIRS]; };
+struct chaos_arg { struct chaos_shared *sh; struct ps *P; int cx; int t; };
+
+static void *chaos_thread(void *a)
+{
+	struct chaos_arg *c = a;
+	int i, n = 0;
+
+	for (i = c->t; i < CH_PAIRS; i += 4, n++) {
+		u64 id;
+
+		c->sh->st[i] = 1;
+		if (cx_attach(c->cx, c->P[i].vnear, c->P[i].tnear, 0, &id, NULL))
+			continue;
+		c->sh->st[i] = 2;
+		if (n % 3 == 0) {
+			if (cx_abort(c->cx, id) == 0)
+				c->sh->st[i] = 3;
+		}
+		if (c->t == 0 && n % 16 == 15) {
+			unsigned k;
+
+			cx_abort_all(c->cx, &k);
+		}
+	}
+	return NULL;
+}
+
+static void s_chaos(void)
+{
+	struct chaos_shared *sh = mmap(NULL, sizeof(*sh), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+	int trial;
+	long viol = 0, att_total = 0, aborted_total = 0, spurious = 0, inflight_states[3] = {0};
+	long live_left = 0;
+	int cx0;
+
+	fx_init();
+	raise_nofile();
+	cx0 = cx_open(0);
+	rep(module_ok(cx0), "version", "ok");
+	close(cx0);
+	srand(12345);
+	for (trial = 0; trial < CH_TRIALS; trial++) {
+		struct ps P[CH_PAIRS];
+		pid_t pid;
+		int i, us = rand() % 20000;
+
+		memset((void *)sh, 0, sizeof(*sh));
+		for (i = 0; i < CH_PAIRS; i++)
+			mk_ps(&P[i]);
+		pid = fork();
+		if (pid == 0) {
+			int cx = cx_open(0);
+			pthread_t th[4];
+			struct chaos_arg a[4];
+
+			for (i = 0; i < CH_PAIRS; i++) {
+				close(P[i].tfar);
+				close(P[i].vfar);
+			}
+			for (i = 0; i < 4; i++) {
+				a[i] = (struct chaos_arg){ sh, P, cx, i };
+				pthread_create(&th[i], NULL, chaos_thread, &a[i]);
+			}
+			for (i = 0; i < 4; i++)
+				pthread_join(th[i], NULL);
+			pause();
+			_exit(0);
+		}
+		usleep(us);
+		kill(pid, SIGKILL);
+		waitpid(pid, NULL, 0);
+		/* after waitpid the exit path (exit_files -> release) has run */
+		{
+			double dl = now_ms() + 1500;
+			char s;
+
+			for (i = 0; i < CH_PAIRS; i++) {
+				int stt = sh->st[i];
+
+				nb(P[i].tfar);
+				s = far_state(P[i].tfar);
+				if (stt == 2 || stt == 3) {
+					att_total++;
+					while (s != 'R' && now_ms() < dl) {
+						usleep(500);
+						s = far_state(P[i].tfar);
+					}
+					if (stt == 3)
+						aborted_total++;
+					if (s != 'R') {
+						viol++;
+						printf("VIOLATION trial %d pair %d st=%d far=%c\n", trial, i, stt, s);
+					}
+				} else if (stt == 1) {
+					inflight_states[s == 'R' ? 0 : s == 'E' ? 1 : 2]++;
+				} else if (s == 'R') {
+					spurious++;
+					printf("SPURIOUS reset on a never-attached pair: trial %d pair %d\n", trial, i);
+				}
+			}
+		}
+		{
+			double dl = now_ms() + 1500;
+
+			while (audit("live") != 0 && now_ms() < dl)
+				usleep(1000);
+			live_left += audit("live");
+		}
+		for (i = 0; i < CH_PAIRS; i++)
+			free_ps(&P[i]);
+	}
+	rep(viol == 0, "every pair whose attach returned is reset by the owner's death",
+	    "%d trials, kill after 0..20 ms; attached-and-recorded pairs %ld (of which owner-aborted %ld); violations %ld", CH_TRIALS, att_total, aborted_total, viol);
+	rep(spurious == 0, "no never-attached pair was reset", "spurious=%ld", spurious);
+	data("pairs in flight (attach started, not recorded) at the kill: reset=%ld eof=%ld open=%ld", inflight_states[0], inflight_states[1], inflight_states[2]);
+	rep(live_left == 0, "no live id after any kill", "sum of live after each trial = %ld", live_left);
+	usleep(1000000);
+	audit_dump("end");
+	rep(audit("pair_new") == audit("pair_free"), "every pair object was freed (no leak)", "pair_new=%lld pair_free=%lld", audit("pair_new"), audit("pair_free"));
+	rep(audit("ctx_open") == audit("ctx_free"), "every context object was freed (no leak)", "opened=%lld released=%lld freed=%lld", audit("ctx_open"),
+	    audit("ctx_rel"), audit("ctx_free"));
+	rep(dmesg_bad() == 0, "no kernel oops/warn", "dmesg scan");
+}
+
+/* ======================================================================================================================
+ * suite: virtio  (V-EV-CTL a over the real virtio-vsock device: host peers are real vhost-vsock sockets on the metal host)
+ * ==================================================================================================================== */
+static int vlisten(unsigned port)
+{
+	struct sockaddr_vm v = { .svm_family = AF_VSOCK, .svm_cid = VMADDR_CID_ANY, .svm_port = port };
+	int fd = socket(AF_VSOCK, SOCK_STREAM | SOCK_CLOEXEC, 0);
+
+	if (fd < 0 || bind(fd, (void *)&v, sizeof(v)) || listen(fd, 1024)) {
+		perror("vlisten");
+		exit(2);
+	}
+	return fd;
+}
+
+static int line_read(int fd, char *buf, int max)
+{
+	int n = 0;
+
+	while (n < max - 1) {
+		char c;
+		int r = read(fd, &c, 1);
+
+		if (r <= 0)
+			return -1;
+		if (c == '\n')
+			break;
+		buf[n++] = c;
+	}
+	buf[n] = 0;
+	return n;
+}
+
+static void virtio_round(int lv, int ctl, int how, int traffic, int n)
+{
+	int *vn = calloc(n, sizeof(int)), *tf = calloc(n, sizeof(int)), *tn = calloc(n, sizeof(int));
+	int i, go[2], ack[2], ready[2], reset = 0, eof = 0, open_ = 0, imm = 0;
+	pid_t pid;
+	char b, line[128];
+	double t_ret, dl;
+	char *st = calloc(n, 1);
+
+	for (i = 0; i < n; i++) {
+		vn[i] = accept4(lv, NULL, NULL, SOCK_CLOEXEC);
+		if (vn[i] < 0) {
+			printf("FATAL virtio accept %d: %s\n", i, strerror(errno));
+			exit(2);
+		}
+		mk_tcp(&tf[i], &tn[i]);
+	}
+	pipe(go);
+	pipe(ack);
+	pipe(ready);
+	pid = fork();
+	if (pid == 0) {
+		int cx;
+
+		for (i = 0; i < n; i++)
+			close(tf[i]);
+		cx = cx_open(0);
+		for (i = 0; i < n; i++)
+			if (cx_attach(cx, vn[i], tn[i], 0, NULL, NULL))
+				_exit(10);
+		b = 'r';
+		write(ready[1], &b, 1);
+		read(go[0], &b, 1);
+		if (how == 0) {
+			close(cx);
+			b = 'c';
+			write(ack[1], &b, 1);
+			pause();
+		}
+		_exit(0);
+	}
+	read(ready[0], &b, 1);
+	for (i = 0; i < n; i++) {
+		close(vn[i]);
+		close(tn[i]);
+		nb(tf[i]);
+	}
+	if (traffic)
+		for (i = 0; i < n; i++)
+			pump_stall(tf[i]);
+	write(ctl, "READY\n", 6);
+	if (line_read(ctl, line, sizeof(line)) < 0 || strcmp(line, "GO")) {
+		printf("FATAL expected GO, got '%s'\n", line);
+		exit(2);
+	}
+	for (i = 0; i < n; i++)
+		st[i] = far_state(tf[i]);
+	for (i = 0; i < n; i++)
+		open_ += st[i] == '.';
+	rep(open_ == n, "virtio: far TCP ends open before the release", "how=%d traffic=%d: %d/%d open", how, traffic, open_, n);
+	b = 'g';
+	if (how == 0) {
+		write(go[1], &b, 1);
+		read(ack[0], &b, 1);
+	} else if (how == 1) {
+		kill(pid, SIGKILL);
+		waitpid(pid, NULL, 0);
+	} else {
+		write(go[1], &b, 1);
+		waitpid(pid, NULL, 0);
+	}
+	t_ret = now_ms();
+	for (i = 0; i < n; i++)
+		if ((st[i] = far_state(tf[i])) == 'R')
+			imm++;
+	dl = t_ret + 3000;
+	for (;;) {
+		int k = 0;
+
+		for (i = 0; i < n; i++) {
+			if (st[i] == '.')
+				st[i] = far_state(tf[i]);
+			k += st[i] != '.';
+		}
+		if (k == n || now_ms() > dl)
+			break;
+		usleep(500);
+	}
+	reset = eof = open_ = 0;
+	for (i = 0; i < n; i++) {
+		reset += st[i] == 'R';
+		eof += st[i] == 'E';
+		open_ += st[i] == '.';
+	}
+	rep(reset == n, "virtio: every guest-side far TCP end reset", "how=%d traffic=%d: reset=%d (at release return %d) eof=%d open=%d", how, traffic, reset, imm, eof, open_);
+	snprintf(line, sizeof(line), "RES how=%d traffic=%d reset=%d eof=%d open=%d\n", how, traffic, reset, eof, open_);
+	write(ctl, line, strlen(line));
+	if (how == 0)
+		kill(pid, SIGKILL);
+	waitpid(pid, NULL, 0);
+	for (i = 0; i < n; i++)
+		rst_close(tf[i]);
+	free(vn); free(tf); free(tn); free(st);
+}
+
+static void s_virtio(void)
+{
+	int lv, lc, ctl;
+	char line[128];
+
+	fx_init();
+	raise_nofile();
+	lv = vlisten(6000);
+	lc = vlisten(6001);
+	printf("VIRTIO_READY\n");
+	for (;;) {
+		int how, traffic, n;
+
+		ctl = accept4(lc, NULL, NULL, SOCK_CLOEXEC);
+		if (ctl < 0)
+			break;
+		if (line_read(ctl, line, sizeof(line)) < 0)
+			break;
+		if (!strcmp(line, "Q"))
+			break;
+		if (sscanf(line, "R %d %d %d", &how, &traffic, &n) != 3)
+			break;
+		virtio_round(lv, ctl, how, traffic, n);
+		close(ctl);
+	}
+	audit_dump("end");
+	rep(audit("live") == 0, "virtio: no live id left", "live=%lld", audit("live"));
+	rep(dmesg_bad() == 0, "no kernel oops/warn", "dmesg scan");
+}
+
+static void watchdog(int sig)
+{
+	(void)sig;
+	printf("CHECK FAIL watchdog :: suite exceeded its time budget\n");
+	fflush(stdout);
+	_exit(9);
+}
+
+int main(int argc, char **argv)
+{
+	const char *s = argc > 1 ? argv[1] : "misc";
+	static const struct { const char *n; int secs; } budget[] = { { "chaos", 400 }, { "virtio", 200 }, { "errno", 100 }, { "misc", 100 }, { "unload", 100 }, { "tls", 150 }, { "release", 300 },
+								      { "watch", 240 }, { "storm", 600 }, { "ids", 800 } };
+	int i;
+
+	for (i = 0; i < 10; i++)
+		if (!strcmp(s, budget[i].n)) {
+			signal(SIGALRM, watchdog);
+			alarm(budget[i].secs);
+		}
+
+	setvbuf(stdout, NULL, _IOLBF, 0);
+	signal(SIGPIPE, SIG_IGN);
+	g_strict = argc > 2 && !strcmp(argv[2], "strict");
+	printf("CTLTEST suite=%s strict=%d\n", s, g_strict);
+	if (!strcmp(s, "errno")) s_errno();
+	else if (!strcmp(s, "release")) s_release();
+	else if (!strcmp(s, "storm")) s_storm();
+	else if (!strcmp(s, "ids")) s_ids();
+	else if (!strcmp(s, "watch")) s_watch();
+	else if (!strcmp(s, "unload")) s_unload();
+	else if (!strcmp(s, "tls")) s_tls();
+	else if (!strcmp(s, "misc")) s_misc();
+	else if (!strcmp(s, "chaos")) s_chaos();
+	else if (!strcmp(s, "virtio")) s_virtio();
+	else {
+		printf("unknown suite %s\n", s);
+		return 2;
+	}
+	printf("RESULT suite=%s pass=%d fail=%d\n", s, g_pass, g_fail);
+	return g_fail ? 1 : 0;
+}

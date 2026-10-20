@@ -64,6 +64,10 @@ overdrive-core = { workspace = true, features = ["test-utils"] }
 # `.claude/rules/testing.md` § "Compile-fail testing (trybuild)" —
 # stderr is sensitive to both rustc and trybuild itself.
 trybuild.workspace = true
+# netns-density-295 R5-PROBE-MERGE — the probe-row merge acceptance drives
+# `SimObservationStore` beside `LocalObservationStore` and asserts both merge
+# on the run sequence identically.
+overdrive-sim.path = "../overdrive-sim"
 
 [lints]
 workspace = true

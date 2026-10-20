@@ -35,6 +35,7 @@
     clippy::unused_async
 )]
 
+use overdrive_core::observation::{ProbeRunSeq, SameStatusRuns};
 use std::collections::BTreeMap;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -256,6 +257,9 @@ async fn write_probe_result(
         status,
         last_observed_at_unix_ms,
         inferred: false,
+        run_seq: ProbeRunSeq::new(u64::max(last_observed_at_unix_ms, 1))
+            .unwrap_or(ProbeRunSeq::FIRST),
+        same_status_runs: SameStatusRuns::ONE,
     };
     obs.write_probe_result(row).await.expect("write probe result");
 }

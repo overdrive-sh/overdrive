@@ -6,14 +6,14 @@
 
   1) quota_bugNodeWideQuota::flow_quota::WithholdingGuestHoldsAtMostItsOwnQuota:
        Error [QNT508]: Cannot continue to "expect"
-        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/flow_quota.qnt:154:48
-        154:   run WithholdingGuestHoldsAtMostItsOwnQuota = init
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/flow_quota.qnt:189:48
+        189:   run WithholdingGuestHoldsAtMostItsOwnQuota = init
                                                             ^^^^
-        155:     .then(Admit(1)).then(HalfClose(1)).then(Refuse(1))
+        190:     .then(Admit(1)).then(HalfClose(1)).then(Refuse(1))
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        156:     .then(Admit(2)).expect(Safety and slot.get(2).own == 2 and g.otherAdmitted)
+        191:     .then(Admit(2)).expect(Safety and slot.get(2).own == 2 and g.otherAdmitted)
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Use --seed=0x4ab865b72c192004 --match=quota_bugNodeWideQuota::flow_quota::WithholdingGuestHoldsAtMostItsOwnQuota to repeat.
+    Use --seed=0x48787b458e3b91d --match=quota_bugNodeWideQuota::flow_quota::WithholdingGuestHoldsAtMostItsOwnQuota to repeat.
 
 
   Use --verbosity=3 to show executions.

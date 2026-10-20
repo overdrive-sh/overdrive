@@ -4,6 +4,7 @@ State 1
   terms = 0
   hist = <<>>
   psame = 0
+  conf_step = [init |-> [tag |-> "UNIT"]]
   pst = ""
   fs = 0
   rst = ""

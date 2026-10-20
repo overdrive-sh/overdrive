@@ -182,14 +182,22 @@ async fn harness() -> Harness {
         // assumes.
         sim_clock.clone(),
         Arc::clone(&obs),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
     )
     .await
     .expect("Earned-Trust gate passes with default Sim probers");
 
     let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(sim_clock.clone());
     assert!(wiring.supervisor().open_after_boot());
+    let sim_vmm = overdrive_sim::SimVmm::new();
+    let beacon = overdrive_worker::BeaconIntake::bind(
+        Arc::new(overdrive_sim::adapters::beacon_io::SimBeaconIo::new(sim_vmm.clone())),
+        overdrive_core::guest_transport::VsockListenPort::KernelAssigned,
+    )
+    .await
+    .expect("bind the node beacon intake");
     let driver: Arc<dyn Driver> = Arc::new(VmDriver::new(
-        Arc::new(overdrive_sim::SimVmm::new()),
+        Arc::new(sim_vmm),
         sim_clock.clone(),
         Arc::new(overdrive_sim::SimCgroupFs::new()),
         Arc::new(overdrive_sim::SimCgroupAccounting::new()),
@@ -206,6 +214,7 @@ async fn harness() -> Harness {
                 1024,
             ),
         },
+        beacon,
     ));
     let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
         let mut r = overdrive_core::traits::driver::DriverRegistry::new();

@@ -343,7 +343,7 @@ convention. Latest-writer-wins is structural (`redb::insert` semantics
 on the composite key); no merge logic needed.
 
 **Amended 2026-10-13 by
-[ADR-0191](adr-0191-every-probe-run-counts-once-through-a-run-sequence-in-the-probe-row.md)
+[ADR-0191](adr-0191-the-probe-runner-records-each-runs-streak-and-servicelifecycle-applies-thresholds-at-read.md)
 (#295, PROBE-RUN-COUNT):** the probe row merges by run sequence. Each row
 carries the producer's run sequence for its key and the producer's count of
 consecutive written runs of its status, and a written row replaces

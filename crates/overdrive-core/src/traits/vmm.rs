@@ -25,7 +25,7 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use tokio::sync::oneshot;
 
-use crate::guest_transport::ClaimedGuestCid;
+use crate::guest_transport::GuestCid;
 use crate::traits::driver::{ConfinementControl, STDERR_TAIL_LINES};
 use crate::vm::config::VmConfig;
 
@@ -112,18 +112,23 @@ pub trait Vmm: Send + Sync + 'static {
     /// Stage this VM's per-launch rootfs clone and spawn ONE confined
     /// hypervisor process for it.
     ///
-    /// D16-CLAIM: a launch takes the claimed device. `config` carries no
-    /// vsock field; the `--vsock cid=` value is `vsock.cid()`. `Err` drops
-    /// (releases) the claim. On `Ok` the VMM process holds the device and
-    /// the adapter holds no copy.
+    /// CID-NOCLAIM: `config` carries no vsock field; the launch's one vsock
+    /// device is `--vsock cid=<cid>,backend=vhost-kernel`, and the VMM opens
+    /// `/dev/vhost-vsock` itself. No Overdrive process opens the device or
+    /// holds a descriptor of it, before or after `create` returns. A device
+    /// the VMM cannot set up (the device cannot be opened, or the kernel
+    /// refuses the CID) makes the VMM exit before READY; the driver projects
+    /// it through the existing pre-READY VMM-exit start failure. No
+    /// vsock-specific [`VmmError`] variant exists.
     ///
     /// # Preconditions
     /// - `config` is a fully-constructed [`VmConfig`] — every substrate
     ///   lie ADR-0082 §D2 discourages (image type, memory ceiling,
     ///   kernel format, seccomp mode) is already resolved by `config`'s
     ///   own construction; `create` does not re-validate them.
-    /// - `vsock` is the claim this launch's [`crate::guest_transport::GuestTransportAssignment`]
-    ///   carried; the kernel holds its CID for this device instance only.
+    /// - `cid` is the leased CID this launch's
+    ///   [`crate::guest_transport::GuestTransportAssignment`] carries
+    ///   (`GUEST_CID_BASE + lease_offset`).
     ///
     /// # Postconditions on Ok
     /// - Exactly one hypervisor process is running, confined per
@@ -153,7 +158,7 @@ pub trait Vmm: Send + Sync + 'static {
     /// the hypervisor process cannot be spawned. On any `Err`, no
     /// process is left running and no clone is left on disk (see the
     /// spawn-after-clone edge case above).
-    async fn create(&self, config: &VmConfig, vsock: ClaimedGuestCid) -> Result<VmProcess>;
+    async fn create(&self, config: &VmConfig, cid: GuestCid) -> Result<VmProcess>;
 
     /// Terminate the hypervisor **process**: await its exit for
     /// `grace`, then kill it unconditionally.

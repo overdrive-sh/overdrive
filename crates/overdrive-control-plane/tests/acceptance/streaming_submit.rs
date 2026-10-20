@@ -1260,6 +1260,95 @@ async fn attempt_failed_exit_code_comes_from_workload_crashed_immediately_reason
     );
 }
 
+// ===========================================================================
+// RESTART-SSOT regression obligation 5 (GH #324): a Job's crash is never
+// placed again — the reconciler finalizes a Job's first natural exit, a crash
+// included (`workload_lifecycle.rs` natural-exit finalize) — so the Job
+// stream's `attempt_failed` line reports `will_restart: false` with no next
+// attempt delay, the reconciler's own decision through
+// `restart_status_for_alloc(target, WorkloadKind::Job, ..)`. Before the fix
+// the stream reported `will_restart: true` for the first four crashes.
+// ===========================================================================
+
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+#[ignore = "pending DELIVER step 0"]
+async fn a_job_crash_streams_attempt_failed_that_will_not_restart() {
+    let tmp = TempDir::new().expect("tmpdir");
+    let sim_clock = Arc::new(SimClock::new());
+    let mut state = build_app_state(&tmp, sim_clock.clone());
+    state.streaming_cap = Duration::from_secs(60);
+    let router = build_router(state.clone());
+
+    let alloc_id = AllocationId::from_str("alloc-payments-0").expect("alloc id");
+    let workload_id = WorkloadId::from_str("payments-v0").expect("job id");
+
+    let request_task = tokio::spawn(async move {
+        let response = router
+            .oneshot(build_submit_request_with_kind(
+                &payments_spec(),
+                "application/x-ndjson",
+                Some("job"),
+            ))
+            .await
+            .expect("router oneshot");
+        assert_eq!(response.status(), StatusCode::OK);
+        body_ndjson_lines(response.into_body()).await
+    });
+
+    for _ in 0..100 {
+        if state.lifecycle_events.receiver_count() >= 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // The exit observer's per-attempt observation of the Job's first crash.
+    let mut failed_event = make_lifecycle_event(
+        alloc_id.clone(),
+        workload_id.clone(),
+        AllocStateWire::Running,
+        AllocStateWire::Failed,
+        TransitionReason::WorkloadCrashedImmediately {
+            exit_code: Some(3),
+            signal: None,
+            stderr_tail: None,
+        },
+    );
+    failed_event.detail = None;
+    failed_event.terminal = None;
+    emit_lifecycle(&state, failed_event);
+
+    for _ in 0..50 {
+        tokio::task::yield_now().await;
+    }
+    sim_clock.tick(Duration::from_secs(61));
+    for _ in 0..50 {
+        tokio::task::yield_now().await;
+    }
+
+    let lines = tokio::time::timeout(Duration::from_secs(5), request_task)
+        .await
+        .expect("request finishes within 5s")
+        .expect("task ok");
+    let attempt_failed = lines
+        .iter()
+        .find(|l| l["kind"] == "attempt_failed")
+        .expect("expected an attempt_failed line in the stream");
+    assert_eq!(
+        attempt_failed["data"]["attempt_index"], 1,
+        "the first attempt; got {attempt_failed}"
+    );
+    assert_eq!(
+        attempt_failed["data"]["will_restart"], false,
+        "a Job crash is finalized, never placed again (GH #324); got {attempt_failed}"
+    );
+    assert!(
+        attempt_failed["data"]["next_attempt_delay"].is_null(),
+        "no next attempt, so no delay; got {attempt_failed}"
+    );
+}
+
 /// Regression: on the `Unchanged` idempotency path the handler used to
 /// take `workload_kind` from the *current request* rather than the stored
 /// discriminator. A first submit with `workload_kind: "job"` followed by a

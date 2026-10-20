@@ -1,0 +1,30 @@
+ 2704 |                 write(go[1], &b, 1);
+      |                 ^~~~~~~~~~~~~~~~~~~
+/var/tmp/ev-ctl-work/src/test/ctltest.c:2705:17: warning: ignoring return value of ‘read’ declared with attribute ‘warn_unused_result’ [-Wunused-result]
+ 2705 |                 read(ack[0], &b, 1);
+      |                 ^~~~~~~~~~~~~~~~~~~
+/var/tmp/ev-ctl-work/src/test/ctltest.c:2710:17: warning: ignoring return value of ‘write’ declared with attribute ‘warn_unused_result’ [-Wunused-result]
+ 2710 |                 write(go[1], &b, 1);
+      |                 ^~~~~~~~~~~~~~~~~~~
+/var/tmp/ev-ctl-work/src/test/ctltest.c:2738:9: warning: ignoring return value of ‘write’ declared with attribute ‘warn_unused_result’ [-Wunused-result]
+ 2738 |         write(ctl, line, strlen(line));
+      |         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/var/tmp/ev-ctl-work/src/test/ctltest.c: At top level:
+/var/tmp/ev-ctl-work/src/test/ctltest.c:2017:16: warning: ‘wr_all_to’ defined but not used [-Wunused-function]
+ 2017 | static ssize_t wr_all_to(int fd, const char *b, size_t n, int ms)
+      |                ^~~~~~~~~
+/var/tmp/ev-ctl-work/src/test/ctltest.c: In function ‘s_unload’:
+/var/tmp/ev-ctl-work/src/test/ctltest.c:1964:51: warning: ‘%s’ directive output may be truncated writing up to 255 bytes into a region of size 64 [-Wformat-truncation=]
+ 1964 |                         snprintf(rb, sizeof(rb), "%s", buf);
+      |                                                   ^~   ~~~
+In file included from /usr/include/stdio.h:974,
+                 from /var/tmp/ev-ctl-work/src/test/ctltest.c:24:
+In function ‘snprintf’,
+    inlined from ‘s_unload’ at /var/tmp/ev-ctl-work/src/test/ctltest.c:1964:4:
+/usr/include/x86_64-linux-gnu/bits/stdio2.h:68:10: note: ‘__builtin_snprintf’ output between 1 and 256 bytes into a destination of size 64
+   68 |   return __builtin___snprintf_chk (__s, __n, __USE_FORTIFY_LEVEL - 1,
+      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   69 |                                    __glibc_objsize (__s), __fmt,
+      |                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   70 |                                    __va_arg_pack ());
+      |                                    ~~~~~~~~~~~~~~~~~

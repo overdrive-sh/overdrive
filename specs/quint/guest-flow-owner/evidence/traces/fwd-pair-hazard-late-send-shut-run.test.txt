@@ -1,0 +1,23 @@
+
+  pair_bugLateSendShut
+    1) pair_bugLateSendShut::fwd_pair::HalfCloseThenPeerCloseIsClean failed after 1 test(s)
+
+  1 failed
+
+  1) pair_bugLateSendShut::fwd_pair::HalfCloseThenPeerCloseIsClean:
+       Error [QNT508]: Expect condition does not hold true
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/fwd_pair.qnt:1446:39
+        1446:   run HalfCloseThenPeerCloseIsClean = Paired
+                                                    ^^^^^^
+        1447:     .then(Fin("gh")).then(HopEnd0("gh")).then(VCtl("gh")).then(HopEnd1("gh")).then(ReadEof("gh"))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        1448:     .then(Write("hg")).then(Fin("hg")).then(Hop0("hg")).then(HopEnd0("hg"))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        1449:     .expect(Safety and pr.get("h").out == "completed" and dir.get("hg").q1 == [1])
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Use --seed=0xf028b4ddd68a2c59 --match=pair_bugLateSendShut::fwd_pair::HalfCloseThenPeerCloseIsClean to repeat.
+
+
+  Use --verbosity=3 to show executions.
+  Further debug with: quint test --verbosity=3 /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/hazard/fwd_pair_watch_hazards_2.qnt
+error: Tests failed

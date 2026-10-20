@@ -356,24 +356,19 @@ async fn vm_running_write_success_keeps_the_supervision_claim() {
         .expect("a Running row must exist after a successful start");
     assert_eq!(row.state, AllocState::Running, "the committed row is Running");
 
-    let (_workload, tap) = {
-        let provisions = network.provisions.lock();
-        assert_eq!(
-            provisions.len(),
-            1,
-            "the supported component composition acknowledges one C3 plan"
-        );
-        provisions[0].clone()
-    };
-    let tap = &tap;
+    assert_eq!(
+        network.provisions.lock().len(),
+        1,
+        "the supported component composition acknowledges one C3 plan"
+    );
     let started = sim_driver.started_specs();
     assert_eq!(started.len(), 1, "the VM-shaped driver is exercised exactly once");
-    let started = &started[0];
-    let network = started.network.as_ref().expect("grouped assignment");
-    assert_eq!(network.address, tap.guest_addr);
-    assert_eq!(network.tap, tap.tap);
-    assert_eq!(network.mac, tap.mac);
-    assert_eq!(network.gateway, tap.tap_gateway);
-    assert_eq!(network.prefix, tap.guest_network.prefix_len());
-    assert_eq!(network.dns, tap.responder_addr);
+    // `mtls_worker: None` composes no guest network: the allocation takes no
+    // guest-address lease and starts with no guest transport (the pre-feature
+    // path, P6-S12b).
+    assert!(
+        started[0].transport.is_none(),
+        "no guest transport without a composed guest network; got {:?}",
+        started[0].transport
+    );
 }

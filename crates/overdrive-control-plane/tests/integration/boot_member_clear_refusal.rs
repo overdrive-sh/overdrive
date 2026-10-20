@@ -31,7 +31,7 @@ use std::time::Duration;
 
 use overdrive_control_plane::error::{ControlPlaneError, MtlsBootError};
 use overdrive_control_plane::guest_network::{GuestNetworkOperation, SharedGuestNetworkOwner};
-use overdrive_control_plane::{ServerConfig, run_server_with_obs_and_driver};
+use overdrive_control_plane::run_server_with_obs_and_driver;
 use overdrive_core::guest_network::{GuestNetworkExecSupervisor, GuestNetworkExecWiring};
 use overdrive_core::id::NodeId;
 use overdrive_core::traits::driver::{Driver, DriverType};
@@ -374,19 +374,10 @@ async fn refused_boot(intercept: &Arc<RecordingBootIntercept>) -> RefusedBoot {
     let operator_config_dir = tmp.path().join("conf");
     std::fs::create_dir_all(&data_dir).expect("create data dir");
     std::fs::create_dir_all(&operator_config_dir).expect("create config dir");
-    let config = ServerConfig {
-        bind: "127.0.0.1:0".parse().expect("loopback bind"),
-        data_dir,
-        operator_config_dir,
-        dataplane: Some(super::dataplane_lo::lo_dataplane_config()),
-        dataplane_override: Some(Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new())),
-        ..ServerConfig::new(
-            Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-            Arc::clone(intercept) as Arc<dyn MtlsIntercept>,
-            Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
-        )
-    };
-    let wiring = GuestNetworkExecWiring::new(Arc::clone(&config.clock));
+    let config = super::node_adapters::test_config(data_dir, operator_config_dir);
+    let mut boot = super::node_adapters::boot_adapters(&config);
+    boot.mtls.intercept = Arc::clone(intercept) as Arc<dyn MtlsIntercept>;
+    let wiring = GuestNetworkExecWiring::new(Arc::clone(&boot.clock));
     let supervisor = wiring.supervisor();
     let owner = Arc::new(SimSharedGuestNetworkOwner::default());
     let owner_port: Arc<dyn SharedGuestNetworkOwner> = owner.clone();
@@ -398,9 +389,8 @@ async fn refused_boot(intercept: &Arc<RecordingBootIntercept>) -> RefusedBoot {
 
     let result = run_server_with_obs_and_driver(
         config,
-        obs,
+        overdrive_control_plane::BootAdapters { observation: obs, ..boot },
         driver,
-        Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         owner_port,
         wiring,
         overdrive_worker::cgroup_manager::CgroupManager::new(
@@ -455,9 +445,9 @@ fn assert_refused_without_publication(
     assert!(boot.supervisor.is_boot_closed(), "the EXEC gate stays BootClosed after the refusal");
     let owner_calls = boot.owner.calls();
     assert!(
-        !owner_calls.iter().any(|call| {
-            matches!(call, GuestNetworkOperation::TapCreate | GuestNetworkOperation::TapSetUp)
-        }),
+        !owner_calls
+            .iter()
+            .any(|call| { matches!(call, GuestNetworkOperation::ForwardingActivate) }),
         "a refused boot makes no guest attachment: {owner_calls:?}"
     );
     let journal = intercept.journal();
@@ -597,9 +587,9 @@ async fn a_boot_member_clear_that_commits_after_the_refusal_publishes_nothing() 
     );
     let owner_calls = boot.owner.calls();
     assert!(
-        !owner_calls.iter().any(|call| {
-            matches!(call, GuestNetworkOperation::TapCreate | GuestNetworkOperation::TapSetUp)
-        }),
+        !owner_calls
+            .iter()
+            .any(|call| { matches!(call, GuestNetworkOperation::ForwardingActivate) }),
         "the late commit admits no guest attachment: {owner_calls:?}"
     );
 }

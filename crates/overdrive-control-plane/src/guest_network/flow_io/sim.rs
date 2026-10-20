@@ -1,42 +1,89 @@
-//! `SimGuestFlowIo` — the owner seam's simulation adapter (DG-3, QPROJ-7).
+//! `SimGuestFlowIo` — the owner seam's simulation adapter (DG-3, QPROJ-7,
+//! QPROJ-8).
 //!
-//! `#[cfg(test)]`, crate-private, beside the seam (QPROJ-1 rule 3: it names the
-//! owner crate's own types). It holds every effect the owner issues (install,
-//! connect, bind, listen, steer, load, attach, pin, route write, close, …)
-//! until the driver releases or fails it, and reports when every owner task
-//! waiting on it is parked with nothing undelivered ([`SimGuestFlowIo::settled`],
-//! on a paused current-thread runtime).
+//! `#[cfg(test)]`, crate-private, beside the seam (QPROJ-1 rule 3: it names
+//! the owner crate's own types). It holds every async effect the owner
+//! issues (connect, bind, the forwarder open, a route write, a close, …)
+//! until the driver releases or fails it, and every input event (an accept, a
+//! record's bytes, an end record on the forwarder context) until the driver
+//! delivers it; it reports when every owner task waiting on it is parked with
+//! nothing undelivered ([`SimGuestFlowIo::settled`], on a paused
+//! current-thread runtime).
 //!
-//! Node-global steering state — the link (`None` / `Attached` / `Pinned`), the
-//! program version it runs, the entries, the tagged route — and the host facts
-//! live in a [`SimGuestNode`] shared by every `SimGuestFlowIo` built over it,
-//! so they survive an owner's drop; an unpinned link and every handle die
-//! with their seam ([`SimGuestFlowIo::exit_process`], or the seam's drop).
-//! Closing an `IntakeListener` removes its steering entry in the same step
-//! (K-L3). `converge_steering` is held as separate effects — `Load`, then
-//! `Attach` (an adopted link: the update) and, for a first attach only,
-//! `Pin` — so a driver can fail or crash between them.
+//! **Arbiters.** The read surfaces are the QPROJ-7 contract:
+//! [`SimGuestFlowIo::socket_observation`] ([`SimOwnerSocketObservation`],
+//! field names and meanings pinned by the design). Every forwarding method
+//! calls the `overdrive-sim` [`SimFlowForwarder`] context the seam holds,
+//! opened from the seam's own [`SimForwarderDevice`]; that context is the
+//! named arbiter of the forwarder's kernel facts (per-direction state, end
+//! records, live pairs and watches, the context table; QPROJ-8), and the
+//! [`SimSocket`]s the seam issues are the arbiters of the per-half socket
+//! facts (queues, peer shutdown bits, `sk_err`, the far reader). The
+//! `forwarder_*` read methods lend those facts to a driver's marked
+//! projection. Their Tier-3 pair is the module's suite through
+//! `KernelFlowForwarder` (V-EV-END, V-EV-CTL, V-EV-PAIR, V-EV-DGRAM) and, for
+//! the accept path, R5-59(a).
 //!
-//! The read surfaces are the QPROJ-7 contract: [`SimGuestFlowIo::socket_observation`],
-//! [`SimGuestFlowIo::steering_observation`], [`SimGuestFlowIo::steering_effects`].
-//! Every other method (holding, releasing, failing, scripting, delivering
-//! guest-side events) is DISTILL's test support.
+//! **Causes, not consequences** (`.claude/rules/testing.md` § "DISTILL —
+//! prove composed system behavior"). A test never queues an end record: it
+//! scripts the cause on a socket — the guest's `0x2` / `0x3` / `RST` on the
+//! flow vsock, the destination's FIN or reset, a stalled reader, the device
+//! release's `sk_err` — and the sim forwarder classifies it, runs the
+//! directions and queues the record as `KernelFlowForwarder` would. With
+//! auto-run (the default) every scripted cause and every attach is followed
+//! by the forwarder's runs until idle; a driver that steps the runs itself
+//! turns auto-run off ([`SimGuestFlowIo::set_auto_run`]).
 //!
-//! The sim enforces the real adapter's preconditions: a handle of another seam
-//! instance, a forwarding / steering call before its boot step, and an
-//! `accept` on an unbound listener are `unreachable!`; consuming calls are
-//! all-or-nothing; a handle left open when the seam drops without a process
-//! exit is reported (panic) as an owner defect.
+//! **Accept order (D-UP-19).** Pending connections wait outside the
+//! listener's accept queue with their peer CID and buffered first record and
+//! are released into it at the step that accepts them: one at a time by the
+//! driver ([`SimGuestFlowIo::release_accept`]), or, with auto-delivery, in a
+//! seeded order among those queued (the kernel's FIFO is one of the orders
+//! the seed produces).
+//!
+//! **Streams.** The `GuestStream` a dial returns reads its dial's `V_h`
+//! ([`SimSocket::local_read`], the holder's read of a watched vsock) and
+//! resolves every end it observes from the facts the seam saw
+//! (EVMOD-STREAM-END): the owner's own abort of the watch (`abort_forward` /
+//! `abort_all`), else the watch's end record as the owner consumed it
+//! (`next_end`), else it waits — the same facts `HostGuestFlowIo` sees in
+//! production. The driver plays the guest application on the far side of
+//! `V_h` ([`SimGuestFlowIo::stream_guest_write`],
+//! [`SimGuestFlowIo::guest_ends_stream`]).
+//!
+//! The sim enforces the real adapter's preconditions: a handle of another
+//! seam instance, a forwarding call with no context held, and an `accept` on
+//! an unbound listener are `unreachable!`; `attach` is all-or-nothing; a
+//! handle left open when the seam drops without a process exit is reported
+//! (panic) as an owner defect.
 
 #![allow(
+    clippy::struct_excessive_bools,
     clippy::redundant_pub_crate,
     reason = "QPROJ-7 pins `pub(crate)` visibility for the sim's read surface"
 )]
 #![allow(
+    clippy::expect_used,
+    clippy::missing_const_for_fn,
+    clippy::option_if_let_else,
+    clippy::needless_pass_by_value,
+    clippy::unnecessary_wraps,
+    clippy::unused_self,
+    reason = "test support and conformance drivers: fixture preconditions are asserted with expect, and handler signatures follow the action map"
+)]
+#![allow(
+    dead_code,
+    reason = "test support shared by the default-lane bodies and the integration-tests conformance drivers; each lane uses a subset"
+)]
+#![allow(
     clippy::significant_drop_tightening,
     clippy::too_many_lines,
-    reason = "the sim applies each effect under one lock acquisition by design (atomic kernel steps)"
+    clippy::missing_panics_doc,
+    reason = "the sim applies each kernel step under one lock acquisition by design (atomic kernel steps)"
 )]
+
+#[cfg(test)]
+mod tests;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io;
@@ -45,174 +92,61 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use aya::programs::ProgramError;
-use aya::sys::SyscallError;
-use ipnet::Ipv4Net;
+use overdrive_core::guest_transport::dial::{GuestStream, GuestStreamEnd, GuestStreamIo};
+use overdrive_core::guest_transport::forwarder::{
+    FlowForwarder, ForwardOutcome, ForwarderOp, ForwarderProbeObservation, ForwarderProbeStage,
+    PairSide,
+};
 use overdrive_core::guest_transport::wire::{
     CONTROL_MESSAGE_LEN, CONTROL_OPEN_LEN, ControlMessage, ControlOpen, FLOW_REQUEST_LEN, FlowId,
-    FlowRequest,
+    FlowRequest, KernelErrno,
 };
-use overdrive_core::guest_transport::{GuestCid, LaunchToken};
-use overdrive_core::net::InterfaceIndex;
-use overdrive_dataplane::guest_flow::{
-    GUEST_FLOW_MAX_PAIRS, GuestFlowCounters, GuestFlowError, GuestFlowInventory, GuestFlowLinks,
-    UnframeAttachError, UnframeConvergence,
-};
-use overdrive_dataplane::guest_steering::{GUEST_PREFIX_STEERING_PIN_DIR, GuestSteeringError};
+use overdrive_core::guest_transport::{GuestCid, LaunchToken, VsockListenPort};
+use overdrive_core::vm::config::VsockPort;
+
+/// The first port a kernel-assigned sim bind takes (above the reserved
+/// range, as `VMADDR_PORT_ANY` binds are).
+const SIM_FIRST_ASSIGNED_PORT: u32 = 49_152;
 use overdrive_netlink::NetlinkError;
+use overdrive_sim::adapters::{
+    SimContextState, SimFarEnd, SimFlowForwarder, SimForwarderDevice, SimLocalRead, SimShutdown,
+    SimSocket, SimVsockState,
+};
 use parking_lot::Mutex;
 use tokio::sync::{Notify, oneshot};
 
 use super::{
-    ArmedPeer, DatagramPair, FlowDirection, FlowHangup, FlowIoError, FlowListener, GuestFlowIo,
-    GuestHostFacts, HostRouteType, InstalledVsock, IntakeChild, IntakeListener, OwnedSocket,
-    PairKey, PairSocket, ParkedChild, PeerProtocol, PeerSocket, PeerSocketSpec, PendingInbound,
-    RecordSocket, SeamHandle, TcpPair,
+    AbortResult, AttachRefused, AttachedPair, FlowIoError, FlowListener, ForwardEnd, ForwardId,
+    ForwarderError, ForwarderGeneration, ForwarderInventory, GuestFlowIo, GuestHostFacts,
+    HostRouteType, OwnedSocket, PairMode, PairSocket, PairState, PeerProtocol, PeerSocket,
+    PeerSocketSpec, RecordSocket, SeamHandle,
 };
 use crate::guest_network::{GuestConnKey, GuestNetworkError, GuestNetworkOperation};
 
 // ===========================================================================
-// QPROJ-7 read surfaces (the contract)
+// QPROJ-7 read surface (the contract)
 // ===========================================================================
 
-/// The steering program a sim binary loads (`bin` in `prefix_boot`).
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct SimProgramVersion(String);
-
-impl SimProgramVersion {
-    /// A program labelled `label` (e.g. `"v1"`).
-    pub(crate) fn new(label: &str) -> Self {
-        Self(label.to_owned())
-    }
-
-    /// The label.
-    pub(crate) fn label(&self) -> &str {
-        &self.0
-    }
-}
-
-/// The node's guest-prefix steering link.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SimSteeringLink {
-    /// No link.
-    None,
-    /// A first link attached and not yet pinned (process-scoped).
-    Attached,
-    /// The link pinned under `GUEST_PREFIX_STEERING_PIN_DIR` (node-global).
-    Pinned,
-}
-
-/// The guest prefix's Overdrive-tagged route.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SimPrefixRoute {
-    /// No tagged route.
-    Absent,
-    /// `local <prefix> dev lo src <gateway> proto GUEST_PREFIX_ROUTE_PROTOCOL`.
-    Local,
-}
-
-/// The intake listener a steering entry names.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct SimListenerRef {
-    /// The listener's bound address (`workload_addr:<intake host port>`).
-    pub(crate) bound: SocketAddrV4,
-    seam: u64,
-    handle: u64,
-}
-
-/// The outcome of one `steer` the owner issued.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SimSteerOutcome {
-    /// The entry is present.
-    Ok,
-    /// `GuestSteeringError::KernelMemory`.
-    KernelMemory,
-    /// Any other failure (an Overdrive defect). No capacity outcome exists
-    /// (D8a-CAP).
-    Defect,
-}
-
-/// One steering or route effect the owner issued, with its outcome.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum SimSteeringEffect {
-    /// `GuestPrefixSteering::load` of this seam's program.
-    Load {
-        /// The program loaded.
-        version: SimProgramVersion,
-        /// The load returned `Ok`.
-        ok: bool,
-    },
-    /// `GuestSteeringCandidate::attach`: the update of an adopted link, or a
-    /// first attach.
-    Attach {
-        /// A pinned link was adopted (the update).
-        adopted: bool,
-        /// The attach returned `Ok`.
-        ok: bool,
-    },
-    /// The pin of a first attach.
-    Pin {
-        /// The pin succeeded.
-        ok: bool,
-    },
-    /// The prefix route write.
-    Route {
-        /// The write succeeded.
-        ok: bool,
-    },
-    /// One `steer`.
-    Steer {
-        /// The intake `(workload_addr, declared port)`.
-        intake: SocketAddrV4,
-        /// Its outcome.
-        outcome: SimSteerOutcome,
-    },
-}
-
-/// The node-global steering state.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SimSteeringObservation {
-    /// None | Attached | Pinned.
-    pub(crate) link: SimSteeringLink,
-    /// The program the link runs.
-    pub(crate) program: Option<SimProgramVersion>,
-    /// `(workload_addr, declared port)` → listener.
-    pub(crate) entries: BTreeMap<SocketAddrV4, SimListenerRef>,
-    /// Absent | Local.
-    pub(crate) route: SimPrefixRoute,
-}
-
-/// The first terminal event an outer far end observed.
+/// An outer far end's first terminal event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FarEndEvent {
-    /// A clean FIN.
+    /// A clean FIN (the forwarder carried the source's clean end, or the
+    /// owner closed the socket with linger cleared).
     Eof,
-    /// A reset.
+    /// A reset (`SO_LINGER{1,0}`, or the forwarder's abort of the pair).
     Reset,
 }
 
-/// The socket facts of one seam (QPROJ-7).
+/// QPROJ-7: the socket facts of one seam.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SimOwnerSocketObservation {
     /// Accept-queued connections and their buffered first record's token
     /// (`None`: nothing buffered).
     pub(crate) queued: BTreeMap<GuestConnKey, Option<LaunchToken>>,
-    /// Connections the owner closed.
+    /// Connections the owner closed; no longer in `flow_observation()`.
     pub(crate) closed_by_owner: BTreeSet<GuestConnKey>,
     /// Accepted; peer VM dead, not yet observed.
     pub(crate) peer_gone: BTreeSet<GuestConnKey>,
-    /// Peer connect issued, completion not consumed.
-    pub(crate) connects_in_flight: BTreeSet<GuestConnKey>,
-    /// `V_h` the owner closed.
-    pub(crate) host_flows_closed: BTreeSet<FlowId>,
-    /// Written by the owner, not consumed by the peer.
-    pub(crate) outbox: BTreeMap<GuestCid, Vec<ControlMessage>>,
-    /// Control sessions that ended.
-    pub(crate) session_ended: BTreeSet<GuestCid>,
-    /// Flow-vsock ends the owner issued, not yet delivered to the peer.
-    pub(crate) vsock_ends_in_flight: BTreeSet<FlowId>,
-    /// Flow-vsock ends delivered to the peer.
-    pub(crate) vsock_ended: BTreeSet<FlowId>,
     /// Each outer far end's first terminal event.
     pub(crate) far_end: BTreeMap<FlowId, FarEndEvent>,
 }
@@ -221,102 +155,67 @@ pub(crate) struct SimOwnerSocketObservation {
 // Test-support vocabulary (DISTILL's)
 // ===========================================================================
 
+/// A vsock SHUTDOWN the host sent toward the guest on a dial's `V_h`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum VsockShutdownOp {
+    /// Flags `0x2` (SEND only): the dialer's `shutdown_write`.
+    HalfClose,
+    /// Flags `0x3` (RCV | SEND): a close of `V_h`.
+    Close,
+}
+
 /// Identifies one held effect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct SimEffectId(u64);
 
-/// The kind of an effect the owner issues through the seam.
+/// The kind of an effect the owner issues through the seam. The
+/// synchronous forwarding calls (`CloseForwarder`, `Watch`, `Attach`,
+/// `AbortForward`, `AbortAll`, `Inventory`) cannot be held; they are
+/// recorded and may be scripted to fail.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum SimEffectKind {
     HostFacts,
+    /// Phase 1's forwarder probe on a context of its own (D-8).
     ProbeForwarder,
-    LoadForwarder,
+    OpenForwarder,
+    CloseForwarder,
     BindListener,
+    GatewayRoute,
     StaleObjects,
-    SteeringLoad,
-    SteeringAttach,
-    SteeringPin,
-    PrefixRoute,
     WriteRecord,
     ConnectGuest,
+    Watch,
     OpenPeer,
     ConnectUdp,
     ConnectPeer,
     RouteType,
-    BindIntake,
-    Steer,
-    InstallVsock,
-    ArmPeer,
-    RouteOutbound,
-    InstallDatagram,
-    RegisterIntake,
-    UnregisterIntake,
-    AdoptIntake,
-    BeginInbound,
-    WriteRequest,
-    RouteInbound,
-    Drained,
-    RemovePair,
+    Attach,
+    AbortForward,
+    AbortAll,
+    /// `inventory()` (the owner's audit read; a scripted `ContextIo` damages
+    /// the `Forwarder` component).
     Inventory,
-    Counters,
-    ShutdownWrite,
     ClearLinger,
     Abort,
     Close,
 }
 
 impl SimEffectKind {
-    /// Every kind.
-    pub(crate) const ALL: [Self; 35] = [
-        Self::HostFacts,
-        Self::ProbeForwarder,
-        Self::LoadForwarder,
-        Self::BindListener,
-        Self::StaleObjects,
-        Self::SteeringLoad,
-        Self::SteeringAttach,
-        Self::SteeringPin,
-        Self::PrefixRoute,
-        Self::WriteRecord,
-        Self::ConnectGuest,
-        Self::OpenPeer,
-        Self::ConnectUdp,
-        Self::ConnectPeer,
-        Self::RouteType,
-        Self::BindIntake,
-        Self::Steer,
-        Self::InstallVsock,
-        Self::ArmPeer,
-        Self::RouteOutbound,
-        Self::InstallDatagram,
-        Self::RegisterIntake,
-        Self::UnregisterIntake,
-        Self::AdoptIntake,
-        Self::BeginInbound,
-        Self::WriteRequest,
-        Self::RouteInbound,
-        Self::Drained,
-        Self::RemovePair,
-        Self::Inventory,
-        Self::Counters,
-        Self::ShutdownWrite,
-        Self::ClearLinger,
-        Self::Abort,
-        Self::Close,
-    ];
-
-    /// Pure reads, released without a hold by default.
-    const READS: [Self; 6] = [
-        Self::HostFacts,
-        Self::StaleObjects,
-        Self::RouteType,
-        Self::Drained,
-        Self::Inventory,
-        Self::Counters,
-    ];
+    /// The synchronous seam calls: recorded and scriptable, never held.
+    const fn is_sync(self) -> bool {
+        matches!(
+            self,
+            Self::CloseForwarder
+                | Self::Watch
+                | Self::Attach
+                | Self::AbortForward
+                | Self::AbortAll
+                | Self::Inventory
+        )
+    }
 }
 
-/// What one held effect targets.
+/// What one effect targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SimEffectTarget {
     /// Nothing beyond the kind.
@@ -325,18 +224,18 @@ pub(crate) enum SimEffectTarget {
     Listener(FlowListener),
     /// A guest CID.
     Cid(GuestCid),
-    /// A socket address (bind, connect, steer intake).
+    /// A socket address.
     Addr(SocketAddrV4),
     /// An IPv4 destination.
     Ip(Ipv4Addr),
-    /// A pair.
-    Pair(PairKey),
-    /// The steering attach: an adopted pinned link (`true`) or a first attach.
-    Adopted(bool),
     /// A peer socket spec.
     Peer(PeerSocketSpec),
-    /// The control session / flow connection a record write goes to.
+    /// The connection a record write goes to (`None`: a dial's `V_h`).
     Conn(Option<GuestConnKey>),
+    /// The flow a socket belongs to, when the sim knows it.
+    Flow(Option<FlowId>),
+    /// A forwarder id of the current context.
+    Forward(ForwardId),
 }
 
 /// One effect the owner issued.
@@ -348,47 +247,49 @@ pub(crate) struct SimEffect {
     pub(crate) target: SimEffectTarget,
 }
 
-/// A scripted steering failure.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SimSteeringFailure {
-    /// `load`: the kernel verifier rejects the program.
-    Load,
-    /// `load`: opening the pinned link failed.
-    Query,
-    /// `attach` of an adopted link: `BPF_LINK_UPDATE` failed.
-    Update,
-    /// A first `attach` failed.
-    Attach,
-    /// Pinning a first attach failed.
-    Pin,
-    /// `steer`: `ENOMEM`.
-    KernelMemory,
-    /// `steer`: another map update failure.
-    MapUpdate,
-    /// `steer`: reading the present entry failed.
-    MapLookup,
-    /// `steer`: the entry names another open listener.
-    IntakeAlreadySteered,
-}
-
-/// A scripted forwarder failure.
+/// A scripted forwarder failure (UI-COV-1): the `ForwarderError` an
+/// `open_forwarder`, `attach`, `watch` or context call returns. A
+/// `HalfEnded` refusal is never scripted: it is the sim forwarder's answer
+/// to a half whose scripted socket facts show it ended (EVMOD-ATTACH-END).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SimForwarderFailure {
-    /// The owner's cgroup is the root cgroup.
-    OwnerCgroupIsRoot,
-    /// A socket query failed with this errno kind.
-    SocketQuery(io::ErrorKind),
-    /// Every pair slot is in use.
-    PairCapacity,
+    /// `/dev/ovd_fwd` cannot be opened (the module is absent).
+    DeviceAbsent,
+    /// The module speaks another ABI.
+    AbiMismatch,
+    /// A probe stage observed the wrong behaviour.
+    ProbeMismatch(ForwarderProbeStage, ForwarderProbeObservation),
+    /// Owner defects at attach.
+    UnsupportedSocket(PairSide),
+    UpperLayerProtocol(PairSide),
+    NotConnected(PairSide),
+    AlreadyHooked(PairSide),
+    BufferTooSmall(PairSide),
+    /// A control call on the context failed (`Io`): the `Forwarder`
+    /// component is damaged.
+    ContextIo(ForwarderOp),
 }
 
-/// A scripted egress unframe attach failure at boot (D5a-IFACE-BOOT).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SimUnframeFailure {
-    /// `ENOMEM`.
-    KernelMemory,
-    /// Any other errno (`ERANGE`, `EEXIST`, `ENODEV`, …).
-    Attach(i32),
+impl SimForwarderFailure {
+    fn error(self) -> ForwarderError {
+        match self {
+            Self::DeviceAbsent => {
+                ForwarderError::DeviceAbsent { source: io::Error::from_raw_os_error(libc::ENOENT) }
+            }
+            Self::AbiMismatch => ForwarderError::AbiMismatch { expected: 1, found: 2 },
+            Self::ProbeMismatch(stage, observed) => {
+                ForwarderError::ProbeMismatch { stage, observed }
+            }
+            Self::UnsupportedSocket(side) => ForwarderError::UnsupportedSocket { side },
+            Self::UpperLayerProtocol(side) => ForwarderError::UpperLayerProtocol { side },
+            Self::NotConnected(side) => ForwarderError::NotConnected { side },
+            Self::AlreadyHooked(side) => ForwarderError::AlreadyHooked { side },
+            Self::BufferTooSmall(side) => ForwarderError::BufferTooSmall { side },
+            Self::ContextIo(op) => {
+                ForwarderError::Io { op, source: io::Error::from_raw_os_error(libc::EIO) }
+            }
+        }
+    }
 }
 
 /// A failure the driver gives a held (or scripts for an auto-released)
@@ -398,19 +299,13 @@ pub(crate) enum SimFailure {
     /// A socket syscall (`FlowIoError::Io`) or, for `host_facts` /
     /// `stale_objects_present`, `GuestNetworkError::Io`.
     Io(io::ErrorKind),
-    /// A steering failure (`converge_steering`, `steer`).
-    Steering(SimSteeringFailure),
     /// A forwarder failure.
     Forwarder(SimForwarderFailure),
-    /// The prefix route write (`GuestNetworkError::Netlink { LocalRouteConverge }`).
+    /// The gateway route write (`GuestNetworkError::Netlink { LocalRouteConverge }`).
     Netlink,
 }
 
-/// A guest-opened connection's first record, buffered in the accept queue.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SimFirstRecord(pub(crate) Vec<u8>);
-
-/// How a peer ends a connection.
+/// How a peer ends a connection the owner reads records on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SimPeerEnd {
     /// A clean end of stream.
@@ -419,120 +314,70 @@ pub(crate) enum SimPeerEnd {
     Reset,
 }
 
-/// Which leg of a pair a terminal event or a vsock end concerns.
+/// What a forwarder id the sim issued carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SimPairLeg {
-    /// The TCP flow vsock.
-    Vsock,
-    /// The TCP outer leg.
-    Outer,
-    /// The datagram stream leg.
-    Stream,
-    /// The datagram seqpacket leg.
-    Seqpacket,
-    /// The datagram UDP socket.
-    Udp,
+pub(crate) enum SimPairKind {
+    /// A guest-opened TCP flow (TcpConnect): `V_h` ↔ D (or leg-F's L).
+    Tcp,
+    /// A datagram association: `V_h` ↔ H.
+    Datagram,
+    /// A dial's `V_h`, watched, never paired.
+    Watch,
 }
 
-/// Where a host-local client connect to the guest prefix lands.
+/// One forwarder id, as the sim names it (test support, never a projection
+/// source).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SimLanding {
-    /// The steered intake listener's accept queue.
-    Steered(SimListenerRef),
-    /// Refused: no entry (every other lookup to the prefix is dropped).
-    Refused,
+pub(crate) struct SimPairInfo {
+    /// What it carries.
+    pub(crate) kind: SimPairKind,
+    /// The flow it belongs to, from the request the sim saw.
+    pub(crate) flow: Option<FlowId>,
+    /// The guest CID of the flow.
+    pub(crate) cid: GuestCid,
+    /// The context generation it was issued in.
+    pub(crate) generation: ForwarderGeneration,
 }
 
-// ===========================================================================
-// Node-global state
-// ===========================================================================
-
-#[derive(Debug, Clone)]
-struct NodeLink {
-    pinned: bool,
-    program: SimProgramVersion,
-    attached_by: u64,
+/// A dial's `TcpAccept` request as the owner wrote it on `V_h`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SimDialRecord {
+    /// The CID the owner connected `V_h` to.
+    pub(crate) cid: GuestCid,
+    /// The forwarder watch on `V_h`, once the owner made it.
+    pub(crate) watch: Option<ForwardId>,
+    /// The decoded request (`None` until written).
+    pub(crate) request: Option<FlowRequest>,
+    /// The owner closed or aborted `V_h` (or handed it off and the stream was
+    /// dropped).
+    pub(crate) closed: bool,
+    /// `V_h` was handed to the dialer as a `GuestStream`.
+    pub(crate) streamed: bool,
 }
 
-#[derive(Debug)]
-struct NodeState {
-    link: Option<NodeLink>,
-    route: SimPrefixRoute,
-    entries: BTreeMap<SocketAddrV4, SimListenerRef>,
-    host_facts: GuestHostFacts,
-    host_facts_failure: Option<io::ErrorKind>,
-    stale_objects: bool,
+/// The guest's end of a dialled stream's direction, as the guest
+/// application and its pair produce it on `V_g` (the far side of `V_h`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SimGuestStreamEnd {
+    /// The application half-closed: `0x2` reaches `V_h`; the watch records
+    /// `GuestHalfClose`.
+    HalfClose,
+    /// The guest pair aborted with a direction open: `0x3` reaches `V_h`;
+    /// the watch records `Aborted { PeerAbort }`.
+    Abort,
+    /// The application's reset reached `V_h` as an `RST`.
+    Reset,
 }
 
-/// Node-global objects shared by every [`SimGuestFlowIo`] over this node:
-/// the pinned steering link, its program and entries, the tagged route, the
-/// host facts. They survive an owner's drop (U-4, K-D3).
-#[derive(Debug)]
-pub(crate) struct SimGuestNode {
-    state: Mutex<NodeState>,
-    next_seam: AtomicU64,
-}
-
-impl SimGuestNode {
-    /// A node never booted: no link, no route, default host facts
-    /// (independent interfaces none, ephemeral range `32768..=60999`,
-    /// `RLIMIT_NOFILE` 1,048,576, the owner in
-    /// `/sys/fs/cgroup/overdrive.slice/control-plane.slice`).
-    pub(crate) fn new() -> Arc<Self> {
-        Arc::new(Self {
-            state: Mutex::new(NodeState {
-                link: None,
-                route: SimPrefixRoute::Absent,
-                entries: BTreeMap::new(),
-                host_facts: GuestHostFacts {
-                    interfaces: BTreeMap::new(),
-                    ephemeral_ports: 32_768..=60_999,
-                    nofile_limit: 1_048_576,
-                    owner_cgroup: PathBuf::from(
-                        "/sys/fs/cgroup/overdrive.slice/control-plane.slice",
-                    ),
-                },
-                host_facts_failure: None,
-                stale_objects: false,
-            }),
-            next_seam: AtomicU64::new(1),
-        })
-    }
-
-    /// Replaces the host facts `host_facts` reports.
-    pub(crate) fn set_host_facts(&self, facts: GuestHostFacts) {
-        self.state.lock().host_facts = facts;
-    }
-
-    /// Mutates the host facts `host_facts` reports.
-    pub(crate) fn update_host_facts(&self, update: impl FnOnce(&mut GuestHostFacts)) {
-        update(&mut self.state.lock().host_facts);
-    }
-
-    /// Makes the next `host_facts` read fail with `kind`.
-    pub(crate) fn fail_host_facts(&self, kind: io::ErrorKind) {
-        self.state.lock().host_facts_failure = Some(kind);
-    }
-
-    /// Whether a process-scoped owner object of a previous run is present.
-    pub(crate) fn set_stale_objects(&self, present: bool) {
-        self.state.lock().stale_objects = present;
-    }
-
-    /// The steering state, read across every seam over this node.
-    fn steering(&self) -> SimSteeringObservation {
-        let node = self.state.lock();
-        SimSteeringObservation {
-            link: match &node.link {
-                None => SimSteeringLink::None,
-                Some(link) if link.pinned => SimSteeringLink::Pinned,
-                Some(_) => SimSteeringLink::Attached,
-            },
-            program: node.link.as_ref().map(|link| link.program.clone()),
-            entries: node.entries.clone(),
-            route: node.route,
-        }
-    }
+/// The dialer side of a handed-off `GuestStream`, as the sim saw it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct SimStreamObservation {
+    /// Bytes the dialer wrote toward the guest.
+    pub(crate) to_guest: Vec<u8>,
+    /// The dialer shut its direction down.
+    pub(crate) host_shut: bool,
+    /// The dialer dropped the stream.
+    pub(crate) dropped: bool,
 }
 
 // ===========================================================================
@@ -544,15 +389,12 @@ struct Held {
     decide: oneshot::Sender<Option<SimFailure>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SteeringPhase {
-    None,
-    Converged { prefix: Ipv4Net, gateway: Ipv4Addr },
-}
-
 #[derive(Debug, Default)]
-struct VsockListener {
+struct ListenerState {
     bound: bool,
+    /// The port the held socket bound (PORTS-CONFIG); kept for the
+    /// process's life, so a repair reports it again.
+    port: Option<VsockPort>,
     failed: Option<io::ErrorKind>,
     queue: VecDeque<QueuedConn>,
 }
@@ -569,103 +411,82 @@ struct QueuedConn {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RecordOrigin {
     Accepted(FlowListener),
-    HostOpened,
+    Dialed,
 }
 
-#[derive(Debug)]
 struct RecordState {
     origin: RecordOrigin,
     conn: Option<GuestConnKey>,
-    peer_cid: Option<GuestCid>,
+    peer_cid: GuestCid,
     first_record: Vec<u8>,
     buffered: VecDeque<u8>,
     ready: VecDeque<u8>,
     end: Option<SimPeerEnd>,
     end_released: bool,
     peer_gone: bool,
+    /// The owner may observe `peer_gone` (auto-delivery, or released by
+    /// [`SimGuestFlowIo::release_peer_gone`]).
+    peer_gone_released: bool,
+    /// A dial: its flow id, once its request was written.
+    dial_flow: Option<FlowId>,
+    /// The vsock socket the forwarder sees (after the record bytes).
+    vsock: SimSocket,
 }
 
-#[derive(Debug, Clone, Copy)]
 struct PeerState {
     spec: PeerSocketSpec,
     local: Option<SocketAddrV4>,
     peer: Option<SocketAddrV4>,
+    /// The flow the peer was attached for (learnt at `attach`).
+    flow: Option<FlowId>,
+    socket: SimSocket,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PairRole {
     Vsock,
-    Outer { abortive: bool },
-    Stream,
-    Seqpacket,
+    Tcp { linger: bool },
     Udp,
 }
 
-#[derive(Debug)]
 struct PairSocketState {
-    pair: PairKey,
+    id: ForwardId,
+    generation: ForwarderGeneration,
     role: PairRole,
     conn: Option<GuestConnKey>,
-    label: Option<[u8; FLOW_REQUEST_LEN]>,
-    hangup: Option<FlowHangup>,
+    flow: Option<FlowId>,
     linger_cleared: bool,
-    shut: bool,
+    socket: SimSocket,
 }
 
-#[derive(Debug)]
-struct IntakeClient {
-    client: SocketAddrV4,
-    released: bool,
-}
-
-#[derive(Debug)]
-struct IntakeListenerState {
-    bound: SocketAddrV4,
-    registered: bool,
-    queue: VecDeque<IntakeClient>,
-}
-
-#[derive(Debug)]
 enum HandleState {
     Record(RecordState),
     Peer(PeerState),
-    Armed {
-        peer: PeerState,
-        conn: Option<GuestConnKey>,
-        label: Option<[u8; FLOW_REQUEST_LEN]>,
-    },
-    Installed {
-        conn: Option<GuestConnKey>,
-        label: Option<[u8; FLOW_REQUEST_LEN]>,
-    },
-    Listener(IntakeListenerState),
-    Child {
-        client: SocketAddrV4,
-        hangup: Option<FlowHangup>,
-    },
-    Parked {
-        client: SocketAddrV4,
-        hangup: Option<FlowHangup>,
-    },
-    Pending {
-        client: SocketAddrV4,
-        hangup: Option<FlowHangup>,
-        cid: Option<GuestCid>,
-        request: Option<[u8; FLOW_REQUEST_LEN]>,
-    },
     Pair(PairSocketState),
 }
 
-#[derive(Debug, Default)]
-struct PairEntry {
-    toward_guest_drained: bool,
-    from_guest_drained: bool,
+/// The context the seam holds.
+struct Context {
+    ctx: Arc<SimFlowForwarder>,
+    generation: ForwarderGeneration,
+}
+
+/// The sockets of one flow, for scripting causes (test support).
+#[derive(Debug, Clone)]
+struct FlowSockets {
+    cid: GuestCid,
+    vsock: SimSocket,
+    peer: Option<(PeerProtocol, SimSocket)>,
 }
 
 #[derive(Debug)]
-struct ForwarderState {
-    attached: BTreeSet<InterfaceIndex>,
-    failed: BTreeMap<InterfaceIndex, SimUnframeFailure>,
+struct StreamPipe {
+    generation: ForwarderGeneration,
+    watch: ForwardId,
+    vsock: SimSocket,
+    to_guest: Vec<u8>,
+    host_shut: bool,
+    dropped: bool,
 }
 
 struct SimState {
@@ -673,138 +494,134 @@ struct SimState {
     auto: BTreeSet<SimEffectKind>,
     scripts: BTreeMap<SimEffectKind, VecDeque<SimFailure>>,
     held: BTreeMap<SimEffectId, Held>,
-    issued: Vec<SimEffectKind>,
+    issued: Vec<SimEffect>,
     next_effect: u64,
     next_handle: u64,
-    next_pair: u64,
     next_port: u16,
-    forwarder: Option<ForwarderState>,
-    unframe_failures: BTreeMap<InterfaceIndex, SimUnframeFailure>,
-    steering: SteeringPhase,
-    steering_effects: Vec<SimSteeringEffect>,
-    listeners: BTreeMap<FlowListener, VsockListener>,
+    /// xorshift state choosing the auto-delivered accept order.
+    rng: u64,
+    /// Accept and record bytes reach the owner without a release.
+    auto_deliver: bool,
+    /// End records reach the owner without a release.
+    auto_ends: bool,
+    released_ends: usize,
+    /// Every scripted cause and attach is followed by the forwarder's runs.
+    auto_run: bool,
+    host_facts: GuestHostFacts,
+    stale_objects: bool,
+    gateway_route: Option<Ipv4Addr>,
+    /// This machine's `/dev/ovd_fwd`; its context table is the `oldCtx`
+    /// arbiter (QPROJ-8).
+    device: SimForwarderDevice,
+    context: Option<Context>,
+    /// The last generation opened (the next open is its `next()`).
+    last_generation: Option<ForwarderGeneration>,
+    listeners: BTreeMap<FlowListener, ListenerState>,
+    /// The next port a kernel-assigned bind takes (the sim's stand-in for
+    /// the kernel's `VMADDR_PORT_ANY` counter; deterministic per seam).
+    next_assigned_port: u32,
     handles: BTreeMap<u64, HandleState>,
-    pairs: BTreeMap<PairKey, PairEntry>,
     route_types: BTreeMap<Ipv4Addr, HostRouteType>,
     connect4: BTreeMap<SocketAddrV4, SocketAddrV4>,
-    counters: GuestFlowCounters,
+    vm_gone: BTreeSet<GuestCid>,
     closed_by_owner: BTreeSet<GuestConnKey>,
-    connects_in_flight: BTreeSet<GuestConnKey>,
-    host_flows_closed: Vec<[u8; FLOW_REQUEST_LEN]>,
-    outbox: BTreeMap<GuestCid, Vec<[u8; CONTROL_MESSAGE_LEN]>>,
-    session_ended: BTreeSet<GuestCid>,
-    vsock_ends_in_flight: BTreeMap<PairKey, [u8; FLOW_REQUEST_LEN]>,
-    vsock_ended: Vec<[u8; FLOW_REQUEST_LEN]>,
-    far_end: Vec<([u8; FLOW_REQUEST_LEN], FarEndEvent)>,
+    /// Far-end events of the owner's own closes of sockets the forwarder
+    /// never held (an unattached peer aborted or closed, a process exit).
+    local_far_end: BTreeMap<FlowId, FarEndEvent>,
+    to_guest: BTreeMap<FlowId, Vec<VsockShutdownOp>>,
+    outbox: BTreeMap<GuestCid, Vec<ControlMessage>>,
+    dials: BTreeMap<u64, SimDialRecord>,
+    peer_connects: Vec<SocketAddrV4>,
+    /// Every host vsock the sim made, by its guest CID (the device release's
+    /// orphan sweep reaches each).
+    cid_vsocks: Vec<(GuestCid, SimSocket)>,
+    flow_sockets: BTreeMap<FlowId, FlowSockets>,
+    /// Live ids the sim issued, by (generation, id).
+    pairs: BTreeMap<(ForwarderGeneration, ForwardId), SimPairInfo>,
+    /// Ids the owner aborted (`abort_forward`, `abort_all`).
+    owner_aborted: BTreeSet<(ForwarderGeneration, ForwardId)>,
+    /// End records the owner consumed (`next_end`), by id.
+    ends_taken: BTreeMap<(ForwarderGeneration, ForwardId), ForwardOutcome>,
+    streams: BTreeMap<FlowId, Arc<Mutex<StreamPipe>>>,
+}
+
+impl std::fmt::Debug for SimState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SimState").finish_non_exhaustive()
+    }
 }
 
 /// The owner seam's simulation adapter (DG-3).
 pub(crate) struct SimGuestFlowIo {
     seam: u64,
-    node: Arc<SimGuestNode>,
-    binary: SimProgramVersion,
-    state: Mutex<SimState>,
-    changed: Notify,
+    state: Arc<Mutex<SimState>>,
+    changed: Arc<Notify>,
 }
 
 impl std::fmt::Debug for SimGuestFlowIo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SimGuestFlowIo")
-            .field("seam", &self.seam)
-            .field("binary", &self.binary)
-            .finish_non_exhaustive()
+        f.debug_struct("SimGuestFlowIo").field("seam", &self.seam).finish_non_exhaustive()
     }
 }
+
+static NEXT_SEAM: AtomicU64 = AtomicU64::new(1);
 
 fn io_error(kind: io::ErrorKind) -> FlowIoError {
     FlowIoError::Io { source: io::Error::from(kind) }
 }
 
-fn syscall(call: &'static str, errno: i32) -> SyscallError {
-    SyscallError { call, io_error: io::Error::from_raw_os_error(errno) }
-}
-
-fn steering_error(failure: SimSteeringFailure, intake: SocketAddrV4) -> GuestSteeringError {
-    match failure {
-        SimSteeringFailure::Load => GuestSteeringError::Load {
-            source: aya::EbpfError::ProgramError(ProgramError::SyscallError(syscall(
-                "bpf_prog_load",
-                libc::EACCES,
-            ))),
-        },
-        SimSteeringFailure::Query => {
-            GuestSteeringError::Query { source: io::Error::from_raw_os_error(libc::EIO) }
-        }
-        SimSteeringFailure::Update => {
-            GuestSteeringError::Update { source: io::Error::from_raw_os_error(libc::EINVAL) }
-        }
-        SimSteeringFailure::Attach => GuestSteeringError::Attach {
-            source: ProgramError::SyscallError(syscall("bpf_link_create", libc::EINVAL)),
-        },
-        SimSteeringFailure::Pin => GuestSteeringError::Pin {
-            path: PathBuf::from(GUEST_PREFIX_STEERING_PIN_DIR),
-            source: io::Error::from_raw_os_error(libc::ENOSPC),
-        },
-        SimSteeringFailure::KernelMemory => GuestSteeringError::KernelMemory {
-            source: aya::maps::MapError::IoError(io::Error::from_raw_os_error(libc::ENOMEM)),
-        },
-        SimSteeringFailure::MapUpdate => GuestSteeringError::MapUpdate {
-            source: aya::maps::MapError::IoError(io::Error::from_raw_os_error(libc::EINVAL)),
-        },
-        SimSteeringFailure::MapLookup => GuestSteeringError::MapLookup {
-            source: aya::maps::MapError::IoError(io::Error::from_raw_os_error(libc::EIO)),
-        },
-        SimSteeringFailure::IntakeAlreadySteered => {
-            GuestSteeringError::IntakeAlreadySteered { intake }
-        }
-    }
-}
-
-fn forwarder_error(failure: SimForwarderFailure) -> GuestFlowError {
-    match failure {
-        SimForwarderFailure::OwnerCgroupIsRoot => GuestFlowError::OwnerCgroupIsRoot,
-        SimForwarderFailure::SocketQuery(kind) => {
-            GuestFlowError::SocketQuery { source: io::Error::from(kind) }
-        }
-        SimForwarderFailure::PairCapacity => {
-            GuestFlowError::PairCapacity { capacity: GUEST_FLOW_MAX_PAIRS }
-        }
-    }
-}
-
-fn unframe_error(ifindex: InterfaceIndex, failure: SimUnframeFailure) -> UnframeAttachError {
-    match failure {
-        SimUnframeFailure::KernelMemory => UnframeAttachError::KernelMemory {
-            ifindex,
-            source: ProgramError::SyscallError(syscall("bpf_link_create", libc::ENOMEM)),
-        },
-        SimUnframeFailure::Attach(errno) => UnframeAttachError::Attach {
-            ifindex,
-            source: ProgramError::SyscallError(syscall("bpf_link_create", errno)),
-        },
-    }
+fn errno_error(errno: KernelErrno) -> io::Error {
+    io::Error::from_raw_os_error(i32::from(errno.get()))
 }
 
 fn mismatched(effect: &str, failure: SimFailure) -> ! {
     panic!("test bug: scripted failure {failure:?} does not match the {effect} effect")
 }
 
-fn decode_flow(label: &[u8; FLOW_REQUEST_LEN]) -> FlowId {
-    FlowRequest::decode(label)
-        .unwrap_or_else(|error| panic!("sim flow label is not a canonical request: {error}"))
-        .flow()
+fn request_of(bytes: &[u8]) -> Option<FlowRequest> {
+    bytes
+        .get(..FLOW_REQUEST_LEN)
+        .and_then(|b| <&[u8; FLOW_REQUEST_LEN]>::try_from(b).ok())
+        .and_then(|b| FlowRequest::decode(b).ok())
+}
+
+fn far_end_of(end: SimFarEnd) -> FarEndEvent {
+    match end {
+        SimFarEnd::Eof => FarEndEvent::Eof,
+        SimFarEnd::Reset => FarEndEvent::Reset,
+    }
 }
 
 impl SimGuestFlowIo {
-    /// A seam over `node` whose binary carries steering program `binary`.
-    pub(crate) fn new(node: &Arc<SimGuestNode>, binary: SimProgramVersion) -> Arc<Self> {
-        let seam = node.next_seam.fetch_add(1, Ordering::SeqCst);
-        let auto = SimEffectKind::READS.into_iter().collect();
+    /// A fresh seam: no listener bound, no forwarder context, no route; host
+    /// facts with no interface, `RLIMIT_NOFILE` 1,048,576 and the owner in
+    /// `/sys/fs/cgroup/overdrive.slice/control-plane.slice`; every async
+    /// effect auto-released; accepts, record bytes and end records delivered
+    /// without a release, the forwarder run to idle after every cause, the
+    /// accept order drawn from `seed`.
+    pub(crate) fn new(seed: u64) -> Arc<Self> {
+        let seam = NEXT_SEAM.fetch_add(1, Ordering::SeqCst);
+        let auto = [
+            SimEffectKind::HostFacts,
+            SimEffectKind::OpenForwarder,
+            SimEffectKind::BindListener,
+            SimEffectKind::GatewayRoute,
+            SimEffectKind::StaleObjects,
+            SimEffectKind::WriteRecord,
+            SimEffectKind::ConnectGuest,
+            SimEffectKind::OpenPeer,
+            SimEffectKind::ConnectUdp,
+            SimEffectKind::ConnectPeer,
+            SimEffectKind::RouteType,
+            SimEffectKind::ClearLinger,
+            SimEffectKind::Abort,
+            SimEffectKind::Close,
+        ]
+        .into_iter()
+        .collect();
         Arc::new(Self {
             seam,
-            node: Arc::clone(node),
-            binary,
-            state: Mutex::new(SimState {
+            state: Arc::new(Mutex::new(SimState {
                 exited: false,
                 auto,
                 scripts: BTreeMap::new(),
@@ -812,41 +629,57 @@ impl SimGuestFlowIo {
                 issued: Vec::new(),
                 next_effect: 1,
                 next_handle: 1,
-                next_pair: 1,
                 next_port: 40_000,
-                forwarder: None,
-                unframe_failures: BTreeMap::new(),
-                steering: SteeringPhase::None,
-                steering_effects: Vec::new(),
+                rng: seed | 1,
+                auto_deliver: true,
+                auto_ends: true,
+                released_ends: 0,
+                auto_run: true,
+                host_facts: GuestHostFacts {
+                    interfaces: BTreeMap::new(),
+                    nofile_limit: 1_048_576,
+                    owner_cgroup: PathBuf::from(
+                        "/sys/fs/cgroup/overdrive.slice/control-plane.slice",
+                    ),
+                },
+                stale_objects: false,
+                gateway_route: None,
+                device: SimForwarderDevice::new(),
+                context: None,
+                last_generation: None,
                 listeners: BTreeMap::new(),
+                next_assigned_port: SIM_FIRST_ASSIGNED_PORT,
                 handles: BTreeMap::new(),
-                pairs: BTreeMap::new(),
                 route_types: BTreeMap::new(),
                 connect4: BTreeMap::new(),
-                counters: GuestFlowCounters::default(),
+                vm_gone: BTreeSet::new(),
                 closed_by_owner: BTreeSet::new(),
-                connects_in_flight: BTreeSet::new(),
-                host_flows_closed: Vec::new(),
+                local_far_end: BTreeMap::new(),
+                to_guest: BTreeMap::new(),
                 outbox: BTreeMap::new(),
-                session_ended: BTreeSet::new(),
-                vsock_ends_in_flight: BTreeMap::new(),
-                vsock_ended: Vec::new(),
-                far_end: Vec::new(),
-            }),
-            changed: Notify::new(),
+                dials: BTreeMap::new(),
+                peer_connects: Vec::new(),
+                cid_vsocks: Vec::new(),
+                flow_sockets: BTreeMap::new(),
+                pairs: BTreeMap::new(),
+                owner_aborted: BTreeSet::new(),
+                ends_taken: BTreeMap::new(),
+                streams: BTreeMap::new(),
+            })),
+            changed: Arc::new(Notify::new()),
         })
     }
 
     // -----------------------------------------------------------------------
-    // QPROJ-7 read surfaces
+    // QPROJ-7 / QPROJ-8 read surfaces
     // -----------------------------------------------------------------------
 
-    /// The socket facts of this seam (QPROJ-7).
-    ///
-    /// A queued connection's token is `None` when nothing is buffered yet, and
-    /// equally when its buffered first record is not canonical (a malformed
-    /// `ControlOpen` / `FlowRequest`): a malformed record carries no token, so
-    /// it projects like an empty buffer.
+    /// QPROJ-7: the socket facts of this seam. A queued connection's token is
+    /// `None` when nothing is buffered, and equally when its buffered first
+    /// record is not canonical (a malformed record carries no token). A far
+    /// end's first terminal event is the owner's own close of a socket the
+    /// forwarder never held, else the far reader's first terminal event on
+    /// the flow's host peer socket ([`SimSocket::peer_end`]).
     pub(crate) fn socket_observation(&self) -> SimOwnerSocketObservation {
         let st = self.state.lock();
         let mut queued = BTreeMap::new();
@@ -859,12 +692,9 @@ impl SimGuestFlowIo {
                         .and_then(|bytes| <&[u8; CONTROL_OPEN_LEN]>::try_from(bytes).ok())
                         .and_then(|bytes| ControlOpen::decode(bytes).ok())
                         .map(|open| open.launch),
-                    FlowListener::Stream | FlowListener::Seqpacket => conn
-                        .record
-                        .get(..FLOW_REQUEST_LEN)
-                        .and_then(|bytes| <&[u8; FLOW_REQUEST_LEN]>::try_from(bytes).ok())
-                        .and_then(|bytes| FlowRequest::decode(bytes).ok())
-                        .map(|request| request.launch()),
+                    FlowListener::Stream => {
+                        request_of(&conn.record).map(|request| request.launch())
+                    }
                 };
                 queued.insert(conn.key, token);
             }
@@ -877,79 +707,99 @@ impl SimGuestFlowIo {
                 _ => None,
             })
             .collect();
-        let outbox = st
-            .outbox
-            .iter()
-            .map(|(cid, messages)| {
-                let decoded = messages
-                    .iter()
-                    .map(|bytes| {
-                        ControlMessage::decode(bytes)
-                            .unwrap_or_else(|e| panic!("sim outbox message: {e}"))
-                    })
-                    .collect();
-                (*cid, decoded)
-            })
-            .collect();
+        let mut far_end = st.local_far_end.clone();
+        for (flow, sockets) in &st.flow_sockets {
+            if let Some((PeerProtocol::Tcp, peer)) = &sockets.peer
+                && let Some(end) = peer.peer_end()
+            {
+                far_end.entry(*flow).or_insert_with(|| far_end_of(end));
+            }
+        }
         SimOwnerSocketObservation {
             queued,
             closed_by_owner: st.closed_by_owner.clone(),
             peer_gone,
-            connects_in_flight: st.connects_in_flight.clone(),
-            host_flows_closed: st.host_flows_closed.iter().map(decode_flow).collect(),
-            outbox,
-            session_ended: st.session_ended.clone(),
-            vsock_ends_in_flight: st.vsock_ends_in_flight.values().map(decode_flow).collect(),
-            vsock_ended: st.vsock_ended.iter().map(decode_flow).collect(),
-            far_end: {
-                let mut far = BTreeMap::new();
-                for (label, event) in &st.far_end {
-                    far.entry(decode_flow(label)).or_insert(*event);
-                }
-                far
-            },
+            far_end,
         }
     }
 
-    /// The node-global steering state (QPROJ-7).
-    pub(crate) fn steering_observation(&self) -> SimSteeringObservation {
-        self.node.steering()
+    /// QPROJ-8 arbiter: the current context's inventory
+    /// (`FlowForwarder::inventory`), or the empty inventory when no context
+    /// is held.
+    pub(crate) fn forwarder_inventory(&self) -> ForwarderInventory {
+        let ctx = self.state.lock().context.as_ref().map(|context| Arc::clone(&context.ctx));
+        ctx.map(|ctx| ctx.inventory().expect("the sim forwarder's inventory is readable"))
+            .unwrap_or_default()
     }
 
-    /// Every steering and route effect this seam's owner issued, in order,
-    /// with its outcome (QPROJ-7).
-    pub(crate) fn steering_effects(&self) -> Vec<SimSteeringEffect> {
-        self.state.lock().steering_effects.clone()
+    /// QPROJ-8 arbiter: a live pair's per-direction state in the current
+    /// context (`FlowForwarder::pair_state`).
+    pub(crate) fn forwarder_pair_state(&self, id: ForwardId) -> Option<PairState> {
+        let ctx = self.state.lock().context.as_ref().map(|context| Arc::clone(&context.ctx))?;
+        ctx.pair_state(id).expect("the sim forwarder's pair state is readable")
+    }
+
+    /// QPROJ-8 arbiter (`oldCtx`): the device's context table, in open order
+    /// — every context this seam opened, whether it is still open, and the
+    /// pairs and watches each still holds.
+    pub(crate) fn forwarder_contexts(&self) -> Vec<SimContextState> {
+        self.state.lock().device.contexts()
+    }
+
+    /// The directions of the current context with a queued run.
+    pub(crate) fn forwarder_pending_runs(&self) -> Vec<(ForwardId, PairSide)> {
+        let ctx = self.state.lock().context.as_ref().map(|context| Arc::clone(&context.ctx));
+        ctx.map(|ctx| ctx.pending_runs()).unwrap_or_default()
+    }
+
+    /// One bounded run of the current context's direction of `id` whose
+    /// source is `source` (`false` when none is queued).
+    pub(crate) fn run_forwarder_once(&self, id: ForwardId, source: PairSide) -> bool {
+        let ctx = self.state.lock().context.as_ref().map(|context| Arc::clone(&context.ctx));
+        let ran = ctx.is_some_and(|ctx| ctx.run(id, source));
+        self.bump();
+        ran
+    }
+
+    /// Runs the current context until no run is queued; returns how many
+    /// ran.
+    pub(crate) fn run_forwarder(&self) -> u32 {
+        let ctx = self.state.lock().context.as_ref().map(|context| Arc::clone(&context.ctx));
+        let ran = ctx.map_or(0, |ctx| ctx.run_until_idle());
+        self.bump();
+        ran
     }
 
     // -----------------------------------------------------------------------
-    // Holding, releasing, failing, scripting
+    // Holding, releasing, failing, scripting (test support)
     // -----------------------------------------------------------------------
+
+    /// Holds every later effect of `kind` until released or failed.
+    pub(crate) fn hold(&self, kind: SimEffectKind) {
+        assert!(!kind.is_sync(), "test bug: the synchronous {kind:?} call cannot be held");
+        self.state.lock().auto.remove(&kind);
+    }
 
     /// Releases every later effect of `kind` without a hold.
     pub(crate) fn auto_release(&self, kind: SimEffectKind) {
         self.state.lock().auto.insert(kind);
     }
 
-    /// Releases every later effect without a hold.
-    pub(crate) fn auto_release_all(&self) {
-        self.state.lock().auto.extend(SimEffectKind::ALL);
-    }
-
-    /// Holds every later effect of `kind` until released or failed.
-    pub(crate) fn hold(&self, kind: SimEffectKind) {
-        self.state.lock().auto.remove(&kind);
-    }
-
-    /// The next auto-released effect of `kind` fails with `failure`.
+    /// The next auto-released (or synchronous) effect of `kind` fails with
+    /// `failure`.
     pub(crate) fn script_failure(&self, kind: SimEffectKind, failure: SimFailure) {
         self.state.lock().scripts.entry(kind).or_default().push_back(failure);
     }
 
-    /// Every effect kind the owner issued through this seam, in order (held
-    /// or not, applied or not).
-    pub(crate) fn issued(&self) -> Vec<SimEffectKind> {
+    /// Every effect the owner issued through this seam, in order (held or
+    /// not, applied or not).
+    pub(crate) fn issued(&self) -> Vec<SimEffect> {
         self.state.lock().issued.clone()
+    }
+
+    /// How many effects of `kind` the owner issued.
+    pub(crate) fn issued_count(&self, kind: SimEffectKind) -> usize {
+        self.state.lock().issued.iter().filter(|effect| effect.kind == kind).count()
     }
 
     /// The effects currently held, in issue order.
@@ -984,29 +834,48 @@ impl SimGuestFlowIo {
         self.bump();
     }
 
+    /// Accepts and record bytes reach the owner only on
+    /// [`Self::release_accept`] / [`Self::release_read`] (`false`), or at
+    /// once (`true`, the default).
+    pub(crate) fn set_auto_deliver(&self, auto: bool) {
+        self.state.lock().auto_deliver = auto;
+        self.bump();
+    }
+
+    /// End records reach the owner's `next_end` only on
+    /// [`Self::release_end`] (`false`), or at once (`true`, the default).
+    pub(crate) fn set_auto_ends(&self, auto: bool) {
+        self.state.lock().auto_ends = auto;
+        self.bump();
+    }
+
+    /// Lets the owner's `next_end` take one more queued end record.
+    pub(crate) fn release_end(&self) {
+        self.state.lock().released_ends += 1;
+        self.bump();
+    }
+
+    /// The forwarder runs to idle after every scripted cause and attach
+    /// (`true`, the default), or only on [`Self::run_forwarder`] /
+    /// [`Self::run_forwarder_once`] (`false`).
+    pub(crate) fn set_auto_run(&self, auto: bool) {
+        self.state.lock().auto_run = auto;
+        self.bump();
+    }
+
     /// Resolves when every owner task waiting on this seam is parked with
     /// nothing undelivered: no task of the runtime is ready to run.
     ///
     /// Idle detection is the runtime's own: the caller drives the owner on a
-    /// current-thread tokio runtime whose time is paused
-    /// (`#[tokio::test(flavor = "current_thread", start_paused = true)]`, or
-    /// `Builder::new_current_thread().enable_time().start_paused(true)`). A
-    /// paused runtime auto-advances its clock to the next timer only when no
-    /// task is ready, so the sleep below completes exactly when every task —
-    /// however many internal hand-offs it makes between seam calls — is
-    /// parked. Every effect the sim holds wakes its waiter inside that
-    /// runtime, so a parked owner is one waiting on the driver.
+    /// current-thread tokio runtime whose time is paused. A paused runtime
+    /// auto-advances its clock to the next timer only when no task is ready,
+    /// so the sleep below completes exactly when every task is parked. The
+    /// owner reads time only through its injected `Clock` port (`SimClock`),
+    /// never through tokio timers, so pausing tokio time does not change its
+    /// behaviour (`.claude/rules/development.md` § "Production code is not
+    /// shaped by simulation").
     ///
-    /// The owner reads time only through its injected `Clock` port
-    /// (`SimClock` here), never through tokio timers, so pausing tokio time
-    /// does not change its behaviour. An owner that awaited a tokio timer
-    /// directly would be a defect (`.claude/rules/development.md` §
-    /// "Production code is not shaped by simulation"; the clock port): its
-    /// timer would fire on the auto-advance here instead of on the injected
-    /// clock.
-    ///
-    /// Precondition: the runtime's time is paused. On a running clock the
-    /// sleep would elapse in real time.
+    /// Precondition: the runtime's time is paused.
     pub(crate) async fn settled(&self) {
         /// Far beyond any deadline the tests arm: the sleep is the idle
         /// signal, never a timeout that elapses while a task is ready.
@@ -1015,9 +884,9 @@ impl SimGuestFlowIo {
     }
 
     /// The `serve` process ended: every handle and every held effect dies
-    /// with it, an unpinned (attached, not pinned) link detaches, and every
-    /// steering entry naming one of its listeners is removed (K-L3, K-L4).
-    /// Node-global objects stay (U-4).
+    /// with it; the context's release aborts every pair (far ends reset,
+    /// EVMOD-CTL); every unattached TCP peer the owner held with linger set
+    /// is reset (H-5); every dial `V_h` ends with `0x3` toward the guest.
     pub(crate) fn exit_process(&self) {
         let mut st = self.state.lock();
         if st.exited {
@@ -1025,61 +894,57 @@ impl SimGuestFlowIo {
         }
         st.exited = true;
         st.held.clear();
+        if let Some(context) = st.context.take() {
+            Self::release_context(&mut st, context);
+        }
         let handles = std::mem::take(&mut st.handles);
-        for handle in handles.values() {
-            if let HandleState::Record(record) = handle
-                && record.origin == RecordOrigin::Accepted(FlowListener::Control)
-                && let Some(cid) = record.peer_cid
-            {
-                st.session_ended.insert(cid);
-            }
-            if let HandleState::Pair(pair) = handle {
-                Self::pair_ended_by_exit(&mut st, pair);
+        for handle in handles.into_values() {
+            match handle {
+                HandleState::Pair(_) => {}
+                HandleState::Peer(peer) => {
+                    if let (PeerProtocol::Tcp, true, Some(flow)) =
+                        (peer.spec.protocol, peer.spec.abortive_linger, peer.flow)
+                    {
+                        st.local_far_end.entry(flow).or_insert(FarEndEvent::Reset);
+                    }
+                }
+                HandleState::Record(record) => {
+                    if let Some(flow) = record.dial_flow {
+                        st.to_guest.entry(flow).or_default().push(VsockShutdownOp::Close);
+                    }
+                }
             }
         }
         drop(st);
-        let mut node = self.node.state.lock();
-        if node.link.as_ref().is_some_and(|link| !link.pinned && link.attached_by == self.seam) {
-            node.link = None;
-        }
-        node.entries.retain(|_, listener| listener.seam != self.seam);
-        drop(node);
         self.bump();
     }
 
-    fn pair_ended_by_exit(st: &mut SimState, pair: &PairSocketState) {
-        let Some(label) = pair.label else { return };
-        match pair.role {
-            PairRole::Vsock => {
-                st.vsock_ends_in_flight.insert(pair.pair, label);
-            }
-            PairRole::Outer { abortive } => {
-                // H-5: linger covers the far ends the dying owner holds.
-                let event = if abortive && !pair.linger_cleared {
-                    FarEndEvent::Reset
-                } else {
-                    FarEndEvent::Eof
-                };
-                st.far_end.push((label, event));
-            }
-            PairRole::Stream | PairRole::Seqpacket | PairRole::Udp => {}
-        }
-    }
-
     // -----------------------------------------------------------------------
-    // Scripting host facts and kernel answers
+    // Scripting host facts and kernel answers (test support)
     // -----------------------------------------------------------------------
 
-    /// The next `load_forwarder` reports `ifindex` in `failed` with `failure`.
-    pub(crate) fn script_unframe_failure(
-        &self,
-        ifindex: InterfaceIndex,
-        failure: SimUnframeFailure,
-    ) {
-        self.state.lock().unframe_failures.insert(ifindex, failure);
+    /// Mutates the host facts `host_facts` reports.
+    pub(crate) fn update_host_facts(&self, update: impl FnOnce(&mut GuestHostFacts)) {
+        update(&mut self.state.lock().host_facts);
     }
 
-    /// `route_type(destination)` answers `route`.
+    /// Whether a process-scoped owner object of a previous run is present.
+    pub(crate) fn set_stale_objects(&self, present: bool) {
+        self.state.lock().stale_objects = present;
+    }
+
+    /// The gateway the converged route names, if converged.
+    pub(crate) fn gateway_route(&self) -> Option<Ipv4Addr> {
+        self.state.lock().gateway_route
+    }
+
+    /// The node starts with a gateway route already present (a route left
+    /// by a previous boot, GW-LOCAL H-4).
+    pub(crate) fn set_gateway_route(&self, gateway: Option<Ipv4Addr>) {
+        self.state.lock().gateway_route = gateway;
+    }
+
+    /// `route_type(destination)` answers `route` (default `Unicast`).
     pub(crate) fn set_route_type(&self, destination: Ipv4Addr, route: HostRouteType) {
         self.state.lock().route_types.insert(destination, route);
     }
@@ -1089,33 +954,231 @@ impl SimGuestFlowIo {
         self.state.lock().connect4.insert(vip, backend);
     }
 
-    /// The forwarder's counters.
-    pub(crate) fn set_counters(&self, counters: GuestFlowCounters) {
-        self.state.lock().counters = counters;
+    /// The live forwarder ids the sim issued in the current context.
+    pub(crate) fn pairs(&self) -> BTreeMap<ForwardId, SimPairInfo> {
+        let st = self.state.lock();
+        let Some(generation) = st.context.as_ref().map(|context| context.generation) else {
+            return BTreeMap::new();
+        };
+        st.pairs
+            .iter()
+            .filter(|((g, _), _)| *g == generation)
+            .map(|((_, id), info)| (*id, *info))
+            .collect()
+    }
+
+    /// The live pair or watch of `flow` in the current context.
+    pub(crate) fn pair_of(&self, flow: FlowId) -> Option<ForwardId> {
+        self.pairs().into_iter().find(|(_, info)| info.flow == Some(flow)).map(|(id, _)| id)
+    }
+
+    /// The forwarder's per-direction state of `flow`'s pair (the arbiter's
+    /// `FlowForwarder::pair_state`).
+    pub(crate) fn pair_state_of(&self, flow: FlowId) -> Option<PairState> {
+        let id = self.pair_of(flow)?;
+        self.forwarder_pair_state(id)
+    }
+
+    /// The vsock SHUTDOWN ops the host sent toward the guest on `flow`'s dial
+    /// `V_h`, in order.
+    pub(crate) fn sent_to_guest(&self, flow: FlowId) -> Vec<VsockShutdownOp> {
+        self.state.lock().to_guest.get(&flow).cloned().unwrap_or_default()
+    }
+
+    /// Every TCP connect of a peer that completed, by destination (D9:
+    /// leg-F; D14: the destination).
+    pub(crate) fn peer_connects(&self) -> Vec<SocketAddrV4> {
+        self.state.lock().peer_connects.clone()
+    }
+
+    /// Every dial the owner opened, in open order.
+    pub(crate) fn dials(&self) -> Vec<SimDialRecord> {
+        self.state.lock().dials.values().copied().collect()
+    }
+
+    /// Control messages the owner wrote on `cid`'s control session and the
+    /// guest has not consumed.
+    pub(crate) fn outbox(&self, cid: GuestCid) -> Vec<ControlMessage> {
+        self.state.lock().outbox.get(&cid).cloned().unwrap_or_default()
+    }
+
+    /// The guest consumes every control message the owner wrote to `cid`.
+    pub(crate) fn take_outbox(&self, cid: GuestCid) -> Vec<ControlMessage> {
+        let taken = self.state.lock().outbox.remove(&cid).unwrap_or_default();
+        self.bump();
+        taken
     }
 
     // -----------------------------------------------------------------------
-    // Guest-side and far-end events
+    // Causes on a flow's sockets (test support; the arbiter classifies them)
     // -----------------------------------------------------------------------
 
-    /// A guest opens a connection to `listener`; it waits in the accept queue
-    /// with `record` buffered until [`Self::release_accept`].
+    /// The host vsock of `flow` (`V_h`), the guest being its far side.
+    pub(crate) fn vsock_of(&self, flow: FlowId) -> SimSocket {
+        self.flow_sockets(flow).vsock
+    }
+
+    /// The host peer socket of `flow` (D, L or H), the destination being its
+    /// far side.
+    pub(crate) fn peer_of(&self, flow: FlowId) -> SimSocket {
+        self.flow_sockets(flow).peer.map_or_else(
+            || panic!("test bug: {flow:?} has no host peer socket yet"),
+            |(_, socket)| socket,
+        )
+    }
+
+    /// The shared `SimSocket` of `flow`'s host vsock half, keyed from the
+    /// step the seam first carries the flow id on it (a guest-opened V_h: its
+    /// request's read; a dial's V_h: its TcpAccept request's write), kept
+    /// after the owner closed it, until the seam is dropped. `None` for a flow
+    /// id the seam never saw (D-5; the `fwd_pair` row `vs(s)`).
+    pub(crate) fn vsock_half(&self, flow: FlowId) -> Option<SimSocket> {
+        self.state.lock().flow_sockets.get(&flow).map(|sockets| sockets.vsock.clone())
+    }
+
+    /// [`Self::peer_of`], `None` before the flow's peer socket was attached.
+    pub(crate) fn peer_of_opt(&self, flow: FlowId) -> Option<SimSocket> {
+        self.state
+            .lock()
+            .flow_sockets
+            .get(&flow)
+            .and_then(|sockets| sockets.peer.as_ref().map(|(_, socket)| socket.clone()))
+    }
+
+    /// The socket of the most recently opened host peer socket the owner
+    /// still holds unattached (D, L or H): the far end's facts before the
+    /// sim learns the socket's flow at attach (a destination's bytes, FIN or
+    /// reset that reach the socket before the owner attaches it).
+    pub(crate) fn latest_peer_socket(&self) -> Option<SimSocket> {
+        self.state.lock().handles.values().rev().find_map(|handle| match handle {
+            HandleState::Peer(peer) => Some(peer.socket.clone()),
+            _ => None,
+        })
+    }
+
+    /// Wakes every owner task after a cause scripted directly on a
+    /// [`SimSocket`] (the forwarder runs only with auto-run).
+    pub(crate) fn caused(&self) {
+        self.after_cause();
+    }
+
+    fn flow_sockets(&self, flow: FlowId) -> FlowSockets {
+        self.state
+            .lock()
+            .flow_sockets
+            .get(&flow)
+            .cloned()
+            .unwrap_or_else(|| panic!("test bug: the sim made no socket of {flow:?}"))
+    }
+
+    /// After a scripted cause: the forwarder's runs (with auto-run), then a
+    /// wake of every owner task.
+    fn after_cause(&self) {
+        if self.state.lock().auto_run {
+            self.run_forwarder();
+        }
+        self.bump();
+    }
+
+    /// The guest sends `bytes` toward the destination on `flow`'s vsock.
+    pub(crate) fn guest_sends(&self, flow: FlowId, bytes: &[u8]) {
+        self.vsock_of(flow).peer_send(bytes);
+        self.after_cause();
+    }
+
+    /// The guest half-closes its direction of `flow` (vsock `0x2`).
+    pub(crate) fn guest_half_closes(&self, flow: FlowId) {
+        self.vsock_of(flow).peer_shutdown(SimShutdown::Send);
+        self.after_cause();
+    }
+
+    /// The guest closes `flow`'s vsock (`0x3`): an abort while a direction is
+    /// open, the end of a completed flow after both ended cleanly
+    /// (CLEAN-FULL-END).
+    pub(crate) fn guest_closes(&self, flow: FlowId) {
+        self.vsock_of(flow).peer_shutdown(SimShutdown::Both);
+        self.after_cause();
+    }
+
+    /// The guest resets `flow`'s vsock (`RST`).
+    pub(crate) fn guest_resets(&self, flow: FlowId) {
+        self.vsock_of(flow).peer_reset();
+        self.after_cause();
+    }
+
+    /// The destination sends `bytes` (UDP: one datagram) toward the guest.
+    pub(crate) fn destination_sends(&self, flow: FlowId, bytes: &[u8]) {
+        self.peer_of(flow).peer_send(bytes);
+        self.after_cause();
+    }
+
+    /// The destination ends its direction with a FIN.
+    pub(crate) fn destination_fins(&self, flow: FlowId) {
+        self.peer_of(flow).peer_shutdown(SimShutdown::Send);
+        self.after_cause();
+    }
+
+    /// The destination resets the connection.
+    pub(crate) fn destination_resets(&self, flow: FlowId) {
+        self.peer_of(flow).peer_reset();
+        self.after_cause();
+    }
+
+    /// The destination's reader stops reading (backpressure).
+    pub(crate) fn destination_stops_reading(&self, flow: FlowId) {
+        self.peer_of(flow).peer_stop_reading();
+        self.after_cause();
+    }
+
+    /// The destination's reader reads again.
+    pub(crate) fn destination_resumes_reading(&self, flow: FlowId) {
+        self.peer_of(flow).peer_resume_reading();
+        self.after_cause();
+    }
+
+    /// The host peer socket of `flow` reports `errno` (D26-PINS F-4: the
+    /// forwarder's send on a datagram association's H rejected `EPERM` by
+    /// the host-internal rule, or an ICMP refusal `ECONNREFUSED`).
+    pub(crate) fn destination_socket_error(&self, flow: FlowId, errno: KernelErrno) {
+        let peer = self.peer_of(flow);
+        peer.set_sk_err(errno);
+        peer.report_error();
+        self.after_cause();
+    }
+
+    /// `flow`'s vsock leaves `ESTABLISHED` with no peer SHUTDOWN or `RST`
+    /// recorded — the broken invariant EVMOD-END aborts `Unclassified`
+    /// (an alarm; no production path produces it).
+    pub(crate) fn vsock_ends_unclassified(&self, flow: FlowId) {
+        self.vsock_of(flow).set_vsock_state(SimVsockState::Closing);
+        self.after_cause();
+    }
+
+    // -----------------------------------------------------------------------
+    // Guest-side events (test support)
+    // -----------------------------------------------------------------------
+
+    /// A guest opens a connection to `listener`; it waits outside the accept
+    /// queue with `record` buffered (`None`: nothing buffered).
     pub(crate) fn queue_connection(
         &self,
         listener: FlowListener,
         key: GuestConnKey,
-        record: Option<SimFirstRecord>,
+        record: Option<Vec<u8>>,
     ) {
-        self.state.lock().listeners.entry(listener).or_default().queue.push_back(QueuedConn {
+        let mut st = self.state.lock();
+        let released = st.auto_deliver;
+        st.listeners.entry(listener).or_default().queue.push_back(QueuedConn {
             key,
-            record: record.map(|record| record.0).unwrap_or_default(),
-            released: false,
+            record: record.unwrap_or_default(),
+            released,
             end: None,
         });
+        drop(st);
         self.bump();
     }
 
-    /// Releases a queued connection to the owner's `accept`.
+    /// Releases a pending connection into the accept queue (D-UP-19).
     pub(crate) fn release_accept(&self, key: GuestConnKey) {
         let mut st = self.state.lock();
         let conn = st
@@ -1144,25 +1207,41 @@ impl SimGuestFlowIo {
         self.bump();
     }
 
-    /// The guest ends an accepted connection (after its buffered bytes).
-    pub(crate) fn end_connection(&self, key: GuestConnKey, end: SimPeerEnd) {
+    /// The guest writes `bytes` on an accepted record connection (a later
+    /// control message: `Paired`, `Refused`, `TimedOut`, `Abort`).
+    pub(crate) fn send_on_connection(&self, key: GuestConnKey, bytes: &[u8]) {
         let mut st = self.state.lock();
+        let auto = st.auto_deliver;
         let record = Self::record_by_conn(&mut st, key);
-        record.end = Some(end);
-        if record.buffered.is_empty() {
-            record.end_released = true;
+        if auto {
+            record.ready.extend(bytes.iter().copied());
+        } else {
+            record.buffered.extend(bytes.iter().copied());
         }
         drop(st);
         self.bump();
     }
 
-    /// Bytes the guest writes on an accepted connection (a later control
-    /// message), buffered until [`Self::release_read`].
-    pub(crate) fn send_on_connection(&self, key: GuestConnKey, bytes: &[u8]) {
+    /// The guest ends an accepted record connection (after its buffered
+    /// bytes): the end a record read observes. Its flow vsock — the socket
+    /// the forwarder would attach — sees the same end as a SHUTDOWN (`Eof`:
+    /// `0x3` with the guest's send shut) or an `RST` (`Reset`), so an attach
+    /// after it finds the half as the kernel leaves it.
+    pub(crate) fn end_connection(&self, key: GuestConnKey, end: SimPeerEnd) {
         let mut st = self.state.lock();
-        Self::record_by_conn(&mut st, key).buffered.extend(bytes.iter().copied());
+        let auto = st.auto_deliver;
+        let record = Self::record_by_conn(&mut st, key);
+        record.end = Some(end);
+        if record.buffered.is_empty() || auto {
+            record.end_released = true;
+        }
+        let vsock = record.vsock.clone();
         drop(st);
-        self.bump();
+        match end {
+            SimPeerEnd::Eof => vsock.peer_shutdown(SimShutdown::Both),
+            SimPeerEnd::Reset => vsock.peer_reset(),
+        }
+        self.after_cause();
     }
 
     fn record_by_conn(st: &mut SimState, key: GuestConnKey) -> &mut RecordState {
@@ -1172,14 +1251,30 @@ impl SimGuestFlowIo {
                 HandleState::Record(record) if record.conn == Some(key) => Some(record),
                 _ => None,
             })
-            .unwrap_or_else(|| panic!("test bug: {key:?} is not an accepted connection"))
+            .unwrap_or_else(|| {
+                panic!("test bug: {key:?} is not an accepted, unattached connection")
+            })
     }
 
-    /// The VM of `cid` dies (K-A2′): accepted connections fail at their next
-    /// I/O; queued ones keep their buffered record, then end; pair sockets of
-    /// its flows hang up with a reset.
+    /// The VM of `cid` dies (K-A2′, RESET-EXIT): accepted connections fail
+    /// at their next I/O; queued ones keep their buffered record, then end;
+    /// the device release's orphan sweep sets `sk_err = ECONNRESET` on every
+    /// host vsock of the CID and then runs its `sk_error_report`, so every
+    /// attached pair and every watch of the CID queues its record. A new
+    /// vsock connect to the CID fails `ENODEV` until [`Self::vm_start`].
     pub(crate) fn vm_stop(&self, cid: GuestCid) {
+        self.vm_stop_before_callbacks(cid);
+        self.finish_sweep(cid);
+    }
+
+    /// The orphan sweep's first step only (`drivers/vhost/vsock.c:746-750 @
+    /// v7.0`): `sk_err` and the state of every host vsock of `cid` are set
+    /// and readable; the forwarder's `sk_error_report` has not run, so no
+    /// record is queued yet (U-EV-11, the `VmmExit` action of `fwd_pair`).
+    pub(crate) fn vm_stop_before_callbacks(&self, cid: GuestCid) {
         let mut st = self.state.lock();
+        st.vm_gone.insert(cid);
+        let auto = st.auto_deliver;
         for listener in st.listeners.values_mut() {
             for conn in &mut listener.queue {
                 if conn.key.peer_cid == cid {
@@ -1188,25 +1283,103 @@ impl SimGuestFlowIo {
             }
         }
         for handle in st.handles.values_mut() {
-            match handle {
-                HandleState::Record(record) if record.peer_cid == Some(cid) => {
-                    if record.origin == RecordOrigin::HostOpened {
-                        record.end = Some(SimPeerEnd::Reset);
-                        record.end_released = true;
-                    } else {
-                        record.peer_gone = true;
-                    }
+            if let HandleState::Record(record) = handle
+                && record.peer_cid == cid
+            {
+                if record.origin == RecordOrigin::Dialed {
+                    record.end = Some(SimPeerEnd::Reset);
+                    record.end_released = true;
+                } else {
+                    record.peer_gone = true;
+                    record.peer_gone_released = auto;
                 }
-                HandleState::Pair(pair)
-                    if pair.conn.is_some_and(|conn| conn.peer_cid == cid)
-                        && !matches!(pair.role, PairRole::Outer { .. } | PairRole::Udp) =>
-                {
-                    pair.hangup = Some(FlowHangup::Error(io::ErrorKind::ConnectionReset));
-                }
-                _ => {}
             }
         }
+        let vsocks: Vec<SimSocket> = st
+            .cid_vsocks
+            .iter()
+            .filter(|(of, _)| *of == cid)
+            .map(|(_, socket)| socket.clone())
+            .collect();
         drop(st);
+        for vsock in vsocks {
+            vsock.set_sk_err(KernelErrno::ECONNRESET);
+        }
+        self.bump();
+    }
+
+    /// The orphan sweep's second step: each reset host vsock's
+    /// `sk_error_report` runs — every pair and watch of `cid` queues its
+    /// record (`Aborted { SocketError { ECONNRESET } }` on its vsock half).
+    pub(crate) fn finish_sweep(&self, cid: GuestCid) {
+        let vsocks: Vec<SimSocket> = self
+            .state
+            .lock()
+            .cid_vsocks
+            .iter()
+            .filter(|(of, _)| *of == cid)
+            .map(|(_, socket)| socket.clone())
+            .collect();
+        for vsock in vsocks {
+            vsock.report_error();
+        }
+        self.after_cause();
+    }
+
+    /// The orphan sweep's second step for one flow only: `flow`'s host vsock
+    /// runs its `sk_error_report` (a driver that orders the sweep's
+    /// callbacks against other events of its trace).
+    pub(crate) fn finish_sweep_of(&self, flow: FlowId) {
+        self.vsock_of(flow).report_error();
+        self.after_cause();
+    }
+
+    /// The dial `V_h` of `flow` fails with `errno` (a vsock I/O error before
+    /// `Paired`): its `sk_error_report` runs, so the dial's watch queues its
+    /// record (`SocketError`).
+    pub(crate) fn dial_vsock_error(&self, flow: FlowId, errno: KernelErrno) {
+        let vsock = self.vsock_of(flow);
+        vsock.set_sk_err(errno);
+        vsock.report_error();
+        self.after_cause();
+    }
+
+    /// Lets the owner observe the death of an accepted connection's VM at its
+    /// next I/O (with `set_auto_deliver(false)`; `HostDeadSessionLoss`).
+    pub(crate) fn release_peer_gone(&self, key: GuestConnKey) {
+        let mut st = self.state.lock();
+        let record = Self::record_by_conn(&mut st, key);
+        assert!(record.peer_gone, "test bug: {key:?} has no dead peer to report");
+        record.peer_gone_released = true;
+        drop(st);
+        self.bump();
+    }
+
+    /// An I/O error on the `V_h` of the in-flight dial of `flow` (a failed
+    /// vsock write or read): the owner's next I/O on it fails with a reset.
+    pub(crate) fn fail_dial_vsock(&self, flow: FlowId) {
+        let mut st = self.state.lock();
+        let record = st
+            .handles
+            .values_mut()
+            .find_map(|handle| match handle {
+                HandleState::Record(record)
+                    if record.origin == RecordOrigin::Dialed && record.dial_flow == Some(flow) =>
+                {
+                    Some(record)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("test bug: no in-flight dial V_h of {flow:?}"));
+        record.end = Some(SimPeerEnd::Reset);
+        record.end_released = true;
+        drop(st);
+        self.bump();
+    }
+
+    /// A new launch of `cid` runs: a vsock connect to it succeeds again.
+    pub(crate) fn vm_start(&self, cid: GuestCid) {
+        self.state.lock().vm_gone.remove(&cid);
         self.bump();
     }
 
@@ -1216,118 +1389,48 @@ impl SimGuestFlowIo {
         self.bump();
     }
 
-    /// The guest consumes every control message the owner wrote to `cid`.
-    pub(crate) fn consume_outbox(&self, cid: GuestCid) -> Vec<[u8; CONTROL_MESSAGE_LEN]> {
-        let taken = self.state.lock().outbox.remove(&cid).unwrap_or_default();
+    // -----------------------------------------------------------------------
+    // Handed-off streams (test support)
+    // -----------------------------------------------------------------------
+
+    /// The guest application writes `bytes` toward the dialer of `flow`:
+    /// they reach `V_h`'s receive queue.
+    pub(crate) fn stream_guest_write(&self, flow: FlowId, bytes: &[u8]) {
+        self.vsock_of(flow).peer_send(bytes);
         self.bump();
-        taken
     }
 
-    /// A host-local client at `client` connects to `intake` (a guest-prefix
-    /// `(workload_addr, declared port)`): the steering decides (D8a-LOOKUP).
-    pub(crate) fn connect_intake_client(
-        &self,
-        intake: SocketAddrV4,
-        client: SocketAddrV4,
-    ) -> SimLanding {
-        let entry = self.node.state.lock().entries.get(&intake).copied();
-        let Some(listener) = entry.filter(|listener| listener.seam == self.seam) else {
-            return SimLanding::Refused;
-        };
-        let mut st = self.state.lock();
-        if let Some(HandleState::Listener(state)) = st.handles.get_mut(&listener.handle) {
-            state.queue.push_back(IntakeClient { client, released: false });
+    /// The guest ends its direction of `flow`'s stream: the watch's callback
+    /// queues its record before the holder can read the end (EVMOD-END,
+    /// "Watch"), and the holder then reads end of stream on `V_h`.
+    pub(crate) fn guest_ends_stream(&self, flow: FlowId, end: SimGuestStreamEnd) {
+        let vsock = self.vsock_of(flow);
+        match end {
+            SimGuestStreamEnd::HalfClose => vsock.peer_shutdown(SimShutdown::Send),
+            SimGuestStreamEnd::Abort => vsock.peer_shutdown(SimShutdown::Both),
+            SimGuestStreamEnd::Reset => vsock.peer_reset(),
         }
-        drop(st);
-        self.bump();
-        SimLanding::Steered(listener)
-    }
-
-    /// Releases a queued intake client to the owner's `accept_intake`.
-    pub(crate) fn release_intake_accept(&self, client: SocketAddrV4) {
-        let mut st = self.state.lock();
-        let queued = st
-            .handles
-            .values_mut()
-            .filter_map(|handle| match handle {
-                HandleState::Listener(state) => Some(state),
-                _ => None,
-            })
-            .flat_map(|state| state.queue.iter_mut())
-            .find(|queued| queued.client == client)
-            .unwrap_or_else(|| panic!("test bug: intake client {client} is not queued"));
-        queued.released = true;
-        drop(st);
         self.bump();
     }
 
-    /// The intake client at `client` ends its connection before `Paired`.
-    pub(crate) fn end_intake_client(&self, client: SocketAddrV4, hangup: FlowHangup) {
-        let mut st = self.state.lock();
-        for handle in st.handles.values_mut() {
-            match handle {
-                HandleState::Child { client: c, hangup: h }
-                | HandleState::Parked { client: c, hangup: h }
-                | HandleState::Pending { client: c, hangup: h, .. }
-                    if *c == client =>
-                {
-                    *h = Some(hangup);
-                }
-                _ => {}
-            }
+    /// The dialer side of `flow`'s stream.
+    pub(crate) fn stream_observation(&self, flow: FlowId) -> SimStreamObservation {
+        let pipe = self.stream_pipe(flow);
+        let pipe = pipe.lock();
+        SimStreamObservation {
+            to_guest: pipe.to_guest.clone(),
+            host_shut: pipe.host_shut,
+            dropped: pipe.dropped,
         }
-        drop(st);
-        self.bump();
     }
 
-    /// A terminal event on one leg of a routed pair.
-    pub(crate) fn pair_hangup(&self, pair: PairKey, leg: SimPairLeg, hangup: FlowHangup) {
-        let mut st = self.state.lock();
-        for handle in st.handles.values_mut() {
-            if let HandleState::Pair(socket) = handle
-                && socket.pair == pair
-                && Self::role_is_leg(socket.role, leg)
-            {
-                socket.hangup = Some(hangup);
-            }
-        }
-        drop(st);
-        self.bump();
-    }
-
-    const fn role_is_leg(role: PairRole, leg: SimPairLeg) -> bool {
-        matches!(
-            (role, leg),
-            (PairRole::Vsock, SimPairLeg::Vsock)
-                | (PairRole::Outer { .. }, SimPairLeg::Outer)
-                | (PairRole::Stream, SimPairLeg::Stream)
-                | (PairRole::Seqpacket, SimPairLeg::Seqpacket)
-                | (PairRole::Udp, SimPairLeg::Udp)
-        )
-    }
-
-    /// Sets the K2 drained answer of `pair` toward `direction`.
-    pub(crate) fn set_drained(&self, pair: PairKey, direction: FlowDirection, drained: bool) {
-        let mut st = self.state.lock();
-        let entry = st.pairs.entry(pair).or_default();
-        match direction {
-            FlowDirection::TowardGuest => entry.toward_guest_drained = drained,
-            FlowDirection::FromGuest => entry.from_guest_drained = drained,
-        }
-        drop(st);
-        self.bump();
-    }
-
-    /// Delivers the flow-vsock end the owner issued on `pair` to the peer.
-    pub(crate) fn deliver_vsock_end(&self, pair: PairKey) {
-        let mut st = self.state.lock();
-        let label = st
-            .vsock_ends_in_flight
-            .remove(&pair)
-            .unwrap_or_else(|| panic!("test bug: no vsock end of {pair:?} in flight"));
-        st.vsock_ended.push(label);
-        drop(st);
-        self.bump();
+    fn stream_pipe(&self, flow: FlowId) -> Arc<Mutex<StreamPipe>> {
+        self.state
+            .lock()
+            .streams
+            .get(&flow)
+            .cloned()
+            .unwrap_or_else(|| panic!("test bug: no stream was handed off for {flow:?}"))
     }
 
     // -----------------------------------------------------------------------
@@ -1338,14 +1441,14 @@ impl SimGuestFlowIo {
         self.changed.notify_waiters();
     }
 
-    /// The effect gate: `None` applies the effect's natural outcome,
-    /// `Some(failure)` fails it. A held effect waits for the driver; a call
-    /// dropped while held never applies.
+    /// The effect gate of an async effect: `None` applies the effect's
+    /// natural outcome, `Some(failure)` fails it. A held effect waits for the
+    /// driver; a call dropped while held never applies.
     async fn gate(&self, kind: SimEffectKind, target: SimEffectTarget) -> Option<SimFailure> {
         let (id, decided) = {
             let mut st = self.state.lock();
             assert!(!st.exited, "owner call after its seam's process exited");
-            st.issued.push(kind);
+            st.issued.push(SimEffect { kind, target });
             if st.auto.contains(&kind) {
                 let scripted = st.scripts.get_mut(&kind).and_then(VecDeque::pop_front);
                 drop(st);
@@ -1371,6 +1474,17 @@ impl SimGuestFlowIo {
         }
     }
 
+    /// The gate of a synchronous forwarding call: recorded, scripted.
+    fn sync_gate(
+        st: &mut SimState,
+        kind: SimEffectKind,
+        target: SimEffectTarget,
+    ) -> Option<SimFailure> {
+        assert!(!st.exited, "owner call after its seam's process exited");
+        st.issued.push(SimEffect { kind, target });
+        st.scripts.get_mut(&kind).and_then(VecDeque::pop_front)
+    }
+
     fn issue(&self, st: &mut SimState, state: HandleState) -> SeamHandle {
         let id = st.next_handle;
         st.next_handle += 1;
@@ -1392,123 +1506,102 @@ impl SimGuestFlowIo {
             .unwrap_or_else(|| unreachable!("a stale or closed handle reached the seam"))
     }
 
-    fn require_forwarder(st: &SimState) {
-        if st.forwarder.is_none() {
-            unreachable!("a forwarding call before load_forwarder returned Ok");
-        }
+    fn context(st: &SimState) -> (Arc<SimFlowForwarder>, ForwarderGeneration) {
+        let Some(context) = st.context.as_ref() else {
+            unreachable!("a forwarding call with no forwarder context held");
+        };
+        (Arc::clone(&context.ctx), context.generation)
     }
 
-    fn require_steering(st: &SimState) -> (Ipv4Net, Ipv4Addr) {
-        match st.steering {
-            SteeringPhase::Converged { prefix, gateway } => (prefix, gateway),
-            SteeringPhase::None => {
-                unreachable!("a steering / route call before converge_steering returned Ok")
+    /// Releases `context` (EVMOD-CTL): the sim forwarder's release aborts
+    /// every pair and watch it holds without a record (TCP halves reset,
+    /// vsock halves `SHUT_RDWR`, a watched `V_h` included).
+    fn release_context(st: &mut SimState, context: Context) {
+        let generation = context.generation;
+        // The release is the owner's own end of every watch it still holds:
+        // a stream whose read then returns 0 or fails `ENOTCONN` reports the
+        // owner's abort (EVMOD-STREAM-END order (1)).
+        let watches: Vec<ForwardId> = st
+            .pairs
+            .iter()
+            .filter(|((g, _), info)| *g == generation && info.kind == SimPairKind::Watch)
+            .map(|((_, id), _)| *id)
+            .collect();
+        for id in watches {
+            if !st.ends_taken.contains_key(&(generation, id)) {
+                st.owner_aborted.insert((generation, id));
             }
         }
+        let ctx = Arc::try_unwrap(context.ctx).unwrap_or_else(|_| {
+            unreachable!("a sim reader held the forwarder context across its release")
+        });
+        ctx.release();
+        st.pairs.retain(|(g, _), _| *g != generation);
     }
 
-    fn label_of_record(record: &RecordState) -> Option<[u8; FLOW_REQUEST_LEN]> {
-        match record.origin {
-            RecordOrigin::Accepted(FlowListener::Stream | FlowListener::Seqpacket) => record
-                .first_record
-                .get(..FLOW_REQUEST_LEN)
-                .and_then(|bytes| <[u8; FLOW_REQUEST_LEN]>::try_from(bytes).ok()),
-            RecordOrigin::Accepted(FlowListener::Control) | RecordOrigin::HostOpened => None,
-        }
-    }
-
-    /// Applies the owner's end of one handle: `abortive` resets. A listener's
-    /// steering entry is removed by the caller in the same step (K-L3).
+    /// Applies the owner's end of one handle: `abortive` resets.
     fn end_handle(st: &mut SimState, state: HandleState, abortive: bool) {
         match state {
             HandleState::Record(record) => {
                 if let Some(conn) = record.conn {
                     st.closed_by_owner.insert(conn);
                 }
-                if record.origin == RecordOrigin::Accepted(FlowListener::Control)
-                    && let Some(cid) = record.peer_cid
+                if record.origin == RecordOrigin::Dialed
+                    && let Some(flow) = record.dial_flow
                 {
-                    st.session_ended.insert(cid);
+                    for dial in st.dials.values_mut() {
+                        if dial.request.map(|request| request.flow()) == Some(flow) {
+                            dial.closed = true;
+                        }
+                    }
+                    st.to_guest.entry(flow).or_default().push(VsockShutdownOp::Close);
                 }
             }
-            HandleState::Installed { conn, .. } | HandleState::Armed { conn, .. } => {
-                if let Some(conn) = conn {
-                    st.closed_by_owner.insert(conn);
-                    st.connects_in_flight.remove(&conn);
-                }
-            }
-            HandleState::Pending { request, .. } => {
-                if let Some(request) = request {
-                    st.host_flows_closed.push(request);
+            HandleState::Peer(peer) => {
+                if let (PeerProtocol::Tcp, Some(flow)) = (peer.spec.protocol, peer.flow) {
+                    let event = if abortive || peer.spec.abortive_linger {
+                        FarEndEvent::Reset
+                    } else {
+                        FarEndEvent::Eof
+                    };
+                    st.local_far_end.entry(flow).or_insert(event);
                 }
             }
             HandleState::Pair(pair) => {
                 if let Some(conn) = pair.conn
-                    && pair.role != PairRole::Udp
+                    && pair.role == PairRole::Vsock
                 {
                     st.closed_by_owner.insert(conn);
                 }
-                if let Some(label) = pair.label {
-                    match pair.role {
-                        PairRole::Vsock if !pair.shut => {
-                            st.vsock_ends_in_flight.insert(pair.pair, label);
-                        }
-                        PairRole::Outer { abortive: linger } => {
-                            let event = if abortive || (linger && !pair.linger_cleared) {
-                                FarEndEvent::Reset
-                            } else {
-                                FarEndEvent::Eof
-                            };
-                            st.far_end.push((label, event));
-                        }
-                        _ => {}
-                    }
+                // An attached half's far end already saw the forwarder's FIN
+                // or reset; a close of a half whose far end saw neither (an
+                // owner close before its pair ended) ends it here.
+                if let (PairRole::Tcp { linger }, Some(flow)) = (pair.role, pair.flow)
+                    && pair.socket.peer_end().is_none()
+                {
+                    let event = if abortive || (linger && !pair.linger_cleared) {
+                        FarEndEvent::Reset
+                    } else {
+                        FarEndEvent::Eof
+                    };
+                    st.local_far_end.entry(flow).or_insert(event);
                 }
             }
-            HandleState::Peer(_)
-            | HandleState::Listener(_)
-            | HandleState::Child { .. }
-            | HandleState::Parked { .. } => {}
         }
     }
 
     /// Ends `socket`'s handle (abort or close).
-    #[expect(
-        clippy::needless_pass_by_value,
-        reason = "ending a handle takes it from the owner, as the seam's `abort` / `close` do"
-    )]
     fn end_owned(&self, socket: OwnedSocket, abortive: bool) {
         let handle = match socket {
             OwnedSocket::Record(RecordSocket(h))
             | OwnedSocket::Peer(PeerSocket(h))
-            | OwnedSocket::Armed(ArmedPeer(h))
-            | OwnedSocket::Installed(InstalledVsock(h))
-            | OwnedSocket::Listener(IntakeListener(h))
-            | OwnedSocket::Child(IntakeChild(h))
-            | OwnedSocket::Parked(ParkedChild(h))
-            | OwnedSocket::Pending(PendingInbound(h))
             | OwnedSocket::Pair(PairSocket(h)) => h,
         };
         let mut st = self.state.lock();
         let state = self.take(&mut st, handle);
-        let listener_id = handle.id;
-        let is_listener = matches!(state, HandleState::Listener(_));
         Self::end_handle(&mut st, state, abortive);
         drop(st);
-        if is_listener {
-            // K-L3: the entry naming this listener goes in the same step.
-            self.node.state.lock().entries.retain(|_, listener| {
-                !(listener.seam == self.seam && listener.handle == listener_id)
-            });
-        }
         self.bump();
-    }
-
-    /// Aborts every consumed handle state (a consuming call's `Err`).
-    fn abort_states(st: &mut SimState, states: Vec<HandleState>) {
-        for state in states {
-            Self::end_handle(st, state, true);
-        }
     }
 
     async fn wait_changed<T>(&self, mut poll: impl FnMut(&mut SimState) -> Option<T>) -> T {
@@ -1530,6 +1623,22 @@ impl SimGuestFlowIo {
                 Some(None) => notified.await,
             }
         }
+    }
+
+    fn next_random(st: &mut SimState) -> u64 {
+        let mut x = st.rng;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        st.rng = x;
+        x
+    }
+
+    /// A new host vsock of `cid` (the device release's sweep reaches it).
+    fn new_vsock(st: &mut SimState, cid: GuestCid) -> SimSocket {
+        let socket = SimSocket::vsock_stream();
+        st.cid_vsocks.push((cid, socket.clone()));
+        socket
     }
 }
 
@@ -1562,198 +1671,322 @@ impl Drop for SimGuestFlowIo {
 }
 
 // ===========================================================================
+// The handed-off stream (sim side of `into_guest_stream`)
+// ===========================================================================
+
+/// The in-memory `GuestStreamIo` behind a `GuestStream` the sim hands off.
+/// It reads the dial's `V_h` as its holder ([`SimSocket::local_read`]) and
+/// resolves every end it observes from the seam's facts (EVMOD-STREAM-END,
+/// WATCH-ABORT).
+#[derive(Debug)]
+struct SimGuestStreamIo {
+    flow: FlowId,
+    pipe: Arc<Mutex<StreamPipe>>,
+    state: Arc<Mutex<SimState>>,
+    changed: Arc<Notify>,
+}
+
+/// How the stream resolves an end it observed on `V_h` (or an owner abort).
+enum Resolved {
+    OwnerAbort,
+    HalfClose,
+    GuestAbort,
+    Pending,
+}
+
+impl SimGuestStreamIo {
+    fn resolve(&self, generation: ForwarderGeneration, watch: ForwardId) -> Resolved {
+        let st = self.state.lock();
+        if st.owner_aborted.contains(&(generation, watch)) {
+            return Resolved::OwnerAbort;
+        }
+        match st.ends_taken.get(&(generation, watch)) {
+            Some(ForwardOutcome::GuestHalfClose | ForwardOutcome::Completed) => Resolved::HalfClose,
+            Some(ForwardOutcome::Aborted { .. }) => Resolved::GuestAbort,
+            None => Resolved::Pending,
+        }
+    }
+
+    fn owner_aborted(&self, generation: ForwarderGeneration, watch: ForwardId) -> bool {
+        self.state.lock().owner_aborted.contains(&(generation, watch))
+    }
+
+    fn ids(&self) -> (ForwarderGeneration, ForwardId, SimSocket) {
+        let pipe = self.pipe.lock();
+        (pipe.generation, pipe.watch, pipe.vsock.clone())
+    }
+}
+
+fn aborted() -> io::Error {
+    io::Error::from(io::ErrorKind::ConnectionAborted)
+}
+
+fn reset() -> io::Error {
+    io::Error::from(io::ErrorKind::ConnectionReset)
+}
+
+#[async_trait::async_trait]
+impl GuestStreamIo for SimGuestStreamIo {
+    async fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        loop {
+            let waiter = self.changed.notified();
+            tokio::pin!(waiter);
+            waiter.as_mut().enable();
+            let (generation, watch, vsock) = self.ids();
+            if self.owner_aborted(generation, watch) {
+                return Err(aborted());
+            }
+            match vsock.local_read(buf.len()) {
+                SimLocalRead::Bytes(bytes) => {
+                    let n = bytes.len().min(buf.len());
+                    buf[..n].copy_from_slice(&bytes[..n]);
+                    return Ok(n);
+                }
+                // The holder's read of an end is never the classification:
+                // the end is resolved from the watch.
+                SimLocalRead::Eof | SimLocalRead::Err(_) => match self.resolve(generation, watch) {
+                    Resolved::OwnerAbort => return Err(aborted()),
+                    Resolved::HalfClose => return Ok(0),
+                    Resolved::GuestAbort => return Err(reset()),
+                    Resolved::Pending => {}
+                },
+                SimLocalRead::WouldBlock => {}
+            }
+            waiter.await;
+        }
+    }
+
+    async fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let (generation, watch, vsock) = self.ids();
+        if self.owner_aborted(generation, watch) {
+            return Err(aborted());
+        }
+        if self.pipe.lock().host_shut {
+            return Err(io::Error::from(io::ErrorKind::BrokenPipe));
+        }
+        // The guest stops receiving only by an abort: a write after the
+        // guest's abort-class end (or the sweep's sk_err) fails, resolved
+        // from the watch (EVMOD-STREAM-END).
+        if vsock.sk_err().is_some() || vsock.vsock_state() == SimVsockState::Closing {
+            loop {
+                let waiter = self.changed.notified();
+                tokio::pin!(waiter);
+                waiter.as_mut().enable();
+                match self.resolve(generation, watch) {
+                    Resolved::OwnerAbort => return Err(aborted()),
+                    Resolved::HalfClose | Resolved::GuestAbort => return Err(reset()),
+                    Resolved::Pending => waiter.await,
+                }
+            }
+        }
+        self.pipe.lock().to_guest.extend_from_slice(buf);
+        self.changed.notify_waiters();
+        Ok(buf.len())
+    }
+
+    async fn shutdown_write(&mut self) -> io::Result<()> {
+        let (generation, watch, vsock) = self.ids();
+        if self.owner_aborted(generation, watch) {
+            return Err(aborted());
+        }
+        let first = {
+            let mut pipe = self.pipe.lock();
+            let first = !pipe.host_shut;
+            pipe.host_shut = true;
+            first
+        };
+        if first {
+            vsock.shutdown_send();
+            self.state
+                .lock()
+                .to_guest
+                .entry(self.flow)
+                .or_default()
+                .push(VsockShutdownOp::HalfClose);
+        }
+        self.changed.notify_waiters();
+        Ok(())
+    }
+
+    fn end(&self) -> Option<GuestStreamEnd> {
+        let (generation, watch, _) = self.ids();
+        match self.resolve(generation, watch) {
+            Resolved::OwnerAbort | Resolved::GuestAbort => Some(GuestStreamEnd::Abort),
+            Resolved::HalfClose => Some(GuestStreamEnd::HalfClose),
+            Resolved::Pending => None,
+        }
+    }
+}
+
+impl Drop for SimGuestStreamIo {
+    /// EVMOD-STREAM-ABORT: the drop aborts the watch (unless the owner
+    /// already ended the stream), then closes `V_h` (`0x3` toward the
+    /// guest), in one step. The watch's record (`Detached`) tells the owner
+    /// to release the node slot and, for `Relay`, the quota place
+    /// (EVMOD-AB).
+    fn drop(&mut self) {
+        let (generation, watch) = {
+            let mut pipe = self.pipe.lock();
+            pipe.dropped = true;
+            (pipe.generation, pipe.watch)
+        };
+        let mut st = self.state.lock();
+        let live_context = st
+            .context
+            .as_ref()
+            .filter(|context| context.generation == generation)
+            .map(|context| Arc::clone(&context.ctx));
+        if !st.owner_aborted.contains(&(generation, watch))
+            && let Some(ctx) = live_context
+        {
+            let _record_queued_or_already_ended = ctx.abort(watch);
+        }
+        st.to_guest.entry(self.flow).or_default().push(VsockShutdownOp::Close);
+        for dial in st.dials.values_mut() {
+            if dial.streamed && dial.request.map(|request| request.flow()) == Some(self.flow) {
+                dial.closed = true;
+            }
+        }
+        drop(st);
+        self.changed.notify_waiters();
+    }
+}
+
+// ===========================================================================
 // The seam
 // ===========================================================================
 
 #[async_trait::async_trait]
 impl GuestFlowIo for SimGuestFlowIo {
     async fn host_facts(&self) -> Result<GuestHostFacts, GuestNetworkError> {
-        let failure = self.gate(SimEffectKind::HostFacts, SimEffectTarget::None).await;
-        let mut node = self.node.state.lock();
-        let failure = match failure {
-            Some(SimFailure::Io(kind)) => Some(kind),
-            Some(other) => mismatched("host_facts", other),
-            None => node.host_facts_failure.take(),
-        };
-        if let Some(kind) = failure {
-            return Err(GuestNetworkError::Io {
+        match self.gate(SimEffectKind::HostFacts, SimEffectTarget::None).await {
+            None => Ok(self.state.lock().host_facts.clone()),
+            Some(SimFailure::Io(kind)) => Err(GuestNetworkError::Io {
                 operation: GuestNetworkOperation::StartupProbe,
                 source: io::Error::from(kind),
-            });
+            }),
+            Some(other) => mismatched("host_facts", other),
         }
-        Ok(node.host_facts.clone())
     }
 
-    async fn probe_forwarder(&self) -> Result<(), GuestFlowError> {
-        match self.gate(SimEffectKind::ProbeForwarder, SimEffectTarget::None).await {
-            None => Ok(()),
-            Some(SimFailure::Forwarder(failure)) => Err(forwarder_error(failure)),
+    async fn probe_forwarder(&self) -> Result<(), ForwarderError> {
+        let failure = self.gate(SimEffectKind::ProbeForwarder, SimEffectTarget::None).await;
+        let st = self.state.lock();
+        // A context of the probe's own: the serving context and the
+        // generation count are untouched, and the context is released before
+        // return on every outcome (D-8).
+        let outcome = match failure {
+            None => {
+                let ctx = st.device.open();
+                let probed = ctx.probe();
+                ctx.release();
+                probed
+            }
+            // The open itself fails: no context is opened.
+            Some(SimFailure::Forwarder(
+                failure @ (SimForwarderFailure::DeviceAbsent | SimForwarderFailure::AbiMismatch),
+            )) => Err(failure.error()),
+            // A stage observed the wrong behaviour on the opened context.
+            Some(SimFailure::Forwarder(failure @ SimForwarderFailure::ProbeMismatch(..))) => {
+                let ctx = st.device.open();
+                ctx.release();
+                Err(failure.error())
+            }
             Some(other) => mismatched("probe_forwarder", other),
-        }
+        };
+        drop(st);
+        self.bump();
+        outcome
     }
 
-    async fn load_forwarder(
-        &self,
-        interfaces: &BTreeSet<InterfaceIndex>,
-    ) -> Result<UnframeConvergence, GuestFlowError> {
-        let failure = self.gate(SimEffectKind::LoadForwarder, SimEffectTarget::None).await;
+    async fn open_forwarder(&self) -> Result<ForwarderGeneration, ForwarderError> {
+        let failure = self.gate(SimEffectKind::OpenForwarder, SimEffectTarget::None).await;
         let mut st = self.state.lock();
-        if let Some(forwarder) = &st.forwarder {
-            return Ok(UnframeConvergence {
-                attached: forwarder.attached.clone(),
-                failed: forwarder
-                    .failed
-                    .iter()
-                    .map(|(ifindex, failure)| (*ifindex, unframe_error(*ifindex, *failure)))
-                    .collect(),
-            });
+        // The old context is closed before the new one is opened (EVMOD-CTL).
+        if let Some(old) = st.context.take() {
+            Self::release_context(&mut st, old);
         }
         match failure {
-            None => {}
-            Some(SimFailure::Forwarder(failure)) => return Err(forwarder_error(failure)),
-            Some(other) => mismatched("load_forwarder", other),
-        }
-        let mut attached = BTreeSet::new();
-        let mut failed = BTreeMap::new();
-        for ifindex in interfaces {
-            match st.unframe_failures.remove(ifindex) {
-                Some(failure) => {
-                    failed.insert(*ifindex, failure);
+            None => {
+                let ctx = st.device.open();
+                // Earned Trust: a context whose probe fails is released at
+                // once; the seam then holds none.
+                if let Err(error) = ctx.probe() {
+                    ctx.release();
+                    return Err(error);
                 }
-                None => {
-                    attached.insert(*ifindex);
-                }
+                let generation = match st.last_generation {
+                    None => ForwarderGeneration::FIRST,
+                    Some(last) => last.next().expect("fewer than u64::MAX contexts"),
+                };
+                st.last_generation = Some(generation);
+                st.context = Some(Context { ctx: Arc::new(ctx), generation });
+                drop(st);
+                self.bump();
+                Ok(generation)
             }
+            Some(SimFailure::Forwarder(failure)) => Err(failure.error()),
+            Some(other) => mismatched("open_forwarder", other),
         }
-        let convergence = UnframeConvergence {
-            attached: attached.clone(),
-            failed: failed
-                .iter()
-                .map(|(ifindex, failure)| (*ifindex, unframe_error(*ifindex, *failure)))
-                .collect(),
-        };
-        st.forwarder = Some(ForwarderState { attached, failed });
-        Ok(convergence)
     }
 
-    async fn bind_listener(&self, listener: FlowListener) -> Result<(), FlowIoError> {
+    fn close_forwarder(&self) {
+        let mut st = self.state.lock();
+        if let Some(failure) =
+            Self::sync_gate(&mut st, SimEffectKind::CloseForwarder, SimEffectTarget::None)
+        {
+            mismatched("close_forwarder (infallible)", failure);
+        }
+        if let Some(context) = st.context.take() {
+            Self::release_context(&mut st, context);
+        }
+        drop(st);
+        self.bump();
+    }
+
+    async fn bind_listener(
+        &self,
+        listener: FlowListener,
+        port: VsockListenPort,
+    ) -> Result<VsockPort, FlowIoError> {
         let failure =
             self.gate(SimEffectKind::BindListener, SimEffectTarget::Listener(listener)).await;
         let mut st = self.state.lock();
+        if let Some(failure) = failure {
+            return match failure {
+                SimFailure::Io(kind) => Err(io_error(kind)),
+                other => mismatched("bind_listener", other),
+            };
+        }
+        // A held listener (a repair after its accept task ended): `port` is
+        // not consulted; the held socket still listens, so it serves again on
+        // its bound port, nothing closed or bound.
+        if let Some(state) = st.listeners.get_mut(&listener)
+            && let Some(held) = state.port
+        {
+            state.bound = true;
+            state.failed = None;
+            return Ok(held);
+        }
+        let bound = match port {
+            VsockListenPort::Fixed(port) => port,
+            VsockListenPort::KernelAssigned => {
+                let assigned = VsockPort::new(st.next_assigned_port);
+                st.next_assigned_port += 1;
+                assigned
+            }
+        };
         let state = st.listeners.entry(listener).or_default();
-        // A repair closes the earlier socket first.
-        state.bound = false;
+        state.bound = true;
         state.failed = None;
-        match failure {
-            None => {
-                state.bound = true;
-                Ok(())
-            }
-            Some(SimFailure::Io(kind)) => Err(io_error(kind)),
-            Some(other) => mismatched("bind_listener", other),
-        }
+        state.port = Some(bound);
+        Ok(bound)
     }
 
-    async fn converge_steering(
-        &self,
-        prefix: Ipv4Net,
-        gateway: Ipv4Addr,
-    ) -> Result<(), GuestSteeringError> {
-        if matches!(self.state.lock().steering, SteeringPhase::Converged { .. }) {
-            unreachable!("converge_steering after it returned Ok in this seam's life");
-        }
-        let any = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0);
-        // Step 1 — Load: this binary's program, verifier-checked; nothing attached.
-        let load = self.gate(SimEffectKind::SteeringLoad, SimEffectTarget::None).await;
-        {
-            let mut st = self.state.lock();
-            let ok = load.is_none();
-            st.steering_effects.push(SimSteeringEffect::Load { version: self.binary.clone(), ok });
-            match load {
-                None => {}
-                Some(SimFailure::Steering(
-                    failure @ (SimSteeringFailure::Load | SimSteeringFailure::Query),
-                )) => return Err(steering_error(failure, any)),
-                Some(other) => mismatched("steering load", other),
-            }
-        }
-        // Step 2 — Swap: update an adopted pinned link, or a first attach.
-        let adopted = self.node.state.lock().link.as_ref().is_some_and(|link| link.pinned);
-        let attach =
-            self.gate(SimEffectKind::SteeringAttach, SimEffectTarget::Adopted(adopted)).await;
-        {
-            let mut st = self.state.lock();
-            st.steering_effects.push(SimSteeringEffect::Attach { adopted, ok: attach.is_none() });
-            match attach {
-                None => {
-                    let mut node = self.node.state.lock();
-                    if adopted {
-                        // BPF_LINK_UPDATE: atomic; the new program's map is new and empty.
-                        if let Some(link) = node.link.as_mut() {
-                            link.program = self.binary.clone();
-                        }
-                    } else {
-                        node.link = Some(NodeLink {
-                            pinned: false,
-                            program: self.binary.clone(),
-                            attached_by: self.seam,
-                        });
-                    }
-                    node.entries.clear();
-                }
-                Some(SimFailure::Steering(
-                    failure @ (SimSteeringFailure::Update | SimSteeringFailure::Attach),
-                )) => {
-                    // The link keeps the earlier program (K-L9); nothing new attached.
-                    return Err(steering_error(failure, any));
-                }
-                Some(other) => mismatched("steering attach", other),
-            }
-            if adopted {
-                st.steering = SteeringPhase::Converged { prefix, gateway };
-                return Ok(());
-            }
-        }
-        // Step 2b — Pin, a first attach only.
-        let pin = self.gate(SimEffectKind::SteeringPin, SimEffectTarget::None).await;
-        let mut st = self.state.lock();
-        st.steering_effects.push(SimSteeringEffect::Pin { ok: pin.is_none() });
-        let mut node = self.node.state.lock();
-        match pin {
+    async fn converge_gateway_route(&self, gateway: Ipv4Addr) -> Result<(), GuestNetworkError> {
+        match self.gate(SimEffectKind::GatewayRoute, SimEffectTarget::Ip(gateway)).await {
             None => {
-                if let Some(link) = node.link.as_mut() {
-                    link.pinned = true;
-                }
-                drop(node);
-                st.steering = SteeringPhase::Converged { prefix, gateway };
-                Ok(())
-            }
-            Some(SimFailure::Steering(SimSteeringFailure::Pin)) => {
-                // The unpinned link detaches when its descriptor closes, on return.
-                if node.link.as_ref().is_some_and(|link| link.attached_by == self.seam) {
-                    node.link = None;
-                }
-                Err(steering_error(SimSteeringFailure::Pin, any))
-            }
-            Some(other) => mismatched("steering pin", other),
-        }
-    }
-
-    async fn converge_prefix_route(
-        &self,
-        prefix: Ipv4Net,
-        gateway: Ipv4Addr,
-    ) -> Result<(), GuestNetworkError> {
-        let converged = Self::require_steering(&self.state.lock());
-        if converged != (prefix, gateway) {
-            unreachable!("the prefix route converges the steering's prefix and gateway");
-        }
-        let failure = self.gate(SimEffectKind::PrefixRoute, SimEffectTarget::None).await;
-        let mut st = self.state.lock();
-        st.steering_effects.push(SimSteeringEffect::Route { ok: failure.is_none() });
-        match failure {
-            None => {
-                self.node.state.lock().route = SimPrefixRoute::Local;
+                self.state.lock().gateway_route = Some(gateway);
                 Ok(())
             }
             Some(SimFailure::Netlink) => Err(GuestNetworkError::Netlink {
@@ -1762,13 +1995,13 @@ impl GuestFlowIo for SimGuestFlowIo {
                     source: io::Error::from_raw_os_error(libc::ENOBUFS),
                 },
             }),
-            Some(other) => mismatched("prefix route", other),
+            Some(other) => mismatched("converge_gateway_route", other),
         }
     }
 
     async fn stale_objects_present(&self) -> Result<bool, GuestNetworkError> {
         match self.gate(SimEffectKind::StaleObjects, SimEffectTarget::None).await {
-            None => Ok(self.node.state.lock().stale_objects),
+            None => Ok(self.state.lock().stale_objects),
             Some(SimFailure::Io(kind)) => Err(GuestNetworkError::Io {
                 operation: GuestNetworkOperation::CleanupComplement,
                 source: io::Error::from(kind),
@@ -1782,6 +2015,7 @@ impl GuestFlowIo for SimGuestFlowIo {
         listener: FlowListener,
     ) -> Result<(RecordSocket, GuestConnKey), FlowIoError> {
         self.wait_changed(|st| {
+            let auto = st.auto_deliver;
             let state = st.listeners.entry(listener).or_default();
             if let Some(kind) = state.failed.take() {
                 state.bound = false;
@@ -1790,19 +2024,55 @@ impl GuestFlowIo for SimGuestFlowIo {
             if !state.bound {
                 unreachable!("accept on a listener bind_listener has not bound");
             }
-            let position = state.queue.iter().position(|conn| conn.released)?;
-            let conn = state.queue.remove(position)?;
-            let record = RecordState {
+            let released: Vec<usize> = state
+                .queue
+                .iter()
+                .enumerate()
+                .filter(|(_, conn)| conn.released)
+                .map(|(index, _)| index)
+                .collect();
+            if released.is_empty() {
+                return None;
+            }
+            // D-UP-19: one connection enters the accept queue at the step
+            // that accepts it; with auto-delivery the seed picks which.
+            let pick = if auto && released.len() > 1 {
+                let draw = Self::next_random(st);
+                released[usize::try_from(draw % released.len() as u64).unwrap_or(0)]
+            } else {
+                released[0]
+            };
+            let state = st.listeners.entry(listener).or_default();
+            let conn = state.queue.remove(pick)?;
+            let vsock = Self::new_vsock(st, conn.key.peer_cid);
+            if listener == FlowListener::Stream
+                && let Some(request) = request_of(&conn.record)
+            {
+                st.flow_sockets.insert(
+                    request.flow(),
+                    FlowSockets { cid: conn.key.peer_cid, vsock: vsock.clone(), peer: None },
+                );
+            }
+            let mut record = RecordState {
                 origin: RecordOrigin::Accepted(listener),
                 conn: Some(conn.key),
-                peer_cid: Some(conn.key.peer_cid),
+                peer_cid: conn.key.peer_cid,
                 first_record: conn.record.clone(),
-                buffered: conn.record.into_iter().collect(),
+                buffered: VecDeque::new(),
                 ready: VecDeque::new(),
                 end: conn.end,
                 end_released: false,
                 peer_gone: false,
+                peer_gone_released: false,
+                dial_flow: None,
+                vsock,
             };
+            if auto {
+                record.ready = conn.record.into_iter().collect();
+                record.end_released = record.end.is_some();
+            } else {
+                record.buffered = conn.record.into_iter().collect();
+            }
             let handle = self.issue(st, HandleState::Record(record));
             Some(Ok((RecordSocket(handle), conn.key)))
         })
@@ -1818,15 +2088,15 @@ impl GuestFlowIo for SimGuestFlowIo {
             let Some(HandleState::Record(record)) = st.handles.get_mut(&id) else {
                 unreachable!("read_record on a handle that is not a live record socket");
             };
-            if record.peer_gone {
-                record.peer_gone = false;
+            // K-A2′: an accepted connection whose VM died fails at its next I/O.
+            if record.peer_gone && record.peer_gone_released {
                 return Some(Err(io_error(io::ErrorKind::ConnectionReset)));
             }
             if !record.ready.is_empty() {
                 let take = max.min(record.ready.len());
                 return Some(Ok(record.ready.drain(..take).collect()));
             }
-            if record.end_released || (record.buffered.is_empty() && record.end.is_some()) {
+            if record.end_released {
                 return match record.end {
                     Some(SimPeerEnd::Eof) | None => Some(Ok(Vec::new())),
                     Some(SimPeerEnd::Reset) => Some(Err(io_error(io::ErrorKind::ConnectionReset))),
@@ -1844,7 +2114,8 @@ impl GuestFlowIo for SimGuestFlowIo {
             _ => unreachable!("write_record on a handle that is not a live record socket"),
         };
         let failure = self.gate(SimEffectKind::WriteRecord, SimEffectTarget::Conn(conn)).await;
-        let mut st = self.state.lock();
+        let mut guard = self.state.lock();
+        let st = &mut *guard;
         let Some(HandleState::Record(record)) = st.handles.get_mut(&id) else {
             unreachable!("write_record on a handle closed while the write was held");
         };
@@ -1855,15 +2126,40 @@ impl GuestFlowIo for SimGuestFlowIo {
             };
         }
         if record.peer_gone || record.end == Some(SimPeerEnd::Reset) {
-            record.peer_gone = false;
             return Err(io_error(io::ErrorKind::BrokenPipe));
         }
-        let Some(cid) = record.peer_cid else {
-            unreachable!("a record socket always has a peer CID");
-        };
-        if let Ok(message) = <[u8; CONTROL_MESSAGE_LEN]>::try_from(bytes) {
-            st.outbox.entry(cid).or_default().push(message);
+        let cid = record.peer_cid;
+        match record.origin {
+            RecordOrigin::Dialed => {
+                let request = request_of(bytes);
+                record.dial_flow = request.map(|request| request.flow());
+                let flow = record.dial_flow;
+                let vsock = record.vsock.clone();
+                if let Some(flow) = flow {
+                    st.flow_sockets.insert(flow, FlowSockets { cid, vsock, peer: None });
+                }
+                if let Some(dial) = st.dials.get_mut(&id) {
+                    dial.request = request;
+                    // The dial's watch learns its flow.
+                    if let Some(watch) = dial.watch {
+                        for ((_, pid), info) in &mut st.pairs {
+                            if *pid == watch && info.kind == SimPairKind::Watch {
+                                info.flow = flow;
+                            }
+                        }
+                    }
+                }
+            }
+            RecordOrigin::Accepted(_) => {
+                if let Ok(bytes) = <&[u8; CONTROL_MESSAGE_LEN]>::try_from(bytes)
+                    && let Ok(message) = ControlMessage::decode(bytes)
+                {
+                    st.outbox.entry(cid).or_default().push(message);
+                }
+            }
         }
+        drop(guard);
+        self.bump();
         Ok(())
     }
 
@@ -1876,18 +2172,102 @@ impl GuestFlowIo for SimGuestFlowIo {
             };
         }
         let mut st = self.state.lock();
+        if st.vm_gone.contains(&cid) {
+            // No device holds the CID: `drivers/vhost/vsock.c:290 @ v7.0`.
+            return Err(FlowIoError::Io { source: io::Error::from_raw_os_error(libc::ENODEV) });
+        }
+        let vsock = Self::new_vsock(&mut st, cid);
         let record = RecordState {
-            origin: RecordOrigin::HostOpened,
+            origin: RecordOrigin::Dialed,
             conn: None,
-            peer_cid: Some(cid),
+            peer_cid: cid,
             first_record: Vec::new(),
             buffered: VecDeque::new(),
             ready: VecDeque::new(),
             end: None,
             end_released: false,
             peer_gone: false,
+            peer_gone_released: false,
+            dial_flow: None,
+            vsock,
         };
-        Ok(RecordSocket(self.issue(&mut st, HandleState::Record(record))))
+        let handle = self.issue(&mut st, HandleState::Record(record));
+        st.dials.insert(
+            handle.id,
+            SimDialRecord { cid, watch: None, request: None, closed: false, streamed: false },
+        );
+        drop(st);
+        self.bump();
+        Ok(RecordSocket(handle))
+    }
+
+    fn watch(&self, vsock: &RecordSocket) -> Result<ForwardId, ForwarderError> {
+        let id = self.own(vsock.0);
+        let mut st = self.state.lock();
+        let failure = Self::sync_gate(&mut st, SimEffectKind::Watch, SimEffectTarget::None);
+        let (ctx, generation) = Self::context(&st);
+        let (socket, cid, flow) = match st.handles.get(&id) {
+            Some(HandleState::Record(record)) if record.origin == RecordOrigin::Dialed => {
+                (record.vsock.clone(), record.peer_cid, record.dial_flow)
+            }
+            _ => unreachable!("watch on a handle that is not a dial's V_h"),
+        };
+        match failure {
+            None => {}
+            Some(SimFailure::Forwarder(failure)) => return Err(failure.error()),
+            Some(other) => mismatched("watch", other),
+        }
+        // `HalfEnded` (the sweep already reset V_h) is the arbiter's answer.
+        let watch = ctx.watch(&socket)?;
+        st.pairs.insert(
+            (generation, watch),
+            SimPairInfo { kind: SimPairKind::Watch, flow, cid, generation },
+        );
+        if let Some(dial) = st.dials.get_mut(&id) {
+            dial.watch = Some(watch);
+        }
+        drop(st);
+        self.bump();
+        Ok(watch)
+    }
+
+    fn into_guest_stream(
+        &self,
+        vsock: RecordSocket,
+        watch: ForwardId,
+        flow: FlowId,
+        target: SocketAddrV4,
+    ) -> GuestStream {
+        let mut st = self.state.lock();
+        let id = self.own(vsock.0);
+        let HandleState::Record(record) = self.take(&mut st, vsock.0) else {
+            unreachable!("into_guest_stream on a handle that is not a dial's V_h");
+        };
+        let (_, generation) = Self::context(&st);
+        if let Some(dial) = st.dials.get_mut(&id) {
+            assert_eq!(dial.watch, Some(watch), "into_guest_stream names the dial's own watch");
+            dial.streamed = true;
+        }
+        let pipe = Arc::new(Mutex::new(StreamPipe {
+            generation,
+            watch,
+            vsock: record.vsock,
+            to_guest: Vec::new(),
+            host_shut: false,
+            dropped: false,
+        }));
+        st.streams.insert(flow, Arc::clone(&pipe));
+        drop(st);
+        self.bump();
+        GuestStream::new(
+            target,
+            Box::new(SimGuestStreamIo {
+                flow,
+                pipe,
+                state: Arc::clone(&self.state),
+                changed: Arc::clone(&self.changed),
+            }),
+        )
     }
 
     async fn open_peer(&self, spec: PeerSocketSpec) -> Result<PeerSocket, FlowIoError> {
@@ -1902,15 +2282,21 @@ impl GuestFlowIo for SimGuestFlowIo {
         let local = spec.bind.map(|bind| {
             if bind.port() == 0 {
                 let port = st.next_port;
-                st.next_port = st.next_port.wrapping_add(1);
+                st.next_port += 1;
                 SocketAddrV4::new(*bind.ip(), port)
             } else {
                 bind
             }
         });
-        Ok(PeerSocket(
-            self.issue(&mut st, HandleState::Peer(PeerState { spec, local, peer: None })),
-        ))
+        let socket = match spec.protocol {
+            PeerProtocol::Tcp => SimSocket::tcp(),
+            PeerProtocol::Udp => SimSocket::udp(),
+        };
+        let handle = self.issue(
+            &mut st,
+            HandleState::Peer(PeerState { spec, local, peer: None, flow: None, socket }),
+        );
+        Ok(PeerSocket(handle))
     }
 
     fn local_addr(&self, peer: &PeerSocket) -> Result<SocketAddrV4, FlowIoError> {
@@ -1919,7 +2305,7 @@ impl GuestFlowIo for SimGuestFlowIo {
             Some(HandleState::Peer(state)) => {
                 state.local.ok_or_else(|| io_error(io::ErrorKind::NotConnected))
             }
-            _ => unreachable!("local_addr on a handle that is not a live peer socket"),
+            _ => unreachable!("local_addr on a handle that is not a peer socket"),
         }
     }
 
@@ -1929,7 +2315,7 @@ impl GuestFlowIo for SimGuestFlowIo {
             Some(HandleState::Peer(state)) => {
                 state.peer.ok_or_else(|| io_error(io::ErrorKind::NotConnected))
             }
-            _ => unreachable!("peer_addr on a handle that is not a live peer socket"),
+            _ => unreachable!("peer_addr on a handle that is not a peer socket"),
         }
     }
 
@@ -1941,63 +2327,55 @@ impl GuestFlowIo for SimGuestFlowIo {
         let id = self.own(peer.0);
         let failure =
             self.gate(SimEffectKind::ConnectUdp, SimEffectTarget::Addr(destination)).await;
-        let mut st = self.state.lock();
-        let rewritten = st.connect4.get(&destination).copied().unwrap_or(destination);
-        let port = st.next_port;
-        let Some(HandleState::Peer(state)) = st.handles.get_mut(&id) else {
-            unreachable!("connect_udp on a handle that is not a live peer socket");
-        };
-        if state.spec.protocol != PeerProtocol::Udp {
-            unreachable!("connect_udp on a TCP peer socket");
-        }
         if let Some(failure) = failure {
             return match failure {
                 SimFailure::Io(kind) => Err(io_error(kind)),
                 other => mismatched("connect_udp", other),
             };
         }
-        state.peer = Some(rewritten);
-        if state.local.is_none() {
-            state.local = Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port));
-            st.next_port = st.next_port.wrapping_add(1);
+        let mut st = self.state.lock();
+        let rewritten = st.connect4.get(&destination).copied().unwrap_or(destination);
+        let port = st.next_port;
+        st.next_port += 1;
+        match st.handles.get_mut(&id) {
+            Some(HandleState::Peer(state)) => {
+                if state.spec.protocol != PeerProtocol::Udp {
+                    unreachable!("connect_udp on a TCP peer socket");
+                }
+                state.peer = Some(rewritten);
+                if state.local.is_none() {
+                    state.local = Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port));
+                }
+                Ok(())
+            }
+            _ => unreachable!("connect_udp on a handle that is not a peer socket"),
         }
-        Ok(())
     }
 
     async fn connect_peer(
         &self,
-        peer: &ArmedPeer,
+        peer: &PeerSocket,
         destination: SocketAddrV4,
     ) -> Result<(), FlowIoError> {
         let id = self.own(peer.0);
-        let conn = match self.state.lock().handles.get(&id) {
-            Some(HandleState::Armed { conn, .. }) => *conn,
-            _ => unreachable!("connect_peer on a handle that is not a live armed peer"),
-        };
-        if let Some(conn) = conn {
-            self.state.lock().connects_in_flight.insert(conn);
-        }
         let failure =
             self.gate(SimEffectKind::ConnectPeer, SimEffectTarget::Addr(destination)).await;
-        let mut st = self.state.lock();
-        if let Some(conn) = conn {
-            st.connects_in_flight.remove(&conn);
-        }
-        let port = st.next_port;
-        let Some(HandleState::Armed { peer: state, .. }) = st.handles.get_mut(&id) else {
-            unreachable!("connect_peer on a handle closed while its connect was held");
-        };
         if let Some(failure) = failure {
             return match failure {
                 SimFailure::Io(kind) => Err(io_error(kind)),
                 other => mismatched("connect_peer", other),
             };
         }
-        state.peer = Some(destination);
-        if state.local.is_none() {
-            state.local = Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port));
-            st.next_port = st.next_port.wrapping_add(1);
+        let mut st = self.state.lock();
+        match st.handles.get_mut(&id) {
+            Some(HandleState::Peer(state)) if state.spec.protocol == PeerProtocol::Tcp => {
+                state.peer = Some(destination);
+            }
+            _ => unreachable!("connect_peer on a handle that is not a TCP peer socket"),
         }
+        st.peer_connects.push(destination);
+        drop(st);
+        self.bump();
         Ok(())
     }
 
@@ -2015,542 +2393,211 @@ impl GuestFlowIo for SimGuestFlowIo {
         }
     }
 
-    async fn bind_intake(&self, address: SocketAddrV4) -> Result<IntakeListener, FlowIoError> {
-        let failure = self.gate(SimEffectKind::BindIntake, SimEffectTarget::Addr(address)).await;
-        if let Some(failure) = failure {
-            return match failure {
-                SimFailure::Io(kind) => Err(io_error(kind)),
-                other => mismatched("bind_intake", other),
-            };
-        }
-        let mut st = self.state.lock();
-        let in_use = st
-            .handles
-            .values()
-            .any(|handle| matches!(handle, HandleState::Listener(state) if state.bound == address));
-        if in_use {
-            return Err(io_error(io::ErrorKind::AddrInUse));
-        }
-        let state =
-            IntakeListenerState { bound: address, registered: false, queue: VecDeque::new() };
-        Ok(IntakeListener(self.issue(&mut st, HandleState::Listener(state))))
-    }
-
-    async fn accept_intake(
+    fn attach(
         &self,
-        listener: &IntakeListener,
-    ) -> Result<(IntakeChild, SocketAddrV4), FlowIoError> {
-        let id = self.own(listener.0);
-        self.wait_changed(|st| {
-            let Some(HandleState::Listener(state)) = st.handles.get_mut(&id) else {
-                unreachable!("accept_intake on a handle that is not a live intake listener");
-            };
-            let position = state.queue.iter().position(|queued| queued.released)?;
-            let client = state.queue.remove(position)?.client;
-            let child = self.issue(st, HandleState::Child { client, hangup: None });
-            Some(Ok((IntakeChild(child), client)))
-        })
-        .await
-    }
-
-    async fn steer(
-        &self,
-        intake: SocketAddrV4,
-        listener: &IntakeListener,
-    ) -> Result<(), GuestSteeringError> {
-        let id = self.own(listener.0);
-        {
-            let st = self.state.lock();
-            Self::require_forwarder(&st);
-            Self::require_steering(&st);
-        }
-        let failure = self.gate(SimEffectKind::Steer, SimEffectTarget::Addr(intake)).await;
-        let st = self.state.lock();
-        let (prefix, gateway) = Self::require_steering(&st);
-        let Some(HandleState::Listener(state)) = st.handles.get(&id) else {
-            unreachable!("steer on a handle that is not a live intake listener");
-        };
-        let bound = state.bound;
-        drop(st);
-        let reference = SimListenerRef { bound, seam: self.seam, handle: id };
-        let result = if !prefix.contains(intake.ip()) || *intake.ip() == gateway {
-            Err(GuestSteeringError::IntakeOutsideGuestPrefix { intake })
-        } else if bound.ip() != intake.ip() {
-            Err(GuestSteeringError::UnsupportedSocket)
-        } else if let Some(SimFailure::Steering(failure)) = failure {
-            Err(steering_error(failure, intake))
-        } else if let Some(other) = failure {
-            mismatched("steer", other)
-        } else {
-            let mut node = self.node.state.lock();
-            match node.entries.get(&intake) {
-                Some(existing) if *existing != reference => {
-                    Err(GuestSteeringError::IntakeAlreadySteered { intake })
-                }
-                _ => {
-                    node.entries.insert(intake, reference);
-                    Ok(())
-                }
-            }
-        };
-        let outcome = match &result {
-            Ok(()) => SimSteerOutcome::Ok,
-            Err(GuestSteeringError::KernelMemory { .. }) => SimSteerOutcome::KernelMemory,
-            Err(_) => SimSteerOutcome::Defect,
-        };
-        self.state.lock().steering_effects.push(SimSteeringEffect::Steer { intake, outcome });
-        result
-    }
-
-    async fn install_vsock(&self, vsock: RecordSocket) -> Result<InstalledVsock, GuestFlowError> {
-        Self::require_forwarder(&self.state.lock());
-        let failure = self.gate(SimEffectKind::InstallVsock, SimEffectTarget::None).await;
-        let mut st = self.state.lock();
-        let state = self.take(&mut st, vsock.0);
-        let HandleState::Record(record) = state else {
-            unreachable!("install_vsock of a handle that is not a record socket");
-        };
-        match failure {
-            None => {
-                let label = Self::label_of_record(&record);
-                let conn = record.conn;
-                Ok(InstalledVsock(self.issue(&mut st, HandleState::Installed { conn, label })))
-            }
-            Some(SimFailure::Forwarder(failure)) => {
-                Self::abort_states(&mut st, vec![HandleState::Record(record)]);
-                Err(forwarder_error(failure))
-            }
-            Some(other) => mismatched("install_vsock", other),
-        }
-    }
-
-    async fn arm_peer(
-        &self,
-        vsock: &InstalledVsock,
-        peer: PeerSocket,
-    ) -> Result<ArmedPeer, GuestFlowError> {
-        let installed = self.own(vsock.0);
-        let failure = self.gate(SimEffectKind::ArmPeer, SimEffectTarget::None).await;
-        let mut st = self.state.lock();
-        let (conn, label) = match st.handles.get(&installed) {
-            Some(HandleState::Installed { conn, label }) => (*conn, *label),
-            _ => unreachable!("arm_peer with a handle that is not an installed vsock"),
-        };
-        let state = self.take(&mut st, peer.0);
-        let HandleState::Peer(peer_state) = state else {
-            unreachable!("arm_peer of a handle that is not a peer socket");
-        };
-        match failure {
-            None => Ok(ArmedPeer(
-                self.issue(&mut st, HandleState::Armed { peer: peer_state, conn, label }),
-            )),
-            Some(SimFailure::Forwarder(failure)) => {
-                Self::abort_states(&mut st, vec![HandleState::Peer(peer_state)]);
-                Err(forwarder_error(failure))
-            }
-            Some(other) => mismatched("arm_peer", other),
-        }
-    }
-
-    async fn route_outbound(
-        &self,
-        vsock: InstalledVsock,
-        peer: ArmedPeer,
-    ) -> Result<TcpPair, GuestFlowError> {
-        let failure = self.gate(SimEffectKind::RouteOutbound, SimEffectTarget::None).await;
-        let mut st = self.state.lock();
-        let installed = self.take(&mut st, vsock.0);
-        let armed = self.take(&mut st, peer.0);
-        let (HandleState::Installed { conn, label }, HandleState::Armed { peer: peer_state, .. }) =
-            (&installed, &armed)
-        else {
-            unreachable!(
-                "route_outbound of handles that are not an installed vsock and an armed peer"
-            );
-        };
-        let (conn, label, abortive) = (*conn, *label, peer_state.spec.abortive_linger);
-        if let Some(failure) = failure {
-            Self::abort_states(&mut st, vec![installed, armed]);
-            return match failure {
-                SimFailure::Forwarder(failure) => Err(forwarder_error(failure)),
-                other => mismatched("route_outbound", other),
-            };
-        }
-        let key = PairKey(st.next_pair);
-        st.next_pair += 1;
-        st.pairs.insert(key, PairEntry::default());
-        let socket = |role| {
-            HandleState::Pair(PairSocketState {
-                pair: key,
-                role,
-                conn,
-                label,
-                hangup: None,
-                linger_cleared: false,
-                shut: false,
-            })
-        };
-        let vsock = PairSocket(self.issue(&mut st, socket(PairRole::Vsock)));
-        let outer = PairSocket(self.issue(&mut st, socket(PairRole::Outer { abortive })));
-        Ok(TcpPair { key, vsock, outer })
-    }
-
-    async fn install_datagram(
-        &self,
-        stream: RecordSocket,
-        seqpacket: RecordSocket,
-        udp: PeerSocket,
-    ) -> Result<DatagramPair, GuestFlowError> {
-        Self::require_forwarder(&self.state.lock());
-        let failure = self.gate(SimEffectKind::InstallDatagram, SimEffectTarget::None).await;
-        let mut st = self.state.lock();
-        let stream_state = self.take(&mut st, stream.0);
-        let seqpacket_state = self.take(&mut st, seqpacket.0);
-        let udp_state = self.take(&mut st, udp.0);
-        let (HandleState::Record(stream_record), HandleState::Record(_), HandleState::Peer(_)) =
-            (&stream_state, &seqpacket_state, &udp_state)
-        else {
-            unreachable!("install_datagram of handles that are not two records and a peer");
-        };
-        let (conn, label) = (stream_record.conn, Self::label_of_record(stream_record));
-        if let Some(failure) = failure {
-            Self::abort_states(&mut st, vec![stream_state, seqpacket_state, udp_state]);
-            return match failure {
-                SimFailure::Forwarder(failure) => Err(forwarder_error(failure)),
-                other => mismatched("install_datagram", other),
-            };
-        }
-        let key = PairKey(st.next_pair);
-        st.next_pair += 1;
-        st.pairs.insert(key, PairEntry::default());
-        let socket = |role| {
-            HandleState::Pair(PairSocketState {
-                pair: key,
-                role,
-                conn,
-                label,
-                hangup: None,
-                linger_cleared: false,
-                shut: false,
-            })
-        };
-        let stream = PairSocket(self.issue(&mut st, socket(PairRole::Stream)));
-        let seqpacket = PairSocket(self.issue(&mut st, socket(PairRole::Seqpacket)));
-        let udp = PairSocket(self.issue(&mut st, socket(PairRole::Udp)));
-        Ok(DatagramPair { key, stream, seqpacket, udp })
-    }
-
-    async fn register_intake(&self, listener: &IntakeListener) -> Result<(), GuestFlowError> {
-        let id = self.own(listener.0);
-        Self::require_forwarder(&self.state.lock());
-        let failure = self.gate(SimEffectKind::RegisterIntake, SimEffectTarget::None).await;
-        let mut st = self.state.lock();
-        let Some(HandleState::Listener(state)) = st.handles.get_mut(&id) else {
-            unreachable!("register_intake with a handle that is not an intake listener");
-        };
-        match failure {
-            None => {
-                state.registered = true;
-                Ok(())
-            }
-            Some(SimFailure::Forwarder(failure)) => Err(forwarder_error(failure)),
-            Some(other) => mismatched("register_intake", other),
-        }
-    }
-
-    async fn unregister_intake(&self, listener: &IntakeListener) -> Result<(), GuestFlowError> {
-        let id = self.own(listener.0);
-        Self::require_forwarder(&self.state.lock());
-        let failure = self.gate(SimEffectKind::UnregisterIntake, SimEffectTarget::None).await;
-        let mut st = self.state.lock();
-        let Some(HandleState::Listener(state)) = st.handles.get_mut(&id) else {
-            unreachable!("unregister_intake with a handle that is not an intake listener");
-        };
-        match failure {
-            None => {
-                state.registered = false;
-                Ok(())
-            }
-            Some(SimFailure::Forwarder(failure)) => Err(forwarder_error(failure)),
-            Some(other) => mismatched("unregister_intake", other),
-        }
-    }
-
-    async fn adopt_intake(&self, child: IntakeChild) -> Result<ParkedChild, GuestFlowError> {
-        Self::require_forwarder(&self.state.lock());
-        let failure = self.gate(SimEffectKind::AdoptIntake, SimEffectTarget::None).await;
-        let mut st = self.state.lock();
-        let state = self.take(&mut st, child.0);
-        let HandleState::Child { client, hangup } = state else {
-            unreachable!("adopt_intake of a handle that is not an intake child");
-        };
-        match failure {
-            None => Ok(ParkedChild(self.issue(&mut st, HandleState::Parked { client, hangup }))),
-            Some(SimFailure::Forwarder(failure)) => {
-                Self::abort_states(&mut st, vec![HandleState::Child { client, hangup }]);
-                Err(forwarder_error(failure))
-            }
-            Some(other) => mismatched("adopt_intake", other),
-        }
-    }
-
-    async fn begin_inbound(
-        &self,
-        child: ParkedChild,
         vsock: RecordSocket,
-    ) -> Result<PendingInbound, GuestFlowError> {
-        let failure = self.gate(SimEffectKind::BeginInbound, SimEffectTarget::None).await;
+        peer: PeerSocket,
+        mode: PairMode,
+    ) -> Result<AttachedPair, AttachRefused> {
         let mut st = self.state.lock();
-        let parked = self.take(&mut st, child.0);
-        let record = self.take(&mut st, vsock.0);
-        let (HandleState::Parked { client, hangup }, HandleState::Record(record_state)) =
-            (&parked, &record)
-        else {
-            unreachable!("begin_inbound of handles that are not a parked child and V_h");
+        let (conn, cid, flow, vsock_socket) = match st.handles.get(&self.own(vsock.0)) {
+            Some(HandleState::Record(record)) => (
+                record.conn,
+                record.peer_cid,
+                request_of(&record.first_record).map(|request| request.flow()),
+                record.vsock.clone(),
+            ),
+            _ => unreachable!("attach with a vsock handle that is not a record socket"),
         };
-        if record_state.origin != RecordOrigin::HostOpened {
-            unreachable!("begin_inbound with a record socket that is not V_h");
-        }
-        let (client, hangup, cid) = (*client, *hangup, record_state.peer_cid);
-        if let Some(failure) = failure {
-            Self::abort_states(&mut st, vec![parked, record]);
-            return match failure {
-                SimFailure::Forwarder(failure) => Err(forwarder_error(failure)),
-                other => mismatched("begin_inbound", other),
-            };
-        }
-        let pending = HandleState::Pending { client, hangup, cid, request: None };
-        Ok(PendingInbound(self.issue(&mut st, pending)))
-    }
-
-    async fn write_request(
-        &self,
-        pending: &PendingInbound,
-        request: &[u8; FLOW_REQUEST_LEN],
-    ) -> Result<(), FlowIoError> {
-        let id = self.own(pending.0);
-        let failure = self.gate(SimEffectKind::WriteRequest, SimEffectTarget::None).await;
-        let mut st = self.state.lock();
-        let Some(HandleState::Pending { request: written, .. }) = st.handles.get_mut(&id) else {
-            unreachable!("write_request on a handle that is not a pending inbound flow");
-        };
-        if written.is_some() {
-            unreachable!("write_request twice on one pending inbound flow");
-        }
-        match failure {
-            None => {
-                *written = Some(*request);
-                Ok(())
+        let failure = Self::sync_gate(&mut st, SimEffectKind::Attach, SimEffectTarget::Flow(flow));
+        let (ctx, generation) = Self::context(&st);
+        let (peer_socket, peer_spec) = match st.handles.get_mut(&self.own(peer.0)) {
+            Some(HandleState::Peer(state)) => {
+                // The sim learns the peer's flow here, whatever the outcome.
+                state.flow = flow;
+                (state.socket.clone(), state.spec)
             }
-            Some(SimFailure::Io(kind)) => Err(io_error(kind)),
-            Some(other) => mismatched("write_request", other),
+            _ => unreachable!("attach with a peer handle that is not a peer socket"),
+        };
+        if let Some(flow) = flow {
+            st.flow_sockets
+                .entry(flow)
+                .or_insert_with(|| FlowSockets { cid, vsock: vsock_socket.clone(), peer: None })
+                .peer = Some((peer_spec.protocol, peer_socket.clone()));
         }
+        let attached = match failure {
+            None => ctx.attach(&vsock_socket, &peer_socket, mode),
+            Some(SimFailure::Forwarder(failure)) => Err(failure.error()),
+            Some(other) => mismatched("attach", other),
+        };
+        let id = match attached {
+            Ok(id) => id,
+            Err(error) => {
+                drop(st);
+                self.bump();
+                return Err(AttachRefused { error, vsock, peer });
+            }
+        };
+        let _vsock_state = self.take(&mut st, vsock.0);
+        let _peer_state = self.take(&mut st, peer.0);
+        let (kind, peer_role) = match mode {
+            PairMode::Stream => {
+                (SimPairKind::Tcp, PairRole::Tcp { linger: peer_spec.abortive_linger })
+            }
+            PairMode::Datagram { .. } => (SimPairKind::Datagram, PairRole::Udp),
+        };
+        st.pairs.insert((generation, id), SimPairInfo { kind, flow, cid, generation });
+        let vsock_half = self.issue(
+            &mut st,
+            HandleState::Pair(PairSocketState {
+                id,
+                generation,
+                role: PairRole::Vsock,
+                conn,
+                flow,
+                linger_cleared: false,
+                socket: vsock_socket,
+            }),
+        );
+        let peer_half = self.issue(
+            &mut st,
+            HandleState::Pair(PairSocketState {
+                id,
+                generation,
+                role: peer_role,
+                conn: None,
+                flow,
+                linger_cleared: false,
+                socket: peer_socket,
+            }),
+        );
+        drop(st);
+        // The attach-time run forwards whatever waited in the halves' queues.
+        self.after_cause();
+        Ok(AttachedPair { id, vsock: PairSocket(vsock_half), peer: PairSocket(peer_half) })
     }
 
-    async fn pending_hangup(&self, pending: &PendingInbound) -> FlowHangup {
-        let id = self.own(pending.0);
-        self.wait_changed(|st| match st.handles.get(&id) {
-            Some(HandleState::Pending { hangup, .. }) => *hangup,
-            _ => unreachable!("pending_hangup on a handle that is not a pending inbound flow"),
+    fn abort_forward(&self, id: ForwardId) -> Result<AbortResult, ForwarderError> {
+        let mut st = self.state.lock();
+        let failure =
+            Self::sync_gate(&mut st, SimEffectKind::AbortForward, SimEffectTarget::Forward(id));
+        let (ctx, generation) = Self::context(&st);
+        match failure {
+            None => {}
+            Some(SimFailure::Forwarder(failure)) => return Err(failure.error()),
+            Some(other) => mismatched("abort_forward", other),
+        }
+        let result = ctx.abort(id)?;
+        if result == AbortResult::Aborted {
+            st.owner_aborted.insert((generation, id));
+        }
+        drop(st);
+        self.bump();
+        Ok(result)
+    }
+
+    fn abort_all(&self) -> Result<u32, ForwarderError> {
+        let mut st = self.state.lock();
+        let failure = Self::sync_gate(&mut st, SimEffectKind::AbortAll, SimEffectTarget::None);
+        let (ctx, generation) = Self::context(&st);
+        // The owner's call ends every stream of the context, whatever the
+        // context returns (§ *Context lifetime and owner failure*, step 1):
+        // a stream resolves the owner's own end of its watch first.
+        let live: Vec<ForwardId> =
+            st.pairs.keys().filter(|(g, _)| *g == generation).map(|(_, id)| *id).collect();
+        for id in live {
+            if !st.ends_taken.contains_key(&(generation, id)) {
+                st.owner_aborted.insert((generation, id));
+            }
+        }
+        let outcome = match failure {
+            None => ctx.abort_all(),
+            Some(SimFailure::Forwarder(failure)) => Err(failure.error()),
+            Some(other) => mismatched("abort_all", other),
+        };
+        drop(st);
+        self.bump();
+        outcome
+    }
+
+    async fn next_end(&self) -> Result<ForwardEnd, ForwarderError> {
+        self.wait_changed(|st| {
+            let (ctx, generation) = match st.context.as_ref() {
+                Some(context) => (Arc::clone(&context.ctx), context.generation),
+                None => return None,
+            };
+            if !st.auto_ends && st.released_ends == 0 {
+                return None;
+            }
+            let end = match ctx.take_end() {
+                Ok(Some(end)) => end,
+                Ok(None) => return None,
+                Err(error) => return Some(Err(error)),
+            };
+            if !st.auto_ends {
+                st.released_ends -= 1;
+            }
+            st.pairs.remove(&(generation, end.id));
+            st.ends_taken.insert((generation, end.id), end.outcome);
+            Some(Ok(end))
         })
         .await
     }
 
-    async fn route_inbound(&self, pending: PendingInbound) -> Result<TcpPair, GuestFlowError> {
-        let failure = self.gate(SimEffectKind::RouteInbound, SimEffectTarget::None).await;
+    fn pair_state(&self, id: ForwardId) -> Result<Option<PairState>, ForwarderError> {
+        let st = self.state.lock();
+        let (ctx, _) = Self::context(&st);
+        drop(st);
+        ctx.pair_state(id)
+    }
+
+    fn inventory(&self) -> Result<ForwarderInventory, ForwarderError> {
         let mut st = self.state.lock();
-        let state = self.take(&mut st, pending.0);
-        let HandleState::Pending { request, hangup, .. } = &state else {
-            unreachable!("route_inbound of a handle that is not a pending inbound flow");
-        };
-        let (label, hangup) = (*request, *hangup);
-        if let Some(failure) = failure {
-            Self::abort_states(&mut st, vec![state]);
-            return match failure {
-                SimFailure::Forwarder(failure) => Err(forwarder_error(failure)),
-                other => mismatched("route_inbound", other),
-            };
-        }
-        let key = PairKey(st.next_pair);
-        st.next_pair += 1;
-        st.pairs.insert(key, PairEntry::default());
-        let vsock = PairSocket(self.issue(
-            &mut st,
-            HandleState::Pair(PairSocketState {
-                pair: key,
-                role: PairRole::Vsock,
-                conn: None,
-                label,
-                hangup: None,
-                linger_cleared: false,
-                shut: false,
-            }),
-        ));
-        let outer = PairSocket(self.issue(
-            &mut st,
-            HandleState::Pair(PairSocketState {
-                pair: key,
-                role: PairRole::Outer { abortive: true },
-                conn: None,
-                label,
-                hangup,
-                linger_cleared: false,
-                shut: false,
-            }),
-        ));
-        Ok(TcpPair { key, vsock, outer })
-    }
-
-    async fn drained(
-        &self,
-        pair: PairKey,
-        direction: FlowDirection,
-    ) -> Result<bool, GuestFlowError> {
-        match self.gate(SimEffectKind::Drained, SimEffectTarget::Pair(pair)).await {
-            None => {
-                let st = self.state.lock();
-                Ok(st.pairs.get(&pair).is_none_or(|entry| match direction {
-                    FlowDirection::TowardGuest => entry.toward_guest_drained,
-                    FlowDirection::FromGuest => entry.from_guest_drained,
-                }))
-            }
-            Some(SimFailure::Forwarder(failure)) => Err(forwarder_error(failure)),
-            Some(other) => mismatched("drained", other),
-        }
-    }
-
-    async fn remove_pair(&self, pair: PairKey) -> Result<(), GuestFlowError> {
-        match self.gate(SimEffectKind::RemovePair, SimEffectTarget::Pair(pair)).await {
-            None => {
-                self.state.lock().pairs.remove(&pair);
-                Ok(())
-            }
-            Some(SimFailure::Forwarder(failure)) => Err(forwarder_error(failure)),
-            Some(other) => mismatched("remove_pair", other),
-        }
-    }
-
-    async fn inventory(&self) -> Result<GuestFlowInventory, GuestFlowError> {
-        match self.gate(SimEffectKind::Inventory, SimEffectTarget::None).await {
-            None => {
-                let st = self.state.lock();
-                Self::require_forwarder(&st);
-                let pairs = u32::try_from(st.pairs.len()).unwrap_or(u32::MAX);
-                let intake_listeners = u32::try_from(
-                    st.handles
-                        .values()
-                        .filter(|handle| {
-                            matches!(handle, HandleState::Listener(state) if state.registered)
-                        })
-                        .count(),
-                )
-                .unwrap_or(u32::MAX);
-                Ok(GuestFlowInventory {
-                    pairs,
-                    free_cells: GUEST_FLOW_MAX_PAIRS.saturating_sub(pairs),
-                    intake_listeners,
-                    links_attached: GuestFlowLinks {
-                        verdict: true,
-                        sock_ops: true,
-                        unframe_lo: true,
-                        drain_counter: true,
-                    },
-                    unframe_interfaces: st
-                        .forwarder
-                        .as_ref()
-                        .map(|forwarder| forwarder.attached.clone())
-                        .unwrap_or_default(),
-                })
-            }
-            Some(SimFailure::Forwarder(failure)) => Err(forwarder_error(failure)),
+        let failure = Self::sync_gate(&mut st, SimEffectKind::Inventory, SimEffectTarget::None);
+        let (ctx, _) = Self::context(&st);
+        drop(st);
+        match failure {
+            None => ctx.inventory(),
+            Some(SimFailure::Forwarder(failure)) => Err(failure.error()),
             Some(other) => mismatched("inventory", other),
         }
     }
 
-    async fn counters(&self) -> Result<GuestFlowCounters, GuestFlowError> {
-        match self.gate(SimEffectKind::Counters, SimEffectTarget::None).await {
-            None => Ok(self.state.lock().counters),
-            Some(SimFailure::Forwarder(failure)) => Err(forwarder_error(failure)),
-            Some(other) => mismatched("counters", other),
-        }
-    }
-
-    async fn hangup(&self, socket: &PairSocket) -> FlowHangup {
-        let id = self.own(socket.0);
-        self.wait_changed(|st| match st.handles.get(&id) {
-            Some(HandleState::Pair(pair)) => pair.hangup,
-            _ => unreachable!("hangup on a handle that is not a live pair socket"),
-        })
-        .await
-    }
-
-    async fn shutdown_write(&self, socket: &PairSocket) -> Result<(), FlowIoError> {
-        let id = self.own(socket.0);
-        let failure = self.gate(SimEffectKind::ShutdownWrite, SimEffectTarget::None).await;
-        let mut st = self.state.lock();
-        let Some(HandleState::Pair(pair)) = st.handles.get_mut(&id) else {
-            unreachable!("shutdown_write on a handle that is not a live pair socket");
-        };
+    async fn clear_linger(&self, socket: &PairSocket) -> Result<(), FlowIoError> {
+        let failure = self.gate(SimEffectKind::ClearLinger, SimEffectTarget::None).await;
         if let Some(failure) = failure {
             return match failure {
                 SimFailure::Io(kind) => Err(io_error(kind)),
-                other => mismatched("shutdown_write", other),
+                other => mismatched("clear_linger", other),
             };
         }
-        if pair.shut {
-            return Ok(());
-        }
-        pair.shut = true;
-        let (role, key, label) = (pair.role, pair.pair, pair.label);
-        if let Some(label) = label {
-            match role {
-                PairRole::Vsock => {
-                    st.vsock_ends_in_flight.insert(key, label);
-                }
-                PairRole::Outer { .. } => st.far_end.push((label, FarEndEvent::Eof)),
-                PairRole::Stream | PairRole::Seqpacket | PairRole::Udp => {}
+        let mut st = self.state.lock();
+        let id = self.own(socket.0);
+        match st.handles.get_mut(&id) {
+            Some(HandleState::Pair(pair)) if matches!(pair.role, PairRole::Tcp { .. }) => {
+                pair.linger_cleared = true;
             }
+            _ => unreachable!("clear_linger on a handle that is not an attached TCP half"),
         }
         Ok(())
     }
 
-    async fn clear_linger(&self, socket: &PairSocket) -> Result<(), FlowIoError> {
-        let id = self.own(socket.0);
-        let failure = self.gate(SimEffectKind::ClearLinger, SimEffectTarget::None).await;
-        let mut st = self.state.lock();
-        let Some(HandleState::Pair(pair)) = st.handles.get_mut(&id) else {
-            unreachable!("clear_linger on a handle that is not a live pair socket");
-        };
-        match failure {
-            None => {
-                pair.linger_cleared = true;
-                Ok(())
-            }
-            Some(SimFailure::Io(kind)) => Err(io_error(kind)),
-            Some(other) => mismatched("clear_linger", other),
-        }
-    }
-
     async fn abort(&self, socket: OwnedSocket) {
         if let Some(failure) = self.gate(SimEffectKind::Abort, SimEffectTarget::None).await {
-            mismatched("abort", failure);
+            mismatched("abort (infallible)", failure);
         }
         self.end_owned(socket, true);
     }
 
     async fn close(&self, socket: OwnedSocket) {
         if let Some(failure) = self.gate(SimEffectKind::Close, SimEffectTarget::None).await {
-            mismatched("close", failure);
+            mismatched("close (infallible)", failure);
         }
         self.end_owned(socket, false);
     }
 }
 
-#[cfg(test)]
-#[allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::panic,
-    reason = "test fixtures assert their preconditions"
-)]
-mod tests;
+/// The `io::Error` a record read reports for `errno` (test support).
+pub(crate) fn errno_io(errno: KernelErrno) -> io::Error {
+    errno_error(errno)
+}

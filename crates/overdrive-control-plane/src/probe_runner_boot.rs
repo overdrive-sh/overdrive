@@ -22,6 +22,7 @@
 
 use std::sync::Arc;
 
+use overdrive_core::guest_transport::dial::GuestStreamDial;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::prober::{HttpProber, TcpProber};
@@ -29,7 +30,9 @@ use overdrive_worker::probe_runner::ProbeRunner;
 
 use crate::error::{ControlPlaneError, ProbeRunnerBootError};
 
-/// Construct a [`ProbeRunner`] from the injected adapter triple and
+/// Construct a [`ProbeRunner`] from the injected adapters (the two
+/// probers, the clock, the observation store and the guest stream dial the
+/// VM probes run through, INB-1 / ADR-0173) and
 /// run its Earned-Trust gate per ADR-0054 § 7. Returns the live
 /// `Arc<ProbeRunner>` on success; on failure emits the canonical
 /// `health.startup.refused` tracing event and returns the typed
@@ -56,8 +59,10 @@ pub async fn compose_and_probe_runner_gate(
     http_prober: Arc<dyn HttpProber>,
     clock: Arc<dyn Clock>,
     observation_store: Arc<dyn ObservationStore>,
+    guest_dial: Arc<dyn GuestStreamDial>,
 ) -> Result<Arc<ProbeRunner>, ControlPlaneError> {
-    let runner = Arc::new(ProbeRunner::new(tcp_prober, http_prober, clock, observation_store));
+    let runner =
+        Arc::new(ProbeRunner::new(tcp_prober, http_prober, clock, observation_store, guest_dial));
     match runner.probe().await {
         Ok(()) => Ok(runner),
         Err(source) => {

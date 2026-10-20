@@ -144,6 +144,9 @@ x509-parser.workspace  = true
 # fire on accept. Mirrors the host adapter's existing capture harness in
 # `overdrive-store-local/tests/integration/envelope_observation_skip.rs`.
 tracing-subscriber.workspace = true
+# Dev-dep ONLY — `service_backend_projection` passes the configured
+# `VipRange` to `ServiceBackendsResolve::new` (netns-density-295 DG-2 row 14).
+overdrive-dataplane.path = "../overdrive-dataplane"
 
 [lints]
 workspace = true

@@ -1,0 +1,19 @@
+[00:51:40] === preflight (fail closed)
+[00:51:40] substrate: {"host_uname_r": "7.0.0-38-generic", "vm_kernel_modules_from": "7.0.0-29-generic", "machine": "x86_64", "systemd_detect_virt": "none", "cpu": "AMD EPYC 8024P 8-Core Processor", "nproc": 16, "meminfo_head": ["MemTotal:       65401732 kB", "MemFree:        58711080 kB", "MemAvailable:   64134156 kB"], "loadavg": "0.83 0.99 0.98 1/314 54172", "failures": []}
+[00:51:40] modules: net chain ['dummy.ko', 'sch_tbf.ko']
+[00:51:40] modules: vsock chain ['vsock.ko', 'vmw_vsock_virtio_transport_common.ko', 'vsock_loopback.ko']; nf chain ['nfnetlink.ko', 'nf_tables.ko', 'nft_reject.ko', 'nf_reject_ipv4.ko', 'nft_reject_ipv4.ko']
+[00:51:40] pins: {"dgprobe": "0904eada0003", "dg-bpf.o": "942d749c5cc1", "evmod.ko": "a3e389b8df55", "evmod.c": "3c0f27d260b8", "initramfs": "48890b959083"}
+[00:51:40] qemu: qemu-system-x86_64 -machine q35 -cpu host -accel kvm -m 8192 -smp 4 -nodefaults -nographic -monitor none -serial stdio -no-reboot -kernel /var/tmp/ev-dgram-work/out/Image -initrd /var/tmp/ev-dgram-work/out/initramfs-q.cpio.gz -append console=ttyS0 rdinit=/init panic=-1 loglevel=4
+[00:51:41] Booting from ROM..c[?7l[2JGUEST_BOOT uname_r=7.0.0-29-generic
+[00:51:41] evmod 53248 0 - Live 0xffffffffc0454000 (OE)
+[00:51:41] vsock 73728 3 evmod,vsock_loopback,vmw_vsock_virtio_transport_common, Live 0xffffffffc0400000
+[00:51:41] GUEST_MEM MemTotal: 8125520 kB MemAvailable: 7860492 kB SUnreclaim: 19188 kB
+[00:51:49] {"ev":"case","env":"k","case":"churn","pass":true,"detail":{"cycles":300,"pairs_attached":600,"pairs_ended_completed_or_aborted":600,"completed":0,"aborted":600,"live_pairs_max_after_a_cycle":0,"worst_detach_pair_ms":4,"dg_ab":280369,"dg_ba":257149,"wall_ms":7389}}
+[00:51:49] [    0.753530] evmod: loading out-of-tree module taints kernel.
+[00:51:49] [    0.753545] evmod: module verification failed: signature and/or required key missing - tainting kernel
+[00:51:49] [    0.754432] evmod: loaded (per-cpu workqueue)
+[00:51:49] DG_ALL_DONE
+[00:51:49] SUMMARY {"qemu_exit": 0, "done_marker": true, "uname_r": "7.0.0-29-generic", "all_pass": true, "oops_lines": []}
+[00:51:49]   PASS  churn
+[00:51:49] physical host modules after: added=[] removed=[] forbidden=[] ok=True
+[00:51:49] RESULT all_pass=True physical_ok=True

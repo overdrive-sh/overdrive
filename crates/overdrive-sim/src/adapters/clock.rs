@@ -56,6 +56,10 @@ pub struct SimClock {
     /// vector is unsorted — `tick` walks it linearly to find expired
     /// timers; the expected entry count is small (one per parked task).
     timers: Arc<Mutex<Vec<(u64, Waker)>>>,
+    /// Total backward steps of the wall clock (`unix_now`), in nanoseconds
+    /// (netns-density-295 R5-PROBE-COUNT fault (e): a backward wall-clock
+    /// step). Subtracted from `unix_now` only; `now()` stays monotonic.
+    wall_back_nanos: Arc<AtomicU64>,
 }
 
 impl SimClock {
@@ -70,6 +74,7 @@ impl SimClock {
             unix_epoch,
             elapsed_nanos: Arc::new(AtomicU64::new(0)),
             timers: Arc::new(Mutex::new(Vec::new())),
+            wall_back_nanos: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -104,6 +109,15 @@ impl SimClock {
         }
     }
 
+    /// Step the wall clock (`unix_now`) back by `by`, as an NTP correction
+    /// does. Logical time (`now()`, `sleep` deadlines) is unaffected and
+    /// stays monotonic; every clone observes the step. `unix_now` saturates
+    /// at the UNIX epoch.
+    pub fn step_wall_clock_back(&self, by: Duration) {
+        let nanos = u64::try_from(by.as_nanos()).unwrap_or(u64::MAX);
+        let _previous = self.wall_back_nanos.fetch_add(nanos, Ordering::Relaxed);
+    }
+
     fn elapsed(&self) -> Duration {
         Duration::from_nanos(self.elapsed_nanos.load(Ordering::Relaxed))
     }
@@ -126,6 +140,7 @@ impl Clone for SimClock {
             unix_epoch: self.unix_epoch,
             elapsed_nanos: Arc::clone(&self.elapsed_nanos),
             timers: Arc::clone(&self.timers),
+            wall_back_nanos: Arc::clone(&self.wall_back_nanos),
         }
     }
 }
@@ -137,7 +152,8 @@ impl Clock for SimClock {
     }
 
     fn unix_now(&self) -> Duration {
-        self.unix_epoch + self.elapsed()
+        (self.unix_epoch + self.elapsed())
+            .saturating_sub(Duration::from_nanos(self.wall_back_nanos.load(Ordering::Relaxed)))
     }
 
     async fn sleep(&self, duration: Duration) {

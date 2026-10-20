@@ -2,10 +2,10 @@
 // Teeth for the flow quota (../flow_quota.qnt): each instance is the design with ONE rule switched off
 // (OFF). Expected verdicts are in ../checks.toml.
 
-// R2-DRAIN off: the quota counts active flows only — a draining flow keeps its slot but not its count, so one
-// withholding guest holds more than its own quota
-module quota_bugCountActiveOnly { import flow_quota(OFF = Set("countActiveOnly")).* from "../flow_quota" }
+// ADR-0147 off: the quota counts active flows only — a half-closed or ended flow keeps its place but not its count, so
+// one withholding guest holds more than its own quota
+module quota_bugCountActiveOnly { import flow_quota(OFF = Set("countActiveOnly"), REC = false).* from "../flow_quota" }
 // the quota is per allocation: with one quota for the node, a withholding guest exhausts the node
-module quota_bugNodeWideQuota { import flow_quota(OFF = Set("nodeWideQuota")).* from "../flow_quota" }
-// R2-DRAIN off: the flow's slot is released at the half-close while its drain cell is pending
-module quota_bugFreeAtHalfClose { import flow_quota(OFF = Set("freeAtHalfClose")).* from "../flow_quota" }
+module quota_bugNodeWideQuota { import flow_quota(OFF = Set("nodeWideQuota"), REC = false).* from "../flow_quota" }
+// EVMOD-AB off: the flow's place is released at the half-close while its pair still forwards
+module quota_bugFreeAtHalfClose { import flow_quota(OFF = Set("freeAtHalfClose"), REC = false).* from "../flow_quota" }

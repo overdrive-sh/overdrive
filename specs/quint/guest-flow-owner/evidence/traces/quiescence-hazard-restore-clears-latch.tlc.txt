@@ -6,18 +6,22 @@ State 1: <Initial predicate>
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE,
   dropped |-> FALSE,
-  refusedBoot |-> FALSE ]
+  refusedBoot |-> FALSE,
+  foreignChanged |-> FALSE ]
 /\ quiesce_bugRestoreClearsLatch_quiescence_latch = FALSE
 /\ quiesce_bugRestoreClearsLatch_quiescence_stop = "none"
 /\ quiesce_bugRestoreClearsLatch_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
+/\ quiesce_bugRestoreClearsLatch_quiescence_foreign = FALSE
 /\ quiesce_bugRestoreClearsLatch_quiescence_up = TRUE
 /\ quiesce_bugRestoreClearsLatch_quiescence_att = [C1 |-> 0, C2 |-> 0]
+/\ quiesce_bugRestoreClearsLatch_quiescence_leaked = 0
 /\ quiesce_bugRestoreClearsLatch_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
 /\ quiesce_bugRestoreClearsLatch_quiescence_cnt = 0
 /\ quiesce_bugRestoreClearsLatch_quiescence_repLeft = 1
-/\ quiesce_bugRestoreClearsLatch_quiescence_flowsOpen = 1
+/\ quiesce_bugRestoreClearsLatch_quiescence_flowsOpen = 0
+/\ quiesce_bugRestoreClearsLatch_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
 
-State 2: <quiesce_bugRestoreClearsLatch_quiescence_Damage line 271, col 3 to line 299, col 51 of module quiesce_bugRestoreClearsLatch>
+State 2: <quiesce_bugRestoreClearsLatch_quiescence_Damage line 305, col 3 to line 342, col 62 of module quiesce_bugRestoreClearsLatch>
 /\ quiesce_bugRestoreClearsLatch_quiescence_table = TRUE
 /\ quiesce_bugRestoreClearsLatch_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> FALSE,
@@ -25,18 +29,22 @@ State 2: <quiesce_bugRestoreClearsLatch_quiescence_Damage line 271, col 3 to lin
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE,
   dropped |-> FALSE,
-  refusedBoot |-> FALSE ]
+  refusedBoot |-> FALSE,
+  foreignChanged |-> FALSE ]
 /\ quiesce_bugRestoreClearsLatch_quiescence_latch = FALSE
 /\ quiesce_bugRestoreClearsLatch_quiescence_stop = "none"
 /\ quiesce_bugRestoreClearsLatch_quiescence_dmg = [C1 |-> TRUE, C2 |-> FALSE]
+/\ quiesce_bugRestoreClearsLatch_quiescence_foreign = FALSE
 /\ quiesce_bugRestoreClearsLatch_quiescence_up = TRUE
 /\ quiesce_bugRestoreClearsLatch_quiescence_att = [C1 |-> 0, C2 |-> 0]
+/\ quiesce_bugRestoreClearsLatch_quiescence_leaked = 0
 /\ quiesce_bugRestoreClearsLatch_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
 /\ quiesce_bugRestoreClearsLatch_quiescence_cnt = 0
 /\ quiesce_bugRestoreClearsLatch_quiescence_repLeft = 1
-/\ quiesce_bugRestoreClearsLatch_quiescence_flowsOpen = 1
+/\ quiesce_bugRestoreClearsLatch_quiescence_flowsOpen = 0
+/\ quiesce_bugRestoreClearsLatch_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
 
-State 3: <quiesce_bugRestoreClearsLatch_quiescence_Damage line 271, col 3 to line 299, col 51 of module quiesce_bugRestoreClearsLatch>
+State 3: <quiesce_bugRestoreClearsLatch_quiescence_RecQuiesce line 424, col 3 to line 464, col 62 of module quiesce_bugRestoreClearsLatch>
 /\ quiesce_bugRestoreClearsLatch_quiescence_table = TRUE
 /\ quiesce_bugRestoreClearsLatch_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> FALSE,
@@ -44,37 +52,22 @@ State 3: <quiesce_bugRestoreClearsLatch_quiescence_Damage line 271, col 3 to lin
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE,
   dropped |-> FALSE,
-  refusedBoot |-> FALSE ]
-/\ quiesce_bugRestoreClearsLatch_quiescence_latch = FALSE
-/\ quiesce_bugRestoreClearsLatch_quiescence_stop = "none"
-/\ quiesce_bugRestoreClearsLatch_quiescence_dmg = [C1 |-> TRUE, C2 |-> TRUE]
-/\ quiesce_bugRestoreClearsLatch_quiescence_up = TRUE
-/\ quiesce_bugRestoreClearsLatch_quiescence_att = [C1 |-> 0, C2 |-> 0]
-/\ quiesce_bugRestoreClearsLatch_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
-/\ quiesce_bugRestoreClearsLatch_quiescence_cnt = 0
-/\ quiesce_bugRestoreClearsLatch_quiescence_repLeft = 1
-/\ quiesce_bugRestoreClearsLatch_quiescence_flowsOpen = 1
-
-State 4: <quiesce_bugRestoreClearsLatch_quiescence_RecQuiesce line 369, col 3 to line 400, col 7 of module quiesce_bugRestoreClearsLatch>
-/\ quiesce_bugRestoreClearsLatch_quiescence_table = TRUE
-/\ quiesce_bugRestoreClearsLatch_quiescence_g = [ reopenEarly |-> FALSE,
-  repairNoHold |-> FALSE,
-  overlapped |-> FALSE,
-  stillQuiesced |-> FALSE,
-  failStopped |-> FALSE,
-  dropped |-> FALSE,
-  refusedBoot |-> FALSE ]
+  refusedBoot |-> FALSE,
+  foreignChanged |-> FALSE ]
 /\ quiesce_bugRestoreClearsLatch_quiescence_latch = TRUE
 /\ quiesce_bugRestoreClearsLatch_quiescence_stop = "none"
-/\ quiesce_bugRestoreClearsLatch_quiescence_dmg = [C1 |-> TRUE, C2 |-> TRUE]
+/\ quiesce_bugRestoreClearsLatch_quiescence_dmg = [C1 |-> TRUE, C2 |-> FALSE]
+/\ quiesce_bugRestoreClearsLatch_quiescence_foreign = FALSE
 /\ quiesce_bugRestoreClearsLatch_quiescence_up = TRUE
 /\ quiesce_bugRestoreClearsLatch_quiescence_att = [C1 |-> 0, C2 |-> 0]
+/\ quiesce_bugRestoreClearsLatch_quiescence_leaked = 0
 /\ quiesce_bugRestoreClearsLatch_quiescence_rec = [C1 |-> "held", C2 |-> "idle"]
 /\ quiesce_bugRestoreClearsLatch_quiescence_cnt = 1
 /\ quiesce_bugRestoreClearsLatch_quiescence_repLeft = 1
 /\ quiesce_bugRestoreClearsLatch_quiescence_flowsOpen = 0
+/\ quiesce_bugRestoreClearsLatch_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
 
-State 5: <quiesce_bugRestoreClearsLatch_quiescence_RecRepair line 163, col 3 to line 199, col 51 of module quiesce_bugRestoreClearsLatch>
+State 4: <quiesce_bugRestoreClearsLatch_quiescence_RecRepair line 192, col 3 to line 237, col 62 of module quiesce_bugRestoreClearsLatch>
 /\ quiesce_bugRestoreClearsLatch_quiescence_table = TRUE
 /\ quiesce_bugRestoreClearsLatch_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> FALSE,
@@ -82,51 +75,63 @@ State 5: <quiesce_bugRestoreClearsLatch_quiescence_RecRepair line 163, col 3 to 
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE,
   dropped |-> FALSE,
-  refusedBoot |-> FALSE ]
+  refusedBoot |-> FALSE,
+  foreignChanged |-> FALSE ]
 /\ quiesce_bugRestoreClearsLatch_quiescence_latch = TRUE
 /\ quiesce_bugRestoreClearsLatch_quiescence_stop = "none"
-/\ quiesce_bugRestoreClearsLatch_quiescence_dmg = [C1 |-> FALSE, C2 |-> TRUE]
+/\ quiesce_bugRestoreClearsLatch_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
+/\ quiesce_bugRestoreClearsLatch_quiescence_foreign = FALSE
 /\ quiesce_bugRestoreClearsLatch_quiescence_up = TRUE
 /\ quiesce_bugRestoreClearsLatch_quiescence_att = [C1 |-> 0, C2 |-> 0]
+/\ quiesce_bugRestoreClearsLatch_quiescence_leaked = 0
 /\ quiesce_bugRestoreClearsLatch_quiescence_rec = [C1 |-> "repaired", C2 |-> "idle"]
 /\ quiesce_bugRestoreClearsLatch_quiescence_cnt = 1
 /\ quiesce_bugRestoreClearsLatch_quiescence_repLeft = 1
 /\ quiesce_bugRestoreClearsLatch_quiescence_flowsOpen = 0
+/\ quiesce_bugRestoreClearsLatch_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
 
-State 6: <quiesce_bugRestoreClearsLatch_quiescence_RecQuiesce line 369, col 3 to line 400, col 7 of module quiesce_bugRestoreClearsLatch>
+State 5: <quiesce_bugRestoreClearsLatch_quiescence_LeakHold line 736, col 3 to line 784, col 62 of module quiesce_bugRestoreClearsLatch>
 /\ quiesce_bugRestoreClearsLatch_quiescence_table = TRUE
 /\ quiesce_bugRestoreClearsLatch_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> FALSE,
   overlapped |-> TRUE,
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE,
-  dropped |-> FALSE,
-  refusedBoot |-> FALSE ]
+  dropped |-> TRUE,
+  refusedBoot |-> FALSE,
+  foreignChanged |-> FALSE ]
 /\ quiesce_bugRestoreClearsLatch_quiescence_latch = TRUE
 /\ quiesce_bugRestoreClearsLatch_quiescence_stop = "none"
-/\ quiesce_bugRestoreClearsLatch_quiescence_dmg = [C1 |-> FALSE, C2 |-> TRUE]
+/\ quiesce_bugRestoreClearsLatch_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
+/\ quiesce_bugRestoreClearsLatch_quiescence_foreign = FALSE
 /\ quiesce_bugRestoreClearsLatch_quiescence_up = TRUE
 /\ quiesce_bugRestoreClearsLatch_quiescence_att = [C1 |-> 0, C2 |-> 0]
-/\ quiesce_bugRestoreClearsLatch_quiescence_rec = [C1 |-> "repaired", C2 |-> "held"]
+/\ quiesce_bugRestoreClearsLatch_quiescence_leaked = 1
+/\ quiesce_bugRestoreClearsLatch_quiescence_rec = [C1 |-> "repaired", C2 |-> "idle"]
 /\ quiesce_bugRestoreClearsLatch_quiescence_cnt = 2
 /\ quiesce_bugRestoreClearsLatch_quiescence_repLeft = 1
 /\ quiesce_bugRestoreClearsLatch_quiescence_flowsOpen = 0
+/\ quiesce_bugRestoreClearsLatch_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
 
-State 7: <quiesce_bugRestoreClearsLatch_quiescence_RecRestore line 444, col 3 to line 523, col 55 of module quiesce_bugRestoreClearsLatch>
+State 6: <quiesce_bugRestoreClearsLatch_quiescence_RecRestore line 517, col 3 to line 605, col 62 of module quiesce_bugRestoreClearsLatch>
 /\ quiesce_bugRestoreClearsLatch_quiescence_table = TRUE
 /\ quiesce_bugRestoreClearsLatch_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> FALSE,
   overlapped |-> TRUE,
   stillQuiesced |-> TRUE,
   failStopped |-> FALSE,
-  dropped |-> FALSE,
-  refusedBoot |-> FALSE ]
+  dropped |-> TRUE,
+  refusedBoot |-> FALSE,
+  foreignChanged |-> FALSE ]
 /\ quiesce_bugRestoreClearsLatch_quiescence_latch = FALSE
 /\ quiesce_bugRestoreClearsLatch_quiescence_stop = "none"
-/\ quiesce_bugRestoreClearsLatch_quiescence_dmg = [C1 |-> FALSE, C2 |-> TRUE]
+/\ quiesce_bugRestoreClearsLatch_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
+/\ quiesce_bugRestoreClearsLatch_quiescence_foreign = FALSE
 /\ quiesce_bugRestoreClearsLatch_quiescence_up = TRUE
 /\ quiesce_bugRestoreClearsLatch_quiescence_att = [C1 |-> 0, C2 |-> 0]
-/\ quiesce_bugRestoreClearsLatch_quiescence_rec = [C1 |-> "idle", C2 |-> "held"]
+/\ quiesce_bugRestoreClearsLatch_quiescence_leaked = 1
+/\ quiesce_bugRestoreClearsLatch_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
 /\ quiesce_bugRestoreClearsLatch_quiescence_cnt = 1
 /\ quiesce_bugRestoreClearsLatch_quiescence_repLeft = 1
 /\ quiesce_bugRestoreClearsLatch_quiescence_flowsOpen = 0
+/\ quiesce_bugRestoreClearsLatch_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]

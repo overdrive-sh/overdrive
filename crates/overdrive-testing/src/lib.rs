@@ -9,7 +9,10 @@
 //!   cross-process CIDR leases for hand-built topologies;
 //!   Cloud-Hypervisor microVM boot provisioning — pinned kernel + ext4
 //!   rootfs staging, `FICLONE` capability, `/dev/kvm` preflight, see
-//!   [`vm_fixture`]) used by ≥ 2 crates' integration tests OR
+//!   [`vm_fixture`]; the guest-kit microVM fixture — a guest kernel with
+//!   its `ovd_fwd.ko`, `overdrive-init` or a scripted guest vsock peer as
+//!   PID 1, and the CH fork launched directly, see [`guest_kit`],
+//!   [`guest_peer`], [`guest_lane`], [`guest_app`] and [`vsock`]) used by ≥ 2 crates' integration tests OR
 //!   non-trivial enough that duplication would drift across consumers.
 //! - **What does NOT live here**: pure in-process test doubles (those
 //!   are Sim\* adapters in `overdrive-sim`); production code (this is
@@ -30,6 +33,13 @@
 
 #[cfg(target_os = "linux")]
 pub mod cidr_lease;
+/// FWD-PREREQ: the forwarder-module lane prerequisite every `serve` test
+/// fixture checks before it boots (GH #295).
+pub mod forwarder_module;
+pub mod guest_app;
+pub mod guest_kit;
+pub mod guest_lane;
+pub mod guest_peer;
 pub mod netns;
 /// GH #295 E23: force OS thread creation to fail via a cgroup v2 `pids.max` cap.
 ///
@@ -37,3 +47,4 @@ pub mod netns;
 /// (the file carries its own `#![cfg(target_os = "linux")]`).
 pub mod pids_max;
 pub mod vm_fixture;
+pub mod vsock;

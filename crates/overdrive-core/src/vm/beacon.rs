@@ -424,9 +424,15 @@ impl BeaconSocket {
 /// first).
 #[async_trait::async_trait]
 pub trait BeaconIo: Send + Sync + 'static {
-    /// Binds and listens (`VMADDR_CID_ANY`, `BEACON_VSOCK_PORT`), once per
-    /// driver. A second call is Ok and changes nothing. Err: nothing bound.
-    async fn bind(&self) -> Result<(), std::io::Error>;
+    /// Binds and listens (`VMADDR_CID_ANY`, `port`), once per driver;
+    /// `KernelAssigned` binds `VMADDR_PORT_ANY` (PORTS-CONFIG, ADR-0218).
+    /// Ok: the port bound (`getsockname`). A second call is Ok, changes
+    /// nothing and returns the first bind's port; its `port` argument is not
+    /// consulted, whatever it names. Err: nothing bound.
+    async fn bind(
+        &self,
+        port: crate::guest_transport::VsockListenPort,
+    ) -> Result<VsockPort, std::io::Error>;
 
     /// Next accepted connection and its kernel-reported key. Precondition:
     /// `bind` returned Ok. Cancellation-safe.

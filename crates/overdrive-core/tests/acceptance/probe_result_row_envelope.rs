@@ -1,5 +1,6 @@
-//! Tier 1 acceptance — `ProbeResultRowEnvelope` V1 round-trip +
-//! discriminant pinning per ADR-0054 §5 QR1.
+//! Tier 1 acceptance — `ProbeResultRowEnvelope` latest (V2) round-trip +
+//! discriminant pinning per ADR-0054 §5 QR1 and the R5-PROBE-V2 bump
+//! (netns-density-295, ADR-0191).
 //!
 //! Slice 01 (US-01).
 //!
@@ -8,8 +9,8 @@
 //! schema-evolution roundtrip": every rkyv envelope ships a per-
 //! version golden-bytes fixture AND a proptest roundtrip.
 //!
-//! Per ADR-0054 §5 QR1: the V1 fixture pins BOTH the archived bytes
-//! AND `const FIXTURE_V1_DISCRIMINANT: u8 = 0;`.
+//! Per ADR-0054 §5 QR1 the historical V1 fixture pins discriminant 0; the
+//! V2 bump appends discriminant 1, which `latest()` now writes.
 //!
 //! Full golden-bytes fixture lives at
 //! `crates/overdrive-core/tests/schema_evolution/probe_result_row.rs`.
@@ -19,12 +20,13 @@
 use overdrive_core::codec::VersionedEnvelope;
 use overdrive_core::id::AllocationId;
 use overdrive_core::observation::{
-    ProbeIdx, ProbeResultRow, ProbeResultRowEnvelope, ProbeResultRowV1, ProbeRole, ProbeStatus,
+    ProbeIdx, ProbeResultRow, ProbeResultRowEnvelope, ProbeResultRowV2, ProbeRole, ProbeRunSeq,
+    ProbeStatus, SameStatusRuns,
 };
 use proptest::prelude::*;
 
 // ---------------------------------------------------------------------------
-// Generators — exercise the full ProbeResultRowV1 product type.
+// Generators — exercise the full ProbeResultRowV2 product type.
 // ---------------------------------------------------------------------------
 
 fn arb_alloc_id() -> impl Strategy<Value = AllocationId> {
@@ -50,39 +52,54 @@ fn arb_probe_status() -> impl Strategy<Value = ProbeStatus> {
     ]
 }
 
-fn arb_probe_result_row() -> impl Strategy<Value = ProbeResultRowV1> {
+fn arb_probe_result_row() -> impl Strategy<Value = ProbeResultRowV2> {
     (
-        arb_alloc_id(),
-        arb_probe_idx(),
-        arb_probe_role(),
-        arb_probe_status(),
-        any::<u64>(),
-        any::<bool>(),
+        (arb_alloc_id(), arb_probe_idx(), arb_probe_role(), arb_probe_status()),
+        (any::<u64>(), any::<bool>(), 1_u64..=u64::MAX, 1_u32..=u32::MAX),
     )
-        .prop_map(|(alloc_id, probe_idx, role, status, last_observed_at_unix_ms, inferred)| {
-            ProbeResultRowV1 {
+        .prop_map(
+            |(
+                (alloc_id, probe_idx, role, status),
+                (last_observed_at_unix_ms, inferred, run_seq, same_status_runs),
+            )| ProbeResultRowV2 {
                 alloc_id,
                 probe_idx,
                 role,
                 status,
                 last_observed_at_unix_ms,
                 inferred,
-            }
-        })
+                run_seq: ProbeRunSeq::new(run_seq).expect("generator yields a non-zero run"),
+                same_status_runs: SameStatusRuns::new(same_status_runs)
+                    .expect("generator yields a non-zero streak"),
+            },
+        )
+}
+
+fn pinned_row(alloc: &str) -> ProbeResultRowV2 {
+    ProbeResultRowV2 {
+        alloc_id: AllocationId::new(alloc).expect("valid alloc id"),
+        probe_idx: ProbeIdx::new(0),
+        role: ProbeRole::Startup,
+        status: ProbeStatus::Pass,
+        last_observed_at_unix_ms: 0,
+        inferred: false,
+        run_seq: ProbeRunSeq::FIRST,
+        same_status_runs: SameStatusRuns::ONE,
+    }
 }
 
 // ---------------------------------------------------------------------------
-// S-SHCP-ENV-01 — V1 round-trips bit-equivalent through rkyv codec.
+// S-SHCP-ENV-01 — the latest variant round-trips bit-equivalent.
 // ---------------------------------------------------------------------------
 
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
 
     /// S-SHCP-ENV-01 (US-01 / ADR-0048 + ADR-0054 §5 QR1) —
-    /// `ProbeResultRowEnvelope::V1` round-trips through rkyv archive +
+    /// `ProbeResultRowEnvelope::latest` (V2) round-trips through rkyv archive +
     /// access + deserialize bit-equivalent to the original.
     #[test]
-    fn probe_result_row_envelope_v1_rkyv_roundtrip_bit_equivalent(
+    fn probe_result_row_envelope_latest_rkyv_roundtrip_bit_equivalent(
         row in arb_probe_result_row(),
     ) {
         let envelope = ProbeResultRowEnvelope::latest(row.clone());
@@ -103,28 +120,17 @@ proptest! {
 }
 
 // ---------------------------------------------------------------------------
-// S-SHCP-ENV-02 — Discriminant byte position pinned to 0 (V1 tag).
+// S-SHCP-ENV-02 — the latest variant's discriminant byte is pinned to 1 (V2).
 // ---------------------------------------------------------------------------
 
-/// S-SHCP-ENV-02 (ADR-0054 §5 QR1 — load-bearing discriminant pin)
-/// — `ProbeResultRowEnvelope::V1` archived bytes have first
-/// discriminant byte == 0. Future V2/V3 append at the tail only.
-///
-/// The schema-evolution fixture at
-/// `crates/overdrive-core/tests/schema_evolution/probe_result_row.rs`
-/// declares `const FIXTURE_V1_DISCRIMINANT: u8 = 0;` and pins this
-/// invariant.
+/// S-SHCP-ENV-02 (ADR-0054 §5 QR1 + R5-PROBE-V2) — `latest()` writes the
+/// V2 variant, whose archived discriminant byte at the pinned offset is 1.
+/// The historical V1 bytes (discriminant 0) are pinned by the
+/// schema-evolution fixture at
+/// `crates/overdrive-core/tests/schema_evolution/probe_result_row.rs`.
 #[test]
-fn probe_result_row_envelope_v1_discriminant_is_pinned_to_zero() {
-    let row = ProbeResultRowV1 {
-        alloc_id: AllocationId::new("alloc-pinned-01").expect("valid alloc id"),
-        probe_idx: ProbeIdx::new(0),
-        role: ProbeRole::Startup,
-        status: ProbeStatus::Pass,
-        last_observed_at_unix_ms: 0,
-        inferred: false,
-    };
-    let envelope = ProbeResultRowEnvelope::latest(row);
+fn probe_result_row_envelope_latest_discriminant_is_pinned_to_one() {
+    let envelope = ProbeResultRowEnvelope::latest(pinned_row("alloc-pinned-01"));
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("rkyv archive");
 
     let offset = ProbeResultRowEnvelope::discriminant_offset_from_end()
@@ -133,8 +139,8 @@ fn probe_result_row_envelope_v1_discriminant_is_pinned_to_zero() {
     assert!(n >= offset, "buffer ({n}) must accommodate discriminant offset ({offset})");
     let discriminant = bytes[n - offset];
     assert_eq!(
-        discriminant, 0,
-        "V1 discriminant must be pinned to 0 per ADR-0054 §5 QR1; observed {discriminant}"
+        discriminant, 1,
+        "the V2 discriminant must be pinned to 1 (R5-PROBE-V2); observed {discriminant}"
     );
 }
 
@@ -156,15 +162,7 @@ fn probe_result_row_envelope_v1_discriminant_is_pinned_to_zero() {
 fn probe_result_row_envelope_unknown_variant_surfaces_unknown_version() {
     use overdrive_core::codec::{EnvelopeError, decode_envelope_bytes};
 
-    let row = ProbeResultRowV1 {
-        alloc_id: AllocationId::new("alloc-unk-01").expect("valid alloc id"),
-        probe_idx: ProbeIdx::new(0),
-        role: ProbeRole::Startup,
-        status: ProbeStatus::Pass,
-        last_observed_at_unix_ms: 0,
-        inferred: false,
-    };
-    let envelope = ProbeResultRowEnvelope::latest(row);
+    let envelope = ProbeResultRowEnvelope::latest(pinned_row("alloc-unk-01"));
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("rkyv archive");
 
     // Synthesise an unknown-variant byte sequence: flip the
@@ -186,7 +184,7 @@ fn probe_result_row_envelope_unknown_variant_surfaces_unknown_version() {
                 type_name, "ProbeResultRowEnvelope",
                 "probe must name the envelope whose decode path surfaced the unknown tag"
             );
-            assert_eq!(supported_max, 0, "supported_max must reflect highest known tag (V1 = 0)");
+            assert_eq!(supported_max, 1, "supported_max must reflect highest known tag (V2 = 1)");
         }
         EnvelopeError::Malformed { .. } => panic!(
             "expected EnvelopeError::UnknownVersion for unknown-variant bytes; got Malformed"

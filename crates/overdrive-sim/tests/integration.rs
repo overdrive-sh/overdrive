@@ -47,6 +47,7 @@ mod integration {
             let enforcement: Arc<dyn MtlsEnforcement> = Arc::new(SimMtlsEnforcement::new(
                 Arc::new(SimIdentityRead::new(BTreeMap::new(), None)),
                 MtlsLimits::default(),
+                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
             ));
             let resolve: Arc<dyn MtlsResolve> =
                 Arc::new(SimMtlsResolve::new(BTreeMap::new(), MtlsResolution::NonMesh));
@@ -70,9 +71,8 @@ mod integration {
         pub fn pool() -> Arc<GuestAddressPool> {
             Arc::new(GuestAddressPool::new(
                 "100.95.0.0/16".parse().expect("static guest prefix"),
-                "ovd-gbr0".to_owned(),
                 Ipv4Addr::new(100, 95, 0, 1),
-                Ipv4Addr::new(100, 95, 0, 1),
+                Arc::new(overdrive_sim::adapters::entropy::SimEntropy::new(0x295)),
             ))
         }
     }

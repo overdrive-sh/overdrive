@@ -1,0 +1,1369 @@
+State 1: <Initial predicate>
+/\ pair_bugTcpEofIsClean_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugTcpEofIsClean_fwd_pair_vmUp = TRUE
+/\ pair_bugTcpEofIsClean_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugTcpEofIsClean_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_hres = "none"
+/\ pair_bugTcpEofIsClean_fwd_pair_attRes = [g |-> "none", h |-> "none"]
+/\ pair_bugTcpEofIsClean_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugTcpEofIsClean_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_bugTcpEofIsClean_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_bugTcpEofIsClean_fwd_pair_strmAbort = FALSE
+/\ pair_bugTcpEofIsClean_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugTcpEofIsClean_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_bugTcpEofIsClean_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugTcpEofIsClean_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_bugTcpEofIsClean_fwd_pair_mode = "stream"
+/\ pair_bugTcpEofIsClean_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_bugTcpEofIsClean_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugTcpEofIsClean_fwd_pair_pr = [ g |->
+      [ ph |-> "unattached",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "unattached",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+
+State 2: <pair_bugTcpEofIsClean_fwd_pair_Fin line 2211, col 3 to line 2248, col 72 of module pair_bugTcpEofIsClean>
+/\ pair_bugTcpEofIsClean_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugTcpEofIsClean_fwd_pair_vmUp = TRUE
+/\ pair_bugTcpEofIsClean_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugTcpEofIsClean_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_hres = "none"
+/\ pair_bugTcpEofIsClean_fwd_pair_attRes = [g |-> "none", h |-> "none"]
+/\ pair_bugTcpEofIsClean_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugTcpEofIsClean_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_bugTcpEofIsClean_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_bugTcpEofIsClean_fwd_pair_strmAbort = FALSE
+/\ pair_bugTcpEofIsClean_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugTcpEofIsClean_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_bugTcpEofIsClean_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugTcpEofIsClean_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_bugTcpEofIsClean_fwd_pair_mode = "stream"
+/\ pair_bugTcpEofIsClean_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_bugTcpEofIsClean_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugTcpEofIsClean_fwd_pair_pr = [ g |->
+      [ ph |-> "unattached",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "unattached",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+
+State 3: <pair_bugTcpEofIsClean_fwd_pair_Attach line 3916, col 3 to line 3926, col 74 of module pair_bugTcpEofIsClean>
+/\ pair_bugTcpEofIsClean_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugTcpEofIsClean_fwd_pair_vmUp = TRUE
+/\ pair_bugTcpEofIsClean_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugTcpEofIsClean_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_hres = "none"
+/\ pair_bugTcpEofIsClean_fwd_pair_attRes = [g |-> "none", h |-> "ok"]
+/\ pair_bugTcpEofIsClean_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugTcpEofIsClean_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_bugTcpEofIsClean_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_bugTcpEofIsClean_fwd_pair_strmAbort = FALSE
+/\ pair_bugTcpEofIsClean_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugTcpEofIsClean_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_bugTcpEofIsClean_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugTcpEofIsClean_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_bugTcpEofIsClean_fwd_pair_mode = "stream"
+/\ pair_bugTcpEofIsClean_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_bugTcpEofIsClean_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugTcpEofIsClean_fwd_pair_pr = [ g |->
+      [ ph |-> "unattached",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+
+State 4: <pair_bugTcpEofIsClean_fwd_pair_Attach line 3916, col 3 to line 3926, col 74 of module pair_bugTcpEofIsClean>
+/\ pair_bugTcpEofIsClean_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugTcpEofIsClean_fwd_pair_vmUp = TRUE
+/\ pair_bugTcpEofIsClean_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugTcpEofIsClean_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_hres = "none"
+/\ pair_bugTcpEofIsClean_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_bugTcpEofIsClean_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugTcpEofIsClean_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_bugTcpEofIsClean_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_bugTcpEofIsClean_fwd_pair_strmAbort = FALSE
+/\ pair_bugTcpEofIsClean_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugTcpEofIsClean_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_bugTcpEofIsClean_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugTcpEofIsClean_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_bugTcpEofIsClean_fwd_pair_mode = "stream"
+/\ pair_bugTcpEofIsClean_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_bugTcpEofIsClean_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugTcpEofIsClean_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+
+State 5: <pair_bugTcpEofIsClean_fwd_pair_HopEnd0 line 3562, col 3 to line 3587, col 49 of module pair_bugTcpEofIsClean>
+/\ pair_bugTcpEofIsClean_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugTcpEofIsClean_fwd_pair_vmUp = TRUE
+/\ pair_bugTcpEofIsClean_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugTcpEofIsClean_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {"S"},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> TRUE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_hres = "none"
+/\ pair_bugTcpEofIsClean_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_bugTcpEofIsClean_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugTcpEofIsClean_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_bugTcpEofIsClean_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_bugTcpEofIsClean_fwd_pair_strmAbort = FALSE
+/\ pair_bugTcpEofIsClean_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugTcpEofIsClean_fwd_pair_ctl = [gh |-> <<{"S"}>>, hg |-> <<>>]
+/\ pair_bugTcpEofIsClean_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugTcpEofIsClean_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_bugTcpEofIsClean_fwd_pair_mode = "stream"
+/\ pair_bugTcpEofIsClean_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_bugTcpEofIsClean_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugTcpEofIsClean_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+
+State 6: <pair_bugTcpEofIsClean_fwd_pair_TcpRst line 4182, col 16 to line 4187, col 14 of module pair_bugTcpEofIsClean>
+/\ pair_bugTcpEofIsClean_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugTcpEofIsClean_fwd_pair_vmUp = TRUE
+/\ pair_bugTcpEofIsClean_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugTcpEofIsClean_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {"S"},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> TRUE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_hres = "none"
+/\ pair_bugTcpEofIsClean_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_bugTcpEofIsClean_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugTcpEofIsClean_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> TRUE,
+        lost |-> 0 ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_bugTcpEofIsClean_fwd_pair_ep = [g |-> "dead", h |-> "alive"]
+/\ pair_bugTcpEofIsClean_fwd_pair_strmAbort = FALSE
+/\ pair_bugTcpEofIsClean_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {"g"},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 1,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugTcpEofIsClean_fwd_pair_ctl = [gh |-> <<{"S"}>>, hg |-> <<>>]
+/\ pair_bugTcpEofIsClean_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugTcpEofIsClean_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_bugTcpEofIsClean_fwd_pair_mode = "stream"
+/\ pair_bugTcpEofIsClean_fwd_pair_tcpErr = [g |-> "EPIPE", h |-> "0"]
+/\ pair_bugTcpEofIsClean_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugTcpEofIsClean_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+
+State 7: <pair_bugTcpEofIsClean_fwd_pair_Fin line 2211, col 3 to line 2248, col 72 of module pair_bugTcpEofIsClean>
+/\ pair_bugTcpEofIsClean_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugTcpEofIsClean_fwd_pair_vmUp = TRUE
+/\ pair_bugTcpEofIsClean_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugTcpEofIsClean_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {"S"},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> TRUE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_hres = "none"
+/\ pair_bugTcpEofIsClean_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_bugTcpEofIsClean_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugTcpEofIsClean_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> TRUE,
+        lost |-> 0 ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_bugTcpEofIsClean_fwd_pair_ep = [g |-> "dead", h |-> "alive"]
+/\ pair_bugTcpEofIsClean_fwd_pair_strmAbort = FALSE
+/\ pair_bugTcpEofIsClean_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {"g"},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 1,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugTcpEofIsClean_fwd_pair_ctl = [gh |-> <<{"S"}>>, hg |-> <<>>]
+/\ pair_bugTcpEofIsClean_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugTcpEofIsClean_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_bugTcpEofIsClean_fwd_pair_mode = "stream"
+/\ pair_bugTcpEofIsClean_fwd_pair_tcpErr = [g |-> "EPIPE", h |-> "0"]
+/\ pair_bugTcpEofIsClean_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugTcpEofIsClean_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+
+State 8: <pair_bugTcpEofIsClean_fwd_pair_HopEnd0 line 3562, col 3 to line 3587, col 49 of module pair_bugTcpEofIsClean>
+/\ pair_bugTcpEofIsClean_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugTcpEofIsClean_fwd_pair_vmUp = TRUE
+/\ pair_bugTcpEofIsClean_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugTcpEofIsClean_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {"S"},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> TRUE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {"S"},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> TRUE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_hres = "none"
+/\ pair_bugTcpEofIsClean_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_bugTcpEofIsClean_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugTcpEofIsClean_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> TRUE,
+        lost |-> 0 ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_bugTcpEofIsClean_fwd_pair_ep = [g |-> "dead", h |-> "alive"]
+/\ pair_bugTcpEofIsClean_fwd_pair_strmAbort = FALSE
+/\ pair_bugTcpEofIsClean_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {"g"},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 1,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugTcpEofIsClean_fwd_pair_ctl = [gh |-> <<{"S"}>>, hg |-> <<{"S"}>>]
+/\ pair_bugTcpEofIsClean_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugTcpEofIsClean_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_bugTcpEofIsClean_fwd_pair_mode = "stream"
+/\ pair_bugTcpEofIsClean_fwd_pair_tcpErr = [g |-> "EPIPE", h |-> "0"]
+/\ pair_bugTcpEofIsClean_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugTcpEofIsClean_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+
+State 9: <pair_bugTcpEofIsClean_fwd_pair_VCtl line 4147, col 3 to line 4150, col 48 of module pair_bugTcpEofIsClean>
+/\ pair_bugTcpEofIsClean_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugTcpEofIsClean_fwd_pair_vmUp = TRUE
+/\ pair_bugTcpEofIsClean_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugTcpEofIsClean_fwd_pair_vs = [ g |->
+      [ ps |-> {"S"},
+        sent |-> {"S"},
+        err |-> FALSE,
+        cls |-> "clean",
+        tcls |-> "clean",
+        ucls |-> "clean",
+        att |-> "noend",
+        clsAt |-> "callback",
+        ncls |-> 1,
+        snap |-> {},
+        sshut |-> TRUE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {"S"},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> TRUE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_hres = "none"
+/\ pair_bugTcpEofIsClean_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_bugTcpEofIsClean_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugTcpEofIsClean_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> TRUE,
+        lost |-> 0 ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_bugTcpEofIsClean_fwd_pair_ep = [g |-> "dead", h |-> "alive"]
+/\ pair_bugTcpEofIsClean_fwd_pair_strmAbort = FALSE
+/\ pair_bugTcpEofIsClean_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {"g"},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 1,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugTcpEofIsClean_fwd_pair_ctl = [gh |-> <<{"S"}>>, hg |-> <<>>]
+/\ pair_bugTcpEofIsClean_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugTcpEofIsClean_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_bugTcpEofIsClean_fwd_pair_mode = "stream"
+/\ pair_bugTcpEofIsClean_fwd_pair_tcpErr = [g |-> "EPIPE", h |-> "0"]
+/\ pair_bugTcpEofIsClean_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugTcpEofIsClean_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+
+State 10: <pair_bugTcpEofIsClean_fwd_pair_HopEnd1 line 3593, col 3 to line 3647, col 49 of module pair_bugTcpEofIsClean>
+/\ pair_bugTcpEofIsClean_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugTcpEofIsClean_fwd_pair_vmUp = TRUE
+/\ pair_bugTcpEofIsClean_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugTcpEofIsClean_fwd_pair_vs = [ g |->
+      [ ps |-> {"S"},
+        sent |-> {"S"},
+        err |-> FALSE,
+        cls |-> "clean",
+        tcls |-> "clean",
+        ucls |-> "clean",
+        att |-> "noend",
+        clsAt |-> "callback",
+        ncls |-> 1,
+        snap |-> {},
+        sshut |-> TRUE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {"S"},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> TRUE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_hres = "none"
+/\ pair_bugTcpEofIsClean_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_bugTcpEofIsClean_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugTcpEofIsClean_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "clean",
+        dstShut |-> TRUE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> TRUE,
+        lost |-> 0 ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugTcpEofIsClean_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_bugTcpEofIsClean_fwd_pair_ep = [g |-> "dead", h |-> "alive"]
+/\ pair_bugTcpEofIsClean_fwd_pair_strmAbort = FALSE
+/\ pair_bugTcpEofIsClean_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {"g"},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 1,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugTcpEofIsClean_fwd_pair_ctl = [gh |-> <<{"S"}>>, hg |-> <<>>]
+/\ pair_bugTcpEofIsClean_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugTcpEofIsClean_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_bugTcpEofIsClean_fwd_pair_mode = "stream"
+/\ pair_bugTcpEofIsClean_fwd_pair_tcpErr = [g |-> "EPIPE", h |-> "0"]
+/\ pair_bugTcpEofIsClean_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugTcpEofIsClean_fwd_pair_pr = [ g |->
+      [ ph |-> "ended",
+        rec |-> "queued",
+        out |-> "completed",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 1,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]

@@ -1687,14 +1687,15 @@ mod shared_program_rollback_acceptance {
         assert_eq!(prior_tables, requested_tables);
         assert_eq!(prior_sets, requested_sets);
         assert_eq!(prior_output, requested_output);
-        assert_eq!(prior_prerouting.len(), 5);
-        assert_eq!(requested_prerouting.len(), 5);
-        for index in [0, 2, 4] {
-            assert_eq!(prior_prerouting[index], requested_prerouting[index]);
-        }
-        for index in [1, 3] {
-            assert_ne!(prior_prerouting[index], requested_prerouting[index]);
-        }
+        assert_eq!(
+            prior_prerouting.len(),
+            requested_prerouting.len(),
+            "a target-only delta adds or removes no rule"
+        );
+        assert!(
+            prior_prerouting.iter().zip(requested_prerouting).any(|(prior, next)| prior != next),
+            "the listener targets changed"
+        );
     }
 
     /// CONTRACT_SHAPE: bounded-change.
@@ -2259,25 +2260,10 @@ mod shared_program_rollback_acceptance {
         ] {
             let io = Arc::new(ScriptedIo::new(Vec::new(), Vec::new()));
             let host = HostMtlsIntercept::with_shared_program_io(io.clone());
-            // Precondition: the allocation's element tokens are live in the
-            // host registry, as its two installs leave them.
-            host.elements.counts.lock().extend([
-                (
-                    SharedElementKey::Address {
-                        set: SharedElementSet::ManagedGuestIps,
-                        address: source_addr,
-                    },
-                    1,
-                ),
-                (
-                    SharedElementKey::Address {
-                        set: SharedElementSet::OutboundSources,
-                        address: source_addr,
-                    },
-                    1,
-                ),
-                (SharedElementKey::Destination(requested), 1),
-            ]);
+            // Precondition: the allocation's element token is live in the
+            // host registry, as its inbound install leaves it (an allocation's
+            // only member after the firewall single cut, roadmap step 12).
+            host.elements.counts.lock().extend([(SharedElementKey::Destination(requested), 1)]);
             let tokens_before = host.elements.counts.lock().clone();
 
             let refused = host.remove_allocation_elements(source_addr, &destinations);

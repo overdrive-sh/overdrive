@@ -1,426 +1,407 @@
-//! P3 guest-side UDP slots (D25, CELL-RECREATE, U-2, SLOT-ABORT, U-5; the
-//! guest rows of `udp_slots`): slot identity (P3-S2), idle release and the
-//! lost-report audit (P3-S4), cell recreation, generation dispatch and
-//! quarantine (P3-S5), keep-slot after `Refused` / `Abort` / pairing deadline
-//! (P3-S6), late `Paired` for a released slot answered with `Abort` (P3-S9
-//! guest half), and exhaustion leaving existing associations unaffected
-//! (P3-S10). The guest kernel (capture program, slot map, cells) is the sim's;
-//! the owner's decisions are observed through QPROJ-5 and the sim's QPROJ-7
-//! surface.
+//! The guest UDP slot pool and datagram associations (feature-delta § *Guest
+//! adaptation contract* intake model and "UDP slot release", § *Per-kind total
+//! orders* "Datagram association", EVMOD-DGRAM, U-2, SLOT-ABORT, DG-5-A; R5-14
+//! and R5-27, guest side).
+//!
+//! An association is one vsock STREAM (kind 2) whose pair (S, V_g) the owner
+//! attaches on `Paired` (S, the UDP slot socket, half A; V_g half B); until
+//! then datagrams wait in S's own receive queue. Every end of an association
+//! aborts the pair (or closes V_g before `Paired`), discards S's receive queue
+//! without reading payload, and disconnects S; a slot release then returns the
+//! slot, which is never re-associated.
 
-use std::collections::BTreeSet;
-use std::io::ErrorKind;
-use std::time::Duration;
+use overdrive_core::guest_transport::forwarder::PairSide;
+use overdrive_core::guest_transport::wire::{
+    ControlMessage, FLOW_PAIRING_DEADLINE, FlowRefusal, FlowRequest,
+};
+use overdrive_core::guest_transport::{GUEST_DATAGRAM_SLOT_IDLE, GUEST_OWNER_AUDIT_PERIOD};
+use overdrive_sim::adapters::SimShutdown;
 
-use overdrive_core::guest_transport::wire::{ControlMessage, FLOW_PAIRING_DEADLINE, FlowRefusal};
-use overdrive_core::guest_transport::{GUEST_DATAGRAM_SLOT_IDLE, GUEST_UDP_SLOTS};
+use super::super::sim::SimGuestEffect;
+use super::*;
 
-use super::super::sim::{SimGuestEffect, sim_cookie, sim_generation};
-use super::{Guest, dest, owned_slots, position};
-use crate::guest_flow::HostChannel;
-
-fn associations_started(g: &Guest) -> usize {
-    g.io.effects().iter().filter(|e| matches!(e, SimGuestEffect::WriteSlotRequests { .. })).count()
+/// The effects of the end-of-association order on `slot`, in log order.
+fn end_order(
+    effects: &[SimGuestEffect],
+    slot: SocketAddrV4,
+    pair: Option<ForwardId>,
+) -> Vec<&'static str> {
+    effects
+        .iter()
+        .filter_map(|e| match e {
+            SimGuestEffect::AbortForward { id } if Some(*id) == pair => Some("abort"),
+            SimGuestEffect::EndAssociation { slot: s } if *s == slot => Some("discard+disconnect"),
+            SimGuestEffect::ReleaseSlot { slot: s } if *s == slot => Some("release"),
+            _ => None,
+        })
+        .collect()
 }
 
-/// P3-S2: one socket sending first datagrams to N distinct destinations holds
-/// exactly N slots, each owned by a distinct (socket, destination); a repeat
-/// send to an owned destination claims nothing and starts no association.
+/// Datagram happy path: the first datagram claims a slot (the slot socket
+/// queues it and becomes readable); its readiness makes the owner connect V_g
+/// and write one `DatagramStream` request (guest origin, the original
+/// destination, its token); on `Paired` it attaches (S, V_g), S half A; the
+/// attach-time run forwards the queued datagram as one frame, and later
+/// datagrams go straight through.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER vsock new-step 5 (guest adaptation in overdrive-init)"]
-fn one_slot_per_socket_destination_pair() {
-    for n in [0u16, 1, 2, GUEST_UDP_SLOTS] {
-        let mut g = Guest::new();
-        g.open_session();
-        let cookie = sim_cookie(42);
-        for i in 0..n {
-            let s = g.io.app_send(cookie, dest(i)).expect("a free slot");
-            g.io.release_slot_ready(s, sim_generation(0));
-        }
-        g.run_released();
-        let obs = g.obs();
-        let owned = owned_slots(&obs);
-        assert_eq!(owned.len(), usize::from(n), "N = {n}");
-        let tags: BTreeSet<_> = owned.iter().map(|s| obs.slots[s].owner).collect();
-        assert_eq!(
-            tags.len(),
-            usize::from(n),
-            "every owned slot has a distinct (socket, destination)"
-        );
-        assert!(tags.iter().all(|t| t.is_some_and(|(k, _)| k == cookie)));
-        assert_eq!(g.connects(HostChannel::FlowStream), usize::from(n), "one association per slot");
-
-        if n > 0 {
-            let s = g.io.app_send(cookie, dest(0)).expect("owned destination");
-            assert_eq!(obs.slots[&s].owner, Some((cookie, dest(0))));
-            g.io.release_slot_ready(s, sim_generation(0));
-            g.run_released();
-            assert_eq!(owned_slots(&g.obs()), owned, "no new slot on a repeat send");
-            assert_eq!(
-                g.connects(HostChannel::FlowStream),
-                usize::from(n),
-                "no second association"
-            );
-        }
-    }
-}
-
-/// P3-S4: an association idle in both directions for
-/// `GUEST_DATAGRAM_SLOT_IDLE` ends in the end-of-association order and its
-/// slot returns to the pool (the host observes the legs' end); a slot with
-/// traffic in the window is kept.
-/// CONTRACT_SHAPE: bounded-change.
-#[test]
-#[ignore = "pending DELIVER vsock new-step 5 (guest adaptation in overdrive-init)"]
-fn an_idle_association_is_released_and_a_busy_one_kept() {
+#[ignore = "pending DELIVER step 5"]
+fn a_first_datagram_claims_a_slot_associates_attaches_and_forwards() {
     let mut g = Guest::new();
     g.open_session();
-    let (idle_k, busy_k) = (sim_cookie(7), sim_cookie(8));
-    let idle = g.io.app_send(idle_k, dest(1)).expect("slot");
-    let idle_flow = g.associate(idle);
-    g.pair_slot(idle_flow);
-    let busy = g.io.app_send(busy_k, dest(2)).expect("slot");
-    let busy_flow = g.associate(busy);
-    g.pair_slot(busy_flow);
-    let _ = g.io.take_outbox();
-
-    let step = Duration::from_secs(30);
-    for _ in 0..10 {
-        g.io.host_datagram(busy);
-        g.io.app_send(busy_k, dest(2)).expect("owned");
-        g.advance(step);
-    }
-    assert!(step * 10 >= GUEST_DATAGRAM_SLOT_IDLE * 2);
-    let obs = g.obs();
-    assert_eq!(obs.slots[&idle].owner, None, "the idle slot is released");
-    assert_eq!(obs.slots[&idle].association, None);
-    assert!(!obs.slots[&idle].routed);
-    assert!(g.io.slot_state(idle).in_pool);
-    assert!(
-        g.io.guest_socket_observation().legs_closed_unobserved.contains(&idle_flow),
-        "the host observes the end"
-    );
-
-    assert_eq!(obs.slots[&busy].owner, Some((busy_k, dest(2))), "the busy slot is kept");
-    assert_eq!(obs.slots[&busy].association, Some(busy_flow));
-    assert!(obs.slots[&busy].routed);
-}
-
-/// P3-S4 / K-B2: a socket released with its `sock_release` report lost is found
-/// by the level-triggered audit (its cookie no longer exists); every slot of
-/// it is released — not only one — even while host traffic keeps them busy.
-/// CONTRACT_SHAPE: bounded-change.
-#[test]
-#[ignore = "pending DELIVER vsock new-step 5 (guest adaptation in overdrive-init)"]
-fn a_lost_release_report_is_recovered_by_the_audit() {
-    let mut g = Guest::new();
-    g.open_session();
-    let k = sim_cookie(9);
-    let a = g.io.app_send(k, dest(1)).expect("slot");
-    let fa = g.associate(a);
-    g.pair_slot(fa);
-    let b = g.io.app_send(k, dest(2)).expect("slot");
-    let fb = g.associate(b);
-    g.pair_slot(fb);
-    assert_eq!(owned_slots(&g.obs()), BTreeSet::from([a, b]));
-
-    g.io.app_close_socket(k, false); // the report is lost
-    assert!(g.io.guest_socket_observation().release_reports.is_empty());
-    for _ in 0..4 {
-        // host traffic keeps both slots out of the idle path: only the audit frees them
-        g.io.host_datagram(a);
-        g.io.host_datagram(b);
-        g.advance(Duration::from_secs(30));
-        if owned_slots(&g.obs()).is_empty() {
-            break;
-        }
-    }
-    assert!(owned_slots(&g.obs()).is_empty(), "both slots of the released socket reclaimed");
-    assert!(g.io.slot_state(a).in_pool && g.io.slot_state(b).in_pool);
-    let ended = g.io.guest_socket_observation().legs_closed_unobserved;
-    assert!(ended.contains(&fa) && ended.contains(&fb));
-}
-
-/// Release through a delivered report: every slot of the socket ends and
-/// returns to the pool.
-/// CONTRACT_SHAPE: bounded-change.
-#[test]
-#[ignore = "pending DELIVER vsock new-step 5 (guest adaptation in overdrive-init)"]
-fn a_release_report_releases_every_slot_of_the_socket() {
-    let mut g = Guest::new();
-    g.open_session();
-    let k = sim_cookie(10);
-    let other = sim_cookie(11);
-    let slots: Vec<_> = (0..3).map(|i| g.io.app_send(k, dest(i)).expect("slot")).collect();
-    for s in &slots {
-        let _ = g.associate(*s);
-    }
-    let kept = g.io.app_send(other, dest(9)).expect("slot");
-    let kept_flow = g.associate(kept);
-    g.io.app_close_socket(k, true);
-    g.io.release_socket_report(k);
-    g.run_released();
-    let obs = g.obs();
-    for s in &slots {
-        assert_eq!(obs.slots[s].owner, None, "{s} released");
-        assert!(g.io.slot_state(*s).in_pool);
-    }
+    let s = g.io.app_send(cookie(1), dest(1)).expect("a free slot");
+    g.settle();
     assert_eq!(
-        obs.slots[&kept].association,
-        Some(kept_flow),
-        "another socket's slot is unaffected"
+        g.obs().slots[&s].owner,
+        Some((cookie(1), dest(1))),
+        "the slot is owned at the claim"
     );
-}
-
-/// P3-S5 (CELL-RECREATE): ending an association (here by `Refused`) recreates
-/// both cells — the parked burst is discarded, the generation advances — and
-/// a readiness event registered for the earlier generation never starts an
-/// association; a current-generation event (a new datagram) does.
-/// CONTRACT_SHAPE: bounded-change.
-#[test]
-#[ignore = "pending DELIVER vsock new-step 5 (guest adaptation in overdrive-init)"]
-fn recreated_cells_discard_parked_frames_and_stale_generation_events() {
-    let mut g = Guest::new();
-    g.open_session();
-    let k = sim_cookie(12);
-    let s = g.io.app_send(k, dest(1)).expect("slot");
-    let f = g.associate(s);
-    for _ in 0..200 {
-        g.io.app_send(k, dest(1)).expect("owned slot");
-    }
-    let parked = g.io.guest_socket_observation();
-    assert_eq!(parked.parked.get(&s), Some(&BTreeSet::from([(k, dest(1))])));
-    assert!(parked.readiness.contains(&(s, sim_generation(0))), "the burst re-armed generation 0");
-    let started = associations_started(&g);
-
-    g.io.host_control(ControlMessage::Refused { flow: f, refusal: FlowRefusal::Policy });
-    g.run_released();
-    let obs = g.obs();
-    assert_eq!(obs.slots[&s].generation, sim_generation(1), "cells recreated");
-    assert_eq!(obs.slots[&s].association, None);
-    assert_eq!(obs.slots[&s].owner, Some((k, dest(1))), "U-2: the slot stays owned");
-    let sim = g.io.guest_socket_observation();
-    assert!(!sim.parked.contains_key(&s), "parked frames discarded");
-    assert!(sim.legs_closed_unobserved.contains(&f), "T_g and Q_g closed");
-
-    // The stale (generation 0) event is dispatched: discarded.
-    g.io.release_slot_ready(s, sim_generation(0));
-    g.run_released();
-    assert_eq!(associations_started(&g), started, "no association from an earlier generation");
-    assert_eq!(g.connects(HostChannel::FlowStream), 0);
-    assert_eq!(g.obs().slots[&s].association, None);
-
-    // A new datagram registers generation 1 and starts exactly one association.
-    g.io.app_send(k, dest(1)).expect("owned");
-    let _ = g.associate(s);
-    assert_eq!(associations_started(&g), started + 1);
-}
-
-/// P3-S5: a slot whose new cell cannot be created is quarantined — no
-/// association, detached from its (socket, destination), not in the pool;
-/// the next send to that destination takes a free slot; the audit's retry
-/// returns it to the pool.
-/// CONTRACT_SHAPE: bounded-change.
-#[test]
-#[ignore = "pending DELIVER vsock new-step 5 (guest adaptation in overdrive-init)"]
-fn a_cell_creation_failure_quarantines_the_slot_until_the_audit_retry() {
-    let mut g = Guest::new();
-    g.open_session();
-    let k = sim_cookie(13);
-    let s = g.io.app_send(k, dest(1)).expect("slot");
-    let f = g.associate(s);
-    g.io.fail_cell_creation(s);
-    g.io.host_control(ControlMessage::Abort { flow: f });
-    g.run_released();
-    let obs = g.obs();
-    assert_eq!(obs.slots[&s].owner, None, "detached from its owner");
-    assert_eq!(obs.slots[&s].association, None);
-    let state = g.io.slot_state(s);
-    assert!(state.quarantined && !state.in_pool);
-    let next = g.io.app_send(k, dest(1)).expect("a free slot");
-    assert_ne!(next, s, "the next send takes another slot");
-
-    g.io.fail_next(super::super::sim::SimGuestOp::RetryQuarantined, ErrorKind::OutOfMemory);
-    g.advance(Duration::from_secs(30));
-    for _ in 0..4 {
-        if g.io.slot_state(s).in_pool {
-            break;
-        }
-        g.advance(Duration::from_secs(30));
-    }
-    assert!(g.io.slot_state(s).in_pool, "a later audit retry succeeds");
-    let retries =
-        g.io.effects()
-            .iter()
-            .filter(|e| matches!(e, SimGuestEffect::RetryQuarantined { slot } if *slot == s))
-            .count();
-    assert!(retries >= 2, "the failed retry was retried at a later audit tick");
-}
-
-/// P3-S6 (U-2): a destination refused every attempt costs at most one pairing
-/// attempt per application send — a parked burst never starts an association
-/// after `Refused`; the slot stays owned.
-/// CONTRACT_SHAPE: bounded-change.
-#[test]
-#[ignore = "pending DELIVER vsock new-step 5 (guest adaptation in overdrive-init)"]
-fn a_refused_burst_keeps_the_slot_and_starts_one_association_per_send() {
-    let mut g = Guest::new();
-    g.open_session();
-    let k = sim_cookie(14);
-    let s = g.io.app_send(k, dest(1)).expect("slot");
-    for _ in 0..499 {
-        g.io.app_send(k, dest(1)).expect("owned");
-    }
-    for round in 0..3 {
-        let f = g.associate(s);
-        g.io.host_control(ControlMessage::Refused { flow: f, refusal: FlowRefusal::HostInternal });
-        g.run_released();
-        assert_eq!(g.obs().slots[&s].owner, Some((k, dest(1))), "round {round}: slot kept");
-        assert!(
-            !g.io.guest_socket_observation().parked.contains_key(&s),
-            "round {round}: backlog discarded"
-        );
-        assert!(
-            g.io.guest_socket_observation()
-                .readiness
-                .iter()
-                .all(|(sl, generation)| *sl != s || *generation < g.obs().slots[&s].generation),
-            "round {round}: no current-generation readiness without a new datagram"
-        );
-        assert_eq!(associations_started(&g), round + 1);
-        g.io.app_send(k, dest(1)).expect("the application sends again");
-    }
-}
-
-/// P3-S6: a connected socket's association aborted after `Paired`
-/// re-associates on its next datagram; with no new datagram it does not.
-/// CONTRACT_SHAPE: bounded-change.
-#[test]
-#[ignore = "pending DELIVER vsock new-step 5 (guest adaptation in overdrive-init)"]
-fn an_aborted_paired_association_reassociates_only_on_the_next_datagram() {
-    let mut g = Guest::new();
-    g.open_session();
-    let k = sim_cookie(15);
-    let s = g.io.app_send(k, dest(1)).expect("slot");
-    let f = g.associate(s);
-    g.pair_slot(f);
-    assert!(g.obs().slots[&s].routed);
-    g.io.host_control(ControlMessage::Abort { flow: f });
-    g.run_released();
-    assert_eq!(g.obs().slots[&s].association, None);
-    assert_eq!(g.obs().slots[&s].owner, Some((k, dest(1))));
-    assert_eq!(g.connects(HostChannel::FlowStream), 0, "no self-retry");
     assert!(
-        g.io.take_outbox().iter().all(|m| *m != ControlMessage::Abort { flow: f }),
-        "Abort is not answered"
+        g.obs().slots[&s].association.is_none(),
+        "no association before readiness is dispatched"
     );
-
-    g.io.app_send(k, dest(1)).expect("next datagram");
-    let f2 = g.associate(s);
-    assert_ne!(f2, f, "a new association with a new flow id");
+    let a = g.associate(s);
+    let requests = g.io.requests();
+    assert_eq!(
+        requests,
+        vec![FlowRequest::DatagramStream { flow: a, destination: dest(1), launch: launch() }],
+        "one request"
+    );
+    g.pair_slot(a);
+    let attached = g.obs().slots[&s].attached.expect("attached on Paired");
+    assert_eq!(g.io.vsock_side(a), Some(PairSide::B));
+    g.io.run_forwarder();
+    let vsock = g.io.slot_vsock(s).expect("the association's V_g");
+    assert!(!vsock.peer_received().is_empty(), "the queued datagram is forwarded as a frame");
+    g.io.app_send(cookie(1), dest(1));
+    g.io.run_forwarder();
+    assert!(
+        g.io.forwarder_pair_state(attached).is_some_and(|p| p.a_to_b.moved >= 2),
+        "the second datagram went straight through"
+    );
+    assert!(
+        g.io.guest_socket_observation().readiness.is_empty(),
+        "an attached slot gives no readiness"
+    );
 }
 
-/// P3-S6 / U-2: the guest opener's `FLOW_PAIRING_DEADLINE` ends an unpaired
-/// association: `Abort` sent, frames discarded, slot kept.
+/// Slot identity: one slot per (application socket, original destination):
+/// two sockets claim distinct slots, and one socket sending to N destinations
+/// holds N slots (R5-14).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER vsock new-step 5 (guest adaptation in overdrive-init)"]
-fn the_pairing_deadline_aborts_the_association_and_keeps_the_slot() {
+#[ignore = "pending DELIVER step 5"]
+fn slots_are_held_per_socket_and_destination() {
     let mut g = Guest::new();
     g.open_session();
-    let _ = g.io.take_outbox();
-    let k = sim_cookie(16);
-    let s = g.io.app_send(k, dest(1)).expect("slot");
-    let f = g.associate(s);
-    g.advance(FLOW_PAIRING_DEADLINE);
-    assert!(g.io.take_outbox().contains(&ControlMessage::Abort { flow: f }));
-    let obs = g.obs();
-    assert_eq!(obs.slots[&s].association, None);
-    assert_eq!(obs.slots[&s].owner, Some((k, dest(1))));
-    assert!(!g.io.guest_socket_observation().parked.contains_key(&s));
+    let a = g.io.app_send(cookie(1), dest(1)).unwrap();
+    let b = g.io.app_send(cookie(2), dest(1)).unwrap();
+    let c = g.io.app_send(cookie(1), dest(2)).unwrap();
+    let again = g.io.app_send(cookie(1), dest(1)).unwrap();
+    g.settle();
+    assert_eq!(again, a, "the same (socket, destination) reuses its slot");
+    let owned = owned_slots(&g.obs());
+    assert_eq!(owned, [a, b, c].into_iter().collect(), "three distinct slots");
 }
 
-/// P3-S9 guest half (SLOT-ABORT): a late `Paired` for a released slot's
-/// association is answered with `Abort` and routes nothing; a `Paired` for a
-/// live association of the same socket is routed; a late `Refused` / `Abort`
-/// for the released association is discarded with no reply (U-5).
+/// R5-14: a socket that sent to N destinations frees N slots when it closes:
+/// on its `sock_release` report the owner releases every slot it owns, each in
+/// the release order — abort the pair (attached) or close V_g (pending), then
+/// discard S's queue and disconnect, then return the slot. The host sees each
+/// association end (its V_h reads `0x3`).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER vsock new-step 5 (guest adaptation in overdrive-init)"]
+#[ignore = "pending DELIVER step 5"]
+fn a_socket_close_releases_every_slot_it_owns_in_the_release_order() {
+    let mut g = Guest::new();
+    g.open_session();
+    let s1 = g.io.app_send(cookie(1), dest(1)).unwrap();
+    let a1 = g.associate(s1);
+    g.pair_slot(a1);
+    let p1 = g.obs().slots[&s1].attached;
+    let s2 = g.io.app_send(cookie(1), dest(2)).unwrap();
+    g.associate(s2);
+    g.io.clear_effects();
+
+    g.io.app_close_socket(cookie(1), true);
+    g.io.release_socket_report(cookie(1));
+    g.settle();
+    let obs = g.obs();
+    assert!(
+        obs.slots[&s1].owner.is_none() && obs.slots[&s2].owner.is_none(),
+        "both slots released"
+    );
+    let effects = g.io.effects();
+    assert_eq!(end_order(&effects, s1, p1), ["abort", "discard+disconnect", "release"]);
+    assert_eq!(end_order(&effects, s2, None), ["discard+disconnect", "release"]);
+    assert!(
+        g.io.vsock_ended().contains(
+            &g.io
+                .requests()
+                .iter()
+                .find_map(|r| match r {
+                    FlowRequest::DatagramStream { flow, destination, .. }
+                        if *destination == dest(2) =>
+                        Some(*flow),
+                    _ => None,
+                })
+                .unwrap()
+        ),
+        "the pending association's V_g is closed"
+    );
+    g.run_and_settle();
+    assert!(g.obs().slots[&s1].attached.is_none());
+}
+
+/// K-B2 / R5-14: a lost `sock_release` report is recovered by the
+/// level-triggered audit — the next audit tick's `live_cookies` finds the
+/// owner's cookie gone and releases its slot.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 5"]
+fn a_lost_release_report_is_recovered_by_the_audit_tick() {
+    let mut g = Guest::new();
+    g.open_session();
+    let s = g.io.app_send(cookie(1), dest(1)).unwrap();
+    g.settle();
+    g.io.app_close_socket(cookie(1), false);
+    g.advance(GUEST_OWNER_AUDIT_PERIOD);
+    assert!(g.obs().slots[&s].owner.is_none(), "the audit tick released the orphan");
+    assert!(g.io.effects().contains(&SimGuestEffect::LiveCookies));
+}
+
+/// DG-5-A / R5-14: an associated slot whose counters (both directions, the
+/// pair's `moved_ab` / `moved_ba`) do not change for `GUEST_DATAGRAM_SLOT_IDLE`
+/// is released by the first audit tick at or after its idle deadline (no
+/// timer of its own); a slot that keeps moving is not.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 5"]
+fn an_idle_slot_is_released_by_the_audit_tick_after_the_idle_period() {
+    let mut g = Guest::new();
+    g.open_session();
+    let idle = g.io.app_send(cookie(1), dest(1)).unwrap();
+    let a = g.associate(idle);
+    g.pair_slot(a);
+    let busy = g.io.app_send(cookie(2), dest(2)).unwrap();
+    let b = g.associate(busy);
+    g.pair_slot(b);
+    g.io.run_forwarder();
+    let ticks = GUEST_DATAGRAM_SLOT_IDLE.as_secs() / GUEST_OWNER_AUDIT_PERIOD.as_secs();
+    for _ in 0..ticks - 1 {
+        g.io.app_send(cookie(2), dest(2));
+        g.io.run_forwarder();
+        g.advance(GUEST_OWNER_AUDIT_PERIOD);
+    }
+    assert!(g.obs().slots[&idle].owner.is_some(), "not before the idle period");
+    for _ in 0..3 {
+        g.io.app_send(cookie(2), dest(2));
+        g.io.run_forwarder();
+        g.advance(GUEST_OWNER_AUDIT_PERIOD);
+    }
+    assert!(
+        g.obs().slots[&idle].owner.is_none(),
+        "released at the first tick past the idle period"
+    );
+    assert!(g.obs().slots[&busy].owner.is_some(), "a moving slot stays");
+}
+
+/// R5-14 / EVMOD-DGRAM: a slot released with a burst queued in its slot socket
+/// (200 datagrams before `Paired`) has its queue discarded without reading
+/// payload, starts no further association, and its next owner — another
+/// socket to another destination — receives none of the old datagrams: its
+/// association's first frame carries the new owner's datagram only.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 5"]
+fn a_released_burst_is_discarded_and_the_next_owner_gets_none_of_it() {
+    let mut g = Guest::new();
+    g.open_session();
+    let s = g.io.app_send(cookie(1), dest(1)).unwrap();
+    g.associate(s);
+    for _ in 0..199 {
+        g.io.app_send(cookie(1), dest(1));
+    }
+    g.io.app_close_socket(cookie(1), true);
+    g.io.release_socket_report(cookie(1));
+    g.settle();
+    let state = g.io.slot_state(s);
+    assert_eq!(state.discarded, 200, "the whole queue discarded, unread");
+    assert!(state.owner.is_none());
+    assert!(!g.io.guest_socket_observation().parked.contains_key(&s));
+    assert!(g.io.guest_socket_observation().readiness.is_empty(), "no further association");
+
+    // the recycled slot's next owner
+    let s2 = g.io.app_send(cookie(2), dest(2)).unwrap();
+    assert_eq!(s2, s, "the slot is recycled");
+    let a2 = g.associate(s2);
+    g.pair_slot(a2);
+    g.io.run_forwarder();
+    let state = g.io.forwarder_pair_state(g.obs().slots[&s2].attached.unwrap()).unwrap();
+    assert_eq!(state.a_to_b.moved, 1, "one datagram's payload: none of the previous owner's 200");
+}
+
+/// U-2 / R5-27: an association refused (`Policy`) discards S's queue without
+/// reading payload, keeps the slot owned, and is not retried until the
+/// application sends again; the next send starts exactly one new association.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 5"]
+fn a_refused_association_discards_its_queue_and_retries_only_on_a_new_datagram() {
+    let mut g = Guest::new();
+    g.open_session();
+    let s = g.io.app_send(cookie(1), dest(1)).unwrap();
+    let a = g.associate(s);
+    g.io.app_send(cookie(1), dest(1));
+    g.io.host_control(ControlMessage::Refused { flow: a, refusal: FlowRefusal::Policy });
+    g.settle();
+    let obs = g.obs();
+    assert_eq!(obs.slots[&s].owner, Some((cookie(1), dest(1))), "the slot is kept");
+    assert!(obs.slots[&s].association.is_none());
+    assert_eq!(g.io.slot_state(s).discarded, 2);
+    assert!(
+        g.io.guest_socket_observation().readiness.is_empty(),
+        "no retry without a new datagram"
+    );
+    for _ in 0..3 {
+        g.advance(GUEST_OWNER_AUDIT_PERIOD);
+    }
+    assert_eq!(g.io.requests().len(), 1, "still one request");
+    g.io.app_send(cookie(1), dest(1));
+    let a2 = g.associate(s);
+    assert_ne!(a2, a, "a new association id");
+    assert_eq!(g.io.requests().len(), 2);
+}
+
+/// EVMOD-DGRAM: the host's `Abort` for a live association aborts its pair,
+/// discards S's queue, disconnects S and keeps the slot owned; the next
+/// datagram re-associates.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 5"]
+fn an_abort_of_a_live_association_aborts_discards_disconnects_and_keeps_the_slot() {
+    let mut g = Guest::new();
+    g.open_session();
+    let s = g.io.app_send(cookie(1), dest(1)).unwrap();
+    let a = g.associate(s);
+    g.pair_slot(a);
+    let pair = g.obs().slots[&s].attached;
+    g.io.clear_effects();
+    g.io.host_control(ControlMessage::Abort { flow: a });
+    g.settle();
+    assert_eq!(
+        end_order(&g.io.effects(), s, pair),
+        ["abort", "discard+disconnect"],
+        "no release: the slot is kept"
+    );
+    let obs = g.obs();
+    assert_eq!(obs.slots[&s].owner, Some((cookie(1), dest(1))));
+    assert!(obs.slots[&s].association.is_none() && obs.slots[&s].attached.is_none());
+    assert!(!g.io.slot_state(s).connected, "S disconnected");
+    g.run_and_settle();
+    g.io.app_send(cookie(1), dest(1));
+    g.associate(s);
+}
+
+/// The host's abort reaching the guest pair as a peer abort (`0x3` with a
+/// direction open) ends the association through its end record the same way
+/// — discard, disconnect, slot kept — and the host's later `Abort` for it is
+/// discarded.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 5"]
+fn a_peer_abort_record_ends_the_association_and_a_late_abort_is_discarded() {
+    let mut g = Guest::new();
+    g.open_session();
+    let s = g.io.app_send(cookie(1), dest(1)).unwrap();
+    let a = g.associate(s);
+    g.pair_slot(a);
+    g.io.slot_vsock(s).unwrap().peer_shutdown(SimShutdown::Both);
+    g.run_and_settle();
+    assert!(g.obs().slots[&s].association.is_none());
+    assert_eq!(g.obs().slots[&s].owner, Some((cookie(1), dest(1))));
+    assert_eq!(g.io.slot_state(s).ended, 1);
+    let before = g.obs();
+    g.io.host_control(ControlMessage::Abort { flow: a });
+    g.settle();
+    assert_eq!(g.obs(), before);
+    assert_eq!(g.io.slot_state(s).ended, 1, "the end order ran once");
+}
+
+/// `FLOW_PAIRING_DEADLINE`: the guest ends an unpaired association itself —
+/// closes V_g, writes `Abort`, discards and disconnects S, keeps the slot; the
+/// host's late `Paired` is discarded without a second `Abort` (U-5).
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 5"]
+fn the_pairing_deadline_aborts_and_a_late_paired_is_discarded() {
+    let mut g = Guest::new();
+    g.open_session();
+    let s = g.io.app_send(cookie(1), dest(1)).unwrap();
+    let started = g.now();
+    let a = g.associate(s);
+    g.advance_to(started + FLOW_PAIRING_DEADLINE);
+    assert_eq!(g.io.take_outbox(), vec![ControlMessage::Abort { flow: a }]);
+    let obs = g.obs();
+    assert!(obs.slots[&s].association.is_none());
+    assert!(obs.slots[&s].owner.is_some(), "the slot is kept");
+    g.io.host_control(ControlMessage::Paired { flow: a });
+    g.settle();
+    assert!(g.io.outbox().is_empty(), "no second Abort");
+    assert!(g.obs().slots[&s].attached.is_none());
+}
+
+/// SLOT-ABORT: the socket closes and its slot is released before the host's
+/// `Paired` arrives; the late `Paired` is answered with `Abort` and attached
+/// nowhere.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 5"]
 fn a_late_paired_for_a_released_slot_is_answered_with_abort() {
     let mut g = Guest::new();
     g.open_session();
-    let k = sim_cookie(17);
-    let released = g.io.app_send(k, dest(1)).expect("slot");
-    let late = g.associate(released);
-    let live_k = sim_cookie(18);
-    let live = g.io.app_send(live_k, dest(1)).expect("slot");
-    let live_flow = g.associate(live);
-    g.io.app_close_socket(k, true);
-    g.io.release_socket_report(k);
-    g.run_released();
-    assert_eq!(g.obs().slots[&released].owner, None);
-    let _ = g.io.take_outbox();
-    g.io.clear_effects();
-
-    g.io.host_control(ControlMessage::Paired { flow: late });
-    g.run_released();
-    assert_eq!(g.io.take_outbox(), vec![ControlMessage::Abort { flow: late }]);
-    assert!(
-        position(&g.io.effects(), |e| matches!(e, SimGuestEffect::RouteSlot { .. })).is_none(),
-        "routes nothing"
-    );
-
-    for message in [
-        ControlMessage::Refused { flow: late, refusal: FlowRefusal::Policy },
-        ControlMessage::Abort { flow: late },
-    ] {
-        g.io.host_control(message);
-        g.run_released();
-        assert!(g.io.take_outbox().is_empty(), "{message:?} discarded, no reply");
-    }
-
-    g.pair_slot(live_flow);
-    assert!(g.obs().slots[&live].routed, "a live association is routed normally");
-    assert!(
-        position(
-            &g.io.effects(),
-            |e| matches!(e, SimGuestEffect::RouteSlot { slot } if *slot == live)
-        )
-        .is_some()
-    );
+    let s = g.io.app_send(cookie(1), dest(1)).unwrap();
+    let a = g.associate(s);
+    g.io.app_close_socket(cookie(1), true);
+    g.io.release_socket_report(cookie(1));
+    g.settle();
+    g.io.host_control(ControlMessage::Paired { flow: a });
+    g.settle();
+    assert_eq!(g.io.take_outbox(), vec![ControlMessage::Abort { flow: a }]);
+    assert!(g.obs().slots.values().all(|x| x.attached.is_none()));
+    assert_eq!(g.io.forwarder_inventory().map(|i| i.attached), Some(0));
 }
 
-/// P3-S10 (D25 exhaustion, host part): with every slot owned the capture
-/// program refuses a new destination (`EPERM`); existing associations are
-/// unaffected; once the owner releases a socket's slot, a new destination
-/// claims it.
+/// R5-27 (guest side): a destination refused every time — each later send
+/// causes at most one association attempt per pairing round trip, also under
+/// a 500-send burst: while an attempt is pending no further request is
+/// written; each `Refused` discards the queue; only the next datagram after
+/// it starts the next attempt.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER vsock new-step 5 (guest adaptation in overdrive-init)"]
-fn exhaustion_refuses_a_new_destination_and_leaves_existing_associations() {
+#[ignore = "pending DELIVER step 5"]
+fn a_refused_destination_gets_at_most_one_attempt_per_round_trip_under_a_burst() {
     let mut g = Guest::new();
     g.open_session();
-    let a = sim_cookie(30);
-    let b = sim_cookie(31);
-    let first = g.io.app_send(a, dest(0)).expect("slot");
-    let fa = g.associate(first);
-    for i in 1..GUEST_UDP_SLOTS {
-        g.io.app_send(b, dest(i)).expect("slot");
+    let s = g.io.app_send(cookie(1), dest(1)).unwrap();
+    for round in 1..=3 {
+        let a = g.associate(s);
+        for _ in 0..500 {
+            g.io.app_send(cookie(1), dest(1));
+        }
+        g.settle();
+        assert_eq!(g.io.requests().len(), round, "round {round}: one attempt while it is pending");
+        g.io.host_control(ControlMessage::Refused { flow: a, refusal: FlowRefusal::Policy });
+        g.settle();
+        assert!(
+            !g.io.guest_socket_observation().parked.contains_key(&s),
+            "round {round}: the queue is discarded"
+        );
+        assert!(
+            g.io.guest_socket_observation().readiness.is_empty(),
+            "round {round}: no retry without a new datagram"
+        );
+        g.io.app_send(cookie(1), dest(1));
     }
-    let before = g.obs();
-    assert_eq!(
-        g.io.app_send(b, dest(60_000)),
-        Err(ErrorKind::PermissionDenied),
-        "the 1,025th destination"
-    );
-    assert_eq!(g.io.exhausted_sends(), 1);
-    assert_eq!(g.obs(), before, "existing associations unaffected");
-    assert_eq!(before.slots[&first].association, Some(fa));
-
-    g.io.app_close_socket(a, true);
-    g.io.release_socket_report(a);
-    g.run_released();
-    assert_eq!(g.io.app_send(b, dest(60_000)), Ok(first), "the released slot is claimable again");
+    assert_eq!(g.obs().slots[&s].owner, Some((cookie(1), dest(1))), "the slot is kept throughout");
 }

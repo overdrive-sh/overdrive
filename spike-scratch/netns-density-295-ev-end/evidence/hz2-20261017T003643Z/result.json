@@ -1,0 +1,18 @@
+{
+ "qemu_exit": 0,
+ "host_done": false,
+ "elapsed_s": 500.029415845871,
+ "scenarios": [
+  "clean-g-first:100",
+  "clean-fullend-0x2-0x3-hostlag:100",
+  "clean-fullend-0x2-0x3-guestlag:100",
+  "guest-abort-0x2then0x3-hostdir-open:100",
+  "guest-abort-direct0x3-hostdir-closed:100",
+  "host-abort-0x2then0x3-guestdir-open:100",
+  "g-rst-both-dirs:100"
+ ],
+ "hazard_host": 2,
+ "hazard_guest": 2,
+ "physical_module_names_unchanged": true,
+ "module_on_physical_host": []
+}

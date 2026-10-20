@@ -394,9 +394,13 @@ pub async fn workload_event_from_lifecycle(
                 _ => 1,
             };
             let target = TargetResource::new(&format!("workload/{workload_id}")).ok();
-            let (attempt_index, will_restart) = target
-                .as_ref()
-                .map_or((1, true), |t| runtime.restart_status_for_alloc(t, &event.alloc_id));
+            let attempt_index =
+                target.as_ref().map_or(1, |t| runtime.attempt_index_for_alloc(t, &event.alloc_id));
+            // SCAFFOLD: true — netns-density-295 DISTILL (DELIVER step 0,
+            // RESTART-SSOT, GH #324): today's value, kept until step 0 calls
+            // `restart_status_for_alloc(target, WorkloadKind::Job, run_desired,
+            // row, generation)` here (regression obligation 5 pins the fixed one).
+            let will_restart = attempt_index < overdrive_reconcilers::RESTART_BACKOFF_CEILING;
             let next_attempt_delay = if will_restart {
                 Some(format!(
                     "{}ms",
@@ -436,7 +440,7 @@ async fn workload_event_from_terminal(
     let stderr_tail = row.as_ref().and_then(|r| r.stderr_tail.clone());
     let target = TargetResource::new(&format!("workload/{workload_id}")).ok();
     let attempt_index =
-        target.as_ref().map_or(1, |t| runtime.restart_status_for_alloc(t, &event.alloc_id).0);
+        target.as_ref().map_or(1, |t| runtime.attempt_index_for_alloc(t, &event.alloc_id));
     match cond {
         TerminalCondition::Completed { exit_code } => JobSubmitEvent::Succeeded {
             exit_code: *exit_code,
@@ -490,7 +494,7 @@ async fn workload_terminal_from_snapshot(
     let stderr_tail = latest.stderr_tail.clone();
     let target = TargetResource::new(&format!("workload/{workload_id}")).ok();
     let attempt_index =
-        target.as_ref().map_or(1, |t| runtime.restart_status_for_alloc(t, &latest.alloc_id).0);
+        target.as_ref().map_or(1, |t| runtime.attempt_index_for_alloc(t, &latest.alloc_id));
     Some(match cond {
         TerminalCondition::Completed { exit_code } => {
             JobSubmitEvent::Succeeded { exit_code: *exit_code, duration, attempts: attempt_index }
@@ -542,7 +546,7 @@ async fn best_effort_attempt_count(
         .max_by_key(|r| r.updated_at.counter);
     latest.map_or(1, |row| {
         let target = TargetResource::new(&format!("workload/{workload_id}")).ok();
-        target.as_ref().map_or(1, |t| runtime.restart_status_for_alloc(t, &row.alloc_id).0)
+        target.as_ref().map_or(1, |t| runtime.attempt_index_for_alloc(t, &row.alloc_id))
     })
 }
 

@@ -22,17 +22,16 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use bytes::Bytes;
+use overdrive_control_plane::ServerHandle;
 use overdrive_control_plane::api::{
     ErrorBody, IdempotencyOutcome, SubmitWorkloadRequest, SubmitWorkloadResponse,
 };
-use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{
     DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput, VmInput,
 };
 use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::intent_store::IntentStore;
-use overdrive_host::RealCgroupFs;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 
@@ -90,39 +89,8 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
     let operator_config_dir = operator_config_dir_under(tmp.path());
     std::fs::create_dir_all(&data_dir).expect("create data dir");
     std::fs::create_dir_all(&operator_config_dir).expect("create operator config dir");
-    let config = ServerConfig {
-        bind: "127.0.0.1:0".parse().expect("parse bind addr"),
-        data_dir,
-        operator_config_dir: operator_config_dir.clone(),
-        // `tick_cadence` and `clock` default to
-        // `DEFAULT_TICK_CADENCE` (100ms) and `Arc::new(SystemClock)`.
-        // Per `fix-convergence-loop-not-spawned` Step 01-02: the
-        // production server now spawns a convergence-tick loop. This
-        // test does not assert on convergence outcomes — its
-        // assertions ride on the IntentStore round-trip through the
-        // submit_workload handler — and shutdown ordering in
-        // `ServerHandle::shutdown` cancels the convergence task
-        // before axum graceful so any in-flight ticks land cleanly.
-        dataplane_override: Some(std::sync::Arc::new(
-            overdrive_sim::adapters::dataplane::SimDataplane::new(),
-        )),
-        // ADR-0061 § 1 (step 01-03): the default `ServerConfig.dataplane`
-        // is now the veth-named single-node shape, whose `client_iface`
-        // (`ovd-veth-cli`) does not exist in the test VM. This fixture
-        // injects `SimDataplane` (no XDP attach) but still resolves
-        // `host_ipv4` from `client_iface` at boot, so it names `lo` via
-        // the shared SSOT helper.
-        dataplane: Some(super::dataplane_lo::lo_dataplane_config()),
-        // Step 02-02 (C1-AMEND) — hermetic in-process boot KEK so `boot_ca`'s
-        // KEK-resolve probe succeeds with no kernel-keyring / env dependency.
-        ..ServerConfig::new(
-            std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-            std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
-            std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
-        )
-    };
-    let handle =
-        run_server(config, std::sync::Arc::new(RealCgroupFs::new())).await.expect("run_server");
+    let config = super::node_adapters::test_config(data_dir, operator_config_dir.clone());
+    let handle = super::node_adapters::boot(config).await.expect("run_server");
     let bound = handle.local_addr().await.expect("bound addr");
     let ca_pem = read_ca_from_trust_triple(&operator_config_dir);
     (handle, bound, tmp, ca_pem)

@@ -1,0 +1,16 @@
+{
+ "guest_kernel": "b51367c7dab2f3824ca811c7e33b7f6bb0ddc8122b48248335ba6164de8d9682",
+ "initramfs": "2133b5016280dbeb773a93312da3d47d2acc0b179b4ac8dd8eaad4c318d777b3",
+ "ctltest": "d78948e418bb2b1911bc02b9f90b56a83c1ee9d25b8d90adcc6ee34759410919",
+ "ovd_fwd.ko": "9c470fb863f742631dd6ce9e5b3f2cd58fc964ed22a811837152bb34067b0ceb",
+ "cloud_hypervisor": "eadddf1bbcdcb1901a82f76bb827e387e49d9e40a308ab9846806668b90989b6",
+ "guest_modules": {
+  "vsock.ko": "a765eca13b720c56",
+  "vmw_vsock_virtio_transport_common.ko": "f5a156b5d6511018",
+  "vmw_vsock_virtio_transport.ko": "ac514e7e11bee436",
+  "vsock_loopback.ko": "570fa4458def7740",
+  "vsock_diag.ko": "9e4dbf051e880bda",
+  "tls.ko": "fdd1dc6696b5b7bb",
+  "aesni-intel.ko": "64d2fa8721f74e5a"
+ }
+}

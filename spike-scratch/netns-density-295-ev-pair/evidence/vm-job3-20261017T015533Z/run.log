@@ -1,0 +1,22 @@
+[01:55:33] === preflight (fail closed)
+[01:55:33] substrate: {"host_uname_r": "7.0.0-38-generic", "machine": "x86_64", "systemd_detect_virt": "none", "cpu": "AMD EPYC 8024P 8-Core Processor", "nproc": 16}
+[01:55:33] === guest image
+[01:55:33] image pins: {"guest_kernel": "b51367c7dab2", "initramfs": "136e97e040b8", "pairprobe": "d66e8b4c8e20", "ovdpair.ko": "b3eb9f4fb169", "cloud_hypervisor": "eadddf1bbcdc"}
+[01:55:33] modules: ['vsock.ko', 'vmw_vsock_virtio_transport_common.ko', 'vmw_vsock_virtio_transport.ko', 'vsock_loopback.ko']
+[01:55:33] host peer ready (userspace only)
+[01:55:33] launch VM: /var/tmp/ev-pair-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /var/tmp/ev-pair-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=0 loglevel=4 log_buf_len=16M --cpus boot=4 --memory size=1536M --serial file=/var/tmp/ev-pair-work/out/vm-20261017T015533Z/serial.log --console off --vsock cid=3371,backend=vhost-kernel --log-file /var/tmp/ev-pair-work/out/vm-20261017T015533Z/ch.log -v
+[02:02:41] VM status=done wall=428s
+[02:02:43] RESULT {"status": "done", "wall_s": 428, "host_uname_r": "7.0.0-38-generic", "guest_uname_r": "7.0.0-29-generic", "physical_module_names_unchanged": true, "physical_ovdpair_loaded": false, "runs": 11, "fault_lines": [], "probe_results": ["{\"abi\":1,\"permanent_flag\":1,\"delete_module_rc\":-1,\"delete_module_errno\":16,\"record_size\":32}"]}
+[02:02:43]   run 501 G-vhost eg-wf lanes=1x10000: ok 10000/10000 reasons={} wall=53.2s
+[02:02:43]   run 502 G-vhost eg-sf lanes=1x10000: ok 10000/10000 reasons={} wall=54.9s
+[02:02:43]   run 503 G-vhost eg-sffin lanes=1x10000: ok 10000/10000 reasons={} wall=54.7s
+[02:02:43]   run 504 G-vhost eg-nofin lanes=1x10000: ok 10000/10000 reasons={} wall=53.2s
+[02:02:43]   run 505 G-vhost in-sf lanes=1x10000: ok 10000/10000 reasons={} wall=45.7s
+[02:02:43]   run 506 G-vhost in-sffin lanes=1x10000: ok 10000/10000 reasons={} wall=43.2s
+[02:02:43]   run 507 G-vhost in-cf lanes=1x10000: ok 9999/10000 reasons={'verify/go-pair-aborted': 1} wall=50.9s
+[02:02:43]   run 508 G-vhost in-cfearly lanes=1x10000: ok 10000/10000 reasons={} wall=42.9s
+[02:02:43]   run 509 G-vhost eg-rst lanes=1x2000: ok 2000/2000 reasons={} wall=15.6s
+[02:02:43]   run 601 G-vhost eg-wf lanes=8x1250: ok 10000/10000 reasons={} wall=6.7s
+[02:02:43]   run 602 G-vhost in-cfearly lanes=8x1250: ok 10000/10000 reasons={} wall=5.7s
+[02:02:43] PEER {"peer_runs":[{"run":601,"shape":"eg-wf","seed":601,"trials":10000,"ok":10000,"fail":0,"reasons":{},"first_failures":[]},{"run":602,"shape":"in-cfearly","seed":602,"trials":10000,"ok":10000,"fail":0,"reasons":{},"first_failures":[]},{"run":501,"shape":"eg-wf","seed":501,"trials":10000,"ok":10000,"fail":0,"reasons":{},"first_failures":[]},{"run":502,"shape":"eg-sf","seed":502,"trials":10000,"ok":10000,"fail":0,"reasons":{},"first_failures":[]},{"run":503,"shape":"eg-sffin","seed":503,"trials":10000,"ok":10000,"fail":0,"reasons":{},"first_failures":[]},{"run":504,"shape":"eg-nofin","seed":504,"trials":10000,"ok":10000,"fail":0,"reasons":{},"first_failures":[]},{"run":505,"shape":"in-sf","seed":505,"trials":10000,"ok":10000,"fail":0,"reasons":{},"first_failures":[]},{"run":506,"shape":"in-sffin","seed":506,"trials":10000,"ok":10000,"fail":0,"reasons":{},"first_failures":[]},{"run":507,"shape":"in-cf","seed":507,"trials":10000,"ok":10000,"fail":0,"reasons":{},"first_failures":[]},{"run":508,"shape":"in-cfearly","seed":508,"trials":10000,"ok":10000,"fail":0,"reasons":{},"first_failures":[]},{"run":509,"shape":"eg-rst","seed":509,"trials":2000,"ok":2000,"fail":0,"reasons":{},"first_failures":[]}]}
+[02:02:43] evidence dir: /var/tmp/ev-pair-work/evidence/vm-job3-20261017T015533Z

@@ -1327,6 +1327,22 @@ port.
 
 ### D8 — the `Vmm` fault-injection seam: `ServerConfig.vmm_override`, and the boundary it does NOT reach
 
+> **Amended 2026-10-19 (GH #295, user ruling NO-OVERRIDE-SEAMS;
+> ADR-0219).** The `ServerConfig` override field described below is
+> removed. `run_server` instead takes the VMM, the beacon intake's port and
+> the `CgroupAccounting` adapter (probed beside the VMM, below) as required
+> parameters in its driven-adapters bundle, built by the composition root:
+> `overdrive serve` passes `CloudHypervisorVmm`, `VsockBeaconIo` and
+> `RealCgroupAccounting`; a test passes `SimVmm` and `SimBeaconIo` (and
+> the accounting adapter it chooses). What the
+> override's presence used to decide — a failed probe refuses boot rather
+> than leaving the node without a `Vm` driver — is now stated explicitly by
+> the composition root (`VmCapability::Required` versus `Optional`;
+> `overdrive serve` passes `Optional`, today's production behaviour). The
+> probe still runs unconditionally against whichever adapter is passed. The
+> rest of this section is retained as the decision's history; the contract
+> is § *[REF] Composition* of the #295 feature delta.
+
 > **Added 2026-08-11, gap-closure amendment.** § D2's composition-root
 > snippet named no override seam, but `brief.md` § 100 already asserted
 > *"`SimVmm` is the injection point for Slice 03's fail-closed confinement

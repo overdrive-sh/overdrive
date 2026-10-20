@@ -1,0 +1,67 @@
+GUEST_BOOT uname_r=7.0.0-29-generic suite=misc arg=strict modparams=strict_established=1
+GUEST_MODULES:
+ovd_fwd 36864 0 [permanent], Live 0xffffffffc0636000 (OE)
+aesni_intel 98304 0 - Live 0xffffffffc0626000
+tls 163840 0 - Live 0xffffffffc0612000
+vsock_diag 12288 0 - Live 0xffffffffc0610000
+vsock_loopback 12288 0 - Live 0xffffffffc0607000
+vmw_vsock_virtio_transport 20480 0 - Live 0xffffffffc060c000
+vmw_vsock_virtio_transport_common 57344 2 vsock_loopback,vmw_vsock_virtio_transport, Live 0xffffffffc0608000
+vsock 73728 4 vsock_diag,vsock_loopback,vmw_vsock_virtio_transport,vmw_vsock_virtio_transport_common, Live 0xffffffffc0600000
+crw-------    1 0        0          10, 263 Oct 17 01:02 /dev/ovd_fwd
+CTLTEST suite=misc strict=1
+CHECK PASS version :: abi 1, PERMANENT flag
+CHECK PASS device is a root-owned 0600 character device :: mode 600 uid 0
+CHECK PASS end record layout is the pinned 32-byte layout :: sizeof=32
+CHECK PASS unknown ioctl is ENOTTY :: ENOTTY
+CHECK PASS bad user pointer is EFAULT :: EFAULT
+CHECK PASS read of a buffer shorter than one record is EINVAL :: EINVAL
+CHECK PASS read with no record is EAGAIN (non-blocking) :: EAGAIN
+CHECK PASS poll: not readable while no record is queued :: 
+CHECK PASS pair_state of a live pair :: r=OK src_end=0/0 moved=0/0
+CHECK PASS ABORT of a live id returns 0 :: OK
+CHECK PASS Detached record is already queued when ABORT returns :: records=1 kind=2 cause=4
+CHECK PASS poll: not readable once drained :: 
+CHECK PASS ABORT of an id whose record was read is ENOENT :: ENOENT
+CHECK PASS ABORT reset the far TCP end :: 
+CHECK PASS pair_state of an ended id is ENOENT :: 
+CHECK PASS poll: EPOLLIN when a record is queued (clean completion) :: poll=1
+CHECK PASS completed pair: kind 1, cause 0 :: kind=1 cause=0 moved=0/0
+CHECK PASS blocking read waits for the record :: read=32 after 301 ms
+CHECK PASS read(100) returns 3 whole records, oldest first :: n=96
+CHECK PASS the rest, in order :: n=224
+CHECK PASS ABORT_ALL with nothing live returns 0 :: n=0
+CHECK PASS ABORT_ALL returns the number aborted :: n=5
+CHECK PASS ABORT_ALL: five Detached records queued before it returns :: queued=5 live=0
+CHECK PASS ctx2 cannot abort ctx1's id :: ctx1 id 18, ctx2 id 1
+CHECK PASS and ctx1's pair is untouched :: live_pairs=1
+CHECK PASS releasing one context leaves the other's pair running :: live_pairs=1
+CHECK PASS watch on a vsock whose peer already half-closed queues the record at once :: watch=OK read=1 kind=3
+CHECK PASS holder close() alone does not end a watch and the far end sees nothing :: live_watches=1 (the owner must ABORT the id when it drops the stream)
+CHECK PASS ABORT ends it :: OK
+CHECK PASS Detached watch record :: kind=4 cause=4
+DATA after ABORT of a watch whose holder had closed: far end poll=1 revents=0x1 (the vsock stays open until the module's reference is dropped)
+CHECK PASS after ABORT of a watch the holder's socket still carries data (spike choice; the contract does not say) :: send=2 recv=2
+CHECK PASS STRICT module refuses the early-FIN TCP half (ENOTCONN) :: ENOTCONN
+CHECK PASS TCP reset -> Aborted(SocketError, side B, ECONNRESET) :: kind=2 cause=2 side=1 err=104
+CHECK PASS vsock 0x3 -> Aborted(PeerAbort, side A) :: kind=2 cause=1 side=0
+CHECK PASS and the TCP far end was reset :: 
+DATA final inventory: live 0/0 queued 0 attached=20 watched=3 completed=1 half_closed=1 aborted peer=1 sockerr=2 detached=18 unclassified=0
+DATA audit[end] ctx_open=3 ctx_rel=2 ctx_free=2 pair_new=25 pair_free=25 rec_new=25 rec_queued=24 rec_read=24 rec_discard=1 rec_free_unread=0 rel_won=1 live=0 bytes=0
+CHECK PASS no kernel oops/warn :: dmesg scan
+RESULT suite=misc pass=36 fail=0
+SUITE_DONE suite=misc rc=0
+[    0.037666] rcu: Preemptible hierarchical RCU implementation.
+[    0.037667] rcu: 	RCU restricting CPUs from NR_CPUS=8192 to nr_cpu_ids=4.
+[    0.037669] 	Trampoline variant of Tasks RCU enabled.
+[    0.037669] 	Rude variant of Tasks RCU enabled.
+[    0.037670] 	Tracing variant of Tasks RCU enabled.
+[    0.037671] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.037679] RCU Tasks: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.037681] RCU Tasks Rude: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.046485] rcu: Hierarchical SRCU implementation.
+[    0.336704] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.336710] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+[    0.337350] ovd_fwd: loaded (spike, permanent: no module_exit)
+GUEST_END
+[    1.436366] reboot: Power down

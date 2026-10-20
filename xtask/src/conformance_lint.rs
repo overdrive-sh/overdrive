@@ -48,6 +48,17 @@
 //! the line immediately above it. The marker suppresses `sim-in-projection`
 //! on that line only, requires a non-empty reason, and counts the read as an
 //! owner-side observation for `projection-without-owner-accessor`.
+//!
+//! For `projection-without-owner-accessor`, a driver field holds the owner
+//! only when its type is a *recognised production type*: a path rooted at an
+//! `overdrive_*` crate (not `overdrive_sim` / `overdrive_testing`) or, for a
+//! driver in a crate's `src/`, at `crate` / `super`, with no test-support
+//! segment (`*test*`, `*fixture*`, `*support*`, `sim`, `quint*`, …), held
+//! directly or behind `Arc` / `Box` / `Mutex` and the like. `Option<T>` is
+//! always bookkeeping. A struct declared in the driver file is followed
+//! through its fields and inherent methods but is never an owner itself.
+//! Anything else — a `tokio` runtime, a temp dir, a fixture, a name the file
+//! does not import — is bookkeeping.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -125,7 +136,9 @@ impl ConformanceRule {
             }
             Self::ProjectionWithoutOwnerAccessor => {
                 "State must be read through the accessors the design pins on the production \
-                 owner, not from the driver's own maps, counters or literals"
+                 owner, held directly in a driver field of its production type (an `overdrive_*` \
+                 or in-crate type, optionally in `Arc`/`Box`/`Mutex`); never from the driver's \
+                 own maps, counters, literals, `Option`s or test fixtures"
             }
             Self::SpecWithoutQuintConnect => {
                 "the only conformance mechanism is quint-connect trace replay of a stateful spec; \
@@ -188,8 +201,9 @@ pub fn scan_source(source: &str, file: impl AsRef<Path>) -> Result<Vec<Conforman
 
     let mut items = ItemCollector::default();
     items.visit_file(&parsed);
+    let scope = TypeScope::new(&report.file, &items.uses, &items.structs);
     let structs: BTreeMap<String, FieldMap> =
-        items.structs.iter().map(|item| (item.ident.to_string(), field_map(item))).collect();
+        items.structs.iter().map(|item| (item.ident.to_string(), scope.field_map(item))).collect();
     let mut inherent: MethodsByType<'_> = BTreeMap::new();
     for item in items.impls.iter().filter(|item| item.trait_.is_none()) {
         let Some(type_name) = self_type_name(item) else { continue };
@@ -307,18 +321,14 @@ fn check_projection(
     report: &mut Reporter,
 ) {
     let Some((param, driver_type)) = driver_param(method) else { return };
-    let empty_fields = FieldMap::new();
-    let empty_methods = BTreeMap::new();
-    let fields = driver_type.as_ref().and_then(|t| structs.get(t)).unwrap_or(&empty_fields);
-    let methods = driver_type.as_ref().and_then(|t| inherent.get(t)).unwrap_or(&empty_methods);
     let mut scan = ProjectionScan {
-        fields,
-        methods,
+        structs,
+        inherent,
         visited: BTreeSet::new(),
         sim_hits: Vec::new(),
         accessor_found: false,
     };
-    scan.scan_block(&method.block, &param);
+    scan.scan_block(&method.block, &param, driver_type.as_deref());
     for (span, what) in std::mem::take(&mut scan.sim_hits) {
         if has_arbiter_marker(source, span.start().line) {
             scan.accessor_found = true;
@@ -334,7 +344,9 @@ fn check_projection(
         report.push(
             method.sig.ident.span(),
             ConformanceRule::ProjectionWithoutOwnerAccessor,
-            "`from_driver` makes no call on a production owner field".to_owned(),
+            "`from_driver` makes no call on a field holding a recognised production type \
+             (an `Option`, a test fixture or an unresolved type is not one)"
+                .to_owned(),
         );
     }
 }
@@ -944,6 +956,7 @@ fn split_top_level(tokens: &TokenStream) -> Vec<TokenStream> {
 struct ItemCollector<'ast> {
     impls: Vec<&'ast ItemImpl>,
     structs: Vec<&'ast ItemStruct>,
+    uses: Vec<&'ast ItemUse>,
 }
 
 impl<'ast> Visit<'ast> for ItemCollector<'ast> {
@@ -955,6 +968,10 @@ impl<'ast> Visit<'ast> for ItemCollector<'ast> {
     fn visit_item_struct(&mut self, item: &'ast ItemStruct) {
         self.structs.push(item);
         syn::visit::visit_item_struct(self, item);
+    }
+
+    fn visit_item_use(&mut self, item: &'ast ItemUse) {
+        self.uses.push(item);
     }
 }
 
@@ -979,27 +996,190 @@ fn trait_name(item: &ItemImpl) -> Option<String> {
 }
 
 /// How a driver field is classified for the projection rule.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum FieldKind {
     /// The type names a `Sim*` adapter.
     Sim,
-    /// A std collection, primitive or wrapper of one: driver bookkeeping.
+    /// Driver bookkeeping: a std collection, primitive, `Option` of anything,
+    /// or any type that is not a recognised production type (test fixtures,
+    /// `tokio` runtimes, temp dirs, …).
     Bookkeeping,
-    /// Anything else: assumed to be (or contain) the production owner.
+    /// A recognised production type, held directly or behind a sharing/locking
+    /// wrapper (`Arc`, `Box`, `Mutex`, …).
     Owner,
+    /// A struct declared in the scanned file. It is not a production type
+    /// itself; a projection reaches the owner through its fields or methods.
+    Local(String),
 }
 
 type FieldMap = BTreeMap<String, FieldKind>;
 
-fn field_map(item: &ItemStruct) -> FieldMap {
-    let Fields::Named(named) = &item.fields else { return FieldMap::new() };
-    named
-        .named
-        .iter()
-        .filter_map(|field| {
-            field.ident.as_ref().map(|ident| (ident.to_string(), classify(&field.ty)))
-        })
-        .collect()
+/// Std types that are always driver bookkeeping.
+const BOOKKEEPING: &[&str] = &[
+    "BTreeMap", "BTreeSet", "HashMap", "HashSet", "Vec", "VecDeque", "String", "Option", "bool",
+    "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128", "isize", "f32",
+    "f64", "char",
+];
+
+/// Wrappers that share, box or lock a value: classified by what they wrap.
+const WRAPPERS: &[&str] = &["Arc", "Rc", "Box", "Mutex", "RwLock", "RefCell", "Cell"];
+
+/// Path segments that mark a module as test support rather than production:
+/// a type imported through one of these is a fixture, not the owner.
+fn is_test_support_segment(segment: &str) -> bool {
+    segment == "sim"
+        || segment.starts_with("sim_")
+        || segment.starts_with("quint")
+        || ["test", "fixture", "support", "mock", "fake"]
+            .iter()
+            .any(|marker| segment.contains(marker))
+}
+
+/// Where the type names a driver file uses come from.
+///
+/// A field counts as the production owner only when its type is a
+/// *recognised production type*: imported (or written) through a path rooted
+/// at an `overdrive_*` crate other than `overdrive_sim` / `overdrive_testing`,
+/// or — for a driver in a crate's `src/` — at `crate` / `super`, with no
+/// test-support segment on the way. An unqualified name that is not imported
+/// by name counts only when the file glob-imports nothing but production
+/// paths. Everything else (`tokio::runtime::Runtime`, `tempfile::TempDir`,
+/// a fixture from `…::test_support`, an unresolved name) is bookkeeping.
+struct TypeScope {
+    /// Unqualified name → the path it was imported from.
+    imports: BTreeMap<String, Vec<String>>,
+    production_glob: bool,
+    foreign_glob: bool,
+    /// The scanned file is in a crate's `src/`, where `crate`/`super` are
+    /// the production crate (not a test crate).
+    in_crate_src: bool,
+    /// Structs declared in the scanned file.
+    locals: BTreeSet<String>,
+}
+
+impl TypeScope {
+    fn new(file: &Path, uses: &[&ItemUse], structs: &[&ItemStruct]) -> Self {
+        let in_crate_src = file.components().any(|c| c.as_os_str() == "src")
+            && !file.components().any(|c| c.as_os_str() == "tests");
+        let mut scope = Self {
+            imports: BTreeMap::new(),
+            production_glob: false,
+            foreign_glob: false,
+            in_crate_src,
+            locals: structs.iter().map(|item| item.ident.to_string()).collect(),
+        };
+        for item in uses {
+            scope.walk(&item.tree, &mut Vec::new());
+        }
+        scope
+    }
+
+    fn walk(&mut self, tree: &UseTree, prefix: &mut Vec<String>) {
+        match tree {
+            UseTree::Path(path) => {
+                prefix.push(path.ident.to_string());
+                self.walk(&path.tree, prefix);
+                prefix.pop();
+            }
+            UseTree::Name(name) => {
+                let ident = name.ident.to_string();
+                if ident == "self" {
+                    if let Some(last) = prefix.last() {
+                        self.imports.insert(last.clone(), prefix.clone());
+                    }
+                } else {
+                    let mut full = prefix.clone();
+                    full.push(ident.clone());
+                    self.imports.insert(ident, full);
+                }
+            }
+            UseTree::Rename(rename) => {
+                let alias = rename.rename.to_string();
+                if alias != "_" {
+                    let mut full = prefix.clone();
+                    if rename.ident != "self" {
+                        full.push(rename.ident.to_string());
+                    }
+                    self.imports.insert(alias, full);
+                }
+            }
+            UseTree::Glob(_) => {
+                if self.is_production_path(prefix) {
+                    self.production_glob = true;
+                } else {
+                    self.foreign_glob = true;
+                }
+            }
+            UseTree::Group(group) => {
+                for item in &group.items {
+                    self.walk(item, prefix);
+                }
+            }
+        }
+    }
+
+    fn is_production_path(&self, segments: &[String]) -> bool {
+        let Some(root) = segments.first() else { return false };
+        let root_ok = (root.starts_with("overdrive_")
+            && root != "overdrive_sim"
+            && root != "overdrive_testing")
+            || (self.in_crate_src && (root == "crate" || root == "super"));
+        root_ok && !segments.iter().any(|segment| is_test_support_segment(segment))
+    }
+
+    fn classify(&self, ty: &Type) -> FieldKind {
+        if names_sim(ty) {
+            return FieldKind::Sim;
+        }
+        match ty {
+            Type::Reference(reference) => self.classify(&reference.elem),
+            Type::Paren(paren) => self.classify(&paren.elem),
+            Type::Path(path) => {
+                let Some(last) = path.path.segments.last() else {
+                    return FieldKind::Bookkeeping;
+                };
+                let name = last.ident.to_string();
+                if name == "Option" || BOOKKEEPING.contains(&name.as_str()) {
+                    // `Option<T>` is always bookkeeping: an owner held in one
+                    // may be absent, so the projection could read nothing.
+                    return FieldKind::Bookkeeping;
+                }
+                if WRAPPERS.contains(&name.as_str()) {
+                    return match &last.arguments {
+                        syn::PathArguments::AngleBracketed(args) => match args.args.first() {
+                            Some(syn::GenericArgument::Type(inner)) => self.classify(inner),
+                            _ => FieldKind::Bookkeeping,
+                        },
+                        _ => FieldKind::Bookkeeping,
+                    };
+                }
+                let segments: Vec<String> =
+                    path.path.segments.iter().map(|s| s.ident.to_string()).collect();
+                let production = if segments.len() > 1 {
+                    self.is_production_path(&segments)
+                } else if self.locals.contains(&name) {
+                    return FieldKind::Local(name);
+                } else if let Some(full) = self.imports.get(&name) {
+                    self.is_production_path(full)
+                } else {
+                    self.production_glob && !self.foreign_glob
+                };
+                if production { FieldKind::Owner } else { FieldKind::Bookkeeping }
+            }
+            _ => FieldKind::Bookkeeping,
+        }
+    }
+
+    fn field_map(&self, item: &ItemStruct) -> FieldMap {
+        let Fields::Named(named) = &item.fields else { return FieldMap::new() };
+        named
+            .named
+            .iter()
+            .filter_map(|field| {
+                field.ident.as_ref().map(|ident| (ident.to_string(), self.classify(&field.ty)))
+            })
+            .collect()
+    }
 }
 
 fn is_sim_ident(ident: &Ident) -> bool {
@@ -1007,7 +1187,7 @@ fn is_sim_ident(ident: &Ident) -> bool {
     name.strip_prefix("Sim").and_then(|rest| rest.chars().next()).is_some_and(char::is_uppercase)
 }
 
-fn classify(ty: &Type) -> FieldKind {
+fn names_sim(ty: &Type) -> bool {
     #[derive(Default)]
     struct SimFinder {
         found: bool,
@@ -1019,38 +1199,7 @@ fn classify(ty: &Type) -> FieldKind {
     }
     let mut finder = SimFinder::default();
     finder.visit_type(ty);
-    if finder.found {
-        return FieldKind::Sim;
-    }
-    if is_bookkeeping(ty) { FieldKind::Bookkeeping } else { FieldKind::Owner }
-}
-
-fn is_bookkeeping(ty: &Type) -> bool {
-    const WRAPPERS: &[&str] = &["Arc", "Rc", "Box", "Mutex", "RwLock", "RefCell", "Cell"];
-    const BOOKKEEPING: &[&str] = &[
-        "BTreeMap", "BTreeSet", "HashMap", "HashSet", "Vec", "VecDeque", "String", "Option",
-        "bool", "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128",
-        "isize", "f32", "f64", "char",
-    ];
-    match ty {
-        Type::Tuple(_) | Type::Array(_) | Type::Slice(_) => true,
-        Type::Reference(reference) => is_bookkeeping(&reference.elem),
-        Type::Paren(paren) => is_bookkeeping(&paren.elem),
-        Type::Path(path) => {
-            let Some(last) = path.path.segments.last() else { return false };
-            let name = last.ident.to_string();
-            if WRAPPERS.contains(&name.as_str()) {
-                if let syn::PathArguments::AngleBracketed(args) = &last.arguments
-                    && let Some(syn::GenericArgument::Type(inner)) = args.args.first()
-                {
-                    return is_bookkeeping(inner);
-                }
-                return false;
-            }
-            BOOKKEEPING.contains(&name.as_str())
-        }
-        _ => false,
-    }
+    finder.found
 }
 
 // ---------------------------------------------------------------------------
@@ -1205,51 +1354,94 @@ fn field_chain(expr: &Expr) -> Option<(String, Vec<String>)> {
     }
 }
 
-struct ProjectionScan<'a> {
-    fields: &'a FieldMap,
-    methods: &'a BTreeMap<String, &'a ImplItemFn>,
-    visited: BTreeSet<String>,
+struct ProjectionScan<'a, 'ast> {
+    structs: &'a BTreeMap<String, FieldMap>,
+    inherent: &'a MethodsByType<'ast>,
+    visited: BTreeSet<(String, String)>,
     sim_hits: Vec<(Span, String)>,
     accessor_found: bool,
 }
 
-impl ProjectionScan<'_> {
-    fn scan_block(&mut self, block: &Block, root: &str) {
-        let mut visitor = ProjectionVisitor { scan: self, root: root.to_owned() };
+impl ProjectionScan<'_, '_> {
+    fn scan_block(&mut self, block: &Block, root: &str, type_name: Option<&str>) {
+        let mut visitor = ProjectionVisitor {
+            scan: self,
+            root: root.to_owned(),
+            type_name: type_name.map(str::to_owned),
+        };
         visitor.visit_block(block);
     }
 
-    fn kind(&self, field: &str) -> FieldKind {
-        self.fields.get(field).copied().unwrap_or(FieldKind::Owner)
+    /// Follow an inherent method of a type declared in the file (once).
+    fn follow_method(&mut self, type_name: &str, method: &str) {
+        let Some(found) = self.inherent.get(type_name).and_then(|m| m.get(method)).copied() else {
+            return;
+        };
+        if self.visited.insert((type_name.to_owned(), method.to_owned())) {
+            self.scan_block(&found.block, "self", Some(type_name));
+        }
+    }
+
+    /// The kind of `field` on `type_name`; an unknown type or field is not an
+    /// owner.
+    fn kind(&self, type_name: Option<&str>, field: &str) -> FieldKind {
+        type_name
+            .and_then(|name| self.structs.get(name))
+            .and_then(|fields| fields.get(field))
+            .cloned()
+            .unwrap_or(FieldKind::Bookkeeping)
     }
 }
 
-struct ProjectionVisitor<'s, 'a> {
-    scan: &'s mut ProjectionScan<'a>,
+/// Where a driver-rooted field chain ends.
+enum ChainEnd {
+    /// Not a chain rooted at the projection root.
+    NotChain,
+    /// Fully classified.
+    Done,
+    /// Ends at a value of a struct declared in the file.
+    Local(String),
+}
+
+struct ProjectionVisitor<'s, 'a, 'ast> {
+    scan: &'s mut ProjectionScan<'a, 'ast>,
     root: String,
+    type_name: Option<String>,
 }
 
-impl ProjectionVisitor<'_, '_> {
-    /// Classify a field chain rooted at the driver. Returns `true` when the
-    /// expression was a driver-rooted chain (and is fully handled).
-    fn classify_chain(&mut self, expr: &Expr, via_call: bool) -> bool {
-        let Some((root, chain)) = field_chain(expr) else { return false };
+impl ProjectionVisitor<'_, '_, '_> {
+    /// Classify a field chain rooted at the projection root, descending
+    /// through structs declared in the file.
+    fn classify_chain(&mut self, expr: &Expr, via_call: bool) -> ChainEnd {
+        let Some((root, chain)) = field_chain(expr) else { return ChainEnd::NotChain };
         if root != self.root {
-            return false;
+            return ChainEnd::NotChain;
         }
-        let Some(first) = chain.first() else { return true };
-        match self.scan.kind(first) {
-            FieldKind::Sim => {
-                self.scan.sim_hits.push((expr.span(), format!("field `{first}`")));
+        let mut type_name = self.type_name.clone();
+        for (index, field) in chain.iter().enumerate() {
+            match self.scan.kind(type_name.as_deref(), field) {
+                FieldKind::Sim => {
+                    self.scan.sim_hits.push((expr.span(), format!("field `{field}`")));
+                    return ChainEnd::Done;
+                }
+                FieldKind::Owner => {
+                    if via_call {
+                        self.scan.accessor_found = true;
+                    }
+                    return ChainEnd::Done;
+                }
+                FieldKind::Bookkeeping => return ChainEnd::Done,
+                FieldKind::Local(name) if index + 1 == chain.len() => {
+                    return ChainEnd::Local(name);
+                }
+                FieldKind::Local(name) => type_name = Some(name),
             }
-            FieldKind::Owner if via_call => self.scan.accessor_found = true,
-            FieldKind::Owner | FieldKind::Bookkeeping => {}
         }
-        true
+        ChainEnd::Done
     }
 }
 
-impl<'ast> Visit<'ast> for ProjectionVisitor<'_, '_> {
+impl<'ast> Visit<'ast> for ProjectionVisitor<'_, '_, '_> {
     fn visit_expr(&mut self, expr: &'ast Expr) {
         match expr {
             Expr::MethodCall(call) => {
@@ -1257,16 +1449,19 @@ impl<'ast> Visit<'ast> for ProjectionVisitor<'_, '_> {
                     &*call.receiver,
                     Expr::Path(path) if path.path.is_ident(self.root.as_str())
                 );
+                let method = call.method.to_string();
                 if receiver_is_root {
-                    // A method on the driver itself: follow its body (once).
-                    let name = call.method.to_string();
-                    if let Some(method) = self.scan.methods.get(&name).copied()
-                        && self.scan.visited.insert(name)
-                    {
-                        self.scan.scan_block(&method.block, "self");
+                    // A method on the root itself: follow its body.
+                    if let Some(type_name) = self.type_name.clone() {
+                        self.scan.follow_method(&type_name, &method);
                     }
-                } else if !self.classify_chain(&call.receiver, true) {
-                    self.visit_expr(&call.receiver);
+                } else {
+                    match self.classify_chain(&call.receiver, true) {
+                        ChainEnd::NotChain => self.visit_expr(&call.receiver),
+                        ChainEnd::Done => {}
+                        // A method on a struct declared in the file: follow it.
+                        ChainEnd::Local(type_name) => self.scan.follow_method(&type_name, &method),
+                    }
                 }
                 for arg in &call.args {
                     self.visit_expr(arg);
@@ -1275,13 +1470,13 @@ impl<'ast> Visit<'ast> for ProjectionVisitor<'_, '_> {
             Expr::Call(call) => {
                 self.visit_expr(&call.func);
                 for arg in &call.args {
-                    if !self.classify_chain(arg, true) {
+                    if matches!(self.classify_chain(arg, true), ChainEnd::NotChain) {
                         self.visit_expr(arg);
                     }
                 }
             }
             Expr::Field(_) => {
-                if !self.classify_chain(expr, false) {
+                if matches!(self.classify_chain(expr, false), ChainEnd::NotChain) {
                     syn::visit::visit_expr(self, expr);
                 }
             }
@@ -1394,6 +1589,7 @@ impl Driver for LeaseDriver {
     const HEALTHY: &str = r#"
 #![cfg(feature = "integration-tests")]
 use std::sync::Arc;
+use overdrive_control_plane::guest_network::GuestAddressPool;
 use quint_connect::{Driver, Result, State, Step, quint_run, switch};
 
 struct LeaseState { lease: Vec<u32>, cursor: u32, kern: Vec<u32> }
@@ -1476,6 +1672,7 @@ fn always_true() {}
     #[test]
     fn unmarked_or_reasonless_sim_read_trips_and_marker_covers_only_its_line() {
         let src = r"
+use overdrive_core::Owner;
 impl State<D> for S {
     fn from_driver(driver: &D) -> Result<Self> {
         let a = driver.owner.view();
@@ -1494,7 +1691,7 @@ struct D { owner: Owner, sim: SimThing }
                 .filter(|(_, r)| *r == ConformanceRule::SimInProjection)
                 .map(|(l, _)| *l)
                 .collect::<Vec<_>>(),
-            vec![6, 7],
+            vec![7, 8],
             "{found:?}"
         );
         assert_eq!(count(&found, ConformanceRule::ProjectionWithoutOwnerAccessor), 0);
@@ -1503,6 +1700,7 @@ struct D { owner: Owner, sim: SimThing }
     #[test]
     fn projection_through_driver_helper_that_reads_owner_passes() {
         let src = r"
+use overdrive_core::Pool;
 impl State<D> for S {
     fn from_driver(driver: &D) -> Result<Self> { Ok(S { x: driver.observe() }) }
 }
@@ -1511,6 +1709,7 @@ impl D { fn observe(&self) -> u32 { self.pool.cursor() } }
 ";
         assert!(rules(src).is_empty());
         let bookkeeping_only = r"
+use overdrive_core::Pool;
 impl State<D> for S {
     fn from_driver(driver: &D) -> Result<Self> { Ok(S { x: driver.observe(), y: driver.seen.len() }) }
 }
@@ -1519,7 +1718,167 @@ impl D { fn observe(&self) -> u32 { self.seen.clone().len() as u32 } }
 ";
         assert_eq!(
             rules(bookkeeping_only),
-            vec![(3, ConformanceRule::ProjectionWithoutOwnerAccessor)]
+            vec![(4, ConformanceRule::ProjectionWithoutOwnerAccessor)]
+        );
+    }
+
+    fn rules_at(source: &str, file: &str) -> Vec<(usize, ConformanceRule)> {
+        scan_source(source, file)
+            .expect("fixture parses")
+            .into_iter()
+            .map(|v| (v.line, v.rule))
+            .collect()
+    }
+
+    /// A driver whose only projection is `driver.f.view()` over a field `f`
+    /// of type `ty`, with `uses` as the file's imports.
+    fn single_field_driver(uses: &str, ty: &str) -> String {
+        format!(
+            "{uses}
+impl State<D> for S {{
+    fn from_driver(driver: &D) -> Result<Self> {{ Ok(S {{ x: driver.f.view() }}) }}
+}}
+struct D {{ f: {ty} }}
+"
+        )
+    }
+
+    #[test]
+    fn an_owner_type_held_directly_or_behind_a_wrapper_passes() {
+        let uses = "use overdrive_control_plane::guest_network::GuestNetwork;";
+        for ty in [
+            "GuestNetwork",
+            "Arc<GuestNetwork>",
+            "Arc<Mutex<GuestNetwork>>",
+            "Box<GuestNetwork>",
+            "&'static GuestNetwork",
+            "overdrive_worker::VmDriver",
+        ] {
+            let src = single_field_driver(uses, ty);
+            assert!(rules(&src).is_empty(), "{ty}: {:?}", rules(&src));
+        }
+        // In a crate's `src/`, `crate::` / `super::` paths are the production crate.
+        for (uses, ty) in [
+            ("use super::GuestNetwork;", "GuestNetwork"),
+            ("use crate::guest_network::{GuestAddressPool as Pool};", "Pool"),
+            ("use super::*;", "GuestNetwork"),
+            ("", "crate::AppState"),
+        ] {
+            let src = single_field_driver(uses, ty);
+            let found = rules_at(&src, "crates/owner/src/guest_network/quint_x.rs");
+            assert!(found.is_empty(), "{uses} {ty}: {found:?}");
+        }
+    }
+
+    #[test]
+    fn an_option_is_bookkeeping_whatever_it_holds() {
+        let uses = "use overdrive_control_plane::guest_network::GuestNetwork;";
+        for ty in [
+            "Option<GuestNetwork>",
+            "Option<Arc<GuestNetwork>>",
+            "Arc<Option<GuestNetwork>>",
+            "Mutex<Option<GuestNetwork>>",
+            "std::option::Option<GuestNetwork>",
+            "Option<Launch>",
+        ] {
+            let src = format!(
+                "{}struct Launch {{ owner: GuestNetwork }}\n",
+                single_field_driver(uses, ty)
+            );
+            assert_eq!(
+                rules(&src),
+                vec![(3, ConformanceRule::ProjectionWithoutOwnerAccessor)],
+                "{ty} must be bookkeeping"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unrecognised_field_type_is_not_an_owner() {
+        for (uses, ty, file) in [
+            ("use tokio::runtime::Runtime;", "Runtime", "fixture.rs"),
+            ("", "tokio::runtime::Runtime", "fixture.rs"),
+            ("use tempfile::TempDir;", "TempDir", "fixture.rs"),
+            ("", "std::path::PathBuf", "fixture.rs"),
+            // Not imported at all.
+            ("", "GuestNetwork", "fixture.rs"),
+            // A glob from a non-production path makes an unresolved name ambiguous.
+            ("use super::*; use tokio::runtime::*;", "Runtime", "crates/o/src/x.rs"),
+            // Test fixtures in the owning crate.
+            ("use super::test_support::GuestProcess;", "GuestProcess", "crates/o/src/x.rs"),
+            (
+                "use super::owner_acceptance::support::Composition;",
+                "Composition",
+                "crates/o/src/x.rs",
+            ),
+            ("use super::probe_count_fixture::ProbeWorld;", "ProbeWorld", "crates/o/src/x.rs"),
+            (
+                "use crate::shared_network_test_ports::composed::ComposedNode;",
+                "ComposedNode",
+                "crates/o/src/x.rs",
+            ),
+            ("use super::quint_itf::Qualified;", "Qualified", "crates/o/src/x.rs"),
+            // The sim / testing crates are never the owner.
+            ("use overdrive_sim::adapters::Recorder;", "Recorder", "fixture.rs"),
+            ("use overdrive_testing::netns::NetNs;", "NetNs", "fixture.rs"),
+            // In a test crate, `crate::` / `super::` are the test crate.
+            ("use crate::helpers::GuestNetwork;", "GuestNetwork", "tests/conformance/tests/x.rs"),
+            ("use super::GuestNetwork;", "GuestNetwork", "crates/o/tests/integration/x.rs"),
+        ] {
+            let src = single_field_driver(uses, ty);
+            assert_eq!(
+                rules_at(&src, file),
+                vec![(3, ConformanceRule::ProjectionWithoutOwnerAccessor)],
+                "{uses} {ty} in {file} must not count as an owner"
+            );
+        }
+    }
+
+    #[test]
+    fn a_local_struct_is_followed_to_its_owner_field() {
+        let through_field = r"
+use overdrive_control_plane::guest_network::GuestNetwork;
+impl State<D> for S {
+    fn from_driver(driver: &D) -> Result<Self> { Ok(S { x: driver.launch.owner.view() }) }
+}
+struct Launch { owner: GuestNetwork, seen: u32 }
+struct D { launch: Launch }
+";
+        assert!(rules(through_field).is_empty(), "{:?}", rules(through_field));
+        let through_method = r"
+use overdrive_control_plane::guest_network::GuestNetwork;
+impl State<D> for S {
+    fn from_driver(driver: &D) -> Result<Self> { Ok(S { x: driver.launch.view() }) }
+}
+struct Launch { owner: GuestNetwork, seen: u32 }
+impl Launch { fn view(&self) -> u32 { self.owner.cursor() } }
+struct D { launch: Launch }
+";
+        assert!(rules(through_method).is_empty(), "{:?}", rules(through_method));
+        let bookkeeping_field = r"
+use overdrive_control_plane::guest_network::GuestNetwork;
+impl State<D> for S {
+    fn from_driver(driver: &D) -> Result<Self> { Ok(S { x: driver.launch.seen.clone() }) }
+}
+struct Launch { owner: GuestNetwork, seen: u32 }
+struct D { launch: Launch }
+";
+        assert_eq!(
+            rules(bookkeeping_field),
+            vec![(4, ConformanceRule::ProjectionWithoutOwnerAccessor)]
+        );
+        let bookkeeping_method = r"
+use overdrive_control_plane::guest_network::GuestNetwork;
+impl State<D> for S {
+    fn from_driver(driver: &D) -> Result<Self> { Ok(S { x: driver.launch.view() }) }
+}
+struct Launch { owner: GuestNetwork, seen: u32 }
+impl Launch { fn view(&self) -> u32 { self.seen } }
+struct D { launch: Launch }
+";
+        assert_eq!(
+            rules(bookkeeping_method),
+            vec![(4, ConformanceRule::ProjectionWithoutOwnerAccessor)]
         );
     }
 
@@ -1582,6 +1941,7 @@ mod conformance {
 #[cfg(all(test, feature = "integration-tests"))]
 mod conformance {
     use quint_connect::{Driver, Result, State, Step, switch};
+    use super::Owner;
     struct S { x: u32 }
     struct D { owner: Owner }
     impl State<D> for S {

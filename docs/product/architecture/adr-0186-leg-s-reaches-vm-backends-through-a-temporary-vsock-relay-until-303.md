@@ -20,16 +20,17 @@ connection in plaintext to the backend (ADR-0120). For a VM backend the
 guest prefix is not host-local, and a host platform client reaches a VM port
 only through an owner-opened vsock flow (ADR-0173). The end state for VM
 mesh traffic is in-guest kernel mTLS (#303), after which the host forwards
-ciphertext over the existing sockmap redirect and no plaintext crosses the
-host. #295's VM cutover cannot wait for #303 without leaving inbound VM mesh
+ciphertext through the in-kernel forwarder (ADR-0197) and no plaintext
+crosses the host. #295's VM cutover cannot wait for #303 without leaving inbound VM mesh
 traffic with no path.
 
 The legs-over-vsock spike (V-28, `spike/findings-v28-legs-vsock.md`,
 Linux 7.0, real microVM) measured a stand-in relay between a host TCP leg and
 a host-opened vsock stream: byte-exact in both directions, half-close
 matching TCP in every case over 2,016 stress flows, and reset fidelity
-restored by the flow-end classifier (ADR-0180; 192 of 192 in each abort
-scenario).
+restored by classifying the guest's end from its SHUTDOWN flags (ADR-0180;
+192 of 192 in each abort scenario). The host forwarder classifies a dialled
+stream's end through a watch on its vsock (ADR-0180, ADR-0202).
 
 ## Decision
 

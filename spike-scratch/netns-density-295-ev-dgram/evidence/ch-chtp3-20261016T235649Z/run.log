@@ -1,0 +1,31 @@
+[23:56:49] === preflight (fail closed)
+[23:56:49] substrate: {"host_uname_r": "7.0.0-38-generic", "vm_kernel_modules_from": "7.0.0-29-generic", "machine": "x86_64", "systemd_detect_virt": "none", "cpu": "AMD EPYC 8024P 8-Core Processor", "nproc": 16, "meminfo_head": ["MemTotal:       65401732 kB", "MemFree:        58762556 kB", "MemAvailable:   64159644 kB"], "loadavg": "0.43 0.72 0.75 1/319 43973", "failures": []}
+[23:56:49] pins: {"dgprobe": "9d7c318851d3", "dg-bpf.o": "942d749c5cc1", "evmod.ko": "ad7f37db3ace", "evmod.c": "8acacfed5eb3", "initramfs": "22a1bf6f9ca4"}
+[23:56:50] launch VM: /var/tmp/ev-dgram-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /var/tmp/ev-dgram-work/out/initramfs-c.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 --cpus boot=4 --memory size=1024M --serial file=/var/tmp/ev-dgram-work/out/vm-20261016T235649Z/serial.log --console off --vsock cid=3372,backend=vhost-kernel --log-file /var/tmp/ev-dgram-work/out/vm-20261016T235649Z/ch.log -v
+[23:57:01] host peer tp-1-64-r0 done: [{"ev": "case", "env": "h", "case": "tp-1-64-r0", "pass": true, "detail": {"echoed_bytes": 10314792, "connections": 1}}]
+[23:57:14] host peer tp-1-64-r1 done: [{"ev": "case", "env": "h", "case": "tp-1-64-r1", "pass": true, "detail": {"echoed_bytes": 10563984, "connections": 1}}]
+[23:57:27] host peer tp-1-1431-r0 done: [{"ev": "case", "env": "h", "case": "tp-1-1431-r0", "pass": true, "detail": {"echoed_bytes": 200764963, "connections": 1}}]
+[23:57:40] host peer tp-1-1431-r1 done: [{"ev": "case", "env": "h", "case": "tp-1-1431-r1", "pass": true, "detail": {"echoed_bytes": 193155531, "connections": 1}}]
+[23:57:53] host peer tp-1-59000-r0 done: [{"ev": "case", "env": "h", "case": "tp-1-59000-r0", "pass": true, "detail": {"echoed_bytes": 2704690688, "connections": 1}}]
+[23:58:06] host peer tp-1-59000-r1 done: [{"ev": "case", "env": "h", "case": "tp-1-59000-r1", "pass": true, "detail": {"echoed_bytes": 2742042752, "connections": 1}}]
+[23:58:19] host peer tp-64-64-r0 done: [{"ev": "case", "env": "h", "case": "tp-64-64-r0", "pass": true, "detail": {"echoed_bytes": 29448360, "connections": 64}}]
+[23:58:32] host peer tp-64-64-r1 done: [{"ev": "case", "env": "h", "case": "tp-64-64-r1", "pass": true, "detail": {"echoed_bytes": 29481984, "connections": 64}}]
+[23:58:45] host peer tp-64-1431-r0 done: [{"ev": "case", "env": "h", "case": "tp-64-1431-r0", "pass": true, "detail": {"echoed_bytes": 638672809, "connections": 64}}]
+[23:58:58] host peer tp-64-1431-r1 done: [{"ev": "case", "env": "h", "case": "tp-64-1431-r1", "pass": true, "detail": {"echoed_bytes": 656491946, "connections": 64}}]
+[23:59:11] host peer tp-64-59000-r0 done: [{"ev": "case", "env": "h", "case": "tp-64-59000-r0", "pass": true, "detail": {"echoed_bytes": 6879270656, "connections": 64}}]
+[23:59:24] host peer tp-64-59000-r1 done: [{"ev": "case", "env": "h", "case": "tp-64-59000-r1", "pass": true, "detail": {"echoed_bytes": 6940697984, "connections": 64}}]
+[23:59:28] SUMMARY {"uname_r_guest": "7.0.0-29-generic", "done_marker": true, "oops_lines": [], "cases": [{"case": "tp-1-64-r0", "pass": true}, {"case": "tp-1-64-r1", "pass": true}, {"case": "tp-1-1431-r0", "pass": true}, {"case": "tp-1-1431-r1", "pass": true}, {"case": "tp-1-59000-r0", "pass": true}, {"case": "tp-1-59000-r1", "pass": true}, {"case": "tp-64-64-r0", "pass": true}, {"case": "tp-64-64-r1", "pass": true}, {"case": "tp-64-1431-r0", "pass": true}, {"case": "tp-64-1431-r1", "pass": true}, {"case": "tp-64-59000-r0", "pass": true}, {"case": "tp-64-59000-r1", "pass": true}], "all_pass": true}
+[23:59:28]   PASS  tp-1-64-r0
+[23:59:28]   PASS  tp-1-64-r1
+[23:59:28]   PASS  tp-1-1431-r0
+[23:59:28]   PASS  tp-1-1431-r1
+[23:59:28]   PASS  tp-1-59000-r0
+[23:59:28]   PASS  tp-1-59000-r1
+[23:59:28]   PASS  tp-64-64-r0
+[23:59:28]   PASS  tp-64-64-r1
+[23:59:28]   PASS  tp-64-1431-r0
+[23:59:28]   PASS  tp-64-1431-r1
+[23:59:28]   PASS  tp-64-59000-r0
+[23:59:28]   PASS  tp-64-59000-r1
+[23:59:28] physical host modules after: added=[] removed=[] forbidden=[] ok=True
+[23:59:28] RESULT all_pass=True physical_ok=True

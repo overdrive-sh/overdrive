@@ -24,4 +24,8 @@ mod acceptance {
     // Complete bodies carry reasoned markers owned by the future re-DELIVER
     // roadmap; the rejected VM/Exec action split is not retained.
     mod vm_recreation_allocation_identity;
+
+    // netns-density-295 R5-PROBE-COUNT — ServiceLifecycle counts probe runs
+    // from the row's same_status_runs and acts once per crossed run.
+    mod probe_run_count;
 }

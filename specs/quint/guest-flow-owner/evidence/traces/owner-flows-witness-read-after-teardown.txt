@@ -17,10 +17,12 @@ State 1
   vmGen = 0
   bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
   readyCross = FALSE
+  conf_step = [InitWith |-> [o |-> "g"]]
   toHostAbort = {}
   dl = [ res |-> <<"none">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
   phantom = FALSE
   badPaired = FALSE
+  gSess = 0
   toGuestAbort = {}
   badAct = FALSE
   gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
@@ -39,6 +41,7 @@ State 3 [VmStart]
   vmGen = 1
 
 State 4 [step]
+  gSess = 1
   sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
 
 State 5 [step]

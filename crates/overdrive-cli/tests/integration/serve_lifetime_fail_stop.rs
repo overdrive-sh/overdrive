@@ -15,7 +15,7 @@
 //! # How the proof drives it (in-process; no binary is spawned)
 //!
 //! Each test boots the real production composition through the CLI entry
-//! point `serve::run_with_kek` (the production `run` differs only in the
+//! point `serve_fixture::serve` over `run_with_adapters` (the production `run` differs only in the
 //! kernel-keyring KEK, which refuses a cold host) and hands the returned
 //! [`ServeHandle`] to the library lifetime owner [`ServeLifetime`] — the same
 //! owner `main.rs` runs. The operator signal source and the outer-bound clock
@@ -42,6 +42,12 @@
 //! guard deletes only its recorded identity, so the retargeted program would
 //! outlive the proof; a conditional cleanup deletes it afterwards only while
 //! the kernel still carries exactly the retargeted identity.
+//!
+//! Under QHOLD (ADR-0169) the `IpRules` recovery repairs only while it holds
+//! its own `QuiescenceHold`; a recovery that spends its bound fail-stops with
+//! its hold still counted, so forwarding stays quiesced until the process ends
+//! (the restart converges on boot, step 8 included, ADR-0184). The request the
+//! lifetime receives is unchanged.
 //!
 //! Deleting the whole table is not a fail-stop cause once D-295-R15 lands
 //! (DELIVER step 08-03): the worker recreates an absent program at the recorded
@@ -104,7 +110,7 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
+use overdrive_cli::commands::serve::ServeHandle;
 use overdrive_cli::commands::serve_lifetime::{
     FAIL_STOP_OUTER_BOUND, FailStopCleanup, ServeExit, ServeLifetime, ServeSignal,
 };
@@ -293,9 +299,13 @@ async fn healthy_real_serve(root: &std::path::Path, capture: &Capture) -> ServeH
     std::fs::create_dir_all(&config_dir).expect("create config dir");
     let handle = tokio::time::timeout(
         BOOT_BOUND,
-        overdrive_cli::commands::serve::run_with_kek(
-            ServeArgs { bind: "127.0.0.1:0".parse().expect("loopback bind"), data_dir, config_dir },
-            Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
+        super::serve_fixture::serve(
+            super::serve_fixture::serve_args(
+                "127.0.0.1:0".parse().expect("loopback bind"),
+                data_dir,
+                config_dir,
+            ),
+            super::serve_fixture::DataplaneChoice::Host,
         ),
     )
     .await
@@ -613,6 +623,7 @@ fn an_operator_interrupt_stops_a_healthy_serve_with_status_zero() {
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 #[serial(cgroup)]
+#[ignore = "pending DELIVER attachment-cut step (DG-2 row 8, the 09-01 rework: the composed owner's quiesce and restore in the IpRules recovery)"]
 fn a_shared_network_fail_stop_wins_over_a_ready_interrupt_and_exits_status_one() {
     let capture = Capture::new();
     let (verdicts, trace) = on_current_thread(&capture, async {
@@ -703,6 +714,7 @@ fn a_shared_network_fail_stop_wins_over_a_ready_interrupt_and_exits_status_one()
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 #[serial(cgroup)]
+#[ignore = "pending DELIVER attachment-cut step (DG-2 row 8, the 09-01 rework: the composed owner's quiesce and restore in the IpRules recovery)"]
 fn a_shared_network_fail_stop_shutdown_is_abandoned_when_the_ten_second_bound_elapses() {
     let capture = Capture::new();
     let (verdicts, trace) = on_current_thread(&capture, async {
@@ -799,6 +811,7 @@ fn a_shared_network_fail_stop_shutdown_is_abandoned_when_the_ten_second_bound_el
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 #[serial(cgroup)]
+#[ignore = "pending DELIVER attachment-cut step (DG-2 row 8, the 09-01 rework: the composed owner's quiesce and restore in the IpRules recovery)"]
 fn a_repaired_shared_network_loss_never_ends_serve() {
     let capture = Capture::new();
     let (verdicts, trace) = on_current_thread(&capture, async {

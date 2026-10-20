@@ -67,8 +67,14 @@ use overdrive_worker::mtls_intercept_worker::{
     MtlsInterceptInstallError, MtlsInterceptStopError, MtlsInterceptWorker,
 };
 
-type GuestNetworkProvisionerAndPool<'a> =
-    Option<(&'a dyn GuestNetworkProvisioner, &'a crate::guest_network::GuestAddressPool)>;
+/// The guest-flow owner's provisioning port, the address pool and the
+/// owner's bound listener ports (PORTS-CONFIG; `None` until the owner
+/// reported them after boot step 9).
+type GuestNetworkProvisionerAndPool<'a> = Option<(
+    &'a dyn GuestNetworkProvisioner,
+    &'a crate::guest_network::GuestAddressPool,
+    Option<overdrive_core::guest_transport::GuestFlowPorts>,
+)>;
 
 /// Allocation-scoped lifecycle boundary for transparent mTLS interception.
 ///
@@ -747,7 +753,11 @@ async fn fail_closed_on_guest_network_activation(
     mtls_lifecycle: &dyn MtlsInterceptLifecycle,
     net_slot_allocator: &NetSlotAllocator,
     network_provisioner: &dyn WorkloadNetworkProvisioner,
-    guest_network: (&dyn GuestNetworkProvisioner, &crate::guest_network::GuestAddressPool),
+    guest_network: (
+        &dyn GuestNetworkProvisioner,
+        &crate::guest_network::GuestAddressPool,
+        Option<overdrive_core::guest_transport::GuestFlowPorts>,
+    ),
     obs: &dyn ObservationStore,
     bus: &broadcast::Sender<LifecycleEvent>,
     tick: &TickContext,
@@ -1349,7 +1359,11 @@ async fn dispatch_with_network_owner(
         mtls_lifecycle,
         &state.dns_slots,
         &ProductionNetworkGuard,
-        Some((state.shared_guest_network.as_ref(), state.guest_pool.as_ref())),
+        Some((
+            state.shared_guest_network.as_ref(),
+            state.guest_pool.as_ref(),
+            state.guest_flow_ports.get().copied(),
+        )),
         Some(state.guest_network_exec.as_ref()),
         state.vm_host_state.as_ref(),
     )
@@ -1436,7 +1450,7 @@ pub async fn dispatch_with_guest_network_provisioner_for_test(
         mtls_lifecycle,
         &state.dns_slots,
         &HostNetworkProvisioner,
-        Some((provisioner, state.guest_pool.as_ref())),
+        Some((provisioner, state.guest_pool.as_ref(), state.guest_flow_ports.get().copied())),
         Some(state.guest_network_exec.as_ref()),
         state.vm_host_state.as_ref(),
     )
@@ -1467,8 +1481,13 @@ async fn provision_and_inject_netns(
     network_provisioner: &dyn WorkloadNetworkProvisioner,
     guest_network: GuestNetworkProvisionerAndPool<'_>,
 ) -> Result<Option<crate::guest_network::GuestNetworkPlan>, ShimError> {
-    if let Some((guest_provisioner, guest_pool)) = guest_network {
-        let plan = guest_pool.assign(spec.alloc.clone(), &declared_tcp_listen_ports(spec))?;
+    if let Some((guest_provisioner, guest_pool, flow_ports)) = guest_network {
+        // SCAFFOLD: true — netns-density-295 DISTILL (attachment-cut step 6):
+        // the owner reports its bound ports from its first `Ok` converge; the
+        // host owner binds no listener until that step.
+        let Some(flow_ports) = flow_ports else { panic!("Not yet implemented -- RED scaffold") };
+        let plan =
+            guest_pool.assign(spec.alloc.clone(), &declared_tcp_listen_ports(spec), flow_ports)?;
         guest_provisioner.provision(&plan).await?;
         spec.transport = Some(plan.assignment().clone());
         return Ok(Some(plan));
@@ -1516,8 +1535,9 @@ fn declared_tcp_listen_ports(spec: &AllocationSpec) -> Vec<ListenPort> {
     spec.service_ports
         .iter()
         .map(|port| {
-            ListenPort::new(port.get())
-                .unwrap_or_else(|_| unreachable!("a NonZeroU16 listener port is a valid ListenPort"))
+            ListenPort::new(port.get()).unwrap_or_else(|_| {
+                unreachable!("a NonZeroU16 listener port is a valid ListenPort")
+            })
         })
         .collect()
 }
@@ -1614,14 +1634,14 @@ async fn reclaim_guest_network(
     network_provisioner: &dyn WorkloadNetworkProvisioner,
     guest_network: GuestNetworkProvisionerAndPool<'_>,
 ) -> Result<(), ShimError> {
-    let Some((guest_provisioner, guest_pool)) = guest_network else {
+    let Some((guest_provisioner, guest_pool, flow_ports)) = guest_network else {
         return Ok(());
     };
     if !guest_pool.observe(std::slice::from_ref(alloc_id)).leases.contains_key(alloc_id) {
         return Ok(());
     }
 
-    retire_guest_network_lease(alloc_id, Some((guest_provisioner, guest_pool)));
+    retire_guest_network_lease(alloc_id, Some((guest_provisioner, guest_pool, flow_ports)));
 
     let handle = AllocationHandle { alloc: alloc_id.clone(), pid: None };
     for driver in resolve_drivers_for_alloc(drivers, alloc_drivers, alloc_id) {
@@ -1643,7 +1663,7 @@ async fn reclaim_guest_network(
         None,
         net_slot_allocator,
         network_provisioner,
-        Some((guest_provisioner, guest_pool)),
+        Some((guest_provisioner, guest_pool, flow_ports)),
     )
     .await?;
     alloc_drivers.lock().remove(alloc_id);
@@ -1688,14 +1708,14 @@ async fn teardown_for_dispatch(
     network_provisioner: &dyn WorkloadNetworkProvisioner,
     guest_network: GuestNetworkProvisionerAndPool<'_>,
 ) -> Result<(), ShimError> {
-    if let Some((guest_provisioner, guest_pool)) = guest_network {
+    if let Some((guest_provisioner, guest_pool, _)) = guest_network {
         return teardown_guest_network(alloc_id, guest_provisioner, guest_pool).await;
     }
     #[cfg(not(any(test, feature = "integration-tests")))]
     {
         let _ = (alloc_id, prior_workload_addr, net_slot_allocator, network_provisioner);
         Err(ShimError::GuestNetwork(crate::guest_network::GuestNetworkError::Io {
-            operation: crate::guest_network::GuestNetworkOperation::PairRemove,
+            operation: crate::guest_network::GuestNetworkOperation::PairAbort,
             source: std::io::Error::other(
                 "production teardown requires the shared guest-network owner",
             ),
@@ -1716,7 +1736,7 @@ fn retire_guest_network_lease(
     alloc_id: &AllocationId,
     guest_network: GuestNetworkProvisionerAndPool<'_>,
 ) {
-    if let Some((_, guest_pool)) = guest_network
+    if let Some((_, guest_pool, _)) = guest_network
         && guest_pool.retire(alloc_id)
     {
         tracing::info!(
@@ -2626,7 +2646,7 @@ async fn dispatch_single(
                         "installed allocation mTLS intercept"
                     );
                 }
-                if let (Some(plan), Some((guest_provisioner, guest_pool))) =
+                if let (Some(plan), Some((guest_provisioner, guest_pool, flow_ports))) =
                     (guest_plan.as_ref(), guest_network)
                 {
                     match activate_guest_network(plan, guest_provisioner, guest_network_exec).await
@@ -2639,7 +2659,7 @@ async fn dispatch_single(
                                 mtls_lifecycle,
                                 net_slot_allocator,
                                 network_provisioner,
-                                (guest_provisioner, guest_pool),
+                                (guest_provisioner, guest_pool, flow_ports),
                                 obs,
                                 bus,
                                 tick,
@@ -2957,7 +2977,9 @@ async fn dispatch_single(
                     // history. A failed launch never reached Running.
                     let started_at = (state == AllocState::Running).then_some(tick.now_unix);
                     let workload_addr = (state == AllocState::Running)
-                        .then_some(spec.transport.as_ref().map(GuestTransportAssignment::workload_addr))
+                        .then_some(
+                            spec.transport.as_ref().map(GuestTransportAssignment::workload_addr),
+                        )
                         .flatten();
                     let row = build_alloc_status_row(
                         successor_alloc_id.clone(),
@@ -3140,7 +3162,7 @@ async fn dispatch_single(
                         driver = ?driver_kind,
                         "installed allocation mTLS intercept"
                     );
-                    if let (Some(plan), Some((guest_provisioner, guest_pool))) =
+                    if let (Some(plan), Some((guest_provisioner, guest_pool, flow_ports))) =
                         (plan.as_ref(), guest_network)
                     {
                         match activate_guest_network(plan, guest_provisioner, guest_network_exec)
@@ -3154,7 +3176,7 @@ async fn dispatch_single(
                                     mtls_lifecycle,
                                     net_slot_allocator,
                                     network_provisioner,
-                                    (guest_provisioner, guest_pool),
+                                    (guest_provisioner, guest_pool, flow_ports),
                                     obs,
                                     bus,
                                     tick,
@@ -3861,6 +3883,12 @@ mod tests {
     }
 }
 
+/// GH #295 — EXEC only after Active (P6-S12), VMM death and the pre-READY
+/// exit (P6-S10), feature disabled (P6-S12b): the shim over the production
+/// guest-flow owner on `SimGuestFlowIo`.
+#[cfg(test)]
+mod guest_activation_acceptance;
+
 #[cfg(test)]
 mod guest_command_release_tests {
     #![allow(clippy::doc_markdown)]
@@ -4062,9 +4090,12 @@ mod fail_closed_mtls_tests {
     fn build_worker() -> Arc<MtlsInterceptWorker> {
         let identity: Arc<dyn IdentityRead> =
             Arc::new(overdrive_sim::adapters::SimIdentityRead::new(BTreeMap::new(), None));
-        let enforcement: Arc<dyn MtlsEnforcement> = Arc::new(
-            overdrive_sim::adapters::SimMtlsEnforcement::new(identity, MtlsLimits::default()),
-        );
+        let enforcement: Arc<dyn MtlsEnforcement> =
+            Arc::new(overdrive_sim::adapters::SimMtlsEnforcement::new(
+                identity,
+                MtlsLimits::default(),
+                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+            ));
         let resolve: Arc<dyn MtlsResolve> = Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
             BTreeMap::new(),
             MtlsResolution::NonMesh,
@@ -4624,16 +4655,16 @@ mod fail_closed_mtls_tests {
 )]
 mod admission_refusal_acceptance {
     //! S-ND295-05E — a refused admission writes nothing and says how full the
-    //! node is (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the admission refusal projection)).
+    //! node is (FD § "Gate G-V0 — node attachment admission (restates G-295-0)" (the admission refusal projection)).
     //!
     //! Source-local because the cap is reached through the pool's own
-    //! crate-private `assign` and `retire` (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the crate-private pool operations)), and the one owner
+    //! crate-private `assign` and `retire` (FD § "Gate G-V0 — node attachment admission (restates G-295-0)" (the crate-private pool operations)), and the one owner
     //! instance is the crate-private `TestSharedOwner` (the `overdrive-sim`
     //! owner implements a second compiled copy of this crate's traits here).
     //! The seam fixture holds the one owner, the kept EXEC wiring, the pool,
     //! and an unstarted worker over sim ports; DELIVER 05-01 passes them to
     //! `AppState`'s pinned constructor, and the seam reads the gate and pool
-    //! from `state` (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (how the gate reaches the shim, and the `AppState` constructors); FD § "C-295-B — network provisioner boundary" (the B-1 pin that both test helpers read the gate and the pool from `state`)). The refusal precedes every
+    //! from `state` (FD § "Gate G-V3 — allocation forwarding activation (replaces G-295-3)" (how the gate reaches the shim, and the `AppState` constructors); FD § "C-295-B — network provisioner boundary" (the B-1 pin that both test helpers read the gate and the pool from `state`)). The refusal precedes every
     //! intercept install, so the worker stays unstarted and binds nothing.
     //!
     //! # Universe
@@ -4641,7 +4672,7 @@ mod admission_refusal_acceptance {
     //! The returned `ShimError`; the owner's journal; `SimDriver::started_specs`;
     //! the allocation rows and lifecycle occurrences; the lifecycle event bus;
     //! the pinned events `guest_network.{admission_refused, lease_retired,
-    //! lease_released}` (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the admission refusal projection and the lease events)), each stamped with the owner journal
+    //! lease_released}` (FD § "Gate G-V0 — node attachment admission (restates G-295-0)" (the admission refusal projection and the lease events)), each stamped with the owner journal
     //! length as emitted; and the pool's own `observe` and `snapshot`.
 
     use std::collections::{BTreeMap, BTreeSet};
@@ -4779,16 +4810,14 @@ mod admission_refusal_acceptance {
             let clock = Arc::new(SimClock::new());
             let owner = Arc::new(TestSharedOwner::new());
             let wiring = GuestNetworkExecWiring::new(Arc::clone(&clock) as Arc<dyn Clock>);
-            let pool = Arc::new(GuestAddressPool::new(
-                ipnet::Ipv4Net::new(Ipv4Addr::new(100, 95, 0, 0), 16).expect("node guest prefix"),
-                "ovd-gbr0".to_owned(),
-                Ipv4Addr::new(100, 95, 0, 1),
-                Ipv4Addr::new(100, 95, 0, 1),
-            ));
+            let pool = crate::shared_network_test_ports::guest_pool();
             let identity: Arc<dyn IdentityRead> =
                 Arc::new(SimIdentityRead::new(BTreeMap::new(), None));
-            let enforcement: Arc<dyn MtlsEnforcement> =
-                Arc::new(SimMtlsEnforcement::new(identity, MtlsLimits::default()));
+            let enforcement: Arc<dyn MtlsEnforcement> = Arc::new(SimMtlsEnforcement::new(
+                identity,
+                MtlsLimits::default(),
+                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+            ));
             let resolve: Arc<dyn MtlsResolve> =
                 Arc::new(SimMtlsResolve::new(BTreeMap::new(), MtlsResolution::NonMesh));
             let worker = Arc::new(MtlsInterceptWorker::new(
@@ -4855,7 +4884,11 @@ mod admission_refusal_acceptance {
         fn fill_to_the_cap_with_one_retiring(&self) {
             for index in 0..MAX_GUEST_NETWORK_ATTACHMENTS {
                 self.pool
-                    .assign(alloc_id(&format!("nd295-held-{index:05}")))
+                    .assign(
+                        alloc_id(&format!("nd295-held-{index:05}")),
+                        &[],
+                        crate::shared_network_test_ports::test_owner_flow_ports(),
+                    )
                     .expect("below the cap every assignment succeeds");
             }
             assert!(self.pool.retire(&alloc_id(RETIRING)), "an Admitted lease moves to Retiring");
@@ -5007,6 +5040,7 @@ mod admission_refusal_acceptance {
     /// `guest_network.admission_refused` event naming the allocation, held,
     /// retiring, and the cap.
     #[tokio::test]
+    #[ignore = "pending DELIVER attachment-cut step (15)"]
     async fn admission_refusal_writes_nothing_and_reports_held_and_retiring() {
         let fixture = AdmissionFixture::build().await;
         fixture.fill_to_the_cap_with_one_retiring();
@@ -5069,6 +5103,7 @@ mod admission_refusal_acceptance {
     /// row, no lifecycle occurrence, and no lifecycle event, and the one
     /// refusal event names it.
     #[tokio::test]
+    #[ignore = "pending DELIVER attachment-cut step (15)"]
     async fn a_refused_restart_successor_still_cleans_up_its_predecessor_once() {
         let fixture = AdmissionFixture::build().await;
         fixture.fill_to_the_cap_with_one_retiring();

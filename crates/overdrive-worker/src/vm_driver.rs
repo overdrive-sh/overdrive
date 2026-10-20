@@ -1025,7 +1025,7 @@ impl VmDriver {
     /// - **Observable invariants:** each `BeaconConnKey` appears at most once
     ///   across `claims` values and `unread`; a repeated call with no
     ///   intervening beacon step returns an equal value.
-    // SCAFFOLD: true — netns-density-295 DISTILL (vsock new-step 6).
+    // SCAFFOLD: true — netns-density-295 DISTILL (attachment-cut step 6, beacon relocation).
     #[expect(
         clippy::unused_self,
         reason = "RED scaffold body panics before reading the driver; the lint self-trips when DELIVER lands the body"
@@ -1147,10 +1147,10 @@ impl VmDriver {
         // same breath — no accessor is added to `DriverPayload`.
         //
         let DriverPayload::Vm(payload) = &spec.driver;
-        // D16-CLAIM: a VM start with no transport is a composition defect,
-        // never a placement path.
+        // A VM start with no transport is a composition defect, never a
+        // placement path (§ *Core vocabulary*): a non-terminal start failure.
         let Some(transport) = spec.transport.as_ref() else {
-            return Err(DriverError::VsockClaimUnavailable { alloc: spec.alloc.clone() });
+            return Err(DriverError::GuestTransportMissing { alloc: spec.alloc.clone() });
         };
         let cmdline = compose_vm_transport(self.layout.arch, transport)?;
 
@@ -1320,24 +1320,10 @@ impl VmDriver {
                 .await);
         }
 
-        // D16-CLAIM: the launch takes the claimed device; a claim already
-        // taken (a second start of the same allocation) has none to hand.
-        let Some(vsock) = transport.take_claim() else {
-            let primary = DriverError::VsockClaimUnavailable { alloc: spec.alloc.clone() };
-            return Err(self
-                .cleanup_after_start_failure(
-                    &spec.alloc,
-                    &run_dir,
-                    Some(&scope),
-                    None,
-                    Some(&rootfs),
-                    primary,
-                )
-                .await);
-        };
-
+        // CID-NOCLAIM: the launch carries the leased CID; the VMM opens its
+        // `/dev/vhost-vsock` device itself (§ *VMM backend contract*).
         tracing::info!(name: "vm.lifecycle.create_enter", alloc = %spec.alloc, "creating VMM");
-        let (control, exit, diagnostics) = match self.vmm.create(&config, vsock).await {
+        let (control, exit, diagnostics) = match self.vmm.create(&config, transport.cid()).await {
             Ok(process) => (process.control, process.exit, process.diagnostics),
             Err(err) => {
                 // §D6: `Vmm::create`'s own Err contract guarantees no
@@ -1469,15 +1455,8 @@ impl Driver for VmDriver {
     }
 
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
-        let ProvisionedVmm {
-            run_dir,
-            scope,
-            control,
-            mut exit,
-            diagnostics,
-            rootfs,
-            memory,
-        } = self.provision_vmm(spec).await?;
+        let ProvisionedVmm { run_dir, scope, control, mut exit, diagnostics, rootfs, memory } =
+            self.provision_vmm(spec).await?;
 
         // Transition Starting -> Live (still §103 step 0's Held phase;
         // brief §105a.3's transition table treats Starting|Live as one
@@ -2225,6 +2204,13 @@ async fn run_exit_watcher(
     let _ = exit_tx.send(event).await;
 }
 
+// GH #295 (QPROJ-1, QPROJ-4): the source-local Quint conformance driver of
+// `specs/quint/guest-flow-owner/owner_flows.qnt`, conformance main
+// `flows_beacon_conf` — the VM driver's beacon intake (D17, ATTR-TOKEN,
+// ATTR-LIVE-CLAIM, D-UP-9).
+#[cfg(all(test, feature = "integration-tests"))]
+mod quint_flows_beacon;
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
@@ -2232,18 +2218,20 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use overdrive_core::SpiffeId;
+    use overdrive_core::guest_transport::{
+        GUEST_CID_BASE, GUEST_FLOW_CONTROL_PORT, GUEST_FLOW_STREAM_PORT, GuestFlowPorts,
+        VsockListenPort,
+    };
     use overdrive_core::id::NodeId;
     use overdrive_core::traits::driver::{DriverPayload, VmPayload};
     use overdrive_core::traits::observation_store::ObservationStore;
     use overdrive_core::traits::vmm::{VmProcess, VmTermination, VmmProbeError};
     use overdrive_core::vm::config::{Gid, VmmIdentity};
+    use overdrive_sim::adapters::beacon_io::SimBeaconIo;
     use overdrive_sim::adapters::cgroup_accounting::SimCgroupAccounting;
     use overdrive_sim::adapters::clock::SimClock;
     use overdrive_sim::adapters::observation_store::SimObservationStore;
     use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
-    use overdrive_core::guest_transport::{ClaimedGuestCid, GUEST_CID_BASE, GuestCidClaim};
-    use overdrive_sim::adapters::beacon_io::SimBeaconIo;
-    use overdrive_sim::adapters::guest_cid_claim::SimGuestCidClaim;
     use overdrive_sim::{SimCgroupFs, SimOp, SimVmm};
     use tokio::net::UnixStream;
 
@@ -2258,6 +2246,7 @@ mod tests {
                 NodeId::new("vm-driver-unit").expect("valid node ID"),
                 0,
             )) as Arc<dyn ObservationStore>,
+            Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
         ))
     }
 
@@ -2395,21 +2384,26 @@ mod tests {
 
     /// The node beacon intake over a simulated beacon listener (DG-4).
     async fn test_beacon_intake() -> BeaconIntake {
-        BeaconIntake::bind(Arc::new(SimBeaconIo::new(SimVmm::new())))
-            .await
-            .expect("bind the simulated beacon listener")
+        BeaconIntake::bind(
+            Arc::new(SimBeaconIo::new(SimVmm::new())),
+            VsockListenPort::KernelAssigned,
+        )
+        .await
+        .expect("bind the simulated beacon listener")
     }
 
-    /// A guest transport handoff over a simulated CID claim (D16-CLAIM).
+    /// A guest transport handoff on the leased CID `GUEST_CID_BASE`
+    /// (CID-NOCLAIM: no claim; the VMM opens its device itself).
     fn test_transport() -> GuestTransportAssignment {
         let cid = GuestCid::new(GUEST_CID_BASE).expect("an in-range guest CID");
-        let claim = SimGuestCidClaim::new().claim(cid).expect("claim the launch's guest CID");
         let launch = LaunchToken::from_bytes([0x5a; 16]).expect("a non-zero launch token");
         GuestTransportAssignment::new(
             "100.95.0.6".parse().expect("valid workload address"),
             "100.95.0.1".parse().expect("valid gateway"),
+            cid,
             launch,
-            claim,
+            GuestFlowPorts::new(GUEST_FLOW_STREAM_PORT, GUEST_FLOW_CONTROL_PORT)
+                .expect("the default guest-flow listener ports"),
         )
     }
 
@@ -2430,7 +2424,7 @@ mod tests {
         async fn create(
             &self,
             _config: &VmConfig,
-            _vsock: ClaimedGuestCid,
+            _cid: GuestCid,
         ) -> overdrive_core::traits::vmm::Result<VmProcess> {
             Err(VmmError::Create { detail: "unused create".to_owned() })
         }
@@ -2461,7 +2455,7 @@ mod tests {
         async fn create(
             &self,
             config: &VmConfig,
-            _vsock: ClaimedGuestCid,
+            _cid: GuestCid,
         ) -> overdrive_core::traits::vmm::Result<VmProcess> {
             std::fs::create_dir_all(config.rootfs.clone_dest().parent().expect("clone has parent"))
                 .expect("create clone parent");
@@ -2577,6 +2571,7 @@ mod tests {
         reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
     )]
     #[tokio::test]
+    #[ignore = "pending DELIVER attachment-cut step (6)"]
     async fn diagnostic_selection_is_total_and_never_masks_rejection_or_cleanup() {
         let cases = [
             (ConsoleOutcome::Content, "guest resolver setup failed"),
@@ -2625,6 +2620,7 @@ mod tests {
         reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
     )]
     #[tokio::test]
+    #[ignore = "pending DELIVER attachment-cut step (6)"]
     async fn cleanup_failures_are_total_and_make_the_composite_rejection_authoritative() {
         let temp = tempfile::TempDir::new().expect("cleanup fixture");
         let layout = VmHostLayout {

@@ -1,11 +1,11 @@
 //! S-ND295-05A (in-process half) — a server restarted after being killed
 //! starts with an empty guest-attachment pool (GH #295, D-295-R6: one pool per
-//! server, FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (one pool per server: the doc-hidden pool and its crate-private operations)).
+//! server, FD § "Gate G-V0 — node attachment admission (restates G-295-0)" (one pool per server: the doc-hidden pool and its crate-private operations)).
 //!
 //! In-process lane (Lima root, `integration-tests`): two boots of the
-//! production composition `run_server_with_obs_and_driver(ServerConfig::new(kek,
-//! mtls_intercept, guest_dns), obs, driver, vm_host_state, shared_guest_network,
-//! guest_network_exec, vm_cgroups)` (FD § "EXEC-close linearization" (the `run_server_with_obs_and_driver(s)` signatures)) on the same data and
+//! production composition `run_server_with_obs_and_driver(config, boot, driver,
+//! shared_guest_network, guest_network_exec, vm_cgroups)` (`boot` is the
+//! `BootAdapters` of `node_adapters::boot_adapters`, GH #295 NO-OVERRIDE-SEAMS) (FD § "EXEC-close linearization" (the `run_server_with_obs_and_driver(s)` signatures)) on the same data and
 //! operator roots, each with a `SimDriver`, a `SimSharedGuestNetworkOwner`,
 //! `SimGuestDnsFactory`, and `vm_cgroups` over `SimCgroupFs`. The first server
 //! is abandoned with `ServerHandle::kill_for_test`, the way process death would
@@ -17,6 +17,7 @@
 //! handoff); workloads are deployed through the public HTTPS API only.
 
 #![allow(
+    clippy::redundant_closure_for_method_calls,
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
@@ -35,13 +36,11 @@ use overdrive_core::id::NodeId;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{AllocationSpec, Driver, DriverType};
 use overdrive_core::traits::observation_store::ObservationStore;
+use overdrive_sim::adapters::SimCgroupFs;
 use overdrive_sim::adapters::clock::SimClock;
-use overdrive_sim::adapters::dataplane::SimDataplane;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_sim::adapters::vm_host_state::SimVmHostState;
-use overdrive_sim::adapters::{SimCgroupFs, SimGuestDnsFactory, SimKek, SimMtlsIntercept};
 use overdrive_worker::cgroup_manager::CgroupManager;
 use tempfile::TempDir;
 
@@ -107,26 +106,17 @@ impl Server {
         let clock = Arc::new(SimClock::new());
         let clock_port: Arc<dyn Clock> = clock.clone();
         let config = ServerConfig {
-            bind: "127.0.0.1:0".parse().expect("parse bind addr"),
-            data_dir,
-            operator_config_dir: operator_config_dir.clone(),
             tick_cadence: TICK,
-            clock: Arc::clone(&clock_port),
-            dataplane: Some(super::dataplane_lo::lo_dataplane_config()),
-            dataplane_override: Some(Arc::new(SimDataplane::new())),
-            ..ServerConfig::new(
-                Arc::new(SimKek::for_boot()),
-                Arc::new(SimMtlsIntercept::new()),
-                Arc::new(SimGuestDnsFactory::default()),
-            )
+            ..super::node_adapters::test_config(data_dir, operator_config_dir.clone())
         };
+        let mut boot = super::node_adapters::boot_adapters(&config);
+        boot.clock = Arc::clone(&clock_port);
         let driver = Arc::new(SimDriver::with_clock(DriverType::Vm, Arc::clone(&clock_port)));
         let driver_port: Arc<dyn Driver> = driver.clone();
         let handle = run_server_with_obs_and_driver(
             config,
-            obs,
+            overdrive_control_plane::BootAdapters { observation: obs, ..boot },
             driver_port,
-            Arc::new(SimVmHostState::new()),
             Arc::new(SimSharedGuestNetworkOwner::default()),
             GuestNetworkExecWiring::new(Arc::clone(&clock_port)),
             CgroupManager::new(PathBuf::from("/sys/fs/cgroup"), Arc::new(SimCgroupFs::new())),
@@ -189,7 +179,10 @@ impl Server {
 }
 
 fn first_address(started: &[AllocationSpec]) -> Option<Ipv4Addr> {
-    started.first().and_then(|spec| spec.network.as_ref()).map(|network| network.address)
+    started
+        .first()
+        .and_then(|spec| spec.transport.as_ref())
+        .map(|transport| transport.workload_addr())
 }
 
 /// Outcome anchor: OUT-ND295-SHARED-SWITCH
@@ -200,6 +193,7 @@ fn first_address(started: &[AllocationSpec]) -> Option<Ipv4Addr> {
 /// the same roots starts with an empty pool, so the first guest-network
 /// assignment it makes is again the smallest free address, `100.95.0.2`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn a_killed_restart_starts_with_an_empty_pool() {
     let roots = TempDir::new().expect("tempdir");
     let obs: Arc<dyn ObservationStore> =

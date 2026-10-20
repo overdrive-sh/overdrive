@@ -64,21 +64,20 @@ enum GuestNetworkExecGateState {
 
 /// Closed vocabulary for the shared guest-network components the supervisor
 /// audits and repairs (feature-delta § *Typed error taxonomy*). Declaration
-/// order is the fixed audit order. Derives `Ord` (§ *Owner and provisioner*,
-/// D8a-HOLD): the supervisor's per-holder state and `QuiescenceHolder` order
-/// by it. The pinned guest-prefix steering, the prefix route and the
-/// forwarder's links are not components (A-31, D19-LINKS).
+/// order is the fixed audit order. Derives `Ord`: the EXEC gate's
+/// `complete_attempt(remaining: BTreeSet<_>)` and `recovery_progress()` order
+/// by it. The gateway route (written only at boot, GW-LOCAL) and the
+/// forwarder's links (D19-LINKS) are not components.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SharedGuestNetworkComponent {
     /// The forwarder's pair and cell bookkeeping: the owner's pair table
     /// against the forwarder's inventory.
     Forwarder,
-    /// The host guest-flow vsock listeners (stream and seqpacket).
+    /// The host guest-flow vsock listener (TCP flows and datagram
+    /// associations, both in stream mode: EVMOD-DGRAM).
     FlowListeners,
     /// The host per-VM control-session vsock listener.
     ControlListener,
-    /// The per-allocation intake listeners.
-    IntakeListeners,
     /// Workload-facing plaintext listener.
     LegF,
     /// Peer-facing inbound TLS listener.
@@ -98,10 +97,22 @@ pub enum SharedGuestNetworkComponent {
 pub enum SharedGuestNetworkFailStopCause {
     /// The bounded recovery deadline elapsed.
     RecoveryDeadlineExceeded,
+    /// QHOLD (ADR-0169): a `QuiescenceHold` was dropped without a restore.
+    /// The supervisor reads the owner's leaked-hold count at every audit tick
+    /// and fail-stops `serve` at once; forwarding stays quiesced until then.
+    LeakedQuiescenceHold,
+    /// QHOLD (D-UP-4, PD-1): `restore` returned
+    /// `QuiescenceRestoreError::ForeignHold` — the hold was issued by another
+    /// owner's `QuiescenceLedger` (a composition defect). The owner's count,
+    /// latch and leaked count are unchanged; the supervisor fail-stops
+    /// `serve` at once and forwarding stays quiesced until then.
+    ForeignQuiescenceHold,
     /// The set of TAPs that failed to go down cannot be determined, so the
     /// whole workloads slice was killed (D-295-R14).
     ///
-    /// RED scaffold (D-295-R14): constructed in DELIVER step 09-01.
+    /// **D-list** (feature-delta § *Bridge-era code for DELIVER to delete*,
+    /// scattered sites): no TAP exists under the vsock attachment; the
+    /// 09-01 rework deletes it with its control-plane users.
     TapQuiescenceUndetermined,
     /// A per-VM kill write for a known allocation failed other than with an
     /// absent scope, so the whole workloads slice was killed (D-295-R14).

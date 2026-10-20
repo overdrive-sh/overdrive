@@ -41,6 +41,7 @@ pub(crate) mod serve_ports {
         let enforcement: Arc<dyn MtlsEnforcement> = Arc::new(SimMtlsEnforcement::new(
             Arc::new(SimIdentityRead::new(BTreeMap::new(), None)),
             MtlsLimits::default(),
+            Arc::new(crate::adapters::guest_stream_dial::SimGuestStreamDial::new()),
         ));
         let resolve: Arc<dyn MtlsResolve> =
             Arc::new(SimMtlsResolve::new(BTreeMap::new(), MtlsResolution::NonMesh));
@@ -67,7 +68,6 @@ pub(crate) mod serve_ports {
         Arc::new(GuestAddressPool::new(
             "100.95.0.0/16".parse().expect("static guest prefix"),
             Ipv4Addr::new(100, 95, 0, 1),
-            Arc::new(crate::adapters::guest_cid_claim::SimGuestCidClaim::new()),
             Arc::new(crate::adapters::entropy::SimEntropy::new(0x295)),
         ))
     }

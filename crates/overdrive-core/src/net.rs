@@ -10,10 +10,10 @@
 //! `ListenPortError`, `InterfaceIndexError`); `FromStr` uses the same errors.
 //!
 //! RED scaffold (DISTILL, Mandate 7): the constructor, accessor, `FromStr` /
-//! `Display` / serde bodies panic until DELIVER vsock new-step 2 lands them.
+//! `Display` / serde bodies panic until DELIVER step 2 lands them.
 //! The error enums are real.
 
-// SCAFFOLD: true — netns-density-295 DISTILL (vsock new-step 2).
+// SCAFFOLD: true — netns-density-295 DISTILL (DELIVER step 2).
 #![expect(
     clippy::unused_self,
     reason = "RED scaffold bodies panic before reading their inputs; the lint self-trips when DELIVER lands the bodies"

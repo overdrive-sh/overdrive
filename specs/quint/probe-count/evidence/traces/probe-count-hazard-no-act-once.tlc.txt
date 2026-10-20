@@ -1,5 +1,6 @@
 State 1: <Initial predicate>
 /\ streak_bugNoActOnce_probe_count_terms = 0
+/\ streak_bugNoActOnce_probe_count_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ streak_bugNoActOnce_probe_count_hist = <<>>
 /\ streak_bugNoActOnce_probe_count_running = TRUE
 /\ streak_bugNoActOnce_probe_count_psame = 0
@@ -24,9 +25,10 @@ State 1: <Initial predicate>
 /\ streak_bugNoActOnce_probe_count_rst = ""
 /\ streak_bugNoActOnce_probe_count_rseq = 0
 
-State 2: <streak_bugNoActOnce_probe_count_ProbeRun line 336, col 3 to line 397, col 46 of module streak_bugNoActOnce>
+State 2: <streak_bugNoActOnce_probe_count_ProbeRun line 357, col 3 to line 423, col 53 of module streak_bugNoActOnce>
 /\ streak_bugNoActOnce_probe_count_terms = 0
-/\ streak_bugNoActOnce_probe_count_hist = <<"Pass">>
+/\ streak_bugNoActOnce_probe_count_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ streak_bugNoActOnce_probe_count_hist = <<"Fail">>
 /\ streak_bugNoActOnce_probe_count_running = TRUE
 /\ streak_bugNoActOnce_probe_count_psame = 1
 /\ streak_bugNoActOnce_probe_count_fs = 0
@@ -46,15 +48,16 @@ State 2: <streak_bugNoActOnce_probe_count_ProbeRun line 336, col 3 to line 397, 
 /\ streak_bugNoActOnce_probe_count_runs = 1
 /\ streak_bugNoActOnce_probe_count_tseqs = {}
 /\ streak_bugNoActOnce_probe_count_rsame = 1
-/\ streak_bugNoActOnce_probe_count_pst = "Pass"
-/\ streak_bugNoActOnce_probe_count_rst = "Pass"
+/\ streak_bugNoActOnce_probe_count_pst = "Fail"
+/\ streak_bugNoActOnce_probe_count_rst = "Fail"
 /\ streak_bugNoActOnce_probe_count_rseq = 1
 
-State 3: <streak_bugNoActOnce_probe_count_ProbeRun line 336, col 3 to line 397, col 46 of module streak_bugNoActOnce>
+State 3: <streak_bugNoActOnce_probe_count_ProbeRun line 357, col 3 to line 423, col 53 of module streak_bugNoActOnce>
 /\ streak_bugNoActOnce_probe_count_terms = 0
-/\ streak_bugNoActOnce_probe_count_hist = <<"Pass", "Fail">>
+/\ streak_bugNoActOnce_probe_count_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ streak_bugNoActOnce_probe_count_hist = <<"Fail", "Fail">>
 /\ streak_bugNoActOnce_probe_count_running = TRUE
-/\ streak_bugNoActOnce_probe_count_psame = 1
+/\ streak_bugNoActOnce_probe_count_psame = 2
 /\ streak_bugNoActOnce_probe_count_fs = 0
 /\ streak_bugNoActOnce_probe_count_rat = 1
 /\ streak_bugNoActOnce_probe_count_pseq = 2
@@ -71,16 +74,17 @@ State 3: <streak_bugNoActOnce_probe_count_ProbeRun line 336, col 3 to line 397, 
   missed |-> FALSE ]
 /\ streak_bugNoActOnce_probe_count_runs = 2
 /\ streak_bugNoActOnce_probe_count_tseqs = {}
-/\ streak_bugNoActOnce_probe_count_rsame = 1
+/\ streak_bugNoActOnce_probe_count_rsame = 2
 /\ streak_bugNoActOnce_probe_count_pst = "Fail"
 /\ streak_bugNoActOnce_probe_count_rst = "Fail"
 /\ streak_bugNoActOnce_probe_count_rseq = 2
 
-State 4: <streak_bugNoActOnce_probe_count_ProbeRun line 336, col 3 to line 397, col 46 of module streak_bugNoActOnce>
+State 4: <streak_bugNoActOnce_probe_count_ProbeRun line 357, col 3 to line 423, col 53 of module streak_bugNoActOnce>
 /\ streak_bugNoActOnce_probe_count_terms = 0
-/\ streak_bugNoActOnce_probe_count_hist = <<"Pass", "Fail", "Fail">>
+/\ streak_bugNoActOnce_probe_count_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ streak_bugNoActOnce_probe_count_hist = <<"Fail", "Fail", "Fail">>
 /\ streak_bugNoActOnce_probe_count_running = TRUE
-/\ streak_bugNoActOnce_probe_count_psame = 2
+/\ streak_bugNoActOnce_probe_count_psame = 3
 /\ streak_bugNoActOnce_probe_count_fs = 0
 /\ streak_bugNoActOnce_probe_count_rat = 2
 /\ streak_bugNoActOnce_probe_count_pseq = 3
@@ -97,85 +101,61 @@ State 4: <streak_bugNoActOnce_probe_count_ProbeRun line 336, col 3 to line 397, 
   missed |-> FALSE ]
 /\ streak_bugNoActOnce_probe_count_runs = 3
 /\ streak_bugNoActOnce_probe_count_tseqs = {}
-/\ streak_bugNoActOnce_probe_count_rsame = 2
+/\ streak_bugNoActOnce_probe_count_rsame = 3
 /\ streak_bugNoActOnce_probe_count_pst = "Fail"
 /\ streak_bugNoActOnce_probe_count_rst = "Fail"
 /\ streak_bugNoActOnce_probe_count_rseq = 3
 
-State 5: <streak_bugNoActOnce_probe_count_ProbeRun line 336, col 3 to line 397, col 46 of module streak_bugNoActOnce>
-/\ streak_bugNoActOnce_probe_count_terms = 0
-/\ streak_bugNoActOnce_probe_count_hist = <<"Pass", "Fail", "Fail", "Fail">>
-/\ streak_bugNoActOnce_probe_count_running = TRUE
-/\ streak_bugNoActOnce_probe_count_psame = 3
-/\ streak_bugNoActOnce_probe_count_fs = 0
-/\ streak_bugNoActOnce_probe_count_rat = 3
-/\ streak_bugNoActOnce_probe_count_pseq = 4
-/\ streak_bugNoActOnce_probe_count_clock = 4
-/\ streak_bugNoActOnce_probe_count_A = 0
-/\ streak_bugNoActOnce_probe_count_M = 0
-/\ streak_bugNoActOnce_probe_count_g = [ missTouched |-> FALSE,
-  staleChange |-> FALSE,
-  early |-> FALSE,
-  pt |-> 0,
-  ready |-> FALSE,
-  seen |-> 0,
-  stoppedTerm |-> FALSE,
-  missed |-> FALSE ]
-/\ streak_bugNoActOnce_probe_count_runs = 4
-/\ streak_bugNoActOnce_probe_count_tseqs = {}
-/\ streak_bugNoActOnce_probe_count_rsame = 3
-/\ streak_bugNoActOnce_probe_count_pst = "Fail"
-/\ streak_bugNoActOnce_probe_count_rst = "Fail"
-/\ streak_bugNoActOnce_probe_count_rseq = 4
-
-State 6: <streak_bugNoActOnce_probe_count_ConsumerLook line 530, col 3 to line 609, col 45 of module streak_bugNoActOnce>
+State 5: <streak_bugNoActOnce_probe_count_ConsumerLook line 556, col 3 to line 640, col 53 of module streak_bugNoActOnce>
 /\ streak_bugNoActOnce_probe_count_terms = 1
-/\ streak_bugNoActOnce_probe_count_hist = <<"Pass", "Fail", "Fail", "Fail">>
+/\ streak_bugNoActOnce_probe_count_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ streak_bugNoActOnce_probe_count_hist = <<"Fail", "Fail", "Fail">>
 /\ streak_bugNoActOnce_probe_count_running = TRUE
 /\ streak_bugNoActOnce_probe_count_psame = 3
 /\ streak_bugNoActOnce_probe_count_fs = 0
-/\ streak_bugNoActOnce_probe_count_rat = 3
-/\ streak_bugNoActOnce_probe_count_pseq = 4
-/\ streak_bugNoActOnce_probe_count_clock = 4
-/\ streak_bugNoActOnce_probe_count_A = 4
+/\ streak_bugNoActOnce_probe_count_rat = 2
+/\ streak_bugNoActOnce_probe_count_pseq = 3
+/\ streak_bugNoActOnce_probe_count_clock = 3
+/\ streak_bugNoActOnce_probe_count_A = 3
 /\ streak_bugNoActOnce_probe_count_M = 0
 /\ streak_bugNoActOnce_probe_count_g = [ missTouched |-> FALSE,
   staleChange |-> FALSE,
   early |-> FALSE,
   pt |-> 0,
   ready |-> FALSE,
-  seen |-> 4,
+  seen |-> 3,
   stoppedTerm |-> FALSE,
   missed |-> FALSE ]
-/\ streak_bugNoActOnce_probe_count_runs = 4
-/\ streak_bugNoActOnce_probe_count_tseqs = {4}
+/\ streak_bugNoActOnce_probe_count_runs = 3
+/\ streak_bugNoActOnce_probe_count_tseqs = {3}
 /\ streak_bugNoActOnce_probe_count_rsame = 3
 /\ streak_bugNoActOnce_probe_count_pst = "Fail"
 /\ streak_bugNoActOnce_probe_count_rst = "Fail"
-/\ streak_bugNoActOnce_probe_count_rseq = 4
+/\ streak_bugNoActOnce_probe_count_rseq = 3
 
-State 7: <streak_bugNoActOnce_probe_count_ConsumerLook line 530, col 3 to line 609, col 45 of module streak_bugNoActOnce>
+State 6: <streak_bugNoActOnce_probe_count_ConsumerLook line 556, col 3 to line 640, col 53 of module streak_bugNoActOnce>
 /\ streak_bugNoActOnce_probe_count_terms = 2
-/\ streak_bugNoActOnce_probe_count_hist = <<"Pass", "Fail", "Fail", "Fail">>
+/\ streak_bugNoActOnce_probe_count_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ streak_bugNoActOnce_probe_count_hist = <<"Fail", "Fail", "Fail">>
 /\ streak_bugNoActOnce_probe_count_running = TRUE
 /\ streak_bugNoActOnce_probe_count_psame = 3
 /\ streak_bugNoActOnce_probe_count_fs = 0
-/\ streak_bugNoActOnce_probe_count_rat = 3
-/\ streak_bugNoActOnce_probe_count_pseq = 4
-/\ streak_bugNoActOnce_probe_count_clock = 4
-/\ streak_bugNoActOnce_probe_count_A = 4
+/\ streak_bugNoActOnce_probe_count_rat = 2
+/\ streak_bugNoActOnce_probe_count_pseq = 3
+/\ streak_bugNoActOnce_probe_count_clock = 3
+/\ streak_bugNoActOnce_probe_count_A = 3
 /\ streak_bugNoActOnce_probe_count_M = 0
 /\ streak_bugNoActOnce_probe_count_g = [ missTouched |-> FALSE,
   staleChange |-> TRUE,
   early |-> FALSE,
   pt |-> 0,
   ready |-> FALSE,
-  seen |-> 4,
+  seen |-> 3,
   stoppedTerm |-> FALSE,
   missed |-> FALSE ]
-/\ streak_bugNoActOnce_probe_count_runs = 4
-/\ streak_bugNoActOnce_probe_count_tseqs = {4}
+/\ streak_bugNoActOnce_probe_count_runs = 3
+/\ streak_bugNoActOnce_probe_count_tseqs = {3}
 /\ streak_bugNoActOnce_probe_count_rsame = 3
 /\ streak_bugNoActOnce_probe_count_pst = "Fail"
 /\ streak_bugNoActOnce_probe_count_rst = "Fail"
-/\ streak_bugNoActOnce_probe_count_rseq = 4
+/\ streak_bugNoActOnce_probe_count_rseq = 3

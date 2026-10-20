@@ -1,0 +1,37 @@
+
+  lease_conf_bugRetryOffByOne
+    1) lease_conf_bugRetryOffByOne::cid_lease::FifthCrashAtCeilingBoundaryIsPlacedAgain failed after 1 test(s)
+
+  1 failed
+
+  1) lease_conf_bugRetryOffByOne::cid_lease::FifthCrashAtCeilingBoundaryIsPlacedAgain:
+       Error [QNT508]: Expect condition does not hold true
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/cid_lease.qnt:709:50
+        709:   run FifthCrashAtCeilingBoundaryIsPlacedAgain = init
+                                                              ^^^^
+        710:     .then(Assign(1)).then(Launch(1)).expect(Safety and st(1) == "running" and att.get(1) == 0)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        711:     .then((CEIL - 1).reps(_ =>
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        712:       VmmCrash(1).expect(Safety and st(1) == "ended" and al.get(1).retry and not(al.get(1).ex) and lease.get(offOf(1)) == 1)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        713:         .then(Assign(1)).expect(Safety and st(1) == "leased" and pstOf(1) == "held")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        714:         .then(Launch(1)).expect(Safety and st(1) == "running" and pstOf(1) == "retiring")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        715:         .then(Release(1)).expect(Safety and st(1) == "running" and pstOf(1) == "none")))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        716:     .expect(Safety and st(1) == "running" and att.get(1) == CEIL - 1 and pstOf(1) == "none")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        717:     .then(VmmCrash(1))
+             ^^^^^^^^^^^^^^^^^^^^^^
+        718:     .expect(Safety and st(1) == "ended" and al.get(1).retry and not(al.get(1).ex) and att.get(1) == CEIL - 1
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        719:       and lease.get(offOf(1)) == 1)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Use --seed=0x314099c39aab8e78 --match=lease_conf_bugRetryOffByOne::cid_lease::FifthCrashAtCeilingBoundaryIsPlacedAgain to repeat.
+
+
+  Use --verbosity=3 to show executions.
+  Further debug with: quint test --verbosity=3 /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/hazard/cid_lease_hazards.qnt
+error: Tests failed

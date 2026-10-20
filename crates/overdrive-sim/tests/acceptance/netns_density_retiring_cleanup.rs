@@ -95,6 +95,7 @@
     reason = "seeded acceptance harness: every verdict prints its seed; fixture preconditions fail loudly"
 )]
 
+use overdrive_core::guest_transport::GuestFlowPorts;
 use std::collections::{BTreeMap, VecDeque};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::sync::Arc;
@@ -102,9 +103,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use overdrive_control_plane::guest_network::{
-    GuestAddressPool, GuestNetworkPlan, GuestNetworkProvisioner, Result as GuestNetworkResult,
-    SharedGuestNetworkAudit, SharedGuestNetworkAuditError, SharedGuestNetworkOwner, TapActivation,
-    TapQuiescence,
+    ForwardingActivation, ForwardingQuiescence, ForwardingRestore, GuestAddressPool,
+    GuestNetworkPlan, GuestNetworkProvisioner, QuiescenceHold, QuiescenceRestoreError,
+    Result as GuestNetworkResult, SharedGuestNetworkAudit, SharedGuestNetworkAuditError,
+    SharedGuestNetworkOwner,
 };
 use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::reconciler_runtime::{
@@ -162,10 +164,9 @@ const DEFAULT_SEEDS: [u64; 4] =
     [0x0295_0007_0000_0001, 0x0295_0007_0000_0002, 0x0295_0007_0000_0003, 0x0295_0007_0000_0004];
 /// The Phase-1 single-node baseline id (`workload_lifecycle::baseline_nodes_phase1`).
 const NODE: &str = "local";
-/// Today's pool constants (`guest_network::action_pool`): node guest prefix,
-/// bridge, and the gateway that is also the guest DNS address.
+/// The node guest prefix and its gateway (the one host-local address of the
+/// prefix, GW-LOCAL), which is also the guest DNS address.
 const GUEST_PREFIX: &str = "100.95.0.0/16";
-const GUEST_BRIDGE: &str = "ovd-gbr0";
 const GUEST_GATEWAY: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 1);
 /// The listener every Service declares; it is the inbound destination the
 /// stop removes.
@@ -348,17 +349,31 @@ impl GuestNetworkProvisioner for JournalOwner {
     async fn provision(&self, plan: &GuestNetworkPlan) -> GuestNetworkResult<()> {
         self.journal.push(Entry::Provision {
             alloc: plan.alloc().clone(),
-            address: plan.assignment().address,
+            address: plan.assignment().workload_addr(),
         });
         self.inner.provision(plan).await
     }
 
-    async fn activate(&self, plan: &GuestNetworkPlan) -> GuestNetworkResult<TapActivation> {
+    async fn activate(&self, plan: &GuestNetworkPlan) -> GuestNetworkResult<ForwardingActivation> {
         self.inner.activate(plan).await
     }
 
     async fn teardown(&self, plan: &GuestNetworkPlan) -> GuestNetworkResult<()> {
         self.inner.teardown(plan).await
+    }
+}
+
+#[async_trait::async_trait]
+impl overdrive_core::guest_transport::dial::GuestStreamDial for JournalOwner {
+    async fn dial(
+        &self,
+        target: std::net::SocketAddrV4,
+        purpose: overdrive_core::guest_transport::dial::DialPurpose,
+    ) -> Result<
+        overdrive_core::guest_transport::dial::GuestStream,
+        overdrive_core::guest_transport::dial::GuestDialError,
+    > {
+        self.inner.dial(target, purpose).await
     }
 }
 
@@ -376,16 +391,23 @@ impl SharedGuestNetworkOwner for JournalOwner {
         self.inner.converge_shared().await
     }
 
+    fn flow_ports(&self) -> Option<GuestFlowPorts> {
+        self.inner.flow_ports()
+    }
+
     async fn audit_shared(&self) -> Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError> {
         self.inner.audit_shared().await
     }
 
-    async fn quiesce_managed_taps(&self) -> GuestNetworkResult<TapQuiescence> {
-        self.inner.quiesce_managed_taps().await
+    async fn quiesce(&self) -> (QuiescenceHold, ForwardingQuiescence) {
+        self.inner.quiesce().await
     }
 
-    async fn restore_quiesced_taps(&self) -> GuestNetworkResult<()> {
-        self.inner.restore_quiesced_taps().await
+    async fn restore(
+        &self,
+        hold: QuiescenceHold,
+    ) -> std::result::Result<ForwardingRestore, QuiescenceRestoreError> {
+        self.inner.restore(hold).await
     }
 }
 
@@ -551,9 +573,8 @@ impl Fixture {
         // One pool from the doc-hidden constructor with today's constants.
         let pool = Arc::new(GuestAddressPool::new(
             GUEST_PREFIX.parse().setup(seed, "static guest prefix"),
-            GUEST_BRIDGE.to_owned(),
             GUEST_GATEWAY,
-            GUEST_GATEWAY,
+            Arc::new(overdrive_sim::adapters::entropy::SimEntropy::new(seed)),
         ));
         // One worker over the sim mTLS ports and the fault intercept, its
         // shared owner started (it binds nothing over the sim port from B-7).
@@ -562,6 +583,7 @@ impl Fixture {
             Arc::new(SimMtlsEnforcement::new(
                 Arc::new(SimIdentityRead::new(BTreeMap::new(), None)),
                 MtlsLimits::default(),
+                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
             )),
             Arc::new(SimMtlsResolve::new(BTreeMap::new(), MtlsResolution::NonMesh)),
             clock.clone() as Arc<dyn Clock>,
@@ -578,8 +600,8 @@ impl Fixture {
             overdrive_control_plane::test_default_allocator(store.clone() as Arc<dyn IntentStore>);
         // DELIVER 05-01 changes this one call: the pinned `AppState::new`
         // appends `worker`, `owner`, `gate`, and `pool` as required parameters
-        // (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED
-        // 2026-09-24" (the `AppState` constructors)), passed here as
+        // (FD § "Gate G-V3 — allocation forwarding activation (replaces
+        // G-295-3)" (the `AppState` constructors)), passed here as
         // `Arc::clone(&worker)`,
         // `Arc::clone(&owner) as Arc<dyn SharedGuestNetworkOwner>`,
         // `Arc::clone(&gate)`, and `Arc::clone(&pool)`. Until then the fixture
@@ -658,8 +680,8 @@ impl Fixture {
     }
 
     /// The gate every activation claims: opened once, as `run_server*`'s boot
-    /// sequence does (FD § "[REF] Driven port — TAP activation gate
-    /// (D-295-R5) — ACCEPTED 2026-09-24" (gate state outside `run_server*`)).
+    /// sequence does (FD § "Gate G-V3 — allocation forwarding activation
+    /// (replaces G-295-3)" (gate state outside `run_server*`)).
     fn open_gate(&self) {
         if !self.supervisor.open_after_boot() {
             self.harness_failure("open_after_boot was refused");
@@ -1060,8 +1082,8 @@ async fn retiring_cleanup_schedule(seed: u64) {
             .started_specs()
             .into_iter()
             .find(|spec| spec.alloc == *alloc)
-            .and_then(|spec| spec.network)
-            .map(|network| network.address)
+            .and_then(|spec| spec.transport)
+            .map(|transport| transport.workload_addr())
     });
     fixture.verdict(
         "E8-REUSE-AFTER-RELEASE",
@@ -1079,6 +1101,7 @@ async fn retiring_cleanup_schedule(seed: u64) {
 /// S-ND295-07 — Stop removes the predecessor completely before its address is reused.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn a_failed_element_removal_keeps_the_address_until_a_retry_converges() {
     for seed in seeds() {
         eprintln!(

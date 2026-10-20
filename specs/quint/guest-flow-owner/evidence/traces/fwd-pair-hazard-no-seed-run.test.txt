@@ -1,0 +1,25 @@
+
+  pair_bugNoSeed
+    1) pair_bugNoSeed::fwd_pair::EarlyVsockHalfCloseBeforeGuestAttachCompletes failed after 1 test(s)
+
+  1 failed
+
+  1) pair_bugNoSeed::fwd_pair::EarlyVsockHalfCloseBeforeGuestAttachCompletes:
+       Error [QNT508]: Expect condition does not hold true
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/fwd_pair.qnt:1557:55
+        1557:   run EarlyVsockHalfCloseBeforeGuestAttachCompletes = InitWith("stream").then(Attach("h"))
+                                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        1558:     .then(Write("hg")).then(Fin("hg")).then(Hop0("hg")).then(HopEnd0("hg")).then(VCtl("hg"))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        1559:     .expect(Safety and vs.get("g").ps == Set("S") and vs.get("g").st == "est" and pr.get("g").ph == "unattached")
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        1560:     .then(Attach("g"))
+              ^^^^^^^^^^^^^^^^^^^^^^
+        1561:     .expect(Safety and attRes.get("g") == "ok" and vs.get("g").cls == "clean" and vs.get("g").clsAt == "attach")
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Use --seed=0x87bdb7efe955c452 --match=pair_bugNoSeed::fwd_pair::EarlyVsockHalfCloseBeforeGuestAttachCompletes to repeat.
+
+
+  Use --verbosity=3 to show executions.
+  Further debug with: quint test --verbosity=3 /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/hazard/fwd_pair_attach_hazards_2.qnt
+error: Tests failed

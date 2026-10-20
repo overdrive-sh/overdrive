@@ -1,43 +1,127 @@
 State 1: <Initial predicate>
-/\ lease_bugResetReboots_cid_lease_g = [clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE]
+/\ lease_bugResetReboots_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"none", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_bugResetReboots_cid_lease_att = <<0, 0>>
 /\ lease_bugResetReboots_cid_lease_cursor = 0
 /\ lease_bugResetReboots_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugResetReboots_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugResetReboots_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugResetReboots_cid_lease_up = TRUE
 /\ lease_bugResetReboots_cid_lease_reclaimed = TRUE
 /\ lease_bugResetReboots_cid_lease_bootLeft = -1
-/\ lease_bugResetReboots_cid_lease_al = << [st |-> "wait", off |-> -1, retry |-> FALSE],
-   [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+/\ lease_bugResetReboots_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
 
-State 2: <lease_bugResetReboots_cid_lease_Assign line 664, col 3 to line 703, col 78 of module lease_bugResetReboots>
-/\ lease_bugResetReboots_cid_lease_g = [clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE]
+State 2: <lease_bugResetReboots_cid_lease_Assign line 1315, col 3 to line 1424, col 53 of module lease_bugResetReboots>
+/\ lease_bugResetReboots_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"none", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_bugResetReboots_cid_lease_att = <<0, 0>>
 /\ lease_bugResetReboots_cid_lease_cursor = 1
 /\ lease_bugResetReboots_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugResetReboots_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugResetReboots_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugResetReboots_cid_lease_up = TRUE
 /\ lease_bugResetReboots_cid_lease_reclaimed = TRUE
 /\ lease_bugResetReboots_cid_lease_bootLeft = -1
-/\ lease_bugResetReboots_cid_lease_al = << [st |-> "leased", off |-> 0, retry |-> FALSE],
-   [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+/\ lease_bugResetReboots_cid_lease_al = << [ st |-> "leased",
+     off |-> 0,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
 
-State 3: <lease_bugResetReboots_cid_lease_Launch line 109, col 3 to line 161, col 49 of module lease_bugResetReboots>
-/\ lease_bugResetReboots_cid_lease_g = [clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE]
+State 3: <lease_bugResetReboots_cid_lease_Launch line 1485, col 3 to line 1571, col 53 of module lease_bugResetReboots>
+/\ lease_bugResetReboots_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"none", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_bugResetReboots_cid_lease_att = <<0, 0>>
 /\ lease_bugResetReboots_cid_lease_cursor = 1
 /\ lease_bugResetReboots_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugResetReboots_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugResetReboots_cid_lease_dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugResetReboots_cid_lease_up = TRUE
 /\ lease_bugResetReboots_cid_lease_reclaimed = TRUE
 /\ lease_bugResetReboots_cid_lease_bootLeft = -1
-/\ lease_bugResetReboots_cid_lease_al = << [st |-> "running", off |-> 0, retry |-> FALSE],
-   [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+/\ lease_bugResetReboots_cid_lease_al = << [ st |-> "running",
+     off |-> 0,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
 
-State 4: <lease_bugResetReboots_cid_lease_GuestReset line 306, col 3 to line 329, col 10 of module lease_bugResetReboots>
-/\ lease_bugResetReboots_cid_lease_g = [clash |-> FALSE, rebooted |-> TRUE, reclaimed |-> FALSE]
+State 4: <lease_bugResetReboots_cid_lease_GuestReset line 1594, col 3 to line 1624, col 53 of module lease_bugResetReboots>
+/\ lease_bugResetReboots_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> TRUE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"none", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_bugResetReboots_cid_lease_att = <<0, 0>>
 /\ lease_bugResetReboots_cid_lease_cursor = 1
 /\ lease_bugResetReboots_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugResetReboots_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugResetReboots_cid_lease_dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugResetReboots_cid_lease_up = TRUE
 /\ lease_bugResetReboots_cid_lease_reclaimed = TRUE
 /\ lease_bugResetReboots_cid_lease_bootLeft = -1
-/\ lease_bugResetReboots_cid_lease_al = << [st |-> "running", off |-> 0, retry |-> FALSE],
-   [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+/\ lease_bugResetReboots_cid_lease_al = << [ st |-> "running",
+     off |-> 0,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>

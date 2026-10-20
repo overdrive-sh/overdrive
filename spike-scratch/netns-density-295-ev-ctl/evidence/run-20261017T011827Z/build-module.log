@@ -1,0 +1,17 @@
+make: Entering directory '/usr/src/linux-headers-7.0.0-29-generic'
+make[1]: Entering directory '/var/tmp/ev-ctl-work/out/modbuild'
+warning: the compiler differs from the one used to build the kernel
+  The kernel was built by: x86_64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+  You are using:           gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+warning: pahole version differs from the one used to build the kernel
+  The kernel was built with: 131
+  You are using:             0
+  CC [M]  ovd_fwd.o
+  MODPOST Module.symvers
+  CC [M]  ovd_fwd.mod.o
+  CC [M]  .module-common.o
+  LD [M]  ovd_fwd.ko
+  BTF [M] ovd_fwd.ko
+Skipping BTF generation for ovd_fwd.ko due to unavailability of vmlinux
+make[1]: Leaving directory '/var/tmp/ev-ctl-work/out/modbuild'
+make: Leaving directory '/usr/src/linux-headers-7.0.0-29-generic'

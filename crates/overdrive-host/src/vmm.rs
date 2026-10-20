@@ -41,8 +41,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use command_fds::{CommandFdExt, FdMapping};
-use overdrive_core::guest_transport::ClaimedGuestCid;
+use overdrive_core::guest_transport::GuestCid;
 use overdrive_core::traits::driver::ConfinementControl;
 use overdrive_core::traits::vmm::{
     Result, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmDiagnostics,
@@ -267,8 +266,8 @@ impl CloudHypervisorVmm {
     /// `--landlock-rules` is rendered HERE — the sole site the 01-10 dst-lint
     /// clause sanctions; each rule VALUE comes from the pure
     /// [`LandlockRule::to_rule_arg`].
-    /// `vsock_arg` is the one `--vsock` device argument of the claimed CID
-    /// (§ *VMM backend contract*). Extracted from `create` purely to keep it
+    /// `vsock_arg` is the one `--vsock` device argument of the leased CID
+    /// (§ *VMM backend contract*, CID-NOCLAIM). Extracted from `create` purely to keep it
     /// within the line budget.
     fn build_confined_command(
         &self,
@@ -366,17 +365,15 @@ fn register_launch_child_hook(
     }
 }
 
-/// The claimed vsock device's launch handoff (D16-CLAIM, § *VMM backend
-/// contract*, ADR-0170): the one `--vsock cid=<claim.cid()>,backend=vhost-kernel,fd=<K>`
-/// argument and the descriptor mapping that installs the claimed
-/// `/dev/vhost-vsock` file (`vsock.into_device().vhost_fd()`) at `K` in the
-/// child before `exec`. A device without a `vhost_fd` (a simulated claim) is
-/// a typed `VmmError::Create` refusal.
+/// The one `--vsock` device argument of a launch (CID-NOCLAIM, § *VMM backend
+/// contract*): exactly `cid=<cid>,backend=vhost-kernel` — no `socket=` field,
+/// no `fd=` field. The VMM opens `/dev/vhost-vsock` itself; the launcher
+/// passes no vsock descriptor and no Overdrive process holds one.
 ///
-/// RED scaffold (DISTILL): DG-2 row 6 — the claim handoff to the VMM lands in
-/// the attachment cut.
-// SCAFFOLD: true — netns-density-295 DISTILL (DG-2 row 6, attachment cut).
-fn claimed_vsock_handoff(_vsock: ClaimedGuestCid) -> Result<(String, FdMapping)> {
+/// RED scaffold (DISTILL): the leased-CID launch argument lands in DELIVER step
+/// 3 (launch args).
+// SCAFFOLD: true — netns-density-295 DISTILL (DELIVER step 3, launch args).
+fn vhost_kernel_vsock_arg(_cid: GuestCid) -> String {
     panic!("Not yet implemented -- RED scaffold")
 }
 
@@ -442,7 +439,7 @@ impl Vmm for CloudHypervisorVmm {
     // ordering. `#[allow]` (not `#[expect]`) because the `#[async_trait]`
     // expansion makes `#[expect]` self-fulfilment unreliable here.
     #[allow(clippy::too_many_lines)]
-    async fn create(&self, config: &VmConfig, vsock: ClaimedGuestCid) -> Result<VmProcess> {
+    async fn create(&self, config: &VmConfig, cid: GuestCid) -> Result<VmProcess> {
         let launch_filter =
             launch_seccomp::VmmLaunchSeccompFilter::for_target().map_err(|error| {
                 VmmError::ConfinementUnavailable {
@@ -536,17 +533,13 @@ impl Vmm for CloudHypervisorVmm {
         }
 
         // §(c): spawn Cloud Hypervisor through the existing confinement
-        // wrapper, handing it the claimed vsock device (D16-CLAIM).
+        // wrapper with the leased CID (CID-NOCLAIM): the VMM opens
+        // `/dev/vhost-vsock` itself, so no descriptor is mapped into the child
+        // and every inherited descriptor above stderr is closed on exec.
         let wrapper = config.confinement.launch_wrapper(config.rlimit_fsize());
-        let (vsock_arg, vsock_mapping) = claimed_vsock_handoff(vsock)?;
-        let vsock_child_fd = vsock_mapping.child_fd;
+        let vsock_arg = vhost_kernel_vsock_arg(cid);
         let mut cmd = self.build_confined_command(config, &wrapper, &vsock_arg);
-        if let Err(error) = cmd.fd_mappings(vec![vsock_mapping]) {
-            return Err(VmmError::create(format!(
-                "mapping the claimed vsock device to child descriptor {vsock_child_fd} failed: {error}"
-            )));
-        }
-        register_launch_child_hook(&mut cmd, vsock_child_fd + 1, launch_filter);
+        register_launch_child_hook(&mut cmd, libc::STDERR_FILENO + 1, launch_filter);
         let launched_executable: OsString = cmd.as_std().get_program().to_owned();
 
         // `let-else` is deliberately NOT used here (unlike the `child.id()`
@@ -1318,7 +1311,7 @@ mod tests {
             "setpriv".to_owned(),
             "--reuid=991".to_owned(),
         ];
-        let vsock_arg = "cid=16777216,backend=vhost-kernel,fd=3";
+        let vsock_arg = "cid=16777216,backend=vhost-kernel";
 
         assert_eq!(
             REQUIRED_LAUNCH_TOOLS.as_slice(),
@@ -1360,6 +1353,45 @@ mod tests {
             ),
             "a missing wrapper must preserve the established confinement classification"
         );
+    }
+
+    /// CID-NOCLAIM (§ *VMM backend contract*): a launch's one vsock device is
+    /// `cid=<cid>,backend=vhost-kernel` for the leased CID, decimal — with no
+    /// `fd=` (the launcher hands the VMM no vsock descriptor) and no `socket=`
+    /// (no per-VM vsock socket). Every CID of the leased range renders the
+    /// same shape; the VMM opens `/dev/vhost-vsock` itself.
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    #[ignore = "pending DELIVER step 3"]
+    fn the_vsock_device_argument_names_the_leased_cid_and_the_vhost_kernel_backend_only() {
+        use overdrive_core::guest_transport::{GUEST_CID_BASE, GUEST_CID_SPAN};
+
+        for offset in [0, 1, 2, 0x0310, GUEST_CID_SPAN - 1] {
+            let cid = GuestCid::new(GUEST_CID_BASE + offset).expect("an in-range guest CID");
+            let arg = vhost_kernel_vsock_arg(cid);
+            assert_eq!(arg, format!("cid={},backend=vhost-kernel", GUEST_CID_BASE + offset));
+            assert!(!arg.contains("fd="), "no descriptor handoff: {arg}");
+            assert!(!arg.contains("socket="), "no per-VM vsock socket: {arg}");
+        }
+
+        let wrapper = vec!["prlimit".to_owned(), "--fsize=1073741824".to_owned()];
+        let cid = GuestCid::new(GUEST_CID_BASE).expect("an in-range guest CID");
+        let vmm = CloudHypervisorVmm::new().with_binary(PathBuf::from("/usr/bin/cloud-hypervisor"));
+        let command =
+            vmm.build_confined_command(&sample_config(), &wrapper, &vhost_kernel_vsock_arg(cid));
+        let args: Vec<_> =
+            command.as_std().get_args().map(|arg| arg.to_string_lossy().into_owned()).collect();
+        let devices: Vec<_> = args
+            .iter()
+            .enumerate()
+            .filter(|(_, arg)| *arg == "--vsock")
+            .map(|(index, _)| args[index + 1].clone())
+            .collect();
+        assert_eq!(devices, vec![format!("cid={GUEST_CID_BASE},backend=vhost-kernel")]);
     }
 }
 
@@ -2634,12 +2666,8 @@ mod launch_seccomp_kernel {
         let tap = ScratchTap::create();
         let queue = attach_scratch_queue(&tap.name);
 
-        let child = run_child(
-            "tasks",
-            &tap,
-            &queue,
-            Launch::Hooked { first_closed: CHILD_QUEUE_FD + 1 },
-        );
+        let child =
+            run_child("tasks", &tap, &queue, Launch::Hooked { first_closed: CHILD_QUEUE_FD + 1 });
         child.assert_completed();
         let descriptors = child.records("descriptors");
         assert_eq!(descriptors.len(), 1, "one descriptor report: {child}");
@@ -2739,8 +2767,7 @@ mod launch_seccomp_kernel {
     #[cfg(not(target_arch = "x86_64"))]
     #[tokio::test]
     async fn launch_on_a_target_without_a_program_is_refused_before_any_effect() {
-        use overdrive_core::guest_transport::{GUEST_CID_BASE, GuestCid, GuestCidClaim};
-        use overdrive_sim::adapters::guest_cid_claim::SimGuestCidClaim;
+        use overdrive_core::guest_transport::{GUEST_CID_BASE, GuestCid};
 
         use super::{
             ConfinementControl, RealVmmProbeSubstrate, Vmm, VmmError, VmmProbeError,
@@ -2764,9 +2791,8 @@ mod launch_seccomp_kernel {
         let run_dir = fixture.config.run_dir.path().to_path_buf();
         let run_dir_owner = owner_uid(&run_dir);
         let cid = GuestCid::new(GUEST_CID_BASE).expect("an in-range guest CID");
-        let claim = SimGuestCidClaim::new().claim(cid).expect("claim the launch's guest CID");
 
-        let result = fixture.vmm().create(&fixture.config, claim).await;
+        let result = fixture.vmm().create(&fixture.config, cid).await;
 
         match &result {
             Err(VmmError::ConfinementUnavailable {

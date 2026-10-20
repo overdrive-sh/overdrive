@@ -1,0 +1,1 @@
+{"ev": "case", "env": "k", "case": "churn", "pass": true, "detail": {"cycles": 300, "pairs_attached": 600, "pairs_ended_completed_or_aborted": 600, "completed": 0, "aborted": 600, "live_pairs_max_after_a_cycle": 0, "worst_detach_pair_ms": 4, "dg_ab": 280369, "dg_ba": 257149, "wall_ms": 7389}}

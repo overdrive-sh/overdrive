@@ -5,7 +5,7 @@
 //! netns-density-295 (`docs/feature/netns-density-295/feature-delta.md`
 //! § "Owner and provisioner" → *Kernel enforcement (D26, D26-PINS,
 //! ADR-0167)*; *Composition* boot step 8; DG-9). Scenario:
-//! `distill/test-scenarios-p5-egress-unframe-hostinternal.md` P5-S8;
+//! `distill/test-scenarios.md` (index) P5-S8;
 //! obligations R5-48 and the kernel-rule half of R5-7; gate G-V6. Anchored on
 //! P-47 (V-21, `spike/findings-v21.md`).
 //!
@@ -19,8 +19,12 @@
 //! the table, the next boot replaces it). No body writes an nft rule, a set
 //! or a chain itself. A marked userspace socket (`SO_MARK =
 //! OWNER_EGRESS_MARK`, DG-9) stands in for the owner's directly connected host
-//! socket H; the forwarder-redirect transmit on H (R5-7, F-4) is P6's walking
-//! skeleton through `serve` + `deploy`.
+//! socket H. Under EVMOD the bytes on H are sent by the in-kernel forwarder
+//! module on the owner's marked socket, so the kernel rule's verdict reaches
+//! the forwarder's send as `EPERM` (R5-7); these cells assert the nft
+//! verdict on the marked socket only, and the forwarder's own send outcome is
+//! the walking skeleton's through `serve` + `deploy` and the `overdrive-fwd`
+//! module suite.
 //!
 //! # Topology
 //!
@@ -37,9 +41,13 @@
 //! # Not here
 //!
 //! - `gateway:53` accepted and the guest prefix's broadcast address rejected
-//!   need the shared `local 100.95.0.0/16 dev lo src 100.95.0.1` route, which
-//!   only `overdrive-control-plane`'s `converge_shared` writes (D8a); a
-//!   worker-crate body would have to hand-install it.
+//!   need the gateway's host-local `/32` route on `lo` (GW-LOCAL, ADR-0152),
+//!   which only `overdrive-control-plane`'s boot convergence writes; a
+//!   worker-crate body would have to hand-install it. Those cells are in the
+//!   walking skeleton through `run_server` (P6-S13).
+//! - The forwarder's send on H (R5-7, F-4 projection: the module's send fails
+//!   `EPERM` under the rule) is the owner's and runs through `serve` +
+//!   `deploy` (P6-S13) and the `overdrive-fwd` Tier-3 suite.
 //!
 //! # Lane and isolation
 //!
@@ -87,6 +95,26 @@ use super::inbound_tproxy_harness::{KernelStateLock, build_worker, is_root, reco
 const VERDICT_BOUND: Duration = Duration::from_secs(1);
 /// How long a service is given to receive a datagram that must not arrive.
 const SETTLE: Duration = Duration::from_millis(300);
+
+/// Positive control of an absence oracle: polls `count` until it reaches
+/// `want` within [`SETTLE`], so a later "received nothing" after the same
+/// window is evidence that delivery on this path would have landed.
+fn wait_count(what: &str, count: impl Fn() -> u64, want: u64) {
+    let deadline = std::time::Instant::now() + SETTLE;
+    loop {
+        let got = count();
+        if got >= want {
+            assert_eq!(got, want, "{what}: the control delivered exactly once");
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{what}: the unmarked control did not land within {SETTLE:?} (got {got}), so the \
+             absence check after the same window would prove nothing"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
 
 const NS: &str = "nd295-hostint";
 const VETH_HOST: &str = "nd295hiH";
@@ -597,7 +625,7 @@ fn assert_udp_rejected(cell: &str, result: &io::Result<OwnedFd>) {
 
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER vsock attachment cut (new-step 14, host-internal deny set, D26 output rules)"]
+#[ignore = "pending DELIVER step 14"]
 async fn a_marked_tcp_connect_to_a_loopback_service_is_refused_econnrefused_without_hang() {
     let evidence = Evidence::begin("F-3-tcp-loopback");
     let _sandbox = EnforceSandbox::provision(evidence);
@@ -621,7 +649,7 @@ async fn a_marked_tcp_connect_to_a_loopback_service_is_refused_econnrefused_with
 
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER vsock attachment cut (new-step 14, host-internal deny set, D26 output rules)"]
+#[ignore = "pending DELIVER step 14"]
 async fn a_marked_tcp_connect_to_a_host_interface_address_is_refused() {
     let evidence = Evidence::begin("local-host-address");
     let sandbox = EnforceSandbox::provision(evidence);
@@ -643,19 +671,25 @@ async fn a_marked_tcp_connect_to_a_host_interface_address_is_refused() {
 
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER vsock attachment cut (new-step 14, host-internal deny set, D26 output rules)"]
+#[ignore = "pending DELIVER step 14"]
 async fn a_marked_udp_first_transmit_to_a_local_service_fails_eperm() {
     let evidence = Evidence::begin("F-3-udp-local");
     let _sandbox = EnforceSandbox::provision(evidence);
     let worker = boot_shared_table(evidence).await;
     let service = UdpService::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0), false);
+    // Positive control: an unmarked datagram to the same service lands
+    // within the window the absence check below waits.
+    let control = udp_first_transmit(service.addr, SocketOpts::default(), b"nd295-f3-control")
+        .expect("precondition: the unmarked control transmits");
+    wait_count("F-3 control", || service.datagrams(), 1);
+    drop(control);
 
     let result = udp_first_transmit(service.addr, owner_marked(), b"nd295-f3");
     evidence.record("transmit", format_args!("{result:?}"));
     std::thread::sleep(SETTLE);
 
     assert_udp_rejected("F-3-udp-local", &result);
-    assert_eq!(service.datagrams(), 0, "the local UDP service received nothing");
+    assert_eq!(service.datagrams(), 1, "the local UDP service received only the control");
     shutdown(&worker).await;
 }
 
@@ -665,7 +699,7 @@ async fn a_marked_udp_first_transmit_to_a_local_service_fails_eperm() {
 
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER vsock attachment cut (new-step 14, host-internal deny set, D26 output rules)"]
+#[ignore = "pending DELIVER step 14"]
 async fn a_marked_udp_socket_reusing_an_unmarked_flows_source_port_is_still_rejected() {
     let evidence = Evidence::begin("F-1-reuse");
     let _sandbox = EnforceSandbox::provision(evidence);
@@ -723,7 +757,9 @@ async fn a_marked_udp_socket_reusing_an_unmarked_flows_source_port_is_still_reje
 
 /// A marked transmit to a non-unicast `dst` reaches no host service: with
 /// `SO_BROADCAST` the rule rejects it `EPERM`; without it the transmit fails
-/// too. The wildcard host service and the neighbour's service count nothing.
+/// too. Positive control first: an unmarked `SO_BROADCAST` datagram to the
+/// same `dst` reaches the wildcard host service within the window, so the
+/// count staying at that one control is evidence, not a vacuous zero.
 async fn non_unicast_reaches_no_service(
     cell: &'static str,
     dst_of: impl Fn(&EnforceSandbox) -> Ipv4Addr,
@@ -733,6 +769,14 @@ async fn non_unicast_reaches_no_service(
     let worker = boot_shared_table(evidence).await;
     let host_service = UdpService::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0), false);
     let dst = SocketAddrV4::new(dst_of(&sandbox), host_service.addr.port());
+    let control = udp_first_transmit(
+        dst,
+        SocketOpts { broadcast: true, ..SocketOpts::default() },
+        b"nd295-f5-control",
+    )
+    .unwrap_or_else(|e| panic!("precondition {cell}: the unmarked broadcast control sends: {e}"));
+    wait_count(cell, || host_service.datagrams(), 1);
+    drop(control);
 
     for broadcast in [true, false] {
         let result = udp_first_transmit(
@@ -752,8 +796,8 @@ async fn non_unicast_reaches_no_service(
         }
         assert_eq!(
             host_service.datagrams(),
-            0,
-            "{cell}: the host service received nothing (SO_BROADCAST={broadcast})"
+            1,
+            "{cell}: the host service received only the control (SO_BROADCAST={broadcast})"
         );
     }
     shutdown(&worker).await;
@@ -761,21 +805,21 @@ async fn non_unicast_reaches_no_service(
 
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER vsock attachment cut (new-step 14, host-internal deny set, D26 output rules)"]
+#[ignore = "pending DELIVER step 14"]
 async fn a_marked_udp_transmit_to_a_subnet_directed_broadcast_reaches_no_service() {
     non_unicast_reaches_no_service("F-5-subnet-broadcast", EnforceSandbox::subnet_broadcast).await;
 }
 
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER vsock attachment cut (new-step 14, host-internal deny set, D26 output rules)"]
+#[ignore = "pending DELIVER step 14"]
 async fn a_marked_udp_transmit_to_the_limited_broadcast_reaches_no_service() {
     non_unicast_reaches_no_service("F-5-limited-broadcast", |_| Ipv4Addr::BROADCAST).await;
 }
 
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER vsock attachment cut (new-step 14, host-internal deny set, D26 output rules)"]
+#[ignore = "pending DELIVER step 14"]
 async fn a_marked_udp_transmit_to_the_all_hosts_multicast_group_is_rejected_eperm() {
     let evidence = Evidence::begin("F-5-multicast");
     let _sandbox = EnforceSandbox::provision(evidence);
@@ -787,6 +831,10 @@ async fn a_marked_udp_transmit_to_the_all_hosts_multicast_group_is_rejected_eper
     evidence.record("transmit", format_args!("{dst}: {result:?}"));
     std::thread::sleep(SETTLE);
 
+    // The oracle is the synchronous `EPERM`. No local socket is a member of
+    // 224.0.0.1, so an unmarked datagram would not land on this service
+    // either: the count below is supplementary, not a positive-controlled
+    // absence check.
     assert_udp_rejected("F-5-multicast", &result);
     assert_eq!(host_service.datagrams(), 0, "the host service received nothing");
     shutdown(&worker).await;
@@ -798,7 +846,7 @@ async fn a_marked_udp_transmit_to_the_all_hosts_multicast_group_is_rejected_eper
 
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER vsock attachment cut (new-step 14, host-internal deny set, D26 output rules)"]
+#[ignore = "pending DELIVER step 14"]
 async fn a_marked_tcp_connect_to_a_link_local_service_is_refused() {
     let evidence = Evidence::begin("link-local");
     let _sandbox = EnforceSandbox::provision(evidence);
@@ -811,6 +859,9 @@ async fn a_marked_tcp_connect_to_a_link_local_service_is_refused() {
         "precondition: an unmarked dial reaches the link-local service: {unmarked:?}"
     );
     drop(unmarked);
+    // Positive control: the unmarked accept is counted within the window the
+    // absence check below waits.
+    wait_count("link-local control", || service.accepted(), 1);
     let before = service.accepted();
 
     let outcome = tcp_connect(service.addr, owner_marked(), VERDICT_BOUND * 2);
@@ -828,7 +879,7 @@ async fn a_marked_tcp_connect_to_a_link_local_service_is_refused() {
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER vsock attachment cut (new-step 14, host-internal deny set, D26 output rules)"]
+#[ignore = "pending DELIVER step 14"]
 async fn a_marked_tcp_connect_to_a_neighbour_stays_reachable() {
     let evidence = Evidence::begin("F-5-neighbour");
     let sandbox = EnforceSandbox::provision(evidence);
@@ -858,7 +909,7 @@ async fn a_marked_tcp_connect_to_a_neighbour_stays_reachable() {
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER vsock attachment cut (new-step 14, host-internal deny set, D26 output rules)"]
+#[ignore = "pending DELIVER step 14"]
 async fn a_marked_udp_transmit_to_an_off_host_address_is_not_rejected() {
     let evidence = Evidence::begin("F-5-off-host");
     let _sandbox = EnforceSandbox::provision(evidence);
@@ -880,7 +931,7 @@ async fn a_marked_udp_transmit_to_an_off_host_address_is_not_rejected() {
 
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER vsock attachment cut (new-step 14, host-internal deny set, D26 output rules)"]
+#[ignore = "pending DELIVER step 14"]
 async fn a_packet_carrying_the_owner_bit_among_other_bits_is_refused() {
     let evidence = Evidence::begin("F-6-masked");
     let _sandbox = EnforceSandbox::provision(evidence);
@@ -902,7 +953,7 @@ async fn a_packet_carrying_the_owner_bit_among_other_bits_is_refused() {
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER vsock attachment cut (new-step 14, host-internal deny set, D26 output rules)"]
+#[ignore = "pending DELIVER step 14"]
 async fn a_packet_carrying_only_the_leg_s_or_tproxy_mark_reaches_a_local_service() {
     let evidence = Evidence::begin("F-6-other-marks");
     let _sandbox = EnforceSandbox::provision(evidence);
@@ -968,7 +1019,7 @@ impl Storm {
 
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER vsock attachment cut (new-step 14, host-internal deny set, D26 output rules)"]
+#[ignore = "pending DELIVER step 14"]
 async fn a_marked_connect_storm_across_repeated_table_replacements_reaches_no_local_service() {
     const RESTARTS: usize = 12;
     let evidence = Evidence::begin("F-2-replacement");

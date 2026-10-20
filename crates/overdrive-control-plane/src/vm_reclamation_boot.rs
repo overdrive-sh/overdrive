@@ -631,3 +631,595 @@ mod tests {
         );
     }
 }
+
+/// Test support (DISTILL): the host a `serve` composition runs on, simulated
+/// over one [`overdrive_sim::SimVmm`] that outlives every composition — the
+/// shape the boot-reclamation cells below and the `cid_lease` conformance
+/// driver (`guest_network::quint_cid_lease`) share.
+///
+/// - [`SimVmmHost`] is a test-local [`VmHostState`](overdrive_core::traits::vm_host_state::VmHostState)
+///   over the `SimVmm`: every simulated VMM process the host knows of has a
+///   cgroup scope and a run directory (a VM-exclusive surface, so an
+///   unsupervised one is reclaimable); `kill_scope` ends the scope's VMM
+///   processes through [`overdrive_sim::SimVmm::kill`], the SIGKILL a real
+///   `cgroup.kill` delivers. Built `gated`, it holds each kill until the test
+///   releases it ([`SimVmmHost::grant_kill`]) — the stepping the conformance
+///   driver needs to replay one `Reclaim(o)` at a time.
+/// - [`RecordingVmm`] is a test-local `Vmm` decorator that tells the host
+///   which allocation each created VMM process belongs to (the scope the VM
+///   driver places it in).
+/// - [`compose`] builds one `serve` composition over them: a fresh
+///   `GuestAddressPool`, a `VmDriver` (beacon intake bound over a stepped
+///   `SimBeaconIo`), and the `AppState` boot reclamation reads.
+///
+/// None of this authors a production decision: the pool leases, the VM driver
+/// launches and stops, and `converge` decides what to reclaim.
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::redundant_pub_crate,
+    reason = "test fixtures assert their preconditions; the fixture items are shared with sibling test modules"
+)]
+pub(crate) mod sim_vm_host {
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::net::Ipv4Addr;
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use async_trait::async_trait;
+    use ipnet::Ipv4Net;
+    use overdrive_core::SpiffeId;
+    use overdrive_core::cgroup::CgroupPath;
+    use overdrive_core::guest_transport::GuestCid;
+    use overdrive_core::id::{AllocationId, NodeId};
+    use overdrive_core::traits::driver::{
+        AllocationSpec, Driver, DriverPayload, Resources, VmPayload,
+    };
+    use overdrive_core::traits::intent_store::IntentStore;
+    use overdrive_core::traits::observation_store::ObservationStore;
+    use overdrive_core::traits::vm_host_state::{
+        ScopeFacts, VmHostObservation, VmHostState, VmHostStateProbeError,
+    };
+    use overdrive_core::traits::vmm::{
+        Result as VmmResult, VmControl, VmProcess, VmTermination, Vmm, VmmProbeError,
+    };
+    use overdrive_core::vm::beacon::BeaconIo;
+    use overdrive_core::vm::config::{
+        Gid, HostArch, KERNEL_MAGIC_WINDOW, VmConfig, VmConfinement, VmmIdentity,
+    };
+    use overdrive_sim::adapters::beacon_io::SimBeaconIo;
+    use overdrive_sim::adapters::clock::SimClock;
+    use overdrive_sim::adapters::entropy::SimEntropy;
+    use overdrive_sim::adapters::observation_store::SimObservationStore;
+    use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
+    use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm};
+    use overdrive_store_local::LocalIntentStore;
+    use overdrive_worker::probe_runner::ProbeRunner;
+    use overdrive_worker::{BeaconIntake, VmDriver, VmHostLayout};
+    use parking_lot::Mutex;
+    use tokio::sync::Notify;
+
+    use crate::AppState;
+    use crate::guest_network::{GuestAddressPool, GuestNetworkPlan};
+    use crate::reconciler_runtime::ReconcilerRuntime;
+
+    #[derive(Debug, Default)]
+    struct HostFacts {
+        /// Every VM the host knows of: its scope's VMM pids, until the scope
+        /// is killed and its run directory discarded.
+        vms: BTreeMap<AllocationId, BTreeSet<u32>>,
+        /// Kills of these pids are held until granted.
+        gated: bool,
+        /// Pids whose kill `kill_scope` is waiting for.
+        requested: BTreeSet<u32>,
+        /// Pids whose kill the test released.
+        granted: BTreeSet<u32>,
+    }
+
+    /// The simulated host's VM surfaces over one `SimVmm`.
+    pub(crate) struct SimVmmHost {
+        vmm: SimVmm,
+        facts: Mutex<HostFacts>,
+        wake: Notify,
+    }
+
+    impl SimVmmHost {
+        pub(crate) fn new(vmm: SimVmm, gated: bool) -> Arc<Self> {
+            Arc::new(Self {
+                vmm,
+                facts: Mutex::new(HostFacts { gated, ..HostFacts::default() }),
+                wake: Notify::new(),
+            })
+        }
+
+        fn record(&self, alloc: AllocationId, pid: u32) {
+            self.facts.lock().vms.entry(alloc).or_default().insert(pid);
+        }
+
+        /// The pids whose kill a `kill_scope` call is waiting for (gated).
+        pub(crate) fn kills_requested(&self) -> BTreeSet<u32> {
+            self.facts.lock().requested.clone()
+        }
+
+        /// Release the held kill of `pid` (gated).
+        pub(crate) fn grant_kill(&self, pid: u32) {
+            self.facts.lock().granted.insert(pid);
+            self.wake.notify_waiters();
+        }
+
+        /// Wake a waiting `kill_scope` to re-check its processes (after a
+        /// VMM exited by itself).
+        pub(crate) fn notify(&self) {
+            self.wake.notify_waiters();
+        }
+
+        /// Forget every outstanding kill request and grant: the `serve`
+        /// process whose boot reclamation made them died with them.
+        pub(crate) fn clear_requests(&self) {
+            let mut facts = self.facts.lock();
+            facts.requested.clear();
+            facts.granted.clear();
+        }
+
+        /// The VMM pids the host placed in `alloc`'s scope (the relabelling
+        /// of a production allocation to its VMM processes).
+        pub(crate) fn pids_of(&self, alloc: &AllocationId) -> BTreeSet<u32> {
+            self.facts.lock().vms.get(alloc).cloned().unwrap_or_default()
+        }
+
+        fn scope_alloc(&self, scope: &CgroupPath) -> Option<AllocationId> {
+            self.facts
+                .lock()
+                .vms
+                .keys()
+                .find(|alloc| CgroupPath::for_alloc(alloc) == *scope)
+                .cloned()
+        }
+    }
+
+    #[async_trait]
+    impl VmHostState for SimVmmHost {
+        fn kind(&self) -> &'static str {
+            "fixture-sim-vmm-host"
+        }
+
+        async fn probe(&self) -> Result<(), VmHostStateProbeError> {
+            Ok(())
+        }
+
+        async fn observe(&self) -> std::io::Result<VmHostObservation> {
+            let facts = self.facts.lock();
+            let mut observation = VmHostObservation::default();
+            for (alloc, pids) in &facts.vms {
+                let live = pids.iter().copied().filter(|pid| self.vmm.is_live(*pid)).collect();
+                observation.scopes.insert(alloc.clone(), ScopeFacts { pids: live });
+                observation.run_dirs.insert(alloc.clone());
+            }
+            drop(facts);
+            Ok(observation)
+        }
+
+        async fn kill_scope(&self, scope: &CgroupPath) -> std::io::Result<()> {
+            let Some(alloc) = self.scope_alloc(scope) else { return Ok(()) };
+            loop {
+                let notified = self.wake.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                let ready = {
+                    let mut facts = self.facts.lock();
+                    let pids = facts.vms.get(&alloc).cloned().unwrap_or_default();
+                    let live: Vec<u32> =
+                        pids.into_iter().filter(|pid| self.vmm.is_live(*pid)).collect();
+                    let held: Vec<u32> = live
+                        .iter()
+                        .copied()
+                        .filter(|pid| facts.gated && !facts.granted.contains(pid))
+                        .collect();
+                    if held.is_empty() {
+                        for pid in &live {
+                            facts.requested.remove(pid);
+                        }
+                        Some(live)
+                    } else {
+                        facts.requested.extend(held);
+                        None
+                    }
+                };
+                if let Some(live) = ready {
+                    for pid in live {
+                        self.vmm.kill(pid);
+                    }
+                    return Ok(());
+                }
+                notified.await;
+            }
+        }
+
+        async fn discard_artifacts(&self, alloc: &AllocationId) -> std::io::Result<()> {
+            self.facts.lock().vms.remove(alloc);
+            Ok(())
+        }
+    }
+
+    /// `Vmm` decorator: records each created VMM process under its
+    /// allocation on the host, then forwards unchanged.
+    pub(crate) struct RecordingVmm {
+        pub(crate) inner: SimVmm,
+        pub(crate) host: Arc<SimVmmHost>,
+    }
+
+    #[async_trait]
+    impl Vmm for RecordingVmm {
+        fn kind(&self) -> &'static str {
+            self.inner.kind()
+        }
+
+        async fn probe(&self) -> Result<(), VmmProbeError> {
+            self.inner.probe().await
+        }
+
+        async fn create(&self, config: &VmConfig, cid: GuestCid) -> VmmResult<VmProcess> {
+            let process = self.inner.create(config, cid).await?;
+            self.host.record(config.alloc.clone(), process.control.pid);
+            Ok(process)
+        }
+
+        async fn terminate(
+            &self,
+            control: &VmControl,
+            grace: Duration,
+        ) -> VmmResult<VmTermination> {
+            self.inner.terminate(control, grace).await
+        }
+    }
+
+    /// One `serve` composition: pool, VM driver, its beacon listener, and the
+    /// `AppState` boot reclamation reads.
+    pub(crate) struct VmComposition {
+        pub(crate) state: AppState,
+        pub(crate) driver: VmDriver,
+        pub(crate) pool: Arc<GuestAddressPool>,
+        pub(crate) root: PathBuf,
+    }
+
+    /// The node gateway of every fixture pool.
+    pub(crate) const GATEWAY: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 1);
+
+    fn stage_artifacts(root: &Path) {
+        std::fs::create_dir_all(root).expect("composition root");
+        std::fs::write(root.join("master.img"), b"deterministic-fixture-rootfs-bytes")
+            .expect("write synthetic master rootfs");
+        let mut header = vec![0_u8; KERNEL_MAGIC_WINDOW];
+        header[..4].copy_from_slice(b"\x7fELF");
+        std::fs::write(root.join("vmlinuz"), &header).expect("stage the synthetic kernel image");
+    }
+
+    /// Build one `serve` composition under `root` over the host's `vmm`.
+    pub(crate) async fn compose(
+        root: &Path,
+        vmm: &SimVmm,
+        host: &Arc<SimVmmHost>,
+        prefix: Ipv4Net,
+        seed: u64,
+    ) -> VmComposition {
+        stage_artifacts(root);
+        let clock = SimClock::new();
+        let beacon = Arc::new(SimBeaconIo::stepped(vmm.clone()));
+        let intake = BeaconIntake::bind(
+            Arc::clone(&beacon) as Arc<dyn BeaconIo>,
+            overdrive_core::guest_transport::VsockListenPort::KernelAssigned,
+        )
+        .await
+        .expect("the sim beacon listener binds");
+        let wiring =
+            overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(clock.clone()));
+        assert!(wiring.supervisor().open_after_boot(), "fixture EXEC gate opens");
+        let probe_runner = Arc::new(ProbeRunner::new(
+            Arc::new(SimTcpProber::new()),
+            Arc::new(SimHttpProber::new()),
+            Arc::new(clock.clone()),
+            Arc::new(SimObservationStore::single_peer(
+                NodeId::new("cid-lease").expect("valid node ID"),
+                0,
+            )) as Arc<dyn ObservationStore>,
+            Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        ));
+        let driver = VmDriver::new(
+            Arc::new(RecordingVmm { inner: vmm.clone(), host: Arc::clone(host) }),
+            Arc::new(clock.clone()),
+            Arc::new(SimCgroupFs::new()),
+            Arc::new(SimCgroupAccounting::new()),
+            probe_runner,
+            wiring.gate(),
+            VmHostLayout {
+                cgroup_root: root.join("cgroup"),
+                run_dir_root: root.join("run"),
+                clone_index_dir: root.join("clone-index"),
+                clone_staging_dir: root.join("clone-staging"),
+                arch: HostArch::X86_64,
+                confinement: VmConfinement::confined(
+                    VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: vec![] },
+                    1024,
+                ),
+            },
+            intake,
+        );
+        let pool =
+            Arc::new(GuestAddressPool::new(prefix, GATEWAY, Arc::new(SimEntropy::new(seed))));
+
+        let runtime =
+            ReconcilerRuntime::new_with_redb_view_store_for_test(root).expect("runtime::new");
+        let store_path = root.join("intent.redb");
+        let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
+        let obs: Arc<dyn ObservationStore> =
+            Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
+        let allocator = crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
+        let mut state = AppState::new(
+            store,
+            store_path,
+            obs,
+            Arc::new(runtime),
+            Arc::new(driver.clone()) as Arc<dyn Driver>,
+            Arc::new(clock.clone()),
+            Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+            Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(SimEntropy::new(0)))),
+            Arc::new(crate::identity_mgr::IdentityMgr::new(None)),
+            NodeId::new("writer-1").expect("valid NodeId"),
+            allocator,
+            crate::test_empty_listener_facts(),
+            Ipv4Addr::LOCALHOST,
+            crate::shared_network_test_ports::mtls_worker(),
+            crate::shared_network_test_ports::shared_guest_network_owner(),
+            crate::shared_network_test_ports::guest_network_exec_gate(),
+            Arc::clone(&pool),
+        );
+        state.vm_host_state = Arc::clone(host) as Arc<dyn VmHostState>;
+        VmComposition { state, driver, pool, root: root.to_path_buf() }
+    }
+
+    /// The VM spec of one lease: the plan's transport (leased CID and launch
+    /// token) over the artifacts staged under the composition's `root`.
+    pub(crate) fn vm_spec(root: &Path, plan: &GuestNetworkPlan) -> AllocationSpec {
+        AllocationSpec {
+            alloc: plan.alloc().clone(),
+            identity: SpiffeId::new("spiffe://overdrive.local/workload/cid-lease/alloc/x")
+                .expect("valid spiffe id"),
+            driver: DriverPayload::Vm(VmPayload {
+                command: "/sbin/init".to_owned(),
+                args: vec![],
+                kernel: root.join("vmlinuz"),
+                rootfs: root.join("master.img"),
+            }),
+            resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+            probe_descriptors: Vec::new(),
+            transport: Some(plan.assignment().clone()),
+            service_ports: Vec::new(),
+        }
+    }
+}
+
+/// Boot reclamation before any `assign` (NO-SURVIVE, CID-NOCLAIM; Gate G-V0,
+/// V-RECLAIM). One `SimVmm` outlives the compositions; a dropped composition
+/// is a crashed `serve` whose VMMs survive as orphans holding their devices.
+/// Observed at the driven ports: `SimVmm::vsock_device_holders` (QPROJ-7
+/// arbiter; Tier-3 pair `overdrive-host` `vsock_vmm_device`, V-30, V-RECLAIM)
+/// and the pool's `lease_observation` (QPROJ-2).
+#[cfg(test)]
+#[allow(clippy::expect_used, reason = "test fixtures assert their preconditions")]
+mod boot_reclamation_before_assign {
+    use std::collections::BTreeMap;
+    use std::time::Duration;
+
+    use ipnet::Ipv4Net;
+    use overdrive_core::id::AllocationId;
+    use overdrive_core::traits::driver::Driver;
+    use overdrive_sim::SimVmm;
+    use tempfile::TempDir;
+
+    use super::converge;
+    use super::sim_vm_host::{SimVmmHost, VmComposition, compose, vm_spec};
+
+    const PREFIX: &str = "100.95.0.0/29";
+
+    fn alloc(name: &str) -> AllocationId {
+        AllocationId::new(name).expect("valid allocation id")
+    }
+
+    /// Lease `name` and launch its VM; returns once the VMM opened its
+    /// device or its start ended: the VMM's pid (0 when nothing holds the
+    /// CID), whether the launch holds its device with its start still
+    /// pending (no guest READY in these cells), and the start task.
+    async fn lease_and_launch(
+        composition: &VmComposition,
+        vmm: &SimVmm,
+        name: &str,
+    ) -> (u32, bool, tokio::task::JoinHandle<()>) {
+        let plan = composition
+            .pool
+            .assign(alloc(name), &[], crate::shared_network_test_ports::test_owner_flow_ports())
+            .expect("a free offset");
+        let cid = plan.assignment().cid();
+        let spec = vm_spec(&composition.root, &plan);
+        let driver = composition.driver.clone();
+        let start = tokio::spawn(async move {
+            let _ = driver.start(&spec).await;
+        });
+        for _ in 0..10_000 {
+            if vmm.vsock_device_holders().contains_key(&cid) || start.is_finished() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        let held = vmm.vsock_device_holders().get(&cid).copied();
+        (held.unwrap_or(0), !start.is_finished() && held.is_some(), start)
+    }
+
+    /// A `serve` crash leaves its VMM running and holding its CID's device;
+    /// the restarted process's boot reclamation kills it before the pool's
+    /// first `assign`, so that `assign` — which takes the same first usable
+    /// offset, hence the same CID — launches a VMM that opens the device.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    #[ignore = "pending DELIVER attachment-cut step (15)"]
+    async fn boot_reclamation_ends_the_previous_processs_vmm_before_the_first_assign() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let prefix: Ipv4Net = PREFIX.parse().expect("prefix");
+        let vmm = SimVmm::new();
+        let host = SimVmmHost::new(vmm.clone(), false);
+
+        let crashed = compose(&tmp.path().join("serve-1"), &vmm, &host, prefix, 1).await;
+        let (orphan, launched, start) = lease_and_launch(&crashed, &vmm, "orphan-0").await;
+        assert!(launched, "precondition: the first process's VMM holds its device");
+        let orphan_cid = crashed.pool.lease_observation().leases[&alloc("orphan-0")].cid;
+        // `serve` crashes: its tasks and composition die; its VMM does not.
+        start.abort();
+        drop(crashed);
+        assert_eq!(
+            vmm.vsock_device_holders(),
+            BTreeMap::from([(orphan_cid, orphan)]),
+            "the crashed process's VMM survives as an orphan holding its device"
+        );
+
+        let restarted = compose(&tmp.path().join("serve-2"), &vmm, &host, prefix, 2).await;
+        assert!(
+            restarted.pool.lease_observation().leases.is_empty(),
+            "no lease survives (NO-SURVIVE)"
+        );
+        converge(&restarted.state).await.expect("boot reclamation converges");
+        assert!(
+            vmm.vsock_device_holders().is_empty(),
+            "the orphan was killed and its device released"
+        );
+        assert!(!vmm.is_live(orphan));
+
+        let (fresh, launched, _start) = lease_and_launch(&restarted, &vmm, "fresh-0").await;
+        let fresh_cid = restarted.pool.lease_observation().leases[&alloc("fresh-0")].cid;
+        assert_eq!(fresh_cid, orphan_cid, "the first assign takes the reclaimed CID again");
+        assert!(launched, "the new VMM opened the reclaimed CID's device: no clash");
+        assert_eq!(vmm.vsock_device_holders(), BTreeMap::from([(fresh_cid, fresh)]));
+    }
+
+    /// R5-55 (d), D-UP-19 — With two VMs running, a `serve` crash leaves both
+    /// as orphans holding their devices; the restarted process's one boot
+    /// reclamation (one `converge` call) kills both before the first
+    /// `assign`, and the new leases launch on the reclaimed CIDs without a
+    /// clash.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    #[ignore = "pending DELIVER attachment-cut step (15)"]
+    async fn one_boot_reclamation_kills_every_orphan_before_the_first_assign() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let prefix: Ipv4Net = PREFIX.parse().expect("prefix");
+        let vmm = SimVmm::new();
+        let host = SimVmmHost::new(vmm.clone(), false);
+
+        let crashed = compose(&tmp.path().join("serve-1"), &vmm, &host, prefix, 1).await;
+        let (first, launched_first, start_first) =
+            lease_and_launch(&crashed, &vmm, "orphan-0").await;
+        let (second, launched_second, start_second) =
+            lease_and_launch(&crashed, &vmm, "orphan-1").await;
+        assert!(launched_first && launched_second, "precondition: both VMMs hold their devices");
+        let orphans = crashed.pool.lease_observation();
+        let cids = [orphans.leases[&alloc("orphan-0")].cid, orphans.leases[&alloc("orphan-1")].cid];
+        start_first.abort();
+        start_second.abort();
+        drop(crashed);
+        assert_eq!(
+            vmm.vsock_device_holders(),
+            BTreeMap::from([(cids[0], first), (cids[1], second)]),
+            "both VMMs survive the crash as orphans"
+        );
+
+        let restarted = compose(&tmp.path().join("serve-2"), &vmm, &host, prefix, 2).await;
+        converge(&restarted.state).await.expect("one boot reclamation converges");
+        assert!(!vmm.is_live(first) && !vmm.is_live(second), "every orphan was killed");
+        assert!(vmm.vsock_device_holders().is_empty(), "every orphan device was released");
+
+        let (fresh_first, launched_first, _a) = lease_and_launch(&restarted, &vmm, "fresh-0").await;
+        let (fresh_second, launched_second, _b) =
+            lease_and_launch(&restarted, &vmm, "fresh-1").await;
+        let fresh = restarted.pool.lease_observation();
+        assert_eq!(
+            [fresh.leases[&alloc("fresh-0")].cid, fresh.leases[&alloc("fresh-1")].cid],
+            cids,
+            "the first assigns take the reclaimed CIDs again (next-fit from a fresh cursor)"
+        );
+        assert!(launched_first && launched_second, "no launch clashes on a reclaimed CID");
+        assert_eq!(
+            vmm.vsock_device_holders(),
+            BTreeMap::from([(cids[0], fresh_first), (cids[1], fresh_second)])
+        );
+    }
+
+    /// The counterexample G-V0 rules out: an `assign` before boot reclamation
+    /// hands the orphan's CID to a new lease, and that launch's VMM exits at
+    /// device setup (the existing pre-READY VMM-exit start failure) while the
+    /// orphan keeps its device.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    #[ignore = "pending DELIVER attachment-cut step (15)"]
+    async fn a_launch_on_an_orphans_cid_before_reclamation_fails_at_device_setup() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let prefix: Ipv4Net = PREFIX.parse().expect("prefix");
+        let vmm = SimVmm::new();
+        let host = SimVmmHost::new(vmm.clone(), false);
+
+        let crashed = compose(&tmp.path().join("serve-1"), &vmm, &host, prefix, 1).await;
+        let (orphan, _, start) = lease_and_launch(&crashed, &vmm, "orphan-0").await;
+        let orphan_cid = crashed.pool.lease_observation().leases[&alloc("orphan-0")].cid;
+        start.abort();
+        drop(crashed);
+
+        let restarted = compose(&tmp.path().join("serve-2"), &vmm, &host, prefix, 2).await;
+        let plan = restarted
+            .pool
+            .assign(
+                alloc("early-0"),
+                &[],
+                crate::shared_network_test_ports::test_owner_flow_ports(),
+            )
+            .expect("a free offset");
+        assert_eq!(plan.assignment().cid(), orphan_cid, "precondition: the orphan's CID");
+        let spec = vm_spec(&restarted.root, &plan);
+        let outcome = tokio::time::timeout(Duration::from_secs(10), restarted.driver.start(&spec))
+            .await
+            .expect("the start ends");
+        assert!(outcome.is_err(), "the VMM exits before READY: a start failure, got {outcome:?}");
+        assert_eq!(
+            vmm.vsock_device_holders(),
+            BTreeMap::from([(orphan_cid, orphan)]),
+            "the orphan keeps its device; the refused launch held nothing"
+        );
+    }
+
+    /// Boot reclamation ends only the VMMs the new process does not
+    /// supervise: a VMM the restarted process launched itself keeps running
+    /// with its device.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    #[ignore = "pending DELIVER attachment-cut step (15)"]
+    async fn boot_reclamation_leaves_a_supervised_vmm_running() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let prefix: Ipv4Net = PREFIX.parse().expect("prefix");
+        let vmm = SimVmm::new();
+        let host = SimVmmHost::new(vmm.clone(), false);
+
+        let composition = compose(&tmp.path().join("serve-1"), &vmm, &host, prefix, 1).await;
+        let (supervised, launched, _start) =
+            lease_and_launch(&composition, &vmm, "supervised-0").await;
+        assert!(launched, "precondition: the VMM holds its device");
+        let before = vmm.vsock_device_holders();
+
+        converge(&composition.state).await.expect("boot reclamation converges");
+        assert!(vmm.is_live(supervised), "a supervised VMM is not reclaimed");
+        assert_eq!(vmm.vsock_device_holders(), before, "its device is untouched");
+        assert!(
+            composition
+                .driver
+                .live_allocations()
+                .is_some_and(|live| live.contains(&alloc("supervised-0"))),
+            "the driver still supervises it"
+        );
+    }
+}

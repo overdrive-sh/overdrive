@@ -19,8 +19,9 @@
 //!   (f) `from_config` with malformed base64 CA → `CliError::ConfigLoad`
 //!       with non-raw cause
 
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use overdrive_cli::http_client::{ApiClient, CliError};
@@ -28,11 +29,14 @@ use overdrive_control_plane::api::{
     IdempotencyOutcome, SubmitWorkloadRequest, WorkloadDescription,
 };
 use overdrive_control_plane::tls_bootstrap::{mint_ephemeral_ca, write_trust_triple};
-use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
+use overdrive_control_plane::{NodeAdapters, ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{DriverInput, JobSpecInput, ResourcesInput};
 use overdrive_core::api::describe::DescribeSpecOutput;
 use overdrive_core::api::submit::SubmitSpecInput;
+use overdrive_core::guest_transport::NodeVsockPortConfig;
 use overdrive_host::RealCgroupFs;
+use overdrive_sim::adapters::dataplane::SimDataplane;
+use overdrive_sim::adapters::{SimDataplaneComposer, SimGuestDnsFactory, SimKek, SimMtlsIntercept};
 use tempfile::TempDir;
 
 /// Spawn a server on an ephemeral port and return (handle, bound addr,
@@ -51,24 +55,28 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, std::path::PathBu
         bind: "127.0.0.1:0".parse().expect("parse bind addr"),
         data_dir,
         operator_config_dir: operator_config_dir.clone(),
-        // `tick_cadence` + `clock` default per
-        // `fix-convergence-loop-not-spawned` Step 01-02.
-        // Step 02-02: inject `SimDataplane` so this test's subject
-        // (HTTPS handshake + trust triple) does not require
-        // CAP_NET_ADMIN / CAP_BPF (architecture.md § 4.7).
-        dataplane_override: Some(std::sync::Arc::new(
-            overdrive_sim::adapters::dataplane::SimDataplane::new(),
-        )),
-        // Step 02-02 (C1-AMEND) — hermetic in-process boot KEK so `boot_ca`'s
-        // KEK-resolve probe succeeds with no kernel-keyring / env dependency.
-        ..ServerConfig::new(
-            std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-            std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
-            std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
-        )
+        // PORTS-CONFIG: the real flow and control listeners bind
+        // kernel-assigned vsock ports, so this boot never collides with
+        // another `serve` on the host.
+        vsock_ports: NodeVsockPortConfig::kernel_assigned(),
+        ..ServerConfig::new()
     };
-    let handle: ServerHandle =
-        run_server(config, std::sync::Arc::new(RealCgroupFs::new())).await.expect("run_server");
+    // NO-OVERRIDE-SEAMS / STORES-IN: the host bundle over this boot's own
+    // `data_dir`, with the two fields this test's subject (HTTPS handshake
+    // + trust triple) does not need from the host replaced by name: a
+    // hermetic `SimKek` (C1-AMEND) and a `SimDataplaneComposer` over a
+    // `SimDataplane` with `host_ipv4` 127.0.0.1 (no CAP_NET_ADMIN /
+    // CAP_BPF, architecture.md § 4.7). The boot runs the real phase-1
+    // forwarder probe, so the lane prerequisite is checked first.
+    overdrive_testing::forwarder_module::expect_forwarder_module();
+    let mut adapters =
+        NodeAdapters::host(&config, Arc::new(RealCgroupFs::new()), Arc::new(SimKek::for_boot()))
+            .expect("open the host bundle under data_dir");
+    adapters.boot.dataplane =
+        Arc::new(SimDataplaneComposer::new(Arc::new(SimDataplane::new()), Ipv4Addr::LOCALHOST));
+    adapters.boot.mtls.intercept = Arc::new(SimMtlsIntercept::new());
+    adapters.boot.guest_dns = Arc::new(SimGuestDnsFactory::default());
+    let handle: ServerHandle = run_server(config, adapters).await.expect("run_server");
     let bound: SocketAddr = handle.local_addr().await.expect("bound addr");
     let config_path = operator_config_dir.join(".overdrive").join("config");
     (handle, bound, tmp, config_path)

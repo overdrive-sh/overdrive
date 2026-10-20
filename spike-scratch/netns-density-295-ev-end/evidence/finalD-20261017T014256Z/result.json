@@ -1,0 +1,16 @@
+{
+ "qemu_exit": 0,
+ "host_done": true,
+ "elapsed_s": 39.06447410583496,
+ "scenarios": [
+  "g-rst-both-dirs:200",
+  "g-rst-hg-only:200",
+  "r-rst-both-dirs:200",
+  "r-rst-gh-only:200",
+  "stalled-g-rst:50"
+ ],
+ "hazard_host": 0,
+ "hazard_guest": 0,
+ "physical_module_names_unchanged": true,
+ "module_on_physical_host": []
+}

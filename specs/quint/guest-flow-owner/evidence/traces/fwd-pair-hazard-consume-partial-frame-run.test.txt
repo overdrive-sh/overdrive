@@ -1,0 +1,23 @@
+
+  pair_bugConsumePartialFrame
+    1) pair_bugConsumePartialFrame::fwd_pair::PartialFrameResumedNotDuplicated failed after 1 test(s)
+
+  1 failed
+
+  1) pair_bugConsumePartialFrame::fwd_pair::PartialFrameResumedNotDuplicated:
+       Error [QNT508]: Expect condition does not hold true
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/fwd_pair.qnt:1720:42
+        1720:   run PartialFrameResumedNotDuplicated = DgramPaired
+                                                       ^^^^^^^^^^^
+        1721:     .then(SendDg("gh", 1)).then(Hop0("gh")).then(Hop0("gh"))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        1722:     .then(SendDg("gh", 2)).then(Hop0("gh"))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        1723:     .expect(DgramSafety and dir.get("gh").q1 == [10, 11, 20] and dg.get("gh").dq0 == [2] and dg.get("gh").foff == 1)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Use --seed=0x8daf4fd0f6220d72 --match=pair_bugConsumePartialFrame::fwd_pair::PartialFrameResumedNotDuplicated to repeat.
+
+
+  Use --verbosity=3 to show executions.
+  Further debug with: quint test --verbosity=3 /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/hazard/fwd_pair_dgram_hazards.qnt
+error: Tests failed

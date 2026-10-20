@@ -1,0 +1,14 @@
+{
+ "item": "watch",
+ "verdict": "done",
+ "elapsed_s": 701.2,
+ "pass": 4,
+ "fail": 1,
+ "kernel_fault": false,
+ "suite_done": [
+  "SUITE_DONE suite=watch rc=9"
+ ],
+ "guest_uname": [
+  "7.0.0-29-generic"
+ ]
+}

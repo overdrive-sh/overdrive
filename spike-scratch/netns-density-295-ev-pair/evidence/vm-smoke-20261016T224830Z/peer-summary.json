@@ -1,0 +1,1 @@
+{"peer_runs":[{"run":21,"shape":"eg-wf","seed":7,"trials":40,"ok":40,"fail":0,"reasons":{},"first_failures":[]},{"run":22,"shape":"in-cfearly","seed":7,"trials":40,"ok":40,"fail":0,"reasons":{},"first_failures":[]}]}

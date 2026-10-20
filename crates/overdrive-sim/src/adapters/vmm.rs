@@ -20,6 +20,23 @@
 //! about reflink savings) — because the observable fact the equivalence
 //! test checks (`clone_dest` exists / does not exist, replaced not
 //! adopted, removed on failure) must be identical to the host adapter's.
+//!
+//! # The vsock device (CID-NOCLAIM, RESET-EXIT)
+//!
+//! `create(config, cid)` models the fork's `--vsock cid=<cid>,backend=vhost-kernel`
+//! launch: the simulated VMM process opens its CID's `/dev/vhost-vsock`
+//! instance itself and is its only holder until the process exits — by
+//! `terminate`, by an injected exit of its own, by an external kill, or by a
+//! guest reset, which ends the VMM (ADR-0182) rather than rebooting the guest
+//! in place. A launch whose CID another live process holds cannot set up its
+//! device: the process is created and exits at once, before any guest could
+//! dial (the driver's existing pre-READY VMM-exit start failure); the holder
+//! is unaffected (K-C1). Nothing ends a process when the composition that
+//! started it is dropped, so a dropped `serve` composition leaves its VMMs
+//! running as orphans holding their devices until something kills them
+//! (NO-SURVIVE). [`SimVmm::vsock_device_holders`] is the pinned QPROJ-7
+//! arbiter of these facts (Tier-3 pair: V-30 Q2a / Q2c / Q2d,
+//! `overdrive-host` `vsock_vmm_device`; V-RECLAIM).
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -27,7 +44,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use overdrive_core::guest_transport::ClaimedGuestCid;
+use overdrive_core::guest_transport::GuestCid;
 use overdrive_core::traits::driver::ConfinementControl;
 use overdrive_core::traits::vmm::{
     Result, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmDiagnostics, VmmError,
@@ -42,9 +59,10 @@ use tokio::sync::oneshot;
 /// real reaper task (there is nothing to reap).
 struct SimProcessEntry {
     terminated: bool,
-    /// D16-CLAIM: the launch's claimed guest CID, held until the simulated
-    /// VMM exits (`terminate`), as the real VMM process holds its device.
-    claim: Option<ClaimedGuestCid>,
+    /// CID-NOCLAIM: the CID whose vhost-vsock device this process opened
+    /// itself and holds until it exits. `None` for a bare process, and for a
+    /// launch refused at device setup (its CID was held by another process).
+    device: Option<GuestCid>,
     /// Consumed exactly once, on the first `terminate` call (mirrors the
     /// host adapter's `VmExitWatch` fill-once contract).
     exit_tx: Option<oneshot::Sender<VmmExit>>,
@@ -328,11 +346,114 @@ impl SimVmm {
         let (diagnostics, _writer) = VmmDiagnostics::new();
         self.state.lock().processes.insert(
             pid,
-            SimProcessEntry { terminated: false, exit_tx: None, diagnostics, scripted_exit: None },
+            SimProcessEntry {
+                terminated: false,
+                device: None,
+                exit_tx: None,
+                diagnostics,
+                scripted_exit: None,
+            },
         );
         VmControl { pid, api_socket: std::path::PathBuf::from(format!("/sim/vm-{pid}/api.sock")) }
     }
+
+    // -----------------------------------------------------------------------
+    // The pinned arbiter (QPROJ-7)
+    // -----------------------------------------------------------------------
+
+    /// The CIDs whose `/dev/vhost-vsock` instance a live simulated VMM
+    /// process holds, each with that process's pid. A VMM is the only holder
+    /// of its device (CID-NOCLAIM); the entry is gone at the VMM's exit, a
+    /// guest reset included (RESET-EXIT). Tier-3 pair: V-30 Q2a / Q2c / Q2d
+    /// (`spike/findings-v30-guest-reset.md`) and V-RECLAIM.
+    #[must_use]
+    pub fn vsock_device_holders(&self) -> BTreeMap<GuestCid, u32> {
+        self.state
+            .lock()
+            .processes
+            .iter()
+            .filter(|(_, entry)| !entry.terminated)
+            .filter_map(|(pid, entry)| entry.device.map(|cid| (cid, *pid)))
+            .collect()
+    }
+
+    // -----------------------------------------------------------------------
+    // Environment stepping (DISTILL test support)
+    // -----------------------------------------------------------------------
+
+    /// **TEST-HOOK-ONLY.** The guest of process `pid` resets — a PID-1 crash
+    /// under `panic=1`, a triple fault, a reset register write. The pinned
+    /// fork ends the VMM through its exit path (RESET-EXIT, ADR-0182): the
+    /// process exits with no guest report and its device is released. `false`
+    /// when `pid` is not a live process.
+    pub fn guest_reset(&self, pid: u32) -> bool {
+        self.end_process(pid, (Some(0), None))
+    }
+
+    /// **TEST-HOOK-ONLY.** Process `pid` exits by itself with `exit_code` /
+    /// `signal` (a VMM crash). Its device is released. `false` when `pid` is
+    /// not a live process.
+    pub fn exit_process(&self, pid: u32, exit_code: Option<i32>, signal: Option<u8>) -> bool {
+        self.end_process(pid, (exit_code, signal))
+    }
+
+    /// **TEST-HOOK-ONLY.** Process `pid` is killed from outside the adapter —
+    /// a `cgroup.kill` of its scope, the SIGKILL boot reclamation sends an
+    /// orphan of a previous `serve` process (NO-SURVIVE). It ends with signal
+    /// 9 and its device is released. `false` when `pid` is not a live
+    /// process.
+    pub fn kill(&self, pid: u32) -> bool {
+        self.end_process(pid, (None, Some(9)))
+    }
+
+    /// The pids of every live simulated process, in order.
+    #[must_use]
+    pub fn live_pids(&self) -> Vec<u32> {
+        self.state
+            .lock()
+            .processes
+            .iter()
+            .filter(|(_, entry)| !entry.terminated)
+            .map(|(pid, _)| *pid)
+            .collect()
+    }
+
+    /// Ends live process `pid` with `ending`: the process is marked exited,
+    /// its device is released, and its exit watch resolves once. The lock is
+    /// released before the watch is filled. `false` when `pid` is not live.
+    fn end_process(&self, pid: u32, ending: ScriptedEnding) -> bool {
+        let taken = {
+            let mut state = self.state.lock();
+            let Some(entry) = state.processes.get_mut(&pid) else {
+                return false;
+            };
+            if entry.terminated {
+                return false;
+            }
+            entry.terminated = true;
+            entry.device = None;
+            let taken = (entry.exit_tx.take(), entry.diagnostics.clone());
+            drop(state);
+            taken
+        };
+        let (exit_tx, diagnostics) = taken;
+        let (exit_code, signal) = ending;
+        if let Some(tx) = exit_tx {
+            let _ = tx.send(VmmExit { exit_code, signal, stderr_tail: diagnostics.console_tail() });
+        }
+        true
+    }
 }
+
+/// The exit status a launch refused at vsock device setup ends with: the fork
+/// cannot open the device or the kernel refuses the CID, and it exits before
+/// READY (§ *VMM backend contract*). Diagnostic only; no owner branches on it.
+const DEVICE_SETUP_REFUSED_EXIT: ScriptedEnding = (Some(1), None);
+
+/// The console line a launch refused at vsock device setup leaves in its
+/// bounded capture (the fork's own diagnostic, carried as context only).
+const DEVICE_SETUP_REFUSED_DETAIL: &[u8] =
+    b"cloud-hypervisor: error: vhost-vsock: setting guest CID failed: Address in use\n";
 
 #[async_trait]
 impl Vmm for SimVmm {
@@ -369,7 +490,7 @@ impl Vmm for SimVmm {
         Ok(())
     }
 
-    async fn create(&self, config: &VmConfig, vsock: ClaimedGuestCid) -> Result<VmProcess> {
+    async fn create(&self, config: &VmConfig, cid: GuestCid) -> Result<VmProcess> {
         let master = config.rootfs.master().to_path_buf();
         let clone_dest = config.rootfs.clone_dest().to_path_buf();
 
@@ -409,16 +530,32 @@ impl Vmm for SimVmm {
         }
         let scripted_exit = self.scripted_exit.lock().take();
 
-        self.state.lock().processes.insert(
-            pid,
-            SimProcessEntry {
-                terminated: false,
-                claim: Some(vsock),
-                exit_tx: Some(exit_tx),
-                diagnostics: diagnostics.clone(),
-                scripted_exit,
-            },
-        );
+        // CID-NOCLAIM: the VMM opens its CID's device itself. A device another
+        // live process holds refuses the open, and the VMM exits before any
+        // guest could dial; the holder is unaffected (K-C1).
+        let refused = {
+            let mut state = self.state.lock();
+            let held = state
+                .processes
+                .values()
+                .any(|entry| !entry.terminated && entry.device == Some(cid));
+            state.processes.insert(
+                pid,
+                SimProcessEntry {
+                    terminated: false,
+                    device: (!held).then_some(cid),
+                    exit_tx: Some(exit_tx),
+                    diagnostics: diagnostics.clone(),
+                    scripted_exit,
+                },
+            );
+            drop(state);
+            held
+        };
+        if refused {
+            writer.append(DEVICE_SETUP_REFUSED_DETAIL);
+            self.end_process(pid, DEVICE_SETUP_REFUSED_EXIT);
+        }
 
         Ok(VmProcess {
             control: VmControl { pid, api_socket: config.run_dir.api_socket() },
@@ -443,8 +580,8 @@ impl Vmm for SimVmm {
                 return Ok(VmTermination::Killed);
             }
             entry.terminated = true;
-            // The simulated VMM exits: its claim is released with it.
-            drop(entry.claim.take());
+            // The simulated VMM exits: its device is released with it.
+            entry.device = None;
             let taken = (entry.exit_tx.take(), entry.diagnostics.clone(), entry.scripted_exit);
             drop(state);
             taken
@@ -461,5 +598,143 @@ impl Vmm for SimVmm {
             let _ = tx.send(VmmExit { exit_code, signal, stderr_tail: diagnostics.console_tail() });
         }
         Ok(VmTermination::Killed)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, reason = "test fixtures assert their preconditions")]
+mod tests {
+    //! The sim's own semantics of the vsock device (CID-NOCLAIM, RESET-EXIT,
+    //! NO-SURVIVE): the facts [`SimVmm::vsock_device_holders`] reports as the
+    //! QPROJ-7 arbiter, each paired with the real adapter's Tier-3 case in
+    //! `overdrive-host/tests/integration/vsock_vmm_device.rs`.
+
+    use std::num::NonZeroU8;
+
+    use overdrive_core::AllocationId;
+    use overdrive_core::cgroup::CgroupPath;
+    use overdrive_core::guest_transport::GUEST_CID_BASE;
+    use overdrive_core::vm::config::{
+        Gid, HostArch, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan, VmConfinement, VmRunDir,
+        VmmIdentity,
+    };
+
+    use super::*;
+
+    fn cid(offset: u32) -> GuestCid {
+        GuestCid::new(GUEST_CID_BASE + offset).expect("an in-range guest CID")
+    }
+
+    /// A launch config whose rootfs master is a real file under `root`.
+    fn config(root: &std::path::Path, alloc: &str) -> VmConfig {
+        let alloc = AllocationId::new(alloc).expect("valid allocation id");
+        let master = root.join(format!("{alloc}-master.img"));
+        std::fs::write(&master, [0_u8; 512]).expect("write rootfs master");
+        let kernel = KernelImage::validate(root.join("vmlinux"), HostArch::X86_64, b"\x7fELF")
+            .expect("an ELF header validates");
+        VmConfig {
+            alloc: alloc.clone(),
+            kernel,
+            rootfs: RootfsPlan::for_alloc(master, 512, &alloc, root, &root.join("clone-index")),
+            cmdline: KernelCmdline::platform_default(HostArch::X86_64),
+            memory: MemoryPlan::derive(128 * 1024 * 1024),
+            vcpus: NonZeroU8::new(1).expect("nonzero"),
+            run_dir: VmRunDir::for_alloc(root, &alloc),
+            confinement: VmConfinement::confined(
+                VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: vec![] },
+                1024,
+            ),
+            cgroup_scope: CgroupPath::for_alloc(&alloc),
+        }
+    }
+
+    /// CID-NOCLAIM: the launched process holds its CID's device until it
+    /// exits; `terminate` releases it.
+    /// `CONTRACT_SHAPE`: bounded-change.
+    #[tokio::test]
+    #[ignore = "pending DELIVER attachment-cut step (3)"]
+    async fn a_launch_holds_its_cid_device_until_terminate() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let sim = SimVmm::new();
+        assert!(sim.vsock_device_holders().is_empty(), "precondition: no device held");
+
+        let process = sim.create(&config(root.path(), "dev-a"), cid(2)).await.expect("create");
+        assert_eq!(
+            sim.vsock_device_holders(),
+            BTreeMap::from([(cid(2), process.control.pid)]),
+            "the VMM holds exactly its own CID's device"
+        );
+
+        sim.terminate(&process.control, Duration::ZERO).await.expect("terminate");
+        assert!(sim.vsock_device_holders().is_empty(), "the exit released the device");
+        assert!(!sim.is_live(process.control.pid));
+    }
+
+    /// K-C1: a launch on a held CID exits at once (before any guest could
+    /// dial) with the device-setup diagnostic; the holder keeps its device.
+    /// `CONTRACT_SHAPE`: bounded-change.
+    #[tokio::test]
+    #[ignore = "pending DELIVER attachment-cut step (3)"]
+    async fn a_launch_on_a_held_cid_exits_before_ready_and_the_holder_is_unaffected() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let sim = SimVmm::new();
+        let holder = sim.create(&config(root.path(), "dev-holder"), cid(3)).await.expect("create");
+
+        let mut clash = sim.create(&config(root.path(), "dev-clash"), cid(3)).await.expect("spawn");
+        let exit = clash.exit.recv().await.expect("the refused VMM reports its ending");
+        assert_eq!((exit.exit_code, exit.signal), DEVICE_SETUP_REFUSED_EXIT);
+        assert!(
+            exit.stderr_tail.as_deref().is_some_and(|tail| tail.contains("Address in use")),
+            "the fork's diagnostic is carried as context: {exit:?}"
+        );
+        assert!(!sim.is_live(clash.control.pid), "the refused VMM is gone");
+        assert_eq!(
+            sim.vsock_device_holders(),
+            BTreeMap::from([(cid(3), holder.control.pid)]),
+            "the holder keeps its device"
+        );
+    }
+
+    /// RESET-EXIT: a guest reset ends the VMM (no in-place reboot) and the
+    /// device is released; the CID is free for the next launch at once.
+    /// `CONTRACT_SHAPE`: bounded-change.
+    #[tokio::test]
+    #[ignore = "pending DELIVER attachment-cut step (3)"]
+    async fn a_guest_reset_ends_the_vmm_and_frees_its_cid() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let sim = SimVmm::new();
+        let mut first =
+            sim.create(&config(root.path(), "dev-reset"), cid(4)).await.expect("create");
+
+        assert!(sim.guest_reset(first.control.pid), "the reset reaches a live VMM");
+        assert!(first.exit.recv().await.is_some(), "the reset ended the VMM process");
+        assert!(sim.vsock_device_holders().is_empty());
+        assert!(!sim.guest_reset(first.control.pid), "a gone VMM cannot reset again");
+
+        let next = sim.create(&config(root.path(), "dev-next"), cid(4)).await.expect("create");
+        assert_eq!(sim.vsock_device_holders(), BTreeMap::from([(cid(4), next.control.pid)]));
+    }
+
+    /// NO-SURVIVE: nothing but an exit, a kill or a reset ends a process —
+    /// dropping every handle of the launch (a crashed composition) leaves it
+    /// running with its device until it is killed.
+    /// `CONTRACT_SHAPE`: bounded-change.
+    #[tokio::test]
+    #[ignore = "pending DELIVER attachment-cut step (3)"]
+    async fn an_orphan_keeps_its_device_until_killed() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let sim = SimVmm::new();
+        let pid = {
+            let process =
+                sim.create(&config(root.path(), "dev-orphan"), cid(5)).await.expect("create");
+            process.control.pid
+        };
+        assert_eq!(sim.vsock_device_holders(), BTreeMap::from([(cid(5), pid)]), "still held");
+        assert_eq!(sim.live_pids(), vec![pid]);
+
+        assert!(sim.kill(pid), "the kill reaches the orphan");
+        assert!(sim.vsock_device_holders().is_empty());
+        assert!(sim.live_pids().is_empty());
+        assert!(!sim.exit_process(pid, Some(0), None), "a killed process cannot exit again");
     }
 }

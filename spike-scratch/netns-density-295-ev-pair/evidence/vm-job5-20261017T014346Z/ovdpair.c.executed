@@ -1,0 +1,865 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * ovdpair: V-EV-PAIR spike module. Derived from the evmod spike (netns-density-295-evmod/inc2/module/evmod.c) and extended to the
+ * PROPOSED contract only as far as the "attach at pairing" question needs:
+ *   - /dev/ovd_fwd: each open() is a context that owns its pairs; release() aborts every live pair before it returns
+ *     (TCP reset via tcp_abort, vsock SHUT_RDWR) and queues nothing (EVMOD-CTL);
+ *   - ids are u64, never reused per context; one 32-byte end record per id, preallocated with the pair, read() + poll();
+ *   - no module_exit: the module is permanent (EVMOD-LIFE);
+ *   - the per-vsock-half end classification of EVMOD-END, computed in sk_state_change AND once at attach time under the socket
+ *     lock (a SHUTDOWN received before the hooks existed fired no callback);
+ *   - attach accepts a TCP half in CLOSE_WAIT (the peer's FIN arrived before the attach) and rejects a reset/closed half with its
+ *     errno.
+ * Hazard switches (writable module parameters, because the module cannot be unloaded):
+ *   h_noseed   skip the attach-time classification (the callbacks alone, as a literal reading of "compare in sk_state_change")
+ *   h_strict   attach requires TCP_ESTABLISHED on a TCP half (the evmod spike's check)
+ *   h_nokick   do not queue the attach-time run (a pair forwards only after a later event)
+ *   h_fault    1 = drop one byte of the first chunk >= 2 bytes (negative control for the probe's checksum)
+ * Spike code, not production.
+ */
+#include <linux/module.h>
+#include <linux/miscdevice.h>
+#include <linux/fs.h>
+#include <linux/poll.h>
+#include <linux/net.h>
+#include <linux/uio.h>
+#include <linux/slab.h>
+#include <linux/xarray.h>
+#include <linux/refcount.h>
+#include <linux/workqueue.h>
+#include <linux/completion.h>
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
+#include <linux/rcupdate.h>
+#include <linux/list.h>
+#include <net/sock.h>
+#include <net/tcp.h>
+#include <net/af_vsock.h>
+#include "ovd_fwd_uapi.h"
+
+#define EV_POOL 256
+#define EV_BUF 65536U
+#define EV_BUDGET (4U * EV_BUF)
+
+static int h_noseed, h_strict, h_nokick, h_fault;
+module_param(h_noseed, int, 0644);
+module_param(h_strict, int, 0644);
+module_param(h_nokick, int, 0644);
+module_param(h_fault, int, 0644);
+
+#define EV_D0 1UL
+#define EV_D1 2UL
+#define EV_ABORT 4UL
+
+struct ev_pair;
+struct ev_ctx {
+	struct xarray pairs;          /* live pairs */
+	atomic64_t next_id;
+	spinlock_t endq_lock;
+	struct list_head endq;        /* ended pairs whose record is unread */
+	wait_queue_head_t wq;
+};
+
+struct ev_half {
+	struct socket *sock;
+	struct sock *sk;
+	struct ev_pair *pair;
+	void (*orig_data_ready)(struct sock *);
+	void (*orig_write_space)(struct sock *);
+	void (*orig_state_change)(struct sock *);
+	void (*orig_error_report)(struct sock *);
+	int idx;
+	bool tcp;
+	bool hooked;
+	bool src_done;     /* EOF seen on this half and propagated as shutdown(WR) on the other half (worker only) */
+	/* under pair->lk */
+	u8 acted;          /* peer_shutdown bits already classified (vsock halves) */
+	bool eof_ok;       /* a clean half-close was classified: the source's end-of-stream may be forwarded as EOF */
+	bool own_wr_shut;  /* this half's send direction was shut by the forwarder */
+};
+
+struct ev_pair {
+	refcount_t ref;
+	struct rcu_head rcu;
+	struct work_struct work;
+	atomic_long_t pending;
+	struct ev_ctx *ctx;
+	struct ev_half h[2];
+	u64 id;
+	bool dead;
+	spinlock_t lk;
+	u8 cause, cside;               /* first abort cause wins */
+	int cerr;
+	u64 moved[2];
+	bool fault_done;
+	struct completion torn;
+	struct list_head endnode;
+	struct list_head relnode;
+	struct ovd_end rec;
+};
+
+static struct workqueue_struct *ev_wq;
+static void *ev_pool[EV_POOL];
+static int ev_pool_n;
+static DEFINE_SPINLOCK(ev_pool_lock);
+
+static atomic64_t st_attached, st_completed, st_aborted, st_runs, st_attach_rej_state, st_attach_early_bytes,
+	st_attach_early_end, st_attach_early_abort, st_ab_socket, st_ab_peer, st_ab_unclass,
+	st_released_pairs, st_fault_hits, st_records;
+
+static void ev_put(struct ev_pair *p)
+{
+	if (refcount_dec_and_test(&p->ref))
+		kfree_rcu(p, rcu);
+}
+
+static void ev_kick(struct ev_pair *p, unsigned long mask)
+{
+	atomic_long_or(mask, &p->pending);
+	if (!refcount_inc_not_zero(&p->ref))
+		return;
+	if (!queue_work(ev_wq, &p->work))
+		ev_put(p);
+}
+
+/* First abort cause wins. Callable from any context. */
+static void ev_set_abort(struct ev_pair *p, u8 cause, u8 side, int err)
+{
+	unsigned long fl;
+	bool first = false;
+
+	spin_lock_irqsave(&p->lk, fl);
+	if (!p->cause) {
+		p->cause = cause;
+		p->cside = side;
+		p->cerr = err;
+		first = true;
+	}
+	spin_unlock_irqrestore(&p->lk, fl);
+	if (first)
+		ev_kick(p, EV_ABORT);
+}
+
+static u8 ev_cause(struct ev_pair *p)
+{
+	unsigned long fl;
+	u8 c;
+
+	spin_lock_irqsave(&p->lk, fl);
+	c = p->cause;
+	spin_unlock_irqrestore(&p->lk, fl);
+	return c;
+}
+
+/* EVMOD-END classification of the received peer_shutdown bits of a vsock half. Called from sk_state_change (the vsock receive path
+ * holds the socket lock, net/vmw_vsock/virtio_transport_common.c:1661) and once at attach under lock_sock. */
+static void ev_classify(struct ev_half *h)
+{
+	struct ev_pair *p = h->pair;
+	u32 ps = READ_ONCE(vsock_sk(h->sk)->peer_shutdown) & SHUTDOWN_MASK;
+	bool abort = false;
+	unsigned long fl;
+	u32 newb;
+
+	spin_lock_irqsave(&p->lk, fl);
+	newb = ps & ~(u32)h->acted;
+	if (newb) {
+		if (newb & SEND_SHUTDOWN) {
+			if (ps & RCV_SHUTDOWN)
+				abort = true;            /* 0x3 or RST: the peer closed or reset with its direction open */
+			else
+				WRITE_ONCE(h->eof_ok, true); /* clean half-close of the peer's direction */
+		} else if (newb & RCV_SHUTDOWN) {
+			if (!h->own_wr_shut)
+				abort = true;            /* the peer stopped receiving while this side still sends */
+			/* else: END-IDEMPOTENT / CLEAN-FULL-END, nothing */
+		}
+		h->acted = ps;
+	}
+	spin_unlock_irqrestore(&p->lk, fl);
+	if (abort) {
+		ev_set_abort(p, OVD_CAUSE_PEER_ABORT, h->idx, 0);
+		atomic64_inc(&st_ab_peer);
+	} else if (newb) {
+		ev_kick(p, h->idx ? EV_D1 : EV_D0);
+	}
+}
+
+static void ev_data_ready(struct sock *sk)
+{
+	struct ev_half *h;
+
+	rcu_read_lock();
+	h = rcu_dereference_sk_user_data(sk);
+	if (h)
+		ev_kick(h->pair, h->idx ? EV_D1 : EV_D0);
+	rcu_read_unlock();
+}
+
+static void ev_write_space(struct sock *sk)
+{
+	struct ev_half *h;
+
+	rcu_read_lock();
+	h = rcu_dereference_sk_user_data(sk);
+	if (h) {
+		h->orig_write_space(sk);
+		if (h->tcp ? sk_stream_is_writeable(sk) : true)
+			ev_kick(h->pair, h->idx ? EV_D0 : EV_D1);
+	}
+	rcu_read_unlock();
+}
+
+static void ev_state_change(struct sock *sk)
+{
+	struct ev_half *h;
+
+	rcu_read_lock();
+	h = rcu_dereference_sk_user_data(sk);
+	if (h) {
+		h->orig_state_change(sk);
+		if (!h->tcp)
+			ev_classify(h);
+		ev_kick(h->pair, EV_D0 | EV_D1);
+	}
+	rcu_read_unlock();
+}
+
+static void ev_error_report(struct sock *sk)
+{
+	struct ev_half *h;
+
+	rcu_read_lock();
+	h = rcu_dereference_sk_user_data(sk);
+	if (h) {
+		h->orig_error_report(sk);
+		ev_kick(h->pair, EV_D0 | EV_D1);
+	}
+	rcu_read_unlock();
+}
+
+static int ev_hook(struct ev_half *h)
+{
+	struct sock *sk = h->sk;
+	int ret = 0;
+
+	write_lock_bh(&sk->sk_callback_lock);
+	if (sk->sk_user_data) {
+		ret = -EBUSY;
+		goto out;
+	}
+	h->orig_data_ready = sk->sk_data_ready;
+	h->orig_write_space = sk->sk_write_space;
+	h->orig_state_change = sk->sk_state_change;
+	h->orig_error_report = sk->sk_error_report;
+	rcu_assign_sk_user_data(sk, h);
+	WRITE_ONCE(sk->sk_data_ready, ev_data_ready);
+	WRITE_ONCE(sk->sk_write_space, ev_write_space);
+	WRITE_ONCE(sk->sk_state_change, ev_state_change);
+	WRITE_ONCE(sk->sk_error_report, ev_error_report);
+	h->hooked = true;
+out:
+	write_unlock_bh(&sk->sk_callback_lock);
+	return ret;
+}
+
+static void ev_unhook(struct ev_half *h)
+{
+	struct sock *sk = h->sk;
+
+	if (!h->hooked)
+		return;
+	write_lock_bh(&sk->sk_callback_lock);
+	WRITE_ONCE(sk->sk_data_ready, h->orig_data_ready);
+	WRITE_ONCE(sk->sk_write_space, h->orig_write_space);
+	WRITE_ONCE(sk->sk_state_change, h->orig_state_change);
+	WRITE_ONCE(sk->sk_error_report, h->orig_error_report);
+	rcu_assign_sk_user_data(sk, NULL);
+	h->hooked = false;
+	write_unlock_bh(&sk->sk_callback_lock);
+}
+
+static void *ev_buf_get(void)
+{
+	void *b = NULL;
+
+	spin_lock_bh(&ev_pool_lock);
+	if (ev_pool_n)
+		b = ev_pool[--ev_pool_n];
+	spin_unlock_bh(&ev_pool_lock);
+	if (!b)
+		b = kvmalloc(EV_BUF, GFP_KERNEL);
+	return b;
+}
+
+static void ev_buf_put(void *b)
+{
+	bool kept = false;
+
+	spin_lock_bh(&ev_pool_lock);
+	if (ev_pool_n < EV_POOL) {
+		ev_pool[ev_pool_n++] = b;
+		kept = true;
+	}
+	spin_unlock_bh(&ev_pool_lock);
+	if (!kept)
+		kvfree(b);
+}
+
+enum { EV_BLOCKED = 0, EV_MORE = 1, EV_EOF = 2 };
+
+static int ev_consume(struct socket *s, size_t n)
+{
+	struct msghdr m = { .msg_flags = MSG_DONTWAIT };
+	int r;
+
+	iov_iter_discard(&m.msg_iter, ITER_DEST, n);
+	r = sock_recvmsg(s, &m, MSG_DONTWAIT);
+	if (r < 0)
+		return r;
+	if ((size_t)r != n)
+		return -EIO;
+	return 0;
+}
+
+static int ev_send(struct socket *t, void *buf, int n)
+{
+	struct msghdr m = { .msg_flags = MSG_DONTWAIT | MSG_NOSIGNAL };
+	struct kvec v = { .iov_base = buf, .iov_len = n };
+
+	return kernel_sendmsg(t, &m, &v, 1, n);
+}
+
+/* EV_BLOCKED / EV_MORE / EV_EOF, or -ECANCELED when an abort cause is recorded. */
+static int ev_fwd(struct ev_pair *p, int d, void *buf, int *budget)
+{
+	struct ev_half *s = &p->h[d], *t = &p->h[!d];
+
+	if (s->src_done)
+		return EV_BLOCKED;
+	while (*budget > 0) {
+		struct msghdr rm = { .msg_flags = MSG_DONTWAIT };
+		struct kvec rv = { .iov_base = buf, .iov_len = EV_BUF };
+		int n, sent, skip = 0;
+		void *sbuf = buf;
+
+		n = kernel_recvmsg(s->sock, &rm, &rv, 1, EV_BUF, MSG_DONTWAIT | MSG_PEEK);
+		if (n == -EAGAIN)
+			return EV_BLOCKED;
+		if (n < 0) {
+			ev_set_abort(p, OVD_CAUSE_SOCKET_ERROR, d, -n);
+			atomic64_inc(&st_ab_socket);
+			return -ECANCELED;
+		}
+		if (n == 0) {
+			if (ev_cause(p))
+				return -ECANCELED;
+			if (!s->tcp && !READ_ONCE(s->eof_ok)) {
+				ev_set_abort(p, OVD_CAUSE_UNCLASSIFIED, d, 0);
+				atomic64_inc(&st_ab_unclass);
+				return -ECANCELED;
+			}
+			s->src_done = true;
+			kernel_sock_shutdown(t->sock, SHUT_WR);
+			{
+				unsigned long fl;
+
+				spin_lock_irqsave(&p->lk, fl);
+				t->own_wr_shut = true;
+				spin_unlock_irqrestore(&p->lk, fl);
+			}
+			return EV_EOF;
+		}
+		if (h_fault == 1 && !p->fault_done && n >= 2) {
+			skip = 1;
+			sbuf = buf + 1;
+			n -= 1;
+			p->fault_done = true;
+			atomic64_inc(&st_fault_hits);
+		}
+		sent = ev_send(t->sock, sbuf, n);
+		if (sent == -EAGAIN)
+			return EV_BLOCKED;
+		if (sent < 0) {
+			ev_set_abort(p, OVD_CAUSE_SOCKET_ERROR, !d, -sent);
+			atomic64_inc(&st_ab_socket);
+			return -ECANCELED;
+		}
+		if (sent > 0) {
+			int r = ev_consume(s->sock, sent + skip);
+
+			if (r) {
+				ev_set_abort(p, OVD_CAUSE_SOCKET_ERROR, d, -r);
+				atomic64_inc(&st_ab_socket);
+				return -ECANCELED;
+			}
+			p->moved[d] += sent;
+			*budget -= sent;
+		}
+		if (sent < n)
+			return EV_BLOCKED;
+	}
+	return EV_MORE;
+}
+
+static void ev_finish(struct ev_pair *p)
+{
+	struct ev_ctx *ctx = p->ctx;
+	u8 cause = ev_cause(p);
+	int i;
+
+	if (cause && cause != OVD_CAUSE_NONE) {
+		for (i = 0; i < 2; i++) {
+			struct ev_half *h = &p->h[i];
+
+			if (h->tcp) {
+				if (h->sk->sk_state != TCP_CLOSE)
+					tcp_abort(h->sk, ECONNABORTED);
+			} else {
+				kernel_sock_shutdown(h->sock, SHUT_RDWR);
+			}
+		}
+	}
+	p->dead = true;
+	for (i = 0; i < 2; i++)
+		ev_unhook(&p->h[i]);
+	for (i = 0; i < 2; i++) {
+		if (p->h[i].sock) {
+			sockfd_put(p->h[i].sock);
+			p->h[i].sock = NULL;
+		}
+	}
+	memset(&p->rec, 0, sizeof(p->rec));
+	p->rec.id = p->id;
+	p->rec.outcome = cause ? OVD_OUT_ABORTED : OVD_OUT_COMPLETED;
+	p->rec.cause = cause;
+	p->rec.side = p->cside;
+	p->rec.err = p->cerr;
+	p->rec.bytes_a2b = p->moved[0];
+	p->rec.bytes_b2a = p->moved[1];
+	if (cause)
+		atomic64_inc(&st_aborted);
+	else
+		atomic64_inc(&st_completed);
+	if (cause == OVD_CAUSE_RELEASED) {
+		atomic64_inc(&st_released_pairs);
+	} else {
+		/* queue the record BEFORE leaving the live set, so a context release that no longer finds the pair finds its record */
+		spin_lock_bh(&ctx->endq_lock);
+		list_add_tail(&p->endnode, &ctx->endq);
+		spin_unlock_bh(&ctx->endq_lock);
+		atomic64_inc(&st_records);
+		wake_up_interruptible(&ctx->wq);
+		refcount_inc(&p->ref);   /* the queue's reference; the live reference is dropped below */
+	}
+	xa_erase(&ctx->pairs, p->id);
+	complete_all(&p->torn);
+	ev_put(p);   /* the live reference */
+}
+
+static void ev_work(struct work_struct *w)
+{
+	struct ev_pair *p = container_of(w, struct ev_pair, work);
+	int budget[2] = { EV_BUDGET, EV_BUDGET };
+	unsigned long again = 0, m;
+	void *buf = NULL;
+	int d;
+
+	atomic64_inc(&st_runs);
+	if (p->dead)
+		goto out;
+	while ((m = atomic_long_xchg(&p->pending, 0)) != 0) {
+		if ((m & EV_ABORT) || ev_cause(p))
+			goto abort;
+		if (!buf) {
+			buf = ev_buf_get();
+			if (!buf) {
+				ev_set_abort(p, OVD_CAUSE_SOCKET_ERROR, 0, ENOMEM);
+				goto abort;
+			}
+		}
+		for (d = 0; d < 2; d++) {
+			int r;
+
+			if (!(m & (d ? EV_D1 : EV_D0)))
+				continue;
+			if (budget[d] <= 0) {
+				again |= d ? EV_D1 : EV_D0;
+				continue;
+			}
+			r = ev_fwd(p, d, buf, &budget[d]);
+			if (r == -ECANCELED)
+				goto abort;
+			if (r == EV_MORE)
+				again |= d ? EV_D1 : EV_D0;
+		}
+		if (again)
+			break;
+	}
+	if (p->h[0].src_done && p->h[1].src_done) {
+		ev_finish(p);
+		goto out;
+	}
+	if (again)
+		ev_kick(p, again);
+	goto out;
+abort:
+	if (!ev_cause(p))
+		ev_set_abort(p, OVD_CAUSE_DETACHED, 0, 0);
+	ev_finish(p);
+out:
+	if (buf)
+		ev_buf_put(buf);
+	ev_put(p);
+}
+
+/* ---- attach ------------------------------------------------------------------------------------------------------------- */
+static int ev_open_half(struct ev_half *h, struct ev_pair *p, int idx, int fd)
+{
+	struct socket *s;
+	int err;
+
+	s = sockfd_lookup(fd, &err);
+	if (!s)
+		return err;
+	h->pair = p;
+	h->idx = idx;
+	if (s->sk->sk_family == AF_VSOCK && s->type == SOCK_STREAM) {
+		h->tcp = false;
+	} else if (s->sk->sk_family == AF_INET && s->sk->sk_protocol == IPPROTO_TCP) {
+		h->tcp = true;
+	} else {
+		sockfd_put(s);
+		return -EOPNOTSUPP;
+	}
+	h->sock = s;
+	h->sk = s->sk;
+	return 0;
+}
+
+/* socket lock held */
+static int ev_check_state(struct ev_half *h)
+{
+	struct sock *sk = h->sk;
+
+	if (h->tcp) {
+		switch (sk->sk_state) {
+		case TCP_ESTABLISHED:
+			return 0;
+		case TCP_CLOSE_WAIT:   /* the peer's FIN arrived before the attach (write + FIN before Paired) */
+			return h_strict ? -ENOTCONN : 0;
+		case TCP_CLOSE:
+			return sk->sk_err ? -sk->sk_err : -ENOTCONN;
+		default:
+			return sk->sk_err ? -sk->sk_err : -ENOTCONN;
+		}
+	}
+	if (sk->sk_state == TCP_ESTABLISHED)
+		return 0;
+	return sk->sk_err ? -sk->sk_err : -ENOTCONN;
+}
+
+/* socket lock held */
+static void ev_early(struct ev_half *h, u64 *bytes, u32 *flags, u32 endbit, u32 abortbit)
+{
+	if (h->tcp) {
+		*bytes = (u64)max(tcp_inq(h->sk), 0);
+		if (READ_ONCE(h->sk->sk_shutdown) & RCV_SHUTDOWN)
+			*flags |= endbit;
+	} else {
+		struct vsock_sock *vsk = vsock_sk(h->sk);
+		s64 q = vsock_stream_has_data(vsk);
+
+		*bytes = q > 0 ? (u64)q : 0;
+		if (vsk->peer_shutdown & SEND_SHUTDOWN)
+			*flags |= endbit;
+		if ((vsk->peer_shutdown & SHUTDOWN_MASK) == SHUTDOWN_MASK)
+			*flags |= abortbit;
+	}
+}
+
+static long ev_attach(struct ev_ctx *ctx, struct ovd_attach __user *u)
+{
+	struct ovd_attach a;
+	struct ev_pair *p;
+	struct sock *first, *second;
+	int err, i;
+
+	if (copy_from_user(&a, u, sizeof(a)))
+		return -EFAULT;
+	if (a.flags)
+		return -EINVAL;
+	p = kzalloc(sizeof(*p), GFP_KERNEL);
+	if (!p)
+		return -ENOMEM;
+	refcount_set(&p->ref, 1);   /* the live reference */
+	INIT_WORK(&p->work, ev_work);
+	init_completion(&p->torn);
+	spin_lock_init(&p->lk);
+	INIT_LIST_HEAD(&p->endnode);
+	INIT_LIST_HEAD(&p->relnode);
+	p->ctx = ctx;
+	err = ev_open_half(&p->h[0], p, 0, a.fd_a);
+	if (err)
+		goto fail;
+	err = ev_open_half(&p->h[1], p, 1, a.fd_b);
+	if (err)
+		goto fail;
+	if (p->h[0].sk == p->h[1].sk) {
+		err = -EINVAL;
+		goto fail;
+	}
+	first = p->h[0].sk < p->h[1].sk ? p->h[0].sk : p->h[1].sk;
+	second = first == p->h[0].sk ? p->h[1].sk : p->h[0].sk;
+	p->id = (u64)atomic64_inc_return(&ctx->next_id);
+	err = xa_insert(&ctx->pairs, p->id, p, GFP_KERNEL);
+	if (err)
+		goto fail;
+	lock_sock(first);
+	lock_sock(second);
+	for (i = 0; i < 2; i++) {
+		err = ev_check_state(&p->h[i]);
+		if (err) {
+			atomic64_inc(&st_attach_rej_state);
+			goto unlock_fail;
+		}
+	}
+	a.early_flags = 0;
+	ev_early(&p->h[0], &a.early_bytes_a, &a.early_flags, OVD_EARLY_END_A, OVD_EARLY_ABORT_A);
+	ev_early(&p->h[1], &a.early_bytes_b, &a.early_flags, OVD_EARLY_END_B, OVD_EARLY_ABORT_B);
+	for (i = 0; i < 2; i++) {
+		err = ev_hook(&p->h[i]);
+		if (err) {
+			while (--i >= 0)
+				ev_unhook(&p->h[i]);
+			goto unlock_fail;
+		}
+	}
+	/* The classification of bits received BEFORE the hooks existed: those transitions fired no callback. The socket lock excludes the
+	 * receive path, so no transition is missed or seen twice. */
+	if (!h_noseed) {
+		for (i = 0; i < 2; i++)
+			if (!p->h[i].tcp)
+				ev_classify(&p->h[i]);
+	}
+	release_sock(second);
+	release_sock(first);
+	a.id = p->id;
+	if (copy_to_user(u, &a, sizeof(a))) {
+		ev_set_abort(p, OVD_CAUSE_DETACHED, 0, 0);
+		return -EFAULT;
+	}
+	atomic64_inc(&st_attached);
+	if (a.early_bytes_a || a.early_bytes_b)
+		atomic64_inc(&st_attach_early_bytes);
+	if (a.early_flags & (OVD_EARLY_END_A | OVD_EARLY_END_B))
+		atomic64_inc(&st_attach_early_end);
+	if (a.early_flags & (OVD_EARLY_ABORT_A | OVD_EARLY_ABORT_B))
+		atomic64_inc(&st_attach_early_abort);
+	if (!h_nokick)
+		ev_kick(p, EV_D0 | EV_D1);   /* bytes and an end already queued on either half */
+	return 0;
+unlock_fail:
+	release_sock(second);
+	release_sock(first);
+	xa_erase(&ctx->pairs, p->id);
+fail:
+	for (i = 0; i < 2; i++)
+		if (p->h[i].sock)
+			sockfd_put(p->h[i].sock);
+	kfree(p);
+	return err;
+}
+
+static long ev_abort_id(struct ev_ctx *ctx, u64 id)
+{
+	struct ev_pair *p;
+
+	rcu_read_lock();
+	p = xa_load(&ctx->pairs, id);
+	if (p && !refcount_inc_not_zero(&p->ref))
+		p = NULL;
+	rcu_read_unlock();
+	if (!p)
+		return -ENOENT;
+	ev_set_abort(p, OVD_CAUSE_DETACHED, 0, 0);
+	ev_kick(p, EV_ABORT);
+	ev_put(p);
+	return 0;
+}
+
+/* ---- control device ----------------------------------------------------------------------------------------------------- */
+static int ev_open(struct inode *i, struct file *f)
+{
+	struct ev_ctx *ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
+
+	if (!ctx)
+		return -ENOMEM;
+	xa_init(&ctx->pairs);
+	atomic64_set(&ctx->next_id, 0);
+	spin_lock_init(&ctx->endq_lock);
+	INIT_LIST_HEAD(&ctx->endq);
+	init_waitqueue_head(&ctx->wq);
+	f->private_data = ctx;
+	return 0;
+}
+
+static int ev_release(struct inode *i, struct file *f)
+{
+	struct ev_ctx *ctx = f->private_data;
+	struct ev_pair *p, *n;
+	LIST_HEAD(rel);
+	unsigned long idx;
+
+	/* abort every live pair before returning: a TCP half is reset, a vsock half is shut SHUT_RDWR; no record is queued */
+	xa_lock(&ctx->pairs);
+	xa_for_each(&ctx->pairs, idx, p) {
+		if (refcount_inc_not_zero(&p->ref))
+			list_add_tail(&p->relnode, &rel);
+	}
+	xa_unlock(&ctx->pairs);
+	list_for_each_entry_safe(p, n, &rel, relnode) {
+		ev_set_abort(p, OVD_CAUSE_RELEASED, 0, 0);
+		ev_kick(p, EV_ABORT);
+		if (!wait_for_completion_timeout(&p->torn, 20 * HZ))
+			pr_err("ovdpair: release timed out waiting for pair %llu\n", p->id);
+		list_del(&p->relnode);
+		ev_put(p);
+	}
+	for (;;) {
+		spin_lock_bh(&ctx->endq_lock);
+		p = list_first_entry_or_null(&ctx->endq, struct ev_pair, endnode);
+		if (p)
+			list_del_init(&p->endnode);
+		spin_unlock_bh(&ctx->endq_lock);
+		if (!p)
+			break;
+		ev_put(p);
+	}
+	xa_destroy(&ctx->pairs);
+	kfree(ctx);
+	return 0;
+}
+
+static ssize_t ev_read(struct file *f, char __user *buf, size_t len, loff_t *off)
+{
+	struct ev_ctx *ctx = f->private_data;
+	struct ev_pair *p;
+	struct ovd_end rec;
+
+	if (len < sizeof(rec))
+		return -EINVAL;
+	for (;;) {
+		spin_lock_bh(&ctx->endq_lock);
+		p = list_first_entry_or_null(&ctx->endq, struct ev_pair, endnode);
+		if (p)
+			list_del_init(&p->endnode);
+		spin_unlock_bh(&ctx->endq_lock);
+		if (p)
+			break;
+		if (f->f_flags & O_NONBLOCK)
+			return -EAGAIN;
+		if (wait_event_interruptible(ctx->wq, !list_empty_careful(&ctx->endq)))
+			return -ERESTARTSYS;
+	}
+	rec = p->rec;
+	ev_put(p);
+	if (copy_to_user(buf, &rec, sizeof(rec)))
+		return -EFAULT;
+	return sizeof(rec);
+}
+
+static __poll_t ev_poll(struct file *f, poll_table *wait)
+{
+	struct ev_ctx *ctx = f->private_data;
+
+	poll_wait(f, &ctx->wq, wait);
+	return list_empty_careful(&ctx->endq) ? 0 : (EPOLLIN | EPOLLRDNORM);
+}
+
+static long ev_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
+{
+	struct ev_ctx *ctx = f->private_data;
+
+	switch (cmd) {
+	case OVD_VERSION: {
+		struct ovd_version v = { .abi = OVD_ABI, .flags = 0 };
+
+#ifdef CONFIG_MODULE_UNLOAD
+		if (!THIS_MODULE->exit)
+			v.flags |= OVD_F_PERMANENT;
+#else
+		v.flags |= OVD_F_PERMANENT;
+#endif
+		return copy_to_user((void __user *)arg, &v, sizeof(v)) ? -EFAULT : 0;
+	}
+	case OVD_ATTACH:
+		return ev_attach(ctx, (struct ovd_attach __user *)arg);
+	case OVD_ABORT: {
+		u64 id;
+
+		if (copy_from_user(&id, (u64 __user *)arg, sizeof(id)))
+			return -EFAULT;
+		return ev_abort_id(ctx, id);
+	}
+	}
+	return -ENOTTY;
+}
+
+static const struct file_operations ev_fops = {
+	.owner = THIS_MODULE,
+	.open = ev_open,
+	.release = ev_release,
+	.read = ev_read,
+	.poll = ev_poll,
+	.unlocked_ioctl = ev_ioctl,
+	.compat_ioctl = ev_ioctl,
+};
+static struct miscdevice ev_misc = { .minor = MISC_DYNAMIC_MINOR, .name = "ovd_fwd", .fops = &ev_fops };
+
+static int ev_stats(struct seq_file *m, void *v)
+{
+	seq_printf(m,
+		   "attached=%lld completed=%lld aborted=%lld records=%lld runs=%lld attach_rej_state=%lld attach_early_bytes=%lld "
+		   "attach_early_end=%lld attach_early_abort=%lld ab_socket=%lld ab_peer=%lld ab_unclassified_eof=%lld "
+		   "released_pairs=%lld fault_hits=%lld\n",
+		   atomic64_read(&st_attached), atomic64_read(&st_completed), atomic64_read(&st_aborted), atomic64_read(&st_records),
+		   atomic64_read(&st_runs), atomic64_read(&st_attach_rej_state), atomic64_read(&st_attach_early_bytes),
+		   atomic64_read(&st_attach_early_end), atomic64_read(&st_attach_early_abort), atomic64_read(&st_ab_socket),
+		   atomic64_read(&st_ab_peer), atomic64_read(&st_ab_unclass), atomic64_read(&st_released_pairs),
+		   atomic64_read(&st_fault_hits));
+	return 0;
+}
+
+static int __init ev_init(void)
+{
+	int i, rc;
+
+	ev_wq = alloc_workqueue("ovd_fwd", WQ_PERCPU, 0);
+	if (!ev_wq)
+		return -ENOMEM;
+	for (i = 0; i < 8; i++) {
+		void *b = kvmalloc(EV_BUF, GFP_KERNEL);
+
+		if (!b) {
+			rc = -ENOMEM;
+			goto fail;
+		}
+		ev_pool[ev_pool_n++] = b;
+	}
+	rc = misc_register(&ev_misc);
+	if (rc)
+		goto fail;
+	proc_create_single("ovd_fwd", 0444, NULL, ev_stats);
+	pr_info("ovdpair: loaded (permanent: no module_exit)\n");
+	return 0;
+fail:
+	while (ev_pool_n)
+		kvfree(ev_pool[--ev_pool_n]);
+	destroy_workqueue(ev_wq);
+	return rc;
+}
+
+module_init(ev_init);
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("V-EV-PAIR spike: attach-at-pairing forwarder with a control context (permanent)");

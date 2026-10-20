@@ -5,15 +5,18 @@ State 1
   repLeft = 1
   table = FALSE
   att = [C1 |-> 0, C2 |-> 0]
-  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE ]
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
   latch = FALSE
   flowsOpen = 0
+  leaked = 0
+  conf_step = [InitDown |-> [tag |-> "UNIT"]]
+  foreign = FALSE
   rec = [C1 |-> "idle", C2 |-> "idle"]
   stop = "crash"
   cnt = 0
   up = FALSE
 
 State 2 [RestartWith]
-  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> TRUE ]
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> TRUE, foreignChanged |-> FALSE ]
   stop = "none"
   up = TRUE

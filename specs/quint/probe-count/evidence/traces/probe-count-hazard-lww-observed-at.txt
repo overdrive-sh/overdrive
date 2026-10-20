@@ -15,6 +15,7 @@ State 1
   hist = <<>>
   terms = 0
   pseq = 0
+  conf_step = [init |-> [tag |-> "UNIT"]]
   psame = 0
   pst = ""
   rst = ""

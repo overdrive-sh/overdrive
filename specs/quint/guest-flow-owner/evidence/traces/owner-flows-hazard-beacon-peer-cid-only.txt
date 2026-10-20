@@ -1,4 +1,4 @@
-# owner-flows-hazard-beacon-peer-cid-only: counterexample, 12 state(s) (from the TLC trace)
+# owner-flows-hazard-beacon-peer-cid-only: counterexample, 9 state(s) (from the TLC trace)
 
 State 1
   resurrected = FALSE
@@ -9,6 +9,7 @@ State 1
   toHostPaired = {}
   sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
   phantom = FALSE
+  gSess = 0
   quiesced = FALSE
   readyCross = FALSE
   crossMsg = FALSE
@@ -17,6 +18,7 @@ State 1
   toGuestAbort = {}
   vmUp = FALSE
   toHostRefused = {}
+  conf_step = [InitWith |-> [o |-> "g"]]
   bHeldByOther = FALSE
   claim = 0
   dl = [ res |-> <<"none">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
@@ -39,34 +41,25 @@ State 3 [VmStart]
   vmUp = TRUE
   drvLive = TRUE
 
-State 4 [Teardown]
-  alloc = "Retiring"
+State 4 [step]
+  bcn = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 1]>>
 
-State 5 [step]
-  bcn = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
-
-State 6 [VmStop]
+State 5 [VmStop]
   vmUp = FALSE
-
-State 7 [step]
-  bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
-
-State 8 [step]
   drvLive = FALSE
 
-State 9 [Release]
-  alloc = "Absent"
-
-State 10 [Provision]
-  alloc = "Provisioned"
+State 6 [Provision]
   gen = 2
 
-State 11 [VmStart]
+State 7 [VmStart]
   vmGen = 2
   vmUp = TRUE
   drvLive = TRUE
 
-State 12 [step]
-  bcn = <<[st |-> "live", gen |-> 1], [st |-> "none", gen |-> 0]>>
-  bclaim = 1
+State 8 [step]
+  bcn = <<[st |-> "none", gen |-> 0], [st |-> "reading", gen |-> 1]>>
+
+State 9 [step]
+  bcn = <<[st |-> "none", gen |-> 0], [st |-> "live", gen |-> 1]>>
+  bclaim = 2
   readyCross = TRUE

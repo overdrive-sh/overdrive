@@ -1,0 +1,17 @@
+{
+ "qemu_exit": 0,
+ "host_done": true,
+ "elapsed_s": 10.449046611785889,
+ "scenarios": [
+  "race-random-1:30",
+  "race-random-16:10",
+  "vmm-kill-after-clean-completion:3",
+  "vmm-kill-halfclosed:3",
+  "dial-watch-holdershut-then-guest-halfclose:10",
+  "dial-watch-holdershut-then-guest-reset:10"
+ ],
+ "hazard_host": 0,
+ "hazard_guest": 0,
+ "physical_module_names_unchanged": true,
+ "module_on_physical_host": []
+}

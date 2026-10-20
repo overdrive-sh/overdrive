@@ -1,0 +1,15 @@
+[22:56:46] === preflight (fail closed)
+[22:56:46] substrate: {"host_uname_r": "7.0.0-38-generic", "machine": "x86_64", "systemd_detect_virt": "none", "cpu": "AMD EPYC 8024P 8-Core Processor", "nproc": 16}
+[22:56:46] === guest image
+[22:56:46] image pins: {"guest_kernel": "b51367c7dab2", "initramfs": "45405be90de0", "pairprobe": "ce8b857ce9a6", "ovdpair.ko": "b3eb9f4fb169", "cloud_hypervisor": "eadddf1bbcdc"}
+[22:56:46] modules: ['vsock.ko', 'vmw_vsock_virtio_transport_common.ko', 'vmw_vsock_virtio_transport.ko', 'vsock_loopback.ko']
+[22:56:46] launch VM: /var/tmp/ev-pair-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /var/tmp/ev-pair-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=0 loglevel=4 --cpus boot=4 --memory size=1536M --serial file=/var/tmp/ev-pair-work/out/vm-20261016T225646Z/serial.log --console off --vsock cid=3371,backend=vhost-kernel --log-file /var/tmp/ev-pair-work/out/vm-20261016T225646Z/ch.log -v
+[23:21:46] VM status=timeout wall=1501s
+[23:21:48] RESULT {"status": "timeout", "wall_s": 1501, "host_uname_r": "7.0.0-38-generic", "guest_uname_r": "7.0.0-29-generic", "physical_module_names_unchanged": true, "physical_ovdpair_loaded": false, "runs": 6, "fault_lines": [], "probe_results": ["{\"abi\":1,\"permanent_flag\":1,\"delete_module_rc\":-1,\"delete_module_errno\":16,\"record_size\":32}"]}
+[23:21:48]   run 301 L-loopback in-sf lanes=1x10000: ok 10000/10000 reasons={} wall=46.6s
+[23:21:48]   run 401 L-loopback in-sf lanes=8x1250: ok 10000/10000 reasons={} wall=5.8s
+[23:21:48]   run 302 L-loopback in-sffin lanes=1x10000: ok 10000/10000 reasons={} wall=45.0s
+[23:21:48]   run 402 L-loopback in-sffin lanes=8x1250: ok 10000/10000 reasons={} wall=5.8s
+[23:21:48]   run 303 L-loopback in-cf lanes=1x10000: ok 10000/10000 reasons={} wall=50.0s
+[23:21:48]   run 403 L-loopback in-cf lanes=8x1250: ok 10000/10000 reasons={} wall=6.2s
+[23:21:48] evidence dir: /var/tmp/ev-pair-work/evidence/vm-job2-20261016T225646Z

@@ -1,0 +1,76 @@
+{
+ "uname_r_guest": "7.0.0-29-generic",
+ "done_marker": true,
+ "oops_lines": [],
+ "cases": [
+  {
+   "case": "sizes-0-u",
+   "pass": true
+  },
+  {
+   "case": "sizes-1-u",
+   "pass": true
+  },
+  {
+   "case": "sizes-1431-u",
+   "pass": true
+  },
+  {
+   "case": "sizes-4096-u",
+   "pass": true
+  },
+  {
+   "case": "sizes-4097-u",
+   "pass": true
+  },
+  {
+   "case": "sizes-59000-u",
+   "pass": true
+  },
+  {
+   "case": "sizes-1431-c",
+   "pass": true
+  },
+  {
+   "case": "mixed-u",
+   "pass": true
+  },
+  {
+   "case": "mixed-c",
+   "pass": true
+  },
+  {
+   "case": "credit",
+   "pass": true
+  },
+  {
+   "case": "chunked",
+   "pass": true
+  },
+  {
+   "case": "oversize",
+   "pass": true
+  },
+  {
+   "case": "badframe-len",
+   "pass": true
+  },
+  {
+   "case": "badframe-magic",
+   "pass": true
+  },
+  {
+   "case": "truncated",
+   "pass": true
+  },
+  {
+   "case": "eof",
+   "pass": true
+  },
+  {
+   "case": "stall",
+   "pass": true
+  }
+ ],
+ "all_pass": true
+}

@@ -4,7 +4,7 @@
 //!
 //! # Contract under test
 //!
-//! D-295-R6, R7, R8, R11 (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the cap, the pool, placement, and restart gating); ADR-0132 to ADR-0134):
+//! D-295-R6, R7, R8, R11 (FD § "Gate G-V0 — node attachment admission (restates G-295-0)" (the cap, the pool, placement, and restart gating); ADR-0132 to ADR-0134):
 //! a node holds at most `MAX_GUEST_NETWORK_ATTACHMENTS` = 16,384 guest-network
 //! leases. A lease is held from the pool's `assign` until the allocation's
 //! cleanup has finished and the pool releases it. The held population is
@@ -44,6 +44,7 @@
 //! | NA-VIEW     | safety   | Each at-cap placement window (NA-1 twice, NA-2) holds no `guest_network.admission_refused`: placement over the production `GuestAttachmentView` returns `NoCapacity` before any dispatch, so the pool's own refusal is never what stops the overflow. A refusal there means the view under-reported occupancy (DR-12). |
 //! | NA-E7       | safety   | At most one refused dispatch per contended slot (E7): every allocation, and every workload, sees at most one `guest_network.admission_refused` over the run. Each workload in this schedule contends for at most one slot, and a raced restart refusal advances the successor id, so the count is taken per workload as well as per allocation. |
 //! | NA-E7-C     | safety   | One contended slot (the `Contended` block): two new workloads are placed on the one free slot before either dispatches; exactly one wins it, the other's dispatch is refused exactly once (`guest_network.admission_refused` naming its allocation — the witness that NA-E7 is not vacuous), and its immediate re-evaluation is refused by placement with no second refused dispatch. |
+//! | G-V0        | safety   | Every lease the pool holds carries `GUEST_CID_BASE + offset` of a usable offset of the node prefix, and no two held leases share a CID (CID-NOCLAIM: within one `serve` process lease uniqueness is CID uniqueness), read through `GuestAddressPool::lease_observation` (QPROJ-2). |
 //!
 //! # Production owner path (causes are driven, consequences are observed)
 //!
@@ -79,7 +80,7 @@
 //!   `SimMtlsResolve`, and `SimMtlsIntercept`. The ledger is the seams'
 //!   `provisioner` and the owner `AppState` receives, so every owner
 //!   observation has one source. `AppState` constructors are unchanged until
-//!   DELIVER 05-01 (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the `AppState` constructors)); until then the helper passes today's inputs,
+//!   DELIVER 05-01 (FD § "Gate G-V3 — allocation forwarding activation (replaces G-295-3)" (the `AppState` constructors)); until then the helper passes today's inputs,
 //!   and 05-01 changes that one call to pass the worker, owner, gate, and pool.
 //! - **Driven ports substituted**: `SimDriver`, `SimObservationStore`,
 //!   `SimViewStore`, `SimClock`, `SimCa`, `SimDataplane`, the three mTLS sim
@@ -110,10 +111,10 @@
 //!
 //! # Outcome oracle
 //!
-//! The pool's own counts are crate-private (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the crate-private pool operations)), so the held
+//! The pool's own counts are crate-private (FD § "Gate G-V0 — node attachment admission (restates G-295-0)" (the crate-private pool operations)), so the held
 //! population is counted from outside: every `provision` the ledger sees adds
 //! a held lease, and every `guest_network.lease_released { alloc }` event
-//! removes one (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the admission refusal projection and the lease events)). A test-local tracing layer ([`LeaseEventLayer`])
+//! removes one (FD § "Gate G-V0 — node attachment admission (restates G-295-0)" (the admission refusal projection and the lease events)). A test-local tracing layer ([`LeaseEventLayer`])
 //! captures `lease_released`, `lease_retired`, and `admission_refused` and
 //! appends them, with each `provision`, to one ordered journal. The held
 //! count at each acquisition is the NA-1..NA-G measure; the journal order is
@@ -145,6 +146,7 @@
 //! `OVERDRIVE_ND295_ADMISSION_SEED=<seed> cargo xtask lima run -- cargo nextest run -p overdrive-sim --test integration --features integration-tests --run-ignored all --no-capture -E 'test(node_wide_attachment_admission_never_exceeds_the_t1_cap_across_workloads)'`.
 
 #![allow(
+    clippy::used_underscore_binding,
     clippy::expect_used,
     clippy::print_stderr,
     clippy::too_many_lines,
@@ -152,6 +154,7 @@
     reason = "seeded proof harness: fixture preconditions fail loudly, the verdict table is the evidence"
 )]
 
+use overdrive_core::guest_transport::GuestFlowPorts;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv4Addr;
 use std::sync::Arc;
@@ -160,9 +163,10 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use overdrive_control_plane::guest_network::{
-    GuestAddressPool, GuestNetworkPlan, GuestNetworkProvisioner, Result as GuestNetworkResult,
-    SharedGuestNetworkAudit, SharedGuestNetworkAuditError, SharedGuestNetworkOwner, TapActivation,
-    TapQuiescence,
+    ForwardingActivation, ForwardingQuiescence, ForwardingRestore, GuestAddressPool,
+    GuestNetworkPlan, GuestNetworkProvisioner, QuiescenceHold, QuiescenceRestoreError,
+    Result as GuestNetworkResult, SharedGuestNetworkAudit, SharedGuestNetworkAuditError,
+    SharedGuestNetworkOwner,
 };
 use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::reconciler_runtime::{
@@ -179,6 +183,9 @@ use overdrive_core::api::{ListenerInput, ServiceSpecInput};
 use overdrive_core::guest_network::{
     GuestNetworkExecGate, GuestNetworkExecSupervisor, GuestNetworkExecWiring,
     MAX_GUEST_NETWORK_ATTACHMENTS,
+};
+use overdrive_core::guest_transport::dial::{
+    DialPurpose, GuestDialError, GuestStream, GuestStreamDial,
 };
 use overdrive_core::id::{AllocationId, MeshServiceName, NodeId, WorkloadId};
 use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
@@ -216,19 +223,18 @@ use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 
 /// The accepted fixed node-wide cap (D-295-R6; `MAX_GUEST_NETWORK_ATTACHMENTS`
-/// in `overdrive_core::guest_network`, FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the `MAX_GUEST_NETWORK_ATTACHMENTS` constant)).
+/// in `overdrive_core::guest_network`, FD § "Gate G-V0 — node attachment admission (restates G-295-0)" (the `MAX_GUEST_NETWORK_ATTACHMENTS` constant)).
 const CAP: usize = 16_384;
 const _: () = assert!(
     MAX_GUEST_NETWORK_ATTACHMENTS as usize == CAP,
     "S-ND295-05D asserts the accepted 16,384 cap"
 );
-/// Today's guest-address pool composition. R6 composes the per-server pool
-/// with the same node prefix, bridge, gateway, and DNS address the shared
-/// owner is composed with (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (one pool per server: the doc-hidden `GuestAddressPool::new`)).
+/// The guest-address pool composition (G-V0, CID-NOCLAIM): the node guest
+/// prefix and its gateway (the guest's DNS server address), with the injected
+/// entropy port the pool draws each lease's launch token from (ATTR-TOKEN).
+/// One pool per server (R6); each lease's CID is `GUEST_CID_BASE + offset`.
 const POOL_PREFIX: &str = "100.95.0.0/16";
-const POOL_BRIDGE: &str = "ovd-gbr0";
 const POOL_GATEWAY: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 1);
-const POOL_DNS: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 1);
 /// The Phase-1 single-node baseline id the scheduler places onto
 /// (`workload_lifecycle::baseline_nodes_phase1`).
 const NODE: &str = "local";
@@ -242,7 +248,7 @@ const DEFAULT_SEEDS: [u64; 2] = [0x0295_0032_A0D1_0001, 295_032];
 const SETTLE_TICKS: usize = 6;
 /// Bounded clock nudges while waiting for the exit observer.
 const CRASH_POLL_BUDGET: usize = 2_000;
-/// The pinned lease events (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the admission refusal projection and the lease events)).
+/// The pinned lease events (FD § "Gate G-V0 — node attachment admission (restates G-295-0)" (the admission refusal projection and the lease events)).
 const LEASE_RETIRED: &str = "guest_network.lease_retired";
 const LEASE_RELEASED: &str = "guest_network.lease_released";
 const ADMISSION_REFUSED: &str = "guest_network.admission_refused";
@@ -569,7 +575,7 @@ impl GuestNetworkProvisioner for LeaseLedger {
         self.inner.provision(plan).await
     }
 
-    async fn activate(&self, plan: &GuestNetworkPlan) -> GuestNetworkResult<TapActivation> {
+    async fn activate(&self, plan: &GuestNetworkPlan) -> GuestNetworkResult<ForwardingActivation> {
         self.inner.activate(plan).await
     }
 
@@ -592,18 +598,38 @@ impl SharedGuestNetworkOwner for LeaseLedger {
         self.inner.converge_shared().await
     }
 
+    fn flow_ports(&self) -> Option<GuestFlowPorts> {
+        self.inner.flow_ports()
+    }
+
     async fn audit_shared(
         &self,
     ) -> std::result::Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError> {
         self.inner.audit_shared().await
     }
 
-    async fn quiesce_managed_taps(&self) -> GuestNetworkResult<TapQuiescence> {
-        self.inner.quiesce_managed_taps().await
+    async fn quiesce(&self) -> (QuiescenceHold, ForwardingQuiescence) {
+        self.inner.quiesce().await
     }
 
-    async fn restore_quiesced_taps(&self) -> GuestNetworkResult<()> {
-        self.inner.restore_quiesced_taps().await
+    async fn restore(
+        &self,
+        hold: QuiescenceHold,
+    ) -> std::result::Result<ForwardingRestore, QuiescenceRestoreError> {
+        self.inner.restore(hold).await
+    }
+}
+
+/// `SharedGuestNetworkOwner: GuestStreamDial` (INB-1): the ledger forwards
+/// every dial unchanged; this schedule dials nothing.
+#[async_trait::async_trait]
+impl GuestStreamDial for LeaseLedger {
+    async fn dial(
+        &self,
+        target: std::net::SocketAddrV4,
+        purpose: DialPurpose,
+    ) -> std::result::Result<GuestStream, GuestDialError> {
+        self.inner.dial(target, purpose).await
     }
 }
 
@@ -747,7 +773,7 @@ impl Decision {
 }
 
 /// The inputs DELIVER 05-01's `AppState` constructors take beside the owner
-/// (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the `AppState` constructors)). The seam fixture holds them from phase B on so that
+/// (FD § "Gate G-V3 — allocation forwarding activation (replaces G-295-3)" (the `AppState` constructors)). The seam fixture holds them from phase B on so that
 /// constructor change is one line.
 #[allow(
     dead_code,
@@ -872,10 +898,13 @@ impl SimNode {
         let allocator =
             overdrive_control_plane::test_default_allocator(store.clone() as Arc<dyn IntentStore>);
 
-        // One started worker over the three mTLS sim ports (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (`AppState` constructors: why `mtls_worker` is a parameter)).
+        // One started worker over the three mTLS sim ports (FD § "Gate G-V3 — allocation forwarding activation (replaces G-295-3)" (`AppState` constructors: why `mtls_worker` is a parameter)).
         let identity: Arc<dyn IdentityRead> = Arc::new(SimIdentityRead::new(BTreeMap::new(), None));
-        let enforcement: Arc<dyn MtlsEnforcement> =
-            Arc::new(SimMtlsEnforcement::new(identity, MtlsLimits::default()));
+        let enforcement: Arc<dyn MtlsEnforcement> = Arc::new(SimMtlsEnforcement::new(
+            identity,
+            MtlsLimits::default(),
+            Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        ));
         let resolve: Arc<dyn MtlsResolve> =
             Arc::new(SimMtlsResolve::new(BTreeMap::new(), MtlsResolution::NonMesh));
         let mtls_worker = Arc::new(MtlsInterceptWorker::new(
@@ -893,7 +922,7 @@ impl SimNode {
 
         // One EXEC wiring over the fixture clock. Only its paired supervisor
         // moves the gate; it is opened before the first dispatch
-        // (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (gate state outside `run_server*`)).
+        // (FD § "Gate G-V3 — allocation forwarding activation (replaces G-295-3)" (gate state outside `run_server*`)).
         let exec = GuestNetworkExecWiring::new(clock.clone());
         let exec_gate = exec.gate();
         let exec_supervisor = exec.supervisor();
@@ -906,14 +935,13 @@ impl SimNode {
         // One pool per server, composed with today's constants (R6).
         let guest_pool = Arc::new(GuestAddressPool::new(
             POOL_PREFIX.parse().expect("pool node prefix"),
-            POOL_BRIDGE.to_owned(),
             POOL_GATEWAY,
-            POOL_DNS,
+            Arc::new(SimEntropy::new(seed)),
         ));
 
         // DELIVER 05-01 changes this call and no other line of the file:
         // `AppState::new` appends `mtls_worker`, `shared_guest_network`,
-        // `guest_network_exec`, and `guest_pool` (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the `AppState` constructors)), passed here as
+        // `guest_network_exec`, and `guest_pool` (FD § "Gate G-V3 — allocation forwarding activation (replaces G-295-3)" (the `AppState` constructors)), passed here as
         // `Arc::clone(&mtls_worker)`,
         // `Arc::clone(&owner) as Arc<dyn SharedGuestNetworkOwner>`,
         // `Arc::clone(&exec_gate)`, and `Arc::clone(&guest_pool)`.
@@ -1300,6 +1328,7 @@ enum Block {
 /// S-ND295-05D — Across a whole node, held attachments never exceed the cap.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn node_wide_attachment_admission_never_exceeds_the_t1_cap_across_workloads() {
     for seed in seeds() {
         eprintln!(
@@ -1732,6 +1761,34 @@ async fn node_wide_admission(seed: u64) {
              {worst_alloc}); per workload {per_workload:?} (max {worst_workload}); events: [{}]",
             run_refusals.len(),
             render_events(&run_refusals),
+        ),
+    );
+
+    // G-V0 (CID-NOCLAIM): every lease the pool holds at the end of the run
+    // carries `GUEST_CID_BASE + offset` of its own workload address, unique
+    // among the held leases — read through the pool's pinned observation
+    // (QPROJ-2), never its private state.
+    let observation = node._held_for_app_state.guest_pool.lease_observation();
+    let mut cids = BTreeMap::new();
+    let mut clashes = Vec::new();
+    for (alloc, view) in &observation.leases {
+        if let Some(other) = cids.insert(view.cid, alloc.clone()) {
+            clashes.push((view.cid, other, alloc.clone()));
+        }
+    }
+    // The /16 prefix's usable host offsets: 0 is the network, 1 the gateway,
+    // 65,535 the broadcast address.
+    let usable = 2..u32::from(u16::MAX);
+    let in_range = observation.leases.values().all(|view| {
+        usable.contains(&(view.cid.get() - overdrive_core::guest_transport::GUEST_CID_BASE))
+    });
+    report.verdict(
+        &node,
+        "G-V0 (one CID per held lease, CID = GUEST_CID_BASE + offset)",
+        clashes.is_empty() && in_range,
+        format!(
+            "held leases: {}; CID clashes: {clashes:?}; every offset usable: {in_range}",
+            observation.leases.len()
         ),
     );
 

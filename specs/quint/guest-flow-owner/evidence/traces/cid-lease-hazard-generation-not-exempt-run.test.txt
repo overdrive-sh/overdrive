@@ -1,0 +1,23 @@
+
+  lease_conf_bugGenerationNotExempt
+    1) lease_conf_bugGenerationNotExempt::cid_lease::RedeployPlacesAnExhaustedWorkloadAgainWithItsCount failed after 1 test(s)
+
+  1 failed
+
+  1) lease_conf_bugGenerationNotExempt::cid_lease::RedeployPlacesAnExhaustedWorkloadAgainWithItsCount:
+       Error [QNT508]: Cannot continue to "expect"
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/cid_lease.qnt:732:60
+        732:   run RedeployPlacesAnExhaustedWorkloadAgainWithItsCount = FifthCrashAtCeilingBoundaryIsPlacedAgain
+                                                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        733:     .then(Launch(1)).then(Release(1)).then(VmmCrash(1)).then(Finalize(1)).then(Release(1))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        734:     .expect(Safety and st(1) == "failed")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        735:     .then(Redeploy(1)).expect(Safety and st(1) == "wait" and not(al.get(1).chg) and att.get(1) == CEIL)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Use --seed=0x93b1aa4ab24c5264 --match=lease_conf_bugGenerationNotExempt::cid_lease::RedeployPlacesAnExhaustedWorkloadAgainWithItsCount to repeat.
+
+
+  Use --verbosity=3 to show executions.
+  Further debug with: quint test --verbosity=3 /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/hazard/cid_lease_hazards.qnt
+error: Tests failed

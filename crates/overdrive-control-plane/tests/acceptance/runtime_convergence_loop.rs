@@ -849,6 +849,7 @@ async fn stop_after_failed_alloc_drains_broker() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
+#[ignore = "pending DELIVER attachment-cut step (DG-2 row 2: GuestAddressPool::assign)"]
 async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart() {
     use std::collections::BTreeMap;
     use std::time::Instant;

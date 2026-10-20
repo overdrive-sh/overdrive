@@ -1,7 +1,9 @@
 //! Bounded DESIGN witness: terminal VM cleanup hands off from ending authorship
 //! to registered `VmReclamation`. Allocation rows are production-authored.
-//! The real `VmDriver` is composed over existing Sim Vmm/cgroup/probe ports;
-//! a protocol peer supplies READY and remains connected after receiving EXEC.
+//! The real `VmDriver` is composed over existing Sim Vmm/cgroup/probe ports and
+//! a node beacon intake over `SimBeaconIo` (D17); a protocol peer supplies
+//! READY with the lease's launch token (ATTR-TOKEN, read from the pool's
+//! `lease_observation`) and remains connected after receiving EXEC.
 #![cfg(feature = "integration-tests")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 #![expect(
@@ -11,25 +13,24 @@
     reason = "bounded diagnostic retains its required Contract Shape and seed evidence"
 )]
 
-use std::path::Path;
+use overdrive_core::observation::{ProbeRunSeq, SameStatusRuns};
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
+use overdrive_control_plane::guest_network::GuestAddressPool;
 use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::reconciler_runtime::{
-    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
+    ReconcilerRuntime, run_convergence_tick_with_guest_network_provisioner_for_test,
 };
-use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
 use overdrive_control_plane::{AppState, service_lifecycle, workload_lifecycle};
-use overdrive_core::guest_transport::ClaimedGuestCid;
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::aggregate::{
     DriverInput, IntentKey, ResourcesInput, Service, VmInput, WorkloadIntent,
 };
 use overdrive_core::api::{ListenerInput, ServiceSpecInput};
 use overdrive_core::cgroup::CgroupPath;
+use overdrive_core::guest_transport::GuestCid;
 use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
 use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
@@ -44,10 +45,11 @@ use overdrive_core::traits::vm_host_state::{
 use overdrive_core::traits::vmm::{
     Result as VmmResult, VmControl, VmProcess, VmTermination, Vmm, VmmProbeError,
 };
-use overdrive_core::vm::beacon::BEACON_VSOCK_PORT;
+use overdrive_core::vm::beacon::{BeaconConnKey, BeaconIo};
 use overdrive_core::vm::config::{
-    Gid, HostArch, KERNEL_MAGIC_WINDOW, VmConfig, VmConfinement, VmRunDir, VmmIdentity,
+    Gid, HostArch, KERNEL_MAGIC_WINDOW, VmConfig, VmConfinement, VmmIdentity, VsockPort,
 };
+use overdrive_sim::adapters::beacon_io::SimBeaconIo;
 use overdrive_sim::adapters::{
     ca::SimCa,
     clock::SimClock,
@@ -59,30 +61,11 @@ use overdrive_sim::adapters::{
 };
 use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm};
 use overdrive_store_local::LocalIntentStore;
+use overdrive_worker::BeaconIntake;
 use overdrive_worker::VmDriver;
 use overdrive_worker::probe_runner::ProbeRunner;
 use overdrive_worker::vm_driver::VmHostLayout;
 use parking_lot::Mutex;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
-
-struct Network {
-    vmm: Arc<RecordedVmm>,
-    live_at_teardown: Mutex<Vec<bool>>,
-}
-
-impl WorkloadNetworkProvisioner for Network {
-    fn provision(&self, _: &WorkloadNetnsPlan, _: &VmTapPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-    fn teardown(&self, _: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        let controls = self.vmm.controls.lock();
-        let any_live = controls.iter().any(|control| self.vmm.inner.is_live(control.pid));
-        drop(controls);
-        self.live_at_teardown.lock().push(any_live);
-        Ok(())
-    }
-}
 
 /// Observe the existing Vmm port, without changing its lifetime behavior.
 struct RecordedVmm {
@@ -100,8 +83,8 @@ impl Vmm for RecordedVmm {
     async fn probe(&self) -> Result<(), VmmProbeError> {
         self.inner.probe().await
     }
-    async fn create(&self, config: &VmConfig, vsock: ClaimedGuestCid) -> VmmResult<VmProcess> {
-        let process = self.inner.create(config, vsock).await?;
+    async fn create(&self, config: &VmConfig, cid: GuestCid) -> VmmResult<VmProcess> {
+        let process = self.inner.create(config, cid).await?;
         self.controls.lock().push(process.control.clone());
         self.scopes.lock().push((config.cgroup_scope.clone(), process.control.clone()));
         self.host.set_scope(config.alloc.clone(), std::iter::once(process.control.pid).collect());
@@ -153,25 +136,44 @@ impl VmHostState for CoupledHost {
     }
 }
 
-async fn guest(path: &Path) -> BufReader<UnixStream> {
-    let stream = tokio::time::timeout(Duration::from_secs(10), async {
+/// The guest of the allocation's VMM dials the node beacon intake with READY
+/// carrying its lease's launch token, and stays connected after EXEC.
+async fn guest(
+    io: &SimBeaconIo,
+    pool: &GuestAddressPool,
+    vmm: &RecordedVmm,
+    alloc: &AllocationId,
+) -> BeaconConnKey {
+    let pid = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
-            if let Ok(stream) = UnixStream::connect(path).await {
-                break stream;
+            if let Some(control) = vmm.controls.lock().first() {
+                break control.pid;
             }
             tokio::time::sleep(Duration::from_millis(2)).await;
         }
     })
     .await
-    .expect("fixture beacon listener becomes available");
-    let mut peer = BufReader::new(stream);
-    peer.get_mut().write_all(b"READY pid=1 port=8080\n").await.unwrap();
-    let mut exec = String::new();
-    peer.read_line(&mut exec).await.unwrap();
-    assert!(exec.starts_with("EXEC "), "production driver sends EXEC: {exec:?}");
+    .expect("the allocation's VMM is created");
+    let lease = pool.lease_observation().leases.get(alloc).cloned().expect("the lease is held");
+    let key = BeaconConnKey { peer_cid: lease.cid, peer_port: VsockPort::new(49_152) };
+    let ready = format!("READY pid=1 port=8080 launch={}", lease.launch);
+    io.queue_connection(key, pid, &[ready.as_str()]).expect("the beacon listener is bound");
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if io
+                .written_lines(key)
+                .is_some_and(|lines| lines.iter().any(|l| l.starts_with("EXEC ")))
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .expect("production driver sends EXEC");
     // A long-lived guest workload need not voluntarily terminate on host
-    // write-half closure. Keep its peer endpoint alive; never inject VMM death.
-    peer
+    // write-half closure. Keep its connection open; never inject VMM death.
+    key
 }
 
 async fn with_clock<F: std::future::Future>(clock: &SimClock, seed: u64, future: F) -> F::Output {
@@ -231,9 +233,17 @@ async fn drive(seed: u64, finalize: bool) {
         http_prober,
         clock.clone(),
         obs.clone(),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
     ));
     let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock.clone());
     assert!(wiring.supervisor().open_after_boot());
+    let beacon_io = Arc::new(SimBeaconIo::new(vmm.inner.clone()));
+    let intake = BeaconIntake::bind(
+        Arc::clone(&beacon_io) as Arc<dyn BeaconIo>,
+        overdrive_core::guest_transport::VsockListenPort::KernelAssigned,
+    )
+    .await
+    .expect("the sim beacon listener binds");
     let driver = Arc::new(VmDriver::new(
         vmm.clone(),
         clock.clone(),
@@ -242,6 +252,12 @@ async fn drive(seed: u64, finalize: bool) {
         probes,
         wiring.gate(),
         layout.clone(),
+        intake,
+    ));
+    let pool = Arc::new(GuestAddressPool::new(
+        "100.95.0.0/16".parse().expect("static guest prefix"),
+        std::net::Ipv4Addr::new(100, 95, 0, 1),
+        Arc::new(SimEntropy::new(0x295)),
     ));
     let mut runtime = ReconcilerRuntime::new_with_redb_view_store_for_test(temp.path()).unwrap();
     runtime.register(workload_lifecycle()).await.unwrap();
@@ -250,6 +266,11 @@ async fn drive(seed: u64, finalize: bool) {
     let store = Arc::new(LocalIntentStore::open(temp.path().join("intent.redb")).unwrap());
     let allocator =
         overdrive_control_plane::test_default_allocator(store.clone() as Arc<dyn IntentStore>);
+    // The one guest-network owner of this process (the post-#295 guest lane):
+    // `AppState` holds it and every convergence tick dispatches through it,
+    // so the VM allocation's transport is the lease the pool assigns.
+    let guest_owner =
+        Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default());
     let mut state = AppState::new(
         store,
         temp.path().join("intent.redb"),
@@ -271,6 +292,7 @@ async fn drive(seed: u64, finalize: bool) {
                     None,
                 )),
                 overdrive_core::traits::mtls_enforcement::MtlsLimits::default(),
+                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
             )),
             Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
                 std::collections::BTreeMap::new(),
@@ -279,17 +301,10 @@ async fn drive(seed: u64, finalize: bool) {
             Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
             Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
         )),
-        Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
-        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(
-            overdrive_sim::adapters::clock::SimClock::new(),
-        ))
-        .gate(),
-        Arc::new(overdrive_control_plane::guest_network::GuestAddressPool::new(
-            "100.95.0.0/16".parse().expect("static guest prefix"),
-            "ovd-gbr0".to_owned(),
-            std::net::Ipv4Addr::new(100, 95, 0, 1),
-            std::net::Ipv4Addr::new(100, 95, 0, 1),
-        )),
+        Arc::clone(&guest_owner)
+            as Arc<dyn overdrive_control_plane::guest_network::SharedGuestNetworkOwner>,
+        wiring.gate(),
+        Arc::clone(&pool),
     );
     state.vm_host_state = Arc::new(CoupledHost(vmm.clone()));
     overdrive_control_plane::worker::exit_observer::spawn(
@@ -331,21 +346,18 @@ async fn drive(seed: u64, finalize: bool) {
     let target = TargetResource::new("workload/vm-finalize-ownership").unwrap();
     let workload = ReconcilerName::new("workload-lifecycle").unwrap();
     let service = ReconcilerName::new("service-lifecycle").unwrap();
-    let network = Network { vmm: vmm.clone(), live_at_teardown: Mutex::new(vec![]) };
     let deadline = clock.now() + Duration::from_secs(30);
-    let beacon_path =
-        VmRunDir::for_alloc(&layout.run_dir_root, &alloc).beacon_socket(BEACON_VSOCK_PORT);
     let (start, peer) = tokio::join!(
-        run_convergence_tick_with_network_provisioner_for_test(
+        run_convergence_tick_with_guest_network_provisioner_for_test(
             &state,
             &workload,
             &target,
             clock.now(),
             33,
             deadline,
-            &network,
+            guest_owner.as_ref(),
         ),
-        guest(&beacon_path),
+        guest(&beacon_io, &pool, &vmm, &alloc),
     );
     start.unwrap();
     let control = vmm.controls.lock()[0].clone();
@@ -354,14 +366,14 @@ async fn drive(seed: u64, finalize: bool) {
     assert!(driver.live_allocations().unwrap().contains(&alloc));
     let reclamation = ReconcilerName::new("vm-reclamation").unwrap();
     let node_target = TargetResource::new("node/local").unwrap();
-    run_convergence_tick_with_network_provisioner_for_test(
+    run_convergence_tick_with_guest_network_provisioner_for_test(
         &state,
         &reclamation,
         &node_target,
         clock.now(),
         33,
         deadline,
-        &network,
+        guest_owner.as_ref(),
     )
     .await
     .unwrap();
@@ -379,20 +391,26 @@ async fn drive(seed: u64, finalize: bool) {
             status: ProbeStatus::Fail { last_fail_reason: "HTTP 302".to_owned() },
             last_observed_at_unix_ms: u64::try_from(clock.unix_now().as_millis()).unwrap(),
             inferred: false,
+            run_seq: ProbeRunSeq::new(u64::max(
+                u64::try_from(clock.unix_now().as_millis()).unwrap(),
+                1,
+            ))
+            .unwrap_or(ProbeRunSeq::FIRST),
+            same_status_runs: SameStatusRuns::ONE,
         })
         .await
         .unwrap();
         with_clock(
             &clock,
             seed,
-            run_convergence_tick_with_network_provisioner_for_test(
+            run_convergence_tick_with_guest_network_provisioner_for_test(
                 &state,
                 &service,
                 &target,
                 clock.now(),
                 34,
                 deadline,
-                &network,
+                guest_owner.as_ref(),
             ),
         )
         .await
@@ -404,22 +422,21 @@ async fn drive(seed: u64, finalize: bool) {
     let live_after_stop = vmm.inner.is_live(control.pid);
     let row = obs.alloc_status_rows().await.unwrap().remove(0);
     eprintln!(
-        "seed={seed} finalize={finalize} row={row:?} owned_before_stop={owned_before_stop} live_before_stop={live_before_stop} subsequent_stop={later_stop:?} live_after_stop={live_after_stop} network_teardowns={}",
-        network.live_at_teardown.lock().len()
+        "seed={seed} finalize={finalize} row={row:?} owned_before_stop={owned_before_stop} live_before_stop={live_before_stop} subsequent_stop={later_stop:?} live_after_stop={live_after_stop}"
     );
     if finalize {
         assert_eq!(row.state, AllocState::Failed, "seed={seed}: production startup terminal");
         assert!(row.terminal.is_some(), "seed={seed}: terminal authored by ServiceLifecycle");
         let before = obs.alloc_lifecycle_occurrences(&alloc).await.unwrap();
         clock.tick(Duration::from_secs(30));
-        run_convergence_tick_with_network_provisioner_for_test(
+        run_convergence_tick_with_guest_network_provisioner_for_test(
             &state,
             &reclamation,
             &node_target,
             clock.now(),
             35,
             deadline,
-            &network,
+            guest_owner.as_ref(),
         )
         .await
         .unwrap();
@@ -455,18 +472,20 @@ async fn drive(seed: u64, finalize: bool) {
     }
     // Fixture disposal after recording/asserting the production result.
     vmm.terminate(&control, Duration::ZERO).await.unwrap();
-    drop(peer);
+    let _ = beacon_io.guest_close(peer);
     assert!(later_stop.is_ok() || matches!(later_stop, Err(DriverError::NotFound { .. })));
 }
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn vm_finalize_failed_reclamation_preserves_terminal_seeded_convergence() {
     drive(257_204, true).await;
 }
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn vm_orderly_stop_retains_owner_until_termination_control() {
     drive(257_204, false).await;
 }

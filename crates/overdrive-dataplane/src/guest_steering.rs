@@ -12,13 +12,13 @@
 //! [`GuestSteeringCandidate`]; only its `attach` returns a
 //! [`GuestPrefixSteering`]; only that type has `steer`.
 //!
-//! RED scaffold (DISTILL, Mandate 7): every function and method body panics
-//! until DELIVER vsock new-step 9 (`load`, `steer`) and new-step 13 (the
-//! candidate's `attach`, the `BPF_LINK_UPDATE` swap) replace it. No surface the
-//! design does not pin is added here; private state is a placeholder field the
-//! crafter replaces.
+//! Removed mechanism: guest-prefix steering was withdrawn by the 2026-10-11
+//! rulings (feature-delta § "Bridge-era code for DELIVER to delete", list C,
+//! the whole module). No DELIVER step implements these bodies; they panic
+//! until DELIVER deletes the module. The tests that defended it were deleted
+//! with the mechanism (deletion discipline).
 
-// SCAFFOLD: true — netns-density-295 DISTILL (vsock new-steps 9 and 13).
+// SCAFFOLD: true — netns-density-295 DISTILL (list C: deleted by DELIVER, never implemented).
 #![expect(
     clippy::unused_self,
     reason = "RED scaffold bodies panic before reading their inputs; the lints self-trip when DELIVER lands the bodies"
@@ -232,63 +232,4 @@ pub enum GuestSteeringError {
         #[source]
         source: std::io::Error,
     },
-}
-
-#[cfg(test)]
-#[allow(
-    clippy::doc_markdown,
-    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
-)]
-mod tests {
-    use std::net::{Ipv4Addr, SocketAddrV4};
-
-    use proptest::prelude::*;
-
-    use super::{GUEST_STEERING_KEY_LEN, guest_steering_key};
-
-    /// CONTRACT_SHAPE: pure-function.
-    #[test]
-    fn the_steering_key_is_eight_bytes() {
-        assert_eq!(GUEST_STEERING_KEY_LEN, 8);
-    }
-
-    /// G-PL-1 golden key: `100.95.0.7:8443` → `64 5f 00 07 | 20 fb | 00 00`.
-    /// CONTRACT_SHAPE: pure-function.
-    #[test]
-    #[ignore = "pending DELIVER vsock new-step 9 (guest-prefix steering)"]
-    fn golden_steering_key_pins_the_layout() {
-        let intake = SocketAddrV4::new(Ipv4Addr::new(100, 95, 0, 7), 8443);
-        assert_eq!(guest_steering_key(intake), [0x64, 0x5f, 0x00, 0x07, 0x20, 0xfb, 0x00, 0x00]);
-    }
-
-    proptest! {
-        /// Bytes 0..4 are the address in network order, 4..6 the port in
-        /// network order, 6..8 zero — for every address and port.
-        /// CONTRACT_SHAPE: pure-function.
-        #[test]
-        #[ignore = "pending DELIVER vsock new-step 9 (guest-prefix steering)"]
-        fn the_key_is_address_then_port_in_network_order_then_zero(
-            octets in any::<[u8; 4]>(),
-            port in any::<u16>(),
-        ) {
-            let key = guest_steering_key(SocketAddrV4::new(Ipv4Addr::from(octets), port));
-            prop_assert_eq!(&key[0..4], &octets[..]);
-            prop_assert_eq!(&key[4..6], &port.to_be_bytes()[..]);
-            prop_assert_eq!(&key[6..8], &[0u8, 0][..]);
-        }
-
-        /// Distinct intakes never share a key (injective over addresses and
-        /// ports).
-        /// CONTRACT_SHAPE: pure-function.
-        #[test]
-        #[ignore = "pending DELIVER vsock new-step 9 (guest-prefix steering)"]
-        fn distinct_intakes_have_distinct_keys(
-            a in (any::<[u8; 4]>(), any::<u16>()),
-            b in (any::<[u8; 4]>(), any::<u16>()),
-        ) {
-            let ka = guest_steering_key(SocketAddrV4::new(Ipv4Addr::from(a.0), a.1));
-            let kb = guest_steering_key(SocketAddrV4::new(Ipv4Addr::from(b.0), b.1));
-            prop_assert_eq!(ka == kb, a == b);
-        }
-    }
 }

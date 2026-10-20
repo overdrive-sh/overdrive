@@ -64,9 +64,6 @@ use tracing::{Event, Subscriber};
 use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
 use tracing_subscriber::registry::LookupSpan;
 
-/// `prefix_landing` real-kernel conformance harness (QPROJ-8).
-pub mod prefix_landing;
-
 /// ADR-0124's accepted shared-network recovery cadence, stated as that
 /// contract and measured on the injected clock.
 ///
@@ -137,7 +134,7 @@ pub struct StepObservation {
     /// Guest-command admission.
     pub admission: Admission,
     /// `recovery_progress()`: `Some` only while recovering.
-    pub recovery: Option<SharedGuestNetworkRecovery>,
+    pub recovery: Vec<SharedGuestNetworkRecovery>,
     /// `is_boot_closed()`.
     pub boot_closed: bool,
 }
@@ -352,12 +349,12 @@ pub fn directory_entries(path: &Path) -> BTreeSet<String> {
     }
 }
 
-/// Managed TAP/veth link names observed without shelling out to `ip`.
+/// Managed veth link names observed without shelling out to `ip`.
 #[must_use]
 pub fn managed_links() -> BTreeSet<String> {
     directory_entries(Path::new("/sys/class/net"))
         .into_iter()
-        .filter(|name| name.starts_with("ovd-tp-") || name.starts_with("ovd-hv-"))
+        .filter(|name| name.starts_with("ovd-hv-"))
         .collect()
 }
 
@@ -365,16 +362,6 @@ pub fn managed_links() -> BTreeSet<String> {
 #[must_use]
 pub fn network_namespaces() -> BTreeSet<String> {
     directory_entries(Path::new("/var/run/netns"))
-}
-
-/// Typed persistent-TAP observation through the host netlink adapter.
-pub fn persistent_tap_state(name: &str) -> overdrive_netlink::TapLinkState {
-    let name = name.to_owned();
-    overdrive_netlink::block_on_host_netlink(move || async move {
-        let client = overdrive_netlink::Client::new()?;
-        client.observe_persistent_tap(&name).await
-    })
-    .expect("observe persistent TAP through overdrive-netlink")
 }
 
 /// Independent typed ifindex lookup through `nix`.
@@ -392,7 +379,6 @@ pub fn interface_index(name: &str) -> Option<u32> {
 pub struct CleanupObservation {
     managed_links: BTreeSet<String>,
     link_indices: BTreeMap<String, u32>,
-    tap_states: BTreeMap<String, overdrive_netlink::TapLinkState>,
     network_namespaces: BTreeSet<String>,
     directories: Vec<(PathBuf, BTreeSet<String>)>,
 }
@@ -405,11 +391,6 @@ impl CleanupObservation {
             link_indices: managed_links
                 .iter()
                 .filter_map(|name| interface_index(name).map(|index| (name.clone(), index)))
-                .collect(),
-            tap_states: managed_links
-                .iter()
-                .filter(|name| name.starts_with("ovd-tp-"))
-                .map(|name| (name.clone(), persistent_tap_state(name)))
                 .collect(),
             managed_links,
             network_namespaces: network_namespaces(),
@@ -429,12 +410,6 @@ impl CleanupObservation {
                 .filter_map(|name| interface_index(name).map(|index| (name.clone(), index)))
                 .collect::<BTreeMap<_, _>>()
                 == self.link_indices
-            && managed_links
-                .iter()
-                .filter(|name| name.starts_with("ovd-tp-"))
-                .map(|name| (name.clone(), persistent_tap_state(name)))
-                .collect::<BTreeMap<_, _>>()
-                == self.tap_states
             && network_namespaces() == self.network_namespaces
             && self.directories.iter().all(|(path, expected)| directory_entries(path) == *expected)
     }
@@ -628,26 +603,42 @@ impl DirectHandlerHarness {
             bind: "127.0.0.1:0".parse().expect("loopback bind"),
             data_dir: self.data_dir.clone(),
             operator_config_dir: self.config_dir.clone(),
-            clock: Arc::clone(&clock_port),
             dataplane: Some(overdrive_control_plane::dataplane_config::DataplaneConfig {
                 client_iface: "lo".to_owned(),
                 backend_iface: "lo".to_owned(),
             }),
-            dataplane_override: Some(Arc::new(
-                overdrive_sim::adapters::dataplane::SimDataplane::new(),
-            )),
-            ..ServerConfig::new(
-                Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-                std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
-                std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
-            )
+            vsock_ports: overdrive_core::guest_transport::NodeVsockPortConfig::kernel_assigned(),
+            ..ServerConfig::new()
         };
         let sequence = self.sequence.fetch_add(1, Ordering::SeqCst);
         self.record("handler_start_attempt", &format!("sequence={sequence}"));
+        // NO-OVERRIDE-SEAMS / STORES-IN (GH #295): the host bundle over this
+        // handler's data_dir — every store reopened from disk, as a fresh
+        // process would — with the edges this harness simulates replaced by
+        // name. The previous instance is shut down first (redb's single-open
+        // lock), so no handle crosses boots.
+        let host = overdrive_control_plane::NodeAdapters::host(
+            &config,
+            Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
+            Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
+        )
+        .expect("the host bundle opens the handler's stores");
         let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
             NodeId::new(&format!("shared-guest-network-handler-{sequence}")).expect("node id"),
             sequence,
         ));
+        let mut boot = overdrive_control_plane::BootAdapters {
+            clock: Arc::clone(&clock_port),
+            observation: obs,
+            vm_host_state: Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
+            dataplane: Arc::new(overdrive_sim::adapters::SimDataplaneComposer::new(
+                Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+                std::net::Ipv4Addr::LOCALHOST,
+            )),
+            guest_dns: Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
+            ..host.boot
+        };
+        boot.mtls.intercept = Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new());
         let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
         // The wiring moves into the handler; its paired gate and supervisor
         // capabilities are kept first for the in-process observations.
@@ -656,12 +647,10 @@ impl DirectHandlerHarness {
         let supervisor = wiring.supervisor();
         let owner_port: Arc<dyn overdrive_control_plane::guest_network::SharedGuestNetworkOwner> =
             owner.clone();
-        let vm_host_state = Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new());
         let handle = run_server_with_obs_and_driver(
             config,
-            obs,
+            boot,
             driver,
-            vm_host_state,
             owner_port,
             wiring,
             overdrive_worker::cgroup_manager::CgroupManager::new(

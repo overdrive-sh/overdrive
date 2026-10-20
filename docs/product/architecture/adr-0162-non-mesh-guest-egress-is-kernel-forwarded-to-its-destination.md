@@ -31,18 +31,20 @@ and a real Internet SSH server's banner arrived before any client byte. The
 off-host UDP spike (`spike/v11-vip-v14-findings.md`) forwarded guest UDP of
 0 to 59,000 bytes through a host UDP socket connected to a destination
 behind a real egress interface (a namespace behind veth at MTU 1,500, and
-the physical NIC for `dig @1.1.1.1` and wire captures). The frame is removed
-in the host verdict and an empty datagram is sent by the owner (ADR-0165).
+the physical NIC for `dig @1.1.1.1` and wire captures). Under the in-kernel
+forwarder (ADR-0197) the host forwarder removes the frame and sends every
+datagram, an empty one included, on the connected UDP socket (ADR-0201).
 
 ## Decision
 
 - A guest TCP flow whose destination resolves `NonMesh` (ADR-0153) is paired
   with a host TCP socket the owner connects **directly to the original
   destination**, unless the destination is host-internal (ADR-0167). That
-  socket carries `SO_LINGER{1,0}` from creation (ADR-0160) and is installed
-  at `ACTIVE_ESTABLISHED`; payload moves only through the host verdict.
+  socket carries `SO_LINGER{1,0}` from creation (ADR-0160) and is attached
+  to the flow vsock once its connect completed, before `Paired` (ADR-0212);
+  payload moves only through the host forwarder (ADR-0197).
 - A guest datagram association is paired with a host UDP socket connected
-  directly to the original destination (ADR-0147, ADR-0165), under the same
+  directly to the original destination (ADR-0147, ADR-0201), under the same
   host-internal deny set. Datagrams are not resolved against the mesh: mTLS is
   TCP-only, as today.
 - The owner always `connect()`s its host-facing socket, and the owner runs
@@ -81,10 +83,11 @@ in the host verdict and an empty datagram is sent by the owner (ADR-0165).
 ## Consequences
 
 - Non-mesh egress costs one host socket per flow and no threads.
-- A connect to an unresponsive destination holds its guest parking cell, its
-  per-allocation quota slot and two host sockets for up to the host's
+- A connect to an unresponsive destination holds one of the guest's pending
+  TcpConnect places (`GUEST_TCP_PENDING_MAX`), its per-allocation quota slot
+  and two host sockets for up to the host's
   SYN-retry time; the per-allocation quota bounds what one VM can hold
-  (ADR-0147), and the cost at density is measured (V-9).
+  (ADR-0208), and the cost at density is measured (V-9).
 - Guest egress source addressing on the wire: the host socket's source address
   is chosen by host routing, as leg-F's dial chose it today. NAT and egress
   policy for VMs are unchanged by this feature.

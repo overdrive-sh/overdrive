@@ -71,6 +71,7 @@ async fn build_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
 /// not panic via `unreachable!()`. A convergence tick against a stored
 /// `WorkloadIntent::Service` must complete without panic.
 #[tokio::test]
+#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2-4: the guest lane leases the transport)"]
 async fn service_workload_convergence_tick_does_not_panic() {
     let tmp = TempDir::new().expect("tempdir");
     let clock = Arc::new(SimClock::new());

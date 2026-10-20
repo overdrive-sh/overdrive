@@ -38,7 +38,7 @@ use serde::{Deserialize, Serialize};
 
 use overdrive_core::dataplane::fingerprint::fingerprint;
 use overdrive_core::id::{AllocationId, ServiceId, ServiceVip, SpiffeId};
-use overdrive_core::observation::{ProbeIdx, ProbeStatus};
+use overdrive_core::observation::{ProbeIdx, ProbeRunSeq, ProbeStatus};
 use overdrive_core::traits::observation_store::{AllocState, ObservationRowKind};
 
 // Re-exports — see file-header docstring for the cycle-breaking
@@ -345,6 +345,18 @@ pub struct ServiceLifecycleView {
     /// once such a dead alloc is archived (otherwise its stale
     /// `observed` entry would retain a stale scheduling boundary).
     pub terminal_announced: BTreeSet<AllocationId>,
+
+    /// Per liveness probe key, the `run_seq` of the probe row on which this
+    /// reconciler last emitted a liveness terminate (PROBE-RUN-COUNT,
+    /// ADR-0191, act once per crossing: a terminate is emitted only on a
+    /// newer row). An input, not a derived value; written only when a
+    /// terminate is emitted. Absent ⇒ never terminated on this key.
+    // SCAFFOLD: true — netns-density-295 DISTILL; the read-time threshold
+    // rule that consumes and writes this field, and the removal of the
+    // three streak fields and `startup_last_fail_seen_at` it replaces, are
+    // DELIVER step 9.
+    #[serde(default)]
+    pub liveness_last_acted_run: BTreeMap<(AllocationId, ProbeIdx), ProbeRunSeq>,
 }
 
 impl ServiceLifecycleView {

@@ -1,0 +1,23 @@
+[01:54:13] === preflight (fail closed)
+[01:54:13] substrate: {"host_uname_r": "7.0.0-38-generic", "machine": "x86_64", "systemd_detect_virt": "none", "cpu": "AMD EPYC 8024P 8-Core Processor", "nproc": 16}
+[01:54:13] === guest image
+[01:54:13] image pins: {"guest_kernel": "b51367c7dab2", "initramfs": "562d67166e76", "pairprobe": "d66e8b4c8e20", "ovdpair.ko": "b3eb9f4fb169", "cloud_hypervisor": "eadddf1bbcdc"}
+[01:54:13] modules: ['vsock.ko', 'vmw_vsock_virtio_transport_common.ko', 'vmw_vsock_virtio_transport.ko', 'vsock_loopback.ko']
+[01:54:13] launch VM: /var/tmp/ev-pair-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /var/tmp/ev-pair-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=0 loglevel=4 log_buf_len=16M --cpus boot=4 --memory size=1536M --serial file=/var/tmp/ev-pair-work/out/vm-20261017T015413Z/serial.log --console off --vsock cid=3371,backend=vhost-kernel --log-file /var/tmp/ev-pair-work/out/vm-20261017T015413Z/ch.log -v
+[01:54:56] VM status=done wall=43s
+[01:54:58] RESULT {"status": "done", "wall_s": 43, "host_uname_r": "7.0.0-38-generic", "guest_uname_r": "7.0.0-29-generic", "physical_module_names_unchanged": true, "physical_ovdpair_loaded": false, "runs": 14, "fault_lines": [], "probe_results": ["{\"abi\":1,\"permanent_flag\":1,\"delete_module_rc\":-1,\"delete_module_errno\":16,\"record_size\":32}"]}
+[01:54:58]   run 701 L-loopback eg-wf lanes=1x500: ok 500/500 reasons={} wall=3.1s
+[01:54:58]   run 702 L-loopback eg-sffin lanes=1x500: ok 500/500 reasons={} wall=3.0s
+[01:54:58]   run 703 L-loopback in-cfearly lanes=1x500: ok 500/500 reasons={} wall=2.2s
+[01:54:58]   run 711 L-loopback eg-wf lanes=1x500: ok 90/500 reasons={'cli/short': 24, 'cli/econnreset': 386} wall=2.4s
+[01:54:58]   run 712 L-loopback in-sffin lanes=1x500: ok 340/500 reasons={'cli/short': 143, 'srv/econnreset': 6, 'srv/short': 8, 'cli/cli-send-error': 3} wall=2.3s
+[01:54:58]   run 721 L-loopback eg-sffin lanes=1x500: ok 115/500 reasons={'cli/econnreset': 351, 'srv/econnreset': 34} wall=2.6s
+[01:54:58]   run 722 L-loopback in-cfearly lanes=1x500: ok 188/500 reasons={'srv/econnreset': 290, 'cli/short': 22} wall=1.9s
+[01:54:58]   run 723 L-loopback eg-wf lanes=1x500: ok 500/500 reasons={} wall=3.1s
+[01:54:58]   run 731 L-loopback eg-wf lanes=1x200: ok 0/200 reasons={'cli/corrupt': 16, 'srv/corrupt': 184} wall=1.2s
+[01:54:58]   run 732 L-loopback in-cf lanes=1x200: ok 0/200 reasons={'srv/corrupt': 186, 'cli/corrupt': 14} wall=1.0s
+[01:54:58]   run 741 L-loopback eg-wf lanes=1x20: ok 3/20 reasons={'cli/timeout': 13, 'srv/timeout': 4} wall=11.9s
+[01:54:58]   run 742 L-loopback in-cfearly lanes=1x20: ok 20/20 reasons={} wall=0.4s
+[01:54:58]   run 751 L-loopback eg-wf lanes=1x500: ok 500/500 reasons={} wall=3.1s
+[01:54:58]   run 752 L-loopback eg-sffin lanes=1x500: ok 500/500 reasons={} wall=3.1s
+[01:54:58] evidence dir: /var/tmp/ev-pair-work/evidence/vm-job6b-20261017T015413Z

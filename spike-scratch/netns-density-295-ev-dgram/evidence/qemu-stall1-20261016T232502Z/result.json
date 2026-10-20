@@ -1,0 +1,21 @@
+{
+ "qemu_exit": 0,
+ "done_marker": true,
+ "uname_r": "7.0.0-29-generic",
+ "cases": [
+  {
+   "case": "peer-stall",
+   "pass": true
+  },
+  {
+   "case": "stall-dest",
+   "pass": true
+  },
+  {
+   "case": "stall-app",
+   "pass": true
+  }
+ ],
+ "all_pass": true,
+ "oops_lines": []
+}

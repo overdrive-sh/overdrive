@@ -1,0 +1,19 @@
+[22:50:10] === preflight (fail closed)
+[22:50:10] substrate: {"host_uname_r": "7.0.0-38-generic", "machine": "x86_64", "systemd_detect_virt": "none", "cpu": "AMD EPYC 8024P 8-Core Processor", "nproc": 16}
+[22:50:10] === guest image
+[22:50:10] image pins: {"guest_kernel": "b51367c7dab2", "initramfs": "8c0133a39cd5", "pairprobe": "ce8b857ce9a6", "ovdpair.ko": "b3eb9f4fb169", "cloud_hypervisor": "eadddf1bbcdc"}
+[22:50:10] modules: ['vsock.ko', 'vmw_vsock_virtio_transport_common.ko', 'vmw_vsock_virtio_transport.ko', 'vsock_loopback.ko']
+[22:50:10] launch VM: /var/tmp/ev-pair-work/out/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /var/tmp/ev-pair-work/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=0 loglevel=4 --cpus boot=4 --memory size=1536M --serial file=/var/tmp/ev-pair-work/out/vm-20261016T225010Z/serial.log --console off --vsock cid=3371,backend=vhost-kernel --log-file /var/tmp/ev-pair-work/out/vm-20261016T225010Z/ch.log -v
+[22:55:43] VM status=done wall=333s
+[22:55:45] RESULT {"status": "done", "wall_s": 333, "host_uname_r": "7.0.0-38-generic", "guest_uname_r": "7.0.0-29-generic", "physical_module_names_unchanged": true, "physical_ovdpair_loaded": false, "runs": 10, "fault_lines": [], "probe_results": ["{\"abi\":1,\"permanent_flag\":1,\"delete_module_rc\":-1,\"delete_module_errno\":16,\"record_size\":32}"]}
+[22:55:45]   run 101 L-loopback eg-wf lanes=1x10000: ok 10000/10000 reasons={} wall=54.3s
+[22:55:45]   run 201 L-loopback eg-wf lanes=8x1250: ok 10000/10000 reasons={} wall=6.7s
+[22:55:45]   run 102 L-loopback eg-sf lanes=1x10000: ok 10000/10000 reasons={} wall=53.7s
+[22:55:45]   run 202 L-loopback eg-sf lanes=8x1250: ok 10000/10000 reasons={} wall=6.9s
+[22:55:45]   run 103 L-loopback eg-sffin lanes=1x10000: ok 10000/10000 reasons={} wall=54.4s
+[22:55:45]   run 203 L-loopback eg-sffin lanes=8x1250: ok 10000/10000 reasons={} wall=6.9s
+[22:55:45]   run 104 L-loopback eg-nofin lanes=1x10000: ok 10000/10000 reasons={} wall=54.1s
+[22:55:45]   run 204 L-loopback eg-nofin lanes=8x1250: ok 10000/10000 reasons={} wall=6.9s
+[22:55:45]   run 105 L-loopback eg-rst lanes=1x10000: ok 10000/10000 reasons={} wall=78.1s
+[22:55:45]   run 205 L-loopback eg-rst lanes=8x1250: ok 10000/10000 reasons={} wall=10.1s
+[22:55:45] evidence dir: /var/tmp/ev-pair-work/evidence/vm-job1-20261016T225010Z

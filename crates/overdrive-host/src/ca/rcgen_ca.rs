@@ -20,7 +20,9 @@
 use std::sync::Arc;
 
 use overdrive_core::race_once_cell::{RaceOnceCell, SetOutcome};
-use overdrive_core::traits::ca::{Ca, CaCertDer, CaCertPem, CaError, CaKeyPem, RootCaHandle};
+use overdrive_core::traits::ca::{
+    Ca, CaCertDer, CaCertPem, CaError, CaFactory, CaKeyPem, RootCaHandle,
+};
 use overdrive_core::traits::ca::{IntermediateHandle, SvidMaterial, SvidRequest, TrustBundle};
 use overdrive_core::traits::entropy::Entropy;
 use overdrive_core::{CertSerial, CertSpec, KeyUsage, NodeId, SpiffeId};
@@ -106,6 +108,27 @@ pub struct RcgenCa {
     subject: SpiffeId,
     root_material: RaceOnceCell<RootMaterial>,
     intermediate_material: RaceOnceCell<IntermediateMaterial>,
+}
+
+/// The production [`CaFactory`] (STORES-IN, ADR-0219): `build` returns
+/// `RcgenCa::new(entropy, subject)`. `CaAdapters::host()` composes it over
+/// the workload CA trust-domain subject `boot_server` uses.
+pub struct RcgenCaFactory {
+    subject: SpiffeId,
+}
+
+impl RcgenCaFactory {
+    /// A factory minting CAs for the trust-domain `subject`.
+    #[must_use]
+    pub const fn new(subject: SpiffeId) -> Self {
+        Self { subject }
+    }
+}
+
+impl CaFactory for RcgenCaFactory {
+    fn build(&self, entropy: Arc<dyn Entropy>) -> Arc<dyn Ca> {
+        Arc::new(RcgenCa::new(entropy, self.subject.clone()))
+    }
 }
 
 impl RcgenCa {

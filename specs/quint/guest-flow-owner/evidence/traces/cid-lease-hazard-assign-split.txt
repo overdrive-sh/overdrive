@@ -5,22 +5,24 @@ State 1
   cursor = 0
   bootLeft = -1
   lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  att = <<0, 0>>
   up = TRUE
+  conf_step = [init |-> [tag |-> "UNIT"]]
   dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-  g = [clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE]
-  al = << [st |-> "wait", off |-> -1, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
+  al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
 
 State 2 [AssignPick]
-  al = << [st |-> "picked", off |-> 0, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  al = << [ st |-> "picked", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
 
 State 3 [AssignPick]
-  al = << [st |-> "picked", off |-> 0, retry |-> FALSE], [st |-> "picked", off |-> 0, retry |-> FALSE] >>
+  al = << [ st |-> "picked", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "picked", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
 
 State 4 [AssignTake]
   cursor = 1
-  lease = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
-  al = << [st |-> "picked", off |-> 0, retry |-> FALSE], [st |-> "leased", off |-> 0, retry |-> FALSE] >>
+  lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "leased", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "picked", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
 
 State 5 [AssignTake]
-  lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
-  al = << [st |-> "leased", off |-> 0, retry |-> FALSE], [st |-> "leased", off |-> 0, retry |-> FALSE] >>
+  lease = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "leased", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "leased", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>

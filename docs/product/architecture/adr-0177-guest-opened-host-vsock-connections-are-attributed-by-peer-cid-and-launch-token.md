@@ -14,9 +14,11 @@ the message set and READY's meaning are unchanged).
 
 ## Context
 
-Every guest-opened connection to the host — the beacon (port 1234), flow
-connections (1240, 1241) and the control session (1243) — arrives on a
-node-shared `AF_VSOCK` listener (ADR-0157, ADR-0166). Attributing each one
+Every guest-opened connection to the host — the beacon, the flow
+connections and the control session, each on its node-global listener port
+(defaults 1234, 1240, 1243; node configuration, ADR-0218, passed to the
+guest on its kernel command line, ADR-0217) — arrives on a node-shared
+`AF_VSOCK` listener (ADR-0157, ADR-0166). Attributing each one
 by the kernel-reported peer CID alone is safe only if the kernel resets a
 dead VM's connections, accept-queue entries included, before the CID is
 reused.

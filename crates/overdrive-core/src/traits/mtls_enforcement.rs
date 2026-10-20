@@ -90,6 +90,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::guest_transport::dial::GuestDialError;
 use crate::id::IdParseError;
 use crate::wall_clock::UnixInstant;
 use crate::{AllocationId, SpiffeId};
@@ -549,6 +550,17 @@ pub enum MtlsEnforcementError {
     /// get their own variant above; this is the genuine residual only.
     #[error("mTLS enforcement I/O: {0}")]
     Io(#[from] std::io::Error),
+
+    /// Leg S to a VM backend (a destination inside the guest prefix) could
+    /// not be dialled through the guest-flow owner's `GuestStreamDial`
+    /// (LEGS-DIAL, D-14). Leg C was reset (`SO_LINGER{1,0}`). The variant
+    /// carries the dial outcome so the operator sees why the VM backend was
+    /// unreachable (not serving, refused, deadline, …).
+    #[error("leg-S dial to the VM backend failed: {source}")]
+    GuestDial {
+        #[from]
+        source: GuestDialError,
+    },
 }
 
 /// The per-connection transparent-mTLS enforcement port (ADR-0069), bidirectional
@@ -836,4 +848,32 @@ pub trait MtlsEnforcement: Send + Sync + 'static {
     /// direction; the per-connection resources are fully reclaimed (no fd/pump
     /// leak), which the equivalence harness asserts by re-querying `liveness`.
     async fn teardown(&self, handle: EnforcedConnection) -> Result<()>;
+}
+
+/// What the boot supplies the enforcement: values that exist only inside the
+/// boot (NO-OVERRIDE-SEAMS, ADR-0219).
+pub struct MtlsEnforcementDeps {
+    /// The boot's `IdentityMgr` (the held SVIDs and the trust bundle).
+    pub identity: std::sync::Arc<dyn crate::traits::IdentityRead>,
+    /// The enforcement's limits.
+    pub limits: MtlsLimits,
+    /// `GUEST_NODE_PREFIX` (LEGB-DIAL).
+    pub guest_prefix: ipnet::Ipv4Net,
+    /// The boot's `OwnerDial` (LEGS-DIAL).
+    pub guest_dial: std::sync::Arc<dyn crate::guest_transport::dial::GuestStreamDial>,
+}
+
+/// Builds the boot's [`MtlsEnforcement`] from the values only the boot holds
+/// (NO-OVERRIDE-SEAMS, ADR-0219). `HostMtlsEnforcementFactory` in production.
+pub trait MtlsEnforcementFactory: Send + Sync {
+    /// Called once per boot, at step 5, before the enforcement's probe (the
+    /// boot probes what this returns: wire → probe → use).
+    ///
+    /// Postcondition: the returned enforcement dials leg S through
+    /// `deps.guest_dial` for a guest-prefix target (LEGS-DIAL) and enforces
+    /// `deps.limits`. Production's enforcement reads `deps.identity`; a
+    /// factory may build its enforcement over another `IdentityRead` (a
+    /// `TestPki`-rooted identity, whose SVID must still chain to its bundle,
+    /// because the production relying-party verifier stays active).
+    fn enforcement(&self, deps: MtlsEnforcementDeps) -> std::sync::Arc<dyn MtlsEnforcement>;
 }

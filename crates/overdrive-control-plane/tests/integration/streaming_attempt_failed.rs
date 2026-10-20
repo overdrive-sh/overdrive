@@ -5,6 +5,13 @@
 //! These tests open a real `RedbViewStore` via `TempDir` and are gated
 //! behind `integration-tests` per `.claude/rules/testing.md`
 //! § "Integration vs unit gating".
+//!
+//! RESTART-SSOT (GH #324, DELIVER step 0): this projection is the Job
+//! stream, and the reconciler finalizes a Job's first natural exit, a crash
+//! included, so it never places a Job crash again. `will_restart` is the
+//! reconciler's decision (`restart_status_for_alloc(target, Job, ..)`):
+//! `false` for every Job crash, with no next-attempt delay. The tests that
+//! pinned the pre-fix `true` now pin the fixed value and are pending step 0.
 
 use std::collections::BTreeMap;
 use std::str::FromStr;
@@ -16,8 +23,7 @@ use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::driver::DriverType;
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_reconcilers::{
-    AnyReconciler, RESTART_BACKOFF_CEILING, RESTART_BACKOFF_DURATION, WorkloadLifecycle,
-    WorkloadLifecycleView,
+    AnyReconciler, RESTART_BACKOFF_CEILING, WorkloadLifecycle, WorkloadLifecycleView,
 };
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 
@@ -63,8 +69,10 @@ fn failed_lifecycle_event(
     }
 }
 
+/// Contract shape: pure-function.
 #[tokio::test]
-async fn attempt_failed_first_attempt_will_restart() {
+#[ignore = "pending DELIVER step 0"]
+async fn attempt_failed_first_attempt_of_a_job_will_not_restart() {
     let tmp = tempfile::tempdir().expect("tmpdir");
     let node = NodeId::from_str("node-a").expect("node id");
     let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(node, 0));
@@ -90,20 +98,17 @@ async fn attempt_failed_first_attempt_will_restart() {
             ..
         }) => {
             assert_eq!(attempt_index, 1, "first attempt should be index 1");
-            assert!(will_restart, "budget not exhausted — will_restart must be true");
+            assert!(!will_restart, "a Job crash is finalized, never placed again (GH #324)");
             assert_eq!(exit_code, 42);
-            let expected_delay = format!("{}ms", RESTART_BACKOFF_DURATION.as_millis());
-            assert_eq!(
-                next_attempt_delay.as_deref(),
-                Some(expected_delay.as_str()),
-                "will_restart=true must populate delay from backoff_for_attempt"
-            );
+            assert_eq!(next_attempt_delay, None, "no next attempt → no delay");
         }
         other => panic!("expected AttemptFailed, got {other:?}"),
     }
 }
 
+/// Contract shape: pure-function.
 #[tokio::test]
+#[ignore = "pending DELIVER step 0"]
 async fn attempt_failed_mid_budget_reports_correct_index() {
     let tmp = tempfile::tempdir().expect("tmpdir");
     let node = NodeId::from_str("node-a").expect("node id");
@@ -129,11 +134,8 @@ async fn attempt_failed_mid_budget_reports_correct_index() {
             ..
         }) => {
             assert_eq!(attempt_index, 4, "restart_counts=3 → attempt_index=4");
-            assert!(will_restart, "4 < CEILING(5) — will_restart must be true");
-            assert!(
-                next_attempt_delay.is_some(),
-                "will_restart=true must populate next_attempt_delay"
-            );
+            assert!(!will_restart, "a Job crash is never placed again, below the ceiling too");
+            assert_eq!(next_attempt_delay, None, "no next attempt → no delay");
         }
         other => panic!("expected AttemptFailed, got {other:?}"),
     }
@@ -179,8 +181,10 @@ async fn attempt_failed_at_ceiling_will_not_restart() {
     }
 }
 
+/// Contract shape: pure-function.
 #[tokio::test]
-async fn attempt_failed_empty_view_defaults_conservative() {
+#[ignore = "pending DELIVER step 0"]
+async fn attempt_failed_empty_view_reports_the_first_attempt_that_will_not_restart() {
     let tmp = tempfile::tempdir().expect("tmpdir");
     let node = NodeId::from_str("node-a").expect("node id");
     let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(node, 0));
@@ -201,11 +205,11 @@ async fn attempt_failed_empty_view_defaults_conservative() {
             ..
         }) => {
             assert_eq!(attempt_index, 1, "empty view → first attempt");
-            assert!(will_restart, "empty view → conservative will_restart=true");
             assert!(
-                next_attempt_delay.is_some(),
-                "empty view defaults to will_restart=true → delay must be populated"
+                !will_restart,
+                "the default view decides as the reconciler does: a Job crash is finalized"
             );
+            assert_eq!(next_attempt_delay, None, "no next attempt → no delay");
         }
         other => panic!("expected AttemptFailed, got {other:?}"),
     }

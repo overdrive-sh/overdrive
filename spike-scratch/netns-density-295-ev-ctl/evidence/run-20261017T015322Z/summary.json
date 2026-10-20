@@ -1,0 +1,21 @@
+{
+ "results": [
+  {
+   "item": "exec",
+   "verdict": "done",
+   "elapsed_s": 4.0,
+   "pass": 5,
+   "fail": 0,
+   "kernel_fault": false,
+   "suite_done": [
+    "SUITE_DONE suite=exec rc=0"
+   ],
+   "guest_uname": [
+    "7.0.0-29-generic"
+   ]
+  }
+ ],
+ "ovd_fwd_in_physical_kernel_after": false,
+ "physical_modules_added": [],
+ "physical_modules_ok": true
+}

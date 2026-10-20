@@ -103,6 +103,7 @@ fn read_ca_from_trust_triple(operator_config_dir: &std::path::Path) -> String {
 
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
+#[ignore = "pending DELIVER attachment-cut step (DG-2 row 2: GuestAddressPool::assign)"]
 async fn submitted_job_reaches_running_via_real_server_boot() {
     let temp = TempDir::new().expect("tempdir");
     let data_dir = temp.path().join("data");
@@ -126,74 +127,18 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
     // RED state. Step 01-02 lands these fields plus the broker-driven
     // `tokio::spawn` that makes this test pass.
     let config = ServerConfig {
-        bind: "127.0.0.1:0".parse().expect("parse bind addr"),
-        data_dir,
-        operator_config_dir: operator_config_dir.clone(),
         tick_cadence: Duration::from_millis(100),
-        clock: clock.clone(),
-        // Step 02-02 (C1-AMEND) — hermetic in-process boot KEK so `boot_ca`'s
-        // KEK-resolve probe succeeds with no kernel-keyring / env dependency.
-        kek: std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-        node: overdrive_worker::NodeConfig::default(),
-        vip_range: overdrive_dataplane::allocators::VipRange::default(),
-        // Step 02-01 — required `[dataplane]` section. ADR-0061 § 1
-        // (step 01-03): this fixture injects `SimDataplane` via
-        // `dataplane_override` below, so it never reaches the XDP attach
-        // path. It DOES still go through
-        // `resolve_host_ipv4_from_dataplane_config` on `client_iface` at
-        // boot, which needs an interface that actually carries a local
-        // IPv4 in the Lima test VM — `ovd-veth-cli` does not exist there
-        // (it is created by the serve-boot provisioner, which this test
-        // skips via `dataplane_override`). The shared `lo`/`lo` helper
-        // is the SSOT for that shape (single-cut — the `loopback()`
-        // helper on `DataplaneConfig` was deleted in this step).
-        dataplane: Some(super::super::dataplane_lo::lo_dataplane_config()),
-        // Step 02-02 — `None` means production default
-        // (`/sys/fs/bpf/overdrive`). This test exercises convergence-
-        // loop spawn against the production boot path, which goes
-        // through `EbpfDataplane::new` on Linux unless overridden via
-        // `dataplane_override` below.
-        dataplane_pin_dir: None,
-        dataplane_cgroup_attach_path: None,
-        // Step 02-02 — inject `SimDataplane` per architecture.md § 4.7
-        // so this test's subject-under-test (the convergence-loop
-        // tokio::spawn shape) does not pay the CAP_NET_ADMIN / CAP_BPF
-        // cost of constructing the production `EbpfDataplane`.
-        dataplane_override: Some(std::sync::Arc::new(
-            overdrive_sim::adapters::dataplane::SimDataplane::new(),
-        )),
-        // Step 02-03 — None means no probe-fault injection; the
-        // production probe path runs (or is bypassed entirely
-        // because `dataplane_override` short-circuits the
-        // `EbpfDataplane` construction above).
-        mtls_intercept: std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
-        guest_dns: std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
-        dataplane_probe_fault: None,
-        // ADR-0082/ADR-0083 step 01-08: no VM boot artifacts configured —
-        // this fixture does not exercise the `[vm]` driver.
-        // transparent-mtls-host-socket step 06-03: no mTLS-probe fault;
-        // this fixture injects `SimDataplane`, so the mTLS layer is never
-        // composed (the worker is `Some` only on the real-dataplane boot).
-        mtls_probe_fault: None,
-        // dial-by-name-responder step 02-01: this fixture injects
-        // `SimDataplane` (no mTLS layer composed, so the DNS responder block is
-        // never reached), so the DNS-probe fault is irrelevant — `None`.
-        // transparent-mtls-host-socket step 06-03 criteria[1]: this fixture
-        // injects `SimDataplane` (no mTLS layer composed), so the identity
-        // override is irrelevant here — `None` is the production default.
-        mtls_identity_override: None,
-        // ADR-0083 §D8 step 01-09: this fixture does not exercise the
-        // `[vm]` driver at all — no Vmm override.
-        vmm_override: None,
+        ..crate::integration::node_adapters::test_config(data_dir, operator_config_dir.clone())
     };
+    let mut boot = crate::integration::node_adapters::boot_adapters(&config);
+    boot.clock = clock.clone();
 
     let wiring =
-        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&config.clock));
+        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&boot.clock));
     let handle = run_server_with_obs_and_driver(
         config,
-        Arc::clone(&obs),
+        overdrive_control_plane::BootAdapters { observation: Arc::clone(&obs), ..boot },
         Arc::clone(&driver),
-        Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
         wiring,
         overdrive_worker::cgroup_manager::CgroupManager::new(

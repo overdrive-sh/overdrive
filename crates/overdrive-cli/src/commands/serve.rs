@@ -16,32 +16,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use overdrive_control_plane::dns_responder::HostGuestDnsFactory;
 use overdrive_control_plane::error::ControlPlaneError;
-#[cfg(feature = "integration-tests")]
-use overdrive_control_plane::VmOverride;
+use overdrive_control_plane::node_adapters::NodeAdapters;
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::guest_network::ServeShutdownRequest;
+use overdrive_core::guest_transport::NodeVsockPortConfig;
 use overdrive_core::traits::cgroup_fs::CgroupFs;
-use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_host::RealCgroupFs;
-use overdrive_worker::mtls_intercept_port::HostMtlsIntercept;
 use url::Url;
 
 use crate::http_client::CliError;
-
-/// Test-only env var honoured by [`run_inner`] to override the
-/// `RealCgroupFs` probe root. When unset (the production default),
-/// the probe runs against `/sys/fs/cgroup` via
-/// [`RealCgroupFs::new`]. When set, the probe runs under the supplied
-/// path so integration tests can force probe-failure without
-/// requiring privileged FS mutations on the real cgroup hierarchy.
-///
-/// TEST-HOOK-ONLY: this env var has NO documented use outside the
-/// CLI integration test suite. It does NOT appear in `--help` and
-/// the binary honours it without flagging — same convention as the
-/// `OPENTELEMETRY_*` / `OVERDRIVE_CONFIG_DIR` env vars.
-const PROBE_ROOT_ENV_VAR: &str = "OVERDRIVE_TEST_PROBE_ROOT";
 
 /// Default drain deadline for `ServeHandle::shutdown`. In-flight
 /// requests complete within this window; new connections are refused
@@ -66,6 +50,12 @@ pub struct ServeArgs {
     /// `commands::cluster::default_operator_config_dir()`; tests pass
     /// an explicit subdirectory of their `TempDir`.
     pub config_dir: PathBuf,
+    /// The node-global host vsock listener ports (PORTS-CONFIG, ADR-0218),
+    /// copied into `ServerConfig.vsock_ports`. The `overdrive` binary passes
+    /// `NodeVsockPortConfig::default()`; a test passes
+    /// `NodeVsockPortConfig::kernel_assigned()` and reads the bound ports
+    /// back from the server.
+    pub vsock_ports: NodeVsockPortConfig,
 }
 
 /// Handle to a running control-plane server, owned by the CLI layer.
@@ -124,213 +114,79 @@ impl ServeHandle {
     }
 }
 
-/// Start the Phase 1 control-plane server. Wraps
-/// [`overdrive_control_plane::run_server`] and converts
-/// `ControlPlaneError` into [`CliError`] variants.
+/// Start the Phase 1 control-plane server over the host adapters
+/// (`NodeAdapters::host` with the production `SystemdCredsKeyring` KEK,
+/// ADR-0063). A call of [`run_with_adapters`].
 ///
 /// # Errors
 ///
-/// Returns [`CliError::Transport`] when the listener cannot bind the
-/// requested address (e.g. port already in use), or the TLS
-/// configuration fails. `endpoint` names the requested bind address so
-/// the operator can act on the error.
+/// As [`run_with_adapters`].
+#[expect(
+    clippy::result_large_err,
+    reason = "the bundle builder returns the boot's typed `ControlPlaneError` unboxed, as `run_server` does"
+)]
 pub async fn run(args: ServeArgs) -> Result<ServeHandle, CliError> {
-    // The ONE production composition site for the workload-identity CA's KEK
-    // binding (feature-delta § C1-AMEND): `SystemdCredsKeyring::new()` (the
-    // Linux kernel-keyring `Kek` provider, ADR-0063 D3/D6) is composed here at
-    // the `serve` binary boundary and threaded into `ServerConfig.kek`. The
-    // test-only sibling `run_with_dataplane` takes the KEK as a parameter so
-    // integration tests inject a hermetic `SimKek` instead — the same
-    // test-injection precedent as the `dataplane` parameter below.
-    let kek: Arc<dyn overdrive_core::ca::kek::Kek> =
-        Arc::new(overdrive_host::ca::SystemdCredsKeyring::new());
-    run_inner(args, None, kek, |c| c).await
-}
-
-/// Test-only sibling of [`run`].
-///
-/// Starts the server with an injected [`Dataplane`] adapter and an injected
-/// [`Kek`] provider. Used by integration tests whose subject under test is the
-/// CLI / HTTPS / observation-row surface and which therefore inject
-/// `Arc::new(SimDataplane::new())` (instead of paying the `CAP_NET_ADMIN` /
-/// `CAP_BPF` cost of constructing the production `EbpfDataplane`) and a
-/// hermetic `Arc::new(SimKek::for_boot())` (instead of the production
-/// kernel-keyring binding, which refuses to boot in a cold CI environment —
-/// feature-delta § C1-AMEND).
-///
-/// Production callers MUST use [`run`] — that path leaves
-/// `ServerConfig.dataplane_override = None`, so production composition
-/// goes through the single-cut `EbpfDataplane` per
-/// `feedback_single_cut_greenfield_migrations.md`, and composes the production
-/// `SystemdCredsKeyring` KEK.
-///
-/// [`Kek`]: overdrive_core::ca::kek::Kek
-pub async fn run_with_dataplane(
-    args: ServeArgs,
-    dataplane: Arc<dyn Dataplane>,
-    kek: Arc<dyn overdrive_core::ca::kek::Kek>,
-) -> Result<ServeHandle, CliError> {
-    run_inner(args, Some(dataplane), kek, |c| c).await
-}
-
-/// Test-only sibling of [`run`] (NOT of [`run_with_dataplane`]) that
-/// injects only the KEK, leaving `dataplane_override` **unset**.
-///
-/// Production `run_server` therefore composes the real `EbpfDataplane`
-/// and `compose_mtls = dataplane_override.is_none()` evaluates `true`,
-/// exactly as it does on the production `run` path. S-VM-05 retains the real
-/// mesh-composed boot proof. Historical S-VM-74's VM-without-intercept contract
-/// was superseded by guest-stack S-GTI-01/S-GTI-03: VM allocations now install
-/// the transparent-mTLS intercept on the tap-fed host veth. The KEK is still injected
-/// (a hermetic `SimKek`) because the production `SystemdCredsKeyring`
-/// refuses to boot in a cold environment, and KEK choice is orthogonal
-/// to the mTLS-composition gate this sibling exercises.
-///
-/// Takes no VM artifacts and carries no `#[cfg]`. It is the survivor of
-/// the deleted `run_with_vm_artifacts` (ADR-0083 §D3a): with artifacts
-/// per-allocation there is nothing node-level left to pass, and the gate
-/// that used to exist only because the artifact TYPE was gated has no
-/// remaining reason to. A `[vm]` deploy against the resulting handle
-/// drives a REAL Cloud Hypervisor VM off the paths its own spec names.
-pub async fn run_with_kek(
-    args: ServeArgs,
-    kek: Arc<dyn overdrive_core::ca::kek::Kek>,
-) -> Result<ServeHandle, CliError> {
-    run_inner(args, None, kek, |c| c).await
-}
-
-/// Test-only sibling of [`run_with_kek`] that preserves the production mTLS
-/// composition root while decorating the real VM driver ports.
-///
-/// Unlike [`run_with_dataplane_and_vm_override`], this leaves
-/// `dataplane_override` unset. The server therefore composes the real eBPF and
-/// transparent-mTLS subsystems; only the VM driver's driven ports (the VMM and
-/// the beacon it pairs with, DG-4) are supplied by the caller, which lets
-/// native acceptance tests put a read-only observation barrier in front of a
-/// real `CloudHypervisorVmm` without substituting any functional network path.
-#[cfg(feature = "integration-tests")]
-pub async fn run_with_kek_and_vm_override(
-    args: ServeArgs,
-    kek: Arc<dyn overdrive_core::ca::kek::Kek>,
-    vm_override: VmOverride,
-) -> Result<ServeHandle, CliError> {
-    run_inner(args, None, kek, move |c| ServerConfig { vm_override: Some(vm_override), ..c }).await
-}
-
-/// Test-only sibling of [`run_with_dataplane`] that ALSO
-/// injects a `ServerConfig.vm_override` (ADR-0083 §D8, GH #42, step 01-09;
-/// DG-4).
-///
-/// A real in-process `overdrive serve` runs the SAME discover → probe →
-/// insert sequence against a substituted VMM and its beacon — a `SimVmm`
-/// carrying an injected capability-flag fault (S-VM-13), or a REAL
-/// `CloudHypervisorVmm` constructed with a test-only builder override
-/// pointed at a genuinely non-reflink directory (S-VM-75) — rather than
-/// against the production discovery path. `Vmm::probe()` still runs
-/// unconditionally against whichever adapter is bound. Gated behind
-/// `integration-tests`, mirroring `vm_override`'s own gate.
-#[cfg(feature = "integration-tests")]
-pub async fn run_with_dataplane_and_vm_override(
-    args: ServeArgs,
-    dataplane: Arc<dyn Dataplane>,
-    kek: Arc<dyn overdrive_core::ca::kek::Kek>,
-    vm_override: VmOverride,
-) -> Result<ServeHandle, CliError> {
-    run_inner(args, Some(dataplane), kek, move |c| ServerConfig {
-        vm_override: Some(vm_override),
-        ..c
+    run_with_adapters(args, Arc::new(RealCgroupFs::new()), |config, fs| {
+        NodeAdapters::host(config, fs, Arc::new(overdrive_host::ca::SystemdCredsKeyring::new()))
     })
     .await
 }
 
-async fn run_inner(
+/// Start the control-plane server over the adapters `adapters` builds
+/// (NO-OVERRIDE-SEAMS, PROBE-ROOT-ENV; ADR-0219).
+///
+/// Builds the `ServerConfig` from `args` (`bind`, `data_dir`,
+/// `operator_config_dir` = `config_dir`, `vsock_ports`, the rest
+/// `ServerConfig::new()`), then, in this order:
+/// 1. probes `cgroup_fs` (ADR-0054); on `Err` emits `health.startup.refused`
+///    (reason `cgroup_fs.probe`) and returns `CliError::ProbeRefused` —
+///    `adapters` is never called, so a refused probe opens no store;
+/// 2. calls `adapters(&config, cgroup_fs)` — the probed handle is the one
+///    the bundle carries;
+/// 3. `run_server(config, bundle)`.
+///
+/// # Errors
+///
+/// [`CliError::ProbeRefused`] when the cgroupfs probe fails;
+/// [`CliError::Transport`] for every error of step 2 or 3 (a `ViewStoreBoot`
+/// error emits `health.startup.refused` first).
+pub async fn run_with_adapters<F>(
     args: ServeArgs,
-    dataplane_override: Option<Arc<dyn Dataplane>>,
-    kek: Arc<dyn overdrive_core::ca::kek::Kek>,
-    with_config: impl FnOnce(ServerConfig) -> ServerConfig,
-) -> Result<ServeHandle, CliError> {
+    cgroup_fs: Arc<dyn CgroupFs>,
+    adapters: F,
+) -> Result<ServeHandle, CliError>
+where
+    F: FnOnce(&ServerConfig, Arc<dyn CgroupFs>) -> Result<NodeAdapters, ControlPlaneError>,
+{
     let requested_endpoint = format!("https://{}", args.bind);
 
-    // ADR-0054 § Composition root wiring — Earned-Trust probe.
-    //
-    // Construct the production cgroupfs adapter and round-trip on the
-    // kernel-managed `cgroup.subtree_control` pseudo-file BEFORE the
-    // worker subsystem starts. On failure, emit a structured
-    // `health.startup.refused` event whose `cause` field carries the
-    // typed `ProbeError` Display rendering (NOT collapsed to
-    // `Internal(String)` per `.claude/rules/development.md` § "Never
-    // flatten a typed error to `Internal(String)` at a composition
-    // boundary"), and return `CliError::ProbeRefused { cause }`.
-    //
-    // The probe runs BEFORE `run_server`, so it executes before
-    // `cgroup_preflight` (ADR-0028) AND before any FS write the
-    // worker subsystem would issue. When the probe fails, the
-    // listener never binds, the convergence loop never spawns, and
-    // no on-disk artefacts are created — operators see the typed
-    // refusal rather than a downstream Transport failure that would
-    // mask the substrate problem.
-    //
-    // The test-only `OVERDRIVE_TEST_PROBE_ROOT` env var swaps the
-    // probe root from `/sys/fs/cgroup` to a caller-supplied path so
-    // integration tests can force probe-failure deterministically.
-    // Production callers never set the variable; the binary honours
-    // it without --help advertisement (same convention as
-    // `$OVERDRIVE_CONFIG_DIR`).
-    let fs: Arc<dyn CgroupFs> = Arc::new(build_probe_adapter());
-    if let Err(probe_err) = fs.probe().await {
+    // ADR-0054 § Composition root wiring — Earned-Trust probe, BEFORE the
+    // bundle is built (so a refused probe opens no store) and before
+    // `cgroup_preflight` (ADR-0028). The probed handle is the used handle.
+    if let Err(probe_err) = cgroup_fs.probe().await {
         let cause = probe_err.to_string();
         tracing::error!(
             name: "health.startup.refused",
             target: "overdrive::health",
             reason = "cgroup_fs.probe",
             cause = %cause,
-            adapter = fs.kind(),
+            adapter = cgroup_fs.kind(),
             "CgroupFs probe refused; composition root will not start worker subsystem"
         );
         return Err(CliError::ProbeRefused { cause });
     }
-    // Same Arc cloned into run_server → VmDriver composition — probed
-    // substrate IS used substrate (Earned Trust per ADR-0054 §
-    // Composition root). The CLI constructs `fs` ONCE; the probe
-    // succeeded against THIS exact handle, and the worker subsystem
-    // downstream calls methods on a clone of THIS same Arc. Threading
-    // a different RealCgroupFs instance — even one that happens to
-    // share `/sys/fs/cgroup` substrate semantics — would break the
-    // invariant: probe-success is a property of the handle that was
-    // probed, not of "some handle to the same substrate".
 
-    // `..ServerConfig::new(kek, intercept, dns)` populates `tick_cadence`
-    // (`reconciler_runtime::DEFAULT_TICK_CADENCE`, 100ms) and `clock`
-    // (`Arc::new(SystemClock)` from `overdrive-host`). Per CLAUDE.md
-    // "Repository structure" `overdrive-host` is the only crate
-    // permitted to instantiate `SystemClock`, so the binding lives in
-    // the `ServerConfig::new` constructor rather than this call site.
-    // Per `fix-convergence-loop-not-spawned` Step 01-02 (RCA Option B2).
-    //
-    // `kek` is threaded in from the caller (feature-delta § C1-AMEND):
-    // production `run` composes `SystemdCredsKeyring::new()` (the Linux
-    // kernel-keyring `Kek` provider, ADR-0063 D3/D6); the test-only sibling
-    // `run_with_dataplane` injects a hermetic `SimKek`. `run_server` then
-    // consumes `config.kek` and never constructs the production binding inline
-    // (inline construction was the regression). The KEK injection mirrors the
-    // `dataplane_override` test-injection precedent above.
-    let config = with_config(ServerConfig {
+    let config = ServerConfig {
         bind: args.bind,
         data_dir: args.data_dir,
         operator_config_dir: args.config_dir,
-        dataplane_override,
-        ..ServerConfig::new(kek, Arc::new(HostMtlsIntercept::new()), Arc::new(HostGuestDnsFactory))
-    });
-    let inner = run_server(config, fs.clone()).await.map_err(|e| {
-        // ADR-0035 §5 + reconciler-memory-redb step 01-06: any
-        // `ViewStore` boot-time failure (open RedbViewStore, probe,
-        // bulk_load) surfaces as the typed
-        // `ControlPlaneError::ViewStoreBoot` variant. Emit a
-        // structured `health.startup.refused` event by branching on
-        // the variant before mapping to `CliError::Transport` —
-        // matches on the type, not on `Display` output, so a future
-        // rewording of the error message cannot silently break this
-        // observability hook.
+        vsock_ports: args.vsock_ports,
+        ..ServerConfig::new()
+    };
+    let map_boot_error = |e: ControlPlaneError| {
+        // ADR-0035 §5: a `ViewStore` boot failure surfaces as the typed
+        // `ControlPlaneError::ViewStoreBoot`; branch on the variant, not on
+        // `Display`, before mapping to `CliError::Transport`.
         if matches!(e, ControlPlaneError::ViewStoreBoot(_)) {
             tracing::error!(
                 target: "overdrive::health",
@@ -343,7 +199,9 @@ async fn run_inner(
             endpoint: requested_endpoint.clone(),
             cause: stripped_server_error(&e.to_string()),
         }
-    })?;
+    };
+    let bundle = adapters(&config, cgroup_fs).map_err(map_boot_error)?;
+    let inner = run_server(config, bundle).await.map_err(map_boot_error)?;
 
     let bound = inner.local_addr().await.ok_or_else(|| CliError::Transport {
         endpoint: requested_endpoint.clone(),
@@ -356,18 +214,6 @@ async fn run_inner(
     })?;
 
     Ok(ServeHandle { inner, endpoint })
-}
-
-/// Construct the production [`RealCgroupFs`] for the Earned-Trust
-/// probe, honouring the test-only [`PROBE_ROOT_ENV_VAR`] override.
-/// Production callers leave the env var unset and the probe runs
-/// against `/sys/fs/cgroup`.
-fn build_probe_adapter() -> RealCgroupFs {
-    match std::env::var(PROBE_ROOT_ENV_VAR) {
-        // mutants: skip — crate-level #![forbid(unsafe_code)] prevents unit-testing env var mutation; integration tests cover the set-path case
-        Ok(path) if !path.is_empty() => RealCgroupFs::new().with_probe_root(PathBuf::from(path)),
-        _ => RealCgroupFs::new(),
-    }
 }
 
 /// Condense a `ControlPlaneError::Internal(...)` rendering into an

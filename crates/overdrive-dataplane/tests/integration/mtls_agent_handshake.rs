@@ -126,7 +126,12 @@ async fn agent_handshake_presents_held_svid_server_role() {
     // default (`.claude/rules/development.md` § "Port-trait dependencies"). The
     // workloads below are handed NO SVID material.
     let identity: Arc<dyn IdentityRead> = Arc::new(held_identities(&pki));
-    let adapter = HostMtlsEnforcement::new(identity, MtlsLimits::default());
+    let adapter = HostMtlsEnforcement::new(
+        identity,
+        MtlsLimits::default(),
+        overdrive_core::guest_transport::GUEST_NODE_PREFIX,
+        crate::integration::helpers::guest_dial::not_serving(),
+    );
 
     adapter
         .probe()

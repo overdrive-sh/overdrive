@@ -1,0 +1,103 @@
+# quiescence-hazard-foreign-ignored: counterexample, 22 state(s) (from the TLC trace)
+
+State 1
+  foreign = FALSE
+  flowsOpen = 0
+  conf_step = [InitDown |-> [tag |-> "UNIT"]]
+  up = TRUE
+  leaked = 0
+  rec = [C1 |-> "idle", C2 |-> "idle"]
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+  cnt = 0
+  stop = "none"
+  repLeft = -1
+  table = TRUE
+  latch = FALSE
+  dmg = [C1 |-> FALSE, C2 |-> FALSE]
+  att = [C1 |-> 0, C2 |-> 0]
+
+State 2 [Damage]
+  dmg = [C1 |-> TRUE, C2 |-> FALSE]
+
+State 3 [RecQuiesce]
+  rec = [C1 |-> "held", C2 |-> "idle"]
+  cnt = 1
+  latch = TRUE
+
+State 4 [LeakHold]
+  leaked = 1
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+  cnt = 2
+
+State 5 [RecRepair]
+  rec = [C1 |-> "repaired", C2 |-> "idle"]
+  dmg = [C1 |-> FALSE, C2 |-> FALSE]
+
+State 6 [RecRestore]
+  rec = [C1 |-> "idle", C2 |-> "idle"]
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> TRUE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+  cnt = 1
+
+State 7 [FailStop]
+  up = FALSE
+  leaked = 0
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> TRUE, failStopped |-> TRUE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+  cnt = 0
+  stop = "failstop"
+  latch = FALSE
+
+State 8 [RestartWith]
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> TRUE, failStopped |-> TRUE, dropped |-> TRUE, refusedBoot |-> TRUE, foreignChanged |-> FALSE ]
+  stop = "refused"
+
+State 9 [RestartWith]
+  up = TRUE
+  stop = "none"
+
+State 10 [Damage]
+  dmg = [C1 |-> FALSE, C2 |-> TRUE]
+
+State 11 [ForeignRestore]
+  foreign = TRUE
+
+State 12 [Damage]
+  dmg = [C1 |-> TRUE, C2 |-> TRUE]
+
+State 13 [RecQuiesce]
+  rec = [C1 |-> "held", C2 |-> "idle"]
+  cnt = 1
+  latch = TRUE
+
+State 14 [RepFail]
+  att = [C1 |-> 1, C2 |-> 0]
+
+State 15 [RecRepair]
+  rec = [C1 |-> "repaired", C2 |-> "idle"]
+  dmg = [C1 |-> FALSE, C2 |-> TRUE]
+
+State 16 [RecQuiesce]
+  rec = [C1 |-> "repaired", C2 |-> "held"]
+  cnt = 2
+
+State 17 [RepFail]
+  att = [C1 |-> 1, C2 |-> 1]
+
+State 18 [RepFail]
+  att = [C1 |-> 1, C2 |-> 2]
+
+State 19 [RecRestore]
+  rec = [C1 |-> "idle", C2 |-> "held"]
+  cnt = 1
+  att = [C1 |-> 0, C2 |-> 2]
+
+State 20 [Damage]
+  dmg = [C1 |-> TRUE, C2 |-> TRUE]
+
+State 21 [RecQuiesce]
+  rec = [C1 |-> "held", C2 |-> "held"]
+  cnt = 2
+
+State 22 [RepFail]
+  att = [C1 |-> 1, C2 |-> 2]
+
+-> loops back to State 18

@@ -1,0 +1,19 @@
+c[?7l[2J[0mSeaBIOS (version 1.17.0-debian-1.17.0-1ubuntu1)
+Booting from ROM..c[?7l[2JGUEST_BOOT uname_r=7.0.0-29-generic
+evmod 53248 0 - Live 0xffffffffc0454000 (OE)
+vsock_loopback 12288 0 - Live 0xffffffffc040c000
+vmw_vsock_virtio_transport_common 57344 1 vsock_loopback, Live 0xffffffffc0408000
+vsock 73728 3 evmod,vsock_loopback,vmw_vsock_virtio_transport_common, Live 0xffffffffc0400000
+GUEST_MEM MemTotal: 8125520 kB MemAvailable: 7860492 kB SUnreclaim: 19188 kB 
+{"ev":"case","env":"k","case":"churn","pass":true,"detail":{"cycles":300,"pairs_attached":600,"pairs_ended_completed_or_aborted":600,"completed":0,"aborted":600,"live_pairs_max_after_a_cycle":0,"worst_detach_pair_ms":4,"dg_ab":280369,"dg_ba":257149,"wall_ms":7389}}
+{"ev":"final","stats":"{"aborted": 600, "attached": 600, "buf_bytes": 65536, "bytes_t2t": 0, "bytes_t2v": 0, "bytes_v2t": 0, "completed": 0, "detached": 569, "dg_ab": 280369, "dg_ab_bytes": 1205816942, "dg_ba": 257149, "dg_ba_bytes": 1148692720, "dg_empty": 23734, "dg_enobufs": 0, "dg_invalid": 0, "dg_oversize": 0, "dg_partial": 5917, "dg_trunc": 7, "dg_wait": 10639, "eof_fwd": 3, "err": 59, "fault_hits": 0, "held_max": 0, "kicks": 1303673, "live": 0, "pair_size": 280, "pool_miss": 0, "queued": 52411, "requeue": 505, "runs": 52411, "short_consume": 0, "stall_dst": 27671, "stall_src": 35723}"}
+DGPROBE_EXIT=0
+live=0 attached=600 detached=569 completed=0 aborted=600 err=59 runs=52411 kicks=1303673 queued=52411 requeue=505 bytes_v2t=0 bytes_t2v=0 bytes_t2t=0 stall_dst=27671 stall_src=35723 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=3 held_max=0 pair_size=280 buf_bytes=65536 dg_ab=280369 dg_ba=257149 dg_ab_bytes=1205816942 dg_ba_bytes=1148692720 dg_empty=23734 dg_oversize=0 dg_partial=5917 dg_wait=10639 dg_invalid=0 dg_trunc=7 dg_enobufs=0
+[    0.000000] Command line: console=ttyS0 rdinit=/init panic=-1 loglevel=4
+[    0.017420] Kernel command line: console=ttyS0 rdinit=/init panic=-1 loglevel=4
+[    0.136210] PCI: Using host bridge windows from ACPI; if necessary, use "pci=nocrs" and report a bug
+[    0.753530] evmod: loading out-of-tree module taints kernel.
+[    0.753545] evmod: module verification failed: signature and/or required key missing - tainting kernel
+[    0.754432] evmod: loaded (per-cpu workqueue)
+DG_ALL_DONE
+[    8.198890] reboot: Power down

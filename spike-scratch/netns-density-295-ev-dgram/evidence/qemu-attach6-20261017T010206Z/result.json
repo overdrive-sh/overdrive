@@ -1,0 +1,33 @@
+{
+ "qemu_exit": 0,
+ "done_marker": true,
+ "uname_r": "7.0.0-29-generic",
+ "cases": [
+  {
+   "case": "sizes-1431-u",
+   "pass": true
+  },
+  {
+   "case": "peer-truncated",
+   "pass": true
+  },
+  {
+   "case": "peer-truncated-nofix",
+   "pass": true
+  },
+  {
+   "case": "peer-truncatedhdr",
+   "pass": true
+  },
+  {
+   "case": "attach-errnos",
+   "pass": true
+  },
+  {
+   "case": "vsock-small-window",
+   "pass": true
+  }
+ ],
+ "all_pass": true,
+ "oops_lines": []
+}

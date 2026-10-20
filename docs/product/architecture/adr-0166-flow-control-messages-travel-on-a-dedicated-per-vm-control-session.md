@@ -83,7 +83,8 @@ carries READY / EXEC / EXIT authority with its own lifecycle.
 
 ## Consequences
 
-- One more vsock listener on the host (port 1243) and one session per VM.
+- One more vsock listener on the host (the control port, default 1243;
+  node configuration, ADR-0218) and one session per VM.
 - Activation of a VM's forwarding requires its live session (G-V3 in the
   feature delta).
 - A guest that cannot hold its control session has no working flows; READY is

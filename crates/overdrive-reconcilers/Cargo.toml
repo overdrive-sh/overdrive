@@ -50,3 +50,5 @@ tracing.workspace        = true
 
 [dev-dependencies]
 proptest.workspace = true
+# netns-density-295 R5-PROBE-COUNT — the View CBOR schema-evolution body.
+ciborium.workspace = true

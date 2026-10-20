@@ -1,0 +1,29 @@
+GUEST_BOOT uname_r=7.0.0-29-generic suite=misc arg= modparams=
+GUEST_MODULES:
+ovd_fwd 36864 0 [permanent], Live 0xffffffffc0636000 (OE)
+aesni_intel 98304 0 - Live 0xffffffffc0626000
+tls 163840 0 - Live 0xffffffffc0612000
+vsock_diag 12288 0 - Live 0xffffffffc0610000
+vsock_loopback 12288 0 - Live 0xffffffffc060e000
+vmw_vsock_virtio_transport 20480 0 - Live 0xffffffffc060c000
+vmw_vsock_virtio_transport_common 57344 2 vsock_loopback,vmw_vsock_virtio_transport, Live 0xffffffffc0608000
+vsock 73728 4 vsock_diag,vsock_loopback,vmw_vsock_virtio_transport,vmw_vsock_virtio_transport_common, Live 0xffffffffc0600000
+crw-------    1 0        0          10, 263 Oct 16 23:22 /dev/ovd_fwd
+CTLTEST suite=misc strict=0
+CHECK PASS version :: abi 1, PERMANENT flag
+CHECK PASS device is a root-owned 0600 character device :: mode 600 uid 0
+CHECK PASS end record layout is the pinned 32-byte layout :: sizeof=32
+CHECK PASS unknown ioctl is ENOTTY :: ENOTTY
+CHECK PASS bad user pointer is EFAULT :: EFAULT
+CHECK PASS read of a buffer shorter than one record is EINVAL :: EINVAL
+CHECK PASS read with no record is EAGAIN (non-blocking) :: EAGAIN
+CHECK PASS poll: not readable while no record is queued :: 
+CHECK FAIL pair_state of a live pair :: r=ENOENT src_end=0/0 moved=0/0
+CHECK FAIL ABORT of a live id returns 0 :: ENOENT
+CHECK FAIL Detached record is already queued when ABORT returns :: records=-11 kind=-1 cause=-1
+CHECK PASS poll: not readable once drained :: 
+CHECK PASS ABORT of an id whose record was read is ENOENT :: ENOENT
+CHECK FAIL ABORT reset the far TCP end :: 
+CHECK PASS pair_state of an ended id is ENOENT :: 
+CHECK FAIL poll: EPOLLIN when a record is queued (clean completion) :: poll=0
+CHECK FAIL completed pair: kind 1, cause 0 :: kind=-1 cause=-1 moved=0/0

@@ -8,9 +8,8 @@
 //!
 //! Consumers: the port equivalence harness (`mtls_intercept_equivalence.rs`),
 //! `MetalSharedIntercept` (`outbound_enforce_substrate_splice.rs`), the
-//! host-listener bodies of `mtls_intercept_install.rs`, and the
-//! original-destination steps of `egress_tproxy_capture.rs` and
-//! `name_resolve_enforce_consistency.rs`.
+//! host-listener bodies of `mtls_intercept_install.rs` and
+//! `shared_intercept_members.rs`.
 //!
 //! # Accept failures
 //!

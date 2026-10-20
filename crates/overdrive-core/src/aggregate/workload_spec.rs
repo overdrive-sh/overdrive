@@ -125,18 +125,11 @@ pub enum ParseError {
     /// A `[[listener]]` declared a port the guest reserves for its intakes
     /// (GH #295 D25). `first` / `last` are `guest_reserved_ports()`'s bounds.
     // SCAFFOLD: true — netns-density-295 DISTILL; the ingress check that
-    // produces this variant lands with DELIVER vsock new-step 9.
+    // produces this variant lands with DELIVER step 2.
     #[error(
         "listener port {port} is reserved for the guest transport ({first}..={last}); choose a port outside this range"
     )]
     ListenerPortReserved { port: u16, first: u16, last: u16 },
-
-    /// INTAKE-PORTS (GH #295, ADR-0179): more distinct TCP `[[listener]]`
-    /// ports than the intake host-port block holds.
-    // SCAFFOLD: true — netns-density-295 DISTILL; the ingress check that
-    // produces this variant lands with DELIVER vsock new-step 9.
-    #[error("{declared} TCP listener ports declared; a workload may declare at most {max}")]
-    TooManyTcpListenerPorts { declared: u32, max: u16 },
 
     /// A TOML section carried a field the parser does not accept.
     ///
@@ -289,6 +282,16 @@ pub enum ParseError {
         /// Per-kind guidance text explaining the rejection.
         guidance: &'static str,
     },
+
+    /// The spec's startup, readiness and liveness probes together exceed
+    /// `GUEST_PROBE_SLOTS` (D-UP-12). `count` includes an inferred default
+    /// startup probe (ADR-0058); `max` is `GUEST_PROBE_SLOTS`.
+    // SCAFFOLD: true — netns-density-295 DISTILL; the ingress check that
+    // produces this variant lands with DELIVER step 2.
+    #[error(
+        "[[health_check.*]] declares {count} probes across startup, readiness and liveness (including any inferred default startup probe); at most {max} probes per workload are supported"
+    )]
+    ProbeCountExceeded { count: usize, max: u32 },
 }
 
 // ---------------------------------------------------------------------------

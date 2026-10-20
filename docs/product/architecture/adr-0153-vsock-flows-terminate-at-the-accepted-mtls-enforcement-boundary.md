@@ -34,9 +34,10 @@ serves only guest traffic.
 
 The guest-capture spike carried a remote server's banner
 (`curl telnet://github.com:22` → `SSH-2.0-…`) and 10,000/10,000 egress
-server-speaks-first flows with the host destination socket installed by
-`sock_ops` at `ACTIVE_ESTABLISHED`, so a host-facing peer that speaks first
-needs no write gate.
+server-speaks-first flows; under the in-kernel forwarder (ADR-0197) bytes a
+host-facing peer sends before the attach wait in its socket's own receive
+queue and are forwarded by the attach-time run (ADR-0212; V-EV-PAIR, P-71),
+so a host-facing peer that speaks first needs no write gate.
 
 ## Decision
 
@@ -53,8 +54,8 @@ needs no write gate.
 2. **Mesh flows have exactly one host-facing peer: leg-F.** The owner binds
    the host-facing socket, registers its local 4-tuple with the mTLS worker
    together with the allocation, the original destination and the resolved
-   backend, and then connects it to leg-F. That socket is installed at
-   `ACTIVE_ESTABLISHED` (ADR-0158).
+   backend, and then connects it to leg-F. That socket is attached to the
+   flow vsock once its connect completed, before `Paired` (ADR-0212).
 3. **Leg-F does not re-resolve.** It claims the registration atomically by the
    accepted connection's 4-tuple and enforces mTLS to the registered backend.
    An accept with no registration is closed. No write gate is needed. Leg-F's
@@ -69,9 +70,9 @@ needs no write gate.
    is temporary and is deleted when #303 lands.
 6. **This ADR does not decide #303.** Under the END-STATE ruling, in-guest
    kernel mTLS (#303) adapts to the NIC-less, vsock-only guest: the guest's
-   kTLS socket reaches the host through a guest-local loopback peer redirected
-   into vsock, and the host forwards ciphertext over the existing kernel
-   redirect.
+   kTLS socket reaches the host through a guest-local loopback peer forwarded
+   into vsock, and the host forwards ciphertext through the in-kernel
+   forwarder (ADR-0197); no forwarded socket carries kTLS (ADR-0200).
 
 ## Alternatives considered
 
@@ -81,15 +82,10 @@ needs no write gate.
   set can disagree (TOCTOU). Rejected.
 - **Bypass leg-F for mesh destinations and wait for #303.** VM mesh traffic
   would be cleartext or blocked. Rejected.
-- **kTLS on a host pair socket inside the SockHash.** The sockmap refuses an
-  inet socket that already has a ULP (`net/core/skmsg.c:756-758 @ v7.0`), so
-  a socket whose TLS ULP is set after the handshake cannot then be installed.
-  The other order is accepted by the kernel — the TLS ULP checks no psock
-  (`net/ipv4/tcp_ulp.c:130-155`; `tls_init` in
-  `net/tls/tls_main.c:1047-1083 @ v7.0`), and kTLS polls a socket that has
-  one (`net/tls/tls_main.c:401-430 @ v7.0`) — but a socket installed at
-  establishment (ADR-0158) has every received byte redirected by the verdict,
-  so the userspace TLS handshake never sees the peer's records. Rejected.
+- **kTLS on a forwarded host pair socket.** The forwarder refuses to attach a
+  socket that carries a ULP, and a ULP installed after attach saves the
+  forwarder's callbacks and turns every TLS alert into an abort (ADR-0200).
+  Rejected.
 
 ## Consequences
 

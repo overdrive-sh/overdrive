@@ -5,8 +5,8 @@
 
 // INB-1 step 3 alone off: a dial opens to an Active, not-quiesced allocation with no live control session (the
 // NoSession check removed; the Active and quiesce checks kept)
-module flows_bugDialNoSessionCheck { import owner_flows(OFF = Set("dialNoSessionCheck"), CFG = "core").* from "../owner_flows" }
+module flows_bugDialNoSessionCheck { import owner_flows(OFF = Set("dialNoSessionCheck"), CFG = "core", REC = false).* from "../owner_flows" }
 // INB-1 off: a typed admission refusal registers (and closes) the dial slot instead of changing nothing
-module flows_bugRefusalRegisters { import owner_flows(OFF = Set("refusalRegisters"), CFG = "core").* from "../owner_flows" }
+module flows_bugRefusalRegisters { import owner_flows(OFF = Set("refusalRegisters"), CFG = "core", REC = false).* from "../owner_flows" }
 // G-V3 off: activate marks the CID Active without a live control session or while quiesced
-module flows_bugActivateNoGuard { import owner_flows(OFF = Set("activateNoGuard"), CFG = "core").* from "../owner_flows" }
+module flows_bugActivateNoGuard { import owner_flows(OFF = Set("activateNoGuard"), CFG = "core", REC = false).* from "../owner_flows" }

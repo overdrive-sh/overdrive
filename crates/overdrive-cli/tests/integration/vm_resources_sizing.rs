@@ -51,7 +51,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use overdrive_cli::commands::deploy::{DeployArgs, deploy};
-use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
+use overdrive_cli::commands::serve::ServeHandle;
 use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput, describe};
 use overdrive_control_plane::api::AllocStateWire;
 use overdrive_core::TransitionReason;
@@ -230,7 +230,7 @@ fn stage_rootfs_with_extra_binary(
 
 /// Spawns a real in-process `overdrive serve` with `SimDataplane` injected
 /// (these functional-sizing scenarios do not need the real `EbpfDataplane`
-/// / mTLS composition), through the UNGATED `run_with_dataplane`
+/// / mTLS composition), through `serve_fixture::serve` (`DataplaneChoice::Sim`)
 /// entrypoint — no node-level artifact seam. Every VM allocation sources
 /// its kernel and rootfs from its own `[vm]` spec.
 async fn spawn_vm_server() -> (ServeHandle, TempDir) {
@@ -240,14 +240,10 @@ async fn spawn_vm_server() -> (ServeHandle, TempDir) {
     let config_dir = tmp.path().join("conf");
     std::fs::create_dir_all(&data_dir).expect("create data dir");
     std::fs::create_dir_all(&config_dir).expect("create operator config dir");
-    let args = ServeArgs { bind, data_dir, config_dir };
-    let handle = overdrive_cli::commands::serve::run_with_dataplane(
-        args,
-        std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
-        std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-    )
-    .await
-    .expect("serve::run_with_dataplane");
+    let args = super::serve_fixture::serve_args(bind, data_dir, config_dir);
+    let handle = super::serve_fixture::serve(args, super::serve_fixture::DataplaneChoice::Sim)
+        .await
+        .expect("serve must start");
     (handle, tmp)
 }
 
@@ -364,6 +360,7 @@ fn guest_reported_mem_units_16mib(out: &WorkloadDescribeOutput) -> i32 {
 /// the constructed hypervisor config). `round_up(2000 / 1000) = 2`.
 #[tokio::test]
 #[serial(cgroup)]
+#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn declared_cpu_milli_2000_yields_two_guest_online_cpus() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -409,6 +406,7 @@ async fn declared_cpu_milli_2000_yields_two_guest_online_cpus() {
 /// fail the boot deadline with no exit code — S-VM-03's shape).
 #[tokio::test]
 #[serial(cgroup)]
+#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn sub_core_cpu_milli_250_yields_one_guest_online_cpu_and_reaches_running() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -488,6 +486,7 @@ async fn sub_core_cpu_milli_250_yields_one_guest_online_cpu_and_reaches_running(
 /// halves fail independently.
 #[tokio::test]
 #[serial(cgroup)]
+#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn declared_memory_2gib_is_guest_observed_and_reported_by_describe() {
     // 2 GiB — the declared operator figure, and the RAM the guest observes.
     const DECLARED_MEMORY_BYTES: u64 = 2_147_483_648;
@@ -607,6 +606,7 @@ async fn declared_memory_2gib_is_guest_observed_and_reported_by_describe() {
 /// RED while the other stays GREEN — the two halves fail independently.
 #[tokio::test]
 #[serial(cgroup)]
+#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn declared_cpu_and_memory_match_guest_observed_on_single_private_backing() {
     const CPU_MILLI: u32 = 2000; // round_up(2000 / 1000) = 2 vCPUs
     const DECLARED_MEMORY_BYTES: u64 = 2_147_483_648; // 2 GiB

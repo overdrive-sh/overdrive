@@ -1,0 +1,133 @@
+{
+ "qemu_exit": 0,
+ "done_marker": true,
+ "uname_r": "7.0.0-29-generic",
+ "cases": [
+  {
+   "case": "sizes-0-u",
+   "pass": true
+  },
+  {
+   "case": "sizes-0-c",
+   "pass": true
+  },
+  {
+   "case": "sizes-1-u",
+   "pass": true
+  },
+  {
+   "case": "sizes-1-c",
+   "pass": true
+  },
+  {
+   "case": "sizes-1431-u",
+   "pass": true
+  },
+  {
+   "case": "sizes-1431-c",
+   "pass": true
+  },
+  {
+   "case": "sizes-4096-u",
+   "pass": true
+  },
+  {
+   "case": "sizes-4096-c",
+   "pass": true
+  },
+  {
+   "case": "sizes-4097-u",
+   "pass": true
+  },
+  {
+   "case": "sizes-4097-c",
+   "pass": true
+  },
+  {
+   "case": "sizes-59000-u",
+   "pass": true
+  },
+  {
+   "case": "sizes-59000-c",
+   "pass": true
+  },
+  {
+   "case": "mixed-u",
+   "pass": true
+  },
+  {
+   "case": "mixed-c",
+   "pass": true
+  },
+  {
+   "case": "oversize-chain",
+   "pass": true
+  },
+  {
+   "case": "peer-credit",
+   "pass": true
+  },
+  {
+   "case": "peer-chunked",
+   "pass": true
+  },
+  {
+   "case": "peer-oversize",
+   "pass": true
+  },
+  {
+   "case": "peer-badframe-len",
+   "pass": true
+  },
+  {
+   "case": "peer-badframe-magic",
+   "pass": true
+  },
+  {
+   "case": "peer-eof",
+   "pass": true
+  },
+  {
+   "case": "err-econnrefused",
+   "pass": true
+  },
+  {
+   "case": "err-eperm-drop",
+   "pass": true
+  },
+  {
+   "case": "err-eperm-reject",
+   "pass": true
+  },
+  {
+   "case": "err-eperm-bpf",
+   "pass": true
+  },
+  {
+   "case": "slot-release-discard",
+   "pass": false
+  },
+  {
+   "case": "slot-release-control-no-discard",
+   "pass": true
+  },
+  {
+   "case": "recvmsg4-control-no-recv-hook",
+   "pass": true
+  },
+  {
+   "case": "recvmsg4-rewrite",
+   "pass": true
+  },
+  {
+   "case": "neg-lose-one",
+   "pass": true
+  },
+  {
+   "case": "neg-duplicate-one",
+   "pass": true
+  }
+ ],
+ "all_pass": false,
+ "oops_lines": []
+}

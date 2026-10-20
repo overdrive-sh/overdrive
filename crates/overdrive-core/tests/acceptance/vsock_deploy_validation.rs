@@ -1,25 +1,34 @@
-//! P1 — deploy / API validation of guest-transport listener constraints.
+//! P1-S10 — deploy / API validation refuses a listener port the guest
+//! reserves for its intakes (GH #295, D25, boundary row R5-21), and a spec
+//! whose probes across startup, readiness and liveness exceed the
+//! per-allocation cap `GUEST_PROBE_SLOTS` (D-UP-12 / PD-3 / EVMOD-AB,
+//! boundary row R5-60).
 //!
-//! DISTILL acceptance scaffolds for feature #295. Spec:
-//! `docs/feature/netns-density-295/distill/test-scenarios-p1-admission-cid-lease.md`
-//! (P1-S10, P1-S11); design pins feature-delta.md §"[REF] Core vocabulary"
-//! (`ParseError::ListenerPortReserved`, `ParseError::TooManyTcpListenerPorts`,
-//! `guest_reserved_ports()`, `GUEST_INTAKE_PORTS_PER_ALLOCATION_MAX`), decisions
-//! D25 / D15-R2 (reserved range) and INTAKE-PORTS, boundary rows R5-21 / R5-44.
+//! Contract: `docs/feature/netns-density-295/feature-delta.md` § "[REF] Core
+//! vocabulary — `overdrive-core`" — **Deploy refusal of a reserved port (D25)**
+//! (`ParseError::ListenerPortReserved`, `guest_reserved_ports()`; the API
+//! ingress returns `AggregateError::Validation { field: "listeners[].port",
+//! message }` with the `ParseError` `Display` text as `message`).
 //!
-//! Both driving ports are overdrive-core (so this file belongs here):
+//! Both driving ports are `overdrive-core`:
 //!   * TOML ingress `overdrive deploy <SPEC>` →
-//!     `overdrive_core::aggregate::WorkloadSpecInput::from_toml_str` →
-//!     `ParseError::{ListenerPortReserved, TooManyTcpListenerPorts}`;
+//!     `overdrive_core::aggregate::WorkloadSpecInput::from_toml_str`;
 //!   * API ingress (operator submit) →
-//!     `overdrive_core::aggregate::Service::from_submit(ServiceSpecInput)` →
-//!     `AggregateError::Validation { field, message }` carrying the same text.
+//!     `overdrive_core::aggregate::Service::from_submit(ServiceSpecInput)`.
 //!
-//! RED: the two `ParseError` variants are scaffolded (Mandate 7) and the
-//! `guest_transport` functions panic until DELIVER lands the ingress checks
-//! (vsock new-step 9 for INTAKE-PORTS; the D25 reserved-port refusal with the
-//! guest intakes, new-step 5). Every body below fails for missing behaviour:
-//! either the scaffold panics or today's parser accepts the spec.
+//! The probe cap (§ "Per-allocation probe cap"): the TOML ingress returns
+//! `ParseError::ProbeCountExceeded { count, max }` after the three role
+//! arrays are parsed and ADR-0058's default startup probe is inferred (so an
+//! inferred probe counts); the API ingress returns `AggregateError::Validation
+//! { field: "probes", message }` with that `Display` text. Both read
+//! `GUEST_PROBE_SLOTS`; neither spells 8.
+//!
+//! RED: `guest_reserved_ports()` panics and neither ingress checks the range
+//! or the probe count until DELIVER step 2 lands them. The removed
+//! INTAKE-PORTS limit (ADR-0179, removed by INB-1) has no cell here. The
+//! seeded-sim half of R5-60 (eight concurrent probe dials, each taking a node
+//! flow slot) is specified against the production owner in
+//! `overdrive-control-plane`.
 
 #![allow(
     clippy::expect_used,
@@ -29,12 +38,12 @@
 )]
 
 use overdrive_core::aggregate::{
-    AggregateError, DriverInput, ParseError, ResourcesInput, Service, VmInput, WorkloadSpecInput,
+    AggregateError, DriverInput, ParseError, ProbeDescriptor, ProbeMechanic, ResourcesInput,
+    Service, VmInput, WorkloadSpecInput,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
-use overdrive_core::guest_transport::{
-    GUEST_INTAKE_PORTS_PER_ALLOCATION_MAX, guest_reserved_ports,
-};
+use overdrive_core::guest_transport::{GUEST_PROBE_SLOTS, guest_reserved_ports};
+use overdrive_core::observation::{ProbeIdx, ProbeRole};
 use proptest::prelude::*;
 
 // ---------------------------------------------------------------------------
@@ -86,7 +95,7 @@ fn service_submit_with_listeners(ports: &[(u16, &str)]) -> ServiceSpecInput {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER vsock new-step 9 (deploy-ingress validation: D25 reserved-port refusal, INTAKE-PORTS)"]
+#[ignore = "pending DELIVER step 2"]
 fn deploy_refuses_reserved_listener_port_naming_the_range() {
     let range = guest_reserved_ports();
     let (first, last) = (*range.start(), *range.end());
@@ -114,18 +123,58 @@ fn deploy_refuses_reserved_listener_port_naming_the_range() {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER vsock new-step 9 (deploy-ingress validation: D25 reserved-port refusal, INTAKE-PORTS)"]
+#[ignore = "pending DELIVER step 2"]
 fn api_ingress_refuses_reserved_listener_port_with_validation() {
     // Same rule at the operator submit ingress → AggregateError::Validation
     // keyed on the listener-port field, carrying the ParseError Display text.
-    let input = service_submit_with_listeners(&[(61_000, "tcp")]);
-    match Service::from_submit(input) {
-        Err(AggregateError::Validation { field, message }) => {
-            assert_eq!(field, "listeners[].port");
-            assert!(message.contains("reserved"), "message names the reservation: {message}");
+    let range = guest_reserved_ports();
+    for (port, proto) in [(61_000u16, "tcp"), (61_500, "udp"), (62_024, "tcp")] {
+        let input = service_submit_with_listeners(&[(8080, "tcp"), (port, proto)]);
+        match Service::from_submit(input) {
+            Err(AggregateError::Validation { field, message }) => {
+                assert_eq!(field, "listeners[].port");
+                let expected = ParseError::ListenerPortReserved {
+                    port,
+                    first: *range.start(),
+                    last: *range.end(),
+                }
+                .to_string();
+                assert_eq!(message, expected, "the ParseError Display text, verbatim");
+            }
+            other => panic!("expected Validation for reserved {proto} {port}, got {other:?}"),
         }
-        other => panic!("expected Validation for reserved port, got {other:?}"),
     }
+    // Boundary: the ports just outside the range submit.
+    for port in [60_999u16, 62_025] {
+        assert!(
+            Service::from_submit(service_submit_with_listeners(&[(port, "tcp")])).is_ok(),
+            "{port} is outside the reserved range and must be accepted",
+        );
+    }
+}
+
+/// A spec mixing an ordinary listener and a reserved one is refused, naming
+/// the reserved port — the ordinary listener does not mask it.
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+#[ignore = "pending DELIVER step 2"]
+fn deploy_refuses_a_reserved_port_among_ordinary_listeners() {
+    let toml = service_toml_with_listeners(&[(8080, "tcp"), (53, "udp"), (61_001, "udp")]);
+    match WorkloadSpecInput::from_toml_str(&toml) {
+        Err(ParseError::ListenerPortReserved { port, .. }) => assert_eq!(port, 61_001),
+        other => panic!("expected ListenerPortReserved for 61001, got {other:?}"),
+    }
+}
+
+/// The refusal text names the port and the range and tells the operator what
+/// to do (D25).
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+fn the_reserved_port_refusal_renders_its_pinned_message() {
+    assert_eq!(
+        ParseError::ListenerPortReserved { port: 61_000, first: 61_000, last: 62_024 }.to_string(),
+        "listener port 61000 is reserved for the guest transport (61000..=62024); choose a port outside this range"
+    );
 }
 
 proptest! {
@@ -133,7 +182,7 @@ proptest! {
     // port lies inside guest_reserved_ports(), for either protocol.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER vsock new-step 9 (deploy-ingress validation: D25 reserved-port refusal, INTAKE-PORTS)"]
+    #[ignore = "pending DELIVER step 2"]
     fn deploy_refusal_iff_port_in_reserved_range(
         port in 60_000u16..=63_000,
         tcp in any::<bool>(),
@@ -150,62 +199,164 @@ proptest! {
 }
 
 // ===========================================================================
-// P1-S11 / R5-44 — too many declared TCP listener ports (INTAKE-PORTS).
+// R5-60 — the per-allocation probe cap (D-UP-12), at both ingresses.
 // ===========================================================================
 
-/// CONTRACT_SHAPE: pure-function.
-#[test]
-#[ignore = "pending DELIVER vsock new-step 9 (deploy-ingress validation: D25 reserved-port refusal, INTAKE-PORTS)"]
-fn deploy_accepts_exactly_the_block_size_and_refuses_one_more() {
-    let max = GUEST_INTAKE_PORTS_PER_ALLOCATION_MAX; // 4,096
-    // Distinct TCP ports drawn from a band disjoint from the reserved range.
-    let at_cap: Vec<(u16, &str)> = (0..max).map(|i| (1_000 + i, "tcp")).collect();
-    assert!(
-        WorkloadSpecInput::from_toml_str(&service_toml_with_listeners(&at_cap)).is_ok(),
-        "exactly {max} distinct TCP listener ports is accepted",
-    );
+/// A TOML spec with one TCP listener on 8080 and `startup` / `readiness` /
+/// `liveness` TCP probes against it. `startup == 0` omits the startup
+/// section, so ADR-0058 infers one default startup probe.
+fn service_toml_with_probes(startup: usize, readiness: usize, liveness: usize) -> String {
+    let section = |role: &str, n: usize| -> String {
+        format!("[[health_check.{role}]]\ntype = \"tcp\"\nport = 8080\n\n").repeat(n)
+    };
+    format!(
+        "{}\n{}{}{}",
+        service_toml_with_listeners(&[(8080, "tcp")]),
+        section("startup", startup),
+        section("readiness", readiness),
+        section("liveness", liveness),
+    )
+}
 
-    let over_cap: Vec<(u16, &str)> = (0..=max).map(|i| (1_000 + i, "tcp")).collect();
-    match WorkloadSpecInput::from_toml_str(&service_toml_with_listeners(&over_cap)) {
-        Err(ParseError::TooManyTcpListenerPorts { declared, max: m }) => {
-            assert_eq!((declared, m), (u32::from(max) + 1, max));
-        }
-        other => panic!("expected TooManyTcpListenerPorts at {}, got {other:?}", max + 1),
+/// One operator-declared TCP probe of `role` at position `idx`, with the
+/// role's ADR-0057 defaults.
+fn tcp_probe(role: ProbeRole, idx: u32) -> ProbeDescriptor {
+    ProbeDescriptor {
+        idx: ProbeIdx::new(idx),
+        role,
+        mechanic: ProbeMechanic::Tcp { host: "0.0.0.0".to_owned(), port: 8080 },
+        timeout_seconds: 5,
+        interval_seconds: 2,
+        max_attempts: 30,
+        failure_threshold: matches!(role, ProbeRole::Liveness).then_some(3),
+        success_threshold: matches!(role, ProbeRole::Readiness).then_some(1),
+        inferred: false,
     }
 }
 
+/// The API-ingress submit input with the given probe counts per role (no
+/// inference at this ingress: the vectors are the intent's).
+fn service_submit_with_probes(startup: u32, readiness: u32, liveness: u32) -> ServiceSpecInput {
+    let mut input = service_submit_with_listeners(&[(8080, "tcp")]);
+    input.startup_probes = (0..startup).map(|i| tcp_probe(ProbeRole::Startup, i)).collect();
+    input.readiness_probes = (0..readiness).map(|i| tcp_probe(ProbeRole::Readiness, i)).collect();
+    input.liveness_probes = (0..liveness).map(|i| tcp_probe(ProbeRole::Liveness, i)).collect();
+    input
+}
+
+/// R5-60: eight probes in total deploy — spread over the three roles, or all
+/// in one role (several probes of one role stay supported) — and every probe
+/// survives into the intent.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER vsock new-step 9 (deploy-ingress validation: D25 reserved-port refusal, INTAKE-PORTS)"]
-fn api_ingress_refuses_too_many_tcp_listener_ports_with_validation() {
-    let max = GUEST_INTAKE_PORTS_PER_ALLOCATION_MAX;
-    let over_cap: Vec<(u16, &str)> = (0..=max).map(|i| (1_000 + i, "tcp")).collect();
-    match Service::from_submit(service_submit_with_listeners(&over_cap)) {
-        Err(AggregateError::Validation { field, .. }) => assert_eq!(field, "listeners"),
-        other => panic!("expected Validation {{ field: listeners }}, got {other:?}"),
+#[ignore = "pending DELIVER step 2"]
+fn deploy_accepts_eight_probes_in_total_in_any_shape() {
+    for (startup, readiness, liveness) in [(3usize, 3usize, 2usize), (8, 0, 0), (1, 0, 7)] {
+        let toml = service_toml_with_probes(startup, readiness, liveness);
+        match WorkloadSpecInput::from_toml_str(&toml) {
+            Ok(WorkloadSpecInput::Service(spec)) => {
+                assert_eq!(
+                    (
+                        spec.startup_probes.len(),
+                        spec.readiness_probes.len(),
+                        spec.liveness_probes.len()
+                    ),
+                    (startup, readiness, liveness),
+                    "every declared probe survives"
+                );
+            }
+            other => panic!(
+                "expected an accepted service for {startup}/{readiness}/{liveness}, got {other:?}"
+            ),
+        }
     }
+}
+
+/// R5-60: nine probes are refused before any intent exists — eight declared
+/// readiness and liveness probes with no startup section, whose inferred
+/// default startup probe is the ninth, and nine declared probes.
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+#[ignore = "pending DELIVER step 2"]
+fn deploy_refuses_nine_probes_counting_the_inferred_startup_probe() {
+    for (startup, readiness, liveness) in [(0usize, 4usize, 4usize), (9, 0, 0), (3, 3, 3)] {
+        let toml = service_toml_with_probes(startup, readiness, liveness);
+        match WorkloadSpecInput::from_toml_str(&toml) {
+            Err(ParseError::ProbeCountExceeded { count, max }) => {
+                assert_eq!(
+                    (count, max),
+                    (9, GUEST_PROBE_SLOTS),
+                    "{startup}/{readiness}/{liveness}"
+                );
+            }
+            other => panic!(
+                "expected ProbeCountExceeded for {startup}/{readiness}/{liveness}, got {other:?}"
+            ),
+        }
+    }
+}
+
+/// R5-60: the API ingress refuses the same counts with `Validation { field:
+/// "probes" }` carrying the `ProbeCountExceeded` text, and accepts eight.
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+#[ignore = "pending DELIVER step 2"]
+fn api_ingress_refuses_nine_probes_with_validation() {
+    let expected = ParseError::ProbeCountExceeded { count: 9, max: GUEST_PROBE_SLOTS }.to_string();
+    for (startup, readiness, liveness) in [(1u32, 4u32, 4u32), (9, 0, 0), (0, 4, 5)] {
+        match Service::from_submit(service_submit_with_probes(startup, readiness, liveness)) {
+            Err(AggregateError::Validation { field, message }) => {
+                assert_eq!(field, "probes");
+                assert_eq!(message, expected, "the ParseError Display text, verbatim");
+            }
+            other => {
+                panic!("expected Validation for {startup}/{readiness}/{liveness}, got {other:?}")
+            }
+        }
+    }
+    for (startup, readiness, liveness) in [(3u32, 3u32, 2u32), (0, 0, 8)] {
+        assert!(
+            Service::from_submit(service_submit_with_probes(startup, readiness, liveness)).is_ok(),
+            "{startup}/{readiness}/{liveness}: eight probes are within the cap"
+        );
+    }
+}
+
+/// The probe-cap refusal names the count, the inferred probe and the cap.
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+fn the_probe_cap_refusal_renders_its_pinned_message() {
+    assert_eq!(
+        ParseError::ProbeCountExceeded { count: 9, max: 8 }.to_string(),
+        "[[health_check.*]] declares 9 probes across startup, readiness and liveness (including any inferred default startup probe); at most 8 probes per workload are supported"
+    );
 }
 
 proptest! {
-    // Property (R5-44): refusal iff the count of DISTINCT TCP listener ports
-    // exceeds the constant. UDP listeners, on the same and on other ports, do
-    // not count toward the TCP limit.
+    // Property (R5-60 count boundary): a spec is refused iff its probe count
+    // — the declared probes plus an inferred default startup probe when no
+    // startup section is written — exceeds GUEST_PROBE_SLOTS.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER vsock new-step 9 (deploy-ingress validation: D25 reserved-port refusal, INTAKE-PORTS)"]
-    fn deploy_refusal_iff_distinct_tcp_ports_over_the_constant(
-        tcp_count in (GUEST_INTAKE_PORTS_PER_ALLOCATION_MAX - 2)..=(GUEST_INTAKE_PORTS_PER_ALLOCATION_MAX + 2),
-        udp_count in 0u16..=64,
+    #[ignore = "pending DELIVER step 2"]
+    fn deploy_refusal_iff_the_probe_count_exceeds_the_cap(
+        startup in 0usize..=6,
+        readiness in 0usize..=6,
+        liveness in 0usize..=6,
     ) {
-        let max = GUEST_INTAKE_PORTS_PER_ALLOCATION_MAX;
-        let mut ports: Vec<(u16, &str)> = (0..tcp_count).map(|i| (1_000 + i, "tcp")).collect();
-        // UDP listeners share the first TCP ports and add ports of their own.
-        ports.extend((0..udp_count).map(|i| (1_000 + i, "udp")));
-        ports.extend((0..udp_count).map(|i| (10_000 + i, "udp")));
-        let refused = matches!(
-            WorkloadSpecInput::from_toml_str(&service_toml_with_listeners(&ports)),
-            Err(ParseError::TooManyTcpListenerPorts { .. })
-        );
-        prop_assert_eq!(refused, tcp_count > max, "refused iff distinct TCP ports > the constant");
+        let inferred = usize::from(startup == 0);
+        let count = startup + readiness + liveness + inferred;
+        let max = usize::try_from(GUEST_PROBE_SLOTS).expect("fits usize");
+        let parsed = WorkloadSpecInput::from_toml_str(&service_toml_with_probes(startup, readiness, liveness));
+        if count > max {
+            let refused_with_the_count = matches!(
+                parsed,
+                Err(ParseError::ProbeCountExceeded { count: c, max: m })
+                    if c == count && m == GUEST_PROBE_SLOTS
+            );
+            prop_assert!(refused_with_the_count, "{} probes: expected ProbeCountExceeded, got {:?}", count, parsed);
+        } else {
+            prop_assert!(parsed.is_ok(), "{} probes are within the cap", count);
+        }
     }
 }

@@ -1,0 +1,25 @@
+
+  slots_bugKeepFramesOnEnd
+    1) slots_bugKeepFramesOnEnd::udp_slots::DatagramQueuedBeforeAnEndIsDiscardedWithTheQueue failed after 1 test(s)
+
+  1 failed
+
+  1) slots_bugKeepFramesOnEnd::udp_slots::DatagramQueuedBeforeAnEndIsDiscardedWithTheQueue:
+       Error [QNT508]: Expect condition does not hold true
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/udp_slots.qnt:511:58
+        511:   run DatagramQueuedBeforeAnEndIsDiscardedWithTheQueue = init
+                                                                      ^^^^
+        512:     .then(AppClaim(1, 1, 0)).then(GuestReady(0)).then(AppSendOnSlot(1, 1, 0))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        513:     .expect(Safety and slots.get(0).parked == Set((1, 1)) and not(readyFor(0)))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        514:     .then(HostRefuse(1)).then(GuestRecvEnd(1))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        515:     .expect(Safety and slots.get(0).parked == Set() and slots.get(0).fid == 0 and not(readyFor(0)) and not(staleReassoc))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Use --seed=0x3a11efa5a7643163 --match=slots_bugKeepFramesOnEnd::udp_slots::DatagramQueuedBeforeAnEndIsDiscardedWithTheQueue to repeat.
+
+
+  Use --verbosity=3 to show executions.
+  Further debug with: quint test --verbosity=3 /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/hazard/udp_slots_hazards.qnt
+error: Tests failed

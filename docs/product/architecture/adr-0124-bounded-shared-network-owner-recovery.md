@@ -120,8 +120,9 @@ supervisor treats a leaked-hold count above zero as an exhausted recovery**:
 it takes this ADR's typed fail-stop path at once, without waiting for the
 five-second bound. The external restart then converges on boot, including
 the shared mTLS table write, whose failure refuses boot (ADR-0184). The
-one-second audit period also paces the guest-flow owner's counter reads
-(ADR-0183, ADR-0165). The EXEC gate, the supervisor and `ServerHandle`
+one-second audit period also paces the guest-flow owner's comparison of its
+flow table with the forwarder context's inventory (ADR-0199). The EXEC gate,
+the supervisor and `ServerHandle`
 ownership, the DNS task owner, exact-port listener recovery, the fail-stop
 request and the CLI's bounded shutdown are unchanged.
 

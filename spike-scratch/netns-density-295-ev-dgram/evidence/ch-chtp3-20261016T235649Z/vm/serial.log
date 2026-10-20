@@ -1,0 +1,60 @@
+GUEST_BOOT uname_r=7.0.0-29-generic
+evmod 53248 0 - Live 0xffffffffc060e000 (OE)
+vmw_vsock_virtio_transport 20480 0 - Live 0xffffffffc060c000
+vmw_vsock_virtio_transport_common 57344 1 vmw_vsock_virtio_transport, Live 0xffffffffc0608000
+vsock 73728 3 evmod,vmw_vsock_virtio_transport,vmw_vsock_virtio_transport_common, Live 0xffffffffc0600000
+GUEST_MEM MemTotal: 977368 kB MemAvailable: 840504 kB SUnreclaim: 18804 kB 
+HB MemAvailable: 840248 kB SUnreclaim: 18908 kB 
+HB MemAvailable: 843672 kB SUnreclaim: 19192 kB 
+{"ev":"case","env":"g","case":"tp-1-64-r0","pass":true,"detail":{"population":1,"payload":64,"seconds":8.0001,"delivered_datagrams":229002,"delivered_datagrams_per_s":28624.7953,"application_GiB_per_s":0.0017,"guest_vm_busy_cores":0.7137,"guest_vm_cpu_us_per_delivered_datagram":24.9343,"bad":0,"resend_timeouts_total":0,"sk_drops_total":0,"dg_partial":0,"dg_wait":0}}
+HB MemAvailable: 855220 kB SUnreclaim: 19224 kB 
+HB MemAvailable: 854936 kB SUnreclaim: 19300 kB 
+HB MemAvailable: 854832 kB SUnreclaim: 19300 kB 
+{"ev":"case","env":"g","case":"tp-1-64-r1","pass":true,"detail":{"population":1,"payload":64,"seconds":8.0001,"delivered_datagrams":230064,"delivered_datagrams_per_s":28757.5741,"application_GiB_per_s":0.0017,"guest_vm_busy_cores":0.8050,"guest_vm_cpu_us_per_delivered_datagram":27.9922,"bad":0,"resend_timeouts_total":0,"sk_drops_total":0,"dg_partial":0,"dg_wait":0}}
+HB MemAvailable: 854720 kB SUnreclaim: 19328 kB 
+HB MemAvailable: 854624 kB SUnreclaim: 19412 kB 
+HB MemAvailable: 854512 kB SUnreclaim: 19412 kB 
+{"ev":"case","env":"g","case":"tp-1-1431-r0","pass":true,"detail":{"population":1,"payload":1431,"seconds":8.0001,"delivered_datagrams":222176,"delivered_datagrams_per_s":27771.5666,"application_GiB_per_s":0.0370,"guest_vm_busy_cores":0.7187,"guest_vm_cpu_us_per_delivered_datagram":25.8804,"bad":0,"resend_timeouts_total":0,"sk_drops_total":0,"dg_partial":0,"dg_wait":0}}
+HB MemAvailable: 854512 kB SUnreclaim: 19412 kB 
+HB MemAvailable: 854400 kB SUnreclaim: 19412 kB 
+{"ev":"case","env":"g","case":"tp-1-1431-r1","pass":true,"detail":{"population":1,"payload":1431,"seconds":8.0001,"delivered_datagrams":214694,"delivered_datagrams_per_s":26836.3116,"application_GiB_per_s":0.0358,"guest_vm_busy_cores":0.7137,"guest_vm_cpu_us_per_delivered_datagram":26.5960,"bad":0,"resend_timeouts_total":0,"sk_drops_total":0,"dg_partial":0,"dg_wait":0}}
+HB MemAvailable: 854400 kB SUnreclaim: 19428 kB 
+HB MemAvailable: 852824 kB SUnreclaim: 19504 kB 
+HB MemAvailable: 851032 kB SUnreclaim: 19516 kB 
+{"ev":"case","env":"g","case":"tp-1-59000-r0","pass":true,"detail":{"population":1,"payload":59000,"seconds":8.0001,"delivered_datagrams":75094,"delivered_datagrams_per_s":9386.6012,"application_GiB_per_s":0.5158,"guest_vm_busy_cores":0.7100,"guest_vm_cpu_us_per_delivered_datagram":75.6385,"bad":0,"resend_timeouts_total":0,"sk_drops_total":0,"dg_partial":0,"dg_wait":1421}}
+HB MemAvailable: 852452 kB SUnreclaim: 19584 kB 
+HB MemAvailable: 852224 kB SUnreclaim: 19592 kB 
+{"ev":"case","env":"g","case":"tp-1-59000-r1","pass":true,"detail":{"population":1,"payload":59000,"seconds":8.0001,"delivered_datagrams":72868,"delivered_datagrams_per_s":9108.3534,"application_GiB_per_s":0.5005,"guest_vm_busy_cores":0.7037,"guest_vm_cpu_us_per_delivered_datagram":77.2630,"bad":0,"resend_timeouts_total":0,"sk_drops_total":0,"dg_partial":0,"dg_wait":1146}}
+HB MemAvailable: 853016 kB SUnreclaim: 19592 kB 
+HB MemAvailable: 851724 kB SUnreclaim: 20456 kB 
+HB MemAvailable: 851124 kB SUnreclaim: 20520 kB 
+{"ev":"case","env":"g","case":"tp-64-64-r0","pass":true,"detail":{"population":64,"payload":64,"seconds":8.0001,"delivered_datagrams":661862,"delivered_datagrams_per_s":82731.4662,"application_GiB_per_s":0.0049,"guest_vm_busy_cores":1.5237,"guest_vm_cpu_us_per_delivered_datagram":18.4177,"bad":0,"resend_timeouts_total":0,"sk_drops_total":0,"dg_partial":0,"dg_wait":0}}
+HB MemAvailable: 850820 kB SUnreclaim: 20552 kB 
+HB MemAvailable: 850312 kB SUnreclaim: 20632 kB 
+HB MemAvailable: 850216 kB SUnreclaim: 20568 kB 
+{"ev":"case","env":"g","case":"tp-64-64-r1","pass":true,"detail":{"population":64,"payload":64,"seconds":8.0001,"delivered_datagrams":652504,"delivered_datagrams_per_s":81561.5197,"application_GiB_per_s":0.0049,"guest_vm_busy_cores":1.5625,"guest_vm_cpu_us_per_delivered_datagram":19.1570,"bad":0,"resend_timeouts_total":0,"sk_drops_total":0,"dg_partial":0,"dg_wait":0}}
+HB MemAvailable: 850076 kB SUnreclaim: 20736 kB 
+HB MemAvailable: 849948 kB SUnreclaim: 20992 kB 
+{"ev":"case","env":"g","case":"tp-64-1431-r0","pass":true,"detail":{"population":64,"payload":1431,"seconds":8.0001,"delivered_datagrams":689786,"delivered_datagrams_per_s":86221.8160,"application_GiB_per_s":0.1149,"guest_vm_busy_cores":1.6087,"guest_vm_cpu_us_per_delivered_datagram":18.6580,"bad":0,"resend_timeouts_total":0,"sk_drops_total":0,"dg_partial":0,"dg_wait":0}}
+HB MemAvailable: 849752 kB SUnreclaim: 21048 kB 
+HB MemAvailable: 849728 kB SUnreclaim: 21020 kB 
+HB MemAvailable: 849728 kB SUnreclaim: 21212 kB 
+{"ev":"case","env":"g","case":"tp-64-1431-r1","pass":true,"detail":{"population":64,"payload":1431,"seconds":8.0002,"delivered_datagrams":736774,"delivered_datagrams_per_s":92095.0092,"application_GiB_per_s":0.1227,"guest_vm_busy_cores":1.7512,"guest_vm_cpu_us_per_delivered_datagram":19.0153,"bad":0,"resend_timeouts_total":0,"sk_drops_total":0,"dg_partial":0,"dg_wait":0}}
+HB MemAvailable: 849492 kB SUnreclaim: 21220 kB 
+HB MemAvailable: 837680 kB SUnreclaim: 22056 kB 
+HB MemAvailable: 836548 kB SUnreclaim: 22056 kB 
+{"ev":"case","env":"g","case":"tp-64-59000-r0","pass":true,"detail":{"population":64,"payload":59000,"seconds":8.0002,"delivered_datagrams":187318,"delivered_datagrams_per_s":23414.2287,"application_GiB_per_s":1.2866,"guest_vm_busy_cores":2.1737,"guest_vm_cpu_us_per_delivered_datagram":92.8368,"bad":0,"resend_timeouts_total":0,"sk_drops_total":0,"dg_partial":0,"dg_wait":6955}}
+HB MemAvailable: 834772 kB SUnreclaim: 22064 kB 
+HB MemAvailable: 836300 kB SUnreclaim: 22064 kB 
+{"ev":"case","env":"g","case":"tp-64-59000-r1","pass":true,"detail":{"population":64,"payload":59000,"seconds":8.0002,"delivered_datagrams":187888,"delivered_datagrams_per_s":23485.5163,"application_GiB_per_s":1.2905,"guest_vm_busy_cores":2.2087,"guest_vm_cpu_us_per_delivered_datagram":94.0454,"bad":0,"resend_timeouts_total":0,"sk_drops_total":0,"dg_partial":0,"dg_wait":6925}}
+HB MemAvailable: 844732 kB SUnreclaim: 21784 kB 
+live=0 attached=390 detached=390 completed=0 aborted=390 err=0 runs=9181768 kicks=30665169 queued=9181768 requeue=0 bytes_v2t=0 bytes_t2v=0 bytes_t2t=0 stall_dst=0 stall_src=13748817 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=0 held_max=0 pair_size=280 buf_bytes=65536 dg_ab=2608761 dg_ba=2608665 dg_ab_bytes=21014726361 dg_ba_bytes=21013056339 dg_empty=0 dg_oversize=0 dg_partial=0 dg_wait=16453 dg_invalid=0 dg_trunc=0
+[    0.000000] Command line: console=ttyS0 panic=-1 loglevel=4
+[    0.000000] [Firmware Bug]: TSC doesn't count with P0 frequency!
+[    0.004010] Kernel command line: console=ttyS0 panic=-1 loglevel=4
+[    0.057005] PCI: Using host bridge windows from ACPI; if necessary, use "pci=nocrs" and report a bug
+[    0.310572] evmod: loading out-of-tree module taints kernel.
+[    0.310579] evmod: module verification failed: signature and/or required key missing - tainting kernel
+[    0.311144] evmod: loaded (per-cpu workqueue)
+DG_ALL_DONE
+[  156.852241] reboot: Power down

@@ -43,8 +43,9 @@ alone is made host-local, which is what GW-LOCAL (ADR-0152) decides.
   `gateway:53`. The gateway is host-local through its own boot-converged
   `local` route on `lo` (ADR-0152), so the datagram is delivered through `lo`
   to the `DnsResponder` addressed to the gateway, and the reply leaves from
-  the gateway, the source the connected socket accepts. The host verdict removes the datagram
-  frame, and an empty datagram is sent by the owner (ADR-0165).
+  the gateway, the source the connected socket accepts. The host forwarder
+  removes the datagram frame and sends every datagram, an empty one
+  included, in order (ADR-0201).
 - `gateway:53` is the one host-local destination the host-internal deny set
   admits (ADR-0167), and the gateway is excluded from the constant
   guest-prefix rules (ADR-0172).
@@ -72,7 +73,7 @@ alone is made host-local, which is what GW-LOCAL (ADR-0152) decides.
   opens a fresh socket per query pays setup on every query, measured in V-9.
 - An association lasts at most as long as the guest socket that created it, or
   until the host aborts it (ADR-0160). After a host abort the guest's next
-  datagram on the same connected socket starts a new association
-  (CELL-RECREATE, ADR-0150).
+  datagram on the same connected socket starts a new association (U-2,
+  ADR-0150).
 - There is no time-based expiry beyond the guest's idle slot release
   (ADR-0150), and an association is never shared across sockets.

@@ -1,0 +1,29 @@
+
+  safe_runsRcuAssignNull
+    1) safe_runsRcuAssignNull::fwd_safe::LateCallbackAfterEndCallsOriginal failed after 1 test(s)
+
+  1 failed
+
+  1) safe_runsRcuAssignNull::fwd_safe::LateCallbackAfterEndCallsOriginal:
+       Error [QNT508]: Expect condition does not hold true
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/fwd_safe.qnt:793:43
+        793:   run LateCallbackAfterEndCallsOriginal = InitWith("pair")
+                                                       ^^^^^^^^^^^^^^^^
+        794:     .then(Write).then(Dispatch("s")).then(Load("s")).then(Use("s")).then(WStart).then(WMove).then(WDrained).then(WRet)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        795:     .then(Write).then(Dispatch("s")).then(Load("s")).then(Use("s")).then(WStart).then(WBlock).then(WRet)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        796:     .then(CtlAbort).then(TcpRx).then(Dispatch("t")).expect(st.inv.get("t").ph == "ovr")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        797:     .then(WStart).then(WEnd).then(WStep).then(WStep).then(WStep).then(WStep).then(WStep).expect(st.ud.get("t") == "null")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        798:     .then(Load("t")).then(Fallback("t"))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        799:     .expect(Safety and not(st.recursed) and st.cause == "Detached")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Use --seed=0xe94aa86569795339 --match=safe_runsRcuAssignNull::fwd_safe::LateCallbackAfterEndCallsOriginal to repeat.
+
+
+  Use --verbosity=3 to show executions.
+  Further debug with: quint test --verbosity=3 /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/hazard/fwd_safe_hazards.qnt
+error: Tests failed

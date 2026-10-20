@@ -62,6 +62,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 use overdrive_core::AllocationId;
+use overdrive_core::guest_transport::dial::GuestStreamDial;
 use overdrive_core::traits::IdentityRead;
 use overdrive_core::traits::mtls_enforcement::{
     EnforcedConnection, EnforcedConnectionId, InterceptedConnection, MtlsEnforcement,
@@ -86,6 +87,11 @@ pub enum ScriptedTrip {
     /// The handshake-and-arm exceeded the deadline ⇒ `HandshakeTimeout` (F4). The
     /// `deadline` carried in the error is the adapter's configured limit.
     HandshakeTimeout,
+    /// The client's certificate does not chain to the held trust bundle ⇒
+    /// `PeerVerificationFailed` (R5-54, LEGS-DIAL: refused before any leg-S
+    /// dial). The host adapter reaches the same outcome from a real
+    /// verification failure in the blocking handshake stage.
+    PeerVerification,
 }
 
 /// Per-connection adapter-private tracking — the owned leg the double closes on
@@ -125,15 +131,28 @@ pub struct SimMtlsEnforcement {
     held_inflight: Mutex<BTreeMap<AllocationId, u32>>,
     /// Per-alloc scripted limit trip armed for the NEXT `enforce` (consumed on use).
     scripted_trips: Mutex<BTreeMap<AllocationId, ScriptedTrip>>,
+    /// The guest-flow owner's dial port (LEGS-DIAL, D-14): the inbound arm
+    /// dials it for an `orig_dst` inside the guest prefix, after the client
+    /// authenticated, and relays over the returned stream — the same contract
+    /// as `HostMtlsEnforcement`.
+    // SCAFFOLD: true — netns-density-295 DISTILL; the inbound leg-S arm reads
+    // it in the attachment-cut step (9) (DG-2 row 19).
+    #[expect(dead_code, reason = "read by the LEGS-DIAL inbound arm (attachment-cut step 9)")]
+    guest_dial: Arc<dyn GuestStreamDial>,
 }
 
 impl SimMtlsEnforcement {
     /// Construct the double from its REQUIRED dependencies — the held-identity read
-    /// port (#35, never an issuer) and the F7 resource contract. Both mandatory: no
-    /// defaulting, no builder (a consumer that forgets the port fails to compile,
-    /// the discipline the trait surface exists to enforce).
+    /// port (#35, never an issuer), the F7 resource contract, and the guest-flow
+    /// owner's dial port leg S reaches a VM backend through (LEGS-DIAL). All
+    /// mandatory: no defaulting, no builder (a consumer that forgets the port
+    /// fails to compile, the discipline the trait surface exists to enforce).
     #[must_use]
-    pub fn new(identity: Arc<dyn IdentityRead>, limits: MtlsLimits) -> Self {
+    pub fn new(
+        identity: Arc<dyn IdentityRead>,
+        limits: MtlsLimits,
+        guest_dial: Arc<dyn GuestStreamDial>,
+    ) -> Self {
         Self {
             identity,
             limits,
@@ -141,6 +160,7 @@ impl SimMtlsEnforcement {
             conns: Mutex::new(BTreeMap::new()),
             held_inflight: Mutex::new(BTreeMap::new()),
             scripted_trips: Mutex::new(BTreeMap::new()),
+            guest_dial,
         }
     }
 
@@ -216,6 +236,10 @@ impl MtlsEnforcement for SimMtlsEnforcement {
                     alloc: conn.alloc,
                     deadline: self.limits.handshake_deadline,
                 },
+                ScriptedTrip::PeerVerification => MtlsEnforcementError::PeerVerificationFailed {
+                    reason: "scripted: the client certificate does not chain to the bundle"
+                        .to_owned(),
+                },
             });
         }
 
@@ -260,5 +284,33 @@ impl MtlsEnforcement for SimMtlsEnforcement {
         // entry drops the owned leg (closes the fd) — no leg leak.
         self.conns.lock().remove(handle.id());
         Ok(())
+    }
+}
+
+/// The simulation [`MtlsEnforcementFactory`](overdrive_core::traits::mtls_enforcement::MtlsEnforcementFactory).
+///
+/// NO-OVERRIDE-SEAMS, ADR-0219: every `enforcement` call returns a fresh
+/// [`SimMtlsEnforcement`] over the boot's identity, limits and guest dial.
+#[derive(Debug, Default)]
+pub struct SimMtlsEnforcementFactory {
+    _private: (),
+}
+
+impl SimMtlsEnforcementFactory {
+    /// A factory with nothing scripted.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self { _private: () }
+    }
+}
+
+impl overdrive_core::traits::mtls_enforcement::MtlsEnforcementFactory
+    for SimMtlsEnforcementFactory
+{
+    fn enforcement(
+        &self,
+        deps: overdrive_core::traits::mtls_enforcement::MtlsEnforcementDeps,
+    ) -> Arc<dyn MtlsEnforcement> {
+        Arc::new(SimMtlsEnforcement::new(deps.identity, deps.limits, deps.guest_dial))
     }
 }

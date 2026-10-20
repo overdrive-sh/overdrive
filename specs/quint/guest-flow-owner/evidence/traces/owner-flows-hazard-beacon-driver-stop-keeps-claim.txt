@@ -1,8 +1,10 @@
-# owner-flows-hazard-beacon-driver-stop-keeps-claim: counterexample, 20 state(s) (from the TLC trace)
+# owner-flows-hazard-beacon-driver-stop-keeps-claim: counterexample, 15 state(s) (from the TLC trace)
 
 State 1
   resurrected = FALSE
   hf = <<[st |-> "none", gen |-> 0]>>
+  gSess = 0
+  conf_step = [InitWith |-> [o |-> "g"]]
   toHostRefused = {}
   bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
   drvLive = FALSE
@@ -42,57 +44,42 @@ State 3 [VmStart]
 State 4 [step]
   bcn = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 1]>>
 
-State 5 [Teardown]
-  alloc = "Retiring"
-
-State 6 [step]
+State 5 [step]
   bcn = <<[st |-> "none", gen |-> 0], [st |-> "reading", gen |-> 1]>>
 
-State 7 [step]
+State 6 [step]
   bcn = <<[st |-> "none", gen |-> 0], [st |-> "live", gen |-> 1]>>
   bclaim = 2
 
-State 8 [VmStop]
-  vmUp = FALSE
-
-State 9 [step]
+State 7 [VmStop]
   bcn = <<[st |-> "none", gen |-> 0], [st |-> "closed", gen |-> 1]>>
   drvLive = FALSE
+  vmUp = FALSE
 
-State 10 [Release]
-  alloc = "Absent"
-
-State 11 [Provision]
-  alloc = "Provisioned"
+State 8 [Provision]
   gen = 2
 
-State 12 [VmStart]
+State 9 [VmStart]
   drvLive = TRUE
   vmGen = 2
   vmUp = TRUE
 
-State 13 [Teardown]
-  alloc = "Retiring"
-
-State 14 [step]
+State 10 [step]
   bcn = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 2]>>
 
-State 15 [step]
+State 11 [step]
   bcn = <<[st |-> "pending", gen |-> 2], [st |-> "pending", gen |-> 2]>>
 
-State 16 [step]
-  bcn = <<[st |-> "reading", gen |-> 2], [st |-> "pending", gen |-> 2]>>
+State 12 [step]
+  bcn = <<[st |-> "pending", gen |-> 2], [st |-> "reading", gen |-> 2]>>
 
-State 17 [step]
-  bcn = <<[st |-> "reading", gen |-> 2], [st |-> "reading", gen |-> 2]>>
-
-State 18 [step]
-  bcn = <<[st |-> "reading", gen |-> 2], [st |-> "closed", gen |-> 2]>>
-
-State 19 [step]
-  bcn = <<[st |-> "closed", gen |-> 2], [st |-> "closed", gen |-> 2]>>
-
-State 20 [step]
+State 13 [step]
   bcn = <<[st |-> "pending", gen |-> 2], [st |-> "closed", gen |-> 2]>>
 
--> loops back to State 18
+State 14 [step]
+  bcn = <<[st |-> "reading", gen |-> 2], [st |-> "closed", gen |-> 2]>>
+
+State 15 [step]
+  bcn = <<[st |-> "closed", gen |-> 2], [st |-> "closed", gen |-> 2]>>
+
+-> loops back to State 13

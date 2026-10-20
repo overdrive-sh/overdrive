@@ -124,8 +124,11 @@ fn is_root() -> bool {
 /// connection (the resolve consumer is the 04-02 default-lane DST's job).
 fn build_worker() -> Arc<MtlsInterceptWorker> {
     let identity: Arc<dyn IdentityRead> = Arc::new(SimIdentityRead::new(BTreeMap::new(), None));
-    let enforcement: Arc<dyn MtlsEnforcement> =
-        Arc::new(SimMtlsEnforcement::new(identity, MtlsLimits::default()));
+    let enforcement: Arc<dyn MtlsEnforcement> = Arc::new(SimMtlsEnforcement::new(
+        identity,
+        MtlsLimits::default(),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+    ));
     let resolve: Arc<dyn overdrive_core::traits::mtls_resolve::MtlsResolve> =
         Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
             std::collections::BTreeMap::new(),

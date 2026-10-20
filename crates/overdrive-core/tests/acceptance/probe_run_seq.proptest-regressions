@@ -1,0 +1,17 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 2f27fa244d1fb61b4d9d631d74e4eff5bcd8a724cc97a84b1545061aeb71d99c # shrinks to text = "\0"
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc a8bddbcb7501fddb2cd943e5c17fd9f20f50e1ecf37f3dcaa0c194dbf4e9bd99 # shrinks to runs = 1
+cc 1ca394eaf2d56dd7be7fb67e23fa4e1ee60f3b3aa946aa0abdabbdbe13bdc171 # shrinks to seq = 1, runs = 1
+cc 0408a4530d5ff590826c3e68ccde66ccd9713177ffbcea4ca6ef139974416fc8 # shrinks to v1 = ProbeResultRowV1 { alloc_id: AllocationId("a0a"), probe_idx: ProbeIdx(0), role: Startup, status: Pass, last_observed_at_unix_ms: 0, inferred: false }
+cc 8dcf75e11fae5f1a9399ac11655f5edfdb327f00b4af3b7d9bd365e4b0158b73 # shrinks to seq = 1

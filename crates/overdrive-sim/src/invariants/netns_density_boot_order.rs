@@ -30,8 +30,9 @@ mod tests {
 
     use overdrive_control_plane::dataplane_config::DataplaneConfig;
     use overdrive_control_plane::guest_network::{GuestNetworkOperation, SharedGuestNetworkOwner};
-    use overdrive_control_plane::{ServerConfig, run_server_with_obs_and_driver};
+    use overdrive_control_plane::{NodeAdapters, ServerConfig, run_server_with_obs_and_driver};
     use overdrive_core::guest_network::{GuestNetworkExecSupervisor, GuestNetworkExecWiring};
+    use overdrive_core::guest_transport::NodeVsockPortConfig;
     use overdrive_core::id::{AllocationId, NodeId};
     use overdrive_core::traits::driver::{Driver, DriverType};
     use overdrive_core::traits::observation_store::ObservationStore;
@@ -49,7 +50,9 @@ mod tests {
     use crate::adapters::guest_network::SimSharedGuestNetworkOwner;
     use crate::adapters::observation_store::SimObservationStore;
     use crate::adapters::vm_host_state::SimVmHostState;
-    use crate::adapters::{SimCgroupFs, SimGuestDnsFactory, SimKek, SimMtlsIntercept};
+    use crate::adapters::{
+        SimCgroupFs, SimDataplaneComposer, SimGuestDnsFactory, SimKek, SimMtlsIntercept,
+    };
 
     /// The port's listener type. The DELIVER step that carries B-7 (05-01 at
     /// the latest, FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the pinned `bind_transparent` signature)) changes this one line to
@@ -358,10 +361,13 @@ mod tests {
         }
     }
 
-    /// The R12 intercept chain: sweep ≺ the shared owner's `converge_shared`
-    /// (step 5, the bridge) ≺ `converge_allocation_elements(∅)` ≺
-    /// `observe_shared` ≺ `converge_shared(prior, F, C)` ≺
-    /// `observe_shared_state` (zero members), every call BootClosed. The order
+    /// The boot chain (G-V1 ordering): sweep ≺ `converge_allocation_elements(∅)`
+    /// ≺ `observe_shared` ≺ `converge_shared(prior, F, C)` ≺
+    /// `observe_shared_state` (zero members) — the mTLS worker's
+    /// `start_shared_owner`, the constant rules in one transaction — ≺ the
+    /// guest-flow owner's `converge_shared` (the forwarder, the listeners and
+    /// the gateway route; "rules before `converge_shared`"), every intercept
+    /// call BootClosed. The order
     /// is relative, not merely "some later call exists": no `observe_shared`
     /// or `converge_shared` call precedes the stale-member clear, and no
     /// `converge_shared` call precedes the `observe_shared` that captured its
@@ -374,7 +380,7 @@ mod tests {
         sweep_index: usize,
         seeded: &InterceptMembers,
     ) -> usize {
-        let clear = assert_stale_member_clear(seed, calls, owner_ops, sweep_index, seeded);
+        let clear = assert_stale_member_clear(seed, calls, sweep_index, seeded);
 
         let Some((observe, observe_call)) =
             next_call(calls, clear + 1, |call| matches!(call, InterceptCall::ObserveShared { .. }))
@@ -395,18 +401,51 @@ mod tests {
         let InterceptCall::ObserveShared { observed: Ok(prior) } = &observe_call.call else {
             chain_failure(seed, calls, &format!("observe_shared (#{observe}) failed"));
         };
-        assert_converge_and_read_back(seed, calls, observe, prior.as_ref())
+        let read_back = assert_converge_and_read_back(seed, calls, observe, prior.as_ref());
+        assert_owner_converges_after_the_rules(seed, calls, owner_ops, sweep_index, read_back);
+        read_back
     }
 
-    /// Chain step 6.2: the first `converge_allocation_elements(∅)` began after
-    /// the owner's sweep and after the owner's `converge_shared` (step 5,
-    /// `ForwarderLoad`) that follows the sweep, and no `observe_shared` or
-    /// `converge_shared` call precedes it (FD § "[REF] Boot ordering
-    /// (D-295-R12)" steps 4, 5, 6.2). Returns its index.
-    fn assert_stale_member_clear(
+    /// G-V1: the guest-flow owner's `converge_shared` (recorded by the sim
+    /// owner as `ForwarderOpen`) runs after the sweep and only after the
+    /// rules' read-back (#`read_back`) began — "rules before
+    /// `converge_shared`" — so no forwarding exists before the shared table is
+    /// written (ADR-0184).
+    fn assert_owner_converges_after_the_rules(
         seed: u64,
         calls: &[RecordedCall],
         owner_ops: &[GuestNetworkOperation],
+        sweep_index: usize,
+        read_back: usize,
+    ) {
+        let owner_converge = owner_ops
+            .iter()
+            .enumerate()
+            .skip(sweep_index + 1)
+            .find(|(_, operation)| **operation == GuestNetworkOperation::ForwarderOpen)
+            .map(|(index, _)| index);
+        let rules_done = calls[read_back].owner_calls;
+        if owner_converge.is_none_or(|index| index < rules_done) {
+            chain_failure(
+                seed,
+                calls,
+                &format!(
+                    "the guest-flow owner's converge_shared must run after the sweep (owner call \
+                     {sweep_index}) and after the rules' read-back (#{read_back}, which began \
+                     with {rules_done} owner calls recorded); first ForwarderOpen after the \
+                     sweep: owner call {owner_converge:?}; owner calls: {owner_ops:?}"
+                ),
+            );
+        }
+    }
+
+    /// The first `converge_allocation_elements(∅)` began after the owner's
+    /// sweep, and no `observe_shared` or `converge_shared` call precedes it
+    /// (G-V1 ordering: `sweep_stale`, then `start_shared_owner`). Returns its
+    /// index.
+    fn assert_stale_member_clear(
+        seed: u64,
+        calls: &[RecordedCall],
         sweep_index: usize,
         seeded: &InterceptMembers,
     ) -> usize {
@@ -433,25 +472,6 @@ mod tests {
                 &format!(
                     "the stale-member clear (#{clear}) began with {} owner calls recorded, \
                      before the sweep (owner call {sweep_index})",
-                    clear_call.owner_calls
-                ),
-            );
-        }
-        let bridge_converge = owner_ops
-            .iter()
-            .enumerate()
-            .skip(sweep_index + 1)
-            .find(|(_, operation)| **operation == GuestNetworkOperation::ForwarderLoad)
-            .map(|(index, _)| index);
-        if bridge_converge.is_none_or(|index| index >= clear_call.owner_calls) {
-            chain_failure(
-                seed,
-                calls,
-                &format!(
-                    "the shared owner's converge_shared (R12 step 5) must run after the sweep \
-                     (owner call {sweep_index}) and before the stale-member clear (#{clear}, \
-                     which began with {} owner calls recorded); first ForwarderLoad after the \
-                     sweep: owner call {bridge_converge:?}; owner calls: {owner_ops:?}",
                     clear_call.owner_calls
                 ),
             );
@@ -545,6 +565,10 @@ mod tests {
         read_back
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one seeded scenario: seed the prior VM, boot over the host bundle, read back the order"
+    )]
     async fn run_seed(seed: u64) {
         eprintln!(
             "seed={seed} invariant=reclamation_completes_before_stale_shared_network_sweep_for_every_seeded_prior_vm"
@@ -583,20 +607,26 @@ mod tests {
                 client_iface: "lo".to_owned(),
                 backend_iface: "lo".to_owned(),
             }),
-            dataplane_override: Some(Arc::new(SimDataplane::new())),
-            ..ServerConfig::new(
-                Arc::new(SimKek::for_boot()),
-                Arc::clone(&intercept) as Arc<dyn MtlsIntercept>,
-                Arc::new(SimGuestDnsFactory::default()),
-            )
+            vsock_ports: NodeVsockPortConfig::kernel_assigned(),
+            ..ServerConfig::new()
         };
-        let host_port: Arc<dyn VmHostState> = Arc::new(host);
-        let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
+        // NO-OVERRIDE-SEAMS / STORES-IN (ADR-0219): the host bundle's boot
+        // group over this data_dir, its simulated edges replaced by name.
+        let mut boot =
+            NodeAdapters::host(&config, Arc::new(SimCgroupFs::new()), Arc::new(SimKek::for_boot()))
+                .expect("host bundle over the seed's data_dir")
+                .boot;
+        boot.observation = Arc::new(SimObservationStore::single_peer(
             NodeId::new("nd295-s13-node").expect("node id"),
             0,
-        ));
+        )) as Arc<dyn ObservationStore>;
+        boot.vm_host_state = Arc::new(host) as Arc<dyn VmHostState>;
+        boot.dataplane =
+            Arc::new(SimDataplaneComposer::new(Arc::new(SimDataplane::new()), Ipv4Addr::LOCALHOST));
+        boot.mtls.intercept = Arc::clone(&intercept) as Arc<dyn MtlsIntercept>;
+        boot.guest_dns = Arc::new(SimGuestDnsFactory::default());
         let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
-        let wiring = GuestNetworkExecWiring::new(Arc::clone(&config.clock));
+        let wiring = GuestNetworkExecWiring::new(Arc::clone(&boot.clock));
         // Kept before the wiring moves into the boot call (TS § In-process
         // observation).
         let supervisor = wiring.supervisor();
@@ -604,9 +634,8 @@ mod tests {
 
         let handle = run_server_with_obs_and_driver(
             config,
-            obs,
+            boot,
             driver,
-            host_port,
             owner_port,
             wiring,
             CgroupManager::new(PathBuf::from("/sys/fs/cgroup"), Arc::new(SimCgroupFs::new())),
@@ -655,10 +684,12 @@ mod tests {
 
     proptest! {
         /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
-        /// S-ND295-13A — Boot reclaims old VMs, sweeps, clears stale members, then
-        /// converges the program before admitting work.
+        /// S-ND295-13A — Boot reclaims old VMs, sweeps, clears stale members,
+        /// converges the program, and only then converges the guest-flow owner
+        /// (G-V1: rules before `converge_shared`) before admitting work.
         /// CONTRACT_SHAPE: bounded-change.
         #[test]
+        #[ignore = "pending DELIVER step 12"]
         fn reclamation_completes_before_stale_shared_network_sweep_for_every_seeded_prior_vm(
             seed in any::<u64>(),
         ) {

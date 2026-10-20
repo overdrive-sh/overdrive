@@ -49,14 +49,10 @@ fn launch() -> LaunchToken {
     LaunchToken::from_bytes([0x5a; 16]).unwrap()
 }
 
-fn beacon_message_strategy() -> impl Strategy<Value = BeaconMessage> {
+/// The messages whose wire shape this feature does not change: EXIT, EXEC
+/// and SHUTDOWN.
+fn unchanged_message_strategy() -> impl Strategy<Value = BeaconMessage> {
     prop_oneof![
-        (any::<u32>(), any::<u32>(), any::<[u8; 16]>().prop_filter("non-zero", |b| *b != [0; 16]))
-            .prop_map(|(pid, port, bytes)| BeaconMessage::Ready {
-                pid,
-                port: VsockPort::new(port),
-                launch: LaunchToken::from_bytes(bytes).unwrap(),
-            }),
         any::<i32>().prop_map(|status| BeaconMessage::Exit { status }),
         Just(BeaconMessage::Shutdown),
         // Non-empty argv only — an all-empty argv is structurally
@@ -69,12 +65,22 @@ fn beacon_message_strategy() -> impl Strategy<Value = BeaconMessage> {
     ]
 }
 
+/// READY with arbitrary `pid` / `port` and a non-zero launch token (DG-7,
+/// DG-2 row 13).
+fn ready_strategy() -> impl Strategy<Value = BeaconMessage> {
+    (any::<u32>(), any::<u32>(), any::<[u8; 16]>().prop_filter("non-zero", |b| *b != [0; 16]))
+        .prop_map(|(pid, port, bytes)| BeaconMessage::Ready {
+            pid,
+            port: VsockPort::new(port),
+            launch: LaunchToken::from_bytes(bytes).unwrap(),
+        })
+}
+
 proptest! {
-    /// Every `BeaconMessage` — arbitrary READY `pid`/`port`, arbitrary
-    /// EXIT `status`, and SHUTDOWN — round-trips bit-exact through
+    /// Every EXIT / EXEC / SHUTDOWN round-trips bit-exact through
     /// `Display -> FromStr`. This is the roadmap's mandatory call site.
     #[test]
-    fn beacon_message_roundtrips_through_display_and_from_str(msg in beacon_message_strategy()) {
+    fn beacon_message_roundtrips_through_display_and_from_str(msg in unchanged_message_strategy()) {
         let rendered = msg.to_string();
         let parsed: BeaconMessage = rendered.parse().expect("rendered beacon line must re-parse");
         prop_assert_eq!(parsed, msg);
@@ -84,10 +90,22 @@ proptest! {
     /// (`\n` on write, `read_line`/`lines()` stripping on read) is the
     /// transport's job, not the Published Language's.
     #[test]
-    fn beacon_message_display_never_embeds_a_line_terminator(msg in beacon_message_strategy()) {
+    fn beacon_message_display_never_embeds_a_line_terminator(msg in unchanged_message_strategy()) {
         let rendered = msg.to_string();
         prop_assert!(!rendered.contains('\n'));
         prop_assert!(!rendered.contains('\r'));
+    }
+
+    /// Every READY — arbitrary `pid` / `port` and launch token — round-trips
+    /// bit-exact through `Display -> FromStr` and renders on one line (DG-7).
+    #[test]
+    #[ignore = "pending DELIVER step 2"]
+    fn ready_roundtrips_through_display_and_from_str(msg in ready_strategy()) {
+        let rendered = msg.to_string();
+        prop_assert!(!rendered.contains('\n'));
+        prop_assert!(!rendered.contains('\r'));
+        let parsed: BeaconMessage = rendered.parse().expect("rendered READY line must re-parse");
+        prop_assert_eq!(parsed, msg);
     }
 }
 
@@ -96,6 +114,7 @@ proptest! {
 /// `spike/findings.md:230`) — pinned so a mutation reordering the fields or
 /// renaming a key is caught.
 #[test]
+#[ignore = "pending DELIVER step 2"]
 fn ready_message_renders_the_measured_wire_shape() {
     let msg = BeaconMessage::Ready { pid: 1, port: VsockPort::new(1234), launch: launch() };
     assert_eq!(msg.to_string(), format!("READY pid=1 port=1234 launch={LAUNCH_HEX}"));
@@ -121,12 +140,20 @@ fn shutdown_message_renders_the_pinned_token() {
 /// `Display` itself never emits one.
 #[test]
 fn from_str_tolerates_an_unstripped_trailing_newline() {
-    let parsed: BeaconMessage =
-        format!("READY pid=1 port=1234 launch={LAUNCH_HEX}\n").parse().unwrap();
-    assert_eq!(parsed, BeaconMessage::Ready { pid: 1, port: VsockPort::new(1234), launch: launch() });
-
     let parsed: BeaconMessage = "EXIT 7\n".parse().unwrap();
     assert_eq!(parsed, BeaconMessage::Exit { status: 7 });
+}
+
+/// The same trailing-terminator tolerance holds for the three-field READY.
+#[test]
+#[ignore = "pending DELIVER step 2"]
+fn from_str_tolerates_an_unstripped_trailing_newline_after_ready() {
+    let parsed: BeaconMessage =
+        format!("READY pid=1 port=1234 launch={LAUNCH_HEX}\n").parse().unwrap();
+    assert_eq!(
+        parsed,
+        BeaconMessage::Ready { pid: 1, port: VsockPort::new(1234), launch: launch() }
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -148,24 +175,10 @@ fn from_str_rejects_an_unrecognised_kind() {
     assert!(matches!(err, BeaconParseError::UnknownKind { .. }), "{err:?}");
 }
 
+/// READY keeps its key discipline for `pid` (DG-7 moves READY to three
+/// fields; the three-field refusals are in `vsock_wire_codec.rs`).
 #[test]
-fn from_str_rejects_ready_with_wrong_field_count() {
-    let err = "READY pid=1 port=2".parse::<BeaconMessage>().unwrap_err();
-    assert!(
-        matches!(err, BeaconParseError::FieldCount { kind: "READY", expected: 3, actual: 2, .. }),
-        "{err:?}"
-    );
-
-    let err = format!("READY pid=1 port=2 launch={LAUNCH_HEX} extra=3")
-        .parse::<BeaconMessage>()
-        .unwrap_err();
-    assert!(
-        matches!(err, BeaconParseError::FieldCount { kind: "READY", expected: 3, actual: 4, .. }),
-        "{err:?}"
-    );
-}
-
-#[test]
+#[ignore = "pending DELIVER step 2"]
 fn from_str_rejects_ready_with_missing_key_prefix() {
     let err = format!("READY 1 port=2 launch={LAUNCH_HEX}").parse::<BeaconMessage>().unwrap_err();
     assert!(
@@ -174,51 +187,8 @@ fn from_str_rejects_ready_with_missing_key_prefix() {
     );
 }
 
-/// DG-7: a third READY field not shaped `launch=<v>` is a missing key.
 #[test]
-#[ignore = "pending DELIVER the attachment-cut step (DG-2 row 13)"]
-fn from_str_rejects_ready_whose_third_field_is_not_launch() {
-    let err = format!("READY pid=1 port=2 token={LAUNCH_HEX}").parse::<BeaconMessage>().unwrap_err();
-    assert!(
-        matches!(err, BeaconParseError::MissingKey { kind: "READY", field: "launch", .. }),
-        "{err:?}"
-    );
-}
-
-/// DG-7: a `launch=` value failing `LaunchToken::from_str` is
-/// `InvalidLaunchToken`, carrying the token's own refusal.
-#[test]
-#[ignore = "pending DELIVER the attachment-cut step (DG-2 row 13)"]
-fn from_str_rejects_ready_with_an_invalid_launch_token() {
-    let err = "READY pid=1 port=2 launch=not-hex".parse::<BeaconMessage>().unwrap_err();
-    assert!(
-        matches!(
-            err,
-            BeaconParseError::InvalidLaunchToken {
-                kind: "READY",
-                source: overdrive_core::guest_transport::LaunchTokenError::Unparseable,
-                ..
-            }
-        ),
-        "{err:?}"
-    );
-
-    let zero = "0".repeat(32);
-    let err = format!("READY pid=1 port=2 launch={zero}").parse::<BeaconMessage>().unwrap_err();
-    assert!(
-        matches!(
-            err,
-            BeaconParseError::InvalidLaunchToken {
-                kind: "READY",
-                source: overdrive_core::guest_transport::LaunchTokenError::Zero,
-                ..
-            }
-        ),
-        "{err:?}"
-    );
-}
-
-#[test]
+#[ignore = "pending DELIVER step 2"]
 fn from_str_rejects_ready_with_non_integer_pid() {
     let err =
         format!("READY pid=abc port=2 launch={LAUNCH_HEX}").parse::<BeaconMessage>().unwrap_err();

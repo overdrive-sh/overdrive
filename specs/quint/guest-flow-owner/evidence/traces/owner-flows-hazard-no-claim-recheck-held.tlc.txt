@@ -1,4 +1,5 @@
 State 1: <Initial predicate>
+/\ flows_bugNoClaimRecheck_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugNoClaimRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_phantom = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
@@ -21,6 +22,7 @@ State 1: <Initial predicate>
 /\ flows_bugNoClaimRecheck_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_crossMsg = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugNoClaimRecheck_owner_flows_gSess = 0
 /\ flows_bugNoClaimRecheck_owner_flows_toGuestAbort = {}
 /\ flows_bugNoClaimRecheck_owner_flows_alloc = "Absent"
 /\ flows_bugNoClaimRecheck_owner_flows_toHostAbort = {}
@@ -33,7 +35,8 @@ State 1: <Initial predicate>
 /\ flows_bugNoClaimRecheck_owner_flows_claim = 0
 /\ flows_bugNoClaimRecheck_owner_flows_vmUp = FALSE
 
-State 2: <flows_bugNoClaimRecheck_owner_flows_Provision line 1209, col 3 to line 1231, col 48 of module flows_bugNoClaimRecheck>
+State 2: <flows_bugNoClaimRecheck_owner_flows_Provision line 1232, col 3 to line 1265, col 48 of module flows_bugNoClaimRecheck>
+/\ flows_bugNoClaimRecheck_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugNoClaimRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_phantom = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
@@ -56,6 +59,7 @@ State 2: <flows_bugNoClaimRecheck_owner_flows_Provision line 1209, col 3 to line
 /\ flows_bugNoClaimRecheck_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_crossMsg = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugNoClaimRecheck_owner_flows_gSess = 0
 /\ flows_bugNoClaimRecheck_owner_flows_toGuestAbort = {}
 /\ flows_bugNoClaimRecheck_owner_flows_alloc = "Provisioned"
 /\ flows_bugNoClaimRecheck_owner_flows_toHostAbort = {}
@@ -68,7 +72,8 @@ State 2: <flows_bugNoClaimRecheck_owner_flows_Provision line 1209, col 3 to line
 /\ flows_bugNoClaimRecheck_owner_flows_claim = 0
 /\ flows_bugNoClaimRecheck_owner_flows_vmUp = FALSE
 
-State 3: <flows_bugNoClaimRecheck_owner_flows_VmStart line 783, col 3 to line 816, col 50 of module flows_bugNoClaimRecheck>
+State 3: <flows_bugNoClaimRecheck_owner_flows_VmStart line 794, col 3 to line 833, col 50 of module flows_bugNoClaimRecheck>
+/\ flows_bugNoClaimRecheck_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugNoClaimRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_phantom = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
@@ -91,6 +96,7 @@ State 3: <flows_bugNoClaimRecheck_owner_flows_VmStart line 783, col 3 to line 81
 /\ flows_bugNoClaimRecheck_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_crossMsg = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugNoClaimRecheck_owner_flows_gSess = 0
 /\ flows_bugNoClaimRecheck_owner_flows_toGuestAbort = {}
 /\ flows_bugNoClaimRecheck_owner_flows_alloc = "Provisioned"
 /\ flows_bugNoClaimRecheck_owner_flows_toHostAbort = {}
@@ -103,7 +109,8 @@ State 3: <flows_bugNoClaimRecheck_owner_flows_VmStart line 783, col 3 to line 81
 /\ flows_bugNoClaimRecheck_owner_flows_claim = 0
 /\ flows_bugNoClaimRecheck_owner_flows_vmUp = TRUE
 
-State 4: <flows_bugNoClaimRecheck_owner_flows_step line 3577, col 9 to line 3578, col 53 of module flows_bugNoClaimRecheck>
+State 4: <flows_bugNoClaimRecheck_owner_flows_step line 3980, col 9 to line 3982, col 53 of module flows_bugNoClaimRecheck>
+/\ flows_bugNoClaimRecheck_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugNoClaimRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_phantom = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
@@ -126,6 +133,7 @@ State 4: <flows_bugNoClaimRecheck_owner_flows_step line 3577, col 9 to line 3578
 /\ flows_bugNoClaimRecheck_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_crossMsg = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugNoClaimRecheck_owner_flows_gSess = 1
 /\ flows_bugNoClaimRecheck_owner_flows_toGuestAbort = {}
 /\ flows_bugNoClaimRecheck_owner_flows_alloc = "Provisioned"
 /\ flows_bugNoClaimRecheck_owner_flows_toHostAbort = {}
@@ -138,7 +146,8 @@ State 4: <flows_bugNoClaimRecheck_owner_flows_step line 3577, col 9 to line 3578
 /\ flows_bugNoClaimRecheck_owner_flows_claim = 0
 /\ flows_bugNoClaimRecheck_owner_flows_vmUp = TRUE
 
-State 5: <flows_bugNoClaimRecheck_owner_flows_VmStop line 822, col 3 to line 1011, col 50 of module flows_bugNoClaimRecheck>
+State 5: <flows_bugNoClaimRecheck_owner_flows_VmStop line 839, col 3 to line 1034, col 50 of module flows_bugNoClaimRecheck>
+/\ flows_bugNoClaimRecheck_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugNoClaimRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_phantom = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
@@ -161,6 +170,7 @@ State 5: <flows_bugNoClaimRecheck_owner_flows_VmStop line 822, col 3 to line 101
 /\ flows_bugNoClaimRecheck_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_crossMsg = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugNoClaimRecheck_owner_flows_gSess = 0
 /\ flows_bugNoClaimRecheck_owner_flows_toGuestAbort = {}
 /\ flows_bugNoClaimRecheck_owner_flows_alloc = "Provisioned"
 /\ flows_bugNoClaimRecheck_owner_flows_toHostAbort = {}
@@ -173,7 +183,8 @@ State 5: <flows_bugNoClaimRecheck_owner_flows_VmStop line 822, col 3 to line 101
 /\ flows_bugNoClaimRecheck_owner_flows_claim = 0
 /\ flows_bugNoClaimRecheck_owner_flows_vmUp = FALSE
 
-State 6: <flows_bugNoClaimRecheck_owner_flows_step line 3577, col 9 to line 3578, col 53 of module flows_bugNoClaimRecheck>
+State 6: <flows_bugNoClaimRecheck_owner_flows_step line 3980, col 9 to line 3982, col 53 of module flows_bugNoClaimRecheck>
+/\ flows_bugNoClaimRecheck_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugNoClaimRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_phantom = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
@@ -196,6 +207,7 @@ State 6: <flows_bugNoClaimRecheck_owner_flows_step line 3577, col 9 to line 3578
 /\ flows_bugNoClaimRecheck_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_crossMsg = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_sess = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugNoClaimRecheck_owner_flows_gSess = 0
 /\ flows_bugNoClaimRecheck_owner_flows_toGuestAbort = {}
 /\ flows_bugNoClaimRecheck_owner_flows_alloc = "Provisioned"
 /\ flows_bugNoClaimRecheck_owner_flows_toHostAbort = {}
@@ -208,7 +220,8 @@ State 6: <flows_bugNoClaimRecheck_owner_flows_step line 3577, col 9 to line 3578
 /\ flows_bugNoClaimRecheck_owner_flows_claim = 0
 /\ flows_bugNoClaimRecheck_owner_flows_vmUp = FALSE
 
-State 7: <flows_bugNoClaimRecheck_owner_flows_Teardown line 1297, col 3 to line 1351, col 48 of module flows_bugNoClaimRecheck>
+State 7: <flows_bugNoClaimRecheck_owner_flows_Teardown line 1359, col 3 to line 1420, col 48 of module flows_bugNoClaimRecheck>
+/\ flows_bugNoClaimRecheck_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugNoClaimRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_phantom = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
@@ -231,6 +244,7 @@ State 7: <flows_bugNoClaimRecheck_owner_flows_Teardown line 1297, col 3 to line 
 /\ flows_bugNoClaimRecheck_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_crossMsg = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_sess = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugNoClaimRecheck_owner_flows_gSess = 0
 /\ flows_bugNoClaimRecheck_owner_flows_toGuestAbort = {}
 /\ flows_bugNoClaimRecheck_owner_flows_alloc = "Retiring"
 /\ flows_bugNoClaimRecheck_owner_flows_toHostAbort = {}
@@ -243,7 +257,8 @@ State 7: <flows_bugNoClaimRecheck_owner_flows_Teardown line 1297, col 3 to line 
 /\ flows_bugNoClaimRecheck_owner_flows_claim = 0
 /\ flows_bugNoClaimRecheck_owner_flows_vmUp = FALSE
 
-State 8: <flows_bugNoClaimRecheck_owner_flows_step line 3577, col 9 to line 3578, col 53 of module flows_bugNoClaimRecheck>
+State 8: <flows_bugNoClaimRecheck_owner_flows_step line 3980, col 9 to line 3982, col 53 of module flows_bugNoClaimRecheck>
+/\ flows_bugNoClaimRecheck_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugNoClaimRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_phantom = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
@@ -266,6 +281,7 @@ State 8: <flows_bugNoClaimRecheck_owner_flows_step line 3577, col 9 to line 3578
 /\ flows_bugNoClaimRecheck_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_crossMsg = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_sess = <<[st |-> "dead", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugNoClaimRecheck_owner_flows_gSess = 0
 /\ flows_bugNoClaimRecheck_owner_flows_toGuestAbort = {}
 /\ flows_bugNoClaimRecheck_owner_flows_alloc = "Retiring"
 /\ flows_bugNoClaimRecheck_owner_flows_toHostAbort = {}
@@ -278,7 +294,8 @@ State 8: <flows_bugNoClaimRecheck_owner_flows_step line 3577, col 9 to line 3578
 /\ flows_bugNoClaimRecheck_owner_flows_claim = 1
 /\ flows_bugNoClaimRecheck_owner_flows_vmUp = FALSE
 
-State 9: <flows_bugNoClaimRecheck_owner_flows_Release line 1357, col 3 to line 1379, col 48 of module flows_bugNoClaimRecheck>
+State 9: <flows_bugNoClaimRecheck_owner_flows_Release line 1426, col 3 to line 1455, col 48 of module flows_bugNoClaimRecheck>
+/\ flows_bugNoClaimRecheck_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugNoClaimRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_phantom = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
@@ -301,6 +318,7 @@ State 9: <flows_bugNoClaimRecheck_owner_flows_Release line 1357, col 3 to line 1
 /\ flows_bugNoClaimRecheck_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_crossMsg = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_sess = <<[st |-> "dead", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugNoClaimRecheck_owner_flows_gSess = 0
 /\ flows_bugNoClaimRecheck_owner_flows_toGuestAbort = {}
 /\ flows_bugNoClaimRecheck_owner_flows_alloc = "Absent"
 /\ flows_bugNoClaimRecheck_owner_flows_toHostAbort = {}
@@ -313,7 +331,8 @@ State 9: <flows_bugNoClaimRecheck_owner_flows_Release line 1357, col 3 to line 1
 /\ flows_bugNoClaimRecheck_owner_flows_claim = 1
 /\ flows_bugNoClaimRecheck_owner_flows_vmUp = FALSE
 
-State 10: <flows_bugNoClaimRecheck_owner_flows_Provision line 1209, col 3 to line 1231, col 48 of module flows_bugNoClaimRecheck>
+State 10: <flows_bugNoClaimRecheck_owner_flows_Provision line 1232, col 3 to line 1265, col 48 of module flows_bugNoClaimRecheck>
+/\ flows_bugNoClaimRecheck_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugNoClaimRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_phantom = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
@@ -336,6 +355,7 @@ State 10: <flows_bugNoClaimRecheck_owner_flows_Provision line 1209, col 3 to lin
 /\ flows_bugNoClaimRecheck_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_crossMsg = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_sess = <<[st |-> "dead", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugNoClaimRecheck_owner_flows_gSess = 0
 /\ flows_bugNoClaimRecheck_owner_flows_toGuestAbort = {}
 /\ flows_bugNoClaimRecheck_owner_flows_alloc = "Provisioned"
 /\ flows_bugNoClaimRecheck_owner_flows_toHostAbort = {}
@@ -348,7 +368,8 @@ State 10: <flows_bugNoClaimRecheck_owner_flows_Provision line 1209, col 3 to lin
 /\ flows_bugNoClaimRecheck_owner_flows_claim = 1
 /\ flows_bugNoClaimRecheck_owner_flows_vmUp = FALSE
 
-State 11: <flows_bugNoClaimRecheck_owner_flows_VmStart line 783, col 3 to line 816, col 50 of module flows_bugNoClaimRecheck>
+State 11: <flows_bugNoClaimRecheck_owner_flows_VmStart line 794, col 3 to line 833, col 50 of module flows_bugNoClaimRecheck>
+/\ flows_bugNoClaimRecheck_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugNoClaimRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_phantom = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
@@ -371,6 +392,7 @@ State 11: <flows_bugNoClaimRecheck_owner_flows_VmStart line 783, col 3 to line 8
 /\ flows_bugNoClaimRecheck_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_crossMsg = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_sess = <<[st |-> "dead", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugNoClaimRecheck_owner_flows_gSess = 0
 /\ flows_bugNoClaimRecheck_owner_flows_toGuestAbort = {}
 /\ flows_bugNoClaimRecheck_owner_flows_alloc = "Provisioned"
 /\ flows_bugNoClaimRecheck_owner_flows_toHostAbort = {}
@@ -383,7 +405,8 @@ State 11: <flows_bugNoClaimRecheck_owner_flows_VmStart line 783, col 3 to line 8
 /\ flows_bugNoClaimRecheck_owner_flows_claim = 1
 /\ flows_bugNoClaimRecheck_owner_flows_vmUp = TRUE
 
-State 12: <flows_bugNoClaimRecheck_owner_flows_step line 3577, col 9 to line 3578, col 53 of module flows_bugNoClaimRecheck>
+State 12: <flows_bugNoClaimRecheck_owner_flows_step line 3980, col 9 to line 3982, col 53 of module flows_bugNoClaimRecheck>
+/\ flows_bugNoClaimRecheck_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugNoClaimRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_phantom = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
@@ -406,6 +429,7 @@ State 12: <flows_bugNoClaimRecheck_owner_flows_step line 3577, col 9 to line 357
 /\ flows_bugNoClaimRecheck_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_crossMsg = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_sess = <<[st |-> "dead", gen |-> 1], [st |-> "pending", gen |-> 2]>>
+/\ flows_bugNoClaimRecheck_owner_flows_gSess = 2
 /\ flows_bugNoClaimRecheck_owner_flows_toGuestAbort = {}
 /\ flows_bugNoClaimRecheck_owner_flows_alloc = "Provisioned"
 /\ flows_bugNoClaimRecheck_owner_flows_toHostAbort = {}
@@ -418,7 +442,8 @@ State 12: <flows_bugNoClaimRecheck_owner_flows_step line 3577, col 9 to line 357
 /\ flows_bugNoClaimRecheck_owner_flows_claim = 1
 /\ flows_bugNoClaimRecheck_owner_flows_vmUp = TRUE
 
-State 13: <flows_bugNoClaimRecheck_owner_flows_step line 3577, col 9 to line 3578, col 53 of module flows_bugNoClaimRecheck>
+State 13: <flows_bugNoClaimRecheck_owner_flows_step line 3980, col 9 to line 3982, col 53 of module flows_bugNoClaimRecheck>
+/\ flows_bugNoClaimRecheck_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugNoClaimRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_phantom = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
@@ -441,6 +466,7 @@ State 13: <flows_bugNoClaimRecheck_owner_flows_step line 3577, col 9 to line 357
 /\ flows_bugNoClaimRecheck_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_crossMsg = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_sess = <<[st |-> "dead", gen |-> 1], [st |-> "reading", gen |-> 2]>>
+/\ flows_bugNoClaimRecheck_owner_flows_gSess = 2
 /\ flows_bugNoClaimRecheck_owner_flows_toGuestAbort = {}
 /\ flows_bugNoClaimRecheck_owner_flows_alloc = "Provisioned"
 /\ flows_bugNoClaimRecheck_owner_flows_toHostAbort = {}
@@ -453,7 +479,8 @@ State 13: <flows_bugNoClaimRecheck_owner_flows_step line 3577, col 9 to line 357
 /\ flows_bugNoClaimRecheck_owner_flows_claim = 1
 /\ flows_bugNoClaimRecheck_owner_flows_vmUp = TRUE
 
-State 14: <flows_bugNoClaimRecheck_owner_flows_step line 3577, col 9 to line 3578, col 53 of module flows_bugNoClaimRecheck>
+State 14: <flows_bugNoClaimRecheck_owner_flows_step line 3980, col 9 to line 3982, col 53 of module flows_bugNoClaimRecheck>
+/\ flows_bugNoClaimRecheck_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugNoClaimRecheck_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_phantom = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
@@ -476,6 +503,7 @@ State 14: <flows_bugNoClaimRecheck_owner_flows_step line 3577, col 9 to line 357
 /\ flows_bugNoClaimRecheck_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugNoClaimRecheck_owner_flows_crossMsg = FALSE
 /\ flows_bugNoClaimRecheck_owner_flows_sess = <<[st |-> "dead", gen |-> 1], [st |-> "closed", gen |-> 2]>>
+/\ flows_bugNoClaimRecheck_owner_flows_gSess = 2
 /\ flows_bugNoClaimRecheck_owner_flows_toGuestAbort = {}
 /\ flows_bugNoClaimRecheck_owner_flows_alloc = "Provisioned"
 /\ flows_bugNoClaimRecheck_owner_flows_toHostAbort = {}

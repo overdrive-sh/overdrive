@@ -290,6 +290,20 @@ deprecation shim. In the same arc that lands D1–D6, **delete**:
   the port is never needed (the method's surviving callers do not cross
   the reconcilers-crate boundary — they live in control-plane's streaming
   layer alongside the runtime).
+
+  **Amendment 2026-10-18 (GH #324, user ruling; not yet implemented).** The
+  retained method computed its own copy of the restart rule and disagreed
+  with the authority: it reported no restart one attempt below the ceiling,
+  ignored the platform-reclamation (D5) and generation-replacement
+  exemptions, and reported a restart for a Job's natural exit, which the
+  authority finalizes. D5's "one ceiling" is made literal: the restart
+  decision is one shared function in `overdrive-reconcilers`, called by
+  every ceiling check of `WorkloadLifecycle` and by the retained method,
+  which now takes the inputs the decision needs. The method's purpose
+  (D7: the streaming layer, not a hydration cross-read) is unchanged. The
+  contract is pinned in
+  [`docs/feature/netns-density-295/feature-delta.md`](../../feature/netns-density-295/feature-delta.md)
+  § "Restart decision" (RESTART-SSOT).
 - `ServiceAllocFact.restart_count` and `ServiceAllocFact.restart_spec`
   (`service_lifecycle.rs:205,215`) — the fact no longer carries the
   budget or the restart spec.
@@ -525,3 +539,6 @@ to port a cross-read that no longer exists.
 - 2026-08-25 — Initial accepted version. Precursor to ADR-0086 (5→4
   ports). Implements `.claude/rules/reconcilers.md` § "Single restart
   authority"; supersedes ADR-0055 §7 "LivenessRestartGovernor".
+- 2026-10-18 — D7 amendment (GH #324): the retained
+  `restart_status_for_alloc` decides through the authority's shared restart
+  decision, so it cannot disagree with `WorkloadLifecycle`.

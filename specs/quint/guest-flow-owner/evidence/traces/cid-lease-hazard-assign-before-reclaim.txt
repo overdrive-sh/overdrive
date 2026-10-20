@@ -2,39 +2,42 @@
 
 State 1
   reclaimed = TRUE
+  att = <<0, 0>>
   up = TRUE
   lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-  al = << [st |-> "wait", off |-> -1, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  conf_step = [init |-> [tag |-> "UNIT"]]
+  al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
   cursor = 0
-  g = [clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE]
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
   bootLeft = -1
 
 State 2 [Assign]
   lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
-  al = << [st |-> "leased", off |-> 0, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  al = << [ st |-> "leased", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
   cursor = 1
 
 State 3 [Launch]
   dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
-  al = << [st |-> "running", off |-> 0, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  al = << [ st |-> "running", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
 
 State 4 [Crash]
   reclaimed = FALSE
   up = FALSE
   lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   dev = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
-  al = << [st |-> "wait", off |-> -1, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
   cursor = 0
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"reclaim", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
 
 State 5 [Restart]
   up = TRUE
 
 State 6 [Assign]
   lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
-  al = << [st |-> "leased", off |-> 0, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  al = << [ st |-> "leased", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
   cursor = 1
 
 State 7 [Launch]
-  al = << [st |-> "retiring", off |-> 0, retry |-> TRUE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
-  g = [clash |-> TRUE, rebooted |-> FALSE, reclaimed |-> FALSE]
+  al = << [ st |-> "retiring", off |-> 0, retry |-> TRUE, ex |-> FALSE, chg |-> TRUE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+  g = [ clash |-> TRUE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"crash", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]

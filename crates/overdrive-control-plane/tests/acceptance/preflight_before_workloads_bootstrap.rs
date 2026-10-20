@@ -15,16 +15,18 @@
 fn preflight_precedes_workloads_bootstrap_in_run_server() {
     let lib_src = include_str!("../../src/lib.rs");
 
-    // Locate the `run_server` function body (not `run_server_with_obs_and_driver`).
+    // Locate the `run_server` function body (not the supplied-owner path
+    // `run_server_with_obs_and_driver(s)`).
     let fn_start =
         lib_src.find("pub async fn run_server(").expect("run_server function must exist in lib.rs");
 
-    // Find the end of `run_server` by locating the call to
-    // `run_server_with_obs_and_driver` which is its last statement.
+    // Find the end of `run_server` by locating its delegation to the
+    // crate-private `boot_server` (GH #295, § Composition: `run_server` runs
+    // phase 1, the probe-runner gate and `compose_vm_driver`, then calls
+    // `boot_server` with `GuestNetworkSource::Composed`), its last statement.
     let fn_body = &lib_src[fn_start..];
-    let fn_end_marker = fn_body
-        .find("run_server_with_obs_and_driver(")
-        .expect("run_server must call run_server_with_obs_and_driver");
+    let fn_end_marker =
+        fn_body.find("boot_server(").expect("run_server must delegate to boot_server");
     let fn_body = &fn_body[..fn_end_marker];
 
     let preflight_pos =

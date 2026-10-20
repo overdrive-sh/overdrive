@@ -13,6 +13,7 @@
 use futures::StreamExt;
 use overdrive_core::id::AllocationId;
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
+use overdrive_core::observation::{ProbeRunSeq, SameStatusRuns};
 use overdrive_core::traits::observation_store::{
     ObservationRow, ObservationStore, SubscriptionEvent,
 };
@@ -39,6 +40,8 @@ async fn probe_result_row_survives_redb_reopen_bit_identical() {
         status: ProbeStatus::Pass,
         last_observed_at_unix_ms: 42_000,
         inferred: false,
+        run_seq: ProbeRunSeq::new(u64::max(42_000, 1)).unwrap_or(ProbeRunSeq::FIRST),
+        same_status_runs: SameStatusRuns::ONE,
     };
 
     {
@@ -71,6 +74,8 @@ async fn probe_result_lww_strict_dominate_on_last_observed_ms() {
         status: ProbeStatus::Pass,
         last_observed_at_unix_ms: 42_000,
         inferred: false,
+        run_seq: ProbeRunSeq::new(u64::max(42_000, 1)).unwrap_or(ProbeRunSeq::FIRST),
+        same_status_runs: SameStatusRuns::ONE,
     };
 
     let store = LocalObservationStore::open(&db_path).expect("open store");
@@ -79,19 +84,25 @@ async fn probe_result_lww_strict_dominate_on_last_observed_ms() {
     // Newer timestamp + new status — dominates.
     let newer = ProbeResultRow {
         last_observed_at_unix_ms: 50_000,
+        run_seq: ProbeRunSeq::new(50_000).unwrap_or(ProbeRunSeq::FIRST),
         status: ProbeStatus::Fail { last_fail_reason: "connection refused".to_owned() },
         ..initial.clone()
     };
     store.write_probe_result(newer.clone()).await.expect("write newer");
 
     // Stale write — strict-dominate rule rejects.
-    let stale = ProbeResultRow { last_observed_at_unix_ms: 30_000, ..initial.clone() };
+    let stale = ProbeResultRow {
+        last_observed_at_unix_ms: 30_000,
+        run_seq: ProbeRunSeq::new(u64::max(30_000, 1)).unwrap_or(ProbeRunSeq::FIRST),
+        ..initial.clone()
+    };
     store.write_probe_result(stale).await.expect("stale write returns Ok (no-op)");
 
     // Equal-timestamp re-write — also a no-op (strict-dominate,
     // not >=).
     let equal_ts = ProbeResultRow {
         last_observed_at_unix_ms: 50_000,
+        run_seq: ProbeRunSeq::new(50_000).unwrap_or(ProbeRunSeq::FIRST),
         status: ProbeStatus::Fail { last_fail_reason: "different reason".to_owned() },
         ..initial.clone()
     };
@@ -118,16 +129,24 @@ async fn accepted_probe_result_emits_once_after_commit_and_lww_losers_are_silent
         status: ProbeStatus::Pass,
         last_observed_at_unix_ms: 42_000,
         inferred: false,
+        run_seq: ProbeRunSeq::new(u64::max(42_000, 1)).unwrap_or(ProbeRunSeq::FIRST),
+        same_status_runs: SameStatusRuns::ONE,
     };
     let newer = ProbeResultRow {
         last_observed_at_unix_ms: 50_000,
+        run_seq: ProbeRunSeq::new(50_000).unwrap_or(ProbeRunSeq::FIRST),
         status: ProbeStatus::Fail { last_fail_reason: "not ready".to_owned() },
         ..initial.clone()
     };
-    let stale = ProbeResultRow { last_observed_at_unix_ms: 40_000, ..initial.clone() };
+    let stale = ProbeResultRow {
+        last_observed_at_unix_ms: 40_000,
+        run_seq: ProbeRunSeq::new(u64::max(40_000, 1)).unwrap_or(ProbeRunSeq::FIRST),
+        ..initial.clone()
+    };
     let equal = ProbeResultRow {
         status: ProbeStatus::Pass,
         last_observed_at_unix_ms: 42_000,
+        run_seq: ProbeRunSeq::new(u64::max(42_000, 1)).unwrap_or(ProbeRunSeq::FIRST),
         ..initial.clone()
     };
 
@@ -185,6 +204,9 @@ async fn probe_results_per_alloc_per_probe_idx_independent_keys() {
         status,
         last_observed_at_unix_ms: 10_000 + u64::from(idx),
         inferred: false,
+        run_seq: ProbeRunSeq::new(u64::max(10_000 + u64::from(idx), 1))
+            .unwrap_or(ProbeRunSeq::FIRST),
+        same_status_runs: SameStatusRuns::ONE,
     };
 
     // Insert in non-monotonic order to verify sort-by-probe_idx.
@@ -251,6 +273,8 @@ async fn probe_results_per_alloc_are_keyed_by_role_as_well_as_index() {
         status,
         last_observed_at_unix_ms: at,
         inferred: false,
+        run_seq: ProbeRunSeq::new(u64::max(at, 1)).unwrap_or(ProbeRunSeq::FIRST),
+        same_status_runs: SameStatusRuns::ONE,
     };
     let startup = mk(ProbeRole::Startup, ProbeStatus::Pass, 1_000);
     let readiness = mk(

@@ -149,7 +149,12 @@ async fn guardrails_fail_closed_limits_supervision_exemption_authn_boundary() {
             svids: Default::default(),
             bundle: Some(pki.trust_bundle()),
         });
-        let adapter = HostMtlsEnforcement::new(empty_identity, MtlsLimits::default());
+        let adapter = HostMtlsEnforcement::new(
+            empty_identity,
+            MtlsLimits::default(),
+            overdrive_core::guest_transport::GUEST_NODE_PREFIX,
+            crate::integration::helpers::guest_dial::not_serving(),
+        );
         let (agent_leg, _peer) = std::os::unix::net::UnixStream::pair().unwrap();
         let absent_alloc = AllocationId::new("alloc-absent-outbound").unwrap();
         let conn = InterceptedConnection {
@@ -170,7 +175,12 @@ async fn guardrails_fail_closed_limits_supervision_exemption_authn_boundary() {
         let mut svids = std::collections::BTreeMap::new();
         svids.insert(pki.client_alloc.clone(), pki.client_svid_material());
         let identity: Arc<dyn IdentityRead> = Arc::new(HeldIdentities { svids, bundle: None });
-        let adapter = HostMtlsEnforcement::new(identity, MtlsLimits::default());
+        let adapter = HostMtlsEnforcement::new(
+            identity,
+            MtlsLimits::default(),
+            overdrive_core::guest_transport::GUEST_NODE_PREFIX,
+            crate::integration::helpers::guest_dial::not_serving(),
+        );
         let (agent_leg, _peer) = std::os::unix::net::UnixStream::pair().unwrap();
         let conn = InterceptedConnection {
             leg: OwnedFd::from(agent_leg),
@@ -190,7 +200,12 @@ async fn guardrails_fail_closed_limits_supervision_exemption_authn_boundary() {
     // AC3 — resource limits at their CONCRETE F7 values
     // ============================================================
     let identity: Arc<dyn IdentityRead> = Arc::new(held_identities(&pki));
-    let adapter = HostMtlsEnforcement::new(identity, MtlsLimits::default());
+    let adapter = HostMtlsEnforcement::new(
+        identity,
+        MtlsLimits::default(),
+        overdrive_core::guest_transport::GUEST_NODE_PREFIX,
+        crate::integration::helpers::guest_dial::not_serving(),
+    );
     adapter
         .probe()
         .await
@@ -271,7 +286,12 @@ async fn guardrails_fail_closed_limits_supervision_exemption_authn_boundary() {
         let short =
             MtlsLimits { handshake_deadline: Duration::from_millis(800), ..MtlsLimits::default() };
         let identity2: Arc<dyn IdentityRead> = Arc::new(held_identities(&pki));
-        let adapter2 = Arc::new(HostMtlsEnforcement::new(identity2, short));
+        let adapter2 = Arc::new(HostMtlsEnforcement::new(
+            identity2,
+            short,
+            overdrive_core::guest_transport::GUEST_NODE_PREFIX,
+            crate::integration::helpers::guest_dial::not_serving(),
+        ));
         let dead_peer = pick_free_port(); // bound-then-dropped: connect refuses fast, but
         // the in-flight slot is held across the bounded handshake window.
         // Launch 128 concurrent pre-arms that hold their slot for the handshake window.

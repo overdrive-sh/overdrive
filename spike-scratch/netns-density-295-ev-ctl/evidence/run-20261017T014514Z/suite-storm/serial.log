@@ -1,0 +1,88 @@
+GUEST_BOOT uname_r=7.0.0-29-generic suite=storm arg= modparams=
+GUEST_MODULES:
+ovd_fwd 36864 0 [permanent], Live 0xffffffffc0635000 (OE)
+aesni_intel 98304 0 - Live 0xffffffffc0626000
+tls 163840 0 - Live 0xffffffffc0612000
+vsock_diag 12288 0 - Live 0xffffffffc0610000
+vsock_loopback 12288 0 - Live 0xffffffffc060e000
+vmw_vsock_virtio_transport 20480 0 - Live 0xffffffffc060c000
+vmw_vsock_virtio_transport_common 57344 2 vsock_loopback,vmw_vsock_virtio_transport, Live 0xffffffffc0608000
+vsock 73728 4 vsock_diag,vsock_loopback,vmw_vsock_virtio_transport,vmw_vsock_virtio_transport_common, Live 0xffffffffc0600000
+crw-------    1 0        0          10, 263 Oct 17 01:48 /dev/ovd_fwd
+CTLTEST suite=storm strict=0
+CHECK PASS version :: ok
+DATA storm[far-reset+watch] built 16384 pairs in 5591 ms, attached in 67 ms (4.1 us each)
+CHECK PASS all pairs live before the storm :: far-reset+watch: live_pairs=16384
+DATA storm[far-reset+watch] storm issued in 90 ms, module settled (live=0) after 92 ms, live now 0, queued_ends 16384
+CHECK PASS bounded queue holds one unread record per id, none dropped :: far-reset+watch: live=0 queued_ends=16384 (N=16384) attached=16384 completed=0 aborted(peer=0 sockerr=16384 detached=0)
+CHECK PASS exactly one record per id, none lost or duplicated :: far-reset+watch: total=16384 dup=0 bad_id=0 missing=0 | kinds completed=0 aborted=16384 wh/c=0 wh/a=0 | causes peer=0 sockerr=16384 detached=0
+CHECK PASS second read is EAGAIN (no extra record) :: far-reset+watch: r=-11
+CHECK PASS inventory zero after the drain :: far-reset+watch: queued=0 live=0
+CHECK PASS far-end storm: every far vsock watch classifies Aborted(PeerAbort) :: far-reset+watch: abort=16384 clean=0 other=0 of 16384
+DATA audit[after-v0] ctx_open=3 ctx_rel=3 ctx_free=3 pair_new=32768 pair_free=32768 rec_new=32768 rec_queued=32768 rec_read=32768 rec_discard=0 rec_free_unread=0 rel_won=0 live=0 bytes=0
+DATA storm[far-clean] built 16384 pairs in 5145 ms, attached in 57 ms (3.5 us each)
+CHECK PASS all pairs live before the storm :: far-clean: live_pairs=16384
+DATA storm[far-clean] storm issued in 91 ms, module settled (live=0) after 2399 ms, live now 0, queued_ends 16384
+CHECK PASS bounded queue holds one unread record per id, none dropped :: far-clean: live=0 queued_ends=16384 (N=16384) attached=16384 completed=16384 aborted(peer=0 sockerr=0 detached=0)
+CHECK PASS exactly one record per id, none lost or duplicated :: far-clean: total=16384 dup=0 bad_id=0 missing=0 | kinds completed=16384 aborted=0 wh/c=0 wh/a=0 | causes peer=0 sockerr=0 detached=0
+CHECK PASS second read is EAGAIN (no extra record) :: far-clean: r=-11
+CHECK PASS inventory zero after the drain :: far-clean: queued=0 live=0
+CHECK PASS clean storm: every pair completed :: far-clean: completed=16384
+DATA audit[after-v1] ctx_open=4 ctx_rel=4 ctx_free=4 pair_new=49152 pair_free=49152 rec_new=49152 rec_queued=49152 rec_read=49152 rec_discard=0 rec_free_unread=0 rel_won=0 live=0 bytes=0
+DATA storm[owner-ABORT_ALL] built 16384 pairs in 6505 ms, attached in 63 ms (3.9 us each)
+CHECK PASS all pairs live before the storm :: owner-ABORT_ALL: live_pairs=16384
+CHECK PASS ABORT_ALL returns the number of ids aborted :: owner-ABORT_ALL: r=0 n=16384
+DATA storm[owner-ABORT_ALL] storm issued in 182 ms, module settled (live=0) after 182 ms, live now 0, queued_ends 16384
+CHECK PASS bounded queue holds one unread record per id, none dropped :: owner-ABORT_ALL: live=0 queued_ends=16384 (N=16384) attached=16384 completed=0 aborted(peer=0 sockerr=0 detached=16384)
+CHECK PASS exactly one record per id, none lost or duplicated :: owner-ABORT_ALL: total=16384 dup=0 bad_id=0 missing=0 | kinds completed=0 aborted=16384 wh/c=0 wh/a=0 | causes peer=0 sockerr=0 detached=16384
+CHECK PASS second read is EAGAIN (no extra record) :: owner-ABORT_ALL: r=-11
+CHECK PASS inventory zero after the drain :: owner-ABORT_ALL: queued=0 live=0
+CHECK PASS all 16,384 far TCP ends reset :: owner-ABORT_ALL: reset=16384 eof=0 open=0
+DATA audit[after-v2] ctx_open=5 ctx_rel=5 ctx_free=5 pair_new=65536 pair_free=65536 rec_new=65536 rec_queued=65536 rec_read=65536 rec_discard=0 rec_free_unread=0 rel_won=0 live=0 bytes=0
+DATA storm[release] built 16384 pairs in 5479 ms, attached in 105 ms (6.4 us each)
+CHECK PASS all pairs live before the storm :: release: live_pairs=16384
+DATA storm[release] release returned in 132 ms
+CHECK PASS all 16,384 far TCP ends reset :: release: reset=16384 eof=0 open=0
+CHECK PASS release at scale: no record queued, no live id left :: release: rec_queued delta=0 live=0
+DATA audit[after-v3] ctx_open=6 ctx_rel=6 ctx_free=6 pair_new=81920 pair_free=81920 rec_new=81920 rec_queued=65536 rec_read=65536 rec_discard=16384 rec_free_unread=0 rel_won=16384 live=0 bytes=0
+DATA storm[far-reset+concurrent-reader] built 16384 pairs in 5202 ms, attached in 85 ms (5.2 us each)
+CHECK PASS all pairs live before the storm :: far-reset+concurrent-reader: live_pairs=16384
+DATA storm[far-reset+concurrent-reader] storm issued in 105 ms, module settled (live=0) after 105 ms, live now 0, queued_ends 5
+DATA storm[far-reset+concurrent-reader] reader thread consumed 16384 during the storm
+CHECK PASS exactly one record per id, none lost or duplicated :: far-reset+concurrent-reader: total=16384 dup=0 bad_id=0 missing=0 | kinds completed=0 aborted=0 wh/c=0 wh/a=0 | causes peer=0 sockerr=0 detached=0
+CHECK PASS second read is EAGAIN (no extra record) :: far-reset+concurrent-reader: r=-11
+CHECK PASS inventory zero after the drain :: far-reset+concurrent-reader: queued=0 live=0
+DATA audit[after-v4] ctx_open=7 ctx_rel=7 ctx_free=7 pair_new=98304 pair_free=98304 rec_new=98304 rec_queued=81920 rec_read=81920 rec_discard=16384 rec_free_unread=0 rel_won=16384 live=0 bytes=0
+DATA storm[far-reset-races-ABORT_ALL] built 16384 pairs in 4979 ms, attached in 66 ms (4.0 us each)
+CHECK PASS all pairs live before the storm :: far-reset-races-ABORT_ALL: live_pairs=16384
+DATA storm[far-reset-races-ABORT_ALL] ABORT_ALL won 6320
+DATA storm[far-reset-races-ABORT_ALL] storm issued in 85 ms, module settled (live=0) after 85 ms, live now 0, queued_ends 16384
+CHECK PASS bounded queue holds one unread record per id, none dropped :: far-reset-races-ABORT_ALL: live=0 queued_ends=16384 (N=16384) attached=16384 completed=0 aborted(peer=14 sockerr=10050 detached=6320)
+CHECK PASS exactly one record per id, none lost or duplicated :: far-reset-races-ABORT_ALL: total=16384 dup=0 bad_id=0 missing=0 | kinds completed=0 aborted=16384 wh/c=0 wh/a=0 | causes peer=14 sockerr=10050 detached=6320
+CHECK PASS second read is EAGAIN (no extra record) :: far-reset-races-ABORT_ALL: r=-11
+CHECK PASS inventory zero after the drain :: far-reset-races-ABORT_ALL: queued=0 live=0
+DATA audit[after-v5] ctx_open=8 ctx_rel=8 ctx_free=8 pair_new=114688 pair_free=114688 rec_new=114688 rec_queued=98304 rec_read=98304 rec_discard=16384 rec_free_unread=0 rel_won=16384 live=0 bytes=0
+CHECK PASS kill-9 storm: all far TCP ends open before the kill :: open=16384 reset=0 eof=0
+DATA storm[kill-9] waitpid returned 211 ms after SIGKILL (release runs inside the exit path, before the zombie is reapable)
+DATA storm[kill-9] far TCP ends reset at waitpid return: 16384 of 16384
+CHECK PASS kill -9 of the owner: all 16,384 far TCP ends reset :: reset=16384 eof=0 open=0 (settled 0 ms after the kill)
+CHECK PASS kill-9 release queued no record and left no live id :: rec_queued delta=0 rec_discard delta=16384 live=0
+DATA audit[end] ctx_open=9 ctx_rel=9 ctx_free=9 pair_new=131072 pair_free=131072 rec_new=131072 rec_queued=98304 rec_read=98304 rec_discard=32768 rec_free_unread=0 rel_won=32768 live=0 bytes=0
+CHECK PASS global live ids zero :: live=0
+CHECK PASS no kernel oops/warn :: dmesg scan
+RESULT suite=storm pass=37 fail=0
+SUITE_DONE suite=storm rc=0
+[    0.050073] rcu: Preemptible hierarchical RCU implementation.
+[    0.050074] rcu: 	RCU restricting CPUs from NR_CPUS=8192 to nr_cpu_ids=4.
+[    0.050076] 	Trampoline variant of Tasks RCU enabled.
+[    0.050077] 	Rude variant of Tasks RCU enabled.
+[    0.050077] 	Tracing variant of Tasks RCU enabled.
+[    0.050078] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.050091] RCU Tasks: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.050093] RCU Tasks Rude: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.059012] rcu: Hierarchical SRCU implementation.
+[    0.363288] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.363300] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+[    0.364695] ovd_fwd: loaded (spike, permanent: no module_exit)
+GUEST_END
+[   60.764744] reboot: Power down

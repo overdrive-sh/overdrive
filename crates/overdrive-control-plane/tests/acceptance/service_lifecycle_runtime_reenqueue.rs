@@ -23,6 +23,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::doc_markdown)]
 
+use overdrive_core::observation::{ProbeRunSeq, SameStatusRuns};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -175,6 +176,8 @@ async fn write_pass_probe(obs: &Arc<dyn ObservationStore>, a: &AllocationId, obs
         status: ProbeStatus::Pass,
         last_observed_at_unix_ms: observed_at_ms,
         inferred: false,
+        run_seq: ProbeRunSeq::new(u64::max(observed_at_ms, 1)).unwrap_or(ProbeRunSeq::FIRST),
+        same_status_runs: SameStatusRuns::ONE,
     })
     .await
     .expect("write pass probe row");

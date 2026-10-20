@@ -1,0 +1,15 @@
+{
+ "qemu_exit": 0,
+ "host_done": true,
+ "elapsed_s": 45.37917518615723,
+ "scenarios": [
+  "dial-watch-reset:300",
+  "dial-watch-halfclose:300",
+  "dial-watch-reset-poll:300",
+  "dial-watch-halfclose-recordcheck-at-end:300"
+ ],
+ "hazard_host": 4,
+ "hazard_guest": 0,
+ "physical_module_names_unchanged": true,
+ "module_on_physical_host": []
+}

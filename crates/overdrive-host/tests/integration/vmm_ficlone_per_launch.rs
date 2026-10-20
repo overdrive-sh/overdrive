@@ -16,22 +16,20 @@ use std::path::{Path, PathBuf};
 
 use overdrive_core::AllocationId;
 use overdrive_core::cgroup::CgroupPath;
-use overdrive_core::guest_transport::{
-    ClaimedGuestCid, GUEST_CID_BASE, GuestCid, GuestCidClaim,
-};
+use overdrive_core::guest_transport::{GUEST_CID_BASE, GuestCid};
 use overdrive_core::traits::vmm::{Vmm, VmmError};
 use overdrive_core::vm::config::{
     Gid, HostArch, KERNEL_MAGIC_WINDOW, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan,
     VmConfig, VmConfinement, VmRunDir, VmmIdentity,
 };
-use overdrive_host::{CloudHypervisorVmm, VhostVsockCidClaim};
+use overdrive_host::CloudHypervisorVmm;
 use overdrive_testing::vm_fixture::{VmFixture, default_staging_root};
 
-/// A guest CID claimed on `claims` for one launch (D16-CLAIM): the claim
-/// `Vmm::create` takes.
-fn claimed_cid(claims: &dyn GuestCidClaim, offset: u32) -> ClaimedGuestCid {
-    let cid = GuestCid::new(GUEST_CID_BASE + offset).expect("an in-range guest CID");
-    claims.claim(cid).expect("claim the launch's guest CID")
+/// The leased guest CID `GUEST_CID_BASE + offset` of one launch (CID-NOCLAIM):
+/// the value `Vmm::create` puts on the `--vsock` argument. No claim is taken;
+/// the VMM opens the device itself.
+fn cid(offset: u32) -> GuestCid {
+    GuestCid::new(GUEST_CID_BASE + offset).expect("an in-range guest CID")
 }
 
 fn read_kernel_header(path: &Path) -> Vec<u8> {
@@ -131,7 +129,7 @@ async fn ficlone_fails_closed_on_a_real_non_reflink_target() {
     };
 
     let vmm = CloudHypervisorVmm::new();
-    let result = vmm.create(&config, claimed_cid(&VhostVsockCidClaim::new(), 0x0300)).await;
+    let result = vmm.create(&config, cid(0x0300)).await;
 
     let err = result.expect_err("create must fail closed on a real non-reflink target");
     match &err {

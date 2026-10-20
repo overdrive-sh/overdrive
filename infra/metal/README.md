@@ -37,6 +37,24 @@ Bare metal removes the nesting. That is the whole reason this exists.
    infra/metal/bootstrap.sh ubuntu@<ip> --sync-only
    ```
 
+## Running the guest-kit `kvm-tests` lanes
+
+The guest-kit lanes (the vsock walking skeleton, fault matrix and density
+cells, the forwarder's VM-boundary cells, the in-guest lane) do not build
+anything inside a test. Run the lane setup first, in the same
+`cargo xtask metal run` session or an earlier one against the same tree:
+
+```bash
+cargo xtask metal run -- bash -c 'OVERDRIVE_BPF_NATIVE=1 cargo xtask bpf-build \
+  && cargo xtask guest-kit-prepare \
+  && cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests …'
+```
+
+`guest-kit-prepare` builds `ovd_fwd.ko` for the running kernel, the static
+scripted guest peer and the in-guest test binaries, and stages each at the
+path the fixture reads (`xtask/src/guest_kit_prepare.rs`). A missing
+artefact makes the fixture refuse with `LaneNotPrepared`, naming the path.
+
 ## Things that cost time on 2026-08-10 — read before debugging
 
 **The login user is `ubuntu`, not `root`.** Root's `authorized_keys` carries the

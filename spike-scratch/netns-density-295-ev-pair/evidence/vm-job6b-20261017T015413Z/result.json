@@ -1,0 +1,13 @@
+{
+ "status": "done",
+ "wall_s": 43,
+ "host_uname_r": "7.0.0-38-generic",
+ "guest_uname_r": "7.0.0-29-generic",
+ "physical_module_names_unchanged": true,
+ "physical_ovdpair_loaded": false,
+ "runs": 14,
+ "fault_lines": [],
+ "probe_results": [
+  "{\"abi\":1,\"permanent_flag\":1,\"delete_module_rc\":-1,\"delete_module_errno\":16,\"record_size\":32}"
+ ]
+}

@@ -77,6 +77,7 @@
     clippy::unused_async
 )]
 
+use overdrive_core::observation::{ProbeRunSeq, SameStatusRuns};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -424,6 +425,8 @@ async fn drive_characterization(mode: GoldenMode) {
             status: ProbeStatus::Pass,
             last_observed_at_unix_ms: FIXED_PROBE_AT_MS,
             inferred: false,
+            run_seq: ProbeRunSeq::new(u64::max(FIXED_PROBE_AT_MS, 1)).unwrap_or(ProbeRunSeq::FIRST),
+            same_status_runs: SameStatusRuns::ONE,
         })
         .await
         .expect("write probe result");

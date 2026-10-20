@@ -1,0 +1,49 @@
+{
+ "results": [
+  {
+   "item": "watch",
+   "verdict": "done",
+   "elapsed_s": 241.1,
+   "pass": 7,
+   "fail": 2,
+   "kernel_fault": false,
+   "suite_done": [
+    "SUITE_DONE suite=watch rc=9"
+   ],
+   "guest_uname": [
+    "7.0.0-29-generic"
+   ]
+  },
+  {
+   "item": "ids",
+   "verdict": "done",
+   "elapsed_s": 17.0,
+   "pass": 13,
+   "fail": 0,
+   "kernel_fault": false,
+   "suite_done": [
+    "SUITE_DONE suite=ids rc=0"
+   ],
+   "guest_uname": [
+    "7.0.0-29-generic"
+   ]
+  },
+  {
+   "item": "storm",
+   "verdict": "done",
+   "elapsed_s": 1203.4,
+   "pass": 3,
+   "fail": 1,
+   "kernel_fault": false,
+   "suite_done": [
+    "SUITE_DONE suite=storm rc=9"
+   ],
+   "guest_uname": [
+    "7.0.0-29-generic"
+   ]
+  }
+ ],
+ "ovd_fwd_in_physical_kernel_after": false,
+ "physical_modules_added": [],
+ "physical_modules_ok": true
+}

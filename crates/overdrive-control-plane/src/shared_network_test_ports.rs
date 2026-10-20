@@ -1,41 +1,53 @@
-//! Crate-private test-local implementations of the three ports this crate
-//! declares — `SharedGuestNetworkOwner` (with its inherited
-//! `GuestNetworkProvisioner`), `GuestDns`, and `GuestDnsFactory` — for this
-//! crate's source-local tests (GH #295, DISTILL gap B-4).
+//! Crate-private test support for this crate's source-local GH #295 bodies.
 //!
-//! `overdrive-sim` depends on `overdrive-control-plane`, which dev-depends on
-//! `overdrive-sim`, so in a source-local test build the sim types implement the
-//! traits of a second compiled copy of this crate and do not coerce to
-//! `Arc<dyn crate::…>`. These doubles model the parts of the pinned
-//! `SimSharedGuestNetworkOwner` / `SimGuestDnsFactory` / `SimGuestDns`
-//! contracts the source-local cells exercise. Their shape is test support
-//! (`distill/test-scenarios.md` § *Test-local control-plane ports*), not
-//! production API.
+//! Two pieces:
 //!
+//! - **Test-local ports** — `TestSharedOwner` (the `SharedGuestNetworkOwner`
+//!   port with its inherited `GuestNetworkProvisioner` and `GuestStreamDial`),
+//!   `TestGuestDnsFactory` and `TestGuestDns`. `overdrive-sim` depends on
+//!   `overdrive-control-plane`, which dev-depends on `overdrive-sim`, so in a
+//!   source-local test build the sim types implement the traits of a second
+//!   compiled copy of this crate and do not coerce to `Arc<dyn crate::…>`
+//!   (QPROJ-1, the sim-placement rule). These doubles stand in for the
+//!   `overdrive-sim` doubles in this crate's own tests only.
+//! - **The composed node** (`composed`, `integration-tests` lane) — one node
+//!   booted the way `run_server` boots it (phase 1 over the seam, then
+//!   `boot_server` with `GuestNetworkSource::Composed` over a `BootAdapters`
+//!   bundle, NO-OVERRIDE-SEAMS) with the production guest-flow owner
+//!   (`compose_guest_network` over `SimGuestFlowIo`), the production runtime
+//!   shared-network supervisor, `SimMtlsIntercept` at the shared mTLS table
+//!   and a `SimClock`. The Quint `quiescence` conformance driver and the
+//!   recovery acceptance bodies (P6-S1..S6, C2) drive it; neither
+//!   re-implements a rule of the owner or the supervisor.
+//!
+//! Their shape is test support (DISTILL's), not production API.
 
 #![allow(
+    clippy::option_if_let_else,
     dead_code,
     clippy::significant_drop_tightening,
-    reason = "test support consumed by the source-local S-ND295-05E, 19, 29A, 30A, and 32 bodies; \
-              each port call records and decides under one state lock, so the journal order is \
-              the decision order"
+    reason = "test support shared by several source-local bodies; each port call records and \
+              decides under one state lock, so the journal order is the decision order"
 )]
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::collections::{BTreeMap, VecDeque};
+use std::net::SocketAddrV4;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use overdrive_core::guest_network::SharedGuestNetworkComponent;
 use overdrive_core::guest_network::{GuestNetworkExecGate, GuestNetworkExecWiring};
+use overdrive_core::guest_transport::dial::{
+    DialPurpose, GuestDialError, GuestStream, GuestStreamDial,
+};
+use overdrive_core::guest_transport::{GUEST_NODE_GATEWAY, GUEST_NODE_PREFIX, GuestFlowPorts};
 use overdrive_core::id::AllocationId;
-use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
 use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
+use overdrive_core::vm::config::VsockPort;
 use overdrive_sim::adapters::clock::SimClock;
+use overdrive_sim::adapters::entropy::SimEntropy;
 use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
-use overdrive_sim::adapters::{SimCgroupFs, SimEntry};
 use overdrive_sim::adapters::{SimIdentityRead, SimMtlsIntercept, SimMtlsResolve};
 use overdrive_worker::mtls_intercept_port::MtlsIntercept;
 use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
@@ -45,49 +57,15 @@ use tokio::sync::Notify;
 use crate::dns_responder::responder::{DnsResponderError, Result as DnsResult};
 use crate::dns_responder::{GuestDns, GuestDnsDeps, GuestDnsFactory};
 use crate::guest_network::{
-    GuestLinkKind, GuestNetworkError, GuestNetworkFact, GuestNetworkOperation, GuestNetworkPlan,
-    GuestNetworkProvisioner, Result, SharedGuestNetworkAudit, SharedGuestNetworkAuditError,
-    SharedGuestNetworkOwner, TapActivation, TapQuiescence,
+    ForwardingActivation, ForwardingQuiescence, ForwardingRestore, GuestAddressPool,
+    GuestNetworkError, GuestNetworkFact, GuestNetworkOperation, GuestNetworkPlan,
+    GuestNetworkProvisioner, QuiescenceHold, QuiescenceLedger, QuiescenceRestoreError, Result,
+    SharedGuestNetworkAudit, SharedGuestNetworkAuditError, SharedGuestNetworkOwner,
 };
 
 // ---------------------------------------------------------------------------
 // TestSharedOwner
 // ---------------------------------------------------------------------------
-
-/// Standing outcome of every subsequent `quiesce_managed_taps` call.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TestQuiesceScript {
-    /// `Ok(TapQuiescence)` naming these allocations unconfirmed (those not yet
-    /// condemned); empty is full quiescence. The `Default`.
-    Unconfirmed(BTreeSet<AllocationId>),
-    /// `Err(GuestNetworkError::Io { operation: TapSetDown, .. })`.
-    Fail,
-    /// A future that never resolves.
-    Hang,
-    /// The call waits `after` on the owner's clock, then resolves as
-    /// `Unconfirmed(unconfirmed)` would: a result that arrives late. Needs
-    /// the clock given to [`TestSharedOwner::with_cgroup_snapshots`].
-    Late { unconfirmed: BTreeSet<AllocationId>, after: Duration },
-}
-
-impl Default for TestQuiesceScript {
-    fn default() -> Self {
-        Self::Unconfirmed(BTreeSet::new())
-    }
-}
-
-/// Standing behaviour of every subsequent `audit_shared` call, before any
-/// node-level slot or damage is consulted.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum TestAuditMode {
-    /// Consult the node-level slots, then the damage set.
-    #[default]
-    Normal,
-    /// A future that never resolves.
-    Hang,
-    /// The call panics.
-    Panic,
-}
 
 /// Outcome of one non-scripted-result port call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,273 +77,219 @@ pub enum TestCallOutcome {
 /// Outcome of one `activate` call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TestActivateOutcome {
-    /// `Ok(TapActivation::Raised)`.
-    Raised,
-    /// `Ok(TapActivation::QuiescenceLatched)`; nothing mutated.
-    Latched,
-    /// The source-less `PostconditionMismatch` for a condemned allocation.
+    /// `Ok(ForwardingActivation::Activated)`.
+    Activated,
+    /// `Ok(ForwardingActivation::QuiescenceLatched)`.
+    QuiescenceLatched,
+    /// `Ok(ForwardingActivation::ControlSessionPending)`.
+    ControlSessionPending,
+    /// `Err(PostconditionMismatch { operation: ForwardingActivate, .. })`:
+    /// the CID is unknown or Retiring.
     Refused,
 }
 
-/// Outcome of one `audit_shared` call.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TestAuditOutcome {
-    /// `Ok` with no damaged allocation.
-    Healthy,
-    /// `Err` naming the first failing node-level component.
-    NodeFailed(SharedGuestNetworkComponent),
-    /// `Ok` naming these newly condemned allocations.
-    Damaged(BTreeSet<AllocationId>),
-    /// The call never resolved.
-    Hung,
-    /// The call panicked.
-    Panicked,
-}
-
-/// Outcome of one `quiesce_managed_taps` call.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TestQuiesceOutcome {
-    /// `Ok` naming these newly condemned allocations unconfirmed.
-    Unconfirmed(BTreeSet<AllocationId>),
-    /// `Err`.
-    Failed,
-    /// The call never resolved.
-    Hung,
-    /// The call began a scripted late result; whether and when that result
-    /// was delivered is not journaled.
-    Late,
+impl TestActivateOutcome {
+    fn result(self, plan: &GuestNetworkPlan) -> Result<ForwardingActivation> {
+        match self {
+            Self::Activated => Ok(ForwardingActivation::Activated),
+            Self::QuiescenceLatched => Ok(ForwardingActivation::QuiescenceLatched),
+            Self::ControlSessionPending => Ok(ForwardingActivation::ControlSessionPending),
+            Self::Refused => Err(GuestNetworkError::PostconditionMismatch {
+                operation: GuestNetworkOperation::ForwardingActivate,
+                expected: GuestNetworkFact::AllocationForwarding {
+                    alloc: plan.alloc().clone(),
+                    cid: plan.assignment().cid(),
+                    pairs: 0,
+                },
+                observed: None,
+            }),
+        }
+    }
 }
 
 /// One port call, its allocation where it has one, and its outcome.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TestOwnerCall {
-    Provision { alloc: AllocationId, outcome: TestCallOutcome },
-    Activate { alloc: AllocationId, outcome: TestActivateOutcome },
-    Teardown { alloc: AllocationId, outcome: TestCallOutcome },
+    Provision {
+        alloc: AllocationId,
+        outcome: TestCallOutcome,
+    },
+    Activate {
+        alloc: AllocationId,
+        outcome: TestActivateOutcome,
+    },
+    Teardown {
+        alloc: AllocationId,
+        outcome: TestCallOutcome,
+    },
     ProbeStartup,
     SweepStale,
     ConvergeShared(TestCallOutcome),
-    AuditShared(TestAuditOutcome),
-    Quiesce(TestQuiesceOutcome),
-    Restore(TestCallOutcome),
+    AuditShared(Option<SharedGuestNetworkComponent>),
+    Dial {
+        target: SocketAddrV4,
+        purpose: DialPurpose,
+    },
+    /// `quiesce`, with the hold count it left.
+    Quiesce {
+        holds: u32,
+    },
+    /// `restore`, with its result and the hold count it left.
+    Restore {
+        result: std::result::Result<ForwardingRestore, QuiescenceRestoreError>,
+        holds: u32,
+    },
 }
 
-/// One journal entry: the call, plus — when the owner was built over a
-/// `SimCgroupFs` clone — the cgroup snapshot taken as the call began (the E12
-/// ordering observation point).
+/// One journal entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestJournalEntry {
     pub call: TestOwnerCall,
-    pub cgroups: Option<BTreeMap<PathBuf, (SimEntry, Vec<u8>)>>,
 }
-
-/// The node-level components in canonical audit order.
-const AUDIT_COMPONENTS: [SharedGuestNetworkComponent; 12] = [
-    SharedGuestNetworkComponent::Bridge,
-    SharedGuestNetworkComponent::LegF,
-    SharedGuestNetworkComponent::LegC,
-    SharedGuestNetworkComponent::Dns,
-    SharedGuestNetworkComponent::TcxLink,
-    SharedGuestNetworkComponent::EndpointMap,
-    SharedGuestNetworkComponent::CounterMap,
-    SharedGuestNetworkComponent::BpffsPin,
-    SharedGuestNetworkComponent::BridgeGuard,
-    SharedGuestNetworkComponent::IpRules,
-    SharedGuestNetworkComponent::IpSets,
-    SharedGuestNetworkComponent::Supervisor,
-];
 
 #[derive(Debug, Default)]
 struct TestOwnerState {
-    /// Set by every `quiesce_managed_taps`; cleared only by a successful
-    /// `restore_quiesced_taps`.
-    latched: bool,
-    /// Every allocation a returned quiescence or audit result has named.
-    condemned: BTreeSet<AllocationId>,
-    /// Allocations whose TAP this double holds raised (`Active`): an
-    /// activation that reported `Raised`, or a restore that raised it.
-    active: BTreeSet<AllocationId>,
-    /// Allocations a returned quiescence set down (`QuiescedActive`).
-    quiesced: BTreeSet<AllocationId>,
-    /// A failing restore raises this many quiesced allocations, in
-    /// `AllocationId` order, before it fails.
-    restore_raises_before_failure: usize,
-    quiesce: TestQuiesceScript,
-    audit_mode: TestAuditMode,
-    damage: BTreeSet<AllocationId>,
+    /// Activation outcomes still to hand out, in order; empty → `Activated`.
+    activations: VecDeque<TestActivateOutcome>,
     audit_failures: Vec<SharedGuestNetworkComponent>,
     journal: Vec<TestJournalEntry>,
 }
 
-impl TestOwnerState {
-    /// A returned quiescence: condemn each newly named allocation (no longer
-    /// raised), and set every other raised TAP down.
-    fn settle_quiescence(
-        &mut self,
-        named: &BTreeSet<AllocationId>,
-    ) -> BTreeMap<AllocationId, GuestNetworkError> {
-        let unconfirmed = TestSharedOwner::condemn(self, named, GuestNetworkOperation::TapSetDown);
-        let raised = std::mem::take(&mut self.active);
-        for alloc in raised {
-            if !self.condemned.contains(&alloc) {
-                self.quiesced.insert(alloc);
-            }
-        }
-        unconfirmed
-    }
-}
-
-/// What one `quiesce_managed_taps` call does once it has journaled.
-enum QuiesceStep {
-    Resolved(Result<TapQuiescence>),
-    Hang,
-    Late { unconfirmed: BTreeSet<AllocationId>, after: Duration },
-}
-
-/// The clock a [`TestQuiesceScript::Late`] result waits on.
-struct LateClock(Arc<dyn Clock>);
-
-impl std::fmt::Debug for LateClock {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("LateClock")
-    }
-}
-
-/// Test-local shared guest-network owner modelling the latch, the
-/// `Condemned` set, which TAPs it holds raised or quiesced, standing refusal
-/// slots, and a per-call journal.
-#[derive(Debug, Default)]
+/// Test-local shared guest-network owner: standing refusal slots, a scripted
+/// sequence of activation outcomes, a counted quiescence over its own
+/// `QuiescenceLedger` (D-UP-4, PD-2: public, so a test-local port issues and
+/// redeems holds the way the production owner does), and a per-call journal.
+///
+/// Quiescence: `quiesce` issues a hold from this owner's ledger and raises
+/// the count; `restore` redeems it at that ledger and lowers the count
+/// (`Reopened` at zero, else `StillQuiesced`). A hold another ledger issued
+/// is refused `Err(ForeignHold)` and changes nothing (the hold is dropped,
+/// counted leaked at its issuing ledger). `script_foreign_restores` makes
+/// this owner refuse its own holds as foreign — the composition defect the
+/// supervisor's `ForeignHold` → `ForeignQuiescenceHold` mapping answers
+/// (FHOLD-CHECK) — keeping each refused hold so it is not counted leaked.
+/// It aborts no flow (it holds none): admission and dial effects of
+/// quiescence are the production owner's, driven through [`composed`].
 pub struct TestSharedOwner {
     provision_refused: AtomicBool,
     teardown_refused: AtomicBool,
     converge_refused: AtomicBool,
-    restore_refused: AtomicBool,
-    cgroups: Option<SimCgroupFs>,
-    late_clock: Option<LateClock>,
+    foreign_restores: AtomicBool,
+    ledger: QuiescenceLedger,
+    holds: AtomicU32,
+    refused_holds: Mutex<Vec<QuiescenceHold>>,
+    /// PORTS-CONFIG: the ports its listeners "bound" — `None` until its
+    /// first `converge_shared` returns `Ok`, then [`test_owner_flow_ports`]
+    /// (the `SharedGuestNetworkOwner::flow_ports` postcondition the boot
+    /// reads after step 9).
+    flow_ports: Mutex<Option<GuestFlowPorts>>,
     state: Mutex<TestOwnerState>,
 }
 
+/// The ports a [`TestSharedOwner`] reports once its `converge_shared`
+/// returned `Ok`. The double binds nothing, so these are fixture values in
+/// the valid range, never a kernel's choice.
+pub fn test_owner_flow_ports() -> GuestFlowPorts {
+    GuestFlowPorts::new(VsockPort::new(50_240), VsockPort::new(50_243))
+        .unwrap_or_else(|e| unreachable!("two distinct ports above the reserved range: {e}"))
+}
+
+impl Default for TestSharedOwner {
+    fn default() -> Self {
+        Self {
+            provision_refused: AtomicBool::new(false),
+            teardown_refused: AtomicBool::new(false),
+            converge_refused: AtomicBool::new(false),
+            foreign_restores: AtomicBool::new(false),
+            ledger: QuiescenceLedger::new(),
+            holds: AtomicU32::new(0),
+            refused_holds: Mutex::new(Vec::new()),
+            flow_ports: Mutex::new(None),
+            state: Mutex::new(TestOwnerState::default()),
+        }
+    }
+}
+
+impl std::fmt::Debug for TestSharedOwner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TestSharedOwner")
+            .field("holds", &self.quiescence_holds())
+            .field("leaked", &self.leaked_quiescence_holds())
+            .finish_non_exhaustive()
+    }
+}
+
 impl TestSharedOwner {
-    /// An owner with every slot disarmed, full quiescence, an empty damage set,
-    /// and no cgroup snapshots in its journal.
+    /// An owner with every slot disarmed and `Activated` for every
+    /// activation.
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// As [`Self::new`], but every journal entry carries `fs.snapshot()`
-    /// taken as the call began, and a [`TestQuiesceScript::Late`] result
-    /// waits on `clock` (the supervisor's injected clock).
-    pub fn with_cgroup_snapshots(fs: SimCgroupFs, clock: Arc<dyn Clock>) -> Self {
-        Self { cgroups: Some(fs), late_clock: Some(LateClock(clock)), ..Self::default() }
     }
 
     pub fn script_provision_failure(&self, armed: bool) {
         self.provision_refused.store(armed, Ordering::SeqCst);
     }
+
     pub fn script_teardown_failure(&self, armed: bool) {
         self.teardown_refused.store(armed, Ordering::SeqCst);
     }
+
     pub fn script_converge_failure(&self, armed: bool) {
         self.converge_refused.store(armed, Ordering::SeqCst);
     }
-    /// Arm or disarm the standing restore refusal; an armed restore raises
-    /// nothing before it fails.
-    pub fn script_restore_failure(&self, armed: bool) {
-        self.state.lock().restore_raises_before_failure = 0;
-        self.restore_refused.store(armed, Ordering::SeqCst);
-    }
-    /// Arm a standing restore refusal that fails part-way: each failing
-    /// restore first raises up to `raised` quiesced allocations, in
-    /// `AllocationId` order, and keeps the latch.
-    pub fn script_restore_failure_after(&self, raised: usize) {
-        self.state.lock().restore_raises_before_failure = raised;
-        self.restore_refused.store(true, Ordering::SeqCst);
-    }
-    /// Arm or disarm the standing node-level audit slot of `component`.
-    pub fn script_component_audit_failure(
-        &self,
-        component: SharedGuestNetworkComponent,
-        armed: bool,
-    ) {
-        let mut state = self.state.lock();
-        state.audit_failures.retain(|armed_component| *armed_component != component);
-        if armed {
-            state.audit_failures.push(component);
-        }
-    }
-    /// Set the standing damage set the audit reports when no node-level slot
-    /// fires.
-    pub fn script_audit_damage(&self, damaged: BTreeSet<AllocationId>) {
-        self.state.lock().damage = damaged;
-    }
-    /// Set the standing audit behaviour (normal, hang, or panic).
-    pub fn script_audit_mode(&self, mode: TestAuditMode) {
-        self.state.lock().audit_mode = mode;
-    }
-    /// Set the standing quiescence outcome.
-    pub fn script_quiesce(&self, script: TestQuiesceScript) {
-        self.state.lock().quiesce = script;
+
+    /// Armed: every `restore` answers `Err(ForeignHold)` as if the hold had
+    /// been issued by another ledger, and keeps the hold (not leaked).
+    pub fn script_foreign_restores(&self, armed: bool) {
+        self.foreign_restores.store(armed, Ordering::SeqCst);
     }
 
-    /// Every port call, in call order.
+    /// The outstanding hold count.
+    pub fn quiescence_holds(&self) -> u32 {
+        self.holds.load(Ordering::SeqCst)
+    }
+
+    /// Holds of this owner's ledger dropped unredeemed.
+    pub fn leaked_quiescence_holds(&self) -> u32 {
+        self.ledger.leaked()
+    }
+
+    /// The next activations return `outcomes`, in order; afterwards
+    /// `Activated`.
+    pub fn script_activations(&self, outcomes: impl IntoIterator<Item = TestActivateOutcome>) {
+        self.state.lock().activations.extend(outcomes);
+    }
+
+    /// The node-level components the next audits report damaged, one per
+    /// audit, in order.
+    pub fn script_audit_failures(
+        &self,
+        components: impl IntoIterator<Item = SharedGuestNetworkComponent>,
+    ) {
+        self.state.lock().audit_failures.extend(components);
+    }
+
+    /// Every call, in call order; a non-draining snapshot.
     pub fn journal(&self) -> Vec<TestJournalEntry> {
         self.state.lock().journal.clone()
     }
-    /// The quiescence latch `activate` consults.
-    pub fn latched(&self) -> bool {
-        self.state.lock().latched
-    }
-    /// Every allocation a returned quiescence or audit result has named.
-    pub fn condemned(&self) -> BTreeSet<AllocationId> {
-        self.state.lock().condemned.clone()
-    }
-    /// The allocations whose TAP this double holds raised.
-    pub fn active(&self) -> BTreeSet<AllocationId> {
-        self.state.lock().active.clone()
-    }
 
-    fn record(&self, state: &mut TestOwnerState, call: TestOwnerCall) {
-        let cgroups = self.cgroups.as_ref().map(SimCgroupFs::snapshot);
-        state.journal.push(TestJournalEntry { call, cgroups });
+    fn record(&self, call: TestOwnerCall) {
+        self.state.lock().journal.push(TestJournalEntry { call });
     }
 
     fn outcome(armed: &AtomicBool) -> TestCallOutcome {
         if armed.load(Ordering::SeqCst) { TestCallOutcome::Failed } else { TestCallOutcome::Ok }
     }
 
-    fn refusal(operation: GuestNetworkOperation) -> GuestNetworkError {
-        GuestNetworkError::Io {
-            operation,
-            source: std::io::Error::other("scripted test owner refusal"),
-        }
-    }
-
     fn result(outcome: TestCallOutcome, operation: GuestNetworkOperation) -> Result<()> {
         match outcome {
             TestCallOutcome::Ok => Ok(()),
-            TestCallOutcome::Failed => Err(Self::refusal(operation)),
+            TestCallOutcome::Failed => Err(GuestNetworkError::Io {
+                operation,
+                source: std::io::Error::other("scripted test owner refusal"),
+            }),
         }
-    }
-
-    /// Condemn each not-yet-condemned allocation of `named`; the returned map
-    /// names exactly those, each with a fresh error for `operation`. A
-    /// condemned allocation leaves the raised and quiesced sets, so no later
-    /// restore raises it.
-    fn condemn(
-        state: &mut TestOwnerState,
-        named: &BTreeSet<AllocationId>,
-        operation: GuestNetworkOperation,
-    ) -> BTreeMap<AllocationId, GuestNetworkError> {
-        let newly: BTreeMap<AllocationId, GuestNetworkError> = named
-            .iter()
-            .filter(|alloc| state.condemned.insert((*alloc).clone()))
-            .map(|alloc| (alloc.clone(), Self::refusal(operation)))
-            .collect();
-        for alloc in newly.keys() {
-            state.active.remove(alloc);
-            state.quiesced.remove(alloc);
-        }
-        newly
     }
 }
 
@@ -373,200 +297,130 @@ impl TestSharedOwner {
 impl GuestNetworkProvisioner for TestSharedOwner {
     async fn provision(&self, plan: &GuestNetworkPlan) -> Result<()> {
         let outcome = Self::outcome(&self.provision_refused);
-        let mut state = self.state.lock();
-        self.record(&mut state, TestOwnerCall::Provision { alloc: plan.alloc().clone(), outcome });
-        drop(state);
-        Self::result(outcome, GuestNetworkOperation::TapCreate)
+        self.record(TestOwnerCall::Provision { alloc: plan.alloc().clone(), outcome });
+        Self::result(outcome, GuestNetworkOperation::PairAttach)
     }
 
-    async fn activate(&self, plan: &GuestNetworkPlan) -> Result<TapActivation> {
-        let mut state = self.state.lock();
-        let outcome = if state.latched {
-            TestActivateOutcome::Latched
-        } else if state.condemned.contains(plan.alloc()) {
-            TestActivateOutcome::Refused
-        } else {
-            TestActivateOutcome::Raised
+    async fn activate(&self, plan: &GuestNetworkPlan) -> Result<ForwardingActivation> {
+        let outcome = {
+            let mut state = self.state.lock();
+            let outcome = state.activations.pop_front().unwrap_or(TestActivateOutcome::Activated);
+            state.journal.push(TestJournalEntry {
+                call: TestOwnerCall::Activate { alloc: plan.alloc().clone(), outcome },
+            });
+            outcome
         };
-        if outcome == TestActivateOutcome::Raised {
-            state.active.insert(plan.alloc().clone());
-        }
-        self.record(&mut state, TestOwnerCall::Activate { alloc: plan.alloc().clone(), outcome });
-        drop(state);
-        match outcome {
-            TestActivateOutcome::Raised => Ok(TapActivation::Raised),
-            TestActivateOutcome::Latched => Ok(TapActivation::QuiescenceLatched),
-            TestActivateOutcome::Refused => Err(GuestNetworkError::PostconditionMismatch {
-                operation: GuestNetworkOperation::TapObserve,
-                expected: GuestNetworkFact::Tap {
-                    name: plan.assignment().tap.clone(),
-                    ifindex: None,
-                    link_kind: GuestLinkKind::Tap,
-                    persistent: true,
-                    up: false,
-                    owner_uid: Some(0),
-                },
-                observed: None,
-            }),
-        }
+        outcome.result(plan)
     }
 
     async fn teardown(&self, plan: &GuestNetworkPlan) -> Result<()> {
         let outcome = Self::outcome(&self.teardown_refused);
-        let mut state = self.state.lock();
-        self.record(&mut state, TestOwnerCall::Teardown { alloc: plan.alloc().clone(), outcome });
-        drop(state);
-        Self::result(outcome, GuestNetworkOperation::TapDelete)
+        self.record(TestOwnerCall::Teardown { alloc: plan.alloc().clone(), outcome });
+        Self::result(outcome, GuestNetworkOperation::PairAbort)
+    }
+}
+
+#[async_trait::async_trait]
+impl GuestStreamDial for TestSharedOwner {
+    /// The double serves no allocation: every dial is `NotServing` with no
+    /// state change (the trait's "no Active VM allocation serves this
+    /// address and port").
+    async fn dial(
+        &self,
+        target: SocketAddrV4,
+        purpose: DialPurpose,
+    ) -> std::result::Result<GuestStream, GuestDialError> {
+        self.record(TestOwnerCall::Dial { target, purpose });
+        Err(GuestDialError::NotServing)
     }
 }
 
 #[async_trait::async_trait]
 impl SharedGuestNetworkOwner for TestSharedOwner {
     async fn probe_startup(&self) -> Result<()> {
-        let mut state = self.state.lock();
-        self.record(&mut state, TestOwnerCall::ProbeStartup);
+        self.record(TestOwnerCall::ProbeStartup);
         Ok(())
     }
 
     async fn sweep_stale(&self) -> Result<()> {
-        let mut state = self.state.lock();
-        self.record(&mut state, TestOwnerCall::SweepStale);
+        self.record(TestOwnerCall::SweepStale);
         Ok(())
     }
 
     async fn converge_shared(&self) -> Result<()> {
         let outcome = Self::outcome(&self.converge_refused);
-        let mut state = self.state.lock();
-        self.record(&mut state, TestOwnerCall::ConvergeShared(outcome));
-        drop(state);
-        Self::result(outcome, GuestNetworkOperation::BridgeConverge)
+        self.record(TestOwnerCall::ConvergeShared(outcome));
+        if outcome == TestCallOutcome::Ok {
+            let mut bound = self.flow_ports.lock();
+            if bound.is_none() {
+                *bound = Some(test_owner_flow_ports());
+            }
+        }
+        Self::result(outcome, GuestNetworkOperation::ForwarderOpen)
     }
 
-    #[allow(clippy::panic, reason = "a scripted audit panic is this double's contract")]
+    fn flow_ports(&self) -> Option<GuestFlowPorts> {
+        *self.flow_ports.lock()
+    }
+
     async fn audit_shared(
         &self,
     ) -> std::result::Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError> {
-        let result = {
+        let failed = {
             let mut state = self.state.lock();
-            let mode = state.audit_mode;
-            match mode {
-                TestAuditMode::Hang => {
-                    self.record(&mut state, TestOwnerCall::AuditShared(TestAuditOutcome::Hung));
-                    None
-                }
-                TestAuditMode::Panic => {
-                    self.record(&mut state, TestOwnerCall::AuditShared(TestAuditOutcome::Panicked));
-                    drop(state);
-                    panic!("scripted test owner audit panic");
-                }
-                TestAuditMode::Normal => {
-                    let failed = AUDIT_COMPONENTS
-                        .into_iter()
-                        .find(|component| state.audit_failures.contains(component));
-                    if let Some(component) = failed {
-                        self.record(
-                            &mut state,
-                            TestOwnerCall::AuditShared(TestAuditOutcome::NodeFailed(component)),
-                        );
-                        Some(Err(SharedGuestNetworkAuditError {
-                            component,
-                            source: GuestNetworkError::PostconditionMismatch {
-                                operation: GuestNetworkOperation::SharedAudit,
-                                expected: GuestNetworkFact::SharedComponent {
-                                    component,
-                                    healthy: true,
-                                },
-                                observed: Some(GuestNetworkFact::SharedComponent {
-                                    component,
-                                    healthy: false,
-                                }),
-                            },
-                        }))
+            let failed = if state.audit_failures.is_empty() {
+                None
+            } else {
+                Some(state.audit_failures.remove(0))
+            };
+            state.journal.push(TestJournalEntry { call: TestOwnerCall::AuditShared(failed) });
+            failed
+        };
+        match failed {
+            None => Ok(SharedGuestNetworkAudit::default()),
+            Some(component) => Err(SharedGuestNetworkAuditError {
+                component,
+                source: GuestNetworkError::PostconditionMismatch {
+                    operation: GuestNetworkOperation::SharedAudit,
+                    expected: GuestNetworkFact::SharedComponent { component, healthy: true },
+                    observed: Some(GuestNetworkFact::SharedComponent { component, healthy: false }),
+                },
+            }),
+        }
+    }
+
+    async fn quiesce(&self) -> (QuiescenceHold, ForwardingQuiescence) {
+        let hold = self.ledger.issue();
+        let holds = self.holds.fetch_add(1, Ordering::SeqCst) + 1;
+        self.record(TestOwnerCall::Quiesce { holds });
+        (hold, ForwardingQuiescence::default())
+    }
+
+    async fn restore(
+        &self,
+        hold: QuiescenceHold,
+    ) -> std::result::Result<ForwardingRestore, QuiescenceRestoreError> {
+        let result = if self.foreign_restores.load(Ordering::SeqCst) {
+            self.refused_holds.lock().push(hold);
+            Err(QuiescenceRestoreError::ForeignHold)
+        } else {
+            match self.ledger.redeem(hold) {
+                Ok(()) => {
+                    let left = self.holds.fetch_sub(1, Ordering::SeqCst) - 1;
+                    Ok(if left == 0 {
+                        ForwardingRestore::Reopened
                     } else {
-                        let damage = state.damage.clone();
-                        let damaged =
-                            Self::condemn(&mut state, &damage, GuestNetworkOperation::TapObserve);
-                        let outcome = if damaged.is_empty() {
-                            TestAuditOutcome::Healthy
-                        } else {
-                            TestAuditOutcome::Damaged(damaged.keys().cloned().collect())
-                        };
-                        self.record(&mut state, TestOwnerCall::AuditShared(outcome));
-                        Some(Ok(SharedGuestNetworkAudit { damaged }))
-                    }
+                        ForwardingRestore::StillQuiesced
+                    })
+                }
+                Err(foreign) => {
+                    drop(foreign);
+                    Err(QuiescenceRestoreError::ForeignHold)
                 }
             }
         };
-        match result {
-            Some(result) => result,
-            None => std::future::pending().await,
-        }
-    }
-
-    #[allow(clippy::panic, reason = "a Late script on an owner without a clock is fixture misuse")]
-    async fn quiesce_managed_taps(&self) -> Result<TapQuiescence> {
-        let step = {
-            let mut state = self.state.lock();
-            state.latched = true;
-            match state.quiesce.clone() {
-                TestQuiesceScript::Unconfirmed(named) => {
-                    let unconfirmed = state.settle_quiescence(&named);
-                    let reported = unconfirmed.keys().cloned().collect();
-                    self.record(
-                        &mut state,
-                        TestOwnerCall::Quiesce(TestQuiesceOutcome::Unconfirmed(reported)),
-                    );
-                    QuiesceStep::Resolved(Ok(TapQuiescence { unconfirmed }))
-                }
-                TestQuiesceScript::Fail => {
-                    self.record(&mut state, TestOwnerCall::Quiesce(TestQuiesceOutcome::Failed));
-                    QuiesceStep::Resolved(Err(Self::refusal(GuestNetworkOperation::TapSetDown)))
-                }
-                TestQuiesceScript::Hang => {
-                    self.record(&mut state, TestOwnerCall::Quiesce(TestQuiesceOutcome::Hung));
-                    QuiesceStep::Hang
-                }
-                TestQuiesceScript::Late { unconfirmed, after } => {
-                    self.record(&mut state, TestOwnerCall::Quiesce(TestQuiesceOutcome::Late));
-                    QuiesceStep::Late { unconfirmed, after }
-                }
-            }
-        };
-        match step {
-            QuiesceStep::Resolved(result) => result,
-            QuiesceStep::Hang => std::future::pending().await,
-            QuiesceStep::Late { unconfirmed, after } => {
-                let Some(LateClock(clock)) = self.late_clock.as_ref() else {
-                    panic!(
-                        "a Late quiescence needs the clock given to \
-                         TestSharedOwner::with_cgroup_snapshots"
-                    );
-                };
-                clock.sleep(after).await;
-                let unconfirmed = self.state.lock().settle_quiescence(&unconfirmed);
-                Ok(TapQuiescence { unconfirmed })
-            }
-        }
-    }
-
-    async fn restore_quiesced_taps(&self) -> Result<()> {
-        let outcome = Self::outcome(&self.restore_refused);
-        let mut state = self.state.lock();
-        self.record(&mut state, TestOwnerCall::Restore(outcome));
-        let raising = match outcome {
-            TestCallOutcome::Ok => state.quiesced.len(),
-            TestCallOutcome::Failed => state.restore_raises_before_failure,
-        };
-        let raised = state.quiesced.iter().take(raising).cloned().collect::<Vec<_>>();
-        for alloc in raised {
-            state.quiesced.remove(&alloc);
-            state.active.insert(alloc);
-        }
-        if outcome == TestCallOutcome::Ok {
-            state.latched = false;
-        }
-        drop(state);
-        Self::result(outcome, GuestNetworkOperation::TapSetUp)
+        self.record(TestOwnerCall::Restore { result, holds: self.holds.load(Ordering::SeqCst) });
+        result
     }
 }
 
@@ -587,12 +441,51 @@ pub enum TestGuestDnsServeExit {
 #[derive(Debug, Default)]
 pub struct TestGuestDnsFactory {
     probe_refused: Arc<AtomicBool>,
+    audits: Arc<TestAuditGate>,
     built: Mutex<Vec<Arc<TestGuestDns>>>,
+}
+
+/// The audit gate every responder of one factory shares: while held, each
+/// `audit` call parks until the test releases it. The supervisor's full
+/// audit awaits the DNS port's `audit` (the `Dns` component is audited in
+/// every full audit, ADR-0124), so a held gate parks every detecting and
+/// post-repair audit at a consistency point (QPROJ-6) — the forwarder's
+/// `inventory()` read is synchronous (EVMOD-PORT) and cannot be parked.
+#[derive(Debug)]
+struct TestAuditGate {
+    held: AtomicBool,
+    pending: AtomicU32,
+    permits: tokio::sync::Semaphore,
+}
+
+impl Default for TestAuditGate {
+    fn default() -> Self {
+        Self {
+            held: AtomicBool::new(false),
+            pending: AtomicU32::new(0),
+            permits: tokio::sync::Semaphore::new(0),
+        }
+    }
 }
 
 impl TestGuestDnsFactory {
     pub fn script_probe_failure(&self, armed: bool) {
         self.probe_refused.store(armed, Ordering::SeqCst);
+    }
+
+    /// Park every later `audit` of this factory's responders until released.
+    pub fn hold_audits(&self) {
+        self.audits.held.store(true, Ordering::SeqCst);
+    }
+
+    /// The `audit` calls currently parked.
+    pub fn pending_audits(&self) -> u32 {
+        self.audits.pending.load(Ordering::SeqCst)
+    }
+
+    /// Release one parked `audit` (it then runs with its scripted outcome).
+    pub fn release_audit(&self) {
+        self.audits.permits.add_permits(1);
     }
 
     /// Every responder built, in build order; a non-draining snapshot.
@@ -606,6 +499,7 @@ impl GuestDnsFactory for TestGuestDnsFactory {
         drop(deps);
         let responder = Arc::new(TestGuestDns {
             probe_refused: Arc::clone(&self.probe_refused),
+            audits: Arc::clone(&self.audits),
             audit_refused: AtomicBool::new(false),
             ending: Mutex::new(None),
             ended: Notify::new(),
@@ -619,6 +513,7 @@ impl GuestDnsFactory for TestGuestDnsFactory {
 #[derive(Debug)]
 pub struct TestGuestDns {
     probe_refused: Arc<AtomicBool>,
+    audits: Arc<TestAuditGate>,
     audit_refused: AtomicBool,
     ending: Mutex<Option<TestGuestDnsServeExit>>,
     ended: Notify,
@@ -670,6 +565,15 @@ impl GuestDns for TestGuestDns {
     }
 
     async fn audit(&self) -> DnsResult<()> {
+        if self.audits.held.load(Ordering::SeqCst) {
+            self.audits.pending.fetch_add(1, Ordering::SeqCst);
+            let permit = self.audits.permits.acquire().await;
+            self.audits.pending.fetch_sub(1, Ordering::SeqCst);
+            match permit {
+                Ok(permit) => permit.forget(),
+                Err(_closed) => unreachable!("the audit gate's semaphore is never closed"),
+            }
+        }
         if self.audit_refused.load(Ordering::SeqCst) {
             return Err(DnsResponderError::Socket {
                 source: std::io::Error::other("scripted test DNS audit refusal"),
@@ -684,31 +588,80 @@ impl GuestDns for TestGuestDns {
 }
 
 // ---------------------------------------------------------------------------
-// Self-tests of the test-local shared owner (S-ND295-53)
+// TestDataplaneComposer
 // ---------------------------------------------------------------------------
-//
-// These specify the `SharedGuestNetworkOwner` activate/restore contract the
-// S-ND295-53 activation-order proof and the source-local supervisor bodies
-// depend on, over the double they actually use here: `TestSharedOwner`. The
-// sim-side twin (`SimSharedGuestNetworkOwner`) cannot host them because its
-// `activate(&GuestNetworkPlan)` needs a `GuestNetworkPlan`, and that type is
-// control-plane-private with no cross-crate constructor (FD § "B1 — replace
-// obsolete plan vocabulary"); a plan is built here through a test-owned
-// `GuestAddressPool`'s crate-private `assign`, as the source-local supervisor
-// rig does, so no process-global pool is touched. "A failed restore keeps the
-// latch" has no other coverage, so a double that regressed it would pass the
-// SUT proof silently — that is exactly what these guard against (a fixture
-// must not fail before, or lie to, the SUT).
+
+/// Test-local `DataplaneComposer` (NO-OVERRIDE-SEAMS): the in-crate
+/// stand-in for `overdrive-sim`'s `SimDataplaneComposer`, which implements
+/// the trait of a second compiled copy of this crate in a source-local build
+/// (module doc). `compose` returns a fresh `SimDataplane` and the node
+/// address it was built with — `Ipv4Addr::LOCALHOST` for every composition
+/// that injected `SimDataplane` before (the feature-delta's replacement
+/// table) — or, when scripted, the `DataplaneBoot` refusal it was given.
+/// It constructs nothing else and keeps no state across boots.
+pub struct TestDataplaneComposer {
+    host_ipv4: std::net::Ipv4Addr,
+    refusal: Mutex<Option<crate::error::ControlPlaneError>>,
+}
+
+impl TestDataplaneComposer {
+    /// Every `compose` succeeds over a fresh `SimDataplane`, reporting
+    /// `host_ipv4` as the node's address.
+    pub fn new(host_ipv4: std::net::Ipv4Addr) -> Self {
+        Self { host_ipv4, refusal: Mutex::new(None) }
+    }
+
+    /// The next `compose` returns `refusal` (one of the boot's
+    /// `DataplaneBoot` refusals) and constructs nothing.
+    pub fn script_refusal(&self, refusal: crate::error::ControlPlaneError) {
+        *self.refusal.lock() = Some(refusal);
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::DataplaneComposer for TestDataplaneComposer {
+    async fn compose(
+        &self,
+        _plan: crate::DataplanePlan<'_>,
+    ) -> std::result::Result<crate::ComposedDataplane, crate::error::ControlPlaneError> {
+        let scripted = self.refusal.lock().take();
+        if let Some(refusal) = scripted {
+            return Err(refusal);
+        }
+        Ok(crate::ComposedDataplane {
+            dataplane: Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+            host_ipv4: self.host_ipv4,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Fixture constructors for source-local `AppState` builds
+// ---------------------------------------------------------------------------
 
 pub fn mtls_worker() -> Arc<MtlsInterceptWorker> {
+    worker_over(Arc::new(SimMtlsIntercept::new()), Arc::new(SimClock::new()))
+}
+
+/// An unstarted mTLS worker over `intercept`, with sim enforcement (its leg-S
+/// guest dial a `SimGuestStreamDial`, LEGS-DIAL) and a non-mesh resolver.
+pub fn worker_over(
+    intercept: Arc<SimMtlsIntercept>,
+    clock: Arc<SimClock>,
+) -> Arc<MtlsInterceptWorker> {
     let enforcement: Arc<dyn MtlsEnforcement> = Arc::new(SimMtlsEnforcement::new(
         Arc::new(SimIdentityRead::new(BTreeMap::new(), None)),
         MtlsLimits::default(),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
     ));
     let resolve: Arc<dyn MtlsResolve> =
         Arc::new(SimMtlsResolve::new(BTreeMap::new(), MtlsResolution::NonMesh));
-    let intercept: Arc<dyn MtlsIntercept> = Arc::new(SimMtlsIntercept::new());
-    Arc::new(MtlsInterceptWorker::new(enforcement, resolve, Arc::new(SimClock::new()), intercept))
+    Arc::new(MtlsInterceptWorker::new(
+        enforcement,
+        resolve,
+        clock,
+        intercept as Arc<dyn MtlsIntercept>,
+    ))
 }
 
 pub fn shared_guest_network_owner() -> Arc<TestSharedOwner> {
@@ -719,254 +672,751 @@ pub fn guest_network_exec_gate() -> Arc<GuestNetworkExecGate> {
     GuestNetworkExecWiring::new(Arc::new(SimClock::new())).gate()
 }
 
-pub fn guest_pool() -> Arc<crate::guest_network::GuestAddressPool> {
-    Arc::new(crate::guest_network::GuestAddressPool::new(
-        ipnet::Ipv4Net::new_assert(std::net::Ipv4Addr::new(100, 95, 0, 0), 16),
-        "ovd-gbr0".to_owned(),
-        std::net::Ipv4Addr::new(100, 95, 0, 1),
-        std::net::Ipv4Addr::new(100, 95, 0, 1),
+/// A pool over the production node prefix and gateway with seeded entropy
+/// (DG-2 row 1: `new(node_prefix, gateway, Arc<dyn Entropy>)`).
+pub fn guest_pool() -> Arc<GuestAddressPool> {
+    Arc::new(GuestAddressPool::new(
+        GUEST_NODE_PREFIX,
+        GUEST_NODE_GATEWAY,
+        Arc::new(SimEntropy::new(0x295)),
     ))
 }
 
-#[cfg(test)]
-#[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
-mod tests {
-    use std::net::Ipv4Addr;
+// ---------------------------------------------------------------------------
+// The composed node (integration-tests lane)
+// ---------------------------------------------------------------------------
 
-    use super::TestSharedOwner;
-    use crate::guest_network::{
-        GuestAddressPool, GuestNetworkError, GuestNetworkOperation, GuestNetworkProvisioner,
-        SharedGuestNetworkOwner, TapActivation,
+#[cfg(feature = "integration-tests")]
+#[allow(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "a test rig fails at once on a broken precondition, naming it"
+)]
+pub mod composed {
+    //! One node booted through the production composition with the guest-flow
+    //! owner over `SimGuestFlowIo` (QPROJ-1: `quiescence` — the host owner
+    //! with the runtime shared-network supervisor; boot step 8 through
+    //! `SimMtlsIntercept`).
+    //!
+    //! **What is production.** The composed boot (T-8, D-8): phase 1
+    //! (`probe_guest_flow_startup` over the process's seam, before any boot
+    //! effect, refusing `guest_network.probe`), then `boot_server` with
+    //! `GuestNetworkSource::Composed` — boot order, phase 2's
+    //! `compose_guest_network` (the owner and its `MtlsInterceptWorker` in one
+    //! construction, the boot's one `OwnerDial` bound to the owner and given
+    //! to the inbound enforcement as its leg-S dial, LEGS-DIAL), the step-8
+    //! refusal of ADR-0184, the supervisor spawn and `open_after_boot` — the
+    //! runtime shared-network supervisor, the `HostSharedGuestNetworkOwner`,
+    //! the `GuestAddressPool`. The rig reaches the composed owner through the
+    //! boot's `OwnerDial::owner()` (D-13), the pinned binding accessor.
+    //!
+    //! **What is simulated.** The owner's effect seam (`SimGuestFlowIo` over a
+    //! `SimGuestNode` whose node-global objects outlive a process), the shared
+    //! mTLS table (`SimMtlsIntercept`, the QPROJ-7 arbiter), the clock
+    //! (`SimClock`), the dataplane (`TestDataplaneComposer` over
+    //! `SimDataplane`), the enforcement (`SimMtlsEnforcementFactory`), the
+    //! KEK, entropy, the workflow transport, DNS, cgroupfs, the observation
+    //! store and VM host state. Each process gets a fresh seam; the shared
+    //! table (the only node-global object the bodies read) outlives the
+    //! process.
+    //!
+    //! **The adapters bundle (NO-OVERRIDE-SEAMS, STORES-IN).** Every boot is
+    //! handed a fresh `BootAdapters` built here — the rig's driven adapters,
+    //! no `ServerConfig` adapter field (none exists). The node's persistent
+    //! stores are the real ones over the node's data directory, reopened from
+    //! disk at every boot with `StoreAdapters::open` after the previous
+    //! process released them (`kill_for_test` drops every handle), never a
+    //! clone of a previous boot's handles, so a restart reads the node's
+    //! durable state back the way a new process does. The workload-identity
+    //! CA comes from a fresh `CaAdapters::host()` per boot; the boot builds it
+    //! over the boot's seeded entropy and runs its generate-or-adopt over the
+    //! reopened intent store.
+    //!
+    //! **Stepping.** Every handle the rig hands back is driven on a
+    //! current-thread tokio runtime with paused time; `settle` resolves when
+    //! no task of the runtime is ready (`SimGuestFlowIo::settled`). Time the
+    //! owner and the supervisor read advances only through
+    //! [`ComposedNode::advance`].
+    //!
+    //! **Supervisor stepping.** After boot the rig holds two effect kinds at
+    //! the owner seam: `BindListener` (the repair of a listener component:
+    //! `converge_shared` calls `bind_listener` on the held socket, which
+    //! confirms it still listens and re-spawns accept — no close, no bind,
+    //! round-11 "Repair") and `OpenForwarder` (the repair of the
+    //! `Forwarder` component: the seam's `open_forwarder`, after
+    //! `close_forwarder`, EVMOD-CTL); and it holds the process's DNS audit
+    //! gate (`TestGuestDnsFactory::hold_audits`): every full audit awaits the
+    //! `Dns` component's `GuestDns::audit` (ADR-0124), while the forwarder's
+    //! `inventory()` is a synchronous port call that cannot be parked
+    //! (EVMOD-PORT). A recovery therefore parks at its repair and at its
+    //! post-repair audit, which is
+    //! what lets a step observe `RecoveryPhase::Repaired` between the repair
+    //! and the restore (QPROJ-6 consistency point). Every other effect is
+    //! released as it is issued. The seam's issued-effect journal
+    //! (`SimGuestFlowIo::issued`) records the synchronous forwarder calls
+    //! (`abort_all`, `close_forwarder`) in call order beside the held ones.
+    //!
+    //! **Defect stimuli (QHOLD, no new seam).** `leak_hold` is the model's
+    //! `LeakHold`: the composed owner's own `quiesce()`, the hold dropped
+    //! unredeemed (D-UP-3). `restore_foreign_hold` is `ForeignRestore`: a hold
+    //! issued by a second, public `QuiescenceLedger` (PD-2) handed to the
+    //! composed owner's `restore` (D-UP-4).
+    //!
+    //! **Identity relabelling** (QPROJ-1): the model's component `C1` ↦
+    //! `SharedGuestNetworkComponent::FlowListeners` (the stream listener's
+    //! accept task exits), `C2` ↦ `ControlListener` (the control listener's
+    //! accept task exits).
+    //!
+    //! **The owner's mTLS port.** The composed boot builds the owner and the
+    //! worker together (D-UP-16's postcondition holds in the rig): the
+    //! owner's `GuestFlowOwnerPorts.mtls` is the worker `serve` runs, over
+    //! the node's `SimMtlsIntercept`.
+
+    use std::io;
+    use std::net::{Ipv4Addr, SocketAddrV4};
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use overdrive_core::guest_network::{
+        GuestNetworkExecWiring, ServeShutdownRequest, SharedGuestNetworkComponent,
     };
-    use overdrive_core::id::AllocationId;
+    use overdrive_core::guest_transport::wire::{ControlOpen, FlowId, FlowOrigin, FlowRequest};
+    use overdrive_core::guest_transport::{
+        GUEST_NODE_GATEWAY, GUEST_NODE_PREFIX, GuestCid, GuestFlowPorts, LaunchToken,
+        NodeVsockPortConfig,
+    };
+    use overdrive_core::id::{AllocationId, NodeId};
+    use overdrive_core::net::ListenPort;
+    use overdrive_core::traits::driver::{DriverRegistry, DriverType};
+    use overdrive_core::vm::config::VsockPort;
+    use overdrive_sim::adapters::clock::SimClock;
+    use overdrive_sim::adapters::driver::SimDriver;
+    use overdrive_sim::adapters::entropy::SimEntropy;
+    use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcementFactory;
+    use overdrive_sim::adapters::observation_store::SimObservationStore;
+    use overdrive_sim::adapters::transport::SimTransport;
+    use overdrive_sim::adapters::{
+        SimCgroupFs, SimKek, SimMtlsIntercept, SimSharedTable, SimVmHostState,
+    };
+    use tempfile::TempDir;
 
-    fn alloc(name: &str) -> AllocationId {
-        AllocationId::new(name).expect("valid allocation id")
-    }
+    use super::{TestDataplaneComposer, TestGuestDnsFactory, TestSharedOwner};
+    use crate::error::ControlPlaneError;
+    use crate::guest_network::flow_io::sim::{
+        SimEffectId, SimEffectKind, SimEffectTarget, SimFailure, SimForwarderFailure,
+        SimGuestFlowIo,
+    };
+    use crate::guest_network::flow_io::{FlowListener, GuestFlowIo, HostRouteType};
+    use crate::guest_network::{
+        ForwardingActivation, ForwardingRestore, GuestAddressPool, GuestConnKey, GuestNetworkPlan,
+        GuestNetworkProvisioner, GuestOwnerObservation, HostSharedGuestNetworkOwner,
+        QuiescenceLedger, QuiescenceRestoreError, SharedGuestNetworkOwner as _,
+    };
+    use crate::guest_network_composition::OwnerDial;
+    use crate::{
+        BootAdapters, CaAdapters, MtlsAdapters, RecoveryEpisode, ServerConfig, ServerHandle,
+        StoreAdapters, run_server_with_obs_and_drivers,
+    };
+    use overdrive_core::guest_transport::forwarder::ForwarderOp;
 
-    /// A pool owned by one self-test, over the node guest prefix.
-    fn pool() -> GuestAddressPool {
-        GuestAddressPool::new(
-            ipnet::Ipv4Net::new(Ipv4Addr::new(100, 95, 0, 0), 16).expect("node guest prefix"),
-            "ovd-gbr0".to_owned(),
-            Ipv4Addr::new(100, 95, 0, 1),
-            Ipv4Addr::new(100, 95, 0, 1),
-        )
-    }
+    /// The seam seed of a node's first boot; each later boot adds its boot
+    /// number, so every process of a node draws its own accept order.
+    const SEAM_SEED: u64 = 0x0295_0169;
 
-    /// Outcome anchor: OUT-ND295-SHARED-SWITCH
-    /// S-ND295-53 — Activation waits out a recovery and never turns it into a failure
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// `activate` reports `Raised` on a fresh allocation, `QuiescenceLatched`
-    /// while a quiescence latch is set (raising nothing), and the source-less
-    /// `PostconditionMismatch` for an allocation a returned quiescence result
-    /// condemned. Re-homed from `overdrive-sim` because a `GuestNetworkPlan`
-    /// is control-plane-private (item 7, DISTILL follow-up).
-    #[tokio::test]
-    async fn activate_reports_raised_latched_or_condemned() {
-        let owner = TestSharedOwner::new();
-        let pool = pool();
-        let plan_a = pool.assign(alloc("s53-selftest-a")).expect("plan A");
-        let plan_b = pool.assign(alloc("s53-selftest-b")).expect("plan B");
+    /// The model's component `C1`.
+    pub const C1: SharedGuestNetworkComponent = SharedGuestNetworkComponent::FlowListeners;
+    /// The model's component `C2`.
+    pub const C2: SharedGuestNetworkComponent = SharedGuestNetworkComponent::ControlListener;
 
-        // Fresh, no latch, not condemned → Raised.
-        assert_eq!(
-            owner.activate(&plan_a).await.expect("a fresh activation raises"),
-            TapActivation::Raised
-        );
-
-        // A latch makes every activation return QuiescenceLatched, raising nothing.
-        owner.quiesce_managed_taps().await.expect("full quiescence latches");
-        assert!(owner.latched(), "quiescence sets the latch");
-        assert_eq!(
-            owner.activate(&plan_a).await.expect("a latched activation is not a failure"),
-            TapActivation::QuiescenceLatched
-        );
-
-        // Restore clears the latch; activation raises again.
-        owner.restore_quiesced_taps().await.expect("restore clears the latch");
-        assert!(!owner.latched(), "a successful restore clears the latch");
-        assert_eq!(
-            owner.activate(&plan_a).await.expect("activation after restore"),
-            TapActivation::Raised
-        );
-
-        // Condemn plan B through a scripted quiescence, then clear the latch so
-        // the condemnation — not the latch — is the reason it is refused.
-        owner.script_quiesce(super::TestQuiesceScript::Unconfirmed(
-            std::collections::BTreeSet::from([alloc("s53-selftest-b")]),
-        ));
-        let quiescence = owner.quiesce_managed_taps().await.expect("scripted quiescence");
-        assert_eq!(
-            quiescence.unconfirmed.keys().cloned().collect::<Vec<_>>(),
-            vec![alloc("s53-selftest-b")],
-            "the scripted allocation is reported unconfirmed"
-        );
-        assert!(owner.condemned().contains(&alloc("s53-selftest-b")), "and condemned");
-        owner.restore_quiesced_taps().await.expect("restore clears the latch");
-        let refusal = owner.activate(&plan_b).await.expect_err("a condemned allocation is refused");
-        assert!(
-            matches!(
-                refusal,
-                GuestNetworkError::PostconditionMismatch {
-                    operation: GuestNetworkOperation::TapObserve,
-                    ..
-                }
-            ),
-            "the refusal is the source-less missing-record mismatch: {refusal:?}"
-        );
-        // An uncondemned allocation still raises.
-        assert_eq!(
-            owner.activate(&plan_a).await.expect("an uncondemned allocation still raises"),
-            TapActivation::Raised
-        );
-    }
-
-    /// Outcome anchor: OUT-ND295-SHARED-SWITCH
-    /// S-ND295-53 — Activation waits out a recovery and never turns it into a failure
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// A failed `restore_quiesced_taps` returns `Err` and leaves the
-    /// quiescence latch set, so a subsequent activation still returns
-    /// `QuiescenceLatched`; only a successful restore clears it. Nothing else
-    /// covers the failed-restore-keeps-the-latch path (item 7, DISTILL
-    /// follow-up).
-    #[tokio::test]
-    async fn restore_failure_slot_keeps_the_latch() {
-        let owner = TestSharedOwner::new();
-        let plan = pool().assign(alloc("s53-selftest-restore")).expect("plan");
-
-        owner.quiesce_managed_taps().await.expect("full quiescence latches");
-        assert!(owner.latched(), "quiescence sets the latch");
-
-        owner.script_restore_failure(true);
-        let failed = owner.restore_quiesced_taps().await;
-        assert!(
-            matches!(
-                failed,
-                Err(GuestNetworkError::Io { operation: GuestNetworkOperation::TapSetUp, .. })
-            ),
-            "an armed restore fails with the typed set-up error: {failed:?}"
-        );
-        assert!(owner.latched(), "a failed restore keeps the latch");
-        assert_eq!(
-            owner.activate(&plan).await.expect("still latched after the failed restore"),
-            TapActivation::QuiescenceLatched
-        );
-
-        owner.script_restore_failure(false);
-        owner.restore_quiesced_taps().await.expect("the retry restores and clears the latch");
-        assert!(!owner.latched(), "the successful retry clears the latch");
-        assert_eq!(
-            owner.activate(&plan).await.expect("activation after the successful restore"),
-            TapActivation::Raised
-        );
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
-    /// S-ND295-29A — Every shared-network component follows one bounded recovery contract
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// The part-way restore the E11 re-quiescence cell scripts: a failing
-    /// restore raises the scripted number of quiesced allocations, in
-    /// `AllocationId` order, and keeps the latch; a repeat quiescence sets
-    /// them down again; a successful restore raises every quiesced
-    /// allocation and clears the latch; a condemned allocation is never
-    /// raised.
-    #[tokio::test]
-    async fn a_part_way_restore_raises_some_and_a_repeat_quiescence_sets_them_down() {
-        let owner = TestSharedOwner::new();
-        let pool = pool();
-        let names = ["s29a-selftest-a", "s29a-selftest-b", "s29a-selftest-c"];
-        for name in names {
-            let plan = pool.assign(alloc(name)).expect("plan");
-            assert_eq!(
-                owner.activate(&plan).await.expect("a fresh activation raises"),
-                TapActivation::Raised
-            );
+    /// The flow listener whose accept task is the component's task.
+    pub const fn listener_of(component: SharedGuestNetworkComponent) -> FlowListener {
+        match component {
+            SharedGuestNetworkComponent::ControlListener => FlowListener::Control,
+            _ => FlowListener::Stream,
         }
-        let all = names.into_iter().map(alloc).collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(owner.active(), all, "every raised TAP is held raised");
-
-        owner.quiesce_managed_taps().await.expect("full quiescence");
-        assert!(owner.active().is_empty(), "quiescence sets every raised TAP down");
-
-        owner.script_restore_failure_after(1);
-        owner.restore_quiesced_taps().await.expect_err("the restore fails part-way");
-        assert_eq!(
-            owner.active(),
-            std::collections::BTreeSet::from([alloc("s29a-selftest-a")]),
-            "the failing restore raised the first quiesced allocation"
-        );
-        assert!(owner.latched(), "a failed restore keeps the latch");
-
-        owner.quiesce_managed_taps().await.expect("a repeat quiescence");
-        assert!(owner.active().is_empty(), "the repeat sets the raised TAP down again");
-        assert!(owner.latched());
-
-        owner.script_restore_failure(false);
-        owner.restore_quiesced_taps().await.expect("a clean restore");
-        assert_eq!(owner.active(), all, "a clean restore raises every quiesced allocation");
-        assert!(!owner.latched(), "and clears the latch");
-
-        owner.script_quiesce(super::TestQuiesceScript::Unconfirmed(
-            std::collections::BTreeSet::from([alloc("s29a-selftest-b")]),
-        ));
-        owner.quiesce_managed_taps().await.expect("a quiescence naming one allocation");
-        owner.restore_quiesced_taps().await.expect("a clean restore");
-        assert_eq!(
-            owner.active(),
-            std::collections::BTreeSet::from([alloc("s29a-selftest-a"), alloc("s29a-selftest-c")]),
-            "a condemned allocation is never raised again"
-        );
     }
 
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
-    /// S-ND295-32 — Every supervisor wait is bounded and every abnormal exit closes new commands visibly
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// The late quiescence the S-ND295-32 late-result cell scripts: the call
-    /// sets the latch and journals `Late` at once, stays pending until its
-    /// delay has elapsed on the owner's clock, and only then condemns and
-    /// reports the scripted allocations.
-    #[tokio::test]
-    async fn a_late_quiescence_resolves_only_after_its_delay_on_the_owner_clock() {
-        use futures::FutureExt as _;
-        use overdrive_sim::adapters::clock::SimClock;
-        use std::sync::Arc;
-        use std::time::Duration;
+    /// How the last `serve` process ended, as the caller observed it.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum NodeStop {
+        /// The process was dropped (`kill_for_test`).
+        Crash,
+        /// The supervisor requested `ServeShutdownRequest::SharedGuestNetwork`
+        /// and the process then ended.
+        FailStop,
+        /// The boot (`boot_server`) returned a typed boot refusal.
+        Refused,
+    }
 
-        let clock = Arc::new(SimClock::new());
-        let owner = TestSharedOwner::with_cgroup_snapshots(
-            overdrive_sim::adapters::SimCgroupFs::new(),
-            Arc::clone(&clock) as Arc<dyn overdrive_core::traits::clock::Clock>,
-        );
-        let late = std::collections::BTreeSet::from([alloc("s32-selftest-late")]);
-        owner.script_quiesce(super::TestQuiesceScript::Late {
-            unconfirmed: late.clone(),
-            after: Duration::from_secs(2),
-        });
+    /// The non-mesh destination every guest-opened flow of the rig dials.
+    pub const FLOW_DESTINATION: SocketAddrV4 =
+        SocketAddrV4::new(Ipv4Addr::new(198, 51, 100, 7), 443);
 
-        let mut call = owner.quiesce_managed_taps();
-        assert!((&mut call).now_or_never().is_none(), "the call is pending at once");
-        assert!(owner.latched(), "the latch is set as the call begins");
-        assert_eq!(
-            owner.journal().into_iter().map(|entry| entry.call).collect::<Vec<_>>(),
-            [super::TestOwnerCall::Quiesce(super::TestQuiesceOutcome::Late)]
-        );
-        clock.tick(Duration::from_secs(1));
-        assert!((&mut call).now_or_never().is_none(), "still pending before its delay");
-        assert!(owner.condemned().is_empty(), "nothing is condemned before the result");
-        clock.tick(Duration::from_secs(1));
-        let quiescence = (&mut call)
-            .now_or_never()
-            .expect("the result arrives once its delay has elapsed")
-            .expect("the late result is Ok");
-        assert_eq!(
-            quiescence.unconfirmed.keys().cloned().collect::<std::collections::BTreeSet<_>>(),
-            late
-        );
-        assert_eq!(owner.condemned(), late);
+    /// The declared listen port of the rig's allocation.
+    pub const LISTEN_PORT: u16 = 8080;
+
+    /// A live `serve` process of the node.
+    pub struct Process {
+        pub io: Arc<SimGuestFlowIo>,
+        /// The composed owner, read once after boot through the boot's
+        /// `OwnerDial::owner()` (D-13).
+        pub owner: Arc<HostSharedGuestNetworkOwner>,
+        /// The boot's one `OwnerDial`, bound to `owner` by phase 2.
+        pub dial: Arc<OwnerDial>,
+        pub server: ServerHandle,
+        /// The process's DNS factory: its responders' `audit` is the rig's
+        /// supervisor-stepping point (module doc).
+        dns: Arc<TestGuestDnsFactory>,
+        /// The Active allocation the rig opened, with its plan and the guest
+        /// source port of its next flow.
+        cid: Option<ActiveCid>,
+    }
+
+    struct ActiveCid {
+        plan: GuestNetworkPlan,
+        next_peer_port: u32,
+        next_flow_seq: u32,
+    }
+
+    /// One node: the node-global state (the shared table, the data
+    /// directory) and at most one live process.
+    pub struct ComposedNode {
+        pub clock: Arc<SimClock>,
+        pub intercept: Arc<SimMtlsIntercept>,
+        /// The pool the rig's plans come from (`GuestAddressPool::assign`
+        /// is crate-private; the server's own pool is not reachable from a
+        /// `ServerHandle`). Its plans name the production prefix and gateway.
+        pub pool: Arc<GuestAddressPool>,
+        pub process: Option<Process>,
+        pub last_stop: Option<NodeStop>,
+        /// A scripted outcome for the next boot's forwarder probe (boot
+        /// phase 1, `probe_forwarder`: the probe context's open and its
+        /// stages; D-8, UI-COV-1).
+        next_forwarder_open: Option<SimFailure>,
+        /// The seam of the last refused boot (its issued effects stay
+        /// readable).
+        refused_io: Option<Arc<SimGuestFlowIo>>,
+        boots: u32,
+        dirs: TempDir,
+    }
+
+    impl ComposedNode {
+        /// A node that has never booted (the model's `InitDown`): no table,
+        /// no process.
+        pub fn fresh() -> Self {
+            Self {
+                clock: Arc::new(SimClock::new()),
+                intercept: Arc::new(SimMtlsIntercept::new()),
+                pool: Arc::new(GuestAddressPool::new(
+                    GUEST_NODE_PREFIX,
+                    GUEST_NODE_GATEWAY,
+                    Arc::new(SimEntropy::new(0x0295_0169)),
+                )),
+                process: None,
+                last_stop: Some(NodeStop::Crash),
+                next_forwarder_open: None,
+                refused_io: None,
+                boots: 0,
+                dirs: TempDir::new().expect("node tempdir"),
+            }
+        }
+
+        /// The next boot's phase-1 forwarder probe (`probe_forwarder`, which
+        /// opens a context, runs its stages and releases it) fails with
+        /// `failure` (`DeviceAbsent`, `AbiMismatch` or a
+        /// probe stage); the boot refuses before any boot effect (D-8).
+        pub fn fail_next_forwarder_open(&mut self, failure: SimFailure) {
+            self.next_forwarder_open = Some(failure);
+        }
+
+        /// The process, which a step that needs one requires.
+        pub fn process(&self) -> &Process {
+            self.process.as_ref().expect("the node has a live serve process")
+        }
+
+        fn process_mut(&mut self) -> &mut Process {
+            self.process.as_mut().expect("the node has a live serve process")
+        }
+
+        /// One composed boot over a fresh seam (T-8, D-8): phase 1
+        /// (`probe_guest_flow_startup`, the forwarder probe included) over the
+        /// seam, then `boot_server` with `GuestNetworkSource::Composed`,
+        /// whose step 5 composes the owner and the worker and binds the
+        /// boot's `OwnerDial`. `Ok` → the process runs; `Err` → the typed
+        /// boot refusal, no process, `last_stop = Refused`.
+        pub async fn boot(&mut self) -> std::result::Result<(), ControlPlaneError> {
+            assert!(self.process.is_none(), "boot needs a stopped node");
+            self.boots += 1;
+            // A fresh seam per process: every effect auto-released, accepts
+            // and record bytes delivered at once (the seam's defaults); the
+            // accept order is drawn from a per-boot seed (D-UP-19).
+            let io = SimGuestFlowIo::new(SEAM_SEED + u64::from(self.boots));
+            if let Some(failure) = self.next_forwarder_open.take() {
+                io.script_failure(SimEffectKind::ProbeForwarder, failure);
+            }
+            let dns = Arc::new(TestGuestDnsFactory::default());
+            let config = self.config();
+            let dial = Arc::new(OwnerDial::unbound());
+            let booted = self.boot_composed(config, Arc::clone(&dns), &io, &dial).await;
+            match booted {
+                Ok(server) => {
+                    io.settled().await;
+                    let owner = dial
+                        .owner()
+                        .expect("phase 2 binds the boot's OwnerDial to the composed owner");
+                    // Supervisor stepping: park repairs and audits (module doc).
+                    io.hold(SimEffectKind::BindListener);
+                    io.hold(SimEffectKind::OpenForwarder);
+                    dns.hold_audits();
+                    self.process = Some(Process { io, owner, dial, server, dns, cid: None });
+                    self.last_stop = None;
+                    Ok(())
+                }
+                Err(refusal) => {
+                    io.exit_process();
+                    self.refused_io = Some(io);
+                    self.last_stop = Some(NodeStop::Refused);
+                    Err(refusal)
+                }
+            }
+        }
+
+        /// The composed boot's two phases over `io` and `dial`, with a fresh
+        /// adapters bundle (NO-OVERRIDE-SEAMS): `boot_server` composes over
+        /// it and constructs no driven adapter (STORES-IN).
+        async fn boot_composed(
+            &self,
+            config: ServerConfig,
+            dns: Arc<TestGuestDnsFactory>,
+            io: &Arc<SimGuestFlowIo>,
+            dial: &Arc<OwnerDial>,
+        ) -> std::result::Result<ServerHandle, ControlPlaneError> {
+            // The composition root's bundle first, as `overdrive serve` builds
+            // it before `run_server` (NodeAdapters::host opens the stores).
+            let boot = self.boot_adapters(&config, dns)?;
+            // Phase 1 (D-8): the production boot-step-1 call `run_server`
+            // makes before any boot effect — `probe_guest_flow_startup` over
+            // the boot's seam, the boot's VIP range and `GUEST_NODE_PREFIX`,
+            // with its `health.startup.refused` (`guest_network.probe`). A
+            // refusal drops the bundle, which closes the stores.
+            crate::probe_guest_flow_boot(io.as_ref(), &config.vip_range).await?;
+            let mut registry = DriverRegistry::new();
+            registry.insert(Arc::new(SimDriver::new(DriverType::Vm)));
+            crate::boot_server(
+                config,
+                boot,
+                Arc::new(registry),
+                crate::GuestNetworkSource::Composed {
+                    io: Arc::clone(io) as Arc<dyn GuestFlowIo>,
+                    dial: Arc::clone(dial),
+                },
+                GuestNetworkExecWiring::new(self.clock.clone()),
+                overdrive_worker::cgroup_manager::CgroupManager::new(
+                    PathBuf::from("/sys/fs/cgroup"),
+                    Arc::new(SimCgroupFs::new()),
+                ),
+            )
+            .await
+        }
+
+        /// The node's configuration: configuration only (NO-OVERRIDE-SEAMS),
+        /// over the node's directories, the vsock listeners kernel-assigned
+        /// (PORTS-CONFIG; the owner reports what it bound, `flow_ports()`).
+        fn config(&self) -> ServerConfig {
+            let data_dir = self.dirs.path().join("data");
+            let operator_config_dir = self.dirs.path().join("conf");
+            std::fs::create_dir_all(&data_dir).expect("create data dir");
+            std::fs::create_dir_all(&operator_config_dir).expect("create config dir");
+            ServerConfig {
+                data_dir,
+                operator_config_dir,
+                vsock_ports: NodeVsockPortConfig::kernel_assigned(),
+                ..ServerConfig::new()
+            }
+        }
+
+        /// One boot's driven adapters (NO-OVERRIDE-SEAMS, STORES-IN): the
+        /// rig's one clock, seeded entropy, the simulated workflow
+        /// transport, the boot KEK, a fresh simulated observation store and
+        /// VM host state, the node's persistent stores reopened from
+        /// `config.data_dir` (the previous process, if any, released them),
+        /// a fresh workload-identity CA, the loopback dataplane composer, the
+        /// node's `SimMtlsIntercept` with the simulated enforcement factory
+        /// (built by the boot over its one `OwnerDial`, LEGS-DIAL), and
+        /// `dns`. Err: the store open's typed refusal, as the boot returns it.
+        fn boot_adapters(
+            &self,
+            config: &ServerConfig,
+            dns: Arc<TestGuestDnsFactory>,
+        ) -> std::result::Result<BootAdapters, ControlPlaneError> {
+            let entropy = Arc::new(SimEntropy::new(SEAM_SEED + u64::from(self.boots)));
+            let stores = StoreAdapters::open(config)?;
+            Ok(BootAdapters {
+                clock: self.clock.clone(),
+                entropy,
+                transport: Arc::new(SimTransport::new()),
+                kek: Arc::new(SimKek::for_boot()),
+                observation: Arc::new(SimObservationStore::single_peer(node_id(), 0)),
+                vm_host_state: Arc::new(SimVmHostState::new()),
+                stores,
+                ca: CaAdapters::host(),
+                dataplane: Arc::new(TestDataplaneComposer::new(Ipv4Addr::LOCALHOST)),
+                mtls: MtlsAdapters {
+                    intercept: Arc::clone(&self.intercept) as _,
+                    enforcement: Arc::new(SimMtlsEnforcementFactory::new()),
+                },
+                guest_dns: dns,
+            })
+        }
+
+        /// The ports the live process's owner bound (PORTS-CONFIG): `Some`
+        /// from its first `Ok` `converge_shared`, which the boot ran.
+        pub fn flow_ports(&self) -> GuestFlowPorts {
+            self.process()
+                .owner
+                .flow_ports()
+                .expect("boot step 9's converge_shared bound the owner's listeners")
+        }
+
+        /// The process dies (the model's `Crash`): no graceful drain; the
+        /// kernel keeps the shared table (`SimMtlsIntercept`'s crash script,
+        /// paired with R5-30) and the seam's node-global objects; every
+        /// process-scoped object — the owner, its holds, its flows — ends.
+        pub async fn crash(&mut self) {
+            let process = self.process.take().expect("a crash needs a live process");
+            self.intercept.script_crash_retains_table();
+            process.io.exit_process();
+            let _residue = process.server.kill_for_test().await;
+            drop(process.owner);
+            self.last_stop = Some(NodeStop::Crash);
+        }
+
+        /// The supervisor's fail-stop request has been received; the process
+        /// then ends as `serve` does on that request (the table stays).
+        pub async fn end_after_fail_stop(&mut self) -> ServeShutdownRequest {
+            let request = self.process_mut().server.shutdown_requested().await;
+            let process = self.process.take().expect("a fail-stop ends a live process");
+            self.intercept.script_crash_retains_table();
+            process.io.exit_process();
+            let _residue = process.server.kill_for_test().await;
+            drop(process.owner);
+            self.last_stop = Some(NodeStop::FailStop);
+            request
+        }
+
+        /// The fail-stop request, if the supervisor has made one, without
+        /// waiting.
+        pub fn fail_stop_requested(&mut self) -> Option<ServeShutdownRequest> {
+            use futures::FutureExt as _;
+            self.process_mut().server.shutdown_requested().now_or_never()
+        }
+
+        /// Advance the injected clock by `by` and settle.
+        pub async fn advance(&self, by: Duration) {
+            self.clock.tick(by);
+            self.settle().await;
+        }
+
+        /// Resolve when no task of the runtime is ready.
+        pub async fn settle(&self) {
+            if let Some(process) = &self.process {
+                process.io.settled().await;
+            } else {
+                tokio::task::yield_now().await;
+            }
+        }
+
+        /// Component `c`'s accept task exits (the model's `Damage(c)`).
+        pub async fn damage(&self, component: SharedGuestNetworkComponent) {
+            self.process()
+                .io
+                .fail_listener(listener_of(component), io::ErrorKind::ConnectionAborted);
+            self.settle().await;
+        }
+
+        /// Release every held post-repair or detecting audit read.
+        pub async fn release_audits(&self) {
+            while self.process().dns.pending_audits() > 0 {
+                self.process().dns.release_audit();
+                self.settle().await;
+            }
+        }
+
+        /// The held repair of `component`, if one is parked: the held
+        /// listener's check its recovery's `converge_shared` issued
+        /// (`bind_listener` on the held socket).
+        pub fn held_repair(
+            &self,
+            component: SharedGuestNetworkComponent,
+        ) -> Option<crate::guest_network::flow_io::sim::SimEffectId> {
+            self.process().io.held().into_iter().find_map(|(id, effect)| {
+                (effect.kind == SimEffectKind::BindListener
+                    && effect.target == SimEffectTarget::Listener(listener_of(component)))
+                .then_some(id)
+            })
+        }
+
+        /// `component`'s parked repair returns `Ok` (`release`: the held
+        /// socket still listens, its accept task is re-spawned) or a scripted
+        /// `Err` (the held socket is found not listening — the defect the
+        /// round-11 "Repair" contract reports as a failed recovery attempt;
+        /// nothing is closed or rebound either way).
+        pub async fn decide_repair(&self, component: SharedGuestNetworkComponent, ok: bool) {
+            let repair = self.held_repair(component).unwrap_or_else(|| {
+                panic!("{component:?}'s repair is parked at its held listener's check")
+            });
+            let seam = &self.process().io;
+            if ok {
+                seam.release(repair);
+            } else {
+                seam.fail(repair, SimFailure::Io(io::ErrorKind::InvalidInput));
+            }
+            self.settle().await;
+        }
+
+        /// The model's `LeakHold` (D-UP-3): the composed owner's `quiesce()`,
+        /// and the returned hold dropped without `restore`.
+        pub async fn leak_hold(&self) {
+            let (hold, _quiescence) = self.process().owner.quiesce().await;
+            drop(hold);
+            self.settle().await;
+        }
+
+        /// The model's `ForeignRestore` (D-UP-4, PD-1): a hold issued by a
+        /// second `QuiescenceLedger`, restored at the composed owner. Returns
+        /// the owner's answer and the issuing ledger (its `leaked()` counts
+        /// the hold the owner dropped unredeemed).
+        pub async fn restore_foreign_hold(
+            &self,
+        ) -> (std::result::Result<ForwardingRestore, QuiescenceRestoreError>, QuiescenceLedger)
+        {
+            let ledger = QuiescenceLedger::new();
+            let hold = ledger.issue();
+            let restored = self.process().owner.restore(hold).await;
+            self.settle().await;
+            (restored, ledger)
+        }
+
+        /// The `Forwarder` component's context fails `Io` (EVMOD-CTL): the
+        /// next audit reports the component damaged.
+        pub async fn damage_forwarder(&self) {
+            self.process().io.script_failure(
+                SimEffectKind::Inventory,
+                SimFailure::Forwarder(SimForwarderFailure::ContextIo(ForwarderOp::Inventory)),
+            );
+            self.settle().await;
+        }
+
+        /// The `Forwarder` repair's parked reopen (`open_forwarder`), if any.
+        pub fn held_forwarder_reopen(&self) -> Option<SimEffectId> {
+            self.process().io.held_of(SimEffectKind::OpenForwarder)
+        }
+
+        /// The kinds of every effect the seam issued, in issue order.
+        pub fn issued_kinds(&self) -> Vec<SimEffectKind> {
+            self.process().io.issued().into_iter().map(|effect| effect.kind).collect()
+        }
+
+        /// The kinds of every effect the last refused boot issued, in order.
+        pub fn refused_boot_issued_kinds(&self) -> Vec<SimEffectKind> {
+            self.refused_io
+                .as_ref()
+                .expect("a boot was refused")
+                .issued()
+                .into_iter()
+                .map(|effect| effect.kind)
+                .collect()
+        }
+
+        /// Release one parked effect and settle.
+        pub async fn release(&self, effect: SimEffectId) {
+            self.process().io.release(effect);
+            self.settle().await;
+        }
+
+        /// The owner's QPROJ-3 observation.
+        pub async fn owner_observation(&self) -> GuestOwnerObservation {
+            self.process().owner.flow_observation().await
+        }
+
+        /// The runtime supervisor's QPROJ-6 observation.
+        pub fn recovery_observation(
+            &self,
+        ) -> std::collections::BTreeMap<SharedGuestNetworkComponent, RecoveryEpisode> {
+            self.process().server.shared_network_supervisor.recovery_observation()
+        }
+
+        /// The QPROJ-7 arbiter read of the shared table.
+        pub fn table(&self) -> SimSharedTable {
+            self.intercept.shared_table_state()
+        }
+
+        /// The number of flows the owner holds (guest-opened, host-opened and
+        /// datagram associations), from the QPROJ-3 observation.
+        pub async fn flows_held(&self) -> usize {
+            self.owner_observation()
+                .await
+                .cids
+                .values()
+                .map(|cid| cid.guest_flows.len() + cid.dials.len() + cid.datagrams.len())
+                .sum()
+        }
+
+        /// `provision` the plan's allocation, then the guest opens its control
+        /// session: `ControlOpen` with the plan's launch token on the control
+        /// listener, accepted and read.
+        pub async fn provision_with_session(&self, plan: &GuestNetworkPlan) {
+            self.process().owner.provision(plan).await.expect("provision the allocation");
+            let control = GuestConnKey {
+                listener: self.flow_ports().control(),
+                peer_cid: plan.assignment().cid(),
+                peer_port: VsockPort::new(49_000),
+            };
+            let launch = plan.assignment().launch();
+            self.deliver(FlowListener::Control, control, ControlOpen { launch }.encode().to_vec())
+                .await;
+        }
+
+        /// Make one allocation Active with a live control session (lease,
+        /// `provision`, the guest's `ControlOpen`, `activate` → `Activated`),
+        /// unless the process already has one.
+        pub async fn ensure_active_cid(&mut self) {
+            if self.process().cid.is_some() {
+                return;
+            }
+            let alloc =
+                AllocationId::new(&format!("nd295-qhold-{}", self.boots)).expect("allocation id");
+            let plan = self
+                .pool
+                .assign(
+                    alloc,
+                    &[ListenPort::new(LISTEN_PORT).expect("listen port")],
+                    self.flow_ports(),
+                )
+                .expect("the rig's pool assigns a lease");
+            self.provision_with_session(&plan).await;
+            let activation = Arc::clone(&self.process().owner)
+                .activate(&plan)
+                .await
+                .expect("activate the rig's allocation");
+            assert_eq!(
+                activation,
+                ForwardingActivation::Activated,
+                "the rig activates with a live session and no hold"
+            );
+            self.process_mut().cid =
+                Some(ActiveCid { plan, next_peer_port: 50_000, next_flow_seq: 1 });
+        }
+
+        /// A guest-opened TCP flow to [`FLOW_DESTINATION`] is admitted, its
+        /// request read, installed, connected and paired (the model's
+        /// `OpenFlow`). Returns the connection key.
+        pub async fn open_guest_flow(&mut self) -> GuestConnKey {
+            self.ensure_active_cid().await;
+            let (cid, launch, peer_port, seq) = {
+                let active = self.process_mut().cid.as_mut().expect("an Active allocation");
+                let peer_port = active.next_peer_port;
+                let seq = active.next_flow_seq;
+                active.next_peer_port += 1;
+                active.next_flow_seq += 1;
+                (active.plan.assignment().cid(), active.plan.assignment().launch(), peer_port, seq)
+            };
+            self.process().io.set_route_type(*FLOW_DESTINATION.ip(), HostRouteType::Unicast);
+            let key = GuestConnKey {
+                listener: self.flow_ports().stream(),
+                peer_cid: cid,
+                peer_port: VsockPort::new(peer_port),
+            };
+            let request = FlowRequest::TcpConnect {
+                flow: FlowId::new(FlowOrigin::Guest, seq).expect("guest flow id"),
+                destination: FLOW_DESTINATION,
+                launch,
+            };
+            self.deliver(FlowListener::Stream, key, request.encode().to_vec()).await;
+            key
+        }
+
+        /// A guest connection on `listener` with `record` buffered; the seam
+        /// delivers its accept and its bytes at once (auto-delivery).
+        pub async fn deliver(&self, listener: FlowListener, key: GuestConnKey, record: Vec<u8>) {
+            self.process().io.queue_connection(listener, key, Some(record));
+            self.settle().await;
+        }
+
+        /// The Active allocation's CID and launch, if the rig opened one.
+        pub fn active_cid(&self) -> Option<(GuestCid, LaunchToken)> {
+            self.process()
+                .cid
+                .as_ref()
+                .map(|active| (active.plan.assignment().cid(), active.plan.assignment().launch()))
+        }
+
+        /// The Active allocation's plan, if the rig opened one.
+        pub fn active_plan(&self) -> Option<&GuestNetworkPlan> {
+            self.process().cid.as_ref().map(|active| &active.plan)
+        }
+    }
+
+    /// One `serve` process composed over the test-local [`TestSharedOwner`]
+    /// at the owner port (FHOLD-CHECK): the production supervisor, boot and
+    /// EXEC gate, with an owner whose `restore` answers `ForeignHold` when
+    /// scripted. No seam is added: the owner is the existing driven port of
+    /// `run_server_with_obs_and_drivers`, which takes the node's
+    /// `BootAdapters` (the stores and the CA included, STORES-IN).
+    pub struct TestOwnerProcess {
+        pub owner: Arc<TestSharedOwner>,
+        pub server: ServerHandle,
+        pub clock: Arc<SimClock>,
+        _dirs: TempDir,
+    }
+
+    impl TestOwnerProcess {
+        /// Boot over `owner`; panics on a boot refusal (the cell's
+        /// precondition).
+        pub async fn boot(owner: Arc<TestSharedOwner>) -> Self {
+            let mut node = ComposedNode::fresh();
+            node.boots += 1;
+            let clock = Arc::clone(&node.clock);
+            let config = node.config();
+            let boot = node
+                .boot_adapters(&config, Arc::new(TestGuestDnsFactory::default()))
+                .expect("the node's stores open over a fresh data directory");
+            let mut registry = DriverRegistry::new();
+            registry.insert(Arc::new(SimDriver::new(DriverType::Vm)));
+            let server = run_server_with_obs_and_drivers(
+                config,
+                boot,
+                Arc::new(registry),
+                Arc::clone(&owner) as Arc<dyn crate::guest_network::SharedGuestNetworkOwner>,
+                GuestNetworkExecWiring::new(clock.clone()),
+                overdrive_worker::cgroup_manager::CgroupManager::new(
+                    PathBuf::from("/sys/fs/cgroup"),
+                    Arc::new(SimCgroupFs::new()),
+                ),
+            )
+            .await
+            .expect("the composition over the test-local owner boots");
+            let dirs = std::mem::replace(&mut node.dirs, TempDir::new().expect("tempdir"));
+            Self { owner, server, clock, _dirs: dirs }
+        }
+
+        /// Advance the injected clock by `by` and let every ready task run.
+        pub async fn advance(&self, by: Duration) {
+            self.clock.tick(by);
+            for _ in 0..64 {
+                tokio::task::yield_now().await;
+            }
+        }
+
+        /// The supervisor's fail-stop request, if made, without waiting.
+        pub fn fail_stop_requested(&mut self) -> Option<ServeShutdownRequest> {
+            use futures::FutureExt as _;
+            self.server.shutdown_requested().now_or_never()
+        }
+    }
+
+    fn node_id() -> NodeId {
+        NodeId::new("nd295-qhold-node").expect("node id")
     }
 }

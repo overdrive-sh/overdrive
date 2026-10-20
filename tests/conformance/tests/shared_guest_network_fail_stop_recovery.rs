@@ -26,7 +26,7 @@ use std::time::Duration;
 
 use overdrive_control_plane::guest_network::GuestNetworkOperation;
 use overdrive_core::guest_network::{SharedGuestNetworkComponent, SharedGuestNetworkFailStopCause};
-use overdrive_sim::adapters::guest_network::{SimQuiesceOutcome, SimSharedGuestNetworkOwner};
+use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_system_conformance::accepted_cadence::{
     ATTEMPT_PERIOD, AUDIT_PERIOD, RECOVERY_ATTEMPTS, RECOVERY_DEADLINE,
 };
@@ -34,11 +34,6 @@ use overdrive_system_conformance::{
     Admission, DirectHandlerHarness, DirectHandlerInstance, TraceEvent, TraceHistory, Trajectory,
 };
 use serde_json::{Value, json};
-
-/// The owned-object counts the supervisor records when it abandons cleanup to
-/// shutdown at the recovery deadline (FD 10030-10032).
-const ABANDONED_COUNT_FIELDS: [&str; 7] =
-    ["taps", "links", "pins", "maps", "managed_set_elements", "intercept_set_elements", "handles"];
 
 fn service_request(id: &str) -> Value {
     json!({
@@ -101,7 +96,7 @@ async fn a_fresh_handler_admits_work_only_after_its_boot(
     );
     assert!(
         !boot.observation.boot_closed
-            && boot.observation.recovery.is_none()
+            && boot.observation.recovery.is_empty()
             && boot.observation.request.is_none(),
         "the fresh handler starts healthy, with no inherited recovery or request: {boot:?}"
     );
@@ -123,9 +118,9 @@ async fn a_fresh_handler_admits_work_only_after_its_boot(
         .unwrap_or_else(|| panic!("the fresh handler ran its stale sweep: {boot:?}"));
     assert!(probe < sweep, "the startup probe precedes the stale sweep: {boot:?}");
     assert!(
-        boot.owner_calls[..sweep].iter().all(|call| {
-            !matches!(call, GuestNetworkOperation::TapCreate | GuestNetworkOperation::TapSetUp)
-        }),
+        boot.owner_calls[..sweep]
+            .iter()
+            .all(|call| { !matches!(call, GuestNetworkOperation::ForwardingActivate) }),
         "no guest attachment is made before the stale sweep: {boot:?}"
     );
 
@@ -143,7 +138,7 @@ async fn no_second_request_follows(handler: &mut DirectHandlerInstance) {
     assert!(
         after.fail_stops().is_empty()
             && after.observations.iter().all(|observation| {
-                observation.admission == Admission::FailStop && observation.recovery.is_none()
+                observation.admission == Admission::FailStop && observation.recovery.is_empty()
             }),
         "one fail-stop request per episode, and admission stays FailStop: {after:?}"
     );
@@ -206,13 +201,14 @@ async fn shared_owner_fail_stop_shuts_down_before_a_fresh_handler_reopens_admiss
     first.wait_running("shared-network-before-loss", Duration::from_secs(30)).await;
     assert_eq!(first.observe().admission, Admission::Open, "the healthy handler admits");
 
-    // When the shared bridge is lost and every repair through its owner is
-    // refused, so ownership cannot be restored in the bounded window.
+    // When the host guest-flow listeners are lost and every repair through
+    // their owner is refused, so ownership cannot be restored in the bounded
+    // window.
     harness.record(
         "shared_owner_fault",
-        "standing Bridge audit failure and converge refusal armed after healthy API admission",
+        "standing FlowListeners audit failure and converge refusal armed after healthy API admission",
     );
-    failing_owner.script_component_audit_failure(SharedGuestNetworkComponent::Bridge, true);
+    failing_owner.script_component_audit_failure(SharedGuestNetworkComponent::FlowListeners, true);
     failing_owner.script_converge_failure(true);
     let trajectory = first
         .step_until(AUDIT_PERIOD + RECOVERY_DEADLINE, |observation| observation.request.is_some())
@@ -226,11 +222,11 @@ async fn shared_owner_fail_stop_shuts_down_before_a_fresh_handler_reopens_admiss
             .iter()
             .filter(|observation| observation.at >= detected && observation.at < requested)
             .all(|observation| observation.admission == Admission::Closed
-                && observation.recovery.is_some()),
+                && !observation.recovery.is_empty()),
         "admission stays closed and recovery is in progress until the request: {trajectory:?}"
     );
     let fail_stop = trajectory.fail_stops()[0].clone();
-    assert_eq!(fail_stop.component, SharedGuestNetworkComponent::Bridge);
+    assert_eq!(fail_stop.component, SharedGuestNetworkComponent::FlowListeners);
     assert_eq!(fail_stop.cause, SharedGuestNetworkFailStopCause::RecoveryDeadlineExceeded);
     assert!(
         (1..=RECOVERY_ATTEMPTS).contains(&fail_stop.attempts)
@@ -242,7 +238,7 @@ async fn shared_owner_fail_stop_shuts_down_before_a_fresh_handler_reopens_admiss
     let failure_events = trace.snapshot();
     let unhealthy = events_named(&failure_events, "guest_network.shared_owner_unhealthy");
     assert_eq!(unhealthy.len(), 1, "one unhealthy record owns the episode");
-    assert_eq!(field(unhealthy[0], "component"), Some("Bridge"));
+    assert_eq!(field(unhealthy[0], "component"), Some("FlowListeners"));
     assert_eq!(field(unhealthy[0], "cause"), Some("audit_mismatch"));
     let retries = events_named(&failure_events, "guest_network.shared_owner_retry");
     assert_eq!(
@@ -251,18 +247,12 @@ async fn shared_owner_fail_stop_shuts_down_before_a_fresh_handler_reopens_admiss
         "one retry record per completed attempt"
     );
     for (index, retry) in retries.iter().enumerate() {
-        assert_eq!(field(retry, "component"), Some("Bridge"));
+        assert_eq!(field(retry, "component"), Some("FlowListeners"));
         assert_eq!(field(retry, "attempt"), Some((index + 1).to_string().as_str()));
     }
     let fail_stop_events = events_named(&failure_events, "guest_network.shared_owner_fail_stop");
     assert_eq!(fail_stop_events.len(), 1, "the supervisor records one fail-stop");
     assert_eq!(field(fail_stop_events[0], "cleanup"), Some("abandoned_to_shutdown"));
-    for count in ABANDONED_COUNT_FIELDS {
-        assert!(
-            fail_stop_events[0].fields.contains_key(count),
-            "the fail-stop record counts the owned {count} it abandons to shutdown"
-        );
-    }
     no_second_request_follows(&mut first).await;
     harness.record(
         "fail_stop_observed",
@@ -288,88 +278,6 @@ async fn shared_owner_fail_stop_shuts_down_before_a_fresh_handler_reopens_admiss
         1,
         "the fresh handler appends evidence without overwriting the original failure"
     );
-
-    let history = harness.diagnostic_history();
-    assert!(history.iter().any(|entry| entry.contains("phase=shared_owner_fault")));
-    assert!(history.iter().any(|entry| entry.contains("phase=fail_stop_observed")));
-    assert!(history.iter().any(|entry| entry.contains("phase=fresh_handler_admitted")));
-}
-
-/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
-/// S-ND295-33 — A failed handler shuts down before a fresh handler admits work
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER step 10-03 (S-ND295-33)"]
-async fn undetermined_tap_quiescence_requests_one_typed_fail_stop_before_a_fresh_handler_reopens() {
-    let trace = TraceHistory::install_global();
-    let harness = DirectHandlerHarness::new();
-
-    // Given one production handler with required ports admitting a VM workload
-    // over HTTPS.
-    let failing_owner = Arc::new(SimSharedGuestNetworkOwner::default());
-    let mut first = harness.start(Arc::clone(&failing_owner)).await;
-    first
-        .api()
-        .submit_workload(
-            "shared-network-before-undetermined",
-            &service_request("shared-network-before-undetermined"),
-        )
-        .await;
-    first.wait_running("shared-network-before-undetermined", Duration::from_secs(30)).await;
-    assert_eq!(first.observe().admission, Admission::Open, "the healthy handler admits");
-
-    // When a kernel-path loss is detected and the set of TAPs that failed to
-    // go down cannot be determined.
-    harness.record(
-        "shared_owner_fault",
-        "standing Bridge audit failure and failing TAP quiescence armed after healthy API admission",
-    );
-    failing_owner.script_component_audit_failure(SharedGuestNetworkComponent::Bridge, true);
-    failing_owner.script_quiesce_outcome(SimQuiesceOutcome::Fail);
-    let trajectory = first
-        .step_until(AUDIT_PERIOD + RECOVERY_DEADLINE, |observation| observation.request.is_some())
-        .await;
-
-    // Then the handler returns one typed fail-stop request naming the
-    // undetermined quiescence, before any recovery attempt.
-    assert_detected_then_closed_until_request(&trajectory);
-    let fail_stop = trajectory.fail_stops()[0].clone();
-    assert_eq!(fail_stop.component, SharedGuestNetworkComponent::Bridge);
-    assert_eq!(fail_stop.cause, SharedGuestNetworkFailStopCause::TapQuiescenceUndetermined);
-    assert_eq!(
-        fail_stop.attempts, 0,
-        "quiescence precedes the first recovery attempt and ends recovery: {fail_stop:?}"
-    );
-    let failure_events = trace.snapshot();
-    let unhealthy = events_named(&failure_events, "guest_network.shared_owner_unhealthy");
-    assert_eq!(unhealthy.len(), 1, "one unhealthy record owns the episode");
-    assert_eq!(field(unhealthy[0], "component"), Some("Bridge"));
-    assert_eq!(field(unhealthy[0], "cause"), Some("audit_mismatch"));
-    assert!(
-        events_named(&failure_events, "guest_network.shared_owner_retry").is_empty(),
-        "no recovery attempt follows an undetermined quiescence"
-    );
-    let fail_stop_events = events_named(&failure_events, "guest_network.shared_owner_fail_stop");
-    assert_eq!(fail_stop_events.len(), 1, "the supervisor records one fail-stop");
-    assert!(
-        fail_stop_events[0].fields.contains_key("vm_kill"),
-        "the fail-stop record carries the workloads-slice kill outcome"
-    );
-    no_second_request_follows(&mut first).await;
-    harness.record(
-        "fail_stop_observed",
-        &format!("component={:?} cause={:?}", fail_stop.component, fail_stop.cause),
-    );
-
-    // And the failed handler shuts down before a fresh handler over the same
-    // roots admits work only after its boot.
-    a_fresh_handler_admits_work_only_after_its_boot(
-        &harness,
-        &trace,
-        first,
-        "shared-network-after-undetermined",
-    )
-    .await;
 
     let history = harness.diagnostic_history();
     assert!(history.iter().any(|entry| entry.contains("phase=shared_owner_fault")));

@@ -1,0 +1,14 @@
+{
+ "item": "tls",
+ "verdict": "done",
+ "elapsed_s": 3.0,
+ "pass": 18,
+ "fail": 0,
+ "kernel_fault": false,
+ "suite_done": [
+  "SUITE_DONE suite=tls rc=0"
+ ],
+ "guest_uname": [
+  "7.0.0-29-generic"
+ ]
+}

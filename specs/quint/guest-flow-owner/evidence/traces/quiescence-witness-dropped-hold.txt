@@ -1,26 +1,24 @@
-# quiescence-witness-dropped-hold: counterexample, 4 state(s) (from the TLC trace)
+# quiescence-witness-dropped-hold: counterexample, 2 state(s) (from the TLC trace)
 
 State 1
   dmg = [C1 |-> FALSE, C2 |-> FALSE]
-  flowsOpen = 0
+  flowsOpen = 1
+  conf_step = [InitDown |-> [tag |-> "UNIT"]]
   repLeft = 1
   att = [C1 |-> 0, C2 |-> 0]
   up = TRUE
+  foreign = FALSE
   rec = [C1 |-> "idle", C2 |-> "idle"]
   table = TRUE
   stop = "none"
   cnt = 0
-  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE ]
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
   latch = FALSE
+  leaked = 0
 
-State 2 [Damage]
-  dmg = [C1 |-> TRUE, C2 |-> FALSE]
-
-State 3 [RecQuiesce]
-  rec = [C1 |-> "held", C2 |-> "idle"]
+State 2 [LeakHold]
+  flowsOpen = 0
   cnt = 1
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
   latch = TRUE
-
-State 4 [RecDropHold]
-  rec = [C1 |-> "dropped", C2 |-> "idle"]
-  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE ]
+  leaked = 1

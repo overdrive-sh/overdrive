@@ -1,0 +1,168 @@
+c[?7l[2J[0mSeaBIOS (version 1.17.0-debian-1.17.0-1ubuntu1)
+Booting from ROM..c[?7l[2JL1_BOOT uname_r=7.0.0-29-generic
+1
+crw-------    1 0        0          10, 232 Oct 16 22:49 /dev/kvm
+crw-------    1 0        0          10, 241 Oct 16 22:49 /dev/vhost-vsock
+crw-------    1 0        0          10, 263 Oct 16 22:49 /dev/ovd_fwd
+ovd_fwd 32768 0 [permanent], Live 0xffffffffc04fc000 (OE)
+HOST_START uname=7.0.0-29-generic
+MODULE abi=1 flags=1 (permanent=1)
+RMMOD host: ret=-1 errno=16 (Device or resource busy)
+VM_UP guest agent answers; guest rmmod: OK -1 errno=16
+RESULT clean-g-first                                trials=5 pass=5 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 5 5 0 0 0
+INV host: live=0/0 queued=0 attached=5 completed=5 aborted=0 unclassified_eof=0 ab_peer=0 ab_socket=0 ab_detached=0
+RESULT clean-r-first                                trials=5 pass=5 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 10 10 0 0 0
+INV host: live=0/0 queued=0 attached=10 completed=10 aborted=0 unclassified_eof=0 ab_peer=0 ab_socket=0 ab_detached=0
+RESULT clean-simul                                  trials=5 pass=5 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 15 15 0 0 0
+INV host: live=0/0 queued=0 attached=15 completed=15 aborted=0 unclassified_eof=0 ab_peer=0 ab_socket=0 ab_detached=0
+RESULT clean-then-trailing-0x3                      trials=5 pass=5 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 20 20 0 0 0
+INV host: live=0/0 queued=0 attached=20 completed=20 aborted=0 unclassified_eof=0 ab_peer=0 ab_socket=0 ab_detached=0
+RESULT clean-fullend-0x2-0x3-hostlag                trials=5 pass=5 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 25 25 0 0 0
+INV host: live=0/0 queued=0 attached=25 completed=25 aborted=0 unclassified_eof=0 ab_peer=0 ab_socket=0 ab_detached=0
+RESULT g-rst-both-dirs                              trials=5 pass=5 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 30 25 5 0 0
+INV host: live=0/0 queued=0 attached=30 completed=25 aborted=5 unclassified_eof=0 ab_peer=5 ab_socket=0 ab_detached=0
+FAIL g-rst-hg-only trial=0: R socket tcp state 8 after wait, want CLOSE (reset);host records: got 0 want 1;guest records: got 0 want 1
+FAIL g-rst-hg-only trial=1: R socket tcp state 8 after wait, want CLOSE (reset);host rec id=31 kind=1 cause=0 side=0 err=0 ab=12262 ba=13881 want(kind=2 cause=1 side=0 err=0 ab=-1 ba=-1);guest rec [id=31 kind=1 cause=0 side=0 err=0 ab=12262 ba=13881] want(kind=2 cause=2 side=0 err=104 ab=-1 ba=-1)
+FAIL g-rst-hg-only trial=2: R socket tcp state 8 after wait, want CLOSE (reset);host rec id=32 kind=1 cause=0 side=0 err=0 ab=30899 ba=13442 want(kind=2 cause=1 side=0 err=0 ab=-1 ba=-1);guest rec [id=32 kind=1 cause=0 side=0 err=0 ab=30899 ba=13442] want(kind=2 cause=2 side=0 err=104 ab=-1 ba=-1)
+FAIL g-rst-hg-only trial=3: R socket tcp state 8 after wait, want CLOSE (reset);host rec id=33 kind=1 cause=0 side=0 err=0 ab=21861 ba=0 want(kind=2 cause=1 side=0 err=0 ab=-1 ba=-1);guest rec [id=33 kind=1 cause=0 side=0 err=0 ab=21861 ba=0] want(kind=2 cause=2 side=0 err=104 ab=-1 ba=-1)
+FAIL g-rst-hg-only trial=4: R socket tcp state 8 after wait, want CLOSE (reset);host rec id=34 kind=1 cause=0 side=0 err=0 ab=0 ba=14650 want(kind=2 cause=1 side=0 err=0 ab=-1 ba=-1);guest rec [id=34 kind=1 cause=0 side=0 err=0 ab=0 ba=14650] want(kind=2 cause=2 side=0 err=104 ab=-1 ba=-1)
+RESULT g-rst-hg-only                                trials=5 pass=0 fail=5 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 1 35 30 5 0 0
+INV host: live=0/0 queued=1 attached=35 completed=30 aborted=5 unclassified_eof=0 ab_peer=5 ab_socket=0 ab_detached=0
+FAIL g-close-unread trial=0: guest records: got 2 want 1;host: 1 extra record(s) after the end
+RESULT g-close-unread                               trials=5 pass=4 fail=1 extra=[1 0 0 0 0 0]
+INV guest: OK 0 0 0 40 30 10 0 0
+INV host: live=0/0 queued=0 attached=40 completed=30 aborted=10 unclassified_eof=0 ab_peer=10 ab_socket=0 ab_detached=0
+RESULT r-rst-both-dirs                              trials=5 pass=5 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 45 30 15 0 5
+INV host: live=0/0 queued=0 attached=45 completed=30 aborted=15 unclassified_eof=0 ab_peer=10 ab_socket=5 ab_detached=0
+FAIL r-rst-gh-only trial=0: G socket tcp state 8 after wait, want CLOSE (reset);host records: got 0 want 1;guest records: got 0 want 1
+FAIL r-rst-gh-only trial=1: G socket tcp state 8 after wait, want CLOSE (reset);host rec id=46 kind=1 cause=0 side=0 err=0 ab=2078 ba=20366 want(kind=2 cause=2 side=1 err=104 ab=-1 ba=-1);guest rec [id=46 kind=1 cause=0 side=0 err=0 ab=2078 ba=20366] want(kind=2 cause=1 side=1 err=0 ab=-1 ba=-1)
+FAIL r-rst-gh-only trial=2: G socket tcp state 8 after wait, want CLOSE (reset);host rec id=47 kind=1 cause=0 side=0 err=0 ab=16009 ba=12980 want(kind=2 cause=2 side=1 err=104 ab=-1 ba=-1);guest rec [id=47 kind=1 cause=0 side=0 err=0 ab=16009 ba=12980] want(kind=2 cause=1 side=1 err=0 ab=-1 ba=-1)
+FAIL r-rst-gh-only trial=3: G socket tcp state 8 after wait, want CLOSE (reset);host rec id=48 kind=1 cause=0 side=0 err=0 ab=24391 ba=1081 want(kind=2 cause=2 side=1 err=104 ab=-1 ba=-1);guest rec [id=48 kind=1 cause=0 side=0 err=0 ab=24391 ba=1081] want(kind=2 cause=1 side=1 err=0 ab=-1 ba=-1)
+FAIL r-rst-gh-only trial=4: G socket tcp state 8 after wait, want CLOSE (reset);host rec id=49 kind=1 cause=0 side=0 err=0 ab=30110 ba=13301 want(kind=2 cause=2 side=1 err=104 ab=-1 ba=-1);guest rec [id=49 kind=1 cause=0 side=0 err=0 ab=30110 ba=13301] want(kind=2 cause=1 side=1 err=0 ab=-1 ba=-1)
+RESULT r-rst-gh-only                                trials=5 pass=0 fail=5 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 1 50 35 15 0 5
+INV host: live=0/0 queued=1 attached=50 completed=35 aborted=15 unclassified_eof=0 ab_peer=10 ab_socket=5 ab_detached=0
+FAIL r-close-unread trial=0: G saw clean EOF after a reset: rx=3849;host rec id=50 kind=1 cause=0 side=0 err=0 ab=27453 ba=20139 want(kind=2 cause=2 side=1 err=104 ab=-1 ba=-1);guest rec [id=50 kind=1 cause=0 side=0 err=0 ab=27453 ba=20139] want(kind=2 cause=1 side=1 err=0 ab=-1 ba=-1)
+FAIL r-close-unread trial=1: G saw clean EOF after a reset: rx=3887;host rec id=51 kind=1 cause=0 side=0 err=0 ab=911 ba=3849 want(kind=2 cause=2 side=1 err=104 ab=-1 ba=-1);guest rec [id=51 kind=1 cause=0 side=0 err=0 ab=911 ba=3849] want(kind=2 cause=1 side=1 err=0 ab=-1 ba=-1)
+FAIL r-close-unread trial=2: G saw clean EOF after a reset: rx=2842;host rec id=52 kind=1 cause=0 side=0 err=0 ab=3096 ba=3887 want(kind=2 cause=2 side=1 err=104 ab=-1 ba=-1);guest rec [id=52 kind=1 cause=0 side=0 err=0 ab=3096 ba=3887] want(kind=2 cause=1 side=1 err=0 ab=-1 ba=-1)
+FAIL r-close-unread trial=3: G saw clean EOF after a reset: rx=3741;host rec id=53 kind=1 cause=0 side=0 err=0 ab=1490 ba=2842 want(kind=2 cause=2 side=1 err=104 ab=-1 ba=-1);guest rec [id=53 kind=1 cause=0 side=0 err=0 ab=1490 ba=2842] want(kind=2 cause=1 side=1 err=0 ab=-1 ba=-1)
+FAIL r-close-unread trial=4: G saw clean EOF after a reset: rx=324;host rec id=54 kind=1 cause=0 side=0 err=0 ab=2189 ba=3741 want(kind=2 cause=2 side=1 err=104 ab=-1 ba=-1);guest rec [id=54 kind=1 cause=0 side=0 err=0 ab=2189 ba=3741] want(kind=2 cause=1 side=1 err=0 ab=-1 ba=-1)
+RESULT r-close-unread                               trials=5 pass=0 fail=5 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 1 55 40 15 0 5
+INV host: live=0/0 queued=1 attached=55 completed=40 aborted=15 unclassified_eof=0 ab_peer=10 ab_socket=5 ab_detached=0
+FAIL host-abort trial=0: guest records: got 2 want 1;host: 1 extra record(s) after the end
+RESULT host-abort                                   trials=5 pass=4 fail=1 extra=[1 0 0 0 0 0]
+INV guest: OK 0 0 0 60 40 20 0 10
+INV host: live=0/0 queued=0 attached=60 completed=40 aborted=20 unclassified_eof=0 ab_peer=10 ab_socket=5 ab_detached=5
+RESULT guest-abort                                  trials=5 pass=5 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 65 40 25 0 10
+INV host: live=0/0 queued=0 attached=65 completed=40 aborted=25 unclassified_eof=0 ab_peer=15 ab_socket=5 ab_detached=5
+RESULT guest-abort-direct0x3-hostdir-closed         trials=5 pass=5 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 70 40 30 0 10
+INV host: live=0/0 queued=0 attached=70 completed=40 aborted=30 unclassified_eof=0 ab_peer=20 ab_socket=5 ab_detached=5
+RESULT guest-abort-0x2then0x3-hostdir-open          trials=5 pass=5 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 75 40 35 0 10
+INV host: live=0/0 queued=0 attached=75 completed=40 aborted=35 unclassified_eof=0 ab_peer=25 ab_socket=5 ab_detached=5
+RESULT host-abort-direct0x3-guestdir-closed         trials=5 pass=5 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 80 40 40 0 15
+INV host: live=0/0 queued=0 attached=80 completed=40 aborted=40 unclassified_eof=0 ab_peer=25 ab_socket=5 ab_detached=10
+RESULT host-abort-0x2then0x3-guestdir-open          trials=5 pass=5 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 85 40 45 0 20
+INV host: live=0/0 queued=0 attached=85 completed=40 aborted=45 unclassified_eof=0 ab_peer=25 ab_socket=5 ab_detached=15
+FAIL dial-watch-halfclose trial=0: guest records 0 want 1
+RESULT dial-watch-halfclose                         trials=5 pass=4 fail=1 extra=[0 5 0 0 0 0]
+INV guest: OK 0 0 1 90 40 50 0 25
+INV host: live=0/0 queued=0 attached=90 completed=40 aborted=45 unclassified_eof=0 ab_peer=25 ab_socket=5 ab_detached=15
+RESULT dial-watch-halfclose-recordcheck-at-end      trials=5 pass=5 fail=0 extra=[0 0 5 0 0 0]
+INV guest: OK 0 0 1 95 40 55 0 30
+INV host: live=0/0 queued=0 attached=95 completed=40 aborted=45 unclassified_eof=0 ab_peer=25 ab_socket=5 ab_detached=15
+FAIL dial-watch-reset trial=0: guest records 2 want 1
+RESULT dial-watch-reset                             trials=5 pass=4 fail=1 extra=[0 5 0 0 5 0]
+INV guest: OK 0 0 0 100 40 60 0 30
+INV host: live=0/0 queued=0 attached=100 completed=40 aborted=45 unclassified_eof=0 ab_peer=25 ab_socket=5 ab_detached=15
+RESULT dial-watch-reset-poll                        trials=5 pass=5 fail=0 extra=[0 0 5 0 5 0]
+INV guest: OK 0 0 0 105 40 65 0 30
+INV host: live=0/0 queued=0 attached=105 completed=40 aborted=45 unclassified_eof=0 ab_peer=25 ab_socket=5 ab_detached=15
+FAIL dial-watch-halfclose-then-reset trial=0: guest records 0 want 1
+RESULT dial-watch-halfclose-then-reset              trials=5 pass=4 fail=1 extra=[0 5 0 0 0 0]
+INV guest: OK 0 0 1 110 40 70 0 35
+INV host: live=0/0 queued=0 attached=110 completed=40 aborted=45 unclassified_eof=0 ab_peer=25 ab_socket=5 ab_detached=15
+FAIL dial-watch-hostdrop trial=0: guest records 2
+RESULT dial-watch-hostdrop                          trials=5 pass=4 fail=1 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 115 40 75 0 40
+INV host: live=0/0 queued=0 attached=115 completed=40 aborted=45 unclassified_eof=0 ab_peer=25 ab_socket=5 ab_detached=15
+RESULT storm-g-rst                                  trials=2 pass=2 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 211 40 171 0 40
+INV host: live=0/0 queued=0 attached=211 completed=40 aborted=141 unclassified_eof=0 ab_peer=121 ab_socket=5 ab_detached=15
+RESULT storm-r-rst                                  trials=2 pass=2 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 307 40 267 0 136
+INV host: live=0/0 queued=0 attached=307 completed=40 aborted=237 unclassified_eof=0 ab_peer=121 ab_socket=101 ab_detached=15
+RESULT ctx-release-host                             trials=2 pass=2 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 339 40 299 0 168
+INV host: live=0/0 queued=0 attached=0 completed=0 aborted=0 unclassified_eof=0 ab_peer=0 ab_socket=0 ab_detached=0
+RESULT ctx-release-guest                            trials=2 pass=2 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 0 0 0 0 0
+INV host: live=0/0 queued=0 attached=32 completed=0 aborted=32 unclassified_eof=0 ab_peer=32 ab_socket=0 ab_detached=0
+GUEST_DMESG_BAD_LINES OK 0
+HOST_DMESG_BAD_LINES 0
+HOST_DONE
+L1_EVEND_EXIT=0
+--- L1 dmesg tail
+[    0.562757] Loaded X.509 cert 'Build time autogenerated kernel key: 454b3e9802e3c39a997a1e8863aaf8b3df15fbc0'
+[    0.562761] ima: Allocated hash algorithm: sha256
+[    0.562776] ima: No architecture policies found
+[    0.562800] evm: Initialising EVM extended attributes:
+[    0.562802] evm: security.selinux
+[    0.562804] evm: security.SMACK64
+[    0.562806] evm: security.SMACK64EXEC
+[    0.562808] evm: security.SMACK64TRANSMUTE
+[    0.562809] evm: security.SMACK64MMAP
+[    0.562811] evm: security.apparmor
+[    0.562813] evm: security.ima
+[    0.562814] evm: security.capability
+[    0.562816] evm: HMAC attrs: 0x1
+[    0.563154] PM:   Magic number: 14:350:856
+[    0.563449] RAS: Correctable Errors collector initialized.
+[    0.563758] clk: Disabling unused clocks
+[    0.563761] PM: genpd: Disabling unused power domains
+[    0.565582] Freeing unused decrypted memory: 2028K
+[    0.566309] Freeing unused kernel image (initmem) memory: 5292K
+[    0.566323] Write protecting the kernel read-only data: 43008k
+[    0.566852] Freeing unused kernel image (text/rodata gap) memory: 776K
+[    0.567203] Freeing unused kernel image (rodata/data gap) memory: 1668K
+[    0.630193] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.630205] Run /init as init process
+[    0.630207]   with arguments:
+[    0.630210]     /init
+[    0.630212]   with environment:
+[    0.630214]     HOME=/
+[    0.630216]     TERM=linux
+[    0.641459] NET: Registered PF_VSOCK protocol family
+[    0.763710] kvm_amd: TSC scaling supported
+[    0.763719] kvm_amd: Nested Virtualization enabled
+[    0.763722] kvm_amd: Nested Paging enabled
+[    0.763727] kvm_amd: LBR virtualization supported
+[    0.763731] kvm_amd: Virtual VMLOAD VMSAVE supported
+[    0.763733] kvm_amd: Virtual GIF supported
+[    0.763734] kvm_amd: Virtual NMI enabled
+[    0.785468] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.785482] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+[    0.786428] ovd_fwd: loaded (permanent, abi 1, hazard=0 work_delay_us=0)
+--- guest serial tail
+GUEST_BOOT uname_r=7.0.0-29-generic
+
+GUEST_READY
+
+AGENT_READY
+
+--- ch.log tail
+ovd_fwd 32768 0 [permanent], Live 0xffffffffc04fc000 (OE)
+[   59.895611] reboot: Power down

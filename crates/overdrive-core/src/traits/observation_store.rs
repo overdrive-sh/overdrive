@@ -2161,20 +2161,18 @@ pub trait ObservationStore: Send + Sync + 'static {
     ///   it never invents indices.
     ///
     /// # Postconditions
-    /// - On `Ok(())`, the row is durable: a subsequent
-    ///   [`Self::list_probe_results_for_alloc`] call MUST include the
-    ///   written row IFF its `last_observed_at_unix_ms` dominates the
-    ///   prior row at the composite primary key
-    ///   `(alloc_id, role, probe_idx)`.
-    /// - When the write is accepted as the LWW winner, the store emits
-    ///   exactly one live [`SubscriptionEvent::Row`] carrying
-    ///   [`ObservationRow::ProbeResult`] **after** the durable commit. A
-    ///   stale or equal write emits no event, and a failed transaction emits
-    ///   no event.
-    /// - LWW resolution on `last_observed_at_unix_ms`: a write whose
-    ///   timestamp does NOT strictly exceed the existing row's
-    ///   timestamp at the same `(alloc_id, role, probe_idx)` MUST NOT
-    ///   mutate state.
+    /// - On `Ok(())` the merge outcome is durable: a later
+    ///   [`Self::list_probe_results_for_alloc`] returns the written row iff no
+    ///   row, or an undecodable row, was stored at `(alloc_id, role, probe_idx)`,
+    ///   or the written row's `run_seq` is strictly greater than the stored
+    ///   row's. `last_observed_at_unix_ms` does not decide the merge.
+    /// - An accepted write emits exactly one live [`SubscriptionEvent::Row`]
+    ///   carrying [`ObservationRow::ProbeResult`], after the durable commit. A
+    ///   write whose `run_seq` is equal to or smaller than the stored row's
+    ///   changes no state and emits no event.
+    /// - On `Err(_)` the call changed no state and emitted no
+    ///   [`SubscriptionEvent`]: the row stored at the key is the row stored
+    ///   before the call, and a later write is merged against that row.
     /// - `role` is load-bearing in the key (ADR-0080 § D2). Because
     ///   `probe_idx` is per-role, an implementation that omits `role`
     ///   makes `(alloc, Startup, 0)`, `(alloc, Readiness, 0)` and
@@ -2188,9 +2186,11 @@ pub trait ObservationStore: Send + Sync + 'static {
     ///   live spec policy.
     ///
     /// # Edge cases
-    /// - Concurrent writes for the same `(alloc_id, role, probe_idx)`
-    ///   with identical `last_observed_at_unix_ms`: the second write
-    ///   loses (strict-dominate rule). Idempotent.
+    /// - Two writes for the same `(alloc_id, role, probe_idx)` with an
+    ///   identical `run_seq`: the second write loses (strictly-greater
+    ///   rule). Idempotent. A later `run_seq` with an earlier
+    ///   `last_observed_at_unix_ms` (a backward wall-clock step) is
+    ///   accepted.
     /// - Two rows differing ONLY in `role` (same alloc, same
     ///   `probe_idx`) are distinct rows and MUST both survive — the
     ///   production shape for a Service declaring one startup and one
@@ -2202,7 +2202,8 @@ pub trait ObservationStore: Send + Sync + 'static {
     /// # Observable invariants
     /// - For any `(alloc_id, role, probe_idx)`,
     ///   `list_probe_results_for_alloc(alloc_id)` returns exactly one
-    ///   row per distinct `(role, probe_idx)` pair — the LWW winner.
+    ///   row per distinct `(role, probe_idx)` pair — the row with the
+    ///   greatest `run_seq` written.
     /// - `write_probe_result` is the ONLY mutator of the probe-result
     ///   table; no other trait method writes probe rows.
     async fn write_probe_result(&self, row: ProbeResultRow) -> Result<(), ObservationStoreError>;

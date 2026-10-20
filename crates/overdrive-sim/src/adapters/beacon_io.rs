@@ -54,12 +54,17 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use async_trait::async_trait;
-use overdrive_core::guest_transport::LaunchToken;
+use overdrive_core::guest_transport::{LaunchToken, VsockListenPort};
 use overdrive_core::vm::beacon::{BeaconConnKey, BeaconIo, BeaconSocket};
+use overdrive_core::vm::config::VsockPort;
 use parking_lot::Mutex;
 use tokio::sync::Notify;
 
 use super::vmm::SimVmm;
+
+/// The port a kernel-assigned sim bind takes (above the reserved range, as
+/// a `VMADDR_PORT_ANY` bind's is; deterministic).
+const SIM_ASSIGNED_BEACON_PORT: VsockPort = VsockPort::new(49_234);
 
 /// The longest beacon line, in bytes, without its terminator (DG-4).
 pub const SIM_BEACON_LINE_MAX: usize = 4_096;
@@ -106,7 +111,8 @@ struct Conn {
 
 #[derive(Debug, Default)]
 struct State {
-    bound: bool,
+    /// The port the first successful `bind` took; `None` until then.
+    bound: Option<VsockPort>,
     /// One-shot scripted `bind` failure.
     bind_failure: Option<io::ErrorKind>,
     /// Accept queue, FIFO.
@@ -191,7 +197,7 @@ impl SimBeaconIo {
     /// Whether the listener is bound.
     #[must_use]
     pub fn is_bound(&self) -> bool {
-        self.state.lock().bound
+        self.state.lock().bound.is_some()
     }
 
     /// A guest of the `SimVmm` process `vm_pid` connects with kernel key
@@ -206,7 +212,7 @@ impl SimBeaconIo {
         buffered: &[&str],
     ) -> io::Result<()> {
         let mut state = self.state.lock();
-        if !state.bound {
+        if state.bound.is_none() {
             return Err(io::Error::new(io::ErrorKind::ConnectionRefused, "no beacon listener"));
         }
         if state.conns.values().any(|conn| conn.key == key) {
@@ -355,7 +361,7 @@ impl SimBeaconIo {
     /// One non-`await`ing attempt at an `accept` delivery.
     fn try_accept(&self) -> Option<io::Result<(BeaconSocket, BeaconConnKey)>> {
         let mut state = self.state.lock();
-        if !state.bound {
+        if state.bound.is_none() {
             return Some(Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "accept on an unbound beacon listener",
@@ -455,16 +461,20 @@ impl Drop for Waiting<'_> {
 
 #[async_trait]
 impl BeaconIo for SimBeaconIo {
-    async fn bind(&self) -> Result<(), io::Error> {
+    async fn bind(&self, port: VsockListenPort) -> Result<VsockPort, io::Error> {
         let mut state = self.state.lock();
-        if state.bound {
-            return Ok(());
+        if let Some(bound) = state.bound {
+            return Ok(bound);
         }
         if let Some(kind) = state.bind_failure.take() {
             return Err(io::Error::new(kind, "sim-scripted beacon bind failure"));
         }
-        state.bound = true;
-        Ok(())
+        let bound = match port {
+            VsockListenPort::Fixed(port) => port,
+            VsockListenPort::KernelAssigned => SIM_ASSIGNED_BEACON_PORT,
+        };
+        state.bound = Some(bound);
+        Ok(bound)
     }
 
     async fn accept(&self) -> Result<(BeaconSocket, BeaconConnKey), io::Error> {
@@ -536,7 +546,7 @@ mod tests {
 
     use super::*;
 
-    const STEP2: &str = "GuestCid / LaunchToken bodies land in DELIVER vsock new-step 2";
+    const STEP2: &str = "GuestCid / LaunchToken bodies land in DELIVER step 2";
 
     fn key(offset: u32, port: u32) -> BeaconConnKey {
         BeaconConnKey {
@@ -553,7 +563,7 @@ mod tests {
 
     async fn bound(vmm: &SimVmm) -> SimBeaconIo {
         let io = SimBeaconIo::new(vmm.clone());
-        io.bind().await.expect("bind");
+        io.bind(VsockListenPort::KernelAssigned).await.expect("bind");
         io
     }
 
@@ -562,8 +572,10 @@ mod tests {
     async fn bind_is_idempotent() {
         let io = SimBeaconIo::new(SimVmm::new());
         assert!(!io.is_bound());
-        io.bind().await.expect("first bind");
-        io.bind().await.expect("a second bind is Ok and changes nothing");
+        io.bind(VsockListenPort::KernelAssigned).await.expect("first bind");
+        io.bind(VsockListenPort::KernelAssigned)
+            .await
+            .expect("a second bind is Ok and changes nothing");
         assert!(io.is_bound());
     }
 
@@ -572,10 +584,11 @@ mod tests {
     async fn a_scripted_bind_failure_binds_nothing_and_is_one_shot() {
         let io = SimBeaconIo::new(SimVmm::new());
         io.fail_next_bind(io::ErrorKind::AddrInUse);
-        let err = io.bind().await.expect_err("the scripted bind fails");
+        let err =
+            io.bind(VsockListenPort::KernelAssigned).await.expect_err("the scripted bind fails");
         assert_eq!(err.kind(), io::ErrorKind::AddrInUse);
         assert!(!io.is_bound(), "nothing bound");
-        io.bind().await.expect("the failure was one-shot");
+        io.bind(VsockListenPort::KernelAssigned).await.expect("the failure was one-shot");
         assert!(io.is_bound());
     }
 
@@ -598,7 +611,7 @@ mod tests {
 
     /// CONTRACT_SHAPE: unbounded-preservation.
     #[tokio::test]
-    #[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+    #[ignore = "pending DELIVER step 2 (core types and wire codec)"]
     async fn a_guest_cannot_connect_before_the_listener_is_bound() {
         let vmm = SimVmm::new();
         let io = SimBeaconIo::new(vmm.clone());
@@ -610,7 +623,7 @@ mod tests {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+    #[ignore = "pending DELIVER step 2 (core types and wire codec)"]
     async fn a_queued_ready_is_observed_then_accepted_and_read() {
         let vmm = SimVmm::new();
         let io = bound(&vmm).await;
@@ -641,7 +654,7 @@ mod tests {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+    #[ignore = "pending DELIVER step 2 (core types and wire codec)"]
     async fn a_queued_connection_with_nothing_buffered_or_no_valid_token_projects_none() {
         let vmm = SimVmm::new();
         let io = bound(&vmm).await;
@@ -659,7 +672,7 @@ mod tests {
     /// K-A2′: an accepted connection whose VM died fails its next I/O.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+    #[ignore = "pending DELIVER step 2 (core types and wire codec)"]
     async fn an_accepted_connection_whose_vm_died_fails_its_next_io() {
         let vmm = SimVmm::new();
         let io = bound(&vmm).await;
@@ -683,7 +696,7 @@ mod tests {
     /// the exit is observed.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+    #[ignore = "pending DELIVER step 2 (core types and wire codec)"]
     async fn a_parked_read_fails_when_its_vm_dies() {
         let vmm = SimVmm::new();
         let io = Arc::new(bound(&vmm).await);
@@ -710,7 +723,7 @@ mod tests {
     /// READY once accepted, then end of stream.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+    #[ignore = "pending DELIVER step 2 (core types and wire codec)"]
     async fn a_queued_connection_whose_vm_died_delivers_its_buffered_ready() {
         let vmm = SimVmm::new();
         let io = bound(&vmm).await;
@@ -734,7 +747,7 @@ mod tests {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+    #[ignore = "pending DELIVER step 2 (core types and wire codec)"]
     async fn a_line_over_4096_bytes_is_invalid_data_and_the_connection_stays() {
         let vmm = SimVmm::new();
         let io = bound(&vmm).await;
@@ -753,7 +766,7 @@ mod tests {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+    #[ignore = "pending DELIVER step 2 (core types and wire codec)"]
     async fn the_guest_closing_is_end_of_stream_after_its_buffer() {
         let vmm = SimVmm::new();
         let io = bound(&vmm).await;
@@ -770,7 +783,7 @@ mod tests {
     /// Cancellation safety: a dropped `read_line` / `accept` loses nothing.
     /// CONTRACT_SHAPE: unbounded-preservation.
     #[tokio::test]
-    #[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+    #[ignore = "pending DELIVER step 2 (core types and wire codec)"]
     async fn dropped_calls_lose_no_connection_and_no_line() {
         let vmm = SimVmm::new();
         let io = bound(&vmm).await;
@@ -791,11 +804,11 @@ mod tests {
     /// reports quiescence.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER vsock new-step 2 (core types and wire codec)"]
+    #[ignore = "pending DELIVER step 2 (core types and wire codec)"]
     async fn stepped_mode_holds_every_delivery_until_granted() {
         let vmm = SimVmm::new();
         let io = Arc::new(SimBeaconIo::stepped(vmm.clone()));
-        io.bind().await.expect("bind");
+        io.bind(VsockListenPort::KernelAssigned).await.expect("bind");
         let pid = vmm.spawn_bare_process().pid;
         let k = key(10, 1);
         io.queue_connection(k, pid, &[&ready(TOKEN)]).expect("connect");

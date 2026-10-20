@@ -54,7 +54,7 @@ use overdrive_host::RealCgroupFs;
 use overdrive_worker::cgroup_manager::{CgroupManager, WorkloadsBootstrapError};
 use serial_test::serial;
 
-use super::super::cgroup_cleanup::AllocCleanup;
+use super::super::cgroup_cleanup::{AllocCleanup, delegate_overdrive_slice};
 
 /// RAII guard that SIGKILLs and reaps the spawned sleep PID on test
 /// exit, regardless of outcome. `AllocCleanup` covers a workload-scope
@@ -86,6 +86,7 @@ impl Drop for KillOnDrop {
 async fn no_internal_process_rule_returns_ebusy_dispatches_to_typed_variant() {
     let cgroup_root = Path::new("/sys/fs/cgroup");
     let fs: Arc<dyn CgroupFs> = Arc::new(RealCgroupFs::new());
+    delegate_overdrive_slice(cgroup_root);
     CgroupManager::new(cgroup_root.to_path_buf(), fs.clone())
         .create_workloads_slice_with_controllers()
         .await

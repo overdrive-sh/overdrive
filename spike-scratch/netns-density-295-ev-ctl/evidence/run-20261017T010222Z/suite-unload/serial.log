@@ -1,0 +1,59 @@
+GUEST_BOOT uname_r=7.0.0-29-generic suite=unload arg= modparams=
+GUEST_MODULES:
+ovd_fwd 36864 0 [permanent], Live 0xffffffffc0435000 (OE)
+aesni_intel 98304 0 - Live 0xffffffffc0425000
+tls 163840 0 - Live 0xffffffffc0412000
+vsock_diag 12288 0 - Live 0xffffffffc0410000
+vsock_loopback 12288 0 - Live 0xffffffffc040e000
+vmw_vsock_virtio_transport 20480 0 - Live 0xffffffffc040c000
+vmw_vsock_virtio_transport_common 57344 2 vsock_loopback,vmw_vsock_virtio_transport, Live 0xffffffffc0408000
+vsock 73728 4 vsock_diag,vsock_loopback,vmw_vsock_virtio_transport,vmw_vsock_virtio_transport_common, Live 0xffffffffc0400000
+crw-------    1 0        0          10, 263 Oct 17 01:02 /dev/ovd_fwd
+CTLTEST suite=unload strict=0
+CHECK PASS control: unknown module -> ENOENT :: ENOENT
+DATA proc/modules: ovd_fwd 36864 0 [permanent], Live 0xffffffffc0435000 (OE)
+DATA proc/modules: vsock_diag 12288 0 - Live 0xffffffffc0410000
+CHECK PASS control: a module with module_exit (vsock_diag) unloads :: delete_module -> OK
+CHECK PASS delete_module refused :: no context open, no pairs, flags=0 -> EBUSY
+CHECK PASS delete_module refused :: no context open, no pairs, O_NONBLOCK (rmmod) -> EBUSY
+CHECK PASS delete_module refused :: no context open, no pairs, O_TRUNC (rmmod -f) -> EBUSY
+CHECK PASS delete_module refused :: no context open, no pairs, O_TRUNC|O_NONBLOCK (rmmod -f) -> EBUSY
+CHECK PASS version :: device still works after the attempts
+CHECK PASS delete_module refused :: context open, no pairs, flags=0 -> EBUSY
+CHECK PASS delete_module refused :: context open, no pairs, O_NONBLOCK (rmmod) -> EBUSY
+CHECK PASS delete_module refused :: context open, no pairs, O_TRUNC (rmmod -f) -> EBUSY
+CHECK PASS delete_module refused :: context open, no pairs, O_TRUNC|O_NONBLOCK (rmmod -f) -> EBUSY
+CHECK PASS attach :: id=1
+CHECK PASS delete_module refused :: live pair, flags=0 -> EBUSY
+CHECK PASS delete_module refused :: live pair, O_NONBLOCK (rmmod) -> EBUSY
+CHECK PASS delete_module refused :: live pair, O_TRUNC (rmmod -f) -> EBUSY
+CHECK PASS delete_module refused :: live pair, O_TRUNC|O_NONBLOCK (rmmod -f) -> EBUSY
+CHECK PASS delete_module refused :: live pair + live watch, flags=0 -> EBUSY
+CHECK PASS delete_module refused :: live pair + live watch, O_NONBLOCK (rmmod) -> EBUSY
+CHECK PASS delete_module refused :: live pair + live watch, O_TRUNC (rmmod -f) -> EBUSY
+CHECK PASS delete_module refused :: live pair + live watch, O_TRUNC|O_NONBLOCK (rmmod -f) -> EBUSY
+CHECK PASS live pair still forwards byte-exact after the unload attempts :: 4096 bytes
+CHECK PASS version :: device usable after every context was released
+CHECK PASS delete_module refused :: after all contexts released, no pairs, flags=0 -> EBUSY
+CHECK PASS delete_module refused :: after all contexts released, no pairs, O_NONBLOCK (rmmod) -> EBUSY
+CHECK PASS delete_module refused :: after all contexts released, no pairs, O_TRUNC (rmmod -f) -> EBUSY
+CHECK PASS delete_module refused :: after all contexts released, no pairs, O_TRUNC|O_NONBLOCK (rmmod -f) -> EBUSY
+DATA final /proc/modules: ovd_fwd 36864 1 [permanent], Live 0xffffffffc0435000 (OE)
+DATA kernel.tainted=12288
+CHECK PASS no kernel oops/warn :: dmesg scan
+RESULT suite=unload pass=27 fail=0
+SUITE_DONE suite=unload rc=0
+[    0.037524] rcu: Preemptible hierarchical RCU implementation.
+[    0.037525] rcu: 	RCU restricting CPUs from NR_CPUS=8192 to nr_cpu_ids=4.
+[    0.037528] 	Trampoline variant of Tasks RCU enabled.
+[    0.037528] 	Rude variant of Tasks RCU enabled.
+[    0.037529] 	Tracing variant of Tasks RCU enabled.
+[    0.037530] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.037541] RCU Tasks: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.037543] RCU Tasks Rude: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.046447] rcu: Hierarchical SRCU implementation.
+[    0.367464] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.367476] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+[    0.368766] ovd_fwd: loaded (spike, permanent: no module_exit)
+GUEST_END
+[    0.689172] reboot: Power down

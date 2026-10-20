@@ -9,6 +9,7 @@ State 1
   toHostPaired = {}
   sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
   phantom = FALSE
+  gSess = 0
   quiesced = FALSE
   readyCross = FALSE
   crossMsg = FALSE
@@ -17,6 +18,7 @@ State 1
   toGuestAbort = {}
   vmUp = FALSE
   toHostRefused = {}
+  conf_step = [InitWith |-> [o |-> "g"]]
   bHeldByOther = FALSE
   claim = 0
   dl = [ res |-> <<"none">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]

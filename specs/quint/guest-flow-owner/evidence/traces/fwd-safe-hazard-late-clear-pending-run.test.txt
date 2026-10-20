@@ -1,0 +1,17 @@
+
+  safe_runsLateClearPending
+    1) safe_runsLateClearPending::fwd_safe::WakeupDuringRunIsNotLost failed after 1 test(s)
+
+  1 failed
+
+  1) safe_runsLateClearPending::fwd_safe::WakeupDuringRunIsNotLost:
+       Error [QNT513]: Cannot continue in `then` because the highlighted expression evaluated to false
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/fwd_safe.qnt:781:22
+        781:     .then(WRet).then(WStart).then(WMove).expect(Safety and st.sq == 0 and st.tq == 1)
+                                  ^^^^^^
+    Use --seed=0x6bb68bee0379a7af --match=safe_runsLateClearPending::fwd_safe::WakeupDuringRunIsNotLost to repeat.
+
+
+  Use --verbosity=3 to show executions.
+  Further debug with: quint test --verbosity=3 /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/hazard/fwd_safe_hazards.qnt
+error: Tests failed

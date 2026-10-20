@@ -86,10 +86,6 @@ linux-keyutils.workspace = true
 # `#[allow(unsafe_code)]` (ADR-0129). The FICLONE call still goes through the
 # safe `rustix` wrapper above.
 libc.workspace           = true
-# `command-fds` installs the claimed `/dev/vhost-vsock` file at the VMM
-# child's vsock descriptor on the existing Tokio command (D16-CLAIM, § *VMM
-# backend contract*).
-command-fds.workspace    = true
 tokio.workspace          = true
 # `tracing` — `SystemdCredsKeyring` (the production `Kek` provider) emits
 # the gated-dev-fallback warnings (`ca.kek.dev_fallback_refused` /

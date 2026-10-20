@@ -1,0 +1,47 @@
+c[?7l[2J[0mSeaBIOS (version 1.17.0-debian-1.17.0-1ubuntu1)
+Booting from ROM..c[?7l[2JL1_BOOT uname_r=7.0.0-29-generic
+1
+crw-------    1 0        0          10, 232 Oct 17 00:18 /dev/kvm
+crw-------    1 0        0          10, 241 Oct 17 00:18 /dev/vhost-vsock
+crw-------    1 0        0          10, 263 Oct 17 00:18 /dev/ovd_fwd
+ovd_fwd 32768 0 [permanent], Live 0xffffffffc04fc000 (OE)
+HOST_START uname=7.0.0-29-generic
+MODULE abi=1 flags=1 (permanent=1)
+RMMOD host: ret=-1 errno=16 (Device or resource busy)
+VM_UP guest agent answers; guest rmmod: OK -1 errno=16
+RESULT clean-g-first                                trials=100 pass=100 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 100 100 0 0 0
+INV host: live=0/0 queued=0 attached=100 completed=100 aborted=0 unclassified_eof=0 ab_peer=0 ab_socket=0 ab_detached=0
+FAIL clean-fullend-0x2-0x3-hostlag trial=0: R: ERR(rx=3189 err=104 tcp=-1) want EOF 3189;host rec id=101 kind=2 cause=1 side=0 err=0 ab=3189 ba=1069 want(kind=1 cause=0 side=0 err=0 ab=3189 ba=1069)
+FAIL clean-fullend-0x2-0x3-hostlag trial=1: R: ERR(rx=677 err=104 tcp=-1) want EOF 677;host rec id=102 kind=2 cause=1 side=0 err=0 ab=677 ba=3232 want(kind=1 cause=0 side=0 err=0 ab=677 ba=3232)
+FAIL clean-fullend-0x2-0x3-hostlag trial=2: R: ERR(rx=4057 err=104 tcp=-1) want EOF 4057;host rec id=103 kind=2 cause=1 side=0 err=0 ab=4057 ba=134 want(kind=1 cause=0 side=0 err=0 ab=4057 ba=134)
+FAIL clean-fullend-0x2-0x3-hostlag trial=3: R: ERR(rx=3815 err=104 tcp=-1) want EOF 3815;host rec id=104 kind=2 cause=1 side=0 err=0 ab=3815 ba=3930 want(kind=1 cause=0 side=0 err=0 ab=3815 ba=3930)
+FAIL clean-fullend-0x2-0x3-hostlag trial=4: R: ERR(rx=2884 err=104 tcp=-1) want EOF 2884;host rec id=105 kind=2 cause=1 side=0 err=0 ab=2884 ba=4018 want(kind=1 cause=0 side=0 err=0 ab=2884 ba=4018)
+RESULT clean-fullend-0x2-0x3-hostlag                trials=100 pass=0 fail=100 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 200 200 0 0 0
+INV host: live=0/0 queued=0 attached=200 completed=100 aborted=100 unclassified_eof=0 ab_peer=100 ab_socket=0 ab_detached=0
+FAIL clean-fullend-0x2-0x3-guestlag trial=0: G: ERR rx=3231 want EOF 3231;guest rec [id=201 kind=2 cause=1 side=1 err=0 ab=3873 ba=3231] want(kind=1 cause=0 side=0 err=0 ab=3873 ba=3231)
+FAIL clean-fullend-0x2-0x3-guestlag trial=1: G: ERR rx=2657 want EOF 2657;guest rec [id=202 kind=2 cause=1 side=1 err=0 ab=902 ba=2657] want(kind=1 cause=0 side=0 err=0 ab=902 ba=2657)
+FAIL clean-fullend-0x2-0x3-guestlag trial=2: G: ERR rx=519 want EOF 519;guest rec [id=203 kind=2 cause=1 side=1 err=0 ab=2325 ba=519] want(kind=1 cause=0 side=0 err=0 ab=2325 ba=519)
+FAIL clean-fullend-0x2-0x3-guestlag trial=3: G: ERR rx=3121 want EOF 3121;guest rec [id=204 kind=2 cause=1 side=1 err=0 ab=2403 ba=3121] want(kind=1 cause=0 side=0 err=0 ab=2403 ba=3121)
+FAIL clean-fullend-0x2-0x3-guestlag trial=4: G: ERR rx=343 want EOF 343;guest rec [id=205 kind=2 cause=1 side=1 err=0 ab=3913 ba=343] want(kind=1 cause=0 side=0 err=0 ab=3913 ba=343)
+RESULT clean-fullend-0x2-0x3-guestlag               trials=100 pass=0 fail=100 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 300 200 100 0 100
+INV host: live=0/0 queued=0 attached=300 completed=200 aborted=100 unclassified_eof=0 ab_peer=100 ab_socket=0 ab_detached=0
+FAIL guest-abort-0x2then0x3-hostdir-open trial=0: R socket tcp state 8 after wait, want CLOSE (reset);host records: got 0 want 1;host: 1 extra record(s) after the end
+FAIL guest-abort-0x2then0x3-hostdir-open trial=1: R socket tcp state 8 after wait, want CLOSE (reset);host records: got 0 want 1;host: 1 extra record(s) after the end
+FAIL guest-abort-0x2then0x3-hostdir-open trial=2: R socket tcp state 8 after wait, want CLOSE (reset);host records: got 0 want 1;host: 1 extra record(s) after the end
+FAIL guest-abort-0x2then0x3-hostdir-open trial=3: R socket tcp state 8 after wait, want CLOSE (reset);host records: got 0 want 1;host: 1 extra record(s) after the end
+FAIL guest-abort-0x2then0x3-hostdir-open trial=4: R socket tcp state 8 after wait, want CLOSE (reset);host records: got 0 want 1;host: 1 extra record(s) after the end
+RESULT guest-abort-0x2then0x3-hostdir-open          trials=100 pass=0 fail=100 extra=[100 0 0 0 0 0]
+INV guest: OK 0 0 0 400 200 200 0 100
+INV host: live=0/0 queued=0 attached=400 completed=300 aborted=100 unclassified_eof=0 ab_peer=100 ab_socket=0 ab_detached=0
+RESULT guest-abort-direct0x3-hostdir-closed         trials=100 pass=100 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 500 200 300 0 100
+INV host: live=0/0 queued=0 attached=500 completed=300 aborted=200 unclassified_eof=0 ab_peer=200 ab_socket=0 ab_detached=0
+FAIL host-abort-0x2then0x3-guestdir-open trial=0: G socket tcp state 8 after wait, want CLOSE (reset);guest records: got 0 want 1;guest: 1 extra record(s) after the end
+FAIL host-abort-0x2then0x3-guestdir-open trial=1: G socket tcp state 8 after wait, want CLOSE (reset);guest records: got 0 want 1;guest: 1 extra record(s) after the end
+FAIL host-abort-0x2then0x3-guestdir-open trial=2: G socket tcp state 8 after wait, want CLOSE (reset);guest records: got 0 want 1;guest: 1 extra record(s) after the end
+FAIL host-abort-0x2then0x3-guestdir-open trial=3: G socket tcp state 8 after wait, want CLOSE (reset);guest records: got 0 want 1;guest: 1 extra record(s) after the end
+FAIL host-abort-0x2then0x3-guestdir-open trial=4: G socket tcp state 8 after wait, want CLOSE (reset);guest records: got 0 want 1;guest: 1 extra record(s) after the end
+qemu-system-x86_64: terminating on signal 15 from pid 46721 (python3)

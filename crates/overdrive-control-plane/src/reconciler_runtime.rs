@@ -39,12 +39,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
+use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::id::AllocationId;
 use overdrive_core::reconcilers::{
     Action, Reconciler, ReconcilerName, TargetResource, TickContext,
 };
 use overdrive_core::traits::observation_store::{
-    ConflictRoute, LogicalTimestamp, ObservationWrite, ReconcileConflictRow,
+    AllocStatusRow, ConflictRoute, LogicalTimestamp, ObservationWrite, ReconcileConflictRow,
 };
 #[cfg(any(test, feature = "integration-tests"))]
 use overdrive_reconcilers::ServiceMapHydrator;
@@ -447,26 +448,48 @@ impl ReconcilerRuntime {
         }
     }
 
-    /// Restart-budget snapshot for a single allocation within the
-    /// `WorkloadLifecycle` view. Returns `(attempt_index, will_restart)`
-    /// where `attempt_index` is 1-indexed (first attempt = 1) and
-    /// `will_restart` is true when the reconciler's budget has not been
-    /// exhausted.
+    /// `(attempt_index, will_restart)` for the failed allocation `failed`
+    /// (RESTART-SSOT, GH #324).
     ///
-    /// Falls back to `(1, true)` when the view is empty (fresh job,
-    /// reconciler not yet registered) — conservative: first attempt,
-    /// budget assumed available.
+    /// Preconditions: `kind` is the workload's kind as `hydrate_desired`
+    /// reads it; `run_desired` is `job.is_some() && !desired_to_stop`;
+    /// `failed` is the workload's current allocation's latest observed row
+    /// (selected with [`overdrive_reconcilers::current_alloc`]);
+    /// `desired_generation` is the value at `workloads/<id>/generation`
+    /// (absent → 0). With the `WorkloadLifecycle` view of `target` (the
+    /// default view when none is held) and `attempts =
+    /// view.restart_counts[failed.alloc_id]` (0 when absent): `.0 =
+    /// attempts.saturating_add(1)`; `.1 = restart_after_failure(kind,
+    /// run_desired, failed, attempts, view.observed_generation <
+    /// desired_generation)` — the reconciler's own decision.
     #[must_use]
+    #[allow(
+        unused_variables,
+        clippy::unused_self,
+        reason = "RED scaffold — netns-density-295 DELIVER step 0 (RESTART-SSOT) lands the accessor"
+    )]
     pub fn restart_status_for_alloc(
         &self,
         target: &TargetResource,
-        alloc_id: &AllocationId,
+        kind: WorkloadKind,
+        run_desired: bool,
+        failed: &AllocStatusRow,
+        desired_generation: u64,
     ) -> (u32, bool) {
+        // SCAFFOLD: true — netns-density-295 DISTILL (DELIVER step 0,
+        // RESTART-SSOT, GH #324): the accessor returns the reconciler's own
+        // decision (`restart_after_failure`), which is new behaviour.
+        panic!("Not yet implemented -- RED scaffold")
+    }
+
+    /// The 1-indexed attempt number of `alloc_id` in its lineage:
+    /// `view.restart_counts[alloc_id].saturating_add(1)`, 1 when absent
+    /// (RESTART-SSOT). Reads any allocation the view has issued, including a
+    /// successor whose dispatch has written no row yet.
+    #[must_use]
+    pub fn attempt_index_for_alloc(&self, target: &TargetResource, alloc_id: &AllocationId) -> u32 {
         let view = self.view_for_workload_lifecycle(target);
-        let attempts = view.restart_counts.get(alloc_id).copied().unwrap_or(0);
-        let attempt_index = attempts.saturating_add(1);
-        let will_restart = attempt_index < overdrive_reconcilers::RESTART_BACKOFF_CEILING;
-        (attempt_index, will_restart)
+        view.restart_counts.get(alloc_id).copied().unwrap_or(0).saturating_add(1)
     }
 
     /// Look up the in-memory view for `(reconciler, target)` against
@@ -1794,43 +1817,153 @@ pub enum ConvergenceError {
 // Unit tests — pure-logic helpers
 // ---------------------------------------------------------------------------
 
+// netns-density-295 PROBE-RUN-COUNT (ADR-0191) / PROBE-NOSAMPLE (ADR-0187):
+// the composition shared by R5-PROBE-COUNT and the `specs/quint/probe-count`
+// conformance driver — the production runtime with `ServiceLifecycle`, the
+// production probe runner, Sim adapters at the driven ports.
+#[cfg(all(test, feature = "integration-tests"))]
+mod probe_count_fixture;
+// R5-PROBE-COUNT: probe-run counting through the composed owners.
+#[cfg(all(test, feature = "integration-tests"))]
+mod probe_run_count;
+// The `probe-count` quint-connect conformance driver (main `probe_streak`).
+#[cfg(all(test, feature = "integration-tests"))]
+mod quint_probe_count;
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
 
-    /// Boundary test for `restart_status_for_alloc` at the
-    /// `RESTART_BACKOFF_CEILING`. Catches the `< vs <=` mutation:
-    /// at exactly ceiling attempts, `will_restart` must be false.
-    #[tokio::test]
-    async fn restart_status_flips_at_ceiling_boundary() {
-        use overdrive_core::id::AllocationId;
-        use overdrive_core::reconcilers::TargetResource;
-        use overdrive_reconcilers::{RESTART_BACKOFF_CEILING, WorkloadLifecycleView};
+    /// A failed Service row of `payments` at attempt 0 (`alloc-payments-0`),
+    /// crash-class unless `reason` says otherwise.
+    fn failed_payments_row(
+        reason: Option<overdrive_core::transition_reason::TransitionReason>,
+    ) -> AllocStatusRow {
+        use overdrive_core::id::{NodeId, WorkloadId};
+        use overdrive_core::traits::observation_store::AllocState;
+        let node_id = NodeId::new("node-0").expect("node id");
+        AllocStatusRow {
+            alloc_id: AllocationId::new("alloc-payments-0").expect("alloc id"),
+            workload_id: WorkloadId::new("payments").expect("workload id"),
+            node_id: node_id.clone(),
+            state: AllocState::Failed,
+            updated_at: LogicalTimestamp { counter: 1, writer: node_id },
+            reason,
+            detail: None,
+            terminal: None,
+            stderr_tail: None,
+            kind: WorkloadKind::Service,
+            listeners: Vec::new(),
+            started_at: None,
+            workload_addr: None,
+            last_terminated: None,
+            restart_count: 0,
+        }
+    }
 
-        let tmp = tempfile::TempDir::new().expect("tempdir");
+    /// A runtime with `WorkloadLifecycle` registered and its view of
+    /// `workload/payments` seeded with `attempts` restarts charged to
+    /// `alloc-payments-0` and `observed_generation`.
+    async fn runtime_with_attempts(
+        tmp: &tempfile::TempDir,
+        attempts: u32,
+        observed_generation: u64,
+    ) -> (ReconcilerRuntime, TargetResource) {
+        use overdrive_reconcilers::WorkloadLifecycleView;
         let mut runtime =
             ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
         runtime.register(crate::workload_lifecycle()).await.expect("register");
-
         let target = TargetResource::new("workload/payments").expect("target");
-        let alloc = AllocationId::new("payments-0").expect("alloc id");
+        let mut view = WorkloadLifecycleView::default();
+        view.restart_counts.insert(AllocationId::new("alloc-payments-0").expect("id"), attempts);
+        view.observed_generation = observed_generation;
+        runtime.seed_workload_lifecycle_view_for_test(&target, view);
+        (runtime, target)
+    }
 
-        // attempts = CEILING - 2 → attempt_index = CEILING - 1 → below ceiling → will_restart
-        let mut below = WorkloadLifecycleView::default();
-        below.restart_counts.insert(alloc.clone(), RESTART_BACKOFF_CEILING - 2);
-        runtime.seed_workload_lifecycle_view_for_test(&target, below);
-        let (idx, restart) = runtime.restart_status_for_alloc(&target, &alloc);
-        assert_eq!(idx, RESTART_BACKOFF_CEILING - 1);
-        assert!(restart, "one below ceiling must still restart");
+    /// RESTART-SSOT regression obligation 1 (GH #324), accessor half: the
+    /// ceiling boundary. At `attempts = CEILING − 1` the reconciler still
+    /// places a successor, so `will_restart` is `true` (the value the
+    /// pre-fix `attempts + 1 < CEILING` got wrong); at `attempts = CEILING`
+    /// it is `false`. The attempt index is `attempts + 1`. Replaces the
+    /// boundary test that pinned the defect.
+    ///
+    /// CONTRACT_SHAPE: pure-function.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 0"]
+    async fn restart_status_matches_the_reconciler_at_the_ceiling_boundary() {
+        use overdrive_reconcilers::RESTART_BACKOFF_CEILING;
+        let row = failed_payments_row(None);
 
-        // attempts = CEILING - 1 → attempt_index = CEILING → AT ceiling → must NOT restart
-        let mut at = WorkloadLifecycleView::default();
-        at.restart_counts.insert(alloc.clone(), RESTART_BACKOFF_CEILING - 1);
-        runtime.seed_workload_lifecycle_view_for_test(&target, at);
-        let (idx, restart) = runtime.restart_status_for_alloc(&target, &alloc);
-        assert_eq!(idx, RESTART_BACKOFF_CEILING);
-        assert!(!restart, "at ceiling must NOT restart — catches < vs <= mutation");
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let (runtime, target) = runtime_with_attempts(&tmp, RESTART_BACKOFF_CEILING - 1, 0).await;
+        assert_eq!(
+            runtime.restart_status_for_alloc(&target, WorkloadKind::Service, true, &row, 0),
+            (RESTART_BACKOFF_CEILING, true),
+            "one below the ceiling the reconciler restarts (GH #324)"
+        );
+        assert_eq!(
+            runtime.attempt_index_for_alloc(&target, &row.alloc_id),
+            RESTART_BACKOFF_CEILING
+        );
+
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let (runtime, target) = runtime_with_attempts(&tmp, RESTART_BACKOFF_CEILING, 0).await;
+        assert_eq!(
+            runtime.restart_status_for_alloc(&target, WorkloadKind::Service, true, &row, 0),
+            (RESTART_BACKOFF_CEILING + 1, false),
+            "at the ceiling the budget is spent and the reconciler finalizes"
+        );
+    }
+
+    /// RESTART-SSOT regression obligation 2, accessor half: a platform
+    /// reclamation is placed again at and past the ceiling.
+    ///
+    /// CONTRACT_SHAPE: pure-function.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 0"]
+    async fn restart_status_exempts_a_platform_reclaimed_row_past_the_ceiling() {
+        use overdrive_core::traits::observation_store::AllocState;
+        use overdrive_core::transition_reason::{StoppedBy, TransitionReason};
+        use overdrive_reconcilers::RESTART_BACKOFF_CEILING;
+        let row = AllocStatusRow {
+            state: AllocState::Terminated,
+            ..failed_payments_row(Some(TransitionReason::Stopped {
+                by: StoppedBy::PlatformReclaimed,
+            }))
+        };
+        for attempts in [RESTART_BACKOFF_CEILING, 2 * RESTART_BACKOFF_CEILING] {
+            let tmp = tempfile::TempDir::new().expect("tempdir");
+            let (runtime, target) = runtime_with_attempts(&tmp, attempts, 0).await;
+            assert!(
+                runtime.restart_status_for_alloc(&target, WorkloadKind::Service, true, &row, 0).1,
+                "a reclaimed row at {attempts} attempts is placed again (ADR-0083)"
+            );
+        }
+    }
+
+    /// RESTART-SSOT regression obligation 3, accessor half: a pending
+    /// desired generation (`observed_generation < desired_generation`)
+    /// places a successor past the ceiling; with no pending generation the
+    /// same row is finalized.
+    ///
+    /// CONTRACT_SHAPE: pure-function.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 0"]
+    async fn restart_status_exempts_a_generation_replacement_past_the_ceiling() {
+        use overdrive_reconcilers::RESTART_BACKOFF_CEILING;
+        let row = failed_payments_row(None);
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let (runtime, target) = runtime_with_attempts(&tmp, RESTART_BACKOFF_CEILING, 3).await;
+        assert!(
+            runtime.restart_status_for_alloc(&target, WorkloadKind::Service, true, &row, 4).1,
+            "a pending generation replaces the lineage (ADR-0073)"
+        );
+        assert!(
+            !runtime.restart_status_for_alloc(&target, WorkloadKind::Service, true, &row, 3).1,
+            "no pending generation: the budget is spent"
+        );
     }
 
     // -----------------------------------------------------------------
@@ -2267,6 +2400,14 @@ mod tests {
                 status,
                 last_observed_at_unix_ms,
                 inferred: false,
+                // One row per observation instant: the run number follows
+                // the observation time, so the merge keeps the latest row
+                // whether it decides on `run_seq` or on the observation time.
+                run_seq: overdrive_core::observation::ProbeRunSeq::new(
+                    last_observed_at_unix_ms.max(1),
+                )
+                .expect("non-zero run sequence"),
+                same_status_runs: overdrive_core::observation::SameStatusRuns::ONE,
             };
             state.obs.write_probe_result(row).await.expect("write probe row");
         }
@@ -2646,6 +2787,11 @@ mod tests {
                     status,
                     last_observed_at_unix_ms: observed_at,
                     inferred: false,
+                    // The run number follows the observation time (see
+                    // `write_probe` above).
+                    run_seq: overdrive_core::observation::ProbeRunSeq::new(observed_at.max(1))
+                        .expect("non-zero run sequence"),
+                    same_status_runs: overdrive_core::observation::SameStatusRuns::ONE,
                 })
                 .await
                 .expect("write probe result");

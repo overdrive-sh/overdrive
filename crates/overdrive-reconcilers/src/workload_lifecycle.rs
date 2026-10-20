@@ -33,6 +33,31 @@ use super::{Action, Reconciler, ReconcilerName, TargetResource, TickContext};
 /// consuming infinite driver resources.
 pub const RESTART_BACKOFF_CEILING: u32 = 5;
 
+/// Whether `WorkloadLifecycle` places a successor for a failed allocation.
+///
+/// Returns `attempts < RESTART_BACKOFF_CEILING || platform_reclaimed ||
+/// generation_replacement` (RESTART-SSOT, GH #324). `attempts` is
+/// `view.restart_counts[failed.alloc_id]` (0 when absent); `platform_reclaimed`
+/// is [`is_platform_reclaimed`] of the failed row; `generation_replacement` is
+/// `view.observed_generation < desired.generation`. `true`: the reconciler
+/// places a successor (backoff and the guest-attachment cap may delay it, never
+/// change it). `false`: the restart budget is spent and the reconciler
+/// finalizes the allocation. This is the only place the ceiling is compared.
+#[must_use]
+#[allow(
+    unused_variables,
+    reason = "RED scaffold — netns-density-295 DELIVER step 0 (RESTART-SSOT) lands the predicate"
+)]
+pub const fn restart_decision(
+    attempts: u32,
+    platform_reclaimed: bool,
+    generation_replacement: bool,
+) -> bool {
+    // SCAFFOLD: true — netns-density-295 DISTILL (DELIVER step 0, RESTART-SSOT,
+    // GH #324): the one shared restart predicate is new behaviour.
+    panic!("Not yet implemented -- RED scaffold")
+}
+
 /// Backoff window between successive `RestartAllocation` emissions
 /// for the same alloc.
 ///
@@ -1403,7 +1428,10 @@ fn next_allocation_attempt(
 ///
 /// Needs no new per-row field (no `generation` on `AllocStatusRow` ⇒ no
 /// ADR-0048 envelope bump).
-fn current_alloc<'a>(allocs: &[&'a AllocStatusRow]) -> Option<&'a AllocStatusRow> {
+///
+/// Public (RESTART-SSOT) so a caller of `restart_status_for_alloc` selects the
+/// failed allocation with the reconciler's own rule; one definition, no copy.
+pub fn current_alloc<'a>(allocs: &[&'a AllocStatusRow]) -> Option<&'a AllocStatusRow> {
     allocs
         .iter()
         .filter_map(|row| alloc_attempt_index(&row.alloc_id).map(|attempt| (attempt, *row)))
@@ -1598,6 +1626,38 @@ fn restart_allocation_action(
         },
         kind: desired.workload_kind,
     }
+}
+
+/// Whether `WorkloadLifecycle` places a successor (`RestartAllocation`) for
+/// the current allocation `failed` of a workload of kind `kind`.
+///
+/// `true` exactly when one `WorkloadLifecycle::reconcile` over this workload,
+/// with `failed` as its current allocation ([`current_alloc`]), past the
+/// backoff deadline and below the guest-attachment cap, emits
+/// `RestartAllocation { alloc_id: failed.alloc_id, .. }` (RESTART-SSOT,
+/// GH #324). `run_desired` is `desired.job.is_some() &&
+/// !desired.desired_to_stop`; `attempts` and `generation_replacement` as for
+/// [`restart_decision`]. In the reconciler's own order: `false` when
+/// `!run_desired`; `false` when `failed` is `Draining`; `false` for a Job's
+/// natural exit; `false` when `failed` is not a restart candidate (neither
+/// restartable nor an operator stop under a pending generation); otherwise
+/// [`restart_decision`].
+#[must_use]
+#[allow(
+    unused_variables,
+    clippy::needless_pass_by_value,
+    reason = "RED scaffold — netns-density-295 DELIVER step 0 (RESTART-SSOT) lands the decision"
+)]
+pub fn restart_after_failure(
+    kind: WorkloadKind,
+    run_desired: bool,
+    failed: &AllocStatusRow,
+    attempts: u32,
+    generation_replacement: bool,
+) -> bool {
+    // SCAFFOLD: true — netns-density-295 DISTILL (DELIVER step 0, RESTART-SSOT,
+    // GH #324): the failed-allocation decision is new behaviour.
+    panic!("Not yet implemented -- RED scaffold")
 }
 
 /// True iff the alloc row is a candidate for a `RestartAllocation`
@@ -3826,6 +3886,170 @@ mod reclaim_emission_acceptance {
             prop_assert!(!pruned.reclaim_attempts.contains_key(&predecessor));
             prop_assert!(!pruned.reclaim_emitted_at.contains_key(&predecessor));
             prop_assert_eq!(next_evaluation_at(&desired_released, &actual_released, &pruned, now), None);
+        }
+    }
+}
+
+/// RESTART-SSOT regression obligation 4 (GH #324; feature-delta § *Restart
+/// decision*): `restart_after_failure` — the decision
+/// `ReconcilerRuntime::restart_status_for_alloc` returns as its `.1` — is
+/// `true` exactly when one `WorkloadLifecycle::reconcile` over the workload,
+/// past the backoff deadline and below the guest-attachment cap, emits
+/// `RestartAllocation` for the current allocation. Generated over every
+/// workload kind, the restart count around the ceiling, a pending desired
+/// generation, the intent (declared, stopped, absent) and a current row of
+/// every class, after a lineage of intentionally stopped and
+/// platform-reclaimed rows (the shape the delta's "single row" paragraph
+/// proves production produces). A mutation of the predicate's `<`, of either
+/// exemption, of the `Draining`, `run_desired` or Job clause fails it; a
+/// `kind == Job` → `kind != Service` mutation fails on a `Schedule` row. The
+/// accessor's own projection of this decision is pinned by obligations 1–3
+/// (`reconciler_runtime` tests).
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod restart_ssot_agreement {
+    use proptest::prelude::*;
+
+    use overdrive_core::aggregate::WorkloadKind;
+    use overdrive_core::reconcilers::Action;
+    use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow};
+    use overdrive_core::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
+
+    use super::netns_density_lifecycle_fixture::{
+        Intent, RowFact, at, observation, reconcile, row, states, view,
+    };
+    use super::{RESTART_BACKOFF_CEILING, restart_after_failure};
+
+    /// The current row's class (feature-delta obligation 4's list).
+    #[derive(Debug, Clone, Copy)]
+    enum Class {
+        /// `Failed` with a crash exit.
+        Crashed,
+        /// `Terminated` with a crash exit.
+        ExitedCrashed,
+        /// `Failed` because the driver refused the start.
+        StartRejected,
+        /// `Terminated` by a liveness kill (crash-class, ADR-0087 D5).
+        LivenessKilled,
+        /// `Terminated` by platform reclamation (ADR-0083).
+        PlatformReclaimed,
+        OperatorStopped,
+        GcStopped,
+        Draining,
+        Running,
+        Pending,
+        /// A Job exit already finalized `Completed`.
+        NaturalExitCompleted,
+        /// A crash already finalized `BackoffExhausted`.
+        BackoffExhausted,
+    }
+
+    const CLASSES: [Class; 12] = [
+        Class::Crashed,
+        Class::ExitedCrashed,
+        Class::StartRejected,
+        Class::LivenessKilled,
+        Class::PlatformReclaimed,
+        Class::OperatorStopped,
+        Class::GcStopped,
+        Class::Draining,
+        Class::Running,
+        Class::Pending,
+        Class::NaturalExitCompleted,
+        Class::BackoffExhausted,
+    ];
+
+    fn current_row(suffix: u32, class: Class, kind: WorkloadKind) -> AllocStatusRow {
+        let stopped = |by| AllocStatusRow {
+            state: AllocState::Terminated,
+            reason: Some(TransitionReason::Stopped { by: StoppedBy::Reconciler }),
+            terminal: Some(TerminalCondition::Stopped { by }),
+            ..row(suffix, RowFact::ExitedCrashed, kind)
+        };
+        match class {
+            Class::Crashed => row(suffix, RowFact::Crashed, kind),
+            Class::ExitedCrashed => row(suffix, RowFact::ExitedCrashed, kind),
+            Class::StartRejected => AllocStatusRow {
+                reason: Some(TransitionReason::VmKernelNotFound { path: "/srv/vm/kernel".into() }),
+                ..row(suffix, RowFact::Crashed, kind)
+            },
+            Class::LivenessKilled => stopped(StoppedBy::LivenessProbe),
+            Class::PlatformReclaimed => AllocStatusRow {
+                state: AllocState::Terminated,
+                reason: Some(TransitionReason::Stopped { by: StoppedBy::PlatformReclaimed }),
+                terminal: None,
+                ..row(suffix, RowFact::ExitedCrashed, kind)
+            },
+            Class::OperatorStopped => row(suffix, RowFact::OperatorStopped, kind),
+            Class::GcStopped => row(suffix, RowFact::GcStopped, kind),
+            Class::Draining => row(suffix, RowFact::Draining, kind),
+            Class::Running => row(suffix, RowFact::Running, kind),
+            Class::Pending => row(suffix, RowFact::Pending, kind),
+            Class::NaturalExitCompleted => row(suffix, RowFact::JobCompleted, kind),
+            Class::BackoffExhausted => row(suffix, RowFact::BackoffExhausted, kind),
+        }
+    }
+
+    /// An earlier row of the lineage: intentionally stopped or reclaimed.
+    fn earlier_row(suffix: u32, reclaimed: bool, kind: WorkloadKind) -> AllocStatusRow {
+        if reclaimed {
+            current_row(suffix, Class::PlatformReclaimed, kind)
+        } else {
+            current_row(suffix, Class::OperatorStopped, kind)
+        }
+    }
+
+    fn kind_strategy() -> impl Strategy<Value = WorkloadKind> {
+        prop::sample::select(vec![WorkloadKind::Job, WorkloadKind::Service, WorkloadKind::Schedule])
+    }
+
+    fn intent_strategy() -> impl Strategy<Value = Intent> {
+        prop::sample::select(vec![Intent::Declared, Intent::Stopped, Intent::Deleted])
+    }
+
+    proptest! {
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        #[ignore = "pending DELIVER step 0"]
+        fn restart_after_failure_agrees_with_one_reconcile(
+            kind in kind_strategy(),
+            attempts in 0..=2 * RESTART_BACKOFF_CEILING,
+            generation_replacement in any::<bool>(),
+            intent in intent_strategy(),
+            class in prop::sample::select(CLASSES.to_vec()),
+            lineage in prop::collection::vec(any::<bool>(), 0..=2),
+        ) {
+            let earlier = u32::try_from(lineage.len()).expect("at most two earlier rows");
+            let mut rows: Vec<AllocStatusRow> = lineage
+                .iter()
+                .enumerate()
+                .map(|(n, reclaimed)| {
+                    earlier_row(u32::try_from(n).expect("small index"), *reclaimed, kind)
+                })
+                .collect();
+            let current = current_row(earlier, class, kind);
+            rows.push(current.clone());
+            let issued = rows.iter().map(|r| (r.alloc_id.clone(), 0)).chain([(current.alloc_id.clone(), attempts)]);
+            let mut lifecycle_view = view(issued, Some((current.alloc_id.clone(), at(1_000))));
+            lifecycle_view.observed_generation = 0;
+            let (mut desired, actual) = states(intent, kind, rows, &observation(0, 0, std::collections::BTreeMap::new()));
+            desired.generation = u64::from(generation_replacement);
+            let run_desired = desired.job.is_some() && !desired.desired_to_stop;
+
+            // Far past every backoff window, below the attachment cap.
+            let now = at(1_000 + 24 * 60 * 60 * 1_000);
+            let (actions, _) = reconcile(&desired, &actual, &lifecycle_view, now);
+            let restarted = actions.iter().any(|action| matches!(
+                action,
+                Action::RestartAllocation { alloc_id, .. } if *alloc_id == current.alloc_id
+            ));
+
+            prop_assert_eq!(
+                restart_after_failure(kind, run_desired, &current, attempts, generation_replacement),
+                restarted,
+                "{:?} row of a {:?} at {} attempts, generation pending {}, intent {:?}",
+                class, kind, attempts, generation_replacement, intent
+            );
         }
     }
 }

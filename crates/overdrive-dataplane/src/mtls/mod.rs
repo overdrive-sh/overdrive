@@ -56,8 +56,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use ipnet::Ipv4Net;
 use overdrive_core::AllocationId;
 use overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
+use overdrive_core::guest_transport::dial::GuestStreamDial;
 use overdrive_core::traits::IdentityRead;
 use overdrive_core::traits::ca::SvidMaterial;
 use overdrive_core::traits::mtls_enforcement::{
@@ -117,18 +119,79 @@ pub struct HostMtlsEnforcement {
     /// fail-closed (`InFlightLimitExceeded`) — one workload cannot exhaust the agent
     /// by opening many stalled connections.
     inflight: InFlightLedger,
+    /// The node's guest prefix: a leg-B peer inside it is a same-node VM,
+    /// dialled marked and source-bound (LEGB-DIAL, ADR-0190).
+    // SCAFFOLD: true — netns-density-295 DISTILL; the leg-B dial reads it in
+    // DELIVER step 13.
+    #[expect(dead_code, reason = "read by the LEGB-DIAL leg-B dial (DELIVER step 13)")]
+    guest_prefix: Ipv4Net,
+    /// The guest-flow owner's dial port: leg S to a VM backend (an inbound
+    /// `orig_dst` inside `guest_prefix`) is
+    /// `guest_dial.dial(orig_dst, DialPurpose::Relay)`, made only after leg
+    /// C's client authenticated (LEGS-DIAL, D-14).
+    // SCAFFOLD: true — netns-density-295 DISTILL; the inbound path's
+    // handshake / awaited dial / relay split reads it in the attachment-cut
+    // step (9) (DG-2 row 19).
+    #[expect(dead_code, reason = "read by the LEGS-DIAL leg-S dial (attachment-cut step 9)")]
+    guest_dial: Arc<dyn GuestStreamDial>,
+}
+
+/// The production [`MtlsEnforcementFactory`] (NO-OVERRIDE-SEAMS, ADR-0219):
+/// builds [`HostMtlsEnforcement`] over the boot's dependencies.
+#[derive(Debug, Clone, Copy)]
+pub struct HostMtlsEnforcementFactory {
+    _private: (),
+}
+
+impl HostMtlsEnforcementFactory {
+    /// Infallible; constructs nothing until `enforcement`.
+    #[must_use]
+    #[expect(
+        clippy::new_without_default,
+        reason = "the composition root names each adapter explicitly; no `Default`"
+    )]
+    pub const fn new() -> Self {
+        Self { _private: () }
+    }
+}
+
+impl overdrive_core::traits::mtls_enforcement::MtlsEnforcementFactory
+    for HostMtlsEnforcementFactory
+{
+    fn enforcement(
+        &self,
+        deps: overdrive_core::traits::mtls_enforcement::MtlsEnforcementDeps,
+    ) -> Arc<dyn overdrive_core::traits::mtls_enforcement::MtlsEnforcement> {
+        Arc::new(HostMtlsEnforcement::new(
+            deps.identity,
+            deps.limits,
+            deps.guest_prefix,
+            deps.guest_dial,
+        ))
+    }
 }
 
 impl HostMtlsEnforcement {
     /// Construct the adapter from its REQUIRED dependencies. `identity` is the
     /// shipped held-identity read port (#35) the proxy reads the SVID + trust
-    /// bundle through (never an issuer); `limits` is the F7 resource contract.
-    /// Both mandatory — no defaulting, no builder.
+    /// bundle through (never an issuer); `limits` is the F7 resource contract;
+    /// `guest_prefix` is the node's guest prefix — a leg-B peer inside it is a
+    /// same-node VM and is dialled marked and source-bound (LEGB-DIAL);
+    /// `guest_dial` is the guest-flow owner's dial port, through which leg S
+    /// reaches a VM backend after leg C's client authenticated (LEGS-DIAL).
+    /// All mandatory — no defaulting, no builder.
     #[must_use]
-    pub fn new(identity: Arc<dyn IdentityRead>, limits: MtlsLimits) -> Self {
+    pub fn new(
+        identity: Arc<dyn IdentityRead>,
+        limits: MtlsLimits,
+        guest_prefix: Ipv4Net,
+        guest_dial: Arc<dyn GuestStreamDial>,
+    ) -> Self {
         Self {
             identity,
             limits,
+            guest_prefix,
+            guest_dial,
             next_counter: AtomicU64::new(0),
             conns: Arc::new(Mutex::new(std::collections::BTreeMap::new())),
             inflight: InFlightLedger::new(),
@@ -925,6 +988,24 @@ mod tests {
         }
     }
 
+    /// A guest dial that serves no VM: these units drive no inbound
+    /// connection to a guest-prefix target, so leg S is never dialled.
+    struct NotServingDial;
+
+    #[async_trait::async_trait]
+    impl overdrive_core::guest_transport::dial::GuestStreamDial for NotServingDial {
+        async fn dial(
+            &self,
+            _target: std::net::SocketAddrV4,
+            _purpose: overdrive_core::guest_transport::dial::DialPurpose,
+        ) -> Result<
+            overdrive_core::guest_transport::dial::GuestStream,
+            overdrive_core::guest_transport::dial::GuestDialError,
+        > {
+            Err(overdrive_core::guest_transport::dial::GuestDialError::NotServing)
+        }
+    }
+
     /// Build a real connected AF_UNIX `socketpair` and hand back BOTH ends as
     /// `OwnedFd`s — idle plaintext sockets that keep a pump Running (no handshake,
     /// no kTLS arm needed; the pump just needs live fds to `poll`/`read`). The
@@ -970,7 +1051,12 @@ mod tests {
     /// aux pump's `PumpState`.
     #[test]
     fn register_installs_self_teardown_trigger_into_every_pump() {
-        let adapter = HostMtlsEnforcement::new(Arc::new(EmptyIdentities), MtlsLimits::default());
+        let adapter = HostMtlsEnforcement::new(
+            Arc::new(EmptyIdentities),
+            MtlsLimits::default(),
+            overdrive_core::guest_transport::GUEST_NODE_PREFIX,
+            Arc::new(NotServingDial),
+        );
         let alloc = AllocationId::new("alloc-register-wires-every-pump").expect("valid alloc");
         let id = adapter.next_id(alloc);
 
@@ -1055,7 +1141,12 @@ mod tests {
         );
         let pump_state = Arc::clone(&pump.state);
 
-        let adapter = HostMtlsEnforcement::new(Arc::new(EmptyIdentities), MtlsLimits::default());
+        let adapter = HostMtlsEnforcement::new(
+            Arc::new(EmptyIdentities),
+            MtlsLimits::default(),
+            overdrive_core::guest_transport::GUEST_NODE_PREFIX,
+            Arc::new(NotServingDial),
+        );
         let alloc = AllocationId::new("alloc-reclaim-blocked-encrypt").expect("valid alloc");
         let id = adapter.next_id(alloc);
         let handle =

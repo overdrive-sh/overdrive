@@ -1,0 +1,47 @@
+GUEST_BOOT uname_r=7.0.0-29-generic suite=watch arg= modparams=
+GUEST_MODULES:
+ovd_fwd 36864 0 [permanent], Live 0xffffffffc0435000 (OE)
+aesni_intel 98304 0 - Live 0xffffffffc0426000
+tls 163840 0 - Live 0xffffffffc0412000
+vsock_diag 12288 0 - Live 0xffffffffc0410000
+vsock_loopback 12288 0 - Live 0xffffffffc0407000
+vmw_vsock_virtio_transport 20480 0 - Live 0xffffffffc040c000
+vmw_vsock_virtio_transport_common 57344 2 vsock_loopback,vmw_vsock_virtio_transport, Live 0xffffffffc0408000
+vsock 73728 4 vsock_diag,vsock_loopback,vmw_vsock_virtio_transport,vmw_vsock_virtio_transport_common, Live 0xffffffffc0400000
+crw-------    1 0        0          10, 263 Oct 17 01:45 /dev/ovd_fwd
+CTLTEST suite=watch strict=0
+CHECK PASS version :: ok
+DATA watch class 'peer SHUT_WR (0x2)': holder read() returned 0 (EOF) 400 times, an error 0 times (last errno -)
+CHECK PASS watch record queued before the holder sees the end :: peer SHUT_WR (0x2) under load: 400/400 correct, order-violations=0 wrong-kind=0 live-after-end=0 extra-records=0 (23.6 ms per trial)
+DATA watch class 'peer SHUT_RDWR (0x3)': holder read() returned 0 (EOF) 390 times, an error 10 times (last errno ENOTCONN)
+CHECK PASS watch record queued before the holder sees the end :: peer SHUT_RDWR (0x3) under load: 400/400 correct, order-violations=0 wrong-kind=0 live-after-end=0 extra-records=0 (27.6 ms per trial)
+DATA watch class 'peer close()': holder read() returned 0 (EOF) 396 times, an error 4 times (last errno ENOTCONN)
+CHECK PASS watch record queued before the holder sees the end :: peer close() under load: 400/400 correct, order-violations=0 wrong-kind=0 live-after-end=0 extra-records=0 (28.0 ms per trial)
+DATA watch class 'peer SHUT_RD': holder read() returned 0 (EOF) 0 times, an error 0 times (last errno -)
+CHECK PASS watch record queued before the holder sees the end :: peer SHUT_RD under load: 400/400 correct, order-violations=0 wrong-kind=0 live-after-end=0 extra-records=0 (29.1 ms per trial)
+DATA watch class '0x2 then 0x3': holder read() returned 0 (EOF) 400 times, an error 0 times (last errno -)
+CHECK PASS watch record queued before the holder sees the end :: 0x2 then 0x3 under load: 400/400 correct, order-violations=0 wrong-kind=0 live-after-end=0 extra-records=0 (31.4 ms per trial)
+DATA parallel: holder read() = 0 (EOF) for 2180 watches, an error for 1916
+CHECK PASS 4096 concurrent watches: no holder reads an end before its watch decided :: holders saw 4096/4096 ends; live-after-end (ABORT succeeded) = 0
+DATA parallel watches: 4096 records: half-close=2048 peer-abort=2048 detached=0 (detached are records of ABORT calls that WON, if any)
+CHECK PASS one record per watch :: records=4096 of 4096
+DATA INFORMATIONAL poll-first window: 0 of 2048 holders that acted on EPOLLRDHUP/HUP alone (no read) found the watch still undecided
+DATA load: 349826775669 bytes written by the load threads; forwarded by module so far 349638695756
+CHECK PASS load pairs stayed live and quiet throughout :: live=100 queued=0 aborted: peer=0 sockerr=0
+CHECK PASS no kernel oops/warn :: dmesg scan
+RESULT suite=watch pass=10 fail=0
+SUITE_DONE suite=watch rc=0
+[    0.037455] rcu: Preemptible hierarchical RCU implementation.
+[    0.037456] rcu: 	RCU restricting CPUs from NR_CPUS=8192 to nr_cpu_ids=4.
+[    0.037458] 	Trampoline variant of Tasks RCU enabled.
+[    0.037458] 	Rude variant of Tasks RCU enabled.
+[    0.037459] 	Tracing variant of Tasks RCU enabled.
+[    0.037460] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.037470] RCU Tasks: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.037472] RCU Tasks Rude: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.046291] rcu: Hierarchical SRCU implementation.
+[    0.320977] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.320988] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+[    0.322126] ovd_fwd: loaded (spike, permanent: no module_exit)
+GUEST_END
+[  197.221751] reboot: Power down

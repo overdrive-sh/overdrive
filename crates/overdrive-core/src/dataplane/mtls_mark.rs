@@ -22,8 +22,8 @@ pub const MTLS_LEG_S_DIAL_MARK: u32 = 0x2;
 
 /// The leg-C / leg-F TPROXY fwmark (DG-9). Today the worker's private
 /// `TPROXY_FWMARK` and netlink's private `SHARED_IP_FWMARK`, both `0x1`; those
-/// private copies are deleted when they consume this constant (DELIVER vsock
-/// new-step 14).
+/// private copies are deleted when they consume this constant (DELIVER
+/// step 14).
 pub const MTLS_TPROXY_MARK: u32 = 0x1;
 
 /// The guest-flow owner's egress mark (D26-PINS F-6, DG-9). One dedicated bit:

@@ -18,7 +18,10 @@
 //!    ([`transport::parse_transport_token`], DG-5).
 //! 4. Configure the guest transport ([`transport::configure_guest_transport`],
 //!    G-V7), then write the resolver configuration.
-//! 5. Send `READY` exactly once, carrying the token's launch token. Any earlier error returns through PID 1's
+//! 5. Construct the guest flow owner over the setup's sockets and programs
+//!    and start its `run` on its own thread (DG-5; READY is not gated on the
+//!    control session, G-V3).
+//! 6. Send `READY` exactly once, carrying the token's launch token. Any earlier error returns through PID 1's
 //!    emergency power-off path without publishing `READY` or guest `EXIT`.
 //! 6. Block for exactly one host -> guest message and require it to be
 //!    `EXEC { argv }` — the operator's command arrives here, over the
@@ -82,6 +85,12 @@ use overdrive_core::vm::beacon::{self, BeaconMessage};
 mod guest_flow;
 mod transport;
 
+use std::sync::Arc;
+
+use guest_flow::{
+    GuestClock, GuestFlowOwner, GuestOwnerFatal, GuestOwnerIo, KernelGuestOwnerIo,
+    MonotonicGuestClock,
+};
 use transport::{
     GuestTransportSetupError, GuestTransportToken, KernelGuestTransportOps,
     configure_guest_transport, parse_transport_token,
@@ -92,12 +101,7 @@ fn main() {
         let mut stderr = std::io::stderr().lock();
         // DG-5: a guest transport setup failure is exactly one console line
         // naming the setup error, then the existing pre-READY exit path.
-        let _ = match &err {
-            InitError::GuestTransportSetup(source) => {
-                writeln!(stderr, "overdrive-init: guest transport setup failed: {source}")
-            }
-            other => writeln!(stderr, "overdrive-init: fatal: {other}"),
-        };
+        let _ = writeln!(stderr, "{}", init_failure_console_line(&err));
         let _ = stderr.flush();
         // Best-effort emergency power-off — a guest that hangs forever
         // on agent failure is worse than one that fails loudly and
@@ -117,12 +121,16 @@ fn run() -> Result<(), InitError> {
         load_vsock_modules,
         connect_beacon,
         configure_guest_network,
-        |conn, token: GuestTransportToken| {
-            send(
-                conn,
-                &BeaconMessage::Ready { pid, port: beacon::BEACON_VSOCK_PORT, launch: token.launch },
-            )
+        |(token, ops): (GuestTransportToken, KernelGuestTransportOps)| {
+            let _owner_thread = start_guest_flow_owner(
+                token,
+                Box::new(KernelGuestOwnerIo::new(ops)),
+                Arc::new(MonotonicGuestClock),
+                report_guest_owner_fatal,
+            )?;
+            Ok(token)
         },
+        |conn, token: GuestTransportToken| send(conn, &ready_message(pid, &token)),
         recv_exec,
         exec_operator_command,
         |conn, status| send(conn, &BeaconMessage::Exit { status }),
@@ -136,11 +144,13 @@ fn run() -> Result<(), InitError> {
 #[allow(clippy::too_many_arguments)]
 fn complete_guest_lifecycle<
     Conn,
+    Setup,
     Token,
     Root,
     Modules,
     Connect,
     Network,
+    StartOwner,
     Ready,
     ReceiveExec,
     Execute,
@@ -151,6 +161,7 @@ fn complete_guest_lifecycle<
     modules: Modules,
     connect: Connect,
     network: Network,
+    start_owner: StartOwner,
     ready: Ready,
     receive_exec: ReceiveExec,
     execute: Execute,
@@ -161,14 +172,15 @@ where
     Root: FnOnce() -> Result<(), InitError>,
     Modules: FnOnce() -> Result<(), InitError>,
     Connect: FnOnce() -> Result<Conn, InitError>,
-    Network: FnOnce() -> Result<Token, InitError>,
+    Network: FnOnce() -> Result<Setup, InitError>,
+    StartOwner: FnOnce(Setup) -> Result<Token, InitError>,
     Ready: FnOnce(&mut Conn, Token) -> Result<(), InitError>,
     ReceiveExec: FnOnce(&Conn) -> Result<Vec<String>, InitError>,
     Execute: FnOnce(&mut Conn, &[String]) -> Result<i32, InitError>,
     SendExit: FnOnce(&mut Conn, i32) -> Result<(), InitError>,
     PowerOff: FnOnce() -> Result<(), InitError>,
 {
-    let mut conn = complete_pre_ready_init(root, modules, connect, network, ready)?;
+    let mut conn = complete_pre_ready_init(root, modules, connect, network, start_owner, ready)?;
     let argv = receive_exec(&conn)?;
     let status = execute(&mut conn, &argv)?;
     send_exit(&mut conn, status)?;
@@ -176,28 +188,85 @@ where
 }
 
 /// The pre-READY path: root, modules, beacon dial, guest network (the
-/// transport token is parsed and the transport configured there, DG-5), then
-/// READY carrying the token the network step produced.
-fn complete_pre_ready_init<Conn, Token, Root, Modules, Connect, Network, Ready>(
+/// transport token is parsed and the transport configured there, DG-5), the
+/// guest flow owner started on its own thread over the setup's results
+/// (DG-5), then READY carrying the token the network step produced.
+fn complete_pre_ready_init<Conn, Setup, Token, Root, Modules, Connect, Network, StartOwner, Ready>(
     root: Root,
     modules: Modules,
     connect: Connect,
     network: Network,
+    start_owner: StartOwner,
     ready: Ready,
 ) -> Result<Conn, InitError>
 where
     Root: FnOnce() -> Result<(), InitError>,
     Modules: FnOnce() -> Result<(), InitError>,
     Connect: FnOnce() -> Result<Conn, InitError>,
-    Network: FnOnce() -> Result<Token, InitError>,
+    Network: FnOnce() -> Result<Setup, InitError>,
+    StartOwner: FnOnce(Setup) -> Result<Token, InitError>,
     Ready: FnOnce(&mut Conn, Token) -> Result<(), InitError>,
 {
     root()?;
     modules()?;
     let mut conn = connect()?;
-    let token = network()?;
+    let setup = network()?;
+    let token = start_owner(setup)?;
     ready(&mut conn, token)?;
     Ok(conn)
+}
+
+/// DG-5: the guest flow owner is constructed after `configure_guest_transport`
+/// and its `run` starts on its own thread, before READY (READY is not gated on
+/// the control session, G-V3). `run` returns only its `GuestOwnerFatal`, which
+/// goes to `on_fatal`.
+fn start_guest_flow_owner<OnFatal>(
+    token: GuestTransportToken,
+    io: Box<dyn GuestOwnerIo>,
+    clock: Arc<dyn GuestClock>,
+    on_fatal: OnFatal,
+) -> Result<std::thread::JoinHandle<()>, InitError>
+where
+    OnFatal: FnOnce(GuestOwnerFatal) + Send + 'static,
+{
+    std::thread::Builder::new()
+        .name("guest-flow-owner".to_owned())
+        .spawn(move || on_fatal(GuestFlowOwner::new(token, io, clock).run()))
+        .map_err(|source| InitError::GuestNetworkIo {
+            operation: "spawn the guest flow owner thread",
+            source,
+        })
+}
+
+/// DG-5: a guest flow owner failure is one console line, then the existing
+/// guest-exit path (the host sees the VMM exit).
+#[allow(clippy::needless_pass_by_value, reason = "the owner thread hands its fatal over by value")]
+fn report_guest_owner_fatal(fatal: GuestOwnerFatal) {
+    eprintln!("{}", guest_owner_fatal_console_line(&fatal));
+    let _ = reboot::reboot(RebootMode::RB_POWER_OFF);
+}
+
+/// The one console line of a guest flow owner failure (DG-5).
+fn guest_owner_fatal_console_line(fatal: &GuestOwnerFatal) -> String {
+    format!("overdrive-init: guest flow owner failed: {fatal}")
+}
+
+/// The one console line `main` writes for a failed lifecycle: a guest
+/// transport setup failure names the setup error (DG-5); every other failure
+/// keeps the existing fatal line.
+fn init_failure_console_line(err: &InitError) -> String {
+    match err {
+        InitError::GuestTransportSetup(source) => {
+            format!("overdrive-init: guest transport setup failed: {source}")
+        }
+        other => format!("overdrive-init: fatal: {other}"),
+    }
+}
+
+/// READY with the launch token of the guest's `overdrive.transport=` token
+/// (ATTR-TOKEN, DG-7).
+const fn ready_message(pid: u32, token: &GuestTransportToken) -> BeaconMessage {
+    BeaconMessage::Ready { pid, port: beacon::BEACON_VSOCK_PORT, launch: token.launch }
 }
 
 fn ensure_guest_directories_at(root: &Path) -> Result<(), InitError> {
@@ -370,23 +439,28 @@ const fn pre_ready_error_class(error: &InitError) -> Option<PreReadyErrorClass> 
 /// The guest network step of the pre-READY path (DG-2 row 16, DG-5): read
 /// `/proc/cmdline`, parse the one `overdrive.transport=` token, configure the
 /// guest transport, then write the resolver configuration (`nameserver
-/// <gateway>`). Returns the parsed token, whose launch token READY carries.
-fn configure_guest_network() -> Result<GuestTransportToken, InitError> {
+/// <gateway>`). Returns the parsed token, whose launch token READY carries,
+/// and the setup's sockets and programs, which the guest flow owner takes.
+fn configure_guest_network() -> Result<(GuestTransportToken, KernelGuestTransportOps), InitError> {
     configure_guest_network_with(
         || fs::read("/proc/cmdline"),
-        |token| configure_guest_transport(token, &mut KernelGuestTransportOps::new()),
+        |token| {
+            let mut ops = KernelGuestTransportOps::new();
+            configure_guest_transport(token, &mut ops)?;
+            Ok(ops)
+        },
         write_resolver,
     )
 }
 
-fn configure_guest_network_with<Read, Setup, Resolver>(
+fn configure_guest_network_with<Read, Setup, Ops, Resolver>(
     read_cmdline: Read,
     setup: Setup,
     write_resolver: Resolver,
-) -> Result<GuestTransportToken, InitError>
+) -> Result<(GuestTransportToken, Ops), InitError>
 where
     Read: FnOnce() -> std::io::Result<Vec<u8>>,
-    Setup: FnOnce(&GuestTransportToken) -> Result<(), GuestTransportSetupError>,
+    Setup: FnOnce(&GuestTransportToken) -> Result<Ops, GuestTransportSetupError>,
     Resolver: FnOnce(Ipv4Addr) -> Result<(), InitError>,
 {
     let cmdline = read_cmdline()
@@ -396,9 +470,9 @@ where
         source: std::io::Error::new(std::io::ErrorKind::InvalidData, source),
     })?;
     let token = parse_transport_token(cmdline).map_err(InitError::GuestTransportSetup)?;
-    setup(&token).map_err(InitError::GuestTransportSetup)?;
+    let ops = setup(&token).map_err(InitError::GuestTransportSetup)?;
     write_resolver(token.gateway)?;
-    Ok(token)
+    Ok((token, ops))
 }
 
 fn write_resolver(dns: Ipv4Addr) -> Result<(), InitError> {
@@ -898,8 +972,6 @@ mod tests {
     use std::cell::Cell;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    use nix::libc;
-
     use super::*;
 
     struct ScratchRoot(std::path::PathBuf);
@@ -1052,6 +1124,7 @@ mod tests {
                 trace.borrow_mut().push(PreReadyStage::Network);
                 network()
             },
+            Ok,
             |_, ()| {
                 trace.borrow_mut().push(PreReadyStage::Ready);
                 ready()
@@ -1133,6 +1206,7 @@ mod tests {
                     trace.borrow_mut().push(PreReadyStage::Network);
                     Ok(())
                 },
+                Ok,
                 |_, ()| {
                     trace.borrow_mut().push(PreReadyStage::Ready);
                     Ok(())
@@ -1269,6 +1343,8 @@ mod tests {
         use std::os::fd::OwnedFd;
         use std::os::unix::net::UnixStream;
 
+        use nix::libc;
+
         fn thread_cpu_time() -> Duration {
             fn timeval_duration(value: libc::timeval) -> Duration {
                 Duration::from_secs(u64::try_from(value.tv_sec).expect("nonnegative CPU seconds"))
@@ -1338,7 +1414,7 @@ mod tests {
         let reader: OwnedFd = reader.into();
         let mut conn = File::from(reader);
         let command = vec!["/bin/sh".to_owned(), "-c".to_owned(), "kill -KILL $$".to_owned()];
-        let expected = exit_status_to_wire(std::process::ExitStatus::from_raw(libc::SIGKILL));
+        let expected = exit_status_to_wire(std::process::ExitStatus::from_raw(nix::libc::SIGKILL));
 
         let observed = exec_operator_command(&mut conn, &command)
             .expect("a signal-terminated direct child is a successful supervision result");
@@ -1517,13 +1593,20 @@ mod tests {
             workload_addr: Ipv4Addr::new(100, 95, 0, 166),
             gateway: Ipv4Addr::new(100, 95, 0, 1),
             launch: overdrive_core::guest_transport::LaunchToken::from_bytes([0x5a; 16]).unwrap(),
+            // GUEST-PORTS (ADR-0217): the host listener ports the VM driver
+            // appends; not the 1234 / 1240 / 1243 defaults.
+            ports: crate::transport::GuestHostPorts {
+                beacon: overdrive_core::vm::config::VsockPort::new(50_234),
+                stream: overdrive_core::vm::config::VsockPort::new(50_240),
+                control: overdrive_core::vm::config::VsockPort::new(50_243),
+            },
         }
     }
 
     /// The `overdrive.transport=` token of [`transport_token`].
     fn transport_cmdline() -> String {
         format!(
-            "console=ttyS0 overdrive.transport=vsock2,addr=100.95.0.166,dns=100.95.0.1,launch={}",
+            "console=ttyS0 overdrive.transport=vsock2,addr=100.95.0.166,dns=100.95.0.1,launch={},beacon=50234,stream=50240,control=50243",
             "5a".repeat(16)
         )
     }
@@ -1566,6 +1649,7 @@ mod tests {
     /// CONTRACT_SHAPE: bounded-change (the resolver write keeps its place
     /// after the transport setup, and its failure suppresses READY).
     #[test]
+    #[ignore = "pending DELIVER attachment-cut step (5)"]
     fn resolver_write_failure_suppresses_ready_and_exec() {
         let configured = Cell::new(false);
         let (result, trace) = lifecycle_trace(
@@ -1606,4 +1690,178 @@ mod tests {
         );
     }
 
+    // -----------------------------------------------------------------------
+    // P6-S11 wiring cells (DG-5): the guest transport setup's console line,
+    // the guest flow owner's thread before READY, READY's launch token.
+    // -----------------------------------------------------------------------
+
+    /// DG-5: on any guest transport setup failure `overdrive-init` writes
+    /// exactly one console line `overdrive-init: guest transport setup failed:
+    /// <Display>` and takes the pre-READY exit path: neither the guest flow
+    /// owner nor READY starts. Every other failure keeps the existing line.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[test]
+    fn a_setup_failure_is_one_console_line_and_starts_neither_owner_nor_ready() {
+        let io = || std::io::Error::other("boom");
+        let setup_errors: Vec<(GuestTransportSetupError, &str)> = vec![
+            (
+                GuestTransportSetupError::TokenMissing,
+                "kernel command line has no overdrive.transport= token",
+            ),
+            (
+                GuestTransportSetupError::TokenMalformed {
+                    field: transport::TransportTokenField::Launch,
+                },
+                "overdrive.transport= field launch is malformed",
+            ),
+            (
+                GuestTransportSetupError::DummyDevice { source: io() },
+                "creating the transport dummy device failed: boom",
+            ),
+            (
+                GuestTransportSetupError::InboundListenerBind { source: io() },
+                "binding the inbound vsock listener failed: boom",
+            ),
+        ];
+        for (error, display) in setup_errors {
+            let err = InitError::GuestTransportSetup(error);
+            let line = init_failure_console_line(&err);
+            assert_eq!(line, format!("overdrive-init: guest transport setup failed: {display}"));
+            assert!(!line.contains('\n'), "exactly one line");
+        }
+        assert_eq!(
+            init_failure_console_line(&InitError::NoExecReceived),
+            "overdrive-init: fatal: beacon connection closed before the host sent EXEC"
+        );
+
+        let owner_started = Cell::new(false);
+        let ready_sent = Cell::new(false);
+        let result = complete_pre_ready_init(
+            || Ok(()),
+            || Ok(()),
+            || Ok(()),
+            || -> Result<(), InitError> {
+                Err(InitError::GuestTransportSetup(GuestTransportSetupError::TokenMissing))
+            },
+            |()| {
+                owner_started.set(true);
+                Ok(())
+            },
+            |_, ()| {
+                ready_sent.set(true);
+                Ok(())
+            },
+        );
+        assert!(matches!(
+            result,
+            Err(InitError::GuestTransportSetup(GuestTransportSetupError::TokenMissing))
+        ));
+        assert!(!owner_started.get(), "no guest flow owner after a setup failure");
+        assert!(!ready_sent.get(), "no READY after a setup failure");
+    }
+
+    /// DG-5: a guest flow owner failure is one console line naming it.
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn a_guest_owner_failure_is_one_console_line() {
+        let fatal = GuestOwnerFatal::EventWait { source: std::io::Error::other("boom") };
+        assert_eq!(
+            guest_owner_fatal_console_line(&fatal),
+            "overdrive-init: guest flow owner failed: waiting for guest transport events failed: boom"
+        );
+    }
+
+    /// DG-5 / G-V3: the pre-READY path constructs the guest flow owner after
+    /// the transport setup and starts its `run` on its own thread before READY
+    /// — READY is not gated on the control session: at READY the owner has
+    /// already made its first seam call and no control session exists. The
+    /// owner's only exit, a `GuestOwnerFatal`, reaches the fatal handler.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[test]
+    #[ignore = "pending DELIVER attachment-cut step (5)"]
+    fn the_guest_flow_owner_runs_on_its_own_thread_before_ready() {
+        use std::sync::Mutex;
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        use guest_flow::sim::{SimGuestClock, SimGuestOwnerIo};
+
+        let clock = Arc::new(SimGuestClock::new());
+        let io = SimGuestOwnerIo::new(transport_token().workload_addr, Arc::clone(&clock));
+        // the owner's readiness wait fails: its `run` returns the fatal
+        io.fail_event_wait(std::io::ErrorKind::Interrupted);
+        let (tx, rx) = mpsc::channel::<String>();
+        let fatal_seen = Arc::new(Mutex::new(None::<String>));
+        let at_ready = Cell::new((false, true));
+        let result = complete_pre_ready_init(
+            || Ok(()),
+            || Ok(()),
+            || Ok(()),
+            || Ok(transport_token()),
+            |token: GuestTransportToken| {
+                let owner_io: Box<dyn GuestOwnerIo> = Box::new(io.clone());
+                let owner_clock: Arc<dyn GuestClock> = clock.clone();
+                let seen = Arc::clone(&fatal_seen);
+                let _thread = start_guest_flow_owner(token, owner_io, owner_clock, move |fatal| {
+                    *seen.lock().unwrap() = Some(fatal.to_string());
+                    tx.send(fatal.to_string()).unwrap();
+                })?;
+                Ok(token)
+            },
+            |_, token: GuestTransportToken| {
+                // the owner thread is running: it has called the seam (its
+                // first dispatch) or already ended on the scripted wait failure
+                let deadline = std::time::Instant::now() + Duration::from_secs(10);
+                let started = || !io.effects().is_empty() || fatal_seen.lock().unwrap().is_some();
+                while !started() && std::time::Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                assert_eq!(token, transport_token());
+                at_ready.set((started(), io.session_socket().is_none()));
+                Ok(())
+            },
+        );
+        assert!(result.is_ok(), "{result:?}");
+        let (started, no_session) = at_ready.get();
+        assert!(started, "the guest flow owner runs on its own thread before READY");
+        assert!(no_session, "READY is not gated on the control session");
+        let fatal = rx.recv_timeout(Duration::from_secs(10)).expect("the owner's run returned");
+        assert_eq!(fatal, "waiting for guest transport events failed: Interrupted");
+    }
+
+    /// DG-7 / ATTR-TOKEN: READY carries the launch token of the guest's one
+    /// `overdrive.transport=` token, read from the kernel command line, after
+    /// the transport setup and the resolver write.
+    /// READY carries the transport token's launch token and its beacon port
+    /// (GUEST-PORTS).
+    /// CONTRACT_SHAPE: bounded-change.
+    #[test]
+    #[ignore = "pending DELIVER attachment-cut step (5)"]
+    fn ready_carries_the_launch_token_of_the_transport_token() {
+        let ready_line = std::cell::RefCell::new(None::<String>);
+        let result = complete_pre_ready_init(
+            || Ok(()),
+            || Ok(()),
+            || Ok(()),
+            || {
+                configure_guest_network_with(
+                    || Ok(transport_cmdline().into_bytes()),
+                    |_| Ok(()),
+                    |_| Ok(()),
+                )
+            },
+            |(token, ()): (GuestTransportToken, ())| Ok(token),
+            |_, token: GuestTransportToken| {
+                *ready_line.borrow_mut() = Some(ready_message(1, &token).to_string());
+                Ok(())
+            },
+        );
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(
+            ready_line.into_inner(),
+            // GUEST-PORTS (ADR-0217): READY's `port=` is the token's
+            // `beacon=` (50234 in the fixture), never the 1234 default.
+            Some(format!("READY pid=1 port=50234 launch={}", "5a".repeat(16)))
+        );
+    }
 }

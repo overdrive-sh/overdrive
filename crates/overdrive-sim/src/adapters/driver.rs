@@ -100,6 +100,13 @@ pub struct SimDriver {
     /// flow through an injected trait, and the matching test binding
     /// is the [`SimClock`] under DST.
     clock: Arc<dyn Clock>,
+    /// Scripted [`Driver::stop`] failure (netns-density-295 R5-PROBE-COUNT
+    /// fault (h), PROBE-RUN-COUNT D-1): while set, every `stop` returns
+    /// [`DriverError::Io`] carrying this text and leaves the allocation
+    /// table untouched — a stop failure other than `NotFound`.
+    stop_failure: Mutex<Option<String>>,
+    /// Every [`Driver::stop`] call, in call order (the stop-call oracle).
+    stop_calls: Mutex<Vec<AllocationId>>,
 }
 
 /// Configured failure mode for the driver. Stored behind a mutex so
@@ -145,7 +152,24 @@ impl SimDriver {
             exit_tx,
             exit_rx: Mutex::new(Some(exit_rx)),
             clock,
+            stop_failure: Mutex::new(None),
+            stop_calls: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Script every later [`Driver::stop`] to fail with `reason`
+    /// (`Some`), or to behave normally (`None`). Sticky until re-scripted.
+    /// A failed stop returns [`DriverError::Io`] — never `NotFound` — and
+    /// changes no driver state, so the allocation stays supervised.
+    pub fn script_stop_failure(&self, reason: Option<&str>) {
+        *self.stop_failure.lock() = reason.map(str::to_owned);
+    }
+
+    /// Every [`Driver::stop`] call so far (failed ones included), in call
+    /// order.
+    #[must_use]
+    pub fn stop_calls(&self) -> Vec<AllocationId> {
+        self.stop_calls.lock().clone()
     }
 
     /// Configure this driver to reject every subsequent `start` call
@@ -425,6 +449,11 @@ impl Driver for SimDriver {
     }
 
     async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
+        self.stop_calls.lock().push(handle.alloc.clone());
+        let scripted_failure = self.stop_failure.lock().clone();
+        if let Some(reason) = scripted_failure {
+            return Err(DriverError::Io(std::io::Error::other(reason)));
+        }
         // Symmetric with the VM driver's stop path per
         // `fix-terminated-slot-accumulation` Step 01-02: the slot is
         // removed on stop, NOT overwritten with `Terminated`. Durable

@@ -1,0 +1,23 @@
+
+  pair_bugTruncatedFrameWaits
+    1) pair_bugTruncatedFrameWaits::fwd_pair::TruncatedFrameAtPeerEndAbortsFrameInvalid failed after 1 test(s)
+
+  1 failed
+
+  1) pair_bugTruncatedFrameWaits::fwd_pair::TruncatedFrameAtPeerEndAbortsFrameInvalid:
+       Error [QNT508]: Expect condition does not hold true
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/fwd_pair.qnt:1740:51
+        1740:   run TruncatedFrameAtPeerEndAbortsFrameInvalid = DgramPaired
+                                                                ^^^^^^^^^^^
+        1741:     .then(SendDg("gh", 2)).then(Hop0("gh")).expect(DgramSafety and dir.get("gh").q1 == [10] and dg.get("gh").foff == 1)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        1742:     .then(DgHalfClose("g")).expect(DgramSafety and ctl.get("gh") == [Set("S")] and not(enHop0("gh")))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        1743:     .then(VCtl("gh")).expect(DgramSafety and live(cur, "h") and vs.get("h").cls == "clean" and headPartial(cur, "gh"))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Use --seed=0x7901106c3564fff2 --match=pair_bugTruncatedFrameWaits::fwd_pair::TruncatedFrameAtPeerEndAbortsFrameInvalid to repeat.
+
+
+  Use --verbosity=3 to show executions.
+  Further debug with: quint test --verbosity=3 /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/hazard/fwd_pair_watch_hazards_3.qnt
+error: Tests failed

@@ -16,28 +16,14 @@ integration-tests = []
 
 [dependencies]
 base64.workspace = true
-ipnet.workspace = true
 nix = { workspace = true, features = ["user"] }
 overdrive-control-plane = { path = "../../crates/overdrive-control-plane", features = ["integration-tests"] }
 overdrive-core = { path = "../../crates/overdrive-core" }
-# `prefix_landing` (G-PL-1, DG-14) decodes the steering map with the dataplane's
-# one key encoder and reads its pin directory constant.
-overdrive-dataplane = { path = "../../crates/overdrive-dataplane" }
-# `prefix_landing` (QPROJ-8) boots the production composition on the real
-# kernel: the production adapters `serve` composes (`RealCgroupFs`), and the
-# shared real-infra fixtures (VM fixture, namespace, CIDR lease). Normal
-# dependencies because the harness is this test crate's library target, as
-# with `overdrive-sim` below.
-overdrive-host = { path = "../../crates/overdrive-host" }
-overdrive-netlink = { path = "../../crates/overdrive-netlink" }
 overdrive-sim = { path = "../../crates/overdrive-sim", features = ["integration-tests"] }
-overdrive-testing = { path = "../../crates/overdrive-testing" }
 # The server composition's required `vm_cgroups: CgroupManager` argument
 # (GH #295, D-295-R14) names the worker's cgroup manager.
 overdrive-worker = { path = "../../crates/overdrive-worker" }
 reqwest.workspace = true
-# The `prefix_landing` probe's TLS ClientHello, which leg-C answers with a TLS record.
-rustls.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 tokio.workspace = true

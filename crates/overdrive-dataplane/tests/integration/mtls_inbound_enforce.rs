@@ -174,7 +174,12 @@ async fn inbound_enforce_origdst_server_mtls_ktls_rx_splice_to_server() {
 
     let pki = TestPki::mint();
     let identity: Arc<dyn IdentityRead> = Arc::new(held_identities(&pki));
-    let adapter = HostMtlsEnforcement::new(identity, MtlsLimits::default());
+    let adapter = HostMtlsEnforcement::new(
+        identity,
+        MtlsLimits::default(),
+        overdrive_core::guest_transport::GUEST_NODE_PREFIX,
+        crate::integration::helpers::guest_dial::not_serving(),
+    );
 
     adapter
         .probe()

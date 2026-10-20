@@ -1,0 +1,102 @@
+c[?7l[2J[0mSeaBIOS (version 1.17.0-debian-1.17.0-1ubuntu1)
+Booting from ROM..c[?7l[2JL1_BOOT uname_r=7.0.0-29-generic
+1
+crw-------    1 0        0          10, 232 Oct 16 23:47 /dev/kvm
+crw-------    1 0        0          10, 241 Oct 16 23:47 /dev/vhost-vsock
+crw-------    1 0        0          10, 263 Oct 16 23:47 /dev/ovd_fwd
+ovd_fwd 32768 0 [permanent], Live 0xffffffffc04fa000 (OE)
+HOST_START uname=7.0.0-29-generic
+MODULE abi=1 flags=1 (permanent=1)
+RMMOD host: ret=-1 errno=16 (Device or resource busy)
+VM_UP guest agent answers; guest rmmod: OK -1 errno=16
+RESULT dial-watch-halfclose                         trials=1000 pass=1000 fail=0 extra=[0 1000 0 0 0 0]
+INV guest: OK 0 0 0 1000 1000 0 0 0
+INV host: live=0/0 queued=0 attached=1000 completed=0 aborted=0 unclassified_eof=0 ab_peer=0 ab_socket=0 ab_detached=0
+RESULT dial-watch-halfclose-recordcheck-at-end      trials=1000 pass=1000 fail=0 extra=[0 0 1000 0 0 0]
+INV guest: OK 0 0 0 2000 2000 0 0 0
+INV host: live=0/0 queued=0 attached=2000 completed=0 aborted=0 unclassified_eof=0 ab_peer=0 ab_socket=0 ab_detached=0
+RESULT dial-watch-reset                             trials=1000 pass=1000 fail=0 extra=[0 1000 0 0 1000 0]
+INV guest: OK 0 0 0 3000 2000 1000 0 0
+INV host: live=0/0 queued=0 attached=3000 completed=0 aborted=0 unclassified_eof=0 ab_peer=0 ab_socket=0 ab_detached=0
+RESULT dial-watch-reset-poll                        trials=1000 pass=1000 fail=0 extra=[0 0 1000 0 1000 0]
+INV guest: OK 0 0 0 4000 2000 2000 0 0
+INV host: live=0/0 queued=0 attached=4000 completed=0 aborted=0 unclassified_eof=0 ab_peer=0 ab_socket=0 ab_detached=0
+RESULT dial-watch-halfclose-then-reset              trials=1000 pass=1000 fail=0 extra=[0 1000 0 0 0 0]
+INV guest: OK 0 0 0 5000 2000 3000 0 0
+INV host: live=0/0 queued=0 attached=5000 completed=0 aborted=0 unclassified_eof=0 ab_peer=0 ab_socket=0 ab_detached=0
+RESULT dial-watch-hostdrop                          trials=1000 pass=1000 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 6000 2000 4000 0 1000
+INV host: live=0/0 queued=0 attached=6000 completed=0 aborted=0 unclassified_eof=0 ab_peer=0 ab_socket=0 ab_detached=0
+RESULT storm-g-rst                                  trials=50 pass=50 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 8400 2000 6400 0 1000
+INV host: live=0/0 queued=0 attached=8400 completed=0 aborted=2400 unclassified_eof=0 ab_peer=2400 ab_socket=0 ab_detached=0
+RESULT storm-r-rst                                  trials=50 pass=50 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 10800 2000 8800 0 3400
+INV host: live=0/0 queued=0 attached=10800 completed=0 aborted=4800 unclassified_eof=0 ab_peer=2400 ab_socket=2400 ab_detached=0
+RESULT ctx-release-host                             trials=50 pass=50 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 11600 2000 9600 0 4200
+INV host: live=0/0 queued=0 attached=0 completed=0 aborted=0 unclassified_eof=0 ab_peer=0 ab_socket=0 ab_detached=0
+RESULT ctx-release-guest                            trials=50 pass=50 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 0 0 0 0 0
+INV host: live=0/0 queued=0 attached=800 completed=0 aborted=800 unclassified_eof=0 ab_peer=800 ab_socket=0 ab_detached=0
+RESULT vmm-kill-32pairs-0dials                      trials=40 pass=40 fail=0 extra=[0 0 0 0 0 1280]
+INV guest: OK 0 0 0 0 0 0 0 0
+INV host: live=0/0 queued=0 attached=0 completed=0 aborted=0 unclassified_eof=0 ab_peer=0 ab_socket=0 ab_detached=0
+RESULT vmm-kill-16pairs-16dials                     trials=40 pass=40 fail=0 extra=[0 0 640 0 0 640]
+INV guest: OK 0 0 0 0 0 0 0 0
+INV host: live=0/0 queued=0 attached=0 completed=0 aborted=0 unclassified_eof=0 ab_peer=0 ab_socket=0 ab_detached=0
+GUEST_DMESG_BAD_LINES OK 0
+HOST_DMESG_BAD_LINES 0
+HOST_DONE
+L1_EVEND_EXIT=0
+--- L1 dmesg tail
+[    0.596296] ima: Allocated hash algorithm: sha256
+[    0.596309] ima: No architecture policies found
+[    0.596332] evm: Initialising EVM extended attributes:
+[    0.596334] evm: security.selinux
+[    0.596336] evm: security.SMACK64
+[    0.596338] evm: security.SMACK64EXEC
+[    0.596340] evm: security.SMACK64TRANSMUTE
+[    0.596341] evm: security.SMACK64MMAP
+[    0.596343] evm: security.apparmor
+[    0.596344] evm: security.ima
+[    0.596346] evm: security.capability
+[    0.596348] evm: HMAC attrs: 0x1
+[    0.596678] PM:   Magic number: 14:903:807
+[    0.596702] misc snapshot: hash matches
+[    0.596995] RAS: Correctable Errors collector initialized.
+[    0.597304] clk: Disabling unused clocks
+[    0.597307] PM: genpd: Disabling unused power domains
+[    0.599143] Freeing unused decrypted memory: 2028K
+[    0.599854] Freeing unused kernel image (initmem) memory: 5292K
+[    0.599869] Write protecting the kernel read-only data: 43008k
+[    0.600450] Freeing unused kernel image (text/rodata gap) memory: 776K
+[    0.600840] Freeing unused kernel image (rodata/data gap) memory: 1668K
+[    0.663944] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.663954] Run /init as init process
+[    0.663957]   with arguments:
+[    0.663959]     /init
+[    0.663961]   with environment:
+[    0.663963]     HOME=/
+[    0.663964]     TERM=linux
+[    0.670986] NET: Registered PF_VSOCK protocol family
+[    0.760548] kvm_amd: TSC scaling supported
+[    0.760557] kvm_amd: Nested Virtualization enabled
+[    0.760559] kvm_amd: Nested Paging enabled
+[    0.760565] kvm_amd: LBR virtualization supported
+[    0.760570] kvm_amd: Virtual VMLOAD VMSAVE supported
+[    0.760571] kvm_amd: Virtual GIF supported
+[    0.760573] kvm_amd: Virtual NMI enabled
+[    0.779842] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.779850] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+[    0.780383] ovd_fwd: loaded (permanent, abi 1, hazard=0 work_delay_us=0)
+--- guest serial tail
+GUEST_BOOT uname_r=7.0.0-29-generic
+
+GUEST_READY
+
+AGENT_READY
+
+--- ch.log tail
+ovd_fwd 32768 0 [permanent], Live 0xffffffffc04fa000 (OE)
+[  390.490383] reboot: Power down

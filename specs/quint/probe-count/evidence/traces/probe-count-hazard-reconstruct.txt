@@ -9,6 +9,7 @@ State 1
   rat = 0
   rseq = 0
   terms = 0
+  conf_step = [init |-> [tag |-> "UNIT"]]
   psame = 0
   hist = <<>>
   running = TRUE

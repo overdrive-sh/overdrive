@@ -17,8 +17,7 @@ The interface contract lives in the #295 feature delta,
 guest stream dial `GuestStreamDial`*, § *[REF] leg-S over vsock (temporary
 bridge until #303) and the mTLS forwarded-outbound port*, § *[REF] VM probe
 runner*, § *[REF] Wire contracts — flow request, control message, datagram
-frame, flow event record* and § *[REF] Typed error taxonomy and who
-branches*.
+frame* and § *[REF] Typed error taxonomy and who branches*.
 
 ## Context
 
@@ -50,9 +49,11 @@ shutdown mask but no socket error (`net/vmw_vsock/virtio_transport_common.c:1244
 `EPOLLRDHUP` / `EPOLLHUP` for a peer shutdown (`net/vmw_vsock/af_vsock.c:1247-1259
 @ v7.0`). With the plain socket API a guest reset arrives as a clean EOF, and
 the peer sees silent truncation (V-28: 192 of 192). A flow's end is therefore
-classified from the kernel's vsock SHUTDOWN flags by a raw tracepoint
-(ADR-0180), which V-28 showed restores reset fidelity (192 of 192 in each
-abort scenario).
+classified from the kernel's own end facts in the forwarder's socket
+callbacks (ADR-0180), and a dialled stream takes the class from its watch
+(ADR-0216);
+measured on Linux 7.0, every abort reached the other far end as a reset
+(P-69).
 
 ## Decision
 
@@ -73,7 +74,7 @@ abort scenario).
    of its declared TCP listen ports (the PORT-295-C projection). A target that
    is not an Active VM lease or not a declared port, a node whose forwarding is
    quiesced (ADR-0169), an allocation whose control session is not live, and a
-   dial past the allocation's flow quota (ADR-0147) each return a distinct
+   dial past the allocation's flow quota (ADR-0208) each return a distinct
    typed result at once and change no state.
 4. **One host-opened flow per dial.** The owner opens a vsock STREAM to the
    guest's inbound port with a `TcpAccept` request that carries the guest
@@ -84,7 +85,7 @@ abort scenario).
    connect errno, or timed out with the connect errno. The owner's pairing
    deadline for a host-opened flow is strictly greater than the guest's
    connect timeout, so a guest reply always arrives before the owner gives
-   up. Paired yields a stream; every other end — refused, timed out, the
+   up (ADR-0215). Paired yields a stream; every other end — refused, timed out, the
    pairing deadline, a vsock connect or I/O failure (the VMM is gone) — is a
    typed dial error. A dial the owner ends while it is in flight reports the
    cause with the admission result of that cause: quiescence as quiesced,
@@ -92,23 +93,23 @@ abort scenario).
    no session; a VMM exit resets the host vsock (the device-release orphan
    sweep) and the dial reports the VM unreachable.
 5. **The dialer owns the stream.** The stream owns the connected host vsock.
-   The host side of a host-opened flow is not installed into the host sockmap;
-   the dialer reads and writes it. The owner delivers the classified end of
-   the guest's direction — clean half-close or abort — from the flow-end
-   classifier (ADR-0180) for that socket; the classification precedes the EOF
-   wake. Dropping the stream closes the vsock, which the guest sees as an
-   abort; shutting down its write side sends a clean half-close.
-6. **A dial holds a forwarder slot, not a host pair.** A dialled stream
-   installs no host sockmap pair, but it takes one forwarder slot from the
-   node's flow-slot space (its classifier registration and drain cells,
-   whose epoch keys its end records, ADR-0180) and counts against its
-   allocation's flow quota (ADR-0147) until it ends. A dial is refused for
-   capacity when either is full: the allocation's quota or the node's flow
-   slots, which every VM on the node shares. If PROBE-NOSAMPLE (ADR-0187,
-   proposed) is confirmed, the quota half applies to relay dials only: a
-   probe dial, which measures the application rather than carrying a
-   client's connection, takes a node flow slot but stands outside the
-   allocation's quota, bounded by one dial in flight per declared probe.
+   The host side of a host-opened flow is not forwarded; the dialer reads
+   and writes it (ADR-0214), and the host forwarder watches it (ADR-0216).
+   The stream reports the classified end of the guest's direction — clean
+   half-close or abort — from the owner's end of the watch or the watch's
+   end record (ADR-0216, ADR-0180, ADR-0202), never from its own `read`.
+   Dropping the stream aborts its watch and closes the vsock, which the
+   guest sees as an abort with a direction open; shutting down its write
+   side sends a clean half-close.
+6. **A dial holds a node flow slot, not a host pair.** A dialled stream has
+   no host pair, but it takes one slot of the node's flow capacity and counts
+   against its allocation's flow quota (ADR-0208) until it ends (ADR-0209). A dial is
+   refused for capacity when either is full: the allocation's quota or the
+   node's flow slots, which every VM on the node shares. Under PROBE-NOSAMPLE
+   (ADR-0187) the quota half applies to relay dials only: a probe dial, which
+   measures the application rather than carrying a client's connection,
+   takes a node flow slot but stands outside the allocation's quota, bounded
+   by one dial in flight per declared probe.
 7. **Probes (amends ADR-0094).** A TCP-connect probe of a VM target is healthy
    if and only if the dial yields a stream, which the probe then drops. An HTTP
    probe runs over the stream. A listener that never accepts is healthy while
@@ -138,9 +139,6 @@ The dial gates no lifecycle state; it yields a typed result to its caller
 - **Carry the leg-C TLS peer as the `TcpAccept` peer.** Works (V-28 Q3), but
   changes the client address a guest application sees from today's (ADR-0174).
   Rejected.
-- **Install the host side of a host-opened flow into the host sockmap.** The
-  dialers consume the bytes in userspace (the leg-S relay, the HTTP probe), so
-  a kernel redirect has no target. Rejected.
 
 ## Consequences
 

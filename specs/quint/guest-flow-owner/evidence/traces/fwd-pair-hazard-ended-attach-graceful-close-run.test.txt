@@ -1,0 +1,29 @@
+
+  pair_bugEndedAttachGracefulClose
+    1) pair_bugEndedAttachGracefulClose::fwd_pair::GuestCloseWithEmptyQueueBeforeHostAttachIsRefusedAndFlowAborts failed after 1 test(s)
+
+  1 failed
+
+  1) pair_bugEndedAttachGracefulClose::fwd_pair::GuestCloseWithEmptyQueueBeforeHostAttachIsRefusedAndFlowAborts:
+       Error [QNT508]: Expect condition does not hold true
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/fwd_pair.qnt:1525:72
+        1525:   run GuestCloseWithEmptyQueueBeforeHostAttachIsRefusedAndFlowAborts = InitWith("stream")
+                                                                                     ^^^^^^^^^^^^^^^^^^
+        1526:     .then(Write("hg")).then(CloseUnattached("g"))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        1527:     .then(VCtl("gh")).expect(Safety and pr.get("h").ph == "unattached" and vs.get("h").ps == both and vs.get("h").st == "closing")
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        1528:     .then(Attach("h"))
+              ^^^^^^^^^^^^^^^^^^^^^^
+        1529:     .expect(Safety and attRes.get("h") == "halfEnded" and attEnded.get("h") == 1 and pr.get("h").ph == "refused"
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        1530:             and pr.get("h").nrec == 0 and pr.get("h").rec == "none" and ep.get("h") == "reset" and dir.get("gh").rst
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        1531:             and not(dir.get("gh").eof) and vs.get("h").sent == both and guestAbortSent)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Use --seed=0x88802552df1706be --match=pair_bugEndedAttachGracefulClose::fwd_pair::GuestCloseWithEmptyQueueBeforeHostAttachIsRefusedAndFlowAborts to repeat.
+
+
+  Use --verbosity=3 to show executions.
+  Further debug with: quint test --verbosity=3 /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/hazard/fwd_pair_attach_hazards_3.qnt
+error: Tests failed

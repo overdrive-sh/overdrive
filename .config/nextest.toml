@@ -318,16 +318,12 @@ filter = '''
     binary(integration)
     & (
         (package(overdrive-worker) & (
-            test(bidirectional_walking_skeleton)
-            | test(egress_tproxy_capture)
-            | test(inbound_rule_keys_declared_port)
+            test(inbound_rule_keys_declared_port)
             | test(inbound_rules_per_listener)
             | test(job_kind_installs_no_inbound_rule)
             | test(mtls_intercept_equivalence)
             | test(mtls_intercept_install)
-            | test(name_resolve_enforce_consistency)
-            | test(outbound_enforce_substrate_bidirectional_splice_zero_copy)
-            | test(start_alloc_installs_both_tproxy)
+            | test(outbound_enforce_substrate_splice)
         ))
         | (package(overdrive-dataplane) & test(mtls))
         | (package(overdrive-control-plane) & (
@@ -758,6 +754,49 @@ test-group = 'host-kernel-shared'
 filter = 'package(overdrive-control-plane) & kind(lib)'
 test-group = 'host-kernel-shared'
 
+# netns-density-295 (vsock cut) DISTILL: the same library test binary also
+# holds the `quint_quiescence` conformance driver and the
+# `shared_network_recovery_acceptance` bodies, which boot
+# `run_server_with_obs_and_drivers` (the real node-global nft stale sweep and a
+# loopback HTTPS listener). They are covered by the whole-binary entry above.
+
+# netns-density-295 EVMOD (DELIVER step 4): the `overdrive-fwd` Tier-3 module
+# suite runs against the real `ovd_fwd` module. Its cases unload and reload
+# `vsock_loopback`, bind-mount over `/proc/modules` and `/dev` in
+# thread-private namespaces, install nft tables in a private netns, call
+# `delete_module`, and measure node-wide `SUnreclaim`. The WHOLE binary joins
+# the single-writer group (`.claude/rules/testing.md` § "Node-global kernel
+# state requires a catch-all nextest group"). The battery moves 512 MiB and
+# 2 x 64 MiB, runs a 1,000-pair reset storm, a 10 s stall and 300 clean-end
+# rounds, so it gets ten slow periods.
+[[profile.default.overrides]]
+filter = 'package(overdrive-fwd) & binary(integration)'
+slow-timeout = { period = "60s", terminate-after = 10 }
+test-group = 'host-kernel-shared'
+
+# netns-density-295 guest-kit lanes (kvm-tests, native metal). The in-guest
+# lane of `overdrive-init` boots a guest-kit microVM per cell, plays the node
+# beacon on vsock port 1234 and binds the root vhost device, so its WHOLE
+# integration binary joins the single-writer group. Each cell boots a guest and
+# runs one filtered in-guest test, so it gets five slow periods.
+[[profile.default.overrides]]
+filter = 'package(overdrive-init) & binary(integration)'
+slow-timeout = { period = "60s", terminate-after = 5 }
+test-group = 'host-kernel-shared'
+
+# The vsock native-metal lanes of `overdrive-cli` (covered by the CLI
+# whole-binary group entry above): a fault-matrix cell boots `serve`, a
+# baseline VM, injects a fault and waits for the next boot's re-placement
+# (five periods); a density cell boots 64 VMs and reboots `serve` over them
+# (twenty periods).
+[[profile.default.overrides]]
+filter = 'package(overdrive-cli) & binary(integration) & test(/vsock_fault_matrix::/)'
+slow-timeout = { period = "60s", terminate-after = 5 }
+
+[[profile.default.overrides]]
+filter = 'package(overdrive-cli) & binary(integration) & test(/vsock_density::/)'
+slow-timeout = { period = "60s", terminate-after = 20 }
+
 # GH #295 S-ND295-40: `overdrive-host`'s integration binary
 # (`vmm_tap_queue_errors.rs`, `kvm-tests`) creates real persistent TAPs and
 # launches Cloud Hypervisor through the production `create` path on the metal
@@ -778,16 +817,6 @@ test-group = 'host-kernel-shared'
 filter = 'package(overdrive-system-conformance) & binary(shared_guest_network_fail_stop_recovery)'
 test-group = 'host-kernel-shared'
 
-# netns-density-295 QPROJ-8 — `prefix_landing` conformance boots the production
-# composition on the real kernel and reads and clears node-global guest-prefix
-# state (the `local` prefix route, the pinned `sk_lookup` steering link, the
-# `ip overdrive-mtls` table), binds wildcard sentinels on fixed ports, and
-# creates a fixed-name client namespace and veth. The whole binary joins the
-# single-writer group (`.claude/rules/testing.md` § "Node-global kernel state
-# requires a catch-all nextest group").
-[[profile.default.overrides]]
-filter = 'package(overdrive-system-conformance) & binary(vsock_prefix_landing_conformance)'
-test-group = 'host-kernel-shared'
 
 # The xtask metal-qualification binary drives the production
 # `infra/metal/bootstrap.sh` lease protocol through several nested shell

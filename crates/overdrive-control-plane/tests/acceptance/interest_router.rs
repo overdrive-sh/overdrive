@@ -27,6 +27,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use overdrive_core::observation::{ProbeRunSeq, SameStatusRuns};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -262,6 +263,8 @@ fn probe_row(alloc_id: &str, at_ms: u64, status: ProbeStatus) -> ProbeResultRow 
         status,
         last_observed_at_unix_ms: at_ms,
         inferred: false,
+        run_seq: ProbeRunSeq::new(u64::max(at_ms, 1)).unwrap_or(ProbeRunSeq::FIRST),
+        same_status_runs: SameStatusRuns::ONE,
     }
 }
 

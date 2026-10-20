@@ -1,0 +1,23 @@
+
+  safe_runsNoSweepRecheck
+    1) safe_runsNoSweepRecheck::fwd_safe::SweepStoresBeforeErrReadRechecksUnderTableLock failed after 1 test(s)
+
+  1 failed
+
+  1) safe_runsNoSweepRecheck::fwd_safe::SweepStoresBeforeErrReadRechecksUnderTableLock:
+       Error [QNT508]: Expect condition does not hold true
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/fwd_safe.qnt:832:56
+        832:   run SweepStoresBeforeErrReadRechecksUnderTableLock = InitWith("pair")
+                                                                    ^^^^^^^^^^^^^^^^
+        833:     .then(Write).then(Dispatch("s")).then(Load("s")).then(Use("s")).expect(st.pend)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        834:     .then(SwState).then(WStart).then(WMove).then(WEnd)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        835:     .expect(Safety and st.wrun == "lock" and st.rawEnd == "eof" and st.pst == "live" and not(st.unclassified))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Use --seed=0xaccb62f1df35292b --match=safe_runsNoSweepRecheck::fwd_safe::SweepStoresBeforeErrReadRechecksUnderTableLock to repeat.
+
+
+  Use --verbosity=3 to show executions.
+  Further debug with: quint test --verbosity=3 /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/hazard/fwd_safe_hazards.qnt
+error: Tests failed

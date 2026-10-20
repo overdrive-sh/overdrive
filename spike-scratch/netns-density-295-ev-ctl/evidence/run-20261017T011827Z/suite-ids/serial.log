@@ -1,0 +1,45 @@
+GUEST_BOOT uname_r=7.0.0-29-generic suite=ids arg= modparams=
+GUEST_MODULES:
+ovd_fwd 36864 0 [permanent], Live 0xffffffffc0636000 (OE)
+aesni_intel 98304 0 - Live 0xffffffffc0626000
+tls 163840 0 - Live 0xffffffffc0612000
+vsock_diag 12288 0 - Live 0xffffffffc0610000
+vsock_loopback 12288 0 - Live 0xffffffffc0607000
+vmw_vsock_virtio_transport 20480 0 - Live 0xffffffffc060c000
+vmw_vsock_virtio_transport_common 57344 2 vsock_loopback,vmw_vsock_virtio_transport, Live 0xffffffffc0608000
+vsock 73728 4 vsock_diag,vsock_loopback,vmw_vsock_virtio_transport,vmw_vsock_virtio_transport_common, Live 0xffffffffc0600000
+crw-------    1 0        0          10, 263 Oct 17 01:22 /dev/ovd_fwd
+CTLTEST suite=ids strict=0
+CHECK PASS version :: ok
+CHECK PASS first id of a fresh context is 1 :: id=1
+DATA ids: 20001 pair attaches + 980000 watches succeeded in 16.0 s; max id 1000001
+CHECK PASS ids strictly increasing, never reused, within one context :: attaches+watches=1000001 dup=0 out-of-order=0 other-failures=0
+CHECK PASS 10^6 successful attach/watch operations :: 1000001
+CHECK PASS exactly one record per issued id across 10^6 ids :: records=1000001 issued=1000001 dup=0 unissued=0 missing=0
+DATA ids: ctx1 next id 1000002, ctx2 first id 1
+CHECK PASS second context starts at 1 :: id=1
+CHECK PASS an id of another context is ENOENT :: abort of ctx1 id 1000002 from ctx2 -> ENOENT
+CHECK PASS pair_state of another context's id is ENOENT :: -> ENOENT
+CHECK PASS id 0 is ENOENT :: 
+CHECK PASS id 2^64-1 is ENOENT :: 
+CHECK PASS abort of own live id :: 
+CHECK PASS abort twice: second is ENOENT :: 
+DATA ids: records module-wide: rec_new delta=1000003 rec_queued delta=1000003
+DATA audit[end] ctx_open=2 ctx_rel=0 ctx_free=0 pair_new=1000003 pair_free=1000001 rec_new=1000003 rec_queued=1000003 rec_read=1000001 rec_discard=0 rec_free_unread=0 rel_won=0 live=0 bytes=0
+CHECK PASS no kernel oops/warn :: dmesg scan
+RESULT suite=ids pass=13 fail=0
+SUITE_DONE suite=ids rc=0
+[    0.037597] rcu: Preemptible hierarchical RCU implementation.
+[    0.037598] rcu: 	RCU restricting CPUs from NR_CPUS=8192 to nr_cpu_ids=4.
+[    0.037601] 	Trampoline variant of Tasks RCU enabled.
+[    0.037601] 	Rude variant of Tasks RCU enabled.
+[    0.037601] 	Tracing variant of Tasks RCU enabled.
+[    0.037602] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.037612] RCU Tasks: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.037614] RCU Tasks Rude: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.046539] rcu: Hierarchical SRCU implementation.
+[    0.342997] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.343009] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+[    0.344146] ovd_fwd: loaded (spike, permanent: no module_exit)
+GUEST_END
+[   16.403990] reboot: Power down

@@ -1,0 +1,52 @@
+{
+ "uname_r_guest": "7.0.0-29-generic",
+ "done_marker": true,
+ "oops_lines": [],
+ "cases": [
+  {
+   "case": "sizes-0-u",
+   "pass": true
+  },
+  {
+   "case": "sizes-1431-c",
+   "pass": true
+  },
+  {
+   "case": "sizes-59000-u",
+   "pass": true
+  },
+  {
+   "case": "mixed-c",
+   "pass": false
+  },
+  {
+   "case": "credit",
+   "pass": true
+  },
+  {
+   "case": "chunked",
+   "pass": true
+  },
+  {
+   "case": "oversize",
+   "pass": true
+  },
+  {
+   "case": "badframe-len",
+   "pass": true
+  },
+  {
+   "case": "badframe-magic",
+   "pass": true
+  },
+  {
+   "case": "eof",
+   "pass": true
+  },
+  {
+   "case": "stall",
+   "pass": true
+  }
+ ],
+ "all_pass": false
+}

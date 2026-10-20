@@ -1,5 +1,5 @@
 //! Shared `VmDriver` acceptance fixtures for the vsock attachment cut (GH #295,
-//! D16-CLAIM / D17).
+//! CID-NOCLAIM / D17).
 //!
 //! The per-VM Unix beacon socket is gone: a guest's beacon connection now
 //! arrives through the node beacon intake over the core `BeaconIo` port. These
@@ -9,7 +9,7 @@
 //!
 //! - **dial** once the driver's VMM exists ([`BeaconHarness::dial_ready`]
 //!   waits for the next `Vmm::create` through [`BeaconHarness::vmm`]'s
-//!   decorator, then queues the connection keyed by the spec's claimed CID with
+//!   decorator, then queues the connection keyed by the spec's leased CID with
 //!   the READY line buffered);
 //! - **read** the host → guest lines the driver wrote ([`GuestSession::next_line`],
 //!   [`GuestSession::session_to_end`]);
@@ -26,6 +26,7 @@
 //! driver's `close` (the sim forgets a closed connection's outbound lines).
 
 #![allow(
+    clippy::missing_const_for_fn,
     clippy::expect_used,
     clippy::unwrap_used,
     clippy::doc_markdown,
@@ -40,7 +41,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use overdrive_core::guest_transport::{
-    ClaimedGuestCid, GUEST_CID_BASE, GuestCid, GuestCidClaim, GuestTransportAssignment, LaunchToken,
+    GUEST_CID_BASE, GuestCid, GuestFlowPorts, GuestTransportAssignment, LaunchToken,
+    VsockListenPort,
 };
 use overdrive_core::traits::driver::AllocationSpec;
 use overdrive_core::traits::vmm::{
@@ -50,7 +52,6 @@ use overdrive_core::vm::beacon::{BeaconConnKey, BeaconIo, BeaconSocket};
 use overdrive_core::vm::config::{VmConfig, VsockPort};
 use overdrive_sim::SimVmm;
 use overdrive_sim::adapters::beacon_io::SimBeaconIo;
-use overdrive_sim::adapters::guest_cid_claim::SimGuestCidClaim;
 use overdrive_worker::BeaconIntake;
 use parking_lot::Mutex;
 use tokio::sync::{Notify, mpsc};
@@ -75,24 +76,49 @@ pub fn test_launch() -> LaunchToken {
     LaunchToken::from_bytes(TEST_LAUNCH_BYTES).expect("fixture launch token is non-zero")
 }
 
-/// A claim on `GUEST_CID_BASE + offset` from a fresh `SimGuestCidClaim`.
-/// Use a distinct offset per allocation within one test.
-pub fn claimed_cid(offset: u32) -> ClaimedGuestCid {
-    let cid = GuestCid::new(GUEST_CID_BASE + offset).expect("fixture CID is in the guest range");
-    SimGuestCidClaim::new().claim(cid).expect("a fresh sim claim set holds nothing")
+/// The leased CID `GUEST_CID_BASE + offset` (CID-NOCLAIM: the VMM opens its
+/// device itself; no claim is taken). Use a distinct offset per allocation
+/// within one test: a `SimVmm` refuses a launch on a CID another live process
+/// holds, as the kernel does.
+pub fn leased_cid(offset: u32) -> GuestCid {
+    GuestCid::new(GUEST_CID_BASE + offset).expect("fixture CID is in the guest range")
 }
 
-/// A transport handoff over a fresh claim of `GUEST_CID_BASE + cid_offset`.
+/// A transport handoff on the leased CID `GUEST_CID_BASE + cid_offset` with
+/// the fixture launch token.
 pub fn transport(
     workload_addr: Ipv4Addr,
     gateway: Ipv4Addr,
     cid_offset: u32,
 ) -> GuestTransportAssignment {
-    GuestTransportAssignment::new(workload_addr, gateway, test_launch(), claimed_cid(cid_offset))
+    GuestTransportAssignment::new(
+        workload_addr,
+        gateway,
+        leased_cid(cid_offset),
+        test_launch(),
+        fixture_flow_ports(),
+    )
+}
+
+/// The guest-flow owner's stream port every fixture transport carries
+/// (GUEST-PORTS, ADR-0217). Deliberately not 1240: the driver must write the
+/// assignment's port, never a constant.
+pub const FIXTURE_FLOW_STREAM_PORT: u32 = 50_240;
+/// The guest-flow owner's control port every fixture transport carries.
+pub const FIXTURE_FLOW_CONTROL_PORT: u32 = 50_243;
+
+/// The bound owner ports a fixture assignment hands the driver
+/// (`GuestTransportAssignment::flow_ports`).
+pub fn fixture_flow_ports() -> GuestFlowPorts {
+    GuestFlowPorts::new(
+        VsockPort::new(FIXTURE_FLOW_STREAM_PORT),
+        VsockPort::new(FIXTURE_FLOW_CONTROL_PORT),
+    )
+    .expect("two distinct ports above the reserved range")
 }
 
 /// The kernel-reported key of the fixture guest's beacon connection for
-/// `spec`: its claimed CID and [`GUEST_BEACON_SOURCE_PORT`].
+/// `spec`: its leased CID and [`GUEST_BEACON_SOURCE_PORT`].
 pub fn beacon_key(spec: &AllocationSpec) -> BeaconConnKey {
     let transport = spec.transport.as_ref().expect("a VM fixture spec carries a transport");
     BeaconConnKey { peer_cid: transport.cid(), peer_port: VsockPort::new(GUEST_BEACON_SOURCE_PORT) }
@@ -143,8 +169,8 @@ impl GuestWire {
 
 #[async_trait]
 impl BeaconIo for GuestWire {
-    async fn bind(&self) -> Result<(), io::Error> {
-        self.inner.bind().await
+    async fn bind(&self, port: VsockListenPort) -> Result<VsockPort, io::Error> {
+        self.inner.bind(port).await
     }
 
     async fn accept(&self) -> Result<(BeaconSocket, BeaconConnKey), io::Error> {
@@ -203,8 +229,8 @@ impl Vmm for PublishesCreated {
         self.inner.probe().await
     }
 
-    async fn create(&self, config: &VmConfig, vsock: ClaimedGuestCid) -> VmmResult<VmProcess> {
-        let process = self.inner.create(config, vsock).await?;
+    async fn create(&self, config: &VmConfig, cid: GuestCid) -> VmmResult<VmProcess> {
+        let process = self.inner.create(config, cid).await?;
         let _ = self.created.send(process.control.pid);
         Ok(process)
     }
@@ -247,11 +273,16 @@ impl BeaconHarness {
         Arc::new(PublishesCreated { inner, created: self.created_tx.clone() })
     }
 
-    /// The driver's beacon intake, bound over this harness's wire.
+    /// The driver's beacon intake, bound over this harness's wire on a
+    /// kernel-assigned port (PORTS-CONFIG: a test never assumes a number; it
+    /// reads `BeaconIntake::bound_port` back).
     pub async fn intake(&self) -> BeaconIntake {
-        BeaconIntake::bind(Arc::clone(&self.wire) as Arc<dyn BeaconIo>)
-            .await
-            .expect("the sim beacon listener binds")
+        BeaconIntake::bind(
+            Arc::clone(&self.wire) as Arc<dyn BeaconIo>,
+            VsockListenPort::KernelAssigned,
+        )
+        .await
+        .expect("the sim beacon listener binds")
     }
 
     /// The pid of the next VMM the driver creates.

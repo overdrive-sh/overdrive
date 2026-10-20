@@ -29,6 +29,8 @@ State 1
   vmGen = 0
   gen = 0
   bHeldByOther = FALSE
+  gSess = 0
+  conf_step = [InitWith |-> [o |-> "g"]]
 
 State 2 [Provision]
   alloc = "Provisioned"
@@ -43,9 +45,11 @@ State 4 [Teardown]
 
 State 5 [step]
   sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+  gSess = 1
 
 State 6 [VmStop]
   vmUp = FALSE
+  gSess = 0
 
 State 7 [Release]
   alloc = "Absent"
@@ -64,6 +68,7 @@ State 10 [step]
 
 State 11 [step]
   sess = <<[st |-> "reading", gen |-> 1], [st |-> "pending", gen |-> 2]>>
+  gSess = 2
 
 State 12 [step]
   sess = <<[st |-> "reading", gen |-> 1], [st |-> "closed", gen |-> 2]>>

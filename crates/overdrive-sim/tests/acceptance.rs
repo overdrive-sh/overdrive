@@ -33,6 +33,7 @@ mod acceptance {
             let enforcement: Arc<dyn MtlsEnforcement> = Arc::new(SimMtlsEnforcement::new(
                 Arc::new(SimIdentityRead::new(BTreeMap::new(), None)),
                 MtlsLimits::default(),
+                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
             ));
             let resolve: Arc<dyn MtlsResolve> =
                 Arc::new(SimMtlsResolve::new(BTreeMap::new(), MtlsResolution::NonMesh));
@@ -56,9 +57,8 @@ mod acceptance {
         pub fn pool() -> Arc<GuestAddressPool> {
             Arc::new(GuestAddressPool::new(
                 "100.95.0.0/16".parse().expect("static guest prefix"),
-                "ovd-gbr0".to_owned(),
                 Ipv4Addr::new(100, 95, 0, 1),
-                Ipv4Addr::new(100, 95, 0, 1),
+                Arc::new(overdrive_sim::adapters::entropy::SimEntropy::new(0x295)),
             ))
         }
     }
@@ -198,4 +198,7 @@ mod acceptance {
     // same-address successor starts: the address is never reassigned while
     // the predecessor's lease is held (D-295-R7, R10).
     mod netns_density_retiring_cleanup;
+    // netns-density-295 EVMOD-PORT — the SimFlowForwarder arbiter of the
+    // forwarder facts (pending DELIVER step 4; Tier-3 pair: overdrive-fwd).
+    mod sim_flow_forwarder;
 }

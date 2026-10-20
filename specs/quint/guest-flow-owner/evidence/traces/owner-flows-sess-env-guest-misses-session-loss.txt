@@ -1,0 +1,77 @@
+# owner-flows-sess-env-guest-misses-session-loss: counterexample, 13 state(s) (from the TLC trace)
+
+State 1
+  bHeldByOther = FALSE
+  vmGen = 0
+  heldByOther = FALSE
+  gen = 0
+  quiesced = FALSE
+  resurrected = FALSE
+  crossMsg = FALSE
+  gSess = 0
+  conf_step = [InitWith |-> [o |-> "g"]]
+  phantom = FALSE
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+  alloc = "Absent"
+  badPaired = FALSE
+  act = "none"
+  abortDiscarded = {}
+  drvLive = FALSE
+  badAct = FALSE
+  toHostPaired = {}
+  claim = 0
+  readyCross = FALSE
+  toHostRefused = {}
+  dl = [res |-> << >>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE]
+  bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+  bclaim = 0
+  vmUp = FALSE
+  gf = << >>
+  hf = << >>
+  toHostAbort = {}
+  toGuestAbort = {}
+  flows = << >>
+
+State 2 [Provision]
+  gen = 1
+  alloc = "Provisioned"
+
+State 3 [Teardown]
+  alloc = "Retiring"
+
+State 4 [Release]
+  alloc = "Absent"
+
+State 5 [Provision]
+  gen = 2
+  alloc = "Provisioned"
+
+State 6 [VmStart]
+  vmGen = 2
+  vmUp = TRUE
+
+State 7 [step]
+  gSess = 2
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 2]>>
+
+State 8 [step]
+  sess = <<[st |-> "pending", gen |-> 2], [st |-> "pending", gen |-> 2]>>
+
+State 9 [step]
+  sess = <<[st |-> "reading", gen |-> 2], [st |-> "pending", gen |-> 2]>>
+
+State 10 [step]
+  sess = <<[st |-> "live", gen |-> 2], [st |-> "pending", gen |-> 2]>>
+  claim = 1
+
+State 11 [step]
+  sess = <<[st |-> "live", gen |-> 2], [st |-> "reading", gen |-> 2]>>
+
+State 12 [step]
+  sess = <<[st |-> "live", gen |-> 2], [st |-> "closed", gen |-> 2]>>
+
+State 13 [step]
+  sess = <<[st |-> "closed", gen |-> 2], [st |-> "closed", gen |-> 2]>>
+  claim = 0
+
+-> stutters forever in State 13

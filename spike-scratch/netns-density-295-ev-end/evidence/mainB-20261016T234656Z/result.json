@@ -1,0 +1,23 @@
+{
+ "qemu_exit": 0,
+ "host_done": true,
+ "elapsed_s": 390.76520109176636,
+ "scenarios": [
+  "dial-watch-halfclose:1000",
+  "dial-watch-halfclose-recordcheck-at-end:1000",
+  "dial-watch-reset:1000",
+  "dial-watch-reset-poll:1000",
+  "dial-watch-halfclose-then-reset:1000",
+  "dial-watch-hostdrop:1000",
+  "storm-g-rst:50",
+  "storm-r-rst:50",
+  "ctx-release-host:50",
+  "ctx-release-guest:50",
+  "vmm-kill:40",
+  "vmm-kill-dials:40"
+ ],
+ "hazard_host": 0,
+ "hazard_guest": 0,
+ "physical_module_names_unchanged": true,
+ "module_on_physical_host": []
+}

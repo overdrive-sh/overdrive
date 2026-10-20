@@ -7,6 +7,7 @@ State 1: <Initial predicate>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostPaired = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_phantom = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_gSess = 0
 /\ flows_bugBeaconPeerCidOnly_owner_flows_quiesced = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_readyCross = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_crossMsg = FALSE
@@ -15,6 +16,7 @@ State 1: <Initial predicate>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toGuestAbort = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmUp = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostRefused = {}
+/\ flows_bugBeaconPeerCidOnly_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bHeldByOther = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_claim = 0
 /\ flows_bugBeaconPeerCidOnly_owner_flows_dl = [ res |-> <<"none">>,
@@ -33,7 +35,7 @@ State 1: <Initial predicate>
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
 
-State 2: <flows_bugBeaconPeerCidOnly_owner_flows_Provision line 1212, col 3 to line 1234, col 51 of module flows_bugBeaconPeerCidOnly>
+State 2: <flows_bugBeaconPeerCidOnly_owner_flows_Provision line 1235, col 3 to line 1268, col 51 of module flows_bugBeaconPeerCidOnly>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 0
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
@@ -42,6 +44,7 @@ State 2: <flows_bugBeaconPeerCidOnly_owner_flows_Provision line 1212, col 3 to l
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostPaired = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_phantom = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_gSess = 0
 /\ flows_bugBeaconPeerCidOnly_owner_flows_quiesced = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_readyCross = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_crossMsg = FALSE
@@ -50,6 +53,7 @@ State 2: <flows_bugBeaconPeerCidOnly_owner_flows_Provision line 1212, col 3 to l
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toGuestAbort = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmUp = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostRefused = {}
+/\ flows_bugBeaconPeerCidOnly_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bHeldByOther = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_claim = 0
 /\ flows_bugBeaconPeerCidOnly_owner_flows_dl = [ res |-> <<"none">>,
@@ -68,7 +72,7 @@ State 2: <flows_bugBeaconPeerCidOnly_owner_flows_Provision line 1212, col 3 to l
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
 
-State 3: <flows_bugBeaconPeerCidOnly_owner_flows_VmStart line 786, col 3 to line 819, col 53 of module flows_bugBeaconPeerCidOnly>
+State 3: <flows_bugBeaconPeerCidOnly_owner_flows_VmStart line 797, col 3 to line 836, col 53 of module flows_bugBeaconPeerCidOnly>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 1
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
@@ -77,6 +81,7 @@ State 3: <flows_bugBeaconPeerCidOnly_owner_flows_VmStart line 786, col 3 to line
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostPaired = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_phantom = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_gSess = 0
 /\ flows_bugBeaconPeerCidOnly_owner_flows_quiesced = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_readyCross = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_crossMsg = FALSE
@@ -85,6 +90,7 @@ State 3: <flows_bugBeaconPeerCidOnly_owner_flows_VmStart line 786, col 3 to line
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toGuestAbort = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmUp = TRUE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostRefused = {}
+/\ flows_bugBeaconPeerCidOnly_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bHeldByOther = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_claim = 0
 /\ flows_bugBeaconPeerCidOnly_owner_flows_dl = [ res |-> <<"none">>,
@@ -103,23 +109,25 @@ State 3: <flows_bugBeaconPeerCidOnly_owner_flows_VmStart line 786, col 3 to line
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
 
-State 4: <flows_bugBeaconPeerCidOnly_owner_flows_Teardown line 1300, col 3 to line 1354, col 51 of module flows_bugBeaconPeerCidOnly>
+State 4: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3992, col 9 to line 3993, col 58 of module flows_bugBeaconPeerCidOnly>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 1
-/\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 1]>>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bclaim = 0
 /\ flows_bugBeaconPeerCidOnly_owner_flows_abortDiscarded = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostPaired = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_phantom = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_gSess = 0
 /\ flows_bugBeaconPeerCidOnly_owner_flows_quiesced = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_readyCross = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_crossMsg = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_alloc = "Retiring"
+/\ flows_bugBeaconPeerCidOnly_owner_flows_alloc = "Provisioned"
 /\ flows_bugBeaconPeerCidOnly_owner_flows_gen = 1
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toGuestAbort = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmUp = TRUE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostRefused = {}
+/\ flows_bugBeaconPeerCidOnly_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bHeldByOther = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_claim = 0
 /\ flows_bugBeaconPeerCidOnly_owner_flows_dl = [ res |-> <<"none">>,
@@ -138,128 +146,25 @@ State 4: <flows_bugBeaconPeerCidOnly_owner_flows_Teardown line 1300, col 3 to li
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
 
-State 5: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3583, col 9 to line 3584, col 58 of module flows_bugBeaconPeerCidOnly>
+State 5: <flows_bugBeaconPeerCidOnly_owner_flows_VmStop line 842, col 3 to line 1037, col 53 of module flows_bugBeaconPeerCidOnly>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 1
-/\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 1]>>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bclaim = 0
 /\ flows_bugBeaconPeerCidOnly_owner_flows_abortDiscarded = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostPaired = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_phantom = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_gSess = 0
 /\ flows_bugBeaconPeerCidOnly_owner_flows_quiesced = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_readyCross = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_crossMsg = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_alloc = "Retiring"
-/\ flows_bugBeaconPeerCidOnly_owner_flows_gen = 1
-/\ flows_bugBeaconPeerCidOnly_owner_flows_toGuestAbort = {}
-/\ flows_bugBeaconPeerCidOnly_owner_flows_vmUp = TRUE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostRefused = {}
-/\ flows_bugBeaconPeerCidOnly_owner_flows_bHeldByOther = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_claim = 0
-/\ flows_bugBeaconPeerCidOnly_owner_flows_dl = [ res |-> <<"none">>,
-  adm |-> {},
-  tout |-> {},
-  earlyDl |-> FALSE,
-  lateReply |-> FALSE ]
-/\ flows_bugBeaconPeerCidOnly_owner_flows_drvLive = TRUE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_badPaired = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostAbort = {}
-/\ flows_bugBeaconPeerCidOnly_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_heldByOther = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_act = "none"
-/\ flows_bugBeaconPeerCidOnly_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
-   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
-
-State 6: <flows_bugBeaconPeerCidOnly_owner_flows_VmStop line 825, col 3 to line 1014, col 53 of module flows_bugBeaconPeerCidOnly>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 1
-/\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_bclaim = 0
-/\ flows_bugBeaconPeerCidOnly_owner_flows_abortDiscarded = {}
-/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostPaired = {}
-/\ flows_bugBeaconPeerCidOnly_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_phantom = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_quiesced = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_readyCross = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_crossMsg = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_alloc = "Retiring"
+/\ flows_bugBeaconPeerCidOnly_owner_flows_alloc = "Provisioned"
 /\ flows_bugBeaconPeerCidOnly_owner_flows_gen = 1
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toGuestAbort = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmUp = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostRefused = {}
-/\ flows_bugBeaconPeerCidOnly_owner_flows_bHeldByOther = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_claim = 0
-/\ flows_bugBeaconPeerCidOnly_owner_flows_dl = [ res |-> <<"none">>,
-  adm |-> {},
-  tout |-> {},
-  earlyDl |-> FALSE,
-  lateReply |-> FALSE ]
-/\ flows_bugBeaconPeerCidOnly_owner_flows_drvLive = TRUE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_badPaired = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostAbort = {}
-/\ flows_bugBeaconPeerCidOnly_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_heldByOther = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_act = "none"
-/\ flows_bugBeaconPeerCidOnly_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
-   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
-
-State 7: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3583, col 9 to line 3584, col 58 of module flows_bugBeaconPeerCidOnly>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 1
-/\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_bclaim = 0
-/\ flows_bugBeaconPeerCidOnly_owner_flows_abortDiscarded = {}
-/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostPaired = {}
-/\ flows_bugBeaconPeerCidOnly_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_phantom = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_quiesced = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_readyCross = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_crossMsg = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_alloc = "Retiring"
-/\ flows_bugBeaconPeerCidOnly_owner_flows_gen = 1
-/\ flows_bugBeaconPeerCidOnly_owner_flows_toGuestAbort = {}
-/\ flows_bugBeaconPeerCidOnly_owner_flows_vmUp = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostRefused = {}
-/\ flows_bugBeaconPeerCidOnly_owner_flows_bHeldByOther = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_claim = 0
-/\ flows_bugBeaconPeerCidOnly_owner_flows_dl = [ res |-> <<"none">>,
-  adm |-> {},
-  tout |-> {},
-  earlyDl |-> FALSE,
-  lateReply |-> FALSE ]
-/\ flows_bugBeaconPeerCidOnly_owner_flows_drvLive = TRUE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_badPaired = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostAbort = {}
-/\ flows_bugBeaconPeerCidOnly_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_heldByOther = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_act = "none"
-/\ flows_bugBeaconPeerCidOnly_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
-   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
-
-State 8: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3583, col 9 to line 3584, col 58 of module flows_bugBeaconPeerCidOnly>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 1
-/\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_bclaim = 0
-/\ flows_bugBeaconPeerCidOnly_owner_flows_abortDiscarded = {}
-/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostPaired = {}
-/\ flows_bugBeaconPeerCidOnly_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_phantom = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_quiesced = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_readyCross = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_crossMsg = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_alloc = "Retiring"
-/\ flows_bugBeaconPeerCidOnly_owner_flows_gen = 1
-/\ flows_bugBeaconPeerCidOnly_owner_flows_toGuestAbort = {}
-/\ flows_bugBeaconPeerCidOnly_owner_flows_vmUp = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostRefused = {}
+/\ flows_bugBeaconPeerCidOnly_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bHeldByOther = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_claim = 0
 /\ flows_bugBeaconPeerCidOnly_owner_flows_dl = [ res |-> <<"none">>,
@@ -278,50 +183,16 @@ State 8: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3583, col 9 to line 3
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
 
-State 9: <flows_bugBeaconPeerCidOnly_owner_flows_Release line 1360, col 3 to line 1382, col 51 of module flows_bugBeaconPeerCidOnly>
+State 6: <flows_bugBeaconPeerCidOnly_owner_flows_Provision line 1235, col 3 to line 1268, col 51 of module flows_bugBeaconPeerCidOnly>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 1
-/\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 1]>>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bclaim = 0
 /\ flows_bugBeaconPeerCidOnly_owner_flows_abortDiscarded = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostPaired = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_phantom = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_quiesced = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_readyCross = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_crossMsg = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_alloc = "Absent"
-/\ flows_bugBeaconPeerCidOnly_owner_flows_gen = 1
-/\ flows_bugBeaconPeerCidOnly_owner_flows_toGuestAbort = {}
-/\ flows_bugBeaconPeerCidOnly_owner_flows_vmUp = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostRefused = {}
-/\ flows_bugBeaconPeerCidOnly_owner_flows_bHeldByOther = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_claim = 0
-/\ flows_bugBeaconPeerCidOnly_owner_flows_dl = [ res |-> <<"none">>,
-  adm |-> {},
-  tout |-> {},
-  earlyDl |-> FALSE,
-  lateReply |-> FALSE ]
-/\ flows_bugBeaconPeerCidOnly_owner_flows_drvLive = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_badPaired = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostAbort = {}
-/\ flows_bugBeaconPeerCidOnly_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_heldByOther = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_act = "none"
-/\ flows_bugBeaconPeerCidOnly_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
-   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
-
-State 10: <flows_bugBeaconPeerCidOnly_owner_flows_Provision line 1212, col 3 to line 1234, col 51 of module flows_bugBeaconPeerCidOnly>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
-/\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 1
-/\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_bclaim = 0
-/\ flows_bugBeaconPeerCidOnly_owner_flows_abortDiscarded = {}
-/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostPaired = {}
-/\ flows_bugBeaconPeerCidOnly_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_phantom = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_gSess = 0
 /\ flows_bugBeaconPeerCidOnly_owner_flows_quiesced = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_readyCross = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_crossMsg = FALSE
@@ -330,6 +201,7 @@ State 10: <flows_bugBeaconPeerCidOnly_owner_flows_Provision line 1212, col 3 to 
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toGuestAbort = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmUp = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostRefused = {}
+/\ flows_bugBeaconPeerCidOnly_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bHeldByOther = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_claim = 0
 /\ flows_bugBeaconPeerCidOnly_owner_flows_dl = [ res |-> <<"none">>,
@@ -348,15 +220,16 @@ State 10: <flows_bugBeaconPeerCidOnly_owner_flows_Provision line 1212, col 3 to 
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
 
-State 11: <flows_bugBeaconPeerCidOnly_owner_flows_VmStart line 786, col 3 to line 819, col 53 of module flows_bugBeaconPeerCidOnly>
+State 7: <flows_bugBeaconPeerCidOnly_owner_flows_VmStart line 797, col 3 to line 836, col 53 of module flows_bugBeaconPeerCidOnly>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 2
-/\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 1]>>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bclaim = 0
 /\ flows_bugBeaconPeerCidOnly_owner_flows_abortDiscarded = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostPaired = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_phantom = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_gSess = 0
 /\ flows_bugBeaconPeerCidOnly_owner_flows_quiesced = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_readyCross = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_crossMsg = FALSE
@@ -365,6 +238,7 @@ State 11: <flows_bugBeaconPeerCidOnly_owner_flows_VmStart line 786, col 3 to lin
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toGuestAbort = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmUp = TRUE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostRefused = {}
+/\ flows_bugBeaconPeerCidOnly_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bHeldByOther = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_claim = 0
 /\ flows_bugBeaconPeerCidOnly_owner_flows_dl = [ res |-> <<"none">>,
@@ -383,15 +257,53 @@ State 11: <flows_bugBeaconPeerCidOnly_owner_flows_VmStart line 786, col 3 to lin
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
 
-State 12: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3583, col 9 to line 3584, col 58 of module flows_bugBeaconPeerCidOnly>
+State 8: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3992, col 9 to line 3993, col 58 of module flows_bugBeaconPeerCidOnly>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 2
-/\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "live", gen |-> 1], [st |-> "none", gen |-> 0]>>
-/\ flows_bugBeaconPeerCidOnly_owner_flows_bclaim = 1
+/\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "reading", gen |-> 1]>>
+/\ flows_bugBeaconPeerCidOnly_owner_flows_bclaim = 0
 /\ flows_bugBeaconPeerCidOnly_owner_flows_abortDiscarded = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostPaired = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_phantom = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_gSess = 0
+/\ flows_bugBeaconPeerCidOnly_owner_flows_quiesced = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_readyCross = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_crossMsg = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_alloc = "Provisioned"
+/\ flows_bugBeaconPeerCidOnly_owner_flows_gen = 2
+/\ flows_bugBeaconPeerCidOnly_owner_flows_toGuestAbort = {}
+/\ flows_bugBeaconPeerCidOnly_owner_flows_vmUp = TRUE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostRefused = {}
+/\ flows_bugBeaconPeerCidOnly_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
+/\ flows_bugBeaconPeerCidOnly_owner_flows_bHeldByOther = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_claim = 0
+/\ flows_bugBeaconPeerCidOnly_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
+/\ flows_bugBeaconPeerCidOnly_owner_flows_drvLive = TRUE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_badPaired = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostAbort = {}
+/\ flows_bugBeaconPeerCidOnly_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_bugBeaconPeerCidOnly_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconPeerCidOnly_owner_flows_heldByOther = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_act = "none"
+/\ flows_bugBeaconPeerCidOnly_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
+
+State 9: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3992, col 9 to line 3993, col 58 of module flows_bugBeaconPeerCidOnly>
+/\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 2
+/\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "live", gen |-> 1]>>
+/\ flows_bugBeaconPeerCidOnly_owner_flows_bclaim = 2
+/\ flows_bugBeaconPeerCidOnly_owner_flows_abortDiscarded = {}
+/\ flows_bugBeaconPeerCidOnly_owner_flows_toHostPaired = {}
+/\ flows_bugBeaconPeerCidOnly_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugBeaconPeerCidOnly_owner_flows_phantom = FALSE
+/\ flows_bugBeaconPeerCidOnly_owner_flows_gSess = 0
 /\ flows_bugBeaconPeerCidOnly_owner_flows_quiesced = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_readyCross = TRUE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_crossMsg = FALSE
@@ -400,6 +312,7 @@ State 12: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3583, col 9 to line 
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toGuestAbort = {}
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmUp = TRUE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_toHostRefused = {}
+/\ flows_bugBeaconPeerCidOnly_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bHeldByOther = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_claim = 0
 /\ flows_bugBeaconPeerCidOnly_owner_flows_dl = [ res |-> <<"none">>,

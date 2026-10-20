@@ -1,0 +1,1008 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * evend: V-EV-END harness. One static binary, three roles:
+ *   evend agent                 guest role (inside the Cloud Hypervisor microVM): module context + guest-side sockets,
+ *                               driven over a vsock control connection (port 4000)
+ *   evend host <scn[:N]>...     host role (inside the private QEMU VM, which also loads the module and vhost_vsock):
+ *                               the orchestrator, the host-side sockets and the host context; starts and kills the VMM
+ *   evend dmesg-scan            count kernel BUG/Oops/WARNING lines
+ * Every byte stream is a splitmix64 stream verified at the receiver.
+ */
+#define _GNU_SOURCE
+#include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <pthread.h>
+#include <signal.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <sys/klog.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <sys/wait.h>
+#include <linux/vm_sockets.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <arpa/inet.h>
+#include <time.h>
+#include <unistd.h>
+#include "../module/ovd_fwd.h"
+
+typedef uint64_t u64;
+#define GUEST_CID 3371
+#define CTL_PORT 4000
+#define FLOW_PORT 1240      /* host listens: guest-originated flows */
+#define DIAL_PORT 1242      /* guest listens: host dials */
+#define INTAKE_PORT 7000    /* guest TCP intake (the capture stand-in) */
+#define APP_PORT 7100       /* guest application server for dials */
+
+static double now_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1e3 + t.tv_nsec / 1e6; }
+static void logf_(const char *fmt, ...) { va_list a; va_start(a, fmt); char b[2048]; vsnprintf(b, sizeof b, fmt, a); va_end(a); printf("%s\n", b); fflush(stdout); }
+#define DIE(...) do { logf_("FATAL: " __VA_ARGS__); fflush(stdout); _exit(2); } while (0)
+
+/* ---------------- splitmix64 streams ---------------- */
+static inline u64 sm_word(u64 seed, u64 k)
+{
+	u64 z = seed + (k + 1) * 0x9E3779B97F4A7C15ULL;
+	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+	z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+	return z ^ (z >> 31);
+}
+static void stream_fill(u64 seed, u64 off, unsigned char *buf, size_t n)
+{
+	for (size_t i = 0; i < n; i++) { u64 p = off + i; buf[i] = (sm_word(seed, p >> 3) >> ((p & 7) * 8)) & 0xff; }
+}
+static long stream_check(u64 seed, u64 off, const unsigned char *buf, size_t n)
+{
+	for (size_t i = 0; i < n; i++) { u64 p = off + i; if (buf[i] != ((sm_word(seed, p >> 3) >> ((p & 7) * 8)) & 0xff)) return (long)i; }
+	return -1;
+}
+static u64 rng_state = 88172645463325252ULL;
+static u64 rnd(void) { rng_state ^= rng_state << 13; rng_state ^= rng_state >> 7; rng_state ^= rng_state << 17; return rng_state; }
+
+/* ---------------- sockets ---------------- */
+static int tcp_listen(int port, int *outport)
+{
+	int fd = socket(AF_INET, SOCK_STREAM, 0), one = 1;
+	struct sockaddr_in a = { .sin_family = AF_INET, .sin_port = htons(port), .sin_addr.s_addr = htonl(INADDR_LOOPBACK) };
+	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+	if (bind(fd, (void *)&a, sizeof a) || listen(fd, 4096)) DIE("tcp_listen %d: %s", port, strerror(errno));
+	if (outport) { socklen_t l = sizeof a; getsockname(fd, (void *)&a, &l); *outport = ntohs(a.sin_port); }
+	return fd;
+}
+static int tcp_connect(int port)
+{
+	int fd = socket(AF_INET, SOCK_STREAM, 0), one = 1;
+	struct sockaddr_in a = { .sin_family = AF_INET, .sin_port = htons(port), .sin_addr.s_addr = htonl(INADDR_LOOPBACK) };
+	setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
+	if (connect(fd, (void *)&a, sizeof a)) { int e = errno; close(fd); errno = e; return -1; }
+	return fd;
+}
+static int vs_listen(int port)
+{
+	int fd = socket(AF_VSOCK, SOCK_STREAM, 0);
+	struct sockaddr_vm a = { .svm_family = AF_VSOCK, .svm_cid = VMADDR_CID_ANY, .svm_port = port };
+	if (bind(fd, (void *)&a, sizeof a) || listen(fd, 4096)) DIE("vs_listen %d: %s", port, strerror(errno));
+	return fd;
+}
+static int vs_connect(int cid, int port)
+{
+	int fd = socket(AF_VSOCK, SOCK_STREAM, 0);
+	struct sockaddr_vm a = { .svm_family = AF_VSOCK, .svm_cid = cid, .svm_port = port };
+	struct timeval tv = { 5, 0 };
+	setsockopt(fd, AF_VSOCK, SO_VM_SOCKETS_CONNECT_TIMEOUT, &tv, sizeof tv);
+	if (connect(fd, (void *)&a, sizeof a)) { int e = errno; close(fd); errno = e; return -1; }
+	return fd;
+}
+static int accept_to(int lfd, int ms)
+{
+	struct pollfd p = { .fd = lfd, .events = POLLIN };
+	if (poll(&p, 1, ms) <= 0) { errno = ETIMEDOUT; return -1; }
+	return accept(lfd, NULL, NULL);
+}
+static int tcp_state(int fd) { struct tcp_info ti; socklen_t l = sizeof ti; if (getsockopt(fd, IPPROTO_TCP, TCP_INFO, &ti, &l)) return -1; return ti.tcpi_state; }
+static void set_rst(int fd) { struct linger l = { 1, 0 }; setsockopt(fd, SOL_SOCKET, SO_LINGER, &l, sizeof l); }
+
+/* ---------------- forwarder context ---------------- */
+static int ctx_open(void) { int fd = open("/dev/ovd_fwd", O_RDWR | O_NONBLOCK | O_CLOEXEC); if (fd < 0) DIE("open /dev/ovd_fwd: %s", strerror(errno)); return fd; }
+static long fwd_attach(int ctx, int a, int b, int *bad)
+{
+	struct ovd_fwd_attach x = { .fd_a = a, .fd_b = b };
+	if (ioctl(ctx, OVD_FWD_ATTACH, &x)) { if (bad) *bad = x.bad_side; return -errno; }
+	return (long)x.id;
+}
+static long fwd_watch(int ctx, int fd) { struct ovd_fwd_watch w = { .fd = fd }; if (ioctl(ctx, OVD_FWD_WATCH, &w)) return -errno; return (long)w.id; }
+static int fwd_abort(int ctx, u64 id) { return ioctl(ctx, OVD_FWD_ABORT, &id) ? -errno : 0; }
+static int fwd_inv(int ctx, struct ovd_fwd_inventory *v) { return ioctl(ctx, OVD_FWD_INVENTORY, v); }
+/* non-blocking: reads up to max records; returns the count */
+static int fwd_read(int ctx, struct ovd_fwd_end *out, int max)
+{
+	int n = read(ctx, out, max * sizeof(*out));
+	if (n < 0) return 0;
+	return n / sizeof(*out);
+}
+static const char *recstr(const struct ovd_fwd_end *r, char *b, size_t n)
+{
+	snprintf(b, n, "id=%llu kind=%u cause=%u side=%u err=%u ab=%llu ba=%llu", (unsigned long long)r->id, r->kind, r->cause, r->side, r->err,
+		 (unsigned long long)r->moved_ab, (unsigned long long)r->moved_ba);
+	return b;
+}
+
+/* ---------------- endpoints with a verifying reader ---------------- */
+enum { EP_RUN = 0, EP_EOF = 1, EP_EOF_RESET = 2, EP_ERR = 3, EP_MISMATCH = 4, EP_TIMEOUT = 5, EP_STOP = 6 };
+struct ep {
+	int fd, vsock, noread, ctx, blocking, shut_wr;      /* ctx >= 0: a watch holder; the reader reads a record the instant it observes an end */
+	u64 seed_tx, seed_rx, tx;
+	volatile u64 rx;
+	pthread_t th;
+	volatile int state, stop, err, tcpst, started;
+	struct ovd_fwd_end rec;
+	volatile int rec_got;
+	volatile char rec_at;            /* 'p' at poll wake, 'e' at the end read, 'x' absent when the end was observed */
+	double deadline;
+};
+static void *ep_reader(void *arg)
+{
+	struct ep *e = arg;
+	unsigned char *buf = malloc(65536);
+	for (;;) {
+		if (e->stop) { e->state = EP_STOP; break; }
+		if (now_ms() > e->deadline) { e->state = EP_TIMEOUT; break; }
+		long n;
+		if (e->blocking) {   /* a holder blocked in read(): no poll, no record check before the read returns */
+			n = recv(e->fd, buf, 65536, 0);
+		} else {
+			struct pollfd p = { .fd = e->fd, .events = POLLIN | POLLRDHUP };
+			int pr = poll(&p, 1, 20);
+			if (pr <= 0) continue;
+			if (e->ctx >= 0 && !e->rec_got) { if (fwd_read(e->ctx, &e->rec, 1) == 1) { e->rec_got = 1; e->rec_at = 'p'; } }
+			n = recv(e->fd, buf, 65536, MSG_DONTWAIT);
+		}
+		if (n < 0 && (errno == EAGAIN || errno == EINTR)) continue;
+		if (n > 0) {
+			long bad = stream_check(e->seed_rx, e->rx, buf, n);
+			if (bad >= 0) { e->err = (int)(e->rx + bad); e->state = EP_MISMATCH; break; }
+			e->rx += n;
+			continue;
+		}
+		/* an end */
+		if (e->ctx >= 0 && !e->rec_got) {
+			if (fwd_read(e->ctx, &e->rec, 1) == 1) { e->rec_got = 1; e->rec_at = 'e'; } else e->rec_at = 'x';
+		}
+		if (n == 0) {
+			e->tcpst = e->vsock ? -1 : tcp_state(e->fd);
+			e->state = (!e->vsock && !e->shut_wr && e->tcpst == TCP_CLOSE) ? EP_EOF_RESET : EP_EOF;   /* after our own FIN a clean close also ends in TCP_CLOSE */
+		} else { e->err = errno; e->state = EP_ERR; }
+		break;
+	}
+	free(buf);
+	return NULL;
+}
+static int blocking_flag;
+static struct ep *ep_new(int fd, int vsock, int noread, u64 stx, u64 srx, int ctx)
+{
+	struct ep *e = calloc(1, sizeof *e);
+	e->fd = fd; e->vsock = vsock; e->noread = noread; e->seed_tx = stx; e->seed_rx = srx; e->ctx = ctx; e->tcpst = -1;
+	e->deadline = now_ms() + 15000;
+	if (!noread && blocking_flag) { struct timeval tv = { 0, 20000 }; setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv); e->blocking = 1; }
+	if (!noread) { e->started = 1; pthread_create(&e->th, NULL, ep_reader, e); }
+	return e;
+}
+static int ep_wait(struct ep *e, int ms)
+{
+	double end = now_ms() + ms;
+	while (e->state == EP_RUN && now_ms() < end) usleep(200);
+	return e->state;
+}
+static long ep_send(struct ep *e, u64 n)
+{
+	unsigned char *buf = malloc(65536); u64 done = 0;
+	while (done < n) {
+		size_t c = n - done > 65536 ? 65536 : n - done;
+		stream_fill(e->seed_tx, e->tx, buf, c);
+		ssize_t w = send(e->fd, buf, c, MSG_NOSIGNAL);
+		if (w < 0) { if (errno == EINTR) continue; int er = errno; free(buf); return -er; }
+		e->tx += w; done += w;
+	}
+	free(buf);
+	return (long)done;
+}
+static void ep_shut_wr(struct ep *e) { e->shut_wr = 1; shutdown(e->fd, SHUT_WR); }
+static void ep_stop(struct ep *e) { if (e->started) { e->stop = 1; pthread_join(e->th, NULL); e->started = 0; } }
+static void ep_free(struct ep *e) { ep_stop(e); if (e->fd >= 0) close(e->fd); free(e); }
+static int ep_is_reset(struct ep *e) { return e->state == EP_ERR || e->state == EP_EOF_RESET; }
+static const char *ep_str(struct ep *e, char *b, size_t n)
+{
+	static const char *nm[] = { "RUN", "EOF", "EOF_RESET", "ERR", "MISMATCH", "TIMEOUT", "STOP" };
+	snprintf(b, n, "%s(rx=%llu err=%d tcp=%d)", nm[e->state], (unsigned long long)e->rx, e->err, e->tcpst);
+	return b;
+}
+
+/* =====================================================================================================================
+ * guest agent
+ * ===================================================================================================================== */
+#define NH 16384
+struct gh { int fd; struct ep *ep; int vsock; };
+static struct gh G[NH];
+static int g_ctx = -1;
+static int gnew(int fd, int vsock) { for (int i = 1; i < NH; i++) if (G[i].fd == 0) { G[i].fd = fd; G[i].vsock = vsock; G[i].ep = NULL; return i; } DIE("handles exhausted"); return -1; }
+static int g_intake = -1, g_vsock_listen = -1, g_app_listen = -1;
+
+static void agent_cmd(char *line, char *out, size_t on)
+{
+	char *argv[12]; int argc = 0;
+	for (char *t = strtok(line, " \n"); t && argc < 12; t = strtok(NULL, " \n")) argv[argc++] = t;
+	if (!argc) { snprintf(out, on, "ERR empty"); return; }
+	#define IS(c) (!strcmp(argv[0], c))
+	#define A(i) (argv[i])
+	#define AI(i) ((long)strtoll(argv[i], NULL, 0))
+	if (IS("PING")) snprintf(out, on, "OK uname=%s", "guest");
+	else if (IS("CTX_OPEN")) { if (g_ctx >= 0) close(g_ctx); g_ctx = ctx_open(); snprintf(out, on, "OK"); }
+	else if (IS("CTX_CLOSE")) { if (g_ctx >= 0) close(g_ctx); g_ctx = -1; snprintf(out, on, "OK"); }
+	else if (IS("LISTEN")) { g_intake = tcp_listen(INTAKE_PORT, NULL); g_app_listen = tcp_listen(APP_PORT, NULL); g_vsock_listen = vs_listen(DIAL_PORT); snprintf(out, on, "OK"); }
+	else if (IS("TCP_CONNECT")) {   /* TCP_CONNECT <port> <seed_tx> <seed_rx> <noread> -> app socket with a reader */
+		int fd = tcp_connect(AI(1)); if (fd < 0) { snprintf(out, on, "ERR %d", errno); return; }
+		int h = gnew(fd, 0); G[h].ep = ep_new(fd, 0, AI(4), AI(2), AI(3), -1); snprintf(out, on, "OK %d", h);
+	}
+	else if (IS("ACCEPT_INTAKE")) { int fd = accept_to(g_intake, 3000); if (fd < 0) { snprintf(out, on, "ERR %d", errno); return; } snprintf(out, on, "OK %d", gnew(fd, 0)); }
+	else if (IS("ACCEPT_APP")) {     /* ACCEPT_APP <seed_tx> <seed_rx> <noread> */
+		int fd = accept_to(g_app_listen, 3000); if (fd < 0) { snprintf(out, on, "ERR %d", errno); return; }
+		int h = gnew(fd, 0); G[h].ep = ep_new(fd, 0, AI(3), AI(1), AI(2), -1); snprintf(out, on, "OK %d", h);
+	}
+	else if (IS("ACCEPT_DIAL")) { int fd = accept_to(g_vsock_listen, 3000); if (fd < 0) { snprintf(out, on, "ERR %d", errno); return; } snprintf(out, on, "OK %d", gnew(fd, 1)); }
+	else if (IS("VCONNECT")) { int fd = vs_connect(2, AI(1)); if (fd < 0) { snprintf(out, on, "ERR %d", errno); return; } snprintf(out, on, "OK %d", gnew(fd, 1)); }
+	else if (IS("TCP_CONNECT_RAW")) { int fd = tcp_connect(AI(1)); if (fd < 0) { snprintf(out, on, "ERR %d", errno); return; } snprintf(out, on, "OK %d", gnew(fd, 0)); }
+	else if (IS("ATTACH")) { int bad = 0; long id = fwd_attach(g_ctx, G[AI(1)].fd, G[AI(2)].fd, &bad); if (id < 0) snprintf(out, on, "ERR %ld bad=%d", -id, bad); else snprintf(out, on, "OK %ld", id); }
+	else if (IS("WATCH")) { long id = fwd_watch(g_ctx, G[AI(1)].fd); if (id < 0) snprintf(out, on, "ERR %ld", -id); else snprintf(out, on, "OK %ld", id); }
+	else if (IS("ABORT")) { int r = fwd_abort(g_ctx, AI(1)); if (r) snprintf(out, on, "ERR %d", -r); else snprintf(out, on, "OK"); }
+	else if (IS("ABORT_ALL")) { unsigned c = 0; ioctl(g_ctx, OVD_FWD_ABORT_ALL, &c); snprintf(out, on, "OK %u", c); }
+	else if (IS("SEND")) { struct gh *h = &G[AI(1)]; long r = ep_send(h->ep, AI(2)); if (r < 0) snprintf(out, on, "ERR %ld", -r); else snprintf(out, on, "OK %ld", r); }
+	else if (IS("SHUT_WR")) { if (G[AI(1)].ep) G[AI(1)].ep->shut_wr = 1; shutdown(G[AI(1)].fd, SHUT_WR); snprintf(out, on, "OK"); }
+	else if (IS("SHUT_RDWR")) { shutdown(G[AI(1)].fd, SHUT_RDWR); snprintf(out, on, "OK"); }
+	else if (IS("RST")) { struct gh *h = &G[AI(1)]; if (h->ep) ep_stop(h->ep); set_rst(h->fd); close(h->fd); if (h->ep) { free(h->ep); } memset(h, 0, sizeof *h); snprintf(out, on, "OK"); }
+	else if (IS("CLOSE")) { struct gh *h = &G[AI(1)]; if (h->ep) ep_stop(h->ep); if (h->fd) close(h->fd); if (h->ep) free(h->ep); memset(h, 0, sizeof *h); snprintf(out, on, "OK"); }
+	else if (IS("RES")) {            /* RES <h> <ms> */
+		struct ep *e = G[AI(1)].ep; if (!e) { snprintf(out, on, "ERR noep"); return; }
+		ep_wait(e, AI(2)); snprintf(out, on, "OK %d %d %llu %d %d", e->state, e->err, (unsigned long long)e->rx, e->tcpst, tcp_state(e->fd));
+	}
+	else if (IS("TCPST")) { snprintf(out, on, "OK %d", tcp_state(G[AI(1)].fd)); }
+	else if (IS("WAIT_TCPST")) {     /* WAIT_TCPST <h> <state> <ms> */
+		double end = now_ms() + AI(3); int st;
+		while ((st = tcp_state(G[AI(1)].fd)) != AI(2) && now_ms() < end) usleep(500);
+		snprintf(out, on, "OK %d", st);
+	}
+	else if (IS("RECS")) {           /* RECS <want> <ms>: wait until `want` records were read, return them all */
+		struct ovd_fwd_end r[64]; int n = 0; double end = now_ms() + AI(2); char *p = out; size_t left = on;
+		int w = snprintf(p, left, "OK"); p += w; left -= w;
+		while (n < AI(1) && now_ms() < end) {
+			struct pollfd pf = { .fd = g_ctx, .events = POLLIN };
+			poll(&pf, 1, 20);
+			int c = fwd_read(g_ctx, r, 64);
+			for (int i = 0; i < c && left > 128; i++, n++) { w = snprintf(p, left, " [%llu %u %u %u %u %llu %llu]", (unsigned long long)r[i].id, r[i].kind, r[i].cause, r[i].side, r[i].err, (unsigned long long)r[i].moved_ab, (unsigned long long)r[i].moved_ba); p += w; left -= w; }
+		}
+	}
+	else if (IS("INV")) {
+		struct ovd_fwd_inventory v; if (fwd_inv(g_ctx, &v)) { snprintf(out, on, "ERR %d", errno); return; }
+		snprintf(out, on, "OK %u %u %u %llu %llu %llu %llu %llu", v.live_pairs, v.live_watches, v.queued_ends, (unsigned long long)v.attached, (unsigned long long)v.completed, (unsigned long long)v.aborted, (unsigned long long)v.unclassified_eof, (unsigned long long)v.ab_peer);
+	}
+	else if (IS("SHUT_THEN_CLOSE_ON_REC")) {   /* SHUT_THEN_CLOSE_ON_REC <hG> <hVg> <hI> <ms>: shutdown(G,WR); on the first record close Vg and I at once */
+		if (G[AI(1)].ep) G[AI(1)].ep->shut_wr = 1;
+		shutdown(G[AI(1)].fd, SHUT_WR);
+		struct pollfd pf = { .fd = g_ctx, .events = POLLIN }; int pr = poll(&pf, 1, AI(4));
+		for (int k = 2; k <= 3; k++) { struct gh *h = &G[AI(k)]; if (h->fd) close(h->fd); memset(h, 0, sizeof *h); }
+		snprintf(out, on, "OK %d", pr);
+	}
+	else if (IS("DMESG")) {
+		int n = klogctl(10, NULL, 0); char *b = malloc(n + 1); n = klogctl(3, b, n); b[n > 0 ? n : 0] = 0; int bad = 0;
+		for (char *l = strtok(b, "\n"); l; l = strtok(NULL, "\n")) if (strstr(l, "BUG") || strstr(l, "Oops") || strstr(l, "WARNING") || strstr(l, "Call Trace") || strstr(l, "RCU stall")) bad++;
+		free(b); snprintf(out, on, "OK %d", bad);
+	}
+	else if (IS("RMMOD")) { long r = syscall(SYS_delete_module, "ovd_fwd", O_NONBLOCK); snprintf(out, on, "OK %ld errno=%d", r, errno); }
+	else if (IS("SYSFS_SET")) { int fd = open(A(1), O_WRONLY); if (fd < 0) { snprintf(out, on, "ERR %d", errno); return; } int w = write(fd, A(2), strlen(A(2))); close(fd); snprintf(out, on, "OK %d", w); }
+	else snprintf(out, on, "ERR unknown %s", argv[0]);
+}
+
+static int agent_main(void)
+{
+	signal(SIGPIPE, SIG_IGN);
+	int lfd = vs_listen(CTL_PORT);
+	logf_("AGENT_READY");
+	for (;;) {
+		int c = accept(lfd, NULL, NULL);
+		if (c < 0) continue;
+		char buf[8192]; size_t have = 0;
+		for (;;) {
+			ssize_t n = recv(c, buf + have, sizeof buf - have - 1, 0);
+			if (n <= 0) break;
+			have += n; buf[have] = 0;
+			char *nl;
+			while ((nl = memchr(buf, '\n', have))) {
+				*nl = 0;
+				char out[8192]; agent_cmd(buf, out, sizeof out - 2);
+				size_t ol = strlen(out); out[ol++] = '\n';
+				size_t sent = 0; while (sent < ol) { ssize_t w = send(c, out + sent, ol - sent, MSG_NOSIGNAL); if (w <= 0) break; sent += w; }
+				size_t used = nl - buf + 1; memmove(buf, buf + used, have - used); have -= used; buf[have] = 0;
+			}
+		}
+		close(c);
+	}
+}
+
+/* =====================================================================================================================
+ * host role
+ * ===================================================================================================================== */
+static int ctl = -1;
+static char lastrsp[8192];
+static const char *grpc(const char *fmt, ...)
+{
+	char cmd[512]; va_list a; va_start(a, fmt); vsnprintf(cmd, sizeof cmd - 2, fmt, a); va_end(a);
+	size_t l = strlen(cmd); cmd[l++] = '\n';
+	if (send(ctl, cmd, l, MSG_NOSIGNAL) != (ssize_t)l) { snprintf(lastrsp, sizeof lastrsp, "ERR ctl-send %s", strerror(errno)); return lastrsp; }
+	size_t have = 0;
+	for (;;) {
+		struct pollfd p = { .fd = ctl, .events = POLLIN };
+		if (poll(&p, 1, 30000) <= 0) { snprintf(lastrsp, sizeof lastrsp, "ERR ctl-timeout"); return lastrsp; }
+		ssize_t n = recv(ctl, lastrsp + have, sizeof lastrsp - have - 1, 0);
+		if (n <= 0) { snprintf(lastrsp, sizeof lastrsp, "ERR ctl-closed"); return lastrsp; }
+		have += n; lastrsp[have] = 0;
+		char *nl = memchr(lastrsp, '\n', have);
+		if (nl) { *nl = 0; return lastrsp; }
+	}
+}
+static int ok(const char *r) { return !strncmp(r, "OK", 2); }
+static long okval(const char *r) { return ok(r) ? strtol(r + 2, NULL, 10) : -1; }
+
+/* ---- VMM ---- */
+static pid_t ch_pid;
+static const char *CH_BIN = "/ch/cloud-hypervisor", *G_KERNEL = "/ch/kernel", *G_INITRD = "/ch/initramfs.cpio.gz";
+static int vm_mem_mb = 512, vm_cpus = 2;
+static int vm_start(void)
+{
+	char mem[64], cpus[64];
+	snprintf(mem, sizeof mem, "size=%dM", vm_mem_mb); snprintf(cpus, sizeof cpus, "boot=%d", vm_cpus);
+	ch_pid = fork();
+	if (!ch_pid) {
+		setsid();
+		int o = open("/tmp/ch.stdout", O_WRONLY | O_CREAT | O_APPEND, 0644); dup2(o, 1); dup2(o, 2);
+		char vs[128]; snprintf(vs, sizeof vs, "cid=%d,backend=vhost-kernel", GUEST_CID);
+		execl(CH_BIN, "cloud-hypervisor", "--kernel", G_KERNEL, "--initramfs", G_INITRD, "--cmdline", "console=ttyS0 panic=-1 loglevel=4",
+		      "--cpus", cpus, "--memory", mem, "--serial", "file=/tmp/guest-serial.log", "--console", "off", "--vsock", vs, "--log-file", "/tmp/ch.log", (char *)NULL);
+		_exit(127);
+	}
+	double end = now_ms() + 60000;
+	while (now_ms() < end) {
+		int fd = vs_connect(GUEST_CID, CTL_PORT);
+		if (fd >= 0) { ctl = fd; const char *r = grpc("PING"); if (ok(r)) return 0; close(fd); ctl = -1; }
+		int st; if (waitpid(ch_pid, &st, WNOHANG) == ch_pid) { logf_("CH exited early status=%d", st); return -1; }
+		usleep(100000);
+	}
+	return -1;
+}
+static void vm_kill(void)
+{
+	if (ch_pid > 0) { kill(-ch_pid, SIGKILL); kill(ch_pid, SIGKILL); int st; waitpid(ch_pid, &st, 0); ch_pid = 0; }
+	if (ctl >= 0) { close(ctl); ctl = -1; }
+}
+
+/* ---- host state ---- */
+static int h_ctx = -1, h_vlisten = -1, h_rlisten = -1, h_rport;
+static void host_reset_ctxs(void)
+{
+	if (h_ctx >= 0) close(h_ctx);
+	h_ctx = ctx_open();
+	const char *r = grpc("CTX_OPEN"); if (!ok(r)) DIE("guest CTX_OPEN: %s", r);
+}
+
+/* ---- scenario bookkeeping ---- */
+struct stats { long trials, pass, fail, shown; char name[48]; long extra[8]; };
+static char whybuf[2048];
+static void why(const char *fmt, ...) { va_list a; va_start(a, fmt); size_t l = strlen(whybuf); if (l < sizeof whybuf - 200) { if (l) whybuf[l++] = ';'; vsnprintf(whybuf + l, sizeof whybuf - l, fmt, a); } va_end(a); }
+
+struct grec { u64 id; unsigned kind, cause, side, err; u64 ab, ba; };
+/* parse "OK [id kind cause side err ab ba] ..." */
+static int parse_grecs(const char *r, struct grec *out, int max)
+{
+	int n = 0; const char *p = r;
+	while ((p = strchr(p, '[')) && n < max) {
+		unsigned long long id, ab, ba; unsigned k, c, s, e;
+		if (sscanf(p, "[%llu %u %u %u %u %llu %llu]", &id, &k, &c, &s, &e, &ab, &ba) == 7) { out[n++] = (struct grec){ id, k, c, s, e, ab, ba }; }
+		p++;
+	}
+	return n;
+}
+static int hrecs_wait(struct ovd_fwd_end *out, int want, int ms)
+{
+	double end = now_ms() + ms; int n = 0;
+	while (n < want && now_ms() < end) {
+		struct pollfd pf = { .fd = h_ctx, .events = POLLIN }; poll(&pf, 1, 20);
+		n += fwd_read(h_ctx, out + n, want - n > 0 ? want - n : 1);
+		if (n >= want) break;
+	}
+	return n;
+}
+static void chk_h(const char *who, const struct ovd_fwd_end *r, int kind, int cause, int side, int err, long ab, long ba)
+{
+	char b[200];
+	if (r->kind != kind || (cause >= 0 && r->cause != cause) || (side >= 0 && r->side != side) || (err >= 0 && r->err != err) || (ab >= 0 && (long)r->moved_ab != ab) || (ba >= 0 && (long)r->moved_ba != ba))
+		why("%s rec %s want(kind=%d cause=%d side=%d err=%d ab=%ld ba=%ld)", who, recstr(r, b, sizeof b), kind, cause, side, err, ab, ba);
+}
+static void chk_g(const char *who, const struct grec *r, int kind, int cause, int side, int err, long ab, long ba)
+{
+	if (r->kind != (unsigned)kind || (cause >= 0 && r->cause != (unsigned)cause) || (side >= 0 && r->side != (unsigned)side) || (err >= 0 && r->err != (unsigned)err) || (ab >= 0 && (long)r->ab != ab) || (ba >= 0 && (long)r->ba != ba))
+		why("%s rec [id=%llu kind=%u cause=%u side=%u err=%u ab=%llu ba=%llu] want(kind=%d cause=%d side=%d err=%d ab=%ld ba=%ld)", who, (unsigned long long)r->id, r->kind, r->cause, r->side, r->err, (unsigned long long)r->ab, (unsigned long long)r->ba, kind, cause, side, err, ab, ba);
+}
+
+/* ---- chain A: the guest application connects out; both forwarders ---- */
+struct chain {
+	int vh, d, gG, gI, gVg; struct ep *R; long hid, gid; u64 sg, sr, seed_gr, seed_rg; int noreadG, noreadR;
+};
+static u64 seedctr = 1000;
+static int chain_open(struct chain *c, int noreadG, int noreadR, int attach_host, int attach_guest)
+{
+	memset(c, 0, sizeof *c);
+	c->seed_gr = ++seedctr * 2; c->seed_rg = c->seed_gr + 1; c->noreadG = noreadG; c->noreadR = noreadR;
+	const char *r = grpc("TCP_CONNECT %d %llu %llu %d", INTAKE_PORT, (unsigned long long)c->seed_gr, (unsigned long long)c->seed_rg, noreadG);
+	if (!ok(r)) { why("G connect: %s", r); return -1; }
+	c->gG = okval(r);
+	r = grpc("ACCEPT_INTAKE"); if (!ok(r)) { why("accept intake: %s", r); return -1; } c->gI = okval(r);
+	r = grpc("VCONNECT %d", FLOW_PORT); if (!ok(r)) { why("guest vsock connect: %s", r); return -1; } c->gVg = okval(r);
+	c->vh = accept_to(h_vlisten, 3000); if (c->vh < 0) { why("host vsock accept: %s", strerror(errno)); return -1; }
+	c->d = tcp_connect(h_rport); if (c->d < 0) { why("host D connect: %s", strerror(errno)); return -1; }
+	int rfd = accept_to(h_rlisten, 3000); if (rfd < 0) { why("R accept: %s", strerror(errno)); return -1; }
+	c->R = ep_new(rfd, 0, noreadR, c->seed_rg, c->seed_gr, -1);
+	if (attach_host) { c->hid = fwd_attach(h_ctx, c->vh, c->d, NULL); if (c->hid < 0) { why("host attach errno %ld", -c->hid); return -1; } }
+	if (attach_guest) { r = grpc("ATTACH %d %d", c->gI, c->gVg); if (!ok(r)) { why("guest attach: %s", r); return -1; } c->gid = okval(r); }
+	return 0;
+}
+static void chain_close(struct chain *c)
+{
+	if (c->R) { ep_free(c->R); c->R = NULL; }
+	if (c->vh > 0) close(c->vh);
+	if (c->d > 0) close(c->d);
+	if (c->gG) grpc("CLOSE %d", c->gG);
+	if (c->gI) grpc("CLOSE %d", c->gI);
+	if (c->gVg) grpc("CLOSE %d", c->gVg);
+}
+struct gres { int state, err, tcpst, tcpst_now; u64 rx; };
+static int g_res(int h, int ms, struct gres *o)
+{
+	const char *r = grpc("RES %d %d", h, ms); if (!ok(r)) return -1;
+	unsigned long long rx; int st, e, t1, t2;
+	if (sscanf(r, "OK %d %d %llu %d %d", &st, &e, &rx, &t1, &t2) != 5) return -1;
+	*o = (struct gres){ st, e, t1, t2, rx }; return 0;
+}
+static const char *stnm(int s) { static const char *nm[] = { "RUN", "EOF", "EOF_RESET", "ERR", "MISMATCH", "TIMEOUT", "STOP" }; return nm[s]; }
+static int gres_reset(struct gres *g) { return g->state == EP_ERR || g->state == EP_EOF_RESET; }
+
+/* the extra trailing quiet check: no further record on either side, ctx queues empty */
+static void trailing_quiet(long *double_recs)
+{
+	usleep(4000);
+	struct ovd_fwd_end x[4]; int n = fwd_read(h_ctx, x, 4);
+	if (n) { why("host: %d extra record(s) after the end", n); (*double_recs)++; }
+	const char *r = grpc("RECS 1 5"); struct grec g[4]; int m = parse_grecs(r, g, 4);
+	if (m) { why("guest: %d extra record(s) after the end", m); (*double_recs)++; }
+}
+
+typedef int (*scfn)(struct chain *, struct stats *);
+static struct stats *cur;
+#define LIM_SZ 32768
+static void rand_sizes(struct chain *c) { c->sg = rnd() % LIM_SZ; c->sr = rnd() % LIM_SZ; if (rnd() % 8 == 0) c->sg = 0; if (rnd() % 8 == 0) c->sr = 0; }
+
+static int rec_pair_wait(struct ovd_fwd_end *h, struct grec *g, int hn, int gn, int ms)
+{
+	int a = hrecs_wait(h, hn, ms); int b = 0;
+	if (gn) { const char *r = grpc("RECS %d %d", gn, ms); b = parse_grecs(r, g, 8); }
+	if (a != hn) why("host records: got %d want %d", a, hn);
+	if (b != gn) why("guest records: got %d want %d", b, gn);
+	return a == hn && b == gn;
+}
+
+/* ---- the scenarios ---- */
+static int sc_clean(struct chain *c, struct stats *st, int order)
+{
+	rand_sizes(c);
+	if (order == 0) {            /* guest first */
+		long r = 0; if (c->sg) { const char *s = grpc("SEND %d %llu", c->gG, (unsigned long long)c->sg); if (!ok(s)) why("G send: %s", s); }
+		grpc("SHUT_WR %d", c->gG);
+		if (ep_wait(c->R, 4000) != EP_EOF || c->R->rx != c->sg) { char b[100]; why("R after G shut: %s want EOF rx=%llu", ep_str(c->R, b, sizeof b), (unsigned long long)c->sg); }
+		r = ep_send(c->R, c->sr); if (r < 0) why("R send errno %ld", -r);
+		ep_shut_wr(c->R);
+	} else if (order == 1) {     /* remote first */
+		long r = ep_send(c->R, c->sr); if (r < 0) why("R send errno %ld", -r);
+		ep_shut_wr(c->R);
+		struct gres g; if (g_res(c->gG, 4000, &g) || g.state != EP_EOF || g.rx != c->sr) why("G after R shut: state=%s rx=%llu want EOF %llu", stnm(g.state), (unsigned long long)g.rx, (unsigned long long)c->sr);
+		if (c->sg) { const char *s = grpc("SEND %d %llu", c->gG, (unsigned long long)c->sg); if (!ok(s)) why("G send: %s", s); }
+		grpc("SHUT_WR %d", c->gG);
+	} else {                     /* simultaneous */
+		if (c->sg) grpc("SEND %d %llu", c->gG, (unsigned long long)c->sg);
+		if (c->sr) ep_send(c->R, c->sr);
+		grpc("SHUT_WR %d", c->gG); ep_shut_wr(c->R);
+	}
+	struct gres g; if (g_res(c->gG, 4000, &g) || g.state != EP_EOF || g.rx != c->sr) why("G end: state=%s rx=%llu want EOF %llu", stnm(g.state), (unsigned long long)g.rx, (unsigned long long)c->sr);
+	if (ep_wait(c->R, 4000) != EP_EOF || c->R->rx != c->sg) { char b[100]; why("R end: %s want EOF %llu", ep_str(c->R, b, sizeof b), (unsigned long long)c->sg); }
+	struct ovd_fwd_end h[2]; struct grec gr[8];
+	if (rec_pair_wait(h, gr, 1, 1, 4000)) {
+		chk_h("host", &h[0], 1, 0, 0, 0, c->sg, c->sr); chk_g("guest", &gr[0], 1, 0, 0, 0, c->sg, c->sr);
+		if (h[0].id != (u64)c->hid) why("host record id %llu != attach id %ld", (unsigned long long)h[0].id, c->hid);
+	}
+	return 0;
+}
+static int sc_clean0(struct chain *c, struct stats *s) { return sc_clean(c, s, 0); }
+static int sc_clean1(struct chain *c, struct stats *s) { return sc_clean(c, s, 1); }
+static int sc_clean2(struct chain *c, struct stats *s) { return sc_clean(c, s, 2); }
+
+/* trailing events after a clean completion: the owners shut and close the vsock halves; nothing changes */
+static int sc_clean_trailing(struct chain *c, struct stats *st)
+{
+	sc_clean(c, st, 2);
+	struct ovd_fwd_inventory v0, v1; fwd_inv(h_ctx, &v0);
+	grpc("SHUT_RDWR %d", c->gVg); shutdown(c->vh, SHUT_RDWR);   /* direct 0x3 on both vsock halves, then the RST replies */
+	usleep(20000);
+	fwd_inv(h_ctx, &v1);
+	if (v1.queued_ends || v1.completed != v0.completed || v1.aborted != v0.aborted || v1.live_pairs) why("host inventory moved after trailing events: q=%u comp %llu->%llu ab %llu->%llu", v1.queued_ends, (unsigned long long)v0.completed, (unsigned long long)v1.completed, (unsigned long long)v0.aborted, (unsigned long long)v1.aborted);
+	return 0;
+}
+/* CLEAN-FULL-END with the host forwarder's work lagging: 0x2 then 0x3 arrive at the host callback before its run */
+static int sc_clean_fullend_delay(struct chain *c, struct stats *st)
+{
+	c->sg = rnd() % 4096; c->sr = rnd() % 4096;
+	int fd = open("/sys/module/ovd_fwd/parameters/work_delay_us", O_WRONLY); if (fd >= 0) { write(fd, "15000", 5); close(fd); }
+	if (c->sg) grpc("SEND %d %llu", c->gG, (unsigned long long)c->sg);
+	if (c->sr) ep_send(c->R, c->sr);
+	ep_shut_wr(c->R);                                     /* R's end first: the host forwards it as 0x2 after its delay */
+	struct gres g; if (g_res(c->gG, 4000, &g) || g.state != EP_EOF || g.rx != c->sr) why("G: %s rx=%llu want EOF %llu", stnm(g.state), (unsigned long long)g.rx, (unsigned long long)c->sr);
+	grpc("SHUT_THEN_CLOSE_ON_REC %d %d %d 3000", c->gG, c->gVg, c->gI);   /* 0x2 from the guest forwarder, its completion, then 0x3 at once */
+	c->gG = c->gVg = c->gI = 0;
+	if (ep_wait(c->R, 4000) != EP_EOF || c->R->rx != c->sg) { char b[100]; why("R: %s want EOF %llu", ep_str(c->R, b, sizeof b), (unsigned long long)c->sg); }
+	struct ovd_fwd_end h[2]; struct grec gr[8];
+	if (rec_pair_wait(h, gr, 1, 1, 4000)) { chk_h("host", &h[0], 1, 0, 0, 0, c->sg, c->sr); chk_g("guest", &gr[0], 1, 0, 0, 0, c->sg, c->sr); }
+	fd = open("/sys/module/ovd_fwd/parameters/work_delay_us", O_WRONLY); if (fd >= 0) { write(fd, "0", 1); close(fd); }
+	return 0;
+}
+
+static void settle_reset_probe(int is_guest_side, struct chain *c)
+{   /* the app-side socket must reach TCP_CLOSE (a reset), never stay CLOSE_WAIT / FIN_WAIT after EOF */
+	double end = now_ms() + 3000; int stt = -1;
+	while (now_ms() < end) {
+		stt = is_guest_side ? (int)okval(grpc("TCPST %d", c->gG)) : tcp_state(c->R->fd);
+		if (stt == TCP_CLOSE) return;
+		usleep(500);
+	}
+	why("%s socket tcp state %d after wait, want CLOSE (reset)", is_guest_side ? "G" : "R", stt);
+}
+static void expect_reset_R(struct chain *c)
+{
+	int s = ep_wait(c->R, 4000);
+	if (s == EP_EOF) { char b[100]; why("R saw clean EOF after a reset: %s", ep_str(c->R, b, sizeof b)); }
+	else if (s == EP_MISMATCH) why("R stream mismatch at %d", c->R->err);
+	else if (!ep_is_reset(c->R)) { char b[100]; why("R no reset: %s", ep_str(c->R, b, sizeof b)); }
+	if (c->R->rx > c->sg) why("R received %llu > sent %llu", (unsigned long long)c->R->rx, (unsigned long long)c->sg);
+}
+static void expect_reset_G(struct chain *c)
+{
+	struct gres g; if (g_res(c->gG, 4000, &g)) { why("G res rpc"); return; }
+	if (g.state == EP_EOF) why("G saw clean EOF after a reset: rx=%llu", (unsigned long long)g.rx);
+	else if (g.state == EP_MISMATCH) why("G stream mismatch at %d", g.err);
+	else if (!gres_reset(&g)) why("G no reset: %s rx=%llu tcp=%d", stnm(g.state), (unsigned long long)g.rx, g.tcpst);
+	if (g.rx > c->sr) why("G received %llu > sent %llu", (unsigned long long)g.rx, (unsigned long long)c->sr);
+}
+
+#define HREC(h, g, nh, ng) struct ovd_fwd_end h[4]; struct grec g[8]; int got = rec_pair_wait(h, g, nh, ng, 4000)
+
+static int sc_g_rst_both(struct chain *c, struct stats *st)
+{
+	rand_sizes(c); if (c->sg) grpc("SEND %d %llu", c->gG, (unsigned long long)c->sg);
+	if (c->sr) ep_send(c->R, c->sr);
+	grpc("RST %d", c->gG); c->gG = 0;
+	expect_reset_R(c);
+	HREC(h, g, 1, 1); if (got) { chk_h("host", &h[0], 2, 1, 0, 0, -1, -1); chk_g("guest", &g[0], 2, 2, 0, 104, -1, -1); }
+	return 0;
+}
+static int sc_g_rst_hg(struct chain *c, struct stats *st)
+{   /* only the host->guest direction is open at the reset */
+	rand_sizes(c); if (c->sg) grpc("SEND %d %llu", c->gG, (unsigned long long)c->sg);
+	grpc("SHUT_WR %d", c->gG);
+	if (ep_wait(c->R, 4000) != EP_EOF || c->R->rx != c->sg) { char b[100]; why("R after G shut: %s want EOF %llu", ep_str(c->R, b, sizeof b), (unsigned long long)c->sg); }
+	if (c->sr) ep_send(c->R, c->sr);
+	grpc("RST %d", c->gG); c->gG = 0;
+	settle_reset_probe(0, c);
+	HREC(h, g, 1, 1); if (got) { chk_h("host", &h[0], 2, 1, 0, 0, -1, -1); chk_g("guest", &g[0], 2, 2, 0, 104, -1, -1); }
+	return 0;
+}
+static int sc_g_close_unread(struct chain *c, struct stats *st)
+{
+	c->sg = rnd() % 4096; c->sr = 1 + rnd() % 4096;
+	if (c->sg) grpc("SEND %d %llu", c->gG, (unsigned long long)c->sg);
+	ep_send(c->R, c->sr);
+	usleep(15000);                                   /* the response is queued, unread, at G */
+	grpc("CLOSE %d", c->gG); c->gG = 0;               /* a plain close() with unread data: the kernel resets */
+	expect_reset_R(c);
+	HREC(h, g, 1, 1); if (got) { chk_h("host", &h[0], 2, 1, 0, 0, -1, -1); chk_g("guest", &g[0], 2, 2, 0, 104, -1, -1); }
+	return 0;
+}
+static int sc_r_rst_both(struct chain *c, struct stats *st)
+{
+	rand_sizes(c); if (c->sg) grpc("SEND %d %llu", c->gG, (unsigned long long)c->sg);
+	if (c->sr) ep_send(c->R, c->sr);
+	ep_stop(c->R); set_rst(c->R->fd); close(c->R->fd); c->R->fd = -1;
+	expect_reset_G(c);
+	HREC(h, g, 1, 1); if (got) { chk_h("host", &h[0], 2, 2, 1, 104, -1, -1); chk_g("guest", &g[0], 2, 1, 1, 0, -1, -1); }
+	return 0;
+}
+static int sc_r_rst_gh(struct chain *c, struct stats *st)
+{   /* only the guest->host direction is open */
+	rand_sizes(c); if (c->sr) ep_send(c->R, c->sr);
+	ep_shut_wr(c->R);
+	struct gres g; if (g_res(c->gG, 4000, &g) || g.state != EP_EOF || g.rx != c->sr) why("G after R shut: %s rx=%llu want EOF %llu", stnm(g.state), (unsigned long long)g.rx, (unsigned long long)c->sr);
+	if (c->sg) grpc("SEND %d %llu", c->gG, (unsigned long long)c->sg);
+	ep_stop(c->R); set_rst(c->R->fd); close(c->R->fd); c->R->fd = -1;
+	settle_reset_probe(1, c);
+	HREC(h, hg, 1, 1); if (got) { chk_h("host", &h[0], 2, 2, 1, 104, -1, -1); chk_g("guest", &hg[0], 2, 1, 1, 0, -1, -1); }
+	return 0;
+}
+static int sc_r_close_unread(struct chain *c, struct stats *st)
+{
+	c->sg = 1 + rnd() % 4096; c->sr = rnd() % 4096;
+	grpc("SEND %d %llu", c->gG, (unsigned long long)c->sg);
+	if (c->sr) ep_send(c->R, c->sr);
+	usleep(15000);
+	ep_stop(c->R); close(c->R->fd); c->R->fd = -1;   /* R's reader is stopped, so the bytes sent by G sit unread at R */
+	expect_reset_G(c);
+	HREC(h, g, 1, 1); if (got) { chk_h("host", &h[0], 2, 2, 1, 104, -1, -1); chk_g("guest", &g[0], 2, 1, 1, 0, -1, -1); }
+	return 0;
+}
+static int sc_host_abort(struct chain *c, struct stats *st)
+{
+	rand_sizes(c); if (c->sg) grpc("SEND %d %llu", c->gG, (unsigned long long)c->sg);
+	if (c->sr) ep_send(c->R, c->sr);
+	if (fwd_abort(h_ctx, c->hid)) why("host abort errno");
+	expect_reset_R(c); expect_reset_G(c);
+	HREC(h, g, 1, 1); if (got) { chk_h("host", &h[0], 2, 4, 0, 0, -1, -1); chk_g("guest", &g[0], 2, 1, 1, 0, -1, -1); }
+	return 0;
+}
+static int sc_guest_abort(struct chain *c, struct stats *st)
+{
+	rand_sizes(c); if (c->sg) grpc("SEND %d %llu", c->gG, (unsigned long long)c->sg);
+	if (c->sr) ep_send(c->R, c->sr);
+	const char *r = grpc("ABORT %ld", c->gid); if (!ok(r)) why("guest abort: %s", r);
+	expect_reset_R(c); expect_reset_G(c);
+	HREC(h, g, 1, 1); if (got) { chk_h("host", &h[0], 2, 1, 0, 0, -1, -1); chk_g("guest", &g[0], 2, 4, 0, 0, -1, -1); }
+	return 0;
+}
+/* the 2x2 of the classification table, driven through the chain: a direct 0x3 or 0x2-then-0x3, with the receiving
+ * forwarder's own direction closed or open */
+static int sc_guest_abort_ourdir_closed(struct chain *c, struct stats *st)
+{   /* R half-closed first: the host forwarder sent 0x2 (its direction is closed); then the guest aborts: a direct 0x3 */
+	rand_sizes(c); if (c->sr) ep_send(c->R, c->sr);
+	ep_shut_wr(c->R);
+	struct gres g; if (g_res(c->gG, 4000, &g) || g.state != EP_EOF) why("G after R shut: %s", stnm(g.state));
+	const char *r = grpc("ABORT %ld", c->gid); if (!ok(r)) why("guest abort: %s", r);
+	settle_reset_probe(0, c);
+	HREC(h, gg, 1, 1); if (got) { chk_h("host", &h[0], 2, 1, 0, 0, -1, -1); chk_g("guest", &gg[0], 2, 4, 0, 0, -1, -1); }
+	return 0;
+}
+static int sc_guest_abort_after_gshut(struct chain *c, struct stats *st)
+{   /* G half-closed first (0x2 sent), then the guest aborts (0x3): 0x2 then 0x3 with the host direction open */
+	rand_sizes(c); if (c->sg) grpc("SEND %d %llu", c->gG, (unsigned long long)c->sg);
+	grpc("SHUT_WR %d", c->gG);
+	if (ep_wait(c->R, 4000) != EP_EOF || c->R->rx != c->sg) { char b[100]; why("R: %s want EOF %llu", ep_str(c->R, b, sizeof b), (unsigned long long)c->sg); }
+	const char *r = grpc("ABORT %ld", c->gid); if (!ok(r)) why("guest abort: %s", r);
+	settle_reset_probe(0, c);
+	HREC(h, gg, 1, 1); if (got) { chk_h("host", &h[0], 2, 1, 0, 0, -1, -1); chk_g("guest", &gg[0], 2, 4, 0, 0, -1, -1); }
+	return 0;
+}
+static int sc_host_abort_ourdir_closed(struct chain *c, struct stats *st)
+{   /* G half-closed first: the guest forwarder sent 0x2; then the host aborts: a direct 0x3 at the guest forwarder */
+	rand_sizes(c); if (c->sg) grpc("SEND %d %llu", c->gG, (unsigned long long)c->sg);
+	grpc("SHUT_WR %d", c->gG);
+	if (ep_wait(c->R, 4000) != EP_EOF) why("R no EOF");
+	if (fwd_abort(h_ctx, c->hid)) why("host abort errno");
+	settle_reset_probe(1, c);
+	HREC(h, g, 1, 1); if (got) { chk_h("host", &h[0], 2, 4, 0, 0, -1, -1); chk_g("guest", &g[0], 2, 1, 1, 0, -1, -1); }
+	return 0;
+}
+static int sc_host_abort_after_rshut(struct chain *c, struct stats *st)
+{   /* R half-closed first (host sent 0x2), then the host aborts (0x3): 0x2 then 0x3 at the guest, its direction open */
+	rand_sizes(c); if (c->sr) ep_send(c->R, c->sr);
+	ep_shut_wr(c->R);
+	struct gres g; if (g_res(c->gG, 4000, &g) || g.state != EP_EOF) why("G after R shut: %s", stnm(g.state));
+	if (fwd_abort(h_ctx, c->hid)) why("host abort errno");
+	settle_reset_probe(1, c);
+	HREC(h, gg, 1, 1); if (got) { chk_h("host", &h[0], 2, 4, 0, 0, -1, -1); chk_g("guest", &gg[0], 2, 1, 1, 0, -1, -1); }
+	return 0;
+}
+
+struct scn { const char *name; scfn fn; int noreadG, noreadR; };
+static struct scn SCN[] = {
+	{ "clean-g-first", sc_clean0 }, { "clean-r-first", sc_clean1 }, { "clean-simul", sc_clean2 },
+	{ "clean-then-trailing-0x3", sc_clean_trailing },
+	{ "clean-fullend-0x2-0x3-hostlag", sc_clean_fullend_delay },
+	{ "g-rst-both-dirs", sc_g_rst_both }, { "g-rst-hg-only", sc_g_rst_hg }, { "g-close-unread", sc_g_close_unread, 1, 0 },
+	{ "r-rst-both-dirs", sc_r_rst_both }, { "r-rst-gh-only", sc_r_rst_gh }, { "r-close-unread", sc_r_close_unread, 0, 0 },
+	{ "host-abort", sc_host_abort }, { "guest-abort", sc_guest_abort },
+	{ "guest-abort-direct0x3-hostdir-closed", sc_guest_abort_ourdir_closed },
+	{ "guest-abort-0x2then0x3-hostdir-open", sc_guest_abort_after_gshut },
+	{ "host-abort-direct0x3-guestdir-closed", sc_host_abort_ourdir_closed },
+	{ "host-abort-0x2then0x3-guestdir-open", sc_host_abort_after_rshut },
+};
+
+static void run_chain_scn(struct scn *s, int n, struct stats *st)
+{
+	snprintf(st->name, sizeof st->name, "%s", s->name);
+	cur = st;
+	long double_recs = 0;
+	for (int i = 0; i < n; i++) {
+		struct chain c; whybuf[0] = 0;
+		int rc = chain_open(&c, s->noreadG, s->noreadR, 1, 1);
+		if (c.R && s->noreadG == 0 && 0) {}
+		if (!rc) s->fn(&c, st);
+		trailing_quiet(&double_recs);
+		chain_close(&c);
+		st->trials++;
+		if (whybuf[0]) { st->fail++; if (st->shown++ < 5) logf_("FAIL %s trial=%d: %s", s->name, i, whybuf); } else st->pass++;
+	}
+	st->extra[0] = double_recs;
+}
+
+/* =====================================================================================================================
+ * dial (watch) shapes
+ * ===================================================================================================================== */
+struct dial { int vh; struct ep *H; int gVg, gC, gA; long wid, gid; u64 sh, sa, seed_ha, seed_ah; };
+static int dial_open(struct dial *d, int holder_ctx, int watch, int blocking)
+{
+	memset(d, 0, sizeof *d);
+	d->seed_ha = ++seedctr * 2; d->seed_ah = d->seed_ha + 1;
+	d->vh = vs_connect(GUEST_CID, DIAL_PORT); if (d->vh < 0) { why("host dial connect: %s", strerror(errno)); return -1; }
+	d->H = NULL;
+	if (watch) { d->wid = fwd_watch(h_ctx, d->vh); if (d->wid < 0) { why("watch errno %ld", -d->wid); return -1; } }
+	blocking_flag = blocking;
+	d->H = ep_new(d->vh, 1, 0, d->seed_ha, d->seed_ah, holder_ctx ? h_ctx : -1);
+	blocking_flag = 0;
+	const char *r = grpc("ACCEPT_DIAL"); if (!ok(r)) { why("guest accept dial: %s", r); return -1; } d->gVg = okval(r);
+	r = grpc("TCP_CONNECT_RAW %d", APP_PORT); if (!ok(r)) { why("guest connect app: %s", r); return -1; } d->gC = okval(r);
+	r = grpc("ACCEPT_APP %llu %llu 0", (unsigned long long)d->seed_ah, (unsigned long long)d->seed_ha); if (!ok(r)) { why("guest accept app: %s", r); return -1; } d->gA = okval(r);
+	r = grpc("ATTACH %d %d", d->gVg, d->gC); if (!ok(r)) { why("guest attach: %s", r); return -1; } d->gid = okval(r);
+	return 0;
+}
+static void dial_close(struct dial *d)
+{
+	if (d->H) { ep_stop(d->H); d->H->fd = -1; free(d->H); d->H = NULL; }
+	if (d->vh > 0) close(d->vh);
+	if (d->gVg) grpc("CLOSE %d", d->gVg);
+	if (d->gC) grpc("CLOSE %d", d->gC);
+	if (d->gA) grpc("CLOSE %d", d->gA);
+}
+static void watch_check_rec(struct dial *d, int kind, int cause, int side, int err, struct stats *st)
+{
+	if (d->H->rec_at == 'x' || !d->H->rec_got) { why("watch record ABSENT when the holder observed the end (state=%s)", stnm(d->H->state)); st->extra[3]++; if (!d->H->rec_got) { struct ovd_fwd_end x; int w = hrecs_wait(&x, 1, 2000); if (w) { d->H->rec = x; d->H->rec_got = 1; } } }
+	else if (d->H->rec_at == 'p') st->extra[1]++; else st->extra[2]++;
+	if (d->H->rec_got) chk_h("watch", &d->H->rec, kind, cause, side, err, -1, -1);
+}
+static int sd_w_halfclose(struct dial *d, struct stats *st, int rst_after)
+{
+	d->sh = rnd() % 4096; d->sa = rnd() % 4096;
+	if (d->sh) ep_send(d->H, d->sh);
+	if (d->sa) grpc("SEND %d %llu", d->gA, (unsigned long long)d->sa);
+	grpc("SHUT_WR %d", d->gA);
+	if (ep_wait(d->H, 4000) != EP_EOF || d->H->rx != d->sa) { char b[100]; why("holder: %s want EOF %llu", ep_str(d->H, b, sizeof b), (unsigned long long)d->sa); }
+	watch_check_rec(d, 3, 0, 0, 0, st);
+	if (rst_after) { grpc("RST %d", d->gA); d->gA = 0; usleep(30000); }
+	return 0;
+}
+static int sd_w_reset(struct dial *d, struct stats *st)
+{   /* the guest application resets: the holder reads 0, the record is the only thing that says abort */
+	d->sh = rnd() % 4096; if (d->sh) ep_send(d->H, d->sh);
+	grpc("RST %d", d->gA); d->gA = 0;
+	int s = ep_wait(d->H, 4000);
+	if (s != EP_EOF && s != EP_ERR) { char b[100]; why("holder: %s", ep_str(d->H, b, sizeof b)); }
+	if (s == EP_EOF) st->extra[4]++;   /* the holder saw EOF: indistinguishable from a clean half-close without the record */
+	watch_check_rec(d, 4, 1, 0, 0, st);
+	return 0;
+}
+static int sd_w_hostdrop(struct dial *d, struct stats *st)
+{
+	d->sh = rnd() % 4096; if (d->sh) ep_send(d->H, d->sh);
+	if (fwd_abort(h_ctx, d->wid)) why("abort watch errno");
+	struct ovd_fwd_end x; if (hrecs_wait(&x, 1, 3000) != 1) why("no host watch record after abort"); else chk_h("watch", &x, 4, 4, 0, 0, -1, -1);
+	struct gres g; if (g_res(d->gA, 4000, &g) || !(gres_reset(&g))) why("guest app not reset: %s", stnm(g.state));
+	const char *r = grpc("RECS 1 3000"); struct grec gr[4]; int n = parse_grecs(r, gr, 4);
+	if (n != 1) why("guest records %d", n); else chk_g("guest", &gr[0], 2, 1, 0, 0, -1, -1);
+	return 0;
+}
+static void run_dial_scn(const char *name, int kind, int n, struct stats *st)
+{
+	snprintf(st->name, sizeof st->name, "%s", name);
+	long double_recs = 0;
+	for (int i = 0; i < n; i++) {
+		struct dial d; whybuf[0] = 0;
+		int rc = dial_open(&d, kind != 5, 1, kind == 1 || kind == 3);
+		if (!rc) {
+			if (kind == 0 || kind == 1) sd_w_halfclose(&d, st, 0);
+			else if (kind == 2 || kind == 3) sd_w_reset(&d, st);
+			else if (kind == 4) sd_w_halfclose(&d, st, 1);
+			else if (kind == 5) sd_w_hostdrop(&d, st);
+		}
+		/* guest records: consume what the guest forwarder queued (exactly one expected where not checked above) */
+		if (kind != 5) { const char *r = grpc("RECS 1 3000"); struct grec g[4]; int m = parse_grecs(r, g, 4); if (m != 1) why("guest records %d want 1", m); }
+		usleep(1500);
+		struct ovd_fwd_end x[2]; int extra = fwd_read(h_ctx, x, 2);   /* a second record for the same watch would be a second end */
+		if (extra) { why("host: %d extra record(s)", extra); double_recs++; }
+		dial_close(&d);
+		st->trials++;
+		if (whybuf[0]) { st->fail++; if (st->shown++ < 5) logf_("FAIL %s trial=%d: %s", name, i, whybuf); } else st->pass++;
+	}
+	st->extra[0] = double_recs;
+}
+
+/* =====================================================================================================================
+ * VMM kill, storms, context release
+ * ===================================================================================================================== */
+#define MAXP 128
+static void run_vmkill(int rounds, int npairs, int dials, struct stats *st)
+{
+	snprintf(st->name, sizeof st->name, "vmm-kill-%dpairs-%ddials", npairs, dials);
+	for (int rd = 0; rd < rounds; rd++) {
+		struct chain cs[MAXP]; struct dial ds[MAXP]; int nc = 0, nd = 0; whybuf[0] = 0;
+		struct ovd_fwd_inventory v0; fwd_inv(h_ctx, &v0);
+		for (int i = 0; i < npairs; i++) { if (chain_open(&cs[nc], 0, 0, 1, 1)) { nc++; break; } nc++; }
+		for (int i = 0; i < dials; i++) { if (dial_open(&ds[nd], 1, 1, i & 1)) { nd++; break; } nd++; }
+		int ok_setup = (nc == npairs && nd == dials && !whybuf[0]);
+		if (ok_setup) {
+			for (int i = 0; i < nc; i++) { cs[i].sg = 1 << 20; cs[i].sr = 1 << 20; ep_send(cs[i].R, 200000); grpc("SEND %d 200000", cs[i].gG); }   /* traffic in both directions, partly unread */
+			for (int i = 0; i < nd; i++) { ep_send(ds[i].H, 1000); }
+		}
+		usleep(20000);
+		vm_kill();                                       /* kill -9 of the VMM: the vhost device release runs the orphan sweep */
+		int want = nc + nd; struct ovd_fwd_end rec[2 * MAXP]; int n = hrecs_wait(rec, want, 8000);
+		if (n != want) why("host records %d want %d", n, want);
+		long seen_pairs = 0, seen_watch = 0; char seen[1 << 16]; memset(seen, 0, sizeof seen);
+		for (int i = 0; i < n; i++) {
+			if (rec[i].id < sizeof seen) { if (seen[rec[i].id]++) why("duplicate record id %llu", (unsigned long long)rec[i].id); }
+			if (rec[i].kind == 2) { seen_pairs++; if (rec[i].cause != 2 || rec[i].side != 0 || rec[i].err != 104) why("pair rec %llu cause=%u side=%u err=%u want SocketError A ECONNRESET", (unsigned long long)rec[i].id, rec[i].cause, rec[i].side, rec[i].err); }
+			else if (rec[i].kind == 4) { seen_watch++; if (rec[i].cause != 2 || rec[i].err != 104) why("watch rec %llu cause=%u err=%u want SocketError ECONNRESET", (unsigned long long)rec[i].id, rec[i].cause, rec[i].err); }
+			else why("unexpected record kind %u", rec[i].kind);
+		}
+		if (seen_pairs != nc || seen_watch != nd) why("pairs %ld/%d watches %ld/%d", seen_pairs, nc, seen_watch, nd);
+		int resets = 0, eofs = 0;
+		for (int i = 0; i < nc; i++) { int s = ep_wait(cs[i].R, 6000); if (s == EP_EOF) eofs++; else if (ep_is_reset(cs[i].R)) resets++; else why("R%d state %s", i, stnm(s)); }
+		if (eofs) why("%d of %d remote peers read a clean EOF after the VMM died", eofs, nc);
+		for (int i = 0; i < nd; i++) {
+			int s = ep_wait(ds[i].H, 6000);
+			if (s != EP_ERR && s != EP_EOF) why("holder%d state %s", i, stnm(s));
+			if (ds[i].H->rec_at == 'x') st->extra[3]++; else if (ds[i].H->rec_got) st->extra[2]++;
+		}
+		struct ovd_fwd_inventory v1; fwd_inv(h_ctx, &v1);
+		if (v1.live_pairs || v1.live_watches || v1.queued_ends) why("inventory after: live=%u/%u queued=%u", v1.live_pairs, v1.live_watches, v1.queued_ends);
+		if (v1.unclassified_eof != v0.unclassified_eof) why("unclassified_eof moved %llu->%llu", (unsigned long long)v0.unclassified_eof, (unsigned long long)v1.unclassified_eof);
+		usleep(5000); struct ovd_fwd_end x[2]; if (fwd_read(h_ctx, x, 2)) why("extra record after the kill");
+		st->extra[5] += resets;
+		for (int i = 0; i < nc; i++) { ep_free(cs[i].R); cs[i].R = NULL; close(cs[i].vh); close(cs[i].d); }
+		for (int i = 0; i < nd; i++) { ep_stop(ds[i].H); free(ds[i].H); close(ds[i].vh); }
+		st->trials++;
+		if (whybuf[0]) { st->fail++; if (st->shown++ < 5) logf_("FAIL %s round=%d: %s", st->name, rd, whybuf); } else st->pass++;
+		if (rd + 1 < rounds || 1) { if (vm_start()) DIE("restart VM"); host_reset_ctxs(); grpc("LISTEN"); }
+	}
+}
+
+static void run_storm(const char *name, int rounds, int npairs, int guest_side, struct stats *st)
+{
+	snprintf(st->name, sizeof st->name, "%s", name);
+	for (int rd = 0; rd < rounds; rd++) {
+		struct chain cs[MAXP]; int nc = 0; whybuf[0] = 0;
+		for (int i = 0; i < npairs; i++) { if (chain_open(&cs[nc], 0, 0, 1, 1)) { nc++; break; } nc++; }
+		if (nc == npairs && !whybuf[0]) {
+			for (int i = 0; i < nc; i++) { cs[i].sg = cs[i].sr = 4096 + i; grpc("SEND %d %llu", cs[i].gG, (unsigned long long)cs[i].sg); ep_send(cs[i].R, cs[i].sr); }
+			for (int i = 0; i < nc; i++) { if (guest_side) { grpc("RST %d", cs[i].gG); cs[i].gG = 0; } else { ep_stop(cs[i].R); set_rst(cs[i].R->fd); close(cs[i].R->fd); cs[i].R->fd = -1; } }
+			struct ovd_fwd_end h[MAXP]; int n = hrecs_wait(h, nc, 8000); struct grec g[MAXP]; int gn = 0;
+			{ double end = now_ms() + 8000; while (gn < nc && now_ms() < end) { const char *r = grpc("RECS %d 500", nc - gn); struct grec t[MAXP]; int m = parse_grecs(r, t, MAXP); for (int k = 0; k < m && gn < MAXP; k++) g[gn++] = t[k]; } }
+			if (n != nc || gn != nc) why("records host %d guest %d want %d", n, gn, nc);
+			char seen[1 << 16]; memset(seen, 0, sizeof seen);
+			for (int i = 0; i < n; i++) { if (h[i].id < sizeof seen && seen[h[i].id]++) why("dup host id %llu", (unsigned long long)h[i].id); if (h[i].kind != 2) why("host kind %u", h[i].kind);
+				if (guest_side ? (h[i].cause != 1 || h[i].side != 0) : (h[i].cause != 2 || h[i].side != 1 || h[i].err != 104)) why("host cause=%u side=%u err=%u", h[i].cause, h[i].side, h[i].err); }
+			for (int i = 0; i < gn; i++) { if (g[i].kind != 2) why("guest kind %u", g[i].kind);
+				if (guest_side ? (g[i].cause != 2 || g[i].side != 0 || g[i].err != 104) : (g[i].cause != 1 || g[i].side != 1)) why("guest cause=%u side=%u err=%u", g[i].cause, g[i].side, g[i].err); }
+			for (int i = 0; i < nc; i++) {
+				if (guest_side) { int s = ep_wait(cs[i].R, 4000); if (s == EP_EOF) why("R%d clean EOF after reset", i); else if (!ep_is_reset(cs[i].R)) why("R%d state %s", i, stnm(s)); }
+				else { struct gres gg; if (g_res(cs[i].gG, 4000, &gg) || gg.state == EP_EOF || !gres_reset(&gg)) why("G%d state %s", i, stnm(gg.state)); }
+			}
+		}
+		long dbl = 0; trailing_quiet(&dbl); st->extra[0] += dbl;
+		for (int i = 0; i < nc; i++) chain_close(&cs[i]);
+		st->trials++;
+		if (whybuf[0]) { st->fail++; if (st->shown++ < 5) logf_("FAIL %s round=%d: %s", name, rd, whybuf); } else st->pass++;
+	}
+}
+
+static void run_ctx_release(const char *name, int rounds, int npairs, int host_side, struct stats *st)
+{
+	snprintf(st->name, sizeof st->name, "%s", name);
+	for (int rd = 0; rd < rounds; rd++) {
+		struct chain cs[MAXP]; int nc = 0; whybuf[0] = 0;
+		for (int i = 0; i < npairs; i++) { if (chain_open(&cs[nc], 0, 0, 1, 1)) { nc++; break; } nc++; }
+		if (nc == npairs && !whybuf[0]) {
+			for (int i = 0; i < nc; i++) { cs[i].sg = cs[i].sr = 2048; grpc("SEND %d 2048", cs[i].gG); ep_send(cs[i].R, 2048); }
+			if (host_side) { close(h_ctx); h_ctx = ctx_open(); } else { grpc("CTX_OPEN"); }   /* the old context's release runs here */
+			for (int i = 0; i < nc; i++) {
+				if (host_side) { struct gres gg; if (g_res(cs[i].gG, 4000, &gg) || gg.state == EP_EOF || !gres_reset(&gg)) why("G%d state %s", i, stnm(gg.state));
+					int s = ep_wait(cs[i].R, 4000); if (s == EP_EOF || !ep_is_reset(cs[i].R)) why("R%d state %s (host context closed)", i, stnm(s)); }
+				else { int s = ep_wait(cs[i].R, 4000); if (s == EP_EOF || !ep_is_reset(cs[i].R)) why("R%d state %s (guest context closed)", i, stnm(s)); }
+			}
+			/* the guest (when the host context closed) classifies the abort; the host (when the guest context closed) too */
+			if (host_side) { struct grec g[MAXP]; const char *r = grpc("RECS %d 3000", nc); int m = parse_grecs(r, g, MAXP); if (m != nc) why("guest records %d want %d", m, nc);
+				for (int i = 0; i < m; i++) if (g[i].kind != 2 || g[i].cause != 1) why("guest rec kind=%u cause=%u", g[i].kind, g[i].cause); }
+			else { struct ovd_fwd_end h[MAXP]; int m = hrecs_wait(h, nc, 3000); if (m != nc) why("host records %d want %d", m, nc);
+				for (int i = 0; i < m; i++) if (h[i].kind != 2 || h[i].cause != 1) why("host rec kind=%u cause=%u", h[i].kind, h[i].cause); }
+			/* the released context queued nothing: the fresh contexts are empty and report no live pair */
+			struct ovd_fwd_inventory v; fwd_inv(h_ctx, &v); if (v.live_pairs || v.queued_ends) why("host fresh ctx live=%u q=%u", v.live_pairs, v.queued_ends);
+			if (host_side) { /* the host's fresh context queues nothing */ struct ovd_fwd_end x[2]; if (fwd_read(h_ctx, x, 2)) why("host fresh ctx has a record"); }
+		}
+		for (int i = 0; i < nc; i++) chain_close(&cs[i]);
+		st->trials++;
+		if (whybuf[0]) { st->fail++; if (st->shown++ < 5) logf_("FAIL %s round=%d: %s", name, rd, whybuf); } else st->pass++;
+	}
+}
+
+/* =====================================================================================================================
+ * main
+ * ===================================================================================================================== */
+static void print_stats(struct stats *s)
+{
+	logf_("RESULT %-44s trials=%ld pass=%ld fail=%ld extra=[%ld %ld %ld %ld %ld %ld]", s->name, s->trials, s->pass, s->fail, s->extra[0], s->extra[1], s->extra[2], s->extra[3], s->extra[4], s->extra[5]);
+}
+static int host_main(int argc, char **argv)
+{
+	signal(SIGPIPE, SIG_IGN);
+	rng_state ^= (u64)time(NULL) * 0x9E3779B97F4A7C15ULL;
+	logf_("HOST_START uname=%s", ({ static char u[128]; FILE *f = fopen("/proc/sys/kernel/osrelease", "r"); if (f) { fgets(u, sizeof u, f); fclose(f); } u[strcspn(u, "\n")] = 0; u; }));
+	struct ovd_fwd_version v; int c0 = ctx_open(); if (ioctl(c0, OVD_FWD_VERSION, &v)) DIE("version"); close(c0);
+	logf_("MODULE abi=%u flags=%u (permanent=%u)", v.abi_version, v.flags, v.flags & 1);
+	{ long r = syscall(SYS_delete_module, "ovd_fwd", O_NONBLOCK); logf_("RMMOD host: ret=%ld errno=%d (%s)", r, errno, strerror(errno)); }
+	h_vlisten = vs_listen(FLOW_PORT); h_rlisten = tcp_listen(0, &h_rport);
+	if (vm_start()) DIE("VM did not come up");
+	logf_("VM_UP guest agent answers; guest rmmod: %s", ({ const char *r = grpc("RMMOD"); r; }));
+	host_reset_ctxs(); grpc("LISTEN");
+	for (int i = 1; i < argc; i++) {
+		char name[96]; int n = 100; strncpy(name, argv[i], sizeof name - 1); name[sizeof name - 1] = 0;
+		char *col = strchr(name, ':'); if (col) { *col = 0; n = atoi(col + 1); }
+		struct stats st = {0}; int found = 0;
+		for (size_t k = 0; k < sizeof SCN / sizeof SCN[0]; k++) if (!strcmp(name, SCN[k].name)) { run_chain_scn(&SCN[k], n, &st); found = 1; }
+		if (!found) {
+			if (!strcmp(name, "dial-watch-halfclose")) run_dial_scn(name, 0, n, &st);
+			else if (!strcmp(name, "dial-watch-halfclose-recordcheck-at-end")) run_dial_scn(name, 1, n, &st);
+			else if (!strcmp(name, "dial-watch-reset")) run_dial_scn(name, 2, n, &st);
+			else if (!strcmp(name, "dial-watch-reset-poll")) run_dial_scn(name, 3, n, &st);
+			else if (!strcmp(name, "dial-watch-halfclose-then-reset")) run_dial_scn(name, 4, n, &st);
+			else if (!strcmp(name, "dial-watch-hostdrop")) run_dial_scn(name, 5, n, &st);
+			else if (!strcmp(name, "vmm-kill")) run_vmkill(n, 32, 0, &st);
+			else if (!strcmp(name, "vmm-kill-dials")) run_vmkill(n, 16, 16, &st);
+			else if (!strcmp(name, "storm-g-rst")) run_storm(name, n, 48, 1, &st);
+			else if (!strcmp(name, "storm-r-rst")) run_storm(name, n, 48, 0, &st);
+			else if (!strcmp(name, "ctx-release-host")) run_ctx_release(name, n, 16, 1, &st);
+			else if (!strcmp(name, "ctx-release-guest")) run_ctx_release(name, n, 16, 0, &st);
+			else { logf_("unknown scenario %s", name); continue; }
+		}
+		print_stats(&st);
+		const char *r = grpc("INV"); logf_("INV guest: %s", r);
+		struct ovd_fwd_inventory iv; if (!fwd_inv(h_ctx, &iv)) logf_("INV host: live=%u/%u queued=%u attached=%llu completed=%llu aborted=%llu unclassified_eof=%llu ab_peer=%llu ab_socket=%llu ab_detached=%llu", iv.live_pairs, iv.live_watches, iv.queued_ends, (unsigned long long)iv.attached, (unsigned long long)iv.completed, (unsigned long long)iv.aborted, (unsigned long long)iv.unclassified_eof, (unsigned long long)iv.ab_peer, (unsigned long long)iv.ab_socket, (unsigned long long)iv.ab_detached);
+	}
+	logf_("GUEST_DMESG_BAD_LINES %s", grpc("DMESG"));
+	{ int n = klogctl(10, NULL, 0); char *b = malloc(n + 1); n = klogctl(3, b, n); b[n > 0 ? n : 0] = 0; int bad = 0; for (char *l = strtok(b, "\n"); l; l = strtok(NULL, "\n")) if (strstr(l, "BUG") || strstr(l, "Oops") || strstr(l, "WARNING") || strstr(l, "Call Trace") || strstr(l, "RCU stall")) bad++; logf_("HOST_DMESG_BAD_LINES %d", bad); }
+	vm_kill();
+	logf_("HOST_DONE");
+	return 0;
+}
+
+int main(int argc, char **argv)
+{
+	setvbuf(stdout, NULL, _IOLBF, 0);
+	if (argc >= 2 && !strcmp(argv[1], "agent")) return agent_main();
+	if (argc >= 2 && !strcmp(argv[1], "host")) return host_main(argc - 1, argv + 1);
+	fprintf(stderr, "usage: evend agent | host <scenario[:N]>...\n");
+	return 1;
+}

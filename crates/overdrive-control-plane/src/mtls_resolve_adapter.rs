@@ -995,6 +995,195 @@ mod tests {
         adapter
     }
 
+    // ---- P5-S7: the D24a VIP classification branch (DELIVER step 11) -------
+    //
+    // Contract: feature-delta § "[REF] leg-S over vsock … and the mTLS
+    // forwarded-outbound port" → "Mesh resolution VIP branch (D24a)". The
+    // branch is evaluated after the frontend branch and before the
+    // backend-address branch: `(orig_dst.ip(), orig_dst.port(), Tcp)` equal to
+    // a service's `(vip, listener port, Tcp)` — the VIP read from the same
+    // `service_backends` rows — classifies exactly as a frontend hit of that
+    // service (`Mesh(first healthy backend by Ord)` or `MeshUnreachable`); no
+    // matching service with `orig_dst.ip()` in the configured VIP ranges →
+    // `MeshUnreachable`, never `NonMesh`. The listener port is the backend's
+    // listener port, as the frontend projection keys it. Every body drives the
+    // real adapter through the `MtlsResolve` port (`probe` + `resolve`) over a
+    // `SimObservationStore`, with the configured `vip_ranges` as its mandatory
+    // constructor input. CONTRACT_SHAPE: pure-function (classification of one
+    // address against a fixed row set; no state changes).
+
+    /// A full `service_backends` row with an explicit VIP.
+    fn vip_row(
+        service_id: u64,
+        vip: Ipv4Addr,
+        backends: Vec<Backend>,
+        counter: u64,
+    ) -> ServiceBackendRow {
+        ServiceBackendRow {
+            service_id: ServiceId::new(service_id).expect("valid service id"),
+            vip,
+            backends,
+            updated_at: lts(counter),
+        }
+    }
+
+    /// The adapter over `rows` with the configured `vip_ranges`, probed.
+    async fn adapter_with_vip_ranges(
+        store: &Arc<SimObservationStore>,
+        rows: Vec<ServiceBackendRow>,
+        vip_ranges: VipRange,
+    ) -> ServiceBackendsResolve {
+        for row in rows {
+            store
+                .write(ObservationWrite::ServiceBackend(row))
+                .await
+                .expect("write service_backends row");
+        }
+        let adapter = ServiceBackendsResolve::new(
+            Arc::clone(store) as Arc<dyn ObservationStore>,
+            FrontendAddrAllocator::new(),
+            vip_ranges,
+        );
+        adapter.probe().await.expect("probe Lists the rows");
+        adapter
+    }
+
+    /// P5-S7 — a dial to a service's VIP and listener port is mesh, enforced
+    /// to the service's first healthy backend by `Ord`.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 11"]
+    async fn a_dial_to_a_service_vip_is_mesh_to_its_first_healthy_backend() {
+        let store = fresh_store();
+        let vip = Ipv4Addr::new(10, 96, 0, 10);
+        let higher = v4(10, 0, 0, 5, 8080);
+        let lower = v4(10, 0, 0, 4, 8080);
+        let unhealthy_lowest = v4(10, 0, 0, 3, 8080);
+        let adapter = adapter_with_vip_ranges(
+            &store,
+            vec![vip_row(
+                7,
+                vip,
+                vec![backend(higher, true), backend(lower, true), backend(unhealthy_lowest, false)],
+                1,
+            )],
+            VipRange::default(),
+        )
+        .await;
+
+        assert_eq!(
+            adapter.resolve(SocketAddrV4::new(vip, 8080)).await.expect("resolve the VIP"),
+            MtlsResolution::Mesh(ResolvedBackend { addr: lower, expected_svid: None }),
+            "the VIP resolves to the first healthy backend by Ord, never an unhealthy one",
+        );
+    }
+
+    /// P5-S7 — a VIP hit whose service has no healthy backend fails closed.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 11"]
+    async fn a_dial_to_a_service_vip_with_no_healthy_backend_is_mesh_unreachable() {
+        let store = fresh_store();
+        let vip = Ipv4Addr::new(10, 96, 0, 11);
+        let adapter = adapter_with_vip_ranges(
+            &store,
+            vec![vip_row(8, vip, vec![backend(v4(10, 0, 0, 6, 9000), false)], 1)],
+            VipRange::default(),
+        )
+        .await;
+
+        assert_eq!(
+            adapter.resolve(SocketAddrV4::new(vip, 9000)).await.expect("resolve the VIP"),
+            MtlsResolution::MeshUnreachable,
+        );
+    }
+
+    /// P5-S7 — an address in the configured VIP ranges that matches no
+    /// service's `(vip, listener port)` — an unknown VIP, or a known VIP on a
+    /// port no backend listens on — fails closed, never `NonMesh`.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 11"]
+    async fn an_unmatched_address_in_the_vip_ranges_is_mesh_unreachable_never_non_mesh() {
+        let store = fresh_store();
+        let vip = Ipv4Addr::new(10, 96, 0, 12);
+        let adapter = adapter_with_vip_ranges(
+            &store,
+            vec![vip_row(9, vip, vec![backend(v4(10, 0, 0, 7, 8080), true)], 1)],
+            VipRange::default(),
+        )
+        .await;
+
+        for (label, orig_dst) in [
+            ("unknown VIP", SocketAddrV4::new(Ipv4Addr::new(10, 96, 0, 99), 8080)),
+            ("known VIP, undeclared port", SocketAddrV4::new(vip, 8081)),
+            ("first address of the range", SocketAddrV4::new(Ipv4Addr::new(10, 96, 0, 2), 80)),
+        ] {
+            assert_eq!(
+                adapter.resolve(orig_dst).await.expect("resolve"),
+                MtlsResolution::MeshUnreachable,
+                "{label}: an unmatched address in the VIP ranges fails closed",
+            );
+        }
+    }
+
+    /// P5-S7 — the branch reads the configured ranges, not a built-in one: an
+    /// unmatched address in a configured range fails closed; the default
+    /// range's addresses, outside the configuration, keep the backend-address
+    /// classification (`NonMesh` for an unclaimed address).
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 11"]
+    async fn the_vip_branch_uses_the_configured_ranges() {
+        let store = fresh_store();
+        let configured = VipRange::new(
+            vec!["192.168.200.0/24".parse().expect("valid range")],
+            std::collections::BTreeSet::new(),
+        )
+        .expect("a valid VIP range");
+        let adapter = adapter_with_vip_ranges(&store, Vec::new(), configured).await;
+
+        assert_eq!(
+            adapter
+                .resolve(SocketAddrV4::new(Ipv4Addr::new(192, 168, 200, 40), 443))
+                .await
+                .expect("resolve"),
+            MtlsResolution::MeshUnreachable,
+            "an address in the configured range fails closed",
+        );
+        assert_eq!(
+            adapter
+                .resolve(SocketAddrV4::new(Ipv4Addr::new(10, 96, 0, 40), 443))
+                .await
+                .expect("resolve"),
+            MtlsResolution::NonMesh,
+            "an address outside the configured ranges and not a backend stays NonMesh",
+        );
+    }
+
+    /// P5-S7 — order: the VIP branch decides before the backend-address
+    /// branch. A VIP that is also some other service's healthy backend
+    /// address classifies by its own service (here: no healthy backend →
+    /// `MeshUnreachable`), not as that backend (`Mesh` to itself).
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 11"]
+    async fn the_vip_branch_precedes_the_backend_address_branch() {
+        let store = fresh_store();
+        let vip = Ipv4Addr::new(10, 96, 0, 13);
+        let at_vip = SocketAddrV4::new(vip, 7000);
+        let adapter = adapter_with_vip_ranges(
+            &store,
+            vec![
+                vip_row(10, vip, vec![backend(v4(10, 0, 0, 8, 7000), false)], 1),
+                vip_row(11, Ipv4Addr::new(10, 96, 0, 14), vec![backend(at_vip, true)], 2),
+            ],
+            VipRange::default(),
+        )
+        .await;
+
+        assert_eq!(
+            adapter.resolve(at_vip).await.expect("resolve"),
+            MtlsResolution::MeshUnreachable,
+            "the VIP's own service decides, before the backend-address lookup",
+        );
+    }
+
     // ---- RED_ACCEPTANCE: scenario through the MtlsResolve port -------------
 
     /// Scenario — `service_backends_resolve_classifies_orig_dst_into_three_arms`.

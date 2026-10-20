@@ -60,10 +60,14 @@ mod integration {
     // process, same x86_64 + nested-KVM floor as `vmm_equivalence`.
     #[cfg(feature = "kvm-tests")]
     mod vm_host_state_equivalence;
-    // netns-density-295 P1-S12 (D16-CLAIM, DG-6) — the real host-kernel CID
-    // claim over `/dev/vhost-vsock` (`VhostVsockCidClaim`). `kvm-tests`: the
-    // native metal host is the Tier-3 lane for the vhost-vsock device
-    // (V-25); node-global CID holder table.
+    // netns-density-295 (CID-NOCLAIM, RESET-EXIT; DG-2) — the fork launch with
+    // the VMM-opened `/dev/vhost-vsock` device: the VMM is the only holder,
+    // the lease outlives the VMM, and a guest reset ends the VMM. `kvm-tests`:
+    // native x86_64 metal is the only real-guest lane.
     #[cfg(feature = "kvm-tests")]
-    mod vsock_cid_claim_handoff;
+    mod vsock_vmm_device;
+    // netns-density-295 R5-59 (a), beacon seam: `VsockBeaconIo` against
+    // `SimBeaconIo` with a guest-kit microVM as the peer (native metal).
+    #[cfg(feature = "kvm-tests")]
+    mod vsock_beacon_accept_path;
 }

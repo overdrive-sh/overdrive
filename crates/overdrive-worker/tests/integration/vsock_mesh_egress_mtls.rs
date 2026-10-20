@@ -3,7 +3,7 @@
 //!
 //! DISTILL (netns-density-295 vsock replacement), piece P5, scenario P5-S10;
 //! gate G-V6. Spec:
-//! `docs/feature/netns-density-295/distill/test-scenarios-p5-egress-unframe-hostinternal.md`.
+//! `docs/feature/netns-density-295/distill/test-scenarios.md` (index).
 //! Interface contract: `docs/feature/netns-density-295/feature-delta.md`
 //! § "[REF] mTLS forwarded-outbound port — `overdrive-worker::MtlsInterceptWorker`
 //! (D9, D14)".
@@ -25,8 +25,12 @@
 //! cannot depend on, so the test plays the owner's role ONLY at the port
 //! boundary: it registers through `register_forwarded_outbound`, opens the
 //! forwarder-side loopback socket bound to the registered `forwarder_local`,
-//! and connects it to `leg_f_addr()`. The full `overdrive serve` +
-//! `overdrive deploy` mesh cell is P6's walking skeleton (V-6).
+//! and connects it to `leg_f_addr()`. In production that socket is the
+//! owner's, attached by the in-kernel forwarder to the flow's vsock once its
+//! connect completed (EVMOD-PAIR; no write gate): leg-F sees an ordinary
+//! loopback TCP peer either way, so the forwarder plays no part in this
+//! port's contract. The full `overdrive serve` + `overdrive deploy` mesh cell
+//! is P6's walking skeleton (V-6).
 //!
 //! ## Egress-dialer discipline (CLAUDE.md § "East-west mTLS tests") — LOAD-BEARING
 //! The forwarder socket stands in for the identity-unaware guest dialer: it
@@ -87,7 +91,8 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use overdrive_core::guest_transport::{
-    GUEST_CID_BASE, GuestCid, GuestCidClaim as _, GuestTransportAssignment, LaunchToken,
+    GUEST_CID_BASE, GUEST_FLOW_CONTROL_PORT, GUEST_FLOW_STREAM_PORT, GUEST_NODE_PREFIX, GuestCid,
+    GuestFlowPorts, GuestTransportAssignment, LaunchToken,
 };
 use overdrive_core::traits::IdentityRead;
 use overdrive_core::traits::ca::{CaCertDer, CaCertPem, CaKeyPem, SvidMaterial, TrustBundle};
@@ -100,7 +105,6 @@ use overdrive_core::wall_clock::UnixInstant;
 use overdrive_core::{AllocationId, CertSerial, SpiffeId};
 use overdrive_dataplane::mtls::HostMtlsEnforcement;
 use overdrive_sim::adapters::clock::SimClock;
-use overdrive_sim::adapters::guest_cid_claim::SimGuestCidClaim;
 use overdrive_testing::cidr_lease::TestCidrLease;
 use overdrive_worker::mtls_intercept_port::HostMtlsIntercept;
 use overdrive_worker::mtls_intercept_worker::{
@@ -123,7 +127,7 @@ const RESPONSE: &[u8] = b"P5-S10-FORWARDED-OUTBOUND-RESPONSE-mesh-peer-reply-ove
 
 /// The DNS SAN the remote mesh peer presents — the fixed SNI the enforcement
 /// adapter's leg-B client handshake uses (`mtls::outbound`).
-const PEER_SNI: &str = "peer.overdrive.local";
+pub(super) const PEER_SNI: &str = "peer.overdrive.local";
 const CLIENT_SPIFFE: &str = "spiffe://overdrive.local/ns/default/sa/p5-forwarded-client";
 const PEER_SPIFFE: &str = "spiffe://overdrive.local/ns/default/sa/p5-forwarded-peer";
 
@@ -146,7 +150,9 @@ const PEER_TERMINATION_DEADLINE: Duration = Duration::from_secs(10);
 // ============================================================================
 
 /// The PEM material the agent's held identity and the peer's trust anchor are
-/// built from. Serializable to a directory so the H-5 child composes from the
+/// built from. `MintedCa`, `HeldIdentities`, `first_cert_der` and `PEER_SNI`
+/// are shared with the sibling Tier-3 files `vsock_legb_dial` and
+/// `vsock_constant_guest_prefix_rules` (DISTILL test support). Serializable to a directory so the H-5 child composes from the
 /// exact same chain the parent's peer trusts.
 #[derive(Clone)]
 struct IdentityMaterial {
@@ -208,7 +214,7 @@ fn client_spiffe() -> SpiffeId {
     CLIENT_SPIFFE.parse().expect("valid client spiffe id")
 }
 
-fn first_cert_der(pem: &str) -> CertificateDer<'static> {
+pub(super) fn first_cert_der(pem: &str) -> CertificateDer<'static> {
     let mut reader = std::io::BufReader::new(pem.as_bytes());
     rustls_pemfile::certs(&mut reader)
         .next()
@@ -246,15 +252,15 @@ impl TestPki {
     }
 }
 
-struct MintedCa {
+pub(super) struct MintedCa {
     params: CertificateParams,
     key: KeyPair,
-    cert_pem: String,
-    cert_der: Vec<u8>,
+    pub(super) cert_pem: String,
+    pub(super) cert_der: Vec<u8>,
 }
 
 impl MintedCa {
-    fn root(cn: &str) -> Self {
+    pub(super) fn root(cn: &str) -> Self {
         let mut params = CertificateParams::new(Vec::<String>::new()).expect("root params");
         params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
         params.distinguished_name.push(rcgen::DnType::CommonName, cn);
@@ -263,7 +269,7 @@ impl MintedCa {
         Self { cert_pem: cert.pem(), cert_der: cert.der().to_vec(), params, key }
     }
 
-    fn intermediate(&self, cn: &str) -> Self {
+    pub(super) fn intermediate(&self, cn: &str) -> Self {
         let mut params = CertificateParams::new(Vec::<String>::new()).expect("intermediate params");
         params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Constrained(0));
         params.distinguished_name.push(rcgen::DnType::CommonName, cn);
@@ -274,7 +280,7 @@ impl MintedCa {
         Self { cert_pem: cert.pem(), cert_der: cert.der().to_vec(), params, key }
     }
 
-    fn leaf(
+    pub(super) fn leaf(
         &self,
         spiffe: &str,
         dns_san: Option<&str>,
@@ -307,9 +313,9 @@ impl MintedCa {
 
 /// The agent's held identity store: the ONLY holder of SVID material
 /// (workloads hold nothing; the kernel does mTLS).
-struct HeldIdentities {
-    svids: BTreeMap<AllocationId, SvidMaterial>,
-    bundle: TrustBundle,
+pub(super) struct HeldIdentities {
+    pub(super) svids: BTreeMap<AllocationId, SvidMaterial>,
+    pub(super) bundle: TrustBundle,
 }
 
 impl IdentityRead for HeldIdentities {
@@ -401,7 +407,6 @@ fn intercept_live_spec(alloc: &AllocationId, guest: GuestAddressing) -> Allocati
     let [_, _, high, low] = guest.address.octets();
     let cid = GuestCid::new(GUEST_CID_BASE + u32::from(u16::from_be_bytes([high, low])))
         .expect("an in-range guest CID");
-    let claim = SimGuestCidClaim::new().claim(cid).expect("claim the allocation's guest CID");
     let launch = LaunchToken::from_bytes([0x5a; 16]).expect("a non-zero launch token");
     AllocationSpec {
         alloc: alloc.clone(),
@@ -414,7 +419,14 @@ fn intercept_live_spec(alloc: &AllocationId, guest: GuestAddressing) -> Allocati
         }),
         resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
-        transport: Some(GuestTransportAssignment::new(guest.address, guest.gateway, launch, claim)),
+        transport: Some(GuestTransportAssignment::new(
+            guest.address,
+            guest.gateway,
+            cid,
+            launch,
+            GuestFlowPorts::new(GUEST_FLOW_STREAM_PORT, GUEST_FLOW_CONTROL_PORT)
+                .expect("the default guest-flow listener ports"),
+        )),
         service_ports: Vec::new(),
     }
 }
@@ -433,7 +445,12 @@ async fn compose_worker(
         svids: live.iter().map(|alloc| (alloc.clone(), svid.clone())).collect(),
         bundle: identity.trust_bundle(),
     };
-    let enforcement = Arc::new(HostMtlsEnforcement::new(Arc::new(held), MtlsLimits::default()));
+    let enforcement = Arc::new(HostMtlsEnforcement::new(
+        Arc::new(held),
+        MtlsLimits::default(),
+        GUEST_NODE_PREFIX,
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+    ));
     enforcement.probe().await.expect("real mTLS enforcement probe passes before any flow");
     let worker = Arc::new(MtlsInterceptWorker::new(
         enforcement as Arc<dyn MtlsEnforcement>,
@@ -996,7 +1013,7 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 /// P5-S10 happy path. `@contract-shape:unbounded-preservation`.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER vsock attachment cut (new-step 8, mesh registration, D9)"]
+#[ignore = "pending DELIVER step 8"]
 async fn registered_mesh_flow_reaches_its_registered_backend_over_mtls_without_leg_f_resolving_again()
  {
     let rig = Rig::start("happy").await;
@@ -1060,7 +1077,7 @@ async fn registered_mesh_flow_reaches_its_registered_backend_over_mtls_without_l
 /// sessions, resolve calls, the forwarder connections' outcome.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER vsock attachment cut (new-step 8, mesh registration, D9)"]
+#[ignore = "pending DELIVER step 8"]
 async fn a_replayed_peer_and_an_unregistered_peer_are_closed_by_leg_f_without_resolution() {
     let rig = Rig::start("claim").await;
 
@@ -1115,7 +1132,7 @@ async fn a_replayed_peer_and_an_unregistered_peer_are_closed_by_leg_f_without_re
 /// through the first registration still carrying its flow), peer sessions.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER vsock attachment cut (new-step 8, mesh registration, D9)"]
+#[ignore = "pending DELIVER step 8"]
 async fn a_second_registration_for_the_same_forwarder_address_is_refused() {
     let rig = Rig::start("duplicate").await;
 
@@ -1163,7 +1180,7 @@ async fn a_second_registration_for_the_same_forwarder_address_is_refused() {
 /// capability.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER vsock attachment cut (new-step 8, mesh registration, D9)"]
+#[ignore = "pending DELIVER step 8"]
 async fn an_allocation_without_a_live_intercept_cannot_register_a_forwarded_flow() {
     let rig = Rig::start("not-live").await;
 
@@ -1222,7 +1239,7 @@ fn assert_not_intercept_live(
 /// Unclaimed: the registration is dropped before leg-F ever accepted the flow.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER vsock attachment cut (new-step 8, mesh registration, D9)"]
+#[ignore = "pending DELIVER step 8"]
 async fn dropping_an_unclaimed_registration_closes_the_flow_before_it_reaches_the_backend() {
     let rig = Rig::start("drop-unclaimed").await;
 
@@ -1254,7 +1271,7 @@ async fn dropping_an_unclaimed_registration_closes_the_flow_before_it_reaches_th
 /// forwarder side and the remote peer each see a reset, never a clean FIN.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER vsock attachment cut (new-step 8, mesh registration, D9)"]
+#[ignore = "pending DELIVER step 8"]
 async fn dropping_a_claimed_registration_with_the_loopback_leg_open_resets_both_sides() {
     let rig = Rig::start("drop-claimed").await;
 
@@ -1299,7 +1316,7 @@ async fn dropping_a_claimed_registration_with_the_loopback_leg_open_resets_both_
 /// registration afterwards releases it without resetting the finished peer.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER vsock attachment cut (new-step 8, mesh registration, D9)"]
+#[ignore = "pending DELIVER step 8"]
 async fn dropping_a_claimed_registration_after_a_clean_close_keeps_the_remote_fin() {
     let rig = Rig::start("drop-after-clean").await;
 
@@ -1322,7 +1339,14 @@ async fn dropping_a_claimed_registration_after_a_clean_close_keeps_the_remote_fi
     drop(registration);
 
     // THEN the remote peer's record is unchanged: FIN, no reset after it.
-    tokio::time::sleep(CLOSURE_DEADLINE).await;
+    // The oracle is the clean close recorded while the registration was
+    // held (`before`, above): both directions of the backend connection had
+    // already ended with FIN, the peer's recorder settled and closed its
+    // socket, so no later effect of the drop can reach the peer and a fixed
+    // wait here would observe nothing (no sleep-only absence check). The
+    // reset this cell rules out is the one the half-ended sibling cell
+    // positively observes (`…_half_ended_resets_the_remote_peer`), recorded
+    // by the same recorder within `PEER_TERMINATION_DEADLINE`.
     let after = rig.peer.sessions();
     assert_eq!(after.len(), 1);
     assert_eq!(after[0].termination, Termination::Fin { reset_after_fin: false });
@@ -1336,7 +1360,7 @@ async fn dropping_a_claimed_registration_after_a_clean_close_keeps_the_remote_fi
 /// remote peer sees a reset after the FIN it already received.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER vsock attachment cut (new-step 8, mesh registration, D9)"]
+#[ignore = "pending DELIVER step 8"]
 async fn dropping_a_claimed_registration_with_the_loopback_leg_half_ended_resets_the_remote_peer() {
     let rig = Rig::start_with("drop-half-ended", PeerMode::HoldOpenOnFin).await;
 
@@ -1388,7 +1412,7 @@ async fn dropping_a_claimed_registration_with_the_loopback_leg_half_ended_resets
 /// `DuplicateForwardedRegistration`), and the new registration carries a flow.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER vsock attachment cut (new-step 8, mesh registration, D9)"]
+#[ignore = "pending DELIVER step 8"]
 async fn an_unclaimed_drop_removes_the_registration_so_the_address_registers_again() {
     let rig = Rig::start("drop-unclaimed-reregister").await;
 
@@ -1439,7 +1463,7 @@ async fn an_unclaimed_drop_removes_the_registration_so_the_address_registers_aga
 /// owner refuses every registration, so it never holds one.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER vsock attachment cut (new-step 8, mesh registration, D9)"]
+#[ignore = "pending DELIVER step 8"]
 async fn forwarded_registration_refusals_follow_the_pinned_precedence() {
     let rig = Rig::start("precedence").await;
     let never_started = AllocationId::new("p5s10-precedence-other").expect("valid allocation id");
@@ -1480,6 +1504,8 @@ async fn forwarded_registration_refusals_follow_the_pinned_precedence() {
                 bundle: TestPki::mint().identity.trust_bundle(),
             }),
             MtlsLimits::default(),
+            overdrive_core::guest_transport::GUEST_NODE_PREFIX,
+            Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
         )) as Arc<dyn MtlsEnforcement>,
         Arc::new(CountingResolve::default()) as Arc<dyn MtlsResolve>,
         Arc::new(SimClock::new()),
@@ -1532,7 +1558,7 @@ async fn forwarded_registration_refusals_follow_the_pinned_precedence() {
 /// reset. `@contract-shape:unbounded-preservation`.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER vsock attachment cut (new-step 8, mesh registration, D9)"]
+#[ignore = "pending DELIVER step 8"]
 async fn a_clean_close_of_both_directions_ends_the_remote_stream_with_fin() {
     let rig = Rig::start("clean-close").await;
 
@@ -1574,7 +1600,7 @@ async fn a_clean_close_of_both_directions_ends_the_remote_stream_with_fin() {
 /// every descriptor the worker held exactly as on a serve exit.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER vsock attachment cut (new-step 8, mesh registration, D9)"]
+#[ignore = "pending DELIVER step 8"]
 async fn a_serve_exit_mid_flow_resets_the_remote_peer() {
     if let Some(dir) = std::env::var_os(SERVE_CHILD_ENV) {
         serve_child(Path::new(&dir)).await;

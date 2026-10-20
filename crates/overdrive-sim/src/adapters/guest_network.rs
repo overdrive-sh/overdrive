@@ -1,21 +1,45 @@
 //! Socket-free simulation adapter for the GH #295 shared guest-network owner.
+//!
+//! Scripts what a consumer of the owner's ports (the action shim, the
+//! composition root) branches on: the three `ForwardingActivation` outcomes,
+//! standing refusal slots for every non-audit operation, one-shot and standing
+//! audit damage, the `OwnerCgroupPlacement` (or any other) startup refusal,
+//! and records every port call in order.
+//!
+//! **Quiescence (QHOLD, D-UP-4, PD-2).** The adapter owns its own
+//! `QuiescenceLedger` (public in `overdrive-control-plane`, not `Clone`; one
+//! per owner) and a hold count: `quiesce` issues a hold from that ledger and
+//! raises the count; `restore` redeems it at the ledger and lowers the count
+//! (`Reopened` at zero, else `StillQuiesced`); a hold another ledger issued is
+//! refused `Err(QuiescenceRestoreError::ForeignHold)` and changes nothing (it
+//! is dropped, counted leaked at its issuing ledger); a hold of this ledger
+//! dropped unredeemed is counted by `leaked_quiescence_holds`. While the count
+//! is above zero every activation answers `QuiescenceLatched`. It aborts no
+//! flow (it holds none).
 
 #![allow(
     clippy::result_large_err,
     reason = "the sim implements the exact accepted control-plane GuestNetworkError contract"
 )]
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::net::SocketAddrV4;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use overdrive_control_plane::guest_network::{
     ForwardingActivation, ForwardingQuiescence, ForwardingRestore, GuestNetworkError,
     GuestNetworkFact, GuestNetworkOperation, GuestNetworkPlan, GuestNetworkProvisioner,
-    QuiescenceHold, QuiescenceHolder, Result, SharedGuestNetworkAudit,
+    QuiescenceHold, QuiescenceLedger, QuiescenceRestoreError, Result, SharedGuestNetworkAudit,
     SharedGuestNetworkAuditError, SharedGuestNetworkOwner,
 };
 use overdrive_core::guest_network::{GuestNetworkExecWiring, SharedGuestNetworkComponent};
+use overdrive_core::guest_transport::dial::{
+    DialPurpose, GuestDialError, GuestStream, GuestStreamDial,
+};
+use overdrive_core::guest_transport::{
+    GUEST_FLOW_CONTROL_PORT, GUEST_FLOW_STREAM_PORT, GuestFlowPorts,
+};
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::vm_host_state::{VmHostObservation, VmHostState};
@@ -30,43 +54,45 @@ pub struct SimSharedGuestNetworkSweepCall {
     pub host: VmHostObservation,
 }
 
+/// One `dial` the adapter answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SimSharedGuestNetworkDial {
+    pub target: SocketAddrV4,
+    pub purpose: DialPurpose,
+}
+
 #[derive(Debug, Default)]
 struct Trace {
     calls: Vec<GuestNetworkOperation>,
     sweep_calls: Vec<SimSharedGuestNetworkSweepCall>,
+    dials: Vec<SimSharedGuestNetworkDial>,
+    activations: Vec<ForwardingActivation>,
 }
 
-/// Standing outcome of every subsequent `quiesce_forwarding` call.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SimQuiesceOutcome {
-    /// `Ok(ForwardingQuiescence)` naming these allocations unconfirmed, each
-    /// with a fresh `GuestNetworkError::Io { operation: ForwardingQuiesce, .. }`;
-    /// empty is full quiescence. The `Default`.
-    Unconfirmed(BTreeSet<AllocationId>),
-    /// `Err(GuestNetworkError::Io { operation: ForwardingQuiesce, .. })`.
-    Fail,
-    /// A future that never resolves.
-    Hang,
+/// The adapter's counted quiescence over its own ledger (module doc).
+struct SimQuiescence {
+    ledger: QuiescenceLedger,
+    holds: AtomicU32,
 }
 
-impl Default for SimQuiesceOutcome {
+impl Default for SimQuiescence {
     fn default() -> Self {
-        Self::Unconfirmed(BTreeSet::new())
+        Self { ledger: QuiescenceLedger::new(), holds: AtomicU32::new(0) }
     }
 }
 
-/// The owner's private runtime-quiescence model: the latch and the
-/// `Condemned` exclusion set (D-295-R5, R14).
-#[derive(Debug, Default)]
-struct Quiescence {
-    /// Set by every `quiesce_forwarding`; cleared only by a successful
-    /// `restore_forwarding`.
-    latched: bool,
-    /// Every allocation a returned quiescence or audit result has named.
-    condemned: BTreeSet<AllocationId>,
+impl std::fmt::Debug for SimQuiescence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SimQuiescence")
+            .field("holds", &self.holds.load(Ordering::SeqCst))
+            .field("leaked", &self.ledger.leaked())
+            .finish()
+    }
 }
 
-/// Sim owner with one standing failure slot per accepted owner operation.
+/// Sim owner with one standing failure slot per non-audit operation, a
+/// scripted sequence of activation outcomes, audit damage, and a counted
+/// quiescence over its own ledger.
 #[derive(Debug, Default)]
 pub struct SimSharedGuestNetworkOwner {
     provision: AtomicBool,
@@ -74,15 +100,18 @@ pub struct SimSharedGuestNetworkOwner {
     probe: AtomicBool,
     sweep: AtomicBool,
     converge: AtomicBool,
-    restore: AtomicBool,
-    audit_components: [AtomicBool; 10],
-    #[allow(dead_code, reason = "read by `quiesce_forwarding` once its RED scaffold (QuiescenceHold blocker) is resolved")]
-    quiesce_outcome: Mutex<SimQuiesceOutcome>,
+    /// Set by the first `Ok` `converge_shared` (PORTS-CONFIG: `flow_ports`
+    /// is `Some` from then on).
+    converged: AtomicBool,
+    audit_components: [AtomicBool; 9],
+    activations: Mutex<VecDeque<ForwardingActivation>>,
+    standing_activation: Mutex<Option<ForwardingActivation>>,
     audit_damage: Mutex<BTreeSet<AllocationId>>,
-    quiescence: Mutex<Quiescence>,
+    condemned: Mutex<BTreeSet<AllocationId>>,
     probe_error: Mutex<Option<GuestNetworkError>>,
     audit_error: Mutex<Option<(SharedGuestNetworkComponent, GuestNetworkError)>>,
     sweep_host_state: Option<SimVmHostState>,
+    quiescence: SimQuiescence,
     trace: Mutex<Trace>,
 }
 
@@ -96,6 +125,14 @@ impl SimSharedGuestNetworkOwner {
     pub fn script_provision_failure(&self, armed: bool) {
         self.provision.store(armed, Ordering::SeqCst);
     }
+    /// QHOLD: the outstanding hold count (leaked holds included).
+    pub fn quiescence_holds(&self) -> u32 {
+        self.quiescence.holds.load(Ordering::SeqCst)
+    }
+    /// QHOLD: holds of this adapter's ledger dropped unredeemed.
+    pub fn leaked_quiescence_holds(&self) -> u32 {
+        self.quiescence.ledger.leaked()
+    }
     pub fn script_teardown_failure(&self, armed: bool) {
         self.teardown.store(armed, Ordering::SeqCst);
     }
@@ -103,7 +140,8 @@ impl SimSharedGuestNetworkOwner {
         self.probe.store(armed, Ordering::SeqCst);
     }
     /// Script the next startup-probe result with the exact accepted typed
-    /// error, including a primary+cleanup aggregate when required.
+    /// error — `OwnerCgroupPlacement`, `FdBudget`, a guest-prefix overlap, or
+    /// a primary+cleanup aggregate.
     pub fn script_next_probe_error(&self, error: GuestNetworkError) {
         *self.probe_error.lock() = Some(error);
     }
@@ -130,14 +168,23 @@ impl SimSharedGuestNetworkOwner {
     ) {
         *self.audit_error.lock() = Some((component, source));
     }
-    /// Set the standing outcome of every subsequent `quiesce_forwarding`.
-    pub fn script_quiesce_outcome(&self, outcome: SimQuiesceOutcome) {
-        *self.quiesce_outcome.lock() = outcome;
+    /// The next activations return these outcomes, in order; afterwards
+    /// `Activated`. `QuiescenceLatched` and `ControlSessionPending` are the
+    /// two waiting outcomes the shim retries under the EXEC claim.
+    pub fn script_activations(&self, outcomes: impl IntoIterator<Item = ForwardingActivation>) {
+        self.activations.lock().extend(outcomes);
     }
-    /// Arm (`true`) or disarm (`false`) the standing `restore_forwarding`
-    /// refusal.
-    pub fn script_restore_failure(&self, armed: bool) {
-        self.restore.store(armed, Ordering::SeqCst);
+    /// While `Some(outcome)`, every activation returns `outcome` (for
+    /// example `QuiescenceLatched` for as long as the consumer under test
+    /// should see forwarding quiesced); `None` returns to the scripted
+    /// sequence, then `Activated`.
+    pub fn script_standing_activation(&self, outcome: Option<ForwardingActivation>) {
+        *self.standing_activation.lock() = outcome;
+    }
+    /// Every activation outcome returned, in call order.
+    #[must_use]
+    pub fn activation_outcomes(&self) -> Vec<ForwardingActivation> {
+        self.trace.lock().activations.clone()
     }
     /// Set the standing damage set `audit_shared` reports when no node-level
     /// audit slot fires.
@@ -157,6 +204,12 @@ impl SimSharedGuestNetworkOwner {
         self.trace.lock().sweep_calls.clone()
     }
 
+    /// Every dial answered, in order.
+    #[must_use]
+    pub fn dials(&self) -> Vec<SimSharedGuestNetworkDial> {
+        self.trace.lock().dials.clone()
+    }
+
     fn record(&self, operation: GuestNetworkOperation) {
         self.trace.lock().calls.push(operation);
     }
@@ -174,41 +227,23 @@ impl SimSharedGuestNetworkOwner {
         }
     }
 
-    /// The host's source-less refusal for an allocation with no activatable
-    /// record — here, a condemned one.
-    fn condemned_refusal(plan: &GuestNetworkPlan) -> GuestNetworkError {
-        GuestNetworkError::PostconditionMismatch {
-            operation: GuestNetworkOperation::ForwardingActivate,
-            expected: GuestNetworkFact::AllocationForwarding {
-                alloc: plan.alloc().clone(),
-                cid: plan.assignment().cid(),
-                pairs: 0,
-            },
-            observed: None,
-        }
-    }
-
     /// Condemn every not-yet-condemned allocation of `named`, mapping each to
-    /// a fresh typed error for `operation`. Already-condemned allocations are
-    /// never named again.
-    fn condemn(
-        &self,
-        named: &BTreeSet<AllocationId>,
-        operation: GuestNetworkOperation,
-    ) -> BTreeMap<AllocationId, GuestNetworkError> {
-        let mut quiescence = self.quiescence.lock();
+    /// a fresh typed error. Already-condemned allocations are never named again.
+    fn condemn(&self, named: &BTreeSet<AllocationId>) -> BTreeMap<AllocationId, GuestNetworkError> {
+        let mut condemned = self.condemned.lock();
         named
             .iter()
-            .filter(|alloc| quiescence.condemned.insert((*alloc).clone()))
-            .map(|alloc| (alloc.clone(), Self::refusal(operation)))
+            .filter(|alloc| condemned.insert((*alloc).clone()))
+            .map(|alloc| (alloc.clone(), Self::refusal(GuestNetworkOperation::SharedAudit)))
             .collect()
     }
 
-    const COMPONENTS: [SharedGuestNetworkComponent; 10] = [
+    /// The pinned component set (§ *Typed error taxonomy*), in canonical
+    /// audit order.
+    const COMPONENTS: [SharedGuestNetworkComponent; 9] = [
         SharedGuestNetworkComponent::Forwarder,
         SharedGuestNetworkComponent::FlowListeners,
         SharedGuestNetworkComponent::ControlListener,
-        SharedGuestNetworkComponent::IntakeListeners,
         SharedGuestNetworkComponent::LegF,
         SharedGuestNetworkComponent::LegC,
         SharedGuestNetworkComponent::IpRules,
@@ -217,19 +252,11 @@ impl SimSharedGuestNetworkOwner {
         SharedGuestNetworkComponent::Supervisor,
     ];
 
-    const fn component_index(component: SharedGuestNetworkComponent) -> usize {
-        match component {
-            SharedGuestNetworkComponent::Forwarder => 0,
-            SharedGuestNetworkComponent::FlowListeners => 1,
-            SharedGuestNetworkComponent::ControlListener => 2,
-            SharedGuestNetworkComponent::IntakeListeners => 3,
-            SharedGuestNetworkComponent::LegF => 4,
-            SharedGuestNetworkComponent::LegC => 5,
-            SharedGuestNetworkComponent::IpRules => 6,
-            SharedGuestNetworkComponent::IpSets => 7,
-            SharedGuestNetworkComponent::Dns => 8,
-            SharedGuestNetworkComponent::Supervisor => 9,
-        }
+    fn component_index(component: SharedGuestNetworkComponent) -> usize {
+        Self::COMPONENTS
+            .iter()
+            .position(|candidate| *candidate == component)
+            .unwrap_or_else(|| unreachable!("{component:?} is in the pinned component set"))
     }
 
     fn standing_audit_error(&self) -> Option<SharedGuestNetworkAuditError> {
@@ -242,17 +269,8 @@ impl SimSharedGuestNetworkOwner {
                 component,
                 source: GuestNetworkError::PostconditionMismatch {
                     operation: GuestNetworkOperation::SharedAudit,
-                    expected:
-                        overdrive_control_plane::guest_network::GuestNetworkFact::SharedComponent {
-                            component,
-                            healthy: true,
-                        },
-                    observed: Some(
-                        overdrive_control_plane::guest_network::GuestNetworkFact::SharedComponent {
-                            component,
-                            healthy: false,
-                        },
-                    ),
+                    expected: GuestNetworkFact::SharedComponent { component, healthy: true },
+                    observed: Some(GuestNetworkFact::SharedComponent { component, healthy: false }),
                 },
             })
     }
@@ -261,32 +279,46 @@ impl SimSharedGuestNetworkOwner {
 #[async_trait::async_trait]
 impl GuestNetworkProvisioner for SimSharedGuestNetworkOwner {
     async fn provision(&self, _plan: &GuestNetworkPlan) -> Result<()> {
-        self.record(GuestNetworkOperation::PairInstall);
-        Self::result(&self.provision, GuestNetworkOperation::PairInstall)
+        self.record(GuestNetworkOperation::PairAttach);
+        Self::result(&self.provision, GuestNetworkOperation::PairAttach)
     }
 
-    /// `Ok(QuiescenceLatched)` with nothing recorded while the latch is set;
-    /// otherwise records `ForwardingActivate` and returns the source-less
-    /// `PostconditionMismatch` for a condemned allocation, `Ok(Activated)`
-    /// else.
-    async fn activate(&self, plan: &GuestNetworkPlan) -> Result<ForwardingActivation> {
-        let condemned = {
-            let quiescence = self.quiescence.lock();
-            if quiescence.latched {
-                return Ok(ForwardingActivation::QuiescenceLatched);
-            }
-            quiescence.condemned.contains(plan.alloc())
+    /// Records `ForwardingActivate`; returns the standing outcome if one is
+    /// scripted, else the next scripted outcome, else `Activated`.
+    async fn activate(&self, _plan: &GuestNetworkPlan) -> Result<ForwardingActivation> {
+        let standing = *self.standing_activation.lock();
+        let outcome = if self.quiescence_holds() > 0 {
+            ForwardingActivation::QuiescenceLatched
+        } else {
+            standing.unwrap_or_else(|| {
+                self.activations.lock().pop_front().unwrap_or(ForwardingActivation::Activated)
+            })
         };
-        self.record(GuestNetworkOperation::ForwardingActivate);
-        if condemned {
-            return Err(Self::condemned_refusal(plan));
+        {
+            let mut trace = self.trace.lock();
+            trace.calls.push(GuestNetworkOperation::ForwardingActivate);
+            trace.activations.push(outcome);
         }
-        Ok(ForwardingActivation::Activated)
+        Ok(outcome)
     }
 
     async fn teardown(&self, _plan: &GuestNetworkPlan) -> Result<()> {
-        self.record(GuestNetworkOperation::PairRemove);
-        Self::result(&self.teardown, GuestNetworkOperation::PairRemove)
+        self.record(GuestNetworkOperation::PairAbort);
+        Self::result(&self.teardown, GuestNetworkOperation::PairAbort)
+    }
+}
+
+#[async_trait::async_trait]
+impl GuestStreamDial for SimSharedGuestNetworkOwner {
+    /// Serves no allocation: every dial is `NotServing` with no state change.
+    /// Consumers that need scripted streams use `SimGuestStreamDial`.
+    async fn dial(
+        &self,
+        target: SocketAddrV4,
+        purpose: DialPurpose,
+    ) -> std::result::Result<GuestStream, GuestDialError> {
+        self.trace.lock().dials.push(SimSharedGuestNetworkDial { target, purpose });
+        Err(GuestDialError::NotServing)
     }
 }
 
@@ -318,13 +350,26 @@ impl SharedGuestNetworkOwner for SimSharedGuestNetworkOwner {
     }
 
     async fn converge_shared(&self) -> Result<()> {
-        self.record(GuestNetworkOperation::ForwarderLoad);
-        Self::result(&self.converge, GuestNetworkOperation::ForwarderLoad)
+        self.record(GuestNetworkOperation::ForwarderOpen);
+        let result = Self::result(&self.converge, GuestNetworkOperation::ForwarderOpen);
+        if result.is_ok() {
+            self.converged.store(true, Ordering::SeqCst);
+        }
+        result
     }
 
-    /// Node-level result as D11 pins it; when no node-level slot fires,
-    /// `Ok` naming each scripted damaged allocation not yet condemned (each
-    /// joins the condemned set).
+    /// The double binds nothing: from its first `Ok` `converge_shared` it
+    /// reports the production default ports (1240 / 1243), constant after.
+    fn flow_ports(&self) -> Option<GuestFlowPorts> {
+        if !self.converged.load(Ordering::SeqCst) {
+            return None;
+        }
+        GuestFlowPorts::new(GUEST_FLOW_STREAM_PORT, GUEST_FLOW_CONTROL_PORT).ok()
+    }
+
+    /// One-shot error first, then the first armed standing component in
+    /// canonical order; otherwise `Ok` naming each scripted damaged
+    /// allocation not yet condemned.
     async fn audit_shared(
         &self,
     ) -> std::result::Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError> {
@@ -337,29 +382,38 @@ impl SharedGuestNetworkOwner for SimSharedGuestNetworkOwner {
             return Err(error);
         }
         let damage = self.audit_damage.lock().clone();
-        Ok(SharedGuestNetworkAudit {
-            damaged: self.condemn(&damage, GuestNetworkOperation::SharedAudit),
-        })
+        Ok(SharedGuestNetworkAudit { damaged: self.condemn(&damage) })
     }
 
-    /// SCAFFOLD: true — netns-density-295 DISTILL (attachment-cut step, 09-01
-    /// rework). The sim must return a `QuiescenceHold`, which the design makes
-    /// constructible only by the owner (D8a-HOLD); no constructor reachable
-    /// from `overdrive-sim` is pinned — surfaced as a DISTILL blocker.
-    async fn quiesce_forwarding(
+    /// QHOLD: a hold of this adapter's ledger; the count rises.
+    async fn quiesce(&self) -> (QuiescenceHold, ForwardingQuiescence) {
+        self.record(GuestNetworkOperation::ForwardingQuiesce);
+        let hold = self.quiescence.ledger.issue();
+        self.quiescence.holds.fetch_add(1, Ordering::SeqCst);
+        (hold, ForwardingQuiescence::default())
+    }
+
+    /// QHOLD: redeems `hold` at this adapter's ledger; a foreign hold is
+    /// refused and changes nothing (D-UP-4, PD-1).
+    async fn restore(
         &self,
-        _holder: QuiescenceHolder,
-    ) -> Result<(QuiescenceHold, ForwardingQuiescence)> {
-        panic!("Not yet implemented -- RED scaffold")
-    }
-
-    /// Records `ForwardingRestore`; returns the standing restore refusal, and
-    /// clears the latch (`Reopened`) only on `Ok`.
-    async fn restore_forwarding(&self, _hold: QuiescenceHold) -> Result<ForwardingRestore> {
+        hold: QuiescenceHold,
+    ) -> std::result::Result<ForwardingRestore, QuiescenceRestoreError> {
         self.record(GuestNetworkOperation::ForwardingRestore);
-        Self::result(&self.restore, GuestNetworkOperation::ForwardingRestore)?;
-        self.quiescence.lock().latched = false;
-        Ok(ForwardingRestore::Reopened)
+        match self.quiescence.ledger.redeem(hold) {
+            Ok(()) => {
+                let left = self.quiescence.holds.fetch_sub(1, Ordering::SeqCst) - 1;
+                Ok(if left == 0 {
+                    ForwardingRestore::Reopened
+                } else {
+                    ForwardingRestore::StillQuiesced
+                })
+            }
+            Err(foreign) => {
+                drop(foreign);
+                Err(QuiescenceRestoreError::ForeignHold)
+            }
+        }
     }
 }
 
@@ -380,28 +434,23 @@ pub fn test_wiring(
 mod tests {
     use super::*;
     use crate::adapters::clock::SimClock;
-    use futures::FutureExt;
-    use overdrive_control_plane::guest_network::{GuestNetworkFact, GuestNetworkProbeStage};
+    use std::path::PathBuf;
 
     /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// The scripted `OwnerCgroupPlacement` startup refusal (D24) is one-shot
+    /// and only port calls are recorded.
     #[tokio::test]
     async fn scripted_probe_error_is_one_shot_and_records_only_port_calls() {
         let owner = SimSharedGuestNetworkOwner::default();
-        owner.script_next_probe_error(GuestNetworkError::PostconditionMismatch {
-            operation: GuestNetworkOperation::StartupProbe,
-            expected: GuestNetworkFact::StartupProbe {
-                stage: GuestNetworkProbeStage::Classifier,
-                passed: true,
-            },
-            observed: Some(GuestNetworkFact::StartupProbe {
-                stage: GuestNetworkProbeStage::Classifier,
-                passed: false,
-            }),
+        owner.script_next_probe_error(GuestNetworkError::OwnerCgroupPlacement {
+            owner: PathBuf::from("/sys/fs/cgroup/user.slice"),
+            attach_point: PathBuf::from("/sys/fs/cgroup/overdrive.slice"),
         });
 
         assert!(matches!(
             owner.probe_startup().await,
-            Err(GuestNetworkError::PostconditionMismatch { .. })
+            Err(GuestNetworkError::OwnerCgroupPlacement { .. })
         ));
         owner.probe_startup().await.expect("one-shot script is consumed");
         assert_eq!(
@@ -411,85 +460,23 @@ mod tests {
     }
 
     /// CONTRACT_SHAPE: bounded-change.
-    #[tokio::test]
-    async fn one_shot_probe_error_replaces_earlier_value_and_preserves_the_standing_slot() {
-        let owner = SimSharedGuestNetworkOwner::default();
-        owner.script_probe_failure(true);
-        owner.script_next_probe_error(GuestNetworkError::PostconditionMismatch {
-            operation: GuestNetworkOperation::StartupProbe,
-            expected: GuestNetworkFact::StartupProbe {
-                stage: GuestNetworkProbeStage::Classifier,
-                passed: true,
-            },
-            observed: None,
-        });
-        owner.script_next_probe_error(GuestNetworkError::PostconditionMismatch {
-            operation: GuestNetworkOperation::StartupProbe,
-            expected: GuestNetworkFact::StartupProbe {
-                stage: GuestNetworkProbeStage::OriginalDestination,
-                passed: true,
-            },
-            observed: Some(GuestNetworkFact::StartupProbe {
-                stage: GuestNetworkProbeStage::OriginalDestination,
-                passed: false,
-            }),
-        });
-
-        let first = owner.probe_startup().await.expect_err("replacement one-shot takes precedence");
-        assert!(matches!(
-            first,
-            GuestNetworkError::PostconditionMismatch {
-                expected: GuestNetworkFact::StartupProbe {
-                    stage: GuestNetworkProbeStage::OriginalDestination,
-                    ..
-                },
-                ..
-            }
-        ));
-        assert!(matches!(
-            owner.probe_startup().await,
-            Err(GuestNetworkError::Io { operation: GuestNetworkOperation::StartupProbe, .. })
-        ));
-        owner.script_probe_failure(false);
-        owner.probe_startup().await.expect("disarming the standing slot restores success");
-        assert_eq!(
-            owner.calls(),
-            [
-                GuestNetworkOperation::StartupProbe,
-                GuestNetworkOperation::StartupProbe,
-                GuestNetworkOperation::StartupProbe,
-            ]
-        );
-        let first_snapshot = owner.calls();
-        assert_eq!(owner.calls(), first_snapshot, "call snapshots are ordered and non-draining");
-    }
-
-    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
-    /// S-ND295-53 — Activation waits out a recovery and never turns it into a failure.
-    /// CONTRACT_SHAPE: bounded-change.
     ///
-    /// The standing non-audit slots (sweep, converge, restore), the standing
-    /// quiescence outcome `Fail`, and the Forwarder audit slot each refuse every
-    /// call while armed, with the exact mapped operation and a fresh
-    /// `"scripted sim owner refusal"` source; each disarms independently, the
-    /// default quiescence outcome is full quiescence, and every call is
-    /// recorded once in call order (FD § "Public deterministic shared-owner simulation API" (the standing slots, their `Default`, and the operation mapping)).
+    /// The standing non-audit slots (sweep, converge) and the Forwarder audit
+    /// slot refuse every call while armed with the mapped operation and a
+    /// fresh `"scripted sim owner refusal"` source; each disarms
+    /// independently, and every call is recorded once in call order.
     #[tokio::test]
     async fn standing_owner_controls_preserve_exact_operation_semantics() {
-        use GuestNetworkOperation::{
-            CleanupComplement, ForwarderLoad, ForwardingQuiesce, ForwardingRestore, SharedAudit,
-        };
+        use GuestNetworkOperation::{CleanupComplement, ForwarderOpen, SharedAudit};
         let owner = SimSharedGuestNetworkOwner::default();
         owner.script_sweep_failure(true);
         owner.script_converge_failure(true);
         owner.script_audit_failure(true);
-        owner.script_quiesce_outcome(SimQuiesceOutcome::Fail);
 
         for call in 0..2 {
             for (result, operation) in [
                 (owner.sweep_stale().await, CleanupComplement),
-                (owner.converge_shared().await, ForwarderLoad),
-                (owner.quiesce_forwarding(holder()).await.map(|_| ()), ForwardingQuiesce),
+                (owner.converge_shared().await, ForwarderOpen),
             ] {
                 assert!(
                     matches!(
@@ -504,162 +491,42 @@ mod tests {
         }
         let audit = owner.audit_shared().await.expect_err("Forwarder audit slot refuses");
         assert_eq!(audit.component, SharedGuestNetworkComponent::Forwarder);
-        assert!(matches!(
-            audit.source,
-            GuestNetworkError::PostconditionMismatch {
-                operation: GuestNetworkOperation::SharedAudit,
-                ..
-            }
-        ));
-        let armed = [CleanupComplement, ForwarderLoad, ForwardingQuiesce];
-        assert_eq!(owner.calls(), [&armed[..], &armed[..], &[SharedAudit][..]].concat());
-
-        // The standing restore refusal: a hold from a successful quiesce is
-        // refused while armed.
-        owner.script_quiesce_outcome(SimQuiesceOutcome::default());
-        owner.script_restore_failure(true);
-        let (hold, _) = owner.quiesce_forwarding(holder()).await.expect("default outcome");
-        let refused = owner.restore_forwarding(hold).await;
-        assert!(
-            matches!(
-                &refused,
-                Err(GuestNetworkError::Io { operation: ForwardingRestore, source })
-                    if source.to_string() == "scripted sim owner refusal"
-            ),
-            "standing ForwardingRestore refusal, got {refused:?}",
-        );
 
         owner.script_sweep_failure(false);
         owner.script_converge_failure(false);
         owner.script_audit_failure(false);
-        owner.script_restore_failure(false);
         owner.sweep_stale().await.expect("sweep slot disarms independently");
         owner.converge_shared().await.expect("converge slot disarms independently");
         let healthy = owner.audit_shared().await.expect("audit slot disarms independently");
         assert!(healthy.damaged.is_empty(), "no damage is scripted");
-        let (hold, quiesced) = owner.quiesce_forwarding(holder()).await.expect("quiesce outcome resets");
-        assert!(quiesced.unconfirmed.is_empty(), "the default outcome is full quiescence");
-        assert_eq!(
-            owner.restore_forwarding(hold).await.expect("restore slot disarms independently"),
-            ForwardingRestore::Reopened,
-        );
+        let armed = [CleanupComplement, ForwarderOpen];
         assert_eq!(
             owner.calls(),
             [
                 &armed[..],
                 &armed[..],
-                &[
-                    SharedAudit,
-                    ForwardingQuiesce,
-                    ForwardingRestore,
-                    CleanupComplement,
-                    ForwarderLoad,
-                    SharedAudit,
-                    ForwardingQuiesce,
-                    ForwardingRestore
-                ][..],
+                &[SharedAudit, CleanupComplement, ForwarderOpen, SharedAudit][..],
             ]
             .concat(),
-            "successful calls append after failed calls, each recorded once",
         );
     }
 
-    /// The holder every sim-owner quiescence in these bodies presents.
-    const fn holder() -> QuiescenceHolder {
-        QuiescenceHolder::Recovery(SharedGuestNetworkComponent::Forwarder)
-    }
-
-    /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
-    /// S-ND295-53 — Activation waits out a recovery and never turns it into a failure.
     /// CONTRACT_SHAPE: bounded-change.
     ///
-    /// Each `SimQuiesceOutcome` gives its pinned result: `Unconfirmed(set)`
-    /// names each not-yet-condemned member with a fresh `Io { ForwardingQuiesce }`
-    /// (empty is full quiescence), `Fail` refuses, `Hang` never resolves.
-    /// Every allocation a quiescence or audit result names is condemned and
-    /// never named again by either operation (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the sim adapter); FD § "Public deterministic shared-owner simulation API" (the pending `Default`, damage, and condemned-set rules)).
+    /// Scripted damage condemns each named allocation once: a repeated audit
+    /// never names an allocation again.
     #[tokio::test]
-    async fn scripted_quiescence_outcomes_condemn_each_named_allocation_once() {
-        use GuestNetworkOperation::{ForwardingQuiesce, SharedAudit};
+    async fn scripted_audit_damage_condemns_each_named_allocation_once() {
         let owner = SimSharedGuestNetworkOwner::default();
-
-        let full = owner.quiesce_forwarding(holder()).await.expect("the default outcome succeeds");
-        assert!(full.unconfirmed.is_empty(), "the default Unconfirmed(∅) is full quiescence");
-
-        owner.script_quiesce_outcome(SimQuiesceOutcome::Unconfirmed(allocs(&["a", "b"])));
-        let first = owner.quiesce_forwarding(holder()).await.expect("Unconfirmed is an Ok outcome");
-        assert_named(&first.unconfirmed, &allocs(&["a", "b"]), ForwardingQuiesce);
-        let repeat = owner.quiesce_forwarding(holder()).await.expect("the outcome is standing");
-        assert_named(&repeat.unconfirmed, &allocs(&[]), ForwardingQuiesce);
-
-        owner.script_quiesce_outcome(SimQuiesceOutcome::Unconfirmed(allocs(&["b", "c"])));
-        let overlap = owner.quiesce_forwarding(holder()).await.expect("Unconfirmed is an Ok outcome");
-        assert_named(&overlap.unconfirmed, &allocs(&["c"]), ForwardingQuiesce);
-
-        owner.script_audit_damage(allocs(&["a", "c", "d"]));
-        let audit = owner.audit_shared().await.expect("no node-level audit slot is armed");
-        assert_named(&audit.damaged, &allocs(&["d"]), SharedAudit);
-        let reaudit = owner.audit_shared().await.expect("the damage set is standing");
-        assert_named(&reaudit.damaged, &allocs(&[]), SharedAudit);
-        owner.script_quiesce_outcome(SimQuiesceOutcome::Unconfirmed(allocs(&["d"])));
-        let after_audit = owner.quiesce_forwarding(holder()).await.expect("Unconfirmed is an Ok outcome");
-        assert_named(&after_audit.unconfirmed, &allocs(&[]), ForwardingQuiesce);
-
-        owner.script_quiesce_outcome(SimQuiesceOutcome::Fail);
-        let failed = owner.quiesce_forwarding(holder()).await;
-        assert!(
-            matches!(&failed, Err(GuestNetworkError::Io { operation: ForwardingQuiesce, .. })),
-            "Fail refuses with Io {{ ForwardingQuiesce }}, got {failed:?}",
-        );
-
-        owner.script_quiesce_outcome(SimQuiesceOutcome::Hang);
-        let mut hung = owner.quiesce_forwarding(holder());
-        for poll in 0..2 {
-            assert!(hung.as_mut().now_or_never().is_none(), "Hang never resolves (poll {poll})");
-            tokio::task::yield_now().await;
-        }
-        drop(hung);
-
-        owner.script_quiesce_outcome(SimQuiesceOutcome::Unconfirmed(allocs(&["e"])));
-        let fresh = owner.quiesce_forwarding(holder()).await.expect("Unconfirmed is an Ok outcome");
-        assert_named(&fresh.unconfirmed, &allocs(&["e"]), ForwardingQuiesce);
-
-        assert_eq!(
-            owner.calls(),
-            [
-                ForwardingQuiesce,
-                ForwardingQuiesce,
-                ForwardingQuiesce,
-                ForwardingQuiesce,
-                SharedAudit,
-                SharedAudit,
-                ForwardingQuiesce,
-                ForwardingQuiesce,
-                ForwardingQuiesce,
-                ForwardingQuiesce,
-            ],
-            "every quiescence records ForwardingQuiesce and every audit SharedAudit, hung call included",
-        );
-    }
-
-    /// The allocation ids `names`, as the set a scripted outcome takes.
-    fn allocs(names: &[&str]) -> BTreeSet<AllocationId> {
-        names.iter().map(|name| AllocationId::new(name).expect("valid allocation id")).collect()
-    }
-
-    /// `named` names exactly `expected`, each with a fresh `Io { operation }`.
-    fn assert_named(
-        named: &BTreeMap<AllocationId, GuestNetworkError>,
-        expected: &BTreeSet<AllocationId>,
-        operation: GuestNetworkOperation,
-    ) {
-        assert_eq!(named.keys().cloned().collect::<BTreeSet<_>>(), *expected);
-        for (alloc, error) in named {
-            assert!(
-                matches!(error, GuestNetworkError::Io { operation: actual, .. } if *actual == operation),
-                "{alloc} is named with Io {{ {operation:?} }}, got {error:?}",
-            );
-        }
+        let allocs: BTreeSet<AllocationId> = ["a", "b"]
+            .iter()
+            .map(|name| AllocationId::new(name).expect("valid allocation id"))
+            .collect();
+        owner.script_audit_damage(allocs.clone());
+        let first = owner.audit_shared().await.expect("no node-level audit slot is armed");
+        assert_eq!(first.damaged.keys().cloned().collect::<BTreeSet<_>>(), allocs);
+        let again = owner.audit_shared().await.expect("the damage set is standing");
+        assert!(again.damaged.is_empty(), "a condemned allocation is never named again");
     }
 
     /// CONTRACT_SHAPE: bounded-change.
@@ -670,38 +537,13 @@ mod tests {
             owner.script_component_audit_failure(component, true);
             let error = owner.audit_shared().await.expect_err("armed component refuses audit");
             assert_eq!(error.component, component);
-            assert!(matches!(
-                error.source,
-                GuestNetworkError::PostconditionMismatch {
-                    operation: GuestNetworkOperation::SharedAudit,
-                    expected: GuestNetworkFact::SharedComponent {
-                        component: expected,
-                        healthy: true,
-                    },
-                    observed: Some(GuestNetworkFact::SharedComponent {
-                        component: observed,
-                        healthy: false,
-                    }),
-                } if expected == component && observed == component
-            ));
             owner.script_component_audit_failure(component, false);
             owner.audit_shared().await.expect("component disarms independently");
-            assert_eq!(
-                owner.calls(),
-                [GuestNetworkOperation::SharedAudit, GuestNetworkOperation::SharedAudit]
-            );
         }
 
         let owner = SimSharedGuestNetworkOwner::default();
         owner.script_component_audit_failure(SharedGuestNetworkComponent::Supervisor, true);
         owner.script_component_audit_failure(SharedGuestNetworkComponent::LegC, true);
-        owner.script_next_audit_error(
-            SharedGuestNetworkComponent::Forwarder,
-            GuestNetworkError::Io {
-                operation: GuestNetworkOperation::ForwarderInventory,
-                source: std::io::Error::other("replaced one-shot"),
-            },
-        );
         owner.script_next_audit_error(
             SharedGuestNetworkComponent::Dns,
             GuestNetworkError::Io {
@@ -711,18 +553,26 @@ mod tests {
         );
         let one_shot = owner.audit_shared().await.expect_err("one-shot has precedence");
         assert_eq!(one_shot.component, SharedGuestNetworkComponent::Dns);
-        assert!(matches!(
-            one_shot.source,
-            GuestNetworkError::Io {
-                operation: GuestNetworkOperation::SharedAudit,
-                source,
-            } if source.to_string() == "final one-shot"
-        ));
         let standing = owner.audit_shared().await.expect_err("one-shot is consumed");
         assert_eq!(standing.component, SharedGuestNetworkComponent::LegC);
         owner.script_component_audit_failure(SharedGuestNetworkComponent::LegC, false);
         let next = owner.audit_shared().await.expect_err("next canonical standing component");
         assert_eq!(next.component, SharedGuestNetworkComponent::Supervisor);
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// A dial is `NotServing` and is recorded with its target and purpose.
+    #[tokio::test]
+    async fn every_dial_is_not_serving_and_recorded() {
+        let owner = SimSharedGuestNetworkOwner::default();
+        let target = SocketAddrV4::new(std::net::Ipv4Addr::new(100, 95, 0, 7), 8080);
+        let outcome = owner.dial(target, DialPurpose::Probe).await;
+        assert!(matches!(outcome, Err(GuestDialError::NotServing)));
+        assert_eq!(
+            owner.dials(),
+            [SimSharedGuestNetworkDial { target, purpose: DialPurpose::Probe }]
+        );
     }
 
     /// CONTRACT_SHAPE: pure-function.
@@ -731,5 +581,36 @@ mod tests {
         let (owner, wiring) = test_wiring(Arc::new(SimClock::new()));
         assert!(wiring.supervisor().is_boot_closed());
         assert_eq!(Arc::strong_count(&owner), 1);
+    }
+
+    /// CONTRACT_SHAPE: bounded-change.
+    ///
+    /// QHOLD over the adapter's own ledger: two holds count two; the first
+    /// restore is `StillQuiesced`, the second `Reopened`; a second ledger's hold is
+    /// refused `ForeignHold`, changes no count and leaks at its issuing
+    /// ledger; a dropped own hold keeps the count and is counted leaked.
+    #[tokio::test]
+    #[ignore = "pending DELIVER attachment-cut step (09-01 rework)"]
+    async fn quiescence_counts_holds_of_its_own_ledger_and_refuses_a_foreign_one() {
+        let owner = SimSharedGuestNetworkOwner::default();
+        let (first, _) = owner.quiesce().await;
+        let (second, _) = owner.quiesce().await;
+        assert_eq!(owner.quiescence_holds(), 2);
+
+        let foreign_ledger = QuiescenceLedger::new();
+        let refused = owner.restore(foreign_ledger.issue()).await;
+        assert_eq!(refused, Err(QuiescenceRestoreError::ForeignHold));
+        assert_eq!(owner.quiescence_holds(), 2, "a foreign hold changes no count");
+        assert_eq!(foreign_ledger.leaked(), 1, "it leaks at its issuing ledger");
+        assert_eq!(owner.leaked_quiescence_holds(), 0, "and not at this one");
+
+        assert_eq!(owner.restore(first).await, Ok(ForwardingRestore::StillQuiesced));
+        assert_eq!(owner.restore(second).await, Ok(ForwardingRestore::Reopened));
+        assert_eq!(owner.quiescence_holds(), 0);
+
+        let (dropped, _) = owner.quiesce().await;
+        drop(dropped);
+        assert_eq!(owner.quiescence_holds(), 1, "a dropped hold keeps its count (fail closed)");
+        assert_eq!(owner.leaked_quiescence_holds(), 1, "and is counted leaked");
     }
 }

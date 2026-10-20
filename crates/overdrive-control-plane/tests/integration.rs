@@ -57,6 +57,7 @@ mod integration {
             let enforcement: Arc<dyn MtlsEnforcement> = Arc::new(SimMtlsEnforcement::new(
                 Arc::new(SimIdentityRead::new(BTreeMap::new(), None)),
                 MtlsLimits::default(),
+                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
             ));
             let resolve: Arc<dyn MtlsResolve> =
                 Arc::new(SimMtlsResolve::new(BTreeMap::new(), MtlsResolution::NonMesh));
@@ -80,9 +81,8 @@ mod integration {
         pub fn pool() -> Arc<GuestAddressPool> {
             Arc::new(GuestAddressPool::new(
                 ipnet::Ipv4Net::new_assert(Ipv4Addr::new(100, 95, 0, 0), 16),
-                "ovd-gbr0".to_owned(),
                 Ipv4Addr::new(100, 95, 0, 1),
-                Ipv4Addr::new(100, 95, 0, 1),
+                Arc::new(overdrive_sim::adapters::entropy::SimEntropy::new(0x295)),
             ))
         }
     }
@@ -94,6 +94,12 @@ mod integration {
     // integration binaries and the `lo`/`lo` shape cannot drift.
     #[path = "../common/dataplane_lo.rs"]
     pub mod dataplane_lo;
+
+    // GH #295 (NO-OVERRIDE-SEAMS, STORES-IN, PORTS-CONFIG, FWD-PREREQ) — the
+    // driven-adapter bundles every `serve` fixture boots over: the host
+    // bundle with the non-VM fixtures' simulations replaced by name.
+    #[path = "../common/node_adapters.rs"]
+    pub mod node_adapters;
 
     // Cross-file net-slot partitioning registry (SSOT). Every real-netns test
     // file draws its per-test `NetSlot` from a named, disjoint band here via
@@ -227,6 +233,14 @@ mod integration {
     /// refusal through `run_server_with_obs_and_driver` (G-295-1 rows 2 and 4).
     mod boot_member_clear_refusal;
 
+    /// GH #295 PORTS-CONFIG (ADR-0218) — kernel-assigned vsock listener
+    /// ports read back through `ServerHandle::vsock_ports`, held, and
+    /// distinct across two `serve`s on one host.
+    mod serve_kernel_assigned_vsock_ports;
+    // D-17 (GH #295): the through-`serve` owner observation cells (R5-57,
+    // R5-41) on native metal with guest-kit microVMs.
+    #[cfg(feature = "kvm-tests")]
+    mod guest_flow_through_serve;
     /// GH #295 S-ND295-00 — composed production-startup ordering and
     /// scratch-probe refusal through the accepted shared-owner port.
     mod shared_guest_network_startup;

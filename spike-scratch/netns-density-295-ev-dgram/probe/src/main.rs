@@ -1,0 +1,2755 @@
+//! dgprobe: V-EV-DGRAM spike harness (netns-density-295). Throwaway probe code, not production.
+//! One static binary, three roles:
+//!   dgprobe k <case,...|all>        Env 1 (single kernel, loopback vsock, QEMU): chain A -> S -> [fwd1] -> vsock -> [fwd2] -> U -> D and peer cases
+//!   dgprobe guest <case>            Env 2 guest side (Cloud Hypervisor guest, real vhost vsock, one forwarder pair in the guest)
+//!   dgprobe host  <case>            Env 2 host side: userspace framed peer on the physical host (no module on the host)
+//! Every case prints one JSON line {"ev":"case",...}. The module under test is /dev/evmod (evmod.c, datagram mode).
+#![allow(clippy::all, dead_code)]
+use std::collections::BTreeMap;
+use std::fs;
+use std::io;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
+use std::os::fd::{AsRawFd, RawFd};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::*};
+use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, Instant};
+
+const MAXP: usize = 59_000;
+const HDR: usize = 8;
+const CID_HOST: u32 = 2;
+const CID_LOCAL: u32 = 1;
+const FWD_PORT: u32 = 1240;
+const MIB: u64 = 1 << 20;
+
+// ------------------------------------------------------------------------------------------------ json
+struct J(Vec<String>);
+impl J {
+    fn new() -> J {
+        J(vec![])
+    }
+    fn s(mut self, k: &str, v: &str) -> J {
+        self.0.push(format!("\"{}\":\"{}\"", k, v.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', " ")));
+        self
+    }
+    fn n(mut self, k: &str, v: i64) -> J {
+        self.0.push(format!("\"{}\":{}", k, v));
+        self
+    }
+    fn f(mut self, k: &str, v: f64) -> J {
+        self.0.push(format!("\"{}\":{:.4}", k, v));
+        self
+    }
+    fn b(mut self, k: &str, v: bool) -> J {
+        self.0.push(format!("\"{}\":{}", k, v));
+        self
+    }
+    fn out(&self) -> String {
+        format!("{{{}}}", self.0.join(","))
+    }
+}
+fn result(env: &str, case: &str, pass: bool, d: J) {
+    println!("{{\"ev\":\"case\",\"env\":\"{}\",\"case\":\"{}\",\"pass\":{},\"detail\":{}}}", env, case, pass, d.out());
+}
+fn note(s: &str) {
+    println!("{{\"ev\":\"note\",\"t\":\"{}\"}}", s.replace('"', "'").replace('\n', " "));
+}
+
+// ------------------------------------------------------------------------------------------------ low level
+fn errno() -> i32 {
+    io::Error::last_os_error().raw_os_error().unwrap_or(0)
+}
+fn setopt<T>(fd: RawFd, lvl: i32, opt: i32, v: &T) -> i32 {
+    unsafe { libc::setsockopt(fd, lvl, opt, v as *const T as *const libc::c_void, std::mem::size_of::<T>() as u32) }
+}
+fn rcvbuf_force(fd: RawFd, bytes: i32) {
+    setopt(fd, libc::SOL_SOCKET, libc::SO_RCVBUFFORCE, &bytes);
+}
+/// SO_MEMINFO: [rmem_alloc, rcvbuf, wmem_alloc, sndbuf, fwd_alloc, wmem_queued, optmem, backlog, drops]
+fn meminfo(fd: RawFd) -> [u32; 9] {
+    let mut a = [0u32; 9];
+    let mut l = 36u32;
+    unsafe { libc::getsockopt(fd, libc::SOL_SOCKET, 55, a.as_mut_ptr() as *mut libc::c_void, &mut l) };
+    a
+}
+fn sk_drops(fd: RawFd) -> u64 {
+    meminfo(fd)[8] as u64
+}
+fn rmem(fd: RawFd) -> u64 {
+    meminfo(fd)[0] as u64
+}
+fn mono_ms() -> u64 {
+    let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+    unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
+    ts.tv_sec as u64 * 1000 + ts.tv_nsec as u64 / 1_000_000
+}
+fn sleep_us(us: u64) {
+    thread::sleep(Duration::from_micros(us));
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct SockaddrVm {
+    family: u16,
+    reserved1: u16,
+    port: u32,
+    cid: u32,
+    flags: u8,
+    zero: [u8; 3],
+}
+fn vm_addr(cid: u32, port: u32) -> SockaddrVm {
+    SockaddrVm { family: 40, reserved1: 0, port, cid, flags: 0, zero: [0; 3] }
+}
+fn vs_sock() -> RawFd {
+    let fd = unsafe { libc::socket(40, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0) };
+    assert!(fd >= 0, "vsock socket: errno {}", errno());
+    fd
+}
+fn vs_listen(port: u32, bufsz: Option<u64>) -> RawFd {
+    let fd = vs_sock();
+    if let Some(b) = bufsz {
+        assert_eq!(setopt(fd, 40, 0, &b), 0, "SO_VM_SOCKETS_BUFFER_SIZE errno {}", errno());
+    }
+    let a = vm_addr(0xFFFF_FFFF, port);
+    let r = unsafe { libc::bind(fd, &a as *const _ as *const libc::sockaddr, 16) };
+    assert_eq!(r, 0, "vsock bind errno {}", errno());
+    assert_eq!(unsafe { libc::listen(fd, 128) }, 0);
+    fd
+}
+fn vs_connect(cid: u32, port: u32) -> Result<RawFd, i32> {
+    let fd = vs_sock();
+    let a = vm_addr(cid, port);
+    let r = unsafe { libc::connect(fd, &a as *const _ as *const libc::sockaddr, 16) };
+    if r != 0 {
+        let e = errno();
+        unsafe { libc::close(fd) };
+        return Err(e);
+    }
+    Ok(fd)
+}
+fn vs_accept(l: RawFd) -> RawFd {
+    let fd = unsafe { libc::accept4(l, std::ptr::null_mut(), std::ptr::null_mut(), libc::SOCK_CLOEXEC) };
+    assert!(fd >= 0, "vsock accept errno {}", errno());
+    fd
+}
+fn close(fd: RawFd) {
+    unsafe { libc::close(fd) };
+}
+fn udp_bind(last: u8) -> UdpSocket {
+    UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, last), 0)).expect("udp bind")
+}
+fn v4(a: SocketAddr) -> SocketAddrV4 {
+    match a {
+        SocketAddr::V4(x) => x,
+        _ => panic!("v4"),
+    }
+}
+fn udp_disconnect(s: &UdpSocket) {
+    let mut a: libc::sockaddr = unsafe { std::mem::zeroed() };
+    a.sa_family = libc::AF_UNSPEC as u16;
+    let r = unsafe { libc::connect(s.as_raw_fd(), &a, std::mem::size_of::<libc::sockaddr>() as u32) };
+    assert_eq!(r, 0, "udp disconnect errno {}", errno());
+}
+
+// ------------------------------------------------------------------------------------------------ evmod control
+#[repr(C)]
+struct EvAttach {
+    fd_a: i32,
+    fd_b: i32,
+    flags: u32,
+    id: u32,
+}
+const EVMOD_ATTACH: u64 = 0xC010_4501; // _IOWR('E', 1, struct evmod_attach)
+const EVMOD_DETACH: u64 = 0x4004_4502; // _IOW('E', 2, __u32)
+struct Ev {
+    fd: RawFd,
+}
+impl Ev {
+    fn open() -> Ev {
+        let p = std::ffi::CString::new("/dev/evmod").unwrap();
+        let fd = unsafe { libc::open(p.as_ptr(), libc::O_RDWR | libc::O_CLOEXEC) };
+        assert!(fd >= 0, "open /dev/evmod errno {}", errno());
+        Ev { fd }
+    }
+    /// mode 1: UDP half = fd_a; mode 2: UDP half = fd_b; mode 0: stream pair
+    fn attach(&self, a: RawFd, b: RawFd, mode: u32) -> Result<u32, i32> {
+        let mut x = EvAttach { fd_a: a, fd_b: b, flags: mode, id: 0 };
+        let floor = next_end_seq();
+        let r = unsafe { libc::ioctl(self.fd, EVMOD_ATTACH as _, &mut x as *mut EvAttach) };
+        if r < 0 {
+            Err(errno())
+        } else {
+            FLOORS.lock().unwrap().insert(x.id, floor);
+            Ok(x.id)
+        }
+    }
+    fn detach(&self, id: u32) -> Result<(), i32> {
+        let r = unsafe { libc::ioctl(self.fd, EVMOD_DETACH as _, &id as *const u32) };
+        if r < 0 {
+            Err(errno())
+        } else {
+            Ok(())
+        }
+    }
+}
+fn evstats() -> BTreeMap<String, i64> {
+    let t = fs::read_to_string("/proc/evmod").unwrap_or_default();
+    t.split_whitespace().filter_map(|kv| kv.split_once('=')).filter_map(|(k, v)| v.parse::<i64>().ok().map(|v| (k.to_string(), v))).collect()
+}
+fn dstat(a: &BTreeMap<String, i64>, b: &BTreeMap<String, i64>, k: &str) -> i64 {
+    b.get(k).copied().unwrap_or(0) - a.get(k).copied().unwrap_or(0)
+}
+#[derive(Debug, Clone, Default)]
+struct End {
+    seq: u64,
+    id: u32,
+    kind: u32,
+    cause: u32,
+    side: u32,
+    errno: i32,
+    ab: u64,
+    ba: u64,
+}
+fn evends() -> Vec<End> {
+    fs::read_to_string("/proc/evmod_ends")
+        .unwrap_or_default()
+        .lines()
+        .map(|l| {
+            let m: BTreeMap<&str, &str> = l.split_whitespace().filter_map(|kv| kv.split_once('=')).collect();
+            let g = |k: &str| m.get(k).and_then(|v| v.parse::<i64>().ok()).unwrap_or(0);
+            End { seq: g("seq") as u64, id: g("id") as u32, kind: g("kind") as u32, cause: g("cause") as u32, side: g("side") as u32, errno: g("errno") as i32, ab: g("moved_ab") as u64, ba: g("moved_ba") as u64 }
+        })
+        .collect()
+}
+/// the module's pair ids are reused after a pair ended (spike stand-in; the contract's ids are never reused), so an end record is only
+/// meaningful if it was written after the attach that returned the id: FLOORS maps id -> first end-record sequence number allowed
+static FLOORS: std::sync::Mutex<BTreeMap<u32, u64>> = std::sync::Mutex::new(BTreeMap::new());
+fn next_end_seq() -> u64 {
+    evends().last().map(|e| e.seq + 1).unwrap_or(0)
+}
+fn end_of(id: u32) -> Option<End> {
+    let floor = FLOORS.lock().unwrap().get(&id).copied().unwrap_or(0);
+    evends().into_iter().rev().find(|e| e.id == id && e.seq >= floor)
+}
+fn end_str(e: &Option<End>) -> String {
+    match e {
+        None => "none".into(),
+        Some(e) => format!("id={} kind={} cause={} side={} errno={} ab={} ba={}", e.id, e.kind, e.cause, e.side, e.errno, e.ab, e.ba),
+    }
+}
+fn wait_end(id: u32, ms: u64) -> Option<End> {
+    let t = Instant::now();
+    loop {
+        if let Some(e) = end_of(id) {
+            return Some(e);
+        }
+        if t.elapsed() > Duration::from_millis(ms) {
+            return None;
+        }
+        sleep_us(2000);
+    }
+}
+fn set_param(name: &str, v: i32) {
+    fs::write(format!("/sys/module/evmod/parameters/{name}"), format!("{v}")).unwrap_or_else(|e| panic!("set evmod param {name}: {e}"));
+}
+fn set_dgfault(v: i32) {
+    set_param("dgfault", v);
+}
+
+// ------------------------------------------------------------------------------------------------ system sampling
+fn meminfo_kb(keys: &[&str]) -> Vec<u64> {
+    let t = fs::read_to_string("/proc/meminfo").unwrap_or_default();
+    keys.iter().map(|k| t.lines().find(|l| l.starts_with(k)).and_then(|l| l.split_whitespace().nth(1)).and_then(|v| v.parse().ok()).unwrap_or(0)).collect()
+}
+struct Sampler {
+    stop: Arc<AtomicBool>,
+    h: Option<thread::JoinHandle<Vec<[u64; 5]>>>,
+}
+/// pages of UDP socket memory (/proc/net/sockstat "UDP: inuse N mem M"): the precise accounting of what the UDP queues hold
+fn udp_mem_pages() -> u64 {
+    fs::read_to_string("/proc/net/sockstat")
+        .unwrap_or_default()
+        .lines()
+        .find(|l| l.starts_with("UDP:"))
+        .and_then(|l| l.split_whitespace().skip_while(|w| *w != "mem").nth(1).and_then(|v| v.parse().ok()))
+        .unwrap_or(0)
+}
+fn sample_row(t0: u64) -> [u64; 5] {
+    let m = meminfo_kb(&["MemAvailable:", "SUnreclaim:", "Slab:"]);
+    [mono_ms() - t0, m[0], m[1], m[2], udp_mem_pages()]
+}
+fn sampler_start(period_ms: u64) -> Sampler {
+    let stop = Arc::new(AtomicBool::new(false));
+    let s2 = stop.clone();
+    let h = thread::spawn(move || {
+        let mut v = vec![];
+        let t0 = mono_ms();
+        while !s2.load(Relaxed) {
+            v.push(sample_row(t0));
+            thread::sleep(Duration::from_millis(period_ms));
+        }
+        v.push(sample_row(t0));
+        v
+    });
+    Sampler { stop, h: Some(h) }
+}
+/// samples, MemAvailable spread KiB, SUnreclaim spread KiB, Slab spread KiB, peak UDP socket memory in pages
+type Mem = (usize, u64, u64, u64, u64);
+impl Sampler {
+    fn finish(mut self) -> Mem {
+        self.stop.store(true, Relaxed);
+        let v = self.h.take().unwrap().join().unwrap();
+        let spread = |i: usize| v.iter().map(|x| x[i]).max().unwrap_or(0) - v.iter().map(|x| x[i]).min().unwrap_or(0);
+        (v.len(), spread(1), spread(2), spread(3), v.iter().map(|x| x[4]).max().unwrap_or(0))
+    }
+}
+/// /proc/net/snmp "Udp:" counters (InDatagrams NoPorts InErrors OutDatagrams RcvbufErrors SndbufErrors ...)
+fn udp_snmp() -> BTreeMap<String, u64> {
+    let t = fs::read_to_string("/proc/net/snmp").unwrap_or_default();
+    let mut it = t.lines().filter(|l| l.starts_with("Udp:"));
+    let (h, v) = (it.next().unwrap_or(""), it.next().unwrap_or(""));
+    h.split_whitespace().skip(1).zip(v.split_whitespace().skip(1)).filter_map(|(k, v)| v.parse::<u64>().ok().map(|v| (k.to_string(), v))).collect()
+}
+fn snmp_d(a: &BTreeMap<String, u64>, b: &BTreeMap<String, u64>, k: &str) -> i64 {
+    b.get(k).copied().unwrap_or(0) as i64 - a.get(k).copied().unwrap_or(0) as i64
+}
+fn cpu_jiffies() -> (u64, u64) {
+    // (busy, total) summed over all CPUs; busy = everything but idle and iowait
+    let t = fs::read_to_string("/proc/stat").unwrap_or_default();
+    let l = t.lines().next().unwrap_or("");
+    let v: Vec<u64> = l.split_whitespace().skip(1).filter_map(|x| x.parse().ok()).collect();
+    let total: u64 = v.iter().sum();
+    let idle = v.get(3).copied().unwrap_or(0) + v.get(4).copied().unwrap_or(0);
+    (total - idle, total)
+}
+
+// ------------------------------------------------------------------------------------------------ plans, patterns, verification
+const K1: u64 = 0x9E37_79B9_7F4A_7C15;
+const K2: u64 = 0xD1B5_4A32_D192_ED03;
+fn splitmix(mut z: u64) -> u64 {
+    z = z.wrapping_add(K1);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+#[derive(Clone)]
+enum Kind {
+    Fixed(usize),
+    Mixed,
+    Seq(Vec<usize>),
+    /// fixed length, sequence number in the first 8 bytes, a constant tail (cheap to generate and to check; used where loss is legal)
+    Stamp(usize),
+}
+#[derive(Clone)]
+struct Plan {
+    seed: u64,
+    n: u64,
+    kind: Kind,
+}
+impl Plan {
+    fn fixed(seed: u64, n: u64, l: usize) -> Plan {
+        Plan { seed, n, kind: Kind::Fixed(l) }
+    }
+    fn mixed(seed: u64, n: u64) -> Plan {
+        Plan { seed, n, kind: Kind::Mixed }
+    }
+    fn len(&self, i: u64) -> usize {
+        match &self.kind {
+            Kind::Fixed(l) | Kind::Stamp(l) => *l,
+            Kind::Seq(v) => v[(i as usize) % v.len()],
+            Kind::Mixed => {
+                let r = splitmix(self.seed ^ i.wrapping_mul(K2));
+                match r % 20 {
+                    0 | 1 => 0,
+                    2 => 1,
+                    3 => 1431,
+                    4 => 4096,
+                    5 => 4097,
+                    6 => MAXP,
+                    7 => 7,
+                    8 => 8,
+                    9 => 9,
+                    _ => 1 + ((r >> 8) % MAXP as u64) as usize,
+                }
+            }
+        }
+    }
+    /// datagram i: len >= 8 carries i in its first 8 bytes (LE); every other word is position dependent
+    fn fill(&self, i: u64, out: &mut Vec<u8>) {
+        let l = self.len(i);
+        out.clear();
+        out.resize(l, 0);
+        if let Kind::Stamp(_) = self.kind {
+            for (j, b) in out.iter_mut().enumerate() {
+                *b = (self.seed as u8).wrapping_add(j as u8);
+            }
+            if l >= 8 {
+                out[..8].copy_from_slice(&i.to_le_bytes());
+            }
+            return;
+        }
+        let base = self.seed ^ i.wrapping_mul(K1);
+        let (mut o, mut w) = (0usize, 0u64);
+        while o + 8 <= l {
+            let v = if o == 0 { i } else { base.wrapping_add(w.wrapping_mul(K2)) };
+            out[o..o + 8].copy_from_slice(&v.to_le_bytes());
+            o += 8;
+            w += 1;
+        }
+        if o < l {
+            let v = base.wrapping_add(w.wrapping_mul(K2)).to_le_bytes();
+            let r = l - o;
+            out[o..].copy_from_slice(&v[..r]);
+        }
+    }
+    fn count_empty(&self) -> u64 {
+        (0..self.n).filter(|&i| self.len(i) == 0).count() as u64
+    }
+}
+#[derive(Default, Clone)]
+struct VerOut {
+    ok: u64,
+    lost: u64,
+    reorder: u64,
+    corrupt: u64,
+    extra: u64,
+    bytes: u64,
+    errs: Vec<String>,
+}
+impl VerOut {
+    fn clean(&self, n: u64) -> bool {
+        self.ok == n && self.lost == 0 && self.reorder == 0 && self.corrupt == 0 && self.extra == 0
+    }
+    fn j(&self, p: &str, mut j: J) -> J {
+        j = j.n(&format!("{p}ok"), self.ok as i64).n(&format!("{p}lost"), self.lost as i64).n(&format!("{p}reorder_dup"), self.reorder as i64);
+        j = j.n(&format!("{p}corrupt"), self.corrupt as i64).n(&format!("{p}extra"), self.extra as i64);
+        if !self.errs.is_empty() {
+            j = j.s(&format!("{p}errs"), &self.errs.join(" | "));
+        }
+        j
+    }
+}
+struct Ver {
+    plan: Plan,
+    next: u64,
+    scratch: Vec<u8>,
+    o: VerOut,
+}
+impl Ver {
+    fn new(plan: Plan) -> Ver {
+        Ver { plan, next: 0, scratch: vec![], o: VerOut::default() }
+    }
+    fn err(&mut self, s: String) {
+        if self.o.errs.len() < 5 {
+            self.o.errs.push(s);
+        }
+    }
+    /// strict in-order, exactly-once check of the next expected datagram; classifies a mismatch using the embedded sequence number
+    fn feed(&mut self, d: &[u8]) {
+        self.o.bytes += d.len() as u64;
+        if self.next >= self.plan.n {
+            self.o.extra += 1;
+            self.err(format!("extra datagram len {} after the plan ended", d.len()));
+            return;
+        }
+        let want = self.next;
+        self.plan.fill(want, &mut self.scratch);
+        if d == &self.scratch[..] {
+            self.o.ok += 1;
+            self.next += 1;
+            return;
+        }
+        if d.len() >= 8 {
+            let s = u64::from_le_bytes(d[..8].try_into().unwrap());
+            if s > want && s < self.plan.n {
+                self.plan.fill(s, &mut self.scratch);
+                if d == &self.scratch[..] {
+                    self.o.lost += s - want;
+                    self.o.ok += 1;
+                    self.next = s + 1;
+                    self.err(format!("gap: expected #{want} got #{s}"));
+                    return;
+                }
+            } else if s < want {
+                self.o.reorder += 1;
+                self.err(format!("dup/reorder: expected #{want} got #{s}"));
+                return;
+            }
+        }
+        self.o.corrupt += 1;
+        self.err(format!("corrupt/split/merge: expected #{want} len {} got len {}", self.plan.len(want), d.len()));
+        self.next += 1;
+    }
+    /// finish: datagrams never delivered count as lost
+    fn finish(mut self) -> VerOut {
+        if self.next < self.plan.n {
+            self.o.lost += self.plan.n - self.next;
+        }
+        self.o
+    }
+}
+
+/// lossy-legal verifier for Kind::Stamp: sequence strictly increasing, tail intact; gaps are counted, duplicates and reorders are errors
+struct MonoVer {
+    plan: Plan,
+    last: Option<u64>,
+    scratch: Vec<u8>,
+    ok: u64,
+    gaps: u64,
+    dup: u64,
+    corrupt: u64,
+}
+impl MonoVer {
+    fn new(plan: Plan) -> MonoVer {
+        MonoVer { plan, last: None, scratch: vec![], ok: 0, gaps: 0, dup: 0, corrupt: 0 }
+    }
+    fn feed(&mut self, d: &[u8]) {
+        if d.len() < 8 || d.len() != self.plan.len(0) {
+            self.corrupt += 1;
+            return;
+        }
+        let s = u64::from_le_bytes(d[..8].try_into().unwrap());
+        self.plan.fill(s, &mut self.scratch);
+        if d != &self.scratch[..] {
+            self.corrupt += 1;
+            return;
+        }
+        match self.last {
+            Some(l) if s <= l => self.dup += 1,
+            Some(l) => {
+                self.gaps += s - l - 1;
+                self.ok += 1;
+                self.last = Some(s);
+            }
+            None => {
+                self.gaps += s;
+                self.ok += 1;
+                self.last = Some(s);
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------------------------ framed userspace peer
+#[derive(Clone, Debug)]
+enum Rd {
+    Fast,
+    Slow { chunk: usize, us: u64 },
+    Stall { ms: u64 },
+}
+#[derive(Clone, Debug)]
+enum Wr {
+    Whole,
+    Chunks { max: usize, us: u64 },
+}
+#[derive(Default, Clone)]
+struct PeerOut {
+    rx: VerOut,
+    gaps: u64,
+    frame_err: Option<String>,
+    eof: bool,
+    read_errno: i32,
+    tx_sent: u64,
+    tx_err: i32,
+    ms: u64,
+    peak_unread: u64,
+    buf_effective: u64,
+}
+fn pollin(fd: RawFd, ms: i32) -> bool {
+    let mut p = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+    let r = unsafe { libc::poll(&mut p, 1, ms) };
+    r > 0
+}
+fn write_all(fd: RawFd, mut b: &[u8]) -> Result<(), i32> {
+    while !b.is_empty() {
+        let r = unsafe { libc::send(fd, b.as_ptr() as *const libc::c_void, b.len(), libc::MSG_NOSIGNAL) };
+        if r < 0 {
+            let e = errno();
+            if e == libc::EINTR {
+                continue;
+            }
+            return Err(e);
+        }
+        b = &b[r as usize..];
+    }
+    Ok(())
+}
+/// Read frames from the vsock and verify them against `plan` (strict) or `mono` (lossy). Stops at EOF, after the plan completed
+/// (plus a 300 ms grace for extras) or after `idle` without data.
+fn peer_rx(fd: RawFd, plan: &Plan, lossy: bool, rd: &Rd, idle: Duration) -> PeerOut {
+    let mut out = PeerOut::default();
+    let t0 = Instant::now();
+    let mut ver = Ver::new(plan.clone());
+    let mut mono = MonoVer::new(plan.clone());
+    let mut acc: Vec<u8> = Vec::with_capacity(1 << 18);
+    let mut off = 0usize;
+    let mut tmp = vec![0u8; 1 << 17];
+    if let Rd::Stall { ms } = rd {
+        thread::sleep(Duration::from_millis(*ms));
+    }
+    let mut last = Instant::now();
+    let mut done_at: Option<Instant> = None;
+    loop {
+        let count = if lossy { mono.ok + mono.dup + mono.corrupt } else { ver.o.ok + ver.o.corrupt + ver.o.reorder + ver.o.extra };
+        if !lossy && ver.next >= plan.n && done_at.is_none() {
+            done_at = Some(Instant::now());
+        }
+        if let Some(d) = done_at {
+            if d.elapsed() > Duration::from_millis(300) {
+                break;
+            }
+        }
+        if last.elapsed() > idle {
+            break;
+        }
+        let _ = count;
+        if !pollin(fd, 100) {
+            continue;
+        }
+        let want = match rd {
+            Rd::Slow { chunk, .. } => (*chunk).min(tmp.len()),
+            _ => tmp.len(),
+        };
+        let r = unsafe { libc::read(fd, tmp.as_mut_ptr() as *mut libc::c_void, want) };
+        if r == 0 {
+            out.eof = true;
+            break;
+        }
+        if r < 0 {
+            let e = errno();
+            if e == libc::EINTR || e == libc::EAGAIN {
+                continue;
+            }
+            out.read_errno = e;
+            out.eof = true;
+            break;
+        }
+        last = Instant::now();
+        acc.extend_from_slice(&tmp[..r as usize]);
+        loop {
+            let avail = acc.len() - off;
+            if avail < HDR {
+                break;
+            }
+            if &acc[off..off + 4] != b"OVD1" {
+                out.frame_err = Some(format!("bad magic {:02x?}", &acc[off..off + 4]));
+                break;
+            }
+            let len = u32::from_be_bytes(acc[off + 4..off + 8].try_into().unwrap()) as usize;
+            if len > MAXP {
+                out.frame_err = Some(format!("length {len} above the bound"));
+                break;
+            }
+            if avail < HDR + len {
+                break;
+            }
+            let payload = &acc[off + HDR..off + HDR + len];
+            if lossy {
+                mono.feed(payload);
+            } else {
+                ver.feed(payload);
+            }
+            off += HDR + len;
+        }
+        if out.frame_err.is_some() {
+            break;
+        }
+        if off > (1 << 20) {
+            acc.drain(..off);
+            off = 0;
+        }
+        out.peak_unread = out.peak_unread.max((acc.len() - off) as u64);
+        if let Rd::Slow { us, .. } = rd {
+            sleep_us(*us);
+        }
+    }
+    out.ms = t0.elapsed().as_millis() as u64;
+    if lossy {
+        out.rx = VerOut { ok: mono.ok, lost: mono.gaps, reorder: mono.dup, corrupt: mono.corrupt, ..Default::default() };
+        out.gaps = mono.gaps;
+    } else {
+        out.rx = ver.finish();
+    }
+    out
+}
+/// Write frames of `plan` to the vsock. `inject` writes raw bytes after frame k and stops. `rate` caps bytes/s.
+fn peer_tx(fd: RawFd, plan: &Plan, wr: &Wr, rate: Option<u64>, inject: Option<(u64, Vec<u8>)>, shut: bool) -> (u64, i32) {
+    let mut buf = vec![];
+    let mut frame = Vec::with_capacity(MAXP + HDR);
+    let t0 = Instant::now();
+    let mut bytes = 0u64;
+    let mut k = 0u64;
+    let mut sent = 0u64;
+    let mut err = 0;
+    'outer: for i in 0..plan.n {
+        plan.fill(i, &mut buf);
+        frame.clear();
+        frame.extend_from_slice(b"OVD1");
+        frame.extend_from_slice(&(buf.len() as u32).to_be_bytes());
+        frame.extend_from_slice(&buf);
+        match wr {
+            Wr::Whole => {
+                if let Err(e) = write_all(fd, &frame) {
+                    err = e;
+                    break 'outer;
+                }
+            }
+            Wr::Chunks { max, us } => {
+                let mut o = 0;
+                while o < frame.len() {
+                    k += 1;
+                    let r = splitmix(plan.seed ^ k);
+                    let mut n = 1 + (r % *max as u64) as usize;
+                    if o == 0 && r % 3 == 0 {
+                        n = 1 + ((r >> 8) % 7) as usize; // split the 8-byte header
+                    }
+                    let n = n.min(frame.len() - o);
+                    if let Err(e) = write_all(fd, &frame[o..o + n]) {
+                        err = e;
+                        break 'outer;
+                    }
+                    o += n;
+                    if *us > 0 {
+                        sleep_us(*us);
+                    }
+                }
+            }
+        }
+        sent += 1;
+        bytes += frame.len() as u64;
+        if let Some((after, raw)) = &inject {
+            if i == *after {
+                if let Err(e) = write_all(fd, raw) {
+                    err = e;
+                }
+                break 'outer;
+            }
+        }
+        if let Some(r) = rate {
+            let want = Duration::from_micros(bytes * 1_000_000 / r.max(1));
+            let el = t0.elapsed();
+            if want > el {
+                thread::sleep(want - el);
+            }
+        }
+    }
+    if shut && err == 0 {
+        unsafe { libc::shutdown(fd, libc::SHUT_WR) };
+    }
+    (sent, err)
+}
+
+// ------------------------------------------------------------------------------------------------ guest-side application helpers
+/// Send `plan` from app socket `a`. `target` None = connected socket. Paces on the slot socket's receive-queue occupancy.
+fn app_send(a: &UdpSocket, plan: &Plan, target: Option<SocketAddrV4>, pace_fd: Option<RawFd>, max_rmem: u64, oversize_every: Option<u64>, dl: Instant) -> (u64, u64, u64) {
+    let (mut sent, mut errs, mut big) = (0u64, 0u64, 0u64);
+    let mut buf = vec![];
+    let sizes = [59_001usize, 60_000, 65_000, 65_507];
+    let ob = vec![0xA5u8; 65_507];
+    for i in 0..plan.n {
+        if let Some(fd) = pace_fd {
+            while rmem(fd) > max_rmem && Instant::now() < dl {
+                sleep_us(50);
+            }
+        }
+        plan.fill(i, &mut buf);
+        let r = match target {
+            Some(t) => a.send_to(&buf, t),
+            None => a.send(&buf),
+        };
+        match r {
+            Ok(_) => sent += 1,
+            Err(_) => errs += 1,
+        }
+        if let Some(e) = oversize_every {
+            if i % e == e - 1 {
+                let sz = sizes[(i / e) as usize % sizes.len()];
+                let r = match target {
+                    Some(t) => a.send_to(&ob[..sz], t),
+                    None => a.send(&ob[..sz]),
+                };
+                if r.is_ok() {
+                    big += 1;
+                } else {
+                    errs += 1;
+                }
+            }
+        }
+        if Instant::now() > dl {
+            break;
+        }
+    }
+    (sent, errs, big)
+}
+/// Receive `plan.n` datagrams on `a`, strict check. Returns the verification and the set of observed source addresses.
+fn app_recv(a: &UdpSocket, plan: &Plan, lossy: bool, to: Duration) -> (VerOut, u64, BTreeMap<String, u64>) {
+    a.set_read_timeout(Some(to)).unwrap();
+    let mut ver = Ver::new(plan.clone());
+    let mut mono = MonoVer::new(plan.clone());
+    let mut srcs: BTreeMap<String, u64> = BTreeMap::new();
+    let mut buf = vec![0u8; 65_536];
+    let mut got = 0u64;
+    while got < plan.n {
+        match a.recv_from(&mut buf) {
+            Ok((n, src)) => {
+                *srcs.entry(src.to_string()).or_insert(0) += 1;
+                got += 1;
+                if lossy {
+                    mono.feed(&buf[..n]);
+                } else {
+                    ver.feed(&buf[..n]);
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    if lossy {
+        (VerOut { ok: mono.ok, lost: mono.gaps, reorder: mono.dup, corrupt: mono.corrupt, ..Default::default() }, mono.gaps, srcs)
+    } else {
+        (ver.finish(), 0, srcs)
+    }
+}
+
+// ------------------------------------------------------------------------------------------------ peer-style cases (Env 1 and Env 2)
+#[derive(Clone)]
+struct PSpec {
+    name: String,
+    g2h: Option<Plan>,
+    h2g: Option<Plan>,
+    lossy: bool,
+    rd: Rd,
+    wr: Wr,
+    bufsz: Option<u64>,
+    rate: Option<u64>,
+    connected: bool,
+    oversize_every: Option<u64>,
+    inject: Option<(u64, Vec<u8>)>,
+    shut: bool,
+    blast_ms: Option<u64>,
+    self_end: bool,
+    idle_s: u64,
+}
+fn pspec(name: &str) -> PSpec {
+    let mut s = PSpec {
+        name: name.to_string(),
+        g2h: None,
+        h2g: None,
+        lossy: false,
+        rd: Rd::Fast,
+        wr: Wr::Whole,
+        bufsz: None,
+        rate: Some(150 * MIB),
+        connected: false,
+        oversize_every: None,
+        inject: None,
+        shut: false,
+        blast_ms: None,
+        self_end: false,
+        idle_s: 6,
+    };
+    let parts: Vec<&str> = name.split('-').collect();
+    match parts[0] {
+        "sizes" => {
+            let l: usize = parts[1].parse().unwrap();
+            let n = if l >= 40_000 { 300 } else { 1500 };
+            s.g2h = Some(Plan::fixed(31, n, l));
+            s.h2g = Some(Plan::fixed(32, n, l));
+            s.connected = parts[2] == "c";
+        }
+        "mixed" => {
+            s.g2h = Some(Plan::mixed(41, 10_000));
+            s.h2g = Some(Plan::mixed(42, 10_000));
+            s.connected = parts[1] == "c";
+        }
+        "credit" => {
+            s.bufsz = Some(65_536);
+            s.rd = Rd::Slow { chunk: 4096, us: 300 };
+            s.g2h = Some(Plan::mixed(51, 1500));
+        }
+        "chunked" => {
+            s.wr = Wr::Chunks { max: 5000, us: 20 };
+            s.h2g = Some(Plan::mixed(61, 1200));
+            s.rate = None;
+        }
+        "oversize" => {
+            s.g2h = Some(Plan { seed: 71, n: 200, kind: Kind::Seq(vec![0, 1, 100, 1431, 59_000, 8, 4097]) });
+            s.oversize_every = Some(10);
+        }
+        "badframe" => {
+            s.h2g = Some(Plan::fixed(81, 10, 1431));
+            let mut raw = b"OVD1".to_vec();
+            if parts[1] == "len" {
+                raw.extend_from_slice(&59_001u32.to_be_bytes());
+            } else {
+                raw = b"XXXX".to_vec();
+                raw.extend_from_slice(&100u32.to_be_bytes());
+            }
+            s.inject = Some((9, raw));
+            s.self_end = true;
+            s.rate = None;
+        }
+        "truncated" => {
+            s.h2g = Some(Plan::fixed(95, 3, 1431));
+            let mut raw = b"OVD1".to_vec();
+            raw.extend_from_slice(&1431u32.to_be_bytes());
+            raw.extend_from_slice(&[0x77u8; 700]);
+            s.inject = Some((2, raw));
+            s.shut = true;
+            s.self_end = true;
+            s.rate = None;
+        }
+        "truncatedhdr" => {
+            s.h2g = Some(Plan::fixed(96, 3, 1431));
+            s.inject = Some((2, b"OVD1\x00".to_vec()));
+            s.shut = true;
+            s.self_end = true;
+            s.rate = None;
+        }
+        "eof" => {
+            s.h2g = Some(Plan::fixed(91, 20, 100));
+            s.shut = true;
+            s.self_end = true;
+            s.rate = None;
+        }
+        "stall" => {
+            s.lossy = true;
+            s.g2h = Some(Plan { seed: 101, n: u64::MAX, kind: Kind::Stamp(1431) });
+            s.rd = Rd::Stall { ms: 10_000 };
+            s.blast_ms = Some(10_000);
+            s.idle_s = 4;
+        }
+        _ => panic!("unknown case {name}"),
+    }
+    s
+}
+#[derive(Default)]
+struct GuestOut {
+    sent: u64,
+    send_errs: u64,
+    big_sent: u64,
+    h2g: VerOut,
+    srcs: BTreeMap<String, u64>,
+    drops_s: u64,
+    drops_a: u64,
+    st: BTreeMap<String, i64>,
+    end: Option<End>,
+    mem: Mem,
+    ms: u64,
+    s_rmem_end: u64,
+    attach_errno: i32,
+    forced_detach: bool,
+    rcvbuf_errors: i64,
+    sndbuf_errors: i64,
+}
+fn s_stats_delta(a: &BTreeMap<String, i64>, b: &BTreeMap<String, i64>) -> BTreeMap<String, i64> {
+    ["dg_ab", "dg_ba", "dg_ab_bytes", "dg_ba_bytes", "dg_empty", "dg_oversize", "dg_partial", "dg_wait", "dg_invalid", "dg_trunc", "stall_dst", "stall_src", "err", "aborted", "completed", "short_consume"]
+        .iter()
+        .map(|k| (k.to_string(), dstat(a, b, k)))
+        .collect()
+}
+/// The guest-side application + the forwarder pair over `vg` (a connected vsock to the framed peer).
+fn guest_side(ev: &Ev, spec: &PSpec, vg: RawFd) -> GuestOut {
+    let mut g = GuestOut::default();
+    let a = udp_bind(1);
+    let s = udp_bind(2);
+    s.connect(a.local_addr().unwrap()).unwrap();
+    let s_addr = v4(s.local_addr().unwrap());
+    rcvbuf_force(a.as_raw_fd(), (128 * MIB) as i32);
+    rcvbuf_force(s.as_raw_fd(), if spec.blast_ms.is_some() { 212_992 } else { (32 * MIB) as i32 });
+    if spec.connected {
+        a.connect(s_addr).unwrap();
+    }
+    let st0 = evstats();
+    let sn0 = udp_snmp();
+    let id = match ev.attach(s.as_raw_fd(), vg, 1) {
+        Ok(i) => i,
+        Err(e) => {
+            g.attach_errno = e;
+            return g;
+        }
+    };
+    let t0 = Instant::now();
+    let sam = sampler_start(100);
+    let target = if spec.connected { None } else { Some(s_addr) };
+    thread::scope(|sc| {
+        let snd = spec.g2h.as_ref().map(|plan| {
+            let (a, s) = (&a, &s);
+            let oe = spec.oversize_every;
+            let blast = spec.blast_ms;
+            sc.spawn(move || {
+                let dl = Instant::now() + Duration::from_secs(120);
+                if let Some(ms) = blast {
+                    // unpaced blast: the sender never waits for the forwarder
+                    let (mut sent, mut errs) = (0u64, 0u64);
+                    let mut buf = vec![];
+                    let end = Instant::now() + Duration::from_millis(ms);
+                    let mut i = 0u64;
+                    while Instant::now() < end {
+                        plan.fill(i, &mut buf);
+                        match a.send_to(&buf, s_addr) {
+                            Ok(_) => sent += 1,
+                            Err(_) => errs += 1,
+                        }
+                        i += 1;
+                    }
+                    (sent, errs, 0)
+                } else {
+                    app_send(a, plan, target, Some(s.as_raw_fd()), 3 * MIB, oe, dl)
+                }
+            })
+        });
+        let rcv = spec.h2g.as_ref().map(|plan| {
+            let a = &a;
+            sc.spawn(move || app_recv(a, plan, false, Duration::from_secs(8)))
+        });
+        if let Some(h) = snd {
+            let (x, y, z) = h.join().unwrap();
+            g.sent = x;
+            g.send_errs = y;
+            g.big_sent = z;
+        }
+        if let Some(h) = rcv {
+            let (v, _, srcs) = h.join().unwrap();
+            g.h2g = v;
+            g.srcs = srcs;
+        }
+    });
+    if spec.blast_ms.is_some() {
+        // let the pipeline drain: peer reads again after its stall
+        let mut quiet = 0;
+        let mut last = evstats().get("dg_ab").copied().unwrap_or(0);
+        let dl = Instant::now() + Duration::from_secs(40);
+        while Instant::now() < dl && quiet < 6 {
+            thread::sleep(Duration::from_millis(500));
+            let cur = evstats().get("dg_ab").copied().unwrap_or(0);
+            if cur == last && rmem(s.as_raw_fd()) == 0 {
+                quiet += 1;
+            } else {
+                quiet = 0;
+            }
+            last = cur;
+        }
+    } else if spec.self_end {
+        g.end = wait_end(id, 4000);
+    } else {
+        sleep_us(300_000);
+    }
+    g.mem = sam.finish();
+    g.s_rmem_end = rmem(s.as_raw_fd());
+    g.drops_s = sk_drops(s.as_raw_fd());
+    g.drops_a = sk_drops(a.as_raw_fd());
+    if g.end.is_none() {
+        g.forced_detach = spec.self_end;
+        let _ = ev.detach(id);
+        g.end = wait_end(id, 3000);
+    }
+    g.st = s_stats_delta(&st0, &evstats());
+    let sn1 = udp_snmp();
+    g.rcvbuf_errors = snmp_d(&sn0, &sn1, "RcvbufErrors");
+    g.sndbuf_errors = snmp_d(&sn0, &sn1, "SndbufErrors");
+    g.ms = t0.elapsed().as_millis() as u64;
+    g
+}
+fn vs_bufsize_get(fd: RawFd) -> u64 {
+    let mut v: u64 = 0;
+    let mut l = 8u32;
+    unsafe { libc::getsockopt(fd, 40, 0, &mut v as *mut u64 as *mut libc::c_void, &mut l) };
+    v
+}
+fn peer_side(spec: &PSpec, fd: RawFd) -> PeerOut {
+    let bufsz = vs_bufsize_get(fd);
+    let mut out = thread::scope(|sc| {
+        let rx = spec.g2h.as_ref().map(|p| sc.spawn(move || peer_rx(fd, p, spec.lossy, &spec.rd, Duration::from_secs(spec.idle_s))));
+        let tx = spec.h2g.as_ref().map(|p| {
+            let inj = spec.inject.clone();
+            sc.spawn(move || peer_tx(fd, p, &spec.wr, spec.rate, inj, spec.shut))
+        });
+        let mut o = match rx {
+            Some(h) => h.join().unwrap(),
+            None => PeerOut::default(),
+        };
+        if let Some(h) = tx {
+            let (n, e) = h.join().unwrap();
+            o.tx_sent = n;
+            o.tx_err = e;
+        }
+        o
+    });
+    out.buf_effective = bufsz;
+    if spec.g2h.is_none() {
+        // no receiver thread: wait for the guest's side to finish, then observe whether the forwarder ended the connection
+        let t = Instant::now();
+        while t.elapsed() < Duration::from_millis(2500) && !out.eof {
+            if pollin(fd, 100) {
+                let mut b = [0u8; 16];
+                let r = unsafe { libc::read(fd, b.as_mut_ptr() as *mut libc::c_void, 16) };
+                if r <= 0 {
+                    out.eof = true;
+                }
+            }
+        }
+    }
+    out
+}
+fn peer_json(p: &PeerOut) -> J {
+    let mut j = p.rx.j("rx_", J::new());
+    j = j.n("rx_gaps", p.gaps as i64).b("rx_eof", p.eof).n("rx_read_errno", p.read_errno as i64).n("tx_sent", p.tx_sent as i64).n("tx_err", p.tx_err as i64);
+    j = j.n("rx_peak_unread_bytes", p.peak_unread as i64).n("rx_ms", p.ms as i64).n("peer_vsock_buffer_size", p.buf_effective as i64);
+    if let Some(e) = &p.frame_err {
+        j = j.s("rx_frame_err", e);
+    }
+    j
+}
+fn guest_json(g: &GuestOut) -> J {
+    let mut j = g.h2g.j("h2g_", J::new());
+    j = j.n("sent", g.sent as i64).n("send_errs", g.send_errs as i64).n("oversize_sent", g.big_sent as i64);
+    j = j.n("drops_slot", g.drops_s as i64).n("drops_app", g.drops_a as i64).n("snmp_udp_RcvbufErrors_delta", g.rcvbuf_errors).n("snmp_udp_SndbufErrors_delta", g.sndbuf_errors).n("slot_rmem_end", g.s_rmem_end as i64).n("attach_errno", g.attach_errno as i64);
+    for (k, v) in &g.st {
+        j = j.n(k, *v);
+    }
+    j = j.s("end", &end_str(&g.end)).n("ms", g.ms as i64).b("end_needed_the_owners_detach", g.forced_detach);
+    j = j.n("mem_samples", g.mem.0 as i64).n("memavail_spread_kb", g.mem.1 as i64).n("sunreclaim_spread_kb", g.mem.2 as i64).n("slab_spread_kb", g.mem.3 as i64).n("udp_mem_pages_peak", g.mem.4 as i64);
+    if !g.srcs.is_empty() {
+        j = j.s("reply_sources", &format!("{:?}", g.srcs));
+    }
+    j
+}
+/// guest-side verdict; `peer` is the framed peer's result when it ran in this process (Env 1), None in Env 2 (host prints its own line)
+fn guest_pass(spec: &PSpec, g: &GuestOut) -> (bool, Vec<String>) {
+    let mut why = vec![];
+    let mut ok = true;
+    let mut chk = |c: bool, m: &str| {
+        if !c {
+            ok = false;
+            why.push(m.to_string());
+        }
+    };
+    chk(g.attach_errno == 0, "attach failed");
+    let st = |k: &str| g.st.get(k).copied().unwrap_or(0);
+    if let Some(h) = &spec.h2g {
+        if spec.inject.is_some() || spec.shut {
+            let sent_ok = if spec.shut { h.n } else { h.n };
+            chk(g.h2g.ok == sent_ok && g.h2g.corrupt == 0 && g.h2g.reorder == 0 && g.h2g.extra == 0, "h2g datagrams not exact before the end");
+        } else {
+            chk(g.h2g.clean(h.n), "h2g datagrams not delivered exactly once in order");
+        }
+        chk(st("dg_ba") == h.n as i64, "dg_ba counter != frames sent");
+    }
+    if let (Some(p), None) = (&spec.g2h, spec.blast_ms) {
+        chk(g.sent == p.n && g.send_errs == 0, "sender did not send all");
+        chk(st("dg_ab") == p.n as i64, "dg_ab counter != datagrams sent");
+        chk(g.drops_s == 0, "drops at the slot socket in a lossless case");
+    }
+    if spec.oversize_every.is_some() {
+        chk(st("dg_oversize") == g.big_sent as i64 && g.big_sent > 0, "dg_oversize != oversize sent");
+    } else {
+        chk(st("dg_oversize") == 0, "unexpected oversize count");
+    }
+    if spec.h2g.is_some() {
+        chk(g.drops_a == 0, "drops at the app socket in a lossless case");
+    }
+    let e = g.end.clone().unwrap_or_default();
+    if g.forced_detach {
+        chk(false, "the pair did not end by itself within 4 s (it only ended when the owner detached it)");
+    }
+    if g.end.is_none() {
+        chk(false, "no end record");
+    } else if spec.name.starts_with("badframe") || spec.name.starts_with("truncated") {
+        chk(e.kind == 2 && e.cause == 3, "badframe: end is not kind 2 cause 3 (frame invalid)");
+        chk(e.errno == 0, "badframe: errno != 0");
+        chk(st("dg_invalid") + st("dg_trunc") == 1, "badframe/truncated: invalid+trunc != 1");
+    } else if spec.name == "eof" {
+        chk(e.kind == 1, "eof: pair did not complete (kind 1)");
+    } else if spec.blast_ms.is_none() {
+        chk(e.kind == 2 && e.cause == 4, "release: end is not kind 2 cause 4 (detached)");
+        if let Some(p) = &spec.g2h {
+            let bytes: u64 = (0..p.n).map(|i| p.len(i) as u64).sum();
+            chk(e.ab == bytes, "moved_ab != payload bytes sent");
+        }
+        if let Some(h) = &spec.h2g {
+            let bytes: u64 = (0..h.n).map(|i| h.len(i) as u64).sum();
+            chk(e.ba == bytes, "moved_ba != payload bytes received");
+        }
+    }
+    if spec.blast_ms.is_some() {
+        chk(g.drops_s > 0, "stall: no drops at the source UDP receive queue (nothing was bounded?)");
+        chk(g.sent as i64 == st("dg_ab") + g.drops_s as i64, "stall: sent != forwarded + dropped at the source queue");
+        chk(g.s_rmem_end == 0, "stall: slot queue not drained after the peer resumed");
+        chk(g.mem.2 < 4096, "stall: SUnreclaim spread >= 4 MiB");
+        chk(g.mem.1 < 16 * 1024, "stall: MemAvailable spread >= 16 MiB");
+        chk(g.mem.4 < 1024, "stall: UDP socket memory peak >= 4 MiB (1024 pages)");
+    }
+    if spec.name == "credit" {
+        chk(st("dg_partial") > 0, "credit: no partial-frame resume was exercised");
+    }
+    (ok, why)
+}
+fn peer_pass(spec: &PSpec, p: &PeerOut, guest_dg_ab: Option<i64>) -> (bool, Vec<String>) {
+    let mut why = vec![];
+    let mut ok = true;
+    let mut chk = |c: bool, m: &str| {
+        if !c {
+            ok = false;
+            why.push(m.to_string());
+        }
+    };
+    chk(p.frame_err.is_none(), "peer saw an invalid frame from the forwarder");
+    if let Some(g) = &spec.g2h {
+        if spec.lossy {
+            chk(p.rx.reorder == 0 && p.rx.corrupt == 0, "stall: peer saw duplicate/reordered/corrupt datagrams");
+            if let Some(f) = guest_dg_ab {
+                chk(p.rx.ok as i64 == f, "stall: peer received != forwarded by the module");
+            }
+            chk(p.rx.ok > 0, "stall: peer received nothing");
+        } else {
+            chk(p.rx.clean(g.n), "peer: g2h datagrams not delivered exactly once in order");
+        }
+    }
+    if spec.name.starts_with("badframe") || spec.name == "eof" || spec.name.starts_with("truncated") {
+        chk(p.eof, "peer did not see the end of the connection");
+    }
+    (ok, why)
+}
+
+// ------------------------------------------------------------------------------------------------ Env 1: the chain A -> S -> [fwd1] -> vsock -> [fwd2] -> U -> D
+static NEXT_PORT: AtomicU64 = AtomicU64::new(3000);
+struct Chain {
+    a: UdpSocket,
+    s: UdpSocket,
+    uh: UdpSocket,
+    d: Option<UdpSocket>,
+    d_addr: SocketAddrV4,
+    vg: RawFd,
+    vh: RawFd,
+    id1: u32,
+    id2: u32,
+}
+struct COpts {
+    big: bool,
+    d_open: bool,
+    dest: Option<SocketAddrV4>,
+}
+fn mk_chain(ev: &Ev, o: &COpts) -> Chain {
+    let a = udp_bind(1);
+    let s = udp_bind(2);
+    s.connect(a.local_addr().unwrap()).unwrap();
+    let d = udp_bind(4);
+    let (uh, d_addr) = match o.dest {
+        Some(dest) => (UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::new(10, 77, 0, 1), 0)).expect("bind uh on dummy0"), dest),
+        None => (udp_bind(3), v4(d.local_addr().unwrap())),
+    };
+    uh.connect(d_addr).unwrap();
+    if o.big {
+        for f in [a.as_raw_fd(), s.as_raw_fd(), uh.as_raw_fd(), d.as_raw_fd()] {
+            rcvbuf_force(f, (64 * MIB) as i32);
+        }
+    }
+    let port = NEXT_PORT.fetch_add(1, SeqCst) as u32;
+    let l = vs_listen(port, None);
+    let vg = vs_connect(CID_LOCAL, port).expect("vsock loopback connect");
+    let vh = vs_accept(l);
+    close(l);
+    let id1 = ev.attach(s.as_raw_fd(), vg, 1).expect("attach pair 1");
+    let id2 = ev.attach(uh.as_raw_fd(), vh, 1).expect("attach pair 2");
+    Chain { a, s, uh, d: if o.d_open && o.dest.is_none() { Some(d) } else { None }, d_addr, vg, vh, id1, id2 }
+}
+impl Chain {
+    fn s_addr(&self) -> SocketAddrV4 {
+        v4(self.s.local_addr().unwrap())
+    }
+    fn close_app(&mut self) {
+        self.a = udp_bind(9); // the old application socket is dropped (closed); a placeholder keeps the field valid
+    }
+    fn uh_addr(&self) -> SocketAddrV4 {
+        v4(self.uh.local_addr().unwrap())
+    }
+    fn drops(&self) -> [u64; 4] {
+        [sk_drops(self.a.as_raw_fd()), sk_drops(self.s.as_raw_fd()), sk_drops(self.uh.as_raw_fd()), self.d.as_ref().map(|d| sk_drops(d.as_raw_fd())).unwrap_or(0)]
+    }
+    /// detach both pairs (the owner's release) and return their end records
+    fn close(self, ev: &Ev) -> (Option<End>, Option<End>) {
+        let _ = ev.detach(self.id1);
+        let _ = ev.detach(self.id2);
+        let e1 = wait_end(self.id1, 3000);
+        let e2 = wait_end(self.id2, 3000);
+        close(self.vg);
+        close(self.vh);
+        (e1, e2)
+    }
+}
+struct DupOpts {
+    connected: bool,
+    window: u64,
+    ov_ad: Option<u64>,
+    ov_da: Option<u64>,
+    target: Option<SocketAddrV4>,
+}
+struct DupOut {
+    ad: VerOut,
+    da: VerOut,
+    srcs: BTreeMap<String, u64>,
+    ov_sent: u64,
+    ms: u64,
+}
+fn duplex(c: &Chain, ad: &Plan, da: &Plan, o: &DupOpts) -> DupOut {
+    let target = o.target.unwrap_or(c.s_addr());
+    if o.connected {
+        c.a.connect(target).unwrap();
+    }
+    let d = c.d.as_ref().expect("D open");
+    let (rd_d, rd_a) = (AtomicU64::new(0), AtomicU64::new(0));
+    let ov = AtomicU64::new(0);
+    let dl = Instant::now() + Duration::from_secs(150);
+    let t0 = Instant::now();
+    let sizes = [59_001usize, 60_000, 65_000, 65_507];
+    let (out_ad, out_da, srcs) = thread::scope(|sc| {
+        let (rd_d, rd_a, ov) = (&rd_d, &rd_a, &ov);
+        let h1 = sc.spawn(move || {
+            let mut buf = vec![];
+            let ob = vec![0x5Au8; 65_507];
+            for i in 0..ad.n {
+                while i.saturating_sub(rd_d.load(Acquire)) >= o.window {
+                    if Instant::now() > dl {
+                        return;
+                    }
+                    sleep_us(10);
+                }
+                ad.fill(i, &mut buf);
+                let r = if o.connected { c.a.send(&buf) } else { c.a.send_to(&buf, target) };
+                r.expect("A send");
+                if let Some(e) = o.ov_ad {
+                    if i % e == e - 1 {
+                        let sz = sizes[(i / e) as usize % sizes.len()];
+                        let r = if o.connected { c.a.send(&ob[..sz]) } else { c.a.send_to(&ob[..sz], target) };
+                        r.expect("A oversize send");
+                        ov.fetch_add(1, SeqCst);
+                    }
+                }
+            }
+        });
+        let h2 = sc.spawn(move || {
+            d.set_read_timeout(Some(Duration::from_secs(4))).unwrap();
+            let mut ver = Ver::new(ad.clone());
+            let mut buf = vec![0u8; 65_536];
+            let mut got = 0u64;
+            while got < ad.n {
+                match d.recv_from(&mut buf) {
+                    Ok((n, _)) => {
+                        got += 1;
+                        ver.feed(&buf[..n]);
+                        rd_d.store(got, Release);
+                    }
+                    Err(_) => break,
+                }
+            }
+            ver.finish()
+        });
+        let h3 = sc.spawn(move || {
+            let mut buf = vec![];
+            let ob = vec![0x5Au8; 65_507];
+            let uh = c.uh_addr();
+            for i in 0..da.n {
+                while i.saturating_sub(rd_a.load(Acquire)) >= o.window {
+                    if Instant::now() > dl {
+                        return;
+                    }
+                    sleep_us(10);
+                }
+                da.fill(i, &mut buf);
+                d.send_to(&buf, uh).expect("D send");
+                if let Some(e) = o.ov_da {
+                    if i % e == e - 1 {
+                        let sz = sizes[(i / e) as usize % sizes.len()];
+                        d.send_to(&ob[..sz], uh).expect("D oversize send");
+                        ov.fetch_add(1, SeqCst);
+                    }
+                }
+            }
+        });
+        let h4 = sc.spawn(move || {
+            c.a.set_read_timeout(Some(Duration::from_secs(4))).unwrap();
+            let mut ver = Ver::new(da.clone());
+            let mut srcs: BTreeMap<String, u64> = BTreeMap::new();
+            let mut buf = vec![0u8; 65_536];
+            let mut got = 0u64;
+            while got < da.n {
+                match c.a.recv_from(&mut buf) {
+                    Ok((n, src)) => {
+                        *srcs.entry(src.to_string()).or_insert(0) += 1;
+                        got += 1;
+                        ver.feed(&buf[..n]);
+                        rd_a.store(got, Release);
+                    }
+                    Err(_) => break,
+                }
+            }
+            (ver.finish(), srcs)
+        });
+        h1.join().unwrap();
+        h3.join().unwrap();
+        let x = h2.join().unwrap();
+        let (y, srcs) = h4.join().unwrap();
+        (x, y, srcs)
+    });
+    DupOut { ad: out_ad, da: out_da, srcs, ov_sent: ov.load(SeqCst), ms: t0.elapsed().as_millis() as u64 }
+}
+fn chain_detail(out: &DupOut, st0: &BTreeMap<String, i64>, st1: &BTreeMap<String, i64>, drops: [u64; 4], e1: &Option<End>, e2: &Option<End>) -> J {
+    let mut j = out.ad.j("ad_", J::new());
+    j = out.da.j("da_", j);
+    for k in ["dg_ab", "dg_ba", "dg_ab_bytes", "dg_ba_bytes", "dg_empty", "dg_oversize", "dg_partial", "dg_wait", "dg_invalid", "stall_dst", "short_consume"] {
+        j = j.n(k, dstat(st0, st1, k));
+    }
+    j = j.s("drops_a_s_uh_d", &format!("{:?}", drops)).s("end_pair1", &end_str(e1)).s("end_pair2", &end_str(e2)).n("ms", out.ms as i64);
+    if !out.srcs.is_empty() {
+        j = j.s("reply_sources", &format!("{:?}", out.srcs));
+    }
+    j
+}
+
+fn k_sizes(ev: &Ev, l: usize, connected: bool) -> (bool, J) {
+    let n: u64 = if l >= 40_000 { 300 } else { 1500 };
+    let (ad, da) = (Plan::fixed(11, n, l), Plan::fixed(12, n, l));
+    let c = mk_chain(ev, &COpts { big: true, d_open: true, dest: None });
+    let st0 = evstats();
+    let out = duplex(&c, &ad, &da, &DupOpts { connected, window: 32, ov_ad: None, ov_da: None, target: None });
+    let st1 = evstats();
+    let drops = c.drops();
+    let (e1, e2) = c.close(ev);
+    let bytes = n * l as u64;
+    let empties = if l == 0 { 4 * n as i64 } else { 0 };
+    let ok = out.ad.clean(n)
+        && out.da.clean(n)
+        && dstat(&st0, &st1, "dg_ab") == 2 * n as i64
+        && dstat(&st0, &st1, "dg_ba") == 2 * n as i64
+        && dstat(&st0, &st1, "dg_empty") == empties
+        && drops.iter().all(|d| *d == 0)
+        && e1.as_ref().map(|e| e.ab == bytes && e.ba == bytes && e.kind == 2 && e.cause == 4).unwrap_or(false)
+        && e2.as_ref().map(|e| e.ab == bytes && e.ba == bytes).unwrap_or(false);
+    (ok, chain_detail(&out, &st0, &st1, drops, &e1, &e2))
+}
+fn k_mixed(ev: &Ev, connected: bool) -> (bool, J) {
+    let n = 10_000u64;
+    let (ad, da) = (Plan::mixed(21, n), Plan::mixed(22, n));
+    let c = mk_chain(ev, &COpts { big: true, d_open: true, dest: None });
+    let st0 = evstats();
+    let out = duplex(&c, &ad, &da, &DupOpts { connected, window: 16, ov_ad: None, ov_da: None, target: None });
+    let st1 = evstats();
+    let drops = c.drops();
+    let (e1, e2) = c.close(ev);
+    let emp = (ad.count_empty() + da.count_empty()) as i64 * 2;
+    let bytes_ad: u64 = (0..n).map(|i| ad.len(i) as u64).sum();
+    let bytes_da: u64 = (0..n).map(|i| da.len(i) as u64).sum();
+    let ok = out.ad.clean(n)
+        && out.da.clean(n)
+        && dstat(&st0, &st1, "dg_empty") == emp
+        && dstat(&st0, &st1, "dg_ab_bytes") == (bytes_ad + bytes_da) as i64
+        && dstat(&st0, &st1, "dg_ba_bytes") == (bytes_ad + bytes_da) as i64
+        && drops.iter().all(|d| *d == 0)
+        && e1.as_ref().map(|e| e.ab == bytes_ad && e.ba == bytes_da).unwrap_or(false)
+        && e2.as_ref().map(|e| e.ab == bytes_da && e.ba == bytes_ad).unwrap_or(false);
+    let mut j = chain_detail(&out, &st0, &st1, drops, &e1, &e2);
+    j = j.n("empties_expected_counted_twice", emp).n("bytes_ad", bytes_ad as i64).n("bytes_da", bytes_da as i64);
+    (ok, j)
+}
+fn k_oversize(ev: &Ev) -> (bool, J) {
+    let n = 400u64;
+    let kind = Kind::Seq(vec![0, 1, 100, 1431, 59_000, 8, 4097]);
+    let (ad, da) = (Plan { seed: 31, n, kind: kind.clone() }, Plan { seed: 32, n, kind });
+    let c = mk_chain(ev, &COpts { big: true, d_open: true, dest: None });
+    let st0 = evstats();
+    let out = duplex(&c, &ad, &da, &DupOpts { connected: false, window: 16, ov_ad: Some(10), ov_da: Some(10), target: None });
+    let st1 = evstats();
+    let drops = c.drops();
+    let (e1, e2) = c.close(ev);
+    let ok = out.ad.clean(n) && out.da.clean(n) && dstat(&st0, &st1, "dg_oversize") == out.ov_sent as i64 && out.ov_sent == 80 && drops.iter().all(|d| *d == 0);
+    let j = chain_detail(&out, &st0, &st1, drops, &e1, &e2).n("oversize_sent_total", out.ov_sent as i64);
+    (ok, j)
+}
+
+/// Blast Stamp(1431) datagrams for `ms` from `from` to `to`; returns (sent, errors)
+fn blast(from: &UdpSocket, to: SocketAddrV4, plan: &Plan, ms: u64) -> (u64, u64) {
+    let (mut sent, mut errs, mut i) = (0u64, 0u64, 0u64);
+    let mut buf = vec![];
+    let end = Instant::now() + Duration::from_millis(ms);
+    while Instant::now() < end {
+        plan.fill(i, &mut buf);
+        match from.send_to(&buf, to) {
+            Ok(_) => sent += 1,
+            Err(_) => errs += 1,
+        }
+        i += 1;
+    }
+    (sent, errs)
+}
+/// receive with a lossy verifier until `idle` of silence
+fn drain_mono(s: &UdpSocket, plan: &Plan, delay_ms: u64, idle: Duration) -> MonoVer {
+    thread::sleep(Duration::from_millis(delay_ms));
+    s.set_read_timeout(Some(idle)).unwrap();
+    let mut m = MonoVer::new(plan.clone());
+    let mut buf = vec![0u8; 65_536];
+    while let Ok((n, _)) = s.recv_from(&mut buf) {
+        m.feed(&buf[..n]);
+    }
+    m
+}
+/// destination or application that does not read for 10 s while the other end blasts: drops land at the UDP receive queue, memory stays flat
+fn k_stall(ev: &Ev, dest_stalled: bool) -> (bool, J) {
+    let plan = Plan { seed: 7, n: u64::MAX, kind: Kind::Stamp(1431) };
+    let c = mk_chain(ev, &COpts { big: false, d_open: true, dest: None });
+    let st0 = evstats();
+    let sn0 = udp_snmp();
+    let sam = sampler_start(100);
+    let d = c.d.as_ref().unwrap();
+    let (sent, errs, mono) = thread::scope(|sc| {
+        if dest_stalled {
+            let r = sc.spawn(|| drain_mono(d, &plan, 10_000, Duration::from_secs(3)));
+            let (s, e) = blast(&c.a, c.s_addr(), &plan, 10_000);
+            (s, e, r.join().unwrap())
+        } else {
+            let r = sc.spawn(|| drain_mono(&c.a, &plan, 10_000, Duration::from_secs(3)));
+            let (s, e) = blast(d, c.uh_addr(), &plan, 10_000);
+            (s, e, r.join().unwrap())
+        }
+    });
+    let mem = sam.finish();
+    let st1 = evstats();
+    let sn1 = udp_snmp();
+    let drops = c.drops();
+    let s_rm = rmem(c.s.as_raw_fd());
+    let (e1, e2) = c.close(ev);
+    let sum: u64 = drops.iter().sum();
+    let ok = mono.dup == 0 && mono.corrupt == 0 && sent == mono.ok + sum && drops[if dest_stalled { 3 } else { 0 }] > 0 && mem.2 < 4096 && mem.1 < 16 * 1024 && mem.4 < 4096 && s_rm == 0;
+    let j = J::new()
+        .n("sent", sent as i64)
+        .n("send_errs", errs as i64)
+        .n("delivered_after_resume", mono.ok as i64)
+        .n("delivered_gaps_seen_in_seq", mono.gaps as i64)
+        .n("dup", mono.dup as i64)
+        .n("corrupt", mono.corrupt as i64)
+        .s("drops_a_s_uh_d", &format!("{:?}", drops))
+        .n("drops_sum", sum as i64)
+        .n("snmp_udp_RcvbufErrors_delta", snmp_d(&sn0, &sn1, "RcvbufErrors"))
+        .b("snmp_RcvbufErrors_equals_sum_of_socket_drops", snmp_d(&sn0, &sn1, "RcvbufErrors") == sum as i64)
+        .n("dg_ab", dstat(&st0, &st1, "dg_ab"))
+        .n("dg_ba", dstat(&st0, &st1, "dg_ba"))
+        .n("mem_samples", mem.0 as i64)
+        .n("memavail_spread_kb", mem.1 as i64)
+        .n("sunreclaim_spread_kb", mem.2 as i64)
+        .n("slab_spread_kb", mem.3 as i64)
+        .n("udp_mem_pages_peak", mem.4 as i64)
+        .s("end_pair1", &end_str(&e1))
+        .s("end_pair2", &end_str(&e2));
+    (ok, j)
+}
+
+// ---- error cases: ECONNREFUSED (ICMP port unreachable) and EPERM (output rule)
+fn run_cmd(cmd: &str) -> (bool, String) {
+    match std::process::Command::new("/bin/sh").arg("-c").arg(cmd).output() {
+        Ok(o) => (o.status.success(), format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)).trim().replace('\n', " | ")),
+        Err(e) => (false, format!("spawn: {e}")),
+    }
+}
+fn k_error(ev: &Ev, which: &str) -> (bool, J) {
+    // which: econnrefused | eperm-drop | eperm-reject | eperm-bpf
+    let mut notes = String::new();
+    let c = if which == "econnrefused" { mk_chain(ev, &COpts { big: true, d_open: false, dest: None }) } else { mk_chain(ev, &COpts { big: true, d_open: true, dest: None }) };
+    let dport = c.d_addr.port();
+    let mut bpf_keep: Option<(aya::Ebpf, std::fs::File)> = None;
+    if which.starts_with("eperm") {
+        if which == "eperm-bpf" {
+            match load_bpf() {
+                Ok((mut bpf, cg)) => {
+                    set_cfg(&mut bpf, 4, dport as u32);
+                    if let Err(e) = attach_egress(&mut bpf, &cg) {
+                        notes += &format!("egress attach failed: {e}; ");
+                    }
+                    bpf_keep = Some((bpf, cg));
+                }
+                Err(e) => notes += &format!("bpf load failed: {e}; "),
+            }
+        } else {
+            let verdict = if which == "eperm-drop" { "drop" } else { "reject" };
+            let cmds = [
+                "nft add table ip dgt".to_string(),
+                "nft 'add chain ip dgt out { type filter hook output priority 0 ; }'".to_string(),
+                format!("nft add rule ip dgt out ip daddr 127.0.0.4 udp dport {dport} {verdict}"),
+            ];
+            for cmd in cmds {
+                let (ok, o) = run_cmd(&cmd);
+                notes += &format!("[{cmd} -> {} {o}] ", if ok { "ok" } else { "FAILED" });
+            }
+        }
+    }
+    let st0 = evstats();
+    let n1 = 5u64;
+    let plan = Plan::fixed(5, 50, 100);
+    let mut buf = vec![];
+    for i in 0..n1 {
+        plan.fill(i, &mut buf);
+        c.a.send_to(&buf, c.s_addr()).unwrap();
+        sleep_us(50_000);
+    }
+    let e2 = wait_end(c.id2, 3000);
+    let e1_early = wait_end(c.id1, 1500);
+    // the guest application keeps sending after the association ended: nothing forwards, the datagrams wait in the slot queue
+    for i in n1..n1 + 5 {
+        plan.fill(i, &mut buf);
+        c.a.send_to(&buf, c.s_addr()).unwrap();
+    }
+    sleep_us(200_000);
+    let slot_after = rmem(c.s.as_raw_fd());
+    let st1 = evstats();
+    if which.starts_with("eperm") {
+        if which == "eperm-bpf" {
+            drop(bpf_keep.take());
+        } else {
+            let (_, o) = run_cmd("nft delete table ip dgt");
+            notes += &format!("[cleanup {o}] ");
+        }
+    }
+    let (e1, e2b) = c.close(ev);
+    let want_errno = if which == "econnrefused" { 111 } else { 1 };
+    let ok = e2.as_ref().map(|e| e.kind == 2 && e.cause == 2 && e.errno == want_errno && e.side == 0).unwrap_or(false);
+    let j = J::new()
+        .s("end_pair2_after_error", &end_str(&e2))
+        .s("end_pair1_after_pair2_aborted", &end_str(&e1_early))
+        .s("end_pair1_final", &end_str(&e1))
+        .n("slot_queue_bytes_after_end", slot_after as i64)
+        .n("dg_ab", dstat(&st0, &st1, "dg_ab"))
+        .n("err_counter", dstat(&st0, &st1, "err"))
+        .s("notes", &notes)
+        .n("expected_errno", want_errno as i64)
+        .s("end_pair2_final", &end_str(&e2b));
+    (ok, j)
+}
+
+fn k_app_gone(ev: &Ev) -> (bool, J) {
+    let mut c = mk_chain(ev, &COpts { big: true, d_open: true, dest: None });
+    let st0 = evstats();
+    let plan = Plan::fixed(5, 3, 100);
+    let mut buf = vec![];
+    for i in 0..3 {
+        plan.fill(i, &mut buf);
+        c.a.send_to(&buf, c.s_addr()).unwrap();
+    }
+    let d = c.d.as_ref().unwrap().try_clone().unwrap();
+    d.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+    let mut got = 0;
+    let mut rb = vec![0u8; 65_536];
+    while got < 3 && d.recv_from(&mut rb).is_ok() {
+        got += 1;
+    }
+    c.close_app(); // the guest application closes its socket
+    let rep = Plan::fixed(6, 1, 100);
+    rep.fill(0, &mut buf);
+    d.send_to(&buf, c.uh_addr()).unwrap(); // the host destination answers: the slot socket's send meets the closed port
+    let e1 = wait_end(c.id1, 3000);
+    let e2 = wait_end(c.id2, 3000);
+    let st1 = evstats();
+    let (e1b, e2b) = c.close(ev);
+    let ok = got == 3 && e1.as_ref().map(|e| e.kind == 2 && e.cause == 2 && e.errno == 111 && e.side == 0).unwrap_or(false);
+    let j = J::new()
+        .n("datagrams_delivered_before_close", got)
+        .s("end_pair1_guest_slot", &end_str(&e1))
+        .s("end_pair2_host", &end_str(&e2))
+        .n("err_counter", dstat(&st0, &st1, "err"))
+        .s("end_pair1_final", &end_str(&e1b))
+        .s("end_pair2_final", &end_str(&e2b));
+    (ok, j)
+}
+
+// ---- congested egress: a slow link behind the host UDP socket (dummy0 + tbf). EAGAIN (send buffer held by the qdisc) must wait for
+// ---- sk_write_space; ENOBUFS (qdisc drop) must not end the association.
+fn netstat(dev: &str, f: &str) -> u64 {
+    fs::read_to_string(format!("/sys/class/net/{dev}/statistics/{f}")).ok().and_then(|v| v.trim().parse().ok()).unwrap_or(0)
+}
+fn k_egress(ev: &Ev, which: &str) -> (bool, J) {
+    // which: eagain | qdisc-drop (tbf limit 30000: the qdisc drops, UDP sendmsg hides -ENOBUFS, net/ipv4/udp.c:1195-1201 @ v7.0)
+    let mut notes = String::new();
+    let limit = if which == "eagain" { "10000000" } else { "30000" };
+    let cmds = [
+        "/usr/sbin/ip link add dummy0 type dummy".to_string(),
+        "echo 1 > /proc/sys/net/ipv6/conf/dummy0/disable_ipv6".to_string(),
+        "/usr/sbin/ip addr add 10.77.0.1/24 dev dummy0".to_string(),
+        "/usr/sbin/ip link set dummy0 up".to_string(),
+        "/usr/sbin/ip neigh add 10.77.0.2 lladdr 02:00:00:00:77:02 dev dummy0 nud permanent".to_string(),
+        format!("/usr/sbin/tc qdisc add dev dummy0 root tbf rate 8mbit burst 3000 limit {limit}"),
+    ];
+    for cmd in cmds {
+        let (ok, o) = run_cmd(&cmd);
+        if !ok {
+            notes += &format!("[{cmd} -> FAILED {o}] ");
+        }
+    }
+    let dest = SocketAddrV4::new(Ipv4Addr::new(10, 77, 0, 2), 9);
+    let c = mk_chain(ev, &COpts { big: false, d_open: true, dest: Some(dest) });
+    // a small send buffer on the host UDP socket so the qdisc backlog fills it quickly
+    let sb: i32 = 65_536;
+    setopt(c.uh.as_raw_fd(), libc::SOL_SOCKET, libc::SO_SNDBUFFORCE, &sb);
+    let plan = Plan { seed: 3, n: u64::MAX, kind: Kind::Stamp(1431) };
+    let st0 = evstats();
+    let sn0 = udp_snmp();
+    let (p0, b0) = (netstat("dummy0", "tx_packets"), netstat("dummy0", "tx_bytes"));
+    let sam = sampler_start(100);
+    let mut buf = vec![];
+    let t0 = Instant::now();
+    let (mut sent, mut i) = (0u64, 0u64);
+    let mut mid = (0u64, 0u64);
+    let mut e2_early: Option<End> = None;
+    while t0.elapsed() < Duration::from_secs(10) {
+        plan.fill(i, &mut buf);
+        if c.a.send_to(&buf, c.s_addr()).is_ok() {
+            sent += 1;
+        }
+        i += 1;
+        if mid.0 == 0 && t0.elapsed() > Duration::from_secs(5) {
+            mid = (netstat("dummy0", "tx_packets"), netstat("dummy0", "tx_bytes"));
+        }
+        if which == "enobufs-abort" && e2_early.is_none() && i % 1024 == 0 {
+            e2_early = end_of(c.id2);
+            if e2_early.is_some() {
+                break; // the association ended: stop blasting
+            }
+        }
+    }
+    // let the backlog drain
+    thread::sleep(Duration::from_secs(if which == "eagain" { 12 } else { 3 }));
+    let mem = sam.finish();
+    let st1 = evstats();
+    let (p1, b1) = (netstat("dummy0", "tx_packets"), netstat("dummy0", "tx_bytes"));
+    let (_, qd) = run_cmd("/usr/sbin/tc -s qdisc show dev dummy0");
+    let drops = c.drops();
+    let id2_end_live = end_of(c.id2);
+    let s_rm = rmem(c.s.as_raw_fd());
+    let (e1, e2) = c.close(ev);
+    let _ = run_cmd("/usr/sbin/ip link del dummy0");
+    let egressed = p1 - p0;
+    let qdisc_dropped: i64 = qd.split("dropped ").nth(1).and_then(|t| t.split(|c: char| !c.is_ascii_digit()).next()).and_then(|n| n.parse().ok()).unwrap_or(0);
+    let sn1 = udp_snmp();
+    let rate_bytes_per_s = 8_000_000.0 / 8.0;
+    let theory = rate_bytes_per_s * 10.0;
+    let ok = match which {
+        // pair alive for the whole run, kept moving the second half too, nothing aborted, every datagram accounted for
+        "eagain" => {
+            id2_end_live.is_none()
+                && dstat(&st0, &st1, "stall_dst") > 0
+                && ((b1 - b0) as f64) > 0.5 * theory
+                && ((mid.1 - b0) as f64) > 0.3 * theory
+                && s_rm == 0
+                && (sent as i64 - (drops[1] + egressed) as i64).abs() <= 4
+                && mem.4 < 1024
+        }
+        // qdisc drops are invisible to the sender: the association lives, nothing aborts, every loss is a counted qdisc drop
+        _ => {
+            id2_end_live.is_none()
+                && dstat(&st0, &st1, "err") == 0
+                && s_rm == 0
+                && qdisc_dropped > 0
+                && (sent as i64 - (drops[1] + egressed) as i64 - qdisc_dropped).abs() <= 4
+                && (snmp_d(&sn0, &sn1, "SndbufErrors") - qdisc_dropped).abs() <= 4
+        }
+    };
+    let j = J::new()
+        .s("which", which)
+        .s("notes", &notes)
+        .n("sent_by_app", sent as i64)
+        .n("egressed_packets_dummy0", egressed as i64)
+        .n("egressed_bytes_dummy0", (b1 - b0) as i64)
+        .n("egressed_bytes_first_5s", (mid.1 - b0) as i64)
+        .f("tbf_theoretical_bytes_10s", theory)
+        .n("slot_queue_drops", drops[1] as i64)
+        .n("accounting_residual_sent_minus_slotdrops_minus_egressed", sent as i64 - (drops[1] + egressed) as i64)
+        .n("dg_enobufs_dropped", dstat(&st0, &st1, "dg_enobufs"))
+        .n("qdisc_dropped", qdisc_dropped)
+        .n("snmp_udp_SndbufErrors_delta", snmp_d(&sn0, &sn1, "SndbufErrors"))
+        .n("snmp_udp_OutDatagrams_delta", snmp_d(&sn0, &sn1, "OutDatagrams"))
+        .n("stall_dst", dstat(&st0, &st1, "stall_dst"))
+        .n("dg_ab", dstat(&st0, &st1, "dg_ab"))
+        .n("dg_ba", dstat(&st0, &st1, "dg_ba"))
+        .n("err", dstat(&st0, &st1, "err"))
+        .s("end_pair2_while_running", &end_str(&id2_end_live))
+        .s("end_pair1_final", &end_str(&e1))
+        .s("end_pair2_final", &end_str(&e2))
+        .n("slot_rmem_end", s_rm as i64)
+        .n("memavail_spread_kb", mem.1 as i64)
+        .n("sunreclaim_spread_kb", mem.2 as i64)
+        .n("udp_mem_pages_peak", mem.4 as i64)
+        .s("qdisc", &qd.chars().take(400).collect::<String>());
+    (ok, j)
+}
+
+// ---- guest slot release: abort, discard the slot socket's queue, reuse the slot for a new association
+fn k_slot_release(ev: &Ev, discard: bool, explicit_port: bool) -> (bool, J) {
+    let a1 = udp_bind(1);
+    let s = if explicit_port {
+        // a slot socket is bound to a fixed port (SOCK_BINDPORT_LOCK); a port-0 bind is released again by the disconnect below
+        let t = udp_bind(2);
+        let port = v4(t.local_addr().unwrap()).port();
+        drop(t);
+        UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 2), port)).expect("explicit bind")
+    } else {
+        udp_bind(2)
+    };
+    s.connect(a1.local_addr().unwrap()).unwrap();
+    let s_addr = v4(s.local_addr().unwrap());
+    let s_addr_before = s_addr;
+    rcvbuf_force(s.as_raw_fd(), (16 * MIB) as i32);
+    // association 1: the peer never reads
+    let port1 = NEXT_PORT.fetch_add(1, SeqCst) as u32;
+    let l1 = vs_listen(port1, None);
+    let vg1 = vs_connect(CID_LOCAL, port1).unwrap();
+    let vh1 = vs_accept(l1);
+    close(l1);
+    let id1 = ev.attach(s.as_raw_fd(), vg1, 1).unwrap();
+    let old = Plan { seed: 7, n: u64::MAX, kind: Kind::Stamp(1431) };
+    let mut buf = vec![];
+    let n_old = 1200u64; // 1200 x 1431 B overflows the 256 KiB vsock window: the rest waits in the slot queue
+    for i in 0..n_old {
+        old.fill(i, &mut buf);
+        a1.send_to(&buf, s_addr).unwrap();
+    }
+    sleep_us(500_000);
+    let queued_before = rmem(s.as_raw_fd());
+    // release: abort the pair, then (optionally) discard the slot socket's receive queue without reading payload
+    ev.detach(id1).unwrap();
+    let end1 = wait_end(id1, 3000);
+    let mut discarded = 0u64;
+    if discard {
+        loop {
+            let mut v = libc::iovec { iov_base: std::ptr::null_mut(), iov_len: 0 };
+            let mut m: libc::msghdr = unsafe { std::mem::zeroed() };
+            m.msg_iov = &mut v;
+            m.msg_iovlen = 1;
+            let r = unsafe { libc::recvmsg(s.as_raw_fd(), &mut m, libc::MSG_DONTWAIT | libc::MSG_TRUNC) };
+            if r < 0 {
+                break;
+            }
+            discarded += 1;
+        }
+    }
+    let queued_after = rmem(s.as_raw_fd());
+    udp_disconnect(&s);
+    close(vg1);
+    close(vh1);
+    // association 2 on the same slot socket: 20 markers
+    let a2 = udp_bind(5);
+    s.connect(a2.local_addr().unwrap()).unwrap();
+    let s_addr_after = v4(s.local_addr().unwrap());
+    let s_addr = s_addr_after;
+    let port2 = NEXT_PORT.fetch_add(1, SeqCst) as u32;
+    let l2 = vs_listen(port2, None);
+    let vg2 = vs_connect(CID_LOCAL, port2).unwrap();
+    let vh2 = vs_accept(l2);
+    close(l2);
+    let id2 = ev.attach(s.as_raw_fd(), vg2, 1).unwrap();
+    let marker = Plan { seed: 99, n: 20, kind: Kind::Stamp(1431) };
+    for i in 0..marker.n {
+        marker.fill(i, &mut buf);
+        a2.send_to(&buf, s_addr).unwrap();
+    }
+    let peer = peer_rx(vh2, &marker, true, &Rd::Fast, Duration::from_secs(2));
+    let _ = ev.detach(id2);
+    close(vg2);
+    close(vh2);
+    // `corrupt` = datagrams of association 1 that reached association 2's peer
+    let port_kept = s_addr_after.port() == s_addr_before.port();
+    let ok = if !explicit_port {
+        !port_kept // documents the autobind hazard
+    } else if discard {
+        port_kept && peer.rx.ok == 20 && peer.rx.corrupt == 0 && discarded > 0
+    } else {
+        port_kept && peer.rx.corrupt > 0
+    };
+    let j = J::new()
+        .b("explicit_port_bind", explicit_port)
+        .n("slot_port_before_disconnect", s_addr_before.port() as i64)
+        .n("slot_port_after_reconnect", s_addr_after.port() as i64)
+        .b("discard_step", discard)
+        .n("sent_by_assoc1", n_old as i64)
+        .n("slot_queue_bytes_before_release", queued_before as i64)
+        .n("discarded_datagrams", discarded as i64)
+        .n("slot_queue_bytes_after_release", queued_after as i64)
+        .s("end_assoc1", &end_str(&end1))
+        .n("assoc2_markers_ok", peer.rx.ok as i64)
+        .n("assoc2_stale_datagrams_from_assoc1", peer.rx.corrupt as i64)
+        .n("assoc2_dup", peer.rx.reorder as i64);
+    (ok, j)
+}
+
+// ---- BPF (aya): the guest's sendmsg4 / recvmsg4 rewrite pair, modelled on cgroup_recvmsg4_service
+use aya::programs::{CgroupSkb, CgroupSkbAttachType, CgroupSockAddr};
+fn load_bpf() -> Result<(aya::Ebpf, std::fs::File), String> {
+    let bpf = aya::EbpfLoader::new().load_file("/dg-bpf.o").map_err(|e| format!("load: {e:?}"))?;
+    let cg = std::fs::File::open("/sys/fs/cgroup").map_err(|e| format!("cgroup: {e}"))?;
+    Ok((bpf, cg))
+}
+fn set_cfg(bpf: &mut aya::Ebpf, i: u32, v: u32) {
+    let mut m: aya::maps::Array<_, u32> = aya::maps::Array::try_from(bpf.map_mut("CFG").unwrap()).unwrap();
+    m.set(i, v, 0).unwrap();
+}
+fn get_hits(bpf: &mut aya::Ebpf) -> Vec<u32> {
+    let m: aya::maps::Array<_, u32> = aya::maps::Array::try_from(bpf.map_mut("HITS").unwrap()).unwrap();
+    (0..5).map(|i| m.get(&i, 0).unwrap_or(0)).collect()
+}
+fn attach_sa(bpf: &mut aya::Ebpf, cg: &std::fs::File, name: &str) -> Result<aya::programs::cgroup_sock_addr::CgroupSockAddrLinkId, String> {
+    let p: &mut CgroupSockAddr = bpf.program_mut(name).ok_or("no prog")?.try_into().map_err(|e| format!("{e:?}"))?;
+    p.load().map_err(|e| format!("load {name}: {e:?}"))?;
+    p.attach(cg, aya::programs::CgroupAttachMode::Single).map_err(|e| format!("attach {name}: {e:?}"))
+}
+fn attach_egress(bpf: &mut aya::Ebpf, cg: &std::fs::File) -> Result<(), String> {
+    let p: &mut CgroupSkb = bpf.program_mut("dg_egress").ok_or("no prog")?.try_into().map_err(|e| format!("{e:?}"))?;
+    p.load().map_err(|e| format!("load: {e:?}"))?;
+    p.attach(cg, CgroupSkbAttachType::Egress, aya::programs::CgroupAttachMode::Single).map_err(|e| format!("attach: {e:?}"))?;
+    Ok(())
+}
+fn nbo_ip(ip: Ipv4Addr) -> u32 {
+    u32::from_ne_bytes(ip.octets())
+}
+fn nbo_port(p: u16) -> u32 {
+    p.to_be() as u32
+}
+fn k_recvmsg4(ev: &Ev, with_recv_hook: bool) -> (bool, J) {
+    let (mut bpf, cg) = match load_bpf() {
+        Ok(x) => x,
+        Err(e) => return (false, J::new().s("error", &e)),
+    };
+    let c = mk_chain(ev, &COpts { big: true, d_open: true, dest: None });
+    let o_addr = SocketAddrV4::new(Ipv4Addr::new(198, 51, 100, 7), 53);
+    let s_addr = c.s_addr();
+    set_cfg(&mut bpf, 0, nbo_ip(*o_addr.ip()));
+    set_cfg(&mut bpf, 1, nbo_port(o_addr.port()));
+    set_cfg(&mut bpf, 2, nbo_ip(*s_addr.ip()));
+    set_cfg(&mut bpf, 3, nbo_port(s_addr.port()));
+    let l1 = attach_sa(&mut bpf, &cg, "dg_sendmsg4");
+    let l2 = if with_recv_hook { attach_sa(&mut bpf, &cg, "dg_recvmsg4") } else { Err("not attached (negative control)".into()) };
+    let n = 200u64;
+    let (ad, da) = (Plan::fixed(61, n, 1431), Plan::mixed(62, n));
+    let st0 = evstats();
+    let out = duplex(&c, &ad, &da, &DupOpts { connected: false, window: 16, ov_ad: None, ov_da: None, target: Some(o_addr) });
+    let st1 = evstats();
+    let hits = get_hits(&mut bpf);
+    let drops = c.drops();
+    let (e1, e2) = c.close(ev);
+    let want_src = if with_recv_hook { o_addr.to_string() } else { s_addr.to_string() };
+    let srcs_ok = out.srcs.len() == 1 && out.srcs.get(&want_src).copied().unwrap_or(0) == n;
+    let ok = l1.is_ok() && out.ad.clean(n) && out.da.clean(n) && srcs_ok && drops.iter().all(|d| *d == 0);
+    let j = chain_detail(&out, &st0, &st1, drops, &e1, &e2)
+        .s("send_hook", &format!("{:?}", l1.is_ok()))
+        .s("recv_hook", &format!("{:?}", l2.as_ref().map(|_| "attached").map_err(|e| e.clone())))
+        .s("hits_send_hit_send_miss_recv_hit_recv_miss", &format!("{:?}", &hits[..4]))
+        .s("wanted_source", &want_src)
+        .s("original_destination_O", &o_addr.to_string())
+        .s("slot_address_S", &s_addr.to_string());
+    (ok, j)
+}
+
+// ---- lifecycle churn: associations torn down at random moments under load; nothing may leak, hang or oops
+fn k_churn(ev: &Ev, cycles: u32) -> (bool, J) {
+    let st0 = evstats();
+    let plan = Plan { seed: 9, n: u64::MAX, kind: Kind::Stamp(1431) };
+    let mixed = Plan::mixed(77, u64::MAX);
+    let mut live_after_max = 0i64;
+    let mut worst_close_ms = 0u128;
+    for k in 0..cycles {
+        let c = mk_chain(ev, &COpts { big: false, d_open: true, dest: None });
+        let stop = AtomicBool::new(false);
+        let (s_addr, uh_addr) = (c.s_addr(), c.uh_addr());
+        thread::scope(|sc| {
+            let (stop, c) = (&stop, &c);
+            let p = if k % 2 == 0 { &plan } else { &mixed };
+            let h1 = sc.spawn(move || {
+                let mut b = vec![];
+                let mut i = 0u64;
+                while !stop.load(Relaxed) {
+                    p.fill(i, &mut b);
+                    let _ = c.a.send_to(&b, s_addr);
+                    i += 1;
+                }
+            });
+            let h2 = sc.spawn(move || {
+                let mut b = vec![];
+                let mut i = 0u64;
+                while !stop.load(Relaxed) {
+                    p.fill(i, &mut b);
+                    let _ = c.d.as_ref().unwrap().send_to(&b, uh_addr);
+                    i += 1;
+                }
+            });
+            let h3 = sc.spawn(move || {
+                let mut b = vec![0u8; 65_536];
+                c.d.as_ref().unwrap().set_read_timeout(Some(Duration::from_millis(5))).unwrap();
+                while !stop.load(Relaxed) {
+                    let _ = c.d.as_ref().unwrap().recv_from(&mut b);
+                }
+            });
+            let h4 = sc.spawn(move || {
+                let mut b = vec![0u8; 65_536];
+                c.a.set_read_timeout(Some(Duration::from_millis(5))).unwrap();
+                while !stop.load(Relaxed) {
+                    let _ = c.a.recv_from(&mut b);
+                }
+            });
+            thread::sleep(Duration::from_micros(500 + (splitmix(k as u64) % 30_000)));
+            // the owner's release happens while traffic flows
+            let t = Instant::now();
+            let _ = ev.detach(c.id1);
+            let _ = ev.detach(c.id2);
+            worst_close_ms = worst_close_ms.max(t.elapsed().as_millis());
+            stop.store(true, Relaxed);
+            for h in [h1, h2, h3, h4] {
+                h.join().unwrap();
+            }
+        });
+        close(c.vg);
+        close(c.vh);
+        let live = evstats().get("live").copied().unwrap_or(-1);
+        live_after_max = live_after_max.max(live);
+    }
+    let st1 = evstats();
+    let attached = dstat(&st0, &st1, "attached");
+    let ended = dstat(&st0, &st1, "completed") + dstat(&st0, &st1, "aborted");
+    let ok = live_after_max == 0 && attached == 2 * cycles as i64 && ended == attached;
+    let j = J::new()
+        .n("cycles", cycles as i64)
+        .n("pairs_attached", attached)
+        .n("pairs_ended_completed_or_aborted", ended)
+        .n("completed", dstat(&st0, &st1, "completed"))
+        .n("aborted", dstat(&st0, &st1, "aborted"))
+        .n("live_pairs_max_after_a_cycle", live_after_max)
+        .n("worst_detach_pair_ms", worst_close_ms as i64)
+        .n("dg_ab", dstat(&st0, &st1, "dg_ab"))
+        .n("dg_ba", dstat(&st0, &st1, "dg_ba"));
+    (ok, j)
+}
+
+// ---- early data: datagrams the app sent and frames the peer sent BEFORE the attach are forwarded by the attach-time run
+fn k_early(ev: &Ev) -> (bool, J) {
+    let a = udp_bind(1);
+    let s = udp_bind(2);
+    s.connect(a.local_addr().unwrap()).unwrap();
+    rcvbuf_force(a.as_raw_fd(), (16 * MIB) as i32);
+    rcvbuf_force(s.as_raw_fd(), (16 * MIB) as i32);
+    let s_addr = v4(s.local_addr().unwrap());
+    let port = NEXT_PORT.fetch_add(1, SeqCst) as u32;
+    let l = vs_listen(port, None);
+    let vg = vs_connect(CID_LOCAL, port).unwrap();
+    let vh = vs_accept(l);
+    close(l);
+    let g2h = Plan::fixed(88, 40, 1431);
+    let h2g = Plan::fixed(89, 40, 1431);
+    // 20 datagrams from the app wait in the slot queue; 20 frames from the peer wait in the guest vsock queue
+    let mut b = vec![];
+    for i in 0..20 {
+        g2h.fill(i, &mut b);
+        a.send_to(&b, s_addr).unwrap();
+    }
+    let early_plan = Plan { seed: h2g.seed, n: 20, kind: h2g.kind.clone() };
+    let (sent_early, _) = peer_tx(vh, &early_plan, &Wr::Whole, None, None, false);
+    sleep_us(300_000);
+    let queued = (rmem(s.as_raw_fd()), vs_queued(vg));
+    let st0 = evstats();
+    let id = ev.attach(s.as_raw_fd(), vg, 1).unwrap();
+    // 20 more of each after the attach
+    let late_tx = Plan { seed: h2g.seed, n: 40, kind: h2g.kind.clone() };
+    let (res_rx, res_app, late) = thread::scope(|sc| {
+        let rx = sc.spawn(|| peer_rx(vh, &g2h, false, &Rd::Fast, Duration::from_secs(3)));
+        let app = sc.spawn(|| app_recv(&a, &h2g, false, Duration::from_secs(4)));
+        for i in 20..40 {
+            g2h.fill(i, &mut b);
+            a.send_to(&b, s_addr).unwrap();
+        }
+        // frames 20..39 from the peer: write them with the same plan indices
+        let mut buf = vec![];
+        let mut late = 0;
+        for i in 20..40u64 {
+            late_tx.fill(i, &mut buf);
+            let mut fr = b"OVD1".to_vec();
+            fr.extend_from_slice(&(buf.len() as u32).to_be_bytes());
+            fr.extend_from_slice(&buf);
+            if write_all(vh, &fr).is_ok() {
+                late += 1;
+            }
+        }
+        (rx.join().unwrap(), app.join().unwrap(), late)
+    });
+    let st1 = evstats();
+    let _ = ev.detach(id);
+    close(vg);
+    close(vh);
+    let ok = res_rx.rx.clean(40) && res_app.0.clean(40) && sent_early == 20 && late == 20;
+    let j = res_rx.rx.j("peer_", J::new());
+    let j = res_app.0.j("app_", j)
+        .n("queued_before_attach_slot_bytes", queued.0 as i64)
+        .n("queued_before_attach_vsock_bytes", queued.1 as i64)
+        .n("dg_ab", dstat(&st0, &st1, "dg_ab"))
+        .n("dg_ba", dstat(&st0, &st1, "dg_ba"));
+    (ok, j)
+}
+fn vs_queued(fd: RawFd) -> i64 {
+    // FIONREAD on a vsock stream (SIOCINQ) returns the readable bytes
+    let mut n: i32 = 0;
+    unsafe { libc::ioctl(fd, libc::FIONREAD as _, &mut n) };
+    n as i64
+}
+
+// ---- attach refusals (the errno table of ADR-0199 for the datagram halves)
+fn vs_pair() -> (RawFd, RawFd) {
+    let port = NEXT_PORT.fetch_add(1, SeqCst) as u32;
+    let l = vs_listen(port, None);
+    let vg = vs_connect(CID_LOCAL, port).unwrap();
+    let vh = vs_accept(l);
+    close(l);
+    (vg, vh)
+}
+fn k_attach_errnos(ev: &Ev) -> (bool, J) {
+    let mut rows: Vec<(String, i32, i32)> = vec![]; // (what, got, want)
+    let mut want = |what: &str, got: Result<u32, i32>, w: i32| rows.push((what.to_string(), got.err().unwrap_or(0), w));
+    let a = udp_bind(1);
+    let s = udp_bind(2);
+    s.connect(a.local_addr().unwrap()).unwrap();
+    let unconn = udp_bind(3);
+    let s2 = udp_bind(4);
+    s2.connect(a.local_addr().unwrap()).unwrap();
+    let (vg, vh) = vs_pair();
+    let (vg2, vh2) = vs_pair();
+    let (vg3, vh3) = vs_pair();
+    let lt = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let tc = std::net::TcpStream::connect(lt.local_addr().unwrap()).unwrap();
+    let (_ts, _) = lt.accept().unwrap();
+    let devnull = std::fs::File::open("/dev/null").unwrap();
+    want("UDP unconnected + vsock", ev.attach(unconn.as_raw_fd(), vg, 1), libc::ENOTCONN);
+    want("UDP + TCP, mode 1", ev.attach(s.as_raw_fd(), tc.as_raw_fd(), 1), libc::ESOCKTNOSUPPORT);
+    want("two UDP, mode 1", ev.attach(s.as_raw_fd(), s2.as_raw_fd(), 1), libc::ESOCKTNOSUPPORT);
+    want("two vsock, mode 1", ev.attach(vg, vg2, 1), libc::ESOCKTNOSUPPORT);
+    want("UDP + vsock, stream mode 0", ev.attach(s.as_raw_fd(), vg, 0), libc::ESOCKTNOSUPPORT);
+    want("UDP twice (same socket), mode 1", ev.attach(s.as_raw_fd(), s.as_raw_fd(), 1), libc::ESOCKTNOSUPPORT.max(libc::EINVAL).min(libc::EINVAL));
+    want("unknown mode 3", ev.attach(s.as_raw_fd(), vg, 3), libc::EINVAL);
+    want("not a socket", ev.attach(devnull.as_raw_fd(), vg, 1), libc::ENOTSOCK);
+    want("bad fd", ev.attach(9999, vg, 1), libc::EBADF);
+    let first = ev.attach(s.as_raw_fd(), vg, 1);
+    want("valid attach", first.map(|_| 0u32).map_err(|e| e), 0);
+    want("UDP already attached -> EBUSY", ev.attach(s.as_raw_fd(), vg2, 1), libc::EBUSY);
+    want("vsock already attached -> EBUSY", ev.attach(s2.as_raw_fd(), vg, 1), libc::EBUSY);
+    // after the failed attaches the first pair still forwards
+    let plan = Plan::fixed(5, 10, 100);
+    let mut b = vec![];
+    for i in 0..10 {
+        plan.fill(i, &mut b);
+        a.send_to(&b, v4(s.local_addr().unwrap())).unwrap();
+    }
+    let peer = peer_rx(vh, &plan, false, &Rd::Fast, Duration::from_secs(2));
+    if let Ok(id) = first {
+        let _ = ev.detach(id);
+    }
+    for f in [vg, vh, vg2, vh2, vg3, vh3] {
+        close(f);
+    }
+    let all = rows.iter().all(|(_, g, w)| g == w);
+    let mut j = J::new().n("first_pair_still_forwards_ok_of_10", peer.rx.ok as i64);
+    for (k, g, w) in &rows {
+        j = j.s(k, &format!("got errno {g} want {w}"));
+    }
+    (all && peer.rx.ok == 10, j)
+}
+
+// ---- a frame that can never fit the vsock half's buffer: the module waits for a whole frame queued in the receiving socket
+fn k_small_window(ev: &Ev) -> (bool, J) {
+    let a = udp_bind(1);
+    let s = udp_bind(2);
+    s.connect(a.local_addr().unwrap()).unwrap();
+    rcvbuf_force(a.as_raw_fd(), (16 * MIB) as i32);
+    let port = NEXT_PORT.fetch_add(1, SeqCst) as u32;
+    let l = vs_listen(port, None);
+    let vg = vs_sock();
+    let small: u64 = 32_768; // below one maximum frame (59,008)
+    assert_eq!(setopt(vg, 40, 0, &small), 0);
+    let ad = vm_addr(CID_LOCAL, port);
+    assert_eq!(unsafe { libc::connect(vg, &ad as *const _ as *const libc::sockaddr, 16) }, 0);
+    let vh = vs_accept(l);
+    close(l);
+    let st0 = evstats();
+    let id = ev.attach(s.as_raw_fd(), vg, 1).unwrap();
+    let plan = Plan { seed: 12, n: 4, kind: Kind::Seq(vec![1431, 1431, 1431, 59_000]) };
+    let (got, end_after, tx_done) = thread::scope(|sc| {
+        let tx = sc.spawn(|| peer_tx(vh, &plan, &Wr::Whole, None, None, false));
+        let (v, _, _) = app_recv(&a, &plan, false, Duration::from_secs(4));
+        let end = end_of(id);
+        thread::sleep(Duration::from_millis(500));
+        let done = tx.is_finished();
+        // unblock the peer: abort the pair, close the sockets
+        let _ = ev.detach(id);
+        close(vg);
+        close(vh);
+        let _ = tx.join();
+        (v, end, done)
+    });
+    let st1 = evstats();
+    let ok = got.ok == 3 && end_after.is_none() && !tx_done;
+    let j = got
+        .j("app_", J::new())
+        .s("pair_end_after_4s", &end_str(&end_after))
+        .b("peer_write_of_the_4th_frame_finished", tx_done)
+        .n("dg_wait", dstat(&st0, &st1, "dg_wait"))
+        .n("vsock_buffer_size", small as i64)
+        .n("frame_bytes", 59_008);
+    (ok, j)
+}
+
+// ---- negative controls: the module is told to lose / duplicate one datagram per pair; the verifier must flag it
+fn k_neg(ev: &Ev, fault: i32) -> (bool, J) {
+    set_dgfault(fault);
+    let n = 3000u64;
+    let (ad, da) = (Plan::mixed(21, n), Plan::mixed(22, n));
+    let c = mk_chain(ev, &COpts { big: true, d_open: true, dest: None });
+    let st0 = evstats();
+    let out = duplex(&c, &ad, &da, &DupOpts { connected: false, window: 16, ov_ad: None, ov_da: None, target: None });
+    let st1 = evstats();
+    let drops = c.drops();
+    let (e1, e2) = c.close(ev);
+    set_dgfault(0);
+    let flagged = if fault == 1 { out.ad.lost + out.da.lost > 0 } else { out.ad.reorder + out.da.reorder + out.ad.extra + out.da.extra + out.ad.corrupt + out.da.corrupt > 0 };
+    let hits = dstat(&st0, &st1, "fault_hits");
+    let j = chain_detail(&out, &st0, &st1, drops, &e1, &e2).n("fault_hits", hits).n("dgfault", fault as i64);
+    (flagged && hits > 0 && !(out.ad.clean(n) && out.da.clean(n)), j)
+}
+
+// ---- throughput: closed loop, `pop` associations each with one request outstanding; the server echoes. Counts verified datagrams both ways.
+struct Tp {
+    req: AtomicU64,
+    rep: AtomicU64,
+    bad: AtomicU64,
+    timeouts: AtomicU64,
+    stop: AtomicBool,
+}
+fn epoll_new(fds: &[RawFd]) -> RawFd {
+    let ep = unsafe { libc::epoll_create1(0) };
+    for (i, f) in fds.iter().enumerate() {
+        let mut e = libc::epoll_event { events: libc::EPOLLIN as u32, u64: i as u64 };
+        unsafe { libc::epoll_ctl(ep, libc::EPOLL_CTL_ADD, *f, &mut e) };
+    }
+    ep
+}
+fn k_tp(ev: &Ev, pop: usize, payload: usize, secs: u64) -> (bool, J) {
+    let mem0 = meminfo_kb(&["SUnreclaim:", "MemAvailable:"]);
+    let chains: Vec<Chain> = (0..pop).map(|_| mk_chain(ev, &COpts { big: false, d_open: true, dest: None })).collect();
+    let mem1 = meminfo_kb(&["SUnreclaim:", "MemAvailable:"]);
+    for c in &chains {
+        c.a.set_nonblocking(true).unwrap();
+        c.d.as_ref().unwrap().set_nonblocking(true).unwrap();
+    }
+    let tp = Tp { req: AtomicU64::new(0), rep: AtomicU64::new(0), bad: AtomicU64::new(0), timeouts: AtomicU64::new(0), stop: AtomicBool::new(false) };
+    let nw = pop.min(4);
+    let plans: Vec<Plan> = (0..pop).map(|i| Plan::fixed(1000 + i as u64, u64::MAX, payload)).collect();
+    let st0 = evstats();
+    let (mut snap0, mut snap1) = ((0u64, 0u64, 0u64), (0u64, 0u64, 0u64));
+    let (mut cpu0, mut cpu1) = ((0u64, 0u64), (0u64, 0u64));
+    let (mut t0, mut t1) = (Instant::now(), Instant::now());
+    thread::scope(|sc| {
+        let tp = &tp;
+        let chains = &chains;
+        let plans = &plans;
+        let mut hs = vec![];
+        for w in 0..nw {
+            // server: echo for D sockets w, w+nw, ...
+            hs.push(sc.spawn(move || {
+                let idx: Vec<usize> = (w..pop).step_by(nw).collect();
+                let fds: Vec<RawFd> = idx.iter().map(|i| chains[*i].d.as_ref().unwrap().as_raw_fd()).collect();
+                let ep = epoll_new(&fds);
+                let mut buf = vec![0u8; 65_536];
+                let mut exp = vec![];
+                let mut evs = [libc::epoll_event { events: 0, u64: 0 }; 32];
+                while !tp.stop.load(Relaxed) {
+                    let n = unsafe { libc::epoll_wait(ep, evs.as_mut_ptr(), 32, 20) };
+                    for e in evs.iter().take(n.max(0) as usize) {
+                        let ci = idx[e.u64 as usize];
+                        let d = chains[ci].d.as_ref().unwrap();
+                        while let Ok((len, src)) = d.recv_from(&mut buf) {
+                            // verify against the plan of this association (sequence is embedded for len >= 8)
+                            let ok = if len >= 8 {
+                                let sq = u64::from_le_bytes(buf[..8].try_into().unwrap());
+                                plans[ci].fill(sq, &mut exp);
+                                exp[..] == buf[..len]
+                            } else {
+                                len == payload
+                            };
+                            if !ok {
+                                tp.bad.fetch_add(1, Relaxed);
+                            }
+                            tp.req.fetch_add(1, Relaxed);
+                            let _ = d.send_to(&buf[..len], src);
+                        }
+                    }
+                }
+                unsafe { libc::close(ep) };
+            }));
+            // client: closed loop for A sockets w, w+nw, ...
+            hs.push(sc.spawn(move || {
+                let idx: Vec<usize> = (w..pop).step_by(nw).collect();
+                let fds: Vec<RawFd> = idx.iter().map(|i| chains[*i].a.as_raw_fd()).collect();
+                let ep = epoll_new(&fds);
+                let mut seq = vec![0u64; idx.len()];
+                let mut last = vec![Instant::now(); idx.len()];
+                let mut buf = vec![0u8; 65_536];
+                let mut exp = vec![];
+                let mut out = vec![];
+                for (k, ci) in idx.iter().enumerate() {
+                    plans[*ci].fill(0, &mut out);
+                    let _ = chains[*ci].a.send_to(&out, chains[*ci].s_addr());
+                    last[k] = Instant::now();
+                }
+                let mut evs = [libc::epoll_event { events: 0, u64: 0 }; 32];
+                let mut scan = Instant::now();
+                while !tp.stop.load(Relaxed) {
+                    let n = unsafe { libc::epoll_wait(ep, evs.as_mut_ptr(), 32, 20) };
+                    for e in evs.iter().take(n.max(0) as usize) {
+                        let k = e.u64 as usize;
+                        let ci = idx[k];
+                        let a = &chains[ci].a;
+                        while let Ok((len, _)) = a.recv_from(&mut buf) {
+                            plans[ci].fill(seq[k], &mut exp);
+                            if exp[..] != buf[..len] {
+                                tp.bad.fetch_add(1, Relaxed);
+                            }
+                            tp.rep.fetch_add(1, Relaxed);
+                            seq[k] += 1;
+                            plans[ci].fill(seq[k], &mut out);
+                            let _ = a.send_to(&out, chains[ci].s_addr());
+                            last[k] = Instant::now();
+                        }
+                    }
+                    if scan.elapsed() > Duration::from_millis(250) {
+                        scan = Instant::now();
+                        for (k, ci) in idx.iter().enumerate() {
+                            if last[k].elapsed() > Duration::from_millis(800) {
+                                plans[*ci].fill(seq[k], &mut out);
+                                let _ = chains[*ci].a.send_to(&out, chains[*ci].s_addr());
+                                last[k] = Instant::now();
+                                tp.timeouts.fetch_add(1, Relaxed);
+                            }
+                        }
+                    }
+                }
+                unsafe { libc::close(ep) };
+            }));
+        }
+        thread::sleep(Duration::from_secs(2)); // warm-up
+        snap0 = (tp.req.load(Relaxed), tp.rep.load(Relaxed), tp.timeouts.load(Relaxed));
+        cpu0 = cpu_jiffies();
+        t0 = Instant::now();
+        thread::sleep(Duration::from_secs(secs));
+        snap1 = (tp.req.load(Relaxed), tp.rep.load(Relaxed), tp.timeouts.load(Relaxed));
+        cpu1 = cpu_jiffies();
+        t1 = Instant::now();
+        tp.stop.store(true, Relaxed);
+        for h in hs {
+            h.join().unwrap();
+        }
+    });
+    let st1 = evstats();
+    let drops: u64 = chains.iter().map(|c| c.drops().iter().sum::<u64>()).sum();
+    for c in chains {
+        let _ = c.close(ev);
+    }
+    let dt = t1.duration_since(t0).as_secs_f64();
+    let delivered = (snap1.0 - snap0.0) + (snap1.1 - snap0.1);
+    let dps = delivered as f64 / dt;
+    let gib = dps * payload as f64 / (1u64 << 30) as f64;
+    let busy = (cpu1.0 - cpu0.0) as f64 / 100.0 / dt;
+    let us = if delivered > 0 { busy * dt * 1e6 / delivered as f64 } else { 0.0 };
+    let ok = tp.bad.load(Relaxed) == 0 && delivered > 0;
+    let j = J::new()
+        .n("population", pop as i64)
+        .n("payload", payload as i64)
+        .f("seconds", dt)
+        .n("delivered_datagrams", delivered as i64)
+        .f("delivered_datagrams_per_s", dps)
+        .f("application_GiB_per_s", gib)
+        .f("vm_busy_cores", busy)
+        .f("vm_cpu_us_per_delivered_datagram", us)
+        .n("bad", tp.bad.load(Relaxed) as i64)
+        .n("resend_timeouts_in_window", (snap1.2 - snap0.2) as i64)
+        .n("sk_drops_total", drops as i64)
+        .n("dg_ab", dstat(&st0, &st1, "dg_ab"))
+        .n("dg_partial", dstat(&st0, &st1, "dg_partial"))
+        .n("dg_wait", dstat(&st0, &st1, "dg_wait"))
+        .n("setup_sunreclaim_delta_kb", mem1[0] as i64 - mem0[0] as i64)
+        .n("setup_memavailable_delta_kb", mem0[1] as i64 - mem1[1] as i64)
+        .n("setup_per_association_kb_sunreclaim", (mem1[0] as i64 - mem0[0] as i64) / pop as i64);
+    (ok, j)
+}
+
+// ------------------------------------------------------------------------------------------------ drivers
+fn run<F: FnOnce() -> (bool, J) + std::panic::UnwindSafe>(env: &str, name: &str, f: F) {
+    let t = Instant::now();
+    match std::panic::catch_unwind(f) {
+        Ok((ok, j)) => result(env, name, ok, j.n("wall_ms", t.elapsed().as_millis() as i64)),
+        Err(e) => {
+            let m = e.downcast_ref::<String>().cloned().or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default();
+            result(env, name, false, J::new().s("panic", &m));
+        }
+    }
+}
+/// Env 1 peer case: the framed peer is a thread on the loopback vsock
+fn k_peer(ev: &Ev, name0: &str) -> (bool, J) {
+    let nofix = name0 == "truncated-nofix";
+    let name = if nofix { "truncated" } else { name0 };
+    if name.starts_with("truncated") {
+        set_param("trunc_fix", if nofix { 0 } else { 1 });
+    }
+    let spec = pspec(name);
+    let port = NEXT_PORT.fetch_add(1, SeqCst) as u32;
+    let l = vs_listen(port, spec.bufsz);
+    let sp = spec.clone();
+    let h = thread::spawn(move || {
+        let fd = vs_accept(l);
+        close(l);
+        let o = peer_side(&sp, fd);
+        sleep_us(500_000);
+        close(fd);
+        o
+    });
+    let vg = vs_connect(CID_LOCAL, port).expect("loopback connect");
+    let g = guest_side(ev, &spec, vg);
+    let p = h.join().unwrap();
+    close(vg);
+    let (mut gok, gwhy) = guest_pass(&spec, &g);
+    let (pok, pwhy) = peer_pass(&spec, &p, Some(*g.st.get("dg_ab").unwrap_or(&0)));
+    let mut pok = pok;
+    if nofix {
+        // the defect reproduction: without the fix the pair must NOT end by itself, and the peer never sees the connection end
+        gok = g.forced_detach && g.h2g.ok == 3;
+        pok = !p.eof;
+    }
+    if name.starts_with("truncated") {
+        set_param("trunc_fix", 1);
+    }
+    let mut j = guest_json(&g);
+    j = peer_json(&p).0.into_iter().fold(j, |mut j, x| {
+        j.0.push(x);
+        j
+    });
+    let why: Vec<String> = gwhy.into_iter().chain(pwhy).collect();
+    if !why.is_empty() {
+        j = j.s("failed_checks", &why.join("; "));
+    }
+    (gok && pok, j)
+}
+fn env1(args: &[String]) {
+    let ev = Ev::open();
+    let want: Vec<String> = args.iter().flat_map(|a| a.split(',').map(|s| s.to_string()).collect::<Vec<_>>()).collect();
+    let all = want.iter().any(|w| w == "all");
+    let sel = |n: &str| all || want.iter().any(|w| n.starts_with(w.as_str()));
+    let evr = &ev;
+    for l in [0usize, 1, 1431, 4096, 4097, 59_000] {
+        for (cn, c) in [("u", false), ("c", true)] {
+            let nm = format!("sizes-{l}-{cn}");
+            if sel(&nm) {
+                run("k", &nm, std::panic::AssertUnwindSafe(|| k_sizes(evr, l, c)));
+            }
+        }
+    }
+    for (cn, c) in [("u", false), ("c", true)] {
+        let nm = format!("mixed-{cn}");
+        if sel(&nm) {
+            run("k", &nm, std::panic::AssertUnwindSafe(|| k_mixed(evr, c)));
+        }
+    }
+    if sel("oversize-chain") {
+        run("k", "oversize-chain", std::panic::AssertUnwindSafe(|| k_oversize(evr)));
+    }
+    for nm in ["credit", "chunked", "oversize", "badframe-len", "badframe-magic", "truncated", "truncated-nofix", "truncatedhdr", "eof"] {
+        if sel(&format!("peer-{nm}")) {
+            run("k", &format!("peer-{nm}"), std::panic::AssertUnwindSafe(|| k_peer(evr, nm)));
+        }
+    }
+    if sel("peer-stall") {
+        run("k", "peer-stall", std::panic::AssertUnwindSafe(|| k_peer(evr, "stall")));
+    }
+    if sel("stall-dest") {
+        run("k", "stall-dest", std::panic::AssertUnwindSafe(|| k_stall(evr, true)));
+    }
+    if sel("stall-app") {
+        run("k", "stall-app", std::panic::AssertUnwindSafe(|| k_stall(evr, false)));
+    }
+    for w in ["econnrefused", "eperm-drop", "eperm-reject", "eperm-bpf"] {
+        if sel(&format!("err-{w}")) {
+            run("k", &format!("err-{w}"), std::panic::AssertUnwindSafe(|| k_error(evr, w)));
+        }
+    }
+    for (d, e, nm) in [(true, true, "slot-release-discard"), (false, true, "slot-release-control-no-discard"), (true, false, "slot-release-autobind-port-changes")] {
+        if sel(nm) {
+            run("k", nm, std::panic::AssertUnwindSafe(|| k_slot_release(evr, d, e)));
+        }
+    }
+    for w in ["eagain", "qdisc-drop"] {
+        if sel(&format!("egress-{w}")) {
+            run("k", &format!("egress-{w}"), std::panic::AssertUnwindSafe(|| k_egress(evr, w)));
+        }
+    }
+    if sel("err-app-gone") {
+        run("k", "err-app-gone", std::panic::AssertUnwindSafe(|| k_app_gone(evr)));
+    }
+    for (h, nm) in [(false, "recvmsg4-control-no-recv-hook"), (true, "recvmsg4-rewrite")] {
+        if sel(nm) {
+            run("k", nm, std::panic::AssertUnwindSafe(|| k_recvmsg4(evr, h)));
+        }
+    }
+    if sel("attach-errnos") {
+        run("k", "attach-errnos", std::panic::AssertUnwindSafe(|| k_attach_errnos(evr)));
+    }
+    if sel("vsock-small-window") {
+        run("k", "vsock-small-window", std::panic::AssertUnwindSafe(|| k_small_window(evr)));
+    }
+    if sel("churn") {
+        run("k", "churn", std::panic::AssertUnwindSafe(|| k_churn(evr, 300)));
+    }
+    if sel("early") {
+        run("k", "early", std::panic::AssertUnwindSafe(|| k_early(evr)));
+    }
+    for (f, nm) in [(1, "neg-lose-one"), (2, "neg-duplicate-one")] {
+        if sel(nm) {
+            run("k", nm, std::panic::AssertUnwindSafe(|| k_neg(evr, f)));
+        }
+    }
+    for pop in [1usize, 64] {
+        for payload in [0usize, 64, 1431, 59_000] {
+            let nm = format!("tp-pop{pop}-{payload}");
+            if sel(&nm) {
+                for rep in 0..3 {
+                    run("k", &format!("{nm}-r{rep}"), std::panic::AssertUnwindSafe(|| k_tp(evr, pop, payload, 8)));
+                }
+            }
+        }
+    }
+    let st = evstats();
+    println!("{{\"ev\":\"final\",\"stats\":\"{:?}\"}}", st);
+}
+
+// ---- Env 2: the guest side (Cloud Hypervisor guest, vhost vsock to the physical host) and the host-side userspace peer
+fn tp_args(case: &str) -> (usize, usize) {
+    let p: Vec<&str> = case.split('-').collect();
+    (p[1].parse().unwrap(), p[2].parse().unwrap())
+}
+/// Env 2 throughput, guest side: `pop` associations A_i -> S_i -> [module] -> vhost vsock -> host echo; closed loop, one request outstanding per association.
+fn tp_guest(ev: &Ev, case: &str) {
+    let (pop, payload) = tp_args(case);
+    let secs = 8u64;
+    struct As {
+        a: UdpSocket,
+        s: UdpSocket,
+        vg: RawFd,
+        id: u32,
+    }
+    let mut v: Vec<As> = vec![];
+    for _ in 0..pop {
+        let a = udp_bind(1);
+        let s = udp_bind(2);
+        s.connect(a.local_addr().unwrap()).unwrap();
+        a.set_nonblocking(true).unwrap();
+        let mut vg = Err(0);
+        for _ in 0..300 {
+            vg = vs_connect(CID_HOST, FWD_PORT);
+            if vg.is_ok() {
+                break;
+            }
+            sleep_us(100_000);
+        }
+        let vg = vg.expect("connect to host");
+        let id = ev.attach(s.as_raw_fd(), vg, 1).expect("attach");
+        v.push(As { a, s, vg, id });
+    }
+    let nw = pop.min(4);
+    let plans: Vec<Plan> = (0..pop).map(|i| Plan::fixed(2000 + i as u64, u64::MAX, payload)).collect();
+    let (rep, bad, tmo) = (AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0));
+    let stop = AtomicBool::new(false);
+    let st0 = evstats();
+    let (mut s0, mut s1) = (0u64, 0u64);
+    let (mut c0, mut c1) = ((0u64, 0u64), (0u64, 0u64));
+    let (mut t0, mut t1) = (Instant::now(), Instant::now());
+    thread::scope(|sc| {
+        let (v, plans, rep, bad, tmo, stop) = (&v, &plans, &rep, &bad, &tmo, &stop);
+        let mut hs = vec![];
+        for w in 0..nw {
+            hs.push(sc.spawn(move || {
+                let idx: Vec<usize> = (w..pop).step_by(nw).collect();
+                let fds: Vec<RawFd> = idx.iter().map(|i| v[*i].a.as_raw_fd()).collect();
+                let ep = epoll_new(&fds);
+                let mut seq = vec![0u64; idx.len()];
+                let mut last = vec![Instant::now(); idx.len()];
+                let mut buf = vec![0u8; 65_536];
+                let (mut exp, mut out) = (vec![], vec![]);
+                for (k, ci) in idx.iter().enumerate() {
+                    plans[*ci].fill(0, &mut out);
+                    let _ = v[*ci].a.send_to(&out, v[*ci].s.local_addr().map(v4).unwrap());
+                    last[k] = Instant::now();
+                }
+                let mut evs = [libc::epoll_event { events: 0, u64: 0 }; 32];
+                let mut scan = Instant::now();
+                while !stop.load(Relaxed) {
+                    let n = unsafe { libc::epoll_wait(ep, evs.as_mut_ptr(), 32, 20) };
+                    for e in evs.iter().take(n.max(0) as usize) {
+                        let k = e.u64 as usize;
+                        let ci = idx[k];
+                        while let Ok((len, _)) = v[ci].a.recv_from(&mut buf) {
+                            plans[ci].fill(seq[k], &mut exp);
+                            if exp[..] != buf[..len] {
+                                bad.fetch_add(1, Relaxed);
+                            }
+                            rep.fetch_add(1, Relaxed);
+                            seq[k] += 1;
+                            plans[ci].fill(seq[k], &mut out);
+                            let _ = v[ci].a.send_to(&out, v4(v[ci].s.local_addr().unwrap()));
+                            last[k] = Instant::now();
+                        }
+                    }
+                    if scan.elapsed() > Duration::from_millis(250) {
+                        scan = Instant::now();
+                        for (k, ci) in idx.iter().enumerate() {
+                            if last[k].elapsed() > Duration::from_millis(800) {
+                                plans[*ci].fill(seq[k], &mut out);
+                                let _ = v[*ci].a.send_to(&out, v4(v[*ci].s.local_addr().unwrap()));
+                                last[k] = Instant::now();
+                                tmo.fetch_add(1, Relaxed);
+                            }
+                        }
+                    }
+                }
+                unsafe { libc::close(ep) };
+            }));
+        }
+        thread::sleep(Duration::from_secs(2));
+        s0 = rep.load(Relaxed);
+        c0 = cpu_jiffies();
+        t0 = Instant::now();
+        thread::sleep(Duration::from_secs(secs));
+        s1 = rep.load(Relaxed);
+        c1 = cpu_jiffies();
+        t1 = Instant::now();
+        stop.store(true, Relaxed);
+        for h in hs {
+            h.join().unwrap();
+        }
+    });
+    let st1 = evstats();
+    let drops: u64 = v.iter().map(|x| sk_drops(x.s.as_raw_fd()) + sk_drops(x.a.as_raw_fd())).sum();
+    for x in &v {
+        let _ = ev.detach(x.id);
+        close(x.vg);
+    }
+    let dt = t1.duration_since(t0).as_secs_f64();
+    let delivered = 2 * (s1 - s0); // each round trip delivers a request to the host peer and a reply to the application
+    let dps = delivered as f64 / dt;
+    let busy = (c1.0 - c0.0) as f64 / 100.0 / dt;
+    let j = J::new()
+        .n("population", pop as i64)
+        .n("payload", payload as i64)
+        .f("seconds", dt)
+        .n("delivered_datagrams", delivered as i64)
+        .f("delivered_datagrams_per_s", dps)
+        .f("application_GiB_per_s", dps * payload as f64 / (1u64 << 30) as f64)
+        .f("guest_vm_busy_cores", busy)
+        .f("guest_vm_cpu_us_per_delivered_datagram", if delivered > 0 { busy * dt * 1e6 / delivered as f64 } else { 0.0 })
+        .n("bad", bad.load(Relaxed) as i64)
+        .n("resend_timeouts_total", tmo.load(Relaxed) as i64)
+        .n("sk_drops_total", drops as i64)
+        .n("dg_partial", dstat(&st0, &st1, "dg_partial"))
+        .n("dg_wait", dstat(&st0, &st1, "dg_wait"));
+    result("g", case, bad.load(Relaxed) == 0 && delivered > 0, j);
+}
+/// Env 2 throughput, host side: accept `pop` connections and echo every byte back (the frames are echoed verbatim)
+fn tp_host(case: &str) {
+    let (pop, _) = tp_args(case);
+    let l = vs_listen(FWD_PORT, None);
+    println!("{{\"ev\":\"host-listening\",\"case\":\"{case}\"}}");
+    let conns: Vec<RawFd> = (0..pop).map(|_| vs_accept(l)).collect();
+    let nw = pop.min(4);
+    let bytes = AtomicU64::new(0);
+    let t0 = Instant::now();
+    thread::scope(|sc| {
+        let conns = &conns;
+        let bytes = &bytes;
+        for w in 0..nw {
+            sc.spawn(move || {
+                let idx: Vec<usize> = (w..pop).step_by(nw).collect();
+                let fds: Vec<RawFd> = idx.iter().map(|i| conns[*i]).collect();
+                let ep = epoll_new(&fds);
+                let mut open = idx.len();
+                let mut buf = vec![0u8; 1 << 17];
+                let mut evs = [libc::epoll_event { events: 0, u64: 0 }; 32];
+                while open > 0 && t0.elapsed() < Duration::from_secs(120) {
+                    let n = unsafe { libc::epoll_wait(ep, evs.as_mut_ptr(), 32, 200) };
+                    for e in evs.iter().take(n.max(0) as usize) {
+                        let fd = fds[e.u64 as usize];
+                        let r = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+                        if r <= 0 {
+                            unsafe { libc::epoll_ctl(ep, libc::EPOLL_CTL_DEL, fd, std::ptr::null_mut()) };
+                            open -= 1;
+                            continue;
+                        }
+                        bytes.fetch_add(r as u64, Relaxed);
+                        let _ = write_all(fd, &buf[..r as usize]);
+                    }
+                }
+                unsafe { libc::close(ep) };
+            });
+        }
+    });
+    result("h", case, true, J::new().n("echoed_bytes", bytes.load(Relaxed) as i64).n("connections", pop as i64));
+    for c in conns {
+        close(c);
+    }
+    close(l);
+}
+fn env2_guest(case: &str) {
+    let ev = Ev::open();
+    if case.starts_with("tp-") {
+        return tp_guest(&ev, case);
+    }
+    let spec = pspec(case);
+    let mut vg = Err(0);
+    for _ in 0..300 {
+        vg = vs_connect(CID_HOST, FWD_PORT);
+        if vg.is_ok() {
+            break;
+        }
+        sleep_us(100_000);
+    }
+    let vg = vg.expect("connect to the host peer on vsock 2:1240");
+    let g = guest_side(&ev, &spec, vg);
+    let (gok, why) = guest_pass(&spec, &g);
+    let mut j = guest_json(&g);
+    if !why.is_empty() {
+        j = j.s("failed_checks", &why.join("; "));
+    }
+    result("g", case, gok, j);
+    sleep_us(500_000);
+    close(vg);
+}
+fn env2_host(case: &str) {
+    if case.starts_with("tp-") {
+        return tp_host(case);
+    }
+    let spec = pspec(case);
+    let l = vs_listen(FWD_PORT, spec.bufsz);
+    println!("{{\"ev\":\"host-listening\",\"case\":\"{case}\"}}");
+    let fd = vs_accept(l);
+    let p = peer_side(&spec, fd);
+    let (pok, why) = peer_pass(&spec, &p, None);
+    let mut j = peer_json(&p);
+    if !why.is_empty() {
+        j = j.s("failed_checks", &why.join("; "));
+    }
+    result("h", case, pok, j);
+    sleep_us(1_500_000);
+    close(fd);
+    close(l);
+}
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    match args.get(1).map(|s| s.as_str()) {
+        Some("k") => env1(&args[2..]),
+        Some("guest") => env2_guest(&args[2]),
+        Some("host") => env2_host(&args[2]),
+        _ => eprintln!("usage: dgprobe k <cases|all> | guest <case> | host <case>"),
+    }
+}

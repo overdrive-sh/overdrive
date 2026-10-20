@@ -29,6 +29,8 @@ State 1
   bHeldByOther = false
   act = "none"
   badAct = false
+  gSess = 0
+  conf_step = InitWith({ o: "g" })
 
 State 2
   alloc = "Provisioned"
@@ -40,6 +42,7 @@ State 3
 
 State 4
   sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "pending" })
+  gSess = 2
 
 State 5
   sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "reading" })
@@ -49,19 +52,20 @@ State 6
   sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "live" })
 
 State 7
-  flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: false, req: 0, st: "queued" })
+  flows = Map(1 -> { gen: 1, inFlight: false, req: 0, st: "queued" }, 2 -> { gen: 0, inFlight: false, req: 0, st: "none" })
 
 State 8
   alloc = "Active"
   act = "Activated"
 
 State 9
-  flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: false, req: 0, st: "checked" })
+  flows = Map(1 -> { gen: 1, inFlight: false, req: 0, st: "checked" }, 2 -> { gen: 0, inFlight: false, req: 0, st: "none" })
   act = "none"
 
 State 10
+  alloc = "Retiring"
   claim = 0
   sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "closed" })
 
 State 11
-  flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: false, req: 0, st: "accepted" })
+  flows = Map(1 -> { gen: 1, inFlight: false, req: 0, st: "accepted" }, 2 -> { gen: 0, inFlight: false, req: 0, st: "none" })

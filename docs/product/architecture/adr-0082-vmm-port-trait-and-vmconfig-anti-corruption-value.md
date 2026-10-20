@@ -651,7 +651,9 @@ the five faults it must be able to answer, but neither this ADR nor
 `brief.md` § 100 (which separately asserted `SimVmm` is *"the injection
 point for Slice 03's fail-closed confinement case"*) ever pinned HOW a real
 in-process `overdrive serve` reaches `SimVmm` in place of
-`CloudHypervisorVmm`. **ADR-0083 § D8** now pins the seam:
+`CloudHypervisorVmm`. (2026-10-19: the `ServerConfig` seam named here is
+removed; `run_server` receives the VMM from the composition root —
+ADR-0219, and the amendment of ADR-0083 § D8.) **ADR-0083 § D8** now pins the seam:
 `ServerConfig.vmm_override`, a `#[cfg(feature = "integration-tests")]`-gated
 whole-port substitution mirroring the already-shipped
 `mtls_identity_override`, ruled explicitly NOT `dataplane_override`-shaped
@@ -1821,7 +1823,9 @@ DELIVER:
 faults `SimVmm` must be able to answer; it does not specify how `SimVmm`
 gets composed in place of `CloudHypervisorVmm` for a Tier-3 test exercising
 S-VM-13 (scenario 1, non-reflink staging) or S-VM-51 (confinement, via
-scenarios 2–4). That wiring is **ADR-0083 § D8** — `ServerConfig
+scenarios 2–4). (2026-10-19: that wiring is now the composition root's
+`NodeAdapters`, ADR-0219; the `ServerConfig` field below is removed.) That
+wiring is **ADR-0083 § D8** — `ServerConfig
 .vmm_override`, a whole-port substitution seam gated behind
 `#[cfg(feature = "integration-tests")]`, ruled there as the port-boundary
 pattern (`Sim*` swapped in for exactly one port) rather than a

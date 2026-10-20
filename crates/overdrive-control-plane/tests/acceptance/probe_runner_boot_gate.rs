@@ -110,7 +110,14 @@ async fn given_passing_tcp_prober_when_probe_gate_runs_then_returns_probe_runner
         0,
     ));
 
-    let result = compose_and_probe_runner_gate(tcp, http, clock, obs).await;
+    let result = compose_and_probe_runner_gate(
+        tcp,
+        http,
+        clock,
+        obs,
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+    )
+    .await;
 
     let runner = result.expect("probe-gate must succeed when TCP adapter returns Pass");
     assert_eq!(
@@ -150,7 +157,14 @@ async fn given_failing_tcp_prober_when_probe_gate_runs_then_returns_typed_refusa
         0,
     ));
 
-    let result = compose_and_probe_runner_gate(tcp, http, clock, obs).await;
+    let result = compose_and_probe_runner_gate(
+        tcp,
+        http,
+        clock,
+        obs,
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+    )
+    .await;
 
     let Err(err) = result else {
         panic!("probe-gate must refuse when TCP adapter returns Fail");

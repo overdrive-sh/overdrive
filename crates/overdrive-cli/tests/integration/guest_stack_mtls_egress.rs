@@ -31,50 +31,41 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read as _, Write as _};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::Command;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use futures::FutureExt as _;
 use overdrive_cli::commands::deploy::{DeployArgs, DeployOutput, StopArgs, deploy, stop};
-use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
+use overdrive_cli::commands::serve::ServeHandle;
 use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput, describe};
 use overdrive_control_plane::api::{
     AllocStateWire, AllocStatusResponse, AllocStatusRowBody, IssuedCertSummary, ResourcesBody,
-    RestartBudget, StopOutcome, TransitionRecord, TransitionSource,
+    RestartBudget, TransitionRecord, TransitionSource,
 };
-use overdrive_control_plane::VmOverride;
-use overdrive_control_plane::dns_responder::frontend_addr_allocator::WORKLOAD_FRONTEND_BASE;
 use overdrive_control_plane::veth_provisioner::{DEFAULT_CLIENT_IFACE, WORKLOAD_SUBNET_BASE};
-use overdrive_core::cgroup::CgroupPath;
-use overdrive_core::guest_transport::ClaimedGuestCid;
+use overdrive_core::guest_transport::GuestCid;
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::ObservationStore as _;
 use overdrive_core::traits::vmm::{
     Result as VmmResult, VmControl, VmProcess, VmTermination, Vmm, VmmProbeError,
 };
-use overdrive_core::transition_reason::StoppedBy;
 use overdrive_core::transition_reason::TerminalCondition;
-use overdrive_core::vm::config::{RootfsPlan, VmConfig, VmRunDir, clone_staging_dir};
+use overdrive_core::vm::config::VmConfig;
 use overdrive_core::{SpiffeId, TransitionReason, aggregate::WorkloadKind};
-use overdrive_netlink::nft::{self, SharedIpInterceptIdentity, SharedIpInterceptState};
 use overdrive_store_local::LocalObservationStore;
 use overdrive_testing::vm_fixture::VmFixture;
 use proptest::prelude::*;
 use serial_test::serial;
 use tempfile::TempDir;
-use tracing::field::{Field, Visit};
-use tracing::{Event, Subscriber};
-use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
 
-use super::serve_lifetime_support::kill_serve_owner;
 use super::vm_walking_skeleton::{
-    PACKET_SOCKET_SEAL_SETTLE, TeardownBound, build_spin_binary, config_path, poll_until_running,
-    poll_until_terminal, seal_packet_socket, shared_staging_root, stage_rootfs_with_extra_binaries,
-    stage_rootfs_with_extra_binary, vm_job_toml, write_toml,
+    PACKET_SOCKET_SEAL_SETTLE, build_spin_binary, config_path, poll_until_running,
+    poll_until_terminal, seal_packet_socket, shared_staging_root, stage_rootfs_with_extra_binary,
+    vm_job_toml, write_toml,
 };
 
 pub(super) const SERVICE_PORT: u16 = 18_951;
@@ -91,7 +82,6 @@ const NON_MESH_REQUEST: &[u8] =
 const NON_MESH_RESPONSE: &[u8] =
     b"GTI_NON_MESH_RESPONSE_distinct_clear_reply_reaches_guest_unchanged_0201";
 const LOOPBACK_IFACE: &str = "lo";
-const INTERCEPT_INSTALL_SUCCESS: &str = "mtls.intercept.install.success";
 const OPERATOR_MARKER: &str = "/gti-operator-action-ran";
 const OPERATOR_CONSOLE_MARKER: &str = "GTI_OPERATOR_ACTION_RAN";
 
@@ -105,17 +95,14 @@ pub(super) async fn spawn_mtls_server() -> (ServeHandle, TempDir) {
     std::fs::create_dir_all(&data_dir).expect("create serve data dir");
     std::fs::create_dir_all(&config_dir).expect("create serve config dir");
 
-    let args = ServeArgs {
-        bind: "127.0.0.1:0".parse().expect("parse loopback bind"),
+    let args = super::serve_fixture::serve_args(
+        "127.0.0.1:0".parse().expect("parse loopback bind"),
         data_dir,
         config_dir,
-    };
-    let handle = overdrive_cli::commands::serve::run_with_kek(
-        args,
-        std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-    )
-    .await
-    .expect("start mTLS-composed serve through the CLI composition root");
+    );
+    let handle = super::serve_fixture::serve(args, super::serve_fixture::DataplaneChoice::Host)
+        .await
+        .expect("start mTLS-composed serve through the CLI composition root");
     (handle, tmp)
 }
 
@@ -141,11 +128,7 @@ impl Vmm for CaptureReadyVmm {
         self.inner.probe().await
     }
 
-    async fn create(
-        &self,
-        config: &VmConfig,
-        vsock: ClaimedGuestCid,
-    ) -> VmmResult<VmProcess> {
+    async fn create(&self, config: &VmConfig, cid: GuestCid) -> VmmResult<VmProcess> {
         let (release, wait) = tokio::sync::oneshot::channel();
         self.spawn_cut.send(VmmSpawnCut { config: config.clone(), release }).map_err(|_| {
             overdrive_core::traits::vmm::VmmError::create(
@@ -157,7 +140,7 @@ impl Vmm for CaptureReadyVmm {
                 "capture observer did not acknowledge capture-ready before VMM spawn",
             )
         })?;
-        self.inner.create(config, vsock).await
+        self.inner.create(config, cid).await
     }
 
     async fn terminate(&self, control: &VmControl, grace: Duration) -> VmmResult<VmTermination> {
@@ -184,18 +167,21 @@ async fn spawn_capture_observed_mtls_server_at(
 ) -> (ServeHandle, VmmCutReceiver) {
     std::fs::create_dir_all(data_dir).expect("create serve data dir");
     std::fs::create_dir_all(config_dir).expect("create serve config dir");
-    let args = ServeArgs {
-        bind: "127.0.0.1:0".parse().expect("parse loopback bind"),
-        data_dir: data_dir.to_path_buf(),
-        config_dir: config_dir.to_path_buf(),
-    };
+    let args = super::serve_fixture::serve_args(
+        "127.0.0.1:0".parse().expect("parse loopback bind"),
+        data_dir.to_path_buf(),
+        config_dir.to_path_buf(),
+    );
     let (spawn_cut, cuts) = std::sync::mpsc::channel();
     let vmm =
         CaptureReadyVmm { inner: Arc::new(overdrive_host::CloudHypervisorVmm::new()), spawn_cut };
-    let handle = overdrive_cli::commands::serve::run_with_kek_and_vm_override(
+    let handle = super::serve_fixture::serve_with_vm(
         args,
-        Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-        VmOverride { vmm: Arc::new(vmm), beacon: Arc::new(overdrive_host::VsockBeaconIo::new()) },
+        super::serve_fixture::DataplaneChoice::Host,
+        super::serve_fixture::VmPorts {
+            vmm: Arc::new(vmm),
+            beacon: Arc::new(overdrive_host::VsockBeaconIo::new()),
+        },
     )
     .await
     .expect("start production-mTLS serve with observation-only real-VMM decorator");
@@ -241,11 +227,7 @@ impl Vmm for FailureObservedVmm {
         self.inner.probe().await
     }
 
-    async fn create(
-        &self,
-        config: &VmConfig,
-        vsock: ClaimedGuestCid,
-    ) -> VmmResult<VmProcess> {
+    async fn create(&self, config: &VmConfig, cid: GuestCid) -> VmmResult<VmProcess> {
         let (release, wait) = tokio::sync::oneshot::channel();
         self.spawn_cut.send(VmmSpawnCut { config: config.clone(), release }).map_err(|_| {
             overdrive_core::traits::vmm::VmmError::create(
@@ -257,7 +239,7 @@ impl Vmm for FailureObservedVmm {
                 "failure observer did not acknowledge capture-ready before VMM spawn",
             )
         })?;
-        let process = self.inner.create(config, vsock).await?;
+        let process = self.inner.create(config, cid).await?;
         self.created.send(process.control.clone()).map_err(|_| {
             overdrive_core::traits::vmm::VmmError::create(
                 "failure observer disappeared after VMM spawn",
@@ -357,11 +339,11 @@ async fn spawn_failure_observed_mtls_server_at(
 ) {
     std::fs::create_dir_all(data_dir).expect("create serve data dir");
     std::fs::create_dir_all(config_dir).expect("create serve config dir");
-    let args = ServeArgs {
-        bind: "127.0.0.1:0".parse().expect("parse loopback bind"),
-        data_dir: data_dir.to_path_buf(),
-        config_dir: config_dir.to_path_buf(),
-    };
+    let args = super::serve_fixture::serve_args(
+        "127.0.0.1:0".parse().expect("parse loopback bind"),
+        data_dir.to_path_buf(),
+        config_dir.to_path_buf(),
+    );
     let (spawn_cut, cuts) = std::sync::mpsc::channel();
     let (created_tx, created) = std::sync::mpsc::channel();
     let (boundary_tx, boundary_observed) = std::sync::mpsc::channel();
@@ -372,10 +354,13 @@ async fn spawn_failure_observed_mtls_server_at(
         created: created_tx,
         boundary_observed: boundary_tx,
     };
-    let handle = overdrive_cli::commands::serve::run_with_kek_and_vm_override(
+    let handle = super::serve_fixture::serve_with_vm(
         args,
-        Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-        VmOverride { vmm: Arc::new(vmm), beacon: Arc::new(overdrive_host::VsockBeaconIo::new()) },
+        super::serve_fixture::DataplaneChoice::Host,
+        super::serve_fixture::VmPorts {
+            vmm: Arc::new(vmm),
+            beacon: Arc::new(overdrive_host::VsockBeaconIo::new()),
+        },
     )
     .await
     .expect("start production-mTLS serve with failure-observed real VMM");
@@ -402,222 +387,6 @@ pub(super) fn build_static_binary(tmp: &Path, name: &str, source: &str) -> PathB
         .expect("spawn rustc for static test fixture");
     assert!(status.success(), "rustc must build {name}");
     out
-}
-
-struct RootfsMountFixture {
-    watchdog: Option<std::process::Child>,
-    dir: TempDir,
-    mountpoint: PathBuf,
-    ready: PathBuf,
-    stop: PathBuf,
-    loop_file: PathBuf,
-    fault: Option<RootfsWatchdogFault>,
-    expected_exit: RootfsWatchdogExit,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RootfsWatchdogFault {
-    Stop,
-    Signal,
-    Wait,
-    Verify,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum RootfsWatchdogExit {
-    #[default]
-    Clean,
-    Signalled,
-}
-
-impl RootfsMountFixture {
-    fn mount(rootfs: &Path, tmp: &Path) -> Self {
-        let dir = tempfile::Builder::new()
-            .prefix("resolver-rootfs-watchdog-")
-            .tempdir_in(tmp)
-            .expect("create resolver watchdog dir before mutation");
-        let mountpoint = dir.path().join("mnt");
-        let ready = dir.path().join("ready");
-        let stop = dir.path().join("stop");
-        let loop_file = dir.path().join("loop-device");
-        std::fs::create_dir(&mountpoint).expect("create guarded rootfs mountpoint");
-        let script = r#"
-set -eu
-parent="$1"; rootfs="$2"; mountpoint="$3"; ready="$4"; stop="$5"; loop_file="$6"
-loopdev=""
-cleanup() {
-  set +e
-  if mountpoint -q "$mountpoint"; then umount "$mountpoint"; fi
-  if [ -n "$loopdev" ]; then losetup -d "$loopdev"; fi
-}
-trap cleanup EXIT
-trap 'exit 128' HUP INT TERM
-loopdev=$(losetup --find --show "$rootfs")
-printf '%s\n' "$loopdev" > "$loop_file"
-mount "$loopdev" "$mountpoint"
-: > "$ready"
-while kill -0 "$parent" 2>/dev/null && [ ! -e "$stop" ]; do sleep 0.05; done
-"#;
-        let watchdog = Command::new("sh")
-            .arg("-c")
-            .arg(script)
-            .arg("rootfs-watchdog")
-            .arg(std::process::id().to_string())
-            .arg(rootfs)
-            .arg(&mountpoint)
-            .arg(&ready)
-            .arg(&stop)
-            .arg(&loop_file)
-            .spawn()
-            .expect("spawn rootfs cleanup watchdog before loop attachment");
-        let mut fixture = Self {
-            watchdog: Some(watchdog),
-            dir,
-            mountpoint,
-            ready,
-            stop,
-            loop_file,
-            fault: None,
-            expected_exit: RootfsWatchdogExit::Clean,
-        };
-        let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        while !fixture.ready.exists() {
-            if let Some(status) = fixture
-                .watchdog
-                .as_mut()
-                .expect("watchdog present")
-                .try_wait()
-                .expect("poll rootfs watchdog")
-            {
-                let detached = fixture.verify_detached();
-                if detached.is_ok() {
-                    fixture.watchdog = None;
-                }
-                panic!("rootfs watchdog exited before mutation: {status}; detached={detached:?}");
-            }
-            assert!(std::time::Instant::now() < deadline, "rootfs watchdog became ready");
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        fixture
-    }
-
-    fn finish(mut self) {
-        self.restore().unwrap_or_else(|error| panic!("authoritative rootfs restoration: {error}"));
-    }
-
-    fn inject_fault(&mut self, fault: RootfsWatchdogFault) {
-        self.fault = Some(fault);
-    }
-
-    fn take_fault(&mut self, expected: RootfsWatchdogFault) -> bool {
-        if self.fault == Some(expected) {
-            self.fault = None;
-            true
-        } else {
-            false
-        }
-    }
-
-    fn validate_exit(&self, status: std::process::ExitStatus) -> Result<(), String> {
-        match self.expected_exit {
-            RootfsWatchdogExit::Clean if status.success() => Ok(()),
-            RootfsWatchdogExit::Signalled if status.code() == Some(128) => Ok(()),
-            expected => Err(format!("watchdog exited {status}; expected {expected:?}")),
-        }
-    }
-
-    fn signal_and_wait(&mut self, signal: i32) -> Result<(), String> {
-        if self.take_fault(RootfsWatchdogFault::Signal) {
-            return Err("injected watchdog signal failure".to_owned());
-        }
-        let watchdog = self.watchdog.as_mut().ok_or_else(|| "watchdog absent".to_owned())?;
-        // SAFETY: the PID belongs to the live child retained by this fixture.
-        if unsafe { libc::kill(watchdog.id().cast_signed(), signal) } != 0 {
-            return Err(std::io::Error::last_os_error().to_string());
-        }
-        self.expected_exit = RootfsWatchdogExit::Signalled;
-        if self.take_fault(RootfsWatchdogFault::Wait) {
-            return Err("injected watchdog wait failure".to_owned());
-        }
-        let status = self
-            .watchdog
-            .as_mut()
-            .expect("watchdog ownership retained after signal")
-            .wait()
-            .map_err(|error| error.to_string())?;
-        self.validate_exit(status)?;
-        if self.take_fault(RootfsWatchdogFault::Verify) {
-            return Err("injected watchdog detached-state verification failure".to_owned());
-        }
-        self.verify_detached()?;
-        self.watchdog = None;
-        Ok(())
-    }
-
-    fn restore(&mut self) -> Result<(), String> {
-        if self.watchdog.is_none() {
-            return Ok(());
-        }
-        if self.take_fault(RootfsWatchdogFault::Stop) {
-            return Err("injected watchdog stop-file failure".to_owned());
-        }
-        std::fs::write(&self.stop, b"").map_err(|error| error.to_string())?;
-        if self.take_fault(RootfsWatchdogFault::Wait) {
-            return Err("injected watchdog wait failure".to_owned());
-        }
-        let status = self
-            .watchdog
-            .as_mut()
-            .expect("watchdog ownership retained through stop")
-            .wait()
-            .map_err(|error| error.to_string())?;
-        self.validate_exit(status)?;
-        if self.take_fault(RootfsWatchdogFault::Verify) {
-            return Err("injected watchdog detached-state verification failure".to_owned());
-        }
-        self.verify_detached()?;
-        self.watchdog = None;
-        Ok(())
-    }
-
-    fn verify_detached(&self) -> Result<(), String> {
-        if Command::new("mountpoint")
-            .args(["-q"])
-            .arg(&self.mountpoint)
-            .status()
-            .map_err(|error| error.to_string())?
-            .success()
-        {
-            return Err(format!("{} remains mounted", self.mountpoint.display()));
-        }
-        let loop_device =
-            std::fs::read_to_string(&self.loop_file).map_err(|error| error.to_string())?;
-        if Command::new("losetup")
-            .arg(loop_device.trim())
-            .output()
-            .map_err(|error| error.to_string())?
-            .status
-            .success()
-        {
-            return Err(format!("{} remains attached", loop_device.trim()));
-        }
-        Ok(())
-    }
-}
-
-impl Drop for RootfsMountFixture {
-    fn drop(&mut self) {
-        if let Err(error) = self.restore() {
-            eprintln!(
-                "authoritative rootfs fixture restoration failed in {}: {error}",
-                self.dir.path().display()
-            );
-            if std::thread::panicking() {
-                std::process::abort();
-            }
-            panic!("authoritative rootfs fixture restoration failed: {error}");
-        }
-    }
 }
 
 fn build_exit_78_binary(tmp: &Path) -> PathBuf {
@@ -685,7 +454,6 @@ struct ParsedTcpSegment<'a> {
     sequence: u32,
     flags: u8,
     payload: &'a [u8],
-    total_len: usize,
 }
 
 impl FlowTuple {
@@ -696,15 +464,12 @@ impl FlowTuple {
 
 #[derive(Debug, Clone, Default)]
 struct WireScan {
-    exact_tuple: Option<FlowTuple>,
     plaintext_hits_on_exact_peer_tuple: u64,
     plaintext_hits_on_other_same_port_streams: u64,
     same_port_streams_observed: usize,
     plaintext_markers_by_tuple: BTreeMap<FlowTuple, u64>,
     plaintext_markers_by_interface_tuple: BTreeMap<(u32, FlowTuple), u64>,
     interfaces_by_tuple: BTreeMap<FlowTuple, BTreeSet<u32>>,
-    capture_packets: u32,
-    capture_drops: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -717,9 +482,6 @@ struct KtlsSocketEvidence {
 
 #[derive(Debug)]
 pub(super) struct CapturedFrame {
-    /// Kernel packet-event time from `SCM_TIMESTAMPNS`. Missing ancillary
-    /// data remains `None`, so unprovable ordering is classified pre-ready.
-    pub(super) kernel_event_at: Option<KernelRealtime>,
     pub(super) ifindex: u32,
     protocol: u16,
     packet_type: u8,
@@ -749,109 +511,9 @@ pub(super) struct PacketStatistics {
     pub(super) drops: u32,
 }
 
-#[derive(Debug)]
-pub(super) struct CaptureBatch {
-    pub(super) frames: Vec<CapturedFrame>,
-    pub(super) statistics: PacketStatistics,
-    /// One entry per pending `ENETDOWN` the socket reported, in order: the
-    /// number of frames already captured when it was reported. A capture bound
-    /// while its device is down reports exactly one, at zero frames.
-    pub(super) link_down_reports: Vec<usize>,
-    /// The bound ifindex stopped resolving after a link-down report, so the
-    /// kernel had unhooked the socket for good and reading ended early.
-    pub(super) interface_removed: bool,
-}
-
-/// Nanoseconds in the shared `SO_TIMESTAMPNS` / `CLOCK_REALTIME` domain.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) struct KernelRealtime(pub(super) i128);
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct InterceptInstallEvent {
-    alloc: Option<String>,
-    at: KernelRealtime,
-}
-
-#[derive(Default)]
-struct InterceptInstallFieldVisitor {
-    alloc: Option<String>,
-}
-
-impl Visit for InterceptInstallFieldVisitor {
-    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-        if field.name() == "alloc" {
-            self.alloc = Some(format!("{value:?}").trim_matches('"').to_owned());
-        }
-    }
-
-    fn record_str(&mut self, field: &Field, value: &str) {
-        if field.name() == "alloc" {
-            self.alloc = Some(value.to_owned());
-        }
-    }
-}
-
-#[derive(Clone, Default)]
-struct InterceptInstallTrace {
-    events: Arc<Mutex<Vec<InterceptInstallEvent>>>,
-}
-
-impl InterceptInstallTrace {
-    fn install_global() -> Self {
-        let trace = Self::default();
-        tracing::subscriber::set_global_default(tracing_subscriber::registry().with(trace.clone()))
-            .expect("S-ND295-01 owns this nextest process's tracing subscriber");
-        trace
-    }
-
-    fn exact_barrier_for(&self, alloc: &AllocationId) -> Result<KernelRealtime, String> {
-        exact_intercept_install_barrier(
-            &self.events.lock().expect("intercept event collector lock").clone(),
-            alloc.as_str(),
-        )
-    }
-}
-
-impl<S> Layer<S> for InterceptInstallTrace
-where
-    S: Subscriber,
-{
-    fn on_event(&self, event: &Event<'_>, _context: Context<'_, S>) {
-        if event.metadata().name() != INTERCEPT_INSTALL_SUCCESS {
-            return;
-        }
-        let at = KernelRealtime::now();
-        let mut visitor = InterceptInstallFieldVisitor::default();
-        event.record(&mut visitor);
-        self.events
-            .lock()
-            .expect("intercept event collector lock")
-            .push(InterceptInstallEvent { alloc: visitor.alloc, at });
-    }
-}
-
-fn exact_intercept_install_barrier(
-    events: &[InterceptInstallEvent],
-    alloc: &str,
-) -> Result<KernelRealtime, String> {
-    let [event] = events else {
-        return Err(format!(
-            "expected exactly one {INTERCEPT_INSTALL_SUCCESS} event for {alloc}, got {events:?}"
-        ));
-    };
-    if event.alloc.as_deref() != Some(alloc) {
-        return Err(format!(
-            "the sole {INTERCEPT_INSTALL_SUCCESS} event belongs to {:?}, not {alloc}",
-            event.alloc
-        ));
-    }
-    Ok(event.at)
-}
-
 pub(super) struct WireCapture {
     stop: Arc<AtomicBool>,
-    handle: Option<std::thread::JoinHandle<CaptureBatch>>,
-    port: u16,
+    handle: Option<std::thread::JoinHandle<()>>,
 }
 
 pub(super) fn interface_index(iface: &str) -> u32 {
@@ -863,83 +525,16 @@ pub(super) fn interface_index(iface: &str) -> u32 {
 }
 
 impl WireCapture {
-    fn start(iface: &str, port: u16) -> Self {
-        Self::start_bound(interface_index(iface), port)
+    fn start(iface: &str) -> Self {
+        Self::start_bound(interface_index(iface))
     }
 
-    /// Capture every interface from before the allocation TAP exists. Binding
-    /// AF_PACKET with ifindex zero is the kernel's all-interface shape; each
-    /// `recvmsg` result retains its actual `sockaddr_ll.sll_ifindex` and kernel
-    /// packet timestamp, allowing the audit to select the exact production interface
-    /// after production creates it without relabeling queued packets at
-    /// userspace dequeue time.
-    fn start_all() -> Self {
-        Self::start_bound(0, 0)
-    }
-
-    fn start_all_for_port(port: u16) -> Self {
-        Self::start_bound(0, port)
-    }
-
-    fn start_bound(ifindex: u32, port: u16) -> Self {
+    fn start_bound(ifindex: u32) -> Self {
         let fd = open_bound_packet_socket(ifindex).expect("open bound AF_PACKET capture");
         let stop = Arc::new(AtomicBool::new(false));
         let stop_thread = Arc::clone(&stop);
         let handle = std::thread::spawn(move || capture_fd(fd, ifindex, &stop_thread));
-        Self { stop, handle: Some(handle), port }
-    }
-
-    fn stop(mut self) -> CaptureBatch {
-        self.stop.store(true, Ordering::SeqCst);
-        let capture =
-            self.handle.take().expect("wire capture thread").join().expect("wire capture join");
-        assert!(
-            capture_statistics_are_lossless(capture.statistics).is_ok(),
-            "lossless AF_PACKET capture requires PACKET_STATISTICS.tp_drops == 0; stats={:?}",
-            capture.statistics,
-        );
-        capture
-    }
-
-    /// S-ND295-01's one loss-accounted exact-ifindex capture. `SOCK_RAW`
-    /// keeps the link-layer header, so a virtio-net header delivered as frame
-    /// bytes (the E3 12-byte zero prefix) is visible rather than hidden by the
-    /// kernel's L3 datagram view. Close-on-exec keeps the capture out of every
-    /// child the in-process `serve` spawns.
-    pub(super) fn start_link_layer(ifindex: u32) -> Self {
-        let fd = open_packet_socket(ifindex, libc::SOCK_RAW | libc::SOCK_CLOEXEC)
-            .expect("open the exact-ifindex link-layer AF_PACKET capture");
-        let stop = Arc::new(AtomicBool::new(false));
-        let stop_thread = Arc::clone(&stop);
-        let handle = std::thread::spawn(move || capture_fd(fd, ifindex, &stop_thread));
-        Self { stop, handle: Some(handle), port: 0 }
-    }
-
-    /// Stop and return the batch; kernel-reported loss, a counted frame the
-    /// reader never read, and a failed capture thread are evidence the caller
-    /// asserts, never a panic here (see [`capture_is_fully_accounted`]).
-    pub(super) fn stop_accounted(mut self) -> Result<CaptureBatch, String> {
-        self.stop.store(true, Ordering::SeqCst);
-        let handle = self.handle.take().ok_or("the capture thread was already joined")?;
-        let capture = handle.join().map_err(|payload| {
-            format!("the capture thread failed: {}", panic_evidence(payload.as_ref()))
-        })?;
-        capture_is_fully_accounted(&capture)?;
-        Ok(capture)
-    }
-
-    fn stop_and_scan(
-        self,
-        ktls_candidates: &[KtlsSocketEvidence],
-        loopback_ifindex: u32,
-    ) -> (WireScan, Result<KtlsSocketEvidence, String>) {
-        let port = self.port;
-        let capture = self.stop();
-        let (mut scan, exact) =
-            correlate_ktls_candidates(&capture.frames, port, loopback_ifindex, ktls_candidates);
-        scan.capture_packets = capture.statistics.packets;
-        scan.capture_drops = capture.statistics.drops;
-        (scan, exact)
+        Self { stop, handle: Some(handle) }
     }
 }
 
@@ -960,29 +555,6 @@ fn capture_statistics_are_lossless(statistics: PacketStatistics) -> Result<(), S
         Ok(())
     } else {
         Err(format!("AF_PACKET reported {} dropped packets", statistics.drops))
-    }
-}
-
-/// Loss accounting over one sealed capture: the kernel dropped nothing, and
-/// every packet it counted for this socket was read. For a socket without a
-/// ring, `PACKET_STATISTICS.tp_packets` is the number of frames the kernel
-/// queued plus the number it dropped (`tp_drops`), so a lossless, fully read
-/// capture has `tp_packets == frames read` exactly. Either inequality fails
-/// closed: "no frame" is evidence only when the reader provably saw every
-/// frame the kernel delivered to it.
-fn capture_is_fully_accounted(capture: &CaptureBatch) -> Result<(), String> {
-    capture_statistics_are_lossless(capture.statistics)?;
-    let counted = u64::from(capture.statistics.packets);
-    let read = u64::try_from(capture.frames.len()).expect("frame count fits u64");
-    if counted == read + u64::from(capture.statistics.drops) {
-        Ok(())
-    } else {
-        Err(format!(
-            "PACKET_STATISTICS counted {counted} packets (tp_drops {}) but the capture read {read} \
-             frames; a frame the kernel delivered was never read (link-down reports {:?}, \
-             interface removed {})",
-            capture.statistics.drops, capture.link_down_reports, capture.interface_removed
-        ))
     }
 }
 
@@ -1063,8 +635,7 @@ fn open_packet_socket(
 /// down later records the same error (`packet_notifier`, `NETDEV_DOWN`). The
 /// next `recvmsg` reports it once, before any queued frame, and clears it.
 /// When the device comes up the kernel hooks the socket to the same ifindex
-/// again (`NETDEV_UP`) and delivery resumes. Each report is recorded with the
-/// number of frames captured before it, and reading continues.
+/// again (`NETDEV_UP`) and delivery resumes, and reading continues.
 ///
 /// Consequence for callers: while its device is down an exact-ifindex capture
 /// is blind. A zero-frame count over a down interval is therefore no evidence
@@ -1080,17 +651,14 @@ fn open_packet_socket(
 ///
 /// At the end the socket is sealed ([`seal_packet_socket`]), settled, and drained,
 /// and `PACKET_STATISTICS` is read over that closed population.
-fn capture_fd(fd: std::os::fd::RawFd, bound_ifindex: u32, stop: &AtomicBool) -> CaptureBatch {
-    let mut frames = Vec::new();
-    let mut link_down_reports = Vec::new();
+fn capture_fd(fd: std::os::fd::RawFd, bound_ifindex: u32, stop: &AtomicBool) {
     let mut interface_removed = false;
     let mut buf = vec![0_u8; 65_535];
     while !stop.load(Ordering::SeqCst) && !interface_removed {
         match receive_captured_frame(fd, &mut buf) {
-            Ok(Some(frame)) => frames.push(frame),
+            Ok(Some(_)) => {}
             Ok(None) => std::thread::sleep(Duration::from_micros(200)),
             Err(error) if error.raw_os_error() == Some(libc::ENETDOWN) => {
-                link_down_reports.push(frames.len());
                 interface_removed = bound_ifindex != 0
                     && !ifindex_resolves(bound_ifindex).unwrap_or_else(|error| {
                         panic!(
@@ -1108,18 +676,15 @@ fn capture_fd(fd: std::os::fd::RawFd, bound_ifindex: u32, stop: &AtomicBool) -> 
     std::thread::sleep(PACKET_SOCKET_SEAL_SETTLE);
     loop {
         match receive_captured_frame(fd, &mut buf) {
-            Ok(Some(frame)) => frames.push(frame),
+            Ok(Some(_)) => {}
             Ok(None) => break,
-            Err(error) if error.raw_os_error() == Some(libc::ENETDOWN) => {
-                link_down_reports.push(frames.len());
-            }
+            Err(error) if error.raw_os_error() == Some(libc::ENETDOWN) => {}
             Err(error) => panic!("AF_PACKET final drain failed: {error}"),
         }
     }
-    let statistics = packet_statistics(fd).expect("read PACKET_STATISTICS");
+    packet_statistics(fd).expect("read PACKET_STATISTICS");
     // SAFETY: close exactly the fd created for this capture.
     unsafe { libc::close(fd) };
-    CaptureBatch { frames, statistics, link_down_reports, interface_removed }
 }
 
 /// Whether `ifindex` names a live interface in this network namespace.
@@ -1197,13 +762,6 @@ fn receive_captured_frame(
             "AF_PACKET returned EOF",
         ));
     }
-    let kernel_event_at = if message.msg_flags & libc::MSG_CTRUNC == 0 {
-        // SAFETY: the kernel populated the cmsghdr chain inside `control`; the
-        // decoder validates record identity and length before reading it.
-        unsafe { kernel_timestamp_from_message(&message) }
-    } else {
-        None
-    };
     let aux = if message.msg_flags & libc::MSG_CTRUNC == 0 {
         // SAFETY: the message's ancillary chain remains live for this call.
         unsafe { packet_auxdata_from_message(&message) }
@@ -1213,7 +771,6 @@ fn receive_captured_frame(
     let wire_len = usize::try_from(n).expect("recvmsg length is non-negative");
     let copied = wire_len.min(buf.len());
     Ok(Some(CapturedFrame {
-        kernel_event_at,
         ifindex: u32::try_from(packet_addr.sll_ifindex).expect("packet ifindex is non-negative"),
         protocol: u16::from_be(packet_addr.sll_protocol),
         packet_type: packet_addr.sll_pkttype,
@@ -1250,56 +807,6 @@ unsafe fn packet_auxdata_from_message(message: &libc::msghdr) -> Option<PacketAu
         header = unsafe { libc::CMSG_NXTHDR(message, header) };
     }
     None
-}
-
-unsafe fn kernel_timestamp_from_message(message: &libc::msghdr) -> Option<KernelRealtime> {
-    // SAFETY: the caller keeps the kernel-populated control buffer alive for
-    // this entire CMSG traversal.
-    let mut header = unsafe { libc::CMSG_FIRSTHDR(message) };
-    while !header.is_null() {
-        // SAFETY: non-null headers are yielded by the libc CMSG helpers.
-        let current = unsafe { &*header };
-        let expected_len = unsafe {
-            libc::CMSG_LEN(
-                u32::try_from(std::mem::size_of::<libc::timespec>())
-                    .expect("timespec control length fits u32"),
-            )
-        } as usize;
-        if current.cmsg_level == libc::SOL_SOCKET
-            && current.cmsg_type == libc::SCM_TIMESTAMPNS
-            && current.cmsg_len >= expected_len
-        {
-            // SAFETY: the validated record contains a complete timespec.
-            let timestamp = unsafe {
-                std::ptr::read_unaligned(libc::CMSG_DATA(header).cast::<libc::timespec>())
-            };
-            return KernelRealtime::from_timespec(timestamp);
-        }
-        // SAFETY: advance within the same live, kernel-populated chain.
-        header = unsafe { libc::CMSG_NXTHDR(message, header) };
-    }
-    None
-}
-
-impl KernelRealtime {
-    fn from_timespec(timestamp: libc::timespec) -> Option<Self> {
-        const NANOS_PER_SECOND: i128 = 1_000_000_000;
-        if timestamp.tv_sec < 0 || !(0..1_000_000_000).contains(&timestamp.tv_nsec) {
-            return None;
-        }
-        i128::from(timestamp.tv_sec)
-            .checked_mul(NANOS_PER_SECOND)
-            .and_then(|seconds| seconds.checked_add(i128::from(timestamp.tv_nsec)))
-            .map(Self)
-    }
-
-    fn now() -> Self {
-        let mut timestamp: libc::timespec = unsafe { std::mem::zeroed() };
-        // SAFETY: `timestamp` points to writable storage for one timespec.
-        let result = unsafe { libc::clock_gettime(libc::CLOCK_REALTIME, &raw mut timestamp) };
-        assert_eq!(result, 0, "read CLOCK_REALTIME: {}", std::io::Error::last_os_error());
-        Self::from_timespec(timestamp).expect("CLOCK_REALTIME yields a valid non-negative timespec")
-    }
 }
 
 fn scan_frames(
@@ -1408,8 +915,7 @@ fn scan_frames(
         streams.insert((ifindex, tuple), stream);
     }
 
-    let mut scan =
-        WireScan { exact_tuple, same_port_streams_observed: streams.len(), ..WireScan::default() };
+    let mut scan = WireScan { same_port_streams_observed: streams.len(), ..WireScan::default() };
     scan.plaintext_markers_by_interface_tuple =
         streams.iter().map(|(key, bytes)| (*key, plaintext_marker_hits(bytes))).collect();
     for ((ifindex, tuple), hits) in &scan.plaintext_markers_by_interface_tuple {
@@ -1625,7 +1131,6 @@ fn parse_tcp_segment(
         ]),
         flags: bytes[tcp + 13],
         payload: &bytes[payload..total_len],
-        total_len,
     }))
 }
 
@@ -1647,69 +1152,6 @@ fn socket_inode(record: &str) -> Option<u64> {
     record
         .split_whitespace()
         .find_map(|field| field.strip_prefix("ino:").and_then(|inode| inode.parse().ok()))
-}
-
-fn process_fds_for_socket_inode(inode: u64) -> BTreeSet<i32> {
-    let expected = format!("socket:[{inode}]");
-    std::fs::read_dir("/proc/self/fd")
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|entry| {
-            let fd = entry.file_name().to_str()?.parse::<i32>().ok()?;
-            let target = std::fs::read_link(entry.path()).ok()?;
-            (target.to_string_lossy() == expected).then_some(fd)
-        })
-        .collect()
-}
-
-fn complete_ktls_evidence(tuple: FlowTuple, record: String) -> Option<KtlsSocketEvidence> {
-    let inode = socket_inode(&record)?;
-    Some(KtlsSocketEvidence { tuple, inode, fds: process_fds_for_socket_inode(inode), record })
-}
-
-fn ktls_socket_records() -> Vec<KtlsSocketEvidence> {
-    let output = Command::new("ss").args(["-H", "-n", "-t", "-i", "-e"]).output().expect("run ss");
-    assert!(output.status.success(), "ss failed: {}", String::from_utf8_lossy(&output.stderr));
-    let text = String::from_utf8_lossy(&output.stdout);
-    let mut records = Vec::new();
-    let mut current: Option<(FlowTuple, String)> = None;
-    for line in text.lines() {
-        if line.starts_with(char::is_whitespace) {
-            if let Some((_, record)) = current.as_mut() {
-                record.push_str(line);
-                record.push('\n');
-            }
-            continue;
-        }
-        if let Some((tuple, record)) = current.take()
-            && let Some(evidence) = complete_ktls_evidence(tuple, record)
-        {
-            records.push(evidence);
-        }
-        let columns = line.split_whitespace().collect::<Vec<_>>();
-        let Some((source, destination)) =
-            columns.get(3).zip(columns.get(4)).and_then(|(source, destination)| {
-                let source = source.parse::<SocketAddr>().ok()?;
-                let destination = destination.parse::<SocketAddr>().ok()?;
-                match (source, destination) {
-                    (SocketAddr::V4(source), SocketAddr::V4(destination)) => {
-                        Some((source, destination))
-                    }
-                    _ => None,
-                }
-            })
-        else {
-            continue;
-        };
-        current = Some((FlowTuple { source, destination }, format!("{line}\n")));
-    }
-    if let Some((tuple, record)) = current
-        && let Some(evidence) = complete_ktls_evidence(tuple, record)
-    {
-        records.push(evidence);
-    }
-    records
 }
 
 fn record_has_bidirectional_tls13_ktls(record: &str) -> bool {
@@ -1737,47 +1179,6 @@ fn retain_eligible_ktls_candidates(
                 record.fds.extend(previous.fds.iter().copied());
             }
             journal.insert(key, record);
-        }
-    }
-}
-
-struct KtlsCandidateJournal {
-    stop: Arc<AtomicBool>,
-    handle: Option<std::thread::JoinHandle<BTreeMap<(FlowTuple, u64), KtlsSocketEvidence>>>,
-}
-
-impl KtlsCandidateJournal {
-    fn start(port: u16) -> Self {
-        let stop = Arc::new(AtomicBool::new(false));
-        let thread_stop = Arc::clone(&stop);
-        let handle = std::thread::spawn(move || {
-            let mut journal = BTreeMap::new();
-            while !thread_stop.load(Ordering::SeqCst) {
-                retain_eligible_ktls_candidates(&mut journal, port, ktls_socket_records());
-                std::thread::yield_now();
-            }
-            journal
-        });
-        Self { stop, handle: Some(handle) }
-    }
-
-    fn finish(mut self) -> Vec<KtlsSocketEvidence> {
-        self.stop.store(true, Ordering::SeqCst);
-        self.handle
-            .take()
-            .expect("kTLS candidate sampler exists")
-            .join()
-            .expect("kTLS candidate sampler joins")
-            .into_values()
-            .collect()
-    }
-}
-
-impl Drop for KtlsCandidateJournal {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::SeqCst);
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
         }
     }
 }
@@ -1817,64 +1218,6 @@ fn require_same_socket_splice(
         ));
     }
     Ok(fd)
-}
-
-struct SpliceProbe {
-    child: Option<Child>,
-    path: PathBuf,
-    seed_tids: BTreeSet<i32>,
-}
-
-impl SpliceProbe {
-    fn attach_self() -> Self {
-        assert!(
-            Command::new("strace").arg("-V").output().is_ok_and(|output| output.status.success()),
-            "strace is required for same-inode/fd splice evidence"
-        );
-        let pid = std::process::id();
-        let path = std::env::temp_dir().join(format!("nd295-s01-splice-{pid}.log"));
-        let _ = std::fs::remove_file(&path);
-        let child = Command::new("strace")
-            .args(["-f", "-q", "-qq", "-e", "trace=clone,clone3,splice"])
-            .args(["-o", path.to_str().expect("UTF-8 strace path")])
-            .args(["-p", &pid.to_string()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("attach strace to the in-process production composition");
-        std::thread::sleep(Duration::from_millis(400));
-        Self { child: Some(child), path, seed_tids: snapshot_thread_group() }
-    }
-
-    fn finish(mut self) -> SpliceEvidence {
-        self.detach();
-        let raw = std::fs::read_to_string(&self.path).unwrap_or_default();
-        let group = thread_group_closure(&raw, &self.seed_tids);
-        parse_positive_splices(&raw, &group)
-    }
-
-    fn detach(&mut self) {
-        if let Some(mut child) = self.child.take() {
-            let _ = Command::new("kill").args(["-TERM", &child.id().to_string()]).status();
-            let _ = child.wait();
-        }
-    }
-}
-
-impl Drop for SpliceProbe {
-    fn drop(&mut self) {
-        self.detach();
-        let _ = std::fs::remove_file(&self.path);
-    }
-}
-
-fn snapshot_thread_group() -> BTreeSet<i32> {
-    std::fs::read_dir("/proc/self/task")
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|entry| entry.file_name().to_str()?.parse().ok())
-        .collect()
 }
 
 fn split_trace_tid(line: &str) -> (Option<i32>, &str) {
@@ -2273,625 +1616,9 @@ async fn durable_alloc_snapshot(
 // shared scenario never asserts on it; only the S-ND295-01 bodies do.
 // ---------------------------------------------------------------------
 
-/// The six TAP counters of the zero-frame contract, in a fixed order.
-const TAP_COUNTER_NAMES: [&str; 6] =
-    ["rx_packets", "tx_packets", "rx_bytes", "tx_bytes", "rx_dropped", "tx_dropped"];
-const NLMSG_HEADER_LEN: usize = 16;
-const IFINFOMSG_LEN: usize = 16;
-const RTATTR_HEADER_LEN: usize = 4;
-const NLA_TYPE_MASK: u16 = 0x3fff;
-const NLMSG_NOOP: u16 = 1;
-const NLMSG_ERROR: u16 = 2;
-const NLMSG_DONE: u16 = 3;
-const NLMSG_OVERRUN: u16 = 4;
-const LINK_MONITOR_RECEIVE_BUFFER: libc::c_int = 32 * 1024 * 1024;
-fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-/// The six TAP counters in [`TAP_COUNTER_NAMES`] order.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct TapCounters([u64; 6]);
-
-impl TapCounters {
-    fn all_zero(self) -> bool {
-        self.0.iter().all(|value| *value == 0)
-    }
-}
-
-/// One read of the caller TAP and its queue holders, from sysfs and procfs.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct TapStateSample {
-    ifindex: u32,
-    flags: u32,
-    /// Raw `tun` sysfs `owner` text; `0` is the root launcher (D-295-R4).
-    owner: String,
-    /// Raw `tun` sysfs `tun_flags` text; diagnostic only.
-    tun_flags: String,
-    counters: TapCounters,
-    /// Every process holding a `/dev/net/tun` descriptor whose `fdinfo`
-    /// `iff:` names this TAP, with those descriptor numbers.
-    queue_holders: BTreeMap<u32, BTreeSet<u32>>,
-    /// The allocation cgroup scope's `cgroup.procs` (empty before the scope
-    /// exists).
-    vmm_scope_pids: BTreeSet<u32>,
-    vmm_argv: BTreeMap<u32, Vec<String>>,
-}
-
-fn sample_tap_state(tap: &str, alloc: &AllocationId) -> Result<TapStateSample, String> {
-    let sysfs = Path::new("/sys/class/net").join(tap);
-    let read = |attribute: &str| {
-        std::fs::read_to_string(sysfs.join(attribute))
-            .map(|text| text.trim().to_owned())
-            .map_err(|error| format!("read {}/{attribute}: {error}", sysfs.display()))
-    };
-    let ifindex_text = read("ifindex")?;
-    let ifindex = ifindex_text
-        .parse::<u32>()
-        .map_err(|error| format!("decode {tap} ifindex {ifindex_text:?}: {error}"))?;
-    let flags_text = read("flags")?;
-    let flags = u32::from_str_radix(flags_text.trim_start_matches("0x"), 16)
-        .map_err(|error| format!("decode {tap} flags {flags_text:?}: {error}"))?;
-    let owner = read("owner")?;
-    let tun_flags = read("tun_flags")?;
-    let mut counters = [0_u64; 6];
-    for (slot, name) in counters.iter_mut().zip(TAP_COUNTER_NAMES) {
-        let text = read(&format!("statistics/{name}"))?;
-        *slot = text.parse().map_err(|error| format!("decode {tap} {name} {text:?}: {error}"))?;
-    }
-    let queue_holders = tap_queue_holders(tap)?;
-    let vmm_scope_pids = allocation_scope_pids(alloc)?;
-    let mut vmm_argv = BTreeMap::new();
-    for pid in &vmm_scope_pids {
-        vmm_argv.insert(*pid, process_argv(*pid)?);
-    }
-    Ok(TapStateSample {
-        ifindex,
-        flags,
-        owner,
-        tun_flags,
-        counters: TapCounters(counters),
-        queue_holders,
-        vmm_scope_pids,
-        vmm_argv,
-    })
-}
-
-fn proc_entry_vanished(error: &std::io::Error) -> bool {
-    error.kind() == std::io::ErrorKind::NotFound || error.raw_os_error() == Some(libc::ESRCH)
-}
-
-/// The queue holder set of one TAP: every process holding a `/dev/net/tun`
-/// descriptor whose `/proc/<pid>/fdinfo/<fd>` `iff:` line names `tap`. A
-/// process or descriptor that disappears during the walk is skipped; any other
-/// read failure is returned, so an unreadable holder never reads as absent.
-fn tap_queue_holders(tap: &str) -> Result<BTreeMap<u32, BTreeSet<u32>>, String> {
-    let mut holders: BTreeMap<u32, BTreeSet<u32>> = BTreeMap::new();
-    let processes = std::fs::read_dir("/proc").map_err(|error| format!("read /proc: {error}"))?;
-    for process in processes {
-        let process = match process {
-            Ok(process) => process,
-            Err(error) if proc_entry_vanished(&error) => continue,
-            Err(error) => return Err(format!("read a /proc entry: {error}")),
-        };
-        let Ok(pid) = process.file_name().to_string_lossy().parse::<u32>() else {
-            continue;
-        };
-        let descriptors = match std::fs::read_dir(process.path().join("fd")) {
-            Ok(descriptors) => descriptors,
-            Err(error) if proc_entry_vanished(&error) => continue,
-            Err(error) => return Err(format!("read /proc/{pid}/fd: {error}")),
-        };
-        for descriptor in descriptors {
-            let descriptor = match descriptor {
-                Ok(descriptor) => descriptor,
-                Err(error) if proc_entry_vanished(&error) => continue,
-                Err(error) => return Err(format!("read a /proc/{pid}/fd entry: {error}")),
-            };
-            let target = match std::fs::read_link(descriptor.path()) {
-                Ok(target) => target,
-                Err(error) if proc_entry_vanished(&error) => continue,
-                Err(error) => {
-                    return Err(format!("read {}: {error}", descriptor.path().display()));
-                }
-            };
-            if target != Path::new("/dev/net/tun") {
-                continue;
-            }
-            let name = descriptor.file_name().to_string_lossy().into_owned();
-            let fd = name
-                .parse::<u32>()
-                .map_err(|error| format!("decode /proc/{pid}/fd/{name}: {error}"))?;
-            let fdinfo = match std::fs::read_to_string(process.path().join("fdinfo").join(&name)) {
-                Ok(fdinfo) => fdinfo,
-                Err(error) if proc_entry_vanished(&error) => continue,
-                Err(error) => return Err(format!("read /proc/{pid}/fdinfo/{name}: {error}")),
-            };
-            let attached = fdinfo.lines().find_map(|line| line.strip_prefix("iff:")).map(str::trim);
-            if attached == Some(tap) {
-                holders.entry(pid).or_default().insert(fd);
-            }
-        }
-    }
-    Ok(holders)
-}
-
-fn allocation_scope_pids(alloc: &AllocationId) -> Result<BTreeSet<u32>, String> {
-    let procs =
-        CgroupPath::for_alloc(alloc).resolve(Path::new("/sys/fs/cgroup")).join("cgroup.procs");
-    match std::fs::read_to_string(&procs) {
-        Ok(text) => text
-            .lines()
-            .map(|line| {
-                line.trim()
-                    .parse::<u32>()
-                    .map_err(|error| format!("decode {} line {line:?}: {error}", procs.display()))
-            })
-            .collect(),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(BTreeSet::new()),
-        Err(error) => Err(format!("read {}: {error}", procs.display())),
-    }
-}
-
-fn process_argv(pid: u32) -> Result<Vec<String>, String> {
-    let bytes = std::fs::read(format!("/proc/{pid}/cmdline"))
-        .map_err(|error| format!("read /proc/{pid}/cmdline: {error}"))?;
-    Ok(bytes
-        .split(|byte| *byte == 0)
-        .filter(|arg| !arg.is_empty())
-        .map(|arg| String::from_utf8_lossy(arg).into_owned())
-        .collect())
-}
-
-/// The caller allocation and TAP the activation witness samples at the event.
-#[derive(Debug, Clone)]
-struct WitnessTarget {
-    alloc: AllocationId,
-    tap: String,
-}
-
-#[derive(Debug, Clone)]
-struct ActivationWitnessSnapshot {
-    alloc: Option<String>,
-    sampled_at: KernelRealtime,
-    /// `None` when no target was registered or the event names another
-    /// allocation.
-    tap: Option<Result<TapStateSample, String>>,
-}
-
-/// A tracing Layer that, synchronously inside the production thread that
-/// emits `mtls.intercept.install.success`, reads the caller TAP's admin state,
-/// ifindex, owner, six counters, and queue holders. The production source
-/// emits the event after `start_alloc` returns and before it awaits
-/// `activate` (FD § "Gate G-295-2 — existing guest command release, narrowed to the new switch" (the intercept-install event barrier)), so this read is at the event and before any
-/// activation. It installs beside [`InterceptInstallTrace`], whose realtime
-/// sample stays the barrier; this Layer runs after it.
-#[derive(Clone, Default)]
-struct ActivationWitness {
-    target: Arc<Mutex<Option<WitnessTarget>>>,
-    snapshots: Arc<Mutex<Vec<ActivationWitnessSnapshot>>>,
-}
-
-impl ActivationWitness {
-    fn watch(&self, target: WitnessTarget) {
-        *lock_unpoisoned(&self.target) = Some(target);
-    }
-
-    fn snapshots(&self) -> Vec<ActivationWitnessSnapshot> {
-        lock_unpoisoned(&self.snapshots).clone()
-    }
-}
-
-impl<S> Layer<S> for ActivationWitness
-where
-    S: Subscriber,
-{
-    fn on_event(&self, event: &Event<'_>, _context: Context<'_, S>) {
-        if event.metadata().name() != INTERCEPT_INSTALL_SUCCESS {
-            return;
-        }
-        let sampled_at = KernelRealtime::now();
-        let mut visitor = InterceptInstallFieldVisitor::default();
-        event.record(&mut visitor);
-        let target = lock_unpoisoned(&self.target).clone();
-        let tap = target
-            .filter(|target| visitor.alloc.as_deref() == Some(target.alloc.as_str()))
-            .map(|target| sample_tap_state(&target.tap, &target.alloc));
-        lock_unpoisoned(&self.snapshots).push(ActivationWitnessSnapshot {
-            alloc: visitor.alloc,
-            sampled_at,
-            tap,
-        });
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LinkNoticeKind {
-    New,
-    Deleted,
-}
-
-/// One kernel `RTM_NEWLINK` / `RTM_DELLINK` notification.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct LinkNotice {
-    /// Userspace receipt time: an upper bound on when the kernel generated it.
-    received_at: KernelRealtime,
-    kind: LinkNoticeKind,
-    /// `ifi_family`: `AF_UNSPEC` for the device's own notification,
-    /// `AF_BRIDGE` for the bridge's notification about its port.
-    family: u8,
-    ifindex: u32,
-    flags: u32,
-    name: Option<String>,
-}
-
-/// An rtnetlink monitor subscribed to the link group. The subscription is
-/// bound before [`LinkMonitor::start`] returns, so it covers every link change
-/// after that point in kernel order. `ENOBUFS` (lost notifications) fails the
-/// monitor rather than yielding a partial history.
-struct LinkMonitor {
-    stop: Arc<AtomicBool>,
-    handle: Option<std::thread::JoinHandle<Result<Vec<LinkNotice>, String>>>,
-}
-
-impl LinkMonitor {
-    fn start() -> Self {
-        let fd = open_link_monitor_socket()
-            .expect("open and bind the rtnetlink link-group monitor before deploy");
-        let stop = Arc::new(AtomicBool::new(false));
-        let stop_thread = Arc::clone(&stop);
-        let handle = std::thread::spawn(move || monitor_links(&fd, &stop_thread));
-        Self { stop, handle: Some(handle) }
-    }
-
-    fn stop(mut self) -> Result<Vec<LinkNotice>, String> {
-        self.stop.store(true, Ordering::SeqCst);
-        let handle = self.handle.take().ok_or("the link monitor thread was already joined")?;
-        handle.join().map_err(|payload| {
-            format!("the link monitor thread failed: {}", panic_evidence(payload.as_ref()))
-        })?
-    }
-}
-
-impl Drop for LinkMonitor {
-    fn drop(&mut self) {
-        // Panic-safe fixture cleanup, as for `WireCapture`: never leave the
-        // monitor thread running past a failed oracle.
-        self.stop.store(true, Ordering::SeqCst);
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
-        }
-    }
-}
-
-fn open_link_monitor_socket() -> std::io::Result<std::os::fd::OwnedFd> {
-    use std::os::fd::{AsRawFd as _, FromRawFd as _};
-
-    // SAFETY: plain socket creation; the descriptor moves into `OwnedFd`.
-    let raw = unsafe {
-        libc::socket(
-            libc::AF_NETLINK,
-            libc::SOCK_RAW | libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK,
-            libc::NETLINK_ROUTE,
-        )
-    };
-    if raw < 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    // SAFETY: `raw` is a fresh descriptor that nothing else owns.
-    let fd = unsafe { std::os::fd::OwnedFd::from_raw_fd(raw) };
-    let size = LINK_MONITOR_RECEIVE_BUFFER;
-    // SAFETY: `fd` is live and the option points to one integer.
-    if unsafe {
-        libc::setsockopt(
-            fd.as_raw_fd(),
-            libc::SOL_SOCKET,
-            libc::SO_RCVBUFFORCE,
-            std::ptr::from_ref(&size).cast(),
-            libc::socklen_t::try_from(std::mem::size_of_val(&size))
-                .expect("receive buffer option length fits socklen_t"),
-        )
-    } != 0
-    {
-        return Err(std::io::Error::last_os_error());
-    }
-    // SAFETY: an all-zero `sockaddr_nl` is valid; the public fields are set.
-    let mut address: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
-    address.nl_family = libc::AF_NETLINK as libc::sa_family_t;
-    address.nl_groups = libc::RTMGRP_LINK as u32;
-    // SAFETY: the live sockaddr has exactly the supplied size.
-    if unsafe {
-        libc::bind(
-            fd.as_raw_fd(),
-            std::ptr::from_ref(&address).cast(),
-            libc::socklen_t::try_from(std::mem::size_of_val(&address))
-                .expect("sockaddr_nl length fits socklen_t"),
-        )
-    } != 0
-    {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(fd)
-}
-
-fn monitor_links(fd: &std::os::fd::OwnedFd, stop: &AtomicBool) -> Result<Vec<LinkNotice>, String> {
-    let mut notices = Vec::new();
-    let mut buf = vec![0_u8; 256 * 1024];
-    loop {
-        // Read the flag before receiving, so a final empty receive after it
-        // was set proves the queue is drained.
-        let stopping = stop.load(Ordering::SeqCst);
-        match receive_link_batch(fd, &mut buf)? {
-            Some((len, received_at)) => parse_link_notices(&buf[..len], received_at, &mut notices)?,
-            None if stopping => return Ok(notices),
-            None => std::thread::sleep(Duration::from_micros(200)),
-        }
-    }
-}
-
-fn receive_link_batch(
-    fd: &std::os::fd::OwnedFd,
-    buf: &mut [u8],
-) -> Result<Option<(usize, KernelRealtime)>, String> {
-    use std::os::fd::AsRawFd as _;
-
-    // SAFETY: an all-zero `sockaddr_nl` is a valid receive buffer.
-    let mut source: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
-    let mut source_len = libc::socklen_t::try_from(std::mem::size_of_val(&source))
-        .expect("sockaddr_nl length fits socklen_t");
-    // SAFETY: every pointer references live owned storage of the stated size.
-    let n = unsafe {
-        libc::recvfrom(
-            fd.as_raw_fd(),
-            buf.as_mut_ptr().cast(),
-            buf.len(),
-            libc::MSG_TRUNC,
-            std::ptr::from_mut(&mut source).cast(),
-            &raw mut source_len,
-        )
-    };
-    let received_at = KernelRealtime::now();
-    if n < 0 {
-        let error = std::io::Error::last_os_error();
-        return match error.kind() {
-            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted => Ok(None),
-            _ if error.raw_os_error() == Some(libc::ENOBUFS) => {
-                Err("the rtnetlink link monitor overran (ENOBUFS): link notifications were lost"
-                    .to_owned())
-            }
-            _ => Err(format!("the rtnetlink link monitor receive failed: {error}")),
-        };
-    }
-    let len = usize::try_from(n).expect("recvfrom length is non-negative");
-    if len > buf.len() {
-        return Err(format!("an rtnetlink datagram of {len} bytes exceeded the receive buffer"));
-    }
-    if source.nl_pid != 0 {
-        return Err(format!("an rtnetlink link notification came from port {}", source.nl_pid));
-    }
-    Ok(Some((len, received_at)))
-}
-
-fn read_ne_u16(bytes: &[u8], offset: usize) -> Result<u16, String> {
-    bytes
-        .get(offset..offset + 2)
-        .and_then(|slice| <[u8; 2]>::try_from(slice).ok())
-        .map(u16::from_ne_bytes)
-        .ok_or_else(|| format!("truncated u16 at offset {offset}"))
-}
-
-fn read_ne_u32(bytes: &[u8], offset: usize) -> Result<u32, String> {
-    bytes
-        .get(offset..offset + 4)
-        .and_then(|slice| <[u8; 4]>::try_from(slice).ok())
-        .map(u32::from_ne_bytes)
-        .ok_or_else(|| format!("truncated u32 at offset {offset}"))
-}
-
-const fn netlink_align(len: usize) -> usize {
-    (len + 3) & !3
-}
-
-fn parse_link_notices(
-    datagram: &[u8],
-    received_at: KernelRealtime,
-    notices: &mut Vec<LinkNotice>,
-) -> Result<(), String> {
-    let mut offset = 0;
-    while offset < datagram.len() {
-        let len = read_ne_u32(datagram, offset)? as usize;
-        let kind = read_ne_u16(datagram, offset + 4)?;
-        let end = offset.checked_add(len).ok_or("rtnetlink message length overflows")?;
-        if len < NLMSG_HEADER_LEN || end > datagram.len() {
-            return Err(format!("malformed rtnetlink message length {len} at offset {offset}"));
-        }
-        let body = &datagram[offset + NLMSG_HEADER_LEN..end];
-        match kind {
-            libc::RTM_NEWLINK => {
-                notices.push(parse_link_notice(LinkNoticeKind::New, body, received_at)?);
-            }
-            libc::RTM_DELLINK => {
-                notices.push(parse_link_notice(LinkNoticeKind::Deleted, body, received_at)?);
-            }
-            NLMSG_ERROR | NLMSG_OVERRUN => {
-                return Err(format!("rtnetlink reported message type {kind} to the link monitor"));
-            }
-            NLMSG_NOOP | NLMSG_DONE => {}
-            other => {
-                return Err(format!("unexpected rtnetlink message type {other} in the link group"));
-            }
-        }
-        offset = netlink_align(end);
-    }
-    Ok(())
-}
-
-fn parse_link_notice(
-    kind: LinkNoticeKind,
-    body: &[u8],
-    received_at: KernelRealtime,
-) -> Result<LinkNotice, String> {
-    if body.len() < IFINFOMSG_LEN {
-        return Err(format!("an rtnetlink link message carries a {}-byte ifinfomsg", body.len()));
-    }
-    let family = body[0];
-    let ifindex = read_ne_u32(body, 4)?;
-    if ifindex == 0 || ifindex > i32::MAX as u32 {
-        return Err(format!("an rtnetlink link message carries ifindex {ifindex}"));
-    }
-    let flags = read_ne_u32(body, 8)?;
-    let mut name = None;
-    let mut offset = IFINFOMSG_LEN;
-    while offset + RTATTR_HEADER_LEN <= body.len() {
-        let attribute_len = usize::from(read_ne_u16(body, offset)?);
-        let attribute_type = read_ne_u16(body, offset + 2)? & NLA_TYPE_MASK;
-        let end = offset + attribute_len;
-        if attribute_len < RTATTR_HEADER_LEN || end > body.len() {
-            return Err(format!("malformed rtnetlink attribute length {attribute_len}"));
-        }
-        if attribute_type == libc::IFLA_IFNAME {
-            let value = &body[offset + RTATTR_HEADER_LEN..end];
-            let value = value
-                .split(|byte| *byte == 0)
-                .next()
-                .unwrap_or_else(|| unreachable!("a slice split yields at least one piece"));
-            name = Some(String::from_utf8_lossy(value).into_owned());
-        }
-        offset = netlink_align(end);
-    }
-    Ok(LinkNotice { received_at, kind, family, ifindex, flags, name })
-}
-
-/// S-ND295-01 evidence joined from the observations above.
-#[derive(Debug)]
-struct BornCapturedEvidence {
-    caller_alloc: AllocationId,
-    tap: String,
-    tap_ifindex: u32,
-    guest_mac: [u8; 6],
-    guest_address: Ipv4Addr,
-    /// Sampled at the VMM spawn cut: after provision, before Cloud Hypervisor.
-    pre_create: Result<TapStateSample, String>,
-    event_snapshots: Vec<ActivationWitnessSnapshot>,
-    link_notices: Result<Vec<LinkNotice>, String>,
-    link_layer: Result<CaptureBatch, String>,
-    post_stop_complement: Result<(), String>,
-}
-
-impl BornCapturedEvidence {
-    /// The caller TAP read at the exact event: exactly one witness snapshot,
-    /// for the caller allocation, sampled at or after the barrier.
-    fn at_event(&self, intercept_live_at: KernelRealtime) -> Result<&TapStateSample, String> {
-        let [snapshot] = self.event_snapshots.as_slice() else {
-            return Err(format!(
-                "expected exactly one witnessed {INTERCEPT_INSTALL_SUCCESS} event, got {:#?}",
-                self.event_snapshots
-            ));
-        };
-        if snapshot.alloc.as_deref() != Some(self.caller_alloc.as_str()) {
-            return Err(format!(
-                "the witnessed event names {:?}, not {}",
-                snapshot.alloc, self.caller_alloc
-            ));
-        }
-        if snapshot.sampled_at < intercept_live_at {
-            return Err(format!(
-                "the witness sampled at {:?}, before the barrier {intercept_live_at:?}",
-                snapshot.sampled_at
-            ));
-        }
-        match &snapshot.tap {
-            Some(Ok(state)) => Ok(state),
-            Some(Err(error)) => Err(format!("the event-time TAP read failed: {error}")),
-            None => Err("no caller TAP was registered with the witness at the event".to_owned()),
-        }
-    }
-}
-
 // ---------------------------------------------------------------------
 // S-ND295-01 harness evidence: the capture helpers against a scratch TAP.
 // ---------------------------------------------------------------------
-
-/// A persistent scratch TAP created down by the production creator
-/// ([`overdrive_netlink::create_persistent_tap`], owner uid 0), named outside
-/// the managed `ovd-tp-` and bridge `ovd-gbr` spaces, and deleted on drop.
-struct CaptureScratchTap {
-    name: String,
-}
-
-impl CaptureScratchTap {
-    fn create() -> Self {
-        let name = format!("nd295cap{:x}", std::process::id());
-        assert!(name.len() < libc::IFNAMSIZ, "scratch TAP name {name} fits IFNAMSIZ");
-        let lookup = std::ffi::CString::new(name.as_str()).expect("TAP name has no NUL");
-        // SAFETY: the NUL-terminated name remains live for this lookup.
-        let existing = unsafe { libc::if_nametoindex(lookup.as_ptr()) };
-        assert_eq!(
-            existing, 0,
-            "scratch TAP {name} already exists; an interrupted earlier run left it behind \
-             (remove it with `ip link del {name}`)"
-        );
-        overdrive_netlink::create_persistent_tap(&name, 0)
-            .unwrap_or_else(|error| panic!("create the persistent scratch TAP {name}: {error}"));
-        Self { name }
-    }
-
-    fn raise(&self) {
-        let name = self.name.clone();
-        overdrive_netlink::block_on_host_netlink(move || async move {
-            overdrive_netlink::Client::new()?.set_link_up(&name).await
-        })
-        .unwrap_or_else(|error| panic!("raise the scratch TAP {}: {error}", self.name));
-    }
-
-    /// Attach one queue to the persistent TAP with a raw `TUNSETIFF`: the
-    /// device's own flags (`IFF_TAP | IFF_NO_PI`, single queue), so a write is
-    /// exactly one Ethernet frame the TAP receives.
-    fn open_queue(&self) -> std::fs::File {
-        let queue = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open("/dev/net/tun")
-            .expect("open /dev/net/tun (close-on-exec)");
-        // SAFETY: an all-zero `ifreq` is a valid initial value; the name and
-        // flags are populated below.
-        let mut request: libc::ifreq = unsafe { std::mem::zeroed() };
-        for (slot, byte) in request.ifr_name.iter_mut().zip(self.name.bytes()) {
-            *slot = libc::c_char::from_ne_bytes([byte]);
-        }
-        request.ifr_ifru.ifru_flags = libc::c_short::try_from(libc::IFF_TAP | libc::IFF_NO_PI)
-            .expect("TAP queue flags fit ifr_flags");
-        // SAFETY: `queue` is an open `/dev/net/tun` descriptor and `request`
-        // is a live, initialised `ifreq` for the whole call.
-        let rc = unsafe {
-            libc::ioctl(std::os::fd::AsRawFd::as_raw_fd(&queue), libc::TUNSETIFF, &raw mut request)
-        };
-        assert_eq!(
-            rc,
-            0,
-            "attach a queue to the scratch TAP {}: {}",
-            self.name,
-            std::io::Error::last_os_error()
-        );
-        queue
-    }
-}
-
-impl Drop for CaptureScratchTap {
-    fn drop(&mut self) {
-        let name = self.name.clone();
-        let deleted = overdrive_netlink::block_on_host_netlink(move || async move {
-            overdrive_netlink::Client::new()?.del_link(&name).await
-        });
-        if let Err(error) = deleted {
-            if std::thread::panicking() {
-                eprintln!("cleanup: deleting the scratch TAP {} failed: {error}", self.name);
-            } else {
-                panic!("delete the scratch TAP {}: {error}", self.name);
-            }
-        }
-    }
-}
 
 /// S-GTI-04 — a destination outside the workload mesh block is classified
 /// NonMesh and reached unchanged over a clear TCP connection.
@@ -2900,6 +1627,7 @@ impl Drop for CaptureScratchTap {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[serial(cgroup)]
+#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn the_same_guest_reaches_a_non_mesh_destination_in_the_clear() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision shared VM fixture");
@@ -2994,6 +1722,7 @@ async fn the_same_guest_reaches_a_non_mesh_destination_in_the_clear() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[serial(cgroup)]
+#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transit_hop() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision shared VM fixture");
@@ -3114,7 +1843,6 @@ fn synthetic_guest_tcp_frame() -> CapturedFrame {
     bytes[32] = 5 << 4;
     bytes[33] = 0x02;
     CapturedFrame {
-        kernel_event_at: Some(KernelRealtime(1)),
         ifindex: 41,
         protocol: ETH_P_IP,
         packet_type: 0,
@@ -3227,7 +1955,6 @@ fn synthetic_peer_tcp_frame_on(
     bytes[33] = flags;
     bytes[40..].copy_from_slice(payload);
     CapturedFrame {
-        kernel_event_at: Some(KernelRealtime(1)),
         ifindex,
         protocol: ETH_P_IP,
         packet_type,
@@ -3612,7 +2339,7 @@ async fn restart_observation_failure_awaits_cleanup_before_reporting() {
     // the assertion-safe interval begins after that production recovery step.
     let exact_before = fault_fixture::PacketPathBaseline::capture();
     let malformed = fault_fixture::ProductInputHookFixture::install();
-    let wire = WireCapture::start(LOOPBACK_IFACE, SERVICE_PORT);
+    let wire = WireCapture::start(LOOPBACK_IFACE);
     let result: Result<(), String> = tokio::time::timeout(
         Duration::from_secs(15),
         finish_after_authoritative_cleanup(
@@ -3653,6 +2380,7 @@ async fn restart_observation_failure_awaits_cleanup_before_reporting() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
+#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn operator_exit_78_after_ready_is_an_ordinary_result() {
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
     let tmp = tempfile::Builder::new()

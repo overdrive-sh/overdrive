@@ -25,7 +25,10 @@
 //! as a **required constructor parameter** — never defaulted to a production
 //! binding (`.claude/rules/development.md` § "Port-trait dependencies").
 
+use std::sync::Arc;
+
 use crate::ca::root_key_envelope::KekId;
+use crate::traits::entropy::Entropy;
 use crate::wall_clock::UnixInstant;
 use crate::{CertSerial, CertSpecError, NodeId, SpiffeId};
 
@@ -888,6 +891,30 @@ pub trait Ca: Send + Sync {
         let _ = (node, intermediate);
         Ok(())
     }
+}
+
+/// Builds the workload-identity CA over the entropy the boot supplies
+/// (STORES-IN, ADR-0219; the precedent of `MtlsEnforcementFactory`: an
+/// adapter whose inputs are known only to the boot is supplied as a
+/// factory).
+///
+/// The composition root passes the factory, not a built CA, so the CA's key
+/// generation always draws from the boot's one `BootAdapters.entropy`: a
+/// test that replaces the entropy cannot leave a CA keyed to another source.
+pub trait CaFactory: Send + Sync {
+    /// Build one CA over `entropy`.
+    ///
+    /// Called exactly once per boot, by `boot_server`, before
+    /// `ca_boot::boot_ca`.
+    ///
+    /// # Postconditions
+    /// The returned CA draws every key it generates from `entropy` and holds
+    /// no root until `boot_ca` (or `bootstrap_node_intermediate`) installs
+    /// one. Two calls return two independent CAs.
+    ///
+    /// # Edge cases
+    /// Infallible and effect-free: no I/O, no clock read.
+    fn build(&self, entropy: Arc<dyn Entropy>) -> Arc<dyn Ca>;
 }
 
 #[cfg(test)]

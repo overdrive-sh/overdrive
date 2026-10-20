@@ -29,6 +29,11 @@ pub mod http_prober;
 pub mod supervisor;
 pub mod tcp_prober;
 
+// netns-density-295 PROBE-RUN-COUNT / PROBE-NOSAMPLE: the VM probe task's
+// run numbering, observed streak and not-sampled outcomes over Sim adapters.
+#[cfg(test)]
+mod run_numbering_tests;
+
 pub use http_prober::HyperHttpProber;
 pub use supervisor::{AllocSupervisor, ProbeTaskHandle};
 pub use tcp_prober::TokioTcpProber;
@@ -38,8 +43,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
+use overdrive_core::guest_transport::dial::GuestStreamDial;
 use overdrive_core::id::AllocationId;
-use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
+use overdrive_core::observation::{
+    ProbeIdx, ProbeResultRow, ProbeRole, ProbeRunSeq, ProbeStatus, SameStatusRuns,
+};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{AllocationSpec, DriverType};
 use overdrive_core::traits::observation_store::ObservationStore;
@@ -83,6 +91,22 @@ pub struct ProbeRunner {
     /// `ProbeResultRow` write). Mandatory constructor parameter per
     /// `.claude/rules/development.md` § "Port-trait dependencies".
     observation_store: Arc<dyn ObservationStore>,
+    /// Injected guest stream dial (INB-1, ADR-0173; PROBE-NOSAMPLE,
+    /// ADR-0187): a network probe whose target is inside the guest prefix —
+    /// a VM allocation's `workload_addr` — runs through
+    /// `guest_dial.dial(target, DialPurpose::Probe)` instead of a TCP
+    /// connect. Mandatory constructor parameter per
+    /// `.claude/rules/development.md` § "Port-trait dependencies": the
+    /// production composition passes the guest-flow owner, tests pass
+    /// `SimGuestStreamDial`.
+    // SCAFFOLD: true — netns-density-295 DISTILL (DG-2 row 19); the VM probe
+    // dispatch through this port, the run numbering and the
+    // `probe.not_sampled` event are DELIVER step 9.
+    #[allow(
+        dead_code,
+        reason = "consumed by the VM probe dispatch of DELIVER step 9 (DG-2 row 19)"
+    )]
+    guest_dial: Arc<dyn GuestStreamDial>,
     /// Per-alloc supervisors. `BTreeMap` per
     /// `.claude/rules/development.md` § "Ordered-collection choice"
     /// — the supervisor map is drained on `stop_alloc` and iterated
@@ -102,12 +126,14 @@ impl ProbeRunner {
         http_prober: Arc<dyn overdrive_core::traits::prober::HttpProber>,
         clock: Arc<dyn Clock>,
         observation_store: Arc<dyn ObservationStore>,
+        guest_dial: Arc<dyn GuestStreamDial>,
     ) -> Self {
         Self {
             tcp_prober,
             http_prober,
             clock,
             observation_store,
+            guest_dial,
             supervisors: Mutex::new(BTreeMap::new()),
         }
     }
@@ -529,6 +555,12 @@ async fn probe_tick(
         status,
         last_observed_at_unix_ms,
         inferred: descriptor.inferred,
+        // SCAFFOLD: true — netns-density-295 DISTILL. The probe task's run
+        // numbering and observed streak (PROBE-RUN-COUNT, ADR-0191: the
+        // previous written row's run_seq + 1, and the same-status streak)
+        // are DELIVER step 9; until then every row carries the first values.
+        run_seq: ProbeRunSeq::FIRST,
+        same_status_runs: SameStatusRuns::ONE,
     };
     observation_store.write_probe_result(row.clone()).await.map_err(|err| {
         ProbeRunnerError::ObservationWriteFailed {

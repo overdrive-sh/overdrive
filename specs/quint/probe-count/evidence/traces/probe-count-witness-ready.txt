@@ -7,6 +7,7 @@ State 1
   terms = 0
   runs = 0
   psame = 0
+  conf_step = [init |-> [tag |-> "UNIT"]]
   clock = 0
   rseq = 0
   running = TRUE

@@ -1,0 +1,21 @@
+
+  pair_bugReleaseKeepsPairs
+    1) pair_bugReleaseKeepsPairs::fwd_pair::ContextReleaseResetsEveryPair failed after 1 test(s)
+
+  1 failed
+
+  1) pair_bugReleaseKeepsPairs::fwd_pair::ContextReleaseResetsEveryPair:
+       Error [QNT508]: Expect condition does not hold true
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/fwd_pair.qnt:1474:39
+        1474:   run ContextReleaseResetsEveryPair = Paired
+                                                    ^^^^^^
+        1475:     .then(Write("hg")).then(Hop0("hg"))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        1476:     .then(CtxRelease("g")).expect(Safety and pr.get("g").ph == "ended" and pr.get("g").rec == "none" and dir.get("hg").rst)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Use --seed=0xb0baacb31c15a5cb --match=pair_bugReleaseKeepsPairs::fwd_pair::ContextReleaseResetsEveryPair to repeat.
+
+
+  Use --verbosity=3 to show executions.
+  Further debug with: quint test --verbosity=3 /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/hazard/fwd_pair_ctl_hazards.qnt
+error: Tests failed

@@ -32,6 +32,7 @@ use overdrive_cli::render::{ProbeRenderRow, probes_section};
 use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::aggregate::probe_descriptor::ProbeMechanic;
 use overdrive_core::observation::probe_result_row::{ProbeIdx, ProbeRole, ProbeStatus};
+use overdrive_core::observation::{ProbeRunSeq, SameStatusRuns};
 
 /// Build a `ProbeRenderRow` with a Pass status observed at `at_ms`.
 fn pass_row(role: ProbeRole, idx: u32, mechanic: ProbeMechanic, at_ms: u64) -> ProbeRenderRow {
@@ -245,6 +246,8 @@ fn fixture_result_row(role: ProbeRole, status: ProbeStatus) -> ProbeResultRow {
         status,
         last_observed_at_unix_ms: 1000,
         inferred: false,
+        run_seq: ProbeRunSeq::FIRST,
+        same_status_runs: SameStatusRuns::ONE,
     }
 }
 

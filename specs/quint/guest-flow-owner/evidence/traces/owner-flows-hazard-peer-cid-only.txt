@@ -29,6 +29,8 @@ State 1
   bHeldByOther = false
   act = "none"
   badAct = false
+  gSess = 0
+  conf_step = InitWith({ o: "g" })
 
 State 2
   alloc = "Provisioned"
@@ -40,6 +42,7 @@ State 3
 
 State 4
   sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "pending" })
+  gSess = 2
 
 State 5
   sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "reading" })
@@ -54,6 +57,7 @@ State 7
 State 8
   vmUp = false
   sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "dead" })
+  gSess = 0
 
 State 9
   alloc = "Absent"

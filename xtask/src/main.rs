@@ -94,6 +94,26 @@ enum Task {
     /// Tier 2 — BPF unit tests via `BPF_PROG_TEST_RUN`.
     BpfUnit,
 
+    /// Lane setup of the guest-kit native-metal lanes (GH #295, T-1): builds
+    /// the forwarder module for the running kernel, the static scripted
+    /// guest peer and the in-guest libtest binaries, and stages each at its
+    /// contract path. See `xtask/src/guest_kit_prepare.rs`.
+    GuestKitPrepare,
+
+    /// Lane setup (FWD-PREREQ, GH #295; MODULE-REFCOUNT): loads this
+    /// workspace's forwarder module (`<workspace>/target/kmod/<uname
+    /// -r>/ovd_fwd.ko`, built by `kmod-build`) into the running kernel. A
+    /// loaded module whose `version` (the tree digest) equals this build's
+    /// is accepted; a stale idle one is unloaded and this build loaded; a
+    /// busy one is refused naming its holders. See `xtask/src/kmod_load.rs`.
+    KmodLoad {
+        /// A busy stale module prints the busy message and exits 0 (the
+        /// hooks' form — the stale verdict then belongs to the `serve`
+        /// fixtures). Every other outcome is the strict form's.
+        #[arg(long)]
+        busy_ok: bool,
+    },
+
     /// Tier 3 — real-kernel integration tests. Reuses aya's
     /// `cargo xtask integration-test vm` harness.
     IntegrationTest {
@@ -442,6 +462,14 @@ fn run() -> Result<()> {
         Task::BpfBuild => bpf_build(),
         Task::BpfClippy => bpf_clippy(),
         Task::BpfUnit => bpf_unit(),
+        Task::GuestKitPrepare => {
+            let root = workspace_root_dir()?;
+            xtask::guest_kit_prepare::run(&root, &cargo_target_dir(&root))
+        }
+        Task::KmodLoad { busy_ok } => {
+            let root = workspace_root_dir()?;
+            xtask::kmod_load::run(&root, busy_ok).map(|_| ())
+        }
         Task::IntegrationTest { scope } => match scope {
             IntegrationScope::Vm { cache_dir, kernels } => integration_vm(&cache_dir, &kernels),
         },

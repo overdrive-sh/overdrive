@@ -13,13 +13,12 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
+use overdrive_control_plane::ServerHandle;
 use overdrive_control_plane::api::{
     IdempotencyOutcome, SubmitWorkloadRequest, SubmitWorkloadResponse,
 };
-use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{DriverInput, JobSpecInput, ResourcesInput};
 use overdrive_core::api::submit::SubmitSpecInput;
-use overdrive_host::RealCgroupFs;
 use serde::Deserialize;
 use tempfile::TempDir;
 
@@ -60,29 +59,8 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
     let operator_config_dir = tmp.path().join("conf");
     std::fs::create_dir_all(&data_dir).expect("create data dir");
     std::fs::create_dir_all(&operator_config_dir).expect("create operator config dir");
-    let config = ServerConfig {
-        bind: "127.0.0.1:0".parse().expect("parse bind addr"),
-        data_dir,
-        operator_config_dir: operator_config_dir.clone(),
-        // `tick_cadence` + `clock` default per
-        // `fix-convergence-loop-not-spawned` Step 01-02.
-        dataplane_override: Some(std::sync::Arc::new(
-            overdrive_sim::adapters::dataplane::SimDataplane::new(),
-        )),
-        // ADR-0061 § 1 (step 01-03): default `dataplane` is now veth-named
-        // (`ovd-veth-cli` absent in the test VM); name `lo` so the boot
-        // `host_ipv4` resolution succeeds. SimDataplane skips XDP attach.
-        dataplane: Some(super::dataplane_lo::lo_dataplane_config()),
-        // Step 02-02 (C1-AMEND) — hermetic in-process boot KEK so `boot_ca`'s
-        // KEK-resolve probe succeeds with no kernel-keyring / env dependency.
-        ..ServerConfig::new(
-            std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-            std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
-            std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
-        )
-    };
-    let handle =
-        run_server(config, std::sync::Arc::new(RealCgroupFs::new())).await.expect("run_server");
+    let config = super::node_adapters::test_config(data_dir, operator_config_dir.clone());
+    let handle = super::node_adapters::boot(config).await.expect("run_server");
     let bound = handle.local_addr().await.expect("bound addr");
     let ca_pem = read_ca_from_trust_triple(&operator_config_dir);
     (handle, bound, tmp, ca_pem)

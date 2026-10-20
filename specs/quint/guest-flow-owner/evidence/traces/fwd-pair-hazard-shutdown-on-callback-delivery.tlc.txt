@@ -1,0 +1,1234 @@
+State 1: <Initial predicate>
+/\ pair_liveShutdownOnCallback_fwd_pair_strmAbort = FALSE
+/\ pair_liveShutdownOnCallback_fwd_pair_guestAbortSent = FALSE
+/\ pair_liveShutdownOnCallback_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_liveShutdownOnCallback_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_liveShutdownOnCallback_fwd_pair_mode = "stream"
+/\ pair_liveShutdownOnCallback_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_liveShutdownOnCallback_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_liveShutdownOnCallback_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_liveShutdownOnCallback_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_liveShutdownOnCallback_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_liveShutdownOnCallback_fwd_pair_pr = [ g |->
+      [ ph |-> "unattached",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "unattached",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_vmUp = TRUE
+/\ pair_liveShutdownOnCallback_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_liveShutdownOnCallback_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_attRes = [g |-> "none", h |-> "none"]
+/\ pair_liveShutdownOnCallback_fwd_pair_hres = "none"
+/\ pair_liveShutdownOnCallback_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_liveShutdownOnCallback_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+
+State 2: <pair_liveShutdownOnCallback_fwd_pair_Attach line 4071, col 3 to line 4081, col 80 of module pair_liveShutdownOnCallback>
+/\ pair_liveShutdownOnCallback_fwd_pair_strmAbort = FALSE
+/\ pair_liveShutdownOnCallback_fwd_pair_guestAbortSent = FALSE
+/\ pair_liveShutdownOnCallback_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_liveShutdownOnCallback_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_liveShutdownOnCallback_fwd_pair_mode = "stream"
+/\ pair_liveShutdownOnCallback_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_liveShutdownOnCallback_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_liveShutdownOnCallback_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_liveShutdownOnCallback_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_liveShutdownOnCallback_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_liveShutdownOnCallback_fwd_pair_pr = [ g |->
+      [ ph |-> "unattached",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_vmUp = TRUE
+/\ pair_liveShutdownOnCallback_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_liveShutdownOnCallback_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_attRes = [g |-> "none", h |-> "ok"]
+/\ pair_liveShutdownOnCallback_fwd_pair_hres = "none"
+/\ pair_liveShutdownOnCallback_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_liveShutdownOnCallback_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+
+State 3: <pair_liveShutdownOnCallback_fwd_pair_Write line 3143, col 3 to line 3184, col 75 of module pair_liveShutdownOnCallback>
+/\ pair_liveShutdownOnCallback_fwd_pair_strmAbort = FALSE
+/\ pair_liveShutdownOnCallback_fwd_pair_guestAbortSent = FALSE
+/\ pair_liveShutdownOnCallback_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_liveShutdownOnCallback_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_liveShutdownOnCallback_fwd_pair_mode = "stream"
+/\ pair_liveShutdownOnCallback_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_liveShutdownOnCallback_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_liveShutdownOnCallback_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_liveShutdownOnCallback_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_liveShutdownOnCallback_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_liveShutdownOnCallback_fwd_pair_pr = [ g |->
+      [ ph |-> "unattached",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_vmUp = TRUE
+/\ pair_liveShutdownOnCallback_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_liveShutdownOnCallback_fwd_pair_dir = [ gh |->
+      [ wr |-> 1,
+        wfin |-> FALSE,
+        q0 |-> <<1>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_attRes = [g |-> "none", h |-> "ok"]
+/\ pair_liveShutdownOnCallback_fwd_pair_hres = "none"
+/\ pair_liveShutdownOnCallback_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_liveShutdownOnCallback_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+
+State 4: <pair_liveShutdownOnCallback_fwd_pair_Fin line 2303, col 3 to line 2340, col 78 of module pair_liveShutdownOnCallback>
+/\ pair_liveShutdownOnCallback_fwd_pair_strmAbort = FALSE
+/\ pair_liveShutdownOnCallback_fwd_pair_guestAbortSent = FALSE
+/\ pair_liveShutdownOnCallback_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_liveShutdownOnCallback_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_liveShutdownOnCallback_fwd_pair_mode = "stream"
+/\ pair_liveShutdownOnCallback_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_liveShutdownOnCallback_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_liveShutdownOnCallback_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_liveShutdownOnCallback_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_liveShutdownOnCallback_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_liveShutdownOnCallback_fwd_pair_pr = [ g |->
+      [ ph |-> "unattached",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_vmUp = TRUE
+/\ pair_liveShutdownOnCallback_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_liveShutdownOnCallback_fwd_pair_dir = [ gh |->
+      [ wr |-> 1,
+        wfin |-> TRUE,
+        q0 |-> <<1>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_attRes = [g |-> "none", h |-> "ok"]
+/\ pair_liveShutdownOnCallback_fwd_pair_hres = "none"
+/\ pair_liveShutdownOnCallback_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_liveShutdownOnCallback_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+
+State 5: <pair_liveShutdownOnCallback_fwd_pair_Attach line 4071, col 3 to line 4081, col 80 of module pair_liveShutdownOnCallback>
+/\ pair_liveShutdownOnCallback_fwd_pair_strmAbort = FALSE
+/\ pair_liveShutdownOnCallback_fwd_pair_guestAbortSent = FALSE
+/\ pair_liveShutdownOnCallback_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_liveShutdownOnCallback_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_liveShutdownOnCallback_fwd_pair_mode = "stream"
+/\ pair_liveShutdownOnCallback_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_liveShutdownOnCallback_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_liveShutdownOnCallback_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_liveShutdownOnCallback_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_liveShutdownOnCallback_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_liveShutdownOnCallback_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_vmUp = TRUE
+/\ pair_liveShutdownOnCallback_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_liveShutdownOnCallback_fwd_pair_dir = [ gh |->
+      [ wr |-> 1,
+        wfin |-> TRUE,
+        q0 |-> <<1>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_liveShutdownOnCallback_fwd_pair_hres = "none"
+/\ pair_liveShutdownOnCallback_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_liveShutdownOnCallback_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+
+State 6: <pair_liveShutdownOnCallback_fwd_pair_Hop0 line 3540, col 3 to line 3552, col 54 of module pair_liveShutdownOnCallback>
+/\ pair_liveShutdownOnCallback_fwd_pair_strmAbort = FALSE
+/\ pair_liveShutdownOnCallback_fwd_pair_guestAbortSent = FALSE
+/\ pair_liveShutdownOnCallback_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_liveShutdownOnCallback_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_liveShutdownOnCallback_fwd_pair_mode = "stream"
+/\ pair_liveShutdownOnCallback_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_liveShutdownOnCallback_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_liveShutdownOnCallback_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_liveShutdownOnCallback_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_liveShutdownOnCallback_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_liveShutdownOnCallback_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_vmUp = TRUE
+/\ pair_liveShutdownOnCallback_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_liveShutdownOnCallback_fwd_pair_dir = [ gh |->
+      [ wr |-> 1,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<1>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_liveShutdownOnCallback_fwd_pair_hres = "none"
+/\ pair_liveShutdownOnCallback_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_liveShutdownOnCallback_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+
+State 7: <pair_liveShutdownOnCallback_fwd_pair_HopEnd0 line 3673, col 3 to line 3698, col 55 of module pair_liveShutdownOnCallback>
+/\ pair_liveShutdownOnCallback_fwd_pair_strmAbort = FALSE
+/\ pair_liveShutdownOnCallback_fwd_pair_guestAbortSent = FALSE
+/\ pair_liveShutdownOnCallback_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_liveShutdownOnCallback_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_liveShutdownOnCallback_fwd_pair_mode = "stream"
+/\ pair_liveShutdownOnCallback_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_liveShutdownOnCallback_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_liveShutdownOnCallback_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_liveShutdownOnCallback_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_liveShutdownOnCallback_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_liveShutdownOnCallback_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_vmUp = TRUE
+/\ pair_liveShutdownOnCallback_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_liveShutdownOnCallback_fwd_pair_dir = [ gh |->
+      [ wr |-> 1,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<1>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_liveShutdownOnCallback_fwd_pair_hres = "none"
+/\ pair_liveShutdownOnCallback_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {"S"},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> TRUE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_ctl = [gh |-> <<{"S"}>>, hg |-> <<>>]
+/\ pair_liveShutdownOnCallback_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+
+State 8: <pair_liveShutdownOnCallback_fwd_pair_VCtl line 4314, col 3 to line 4318, col 54 of module pair_liveShutdownOnCallback>
+/\ pair_liveShutdownOnCallback_fwd_pair_strmAbort = FALSE
+/\ pair_liveShutdownOnCallback_fwd_pair_guestAbortSent = FALSE
+/\ pair_liveShutdownOnCallback_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_liveShutdownOnCallback_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_liveShutdownOnCallback_fwd_pair_mode = "stream"
+/\ pair_liveShutdownOnCallback_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_liveShutdownOnCallback_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_liveShutdownOnCallback_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_liveShutdownOnCallback_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_liveShutdownOnCallback_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_liveShutdownOnCallback_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_vmUp = TRUE
+/\ pair_liveShutdownOnCallback_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_liveShutdownOnCallback_fwd_pair_dir = [ gh |->
+      [ wr |-> 1,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<1>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "none",
+        dstShut |-> TRUE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_liveShutdownOnCallback_fwd_pair_hres = "none"
+/\ pair_liveShutdownOnCallback_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {"S"},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> TRUE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {"S"},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "clean",
+        tcls |-> "clean",
+        ucls |-> "clean",
+        att |-> "noend",
+        clsAt |-> "callback",
+        ncls |-> 1,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_liveShutdownOnCallback_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+
+State 9: <pair_liveShutdownOnCallback_fwd_pair_ReadEof line 3190, col 3 to line 3239, col 55 of module pair_liveShutdownOnCallback>
+/\ pair_liveShutdownOnCallback_fwd_pair_strmAbort = FALSE
+/\ pair_liveShutdownOnCallback_fwd_pair_guestAbortSent = FALSE
+/\ pair_liveShutdownOnCallback_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_liveShutdownOnCallback_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_liveShutdownOnCallback_fwd_pair_mode = "stream"
+/\ pair_liveShutdownOnCallback_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_liveShutdownOnCallback_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_liveShutdownOnCallback_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_liveShutdownOnCallback_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_liveShutdownOnCallback_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_liveShutdownOnCallback_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_vmUp = TRUE
+/\ pair_liveShutdownOnCallback_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_liveShutdownOnCallback_fwd_pair_dir = [ gh |->
+      [ wr |-> 1,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<1>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "none",
+        dstShut |-> TRUE,
+        got |-> <<>>,
+        eof |-> TRUE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_liveShutdownOnCallback_fwd_pair_hres = "none"
+/\ pair_liveShutdownOnCallback_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {"S"},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> TRUE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {"S"},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "clean",
+        tcls |-> "clean",
+        ucls |-> "clean",
+        att |-> "noend",
+        clsAt |-> "callback",
+        ncls |-> 1,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_liveShutdownOnCallback_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_liveShutdownOnCallback_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+
+State 10: Stuttering

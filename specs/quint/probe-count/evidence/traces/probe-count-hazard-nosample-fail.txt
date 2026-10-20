@@ -13,6 +13,7 @@ State 1
   pst = ""
   rst = ""
   tseqs = {}
+  conf_step = [init |-> [tag |-> "UNIT"]]
   rsame = 0
   A = 0
   runs = 0

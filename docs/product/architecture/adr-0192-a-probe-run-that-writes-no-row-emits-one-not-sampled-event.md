@@ -69,7 +69,7 @@ naming the probe and the reason, for every workload kind.**
   record a durable marker in the store that rejected it. The conditions that
   cause the other two reasons are durable elsewhere: node quiescence is
   Overdrive's own recovery state (ADR-0169) and node capacity is visible in
-  the node's flow counts (ADR-0147). Rejected.
+  the node's flow counts (ADR-0208). Rejected.
 
 ## Consequences
 

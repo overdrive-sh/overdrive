@@ -196,8 +196,12 @@ async fn run(cli: Cli) -> Result<()> {
             // resolves to on the read side, so `serve` and `deploy`
             // share the same file (`fix-cli-cannot-reach-control-plane`).
             let config_dir = overdrive_cli::commands::cluster::default_operator_config_dir();
-            let args =
-                overdrive_cli::commands::serve::ServeArgs { bind: bind_addr, data_dir, config_dir };
+            let args = overdrive_cli::commands::serve::ServeArgs {
+                bind: bind_addr,
+                data_dir,
+                config_dir,
+                vsock_ports: overdrive_core::guest_transport::NodeVsockPortConfig::default(),
+            };
             let handle = overdrive_cli::commands::serve::run(args).await?;
             tracing::info!(endpoint = %handle.endpoint(), "control plane listening");
 

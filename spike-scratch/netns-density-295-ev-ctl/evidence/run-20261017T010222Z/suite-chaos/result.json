@@ -1,0 +1,14 @@
+{
+ "item": "chaos",
+ "verdict": "done",
+ "elapsed_s": 6.0,
+ "pass": 7,
+ "fail": 0,
+ "kernel_fault": false,
+ "suite_done": [
+  "SUITE_DONE suite=chaos rc=0"
+ ],
+ "guest_uname": [
+  "7.0.0-29-generic"
+ ]
+}

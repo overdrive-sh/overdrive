@@ -1,0 +1,684 @@
+State 1: <Initial predicate>
+/\ pair_bugNoRecordIsClean_fwd_pair_mode = "watch"
+/\ pair_bugNoRecordIsClean_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_bugNoRecordIsClean_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugNoRecordIsClean_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugNoRecordIsClean_fwd_pair_pr = [ g |->
+      [ ph |-> "unattached",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_bugNoRecordIsClean_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_bugNoRecordIsClean_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugNoRecordIsClean_fwd_pair_vmUp = TRUE
+/\ pair_bugNoRecordIsClean_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_bugNoRecordIsClean_fwd_pair_attRes = [g |-> "none", h |-> "ok"]
+/\ pair_bugNoRecordIsClean_fwd_pair_hres = "none"
+/\ pair_bugNoRecordIsClean_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugNoRecordIsClean_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_bugNoRecordIsClean_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_bugNoRecordIsClean_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugNoRecordIsClean_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugNoRecordIsClean_fwd_pair_conf_step = [InitWith |-> [m |-> "watch"]]
+/\ pair_bugNoRecordIsClean_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugNoRecordIsClean_fwd_pair_strmAbort = FALSE
+/\ pair_bugNoRecordIsClean_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+
+State 2: <pair_bugNoRecordIsClean_fwd_pair_Attach line 3955, col 3 to line 3965, col 76 of module pair_bugNoRecordIsClean>
+/\ pair_bugNoRecordIsClean_fwd_pair_mode = "watch"
+/\ pair_bugNoRecordIsClean_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_bugNoRecordIsClean_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugNoRecordIsClean_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugNoRecordIsClean_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_bugNoRecordIsClean_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_bugNoRecordIsClean_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugNoRecordIsClean_fwd_pair_vmUp = TRUE
+/\ pair_bugNoRecordIsClean_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_bugNoRecordIsClean_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_bugNoRecordIsClean_fwd_pair_hres = "none"
+/\ pair_bugNoRecordIsClean_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugNoRecordIsClean_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_bugNoRecordIsClean_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_bugNoRecordIsClean_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugNoRecordIsClean_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugNoRecordIsClean_fwd_pair_conf_step = [InitWith |-> [m |-> "watch"]]
+/\ pair_bugNoRecordIsClean_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugNoRecordIsClean_fwd_pair_strmAbort = FALSE
+/\ pair_bugNoRecordIsClean_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+
+State 3: <pair_bugNoRecordIsClean_fwd_pair_VmmExit line 2391, col 3 to line 2454, col 42 of module pair_bugNoRecordIsClean>
+/\ pair_bugNoRecordIsClean_fwd_pair_mode = "watch"
+/\ pair_bugNoRecordIsClean_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_bugNoRecordIsClean_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugNoRecordIsClean_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugNoRecordIsClean_fwd_pair_pr = [ g |->
+      [ ph |-> "gone",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_bugNoRecordIsClean_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> TRUE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_bugNoRecordIsClean_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugNoRecordIsClean_fwd_pair_vmUp = FALSE
+/\ pair_bugNoRecordIsClean_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> TRUE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> TRUE,
+        lost |-> 0 ] ]
+/\ pair_bugNoRecordIsClean_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_bugNoRecordIsClean_fwd_pair_hres = "none"
+/\ pair_bugNoRecordIsClean_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugNoRecordIsClean_fwd_pair_ep = [g |-> "gone", h |-> "alive"]
+/\ pair_bugNoRecordIsClean_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_bugNoRecordIsClean_fwd_pair_ctx = [g |-> "gone", h |-> "open"]
+/\ pair_bugNoRecordIsClean_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 1,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugNoRecordIsClean_fwd_pair_conf_step = [InitWith |-> [m |-> "watch"]]
+/\ pair_bugNoRecordIsClean_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugNoRecordIsClean_fwd_pair_strmAbort = FALSE
+/\ pair_bugNoRecordIsClean_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+
+State 4: <pair_bugNoRecordIsClean_fwd_pair_HolderEnd line 2082, col 3 to line 2091, col 77 of module pair_bugNoRecordIsClean>
+/\ pair_bugNoRecordIsClean_fwd_pair_mode = "watch"
+/\ pair_bugNoRecordIsClean_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_bugNoRecordIsClean_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugNoRecordIsClean_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugNoRecordIsClean_fwd_pair_pr = [ g |->
+      [ ph |-> "gone",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_bugNoRecordIsClean_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> TRUE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_bugNoRecordIsClean_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugNoRecordIsClean_fwd_pair_vmUp = FALSE
+/\ pair_bugNoRecordIsClean_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> TRUE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> TRUE,
+        lost |-> 0 ] ]
+/\ pair_bugNoRecordIsClean_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_bugNoRecordIsClean_fwd_pair_hres = "none"
+/\ pair_bugNoRecordIsClean_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugNoRecordIsClean_fwd_pair_ep = [g |-> "gone", h |-> "alive"]
+/\ pair_bugNoRecordIsClean_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_bugNoRecordIsClean_fwd_pair_ctx = [g |-> "gone", h |-> "open"]
+/\ pair_bugNoRecordIsClean_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 1,
+  hobs |-> "err",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugNoRecordIsClean_fwd_pair_conf_step = [InitWith |-> [m |-> "watch"]]
+/\ pair_bugNoRecordIsClean_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugNoRecordIsClean_fwd_pair_strmAbort = FALSE
+/\ pair_bugNoRecordIsClean_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+
+State 5: <pair_bugNoRecordIsClean_fwd_pair_ReadEof line 3118, col 3 to line 3167, col 51 of module pair_bugNoRecordIsClean>
+/\ pair_bugNoRecordIsClean_fwd_pair_mode = "watch"
+/\ pair_bugNoRecordIsClean_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_bugNoRecordIsClean_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugNoRecordIsClean_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugNoRecordIsClean_fwd_pair_pr = [ g |->
+      [ ph |-> "gone",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_bugNoRecordIsClean_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> TRUE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_bugNoRecordIsClean_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugNoRecordIsClean_fwd_pair_vmUp = FALSE
+/\ pair_bugNoRecordIsClean_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> TRUE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> TRUE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> TRUE,
+        lost |-> 0 ] ]
+/\ pair_bugNoRecordIsClean_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_bugNoRecordIsClean_fwd_pair_hres = "HalfClose"
+/\ pair_bugNoRecordIsClean_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugNoRecordIsClean_fwd_pair_ep = [g |-> "gone", h |-> "alive"]
+/\ pair_bugNoRecordIsClean_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_bugNoRecordIsClean_fwd_pair_ctx = [g |-> "gone", h |-> "open"]
+/\ pair_bugNoRecordIsClean_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 1,
+  hobs |-> "err",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugNoRecordIsClean_fwd_pair_conf_step = [InitWith |-> [m |-> "watch"]]
+/\ pair_bugNoRecordIsClean_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugNoRecordIsClean_fwd_pair_strmAbort = FALSE
+/\ pair_bugNoRecordIsClean_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]

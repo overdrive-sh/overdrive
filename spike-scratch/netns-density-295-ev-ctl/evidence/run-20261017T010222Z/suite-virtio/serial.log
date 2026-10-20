@@ -1,0 +1,44 @@
+GUEST_BOOT uname_r=7.0.0-29-generic suite=virtio arg= modparams=
+GUEST_MODULES:
+ovd_fwd 36864 0 [permanent], Live 0xffffffffc0434000 (OE)
+aesni_intel 98304 0 - Live 0xffffffffc0425000
+tls 163840 0 - Live 0xffffffffc0412000
+vsock_diag 12288 0 - Live 0xffffffffc0410000
+vsock_loopback 12288 0 - Live 0xffffffffc0407000
+vmw_vsock_virtio_transport 20480 0 - Live 0xffffffffc040c000
+vmw_vsock_virtio_transport_common 57344 2 vsock_loopback,vmw_vsock_virtio_transport, Live 0xffffffffc0408000
+vsock 73728 4 vsock_diag,vsock_loopback,vmw_vsock_virtio_transport,vmw_vsock_virtio_transport_common, Live 0xffffffffc0400000
+crw-------    1 0        0          10, 263 Oct 17 01:14 /dev/ovd_fwd
+CTLTEST suite=virtio strict=0
+VIRTIO_READY
+CHECK PASS virtio: far TCP ends open before the release :: how=0 traffic=0: 32/32 open
+CHECK PASS virtio: every guest-side far TCP end reset :: how=0 traffic=0: reset=32 (at release return 32) eof=0 open=0
+CHECK PASS virtio: far TCP ends open before the release :: how=1 traffic=0: 32/32 open
+CHECK PASS virtio: every guest-side far TCP end reset :: how=1 traffic=0: reset=32 (at release return 32) eof=0 open=0
+CHECK PASS virtio: far TCP ends open before the release :: how=2 traffic=0: 32/32 open
+CHECK PASS virtio: every guest-side far TCP end reset :: how=2 traffic=0: reset=32 (at release return 32) eof=0 open=0
+CHECK PASS virtio: far TCP ends open before the release :: how=0 traffic=1: 32/32 open
+CHECK PASS virtio: every guest-side far TCP end reset :: how=0 traffic=1: reset=32 (at release return 32) eof=0 open=0
+CHECK PASS virtio: far TCP ends open before the release :: how=1 traffic=1: 32/32 open
+CHECK PASS virtio: every guest-side far TCP end reset :: how=1 traffic=1: reset=32 (at release return 32) eof=0 open=0
+CHECK PASS virtio: far TCP ends open before the release :: how=2 traffic=1: 32/32 open
+CHECK PASS virtio: every guest-side far TCP end reset :: how=2 traffic=1: reset=32 (at release return 32) eof=0 open=0
+DATA audit[end] ctx_open=6 ctx_rel=6 ctx_free=6 pair_new=192 pair_free=192 rec_new=192 rec_queued=0 rec_read=0 rec_discard=192 rec_free_unread=0 rel_won=192 live=0 bytes=68381952
+CHECK PASS virtio: no live id left :: live=0
+CHECK PASS no kernel oops/warn :: dmesg scan
+RESULT suite=virtio pass=14 fail=0
+SUITE_DONE suite=virtio rc=0
+[    0.037393] rcu: Preemptible hierarchical RCU implementation.
+[    0.037394] rcu: 	RCU restricting CPUs from NR_CPUS=8192 to nr_cpu_ids=4.
+[    0.037396] 	Trampoline variant of Tasks RCU enabled.
+[    0.037397] 	Rude variant of Tasks RCU enabled.
+[    0.037397] 	Tracing variant of Tasks RCU enabled.
+[    0.037398] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.037408] RCU Tasks: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.037409] RCU Tasks Rude: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.046129] rcu: Hierarchical SRCU implementation.
+[    0.392809] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.392820] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+[    0.393909] ovd_fwd: loaded (spike, permanent: no module_exit)
+GUEST_END
+[    5.084218] reboot: Power down

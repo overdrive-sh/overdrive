@@ -360,9 +360,15 @@ mod acceptance {
     // the guest-transport vocabulary, the wire codec and the deploy-ingress
     // listener bounds (feature-delta § "[REF] Core vocabulary", § "[REF] Wire
     // contracts"). RED: the pinned surface is scaffolded and every body is
-    // `#[ignore = "pending DELIVER vsock new-step N …"]`.
+    // `#[ignore = "pending DELIVER step 2"]` (core codec and newtypes) or
+    // `#[ignore = "pending DELIVER attachment-cut step"]` (the READY line).
     mod vsock_datagram_frame;
     mod vsock_deploy_validation;
+    mod vsock_forwarder_vocabulary;
+    mod vsock_guest_stream_dial_vocabulary;
     mod vsock_guest_transport_vocabulary;
     mod vsock_wire_codec;
+    // netns-density-295 probe-run counting (R5-PROBE-V2) — ProbeRunSeq /
+    // SameStatusRuns newtype completeness and the V1 -> V2 up-conversion.
+    mod probe_run_seq;
 }

@@ -1,35 +1,39 @@
 //! E2 — composition-root probe gate walking-skeleton.
 //!
 //! Step 01-06 of the `cgroup-fs-port` migration per ADR-0054
-//! § Composition root wiring. Drives the production `serve::run`
-//! handler against an unwritable `OVERDRIVE_TEST_PROBE_ROOT` and
-//! asserts:
-//!   1. `serve::run` returns `Err(CliError::ProbeRefused { .. })`
+//! § Composition root wiring; re-pointed by GH #295 PROBE-ROOT-ENV (user
+//! ruling 2026-10-19). Drives the CLI's one entry function
+//! `serve::run_with_adapters` — production `run` is a call of it — with a
+//! REAL `RealCgroupFs` whose probe root lies under a regular file
+//! (`RealCgroupFs::new().with_probe_root(..)`, the real adapter's own
+//! probe-root constructor), so the refusal comes from the real probe's
+//! `create_dir_all` failure. It asserts:
+//!   1. `run_with_adapters` returns `Err(CliError::ProbeRefused { .. })`
 //!      (the typed variant, not a `Display`-grep on `Transport`).
 //!   2. A `health.startup.refused` structured tracing event fires
 //!      with the `ProbeError::Substrate` cause threaded as a typed
 //!      field — NOT collapsed to `Internal(String)` per
 //!      `.claude/rules/development.md` § "Never flatten a typed error
 //!      to `Internal(String)` at a composition boundary".
-//!   3. The control-plane server NEVER reached the listener-bind step
-//!      (asserted indirectly by the absence of a
-//!      `cgroup_preflight` event AND by the test fixture's HTTPS
-//!      port staying unbound — verified by the fact that
-//!      `serve::run` returned `Err` rather than `Ok(handle)`).
+//!   3. The control-plane server NEVER reached the listener-bind step:
+//!      no `cgroup_preflight` event fired.
+//!   4. The adapters builder was never called: a refused probe opens no
+//!      store and creates no file (probe before the bundle, round 13).
 //!
-//! Per `crates/overdrive-cli/CLAUDE.md` § "Integration tests — no
-//! subprocess", this is a DIRECT in-process call to `serve::run` (not
-//! a `Command::spawn` of `overdrive`). The test-only env var
-//! `OVERDRIVE_TEST_PROBE_ROOT` is honoured by `serve::run` when
-//! present; production callers never set it, so the production probe
-//! path remains rooted at `/sys/fs/cgroup`.
+//! No environment variable is read or written (the
+//! `OVERDRIVE_TEST_PROBE_ROOT` seam is removed), so the test needs no
+//! `#[serial(env)]`. The tracing capture is a thread-local default
+//! subscriber held for the test body on a current-thread runtime, so the
+//! probe's event (emitted on the calling task) is captured and no other
+//! test's events are.
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use overdrive_cli::commands::serve::{self, ServeArgs};
+use overdrive_cli::commands::serve;
 use overdrive_cli::http_client::CliError;
+use overdrive_host::RealCgroupFs;
 use tempfile::TempDir;
 use tracing::field::{Field, Visit};
 use tracing::{Event, Subscriber};
@@ -90,71 +94,32 @@ where
 // E2 — composition root refuses to start when RealCgroupFs::probe() fails.
 // ----------------------------------------------------------------------------
 
-/// RAII guard that restores `OVERDRIVE_TEST_PROBE_ROOT` on drop. The
-/// `#[serial(env)]` annotation on the test body guarantees exclusive
-/// access; this guard ensures the env stays clean if the test panics
-/// mid-body.
-struct EnvGuard;
-
-impl Drop for EnvGuard {
-    fn drop(&mut self) {
-        // SAFETY: `#[serial(env)]` on the test body guarantees
-        // exclusive access to the process env for the duration of
-        // this guard's lifetime.
-        unsafe {
-            std::env::remove_var("OVERDRIVE_TEST_PROBE_ROOT");
-        }
-    }
-}
-
-/// Drive `serve::run` with `OVERDRIVE_TEST_PROBE_ROOT` pointed at an
-/// unwritable parent path. The probe MUST fail with
-/// `ProbeError::Substrate { source }` (`NotFound` / `PermissionDenied`
-/// depending on which step trips first), the structured
+/// Drive `serve::run_with_adapters` with a real `RealCgroupFs` whose probe
+/// root lies under a regular file. The probe MUST fail with
+/// `ProbeError::Substrate { source }` (`NotADirectory`), the structured
 /// `health.startup.refused` event MUST fire with the typed cause,
-/// and `serve::run` MUST return `Err(CliError::ProbeRefused { .. })`.
-///
-/// `#[serial(env)]` is required: the test mutates the process-global
-/// `OVERDRIVE_TEST_PROBE_ROOT` env var and the global tracing
-/// subscriber (`with_default` guard is process-wide while held).
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[serial_test::serial(env)]
+/// `run_with_adapters` MUST return `Err(CliError::ProbeRefused { .. })`, and
+/// the adapters builder MUST NOT have been called.
+#[tokio::test(flavor = "current_thread")]
+#[expect(
+    clippy::result_large_err,
+    reason = "the bundle builder returns the boot's typed `ControlPlaneError` unboxed, as `run_server` does"
+)]
 async fn serve_refuses_to_start_when_cgroup_fs_probe_fails() {
-    // Choose a probe root whose parent does not exist. RealCgroupFs's
-    // probe calls `tokio::fs::create_dir_all(probe_root/.overdrive-probe-<uuid>)`
-    // — `create_dir_all` creates missing parents EXCEPT when the
-    // grandparent is also missing under some Lima FS configurations.
-    // We construct a path whose root is non-creatable by an
-    // unprivileged process: under /nonexistent-overdrive-probe/...
-    // the root `/nonexistent-overdrive-probe` cannot be created
-    // without root.
-    //
-    // The reliable way: an unwritable parent. We use a tempdir, then
-    // chmod its parent so create_dir_all returns PermissionDenied.
-    // BUT chmod-based fixtures are flaky under Lima. The simplest
-    // reliable mechanism is to target a path under a regular FILE
-    // (not a directory): create_dir_all returns NotADirectory.
+    // `create_dir_all` under a regular FILE (not a directory) fails with
+    // NotADirectory — the reliable unwritable probe root (chmod-based
+    // fixtures are flaky under Lima).
     let tmp = TempDir::new().expect("tempdir");
     let blocking_file = tmp.path().join("not-a-dir");
     std::fs::write(&blocking_file, b"this is a file, not a directory")
         .expect("create blocking file");
     let probe_root = blocking_file.join("probe-root");
 
-    // Install tracing subscriber BEFORE setting the env var so the
-    // probe's `health.startup.refused` event is captured.
+    // Thread-local default subscriber, installed before the probe runs; the
+    // current-thread runtime keeps the probe on this thread.
     let collector = EventCollector::default();
     let subscriber = tracing_subscriber::registry().with(collector.clone());
     let _trace_guard = tracing::subscriber::set_default(subscriber);
-
-    // SAFETY: `#[serial(env)]` guarantees exclusive access to the
-    // process env for the duration of this test.
-    unsafe {
-        std::env::set_var("OVERDRIVE_TEST_PROBE_ROOT", &probe_root);
-    }
-    // RAII guard (see top of file) restores the env on drop, so a
-    // panic mid-body does not pollute subsequent tests in the same
-    // binary.
-    let _env_guard = EnvGuard;
 
     let data_dir = tmp.path().join("data");
     let config_dir = tmp.path().join("conf");
@@ -162,12 +127,22 @@ async fn serve_refuses_to_start_when_cgroup_fs_probe_fails() {
     std::fs::create_dir_all(&config_dir).expect("mkdir conf");
 
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind");
-    let args = ServeArgs { bind, data_dir, config_dir };
+    let args = super::serve_fixture::serve_args(bind, data_dir, config_dir);
 
-    let result = serve::run(args).await;
+    let builder_called = Arc::new(AtomicBool::new(false));
+    let called = Arc::clone(&builder_called);
+    let result = serve::run_with_adapters(
+        args,
+        Arc::new(RealCgroupFs::new().with_probe_root(probe_root.clone())),
+        move |_config, _fs| {
+            called.store(true, Ordering::SeqCst);
+            unreachable!("the adapters builder runs only after the cgroupfs probe passed")
+        },
+    )
+    .await;
 
     // 1. Typed error variant — `ProbeRefused`, not `Transport`.
-    let err = result.expect_err("expected serve::run to refuse when probe fails");
+    let err = result.expect_err("expected run_with_adapters to refuse when the probe fails");
     assert!(
         matches!(err, CliError::ProbeRefused { .. }),
         "expected CliError::ProbeRefused variant; got {err:?}"
@@ -217,25 +192,13 @@ async fn serve_refuses_to_start_when_cgroup_fs_probe_fails() {
         "expected NO cgroup_preflight event when probe refuses; saw: {preflight_event:?}"
     );
 
-    // Probe root cleanup: tempdir handles the file; the
-    // `probe-root` subpath never came into existence because
-    // `create_dir_all` failed.
-    let _ = probe_root;
-}
-
-/// Sanity counterpart — when `OVERDRIVE_TEST_PROBE_ROOT` is UNSET
-/// AND we're not running under Lima with cgroupfs delegated, the
-/// production probe path runs against `/sys/fs/cgroup` and may
-/// succeed (Lima sudo) or fail (no cgroup v2 substrate). This
-/// variant exists only to document the env-var-is-optional shape;
-/// it does NOT assert success — we only assert that `serve::run`
-/// reads the env var when set vs not set.
-///
-/// In practice, the GREEN sister of the above test is the existing
-/// `http_client::*` integration tests, which call `run_server`
-/// directly (not via `serve::run`) and assume `cgroup_preflight`
-/// passes under `cargo xtask lima run --`.
-#[allow(dead_code)]
-fn _doc_test_only_env_var_is_optional() {
-    let _ = PathBuf::from("/sys/fs/cgroup");
+    // 4. Probe before the bundle: the builder never ran, so no store was
+    //    opened and the data directory holds nothing.
+    assert!(
+        !builder_called.load(Ordering::SeqCst),
+        "a refused probe must not call the adapters builder"
+    );
+    let data_entries = std::fs::read_dir(tmp.path().join("data")).expect("read data dir").count();
+    assert_eq!(data_entries, 0, "a refused probe opens no store under data_dir");
+    assert!(!probe_root.exists(), "the probe root under a regular file never came into existence");
 }

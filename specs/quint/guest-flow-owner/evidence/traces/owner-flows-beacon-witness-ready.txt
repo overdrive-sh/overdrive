@@ -6,8 +6,10 @@ State 1
   phantom = FALSE
   toHostRefused = {}
   toGuestAbort = {}
+  gSess = 0
   quiesced = FALSE
   bHeldByOther = FALSE
+  conf_step = [InitWith |-> [o |-> "g"]]
   dl = [ res |-> <<"none">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
   toHostAbort = {}
   alloc = "Absent"

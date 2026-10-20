@@ -1,17 +1,13 @@
-//! Shared `lo`-named `DataplaneConfig` for SimDataplane-override tests.
+//! Shared `lo`-named `DataplaneConfig` for the simulated-dataplane fixtures.
 //!
 //! ADR-0061 § 1 (single-node-dataplane-wiring step 01-03): the default
-//! `ServerConfig.dataplane` is now the veth-named single-node shape
-//! (`ovd-veth-cli` / `ovd-veth-bk`) so the production serve-boot
-//! provisioner has a stable pair to create. Tests that inject a
-//! `SimDataplane` via `dataplane_override` never reach the XDP attach
-//! path — but they DO still go through
-//! `resolve_host_ipv4_from_dataplane_config` on `client_iface` at boot,
-//! which needs an interface that actually carries a local IPv4 in the
-//! Lima test VM. The default veth ifaces do not exist there (they are
-//! created by the serve-boot provisioner, which `dataplane_override`
-//! skips), so every such fixture must name `lo` — the one interface
-//! that always resolves to `127.0.0.1`.
+//! `ServerConfig.dataplane` is the veth-named single-node shape
+//! (`ovd-veth-cli` / `ovd-veth-bk`) the production `HostDataplaneComposer`
+//! provisions. A fixture whose `BootAdapters.dataplane` is a
+//! `SimDataplaneComposer` (GH #295 NO-OVERRIDE-SEAMS; the replacement of the
+//! removed `dataplane_override`) provisions no pair and attaches no XDP; it
+//! names `lo` / `lo` so its configuration describes interfaces that exist in
+//! the test VM, matching the `host_ipv4` 127.0.0.1 its composer returns.
 //!
 //! This single helper is the SSOT for that `lo`/`lo` shape so the many
 //! SimDataplane-override fixtures cannot drift. The prior `loopback()`

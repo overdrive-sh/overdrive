@@ -7,9 +7,10 @@
 //! `overdrive-worker/src`. The scan finds each declaration by its name, not by
 //! the file it lives in: no file placement is part of the contract. Before any
 //! check, every comment (doc comments included), string, and char literal is
-//! blanked, every item gated by exactly `#[cfg(test)]` is removed, and the file
-//! of an out-of-line module declared under `#[cfg(test)]` is not scanned. An
-//! item gated by `#[cfg(any(test, feature = "integration-tests"))]` is
+//! blanked, every item gated by exactly `#[cfg(test)]` or by
+//! `#[cfg(all(test, …))]` (compiled only under test) is removed, and the file
+//! of an out-of-line module declared under either is not scanned. An item
+//! gated by `#[cfg(any(test, feature = "integration-tests"))]` is
 //! production-compiled under that feature and is scanned.
 //!
 //! The scan reads declarations, not prose:
@@ -37,7 +38,10 @@
 //!   parameters of `AppState::new` and `AppState::new_with_workflow_engine`
 //!   (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the `AppState` fields and constructors)); `ServerHandle.{mtls_worker_owner, mtls_resolve_owner}` and
 //!   its `SharedNetworkSupervisorHandle` field (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (`AppState` constructors: `ServerHandle` owner fields));
-//!   `ServerConfig.{mtls_intercept, guest_dns}` (FD § "[REF] Serve-boundary ports (D-295-R16) — ACCEPTED 2026-09-24" (the `ServerConfig` port fields)); at least one
+//!   `MtlsAdapters.{intercept, enforcement}`, `BootAdapters.{guest_dns, mtls}`,
+//!   `NodeAdapters.boot` and `run_server`'s `adapters: NodeAdapters` parameter
+//!   (the serve-boundary ports moved from `ServerConfig` into the adapters
+//!   bundle the composition root passes, NO-OVERRIDE-SEAMS, ADR-0219); at least one
 //!   parameter of the `MtlsInterceptLifecycle` port (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (no activation path without intercept-live)).
 //! - **No switch and no after-boot replacement.** None of the identifiers
 //!   `compose_mtls`, `dns_probe_fault`, `replace_mtls_worker_for_test`,
@@ -45,6 +49,31 @@
 //!   occurs in code (FD § "[REF] Serve-boundary ports (D-295-R16) — ACCEPTED 2026-09-24" (the removed `dns_probe_fault` and the deleted `compose_mtls`); FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (`AppState` constructors: the deleted test-only replacement hooks)); no `ServerHandle` method assigns
 //!   one of its owner fields; and no `run_server*` body assigns a required
 //!   `AppState` or `ServerHandle` owner field after construction (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (`AppState` constructors: composition roots)).
+//! - **`run_server` receives its driven adapters (NO-OVERRIDE-SEAMS,
+//!   STORES-IN, GH #295; feature-delta § *Composition*, "Driven adapters of
+//!   `run_server`").** No `ServerConfig` field names a port trait or a driven
+//!   adapter (it carries configuration only); none of the removed seam
+//!   identifiers (`dataplane_override`, `mtls_identity_override`,
+//!   `dataplane_probe_fault`, `mtls_probe_fault`, `vm_override`, `VmOverride`,
+//!   `host_ipv4_with_override_fallback`) occurs in code; neither `run_server`,
+//!   the supplied-owner entry points nor `boot_server` constructs a driven
+//!   adapter (the intent, view and journal stores, the workload-identity CA
+//!   and its codec, the clock, entropy, transport, probers, cgroup accounting,
+//!   VM host state, enforcement, dataplane, guest-flow seam and observation
+//!   store all come from the composition root); and the CLI's serve entry
+//!   carries no `OVERDRIVE_TEST_PROBE_ROOT` seam (PROBE-ROOT-ENV).
+//! - **No host adapter is constructed anywhere in the boot's file.** A
+//!   construction moved out of the four boot bodies into a private helper
+//!   they call would escape a body-only scan, so every host adapter and
+//!   bundle constructor of [`BOOT_CONSTRUCTIONS`] is banned anywhere in
+//!   `src/lib.rs` (`#[cfg(test)]` items removed), except in the pre-existing
+//!   `test_default_workflow_engine`. The bundle constructors
+//!   (`NodeAdapters::host`, `StoreAdapters::open`, `IntentStoreAdapter::open`,
+//!   `CaAdapters::host`, `GuestFlowAdapter::host`) are composition-root calls:
+//!   no production file of the scanned trees other than their defining
+//!   `src/node_adapters.rs` calls them. A unit struct (`OsEntropy`,
+//!   `SystemClock`, `HostGuestDnsFactory`) or a function
+//!   (`wire_single_node_observation`) is matched by its bare name.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -56,7 +85,7 @@ const SOURCE_ROOTS: [&str; 2] = ["src", "../overdrive-worker/src"];
 
 /// The required serve ports and owners no composition declaration may wrap in
 /// `Option`.
-const REQUIRED_PORTS: [&str; 9] = [
+const REQUIRED_PORTS: [&str; 10] = [
     "MtlsInterceptWorker",
     "ServiceBackendsResolve",
     "SharedGuestNetworkOwner",
@@ -66,10 +95,15 @@ const REQUIRED_PORTS: [&str; 9] = [
     "GuestDnsFactory",
     "DnsServeTaskOwner",
     "SharedNetworkSupervisorHandle",
+    "MtlsEnforcementFactory",
 ];
 
-/// The structs whose fields are composition declarations (E16).
-const COMPOSITION_STRUCTS: [&str; 3] = ["AppState", "ServerHandle", "ServerConfig"];
+/// The structs whose fields are composition declarations (E16). The driven
+/// adapters of `run_server` are its `NodeAdapters` parameter, built by the
+/// composition root (NO-OVERRIDE-SEAMS, ADR-0219): `NodeAdapters`,
+/// `BootAdapters` and `MtlsAdapters` are composition declarations too.
+const COMPOSITION_STRUCTS: [&str; 6] =
+    ["AppState", "ServerHandle", "ServerConfig", "NodeAdapters", "BootAdapters", "MtlsAdapters"];
 
 /// The `AppState` constructors whose parameters are composition declarations.
 const APP_STATE_CONSTRUCTORS: [&str; 2] = ["new", "new_with_workflow_engine"];
@@ -83,12 +117,144 @@ const EXEMPT_LIFECYCLE_SLOTS: [&str; 1] = ["DnsServeTaskOwner.responder"];
 
 /// Identifiers whose presence in code is itself an optional switch or an
 /// after-boot replacement hook.
-const BANNED_IDENTIFIERS: [&str; 5] = [
+const BANNED_IDENTIFIERS: [&str; 12] = [
     "compose_mtls",
     "dns_probe_fault",
     "replace_mtls_worker_for_test",
     "inject_owner_shutdown_failure_for_test",
     "owner_shutdown_failures",
+    // NO-OVERRIDE-SEAMS (ADR-0219): no `ServerConfig` field swaps an adapter
+    // or injects a fault, and no boot branch keys on one.
+    "dataplane_override",
+    "mtls_identity_override",
+    "dataplane_probe_fault",
+    "mtls_probe_fault",
+    "vm_override",
+    "VmOverride",
+    "host_ipv4_with_override_fallback",
+];
+
+/// The CLI's serve entry (PROBE-ROOT-ENV): its test-only probe-root
+/// environment seam is removed. Scanned for these identifiers and for the
+/// environment variable's name as a string literal.
+const CLI_SERVE_SOURCE: &str = "../overdrive-cli/src/commands/serve.rs";
+/// Identifiers of the removed CLI probe-root seam.
+const CLI_BANNED_IDENTIFIERS: [&str; 2] = ["PROBE_ROOT_ENV_VAR", "build_probe_adapter"];
+/// The removed environment variable, as a literal.
+const CLI_BANNED_LITERAL: &str = "\"OVERDRIVE_TEST_PROBE_ROOT\"";
+
+/// Port traits and driven adapters no `ServerConfig` field may name: it
+/// carries configuration only (NO-OVERRIDE-SEAMS, STORES-IN).
+const ADAPTER_TYPES: [&str; 33] = [
+    "Clock",
+    "Entropy",
+    "Transport",
+    "Kek",
+    "ObservationStore",
+    "VmHostState",
+    "ViewStore",
+    "JournalStore",
+    "IntentStore",
+    "LocalIntentStore",
+    "IntentStoreAdapter",
+    "StoreAdapters",
+    "Ca",
+    "CaAdapters",
+    "RootKeyAeadCodec",
+    "Dataplane",
+    "DataplaneComposer",
+    "MtlsIntercept",
+    "MtlsEnforcement",
+    "MtlsEnforcementFactory",
+    "IdentityRead",
+    "GuestDnsFactory",
+    "CgroupFs",
+    "CgroupAccounting",
+    "TcpProber",
+    "HttpProber",
+    "Vmm",
+    "BeaconIo",
+    "GuestFlowIo",
+    "GuestFlowAdapter",
+    "NodeAdapters",
+    "BootAdapters",
+    "VmAdapters",
+];
+
+/// Driven-adapter constructions neither `run_server`, the supplied-owner
+/// entry points nor `boot_server` may contain (STORES-IN: the composition
+/// root constructs every driven adapter; the boot probes and uses them), and
+/// that nothing in `src/lib.rs` outside [`HOST_CONSTRUCTION_EXEMPT_FN`] may
+/// contain. An empty method matches the bare identifier: a unit struct is
+/// constructed without a path call (`Arc::new(OsEntropy)`).
+const BOOT_CONSTRUCTIONS: [(&str, &str); 37] = [
+    ("LocalIntentStore", "open"),
+    ("RedbViewStore", "open"),
+    ("RedbJournalStore", "new"),
+    ("Database", "create"),
+    ("RcgenCa", "new"),
+    ("RcgenCaFactory", "new"),
+    ("RootKeyAeadCodec", "new"),
+    ("SystemClock", ""),
+    ("OsEntropy", ""),
+    ("TcpTransport", "new"),
+    ("TcpTransport", "default"),
+    ("TokioTcpProber", "new"),
+    ("HyperHttpProber", "new"),
+    ("RealCgroupAccounting", "new"),
+    ("RealCgroupFs", "new"),
+    ("RealVmHostState", "new"),
+    ("CloudHypervisorVmm", "new"),
+    ("VsockBeaconIo", "new"),
+    ("HostMtlsIntercept", "new"),
+    ("HostMtlsEnforcement", "new"),
+    ("HostMtlsEnforcementFactory", "new"),
+    ("EbpfDataplane", "new"),
+    ("EbpfDataplane", "new_with_pin_dir"),
+    ("HostDataplaneComposer", "new"),
+    ("HostDataplaneComposer", "with_probe_fault"),
+    ("HostGuestFlowIo", "new"),
+    ("HostGuestDnsFactory", ""),
+    ("SystemdCredsKeyring", "new"),
+    ("wire_single_node_observation", ""),
+    ("NodeAdapters", "host"),
+    ("StoreAdapters", "open"),
+    ("IntentStoreAdapter", "open"),
+    ("CaAdapters", "host"),
+    ("GuestFlowAdapter", "host"),
+    ("SimClock", "new"),
+    ("SimEntropy", "new"),
+    ("SimKek", "for_boot"),
+];
+
+/// The bundle constructors: composition-root calls that no production file
+/// other than [`BUNDLE_CONSTRUCTOR_HOME`] makes.
+const BUNDLE_CONSTRUCTORS: [(&str, &str); 5] = [
+    ("NodeAdapters", "host"),
+    ("StoreAdapters", "open"),
+    ("IntentStoreAdapter", "open"),
+    ("CaAdapters", "host"),
+    ("GuestFlowAdapter", "host"),
+];
+
+/// The one production file that defines (and so names) the bundle
+/// constructors.
+const BUNDLE_CONSTRUCTOR_HOME: &str = "src/node_adapters.rs";
+
+/// The boot's file: no host adapter is constructed anywhere in it.
+const BOOT_FILE: &str = "src/lib.rs";
+
+/// The pre-existing `pub` helper of `src/lib.rs` that builds a workflow
+/// engine over host adapters for callers outside the boot; the one exemption
+/// of the file-wide construction rule.
+const HOST_CONSTRUCTION_EXEMPT_FN: &str = "test_default_workflow_engine";
+
+/// The functions the construction rule covers.
+const BOOT_FUNCTIONS: [&str; 4] = [
+    "run_server",
+    "run_server_with_obs_and_driver",
+    "run_server_with_obs_and_drivers",
+    "boot_server",
 ];
 
 /// Required `AppState` fields and constructor parameters, with the type each
@@ -106,9 +272,19 @@ const SERVER_HANDLE_OWNERS: [(&str, &str); 2] = [
     ("mtls_resolve_owner", "ServiceBackendsResolve"),
 ];
 
-/// Required `ServerConfig` port fields (FD § "[REF] Serve-boundary ports (D-295-R16) — ACCEPTED 2026-09-24" (the `ServerConfig` port fields)).
-const SERVER_CONFIG_PORTS: [(&str, &str); 2] =
-    [("mtls_intercept", "MtlsIntercept"), ("guest_dns", "GuestDnsFactory")];
+/// Required transparent-mTLS adapters (ADR-0138 as folded by ADR-0219: the
+/// former `ServerConfig.mtls_intercept` moves into the adapters bundle beside
+/// the enforcement factory).
+const MTLS_ADAPTERS_PORTS: [(&str, &str); 2] =
+    [("intercept", "MtlsIntercept"), ("enforcement", "MtlsEnforcementFactory")];
+
+/// Required boot-wide adapters (the former `ServerConfig.guest_dns`, and the
+/// mTLS group).
+const BOOT_ADAPTERS_PORTS: [(&str, &str); 2] =
+    [("guest_dns", "GuestDnsFactory"), ("mtls", "MtlsAdapters")];
+
+/// `run_server`'s adapters parameter (NO-OVERRIDE-SEAMS).
+const RUN_SERVER_ADAPTERS: [(&str, &str); 1] = [("adapters", "NodeAdapters")];
 
 // ---------------------------------------------------------------------------
 // Lexing.
@@ -380,12 +556,24 @@ fn generics_end(tokens: &[Token], open: usize) -> usize {
     tokens.len()
 }
 
-/// Whether an `#[cfg(test)]` attribute starts at `i`.
+/// Whether a test-only attribute starts at `i`: exactly `#[cfg(test)]`, or
+/// `#[cfg(all(test, …))]` (compiled only under test, whatever else it adds).
 fn is_cfg_test_attr(tokens: &[Token], i: usize) -> bool {
-    const SHAPE: [&str; 7] = ["#", "[", "cfg", "(", "test", ")", "]"];
-    SHAPE.iter().enumerate().all(|(k, part)| {
-        tokens.get(i + k).is_some_and(|token| token.is_punct(part) || token.is_ident(part))
-    })
+    const EXACT: [&str; 7] = ["#", "[", "cfg", "(", "test", ")", "]"];
+    const ALL_TEST: [&str; 7] = ["#", "[", "cfg", "(", "all", "(", "test"];
+    let shaped = |shape: &[&str; 7]| {
+        shape.iter().enumerate().all(|(k, part)| {
+            tokens.get(i + k).is_some_and(|token| token.is_punct(part) || token.is_ident(part))
+        })
+    };
+    shaped(&EXACT)
+        || (shaped(&ALL_TEST)
+            && tokens.get(i + 7).is_some_and(|t| t.is_punct(",") || t.is_punct(")")))
+}
+
+/// Index just past the test-only attribute that starts at `i`.
+fn cfg_test_attr_end(tokens: &[Token], i: usize) -> usize {
+    matching_close(tokens, i + 1) + 1
 }
 
 /// Index just past the outer attributes starting at `i`.
@@ -426,7 +614,7 @@ const ITEM_KEYWORDS: [&str; 11] = [
 /// Index just past the item, field, or statement a `#[cfg(test)]` at `start`
 /// gates.
 fn gated_item_end(tokens: &[Token], start: usize) -> usize {
-    let body = skip_visibility(tokens, skip_attributes(tokens, start + 7));
+    let body = skip_visibility(tokens, skip_attributes(tokens, cfg_test_attr_end(tokens, start)));
     let is_item = tokens.get(body).is_some_and(|t| ITEM_KEYWORDS.iter().any(|kw| t.is_ident(kw)));
     let mut depth = 0_usize;
     let mut angles = 0_usize;
@@ -844,7 +1032,7 @@ fn cfg_test_module_files(file: &Path, tokens: &[Token]) -> Vec<PathBuf> {
         if !is_cfg_test_attr(tokens, i) {
             continue;
         }
-        let at = skip_visibility(tokens, skip_attributes(tokens, i + 7));
+        let at = skip_visibility(tokens, skip_attributes(tokens, cfg_test_attr_end(tokens, i)));
         if tokens.get(at).is_some_and(|t| t.is_ident("mod"))
             && let Some(name) = tokens.get(at + 1).and_then(Token::ident)
             && tokens.get(at + 2).is_some_and(|t| t.is_punct(";"))
@@ -1033,6 +1221,28 @@ fn check_required(
     }
 }
 
+/// Every construction of `banned` in `tokens`: `Type :: method` (or, for an
+/// entry with an empty method, the identifier itself — a unit struct or a
+/// function).
+fn constructions(tokens: &[Token], banned: &[(&str, &str)]) -> Vec<(usize, String)> {
+    let mut found = Vec::new();
+    for (k, token) in tokens.iter().enumerate() {
+        for &(ty, method) in banned {
+            if !token.is_ident(ty) {
+                continue;
+            }
+            if method.is_empty() {
+                found.push((token.line, ty.to_owned()));
+            } else if tokens.get(k + 1).is_some_and(|t| t.is_punct("::"))
+                && tokens.get(k + 2).is_some_and(|t| t.is_ident(method))
+            {
+                found.push((token.line, format!("{ty}::{method}")));
+            }
+        }
+    }
+    found
+}
+
 /// Every place where a scanned token window assigns `.field` for one of
 /// `fields` (`.field =`).
 fn field_assignments(tokens: &[Token], fields: &BTreeSet<&str>) -> Vec<(usize, String)> {
@@ -1095,10 +1305,84 @@ fn no_optional_switch_gates_protection_dns_or_supervisor_composition() {
     );
     check_required(
         &mut violations,
-        "ServerConfig",
-        &fields_of("ServerConfig"),
-        &SERVER_CONFIG_PORTS,
+        "MtlsAdapters",
+        &fields_of("MtlsAdapters"),
+        &MTLS_ADAPTERS_PORTS,
     );
+    check_required(
+        &mut violations,
+        "BootAdapters",
+        &fields_of("BootAdapters"),
+        &BOOT_ADAPTERS_PORTS,
+    );
+    check_required(
+        &mut violations,
+        "NodeAdapters",
+        &fields_of("NodeAdapters"),
+        &[("boot", "BootAdapters")],
+    );
+    for (file, field) in fields_of("ServerConfig") {
+        if let Some(adapter) = ADAPTER_TYPES.iter().find(|ty| names(&field.ty, ty)) {
+            violations.push(format!(
+                "{file}:{}: {} is `{}`, which names the driven adapter `{adapter}`; \
+                 ServerConfig carries configuration only",
+                field.line,
+                field.site,
+                render(&field.ty)
+            ));
+        }
+    }
+    let run_server_params: Vec<(&str, &Declaration)> = files
+        .iter()
+        .flat_map(|file| {
+            file.functions
+                .iter()
+                .filter(|f| f.name == "run_server" && f.body.is_some())
+                .flat_map(move |f| f.params.iter().map(move |p| (file.path.as_str(), p)))
+        })
+        .collect();
+    check_required(&mut violations, "run_server", &run_server_params, &RUN_SERVER_ADAPTERS);
+
+    // Neither `run_server`, the supplied-owner entry points nor
+    // `boot_server` constructs a driven adapter (STORES-IN).
+    let mut boot_bodies = 0;
+    for file in &files {
+        for function in file.functions.iter().filter(|f| BOOT_FUNCTIONS.contains(&f.name.as_str()))
+        {
+            let Some((open, close)) = function.body else { continue };
+            boot_bodies += 1;
+            for (line, construction) in
+                constructions(&file.tokens[open..close], &BOOT_CONSTRUCTIONS)
+            {
+                violations.push(format!(
+                    "{}:{line}: `{}` constructs the driven adapter `{construction}`",
+                    file.path, function.name
+                ));
+            }
+        }
+    }
+    if boot_bodies < 2 {
+        violations.push(format!(
+            "expected the bodies of `run_server` and `boot_server` among {BOOT_FUNCTIONS:?}, \
+             found {boot_bodies}"
+        ));
+    }
+    violations.extend(host_constructions_outside_the_composition_root(&files));
+
+    // The CLI's probe-root environment seam is gone (PROBE-ROOT-ENV).
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cli_path = manifest.join(CLI_SERVE_SOURCE);
+    let cli_source = std::fs::read_to_string(&cli_path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", cli_path.display()));
+    let cli = scan_source(CLI_SERVE_SOURCE.to_owned(), &cli_source);
+    for token in &cli.tokens {
+        if let Some(ident) = token.ident().filter(|i| CLI_BANNED_IDENTIFIERS.contains(i)) {
+            violations.push(format!("{}:{}: `{ident}` is present", cli.path, token.line));
+        }
+    }
+    if cli_source.contains(CLI_BANNED_LITERAL) {
+        violations.push(format!("{CLI_SERVE_SOURCE}: the literal {CLI_BANNED_LITERAL} is present"));
+    }
     let supervisor_field = fields_of("ServerHandle")
         .into_iter()
         .find(|(_, d)| names(&d.ty, "SharedNetworkSupervisorHandle"))
@@ -1312,4 +1596,139 @@ fn the_scan_reports_optional_ports_only_in_composition_declarations() {
         "the lifecycle slot is seen as the exemption's positive row and not reported"
     );
     assert_eq!(scan.scanned, 8, "every composition declaration of the planted source is checked");
+}
+
+/// The file-wide construction rule: every [`BOOT_CONSTRUCTIONS`] entry in
+/// [`BOOT_FILE`] outside the body of [`HOST_CONSTRUCTION_EXEMPT_FN`], and
+/// every [`BUNDLE_CONSTRUCTORS`] call in a production file other than
+/// [`BUNDLE_CONSTRUCTOR_HOME`]. Also reports a missing boot file, so the rule
+/// cannot pass by observing nothing.
+fn host_constructions_outside_the_composition_root(files: &[ScannedFile]) -> Vec<String> {
+    let mut violations = Vec::new();
+    let mut boot_file_seen = false;
+    for file in files {
+        // Labels are relative to this crate's manifest directory, so the
+        // worker's `../overdrive-worker/src/lib.rs` is not the boot's file.
+        if file.path == BOOT_FILE {
+            boot_file_seen = true;
+            let exempt: Vec<(usize, usize)> = file
+                .functions
+                .iter()
+                .filter(|f| f.name == HOST_CONSTRUCTION_EXEMPT_FN)
+                .filter_map(|f| f.body)
+                .collect();
+            let mut k = 0;
+            while k < file.tokens.len() {
+                if let Some(&(_, close)) = exempt.iter().find(|(open, _)| *open == k) {
+                    k = close;
+                    continue;
+                }
+                let next = exempt.iter().map(|(open, _)| *open).filter(|open| *open > k).min();
+                let end = next.unwrap_or(file.tokens.len());
+                for (line, construction) in constructions(&file.tokens[k..end], &BOOT_CONSTRUCTIONS)
+                {
+                    violations.push(format!(
+                        "{}:{line}: `{construction}` is constructed in the boot's file outside \
+                         `{HOST_CONSTRUCTION_EXEMPT_FN}`; the composition root builds it",
+                        file.path
+                    ));
+                }
+                k = end;
+            }
+        } else if file.path != BUNDLE_CONSTRUCTOR_HOME {
+            for (line, construction) in constructions(&file.tokens, &BUNDLE_CONSTRUCTORS) {
+                violations.push(format!(
+                    "{}:{line}: `{construction}` is a composition-root call",
+                    file.path
+                ));
+            }
+        }
+    }
+    if !boot_file_seen {
+        violations.push(format!("the boot's file {BOOT_FILE} was not among the scanned files"));
+    }
+    violations
+}
+
+/// A planted boot file: constructions reached only through a private helper,
+/// by bare unit-struct name, by `::default()`, and inside the exempt helper,
+/// plus a test-only module that constructs freely.
+const PLANTED_BOOT_FILE: &str = r#"
+pub fn test_default_workflow_engine() -> Engine {
+    Engine::new(Arc::new(TcpTransport::default()), Arc::new(OsEntropy))
+}
+
+pub async fn boot_server(boot: BootAdapters) {
+    let vmm = compose_helper();
+    let entropy = Arc::new(overdrive_host::OsEntropy);
+    let transport = TcpTransport::default();
+}
+
+fn compose_helper() -> Arc<dyn Vmm> {
+    let _dns = HostGuestDnsFactory;
+    Arc::new(CloudHypervisorVmm::new())
+}
+
+#[cfg(all(test, feature = "integration-tests"))]
+mod driver {
+    fn reopen() { let _ = StoreAdapters::open(&config); }
+}
+"#;
+
+/// A planted non-boot production file that calls a bundle constructor.
+const PLANTED_OTHER_FILE: &str = r"
+pub fn sneaky(config: &ServerConfig) {
+    let _ = NodeAdapters::host(config, fs, kek);
+}
+";
+
+/// Outcome anchor: OUT-ND295-BORN-CAPTURED
+/// S-ND295-65 — the composition root constructs every driven adapter
+/// CONTRACT_SHAPE: pure-function.
+///
+/// The positive and negative rows of the file-wide construction rule over
+/// planted sources: a host construction moved into a private helper of the
+/// boot's file, a bare unit-struct construction and a `::default()`
+/// construction are reported; the exempt `test_default_workflow_engine` and
+/// a `#[cfg(all(test, …))]` module are not; a bundle constructor in another
+/// production file is reported, in its defining file it is not; and a scan
+/// whose files omit the boot's file reports that it observed nothing.
+#[test]
+fn the_file_wide_construction_rule_sees_helpers_unit_structs_and_defaults() {
+    let boot = scan_source(BOOT_FILE.to_owned(), PLANTED_BOOT_FILE);
+    let other = scan_source("src/sneaky.rs".to_owned(), PLANTED_OTHER_FILE);
+    let home = scan_source(BUNDLE_CONSTRUCTOR_HOME.to_owned(), PLANTED_OTHER_FILE);
+    let violations = host_constructions_outside_the_composition_root(&[boot, other, home]);
+    let reported: BTreeSet<String> = violations
+        .iter()
+        .map(|v| {
+            let (site, rest) = v.split_once(": `").unwrap_or_else(|| panic!("shape of {v:?}"));
+            let construction = rest.split('`').next().unwrap_or_default();
+            format!("{site} {construction}")
+        })
+        .collect();
+    assert_eq!(
+        reported,
+        BTreeSet::from(
+            [
+                "src/lib.rs:8 OsEntropy",
+                "src/lib.rs:9 TcpTransport::default",
+                "src/lib.rs:13 HostGuestDnsFactory",
+                "src/lib.rs:14 CloudHypervisorVmm::new",
+                "src/sneaky.rs:3 NodeAdapters::host",
+            ]
+            .map(str::to_owned)
+        ),
+        "the constructions reported: {violations:#?}"
+    );
+
+    let without_boot = host_constructions_outside_the_composition_root(&[scan_source(
+        "src/sneaky.rs".to_owned(),
+        "fn quiet() {}",
+    )]);
+    assert_eq!(
+        without_boot,
+        vec![format!("the boot's file {BOOT_FILE} was not among the scanned files")],
+        "a scan that never saw the boot's file must not pass"
+    );
 }

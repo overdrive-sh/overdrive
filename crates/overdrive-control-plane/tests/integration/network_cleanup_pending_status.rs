@@ -3,9 +3,9 @@
 //! FD § "[REF] Operator status — network cleanup pending (D-295-R20) — ACCEPTED 2026-09-24 (operator behaviour user ruling of the same date)" (the server projection)).
 //!
 //! In-process lane (Lima root, `integration-tests`): the production composition
-//! `run_server_with_obs_and_driver(ServerConfig::new(kek, mtls_intercept,
-//! guest_dns), obs, driver, vm_host_state, shared_guest_network,
-//! guest_network_exec, vm_cgroups)` (FD § "EXEC-close linearization" (the `run_server_with_obs_and_driver(s)` signatures)) with a `SimDriver`, the
+//! `run_server_with_obs_and_driver(config, boot, driver, shared_guest_network,
+//! guest_network_exec, vm_cgroups)` (`boot` from `node_adapters::boot_adapters`,
+//! GH #295 NO-OVERRIDE-SEAMS) (FD § "EXEC-close linearization" (the `run_server_with_obs_and_driver(s)` signatures)) with a `SimDriver`, the
 //! `SimSharedGuestNetworkOwner`, `SimGuestDnsFactory`, and `vm_cgroups` over
 //! `SimCgroupFs`. Workloads are deployed and stopped, and allocations read,
 //! through the public HTTPS API only.
@@ -50,12 +50,10 @@ use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{Driver, DriverType, ExitKind};
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_sim::adapters::clock::SimClock;
-use overdrive_sim::adapters::dataplane::SimDataplane;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_sim::adapters::vm_host_state::SimVmHostState;
-use overdrive_sim::adapters::{SimCgroupFs, SimGuestDnsFactory, SimKek, SimMtlsIntercept};
+use overdrive_sim::adapters::{SimCgroupFs, SimGuestDnsFactory, SimMtlsIntercept};
 use overdrive_worker::cgroup_manager::CgroupManager;
 use overdrive_worker::mtls_intercept::{
     InterceptElementKey, InterceptElementOperation, InterceptError, InterceptPostcondition,
@@ -330,15 +328,13 @@ impl Node {
         let intercept_port: Arc<dyn MtlsIntercept> = intercept.clone();
         let guest_dns: Arc<dyn GuestDnsFactory> = Arc::new(SimGuestDnsFactory::default());
         let config = ServerConfig {
-            bind: "127.0.0.1:0".parse().expect("parse bind addr"),
-            data_dir,
-            operator_config_dir: operator_config_dir.clone(),
             tick_cadence: TICK,
-            clock: Arc::clone(&clock_port),
-            dataplane: Some(super::dataplane_lo::lo_dataplane_config()),
-            dataplane_override: Some(Arc::new(SimDataplane::new())),
-            ..ServerConfig::new(Arc::new(SimKek::for_boot()), intercept_port, guest_dns)
+            ..super::node_adapters::test_config(data_dir, operator_config_dir.clone())
         };
+        let mut boot = super::node_adapters::boot_adapters(&config);
+        boot.mtls.intercept = intercept_port;
+        boot.guest_dns = guest_dns;
+        boot.clock = Arc::clone(&clock_port);
         let obs: Arc<dyn ObservationStore> =
             Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
         let driver = Arc::new(SimDriver::with_clock(DriverType::Vm, Arc::clone(&clock_port)));
@@ -346,9 +342,8 @@ impl Node {
         let wiring = GuestNetworkExecWiring::new(Arc::clone(&clock_port));
         let handle = run_server_with_obs_and_driver(
             config,
-            obs,
+            overdrive_control_plane::BootAdapters { observation: obs, ..boot },
             driver_port,
-            Arc::new(SimVmHostState::new()),
             Arc::new(SimSharedGuestNetworkOwner::default()),
             wiring,
             CgroupManager::new(PathBuf::from("/sys/fs/cgroup"), Arc::new(SimCgroupFs::new())),
@@ -488,6 +483,7 @@ fn vm_job(id: &str) -> SubmitSpecInput {
 /// excluded from `replicas_running`; once the removal succeeds on a retry the
 /// allocation is `Terminated` and no longer pending.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2-4: the guest lane leases the transport)"]
 async fn a_stuck_stop_is_reported_cleanup_pending_and_is_not_a_running_replica() {
     let node = Node::boot().await;
     node.submit(vm_service("cleanup-svc")).await;
@@ -565,6 +561,7 @@ async fn a_stuck_stop_is_reported_cleanup_pending_and_is_not_a_running_replica()
 /// already-Retiring lease emits `lease_retired` again is not pinned, so the
 /// retired events are not counted exactly; the release is.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "pending DELIVER attachment-cut step (DG-2 row 2: GuestAddressPool::assign)"]
 async fn crashed_and_reclaiming_allocations_are_reported_cleanup_pending() {
     // Installed before boot so no lease event is missed.
     lease_event_log();

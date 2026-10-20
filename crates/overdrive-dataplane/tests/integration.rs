@@ -73,6 +73,13 @@ mod integration {
     /// 0x17-only (cleartext-hits=0), and splice-only deliver (strace), through the
     /// `MtlsEnforcement` driving port.
     mod mtls_inbound_enforce;
+    /// GH #295 R5-54 Tier-3 half (LEGS-DIAL, D-14): the real
+    /// `HostMtlsEnforcement`'s inbound path to a guest-prefix target —
+    /// handshake, awaited dial, relay with the 0.5-RTT plaintext first, no
+    /// dial for a client failing peer verification, a dial error resetting
+    /// leg C, leg S ended only by the `GuestStream`'s drop, and `teardown`
+    /// awaiting the relay.
+    mod mtls_inbound_guest_relay;
     /// udp-service-support US-05 / S-05-A..C (ADR-0060 Tier 3; K4) —
     /// multi-listener (TCP + UDP) forward+reverse e2e. RED scaffolds.
     mod multi_listener_tcp_udp_e2e;
@@ -114,19 +121,4 @@ mod integration {
     /// phase-2-xdp-service-map Slice 01 (US-01; S-2.2-01..03) —
     /// real-iface XDP attach. RED scaffolds.
     mod veth_attach;
-    /// netns-density-295 P5 (P5-S1, P5-S3; D5a-IFACE, D5a-IFACE-BOOT,
-    /// USO-NO-SEGMENT) — the real `GuestFlowForwarder`'s egress unframe
-    /// program: `lo` at load, boot convergence onto veth interfaces, the
-    /// classified attach failures, byte-exact guest datagrams. Pending DELIVER
-    /// vsock new-step 4.
-    mod vsock_egress_unframe;
-    /// netns-density-295 P5 (P5-S4; FRAG-MAP-LIFECYCLE) — the egress unframe
-    /// program's fragment-tracking map under cut trains, capacity pressure from
-    /// several CPUs and a congested qdisc. Pending DELIVER vsock new-step 4.
-    mod vsock_fragment_map;
-    /// netns-density-295 P4 (P4-S1..P4-S5; D8a-LOOKUP, D8a-LOAD-SWAP,
-    /// D8a-CAP) — the real `GuestPrefixSteering` `sk_lookup` adapter over a
-    /// leased prefix made local on `lo`. Pending DELIVER vsock new-steps 9 and
-    /// 13.
-    mod vsock_guest_steering;
 }

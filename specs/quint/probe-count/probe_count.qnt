@@ -38,6 +38,11 @@
  *   lwwObservedAt the store merges by observed-at (strictly later) instead of run_seq, with ClockBack steps
  * Main instance probe_streak: OFF = {}.
  *
+ * D-UP-1 (conformance step record): the state variable `conf_step` records the action that produced the
+ * state, as a variant of `probe_count_conf::ConfStep` whose tag is the action's name and whose value is the record
+ * of its parameters by parameter name (`init` and parameterless actions: the unit value). quint-connect reads the
+ * action and its picks from it (`Config::nondet`), since `quint test` emits no `mbt::actionTaken`. Model-only.
+ *
  * Ghost / model-only state: `hist` (true sequence of written outcomes), `terms` / `tseqs` (terminates emitted and
  * the set of run_seqs they acted on), `g`. `fs` and `M` exist only for the `reconstruct` hazard and stay 0
  * otherwise. Conformance projection: rseq, rst, rsame (the stored row), A (consumer view) and running (the
@@ -66,8 +71,23 @@
  *         The view (with A) is persisted before dispatch.
  *         Discharged by: R5-PROBE-COUNT fault (h): a scripted Driver::stop failure
  */
+// D-UP-1: the variants of `conf_step` (a module of its own: a constructor would clash with the action of the same
+// name, so the actions build their variant with the builtin `variant`)
+module probe_count_conf {
+  type ConfStep =
+    | init
+    | ProbeRun({ out: str, reason: str })
+    | ClockBack
+    | ConsumerLook({ stopOk: bool })
+    | Idle
+}
+
 module probe_count {
+  import probe_count_conf.ConfStep from "./probe_count"
   const OFF: Set[str]
+  // D-UP-1: true only on the module's conformance main, where `conf_step` records the action taken; every
+  // model-checking, liveness and hazard instance passes false and keeps `conf_step` at its initial value.
+  const REC: bool
 
   val LT: int = 3          // liveness failure threshold
   val RT: int = 2          // readiness success threshold
@@ -111,6 +131,7 @@ module probe_count {
   var terms: int           // terminates emitted
   var tseqs: Set[int]      // run_seqs of the rows terminates acted on
   var g: Ghost
+  var conf_step: ConfStep  // D-UP-1: the action that produced this state (model-only)
 
   pure def trail(h: List[str], s: str): int = h.foldl(0, (c, x) => if (x == s) c + 1 else 0)
 
@@ -121,6 +142,7 @@ module probe_count {
     hist' = List(), terms' = 0, tseqs' = Set(),
     g' = { missTouched: false, staleChange: false, early: false, pt: 0, ready: false, seen: 0,
            stoppedTerm: false, missed: false },
+    conf_step' = variant("init", ()),
   }
 
   action ProbeRun(out: str, reason: str): bool = {
@@ -143,6 +165,7 @@ module probe_count {
       hist' = if (out == "Pass" or out == "Fail") hist.append(out) else hist,
       g' = { ...g, missTouched: g.missTouched or (isMiss and isWrite and accept) },
       A' = A, running' = running, fs' = fs, M' = M, terms' = terms, tseqs' = tseqs,
+      conf_step' = if (REC) variant("ProbeRun", { out: out, reason: reason }) else conf_step,
     }
   }
 
@@ -153,6 +176,7 @@ module probe_count {
     runs' = runs, pseq' = pseq, pst' = pst, psame' = psame,
     rseq' = rseq, rst' = rst, rsame' = rsame, rat' = rat,
     A' = A, running' = running, fs' = fs, M' = M, hist' = hist, terms' = terms, tseqs' = tseqs, g' = g,
+    conf_step' = if (REC) variant("ClockBack", ()) else conf_step,
   }
 
   action ConsumerLook(stopOk: bool): bool = {
@@ -191,6 +215,7 @@ module probe_count {
       },
       runs' = runs, pseq' = pseq, pst' = pst, psame' = psame,
       rseq' = rseq, rst' = rst, rsame' = rsame, rat' = rat, clock' = clock, hist' = hist,
+      conf_step' = if (REC) variant("ConsumerLook", { stopOk: stopOk }) else conf_step,
     }
   }
 
@@ -198,6 +223,7 @@ module probe_count {
     runs' = runs, pseq' = pseq, pst' = pst, psame' = psame,
     rseq' = rseq, rst' = rst, rsame' = rsame, rat' = rat, clock' = clock,
     A' = A, running' = running, fs' = fs, M' = M, hist' = hist, terms' = terms, tseqs' = tseqs, g' = g,
+    conf_step' = if (REC) variant("Idle", ()) else conf_step,
   }
 
   action step = {
@@ -300,4 +326,6 @@ module probe_count {
 }
 
 // Main instance: the approved rule. All invariants hold.
-module probe_streak { import probe_count(OFF = Set()).* from "./probe_count" }
+module probe_streak { import probe_count(OFF = Set(), REC = false).* from "./probe_count" }
+// Conformance main (D-UP-1): `probe_streak` recording `conf_step`; only the named runs are checked on it.
+module probe_streak_conf { import probe_count(OFF = Set(), REC = true).* from "./probe_count" }

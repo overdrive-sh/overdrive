@@ -1595,30 +1595,30 @@ C4Container
   Person(op, "Platform operator")
   Container(cli, "overdrive CLI", "Rust", "overdrive deploy")
   Container(cp, "Guest-flow owner", "Rust, overdrive-control-plane::guest_network", "Leases, CIDs, launch tokens, flow and control listeners, control sessions, pairing, GuestStreamDial")
-  Container(fwd, "Host forwarder", "Aya eBPF via overdrive-dataplane::guest_flow", "SK_SKB verdicts, sock_ops on the owner cgroup, raw-tracepoint flow-end classifier, drain programs and cells, flow-event ring")
-  Container(mtls, "mTLS worker", "Rust, overdrive-worker", "leg-F (registered mesh flows), leg-C, leg-S")
+  Container(fwd, "Host flow forwarder", "C kernel module ovd_fwd via overdrive-fwd (ADR-0197)", "Event-driven pair forwarding: peek, send, consume only the accepted bytes; vsock end classification; one end record per pair")
+  Container(mtls, "mTLS worker and enforcement", "Rust, overdrive-worker + overdrive-dataplane", "leg-F (registered mesh flows), leg-C; the enforcement dials and relays leg-S (LEGS-DIAL)")
   Container(probe, "VM probe runner", "Rust, overdrive-worker", "TCP and HTTP probes of VM services")
-  Container(drv, "VmDriver", "Rust, overdrive-worker", "Beacon listener on vsock 1234; VMM lifecycle")
+  Container(drv, "VmDriver", "Rust, overdrive-worker", "Beacon listener on the node beacon port (default 1234); VMM lifecycle")
   Container(resolve, "Mesh resolution", "Rust, ServiceBackendsResolve", "Classifies TCP destinations by frontend, VIP and backend")
   Container(svc, "Service connect4", "Aya eBPF, ADR-0053", "Rewrites service VIPs at connect")
   Container(dns, "DnsResponder", "Rust", "Node DNS, wildcard bind on port 53")
   Container(nft, "Host firewall", "nftables, constant rules", "Diverts to leg-C; refuses other guest-prefix traffic; rejects marked owner sockets to host-internal destinations")
   Container(vmm, "Cloud Hypervisor fork", "VMM, backend=vhost-kernel", "Opens its own vhost-vsock device; exits on guest reset with the fork change of ADR-0182")
   Container(init, "overdrive-init", "Rust, guest PID 1", "Guest network configuration, guest flow owner, control session, beacon")
-  Container(gfwd, "Guest forwarder", "Aya eBPF in the guest kernel", "Captures sockets, installs at establishment, parks, frames, reassembles, classifies flow ends")
+  Container(gfwd, "Guest capture and forwarder", "Aya eBPF capture + C module ovd_fwd in the guest kernel", "Captures ordinary sockets; forwards each pair; classifies vsock ends")
   System_Ext(peer, "Remote mesh peer")
   System_Ext(ext, "Non-mesh destination")
 
   Rel(op, cli, "Runs deploy through")
   Rel(cli, cp, "Submits workload intent that provisions leases in")
-  Rel(drv, vmm, "Launches with CID and launch token")
+  Rel(drv, vmm, "Launches with CID, launch token and the node's bound vsock ports")
   Rel(vmm, gfwd, "Carries guest virtqueues for")
-  Rel(init, drv, "Reports READY and exit status to", "vsock 1234")
-  Rel(init, cp, "Holds its control session with", "vsock 1243")
-  Rel(init, cp, "Opens outbound flows to", "vsock 1240 / 1241")
+  Rel(init, drv, "Reports READY and exit status to", "vsock beacon port (default 1234)")
+  Rel(init, cp, "Holds its control session with", "vsock control port (default 1243)")
+  Rel(init, cp, "Opens outbound flows to", "vsock stream port (default 1240)")
   Rel(cp, init, "Opens host-initiated flows to", "vsock 1242")
-  Rel(init, gfwd, "Loads and installs pairs in", "bpf map ops")
-  Rel(cp, fwd, "Loads, installs pairs in and reads records from", "bpf map ops, ring buffer")
+  Rel(init, gfwd, "Loads capture programs and attaches pairs in", "bpf links; /dev/ovd_fwd")
+  Rel(cp, fwd, "Attaches, watches and aborts pairs in, and reads end records from", "/dev/ovd_fwd")
   Rel(cp, resolve, "Classifies guest TCP destinations through", "MtlsResolve")
   Rel(cp, mtls, "Registers resolved mesh flows with", "in-process call")
   Rel(fwd, mtls, "Forwards guest mesh TCP to", "loopback TCP to leg-F")
@@ -1633,15 +1633,28 @@ C4Container
   Rel(fwd, dns, "Delivers guest DNS datagrams to", "UDP to gateway:53 on lo, GW-LOCAL")
 ```
 
+Every container above that runs inside `overdrive serve` is composed over
+driven adapters the `serve` composition root passes to `run_server` as one
+required bundle per boot (ADR-0219), the persistent stores and the
+workload-identity CA's factory included; the three vsock ports are a field
+of the server's configuration value (ADR-0218; a node configuration file
+that sets them is GH #327).
+
 leg-S's use of `GuestStreamDial` is a userspace kTLS↔vsock relay
 ([ADR-0186](adr-0186-leg-s-reaches-vm-backends-through-a-temporary-vsock-relay-until-303.md))
 and is deleted when [GH #303](https://github.com/overdrive-sh/overdrive/issues/303)
-lands; the host then forwards ciphertext over the kernel redirect. A VM probe
+lands; the host then forwards ciphertext through the in-kernel forwarder
+([ADR-0197](adr-0197-guest-flows-are-forwarded-by-an-event-driven-in-kernel-forwarder.md);
+its module, control interface, end classification and datagram mode are
+ADR-0198 to ADR-0206). The host side is guest-neutral
+([ADR-0207](adr-0207-the-host-side-guest-flow-protocol-is-guest-neutral.md));
+the guest components drawn here are those of a Linux guest, and a guest that
+runs no Linux kernel is [GH #321](https://github.com/overdrive-sh/overdrive/issues/321). A VM probe
 dial stands outside the allocation's flow quota, and one refused for node
 capacity or quiescence records no sample
 ([ADR-0187](adr-0187-a-vm-probe-refused-by-node-capacity-or-quiescence-records-no-sample.md));
 each written probe run counts once toward its threshold
-([ADR-0191](adr-0191-every-probe-run-counts-once-through-a-run-sequence-in-the-probe-row.md)).
+([ADR-0191](adr-0191-the-probe-runner-records-each-runs-streak-and-servicelifecycle-applies-thresholds-at-read.md)).
 Same-node leg-B to a VM sets the intercept mark `0x1` and binds `127.0.0.1`,
 so the existing `fwmark 0x1 → table 100` rule delivers it on `lo` and TPROXY
 assigns it to leg-C, with no route covering the prefix except the gateway
@@ -1664,12 +1677,12 @@ C4Component
     Component(sessions, "Control sessions", "Rust", "One live session per CID, claimed on a matching live token")
     Component(flows, "Flow table and pairing", "Rust", "Admits flows against node capacity and the allocation quota; pairs out of band")
     Component(dial, "GuestStreamDial", "Rust", "Resolves a target to an Active VM lease and declared port; opens a host-initiated flow")
-    Component(ends, "Flow-end dispatch", "Rust", "Applies classification and drain records; reads ring-loss and recursion-miss counters at each dispatch and every audit period")
+    Component(ends, "Flow-end dispatch", "Rust", "Reads the forwarder's end records; releases each flow's quota place and node slot and closes its sockets")
     Component(quiesce, "Quiescence", "Rust", "Counted move-only holds; reopens admission at zero")
   }
-  Container(fwd, "Host forwarder", "overdrive-dataplane::guest_flow")
+  Container(fwd, "Host flow forwarder", "ovd_fwd via overdrive-fwd")
   Container(sup, "Recovery supervisor", "ADR-0124")
-  Container(mtls, "mTLS worker", "leg-S")
+  Container(mtls, "Inbound mTLS enforcement", "overdrive-dataplane HostMtlsEnforcement, leg-S")
   Container(probe, "VM probe runner")
 
   Rel(mtls, dial, "Requests a guest stream from")
@@ -1677,9 +1690,9 @@ C4Component
   Rel(dial, pool, "Looks up the Active lease and declared ports in")
   Rel(dial, sessions, "Awaits the pairing reply of its host-initiated flow on")
   Rel(flows, sessions, "Receives pairing replies through")
-  Rel(flows, fwd, "Installs and removes pairs through")
-  Rel(fwd, ends, "Delivers flow-event records to")
-  Rel(ends, fwd, "Arms drain cells and shuts down targets through")
+  Rel(flows, fwd, "Attaches and aborts pairs through")
+  Rel(dial, fwd, "Watches each dialled vsock through")
+  Rel(fwd, ends, "Delivers one end record per pair to")
   Rel(sup, quiesce, "Takes and restores holds on")
   Rel(quiesce, flows, "Closes and reopens admission of")
 ```
@@ -1739,20 +1752,20 @@ sequenceDiagram
     participant Own as Guest-flow owner
     participant F as Host forwarder
     participant D as Destination (leg-F or non-mesh)
-    App->>GF: connects to a destination
-    GF->>GF: captures the socket and parks early data
+    App->>G: connects to a destination (captured to the guest intake)
+    Note over App,GF: early bytes wait in the intake child's receive queue
     G->>Own: opens a flow vsock with the request and launch token
     Own->>Own: applies policy, resolves mesh once, admits against the quota
     Own->>D: connects the host-facing socket
-    Own->>F: installs the pair at establishment
+    Own->>F: attaches the pair once the connect completed
     Own->>G: sends Paired on the control session
+    G->>GF: attaches the intake child to its flow vsock
+    GF->>F: forwards payload through the flow vsock
     F->>D: forwards payload in the host kernel
     App->>GF: half-closes its write side
-    G->>Own: sends vsock SHUTDOWN with SEND only
-    F->>Own: records a clean half-close from the raw tracepoint
-    Own->>F: arms the drain cell with its goal
-    F->>Own: records drain complete
-    Own->>D: shuts down the write side
+    GF->>F: sends vsock SHUTDOWN with SEND only after the last byte
+    F->>D: classifies a clean half-close and shuts down the write side after the last accepted byte
+    F->>Own: queues the pair's end record once both directions ended
 ```
 
 ### Dynamic sequence — guest reset ends the VMM
@@ -1769,8 +1782,8 @@ sequenceDiagram
     Guest->>VMM: signals reset
     VMM->>VMM: exits instead of rebooting in place
     VMM->>K: closes its vhost-vsock descriptor
-    K->>Own: resets every host flow of that guest (orphan sweep)
-    Own->>Own: aborts the flows with no classification record
+    K->>K: resets every host vsock of that guest (orphan sweep)
+    K->>Own: the host forwarder aborts each pair and queues its end record
     VMM-->>Drv: reports VMM exit
     Drv->>Pool: reports the ended launch
     Note over Pool: the lease is released only after the VMM has exited

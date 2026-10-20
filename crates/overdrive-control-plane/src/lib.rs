@@ -80,6 +80,10 @@ pub mod handlers;
 // `IdentityRead` impl lands 02-01; the reconciler wiring 01-04.
 /// Shared guest-network plan, ports, facts, and source-honest errors.
 pub mod guest_network;
+// netns-density-295 D-UP-16 — the one construction of the host guest-flow
+// owner and the mTLS worker, each holding the other.
+pub(crate) mod guest_network_composition;
+pub(crate) use guest_network_composition::{GuestNetworkCompositionPorts, compose_guest_network};
 pub mod identity_mgr;
 // IPv4 resolution via `getifaddrs(3)` for the operator-supplied
 // `[dataplane] client_iface`. Production boot threads the resolved
@@ -97,6 +101,7 @@ pub mod journal;
 // projection (ADR-0062) replacing the `ServiceMapHydrator`'s O(S²)
 // per-tick cluster scan with an O(1) keyed read off a maintained view.
 pub mod listener_facts;
+pub mod node_adapters;
 // transparent-mtls-enrollment step 01-03 (ADR-0071, GH #242) —
 // `ServiceBackendsResolve`, the v1 host `MtlsResolve` adapter. Resolves
 // `orig_dst` against an in-RAM, ownership-aware `addr → {service → Backend}`
@@ -142,12 +147,29 @@ pub mod worker;
 // executor that core's trait declaration delegates to.
 pub mod workflow_runtime;
 
+pub use node_adapters::{
+    BootAdapters, CaAdapters, ComposedDataplane, DataplaneComposer, DataplanePlan,
+    GuestFlowAdapter, HostDataplaneComposer, IntentStoreAdapter, MtlsAdapters, NodeAdapters,
+    ProbeAdapters, StoreAdapters, VmAdapters, VmCapability,
+};
+
 // GH #295 (DISTILL gap B-4): crate-private test-local implementations of the
 // three ports this crate declares, for the source-local supervisor and
 // admission cells (the `overdrive-sim` doubles implement a second compiled
 // copy of these traits here).
 #[cfg(test)]
 mod shared_network_test_ports;
+
+// GH #295 QHOLD (ADR-0169, ADR-0184, ADR-0124): the source-local Quint
+// conformance driver of `specs/quint/guest-flow-owner/quiescence.qnt`
+// (QPROJ-1: the owner with the runtime shared-network supervisor) and the
+// recovery acceptance bodies P6-S1..S6 / C2. Both boot the composition through
+// `run_server_with_obs_and_drivers` (real HTTPS bind, real redb), so they run
+// in the `integration-tests` lane.
+#[cfg(all(test, feature = "integration-tests"))]
+mod quint_quiescence;
+#[cfg(all(test, feature = "integration-tests"))]
+mod shared_network_recovery_acceptance;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
@@ -392,6 +414,11 @@ pub struct AppState {
     pub(crate) guest_pool: Arc<guest_network::GuestAddressPool>,
     /// Read-port projection backed by the same per-server pool used at dispatch.
     pub(crate) guest_attachment_view: guest_network::GuestPoolAttachmentView,
+    /// PORTS-CONFIG: the guest-flow owner's bound stream and control
+    /// listener ports, read once by the boot after step 9; the action shim
+    /// passes them to `GuestAddressPool::assign` (GUEST-PORTS).
+    pub(crate) guest_flow_ports:
+        Arc<std::sync::OnceLock<overdrive_core::guest_transport::GuestFlowPorts>>,
     /// DNS reply-source fallback allocator. It is retained only by the DNS
     /// responder's source-pinning adapter; guest attachment ownership lives in
     /// `SharedGuestNetworkOwner`.
@@ -742,6 +769,7 @@ impl AppState {
             identity,
             mtls_worker,
             guest_network_exec,
+            guest_flow_ports: Arc::new(std::sync::OnceLock::new()),
             guest_attachment_view: guest_network::GuestPoolAttachmentView::new(Arc::clone(
                 &guest_pool,
             )),
@@ -775,8 +803,11 @@ impl AppState {
 }
 
 /// Configuration for the Phase 1 control-plane server. Populated at
-/// startup from CLI flags and environment.
-#[derive(Clone)]
+/// startup from CLI flags and environment. Configuration only
+/// (NO-OVERRIDE-SEAMS, ADR-0219): no field carries or swaps a driven adapter
+/// and no field injects a fault — every driven adapter comes from the
+/// composition root in [`NodeAdapters`].
+#[derive(Debug, Clone)]
 pub struct ServerConfig {
     /// Socket address to bind the HTTPS listener. Default
     /// `127.0.0.1:7001` per ADR-0008. Use `127.0.0.1:0` in tests to
@@ -808,42 +839,6 @@ pub struct ServerConfig {
     ///
     /// [`SimClock`]: overdrive_core::traits::clock::Clock
     pub tick_cadence: Duration,
-    /// Injected [`Clock`] used by the convergence-loop spawn for the
-    /// per-tick `now()` snapshot, the `tick.deadline` budget, and the
-    /// `clock.sleep(tick_cadence)` between drains. Production wires
-    /// this to `Arc::new(SystemClock)` from the
-    /// [`overdrive_host`] crate (the only crate permitted to
-    /// instantiate `SystemClock` per CLAUDE.md "Repository
-    /// structure"); DST tests inject `Arc<SimClock>` so the harness
-    /// controls time.
-    pub clock: Arc<dyn Clock>,
-
-    /// Injected [`Kek`] provider used by the workload-identity CA boot path
-    /// (`boot_ca` / `bootstrap_node_intermediate`) to resolve the
-    /// `overdrive-ca-root` key-encryption key that seals the persistent root
-    /// at rest (ADR-0063 D3/D6).
-    ///
-    /// **Mandatory by design — no `Default`, no `Option`-override.** Production
-    /// composes `SystemdCredsKeyring::new()` (the Linux kernel keyring binding)
-    /// at the CLI `serve` boundary; tests inject a hermetic in-process double
-    /// (`overdrive_sim::adapters::SimKek::for_boot()`) so the boot's KEK-resolve
-    /// probe succeeds with no `$CREDENTIALS_DIRECTORY` / kernel-keyring
-    /// dependency. The field is mandatory specifically so a boot site that
-    /// forgets the KEK **fails to compile** rather than silently inheriting the
-    /// production binding and refusing to start in a cold environment — the
-    /// exact regression this seam closes. See `.claude/rules/development.md`
-    /// § "Port-trait dependencies" and feature-delta § C1-AMEND. Because a
-    /// mandatory `Arc<dyn Kek>` cannot be defaulted to a benign value,
-    /// `ServerConfig` has **no `Default` impl**; use
-    /// [`ServerConfig::new`](Self::new) + the
-    /// `..ServerConfig::new(kek, mtls_intercept, guest_dns)` rest-pattern
-    /// instead.
-    ///
-    /// Excluded from [`Debug`] — `Arc<dyn Kek>` is not [`Debug`].
-    ///
-    /// [`Kek`]: overdrive_core::ca::kek::Kek
-    pub kek: Arc<dyn overdrive_core::ca::kek::Kek>,
-
     /// `[node]` config block per ADR-0025 (amended by ADR-0029).
     /// Carries the operator-supplied `id_override` (hostname fallback
     /// when `None`), `region` (Phase 1 default `"local"`), and
@@ -857,7 +852,6 @@ pub struct ServerConfig {
     /// test fixtures continues to work without touching every
     /// fixture's TOML.
     pub node: overdrive_worker::NodeConfig,
-
     /// Address-pool definition for [`PersistentServiceVipAllocator`]
     /// per ADR-0049 (amended 2026-05-15 — default-with-override
     /// posture). When the operator-supplied TOML carries
@@ -866,7 +860,6 @@ pub struct ServerConfig {
     /// [`VipRange::default()`] supplies the Phase 1 pinned default
     /// (`10.96.0.0/16` reserved `[.0, .1, .255.255]`).
     pub vip_range: VipRange,
-
     /// Required `[dataplane]` section. Carries the operator-supplied
     /// `client_iface` + `backend_iface` bindings the production XDP
     /// programs attach to (Phase 2.3) and from which
@@ -883,13 +876,12 @@ pub struct ServerConfig {
     /// construction continues to work without touching every
     /// fixture's TOML.
     ///
-    /// `run_server_with_obs_and_driver` refuses to start when this
+    /// `run_server` refuses to start when this
     /// field is `None` with
     /// `ControlPlaneError::Validation { field: Some("dataplane"), .. }`
     /// — the same shape the parser returns. See architecture.md
     /// § 5.2.
     pub dataplane: Option<dataplane_config::DataplaneConfig>,
-
     /// Optional override for the bpffs directory the `EbpfDataplane`
     /// pins SERVICE_MAP into. `None` (the production default) means
     /// `overdrive_dataplane::DEFAULT_PIN_DIR` = `/sys/fs/bpf/overdrive`.
@@ -900,7 +892,6 @@ pub struct ServerConfig {
     /// `serve` always reads `None` (single-cut to EbpfDataplane); the
     /// field exists only for test isolation.
     pub dataplane_pin_dir: Option<PathBuf>,
-
     /// Optional override for the cgroup the `cgroup_connect4_service`
     /// program attaches to per ADR-0053 § 7. `None` (the production
     /// default) means
@@ -912,210 +903,32 @@ pub struct ServerConfig {
     /// collisions when multiple integration tests boot the server
     /// concurrently inside Lima.
     pub dataplane_cgroup_attach_path: Option<PathBuf>,
-
-    /// Optional injected [`Dataplane`] adapter — for tests whose
-    /// subject under test is NOT the dataplane attach path. When
-    /// `Some(_)`, the boot path uses this adapter and SKIPS
-    /// `EbpfDataplane::new`; when `None` (the production default),
-    /// the boot path constructs `EbpfDataplane` from the
-    /// `[dataplane]` config section per architecture.md § 5.2.
-    ///
-    /// Per architecture.md § 4.7, tests inject `SimDataplane` via
-    /// this field; production binaries (the CLI's `serve` subcommand)
-    /// pass `None` so the single-cut `EbpfDataplane` composition
-    /// per `feedback_single_cut_greenfield_migrations.md` is the
-    /// only production-reachable code path.
-    ///
-    /// Excluded from [`Debug`] / [`Default`] — `Arc<dyn Dataplane>`
-    /// is neither `Debug` nor `Default`.
-    ///
-    /// [`Dataplane`]: overdrive_core::traits::dataplane::Dataplane
-    pub dataplane_override: Option<Arc<dyn overdrive_core::traits::dataplane::Dataplane>>,
-
-    /// The required transparent-mTLS intercept port (D-295-R16). Production
-    /// passes `HostMtlsIntercept`; tests inject `SimMtlsIntercept` or a
-    /// test-local intercept. `run_server*` always composes the worker over it.
-    ///
-    /// RED scaffold (D-295-R16): consumed in DELIVER step 05-01; until then
-    /// `run_server*` keep today's composition and do not read it.
-    pub mtls_intercept: Arc<dyn overdrive_worker::mtls_intercept_port::MtlsIntercept>,
-
-    /// The required shared-gateway DNS responder factory (D-295-R16).
-    /// Production passes `HostGuestDnsFactory`; tests inject
-    /// `SimGuestDnsFactory`.
-    ///
-    /// RED scaffold (D-295-R16): consumed in DELIVER step 05-01; until then
-    /// `run_server*` keep today's composition and do not read it.
-    pub guest_dns: Arc<dyn crate::dns_responder::GuestDnsFactory>,
-
-    /// Test-only failure-injection seam for the `EbpfDataplane::probe`
-    /// Earned-Trust call site. When `Some(msg)`, the boot path
-    /// constructs `DataplaneError::LoadFailed(msg)` and applies it to
-    /// the constructed `EbpfDataplane` via
-    /// [`overdrive_dataplane::EbpfDataplane::set_probe_fault`] BEFORE
-    /// `.probe().await` runs; the probe short-circuits to the
-    /// constructed error so the boot path exercises the
-    /// `DataplaneBootError::Probe` mapping arm and the
-    /// `health.startup.refused` emit per architecture.md § 5.4.
-    ///
-    /// The seam is `String`-shaped (not `DataplaneError`-shaped)
-    /// because `DataplaneError` cannot derive `Clone` — its `Io`
-    /// variant embeds `std::io::Error`. Storing the load-failure
-    /// message and reconstructing `LoadFailed(msg)` at the boot
-    /// boundary keeps the field `Clone` (and therefore `ServerConfig:
-    /// Clone`) without broadening `DataplaneError`'s public surface.
-    /// The S-BDB-14 fixture injects a verbatim "probe: round-trip
-    /// mismatch ..." string per architecture.md § 5.4.
-    ///
-    /// Gated behind `#[cfg(feature = "integration-tests")]` on both
-    /// this field declaration and its use site in the boot path.
-    /// Production builds compile the field out entirely; the
-    /// `..Default::default()` rest-pattern construction in production
-    /// callers never names it. The `cfg(test)` arm is deliberately
-    /// omitted — the boot-path call site forwards the feature into
-    /// `overdrive-dataplane` via the Cargo.toml dep, and using
-    /// `cfg(test)` here would let the control-plane's own `cargo
-    /// test --no-run` enable the call site without enabling
-    /// `set_probe_fault` on the dataplane dep.
-    #[cfg(feature = "integration-tests")]
-    pub dataplane_probe_fault: Option<String>,
-
-    /// Test-only fault-injection seam for the transparent-mTLS proxy
-    /// Earned-Trust probe (transparent-mtls-host-socket, step 06-03,
-    /// criteria[0]). When `Some(msg)`, the boot path forces
-    /// `MtlsEnforcement::probe()` to fail with the carried message BEFORE
-    /// the mTLS layer is declared usable, so the
-    /// `MtlsBootError::Probe`/`health.startup.refused` fail-closed branch
-    /// is exercised without needing a real kernel substrate failure.
-    /// Mirrors `dataplane_probe_fault` above; gated behind
-    /// `#[cfg(feature = "integration-tests")]` on both the field and its
-    /// use site so production builds compile it out entirely.
-    #[cfg(feature = "integration-tests")]
-    pub mtls_probe_fault: Option<String>,
-
-    /// Test-only whole-port substitution seam for focused transparent-mTLS
-    /// adapter tests (transparent-mtls-host-socket, step 06-03, criteria[1]).
-    /// When `Some(read)`, boot composes `HostMtlsEnforcement` over THIS
-    /// `IdentityRead` instead of the production `IdentityMgr`; its SVID must
-    /// still chain to its supplied bundle and carry exactly one valid SPIFFE
-    /// URI SAN because the production relying-party verifier remains active.
-    ///
-    /// Production walking-skeleton tests must leave this `None`: only the real
-    /// `IdentityMgr` issuance/lifecycle path can prove production composition.
-    ///
-    /// Sibling to the existing `SimKek::for_boot()` boot injection (the
-    /// criteria[0] test uses that); gated behind
-    /// `#[cfg(feature = "integration-tests")]` on both the field and its
-    /// single use site so production builds compile it out entirely and
-    /// the production `IdentityMgr` is the only reachable identity
-    /// source. This is the WORKLOAD-identity path (`RcgenCa` /
-    /// `IdentityMgr`), NOT the operator HTTPS CA.
-    #[cfg(feature = "integration-tests")]
-    pub mtls_identity_override: Option<Arc<dyn overdrive_core::traits::IdentityRead>>,
-
-    /// Test-only adapter-substitution seam for the VM driver's two driven
-    /// ports, `Vmm` and `BeaconIo` (ADR-0083 §D8; DG-4). A simulated VMM
-    /// without a simulated beacon is the wrong state (a `SimVmm` guest cannot
-    /// reach a real vsock listener), so the two travel together. When
-    /// `Some(o)`, `compose_vm_driver` uses `o.vmm` in place of discovering
-    /// `CloudHypervisorVmm` and binds the node beacon intake through
-    /// `o.beacon` in place of `VsockBeaconIo`; `None` composes both
-    /// production adapters. `Vmm::probe()` (and `CgroupAccounting::probe()`)
-    /// run UNCONDITIONALLY against whichever adapter is bound — Earned Trust
-    /// is never skipped for the injected case.
-    ///
-    /// Gated behind `#[cfg(feature = "integration-tests")]` on both this
-    /// field declaration and its one use site, mirroring
-    /// `mtls_identity_override`'s discipline.
-    ///
-    /// Excluded from [`Debug`] (beyond the adapter-presence marker).
-    #[cfg(feature = "integration-tests")]
-    pub vm_override: Option<VmOverride>,
-}
-
-/// The VM driver's injected driven ports (DG-4): a simulated VMM and the
-/// simulated beacon its guests reach. `ServerConfig.vm_override = None`
-/// composes `CloudHypervisorVmm` and `VsockBeaconIo`.
-pub struct VmOverride {
-    /// Replaces the discovered `CloudHypervisorVmm`.
-    pub vmm: Arc<dyn overdrive_core::traits::vmm::Vmm>,
-    /// Replaces `VsockBeaconIo` as the node beacon intake's port.
-    pub beacon: Arc<dyn overdrive_core::vm::beacon::BeaconIo>,
-}
-
-impl std::fmt::Debug for ServerConfig {
-    /// `Arc<dyn Clock>` is not [`Debug`], so the auto-derive on
-    /// `ServerConfig` is replaced by a manual impl that elides the
-    /// clock field.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut dbg = f.debug_struct("ServerConfig");
-        dbg.field("bind", &self.bind)
-            .field("data_dir", &self.data_dir)
-            .field("operator_config_dir", &self.operator_config_dir)
-            .field("tick_cadence", &self.tick_cadence)
-            .field("clock", &"<dyn Clock>")
-            .field("kek", &"<dyn Kek>")
-            .field("node", &self.node)
-            .field("vip_range", &"<VipRange>")
-            .field("dataplane", &self.dataplane)
-            .field("dataplane_pin_dir", &self.dataplane_pin_dir)
-            .field("dataplane_cgroup_attach_path", &self.dataplane_cgroup_attach_path)
-            .field(
-                "dataplane_override",
-                &self.dataplane_override.as_ref().map(|_| "<dyn Dataplane>"),
-            )
-            .field("mtls_intercept", &"<dyn MtlsIntercept>")
-            .field("guest_dns", &"<dyn GuestDnsFactory>");
-        #[cfg(feature = "integration-tests")]
-        dbg.field("dataplane_probe_fault", &self.dataplane_probe_fault);
-        #[cfg(feature = "integration-tests")]
-        dbg.field("mtls_probe_fault", &self.mtls_probe_fault);
-        #[cfg(feature = "integration-tests")]
-        dbg.field(
-            "mtls_identity_override",
-            &self.mtls_identity_override.as_ref().map(|_| "<dyn IdentityRead>"),
-        );
-        #[cfg(feature = "integration-tests")]
-        dbg.field("vm_override", &self.vm_override.as_ref().map(|_| "<VmOverride>"));
-        dbg.finish()
-    }
+    /// The node-global host vsock listener ports (PORTS-CONFIG, ADR-0218):
+    /// the beacon, the guest-flow stream and the guest-flow control
+    /// listener. Validated at construction (`NodeVsockPortConfig::new`), so
+    /// the boot has no port-validation refusal. `ServerConfig::new()` sets
+    /// the production default (1234 / 1240 / 1243); tests set
+    /// `NodeVsockPortConfig::kernel_assigned()` and read the bound ports back
+    /// ([`ServerHandle::vsock_ports`]).
+    pub vsock_ports: overdrive_core::guest_transport::NodeVsockPortConfig,
 }
 
 impl ServerConfig {
-    /// Construct a `ServerConfig` with the **mandatory** `kek` provider and
-    /// every other field set to its prior `Default` value.
-    ///
-    /// Replaces the removed `impl Default for ServerConfig`: the [`Kek`] port
-    /// binding MUST be supplied explicitly (production composes
-    /// `SystemdCredsKeyring::new()` at the CLI `serve` boundary; tests inject a
-    /// hermetic `SimKek::for_boot()`) so a boot site that forgets it fails to
-    /// **compile**, never inherits the production binding and refuses to start
-    /// in a cold environment. See feature-delta § C1-AMEND and
-    /// `.claude/rules/development.md` § "Port-trait dependencies".
-    ///
-    /// Fixtures use `..ServerConfig::new(test_kek, intercept, dns)`: the
-    /// rest-pattern still supplies every other field, while the three required
-    /// ports are explicit, type-checked arguments.
-    ///
-    /// `bind`, `data_dir`, and `operator_config_dir` get sentinel values that
-    /// callers MUST override (as under the prior `Default`). `tick_cadence`
-    /// defaults to [`reconciler_runtime::DEFAULT_TICK_CADENCE`] (100ms) and
-    /// `clock` to `Arc::new(SystemClock)` from the [`overdrive_host`] crate —
-    /// the only crate permitted to instantiate `SystemClock` per CLAUDE.md
-    /// "Repository structure". Tests that need a controllable clock override
-    /// `clock` in the same struct literal.
-    ///
-    /// The intercept and DNS ports (D-295-R16) are equally required: a boot
-    /// site that forgets either fails to compile. Production passes
-    /// `HostMtlsIntercept` and `HostGuestDnsFactory`.
-    ///
-    /// [`Kek`]: overdrive_core::ca::kek::Kek
+    /// A `ServerConfig` with every field at its default: `bind`,
+    /// `data_dir` and `operator_config_dir` get sentinel values callers
+    /// MUST override; `tick_cadence` is
+    /// [`reconciler_runtime::DEFAULT_TICK_CADENCE`] (100ms); the
+    /// `[dataplane]` section is the veth-named single-node shape
+    /// (ADR-0061 § 1); the pin directory and cgroup attach path are the
+    /// production defaults; `vsock_ports` is
+    /// `NodeVsockPortConfig::default()`. No `Default` impl: the rest-pattern
+    /// `..ServerConfig::new()` is the construction shape.
     #[must_use]
-    pub fn new(
-        kek: Arc<dyn overdrive_core::ca::kek::Kek>,
-        mtls_intercept: Arc<dyn overdrive_worker::mtls_intercept_port::MtlsIntercept>,
-        guest_dns: Arc<dyn crate::dns_responder::GuestDnsFactory>,
-    ) -> Self {
+    #[expect(
+        clippy::new_without_default,
+        reason = "ADR-0219: `ServerConfig` stays without `Default`; `..ServerConfig::new()` is the rest-pattern"
+    )]
+    pub fn new() -> Self {
         // 127.0.0.1:0 — IPv4 loopback, ephemeral port. Constructed
         // directly rather than via `parse()` so the constructor
         // is infallible and clippy's `expect_used` lint stays clean.
@@ -1125,60 +938,17 @@ impl ServerConfig {
             data_dir: PathBuf::new(),
             operator_config_dir: PathBuf::new(),
             tick_cadence: DEFAULT_TICK_CADENCE,
-            clock: Arc::new(overdrive_host::SystemClock),
-            kek,
             node: overdrive_worker::NodeConfig::default(),
             vip_range: VipRange::default(),
-            // ADR-0061 § 1 (step 01-03): `Default` populates the
-            // veth-named single-node `[dataplane]` shape (two DISTINCT
-            // ifaces `ovd-veth-cli` / `ovd-veth-bk`, NOT `lo`/`lo`) so
-            // existing test fixtures using `..Default::default()`
-            // rest-pattern construction and the production boot default
-            // both carry the shape the serve-boot provisioner expects.
-            // Production callers reading an operator TOML go through
-            // `parse_dataplane_section` and overwrite this value.
+            // ADR-0061 § 1 (step 01-03): the veth-named single-node
+            // `[dataplane]` shape (`ovd-veth-cli` / `ovd-veth-bk`).
             dataplane: Some(dataplane_config::DataplaneConfig::single_node_veth()),
-            // Step 02-02: `None` means production default
-            // (`/sys/fs/bpf/overdrive`). Tests override to a per-test
-            // tempdir for SERVICE_MAP pin isolation.
+            // `None` means the production default (`/sys/fs/bpf/overdrive`).
             dataplane_pin_dir: None,
-            // ADR-0053 § 7: `None` means production default
-            // (`/sys/fs/cgroup/overdrive.slice`). Tests inject a
-            // per-test cgroup path for attachment isolation.
+            // ADR-0053 § 7: `None` means the production default
+            // (`/sys/fs/cgroup/overdrive.slice`).
             dataplane_cgroup_attach_path: None,
-            // Step 02-02: `None` means production default
-            // (construct `EbpfDataplane` from the `[dataplane]`
-            // section). Tests that exercise unrelated subsystems
-            // inject `Some(Arc::new(SimDataplane::new()))` per
-            // architecture.md § 4.7.
-            dataplane_override: None,
-            mtls_intercept,
-            guest_dns,
-            // Step 02-03: `None` means production default (probe
-            // runs against the real BACKEND_MAP via the typed
-            // `EbpfDataplane` handle). Tests inject
-            // `Some(DataplaneError::...)` to exercise the
-            // `DataplaneBootError::Probe` mapping arm (S-BDB-14).
-            #[cfg(feature = "integration-tests")]
-            dataplane_probe_fault: None,
-            // transparent-mtls-host-socket step 06-03: default no
-            // mTLS-probe fault; the e2e criteria[0] test sets
-            // `Some(..)` to exercise the `MtlsBootError::Probe`
-            // fail-closed branch.
-            #[cfg(feature = "integration-tests")]
-            mtls_probe_fault: None,
-            // transparent-mtls-host-socket step 06-03: default no
-            // identity override; the criteria[1] e2e sets `Some(..)`
-            // to a `TestPki`-rooted `IdentityRead` so the agent's
-            // leg-B trusts the test peer's server cert.
-            #[cfg(feature = "integration-tests")]
-            mtls_identity_override: None,
-            // ADR-0083 §D8 step 01-09: default no Vmm override; the
-            // composition root discovers/constructs the production
-            // `CloudHypervisorVmm`. S-VM-13/S-VM-75 set `Some(..)` to
-            // exercise the probe-refusal fail-closed branch.
-            #[cfg(feature = "integration-tests")]
-            vm_override: None,
+            vsock_ports: overdrive_core::guest_transport::NodeVsockPortConfig::default(),
         }
     }
 }
@@ -1275,6 +1045,23 @@ pub struct ServerHandle {
     /// Sole retained shared-network supervisor owner. Step 03-03 supplies the
     /// retained task and classification behavior behind this exact field.
     shared_network_supervisor: SharedNetworkSupervisorHandle,
+    /// PORTS-CONFIG: the guest-flow owner's bound listener ports, read once
+    /// after boot step 9.
+    flow_ports: Option<overdrive_core::guest_transport::GuestFlowPorts>,
+    /// PORTS-CONFIG: the beacon intake's bound port; `None` when no `Vm`
+    /// driver was composed or on the supplied-owner path.
+    beacon_port: Option<overdrive_core::vm::config::VsockPort>,
+}
+
+/// The node-global host vsock listener ports a running server bound
+/// (PORTS-CONFIG, ADR-0218), reported by [`ServerHandle::vsock_ports`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BoundVsockPorts {
+    /// `None` when `run_server` composed no `Vm` driver (`Optional`
+    /// capability absent) or on the supplied-owner path.
+    pub beacon: Option<overdrive_core::vm::config::VsockPort>,
+    /// The guest-flow owner's stream and control listener ports.
+    pub flow: overdrive_core::guest_transport::GuestFlowPorts,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -1291,22 +1078,31 @@ pub(crate) enum SharedNetworkSupervisorError {
 /// Period between the starts of two full shared-network audits while EXEC is
 /// Open: ADR-0124's one-second security detection bound (D-295-R13). A slow
 /// audit stretches the period instead of stacking calls.
-#[cfg_attr(not(test), allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01"))]
+#[cfg_attr(
+    not(all(test, feature = "integration-tests")),
+    allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01")
+)]
 const SHARED_NETWORK_AUDIT_PERIOD: Duration = Duration::from_secs(1);
 
 /// Period between two bounded recovery attempts while EXEC is Recovering
 /// (ADR-0124, D-295-R13).
-#[cfg_attr(not(test), allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01"))]
+#[cfg_attr(
+    not(all(test, feature = "integration-tests")),
+    allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01")
+)]
 const SHARED_NETWORK_RETRY_PERIOD: Duration = Duration::from_millis(250);
 
 /// Recovery window from detection to the typed fail-stop (ADR-0124,
 /// D-295-R13).
-#[cfg_attr(not(test), allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01"))]
+#[cfg_attr(
+    not(all(test, feature = "integration-tests")),
+    allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01")
+)]
 const SHARED_NETWORK_RECOVERY_DEADLINE: Duration = Duration::from_secs(5);
 
 /// Completed recovery attempts after which the supervisor fail-stops
 /// (ADR-0124, D-295-R13).
-#[cfg_attr(not(test), allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01"))]
+#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01")]
 const SHARED_NETWORK_RECOVERY_ATTEMPTS: u32 = 20;
 
 /// Bound on each owner call during detection; a call that misses it fails
@@ -1314,16 +1110,16 @@ const SHARED_NETWORK_RECOVERY_ATTEMPTS: u32 = 20;
 /// Rule: `max(1 s, 4 × L)`, L the largest single owner-call audit latency at
 /// T1-PORT4 (M-ND295-E18). It holds the rule's floor until the measurement
 /// sets it; the step that sets it records the measurement here.
-#[cfg_attr(not(test), allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01"))]
+#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01")]
 const SHARED_NETWORK_AUDIT_CALL_BOUND: Duration = Duration::from_secs(1);
 
-/// Bound on the one `quiesce_managed_taps` call, itself capped by the
+/// Bound on each recovery's `quiesce()` call, itself capped by the
 /// remaining recovery deadline; a call that misses it leaves the unconfirmed
 /// set undetermined (D-295-R14). Rule: `max(1 s, 4 × Q)`, Q the largest
 /// quiescence wall time at T1-PORT4 (M-ND295-E18). It holds the rule's floor
 /// until the measurement sets it; the step that sets it records the
 /// measurement here.
-#[cfg_attr(not(test), allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01"))]
+#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01")]
 const SHARED_NETWORK_QUIESCE_CALL_BOUND: Duration = Duration::from_secs(1);
 
 /// Bound on each `cgroup.kill` write — per-VM and workloads-slice — in a
@@ -1335,7 +1131,7 @@ const SHARED_NETWORK_QUIESCE_CALL_BOUND: Duration = Duration::from_secs(1);
 /// or fail-stop. Rule: `max(1 s, 4 × W)`, W the largest single kill write at
 /// T1-PORT4 (M-ND295-E18). It holds the rule's floor until the measurement sets
 /// it; the step that sets it records the measurement here.
-#[cfg_attr(not(test), allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01"))]
+#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01")]
 const SHARED_NETWORK_VM_KILL_CALL_BOUND: Duration = Duration::from_secs(1);
 
 /// The ports the one runtime shared-network supervisor task owns (D-295-R13,
@@ -1407,25 +1203,23 @@ mod vm_kill {
     }
 }
 
-/// QPROJ-6: one holder's recovery episode at the runtime shared-network
+/// QPROJ-6: one component's recovery episode at the runtime shared-network
 /// supervisor (RUN-295-B).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RecoveryEpisode {
-    /// Held: quiesced under its holder, repair not yet clean; Repaired: the
-    /// repair returned and the post-repair audit is pending.
     pub phase: RecoveryPhase,
-    /// Failed attempts of this holder: a failed repair, or a failed
+    /// Failed attempts of this recovery: a failed repair, or a failed
     /// post-repair audit (D-295-R13, UP-7). Equals the `attempts` the EXEC
     /// gate's `recovery_progress()` reports for the same component.
     pub failed_attempts: u32,
 }
 
-/// QPROJ-6: where a holder's recovery episode stands.
+/// QPROJ-6: where a component's recovery episode stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecoveryPhase {
-    /// Quiesced under its holder; the repair is not yet clean.
+    /// Quiesced under the recovery's `QuiescenceHold`; repair not yet clean.
     Held,
-    /// The repair returned; the post-repair audit is pending.
+    /// The repair returned `Ok`; the post-repair audit is pending.
     Repaired,
 }
 
@@ -1448,31 +1242,40 @@ impl SharedNetworkSupervisorHandle {
         Self { request_rx, task: Some(task), exec, shutdown }
     }
 
-    /// QPROJ-6: an owned copy of the supervisor's per-holder episodes.
+    /// QPROJ-6: an owned copy of the supervisor's per-component episodes.
     ///
     /// - **Preconditions:** none. Infallible; callable at any time on a
     ///   spawned supervisor.
-    /// - **Postconditions:** an owned copy of the supervisor's per-holder
+    /// - **Postconditions:** an owned copy of the supervisor's per-component
     ///   episodes, taken under the same gate lock that linearizes
     ///   `recovery_progress()`; no lock is held on return; nothing is
     ///   quiesced, repaired, audited or restored by the call.
     /// - **Consistency point:** between two supervisor steps (one quiesce,
-    ///   one repair, one audit, one restore, one `complete_attempt`).
+    ///   one repair, one audit, one restore, one `complete_attempt`, one
+    ///   fail-stop).
     /// - **Edge cases:** a component with no recovery in progress is absent;
     ///   the map is empty while the gate is Open, BootClosed or FailStop.
     /// - **Observable invariants:** the key set equals the set of components
-    ///   `recovery_progress()` reports (the EXEC gate contract), and contains
-    ///   every component of the host owner's `Recovery(c)` holders (QPROJ-3);
-    ///   a holder's `failed_attempts` equals the `attempts` of its
-    ///   `recovery_progress()` entry; a repeated call with no intervening
-    ///   supervisor step returns an equal value.
+    ///   `recovery_progress()` reports (the EXEC gate contract); at a
+    ///   consistency point of both the supervisor and the owner, the number
+    ///   of episodes plus the owner's
+    ///   `flow_observation().leaked_quiescence_holds` equals its
+    ///   `quiescence_holds` (QHOLD `CountCoversRecoveries`, D-UP-3: no
+    ///   recovery drops its hold, so a dropped hold is not an episode); a
+    ///   recovery's
+    ///   `failed_attempts` equals the `attempts` of its `recovery_progress()`
+    ///   entry; a repeated call with no intervening supervisor step returns
+    ///   an equal value.
     ///
-    /// RED scaffold: DELIVER lands it with the supervisor rework (09-01,
-    /// attachment cut), which keeps each holder's episode beside the EXEC
-    /// gate's per-holder snapshots.
-    #[expect(
-        dead_code,
-        reason = "RED scaffold — consumed by the quiescence conformance driver at the attachment cut"
+    /// RED scaffold: DELIVER lands it with the supervisor rework (09-01
+    /// rework, inside the attachment cut), which keeps each recovery's
+    /// episode beside the EXEC gate's per-recovery snapshots.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "RED scaffold — read by the quiescence conformance driver and the recovery acceptance bodies"
+        )
     )]
     #[expect(
         clippy::unused_self,
@@ -1638,14 +1441,13 @@ impl SharedNetworkSupervisorHandle {
                     Err(source) => return Err(source.into()),
                 }
             }
-            // D8a-HOLD: this recovery's hold. Kept for the life of the
-            // recovery; dropping it unrestored leaves the holder registered
-            // (forwarding stays quiesced), as the latch did before.
+            // QHOLD (ADR-0169): this recovery's counted, move-only hold. Kept
+            // for the life of the recovery and consumed by `restore` after the
+            // clean post-repair audit; dropped unrestored it raises the
+            // owner's leaked-hold count and forwarding stays quiesced.
             let mut quiesced: Option<guest_network::QuiescenceHold> =
                 if requires_quiescence(component) {
-                    let (hold, _quiescence) = shared_guest_network
-                        .quiesce_forwarding(guest_network::QuiescenceHolder::Recovery(component))
-                        .await?;
+                    let (hold, _quiescence) = shared_guest_network.quiesce().await;
                     Some(hold)
                 } else {
                     None
@@ -1688,7 +1490,43 @@ impl SharedNetworkSupervisorHandle {
                     }
                 };
                 if first_remaining.is_none() {
-                    if exec.complete_attempt(None) {
+                    if exec.complete_attempt(BTreeSet::new()) {
+                        if let Some(hold) = quiesced.take() {
+                            match shared_guest_network.restore(hold).await {
+                                Ok(restored) => tracing::info!(
+                                    name: "guest_network.shared_owner_restored",
+                                    component = ?component,
+                                    restored = ?restored,
+                                    "shared guest-network recovery restored its quiescence hold"
+                                ),
+                                // D-UP-4 / PD-1: a hold another ledger issued
+                                // changes nothing at the owner; the
+                                // composition is defective, so `serve`
+                                // fail-stops at once (ADR-0124).
+                                Err(error) => {
+                                    tracing::error!(
+                                        name: "guest_network.shared_owner_fail_stop",
+                                        component = ?component,
+                                        error = error.as_str(),
+                                        "shared guest-network recovery restored a foreign quiescence hold"
+                                    );
+                                    let Some(request) = exec.fail_stop(
+                                        overdrive_core::guest_network::SharedGuestNetworkFailStopCause::ForeignQuiescenceHold,
+                                    ) else {
+                                        return Ok(());
+                                    };
+                                    let _ = request_tx
+                                        .send(
+                                            overdrive_core::guest_network::ServeShutdownRequest::SharedGuestNetwork(
+                                                request,
+                                            ),
+                                        )
+                                        .await;
+                                    shutdown.cancelled().await;
+                                    return Ok(());
+                                }
+                            }
+                        }
                         tracing::info!(
                             name: "guest_network.shared_owner_recovered",
                             component = ?component,
@@ -1708,13 +1546,11 @@ impl SharedNetworkSupervisorHandle {
                         Err(source) => return Err(source.into()),
                     }
                 }
-                if !exec.complete_attempt(Some(component)) {
+                if !exec.complete_attempt(BTreeSet::from([component])) {
                     return Ok(());
                 }
                 if quiesced.is_none() && requires_quiescence(component) {
-                    let (hold, _quiescence) = shared_guest_network
-                        .quiesce_forwarding(guest_network::QuiescenceHolder::Recovery(component))
-                        .await?;
+                    let (hold, _quiescence) = shared_guest_network.quiesce().await;
                     quiesced = Some(hold);
                 }
                 let Some(progress) = exec.recovery_progress().into_iter().next() else {
@@ -1868,100 +1704,45 @@ impl DnsServeTaskOwner {
     }
 }
 
+// GH #295 — the source-local supervisor task-owner and DNS task-owner bodies
+// that survive the vsock attachment replacement (S-ND295-32 exit matrix,
+// S-ND295-34 DNS task owner). The bridge / TAP / drain-era cells of this
+// module (per-TAP quiescence, per-VM kill scope over TAP sets, the R18
+// guard, the TCX / endpoint / counter-map / bpffs-pin components) were
+// deleted with the mechanism they defended; the QHOLD recovery cells live in
+// `shared_network_recovery_acceptance` and the Quint `quiescence` driver.
 #[cfg(test)]
 #[allow(
     clippy::doc_markdown,
     clippy::expect_used,
     clippy::panic,
-    clippy::too_many_lines,
-    reason = "D-295-DISTILL-8 acceptance tables use exact Contract Shape markers and diagnostics"
+    reason = "acceptance bodies use exact Contract Shape markers and fail at once on a broken precondition"
 )]
 mod shared_network_task_owner_acceptance {
-    //! Source-local supervisor lane (seeded-sim, default lane) of GH #295:
-    //! S-ND295-19, 29A, 30A, 32, and the S-ND295-34 DNS task-owner bodies.
+    //! # Universe (port-exposed)
     //!
-    //! The supervisor under test is the private
-    //! `SharedNetworkSupervisorHandle::run_shared_network_supervisor(ports,
-    //! exec, clock, request_tx, shutdown)` (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the private signature)). Its ports are the
-    //! crate-private test-local owner and DNS doubles
-    //! (`shared_network_test_ports`, because the `overdrive-sim` doubles
-    //! implement a second compiled copy of this crate's traits), a real
-    //! `MtlsInterceptWorker` over sim enforcement and resolve and the stateful
-    //! test intercept below, and the kill-only `VmKillCapability` over a
-    //! `CgroupManager` on one `SimCgroupFs`. Time is the injected `SimClock`;
-    //! the supervisor future is polled through a pending-poll probe so every
-    //! step waits for the supervisor to register its next wait.
-    //!
-    //! # SUT state machines
-    //!
-    //! ```text
-    //! EXEC gate:   Open --detect(c)--> Recovering(c, n, t) --clean attempt--> Open
-    //!                                  Recovering --20 attempts | 5 s--> FailStop
-    //!              Open | Recovering --undetermined quiescence | kill write failed--> FailStop
-    //! owner latch: clear --quiesce_managed_taps--> set --restore_quiesced_taps Ok--> clear
-    //! allocation:  Active --reported unconfirmed or damaged + kill write Ok/NotFound--> Condemned
-    //! ```
-    //!
-    //! Every observation point also asserts the E11 latch invariant (L9,
-    //! FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the latch-set implies gate-not-Open invariant)): while the owner's latch is set, the gate is Recovering or
-    //! a fail-stop request was received, and the gate admits no claim.
-    //!
-    //! # Universe
-    //!
-    //! Port-exposed observables only: the test-local owner's journal (with the
-    //! `SimCgroupFs` snapshot taken as each call began), latch, and condemned
-    //! set; the stateful intercept's call log (stamped with the owner journal
-    //! length) and its published state; the DNS doubles' probe, audit, and stop
-    //! records; the gate's `claim_release` and `recovery_progress`; the typed
-    //! request from `ServerHandle::shutdown_requested`; and the supervisor's
-    //! `guest_network.shared_owner_*` events.
+    //! The supervisor handle's typed `ServeShutdownRequest` and the EXEC
+    //! gate's `fail_stop` / `recovery_progress`; the DNS task owner's state,
+    //! its retained task and responder, the `GuestDns` port's serve/stop
+    //! outcomes through the test-local `TestGuestDns` doubles
+    //! (`shared_network_test_ports`). No production state is seeded.
 
     use std::collections::BTreeSet;
-    use std::future::Future as _;
-    use std::net::{Ipv4Addr, SocketAddrV4};
-    use std::num::NonZeroU16;
-    use std::path::{Path, PathBuf};
+    use std::net::Ipv4Addr;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-    use futures::FutureExt as _;
-    use tracing::field::{Field, Visit};
-    use tracing::instrument::WithSubscriber as _;
-    use tracing::{Event, Subscriber};
-    use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
+    use overdrive_core::guest_network::{
+        GuestNetworkExecSupervisor, ServeShutdownRequest, SharedGuestNetworkFailStop,
+        SharedGuestNetworkFailStopCause,
+    };
+    use overdrive_sim::adapters::clock::SimClock;
+    use overdrive_sim::adapters::observation_store::SimObservationStore;
 
     use super::*;
-    use crate::dns_responder::responder::Result as DnsResult;
     use crate::dns_responder::{GuestDns, GuestDnsDeps, GuestDnsFactory};
     use crate::shared_network_test_ports::{
-        TestAuditMode, TestAuditOutcome, TestCallOutcome, TestGuestDns, TestGuestDnsFactory,
-        TestGuestDnsServeExit, TestOwnerCall, TestQuiesceOutcome, TestQuiesceScript,
-        TestSharedOwner,
+        TestGuestDns, TestGuestDnsFactory, TestGuestDnsServeExit,
     };
-    use overdrive_core::guest_network::{
-        GuestNetworkExecGate, GuestNetworkExecSupervisor, GuestNetworkExecWiring,
-        ServeShutdownRequest, SharedGuestNetworkComponent, SharedGuestNetworkFailStop,
-        SharedGuestNetworkFailStopCause, SharedGuestNetworkRecovery,
-    };
-    use overdrive_core::id::{NodeId, SpiffeId};
-    use overdrive_core::traits::IdentityRead;
-    use overdrive_core::traits::cgroup_fs::CgroupFs as _;
-    use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, Resources, VmPayload};
-    use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
-    use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
-    use overdrive_netlink::nft::SharedIpInterceptIdentity;
-    use overdrive_sim::adapters::clock::SimClock;
-    use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
-    use overdrive_sim::adapters::observation_store::SimObservationStore;
-    use overdrive_sim::adapters::{
-        SimAcceptScript, SimCgroupFs, SimEntry, SimIdentityRead, SimInterceptFault,
-        SimMtlsIntercept, SimOp,
-    };
-    use overdrive_worker::mtls_intercept::{InterceptError, InterceptLeg, InterceptPostcondition};
-    use overdrive_worker::mtls_intercept_port::{
-        InterceptGuard, InterceptListener, InterceptMembers, InterceptState, MtlsIntercept,
-    };
-    use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
-    use parking_lot::Mutex;
 
     #[derive(Clone, Copy)]
     enum SupervisorExitCase {
@@ -1972,705 +1753,19 @@ mod shared_network_task_owner_acceptance {
         RequestChannelClosed,
     }
 
-    const COMPONENTS: [SharedGuestNetworkComponent; 12] = [
-        SharedGuestNetworkComponent::Bridge,
+    /// The shared guest-network components (§ *Typed error taxonomy*), in
+    /// their audit order.
+    const COMPONENTS: [SharedGuestNetworkComponent; 9] = [
+        SharedGuestNetworkComponent::Forwarder,
+        SharedGuestNetworkComponent::FlowListeners,
+        SharedGuestNetworkComponent::ControlListener,
         SharedGuestNetworkComponent::LegF,
         SharedGuestNetworkComponent::LegC,
-        SharedGuestNetworkComponent::Dns,
-        SharedGuestNetworkComponent::TcxLink,
-        SharedGuestNetworkComponent::EndpointMap,
-        SharedGuestNetworkComponent::CounterMap,
-        SharedGuestNetworkComponent::BpffsPin,
-        SharedGuestNetworkComponent::BridgeGuard,
         SharedGuestNetworkComponent::IpRules,
         SharedGuestNetworkComponent::IpSets,
+        SharedGuestNetworkComponent::Dns,
         SharedGuestNetworkComponent::Supervisor,
     ];
-
-    /// The node-level components the shared guest-network owner repairs
-    /// (runtime supervisor matrix, FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the component matrix)).
-    const OWNER_COMPONENTS: [SharedGuestNetworkComponent; 6] = [
-        SharedGuestNetworkComponent::Bridge,
-        SharedGuestNetworkComponent::TcxLink,
-        SharedGuestNetworkComponent::EndpointMap,
-        SharedGuestNetworkComponent::CounterMap,
-        SharedGuestNetworkComponent::BpffsPin,
-        SharedGuestNetworkComponent::BridgeGuard,
-    ];
-
-    /// Seeds for every seeded supervisor schedule, printed on every verdict.
-    const SUPERVISOR_SEEDS_ENV: &str = "OVERDRIVE_SUPERVISOR_SEEDS";
-    const DEFAULT_SUPERVISOR_SEEDS: [u64; 2] = [0x2953_3000_0000_0001, 0x2953_3000_5eed_0002];
-
-    /// The injected clock step that proves nothing fires one millisecond early.
-    const ONE_MS: Duration = Duration::from_millis(1);
-
-    const LIVE_ALLOCATION: &str = "nd295-live";
-    const VM_A: &str = "nd295-vm-a";
-    const VM_B: &str = "nd295-vm-b";
-    const VM_C: &str = "nd295-vm-c";
-    /// A managed-guest set member no registry record owns.
-    const STALE_MEMBER: Ipv4Addr = Ipv4Addr::new(100, 95, 3, 7);
-
-    /// `from - by`; every schedule subtracts a step shorter than its period.
-    fn earlier(from: Duration, by: Duration) -> Duration {
-        from.checked_sub(by).expect("a schedule step is shorter than its period")
-    }
-
-    fn supervisor_seeds() -> Vec<u64> {
-        let Ok(raw) = std::env::var(SUPERVISOR_SEEDS_ENV) else {
-            return DEFAULT_SUPERVISOR_SEEDS.to_vec();
-        };
-        raw.split(',')
-            .map(str::trim)
-            .filter(|entry| !entry.is_empty())
-            .map(|entry| {
-                entry
-                    .strip_prefix("0x")
-                    .map_or_else(|| entry.parse::<u64>(), |hex| u64::from_str_radix(hex, 16))
-                    .unwrap_or_else(|error| {
-                        panic!("{SUPERVISOR_SEEDS_ENV} entry {entry:?} is not a u64: {error}")
-                    })
-            })
-            .collect()
-    }
-
-    /// SplitMix64 over the printed seed: the seeded schedule's one entropy
-    /// source (the crate has no `rand` dev-dependency).
-    struct Schedule(u64);
-
-    impl Schedule {
-        const fn new(seed: u64, cell: u64) -> Self {
-            Self(seed ^ cell.wrapping_mul(0x9E37_79B9_7F4A_7C15))
-        }
-
-        const fn next(&mut self) -> u64 {
-            self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-            let mut z = self.0;
-            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-            z ^ (z >> 31)
-        }
-
-        const fn below(&mut self, bound: u64) -> u64 {
-            self.next() % bound
-        }
-
-        fn attempts(&mut self, bound: u64) -> u32 {
-            u32::try_from(self.below(bound)).expect("a small attempt count fits u32")
-        }
-
-        /// A detection-period offset in `1 ..= period - 1` milliseconds.
-        fn offset_within(&mut self, period: Duration) -> Duration {
-            let span = u64::try_from(period.as_millis()).expect("period fits u64");
-            Duration::from_millis(1 + self.below(span.saturating_sub(1).max(1)))
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // Observations
-    // -----------------------------------------------------------------------
-
-    /// What `claim_release` would do right now, polled once and dropped
-    /// (TS § *In-process observation*).
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    enum Admission {
-        /// Pending: BootClosed or Recovering.
-        Closed,
-        /// `Some(claim)`: Open (the claim is dropped at once).
-        Open,
-        /// `None`: FailStop.
-        FailStopped,
-    }
-
-    fn admission(gate: &GuestNetworkExecGate) -> Admission {
-        match gate.claim_release().now_or_never() {
-            None => Admission::Closed,
-            Some(Some(claim)) => {
-                drop(claim);
-                Admission::Open
-            }
-            Some(None) => Admission::FailStopped,
-        }
-    }
-
-    type CgroupSnapshot = BTreeMap<PathBuf, (SimEntry, Vec<u8>)>;
-
-    /// One `guest_network.shared_owner_*` event with the port observations
-    /// sampled as it was emitted.
-    #[derive(Debug, Clone)]
-    struct CapturedEvent {
-        name: &'static str,
-        fields: BTreeMap<String, String>,
-        progress: Option<SharedGuestNetworkRecovery>,
-        admission: Admission,
-        owner_calls: usize,
-        dns_built: usize,
-        cgroups: CgroupSnapshot,
-    }
-
-    impl CapturedEvent {
-        fn field(&self, name: &str) -> Option<&str> {
-            self.fields.get(name).map(String::as_str)
-        }
-    }
-
-    #[derive(Default)]
-    struct FieldCapture(BTreeMap<String, String>);
-
-    impl Visit for FieldCapture {
-        fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-            self.0.insert(field.name().to_owned(), format!("{value:?}"));
-        }
-
-        fn record_str(&mut self, field: &Field, value: &str) {
-            self.0.insert(field.name().to_owned(), value.to_owned());
-        }
-
-        fn record_u64(&mut self, field: &Field, value: u64) {
-            self.0.insert(field.name().to_owned(), value.to_string());
-        }
-
-        fn record_i64(&mut self, field: &Field, value: i64) {
-            self.0.insert(field.name().to_owned(), value.to_string());
-        }
-
-        fn record_bool(&mut self, field: &Field, value: bool) {
-            self.0.insert(field.name().to_owned(), value.to_string());
-        }
-    }
-
-    /// The observation surfaces an event is stamped with.
-    struct EventProbe {
-        exec: Arc<GuestNetworkExecSupervisor>,
-        gate: Arc<GuestNetworkExecGate>,
-        owner: Arc<TestSharedOwner>,
-        dns: Arc<StampedDnsFactory>,
-        fs: SimCgroupFs,
-        events: Mutex<Vec<CapturedEvent>>,
-    }
-
-    /// Captures the supervisor's `guest_network.shared_owner_*` events. It is
-    /// installed on the supervisor future itself (`with_subscriber`), so it
-    /// sees events on whichever runtime thread polls that future.
-    struct SupervisorEventLayer(Arc<EventProbe>);
-
-    impl<S: Subscriber> Layer<S> for SupervisorEventLayer {
-        fn on_event(&self, event: &Event<'_>, _context: Context<'_, S>) {
-            let name = event.metadata().name();
-            if !name.starts_with("guest_network.shared_owner") {
-                return;
-            }
-            let mut fields = FieldCapture::default();
-            event.record(&mut fields);
-            let probe = &self.0;
-            let captured = CapturedEvent {
-                name,
-                fields: fields.0,
-                progress: probe.exec.recovery_progress(),
-                admission: admission(&probe.gate),
-                owner_calls: probe.owner.journal().len(),
-                dns_built: probe.dns.built(),
-                cgroups: probe.fs.snapshot(),
-            };
-            probe.events.lock().push(captured);
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // Stateful test intercept (TS § *Intercept listener and stop-error test
-    // support*: `S19Intercept` delegates binding to an inner `SimMtlsIntercept`)
-    // -----------------------------------------------------------------------
-
-    /// The listener type `bind_transparent` returns.
-    type BoundListener = Arc<dyn InterceptListener>;
-
-    struct S19NodeGuard(Arc<AtomicUsize>);
-
-    impl InterceptGuard for S19NodeGuard {}
-
-    impl Drop for S19NodeGuard {
-        fn drop(&mut self) {
-            self.0.fetch_add(1, Ordering::SeqCst);
-        }
-    }
-
-    struct S19InertGuard;
-
-    impl InterceptGuard for S19InertGuard {}
-
-    /// One call on the stateful intercept.
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    enum InterceptCall {
-        Bind {
-            requested: SocketAddrV4,
-        },
-        ConvergeShared {
-            prior: bool,
-            leg_f: SocketAddrV4,
-            leg_c: SocketAddrV4,
-            wrote: bool,
-            refused: bool,
-        },
-        ObserveShared,
-        ObserveSharedState,
-        ConvergeMembers {
-            expected: InterceptMembers,
-            refused: bool,
-        },
-        RemoveMembers {
-            source: Ipv4Addr,
-        },
-        InstallOutbound {
-            source: Ipv4Addr,
-        },
-        InstallInbound {
-            virt: SocketAddrV4,
-        },
-    }
-
-    impl InterceptCall {
-        /// True for every call that may change the published program, route,
-        /// guard, members, or listeners.
-        const fn writes(&self) -> bool {
-            !matches!(self, Self::ObserveShared | Self::ObserveSharedState)
-        }
-    }
-
-    /// One logged call, stamped with the test-local owner's journal length as
-    /// it began (the cross-owner ordering point).
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    struct InterceptEntry {
-        call: InterceptCall,
-        owner_calls: usize,
-    }
-
-    /// A stateful `MtlsIntercept` modelling the owned constant program, the
-    /// policy route, the R18 mark guard, and the dynamic members with the
-    /// accepted observation and repair contract (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the eight-method `MtlsIntercept` port through the netlink surface, the runtime member audit, and the runtime repair contract)): the
-    /// program is observed by identity whatever the members; `converge_shared`
-    /// refuses unless its observation equals `prior`, writes only when the
-    /// identity differs, and ensures the route and guard; deleting the table
-    /// deletes its sets.
-    struct S19Intercept {
-        sim: SimMtlsIntercept,
-        owner: Arc<TestSharedOwner>,
-        program: Mutex<Option<InterceptPostcondition>>,
-        policy_route: AtomicBool,
-        mark_guard: AtomicBool,
-        members: Mutex<InterceptMembers>,
-        listener_addresses: Mutex<Vec<SocketAddrV4>>,
-        refuse_constant_repair: AtomicBool,
-        refuse_member_repair: AtomicBool,
-        log: Mutex<Vec<InterceptEntry>>,
-        guard_drops: Arc<AtomicUsize>,
-    }
-
-    impl S19Intercept {
-        fn new(owner: Arc<TestSharedOwner>) -> Self {
-            Self {
-                sim: SimMtlsIntercept::new(),
-                owner,
-                program: Mutex::new(None),
-                policy_route: AtomicBool::new(false),
-                mark_guard: AtomicBool::new(false),
-                members: Mutex::new(InterceptMembers::default()),
-                listener_addresses: Mutex::new(Vec::new()),
-                refuse_constant_repair: AtomicBool::new(false),
-                refuse_member_repair: AtomicBool::new(false),
-                log: Mutex::new(Vec::new()),
-                guard_drops: Arc::new(AtomicUsize::new(0)),
-            }
-        }
-
-        /// The inner sim adapter every bind delegates to (its listener scripts
-        /// are the listener-loss stimulus).
-        const fn sim(&self) -> &SimMtlsIntercept {
-            &self.sim
-        }
-
-        fn identity(leg_f: SocketAddrV4, leg_c: SocketAddrV4) -> InterceptPostcondition {
-            let (table_and_chains, sets, prerouting, output) =
-                SharedIpInterceptIdentity::for_listener_ports(leg_f.port(), leg_c.port())
-                    .expect("non-zero S19 targets form one canonical identity")
-                    .normalized_parts();
-            InterceptPostcondition::ConstantRules { table_and_chains, sets, prerouting, output }
-        }
-
-        fn record(&self, call: InterceptCall) {
-            let owner_calls = self.owner.journal().len();
-            self.log.lock().push(InterceptEntry { call, owner_calls });
-        }
-
-        /// A foreign actor rewrites one owned rule to a different leg-F target.
-        fn publish_wrong_leg_f(&self, recorded_f: SocketAddrV4, recorded_c: SocketAddrV4) {
-            let wrong_port = recorded_f.port().checked_add(1).unwrap_or(1);
-            assert_ne!(wrong_port, recorded_f.port());
-            *self.program.lock() =
-                Some(Self::identity(SocketAddrV4::new(*recorded_f.ip(), wrong_port), recorded_c));
-        }
-
-        /// The owned table is deleted; its sets, and so every member, go with it.
-        fn delete_program(&self) {
-            *self.program.lock() = None;
-            *self.members.lock() = InterceptMembers::default();
-        }
-
-        fn delete_policy_route(&self) {
-            self.policy_route.store(false, Ordering::SeqCst);
-        }
-
-        fn delete_mark_guard(&self) {
-            self.mark_guard.store(false, Ordering::SeqCst);
-        }
-
-        fn add_stale_member(&self, member: Ipv4Addr) {
-            self.members.lock().managed_guest_ips.insert(member);
-        }
-
-        fn refuse_constant_repair(&self, refused: bool) {
-            self.refuse_constant_repair.store(refused, Ordering::SeqCst);
-        }
-
-        fn refuse_member_repair(&self, refused: bool) {
-            self.refuse_member_repair.store(refused, Ordering::SeqCst);
-        }
-
-        fn program(&self) -> Option<InterceptPostcondition> {
-            self.program.lock().clone()
-        }
-
-        fn members(&self) -> InterceptMembers {
-            self.members.lock().clone()
-        }
-
-        fn policy_route(&self) -> bool {
-            self.policy_route.load(Ordering::SeqCst)
-        }
-
-        fn mark_guard(&self) -> bool {
-            self.mark_guard.load(Ordering::SeqCst)
-        }
-
-        fn listener_addresses(&self) -> Vec<SocketAddrV4> {
-            self.listener_addresses.lock().clone()
-        }
-
-        fn log(&self) -> Vec<InterceptEntry> {
-            self.log.lock().clone()
-        }
-
-        fn log_since(&self, mark: usize) -> Vec<InterceptEntry> {
-            self.log.lock()[mark..].to_vec()
-        }
-
-        fn writes_since(&self, mark: usize) -> Vec<InterceptEntry> {
-            self.log_since(mark).into_iter().filter(|entry| entry.call.writes()).collect()
-        }
-
-        fn guard_drops(&self) -> usize {
-            self.guard_drops.load(Ordering::SeqCst)
-        }
-
-        fn state(&self) -> Option<InterceptState> {
-            let program = self.program.lock().clone()?;
-            Some(InterceptState {
-                program,
-                policy_route: self.policy_route(),
-                intercept_mark_guard: self.mark_guard(),
-                members: self.members(),
-            })
-        }
-
-        fn nft_refusal(op: &'static str) -> overdrive_netlink::NetlinkError {
-            overdrive_netlink::NetlinkError::nft(
-                op,
-                std::io::Error::other("scripted repair refusal"),
-            )
-        }
-    }
-
-    impl MtlsIntercept for S19Intercept {
-        fn bind_transparent(
-            &self,
-            addr: SocketAddrV4,
-        ) -> overdrive_worker::mtls_intercept::Result<BoundListener> {
-            self.record(InterceptCall::Bind { requested: addr });
-            let listener = self.sim.bind_transparent(addr)?;
-            let bound = listener
-                .local_addr()
-                .map_err(|source| InterceptError::TransparentListener { addr, source })?;
-            self.listener_addresses.lock().push(bound);
-            Ok(listener)
-        }
-
-        fn converge_shared(
-            &self,
-            prior: Option<&InterceptPostcondition>,
-            leg_f: SocketAddrV4,
-            leg_c: SocketAddrV4,
-        ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
-            let requested = Self::identity(leg_f, leg_c);
-            let observed = self.program.lock().clone();
-            if observed.as_ref() != prior {
-                self.record(InterceptCall::ConvergeShared {
-                    prior: prior.is_some(),
-                    leg_f,
-                    leg_c,
-                    wrote: false,
-                    refused: true,
-                });
-                return Err(InterceptError::PostconditionMismatch {
-                    expected: prior.cloned().unwrap_or(requested),
-                    observed,
-                });
-            }
-            if self.refuse_constant_repair.load(Ordering::SeqCst) {
-                self.record(InterceptCall::ConvergeShared {
-                    prior: prior.is_some(),
-                    leg_f,
-                    leg_c,
-                    wrote: false,
-                    refused: true,
-                });
-                return Err(InterceptError::NftSharedReplaceFailed {
-                    prior: observed,
-                    requested,
-                    source: Self::nft_refusal("shared-replace"),
-                });
-            }
-            let wrote = observed.as_ref() != Some(&requested);
-            if wrote {
-                *self.program.lock() = Some(requested);
-            }
-            self.policy_route.store(true, Ordering::SeqCst);
-            self.mark_guard.store(true, Ordering::SeqCst);
-            self.record(InterceptCall::ConvergeShared {
-                prior: prior.is_some(),
-                leg_f,
-                leg_c,
-                wrote,
-                refused: false,
-            });
-            Ok(Box::new(S19NodeGuard(Arc::clone(&self.guard_drops))))
-        }
-
-        fn observe_shared(
-            &self,
-        ) -> overdrive_worker::mtls_intercept::Result<Option<InterceptPostcondition>> {
-            self.record(InterceptCall::ObserveShared);
-            Ok(self.program())
-        }
-
-        fn install_outbound(
-            &self,
-            source_addr: Ipv4Addr,
-            _agent_leg_f_port: u16,
-        ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
-            self.record(InterceptCall::InstallOutbound { source: source_addr });
-            // The B-8 precondition; this double conflates the record with the
-            // program it models.
-            if self.program.lock().is_none() {
-                return Err(InterceptError::SharedProgramNotConverged);
-            }
-            let mut members = self.members.lock();
-            members.managed_guest_ips.insert(source_addr);
-            members.outbound_sources.insert(source_addr);
-            drop(members);
-            Ok(Box::new(S19InertGuard))
-        }
-
-        fn install_inbound(
-            &self,
-            virt: SocketAddrV4,
-            _agent_leg_c_port: u16,
-        ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
-            self.record(InterceptCall::InstallInbound { virt });
-            // The B-8 precondition; this double conflates the record with the
-            // program it models.
-            if self.program.lock().is_none() {
-                return Err(InterceptError::SharedProgramNotConverged);
-            }
-            self.members.lock().inbound_destinations.insert(virt);
-            Ok(Box::new(S19InertGuard))
-        }
-
-        fn observe_shared_state(
-            &self,
-        ) -> overdrive_worker::mtls_intercept::Result<Option<InterceptState>> {
-            self.record(InterceptCall::ObserveSharedState);
-            Ok(self.state())
-        }
-
-        fn converge_allocation_elements(
-            &self,
-            expected: &InterceptMembers,
-        ) -> overdrive_worker::mtls_intercept::Result<Option<InterceptState>> {
-            let refused = self.refuse_member_repair.load(Ordering::SeqCst);
-            self.record(InterceptCall::ConvergeMembers { expected: expected.clone(), refused });
-            if self.program.lock().is_none() {
-                return Ok(None);
-            }
-            if refused {
-                return Err(InterceptError::NftRuleInstallFailed {
-                    op: "shared-member-converge",
-                    source: Self::nft_refusal("shared-member-converge"),
-                });
-            }
-            *self.members.lock() = expected.clone();
-            Ok(self.state())
-        }
-
-        fn remove_allocation_elements(
-            &self,
-            source_addr: Ipv4Addr,
-            destinations: &[SocketAddrV4],
-        ) -> overdrive_worker::mtls_intercept::Result<InterceptState> {
-            self.record(InterceptCall::RemoveMembers { source: source_addr });
-            let mut members = self.members.lock();
-            members.managed_guest_ips.remove(&source_addr);
-            members.outbound_sources.remove(&source_addr);
-            for destination in destinations {
-                members.inbound_destinations.remove(destination);
-            }
-            drop(members);
-            self.state().ok_or(InterceptError::SharedProgramNotConverged)
-        }
-    }
-
-    fn s19_worker(intercept: Arc<S19Intercept>, clock: Arc<SimClock>) -> Arc<MtlsInterceptWorker> {
-        let identity: Arc<dyn IdentityRead> = Arc::new(SimIdentityRead::new(BTreeMap::new(), None));
-        let enforcement: Arc<dyn MtlsEnforcement> =
-            Arc::new(SimMtlsEnforcement::new(identity, MtlsLimits::default()));
-        let resolve: Arc<dyn MtlsResolve> = Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
-            BTreeMap::new(),
-            MtlsResolution::NonMesh,
-        ));
-        Arc::new(MtlsInterceptWorker::new(enforcement, resolve, clock, intercept))
-    }
-
-    // -----------------------------------------------------------------------
-    // Stamped DNS doubles over the test-local `TestGuestDnsFactory`
-    // -----------------------------------------------------------------------
-
-    /// One DNS audit: the responder (build order) and where the owner journal
-    /// and the intercept call log stood as it began.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    struct DnsAuditStamp {
-        responder: usize,
-        owner_calls: usize,
-        intercept_calls: usize,
-    }
-
-    #[derive(Default)]
-    struct DnsRecord {
-        /// Owner journal length at each probe and stop, per responder (build
-        /// order).
-        probes: Vec<(usize, usize)>,
-        audits: Vec<DnsAuditStamp>,
-        stops: Vec<usize>,
-    }
-
-    /// Wraps `TestGuestDnsFactory` so every responder's probe, audit, and stop
-    /// is recorded against the owner journal and the intercept call log (the
-    /// full-audit ordering points).
-    struct StampedDnsFactory {
-        inner: TestGuestDnsFactory,
-        owner: Arc<TestSharedOwner>,
-        intercept: Arc<S19Intercept>,
-        record: Arc<Mutex<DnsRecord>>,
-    }
-
-    impl StampedDnsFactory {
-        fn new(owner: Arc<TestSharedOwner>, intercept: Arc<S19Intercept>) -> Self {
-            Self {
-                inner: TestGuestDnsFactory::default(),
-                owner,
-                intercept,
-                record: Arc::new(Mutex::new(DnsRecord::default())),
-            }
-        }
-
-        /// Every DNS audit stamp from the `from`-th audit on.
-        fn audit_stamps_since(&self, from: usize) -> Vec<DnsAuditStamp> {
-            self.record.lock().audits[from..].to_vec()
-        }
-
-        fn built(&self) -> usize {
-            self.inner.responders().len()
-        }
-
-        /// The most recently built responder: the live one after boot and
-        /// after every completed replacement.
-        fn live(&self) -> Arc<TestGuestDns> {
-            self.inner.responders().pop().expect("the DNS owner holds at least the boot responder")
-        }
-
-        fn audits(&self) -> usize {
-            self.record.lock().audits.len()
-        }
-
-        fn probes(&self) -> usize {
-            self.record.lock().probes.len()
-        }
-
-        fn stops_of(&self, responder: usize) -> usize {
-            self.record.lock().stops.iter().filter(|stopped| **stopped == responder).count()
-        }
-
-        fn audits_by(&self, responder: usize) -> usize {
-            self.record.lock().audits.iter().filter(|stamp| stamp.responder == responder).count()
-        }
-    }
-
-    impl GuestDnsFactory for StampedDnsFactory {
-        fn responder(&self, deps: GuestDnsDeps) -> Arc<dyn GuestDns> {
-            let index = self.built();
-            Arc::new(StampedDns {
-                inner: self.inner.responder(deps),
-                index,
-                owner: Arc::clone(&self.owner),
-                intercept: Arc::clone(&self.intercept),
-                record: Arc::clone(&self.record),
-            })
-        }
-    }
-
-    struct StampedDns {
-        inner: Arc<dyn GuestDns>,
-        index: usize,
-        owner: Arc<TestSharedOwner>,
-        intercept: Arc<S19Intercept>,
-        record: Arc<Mutex<DnsRecord>>,
-    }
-
-    #[async_trait::async_trait]
-    impl GuestDns for StampedDns {
-        async fn probe(&self) -> DnsResult<()> {
-            let owner_calls = self.owner.journal().len();
-            self.record.lock().probes.push((self.index, owner_calls));
-            self.inner.probe().await
-        }
-
-        async fn serve(self: Arc<Self>) {
-            Arc::clone(&self.inner).serve().await;
-        }
-
-        async fn audit(&self) -> DnsResult<()> {
-            let stamp = DnsAuditStamp {
-                responder: self.index,
-                owner_calls: self.owner.journal().len(),
-                intercept_calls: self.intercept.log().len(),
-            };
-            self.record.lock().audits.push(stamp);
-            self.inner.audit().await
-        }
-
-        fn stop(&self) {
-            self.record.lock().stops.push(self.index);
-            self.inner.stop();
-        }
-    }
 
     fn dns_deps(clock: &Arc<SimClock>) -> GuestDnsDeps {
         GuestDnsDeps {
@@ -2684,3299 +1779,14 @@ mod shared_network_task_owner_acceptance {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Fixture helpers
-    // -----------------------------------------------------------------------
-
-    fn alloc_id(name: &str) -> AllocationId {
-        AllocationId::new(name).expect("allocation id")
-    }
-
-    fn guest_pool() -> guest_network::GuestAddressPool {
-        guest_network::GuestAddressPool::new(
-            ipnet::Ipv4Net::new(Ipv4Addr::new(100, 95, 0, 0), 16).expect("node guest prefix"),
-            "ovd-gbr0".to_owned(),
-            Ipv4Addr::new(100, 95, 0, 1),
-            Ipv4Addr::new(100, 95, 0, 1),
-        )
-    }
-
-    /// The spec of a shared (guest-network) allocation, as the action shim
-    /// hands it to the worker after `provision`.
-    fn shared_spec(plan: &guest_network::GuestNetworkPlan) -> AllocationSpec {
-        let alloc = plan.alloc().clone();
-        AllocationSpec {
-            identity: SpiffeId::new(&format!(
-                "spiffe://overdrive.local/workload/nd295/alloc/{alloc}"
-            ))
-            .expect("SPIFFE ID"),
-            alloc,
-            driver: DriverPayload::Vm(VmPayload {
-                command: "/bin/true".to_owned(),
-                args: Vec::new(),
-                kernel: PathBuf::from("/nd295/kernel"),
-                rootfs: PathBuf::from("/nd295/rootfs.ext4"),
-            }),
-            resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
-            probe_descriptors: Vec::new(),
-            network: Some(plan.assignment().clone()),
-            service_ports: vec![NonZeroU16::new(8080).expect("non-zero listener port")],
-        }
-    }
-
-    /// The workloads slice every allocation scope lives under, spelled as the
-    /// literal path the contract pins, never derived from the code under test
-    /// (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the `SimCgroupFs::snapshot()` oracle: `<root>/overdrive.slice/workloads.slice/cgroup.kill`)).
-    fn workloads_slice_dir(root: &Path) -> PathBuf {
-        root.join("overdrive.slice/workloads.slice")
-    }
-
-    /// `<root>/overdrive.slice/workloads.slice/cgroup.kill`, literally.
-    fn slice_kill(root: &Path) -> PathBuf {
-        root.join("overdrive.slice/workloads.slice/cgroup.kill")
-    }
-
-    /// Whether an event field names `component`. The contract pins the field,
-    /// not its rendering (`Debug` or a label), so case and separators are
-    /// ignored.
-    fn names_component(value: Option<&str>, component: SharedGuestNetworkComponent) -> bool {
-        let normalize = |text: &str| {
-            text.chars()
-                .filter(char::is_ascii_alphanumeric)
-                .map(|character| character.to_ascii_lowercase())
-                .collect::<String>()
-        };
-        value.is_some_and(|value| normalize(value) == normalize(&format!("{component:?}")))
-    }
-
-    /// Whether an event's `alloc` field names `alloc`, whatever its rendering
-    /// (`Display` or `Debug` of the `AllocationId`).
-    fn names_alloc(event: &CapturedEvent, alloc: &str) -> bool {
-        event.field("alloc").is_some_and(|value| value.contains(alloc))
-    }
-
-    /// The one fixture allocation of `candidates` an event's `alloc` field
-    /// names, if exactly one.
-    fn named_alloc(event: &CapturedEvent, candidates: &[&'static str]) -> Option<&'static str> {
-        let named: Vec<_> =
-            candidates.iter().copied().filter(|alloc| names_alloc(event, alloc)).collect();
-        match named.as_slice() {
-            [alloc] => Some(alloc),
-            _ => None,
-        }
-    }
-
-    /// One allocation's scope, spelled as the literal the TS oracle pins
-    /// (`<root>/overdrive.slice/workloads.slice/<alloc>.scope`), never derived
-    /// through the `CgroupPath` constructors (DISTILL review H10: an oracle must not be computed
-    /// by the code it checks).
-    fn scope_dir(root: &Path, alloc: &str) -> PathBuf {
-        workloads_slice_dir(root).join(format!("{alloc}.scope"))
-    }
-
-    fn scope_kill(root: &Path, alloc: &str) -> PathBuf {
-        scope_dir(root, alloc).join("cgroup.kill")
-    }
-
-    fn killed(snapshot: &CgroupSnapshot, path: &Path) -> bool {
-        snapshot.get(path) == Some(&(SimEntry::File, b"1\n".to_vec()))
-    }
-
-    fn untouched(snapshot: &CgroupSnapshot, path: &Path) -> bool {
-        !snapshot.contains_key(path)
-    }
-
-    fn is_audit(call: &TestOwnerCall) -> bool {
-        matches!(call, TestOwnerCall::AuditShared(_))
-    }
-
-    fn is_quiesce(call: &TestOwnerCall) -> bool {
-        matches!(call, TestOwnerCall::Quiesce(_))
-    }
-
-    fn is_restore(call: &TestOwnerCall) -> bool {
-        matches!(call, TestOwnerCall::Restore(_))
-    }
-
-    fn is_owner_converge(call: &TestOwnerCall) -> bool {
-        matches!(call, TestOwnerCall::ConvergeShared(_))
-    }
-
-    const fn healthy_audit() -> TestOwnerCall {
-        TestOwnerCall::AuditShared(TestAuditOutcome::Healthy)
-    }
-
-    fn quiesced_none() -> TestOwnerCall {
-        TestOwnerCall::Quiesce(TestQuiesceOutcome::Unconfirmed(BTreeSet::new()))
-    }
-
-    // -----------------------------------------------------------------------
-    // Losses: one per node-level component or task class (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the component matrix))
-    // -----------------------------------------------------------------------
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    enum Loss {
-        /// A node-level part the shared owner audits fails its read-back.
-        Owner(SharedGuestNetworkComponent),
-        /// The owned nft table is deleted (members go with it).
-        ProgramDeleted,
-        /// The fwmark rule / table-100 local route is deleted.
-        PolicyRouteDeleted,
-        /// The R18 intercept-mark guard table is deleted (R18 is provisional).
-        MarkGuardDeleted,
-        /// A member no registry record owns appears in a shared set.
-        StaleMember,
-        /// A listener's accept task ends on a lost listener.
-        ListenerLost(InterceptLeg),
-        /// The DNS serve task returns.
-        DnsServeReturned,
-        /// The DNS serve task panics.
-        DnsServePanicked,
-        /// The DNS responder's read-back of its socket identities fails.
-        DnsAuditFailed,
-    }
-
-    impl Loss {
-        const fn component(self) -> SharedGuestNetworkComponent {
-            match self {
-                Self::Owner(component) => component,
-                Self::ProgramDeleted | Self::PolicyRouteDeleted | Self::MarkGuardDeleted => {
-                    SharedGuestNetworkComponent::IpRules
-                }
-                Self::StaleMember => SharedGuestNetworkComponent::IpSets,
-                Self::ListenerLost(InterceptLeg::F) => SharedGuestNetworkComponent::LegF,
-                Self::ListenerLost(InterceptLeg::C) => SharedGuestNetworkComponent::LegC,
-                Self::DnsServeReturned | Self::DnsServePanicked | Self::DnsAuditFailed => {
-                    SharedGuestNetworkComponent::Dns
-                }
-            }
-        }
-
-        /// Task exits are detected at once; everything else by the audit.
-        const fn immediate(self) -> bool {
-            matches!(self, Self::ListenerLost(_) | Self::DnsServeReturned | Self::DnsServePanicked)
-        }
-
-        const fn cause(self) -> &'static str {
-            if self.immediate() { "task_exit" } else { "audit_mismatch" }
-        }
-
-        /// Kernel-path components quiesce TAPs; listener and DNS loss never do.
-        const fn kernel_path(self) -> bool {
-            !matches!(
-                self.component(),
-                SharedGuestNetworkComponent::LegF
-                    | SharedGuestNetworkComponent::LegC
-                    | SharedGuestNetworkComponent::Dns
-            )
-        }
-
-        /// The owner whose repair heals this loss.
-        const fn repair_owner(self) -> RepairOwner {
-            match self {
-                Self::Owner(_) => RepairOwner::Shared,
-                Self::ProgramDeleted
-                | Self::PolicyRouteDeleted
-                | Self::MarkGuardDeleted
-                | Self::StaleMember
-                | Self::ListenerLost(_) => RepairOwner::Worker,
-                Self::DnsServeReturned | Self::DnsServePanicked | Self::DnsAuditFailed => {
-                    RepairOwner::Dns
-                }
-            }
-        }
-    }
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    enum RepairOwner {
-        Shared,
-        Worker,
-        Dns,
-    }
-
-    fn every_loss() -> Vec<Loss> {
-        OWNER_COMPONENTS
-            .into_iter()
-            .map(Loss::Owner)
-            .chain([
-                Loss::ProgramDeleted,
-                Loss::PolicyRouteDeleted,
-                Loss::MarkGuardDeleted,
-                Loss::StaleMember,
-                Loss::ListenerLost(InterceptLeg::F),
-                Loss::ListenerLost(InterceptLeg::C),
-                Loss::DnsServeReturned,
-                Loss::DnsServePanicked,
-                Loss::DnsAuditFailed,
-            ])
-            .collect()
-    }
-
-    /// Where every observation surface stood at one instant.
-    #[derive(Debug, Clone, Copy)]
-    struct Mark {
-        owner_calls: usize,
-        intercept_calls: usize,
-        dns_built: usize,
-        dns_probes: usize,
-        dns_audits: usize,
-    }
-
-    // -----------------------------------------------------------------------
-    // The rig
-    // -----------------------------------------------------------------------
-
-    #[derive(Debug, Clone, Default)]
-    struct RigSetup {
-        /// Allocations whose VMM scope directory exists under the workloads
-        /// slice (a kill write under a missing parent is `NotFound`).
-        scoped: Vec<&'static str>,
-        /// Create the workloads slice directory.
-        slice: bool,
-        /// Start one live shared allocation through the worker, so the node
-        /// holds dynamic members.
-        live_allocation: bool,
-    }
-
-    /// How a rig's schedule is reproduced; printed on every verdict.
-    #[derive(Debug, Clone)]
-    enum Repro {
-        /// A seeded schedule: rerun with `OVERDRIVE_SUPERVISOR_SEEDS=<seed>`.
-        Seeded { seed: u64, cell: String },
-        /// A fixed schedule with no entropy: its id names it.
-        Deterministic { schedule: String },
-    }
-
-    impl Repro {
-        fn verdict(&self) -> String {
-            match self {
-                Self::Seeded { seed, cell } => {
-                    format!("[{SUPERVISOR_SEEDS_ENV}={seed:#018x} cell {cell}]")
-                }
-                Self::Deterministic { schedule } => format!("[deterministic schedule {schedule}]"),
-            }
-        }
-    }
-
-    /// One supervisor over the source-local ports, driven on the injected clock.
-    struct Rig {
-        repro: Repro,
-        clock: Arc<SimClock>,
-        root: PathBuf,
-        fs: SimCgroupFs,
-        owner: Arc<TestSharedOwner>,
-        intercept: Arc<S19Intercept>,
-        dns: Arc<StampedDnsFactory>,
-        exec: Arc<GuestNetworkExecSupervisor>,
-        gate: Arc<GuestNetworkExecGate>,
-        probe: Arc<EventProbe>,
-        pool: guest_network::GuestAddressPool,
-        server: ServerHandle,
-        pending_polls: tokio::sync::mpsc::UnboundedReceiver<()>,
-        request: Option<ServeShutdownRequest>,
-        request_cgroups: Option<CgroupSnapshot>,
-        /// The supervisor's intentional-shutdown token, retained so a cell can
-        /// cancel it mid-kill-loop (S-ND295-30A shutdown-mid-loop, user decision
-        /// 1 of 2026-09-30). `run_shared_network_supervisor` and the handle hold
-        /// their own clones.
-        shutdown: CancellationToken,
-    }
-
-    /// What survives `Rig::finish` for after-shutdown assertions.
-    struct Finished {
-        owner: Arc<TestSharedOwner>,
-        intercept: Arc<S19Intercept>,
-        dns: Arc<StampedDnsFactory>,
-    }
-
-    impl Rig {
-        /// A seeded rig: every verdict prints the seed and cell.
-        async fn build(seed: u64, cell: impl Into<String>, setup: RigSetup) -> Self {
-            Self::assemble(Repro::Seeded { seed, cell: cell.into() }, setup).await
-        }
-
-        /// A rig for a fixed schedule with no entropy: every verdict prints the
-        /// schedule id and no seed.
-        async fn build_deterministic(schedule: impl Into<String>, setup: RigSetup) -> Self {
-            Self::assemble(Repro::Deterministic { schedule: schedule.into() }, setup).await
-        }
-
-        async fn assemble(repro: Repro, setup: RigSetup) -> Self {
-            let verdict = repro.verdict();
-            let clock = Arc::new(SimClock::new());
-            let fs = SimCgroupFs::new();
-            let root = PathBuf::from("/sys/fs/cgroup");
-            if setup.slice {
-                fs.create_dir(&workloads_slice_dir(&root)).await.unwrap_or_else(|error| {
-                    panic!("{verdict}: create the workloads slice: {error}")
-                });
-            }
-            for alloc in &setup.scoped {
-                fs.create_dir(&scope_dir(&root, alloc)).await.unwrap_or_else(|error| {
-                    panic!("{verdict}: create the scope of {alloc}: {error}")
-                });
-            }
-            let owner = Arc::new(TestSharedOwner::with_cgroup_snapshots(
-                fs.clone(),
-                Arc::clone(&clock) as Arc<dyn Clock>,
-            ));
-            let intercept = Arc::new(S19Intercept::new(Arc::clone(&owner)));
-            let worker = s19_worker(Arc::clone(&intercept), Arc::clone(&clock));
-            worker.start_shared_owner().await.unwrap_or_else(|error| {
-                panic!("{verdict}: publish the healthy two-listener owner: {error}")
-            });
-            let pool = guest_pool();
-            if setup.live_allocation {
-                let plan = pool.assign(alloc_id(LIVE_ALLOCATION)).unwrap_or_else(|error| {
-                    panic!("{verdict}: lease the live allocation: {error}")
-                });
-                worker.start_alloc(&shared_spec(&plan)).await.unwrap_or_else(|error| {
-                    panic!("{verdict}: the live shared allocation installs its members: {error}")
-                });
-            }
-
-            let wiring = GuestNetworkExecWiring::new(Arc::clone(&clock) as Arc<dyn Clock>);
-            let exec = wiring.supervisor();
-            let gate = wiring.gate();
-            assert!(
-                exec.open_after_boot(),
-                "{verdict}: the fixture's gate starts BootClosed; only its supervisor opens it"
-            );
-
-            let dns = Arc::new(StampedDnsFactory::new(Arc::clone(&owner), Arc::clone(&intercept)));
-            let responder = dns.responder(dns_deps(&clock));
-            responder.probe().await.unwrap_or_else(|error| {
-                panic!("{verdict}: the boot responder probes clean: {error}")
-            });
-            let serve = tokio::spawn(Arc::clone(&responder).serve());
-            let ports = SharedNetworkSupervisorPorts {
-                shared_guest_network: Arc::clone(&owner)
-                    as Arc<dyn guest_network::SharedGuestNetworkOwner>,
-                mtls_worker: Arc::clone(&worker),
-                dns: DnsServeTaskOwner::new(responder, serve),
-                dns_factory: Arc::clone(&dns) as Arc<dyn GuestDnsFactory>,
-                dns_deps: dns_deps(&clock),
-                vm_kill: vm_kill::VmKillCapability::new(CgroupManager::new(
-                    root.clone(),
-                    Arc::new(fs.clone()),
-                )),
-            };
-
-            let probe = Arc::new(EventProbe {
-                exec: Arc::clone(&exec),
-                gate: Arc::clone(&gate),
-                owner: Arc::clone(&owner),
-                dns: Arc::clone(&dns),
-                fs: fs.clone(),
-                events: Mutex::new(Vec::new()),
-            });
-            let dispatch = tracing::Dispatch::new(
-                tracing_subscriber::registry().with(SupervisorEventLayer(Arc::clone(&probe))),
-            );
-            let shutdown = CancellationToken::new();
-            let (request_tx, request_rx) = tokio::sync::mpsc::channel(1);
-            let supervisor = SharedNetworkSupervisorHandle::run_shared_network_supervisor(
-                ports,
-                Arc::clone(&exec),
-                Arc::clone(&clock) as Arc<dyn Clock>,
-                request_tx,
-                shutdown.clone(),
-            )
-            .with_subscriber(dispatch);
-            let mut supervisor = Box::pin(supervisor);
-            let (pending_poll_tx, pending_polls) = tokio::sync::mpsc::unbounded_channel();
-            let poll_verdict = verdict.clone();
-            let task = tokio::spawn(std::future::poll_fn(move |context| {
-                let polled = supervisor.as_mut().poll(context);
-                if polled.is_pending() {
-                    pending_poll_tx.send(()).unwrap_or_else(|_| {
-                        panic!(
-                            "{poll_verdict}: the rig observes the supervisor cadence until \
-                             shutdown"
-                        )
-                    });
-                }
-                polled
-            }));
-            let handle = SharedNetworkSupervisorHandle::new(
-                request_rx,
-                task,
-                Arc::clone(&exec),
-                shutdown.clone(),
-            );
-            let server = s19_server_handle(handle, Arc::clone(&worker));
-
-            let mut rig = Self {
-                repro,
-                clock,
-                root,
-                fs,
-                owner,
-                intercept,
-                dns,
-                exec,
-                gate,
-                probe,
-                pool,
-                server,
-                pending_polls,
-                request: None,
-                request_cgroups: None,
-                shutdown,
-            };
-            rig.await_wake().await;
-            rig
-        }
-
-        fn verdict(&self) -> String {
-            self.repro.verdict()
-        }
-
-        /// Request intentional shutdown (SIGINT/SIGTERM): cancel the
-        /// supervisor's token. Under user decision 1 of 2026-09-30 it cancels
-        /// only BETWEEN kill loops — a loop in progress runs to its end first.
-        fn request_intentional_shutdown(&self) {
-            self.shutdown.cancel();
-        }
-
-        async fn drain(&mut self, quiet: Duration) {
-            while tokio::time::timeout(quiet, self.pending_polls.recv()).await == Ok(Some(())) {}
-        }
-
-        /// Wait until the supervisor has woken and registered its next wait.
-        async fn await_wake(&mut self) {
-            let woke =
-                tokio::time::timeout(Duration::from_secs(5), self.pending_polls.recv()).await;
-            assert!(
-                matches!(woke, Ok(Some(()))),
-                "{}: the supervisor wakes and registers its next wait",
-                self.verdict()
-            );
-            self.drain(Duration::from_millis(25)).await;
-            self.check_invariants();
-        }
-
-        /// Advance to an instant at which the supervisor is due to wake.
-        async fn advance(&mut self, by: Duration) {
-            self.clock.tick(by);
-            self.await_wake().await;
-        }
-
-        /// Advance to an instant at which nothing is due; any wake is settled.
-        async fn advance_quiet(&mut self, by: Duration) {
-            self.clock.tick(by);
-            self.drain(Duration::from_millis(50)).await;
-            self.check_invariants();
-        }
-
-        async fn attempt(&mut self) {
-            self.advance(super::SHARED_NETWORK_RETRY_PERIOD).await;
-        }
-
-        /// Run until the supervisor's first audit, so every schedule is
-        /// anchored on an audit start whatever the first audit's instant.
-        async fn run_until_first_audit(&mut self) {
-            for _ in 0..2 {
-                if self.calls().iter().any(is_audit) {
-                    break;
-                }
-                self.advance(super::SHARED_NETWORK_AUDIT_PERIOD).await;
-            }
-            assert_eq!(
-                self.calls(),
-                [healthy_audit()],
-                "{}: one healthy audit anchors the schedule",
-                self.verdict()
-            );
-            assert_eq!(self.exec.recovery_progress(), None, "{}", self.verdict());
-            assert_eq!(self.admission(), Admission::Open, "{}", self.verdict());
-            assert_eq!(self.dns.audits(), 1, "{}: the full audit reads DNS", self.verdict());
-        }
-
-        /// E11 latch invariant (L9), read from the owner's own latch at every
-        /// observation point.
-        fn check_invariants(&mut self) {
-            let requested = self.poll_request().is_some();
-            if self.owner.latched() {
-                assert!(
-                    self.exec.recovery_progress().is_some() || requested,
-                    "{}: a set latch implies Recovering or a received fail-stop request",
-                    self.verdict()
-                );
-                assert_ne!(
-                    admission(&self.gate),
-                    Admission::Open,
-                    "{}: the gate admits no claim while the latch is set",
-                    self.verdict()
-                );
-            }
-        }
-
-        /// The one fail-stop request, observed through the retained
-        /// `ServerHandle` (polled once, never awaited).
-        fn poll_request(&mut self) -> Option<&ServeShutdownRequest> {
-            if self.request.is_none()
-                && let Some(request) = self.server.shutdown_requested().now_or_never()
-            {
-                self.request_cgroups = Some(self.fs.snapshot());
-                self.request = Some(request);
-            }
-            self.request.as_ref()
-        }
-
-        fn admission(&self) -> Admission {
-            admission(&self.gate)
-        }
-
-        fn calls(&self) -> Vec<TestOwnerCall> {
-            self.owner.journal().into_iter().map(|entry| entry.call).collect()
-        }
-
-        fn calls_since(&self, mark: usize) -> Vec<TestOwnerCall> {
-            self.calls()[mark..].to_vec()
-        }
-
-        fn count_since(&self, mark: usize, pred: fn(&TestOwnerCall) -> bool) -> usize {
-            self.calls_since(mark).iter().filter(|call| pred(call)).count()
-        }
-
-        fn events(&self, name: &str) -> Vec<CapturedEvent> {
-            self.probe.events.lock().iter().filter(|event| event.name == name).cloned().collect()
-        }
-
-        fn unhealthy(&self) -> Vec<CapturedEvent> {
-            self.events("guest_network.shared_owner_unhealthy")
-        }
-
-        fn vm_killed(&self) -> Vec<CapturedEvent> {
-            self.events("guest_network.shared_owner_vm_killed")
-        }
-
-        fn mark(&self) -> Mark {
-            Mark {
-                owner_calls: self.owner.journal().len(),
-                intercept_calls: self.intercept.log().len(),
-                dns_built: self.dns.built(),
-                dns_probes: self.dns.probes(),
-                dns_audits: self.dns.audits(),
-            }
-        }
-
-        fn leg_address(&self, leg: InterceptLeg) -> SocketAddrV4 {
-            let addresses = self.intercept.listener_addresses();
-            assert!(addresses.len() >= 2, "{}: both legs are bound", self.verdict());
-            match leg {
-                InterceptLeg::F => addresses[0],
-                InterceptLeg::C => addresses[1],
-            }
-        }
-
-        fn inject(&self, loss: Loss) {
-            match loss {
-                Loss::Owner(component) => {
-                    self.owner.script_component_audit_failure(component, true);
-                }
-                Loss::ProgramDeleted => self.intercept.delete_program(),
-                Loss::PolicyRouteDeleted => self.intercept.delete_policy_route(),
-                Loss::MarkGuardDeleted => self.intercept.delete_mark_guard(),
-                Loss::StaleMember => self.intercept.add_stale_member(STALE_MEMBER),
-                Loss::ListenerLost(leg) => {
-                    let at = self.leg_address(leg);
-                    assert!(
-                        self.intercept.sim().script_accept(
-                            at,
-                            SimAcceptScript::ListenerLost { errno: libc::EINVAL }
-                        ),
-                        "{}: the {leg:?} listener at {at} is a live port-owned listener",
-                        self.verdict()
-                    );
-                }
-                Loss::DnsServeReturned => self.dns.live().end_serve(TestGuestDnsServeExit::Return),
-                Loss::DnsServePanicked => self.dns.live().end_serve(TestGuestDnsServeExit::Panic),
-                Loss::DnsAuditFailed => self.dns.live().script_audit_failure(true),
-            }
-        }
-
-        /// Keep the owning component's repair failing (`true`) or let it
-        /// succeed (`false`). For a shared-owner component the standing audit
-        /// slot is the loss itself, so releasing it heals the part.
-        fn block_repair(&self, loss: Loss, blocked: bool) {
-            match loss {
-                Loss::Owner(component) => {
-                    if !blocked {
-                        self.owner.script_component_audit_failure(component, false);
-                    }
-                }
-                Loss::ProgramDeleted | Loss::PolicyRouteDeleted | Loss::MarkGuardDeleted => {
-                    self.intercept.refuse_constant_repair(blocked);
-                }
-                Loss::StaleMember => self.intercept.refuse_member_repair(blocked),
-                Loss::ListenerLost(_) => {
-                    if blocked {
-                        self.intercept.sim().script_bind_fault(
-                            SimInterceptFault::TransparentListener { errno: libc::EADDRINUSE },
-                        );
-                    } else {
-                        self.intercept.sim().clear_faults();
-                    }
-                }
-                Loss::DnsServeReturned | Loss::DnsServePanicked | Loss::DnsAuditFailed => {
-                    self.dns.inner.script_probe_failure(blocked);
-                }
-            }
-        }
-
-        /// Inject `loss` `offset` after the last audit started and drive the
-        /// supervisor to its detection; returns the mark taken just before.
-        async fn detect(&mut self, loss: Loss, offset: Duration) -> Mark {
-            self.advance_quiet(offset).await;
-            let mark = self.mark();
-            self.inject(loss);
-            if loss.immediate() {
-                self.await_wake().await;
-            } else {
-                self.advance(earlier(super::SHARED_NETWORK_AUDIT_PERIOD, offset)).await;
-            }
-            mark
-        }
-
-        /// EXEC closes before the one typed announcement of `component`.
-        fn assert_detected(
-            &self,
-            component: SharedGuestNetworkComponent,
-            cause: &str,
-            since: Mark,
-        ) {
-            let verdict = self.verdict();
-            assert_eq!(
-                self.exec.recovery_progress(),
-                Some(SharedGuestNetworkRecovery {
-                    component,
-                    attempts: 0,
-                    elapsed: Duration::ZERO
-                }),
-                "{verdict}: detection begins recovery of the first failing component"
-            );
-            assert_eq!(self.admission(), Admission::Closed, "{verdict}: detection closes EXEC");
-            let announced: Vec<_> = self
-                .unhealthy()
-                .into_iter()
-                .filter(|event| event.owner_calls >= since.owner_calls)
-                .collect();
-            assert_eq!(
-                announced.len(),
-                1,
-                "{verdict}: one announcement per detection: {announced:?}"
-            );
-            let event = &announced[0];
-            assert!(
-                names_component(event.field("component"), component),
-                "{verdict}: the announcement names {component:?}: {event:?}"
-            );
-            assert_eq!(event.field("cause"), Some(cause), "{verdict}");
-            assert_eq!(
-                event.progress.as_ref().map(|progress| progress.component),
-                Some(component),
-                "{verdict}: begin_recovery precedes the announcement"
-            );
-            assert_eq!(
-                event.admission,
-                Admission::Closed,
-                "{verdict}: EXEC closes before the announcement"
-            );
-        }
-
-        /// The loss's own owner repaired it since `mark`, and no other owner
-        /// was asked to.
-        fn assert_repaired_through_owner(&self, loss: Loss, mark: Mark) {
-            let verdict = self.verdict();
-            let owner_converges = self.count_since(mark.owner_calls, is_owner_converge);
-            let intercept_writes = self.intercept.writes_since(mark.intercept_calls);
-            let replacements = self.dns.built() - mark.dns_built;
-            match loss.repair_owner() {
-                RepairOwner::Shared => {
-                    assert!(owner_converges >= 1, "{verdict}: the shared owner converges its part");
-                    assert!(intercept_writes.is_empty(), "{verdict}: {intercept_writes:?}");
-                    assert_eq!(replacements, 0, "{verdict}: DNS is not replaced");
-                }
-                RepairOwner::Worker => {
-                    assert_eq!(
-                        owner_converges, 0,
-                        "{verdict}: the shared owner had nothing to repair"
-                    );
-                    assert_eq!(replacements, 0, "{verdict}: DNS is not replaced");
-                    let calls: Vec<_> =
-                        intercept_writes.iter().map(|entry| entry.call.clone()).collect();
-                    let repaired = match loss {
-                        Loss::ProgramDeleted => calls.iter().any(|call| {
-                            matches!(
-                                call,
-                                InterceptCall::ConvergeShared {
-                                    prior: false,
-                                    wrote: true,
-                                    refused: false,
-                                    ..
-                                }
-                            )
-                        }),
-                        Loss::PolicyRouteDeleted | Loss::MarkGuardDeleted => {
-                            calls.iter().any(|call| {
-                                matches!(
-                                    call,
-                                    InterceptCall::ConvergeShared {
-                                        prior: true,
-                                        wrote: false,
-                                        refused: false,
-                                        ..
-                                    }
-                                )
-                            })
-                        }
-                        Loss::StaleMember => calls.iter().any(|call| {
-                            matches!(call, InterceptCall::ConvergeMembers { refused: false, .. })
-                        }),
-                        Loss::ListenerLost(leg) => {
-                            let recorded = self.leg_address(leg);
-                            calls.contains(&InterceptCall::Bind { requested: recorded })
-                        }
-                        _ => unreachable!("worker-owned losses only"),
-                    };
-                    assert!(repaired, "{verdict}: the worker repaired {loss:?}: {calls:?}");
-                }
-                RepairOwner::Dns => {
-                    assert_eq!(
-                        owner_converges, 0,
-                        "{verdict}: the shared owner had nothing to repair"
-                    );
-                    assert!(intercept_writes.is_empty(), "{verdict}: {intercept_writes:?}");
-                    assert!(
-                        replacements >= 1,
-                        "{verdict}: a fresh responder replaces the lost one"
-                    );
-                    assert!(
-                        self.dns.probes() > mark.dns_probes,
-                        "{verdict}: the replacement is probed before it serves"
-                    );
-                }
-            }
-            if loss.repair_owner() == RepairOwner::Worker {
-                assert!(
-                    self.intercept.policy_route() && self.intercept.mark_guard(),
-                    "{verdict}: the constant route and guard are present after repair"
-                );
-                assert_eq!(
-                    self.intercept.program(),
-                    Some(S19Intercept::identity(
-                        self.leg_address(InterceptLeg::F),
-                        self.leg_address(InterceptLeg::C)
-                    )),
-                    "{verdict}: the program names exactly the recorded listeners"
-                );
-            }
-        }
-
-        /// Recovery from `loss` with its repair blocked for `blocked` attempts
-        /// reopens exactly once, through its owner, restoring quiesced TAPs.
-        async fn recover(&mut self, loss: Loss, offset: Duration, blocked: u32) -> Mark {
-            let before = self.mark();
-            if blocked > 0 {
-                self.block_repair(loss, true);
-            }
-            let detection = self.detect(loss, offset).await;
-            self.assert_detected(loss.component(), loss.cause(), before);
-            let verdict = self.verdict();
-            assert_eq!(
-                self.count_since(detection.owner_calls, is_quiesce),
-                usize::from(loss.kernel_path()),
-                "{verdict}: kernel-path components quiesce once; listener and DNS loss never do"
-            );
-            if loss.kernel_path() {
-                assert!(self.owner.latched(), "{verdict}: quiescence sets the latch");
-            }
-            for attempt in 1..=blocked {
-                self.attempt().await;
-                let progress = self
-                    .exec
-                    .recovery_progress()
-                    .unwrap_or_else(|| panic!("{verdict}: attempt {attempt} is still recovering"));
-                assert_eq!(
-                    progress.attempts, attempt,
-                    "{verdict}: attempts count on the 250 ms cadence"
-                );
-                assert_eq!(progress.component, loss.component(), "{verdict}");
-                assert_eq!(self.admission(), Admission::Closed, "{verdict}");
-                assert_eq!(
-                    self.count_since(detection.owner_calls, is_restore),
-                    0,
-                    "{verdict}: no TAP is restored while a component fails"
-                );
-            }
-            self.block_repair(loss, false);
-            self.attempt().await;
-            assert_eq!(self.exec.recovery_progress(), None, "{verdict}: a clean attempt reopens");
-            assert_eq!(self.admission(), Admission::Open, "{verdict}");
-            self.assert_repaired_through_owner(loss, detection);
-            let since = self.calls_since(detection.owner_calls);
-            let restores: Vec<_> = since.iter().filter(|call| is_restore(call)).cloned().collect();
-            if loss.kernel_path() {
-                assert_eq!(
-                    restores,
-                    [TestOwnerCall::Restore(TestCallOutcome::Ok)],
-                    "{verdict}: one restore after the clean audit"
-                );
-                let restore_at = since
-                    .iter()
-                    .position(is_restore)
-                    .unwrap_or_else(|| panic!("{verdict}: the recovery restores"));
-                assert_eq!(
-                    since[restore_at - 1],
-                    healthy_audit(),
-                    "{verdict}: restore follows a clean shared audit"
-                );
-                assert!(!self.owner.latched(), "{verdict}: restore cleared the latch");
-            } else {
-                assert!(
-                    restores.is_empty(),
-                    "{verdict}: nothing was quiesced, so nothing is restored"
-                );
-            }
-            detection
-        }
-
-        /// Reopen happened once: two more audit periods stay Open with no new
-        /// announcement, quiescence, restore, or repair.
-        async fn assert_single_reopen(&mut self) {
-            let reopened = self.mark();
-            let announcements = self.unhealthy().len();
-            for _ in 0..2 {
-                self.advance(super::SHARED_NETWORK_AUDIT_PERIOD).await;
-                let verdict = self.verdict();
-                assert_eq!(self.exec.recovery_progress(), None, "{verdict}: stays Open");
-                assert_eq!(self.admission(), Admission::Open, "{verdict}");
-            }
-            let verdict = self.verdict();
-            assert_eq!(self.unhealthy().len(), announcements, "{verdict}: no second detection");
-            let since = self.calls_since(reopened.owner_calls);
-            assert_eq!(
-                since,
-                [healthy_audit(), healthy_audit()],
-                "{verdict}: one audit per period and nothing else"
-            );
-            assert!(self.intercept.writes_since(reopened.intercept_calls).is_empty(), "{verdict}");
-            assert_eq!(self.dns.built(), reopened.dns_built, "{verdict}");
-        }
-
-        async fn finish(self) -> Finished {
-            let verdict = self.verdict();
-            let Self { server, pending_polls, owner, intercept, dns, .. } = self;
-            server.shutdown(Duration::from_millis(10)).await.unwrap_or_else(|error| {
-                panic!(
-                    "{verdict}: the sole terminal ServerHandle owner drains and joins every \
-                     retained owner: {error}"
-                )
-            });
-            drop(pending_polls);
-            Finished { owner, intercept, dns }
-        }
-    }
-
-    fn s19_inert_task(shutdown: &CancellationToken) -> tokio::task::JoinHandle<()> {
-        let shutdown = shutdown.clone();
-        tokio::spawn(async move { shutdown.cancelled().await })
-    }
-
-    fn s19_server_handle(
-        shared_network_supervisor: SharedNetworkSupervisorHandle,
-        mtls_worker_owner: Arc<MtlsInterceptWorker>,
-    ) -> ServerHandle {
-        let convergence_shutdown = CancellationToken::new();
-        let emit_drain_shutdown = CancellationToken::new();
-        let interest_router_shutdown = CancellationToken::new();
-        let sim_store: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
-            NodeId::new("nd295-server-handle").expect("node id"),
-            0,
-        ));
-        let mtls_resolve_owner =
-            Arc::new(crate::mtls_resolve_adapter::ServiceBackendsResolve::new(
-                sim_store,
-                crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator::new(),
-                VipRange::default(),
-            ));
-        ServerHandle {
-            inner: AxumHandle::new(),
-            server_task: tokio::spawn(async { Ok::<(), std::io::Error>(()) }),
-            convergence_task: s19_inert_task(&convergence_shutdown),
-            exit_observer_tasks: Vec::new(),
-            emit_drain_task: s19_inert_task(&emit_drain_shutdown),
-            interest_router_task: s19_inert_task(&interest_router_shutdown),
-            convergence_shutdown,
-            exit_observer_shutdown: CancellationToken::new(),
-            emit_drain_shutdown,
-            interest_router_shutdown,
-            mtls_worker_owner,
-            mtls_resolve_owner,
-            shared_network_supervisor,
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // S-ND295-19
-    // -----------------------------------------------------------------------
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
-    /// S-ND295-19 — Live repair never redirects protection to a different listener
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// Schedule `s19-wrong-leg-f-target` (deterministic `SimClock`, no seed).
-    /// One owned rule names a different leg-F target. Detection is one full
-    /// audit (the shared owner, then the worker's read of the program, then
-    /// DNS) followed by one quiescence. Each of the twenty 250 ms attempts is,
-    /// in this order: one worker repair (`converge_shared_owner` observes the
-    /// program through `observe_shared_state` and refuses the differing
-    /// identity without writing; the observation precedes the attempt's
-    /// shared-owner audit), then one full audit of all three owners (the
-    /// shared owner, the worker's read, then DNS). Nothing is restored; at
-    /// five seconds exactly one `IpRules / RecoveryDeadlineExceeded / 20 /
-    /// 5 s` request is sent and no twenty-first attempt runs. Terminal
-    /// ownership stays with `ServerHandle::shutdown` (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the S19 consequence); FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the runtime member audit and the runtime repair contract)).
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 09-01 (S-ND295-19)"]
-    async fn published_wrong_shared_target_retries_on_production_cadence_and_emits_one_typed_fail_stop()
-     {
-        assert_eq!(
-            super::SHARED_NETWORK_RETRY_PERIOD * super::SHARED_NETWORK_RECOVERY_ATTEMPTS,
-            super::SHARED_NETWORK_RECOVERY_DEADLINE,
-            "ADR-0124: the twentieth attempt lands on the five-second deadline"
-        );
-        let mut rig = Rig::build_deterministic("s19-wrong-leg-f-target", RigSetup::default()).await;
-        rig.run_until_first_audit().await;
-        let verdict = rig.verdict();
-        let leg_f = rig.leg_address(InterceptLeg::F);
-        let leg_c = rig.leg_address(InterceptLeg::C);
-        assert!(
-            leg_f.port() != 0 && leg_c.port() != 0,
-            "{verdict}: both legs are bound to real ports"
-        );
-        assert_eq!(
-            rig.intercept.program(),
-            Some(S19Intercept::identity(leg_f, leg_c)),
-            "{verdict}"
-        );
-        rig.intercept.publish_wrong_leg_f(leg_f, leg_c);
-        let wrong = rig
-            .intercept
-            .program()
-            .unwrap_or_else(|| panic!("{verdict}: the canonical wrong target is present"));
-        let start = rig.mark();
-
-        rig.advance_quiet(earlier(super::SHARED_NETWORK_AUDIT_PERIOD, ONE_MS)).await;
-        assert_eq!(rig.exec.recovery_progress(), None, "{verdict}: no detection before the audit");
-        assert!(rig.calls_since(start.owner_calls).is_empty(), "{verdict}");
-        assert!(rig.intercept.log_since(start.intercept_calls).is_empty(), "{verdict}");
-        assert!(rig.poll_request().is_none(), "{verdict}");
-
-        rig.advance(ONE_MS).await;
-        rig.assert_detected(SharedGuestNetworkComponent::IpRules, "audit_mismatch", start);
-        assert_eq!(
-            rig.calls_since(start.owner_calls),
-            [healthy_audit(), quiesced_none()],
-            "{verdict}: detection is one full audit, then one quiescence"
-        );
-        assert_eq!(
-            rig.intercept.log_since(start.intercept_calls),
-            [InterceptEntry {
-                call: InterceptCall::ObserveSharedState,
-                owner_calls: start.owner_calls + 1,
-            }],
-            "{verdict}: the detection audit's worker read follows the shared-owner audit"
-        );
-        assert_eq!(
-            rig.dns.audit_stamps_since(start.dns_audits),
-            [DnsAuditStamp {
-                responder: 0,
-                owner_calls: start.owner_calls + 1,
-                intercept_calls: start.intercept_calls + 1,
-            }],
-            "{verdict}: the full audit reads DNS last, after the worker"
-        );
-
-        let mut expected_calls = vec![healthy_audit(), quiesced_none()];
-        for attempt in 1..super::SHARED_NETWORK_RECOVERY_ATTEMPTS {
-            let prior = super::SHARED_NETWORK_RETRY_PERIOD * (attempt - 1);
-            rig.advance_quiet(earlier(super::SHARED_NETWORK_RETRY_PERIOD, ONE_MS)).await;
-            assert_eq!(
-                rig.exec.recovery_progress(),
-                Some(SharedGuestNetworkRecovery {
-                    component: SharedGuestNetworkComponent::IpRules,
-                    attempts: attempt - 1,
-                    elapsed: earlier(prior + super::SHARED_NETWORK_RETRY_PERIOD, ONE_MS),
-                }),
-                "{verdict}: attempt {attempt} does not start early"
-            );
-            let at = rig.mark();
-            rig.advance(ONE_MS).await;
-            assert_eq!(
-                rig.exec.recovery_progress(),
-                Some(SharedGuestNetworkRecovery {
-                    component: SharedGuestNetworkComponent::IpRules,
-                    attempts: attempt,
-                    elapsed: super::SHARED_NETWORK_RETRY_PERIOD * attempt,
-                }),
-                "{verdict}: attempt {attempt} completes on the 250 ms cadence"
-            );
-            assert_eq!(
-                rig.intercept.log_since(at.intercept_calls),
-                [
-                    InterceptEntry {
-                        call: InterceptCall::ObserveSharedState,
-                        owner_calls: at.owner_calls,
-                    },
-                    InterceptEntry {
-                        call: InterceptCall::ObserveSharedState,
-                        owner_calls: at.owner_calls + 1,
-                    },
-                ],
-                "{verdict}: attempt {attempt} is one worker repair (observe, refuse, no write) \
-                 before the shared-owner audit, then the full audit's worker read after it"
-            );
-            assert_eq!(
-                rig.calls_since(at.owner_calls),
-                [healthy_audit()],
-                "{verdict}: attempt {attempt} makes one shared-owner call, its audit"
-            );
-            assert_eq!(
-                rig.dns.audit_stamps_since(at.dns_audits),
-                [DnsAuditStamp {
-                    responder: 0,
-                    owner_calls: at.owner_calls + 1,
-                    intercept_calls: at.intercept_calls + 2,
-                }],
-                "{verdict}: attempt {attempt}'s full audit reads DNS once, last"
-            );
-            expected_calls.push(healthy_audit());
-            assert_eq!(
-                rig.calls_since(start.owner_calls),
-                expected_calls,
-                "{verdict}: each attempt adds one shared audit and nothing else"
-            );
-            assert!(
-                rig.intercept.writes_since(start.intercept_calls).is_empty(),
-                "{verdict}: the differently targeted program is never rewritten"
-            );
-            assert_eq!(rig.intercept.program().as_ref(), Some(&wrong), "{verdict}");
-            assert!(rig.poll_request().is_none(), "{verdict}: no request before the deadline");
-        }
-
-        rig.advance_quiet(earlier(super::SHARED_NETWORK_RETRY_PERIOD, ONE_MS)).await;
-        assert!(rig.poll_request().is_none(), "{verdict}");
-        let last = rig.mark();
-        rig.advance(ONE_MS).await;
-        assert_eq!(
-            rig.intercept.log_since(last.intercept_calls),
-            [
-                InterceptEntry {
-                    call: InterceptCall::ObserveSharedState,
-                    owner_calls: last.owner_calls,
-                },
-                InterceptEntry {
-                    call: InterceptCall::ObserveSharedState,
-                    owner_calls: last.owner_calls + 1,
-                },
-            ],
-            "{verdict}: attempt 20 is one worker repair, then the full audit"
-        );
-        assert_eq!(rig.dns.audits(), last.dns_audits + 1, "{verdict}: attempt 20 reads DNS once");
-        let expected = ServeShutdownRequest::SharedGuestNetwork(SharedGuestNetworkFailStop {
-            component: SharedGuestNetworkComponent::IpRules,
-            cause: SharedGuestNetworkFailStopCause::RecoveryDeadlineExceeded,
-            attempts: super::SHARED_NETWORK_RECOVERY_ATTEMPTS,
-            elapsed: super::SHARED_NETWORK_RECOVERY_DEADLINE,
-        });
-        assert_eq!(rig.poll_request(), Some(&expected), "{verdict}");
-        expected_calls.push(healthy_audit());
-        assert_eq!(
-            rig.calls_since(start.owner_calls),
-            expected_calls,
-            "{verdict}: attempt 20 runs, then fail-stop"
-        );
-        assert!(
-            rig.exec.fail_stop(SharedGuestNetworkFailStopCause::RecoveryDeadlineExceeded).is_none(),
-            "{verdict}: the supervisor already entered FailStop exactly once"
-        );
-        assert_eq!(rig.exec.recovery_progress(), None, "{verdict}: FailStop consumes the snapshot");
-        assert_eq!(rig.admission(), Admission::FailStopped, "{verdict}");
-        assert!(rig.intercept.writes_since(start.intercept_calls).is_empty(), "{verdict}");
-        assert_eq!(rig.intercept.program().as_ref(), Some(&wrong), "{verdict}");
-        assert!(
-            rig.server
-                .shared_network_supervisor
-                .task
-                .as_ref()
-                .is_some_and(|task| !task.is_finished()),
-            "{verdict}: the supervisor parks after its one request"
-        );
-
-        let terminal = rig.mark();
-        rig.advance_quiet(super::SHARED_NETWORK_RECOVERY_DEADLINE).await;
-        assert_eq!(rig.calls().len(), terminal.owner_calls, "{verdict}: no twenty-first attempt");
-        assert_eq!(rig.intercept.log().len(), terminal.intercept_calls, "{verdict}");
-        assert_eq!(rig.dns.audits(), terminal.dns_audits, "{verdict}");
-        assert_eq!(rig.unhealthy().len(), 1, "{verdict}: one announcement in total");
-        assert_eq!(rig.intercept.guard_drops(), 0, "{verdict}: the published guard is retained");
-
-        let finished = rig.finish().await;
-        assert_eq!(
-            finished.owner.journal().len(),
-            terminal.owner_calls,
-            "{verdict}: shutdown adds no owner effect"
-        );
-        assert_eq!(finished.intercept.log().len(), terminal.intercept_calls, "{verdict}");
-        assert_eq!(
-            finished.intercept.guard_drops(),
-            0,
-            "{verdict}: sealed terminal relinquishment does not invoke the constant-program guard's Drop"
-        );
-        assert_eq!(finished.dns.audits(), terminal.dns_audits, "{verdict}");
-    }
-
-    // -----------------------------------------------------------------------
-    // S-ND295-29A
-    // -----------------------------------------------------------------------
-
-    fn loss_code(loss: Loss) -> u64 {
-        let index =
-            every_loss().iter().position(|candidate| *candidate == loss).expect("known loss");
-        u64::try_from(index).expect("index fits u64") + 1
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
-    /// S-ND295-29A — Every shared-network component follows one bounded recovery contract
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// Every node-level component and task class (the six shared-owner parts;
-    /// the program, policy route, and mark guard of `IpRules`; `IpSets`; each
-    /// listener; DNS serve return, serve panic, and audit failure), each
-    /// injected at a seeded instant within the audit period and kept failing
-    /// for a seeded 0-2 attempts: detection within one audit period (at once
-    /// for a task exit) closes EXEC before one announcement, the loss is
-    /// repaired through its own owner, quiesced TAPs are restored only after a
-    /// clean full audit, and EXEC reopens exactly once. The `Supervisor`
-    /// component is the join classification of the retained exit matrix.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 09-01 (S-ND295-29A)"]
-    async fn every_component_loss_is_detected_and_recovered_through_its_owner() {
-        for seed in supervisor_seeds() {
-            for loss in every_loss() {
-                let mut schedule = Schedule::new(seed, loss_code(loss));
-                let blocked = schedule.attempts(3);
-                let offset = schedule.offset_within(super::SHARED_NETWORK_AUDIT_PERIOD);
-                let mut rig = Rig::build(
-                    seed,
-                    format!("{loss:?}/blocked-{blocked}/offset-{offset:?}"),
-                    RigSetup::default(),
-                )
-                .await;
-                rig.run_until_first_audit().await;
-                rig.recover(loss, offset, blocked).await;
-                rig.assert_single_reopen().await;
-                rig.finish().await;
-            }
-        }
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
-    /// S-ND295-63 — A pure leg-C listener loss keeps managed TAPs raised.
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// This bounded seeded reproduction drives the currently composed
-    /// `run_mtls_owner` through its existing worker, listener, shared-owner,
-    /// clock, and cancellation ports. The surviving leg-C `accept` task gets
-    /// successful exact-port rebind, standing EADDRINUSE, and failed local_addr
-    /// audit conditions; no task abort or unreachable listener state is
-    /// manufactured. With one activated shared allocation, the accepted TAP
-    /// and quiescence outcomes stay visible across each recovery. Each seed
-    /// places the loss at a different offset within the audit period.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn current_mtls_owner_keeps_the_active_tap_up_after_leg_c_listener_loss() {
-        for (port_theft, local_addr_failure, branch) in [
-            (false, false, "successful-exact-port-rebind"),
-            (true, false, "EADDRINUSE-port-theft"),
-            (false, true, "ListenerLocalAddr-EBADF"),
-        ] {
-            for seed in supervisor_seeds() {
-                let loss = Loss::ListenerLost(InterceptLeg::C);
-                let mut schedule = Schedule::new(seed, loss_code(loss));
-                let offset = schedule.offset_within(super::SHARED_NETWORK_AUDIT_PERIOD);
-                let verdict = Repro::Seeded {
-                    seed,
-                    cell: format!("current-run-mtls-owner/LegC/{branch}/offset-{offset:?}"),
-                }
-                .verdict();
-
-                let clock = Arc::new(SimClock::new());
-                let owner = Arc::new(TestSharedOwner::new());
-                let intercept = Arc::new(S19Intercept::new(Arc::clone(&owner)));
-                let worker = s19_worker(Arc::clone(&intercept), Arc::clone(&clock));
-                worker.start_shared_owner().await.unwrap_or_else(|error| {
-                    panic!("{verdict}: publish both production listener tasks: {error}")
-                });
-
-                let plan = guest_pool().assign(alloc_id(LIVE_ALLOCATION)).unwrap_or_else(|error| {
-                    panic!("{verdict}: assign the live guest address: {error}")
-                });
-                crate::guest_network::GuestNetworkProvisioner::provision(&*owner, &plan)
-                    .await
-                    .unwrap_or_else(|error| {
-                        panic!("{verdict}: provision the live guest TAP: {error}")
-                    });
-                worker.start_alloc(&shared_spec(&plan)).await.unwrap_or_else(|error| {
-                    panic!("{verdict}: register the live guest's mTLS elements: {error}")
-                });
-                crate::guest_network::GuestNetworkProvisioner::activate(&*owner, &plan)
-                    .await
-                    .unwrap_or_else(|error| {
-                        panic!("{verdict}: activate the live guest TAP: {error}")
-                    });
-                let active_before = BTreeSet::from([plan.alloc().clone()]);
-                assert_eq!(
-                    owner.active(),
-                    active_before,
-                    "{verdict}: the guest TAP is up before loss"
-                );
-                assert!(!owner.latched(), "{verdict}: no quiescence is pending before loss");
-
-                let wiring = GuestNetworkExecWiring::new(Arc::clone(&clock) as Arc<dyn Clock>);
-                let gate = wiring.gate();
-                let exec = wiring.supervisor();
-                assert!(
-                    exec.open_after_boot(),
-                    "{verdict}: EXEC opens after the healthy boot audit"
-                );
-                let shutdown = CancellationToken::new();
-                let (request_tx, request_rx) = tokio::sync::mpsc::channel(1);
-                let supervisor = SharedNetworkSupervisorHandle::run_mtls_owner(
-                    Arc::clone(&owner) as Arc<dyn guest_network::SharedGuestNetworkOwner>,
-                    Arc::clone(&worker),
-                    Arc::clone(&exec),
-                    Arc::clone(&clock) as Arc<dyn Clock>,
-                    request_tx,
-                    shutdown.clone(),
-                );
-                let mut supervisor = Box::pin(supervisor);
-                let (pending_poll_tx, mut pending_polls) = tokio::sync::mpsc::unbounded_channel();
-                let poll_verdict = verdict.clone();
-                let task = tokio::spawn(std::future::poll_fn(move |context| {
-                    let polled = supervisor.as_mut().poll(context);
-                    if polled.is_pending() {
-                        pending_poll_tx.send(()).unwrap_or_else(|_| {
-                            panic!("{poll_verdict}: the composed owner remains scheduled")
-                        });
-                    }
-                    polled
-                }));
-                let supervisor = SharedNetworkSupervisorHandle::new(
-                    request_rx,
-                    task,
-                    Arc::clone(&exec),
-                    shutdown,
-                );
-                let server = s19_server_handle(supervisor, Arc::clone(&worker));
-
-                tokio::time::timeout(Duration::from_secs(5), pending_polls.recv())
-                    .await
-                    .unwrap_or_else(|_| {
-                        panic!("{verdict}: the owner registers its first audit wait")
-                    })
-                    .unwrap_or_else(|| panic!("{verdict}: the owner remains scheduled"));
-                clock.tick(super::SHARED_NETWORK_AUDIT_PERIOD);
-                tokio::time::timeout(Duration::from_secs(5), pending_polls.recv())
-                    .await
-                    .unwrap_or_else(|_| panic!("{verdict}: the healthy audit completes"))
-                    .unwrap_or_else(|| panic!("{verdict}: the owner remains scheduled"));
-                worker.audit_shared_owner().await.unwrap_or_else(|error| {
-                panic!(
-                    "{verdict}: the worker's production-owned listener audit is healthy: {error}"
-                )
-            });
-
-                clock.tick(offset);
-                let leg_c = intercept.listener_addresses()[1];
-                if port_theft {
-                    intercept.sim().script_bind_fault(SimInterceptFault::TransparentListener {
-                        errno: libc::EADDRINUSE,
-                    });
-                }
-                let initial_audit_error = if local_addr_failure {
-                    assert!(
-                        intercept.sim().script_local_addr_failure(leg_c, libc::EBADF),
-                        "{verdict}: script the existing leg-C local_addr port"
-                    );
-                    assert!(
-                        intercept.sim().parked_accepts(leg_c) > 0,
-                        "{verdict}: the real leg-C accept task remains live during the address error"
-                    );
-                    let error = worker
-                        .audit_shared_owner()
-                        .await
-                        .expect_err("the live-task audit reports the scripted EBADF");
-                    match error {
-                        overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::ListenerLocalAddr {
-                            leg: InterceptLeg::C,
-                            source,
-                        } => {
-                            assert_eq!(source.raw_os_error(), Some(libc::EBADF), "{verdict}");
-                            format!("ListenerLocalAddr {{ leg: C, errno: {:?} }}", source.raw_os_error())
-                        }
-                        other => panic!("{verdict}: expected exact typed live-task Leg-C local_addr failure, got {other:?}"),
-                    }
-                } else {
-                    "none".to_owned()
-                };
-                let remaining_audit = super::SHARED_NETWORK_AUDIT_PERIOD
-                    .checked_sub(offset)
-                    .expect("the seeded offset is within the audit period");
-                if local_addr_failure {
-                    clock.tick(remaining_audit);
-                    tokio::time::timeout(Duration::from_secs(5), async {
-                        while exec.recovery_progress().is_none() {
-                            tokio::task::yield_now().await;
-                        }
-                    })
-                    .await
-                    .unwrap_or_else(|_| {
-                        panic!(
-                            "{verdict}: the owner audits ListenerLocalAddr while Leg-C task is live"
-                        )
-                    });
-                }
-                assert!(
-                    intercept.sim().script_accept(
-                        leg_c,
-                        SimAcceptScript::ListenerLost { errno: libc::ECONNABORTED },
-                    ),
-                    "{verdict}: the real leg-C accept task owns the listener-loss stimulus"
-                );
-                tokio::time::timeout(Duration::from_secs(5), async {
-                loop {
-                    match worker.audit_shared_owner().await {
-                        Err(
-                            overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::TaskReturned {
-                                leg: InterceptLeg::C,
-                            },
-                        ) => break,
-                        Err(
-                            overdrive_worker::mtls_intercept_worker::MtlsSharedOwnerError::ListenerLocalAddr {
-                                leg: InterceptLeg::C,
-                                ref source,
-                            },
-                        ) if local_addr_failure
-                            && source.raw_os_error() == Some(libc::EBADF) =>
-                        {
-                            tokio::task::yield_now().await;
-                        }
-                        Ok(()) => tokio::task::yield_now().await,
-                        Err(error) => panic!("{verdict}: the isolated loss is leg C: {error}"),
-                    }
-                }
-                })
-                .await
-                .unwrap_or_else(|_| panic!("{verdict}: the scripted leg-C accept task exits"));
-
-                if !local_addr_failure {
-                    clock.tick(remaining_audit);
-                    tokio::time::timeout(Duration::from_secs(5), async {
-                        while exec.recovery_progress().is_none() {
-                            tokio::task::yield_now().await;
-                        }
-                    })
-                    .await
-                    .unwrap_or_else(|_| panic!("{verdict}: the owner observes the leg-C loss"));
-                }
-
-                // One actual retry reaches either the successful replacement
-                // path or the retained native port-theft/EADDRINUSE condition.
-                let retry_outcome = tokio::time::timeout(Duration::from_secs(1), async {
-                    for _ in 0..3 {
-                        clock.tick(super::SHARED_NETWORK_RETRY_PERIOD);
-                        let ready = tokio::time::timeout(Duration::from_millis(20), async {
-                            loop {
-                                let progress = exec.recovery_progress();
-                                let completed = if port_theft {
-                                    progress.is_some_and(|state| state.attempts >= 1)
-                                } else {
-                                    progress.is_none_or(|state| state.attempts >= 1)
-                                };
-                                if completed {
-                                    break;
-                                }
-                                tokio::task::yield_now().await;
-                            }
-                        })
-                        .await
-                        .is_ok();
-                        if ready {
-                            return true;
-                        }
-                    }
-                    false
-                })
-                .await
-                .unwrap_or(false);
-                assert!(retry_outcome, "{verdict}: an actual retry reaches its owner outcome");
-                let gate_reopened = if port_theft {
-                    false
-                } else {
-                    tokio::time::timeout(Duration::from_millis(50), gate.claim_release())
-                        .await
-                        .is_ok_and(|claim| claim.is_some())
-                };
-                let recovery = exec.recovery_progress();
-                let recovery_component = recovery.as_ref().map(|progress| progress.component);
-                let recovery_attempts = recovery.as_ref().map(|progress| progress.attempts);
-                let quiesce_calls = owner
-                    .journal()
-                    .iter()
-                    .filter(|entry| matches!(entry.call, TestOwnerCall::Quiesce(_)))
-                    .count();
-                let active_after = owner.active();
-                let latched_after = owner.latched();
-
-                server.shutdown(Duration::from_millis(10)).await.unwrap_or_else(|error| {
-                    panic!("{verdict}: orderly Sim owner shutdown: {error}")
-                });
-
-                let expected_component = port_theft.then_some(SharedGuestNetworkComponent::LegC);
-                let expected_attempts = port_theft.then_some(1);
-                assert_eq!(
-                    recovery_component, expected_component,
-                    "{verdict}: recovery component after the listener repair; initial_audit_error={initial_audit_error}, attempts={recovery_attempts:?}, quiesce_calls={quiesce_calls}, active_after={active_after:?}, latched_after={latched_after}"
-                );
-                assert_eq!(
-                    recovery_attempts, expected_attempts,
-                    "{verdict}: successful exact-port replacement reopens; EADDRINUSE remains recovering"
-                );
-                assert_eq!(
-                    gate_reopened, !port_theft,
-                    "{verdict}: only the successful exact-port replacement reopens the existing gate"
-                );
-                assert_eq!(
-                    quiesce_calls, 0,
-                    "{verdict}: a pure leg-C listener failure does not quiesce managed TAPs; \
-                     active_before={active_before:?}, active_after={active_after:?}, \
-                     latched_after={latched_after}"
-                );
-                assert_eq!(
-                    active_after, active_before,
-                    "{verdict}: the managed TAP remains raised through the owner audit"
-                );
-                assert!(!latched_after, "{verdict}: the pure listener loss leaves the latch clear");
-            }
-        }
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
-    /// S-ND295-29A — Every shared-network component follows one bounded recovery contract
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// TAPs are quiesced once per recovery for a kernel-path component,
-    /// however long it stays failing, and never for a listener or DNS loss;
-    /// an attempt whose audit first reveals a kernel-path component during a
-    /// listener or DNS recovery quiesces at that point, once.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 09-01 (S-ND295-29A)"]
-    async fn kernel_path_components_quiesce_and_listener_or_dns_loss_never_does() {
-        for seed in supervisor_seeds() {
-            for loss in every_loss() {
-                let mut schedule = Schedule::new(seed, loss_code(loss) + 100);
-                let blocked = 2 + schedule.attempts(3);
-                let mut rig = Rig::build(
-                    seed,
-                    format!("{loss:?}/long-outage-{blocked}"),
-                    RigSetup::default(),
-                )
-                .await;
-                rig.run_until_first_audit().await;
-                let detection = rig.recover(loss, ONE_MS, blocked).await;
-                assert_eq!(
-                    rig.count_since(detection.owner_calls, is_quiesce),
-                    usize::from(loss.kernel_path()),
-                    "{}: one quiescence for the whole outage",
-                    rig.verdict()
-                );
-                rig.finish().await;
-            }
-
-            for first in [
-                Loss::ListenerLost(InterceptLeg::F),
-                Loss::ListenerLost(InterceptLeg::C),
-                Loss::DnsServeReturned,
-                Loss::DnsAuditFailed,
-            ] {
-                let mut rig =
-                    Rig::build(seed, format!("{first:?}-then-Bridge"), RigSetup::default()).await;
-                rig.run_until_first_audit().await;
-                let before = rig.mark();
-                rig.block_repair(first, true);
-                let detection = rig.detect(first, ONE_MS).await;
-                rig.assert_detected(first.component(), first.cause(), before);
-                let verdict = rig.verdict();
-                assert_eq!(rig.count_since(detection.owner_calls, is_quiesce), 0, "{verdict}");
-                rig.inject(Loss::Owner(SharedGuestNetworkComponent::Bridge));
-                let revealing = rig.mark();
-                rig.attempt().await;
-                let since = rig.calls_since(revealing.owner_calls);
-                assert_eq!(
-                    since,
-                    [
-                        TestOwnerCall::AuditShared(TestAuditOutcome::NodeFailed(
-                            SharedGuestNetworkComponent::Bridge
-                        )),
-                        quiesced_none(),
-                    ],
-                    "{verdict}: the attempt whose audit reveals a kernel-path loss quiesces there"
-                );
-                assert_eq!(
-                    rig.exec.recovery_progress().map(|progress| progress.component),
-                    Some(SharedGuestNetworkComponent::Bridge),
-                    "{verdict}: Bridge is first in D8 order"
-                );
-                rig.attempt().await;
-                assert_eq!(
-                    rig.count_since(detection.owner_calls, is_quiesce),
-                    1,
-                    "{verdict}: still once"
-                );
-                rig.block_repair(first, false);
-                rig.block_repair(Loss::Owner(SharedGuestNetworkComponent::Bridge), false);
-                rig.attempt().await;
-                assert_eq!(
-                    rig.exec.recovery_progress(),
-                    None,
-                    "{verdict}: both repaired, EXEC reopens"
-                );
-                assert_eq!(rig.count_since(detection.owner_calls, is_restore), 1, "{verdict}");
-                assert!(!rig.owner.latched(), "{verdict}");
-                rig.finish().await;
-            }
-        }
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
-    /// S-ND295-29A — Every shared-network component follows one bounded recovery contract
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// An `IpRules`-only or `IpSets`-only loss is repaired by the worker alone,
-    /// yet the TAPs the detection quiesced are restored after the clean audit,
-    /// before EXEC reopens: the owner journal from detection is exactly one
-    /// audit, one quiescence, one audit per attempt, and one successful
-    /// restore, with no shared-owner converge.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 09-01 (S-ND295-29A)"]
-    async fn a_worker_only_repair_still_restores_quiesced_taps_and_reopens() {
-        for seed in supervisor_seeds() {
-            for loss in [
-                Loss::ProgramDeleted,
-                Loss::PolicyRouteDeleted,
-                Loss::MarkGuardDeleted,
-                Loss::StaleMember,
-            ] {
-                let mut schedule = Schedule::new(seed, loss_code(loss) + 200);
-                let blocked = schedule.attempts(2);
-                let mut rig = Rig::build(
-                    seed,
-                    format!("{loss:?}/worker-only-{blocked}"),
-                    RigSetup::default(),
-                )
-                .await;
-                rig.run_until_first_audit().await;
-                let detection = rig.recover(loss, ONE_MS, blocked).await;
-                let verdict = rig.verdict();
-                let mut expected = vec![healthy_audit(), quiesced_none()];
-                for _ in 0..=blocked {
-                    expected.push(healthy_audit());
-                }
-                expected.push(TestOwnerCall::Restore(TestCallOutcome::Ok));
-                assert_eq!(rig.calls_since(detection.owner_calls), expected, "{verdict}");
-                let restore_at = detection.owner_calls + expected.len() - 1;
-                let last_dns_audit =
-                    rig.dns.record.lock().audits.last().map(|stamp| stamp.owner_calls);
-                assert_eq!(
-                    last_dns_audit,
-                    Some(restore_at),
-                    "{verdict}: the attempt's DNS audit completes the full audit before the restore"
-                );
-                let repair_stamp =
-                    rig.intercept.writes_since(detection.intercept_calls).last().map_or_else(
-                        || panic!("{verdict}: the worker repaired"),
-                        |entry| entry.owner_calls,
-                    );
-                assert!(repair_stamp < restore_at, "{verdict}: repair precedes restore");
-                rig.assert_single_reopen().await;
-                rig.finish().await;
-            }
-        }
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
-    /// S-ND295-29A — Every shared-network component follows one bounded recovery contract
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// With a live shared allocation holding members, losing the policy route
-    /// or the mark guard under an intact program is repaired by one
-    /// `converge_shared(Some(recorded), F, C)` that writes no program, the
-    /// members stay exactly the live set, and the prior node guard is
-    /// relinquished, never dropped (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the runtime repair contract)). A deleted table is recreated
-    /// and its members reconverged to the live set.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 09-01 (S-ND295-29A)"]
-    async fn a_policy_route_loss_is_repaired_with_live_members_and_the_guard_is_relinquished() {
-        for seed in supervisor_seeds() {
-            for loss in [Loss::PolicyRouteDeleted, Loss::MarkGuardDeleted, Loss::ProgramDeleted] {
-                let mut rig = Rig::build(
-                    seed,
-                    format!("{loss:?}/live-members"),
-                    RigSetup { live_allocation: true, ..RigSetup::default() },
-                )
-                .await;
-                rig.run_until_first_audit().await;
-                let live_members = rig.intercept.members();
-                assert!(
-                    !live_members.managed_guest_ips.is_empty()
-                        && !live_members.inbound_destinations.is_empty(),
-                    "{}: the live allocation holds members",
-                    rig.verdict()
-                );
-                let program = rig.intercept.program();
-                let detection = rig.recover(loss, ONE_MS, 0).await;
-                let verdict = rig.verdict();
-                let converges: Vec<_> = rig
-                    .intercept
-                    .log_since(detection.intercept_calls)
-                    .into_iter()
-                    .filter(|entry| matches!(entry.call, InterceptCall::ConvergeShared { .. }))
-                    .map(|entry| entry.call)
-                    .collect();
-                let leg_f = rig.leg_address(InterceptLeg::F);
-                let leg_c = rig.leg_address(InterceptLeg::C);
-                let expected_converge = InterceptCall::ConvergeShared {
-                    prior: loss != Loss::ProgramDeleted,
-                    leg_f,
-                    leg_c,
-                    wrote: loss == Loss::ProgramDeleted,
-                    refused: false,
-                };
-                assert_eq!(
-                    converges,
-                    [expected_converge],
-                    "{verdict}: one repair at the recorded targets"
-                );
-                assert_eq!(
-                    rig.intercept.program(),
-                    program,
-                    "{verdict}: the same program identity"
-                );
-                assert_eq!(
-                    rig.intercept.members(),
-                    live_members,
-                    "{verdict}: exactly the live members"
-                );
-                assert_eq!(
-                    rig.intercept.guard_drops(),
-                    0,
-                    "{verdict}: the prior guard is relinquished, not dropped"
-                );
-                rig.assert_single_reopen().await;
-                rig.finish().await;
-            }
-        }
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
-    /// S-ND295-29A — Every shared-network component follows one bounded recovery contract
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// A shared-owner part and the program fail together and heal at seeded,
-    /// different attempts: each attempt converges the shared owner before the
-    /// worker, the recovery snapshot names the first failing component in D8
-    /// order, no TAP is raised while either is failing, and the one restore
-    /// follows the first fully clean audit.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 09-01 (S-ND295-29A)"]
-    async fn a_double_failure_raises_no_tap_before_every_owner_is_repaired() {
-        let bridge = Loss::Owner(SharedGuestNetworkComponent::Bridge);
-        for seed in supervisor_seeds() {
-            let mut schedule = Schedule::new(seed, 300);
-            let bridge_heals_after = schedule.attempts(3);
-            let program_heals_after = (bridge_heals_after + 1 + schedule.attempts(2)) % 4;
-            let mut rig = Rig::build(
-                seed,
-                format!("Bridge+ProgramDeleted/heal-{bridge_heals_after}-{program_heals_after}"),
-                RigSetup::default(),
-            )
-            .await;
-            rig.run_until_first_audit().await;
-            let before = rig.mark();
-            rig.block_repair(Loss::ProgramDeleted, true);
-            rig.inject(bridge);
-            rig.inject(Loss::ProgramDeleted);
-            rig.advance(super::SHARED_NETWORK_AUDIT_PERIOD).await;
-            rig.assert_detected(SharedGuestNetworkComponent::Bridge, "audit_mismatch", before);
-            let verdict = rig.verdict();
-            assert_eq!(rig.count_since(before.owner_calls, is_quiesce), 1, "{verdict}");
-
-            let last = bridge_heals_after.max(program_heals_after);
-            for attempt in 0..=last {
-                if attempt == bridge_heals_after {
-                    rig.block_repair(bridge, false);
-                }
-                if attempt == program_heals_after {
-                    rig.block_repair(Loss::ProgramDeleted, false);
-                }
-                let at = rig.mark();
-                let bridge_failing = attempt <= bridge_heals_after;
-                // The program fails every audit before the attempt whose
-                // repair heals it, so the worker is due to repair in exactly
-                // the attempts up to `program_heals_after`.
-                let worker_due = attempt <= program_heals_after;
-                rig.attempt().await;
-                let calls = rig.calls_since(at.owner_calls);
-                let worker_writes = rig.intercept.writes_since(at.intercept_calls);
-                if bridge_failing {
-                    assert!(
-                        calls.first().is_some_and(is_owner_converge),
-                        "{verdict}: attempt {attempt} converges the shared owner first: {calls:?}"
-                    );
-                    if worker_due {
-                        assert!(
-                            !worker_writes.is_empty(),
-                            "{verdict}: attempt {attempt} repairs the worker too: {worker_writes:?}"
-                        );
-                        assert!(
-                            worker_writes
-                                .iter()
-                                .all(|entry| entry.owner_calls == at.owner_calls + 1),
-                            "{verdict}: the worker converges after the shared owner and before the audit: {worker_writes:?}"
-                        );
-                    } else {
-                        assert!(
-                            worker_writes.is_empty(),
-                            "{verdict}: attempt {attempt}: a worker that passed the latest audit is not repaired: {worker_writes:?}"
-                        );
-                    }
-                }
-                if attempt < last {
-                    assert_eq!(
-                        rig.count_since(before.owner_calls, is_restore),
-                        0,
-                        "{verdict}: no TAP before every owner is repaired"
-                    );
-                    let expected_first = if attempt < bridge_heals_after {
-                        SharedGuestNetworkComponent::Bridge
-                    } else {
-                        SharedGuestNetworkComponent::IpRules
-                    };
-                    assert_eq!(
-                        rig.exec.recovery_progress().map(|progress| progress.component),
-                        Some(expected_first),
-                        "{verdict}: attempt {attempt} reports the first remaining component"
-                    );
-                }
-            }
-            assert_eq!(
-                rig.exec.recovery_progress(),
-                None,
-                "{verdict}: reopened after the last repair"
-            );
-            let since = rig.calls_since(before.owner_calls);
-            assert_eq!(
-                since.iter().filter(|call| is_restore(call)).count(),
-                1,
-                "{verdict}: exactly one restore"
-            );
-            assert_eq!(
-                since.last(),
-                Some(&TestOwnerCall::Restore(TestCallOutcome::Ok)),
-                "{verdict}"
-            );
-            assert_eq!(
-                since[since.len() - 2],
-                healthy_audit(),
-                "{verdict}: the restore follows a clean audit"
-            );
-            rig.finish().await;
-        }
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
-    /// S-ND295-29A — Every shared-network component follows one bounded recovery contract
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// E11 re-quiescence after a part-way restore (user-approved 2026-09-30).
-    /// Three allocations are `Active` on the owner. A seeded kernel-path loss
-    /// quiesces once; its repair and a clean full audit are followed by a
-    /// restore that raises one or two TAPs (seeded) and fails, which leaves
-    /// `Bridge` first remaining and the latch set, and TAPs no longer count as
-    /// quiesced. A seeded kernel-path component then fails: the next attempt's
-    /// audit reveals it and the supervisor quiesces again before any
-    /// successful restore, which sets down every TAP the restore raised. Once
-    /// every fault clears, the next attempt repairs, audits clean, restores,
-    /// and EXEC reopens exactly once. The latch is observed set at each step
-    /// between the first quiescence and the successful restore, and the L9
-    /// invariant holds at every observation point.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 09-01 (S-ND295-29A)"]
-    async fn a_kernel_path_failure_after_a_part_way_restore_quiesces_again_before_any_restore() {
-        for seed in supervisor_seeds() {
-            let mut schedule = Schedule::new(seed, 350);
-            let kernel_path: Vec<Loss> =
-                every_loss().into_iter().filter(|loss| loss.kernel_path()).collect();
-            let bound = u64::try_from(kernel_path.len())
-                .unwrap_or_else(|_| unreachable!("a Vec length fits u64"));
-            let pick = |schedule: &mut Schedule| {
-                kernel_path[usize::try_from(schedule.below(bound))
-                    .unwrap_or_else(|_| unreachable!("an index below a Vec length fits usize"))]
-            };
-            let first = pick(&mut schedule);
-            let second = pick(&mut schedule);
-            let raised = if schedule.below(2) == 0 { 1 } else { 2 };
-            let offset = schedule.offset_within(super::SHARED_NETWORK_AUDIT_PERIOD);
-            let mut rig = Rig::build(
-                seed,
-                format!("requiesce/{first:?}-then-{second:?}/raised-{raised}/offset-{offset:?}"),
-                RigSetup::default(),
-            )
-            .await;
-            rig.run_until_first_audit().await;
-            let verdict = rig.verdict();
-            let vms = [VM_A, VM_B, VM_C];
-            for vm in vms {
-                let plan = rig
-                    .pool
-                    .assign(alloc_id(vm))
-                    .unwrap_or_else(|error| panic!("{verdict}: lease {vm}: {error}"));
-                let activation =
-                    guest_network::GuestNetworkProvisioner::activate(rig.owner.as_ref(), &plan)
-                        .await
-                        .unwrap_or_else(|error| panic!("{verdict}: activate {vm}: {error}"));
-                assert_eq!(activation, guest_network::TapActivation::Raised, "{verdict}: {vm}");
-            }
-            let every: BTreeSet<AllocationId> = vms.into_iter().map(alloc_id).collect();
-
-            // A kernel-path loss quiesces once.
-            let before = rig.mark();
-            rig.block_repair(first, true);
-            let detection = rig.detect(first, offset).await;
-            rig.assert_detected(first.component(), first.cause(), before);
-            assert_eq!(
-                rig.count_since(detection.owner_calls, is_quiesce),
-                1,
-                "{verdict}: the detection quiesces once"
-            );
-            assert!(rig.owner.latched(), "{verdict}: the first quiescence sets the latch");
-            assert!(rig.owner.active().is_empty(), "{verdict}: every Active TAP went down");
-
-            // Repair, a clean full audit, then a restore that fails part-way.
-            rig.owner.script_restore_failure_after(raised);
-            rig.block_repair(first, false);
-            let partial = rig.mark();
-            rig.attempt().await;
-            let since = rig.calls_since(partial.owner_calls);
-            let restore_at = since
-                .iter()
-                .position(is_restore)
-                .unwrap_or_else(|| panic!("{verdict}: the clean attempt restores: {since:?}"));
-            assert_eq!(
-                since[restore_at],
-                TestOwnerCall::Restore(TestCallOutcome::Failed),
-                "{verdict}: the restore fails part-way"
-            );
-            assert_eq!(
-                since[restore_at - 1],
-                healthy_audit(),
-                "{verdict}: the restore follows a clean audit"
-            );
-            assert_eq!(
-                rig.exec.recovery_progress().map(|progress| progress.component),
-                Some(SharedGuestNetworkComponent::Bridge),
-                "{verdict}: a restore failure leaves Bridge first remaining"
-            );
-            assert!(rig.owner.latched(), "{verdict}: a failed restore keeps the latch");
-            assert_eq!(
-                rig.owner.active().len(),
-                raised,
-                "{verdict}: the part-way restore left {raised} TAP(s) raised"
-            );
-
-            // A kernel-path component fails before any successful restore.
-            rig.inject(second);
-            let revealing = rig.mark();
-            rig.attempt().await;
-            let since = rig.calls_since(revealing.owner_calls);
-            let quiesce_at = since.iter().position(is_quiesce).unwrap_or_else(|| {
-                panic!(
-                    "{verdict}: the attempt whose audit reveals {second:?} quiesces again: \
-                     {since:?}"
-                )
-            });
-            assert!(
-                since[..quiesce_at].iter().any(is_audit),
-                "{verdict}: the re-quiescence follows the audit that reveals the failure: {since:?}"
-            );
-            assert_eq!(
-                since.iter().filter(|call| is_quiesce(call)).count(),
-                1,
-                "{verdict}: one quiescence in that attempt: {since:?}"
-            );
-            assert!(
-                !since.iter().any(is_restore),
-                "{verdict}: no restore while {second:?} fails: {since:?}"
-            );
-            assert!(rig.owner.latched(), "{verdict}: the re-quiescence keeps the latch set");
-            assert!(
-                rig.owner.active().is_empty(),
-                "{verdict}: the re-quiescence set down every TAP the restore raised"
-            );
-            assert_eq!(
-                rig.exec.recovery_progress().map(|progress| progress.component),
-                Some(second.component()),
-                "{verdict}: the revealing audit names the first remaining component"
-            );
-            assert_eq!(
-                rig.admission(),
-                Admission::Closed,
-                "{verdict}: EXEC stays closed while TAPs are re-quiesced"
-            );
-
-            // Every fault clears: repair, a clean audit, one restore, reopen.
-            rig.block_repair(second, false);
-            rig.owner.script_restore_failure(false);
-            let healing = rig.mark();
-            rig.attempt().await;
-            assert_eq!(rig.exec.recovery_progress(), None, "{verdict}: the clean attempt reopens");
-            assert_eq!(rig.admission(), Admission::Open, "{verdict}");
-            assert!(!rig.owner.latched(), "{verdict}: the successful restore cleared the latch");
-            let since = rig.calls_since(healing.owner_calls);
-            assert_eq!(
-                since.last(),
-                Some(&TestOwnerCall::Restore(TestCallOutcome::Ok)),
-                "{verdict}: the attempt ends with one successful restore: {since:?}"
-            );
-            assert_eq!(
-                since.iter().filter(|call| is_restore(call)).count(),
-                1,
-                "{verdict}: {since:?}"
-            );
-            assert_eq!(
-                since[since.len() - 2],
-                healthy_audit(),
-                "{verdict}: the restore follows a clean audit"
-            );
-            let episode = rig.calls_since(detection.owner_calls);
-            let restores: Vec<_> = episode.iter().filter(|call| is_restore(call)).collect();
-            assert_eq!(
-                restores,
-                [
-                    &TestOwnerCall::Restore(TestCallOutcome::Failed),
-                    &TestOwnerCall::Restore(TestCallOutcome::Ok)
-                ],
-                "{verdict}: one part-way restore, then one successful restore"
-            );
-            let quiesces: Vec<_> =
-                episode.iter().enumerate().filter(|(_, call)| is_quiesce(call)).collect();
-            let failed_at = episode
-                .iter()
-                .position(|call| *call == TestOwnerCall::Restore(TestCallOutcome::Failed))
-                .unwrap_or_else(|| panic!("{verdict}: the part-way restore is journaled"));
-            let succeeded_at = episode
-                .iter()
-                .position(|call| *call == TestOwnerCall::Restore(TestCallOutcome::Ok))
-                .unwrap_or_else(|| panic!("{verdict}: the successful restore is journaled"));
-            assert_eq!(quiesces.len(), 2, "{verdict}: exactly two quiescences: {episode:?}");
-            assert!(
-                quiesces[0].0 < failed_at
-                    && failed_at < quiesces[1].0
-                    && quiesces[1].0 < succeeded_at,
-                "{verdict}: quiesce, part-way restore, quiesce again, then the successful restore: \
-                 {episode:?}"
-            );
-            assert_eq!(rig.owner.active(), every, "{verdict}: the restore raised every TAP again");
-            rig.assert_single_reopen().await;
-            rig.finish().await;
-        }
-    }
-
-    /// Outcome anchor: OUT-ND295-SHARED-SWITCH; OUT-ND295-BORN-CAPTURED
-    /// S-ND295-29A — Every shared-network component follows one bounded recovery contract
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// E17 seeded: a DNS serve return, serve panic, or audit failure closes
-    /// EXEC before any replacement is built, never quiesces, and recovers
-    /// through a freshly built, probed responder; a responder whose serve task
-    /// is still running (the audit failure) is stopped before its replacement
-    /// serves, while one whose task already exited has no stop pinned (D8's
-    /// `replace` from `Exited`); a replacement whose probe fails keeps EXEC
-    /// closed and the next attempt builds another.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 09-01 (S-ND295-29A)"]
-    async fn dns_task_loss_closes_new_commands_and_recovers_through_a_fresh_responder() {
-        for seed in supervisor_seeds() {
-            for loss in [Loss::DnsServeReturned, Loss::DnsServePanicked, Loss::DnsAuditFailed] {
-                let mut schedule = Schedule::new(seed, loss_code(loss) + 400);
-                let refused_probes = schedule.attempts(3);
-                let mut rig = Rig::build(
-                    seed,
-                    format!("{loss:?}/refused-probes-{refused_probes}"),
-                    RigSetup::default(),
-                )
-                .await;
-                rig.run_until_first_audit().await;
-                let detection = rig.recover(loss, ONE_MS, refused_probes).await;
-                let verdict = rig.verdict();
-                let announcement = rig
-                    .unhealthy()
-                    .into_iter()
-                    .find(|event| event.owner_calls >= detection.owner_calls)
-                    .unwrap_or_else(|| panic!("{verdict}: the DNS loss is announced"));
-                assert_eq!(
-                    announcement.dns_built, 1,
-                    "{verdict}: EXEC closes before any replacement is built"
-                );
-                let refused_probes = usize::try_from(refused_probes)
-                    .unwrap_or_else(|error| panic!("{verdict}: a small count fits usize: {error}"));
-                assert_eq!(
-                    rig.dns.built(),
-                    2 + refused_probes,
-                    "{verdict}: one fresh responder per attempt until one probes clean"
-                );
-                if loss == Loss::DnsAuditFailed {
-                    assert!(
-                        rig.dns.stops_of(0) >= 1,
-                        "{verdict}: a still-running responder is stopped before it is replaced"
-                    );
-                }
-                let live = rig.dns.built() - 1;
-                assert_eq!(rig.dns.stops_of(live), 0, "{verdict}: the fresh responder serves");
-                assert!(
-                    rig.dns.audits_by(live) >= 1,
-                    "{verdict}: the reopening audit read the fresh responder"
-                );
-                assert_eq!(rig.count_since(detection.owner_calls, is_quiesce), 0, "{verdict}");
-                rig.assert_single_reopen().await;
-                rig.finish().await;
-            }
-        }
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
-    /// S-ND295-29A — Every shared-network component follows one bounded recovery contract
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// L9 on every schedule: a seeded walk of losses, heals, restore
-    /// failures, and clock steps, plus two fixed cells — a restore that fails
-    /// twice keeps the latch and EXEC closed with `Bridge` first remaining,
-    /// then reopens; a restore that never succeeds reaches the deadline with
-    /// the latch set. The rig checks, at every observation point, that a set
-    /// latch implies Recovering or a received request and that the gate
-    /// admits no claim.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 09-01 (S-ND295-29A)"]
-    async fn the_gate_is_never_open_while_quiescence_is_latched() {
-        for seed in supervisor_seeds() {
-            // Fixed cell: a restore that fails twice.
-            let mut rig = Rig::build(seed, "restore-fails-twice", RigSetup::default()).await;
-            rig.run_until_first_audit().await;
-            rig.owner.script_restore_failure(true);
-            let detection = rig.detect(Loss::ProgramDeleted, ONE_MS).await;
-            let verdict = rig.verdict();
-            for failed in 1..=2 {
-                rig.attempt().await;
-                assert!(rig.owner.latched(), "{verdict}: a failed restore keeps the latch");
-                assert_eq!(
-                    rig.exec.recovery_progress().map(|progress| progress.component),
-                    Some(SharedGuestNetworkComponent::Bridge),
-                    "{verdict}: a restore failure leaves Bridge first remaining"
-                );
-                assert_eq!(
-                    rig.count_since(detection.owner_calls, |call| {
-                        *call == TestOwnerCall::Restore(TestCallOutcome::Failed)
-                    }),
-                    failed,
-                    "{verdict}"
-                );
-            }
-            rig.owner.script_restore_failure(false);
-            rig.attempt().await;
-            assert_eq!(
-                rig.exec.recovery_progress(),
-                None,
-                "{verdict}: the restore succeeds and EXEC reopens"
-            );
-            assert!(!rig.owner.latched(), "{verdict}");
-            rig.finish().await;
-
-            // Fixed cell: a restore that never succeeds.
-            let mut rig = Rig::build(seed, "restore-never-succeeds", RigSetup::default()).await;
-            rig.run_until_first_audit().await;
-            rig.owner.script_restore_failure(true);
-            rig.detect(Loss::StaleMember, ONE_MS).await;
-            for _ in 0..super::SHARED_NETWORK_RECOVERY_ATTEMPTS {
-                rig.attempt().await;
-            }
-            let verdict = rig.verdict();
-            let request = rig
-                .poll_request()
-                .cloned()
-                .unwrap_or_else(|| panic!("{verdict}: the deadline fail-stops"));
-            let ServeShutdownRequest::SharedGuestNetwork(request) = request;
-            assert_eq!(
-                request.cause,
-                SharedGuestNetworkFailStopCause::RecoveryDeadlineExceeded,
-                "{verdict}"
-            );
-            assert_eq!(request.component, SharedGuestNetworkComponent::Bridge, "{verdict}");
-            assert!(rig.owner.latched(), "{verdict}: the latch is still set at fail-stop");
-            assert_eq!(rig.admission(), Admission::FailStopped, "{verdict}");
-            rig.finish().await;
-
-            // Seeded walk. It opens with a seeded kernel-path loss detected by
-            // the next audit, so every seed's walk reaches the latch at least
-            // once and the invariant is exercised while it is set.
-            let mut schedule = Schedule::new(seed, 500);
-            let mut rig = Rig::build(seed, "latch-walk", RigSetup::default()).await;
-            rig.run_until_first_audit().await;
-            let verdict = rig.verdict();
-            let losses = every_loss();
-            let index = |schedule: &mut Schedule, len: usize| {
-                let bound = u64::try_from(len)
-                    .unwrap_or_else(|error| panic!("{verdict}: a length fits u64: {error}"));
-                usize::try_from(schedule.below(bound))
-                    .unwrap_or_else(|error| panic!("{verdict}: an index fits usize: {error}"))
-            };
-            let kernel_path: Vec<Loss> =
-                losses.iter().copied().filter(|loss| loss.kernel_path()).collect();
-            let opening = kernel_path[index(&mut schedule, kernel_path.len())];
-            rig.inject(opening);
-            let mut active: Vec<Loss> = vec![opening];
-            rig.advance(super::SHARED_NETWORK_AUDIT_PERIOD).await;
-            let mut latched_steps = usize::from(rig.owner.latched());
-            for _ in 0..40 {
-                if rig.poll_request().is_some() {
-                    break;
-                }
-                match schedule.below(6) {
-                    0 if active.is_empty() => {
-                        let loss = losses[index(&mut schedule, losses.len())];
-                        if !loss.immediate() || rig.exec.recovery_progress().is_none() {
-                            rig.inject(loss);
-                            active.push(loss);
-                            if loss.immediate() {
-                                rig.await_wake().await;
-                            }
-                        }
-                    }
-                    1 => {
-                        for loss in std::mem::take(&mut active) {
-                            rig.block_repair(loss, false);
-                        }
-                    }
-                    2 => rig.owner.script_restore_failure(schedule.below(2) == 0),
-                    3 => rig.advance(super::SHARED_NETWORK_AUDIT_PERIOD).await,
-                    _ => {
-                        if rig.exec.recovery_progress().is_some() {
-                            rig.attempt().await;
-                        } else {
-                            rig.advance_quiet(super::SHARED_NETWORK_RETRY_PERIOD).await;
-                        }
-                    }
-                }
-                rig.check_invariants();
-                latched_steps += usize::from(rig.owner.latched());
-            }
-            assert!(
-                latched_steps >= 1,
-                "{verdict}: the walk observed the latch set at least once (opening loss \
-                 {opening:?}), so the invariant was exercised while it held"
-            );
-            rig.finish().await;
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // S-ND295-30A
-    // -----------------------------------------------------------------------
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
-    /// S-ND295-30A — Only VMs whose isolation cannot be confirmed are stopped
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// (a) Quiescence reports A unconfirmed during a `Bridge` recovery: A's
-    /// scope `cgroup.kill` holds `1\n` before the supervisor calls any owner
-    /// again, B and the workloads slice are untouched, one
-    /// `shared_owner_vm_killed { alloc: A, cause: "quiescence_unconfirmed" }`
-    /// is emitted, recovery reopens for the rest, and no later audit period
-    /// kills or announces A again.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 09-01 (S-ND295-30A)"]
-    async fn an_unconfirmed_tap_stops_only_its_vm_and_recovery_reopens() {
-        let bridge = Loss::Owner(SharedGuestNetworkComponent::Bridge);
-        for seed in supervisor_seeds() {
-            let mut schedule = Schedule::new(seed, 600);
-            let offset = schedule.offset_within(super::SHARED_NETWORK_AUDIT_PERIOD);
-            let mut rig = Rig::build(
-                seed,
-                format!("unconfirmed-A/offset-{offset:?}"),
-                RigSetup { scoped: vec![VM_A, VM_B], slice: true, ..RigSetup::default() },
-            )
-            .await;
-            rig.run_until_first_audit().await;
-            rig.owner
-                .script_quiesce(TestQuiesceScript::Unconfirmed(BTreeSet::from([alloc_id(VM_A)])));
-            let detection = rig.detect(bridge, offset).await;
-            let verdict = rig.verdict();
-            let journal = rig.owner.journal();
-            let quiesce_at = journal[detection.owner_calls..]
-                .iter()
-                .position(|entry| is_quiesce(&entry.call))
-                .map_or_else(
-                    || panic!("{verdict}: the detection quiesces"),
-                    |at| at + detection.owner_calls,
-                );
-            assert_eq!(
-                journal[quiesce_at].call,
-                TestOwnerCall::Quiesce(TestQuiesceOutcome::Unconfirmed(BTreeSet::from([
-                    alloc_id(VM_A)
-                ]))),
-                "{verdict}"
-            );
-            let killed_events = rig.vm_killed();
-            assert_eq!(killed_events.len(), 1, "{verdict}: {killed_events:?}");
-            assert!(names_alloc(&killed_events[0], VM_A), "{verdict}: {killed_events:?}");
-            assert_eq!(
-                killed_events[0].field("cause"),
-                Some("quiescence_unconfirmed"),
-                "{verdict}"
-            );
-            assert!(
-                killed(&killed_events[0].cgroups, &scope_kill(&rig.root, VM_A)),
-                "{verdict}: kill, then announce"
-            );
-            assert!(
-                rig.exec.recovery_progress().is_some(),
-                "{verdict}: the kill does not end recovery"
-            );
-
-            rig.block_repair(bridge, false);
-            rig.attempt().await;
-            let journal = rig.owner.journal();
-            let next = journal
-                .get(quiesce_at + 1)
-                .unwrap_or_else(|| panic!("{verdict}: the attempt calls the owner again"));
-            let snapshot = next
-                .cgroups
-                .as_ref()
-                .unwrap_or_else(|| panic!("{verdict}: the owner journals cgroup snapshots"));
-            assert!(
-                killed(snapshot, &scope_kill(&rig.root, VM_A)),
-                "{verdict}: A is killed before the next owner call"
-            );
-            assert!(
-                untouched(snapshot, &scope_kill(&rig.root, VM_B)),
-                "{verdict}: B keeps running"
-            );
-            assert!(untouched(snapshot, &slice_kill(&rig.root)), "{verdict}: no whole-slice kill");
-            assert_eq!(
-                rig.exec.recovery_progress(),
-                None,
-                "{verdict}: recovery reopens for the rest"
-            );
-            assert!(rig.poll_request().is_none(), "{verdict}");
-            rig.assert_single_reopen().await;
-            let killed_events = rig.vm_killed();
-            assert_eq!(
-                killed_events.len(),
-                1,
-                "{verdict}: no later audit period kills or announces A again: {killed_events:?}"
-            );
-            let final_snapshot = rig.fs.snapshot();
-            assert!(untouched(&final_snapshot, &scope_kill(&rig.root, VM_B)), "{verdict}");
-            assert!(untouched(&final_snapshot, &slice_kill(&rig.root)), "{verdict}");
-            rig.finish().await;
-        }
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
-    /// S-ND295-30A — Only VMs whose isolation cannot be confirmed are stopped
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// A netlink failure common to every TAP makes every `Active` allocation
-    /// unconfirmed (DR-08 (b)-A): quiescence during a `Bridge` recovery names
-    /// all of them (two or three, seeded). Each scope's `cgroup.kill` holds
-    /// `1\n` in the snapshot of the first owner call after the report; the
-    /// kills run in `AllocationId` order (each announcement's snapshot holds
-    /// the kills of its own and every earlier allocation, and none of a later
-    /// one); the workloads slice is never written, no fail-stop is requested,
-    /// and recovery continues and reopens exactly once. The whole-call cells
-    /// stay with `an_undetermined_quiescence_stops_every_workload_vm_then_fails_the_node`.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 09-01 (S-ND295-30A)"]
-    async fn a_quiescence_naming_every_active_vm_stops_each_in_order_and_recovery_reopens() {
-        let bridge = Loss::Owner(SharedGuestNetworkComponent::Bridge);
-        for seed in supervisor_seeds() {
-            let mut schedule = Schedule::new(seed, 650);
-            let count = if schedule.below(2) == 0 { 2 } else { 3 };
-            let offset = schedule.offset_within(super::SHARED_NETWORK_AUDIT_PERIOD);
-            let vms: Vec<&'static str> = [VM_A, VM_B, VM_C][..count].to_vec();
-            let mut rig = Rig::build(
-                seed,
-                format!("all-unconfirmed-{count}/offset-{offset:?}"),
-                RigSetup { scoped: vms.clone(), slice: true, ..RigSetup::default() },
-            )
-            .await;
-            rig.run_until_first_audit().await;
-            let verdict = rig.verdict();
-            for vm in &vms {
-                let plan = rig
-                    .pool
-                    .assign(alloc_id(vm))
-                    .unwrap_or_else(|error| panic!("{verdict}: lease {vm}: {error}"));
-                let raised =
-                    guest_network::GuestNetworkProvisioner::activate(rig.owner.as_ref(), &plan)
-                        .await
-                        .unwrap_or_else(|error| panic!("{verdict}: activate {vm}: {error}"));
-                assert_eq!(raised, guest_network::TapActivation::Raised, "{verdict}: {vm}");
-            }
-            let every: BTreeSet<AllocationId> = vms.iter().map(|vm| alloc_id(vm)).collect();
-            rig.owner.script_quiesce(TestQuiesceScript::Unconfirmed(every.clone()));
-            let detection = rig.detect(bridge, offset).await;
-            let journal = rig.owner.journal();
-            let quiesce_at = journal[detection.owner_calls..]
-                .iter()
-                .position(|entry| is_quiesce(&entry.call))
-                .map_or_else(
-                    || panic!("{verdict}: the detection quiesces"),
-                    |at| at + detection.owner_calls,
-                );
-            assert_eq!(
-                journal[quiesce_at].call,
-                TestOwnerCall::Quiesce(TestQuiesceOutcome::Unconfirmed(every.clone())),
-                "{verdict}: the report names every Active allocation"
-            );
-
-            let killed_events = rig.vm_killed();
-            let announced: Vec<_> =
-                killed_events.iter().map(|event| named_alloc(event, &vms)).collect();
-            let expected: Vec<_> = vms.iter().map(|vm| Some(*vm)).collect();
-            assert_eq!(
-                announced, expected,
-                "{verdict}: one announcement per VM, in AllocationId order: {killed_events:?}"
-            );
-            for (position, event) in killed_events.iter().enumerate() {
-                assert_eq!(event.field("cause"), Some("quiescence_unconfirmed"), "{verdict}");
-                for (other, vm) in vms.iter().enumerate() {
-                    assert_eq!(
-                        killed(&event.cgroups, &scope_kill(&rig.root, vm)),
-                        other <= position,
-                        "{verdict}: at the announcement of {}, {vm}'s kill is written exactly \
-                         when it is not later in AllocationId order",
-                        vms[position]
-                    );
-                }
-                assert!(
-                    untouched(&event.cgroups, &slice_kill(&rig.root)),
-                    "{verdict}: no whole-slice kill"
-                );
-            }
-            assert!(
-                rig.exec.recovery_progress().is_some(),
-                "{verdict}: the kills do not end recovery"
-            );
-
-            rig.block_repair(bridge, false);
-            rig.attempt().await;
-            let journal = rig.owner.journal();
-            let next = journal
-                .get(quiesce_at + 1)
-                .unwrap_or_else(|| panic!("{verdict}: the attempt calls the owner again"));
-            let snapshot = next
-                .cgroups
-                .as_ref()
-                .unwrap_or_else(|| panic!("{verdict}: the owner journals cgroup snapshots"));
-            for vm in &vms {
-                assert!(
-                    killed(snapshot, &scope_kill(&rig.root, vm)),
-                    "{verdict}: {vm} is killed before the next owner call"
-                );
-            }
-            assert!(untouched(snapshot, &slice_kill(&rig.root)), "{verdict}: no whole-slice kill");
-            assert_eq!(
-                rig.exec.recovery_progress(),
-                None,
-                "{verdict}: recovery continues and reopens"
-            );
-            assert!(rig.poll_request().is_none(), "{verdict}: no fail-stop is requested");
-            rig.assert_single_reopen().await;
-            assert_eq!(
-                rig.vm_killed().len(),
-                vms.len(),
-                "{verdict}: each VM is killed once and never again"
-            );
-            assert!(untouched(&rig.fs.snapshot(), &slice_kill(&rig.root)), "{verdict}");
-            rig.finish().await;
-        }
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
-    /// S-ND295-30A — Only VMs whose isolation cannot be confirmed are stopped
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// (b) A quiescence that fails, or that is still pending at
-    /// `SHARED_NETWORK_QUIESCE_CALL_BOUND`, cannot name the affected TAPs:
-    /// the workloads slice's `cgroup.kill` holds `1\n` when the one
-    /// `TapQuiescenceUndetermined` request is received, no single scope is
-    /// written, and the fail-stop event records the slice kill (S-ND295-32's
-    /// quiescence bound cell).
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 09-01 (S-ND295-30A)"]
-    async fn an_undetermined_quiescence_stops_every_workload_vm_then_fails_the_node() {
-        let bridge = Loss::Owner(SharedGuestNetworkComponent::Bridge);
-        for seed in supervisor_seeds() {
-            for (script, elapsed) in [
-                (TestQuiesceScript::Fail, Duration::ZERO),
-                (TestQuiesceScript::Hang, super::SHARED_NETWORK_QUIESCE_CALL_BOUND),
-            ] {
-                let mut rig = Rig::build(
-                    seed,
-                    format!("undetermined-{script:?}"),
-                    RigSetup { scoped: vec![VM_A, VM_B], slice: true, ..RigSetup::default() },
-                )
-                .await;
-                rig.run_until_first_audit().await;
-                rig.owner.script_quiesce(script.clone());
-                rig.detect(bridge, ONE_MS).await;
-                let verdict = rig.verdict();
-                if script == TestQuiesceScript::Hang {
-                    assert!(
-                        rig.poll_request().is_none(),
-                        "{verdict}: the quiescence call is still pending"
-                    );
-                    rig.advance_quiet(earlier(super::SHARED_NETWORK_QUIESCE_CALL_BOUND, ONE_MS))
-                        .await;
-                    assert!(
-                        rig.poll_request().is_none(),
-                        "{verdict}: not before the quiescence bound"
-                    );
-                    rig.advance(ONE_MS).await;
-                }
-                let request = rig
-                    .poll_request()
-                    .cloned()
-                    .unwrap_or_else(|| panic!("{verdict}: an undetermined quiescence fail-stops"));
-                assert_eq!(
-                    request,
-                    ServeShutdownRequest::SharedGuestNetwork(SharedGuestNetworkFailStop {
-                        component: SharedGuestNetworkComponent::Bridge,
-                        cause: SharedGuestNetworkFailStopCause::TapQuiescenceUndetermined,
-                        attempts: 0,
-                        elapsed,
-                    }),
-                    "{verdict}"
-                );
-                let at_receipt = rig
-                    .request_cgroups
-                    .clone()
-                    .unwrap_or_else(|| panic!("{verdict}: the rig snapshots at receipt"));
-                assert!(
-                    killed(&at_receipt, &slice_kill(&rig.root)),
-                    "{verdict}: every workload VM is killed"
-                );
-                assert!(untouched(&at_receipt, &scope_kill(&rig.root, VM_A)), "{verdict}");
-                assert!(untouched(&at_receipt, &scope_kill(&rig.root, VM_B)), "{verdict}");
-                assert_eq!(rig.admission(), Admission::FailStopped, "{verdict}");
-                assert!(rig.vm_killed().is_empty(), "{verdict}: no per-VM kill was attempted");
-                let fail_stop = rig.events("guest_network.shared_owner_fail_stop");
-                assert_eq!(fail_stop.len(), 1, "{verdict}");
-                assert!(
-                    fail_stop[0].fields.contains_key("vm_kill"),
-                    "{verdict}: the slice kill outcome is recorded"
-                );
-                let calls = rig.calls();
-                assert!(!calls.iter().any(is_owner_converge), "{verdict}: no repair attempt runs");
-                assert!(!calls.iter().any(is_restore), "{verdict}");
-                rig.finish().await;
-            }
-        }
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
-    /// S-ND295-30A — Only VMs whose isolation cannot be confirmed are stopped
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// (c) A per-VM kill write for a known allocation fails other than with an
-    /// absent scope — during a recovery's quiescence, and for damage found
-    /// while Open: the workloads slice is killed and one `VmKillFailed`
-    /// request is sent, carrying the recovery snapshot, or from Open the
-    /// no-recovery values (`Supervisor`, 0, 0).
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 09-01 (S-ND295-30A)"]
-    async fn a_failed_per_vm_stop_stops_every_workload_vm_then_fails_the_node() {
-        let bridge = Loss::Owner(SharedGuestNetworkComponent::Bridge);
-        for seed in supervisor_seeds() {
-            for during_recovery in [true, false] {
-                let mut rig = Rig::build(
-                    seed,
-                    format!("kill-write-fails/during-recovery-{during_recovery}"),
-                    RigSetup { scoped: vec![VM_A, VM_B], slice: true, ..RigSetup::default() },
-                )
-                .await;
-                rig.run_until_first_audit().await;
-                rig.fs.inject_error(
-                    SimOp::Write,
-                    scope_kill(&rig.root, VM_A),
-                    std::io::ErrorKind::Other,
-                );
-                let expected = if during_recovery {
-                    rig.owner.script_quiesce(TestQuiesceScript::Unconfirmed(BTreeSet::from([
-                        alloc_id(VM_A),
-                    ])));
-                    rig.detect(bridge, ONE_MS).await;
-                    SharedGuestNetworkFailStop {
-                        component: SharedGuestNetworkComponent::Bridge,
-                        cause: SharedGuestNetworkFailStopCause::VmKillFailed,
-                        attempts: 0,
-                        elapsed: Duration::ZERO,
-                    }
-                } else {
-                    rig.owner.script_audit_damage(BTreeSet::from([alloc_id(VM_A)]));
-                    rig.advance(super::SHARED_NETWORK_AUDIT_PERIOD).await;
-                    SharedGuestNetworkFailStop {
-                        component: SharedGuestNetworkComponent::Supervisor,
-                        cause: SharedGuestNetworkFailStopCause::VmKillFailed,
-                        attempts: 0,
-                        elapsed: Duration::ZERO,
-                    }
-                };
-                let verdict = rig.verdict();
-                assert_eq!(
-                    rig.poll_request().cloned(),
-                    Some(ServeShutdownRequest::SharedGuestNetwork(expected)),
-                    "{verdict}"
-                );
-                let at_receipt = rig
-                    .request_cgroups
-                    .clone()
-                    .unwrap_or_else(|| panic!("{verdict}: the rig snapshots at receipt"));
-                assert!(
-                    killed(&at_receipt, &slice_kill(&rig.root)),
-                    "{verdict}: every workload VM is killed"
-                );
-                assert!(
-                    untouched(&at_receipt, &scope_kill(&rig.root, VM_A)),
-                    "{verdict}: A's write failed"
-                );
-                assert!(untouched(&at_receipt, &scope_kill(&rig.root, VM_B)), "{verdict}");
-                assert_eq!(rig.admission(), Admission::FailStopped, "{verdict}");
-                rig.finish().await;
-            }
-        }
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
-    /// S-ND295-30A — Only VMs whose isolation cannot be confirmed are stopped
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// (d) A reported allocation whose scope directory is already gone (the
-    /// kill write under a missing parent is `NotFound`) counts as stopped:
-    /// nothing is written at its scope or the slice, it is announced once and
-    /// never again over the next audit periods, and — during a recovery or
-    /// while Open — the node continues.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 09-01 (S-ND295-30A)"]
-    async fn an_already_removed_scope_counts_as_stopped() {
-        let bridge = Loss::Owner(SharedGuestNetworkComponent::Bridge);
-        for seed in supervisor_seeds() {
-            for during_recovery in [true, false] {
-                let mut rig = Rig::build(
-                    seed,
-                    format!("scope-gone/during-recovery-{during_recovery}"),
-                    RigSetup { scoped: vec![VM_B], slice: true, ..RigSetup::default() },
-                )
-                .await;
-                rig.run_until_first_audit().await;
-                let cause = if during_recovery {
-                    rig.owner.script_quiesce(TestQuiesceScript::Unconfirmed(BTreeSet::from([
-                        alloc_id(VM_A),
-                    ])));
-                    rig.detect(bridge, ONE_MS).await;
-                    rig.block_repair(bridge, false);
-                    rig.attempt().await;
-                    "quiescence_unconfirmed"
-                } else {
-                    rig.owner.script_audit_damage(BTreeSet::from([alloc_id(VM_A)]));
-                    rig.advance(super::SHARED_NETWORK_AUDIT_PERIOD).await;
-                    "attachment_damaged"
-                };
-                let verdict = rig.verdict();
-                let killed_events = rig.vm_killed();
-                assert_eq!(killed_events.len(), 1, "{verdict}: {killed_events:?}");
-                assert!(names_alloc(&killed_events[0], VM_A), "{verdict}: {killed_events:?}");
-                assert_eq!(killed_events[0].field("cause"), Some(cause), "{verdict}");
-                let snapshot = rig.fs.snapshot();
-                assert!(untouched(&snapshot, &scope_kill(&rig.root, VM_A)), "{verdict}");
-                assert!(
-                    untouched(&snapshot, &slice_kill(&rig.root)),
-                    "{verdict}: no whole-slice kill"
-                );
-                assert!(untouched(&snapshot, &scope_kill(&rig.root, VM_B)), "{verdict}");
-                assert!(
-                    rig.poll_request().is_none(),
-                    "{verdict}: an absent scope is a confirmed kill"
-                );
-                assert_eq!(rig.exec.recovery_progress(), None, "{verdict}");
-                assert_eq!(rig.admission(), Admission::Open, "{verdict}");
-                rig.assert_single_reopen().await;
-                assert_eq!(
-                    rig.vm_killed().len(),
-                    1,
-                    "{verdict}: A is never announced again over the next audit periods"
-                );
-                assert!(untouched(&rig.fs.snapshot(), &slice_kill(&rig.root)), "{verdict}");
-                rig.finish().await;
-            }
-        }
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
-    /// S-ND295-30A — Only VMs whose isolation cannot be confirmed are stopped
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// (e)-(g) Damage the owner attributes to allocations while every
-    /// node-level part is healthy stops exactly those VMs, in `AllocationId`
-    /// order, with no owner call between the audit and the kills, while EXEC
-    /// stays Open; damage found by an attempt's audit during a recovery is
-    /// killed before that attempt's restore. The table spans the damaged-set
-    /// cardinalities (none, one, two); the kill decision does not depend on
-    /// which part is damaged — per-part attribution is the owner's
-    /// (S-ND295-50).
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 09-01 (S-ND295-30A)"]
-    async fn every_damaged_per_vm_part_stops_only_that_vm_while_admission_stays_open() {
-        for seed in supervisor_seeds() {
-            for damaged in [vec![], vec![VM_B], vec![VM_A, VM_B]] {
-                let mut rig = Rig::build(
-                    seed,
-                    format!("damage-while-open/{damaged:?}"),
-                    RigSetup { scoped: vec![VM_A, VM_B, VM_C], slice: true, ..RigSetup::default() },
-                )
-                .await;
-                rig.run_until_first_audit().await;
-                rig.owner
-                    .script_audit_damage(damaged.iter().map(|alloc| alloc_id(alloc)).collect());
-                let before = rig.mark();
-                rig.advance(super::SHARED_NETWORK_AUDIT_PERIOD).await;
-                let verdict = rig.verdict();
-                assert_eq!(
-                    rig.exec.recovery_progress(),
-                    None,
-                    "{verdict}: damage is not a node failure"
-                );
-                assert_eq!(rig.admission(), Admission::Open, "{verdict}: EXEC stays Open");
-                assert!(rig.unhealthy().is_empty(), "{verdict}");
-                assert_eq!(rig.count_since(before.owner_calls, is_quiesce), 0, "{verdict}");
-                let killed_events = rig.vm_killed();
-                let announced: Vec<_> = killed_events
-                    .iter()
-                    .map(|event| named_alloc(event, &[VM_A, VM_B, VM_C]))
-                    .collect();
-                let expected: Vec<_> = damaged.iter().map(|alloc| Some(*alloc)).collect();
-                assert_eq!(
-                    announced, expected,
-                    "{verdict}: exactly the damaged VMs, in AllocationId order: {killed_events:?}"
-                );
-                for event in &killed_events {
-                    assert_eq!(event.field("cause"), Some("attachment_damaged"), "{verdict}");
-                    assert_eq!(
-                        event.owner_calls,
-                        before.owner_calls + 1,
-                        "{verdict}: no owner call between the audit and the kills"
-                    );
-                }
-                rig.advance(super::SHARED_NETWORK_AUDIT_PERIOD).await;
-                let journal = rig.owner.journal();
-                let next = journal
-                    .get(before.owner_calls + 1)
-                    .unwrap_or_else(|| panic!("{verdict}: the next audit calls the owner"));
-                let snapshot = next
-                    .cgroups
-                    .as_ref()
-                    .unwrap_or_else(|| panic!("{verdict}: the owner journals cgroup snapshots"));
-                for alloc in [VM_A, VM_B, VM_C] {
-                    assert_eq!(
-                        killed(snapshot, &scope_kill(&rig.root, alloc)),
-                        damaged.contains(&alloc),
-                        "{verdict}: {alloc}"
-                    );
-                }
-                assert!(untouched(snapshot, &slice_kill(&rig.root)), "{verdict}");
-                rig.finish().await;
-            }
-
-            // Damage revealed by an attempt's audit during a recovery.
-            let bridge = Loss::Owner(SharedGuestNetworkComponent::Bridge);
-            let mut rig = Rig::build(
-                seed,
-                "damage-during-recovery/B",
-                RigSetup { scoped: vec![VM_A, VM_B], slice: true, ..RigSetup::default() },
-            )
-            .await;
-            rig.run_until_first_audit().await;
-            rig.owner.script_audit_damage(BTreeSet::from([alloc_id(VM_B)]));
-            let detection = rig.detect(bridge, ONE_MS).await;
-            rig.block_repair(bridge, false);
-            rig.attempt().await;
-            let verdict = rig.verdict();
-            let journal = rig.owner.journal();
-            let restore = journal[detection.owner_calls..]
-                .iter()
-                .find(|entry| is_restore(&entry.call))
-                .unwrap_or_else(|| panic!("{verdict}: the attempt restores"));
-            let snapshot = restore
-                .cgroups
-                .as_ref()
-                .unwrap_or_else(|| panic!("{verdict}: the owner journals cgroup snapshots"));
-            assert!(
-                killed(snapshot, &scope_kill(&rig.root, VM_B)),
-                "{verdict}: B is killed before the restore"
-            );
-            assert!(untouched(snapshot, &scope_kill(&rig.root, VM_A)), "{verdict}");
-            let killed_events = rig.vm_killed();
-            assert_eq!(killed_events.len(), 1, "{verdict}: {killed_events:?}");
-            assert!(names_alloc(&killed_events[0], VM_B), "{verdict}: {killed_events:?}");
-            assert_eq!(killed_events[0].field("cause"), Some("attachment_damaged"), "{verdict}");
-            assert_eq!(rig.exec.recovery_progress(), None, "{verdict}: the attempt reopens");
-            rig.finish().await;
-        }
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
-    /// S-ND295-30A — Only VMs whose isolation cannot be confirmed are stopped
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// A stopped VM is stopped once: over a later kernel-path recovery and
-    /// further audits with the same standing reports, A is announced once, B is
-    /// stopped when it is later reported, each one's scope `cgroup.kill` is
-    /// written and the slice's never, A's and B's activations are refused
-    /// while an unreported VM's raises, and recovery keeps reopening for the
-    /// rest.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 09-01 (S-ND295-30A)"]
-    async fn a_killed_vm_leaves_every_later_audit_and_restore_universe() {
-        let bridge = Loss::Owner(SharedGuestNetworkComponent::Bridge);
-        for seed in supervisor_seeds() {
-            let mut rig = Rig::build(
-                seed,
-                "killed-once",
-                RigSetup { scoped: vec![VM_A, VM_B], slice: true, ..RigSetup::default() },
-            )
-            .await;
-            rig.run_until_first_audit().await;
-            let verdict = rig.verdict();
-            let lease = |rig: &Rig, alloc: &str| {
-                rig.pool
-                    .assign(alloc_id(alloc))
-                    .unwrap_or_else(|error| panic!("{verdict}: lease {alloc}: {error}"))
-            };
-            let plan_a = lease(&rig, VM_A);
-            let plan_b = lease(&rig, VM_B);
-            rig.owner
-                .script_quiesce(TestQuiesceScript::Unconfirmed(BTreeSet::from([alloc_id(VM_A)])));
-            rig.owner.script_audit_damage(BTreeSet::from([alloc_id(VM_A)]));
-            rig.detect(bridge, ONE_MS).await;
-            rig.block_repair(bridge, false);
-            rig.attempt().await;
-            rig.advance(super::SHARED_NETWORK_AUDIT_PERIOD).await;
-            rig.detect(bridge, ONE_MS).await;
-            rig.block_repair(bridge, false);
-            rig.attempt().await;
-            rig.owner.script_audit_damage(BTreeSet::from([alloc_id(VM_A), alloc_id(VM_B)]));
-            rig.advance(super::SHARED_NETWORK_AUDIT_PERIOD).await;
-            rig.advance(super::SHARED_NETWORK_AUDIT_PERIOD).await;
-            let killed_events = rig.vm_killed();
-            let announced: Vec<_> =
-                killed_events.iter().map(|event| named_alloc(event, &[VM_A, VM_B])).collect();
-            assert_eq!(
-                announced,
-                [Some(VM_A), Some(VM_B)],
-                "{verdict}: each VM is stopped exactly once: {killed_events:?}"
-            );
-            let snapshot = rig.fs.snapshot();
-            for alloc in [VM_A, VM_B] {
-                assert!(
-                    killed(&snapshot, &scope_kill(&rig.root, alloc)),
-                    "{verdict}: {alloc}'s scope kill was written"
-                );
-            }
-            assert!(untouched(&snapshot, &slice_kill(&rig.root)), "{verdict}: no whole-slice kill");
-            assert_eq!(
-                rig.exec.recovery_progress(),
-                None,
-                "{verdict}: the node keeps recovering for the rest"
-            );
-            let refused =
-                guest_network::GuestNetworkProvisioner::activate(rig.owner.as_ref(), &plan_a).await;
-            assert!(refused.is_err(), "{verdict}: a stopped VM is never activated");
-            let refused_b =
-                guest_network::GuestNetworkProvisioner::activate(rig.owner.as_ref(), &plan_b).await;
-            assert!(refused_b.is_err(), "{verdict}: B was stopped too");
-            let other = lease(&rig, VM_C);
-            let raised =
-                guest_network::GuestNetworkProvisioner::activate(rig.owner.as_ref(), &other).await;
-            assert!(
-                matches!(raised, Ok(guest_network::TapActivation::Raised)),
-                "{verdict}: an unreported VM raises"
-            );
-            rig.finish().await;
-        }
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
-    /// S-ND295-30A — Only VMs whose isolation cannot be confirmed are stopped
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// (c2) A per-VM kill write that stays pending past
-    /// `SHARED_NETWORK_VM_KILL_CALL_BOUND` on the injected clock counts as a
-    /// failed kill: the workloads slice is killed and one `VmKillFailed` request
-    /// is sent, with no owner call between the report and the slice kill (user
-    /// decision 1 of 2026-09-30). A write that lands after its missed bound
-    /// changes no outcome.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 09-01 (S-ND295-30A)"]
-    async fn a_per_vm_kill_write_pending_past_its_bound_fails_the_node() {
-        let bridge = Loss::Owner(SharedGuestNetworkComponent::Bridge);
-        for seed in supervisor_seeds() {
-            let mut rig = Rig::build(
-                seed,
-                "kill-write-bound-miss",
-                RigSetup { scoped: vec![VM_A, VM_B], slice: true, ..RigSetup::default() },
-            )
-            .await;
-            rig.run_until_first_audit().await;
-            // A's kill write parks past its own bound on the injected clock.
-            rig.fs.park_until(
-                SimOp::Write,
-                scope_kill(&rig.root, VM_A),
-                Arc::clone(&rig.clock) as Arc<dyn Clock>,
-                super::SHARED_NETWORK_VM_KILL_CALL_BOUND * 2,
-            );
-            rig.owner
-                .script_quiesce(TestQuiesceScript::Unconfirmed(BTreeSet::from([alloc_id(VM_A)])));
-            let detection = rig.detect(bridge, ONE_MS).await;
-            let verdict = rig.verdict();
-            // Not before the kill-write bound: no request yet.
-            rig.advance_quiet(earlier(super::SHARED_NETWORK_VM_KILL_CALL_BOUND, ONE_MS)).await;
-            assert!(rig.poll_request().is_none(), "{verdict}: not before the kill-write bound");
-            rig.advance(ONE_MS).await;
-            let request = rig
-                .poll_request()
-                .cloned()
-                .unwrap_or_else(|| panic!("{verdict}: the missed kill-write bound fail-stops"));
-            let ServeShutdownRequest::SharedGuestNetwork(fail_stop) = request;
-            assert_eq!(fail_stop.component, SharedGuestNetworkComponent::Bridge, "{verdict}");
-            assert_eq!(
-                fail_stop.cause,
-                SharedGuestNetworkFailStopCause::VmKillFailed,
-                "{verdict}: a kill-write bound miss is VmKillFailed"
-            );
-            let at_receipt = rig
-                .request_cgroups
-                .clone()
-                .unwrap_or_else(|| panic!("{verdict}: the rig snapshots at receipt"));
-            assert!(
-                killed(&at_receipt, &slice_kill(&rig.root)),
-                "{verdict}: every workload VM is killed"
-            );
-            assert_eq!(
-                rig.count_since(detection.owner_calls, is_owner_converge),
-                0,
-                "{verdict}: no owner call between the report and the slice kill"
-            );
-            assert_eq!(rig.admission(), Admission::FailStopped, "{verdict}");
-            rig.finish().await;
-        }
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
-    /// S-ND295-30A — Only VMs whose isolation cannot be confirmed are stopped
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// (i) A report naming at least two allocations whose kill loop is still
-    /// running when the recovery deadline passes completes — every reported
-    /// scope's `cgroup.kill` written, in `AllocationId` order — before the one
-    /// `RecoveryDeadlineExceeded` request, with no owner repair call between the
-    /// report and that request (user decision 1 of 2026-09-30).
-    /// `RecoveryDeadlineExceeded` never cuts the loop short.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 09-01 (S-ND295-30A)"]
-    async fn a_kill_loop_running_at_the_deadline_completes_before_the_one_request() {
-        let bridge = Loss::Owner(SharedGuestNetworkComponent::Bridge);
-        for seed in supervisor_seeds() {
-            let mut rig = Rig::build(
-                seed,
-                "loop-past-deadline",
-                RigSetup { scoped: vec![VM_A, VM_B], slice: true, ..RigSetup::default() },
-            )
-            .await;
-            rig.run_until_first_audit().await;
-            // A Bridge loss whose repair never succeeds drives recovery to the
-            // 5 s deadline; both reported kill writes park (each within its own
-            // bound) so a damage report near the deadline straddles it.
-            rig.block_repair(bridge, true);
-            let half = super::SHARED_NETWORK_VM_KILL_CALL_BOUND / 2;
-            for alloc in [VM_A, VM_B] {
-                rig.fs.park_until(
-                    SimOp::Write,
-                    scope_kill(&rig.root, alloc),
-                    Arc::clone(&rig.clock) as Arc<dyn Clock>,
-                    half,
-                );
-            }
-            rig.detect(bridge, ONE_MS).await;
-            let verdict = rig.verdict();
-            // Drive failing attempts until one kill-loop budget remains before
-            // the 5 s deadline.
-            loop {
-                let elapsed = rig
-                    .exec
-                    .recovery_progress()
-                    .unwrap_or_else(|| panic!("{verdict}: recovery is running before the deadline"))
-                    .elapsed;
-                if elapsed + super::SHARED_NETWORK_VM_KILL_CALL_BOUND
-                    >= super::SHARED_NETWORK_RECOVERY_DEADLINE
-                {
-                    break;
-                }
-                rig.attempt().await;
-            }
-            // The last attempt's audit before the deadline reports damage for
-            // both A and B; their parked kill loop then straddles the deadline.
-            let mark = rig.mark();
-            rig.owner.script_audit_damage(BTreeSet::from([alloc_id(VM_A), alloc_id(VM_B)]));
-            rig.advance(super::SHARED_NETWORK_RETRY_PERIOD).await;
-            rig.advance_quiet(super::SHARED_NETWORK_VM_KILL_CALL_BOUND).await;
-            let request = rig.poll_request().cloned().unwrap_or_else(|| {
-                panic!("{verdict}: the deadline fail-stops once the kill loop completes")
-            });
-            let ServeShutdownRequest::SharedGuestNetwork(fail_stop) = request;
-            assert_eq!(
-                fail_stop.cause,
-                SharedGuestNetworkFailStopCause::RecoveryDeadlineExceeded,
-                "{verdict}: a kill loop running at the deadline does not change the cause"
-            );
-            let killed_events = rig.vm_killed();
-            let order: Vec<_> = killed_events
-                .iter()
-                .filter_map(|event| named_alloc(event, &[VM_A, VM_B]))
-                .collect();
-            assert_eq!(
-                order,
-                [VM_A, VM_B],
-                "{verdict}: both killed in AllocationId order: {killed_events:?}"
-            );
-            let at_receipt = rig
-                .request_cgroups
-                .clone()
-                .unwrap_or_else(|| panic!("{verdict}: the rig snapshots at receipt"));
-            for alloc in [VM_A, VM_B] {
-                assert!(
-                    killed(&at_receipt, &scope_kill(&rig.root, alloc)),
-                    "{verdict}: {alloc}'s kill was written before the request"
-                );
-            }
-            assert!(
-                untouched(&at_receipt, &slice_kill(&rig.root)),
-                "{verdict}: no whole-slice kill — the loop ran to its end, not cut short"
-            );
-            assert!(
-                !rig.calls_since(mark.owner_calls).iter().any(is_owner_converge),
-                "{verdict}: no owner repair call between the report and the request"
-            );
-            rig.finish().await;
-        }
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
-    /// S-ND295-30A — Only VMs whose isolation cannot be confirmed are stopped
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// An intentional shutdown (SIGINT/SIGTERM) that arrives while a kill loop
-    /// is in progress cancels the supervisor only between loops: every reported
-    /// kill is written, in `AllocationId` order, before the supervisor observes
-    /// cancellation — no slice kill, and intentional shutdown is not a fail-stop
-    /// (user decision 1 of 2026-09-30).
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 09-01 (S-ND295-30A)"]
-    async fn an_intentional_shutdown_mid_kill_loop_lets_the_loop_finish_first() {
-        let bridge = Loss::Owner(SharedGuestNetworkComponent::Bridge);
-        for seed in supervisor_seeds() {
-            let mut rig = Rig::build(
-                seed,
-                "shutdown-mid-loop",
-                RigSetup { scoped: vec![VM_A, VM_B], slice: true, ..RigSetup::default() },
-            )
-            .await;
-            rig.run_until_first_audit().await;
-            // Both reported VMs' kill writes park on the injected clock, so the
-            // loop is unambiguously in progress when shutdown is requested.
-            let half = super::SHARED_NETWORK_VM_KILL_CALL_BOUND / 2;
-            for alloc in [VM_A, VM_B] {
-                rig.fs.park_until(
-                    SimOp::Write,
-                    scope_kill(&rig.root, alloc),
-                    Arc::clone(&rig.clock) as Arc<dyn Clock>,
-                    half,
-                );
-            }
-            rig.owner.script_quiesce(TestQuiesceScript::Unconfirmed(BTreeSet::from([
-                alloc_id(VM_A),
-                alloc_id(VM_B),
-            ])));
-            rig.detect(bridge, ONE_MS).await;
-            let verdict = rig.verdict();
-            // Shutdown arrives mid-loop.
-            rig.request_intentional_shutdown();
-            rig.advance_quiet(super::SHARED_NETWORK_VM_KILL_CALL_BOUND).await;
-            let killed_events = rig.vm_killed();
-            let order: Vec<_> = killed_events
-                .iter()
-                .filter_map(|event| named_alloc(event, &[VM_A, VM_B]))
-                .collect();
-            assert_eq!(
-                order,
-                [VM_A, VM_B],
-                "{verdict}: the loop runs to its end in AllocationId order: {killed_events:?}"
-            );
-            let snapshot = rig.fs.snapshot();
-            for alloc in [VM_A, VM_B] {
-                assert!(
-                    killed(&snapshot, &scope_kill(&rig.root, alloc)),
-                    "{verdict}: {alloc}'s kill was written before the supervisor observed shutdown"
-                );
-            }
-            assert!(untouched(&snapshot, &slice_kill(&rig.root)), "{verdict}: no whole-slice kill");
-            assert!(
-                rig.poll_request().is_none(),
-                "{verdict}: intentional shutdown is not a fail-stop"
-            );
-            rig.finish().await;
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // S-ND295-32
-    // -----------------------------------------------------------------------
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
-    /// S-ND295-32 — Every supervisor wait is bounded and every abnormal exit closes new commands visibly
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// A shared-owner audit that never answers fails that owner's first
-    /// component, `Bridge`, with cause `audit_timeout`, exactly
-    /// `SHARED_NETWORK_AUDIT_CALL_BOUND` after the audit began on the injected
-    /// clock; recovery then proceeds as for any `Bridge` loss.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 09-01 (S-ND295-32)"]
-    async fn a_hung_audit_is_a_timeout_failure_of_its_owner() {
-        for seed in supervisor_seeds() {
-            let mut rig = Rig::build(seed, "hung-shared-audit", RigSetup::default()).await;
-            rig.run_until_first_audit().await;
-            rig.owner.script_audit_mode(TestAuditMode::Hang);
-            let before = rig.mark();
-            rig.advance(super::SHARED_NETWORK_AUDIT_PERIOD).await;
-            let verdict = rig.verdict();
-            assert_eq!(
-                rig.calls_since(before.owner_calls),
-                [TestOwnerCall::AuditShared(TestAuditOutcome::Hung)],
-                "{verdict}: the audit began and is pending"
-            );
-            assert_eq!(rig.exec.recovery_progress(), None, "{verdict}");
-            rig.advance_quiet(earlier(super::SHARED_NETWORK_AUDIT_CALL_BOUND, ONE_MS)).await;
-            assert_eq!(rig.exec.recovery_progress(), None, "{verdict}: not before the call bound");
-            assert_eq!(rig.admission(), Admission::Open, "{verdict}");
-            rig.owner.script_audit_mode(TestAuditMode::Normal);
-            rig.advance(ONE_MS).await;
-            rig.assert_detected(SharedGuestNetworkComponent::Bridge, "audit_timeout", before);
-            assert_eq!(
-                rig.count_since(before.owner_calls, is_quiesce),
-                1,
-                "{verdict}: Bridge is kernel-path"
-            );
-            rig.attempt().await;
-            assert_eq!(
-                rig.exec.recovery_progress(),
-                None,
-                "{verdict}: an answering owner recovers"
-            );
-            assert_eq!(rig.count_since(before.owner_calls, is_restore), 1, "{verdict}");
-            rig.finish().await;
-        }
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
-    /// S-ND295-32 — Every supervisor wait is bounded and every abnormal exit closes new commands visibly
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// An attempt whose full audit is still pending at the recovery deadline
-    /// is abandoned and not counted: the one `RecoveryDeadlineExceeded`
-    /// request carries the attempts completed before it and the full deadline
-    /// as elapsed.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 09-01 (S-ND295-32)"]
-    async fn a_call_pending_at_the_deadline_is_abandoned_uncounted() {
-        let bridge = Loss::Owner(SharedGuestNetworkComponent::Bridge);
-        let completed = super::SHARED_NETWORK_RECOVERY_ATTEMPTS - 3;
-        let hung_start = super::SHARED_NETWORK_RETRY_PERIOD * (completed + 1);
-        assert!(
-            hung_start < super::SHARED_NETWORK_RECOVERY_DEADLINE,
-            "the hung attempt starts inside the window"
-        );
-        for seed in supervisor_seeds() {
-            let mut rig = Rig::build(seed, "pending-at-deadline", RigSetup::default()).await;
-            rig.run_until_first_audit().await;
-            rig.detect(bridge, ONE_MS).await;
-            for _ in 0..completed {
-                rig.attempt().await;
-            }
-            let verdict = rig.verdict();
-            assert_eq!(
-                rig.exec.recovery_progress().map(|progress| progress.attempts),
-                Some(completed),
-                "{verdict}"
-            );
-            rig.owner.script_audit_mode(TestAuditMode::Hang);
-            rig.attempt().await;
-            assert!(
-                matches!(
-                    rig.calls().last(),
-                    Some(TestOwnerCall::AuditShared(TestAuditOutcome::Hung))
-                ),
-                "{verdict}: the attempt's audit is pending"
-            );
-            let remaining = earlier(super::SHARED_NETWORK_RECOVERY_DEADLINE, hung_start);
-            rig.advance_quiet(earlier(remaining, ONE_MS)).await;
-            assert!(rig.poll_request().is_none(), "{verdict}: nothing before the deadline");
-            assert_eq!(
-                rig.exec.recovery_progress().map(|progress| progress.attempts),
-                Some(completed),
-                "{verdict}: the pending attempt is not counted"
-            );
-            rig.advance(ONE_MS).await;
-            assert_eq!(
-                rig.poll_request().cloned(),
-                Some(ServeShutdownRequest::SharedGuestNetwork(SharedGuestNetworkFailStop {
-                    component: SharedGuestNetworkComponent::Bridge,
-                    cause: SharedGuestNetworkFailStopCause::RecoveryDeadlineExceeded,
-                    attempts: completed,
-                    elapsed: super::SHARED_NETWORK_RECOVERY_DEADLINE,
-                })),
-                "{verdict}"
-            );
-            rig.finish().await;
-        }
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
-    /// S-ND295-32 — Every supervisor wait is bounded and every abnormal exit closes new commands visibly
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// G-295-5 row 4: a quiescence result arriving after its bound is
-    /// ignored. The owner's quiescence resolves only after twice
-    /// `SHARED_NETWORK_QUIESCE_CALL_BOUND` on the injected clock, naming A
-    /// unconfirmed. At the bound the supervisor answers the miss: the
-    /// workloads-slice `cgroup.kill` is already in the snapshot when the one
-    /// `TapQuiescenceUndetermined` request is received. Past the late
-    /// result's instant and further audit periods, no per-VM kill for A is
-    /// ever written or announced, no repair or restore runs, and the gate
-    /// never reopens.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 09-01 (S-ND295-32)"]
-    async fn a_quiescence_result_after_its_bound_is_ignored() {
-        let bridge = Loss::Owner(SharedGuestNetworkComponent::Bridge);
-        let late = super::SHARED_NETWORK_QUIESCE_CALL_BOUND * 2;
-        for seed in supervisor_seeds() {
-            let mut rig = Rig::build(
-                seed,
-                "late-quiescence-result",
-                RigSetup { scoped: vec![VM_A, VM_B], slice: true, ..RigSetup::default() },
-            )
-            .await;
-            rig.run_until_first_audit().await;
-            rig.owner.script_quiesce(TestQuiesceScript::Late {
-                unconfirmed: BTreeSet::from([alloc_id(VM_A)]),
-                after: late,
-            });
-            let detection = rig.detect(bridge, ONE_MS).await;
-            let verdict = rig.verdict();
-            assert_eq!(
-                rig.count_since(detection.owner_calls, |call| {
-                    *call == TestOwnerCall::Quiesce(TestQuiesceOutcome::Late)
-                }),
-                1,
-                "{verdict}: the detection began the one quiescence call"
-            );
-            assert!(rig.poll_request().is_none(), "{verdict}: the call is still within its bound");
-            rig.advance_quiet(earlier(super::SHARED_NETWORK_QUIESCE_CALL_BOUND, ONE_MS)).await;
-            assert!(rig.poll_request().is_none(), "{verdict}: not before the quiescence bound");
-            rig.advance(ONE_MS).await;
-
-            let request = rig
-                .poll_request()
-                .cloned()
-                .unwrap_or_else(|| panic!("{verdict}: the missed bound fail-stops"));
-            let expected = ServeShutdownRequest::SharedGuestNetwork(SharedGuestNetworkFailStop {
-                component: SharedGuestNetworkComponent::Bridge,
-                cause: SharedGuestNetworkFailStopCause::TapQuiescenceUndetermined,
-                attempts: 0,
-                elapsed: super::SHARED_NETWORK_QUIESCE_CALL_BOUND,
-            });
-            assert_eq!(request, expected, "{verdict}");
-            let at_receipt = rig
-                .request_cgroups
-                .clone()
-                .unwrap_or_else(|| panic!("{verdict}: the rig snapshots at receipt"));
-            assert!(
-                killed(&at_receipt, &slice_kill(&rig.root)),
-                "{verdict}: the workloads-slice kill already fired when the request arrived"
-            );
-            assert!(untouched(&at_receipt, &scope_kill(&rig.root, VM_A)), "{verdict}");
-
-            // The late result's instant passes, then further audit periods.
-            let after_bound = earlier(late, super::SHARED_NETWORK_QUIESCE_CALL_BOUND);
-            rig.advance_quiet(after_bound).await;
-            for _ in 0..2 {
-                rig.advance_quiet(super::SHARED_NETWORK_AUDIT_PERIOD).await;
-            }
-            let snapshot = rig.fs.snapshot();
-            assert!(
-                untouched(&snapshot, &scope_kill(&rig.root, VM_A)),
-                "{verdict}: no per-VM kill is written for the late result's set"
-            );
-            assert!(untouched(&snapshot, &scope_kill(&rig.root, VM_B)), "{verdict}");
-            assert!(rig.vm_killed().is_empty(), "{verdict}: nothing is announced for the late set");
-            assert_eq!(rig.admission(), Admission::FailStopped, "{verdict}: never reopens");
-            assert_eq!(rig.exec.recovery_progress(), None, "{verdict}");
-            let calls = rig.calls();
-            assert!(!calls.iter().any(is_owner_converge), "{verdict}: no repair attempt runs");
-            assert!(!calls.iter().any(is_restore), "{verdict}: no restore runs");
-            rig.finish().await;
-        }
-    }
-
+    /// A spawned supervisor task ending as `case`, its handle, and the EXEC
+    /// supervisor it fail-stops; with `recovering`, the gate is in a
+    /// recovery of that component that has completed two failed attempts
+    /// over 1.25 s of the injected clock.
     fn supervisor_handle(
         case: SupervisorExitCase,
         recovering: Option<SharedGuestNetworkComponent>,
-    ) -> (
-        SharedNetworkSupervisorHandle,
-        Arc<overdrive_core::guest_network::GuestNetworkExecSupervisor>,
-    ) {
+    ) -> (SharedNetworkSupervisorHandle, Arc<GuestNetworkExecSupervisor>) {
         let clock = Arc::new(SimClock::new());
         let wiring = GuestNetworkExecWiring::new(clock.clone());
         let exec = wiring.supervisor();
@@ -5984,9 +1794,9 @@ mod shared_network_task_owner_acceptance {
         if let Some(component) = recovering {
             assert!(exec.begin_recovery(component));
             clock.tick(Duration::from_millis(250));
-            assert!(exec.complete_attempt(Some(component)));
+            assert!(exec.complete_attempt(BTreeSet::from([component])));
             clock.tick(Duration::from_millis(250));
-            assert!(exec.complete_attempt(Some(component)));
+            assert!(exec.complete_attempt(BTreeSet::from([component])));
             clock.tick(Duration::from_millis(750));
         }
         let shutdown = CancellationToken::new();
@@ -6005,7 +1815,7 @@ mod shared_network_task_owner_acceptance {
                     let _request_owner = request_owner;
                     Err(SharedNetworkSupervisorError::GuestNetwork(
                         guest_network::GuestNetworkError::Io {
-                            operation: guest_network::GuestNetworkOperation::BridgeObserve,
+                            operation: guest_network::GuestNetworkOperation::SharedAudit,
                             source: std::io::Error::other("scripted supervisor failure"),
                         },
                     ))
@@ -6090,7 +1900,7 @@ mod shared_network_task_owner_acceptance {
             Ok(())
         });
         let expected = ServeShutdownRequest::SharedGuestNetwork(SharedGuestNetworkFailStop {
-            component: SharedGuestNetworkComponent::BridgeGuard,
+            component: SharedGuestNetworkComponent::IpRules,
             cause: SharedGuestNetworkFailStopCause::RecoveryDeadlineExceeded,
             attempts: 20,
             elapsed: Duration::from_secs(5),
@@ -6111,61 +1921,6 @@ mod shared_network_task_owner_acceptance {
         SharedNetworkSupervisorHandle::new(request_rx, task, wiring.supervisor(), shutdown)
             .shutdown()
             .await;
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED
-    /// S-ND295-32 — Every supervisor wait is bounded and every abnormal exit closes new commands visibly
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// A per-VM `cgroup.kill` write that never answers is a bounded wait: the
-    /// supervisor abandons it at `SHARED_NETWORK_VM_KILL_CALL_BOUND` on the
-    /// injected clock — not before — kills the workloads slice, and sends one
-    /// `VmKillFailed` request (user decision 1 of 2026-09-30). The recovery
-    /// deadline does not cap the write; its own bound does.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 09-01 (S-ND295-32)"]
-    async fn a_per_vm_kill_write_is_bounded_by_its_own_bound() {
-        let bridge = Loss::Owner(SharedGuestNetworkComponent::Bridge);
-        for seed in supervisor_seeds() {
-            let mut rig = Rig::build(
-                seed,
-                "kill-write-never-answers",
-                RigSetup { scoped: vec![VM_A, VM_B], slice: true, ..RigSetup::default() },
-            )
-            .await;
-            rig.run_until_first_audit().await;
-            // A's kill write never answers within the window.
-            rig.fs.park_until(
-                SimOp::Write,
-                scope_kill(&rig.root, VM_A),
-                Arc::clone(&rig.clock) as Arc<dyn Clock>,
-                super::SHARED_NETWORK_RECOVERY_DEADLINE * 4,
-            );
-            rig.owner
-                .script_quiesce(TestQuiesceScript::Unconfirmed(BTreeSet::from([alloc_id(VM_A)])));
-            rig.detect(bridge, ONE_MS).await;
-            let verdict = rig.verdict();
-            rig.advance_quiet(earlier(super::SHARED_NETWORK_VM_KILL_CALL_BOUND, ONE_MS)).await;
-            assert!(rig.poll_request().is_none(), "{verdict}: the wait is not abandoned early");
-            rig.advance(ONE_MS).await;
-            let request = rig
-                .poll_request()
-                .cloned()
-                .unwrap_or_else(|| panic!("{verdict}: the kill write is abandoned at its bound"));
-            let ServeShutdownRequest::SharedGuestNetwork(fail_stop) = request;
-            assert_eq!(
-                fail_stop.cause,
-                SharedGuestNetworkFailStopCause::VmKillFailed,
-                "{verdict}: an abandoned kill write is VmKillFailed"
-            );
-            let at_receipt = rig
-                .request_cgroups
-                .clone()
-                .unwrap_or_else(|| panic!("{verdict}: the rig snapshots at receipt"));
-            assert!(killed(&at_receipt, &slice_kill(&rig.root)), "{verdict}: the slice is killed");
-            assert_eq!(rig.admission(), Admission::FailStopped, "{verdict}");
-            rig.finish().await;
-        }
     }
 
     // -----------------------------------------------------------------------
@@ -6487,6 +2242,41 @@ impl std::fmt::Debug for ServerHandle {
 }
 
 impl ServerHandle {
+    /// The running node's guest-flow owner's `flow_observation()` (D-15:
+    /// R5-57, and the R5-41 / R5-54 / R5-63 cells through `serve`). `None`
+    /// when the boot took the supplied-owner path
+    /// (`run_server_with_obs_and_drivers`), whose owner exposes only
+    /// `SharedGuestNetworkOwner`. Reads only; changes nothing.
+    ///
+    /// Reached without a CLI hook (D-17): the through-`serve` cells run in
+    /// this crate's integration lane under the `kvm-tests` feature on native
+    /// metal, which calls `run_server(config, adapters)` with
+    /// `NodeAdapters::host(&config, cgroup_fs, kek)` and a hermetic `SimKek`,
+    /// holds the returned `ServerHandle`, and deploys through the server's
+    /// public API.
+    #[cfg(feature = "integration-tests")]
+    #[expect(
+        clippy::unused_async,
+        reason = "RED scaffold body panics; the attachment-cut step lands the observation"
+    )]
+    pub async fn guest_flow_observation(&self) -> Option<guest_network::GuestOwnerObservation> {
+        // SCAFFOLD: true — netns-density-295 DISTILL (D-17; the attachment-cut
+        // step holds the composed owner on the handle).
+        panic!("Not yet implemented -- RED scaffold")
+    }
+
+    /// PORTS-CONFIG (ADR-0218): the ports this server's node-global vsock
+    /// listeners bound — constant for the process. A test that configured
+    /// `NodeVsockPortConfig::kernel_assigned()` reads them here and never
+    /// assumes a number.
+    #[must_use]
+    pub fn vsock_ports(&self) -> BoundVsockPorts {
+        // SCAFFOLD: true — netns-density-295 DISTILL (attachment-cut step 6):
+        // the host owner binds its listeners and reports their ports there.
+        let Some(flow) = self.flow_ports else { panic!("Not yet implemented -- RED scaffold") };
+        BoundVsockPorts { beacon: self.beacon_port, flow }
+    }
+
     /// Return the socket address the server is actually listening on.
     /// When [`ServerConfig::bind`] specified port 0, this reveals the
     /// ephemeral port the OS chose. Awaits the server's "listening"
@@ -6550,6 +2340,8 @@ impl ServerHandle {
             mtls_worker_owner,
             mtls_resolve_owner,
             shared_network_supervisor,
+            flow_ports: _,
+            beacon_port: _,
         } = self;
 
         // The axum server owns one `AppState` clone and each accepted
@@ -6713,69 +2505,6 @@ impl ServerHandle {
 /// Extracted from `run_server_with_obs_and_driver` to keep that fn
 /// under the clippy `too_many_lines` ceiling — the construction is
 /// otherwise a single logical step.
-/// Validate the `[dataplane]` config section and resolve the host
-/// IPv4 address for the configured `client_iface` per
-/// dataplane configuration contract.
-///
-/// Two refusal shapes per
-/// `.claude/rules/development.md` § Errors → "Distinct failure
-/// modes get distinct error variants":
-///
-/// - Missing section → [`error::ControlPlaneError::Validation`] with
-///   `field = Some("dataplane")` so the operator's CLI / log
-///   surface can branch on the field without `Display`-grepping.
-/// - `getifaddrs(3)` refusal → [`error::DataplaneBootError::
-///   IfaceAddrResolution`] embedding the underlying `io::Error`
-///   verbatim (NotFound vs Other) for programmatic inspection.
-///
-/// Extracted from `run_server_with_obs_and_driver` to keep that fn
-/// under the clippy `too_many_lines` ceiling — the validation +
-/// resolve sequence is otherwise a single logical step.
-fn resolve_host_ipv4_from_dataplane_config(
-    dataplane: Option<&dataplane_config::DataplaneConfig>,
-) -> Result<std::net::Ipv4Addr, error::ControlPlaneError> {
-    let dataplane_cfg = dataplane.ok_or_else(|| error::ControlPlaneError::Validation {
-        message: "missing required [dataplane] section in overdrive.toml \
-                  (client_iface + backend_iface)"
-            .to_owned(),
-        field: Some("dataplane".to_owned()),
-    })?;
-    let host_ipv4 = iface::resolve_iface_ipv4(&dataplane_cfg.client_iface).map_err(|source| {
-        error::DataplaneBootError::IfaceAddrResolution {
-            iface: dataplane_cfg.client_iface.clone(),
-            source,
-        }
-    })?;
-    Ok(host_ipv4)
-}
-
-/// Apply the override-aware `LOCALHOST` fallback to a `host_ipv4`
-/// resolution result.
-///
-/// Production (no dataplane override) propagates a resolution failure
-/// verbatim — the control plane refuses to boot on an absent or
-/// unresolvable client iface. An injected dataplane override
-/// (Sim/DST/CLI with no provisioned veth) falls back to
-/// `Ipv4Addr::LOCALHOST` on resolution failure so those callers can
-/// boot without real network state. A successful resolution is used
-/// as-is on both branches — the override never overrides a real IP.
-///
-/// See ADR-0053 and
-/// `docs/analysis/root-cause-analysis-bridge-hydrator-register-local-backend.md`
-/// for why the override must NOT collapse a successful resolution to
-/// loopback (doing so makes the bridge write a loopback backend the
-/// hydrator's loopback guard then rejects).
-fn host_ipv4_with_override_fallback(
-    resolved: Result<std::net::Ipv4Addr, error::ControlPlaneError>,
-    has_dataplane_override: bool,
-) -> Result<std::net::Ipv4Addr, error::ControlPlaneError> {
-    match resolved {
-        Ok(ip) => Ok(ip),
-        Err(_) if has_dataplane_override => Ok(std::net::Ipv4Addr::LOCALHOST),
-        Err(source) => Err(source),
-    }
-}
-
 async fn bulk_load_service_vip_allocator(
     vip_range: &VipRange,
     store: &Arc<LocalIntentStore>,
@@ -6795,65 +2524,40 @@ async fn bulk_load_service_vip_allocator(
     Ok(Arc::new(tokio::sync::Mutex::new(allocator)))
 }
 
+/// Start the control-plane server over the driven adapters the composition
+/// root built (NO-OVERRIDE-SEAMS, STORES-IN; ADR-0219). `overdrive serve`
+/// passes `NodeAdapters::host(..)`; a test passes the host bundle with the
+/// fields it simulates replaced by name. Neither this function nor the
+/// `boot_server` it delegates to constructs a driven adapter.
+///
+/// # Errors
+///
+/// The typed boot refusals of § *Composition* (cgroup preflight and
+/// bootstrap, the guest-flow startup probe, the probe-runner gate, a
+/// `Required` VM capability's probe refusal, and every refusal of
+/// `boot_server`).
 pub async fn run_server(
     config: ServerConfig,
-    fs: Arc<dyn overdrive_core::traits::cgroup_fs::CgroupFs>,
+    adapters: NodeAdapters,
 ) -> Result<ServerHandle, error::ControlPlaneError> {
-    // Wire the Phase 1 observation store (`LocalObservationStore`
-    // single-node per ADR-0012, revised 2026-04-24) internally and the
-    // production driver registry at this composition root, then delegate
-    // to `run_server_with_obs_and_drivers`. The split
-    // exists so integration tests can hold a shared `Arc<dyn ObservationStore>`
-    // handle for the canary-injection Fixture-Theater defence without
-    // introducing a test-only hook into the production boot path.
-    //
-    // Per ADR-0029 / ADR-0054 § Composition root wiring, this is the
-    // binary-composition boundary. The CLI's `serve` subcommand
-    // constructs the production cgroupfs adapter at boot, probes it,
-    // and threads the SAME `Arc<dyn CgroupFs>` through here — the
-    // probed substrate IS the used substrate (Earned Trust invariant).
-    // Tests pass either the production adapter (Lima integration
-    // suite, real `/sys/fs/cgroup`) or the sim adapter (DST / sim
-    // path). The trait name `CgroupFs` from `overdrive-core` is fine
-    // in this signature — control-plane already depends on
-    // `overdrive-core` for every other port trait (`Clock`,
-    // `Driver`, `IntentStore`, `ObservationStore`); the concrete
-    // production binding is NOT named here.
-    let obs: Arc<dyn ObservationStore> =
-        Arc::from(observation_wiring::wire_single_node_observation(&config.data_dir)?);
+    let NodeAdapters { boot, cgroup_fs: fs, probers, vm, guest_flow } = adapters;
 
     // Per ADR-0028 (as superseded in part by ADR-0034), run the cgroup
     // v2 delegation pre-flight at the start of the boot path — BEFORE
-    // any on-disk side effects. The preflight uses direct `std::fs`
-    // reads (no `CgroupFs` port dependency) and must execute before
-    // the workloads-slice bootstrap below, which creates directories
-    // and writes `cgroup.subtree_control` on real cgroupfs. Without
-    // this ordering, a misconfigured host sees
-    // `WorkloadsBootstrap(WriteFailed: PermissionDenied)` instead of
+    // any on-disk side effects. Without this ordering, a misconfigured host
+    // sees `WorkloadsBootstrap(WriteFailed: PermissionDenied)` instead of
     // the actionable `CgroupBootstrap(DelegationMissing)` message.
     cgroup_preflight::run_preflight().map_err(error::ControlPlaneError::from)?;
 
-    // Per the cgroup v2 kernel contract, a parent's `subtree_control`
-    // must delegate controllers BEFORE any child can enable them in
-    // its own `subtree_control`. `create_and_enrol_control_plane_slice`
-    // writes `+cpu +memory +io +pids` to
-    // `overdrive.slice/cgroup.subtree_control` (step 2 of its
-    // four-step sequence), which is a prerequisite for the
-    // workloads-slice bootstrap below. Order is load-bearing: moving
-    // this call after the workloads bootstrap produces ENOENT on the
-    // child's `subtree_control` write because the kernel does not see
-    // the controllers at the parent level.
+    // The parent slice delegates controllers BEFORE the workloads-slice
+    // bootstrap below enables them (cgroup v2 kernel contract); the order is
+    // load-bearing.
     cgroup_manager::create_and_enrol_control_plane_slice()
         .map_err(error::ControlPlaneError::from)?;
 
-    // Per `docs/feature/fix-cgroup-subtree-control-delegation/bugfix-rca.md`
-    // § "Production fix #2": delegate `+cpu +memory +io +pids` to
-    // `overdrive.slice/workloads.slice/cgroup.subtree_control` BEFORE
-    // the convergence loop accepts any allocations. Without this, the
-    // per-alloc `cpu.weight` / `memory.max` writes return EACCES on
-    // real cgroupfs (the resource interface files do not exist on
-    // children of a slice whose subtree_control is empty), silently
-    // absorbed by the ADR-0026 D9 warn-and-continue disposition.
+    // Delegate `+cpu +memory +io +pids` to the workloads slice BEFORE the
+    // convergence loop accepts any allocation (fix-cgroup-subtree-control-
+    // delegation, production fix #2).
     let cgroup_root_path = std::path::PathBuf::from(cgroup_preflight::DEFAULT_CGROUP_ROOT);
     let bootstrap_manager =
         overdrive_worker::cgroup_manager::CgroupManager::new(cgroup_root_path.clone(), fs.clone());
@@ -6862,115 +2566,164 @@ pub async fn run_server(
         .await
         .map_err(error::ControlPlaneError::from)?;
 
-    // Service-health-check-probes step 01-03d / ADR-0054 § 7 — the
-    // probe-runner Earned-Trust gate runs here, at the binary composition
-    // root. Keep the one trusted runner returned by the gate and pass it to
-    // the VM driver's existing lifecycle hooks.
-    let clock: Arc<dyn Clock> = Arc::new(overdrive_host::SystemClock);
+    // Boot step 1, phase 1 of the guest-flow owner's two-phase boot (D-8):
+    // the owner's startup checks and the forwarder probe run over the
+    // composition root's seam before the owner exists and before any boot
+    // effect below. The owner is composed over this same seam at step 5.
+    let GuestFlowAdapter(guest_flow_io) = guest_flow;
+    probe_guest_flow_boot(guest_flow_io.as_ref(), &config.vip_range).await?;
+
+    // ADR-0054 § 7 — the probe-runner Earned-Trust gate, over the root's
+    // probers and the boot's one clock.
+    let clock = Arc::clone(&boot.clock);
+    // The boot's one `OwnerDial` (D-13): the VM probe runner dials guest
+    // ports through it (DG-2 row 19) and the inbound enforcement dials leg S
+    // through it (LEGS-DIAL). The owner is composed at boot step 5
+    // (`compose_guest_network`, D-UP-16), which binds it.
+    let owner_dial = Arc::new(guest_network_composition::OwnerDial::unbound());
+    let guest_dial: Arc<dyn overdrive_core::guest_transport::dial::GuestStreamDial> =
+        Arc::clone(&owner_dial) as _;
     let probe_runner = probe_runner_boot::compose_and_probe_runner_gate(
-        Arc::new(overdrive_worker::probe_runner::TokioTcpProber::new()),
-        Arc::new(overdrive_worker::probe_runner::HyperHttpProber::new()),
+        probers.tcp,
+        probers.http,
         Arc::clone(&clock),
-        Arc::clone(&obs),
+        Arc::clone(&boot.observation),
+        guest_dial,
     )
     .await?;
     let guest_network_exec = GuestNetworkExecWiring::new(Arc::clone(&clock));
 
     let mut registry = DriverRegistry::new();
 
-    // ADR-0082/ADR-0083 (GH #42, steps 01-08/01-09, §D3c): discover ->
-    // probe -> insert `cloud-hypervisor`. UNCONDITIONAL — no `#[cfg]`, no
-    // artifact precondition. Artifacts are per-allocation (§D3a), so the
-    // ONLY thing that decides whether this node can run microVMs is
-    // whether `Vmm::probe` passes, and "the registry IS the VM capability
-    // gate" is finally true in production.
-    //
-    // Capability ABSENCE (the real, non-injected discover/probe sequence
-    // failing — a host with no `cloud-hypervisor`, or SD-5's "no
-    // genuinely lying host exists in the real test envelope for these
-    // classes" case) is NOT a fault: the node boots with no `Vm` entry
-    // and `[vm]` deploys fail at dispatch naming the absent capability
-    // (`VmComposeError::NotAvailable`). A GENUINE substrate lie caught on
-    // an adapter the composition root already knows is PRESENT — the real
-    // adapter discovered successfully-but-then-failed-probe is not
-    // reachable in this codebase's test envelope, so in practice this is
-    // exclusively the injected `ServerConfig.vmm_override` path (ADR-0083
-    // §D8) declaring presence — hard-refuses the whole boot with
-    // `health.startup.refused` (`VmComposeError::Refused`).
+    // ADR-0082/ADR-0083 (§D3c, § D8) and ADR-0219: discover -> probe ->
+    // insert the `Vm` driver over the root's VM ports. The probes run
+    // UNCONDITIONALLY; `vm.capability` decides what a failed probe means:
+    // `Optional` — the node boots with no `Vm` entry and `[vm]` deploys fail
+    // at dispatch (`driver.vm.not_composed`); `Required` — the boot refuses
+    // (`health.startup.refused`, reason `vmm.probe`).
+    let mut beacon_port = None;
+    match compose_vm_driver(
+        cgroup_root_path,
+        overdrive_core::vm::config::clone_index_dir(&config.data_dir),
+        overdrive_core::vm::config::clone_staging_dir(&config.data_dir),
+        Arc::clone(&clock),
+        fs,
+        Arc::clone(&probe_runner),
+        guest_network_exec.gate(),
+        vm,
+        config.vsock_ports.beacon(),
+    )
+    .await
     {
-        let cgroup_accounting: Arc<
-            dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting,
-        > = Arc::new(overdrive_host::RealCgroupAccounting::new());
-        #[cfg(feature = "integration-tests")]
-        let vm_override = config.vm_override.as_ref().map(|vm| VmOverride {
-            vmm: Arc::clone(&vm.vmm),
-            beacon: Arc::clone(&vm.beacon),
-        });
-        #[cfg(not(feature = "integration-tests"))]
-        let vm_override = None;
-        match compose_vm_driver(
-            cgroup_root_path.clone(),
-            overdrive_core::vm::config::clone_index_dir(&config.data_dir),
-            overdrive_core::vm::config::clone_staging_dir(&config.data_dir),
-            Arc::clone(&clock),
-            fs,
-            cgroup_accounting,
-            Arc::clone(&probe_runner),
-            guest_network_exec.gate(),
-            vm_override,
-        )
-        .await
-        {
-            Ok(vm_driver) => registry.insert(Arc::new(vm_driver)),
-            Err(VmComposeError::NotAvailable(cause)) => {
-                tracing::info!(
-                    name: "driver.vm.not_composed",
-                    reason = %cause,
-                    "cloud-hypervisor not composed; [vm] deploys will be rejected at admission"
-                );
-            }
-            Err(VmComposeError::Refused(cause)) => {
-                tracing::error!(
-                    name: "health.startup.refused",
-                    target: "overdrive::health",
-                    reason = "vmm.probe",
-                    cause = %cause,
-                    "VM driver probe refused; composition root will not start"
-                );
-                return Err(error::ControlPlaneError::VmmBoot(cause));
-            }
+        Ok((vm_driver, bound)) => {
+            beacon_port = Some(bound);
+            registry.insert(Arc::new(vm_driver));
+        }
+        Err(VmComposeError::NotAvailable(cause)) => {
+            tracing::info!(
+                name: "driver.vm.not_composed",
+                reason = %cause,
+                "cloud-hypervisor not composed; [vm] deploys will be rejected at admission"
+            );
+        }
+        Err(VmComposeError::Refused(cause)) => {
+            tracing::error!(
+                name: "health.startup.refused",
+                target: "overdrive::health",
+                reason = "vmm.probe",
+                cause = %cause,
+                "VM driver probe refused; composition root will not start"
+            );
+            return Err(error::ControlPlaneError::VmmBoot(cause));
         }
     }
 
-    let vm_host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState> =
-        Arc::new(overdrive_host::RealVmHostState::new(
-            cgroup_root_path,
-            std::path::PathBuf::from("/run/overdrive/vm"),
-            overdrive_core::vm::config::clone_index_dir(&config.data_dir),
-        ));
-
-    run_server_with_obs_and_drivers(
+    let mut handle = boot_server(
         config,
-        obs,
+        boot,
         Arc::new(registry),
-        vm_host_state,
-        compose_guest_flow_owner(),
+        GuestNetworkSource::Composed { io: guest_flow_io, dial: owner_dial },
         guest_network_exec,
         bootstrap_manager,
     )
+    .await?;
+    handle.beacon_port = beacon_port;
+    Ok(handle)
+}
+
+/// Where a boot's guest-flow owner comes from.
+enum GuestNetworkSource {
+    /// The caller's owner ([`run_server_with_obs_and_drivers`]): the owner's
+    /// driven port for owner-level doubles. The inbound enforcement takes it
+    /// as its `guest_dial` (LEGS-DIAL); D-UP-16's postcondition is not
+    /// claimed on this path.
+    Supplied(Arc<dyn guest_network::SharedGuestNetworkOwner>),
+    /// [`run_server`] and the in-crate composed rig: `io` is the seam phase 1
+    /// checked; the owner and the mTLS worker are composed together at boot
+    /// step 5 by [`compose_guest_network`] over `io` (D-UP-16, D-8), which
+    /// binds `dial` — the boot's one `OwnerDial`, the VM probe runner's and
+    /// the enforcement's guest dial — to the owner.
+    Composed {
+        io: Arc<dyn guest_network::flow_io::GuestFlowIo>,
+        dial: Arc<guest_network_composition::OwnerDial>,
+    },
+}
+
+/// Boot step 1, phase 1 (D-8): [`guest_network::probe_guest_flow_startup`]
+/// over the boot's seam, before the owner exists and before any boot effect.
+/// Refusal: `health.startup.refused`, reason `guest_network.probe`.
+async fn probe_guest_flow_boot(
+    io: &dyn guest_network::flow_io::GuestFlowIo,
+    vip_range: &VipRange,
+) -> Result<(), error::ControlPlaneError> {
+    if let Err(cause) = guest_network::probe_guest_flow_startup(
+        io,
+        vip_range,
+        overdrive_core::guest_transport::GUEST_NODE_PREFIX,
+    )
     .await
+    {
+        tracing::error!(
+            name: "health.startup.refused",
+            target: "overdrive::health",
+            reason = "guest_network.probe",
+            cause = %cause,
+            "shared guest-network startup probe refused"
+        );
+        return Err(error::ControlPlaneError::from(cause));
+    }
+    Ok(())
+}
+
+/// Boot step 1 on the supplied-owner path (§ *Composition*, "Entry points
+/// and the supplied owner"): the supplied owner's startup probe, first in the
+/// boot. Refusal: `health.startup.refused`, reason `guest_network.probe`.
+async fn probe_guest_network_startup(
+    owner: &dyn guest_network::SharedGuestNetworkOwner,
+) -> Result<(), error::ControlPlaneError> {
+    if let Err(cause) = owner.probe_startup().await {
+        tracing::error!(
+            name: "health.startup.refused",
+            target: "overdrive::health",
+            reason = "guest_network.probe",
+            cause = %cause,
+            "shared guest-network startup probe refused"
+        );
+        return Err(error::ControlPlaneError::from(cause));
+    }
+    Ok(())
 }
 
 /// Outcome of a failed [`compose_vm_driver`] attempt — distinguishes
 /// capability ABSENCE (soft: the node simply has no `Vm` entry) from a
 /// genuine substrate lie caught by a probe against an adapter the
-/// composition root (or an injected `ServerConfig.vmm_override` test
-/// seam) already knows is present (hard: refuses the whole boot).
-/// ADR-0083 §D8.
+/// composition root declared present with `VmCapability::Required` (hard:
+/// refuses the whole boot). ADR-0083 §D8, ADR-0219.
 #[derive(Debug)]
 enum VmComposeError {
-    /// No override was injected, and the real discover/probe
-    /// sequence failed. Capability absence is not a fault
+    /// The composition root passed `VmCapability::Optional` (as
+    /// `overdrive serve` does), and a probe failed. Capability absence is
+    /// not a fault
     /// (SD-5) — the caller logs `driver.vm.not_composed` and continues
     /// booting with no `Vm` entry. Carries the typed
     /// [`error::VmmBootError`] cause (not a pre-flattened `String`) per
@@ -6979,8 +2732,8 @@ enum VmComposeError {
     /// `driver.vm.not_composed` log line renders it via `Display`
     /// (`%cause`), and a test can `matches!()` on the variant.
     NotAvailable(error::VmmBootError),
-    /// An override WAS injected (`ServerConfig.vmm_override`) — the test
-    /// is declaring "cloud-hypervisor IS present" — and its probe (or
+    /// The composition root passed `VmCapability::Required` — it declares
+    /// "cloud-hypervisor IS present" — and the VMM's probe (or
     /// `CgroupAccounting`'s probe, or the kernel-header read/validate)
     /// failed. Unambiguously a genuine substrate lie, never absence: the
     /// caller refuses the whole boot with `health.startup.refused`,
@@ -6990,9 +2743,10 @@ enum VmComposeError {
     Refused(error::VmmBootError),
 }
 
-/// Compose the production `VmDriver` — resolve `Vmm` (the injected
-/// `vmm_override`, when present, or a freshly discovered
-/// `CloudHypervisorVmm`) and run its Earned-Trust `.probe()` (and
+/// Compose the production `VmDriver` over the composition root's
+/// `VmAdapters` (`CloudHypervisorVmm` and `VsockBeaconIo` from
+/// `NodeAdapters::host`, or the doubles a test passes) and run the VMM's
+/// Earned-Trust `.probe()` (and
 /// `CgroupAccounting`'s, gated alongside it per ADR-0082 §D8's
 /// "Composition" section). ADR-0082/ADR-0083 (GH #42, steps 01-08/01-09,
 /// §§D3a/D3c).
@@ -7054,25 +2808,23 @@ async fn compose_vm_driver(
     clone_staging_dir: std::path::PathBuf,
     clock: Arc<dyn Clock>,
     fs: Arc<dyn overdrive_core::traits::cgroup_fs::CgroupFs>,
-    cgroup_accounting: Arc<dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting>,
     probe_runner: Arc<overdrive_worker::probe_runner::ProbeRunner>,
     guest_network_exec: Arc<overdrive_core::guest_network::GuestNetworkExecGate>,
-    vm_override: Option<VmOverride>,
-) -> std::result::Result<overdrive_worker::vm_driver::VmDriver, VmComposeError> {
-    use overdrive_core::traits::vmm::Vmm;
+    vm: VmAdapters,
+    beacon_port: overdrive_core::guest_transport::VsockListenPort,
+) -> std::result::Result<
+    (overdrive_worker::vm_driver::VmDriver, overdrive_core::vm::config::VsockPort),
+    VmComposeError,
+> {
     use overdrive_core::vm::config::{HostArch, VmConfinement, VmmIdentity};
     use overdrive_worker::vm_driver::VmHostLayout;
 
-    // §D8's resolution: the override, when present, replaces discovery
-    // entirely. `injected` records WHICH branch was taken so a
-    // subsequent probe failure is classified correctly — see
-    // `VmComposeError`'s own docs.
-    let injected = vm_override.is_some();
-    let (vmm, beacon_io): (Arc<dyn Vmm>, Option<Arc<dyn overdrive_core::vm::beacon::BeaconIo>>) =
-        match vm_override {
-            Some(VmOverride { vmm, beacon }) => (vmm, Some(beacon)),
-            None => (Arc::new(overdrive_host::CloudHypervisorVmm::new()), None),
-        };
+    // ADR-0219: the composition root states what a failed probe means.
+    // `injected` keeps its name for the classification below: `Required`
+    // (the root constructed the VMM and declares the capability present) →
+    // `Refused`; `Optional` (capability may be absent) → `NotAvailable`.
+    let injected = vm.capability == VmCapability::Required;
+    let VmAdapters { vmm, beacon: beacon_io, cgroup_accounting, capability: _ } = vm;
     // Earned Trust is UNCONDITIONAL here: `.probe()` runs against
     // WHATEVER adapter is bound, production or injected — there is no
     // `if injected { skip probe }` branch anywhere in this function.
@@ -7186,10 +2938,11 @@ async fn compose_vm_driver(
         ),
     };
 
-    // DG-4 boot step 2: after `Vmm::probe`, bind the node beacon intake
-    // (`BeaconIntake::bind`) and pass it to `VmDriver::new`.
-    let beacon_io = beacon_io.unwrap_or_else(production_beacon_io);
-    let beacon = match overdrive_worker::BeaconIntake::bind(beacon_io).await {
+    // DG-4 boot step 2: after `Vmm::probe`, bind the node beacon intake on
+    // the configured port (`BeaconIntake::bind`) and pass it to
+    // `VmDriver::new`.
+    #[allow(clippy::match_wild_err_arm, reason = "RED scaffold arm until the attachment-cut step")]
+    let beacon = match overdrive_worker::BeaconIntake::bind(beacon_io, beacon_port).await {
         Ok(beacon) => beacon,
         // SCAFFOLD: true — netns-density-295 DISTILL (attachment-cut step 6):
         // the `vm_driver.beacon_bind` startup refusal is new behaviour, and no
@@ -7197,39 +2950,21 @@ async fn compose_vm_driver(
         // `BeaconIntakeError` is pinned (DG-4) — surfaced as a DISTILL blocker.
         Err(_source) => panic!("Not yet implemented -- RED scaffold"),
     };
+    let bound = beacon.bound_port();
 
-    Ok(overdrive_worker::vm_driver::VmDriver::new(
-        vmm,
-        clock,
-        fs,
-        cgroup_accounting,
-        probe_runner,
-        guest_network_exec,
-        layout,
-        beacon,
+    Ok((
+        overdrive_worker::vm_driver::VmDriver::new(
+            vmm,
+            clock,
+            fs,
+            cgroup_accounting,
+            probe_runner,
+            guest_network_exec,
+            layout,
+            beacon,
+        ),
+        bound,
     ))
-}
-
-/// The production beacon port (`VsockBeaconIo`) for the node beacon intake.
-///
-/// SCAFFOLD: true — netns-density-295 DISTILL (attachment-cut step 6): DG-4
-/// pins no `VsockBeaconIo` constructor (upstream issue UI-R2-2), so the
-/// production composition cannot build one yet.
-fn production_beacon_io() -> Arc<dyn overdrive_core::vm::beacon::BeaconIo> {
-    panic!("Not yet implemented -- RED scaffold")
-}
-
-/// The production host guest-flow owner (`HostSharedGuestNetworkOwner::new`,
-/// DG-3) for `run_server`.
-///
-/// SCAFFOLD: true — netns-density-295 DISTILL (attachment-cut step 7): its
-/// `GuestFlowOwnerPorts` need the `MtlsResolve` and `MtlsInterceptWorker`
-/// that `run_server_with_obs_and_drivers` builds (boot step 5), after the
-/// owner it receives as an argument runs `probe_startup` (boot step 1); the
-/// composition order that supplies them is not pinned — surfaced as a
-/// DISTILL blocker.
-fn compose_guest_flow_owner() -> Arc<dyn guest_network::SharedGuestNetworkOwner> {
-    panic!("Not yet implemented -- RED scaffold")
 }
 
 /// Node-setup (once, idempotent) for the platform-owned VM clone-staging root:
@@ -7263,9 +2998,8 @@ async fn prepare_clone_staging_root(dir: &std::path::Path, gid: u32) -> std::io:
 /// caller-built registry.
 pub async fn run_server_with_obs_and_driver(
     config: ServerConfig,
-    obs: Arc<dyn ObservationStore>,
+    boot: BootAdapters,
     driver: Arc<dyn Driver>,
-    vm_host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState>,
     shared_guest_network: Arc<dyn guest_network::SharedGuestNetworkOwner>,
     guest_network_exec: GuestNetworkExecWiring,
     vm_cgroups: CgroupManager,
@@ -7274,9 +3008,8 @@ pub async fn run_server_with_obs_and_driver(
     registry.insert(driver);
     run_server_with_obs_and_drivers(
         config,
-        obs,
+        boot,
         Arc::new(registry),
-        vm_host_state,
         shared_guest_network,
         guest_network_exec,
         vm_cgroups,
@@ -7284,42 +3017,69 @@ pub async fn run_server_with_obs_and_driver(
     .await
 }
 
-/// Start the control-plane server with caller-supplied observation
-/// store and driver registry.
+/// Start the control-plane server over a caller-supplied boot-wide adapter
+/// group, driver registry and guest-flow owner (the supplied-owner path,
+/// § *Composition*, "Entry points and the supplied owner").
 ///
-/// Per ADR-0022 (amended by ADR-0029) / ADR-0083 §D1 (GH #42), the
-/// binary owns the composition: the CLI's `serve` subcommand composes the
-/// available driver registry and threads it through this function.
-///
-/// Used by integration tests that need to retain a handle to the
-/// observation store the server is reading from.
-// `async` is kept to preserve the public-API shape: every caller
-// invokes `run_server_with_obs_and_drivers(...).await`, and the function
-// may grow real `.await` points as the boot sequence evolves
-// (observation provisioning, lifecycle handshakes). Removing it now
-// would churn every call site for no functional gain.
-#[allow(clippy::unused_async, clippy::too_many_lines)]
+/// `boot` replaces the former `obs` and `vm_host_state` parameters and
+/// carries the stores and the CA (STORES-IN), so the boot opens and
+/// constructs nothing. Preconditions: `drivers` and `guest_network_exec`
+/// were built over `boot.clock` (the boot's one clock), and `boot.stores` /
+/// `boot.observation` / `boot.vm_host_state` are over `config.data_dir` or
+/// simulations. The inbound enforcement takes `shared_guest_network` as its
+/// `GuestStreamDial` (LEGS-DIAL).
 pub async fn run_server_with_obs_and_drivers(
     config: ServerConfig,
-    obs: Arc<dyn ObservationStore>,
+    boot: BootAdapters,
     drivers: Arc<DriverRegistry>,
-    vm_host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState>,
     shared_guest_network: Arc<dyn guest_network::SharedGuestNetworkOwner>,
     guest_network_exec: GuestNetworkExecWiring,
     vm_cgroups: CgroupManager,
 ) -> Result<ServerHandle, error::ControlPlaneError> {
+    boot_server(
+        config,
+        boot,
+        drivers,
+        GuestNetworkSource::Supplied(shared_guest_network),
+        guest_network_exec,
+        vm_cgroups,
+    )
+    .await
+}
+
+/// The boot sequence of § *Composition* over `guest_network`'s owner.
+#[allow(clippy::too_many_lines)]
+async fn boot_server(
+    config: ServerConfig,
+    boot: BootAdapters,
+    drivers: Arc<DriverRegistry>,
+    guest_network: GuestNetworkSource,
+    guest_network_exec: GuestNetworkExecWiring,
+    vm_cgroups: CgroupManager,
+) -> Result<ServerHandle, error::ControlPlaneError> {
+    // NO-OVERRIDE-SEAMS / STORES-IN (ADR-0219): every driven adapter of the
+    // boot comes from the composition root; this function constructs none.
+    let BootAdapters {
+        clock,
+        entropy,
+        transport,
+        kek,
+        observation: obs,
+        vm_host_state,
+        stores,
+        ca: ca_adapters,
+        dataplane: dataplane_composer,
+        mtls: mtls_adapters,
+        guest_dns,
+    } = boot;
     // RED scaffold (D-295-R14): consumed in DELIVER step 09-01, which wraps it
     // in the supervisor's kill-only `VmKillCapability`.
     let _ = vm_cgroups;
-    if let Err(cause) = shared_guest_network.probe_startup().await {
-        tracing::error!(
-            name: "health.startup.refused",
-            target: "overdrive::health",
-            reason = "guest_network.probe",
-            cause = %cause,
-            "shared guest-network startup probe refused"
-        );
-        return Err(error::ControlPlaneError::from(cause));
+    // Boot step 1 for a supplied owner (D-8, "Entry points and the supplied
+    // owner"). A composed owner's step 1 is phase 1, which its caller ran over
+    // the seam before this function (`run_server`, the composed rig).
+    if let GuestNetworkSource::Supplied(owner) = &guest_network {
+        probe_guest_network_startup(owner.as_ref()).await?;
     }
     // ADR-0028 preflight, parent-slice delegation, and workloads-slice
     // bootstrap all run in `run_server` (the outer composition
@@ -7340,7 +3100,7 @@ pub async fn run_server_with_obs_and_drivers(
     // typed error to `Internal(String)` at a composition boundary"
     // the conversion is `#[from]` — never
     // `ControlPlaneError::internal("context", e)`.
-    overdrive_worker::start_local_node(&obs, &config.node, &config.clock)
+    overdrive_worker::start_local_node(&obs, &config.node, &clock)
         .await
         .map_err(error::ControlPlaneError::from)?;
 
@@ -7362,15 +3122,11 @@ pub async fn run_server_with_obs_and_drivers(
     let rustls_config = tls_bootstrap::load_server_tls_config(&material)?;
     let axum_rustls = RustlsConfig::from_config(Arc::new(rustls_config));
 
-    // Open the authoritative intent store at <data_dir>/intent.redb.
-    // `LocalIntentStore::open` creates the parent directory if missing,
-    // so the boot path does not depend on caller ordering or a sibling
-    // store's directory-creation side effect to satisfy this open.
-    let store_path = config.data_dir.join("intent.redb");
-    let store = Arc::new(
-        LocalIntentStore::open(&store_path)
-            .map_err(|e| error::ControlPlaneError::internal("open LocalIntentStore", e))?,
-    );
+    // The authoritative intent store the composition root opened
+    // (STORES-IN); its path travels with it, so remediations name the file
+    // that was opened.
+    let store = Arc::clone(stores.intent.store());
+    let store_path = stores.intent.path().to_path_buf();
 
     // Construct the reconciler runtime against the production
     // `RedbViewStore` (ADR-0035 §4 — one redb file per node at
@@ -7386,13 +3142,7 @@ pub async fn run_server_with_obs_and_drivers(
     // with `ControlPlaneError::Internal`; the surrounding `?` surfaces
     // it to the operator via the binary-layer error formatter
     // (`overdrive-cli` logs `health.startup.refused` and exits non-zero).
-    let view_store: Arc<dyn view_store::ViewStore> =
-        Arc::new(view_store::redb::RedbViewStore::open(&config.data_dir).map_err(|e| {
-            error::ViewStoreBootError::Open {
-                path: view_store::redb::RedbViewStore::resolve_path(&config.data_dir),
-                source: e,
-            }
-        })?);
+    let view_store: Arc<dyn view_store::ViewStore> = Arc::clone(&stores.views);
     let mut runtime = reconciler_runtime::ReconcilerRuntime::new(&config.data_dir, view_store)?;
     runtime.register(noop_heartbeat()).await?;
     runtime.register(workload_lifecycle()).await?;
@@ -7422,25 +3172,19 @@ pub async fn run_server_with_obs_and_drivers(
     // `Observed(∅)`.
     runtime.register(vm_reclamation()).await?;
 
-    // Production boot threads the `ServerConfig.clock` into AppState
-    // so the streaming submit handler's cap timer uses the same clock
-    // as the convergence-loop spawn. The clock is required at
-    // construction per `.claude/rules/development.md` § "Port-trait
-    // dependencies"; there is no post-construction injection path.
+    // The boot's one clock is `BootAdapters.clock`, threaded into
+    // AppState so the streaming submit handler's cap timer uses the same
+    // clock as the convergence-loop spawn. It is required at construction
+    // per `.claude/rules/development.md` § "Port-trait dependencies"; there
+    // is no post-construction injection path.
     //
-    // Dataplane adapter composition —
-    // wire `EbpfDataplane` as the single production `Dataplane`
-    // adapter per architecture.md § 5.2. Single-cut migration from
-    // `NoopDataplane` per `feedback_single_cut_greenfield_migrations.md`.
-    // Failure paths route through `DataplaneBootError::Construct`
-    // per architecture.md § 5.3.
-    //
-    // Tests whose subject under test is NOT the dataplane attach path
-    // (CLI HTTPS handshake, trust-triple round-trip, action-shim
-    // dispatch arms, observation-row read handlers) inject
-    // `SimDataplane` via `config.dataplane_override` per architecture.md
-    // § 4.7. Production binaries leave `dataplane_override = None` so
-    // `EbpfDataplane::new` is the only production-reachable adapter.
+    // Dataplane composition — the composition root's `DataplaneComposer`
+    // (`BootAdapters.dataplane`) provisions, constructs and probes the
+    // dataplane: `HostDataplaneComposer` (the real `EbpfDataplane`) from
+    // `NodeAdapters::host`, or the simulation composer a test passes when
+    // its subject is not the dataplane attach path. No branch here keys on
+    // which composer it is (ADR-0219). Failure paths route through
+    // `DataplaneBootError` per architecture.md § 5.3.
     let dataplane_cfg =
         config.dataplane.as_ref().ok_or_else(|| error::ControlPlaneError::Validation {
             message: "missing required [dataplane] section in overdrive.toml \
@@ -7448,136 +3192,24 @@ pub async fn run_server_with_obs_and_drivers(
                 .to_owned(),
             field: Some("dataplane".to_owned()),
         })?;
-    let dataplane: Arc<dyn overdrive_core::traits::dataplane::Dataplane> = if let Some(overridden) =
-        config.dataplane_override.clone()
-    {
-        overridden
-    } else {
-        // ADR-0061 § 3 (step 01-03): single-node serve-boot
-        // auto-provisions the host-netns veth pair BEFORE
-        // `EbpfDataplane::new`, extending the ADR-0052
-        // parse->construct->probe->use sequence ADDITIVELY to
-        // provision->construct->probe->use.
-        //
-        // CRITICAL GATING (ADR-0061 § 1 / feature-delta § 6.4): the
-        // provisioner fires ONLY when the configured ifaces are the
-        // DEFAULT veth names (`ovd-veth-cli` / `ovd-veth-bk`). When
-        // an operator names REAL NICs (any other names) we SKIP
-        // provision entirely — the existing two-NIC boot resolution
-        // is unchanged and must not regress (an `ip addr add`
-        // VIP-gateway onto a real NIC + `ip route add` over it would
-        // be wrong). The default-veth-name check IS the implicit
-        // gate; the explicit `[dataplane] provision = "veth"|"none"`
-        // opt-out knob is deferred to issue #194.
-        let is_default_veth = dataplane_cfg.client_iface == veth_provisioner::DEFAULT_CLIENT_IFACE
-            && dataplane_cfg.backend_iface == veth_provisioner::DEFAULT_BACKEND_IFACE;
-        if is_default_veth {
-            let plan = veth_provisioner::derive_veth_plan(
-                &dataplane_cfg.client_iface,
-                &dataplane_cfg.backend_iface,
-                config.vip_range.first_range(),
-            );
-            if let Err(source) = veth_provisioner::provision(&plan).await {
-                tracing::warn!(
-                    name: "health.startup.refused",
-                    reason = "dataplane.provision",
-                    client_iface = %dataplane_cfg.client_iface,
-                    backend_iface = %dataplane_cfg.backend_iface,
-                    error = %source,
-                    "single-node veth provisioning failed; refusing to boot"
-                );
-                return Err(error::ControlPlaneError::DataplaneBoot(
-                    error::DataplaneBootError::Provision { source },
-                ));
-            }
-        }
-
-        // ADR-0053 § 7: resolve cgroup_attach_path with the
-        // production default when unset.
-        let cgroup_attach_path: std::path::PathBuf =
-            config.dataplane_cgroup_attach_path.clone().unwrap_or_else(|| {
-                std::path::PathBuf::from(overdrive_dataplane::DEFAULT_CGROUP_ATTACH_PATH)
-            });
-        #[allow(unused_mut)] // mut needed only under cfg(test|integration-tests)
-        let mut ebpf_dataplane = config
-            .dataplane_pin_dir
-            .as_deref()
-            .map_or_else(
-                || {
-                    overdrive_dataplane::EbpfDataplane::new_with_pin_dir(
-                        &dataplane_cfg.client_iface,
-                        &dataplane_cfg.backend_iface,
-                        std::path::Path::new(overdrive_dataplane::DEFAULT_PIN_DIR),
-                        cgroup_attach_path.as_path(),
-                    )
-                },
-                |pin_dir| {
-                    overdrive_dataplane::EbpfDataplane::new_with_pin_dir(
-                        &dataplane_cfg.client_iface,
-                        &dataplane_cfg.backend_iface,
-                        pin_dir,
-                        cgroup_attach_path.as_path(),
-                    )
-                },
-            )
-            .map_err(|source| error::DataplaneBootError::Construct {
-                client_iface: dataplane_cfg.client_iface.clone(),
-                backend_iface: dataplane_cfg.backend_iface.clone(),
-                source,
-            })?;
-
-        // Step 02-03: Apply the test-only probe-fault seam BEFORE
-        // running the probe. Production builds compile both the
-        // field and this branch out entirely. The seam is
-        // `String`-shaped at the `ServerConfig` boundary (see the
-        // field docstring) and reconstructed into
-        // `DataplaneError::LoadFailed` here — the variant
-        // S-BDB-14's assertion (`matches!(... LoadFailed(_))`)
-        // expects.
-        //
-        // Gated on `feature = "integration-tests"` (NOT also
-        // `cfg(test)`) so the gate matches the upstream
-        // `EbpfDataplane::set_probe_fault` symbol's cfg —
-        // `cargo test --no-run -p overdrive-control-plane`
-        // without `--features integration-tests` would otherwise
-        // enable this branch (test-of-control-plane sets
-        // `cfg(test)` for control-plane) while leaving the
-        // dataplane dep compiled without the feature, so the
-        // method would be missing. The integration-tests feature
-        // forwards via the Cargo.toml dep — see this crate's
-        // `[features]` block.
-        #[cfg(feature = "integration-tests")]
-        if let Some(fault_msg) = config.dataplane_probe_fault.clone() {
-            ebpf_dataplane.set_probe_fault(
-                overdrive_core::traits::dataplane::DataplaneError::LoadFailed(fault_msg),
-            );
-        }
-
-        // Step 02-03: Earned-Trust probe per architecture.md § 5.4
-        // and CLAUDE.md principle 12. Composition-root invariant
-        // "wire then probe then use" — the probe runs AFTER
-        // `new()` succeeds and BEFORE the first dataplane operation.
-        // On failure we emit a structured `health.startup.refused`
-        // event with `reason = "dataplane.probe"` and refuse to
-        // boot. The `?` causes `ebpf_dataplane` to drop, which
-        // detaches XDP and unlinks the SERVICE_MAP pin via the
-        // `EbpfDataplane::Drop` impl.
-        if let Err(source) = ebpf_dataplane.probe().await {
-            tracing::warn!(
-                name: "health.startup.refused",
-                reason = "dataplane.probe",
-                client_iface = %dataplane_cfg.client_iface,
-                backend_iface = %dataplane_cfg.backend_iface,
-                error = %source,
-                "Earned-Trust probe failed; refusing to boot"
-            );
-            return Err(error::ControlPlaneError::DataplaneBoot(
-                error::DataplaneBootError::Probe { source },
-            ));
-        }
-
-        Arc::new(ebpf_dataplane)
-    };
+    // Boot step 3 (ADR-0052, ADR-0061, ADR-0219): the root's composer
+    // provisions, constructs and probes the dataplane and resolves the
+    // node's address on the client interface; its refusals are the boot's.
+    let pin_dir = config
+        .dataplane_pin_dir
+        .clone()
+        .unwrap_or_else(|| std::path::PathBuf::from(overdrive_dataplane::DEFAULT_PIN_DIR));
+    let cgroup_attach_path = config.dataplane_cgroup_attach_path.clone().unwrap_or_else(|| {
+        std::path::PathBuf::from(overdrive_dataplane::DEFAULT_CGROUP_ATTACH_PATH)
+    });
+    let ComposedDataplane { dataplane, host_ipv4 } = dataplane_composer
+        .compose(DataplanePlan {
+            config: dataplane_cfg,
+            vip_range: &config.vip_range,
+            pin_dir: &pin_dir,
+            cgroup_attach_path: &cgroup_attach_path,
+        })
+        .await?;
     // Phase 2.2: production single-mode uses a placeholder node id;
     // Phase 2 introduces real node-bootstrap identity that will replace
     // this. The shim writes this into `LogicalTimestamp.writer` on
@@ -7586,39 +3218,6 @@ pub async fn run_server_with_obs_and_drivers(
         error::ControlPlaneError::Internal(format!("placeholder NodeId rejected: {e}"))
     })?;
 
-    // Dataplane configuration —
-    // require the `[dataplane]` config section per architecture.md
-    // § 5.1 and resolve `host_ipv4` via `getifaddrs(3)` on the
-    // operator-supplied `client_iface`.
-    //
-    // The loopback default is keyed on *iface-resolution failure*,
-    // never on `dataplane_override` presence. The override knob is too
-    // coarse a proxy for "Sim/loopback boot": it carries TWO cases that
-    // need OPPOSITE host_ipv4 resolution (RCA
-    // docs/analysis/root-cause-analysis-bridge-hydrator-register-local-backend.md):
-    //
-    //   1. Sim/DST/CLI boots inject a SimDataplane override and never
-    //      provision the `client_iface` (`ovd-veth-cli` in the default
-    //      config), or carry no `[dataplane]` section at all. Resolving
-    //      the iface fails → `LOCALHOST` is correct (these boots only
-    //      seed the bridge/hydrator local-backend socket addresses and
-    //      do not exercise the real attach path).
-    //   2. The S-BDB walking-skeletons inject a REAL `EbpfDataplane` on
-    //      a REAL provisioned veth (`10.244.x.1`) through the SAME
-    //      override field. Resolving the iface SUCCEEDS → the real IP is
-    //      correct; collapsing it to `LOCALHOST` makes the bridge write
-    //      a loopback backend that the hydrator's (correct, intended)
-    //      loopback guard then rejects, so no `RegisterLocalBackend` is
-    //      ever emitted.
-    //
-    // Resolve from `client_iface` first; fall back to `LOCALHOST` only
-    // when resolution fails AND an override is present (the Sim/CLI/DST
-    // condition). The production path (no override) still propagates the
-    // error and refuses to boot on an absent/unresolvable iface.
-    let host_ipv4 = host_ipv4_with_override_fallback(
-        resolve_host_ipv4_from_dataplane_config(config.dataplane.as_ref()),
-        config.dataplane_override.is_some(),
-    )?;
     // Service-health-check-probes — the `ProbeRunner` Earned-Trust gate is
     // owned by `run_server`; this split function accepts a caller-supplied
     // registry and intentionally does not repeat the boot gate. Test callers
@@ -7677,18 +3276,12 @@ pub async fn run_server_with_obs_and_drivers(
     // no-op. The composition itself is what 01-08 makes real — the
     // engine is now reachable in the production binary, replacing the
     // 01-05/01-06 `dispatch(... None)` placeholder.
-    let journal_path = config.data_dir.join("workflow-journal.redb");
-    let journal_db = Arc::new(
-        redb::Database::create(&journal_path)
-            .map_err(|e| error::ControlPlaneError::internal("create workflow-journal redb", e))?,
-    );
-    let journal: Arc<dyn journal::JournalStore> =
-        Arc::new(journal::RedbJournalStore::new(journal_db));
+    let journal: Arc<dyn journal::JournalStore> = Arc::clone(&stores.journal);
     let workflow_engine = Arc::new(workflow_runtime::WorkflowEngine::new(
         journal,
-        config.clock.clone(),
-        Arc::new(overdrive_host::TcpTransport::default()),
-        Arc::new(overdrive_host::OsEntropy),
+        clock.clone(),
+        transport,
+        Arc::clone(&entropy),
         workflow_runtime::WorkflowRegistry::new(),
         Arc::clone(&obs),
     ));
@@ -7709,28 +3302,26 @@ pub async fn run_server_with_obs_and_drivers(
     // adopted CA on demand. This is the WORKLOAD-identity CA only; the separate
     // operator/control-plane HTTPS CA (`mint_ephemeral_ca`) is ephemeral by
     // design and untouched.
-    let ca_subject = overdrive_core::SpiffeId::new("spiffe://overdrive.local/overdrive/ca")
-        .unwrap_or_else(|e| unreachable!("CA trust-domain subject is a valid SPIFFE URI: {e}"));
-    let ca: Arc<dyn Ca> =
-        Arc::new(overdrive_host::ca::RcgenCa::new(Arc::new(overdrive_host::OsEntropy), ca_subject));
+    // STORES-IN (ADR-0219): the CA comes from the composition root as a
+    // factory, built here exactly once over the boot's one entropy, so a
+    // composition that replaces `BootAdapters.entropy` cannot leave the CA
+    // keyed to another source.
+    let CaAdapters { factory: ca_factory, root_key_codec } = ca_adapters;
+    let ca = ca_factory.build(Arc::clone(&entropy));
 
-    // The `Kek` provider is INJECTED through `config.kek` (§ C1-AMEND), NOT
-    // constructed inline. Production composes `SystemdCredsKeyring::new()` at
-    // the CLI `serve` boundary; tests inject a hermetic `SimKek::for_boot()`.
-    // Inline construction here (the prior `SystemdCredsKeyring::new()`) forced
-    // the production kernel-keyring binding on every test fixture and refused
-    // to boot in a cold environment — the regression this seam closes. Both
-    // `boot_ca` and `bootstrap_node_intermediate` already take `&dyn Kek`, so
-    // only the SOURCE of the `&dyn Kek` changes (REUSE-AS-IS).
-    let codec = overdrive_host::ca::RootKeyAeadCodec::new();
+    // The `Kek` provider is `BootAdapters.kek` (§ C1-AMEND), never constructed
+    // here: `overdrive serve` passes `SystemdCredsKeyring::new()` through
+    // `NodeAdapters::host`; tests pass a hermetic `SimKek::for_boot()`. Both
+    // `boot_ca` and `bootstrap_node_intermediate` take `&dyn Kek`.
+    let codec = root_key_codec;
     let kek_id = ca_boot::root_kek_id();
     let intent_store: Arc<dyn IntentStore> = Arc::clone(&store) as Arc<dyn IntentStore>;
 
     let _root = ca_boot::boot_ca(
         ca.as_ref(),
-        config.kek.as_ref(),
+        kek.as_ref(),
         &kek_id,
-        &codec,
+        codec.as_ref(),
         &intent_store,
         &store_path,
     )
@@ -7739,9 +3330,9 @@ pub async fn run_server_with_obs_and_drivers(
         ca.as_ref(),
         &node_id,
         &intent_store,
-        config.kek.as_ref(),
+        kek.as_ref(),
         &kek_id,
-        &codec,
+        codec.as_ref(),
         &store_path,
     )
     .await?;
@@ -7768,8 +3359,7 @@ pub async fn run_server_with_obs_and_drivers(
     let guest_pool = Arc::new(guest_network::GuestAddressPool::new(
         overdrive_core::guest_transport::GUEST_NODE_PREFIX,
         overdrive_core::guest_transport::GUEST_NODE_GATEWAY,
-        Arc::new(overdrive_host::VhostVsockCidClaim::new()),
-        Arc::new(overdrive_host::OsEntropy),
+        Arc::clone(&entropy),
     ));
 
     // Retain the probed resolver through the later converge-on-boot frontend
@@ -7781,53 +3371,29 @@ pub async fn run_server_with_obs_and_drivers(
     // write happens.
     let mtls_resolve_after_frontend_rebuild;
     let mtls_resolve_owner;
-    let mtls_worker = {
-        // (1) construct the enforcement port over the held identity +
-        // the F7 limits. `IdentityMgr` impls `IdentityRead`.
-        //
-        // Focused adapter tests may substitute the whole IdentityRead
-        // port. The normal integration and production paths keep this
-        // unset and therefore prove the real IdentityMgr issuance and
-        // lifecycle path. Production builds compile the override out.
-        #[cfg(feature = "integration-tests")]
-        let mtls_identity: Arc<dyn overdrive_core::traits::IdentityRead> =
-            config.mtls_identity_override.clone().unwrap_or_else(|| {
-                Arc::clone(&identity) as Arc<dyn overdrive_core::traits::IdentityRead>
-            });
-        #[cfg(not(feature = "integration-tests"))]
-        let mtls_identity: Arc<dyn overdrive_core::traits::IdentityRead> =
-            Arc::clone(&identity) as Arc<dyn overdrive_core::traits::IdentityRead>;
-        let enforcement: Arc<dyn overdrive_core::traits::mtls_enforcement::MtlsEnforcement> =
-            Arc::new(overdrive_dataplane::mtls::HostMtlsEnforcement::new(
-                mtls_identity,
-                overdrive_core::traits::mtls_enforcement::MtlsLimits::default(),
-            ));
-
-        // (2) probe (Earned Trust): the test-only `mtls_probe_fault` seam
-        // forces a probe failure so criteria[0] exercises the fail-closed
-        // refusal without a real substrate fault; otherwise the real
-        // `probe()` runs. Either failure → refuse to boot.
-        #[cfg(feature = "integration-tests")]
-        let forced_probe_fault = config.mtls_probe_fault.clone();
-        #[cfg(not(feature = "integration-tests"))]
-        let forced_probe_fault: Option<String> = None;
-
-        if let Some(message) = forced_probe_fault {
-            tracing::warn!(
-                name: "health.startup.refused",
-                reason = "mtls.probe",
-                error = %message,
-                "transparent-mTLS proxy probe failed (injected fault); \
-                 refusing to boot (no cleartext fallback)"
-            );
-            return Err(error::ControlPlaneError::MtlsBoot(error::MtlsBootError::Probe {
-                source: overdrive_core::traits::mtls_enforcement::MtlsEnforcementError::Probe {
-                    which:
-                        overdrive_core::traits::mtls_enforcement::ProbeSentinel::KtlsArmRoundTrip,
-                    message,
+    let (mtls_worker, shared_guest_network) = {
+        // (1) the root's enforcement factory builds the enforcement port over
+        // the held identity, the F7 limits, the guest prefix and the boot's
+        // guest dial (NO-OVERRIDE-SEAMS, LEGS-DIAL). `IdentityMgr` impls
+        // `IdentityRead`. Leg S to a VM backend dials the guest-flow owner —
+        // the boot's one `OwnerDial` on the composed path, the supplied owner
+        // on the supplied path.
+        let enforcement = mtls_adapters.enforcement.enforcement(
+            overdrive_core::traits::mtls_enforcement::MtlsEnforcementDeps {
+                identity: Arc::clone(&identity) as Arc<dyn overdrive_core::traits::IdentityRead>,
+                limits: overdrive_core::traits::mtls_enforcement::MtlsLimits::default(),
+                guest_prefix: overdrive_core::guest_transport::GUEST_NODE_PREFIX,
+                guest_dial: match &guest_network {
+                    GuestNetworkSource::Supplied(owner) => Arc::clone(owner)
+                        as Arc<dyn overdrive_core::guest_transport::dial::GuestStreamDial>,
+                    GuestNetworkSource::Composed { dial, .. } => Arc::clone(dial)
+                        as Arc<dyn overdrive_core::guest_transport::dial::GuestStreamDial>,
                 },
-            }));
-        }
+            },
+        );
+
+        // (2) probe (Earned Trust): wire → probe → use. A failure refuses
+        // to boot (no cleartext fallback).
         if let Err(source) = enforcement.probe().await {
             tracing::warn!(
                 name: "health.startup.refused",
@@ -7878,18 +3444,47 @@ pub async fn run_server_with_obs_and_drivers(
         mtls_resolve_after_frontend_rebuild = Arc::clone(&resolve);
         mtls_resolve_owner = service_backends_resolve;
 
-        // (4) construct the worker with all four ports as REQUIRED params
+        // (4) construct the worker with all its ports as REQUIRED params
         // (mandatory `new()`, no builder). `ServerConfig` owns the intercept
         // adapter: production supplies `HostMtlsIntercept`; in-process
         // compositions can supply `SimMtlsIntercept` through the same port.
         // The worker uses it for the node-shared listeners and program as
-        // well as allocation element registration.
-        Arc::new(overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::new(
-            enforcement,
-            resolve,
-            config.clock.clone(),
-            config.mtls_intercept.clone(),
-        ))
+        // well as allocation element registration. LEGS-DIAL: leg S of a VM
+        // backend is dialled by the enforcement (above), not the worker.
+        match guest_network {
+            GuestNetworkSource::Supplied(owner) => {
+                let worker =
+                    Arc::new(overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::new(
+                        enforcement,
+                        resolve,
+                        clock.clone(),
+                        Arc::clone(&mtls_adapters.intercept),
+                    ));
+                (worker, owner)
+            }
+            GuestNetworkSource::Composed { io, dial } => {
+                // D-UP-16 / D-8 phase 2: the owner takes this worker, and the
+                // enforcement the worker is built over reaches the owner
+                // through `dial`, which the composition binds; one
+                // construction, no other owner or worker.
+                let (owner, worker) = compose_guest_network(
+                    GuestNetworkCompositionPorts {
+                        clock: clock.clone(),
+                        resolve,
+                        enforcement,
+                        intercept: Arc::clone(&mtls_adapters.intercept),
+                        vip_range: config.vip_range.clone(),
+                        node_prefix: overdrive_core::guest_transport::GUEST_NODE_PREFIX,
+                        gateway: overdrive_core::guest_transport::GUEST_NODE_GATEWAY,
+                        stream_port: config.vsock_ports.flow_stream(),
+                        control_port: config.vsock_ports.flow_control(),
+                    },
+                    io,
+                    dial,
+                );
+                (worker, owner as Arc<dyn guest_network::SharedGuestNetworkOwner>)
+            }
+        }
     };
 
     // microvm-driver-cloud-hypervisor step 02-02 (ADR-0083 §D7, brief.md
@@ -7921,7 +3516,7 @@ pub async fn run_server_with_obs_and_drivers(
         obs,
         runtime,
         drivers,
-        config.clock.clone(),
+        clock.clone(),
         dataplane,
         ca,
         identity,
@@ -8009,6 +3604,18 @@ pub async fn run_server_with_obs_and_drivers(
             "shared guest-network convergence refused"
         );
         return Err(error::ControlPlaneError::from(cause));
+    }
+    // PORTS-CONFIG (ADR-0218): from the first `Ok` converge the owner reports
+    // the ports its stream and control listeners bound; the boot reads them
+    // once into the action shim's state.
+    // SCAFFOLD: true — netns-density-295 DISTILL (attachment-cut step 6): the
+    // host owner binds no listener until that step and reports `None`; the
+    // `unreachable!` on `None` after an `Ok` converge lands with it.
+    let flow_ports = shared_guest_network.flow_ports();
+    if let Some(ports) = flow_ports
+        && state.guest_flow_ports.set(ports).is_err()
+    {
+        unreachable!("the boot sets the guest-flow ports once, after step 9");
     }
 
     // Publish the one node-shared F/C listener owner only after the shared
@@ -8118,11 +3725,12 @@ pub async fn run_server_with_obs_and_drivers(
         // dial-by-name-responder step 02-01, ADR-0072). Built AFTER the
         // converge-on-boot frontend rebuild (so its internal `NameIndex` reads a
         // populated allocator, never empty-but-trusted) and BEFORE the listener
-        // binds, inside the SAME `mtls_worker.is_some()` real-dataplane block
-        // that gates the netns / intercept path. It holds:
+        // binds, inside the same block that composes the netns / intercept
+        // path. It holds:
         //   - `state.obs` — the `service_backends` List/Watch source the
         //     internal `NameIndex` reads (the third sibling reader, DDN-1);
-        //   - `config.clock` — the SOA SERIAL source for `wire::encode`;
+        //   - the boot's one clock (`BootAdapters.clock`) — the SOA SERIAL
+        //     source for `wire::encode`;
         //   - the accepted fixed node-shared gateway — the singular fallback;
         //   - `state.frontend_addr_allocator` — the SAME shared
         //     `FrontendAddrAllocator` injected into the re-keyed `MtlsResolve`
@@ -8135,10 +3743,10 @@ pub async fn run_server_with_obs_and_drivers(
         // lazily could start and THEN fail to answer — the silent-degradation
         // footgun). Mirrors the `MtlsResolve.probe()` refuse-boot block above.
         let dns_gateway = std::net::Ipv4Addr::new(100, 95, 0, 1);
-        let dns_factory = Arc::clone(&config.guest_dns);
+        let dns_factory = Arc::clone(&guest_dns);
         let dns_responder_deps = (
             Arc::clone(&state.obs),
-            config.clock.clone(),
+            clock.clone(),
             dns_gateway,
             state.frontend_addr_allocator.clone(),
         );
@@ -8200,7 +3808,7 @@ pub async fn run_server_with_obs_and_drivers(
                 state.obs.clone(),
                 driver,
                 state.lifecycle_events.clone(),
-                config.clock.clone(),
+                clock.clone(),
                 Some(state.runtime.clone()),
                 exit_observer_shutdown.clone(),
             )
@@ -8222,7 +3830,7 @@ pub async fn run_server_with_obs_and_drivers(
     let convergence_shutdown = CancellationToken::new();
     let convergence_task = spawn_convergence_loop(
         state.clone(),
-        config.clock.clone(),
+        clock.clone(),
         config.tick_cadence,
         convergence_shutdown.clone(),
     );
@@ -8252,13 +3860,13 @@ pub async fn run_server_with_obs_and_drivers(
         state.obs.clone(),
         interest_subscription,
         interest_table,
-        InterestRouterBroker::from_runtime(state.runtime.clone(), config.clock.clone()),
+        InterestRouterBroker::from_runtime(state.runtime.clone(), clock.clone()),
         // Single-clock DST preserved (ADR-0084 § Amendment 2026-08-23): the
-        // router reads the SAME `config.clock` instance the convergence loop
+        // router reads the SAME `BootAdapters.clock` instance the convergence loop
         // reads (one clock, two readers), so seed → bit-identical trajectory
         // holds. `INTEREST_ROUTER_RELIST_PERIOD` is the production relist
         // cadence — the row-backed level-triggered backstop.
-        config.clock.clone(),
+        clock.clone(),
         INTEREST_ROUTER_RELIST_PERIOD,
         interest_router_shutdown.clone(),
     );
@@ -8276,7 +3884,7 @@ pub async fn run_server_with_obs_and_drivers(
     // emit path complete end-to-end.
     let emit_drain_shutdown = CancellationToken::new();
     let emit_drain_task =
-        spawn_workflow_emit_drain(state.clone(), config.clock.clone(), emit_drain_shutdown.clone());
+        spawn_workflow_emit_drain(state.clone(), clock.clone(), emit_drain_shutdown.clone());
 
     // Hold the worker's task tree at the same ownership boundary as the
     // server. The router and convergence tasks also hold AppState clones, but
@@ -8288,7 +3896,7 @@ pub async fn run_server_with_obs_and_drivers(
     let (request_tx, request_rx) = tokio::sync::mpsc::channel(1);
     let supervisor_exec = guest_network_exec.supervisor();
     let supervisor_guest_network = Arc::clone(&shared_guest_network);
-    let supervisor_clock = config.clock.clone();
+    let supervisor_clock = clock.clone();
     let supervisor_worker = mtls_worker_owner.clone();
     let supervisor_task_shutdown = supervisor_shutdown.clone();
     let supervisor_task = tokio::spawn(async move {
@@ -8421,6 +4029,8 @@ pub async fn run_server_with_obs_and_drivers(
         mtls_worker_owner,
         mtls_resolve_owner,
         shared_network_supervisor,
+        flow_ports,
+        beacon_port: None,
     })
 }
 
@@ -9229,63 +4839,6 @@ pub fn service_map_hydrator(host_ipv4: std::net::Ipv4Addr) -> overdrive_reconcil
 
 #[cfg(test)]
 mod tests {
-    use std::net::Ipv4Addr;
-
-    use super::host_ipv4_with_override_fallback;
-    use crate::error::ControlPlaneError;
-
-    fn resolution_failure() -> ControlPlaneError {
-        ControlPlaneError::Validation {
-            message: "iface unresolvable".to_owned(),
-            field: Some("dataplane.client_iface".to_owned()),
-        }
-    }
-
-    // A successful resolution is used as-is regardless of the override
-    // flag — the override must NEVER collapse a real IP to loopback
-    // (the ADR-0053 bridge-hydrator bug). Asserted on both branches of
-    // `has_dataplane_override` to pin that the flag is inert on `Ok`.
-    #[test]
-    fn successful_resolution_is_used_as_is_with_override() {
-        let resolved = Ok(Ipv4Addr::new(10, 1, 2, 3));
-        let result = host_ipv4_with_override_fallback(resolved, true);
-        assert_eq!(result.ok(), Some(Ipv4Addr::new(10, 1, 2, 3)));
-    }
-
-    #[test]
-    fn successful_resolution_is_used_as_is_without_override() {
-        let resolved = Ok(Ipv4Addr::new(10, 1, 2, 3));
-        let result = host_ipv4_with_override_fallback(resolved, false);
-        assert_eq!(result.ok(), Some(Ipv4Addr::new(10, 1, 2, 3)));
-    }
-
-    // The fallback arm: resolution FAILED and an override is present
-    // (Sim/DST/CLI with no provisioned veth) → boot with LOCALHOST.
-    // This is precisely the arm the `is_some() -> false` match-guard
-    // mutant breaks: with the guard forced to `false`, a present
-    // override would fall through to `Err(source)` and this assertion
-    // would fail.
-    #[test]
-    fn failed_resolution_with_override_falls_back_to_localhost() {
-        let resolved = Err(resolution_failure());
-        let result = host_ipv4_with_override_fallback(resolved, true);
-        assert_eq!(result.ok(), Some(Ipv4Addr::LOCALHOST));
-    }
-
-    // The production arm: resolution FAILED and no override is present
-    // → propagate the error and refuse to boot. Paired with the test
-    // above, this is what makes flipping the guard to `false` fail:
-    // the two branches must diverge on the same `Err` input.
-    #[test]
-    fn failed_resolution_without_override_propagates_error() {
-        let resolved = Err(resolution_failure());
-        let result = host_ipv4_with_override_fallback(resolved, false);
-        assert!(
-            matches!(result, Err(ControlPlaneError::Validation { .. })),
-            "expected the resolution failure to propagate unchanged, got {result:?}",
-        );
-    }
-
     /// D1 review remediation (step 01-09, GH #42): proves `compose_vm_driver`
     /// wires each of its fallible steps into its OWN [`error::VmmBootError`]
     /// variant rather than a flattened `String` — a `matches!()` on the
@@ -9317,7 +4870,10 @@ mod tests {
         use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm, SimVmmProbeFault};
         use overdrive_worker::probe_runner::ProbeRunner;
 
+        use overdrive_core::guest_transport::VsockListenPort;
+
         use crate::error::VmmBootError;
+        use crate::node_adapters::{VmAdapters, VmCapability};
         use crate::{VmComposeError, compose_vm_driver};
 
         #[allow(clippy::expect_used)]
@@ -9330,6 +4886,7 @@ mod tests {
                     overdrive_core::id::NodeId::new("vm-compose-errors").expect("valid node ID"),
                     0,
                 )),
+                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
             ))
         }
 
@@ -9351,13 +4908,20 @@ mod tests {
                 )),
                 Arc::new(SimClock::new()),
                 Arc::new(SimCgroupFs::new()),
-                Arc::new(SimCgroupAccounting::new()),
                 test_probe_runner(),
                 overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(
                     SimClock::new(),
                 ))
                 .gate(),
-                Some(Arc::new(sim_vmm)),
+                VmAdapters {
+                    beacon: Arc::new(overdrive_sim::adapters::beacon_io::SimBeaconIo::new(
+                        sim_vmm.clone(),
+                    )),
+                    vmm: Arc::new(sim_vmm),
+                    cgroup_accounting: Arc::new(SimCgroupAccounting::new()),
+                    capability: VmCapability::Required,
+                },
+                VsockListenPort::KernelAssigned,
             )
             .await
             .err();
@@ -9378,17 +4942,7 @@ mod tests {
         /// entirely in which wrapper holds the cause, never in a second,
         /// differently-shaped copy of it (enforced by the type
         /// declaration itself: both variants are declared as
-        /// `(error::VmmBootError)`). Constructed directly — no adapter,
-        /// no `.await` — because `compose_vm_driver`'s `injected` flag
-        /// is DEFINED as `vmm_override.is_some()`: there is no way to
-        /// reach `NotAvailable` through the function itself with a
-        /// CONTROLLED fault. `vmm_override = None` always constructs the
-        /// REAL, un-injectable `overdrive_host::CloudHypervisorVmm`
-        /// (confirmed empirically: on the Lima dev box this genuinely
-        /// fails probe with `ReflinkUnsupported` on `/srv/vm`, a real
-        /// substrate fact of THIS host — exactly the kind of
-        /// environment-dependent outcome a deterministic unit test must
-        /// not assert a specific variant of).
+        /// `(error::VmmBootError)`).
         #[test]
         fn not_available_wraps_the_same_typed_boot_error_as_refused() {
             let cause = VmmBootError::Probe {
@@ -9405,6 +4959,52 @@ mod tests {
                     })
                 ),
                 "VmComposeError::NotAvailable must carry the typed VmmBootError variant unchanged"
+            );
+        }
+
+        /// ADR-0219: the composition root's `VmCapability` states what a
+        /// failed probe means. Under `Optional` the same injected probe
+        /// fault is `NotAvailable` (the node boots without a `Vm` driver),
+        /// carrying the same typed cause `Required` refuses with.
+        #[tokio::test]
+        async fn optional_capability_classifies_the_probe_failure_as_not_available() {
+            let sim_vmm = SimVmm::new();
+            sim_vmm.inject_probe_failure(SimVmmProbeFault::LandlockLsmAbsent);
+
+            let err = compose_vm_driver(
+                PathBuf::from("/sys/fs/cgroup/overdrive.slice"),
+                overdrive_core::vm::config::clone_index_dir(&PathBuf::from("/srv/overdrive/data")),
+                overdrive_core::vm::config::clone_staging_dir(&PathBuf::from(
+                    "/srv/overdrive/data",
+                )),
+                Arc::new(SimClock::new()),
+                Arc::new(SimCgroupFs::new()),
+                test_probe_runner(),
+                overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(
+                    SimClock::new(),
+                ))
+                .gate(),
+                VmAdapters {
+                    beacon: Arc::new(overdrive_sim::adapters::beacon_io::SimBeaconIo::new(
+                        sim_vmm.clone(),
+                    )),
+                    vmm: Arc::new(sim_vmm),
+                    cgroup_accounting: Arc::new(SimCgroupAccounting::new()),
+                    capability: VmCapability::Optional,
+                },
+                VsockListenPort::KernelAssigned,
+            )
+            .await
+            .err();
+
+            assert!(
+                matches!(
+                    err,
+                    Some(VmComposeError::NotAvailable(VmmBootError::Probe {
+                        source: overdrive_core::traits::vmm::VmmProbeError::LandlockLsmAbsent { .. }
+                    }))
+                ),
+                "expected NotAvailable(VmmBootError::Probe{{LandlockLsmAbsent}}), got {err:?}"
             );
         }
 
@@ -9427,13 +5027,20 @@ mod tests {
                 )),
                 Arc::new(SimClock::new()),
                 Arc::new(SimCgroupFs::new()),
-                Arc::new(sim_cgroup_accounting),
                 test_probe_runner(),
                 overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(
                     SimClock::new(),
                 ))
                 .gate(),
-                Some(Arc::new(sim_vmm)),
+                VmAdapters {
+                    beacon: Arc::new(overdrive_sim::adapters::beacon_io::SimBeaconIo::new(
+                        sim_vmm.clone(),
+                    )),
+                    vmm: Arc::new(sim_vmm),
+                    cgroup_accounting: Arc::new(sim_cgroup_accounting),
+                    capability: VmCapability::Required,
+                },
+                VsockListenPort::KernelAssigned,
             )
             .await
             .err();

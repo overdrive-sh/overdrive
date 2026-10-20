@@ -1,5 +1,6 @@
 # Checks the `cargo xtask quint` runner executes for specs/quint/probe-count/.
-# Main instance probe_streak (the approved rule); hazard/ instances switch one rule off each.
+# Main instance probe_streak (the approved rule); hazard/ instances switch one rule off each; probe_streak_conf is the
+# conformance main (D-UP-1), the only instance that records conf_step.
 
 # ---- main instance: every invariant holds
 
@@ -169,12 +170,12 @@ backend = "tlc"
 expect = "violation"
 ci = true
 
-# ---- named runs on the main instance
+# ---- named runs on the conformance main probe_streak_conf (D-UP-1: records conf_step; no model check runs on it)
 
 [[check]]
 name = "probe-count-run-happy-path-three-fails-terminate-at-threshold"
 spec = "probe_count.qnt"
-main = "probe_streak"
+main = "probe_streak_conf"
 run = "HappyPathThreeFailsTerminateAtThreshold"
 backend = "evaluator"
 expect = "holds"
@@ -183,7 +184,7 @@ ci = true
 [[check]]
 name = "probe-count-run-coalesced-fails-terminate-on-first-look"
 spec = "probe_count.qnt"
-main = "probe_streak"
+main = "probe_streak_conf"
 run = "CoalescedFailsTerminateOnFirstLook"
 backend = "evaluator"
 expect = "holds"
@@ -192,7 +193,7 @@ ci = true
 [[check]]
 name = "probe-count-run-missing-sample-changes-nothing"
 spec = "probe_count.qnt"
-main = "probe_streak"
+main = "probe_streak_conf"
 run = "MissingSampleChangesNothing"
 backend = "evaluator"
 expect = "holds"
@@ -201,7 +202,7 @@ ci = true
 [[check]]
 name = "probe-count-run-re-read-after-failed-stop-does-not-re-terminate"
 spec = "probe_count.qnt"
-main = "probe_streak"
+main = "probe_streak_conf"
 run = "ReReadAfterFailedStopDoesNotReTerminate"
 backend = "evaluator"
 expect = "holds"
@@ -210,7 +211,7 @@ ci = true
 [[check]]
 name = "probe-count-run-failed-stop-retried-on-next-row"
 spec = "probe_count.qnt"
-main = "probe_streak"
+main = "probe_streak_conf"
 run = "FailedStopRetriedOnNextRow"
 backend = "evaluator"
 expect = "holds"
@@ -219,7 +220,7 @@ ci = true
 [[check]]
 name = "probe-count-run-new-streak-after-pass-terminates-again"
 spec = "probe_count.qnt"
-main = "probe_streak"
+main = "probe_streak_conf"
 run = "NewStreakAfterPassTerminatesAgain"
 backend = "evaluator"
 expect = "holds"
@@ -228,7 +229,7 @@ ci = true
 [[check]]
 name = "probe-count-run-flip-between-looks-no-early-terminate"
 spec = "probe_count.qnt"
-main = "probe_streak"
+main = "probe_streak_conf"
 run = "FlipBetweenLooksNoEarlyTerminate"
 backend = "evaluator"
 expect = "holds"
@@ -237,7 +238,7 @@ ci = true
 [[check]]
 name = "probe-count-run-readiness-reaches-threshold"
 spec = "probe_count.qnt"
-main = "probe_streak"
+main = "probe_streak_conf"
 run = "ReadinessReachesThreshold"
 backend = "evaluator"
 expect = "holds"
@@ -246,7 +247,7 @@ ci = true
 [[check]]
 name = "probe-count-run-clock-step-back-does-not-lose-row"
 spec = "probe_count.qnt"
-main = "probe_streak"
+main = "probe_streak_conf"
 run = "ClockStepBackDoesNotLoseRow"
 backend = "evaluator"
 expect = "holds"

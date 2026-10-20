@@ -20,11 +20,12 @@ State 1: <Initial predicate>
 /\ streak_bugLwwObservedAt_probe_count_hist = <<>>
 /\ streak_bugLwwObservedAt_probe_count_terms = 0
 /\ streak_bugLwwObservedAt_probe_count_pseq = 0
+/\ streak_bugLwwObservedAt_probe_count_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ streak_bugLwwObservedAt_probe_count_psame = 0
 /\ streak_bugLwwObservedAt_probe_count_pst = ""
 /\ streak_bugLwwObservedAt_probe_count_rst = ""
 
-State 2: <streak_bugLwwObservedAt_probe_count_ProbeRun line 349, col 3 to line 414, col 50 of module streak_bugLwwObservedAt>
+State 2: <streak_bugLwwObservedAt_probe_count_ProbeRun line 370, col 3 to line 441, col 57 of module streak_bugLwwObservedAt>
 /\ streak_bugLwwObservedAt_probe_count_fs = 0
 /\ streak_bugLwwObservedAt_probe_count_clock = 1
 /\ streak_bugLwwObservedAt_probe_count_runs = 1
@@ -46,11 +47,12 @@ State 2: <streak_bugLwwObservedAt_probe_count_ProbeRun line 349, col 3 to line 4
 /\ streak_bugLwwObservedAt_probe_count_hist = <<"Pass">>
 /\ streak_bugLwwObservedAt_probe_count_terms = 0
 /\ streak_bugLwwObservedAt_probe_count_pseq = 1
+/\ streak_bugLwwObservedAt_probe_count_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ streak_bugLwwObservedAt_probe_count_psame = 1
 /\ streak_bugLwwObservedAt_probe_count_pst = "Pass"
 /\ streak_bugLwwObservedAt_probe_count_rst = "Pass"
 
-State 3: <streak_bugLwwObservedAt_probe_count_ProbeRun line 349, col 3 to line 414, col 50 of module streak_bugLwwObservedAt>
+State 3: <streak_bugLwwObservedAt_probe_count_ProbeRun line 370, col 3 to line 441, col 57 of module streak_bugLwwObservedAt>
 /\ streak_bugLwwObservedAt_probe_count_fs = 0
 /\ streak_bugLwwObservedAt_probe_count_clock = 2
 /\ streak_bugLwwObservedAt_probe_count_runs = 2
@@ -72,11 +74,12 @@ State 3: <streak_bugLwwObservedAt_probe_count_ProbeRun line 349, col 3 to line 4
 /\ streak_bugLwwObservedAt_probe_count_hist = <<"Pass", "Pass">>
 /\ streak_bugLwwObservedAt_probe_count_terms = 0
 /\ streak_bugLwwObservedAt_probe_count_pseq = 2
+/\ streak_bugLwwObservedAt_probe_count_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ streak_bugLwwObservedAt_probe_count_psame = 2
 /\ streak_bugLwwObservedAt_probe_count_pst = "Pass"
 /\ streak_bugLwwObservedAt_probe_count_rst = "Pass"
 
-State 4: <streak_bugLwwObservedAt_probe_count_ClockBack line 189, col 3 to line 223, col 46 of module streak_bugLwwObservedAt>
+State 4: <streak_bugLwwObservedAt_probe_count_ClockBack line 202, col 3 to line 240, col 57 of module streak_bugLwwObservedAt>
 /\ streak_bugLwwObservedAt_probe_count_fs = 0
 /\ streak_bugLwwObservedAt_probe_count_clock = 0
 /\ streak_bugLwwObservedAt_probe_count_runs = 2
@@ -98,11 +101,12 @@ State 4: <streak_bugLwwObservedAt_probe_count_ClockBack line 189, col 3 to line 
 /\ streak_bugLwwObservedAt_probe_count_hist = <<"Pass", "Pass">>
 /\ streak_bugLwwObservedAt_probe_count_terms = 0
 /\ streak_bugLwwObservedAt_probe_count_pseq = 2
+/\ streak_bugLwwObservedAt_probe_count_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ streak_bugLwwObservedAt_probe_count_psame = 2
 /\ streak_bugLwwObservedAt_probe_count_pst = "Pass"
 /\ streak_bugLwwObservedAt_probe_count_rst = "Pass"
 
-State 5: <streak_bugLwwObservedAt_probe_count_ProbeRun line 349, col 3 to line 414, col 50 of module streak_bugLwwObservedAt>
+State 5: <streak_bugLwwObservedAt_probe_count_ProbeRun line 370, col 3 to line 441, col 57 of module streak_bugLwwObservedAt>
 /\ streak_bugLwwObservedAt_probe_count_fs = 0
 /\ streak_bugLwwObservedAt_probe_count_clock = 1
 /\ streak_bugLwwObservedAt_probe_count_runs = 3
@@ -124,6 +128,7 @@ State 5: <streak_bugLwwObservedAt_probe_count_ProbeRun line 349, col 3 to line 4
 /\ streak_bugLwwObservedAt_probe_count_hist = <<"Pass", "Pass", "Pass">>
 /\ streak_bugLwwObservedAt_probe_count_terms = 0
 /\ streak_bugLwwObservedAt_probe_count_pseq = 3
+/\ streak_bugLwwObservedAt_probe_count_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ streak_bugLwwObservedAt_probe_count_psame = 3
 /\ streak_bugLwwObservedAt_probe_count_pst = "Pass"
 /\ streak_bugLwwObservedAt_probe_count_rst = "Pass"

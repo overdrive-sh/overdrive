@@ -1,0 +1,129 @@
+c[?7l[2J[0mSeaBIOS (version 1.17.0-debian-1.17.0-1ubuntu1)
+Booting from ROM..c[?7l[2JL1_BOOT uname_r=7.0.0-29-generic
+1
+crw-------    1 0        0          10, 232 Oct 16 23:27 /dev/kvm
+crw-------    1 0        0          10, 241 Oct 16 23:27 /dev/vhost-vsock
+crw-------    1 0        0          10, 263 Oct 16 23:27 /dev/ovd_fwd
+ovd_fwd 32768 0 [permanent], Live 0xffffffffc06fa000 (OE)
+HOST_START uname=7.0.0-29-generic
+MODULE abi=1 flags=1 (permanent=1)
+RMMOD host: ret=-1 errno=16 (Device or resource busy)
+VM_UP guest agent answers; guest rmmod: OK -1 errno=16
+RESULT clean-g-first                                trials=1000 pass=1000 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 1000 1000 0 0 0
+INV host: live=0/0 queued=0 attached=1000 completed=1000 aborted=0 unclassified_eof=0 ab_peer=0 ab_socket=0 ab_detached=0
+RESULT clean-r-first                                trials=1000 pass=1000 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 2000 2000 0 0 0
+INV host: live=0/0 queued=0 attached=2000 completed=2000 aborted=0 unclassified_eof=0 ab_peer=0 ab_socket=0 ab_detached=0
+RESULT clean-simul                                  trials=1000 pass=1000 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 3000 3000 0 0 0
+INV host: live=0/0 queued=0 attached=3000 completed=3000 aborted=0 unclassified_eof=0 ab_peer=0 ab_socket=0 ab_detached=0
+RESULT clean-then-trailing-0x3                      trials=1000 pass=1000 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 4000 4000 0 0 0
+INV host: live=0/0 queued=0 attached=4000 completed=4000 aborted=0 unclassified_eof=0 ab_peer=0 ab_socket=0 ab_detached=0
+RESULT clean-fullend-0x2-0x3-hostlag                trials=1000 pass=1000 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 5000 5000 0 0 0
+INV host: live=0/0 queued=0 attached=5000 completed=5000 aborted=0 unclassified_eof=0 ab_peer=0 ab_socket=0 ab_detached=0
+RESULT clean-fullend-0x2-0x3-guestlag               trials=1000 pass=1000 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 6000 6000 0 0 0
+INV host: live=0/0 queued=0 attached=6000 completed=6000 aborted=0 unclassified_eof=0 ab_peer=0 ab_socket=0 ab_detached=0
+RESULT g-rst-both-dirs                              trials=1000 pass=1000 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 7000 6000 1000 0 0
+INV host: live=0/0 queued=0 attached=7000 completed=6000 aborted=1000 unclassified_eof=0 ab_peer=1000 ab_socket=0 ab_detached=0
+RESULT g-rst-hg-only                                trials=1000 pass=1000 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 8000 6000 2000 0 0
+INV host: live=0/0 queued=0 attached=8000 completed=6000 aborted=2000 unclassified_eof=0 ab_peer=2000 ab_socket=0 ab_detached=0
+RESULT g-close-unread                               trials=1000 pass=1000 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 9000 6000 3000 0 0
+INV host: live=0/0 queued=0 attached=9000 completed=6000 aborted=3000 unclassified_eof=0 ab_peer=3000 ab_socket=0 ab_detached=0
+RESULT r-rst-both-dirs                              trials=1000 pass=1000 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 10000 6000 4000 0 1000
+INV host: live=0/0 queued=0 attached=10000 completed=6000 aborted=4000 unclassified_eof=0 ab_peer=3000 ab_socket=1000 ab_detached=0
+RESULT r-rst-gh-only                                trials=1000 pass=1000 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 11000 6000 5000 0 2000
+INV host: live=0/0 queued=0 attached=11000 completed=6000 aborted=5000 unclassified_eof=0 ab_peer=3000 ab_socket=2000 ab_detached=0
+RESULT r-close-unread                               trials=1000 pass=1000 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 12000 6000 6000 0 3000
+INV host: live=0/0 queued=0 attached=12000 completed=6000 aborted=6000 unclassified_eof=0 ab_peer=3000 ab_socket=3000 ab_detached=0
+RESULT host-abort                                   trials=1000 pass=1000 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 13000 6000 7000 0 4000
+INV host: live=0/0 queued=0 attached=13000 completed=6000 aborted=7000 unclassified_eof=0 ab_peer=3000 ab_socket=3000 ab_detached=1000
+RESULT guest-abort                                  trials=1000 pass=1000 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 14000 6000 8000 0 4000
+INV host: live=0/0 queued=0 attached=14000 completed=6000 aborted=8000 unclassified_eof=0 ab_peer=4000 ab_socket=3000 ab_detached=1000
+RESULT guest-abort-direct0x3-hostdir-closed         trials=1000 pass=1000 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 15000 6000 9000 0 4000
+INV host: live=0/0 queued=0 attached=15000 completed=6000 aborted=9000 unclassified_eof=0 ab_peer=5000 ab_socket=3000 ab_detached=1000
+RESULT guest-abort-0x2then0x3-hostdir-open          trials=1000 pass=1000 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 16000 6000 10000 0 4000
+INV host: live=0/0 queued=0 attached=16000 completed=6000 aborted=10000 unclassified_eof=0 ab_peer=6000 ab_socket=3000 ab_detached=1000
+RESULT host-abort-direct0x3-guestdir-closed         trials=1000 pass=1000 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 17000 6000 11000 0 5000
+INV host: live=0/0 queued=0 attached=17000 completed=6000 aborted=11000 unclassified_eof=0 ab_peer=6000 ab_socket=3000 ab_detached=2000
+RESULT host-abort-0x2then0x3-guestdir-open          trials=1000 pass=1000 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 18000 6000 12000 0 6000
+INV host: live=0/0 queued=0 attached=18000 completed=6000 aborted=12000 unclassified_eof=0 ab_peer=6000 ab_socket=3000 ab_detached=3000
+RESULT stalled-g-rst                                trials=200 pass=200 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 18200 6000 12200 0 6000
+INV host: live=0/0 queued=0 attached=18200 completed=6000 aborted=12200 unclassified_eof=0 ab_peer=6200 ab_socket=3000 ab_detached=3000
+RESULT stalled-r-rst                                trials=200 pass=200 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 18400 6000 12400 0 6200
+INV host: live=0/0 queued=0 attached=18400 completed=6000 aborted=12400 unclassified_eof=0 ab_peer=6200 ab_socket=3200 ab_detached=3000
+RESULT stalled-host-abort                           trials=200 pass=200 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 18600 6000 12600 0 6400
+INV host: live=0/0 queued=0 attached=18600 completed=6000 aborted=12600 unclassified_eof=0 ab_peer=6200 ab_socket=3200 ab_detached=3200
+GUEST_DMESG_BAD_LINES OK 0
+HOST_DMESG_BAD_LINES 0
+HOST_DONE
+L1_EVEND_EXIT=0
+--- L1 dmesg tail
+[    0.549703] Loaded X.509 cert 'Build time autogenerated kernel key: 454b3e9802e3c39a997a1e8863aaf8b3df15fbc0'
+[    0.549707] ima: Allocated hash algorithm: sha256
+[    0.549719] ima: No architecture policies found
+[    0.549758] evm: Initialising EVM extended attributes:
+[    0.549760] evm: security.selinux
+[    0.549762] evm: security.SMACK64
+[    0.549764] evm: security.SMACK64EXEC
+[    0.549766] evm: security.SMACK64TRANSMUTE
+[    0.549767] evm: security.SMACK64MMAP
+[    0.549769] evm: security.apparmor
+[    0.549771] evm: security.ima
+[    0.549772] evm: security.capability
+[    0.549774] evm: HMAC attrs: 0x1
+[    0.550088] PM:   Magic number: 14:594:504
+[    0.550375] RAS: Correctable Errors collector initialized.
+[    0.550689] clk: Disabling unused clocks
+[    0.550694] PM: genpd: Disabling unused power domains
+[    0.552505] Freeing unused decrypted memory: 2028K
+[    0.553225] Freeing unused kernel image (initmem) memory: 5292K
+[    0.553240] Write protecting the kernel read-only data: 43008k
+[    0.553772] Freeing unused kernel image (text/rodata gap) memory: 776K
+[    0.554100] Freeing unused kernel image (rodata/data gap) memory: 1668K
+[    0.617130] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.617141] Run /init as init process
+[    0.617143]   with arguments:
+[    0.617146]     /init
+[    0.617148]   with environment:
+[    0.617150]     HOME=/
+[    0.617152]     TERM=linux
+[    0.625770] NET: Registered PF_VSOCK protocol family
+[    0.748611] kvm_amd: TSC scaling supported
+[    0.748620] kvm_amd: Nested Virtualization enabled
+[    0.748623] kvm_amd: Nested Paging enabled
+[    0.748629] kvm_amd: LBR virtualization supported
+[    0.748633] kvm_amd: Virtual VMLOAD VMSAVE supported
+[    0.748634] kvm_amd: Virtual GIF supported
+[    0.748636] kvm_amd: Virtual NMI enabled
+[    0.768547] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.768552] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+[    0.769005] ovd_fwd: loaded (permanent, abi 1, hazard=0 work_delay_us=0)
+--- guest serial tail
+GUEST_BOOT uname_r=7.0.0-29-generic
+
+GUEST_READY
+
+AGENT_READY
+
+--- ch.log tail
+ovd_fwd 32768 0 [permanent], Live 0xffffffffc06fa000 (OE)
+[  782.509434] reboot: Power down

@@ -156,7 +156,7 @@ fn sim_mtls_enforcement_outcome_matches_contract_both_directions() {
                 // after idempotent teardown. (bundle_present == true arm.)
                 if bundle_present {
                     let identity = Arc::new(SimIdentityRead::new(held, Some(bundle())));
-                    let sim = SimMtlsEnforcement::new(identity, MtlsLimits::default());
+                    let sim = SimMtlsEnforcement::new(identity, MtlsLimits::default(), Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()));
 
                     let conn = intercepted(direction, held_alloc.clone());
                     let handle = rt
@@ -197,7 +197,7 @@ fn sim_mtls_enforcement_outcome_matches_contract_both_directions() {
                 } else {
                     // (3) ABSENT BUNDLE (svid present) ⇒ AbsentBundle (fail-closed).
                     let identity = Arc::new(SimIdentityRead::new(held, None));
-                    let sim = SimMtlsEnforcement::new(identity, MtlsLimits::default());
+                    let sim = SimMtlsEnforcement::new(identity, MtlsLimits::default(), Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()));
 
                     let conn = intercepted(direction, held_alloc.clone());
                     let err = rt
@@ -231,7 +231,11 @@ fn sim_mtls_enforcement_probe_ok_and_unknown_handle_is_gone() {
         .expect("tokio runtime builds");
 
     let identity = Arc::new(SimIdentityRead::new(BTreeMap::new(), Some(bundle())));
-    let sim = SimMtlsEnforcement::new(identity, MtlsLimits::default());
+    let sim = SimMtlsEnforcement::new(
+        identity,
+        MtlsLimits::default(),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+    );
 
     // probe: the in-process substrate honours its contract by construction.
     rt.block_on(sim.probe()).expect("sim probe is Ok (no kernel kTLS arm to fail)");
@@ -261,7 +265,11 @@ fn established_adapter(held_alloc: &AllocationId) -> SimMtlsEnforcement {
         svid("spiffe://overdrive.local/workload/j/alloc/held", 1_900_000_000),
     );
     let identity = Arc::new(SimIdentityRead::new(held, Some(bundle())));
-    SimMtlsEnforcement::new(identity, MtlsLimits::default())
+    SimMtlsEnforcement::new(
+        identity,
+        MtlsLimits::default(),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+    )
 }
 
 /// `@in-memory` — the F4/F7 CONCRETE-VALUE limit trips are the SAME cause-distinct

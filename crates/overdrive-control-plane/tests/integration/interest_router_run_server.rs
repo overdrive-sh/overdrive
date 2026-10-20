@@ -48,39 +48,18 @@ async fn production_boot_spawns_the_interest_router() {
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
 
     let config = ServerConfig {
-        bind: "127.0.0.1:0".parse().expect("parse bind addr"),
-        data_dir,
-        operator_config_dir,
         tick_cadence: Duration::from_millis(100),
-        clock: clock.clone(),
-        // Hermetic in-process boot KEK so `boot_ca`'s KEK-resolve probe
-        // succeeds with no kernel-keyring / env dependency.
-        kek: Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-        node: overdrive_worker::NodeConfig::default(),
-        vip_range: overdrive_dataplane::allocators::VipRange::default(),
-        // ADR-0061 § 1 — `lo`/`lo` shape so the boot `host_ipv4` resolution
-        // succeeds in the test VM; `SimDataplane` (below) skips XDP attach.
-        dataplane: Some(super::dataplane_lo::lo_dataplane_config()),
-        dataplane_pin_dir: None,
-        dataplane_cgroup_attach_path: None,
-        // Inject `SimDataplane` per architecture.md § 4.7 — the SUT here is
-        // the interest-router spawn wiring, not the dataplane attach path.
-        dataplane_override: Some(Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new())),
-        mtls_intercept: std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
-        guest_dns: std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
-        dataplane_probe_fault: None,
-        mtls_probe_fault: None,
-        mtls_identity_override: None,
-        vmm_override: None,
+        ..super::node_adapters::test_config(data_dir, operator_config_dir)
     };
+    let mut boot = super::node_adapters::boot_adapters(&config);
+    boot.clock = clock.clone();
 
     let wiring =
-        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&config.clock));
+        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&boot.clock));
     let handle = run_server_with_obs_and_driver(
         config,
-        Arc::clone(&obs),
+        overdrive_control_plane::BootAdapters { observation: Arc::clone(&obs), ..boot },
         Arc::clone(&driver),
-        Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
         wiring,
         overdrive_worker::cgroup_manager::CgroupManager::new(

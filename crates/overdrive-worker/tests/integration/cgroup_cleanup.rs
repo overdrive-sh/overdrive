@@ -12,10 +12,37 @@
 //! live allocations from: each caller passes the allocation ID for its one
 //! owned scope.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use overdrive_core::id::AllocationId;
+
+/// The controllers the control plane delegates to `overdrive.slice`'s
+/// children at boot (`overdrive-control-plane` `cgroup_manager`,
+/// ADR-0028): the same four the worker then delegates under
+/// `workloads.slice`.
+const OVERDRIVE_SLICE_CONTROLLERS: &str = "+cpu +memory +io +pids\n";
+
+/// The precondition a real-cgroup test of `CgroupManager` needs from the
+/// node: `overdrive.slice` exists and delegates `+cpu +memory +io +pids` to
+/// its children. In production `overdrive serve` establishes it before any
+/// worker cgroup write (the control-plane cgroup bootstrap, ADR-0028); a
+/// worker test runs no `serve`, so it establishes the same state itself.
+/// Without it, a node on which no `serve` has booted (a freshly recreated
+/// VM) refuses `create_workloads_slice_with_controllers`'s
+/// `workloads.slice/cgroup.subtree_control` write with `ENOENT` (the
+/// controllers are not in `workloads.slice/cgroup.controllers`), surfacing as
+/// `WriteFailed { NotFound }`. Idempotent; panics naming the precondition
+/// when the node refuses it.
+pub fn delegate_overdrive_slice(cgroup_root: &Path) {
+    let slice = cgroup_root.join("overdrive.slice");
+    std::fs::create_dir_all(&slice)
+        .unwrap_or_else(|e| panic!("precondition: create {}: {e}", slice.display()));
+    let control = slice.join("cgroup.subtree_control");
+    std::fs::write(&control, OVERDRIVE_SLICE_CONTROLLERS).unwrap_or_else(|e| {
+        panic!("precondition: delegate controllers at {}: {e}", control.display())
+    });
+}
 
 /// RAII guard that mass-kills, reaps, and removes one allocation scope when
 /// dropped. Best effort: a missing scope is benign because the production

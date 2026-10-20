@@ -39,11 +39,9 @@ workspace = true
 # default so `cargo nextest run --workspace` stays under the 60s
 # slow-test budget; CI exercises the gate in a dedicated
 # `integration` job. Per `.claude/rules/testing.md`. Forwards to
-# `overdrive-control-plane/integration-tests` (step 01-08, GH #42) —
-# `commands::serve::run_with_dataplane_and_vmm_override` and the
-# `ServerConfig.vmm_override` fault seam it needs are themselves gated
-# there (step 03-07 deleted the artifact seam this comment used to name;
-# artifacts now arrive per allocation, ADR-0083 §D3a), and a
+# `overdrive-control-plane/integration-tests` — its `integration-tests`-only
+# test support (`HostDataplaneComposer::with_probe_fault`, the composition
+# accessors) is gated there, and a
 # `-p overdrive-cli --features
 # integration-tests` invocation does not otherwise unify the
 # same-named feature across the dependency graph (unlike a
@@ -68,10 +66,10 @@ overdrive-core.workspace           = true
 overdrive-reconcilers.workspace    = true
 # `overdrive-host` — production adapter crate (`adapter-host`).
 # Added at step 01-06 of the cgroup-fs-port migration: the `serve`
-# subcommand constructs `Arc::new(RealCgroupFs::new())` (with a
-# test-only `OVERDRIVE_TEST_PROBE_ROOT` override) and calls
+# subcommand constructs `Arc::new(RealCgroupFs::new())`, calls
 # `.probe().await` at the composition root BEFORE `run_server`
-# starts the worker subsystem. Per ADR-0054 § Composition root
+# starts the worker subsystem, and builds the host bundle
+# `NodeAdapters::host` (ADR-0219). Per ADR-0054 § Composition root
 # wiring. The binary IS the composition root per `.claude/rules/
 # development.md` § "Port-trait dependencies" — naming the
 # production binding here is the intended shape.
@@ -154,14 +152,13 @@ overdrive-dataplane.path     = "../overdrive-dataplane"
 # inspects its complete typed worker error chain without claiming the later
 # lifecycle scenario complete.
 overdrive-worker.path        = "../overdrive-worker"
-# `overdrive-sim` provides the `SimDataplane` adapter every CLI
-# integration test injects via `serve::run_with_dataplane`. Per step
-# 02-02 of `backend-discovery-bridge-service-reachability` the
-# production `serve::run` constructs `EbpfDataplane`, which requires
-# CAP_NET_ADMIN / CAP_BPF — too heavy for tests whose subject under
-# test is the HTTPS / CLI / observation-row surface. The architecture
-# (architecture.md § 4.7) prescribes `SimDataplane` injection for this
-# lane.
+# `overdrive-sim` provides the simulation adapters CLI integration tests
+# replace by name in the host bundle they pass to
+# `serve::run_with_adapters` (ADR-0219): the `SimDataplaneComposer` over a
+# `SimDataplane` (the host composer's `EbpfDataplane` requires
+# CAP_NET_ADMIN / CAP_BPF — too heavy for tests whose subject is the
+# HTTPS / CLI / observation-row surface, architecture.md § 4.7), `SimKek`,
+# and `SimVmm` with `SimBeaconIo`.
 overdrive-sim.path           = "../overdrive-sim"
 # `overdrive-testing` provides the shared 01-04 real-boot VM fixture
 # (`vm_fixture::VmFixture::provision`) — stages a pinned kernel + ext4

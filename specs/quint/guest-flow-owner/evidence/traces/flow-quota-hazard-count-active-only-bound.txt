@@ -1,14 +1,16 @@
 # flow-quota-hazard-count-active-only-bound: counterexample, 4 state(s) (from the TLC trace)
 
 State 1
+  conf_step = [init |-> [tag |-> "UNIT"]]
   g = [ refusedUnder |-> FALSE, clash |-> FALSE, refused |-> FALSE, otherAdmitted |-> FALSE ]
-  slot = << [own |-> 0, st |-> "free", pend |-> FALSE], [own |-> 0, st |-> "free", pend |-> FALSE] >>
+  slot = << [own |-> 0, st |-> "free", fwd |-> FALSE], [own |-> 0, st |-> "free", fwd |-> FALSE] >>
+  endq = <<>>
 
 State 2 [Admit]
-  slot = << [own |-> 1, st |-> "active", pend |-> FALSE], [own |-> 0, st |-> "free", pend |-> FALSE] >>
+  slot = << [own |-> 1, st |-> "active", fwd |-> TRUE], [own |-> 0, st |-> "free", fwd |-> FALSE] >>
 
 State 3 [HalfClose]
-  slot = << [own |-> 1, st |-> "draining", pend |-> TRUE], [own |-> 0, st |-> "free", pend |-> FALSE] >>
+  slot = << [own |-> 1, st |-> "half", fwd |-> TRUE], [own |-> 0, st |-> "free", fwd |-> FALSE] >>
 
 State 4 [Admit]
-  slot = << [own |-> 1, st |-> "draining", pend |-> TRUE], [own |-> 1, st |-> "active", pend |-> FALSE] >>
+  slot = << [own |-> 1, st |-> "half", fwd |-> TRUE], [own |-> 1, st |-> "active", fwd |-> TRUE] >>

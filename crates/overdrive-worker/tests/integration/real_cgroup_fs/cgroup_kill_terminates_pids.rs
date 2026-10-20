@@ -25,13 +25,14 @@ use overdrive_host::RealCgroupFs;
 use overdrive_worker::cgroup_manager::CgroupManager;
 use serial_test::serial;
 
-use super::super::cgroup_cleanup::AllocCleanup;
+use super::super::cgroup_cleanup::{AllocCleanup, delegate_overdrive_slice};
 
 #[tokio::test]
 #[serial(cgroup)]
 async fn cgroup_kill_terminates_every_pid_within_two_seconds() {
     let cgroup_root = Path::new("/sys/fs/cgroup");
     let fs: Arc<dyn CgroupFs> = Arc::new(RealCgroupFs::new());
+    delegate_overdrive_slice(cgroup_root);
     CgroupManager::new(cgroup_root.to_path_buf(), fs.clone())
         .create_workloads_slice_with_controllers()
         .await

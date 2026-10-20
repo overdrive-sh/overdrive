@@ -1,0 +1,2 @@
+{"ev":"host-listening","case":"mixed-c"}
+{"ev":"case","env":"h","case":"mixed-c","pass":true,"detail":{"rx_ok":10000,"rx_lost":0,"rx_reorder_dup":0,"rx_corrupt":0,"rx_extra":0,"rx_gaps":0,"rx_eof":false,"rx_read_errno":0,"tx_sent":10000,"tx_err":0,"rx_peak_unread_bytes":56252,"rx_ms":540,"peer_vsock_buffer_size":262144}}

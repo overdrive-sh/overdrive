@@ -56,14 +56,12 @@ use std::time::Duration;
 
 use overdrive_control_plane::ca_boot::CaBootError;
 use overdrive_control_plane::error::ControlPlaneError;
-use overdrive_control_plane::{ServerConfig, ServerHandle, ca_boot, run_server};
+use overdrive_control_plane::{ServerHandle, ca_boot, run_server};
 use overdrive_core::ca::kek::KEK_LEN;
 use overdrive_core::ca::root_key_envelope::KekId;
 use overdrive_core::codec::EnvelopeError;
 use overdrive_core::traits::ca::CaError;
-use overdrive_host::RealCgroupFs;
 use overdrive_sim::adapters::SimKek;
-use overdrive_sim::adapters::dataplane::SimDataplane;
 use tempfile::TempDir;
 
 /// The canonical single-node boot KEK identity the persistent CA seals under.
@@ -124,28 +122,27 @@ impl ServeDirs {
 /// the `Result` so refusal scenarios can assert the typed `Err` and happy
 /// scenarios can drive the returned `ServerHandle`.
 ///
-/// Injects `SimDataplane` (no XDP attach) + the shared `lo`/`lo` dataplane
-/// config (so `host_ipv4` resolves on a VM with no provisioned veth) per the
-/// `server_lifecycle.rs` precedent. The KEK is the SUT — it is threaded through
-/// `ServerConfig::new(kek)` exactly as the production `serve` verb threads
-/// `SystemdCredsKeyring`.
+/// Boots the host bundle over `dirs` (`NodeAdapters::host`, which opens the
+/// intent store, the view store, the journal and the observation store from
+/// `data_dir` and constructs a fresh `CaAdapters` — STORES-IN) with the
+/// non-VM fixtures' simulations (`SimDataplaneComposer`, the `lo`/`lo`
+/// dataplane config) and `boot.kek` replaced by the KEK under test — the KEK
+/// is the SUT, threaded into the bundle exactly as the production `serve`
+/// composition root threads `SystemdCredsKeyring` into `NodeAdapters::host`.
+/// Each attempt builds a new bundle after the previous server is down, so a
+/// restart reopens the stores from disk and adopts the root a new process
+/// would adopt.
 async fn boot_attempt(
     dirs: &ServeDirs,
     kek: Arc<dyn overdrive_core::ca::kek::Kek>,
 ) -> Result<ServerHandle, ControlPlaneError> {
-    let config = ServerConfig {
-        bind: "127.0.0.1:0".parse().expect("parse bind addr"),
-        data_dir: dirs.data_dir.clone(),
-        operator_config_dir: dirs.operator_config_dir.clone(),
-        dataplane_override: Some(Arc::new(SimDataplane::new())),
-        dataplane: Some(super::super::dataplane_lo::lo_dataplane_config()),
-        ..ServerConfig::new(
-            kek,
-            std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
-            std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
-        )
-    };
-    run_server(config, Arc::new(RealCgroupFs::new())).await
+    let config = super::super::node_adapters::test_config(
+        dirs.data_dir.clone(),
+        dirs.operator_config_dir.clone(),
+    );
+    let mut adapters = super::super::node_adapters::node_adapters(&config);
+    adapters.boot.kek = kek;
+    run_server(config, adapters).await
 }
 
 /// Read the bytes of the on-disk redb IntentStore. The file MUST exist after a

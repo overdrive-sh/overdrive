@@ -1,0 +1,21 @@
+
+  pair_bugEstablishedOnly
+    1) pair_bugEstablishedOnly::fwd_pair::AppWriteAndFinBeforePairedAttachesInCloseWaitAndCompletes failed after 1 test(s)
+
+  1 failed
+
+  1) pair_bugEstablishedOnly::fwd_pair::AppWriteAndFinBeforePairedAttachesInCloseWaitAndCompletes:
+       Error [QNT508]: Expect condition does not hold true
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/fwd_pair.qnt:1568:67
+        1568:   run AppWriteAndFinBeforePairedAttachesInCloseWaitAndCompletes = InitWith("stream")
+                                                                                ^^^^^^^^^^^^^^^^^^
+        1569:     .then(Write("gh")).then(Fin("gh")).then(Attach("h")).expect(Safety and tcpSt(cur, "g") == "closeWait")
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        1570:     .then(Attach("g")).expect(Safety and attRes.get("g") == "ok" and live(cur, "g"))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Use --seed=0x3ccc0b220c8e6ef5 --match=pair_bugEstablishedOnly::fwd_pair::AppWriteAndFinBeforePairedAttachesInCloseWaitAndCompletes to repeat.
+
+
+  Use --verbosity=3 to show executions.
+  Further debug with: quint test --verbosity=3 /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/hazard/fwd_pair_attach_hazards_2.qnt
+error: Tests failed

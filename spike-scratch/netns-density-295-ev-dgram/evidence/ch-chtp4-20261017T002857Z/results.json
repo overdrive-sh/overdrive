@@ -1,0 +1,422 @@
+[
+ {
+  "case": "tp-1-64-r0",
+  "guest": {
+   "ev": "case",
+   "env": "g",
+   "case": "tp-1-64-r0",
+   "pass": true,
+   "detail": {
+    "population": 1,
+    "payload": 64,
+    "seconds": 8.0001,
+    "delivered_datagrams": 234284,
+    "delivered_datagrams_per_s": 29285.0644,
+    "application_GiB_per_s": 0.0017,
+    "guest_vm_busy_cores": 0.8537,
+    "guest_vm_cpu_us_per_delivered_datagram": 29.1527,
+    "bad": 0,
+    "resend_timeouts_total": 0,
+    "sk_drops_total": 0,
+    "dg_partial": 0,
+    "dg_wait": 0
+   }
+  },
+  "host": {
+   "ev": "case",
+   "env": "h",
+   "case": "tp-1-64-r0",
+   "pass": true,
+   "detail": {
+    "echoed_bytes": 10507392,
+    "connections": 1
+   }
+  },
+  "pass": true
+ },
+ {
+  "case": "tp-1-64-r1",
+  "guest": {
+   "ev": "case",
+   "env": "g",
+   "case": "tp-1-64-r1",
+   "pass": true,
+   "detail": {
+    "population": 1,
+    "payload": 64,
+    "seconds": 8.0002,
+    "delivered_datagrams": 242138,
+    "delivered_datagrams_per_s": 30266.5425,
+    "application_GiB_per_s": 0.0018,
+    "guest_vm_busy_cores": 0.885,
+    "guest_vm_cpu_us_per_delivered_datagram": 29.2395,
+    "bad": 0,
+    "resend_timeouts_total": 0,
+    "sk_drops_total": 0,
+    "dg_partial": 0,
+    "dg_wait": 0
+   }
+  },
+  "host": {
+   "ev": "case",
+   "env": "h",
+   "case": "tp-1-64-r1",
+   "pass": true,
+   "detail": {
+    "echoed_bytes": 10828728,
+    "connections": 1
+   }
+  },
+  "pass": true
+ },
+ {
+  "case": "tp-1-1431-r0",
+  "guest": {
+   "ev": "case",
+   "env": "g",
+   "case": "tp-1-1431-r0",
+   "pass": true,
+   "detail": {
+    "population": 1,
+    "payload": 1431,
+    "seconds": 8.0001,
+    "delivered_datagrams": 233960,
+    "delivered_datagrams_per_s": 29244.5016,
+    "application_GiB_per_s": 0.039,
+    "guest_vm_busy_cores": 0.825,
+    "guest_vm_cpu_us_per_delivered_datagram": 28.21,
+    "bad": 0,
+    "resend_timeouts_total": 0,
+    "sk_drops_total": 0,
+    "dg_partial": 0,
+    "dg_wait": 0
+   }
+  },
+  "host": {
+   "ev": "case",
+   "env": "h",
+   "case": "tp-1-1431-r0",
+   "pass": true,
+   "detail": {
+    "echoed_bytes": 211945993,
+    "connections": 1
+   }
+  },
+  "pass": true
+ },
+ {
+  "case": "tp-1-1431-r1",
+  "guest": {
+   "ev": "case",
+   "env": "g",
+   "case": "tp-1-1431-r1",
+   "pass": true,
+   "detail": {
+    "population": 1,
+    "payload": 1431,
+    "seconds": 8.0001,
+    "delivered_datagrams": 228246,
+    "delivered_datagrams_per_s": 28530.2851,
+    "application_GiB_per_s": 0.038,
+    "guest_vm_busy_cores": 0.8075,
+    "guest_vm_cpu_us_per_delivered_datagram": 28.3028,
+    "bad": 0,
+    "resend_timeouts_total": 0,
+    "sk_drops_total": 0,
+    "dg_partial": 0,
+    "dg_wait": 0
+   }
+  },
+  "host": {
+   "ev": "case",
+   "env": "h",
+   "case": "tp-1-1431-r1",
+   "pass": true,
+   "detail": {
+    "echoed_bytes": 205142401,
+    "connections": 1
+   }
+  },
+  "pass": true
+ },
+ {
+  "case": "tp-1-59000-r0",
+  "guest": {
+   "ev": "case",
+   "env": "g",
+   "case": "tp-1-59000-r0",
+   "pass": true,
+   "detail": {
+    "population": 1,
+    "payload": 59000,
+    "seconds": 8.0001,
+    "delivered_datagrams": 69096,
+    "delivered_datagrams_per_s": 8636.8549,
+    "application_GiB_per_s": 0.4746,
+    "guest_vm_busy_cores": 0.7612,
+    "guest_vm_cpu_us_per_delivered_datagram": 88.1382,
+    "bad": 0,
+    "resend_timeouts_total": 0,
+    "sk_drops_total": 0,
+    "dg_partial": 0,
+    "dg_wait": 1936
+   }
+  },
+  "host": {
+   "ev": "case",
+   "env": "h",
+   "case": "tp-1-59000-r0",
+   "pass": true,
+   "detail": {
+    "echoed_bytes": 2655655040,
+    "connections": 1
+   }
+  },
+  "pass": true
+ },
+ {
+  "case": "tp-1-59000-r1",
+  "guest": {
+   "ev": "case",
+   "env": "g",
+   "case": "tp-1-59000-r1",
+   "pass": true,
+   "detail": {
+    "population": 1,
+    "payload": 59000,
+    "seconds": 8.0001,
+    "delivered_datagrams": 66726,
+    "delivered_datagrams_per_s": 8340.6344,
+    "application_GiB_per_s": 0.4583,
+    "guest_vm_busy_cores": 0.7437,
+    "guest_vm_cpu_us_per_delivered_datagram": 89.1706,
+    "bad": 0,
+    "resend_timeouts_total": 0,
+    "sk_drops_total": 0,
+    "dg_partial": 0,
+    "dg_wait": 2145
+   }
+  },
+  "host": {
+   "ev": "case",
+   "env": "h",
+   "case": "tp-1-59000-r1",
+   "pass": true,
+   "detail": {
+    "echoed_bytes": 2461754752,
+    "connections": 1
+   }
+  },
+  "pass": true
+ },
+ {
+  "case": "tp-64-64-r0",
+  "guest": {
+   "ev": "case",
+   "env": "g",
+   "case": "tp-64-64-r0",
+   "pass": true,
+   "detail": {
+    "population": 64,
+    "payload": 64,
+    "seconds": 8.0003,
+    "delivered_datagrams": 618246,
+    "delivered_datagrams_per_s": 77278.1188,
+    "application_GiB_per_s": 0.0046,
+    "guest_vm_busy_cores": 1.6274,
+    "guest_vm_cpu_us_per_delivered_datagram": 21.0596,
+    "bad": 0,
+    "resend_timeouts_total": 0,
+    "sk_drops_total": 0,
+    "dg_partial": 0,
+    "dg_wait": 0
+   }
+  },
+  "host": {
+   "ev": "case",
+   "env": "h",
+   "case": "tp-64-64-r0",
+   "pass": true,
+   "detail": {
+    "echoed_bytes": 28057680,
+    "connections": 64
+   }
+  },
+  "pass": true
+ },
+ {
+  "case": "tp-64-64-r1",
+  "guest": {
+   "ev": "case",
+   "env": "g",
+   "case": "tp-64-64-r1",
+   "pass": true,
+   "detail": {
+    "population": 64,
+    "payload": 64,
+    "seconds": 8.0002,
+    "delivered_datagrams": 658464,
+    "delivered_datagrams_per_s": 82306.4375,
+    "application_GiB_per_s": 0.0049,
+    "guest_vm_busy_cores": 1.4875,
+    "guest_vm_cpu_us_per_delivered_datagram": 18.0724,
+    "bad": 0,
+    "resend_timeouts_total": 0,
+    "sk_drops_total": 0,
+    "dg_partial": 0,
+    "dg_wait": 0
+   }
+  },
+  "host": {
+   "ev": "case",
+   "env": "h",
+   "case": "tp-64-64-r1",
+   "pass": true,
+   "detail": {
+    "echoed_bytes": 29056248,
+    "connections": 64
+   }
+  },
+  "pass": true
+ },
+ {
+  "case": "tp-64-1431-r0",
+  "guest": {
+   "ev": "case",
+   "env": "g",
+   "case": "tp-64-1431-r0",
+   "pass": true,
+   "detail": {
+    "population": 64,
+    "payload": 1431,
+    "seconds": 8.0002,
+    "delivered_datagrams": 672216,
+    "delivered_datagrams_per_s": 84024.902,
+    "application_GiB_per_s": 0.112,
+    "guest_vm_busy_cores": 1.7662,
+    "guest_vm_cpu_us_per_delivered_datagram": 21.02,
+    "bad": 0,
+    "resend_timeouts_total": 0,
+    "sk_drops_total": 0,
+    "dg_partial": 0,
+    "dg_wait": 0
+   }
+  },
+  "host": {
+   "ev": "case",
+   "env": "h",
+   "case": "tp-64-1431-r0",
+   "pass": true,
+   "detail": {
+    "echoed_bytes": 604228905,
+    "connections": 64
+   }
+  },
+  "pass": true
+ },
+ {
+  "case": "tp-64-1431-r1",
+  "guest": {
+   "ev": "case",
+   "env": "g",
+   "case": "tp-64-1431-r1",
+   "pass": true,
+   "detail": {
+    "population": 64,
+    "payload": 1431,
+    "seconds": 8.0001,
+    "delivered_datagrams": 633904,
+    "delivered_datagrams_per_s": 79236.7041,
+    "application_GiB_per_s": 0.1056,
+    "guest_vm_busy_cores": 1.5862,
+    "guest_vm_cpu_us_per_delivered_datagram": 20.0188,
+    "bad": 0,
+    "resend_timeouts_total": 0,
+    "sk_drops_total": 0,
+    "dg_partial": 0,
+    "dg_wait": 0
+   }
+  },
+  "host": {
+   "ev": "case",
+   "env": "h",
+   "case": "tp-64-1431-r1",
+   "pass": true,
+   "detail": {
+    "echoed_bytes": 574998498,
+    "connections": 64
+   }
+  },
+  "pass": true
+ },
+ {
+  "case": "tp-64-59000-r0",
+  "guest": {
+   "ev": "case",
+   "env": "g",
+   "case": "tp-64-59000-r0",
+   "pass": true,
+   "detail": {
+    "population": 64,
+    "payload": 59000,
+    "seconds": 8.0001,
+    "delivered_datagrams": 217152,
+    "delivered_datagrams_per_s": 27143.5715,
+    "application_GiB_per_s": 1.4915,
+    "guest_vm_busy_cores": 2.0725,
+    "guest_vm_cpu_us_per_delivered_datagram": 76.352,
+    "bad": 0,
+    "resend_timeouts_total": 0,
+    "sk_drops_total": 0,
+    "dg_partial": 0,
+    "dg_wait": 8175
+   }
+  },
+  "host": {
+   "ev": "case",
+   "env": "h",
+   "case": "tp-64-59000-r0",
+   "pass": true,
+   "detail": {
+    "echoed_bytes": 8193850880,
+    "connections": 64
+   }
+  },
+  "pass": true
+ },
+ {
+  "case": "tp-64-59000-r1",
+  "guest": {
+   "ev": "case",
+   "env": "g",
+   "case": "tp-64-59000-r1",
+   "pass": true,
+   "detail": {
+    "population": 64,
+    "payload": 59000,
+    "seconds": 8.0001,
+    "delivered_datagrams": 186250,
+    "delivered_datagrams_per_s": 23280.8238,
+    "application_GiB_per_s": 1.2792,
+    "guest_vm_busy_cores": 2.2462,
+    "guest_vm_cpu_us_per_delivered_datagram": 96.4832,
+    "bad": 0,
+    "resend_timeouts_total": 0,
+    "sk_drops_total": 0,
+    "dg_partial": 0,
+    "dg_wait": 6827
+   }
+  },
+  "host": {
+   "ev": "case",
+   "env": "h",
+   "case": "tp-64-59000-r1",
+   "pass": true,
+   "detail": {
+    "echoed_bytes": 6855962496,
+    "connections": 64
+   }
+  },
+  "pass": true
+ }
+]

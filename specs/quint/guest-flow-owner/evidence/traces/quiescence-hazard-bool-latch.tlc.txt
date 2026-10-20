@@ -6,18 +6,22 @@ State 1: <Initial predicate>
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE,
   dropped |-> FALSE,
-  refusedBoot |-> FALSE ]
+  refusedBoot |-> FALSE,
+  foreignChanged |-> FALSE ]
 /\ quiesce_bugBoolLatch_quiescence_up = TRUE
 /\ quiesce_bugBoolLatch_quiescence_stop = "none"
 /\ quiesce_bugBoolLatch_quiescence_cnt = 0
+/\ quiesce_bugBoolLatch_quiescence_foreign = FALSE
 /\ quiesce_bugBoolLatch_quiescence_flowsOpen = 0
+/\ quiesce_bugBoolLatch_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
 /\ quiesce_bugBoolLatch_quiescence_table = TRUE
+/\ quiesce_bugBoolLatch_quiescence_leaked = 0
 /\ quiesce_bugBoolLatch_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
 /\ quiesce_bugBoolLatch_quiescence_att = [C1 |-> 0, C2 |-> 0]
 /\ quiesce_bugBoolLatch_quiescence_latch = FALSE
 /\ quiesce_bugBoolLatch_quiescence_repLeft = 1
 
-State 2: <quiesce_bugBoolLatch_quiescence_Damage line 261, col 3 to line 287, col 78 of module quiesce_bugBoolLatch>
+State 2: <quiesce_bugBoolLatch_quiescence_Damage line 295, col 3 to line 329, col 53 of module quiesce_bugBoolLatch>
 /\ quiesce_bugBoolLatch_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
 /\ quiesce_bugBoolLatch_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> FALSE,
@@ -25,18 +29,22 @@ State 2: <quiesce_bugBoolLatch_quiescence_Damage line 261, col 3 to line 287, co
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE,
   dropped |-> FALSE,
-  refusedBoot |-> FALSE ]
+  refusedBoot |-> FALSE,
+  foreignChanged |-> FALSE ]
 /\ quiesce_bugBoolLatch_quiescence_up = TRUE
 /\ quiesce_bugBoolLatch_quiescence_stop = "none"
 /\ quiesce_bugBoolLatch_quiescence_cnt = 0
+/\ quiesce_bugBoolLatch_quiescence_foreign = FALSE
 /\ quiesce_bugBoolLatch_quiescence_flowsOpen = 0
+/\ quiesce_bugBoolLatch_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
 /\ quiesce_bugBoolLatch_quiescence_table = TRUE
+/\ quiesce_bugBoolLatch_quiescence_leaked = 0
 /\ quiesce_bugBoolLatch_quiescence_dmg = [C1 |-> TRUE, C2 |-> FALSE]
 /\ quiesce_bugBoolLatch_quiescence_att = [C1 |-> 0, C2 |-> 0]
 /\ quiesce_bugBoolLatch_quiescence_latch = FALSE
 /\ quiesce_bugBoolLatch_quiescence_repLeft = 1
 
-State 3: <quiesce_bugBoolLatch_quiescence_RecQuiesce line 354, col 3 to line 385, col 7 of module quiesce_bugBoolLatch>
+State 3: <quiesce_bugBoolLatch_quiescence_RecQuiesce line 407, col 3 to line 446, col 53 of module quiesce_bugBoolLatch>
 /\ quiesce_bugBoolLatch_quiescence_rec = [C1 |-> "held", C2 |-> "idle"]
 /\ quiesce_bugBoolLatch_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> FALSE,
@@ -44,18 +52,22 @@ State 3: <quiesce_bugBoolLatch_quiescence_RecQuiesce line 354, col 3 to line 385
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE,
   dropped |-> FALSE,
-  refusedBoot |-> FALSE ]
+  refusedBoot |-> FALSE,
+  foreignChanged |-> FALSE ]
 /\ quiesce_bugBoolLatch_quiescence_up = TRUE
 /\ quiesce_bugBoolLatch_quiescence_stop = "none"
 /\ quiesce_bugBoolLatch_quiescence_cnt = 1
+/\ quiesce_bugBoolLatch_quiescence_foreign = FALSE
 /\ quiesce_bugBoolLatch_quiescence_flowsOpen = 0
+/\ quiesce_bugBoolLatch_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
 /\ quiesce_bugBoolLatch_quiescence_table = TRUE
+/\ quiesce_bugBoolLatch_quiescence_leaked = 0
 /\ quiesce_bugBoolLatch_quiescence_dmg = [C1 |-> TRUE, C2 |-> FALSE]
 /\ quiesce_bugBoolLatch_quiescence_att = [C1 |-> 0, C2 |-> 0]
 /\ quiesce_bugBoolLatch_quiescence_latch = TRUE
 /\ quiesce_bugBoolLatch_quiescence_repLeft = 1
 
-State 4: <quiesce_bugBoolLatch_quiescence_RecRepair line 161, col 3 to line 195, col 78 of module quiesce_bugBoolLatch>
+State 4: <quiesce_bugBoolLatch_quiescence_RecRepair line 190, col 3 to line 232, col 53 of module quiesce_bugBoolLatch>
 /\ quiesce_bugBoolLatch_quiescence_rec = [C1 |-> "repaired", C2 |-> "idle"]
 /\ quiesce_bugBoolLatch_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> FALSE,
@@ -63,18 +75,22 @@ State 4: <quiesce_bugBoolLatch_quiescence_RecRepair line 161, col 3 to line 195,
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE,
   dropped |-> FALSE,
-  refusedBoot |-> FALSE ]
+  refusedBoot |-> FALSE,
+  foreignChanged |-> FALSE ]
 /\ quiesce_bugBoolLatch_quiescence_up = TRUE
 /\ quiesce_bugBoolLatch_quiescence_stop = "none"
 /\ quiesce_bugBoolLatch_quiescence_cnt = 1
+/\ quiesce_bugBoolLatch_quiescence_foreign = FALSE
 /\ quiesce_bugBoolLatch_quiescence_flowsOpen = 0
+/\ quiesce_bugBoolLatch_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
 /\ quiesce_bugBoolLatch_quiescence_table = TRUE
+/\ quiesce_bugBoolLatch_quiescence_leaked = 0
 /\ quiesce_bugBoolLatch_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
 /\ quiesce_bugBoolLatch_quiescence_att = [C1 |-> 0, C2 |-> 0]
 /\ quiesce_bugBoolLatch_quiescence_latch = TRUE
 /\ quiesce_bugBoolLatch_quiescence_repLeft = 1
 
-State 5: <quiesce_bugBoolLatch_quiescence_Damage line 261, col 3 to line 287, col 78 of module quiesce_bugBoolLatch>
+State 5: <quiesce_bugBoolLatch_quiescence_Damage line 295, col 3 to line 329, col 53 of module quiesce_bugBoolLatch>
 /\ quiesce_bugBoolLatch_quiescence_rec = [C1 |-> "repaired", C2 |-> "idle"]
 /\ quiesce_bugBoolLatch_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> FALSE,
@@ -82,18 +98,22 @@ State 5: <quiesce_bugBoolLatch_quiescence_Damage line 261, col 3 to line 287, co
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE,
   dropped |-> FALSE,
-  refusedBoot |-> FALSE ]
+  refusedBoot |-> FALSE,
+  foreignChanged |-> FALSE ]
 /\ quiesce_bugBoolLatch_quiescence_up = TRUE
 /\ quiesce_bugBoolLatch_quiescence_stop = "none"
 /\ quiesce_bugBoolLatch_quiescence_cnt = 1
+/\ quiesce_bugBoolLatch_quiescence_foreign = FALSE
 /\ quiesce_bugBoolLatch_quiescence_flowsOpen = 0
+/\ quiesce_bugBoolLatch_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
 /\ quiesce_bugBoolLatch_quiescence_table = TRUE
+/\ quiesce_bugBoolLatch_quiescence_leaked = 0
 /\ quiesce_bugBoolLatch_quiescence_dmg = [C1 |-> FALSE, C2 |-> TRUE]
 /\ quiesce_bugBoolLatch_quiescence_att = [C1 |-> 0, C2 |-> 0]
 /\ quiesce_bugBoolLatch_quiescence_latch = TRUE
 /\ quiesce_bugBoolLatch_quiescence_repLeft = 1
 
-State 6: <quiesce_bugBoolLatch_quiescence_RecQuiesce line 354, col 3 to line 385, col 7 of module quiesce_bugBoolLatch>
+State 6: <quiesce_bugBoolLatch_quiescence_RecQuiesce line 407, col 3 to line 446, col 53 of module quiesce_bugBoolLatch>
 /\ quiesce_bugBoolLatch_quiescence_rec = [C1 |-> "repaired", C2 |-> "held"]
 /\ quiesce_bugBoolLatch_quiescence_g = [ reopenEarly |-> FALSE,
   repairNoHold |-> FALSE,
@@ -101,18 +121,22 @@ State 6: <quiesce_bugBoolLatch_quiescence_RecQuiesce line 354, col 3 to line 385
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE,
   dropped |-> FALSE,
-  refusedBoot |-> FALSE ]
+  refusedBoot |-> FALSE,
+  foreignChanged |-> FALSE ]
 /\ quiesce_bugBoolLatch_quiescence_up = TRUE
 /\ quiesce_bugBoolLatch_quiescence_stop = "none"
 /\ quiesce_bugBoolLatch_quiescence_cnt = 2
+/\ quiesce_bugBoolLatch_quiescence_foreign = FALSE
 /\ quiesce_bugBoolLatch_quiescence_flowsOpen = 0
+/\ quiesce_bugBoolLatch_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
 /\ quiesce_bugBoolLatch_quiescence_table = TRUE
+/\ quiesce_bugBoolLatch_quiescence_leaked = 0
 /\ quiesce_bugBoolLatch_quiescence_dmg = [C1 |-> FALSE, C2 |-> TRUE]
 /\ quiesce_bugBoolLatch_quiescence_att = [C1 |-> 0, C2 |-> 0]
 /\ quiesce_bugBoolLatch_quiescence_latch = TRUE
 /\ quiesce_bugBoolLatch_quiescence_repLeft = 1
 
-State 7: <quiesce_bugBoolLatch_quiescence_RecRestore line 428, col 3 to line 507, col 46 of module quiesce_bugBoolLatch>
+State 7: <quiesce_bugBoolLatch_quiescence_RecRestore line 497, col 3 to line 584, col 53 of module quiesce_bugBoolLatch>
 /\ quiesce_bugBoolLatch_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
 /\ quiesce_bugBoolLatch_quiescence_g = [ reopenEarly |-> TRUE,
   repairNoHold |-> FALSE,
@@ -120,12 +144,16 @@ State 7: <quiesce_bugBoolLatch_quiescence_RecRestore line 428, col 3 to line 507
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE,
   dropped |-> FALSE,
-  refusedBoot |-> FALSE ]
+  refusedBoot |-> FALSE,
+  foreignChanged |-> FALSE ]
 /\ quiesce_bugBoolLatch_quiescence_up = TRUE
 /\ quiesce_bugBoolLatch_quiescence_stop = "none"
 /\ quiesce_bugBoolLatch_quiescence_cnt = 0
+/\ quiesce_bugBoolLatch_quiescence_foreign = FALSE
 /\ quiesce_bugBoolLatch_quiescence_flowsOpen = 0
+/\ quiesce_bugBoolLatch_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
 /\ quiesce_bugBoolLatch_quiescence_table = TRUE
+/\ quiesce_bugBoolLatch_quiescence_leaked = 0
 /\ quiesce_bugBoolLatch_quiescence_dmg = [C1 |-> FALSE, C2 |-> TRUE]
 /\ quiesce_bugBoolLatch_quiescence_att = [C1 |-> 0, C2 |-> 0]
 /\ quiesce_bugBoolLatch_quiescence_latch = FALSE

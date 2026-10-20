@@ -1,0 +1,2 @@
+{"ev":"host-listening","case":"credit"}
+{"ev":"case","env":"h","case":"credit","pass":true,"detail":{"rx_ok":1500,"rx_lost":0,"rx_reorder_dup":0,"rx_corrupt":0,"rx_extra":0,"rx_gaps":0,"rx_eof":true,"rx_read_errno":0,"tx_sent":0,"tx_err":0,"rx_peak_unread_bytes":58966,"rx_ms":2403}}

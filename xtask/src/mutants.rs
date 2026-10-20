@@ -274,6 +274,14 @@ fn invoke_cargo_mutants(
     let workspace_root = workspace_root_for_bpf_override();
     let (bpf_env_name, bpf_env_path) = bpf_object_env_override(&workspace_root);
     cmd.env(&bpf_env_name, &bpf_env_path);
+    // FWD-PREREQ (GH #295): the `serve` fixtures check the loaded
+    // `ovd_fwd` against the module built from this workspace's source at
+    // `<workspace>/target/kmod/<release>/ovd_fwd.ko`. A mutant's scratch
+    // copy has no `target/`, so the wrapper names the original tree's
+    // build directory, which `overdrive_testing::forwarder_module` reads
+    // first (the `OVERDRIVE_BPF_OBJECT` precedent above).
+    let (kmod_env_name, kmod_env_path) = kmod_dir_env_override(&workspace_root);
+    cmd.env(&kmod_env_name, &kmod_env_path);
 
     eprintln!("xtask mutants: running {} (NEXTEST_PROFILE=mutants)", format_cmd(&cmd));
     let status = cmd.status().wrap_err("spawn cargo-mutants")?;
@@ -970,6 +978,15 @@ fn bpf_object_env_override(workspace_root: &Path) -> (std::ffi::OsString, std::f
     ("OVERDRIVE_BPF_OBJECT".into(), path.into_os_string())
 }
 
+/// The `OVERDRIVE_KMOD_DIR` override for mutation runs (FWD-PREREQ): the
+/// original tree's workspace-scoped forwarder-module build directory
+/// (`crate::guest_kit_prepare::kmod_dir`), which the `overdrive-testing`
+/// fixture check reads before its own workspace-relative lookup.
+fn kmod_dir_env_override(workspace_root: &Path) -> (std::ffi::OsString, std::ffi::OsString) {
+    let path = crate::guest_kit_prepare::kmod_dir(workspace_root);
+    ("OVERDRIVE_KMOD_DIR".into(), path.into_os_string())
+}
+
 /// Resolve the workspace root for use by the BPF-object env override.
 ///
 /// Mirrors `xtask::workspace_root_dir()` in `main.rs` but lives here so
@@ -1634,6 +1651,17 @@ mod tests {
             "env var name must match the one `crates/overdrive-dataplane/build.rs` consults; \
              changing it requires updating both sides in lockstep (single-cut migration)"
         );
+    }
+
+    #[test]
+    fn kmod_dir_env_override_names_the_variable_the_fixture_reads_and_the_workspace_build_dir() {
+        let (name, path) = kmod_dir_env_override(Path::new("/w"));
+        assert_eq!(
+            name.to_str(),
+            Some("OVERDRIVE_KMOD_DIR"),
+            "must match overdrive_testing::forwarder_module::KMOD_DIR_ENV"
+        );
+        assert_eq!(Path::new(&path), Path::new("/w/target/kmod"));
     }
 
     #[test]

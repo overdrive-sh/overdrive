@@ -32,6 +32,7 @@
 
 #![allow(clippy::doc_markdown, clippy::expect_used)]
 
+use overdrive_core::observation::{ProbeRunSeq, SameStatusRuns};
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 use std::time::Duration;
@@ -170,6 +171,8 @@ fn probe_result_row() -> ProbeResultRow {
         status: ProbeStatus::Pass,
         last_observed_at_unix_ms: 1_700_000_000_000,
         inferred: false,
+        run_seq: ProbeRunSeq::new(u64::max(1_700_000_000_000, 1)).unwrap_or(ProbeRunSeq::FIRST),
+        same_status_runs: SameStatusRuns::ONE,
     }
 }
 

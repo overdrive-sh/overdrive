@@ -300,9 +300,9 @@ pub enum DataplaneBootError {
 
     /// The single-node veth provisioner (ADR-0061 § 3, step 01-03)
     /// failed to stand up the host-netns veth pair before
-    /// `EbpfDataplane::new`. Reached only on the production
-    /// (non-`dataplane_override`) boot branch AND only when the
-    /// configured ifaces are the default veth names — an operator who
+    /// `EbpfDataplane::new`. Reached only through the host composer
+    /// (`HostDataplaneComposer`, the composition `overdrive serve` runs)
+    /// AND only when the configured ifaces are the default veth names — an operator who
     /// names real NICs skips provision entirely, so this variant cannot
     /// fire on the two-NIC path.
     ///

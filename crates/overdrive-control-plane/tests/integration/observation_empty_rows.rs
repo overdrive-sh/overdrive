@@ -26,8 +26,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use overdrive_control_plane::api::NodeList;
-use overdrive_control_plane::observation_wiring::wire_single_node_observation;
-use overdrive_control_plane::{ServerConfig, ServerHandle, run_server_with_obs_and_driver};
+use overdrive_control_plane::{ServerHandle, run_server_with_obs_and_driver};
 use overdrive_core::id::{NodeId, Region};
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::observation_store::{
@@ -93,40 +92,18 @@ async fn spawn_server_with_obs_handle()
     let operator_config_dir = tmp.path().join("conf");
     std::fs::create_dir_all(&data_dir).expect("create data dir");
     std::fs::create_dir_all(&operator_config_dir).expect("create operator config dir");
-    let obs: Arc<dyn ObservationStore> =
-        Arc::from(wire_single_node_observation(&data_dir).expect("wire obs store"));
-    let config = ServerConfig {
-        bind: "127.0.0.1:0".parse().expect("parse bind addr"),
-        data_dir,
-        operator_config_dir: operator_config_dir.clone(),
-        // `tick_cadence` + `clock` default per
-        // `fix-convergence-loop-not-spawned` Step 01-02.
-        dataplane_override: Some(std::sync::Arc::new(
-            overdrive_sim::adapters::dataplane::SimDataplane::new(),
-        )),
-        // ADR-0061 § 1 (step 01-03): the default `ServerConfig.dataplane`
-        // is now the veth-named single-node shape, whose `client_iface`
-        // (`ovd-veth-cli`) does not exist in the test VM. This fixture
-        // injects `SimDataplane` (no XDP attach) but still resolves
-        // `host_ipv4` from `client_iface` at boot, so it names `lo` via
-        // the shared SSOT helper.
-        dataplane: Some(super::dataplane_lo::lo_dataplane_config()),
-        // Step 02-02 (C1-AMEND) — hermetic in-process boot KEK so `boot_ca`'s
-        // KEK-resolve probe succeeds with no kernel-keyring / env dependency.
-        ..ServerConfig::new(
-            std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-            std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
-            std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
-        )
-    };
+    let config = super::node_adapters::test_config(data_dir, operator_config_dir.clone());
+    let boot = super::node_adapters::boot_adapters(&config);
+    // The bundle opened the node's observation store over `data_dir`
+    // (STORES-IN); the test keeps a handle to it to read rows after boot.
+    let obs: Arc<dyn ObservationStore> = Arc::clone(&boot.observation);
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let wiring =
-        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&config.clock));
+        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&boot.clock));
     let handle = run_server_with_obs_and_driver(
         config,
-        Arc::clone(&obs),
+        boot,
         driver,
-        Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
         wiring,
         overdrive_worker::cgroup_manager::CgroupManager::new(

@@ -1,0 +1,447 @@
+State 1: <Initial predicate>
+/\ lease_ok_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_ok_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_ok_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"none", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_ok_cid_lease_cursor = 0
+/\ lease_ok_cid_lease_att = <<0, 0>>
+/\ lease_ok_cid_lease_bootLeft = -1
+/\ lease_ok_cid_lease_reclaimed = TRUE
+/\ lease_ok_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_up = TRUE
+
+State 2: <lease_ok_cid_lease_Assign line 1057, col 3 to line 1153, col 40 of module lease_ok>
+/\ lease_ok_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_ok_cid_lease_al = << [ st |-> "leased",
+     off |-> 0,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_ok_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"none", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_ok_cid_lease_cursor = 1
+/\ lease_ok_cid_lease_att = <<0, 0>>
+/\ lease_ok_cid_lease_bootLeft = -1
+/\ lease_ok_cid_lease_reclaimed = TRUE
+/\ lease_ok_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_up = TRUE
+
+State 3: <lease_ok_cid_lease_Launch line 1201, col 3 to line 1267, col 40 of module lease_ok>
+/\ lease_ok_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_ok_cid_lease_al = << [ st |-> "running",
+     off |-> 0,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_ok_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"none", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_ok_cid_lease_cursor = 1
+/\ lease_ok_cid_lease_att = <<0, 0>>
+/\ lease_ok_cid_lease_bootLeft = -1
+/\ lease_ok_cid_lease_reclaimed = TRUE
+/\ lease_ok_cid_lease_dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_up = TRUE
+
+State 4: <lease_ok_cid_lease_VmmCrash line 1273, col 3 to line 1279, col 40 of module lease_ok>
+/\ lease_ok_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_ok_cid_lease_al = << [ st |-> "ended",
+     off |-> 0,
+     retry |-> TRUE,
+     ex |-> FALSE,
+     chg |-> TRUE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_ok_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"crash", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_ok_cid_lease_cursor = 1
+/\ lease_ok_cid_lease_att = <<0, 0>>
+/\ lease_ok_cid_lease_bootLeft = -1
+/\ lease_ok_cid_lease_reclaimed = TRUE
+/\ lease_ok_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_up = TRUE
+
+State 5: <lease_ok_cid_lease_Assign line 1057, col 3 to line 1153, col 40 of module lease_ok>
+/\ lease_ok_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_ok_cid_lease_al = << [ st |-> "leased",
+     off |-> 1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> TRUE,
+     pred |-> 0,
+     pst |-> "held" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_ok_cid_lease_lease = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"crash", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_ok_cid_lease_cursor = 2
+/\ lease_ok_cid_lease_att = <<1, 0>>
+/\ lease_ok_cid_lease_bootLeft = -1
+/\ lease_ok_cid_lease_reclaimed = TRUE
+/\ lease_ok_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_up = TRUE
+
+State 6: <lease_ok_cid_lease_Launch line 1201, col 3 to line 1267, col 40 of module lease_ok>
+/\ lease_ok_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_ok_cid_lease_al = << [ st |-> "running",
+     off |-> 1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> 0,
+     pst |-> "retiring" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_ok_cid_lease_lease = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"crash", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_ok_cid_lease_cursor = 2
+/\ lease_ok_cid_lease_att = <<1, 0>>
+/\ lease_ok_cid_lease_bootLeft = -1
+/\ lease_ok_cid_lease_reclaimed = TRUE
+/\ lease_ok_cid_lease_dev = (0 :> 0 @@ 1 :> 1 @@ 2 :> 0)
+/\ lease_ok_cid_lease_up = TRUE
+
+State 7: <lease_ok_cid_lease_VmmCrash line 1273, col 3 to line 1279, col 40 of module lease_ok>
+/\ lease_ok_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_ok_cid_lease_al = << [ st |-> "ended",
+     off |-> 1,
+     retry |-> TRUE,
+     ex |-> FALSE,
+     chg |-> TRUE,
+     pred |-> 0,
+     pst |-> "retiring" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_ok_cid_lease_lease = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"crash", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_ok_cid_lease_cursor = 2
+/\ lease_ok_cid_lease_att = <<1, 0>>
+/\ lease_ok_cid_lease_bootLeft = -1
+/\ lease_ok_cid_lease_reclaimed = TRUE
+/\ lease_ok_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_up = TRUE
+
+State 8: <lease_ok_cid_lease_Release line 765, col 3 to line 873, col 40 of module lease_ok>
+/\ lease_ok_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_ok_cid_lease_al = << [ st |-> "ended",
+     off |-> 1,
+     retry |-> TRUE,
+     ex |-> FALSE,
+     chg |-> TRUE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_ok_cid_lease_lease = (0 :> 0 @@ 1 :> 1 @@ 2 :> 0)
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"crash", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_ok_cid_lease_cursor = 2
+/\ lease_ok_cid_lease_att = <<1, 0>>
+/\ lease_ok_cid_lease_bootLeft = -1
+/\ lease_ok_cid_lease_reclaimed = TRUE
+/\ lease_ok_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_up = TRUE
+
+State 9: <lease_ok_cid_lease_Assign line 1057, col 3 to line 1153, col 40 of module lease_ok>
+/\ lease_ok_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_ok_cid_lease_al = << [ st |-> "leased",
+     off |-> 2,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> TRUE,
+     pred |-> 1,
+     pst |-> "held" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_ok_cid_lease_lease = (0 :> 0 @@ 1 :> 1 @@ 2 :> 1)
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"crash", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_ok_cid_lease_cursor = 0
+/\ lease_ok_cid_lease_att = <<2, 0>>
+/\ lease_ok_cid_lease_bootLeft = -1
+/\ lease_ok_cid_lease_reclaimed = TRUE
+/\ lease_ok_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_up = TRUE
+
+State 10: <lease_ok_cid_lease_Launch line 1201, col 3 to line 1267, col 40 of module lease_ok>
+/\ lease_ok_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_ok_cid_lease_al = << [ st |-> "running",
+     off |-> 2,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> 1,
+     pst |-> "retiring" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_ok_cid_lease_lease = (0 :> 0 @@ 1 :> 1 @@ 2 :> 1)
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"crash", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_ok_cid_lease_cursor = 0
+/\ lease_ok_cid_lease_att = <<2, 0>>
+/\ lease_ok_cid_lease_bootLeft = -1
+/\ lease_ok_cid_lease_reclaimed = TRUE
+/\ lease_ok_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 1)
+/\ lease_ok_cid_lease_up = TRUE
+
+State 11: <lease_ok_cid_lease_VmmCrash line 1273, col 3 to line 1279, col 40 of module lease_ok>
+/\ lease_ok_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_ok_cid_lease_al = << [ st |-> "ended",
+     off |-> 2,
+     retry |-> FALSE,
+     ex |-> TRUE,
+     chg |-> FALSE,
+     pred |-> 1,
+     pst |-> "retiring" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_ok_cid_lease_lease = (0 :> 0 @@ 1 :> 1 @@ 2 :> 1)
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"crash", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_ok_cid_lease_cursor = 0
+/\ lease_ok_cid_lease_att = <<2, 0>>
+/\ lease_ok_cid_lease_bootLeft = -1
+/\ lease_ok_cid_lease_reclaimed = TRUE
+/\ lease_ok_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_up = TRUE
+
+State 12: <lease_ok_cid_lease_Release line 765, col 3 to line 873, col 40 of module lease_ok>
+/\ lease_ok_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_ok_cid_lease_al = << [ st |-> "ended",
+     off |-> 2,
+     retry |-> FALSE,
+     ex |-> TRUE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_ok_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 1)
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"crash", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_ok_cid_lease_cursor = 0
+/\ lease_ok_cid_lease_att = <<2, 0>>
+/\ lease_ok_cid_lease_bootLeft = -1
+/\ lease_ok_cid_lease_reclaimed = TRUE
+/\ lease_ok_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_up = TRUE
+
+State 13: <lease_ok_cid_lease_Finalize line 484, col 3 to line 551, col 40 of module lease_ok>
+/\ lease_ok_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_ok_cid_lease_al = << [ st |-> "retiring",
+     off |-> 2,
+     retry |-> FALSE,
+     ex |-> TRUE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_ok_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 1)
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"crash", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {1} ]
+/\ lease_ok_cid_lease_cursor = 0
+/\ lease_ok_cid_lease_att = <<2, 0>>
+/\ lease_ok_cid_lease_bootLeft = -1
+/\ lease_ok_cid_lease_reclaimed = TRUE
+/\ lease_ok_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_up = TRUE
+
+State 14: <lease_ok_cid_lease_Release line 765, col 3 to line 873, col 40 of module lease_ok>
+/\ lease_ok_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_ok_cid_lease_al = << [ st |-> "failed",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_ok_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"crash", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_ok_cid_lease_cursor = 0
+/\ lease_ok_cid_lease_att = <<2, 0>>
+/\ lease_ok_cid_lease_bootLeft = -1
+/\ lease_ok_cid_lease_reclaimed = TRUE
+/\ lease_ok_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_ok_cid_lease_up = TRUE

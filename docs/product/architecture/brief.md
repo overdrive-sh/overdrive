@@ -695,8 +695,10 @@ table below bury themselves. Fail-closed applies to the fault, not to the
 absence.
 
 **Composition is gated on an observable, not a new operator knob.** The presence
-of the hypervisor binary is the configuration — the same shape as
-`compose_mtls = config.dataplane_override.is_none()`. **How the composition root
+of the hypervisor binary is the configuration. (2026-10-19: the composition
+root now states whether the node requires VM capability, ADR-0219;
+`overdrive serve` states that it does not, so a host without the binary
+still boots without a `Vm` driver.) **How the composition root
 expresses that gate is a solution-architect decision**, not this entry's; what is
 decided here is that a *substrate lie* refuses the node and a *capability
 absence* does not.
@@ -942,9 +944,9 @@ resync**, not merely under edge-triggering. #265 remains a separate track.
 ### vsock microVM attachment (GH #295)
 
 **Status: Accepted.** D1–D26 and their companion decisions were approved by
-the user between 2026-10-05 and 2026-10-09; INB-1, UDP-EMPTY (with the
-D15-R4 residual), END-STATE, R2-END, R2-DRAIN, CID-NOCLAIM, RESET-EXIT,
-UDP-SEQ, QHOLD and NO-SURVIVE were approved by the user on 2026-10-11.
+the user between 2026-10-05 and 2026-10-09; INB-1, END-STATE, R2-END,
+R2-DRAIN, CID-NOCLAIM, RESET-EXIT, QHOLD and NO-SURVIVE were approved by the
+user on 2026-10-11.
 GW-LOCAL (only the guest gateway is host-local in the guest prefix; guest
 DNS depends on it, ADR-0152), PROBE-NOSAMPLE (a VM probe dial stands outside
 the allocation's flow quota, and a probe refused by node capacity or
@@ -955,7 +957,26 @@ streak in the probe row, and ServiceLifecycle applies the thresholds when it
 reads the row, acting once per crossing; with D-1, a failed liveness stop is
 retried on the next row still past the threshold, ADR-0191) and
 PROBE-NOSAMPLE-EVENT (every probe run that writes no row emits one
-not-sampled event, ADR-0192) were approved by the user on 2026-10-13. Exact
+not-sampled event, ADR-0192) were approved by the user on 2026-10-13. On
+2026-10-16 the user adopted an event-driven in-kernel forwarder as the data
+path (EVMOD-ADOPT, ADR-0197). On 2026-10-17 the user approved the
+forwarder's contracts (EVMOD-LIFE to EVMOD-AB): its module lifetime (amended
+on 2026-10-20 by MODULE-REFCOUNT: the module unloads only when no context is
+open and no socket is hooked), build,
+loading and Linux guest kit, late-callback safety, control context and end
+record, end classification, attach order, datagram mode, kTLS exclusion,
+workqueue, the refusal of a half that ended before attach, and the release
+point that replaces the guest drain-slot rules (ADR-0198 to ADR-0206,
+ADR-0149, ADR-0180, ADR-0209, ADR-0210, ADR-0212), together with the
+watch-abort rule (a watch's abort never touches the holder's socket; only a
+context release shuts it, ADR-0211) and the guest-neutral host side
+(the request, the datagram frame and the end classes are the same for every
+guest, and the host forwarder never branches on guest type, ADR-0207). The
+guest hop of a guest that runs no Linux kernel (Unikraft) is
+[GH #321](https://github.com/overdrive-sh/overdrive/issues/321). The four
+contract-shaping spikes (end classification across two forwarders, the
+control context, attach at pairing, datagram mode) ran on Linux 7.0 and
+held. No contract-shaping item is open. Exact
 interface contracts, the decision index with approval dates, the validation
 plan and the formal protocol model live in the
 [#295 feature delta](../../feature/netns-density-295/feature-delta.md)
@@ -973,11 +994,36 @@ on the production path and is deleted, with its tests, during DELIVER.
 
 **Transport.** A VM has no guest network device, no host TAP, no bridge port
 and no per-VM host netdevice. Its application traffic crosses its one
-virtio-vsock device. Aya Rust eBPF programs forward payload in the guest
-kernel (loaded and controlled by `overdrive-init`) and in the host kernel
-(held by the node's one guest-flow owner in `overdrive-control-plane`). Both
-control planes exchange only fixed-size control messages and never touch
-payload, with one temporary exception named under *Inbound* below.
+virtio-vsock device. An event-driven in-kernel forwarder moves payload on
+each side (ADR-0197): it joins a flow's two sockets, peeks the source, sends
+to the target without blocking and consumes only what the target accepted,
+so a stalled flow's bytes wait in its source socket and vsock credit or the
+TCP window holds the sender — bounded per flow, where a BPF sockmap
+redirect's queue toward a non-reading target is unbounded. In a Linux
+guest, Aya programs capture ordinary sockets and `overdrive-init` attaches
+each pair to the guest's forwarder; on the host the node's one guest-flow
+owner in `overdrive-control-plane` attaches them. The host side is
+guest-neutral (ADR-0207). The forwarder is a C kernel module
+(Rust-for-Linux has no socket abstractions on 7.0). It holds a module
+reference for every open control context and every hooked socket, so the
+kernel unloads it only when nothing can still call its text; on the
+appliance nothing unloads it, and module unloading is configured out of the
+image kernel (ADR-0198, ADR-0068 § 7; MODULE-REFCOUNT, 2026-10-20); a
+development host reloads a changed module while it is idle; it is built from one in-repository source
+per kernel release (ADR-0203); the host image loads it at boot and
+`overdrive-init` loads it from the guest root filesystem, never `serve`
+(ADR-0205); a Linux guest kernel and its module ship together as one guest
+kit, which `overdrive-init` checks against the running kernel's release
+before loading — on a kernel with `CONFIG_MODVERSIONS` the kernel itself
+compares CRCs, not the release (ADR-0206); a late callback never touches an
+ended pair, and a control call reaches a pair by id only under its
+context's record-queue lock, so its state is freed after an RCU grace period
+and then the completion of its work item (ADR-0204); and every pair is bound to the
+control context of the owner that attached it, opened `O_CLOEXEC` and
+replaced only after the old context is released (ADR-0199). Both
+control planes exchange only
+fixed-size control messages and never touch payload, with one temporary
+exception named under *Inbound* below.
 
 **VMM and device.** The vendored Cloud Hypervisor fork (ADR-0161) runs every
 VM with `--vsock cid=N,backend=vhost-kernel` and opens `/dev/vhost-vsock`
@@ -997,28 +1043,66 @@ guest-flow owner's listeners accept guest-opened vsock connections and
 attribute each by its peer CID and the per-launch token the guest received on
 its kernel command line (ADR-0157, ADR-0177). The token is sound only with
 the fork change of ADR-0182, under which a guest reset ends the VMM. Each VM holds one control session to the owner
-(ADR-0166); losing it aborts every flow of that session.
+(ADR-0166); losing it aborts every flow of that session. The three
+node-global listener ports (beacon, flow stream, control; defaults 1234,
+1240, 1243) are node configuration, fixed or kernel-assigned, and each
+owner reports the port it bound (ADR-0218); the VM driver passes the bound
+ports to the guest on the same kernel command line (ADR-0217). `run_server`
+receives every driven adapter it composes the node over — clock, entropy,
+KEK, observation store, intent store, view store, workflow journal,
+workload-identity CA factory and its root-key codec, dataplane composer, mTLS
+intercept and enforcement factory, guest-DNS factory, probers, VMM, beacon
+port, cgroup accounting, VM host state and the guest-flow owner's seam —
+from the composition root as one required bundle per boot. Neither it nor
+the boot it delegates to constructs an adapter over a host resource or a
+store; they compose the VM driver, driver registry, owner and workflow
+engine over the supplied ports and build the CA through its factory over
+the boot's one entropy. The boot still probes each adapter before use (the
+view store at registration, the CA's KEK and envelope probes and its
+generate-or-adopt). In #295 the vsock ports are set in the server's
+configuration value only; loading a node configuration file is GH #327. `ServerConfig` carries configuration
+only, and a test injects a fault through an adapter it passes (ADR-0219).
 
 **Flows.** Each transport flow is one kernel-forwarded pair, never
-multiplexed: node pair capacity `GUEST_FLOW_MAX_PAIRS = 65,536` and a
-per-allocation quota of 4,096 flows, which counts draining flows (ADR-0147,
-ADR-0183). Pairing is out of band on the control session, with sockets
-installed at establishment and early data parked in kernel cells (ADR-0158).
-Datagrams travel as STREAM toward the guest and SEQPACKET from the guest
-(ADR-0148), framed by a length prefix (ADR-0149). The host verdict strips the
-frame from every guest datagram; an empty datagram is dropped by the verdict
-and sent by the owner, so an empty datagram may be reordered relative to its
-neighbours (D15-R4; ADR-0165).
+multiplexed (ADR-0147); the node bounds them with a pair capacity
+`GUEST_FLOW_MAX_PAIRS = 65,536` and a per-allocation quota of 4,096 flows,
+which counts half-closed flows (ADR-0208, ADR-0183); the host releases a
+flow's places when it reads the flow's end record, or a dial's when its
+stream is dropped or aborted (ADR-0209).
+A flow's request travels first on its own connection and every other
+pairing message out of band on the control session (ADR-0158); each side
+attaches its pair at pairing, with early bytes waiting in the source
+socket's own queue (ADR-0212); admission and registration are one step, and
+a continuation never acts on a flow that has closed (ADR-0213); the host
+end of a host-opened flow is held by its dialer (ADR-0214) and watched by
+the host forwarder so the dialled stream keeps the classified end
+(ADR-0216); and each kind of flow bounds its pairing wait at one side
+(ADR-0215). A datagram association is one vsock STREAM carrying a
+length-prefixed frame both ways (ADR-0149), framed and unframed by the
+forwarder, with every datagram, empties included, delivered in order
+(ADR-0201).
 
-**Flow end and drain.** A flow's end is classified from the vsock SHUTDOWN
-flags the peer sent, read by a raw tracepoint on vsock packet receipt on host
-and guest: `shutdown(SHUT_WR)` sends SEND only, `close()` and process exit
-send RCV|SEND (`net/vmw_vsock/virtio_transport_common.c:1084-1097`,
-`:1294-1295 @ v7.0`; the tracepoint fires at `:1622`). SEND only is a clean
-half-close; RCV|SEND while a direction is open, or RST, is an abort; an end
-with no record is an abort (ADR-0180). A half-close drain completes on a
-kernel ring-buffer record when the forwarded count reaches its goal, with no
-deadline (ADR-0183).
+**Flow end and drain.** A flow's end is classified from the kernel's own end
+facts — chiefly the vsock SHUTDOWN flags the peer sent: `shutdown(SHUT_WR)` sends SEND only, `close()` and
+process exit send RCV|SEND (`net/vmw_vsock/virtio_transport_common.c:1084-1097`,
+`:1294-1295 @ v7.0`). SEND only is a clean half-close; RCV|SEND while a
+direction is open, or RST, is an abort (ADR-0180). The forwarder forwards a
+clean end as `SHUT_WR` on the target after the last byte the target
+accepted, with no deadline, and aborts a pair with resets on any other end
+(ADR-0183). It classifies each vsock end in its own callback as the
+SHUTDOWN or RST arrives, or once from the state read under the socket's
+locks when the pair is attached, aborts on a TCP half's reset even after
+its FIN, and reports each pair's end to its owner as one lossless record
+(ADR-0180, ADR-0212, ADR-0202). A half that has already ended when it is
+attached is refused and the owner aborts the flow (ADR-0210). An end read
+from a vsock half before the device release's unlocked orphan sweep has
+recorded its class is re-checked under `vsock_table_lock` and aborts as the
+sweep's reset; an end still unclassified after that aborts with its own
+`Unclassified` cause, an alarm for a forwarder defect (ADR-0180). A dialled stream's holder never classifies
+its end from what its read returned; the owner resolves it from its own
+abort or the watch's record (the `GuestStream` contract of the feature
+delta), and an owner abort of a watch leaves the holder's socket untouched
+(ADR-0211).
 
 **Addressing and reachability.** `workload_addr` remains the persisted
 backend and probe address and lives in the guest on a dummy device
@@ -1046,7 +1130,7 @@ reports its own connect paired, or a typed refusal (ADR-0173). leg-S delivers
 mesh plaintext to a VM backend by relaying between its kTLS socket and that
 stream — a userspace relay, explicitly temporary, deleted when
 [GH #303](https://github.com/overdrive-sh/overdrive/issues/303) lands
-(ADR-0186). The VM
+(ADR-0186). No socket the forwarder joins carries kTLS (ADR-0200). The VM
 probe runner's TCP probe is healthy when the dial succeeds; its HTTP probe
 runs over the stream. Under ADR-0187 a probe dial takes a node
 flow slot but stands outside the allocation's flow quota, so a hung
@@ -1073,9 +1157,12 @@ owner's connected sockets (ADR-0164). Host-internal destinations are refused
 delivered to the node `DnsResponder` through the gateway route (ADR-0154,
 GW-LOCAL).
 
-**Owner lifecycle and recovery.** The owner holds every host forwarding
-object, listener and pair socket (ADR-0151); its kernel objects are unpinned
-and die with the process (ADR-0159). Stop aborts flows with reset and restore
+**Owner lifecycle and recovery.** The owner holds the host forwarder's
+control context and every listener and pair socket (ADR-0151); forwarding
+state dies with the process, which aborts every forwarded flow (ADR-0159,
+ADR-0199); the only in-process replacement of the forwarder context — the
+`Forwarder` component's recovery — aborts every flow and closes the old
+context before it opens a new one. Stop aborts flows with reset and restore
 reopens admission only (ADR-0160). Quiescence is a counted, move-only hold:
 forwarding reopens only when every hold has been restored, and a hold dropped
 without restore keeps forwarding quiesced until ADR-0124's recovery fails
@@ -1108,7 +1195,6 @@ connection-pump scaling ([#300](https://github.com/overdrive-sh/overdrive/issues
 [ADR-0145](adr-0145-vsock-kernel-forwarded-guest-transport-replaces-shared-bridge.md),
 [ADR-0146](adr-0146-vm-vsock-device-uses-kernel-vhost-backend-opened-by-the-vmm.md),
 [ADR-0147](adr-0147-one-kernel-forwarded-pair-per-transport-flow.md),
-[ADR-0148](adr-0148-stream-toward-guest-seqpacket-replies-for-datagram-flows.md),
 [ADR-0149](adr-0149-length-prefixed-datagram-frame-with-empty-carrier.md),
 [ADR-0150](adr-0150-guest-kernel-aya-adaptation-controlled-by-overdrive-init.md),
 [ADR-0151](adr-0151-one-node-guest-flow-owner-holds-forwarder-and-pair-sockets.md),
@@ -1118,13 +1204,12 @@ connection-pump scaling ([#300](https://github.com/overdrive-sh/overdrive/issues
 [ADR-0155](adr-0155-vsock-attachment-density-target-introduces-no-topology-ceiling.md),
 [ADR-0156](adr-0156-guest-cid-derived-from-admission-lease.md),
 [ADR-0157](adr-0157-beacon-on-node-shared-vsock-listener-keyed-by-peer-cid.md),
-[ADR-0158](adr-0158-flows-are-paired-out-of-band-with-install-at-establishment-and-kernel-parking.md),
+[ADR-0158](adr-0158-a-flows-request-travels-in-band-and-every-other-pairing-message-out-of-band.md),
 [ADR-0159](adr-0159-guest-forwarding-kernel-objects-are-unpinned.md),
 [ADR-0160](adr-0160-forwarding-stop-aborts-flows-and-restore-reopens-admission-only.md),
 [ADR-0161](adr-0161-vendored-cloud-hypervisor-fork-is-built-pinned-and-provisioned-as-a-checksummed-release.md),
 [ADR-0162](adr-0162-non-mesh-guest-egress-is-kernel-forwarded-to-its-destination.md),
-[ADR-0164](adr-0164-guest-service-vip-access-uses-the-existing-connect4-rewrite-on-owner-sockets.md),
-[ADR-0165](adr-0165-host-verdict-strips-every-guest-datagram-frame-and-the-owner-sends-empty-datagrams.md),
+[ADR-0164](adr-0164-guest-vip-tcp-resolves-as-mesh-and-datagrams-use-the-connect4-rewrite.md),
 [ADR-0166](adr-0166-flow-control-messages-travel-on-a-dedicated-per-vm-control-session.md),
 [ADR-0167](adr-0167-guest-flows-to-host-internal-destinations-are-refused.md),
 [ADR-0169](adr-0169-forwarding-quiescence-is-a-counted-move-only-hold.md),
@@ -1132,18 +1217,39 @@ connection-pump scaling ([#300](https://github.com/overdrive-sh/overdrive/issues
 [ADR-0173](adr-0173-host-platform-clients-reach-a-vm-port-through-an-owner-opened-vsock-flow.md),
 [ADR-0174](adr-0174-host-opened-guest-connections-appear-from-the-guest-gateway.md),
 [ADR-0177](adr-0177-guest-opened-host-vsock-connections-are-attributed-by-peer-cid-and-launch-token.md),
-[ADR-0180](adr-0180-a-flow-end-is-classified-from-the-kernels-vsock-shutdown-flags.md),
+[ADR-0180](adr-0180-a-flows-end-is-classified-in-the-forwarders-socket-callbacks-from-the-kernels-end-facts.md),
 [ADR-0182](adr-0182-a-guest-reset-ends-the-vmm.md),
-[ADR-0183](adr-0183-a-half-close-drain-completes-on-a-kernel-record-without-a-deadline.md),
+[ADR-0183](adr-0183-a-half-close-completes-in-the-kernel-forwarder-after-the-last-accepted-byte.md),
 [ADR-0184](adr-0184-a-failed-boot-write-of-the-shared-mtls-table-refuses-boot.md),
 [ADR-0185](adr-0185-the-guest-prefix-holds-no-node-address-and-no-vip.md),
 [ADR-0186](adr-0186-leg-s-reaches-vm-backends-through-a-temporary-vsock-relay-until-303.md),
 [ADR-0187](adr-0187-a-vm-probe-refused-by-node-capacity-or-quiescence-records-no-sample.md),
 [ADR-0190](adr-0190-leg-b-marks-and-loopback-binds-same-node-vm-dials.md),
-[ADR-0191](adr-0191-every-probe-run-counts-once-through-a-run-sequence-in-the-probe-row.md),
-[ADR-0192](adr-0192-a-probe-run-that-writes-no-row-emits-one-not-sampled-event.md).
-The numbers 0163, 0168, 0170, 0171, 0175, 0176, 0178, 0179, 0181, 0188 and
-0189 are not used. ADR-0068 pins the kernel, Linux 7.0.
+[ADR-0191](adr-0191-the-probe-runner-records-each-runs-streak-and-servicelifecycle-applies-thresholds-at-read.md),
+[ADR-0192](adr-0192-a-probe-run-that-writes-no-row-emits-one-not-sampled-event.md),
+[ADR-0197](adr-0197-guest-flows-are-forwarded-by-an-event-driven-in-kernel-forwarder.md),
+[ADR-0198](adr-0198-the-flow-forwarder-module-unloads-only-when-nothing-references-it.md),
+[ADR-0199](adr-0199-forwarder-pairs-live-and-die-with-the-control-context-that-attached-them.md),
+[ADR-0200](adr-0200-no-socket-the-flow-forwarder-joins-carries-ktls.md),
+[ADR-0201](adr-0201-a-datagram-association-is-one-framed-vsock-stream-forwarded-a-datagram-at-a-time.md),
+[ADR-0202](adr-0202-each-forwarder-pair-and-watch-reports-exactly-one-preallocated-end-record.md),
+[ADR-0203](adr-0203-the-flow-forwarder-module-is-built-from-one-source-once-per-supported-kernel-release.md),
+[ADR-0204](adr-0204-neither-a-late-forwarder-callback-nor-a-control-call-by-id-touches-an-ended-pairs-state.md),
+[ADR-0205](adr-0205-the-flow-forwarder-module-is-loaded-at-boot-by-the-host-image-and-by-overdrive-init-never-by-serve.md),
+[ADR-0206](adr-0206-a-guest-kernel-and-its-forwarder-module-ship-as-one-guest-kit.md),
+[ADR-0207](adr-0207-the-host-side-guest-flow-protocol-is-guest-neutral.md),
+[ADR-0208](adr-0208-guest-flows-are-bounded-by-a-node-pair-capacity-and-a-per-allocation-quota.md),
+[ADR-0209](adr-0209-a-guest-flows-places-are-released-when-the-host-reads-its-end-record.md),
+[ADR-0210](adr-0210-a-half-that-has-ended-before-attach-is-refused-and-its-flow-aborted.md),
+[ADR-0211](adr-0211-an-owners-abort-of-a-watch-never-touches-the-watched-socket.md),
+[ADR-0212](adr-0212-each-side-attaches-a-flows-pair-to-the-forwarder-at-pairing.md),
+[ADR-0213](adr-0213-a-flow-is-admitted-and-registered-in-one-step-and-never-acted-on-after-it-closed.md),
+[ADR-0214](adr-0214-the-host-end-of-a-host-opened-flow-is-held-by-its-dialer-never-forwarded.md),
+[ADR-0215](adr-0215-each-kind-of-flow-bounds-its-pairing-wait-at-exactly-one-side.md),
+[ADR-0216](adr-0216-the-host-forwarder-watches-a-dialled-vsock-so-its-stream-keeps-the-classified-end.md).
+The numbers 0148, 0163, 0165, 0168, 0170, 0171, 0175, 0176, 0178, 0179,
+0181, 0188, 0189 and 0193 to 0196 are not used. ADR-0068 pins the kernel,
+Linux 7.0.
 
 ---
 
@@ -1951,7 +2057,7 @@ allocation; it does not change what a workload, Service, allocation, SVID,
 selected backend, Running row or Service Stable state means. It introduces no
 bounded context, aggregate, repository, domain event, persistence boundary,
 workload or allocation lifecycle state, workflow, Event Sourcing model or
-CQRS split. The decisions are technical and are recorded as ADR-0145–0162, 0164–0167, 0169, 0172–0174, 0177, 0180, 0182–0187 and 0190–0192 (§ *vsock microVM attachment (GH #295)* above).
+CQRS split. The decisions are technical and are recorded as ADR-0145–0147, 0149–0162, 0164, 0166, 0167, 0169, 0172–0174, 0177, 0180, 0182–0187, 0190–0192 and 0197–0211 (§ *vsock microVM attachment (GH #295)* above).
 
 The production model keeps its split: `WorkloadIntent::{Job,Service,Schedule}`
 owns declared intent; the live physical-execution identity is the
@@ -1985,7 +2091,7 @@ flowchart LR
         GR["Guest Runtime\nREADY / EXEC · control session"]
     end
     subgraph External["Generic / external"]
-        HK["Host kernel\nvhost-vsock · sockmap · eBPF · nft · kTLS"]
+        HK["Host kernel\nvhost-vsock · ovd_fwd forwarder · eBPF · nft · kTLS"]
         HV["Cloud Hypervisor fork"]
     end
 
@@ -11263,7 +11369,15 @@ The L1/L2 diagrams are in
 ## vsock microVM attachment application architecture (GH #295)
 
 **Status: Accepted**, with the decision dates stated in § *vsock microVM
-attachment (GH #295)* above. Exact
+attachment (GH #295)* above: the event-driven in-kernel forwarder
+(EVMOD-ADOPT, ADR-0197) on 2026-10-16; its module, port and adapters, and
+the end-classification and attach rules it runs (EVMOD-LIFE to EVMOD-AB,
+ADR-0198 to ADR-0206, ADR-0149, ADR-0180, ADR-0209, ADR-0210, ADR-0212),
+the watch-abort rule (ADR-0211) and the guest-neutral host side (ADR-0207)
+on 2026-10-17. The guest-side components
+below are those of a Linux guest; a guest that runs no Linux kernel
+implements the same host-side protocol in its own image
+([GH #321](https://github.com/overdrive-sh/overdrive/issues/321)). Exact
 signatures, wire layouts, error variants, constants, ownership and lifecycle
 tables are pinned only in the
 [#295 feature delta](../../feature/netns-density-295/feature-delta.md)
@@ -11274,16 +11388,22 @@ tables are pinned only in the
 
 | Crate | Component | Role |
 |---|---|---|
-| `overdrive-core` | vocabulary and ports | Transport assignment, launch token, CID, flow refusal and close-cause vocabulary; the `GuestStreamDial` driving port; the `Vmm` port. No I/O. |
-| `overdrive-control-plane` | guest-flow owner (`guest_network`) | Leases and CIDs, flow and control listeners, control sessions, pairing, dials, quiescence, the gateway route at boot (GW-LOCAL). Implements `GuestStreamDial`. |
-| `overdrive-dataplane` | host forwarder (`guest_flow`) | Driven port over the host Aya programs and maps: verdicts, `sock_ops`, flow-end classifier, drain programs and cells, flow-event ring. |
-| `overdrive-worker` | `VmDriver`, mTLS worker, VM probe runner | Beacon intake and VMM lifecycle; leg-F/leg-C/leg-S; leg-S and the VM probe runner dial VM ports through `GuestStreamDial`. |
+| `overdrive-core` | vocabulary and ports | Transport assignment, launch token, CID, flow refusal and close-cause vocabulary; the `GuestStreamDial` driving port; the `Vmm` port; the driven port `FlowForwarder` and its vocabulary (EVMOD-PORT) (`guest_transport::forwarder`: ids, sides, modes, end outcomes and causes, inventory, `ForwarderError`). No I/O. |
+| `overdrive-control-plane` | guest-flow owner (`guest_network`) | Leases and CIDs, flow and control listeners, control sessions, pairing, dials, quiescence, the gateway route at boot (GW-LOCAL). Implements `GuestStreamDial`. Holds the host forwarder context; attaches each pair before `Paired`, watches each dial's vsock, releases a flow on its end record, resolves a `GuestStream`'s end from its own abort or the watch's record (EVMOD-CTL, EVMOD-REC, EVMOD-PAIR, EVMOD-STREAM-END, EVMOD-STREAM-ABORT). Guest-neutral: never branches on guest type (ADR-0207). |
+| `kmod/ovd_fwd` (C, GPL-2.0; no crate) | flow forwarder module | (EVMOD-LIFE, EVMOD-BUILD, EVMOD-LOAD, EVMOD-SAFE, EVMOD-END, EVMOD-PAIR, EVMOD-DGRAM, EVMOD-KTLS, EVMOD-WQ) The in-kernel forwarder on both sides — peek, non-blocking send, consume only what the target accepted; end classification in its own socket callbacks; stream and datagram modes; one control context per owner, one end record per pair or watch. Unloads only at zero module references (one per open context and per hooked socket; MODULE-REFCOUNT); built per kernel release by `cargo xtask kmod-build`; loaded by the host image and by `overdrive-init`. |
+| `overdrive-fwd` (new, `adapter-host`) | `KernelFlowForwarder` | (EVMOD-PORT) The only production `FlowForwarder` adapter: opens `/dev/ovd_fwd`, mirrors the UAPI header with layout assertions, runs the forwarder probe. No async runtime; linked by `overdrive serve` and `overdrive-init`. |
+| `overdrive-worker` | `VmDriver`, mTLS worker, VM probe runner | Beacon intake and VMM lifecycle; the leg-F/leg-C listeners and the forwarded-outbound port; the VM probe runner dials VM ports through `GuestStreamDial`. |
+| `overdrive-dataplane` | `HostMtlsEnforcement` | The inbound enforcement dials leg S to a VM backend through `GuestStreamDial` after the client authenticated, and relays it until #303 (LEGS-DIAL). |
 | `overdrive-host` | `CloudHypervisorVmm` | Launches the fork with `--vsock cid=N,backend=vhost-kernel`; the VMM opens the device. |
-| `overdrive-init` | guest PID 1 | Guest network configuration, guest Aya programs, guest flow owner, control session, beacon. |
-| `overdrive-sim` | `Sim*` adapters | Simulated dial, forwarder, VMM and guest peer for seeded DST and Quint conformance. |
+| `overdrive-init` | Linux guest PID 1 | Guest network configuration, guest Aya capture programs, guest flow owner, control session, beacon. (EVMOD-LOAD, EVMOD-GUEST-KIT) Checks the forwarder module's release against the running kernel, loads it and opens its context before READY; attaches each guest pair through `KernelFlowForwarder`. |
+| `overdrive-bpf` | guest capture programs | The guest's cgroup socket hooks and `sock_release` capture. No forwarding program. |
+| `overdrive-sim` | `Sim*` adapters | Simulated dial, VMM and guest peer for seeded DST and Quint conformance; `SimFlowForwarder` (EVMOD-PORT), the named arbiter for forwarder facts, paired with the module's Tier-3 suite (V-EV-END, V-EV-CTL). |
 
-Dependencies point down to `overdrive-core`. Workers depend on the
-`GuestStreamDial` trait, never on the owner's concrete type.
+Dependencies point down to `overdrive-core`. The dial's holders (the VM
+probe runner and the inbound mTLS enforcement) depend on the
+`GuestStreamDial` trait, never on the owner's concrete type; the owners
+depend on the `FlowForwarder` trait, never on `KernelFlowForwarder`.
+`overdrive-dataplane` carries no guest-flow forwarder.
 
 ### Port/adapter composition
 
@@ -11294,10 +11414,14 @@ Dependencies point down to `overdrive-core`. Workers depend on the
   session, quiesced, refused, timed out, pairing deadline, unreachable,
   capacity). The dial gates no lifecycle state; it returns a result to its
   caller.
-- **Driven port `guest_flow`** (dataplane): every kernel forwarding effect of
-  the owner. Its `Sim` counterpart is the named arbiter for kernel facts in
-  conformance (forwarded counts, ring contents, program skips), paired with
-  Tier-3 evidence.
+- **Driven port `FlowForwarder`** (core trait, EVMOD-PORT;
+  production adapter `overdrive-fwd::KernelFlowForwarder`, sim adapter
+  `overdrive-sim::SimFlowForwarder`): every kernel forwarding effect of an
+  owner — probe, attach, watch, abort, abort-all, take an end record, pair
+  state, inventory. It has no read or write method on a forwarded socket.
+  `SimFlowForwarder` is the named arbiter for forwarder facts in
+  conformance (end records, live pairs and watches, a watched socket's
+  state), paired with the module's Tier-3 suite.
 - **Existing ports reused:** `MtlsResolve` (mesh classification, VIP branch),
   `Vmm`, `Entropy` (launch tokens), `Clock`, `IntentStore` /
   `ObservationStore`.
@@ -11305,7 +11429,8 @@ Dependencies point down to `overdrive-core`. Workers depend on the
 ### Lifecycle and data-flow contract
 
 1. **Boot.** Startup probes refuse before any effect (owner cgroup placement,
-   descriptor budget, guest prefix free of node addresses and VIPs); the VM
+   descriptor budget, guest prefix free of node addresses and VIPs, and the
+   forwarder probe on a context opened and released for it); the VM
    driver and its beacon listener compose; boot reclamation ends every VM this
    process does not supervise, before any lease is assigned; the shared mTLS
    table is written in one transaction and a failure refuses boot (ADR-0184);
@@ -11321,12 +11446,14 @@ Dependencies point down to `overdrive-core`. Workers depend on the
    kernel. Host platform clients reach a VM port only through
    `GuestStreamDial`; leg-S relays a VM backend's plaintext over the returned
    stream until #303 lands (ADR-0186).
-4. **Flow end.** The flow-end classifier's records decide clean half-close
-   versus abort; drain completes on a kernel record; a lost flow record
-   aborts its flow, a lost empty-datagram notice is compensated, and a
-   recursion-miss rise triggers a level re-read. The owners read these
-   counters at every flow-event dispatch and on the one-second audit period
-   (ADR-0183, ADR-0165).
+4. **Flow end** (EVMOD-END and EVMOD-REC). The forwarder
+   classifies each vsock end in its own callback as the SHUTDOWN or RST
+   arrives (or once at attach), forwards a clean end as `SHUT_WR` after the
+   last accepted byte and aborts with resets on any other end (ADR-0180,
+   ADR-0183); the owner learns each end from the pair's one end
+   record and only then releases the flow and closes its descriptors
+   (ADR-0202). There is no flow-event ring, loss count or audit-period
+   counter read.
 5. **Teardown.** The driver stops the VMM; the device's release resets every
    host flow of that guest; the mTLS lifecycle and the owner then tear down
    the allocation's remaining state, aborting any flow with reset; the lease
@@ -11348,15 +11475,22 @@ Dependencies point down to `overdrive-core`. Workers depend on the
 
 ### Effect isolation, enforcement, and evidence
 
-Source checks pin: the flow-end classifier is a raw tracepoint, never a
-perf-attached one; no flow vsock sets `SO_RCVLOWAT` above 1; every strparser
-parking-cell sender sets `TCP_NODELAY`; every redirect into a UDP or
-SEQPACKET target pulls the whole frame first; no Overdrive process holds a
-`/dev/vhost-vsock` descriptor. The guest-flow owner's protocol is
-model-checked in `specs/quint/guest-flow-owner/` and replayed against the
+Checks pin: the module builds
+`W=1`, sparse and `checkpatch --strict` clean, has a `module_exit`, and its
+misc device's `fops` owner is the module (MODULE-REFCOUNT: it unloads only at
+zero references, and V-EV-UNLOAD proves the refusal on a real kernel); its
+UAPI header is the one ABI SSOT, mirrored in `overdrive-fwd` with layout
+assertions and pinned by a Tier-3 round-trip; only `overdrive-fwd` opens
+`/dev/ovd_fwd`; `overdrive-fwd` is `adapter-host` with no async runtime and
+depends only on `overdrive-core`; no owner installs a ULP on a forwarded
+socket. Unchanged: no Overdrive process holds a `/dev/vhost-vsock`
+descriptor. The guest-flow owner's protocol is
+model-checked in `specs/quint/guest-flow-owner/` (current evidence: run
+`36080-1792257031.125`, `evidence/summary.json`) and replayed against the
 owner through quint-connect conformance drivers; probe-run counting
 (PROBE-RUN-COUNT with D-1, ADR-0191) is model-checked in
-`specs/quint/probe-count/`; kernel behaviour the model
+`specs/quint/probe-count/` (current evidence: run `252559-1791986812.704`);
+kernel behaviour the model
 assumes is proven at Tier 3 on Linux 7.0 (spike findings under
 `docs/feature/netns-density-295/spike/`).
 
@@ -11386,6 +11520,14 @@ for current proposed contracts.
 
 | Date | Change |
 |---|---|
+| 2026-10-20 | **netns-density-295: MODULE-REFCOUNT (user ruling).** The flow forwarder `ovd_fwd` is no longer permanent: it holds a module reference for every open control context and every hooked socket, and unloads only at zero (ADR-0198 restated in present tense; ADR-0204 gains rule 5 — callbacks are removed under the socket lock, `sk_write_space` is never overridden (the write-space trigger is a socket wait-queue entry, since `sock_wfree` calls `sk_write_space` on vsock and UDP sockets from preemptible process context with no lock), and a ULP present at removal on a TCP half keeps that socket's reference). ADR-0068 § 7 keeps the image kernel without module unloading, for a restated reason. ADR-0203's tree digest covers the files git does not ignore. ADR-0205 and ADR-0203 replace the reboot remedy with `kmod-load`'s reload of an idle module. ADR-0200's two permanence references are restated. — Morgan. |
+| 2026-10-18 | **netns-density-295: dispositions recorded apart from approvals.** ADR-0164 and ADR-0191 take file names that no longer misdescribe their decisions; every link resolves. In the feature delta § *Approval record*, RECORD-COST moves out of the user-approval table into "Architect dispositions" (outcome-neutral, confirmed by adversarial review, not a user approval) and PD-9 is marked superseded by it; ADR-SLUG records the file-name rule (a slug must not misdescribe its decision; a faithful shortened prefix of the title suffices). — Morgan. |
+| 2026-10-18 | **netns-density-295: review close-out.** ADR-0200, ADR-0202 and ADR-0214 take file names that match their titles; their links are updated. RECORD-COST is confirmed by adversarial review (feature delta § *Approval record*); no design item is open before DISTILL. — Morgan. |
+| 2026-10-18 | **netns-density-295: ADR-0214 split.** ADR-0214 keeps INB-1 alone (the dialer holds the host end of a host-opened flow, never forwarded); new ADR-0216 records the watch clause of EVMOD-END (the host forwarder watches a dialled vsock so the stream keeps the classified end; a dropped stream aborts its watch). ADR-0147, ADR-0158, ADR-0173, ADR-0180, ADR-0202, ADR-0211 and ADR-0212 link ADR-0216. ADR-0204 rule 4's sentence on whose end removes the id is reflowed. The `guest-flow-owner` full record cost (81.5 minutes, 12 jobs) is decided as the new baseline beside PD-9, the recommended option of a small choice, its adversarial-review confirmation pending (feature delta § *Approval record*, RECORD-COST). — Morgan. |
+| 2026-10-18 | **netns-density-295: ADR-0158 split into one decision per ADR.** ADR-0158 keeps D18 (the request in band and first, every other pairing message out of band); new ADR-0212 (EVMOD-PAIR: attach at pairing), ADR-0213 (U-1: one-step admission and registration, no continuation for a closed flow), ADR-0214 (INB-1 / EVMOD-END: the dialled host end held by its dialer and watched) and ADR-0215 (the per-kind pairing-wait bounds under D15-R3); the pending TcpConnect bound stays in ADR-0150 and non-blocking owner connects move to ADR-0151. ADR-0158, ADR-0180 and ADR-0204 take file names that match their decisions. — Morgan. |
+| 2026-10-17 | **netns-density-295: one decision per ADR for the flow bounds, release point, ended-half refusal and watch abort.** New ADR-0208 (D3's node pair capacity and per-allocation quota), ADR-0209 (EVMOD-AB: places released at the end record), ADR-0210 (EVMOD-ATTACH-END) and ADR-0211 (WATCH-ABORT); ADR-0147, ADR-0158, ADR-0180 and ADR-0199 each record one decision and link them. ADR-0180 is retitled to classification in the forwarder's socket callbacks. ADR-0204 adds the control path by id (lookup and enqueue under the context's record-queue lock; the id removed before the free work is queued). ADR-0203 and ADR-0206 cite the `CONFIG_MODVERSIONS` `same_magic` at `kernel/module/version.c:97-105`. The Quint evidence ids are cited. — Morgan. |
+| 2026-10-17 | **netns-density-295: the forwarder's contracts approved.** The user approved EVMOD-LIFE to EVMOD-AB (for Linux guests) and the guest-neutral host side (new ADR-0207; the Unikraft guest hop is GH #321). The #295 sections drop their PROPOSED markers; ADR-0147, ADR-0149, ADR-0150, ADR-0151, ADR-0158, ADR-0159 and ADR-0180 are rewritten in present tense for the forwarder; ADR-0148, ADR-0165, ADR-0193, ADR-0194, ADR-0195 and ADR-0196 are removed from the decision records (their subjects do not exist under the forwarder); ADR-0203 and ADR-0206 cite the `CONFIG_MODVERSIONS` check of `kernel/module/version.c`; ADR-0204 states the free order. — Morgan. |
+| 2026-10-17 | **netns-density-295: the forwarder's application architecture.** § *vsock microVM attachment application architecture (GH #295)* is rewritten for the event-driven in-kernel forwarder (EVMOD-ADOPT, ADR-0197): the `FlowForwarder` port, `kmod/ovd_fwd`, `overdrive-fwd::KernelFlowForwarder` and `SimFlowForwarder` replace the sockmap host forwarder, with the forwarder's contracts marked PROPOSED. ADR-0203 is narrowed to the build; the load placement (ADR-0205) and the guest kit (ADR-0206) are their own proposed decisions; ADR-0202 is narrowed to the completion channel. — Morgan. |
 | 2026-10-13 | **netns-density-295: the #295 sections describe the vsock microVM attachment (ADR-0145–0162, 0164–0167, 0169, 0172–0174, 0177, 0180, 0182–0187 and 0190–0192).** The shared-bridge sections are replaced by the current vsock design: § *vsock microVM attachment (GH #295)*, its domain reading and its application architecture. GW-LOCAL (ADR-0152), PROBE-NOSAMPLE (ADR-0187), LEGB-DIAL (ADR-0190), PROBE-RUN-COUNT with D-1 (ADR-0191; amends ADR-0054 § 5, ADR-0055 and ADR-0097 D2) and PROBE-NOSAMPLE-EVENT (ADR-0192) are recorded as approved by the user on 2026-10-13. — Morgan. |
 | 2026-10-03 | **netns-density-295 D-295-R19 ordering change WITHDRAWN under its accepted native condition; LegF/LegC listener-loss no-quiescence recorded on the named-Service E14(e) native result.** Native E14(c)/(d) fail closed under the existing mark-before-TPROXY program, so the R19 reorder does not reproduce its required ordinary absent-listener exposure; under the pre-approved conditional branch (user acceptance 2026-09-24) it is withdrawn and both constant TPROXY rules retain mark → TPROXY → accept, with no alternate-order recognizer and no canonical-identity change. The bounded ordinary-flow withdrawal was independently reviewed (`arch_rev_20261003_netns295_r19_native_falsification`, APPROVED). The named-Service E14(e) guest `TIME_WAIT` door (nextest `f03c43d5-ffcc-4bec-8bd3-9b98f90e334a`) fails closed — `reopened=false`, wildcard `accepts=0` — with the `serve` owner killed and the guest TAP up and the entry surviving, so a pure LegF/LegC listener failure does not quiesce managed TAPs, the killed-mode residual is closed, and the original single-loss security outcome (no SYN-ACK, no wildcard accept, no reopen to the user) is preserved by the kernel path, on that bounded native evidence and not extrapolated. D-295-R18 stands on its reproduced native RED, unchanged. ADR-0140 is Withdrawn; ADR-0088/0089/0124/0125/0139, this brief, and the #295 feature delta record the withdrawal. The `c4-diagrams.md` L2 order/listener prose, independent review of the listener-loss classification, and roadmap revalidation of step 08-01 remain downstream gates; DELIVER is not authorized by this record. — Morgan. |
 | 2026-09-28 | **netns-density-295: the `TapHostMac` fact shape and the reserved set's `Condemned` exclusion are user-approved, and the remaining host-side MAC wording is corrected (user approval of 2026-09-28).** `GuestNetworkFact::TapHostMac { ifindex, address: TapHostAddress }`, with `TapHostAddress` = `Unreserved \| Reserved([u8; 6]) \| Missing`, replaces the in-tree `{ ifindex, mac }`. The reserved set leaves out `Condemned` allocations. ADR-0122's amendment list, ADR-0124's Decision, ADR-0142's *Detection only* alternative and Consequences bound, ADR-0143's Consequences, and `c4-diagrams.md`'s shared-owner container and allocation sequence now describe the host-side MAC read-back by the invariant: a reserved or absent address is damage, a change to an unreserved address is not, and nothing is recorded. Code committed on the feature branch counts as landed, because the repository merges with linear history (the user, 2026-09-28: "we merge commit with linear history"), so the 2026-09-24 amendment blocks of ADR-0114, 0115, 0117, 0118, 0121, 0122, 0124, and 0125 stand as written. The host-side MAC clause revised here is not implemented even on the feature branch (`GuestNetworkFact::TapHostMac` is constructed only in `#[cfg(test)]` code), so it has no operative contract to amend, and each of the four ADRs states it in present tense with no amendment narrative. The allocation sequence's messages no longer contain `;`, which ends a Mermaid sequence message. — Morgan. |

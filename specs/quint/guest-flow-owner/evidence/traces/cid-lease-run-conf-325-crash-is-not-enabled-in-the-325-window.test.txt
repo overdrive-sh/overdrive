@@ -1,0 +1,17 @@
+
+  lease_conf_325
+    1) lease_conf_325::cid_lease::CrashIsNotEnabledInThe325Window failed after 1 test(s)
+
+  1 failed
+
+  1) lease_conf_325::cid_lease::CrashIsNotEnabledInThe325Window:
+       Error [QNT511]: Test lease_conf_325::cid_lease::CrashIsNotEnabledInThe325Window returned false
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/cid_lease.qnt:796:7
+        796:   run CrashIsNotEnabledInThe325Window = init
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Use --seed=0x4680fdcdd1afd28a --match=lease_conf_325::cid_lease::CrashIsNotEnabledInThe325Window to repeat.
+
+
+  Use --verbosity=3 to show executions.
+  Further debug with: quint test --verbosity=3 /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/cid_lease.qnt
+error: Tests failed

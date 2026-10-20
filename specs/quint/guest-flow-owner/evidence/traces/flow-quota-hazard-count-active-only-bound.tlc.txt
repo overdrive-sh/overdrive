@@ -1,31 +1,39 @@
 State 1: <Initial predicate>
+/\ quota_bugCountActiveOnly_flow_quota_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ quota_bugCountActiveOnly_flow_quota_g = [ refusedUnder |-> FALSE,
   clash |-> FALSE,
   refused |-> FALSE,
   otherAdmitted |-> FALSE ]
-/\ quota_bugCountActiveOnly_flow_quota_slot = << [own |-> 0, st |-> "free", pend |-> FALSE],
-   [own |-> 0, st |-> "free", pend |-> FALSE] >>
+/\ quota_bugCountActiveOnly_flow_quota_slot = << [own |-> 0, st |-> "free", fwd |-> FALSE],
+   [own |-> 0, st |-> "free", fwd |-> FALSE] >>
+/\ quota_bugCountActiveOnly_flow_quota_endq = <<>>
 
-State 2: <quota_bugCountActiveOnly_flow_quota_Admit line 304, col 3 to line 346, col 10 of module quota_bugCountActiveOnly>
+State 2: <quota_bugCountActiveOnly_flow_quota_Admit line 393, col 3 to line 442, col 57 of module quota_bugCountActiveOnly>
+/\ quota_bugCountActiveOnly_flow_quota_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ quota_bugCountActiveOnly_flow_quota_g = [ refusedUnder |-> FALSE,
   clash |-> FALSE,
   refused |-> FALSE,
   otherAdmitted |-> FALSE ]
-/\ quota_bugCountActiveOnly_flow_quota_slot = << [own |-> 1, st |-> "active", pend |-> FALSE],
-   [own |-> 0, st |-> "free", pend |-> FALSE] >>
+/\ quota_bugCountActiveOnly_flow_quota_slot = << [own |-> 1, st |-> "active", fwd |-> TRUE],
+   [own |-> 0, st |-> "free", fwd |-> FALSE] >>
+/\ quota_bugCountActiveOnly_flow_quota_endq = <<>>
 
-State 3: <quota_bugCountActiveOnly_flow_quota_HalfClose line 267, col 3 to line 290, col 46 of module quota_bugCountActiveOnly>
+State 3: <quota_bugCountActiveOnly_flow_quota_HalfClose line 252, col 3 to line 278, col 57 of module quota_bugCountActiveOnly>
+/\ quota_bugCountActiveOnly_flow_quota_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ quota_bugCountActiveOnly_flow_quota_g = [ refusedUnder |-> FALSE,
   clash |-> FALSE,
   refused |-> FALSE,
   otherAdmitted |-> FALSE ]
-/\ quota_bugCountActiveOnly_flow_quota_slot = << [own |-> 1, st |-> "draining", pend |-> TRUE],
-   [own |-> 0, st |-> "free", pend |-> FALSE] >>
+/\ quota_bugCountActiveOnly_flow_quota_slot = << [own |-> 1, st |-> "half", fwd |-> TRUE],
+   [own |-> 0, st |-> "free", fwd |-> FALSE] >>
+/\ quota_bugCountActiveOnly_flow_quota_endq = <<>>
 
-State 4: <quota_bugCountActiveOnly_flow_quota_Admit line 304, col 3 to line 346, col 10 of module quota_bugCountActiveOnly>
+State 4: <quota_bugCountActiveOnly_flow_quota_Admit line 393, col 3 to line 442, col 57 of module quota_bugCountActiveOnly>
+/\ quota_bugCountActiveOnly_flow_quota_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ quota_bugCountActiveOnly_flow_quota_g = [ refusedUnder |-> FALSE,
   clash |-> FALSE,
   refused |-> FALSE,
   otherAdmitted |-> FALSE ]
-/\ quota_bugCountActiveOnly_flow_quota_slot = << [own |-> 1, st |-> "draining", pend |-> TRUE],
-   [own |-> 1, st |-> "active", pend |-> FALSE] >>
+/\ quota_bugCountActiveOnly_flow_quota_slot = << [own |-> 1, st |-> "half", fwd |-> TRUE],
+   [own |-> 1, st |-> "active", fwd |-> TRUE] >>
+/\ quota_bugCountActiveOnly_flow_quota_endq = <<>>

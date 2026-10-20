@@ -41,15 +41,20 @@ pub mod kek;
 // (`overdrive-control-plane`); the `identity_read_equivalence` structural guard
 // drives both adapters through the same calls (ADR-0067 D7/D9).
 pub mod dataplane;
+pub mod dataplane_composer;
 pub mod driver;
 pub mod entropy;
-// GH #295 D16-CLAIM — `SimGuestCidClaim`, the in-memory double of the
-// host-kernel CID-claim port (`overdrive_core::guest_transport::GuestCidClaim`).
-pub mod guest_cid_claim;
+// GH #295 EVMOD-PORT — `SimFlowForwarder` over `SimSocket`s, the sim binding
+// of the core `FlowForwarder` port and the named arbiter of the forwarder's
+// kernel facts (DELIVER step 4 implements it, decision B-4).
+pub mod flow_forwarder;
 // GH #295 D-295-R16 — `SimGuestDnsFactory` / `SimGuestDns`, the socket-free
 // doubles of the control-plane shared-gateway DNS owner port.
 pub mod guest_dns;
+// GH #295 — `SimGuestStreamDial`, the scripted double of the guest-flow
+// owner's `GuestStreamDial` driving port (leg-S, VM probe runner).
 pub mod guest_network;
+pub mod guest_stream_dial;
 pub mod identity_read;
 pub mod llm;
 // transparent-mtls-host-socket step 02-02 — `SimMtlsEnforcement`, the in-memory
@@ -109,13 +114,18 @@ pub mod vmm;
 pub mod vm_host_state;
 
 pub use beacon_io::{SimBeaconIo, SimBeaconSocketObservation};
-pub use ca::SimCa;
+pub use ca::{SimCa, SimCaFactory};
 pub use cgroup_accounting::SimCgroupAccounting;
 pub use cgroup_fs::{SimCgroupFs, SimEntry, SimOp};
+pub use dataplane_composer::SimDataplaneComposer;
+pub use flow_forwarder::{
+    SimContextState, SimFarEnd, SimFlowForwarder, SimForwarderDevice, SimLocalRead, SimShutdown,
+    SimSocket, SimSocketKind, SimSocketSetup, SimVsockState,
+};
 pub use guest_dns::{SimGuestDns, SimGuestDnsFactory, SimGuestDnsServeExit};
 pub use identity_read::SimIdentityRead;
 pub use kek::SimKek;
-pub use mtls_enforcement::{ScriptedTrip, SimMtlsEnforcement};
+pub use mtls_enforcement::{ScriptedTrip, SimMtlsEnforcement, SimMtlsEnforcementFactory};
 pub use mtls_intercept::{
     SimAcceptScript, SimInterceptFault, SimInterceptListener, SimMtlsIntercept, SimSharedTable,
 };

@@ -1,0 +1,17 @@
+{
+ "status": "done",
+ "wall_s": 175,
+ "host_uname_r": "7.0.0-38-generic",
+ "guest_uname_r": "7.0.0-29-generic",
+ "physical_module_names_unchanged": true,
+ "physical_ovdpair_loaded": false,
+ "runs": 0,
+ "fault_lines": [
+  "[   86.876550] Call Trace:",
+  "[   86.876672] Call Trace:",
+  "[   86.876814] Call Trace:",
+  "[  174.084788] Call Trace:",
+  "[  174.085020] Call Trace:"
+ ],
+ "probe_results": []
+}

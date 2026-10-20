@@ -24,8 +24,8 @@
 //!   `health.startup.refused` reason at the `run_server` composition root.
 //! - **S-DBN-BIND-03 composition-root half (D2)** — the prior two assert the
 //!   `probe()`-level variant; this one boots the PRODUCTION `run_server`
-//!   composition root (real `EbpfDataplane` + composed mTLS worker via
-//!   `mtls_identity_override`, mirroring the keystone) with the test-only
+//!   composition root (real `EbpfDataplane` + composed mTLS worker, mirroring
+//!   the keystone) with the test-only
 //!   `dns_probe_fault` seam armed, and asserts the boot REFUSES with
 //!   `Err(ControlPlaneError::DnsResponderBoot(_))` AND emits a structured
 //!   `health.startup.refused` event whose `reason` is `dns.responder.probe` —
@@ -38,8 +38,9 @@
 //!   the socket identities `probe` recorded without mutating them, and fails
 //!   once the responder's socket is lost out of band. The composition-root
 //!   successor boots `run_server_with_obs_and_driver` with the required
-//!   `ServerConfig.guest_dns` port set to the pinned `SimGuestDnsFactory`
-//!   scripted to refuse its probe, and asserts the same refusal contract.
+//!   `BootAdapters.guest_dns` port (GH #295 NO-OVERRIDE-SEAMS; formerly a
+//!   `ServerConfig` field) set to the pinned `SimGuestDnsFactory` scripted to
+//!   refuse its probe, and asserts the same refusal contract.
 //!
 //! Root + Lima (the `:53` bind needs CAP_NET_BIND_SERVICE / root; the
 //! composition-root test additionally needs the real `EbpfDataplane` XDP attach
@@ -73,7 +74,7 @@ use overdrive_control_plane::dns_responder::{
     GuestDns, GuestDnsDeps, GuestDnsFactory, HostGuestDnsFactory,
 };
 use overdrive_control_plane::error::ControlPlaneError;
-use overdrive_control_plane::{ServerConfig, run_server_with_obs_and_driver};
+use overdrive_control_plane::run_server_with_obs_and_driver;
 use overdrive_core::id::{AllocationId, MeshServiceName, NodeId, ServiceId, SpiffeId, WorkloadId};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Backend;
@@ -823,20 +824,11 @@ async fn run_server_refuses_boot_when_the_guest_dns_probe_fails_through_the_requ
     let cfg_dir = tmp.path().join("conf");
     std::fs::create_dir_all(&data_dir).expect("mkdir data");
     std::fs::create_dir_all(&cfg_dir).expect("mkdir cfg");
-    let config = ServerConfig {
-        bind: "127.0.0.1:0".parse().expect("parse bind addr"),
-        data_dir,
-        operator_config_dir: cfg_dir,
-        dataplane: Some(super::dataplane_lo::lo_dataplane_config()),
-        dataplane_override: Some(Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new())),
-        ..ServerConfig::new(
-            Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-            Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
-            Arc::clone(&factory) as Arc<dyn GuestDnsFactory>,
-        )
-    };
+    let config = super::node_adapters::test_config(data_dir, cfg_dir);
+    let mut boot = super::node_adapters::boot_adapters(&config);
+    boot.guest_dns = Arc::clone(&factory) as Arc<dyn GuestDnsFactory>;
     let wiring =
-        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&config.clock));
+        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::clone(&boot.clock));
     let supervisor = wiring.supervisor();
     let owner = Arc::new(SimSharedGuestNetworkOwner::default());
     let owner_port: Arc<dyn SharedGuestNetworkOwner> = owner.clone();
@@ -846,9 +838,8 @@ async fn run_server_refuses_boot_when_the_guest_dns_probe_fails_through_the_requ
     // WHEN the production composition boots.
     let result = run_server_with_obs_and_driver(
         config,
-        obs,
+        overdrive_control_plane::BootAdapters { observation: obs, ..boot },
         driver,
-        Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new()),
         owner_port,
         wiring,
         overdrive_worker::cgroup_manager::CgroupManager::new(
@@ -894,9 +885,7 @@ async fn run_server_refuses_boot_when_the_guest_dns_probe_fails_through_the_requ
     assert!(supervisor.is_boot_closed(), "the EXEC gate never opens on a refused boot");
     let calls = owner.calls();
     assert!(
-        !calls.iter().any(|call| {
-            matches!(call, GuestNetworkOperation::TapCreate | GuestNetworkOperation::TapSetUp)
-        }),
+        !calls.iter().any(|call| { matches!(call, GuestNetworkOperation::ForwardingActivate) }),
         "a refused boot makes no guest attachment: {calls:?}"
     );
     assert_eq!(

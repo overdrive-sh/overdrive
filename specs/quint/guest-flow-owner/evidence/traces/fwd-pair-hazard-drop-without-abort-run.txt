@@ -1,0 +1,25 @@
+
+  pair_bugDropWithoutAbort
+    1) pair_bugDropWithoutAbort::fwd_pair::DroppedStreamAbortsWatchThenGuestSeesAbort failed after 1 test(s)
+
+  1 failed
+
+  1) pair_bugDropWithoutAbort::fwd_pair::DroppedStreamAbortsWatchThenGuestSeesAbort:
+       Error [QNT508]: Expect condition does not hold true
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/fwd_pair.qnt:1690:52
+        1690:   run DroppedStreamAbortsWatchThenGuestSeesAbort = InitWith("watch")
+                                                                 ^^^^^^^^^^^^^^^^^
+        1691:     .then(Attach("g")).then(Write("gh")).then(Hop0("gh")).then(Read("gh"))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        1692:     .then(HolderDrop)
+              ^^^^^^^^^^^^^^^^^^^^^
+        1693:     .expect(Safety and gh.dropped and not(live(cur, "h")) and pr.get("h").cause == "Detached" and pr.get("h").rec == "queued"
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        1694:             and ctl.get("hg") == [both])
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Use --seed=0x6521484fc95a44b4 --match=pair_bugDropWithoutAbort::fwd_pair::DroppedStreamAbortsWatchThenGuestSeesAbort to repeat.
+
+
+  Use --verbosity=3 to show executions.
+  Further debug with: quint test --verbosity=3 /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/hazard/fwd_pair_stream_hazards_2.qnt
+error: Tests failed

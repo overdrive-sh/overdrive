@@ -43,6 +43,7 @@ mod acceptance {
             let enforcement: Arc<dyn MtlsEnforcement> = Arc::new(SimMtlsEnforcement::new(
                 Arc::new(SimIdentityRead::new(BTreeMap::new(), None)),
                 MtlsLimits::default(),
+                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
             ));
             let resolve: Arc<dyn MtlsResolve> =
                 Arc::new(SimMtlsResolve::new(BTreeMap::new(), MtlsResolution::NonMesh));
@@ -66,9 +67,8 @@ mod acceptance {
         pub fn pool() -> Arc<GuestAddressPool> {
             Arc::new(GuestAddressPool::new(
                 ipnet::Ipv4Net::new_assert(Ipv4Addr::new(100, 95, 0, 0), 16),
-                "ovd-gbr0".to_owned(),
                 Ipv4Addr::new(100, 95, 0, 1),
-                Ipv4Addr::new(100, 95, 0, 1),
+                Arc::new(overdrive_sim::adapters::entropy::SimEntropy::new(0x295)),
             ))
         }
     }
@@ -88,6 +88,13 @@ mod acceptance {
     #[cfg(feature = "integration-tests")]
     #[path = "../common/dataplane_lo.rs"]
     pub mod dataplane_lo;
+
+    // GH #295 (NO-OVERRIDE-SEAMS, STORES-IN, PORTS-CONFIG, FWD-PREREQ) — the
+    // driven-adapter bundles every `serve` fixture boots over: the host
+    // bundle with the non-VM fixtures' simulations replaced by name.
+    #[cfg(feature = "integration-tests")]
+    #[path = "../common/node_adapters.rs"]
+    pub mod node_adapters;
 
     // S-CP-09 — AllocStatusRow rkyv round-trip with the new
     // `reason: Option<TransitionReason>` and `detail: Option<String>`

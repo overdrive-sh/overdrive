@@ -21,6 +21,7 @@ State 1: <Initial predicate>
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toHostAbort = {}
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toHostPaired = {}
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_badAct = FALSE
+/\ flows_bugReconnectBeforeLossAbort_owner_flows_gSess = 0
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_heldByOther = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_gen = 0
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_phantom = FALSE
@@ -31,9 +32,10 @@ State 1: <Initial predicate>
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_alloc = "Absent"
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_drvLive = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toGuestAbort = {}
+/\ flows_bugReconnectBeforeLossAbort_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_crossMsg = FALSE
 
-State 2: <flows_bugReconnectBeforeLossAbort_owner_flows_Provision line 1239, col 3 to line 1261, col 58 of module flows_bugReconnectBeforeLossAbort>
+State 2: <flows_bugReconnectBeforeLossAbort_owner_flows_Provision line 1262, col 3 to line 1295, col 58 of module flows_bugReconnectBeforeLossAbort>
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_claim = 0
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_bHeldByOther = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_badPaired = FALSE
@@ -56,6 +58,7 @@ State 2: <flows_bugReconnectBeforeLossAbort_owner_flows_Provision line 1239, col
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toHostAbort = {}
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toHostPaired = {}
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_badAct = FALSE
+/\ flows_bugReconnectBeforeLossAbort_owner_flows_gSess = 0
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_heldByOther = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_gen = 1
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_phantom = FALSE
@@ -66,9 +69,10 @@ State 2: <flows_bugReconnectBeforeLossAbort_owner_flows_Provision line 1239, col
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_alloc = "Provisioned"
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_drvLive = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toGuestAbort = {}
+/\ flows_bugReconnectBeforeLossAbort_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_crossMsg = FALSE
 
-State 3: <flows_bugReconnectBeforeLossAbort_owner_flows_VmStart line 788, col 3 to line 821, col 60 of module flows_bugReconnectBeforeLossAbort>
+State 3: <flows_bugReconnectBeforeLossAbort_owner_flows_VmStart line 799, col 3 to line 838, col 60 of module flows_bugReconnectBeforeLossAbort>
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_claim = 0
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_bHeldByOther = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_badPaired = FALSE
@@ -91,6 +95,7 @@ State 3: <flows_bugReconnectBeforeLossAbort_owner_flows_VmStart line 788, col 3 
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toHostAbort = {}
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toHostPaired = {}
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_badAct = FALSE
+/\ flows_bugReconnectBeforeLossAbort_owner_flows_gSess = 0
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_heldByOther = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_gen = 1
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_phantom = FALSE
@@ -101,9 +106,10 @@ State 3: <flows_bugReconnectBeforeLossAbort_owner_flows_VmStart line 788, col 3 
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_alloc = "Provisioned"
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_drvLive = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toGuestAbort = {}
+/\ flows_bugReconnectBeforeLossAbort_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_crossMsg = FALSE
 
-State 4: <flows_bugReconnectBeforeLossAbort_owner_flows_step line 3620, col 9 to line 3621, col 63 of module flows_bugReconnectBeforeLossAbort>
+State 4: <flows_bugReconnectBeforeLossAbort_owner_flows_step line 4024, col 9 to line 4026, col 63 of module flows_bugReconnectBeforeLossAbort>
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_claim = 0
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_bHeldByOther = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_badPaired = FALSE
@@ -126,6 +132,7 @@ State 4: <flows_bugReconnectBeforeLossAbort_owner_flows_step line 3620, col 9 to
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toHostAbort = {}
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toHostPaired = {}
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_badAct = FALSE
+/\ flows_bugReconnectBeforeLossAbort_owner_flows_gSess = 1
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_heldByOther = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_gen = 1
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_phantom = FALSE
@@ -136,9 +143,10 @@ State 4: <flows_bugReconnectBeforeLossAbort_owner_flows_step line 3620, col 9 to
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_alloc = "Provisioned"
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_drvLive = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toGuestAbort = {}
+/\ flows_bugReconnectBeforeLossAbort_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_crossMsg = FALSE
 
-State 5: <flows_bugReconnectBeforeLossAbort_owner_flows_step line 3620, col 9 to line 3621, col 63 of module flows_bugReconnectBeforeLossAbort>
+State 5: <flows_bugReconnectBeforeLossAbort_owner_flows_step line 4024, col 9 to line 4026, col 63 of module flows_bugReconnectBeforeLossAbort>
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_claim = 0
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_bHeldByOther = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_badPaired = FALSE
@@ -161,6 +169,7 @@ State 5: <flows_bugReconnectBeforeLossAbort_owner_flows_step line 3620, col 9 to
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toHostAbort = {}
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toHostPaired = {}
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_badAct = FALSE
+/\ flows_bugReconnectBeforeLossAbort_owner_flows_gSess = 1
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_heldByOther = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_gen = 1
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_phantom = FALSE
@@ -171,9 +180,10 @@ State 5: <flows_bugReconnectBeforeLossAbort_owner_flows_step line 3620, col 9 to
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_alloc = "Provisioned"
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_drvLive = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toGuestAbort = {}
+/\ flows_bugReconnectBeforeLossAbort_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_crossMsg = FALSE
 
-State 6: <flows_bugReconnectBeforeLossAbort_owner_flows_step line 3620, col 9 to line 3621, col 63 of module flows_bugReconnectBeforeLossAbort>
+State 6: <flows_bugReconnectBeforeLossAbort_owner_flows_step line 4024, col 9 to line 4026, col 63 of module flows_bugReconnectBeforeLossAbort>
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_claim = 1
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_bHeldByOther = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_badPaired = FALSE
@@ -196,6 +206,7 @@ State 6: <flows_bugReconnectBeforeLossAbort_owner_flows_step line 3620, col 9 to
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toHostAbort = {}
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toHostPaired = {}
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_badAct = FALSE
+/\ flows_bugReconnectBeforeLossAbort_owner_flows_gSess = 1
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_heldByOther = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_gen = 1
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_phantom = FALSE
@@ -206,9 +217,10 @@ State 6: <flows_bugReconnectBeforeLossAbort_owner_flows_step line 3620, col 9 to
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_alloc = "Provisioned"
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_drvLive = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toGuestAbort = {}
+/\ flows_bugReconnectBeforeLossAbort_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_crossMsg = FALSE
 
-State 7: <flows_bugReconnectBeforeLossAbort_owner_flows_Activate line 1267, col 3 to line 1295, col 58 of module flows_bugReconnectBeforeLossAbort>
+State 7: <flows_bugReconnectBeforeLossAbort_owner_flows_Activate line 1301, col 3 to line 1336, col 58 of module flows_bugReconnectBeforeLossAbort>
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_claim = 1
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_bHeldByOther = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_badPaired = FALSE
@@ -231,6 +243,7 @@ State 7: <flows_bugReconnectBeforeLossAbort_owner_flows_Activate line 1267, col 
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toHostAbort = {}
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toHostPaired = {}
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_badAct = FALSE
+/\ flows_bugReconnectBeforeLossAbort_owner_flows_gSess = 1
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_heldByOther = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_gen = 1
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_phantom = FALSE
@@ -241,9 +254,10 @@ State 7: <flows_bugReconnectBeforeLossAbort_owner_flows_Activate line 1267, col 
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_alloc = "Active"
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_drvLive = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toGuestAbort = {}
+/\ flows_bugReconnectBeforeLossAbort_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_crossMsg = FALSE
 
-State 8: <flows_bugReconnectBeforeLossAbort_owner_flows_step line 3620, col 9 to line 3621, col 63 of module flows_bugReconnectBeforeLossAbort>
+State 8: <flows_bugReconnectBeforeLossAbort_owner_flows_step line 4024, col 9 to line 4026, col 63 of module flows_bugReconnectBeforeLossAbort>
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_claim = 1
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_bHeldByOther = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_badPaired = FALSE
@@ -266,6 +280,7 @@ State 8: <flows_bugReconnectBeforeLossAbort_owner_flows_step line 3620, col 9 to
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toHostAbort = {}
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toHostPaired = {}
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_badAct = FALSE
+/\ flows_bugReconnectBeforeLossAbort_owner_flows_gSess = 1
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_heldByOther = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_gen = 1
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_phantom = FALSE
@@ -276,9 +291,10 @@ State 8: <flows_bugReconnectBeforeLossAbort_owner_flows_step line 3620, col 9 to
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_alloc = "Active"
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_drvLive = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toGuestAbort = {}
+/\ flows_bugReconnectBeforeLossAbort_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_crossMsg = FALSE
 
-State 9: <flows_bugReconnectBeforeLossAbort_owner_flows_step line 3620, col 9 to line 3621, col 63 of module flows_bugReconnectBeforeLossAbort>
+State 9: <flows_bugReconnectBeforeLossAbort_owner_flows_step line 4024, col 9 to line 4026, col 63 of module flows_bugReconnectBeforeLossAbort>
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_claim = 1
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_bHeldByOther = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_badPaired = FALSE
@@ -301,6 +317,7 @@ State 9: <flows_bugReconnectBeforeLossAbort_owner_flows_step line 3620, col 9 to
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toHostAbort = {}
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toHostPaired = {}
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_badAct = FALSE
+/\ flows_bugReconnectBeforeLossAbort_owner_flows_gSess = 1
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_heldByOther = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_gen = 1
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_phantom = FALSE
@@ -311,9 +328,10 @@ State 9: <flows_bugReconnectBeforeLossAbort_owner_flows_step line 3620, col 9 to
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_alloc = "Active"
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_drvLive = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toGuestAbort = {}
+/\ flows_bugReconnectBeforeLossAbort_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_crossMsg = FALSE
 
-State 10: <flows_bugReconnectBeforeLossAbort_owner_flows_Teardown line 1328, col 3 to line 1384, col 58 of module flows_bugReconnectBeforeLossAbort>
+State 10: <flows_bugReconnectBeforeLossAbort_owner_flows_Teardown line 1390, col 3 to line 1453, col 58 of module flows_bugReconnectBeforeLossAbort>
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_claim = 0
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_bHeldByOther = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_badPaired = FALSE
@@ -336,6 +354,7 @@ State 10: <flows_bugReconnectBeforeLossAbort_owner_flows_Teardown line 1328, col
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toHostAbort = {}
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toHostPaired = {}
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_badAct = FALSE
+/\ flows_bugReconnectBeforeLossAbort_owner_flows_gSess = 1
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_heldByOther = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_gen = 1
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_phantom = FALSE
@@ -346,9 +365,10 @@ State 10: <flows_bugReconnectBeforeLossAbort_owner_flows_Teardown line 1328, col
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_alloc = "Retiring"
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_drvLive = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toGuestAbort = {}
+/\ flows_bugReconnectBeforeLossAbort_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_crossMsg = FALSE
 
-State 11: <flows_bugReconnectBeforeLossAbort_owner_flows_step line 3620, col 9 to line 3621, col 63 of module flows_bugReconnectBeforeLossAbort>
+State 11: <flows_bugReconnectBeforeLossAbort_owner_flows_step line 4024, col 9 to line 4026, col 63 of module flows_bugReconnectBeforeLossAbort>
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_claim = 0
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_bHeldByOther = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_badPaired = FALSE
@@ -371,6 +391,7 @@ State 11: <flows_bugReconnectBeforeLossAbort_owner_flows_step line 3620, col 9 t
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toHostAbort = {}
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toHostPaired = {}
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_badAct = FALSE
+/\ flows_bugReconnectBeforeLossAbort_owner_flows_gSess = 1
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_heldByOther = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_gen = 1
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_phantom = FALSE
@@ -381,4 +402,5 @@ State 11: <flows_bugReconnectBeforeLossAbort_owner_flows_step line 3620, col 9 t
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_alloc = "Retiring"
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_drvLive = FALSE
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_toGuestAbort = {}
+/\ flows_bugReconnectBeforeLossAbort_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugReconnectBeforeLossAbort_owner_flows_crossMsg = FALSE

@@ -1,0 +1,14 @@
+{
+ "item": "errno",
+ "verdict": "done",
+ "elapsed_s": 1.0,
+ "pass": 42,
+ "fail": 0,
+ "kernel_fault": false,
+ "suite_done": [
+  "SUITE_DONE suite=errno rc=0"
+ ],
+ "guest_uname": [
+  "7.0.0-29-generic"
+ ]
+}

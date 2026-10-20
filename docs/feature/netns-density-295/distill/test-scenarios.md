@@ -1,384 +1,199 @@
-# DISTILL scenario index — netns-density-295 (vsock attachment replacement)
+# DISTILL scenario index — netns-density-295 (EVMOD: the in-kernel forwarder)
 
-This index replaces the prior (deleted) `test-scenarios.md`, which specified
-the superseded TAP / shared-bridge / intercept-program attachment model
-(S-ND295-*). The replacement DESIGN (feature-delta L16552+, ADR-0145..0181)
-forwards guest traffic over virtio-vsock (kernel vhost) + Aya SK_SKB / strparser
-forwarding + `sk_lookup` guest-prefix steering; there is **no** guest NIC, TAP,
-bridge, per-VM netdevice or per-VM netns (D1).
+Code-only DISTILL against the approved EVMOD design (feature-delta
+§ *[REF] Interface contracts*, the EVMOD section, Lifecycle Gate Ownership,
+Required boundary scenarios, Formal protocol model with its conformance
+mains, named runs and pinned accessors, Roadmap impact) and
+`specs/quint/{guest-flow-owner,probe-count}/`. Scenarios are specification
+only; the executable bodies are the Rust tests named in the partition files.
+No `.feature` files (testing.md). `[lang-mode] rust`, `[policy-mode]
+inherit`, `[port-mode] n/a-rust` (Mandate 8 maps to native before/after
+assertions on port-exposed observations). Reconciliation: one SSOT (the
+feature-delta, with the user decisions in
+`.context/round-2026-10-13/decisions.md`: the EVMOD approval of 2026-10-17
+and the DISTILL rulings of 2026-10-18 — T-1 / T-2 the guest-kit fixture and
+lane, RESTART-SSOT (GH #324 fixed in #295), GH #325 out of scope — and of
+2026-10-19 — U-2 (GH #326), E-3, D-14 LEGS-DIAL, and after round 10
+PORTS-CONFIG, GUEST-PORTS, FWD-PREREQ, NO-OVERRIDE-SEAMS (full scope),
+STORES-IN, PROBE-ROOT-ENV, which replace U-1 (b)) — 0 contradictions in the
+authored scope. The earlier DISTILL rulings R-D1
+(the `ProbeResultRow` V2 bump) and R-D2 (the CID-claim port deleted) stand.
 
-Binding rules: no `.feature` files; GWT scenarios are spec-only here and in the
-per-piece docs; the crafter translates each to a Rust `#[test]`/`#[tokio::test]`
-(`.claude/rules/testing.md`). Shared test-support contract:
-[`shared-test-infrastructure.md`](shared-test-infrastructure.md). The Quint
-oracle is `specs/quint/guest-flow-owner/` (do **not** edit).
+## Partitions
 
-## Pieces (disjoint file ownership)
-
-| Piece | Title | Scenario doc |
-|---|---|---|
-| **P1** | Admission, CID lease & kernel claim, intake capacity, deploy validation | [test-scenarios-p1-admission-cid-lease.md](test-scenarios-p1-admission-cid-lease.md) |
-| **P2** | Guest-flow owner: control session, flow admission, pairing, launch attribution | [test-scenarios-p2-owner-flows.md](test-scenarios-p2-owner-flows.md) |
-| **P3** | Datagram associations, UDP slots, framing, cells | [test-scenarios-p3-udp-slots-framing.md](test-scenarios-p3-udp-slots-framing.md) |
-| **P4** | Guest-prefix steering, intake listeners, boot convergence & landing | [test-scenarios-p4-steering-intake-boot.md](test-scenarios-p4-steering-intake-boot.md) |
-| **P5** | Egress unframe (hybrid), host-internal deny, mesh/non-mesh egress, VIP | [test-scenarios-p5-egress-unframe-hostinternal.md](test-scenarios-p5-egress-unframe-hostinternal.md) |
-| **P6** | Quiescence & recovery, shared-table, VMM device & fork, guest READY, walking skeleton + crash matrix | [test-scenarios-p6-recovery-vmm-ws.md](test-scenarios-p6-recovery-vmm-ws.md) |
-
-## DISTILL status (2026-10-10)
-
-Every round-1 `UI-*` item of [`upstream-issues.md`](upstream-issues.md) is
-closed by a DG decision (feature-delta § *DISTILL design-gap closure*,
-DG-1..DG-16). Round 2 (same file) leaves DESIGN decisions open that bear on
-scenarios: the three guest Quint drivers (P2-S15, P3-S8) are authored, but
-their model fidelity is open (UI-R2-5, HIGH) — a correct implementation may
-fail them until the model decision; no `#[quint_test]` pin exists (UI-R2-1,
-HIGH); and P5-S7's resolve-adapter bodies have no pinned authoring time
-(UI-R2-16). DG-2 sorts each scenario
-into one of two authoring times:
-
-- **Authored now** — every body and driver over additive surface. Each is a
-  complete, compiled, registered body marked `#[ignore = "pending DELIVER
-  vsock new-step N (…)"]` (or `"… attachment cut (…)"` where its behaviour
-  lands in the cut although the body names no replaced signature), RED for
-  the right reason (per-test classes in
-  [`red-classification.md`](red-classification.md)).
-- **Authored at the attachment cut** — every body or driver that calls a
-  DG-2 row-1..18 replacement. It cannot compile before the cut and is not in
-  the tree; its plan (drives / asserts per item) is feature-delta
-  § *Attachment-cut DISTILL increment*, and each piece doc restates it per
-  scenario as `attachment cut (DG-2 rows …)`.
-
-Authored files (ignored count / default-lane count):
-
-| File | Crate / binary | Scenarios | Ignored | Default lane |
-|---|---|---|---|---|
-| `crates/overdrive-core/tests/acceptance/vsock_guest_transport_vocabulary.rs` | `overdrive-core` `acceptance` | P1-S1, P1-S6 (core half), P1-S8 / P4-S9 pure parts, P1-S11, P3-S3 range fact | 20 | 1 |
-| `crates/overdrive-core/tests/acceptance/vsock_wire_codec.rs` | `overdrive-core` `acceptance` | P2-S1, P2-S2 | 18 | 0 |
-| `crates/overdrive-core/tests/acceptance/vsock_datagram_frame.rs` | `overdrive-core` `acceptance` | P3-S1 | 11 | 1 |
-| `crates/overdrive-core/tests/acceptance/vsock_deploy_validation.rs` | `overdrive-core` `acceptance` | P1-S10, P1-S11 | 6 | 0 |
-| `crates/overdrive-core/src/dataplane/mtls_mark.rs` (unit tests) | `overdrive-core` lib | DG-9 marks and table (P5-S8 layer 1) | 0 | 2 |
-| `crates/overdrive-dataplane/src/guest_steering.rs` (unit tests) | `overdrive-dataplane` lib | DG-14 steering key (P4-S1..S5) | 3 | 1 |
-| `crates/overdrive-dataplane/tests/integration/vsock_guest_steering.rs` | `overdrive-dataplane` `integration` (Tier-3) | P4-S1 … P4-S5 | 12 | 0 |
-| `crates/overdrive-dataplane/tests/integration/vsock_egress_unframe.rs` | same | P5-S1, P5-S3 | 11 | 0 |
-| `crates/overdrive-dataplane/tests/integration/vsock_fragment_map.rs` | same | P5-S4 | 4 | 0 |
-| `crates/overdrive-sim/src/adapters/beacon_io.rs` (unit tests) | `overdrive-sim` lib | `SimBeaconIo` semantics (P2-S14) | 10 | 4 |
-| `crates/overdrive-sim/src/adapters/mtls_intercept.rs` (new unit tests) | `overdrive-sim` lib | `SimMtlsIntercept::shared_table_state` (P6 shared table) | 0 | 3 |
-| `crates/overdrive-host/tests/integration/vsock_cid_claim_handoff.rs` | `overdrive-host` `integration`, `kvm-tests` (native metal) | P1-S12 | 6 | 1 |
-| `crates/overdrive-worker/tests/acceptance/vsock_beacon_intake.rs` | `overdrive-worker` `acceptance` | P2-S14 additive half | 3 | 1 |
-| `crates/overdrive-worker/tests/integration/vsock_mesh_egress_mtls.rs` | `overdrive-worker` `integration` (Tier-3) | P5-S10 | 10 | 0 |
-| `crates/overdrive-worker/src/mtls_intercept_worker.rs` (unit test) | `overdrive-worker` lib | P5-S10 stage labels | 1 | 0 |
-| `crates/overdrive-worker/tests/integration/vsock_host_internal_enforce.rs` | `overdrive-worker` `integration` (Tier-3) | P5-S8 | 13 | 0 |
-| `crates/overdrive-control-plane/src/guest_network/prefix_boot_acceptance.rs` | `overdrive-control-plane` lib, `#[cfg(test)]` | P4-S12, P4-S14, P4-S15, P5-S1 (boot refusal), P5-S2 | 17 | 0 |
-| `crates/overdrive-control-plane/src/guest_network/prefix_boot_conformance.rs` | same, `integration-tests` | P4-S17 (driver, 3 instances) | 3 | 0 |
-| `crates/overdrive-control-plane/src/guest_network/flow_io/sim/tests.rs` | `overdrive-control-plane` lib | `SimGuestFlowIo` semantics | 0 | 11 |
-| `crates/overdrive-init/src/transport/tests.rs` | `overdrive-init` bin (source-local) | P6-S11, P2-S1 token form | 7 | 2 |
-| `crates/overdrive-init/src/guest_flow/tests/{newtypes,session,tcp_accept,tcp_connect,half_close,udp_slots}.rs` | same | P2-S10 / S12 guest halves, P3-S2, S4..S6, S9 guest half, S10, P6-S11 | 38 | 1 |
-| `crates/overdrive-init/src/guest_flow/quint_{owner_flows,flows_half,udp_slots}.rs` | same, `integration-tests` | P2-S15 guest side, P3-S8 guest side (drivers, 4 instances) | 4 | 0 |
-| `tests/conformance/tests/vsock_prefix_landing_conformance.rs` | `overdrive-system-conformance` (native metal) | P4-S19 (QPROJ-8), covers P4-S16 | 1 | 0 |
-
-Withdrawn: P6-S7 (DG-1) and P6-S8 (with the VMM backend probe, DG-1; its
-`fd=` handoff obligations are P1-S12's VMM cell at the cut and P6-S13).
-
-RED scaffolds added in this increment (every one `// SCAFFOLD: true`) are
-listed with their contract in feature-delta § "Wave: DISTILL / [REF] vsock
-Scaffolds".
-
-## Gate → piece
-
-| Gate | Owner / promise | Piece |
-|---|---|---|
-| G-V0 node attachment admission | `GuestAddressPool::assign` (lease + CID claim + port reservation) | P1 |
-| G-V1 shared forwarding substrate startup | owner boot: probe/converge, steering load+swap, unframe attach, route | P4 (steering/boot/route) + P5 (unframe attach) |
-| G-V2 guest command release | VM driver under EXEC claim (after Active) | P6 |
-| G-V3 allocation forwarding activation | owner `activate` (all-or-nothing listeners) | P2 (activate/flow) + P4 (listeners) |
-| G-V4 VMM vsock device | `CloudHypervisorVmm` + fork (`backend=vhost-kernel`, `fd=`) | P6 |
-| G-V5 runtime recovery reopen | supervisor, per-component quiescence holders | P6 |
-| G-V6 per-flow pairing | flow acceptor (`Paired` after install) | P2 (TCP flows) + P3 (datagram) + P5 (egress legs) |
-| G-V7 guest network config before READY | `overdrive-init` | P6 |
-| G-V8 intake listener + steering entry | owner (`GuestPrefixSteering::steer`) | P4 |
-
-## Quint conformance drivers (QPROJ-1 to QPROJ-8, approved 2026-10-09)
-
-Placement, projection and action map are pinned by feature-delta
-§ *Conformance observation surface and action map* (QPROJ-1 to QPROJ-8) and
-§ "Wave: DISTILL / [REF] vsock Conformance Drivers", under
-`.claude/rules/testing.md` § "Quint conformance". Each driver is a
-`quint-connect` module in its owner's crate, gated only
-`#[cfg(all(test, feature = "integration-tests"))]`; only `prefix_landing`
-lives in `tests/conformance` (real kernel). Every spec is referenced in place
-under `specs/quint/guest-flow-owner/`. The specs define no Quint `run`, so no
-`#[quint_test]` pin exists (UI-R2-1); each instance replays randomized traces
-through `#[quint_run]` with the seed printed on failure. The `checks.toml`
-entries named below are the design's model checks (invariants, liveness
-properties and non-vacuity witnesses), not Quint runs. `cargo xtask
-conformance-lint`: 0 violations over the four authored drivers.
-
-### Driver table
-
-| Module (instance) | Owner / driver crate | `checks.toml` model checks (invariants / witnesses) | `#[quint_run]` instances | Status |
-|---|---|---|---|---|
-| `prefix_boot` | host owner boot `converge_shared` / `overdrive-control-plane` `guest_network::prefix_boot_conformance` | `prefix-boot-safety`, `-faulty-safety`, `-local-only-over-link`, `-local-only-over-link-while-down`, `-no-wildcard`, `-nothing-while-down`, `-open-converged`, `-opens`, `-pin-only-after-first-attach`, `prefix-boot-witness-*`; inv 6 | `prefix_boot_conformance_boot_ok`, `_boot_faulty`, `_boot_live` | **authored** — ignored `pending DELIVER vsock attachment cut (new-step 13, steering load and swap, shared local route)` |
-| `owner_flows` `flows_ok`, guest side (TcpAccept half) | `GuestFlowOwner` / `overdrive-init` `guest_flow::quint_owner_flows` | `owner-flows-safety-tlc`, `owner-flows-witness-*` (accept half); inv 4+ (accept half), 9 | `quint_owner_flows_ok_guest` | **authored; model fidelity open (UI-R2-5)** — a correct implementation may fail it until the model decision; ignored `pending DELIVER vsock new-step 5 (guest adaptation in overdrive-init); model fidelity open, upstream UI-R2-5` |
-| `owner_flows` `flows_half_guest` (S-4) | `GuestFlowOwner` / `overdrive-init` `guest_flow::quint_flows_half` | `owner-flows-half-guest-*`; inv 13 (HALFCLOSE-SIGNAL) | `quint_owner_flows_half_guest` | **authored; model fidelity open (UI-R2-5)** — same ignore |
-| `udp_slots`, guest side | `GuestFlowOwner` slot pool / `overdrive-init` `guest_flow::quint_udp_slots` | `udp-slots-witness-*`, `udp-slots-safety-tlc`, `udp-slots-release-liveness`; inv 2, 14; `ReleasedSlotBecomesFree` | `quint_udp_slots_guest_slots_ok`, `_guest_slots_live` | **authored; model fidelity open (UI-R2-5)** — same ignore |
-| `prefix_landing` (stateless; QPROJ-8) | the kernel over the production composition / `tests/conformance` | none — `lands(net, client, port)` evaluated per observation (`quint repl` over the spec in place) | — | **authored** — `native_metal_kvm_prefix_landing_matches_lands_for_every_client_class_and_reachable_configuration`, ignored `pending DELIVER vsock new-step 5 and attachment cut (new-steps 9, 12, 13 …)` |
-| `cid_lease` (`lease_conf_ok`, `lease_conf_live`) | `GuestAddressPool` / `overdrive-control-plane` | `cid-lease-conf-*`; inv 5, `EventuallyPlaced` | `lease_conf_ok`, `lease_conf_live` | attachment cut (DG-2 rows 1, 2, 3, 6): QPROJ action map; O2 `lease_observation` + S `held_cids` / `is_live` |
-| `owner_flows` `flows_ok`, host side; `flows_half_host`; `udp_slots` host side | `HostSharedGuestNetworkOwner` / `overdrive-control-plane` | `owner-flows-*`, `owner-flows-half-host-*`, `udp-slots-*` (host variables) | `flows_ok`, `flows_half_host`, `slots_ok` / `slots_live` | attachment cut (DG-2 rows 2, 3, 7, 8, 9): QPROJ host-side action maps over `SimGuestFlowIo`; O2, O3, S `socket_observation()` |
-| `intake` | host owner with the pool / `overdrive-control-plane` | `intake-*`; inv 7, 8, 12 | `intake_ok`, `intake_two`, `intake_live` | attachment cut (DG-2 rows 2, 3, 7, 8, 9): O3 `intake`, `parked`, `last_listen_state`; S `steering_observation().entries`, `steering_effects()` |
-| `quiescence`, `shared_table` | host owner + runtime supervisor + `SimMtlsIntercept` / `overdrive-control-plane` | `quiescence-*`, `shared-table-*`; inv 10, 11 | `quiesce_ok` / `quiesce_live`, `table_ok` / `table_live` | attachment cut (DG-2 rows 2, 3, 7, 8, 9, 10, 12): O3 `holders`, `admission`, `intake`, `flow_listeners_running`; O6 `recovery_observation()`; S `shared_table_state()` |
-| `owner_flows` `flows_beacon` | `VmDriver` beacon intake / `overdrive-worker` | `owner-flows-beacon-*`; inv 4+ (beacon; ATTR-LIVE-CLAIM) | `flows_beacon` | attachment cut (DG-2 rows 13, 15): `VmDriver::start` / `stop`, `SimVmm` exit, beacon connections over `SimBeaconIo`; O4 `beacon_observation`, S `beacon_socket_observation` |
-
-Four drivers (7 instances) are authored now (the three guest drivers with model fidelity open, UI-R2-5); seven are written at the
-attachment cut because each calls a DG-2 replaced signature
-(`GuestAddressPool::new` / `assign`, `HostSharedGuestNetworkOwner::new(ports)`,
-`quiesce_forwarding` / `restore_forwarding`, `VmDriver::new(.., beacon)`,
-READY `launch=`). `udp_slots` carries no per-side instances in `checks.toml`;
-the per-side replay uses `slots_ok` / `slots_live` with the other side as
-stimulus (QPROJ-1).
-
-### Per-driver checklist — the four authored drivers (testing.md § "Quint conformance")
-
-**`prefix_boot`** — `crates/overdrive-control-plane/src/guest_network/prefix_boot_conformance.rs`
-
-1. *Placement / gate — yes.* Source-local in the owner crate, declared
-   `#[cfg(all(test, feature = "integration-tests"))] mod prefix_boot_conformance;`
-   (`guest_network.rs:79-80`); no always-false `cfg`; each instance carries
-   the reasoned ignore above (`:457-472`).
-2. *Owner field — yes.* `PrefixBootDriver` (`:82`) holds `serve:
-   Option<Serve>` whose `Serve` (`:77`) holds the production
-   `Arc<HostSharedGuestNetworkOwner>` built with `with_flow_io`, plus the seam
-   `io: Arc<SimGuestFlowIo>` and the node-global `node: Arc<SimGuestNode>`.
-3. *Every action mapped — yes.* `switch!` (`:243-253`) maps the spec's whole
-   `step = any { Restart, BootStep, Fail, Crash }` (`prefix_boot.qnt:205`)
-   plus `init`: `Restart(b)` a new `SimGuestFlowIo` over the persisted node
-   with program `b` and a new owner; `BootStep` call `converge_shared` /
-   release the held `Load`, `Attach`, `Pin`, route effect; `Fail` fail the
-   held effect; `Crash` abort the pending boot, drop the owner, end the seam's
-   process. No empty or catch-all arm. The `step` arm maps quint 0.32's
-   mislabelled initial state to `init` (commented, `:245-248`; UI-R2-13).
-4. *State fields and accessors — yes.* `PrefixBootState` (`:284`): `link`,
-   `prog`, `route` ← `SimGuestFlowIo::steering_observation()`; `phase` ← the
-   driver's record of its own `converge_shared` call (not called / pending /
-   `Ok`) combined with `steering_effects()` (`from_driver`, `:395-411`;
-   `boot_phase`, `:416`).
-5. *No sim read except marked arbiters — yes.* The two seam reads are marked
-   `// conformance-lint: sim-arbiter-ok …` (`:397`, `:399`): the node-global
-   pinned link / program / tagged route and the boot effects this `serve`'s
-   owner issued, paired with Tier-3 R5-24, R5-34, R5-25.
-6. *Spec in place, trace mode — yes.* `#[quint_run(spec =
-   "../../specs/quint/guest-flow-owner/prefix_boot.qnt", main = …)]` for
-   `boot_ok`, `boot_faulty`, `boot_live` (`:457`, `:463`, `:469`); no
-   `#[quint_test]` (UI-R2-1).
-
-**`owner_flows` `flows_ok`, guest side** — `crates/overdrive-init/src/guest_flow/quint_owner_flows.rs`
-
-1. *Placement / gate — yes.* `#[cfg(all(test, feature = "integration-tests"))]
-   mod quint_owner_flows;` (`guest_flow/mod.rs:47-48`); reasoned ignore on the
-   instance (`:965-969`).
-2. *Owner field — yes.* `FlowsOkDriver` (`:185`) holds `guest:
-   GuestProcess`, the current launch's production `GuestFlowOwner`, with every
-   launch's `SimGuestOwnerIo` and the launch's `SimGuestClock`. The remaining
-   fields are the host-side stimulus model (QPROJ-1: the host owner, the
-   lease, the VM and the applications are stimulus).
-3. *Every action mapped — yes.* `switch!` (`:815-855`) maps every action of
-   the spec's `step`, including the host, lease and VM actions as seam
-   stimuli (`VmStart` a new owner per launch, `VmStop` `guest_owner_dies` and
-   drop) and the guest actions as `SimGuestOwnerIo` releases followed by
-   `dispatch_next`. The hazard-only `HostClaimSession`, `HostCheckFlow`,
-   `HostRegisterFlow` return a typed `HazardOnly` error (`:832`, `:837-838`),
-   never a no-op. No catch-all arm.
-4. *State fields and accessors — yes.* `FlowsOkGuestState` (`:864`):
-   `gf(h).st` ← O5 `GuestFlowOwner::guest_observation().accepted`
-   (`Accepted` → `acc`, `Routed` → `routed`); `reset` ← S `reset_in_queue`;
-   `toHostPaired`, `toHostRefused` ← S `outbox` of every launch
-   (`from_driver`, `:904-961`). `closed` is "seen in `accepted` or
-   `reset_in_queue` and no longer present", using the identity bijection's
-   record `held` of production flow ids it has seen (`:205`); that record
-   supplies a pre-image for a history fact, never a phase.
-5. *No sim read except marked arbiters — yes.* Two marked reads (`:910`,
-   `:945`), QPROJ-7 guest-owner seam arbiter, paired with Tier-3 R5-31 /
-   R5-28.
-6. *Spec in place, trace mode — yes.* `#[quint_run(spec =
-   "../../specs/quint/guest-flow-owner/owner_flows.qnt", main = "flows_ok")]`
-   (`:965`).
-
-**`owner_flows` `flows_half_guest`** — `crates/overdrive-init/src/guest_flow/quint_flows_half.rs`
-
-1. *Placement / gate — yes.* `guest_flow/mod.rs:45-46`; reasoned ignore
-   (`:805-809`).
-2. *Owner field — yes.* `FlowsHalfDriver` (`:203`) holds `owner:
-   GuestProcess` (the production `GuestFlowOwner`, `Dead` once dropped), its
-   seam clone `io: SimGuestOwnerIo` and `clock: Arc<SimGuestClock>`; `host`
-   and `ctl_down` are stimulus.
-3. *Every action mapped — yes.* `switch!` (`:631-651`): `init(o)` and the
-   mislabelled `step(o)`; `HcFarHalfClose`, `HcFarReset` → `app_end`;
-   `HcPair` → `complete_app_connect` / host `Paired`; `HcAnnounce` →
-   `set_drained`; `HcRecv` → `host_control`; `VsockEndArrives`,
-   `VsockEndReachesSurvivor` → `host_vsock_end`; `HcLossObserved` →
-   `release_session_end`; `HcFlowError` → `SimGuestClock` past
-   `FLOW_DRAIN_DEADLINE` or `flow_vsock_error`; `HcOwnerDies` →
-   `guest_owner_dies` and drop; `HcCleanClose` → settle; `HcSessionDrop` →
-   stimulus; `HcLateAck` → typed `HazardOnly`; `HcPeerDefectEnd(g)` → typed
-   error (disabled for the side under test, S-4). No catch-all arm.
-4. *State fields and accessors — yes.* `HalfGuestState` (`:674`) /
-   `OpenSide` (`:659`): `paired`, `outEof`, `ann`, `acked`, `outShut`,
-   `open` ← O5 `guest_observation().flows` / `awaiting_paired` / `accepted`;
-   `loss`, `ch`, `vEnd`, `vEndSent`, `far`, `ctlDown` ← S
-   `guest_socket_observation()` (`session_ended`, `outbox`,
-   `vsock_ends_in_flight`, `vsock_ended`, `far_end`); `dead` ← C (the driver
-   dropped the owner) (`from_driver`, `:743-800`).
-5. *No sim read except marked arbiters — yes.* One marked read (`:745`),
-   QPROJ-7 arbiter, paired with Tier-3 R5-10 / R5-45 / R5-28.
-6. *Spec in place, trace mode — yes.* `#[quint_run(spec = …/owner_flows.qnt,
-   main = "flows_half_guest")]` (`:805`).
-
-**`udp_slots`, guest side** — `crates/overdrive-init/src/guest_flow/quint_udp_slots.rs`
-
-1. *Placement / gate — yes.* `guest_flow/mod.rs:49-50`; reasoned ignore on
-   both instances (`:668-678`).
-2. *Owner field — yes.* `UdpSlotsDriver` (`:125`) holds `owner:
-   GuestProcess` (the production `GuestFlowOwner`), `io: SimGuestOwnerIo`,
-   `clock: Arc<SimGuestClock>`; `stimulus` is the host and application side;
-   `fids` is the association-id bijection.
-3. *Every action mapped — yes.* `switch!` (`:456-480`): `AppClaim`,
-   `AppSendOnSlot` → `app_send_on`; `GuestReady(s, cur)` → `release_slot_ready`
-   and both leg connects; `HostPair`, `HostRefuse`, `HostAbortAssoc` →
-   stimulus; `GuestRecvPaired`, `GuestRecvEnd` → `host_control`;
-   `GuestPairingTimeout`, `GuestAudit`, `IdleRelease` → `SimGuestClock`;
-   `HostRecvEnd` → host consumption; `SockClose`, `SockCloseReportLost` →
-   `app_close_socket`; `GuestReleaseSock` → `release_socket_report`;
-   `AppPick`, `AppTake`, `Refill` → typed `HazardOnly`. No catch-all arm. A
-   trace that exceeds the model's association-id bound returns
-   `DriverError::ModelBound` (`:267`; UI-R2-5(b)).
-4. *State fields and accessors — yes.* `UdpSlotsState` (`:499`):
-   `slots(s).owned / sock / dest / fid / routed` ← O5
-   `guest_observation().slots`; `slots(s).parked` ← S `parked`; `ready` ← S
-   `readiness`, current iff its generation equals O5's for the slot;
-   `releasePending` ← S `release_reports`; `toHostAbort` ← S `outbox`;
-   `toHostEnd` ← S `legs_closed_unobserved` (`from_driver`, `:579-663`).
-5. *No sim read except marked arbiters — yes.* One marked read (`:581`),
-   QPROJ-7 arbiter, paired with Tier-3 R5-14 / R5-27.
-6. *Spec in place, trace mode — yes.* `#[quint_run(spec = …/udp_slots.qnt,
-   main = "slots_ok")]` and `main = "slots_live"` (`:668`, `:674`).
-
-Open fidelity items on the three guest drivers (UI-R2-5, HIGH): one guest
-clock drives every timer, `HcCleanClose` is not a separate production step
-(production clears linger and closes in the dispatch that completes the second
-half-close, as `a_clean_close_clears_linger_before_closing` asserts), how an
-owner learns a half-closed direction has drained is unpinned on both sides
-(no drain-complete event in `GuestIoEvent`, no re-check trigger in § *Flow
-end*), an error on an unrouted V_g is not observable to the owner before
-routing, and some `flows_ok` orders are not producible. A correct
-implementation may fail these drivers until the model decision. The drivers
-are therefore authored coverage with model fidelity open, not settled
-evidence; the decision is upstream.
-
-### `prefix_landing` — per-driver checklist (testing.md § "Quint conformance")
-
-The driver evaluates a stateless definition, so quint-connect's trace
-machinery does not apply; `cargo xtask conformance-lint` scans only
-quint-connect files and does not scan it. The checklist is answered for the
-same intent (test file `tests/conformance/tests/vsock_prefix_landing_conformance.rs`,
-harness `tests/conformance/src/prefix_landing.rs`):
-
-1. **Placement / gating — yes.** `tests/conformance` (multi-owner, QPROJ-8);
-   only gate `#![cfg(feature = "integration-tests")]` (test file `:33`); no
-   always-false `cfg`; reasoned `#[ignore = "pending DELIVER vsock new-step 5 and attachment cut (new-steps 9, 12, 13 …)"]` (`:83`).
-2. **Driver holds the production composition — yes.** `LandingNode`
-   (`prefix_landing.rs:904`) owns the `ServerHandle` from `run_server`; the
-   scenario boots it (test file `:120`, `:163`), deploys through the HTTPS API
-   (`:122`), kills it (`LandingNode::kill`, `prefix_landing.rs:951`) and stops
-   it gracefully (`LandingNode::shutdown`, `:956`).
-3. **Every action calls the owner — yes (no action set).** The module has no
-   `step` relation; each configuration is reached through production paths;
-   the clients are real connects (`observe_landing`, `prefix_landing.rs:721`).
-4. **State from pinned sources — yes.** `Net` inputs are independent kernel
-   queries per QPROJ-8: `read_route` (`:291`), `read_prefix_rules` (`:318`),
-   `read_leg_c` (`:376`), `read_intake_listeners` (`:386`),
-   `read_steering_program` (`:403`), `read_steering_entries` (`:421`),
-   assembled by `read_net` (`:456`); `marked` is the caller's fact (QPROJ-1
-   source (d)); the observed landing is the accepting socket's first bytes
-   (`classify_accepted`, `:745`) or the connect error plus `ip route get`
-   (`routes_locally`, `:473`).
-5. **No sim, no driver bookkeeping — yes.** No `Sim*` adapter is read; the
-   only sim in the composition is `SimKek` at the KEK port. The model side is
-   `model_landings` (`:220`) over the spec in place (`SPEC`, `:79`).
-6. **Spec in place; trace modes — partly N/A.** The spec is referenced in
-   place; `#[quint_test]` / `#[quint_run]` do not apply to a stateless module;
-   every comparison row is retained in an append-only record
-   (`ComparisonRecord::compare` `:1044`, `assert_conforms` `:1080`).
-
-Items on this driver: G-PL-1 (steering key layout), G-PL-2 (route protocol
-tag), G-PL-5 (shared table name) and G-PL-7 (harness-spelled constants) are
-closed by DG-9 and DG-14 — the harness now reads the exported
-`MTLS_SHARED_NFT_TABLE`, `GUEST_NODE_PREFIX`, `GUEST_PREFIX_ROUTE_PROTOCOL`,
-`GUEST_PREFIX_STEERING_PIN_DIR`, `GUEST_INTAKE_HOST_PORT_BASE`,
-`GUEST_STEERING_KEY_LEN` and `guest_steering_key`. G-PL-3 (`quint` on the
-metal host) is DELIVER new-step 1 provisioning. G-PL-4 (the oracle runs
-`quint repl`, quint-connect has no definition-evaluation surface) and G-PL-6
-(`run-native-metal.sh` selects every ignored `native_metal_kvm_*` test, so it
-runs this one RED until its steps land) remain notes.
-
-## Decision → piece (every approved decision lands in exactly one piece)
-
-| Piece | Decisions owned |
-|---|---|
-| P1 | D3, D11, D16, D16-CLAIM, D8a-CAP, INTAKE-PORTS, D15-R2 (reserved-range deploy refusal) |
-| P2 | D7, D9, D14, D17, D18, D18a, D15-R1, D15-R3, ATTR-TOKEN, ATTR-LIVE-CLAIM (U-1, U-5) |
-| P3 | D4, D5, D10, D25, D25-BIND, D15-R2 (guest bind/pool/idle), CELL-RECREATE (U-2) |
-| P4 | D8, D8-INTAKE, D8-PEER, D8-PREFIX-CFG, D8-PREFIX-VIP, D8a, D8a-LOOKUP, D8a-LOAD-SWAP, D23, INTAKE-BIND, PREFIX-REPLY, D5a-SERVE-IFACE (veth carries unframe), U-3, U-4, U-6, M-7 |
-| P5 | D5a, D5a-IFACE, D5a-IFACE-BOOT, D5a-LATE, IMG-IFACE-BOOT, USO-NO-SEGMENT, IFACE-NO-STACK, FRAG-MAP-LIFECYCLE, D24, D24a, D26, D26-PINS |
-| P6 | D2, D13, D21, D8a-HOLD, D19, D19-LINKS, HALFCLOSE-SIGNAL (crash matrix), G-V7 guest config, QUINT process |
-
-## R5-* boundary obligation → piece
-
-| Piece | R5-* owned |
-|---|---|
-| P1 | R5-19, R5-21, R5-37, R5-44 (deploy + intake-block boot refusal) |
-| P2 | R5-9, R5-16, R5-17, R5-18, R5-20, R5-26, R5-28, R5-31, R5-41, R5-45 (owner-seam + codec half-close) |
-| P3 | R5-14, R5-15, R5-27 |
-| P4 | R5-1, R5-2, R5-3, R5-22, R5-23, R5-24, R5-25, R5-29, R5-34, R5-39, R5-40, R5-42, R5-43 |
-| P5 | R5-6, R5-7, R5-8, R5-38, R5-46, R5-47, R5-48 |
-| P6 | R5-4, R5-5, R5-10, R5-13, R5-30, R5-32, R5-45 (Tier-3 inside R5-10); the Tier-3 halves of R5-41 (kill-and-reuse through `serve` + `deploy`) and R5-28 / R5-31 (the V-24 shape through `serve`), as P6-S13 cells |
-
-(R5-5 state-interleaving is split: `ListenState` interleaving in P4 (`intake`),
-quiesce/restore interleaving in P6; each doc restates its half. R5-13 intake-child
-identity lives in P4's `intake` steering scope with the V-20 INTAKE-TAG-MAP map.
-R5-45 half-close: codec + owner-seam in P2; the Tier-3 crash-matrix cell in P6.)
-
-## Validation-item → piece (DELIVER-step items; scenarios RED `#[ignore]`)
-
-| V-item | Status | Piece | Note |
+| Partition | File | Owner crates | Scope |
 |---|---|---|---|
-| V-1(c) fork `fd=` under production launch | open (DELIVER step 3) | P6 | handoff proven root (P-39) |
-| V-6 walking skeleton serve+deploy | open (DELIVER 10-01) | P6 | includes V-15 |
-| V-8 fail-closed in production composition | open (DELIVER 10-02) | P6 | |
-| V-9 density & costs | open (DELIVER ≈08-04/10-05) | P6 | surfaced-not-relaxed |
-| V-12 host-local connect source address | open (DELIVER step 9) | P4 | one D15 row |
-| V-19 guest-prefix exposure | covered by P4-S19 (`prefix_landing`, authored; runs on native metal once new-steps 5, 9, 12 and 13 land) | P4 | |
-| V-28 6.18 re-run | open, not a gate (KVER) | P6 | runs with DELIVER Tier-3 |
-| contract-shaping (V-10/22/24/25/26/5c/13/16/17/18/20/21) | **all DONE** (P-37..P-48) | — | nothing blocked on them |
+| P1 | `test-scenarios-p1-core-vocabulary.md` | `overdrive-core`, `overdrive-sim` | the forwarder vocabulary (`ForwardId`, `ForwarderGeneration`, `AbortCause`, `ForwarderError`), wire codec (request with launch token, control open, control messages, datagram frame), READY `launch=`, `KernelErrno`, `GuestStream` / dial vocabulary, the two deploy ingresses (D25, D-UP-12); `SimFlowForwarder` arbiter cells |
+| P2 | `test-scenarios-p2-ovd-fwd-module.md` | `overdrive-fwd` (new) | Tier-3 module suite through `KernelFlowForwarder` (probe, attach / watch, stream battery and ends, paused / stall, datagrams, watch, context release, end-record ABI, R5-57 equivalence); UAPI unit cells |
+| P3a | `test-scenarios-p3a-host-guest-flow-owner.md` | `overdrive-control-plane::guest_network` | host owner over `SimGuestFlowIo`: admission, flow ends from end records, quota, datagrams, the dial, policy, error taxonomy; drivers `owner_flows`, `fwd_pair`, `flow_quota`, `udp_slots` (host) |
+| P3b | `test-scenarios-p3b-lease-quiescence-recovery-boot.md` | `overdrive-control-plane`, `overdrive-sim`, `tests/conformance` | pool and lease, boot reclamation, QHOLD recovery and the `Forwarder` recovery, boot order (G-V1), boot refusals, activation gate; drivers `cid_lease`, `quiescence` |
+| P4 | `test-scenarios-p4-guest-init.md` | `overdrive-init` | guest owner over `SimGuestOwnerIo`: session, `TcpAccept`, `TcpConnect`, flow end, UDP slots; transport setup; `main`; drivers `owner_flows`, `fwd_pair`, `udp_slots` (guest) |
+| P5 (carried) | `test-scenarios-p5-vmm-device-beacon.md` | `overdrive-host`, `overdrive-sim`, `overdrive-worker` | VMM-opened device (CID-NOCLAIM), RESET-EXIT, beacon intake; driver `flows_beacon` |
+| P6 (carried) | `test-scenarios-p6-real-kernel-mtls-firewall.md` | `overdrive-worker`, `overdrive-control-plane` | forwarded-outbound port, leg-B dial, constant guest-prefix rules, host-internal deny set, VIP resolve branch |
+| P7 (carried) | `test-scenarios-p7-probe-run-count.md` | `overdrive-core`, `overdrive-store-local`, `overdrive-worker`, `overdrive-reconcilers`, `overdrive-control-plane` | `ProbeResultRow` V2, run-sequence merge, R5-PROBE-COUNT; driver `probe_streak` |
+| RESTART-SSOT | `red-classification.md` § *RESTART-SSOT* | `overdrive-reconcilers`, `overdrive-control-plane` | regression obligations 1–5 of § *Restart decision* (step 0, GH #324) |
+| Native metal lanes | `shared-test-infrastructure.md` § 3, P2, P3a, P4, P5 | `overdrive-testing` (guest kit), `overdrive-fwd`, `overdrive-control-plane`, `overdrive-host`, `overdrive-init`, `overdrive-cli` | `guest_boundary` (T-1), R5-59 (a) flow and beacon seams, the in-guest lane (T-2), walking skeleton P6-S13 (10-01), native fault matrix P6-S14 (10-02), density and fail-closed P6-S15 (08-04) |
 
-## 6-row boundary-scenario table (feature-delta §"Required boundary scenarios")
+Cross-cutting: `red-classification.md` (gate runs, driver activation,
+semantic RED per marker), `shared-test-infrastructure.md` (sims, rigs,
+lanes), `upstream-issues.md` (blockers and routing).
 
-Rows 1 (available), 2 (typed failure in owner domain), 3 (unrelated unchanged),
-4 (late success can't resurrect), 5 (disconnect/reconnect), 6 (feature disabled
-= sim `transport: None`) are enumerated per gate inside the owning piece doc.
-Row 6 for every gate is the planned attachment-cut cell P6-S12b (a
-`SimDriver` allocation with `AllocationSpec.transport: None` through the
-action shim: no lease, no CID claim, no `activate`, `alloc_status` equal to
-the pre-feature `network: None` baseline). The startup-refusal projection of
-G-V1 row 2 through `run_server` is the planned attachment-cut cell
-"`run_server` boot refusal" under P4-S13.
-Rows 2/4/5 for G-V2/G-V3/G-V5/G-V6/G-V8 need a seeded `overdrive-sim` invariant
-through the production owner path; kernel effects (G-V1/G-V4/G-V6/G-V7/G-V8) need
-native Tier-3 through `serve` + `deploy`.
+## Marker convention
 
-## Retired / not-deleted
+`#[ignore = "pending DELIVER <step>"]` naming the Roadmap impact step that
+activates the body (`step N` for the new steps 1–15; `attachment-cut step
+(N)` for the DG-2 grouping; the rework names of the earlier steps, e.g.
+`(09-01 rework)`). The body is complete; the crafter only removes the marker.
 
-- **Re-created by the 2026-10-09 pass, updated 2026-10-10**:
-  `distill/red-classification.md` (vsock model) and
-  `distill/upstream-issues.md` (round 2 appended).
-- **Retired in the attachment cut** (DG-2; coupled to old production-code
-  removal, NOT deleted now): the OLD-model GREEN test modules cataloged in
-  [`shared-test-infrastructure.md`](shared-test-infrastructure.md) §7.
+## Conformance driver checklist (testing.md § "Per-driver checklist")
+
+All eleven drivers: (1) gated only by `#[cfg(all(test, feature =
+"integration-tests"))]` at their `mod` line, no always-false `cfg`, each
+`#[quint_test]` / `#[quint_run]` carries its reasoned pending marker; (2)
+the driver struct holds the production owner or its composition; (3) every
+`step` action is mapped, hazard-only and other-instance actions return an
+error, no `_ => {}` arm; (4)–(5) `State::from_driver` reads the pinned
+accessors, and every `Sim*` read is a named arbiter marked
+`// conformance-lint: sim-arbiter-ok` with its Tier-3 pair; (6) the spec is
+referenced in place, every critical named run has a `#[quint_test(max_samples
+= 1)]`, one `#[quint_run]`; (7) the target module is a state machine, no
+`quint` CLI. `cargo xtask conformance-lint` is clean.
+
+| Driver | `mod` gate | Driver struct | `switch!` | `from_driver` | first `#[quint_test]` | `#[quint_run]` | Runs |
+|---|---|---|---|---|---|---|---|
+| CP `guest_network::quint_owner_flows` (`flows_conf`) | `guest_network.rs:75` | `:305` | `:1041` | `:236` | `:1137` | `:1727` | 45 |
+| CP `guest_network::quint_fwd_pair` (`pair_conf`) | `guest_network.rs:69` | `:361` | `:1326` | `:275` | `:1448` | `:1921` | 39 |
+| CP `guest_network::quint_flow_quota` (`quota_conf`) | `guest_network.rs:67` | `:164` | `:415` | `:141` | `:431` | `:498` | 5 |
+| CP `guest_network::quint_udp_slots` (`slots_conf`) | `guest_network.rs:77` | `:134` | `:339` | `:117` | `:367` | `:512` | 12 |
+| CP `guest_network::quint_cid_lease` (`lease_conf_ok`, `lease_conf_325`, `lease_conf_three`) | `guest_network.rs:65` | `:654` | `:1588` | `:1750` | `:1808` | `:2112` | 21 + 1 + 1 |
+| CP `quint_quiescence` (`quiesce_conf`) | `lib.rs:170` | `:174` | `:416` | `:505` | `:562` | `:685` | 10 |
+| CP `reconciler_runtime::quint_probe_count` (`probe_streak_conf`) | `reconciler_runtime.rs:1831` | `:117` | `:215` | `:256` | `:365` | `:484` | 9 |
+| worker `vm_driver::quint_flows_beacon` (`flows_beacon_conf`) | `vm_driver.rs:2212` | `:222` | `:538` | `:593` | `:629` | `:726` | 7 |
+| init `guest_flow::quint_owner_flows` (`flows_conf`) | `guest_flow/mod.rs:43` | `:229` | `:643` | `:762` | `:797` | `:1395` | 45 |
+| init `guest_flow::quint_fwd_pair` (`pair_conf`) | `guest_flow/mod.rs:39` | `:276` | `:759` | `:1306` | `:1331` | `:1819` | 37 |
+| init `guest_flow::quint_udp_slots` (`slots_conf`) | `guest_flow/mod.rs:45` | `:205` | `:575` | `:669` | `:736` | `:895` | 12 |
+
+Line numbers re-read in the round-13 integration pass (2026-10-20), after
+the drivers compiled.
+`conformance-lint` is clean. Every driver holds its production owner, or
+the composition that contains it, in a non-`Option` field (lint ruling
+"Owner field", S-7 closed): the init drivers hold `GuestFlowOwner` directly
+beside the lifecycle-only `GuestProcess`, the `quiescence` driver holds
+`node: ComposedNode`. Every driver decodes the spec state with the shared
+ITF decoder through `from_spec`. The `fwd_pair` drivers project `pr(s).out` /
+`.cause` / `.errno` / `rec = read` from `last_consumed_end` (D-11) and
+`ctx(s)` from the `SimFlowForwarder` context table; the host `fwd_pair`
+watch dial goes through the composition's one `OwnerDial` (D-13);
+`flow_quota` projects `endq` from `queued_ends` (D-12); `cid_lease` reads
+`leased` from the owner and treats `up` / `reclaimed` as stimulus (S-4).
+`lease` and `cursor` are not compared from a `Crash` to the next boot's
+first step (S-4: `WhileUp::NoPool`, a `PartialEq` that skips the comparison;
+quint-connect compares with `!=`, `runner/mod.rs:93`). The `cid_lease` run
+`PoolExhaustedRestartCleansThePredecessorThenPlaces` replays on the declared
+main `lease_conf_three` (D-18 closed) through two background Service leases on
+usable offsets 0 and 1 (checked Admitted at every compared step) and the
+relabelling model `m` ↦ usable `m + 2`; that main carries no `#[quint_run]`.
+Round 13 (NO-OVERRIDE-SEAMS, STORES-IN, PORTS-CONFIG): the `quiescence`
+driver's `RestartWith` / `Damage` / `RepFail` go through the composed rig
+(`boot_server` over `SimGuestFlowIo` and a fresh `BootAdapters` per boot, the
+stores reopened from disk, never a retained clone); every composition reads
+its vsock ports back from the owner (`flow_ports()`, `BeaconIntake::bound_port`),
+never a number; the init `fwd_pair` driver no longer reads `driver.gone`.
+Round 16: the init `fwd_pair` driver gates `ctx(g)`, the owner view
+(`pr(g)`, the attach counters, the guest-held `dir(d)` facts) and the guest
+socket view on the `VmmExit` stimulus it applied itself (`vmm_exit_applied`,
+reset per trace); its spec side always decodes the spec's values and does
+not read `vmUp`, so a spec `ctx(g) = gone` before the driver's own `VmmExit`
+fails the comparison; `gen(g)` / `oldCtx(g)` are compared at every step. The
+`cid_lease` driver reopens the node's stores through `StoreAdapters::open`
+at every composition (each boot and the S-4 read between boots, D-21): its
+view store moved from `<root>/views` to `<root>/reconcilers/memory.redb` and
+the node directory gains a `workflow-journal.redb`; neither changes what the
+driver projects. Each driver's first named run fails at a
+production RED scaffold (`red-classification.md`); the three init drivers
+do so in driver construction (a step-2 `LaunchToken`).
+
+## Round-13 integration pass
+
+Every serve-booting fixture now builds its driven adapters from
+`NodeAdapters::host(&config, cgroup_fs, kek)` and replaces the simulated
+fields by name — the crate helpers `tests/common/node_adapters.rs`
+(control-plane) and `serve_fixture.rs` / `vsock_support.rs` (cli), the
+composed rig, the conformance harness, the `overdrive-sim` invariants and
+the `vm_lifecycle_latency_283` spike — with `ServerConfig::new()` and
+`NodeVsockPortConfig::kernel_assigned()`. A boot after a shutdown reopens
+the stores from disk; no fixture carries a `StoreAdapters` clone. Test
+assignments carry the owner's `GuestFlowPorts`; every test beacon bind is
+kernel-assigned and reads its port back. The default lane is red only on the
+FWD-PREREQ precondition until step K lands the module build (user ruling
+U-3, option (b): step K precedes step 0; `red-classification.md`
+§ *FWD-PREREQ in the default lane*).
+
+## Round-16 cells pass
+
+| Cell(s) | Subject | Lane · step |
+|---|---|---|
+| `xtask::kmod_load` tests (14) | `kmod-load` over a scripted kernel: absent → load; current → done; stale idle → unload then load; stale busy → refused naming the holder class (open context with pid / `comm`; unseen references with `refcnt`); `--busy-ok` tolerates busy; `EBUSY` + `coming`/`going` busy, + absent `initstate` gone, + `live` confirmed by a second unload, a second `EBUSY` on `live` → no `module_exit` (not softened by `--busy-ok`); second-pass race; unhandled errno | default (xtask) · GREEN |
+| `overdrive_testing::forwarder_module` tests | D-20 `version` read at a NUL boundary (not the tail of `srcversion=`); stale verdict names `cargo xtask kmod-load`, never a reboot | default · GREEN |
+| `required_serve_ports_source_scan` (+1 planted cell) | NO-OVERRIDE-SEAMS / STORES-IN file-wide: no host constructor in `src/lib.rs` outside `test_default_workflow_engine` (helpers, unit structs, `::default()` included); bundle constructors only in `src/node_adapters.rs`; `#[cfg(all(test, …))]` items test-only | default · GREEN once the production `src/lib.rs` holds no such construction |
+| `overdrive-fwd` `unload.rs` (2) | V-EV-UNLOAD context half and socket half | metal `kvm-tests` · K, 4 |
+| `overdrive-control-plane` `guest_flow_through_serve.rs` (2) | D-17: R5-57 guest-opened share and R5-41 kill-and-reuse through `run_server` + the HTTPS deploy API, read via `ServerHandle::guest_flow_observation()` | metal `kvm-tests` · 10-01 |
+| `vsock_host_internal_enforce.rs` F-3, F-5, link-local | absence oracles with an unmarked positive control in the same window | Tier-3 · 14 |
+
+## Lane setup (native metal)
+
+The guest-kit lanes run `cargo xtask guest-kit-prepare` first
+(`infra/metal/README.md`; `upstream-issues.md` S-12, T-6): it builds
+`ovd_fwd.ko` for the running kernel, the static scripted peer and the
+in-guest test binaries, and stages each at the contract path the fixture
+reads; the fixture refuses with `LaneNotPrepared` when one is missing. The
+FWD-PREREQ lane setup, on Lima and on metal, is `cargo xtask kmod-build`
+then `cargo xtask kmod-load` (the hooks: `kmod-load --if-absent`); the
+composed `serve` fixtures check that the loaded module is this workspace's
+build (`overdrive_testing::forwarder_module`; `upstream-issues.md` D-20 on
+what that comparison covers).
+
+## Round-9 cells
+
+| Cell | Contract / owner path | Oracle | Tier · pending |
+|---|---|---|---|
+| `owner_acceptance::legs_dial` (4) | R5-54 seeded half, LEGS-DIAL: `SimMtlsEnforcement` built with the composition's `OwnerDial`, driven through `MtlsEnforcement::enforce` (`Routed::Inbound`) then `teardown` | one `DialPurpose::Relay` dial after authentication and `held_flows` restored with `0x3` at teardown; no dial for a client the peer verification refuses (`AbsentBundle`); a dial error returns `GuestDial { NotServing }` and closes leg C; no owner dial outside the guest prefix | seeded sim · attachment-cut (9) |
+| `prefix_boot_acceptance::phase_one_probes_the_forwarder_on_a_context_it_releases_and_refuses_a_bad_one` | D-8 phase 1, through `probe_guest_flow_startup` and through the owner's `probe_startup` | each scripted `ProbeForwarder` failure (`DeviceAbsent`, `AbiMismatch`, `NotPermanent`, a Backpressure-stage mismatch, a Cleanup-stage residue) gives `Forwarder { cause }` with no context left open and no other effect; a pass issues one `ProbeForwarder`, no serving open, and releases its context | default · (09-01 rework) |
+| `overdrive-fwd` `end_record_abi::take_end_returns_records_in_end_order` | D-12, EVMOD-REC / EVMOD-WQ: `take_end` returns records oldest first | two pairs ended in a known order (abort path and clean-close path) are read in that order | Tier 3 · step 4 |
+| `overdrive-worker` `vsock_leg_f_repair::leg_f_repair_rebinds_transparent_listener` | D-9 / V-8: the supervisor's repair port on the real `HostMtlsIntercept` after leg-F's accept task ends (`shutdown(SHUT_RD)`, S-11) | repair `Ok` (no `EADDRINUSE`), same address, a new LISTEN inode, the old descriptor closed, a connect succeeds, the audit is `Ok` | Tier 3 (`host-kernel-shared`) · 10-02 |
+| `vsock_density` R5-25 fail-closed | a live host listener on the dialled port (S-10) | every VM address refused `ECONNREFUSED` / `ENETUNREACH` with `serve` up and down; the listener accepts nothing | native metal · 08-04 |
+| `vsock_fault_matrix` R5-62 | stall window | polls until two samples 2 s apart are equal and non-zero (60 s bound), then the count stays flat for 10 s | native metal · 10-02 |
+
+## Completeness (`nw-at-completeness-check`)
+
+C1a/b (empty, boundaries: zero payload frames, `MAX` and `MAX + 1`, the
+probe cap 8 / 9, the reserved range edges, the restart ceiling `CEIL − 1` /
+`CEIL`), C2a/b (state machines documented in the driver headers and the
+specs; illegal events refused with typed errors), C3 (0/1/N pairs,
+watches, datagrams, slots; 64 VMs), C4a/b (END-IDEMPOTENT, a second abort
+`AlreadyEnded`, abort of an unknown id), C5a/b (stream / datagram / watch
+modes; feature-disabled activation), C6a/b/c (every refusal of every codec
+and of attach, the closed `ForwarderError` and `GuestNetworkError` sets),
+C7a (stalled readers, full queues, a 10 s stall, 1,100 UDP sockets churned),
+C7b (crash mid-recovery, quiescence mid-flow, VMM death, owner death,
+`serve` death and guest kernel crash on native metal), C7c (two contexts,
+overlapping recoveries, racing sessions) pass: 15 / 15 → **COMPLETE**.
+Documented gaps that do not fail an item: the guest-driven
+control-session-loss fault (D-16), R5-57 through `serve` (D-17) and the not-authored shapes of T-9 (the Tier-3
+half of R5-54 among them); V-9's measurements are the benchmark GH #326.
+
+## Deleted with the old contract
+
+The redirect-era bodies and drivers whose subject EVMOD-ADOPT removed:
+`overdrive-dataplane/tests/integration/vsock_{forwarder_verdict,
+seqpacket_length, flow_end_classifier, drain, egress_unframe, fragment_map,
+guest_steering}.rs` and `helpers/guest_net.rs`; the
+`overdrive-dataplane::guest_steering` unit cells (list C) with
+`proptest-regressions/guest_steering.txt`; `quint_flow_end.rs`,
+`quint_udp_empty.rs`, `quint_flows_half.rs`, `tests/half_close.rs`; the
+`FlowEvent` / `FlowCell` / `CellEpoch` / empty-notice cells; the
+`overdrive-bpf` `maps/guest_flow.rs` scaffold; `tests/conformance`
+`prefix_landing`; the worker TAP-era egress-capture tests; the stale
+`*.proptest-regressions` files of the rewritten core codecs; the earlier
+pass's partition documents (`test-scenarios-p{2,3,5}-*.md`, superseded by
+P3a, P4 and P3b).

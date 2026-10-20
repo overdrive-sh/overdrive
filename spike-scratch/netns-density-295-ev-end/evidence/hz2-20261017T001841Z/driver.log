@@ -1,0 +1,33 @@
+[00:18:41] substrate: {"host_uname_r": "7.0.0-38-generic", "systemd_detect_virt": "none", "nested": "1", "cpu": "AMD EPYC 8024P 8-Core Processor", "failures": []}
+[00:18:43] module build:
+warning: pahole version differs from the one used to build the kernel
+  The kernel was built with: 131
+  You are using:             0
+  CC [M]  ovd_fwd.o
+  MODPOST Module.symvers
+  CC [M]  ovd_fwd.mod.o
+  CC [M]  .module-common.o
+  LD [M]  ovd_fwd.ko
+  BTF [M] ovd_fwd.ko
+Skipping BTF generation for ovd_fwd.ko due to unavailability of vmlinux
+make[1]: Leaving directory '/var/tmp/ev-end-work/out/build/module'
+make: Leaving directory '/usr/src/linux-headers-7.0.0-29-generic'
+[00:18:43] NOTE: compiler warnings in module build (see commands.jsonl)
+[00:18:44] harness build:
+      | ^
+/var/tmp/ev-end-work/out/build/harness/evend.c: In function ‘host_main’:
+/var/tmp/ev-end-work/out/build/harness/evend.c:1038:122: warning: ignoring return value of ‘fgets’ declared with attribute ‘warn_unused_result’ [-Wunused-result]
+ 1038 |         logf_("HOST_START uname=%s", ({ static char u[128]; FILE *f = fopen("/proc/sys/kernel/osrelease", "r"); if (f) { fgets(u, sizeof u, f); fclose(f); } u[strcspn(u, "\n")] = 0; u; }));
+      |                                                                                                                          ^~~~~~~~~~~~~~~~~~~~~
+/var/tmp/ev-end-work/out/build/harness/evend.c: In function ‘sc_clean_fullend_delay’:
+/var/tmp/ev-end-work/out/build/harness/evend.c:571:97: warning: ignoring return value of ‘write’ declared with attribute ‘warn_unused_result’ [-Wunused-result]
+  571 |         int fd = open("/sys/module/ovd_fwd/parameters/work_delay_us", O_WRONLY); if (fd >= 0) { write(fd, "15000", 5); close(fd); }
+      |                                                                                                 ^~~~~~~~~~~~~~~~~~~~~
+/var/tmp/ev-end-work/out/build/harness/evend.c:581:93: warning: ignoring return value of ‘write’ declared with attribute ‘warn_unused_result’ [-Wunused-result]
+  581 |         fd = open("/sys/module/ovd_fwd/parameters/work_delay_us", O_WRONLY); if (fd >= 0) { write(fd, "0", 1); close(fd); }
+      |                                                                                             ^~~~~~~~~~~~~~~~~
+[00:18:44] modinfo: filename:       /var/tmp/ev-end-work/out/build/module/ovd_fwd.ko | description:    ev-end spike: proposed EVMOD contract, stream mode and watch | license:        GPL | srcversion:     720B37ABDAF3643B535D015 | depends:         | name:           ovd_fwd | retpoline:      Y | vermagic:       7.0.0-29-generic SMP preempt mod_unload modversions  | parm:           hazard:uint | parm:           work_delay_us:uint | 
+[00:18:45] pins {"ovd_fwd.ko": "8c6ad90dce68", "evend": "27219916ffd1", "L1_kernel": "b51367c7dab2", "guest_kernel": "b51367c7dab2", "cloud-hypervisor": "eadddf1bbcdc", "host_initramfs": "21e6856e3c14", "guest_initramfs": "08cec5927e31"}
+[00:18:45] L1 size: 28 MiB
+[00:18:45] QEMU: qemu-system-x86_64 -machine q35 -cpu host -accel kvm -m 3072 -smp 4 -nodefaults -nographic -monitor none -serial stdio -no-reboot -kernel /var/tmp/ev-end-work/out/Image -initrd /var/tmp/ev-end-work/out/host.cpio.gz -append console=ttyS0 rdinit=/init panic=-1 loglevel=4
+[00:33:45] QEMU exit 0 after 900s; HOST_DONE=False

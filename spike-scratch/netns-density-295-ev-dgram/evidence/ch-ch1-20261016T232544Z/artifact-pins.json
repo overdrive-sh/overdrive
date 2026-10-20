@@ -1,0 +1,7 @@
+{
+  "dgprobe": "f337a34124f7fe2e377ec0b8d3be5080de5ea2ff572ed01d1595981753df7557",
+  "dg-bpf.o": "942d749c5cc15b6ab0d2ac9711f4fa86bf10fd1d8e2b987a271a2c1f3b9cf3bb",
+  "evmod.ko": "07386712462ce1d5e8b291ece608bd4af793d4690e329f0dd0ffc6b2bb15f302",
+  "evmod.c": "327f666961ff44263beb9b16cd6d917c78ac4364ffadde578dd04007f5804cee",
+  "initramfs": "e6560bc8ae7dbf7acc04605d4c0b9367a408a136ebd2cd4d1511ea86a3bd433f"
+}

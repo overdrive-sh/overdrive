@@ -23,6 +23,7 @@
 
 #![allow(clippy::expect_used, clippy::expect_fun_call, clippy::unwrap_used)]
 
+use overdrive_core::observation::{ProbeRunSeq, SameStatusRuns};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -251,6 +252,8 @@ async fn write_probe_row(
             status,
             last_observed_at_unix_ms: at_ms,
             inferred: false,
+            run_seq: ProbeRunSeq::new(u64::max(at_ms, 1)).unwrap_or(ProbeRunSeq::FIRST),
+            same_status_runs: SameStatusRuns::ONE,
         })
         .await
         .expect("obs write probe result");

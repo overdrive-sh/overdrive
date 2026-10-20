@@ -24,6 +24,7 @@ use overdrive_core::aggregate::{DriverInput, IntentKey, ResourcesInput, Service,
 use overdrive_core::api::{ListenerInput, ServiceSpecInput};
 use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
+use overdrive_core::observation::{ProbeRunSeq, SameStatusRuns};
 use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
@@ -185,6 +186,7 @@ async fn drive(seed: u64, contend: bool) {
                     None,
                 )),
                 overdrive_core::traits::mtls_enforcement::MtlsLimits::default(),
+                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
             )),
             Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
                 std::collections::BTreeMap::new(),
@@ -200,9 +202,8 @@ async fn drive(seed: u64, contend: bool) {
         .gate(),
         Arc::new(overdrive_control_plane::guest_network::GuestAddressPool::new(
             "100.95.0.0/16".parse().expect("static guest prefix"),
-            "ovd-gbr0".to_owned(),
             std::net::Ipv4Addr::new(100, 95, 0, 1),
-            std::net::Ipv4Addr::new(100, 95, 0, 1),
+            std::sync::Arc::new(overdrive_sim::adapters::entropy::SimEntropy::new(0x295)),
         )),
     );
     exit_observer::spawn(
@@ -267,6 +268,12 @@ async fn drive(seed: u64, contend: bool) {
         status: ProbeStatus::Fail { last_fail_reason: "HTTP 302".to_owned() },
         last_observed_at_unix_ms: u64::try_from(clock.unix_now().as_millis()).unwrap(),
         inferred: false,
+        run_seq: ProbeRunSeq::new(u64::max(
+            u64::try_from(clock.unix_now().as_millis()).unwrap(),
+            1,
+        ))
+        .unwrap_or(ProbeRunSeq::FIRST),
+        same_status_runs: SameStatusRuns::ONE,
     })
     .await
     .unwrap();

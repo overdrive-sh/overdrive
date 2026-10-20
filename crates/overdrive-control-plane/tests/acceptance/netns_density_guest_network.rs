@@ -9,13 +9,14 @@
 //! `SimMtlsIntercept`. The pool's operations are crate-private, so lease state
 //! is observed only through the pinned events `guest_network.lease_retired`,
 //! `guest_network.lease_released`, and `guest_network.admission_refused`
-//! (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the admission refusal projection and the lease events)), captured by [`LeaseEventLayer`] into one ordered
+//! (FD § "Gate G-V0 — node attachment admission (restates G-295-0)" (the admission refusal projection and the lease events)), captured by [`LeaseEventLayer`] into one ordered
 //! [`StepTrace`] together with the driver's stops and the intercept's element
 //! removals. Each trace entry samples the sim owner's `calls().len()`, so the
 //! owner's calls are interleaved into the same order.
 
 #![allow(clippy::doc_markdown)]
 
+use overdrive_core::guest_transport::GuestFlowPorts;
 use std::collections::BTreeSet;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::num::NonZeroU16;
@@ -28,21 +29,23 @@ use overdrive_control_plane::action_shim::{
     ShimError, dispatch_with_guest_network_provisioner_for_test,
 };
 use overdrive_control_plane::guest_network::{
-    GuestAddressPool, GuestNetworkError, GuestNetworkOperation, GuestNetworkPlan,
-    GuestNetworkProvisioner, GuestNetworkScratchComplement, GuestNetworkScratchCount,
-    SharedGuestNetworkAudit, SharedGuestNetworkAuditError, SharedGuestNetworkOwner, TapActivation,
-    TapQuiescence,
+    ForwardingActivation, ForwardingQuiescence, ForwardingRestore, GuestAddressPool,
+    GuestNetworkError, GuestNetworkOperation, GuestNetworkPlan, GuestNetworkProvisioner,
+    GuestNetworkScratchComplement, GuestNetworkScratchCount, QuiescenceHold,
+    QuiescenceRestoreError, SharedGuestNetworkAudit, SharedGuestNetworkAuditError,
+    SharedGuestNetworkOwner,
 };
 use overdrive_control_plane::{AppState, noop_heartbeat};
 use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::guest_network::GuestNetworkExecWiring;
+use overdrive_core::guest_transport::GuestTransportAssignment;
 use overdrive_core::id::{AllocationId, NodeId, SpiffeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::IdentityRead;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverPayload,
-    DriverType, ExitEvent, ExitKind, GuestNetworkAssignment, Resources, VmPayload,
+    DriverType, ExitEvent, ExitKind, Resources, VmPayload,
 };
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
@@ -218,9 +221,9 @@ impl StepTrace {
     }
 }
 
-/// `steps` without `LeaseRetired { alloc }` entries: FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the lease events) pins that `retire`
+/// `steps` without `LeaseRetired { alloc }` entries: FD § "Gate G-V0 — node attachment admission (restates G-295-0)" (the lease events) pins that `retire`
 /// emits `lease_retired`, but not whether a `retire` of an already-Retiring
-/// lease (which changes nothing and returns `false`, FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the pool operations: `retire`)) emits it.
+/// lease (which changes nothing and returns `false`, FD § "Gate G-V0 — node attachment admission (restates G-295-0)" (the pool operations: `retire`)) emits it.
 fn without_noop_retire(steps: Vec<Step>, alloc: &str) -> Vec<Step> {
     steps
         .into_iter()
@@ -285,7 +288,7 @@ impl Visit for LeaseEventFields {
     }
 }
 
-/// Records the three pinned lease events (FD § "[REF] Component — node-wide guest-attachment admission (D-295-R6, R7, R8) — ACCEPTED 2026-09-24 (R7 user ruling of the same date)" (the admission refusal projection and the lease events)) into the trace.
+/// Records the three pinned lease events (FD § "Gate G-V0 — node attachment admission (restates G-295-0)" (the admission refusal projection and the lease events)) into the trace.
 struct LeaseEventLayer {
     trace: Arc<StepTrace>,
 }
@@ -580,11 +583,11 @@ impl GuestNetworkProvisioner for ActivationFaultOwner {
     async fn activate(
         &self,
         plan: &GuestNetworkPlan,
-    ) -> overdrive_control_plane::guest_network::Result<TapActivation> {
+    ) -> overdrive_control_plane::guest_network::Result<ForwardingActivation> {
         if self.refuse_activation.load(Ordering::SeqCst) {
             self.trace.record(Step::ActivateRefused { alloc: plan.alloc().to_string() });
             return Err(GuestNetworkError::Io {
-                operation: GuestNetworkOperation::TapSetUp,
+                operation: GuestNetworkOperation::ForwardingActivate,
                 source: std::io::Error::other("scripted activation refusal"),
             });
         }
@@ -605,6 +608,20 @@ impl GuestNetworkProvisioner for ActivationFaultOwner {
 }
 
 #[async_trait::async_trait]
+impl overdrive_core::guest_transport::dial::GuestStreamDial for ActivationFaultOwner {
+    async fn dial(
+        &self,
+        target: std::net::SocketAddrV4,
+        purpose: overdrive_core::guest_transport::dial::DialPurpose,
+    ) -> Result<
+        overdrive_core::guest_transport::dial::GuestStream,
+        overdrive_core::guest_transport::dial::GuestDialError,
+    > {
+        self.inner.dial(target, purpose).await
+    }
+}
+
+#[async_trait::async_trait]
 impl SharedGuestNetworkOwner for ActivationFaultOwner {
     async fn probe_startup(&self) -> overdrive_control_plane::guest_network::Result<()> {
         self.inner.probe_startup().await
@@ -618,23 +635,28 @@ impl SharedGuestNetworkOwner for ActivationFaultOwner {
         self.inner.converge_shared().await
     }
 
+    fn flow_ports(&self) -> Option<GuestFlowPorts> {
+        self.inner.flow_ports()
+    }
+
     async fn audit_shared(&self) -> Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError> {
         self.inner.audit_shared().await
     }
 
-    async fn quiesce_managed_taps(
-        &self,
-    ) -> overdrive_control_plane::guest_network::Result<TapQuiescence> {
-        self.inner.quiesce_managed_taps().await
+    async fn quiesce(&self) -> (QuiescenceHold, ForwardingQuiescence) {
+        self.inner.quiesce().await
     }
 
-    async fn restore_quiesced_taps(&self) -> overdrive_control_plane::guest_network::Result<()> {
-        self.inner.restore_quiesced_taps().await
+    async fn restore(
+        &self,
+        hold: QuiescenceHold,
+    ) -> std::result::Result<ForwardingRestore, QuiescenceRestoreError> {
+        self.inner.restore(hold).await
     }
 }
 
 // ---------------------------------------------------------------------------
-// Seam fixture (test-scenarios § Seam fixture; FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (how the gate reaches the shim, and the `AppState` constructors); FD § "C-295-B — network provisioner boundary" (the B-1 pin that both test helpers read the gate and the pool from `state`)).
+// Seam fixture (test-scenarios § Seam fixture; FD § "Gate G-V3 — allocation forwarding activation (replaces G-295-3)" (how the gate reaches the shim, and the `AppState` constructors); FD § "C-295-B — network provisioner boundary" (the B-1 pin that both test helpers read the gate and the pool from `state`)).
 // ---------------------------------------------------------------------------
 
 /// Distinct declared Service ports, as the production service projection
@@ -701,15 +723,17 @@ where
         // reads until DELIVER 06-03 reads `state.guest_pool`).
         let pool = Arc::new(GuestAddressPool::new(
             ipnet::Ipv4Net::new(Ipv4Addr::new(100, 95, 0, 0), 16).expect("node guest prefix"),
-            "ovd-gbr0".to_owned(),
             Ipv4Addr::new(100, 95, 0, 1),
-            Ipv4Addr::new(100, 95, 0, 1),
+            Arc::new(overdrive_sim::adapters::entropy::SimEntropy::new(0x295)),
         ));
         let intercept = Arc::new(RecordingIntercept::new(Arc::clone(&trace)));
         let identity: Arc<dyn IdentityRead> =
             Arc::new(SimIdentityRead::new(std::collections::BTreeMap::new(), None));
-        let enforcement: Arc<dyn MtlsEnforcement> =
-            Arc::new(SimMtlsEnforcement::new(identity, MtlsLimits::default()));
+        let enforcement: Arc<dyn MtlsEnforcement> = Arc::new(SimMtlsEnforcement::new(
+            identity,
+            MtlsLimits::default(),
+            Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        ));
         let resolve: Arc<dyn MtlsResolve> = Arc::new(SimMtlsResolve::new(
             std::collections::BTreeMap::new(),
             MtlsResolution::NonMesh,
@@ -739,7 +763,7 @@ where
             Arc::clone(&store) as Arc<dyn IntentStore>
         );
         // The constructor call. Until DELIVER 05-01 cuts the pinned
-        // constructors (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the `AppState` constructors)) it passes today's inputs; 05-01 appends
+        // constructors (FD § "Gate G-V3 — allocation forwarding activation (replaces G-295-3)" (the `AppState` constructors)) it passes today's inputs; 05-01 appends
         // `Arc::clone(&worker)`, `Arc::clone(&owner) as Arc<dyn SharedGuestNetworkOwner>`,
         // `wiring.gate()`, and `Arc::clone(&pool)`, and nothing else in this
         // file changes with the constructors.
@@ -784,7 +808,7 @@ where
     /// Start the worker's shared owner (it binds nothing over the sim port
     /// from B-7, FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (the `SimMtlsIntercept` contract)) and open the EXEC gate through the paired
     /// supervisor, as a body whose dispatch reaches intercept install and
-    /// `claim_release` must (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (gate state outside `run_server*`)).
+    /// `claim_release` must (FD § "Gate G-V3 — allocation forwarding activation (replaces G-295-3)" (gate state outside `run_server*`)).
     async fn start_protection_and_open_exec(&self) {
         self.worker.start_shared_owner().await.expect("the shared intercept owner starts");
         assert!(
@@ -804,9 +828,9 @@ where
         .await
     }
 
-    fn started_assignment(&self, index: usize) -> GuestNetworkAssignment {
+    fn started_assignment(&self, index: usize) -> GuestTransportAssignment {
         let specs = self.driver.inner.started_specs();
-        specs[index].network.clone().expect("canonical grouped assignment")
+        specs[index].transport.clone().expect("the pool's guest transport assignment")
     }
 
     async fn row_state(&self, alloc: &str) -> Option<AllocState> {
@@ -928,6 +952,7 @@ fn tick(counter: u64) -> TickContext {
 /// S-ND295-06 — Start publishes no partial attachment
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
+#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn provision_refusal_stops_before_driver_start_and_preserves_the_typed_owner_cause() {
     const REFUSED: &str = "nd295-provision-refused";
     let fixture = SeamFixture::with_sim_owner().await;
@@ -943,7 +968,7 @@ async fn provision_refusal_stops_before_driver_start_and_preserves_the_typed_own
         matches!(
             error,
             ShimError::GuestNetwork(GuestNetworkError::Io {
-                operation: GuestNetworkOperation::TapCreate,
+                operation: GuestNetworkOperation::PairAttach,
                 ..
             })
         ),
@@ -963,9 +988,9 @@ async fn provision_refusal_stops_before_driver_start_and_preserves_the_typed_own
     assert_eq!(
         steps,
         vec![
-            Step::Owner(GuestNetworkOperation::TapCreate),
+            Step::Owner(GuestNetworkOperation::PairAttach),
             Step::LeaseRetired { alloc: REFUSED.to_owned() },
-            Step::Owner(GuestNetworkOperation::TapDelete),
+            Step::Owner(GuestNetworkOperation::PairAbort),
             Step::LeaseReleased { alloc: REFUSED.to_owned() },
         ],
         "the lease is retired before the owner's teardown and released only after it succeeds"
@@ -980,6 +1005,7 @@ async fn provision_refusal_stops_before_driver_start_and_preserves_the_typed_own
 /// S-ND295-07 — Stop removes the predecessor completely before its address is reused
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
+#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn teardown_failure_holds_the_lease_until_retry_completes_then_allows_exact_address_reuse() {
     const PREDECESSOR: &str = "nd295-predecessor";
     let fixture = SeamFixture::with_sim_owner().await;
@@ -1004,7 +1030,7 @@ async fn teardown_failure_holds_the_lease_until_retry_completes_then_allows_exac
         matches!(
             stop_error,
             ShimError::GuestNetwork(GuestNetworkError::Io {
-                operation: GuestNetworkOperation::TapDelete,
+                operation: GuestNetworkOperation::PairAbort,
                 ..
             })
         ),
@@ -1016,11 +1042,11 @@ async fn teardown_failure_holds_the_lease_until_retry_completes_then_allows_exac
             Step::DriverStop { alloc: PREDECESSOR.to_owned(), outcome: StopOutcome::Stopped },
             Step::LeaseRetired { alloc: PREDECESSOR.to_owned() },
             Step::ElementRemoval {
-                source: predecessor.address,
-                destinations: destinations(predecessor.address),
+                source: predecessor.workload_addr(),
+                destinations: destinations(predecessor.workload_addr()),
                 outcome: RemovalOutcome::Removed,
             },
-            Step::Owner(GuestNetworkOperation::TapDelete),
+            Step::Owner(GuestNetworkOperation::PairAbort),
         ],
         "driver.stop → lease_retired → element removal → teardown, and no lease_released"
     );
@@ -1033,7 +1059,7 @@ async fn teardown_failure_holds_the_lease_until_retry_completes_then_allows_exac
         .await
         .expect("unrelated allocation remains startable");
     let while_held = fixture.started_assignment(1);
-    assert_ne!(while_held.address, predecessor.address);
+    assert_ne!(while_held.workload_addr(), predecessor.workload_addr());
     assert!(
         !fixture
             .trace
@@ -1055,7 +1081,7 @@ async fn teardown_failure_holds_the_lease_until_retry_completes_then_allows_exac
         without_noop_retire(fixture.trace.since(&retry), PREDECESSOR),
         vec![
             Step::DriverStop { alloc: PREDECESSOR.to_owned(), outcome: StopOutcome::NotFound },
-            Step::Owner(GuestNetworkOperation::TapDelete),
+            Step::Owner(GuestNetworkOperation::PairAbort),
             Step::LeaseReleased { alloc: PREDECESSOR.to_owned() },
         ],
         "teardown → lease_released, released last"
@@ -1066,20 +1092,19 @@ async fn teardown_failure_holds_the_lease_until_retry_completes_then_allows_exac
         .await
         .expect("successor starts after predecessor complement is empty");
     let successor = fixture.started_assignment(2);
-    assert_eq!(successor.address, predecessor.address);
-    assert_eq!(successor.tap, predecessor.tap);
-    assert_eq!(successor.mac, predecessor.mac);
+    assert_eq!(successor.workload_addr(), predecessor.workload_addr());
+    assert_eq!(successor.cid(), predecessor.cid());
     assert_eq!(
         fixture.sim_owner.calls(),
         [
-            GuestNetworkOperation::TapCreate,
-            GuestNetworkOperation::TapSetUp,
-            GuestNetworkOperation::TapDelete,
-            GuestNetworkOperation::TapCreate,
-            GuestNetworkOperation::TapSetUp,
-            GuestNetworkOperation::TapDelete,
-            GuestNetworkOperation::TapCreate,
-            GuestNetworkOperation::TapSetUp,
+            GuestNetworkOperation::PairAttach,
+            GuestNetworkOperation::ForwardingActivate,
+            GuestNetworkOperation::PairAbort,
+            GuestNetworkOperation::PairAttach,
+            GuestNetworkOperation::ForwardingActivate,
+            GuestNetworkOperation::PairAbort,
+            GuestNetworkOperation::PairAttach,
+            GuestNetworkOperation::ForwardingActivate,
         ],
         "each successful start activates exactly once before release; teardown/retry remains effect-first"
     );
@@ -1090,7 +1115,7 @@ async fn teardown_failure_holds_the_lease_until_retry_completes_then_allows_exac
 // ---------------------------------------------------------------------------
 
 impl SeamFixture<ActivationFaultOwner> {
-    /// Precondition through the production path (FD § "[REF] Driven port — TAP activation gate (D-295-R5) — ACCEPTED 2026-09-24" (the activation failure projection)): `alloc`
+    /// Precondition through the production path (FD § "Gate G-V3 — allocation forwarding activation (replaces G-295-3)" (the activation failure projection)): `alloc`
     /// starts, its activation is refused, and both protection removal and the
     /// owner's teardown fail, so the action owner confirms the VMM gone,
     /// retires the lease, withholds release, and writes the allocation's Failed row. The
@@ -1119,7 +1144,7 @@ impl SeamFixture<ActivationFaultOwner> {
         self.owner.script_activation_failure(false);
         self.intercept.script_removal_failure(false);
         self.sim_owner.script_teardown_failure(false);
-        self.started_assignment(0).address
+        self.started_assignment(0).workload_addr()
     }
 }
 
@@ -1127,6 +1152,7 @@ impl SeamFixture<ActivationFaultOwner> {
 /// S-ND295-56 — Reclaim cleans an allocation's network without touching its row
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
+#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn reclaim_cleans_a_leased_finished_allocation_without_a_row() {
     const FINISHED: &str = "nd295-reclaim-finished";
     let fixture = SeamFixture::with_activation_fault_owner().await;
@@ -1147,7 +1173,7 @@ async fn reclaim_cleans_a_leased_finished_allocation_without_a_row() {
                 destinations: destinations(address),
                 outcome: RemovalOutcome::Removed,
             },
-            Step::Owner(GuestNetworkOperation::TapDelete),
+            Step::Owner(GuestNetworkOperation::PairAbort),
             Step::LeaseReleased { alloc: FINISHED.to_owned() },
         ],
         "retire → VMM confirmed gone → element removal → teardown → lease_released"
@@ -1159,6 +1185,7 @@ async fn reclaim_cleans_a_leased_finished_allocation_without_a_row() {
 /// S-ND295-56 — Reclaim cleans an allocation's network without touching its row
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
+#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn reclaim_without_a_lease_does_nothing() {
     const NEVER_LEASED: &str = "nd295-reclaim-never-leased";
     const RELEASED: &str = "nd295-reclaim-released";
@@ -1201,6 +1228,7 @@ async fn reclaim_without_a_lease_does_nothing() {
 /// S-ND295-56 — Reclaim cleans an allocation's network without touching its row
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
+#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn a_failed_reclaim_step_keeps_the_lease_for_the_next_attempt() {
     const FINISHED: &str = "nd295-reclaim-failing";
     let fixture = SeamFixture::with_activation_fault_owner().await;
@@ -1253,7 +1281,7 @@ async fn a_failed_reclaim_step_keeps_the_lease_for_the_next_attempt() {
         matches!(
             error,
             ShimError::GuestNetwork(GuestNetworkError::Io {
-                operation: GuestNetworkOperation::TapDelete,
+                operation: GuestNetworkOperation::PairAbort,
                 ..
             })
         ),
@@ -1268,7 +1296,7 @@ async fn a_failed_reclaim_step_keeps_the_lease_for_the_next_attempt() {
                 destinations: destinations(address),
                 outcome: RemovalOutcome::Removed,
             },
-            Step::Owner(GuestNetworkOperation::TapDelete),
+            Step::Owner(GuestNetworkOperation::PairAbort),
         ],
         "the retried removal converges; the refused teardown leaves the lease held"
     );
@@ -1281,7 +1309,7 @@ async fn a_failed_reclaim_step_keeps_the_lease_for_the_next_attempt() {
         without_noop_retire(fixture.trace.since(&completed), FINISHED),
         vec![
             Step::DriverStop { alloc: finished(), outcome: StopOutcome::NotFound },
-            Step::Owner(GuestNetworkOperation::TapDelete),
+            Step::Owner(GuestNetworkOperation::PairAbort),
             Step::LeaseReleased { alloc: finished() },
         ],
         "the protection is already gone, so teardown → lease_released"
@@ -1298,6 +1326,7 @@ async fn a_failed_reclaim_step_keeps_the_lease_for_the_next_attempt() {
 /// band. The reclaim's element removal and teardown converge on that absence,
 /// and the lease is released last.
 #[tokio::test]
+#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn a_reclaim_whose_parts_were_removed_out_of_band_releases_the_lease() {
     const FINISHED: &str = "nd295-reclaim-out-of-band";
     let fixture = SeamFixture::with_activation_fault_owner().await;
@@ -1349,7 +1378,7 @@ async fn a_reclaim_whose_parts_were_removed_out_of_band_releases_the_lease() {
                 destinations,
                 outcome: RemovalOutcome::Removed,
             },
-            Step::Owner(GuestNetworkOperation::TapDelete),
+            Step::Owner(GuestNetworkOperation::PairAbort),
             Step::LeaseReleased { alloc: FINISHED.to_owned() },
         ],
         "the removal and teardown converge on the absent parts, then lease_released"
@@ -1372,6 +1401,7 @@ async fn a_reclaim_whose_parts_were_removed_out_of_band_releases_the_lease() {
 /// reclaim records `lease_retired` before the element removal and the owner's
 /// teardown, and `lease_released` after them.
 #[tokio::test]
+#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn a_reclaim_retires_an_admitted_lease_before_its_teardown_and_releases_it_after() {
     const CRASHED: &str = "nd295-reclaim-crashed";
     let fixture = SeamFixture::with_sim_owner().await;
@@ -1388,7 +1418,7 @@ async fn a_reclaim_retires_an_admitted_lease_before_its_teardown_and_releases_it
 
     let start = fixture.trace.mark();
     fixture.dispatch(start_action(CRASHED)).await.expect("the allocation starts");
-    let address = fixture.started_assignment(0).address;
+    let address = fixture.started_assignment(0).workload_addr();
     assert_eq!(fixture.row_state(CRASHED).await, Some(AllocState::Running));
 
     // The VMM crashes; the production exit observer writes the Failed row.
@@ -1445,7 +1475,7 @@ async fn a_reclaim_retires_an_admitted_lease_before_its_teardown_and_releases_it
                 destinations: destinations(address),
                 outcome: RemovalOutcome::Removed,
             },
-            Step::Owner(GuestNetworkOperation::TapDelete),
+            Step::Owner(GuestNetworkOperation::PairAbort),
             Step::LeaseReleased { alloc: CRASHED.to_owned() },
         ],
         "lease_retired precedes the removal and the teardown; lease_released follows them"

@@ -88,6 +88,9 @@ quint-connect.workspace = true
 itf.workspace           = true
 anyhow.workspace        = true
 overdrive-sim.path  = "../overdrive-sim"
+# `test-util`: the paused-clock probe-run numbering tests
+# (`probe_runner/run_numbering_tests.rs`, `#[tokio::test(start_paused = true)]`).
+tokio = { workspace = true, features = ["test-util"] }
 # Shared real-OS fixtures, including the cross-process CIDR lease used by the
 # hand-built worker mTLS topologies. Dev-dependency only.
 overdrive-testing.workspace = true

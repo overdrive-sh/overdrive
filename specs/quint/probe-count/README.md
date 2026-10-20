@@ -13,7 +13,7 @@ Evidence: `evidence/summary.md` (written only by `--record`; `cargo xtask quint 
 
 ## Abstraction and rule
 
-One key, one producer, one consumer. Module `probe_count` (parameter `OFF`); main instance `probe_streak` (`OFF = {}`).
+One key, one producer, one consumer. Module `probe_count` (parameters `OFF`, `REC`); main instance `probe_streak` (`OFF = {}`, `REC = false`); conformance main `probe_streak_conf` (`REC = true`).
 LT = 3 (liveness), RT = 2 (readiness), bound MAXRUNS = 7 producer runs of any outcome (`Fail x3, Pass, Fail x3` fits); looks are unbounded (the state space is finite: A, running, run_seq are bounded by MAXRUNS), each TLC check takes about 6 s.
 
 Producer action `ProbeRun(outcome, reason)`, outcome in Pass | Fail | NoSample | WriteFail (reason: `node_capacity` |
@@ -40,6 +40,23 @@ in ghost state (`terms`, `tseqs`).
 Conformance projection: `rseq`, `rst`, `rsame` (the stored row), `A` (consumer view) and `running` (projected from the
 allocation's `AllocStatusRow`: not terminal). Model-only (not projected): `hist`, `terms`, `tseqs`, `g`, the producer
 variables, `clock`/`rat`, and `fs`/`M`, which exist only for the `reconstruct` hazard and stay 0 in the main instance.
+
+## The conformance step record `conf_step` (D-UP-1)
+
+`quint test` (which `#[quint_test]` runs) emits no `mbt::actionTaken` / `mbt::nondetPicks`, so the module records the
+action that produced each state in `conf_step`: a variant of `probe_count_conf::ConfStep` whose tag is the action's
+name (`init`, `ProbeRun`, `ClockBack`, `ConsumerLook`, `Idle`) and whose value is the record of the action's parameters
+by parameter name (`ProbeRun { out, reason }`, `ConsumerLook { stopOk }`; the unit value for `init`, `ClockBack`,
+`Idle`). The variant type sits in the definitions-only module `probe_count_conf` and each action builds its value with
+the builtin `variant`, because a constructor cannot share an action's name. `conf_step` is model-only and write-only
+(no guard or property reads it).
+
+It changes only on the conformance main `probe_streak_conf` (`REC = true`); each action assigns
+`conf_step' = if (REC) variant(…) else conf_step`, so `probe_streak` and every hazard instance (`REC = false`) keep it
+at `init` and their TLC state spaces are those of the rules alone. Only the named runs are checked on
+`probe_streak_conf`. A driver names it in `#[quint_test(main = "probe_streak_conf", …)]`, `#[quint_run]` and
+`Config::nondet` by its ITF name `probe_streak_conf::probe_count::conf_step` (Quint qualifies a variable with the main
+module and the module that declares it). D-UP-1 was approved by the user on 2026-10-14.
 
 ## Invariants (named after the decision they defend)
 

@@ -7,8 +7,7 @@
 //! the shared-infra scrub, the chain dump, the sim-double worker, the
 //! `AllocationSpec` builder). Promoted to a shared helper per
 //! `.claude/rules/development.md` § "Shared real-infra test fixtures" (≥2
-//! consumers, non-trivial setup). Modelled on the established worker Tier-3
-//! pattern in `start_alloc_installs_both_tproxy.rs`.
+//! consumers, non-trivial setup).
 //!
 //! The rule install MUST be the production `start_alloc` call site — these
 //! helpers NEVER call `install_inbound_tproxy` themselves (vertical-slice rule,
@@ -30,14 +29,14 @@ use std::sync::Arc;
 
 use overdrive_core::AllocationId;
 use overdrive_core::guest_transport::{
-    GUEST_CID_BASE, GuestCid, GuestCidClaim as _, GuestTransportAssignment, LaunchToken,
+    GUEST_CID_BASE, GUEST_FLOW_CONTROL_PORT, GUEST_FLOW_STREAM_PORT, GuestCid, GuestFlowPorts,
+    GuestTransportAssignment, LaunchToken,
 };
 use overdrive_core::traits::IdentityRead;
 use overdrive_core::traits::driver::{AllocationSpec, Resources};
 use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
 use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
 use overdrive_sim::adapters::clock::SimClock;
-use overdrive_sim::adapters::guest_cid_claim::SimGuestCidClaim;
 use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
 use overdrive_sim::adapters::{SimIdentityRead, SimMtlsResolve};
 use overdrive_worker::mtls_intercept_port::HostMtlsIntercept;
@@ -45,8 +44,8 @@ use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
 
 /// Cross-PROCESS exclusion for the shared host-netns kernel state — the SAME
 /// fixed lock path the sibling kernel-touching suites
-/// (`start_alloc_installs_both_tproxy.rs`, `mtls_intercept_install.rs`,
-/// `egress_tproxy_capture.rs`) hold, so they cannot race each other's
+/// (`mtls_intercept_install.rs` and the other kernel-touching worker suites)
+/// hold, so they cannot race each other's
 /// `overdrive-mtls` chain dumps. nextest runs each `#[test]` in a separate
 /// process, so an in-process `serial_test` lock cannot serialise node-global
 /// kernel state.
@@ -208,10 +207,15 @@ pub fn build_inbound_spec(
             let [_, _, high, low] = address.octets();
             let cid = GuestCid::new(GUEST_CID_BASE + u32::from(u16::from_be_bytes([high, low])))
                 .expect("an in-range guest CID");
-            let claim =
-                SimGuestCidClaim::new().claim(cid).expect("claim the allocation's guest CID");
             let launch = LaunchToken::from_bytes([0x5a; 16]).expect("a non-zero launch token");
-            GuestTransportAssignment::new(address, address, launch, claim)
+            GuestTransportAssignment::new(
+                address,
+                address,
+                cid,
+                launch,
+                GuestFlowPorts::new(GUEST_FLOW_STREAM_PORT, GUEST_FLOW_CONTROL_PORT)
+                    .expect("the default guest-flow listener ports"),
+            )
         }),
         service_ports,
     }
@@ -222,8 +226,11 @@ pub fn build_inbound_spec(
 /// connection — the doubles only satisfy the constructor.
 pub fn build_worker() -> Arc<MtlsInterceptWorker> {
     let identity: Arc<dyn IdentityRead> = Arc::new(SimIdentityRead::new(BTreeMap::new(), None));
-    let enforcement: Arc<dyn MtlsEnforcement> =
-        Arc::new(SimMtlsEnforcement::new(identity, MtlsLimits::default()));
+    let enforcement: Arc<dyn MtlsEnforcement> = Arc::new(SimMtlsEnforcement::new(
+        identity,
+        MtlsLimits::default(),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+    ));
     let resolve: Arc<dyn MtlsResolve> =
         Arc::new(SimMtlsResolve::new(BTreeMap::new(), MtlsResolution::NonMesh));
     Arc::new(MtlsInterceptWorker::new(

@@ -18,8 +18,10 @@ State 1: <Initial predicate>
 /\ flows_envGuestMissesHostClose_owner_flows_vmUp = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_toHostPaired = {}
 /\ flows_envGuestMissesHostClose_owner_flows_phantom = FALSE
+/\ flows_envGuestMissesHostClose_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_envGuestMissesHostClose_owner_flows_toHostRefused = {}
 /\ flows_envGuestMissesHostClose_owner_flows_abortDiscarded = {}
+/\ flows_envGuestMissesHostClose_owner_flows_gSess = 0
 /\ flows_envGuestMissesHostClose_owner_flows_readyCross = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_badPaired = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_toGuestAbort = {}
@@ -33,7 +35,7 @@ State 1: <Initial predicate>
 /\ flows_envGuestMissesHostClose_owner_flows_bHeldByOther = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_heldByOther = FALSE
 
-State 2: <flows_envGuestMissesHostClose_owner_flows_Provision line 1219, col 3 to line 1241, col 54 of module flows_envGuestMissesHostClose>
+State 2: <flows_envGuestMissesHostClose_owner_flows_Provision line 1242, col 3 to line 1275, col 54 of module flows_envGuestMissesHostClose>
 /\ flows_envGuestMissesHostClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_envGuestMissesHostClose_owner_flows_quiesced = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_drvLive = FALSE
@@ -53,8 +55,10 @@ State 2: <flows_envGuestMissesHostClose_owner_flows_Provision line 1219, col 3 t
 /\ flows_envGuestMissesHostClose_owner_flows_vmUp = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_toHostPaired = {}
 /\ flows_envGuestMissesHostClose_owner_flows_phantom = FALSE
+/\ flows_envGuestMissesHostClose_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_envGuestMissesHostClose_owner_flows_toHostRefused = {}
 /\ flows_envGuestMissesHostClose_owner_flows_abortDiscarded = {}
+/\ flows_envGuestMissesHostClose_owner_flows_gSess = 0
 /\ flows_envGuestMissesHostClose_owner_flows_readyCross = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_badPaired = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_toGuestAbort = {}
@@ -68,7 +72,7 @@ State 2: <flows_envGuestMissesHostClose_owner_flows_Provision line 1219, col 3 t
 /\ flows_envGuestMissesHostClose_owner_flows_bHeldByOther = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_heldByOther = FALSE
 
-State 3: <flows_envGuestMissesHostClose_owner_flows_Teardown line 1307, col 3 to line 1362, col 54 of module flows_envGuestMissesHostClose>
+State 3: <flows_envGuestMissesHostClose_owner_flows_VmStart line 796, col 3 to line 835, col 56 of module flows_envGuestMissesHostClose>
 /\ flows_envGuestMissesHostClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_envGuestMissesHostClose_owner_flows_quiesced = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_drvLive = FALSE
@@ -82,14 +86,16 @@ State 3: <flows_envGuestMissesHostClose_owner_flows_Teardown line 1307, col 3 to
 /\ flows_envGuestMissesHostClose_owner_flows_act = "none"
 /\ flows_envGuestMissesHostClose_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_envGuestMissesHostClose_owner_flows_vmGen = 0
+/\ flows_envGuestMissesHostClose_owner_flows_vmGen = 1
 /\ flows_envGuestMissesHostClose_owner_flows_toHostAbort = {}
 /\ flows_envGuestMissesHostClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_envGuestMissesHostClose_owner_flows_vmUp = FALSE
+/\ flows_envGuestMissesHostClose_owner_flows_vmUp = TRUE
 /\ flows_envGuestMissesHostClose_owner_flows_toHostPaired = {}
 /\ flows_envGuestMissesHostClose_owner_flows_phantom = FALSE
+/\ flows_envGuestMissesHostClose_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_envGuestMissesHostClose_owner_flows_toHostRefused = {}
 /\ flows_envGuestMissesHostClose_owner_flows_abortDiscarded = {}
+/\ flows_envGuestMissesHostClose_owner_flows_gSess = 0
 /\ flows_envGuestMissesHostClose_owner_flows_readyCross = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_badPaired = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_toGuestAbort = {}
@@ -99,11 +105,11 @@ State 3: <flows_envGuestMissesHostClose_owner_flows_Teardown line 1307, col 3 to
   earlyDl |-> FALSE,
   lateReply |-> FALSE ]
 /\ flows_envGuestMissesHostClose_owner_flows_gen = 1
-/\ flows_envGuestMissesHostClose_owner_flows_alloc = "Retiring"
+/\ flows_envGuestMissesHostClose_owner_flows_alloc = "Provisioned"
 /\ flows_envGuestMissesHostClose_owner_flows_bHeldByOther = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_heldByOther = FALSE
 
-State 4: <flows_envGuestMissesHostClose_owner_flows_Release line 1368, col 3 to line 1390, col 54 of module flows_envGuestMissesHostClose>
+State 4: <flows_envGuestMissesHostClose_owner_flows_step line 4026, col 9 to line 4028, col 59 of module flows_envGuestMissesHostClose>
 /\ flows_envGuestMissesHostClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_envGuestMissesHostClose_owner_flows_quiesced = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_drvLive = FALSE
@@ -112,19 +118,21 @@ State 4: <flows_envGuestMissesHostClose_owner_flows_Release line 1368, col 3 to 
 /\ flows_envGuestMissesHostClose_owner_flows_claim = 0
 /\ flows_envGuestMissesHostClose_owner_flows_crossMsg = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_resurrected = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_envGuestMissesHostClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 1]>>
 /\ flows_envGuestMissesHostClose_owner_flows_bclaim = 0
 /\ flows_envGuestMissesHostClose_owner_flows_act = "none"
 /\ flows_envGuestMissesHostClose_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_envGuestMissesHostClose_owner_flows_vmGen = 0
+/\ flows_envGuestMissesHostClose_owner_flows_vmGen = 1
 /\ flows_envGuestMissesHostClose_owner_flows_toHostAbort = {}
 /\ flows_envGuestMissesHostClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_envGuestMissesHostClose_owner_flows_vmUp = FALSE
+/\ flows_envGuestMissesHostClose_owner_flows_vmUp = TRUE
 /\ flows_envGuestMissesHostClose_owner_flows_toHostPaired = {}
 /\ flows_envGuestMissesHostClose_owner_flows_phantom = FALSE
+/\ flows_envGuestMissesHostClose_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_envGuestMissesHostClose_owner_flows_toHostRefused = {}
 /\ flows_envGuestMissesHostClose_owner_flows_abortDiscarded = {}
+/\ flows_envGuestMissesHostClose_owner_flows_gSess = 2
 /\ flows_envGuestMissesHostClose_owner_flows_readyCross = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_badPaired = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_toGuestAbort = {}
@@ -134,46 +142,11 @@ State 4: <flows_envGuestMissesHostClose_owner_flows_Release line 1368, col 3 to 
   earlyDl |-> FALSE,
   lateReply |-> FALSE ]
 /\ flows_envGuestMissesHostClose_owner_flows_gen = 1
-/\ flows_envGuestMissesHostClose_owner_flows_alloc = "Absent"
-/\ flows_envGuestMissesHostClose_owner_flows_bHeldByOther = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_heldByOther = FALSE
-
-State 5: <flows_envGuestMissesHostClose_owner_flows_Provision line 1219, col 3 to line 1241, col 54 of module flows_envGuestMissesHostClose>
-/\ flows_envGuestMissesHostClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_envGuestMissesHostClose_owner_flows_quiesced = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_drvLive = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
-/\ flows_envGuestMissesHostClose_owner_flows_badAct = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_claim = 0
-/\ flows_envGuestMissesHostClose_owner_flows_crossMsg = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_resurrected = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_envGuestMissesHostClose_owner_flows_bclaim = 0
-/\ flows_envGuestMissesHostClose_owner_flows_act = "none"
-/\ flows_envGuestMissesHostClose_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
-   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_envGuestMissesHostClose_owner_flows_vmGen = 0
-/\ flows_envGuestMissesHostClose_owner_flows_toHostAbort = {}
-/\ flows_envGuestMissesHostClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_envGuestMissesHostClose_owner_flows_vmUp = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_toHostPaired = {}
-/\ flows_envGuestMissesHostClose_owner_flows_phantom = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_toHostRefused = {}
-/\ flows_envGuestMissesHostClose_owner_flows_abortDiscarded = {}
-/\ flows_envGuestMissesHostClose_owner_flows_readyCross = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_badPaired = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_toGuestAbort = {}
-/\ flows_envGuestMissesHostClose_owner_flows_dl = [ res |-> <<"none">>,
-  adm |-> {},
-  tout |-> {},
-  earlyDl |-> FALSE,
-  lateReply |-> FALSE ]
-/\ flows_envGuestMissesHostClose_owner_flows_gen = 2
 /\ flows_envGuestMissesHostClose_owner_flows_alloc = "Provisioned"
 /\ flows_envGuestMissesHostClose_owner_flows_bHeldByOther = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_heldByOther = FALSE
 
-State 6: <flows_envGuestMissesHostClose_owner_flows_VmStart line 785, col 3 to line 818, col 56 of module flows_envGuestMissesHostClose>
+State 5: <flows_envGuestMissesHostClose_owner_flows_step line 4026, col 9 to line 4028, col 59 of module flows_envGuestMissesHostClose>
 /\ flows_envGuestMissesHostClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_envGuestMissesHostClose_owner_flows_quiesced = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_drvLive = FALSE
@@ -182,19 +155,21 @@ State 6: <flows_envGuestMissesHostClose_owner_flows_VmStart line 785, col 3 to l
 /\ flows_envGuestMissesHostClose_owner_flows_claim = 0
 /\ flows_envGuestMissesHostClose_owner_flows_crossMsg = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_resurrected = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_envGuestMissesHostClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 1]>>
 /\ flows_envGuestMissesHostClose_owner_flows_bclaim = 0
 /\ flows_envGuestMissesHostClose_owner_flows_act = "none"
-/\ flows_envGuestMissesHostClose_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+/\ flows_envGuestMissesHostClose_owner_flows_flows = << [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_envGuestMissesHostClose_owner_flows_vmGen = 2
+/\ flows_envGuestMissesHostClose_owner_flows_vmGen = 1
 /\ flows_envGuestMissesHostClose_owner_flows_toHostAbort = {}
 /\ flows_envGuestMissesHostClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_envGuestMissesHostClose_owner_flows_vmUp = TRUE
 /\ flows_envGuestMissesHostClose_owner_flows_toHostPaired = {}
 /\ flows_envGuestMissesHostClose_owner_flows_phantom = FALSE
+/\ flows_envGuestMissesHostClose_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_envGuestMissesHostClose_owner_flows_toHostRefused = {}
 /\ flows_envGuestMissesHostClose_owner_flows_abortDiscarded = {}
+/\ flows_envGuestMissesHostClose_owner_flows_gSess = 2
 /\ flows_envGuestMissesHostClose_owner_flows_readyCross = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_badPaired = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_toGuestAbort = {}
@@ -203,12 +178,12 @@ State 6: <flows_envGuestMissesHostClose_owner_flows_VmStart line 785, col 3 to l
   tout |-> {},
   earlyDl |-> FALSE,
   lateReply |-> FALSE ]
-/\ flows_envGuestMissesHostClose_owner_flows_gen = 2
+/\ flows_envGuestMissesHostClose_owner_flows_gen = 1
 /\ flows_envGuestMissesHostClose_owner_flows_alloc = "Provisioned"
 /\ flows_envGuestMissesHostClose_owner_flows_bHeldByOther = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_heldByOther = FALSE
 
-State 7: <flows_envGuestMissesHostClose_owner_flows_step line 3622, col 9 to line 3623, col 59 of module flows_envGuestMissesHostClose>
+State 6: <flows_envGuestMissesHostClose_owner_flows_step line 4026, col 9 to line 4028, col 59 of module flows_envGuestMissesHostClose>
 /\ flows_envGuestMissesHostClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_envGuestMissesHostClose_owner_flows_quiesced = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_drvLive = FALSE
@@ -217,19 +192,21 @@ State 7: <flows_envGuestMissesHostClose_owner_flows_step line 3622, col 9 to lin
 /\ flows_envGuestMissesHostClose_owner_flows_claim = 0
 /\ flows_envGuestMissesHostClose_owner_flows_crossMsg = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_resurrected = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 2]>>
+/\ flows_envGuestMissesHostClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "reading", gen |-> 1]>>
 /\ flows_envGuestMissesHostClose_owner_flows_bclaim = 0
 /\ flows_envGuestMissesHostClose_owner_flows_act = "none"
-/\ flows_envGuestMissesHostClose_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+/\ flows_envGuestMissesHostClose_owner_flows_flows = << [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_envGuestMissesHostClose_owner_flows_vmGen = 2
+/\ flows_envGuestMissesHostClose_owner_flows_vmGen = 1
 /\ flows_envGuestMissesHostClose_owner_flows_toHostAbort = {}
 /\ flows_envGuestMissesHostClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_envGuestMissesHostClose_owner_flows_vmUp = TRUE
 /\ flows_envGuestMissesHostClose_owner_flows_toHostPaired = {}
 /\ flows_envGuestMissesHostClose_owner_flows_phantom = FALSE
+/\ flows_envGuestMissesHostClose_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_envGuestMissesHostClose_owner_flows_toHostRefused = {}
 /\ flows_envGuestMissesHostClose_owner_flows_abortDiscarded = {}
+/\ flows_envGuestMissesHostClose_owner_flows_gSess = 2
 /\ flows_envGuestMissesHostClose_owner_flows_readyCross = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_badPaired = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_toGuestAbort = {}
@@ -238,47 +215,12 @@ State 7: <flows_envGuestMissesHostClose_owner_flows_step line 3622, col 9 to lin
   tout |-> {},
   earlyDl |-> FALSE,
   lateReply |-> FALSE ]
-/\ flows_envGuestMissesHostClose_owner_flows_gen = 2
+/\ flows_envGuestMissesHostClose_owner_flows_gen = 1
 /\ flows_envGuestMissesHostClose_owner_flows_alloc = "Provisioned"
 /\ flows_envGuestMissesHostClose_owner_flows_bHeldByOther = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_heldByOther = FALSE
 
-State 8: <flows_envGuestMissesHostClose_owner_flows_step line 3622, col 9 to line 3623, col 59 of module flows_envGuestMissesHostClose>
-/\ flows_envGuestMissesHostClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_envGuestMissesHostClose_owner_flows_quiesced = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_drvLive = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
-/\ flows_envGuestMissesHostClose_owner_flows_badAct = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_claim = 0
-/\ flows_envGuestMissesHostClose_owner_flows_crossMsg = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_resurrected = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "reading", gen |-> 2]>>
-/\ flows_envGuestMissesHostClose_owner_flows_bclaim = 0
-/\ flows_envGuestMissesHostClose_owner_flows_act = "none"
-/\ flows_envGuestMissesHostClose_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
-   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_envGuestMissesHostClose_owner_flows_vmGen = 2
-/\ flows_envGuestMissesHostClose_owner_flows_toHostAbort = {}
-/\ flows_envGuestMissesHostClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_envGuestMissesHostClose_owner_flows_vmUp = TRUE
-/\ flows_envGuestMissesHostClose_owner_flows_toHostPaired = {}
-/\ flows_envGuestMissesHostClose_owner_flows_phantom = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_toHostRefused = {}
-/\ flows_envGuestMissesHostClose_owner_flows_abortDiscarded = {}
-/\ flows_envGuestMissesHostClose_owner_flows_readyCross = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_badPaired = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_toGuestAbort = {}
-/\ flows_envGuestMissesHostClose_owner_flows_dl = [ res |-> <<"none">>,
-  adm |-> {},
-  tout |-> {},
-  earlyDl |-> FALSE,
-  lateReply |-> FALSE ]
-/\ flows_envGuestMissesHostClose_owner_flows_gen = 2
-/\ flows_envGuestMissesHostClose_owner_flows_alloc = "Provisioned"
-/\ flows_envGuestMissesHostClose_owner_flows_bHeldByOther = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_heldByOther = FALSE
-
-State 9: <flows_envGuestMissesHostClose_owner_flows_step line 3622, col 9 to line 3623, col 59 of module flows_envGuestMissesHostClose>
+State 7: <flows_envGuestMissesHostClose_owner_flows_step line 4026, col 9 to line 4028, col 59 of module flows_envGuestMissesHostClose>
 /\ flows_envGuestMissesHostClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_envGuestMissesHostClose_owner_flows_quiesced = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_drvLive = FALSE
@@ -287,19 +229,21 @@ State 9: <flows_envGuestMissesHostClose_owner_flows_step line 3622, col 9 to lin
 /\ flows_envGuestMissesHostClose_owner_flows_claim = 2
 /\ flows_envGuestMissesHostClose_owner_flows_crossMsg = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_resurrected = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "live", gen |-> 2]>>
+/\ flows_envGuestMissesHostClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "live", gen |-> 1]>>
 /\ flows_envGuestMissesHostClose_owner_flows_bclaim = 0
 /\ flows_envGuestMissesHostClose_owner_flows_act = "none"
-/\ flows_envGuestMissesHostClose_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+/\ flows_envGuestMissesHostClose_owner_flows_flows = << [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_envGuestMissesHostClose_owner_flows_vmGen = 2
+/\ flows_envGuestMissesHostClose_owner_flows_vmGen = 1
 /\ flows_envGuestMissesHostClose_owner_flows_toHostAbort = {}
 /\ flows_envGuestMissesHostClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_envGuestMissesHostClose_owner_flows_vmUp = TRUE
 /\ flows_envGuestMissesHostClose_owner_flows_toHostPaired = {}
 /\ flows_envGuestMissesHostClose_owner_flows_phantom = FALSE
+/\ flows_envGuestMissesHostClose_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_envGuestMissesHostClose_owner_flows_toHostRefused = {}
 /\ flows_envGuestMissesHostClose_owner_flows_abortDiscarded = {}
+/\ flows_envGuestMissesHostClose_owner_flows_gSess = 2
 /\ flows_envGuestMissesHostClose_owner_flows_readyCross = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_badPaired = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_toGuestAbort = {}
@@ -308,12 +252,12 @@ State 9: <flows_envGuestMissesHostClose_owner_flows_step line 3622, col 9 to lin
   tout |-> {},
   earlyDl |-> FALSE,
   lateReply |-> FALSE ]
-/\ flows_envGuestMissesHostClose_owner_flows_gen = 2
+/\ flows_envGuestMissesHostClose_owner_flows_gen = 1
 /\ flows_envGuestMissesHostClose_owner_flows_alloc = "Provisioned"
 /\ flows_envGuestMissesHostClose_owner_flows_bHeldByOther = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_heldByOther = FALSE
 
-State 10: <flows_envGuestMissesHostClose_owner_flows_Activate line 1247, col 3 to line 1275, col 54 of module flows_envGuestMissesHostClose>
+State 8: <flows_envGuestMissesHostClose_owner_flows_Activate line 1281, col 3 to line 1316, col 54 of module flows_envGuestMissesHostClose>
 /\ flows_envGuestMissesHostClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_envGuestMissesHostClose_owner_flows_quiesced = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_drvLive = FALSE
@@ -322,19 +266,21 @@ State 10: <flows_envGuestMissesHostClose_owner_flows_Activate line 1247, col 3 t
 /\ flows_envGuestMissesHostClose_owner_flows_claim = 2
 /\ flows_envGuestMissesHostClose_owner_flows_crossMsg = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_resurrected = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "live", gen |-> 2]>>
+/\ flows_envGuestMissesHostClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "live", gen |-> 1]>>
 /\ flows_envGuestMissesHostClose_owner_flows_bclaim = 0
 /\ flows_envGuestMissesHostClose_owner_flows_act = "Activated"
-/\ flows_envGuestMissesHostClose_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+/\ flows_envGuestMissesHostClose_owner_flows_flows = << [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_envGuestMissesHostClose_owner_flows_vmGen = 2
+/\ flows_envGuestMissesHostClose_owner_flows_vmGen = 1
 /\ flows_envGuestMissesHostClose_owner_flows_toHostAbort = {}
 /\ flows_envGuestMissesHostClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_envGuestMissesHostClose_owner_flows_vmUp = TRUE
 /\ flows_envGuestMissesHostClose_owner_flows_toHostPaired = {}
 /\ flows_envGuestMissesHostClose_owner_flows_phantom = FALSE
+/\ flows_envGuestMissesHostClose_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_envGuestMissesHostClose_owner_flows_toHostRefused = {}
 /\ flows_envGuestMissesHostClose_owner_flows_abortDiscarded = {}
+/\ flows_envGuestMissesHostClose_owner_flows_gSess = 2
 /\ flows_envGuestMissesHostClose_owner_flows_readyCross = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_badPaired = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_toGuestAbort = {}
@@ -343,33 +289,35 @@ State 10: <flows_envGuestMissesHostClose_owner_flows_Activate line 1247, col 3 t
   tout |-> {},
   earlyDl |-> FALSE,
   lateReply |-> FALSE ]
-/\ flows_envGuestMissesHostClose_owner_flows_gen = 2
+/\ flows_envGuestMissesHostClose_owner_flows_gen = 1
 /\ flows_envGuestMissesHostClose_owner_flows_alloc = "Active"
 /\ flows_envGuestMissesHostClose_owner_flows_bHeldByOther = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_heldByOther = FALSE
 
-State 11: <flows_envGuestMissesHostClose_owner_flows_step line 3622, col 9 to line 3623, col 59 of module flows_envGuestMissesHostClose>
+State 9: <flows_envGuestMissesHostClose_owner_flows_step line 4026, col 9 to line 4028, col 59 of module flows_envGuestMissesHostClose>
 /\ flows_envGuestMissesHostClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_envGuestMissesHostClose_owner_flows_quiesced = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_drvLive = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_hf = <<[st |-> "req", gen |-> 2]>>
+/\ flows_envGuestMissesHostClose_owner_flows_hf = <<[st |-> "req", gen |-> 1]>>
 /\ flows_envGuestMissesHostClose_owner_flows_badAct = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_claim = 2
 /\ flows_envGuestMissesHostClose_owner_flows_crossMsg = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_resurrected = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "live", gen |-> 2]>>
+/\ flows_envGuestMissesHostClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "live", gen |-> 1]>>
 /\ flows_envGuestMissesHostClose_owner_flows_bclaim = 0
 /\ flows_envGuestMissesHostClose_owner_flows_act = "none"
-/\ flows_envGuestMissesHostClose_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+/\ flows_envGuestMissesHostClose_owner_flows_flows = << [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_envGuestMissesHostClose_owner_flows_vmGen = 2
+/\ flows_envGuestMissesHostClose_owner_flows_vmGen = 1
 /\ flows_envGuestMissesHostClose_owner_flows_toHostAbort = {}
 /\ flows_envGuestMissesHostClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_envGuestMissesHostClose_owner_flows_vmUp = TRUE
 /\ flows_envGuestMissesHostClose_owner_flows_toHostPaired = {}
 /\ flows_envGuestMissesHostClose_owner_flows_phantom = FALSE
+/\ flows_envGuestMissesHostClose_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_envGuestMissesHostClose_owner_flows_toHostRefused = {}
 /\ flows_envGuestMissesHostClose_owner_flows_abortDiscarded = {}
+/\ flows_envGuestMissesHostClose_owner_flows_gSess = 2
 /\ flows_envGuestMissesHostClose_owner_flows_readyCross = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_badPaired = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_toGuestAbort = {}
@@ -378,44 +326,83 @@ State 11: <flows_envGuestMissesHostClose_owner_flows_step line 3622, col 9 to li
   tout |-> {},
   earlyDl |-> FALSE,
   lateReply |-> FALSE ]
-/\ flows_envGuestMissesHostClose_owner_flows_gen = 2
+/\ flows_envGuestMissesHostClose_owner_flows_gen = 1
 /\ flows_envGuestMissesHostClose_owner_flows_alloc = "Active"
 /\ flows_envGuestMissesHostClose_owner_flows_bHeldByOther = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_heldByOther = FALSE
 
-State 12: <flows_envGuestMissesHostClose_owner_flows_step line 3622, col 9 to line 3623, col 59 of module flows_envGuestMissesHostClose>
+State 10: <flows_envGuestMissesHostClose_owner_flows_step line 4026, col 9 to line 4028, col 59 of module flows_envGuestMissesHostClose>
 /\ flows_envGuestMissesHostClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_envGuestMissesHostClose_owner_flows_quiesced = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_drvLive = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_hf = <<[st |-> "closed", gen |-> 2]>>
+/\ flows_envGuestMissesHostClose_owner_flows_hf = <<[st |-> "closed", gen |-> 1]>>
 /\ flows_envGuestMissesHostClose_owner_flows_badAct = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_claim = 2
+/\ flows_envGuestMissesHostClose_owner_flows_claim = 0
 /\ flows_envGuestMissesHostClose_owner_flows_crossMsg = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_resurrected = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "live", gen |-> 2]>>
+/\ flows_envGuestMissesHostClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "closed", gen |-> 1]>>
 /\ flows_envGuestMissesHostClose_owner_flows_bclaim = 0
 /\ flows_envGuestMissesHostClose_owner_flows_act = "none"
-/\ flows_envGuestMissesHostClose_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
+/\ flows_envGuestMissesHostClose_owner_flows_flows = << [st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
-/\ flows_envGuestMissesHostClose_owner_flows_vmGen = 2
+/\ flows_envGuestMissesHostClose_owner_flows_vmGen = 1
 /\ flows_envGuestMissesHostClose_owner_flows_toHostAbort = {}
 /\ flows_envGuestMissesHostClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_envGuestMissesHostClose_owner_flows_vmUp = TRUE
 /\ flows_envGuestMissesHostClose_owner_flows_toHostPaired = {}
 /\ flows_envGuestMissesHostClose_owner_flows_phantom = FALSE
+/\ flows_envGuestMissesHostClose_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_envGuestMissesHostClose_owner_flows_toHostRefused = {}
 /\ flows_envGuestMissesHostClose_owner_flows_abortDiscarded = {}
+/\ flows_envGuestMissesHostClose_owner_flows_gSess = 2
 /\ flows_envGuestMissesHostClose_owner_flows_readyCross = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_badPaired = FALSE
-/\ flows_envGuestMissesHostClose_owner_flows_toGuestAbort = {1}
-/\ flows_envGuestMissesHostClose_owner_flows_dl = [ res |-> <<"Unreachable:io">>,
+/\ flows_envGuestMissesHostClose_owner_flows_toGuestAbort = {}
+/\ flows_envGuestMissesHostClose_owner_flows_dl = [ res |-> <<"NoSession">>,
   adm |-> {},
   tout |-> {},
   earlyDl |-> FALSE,
   lateReply |-> FALSE ]
-/\ flows_envGuestMissesHostClose_owner_flows_gen = 2
+/\ flows_envGuestMissesHostClose_owner_flows_gen = 1
 /\ flows_envGuestMissesHostClose_owner_flows_alloc = "Active"
 /\ flows_envGuestMissesHostClose_owner_flows_bHeldByOther = FALSE
 /\ flows_envGuestMissesHostClose_owner_flows_heldByOther = FALSE
 
-State 13: Stuttering
+State 11: <flows_envGuestMissesHostClose_owner_flows_step line 4026, col 9 to line 4028, col 59 of module flows_envGuestMissesHostClose>
+/\ flows_envGuestMissesHostClose_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_envGuestMissesHostClose_owner_flows_quiesced = FALSE
+/\ flows_envGuestMissesHostClose_owner_flows_drvLive = FALSE
+/\ flows_envGuestMissesHostClose_owner_flows_hf = <<[st |-> "closed", gen |-> 1]>>
+/\ flows_envGuestMissesHostClose_owner_flows_badAct = FALSE
+/\ flows_envGuestMissesHostClose_owner_flows_claim = 0
+/\ flows_envGuestMissesHostClose_owner_flows_crossMsg = FALSE
+/\ flows_envGuestMissesHostClose_owner_flows_resurrected = FALSE
+/\ flows_envGuestMissesHostClose_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "closed", gen |-> 1]>>
+/\ flows_envGuestMissesHostClose_owner_flows_bclaim = 0
+/\ flows_envGuestMissesHostClose_owner_flows_act = "none"
+/\ flows_envGuestMissesHostClose_owner_flows_flows = << [st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE],
+   [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+/\ flows_envGuestMissesHostClose_owner_flows_vmGen = 1
+/\ flows_envGuestMissesHostClose_owner_flows_toHostAbort = {}
+/\ flows_envGuestMissesHostClose_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_envGuestMissesHostClose_owner_flows_vmUp = TRUE
+/\ flows_envGuestMissesHostClose_owner_flows_toHostPaired = {}
+/\ flows_envGuestMissesHostClose_owner_flows_phantom = FALSE
+/\ flows_envGuestMissesHostClose_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
+/\ flows_envGuestMissesHostClose_owner_flows_toHostRefused = {}
+/\ flows_envGuestMissesHostClose_owner_flows_abortDiscarded = {}
+/\ flows_envGuestMissesHostClose_owner_flows_gSess = 2
+/\ flows_envGuestMissesHostClose_owner_flows_readyCross = FALSE
+/\ flows_envGuestMissesHostClose_owner_flows_badPaired = FALSE
+/\ flows_envGuestMissesHostClose_owner_flows_toGuestAbort = {}
+/\ flows_envGuestMissesHostClose_owner_flows_dl = [ res |-> <<"NoSession">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
+/\ flows_envGuestMissesHostClose_owner_flows_gen = 1
+/\ flows_envGuestMissesHostClose_owner_flows_alloc = "Active"
+/\ flows_envGuestMissesHostClose_owner_flows_bHeldByOther = FALSE
+/\ flows_envGuestMissesHostClose_owner_flows_heldByOther = FALSE
+
+State 12: Stuttering

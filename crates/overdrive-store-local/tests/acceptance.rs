@@ -45,4 +45,8 @@ mod acceptance {
     // boot-validation walk must skip the `/generation` sub-key via the
     // shared `IntentKey::is_canonical_workload_record` predicate.
     mod reopen_after_generation_bump;
+
+    // netns-density-295 R5-PROBE-MERGE — the probe-result row merges on its
+    // run sequence identically in LocalObservationStore and the sim store.
+    mod probe_result_merge;
 }

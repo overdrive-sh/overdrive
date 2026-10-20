@@ -1,0 +1,37 @@
+GUEST_BOOT uname_r=7.0.0-29-generic suite=watch arg= modparams=
+GUEST_MODULES:
+ovd_fwd 36864 0 [permanent], Live 0xffffffffc0436000 (OE)
+aesni_intel 98304 0 - Live 0xffffffffc0426000
+tls 163840 0 - Live 0xffffffffc0412000
+vsock_diag 12288 0 - Live 0xffffffffc0410000
+vsock_loopback 12288 0 - Live 0xffffffffc040e000
+vmw_vsock_virtio_transport 20480 0 - Live 0xffffffffc040c000
+vmw_vsock_virtio_transport_common 57344 2 vsock_loopback,vmw_vsock_virtio_transport, Live 0xffffffffc0408000
+vsock 73728 4 vsock_diag,vsock_loopback,vmw_vsock_virtio_transport,vmw_vsock_virtio_transport_common, Live 0xffffffffc0400000
+crw-------    1 0        0          10, 263 Oct 17 01:18 /dev/ovd_fwd
+CTLTEST suite=watch strict=0
+CHECK PASS version :: ok
+CHECK PASS watch record queued before the holder sees the end :: peer SHUT_WR (0x2) under load: 500/500 correct, order-violations=0 wrong-kind=0 live-after-end=0 extra-records=0 (48.1 ms per trial)
+CHECK PASS watch record queued before the holder sees the end :: peer SHUT_RDWR (0x3) under load: 500/500 correct, order-violations=0 wrong-kind=0 live-after-end=0 extra-records=0 (53.4 ms per trial)
+CHECK PASS watch record queued before the holder sees the end :: peer close() under load: 500/500 correct, order-violations=0 wrong-kind=0 live-after-end=0 extra-records=0 (45.6 ms per trial)
+CHECK PASS watch record queued before the holder sees the end :: peer SHUT_RD under load: 500/500 correct, order-violations=0 wrong-kind=0 live-after-end=0 extra-records=0 (29.0 ms per trial)
+CHECK PASS watch record queued before the holder sees the end :: 0x2 then 0x3 under load: 500/500 correct, order-violations=0 wrong-kind=0 live-after-end=0 extra-records=0 (18.8 ms per trial)
+CHECK FAIL 4096 concurrent watches: no holder reads an end before its watch decided :: holders saw 2134/4096 ends; live-after-end (ABORT succeeded) = 0
+DATA parallel watches: 4096 records: half-close=2048 peer-abort=2048 detached=0 (detached are records of ABORT calls that WON, if any)
+CHECK PASS one record per watch :: records=4096 of 4096
+CHECK FAIL watchdog :: suite exceeded its time budget
+SUITE_DONE suite=watch rc=9
+[    0.037672] rcu: Preemptible hierarchical RCU implementation.
+[    0.037673] rcu: 	RCU restricting CPUs from NR_CPUS=8192 to nr_cpu_ids=4.
+[    0.037675] 	Trampoline variant of Tasks RCU enabled.
+[    0.037676] 	Rude variant of Tasks RCU enabled.
+[    0.037676] 	Tracing variant of Tasks RCU enabled.
+[    0.037677] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.037688] RCU Tasks: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.037690] RCU Tasks Rude: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.046571] rcu: Hierarchical SRCU implementation.
+[    0.315367] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.315376] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+[    0.316185] ovd_fwd: loaded (spike, permanent: no module_exit)
+GUEST_END
+[  240.474774] reboot: Power down

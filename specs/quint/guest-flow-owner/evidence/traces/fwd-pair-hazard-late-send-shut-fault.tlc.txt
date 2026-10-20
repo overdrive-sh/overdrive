@@ -1,0 +1,1643 @@
+State 1: <Initial predicate>
+/\ pair_bugLateSendShut_fwd_pair_strmAbort = FALSE
+/\ pair_bugLateSendShut_fwd_pair_vmUp = TRUE
+/\ pair_bugLateSendShut_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_bugLateSendShut_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugLateSendShut_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugLateSendShut_fwd_pair_hres = "none"
+/\ pair_bugLateSendShut_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_bugLateSendShut_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_bugLateSendShut_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugLateSendShut_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_bugLateSendShut_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugLateSendShut_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_bugLateSendShut_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugLateSendShut_fwd_pair_mode = "stream"
+/\ pair_bugLateSendShut_fwd_pair_attRes = [g |-> "none", h |-> "none"]
+/\ pair_bugLateSendShut_fwd_pair_pr = [ g |->
+      [ ph |-> "unattached",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "unattached",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_bugLateSendShut_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugLateSendShut_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_bugLateSendShut_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugLateSendShut_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+
+State 2: <pair_bugLateSendShut_fwd_pair_Fin line 2194, col 3 to line 2231, col 71 of module pair_bugLateSendShut>
+/\ pair_bugLateSendShut_fwd_pair_strmAbort = FALSE
+/\ pair_bugLateSendShut_fwd_pair_vmUp = TRUE
+/\ pair_bugLateSendShut_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_bugLateSendShut_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugLateSendShut_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugLateSendShut_fwd_pair_hres = "none"
+/\ pair_bugLateSendShut_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_bugLateSendShut_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_bugLateSendShut_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugLateSendShut_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_bugLateSendShut_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugLateSendShut_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_bugLateSendShut_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugLateSendShut_fwd_pair_mode = "stream"
+/\ pair_bugLateSendShut_fwd_pair_attRes = [g |-> "none", h |-> "none"]
+/\ pair_bugLateSendShut_fwd_pair_pr = [ g |->
+      [ ph |-> "unattached",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "unattached",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_bugLateSendShut_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugLateSendShut_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_bugLateSendShut_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugLateSendShut_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+
+State 3: <pair_bugLateSendShut_fwd_pair_Attach line 3870, col 3 to line 3880, col 73 of module pair_bugLateSendShut>
+/\ pair_bugLateSendShut_fwd_pair_strmAbort = FALSE
+/\ pair_bugLateSendShut_fwd_pair_vmUp = TRUE
+/\ pair_bugLateSendShut_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_bugLateSendShut_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugLateSendShut_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugLateSendShut_fwd_pair_hres = "none"
+/\ pair_bugLateSendShut_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_bugLateSendShut_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_bugLateSendShut_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugLateSendShut_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_bugLateSendShut_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugLateSendShut_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_bugLateSendShut_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugLateSendShut_fwd_pair_mode = "stream"
+/\ pair_bugLateSendShut_fwd_pair_attRes = [g |-> "none", h |-> "ok"]
+/\ pair_bugLateSendShut_fwd_pair_pr = [ g |->
+      [ ph |-> "unattached",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_bugLateSendShut_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugLateSendShut_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_bugLateSendShut_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugLateSendShut_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+
+State 4: <pair_bugLateSendShut_fwd_pair_Attach line 3870, col 3 to line 3880, col 73 of module pair_bugLateSendShut>
+/\ pair_bugLateSendShut_fwd_pair_strmAbort = FALSE
+/\ pair_bugLateSendShut_fwd_pair_vmUp = TRUE
+/\ pair_bugLateSendShut_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_bugLateSendShut_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugLateSendShut_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugLateSendShut_fwd_pair_hres = "none"
+/\ pair_bugLateSendShut_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_bugLateSendShut_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_bugLateSendShut_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugLateSendShut_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_bugLateSendShut_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugLateSendShut_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_bugLateSendShut_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugLateSendShut_fwd_pair_mode = "stream"
+/\ pair_bugLateSendShut_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_bugLateSendShut_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_bugLateSendShut_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugLateSendShut_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_bugLateSendShut_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugLateSendShut_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+
+State 5: <pair_bugLateSendShut_fwd_pair_HopEnd0 line 3520, col 3 to line 3544, col 48 of module pair_bugLateSendShut>
+/\ pair_bugLateSendShut_fwd_pair_strmAbort = FALSE
+/\ pair_bugLateSendShut_fwd_pair_vmUp = TRUE
+/\ pair_bugLateSendShut_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_bugLateSendShut_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugLateSendShut_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugLateSendShut_fwd_pair_hres = "none"
+/\ pair_bugLateSendShut_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_bugLateSendShut_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_bugLateSendShut_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugLateSendShut_fwd_pair_ctl = [gh |-> <<{"S"}>>, hg |-> <<>>]
+/\ pair_bugLateSendShut_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugLateSendShut_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_bugLateSendShut_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugLateSendShut_fwd_pair_mode = "stream"
+/\ pair_bugLateSendShut_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_bugLateSendShut_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_bugLateSendShut_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugLateSendShut_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_bugLateSendShut_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugLateSendShut_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {"S"},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+
+State 6: <pair_bugLateSendShut_fwd_pair_VCtl line 4100, col 3 to line 4103, col 47 of module pair_bugLateSendShut>
+/\ pair_bugLateSendShut_fwd_pair_strmAbort = FALSE
+/\ pair_bugLateSendShut_fwd_pair_vmUp = TRUE
+/\ pair_bugLateSendShut_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_bugLateSendShut_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugLateSendShut_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugLateSendShut_fwd_pair_hres = "none"
+/\ pair_bugLateSendShut_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_bugLateSendShut_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_bugLateSendShut_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugLateSendShut_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_bugLateSendShut_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugLateSendShut_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_bugLateSendShut_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugLateSendShut_fwd_pair_mode = "stream"
+/\ pair_bugLateSendShut_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_bugLateSendShut_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_bugLateSendShut_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugLateSendShut_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_bugLateSendShut_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugLateSendShut_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {"S"},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {"S"},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "clean",
+        tcls |-> "clean",
+        ucls |-> "clean",
+        att |-> "noend",
+        clsAt |-> "callback",
+        ncls |-> 1,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+
+State 7: <pair_bugLateSendShut_fwd_pair_HopEnd1 line 3550, col 3 to line 3603, col 48 of module pair_bugLateSendShut>
+/\ pair_bugLateSendShut_fwd_pair_strmAbort = FALSE
+/\ pair_bugLateSendShut_fwd_pair_vmUp = TRUE
+/\ pair_bugLateSendShut_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "clean",
+        dstShut |-> TRUE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_bugLateSendShut_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugLateSendShut_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugLateSendShut_fwd_pair_hres = "none"
+/\ pair_bugLateSendShut_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_bugLateSendShut_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_bugLateSendShut_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugLateSendShut_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_bugLateSendShut_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugLateSendShut_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_bugLateSendShut_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugLateSendShut_fwd_pair_mode = "stream"
+/\ pair_bugLateSendShut_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_bugLateSendShut_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_bugLateSendShut_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugLateSendShut_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_bugLateSendShut_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugLateSendShut_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {"S"},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {"S"},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "clean",
+        tcls |-> "clean",
+        ucls |-> "clean",
+        att |-> "noend",
+        clsAt |-> "callback",
+        ncls |-> 1,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+
+State 8: <pair_bugLateSendShut_fwd_pair_Fin line 2194, col 3 to line 2231, col 71 of module pair_bugLateSendShut>
+/\ pair_bugLateSendShut_fwd_pair_strmAbort = FALSE
+/\ pair_bugLateSendShut_fwd_pair_vmUp = TRUE
+/\ pair_bugLateSendShut_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "clean",
+        dstShut |-> TRUE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_bugLateSendShut_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugLateSendShut_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugLateSendShut_fwd_pair_hres = "none"
+/\ pair_bugLateSendShut_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_bugLateSendShut_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_bugLateSendShut_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugLateSendShut_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_bugLateSendShut_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugLateSendShut_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_bugLateSendShut_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugLateSendShut_fwd_pair_mode = "stream"
+/\ pair_bugLateSendShut_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_bugLateSendShut_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_bugLateSendShut_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugLateSendShut_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_bugLateSendShut_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugLateSendShut_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {"S"},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {"S"},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "clean",
+        tcls |-> "clean",
+        ucls |-> "clean",
+        att |-> "noend",
+        clsAt |-> "callback",
+        ncls |-> 1,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+
+State 9: <pair_bugLateSendShut_fwd_pair_HopEnd0 line 3520, col 3 to line 3544, col 48 of module pair_bugLateSendShut>
+/\ pair_bugLateSendShut_fwd_pair_strmAbort = FALSE
+/\ pair_bugLateSendShut_fwd_pair_vmUp = TRUE
+/\ pair_bugLateSendShut_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "clean",
+        dstShut |-> TRUE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_bugLateSendShut_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugLateSendShut_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugLateSendShut_fwd_pair_hres = "none"
+/\ pair_bugLateSendShut_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_bugLateSendShut_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_bugLateSendShut_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugLateSendShut_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<{"S"}>>]
+/\ pair_bugLateSendShut_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugLateSendShut_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_bugLateSendShut_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugLateSendShut_fwd_pair_mode = "stream"
+/\ pair_bugLateSendShut_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_bugLateSendShut_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "ended",
+        rec |-> "queued",
+        out |-> "completed",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 1,
+        cgen |-> 0 ] ]
+/\ pair_bugLateSendShut_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugLateSendShut_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_bugLateSendShut_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugLateSendShut_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {"S"},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {"S"},
+        sent |-> {"S"},
+        err |-> FALSE,
+        cls |-> "clean",
+        tcls |-> "clean",
+        ucls |-> "clean",
+        att |-> "noend",
+        clsAt |-> "callback",
+        ncls |-> 1,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+
+State 10: <pair_bugLateSendShut_fwd_pair_TakeEnd line 3343, col 3 to line 3363, col 48 of module pair_bugLateSendShut>
+/\ pair_bugLateSendShut_fwd_pair_strmAbort = FALSE
+/\ pair_bugLateSendShut_fwd_pair_vmUp = TRUE
+/\ pair_bugLateSendShut_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "clean",
+        dstShut |-> TRUE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_bugLateSendShut_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugLateSendShut_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugLateSendShut_fwd_pair_hres = "none"
+/\ pair_bugLateSendShut_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_bugLateSendShut_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_bugLateSendShut_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugLateSendShut_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<{"S"}, {"S", "R"}>>]
+/\ pair_bugLateSendShut_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugLateSendShut_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_bugLateSendShut_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugLateSendShut_fwd_pair_mode = "stream"
+/\ pair_bugLateSendShut_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_bugLateSendShut_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "ended",
+        rec |-> "read",
+        out |-> "completed",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> TRUE,
+        nrec |-> 1,
+        cgen |-> 0 ] ]
+/\ pair_bugLateSendShut_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugLateSendShut_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_bugLateSendShut_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugLateSendShut_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {"S"},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {"S"},
+        sent |-> {"S", "R"},
+        err |-> FALSE,
+        cls |-> "clean",
+        tcls |-> "clean",
+        ucls |-> "clean",
+        att |-> "noend",
+        clsAt |-> "callback",
+        ncls |-> 1,
+        snap |-> {},
+        sshut |-> TRUE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+
+State 11: <pair_bugLateSendShut_fwd_pair_VCtl line 4100, col 3 to line 4103, col 47 of module pair_bugLateSendShut>
+/\ pair_bugLateSendShut_fwd_pair_strmAbort = FALSE
+/\ pair_bugLateSendShut_fwd_pair_vmUp = TRUE
+/\ pair_bugLateSendShut_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "clean",
+        dstShut |-> TRUE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_bugLateSendShut_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugLateSendShut_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugLateSendShut_fwd_pair_hres = "none"
+/\ pair_bugLateSendShut_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_bugLateSendShut_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_bugLateSendShut_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugLateSendShut_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<{"S", "R"}>>]
+/\ pair_bugLateSendShut_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugLateSendShut_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_bugLateSendShut_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugLateSendShut_fwd_pair_mode = "stream"
+/\ pair_bugLateSendShut_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_bugLateSendShut_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "ended",
+        rec |-> "read",
+        out |-> "completed",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> TRUE,
+        nrec |-> 1,
+        cgen |-> 0 ] ]
+/\ pair_bugLateSendShut_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugLateSendShut_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_bugLateSendShut_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugLateSendShut_fwd_pair_vs = [ g |->
+      [ ps |-> {"S"},
+        sent |-> {"S"},
+        err |-> FALSE,
+        cls |-> "clean",
+        tcls |-> "clean",
+        ucls |-> "clean",
+        att |-> "noend",
+        clsAt |-> "callback",
+        ncls |-> 1,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {"S"},
+        sent |-> {"S", "R"},
+        err |-> FALSE,
+        cls |-> "clean",
+        tcls |-> "clean",
+        ucls |-> "clean",
+        att |-> "noend",
+        clsAt |-> "callback",
+        ncls |-> 1,
+        snap |-> {},
+        sshut |-> TRUE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+
+State 12: <pair_bugLateSendShut_fwd_pair_VCtl line 4100, col 3 to line 4103, col 47 of module pair_bugLateSendShut>
+/\ pair_bugLateSendShut_fwd_pair_strmAbort = FALSE
+/\ pair_bugLateSendShut_fwd_pair_vmUp = TRUE
+/\ pair_bugLateSendShut_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "clean",
+        dstShut |-> TRUE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> TRUE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_bugLateSendShut_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugLateSendShut_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugLateSendShut_fwd_pair_hres = "none"
+/\ pair_bugLateSendShut_fwd_pair_ep = [g |-> "reset", h |-> "alive"]
+/\ pair_bugLateSendShut_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_bugLateSendShut_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugLateSendShut_fwd_pair_ctl = [gh |-> <<{"S", "R"}>>, hg |-> <<>>]
+/\ pair_bugLateSendShut_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugLateSendShut_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_bugLateSendShut_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugLateSendShut_fwd_pair_mode = "stream"
+/\ pair_bugLateSendShut_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_bugLateSendShut_fwd_pair_pr = [ g |->
+      [ ph |-> "ended",
+        rec |-> "queued",
+        out |-> "aborted",
+        cause |-> "PeerAbort",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 1,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "ended",
+        rec |-> "read",
+        out |-> "completed",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> TRUE,
+        nrec |-> 1,
+        cgen |-> 0 ] ]
+/\ pair_bugLateSendShut_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugLateSendShut_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_bugLateSendShut_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugLateSendShut_fwd_pair_vs = [ g |->
+      [ ps |-> {"S", "R"},
+        sent |-> {"S", "R"},
+        err |-> FALSE,
+        cls |-> "clean",
+        tcls |-> "clean",
+        ucls |-> "clean",
+        att |-> "noend",
+        clsAt |-> "callback",
+        ncls |-> 1,
+        snap |-> {},
+        sshut |-> TRUE,
+        misc |-> TRUE,
+        st |-> "closing" ],
+  h |->
+      [ ps |-> {"S"},
+        sent |-> {"S", "R"},
+        err |-> FALSE,
+        cls |-> "clean",
+        tcls |-> "clean",
+        ucls |-> "clean",
+        att |-> "noend",
+        clsAt |-> "callback",
+        ncls |-> 1,
+        snap |-> {},
+        sshut |-> TRUE,
+        misc |-> FALSE,
+        st |-> "est" ] ]

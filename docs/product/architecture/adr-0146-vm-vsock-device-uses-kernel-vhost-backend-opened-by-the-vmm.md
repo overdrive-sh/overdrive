@@ -105,7 +105,7 @@ the feature delta (§ *VMM backend contract*, § *Core vocabulary*).
 ## Alternatives considered
 
 - **Keep CH's Unix-socket muxer.** The VMM would copy every application byte,
-  CH is stream-only (no SEQPACKET leg for ADR-0148), and each VM is capped at
+  CH's muxer is stream-only, and each VM is capped at
   1,023 connections. Rejected by constraint.
 - **Swap to QEMU (`vhost-vsock-device`).** Supports the kernel backend
   upstream, but replaces the VMM, its launch confinement (ADR-0129/0143) and

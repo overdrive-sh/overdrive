@@ -1,0 +1,15 @@
+{
+ "qemu_exit": 0,
+ "host_done": false,
+ "elapsed_s": 900.0742318630219,
+ "scenarios": [
+  "g-rst-hg-only:100",
+  "r-rst-gh-only:100",
+  "g-rst-both-dirs:100",
+  "dial-watch-halfclose-then-reset:50"
+ ],
+ "hazard_host": 16,
+ "hazard_guest": 16,
+ "physical_module_names_unchanged": true,
+ "module_on_physical_host": []
+}

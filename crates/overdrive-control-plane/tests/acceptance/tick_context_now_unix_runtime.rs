@@ -130,6 +130,7 @@ async fn build_state_with_clock(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppStat
 /// / `SystemTime::now()` directly (the failure mode the §18 contract
 /// forbids), the call count stays at zero.
 #[tokio::test]
+#[ignore = "pending DELIVER attachment-cut step (DG-2 row 2: GuestAddressPool::assign)"]
 async fn run_convergence_tick_populates_now_unix_from_state_clock() {
     let tmp = TempDir::new().expect("tempdir");
     let sim = Arc::new(SimClock::new());

@@ -1,64 +1,190 @@
 State 1: <Initial predicate>
-/\ lease_ok_cid_lease_al = << [st |-> "wait", off |-> -1, retry |-> FALSE],
-   [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+/\ lease_ok_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_ok_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
 /\ lease_ok_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-/\ lease_ok_cid_lease_g = [clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE]
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"none", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
 /\ lease_ok_cid_lease_cursor = 0
+/\ lease_ok_cid_lease_att = <<0, 0>>
 /\ lease_ok_cid_lease_bootLeft = -1
 /\ lease_ok_cid_lease_reclaimed = TRUE
 /\ lease_ok_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_ok_cid_lease_up = TRUE
 
-State 2: <lease_ok_cid_lease_Assign line 512, col 3 to line 541, col 52 of module lease_ok>
-/\ lease_ok_cid_lease_al = << [st |-> "leased", off |-> 0, retry |-> FALSE],
-   [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+State 2: <lease_ok_cid_lease_Assign line 1055, col 3 to line 1151, col 40 of module lease_ok>
+/\ lease_ok_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_ok_cid_lease_al = << [ st |-> "leased",
+     off |-> 0,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
 /\ lease_ok_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
-/\ lease_ok_cid_lease_g = [clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE]
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"none", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
 /\ lease_ok_cid_lease_cursor = 1
+/\ lease_ok_cid_lease_att = <<0, 0>>
 /\ lease_ok_cid_lease_bootLeft = -1
 /\ lease_ok_cid_lease_reclaimed = TRUE
 /\ lease_ok_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_ok_cid_lease_up = TRUE
 
-State 3: <lease_ok_cid_lease_Launch line 105, col 3 to line 141, col 66 of module lease_ok>
-/\ lease_ok_cid_lease_al = << [st |-> "running", off |-> 0, retry |-> FALSE],
-   [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+State 3: <lease_ok_cid_lease_Launch line 1199, col 3 to line 1265, col 40 of module lease_ok>
+/\ lease_ok_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_ok_cid_lease_al = << [ st |-> "running",
+     off |-> 0,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
 /\ lease_ok_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
-/\ lease_ok_cid_lease_g = [clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE]
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"none", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
 /\ lease_ok_cid_lease_cursor = 1
+/\ lease_ok_cid_lease_att = <<0, 0>>
 /\ lease_ok_cid_lease_bootLeft = -1
 /\ lease_ok_cid_lease_reclaimed = TRUE
 /\ lease_ok_cid_lease_dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_ok_cid_lease_up = TRUE
 
-State 4: <lease_ok_cid_lease_Crash line 356, col 3 to line 381, col 52 of module lease_ok>
-/\ lease_ok_cid_lease_al = << [st |-> "wait", off |-> -1, retry |-> FALSE],
-   [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+State 4: <lease_ok_cid_lease_Crash line 1306, col 3 to line 1363, col 40 of module lease_ok>
+/\ lease_ok_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_ok_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
 /\ lease_ok_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-/\ lease_ok_cid_lease_g = [clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE]
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"reclaim", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
 /\ lease_ok_cid_lease_cursor = 0
+/\ lease_ok_cid_lease_att = <<0, 0>>
 /\ lease_ok_cid_lease_bootLeft = -1
 /\ lease_ok_cid_lease_reclaimed = FALSE
 /\ lease_ok_cid_lease_dev = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_ok_cid_lease_up = FALSE
 
-State 5: <lease_ok_cid_lease_Restart line 460, col 3 to line 468, col 52 of module lease_ok>
-/\ lease_ok_cid_lease_al = << [st |-> "wait", off |-> -1, retry |-> FALSE],
-   [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+State 5: <lease_ok_cid_lease_Restart line 984, col 3 to line 997, col 40 of module lease_ok>
+/\ lease_ok_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_ok_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
 /\ lease_ok_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-/\ lease_ok_cid_lease_g = [clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE]
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"reclaim", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
 /\ lease_ok_cid_lease_cursor = 0
+/\ lease_ok_cid_lease_att = <<0, 0>>
 /\ lease_ok_cid_lease_bootLeft = -1
 /\ lease_ok_cid_lease_reclaimed = FALSE
 /\ lease_ok_cid_lease_dev = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_ok_cid_lease_up = TRUE
 
-State 6: <lease_ok_cid_lease_Reclaim line 474, col 3 to line 488, col 62 of module lease_ok>
-/\ lease_ok_cid_lease_al = << [st |-> "wait", off |-> -1, retry |-> FALSE],
-   [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+State 6: <lease_ok_cid_lease_Reclaim line 1003, col 3 to line 1026, col 56 of module lease_ok>
+/\ lease_ok_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_ok_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
 /\ lease_ok_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-/\ lease_ok_cid_lease_g = [clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> TRUE]
+/\ lease_ok_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> TRUE,
+  stopped |-> {},
+  lastEnd |-> <<"reclaim", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
 /\ lease_ok_cid_lease_cursor = 0
+/\ lease_ok_cid_lease_att = <<0, 0>>
 /\ lease_ok_cid_lease_bootLeft = -1
 /\ lease_ok_cid_lease_reclaimed = TRUE
 /\ lease_ok_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)

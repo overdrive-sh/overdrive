@@ -1,0 +1,90 @@
+GUEST_BOOT uname_r=7.0.0-29-generic suite=errno arg= modparams=
+GUEST_MODULES:
+ovd_fwd 36864 0 [permanent], Live 0xffffffffc0636000 (OE)
+aesni_intel 98304 0 - Live 0xffffffffc0626000
+tls 163840 0 - Live 0xffffffffc0612000
+vsock_diag 12288 0 - Live 0xffffffffc0610000
+vsock_loopback 12288 0 - Live 0xffffffffc060e000
+vmw_vsock_virtio_transport 20480 0 - Live 0xffffffffc060c000
+vmw_vsock_virtio_transport_common 57344 2 vsock_loopback,vmw_vsock_virtio_transport, Live 0xffffffffc0608000
+vsock 73728 4 vsock_diag,vsock_loopback,vmw_vsock_virtio_transport,vmw_vsock_virtio_transport_common, Live 0xffffffffc0600000
+crw-------    1 0        0          10, 263 Oct 16 23:22 /dev/ovd_fwd
+CTLTEST suite=errno strict=0
+CHECK PASS version :: abi=1 permanent flag
+CHECK PASS badfd-A :: got EBADF bad_side=0 (want EBADF bad_side=0)
+DATA errno-case badfd-A -> EBADF bad=0
+CHECK FAIL badfd-B :: got EBADF bad_side=0 (want EBADF bad_side=1)
+DATA errno-case badfd-B -> EBADF bad=0
+CHECK FAIL closedfd-B :: got EBADF bad_side=0 (want EBADF bad_side=1)
+DATA errno-case closedfd-B -> EBADF bad=0
+CHECK PASS pipe-A :: got ENOTSOCK bad_side=0 (want ENOTSOCK bad_side=0)
+DATA errno-case pipe-A -> ENOTSOCK bad=0
+CHECK FAIL devnull-B :: got EBADF bad_side=0 (want ENOTSOCK bad_side=1)
+DATA errno-case devnull-B -> EBADF bad=0
+CHECK FAIL tcp+tcp :: got EBADF bad_side=0 (want ESOCKTNOSUPPORT bad_side=1)
+DATA errno-case tcp+tcp -> EBADF bad=0
+CHECK FAIL vsock+vsock :: got EBADF bad_side=0 (want ESOCKTNOSUPPORT bad_side=1)
+DATA errno-case vsock+vsock -> EBADF bad=0
+CHECK FAIL udp+tcp(A=udp) :: got EBADF bad_side=1 (want ESOCKTNOSUPPORT bad_side=0)
+DATA errno-case udp+tcp(A=udp) -> EBADF bad=1
+CHECK FAIL vsock+unix(B=unix) :: got EBADF bad_side=0 (want ESOCKTNOSUPPORT bad_side=1)
+DATA errno-case vsock+unix(B=unix) -> EBADF bad=0
+CHECK FAIL vsock-seqpacket+tcp :: got EBADF bad_side=1 (want ESOCKTNOSUPPORT bad_side=0)
+DATA errno-case vsock-seqpacket+tcp -> EBADF bad=1
+DATA errno-case ipv6-tcp+vsock -> skipped (no ::1)
+CHECK FAIL tls-ulp-setup :: TCP_ULP tls failed: EBADF
+CHECK FAIL tcp-never-connected(B) :: got EBADF bad_side=0 (want ENOTCONN bad_side=1)
+DATA errno-case tcp-never-connected(B) -> EBADF bad=0
+CHECK FAIL tcp-listener(B) :: got EBADF bad_side=0 (want ENOTCONN bad_side=1)
+DATA errno-case tcp-listener(B) -> EBADF bad=0
+CHECK FAIL vsock-never-connected(A) :: got EBADF bad_side=1 (want ENOTCONN bad_side=0)
+DATA errno-case vsock-never-connected(A) -> EBADF bad=1
+CHECK FAIL vsock-listener(A) :: got EBADF bad_side=1 (want ENOTCONN bad_side=0)
+DATA errno-case vsock-listener(A) -> EBADF bad=1
+CHECK FAIL tcp-after-peer-RST(B) :: got EBADF bad_side=0 (want ENOTCONN bad_side=1)
+DATA errno-case tcp-after-peer-RST(B) -> EBADF bad=0
+CHECK FAIL tcp-FIN_WAIT2(B) :: got EBADF bad_side=0 (want ENOTCONN bad_side=1)
+DATA errno-case tcp-FIN_WAIT2(B) -> EBADF bad=0
+DATA close-wait-state tcpi_state=255 (1=ESTABLISHED 8=CLOSE_WAIT)
+CHECK FAIL tcp-CLOSE_WAIT(B) :: got EBADF bad_side=0 (want OK bad_side=-1)
+DATA errno-case tcp-CLOSE_WAIT(B) -> EBADF bad=0
+CHECK FAIL vsock-after-peer-close(A) :: got EBADF bad_side=0 (want ENOTCONN bad_side=0)
+DATA errno-case vsock-after-peer-close(A) -> EBADF bad=0
+CHECK FAIL watch-ok :: got EBADF
+CHECK FAIL watch-twice :: got EBADF
+CHECK FAIL attach-of-watched-vsock(A) :: got EBADF bad_side=0 (want EBUSY bad_side=0)
+DATA errno-case attach-of-watched-vsock(A) -> EBADF bad=0
+CHECK FAIL same-fd-twice :: got EBADF bad_side=0 (want EINVAL bad_side=1)
+DATA errno-case same-fd-twice -> EBADF bad=0
+CHECK FAIL dup-of-same-socket :: got EBADF bad_side=0 (want EINVAL bad_side=1)
+DATA errno-case dup-of-same-socket -> EBADF bad=0
+CHECK FAIL dup-of-same-tcp-socket :: got EBADF bad_side=0 (want EINVAL bad_side=1)
+DATA errno-case dup-of-same-tcp-socket -> EBADF bad=0
+CHECK PASS unknown-mode-3 :: got EINVAL bad_side=0 (want EINVAL bad_side=-1)
+DATA errno-case unknown-mode-3 -> EINVAL bad=0
+CHECK PASS unknown-flag-bit :: got EINVAL
+CHECK FAIL mode-1-datagram(spike: not forwarded) :: got EBADF bad_side=0 (want EOPNOTSUPP bad_side=-1)
+DATA errno-case mode-1-datagram(spike: not forwarded) -> EBADF bad=0
+CHECK FAIL precedence: ULP-tcp + never-connected-vsock :: got EBADF bad_side=1 (want EPROTONOSUPPORT bad_side=1)
+DATA errno-case precedence: ULP-tcp + never-connected-vsock -> EBADF bad=1
+CHECK FAIL precedence: dup-vsock beats two-vsock-kind :: got EBADF bad_side=0 (want EINVAL bad_side=1)
+DATA errno-case precedence: dup-vsock beats two-vsock-kind -> EBADF bad=0
+CHECK PASS errno-classes-pairwise-distinct :: ESOCKTNOSUPPORT EPROTONOSUPPORT ENOTCONN EBUSY EINVAL EBADF ENOTSOCK
+DATA errno suite inventory before cleanup: live_pairs=0 live_watches=0 queued=0
+CHECK PASS no-live-ids-after-abort_all :: aborted 0, live now 0/0
+RESULT suite=errno pass=7 fail=26
+SUITE_DONE suite=errno rc=1
+[    0.037681] rcu: Preemptible hierarchical RCU implementation.
+[    0.037682] rcu: 	RCU restricting CPUs from NR_CPUS=8192 to nr_cpu_ids=4.
+[    0.037684] 	Trampoline variant of Tasks RCU enabled.
+[    0.037684] 	Rude variant of Tasks RCU enabled.
+[    0.037685] 	Tracing variant of Tasks RCU enabled.
+[    0.037686] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.037695] RCU Tasks: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.037698] RCU Tasks Rude: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.046567] rcu: Hierarchical SRCU implementation.
+[    0.345998] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.346004] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+[    0.346715] ovd_fwd: loaded (spike, permanent: no module_exit)
+GUEST_END
+[    0.740011] reboot: Power down

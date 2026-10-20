@@ -1,0 +1,46 @@
+# `overdrive-fwd` — the kernel adapter of the core port `FlowForwarder`:
+# the control context of the in-kernel event-driven flow forwarder
+# `ovd_fwd` (netns-density-295 EVMOD-PORT, EVMOD-CTL, EVMOD-REC; ADR-0197,
+# ADR-0199, ADR-0202). An `adapter-host`-class crate: it performs real
+# kernel I/O on `/dev/ovd_fwd`. No async runtime, so both
+# `overdrive-control-plane` and the static `overdrive-init` link it.
+
+[package]
+name        = "overdrive-fwd"
+version     = "0.0.0"
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+publish                = false
+
+[package.metadata.overdrive]
+crate_class = "adapter-host"
+
+[features]
+# Workspace-wide convention (`.claude/rules/testing.md` § "Workspace
+# convention"). Here it gates the Tier-3 module suite under
+# `tests/integration/`, which runs against the real `ovd_fwd` module on
+# the host role in Lima, in the `host-kernel-shared` nextest group.
+integration-tests = []
+# Declared for the guest-side real-VM lane (`cargo xtask metal run --`).
+kvm-tests = ["integration-tests"]
+
+[dependencies]
+overdrive-core.workspace = true
+# `ioctl` for the control ABI, `fs` for `open`/`fcntl`, `poll` for the
+# readiness descriptor (EVMOD-REC).
+nix       = { workspace = true, features = ["fs", "poll"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+# R5-57 real half (`tests/integration/adapter_equivalence.rs`) drives the
+# same step sequence against `SimFlowForwarder`.
+overdrive-sim.path = "../overdrive-sim"
+# The guest-kit microVM fixture for the guest-side cells
+# (`tests/integration/guest_boundary.rs`, kvm-tests, native metal).
+overdrive-testing.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,97 @@
+GUEST_BOOT uname_r=7.0.0-29-generic suite=release arg= modparams=
+GUEST_MODULES:
+ovd_fwd 36864 0 [permanent], Live 0xffffffffc0436000 (OE)
+aesni_intel 98304 0 - Live 0xffffffffc0426000
+tls 163840 0 - Live 0xffffffffc0412000
+vsock_diag 12288 0 - Live 0xffffffffc0410000
+vsock_loopback 12288 0 - Live 0xffffffffc0407000
+vmw_vsock_virtio_transport 20480 0 - Live 0xffffffffc040c000
+vmw_vsock_virtio_transport_common 57344 2 vsock_loopback,vmw_vsock_virtio_transport, Live 0xffffffffc0408000
+vsock 73728 4 vsock_diag,vsock_loopback,vmw_vsock_virtio_transport,vmw_vsock_virtio_transport_common, Live 0xffffffffc0400000
+crw-------    1 0        0          10, 263 Oct 17 01:02 /dev/ovd_fwd
+CTLTEST suite=release strict=0
+CHECK PASS version :: ok
+CHECK PASS pre-release far TCP ends open :: release/close/parent_holds_near=0/traffic=0: 48/48 open
+CHECK PASS far TCP ends all ECONNRESET :: release/close/parent_holds_near=0/traffic=0: reset=48 (at release return 48) eof=0 open=0, last settled 0.0 ms after release returned
+CHECK PASS far vsock ends all classify abort (ctx B watch) :: release/close/parent_holds_near=0/traffic=0: abort=64 clean=0 other=0 of 64
+CHECK PASS release queued no record :: release/close/parent_holds_near=0/traffic=0: rec_queued delta=64 (== ctxB watch records 64), rec_discard delta=64, won=64, live=5
+CHECK PASS after the released context and the classifier context are both gone no id is live :: release/close/parent_holds_near=0/traffic=0: global live=0
+CHECK PASS pre-release far TCP ends open :: release/close/parent_holds_near=0/traffic=1: 48/48 open
+CHECK PASS far TCP ends all ECONNRESET :: release/close/parent_holds_near=0/traffic=1: reset=48 (at release return 48) eof=0 open=0, last settled 0.0 ms after release returned
+CHECK PASS far vsock ends all classify abort (ctx B watch) :: release/close/parent_holds_near=0/traffic=1: abort=64 clean=0 other=0 of 64
+CHECK PASS release queued no record :: release/close/parent_holds_near=0/traffic=1: rec_queued delta=64 (== ctxB watch records 64), rec_discard delta=64, won=64, live=16
+CHECK PASS after the released context and the classifier context are both gone no id is live :: release/close/parent_holds_near=0/traffic=1: global live=0
+CHECK PASS pre-release far TCP ends open :: release/close/parent_holds_near=1/traffic=0: 48/48 open
+CHECK PASS far TCP ends all ECONNRESET :: release/close/parent_holds_near=1/traffic=0: reset=48 (at release return 48) eof=0 open=0, last settled 0.0 ms after release returned
+CHECK PASS far vsock ends all classify abort (ctx B watch) :: release/close/parent_holds_near=1/traffic=0: abort=64 clean=0 other=0 of 64
+CHECK PASS release queued no record :: release/close/parent_holds_near=1/traffic=0: rec_queued delta=64 (== ctxB watch records 64), rec_discard delta=64, won=64, live=0
+CHECK PASS after the released context and the classifier context are both gone no id is live :: release/close/parent_holds_near=1/traffic=0: global live=0
+CHECK PASS pre-release far TCP ends open :: release/close/parent_holds_near=1/traffic=1: 48/48 open
+CHECK PASS far TCP ends all ECONNRESET :: release/close/parent_holds_near=1/traffic=1: reset=48 (at release return 48) eof=0 open=0, last settled 0.0 ms after release returned
+CHECK PASS far vsock ends all classify abort (ctx B watch) :: release/close/parent_holds_near=1/traffic=1: abort=64 clean=0 other=0 of 64
+CHECK PASS release queued no record :: release/close/parent_holds_near=1/traffic=1: rec_queued delta=64 (== ctxB watch records 64), rec_discard delta=64, won=64, live=0
+CHECK PASS after the released context and the classifier context are both gone no id is live :: release/close/parent_holds_near=1/traffic=1: global live=0
+CHECK PASS pre-release far TCP ends open :: release/kill-9/parent_holds_near=0/traffic=0: 48/48 open
+CHECK PASS far TCP ends all ECONNRESET :: release/kill-9/parent_holds_near=0/traffic=0: reset=48 (at release return 48) eof=0 open=0, last settled 0.0 ms after release returned
+CHECK PASS far vsock ends all classify abort (ctx B watch) :: release/kill-9/parent_holds_near=0/traffic=0: abort=64 clean=0 other=0 of 64
+CHECK PASS release queued no record :: release/kill-9/parent_holds_near=0/traffic=0: rec_queued delta=64 (== ctxB watch records 64), rec_discard delta=64, won=64, live=0
+CHECK PASS after the released context and the classifier context are both gone no id is live :: release/kill-9/parent_holds_near=0/traffic=0: global live=0
+CHECK PASS pre-release far TCP ends open :: release/kill-9/parent_holds_near=0/traffic=1: 48/48 open
+CHECK PASS far TCP ends all ECONNRESET :: release/kill-9/parent_holds_near=0/traffic=1: reset=48 (at release return 48) eof=0 open=0, last settled 0.0 ms after release returned
+CHECK PASS far vsock ends all classify abort (ctx B watch) :: release/kill-9/parent_holds_near=0/traffic=1: abort=64 clean=0 other=0 of 64
+CHECK PASS release queued no record :: release/kill-9/parent_holds_near=0/traffic=1: rec_queued delta=64 (== ctxB watch records 64), rec_discard delta=64, won=64, live=64
+CHECK PASS after the released context and the classifier context are both gone no id is live :: release/kill-9/parent_holds_near=0/traffic=1: global live=0
+CHECK PASS pre-release far TCP ends open :: release/kill-9/parent_holds_near=1/traffic=0: 48/48 open
+CHECK PASS far TCP ends all ECONNRESET :: release/kill-9/parent_holds_near=1/traffic=0: reset=48 (at release return 48) eof=0 open=0, last settled 0.0 ms after release returned
+CHECK PASS far vsock ends all classify abort (ctx B watch) :: release/kill-9/parent_holds_near=1/traffic=0: abort=64 clean=0 other=0 of 64
+CHECK PASS release queued no record :: release/kill-9/parent_holds_near=1/traffic=0: rec_queued delta=64 (== ctxB watch records 64), rec_discard delta=64, won=64, live=0
+CHECK PASS after the released context and the classifier context are both gone no id is live :: release/kill-9/parent_holds_near=1/traffic=0: global live=0
+CHECK PASS pre-release far TCP ends open :: release/kill-9/parent_holds_near=1/traffic=1: 48/48 open
+CHECK PASS far TCP ends all ECONNRESET :: release/kill-9/parent_holds_near=1/traffic=1: reset=48 (at release return 48) eof=0 open=0, last settled 0.0 ms after release returned
+CHECK PASS far vsock ends all classify abort (ctx B watch) :: release/kill-9/parent_holds_near=1/traffic=1: abort=64 clean=0 other=0 of 64
+CHECK PASS release queued no record :: release/kill-9/parent_holds_near=1/traffic=1: rec_queued delta=64 (== ctxB watch records 64), rec_discard delta=64, won=64, live=0
+CHECK PASS after the released context and the classifier context are both gone no id is live :: release/kill-9/parent_holds_near=1/traffic=1: global live=0
+CHECK PASS pre-release far TCP ends open :: release/exit/parent_holds_near=0/traffic=0: 48/48 open
+CHECK PASS far TCP ends all ECONNRESET :: release/exit/parent_holds_near=0/traffic=0: reset=48 (at release return 48) eof=0 open=0, last settled 0.0 ms after release returned
+CHECK PASS far vsock ends all classify abort (ctx B watch) :: release/exit/parent_holds_near=0/traffic=0: abort=64 clean=0 other=0 of 64
+CHECK PASS release queued no record :: release/exit/parent_holds_near=0/traffic=0: rec_queued delta=64 (== ctxB watch records 64), rec_discard delta=64, won=64, live=0
+CHECK PASS after the released context and the classifier context are both gone no id is live :: release/exit/parent_holds_near=0/traffic=0: global live=0
+CHECK PASS pre-release far TCP ends open :: release/exit/parent_holds_near=0/traffic=1: 48/48 open
+CHECK PASS far TCP ends all ECONNRESET :: release/exit/parent_holds_near=0/traffic=1: reset=48 (at release return 48) eof=0 open=0, last settled 0.0 ms after release returned
+CHECK PASS far vsock ends all classify abort (ctx B watch) :: release/exit/parent_holds_near=0/traffic=1: abort=64 clean=0 other=0 of 64
+CHECK PASS release queued no record :: release/exit/parent_holds_near=0/traffic=1: rec_queued delta=64 (== ctxB watch records 64), rec_discard delta=64, won=64, live=0
+CHECK PASS after the released context and the classifier context are both gone no id is live :: release/exit/parent_holds_near=0/traffic=1: global live=0
+CHECK PASS pre-release far TCP ends open :: release/exit/parent_holds_near=1/traffic=0: 48/48 open
+CHECK PASS far TCP ends all ECONNRESET :: release/exit/parent_holds_near=1/traffic=0: reset=48 (at release return 48) eof=0 open=0, last settled 0.0 ms after release returned
+CHECK PASS far vsock ends all classify abort (ctx B watch) :: release/exit/parent_holds_near=1/traffic=0: abort=64 clean=0 other=0 of 64
+CHECK PASS release queued no record :: release/exit/parent_holds_near=1/traffic=0: rec_queued delta=64 (== ctxB watch records 64), rec_discard delta=64, won=64, live=0
+CHECK PASS after the released context and the classifier context are both gone no id is live :: release/exit/parent_holds_near=1/traffic=0: global live=0
+CHECK PASS pre-release far TCP ends open :: release/exit/parent_holds_near=1/traffic=1: 48/48 open
+CHECK PASS far TCP ends all ECONNRESET :: release/exit/parent_holds_near=1/traffic=1: reset=48 (at release return 48) eof=0 open=0, last settled 0.0 ms after release returned
+CHECK PASS far vsock ends all classify abort (ctx B watch) :: release/exit/parent_holds_near=1/traffic=1: abort=64 clean=0 other=0 of 64
+CHECK PASS release queued no record :: release/exit/parent_holds_near=1/traffic=1: rec_queued delta=64 (== ctxB watch records 64), rec_discard delta=64, won=64, live=16
+CHECK PASS after the released context and the classifier context are both gone no id is live :: release/exit/parent_holds_near=1/traffic=1: global live=0
+CHECK PASS global live ids zero at the end :: live=0
+DATA audit[end] ctx_open=25 ctx_rel=25 ctx_free=25 pair_new=1536 pair_free=1536 rec_new=1536 rec_queued=768 rec_read=768 rec_discard=768 rec_free_unread=0 rel_won=768 live=0 bytes=247463936
+CHECK PASS sole holder killed -> release :: far TCP reset after the last holder died
+CHECK PASS close of one of two descriptors does not release :: far TCP still open, live_pairs=1
+CHECK PASS last descriptor close releases :: far TCP reset
+CHECK PASS kill of a forked inheritor does not release :: far TCP open, live_pairs=1
+CHECK PASS parent close then releases :: far TCP reset
+CHECK PASS no kernel oops/warn :: dmesg scan
+RESULT suite=release pass=68 fail=0
+SUITE_DONE suite=release rc=0
+[    0.037558] rcu: Preemptible hierarchical RCU implementation.
+[    0.037559] rcu: 	RCU restricting CPUs from NR_CPUS=8192 to nr_cpu_ids=4.
+[    0.037561] 	Trampoline variant of Tasks RCU enabled.
+[    0.037562] 	Rude variant of Tasks RCU enabled.
+[    0.037562] 	Tracing variant of Tasks RCU enabled.
+[    0.037563] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.037575] RCU Tasks: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.037577] RCU Tasks Rude: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.046503] rcu: Hierarchical SRCU implementation.
+[    0.359604] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.359613] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+[    0.360572] ovd_fwd: loaded (spike, permanent: no module_exit)
+GUEST_END
+[    9.423023] reboot: Power down

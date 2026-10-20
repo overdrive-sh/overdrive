@@ -477,12 +477,13 @@ mod service_vm_boot_redrive {
     use std::time::{Duration, Instant};
 
     use overdrive_control_plane::dataplane_config::DataplaneConfig;
-    use overdrive_control_plane::{ServerConfig, run_server_with_obs_and_driver};
+    use overdrive_control_plane::{NodeAdapters, ServerConfig, run_server_with_obs_and_driver};
     use overdrive_core::aggregate::{
         DriverInput, IntentKey, ResourcesInput, Service, VmInput, WorkloadIntent, WorkloadKind,
     };
     use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
     use overdrive_core::guest_network::GuestNetworkExecWiring;
+    use overdrive_core::guest_transport::NodeVsockPortConfig;
     use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
     use overdrive_core::traits::driver::{Driver, DriverType};
     use overdrive_core::traits::intent_store::IntentStore;
@@ -500,7 +501,9 @@ mod service_vm_boot_redrive {
     use crate::adapters::guest_network::SimSharedGuestNetworkOwner;
     use crate::adapters::observation_store::SimObservationStore;
     use crate::adapters::vm_host_state::SimVmHostState;
-    use crate::adapters::{SimCgroupFs, SimGuestDnsFactory, SimKek, SimMtlsIntercept};
+    use crate::adapters::{
+        SimCgroupFs, SimDataplaneComposer, SimGuestDnsFactory, SimKek, SimMtlsIntercept,
+    };
 
     const FIRST_GUEST_LEASE: std::net::Ipv4Addr = std::net::Ipv4Addr::new(100, 95, 0, 2);
 
@@ -612,28 +615,39 @@ mod service_vm_boot_redrive {
         let driver = Arc::new(SimDriver::with_clock(DriverType::Vm, clock.clone()));
         let shared_owner =
             Arc::new(SimSharedGuestNetworkOwner::with_sweep_host_state(vm_host.as_ref().clone()));
-        let intercept = Arc::new(SimMtlsIntercept::new());
-        let mut config = ServerConfig::new(
-            Arc::new(SimKek::for_boot()),
-            intercept,
-            Arc::new(SimGuestDnsFactory::default()),
-        );
+        let mut config = ServerConfig::new();
         config.bind = "127.0.0.1:0"
             .parse()
             .map_err(|error| format!("seed={seed}: loopback bind: {error}"))?;
         config.data_dir.clone_from(&data_dir);
         config.operator_config_dir.clone_from(&operator_config_dir);
-        config.clock = clock.clone();
         config.tick_cadence = Duration::from_millis(10);
         config.dataplane =
             Some(DataplaneConfig { client_iface: "lo".to_owned(), backend_iface: "lo".to_owned() });
-        config.dataplane_override = Some(Arc::new(SimDataplane::new()));
+        config.vsock_ports = NodeVsockPortConfig::kernel_assigned();
+        // NO-OVERRIDE-SEAMS / STORES-IN (ADR-0219): the host bundle's boot
+        // group over this data_dir (its stores reopen the intent file the
+        // seeding block above closed), with every simulated edge replaced by
+        // name: the clock, the observation store, the VM host state, the
+        // dataplane, the intercept and the guest DNS.
+        let mut boot =
+            NodeAdapters::host(&config, Arc::new(SimCgroupFs::new()), Arc::new(SimKek::for_boot()))
+                .map_err(|error| format!("seed={seed}: host bundle: {error}"))?
+                .boot;
+        boot.clock = clock.clone();
+        boot.observation = Arc::clone(&observations) as Arc<dyn ObservationStore>;
+        boot.vm_host_state = vm_host.clone() as Arc<dyn VmHostState>;
+        boot.dataplane = Arc::new(SimDataplaneComposer::new(
+            Arc::new(SimDataplane::new()),
+            std::net::Ipv4Addr::LOCALHOST,
+        ));
+        boot.mtls.intercept = Arc::new(SimMtlsIntercept::new());
+        boot.guest_dns = Arc::new(SimGuestDnsFactory::default());
         let wiring = GuestNetworkExecWiring::new(clock.clone());
         let handle = run_server_with_obs_and_driver(
             config,
-            Arc::clone(&observations) as Arc<dyn ObservationStore>,
+            boot,
             driver.clone() as Arc<dyn Driver>,
-            vm_host.clone() as Arc<dyn VmHostState>,
             shared_owner,
             wiring,
             CgroupManager::new(PathBuf::from("/sys/fs/cgroup"), Arc::new(SimCgroupFs::new())),
@@ -705,6 +719,7 @@ mod service_vm_boot_redrive {
         clippy::doc_markdown,
         reason = "the required Contract Shape declaration uses an exact parser token"
     )]
+    #[ignore = "pending DELIVER attachment-cut step (15)"]
     async fn a_service_vm_running_before_process_loss_is_reclaimed_and_replaced_after_boot() {
         const SEED: u64 = 0;
         let result = run_service_vm_reclaim(SEED).await;

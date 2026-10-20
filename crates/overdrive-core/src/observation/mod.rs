@@ -17,5 +17,6 @@ pub mod probe_result_row;
 
 pub use probe_result_row::{
     ProbeIdx, ProbeResultRow, ProbeResultRowEnvelope, ProbeResultRowLatest, ProbeResultRowV1,
-    ProbeRole, ProbeStatus,
+    ProbeResultRowV2, ProbeRole, ProbeRunSeq, ProbeRunSeqParseError, ProbeStatus, SameStatusRuns,
+    SameStatusRunsParseError,
 };

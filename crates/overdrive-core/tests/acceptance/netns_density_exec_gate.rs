@@ -12,11 +12,10 @@ use overdrive_core::guest_network::{
 use overdrive_sim::adapters::clock::SimClock;
 use proptest::prelude::*;
 
-const COMPONENTS: [SharedGuestNetworkComponent; 10] = [
+const COMPONENTS: [SharedGuestNetworkComponent; 9] = [
     SharedGuestNetworkComponent::Forwarder,
     SharedGuestNetworkComponent::FlowListeners,
     SharedGuestNetworkComponent::ControlListener,
-    SharedGuestNetworkComponent::IntakeListeners,
     SharedGuestNetworkComponent::LegF,
     SharedGuestNetworkComponent::LegC,
     SharedGuestNetworkComponent::IpRules,
@@ -26,10 +25,13 @@ const COMPONENTS: [SharedGuestNetworkComponent; 10] = [
 ];
 
 /// Every fail-stop cause in declaration order (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the core addition: two fail-stop causes)). The gate is
-/// cause-agnostic, so the two D-295-R14 causes are closed exactly like the
-/// original six.
-const CAUSES: [SharedGuestNetworkFailStopCause; 8] = [
+/// cause-agnostic, so the two D-295-R14 causes and the two QHOLD causes
+/// (`LeakedQuiescenceHold`, `ForeignQuiescenceHold`, D-UP-3 / D-UP-4) are
+/// closed exactly like the original six.
+const CAUSES: [SharedGuestNetworkFailStopCause; 10] = [
     SharedGuestNetworkFailStopCause::RecoveryDeadlineExceeded,
+    SharedGuestNetworkFailStopCause::LeakedQuiescenceHold,
+    SharedGuestNetworkFailStopCause::ForeignQuiescenceHold,
     SharedGuestNetworkFailStopCause::TapQuiescenceUndetermined,
     SharedGuestNetworkFailStopCause::VmKillFailed,
     SharedGuestNetworkFailStopCause::SupervisorReturned,
@@ -39,7 +41,7 @@ const CAUSES: [SharedGuestNetworkFailStopCause; 8] = [
     SharedGuestNetworkFailStopCause::RequestChannelClosed,
 ];
 // The generated `FailStop(index)` range below indexes `CAUSES`.
-const _: () = assert!(CAUSES.len() == 8);
+const _: () = assert!(CAUSES.len() == 10);
 
 #[derive(Clone, Copy, Debug)]
 enum Operation {
@@ -62,9 +64,9 @@ enum ModelState {
 fn operation_strategy() -> impl Strategy<Value = Operation> {
     prop_oneof![
         Just(Operation::OpenAfterBoot),
-        (0_u8..10).prop_map(Operation::BeginRecovery),
-        prop::option::of(0_u8..10).prop_map(Operation::CompleteAttempt),
-        (0_u8..8).prop_map(Operation::FailStop),
+        (0_u8..9).prop_map(Operation::BeginRecovery),
+        prop::option::of(0_u8..9).prop_map(Operation::CompleteAttempt),
+        (0_u8..10).prop_map(Operation::FailStop),
         Just(Operation::Claim),
         Just(Operation::DropClaim),
     ]

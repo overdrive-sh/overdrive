@@ -1,0 +1,1622 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * pairprobe: V-EV-PAIR harness (spike code). Drives the ovdpair module with the P-22 / P-23 shapes at the PROPOSED attach points.
+ *
+ *   pairprobe probe                                  module ABI / permanence / delete_module
+ *   pairprobe L <shape> <lanes> <trials> <seed> <tmo_ms> <run>
+ *                                                    loopback chain in this kernel: guest owner + host owner + both pairs,
+ *                                                    vsock loopback (CID 1) between them, app + destination over TCP loopback
+ *   pairprobe G <shape> <lanes> <trials> <seed> <tmo_ms> <run> <hostcid> <guestcid>
+ *                                                    guest side only, in the Cloud Hypervisor guest; the host side is `peer`
+ *                                                    on the physical host over the real vhost-vsock transport
+ *   pairprobe peer <outdir>                          host userspace peer (no module involved, never loads anything)
+ *
+ * Shapes (egress = guest TcpConnect, inbound = guest TcpAccept):
+ *   eg-wf     client writes cn bytes + FIN before Paired, destination replies sn bytes + FIN
+ *   eg-sf     destination writes sn bytes first (before the guest attaches), client replies cn + FIN
+ *   eg-sffin  destination writes sn bytes AND its FIN first (an early END on the vsock half), client replies cn + FIN
+ *   eg-nofin  client writes cn (no FIN), destination replies sn (no FIN), both then close
+ *   eg-rst    client writes cn then resets before Paired: the flow must abort, never end clean
+ *   in-sf     the application writes sn bytes first, remote client replies cn + FIN
+ *   in-sffin  the application writes sn bytes + FIN first
+ *   in-cf     remote client writes cn + FIN after Paired (H-1 order)
+ *   in-cfearly remote client writes cn + FIN right after the request, BEFORE Paired
+ */
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include <errno.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <pthread.h>
+#include <signal.h>
+#include <time.h>
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <arpa/inet.h>
+#include <linux/vm_sockets.h>
+#include "ovd_fwd_uapi.h"
+
+#ifndef VMADDR_CID_LOCAL
+#define VMADDR_CID_LOCAL 1
+#endif
+
+enum { EG_WF, EG_SF, EG_SFFIN, EG_NOFIN, EG_RST, IN_SF, IN_SFFIN, IN_CF, IN_CFEARLY, NSHAPE };
+static const char *SHN[NSHAPE] = { "eg-wf", "eg-sf", "eg-sffin", "eg-nofin", "eg-rst", "in-sf", "in-sffin", "in-cf", "in-cfearly" };
+static int inbound(int s) { return s >= IN_SF; }
+
+#define PORT_CTL 1230
+#define PORT_CMD 1238
+#define PORT_REQ 1240   /* + lane: host-side accept of an egress flow request */
+#define PORT_IN 1250    /* + lane: guest-side accept of an inbound flow request */
+#define TCP_INTAKE 20000
+#define TCP_DEST 21000
+#define TCP_APP 22000
+#define MAXLANE 8
+#define REQ_MAGIC 0x4F564450u
+#define P_MAGIC 0x50414952u
+
+static struct {
+	int mode_g, shape, lanes, trials, run, tmo, hostcid, guestcid;
+	uint64_t seed;
+} C;
+
+/* ------------------------------------------------------------------------------------------------------------------------ util */
+static uint64_t now_ms(void)
+{
+	struct timespec t;
+
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	return (uint64_t)t.tv_sec * 1000ULL + t.tv_nsec / 1000000ULL;
+}
+
+static uint64_t mix(uint64_t z)
+{
+	z += 0x9E3779B97F4A7C15ULL;
+	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+	z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+	return z ^ (z >> 31);
+}
+
+struct rng { uint64_t s; };
+static uint64_t rn(struct rng *r)
+{
+	r->s += 0x9E3779B97F4A7C15ULL;
+	return mix(r->s);
+}
+
+static void gen(uint8_t *out, size_t len, uint64_t seed, uint64_t off)
+{
+	uint64_t w = ~0ULL, x = 0;
+
+	for (size_t i = 0; i < len; i++) {
+		uint64_t g = off + i, wi = g >> 3;
+
+		if (wi != w) {
+			w = wi;
+			x = mix(seed + wi * 0x9E3779B97F4A7C15ULL);
+		}
+		out[i] = (uint8_t)(x >> ((g & 7) * 8));
+	}
+}
+
+#define FNV_INIT 0xcbf29ce484222325ULL
+static uint64_t fnv(uint64_t h, const uint8_t *b, size_t n)
+{
+	for (size_t i = 0; i < n; i++) {
+		h ^= b[i];
+		h *= 0x100000001b3ULL;
+	}
+	return h;
+}
+
+static uint64_t fnv_expected(uint64_t seed, uint64_t n)
+{
+	uint8_t *b = malloc(65536);
+	uint64_t h = FNV_INIT, off = 0;
+
+	while (off < n) {
+		size_t c = n - off > 65536 ? 65536 : n - off;
+
+		gen(b, c, seed, off);
+		h = fnv(h, b, c);
+		off += c;
+	}
+	free(b);
+	return h;
+}
+
+static void jsleep(int cls)
+{
+	static const int us[] = { 0, 20, 200, 2000, 10000 };
+
+	if (cls > 0 && cls < 5)
+		usleep(us[cls]);
+}
+
+static void set_to(int fd, int ms)
+{
+	struct timeval tv = { ms / 1000, (ms % 1000) * 1000 };
+
+	setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+	setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+}
+
+/* ------------------------------------------------------------------------------------------------------------------------ spec */
+enum { J_CLI, J_SRV, J_GO1, J_GO2, J_HO1, J_HO2, NJ };
+struct spec {
+	uint64_t cs, ss;
+	uint32_t cn, sn;
+	uint8_t j[NJ];
+};
+
+static uint32_t pick_size(struct rng *r)
+{
+	uint32_t x = rn(r) % 1000;
+
+	if (x < 50)
+		return 0;
+	if (x < 450)
+		return 1 + rn(r) % 64;
+	if (x < 850)
+		return 65 + rn(r) % 8128;
+	if (x < 985)
+		return 8193 + rn(r) % 253952;
+	return 262145 + rn(r) % 1200000;
+}
+
+static uint8_t pick_j(struct rng *r)
+{
+	uint32_t x = rn(r) % 100;
+
+	return x < 30 ? 0 : x < 55 ? 1 : x < 80 ? 2 : x < 97 ? 3 : 4;
+}
+
+static void make_spec(struct spec *sp, uint64_t seed, int shape, int lane, int trial)
+{
+	struct rng r = { mix(seed ^ ((uint64_t)shape << 56) ^ ((uint64_t)lane << 48) ^ (uint64_t)trial) };
+
+	sp->cs = rn(&r);
+	sp->ss = rn(&r);
+	sp->cn = pick_size(&r);
+	sp->sn = pick_size(&r);
+	for (int i = 0; i < NJ; i++)
+		sp->j[i] = pick_j(&r);
+	if (shape == EG_RST) {
+		sp->cn = 1 + sp->cn % 65536;
+		sp->sn = 0;
+		if (rn(&r) % 100 < 80)
+			sp->j[J_HO2] = 3 + (uint8_t)(rn(&r) % 2);
+	}
+}
+
+/* ------------------------------------------------------------------------------------------------------------------------ stream io */
+struct rr { uint64_t got; int64_t mism; int eof; int err; uint64_t fnv; };
+
+static int wr_stream(int fd, uint64_t seed, uint64_t n, uint64_t csd)
+{
+	uint8_t *buf = malloc(65536);
+	struct rng r = { csd };
+	uint64_t off = 0;
+	int rc = 0;
+
+	while (off < n && !rc) {
+		uint64_t c = n - off, lim = n <= 4096 ? n : 1 + rn(&r) % 65536;
+		size_t p = 0;
+
+		if (c > lim)
+			c = lim;
+		gen(buf, c, seed, off);
+		while (p < c) {
+			ssize_t k = send(fd, buf + p, c - p, MSG_NOSIGNAL);
+
+			if (k < 0) {
+				if (errno == EINTR)
+					continue;
+				rc = errno;
+				break;
+			}
+			p += (size_t)k;
+		}
+		off += c;
+	}
+	free(buf);
+	return rc;
+}
+
+static void rd_check(int fd, uint64_t seed, uint64_t n, int to_eof, struct rr *r)
+{
+	uint8_t *buf = malloc(65536), *ex = malloc(65536);
+
+	memset(r, 0, sizeof(*r));
+	r->mism = -1;
+	r->fnv = FNV_INIT;
+	for (;;) {
+		size_t want = 65536;
+		ssize_t k;
+		uint64_t inr;
+
+		if (!to_eof) {
+			if (r->got >= n)
+				break;
+			if (n - r->got < want)
+				want = n - r->got;
+		}
+		k = recv(fd, buf, want, 0);
+		if (k == 0) {
+			r->eof = 1;
+			break;
+		}
+		if (k < 0) {
+			if (errno == EINTR)
+				continue;
+			r->err = errno;
+			break;
+		}
+		inr = r->got < n ? ((r->got + (uint64_t)k <= n) ? (uint64_t)k : n - r->got) : 0;
+		if (inr && r->mism < 0) {
+			gen(ex, inr, seed, r->got);
+			if (memcmp(ex, buf, inr)) {
+				size_t i = 0;
+
+				while (ex[i] == buf[i])
+					i++;
+				r->mism = (int64_t)(r->got + i);
+			}
+		}
+		r->fnv = fnv(r->fnv, buf, inr);
+		r->got += (uint64_t)k;
+	}
+	free(buf);
+	free(ex);
+}
+
+static const char *rr_verdict(const struct rr *r, uint64_t n, uint64_t seed, int want_eof)
+{
+	if (r->err == EAGAIN || r->err == EWOULDBLOCK)
+		return "timeout";
+	if (r->err == ECONNRESET)
+		return "econnreset";
+	if (r->err)
+		return "recv-error";
+	if (r->mism >= 0)
+		return "corrupt";
+	if (r->got < n)
+		return "short";
+	if (r->got > n)
+		return "excess";
+	if (want_eof && !r->eof)
+		return "no-eof";
+	if (r->fnv != fnv_expected(seed, n))
+		return "checksum";
+	return NULL;
+}
+
+struct req { uint32_t magic; uint8_t shape, lane; uint16_t pad; uint32_t trial, run; uint64_t seed; };
+struct pmsg { uint32_t magic, trial; };
+
+static int send_all(int fd, const void *b, size_t n)
+{
+	const char *p = b;
+
+	while (n) {
+		ssize_t k = send(fd, p, n, MSG_NOSIGNAL);
+
+		if (k < 0) {
+			if (errno == EINTR)
+				continue;
+			return errno;
+		}
+		p += k;
+		n -= (size_t)k;
+	}
+	return 0;
+}
+
+static int recv_all(int fd, void *b, size_t n)
+{
+	char *p = b;
+
+	while (n) {
+		ssize_t k = recv(fd, p, n, 0);
+
+		if (k == 0)
+			return ECONNRESET;
+		if (k < 0) {
+			if (errno == EINTR)
+				continue;
+			return errno;
+		}
+		p += k;
+		n -= (size_t)k;
+	}
+	return 0;
+}
+
+static int send_P(int fd, int t)
+{
+	struct pmsg m = { P_MAGIC, (uint32_t)t };
+
+	return send_all(fd, &m, sizeof(m));
+}
+
+/* Paired for trial t; stale ones from earlier trials are discarded. */
+static int wait_P(int fd, int t, int ms)
+{
+	for (;;) {
+		struct pollfd pf = { fd, POLLIN, 0 };
+		struct pmsg m;
+
+		if (poll(&pf, 1, ms) <= 0)
+			return -1;
+		if (recv_all(fd, &m, sizeof(m)) || m.magic != P_MAGIC)
+			return -2;
+		if ((int)m.trial == t)
+			return 0;
+		if ((int)m.trial > t)
+			return -3;
+	}
+}
+
+static int accept_to(int ls, int ms)
+{
+	struct pollfd pf = { ls, POLLIN, 0 };
+
+	if (poll(&pf, 1, ms) <= 0)
+		return -1;
+	return accept(ls, NULL, NULL);
+}
+
+static int tcp_listen(int port)
+{
+	int s = socket(AF_INET, SOCK_STREAM, 0), one = 1;
+	struct sockaddr_in a = { .sin_family = AF_INET, .sin_port = htons(port), .sin_addr.s_addr = htonl(INADDR_LOOPBACK) };
+
+	setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+	if (bind(s, (void *)&a, sizeof(a)) || listen(s, 128)) {
+		perror("tcp_listen");
+		exit(2);
+	}
+	return s;
+}
+
+static int tcp_connect(int port)
+{
+	int s = socket(AF_INET, SOCK_STREAM, 0);
+	struct sockaddr_in a = { .sin_family = AF_INET, .sin_port = htons(port), .sin_addr.s_addr = htonl(INADDR_LOOPBACK) };
+
+	if (connect(s, (void *)&a, sizeof(a)) < 0) {
+		close(s);
+		return -1;
+	}
+	return s;
+}
+
+static int vs_listen(unsigned port)
+{
+	int s = socket(AF_VSOCK, SOCK_STREAM, 0);
+	struct sockaddr_vm a = { .svm_family = AF_VSOCK, .svm_cid = VMADDR_CID_ANY, .svm_port = port };
+
+	if (bind(s, (void *)&a, sizeof(a)) || listen(s, 128)) {
+		perror("vs_listen");
+		exit(2);
+	}
+	return s;
+}
+
+static int vs_connect(unsigned cid, unsigned port)
+{
+	int s = socket(AF_VSOCK, SOCK_STREAM, 0);
+	struct sockaddr_vm a = { .svm_family = AF_VSOCK, .svm_cid = cid, .svm_port = port };
+
+	if (connect(s, (void *)&a, sizeof(a)) < 0) {
+		close(s);
+		return -1;
+	}
+	return s;
+}
+
+/* ------------------------------------------------------------------------------------------------------------------------ roles */
+/* The client side of a shape (egress: the guest application; inbound: the remote client). NULL = ok, else a reason. */
+static const char *role_cli(int shape, int fd, const struct spec *sp)
+{
+	struct rr r;
+	const char *v;
+
+	switch (shape) {
+	case EG_WF:
+	case IN_CF:
+	case IN_CFEARLY:
+		jsleep(sp->j[J_CLI]);
+		if (wr_stream(fd, sp->cs, sp->cn, sp->cs ^ 1))
+			return "cli-send-error";
+		shutdown(fd, SHUT_WR);
+		rd_check(fd, sp->ss, sp->sn, 1, &r);
+		return rr_verdict(&r, sp->sn, sp->ss, 1);
+	case EG_SF:
+	case IN_SF:
+		rd_check(fd, sp->ss, sp->sn, 0, &r);
+		if ((v = rr_verdict(&r, sp->sn, sp->ss, 0)))
+			return v;
+		jsleep(sp->j[J_CLI]);
+		if (wr_stream(fd, sp->cs, sp->cn, sp->cs ^ 1))
+			return "cli-send-error";
+		shutdown(fd, SHUT_WR);
+		rd_check(fd, 0, 0, 1, &r);
+		return rr_verdict(&r, 0, 0, 1);
+	case EG_SFFIN:
+	case IN_SFFIN:
+		rd_check(fd, sp->ss, sp->sn, 1, &r);
+		if ((v = rr_verdict(&r, sp->sn, sp->ss, 1)))
+			return v;
+		jsleep(sp->j[J_CLI]);
+		if (wr_stream(fd, sp->cs, sp->cn, sp->cs ^ 1))
+			return "cli-send-error";
+		shutdown(fd, SHUT_WR);
+		rd_check(fd, 0, 0, 1, &r);
+		return rr_verdict(&r, 0, 0, 1);
+	case EG_NOFIN:
+		jsleep(sp->j[J_CLI]);
+		if (wr_stream(fd, sp->cs, sp->cn, sp->cs ^ 1))
+			return "cli-send-error";
+		rd_check(fd, sp->ss, sp->sn, 0, &r);
+		return rr_verdict(&r, sp->sn, sp->ss, 0);
+	case EG_RST:
+		jsleep(sp->j[J_CLI]);
+		if (wr_stream(fd, sp->cs, sp->cn, sp->cs ^ 1))
+			return "cli-send-error";
+		return NULL; /* the caller resets */
+	}
+	return "bad-shape";
+}
+
+/* The server side (egress: the destination; inbound: the guest application). *saw_reset is set for eg-rst. */
+static const char *role_srv(int shape, int fd, const struct spec *sp, int *saw_reset)
+{
+	struct rr r;
+	const char *v;
+
+	switch (shape) {
+	case EG_WF:
+	case IN_CF:
+	case IN_CFEARLY:
+		rd_check(fd, sp->cs, sp->cn, 1, &r);
+		if ((v = rr_verdict(&r, sp->cn, sp->cs, 1)))
+			return v;
+		jsleep(sp->j[J_SRV]);
+		if (wr_stream(fd, sp->ss, sp->sn, sp->ss ^ 1))
+			return "srv-send-error";
+		shutdown(fd, SHUT_WR);
+		return NULL;
+	case EG_SF:
+	case IN_SF:
+		jsleep(sp->j[J_SRV]);
+		if (wr_stream(fd, sp->ss, sp->sn, sp->ss ^ 1))
+			return "srv-send-error";
+		rd_check(fd, sp->cs, sp->cn, 1, &r);
+		if ((v = rr_verdict(&r, sp->cn, sp->cs, 1)))
+			return v;
+		shutdown(fd, SHUT_WR);
+		return NULL;
+	case EG_SFFIN:
+	case IN_SFFIN:
+		jsleep(sp->j[J_SRV]);
+		if (wr_stream(fd, sp->ss, sp->sn, sp->ss ^ 1))
+			return "srv-send-error";
+		shutdown(fd, SHUT_WR);
+		rd_check(fd, sp->cs, sp->cn, 1, &r);
+		return rr_verdict(&r, sp->cn, sp->cs, 1);
+	case EG_NOFIN:
+		rd_check(fd, sp->cs, sp->cn, 0, &r);
+		if ((v = rr_verdict(&r, sp->cn, sp->cs, 0)))
+			return v;
+		jsleep(sp->j[J_SRV]);
+		if (wr_stream(fd, sp->ss, sp->sn, sp->ss ^ 1))
+			return "srv-send-error";
+		rd_check(fd, 0, 0, 1, &r);
+		if ((v = rr_verdict(&r, 0, 0, 1)))
+			return v;
+		shutdown(fd, SHUT_WR);
+		return NULL;
+	case EG_RST:
+		rd_check(fd, sp->cs, 0, 1, &r); /* n = 0: any byte is "excess"; we only want how the stream ended */
+		if (r.err == ECONNRESET) {
+			*saw_reset = 1;
+			return NULL;
+		}
+		if (r.err == EAGAIN || r.err == EWOULDBLOCK)
+			return "timeout";
+		if (r.eof) {
+			if (C.mode_g) /* a vsock peer cannot tell a reset from a close (P-49); the host forwarder's job */
+				return NULL;
+			return "reset-became-eof";
+		}
+		return "other";
+	}
+	return "bad-shape";
+}
+
+/* ------------------------------------------------------------------------------------------------------------------------ owner contexts */
+struct octx {
+	int fd;
+	pthread_t th;
+	pthread_mutex_t mu;
+	pthread_cond_t cv;
+	struct ovd_end *rec;
+	char *have;
+	uint64_t cap;
+	volatile int stop;
+};
+
+static void *reaper(void *a)
+{
+	struct octx *c = a;
+
+	while (!c->stop) {
+		struct pollfd pf = { c->fd, POLLIN, 0 };
+		struct ovd_end e;
+
+		if (poll(&pf, 1, 100) <= 0)
+			continue;
+		if (read(c->fd, &e, sizeof(e)) == (ssize_t)sizeof(e)) {
+			pthread_mutex_lock(&c->mu);
+			if (e.id < c->cap) {
+				c->rec[e.id] = e;
+				c->have[e.id] = 1;
+			}
+			pthread_cond_broadcast(&c->cv);
+			pthread_mutex_unlock(&c->mu);
+		}
+	}
+	return NULL;
+}
+
+static struct octx *octx_open(uint64_t cap)
+{
+	struct octx *c = calloc(1, sizeof(*c));
+
+	c->fd = open("/dev/ovd_fwd", O_RDWR | O_NONBLOCK);
+	if (c->fd < 0) {
+		perror("open /dev/ovd_fwd");
+		exit(2);
+	}
+	pthread_mutex_init(&c->mu, NULL);
+	pthread_cond_init(&c->cv, NULL);
+	c->cap = cap;
+	c->rec = calloc(cap, sizeof(struct ovd_end));
+	c->have = calloc(cap, 1);
+	pthread_create(&c->th, NULL, reaper, c);
+	return c;
+}
+
+static void octx_close(struct octx *c)
+{
+	c->stop = 1;
+	pthread_join(c->th, NULL);
+	close(c->fd); /* release: aborts every pair still live */
+}
+
+static int rec_wait(struct octx *c, uint64_t id, int ms, struct ovd_end *out)
+{
+	struct timespec ts;
+	int rc = 0;
+
+	clock_gettime(CLOCK_REALTIME, &ts);
+	ts.tv_sec += ms / 1000;
+	ts.tv_nsec += (long)(ms % 1000) * 1000000L;
+	if (ts.tv_nsec >= 1000000000L) {
+		ts.tv_sec++;
+		ts.tv_nsec -= 1000000000L;
+	}
+	pthread_mutex_lock(&c->mu);
+	while (id < c->cap && !c->have[id] && rc == 0)
+		rc = pthread_cond_timedwait(&c->cv, &c->mu, &ts);
+	if (id < c->cap && c->have[id]) {
+		*out = c->rec[id];
+		rc = 0;
+	} else {
+		rc = -1;
+	}
+	pthread_mutex_unlock(&c->mu);
+	return rc;
+}
+
+static int do_attach(struct octx *c, int a, int b, struct ovd_attach *out)
+{
+	memset(out, 0, sizeof(*out));
+	out->fd_a = a;
+	out->fd_b = b;
+	if (ioctl(c->fd, OVD_ATTACH, out) < 0)
+		return errno;
+	return 0;
+}
+
+/* ------------------------------------------------------------------------------------------------------------------------ lanes */
+#define D_CLI 1
+#define D_SRV 2
+#define D_GO 4
+#define D_HO 8
+
+struct trial {
+	struct spec sp;
+	const char *fail, *frole;
+	int fdetail;
+	int done, saw_reset;
+	int ga_err, ha_err, gr_ok, hr_ok;
+	struct ovd_attach ga, ha;
+	struct ovd_end gr, hr;
+};
+
+struct lane {
+	int k, shape, trials, need;
+	int ls_intake, ls_dest, ls_vh, ls_vg, ls_app;
+	int ctl_a, ctl_b; /* L: socketpair; G: ctl_a is the vsock control connection (guest side) */
+	struct trial *tr;
+	pthread_mutex_t mu;
+	pthread_cond_t cv;
+};
+static struct octx *GCTX, *HCTX;
+
+static void tfail(struct lane *L, int t, const char *role, const char *why, int detail)
+{
+	pthread_mutex_lock(&L->mu);
+	if (!L->tr[t].fail) {
+		L->tr[t].fail = why;
+		L->tr[t].frole = role;
+		L->tr[t].fdetail = detail;
+	}
+	pthread_mutex_unlock(&L->mu);
+}
+
+static void mark_done(struct lane *L, int t, int bit)
+{
+	pthread_mutex_lock(&L->mu);
+	L->tr[t].done |= bit;
+	pthread_cond_broadcast(&L->cv);
+	pthread_mutex_unlock(&L->mu);
+}
+
+static void barrier(struct lane *L, int t)
+{
+	struct timespec ts;
+	int ms = C.tmo * 5, rc = 0;
+
+	clock_gettime(CLOCK_REALTIME, &ts);
+	ts.tv_sec += ms / 1000;
+	pthread_mutex_lock(&L->mu);
+	while ((L->tr[t].done & L->need) != L->need && rc == 0)
+		rc = pthread_cond_timedwait(&L->cv, &L->mu, &ts);
+	pthread_mutex_unlock(&L->mu);
+	if (rc)
+		tfail(L, t, "master", "role-hang", L->tr[t].done);
+}
+
+static void fill_req(struct req *q, int shape, int lane, int t)
+{
+	memset(q, 0, sizeof(*q));
+	q->magic = REQ_MAGIC;
+	q->shape = (uint8_t)shape;
+	q->lane = (uint8_t)lane;
+	q->trial = (uint32_t)t;
+	q->run = (uint32_t)C.run;
+	q->seed = C.seed;
+}
+
+static int abortable_wait(struct octx *c, uint64_t id, struct ovd_end *e)
+{
+	if (rec_wait(c, id, C.tmo * 2, e) == 0)
+		return 0;
+	ioctl(c->fd, OVD_ABORT, &id);
+	rec_wait(c, id, 3000, e);
+	return -1;
+}
+
+/* guest owner, egress: intake child + V_g, attach on Paired */
+static void *th_go_eg(void *a)
+{
+	struct lane *L = a;
+
+	for (int t = 0; t < L->trials; t++) {
+		struct trial *T = &L->tr[t];
+		struct req q;
+		int I, V, e;
+
+		I = accept_to(L->ls_intake, C.tmo * 3);
+		if (I < 0) {
+			tfail(L, t, "go", "no-intake", errno);
+			mark_done(L, t, D_GO);
+			continue;
+		}
+		set_to(I, C.tmo);
+		V = socket(AF_VSOCK, SOCK_STREAM, 0);
+		set_to(V, C.tmo);
+		{
+			struct sockaddr_vm sa = { .svm_family = AF_VSOCK, .svm_cid = C.hostcid, .svm_port = PORT_REQ + L->k };
+
+			if (connect(V, (void *)&sa, sizeof(sa)) < 0) {
+				tfail(L, t, "go", "vsock-connect", errno);
+				close(I);
+				close(V);
+				mark_done(L, t, D_GO);
+				continue;
+			}
+		}
+		jsleep(T->sp.j[J_GO1]);
+		fill_req(&q, L->shape, L->k, t);
+		if (send_all(V, &q, sizeof(q)))
+			tfail(L, t, "go", "req-send", errno);
+		if (wait_P(L->ctl_b, t, C.tmo * 2) < 0) {
+			tfail(L, t, "go", "no-paired", 0);
+			close(I);
+			close(V);
+			mark_done(L, t, D_GO);
+			continue;
+		}
+		jsleep(T->sp.j[J_GO2]);
+		e = do_attach(GCTX, I, V, &T->ga);
+		T->ga_err = e;
+		if (e) {
+			/* attach refused: the owner aborts the flow by closing both (the pair never existed) */
+			close(I);
+			close(V);
+			mark_done(L, t, D_GO);
+			continue;
+		}
+		if (abortable_wait(GCTX, T->ga.id, &T->gr) == 0)
+			T->gr_ok = 1;
+		else
+			tfail(L, t, "go", "pair-never-ended", 0);
+		close(I);
+		close(V);
+		mark_done(L, t, D_GO);
+	}
+	return NULL;
+}
+
+/* host owner, egress (L only): V_h + D, attach BEFORE Paired */
+static void *th_ho_eg(void *a)
+{
+	struct lane *L = a;
+
+	for (int t = 0; t < L->trials; t++) {
+		struct trial *T = &L->tr[t];
+		struct req q;
+		int V, D, e;
+
+		V = accept_to(L->ls_vh, C.tmo * 3);
+		if (V < 0) {
+			tfail(L, t, "ho", "no-request", errno);
+			mark_done(L, t, D_HO);
+			continue;
+		}
+		set_to(V, C.tmo);
+		if (recv_all(V, &q, sizeof(q)) || q.magic != REQ_MAGIC || (int)q.trial != t) {
+			tfail(L, t, "ho", "bad-request", 0);
+			close(V);
+			mark_done(L, t, D_HO);
+			continue;
+		}
+		D = tcp_connect(TCP_DEST + L->k);
+		if (D < 0) {
+			tfail(L, t, "ho", "dest-connect", errno);
+			close(V);
+			mark_done(L, t, D_HO);
+			continue;
+		}
+		set_to(D, C.tmo);
+		jsleep(T->sp.j[J_HO1]);
+		e = do_attach(HCTX, V, D, &T->ha);
+		T->ha_err = e;
+		if (e) {
+			close(V);
+			close(D);
+			send_P(L->ctl_a, t); /* the owner still answers; the guest attach will see the closed half */
+			mark_done(L, t, D_HO);
+			continue;
+		}
+		jsleep(T->sp.j[J_HO2]);
+		send_P(L->ctl_a, t);
+		if (abortable_wait(HCTX, T->ha.id, &T->hr) == 0)
+			T->hr_ok = 1;
+		else
+			tfail(L, t, "ho", "pair-never-ended", 0);
+		close(V);
+		close(D);
+		mark_done(L, t, D_HO);
+	}
+	return NULL;
+}
+
+/* destination server (egress, L) / guest application (inbound) */
+static void *th_srv(void *a)
+{
+	struct lane *L = a;
+	int ls = inbound(L->shape) ? L->ls_app : L->ls_dest;
+
+	for (int t = 0; t < L->trials; t++) {
+		struct trial *T = &L->tr[t];
+		const char *why;
+		int fd = accept_to(ls, C.tmo * 3);
+
+		if (fd < 0) {
+			tfail(L, t, "srv", "no-accept", errno);
+			mark_done(L, t, D_SRV);
+			continue;
+		}
+		set_to(fd, C.tmo);
+		why = role_srv(L->shape, fd, &T->sp, &T->saw_reset);
+		if (why)
+			tfail(L, t, "srv", why, 0);
+		close(fd);
+		mark_done(L, t, D_SRV);
+	}
+	return NULL;
+}
+
+/* guest owner, inbound: V_g accepted, request read, C connected, attach BEFORE Paired */
+static void *th_go_in(void *a)
+{
+	struct lane *L = a;
+
+	for (int t = 0; t < L->trials; t++) {
+		struct trial *T = &L->tr[t];
+		struct req q;
+		int V, Cn, e;
+
+		V = accept_to(L->ls_vg, C.tmo * 3);
+		if (V < 0) {
+			tfail(L, t, "go", "no-request", errno);
+			mark_done(L, t, D_GO);
+			continue;
+		}
+		set_to(V, C.tmo);
+		if (recv_all(V, &q, sizeof(q)) || q.magic != REQ_MAGIC) {
+			tfail(L, t, "go", "bad-request", 0);
+			close(V);
+			mark_done(L, t, D_GO);
+			continue;
+		}
+		Cn = tcp_connect(TCP_APP + L->k);
+		if (Cn < 0) {
+			tfail(L, t, "go", "app-connect", errno);
+			close(V);
+			mark_done(L, t, D_GO);
+			continue;
+		}
+		set_to(Cn, C.tmo);
+		jsleep(T->sp.j[J_GO1]);
+		e = do_attach(GCTX, V, Cn, &T->ga);
+		T->ga_err = e;
+		if (e) {
+			close(V);
+			close(Cn);
+			mark_done(L, t, D_GO);
+			continue;
+		}
+		jsleep(T->sp.j[J_GO2]);
+		send_P(L->ctl_b, t);
+		if (abortable_wait(GCTX, T->ga.id, &T->gr) == 0)
+			T->gr_ok = 1;
+		else
+			tfail(L, t, "go", "pair-never-ended", 0);
+		close(V);
+		close(Cn);
+		mark_done(L, t, D_GO);
+	}
+	return NULL;
+}
+
+/* master: egress client (guest application) or inbound remote client (dialer) */
+static void do_trial_cli(struct lane *L, int t, int dial_cid, int ctl_for_P)
+{
+	struct trial *T = &L->tr[t];
+	int fd;
+	const char *why;
+
+	if (!inbound(L->shape)) {
+		fd = tcp_connect(TCP_INTAKE + L->k);
+	} else {
+		fd = vs_connect((unsigned)dial_cid, PORT_IN + L->k);
+	}
+	if (fd < 0) {
+		tfail(L, t, "cli", "connect", errno);
+		return;
+	}
+	set_to(fd, C.tmo);
+	if (inbound(L->shape)) {
+		struct req q;
+
+		jsleep(T->sp.j[J_CLI]);
+		fill_req(&q, L->shape, L->k, t);
+		if (send_all(fd, &q, sizeof(q))) {
+			tfail(L, t, "cli", "req-send", errno);
+			close(fd);
+			return;
+		}
+		if (L->shape != IN_CFEARLY && wait_P(ctl_for_P, t, C.tmo * 2) < 0) {
+			tfail(L, t, "cli", "no-paired", 0);
+			close(fd);
+			return;
+		}
+	}
+	why = role_cli(L->shape, fd, &T->sp);
+	if (why)
+		tfail(L, t, "cli", why, 0);
+	if (L->shape == EG_RST) {
+		struct linger lg = { 1, 0 };
+
+		setsockopt(fd, SOL_SOCKET, SO_LINGER, &lg, sizeof(lg));
+	}
+	close(fd);
+}
+
+static void *th_master(void *a)
+{
+	struct lane *L = a;
+
+	for (int t = 0; t < L->trials; t++) {
+		/* pre-mark roles that are not present in this configuration */
+		do_trial_cli(L, t, C.guestcid, L->ctl_a);
+		mark_done(L, t, D_CLI);
+		barrier(L, t);
+	}
+	return NULL;
+}
+
+/* ------------------------------------------------------------------------------------------------------------------------ verification + report */
+static void verify_trial(struct lane *L, int t)
+{
+	struct trial *T = &L->tr[t];
+	const struct spec *sp = &T->sp;
+	int in = inbound(L->shape);
+
+	if (T->fail)
+		return;
+	if (L->shape == EG_RST) {
+		if (!C.mode_g && !T->saw_reset) {
+			tfail(L, t, "verify", "rst-not-seen-by-dest", 0);
+			return;
+		}
+		if (T->ga_err) {
+			if (T->ga_err != ECONNRESET && T->ga_err != EPIPE && T->ga_err != ENOTCONN) {
+				tfail(L, t, "verify", "rst-attach-errno", T->ga_err);
+				return;
+			}
+		} else if (!T->gr_ok || T->gr.outcome != OVD_OUT_ABORTED) {
+			tfail(L, t, "verify", "rst-pair-not-aborted", 0);
+			return;
+		}
+		if (!C.mode_g && (!T->hr_ok || T->hr.outcome != OVD_OUT_ABORTED)) {
+			tfail(L, t, "verify", "rst-host-pair-not-aborted", T->hr_ok ? T->hr.outcome : 0);
+			return;
+		}
+		return;
+	}
+	if (T->ga_err) {
+		tfail(L, t, "verify", "go-attach-errno", T->ga_err);
+		return;
+	}
+	if (!T->gr_ok) {
+		tfail(L, t, "verify", "go-no-record", 0);
+		return;
+	}
+	if (T->gr.outcome != OVD_OUT_COMPLETED) {
+		tfail(L, t, "verify", "go-pair-aborted", T->gr.cause * 1000 + T->gr.err);
+		return;
+	}
+	if (T->gr.bytes_a2b != (in ? sp->cn : sp->cn) || T->gr.bytes_b2a != sp->sn) {
+		tfail(L, t, "verify", "go-bytes", 0);
+		return;
+	}
+	if (!C.mode_g && !in) {
+		if (T->ha_err) {
+			tfail(L, t, "verify", "ho-attach-errno", T->ha_err);
+			return;
+		}
+		if (!T->hr_ok) {
+			tfail(L, t, "verify", "ho-no-record", 0);
+			return;
+		}
+		if (T->hr.outcome != OVD_OUT_COMPLETED) {
+			tfail(L, t, "verify", "ho-pair-aborted", T->hr.cause * 1000 + T->hr.err);
+			return;
+		}
+		if (T->hr.bytes_a2b != sp->cn || T->hr.bytes_b2a != sp->sn) {
+			tfail(L, t, "verify", "ho-bytes", 0);
+			return;
+		}
+	}
+}
+
+struct reason { char key[64]; uint64_t n; };
+
+static void add_reason(struct reason *rs, int *nr, const char *role, const char *why)
+{
+	char key[64];
+
+	snprintf(key, sizeof(key), "%s/%s", role, why);
+	for (int i = 0; i < *nr; i++)
+		if (!strcmp(rs[i].key, key)) {
+			rs[i].n++;
+			return;
+		}
+	if (*nr < 32) {
+		strcpy(rs[*nr].key, key);
+		rs[*nr].n = 1;
+		(*nr)++;
+	}
+}
+
+static void read_proc(char *buf, size_t n)
+{
+	FILE *f = fopen("/proc/ovd_fwd", "r");
+
+	buf[0] = 0;
+	if (f) {
+		if (fgets(buf, (int)n, f))
+			buf[strcspn(buf, "\n")] = 0;
+		fclose(f);
+	}
+}
+
+struct early { uint64_t n, bytes_a, bytes_b, end_a, end_b, abort_a, abort_b, any; uint64_t bsum_a, bsum_b; };
+
+static void tally_early(struct early *e, const struct ovd_attach *a)
+{
+	e->n++;
+	if (a->early_bytes_a) { e->bytes_a++; e->bsum_a += a->early_bytes_a; }
+	if (a->early_bytes_b) { e->bytes_b++; e->bsum_b += a->early_bytes_b; }
+	if (a->early_flags & OVD_EARLY_END_A) e->end_a++;
+	if (a->early_flags & OVD_EARLY_END_B) e->end_b++;
+	if (a->early_flags & OVD_EARLY_ABORT_A) e->abort_a++;
+	if (a->early_flags & OVD_EARLY_ABORT_B) e->abort_b++;
+	if (a->early_bytes_a || a->early_bytes_b || (a->early_flags & (OVD_EARLY_END_A | OVD_EARLY_END_B)))
+		e->any++;
+}
+
+static void print_early(const char *name, const struct early *e)
+{
+	printf("\"%s\":{\"attached\":%llu,\"early_bytes_A\":%llu,\"early_bytes_B\":%llu,\"early_end_A\":%llu,\"early_end_B\":%llu,"
+	       "\"early_abort_A\":%llu,\"early_abort_B\":%llu,\"any_early\":%llu,\"early_bytes_sum_A\":%llu,\"early_bytes_sum_B\":%llu}",
+	       name, (unsigned long long)e->n, (unsigned long long)e->bytes_a, (unsigned long long)e->bytes_b,
+	       (unsigned long long)e->end_a, (unsigned long long)e->end_b, (unsigned long long)e->abort_a,
+	       (unsigned long long)e->abort_b, (unsigned long long)e->any, (unsigned long long)e->bsum_a,
+	       (unsigned long long)e->bsum_b);
+}
+
+/* ------------------------------------------------------------------------------------------------------------------------ host peer results (shared with `peer`) */
+struct prun {
+	int used;
+	uint32_t run;
+	int shape;
+	uint64_t seed, trials, ok, fail;
+	struct reason rs[16];
+	int nr;
+	struct { int lane, trial; char why[48]; } first[8];
+	int nfirst;
+};
+static struct prun PR[64];
+static pthread_mutex_t PRmu = PTHREAD_MUTEX_INITIALIZER;
+
+static struct prun *prun_get(uint32_t run, int shape, uint64_t seed)
+{
+	struct prun *p = &PR[run % 64];
+
+	if (!p->used || p->run != run) {
+		memset(p, 0, sizeof(*p));
+		p->used = 1;
+		p->run = run;
+		p->shape = shape;
+		p->seed = seed;
+	}
+	return p;
+}
+
+static void prun_record(uint32_t run, int shape, uint64_t seed, int lane, int trial, const char *why, const char *role)
+{
+	pthread_mutex_lock(&PRmu);
+	struct prun *p = prun_get(run, shape, seed);
+
+	p->trials++;
+	if (!why) {
+		p->ok++;
+	} else {
+		p->fail++;
+		add_reason(p->rs, &p->nr, role, why);
+		if (p->nfirst < 8) {
+			p->first[p->nfirst].lane = lane;
+			p->first[p->nfirst].trial = trial;
+			snprintf(p->first[p->nfirst].why, 48, "%s/%s", role, why);
+			p->nfirst++;
+		}
+	}
+	pthread_mutex_unlock(&PRmu);
+}
+
+static void prun_dump(FILE *f)
+{
+	pthread_mutex_lock(&PRmu);
+	fprintf(f, "{\"peer_runs\":[");
+	int firstp = 1;
+
+	for (int i = 0; i < 64; i++) {
+		struct prun *p = &PR[i];
+
+		if (!p->used)
+			continue;
+		fprintf(f, "%s{\"run\":%u,\"shape\":\"%s\",\"seed\":%llu,\"trials\":%llu,\"ok\":%llu,\"fail\":%llu,\"reasons\":{", firstp ? "" : ",",
+			p->run, SHN[p->shape], (unsigned long long)p->seed, (unsigned long long)p->trials, (unsigned long long)p->ok,
+			(unsigned long long)p->fail);
+		firstp = 0;
+		for (int r = 0; r < p->nr; r++)
+			fprintf(f, "%s\"%s\":%llu", r ? "," : "", p->rs[r].key, (unsigned long long)p->rs[r].n);
+		fprintf(f, "},\"first_failures\":[");
+		for (int r = 0; r < p->nfirst; r++)
+			fprintf(f, "%s{\"lane\":%d,\"trial\":%d,\"why\":\"%s\"}", r ? "," : "", p->first[r].lane, p->first[r].trial, p->first[r].why);
+		fprintf(f, "]}");
+	}
+	fprintf(f, "]}\n");
+	pthread_mutex_unlock(&PRmu);
+}
+
+/* ------------------------------------------------------------------------------------------------------------------------ run driver (L and G) */
+static int run_lanes(void)
+{
+	struct lane lanes[MAXLANE];
+	pthread_t th[MAXLANE][4];
+	int nth[MAXLANE] = { 0 };
+	int in = inbound(C.shape), cap = C.lanes * C.trials + 64;
+	char before[512], after[512];
+	uint64_t t0 = now_ms();
+	int cmdfd = -1;
+
+	GCTX = octx_open(cap);
+	if (!C.mode_g && !in)
+		HCTX = octx_open(cap);
+	read_proc(before, sizeof(before));
+	memset(lanes, 0, sizeof(lanes));
+	for (int k = 0; k < C.lanes; k++) {
+		struct lane *L = &lanes[k];
+		int sp[2];
+
+		L->k = k;
+		L->shape = C.shape;
+		L->trials = C.trials;
+		L->tr = calloc(C.trials, sizeof(struct trial));
+		for (int t = 0; t < C.trials; t++)
+			make_spec(&L->tr[t].sp, C.seed, C.shape, k, t);
+		pthread_mutex_init(&L->mu, NULL);
+		pthread_cond_init(&L->cv, NULL);
+		L->ls_intake = L->ls_dest = L->ls_vh = L->ls_vg = L->ls_app = -1;
+		if (!in) {
+			L->ls_intake = tcp_listen(TCP_INTAKE + k);
+			if (!C.mode_g) {
+				L->ls_dest = tcp_listen(TCP_DEST + k);
+				L->ls_vh = vs_listen(PORT_REQ + k);
+			}
+		} else {
+			L->ls_vg = vs_listen(PORT_IN + k);
+			L->ls_app = tcp_listen(TCP_APP + k);
+		}
+		if (C.mode_g) {
+			L->ctl_b = vs_connect((unsigned)C.hostcid, PORT_CTL + k);
+			if (L->ctl_b < 0) {
+				fprintf(stderr, "control connect lane %d failed: %s\n", k, strerror(errno));
+				exit(2);
+			}
+			L->ctl_a = -1;
+		} else {
+			socketpair(AF_UNIX, SOCK_STREAM, 0, sp);
+			L->ctl_a = sp[0];
+			L->ctl_b = sp[1];
+		}
+	}
+	if (C.mode_g && in) {
+		char cmd[256];
+
+		cmdfd = vs_connect((unsigned)C.hostcid, PORT_CMD);
+		if (cmdfd < 0) {
+			fprintf(stderr, "cmd connect failed: %s\n", strerror(errno));
+			exit(2);
+		}
+		snprintf(cmd, sizeof(cmd), "INBOUND %d %d %d %d %llu %d %d\n", C.run, C.shape, C.lanes, C.trials, (unsigned long long)C.seed, C.tmo,
+			 C.guestcid);
+		send_all(cmdfd, cmd, strlen(cmd));
+	}
+	for (int k = 0; k < C.lanes; k++) {
+		struct lane *L = &lanes[k];
+		int *n = &nth[k];
+
+		/* the roles that run in this process; `need` is the set the per-trial barrier waits for */
+		if (!in) {
+			L->need = D_CLI | D_GO | (C.mode_g ? 0 : (D_SRV | D_HO));
+			pthread_create(&th[k][(*n)++], NULL, th_go_eg, L);
+			if (!C.mode_g) {
+				pthread_create(&th[k][(*n)++], NULL, th_ho_eg, L);
+				pthread_create(&th[k][(*n)++], NULL, th_srv, L);
+			}
+			pthread_create(&th[k][(*n)++], NULL, th_master, L);
+		} else {
+			L->need = D_SRV | D_GO | (C.mode_g ? 0 : D_CLI);
+			pthread_create(&th[k][(*n)++], NULL, th_go_in, L);
+			pthread_create(&th[k][(*n)++], NULL, th_srv, L);
+			if (!C.mode_g)
+				pthread_create(&th[k][(*n)++], NULL, th_master, L);
+		}
+	}
+	for (int k = 0; k < C.lanes; k++)
+		for (int i = 0; i < nth[k]; i++)
+			pthread_join(th[k][i], NULL);
+
+	char peerdone[512] = "";
+
+	if (cmdfd >= 0) {
+		struct pollfd pf = { cmdfd, POLLIN, 0 };
+
+		if (poll(&pf, 1, 120000) > 0) {
+			ssize_t k = recv(cmdfd, peerdone, sizeof(peerdone) - 1, 0);
+
+			if (k > 0)
+				peerdone[k] = 0;
+		}
+		peerdone[strcspn(peerdone, "\n")] = 0;
+		close(cmdfd);
+	}
+	/* verification */
+	uint64_t total = 0, ok = 0, bytes = 0;
+	struct reason rs[32];
+	int nr = 0, nf = 0;
+	struct early eg = { 0 }, eh = { 0 };
+	struct { int lane, t; const char *role, *why; int d; uint32_t cn, sn; uint8_t j[NJ]; } first[8];
+
+	for (int k = 0; k < C.lanes; k++) {
+		for (int t = 0; t < C.trials; t++) {
+			struct trial *T = &lanes[k].tr[t];
+
+			total++;
+			verify_trial(&lanes[k], t);
+			if (!T->ga_err && T->ga.id)
+				tally_early(&eg, &T->ga);
+			if (!T->ha_err && T->ha.id)
+				tally_early(&eh, &T->ha);
+			bytes += (uint64_t)T->sp.cn + T->sp.sn;
+			if (!T->fail) {
+				ok++;
+			} else {
+				add_reason(rs, &nr, T->frole, T->fail);
+				if (nf < 8) {
+					first[nf].lane = k;
+					first[nf].t = t;
+					first[nf].role = T->frole;
+					first[nf].why = T->fail;
+					first[nf].d = T->fdetail;
+					first[nf].cn = T->sp.cn;
+					first[nf].sn = T->sp.sn;
+					memcpy(first[nf].j, T->sp.j, NJ);
+					nf++;
+				}
+			}
+		}
+	}
+	for (int k = 0; k < C.lanes; k++) {
+		if (lanes[k].ls_intake >= 0) close(lanes[k].ls_intake);
+		if (lanes[k].ls_dest >= 0) close(lanes[k].ls_dest);
+		if (lanes[k].ls_vh >= 0) close(lanes[k].ls_vh);
+		if (lanes[k].ls_vg >= 0) close(lanes[k].ls_vg);
+		if (lanes[k].ls_app >= 0) close(lanes[k].ls_app);
+		if (lanes[k].ctl_a >= 0) close(lanes[k].ctl_a);
+		if (lanes[k].ctl_b >= 0) close(lanes[k].ctl_b);
+	}
+	octx_close(GCTX);
+	if (HCTX)
+		octx_close(HCTX);
+	usleep(200000);
+	read_proc(after, sizeof(after));
+	printf("RUN_RESULT {\"run\":%d,\"mode\":\"%s\",\"shape\":\"%s\",\"lanes\":%d,\"trials_per_lane\":%d,\"trials\":%llu,\"ok\":%llu,\"fail\":%llu,"
+	       "\"seed\":%llu,\"payload_bytes_each_dir_total\":%llu,\"wall_s\":%.1f,",
+	       C.run, C.mode_g ? "G-vhost" : "L-loopback", SHN[C.shape], C.lanes, C.trials, (unsigned long long)total, (unsigned long long)ok,
+	       (unsigned long long)(total - ok), (unsigned long long)C.seed, (unsigned long long)bytes, (now_ms() - t0) / 1000.0);
+	print_early("guest_attach", &eg);
+	if (!C.mode_g && !in) {
+		printf(",");
+		print_early("host_attach", &eh);
+	}
+	printf(",\"reasons\":{");
+	for (int i = 0; i < nr; i++)
+		printf("%s\"%s\":%llu", i ? "," : "", rs[i].key, (unsigned long long)rs[i].n);
+	printf("},\"first_failures\":[");
+	for (int i = 0; i < nf; i++)
+		printf("%s{\"lane\":%d,\"trial\":%d,\"why\":\"%s/%s\",\"detail\":%d,\"cn\":%u,\"sn\":%u,\"j\":[%d,%d,%d,%d,%d,%d]}", i ? "," : "",
+		       first[i].lane, first[i].t, first[i].role, first[i].why, first[i].d, first[i].cn, first[i].sn, first[i].j[0],
+		       first[i].j[1], first[i].j[2], first[i].j[3], first[i].j[4], first[i].j[5]);
+	printf("],\"proc_before\":\"%s\",\"proc_after\":\"%s\",\"peer_done\":\"%s\"}\n", before, after, peerdone);
+	fflush(stdout);
+	return (ok == total) ? 0 : 1;
+}
+
+/* ------------------------------------------------------------------------------------------------------------------------ probe */
+static int do_probe(void)
+{
+	struct ovd_version v;
+	int fd = open("/dev/ovd_fwd", O_RDWR);
+	long rc;
+
+	if (fd < 0) {
+		perror("open");
+		return 2;
+	}
+	memset(&v, 0, sizeof(v));
+	if (ioctl(fd, OVD_VERSION, &v) < 0) {
+		perror("ioctl VERSION");
+		return 2;
+	}
+	rc = syscall(SYS_delete_module, "ovdpair", O_NONBLOCK);
+	printf("PROBE_RESULT {\"abi\":%u,\"permanent_flag\":%u,\"delete_module_rc\":%ld,\"delete_module_errno\":%d,\"record_size\":%zu}\n", v.abi,
+	       v.flags & OVD_F_PERMANENT, rc, rc < 0 ? errno : 0, sizeof(struct ovd_end));
+	close(fd);
+	return 0;
+}
+
+/* ------------------------------------------------------------------------------------------------------------------------ host peer */
+static int PEER_CTL[MAXLANE];
+static pthread_mutex_t PEER_MU = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t PEER_CV = PTHREAD_COND_INITIALIZER;
+static const char *OUTDIR = ".";
+
+static void *peer_ctl_acceptor(void *a)
+{
+	int k = (int)(intptr_t)a, ls = vs_listen(PORT_CTL + k);
+
+	for (;;) {
+		int fd = accept(ls, NULL, NULL);
+
+		if (fd < 0)
+			continue;
+		pthread_mutex_lock(&PEER_MU);
+		if (PEER_CTL[k] >= 0)
+			close(PEER_CTL[k]);
+		PEER_CTL[k] = fd;
+		pthread_cond_broadcast(&PEER_CV);
+		pthread_mutex_unlock(&PEER_MU);
+	}
+	return NULL;
+}
+
+static int peer_get_ctl(int k)
+{
+	int fd;
+
+	pthread_mutex_lock(&PEER_MU);
+	while (PEER_CTL[k] < 0)
+		pthread_cond_wait(&PEER_CV, &PEER_MU);
+	fd = PEER_CTL[k];
+	pthread_mutex_unlock(&PEER_MU);
+	return fd;
+}
+
+/* egress: the peer plays the host owner + destination behind the host forwarder */
+static void *peer_egress(void *a)
+{
+	int k = (int)(intptr_t)a, ls = vs_listen(PORT_REQ + k);
+
+	for (;;) {
+		struct req q;
+		struct spec sp;
+		const char *why;
+		int saw = 0, fd = accept(ls, NULL, NULL);
+
+		if (fd < 0)
+			continue;
+		set_to(fd, 20000);
+		if (recv_all(fd, &q, sizeof(q)) || q.magic != REQ_MAGIC || q.shape >= NSHAPE) {
+			close(fd);
+			continue;
+		}
+		make_spec(&sp, q.seed, q.shape, q.lane, (int)q.trial);
+		C.mode_g = 1;
+		{
+			int ctl = peer_get_ctl(k);
+
+			jsleep(sp.j[J_HO1]);
+			jsleep(sp.j[J_HO2]);
+			send_P(ctl, (int)q.trial);
+		}
+		why = role_srv(q.shape, fd, &sp, &saw);
+		prun_record(q.run, q.shape, q.seed, q.lane, (int)q.trial, why, "peer-srv");
+		close(fd);
+	}
+	return NULL;
+}
+
+struct inb { int run, shape, lanes, trials, tmo, guestcid, lane; uint64_t seed; };
+
+static void *peer_inb_lane(void *a)
+{
+	struct inb *I = a;
+	int ctl = peer_get_ctl(I->lane);
+
+	for (int t = 0; t < I->trials; t++) {
+		struct spec sp;
+		struct req q;
+		const char *why = NULL;
+		int fd;
+
+		make_spec(&sp, I->seed, I->shape, I->lane, t);
+		fd = vs_connect((unsigned)I->guestcid, PORT_IN + I->lane);
+		if (fd < 0) {
+			prun_record(I->run, I->shape, I->seed, I->lane, t, "connect", "peer-x");
+			continue;
+		}
+		set_to(fd, I->tmo);
+		jsleep(sp.j[J_CLI]);
+		memset(&q, 0, sizeof(q));
+		q.magic = REQ_MAGIC;
+		q.shape = (uint8_t)I->shape;
+		q.lane = (uint8_t)I->lane;
+		q.trial = (uint32_t)t;
+		q.run = (uint32_t)I->run;
+		q.seed = I->seed;
+		if (send_all(fd, &q, sizeof(q))) {
+			why = "req-send";
+		} else if (I->shape != IN_CFEARLY && wait_P(ctl, t, I->tmo * 2) < 0) {
+			why = "no-paired";
+		} else {
+			C.tmo = I->tmo;
+			why = role_cli(I->shape, fd, &sp);
+		}
+		prun_record(I->run, I->shape, I->seed, I->lane, t, why, "peer-x");
+		close(fd);
+	}
+	return NULL;
+}
+
+static void *peer_cmd_conn(void *a)
+{
+	int fd = (int)(intptr_t)a;
+	char line[256];
+	size_t n = 0;
+	struct inb base;
+	pthread_t th[MAXLANE];
+	struct inb lanes[MAXLANE];
+	unsigned long long seed;
+
+	while (n < sizeof(line) - 1) {
+		ssize_t k = recv(fd, line + n, 1, 0);
+
+		if (k <= 0)
+			break;
+		if (line[n++] == '\n')
+			break;
+	}
+	line[n] = 0;
+	if (sscanf(line, "INBOUND %d %d %d %d %llu %d %d", &base.run, &base.shape, &base.lanes, &base.trials, &seed, &base.tmo, &base.guestcid) != 7 ||
+	    base.lanes > MAXLANE) {
+		close(fd);
+		return NULL;
+	}
+	base.seed = seed;
+	C.mode_g = 1;
+	for (int k = 0; k < base.lanes; k++) {
+		lanes[k] = base;
+		lanes[k].lane = k;
+		pthread_create(&th[k], NULL, peer_inb_lane, &lanes[k]);
+	}
+	for (int k = 0; k < base.lanes; k++)
+		pthread_join(th[k], NULL);
+	{
+		char done[128];
+
+		pthread_mutex_lock(&PRmu);
+		struct prun *p = prun_get((uint32_t)base.run, base.shape, base.seed);
+
+		snprintf(done, sizeof(done), "DONE run=%d peer_trials=%llu peer_ok=%llu peer_fail=%llu\n", base.run, (unsigned long long)p->trials,
+			 (unsigned long long)p->ok, (unsigned long long)p->fail);
+		pthread_mutex_unlock(&PRmu);
+		send_all(fd, done, strlen(done));
+	}
+	close(fd);
+	return NULL;
+}
+
+static void *peer_dumper(void *a)
+{
+	(void)a;
+	for (;;) {
+		char path[512];
+		FILE *f;
+
+		sleep(1);
+		snprintf(path, sizeof(path), "%s/peer-summary.json", OUTDIR);
+		f = fopen(path, "w");
+		if (f) {
+			prun_dump(f);
+			fclose(f);
+		}
+	}
+	return NULL;
+}
+
+static void peer_term(int sig)
+{
+	char path[512];
+	FILE *f;
+
+	(void)sig;
+	snprintf(path, sizeof(path), "%s/peer-summary.json", OUTDIR);
+	f = fopen(path, "w");
+	if (f) {
+		prun_dump(f);
+		fclose(f);
+	}
+	_exit(0);
+}
+
+static int do_peer(const char *outdir)
+{
+	pthread_t t;
+	int cl = vs_listen(PORT_CMD);
+
+	OUTDIR = outdir;
+	for (int k = 0; k < MAXLANE; k++)
+		PEER_CTL[k] = -1;
+	signal(SIGTERM, peer_term);
+	signal(SIGINT, peer_term);
+	signal(SIGPIPE, SIG_IGN);
+	for (int k = 0; k < MAXLANE; k++) {
+		pthread_create(&t, NULL, peer_ctl_acceptor, (void *)(intptr_t)k);
+		pthread_create(&t, NULL, peer_egress, (void *)(intptr_t)k);
+	}
+	pthread_create(&t, NULL, peer_dumper, NULL);
+	fprintf(stderr, "PEER_READY\n");
+	printf("PEER_READY\n");
+	fflush(stdout);
+	for (;;) {
+		int fd = accept(cl, NULL, NULL);
+
+		if (fd >= 0)
+			pthread_create(&t, NULL, peer_cmd_conn, (void *)(intptr_t)fd);
+	}
+	return 0;
+}
+
+int main(int argc, char **argv)
+{
+	setvbuf(stdout, NULL, _IOLBF, 0);
+	signal(SIGPIPE, SIG_IGN);
+	if (argc >= 2 && !strcmp(argv[1], "probe"))
+		return do_probe();
+	if (argc >= 3 && !strcmp(argv[1], "peer"))
+		return do_peer(argv[2]);
+	if (argc >= 8 && (!strcmp(argv[1], "L") || !strcmp(argv[1], "G"))) {
+		int s;
+
+		C.mode_g = argv[1][0] == 'G';
+		for (s = 0; s < NSHAPE; s++)
+			if (!strcmp(argv[2], SHN[s]))
+				break;
+		if (s == NSHAPE) {
+			fprintf(stderr, "unknown shape %s\n", argv[2]);
+			return 2;
+		}
+		C.shape = s;
+		C.lanes = atoi(argv[3]);
+		C.trials = atoi(argv[4]);
+		C.seed = strtoull(argv[5], NULL, 0);
+		C.tmo = atoi(argv[6]);
+		C.run = atoi(argv[7]);
+		C.hostcid = C.mode_g ? (argc > 8 ? atoi(argv[8]) : 2) : VMADDR_CID_LOCAL;
+		C.guestcid = C.mode_g ? (argc > 9 ? atoi(argv[9]) : 3) : VMADDR_CID_LOCAL;
+		if (C.lanes < 1 || C.lanes > MAXLANE)
+			return 2;
+		return run_lanes();
+	}
+	fprintf(stderr, "usage: see source header\n");
+	return 2;
+}

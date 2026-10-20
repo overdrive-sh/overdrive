@@ -1,0 +1,29 @@
+# quiescence-hazard-foreign-decrements: counterexample, 3 state(s) (from the TLC trace)
+
+State 1
+  table = TRUE
+  cnt = 0
+  flowsOpen = 0
+  conf_step = [InitDown |-> [tag |-> "UNIT"]]
+  leaked = 0
+  latch = FALSE
+  foreign = FALSE
+  dmg = [C1 |-> FALSE, C2 |-> FALSE]
+  up = TRUE
+  att = [C1 |-> 0, C2 |-> 0]
+  stop = "none"
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+  repLeft = 1
+  rec = [C1 |-> "idle", C2 |-> "idle"]
+
+State 2 [LeakHold]
+  cnt = 1
+  leaked = 1
+  latch = TRUE
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+
+State 3 [ForeignRestore]
+  cnt = 0
+  latch = FALSE
+  foreign = TRUE
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> TRUE ]

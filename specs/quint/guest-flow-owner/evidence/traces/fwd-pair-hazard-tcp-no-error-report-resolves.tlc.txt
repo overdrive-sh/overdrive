@@ -1,0 +1,1234 @@
+State 1: <Initial predicate>
+/\ pair_liveTcpNoErrorReport_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_attRes = [g |-> "none", h |-> "none"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_pr = [ g |->
+      [ ph |-> "unattached",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "unattached",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_vmUp = TRUE
+/\ pair_liveTcpNoErrorReport_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_liveTcpNoErrorReport_fwd_pair_hres = "none"
+/\ pair_liveTcpNoErrorReport_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_liveTcpNoErrorReport_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_liveTcpNoErrorReport_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_strmAbort = FALSE
+/\ pair_liveTcpNoErrorReport_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_liveTcpNoErrorReport_fwd_pair_guestAbortSent = FALSE
+/\ pair_liveTcpNoErrorReport_fwd_pair_mode = "stream"
+
+State 2: <pair_liveTcpNoErrorReport_fwd_pair_Fin line 2284, col 3 to line 2321, col 76 of module pair_liveTcpNoErrorReport>
+/\ pair_liveTcpNoErrorReport_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_attRes = [g |-> "none", h |-> "none"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_pr = [ g |->
+      [ ph |-> "unattached",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "unattached",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_vmUp = TRUE
+/\ pair_liveTcpNoErrorReport_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_liveTcpNoErrorReport_fwd_pair_hres = "none"
+/\ pair_liveTcpNoErrorReport_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_liveTcpNoErrorReport_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_liveTcpNoErrorReport_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_strmAbort = FALSE
+/\ pair_liveTcpNoErrorReport_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_liveTcpNoErrorReport_fwd_pair_guestAbortSent = FALSE
+/\ pair_liveTcpNoErrorReport_fwd_pair_mode = "stream"
+
+State 3: <pair_liveTcpNoErrorReport_fwd_pair_Attach line 4076, col 3 to line 4086, col 78 of module pair_liveTcpNoErrorReport>
+/\ pair_liveTcpNoErrorReport_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_attRes = [g |-> "none", h |-> "ok"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_pr = [ g |->
+      [ ph |-> "unattached",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_vmUp = TRUE
+/\ pair_liveTcpNoErrorReport_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_liveTcpNoErrorReport_fwd_pair_hres = "none"
+/\ pair_liveTcpNoErrorReport_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_liveTcpNoErrorReport_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_liveTcpNoErrorReport_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_strmAbort = FALSE
+/\ pair_liveTcpNoErrorReport_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_liveTcpNoErrorReport_fwd_pair_guestAbortSent = FALSE
+/\ pair_liveTcpNoErrorReport_fwd_pair_mode = "stream"
+
+State 4: <pair_liveTcpNoErrorReport_fwd_pair_Attach line 4076, col 3 to line 4086, col 78 of module pair_liveTcpNoErrorReport>
+/\ pair_liveTcpNoErrorReport_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_vmUp = TRUE
+/\ pair_liveTcpNoErrorReport_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_liveTcpNoErrorReport_fwd_pair_hres = "none"
+/\ pair_liveTcpNoErrorReport_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_liveTcpNoErrorReport_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_liveTcpNoErrorReport_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_strmAbort = FALSE
+/\ pair_liveTcpNoErrorReport_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_liveTcpNoErrorReport_fwd_pair_guestAbortSent = FALSE
+/\ pair_liveTcpNoErrorReport_fwd_pair_mode = "stream"
+
+State 5: <pair_liveTcpNoErrorReport_fwd_pair_HopEnd0 line 3683, col 3 to line 3708, col 53 of module pair_liveTcpNoErrorReport>
+/\ pair_liveTcpNoErrorReport_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<{"S"}>>]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {"S"},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> TRUE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_vmUp = TRUE
+/\ pair_liveTcpNoErrorReport_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_liveTcpNoErrorReport_fwd_pair_hres = "none"
+/\ pair_liveTcpNoErrorReport_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_liveTcpNoErrorReport_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_liveTcpNoErrorReport_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_strmAbort = FALSE
+/\ pair_liveTcpNoErrorReport_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_liveTcpNoErrorReport_fwd_pair_guestAbortSent = FALSE
+/\ pair_liveTcpNoErrorReport_fwd_pair_mode = "stream"
+
+State 6: <pair_liveTcpNoErrorReport_fwd_pair_TcpRst line 4366, col 16 to line 4371, col 14 of module pair_liveTcpNoErrorReport>
+/\ pair_liveTcpNoErrorReport_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> TRUE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_tcpErr = [g |-> "0", h |-> "EPIPE"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<{"S"}>>]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {"S"},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> TRUE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_vmUp = TRUE
+/\ pair_liveTcpNoErrorReport_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_liveTcpNoErrorReport_fwd_pair_hres = "none"
+/\ pair_liveTcpNoErrorReport_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ep = [g |-> "alive", h |-> "dead"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_liveTcpNoErrorReport_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_liveTcpNoErrorReport_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {"h"},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 1,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_strmAbort = FALSE
+/\ pair_liveTcpNoErrorReport_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_liveTcpNoErrorReport_fwd_pair_guestAbortSent = FALSE
+/\ pair_liveTcpNoErrorReport_fwd_pair_mode = "stream"
+
+State 7: <pair_liveTcpNoErrorReport_fwd_pair_VCtl line 4318, col 3 to line 4322, col 52 of module pair_liveTcpNoErrorReport>
+/\ pair_liveTcpNoErrorReport_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> TRUE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_tcpErr = [g |-> "0", h |-> "EPIPE"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_vs = [ g |->
+      [ ps |-> {"S"},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "clean",
+        tcls |-> "clean",
+        ucls |-> "clean",
+        att |-> "noend",
+        clsAt |-> "callback",
+        ncls |-> 1,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {"S"},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> TRUE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_vmUp = TRUE
+/\ pair_liveTcpNoErrorReport_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_liveTcpNoErrorReport_fwd_pair_hres = "none"
+/\ pair_liveTcpNoErrorReport_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ep = [g |-> "alive", h |-> "dead"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_liveTcpNoErrorReport_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_liveTcpNoErrorReport_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {"h"},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 1,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_strmAbort = FALSE
+/\ pair_liveTcpNoErrorReport_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_liveTcpNoErrorReport_fwd_pair_guestAbortSent = FALSE
+/\ pair_liveTcpNoErrorReport_fwd_pair_mode = "stream"
+
+State 8: <pair_liveTcpNoErrorReport_fwd_pair_HopEnd1 line 3714, col 3 to line 3768, col 53 of module pair_liveTcpNoErrorReport>
+/\ pair_liveTcpNoErrorReport_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> TRUE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "clean",
+        dstShut |-> TRUE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_tcpErr = [g |-> "0", h |-> "EPIPE"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_vs = [ g |->
+      [ ps |-> {"S"},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "clean",
+        tcls |-> "clean",
+        ucls |-> "clean",
+        att |-> "noend",
+        clsAt |-> "callback",
+        ncls |-> 1,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {"S"},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> TRUE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_vmUp = TRUE
+/\ pair_liveTcpNoErrorReport_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_liveTcpNoErrorReport_fwd_pair_hres = "none"
+/\ pair_liveTcpNoErrorReport_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ep = [g |-> "alive", h |-> "dead"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_liveTcpNoErrorReport_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_liveTcpNoErrorReport_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {"h"},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 1,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_strmAbort = FALSE
+/\ pair_liveTcpNoErrorReport_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_liveTcpNoErrorReport_fwd_pair_guestAbortSent = FALSE
+/\ pair_liveTcpNoErrorReport_fwd_pair_mode = "stream"
+
+State 9: <pair_liveTcpNoErrorReport_fwd_pair_ReadEof line 3169, col 3 to line 3218, col 53 of module pair_liveTcpNoErrorReport>
+/\ pair_liveTcpNoErrorReport_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> TRUE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> TRUE,
+        q0 |-> <<>>,
+        h0 |-> <<>>,
+        q1 |-> <<>>,
+        h1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "clean",
+        srcShut |-> TRUE,
+        dstEnd |-> "clean",
+        dstShut |-> TRUE,
+        got |-> <<>>,
+        eof |-> TRUE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_tcpErr = [g |-> "0", h |-> "EPIPE"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_vs = [ g |->
+      [ ps |-> {"S"},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "clean",
+        tcls |-> "clean",
+        ucls |-> "clean",
+        att |-> "noend",
+        clsAt |-> "callback",
+        ncls |-> 1,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {"S"},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> TRUE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_vmUp = TRUE
+/\ pair_liveTcpNoErrorReport_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_liveTcpNoErrorReport_fwd_pair_hres = "none"
+/\ pair_liveTcpNoErrorReport_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_ep = [g |-> "alive", h |-> "dead"]
+/\ pair_liveTcpNoErrorReport_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_liveTcpNoErrorReport_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
+/\ pair_liveTcpNoErrorReport_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {"h"},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 1,
+  hobs |-> "none",
+  woken |-> FALSE,
+  recPend |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_liveTcpNoErrorReport_fwd_pair_strmAbort = FALSE
+/\ pair_liveTcpNoErrorReport_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_liveTcpNoErrorReport_fwd_pair_guestAbortSent = FALSE
+/\ pair_liveTcpNoErrorReport_fwd_pair_mode = "stream"
+
+State 10: Stuttering

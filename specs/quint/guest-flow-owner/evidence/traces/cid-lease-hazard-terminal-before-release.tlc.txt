@@ -1,0 +1,415 @@
+State 1: <Initial predicate>
+/\ lease_bugTerminalBeforeRelease_cid_lease_att = <<0, 0>>
+/\ lease_bugTerminalBeforeRelease_cid_lease_up = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugTerminalBeforeRelease_cid_lease_reclaimed = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugTerminalBeforeRelease_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"none", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_bugTerminalBeforeRelease_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugTerminalBeforeRelease_cid_lease_bootLeft = -1
+/\ lease_bugTerminalBeforeRelease_cid_lease_cursor = 0
+/\ lease_bugTerminalBeforeRelease_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+
+State 2: <lease_bugTerminalBeforeRelease_cid_lease_Assign line 1414, col 3 to line 1531, col 62 of module lease_bugTerminalBeforeRelease>
+/\ lease_bugTerminalBeforeRelease_cid_lease_att = <<0, 0>>
+/\ lease_bugTerminalBeforeRelease_cid_lease_up = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugTerminalBeforeRelease_cid_lease_reclaimed = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugTerminalBeforeRelease_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"none", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_bugTerminalBeforeRelease_cid_lease_al = << [ st |-> "leased",
+     off |-> 0,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugTerminalBeforeRelease_cid_lease_bootLeft = -1
+/\ lease_bugTerminalBeforeRelease_cid_lease_cursor = 1
+/\ lease_bugTerminalBeforeRelease_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+
+State 3: <lease_bugTerminalBeforeRelease_cid_lease_Launch line 1595, col 3 to line 1689, col 62 of module lease_bugTerminalBeforeRelease>
+/\ lease_bugTerminalBeforeRelease_cid_lease_att = <<0, 0>>
+/\ lease_bugTerminalBeforeRelease_cid_lease_up = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugTerminalBeforeRelease_cid_lease_reclaimed = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugTerminalBeforeRelease_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"none", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_bugTerminalBeforeRelease_cid_lease_al = << [ st |-> "running",
+     off |-> 0,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugTerminalBeforeRelease_cid_lease_bootLeft = -1
+/\ lease_bugTerminalBeforeRelease_cid_lease_cursor = 1
+/\ lease_bugTerminalBeforeRelease_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+
+State 4: <lease_bugTerminalBeforeRelease_cid_lease_VmmCrash line 1695, col 3 to line 1707, col 62 of module lease_bugTerminalBeforeRelease>
+/\ lease_bugTerminalBeforeRelease_cid_lease_att = <<0, 0>>
+/\ lease_bugTerminalBeforeRelease_cid_lease_up = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugTerminalBeforeRelease_cid_lease_reclaimed = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugTerminalBeforeRelease_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"crash", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_bugTerminalBeforeRelease_cid_lease_al = << [ st |-> "ended",
+     off |-> 0,
+     retry |-> TRUE,
+     ex |-> FALSE,
+     chg |-> TRUE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugTerminalBeforeRelease_cid_lease_bootLeft = -1
+/\ lease_bugTerminalBeforeRelease_cid_lease_cursor = 1
+/\ lease_bugTerminalBeforeRelease_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+
+State 5: <lease_bugTerminalBeforeRelease_cid_lease_Assign line 1414, col 3 to line 1531, col 62 of module lease_bugTerminalBeforeRelease>
+/\ lease_bugTerminalBeforeRelease_cid_lease_att = <<1, 0>>
+/\ lease_bugTerminalBeforeRelease_cid_lease_up = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_lease = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
+/\ lease_bugTerminalBeforeRelease_cid_lease_reclaimed = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugTerminalBeforeRelease_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"crash", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_bugTerminalBeforeRelease_cid_lease_al = << [ st |-> "leased",
+     off |-> 1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> TRUE,
+     pred |-> 0,
+     pst |-> "held" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugTerminalBeforeRelease_cid_lease_bootLeft = -1
+/\ lease_bugTerminalBeforeRelease_cid_lease_cursor = 2
+/\ lease_bugTerminalBeforeRelease_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+
+State 6: <lease_bugTerminalBeforeRelease_cid_lease_Launch line 1595, col 3 to line 1689, col 62 of module lease_bugTerminalBeforeRelease>
+/\ lease_bugTerminalBeforeRelease_cid_lease_att = <<1, 0>>
+/\ lease_bugTerminalBeforeRelease_cid_lease_up = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_lease = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
+/\ lease_bugTerminalBeforeRelease_cid_lease_reclaimed = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_dev = (0 :> 0 @@ 1 :> 1 @@ 2 :> 0)
+/\ lease_bugTerminalBeforeRelease_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"crash", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_bugTerminalBeforeRelease_cid_lease_al = << [ st |-> "running",
+     off |-> 1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> 0,
+     pst |-> "retiring" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugTerminalBeforeRelease_cid_lease_bootLeft = -1
+/\ lease_bugTerminalBeforeRelease_cid_lease_cursor = 2
+/\ lease_bugTerminalBeforeRelease_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+
+State 7: <lease_bugTerminalBeforeRelease_cid_lease_VmmCrash line 1695, col 3 to line 1707, col 62 of module lease_bugTerminalBeforeRelease>
+/\ lease_bugTerminalBeforeRelease_cid_lease_att = <<1, 0>>
+/\ lease_bugTerminalBeforeRelease_cid_lease_up = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_lease = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
+/\ lease_bugTerminalBeforeRelease_cid_lease_reclaimed = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugTerminalBeforeRelease_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"crash", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_bugTerminalBeforeRelease_cid_lease_al = << [ st |-> "ended",
+     off |-> 1,
+     retry |-> TRUE,
+     ex |-> FALSE,
+     chg |-> TRUE,
+     pred |-> 0,
+     pst |-> "retiring" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugTerminalBeforeRelease_cid_lease_bootLeft = -1
+/\ lease_bugTerminalBeforeRelease_cid_lease_cursor = 2
+/\ lease_bugTerminalBeforeRelease_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+
+State 8: <lease_bugTerminalBeforeRelease_cid_lease_Release line 1007, col 3 to line 1157, col 62 of module lease_bugTerminalBeforeRelease>
+/\ lease_bugTerminalBeforeRelease_cid_lease_att = <<1, 0>>
+/\ lease_bugTerminalBeforeRelease_cid_lease_up = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_lease = (0 :> 0 @@ 1 :> 1 @@ 2 :> 0)
+/\ lease_bugTerminalBeforeRelease_cid_lease_reclaimed = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugTerminalBeforeRelease_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"crash", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_bugTerminalBeforeRelease_cid_lease_al = << [ st |-> "ended",
+     off |-> 1,
+     retry |-> TRUE,
+     ex |-> FALSE,
+     chg |-> TRUE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugTerminalBeforeRelease_cid_lease_bootLeft = -1
+/\ lease_bugTerminalBeforeRelease_cid_lease_cursor = 2
+/\ lease_bugTerminalBeforeRelease_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+
+State 9: <lease_bugTerminalBeforeRelease_cid_lease_Assign line 1414, col 3 to line 1531, col 62 of module lease_bugTerminalBeforeRelease>
+/\ lease_bugTerminalBeforeRelease_cid_lease_att = <<2, 0>>
+/\ lease_bugTerminalBeforeRelease_cid_lease_up = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_lease = (0 :> 0 @@ 1 :> 1 @@ 2 :> 1)
+/\ lease_bugTerminalBeforeRelease_cid_lease_reclaimed = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugTerminalBeforeRelease_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"crash", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_bugTerminalBeforeRelease_cid_lease_al = << [ st |-> "leased",
+     off |-> 2,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> TRUE,
+     pred |-> 1,
+     pst |-> "held" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugTerminalBeforeRelease_cid_lease_bootLeft = -1
+/\ lease_bugTerminalBeforeRelease_cid_lease_cursor = 0
+/\ lease_bugTerminalBeforeRelease_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+
+State 10: <lease_bugTerminalBeforeRelease_cid_lease_Launch line 1595, col 3 to line 1689, col 62 of module lease_bugTerminalBeforeRelease>
+/\ lease_bugTerminalBeforeRelease_cid_lease_att = <<2, 0>>
+/\ lease_bugTerminalBeforeRelease_cid_lease_up = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_lease = (0 :> 0 @@ 1 :> 1 @@ 2 :> 1)
+/\ lease_bugTerminalBeforeRelease_cid_lease_reclaimed = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 1)
+/\ lease_bugTerminalBeforeRelease_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"crash", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_bugTerminalBeforeRelease_cid_lease_al = << [ st |-> "running",
+     off |-> 2,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> 1,
+     pst |-> "retiring" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugTerminalBeforeRelease_cid_lease_bootLeft = -1
+/\ lease_bugTerminalBeforeRelease_cid_lease_cursor = 0
+/\ lease_bugTerminalBeforeRelease_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+
+State 11: <lease_bugTerminalBeforeRelease_cid_lease_Release line 1007, col 3 to line 1157, col 62 of module lease_bugTerminalBeforeRelease>
+/\ lease_bugTerminalBeforeRelease_cid_lease_att = <<2, 0>>
+/\ lease_bugTerminalBeforeRelease_cid_lease_up = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 1)
+/\ lease_bugTerminalBeforeRelease_cid_lease_reclaimed = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 1)
+/\ lease_bugTerminalBeforeRelease_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"crash", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_bugTerminalBeforeRelease_cid_lease_al = << [ st |-> "running",
+     off |-> 2,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugTerminalBeforeRelease_cid_lease_bootLeft = -1
+/\ lease_bugTerminalBeforeRelease_cid_lease_cursor = 0
+/\ lease_bugTerminalBeforeRelease_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+
+State 12: <lease_bugTerminalBeforeRelease_cid_lease_VmmCrash line 1695, col 3 to line 1707, col 62 of module lease_bugTerminalBeforeRelease>
+/\ lease_bugTerminalBeforeRelease_cid_lease_att = <<2, 0>>
+/\ lease_bugTerminalBeforeRelease_cid_lease_up = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 1)
+/\ lease_bugTerminalBeforeRelease_cid_lease_reclaimed = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugTerminalBeforeRelease_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"crash", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_bugTerminalBeforeRelease_cid_lease_al = << [ st |-> "ended",
+     off |-> 2,
+     retry |-> FALSE,
+     ex |-> TRUE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugTerminalBeforeRelease_cid_lease_bootLeft = -1
+/\ lease_bugTerminalBeforeRelease_cid_lease_cursor = 0
+/\ lease_bugTerminalBeforeRelease_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+
+State 13: <lease_bugTerminalBeforeRelease_cid_lease_Finalize line 633, col 3 to line 723, col 62 of module lease_bugTerminalBeforeRelease>
+/\ lease_bugTerminalBeforeRelease_cid_lease_att = <<2, 0>>
+/\ lease_bugTerminalBeforeRelease_cid_lease_up = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 1)
+/\ lease_bugTerminalBeforeRelease_cid_lease_reclaimed = TRUE
+/\ lease_bugTerminalBeforeRelease_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugTerminalBeforeRelease_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"crash", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_bugTerminalBeforeRelease_cid_lease_al = << [ st |-> "failed",
+     off |-> 2,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugTerminalBeforeRelease_cid_lease_bootLeft = -1
+/\ lease_bugTerminalBeforeRelease_cid_lease_cursor = 0
+/\ lease_bugTerminalBeforeRelease_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]

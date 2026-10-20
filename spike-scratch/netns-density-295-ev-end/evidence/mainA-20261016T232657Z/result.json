@@ -1,0 +1,32 @@
+{
+ "qemu_exit": 0,
+ "host_done": true,
+ "elapsed_s": 782.8360285758972,
+ "scenarios": [
+  "clean-g-first:1000",
+  "clean-r-first:1000",
+  "clean-simul:1000",
+  "clean-then-trailing-0x3:1000",
+  "clean-fullend-0x2-0x3-hostlag:1000",
+  "clean-fullend-0x2-0x3-guestlag:1000",
+  "g-rst-both-dirs:1000",
+  "g-rst-hg-only:1000",
+  "g-close-unread:1000",
+  "r-rst-both-dirs:1000",
+  "r-rst-gh-only:1000",
+  "r-close-unread:1000",
+  "host-abort:1000",
+  "guest-abort:1000",
+  "guest-abort-direct0x3-hostdir-closed:1000",
+  "guest-abort-0x2then0x3-hostdir-open:1000",
+  "host-abort-direct0x3-guestdir-closed:1000",
+  "host-abort-0x2then0x3-guestdir-open:1000",
+  "stalled-g-rst:200",
+  "stalled-r-rst:200",
+  "stalled-host-abort:200"
+ ],
+ "hazard_host": 0,
+ "hazard_guest": 0,
+ "physical_module_names_unchanged": true,
+ "module_on_physical_host": []
+}

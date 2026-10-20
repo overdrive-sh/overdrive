@@ -1,0 +1,824 @@
+GUEST_BOOT uname_r=7.0.0-29-generic
+GUEST_READY
+== job2b: in-cfearly serial 10000 with the hang watchdog (the previous run hung here)
+7.0.0-29-generic
+HANG_DUMP run=304 shape=in-cfearly idle_s=45 done=279
+  lane 0 first-incomplete trial 278 done=0x3 need=0x7 fail=master/role-hang cn=17 sn=4 j=3,0,2,2,3,0 ga_err=0 gr_ok=0
+attached=279 completed=279 aborted=0 records=279 runs=2636 attach_rej_state=0 attach_early_bytes=167 attach_early_end=164 attach_early_abort=0 ab_socket=0 ab_peer=0 ab_unclassified_eof=0 released_pairs=0 fault_hits=0
+[   86.863619] sysrq: Show State
+[   86.876398]  ? __x64_sys_clock_nanosleep+0xee/0x190
+[   86.876405]  ? srso_alias_return_thunk+0x5/0xfbef5
+[   86.876412]  ? srso_alias_return_thunk+0x5/0xfbef5
+[   86.876419]  ? arch_exit_to_user_mode_prepare.isra.0+0xc3/0xe0
+[   86.876425]  ? srso_alias_return_thunk+0x5/0xfbef5
+[   86.876431]  ? do_syscall_64+0x140/0x5a0
+[   86.876437]  ? srso_alias_return_thunk+0x5/0xfbef5
+[   86.876442]  ? do_syscall_64+0x140/0x5a0
+[   86.876448]  ? arch_exit_to_user_mode_prepare.isra.0+0xc3/0xe0
+[   86.876454]  ? srso_alias_return_thunk+0x5/0xfbef5
+[   86.876460]  ? do_syscall_64+0x140/0x5a0
+[   86.876466]  ? srso_alias_return_thunk+0x5/0xfbef5
+[   86.876473]  ? srso_alias_return_thunk+0x5/0xfbef5
+[   86.876479]  ? sysvec_apic_timer_interrupt+0x54/0xd0
+[   86.876485]  entry_SYSCALL_64_after_hwframe+0x76/0x7e
+[   86.876490] RIP: 0033:0x47e322
+[   86.876495] RSP: 002b:000077bd97a6e008 EFLAGS: 00000246 ORIG_RAX: 00000000000000ca
+[   86.876502] RAX: ffffffffffffffda RBX: 00007ffdc850227c RCX: 000000000047e322
+[   86.876506] RDX: 00000000000000cb RSI: 0000000000000189 RDI: 00007ffdc8502284
+[   86.876510] RBP: 000077bd97a6e030 R08: 0000000000000000 R09: 00000000ffffffff
+[   86.876514] R10: 000077bd97a6e190 R11: 0000000000000246 R12: 0000000000000000
+[   86.876517] R13: 00007ffdc8502284 R14: 00007ffdc8502260 R15: 00007ffdc8502238
+[   86.876529]  </TASK>
+[   86.876533] task:kworker/2:2     state:I stack:0     pid:112   tgid:112   ppid:2      task_flags:0x4208060 flags:0x00080000
+[   86.876541] Workqueue:  0x0 (ovd_fwd)
+[   86.876550] Call Trace:
+[   86.876553]  <TASK>
+[   86.876558]  __schedule+0x2bb/0x650
+[   86.876567]  schedule+0x27/0x90
+[   86.876573]  worker_thread+0xa4/0x360
+[   86.876580]  ? _raw_spin_unlock_irqrestore+0x11/0x60
+[   86.876585]  ? srso_alias_return_thunk+0x5/0xfbef5
+[   86.876592]  ? __pfx_worker_thread+0x10/0x10
+[   86.876599]  kthread+0xf7/0x130
+[   86.876607]  ? __pfx_kthread+0x10/0x10
+[   86.876615]  ret_from_fork+0x195/0x2a0
+[   86.876623]  ? __pfx_kthread+0x10/0x10
+[   86.876630]  ? __pfx_kthread+0x10/0x10
+[   86.876638]  ret_from_fork_asm+0x1a/0x30
+[   86.876652]  </TASK>
+[   86.876655] task:kworker/1:2     state:I stack:0     pid:113   tgid:113   ppid:2      task_flags:0x4208060 flags:0x00080000
+[   86.876663] Workqueue:  0x0 (events)
+[   86.876672] Call Trace:
+[   86.876675]  <TASK>
+[   86.876681]  __schedule+0x2bb/0x650
+[   86.876704]  schedule+0x27/0x90
+[   86.876710]  worker_thread+0xa4/0x360
+[   86.876717]  ? _raw_spin_unlock_irqrestore+0x11/0x60
+[   86.876722]  ? srso_alias_return_thunk+0x5/0xfbef5
+[   86.876729]  ? __pfx_worker_thread+0x10/0x10
+[   86.876736]  kthread+0xf7/0x130
+[   86.876743]  ? __pfx_kthread+0x10/0x10
+[   86.876752]  ret_from_fork+0x195/0x2a0
+[   86.876760]  ? __pfx_kthread+0x10/0x10
+[   86.876767]  ? __pfx_kthread+0x10/0x10
+[   86.876775]  ret_from_fork_asm+0x1a/0x30
+[   86.876788]  </TASK>
+[   86.876792] task:sh              state:R  running task     stack:0     pid:114   tgid:114   ppid:108    task_flags:0x400100 flags:0x00000000
+[   86.876814] Call Trace:
+[   86.876818]  <TASK>
+[   86.876821]  show_stack+0x49/0x60
+[   86.876831]  sched_show_task+0x18f/0x1f0
+[   86.876841]  show_state_filter+0x58/0x100
+[   86.876850]  sysrq_handle_showstate+0x10/0x20
+[   86.876858]  __handle_sysrq.cold+0x23/0x167
+[   86.876868]  write_sysrq_trigger+0x62/0xa0
+[   86.876877]  proc_reg_write+0x6d/0xd0
+[   86.876886]  vfs_write+0xce/0x490
+[   86.876894]  ? __x64_sys_dup2+0x24/0x110
+[   86.876901]  ? srso_alias_return_thunk+0x5/0xfbef5
+[   86.876907]  ? xas_load+0x11/0x100
+[   86.876916]  ? srso_alias_return_thunk+0x5/0xfbef5
+[   86.876922]  ? do_syscall_64+0x140/0x5a0
+[   86.876927]  ? srso_alias_return_thunk+0x5/0xfbef5
+[   86.876933]  ? xas_find+0x84/0x1c0
+[   86.876940]  ksys_write+0x71/0xf0
+[   86.876950]  __x64_sys_write+0x19/0x30
+[   86.876956]  x64_sys_call+0x22f/0x2390
+[   86.876963]  do_syscall_64+0x105/0x5a0
+[   86.876975]  ? srso_alias_return_thunk+0x5/0xfbef5
+[   86.876981]  ? do_read_fault+0x10a/0x280
+[   86.876990]  ? srso_alias_return_thunk+0x5/0xfbef5
+[   86.876996]  ? wp_page_reuse+0x97/0xc0
+[   86.877004]  ? srso_alias_return_thunk+0x5/0xfbef5
+[   86.877010]  ? do_fault+0x16c/0x2a0
+[   86.877018]  ? pte_offset_map_rw_nolock+0x20/0xa0
+[   86.877025]  ? srso_alias_return_thunk+0x5/0xfbef5
+[   86.877031]  ? handle_pte_fault+0x141/0x1f0
+[   86.877039]  ? srso_alias_return_thunk+0x5/0xfbef5
+[   86.877045]  ? __handle_mm_fault+0x493/0x720
+[   86.877055]  ? srso_alias_return_thunk+0x5/0xfbef5
+[   86.877061]  ? count_memcg_events+0x103/0x250
+[   86.877069]  ? srso_alias_return_thunk+0x5/0xfbef5
+[   86.877075]  ? handle_mm_fault+0x1be/0x2e0
+[   86.877083]  ? srso_alias_return_thunk+0x5/0xfbef5
+[   86.877089]  ? arch_exit_to_user_mode_prepare.isra.0+0xd/0x100
+[   86.877096]  ? srso_alias_return_thunk+0x5/0xfbef5
+[   86.877102]  ? irqentry_exit+0x97/0x6f0
+[   86.877111]  ? srso_alias_return_thunk+0x5/0xfbef5
+[   86.877117]  ? exc_page_fault+0x94/0x1e0
+[   86.877124]  entry_SYSCALL_64_after_hwframe+0x76/0x7e
+[   86.877130] RIP: 0033:0x4ccde6
+[   86.877135] Code: 47 ba 04 00 00 00 48 c7 c0 e8 ff ff ff 64 89 10 48 c7 c2 ff ff ff ff c9 48 89 d0 c3 0f 1f 84 00 00 00 00 00 48 8b 45 10 0f 05 <48> 89 c2 48 3d 00 f0 ff ff 77 0f c9 48 89 d0 c3 66 2e 0f 1f 84 00
+[   86.877140] RSP: 002b:00007ffee2da6c00 EFLAGS: 00000202 ORIG_RAX: 0000000000000001
+[   86.877146] RAX: ffffffffffffffda RBX: 0000000000000001 RCX: 00000000004ccde6
+[   86.877150] RDX: 0000000000000002 RSI: 000000001e2b3ed0 RDI: 0000000000000001
+[   86.877154] RBP: 00007ffee2da6c10 R08: 0000000000000000 R09: 0000000000000000
+[   86.877158] R10: 0000000000000000 R11: 0000000000000202 R12: 000000001e2b3ed0
+[   86.877162] R13: 0000000000000002 R14: 0000000000000000 R15: 000000001e2b3ed2
+[   86.877173]  </TASK>
+[   86.877177] Sched Debug Version: v0.11, 7.0.0-29-generic #29-Ubuntu
+[   86.877182] ktime                                   : 86874.491062
+[   86.877187] sched_clk                               : 86919.143244
+[   86.877192] cpu_clk                                 : 86877.177238
+[   86.877196] jiffies                                 : 4294754142
+[   86.877199] sched_clock_stable()                    : 1
+[   86.877203] 
+[   86.877206] sysctl_sched
+[   86.877209]   .sysctl_sched_base_slice                 : 2.100000
+[   86.877213]   .sysctl_sched_features                   : 99805151
+[   86.877217]   .sysctl_sched_tunable_scaling            : 1 (logarithmic)
+[   86.877221] 
+[   86.877225] cpu#0, 2396.400 MHz
+[   86.877229]   .nr_running                    : 0
+[   86.877233]   .nr_switches                   : 5903
+[   86.877236]   .nr_uninterruptible            : 1
+[   86.877240]   .next_balance                  : 4294.754144
+[   86.877244]   .curr->pid                     : 0
+[   86.877247]   .clock                         : 86876.698961
+[   86.877251]   .clock_task                    : 86876.698961
+[   86.877255]   .avg_idle                      : 1000000
+[   86.877259]   .max_idle_balance_cost         : 500000
+[   86.877263] 
+[   86.877267] cfs_rq[0]:/
+[   86.877271]   .left_deadline                 : 0.000001
+[   86.877275]   .left_vruntime                 : 0.000001
+[   86.877279]   .zero_vruntime                 : 184.591618
+[   86.877283]   .avg_vruntime                  : 184.591618
+[   86.877287]   .right_vruntime                : 0.000001
+[   86.877290]   .spread                        : 0.000000
+[   86.877294]   .nr_queued                     : 0
+[   86.877297]   .h_nr_runnable                 : 0
+[   86.877301]   .h_nr_queued                   : 0
+[   86.877304]   .h_nr_idle                     : 0
+[   86.877308]   .load                          : 0
+[   86.877311]   .load_avg                      : 0
+[   86.877315]   .runnable_avg                  : 1
+[   86.877318]   .util_avg                      : 1
+[   86.877321]   .util_est                      : 0
+[   86.877325]   .removed.load_avg              : 0
+[   86.877328]   .removed.util_avg              : 0
+[   86.877331]   .removed.runnable_avg          : 0
+[   86.877335]   .tg_load_avg_contrib           : 0
+[   86.877338]   .tg_load_avg                   : 0
+[   86.877342]   .throttled                     : 0
+[   86.877345]   .throttle_count                : 0
+[   86.877349] 
+[   86.877352] rt_rq[0]:
+[   86.877355]   .rt_nr_running                 : 0
+[   86.877359] 
+[   86.877361] dl_rq[0]:
+[   86.877365]   .dl_nr_running                 : 0
+[   86.877368]   .dl_bw->bw                     : 996147
+[   86.877372]   .dl_bw->total_bw               : 419424
+[   86.877375] 
+[   86.877378] runnable tasks:
+[   86.877381]  S            task   PID       vruntime   eligible    deadline             slice          sum-exec      switches  prio         wait-time        sum-sleep       sum-block  node   group-id  group-path
+[   86.877384] -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+[   86.877388]  S        kthreadd     2        82.507076   E          84.552314           2.100000         1.203614        78     120         0.000000         0.000000         0.000000   0      0        /
+[   86.877412]  S pool_workqueue_     3        29.002392   E          31.096783           2.100000         0.005609         3     120         0.000000         0.000000         0.000000   0      0        /
+[   86.877434]  I kworker/R-rcu_g     4        -1.048576   E          -1.040501           0.700000         0.000000         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.877455]  I kworker/R-sync_     5        -1.048576   E          -1.040501           0.700000         0.000000         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.877474]  I kworker/R-kvfre     6        -1.048576   E          -1.040501           0.700000         0.000000         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.877493]  I kworker/R-slub_     7        -1.048576   E          -1.040501           0.700000         0.000000         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.877512]  I kworker/R-netns     8        -1.048576   E          -1.040501           0.700000         0.000000         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.877531]  I     kworker/0:0     9        33.241968   E          35.334177           2.100000         0.018056         5     120         0.000000         0.000000         0.000000   0      0        /
+[   86.877551]  I    kworker/0:0H    10        -1.048576   E          -1.040501           0.700000         0.000000         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.877571]  I     kworker/0:1    11       145.348683   E         147.435873           2.100000         5.770752       274     120         0.000000         0.000000         0.000000   0      0        /
+[   86.877591]  I kworker/R-mm_pe    13        -1.048576   E          -1.040501           0.700000         0.000000         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.877610]  S     ksoftirqd/0    14       162.241636   E         164.328226           2.100000         0.102265        15     120         0.000000         0.000000         0.000000   0      0        /
+[   86.877630]  S rcu_exp_par_gp_    16        -1.048576   E           0.348576           0.700000         0.000000         2     120         0.000000         0.000000         0.000000   0      0        /
+[   86.877649]  S rcu_exp_gp_kthr    17        29.006708   E          31.102392           2.100000         0.025759        11     120         0.000000         0.000000         0.000000   0      0        /
+[   86.877669]  S     migration/0    18        -1.048576   E           0.348576           0.700000         1.507353        27       0         0.000000         0.000000         0.000000   0      0        /
+[   86.877703]  S kprobe-optimize    19        -1.046012   E           0.348576           0.700000         0.002564         2     120         0.000000         0.000000         0.000000   0      0        /
+[   86.877722]  S   idle_inject/0    20         6.175517   E           0.698087           0.700000         0.010986         3      49         0.000000         0.000000         0.000000   0      0        /
+[   86.877742]  S         cpuhp/0    21        28.725733   E          30.821126           2.100000         1.217276        12     120         0.000000         0.000000         0.000000   0      0        /
+[   86.877763]  I    kworker/1:0H    27         6.324627   E           6.332666           0.700000         0.006379         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.877783]  I    kworker/2:0H    33         6.508067   E           6.516124           0.700000         0.005789         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.877816]  I    kworker/3:0H    39         6.629376   E           6.637432           0.700000         0.004767         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.877836]  I   kworker/u16:1    47        91.071734   E          93.126687           2.100000        15.602703         7     120         0.000000         0.000000         0.000000   0      0        /
+[   86.877856]  I kworker/R-tpm_d    59        26.717973   E          26.742199           2.100000         0.001182         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.877876]  I kworker/R-ata_s    60        27.670010   E          27.694236           2.100000         0.008012         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.877895]  I kworker/R-md_bi    61        27.670010   E          27.694236           2.100000         0.000000         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.877914]  I kworker/R-md_ll    62        27.672106   E          27.696295           2.100000         0.003275         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.877933]  I kworker/R-md_ll    63        27.673028   E          27.697254           2.100000         0.000922         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.877952]  I kworker/R-edac-    64        27.684715   E          27.708941           2.100000         0.011687         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.877971]  I kworker/R-devfr    65        27.684715   E          27.708941           2.100000         0.000000         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.877990]  S       watchdogd    66        27.684715   E          28.734715           2.100000         0.000000         2      49         0.000000         0.000000         0.000000   0      0        /
+[   86.878009]  I kworker/R-quota    67        27.687042   E          27.711229           2.100000         0.003526         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.878028]  S         kswapd0    68        29.014579   E          31.106708           2.100000         0.030325         3     120         0.000000         0.000000         0.000000   0      0        /
+[   86.878048]  S ecryptfs-kthrea    69        27.812712   E          29.909467           2.100000         0.021653         2     120         0.000000         0.000000         0.000000   0      0        /
+[   86.878067]  I kworker/R-kthro    70        27.892710   E          27.916879           2.100000         0.067572         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.878086]  S irq/25-ACPI:Ged    71        27.927020   E           2.096285           2.100000         0.030605         2      49         0.000000         0.000000         0.000000   0      0        /
+[   86.878105]  I kworker/R-acpi_    72        28.003277   E          28.027463           2.100000         0.021742         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.878124]  I   kworker/R-mld    73        28.555981   E          28.580163           2.100000         0.019318         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.878143]  I kworker/R-ipv6_    74        28.571537   E          28.595727           2.100000         0.016705         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.878162]  I kworker/R-kstrp    75        28.580754   E          28.604946           2.100000         0.010297         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.878181]  I   kworker/u17:0    77        28.792181   E          28.816380           2.100000         0.016414         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.878200]  I kworker/R-charg    88        28.996783   E          29.020967           2.100000         0.020561         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.878219]  I     kworker/0:2    98       175.779079   E         177.862524           2.100000        13.261023       663     120         0.000000         0.000000         0.000000   0      0        /
+[   86.878239]  S       pairprobe   106        47.254828   E          48.134678           2.100000         5.723976         1     120         0.000000         0.000000         0.000000   0      0        /
+[   86.878258]  S       pairprobe   107       175.762524   E         177.827942           2.100000        36.947723      1131     120         0.000000         0.000000         0.000000   0      0        /
+[   86.878278] 
+[   86.878282] cpu#1, 2396.400 MHz
+[   86.878286]   .nr_running                    : 0
+[   86.878290]   .nr_switches                   : 4109
+[   86.878293]   .nr_uninterruptible            : -2
+[   86.878297]   .next_balance                  : 4294.754144
+[   86.878301]   .curr->pid                     : 0
+[   86.878305]   .clock                         : 86870.717709
+[   86.878309]   .clock_task                    : 86870.717709
+[   86.878313]   .avg_idle                      : 904795
+[   86.878316]   .max_idle_balance_cost         : 500000
+[   86.878320] 
+[   86.878323] cfs_rq[1]:/
+[   86.878327]   .left_deadline                 : 0.000001
+[   86.878331]   .left_vruntime                 : 0.000001
+[   86.878335]   .zero_vruntime                 : 180.824558
+[   86.878338]   .avg_vruntime                  : 180.824558
+[   86.878342]   .right_vruntime                : 0.000001
+[   86.878346]   .spread                        : 0.000000
+[   86.878350]   .nr_queued                     : 0
+[   86.878353]   .h_nr_runnable                 : 0
+[   86.878356]   .h_nr_queued                   : 0
+[   86.878360]   .h_nr_idle                     : 0
+[   86.878363]   .load                          : 0
+[   86.878366]   .load_avg                      : 101
+[   86.878370]   .runnable_avg                  : 101
+[   86.878373]   .util_avg                      : 97
+[   86.878377]   .util_est                      : 0
+[   86.878380]   .removed.load_avg              : 0
+[   86.878384]   .removed.util_avg              : 0
+[   86.878387]   .removed.runnable_avg          : 0
+[   86.878391]   .tg_load_avg_contrib           : 0
+[   86.878394]   .tg_load_avg                   : 0
+[   86.878397]   .throttled                     : 0
+[   86.878401]   .throttle_count                : 0
+[   86.878404] 
+[   86.878407] rt_rq[1]:
+[   86.878410]   .rt_nr_running                 : 0
+[   86.878414] 
+[   86.878417] dl_rq[1]:
+[   86.878420]   .dl_nr_running                 : 0
+[   86.878423]   .dl_bw->bw                     : 996147
+[   86.878427]   .dl_bw->total_bw               : 419424
+[   86.878430] 
+[   86.878433] runnable tasks:
+[   86.878436]  S            task   PID       vruntime   eligible    deadline             slice          sum-exec      switches  prio         wait-time        sum-sleep       sum-block  node   group-id  group-path
+[   86.878439] -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+[   86.878443]  S         cpuhp/1    22        96.233543   E          98.324209           2.100000         0.406468        12     120         0.000000         0.000000         0.000000   0      0        /
+[   86.878463]  S   idle_inject/1    23        -1.048470   E           0.700000           0.700000         0.005078         3      49         0.000000         0.000000         0.000000   0      0        /
+[   86.878482]  S     migration/1    24         6.285992   E           6.984170           0.700000         0.848993        27       0         0.000000         0.000000         0.000000   0      0        /
+[   86.878502]  S     ksoftirqd/1    25       180.017263   E         182.109862           2.100000         0.049986         9     120         0.000000         0.000000         0.000000   0      0        /
+[   86.878521]  I     kworker/1:0    26       121.792000   E         123.821465           2.100000         3.465613       156     120         0.000000         0.000000         0.000000   0      0        /
+[   86.878540]  S       kdevtmpfs    40        96.819929   E          98.890705           2.100000         1.366857       147     120         0.000000         0.000000         0.000000   0      0        /
+[   86.878560]  I kworker/R-inet_    41        -1.035414   E          -1.011188           2.100000         0.007231         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.878579]  I rcu_tasks_kthre    42        -1.035414   E           1.064586           2.100000         0.000000         2     120         0.000000         0.000000         0.000000   0      0        /
+[   86.878598]  S         kauditd    44        -1.026331   E           1.073669           2.100000         0.009083         2     120         0.000000         0.000000         0.000000   0      0        /
+[   86.878617]  S      oom_reaper    46         0.923356   E           1.176644           2.100000         0.000000         2     120         0.000000         0.000000         0.000000   0      0        /
+[   86.878636]  I   kworker/u16:2    48       173.615083   E         175.684537           2.100000         1.294971        49     120         0.000000         0.000000         0.000000   0      0        /
+[   86.878656]  I     kworker/1:1    58       152.488701   E         154.584074           2.100000         1.737061        89     120         0.000000         0.000000         0.000000   0      0        /
+[   86.878675]  S       pairprobe   108       180.824558   E         182.885880           2.100000        12.911127       176     120         0.000000         0.000000         0.000000   0      0        /
+[   86.878723]  S       pairprobe   110       172.716914   E         174.761451           2.100000       155.036939      1554     120         0.000000         0.000000         0.000000   0      0        /
+[   86.878743]  I     kworker/1:2   113       173.084858   E         175.159961           2.100000        10.542949       459     120         0.000000         0.000000         0.000000   0      0        /
+[   86.878763] 
+[   86.878766] cpu#2, 2396.400 MHz
+[   86.878770]   .nr_running                    : 1
+[   86.878774]   .nr_switches                   : 4256
+[   86.878777]   .nr_uninterruptible            : -2
+[   86.878781]   .next_balance                  : 4294.754149
+[   86.878785]   .curr->pid                     : 0
+[   86.878788]   .clock                         : 86878.781304
+[   86.878792]   .clock_task                    : 86878.781304
+[   86.878796]   .avg_idle                      : 1000000
+[   86.878812]   .max_idle_balance_cost         : 500000
+[   86.878816] 
+[   86.878819] cfs_rq[2]:/
+[   86.878823]   .left_deadline                 : 0.000001
+[   86.878827]   .left_vruntime                 : 0.000001
+[   86.878830]   .zero_vruntime                 : 362.980380
+[   86.878834]   .avg_vruntime                  : 362.980380
+[   86.878838]   .right_vruntime                : 0.000001
+[   86.878841]   .spread                        : 0.000000
+[   86.878845]   .nr_queued                     : 0
+[   86.878848]   .h_nr_runnable                 : 0
+[   86.878851]   .h_nr_queued                   : 0
+[   86.878855]   .h_nr_idle                     : 0
+[   86.878858]   .load                          : 0
+[   86.878861]   .load_avg                      : 23
+[   86.878865]   .runnable_avg                  : 23
+[   86.878868]   .util_avg                      : 23
+[   86.878872]   .util_est                      : 0
+[   86.878875]   .removed.load_avg              : 0
+[   86.878879]   .removed.util_avg              : 0
+[   86.878882]   .removed.runnable_avg          : 0
+[   86.878885]   .tg_load_avg_contrib           : 0
+[   86.878889]   .tg_load_avg                   : 0
+[   86.878892]   .throttled                     : 0
+[   86.878895]   .throttle_count                : 0
+[   86.878899] 
+[   86.878902] rt_rq[2]:
+[   86.878905]   .rt_nr_running                 : 0
+[   86.878908] 
+[   86.878911] dl_rq[2]:
+[   86.878914]   .dl_nr_running                 : 0
+[   86.878917]   .dl_bw->bw                     : 996147
+[   86.878920]   .dl_bw->total_bw               : 419424
+[   86.878924] 
+[   86.878927] runnable tasks:
+[   86.878929]  S            task   PID       vruntime   eligible    deadline             slice          sum-exec      switches  prio         wait-time        sum-sleep       sum-block  node   group-id  group-path
+[   86.878933] -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+[   86.878936]  S            init     1       216.068517   E         217.668036           2.100000       229.251808       314     120         0.000000         0.000000         0.000000   0      0        /
+[   86.878957]  I   kworker/u16:0    12       362.829613   E         363.042743           2.100000        99.628982        81     120         0.000000         0.000000         0.000000   0      0        /
+[   86.878976]  I     rcu_preempt    15       362.980380   E         365.060370           2.100000         4.189596       417     120         0.000000         0.000000         0.000000   0      0        /
+[   86.878996]  S         cpuhp/2    28       133.820568   E         135.913988           2.100000         0.329185        12     120         0.000000         0.000000         0.000000   0      0        /
+[   86.879015]  S   idle_inject/2    29        -1.094030   E           1.394722           1.400000         0.015353         3      49         0.000000         0.000000         0.000000   0      0        /
+[   86.879035]  S     migration/2    30         6.477738   E           7.175915           0.700000         0.914104        27       0         0.000000         0.000000         0.000000   0      0        /
+[   86.879054]  S     ksoftirqd/2    31       318.828382   E         320.920230           2.100000         0.231766         9     120         0.000000         0.000000         0.000000   0      0        /
+[   86.879073]  I     kworker/2:0    32       360.557036   E         362.641382           2.100000        13.258126       662     120         0.000000         0.000000         0.000000   0      0        /
+[   86.879093]  I rcu_tasks_rude_    43         0.950309   E           1.149691           2.100000         0.000000         2     120         0.000000         0.000000         0.000000   0      0        /
+[   86.879112]  I kworker/R-write    49         0.947537   E           0.923380           2.100000         0.006079         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.879131]  I     kworker/2:1    50       222.758787   E         224.848281           2.100000         1.611289        87     120         0.000000         0.000000         0.000000   0      0        /
+[   86.879150]  S      khugepaged    53         0.795028   E         142.564972           2.100000         0.000000         2     139         0.000000         0.000000         0.000000   0      0        /
+[   86.879169]  I kworker/R-blkcg    55         0.699414   E           0.675188           2.100000         0.000000         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.879189]  S       pairprobe   109       359.248926   E         361.339342           2.100000        50.536879      1730     120         0.000000         0.000000         0.000000   0      0        /
+[   86.879208]  S       pairprobe   111       360.813109   E         362.885848           2.100000       160.446880      2786     120         0.000000         0.000000         0.000000   0      0        /
+[   86.879228]  I     kworker/2:2   112       358.126666   E         360.218834           2.100000         4.094576       198     120         0.000000         0.000000         0.000000   0      0        /
+[   86.879247] 
+[   86.879250] cpu#3, 2396.400 MHz
+[   86.879254]   .nr_running                    : 1
+[   86.879257]   .nr_switches                   : 4216
+[   86.879261]   .nr_uninterruptible            : 3
+[   86.879264]   .next_balance                  : 4294.754249
+[   86.879268]   .curr->pid                     : 114
+[   86.879272]   .clock                         : 86878.692291
+[   86.879276]   .clock_task                    : 86878.692291
+[   86.879279]   .avg_idle                      : 1000000
+[   86.879283]   .max_idle_balance_cost         : 500000
+[   86.879286] 
+[   86.879289] cfs_rq[3]:/
+[   86.879293]   .left_deadline                 : 0.000001
+[   86.879297]   .left_vruntime                 : 0.000001
+[   86.879300]   .zero_vruntime                 : 110.984923
+[   86.879304]   .avg_vruntime                  : 111.986305
+[   86.879308]   .right_vruntime                : 0.000001
+[   86.879311]   .spread                        : 0.000000
+[   86.879315]   .nr_queued                     : 1
+[   86.879318]   .h_nr_runnable                 : 1
+[   86.879322]   .h_nr_queued                   : 1
+[   86.879325]   .h_nr_idle                     : 0
+[   86.879328]   .load                          : 1048576
+[   86.879332]   .load_avg                      : 897
+[   86.879335]   .runnable_avg                  : 585
+[   86.879339]   .util_avg                      : 585
+[   86.879342]   .util_est                      : 521
+[   86.879346]   .removed.load_avg              : 0
+[   86.879349]   .removed.util_avg              : 0
+[   86.879352]   .removed.runnable_avg          : 0
+[   86.879356]   .tg_load_avg_contrib           : 0
+[   86.879359]   .tg_load_avg                   : 0
+[   86.879362]   .throttled                     : 0
+[   86.879366]   .throttle_count                : 0
+[   86.879369] 
+[   86.879372] rt_rq[3]:
+[   86.879375]   .rt_nr_running                 : 0
+[   86.879378] 
+[   86.879381] dl_rq[3]:
+[   86.879384]   .dl_nr_running                 : 0
+[   86.879388]   .dl_bw->bw                     : 996147
+[   86.879391]   .dl_bw->total_bw               : 419424
+[   86.879394] 
+[   86.879397] runnable tasks:
+[   86.879400]  S            task   PID       vruntime   eligible    deadline             slice          sum-exec      switches  prio         wait-time        sum-sleep       sum-block  node   group-id  group-path
+[   86.879403] -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+[   86.879407]  S         cpuhp/3    34         0.535098   E           2.626885           2.100000         0.579770        12     120         0.000000         0.000000         0.000000   0      0        /
+[   86.879426]  S   idle_inject/3    35        -1.069794   E           1.394672           1.400000         0.015184         3      49         0.000000         0.000000         0.000000   0      0        /
+[   86.879445]  S     migration/3    36         6.589844   E           7.288071           0.700000         0.843003        27       0         0.000000         0.000000         0.000000   0      0        /
+[   86.879465]  S     ksoftirqd/3    37        30.823606   E          32.913300           2.100000         0.036520         5     120         0.000000         0.000000         0.000000   0      0        /
+[   86.879484]  I     kworker/3:0    38         8.522228   E          10.611743           2.100000         0.048973         6     120         0.000000         0.000000         0.000000   0      0        /
+[   86.879503]  S      khungtaskd    45         0.953363   E           1.146637           2.100000         0.001353         2     120         0.000000         0.000000         0.000000   0      0        /
+[   86.879522]  S      kcompactd0    51        95.817102   E          97.891484           2.100000         4.617993       174     120         0.000000         0.000000         0.000000   0      0        /
+[   86.879542]  S            ksmd    52         0.883629   E           5.535475           2.100000         0.004957         2     125         0.000000         0.000000         0.000000   0      0        /
+[   86.879561]  I kworker/R-kbloc    54         0.674104   E           0.649878           2.100000         0.008613         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.879579]  I kworker/R-kinte    56         0.507243   E           0.483017           2.100000         0.000000         2     100         0.000000         0.000000         0.000000   0      0        /
+[   86.879598]  I     kworker/3:1    57        90.878680   E          92.971810           2.100000         6.886668       368     120         0.000000         0.000000         0.000000   0      0        /
+[   86.879618]  I     kworker/3:2   100        95.427579   E          97.499387           2.100000        10.400671       550     120         0.000000         0.000000         0.000000   0      0        /
+[   86.879637]  S              sh   104        15.429330   E          17.377242           2.100000         3.961192         2     120         0.000000         0.000000         0.000000   0      0        /
+[   86.879657] >R              sh   114       111.986305   E         113.084923           2.100000        16.169203         1     120         0.000000         0.000000         0.000000   0      0        /
+[   86.879676] 
+[   86.879679] Showing busy workqueues and worker pools:
+attached=279 completed=279 aborted=0 records=279 runs=2636 attach_rej_state=0 attach_early_bytes=167 attach_early_end=164 attach_early_abort=0 ab_socket=0 ab_peer=0 ab_unclassified_eof=0 released_pairs=0 fault_hits=0
+HANG_DUMP run=404 shape=in-cfearly idle_s=45 done=2232
+  lane 0 first-incomplete trial 278 done=0x3 need=0x7 fail=master/role-hang cn=191110 sn=2971 j=1,2,2,1,0,1 ga_err=0 gr_ok=0
+  lane 1 first-incomplete trial 278 done=0x3 need=0x7 fail=master/role-hang cn=60 sn=5601 j=0,0,1,0,0,0 ga_err=0 gr_ok=0
+  lane 2 first-incomplete trial 278 done=0x3 need=0x7 fail=master/role-hang cn=2348 sn=47 j=1,1,2,1,0,1 ga_err=0 gr_ok=0
+  lane 3 first-incomplete trial 278 done=0x3 need=0x7 fail=master/role-hang cn=4102 sn=3908 j=2,3,0,0,0,1 ga_err=0 gr_ok=0
+  lane 4 first-incomplete trial 278 done=0x3 need=0x7 fail=master/role-hang cn=4387 sn=17 j=1,2,1,3,2,2 ga_err=0 gr_ok=0
+  lane 5 first-incomplete trial 278 done=0x3 need=0x7 fail=master/role-hang cn=13 sn=40 j=2,3,1,2,0,2 ga_err=0 gr_ok=0
+  lane 6 first-incomplete trial 278 done=0x3 need=0x7 fail=master/role-hang cn=5812 sn=54397 j=0,4,0,3,4,1 ga_err=0 gr_ok=0
+  lane 7 first-incomplete trial 278 done=0x3 need=0x7 fail=master/role-hang cn=15 sn=11 j=1,0,0,2,0,1 ga_err=0 gr_ok=0
+attached=2511 completed=2511 aborted=0 records=2511 runs=21392 attach_rej_state=0 attach_early_bytes=1447 attach_early_end=1430 attach_early_abort=0 ab_socket=0 ab_peer=0 ab_unclassified_eof=0 released_pairs=0 fault_hits=0
+[  174.064045] sysrq: Show State
+[  174.084681]  ? srso_alias_return_thunk+0x5/0xfbef5
+[  174.084701]  ? arch_exit_to_user_mode_prepare.isra.0+0xc3/0xe0
+[  174.084708]  ? srso_alias_return_thunk+0x5/0xfbef5
+[  174.084714]  ? do_syscall_64+0x140/0x5a0
+[  174.084720]  ? srso_alias_return_thunk+0x5/0xfbef5
+[  174.084726]  ? sysvec_apic_timer_interrupt+0x54/0xd0
+[  174.084732]  entry_SYSCALL_64_after_hwframe+0x76/0x7e
+[  174.084738] RIP: 0033:0x47e322
+[  174.084743] RSP: 002b:000070ff4bfff108 EFLAGS: 00000246 ORIG_RAX: 0000000000000007
+[  174.084749] RAX: ffffffffffffffda RBX: 0000000000000021 RCX: 000000000047e322
+[  174.084753] RDX: 0000000000005dc0 RSI: 0000000000000001 RDI: 000070ff4bfff190
+[  174.084756] RBP: 000070ff4bfff130 R08: 0000000000000000 R09: 0000000000000000
+[  174.084761] R10: 0000000000000000 R11: 0000000000000246 R12: 000070ff6839a010
+[  174.084764] R13: 000000000000011a R14: 00007fffc29339e0 R15: 00000000005109e0
+[  174.084776]  </TASK>
+[  174.084780] task:pairprobe       state:S stack:0     pid:145   tgid:119   ppid:104    task_flags:0x400140 flags:0x00080000
+[  174.084788] Call Trace:
+[  174.084791]  <TASK>
+[  174.084797]  __schedule+0x2bb/0x650
+[  174.084806]  schedule+0x27/0x90
+[  174.084812]  futex_do_wait+0x48/0x90
+[  174.084819]  __futex_wait+0x9c/0x110
+[  174.084827]  ? __pfx_futex_wake_mark+0x10/0x10
+[  174.084838]  futex_wait+0x7b/0x140
+[  174.084846]  ? __pfx_hrtimer_wakeup+0x10/0x10
+[  174.084857]  do_futex+0x102/0x260
+[  174.084862]  __x64_sys_futex+0x120/0x210
+[  174.084872]  x64_sys_call+0x198e/0x2390
+[  174.084879]  do_syscall_64+0x105/0x5a0
+[  174.084887]  ? srso_alias_return_thunk+0x5/0xfbef5
+[  174.084893]  ? __fput+0x1a2/0x2d0
+[  174.084900]  ? srso_alias_return_thunk+0x5/0xfbef5
+[  174.084906]  ? fput_close_sync+0x40/0xc0
+[  174.084912]  ? srso_alias_return_thunk+0x5/0xfbef5
+[  174.084918]  ? __x64_sys_close+0x3e/0x90
+[  174.084926]  ? srso_alias_return_thunk+0x5/0xfbef5
+[  174.084932]  ? arch_exit_to_user_mode_prepare.isra.0+0xd/0xe0
+[  174.084939]  ? srso_alias_return_thunk+0x5/0xfbef5
+[  174.084945]  ? do_syscall_64+0x140/0x5a0
+[  174.084950]  ? srso_alias_return_thunk+0x5/0xfbef5
+[  174.084957]  ? sysvec_apic_timer_interrupt+0x54/0xd0
+[  174.084963]  entry_SYSCALL_64_after_hwframe+0x76/0x7e
+[  174.084968] RIP: 0033:0x47e322
+[  174.084973] RSP: 002b:000070ff4b7fe008 EFLAGS: 00000246 ORIG_RAX: 00000000000000ca
+[  174.084979] RAX: ffffffffffffffda RBX: 00007fffc2933a5c RCX: 000000000047e322
+[  174.084983] RDX: 00000000000000c1 RSI: 0000000000000189 RDI: 00007fffc2933a64
+[  174.084987] RBP: 000070ff4b7fe030 R08: 0000000000000000 R09: 00000000ffffffff
+[  174.084991] R10: 000070ff4b7fe190 R11: 0000000000000246 R12: 0000000000000000
+[  174.084995] R13: 00007fffc2933a64 R14: 00007fffc2933a40 R15: 00007fffc2933a18
+[  174.085006]  </TASK>
+[  174.085010] task:sh              state:R  running task     stack:0     pid:146   tgid:146   ppid:121    task_flags:0x400000 flags:0x00080000
+[  174.085020] Call Trace:
+[  174.085023]  <TASK>
+[  174.085027]  show_stack+0x49/0x60
+[  174.085037]  sched_show_task+0x18f/0x1f0
+[  174.085046]  show_state_filter+0x58/0x100
+[  174.085055]  sysrq_handle_showstate+0x10/0x20
+[  174.085063]  __handle_sysrq.cold+0x23/0x167
+[  174.085074]  write_sysrq_trigger+0x62/0xa0
+[  174.085082]  proc_reg_write+0x6d/0xd0
+[  174.085091]  vfs_write+0xce/0x490
+[  174.085100]  ? srso_alias_return_thunk+0x5/0xfbef5
+[  174.085107]  ? do_read_fault+0x10a/0x280
+[  174.085115]  ? srso_alias_return_thunk+0x5/0xfbef5
+[  174.085121]  ? wp_page_reuse+0x97/0xc0
+[  174.085131]  ksys_write+0x71/0xf0
+[  174.085141]  __x64_sys_write+0x19/0x30
+[  174.085147]  x64_sys_call+0x22f/0x2390
+[  174.085154]  do_syscall_64+0x105/0x5a0
+[  174.085163]  ? srso_alias_return_thunk+0x5/0xfbef5
+[  174.085170]  ? count_memcg_events+0x103/0x250
+[  174.085178]  ? srso_alias_return_thunk+0x5/0xfbef5
+[  174.085184]  ? handle_mm_fault+0x1be/0x2e0
+[  174.085193]  ? srso_alias_return_thunk+0x5/0xfbef5
+[  174.085199]  ? arch_exit_to_user_mode_prepare.isra.0+0xd/0x100
+[  174.085206]  ? srso_alias_return_thunk+0x5/0xfbef5
+[  174.085212]  ? irqentry_exit+0x97/0x6f0
+[  174.085220]  ? srso_alias_return_thunk+0x5/0xfbef5
+[  174.085226]  ? exc_page_fault+0x94/0x1e0
+[  174.085234]  entry_SYSCALL_64_after_hwframe+0x76/0x7e
+[  174.085239] RIP: 0033:0x4ccde6
+[  174.085245] Code: 47 ba 04 00 00 00 48 c7 c0 e8 ff ff ff 64 89 10 48 c7 c2 ff ff ff ff c9 48 89 d0 c3 0f 1f 84 00 00 00 00 00 48 8b 45 10 0f 05 <48> 89 c2 48 3d 00 f0 ff ff 77 0f c9 48 89 d0 c3 66 2e 0f 1f 84 00
+[  174.085250] RSP: 002b:00007ffe3d3e3020 EFLAGS: 00000202 ORIG_RAX: 0000000000000001
+[  174.085257] RAX: ffffffffffffffda RBX: 0000000000000001 RCX: 00000000004ccde6
+[  174.085261] RDX: 0000000000000002 RSI: 000000003b8b4ed0 RDI: 0000000000000001
+[  174.085265] RBP: 00007ffe3d3e3030 R08: 0000000000000000 R09: 0000000000000000
+[  174.085268] R10: 0000000000000000 R11: 0000000000000202 R12: 000000003b8b4ed0
+[  174.085272] R13: 0000000000000002 R14: 0000000000000000 R15: 000000003b8b4ed2
+[  174.085284]  </TASK>
+[  174.085288] Sched Debug Version: v0.11, 7.0.0-29-generic #29-Ubuntu
+[  174.085293] ktime                                   : 174082.599419
+[  174.085298] sched_clk                               : 174127.253815
+[  174.085302] cpu_clk                                 : 174085.287809
+[  174.085306] jiffies                                 : 4294841350
+[  174.085310] sched_clock_stable()                    : 1
+[  174.085314] 
+[  174.085317] sysctl_sched
+[  174.085320]   .sysctl_sched_base_slice                 : 2.100000
+[  174.085324]   .sysctl_sched_features                   : 99805151
+[  174.085328]   .sysctl_sched_tunable_scaling            : 1 (logarithmic)
+[  174.085344] 
+[  174.085348] cpu#0, 2396.400 MHz
+[  174.085353]   .nr_running                    : 0
+[  174.085356]   .nr_switches                   : 30275
+[  174.085360]   .nr_uninterruptible            : -1
+[  174.085364]   .next_balance                  : 4294.841358
+[  174.085368]   .curr->pid                     : 0
+[  174.085372]   .clock                         : 174084.707078
+[  174.085376]   .clock_task                    : 174084.707078
+[  174.085380]   .avg_idle                      : 1000000
+[  174.085384]   .max_idle_balance_cost         : 500000
+[  174.085388] 
+[  174.085392] cfs_rq[0]:/
+[  174.085396]   .left_deadline                 : 0.000001
+[  174.085400]   .left_vruntime                 : 0.000001
+[  174.085404]   .zero_vruntime                 : 586.753411
+[  174.085408]   .avg_vruntime                  : 586.753411
+[  174.085412]   .right_vruntime                : 0.000001
+[  174.085416]   .spread                        : 0.000000
+[  174.085419]   .nr_queued                     : 0
+[  174.085423]   .h_nr_runnable                 : 0
+[  174.085426]   .h_nr_queued                   : 0
+[  174.085430]   .h_nr_idle                     : 0
+[  174.085433]   .load                          : 0
+[  174.085437]   .load_avg                      : 52
+[  174.085440]   .runnable_avg                  : 52
+[  174.085444]   .util_avg                      : 1
+[  174.085447]   .util_est                      : 0
+[  174.085451]   .removed.load_avg              : 0
+[  174.085455]   .removed.util_avg              : 0
+[  174.085458]   .removed.runnable_avg          : 0
+[  174.085461]   .tg_load_avg_contrib           : 0
+[  174.085465]   .tg_load_avg                   : 0
+[  174.085468]   .throttled                     : 0
+[  174.085472]   .throttle_count                : 0
+[  174.085476] 
+[  174.085479] rt_rq[0]:
+[  174.085482]   .rt_nr_running                 : 0
+[  174.085486] 
+[  174.085488] dl_rq[0]:
+[  174.085492]   .dl_nr_running                 : 0
+[  174.085495]   .dl_bw->bw                     : 996147
+[  174.085499]   .dl_bw->total_bw               : 419424
+[  174.085503] 
+[  174.085505] runnable tasks:
+[  174.085508]  S            task   PID       vruntime   eligible    deadline             slice          sum-exec      switches  prio         wait-time        sum-sleep       sum-block  node   group-id  group-path
+[  174.085512] -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+[  174.085516]  S        kthreadd     2        82.507076   E          84.552314           2.100000         1.203614        78     120         0.000000         0.000000         0.000000   0      0        /
+[  174.085541]  S pool_workqueue_     3        29.002392   E          31.096783           2.100000         0.005609         3     120         0.000000         0.000000         0.000000   0      0        /
+[  174.085562]  I kworker/R-rcu_g     4        -1.048576   E          -1.040501           0.700000         0.000000         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.085583]  I kworker/R-sync_     5        -1.048576   E          -1.040501           0.700000         0.000000         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.085602]  I kworker/R-kvfre     6        -1.048576   E          -1.040501           0.700000         0.000000         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.085621]  I kworker/R-slub_     7        -1.048576   E          -1.040501           0.700000         0.000000         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.085640]  I kworker/R-netns     8        -1.048576   E          -1.040501           0.700000         0.000000         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.085659]  I     kworker/0:0     9        33.241968   E          35.334177           2.100000         0.018056         5     120         0.000000         0.000000         0.000000   0      0        /
+[  174.085679]  I    kworker/0:0H    10        -1.048576   E          -1.040501           0.700000         0.000000         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.085713]  I     kworker/0:1    11       565.093519   E         567.059558           2.100000        31.078037      2223     120         0.000000         0.000000         0.000000   0      0        /
+[  174.085733]  I kworker/R-mm_pe    13        -1.048576   E          -1.040501           0.700000         0.000000         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.085753]  S     ksoftirqd/0    14       511.834423   E         513.928564           2.100000         0.249624        41     120         0.000000         0.000000         0.000000   0      0        /
+[  174.085773]  I     rcu_preempt    15       586.753411   E         588.841694           2.100000         8.118761      1097     120         0.000000         0.000000         0.000000   0      0        /
+[  174.085792]  S rcu_exp_par_gp_    16        -1.048576   E           0.348576           0.700000         0.000000         2     120         0.000000         0.000000         0.000000   0      0        /
+[  174.085811]  S rcu_exp_gp_kthr    17        29.006708   E          31.102392           2.100000         0.025759        11     120         0.000000         0.000000         0.000000   0      0        /
+[  174.085831]  S     migration/0    18        -1.048576   E           0.348576           0.700000         2.095633        49       0         0.000000         0.000000         0.000000   0      0        /
+[  174.085851]  S kprobe-optimize    19        -1.046012   E           0.348576           0.700000         0.002564         2     120         0.000000         0.000000         0.000000   0      0        /
+[  174.085870]  S   idle_inject/0    20         6.175517   E           0.698087           0.700000         0.010986         3      49         0.000000         0.000000         0.000000   0      0        /
+[  174.085890]  S         cpuhp/0    21        28.725733   E          30.821126           2.100000         1.217276        12     120         0.000000         0.000000         0.000000   0      0        /
+[  174.085910]  I    kworker/1:0H    27         6.324627   E           6.332666           0.700000         0.006379         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.085930]  I    kworker/2:0H    33         6.508067   E           6.516124           0.700000         0.005789         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.085950]  I    kworker/3:0H    39         6.629376   E           6.637432           0.700000         0.004767         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.085971]  I   kworker/u16:1    47        91.071734   E          93.126687           2.100000        15.602703         7     120         0.000000         0.000000         0.000000   0      0        /
+[  174.085991]  I kworker/R-tpm_d    59        26.717973   E          26.742199           2.100000         0.001182         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.086011]  I kworker/R-ata_s    60        27.670010   E          27.694236           2.100000         0.008012         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.086030]  I kworker/R-md_bi    61        27.670010   E          27.694236           2.100000         0.000000         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.086049]  I kworker/R-md_ll    62        27.672106   E          27.696295           2.100000         0.003275         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.086068]  I kworker/R-md_ll    63        27.673028   E          27.697254           2.100000         0.000922         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.086088]  I kworker/R-edac-    64        27.684715   E          27.708941           2.100000         0.011687         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.086107]  I kworker/R-devfr    65        27.684715   E          27.708941           2.100000         0.000000         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.086126]  S       watchdogd    66        27.684715   E          28.734715           2.100000         0.000000         2      49         0.000000         0.000000         0.000000   0      0        /
+[  174.086145]  I kworker/R-quota    67        27.687042   E          27.711229           2.100000         0.003526         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.086165]  S         kswapd0    68        29.014579   E          31.106708           2.100000         0.030325         3     120         0.000000         0.000000         0.000000   0      0        /
+[  174.086184]  S ecryptfs-kthrea    69        27.812712   E          29.909467           2.100000         0.021653         2     120         0.000000         0.000000         0.000000   0      0        /
+[  174.086204]  I kworker/R-kthro    70        27.892710   E          27.916879           2.100000         0.067572         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.086223]  S irq/25-ACPI:Ged    71        27.927020   E           2.096285           2.100000         0.030605         2      49         0.000000         0.000000         0.000000   0      0        /
+[  174.086242]  I kworker/R-acpi_    72        28.003277   E          28.027463           2.100000         0.021742         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.086261]  I   kworker/R-mld    73        28.555981   E          28.580163           2.100000         0.019318         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.086281]  I kworker/R-ipv6_    74        28.571537   E          28.595727           2.100000         0.016705         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.086300]  I kworker/R-kstrp    75        28.580754   E          28.604946           2.100000         0.010297         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.086319]  I   kworker/u17:0    77        28.792181   E          28.816380           2.100000         0.016414         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.086350]  I kworker/R-charg    88        28.996783   E          29.020967           2.100000         0.020561         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.086370]  I     kworker/0:2    98       579.541952   E         581.610145           2.100000        60.348168      3931     120         0.000000         0.000000         0.000000   0      0        /
+[  174.086391]  S       pairprobe   124       578.588743   E         580.657926           2.100000        94.447541      2641     120         0.000000         0.000000         0.000000   0      0        /
+[  174.086411]  S       pairprobe   127       578.509263   E         580.571567           2.100000        82.546086      2653     120         0.000000         0.000000         0.000000   0      0        /
+[  174.086431]  S       pairprobe   129       578.557926   E         580.609263           2.100000        77.658682      1364     120         0.000000         0.000000         0.000000   0      0        /
+[  174.086451]  S       pairprobe   136       578.624297   E         580.688743           2.100000        95.390649      2754     120         0.000000         0.000000         0.000000   0      0        /
+[  174.086470]  S       pairprobe   143       563.420807   E         565.515208           2.100000        27.177677      2342     120         0.000000         0.000000         0.000000   0      0        /
+[  174.086490] 
+[  174.086493] cpu#1, 2396.400 MHz
+[  174.086497]   .nr_running                    : 0
+[  174.086501]   .nr_switches                   : 30333
+[  174.086505]   .nr_uninterruptible            : -1
+[  174.086509]   .next_balance                  : 4294.841356
+[  174.086513]   .curr->pid                     : 0
+[  174.086517]   .clock                         : 174082.723403
+[  174.086521]   .clock_task                    : 174082.723403
+[  174.086525]   .avg_idle                      : 1000000
+[  174.086528]   .max_idle_balance_cost         : 500000
+[  174.086532] 
+[  174.086535] cfs_rq[1]:/
+[  174.086539]   .left_deadline                 : 0.000001
+[  174.086543]   .left_vruntime                 : 0.000001
+[  174.086547]   .zero_vruntime                 : 597.589284
+[  174.086551]   .avg_vruntime                  : 597.589284
+[  174.086555]   .right_vruntime                : 0.000001
+[  174.086558]   .spread                        : 0.000000
+[  174.086562]   .nr_queued                     : 0
+[  174.086565]   .h_nr_runnable                 : 0
+[  174.086569]   .h_nr_queued                   : 0
+[  174.086572]   .h_nr_idle                     : 0
+[  174.086575]   .load                          : 0
+[  174.086579]   .load_avg                      : 312
+[  174.086583]   .runnable_avg                  : 312
+[  174.086586]   .util_avg                      : 311
+[  174.086590]   .util_est                      : 0
+[  174.086593]   .removed.load_avg              : 0
+[  174.086597]   .removed.util_avg              : 0
+[  174.086600]   .removed.runnable_avg          : 0
+[  174.086603]   .tg_load_avg_contrib           : 0
+[  174.086607]   .tg_load_avg                   : 0
+[  174.086610]   .throttled                     : 0
+[  174.086614]   .throttle_count                : 0
+[  174.086617] 
+[  174.086620] rt_rq[1]:
+[  174.086623]   .rt_nr_running                 : 0
+[  174.086627] 
+[  174.086630] dl_rq[1]:
+[  174.086633]   .dl_nr_running                 : 0
+[  174.086636]   .dl_bw->bw                     : 996147
+[  174.086640]   .dl_bw->total_bw               : 419424
+[  174.086643] 
+[  174.086646] runnable tasks:
+[  174.086649]  S            task   PID       vruntime   eligible    deadline             slice          sum-exec      switches  prio         wait-time        sum-sleep       sum-block  node   group-id  group-path
+[  174.086652] -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+[  174.086656]  S         cpuhp/1    22        96.233543   E          98.324209           2.100000         0.406468        12     120         0.000000         0.000000         0.000000   0      0        /
+[  174.086676]  S   idle_inject/1    23        -1.048470   E           0.700000           0.700000         0.005078         3      49         0.000000         0.000000         0.000000   0      0        /
+[  174.086709]  S     migration/1    24         6.285992   E           6.984170           0.700000         1.372229        49       0         0.000000         0.000000         0.000000   0      0        /
+[  174.086728]  S     ksoftirqd/1    25       566.596688   E         568.689627           2.100000         0.217928        43     120         0.000000         0.000000         0.000000   0      0        /
+[  174.086748]  I     kworker/1:0    26       121.792000   E         123.821465           2.100000         3.465613       156     120         0.000000         0.000000         0.000000   0      0        /
+[  174.086768]  S       kdevtmpfs    40        96.819929   E          98.890705           2.100000         1.366857       147     120         0.000000         0.000000         0.000000   0      0        /
+[  174.086788]  I kworker/R-inet_    41        -1.035414   E          -1.011188           2.100000         0.007231         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.086807]  I rcu_tasks_kthre    42        -1.035414   E           1.064586           2.100000         0.000000         2     120         0.000000         0.000000         0.000000   0      0        /
+[  174.086826]  S         kauditd    44        -1.026331   E           1.073669           2.100000         0.009083         2     120         0.000000         0.000000         0.000000   0      0        /
+[  174.086846]  S      oom_reaper    46         0.923356   E           1.176644           2.100000         0.000000         2     120         0.000000         0.000000         0.000000   0      0        /
+[  174.086865]  S      kcompactd0    51       560.183184   E         562.256063           2.100000         8.630762       347     120         0.000000         0.000000         0.000000   0      0        /
+[  174.086885]  I     kworker/1:1    58       540.955654   E         543.053941           2.100000        41.771918      3337     120         0.000000         0.000000         0.000000   0      0        /
+[  174.086905]  I     kworker/1:2   113       597.589284   E         599.641963           2.100000        35.827416      2511     120         0.000000         0.000000         0.000000   0      0        /
+[  174.086925]  S       pairprobe   119       184.425500   E         186.151709           2.100000         3.463716         3     120         0.000000         0.000000         0.000000   0      0        /
+[  174.086944]  S       pairprobe   121       597.530916   E         599.590034           2.100000        43.778730       176     120         0.000000         0.000000         0.000000   0      0        /
+[  174.086964]  S       pairprobe   123       558.402065   E         560.456026           2.100000        84.451856      1428     120         0.000000         0.000000         0.000000   0      0        /
+[  174.086983]  S       pairprobe   125       513.629224   E         515.717677           2.100000        27.484536      2306     120         0.000000         0.000000         0.000000   0      0        /
+[  174.087003]  S       pairprobe   130       558.356026   E         560.426131           2.100000        84.458382      2602     120         0.000000         0.000000         0.000000   0      0        /
+[  174.087022]  S       pairprobe   132       558.326131   E         560.372029           2.100000        80.420555      1491     120         0.000000         0.000000         0.000000   0      0        /
+[  174.087041]  S       pairprobe   134       541.607069   E         543.701029           2.100000        28.852738      2525     120         0.000000         0.000000         0.000000   0      0        /
+[  174.087061]  S       pairprobe   141       558.456306   E         560.502065           2.100000        70.444406      1400     120         0.000000         0.000000         0.000000   0      0        /
+[  174.087080] 
+[  174.087084] cpu#2, 2396.400 MHz
+[  174.087088]   .nr_running                    : 0
+[  174.087091]   .nr_switches                   : 31936
+[  174.087095]   .nr_uninterruptible            : 0
+[  174.087098]   .next_balance                  : 4294.841356
+[  174.087102]   .curr->pid                     : 0
+[  174.087106]   .clock                         : 174082.720058
+[  174.087110]   .clock_task                    : 174082.720058
+[  174.087114]   .avg_idle                      : 1000000
+[  174.087117]   .max_idle_balance_cost         : 500000
+[  174.087121] 
+[  174.087124] cfs_rq[2]:/
+[  174.087128]   .left_deadline                 : 0.000001
+[  174.087132]   .left_vruntime                 : 0.000001
+[  174.087135]   .zero_vruntime                 : 969.897096
+[  174.087139]   .avg_vruntime                  : 969.897096
+[  174.087143]   .right_vruntime                : 0.000001
+[  174.087146]   .spread                        : 0.000000
+[  174.087150]   .nr_queued                     : 0
+[  174.087153]   .h_nr_runnable                 : 0
+[  174.087157]   .h_nr_queued                   : 0
+[  174.087160]   .h_nr_idle                     : 0
+[  174.087164]   .load                          : 0
+[  174.087167]   .load_avg                      : 10
+[  174.087171]   .runnable_avg                  : 10
+[  174.087174]   .util_avg                      : 10
+[  174.087178]   .util_est                      : 0
+[  174.087181]   .removed.load_avg              : 0
+[  174.087185]   .removed.util_avg              : 0
+[  174.087188]   .removed.runnable_avg          : 0
+[  174.087191]   .tg_load_avg_contrib           : 0
+[  174.087195]   .tg_load_avg                   : 0
+[  174.087198]   .throttled                     : 0
+[  174.087202]   .throttle_count                : 0
+[  174.087205] 
+[  174.087208] rt_rq[2]:
+[  174.087211]   .rt_nr_running                 : 0
+[  174.087215] 
+[  174.087217] dl_rq[2]:
+[  174.087220]   .dl_nr_running                 : 0
+[  174.087224]   .dl_bw->bw                     : 996147
+[  174.087227]   .dl_bw->total_bw               : 419424
+[  174.087231] 
+[  174.087234] runnable tasks:
+[  174.087236]  S            task   PID       vruntime   eligible    deadline             slice          sum-exec      switches  prio         wait-time        sum-sleep       sum-block  node   group-id  group-path
+[  174.087240] -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+[  174.087243]  S            init     1       216.068517   E         217.668036           2.100000       229.251808       314     120         0.000000         0.000000         0.000000   0      0        /
+[  174.087263]  I   kworker/u16:0    12       967.939890   E         969.994872           2.100000       100.695570       119     120         0.000000         0.000000         0.000000   0      0        /
+[  174.087283]  S         cpuhp/2    28       133.820568   E         135.913988           2.100000         0.329185        12     120         0.000000         0.000000         0.000000   0      0        /
+[  174.087303]  S   idle_inject/2    29        -1.094030   E           1.394722           1.400000         0.015353         3      49         0.000000         0.000000         0.000000   0      0        /
+[  174.087322]  S     migration/2    30         6.477738   E           7.175915           0.700000         1.481815        49       0         0.000000         0.000000         0.000000   0      0        /
+[  174.087354]  S     ksoftirqd/2    31       963.428426   E         965.523569           2.100000         0.406937        44     120         0.000000         0.000000         0.000000   0      0        /
+[  174.087374]  I     kworker/2:0    32       967.829124   E         969.903636           2.100000        57.732664      4253     120         0.000000         0.000000         0.000000   0      0        /
+[  174.087394]  I rcu_tasks_rude_    43         0.950309   E           1.149691           2.100000         0.000000         2     120         0.000000         0.000000         0.000000   0      0        /
+[  174.087414]  I   kworker/u16:2    48       969.897096   E         970.061402           2.100000         4.163668        90     120         0.000000         0.000000         0.000000   0      0        /
+[  174.087433]  I kworker/R-write    49         0.947537   E           0.923380           2.100000         0.006079         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.087452]  I     kworker/2:1    50       222.758787   E         224.848281           2.100000         1.611289        87     120         0.000000         0.000000         0.000000   0      0        /
+[  174.087472]  S      khugepaged    53         0.795028   E         142.564972           2.100000         0.000000         2     139         0.000000         0.000000         0.000000   0      0        /
+[  174.087491]  I kworker/R-blkcg    55         0.699414   E           0.675188           2.100000         0.000000         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.087511]  I     kworker/2:2   112       964.900450   E         966.983845           2.100000        29.365665      2450     120         0.000000         0.000000         0.000000   0      0        /
+[  174.087531]  S       pairprobe   122       950.462569   E         952.558093           2.100000        27.709277      2445     120         0.000000         0.000000         0.000000   0      0        /
+[  174.087550]  S       pairprobe   126       967.597115   E         969.650896           2.100000        62.707571      1478     120         0.000000         0.000000         0.000000   0      0        /
+[  174.087570]  S       pairprobe   135       967.727592   E         969.787762           2.100000        94.916147      1458     120         0.000000         0.000000         0.000000   0      0        /
+[  174.087590]  S       pairprobe   138       967.674422   E         969.725548           2.100000        69.539247      1434     120         0.000000         0.000000         0.000000   0      0        /
+[  174.087609]  S       pairprobe   140       960.179696   E         962.273727           2.100000        28.467743      2485     120         0.000000         0.000000         0.000000   0      0        /
+[  174.087629]  S       pairprobe   142       967.687762   E         969.774422           2.100000        72.141784      2650     120         0.000000         0.000000         0.000000   0      0        /
+[  174.087648]  S       pairprobe   144       967.625548   E         969.697115           2.100000        87.039684      1423     120         0.000000         0.000000         0.000000   0      0        /
+[  174.087668] 
+[  174.087671] cpu#3, 2396.400 MHz
+[  174.087675]   .nr_running                    : 1
+[  174.087679]   .nr_switches                   : 30881
+[  174.087682]   .nr_uninterruptible            : 2
+[  174.087698]   .next_balance                  : 4294.841453
+[  174.087703]   .curr->pid                     : 146
+[  174.087707]   .clock                         : 174087.691775
+[  174.087710]   .clock_task                    : 174087.691775
+[  174.087714]   .avg_idle                      : 1000000
+[  174.087718]   .max_idle_balance_cost         : 500000
+[  174.087721] 
+[  174.087725] cfs_rq[3]:/
+[  174.087729]   .left_deadline                 : 0.000001
+[  174.087733]   .left_vruntime                 : 0.000001
+[  174.087736]   .zero_vruntime                 : 533.537311
+[  174.087740]   .avg_vruntime                  : 533.537311
+[  174.087744]   .right_vruntime                : 0.000001
+[  174.087747]   .spread                        : 0.000000
+[  174.087751]   .nr_queued                     : 1
+[  174.087754]   .h_nr_runnable                 : 1
+[  174.087758]   .h_nr_queued                   : 1
+[  174.087761]   .h_nr_idle                     : 0
+[  174.087764]   .load                          : 1048576
+[  174.087768]   .load_avg                      : 965
+[  174.087772]   .runnable_avg                  : 699
+[  174.087775]   .util_avg                      : 661
+[  174.087779]   .util_est                      : 520
+[  174.087782]   .removed.load_avg              : 0
+[  174.087786]   .removed.util_avg              : 0
+[  174.087789]   .removed.runnable_avg          : 0
+[  174.087792]   .tg_load_avg_contrib           : 0
+[  174.087796]   .tg_load_avg                   : 0
+[  174.087799]   .throttled                     : 0
+[  174.087803]   .throttle_count                : 0
+[  174.087806] 
+[  174.087809] rt_rq[3]:
+[  174.087812]   .rt_nr_running                 : 0
+[  174.087815] 
+[  174.087818] dl_rq[3]:
+[  174.087821]   .dl_nr_running                 : 0
+[  174.087825]   .dl_bw->bw                     : 996147
+[  174.087828]   .dl_bw->total_bw               : 419424
+[  174.087832] 
+[  174.087835] runnable tasks:
+[  174.087837]  S            task   PID       vruntime   eligible    deadline             slice          sum-exec      switches  prio         wait-time        sum-sleep       sum-block  node   group-id  group-path
+[  174.087841] -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+[  174.087845]  S         cpuhp/3    34         0.535098   E           2.626885           2.100000         0.579770        12     120         0.000000         0.000000         0.000000   0      0        /
+[  174.087865]  S   idle_inject/3    35        -1.069794   E           1.394672           1.400000         0.015184         3      49         0.000000         0.000000         0.000000   0      0        /
+[  174.087885]  S     migration/3    36         6.589844   E           7.288071           0.700000         1.368929        49       0         0.000000         0.000000         0.000000   0      0        /
+[  174.087904]  S     ksoftirqd/3    37       456.392614   E         458.486885           2.100000         0.204414        39     120         0.000000         0.000000         0.000000   0      0        /
+[  174.087924]  I     kworker/3:0    38         8.522228   E          10.611743           2.100000         0.048973         6     120         0.000000         0.000000         0.000000   0      0        /
+[  174.087943]  S      khungtaskd    45       488.161747   E         490.217711           2.100000         0.045389         3     120         0.000000         0.000000         0.000000   0      0        /
+[  174.087963]  S            ksmd    52         0.883629   E           5.535475           2.100000         0.004957         2     125         0.000000         0.000000         0.000000   0      0        /
+[  174.087982]  I kworker/R-kbloc    54         0.674104   E           0.649878           2.100000         0.008613         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.088001]  I kworker/R-kinte    56         0.507243   E           0.483017           2.100000         0.000000         2     100         0.000000         0.000000         0.000000   0      0        /
+[  174.088020]  I     kworker/3:1    57       476.908019   E         479.005044           2.100000        37.263277      2656     120         0.000000         0.000000         0.000000   0      0        /
+[  174.088040]  I     kworker/3:2   100       525.578373   E         527.662309           2.100000        53.507528      3609     120         0.000000         0.000000         0.000000   0      0        /
+[  174.088060]  S              sh   104       114.994961   E         116.953048           2.100000         4.324286         4     120         0.000000         0.000000         0.000000   0      0        /
+[  174.088079]  S       pairprobe   120       508.717251   E         510.779755           2.100000        62.185274      3448     120         0.000000         0.000000         0.000000   0      0        /
+[  174.088099]  S       pairprobe   128       460.986457   E         463.081510           2.100000        28.061661      2433     120         0.000000         0.000000         0.000000   0      0        /
+[  174.088119]  S       pairprobe   131       458.092773   E         460.146414           2.100000        28.023611      2393     120         0.000000         0.000000         0.000000   0      0        /
+[  174.088138]  S       pairprobe   133       503.717113   E         505.785776           2.100000        91.311768      2700     120         0.000000         0.000000         0.000000   0      0        /
+[  174.088158]  S       pairprobe   137       482.202238   E         484.296990           2.100000        29.296377      2551     120         0.000000         0.000000         0.000000   0      0        /
+[  174.088177]  S       pairprobe   139       503.810503   E         505.879927           2.100000        71.950126      2669     120         0.000000         0.000000         0.000000   0      0        /
+[  174.088196]  S       pairprobe   145       503.746577   E         505.817113           2.100000        85.326409      2758     120         0.000000         0.000000         0.000000   0      0        /
+[  174.088216] >R              sh   146       533.537311   E         535.637311           2.100000        24.784356         2     120         0.000000         0.000000         0.000000   0      0        /
+[  174.088235] 
+[  174.088239] Showing busy workqueues and worker pools:
+attached=2511 completed=2511 aborted=0 records=2511 runs=21392 attach_rej_state=0 attach_early_bytes=1447 attach_early_end=1430 attach_early_abort=0 ab_socket=0 ab_peer=0 ab_unclassified_eof=0 released_pairs=0 fault_hits=0
+GUEST_DONE
+[  174.722003] sysrq: Power Off
+[  174.724206] reboot: Power down

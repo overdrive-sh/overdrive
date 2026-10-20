@@ -261,7 +261,7 @@ Reputation: High 8 (57 %), Medium-high 5 (36 %), Medium 1 (7 %). Average about 0
 [13] Rieger, G. "socat manual page". https://manpages.debian.org/testing/socat/socat.1.en.html. Accessed 2026-10-15.
 [14] HAProxy. "MEDIUM: session: implement half-closed timeouts (client-fin and server-fin)". https://git01.mediatek.com/plugins/gitiles/haproxy/+/05cdd9655db32bfd6cb9c503f3474390e346903b. Accessed 2026-10-15.
 [15] Firecracker. `src/vmm/src/devices/virtio/vsock/csm/connection.rs`. https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/src/vmm/src/devices/virtio/vsock/csm/connection.rs. Accessed 2026-10-15.
-[16] Overdrive. `docs/feature/netns-density-295/feature-delta.md` (lines cited in text); `docs/product/architecture/adr-0183-a-half-close-drain-completes-on-a-kernel-record-without-a-deadline.md:130-171`; `docs/research/networking/vsock-sockmap-half-close-and-drain-research.md:166-190,249-287,336-352`; `docs/feature/netns-density-295/spike/findings-drain-t1-t6.md:9-19,49-101`.
+[16] Overdrive. `docs/feature/netns-density-295/feature-delta.md` (lines cited in text); `docs/product/architecture/adr-0183-a-half-close-completes-in-the-kernel-forwarder-after-the-last-accepted-byte.md`; `docs/research/networking/vsock-sockmap-half-close-and-drain-research.md:166-190,249-287,336-352`; `docs/feature/netns-density-295/spike/findings-drain-t1-t6.md:9-19,49-101`.
 
 ## Research Metadata
 

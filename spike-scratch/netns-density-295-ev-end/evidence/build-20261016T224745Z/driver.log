@@ -1,0 +1,29 @@
+[22:47:45] substrate: {"host_uname_r": "7.0.0-38-generic", "systemd_detect_virt": "none", "nested": "1", "cpu": "AMD EPYC 8024P 8-Core Processor", "failures": []}
+[22:47:47] module build:
+warning: pahole version differs from the one used to build the kernel
+  The kernel was built with: 131
+  You are using:             0
+  CC [M]  ovd_fwd.o
+  MODPOST Module.symvers
+  CC [M]  ovd_fwd.mod.o
+  CC [M]  .module-common.o
+  LD [M]  ovd_fwd.ko
+  BTF [M] ovd_fwd.ko
+Skipping BTF generation for ovd_fwd.ko due to unavailability of vmlinux
+make[1]: Leaving directory '/var/tmp/ev-end-work/out/build/module'
+make: Leaving directory '/usr/src/linux-headers-7.0.0-29-generic'
+[22:47:47] NOTE: compiler warnings in module build (see commands.jsonl)
+[22:47:48] harness build:
+      | ^
+/var/tmp/ev-end-work/out/build/harness/evend.c: In function ‘host_main’:
+/var/tmp/ev-end-work/out/build/harness/evend.c:960:122: warning: ignoring return value of ‘fgets’ declared with attribute ‘warn_unused_result’ [-Wunused-result]
+  960 |         logf_("HOST_START uname=%s", ({ static char u[128]; FILE *f = fopen("/proc/sys/kernel/osrelease", "r"); if (f) { fgets(u, sizeof u, f); fclose(f); } u[strcspn(u, "\n")] = 0; u; }));
+      |                                                                                                                          ^~~~~~~~~~~~~~~~~~~~~
+/var/tmp/ev-end-work/out/build/harness/evend.c: In function ‘sc_clean_fullend_delay’:
+/var/tmp/ev-end-work/out/build/harness/evend.c:553:97: warning: ignoring return value of ‘write’ declared with attribute ‘warn_unused_result’ [-Wunused-result]
+  553 |         int fd = open("/sys/module/ovd_fwd/parameters/work_delay_us", O_WRONLY); if (fd >= 0) { write(fd, "15000", 5); close(fd); }
+      |                                                                                                 ^~~~~~~~~~~~~~~~~~~~~
+/var/tmp/ev-end-work/out/build/harness/evend.c:563:93: warning: ignoring return value of ‘write’ declared with attribute ‘warn_unused_result’ [-Wunused-result]
+  563 |         fd = open("/sys/module/ovd_fwd/parameters/work_delay_us", O_WRONLY); if (fd >= 0) { write(fd, "0", 1); close(fd); }
+      |                                                                                             ^~~~~~~~~~~~~~~~~
+[22:47:48] modinfo: filename:       /var/tmp/ev-end-work/out/build/module/ovd_fwd.ko | description:    ev-end spike: proposed EVMOD contract, stream mode and watch | license:        GPL | srcversion:     3F3E51D30ADC4E108FD37D8 | depends:         | name:           ovd_fwd | retpoline:      Y | vermagic:       7.0.0-29-generic SMP preempt mod_unload modversions  | parm:           hazard:uint | parm:           work_delay_us:uint | 

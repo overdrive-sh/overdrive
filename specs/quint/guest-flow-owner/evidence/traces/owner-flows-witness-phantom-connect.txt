@@ -29,6 +29,8 @@ State 1
   bHeldByOther = false
   act = "none"
   badAct = false
+  gSess = 0
+  conf_step = InitWith({ o: "g" })
 
 State 2
   alloc = "Provisioned"
@@ -39,14 +41,15 @@ State 3
   vmUp = true
 
 State 4
-  sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "pending" })
+  sess = Map(1 -> { gen: 1, st: "pending" }, 2 -> { gen: 0, st: "none" })
+  gSess = 1
 
 State 5
-  sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "reading" })
+  sess = Map(1 -> { gen: 1, st: "reading" }, 2 -> { gen: 0, st: "none" })
 
 State 6
-  claim = 2
-  sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "live" })
+  claim = 1
+  sess = Map(1 -> { gen: 1, st: "live" }, 2 -> { gen: 0, st: "none" })
 
 State 7
   alloc = "Active"
@@ -60,16 +63,16 @@ State 8
 State 9
   hf = Map(1 -> { gen: 1, st: "closed" })
   toGuestAbort = Set(1)
-  dl = { adm: Set(), earlyDl: false, lateReply: false, res: Map(1 -> "Unreachable:io"), tout: Set() }
+  dl = { adm: Set(), earlyDl: false, lateReply: false, res: Map(1 -> "Cancelled"), tout: Set() }
 
 State 10
   toGuestAbort = Set()
   abortDiscarded = Set(1)
 
 State 11
-  gf = Map(1 -> { c: 2, gen: 1, st: "acc" })
+  gf = Map(1 -> { c: 1, gen: 1, st: "acc" })
 
 State 12
-  gf = Map(1 -> { c: 2, gen: 1, st: "routed" })
+  gf = Map(1 -> { c: 1, gen: 1, st: "attached" })
   toHostPaired = Set(1)
   phantom = true

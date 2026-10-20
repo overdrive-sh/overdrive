@@ -45,6 +45,10 @@ integration-tests = [
     "overdrive-worker/integration-tests",
     "dep:rustix",
 ]
+# Native x86_64 metal KVM lane (`.claude/rules/testing.md` § "Running tests —
+# native x86_64 bare-metal KVM host"): the source-local R5-59 (a) flow-seam cell
+# (`guest_network/flow_io/accept_path_tier3.rs`) boots a guest-kit microVM.
+kvm-tests = ["integration-tests"]
 
 [dependencies]
 overdrive-core.workspace           = true
@@ -204,10 +208,6 @@ rustix = { workspace = true, features = ["thread"] }
 # DST-style `Sim*` adapters — it is NOT a runtime dep (see note on
 # `overdrive-store-local` above + ADR-0012 revision 2026-04-24).
 overdrive-sim.path       = "../overdrive-sim"
-# `aya` error types: the source-local `SimGuestFlowIo` (DG-3) builds the
-# scripted `GuestSteeringError` / `GuestFlowError` / `UnframeAttachError`
-# outcomes the owner seam's contract names (UI-COV-1).
-aya.workspace            = true
 # `overdrive-testing` — shared real-infra fixtures. GH #295 E23 uses its
 # `pids_max` cgroup v2 thread-refusal guard in the source-local Lima-root
 # `guest_network::shared_owner_link_address_kernel` module. Dev-only.

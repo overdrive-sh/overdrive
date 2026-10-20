@@ -1,0 +1,121 @@
+c[?7l[2J[0mSeaBIOS (version 1.17.0-debian-1.17.0-1ubuntu1)
+Booting from ROM..c[?7l[2JL1_BOOT uname_r=7.0.0-29-generic
+1
+crw-------    1 0        0          10, 232 Oct 17 00:35 /dev/kvm
+crw-------    1 0        0          10, 241 Oct 17 00:35 /dev/vhost-vsock
+crw-------    1 0        0          10, 263 Oct 17 00:35 /dev/ovd_fwd
+ovd_fwd 32768 0 [permanent], Live 0xffffffffc04fc000 (OE)
+HOST_START uname=7.0.0-29-generic
+MODULE abi=1 flags=1 (permanent=1)
+RMMOD host: ret=-1 errno=16 (Device or resource busy)
+VM_UP guest agent answers; guest rmmod: OK -1 errno=16
+FAIL g-rst-both-dirs trial=0: R saw clean EOF after a reset: EOF(rx=23591 err=0 tcp=8);host records: got 0 want 1;host: 1 extra record(s) after the end
+FAIL g-rst-both-dirs trial=1: R saw clean EOF after a reset: EOF(rx=32486 err=0 tcp=8);host records: got 0 want 1;host: 1 extra record(s) after the end
+FAIL g-rst-both-dirs trial=2: R saw clean EOF after a reset: EOF(rx=17579 err=0 tcp=8);host records: got 0 want 1;host: 1 extra record(s) after the end
+FAIL g-rst-both-dirs trial=3: R saw clean EOF after a reset: EOF(rx=15817 err=0 tcp=8);host records: got 0 want 1;host: 1 extra record(s) after the end
+FAIL g-rst-both-dirs trial=4: R saw clean EOF after a reset: EOF(rx=6120 err=0 tcp=8);host records: got 0 want 1;host: 1 extra record(s) after the end
+RESULT g-rst-both-dirs                              trials=10 pass=0 fail=10 extra=[10 0 0 0 0 0]
+INV guest: OK 0 0 0 10 0 10 0 0
+INV host: live=0/0 queued=0 attached=10 completed=10 aborted=0 unclassified_eof=0 ab_peer=0 ab_socket=0 ab_detached=0
+FAIL r-rst-both-dirs trial=0: G saw clean EOF after a reset: rx=17799;guest records: got 0 want 1;guest: 1 extra record(s) after the end
+FAIL r-rst-both-dirs trial=1: G saw clean EOF after a reset: rx=13249;guest records: got 0 want 1;guest: 1 extra record(s) after the end
+FAIL r-rst-both-dirs trial=2: G saw clean EOF after a reset: rx=25227;guest records: got 0 want 1;guest: 1 extra record(s) after the end
+FAIL r-rst-both-dirs trial=3: G saw clean EOF after a reset: rx=0;guest records: got 0 want 1;guest: 1 extra record(s) after the end
+FAIL r-rst-both-dirs trial=4: G saw clean EOF after a reset: rx=26271;guest records: got 0 want 1;guest: 1 extra record(s) after the end
+RESULT r-rst-both-dirs                              trials=10 pass=0 fail=10 extra=[10 0 0 0 0 0]
+INV guest: OK 0 0 0 20 10 10 0 0
+INV host: live=0/0 queued=0 attached=20 completed=10 aborted=10 unclassified_eof=0 ab_peer=0 ab_socket=10 ab_detached=0
+FAIL host-abort trial=0: G saw clean EOF after a reset: rx=18163;guest records: got 0 want 1;guest: 1 extra record(s) after the end
+FAIL host-abort trial=1: G saw clean EOF after a reset: rx=27344;guest records: got 0 want 1;guest: 1 extra record(s) after the end
+FAIL host-abort trial=2: G saw clean EOF after a reset: rx=0;guest records: got 0 want 1;guest: 1 extra record(s) after the end
+FAIL host-abort trial=3: G saw clean EOF after a reset: rx=0;guest records: got 0 want 1;guest: 1 extra record(s) after the end
+FAIL host-abort trial=4: G saw clean EOF after a reset: rx=2121;guest records: got 0 want 1;guest: 1 extra record(s) after the end
+RESULT host-abort                                   trials=6 pass=0 fail=6 extra=[6 0 0 0 0 0]
+INV guest: OK 0 0 0 26 16 10 0 0
+INV host: live=0/0 queued=0 attached=26 completed=10 aborted=16 unclassified_eof=0 ab_peer=0 ab_socket=10 ab_detached=6
+FAIL guest-abort trial=0: R saw clean EOF after a reset: EOF(rx=17241 err=0 tcp=8);host records: got 0 want 1;host: 1 extra record(s) after the end
+FAIL guest-abort trial=1: R saw clean EOF after a reset: EOF(rx=13839 err=0 tcp=8);host records: got 0 want 1;host: 1 extra record(s) after the end
+FAIL guest-abort trial=2: R saw clean EOF after a reset: EOF(rx=28079 err=0 tcp=8);host records: got 0 want 1;host: 1 extra record(s) after the end
+FAIL guest-abort trial=3: R saw clean EOF after a reset: EOF(rx=12231 err=0 tcp=8);host records: got 0 want 1;host: 1 extra record(s) after the end
+FAIL guest-abort trial=4: R saw clean EOF after a reset: EOF(rx=0 err=0 tcp=8);host records: got 0 want 1;host: 1 extra record(s) after the end
+RESULT guest-abort                                  trials=6 pass=0 fail=6 extra=[6 0 0 0 0 0]
+INV guest: OK 0 0 0 32 16 16 0 0
+INV host: live=0/0 queued=0 attached=32 completed=16 aborted=16 unclassified_eof=0 ab_peer=0 ab_socket=10 ab_detached=6
+FAIL g-close-unread trial=0: R saw clean EOF after a reset: EOF(rx=2596 err=0 tcp=8);host records: got 0 want 1;host: 1 extra record(s) after the end
+FAIL g-close-unread trial=1: R saw clean EOF after a reset: EOF(rx=3307 err=0 tcp=8);host records: got 0 want 1;host: 1 extra record(s) after the end
+FAIL g-close-unread trial=2: R saw clean EOF after a reset: EOF(rx=922 err=0 tcp=8);host records: got 0 want 1;host: 1 extra record(s) after the end
+FAIL g-close-unread trial=3: R saw clean EOF after a reset: EOF(rx=2782 err=0 tcp=8);host records: got 0 want 1;host: 1 extra record(s) after the end
+FAIL g-close-unread trial=4: R saw clean EOF after a reset: EOF(rx=3428 err=0 tcp=8);host records: got 0 want 1;host: 1 extra record(s) after the end
+RESULT g-close-unread                               trials=6 pass=0 fail=6 extra=[6 0 0 0 0 0]
+INV guest: OK 0 0 0 38 16 22 0 0
+INV host: live=0/0 queued=0 attached=38 completed=22 aborted=16 unclassified_eof=0 ab_peer=0 ab_socket=10 ab_detached=6
+FAIL dial-watch-reset trial=0: watch record ABSENT when the holder observed the end (state=EOF)
+FAIL dial-watch-reset trial=1: watch record ABSENT when the holder observed the end (state=EOF)
+FAIL dial-watch-reset trial=2: watch record ABSENT when the holder observed the end (state=EOF)
+FAIL dial-watch-reset trial=3: watch record ABSENT when the holder observed the end (state=EOF)
+FAIL dial-watch-reset trial=4: watch record ABSENT when the holder observed the end (state=EOF)
+RESULT dial-watch-reset                             trials=10 pass=0 fail=10 extra=[0 0 0 10 10 0]
+INV guest: OK 0 0 0 48 16 32 0 0
+INV host: live=0/10 queued=0 attached=48 completed=22 aborted=16 unclassified_eof=0 ab_peer=0 ab_socket=10 ab_detached=6
+RESULT clean-g-first                                trials=10 pass=10 fail=0 extra=[0 0 0 0 0 0]
+INV guest: OK 0 0 0 58 26 32 0 0
+INV host: live=0/10 queued=0 attached=58 completed=32 aborted=16 unclassified_eof=0 ab_peer=0 ab_socket=10 ab_detached=6
+FAIL vmm-kill-32pairs-0dials round=0: inventory after: live=0/10 queued=0
+RESULT vmm-kill-32pairs-0dials                      trials=2 pass=1 fail=1 extra=[0 0 0 0 0 64]
+INV guest: OK 0 0 0 0 0 0 0 0
+INV host: live=0/0 queued=0 attached=0 completed=0 aborted=0 unclassified_eof=0 ab_peer=0 ab_socket=0 ab_detached=0
+GUEST_DMESG_BAD_LINES OK 0
+HOST_DMESG_BAD_LINES 0
+HOST_DONE
+L1_EVEND_EXIT=0
+--- L1 dmesg tail
+[    0.589251] ima: Allocated hash algorithm: sha256
+[    0.589278] ima: No architecture policies found
+[    0.589322] evm: Initialising EVM extended attributes:
+[    0.589326] evm: security.selinux
+[    0.589329] evm: security.SMACK64
+[    0.589333] evm: security.SMACK64EXEC
+[    0.589336] evm: security.SMACK64TRANSMUTE
+[    0.589339] evm: security.SMACK64MMAP
+[    0.589343] evm: security.apparmor
+[    0.589346] evm: security.ima
+[    0.589349] evm: security.capability
+[    0.589352] evm: HMAC attrs: 0x1
+[    0.589955] PM:   Magic number: 14:328:557
+[    0.590002] acpi PNP0C0F:08: hash matches
+[    0.590457] RAS: Correctable Errors collector initialized.
+[    0.591054] clk: Disabling unused clocks
+[    0.591060] PM: genpd: Disabling unused power domains
+[    0.594735] Freeing unused decrypted memory: 2028K
+[    0.595969] Freeing unused kernel image (initmem) memory: 5292K
+[    0.595995] Write protecting the kernel read-only data: 43008k
+[    0.597026] Freeing unused kernel image (text/rodata gap) memory: 776K
+[    0.597649] Freeing unused kernel image (rodata/data gap) memory: 1668K
+[    0.682630] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.682643] Run /init as init process
+[    0.682646]   with arguments:
+[    0.682648]     /init
+[    0.682650]   with environment:
+[    0.682652]     HOME=/
+[    0.682654]     TERM=linux
+[    0.693882] NET: Registered PF_VSOCK protocol family
+[    0.819462] kvm_amd: TSC scaling supported
+[    0.819472] kvm_amd: Nested Virtualization enabled
+[    0.819475] kvm_amd: Nested Paging enabled
+[    0.819480] kvm_amd: LBR virtualization supported
+[    0.819484] kvm_amd: Virtual VMLOAD VMSAVE supported
+[    0.819486] kvm_amd: Virtual GIF supported
+[    0.819487] kvm_amd: Virtual NMI enabled
+[    0.842190] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.842195] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+[    0.842748] ovd_fwd: loaded (permanent, abi 1, hazard=1 work_delay_us=0)
+--- guest serial tail
+GUEST_BOOT uname_r=7.0.0-29-generic
+
+GUEST_READY
+
+AGENT_READY
+
+--- ch.log tail
+ovd_fwd 32768 0 [permanent], Live 0xffffffffc04fc000 (OE)
+[   52.465076] reboot: Power down

@@ -16,6 +16,14 @@ VmReclamation(
                 ),
                 terminal: false,
             },
+            AllocationId(
+                "svc-app-0",
+            ): VmAllocFacts {
+                workload_id: WorkloadId(
+                    "svc-app",
+                ),
+                terminal: false,
+            },
         },
         host: VmHostObservation {
             scopes: {},

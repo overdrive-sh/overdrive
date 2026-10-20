@@ -12,4 +12,4 @@ pub mod rcgen_ca;
 
 pub use aead_codec::RootKeyAeadCodec;
 pub use keyring::SystemdCredsKeyring;
-pub use rcgen_ca::RcgenCa;
+pub use rcgen_ca::{RcgenCa, RcgenCaFactory};

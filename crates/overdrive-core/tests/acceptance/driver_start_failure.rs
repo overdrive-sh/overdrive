@@ -100,7 +100,7 @@ fn frozen_driver_error_remains_exhaustively_matchable_by_external_callers() {
             DriverError::NotFound { .. } => "not_found",
             DriverError::Io(_) => "io",
             DriverError::ResizeUnsupported { .. } => "resize_unsupported",
-            DriverError::VsockClaimUnavailable { .. } => "vsock_claim_unavailable",
+            DriverError::GuestTransportMissing { .. } => "guest_transport_missing",
         }
     }
 

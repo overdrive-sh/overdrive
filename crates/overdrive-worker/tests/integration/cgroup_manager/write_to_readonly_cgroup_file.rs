@@ -40,7 +40,7 @@ use overdrive_host::RealCgroupFs;
 use overdrive_worker::cgroup_manager::CgroupManager;
 use serial_test::serial;
 
-use super::super::cgroup_cleanup::AllocCleanup;
+use super::super::cgroup_cleanup::{AllocCleanup, delegate_overdrive_slice};
 
 #[tokio::test]
 #[serial(cgroup)]
@@ -52,6 +52,7 @@ async fn write_to_readonly_cgroup_events_propagates_real_eacces() {
     // wiring even though the test invokes the underlying fs.write
     // directly. The clone of `fs` materialises the Arc<dyn CgroupFs>
     // flowing through the manager's field.
+    delegate_overdrive_slice(cgroup_root);
     let manager = CgroupManager::new(cgroup_root.to_path_buf(), fs.clone());
     manager
         .create_workloads_slice_with_controllers()

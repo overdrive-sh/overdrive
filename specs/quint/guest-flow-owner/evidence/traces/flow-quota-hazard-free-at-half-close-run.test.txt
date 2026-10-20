@@ -6,14 +6,14 @@
 
   1) quota_bugFreeAtHalfClose::flow_quota::DrainingFlowStillCountsAgainstTheQuota:
        Error [QNT508]: Expect condition does not hold true
-        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/flow_quota.qnt:147:48
-        147:   run DrainingFlowStillCountsAgainstTheQuota = init
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/flow_quota.qnt:182:48
+        182:   run DrainingFlowStillCountsAgainstTheQuota = init
                                                             ^^^^
-        148:     .then(Admit(1)).then(HalfClose(1))
+        183:     .then(Admit(1)).then(HalfClose(1))
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        149:     .expect(Safety and st(1) == "draining" and slot.get(1).pend and heldBy(1) == 1)
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Use --seed=0x76ce5e4e049facd3 --match=quota_bugFreeAtHalfClose::flow_quota::DrainingFlowStillCountsAgainstTheQuota to repeat.
+        184:     .expect(Safety and st(1) == "half" and slot.get(1).fwd and heldBy(1) == 1)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Use --seed=0x398679e0afe1fa2d --match=quota_bugFreeAtHalfClose::flow_quota::DrainingFlowStillCountsAgainstTheQuota to repeat.
 
 
   Use --verbosity=3 to show executions.

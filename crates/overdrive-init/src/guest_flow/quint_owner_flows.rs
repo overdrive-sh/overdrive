@@ -1,84 +1,77 @@
-//! Quint conformance driver — `owner_flows` `flows_ok`, guest side (the
-//! TcpAccept half `gf`; QPROJ-1, QPROJ-5, QPROJ-7, DG-15).
+//! Quint conformance driver — `owner_flows`, guest side (`gf`, `gSess`;
+//! QPROJ-1, QPROJ-5, QPROJ-7, DG-5-E, DG-5-F, D-UP-8, INB-1).
 //!
-//! Replays `specs/quint/guest-flow-owner/owner_flows.qnt`, instance
-//! `flows_ok`, against the production guest flow owner [`GuestFlowOwner`] of
-//! each launch, over the guest-owner seam sim [`SimGuestOwnerIo`] and
-//! [`SimGuestClock`]. The spec is referenced in place. Every host variable is
-//! stimulus (QPROJ-1): the driver plays the host owner, the allocation
-//! lifecycle, the VM and the applications. It keeps a stimulus model of the
-//! host's side — the CID's lease, the control-session connections, the
-//! guest-opened flows, the host-opened flows and the host's in-flight `Abort`s
-//! — because the host's next seam input depends on it (whether the host
-//! accepts or closes a session, whether a flow is admitted, which flows a
-//! teardown closes); it re-implements no rule of the guest.
+//! Replays `specs/quint/guest-flow-owner/owner_flows.qnt`, conformance main
+//! `flows_conf` (`core2`: two control connections, two guest-opened flows, two
+//! dial slots; `REC = true`), against the production guest flow owner
+//! [`GuestFlowOwner`] of each launch, over the guest-owner seam sim
+//! [`SimGuestOwnerIo`] (its forwarder context a `SimFlowForwarder`) and
+//! [`SimGuestClock`]. The spec is referenced in place. The guest side of the
+//! module is projected; every host action is stimulus (QPROJ-1): the driver
+//! plays the host owner, the allocation lifecycle, the VM, the dialer and the
+//! applications, and its outputs reach the guest at the guest actions the trace
+//! names (`GuestRecvAbort`, `GuestSeesHostClose`, `GuestQueueReset`,
+//! `GuestSessionLossObserved`); it re-implements no rule of the guest.
+//!
+//! **Step record (D-UP-1).** `Config::nondet` is the single element
+//! `flows_conf::owner_flows::conf_step`; every `#[quint_test]` and the
+//! `#[quint_run]` name `flows_conf`; the projection matches the qualified
+//! names `flows_conf::owner_flows::<var>` ([`quint_itf::Qualified`]).
 //!
 //! Action → driving port / seam stimulus (feature-delta § *Conformance
-//! observation surface and action map*, "`owner_flows` `flows_ok`, guest
-//! side", with the host-side map read from the guest's seam; DG-15):
+//! observation surface and action map*, "`owner_flows` `flows_conf`, guest
+//! side"). Every handler ends by dispatching the owner until quiescent
+//! (DG-5-Q), the owner's driving port, once the guest has taken its first
+//! dispatch:
 //!
 //! | Action | Driver |
 //! |---|---|
-//! | `init` | no lease, no VM, no guest |
-//! | `Provision`, `Activate`, `Release`, `Restore` | stimulus: the host's CID lease / admission latch (stimulus model; no guest seam effect) |
-//! | `VmStart` | a new launch: a fresh seam and `GuestFlowOwner::new` with the lease's launch token; the owner issues its control connect |
-//! | `VmStop` | the VM dies: the seam ends every socket of the guest (`guest_owner_dies`) and the driver drops the owner |
-//! | `Teardown`, `Quiesce`, `HostSessionLoss(c)` | the host closes what the model closes: the host's open flows' V_h (seam: vsock end at the guest), the guest's unconsumed messages discarded, and — for a live session — the session's end, held until the guest's `GuestLossAbort` / `GuestOpenSession` |
-//! | `GuestOpenSession(c)` | the guest's control connect is in flight (after its loss is delivered and `CONTROL_RECONNECT_BACKOFF` passes, when it lost its previous session) |
-//! | `HostAcceptSession(c)`, `HostReadOpen(c)` | seam completes the guest's control connect; a session the host closes (CID not accepting, stale token, held claim) ends at the guest |
-//! | `GuestOpenFlow(f)` | seam: the application's `connect()` is captured; the guest issues its flow connect |
-//! | `HostAcceptFlow(f)`, `HostReadReq(f)`, `HostConnectDone(f)`, `HostFlowEnds(f)` | seam completes the guest's flow connect / delivers the host's `Paired`, `Refused` or `Abort` / ends V_h, as the host's step does; `HostInstall`, `HostStartConnect`, `HostConnectDiscard` are host-internal (stimulus model only) |
-//! | `HostOpenAccept(h)` | seam queues V_g with its `TcpAccept` request (the lease's launch token) |
+//! | `InitWith(o)` | no lease, no VM, no guest |
+//! | `Provision` | a new lease: its launch token is the next launch's |
+//! | `VmStart` | a new launch: a fresh seam and `GuestFlowOwner::new` with the lease's launch token; no dispatch yet |
+//! | `VmStop` | the VM ends: the seam releases the guest context and ends every guest socket (`guest_owner_dies`); the driver drops the owner (the guest's session is gone, D-UP-8) |
+//! | `GuestOpenSession(c)` | `dispatch_next` with no session — the first dispatch, or `SimGuestClock` advanced to the loss + `CONTROL_RECONNECT_BACKOFF` — must issue `start_connect_host(Control)`; the host listener completes it and the owner writes its `ControlOpen` (an owner that issues no connect fails the step) |
+//! | `WorkloadOpenSession(c)` | stimulus: a guest workload's connection, not the guest owner's |
+//! | `GuestOpenFlow(f)` | seam: an application `connect()` is captured (`OutboundCaptured`); the host listener completes the owner's V_g connect and the owner writes its request |
+//! | `HostConnectDone(f)` | the host attached its pair and writes `Paired` for `f`'s production flow on the session (EVMOD-PAIR: the guest attaches on it) |
+//! | `HostFlowEndsMsg(f, msg)` | the host closes `f`'s V_h, writing `Refused` (before `Paired`) or `Abort` (after) first when it answers (`msg` and the flow attributed) |
+//! | `Teardown`, `Quiesce`, `HostSessionLoss(c)`, `HostDeadSessionLoss(c)` | the host closes the V_h of every guest-opened flow it held registered; the session's end and the dials' closes reach the guest at the guest actions below |
+//! | `DialOpen(h)` | seam queues V_g with its `TcpAccept` request (peer = gateway:0, the lease's token) |
 //! | `GuestAcceptV(h)` | seam releases the accept and the request |
-//! | `GuestPairOrRefuse(h, ok)` | seam completes the application connect (accepted / refused) |
-//! | `HostRecvPaired(h)`, `HostRecvRefused(h)` | the host consumes the guest's `Paired` / `Refused` |
-//! | `HostAbortAccept(h)` | stimulus: the host closes V_h and, while a session lives, sends `Abort` — both reach the guest later (`GuestRecvAbort`, `GuestSeesHostClose`, `GuestQueueReset`) |
+//! | `GuestPairOrRefuseOk(h, ok)` | seam completes the application connect (accepted / refused) |
+//! | `GuestConnectTimesOut(h)` | `SimGuestClock` advanced to that flow's `GUEST_INBOUND_CONNECT_TIMEOUT` deadline |
 //! | `GuestRecvAbort(h)` | seam releases the host's `Abort` |
-//! | `GuestSeesHostClose(h)` / `GuestQueueReset(h)` | seam delivers the host's close of V_h (K-A4) after / before the guest's accept |
-//! | `GuestLossAbort(h)` | seam delivers the end of the session the host ended |
+//! | `GuestSeesHostClose(h)` / `GuestQueueReset(h)` | seam delivers the host's close of V_h after / before the guest's accept (DG-5-E, K-A4); an attached pair's end record is released |
+//! | `GuestAcceptedError(h)` | seam delivers `Hangup { Error }` on the accepted V_g (DG-5-E) |
+//! | `GuestSessionLossObserved(c)` | seam delivers the end (EOF, K-A5) of the guest's session connection `c`; the owner aborts every flow of it in that dispatch (DG-5-F) |
+//! | `GuestNeverReplies(h)` | stimulus: the guest's dial handling stalls — the seam releases nothing more for `h` |
+//! | `HostRecvPaired(h)`, `HostRecvRefused(h)`, `HostRecvTimedOut(h)`, `HostRecvAbort(h)` | the host consumes the guest's reply from the seam; a reply the guest did not write fails the step |
+//! | `Activate*`, `Release`, `Restore`, `HostAcceptSession`, `HostReadOpen`, `HostAcceptFlow`, `HostReadReqN`, `HostStartConnect`, `HostConnectDiscard`, `Dial{NotServing,Quiesced,NoSession,Unreachable}`, `HostAbortAccept`, `HostDialDeadline`, `DialCancel` | stimulus (host state; the guest observes its effects at the guest actions above) |
 //! | `HostClaimSession`, `HostCheckFlow`, `HostRegisterFlow` | hazard-only — an error, never a no-op |
+//! | `GuestOpenBeacon`, `HostAcceptBeacon`, `HostReadReady`, `DriverStop` | the beacon instance's actions (`flows_beacon_conf`, the VM driver's driver) — never enabled on `flows_conf`; an error |
 //!
-//! Projection (`State::from_driver`): `gf(h).st` ← O5
-//! `guest_observation().accepted` (`Accepted` → `acc`, `Routed` → `routed`);
-//! `reset` ⇔ S `reset_in_queue` of the live launch; `closed` ⇔ the flow has
-//! been held by the guest (seen in `accepted` or `reset_in_queue`) and no
-//! longer is; `toHostPaired`, `toHostRefused` ← S `outbox` of every launch
-//! (messages the guest wrote and the host has not consumed outlive the VM). S
-//! = `SimGuestOwnerIo::guest_socket_observation` (QPROJ-7). The memory "the
-//! guest has held this flow" is the relabelling's record of the production
-//! identities it has seen, kept so that `closed` (a history fact the owner's
-//! table cannot hold once the flow is gone) has a pre-image; it never supplies
-//! a phase. Every other variable is stimulus, ghost or constant (README S-1).
+//! Projection (`State::from_driver`): `gf(h).st` ← O QPROJ-5
+//! `guest_observation().accepted` (`Accepted` → `acc`, `Paired` → `attached`);
+//! `reset` ⇔ S `reset_in_queue` of the live launch (QPROJ-7, Tier-3 pair V-24);
+//! `closed` (and the model-internal `tomb`) ⇔ the flow was held by the guest —
+//! accepted, or torn down in its queue — and no longer is; `none` otherwise;
+//! `silent` is the scripted stimulus of `GuestNeverReplies` and is not
+//! compared. `gSess` ← O QPROJ-5 `session` (`session ⇔ gSess ≠ 0`); while the
+//! VM is down, or before the guest's first dispatch, `session = false`. Every
+//! other variable is stimulus, ghost or model-only.
 //!
 //! Identity relabelling: host flow `h` ↔ `FlowId::new(Host, h)`; guest flow
 //! `f` ↔ the guest-origin `FlowId` of the request the owner wrote for the
 //! application connect the driver issued for `f`; connection `c` ↔ the
-//! guest's control connect the driver attributed to it; lease `gen` ↔ launch
-//! token `gen`.
+//! guest's control connect the driver completed for it; lease `gen` ↔ the
+//! launch token `token(gen)`. The memory "the guest has held this host flow"
+//! is the relabelling's record of the production identities it has seen.
 //!
-//! **The stimulus model is verified against the spec.** The host variables the
-//! stimulus model tracks — `alloc`, `gen`, `vmGen`, `vmUp`, `quiesced`,
-//! `claim`, `sess`, `flows`, `hf`, `toGuestAbort` — are stimulus (QPROJ-1),
-//! but the driver's own copy of them decides its next seam input, so it is
-//! checked: `State::from_spec` decodes them from each step's ITF post-state and
-//! stashes them (a thread-local this module owns); at the start of the next
-//! step the driver compares its model with the stash and fails with
-//! [`DriverError::PeerDiverged`] on any difference. The stimulus is therefore
-//! driven from a pre-state equal to the spec's. The stash verifies stimulus;
-//! it never feeds `State` — `from_driver` reads only O5 and the marked sim
-//! arbiter. The same comparison checks the instance's domains (`CONNS`,
-//! `FLOW_IDS` are read from the spec; `HFLOWS` must equal the driver's) and
-//! that a state labelled `step` is the instance's initial state.
-//!
-//! **Coverage limit.** The `flows_ok` guest side compares only `gf`,
-//! `toHostPaired` and `toHostRefused` (the TcpAccept half). The guest's
-//! TcpConnect half (`GuestOpenFlow` … `HostFlowEnds`) is exercised here as
-//! stimulus only — its production outcome is not projected; its oracle is the
-//! acceptance suite `guest_flow/tests/tcp_connect.rs`.
-//!
-//! The spec defines no Quint `run` declarations, so there is no named run for
-//! `#[quint_test]`; the instance replays randomized traces through
-//! `#[quint_run]` (the seed is printed on failure).
+//! **Pre-state stash.** `State::from_spec` stashes each step's state; at the
+//! next step the driver reads the pre-state's host variables where a host
+//! output depends on them (which guest-opened flows the host held registered;
+//! whether the host answers a flow it ends; which connection is the CID's live
+//! session at a guest accept). The stash is stimulus; it never feeds `State`.
 
 #![allow(
     clippy::expect_used,
@@ -94,31 +87,45 @@ use std::io::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Instant;
 
 use itf::Value;
 use overdrive_core::guest_transport::LaunchToken;
 use overdrive_core::guest_transport::wire::{
     CONTROL_RECONNECT_BACKOFF, ControlMessage, FlowId, FlowOrigin, FlowRefusal, FlowRequest,
+    GUEST_INBOUND_CONNECT_TIMEOUT,
 };
 use overdrive_core::net::ListenPort;
-use quint_connect::{Driver, Result, State, Step, quint_run, switch};
+use overdrive_core::vm::config::VsockPort;
+use quint_connect::{Config, Driver, Result, State, Step, quint_run, quint_test, switch};
 use serde::Deserialize;
 
-use super::quint_itf::{self, ItfError};
-use super::sim::{
-    SimConnectTarget, SimGuestClock, SimGuestEffect, SimGuestOwnerIo, SimSessionEnd, sim_cookie,
-};
-use super::test_support::{GuestProcess, settle};
-use super::{GuestAcceptPhase, GuestClock, GuestFlowOwner, HostChannel, SocketId};
-use crate::transport::GuestTransportToken;
+use super::quint_itf::{self, ItfError, Qualified};
+use super::sim::{SimConnectTarget, SimGuestClock, SimGuestOwnerIo, SimSessionEnd, sim_cookie};
+use super::test_support::{GuestProcess, settle, start};
+use super::{GuestAcceptPhase, GuestClock, GuestFlowOwner, HostChannel};
+use crate::transport::{GuestHostPorts, GuestTransportToken};
 
+/// The host listener ports the launch's `overdrive.transport=` token names
+/// (GUEST-PORTS, ADR-0217: `beacon=`, `stream=`, `control=`, read by the
+/// guest from its command line; it holds no host-port constant). The seam's
+/// sim keys connections by the guest's own socket, so fixture values in the
+/// valid range, three distinct and none the production default.
+const fn host_ports() -> GuestHostPorts {
+    GuestHostPorts {
+        beacon: VsockPort::new(50_234),
+        stream: VsockPort::new(50_240),
+        control: VsockPort::new(50_243),
+    }
+}
+
+const MAIN: &str = "flows_conf";
+const MODULE: &str = "owner_flows";
 const WL: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 7);
 const GW: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 1);
-/// The intake client a host-opened flow names.
-const CLIENT: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(198, 51, 100, 7), 40_000);
-const ACCEPT_PORT: &str = "8080";
-/// The model's host-opened flows (`HFLOWS`).
-const HFLOWS: [i64; 1] = [1];
+const DIAL_PORT: u16 = 8080;
+/// `HFLOWS` of `flows_conf` (`core2`).
+const HFLOWS: [i64; 2] = [1, 2];
 
 /// Why a driver step cannot proceed.
 #[derive(Debug, thiserror::Error)]
@@ -128,1097 +135,1265 @@ enum DriverError {
     #[error("action `{0}` is hazard-only: it is never enabled in a design instance")]
     HazardOnly(&'static str),
     #[error(
-        "peer stimulus model diverged from the spec's host variables: spec {spec}, driver {driver}"
+        "action `{0}` belongs to the beacon instance (`flows_beacon_conf`); it is never enabled on `flows_conf`"
     )]
-    PeerDiverged { spec: String, driver: String },
-    #[error("the spec instance's domains differ from the driver's assumptions: {0}")]
-    DomainMismatch(String),
-    #[error(
-        "action `step` labelled a state that is not the instance's initial state (only a trace's \
-         initial state may carry quint's `step` label)"
-    )]
-    StepNotInitial,
+    OtherInstance(&'static str),
+    #[error("the step cannot be represented in production: {0}")]
+    NotRepresentable(String),
+    #[error("the trace's {0} has no production identity")]
+    NoIdentity(String),
 }
 
-// ----- the spec's host variables (stimulus verification, never projection) ----
-
-/// The host variables the stimulus model tracks, in the spec's vocabulary.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct HostVars {
-    alloc: String,
-    lease: i64,
-    vm_gen: i64,
-    vm_up: bool,
-    quiesced: bool,
-    claim: i64,
-    /// `sess(c)`: `(st, gen)`.
-    sess: BTreeMap<i64, (String, i64)>,
-    /// `flows(f)`: `(st, gen, req, inFlight)`.
-    flows: BTreeMap<i64, (String, i64, i64, bool)>,
-    /// `hf(h)`: `(st, gen)`.
-    hf: BTreeMap<i64, (String, i64)>,
-    to_guest_abort: BTreeSet<i64>,
-}
-
-/// One step's spec post-state, as the next step's driver checks it.
-struct SpecStash {
-    host: HostVars,
-    /// The state is the instance's initial state.
-    initial: bool,
-}
+// ----- the pre-state stash (stimulus, never projection) --------------------------
 
 thread_local! {
-    /// Written by `State::from_spec` (each step's post-state), taken by the
-    /// driver at its next step. Verifies the stimulus model; never a
-    /// projection source.
-    static SPEC_HOST: RefCell<Option<SpecStash>> = const { RefCell::new(None) };
+    /// The previous step's spec state, written by `State::from_spec`. Read by
+    /// the next step's handlers where a host output depends on the host's
+    /// state; never a projection source.
+    static SPEC_PRE: RefCell<Option<Qualified>> = const { RefCell::new(None) };
 }
 
-impl HostVars {
-    fn from_vars(vars: &BTreeMap<String, Value>) -> std::result::Result<Self, ItfError> {
-        let st_gen = |v: &Value| -> std::result::Result<(String, i64), ItfError> {
+fn pre() -> Option<Qualified> {
+    SPEC_PRE.with(|stash| stash.borrow().clone())
+}
+
+/// The pre-state's `flows(f).st`.
+fn pre_flow_st(f: i64) -> Option<String> {
+    let vars = pre()?;
+    let flows = quint_itf::int_map(vars.var("flows").ok()?, |v| {
+        quint_itf::string(quint_itf::field(v, "st")?)
+    })
+    .ok()?;
+    flows.get(&f).cloned()
+}
+
+/// The pre-state's guest-opened flows the host holds registered (U-1).
+fn pre_registered_flows() -> BTreeSet<i64> {
+    let Some(vars) = pre() else { return BTreeSet::new() };
+    let Ok(flows) = vars
+        .var("flows")
+        .and_then(|v| quint_itf::int_map(v, |x| quint_itf::string(quint_itf::field(x, "st")?)))
+    else {
+        return BTreeSet::new();
+    };
+    flows
+        .into_iter()
+        .filter(|(_, st)| matches!(st.as_str(), "accepted" | "read" | "connecting" | "paired"))
+        .map(|(f, _)| f)
+        .collect()
+}
+
+/// The pre-state's live control connection of the current launch (`liveConn`).
+fn pre_live_conn() -> i64 {
+    let Some(vars) = pre() else { return 0 };
+    let vm_gen = vars.var("vmGen").ok().and_then(|v| quint_itf::int(v).ok()).unwrap_or(0);
+    let Ok(sess) = vars.var("sess").and_then(|v| {
+        quint_itf::int_map(v, |x| {
             Ok((
-                quint_itf::string(quint_itf::field(v, "st")?)?,
-                quint_itf::int(quint_itf::field(v, "gen")?)?,
+                quint_itf::string(quint_itf::field(x, "st")?)?,
+                quint_itf::int(quint_itf::field(x, "gen")?)?,
             ))
-        };
-        Ok(Self {
-            alloc: quint_itf::string(quint_itf::var(vars, "alloc")?)?,
-            lease: quint_itf::int(quint_itf::var(vars, "gen")?)?,
-            vm_gen: quint_itf::int(quint_itf::var(vars, "vmGen")?)?,
-            vm_up: quint_itf::boolean(quint_itf::var(vars, "vmUp")?)?,
-            quiesced: quint_itf::boolean(quint_itf::var(vars, "quiesced")?)?,
-            claim: quint_itf::int(quint_itf::var(vars, "claim")?)?,
-            sess: quint_itf::int_map(quint_itf::var(vars, "sess")?, st_gen)?,
-            flows: quint_itf::int_map(quint_itf::var(vars, "flows")?, |v| {
-                Ok((
-                    quint_itf::string(quint_itf::field(v, "st")?)?,
-                    quint_itf::int(quint_itf::field(v, "gen")?)?,
-                    quint_itf::int(quint_itf::field(v, "req")?)?,
-                    quint_itf::boolean(quint_itf::field(v, "inFlight")?)?,
-                ))
-            })?,
-            hf: quint_itf::int_map(quint_itf::var(vars, "hf")?, st_gen)?,
-            to_guest_abort: quint_itf::int_set(quint_itf::var(vars, "toGuestAbort")?)?,
         })
-    }
-
-    /// The spec's `init` over the same domains.
-    fn initial(&self) -> Self {
-        Self {
-            alloc: "Absent".to_owned(),
-            lease: 0,
-            vm_gen: 0,
-            vm_up: false,
-            quiesced: false,
-            claim: 0,
-            sess: self.sess.keys().map(|c| (*c, ("none".to_owned(), 0))).collect(),
-            flows: self.flows.keys().map(|f| (*f, ("none".to_owned(), 0, 0, false))).collect(),
-            hf: self.hf.keys().map(|h| (*h, ("none".to_owned(), 0))).collect(),
-            to_guest_abort: BTreeSet::new(),
-        }
-    }
+    }) else {
+        return 0;
+    };
+    sess.into_iter()
+        .filter(|(_, (st, g))| st == "live" && *g == vm_gen)
+        .map(|(c, _)| c)
+        .next_back()
+        .unwrap_or(0)
 }
 
-fn not_enabled(action: &'static str, why: &'static str) -> impl FnOnce() -> DriverError {
-    move || DriverError::NotEnabled { action, why: why.to_owned() }
-}
+// ----- the driver ----------------------------------------------------------------
 
-// ----- the stimulus model (the host's side) ------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Alloc {
-    Absent,
-    Provisioned,
-    Active,
-    Retiring,
-}
-
-impl Alloc {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Absent => "Absent",
-            Self::Provisioned => "Provisioned",
-            Self::Active => "Active",
-            Self::Retiring => "Retiring",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SessSt {
-    Pending,
-    Reading,
-    Live,
-    Dead,
-    Closed,
-}
-
-impl SessSt {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Reading => "reading",
-            Self::Live => "live",
-            Self::Dead => "dead",
-            Self::Closed => "closed",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct Sess {
-    st: SessSt,
-    lease: u32,
-    /// The guest's control connect the driver attributed to this connection.
-    socket: Option<SocketId>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FlowSt {
-    Queued,
-    Accepted,
-    Read,
-    Installed,
-    Connecting,
-    Paired,
-    Closed,
-}
-
-impl FlowSt {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Queued => "queued",
-            Self::Accepted => "accepted",
-            Self::Read => "read",
-            Self::Installed => "installed",
-            Self::Connecting => "connecting",
-            Self::Paired => "paired",
-            Self::Closed => "closed",
-        }
-    }
-
-    const fn registered(self) -> bool {
-        matches!(
-            self,
-            Self::Accepted | Self::Read | Self::Installed | Self::Connecting | Self::Paired
-        )
-    }
-
-    const fn attributed(self) -> bool {
-        matches!(self, Self::Read | Self::Installed | Self::Connecting | Self::Paired)
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct HostFlow {
-    st: FlowSt,
-    lease: u32,
-    req: i64,
-    in_flight: bool,
-    /// The guest's flow connect for this flow, on the launch `gen`.
-    socket: Option<SocketId>,
-    /// The guest-origin flow id the guest wrote in its request.
-    id: Option<FlowId>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HfSt {
-    Req,
-    Paired,
-    Closed,
-}
-
-impl HfSt {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Req => "req",
-            Self::Paired => "paired",
-            Self::Closed => "closed",
-        }
-    }
-}
-
-struct FlowsOkDriver {
-    /// The current launch's owner under test.
-    guest: GuestProcess,
-    /// Every launch's seam, in launch order (the last is the current VM's).
-    sims: Vec<SimGuestOwnerIo>,
-    /// The current launch's clock.
+/// One launch of the guest: its seam, clock and lifecycle. The launch's
+/// owner is the driver's own `owner` field (S-7, the "Owner field" ruling),
+/// built with the launch and replaced with it at each `VmStart`.
+struct Launch {
+    /// The launch's guest process lifecycle (test support beside the owner).
+    process: GuestProcess,
+    io: SimGuestOwnerIo,
     clock: Arc<SimGuestClock>,
-    // stimulus model
-    alloc: Alloc,
-    lease: u32,
-    vm_gen: u32,
-    vm_up: bool,
-    quiesced: bool,
-    claim: Option<i64>,
-    sess: BTreeMap<i64, Sess>,
-    flows: BTreeMap<i64, HostFlow>,
-    /// `hf(h)`: state and the lease that opened it.
-    hf: BTreeMap<i64, (HfSt, u32)>,
-    to_guest_abort: BTreeSet<i64>,
-    /// A state labelled `step` was taken as the initial state; the next step
-    /// checks that it was.
-    step_as_init: bool,
-    /// Relabelling record: host-opened flows the guest has held (seen in
-    /// `accepted` or `reset_in_queue`).
-    held: BTreeSet<FlowId>,
+    /// The owner has taken its first dispatch.
+    started: bool,
+    /// The guest's control connection `c` (the guest owner's own), by model id.
+    own_conns: BTreeSet<i64>,
+    /// The connection the guest holds as its session (model id).
+    session_conn: Option<i64>,
+    /// When the guest observed the loss of the session it held.
+    loss_at: Option<Instant>,
+    /// When each dial's C connect started (its `GUEST_INBOUND_CONNECT_TIMEOUT`).
+    connect_started: BTreeMap<i64, Instant>,
+}
+
+struct OwnerFlowsGuestDriver {
+    /// The production guest flow owner of the current launch, held directly
+    /// (S-7, the "Owner field" ruling): the only path to the owner. Built
+    /// with each launch; after the launch's VM stops it is kept and never
+    /// called or projected again.
+    owner: GuestFlowOwner,
+    /// The current lease (`gen`).
+    lease_gen: i64,
+    /// The VM's launch (`vmGen`) and whether it is up.
+    vm_gen: i64,
+    /// The current launch (its owner is `owner`): `NotStarted` before the
+    /// first `VmStart` (an owner built, never dispatched or projected),
+    /// `Alive` while the VM runs, `Dead` after its `VmStop` (the guest is PID
+    /// 1: it dies with its VM).
+    launch: Launch,
+    /// Guest-opened flow `f` ↔ its production flow, per launch.
+    flow_of: BTreeMap<i64, FlowId>,
+    /// Dial slots the guest has held (accepted, or torn down in its accept
+    /// queue): the relabelling's memory of identities seen.
+    held: BTreeSet<i64>,
+    /// Dial slots whose V_g the host tore down in the guest's accept queue
+    /// in a launch that has since ended.
+    reset_then_gone: BTreeSet<i64>,
+    /// Dial slots scripted `GuestNeverReplies` (stimulus; not compared).
+    silent: BTreeSet<i64>,
+}
+
+fn token(lease_gen: i64) -> LaunchToken {
+    let byte = 0x10 + u8::try_from(lease_gen).expect("MAXGEN is small");
+    LaunchToken::from_bytes([byte; 16]).expect("non-zero launch token")
 }
 
 fn host_flow(h: i64) -> FlowId {
-    FlowId::new(FlowOrigin::Host, u32::try_from(h).expect("model flow ids are small"))
-        .expect("seq < 2^31")
+    FlowId::new(FlowOrigin::Host, u32::try_from(h).expect("dial slots are small"))
+        .expect("small seq")
 }
 
-fn launch_token(lease: u32) -> LaunchToken {
-    LaunchToken::from_str(&format!("{lease:032x}")).expect("fixture launch token")
+fn guest_dest(f: i64) -> SocketAddrV4 {
+    SocketAddrV4::new(Ipv4Addr::new(93, 0, u8::try_from(f).expect("flow ids are small"), 1), 443)
 }
 
-fn app_cookie(f: i64) -> super::SocketCookie {
-    sim_cookie(100 + u64::try_from(f).expect("model flow ids are positive"))
+fn listen_port() -> ListenPort {
+    ListenPort::from_str(&DIAL_PORT.to_string()).expect("non-zero port")
 }
 
-fn app_destination(f: i64) -> SocketAddrV4 {
-    SocketAddrV4::new(
-        Ipv4Addr::new(93, 0, u8::try_from(f).expect("model flow ids are small"), 1),
-        443,
-    )
-}
-
-impl FlowsOkDriver {
-    fn new() -> Self {
+impl Launch {
+    /// A launch of generation `vm_gen` whose VM has not started, with its
+    /// owner built over the launch's fresh seam and clock, not dispatched.
+    fn of(vm_gen: i64) -> (GuestFlowOwner, Self) {
         let clock = Arc::new(SimGuestClock::new());
-        Self {
-            guest: GuestProcess::NotStarted,
-            sims: Vec::new(),
-            clock,
-            alloc: Alloc::Absent,
-            lease: 0,
-            vm_gen: 0,
-            vm_up: false,
-            quiesced: false,
-            claim: None,
-            sess: BTreeMap::new(),
-            flows: BTreeMap::new(),
-            hf: BTreeMap::new(),
-            to_guest_abort: BTreeSet::new(),
-            step_as_init: false,
-            held: BTreeSet::new(),
-        }
-    }
-
-    /// A driver for a new run: no stash of an earlier run is compared.
-    fn fresh() -> Self {
-        SPEC_HOST.with(|stash| stash.borrow_mut().take());
-        Self::new()
-    }
-
-    // ----- stimulus verification ------------------------------------------------------
-
-    /// The stimulus model in the spec's vocabulary, over the spec's domains
-    /// (`conns`, `fids`, `hflows`) and any key the model holds besides.
-    fn host_vars(&self, spec: &HostVars) -> HostVars {
-        let mut sess: BTreeMap<i64, (String, i64)> =
-            spec.sess.keys().map(|c| (*c, ("none".to_owned(), 0))).collect();
-        for (c, s) in &self.sess {
-            sess.insert(*c, (s.st.as_str().to_owned(), i64::from(s.lease)));
-        }
-        let mut flows: BTreeMap<i64, (String, i64, i64, bool)> =
-            spec.flows.keys().map(|f| (*f, ("none".to_owned(), 0, 0, false))).collect();
-        for (f, x) in &self.flows {
-            flows.insert(*f, (x.st.as_str().to_owned(), i64::from(x.lease), x.req, x.in_flight));
-        }
-        let mut hf: BTreeMap<i64, (String, i64)> =
-            spec.hf.keys().map(|h| (*h, ("none".to_owned(), 0))).collect();
-        for (h, (st, lease)) in &self.hf {
-            hf.insert(*h, (st.as_str().to_owned(), i64::from(*lease)));
-        }
-        HostVars {
-            alloc: self.alloc.as_str().to_owned(),
-            lease: i64::from(self.lease),
-            vm_gen: i64::from(self.vm_gen),
-            vm_up: self.vm_up,
-            quiesced: self.quiesced,
-            claim: self.claim.unwrap_or(0),
-            sess,
-            flows,
-            hf,
-            to_guest_abort: self.to_guest_abort.clone(),
-        }
-    }
-
-    /// Compares the stimulus model with the spec's post-state of the previous
-    /// step (stashed by `State::from_spec`): the instance's domains, the
-    /// `step`-labelled initial state, then every host variable the model
-    /// tracks. Nothing to compare before the run's first step.
-    fn verify_stimulus(&mut self) -> std::result::Result<(), DriverError> {
-        let Some(spec) = SPEC_HOST.with(|stash| stash.borrow_mut().take()) else {
-            return Ok(());
+        let io = SimGuestOwnerIo::new(WL, Arc::clone(&clock));
+        let transport = GuestTransportToken {
+            workload_addr: WL,
+            gateway: GW,
+            launch: token(vm_gen),
+            ports: host_ports(),
         };
-        let hflows: BTreeSet<i64> = spec.host.hf.keys().copied().collect();
-        if hflows != HFLOWS.iter().copied().collect::<BTreeSet<_>>() {
-            return Err(DriverError::DomainMismatch(format!(
-                "the spec's HFLOWS is {hflows:?}, the driver assumes {HFLOWS:?}"
-            )));
-        }
-        if std::mem::take(&mut self.step_as_init) && !spec.initial {
-            return Err(DriverError::StepNotInitial);
-        }
-        let model = self.host_vars(&spec.host);
-        if model != spec.host {
-            return Err(DriverError::PeerDiverged {
-                spec: format!("{:?}", spec.host),
-                driver: format!("{model:?}"),
-            });
-        }
-        Ok(())
+        let owner_clock: Arc<dyn GuestClock> = clock.clone();
+        let owner = GuestFlowOwner::new(transport, Box::new(io.clone()), owner_clock);
+        let launch = Self {
+            process: GuestProcess::NotStarted,
+            io,
+            clock,
+            started: false,
+            own_conns: BTreeSet::new(),
+            session_conn: None,
+            loss_at: None,
+            connect_started: BTreeMap::new(),
+        };
+        (owner, launch)
     }
 
-    // ----- the host's predicates (stimulus model) ---------------------------------
-
-    fn sess_live(&self) -> bool {
-        self.sess.values().any(|s| matches!(s.st, SessSt::Live | SessSt::Dead))
+    /// The launch's VM runs: its owner has not died. (`Alive` from the VM's
+    /// start; the owner's first dispatch is taken at the guest's first
+    /// session, `started`.)
+    const fn alive(&self) -> bool {
+        self.process.is_alive()
     }
+}
 
-    const fn cid_accepts_session(&self) -> bool {
-        matches!(self.alloc, Alloc::Provisioned | Alloc::Active)
-    }
-
-    const fn token_matches(&self, lease: u32) -> bool {
-        self.cid_accepts_session() && lease == self.lease
-    }
-
-    fn admissible(&self) -> bool {
-        self.alloc == Alloc::Active && self.sess_live() && !self.quiesced
-    }
-
-    const fn writer_up(&self, lease: u32) -> bool {
-        self.vm_up && self.vm_gen == lease
-    }
-
-    // ----- the guest -----------------------------------------------------------------
-
-    /// The live launch's seam: the VM of `gen` is running.
-    fn live_sim(&self, lease: u32) -> Option<SimGuestOwnerIo> {
-        if self.writer_up(lease) && self.guest.owner().is_some() {
-            self.sims.last().cloned()
-        } else {
-            None
+impl OwnerFlowsGuestDriver {
+    fn new() -> Self {
+        SPEC_PRE.with(|stash| stash.borrow_mut().take());
+        let (owner, launch) = Launch::of(0);
+        Self {
+            owner,
+            lease_gen: 0,
+            vm_gen: 0,
+            launch,
+            flow_of: BTreeMap::new(),
+            held: BTreeSet::new(),
+            reset_then_gone: BTreeSet::new(),
+            silent: BTreeSet::new(),
         }
     }
 
-    /// Settles the live owner.
+    fn launch(&mut self, action: &'static str) -> std::result::Result<&mut Launch, DriverError> {
+        Some(&mut self.launch).filter(|l| l.alive()).ok_or_else(|| DriverError::NotEnabled {
+            action,
+            why: "no guest is running".to_owned(),
+        })
+    }
+
+    /// Dispatches the live guest owner until quiescent (DG-5-Q) once it has
+    /// taken its first dispatch: the owner's driving port, called by every
+    /// handler.
     fn settle(&mut self) {
-        if let (Some(owner), Some(io)) = (self.guest.owner_mut(), self.sims.last()) {
-            settle(owner, io);
+        let launch = &self.launch;
+        if !launch.started || !launch.alive() {
+            return;
         }
+        let (io, clock) = (launch.io.clone(), Arc::clone(&launch.clock));
+        settle(&mut self.owner, &io, &clock);
     }
 
-    /// Records the host-opened flows the guest holds now (relabelling memory).
-    fn note_held(&mut self) {
-        let Some(owner) = self.guest.owner() else { return };
-        let accepted: Vec<FlowId> = owner.guest_observation().accepted.keys().copied().collect();
-        self.held.extend(accepted);
-        if let Some(io) = self.sims.last() {
-            self.held.extend(io.guest_socket_observation().reset_in_queue);
+    /// Runs the guest forwarder's queued work and releases its end records,
+    /// then settles (the context's readiness, EVMOD-REC).
+    fn settle_forwarder(&mut self) {
+        if let Some(launch) = Some(&self.launch).filter(|l| l.started && l.alive()) {
+            launch.io.run_forwarder();
+            launch.io.release_forward_ends();
         }
+        self.settle();
     }
 
-    /// The host discards every message the guest wrote and it has not consumed.
-    fn discard_guest_messages(&self) {
-        for io in &self.sims {
-            let _discarded = io.take_outbox();
+    /// The host closes the V_h of a guest flow the live guest holds.
+    fn host_closes_vsock(&mut self, flow: FlowId) {
+        if let Some(launch) = Some(&self.launch).filter(|l| l.alive()) {
+            launch.io.host_vsock_end(flow);
         }
+        self.settle_forwarder();
     }
 
-    /// The host closes `flow`'s V_h: the guest sees the vsock end.
-    fn end_guest_flow(&mut self, f: i64) {
-        let Some(flow) = self.flows.get(&f).copied() else { return };
-        if let (Some(id), Some(io)) = (flow.id, self.live_sim(flow.lease)) {
-            io.host_vsock_end(id);
-            self.settle();
-        }
-    }
-
-    /// Aborts every registered guest-opened flow (`abortAll`).
-    fn abort_all_flows(&mut self) {
-        let aborted: Vec<i64> =
-            self.flows.iter().filter(|(_, x)| x.st.registered()).map(|(f, _)| *f).collect();
-        for f in aborted {
-            if let Some(x) = self.flows.get_mut(&f) {
-                x.st = FlowSt::Closed;
-            }
-            self.end_guest_flow(f);
-        }
-    }
-
-    /// Closes every open host-opened flow (`abortAllH`); the guest observes
-    /// each close later (`GuestSeesHostClose`, `GuestQueueReset`).
-    fn abort_all_h(&mut self) -> BTreeSet<i64> {
-        let open: BTreeSet<i64> = self
-            .hf
-            .iter()
-            .filter(|(_, (st, _))| matches!(st, HfSt::Req | HfSt::Paired))
-            .map(|(h, _)| *h)
-            .collect();
-        for h in &open {
-            self.set_hf(*h, HfSt::Closed);
-        }
-        open
-    }
-
-    /// Sets `hf(h).st`, keeping the lease that opened it.
-    fn set_hf(&mut self, h: i64, st: HfSt) {
-        if let Some(entry) = self.hf.get_mut(&h) {
-            entry.0 = st;
-        }
-    }
-
-    /// The host ends the live guest's session `c`: held at the seam until the
-    /// guest observes it.
-    fn end_session_deferred(&self, c: i64) {
-        let Some(s) = self.sess.get(&c) else { return };
-        if let Some(io) = self.live_sim(s.lease)
-            && io.session_socket().is_some()
-            && s.socket.is_some()
-            && !io.session_end_pending()
-        {
-            io.host_end_session_deferred(SimSessionEnd::Eof);
-        }
-    }
-
-    /// The host closes connection `c` before it ever was live: the guest's
-    /// session ends at once (no guest flow belongs to it).
-    fn close_unlive_session(&mut self, c: i64) {
-        let Some(s) = self.sess.get(&c).copied() else { return };
-        if s.socket.is_some()
-            && let Some(io) = self.live_sim(s.lease)
-        {
-            io.end_session(SimSessionEnd::Eof);
-            self.settle();
-        }
-    }
-
-    // ----- lifecycle -------------------------------------------------------------------
+    // ----- lifecycle --------------------------------------------------------------
 
     fn init(&mut self) {
         *self = Self::new();
     }
 
-    /// A state labelled `step` (quint 0.32 labels the initial state of some
-    /// traces so): taken as the initial state, which the next step verifies.
-    fn initial_step(&mut self) {
-        self.init();
-        self.step_as_init = true;
-    }
-
-    const fn provision(&mut self) {
-        self.alloc = Alloc::Provisioned;
-        self.lease += 1;
+    fn provision(&mut self) {
+        self.lease_gen += 1;
+        self.settle();
     }
 
     fn vm_start(&mut self) {
-        self.vm_up = true;
-        self.vm_gen = self.lease;
-        let clock = Arc::new(SimGuestClock::new());
-        let io = SimGuestOwnerIo::new(WL, Arc::clone(&clock));
-        let token = GuestTransportToken {
-            workload_addr: WL,
-            gateway: GW,
-            launch: launch_token(self.lease),
-        };
-        let owner_clock: Arc<dyn GuestClock> = clock.clone();
-        let owner = GuestFlowOwner::new(token, Box::new(io.clone()), owner_clock);
-        self.guest = GuestProcess::Alive(owner);
-        self.sims.push(io);
-        self.clock = clock;
-        self.settle();
+        self.vm_gen = self.lease_gen;
+        self.flow_of.clear();
+        let (owner, launch) = Launch::of(self.vm_gen);
+        self.owner = owner;
+        self.launch = launch;
+        self.launch.process = GuestProcess::Alive;
     }
 
     fn vm_stop(&mut self) {
-        let vm_gen = self.vm_gen;
-        for s in self.sess.values_mut() {
-            if s.lease == vm_gen && s.st == SessSt::Live {
-                s.st = SessSt::Dead;
-            } else if s.lease == vm_gen && s.st == SessSt::Reading {
-                s.st = SessSt::Closed;
+        if let Some(launch) = Some(&mut self.launch).filter(|l| l.alive()) {
+            let queued_reset = launch.io.guest_socket_observation().reset_in_queue;
+            for h in HFLOWS {
+                if queued_reset.contains(&host_flow(h)) {
+                    self.reset_then_gone.insert(h);
+                }
             }
-        }
-        for x in self.flows.values_mut() {
-            if x.lease == vm_gen && x.st == FlowSt::Accepted && x.req < 2 {
-                x.st = FlowSt::Closed;
-            }
-        }
-        if let Some(io) = self.sims.last() {
-            io.guest_owner_dies();
-        }
-        self.guest = GuestProcess::Dead;
-        self.vm_up = false;
-    }
-
-    const fn activate(&mut self) {
-        self.alloc = Alloc::Active;
-    }
-
-    fn teardown(&mut self) {
-        self.alloc = Alloc::Retiring;
-        let closing: Vec<i64> = self
-            .sess
-            .iter()
-            .filter(|(_, s)| matches!(s.st, SessSt::Live | SessSt::Dead))
-            .map(|(c, _)| *c)
-            .collect();
-        for c in &closing {
-            self.end_session_deferred(*c);
-            if let Some(s) = self.sess.get_mut(c) {
-                s.st = SessSt::Closed;
-            }
-        }
-        self.claim = None;
-        self.abort_all_flows();
-        let _closed = self.abort_all_h();
-        self.discard_guest_messages();
-        self.to_guest_abort.clear();
-    }
-
-    const fn release(&mut self) {
-        self.alloc = Alloc::Absent;
-    }
-
-    fn quiesce(&mut self) {
-        self.quiesced = true;
-        self.abort_all_flows();
-        let open = self.abort_all_h();
-        if self.sess_live() {
-            self.to_guest_abort.extend(open);
-        } else {
-            self.to_guest_abort.clear();
+            launch.io.guest_owner_dies();
+            launch.process = GuestProcess::Dead;
         }
     }
 
-    const fn restore(&mut self) {
-        self.quiesced = false;
-    }
-
-    // ----- control session -------------------------------------------------------------
+    // ----- the guest's control session -----------------------------------------------
 
     fn guest_open_session(&mut self, c: i64) -> std::result::Result<(), DriverError> {
-        let lease = self.vm_gen;
-        let io =
-            self.live_sim(lease).ok_or_else(not_enabled("GuestOpenSession", "no live guest"))?;
-        if io.session_end_pending() {
-            // the guest observes the loss before it reconnects
-            io.release_session_end();
-            self.settle();
-            self.note_held();
-        }
-        let connecting = |io: &SimGuestOwnerIo| {
-            io.pending_connects()
-                .into_iter()
-                .find(|(_, t)| *t == SimConnectTarget::Host(HostChannel::Control))
-        };
-        if connecting(&io).is_none() {
-            if io.session_socket().is_some() {
-                return Err(DriverError::NotEnabled {
-                    action: "GuestOpenSession",
-                    why: "the guest's session is live at the seam".to_owned(),
-                });
-            }
-            self.clock.advance(CONTROL_RECONNECT_BACKOFF);
-            self.settle();
-        }
-        let (socket, _) = connecting(&io)
-            .ok_or_else(not_enabled("GuestOpenSession", "the guest issued no control connect"))?;
-        self.sess.insert(c, Sess { st: SessSt::Pending, lease, socket: Some(socket) });
-        Ok(())
-    }
-
-    fn host_accept_session(&mut self, c: i64) -> std::result::Result<(), DriverError> {
-        let s = self
-            .sess
-            .get(&c)
-            .copied()
-            .ok_or_else(not_enabled("HostAcceptSession", "no such connection"))?;
-        let accepts = self.cid_accepts_session();
-        if let (Some(socket), Some(io)) = (s.socket, self.live_sim(s.lease)) {
-            io.complete_connect(socket, Ok(()));
-            self.settle();
-        }
-        self.sess
-            .insert(c, Sess { st: if accepts { SessSt::Reading } else { SessSt::Closed }, ..s });
-        if !accepts {
-            self.close_unlive_session(c);
-        }
-        Ok(())
-    }
-
-    fn host_read_open(&mut self, c: i64) -> std::result::Result<(), DriverError> {
-        let s = self
-            .sess
-            .get(&c)
-            .copied()
-            .ok_or_else(not_enabled("HostReadOpen", "no such connection"))?;
-        let st = if !self.token_matches(s.lease) || self.claim.is_some() {
-            SessSt::Closed
+        let launch = self.launch("GuestOpenSession")?;
+        if launch.started {
+            let at = launch.loss_at.ok_or_else(|| DriverError::NotEnabled {
+                action: "GuestOpenSession",
+                why: "the guest holds a session it has not observed lost (D-UP-8)".to_owned(),
+            })?;
+            launch.clock.advance_to(at + CONTROL_RECONNECT_BACKOFF);
         } else {
-            self.claim = Some(c);
-            if self.writer_up(s.lease) { SessSt::Live } else { SessSt::Dead }
-        };
-        self.sess.insert(c, Sess { st, ..s });
-        if st == SessSt::Closed {
-            self.close_unlive_session(c);
+            launch.started = true;
+            start(&mut self.owner);
         }
+        self.settle();
+        let launch = self.launch("GuestOpenSession")?;
+        let connecting = launch
+            .io
+            .pending_connects()
+            .iter()
+            .any(|(_, t)| *t == SimConnectTarget::Host(HostChannel::Control));
+        if !connecting {
+            return Err(DriverError::NotEnabled {
+                action: "GuestOpenSession",
+                why: "the guest owner issued no control connect".to_owned(),
+            });
+        }
+        launch.io.complete_host_connect(HostChannel::Control, Ok(()));
+        launch.own_conns.insert(c);
+        launch.session_conn = Some(c);
+        launch.loss_at = None;
+        self.settle();
         Ok(())
     }
 
-    fn host_session_loss(&mut self, c: i64) -> std::result::Result<(), DriverError> {
-        let s = self
-            .sess
-            .get(&c)
-            .copied()
-            .ok_or_else(not_enabled("HostSessionLoss", "no such connection"))?;
-        self.end_session_deferred(c);
-        self.sess.insert(c, Sess { st: SessSt::Closed, ..s });
-        if self.claim == Some(c) {
-            self.claim = None;
+    fn guest_session_loss_observed(&mut self, c: i64) -> std::result::Result<(), DriverError> {
+        let launch = self.launch("GuestSessionLossObserved")?;
+        if launch.session_conn != Some(c) {
+            if launch.own_conns.contains(&c) {
+                self.settle();
+                return Ok(());
+            }
+            return Err(DriverError::NotRepresentable(format!(
+                "the guest's flows are of connection {c}, a workload's: in production the guest owner's flows \
+                 belong to its own session (DG-5-F, D-UP-8)"
+            )));
         }
-        self.abort_all_flows();
-        let _closed = self.abort_all_h();
-        self.discard_guest_messages();
-        self.to_guest_abort.clear();
+        launch.io.end_session(SimSessionEnd::Eof);
+        let now = launch.clock.now();
+        launch.session_conn = None;
+        launch.loss_at = Some(now);
+        self.settle_forwarder();
         Ok(())
     }
 
-    // ----- guest-opened flows (TcpConnect) ----------------------------------------------
+    // ----- guest-opened flows ---------------------------------------------------------
 
     fn guest_open_flow(&mut self, f: i64) -> std::result::Result<(), DriverError> {
-        let lease = self.vm_gen;
-        let io = self.live_sim(lease).ok_or_else(not_enabled("GuestOpenFlow", "no live guest"))?;
-        let before: BTreeSet<SocketId> =
-            io.pending_connects().into_iter().map(|(id, _)| id).collect();
-        io.app_connect(app_cookie(f), app_destination(f), true);
+        let launch = self.launch("GuestOpenFlow")?;
+        if !launch.started {
+            return Err(DriverError::NotRepresentable(
+                "a captured connect before the guest owner's first dispatch".to_owned(),
+            ));
+        }
+        launch.io.app_connect(sim_cookie(u64::try_from(f).expect("small")), guest_dest(f));
         self.settle();
-        // the guest's flow connect; none if the owner refused the connect
-        let socket = io
-            .pending_connects()
-            .into_iter()
-            .find(|(id, t)| {
-                *t == SimConnectTarget::Host(HostChannel::FlowStream) && !before.contains(id)
-            })
-            .map(|(id, _)| id);
-        self.flows.insert(
-            f,
-            HostFlow { st: FlowSt::Queued, lease, req: 0, in_flight: false, socket, id: None },
-        );
-        Ok(())
-    }
-
-    fn host_accept_flow(&mut self, f: i64) -> std::result::Result<(), DriverError> {
-        let x = self
-            .flows
-            .get(&f)
-            .copied()
-            .ok_or_else(not_enabled("HostAcceptFlow", "no such flow"))?;
-        let st = if self.admissible() { FlowSt::Accepted } else { FlowSt::Closed };
-        let id = if let (Some(socket), Some(io)) = (x.socket, self.live_sim(x.lease)) {
-            io.complete_connect(socket, Ok(()));
-            self.settle();
-            io.effects().iter().rev().find_map(|e| match e {
-                SimGuestEffect::WriteRequest {
-                    request: FlowRequest::TcpConnect { flow, .. },
-                    ..
-                } => Some(*flow),
+        let launch = self.launch("GuestOpenFlow")?;
+        launch.io.complete_host_connect(HostChannel::FlowStream, Ok(()));
+        self.settle();
+        let launch = self.launch("GuestOpenFlow")?;
+        let flow = launch
+            .io
+            .requests()
+            .iter()
+            .rev()
+            .find_map(|r| match r {
+                FlowRequest::TcpConnect { flow, destination, .. }
+                    if *destination == guest_dest(f) =>
+                {
+                    Some(*flow)
+                }
                 _ => None,
             })
-        } else {
-            None
-        };
-        self.flows.insert(f, HostFlow { st, id, ..x });
-        if st == FlowSt::Closed {
-            self.end_guest_flow(f);
-        }
+            .ok_or_else(|| DriverError::NotEnabled {
+                action: "GuestOpenFlow",
+                why: "the guest owner wrote no TcpConnect request".to_owned(),
+            })?;
+        self.flow_of.insert(f, flow);
         Ok(())
     }
 
-    fn host_read_req(&mut self, f: i64, n: i64) -> std::result::Result<(), DriverError> {
-        let x =
-            self.flows.get(&f).copied().ok_or_else(not_enabled("HostReadReq", "no such flow"))?;
-        let req = (x.req + n).min(2);
-        let st = if req < 2 {
-            FlowSt::Accepted
-        } else if self.token_matches(x.lease) {
-            FlowSt::Read
-        } else {
-            FlowSt::Closed
-        };
-        self.flows.insert(f, HostFlow { st, req, ..x });
-        if st == FlowSt::Closed {
-            self.end_guest_flow(f);
-        }
-        Ok(())
-    }
-
-    fn host_flow_step(
-        &mut self,
-        f: i64,
-        action: &'static str,
-        st: FlowSt,
-        in_flight: bool,
-    ) -> std::result::Result<(), DriverError> {
-        let x = self.flows.get(&f).copied().ok_or_else(not_enabled(action, "no such flow"))?;
-        self.flows.insert(f, HostFlow { st, in_flight, ..x });
-        Ok(())
-    }
-
-    fn host_connect_done(&mut self, f: i64) -> std::result::Result<(), DriverError> {
-        let x = self
-            .flows
-            .get(&f)
-            .copied()
-            .ok_or_else(not_enabled("HostConnectDone", "no such flow"))?;
-        self.flows.insert(f, HostFlow { st: FlowSt::Paired, in_flight: false, ..x });
-        if let (Some(flow), Some(io)) = (x.id, self.live_sim(x.lease))
-            && io.session_socket().is_some()
-            && !io.session_end_pending()
+    fn host_connect_done(&mut self, f: i64) {
+        if let (Some(flow), Some(launch)) =
+            (self.flow_of.get(&f).copied(), Some(&self.launch).filter(|l| l.alive()))
+            && launch.io.session_socket().is_some()
         {
-            io.host_control(ControlMessage::Paired { flow });
+            launch.io.host_control(ControlMessage::Paired { flow });
+        }
+        self.settle_forwarder();
+    }
+
+    fn host_flow_ends(&mut self, f: i64, msg: bool) {
+        let st = pre_flow_st(f).unwrap_or_default();
+        let attributed = matches!(st.as_str(), "read" | "connecting" | "paired");
+        if let Some(flow) = self.flow_of.get(&f).copied() {
+            if msg
+                && attributed
+                && let Some(launch) = Some(&self.launch).filter(|l| l.alive())
+                && launch.io.session_socket().is_some()
+            {
+                let message = if st == "paired" {
+                    ControlMessage::Abort { flow }
+                } else {
+                    ControlMessage::Refused { flow, refusal: FlowRefusal::Policy }
+                };
+                launch.io.host_control(message);
+                self.settle();
+            }
+            self.host_closes_vsock(flow);
+        } else {
             self.settle();
         }
-        Ok(())
     }
 
-    fn host_flow_ends(&mut self, f: i64, msg: bool) -> std::result::Result<(), DriverError> {
-        let x =
-            self.flows.get(&f).copied().ok_or_else(not_enabled("HostFlowEnds", "no such flow"))?;
-        self.flows.insert(f, HostFlow { st: FlowSt::Closed, ..x });
-        if let (Some(flow), Some(io)) = (x.id, self.live_sim(x.lease))
-            && msg
-            && x.st.attributed()
-            && io.session_socket().is_some()
-            && !io.session_end_pending()
-        {
-            let message = if x.st == FlowSt::Paired {
-                ControlMessage::Abort { flow }
-            } else {
-                ControlMessage::Refused { flow, refusal: FlowRefusal::Policy }
-            };
-            io.host_control(message);
-            self.settle();
+    /// Teardown, quiescence, session loss: the host closes the V_h of every
+    /// guest-opened flow it held registered.
+    fn host_aborts_flows(&mut self) {
+        for f in pre_registered_flows() {
+            if let Some(flow) = self.flow_of.get(&f).copied() {
+                self.host_closes_vsock(flow);
+            }
         }
-        self.end_guest_flow(f);
-        Ok(())
+        self.settle();
     }
 
-    // ----- host-opened flows (TcpAccept) -------------------------------------------------
+    // ----- dials (host-opened flows) -----------------------------------------------------
 
-    fn host_open_accept(&mut self, h: i64) -> std::result::Result<(), DriverError> {
-        let lease = self.lease;
-        let io = self
-            .live_sim(lease)
-            .ok_or_else(not_enabled("HostOpenAccept", "no live guest of the lease"))?;
-        let listen_port = ListenPort::from_str(ACCEPT_PORT).expect("non-zero listen port");
-        io.host_open_accept(FlowRequest::TcpAccept {
+    fn dial_open(&mut self, h: i64) -> std::result::Result<(), DriverError> {
+        let token = token(self.lease_gen);
+        let launch = self.launch("DialOpen")?;
+        launch.io.host_open_accept(FlowRequest::TcpAccept {
             flow: host_flow(h),
-            client: CLIENT,
-            listen_port,
-            launch: launch_token(lease),
+            peer: GW,
+            listen_port: listen_port(),
+            launch: token,
         });
-        self.hf.insert(h, (HfSt::Req, lease));
+        self.settle();
         Ok(())
     }
 
     fn guest_accept_v(&mut self, h: i64) -> std::result::Result<(), DriverError> {
-        let io =
-            self.live_sim(self.vm_gen).ok_or_else(not_enabled("GuestAcceptV", "no live guest"))?;
-        let flow = host_flow(h);
-        io.release_inbound_accept(flow);
+        let live = pre_live_conn();
+        let launch = self.launch("GuestAcceptV")?;
+        if live != 0 && !launch.own_conns.contains(&live) {
+            return Err(DriverError::NotRepresentable(format!(
+                "the CID's live session is connection {live}, a workload's; the model attributes the guest's \
+                 flow to it, production to the guest owner's own session (DG-5-F, D-UP-8)"
+            )));
+        }
+        launch.io.release_inbound_accept(host_flow(h));
         self.settle();
-        io.release_inbound_request(flow);
+        let launch = self.launch("GuestAcceptV")?;
+        launch.io.release_inbound_request(host_flow(h));
+        let now = launch.clock.now();
+        launch.connect_started.insert(h, now);
+        self.held.insert(h);
         self.settle();
-        self.note_held();
         Ok(())
     }
 
     fn guest_pair_or_refuse(&mut self, h: i64, ok: bool) -> std::result::Result<(), DriverError> {
-        let io = self
-            .live_sim(self.vm_gen)
-            .ok_or_else(not_enabled("GuestPairOrRefuse", "no live guest"))?;
-        io.complete_app_connect(
-            host_flow(h),
-            if ok { Ok(()) } else { Err(ErrorKind::ConnectionRefused) },
+        let launch = self.launch("GuestPairOrRefuseOk")?;
+        let result = if ok { Ok(()) } else { Err(ErrorKind::ConnectionRefused) };
+        let connecting = launch.io.pending_connects().iter().any(
+            |(_, t)| matches!(t, SimConnectTarget::App { flow: Some(f), .. } if *f == host_flow(h)),
         );
+        if !connecting {
+            return Err(DriverError::NotEnabled {
+                action: "GuestPairOrRefuseOk",
+                why: format!("the guest has no application connect in flight for dial {h}"),
+            });
+        }
+        launch.io.complete_app_connect(host_flow(h), result);
         self.settle();
         Ok(())
     }
 
-    fn host_recv_paired(&mut self, h: i64) -> std::result::Result<(), DriverError> {
-        let flow = host_flow(h);
-        let took = self.sims.iter().any(|io| io.host_take_message(ControlMessage::Paired { flow }));
-        if !took {
-            return Err(DriverError::NotEnabled {
-                action: "HostRecvPaired",
-                why: "the guest wrote no Paired".to_owned(),
-            });
-        }
-        if self.hf.get(&h).is_some_and(|(st, _)| *st == HfSt::Req) {
-            self.set_hf(h, HfSt::Paired);
-        }
+    fn guest_connect_times_out(&mut self, h: i64) -> std::result::Result<(), DriverError> {
+        let launch = self.launch("GuestConnectTimesOut")?;
+        let started =
+            launch.connect_started.get(&h).copied().ok_or_else(|| DriverError::NotEnabled {
+                action: "GuestConnectTimesOut",
+                why: format!("dial {h} has no application connect the guest started"),
+            })?;
+        launch.clock.advance_to(started + GUEST_INBOUND_CONNECT_TIMEOUT);
+        self.settle();
         Ok(())
-    }
-
-    fn host_recv_refused(&mut self, h: i64) -> std::result::Result<(), DriverError> {
-        let flow = host_flow(h);
-        let took = self.sims.iter().any(|io| {
-            io.host_take_first(
-                |m| matches!(m, ControlMessage::Refused { flow: f, .. } if *f == flow),
-            )
-            .is_some()
-        });
-        if !took {
-            return Err(DriverError::NotEnabled {
-                action: "HostRecvRefused",
-                why: "the guest wrote no Refused".to_owned(),
-            });
-        }
-        if self.hf.get(&h).is_some_and(|(st, _)| *st == HfSt::Req) {
-            self.set_hf(h, HfSt::Closed);
-        }
-        Ok(())
-    }
-
-    fn host_abort_accept(&mut self, h: i64) {
-        self.set_hf(h, HfSt::Closed);
-        if self.sess_live() {
-            self.to_guest_abort.insert(h);
-        }
     }
 
     fn guest_recv_abort(&mut self, h: i64) -> std::result::Result<(), DriverError> {
-        if !self.to_guest_abort.remove(&h) {
-            return Err(DriverError::NotEnabled {
-                action: "GuestRecvAbort",
-                why: "no Abort in flight".to_owned(),
-            });
-        }
-        // the Abort reaches a live guest on its live session; else it is lost
-        if let Some(io) = self.live_sim(self.vm_gen)
-            && io.session_socket().is_some()
-            && !io.session_end_pending()
-        {
-            io.host_control(ControlMessage::Abort { flow: host_flow(h) });
-            self.settle();
-        }
+        let launch = self.launch("GuestRecvAbort")?;
+        launch.io.host_control(ControlMessage::Abort { flow: host_flow(h) });
+        self.settle_forwarder();
         Ok(())
     }
 
-    fn guest_sees_host_close(
-        &mut self,
-        h: i64,
-        action: &'static str,
-    ) -> std::result::Result<(), DriverError> {
-        let io = self.live_sim(self.vm_gen).ok_or_else(not_enabled(action, "no live guest"))?;
-        io.host_vsock_end(host_flow(h));
+    fn guest_sees_host_close(&mut self, h: i64) {
+        self.host_closes_vsock(host_flow(h));
+        if self.launch.io.guest_socket_observation().reset_in_queue.contains(&host_flow(h)) {
+            self.held.insert(h);
+        }
+    }
+
+    fn guest_accepted_error(&mut self, h: i64) -> std::result::Result<(), DriverError> {
+        let launch = self.launch("GuestAcceptedError")?;
+        launch.io.flow_vsock_error(host_flow(h), ErrorKind::ConnectionReset);
         self.settle();
-        self.note_held();
         Ok(())
     }
 
-    fn guest_loss_abort(&mut self, h: i64) -> std::result::Result<(), DriverError> {
-        let io = self
-            .live_sim(self.vm_gen)
-            .ok_or_else(not_enabled("GuestLossAbort", "no live guest"))?;
-        let holds = self
-            .guest
-            .owner()
-            .is_some_and(|o| o.guest_observation().accepted.contains_key(&host_flow(h)));
-        if !holds {
+    /// The host consumes the guest's reply for dial `h`; a reply the guest did
+    /// not write fails the step.
+    fn host_recv(
+        &mut self,
+        action: &'static str,
+        h: i64,
+        matches: impl Fn(&ControlMessage) -> bool,
+    ) -> std::result::Result<(), DriverError> {
+        let taken = self.launch.io.host_take_first(|m| matches(m));
+        if taken.is_none() {
             return Err(DriverError::NotEnabled {
-                action: "GuestLossAbort",
-                why: format!("the guest holds no flow {h}"),
+                action,
+                why: format!("the guest wrote no such reply for dial {h}"),
             });
         }
-        if !io.session_end_pending() {
-            return Err(DriverError::NotEnabled {
-                action: "GuestLossAbort",
-                why: "the seam holds no session end for the guest (its flow belongs to no session the host ended)"
-                    .to_owned(),
-            });
-        }
-        io.release_session_end();
         self.settle();
         Ok(())
     }
 }
 
-impl Driver for FlowsOkDriver {
-    type State = FlowsOkGuestState;
+impl Driver for OwnerFlowsGuestDriver {
+    type State = OwnerFlowsGuestState;
+
+    fn config() -> Config {
+        Config { state: &[], nondet: &["flows_conf::owner_flows::conf_step"] }
+    }
 
     fn step(&mut self, step: &Step) -> Result {
-        self.verify_stimulus()?;
         switch!(step {
-            init => self.init(),
-            // quint 0.32 `run --n-traces` labels the initial state of some
-            // traces `step` instead of `init` (observed at index 0, with the
-            // `init` state's values); it is taken as the initial state, and
-            // the next step fails with `StepNotInitial` unless it was.
-            step => self.initial_step(),
+            InitWith => self.init(),
             Provision => self.provision(),
             VmStart => self.vm_start(),
             VmStop => self.vm_stop(),
-            Activate => self.activate(),
-            Teardown => self.teardown(),
-            Release => self.release(),
-            Quiesce => self.quiesce(),
-            Restore => self.restore(),
+            Activate => self.settle(),
+            ActivatePending => self.settle(),
+            ActivateQuiesced => self.settle(),
+            ActivateRetiring => self.settle(),
+            Teardown => self.host_aborts_flows(),
+            Release => self.settle(),
+            Quiesce => self.host_aborts_flows(),
+            Restore => self.settle(),
             GuestOpenSession(c: i64) => self.guest_open_session(c)?,
-            HostAcceptSession(c: i64) => self.host_accept_session(c)?,
-            HostReadOpen(c: i64) => self.host_read_open(c)?,
+            WorkloadOpenSession => self.settle(),
+            HostAcceptSession => self.settle(),
+            HostReadOpen => self.settle(),
             HostClaimSession => return Err(DriverError::HazardOnly("HostClaimSession").into()),
-            HostSessionLoss(c: i64) => self.host_session_loss(c)?,
-            HostDeadSessionLoss(c: i64) => self.host_session_loss(c)?,
+            HostSessionLoss => self.host_aborts_flows(),
+            HostDeadSessionLoss => self.host_aborts_flows(),
             GuestOpenFlow(f: i64) => self.guest_open_flow(f)?,
-            HostAcceptFlow(f: i64) => self.host_accept_flow(f)?,
+            HostAcceptFlow => self.settle(),
             HostCheckFlow => return Err(DriverError::HazardOnly("HostCheckFlow").into()),
             HostRegisterFlow => return Err(DriverError::HazardOnly("HostRegisterFlow").into()),
-            HostReadReq(f: i64, n: i64) => self.host_read_req(f, n)?,
-            HostInstall(f: i64) => self.host_flow_step(f, "HostInstall", FlowSt::Installed, false)?,
-            HostStartConnect(f: i64) => self.host_flow_step(f, "HostStartConnect", FlowSt::Connecting, true)?,
-            HostConnectDone(f: i64) => self.host_connect_done(f)?,
-            HostConnectDiscard(f: i64) => self.host_flow_step(f, "HostConnectDiscard", FlowSt::Closed, false)?,
-            HostFlowEnds(f: i64, msg: bool) => self.host_flow_ends(f, msg)?,
-            HostOpenAccept(h: i64) => self.host_open_accept(h)?,
+            HostReadReqN => self.settle(),
+            HostStartConnect => self.settle(),
+            HostConnectDone(f: i64) => self.host_connect_done(f),
+            HostConnectDiscard => self.settle(),
+            HostFlowEndsMsg(f: i64, msg: bool) => self.host_flow_ends(f, msg),
+            DialOpen(h: i64) => self.dial_open(h)?,
+            DialNotServing => self.settle(),
+            DialQuiesced => self.settle(),
+            DialNoSession => self.settle(),
+            DialUnreachable => self.settle(),
             GuestAcceptV(h: i64) => self.guest_accept_v(h)?,
-            GuestPairOrRefuse(h: i64, ok: bool) => self.guest_pair_or_refuse(h, ok)?,
-            HostRecvPaired(h: i64) => self.host_recv_paired(h)?,
-            HostRecvRefused(h: i64) => self.host_recv_refused(h)?,
-            HostAbortAccept(h: i64) => self.host_abort_accept(h),
+            GuestPairOrRefuseOk(h: i64, ok: bool) => self.guest_pair_or_refuse(h, ok)?,
+            GuestConnectTimesOut(h: i64) => self.guest_connect_times_out(h)?,
+            HostRecvPaired(h: i64) => {
+                let flow = host_flow(h);
+                self.host_recv("HostRecvPaired", h, |m| *m == ControlMessage::Paired { flow })?;
+            },
+            HostRecvRefused(h: i64) => {
+                let flow = host_flow(h);
+                self.host_recv("HostRecvRefused", h, |m| matches!(m, ControlMessage::Refused { flow: x, .. } if *x == flow))?;
+            },
+            HostRecvTimedOut(h: i64) => {
+                let flow = host_flow(h);
+                self.host_recv("HostRecvTimedOut", h, |m| matches!(m, ControlMessage::TimedOut { flow: x, .. } if *x == flow))?;
+            },
+            HostAbortAccept => self.settle(),
+            HostDialDeadline => self.settle(),
+            DialCancel => self.settle(),
+            GuestNeverReplies(h: i64) => {
+                self.silent.insert(h);
+                self.settle();
+            },
             GuestRecvAbort(h: i64) => self.guest_recv_abort(h)?,
-            GuestSeesHostClose(h: i64) => self.guest_sees_host_close(h, "GuestSeesHostClose")?,
-            GuestLossAbort(h: i64) => self.guest_loss_abort(h)?,
-            GuestQueueReset(h: i64) => self.guest_sees_host_close(h, "GuestQueueReset")?,
+            GuestSeesHostClose(h: i64) => self.guest_sees_host_close(h),
+            GuestAcceptedError(h: i64) => self.guest_accepted_error(h)?,
+            HostRecvAbort(h: i64) => {
+                let flow = host_flow(h);
+                self.host_recv("HostRecvAbort", h, |m| *m == ControlMessage::Abort { flow })?;
+            },
+            GuestSessionLossObserved(c: i64) => self.guest_session_loss_observed(c)?,
+            GuestQueueReset(h: i64) => self.guest_sees_host_close(h),
+            GuestOpenBeacon => return Err(DriverError::OtherInstance("GuestOpenBeacon").into()),
+            HostAcceptBeacon => return Err(DriverError::OtherInstance("HostAcceptBeacon").into()),
+            HostReadReady => return Err(DriverError::OtherInstance("HostReadReady").into()),
+            DriverStop => return Err(DriverError::OtherInstance("DriverStop").into()),
         })
     }
 }
 
 // ----- the compared state ------------------------------------------------------
 
-/// The compared `owner_flows` variables, guest side: `gf(h).st`,
-/// `toHostPaired`, `toHostRefused` (`gf(h).gen` ghost, `gf(h).c` stimulus).
+/// The compared `owner_flows` variables, guest side: each dial slot's guest
+/// phase (`None`: the scripted `silent` stimulus, not compared) and whether
+/// the guest owner holds a session (`gSess ≠ 0`).
 #[derive(Debug, PartialEq, Eq)]
-struct FlowsOkGuestState {
-    gf: BTreeMap<i64, String>,
-    to_host_paired: BTreeSet<i64>,
-    to_host_refused: BTreeSet<i64>,
+struct OwnerFlowsGuestState {
+    gf: BTreeMap<i64, Option<String>>,
+    session: bool,
 }
 
-/// Why the production state has no model image.
-#[derive(Debug, thiserror::Error)]
-enum ProjectionError {
-    #[error("{0} has no pre-image in the model")]
-    NoPreImage(String),
-}
-
-impl FlowsOkGuestState {
-    fn from_value(value: &Value) -> std::result::Result<Self, ItfError> {
-        let vars = quint_itf::vars(value)?;
-        Ok(Self {
-            gf: quint_itf::int_map(quint_itf::var(&vars, "gf")?, |g| {
-                quint_itf::string(quint_itf::field(g, "st")?)
-            })?,
-            to_host_paired: quint_itf::int_set(quint_itf::var(&vars, "toHostPaired")?)?,
-            to_host_refused: quint_itf::int_set(quint_itf::var(&vars, "toHostRefused")?)?,
-        })
+impl OwnerFlowsGuestState {
+    fn from_vars(vars: &Qualified) -> std::result::Result<Self, ItfError> {
+        let gf = quint_itf::int_map(vars.var("gf")?, |x| {
+            let st = quint_itf::string(quint_itf::field(x, "st")?)?;
+            Ok(match st.as_str() {
+                "silent" => None,
+                "tomb" => Some("closed".to_owned()),
+                _ => Some(st),
+            })
+        })?;
+        let session = quint_itf::int(vars.var("gSess")?)? != 0;
+        Ok(Self { gf, session })
     }
 }
 
-impl<'de> Deserialize<'de> for FlowsOkGuestState {
+impl<'de> Deserialize<'de> for OwnerFlowsGuestState {
     fn deserialize<D: serde::Deserializer<'de>>(
         deserializer: D,
     ) -> std::result::Result<Self, D::Error> {
         let value = Value::deserialize(deserializer)?;
-        Self::from_value(&value).map_err(serde::de::Error::custom)
+        let vars = Qualified::of(&value, MAIN, MODULE).map_err(serde::de::Error::custom)?;
+        Self::from_vars(&vars).map_err(serde::de::Error::custom)
     }
 }
 
-impl State<FlowsOkDriver> for FlowsOkGuestState {
-    /// Decodes the compared variables, and stashes the host variables for the
-    /// next step's stimulus verification (never a projection source).
+impl State<OwnerFlowsGuestDriver> for OwnerFlowsGuestState {
+    /// Decodes the compared variables by qualified name and stashes the state
+    /// for the next step's stimulus (never a projection source).
     fn from_spec(value: Value) -> Result<Self> {
-        let state = Self::from_value(&value)?;
-        let host = HostVars::from_vars(&quint_itf::vars(&value)?)?;
-        let initial = host == host.initial()
-            && state.to_host_paired.is_empty()
-            && state.to_host_refused.is_empty()
-            && state.gf.values().all(|st| st == "none");
-        SPEC_HOST.with(|stash| *stash.borrow_mut() = Some(SpecStash { host, initial }));
+        let vars = Qualified::of(&value, MAIN, MODULE)?;
+        let state = Self::from_vars(&vars)?;
+        SPEC_PRE.with(|stash| *stash.borrow_mut() = Some(vars));
         Ok(state)
     }
 
-    fn from_driver(driver: &FlowsOkDriver) -> Result<Self> {
-        let accepted = driver
-            .guest
-            .owner()
-            .map(|owner| owner.guest_observation().accepted)
-            .unwrap_or_default();
-        // conformance-lint: sim-arbiter-ok QPROJ-7 guest-owner seam arbiter (V_g torn down in the guest accept queue, K-A4), Tier-3 R5-31 / R5-28
-        let live_sim = driver.sims.last().filter(|_| driver.guest.owner().is_some());
-        let reset =
-            live_sim.map(|io| io.guest_socket_observation().reset_in_queue).unwrap_or_default();
+    fn from_driver(driver: &OwnerFlowsGuestDriver) -> Result<Self> {
+        // QPROJ-5: the live launch's owner accessor (none while no VM runs).
+        let observation = driver.launch.alive().then(|| driver.owner.guest_observation());
+        let alive = observation.is_some();
+        // conformance-lint: sim-arbiter-ok QPROJ-7 guest-owner seam arbiter (V_g torn down in the guest accept queue, K-A4), Tier-3 V-24 (P-38)
+        let sockets = alive.then(|| driver.launch.io.guest_socket_observation());
         let mut gf = BTreeMap::new();
-        if accepted.is_empty() && reset.is_empty() && driver.held.is_empty() {
-            // the guest has never held a host-opened flow
-            gf.extend(HFLOWS.iter().map(|h| (*h, "none".to_owned())));
-        } else {
-            for h in HFLOWS {
-                let flow = host_flow(h);
-                let st = match accepted.get(&flow) {
-                    Some(GuestAcceptPhase::Accepted) => "acc",
-                    Some(GuestAcceptPhase::Routed) => "routed",
-                    None if reset.contains(&flow) => "reset",
-                    None if driver.held.contains(&flow) => "closed",
-                    None => "none",
-                };
-                gf.insert(h, st.to_owned());
+        for h in HFLOWS {
+            if driver.silent.contains(&h) {
+                gf.insert(h, None);
+                continue;
             }
-            for flow in accepted.keys().chain(reset.iter()) {
-                if !HFLOWS.iter().any(|h| host_flow(*h) == *flow) {
-                    return Err(ProjectionError::NoPreImage(format!("host flow {flow:?}")).into());
+            let flow = host_flow(h);
+            let phase = match observation.as_ref().and_then(|o| o.accepted.get(&flow)) {
+                Some(GuestAcceptPhase::Accepted) => "acc",
+                Some(GuestAcceptPhase::Paired { .. }) => "attached",
+                None if sockets.as_ref().is_some_and(|s| s.reset_in_queue.contains(&flow)) => {
+                    "reset"
                 }
-            }
+                None if driver.held.contains(&h) || driver.reset_then_gone.contains(&h) => "closed",
+                None => "none",
+            };
+            gf.insert(h, Some(phase.to_owned()));
         }
-        let h_of = |flow: FlowId| -> std::result::Result<i64, ProjectionError> {
-            HFLOWS
-                .iter()
-                .copied()
-                .find(|h| host_flow(*h) == flow)
-                .ok_or_else(|| ProjectionError::NoPreImage(format!("flow {flow:?}")))
-        };
-        let mut to_host_paired = BTreeSet::new();
-        let mut to_host_refused = BTreeSet::new();
-        // conformance-lint: sim-arbiter-ok QPROJ-7 guest-owner seam arbiter (messages the guest wrote, not consumed), Tier-3 R5-31 / R5-28
-        for io in &driver.sims {
-            for message in io.guest_socket_observation().outbox {
-                match message {
-                    ControlMessage::Paired { flow } => {
-                        to_host_paired.insert(h_of(flow)?);
-                    }
-                    ControlMessage::Refused { flow, .. } => {
-                        to_host_refused.insert(h_of(flow)?);
-                    }
-                    _ => {}
-                }
-            }
-        }
-        Ok(Self { gf, to_host_paired, to_host_refused })
+        let session =
+            alive && driver.launch.started && observation.as_ref().is_some_and(|o| o.session);
+        Ok(Self { gf, session })
     }
 }
 
-// ----- the run -----------------------------------------------------------------
+// ----- the named runs (every run of the conformance main encodes a critical
+// ----- scenario of `owner_flows`, feature-delta § *Named runs pinned by each driver*)
 
+/// Named run `ControlSessionOpensAndCidActivates` (`flows_conf`), guest side.
 /// CONTRACT_SHAPE: bounded-change.
-#[quint_run(spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt", main = "flows_ok")]
-#[ignore = "pending DELIVER vsock new-step 5 (guest adaptation in overdrive-init); model fidelity open, upstream UI-R2-5"]
-fn quint_owner_flows_ok_guest() -> impl Driver {
-    FlowsOkDriver::fresh()
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "ControlSessionOpensAndCidActivates"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_control_session_opens_and_cid_activates() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `GuestOpenedFlowIsAdmittedReadAttachedAndPaired` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "GuestOpenedFlowIsAdmittedReadAttachedAndPaired"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_guest_opened_flow_is_admitted_read_attached_and_paired() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `RequestReadInPiecesAttachesOnlyAfterFullRead` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "RequestReadInPiecesAttachesOnlyAfterFullRead"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_request_read_in_pieces_attaches_only_after_full_read() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `RacingFirstConnectsLeaveOneLiveSession` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "RacingFirstConnectsLeaveOneLiveSession"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_racing_first_connects_leave_one_live_session() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `SessionLossAbortsFlowsAndReconnectRestores` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "SessionLossAbortsFlowsAndReconnectRestores"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_session_loss_aborts_flows_and_reconnect_restores() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `GuestReopensSessionOnlyAfterObservingItsLoss` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "GuestReopensSessionOnlyAfterObservingItsLoss"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_guest_reopens_session_only_after_observing_its_loss() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `GuestObservesSessionLossThenReopens` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "GuestObservesSessionLossThenReopens"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_guest_observes_session_loss_then_reopens() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `VmStopClearsTheGuestSession` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "VmStopClearsTheGuestSession"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_vm_stop_clears_the_guest_session() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `QuiesceAbortsFlowsAndRefusesAdmissionUntilRestore` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "QuiesceAbortsFlowsAndRefusesAdmissionUntilRestore"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_quiesce_aborts_flows_and_refuses_admission_until_restore() -> impl Driver
+{
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `ActivationWaitsForQuiescenceToEnd` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "ActivationWaitsForQuiescenceToEnd"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_activation_waits_for_quiescence_to_end() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `InFlightConnectOfAbortedFlowIsDiscarded` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "InFlightConnectOfAbortedFlowIsDiscarded"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_in_flight_connect_of_aborted_flow_is_discarded() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `AttributedFlowEndsAndCidKeepsServing` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "AttributedFlowEndsAndCidKeepsServing"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_attributed_flow_ends_and_cid_keeps_serving() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `TeardownAbortsEverythingThenCidIsLeasedAgain` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "TeardownAbortsEverythingThenCidIsLeasedAgain"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_teardown_aborts_everything_then_cid_is_leased_again() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `StaleLaunchSessionIsClosedAtReadAndDoesNotPoisonClaim` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "StaleLaunchSessionIsClosedAtReadAndDoesNotPoisonClaim"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_stale_launch_session_is_closed_at_read_and_does_not_poison_claim()
+-> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `TeardownBetweenAcceptAndReadClosesWithoutClaim` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "TeardownBetweenAcceptAndReadClosesWithoutClaim"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_teardown_between_accept_and_read_closes_without_claim() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `StaleLaunchFlowIsClosedAtRequestReadWithNoMessage` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "StaleLaunchFlowIsClosedAtRequestReadWithNoMessage"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_stale_launch_flow_is_closed_at_request_read_with_no_message()
+-> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `VmDeathMakesLiveSessionDeadThenLossIsProcessed` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "VmDeathMakesLiveSessionDeadThenLossIsProcessed"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_vm_death_makes_live_session_dead_then_loss_is_processed() -> impl Driver
+{
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `DialPairsAndReturnsStream` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "DialPairsAndReturnsStream"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_dial_pairs_and_returns_stream() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `DialRefusedReturnsTypedError` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "DialRefusedReturnsTypedError"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_dial_refused_returns_typed_error() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `DialTimedOutReturnsTypedError` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "DialTimedOutReturnsTypedError"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_dial_timed_out_returns_typed_error() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `DialNotServingIsATypedResultWithNoStateChange` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "DialNotServingIsATypedResultWithNoStateChange"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_dial_not_serving_is_a_typed_result_with_no_state_change() -> impl Driver
+{
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `DialWhileQuiescedIsATypedResultWithNoStateChange` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "DialWhileQuiescedIsATypedResultWithNoStateChange"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_dial_while_quiesced_is_a_typed_result_with_no_state_change()
+-> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `DialWithoutLiveSessionIsATypedResultWithNoStateChange` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "DialWithoutLiveSessionIsATypedResultWithNoStateChange"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_dial_without_live_session_is_a_typed_result_with_no_state_change()
+-> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `DialToAGoneVmIsUnreachable` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "DialToAGoneVmIsUnreachable"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_dial_to_a_gone_vm_is_unreachable() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `DialAfterObservedSessionLossWithVmGoneReturnsNoSession` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "DialAfterObservedSessionLossWithVmGoneReturnsNoSession"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_dial_after_observed_session_loss_with_vm_gone_returns_no_session()
+-> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `PairingDeadlineWaitsForTheGuestAnswer` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "PairingDeadlineWaitsForTheGuestAnswer"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_pairing_deadline_waits_for_the_guest_answer() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `PairingDeadlineFiresOnlyAfterGuestTimeoutAndLateReplyIsDiscarded` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "PairingDeadlineFiresOnlyAfterGuestTimeoutAndLateReplyIsDiscarded"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_pairing_deadline_fires_only_after_guest_timeout_and_late_reply_is_discarded()
+-> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `PairingDeadlineEndsDialToALiveVmWhoseGuestNeverReplies` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "PairingDeadlineEndsDialToALiveVmWhoseGuestNeverReplies"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_pairing_deadline_ends_dial_to_a_live_vm_whose_guest_never_replies()
+-> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `VmExitDuringDialReturnsUnreachableReset` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "VmExitDuringDialReturnsUnreachableReset"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_vm_exit_during_dial_returns_unreachable_reset() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `VmExitDuringDialLeavesNoPairingDeadline` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "VmExitDuringDialLeavesNoPairingDeadline"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_vm_exit_during_dial_leaves_no_pairing_deadline() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `DroppedDialFutureEndsLikeThePairingDeadline` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "DroppedDialFutureEndsLikeThePairingDeadline"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_dropped_dial_future_ends_like_the_pairing_deadline() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `TeardownEndsPendingDialWithNotServing` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "TeardownEndsPendingDialWithNotServing"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_teardown_ends_pending_dial_with_not_serving() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `ActivationIsImpossibleWhileTheSessionIsPending` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "ActivationIsImpossibleWhileTheSessionIsPending"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_activation_is_impossible_while_the_session_is_pending() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `ActivationWithSessionPendingReturnsPendingThenActivates` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "ActivationWithSessionPendingReturnsPendingThenActivates"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_activation_with_session_pending_returns_pending_then_activates()
+-> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `ActivateAfterTeardownIsRefusedAndChangesNothing` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "ActivateAfterTeardownIsRefusedAndChangesNothing"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_activate_after_teardown_is_refused_and_changes_nothing() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `ActivateAfterTeardownNeverActivates` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "ActivateAfterTeardownNeverActivates"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_activate_after_teardown_never_activates() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `DialAbortedBeforeGuestAcceptsEndsByHostClose` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "DialAbortedBeforeGuestAcceptsEndsByHostClose"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_dial_aborted_before_guest_accepts_ends_by_host_close() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `DialQueuedVgIsResetByHostClose` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "DialQueuedVgIsResetByHostClose"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_dial_queued_vg_is_reset_by_host_close() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `LatePairedForClosedHostFlowIsDiscarded` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "LatePairedForClosedHostFlowIsDiscarded"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_late_paired_for_closed_host_flow_is_discarded() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `SessionLossAbortsDialOnBothSides` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "SessionLossAbortsDialOnBothSides"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_session_loss_aborts_dial_on_both_sides() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `QuiesceAbortsDialAndSendsAbort` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "QuiesceAbortsDialAndSendsAbort"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_quiesce_aborts_dial_and_sends_abort() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `AcceptedVgHostCloseEndsFlowSilently` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "AcceptedVgHostCloseEndsFlowSilently"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_accepted_vg_host_close_ends_flow_silently() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `AcceptedVgErrorAbortsWithAbort` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "AcceptedVgErrorAbortsWithAbort"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_accepted_vg_error_aborts_with_abort() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `SessionLossAbortsAllFlowsBeforeReconnect` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "SessionLossAbortsAllFlowsBeforeReconnect"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_session_loss_aborts_all_flows_before_reconnect() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+/// Named run `DialAfterReconnectPairs` (`flows_conf`), guest side.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
+    main = "flows_conf",
+    max_samples = 1,
+    test = "DialAfterReconnectPairs"
+)]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_guest_dial_after_reconnect_pairs() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
+}
+
+// ----- randomized traces -------------------------------------------------------------
+
+/// Randomized traces of the conformance main (seed printed on failure).
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_run(spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt", main = "flows_conf")]
+#[ignore = "pending DELIVER step 5"]
+fn quint_owner_flows_flows_conf_guest() -> impl Driver {
+    OwnerFlowsGuestDriver::new()
 }

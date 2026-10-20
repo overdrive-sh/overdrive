@@ -1,0 +1,7 @@
+{
+ "host_uname_r": "7.0.0-38-generic",
+ "systemd_detect_virt": "none",
+ "nested": "1",
+ "cpu": "AMD EPYC 8024P 8-Core Processor",
+ "failures": []
+}

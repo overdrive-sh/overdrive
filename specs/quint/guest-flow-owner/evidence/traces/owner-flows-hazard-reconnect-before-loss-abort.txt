@@ -18,6 +18,7 @@ State 1
   toHostAbort = {}
   toHostPaired = {}
   badAct = FALSE
+  gSess = 0
   heldByOther = FALSE
   gen = 0
   phantom = FALSE
@@ -28,6 +29,7 @@ State 1
   alloc = "Absent"
   drvLive = FALSE
   toGuestAbort = {}
+  conf_step = [InitWith |-> [o |-> "g"]]
   crossMsg = FALSE
 
 State 2 [Provision]
@@ -40,6 +42,7 @@ State 3 [VmStart]
 
 State 4 [step]
   sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+  gSess = 1
 
 State 5 [step]
   sess = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>

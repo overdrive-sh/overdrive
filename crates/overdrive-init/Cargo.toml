@@ -48,6 +48,11 @@ path = "src/main.rs"
 # File/process-boundary acceptance complements; genuine guest boot remains
 # `overdrive-host`/`overdrive-cli`'s `kvm-tests` gate, not a gate on this crate.
 integration-tests = []
+# netns-density-295: the in-guest real-kernel cells (`transport::real_kernel`,
+# `guest_flow::real_kernel`), gated
+# `cfg(all(test, feature = "integration-tests", feature = "kvm-tests"))`. They
+# run only inside a booted guest (the metal lane), never in plain Lima.
+kvm-tests = ["integration-tests"]
 
 [dependencies]
 overdrive-core.workspace = true
@@ -69,8 +74,18 @@ nix = { workspace = true, features = ["reboot", "kmod", "mount", "poll", "proces
 # `aya` — the guest programs (`GuestProgram`) and the error types of
 # `GuestTransportOps::{load_program, attach_program}` (DG-5, step 5).
 aya.workspace = true
+# `overdrive-fwd` — the kernel adapter of `FlowForwarder` the guest flow
+# owner drives (`KernelGuestOwnerIo`, netns-density-295 DELIVER step 5).
+overdrive-fwd.workspace = true
 
 [dev-dependencies]
+# The guest-kit microVM fixture behind the in-guest lane
+# (`tests/integration/in_guest_lane.rs`, kvm-tests, native metal).
+overdrive-testing.workspace = true
+# `SimFlowForwarder` / `SimSocket` behind the guest owner's sim seam
+# (`guest_flow::sim`, netns-density-295).
+overdrive-sim.path = "../overdrive-sim"
+
 # quint-connect conformance drivers (netns-density-295, QPROJ-1): source-local
 # `#[cfg(all(test, feature = "integration-tests"))]` modules replaying
 # `specs/quint/guest-flow-owner/*.qnt` against the production owner.

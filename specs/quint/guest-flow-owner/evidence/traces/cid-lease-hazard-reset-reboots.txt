@@ -1,23 +1,25 @@
 # cid-lease-hazard-reset-reboots: counterexample, 4 state(s) (from the TLC trace)
 
 State 1
-  g = [clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE]
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
+  att = <<0, 0>>
   cursor = 0
   lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  conf_step = [init |-> [tag |-> "UNIT"]]
   dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   up = TRUE
   reclaimed = TRUE
   bootLeft = -1
-  al = << [st |-> "wait", off |-> -1, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
 
 State 2 [Assign]
   cursor = 1
   lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
-  al = << [st |-> "leased", off |-> 0, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  al = << [ st |-> "leased", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
 
 State 3 [Launch]
   dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
-  al = << [st |-> "running", off |-> 0, retry |-> FALSE], [st |-> "wait", off |-> -1, retry |-> FALSE] >>
+  al = << [ st |-> "running", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
 
 State 4 [GuestReset]
-  g = [clash |-> FALSE, rebooted |-> TRUE, reclaimed |-> FALSE]
+  g = [ clash |-> FALSE, rebooted |-> TRUE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]

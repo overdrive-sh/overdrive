@@ -2,17 +2,28 @@
 //! (GH #295).
 //!
 //! Interface contract: `docs/feature/netns-density-295/feature-delta.md`
-//! § "[REF] Driven port — host forwarder `overdrive-dataplane::guest_flow`
-//! (D1, D4, D5, D7)". Every public item below is the one that section pins,
-//! with the derives and constant values it pins.
+//! § "[REF] Driven port — host forwarder `overdrive-dataplane::guest_flow`".
+//! Every public item in the first part of this file is the one that section
+//! pins, with the derives, fields, variants and constant values it pins: the
+//! verdict, `sock_ops`, `flow_end_classifier` (raw tracepoint on
+//! `vsock:virtio_transport_recv_pkt`), `drain_sent_a` / `drain_sent_b`
+//! (`fexit(skb_send_sock)`) and `drain_level_read` (`fentry(sock_poll)`)
+//! programs, the `BPF_F_MMAPABLE` drain-cell array and `FLOW_EVENT_RING`
+//! (R2-END, R2-DRAIN, UDP-EMPTY, UDP-SEQ).
 //!
 //! RED scaffold (DISTILL, Mandate 7): every function and method body panics
-//! until DELIVER vsock new-step 4 ("host forwarder in `overdrive-dataplane` +
-//! host programs in `overdrive-bpf`") replaces it. No surface the design does
-//! not pin is added here; private state is a placeholder field the crafter
-//! replaces.
+//! until DELIVER step 4 ("host forwarder in `overdrive-dataplane` + host
+//! programs in `overdrive-bpf`") replaces it. Plain data (`DrainStep::as_str`)
+//! is real. Private state is a placeholder field the crafter replaces.
+//!
+//! The items under "Removed by the 2026-10-11 rulings" at the end of the file
+//! (the host egress unframe and the intake-steering surface) are the
+//! feature-delta § *Roadmap impact* → *Bridge-era code for DELIVER to delete*
+//! list D range of this file; DELIVER deletes them with the tests that still
+//! defend them. They are not part of the current contract and nothing new
+//! calls them.
 
-// SCAFFOLD: true — netns-density-295 DISTILL (vsock new-step 4).
+// SCAFFOLD: true — netns-density-295 DISTILL (DELIVER step 4).
 #![expect(
     clippy::unused_self,
     reason = "RED scaffold bodies panic before reading their inputs; the lints self-trip when DELIVER lands the bodies"
@@ -21,28 +32,33 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::os::fd::BorrowedFd;
 
+use overdrive_core::guest_transport::wire::{
+    CellEpoch, FlowCell, FlowEvent, FlowEventKind, FlowWireError,
+};
 use overdrive_core::net::InterfaceIndex;
 
 const SCAFFOLD: &str = "Not yet implemented -- RED scaffold";
 
-/// The loaded host forwarding programs, maps and links. Not pinned: dropping
-/// it detaches every link and frees every map and program.
+/// The loaded host forwarding programs, maps, drain cells, flow-event ring
+/// and links. Not pinned: dropping it detaches every link and frees every
+/// map and program.
 pub struct GuestFlowForwarder {
     _scaffold: (),
 }
 
-/// Opaque handle naming one forwarded flow inside the forwarder.
+/// Opaque handle naming one flow's slot inside the forwarder: its drain
+/// cells, its classifier registration and, for an installed flow, its routes
+/// and members.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FlowPairKey(u32);
 
-/// Opaque handle for a registered intake listener.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct IntakeListenerKey(u32);
-
-/// An accepted intake child whose bytes are parked in a host cell.
-#[must_use]
-pub struct ParkedIntake {
-    _scaffold: (),
+impl FlowPairKey {
+    /// The flow's slot in the drain-cell array (cells `2 × slot` and
+    /// `2 × slot + 1`); the `cell` field of every flow-event record of this
+    /// flow.
+    pub fn cell(self) -> FlowCell {
+        panic!("{SCAFFOLD}")
+    }
 }
 
 /// A host vsock socket installed, awaiting its route.
@@ -57,32 +73,112 @@ pub struct ArmedPeer {
     _scaffold: (),
 }
 
-/// A host-opened flow awaiting `Paired`.
-#[must_use]
-pub struct PendingInbound {
-    _scaffold: (),
-}
-
-/// Capacity of the forwarder: the most flows it forwards at once, and the
-/// size of its host parking-cell pool.
+/// Node bound on concurrent flows (pair table, slots, fd budget term).
 pub const GUEST_FLOW_MAX_PAIRS: u32 = 65_536;
 
-/// Which way through a flow pair bytes travel.
+/// Size of one drain cell; the cell array holds `2 × GUEST_FLOW_MAX_PAIRS`.
+pub const GUEST_FLOW_CELL_LEN: usize = 64;
+
+/// Host direction of a flow. `TowardGuest` = into the flow vsock (cell
+/// `2 × slot`), `FromGuest` = out of the flow vsock (cell `2 × slot + 1`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlowDirection {
-    /// From the host peer toward the guest.
+    /// Into the flow vsock (cell `2 × slot`).
     TowardGuest,
-    /// From the guest toward the host peer.
+    /// Out of the flow vsock (cell `2 × slot + 1`).
     FromGuest,
 }
 
+/// R2-DRAIN: the result of reading `sent` after `arm`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrainRead {
+    /// `sent >= goal` and this call won `cmpxchg(fired, 0, 1)`: the direction
+    /// is drained; no `DrainComplete` record is written for it.
+    Complete,
+    /// Either `sent < goal` (`short = true`), or a kernel program won
+    /// `fired` (`short = false`; its `DrainComplete` record is or will be in
+    /// the ring). The owner waits for the record.
+    AwaitRecord {
+        /// `sent < goal` at the read.
+        short: bool,
+    },
+}
+
+/// The userspace-visible fields of one drain cell, read atomically per field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FlowCellSnapshot {
+    /// Bytes the direction's target accepted since the cell was initialised.
+    pub sent: u64,
+    /// The byte count at which the direction is drained.
+    pub goal: u64,
+    /// Bytes the verdict redirected from the direction's source.
+    pub fwd: u64,
+    /// The cell's epoch.
+    pub epoch: CellEpoch,
+    /// The goal is stored.
+    pub armed: bool,
+    /// Completion is reported.
+    pub fired: bool,
+    /// The direction's sending side has ended on the vsock.
+    pub ended: bool,
+    /// Redirects to the cell's target refused `SK_DROP` (A3).
+    pub drops: u32,
+    /// Lost `EndHalfClose` / `EndAbort` / `DrainComplete` / `RedirectRefused`
+    /// records of this cell (A7).
+    pub ring_lost: u32,
+    /// Lost `EmptyDatagram` notices of this cell (UDP-EMPTY).
+    pub empty_lost: u32,
+}
+
+/// `recursion_misses` of the two `fexit(skb_send_sock)` programs, read from
+/// their program file descriptors' fdinfo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DrainRecursionMisses {
+    /// `drain_sent_a`'s `recursion_misses`.
+    pub sent_a: u64,
+    /// `drain_sent_b`'s `recursion_misses`.
+    pub sent_b: u64,
+}
+
+/// The pinned order of the drain sub-steps of one direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrainStep {
+    /// Step 1, `store_goal`.
+    StoreGoal,
+    /// Step 2, `arm`.
+    Arm,
+    /// Step 3, `read_sent`.
+    ReadSent,
+    /// Step 4 (conditional), `backstop_poll`.
+    BackstopPoll,
+    /// Step 5, `shutdown_write`.
+    ShutdownWrite,
+}
+
+impl DrainStep {
+    /// The step's label.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::StoreGoal => "store_goal",
+            Self::Arm => "arm",
+            Self::ReadSent => "read_sent",
+            Self::BackstopPoll => "backstop_poll",
+            Self::ShutdownWrite => "shutdown_write",
+        }
+    }
+}
+
 impl GuestFlowForwarder {
-    /// Loads the verdict, strparser, egress unframe, `sock_ops` and
-    /// drain-counter programs; creates maps and the host parking-cell pool
-    /// sized from `GUEST_FLOW_MAX_PAIRS`; attaches every program as a BPF
-    /// link — `sock_ops` to `owner_cgroup`, which must not be the root cgroup,
-    /// and the egress unframe to `lo` only (other interfaces via
-    /// `converge_unframe_interfaces`).
+    /// Loads the verdict, `sock_ops`, `flow_end_classifier` (raw tracepoint,
+    /// `tp_btf`, on `vsock:virtio_transport_recv_pkt`), `drain_sent_a` and
+    /// `drain_sent_b` (each `fexit(skb_send_sock)`) and `drain_level_read`
+    /// (`fentry(sock_poll)`) programs; creates the maps, the drain cell array
+    /// (`BPF_ARRAY`, `BPF_F_MMAPABLE`, `2 × GUEST_FLOW_MAX_PAIRS` cells,
+    /// mapped into this process) and `FLOW_EVENT_RING`; attaches every
+    /// program as a BPF link — `sock_ops` to `owner_cgroup`. Precondition:
+    /// owner placement was checked (`GuestNetworkError::OwnerCgroupPlacement`,
+    /// D24), so `owner_cgroup` is at or below `overdrive.slice`, never the
+    /// root cgroup.
     pub fn load(_owner_cgroup: BorrowedFd<'_>) -> Result<Self, GuestFlowError> {
         panic!("{SCAFFOLD}")
     }
@@ -92,77 +188,14 @@ impl GuestFlowForwarder {
         panic!("{SCAFFOLD}")
     }
 
-    /// D5a, D5a-IFACE: at boot, attaches the egress unframe program (TCX
-    /// egress) to every non-`lo` interface in `interfaces` (every interface
-    /// present in the host's root network namespace). Each interface lands
-    /// in exactly one of `attached` / `failed`, a failure keeping its cause
-    /// (`UnframeAttachError`); a failure never stops the others. Never
-    /// detaches anything. `Err` only when the call cannot run at all (the
-    /// program is not loaded). The only unframe attach after `load`: every
-    /// interface `serve` creates exists before it (D5a-SERVE-IFACE) and no
-    /// interface registered after boot is configured (D5a-LATE, ADR-0068
-    /// § 5), so none is attached later.
-    pub fn converge_unframe_interfaces(
-        &self,
-        _interfaces: &BTreeSet<InterfaceIndex>,
-    ) -> Result<UnframeConvergence, GuestFlowError> {
-        panic!("{SCAFFOLD}")
-    }
-
-    // --- inbound (TcpAccept, host opener) ---
-
-    /// Tags `listener` with an entry in the forwarder's dedicated
-    /// clone-flagged socket-storage map (`BPF_F_CLONE` is set on the map at
-    /// creation; INTAKE-TAG-MAP), so every child accepted on it carries a copy
-    /// of the tag from creation; no other socket is ever stored in that map;
-    /// `sock_ops` installs and parks at `PASSIVE_ESTABLISHED` exactly the
-    /// children that carry it (M-1). Never keyed by port or address.
-    pub fn register_intake_listener(
-        &self,
-        _listener: BorrowedFd<'_>,
-    ) -> Result<IntakeListenerKey, GuestFlowError> {
-        panic!("{SCAFFOLD}")
-    }
-
-    /// Removes the tag of a listener registered by
-    /// [`Self::register_intake_listener`].
-    pub fn unregister_intake_listener(
-        &self,
-        _key: IntakeListenerKey,
-    ) -> Result<(), GuestFlowError> {
-        panic!("{SCAFFOLD}")
-    }
-
-    /// Called right after `accept()`; re-arms the child. `IntakeNotParked` if
-    /// no cell was free at establishment.
-    pub fn adopt_intake(&self, _child: BorrowedFd<'_>) -> Result<ParkedIntake, GuestFlowError> {
-        panic!("{SCAFFOLD}")
-    }
-
-    /// Installs `vsock` (connected, request not yet written) with route
-    /// vsock → intake child.
-    pub fn begin_inbound(
-        &self,
-        _intake: ParkedIntake,
-        _vsock: BorrowedFd<'_>,
-    ) -> Result<PendingInbound, GuestFlowError> {
-        panic!("{SCAFFOLD}")
-    }
-
-    /// On `Paired`: routes the cell → vsock and re-arms it.
-    pub fn complete_inbound(
-        &self,
-        _pending: PendingInbound,
-    ) -> Result<FlowPairKey, GuestFlowError> {
-        panic!("{SCAFFOLD}")
-    }
-
     // --- outbound TCP (TcpConnect, host acceptor) ---
 
     /// Precondition: the caller has already read the 32-byte request from
     /// `vsock` in userspace (H-1) and matched its launch token (ATTR-TOKEN).
     /// Installing earlier would hand the request to the verdict, which drops
-    /// it on the route miss.
+    /// it on the route miss. Takes a free slot, initialises both its cells
+    /// (new epoch; every counter and flag zero) and registers the vsock with
+    /// `flow_end_classifier`. `PairCapacity` when no slot is free.
     pub fn install_accepted_vsock(
         &self,
         _vsock: BorrowedFd<'_>,
@@ -189,13 +222,29 @@ impl GuestFlowForwarder {
         panic!("{SCAFFOLD}")
     }
 
+    // --- host-opened flow (TcpAccept, GuestStreamDial) ---
+
+    /// `vsock`: a connected host vsock STREAM to (CID, `GUEST_INBOUND_PORT`),
+    /// before its request is written. Takes a free slot, initialises its
+    /// cells and registers the vsock with `flow_end_classifier`. Installs
+    /// nothing: the vsock is no `SockHash` member and no verdict runs on it;
+    /// its bytes are read and written by the dialer (INB-1). Only
+    /// `EndHalfClose` / `EndAbort` records name this slot.
+    pub fn register_dialed_vsock(
+        &self,
+        _vsock: BorrowedFd<'_>,
+    ) -> Result<FlowPairKey, GuestFlowError> {
+        panic!("{SCAFFOLD}")
+    }
+
     // --- datagram (host acceptor) ---
 
     /// `host_udp` must be a connected IPv4 UDP socket with `SO_NO_CHECK`;
     /// `stream` and `seqpacket` must have had their requests read already.
-    /// Registers the unframe tuple from `host_udp`'s kernel-reported local
-    /// address and peer (`getsockname` / `getpeername`, i.e. after any
-    /// `connect4` VIP rewrite), never from the requested destination.
+    /// Installs `seqpacket` with route → `host_udp` (every record length-
+    /// checked and stripped), `host_udp` with route → `stream` (framed) and
+    /// `stream` as a target; takes a slot and initialises its cells, which
+    /// carry the association's `EmptyDatagram` notices and loss counts.
     pub fn install_datagram(
         &self,
         _stream: BorrowedFd<'_>,
@@ -205,22 +254,93 @@ impl GuestFlowForwarder {
         panic!("{SCAFFOLD}")
     }
 
-    // --- end of flow ---
+    // --- end of flow (R2-END, R2-DRAIN; called in this order per direction) ---
 
-    /// K2: true when every byte received toward `direction`'s target has been
-    /// forwarded and sent across every hop between them — including the
-    /// parking cell, when the flow's path has one (L-6). Exact counters;
-    /// never evicted.
-    pub fn drained(
+    /// Step 1. Stores `goal` into the direction's cell. TCP source: the
+    /// source's `tcpi_bytes_received − 1` read at its EOF (FIN counted).
+    /// vsock source: the cell's own `fwd` at the classified `EndHalfClose`
+    /// (T4: equals the peer's final-hop `sent`).
+    pub fn store_goal(
         &self,
         _key: FlowPairKey,
         _direction: FlowDirection,
-    ) -> Result<bool, GuestFlowError> {
+        _goal: u64,
+    ) -> Result<(), GuestFlowError> {
         panic!("{SCAFFOLD}")
     }
 
-    /// Removes routes, tuples, counters and members of `key` and releases its
-    /// cell. Convergent: absent entries count as removed.
+    /// Step 2. Sets `armed = 1`, sequentially consistent with the programs'
+    /// read of `armed` after their `sent` update, so the owner's step 3 and
+    /// every later program run cannot both miss the goal.
+    pub fn arm(&self, _key: FlowPairKey, _direction: FlowDirection) -> Result<(), GuestFlowError> {
+        panic!("{SCAFFOLD}")
+    }
+
+    /// Step 3. Reads `sent`; when `sent >= goal`, attempts
+    /// `cmpxchg(fired, 0, 1)`.
+    pub fn read_sent(
+        &self,
+        _key: FlowPairKey,
+        _direction: FlowDirection,
+    ) -> Result<DrainRead, GuestFlowError> {
+        panic!("{SCAFFOLD}")
+    }
+
+    /// Step 4 (conditional). A zero-event `poll(target, 0, 0)` that runs
+    /// `drain_level_read` on `target`, the direction's target socket. Called
+    /// once after an `AwaitRecord { short: true }` at arm time, and for every
+    /// armed, incomplete direction when either value of
+    /// `drain_recursion_misses` has risen at the owner's counter read.
+    pub fn backstop_poll(
+        &self,
+        _key: FlowPairKey,
+        _direction: FlowDirection,
+        _target: BorrowedFd<'_>,
+    ) -> Result<(), GuestFlowError> {
+        panic!("{SCAFFOLD}")
+    }
+
+    /// Step 5. `shutdown(SHUT_WR)` on `target`, the direction's target. When
+    /// `target` is the flow vsock (`TowardGuest`), first sets the cell's
+    /// `ended`. Precondition for an installed flow: the direction's `fired`
+    /// is set. For a dialed vsock (no drain) it is the dialer's
+    /// `shutdown(Write)` and has no precondition.
+    pub fn shutdown_write(
+        &self,
+        _key: FlowPairKey,
+        _direction: FlowDirection,
+        _target: BorrowedFd<'_>,
+    ) -> Result<(), GuestFlowError> {
+        panic!("{SCAFFOLD}")
+    }
+
+    /// Reads one direction's cell.
+    pub fn cell(
+        &self,
+        _key: FlowPairKey,
+        _direction: FlowDirection,
+    ) -> Result<FlowCellSnapshot, GuestFlowError> {
+        panic!("{SCAFFOLD}")
+    }
+
+    /// The ring's readiness descriptor, for the owner's event loop.
+    pub fn flow_event_fd(&self) -> BorrowedFd<'_> {
+        panic!("{SCAFFOLD}")
+    }
+
+    /// Takes the next record of `FLOW_EVENT_RING`, `None` when empty.
+    pub fn next_flow_event(&self) -> Result<Option<FlowEvent>, GuestFlowError> {
+        panic!("{SCAFFOLD}")
+    }
+
+    /// `recursion_misses` of `drain_sent_a` and `drain_sent_b`.
+    pub fn drain_recursion_misses(&self) -> Result<DrainRecursionMisses, GuestFlowError> {
+        panic!("{SCAFFOLD}")
+    }
+
+    /// Removes routes, members, the classifier registration and the arms of
+    /// `key` and frees its slot; the next flow on the slot gets a new epoch.
+    /// Convergent: absent entries count as removed.
     pub fn remove_pair(&self, _key: FlowPairKey) -> Result<(), GuestFlowError> {
         panic!("{SCAFFOLD}")
     }
@@ -230,12 +350,12 @@ impl GuestFlowForwarder {
         panic!("{SCAFFOLD}")
     }
 
-    /// The forwarder's current pairs, cells, intake listeners and links.
+    /// The forwarder's current pairs, free slots and links (startup probe).
     pub fn inventory(&self) -> Result<GuestFlowInventory, GuestFlowError> {
         panic!("{SCAFFOLD}")
     }
 
-    /// The forwarder's drop and keep counters.
+    /// The forwarder's global counters.
     pub fn counters(&self) -> Result<GuestFlowCounters, GuestFlowError> {
         panic!("{SCAFFOLD}")
     }
@@ -244,16 +364,12 @@ impl GuestFlowForwarder {
 /// What the forwarder holds right now.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GuestFlowInventory {
-    /// Forwarded flow pairs.
+    /// Live flows.
     pub pairs: u32,
-    /// Parking cells free in the pool.
-    pub free_cells: u32,
-    /// Registered intake listeners.
-    pub intake_listeners: u32,
+    /// Free slots.
+    pub free_slots: u32,
     /// Which program links are attached.
     pub links_attached: GuestFlowLinks,
-    /// Non-`lo` interfaces currently carrying the egress unframe link.
-    pub unframe_interfaces: BTreeSet<InterfaceIndex>,
 }
 
 /// Which of the forwarder's program links are attached.
@@ -263,113 +379,62 @@ pub struct GuestFlowInventory {
     reason = "the design pins one bool per link (feature-delta `GuestFlowLinks`)"
 )]
 pub struct GuestFlowLinks {
-    /// The verdict program.
+    /// The verdict.
     pub verdict: bool,
-    /// The `sock_ops` program on the owner's cgroup.
+    /// `sock_ops` on the owner's cgroup.
     pub sock_ops: bool,
-    /// The egress unframe program on `lo`.
-    pub unframe_lo: bool,
-    /// The drain-counter program.
-    pub drain_counter: bool,
+    /// `flow_end_classifier` (raw tracepoint).
+    pub flow_end_classifier: bool,
+    /// `drain_sent_a` (`fexit(skb_send_sock)`).
+    pub drain_sent_a: bool,
+    /// `drain_sent_b` (`fexit(skb_send_sock)`).
+    pub drain_sent_b: bool,
+    /// `drain_level_read` (`fentry(sock_poll)`).
+    pub drain_level_read: bool,
 }
 
-/// The outcome of the boot attach. Every requested interface is in exactly
-/// one of the two maps; a failure keeps its cause.
-#[derive(Debug, Default)]
-pub struct UnframeConvergence {
-    /// Interfaces now carrying the egress unframe link.
-    pub attached: BTreeSet<InterfaceIndex>,
-    /// Interfaces whose attach failed, with the cause.
-    pub failed: BTreeMap<InterfaceIndex, UnframeAttachError>,
-}
-
-/// D5a-IFACE-BOOT: why the egress unframe program could not be attached to
-/// an interface present at boot.
-///
-/// Every variant refuses startup
-/// (`GuestNetworkError::UnframeAttach`); the variant names the cause for the
-/// operator, and nothing retries it. Classified from the errno carried by
-/// the source (P-44): `ENOMEM` → `KernelMemory`; every other errno →
-/// `Attach` — observed: `EEXIST` (already attached), `ENODEV` (interface
-/// gone between enumeration and attach), `EMFILE` (descriptor limit, from
-/// name resolution), `ERANGE` (the interface's TCX egress set is full).
-/// The attach of a loaded program raises no `EPERM`.
-#[derive(Debug, thiserror::Error)]
-pub enum UnframeAttachError {
-    /// The kernel could not allocate the TCX link (`ENOMEM`): node memory
-    /// pressure at boot.
-    #[error("the kernel could not allocate the egress unframe link on interface {ifindex}")]
-    KernelMemory {
-        /// The interface.
-        ifindex: InterfaceIndex,
-        /// The attach error.
-        #[source]
-        source: aya::programs::ProgramError,
-    },
-    /// Any other failure (`EEXIST`, `ENODEV`, `EMFILE`, `ERANGE`, or any
-    /// errno not listed). On the appliance nothing but Overdrive attaches to
-    /// these interfaces (A-31), so it is an Overdrive defect, reported with
-    /// its cause.
-    #[error("attaching the egress unframe program to interface {ifindex} failed")]
-    Attach {
-        /// The interface.
-        ifindex: InterfaceIndex,
-        /// The attach error.
-        #[source]
-        source: aya::programs::ProgramError,
-    },
-}
-
-impl UnframeAttachError {
-    /// The interface the attach failed on.
-    pub fn ifindex(&self) -> InterfaceIndex {
-        panic!("{SCAFFOLD}")
-    }
-}
-
-/// The forwarder's drop and keep counters.
+/// The forwarder's global counters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct GuestFlowCounters {
     /// Skbs dropped on a route miss.
     pub route_miss: u64,
-    /// Redirects that failed.
-    pub redirect_failed: u64,
-    /// Zero-length (FIN-only) TCP skbs dropped by a verdict.
+    /// Redirects refused `SK_DROP` (A3).
+    pub redirect_refused: u64,
+    /// FIN-only (zero-length) TCP skbs dropped.
     pub fin_only_dropped: u64,
-    /// Guest datagrams over the payload limit.
-    pub datagram_oversize: u64,
-    /// Guest datagrams whose frame did not parse.
-    pub datagram_malformed: u64,
-    /// Egress packets on no registered tuple.
-    pub unframe_tuple_miss: u64,
-    /// Skbs the egress program could not linearize.
+    /// `bpf_skb_pull_data` failures before a UDP / SEQPACKET redirect.
     pub linearize_failed: u64,
-    /// Intake children not parked at establishment.
-    pub intake_not_parked: u64,
-    /// D5a: frames the verdict kept (empty datagram).
-    pub frame_kept_empty: u64,
-    /// D5a: frames the verdict kept (frame-shaped payload).
-    pub frame_kept_escaped: u64,
-    /// D5a: later fragments moved back after a first-fragment unframe.
-    pub unframe_fragment_shifted: u64,
-    /// D5a: later fragments seen with no first-fragment record (passed
-    /// unchanged).
-    pub unframe_fragment_orphan: u64,
+    /// UDP-SEQ: `skb.len − 8 < declared`.
+    pub datagram_short: u64,
+    /// UDP-SEQ: `skb.len − 8 > declared`.
+    pub datagram_long: u64,
+    /// UDP-SEQ: `skb.len < 8`.
+    pub datagram_lt8: u64,
+    /// UDP-SEQ: magic ≠ `OVD1`.
+    pub datagram_bad_magic: u64,
+    /// UDP-SEQ: declared length > `MAX_GUEST_DATAGRAM_PAYLOAD`.
+    pub datagram_oversize: u64,
+    /// UDP-EMPTY: declared-length-0 records dropped with a notice.
+    pub datagram_empty: u64,
+    /// `bpf_ringbuf_output` failures, every kind.
+    pub ring_dropped: u64,
 }
 
 /// One of the forwarder's programs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuestFlowProgram {
-    /// The sockmap verdict.
+    /// The verdict.
     Verdict,
-    /// The stream parser.
-    StreamParser,
-    /// The TCX egress unframe.
-    Unframe,
-    /// The `sock_ops` program.
+    /// `sock_ops`.
     SockOps,
-    /// The drain counter.
-    DrainCounter,
+    /// `flow_end_classifier`.
+    FlowEndClassifier,
+    /// `drain_sent_a`.
+    DrainSentA,
+    /// `drain_sent_b`.
+    DrainSentB,
+    /// `drain_level_read`.
+    DrainLevelRead,
 }
 
 /// One of the forwarder's maps.
@@ -381,43 +446,35 @@ pub enum GuestFlowMap {
     Routes,
     /// Armed sockets.
     Arms,
-    /// The clone-flagged intake-tag storage.
-    IntakeTags,
-    /// Parking cells.
-    Parking,
-    /// Registered unframe tuples.
-    Tuples,
-    /// The fragment-tracking map.
-    Fragments,
-    /// Drain counters.
-    DrainCounters,
-    /// Drop and keep counters.
+    /// The drain-cell array.
+    Cells,
+    /// `flow_end_classifier` registrations.
+    ClassifierRegistrations,
+    /// `FLOW_EVENT_RING`.
+    FlowEventRing,
+    /// Global counters.
     Counters,
 }
 
 /// A stage of the forwarder's startup probe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuestFlowProbeStage {
-    /// The owner's cgroup is not the root cgroup.
-    OwnerCgroupNotRoot,
-    /// Registering the probe CID with vhost.
-    VhostCidRegister,
     /// Every link attached.
     LinksAttached,
     /// Inserting a vsock socket into the socket map.
     SockmapVsockInsert,
-    /// Parking at establishment.
-    EstablishmentParking,
     /// A loopback stream round trip.
     LoopbackStreamRoundTrip,
     /// A half-close drain.
     HalfCloseDrain,
+    /// A flow end classified.
+    FlowEndClassified,
     /// An empty datagram.
     EmptyDatagram,
     /// A maximum-size datagram.
     MaxDatagram,
-    /// A frame-shaped (escaped) datagram.
-    EscapedFrame,
+    /// A frame-shaped payload.
+    FrameShapedPayload,
     /// An oversize datagram is dropped.
     OversizeDropped,
     /// A seqpacket record.
@@ -437,8 +494,6 @@ pub enum GuestFlowSocketKind {
     TcpV4Established,
     /// An unconnected TCPv4 socket.
     TcpV4Unconnected,
-    /// A listening TCPv4 socket.
-    TcpV4Listener,
     /// A connected UDPv4 socket.
     UdpV4Connected,
 }
@@ -450,28 +505,27 @@ pub enum GuestFlowProbeObservation {
     BytesDiffer,
     /// Nothing was received.
     NothingReceived,
-    /// Early bytes were lost.
-    EarlyBytesLost,
     /// The tail was truncated.
     TailTruncated,
     /// A datagram arrived split.
     DatagramSplit,
     /// An oversize datagram was delivered.
     OversizeDelivered,
+    /// An expected flow-event record did not arrive.
+    RecordMissing {
+        /// The kind expected.
+        kind: FlowEventKind,
+    },
+    /// A flow-event record arrived that the stage did not expect.
+    RecordUnexpected {
+        /// The kind received.
+        kind: FlowEventKind,
+    },
     /// Probe entries remained after cleanup.
     ResidueRemains {
         /// Pairs remaining.
         pairs: u32,
     },
-}
-
-/// The role of a host socket the owner armed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FlowRole {
-    /// An accepted intake child.
-    InboundIntake,
-    /// A host peer of an outbound flow.
-    OutboundPeer,
 }
 
 /// Why a forwarder call failed.
@@ -495,9 +549,6 @@ pub enum GuestFlowError {
         #[source]
         source: aya::programs::ProgramError,
     },
-    /// The owner's cgroup is the root cgroup.
-    #[error("the owner's cgroup is the root cgroup; sock_ops would apply to every host socket")]
-    OwnerCgroupIsRoot,
     /// Updating a map failed.
     #[error("updating guest-flow map {map:?} failed")]
     MapUpdate {
@@ -516,16 +567,9 @@ pub enum GuestFlowError {
         #[source]
         source: aya::maps::MapError,
     },
-    /// Reading a socket cookie or `TCP_INFO` failed.
-    #[error("reading a socket cookie or TCP_INFO failed")]
+    /// Reading a socket cookie, socket address or `TCP_INFO` failed.
+    #[error("reading a socket cookie, socket address or TCP_INFO failed")]
     SocketQuery {
-        /// The I/O error.
-        #[source]
-        source: std::io::Error,
-    },
-    /// Re-arming a socket with `SO_RCVLOWAT` failed.
-    #[error("re-arming a socket with SO_RCVLOWAT failed")]
-    Rearm {
         /// The I/O error.
         #[source]
         source: std::io::Error,
@@ -536,20 +580,64 @@ pub enum GuestFlowError {
         /// The kind required.
         expected: GuestFlowSocketKind,
     },
-    /// The intake child was not parked at establishment.
-    #[error("intake child was not parked at establishment")]
-    IntakeNotParked,
-    /// The socket was not installed at establishment.
-    #[error("{role:?} socket was not installed at establishment")]
-    PeerNotInstalled {
-        /// The socket's role.
-        role: FlowRole,
-    },
-    /// Every pair slot is in use.
+    /// The outbound peer socket was not installed at establishment.
+    #[error("outbound peer socket was not installed at establishment")]
+    PeerNotInstalled,
+    /// Every slot is in use.
     #[error("guest-flow pair capacity {capacity} exhausted")]
     PairCapacity {
         /// The capacity.
         capacity: u32,
+    },
+    /// The key names no live flow.
+    #[error("flow {key:?} is not live in the forwarder")]
+    UnknownFlow {
+        /// The key.
+        key: FlowPairKey,
+    },
+    /// A drain sub-step was called out of the pinned order.
+    #[error(
+        "drain step {step:?} of flow {key:?} direction {direction:?} is out of the pinned order"
+    )]
+    DrainStepOutOfOrder {
+        /// The flow.
+        key: FlowPairKey,
+        /// The direction.
+        direction: FlowDirection,
+        /// The step called.
+        step: DrainStep,
+    },
+    /// A drain sub-step's syscall failed.
+    #[error("drain step {step:?} failed")]
+    DrainIo {
+        /// The step.
+        step: DrainStep,
+        /// The I/O error.
+        #[source]
+        source: std::io::Error,
+    },
+    /// Reading the flow-event ring failed.
+    #[error("reading the flow-event ring failed")]
+    FlowEventRing {
+        /// The map error.
+        #[source]
+        source: aya::maps::MapError,
+    },
+    /// A flow-event record failed to decode.
+    #[error("a flow-event record failed to decode")]
+    FlowEventDecode {
+        /// The decode error.
+        #[source]
+        source: FlowWireError,
+    },
+    /// Reading a program's statistics failed.
+    #[error("reading program statistics of {program:?} failed")]
+    ProgramStats {
+        /// The program.
+        program: GuestFlowProgram,
+        /// The I/O error.
+        #[source]
+        source: std::io::Error,
     },
     /// A probe stage failed.
     #[error("guest-flow probe stage {stage:?} failed")]
@@ -577,4 +665,113 @@ pub enum GuestFlowError {
         #[source]
         source: std::io::Error,
     },
+}
+
+// ---------------------------------------------------------------------------
+// Removed by the 2026-10-11 rulings (feature-delta § *Roadmap impact* →
+// *Bridge-era code for DELIVER to delete*, list D). Not part of the current
+// contract; DELIVER deletes them with the tests that still defend them.
+// ---------------------------------------------------------------------------
+
+/// Opaque handle for a registered intake listener (removed mechanism).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct IntakeListenerKey(u32);
+
+/// An accepted intake child whose bytes are parked (removed mechanism).
+#[must_use]
+pub struct ParkedIntake {
+    _scaffold: (),
+}
+
+/// A host-opened flow awaiting `Paired` (removed mechanism).
+#[must_use]
+pub struct PendingInbound {
+    _scaffold: (),
+}
+
+impl GuestFlowForwarder {
+    /// Removed mechanism (host egress unframe).
+    pub fn converge_unframe_interfaces(
+        &self,
+        _interfaces: &BTreeSet<InterfaceIndex>,
+    ) -> Result<UnframeConvergence, GuestFlowError> {
+        panic!("{SCAFFOLD}")
+    }
+
+    /// Removed mechanism (intake steering).
+    pub fn register_intake_listener(
+        &self,
+        _listener: BorrowedFd<'_>,
+    ) -> Result<IntakeListenerKey, GuestFlowError> {
+        panic!("{SCAFFOLD}")
+    }
+
+    /// Removed mechanism (intake steering).
+    pub fn unregister_intake_listener(
+        &self,
+        _key: IntakeListenerKey,
+    ) -> Result<(), GuestFlowError> {
+        panic!("{SCAFFOLD}")
+    }
+
+    /// Removed mechanism (intake steering).
+    pub fn adopt_intake(&self, _child: BorrowedFd<'_>) -> Result<ParkedIntake, GuestFlowError> {
+        panic!("{SCAFFOLD}")
+    }
+
+    /// Removed mechanism (intake steering).
+    pub fn begin_inbound(
+        &self,
+        _intake: ParkedIntake,
+        _vsock: BorrowedFd<'_>,
+    ) -> Result<PendingInbound, GuestFlowError> {
+        panic!("{SCAFFOLD}")
+    }
+
+    /// Removed mechanism (intake steering).
+    pub fn complete_inbound(
+        &self,
+        _pending: PendingInbound,
+    ) -> Result<FlowPairKey, GuestFlowError> {
+        panic!("{SCAFFOLD}")
+    }
+}
+
+/// The outcome of the boot unframe attach (removed mechanism).
+#[derive(Debug, Default)]
+pub struct UnframeConvergence {
+    /// Interfaces now carrying the egress unframe link.
+    pub attached: BTreeSet<InterfaceIndex>,
+    /// Interfaces whose attach failed, with the cause.
+    pub failed: BTreeMap<InterfaceIndex, UnframeAttachError>,
+}
+
+/// Why the egress unframe program could not be attached (removed mechanism).
+#[derive(Debug, thiserror::Error)]
+pub enum UnframeAttachError {
+    /// `ENOMEM`.
+    #[error("the kernel could not allocate the egress unframe link on interface {ifindex}")]
+    KernelMemory {
+        /// The interface.
+        ifindex: InterfaceIndex,
+        /// The attach error.
+        #[source]
+        source: aya::programs::ProgramError,
+    },
+    /// Any other errno.
+    #[error("attaching the egress unframe program to interface {ifindex} failed")]
+    Attach {
+        /// The interface.
+        ifindex: InterfaceIndex,
+        /// The attach error.
+        #[source]
+        source: aya::programs::ProgramError,
+    },
+}
+
+impl UnframeAttachError {
+    /// The interface the attach failed on.
+    pub fn ifindex(&self) -> InterfaceIndex {
+        panic!("{SCAFFOLD}")
+    }
 }

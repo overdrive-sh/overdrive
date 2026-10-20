@@ -41,6 +41,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::net::{Ipv4Addr, SocketAddrV4};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
 use async_trait::async_trait;
@@ -155,6 +156,10 @@ pub struct SimMtlsIntercept {
     next_table_transaction_fault: Mutex<Option<SimInterceptFault>>,
     /// The complete shared identity last installed through the sim port.
     shared_observation: Arc<Mutex<Option<InterceptPostcondition>>>,
+    /// Set by [`script_crash_retains_table`](SimMtlsIntercept::script_crash_retains_table):
+    /// the owning process dies, so the shared guards it drops remove nothing
+    /// the kernel holds. Cleared by the next successful table transaction.
+    crashed: Arc<AtomicBool>,
     /// Exact listener targets recorded only while a node guard is retained.
     recorded_targets: Arc<Mutex<Option<(u16, u16)>>>,
     /// Standing fault for [`bind_transparent`](MtlsIntercept::bind_transparent).
@@ -184,6 +189,7 @@ pub enum SimSharedTable {
 
 struct SimSharedGuard {
     observation: Arc<Mutex<Option<InterceptPostcondition>>>,
+    crashed: Arc<AtomicBool>,
     recorded_targets: Arc<Mutex<Option<(u16, u16)>>>,
     members: Arc<Mutex<SimMemberState>>,
     requested: InterceptPostcondition,
@@ -194,6 +200,10 @@ impl InterceptGuard for SimSharedGuard {}
 impl Drop for SimSharedGuard {
     fn drop(&mut self) {
         self.recorded_targets.lock().take();
+        if self.crashed.load(Ordering::SeqCst) {
+            // A dead process removes nothing: the table is the kernel's.
+            return;
+        }
         if self.members.lock().members == InterceptMembers::default() {
             let mut observation = self.observation.lock();
             if observation.as_ref() == Some(&self.requested) {
@@ -429,6 +439,7 @@ impl SimMtlsIntercept {
             observe_shared_fault: Mutex::new(None),
             next_table_transaction_fault: Mutex::new(None),
             shared_observation: Arc::new(Mutex::new(None)),
+            crashed: Arc::new(AtomicBool::new(false)),
             recorded_targets: Arc::new(Mutex::new(None)),
             bind_fault: Mutex::new(None),
             outbound_fault: Mutex::new(None),
@@ -508,6 +519,18 @@ impl SimMtlsIntercept {
     /// is unchanged. One-shot: consumed by the call it fails.
     pub fn fail_next_table_transaction(&self, fault: SimInterceptFault) {
         *self.next_table_transaction_fault.lock() = Some(fault);
+    }
+
+    /// The process that owns the shared guards now dies (`serve` crash or
+    /// the end after a fail-stop): every shared guard it drops from here on
+    /// releases its process-local listener targets but removes nothing the
+    /// kernel holds, so [`shared_table_state`](Self::shared_table_state) is
+    /// unchanged — the table persists across a crash, as the real nft table
+    /// does when its owner dies without running its destructors (QPROJ-7
+    /// arbiter; Tier-3 pair R5-30). The next successful table transaction (a
+    /// new process's boot step 8) ends the script.
+    pub fn script_crash_retains_table(&self) {
+        self.crashed.store(true, Ordering::SeqCst);
     }
 
     fn live_listener(&self, at: SocketAddrV4) -> Option<Arc<SimInterceptListener>> {
@@ -783,8 +806,10 @@ impl MtlsIntercept for SimMtlsIntercept {
         }
         *self.shared_observation.lock() = Some(requested.clone());
         *self.recorded_targets.lock() = Some((leg_f.port(), leg_c.port()));
+        self.crashed.store(false, Ordering::SeqCst);
         Ok(Box::new(SimSharedGuard {
             observation: Arc::clone(&self.shared_observation),
+            crashed: Arc::clone(&self.crashed),
             recorded_targets: Arc::clone(&self.recorded_targets),
             members: Arc::clone(&self.members),
             requested,
@@ -1001,6 +1026,32 @@ mod tests {
         assert_eq!(sut.shared_table_state(), SimSharedTable::Complete, "still complete");
         assert_eq!(sut.observe_shared().expect("observe after the failure"), before);
         drop(guard);
+    }
+
+    /// QPROJ-7 / R5-30: a crashed owner's dropped guard leaves the table
+    /// complete (the kernel keeps it), while a live owner's dropped guard with
+    /// no member removes it; the next successful transaction ends the crash
+    /// script, so its guard's drop removes the table again.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[test]
+    fn a_crashed_owner_leaves_the_table_and_the_next_transaction_owns_it_again() {
+        let sut = SimMtlsIntercept::new();
+        let guard = converge_at_install_ports(&sut);
+        sut.script_crash_retains_table();
+        drop(guard);
+        assert_eq!(sut.shared_table_state(), SimSharedTable::Complete, "a crash keeps the table");
+
+        let prior = sut.observe_shared().expect("observe the surviving program");
+        let next = sut
+            .converge_shared(prior.as_ref(), INSTALL_LEG_F, INSTALL_LEG_C)
+            .expect("the next boot adopts the surviving program");
+        assert_eq!(sut.shared_table_state(), SimSharedTable::Complete);
+        drop(next);
+        assert_eq!(
+            sut.shared_table_state(),
+            SimSharedTable::Absent,
+            "after a successful transaction, a live owner's drop removes the table again"
+        );
     }
 
     /// `clear_faults` also disarms a pending one-shot table failure.

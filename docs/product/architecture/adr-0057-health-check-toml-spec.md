@@ -12,6 +12,10 @@ Tags: phase-1, service-kind, operator-config, toml-spec.
 (ProbeRunner), ADR-0055 (ServiceLifecycleReconciler), ADR-0058
 (default-probe inference).
 
+**Amended 2026-10-14** (GH #295, decision D-UP-12, approved by the user
+2026-10-14): § 1 gains a per-workload probe cap; see § *Amendment
+2026-10-14 — per-allocation probe cap*. Not yet implemented.
+
 ## Context
 
 The operator declares health-check intent in TOML; the parser must
@@ -217,6 +221,37 @@ same `Vec<ProbeDescriptor>` shape for both cases — the reconciler
 treats an empty `startup_probes` as "Stable on first Running" by
 construction.
 
+## Amendment 2026-10-14 — per-allocation probe cap
+
+**Context.** Under ADR-0145 a VM's probe dials reach the guest over vsock,
+and each in-flight dial holds one of the node's flow slots. Probe dials are
+exempt from the allocation's flow quota (ADR-0187), so without a bound on
+the probes of one workload nothing bounds the node flow slots one
+allocation holds outside its quota.
+
+**Decision.** § 1's grammar is unchanged: each role is an array of tables
+and a role may declare several probes. The total number of probes across
+startup, readiness and liveness — the inferred default startup probe of
+ADR-0058 included when it is synthesised — is at most `GUEST_PROBE_SLOTS`
+(8). A spec above it is refused at deploy with one validation error at each
+ingress (the TOML parser and the API), before any intent write. The exact
+error and constant are pinned in the #295 feature delta (§ *[REF] Core
+vocabulary*). Applies to every Service spec.
+
+**Alternatives.** One probe per role (removes the multi-probe grammar of
+§ 1; withdrawn by the user); a probe dial beyond a per-allocation count
+answered as no sample (an accepted probe would have no guaranteed dial);
+no cap (the quota-exempt dials of one allocation unbounded).
+
+**Consequences.** A spec with more than eight probes, which deployed
+before, is refused. Each probe task holds at most one dial in flight, so one
+allocation holds at most eight quota-exempt probe dials (a node-capacity
+bulkhead; the #295 user approval of EVMOD-AB, 2026-10-17). The persisted
+intent format is unchanged and an intent persisted above the cap by an
+earlier build is not migrated: the Phase-1 upgrade path deletes the intent
+store (greenfield single cut; user ruling 2026-10-15), so no such intent is
+read by a build that enforces the cap.
+
 ## Considered alternatives
 
 ### Alternative A — `[probes]` table (singular, not array-of-tables)
@@ -308,3 +343,4 @@ Adding it Phase 2+ is additive.
 ## Changelog
 
 - 2026-05-24 — Initial accepted version. Resolves P2-Q4.
+- 2026-10-14 — Amendment: per-allocation probe cap `GUEST_PROBE_SLOTS` (GH #295, D-UP-12).

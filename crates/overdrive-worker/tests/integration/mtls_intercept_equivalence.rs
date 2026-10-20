@@ -126,9 +126,6 @@ use super::leg_listener::LegListener;
 /// port `0` is the only behaviourally-distinguished value in the `u16` domain.
 const LEG_ADDR: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0);
 
-/// The canonical guest source address admitted by the shared outbound set.
-const SOURCE_ADDR: Ipv4Addr = Ipv4Addr::new(10, 99, 5, 2);
-
 /// The canonical per-workload address paired with a DECLARED Service listener
 /// port — the `virt` shape `install_inbound` is called with. A suite-distinct
 /// /32 for the same non-collision reason as the veth names.
@@ -419,23 +416,19 @@ fn a_held_address_is_refused_with_eaddrinuse_until_its_last_holder_drops() {
     }
 }
 
-/// S-MIF-11 — after the node program is converged, both installs hand back a
-/// guard that releases without incident, whichever intercept surface is in
-/// use.
+/// S-MIF-11 — after the node program is converged, the inbound install hands
+/// back a guard that releases without incident, whichever intercept surface is
+/// in use.
 ///
 /// The call sequence is production's (DISTILL gap B-8): observe the prior, bind
-/// leg F and leg C, `converge_shared(prior, F, C)`, then install with each
-/// leg's bound port. The allocation guards drop first, then the node guard,
-/// then the listeners.
+/// leg F and leg C, `converge_shared(prior, F, C)`, then install with leg C's
+/// bound port. The allocation guard drops first, then the node guard, then the
+/// listeners.
 ///
-/// Universe: the `converge_shared` and two install `Result`s (all `Ok`) plus
-/// the ABSENCE of a panic across every `Drop`. **This test completing IS the
+/// Universe: the `converge_shared` and install `Result`s (both `Ok`) plus the
+/// ABSENCE of a panic across every `Drop`. **This test completing IS the
 /// observable** — `InterceptGuard`'s contract is ENTIRELY its `Drop`, so there
 /// is no accessor to read.
-///
-/// Deliberately NOT asserted: which set elements the host adds and removes —
-/// substrate, owned by `HostMtlsIntercept`'s Tier-3 obligations (see the module
-/// doc).
 ///
 /// Mutation target: a guard `Drop` that panics or that propagates an element
 /// removal error; an install that refuses at the recorded port.
@@ -445,7 +438,7 @@ fn a_held_address_is_refused_with_eaddrinuse_until_its_last_holder_drops() {
 /// simulated node opens no socket, and a listener stops when its wait is cancelled.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-fn both_installs_hand_back_a_guard_that_releases_cleanly() {
+fn the_inbound_install_hands_back_a_guard_that_releases_cleanly() {
     assert!(
         is_root(),
         "S-ND295-70: the host adapter needs CAP_NET_ADMIN for IP_TRANSPARENT and real nft; \
@@ -459,108 +452,30 @@ fn both_installs_hand_back_a_guard_that_releases_cleanly() {
         let label = adapter.label();
         let sut = adapter.build();
         let legs = bind_and_converge(sut.as_ref(), "S-MIF-11", label);
-        let outbound_port = legs.leg_f_addr.port();
         let inbound_port = legs.leg_c_addr.port();
 
-        let outbound_guard = sut
-            .install_outbound(SOURCE_ADDR, outbound_port)
-            .expect("install_outbound at the recorded leg-F port must hand back a guard");
         let inbound_guard = sut
             .install_inbound(VIRT, inbound_port)
             .expect("install_inbound at the recorded leg-C port must hand back a guard");
 
         // Releasing each guard neither fails nor panics.
-        drop(outbound_guard);
         drop(inbound_guard);
         drop(legs.node_guard);
         drop((legs.leg_f, legs.leg_c));
 
         eprintln!(
-            "[S-MIF-11][{label}] EXECUTED — converge_shared at ({outbound_port}, {inbound_port}); \
-             install_outbound({SOURCE_ADDR}, {outbound_port}) and install_inbound({VIRT}, \
-             {inbound_port}) both Ok; every guard released cleanly"
-        );
-    }
-}
-
-/// S-MIF-12 — installing the SAME capture twice converges instead of
-/// duplicating, and both guards release cleanly, whichever intercept surface is
-/// in use.
-///
-/// The node program is converged once (DISTILL gap B-8); the capture is
-/// installed twice at the recorded leg-F port.
-///
-/// Universe: the two install `Result`s (both `Ok`) plus the absence of a panic
-/// across both `Drop`s — **including the second `Drop`, whose underlying state
-/// the first `Drop` may already have released**.
-///
-/// This is a pure contract-clause assertion adding no API. It pins the two
-/// clauses `mtls_intercept_port.rs` states explicitly and that no other
-/// scenario reaches:
-///
-/// 1. `install_outbound`'s edge case — *"A re-install for an already-owned
-///    source adopts the process-local element token; it does not create a
-///    duplicate set element."*
-/// 2. `InterceptGuard`'s invariant — *"Dropping never panics and never errors,
-///    including for a guard whose underlying state was already released
-///    out-of-band."*
-///
-/// C4a (apply twice) + C4b (inverse op without its prerequisite).
-///
-/// Deliberately NOT asserted: "exactly one element exists" — substrate, per
-/// the module doc.
-///
-/// Mutation target: a non-idempotent install that adds a duplicate; a
-/// double-release panic.
-///
-/// Outcome anchor: OUT-ND295-BORN-CAPTURED.
-/// S-ND295-70 — The node's protection listeners belong to the protection port: a
-/// simulated node opens no socket, and a listener stops when its wait is cancelled.
-/// CONTRACT_SHAPE: bounded-change.
-#[test]
-fn re_installing_the_same_capture_converges_and_both_guards_release_cleanly() {
-    assert!(
-        is_root(),
-        "S-ND295-70: the host adapter needs CAP_NET_ADMIN for IP_TRANSPARENT and real nft; \
-         run as root through `cargo xtask lima run --`"
-    );
-    record_uname("05-01-S-MIF-12");
-    let _kernel_lock = KernelStateLock::acquire();
-    let _sweep = SharedInfraSweep::create();
-
-    for adapter in ADAPTERS {
-        let label = adapter.label();
-        let sut = adapter.build();
-        let legs = bind_and_converge(sut.as_ref(), "S-MIF-12", label);
-        let leg_f_port = legs.leg_f_addr.port();
-
-        let first = sut
-            .install_outbound(SOURCE_ADDR, leg_f_port)
-            .expect("the first install of the outbound capture must hand back a guard");
-        let second = sut.install_outbound(SOURCE_ADDR, leg_f_port).expect(
-            "a re-install of the SAME capture is idempotent-by-convergence and must still hand \
-             back a guard",
-        );
-
-        // Release both IN TURN, then the node guard, then the listeners.
-        drop(first);
-        drop(second);
-        drop(legs.node_guard);
-        drop((legs.leg_f, legs.leg_c));
-
-        eprintln!(
-            "[S-MIF-12][{label}] EXECUTED — two installs of ({SOURCE_ADDR}, {leg_f_port}) after \
-             one converge both Ok; both guards released in turn"
+            "[S-MIF-11][{label}] EXECUTED — converge_shared then install_inbound({VIRT}, \
+             {inbound_port}) Ok; every guard released cleanly"
         );
     }
 }
 
 /// B-8 refusal 1 on both adapters: on a fresh adapter with bound legs, before
-/// any `converge_shared`, `install_outbound` and `install_inbound` are each
-/// refused with `SharedProgramNotConverged`, and the owned program stays
+/// any `converge_shared`, `install_inbound` is refused with
+/// `SharedProgramNotConverged`, and the owned program stays
 /// absent (`observe_shared` reads `Ok(None)` before and after).
 ///
-/// Universe: the two install `Result`s and `observe_shared` before and after.
+/// Universe: the install `Result` and `observe_shared` before and after.
 ///
 /// Mutation targets: a host `install_inbound` that falls back to a
 /// per-allocation rule; an adapter that records a member with no program; a
@@ -581,7 +496,6 @@ fn an_install_before_convergence_is_refused_and_changes_nothing() {
         let sut = adapter.build();
         let leg_f = sut.bind_transparent(LEG_ADDR).expect("leg F must bind");
         let leg_c = sut.bind_transparent(LEG_ADDR).expect("leg C must bind");
-        let leg_f_port = bound_ipv4_port(&leg_f, "S-ND295-71", label);
         let leg_c_port = bound_ipv4_port(&leg_c, "S-ND295-71", label);
         assert_eq!(
             sut.observe_shared().expect("observe before the installs"),
@@ -589,14 +503,8 @@ fn an_install_before_convergence_is_refused_and_changes_nothing() {
             "[S-ND295-71][{label}] no program exists before the installs"
         );
 
-        let outbound = sut.install_outbound(SOURCE_ADDR, leg_f_port).map(|_guard| ());
         let inbound = sut.install_inbound(VIRT, leg_c_port).map(|_guard| ());
-        eprintln!("[S-ND295-71][{label}] pre-converge outbound={outbound:?} inbound={inbound:?}");
-        assert!(
-            matches!(outbound, Err(InterceptError::SharedProgramNotConverged)),
-            "[S-ND295-71][{label}] install_outbound before any converge is refused with \
-             SharedProgramNotConverged, got {outbound:?}"
-        );
+        eprintln!("[S-ND295-71][{label}] pre-converge inbound={inbound:?}");
         assert!(
             matches!(inbound, Err(InterceptError::SharedProgramNotConverged)),
             "[S-ND295-71][{label}] install_inbound before any converge is refused with \
@@ -614,8 +522,8 @@ fn an_install_before_convergence_is_refused_and_changes_nothing() {
 /// B-8 refusal 2 on both adapters: after `converge_shared` records a program,
 /// an install at a port other than the recorded target of its leg is refused
 /// with `SharedListenerPortMismatch { leg, expected, actual }` — `expected`
-/// the recorded port, `actual` the passed one. Each install passes the other
-/// leg's port (a cross-wiring).
+/// the recorded port, `actual` the passed one. The inbound install passes leg
+/// F's port (a cross-wiring).
 ///
 /// Universe: the two install `Result`s.
 ///
@@ -639,33 +547,21 @@ fn an_install_at_a_port_other_than_the_recorded_target_is_refused() {
         let leg_f_port = legs.leg_f_addr.port();
         let leg_c_port = legs.leg_c_addr.port();
 
-        for (leg, result) in [
-            (InterceptLeg::F, sut.install_outbound(SOURCE_ADDR, leg_c_port).map(|_guard| ())),
-            (InterceptLeg::C, sut.install_inbound(VIRT, leg_f_port).map(|_guard| ())),
-        ] {
-            let (recorded, passed) = match leg {
-                InterceptLeg::F => (leg_f_port, leg_c_port),
-                InterceptLeg::C => (leg_c_port, leg_f_port),
-            };
-            eprintln!("[S-ND295-71][{label}] {leg:?} install at port {passed}: {result:?}");
-            match result {
-                Err(InterceptError::SharedListenerPortMismatch {
-                    leg: got_leg,
-                    expected,
-                    actual,
-                }) => {
-                    assert_eq!(got_leg, leg, "[S-ND295-71][{label}] the refusal names the leg");
-                    assert_eq!(
-                        expected, recorded,
-                        "[S-ND295-71][{label}] expected is the recorded port"
-                    );
-                    assert_eq!(actual, passed, "[S-ND295-71][{label}] actual is the passed port");
-                }
-                other => panic!(
-                    "[S-ND295-71][{label}] a {leg:?} install at port {passed} must be refused \
-                     with SharedListenerPortMismatch, got {other:?}"
-                ),
+        let result = sut.install_inbound(VIRT, leg_f_port).map(|_guard| ());
+        eprintln!("[S-ND295-71][{label}] C install at port {leg_f_port}: {result:?}");
+        match result {
+            Err(InterceptError::SharedListenerPortMismatch { leg, expected, actual }) => {
+                assert_eq!(leg, InterceptLeg::C, "[S-ND295-71][{label}] the refusal names the leg");
+                assert_eq!(
+                    expected, leg_c_port,
+                    "[S-ND295-71][{label}] expected is the recorded port"
+                );
+                assert_eq!(actual, leg_f_port, "[S-ND295-71][{label}] actual is the passed port");
             }
+            other => panic!(
+                "[S-ND295-71][{label}] an inbound install at port {leg_f_port} must be refused \
+                 with SharedListenerPortMismatch, got {other:?}"
+            ),
         }
         drop(legs.node_guard);
         drop((legs.leg_f, legs.leg_c));
@@ -883,7 +779,7 @@ fn a_node_guard_dropped_while_members_exist_keeps_the_program() {
             .expect("observe the converged program")
             .expect("the converged program is present");
         let member = sut
-            .install_outbound(SOURCE_ADDR, legs.leg_f_addr.port())
+            .install_inbound(VIRT, legs.leg_c_addr.port())
             .expect("install one member at the recorded port");
         // Relinquish, not drop: the member stays for the sweep.
         std::mem::forget(member);
@@ -895,7 +791,7 @@ fn a_node_guard_dropped_while_members_exist_keeps_the_program() {
             .expect("a node guard dropped while members exist keeps the program");
         assert_eq!(state.program, program, "[S-ND295-71][{label}] the program is unchanged");
         assert!(
-            state.members.outbound_sources.contains(&SOURCE_ADDR),
+            state.members.inbound_destinations.contains(&VIRT),
             "[S-ND295-71][{label}] the relinquished member is still present"
         );
         drop((legs.leg_f, legs.leg_c));

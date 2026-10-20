@@ -388,6 +388,47 @@ fn inject_alloc_lifecycle_write_fault(
     Ok(())
 }
 
+/// Source-local fault seam of the probe-row write transaction
+/// (netns-density-295 R5-PROBE-MERGE failed-write case, the
+/// `write_probe_result` `Err` postcondition, PC-3). Production passes
+/// `None`; the `#[cfg(test)]` cases inject a failure after the merge's
+/// insert and before the commit, so the transaction aborts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProbeResultWriteFault {
+    BeforeCommit,
+}
+
+fn inject_probe_result_write_fault(
+    fault: Option<ProbeResultWriteFault>,
+    stage: ProbeResultWriteFault,
+) -> Result<(), ObservationStoreError> {
+    if fault == Some(stage) {
+        return Err(ObservationStoreError::Io(std::io::Error::other(format!(
+            "injected probe-result write failure at {stage:?}",
+        ))));
+    }
+    Ok(())
+}
+
+/// The probe-row write transaction: merge `row` into
+/// `PROBE_RESULTS_TABLE` and commit. Returns whether the merge accepted the
+/// row. A failure at any stage drops the uncommitted transaction, so the
+/// stored row is the one stored before the call.
+fn write_probe_result_transaction(
+    inner: &Inner,
+    row: &ProbeResultRow,
+    fault: Option<ProbeResultWriteFault>,
+) -> Result<bool, ObservationStoreError> {
+    let write = inner.db.begin_write().map_err(map_to_io)?;
+    let accepted = {
+        let mut table = write.open_table(PROBE_RESULTS_TABLE).map_err(map_to_io)?;
+        apply_probe_result_lww(&mut table, row)?
+    };
+    inject_probe_result_write_fault(fault, ProbeResultWriteFault::BeforeCommit)?;
+    write.commit().map_err(map_to_io)?;
+    Ok(accepted)
+}
+
 impl LocalObservationStore {
     /// Open (or create) a redb-backed `LocalObservationStore` at `path`.
     ///
@@ -972,13 +1013,7 @@ impl ObservationStore for LocalObservationStore {
         let inner = Arc::clone(&self.inner);
         let row_for_commit = row.clone();
         let accepted = tokio::task::spawn_blocking(move || {
-            let write = inner.db.begin_write().map_err(map_to_io)?;
-            let accepted = {
-                let mut table = write.open_table(PROBE_RESULTS_TABLE).map_err(map_to_io)?;
-                apply_probe_result_lww(&mut table, &row_for_commit)?
-            };
-            write.commit().map_err(map_to_io)?;
-            Ok::<_, ObservationStoreError>(accepted)
+            write_probe_result_transaction(&inner, &row_for_commit, None)
         })
         .await
         .map_err(map_to_io)??;
@@ -1702,5 +1737,144 @@ mod tests {
             occurrences_before,
             "pruning failure must restore the evicted oldest occurrence and add no new one",
         );
+    }
+}
+
+/// R5-PROBE-MERGE host-adapter cases that need the source-local seams: the
+/// failed write (the `write_probe_result` `Err` postcondition, PC-3) and the
+/// undecodable stored row (ADR-0048 § 3). The cases both adapters share are
+/// `tests/acceptance/probe_result_merge.rs`.
+#[cfg(test)]
+mod probe_merge_tests {
+    #![allow(
+        clippy::expect_used,
+        clippy::doc_markdown,
+        reason = "test fixture failures should panic with their precise precondition; the CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+
+    use futures::FutureExt as _;
+    use overdrive_core::id::AllocationId;
+    use overdrive_core::observation::{
+        ProbeIdx, ProbeResultRow, ProbeRole, ProbeRunSeq, ProbeStatus, SameStatusRuns,
+    };
+    use overdrive_core::traits::observation_store::{
+        LagAwareSubscription, ObservationRow, ObservationStore, SubscriptionEvent,
+    };
+    use tokio_stream::StreamExt as _;
+
+    use super::*;
+
+    fn alloc() -> AllocationId {
+        AllocationId::new("alloc-probe-merge").expect("valid alloc id")
+    }
+
+    fn row(run_seq: u64, observed_at: u64) -> ProbeResultRow {
+        ProbeResultRow {
+            alloc_id: alloc(),
+            probe_idx: ProbeIdx::new(0),
+            role: ProbeRole::Liveness,
+            status: ProbeStatus::Fail { last_fail_reason: "refused".to_owned() },
+            last_observed_at_unix_ms: observed_at,
+            inferred: false,
+            run_seq: ProbeRunSeq::new(run_seq).expect("non-zero run sequence"),
+            same_status_runs: SameStatusRuns::new(u32::try_from(run_seq).expect("small"))
+                .expect("non-zero streak"),
+        }
+    }
+
+    fn open_store(temp: &tempfile::TempDir) -> LocalObservationStore {
+        LocalObservationStore::open(temp.path().join("observation.redb"))
+            .expect("open observation store")
+    }
+
+    /// Drain every event already delivered to `sub` without waiting.
+    fn drain(sub: &mut LagAwareSubscription) -> Vec<ObservationRow> {
+        let mut rows = Vec::new();
+        while let Some(Some(event)) = sub.next().now_or_never() {
+            match event {
+                SubscriptionEvent::Row(row) => rows.push(row),
+                SubscriptionEvent::Lagged { missed } => {
+                    panic!("subscription lagged ({missed}) on a handful of writes")
+                }
+            }
+        }
+        rows
+    }
+
+    async fn write_with_fault(
+        store: &LocalObservationStore,
+        row: ProbeResultRow,
+    ) -> Result<bool, ObservationStoreError> {
+        let inner = Arc::clone(&store.inner);
+        tokio::task::spawn_blocking(move || {
+            write_probe_result_transaction(&inner, &row, Some(ProbeResultWriteFault::BeforeCommit))
+        })
+        .await
+        .map_err(map_to_io)?
+    }
+
+    /// A probe-row write whose transaction aborts before commit returns
+    /// `Err`, leaves the stored row as it was and emits no event; the
+    /// following write of the same `run_seq` is merged against the row stored
+    /// before the failure, and is accepted (PC-3, R5-PROBE-MERGE).
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    #[ignore = "pending DELIVER step 9"]
+    async fn failed_probe_write_changes_nothing_and_the_same_run_is_accepted_after() {
+        let temp = tempfile::TempDir::new().expect("temporary observation store");
+        let store = open_store(&temp);
+        let mut sub = store.subscribe_all_events().await.expect("subscribe");
+
+        store.write_probe_result(row(1, 1_000)).await.expect("first write");
+        assert_eq!(drain(&mut sub), vec![ObservationRow::ProbeResult(row(1, 1_000))]);
+
+        let error = write_with_fault(&store, row(2, 2_000))
+            .await
+            .expect_err("injected probe-row write failure");
+        assert!(error.to_string().contains("BeforeCommit"));
+        assert_eq!(
+            store.list_probe_results_for_alloc(&alloc()).await.expect("read after failure"),
+            vec![row(1, 1_000)],
+            "a failed write must leave the stored row unchanged",
+        );
+        assert!(drain(&mut sub).is_empty(), "a failed write must emit no event");
+
+        // The retried run carries the same run sequence and an EARLIER
+        // observation time (a wall-clock step between the attempts): the
+        // merge decides on run_seq alone, against the row stored before the
+        // failure.
+        store.write_probe_result(row(2, 500)).await.expect("write of the same run");
+        assert_eq!(
+            store.list_probe_results_for_alloc(&alloc()).await.expect("read after retry"),
+            vec![row(2, 500)],
+        );
+        assert_eq!(drain(&mut sub), vec![ObservationRow::ProbeResult(row(2, 500))]);
+    }
+
+    /// A stored probe row that does not decode is replaced by the next write
+    /// whatever its `run_seq` (ADR-0048 § 3, unchanged by PROBE-RUN-COUNT).
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    async fn undecodable_stored_probe_row_is_replaced_by_any_write() {
+        let temp = tempfile::TempDir::new().expect("temporary observation store");
+        let store = open_store(&temp);
+        {
+            let write = store.inner.db.begin_write().expect("begin write");
+            {
+                let mut table = write.open_table(PROBE_RESULTS_TABLE).expect("open table");
+                let key = encode_probe_result_key(&alloc(), ProbeRole::Liveness, ProbeIdx::new(0));
+                table.insert(key.as_slice(), [0xff_u8; 9].as_slice()).expect("insert garbage");
+            }
+            write.commit().expect("commit garbage");
+        }
+        let mut sub = store.subscribe_all_events().await.expect("subscribe");
+
+        store.write_probe_result(row(1, 1_000)).await.expect("write over garbage");
+
+        assert_eq!(
+            store.list_probe_results_for_alloc(&alloc()).await.expect("read"),
+            vec![row(1, 1_000)],
+        );
+        assert_eq!(drain(&mut sub), vec![ObservationRow::ProbeResult(row(1, 1_000))]);
     }
 }

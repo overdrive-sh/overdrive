@@ -14,6 +14,7 @@ State 1
   bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
   toGuestAbort = {}
   heldByOther = FALSE
+  conf_step = [InitWith |-> [o |-> "g"]]
   crossMsg = FALSE
   flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE], [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
   resurrected = FALSE
@@ -24,6 +25,7 @@ State 1
   sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
   toHostPaired = {}
   dl = [ res |-> <<"none">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
+  gSess = 0
   phantom = FALSE
   gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
   hf = <<[st |-> "none", gen |-> 0]>>
@@ -43,9 +45,11 @@ State 4 [Teardown]
 
 State 5 [step]
   sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+  gSess = 1
 
 State 6 [VmStop]
   vmUp = FALSE
+  gSess = 0
 
 State 7 [Release]
   alloc = "Absent"

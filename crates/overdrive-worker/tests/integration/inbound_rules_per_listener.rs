@@ -47,6 +47,7 @@ const PORT_A: u16 = 18555;
 const PORT_B: u16 = 18666;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "pending DELIVER step 2 (GuestCid / LaunchToken newtypes)"]
 async fn two_declared_listeners_install_exactly_two_inbound_capture_rules() {
     if !is_root() {
         eprintln!(

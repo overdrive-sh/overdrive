@@ -1,35 +1,37 @@
-//! Additive host guest-flow owner surface — vsock attachment replacement
-//! (GH #295).
+//! Host guest-flow owner surface — vsock attachment replacement (GH #295).
 //!
 //! Interface contract: `docs/feature/netns-density-295/feature-delta.md`
-//! § "[REF] Owner and provisioner" (`QuiescenceHolder`, `FlowCloseCause`),
-//! § "[REF] Typed error taxonomy" (`InterfaceStacking`, `StackedLinkKind`),
-//! § DG-3 ("Owner construction": `GuestFlowOwnerPorts`,
-//! `HostSharedGuestNetworkOwner::with_flow_io`), § DG-13
-//! (`IntakePortBlockConflict`) and § "Conformance observation surface"
-//! QPROJ-2 (`GuestAddressPool::lease_observation`) and QPROJ-3
-//! (`HostSharedGuestNetworkOwner::flow_observation`). Every item below is the
-//! one those sections pin; the items are re-exported from
-//! `overdrive_control_plane::guest_network`.
+//! § "[REF] Owner and provisioner" (`QuiescenceHold`, `QuiescenceLedger`,
+//! `QuiescenceRestoreError`, `FlowCloseCause`,
+//! `GUEST_FLOW_MAX_PAIRS_PER_ALLOCATION`, "Conformance observation (owner
+//! accessors)"), § DG-3 ("Owner construction": `GuestFlowOwnerPorts`) and
+//! § "Conformance observation surface" QPROJ-2
+//! (`GuestAddressPool::lease_observation`), QPROJ-3
+//! (`HostSharedGuestNetworkOwner::flow_observation`) and QPROJ-8
+//! (`forwarder_generation`, `forwarder_attach_ended` and the `generation` of
+//! each `Paired` phase). Every item below is the one those sections pin; the
+//! items are re-exported from `overdrive_control_plane::guest_network`.
 //!
 //! The owner's constructors (`new(GuestFlowOwnerPorts)`, `with_flow_io`) live
-//! beside its struct in `guest_network`. The observation accessors are RED
-//! scaffolds; the owner they observe is the guest-flow owner the attachment
-//! cut lands. The data types are plain
-//! data and are written for real.
+//! beside its struct in `guest_network`. The accessors and the ledger's
+//! operations are RED scaffolds; the owner and pool they observe land in the
+//! attachment-cut step (7). The observation types are plain data.
 
-// SCAFFOLD: true — netns-density-295 DISTILL (vsock new-steps 7, 9, 13, 15; attachment cut).
+// SCAFFOLD: true — netns-density-295 DISTILL (vsock attachment cut, step 7).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv4Addr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use ipnet::Ipv4Net;
-use overdrive_core::guest_network::SharedGuestNetworkComponent;
+use overdrive_core::guest_transport::dial::{DialPurpose, GuestStreamEnd};
+use overdrive_core::guest_transport::forwarder::{
+    ForwardEnd, ForwardId, ForwarderGeneration, ForwarderInventory,
+};
 use overdrive_core::guest_transport::wire::FlowId;
-use overdrive_core::guest_transport::{GuestCid, LaunchToken};
+use overdrive_core::guest_transport::{GuestCid, LaunchToken, VsockListenPort};
 use overdrive_core::id::AllocationId;
-use overdrive_core::net::{InterfaceIndex, ListenPort};
 use overdrive_core::traits::GuestAttachmentLease;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::mtls_resolve::MtlsResolve;
@@ -40,6 +42,15 @@ use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
 use super::{GuestAddressPool, HostSharedGuestNetworkOwner};
 
 const SCAFFOLD: &str = "Not yet implemented -- RED scaffold";
+
+/// The per-allocation flow quota (ADR-0208, 4,096). It counts every flow of
+/// the allocation from its registration until the host releases it — at the
+/// flow's end record, or for a dial at its stream's drop or the owner's abort
+/// (EVMOD-AB): guest-opened TCP flows, datagram associations, and
+/// `DialPurpose::Relay` host-opened flows (an in-flight dial, then its
+/// `GuestStream`), half-closed flows included. A `DialPurpose::Probe` dial
+/// takes a node flow slot and no quota slot (PROBE-NOSAMPLE).
+pub use overdrive_core::guest_transport::GUEST_FLOW_MAX_PAIRS_PER_ALLOCATION;
 
 // ---------------------------------------------------------------------------
 // Owner construction (DG-3)
@@ -58,54 +69,62 @@ pub struct GuestFlowOwnerPorts {
     /// The configured service VIP range — the same value the VIP allocator
     /// and `ServiceBackendsResolve::new` receive (D24a, D8-PREFIX-VIP).
     pub vip_range: VipRange,
-    /// TCP ports `serve` binds on the unspecified address (INTAKE-BIND).
-    pub wildcard_tcp_ports: BTreeSet<u16>,
-    /// `GUEST_NODE_PREFIX` / `GUEST_NODE_GATEWAY` in production (DG-14).
+    /// `GUEST_NODE_PREFIX` in production (DG-9).
     pub node_prefix: Ipv4Net,
-    /// The guest gateway inside `node_prefix` (DG-14).
+    /// `GUEST_NODE_GATEWAY` in production (DG-9).
     pub gateway: Ipv4Addr,
+    /// PORTS-CONFIG: `config.vsock_ports.flow_stream()`.
+    pub stream_port: VsockListenPort,
+    /// PORTS-CONFIG: `config.vsock_ports.flow_control()`.
+    pub control_port: VsockListenPort,
 }
 
 impl HostSharedGuestNetworkOwner {
-    /// QPROJ-3: an owned snapshot of the owner's per-CID tables, the holder
-    /// set and the listener-task state.
+    /// QPROJ-3: an owned snapshot of the owner's per-CID tables, the hold and
+    /// leaked-hold counts, the listener-task state and the forwarder facts the
+    /// owner holds.
     ///
     /// - **Preconditions:** none. Infallible; callable on a started owner at
     ///   any time, including while quiesced and after `teardown` of every
     ///   allocation.
-    /// - **Postconditions:** the returned value is an owned copy of the
-    ///   owner's per-CID tables, the holder set and the listener-task state.
-    ///   No lock or queue slot is held after return. The call starts no step:
-    ///   it opens no listener, registers no flow, sends no message and changes
-    ///   no state. Dropping the future before it completes has no effect on
-    ///   the owner (cancellation-safe).
-    /// - **Consistency point:** a state between two steps of every CID's
-    ///   serialized order (M-7) and of quiescence. The call is ordered through
-    ///   each CID's queue and the quiescence section, so it never reports a
-    ///   flow half-registered, a holder set that disagrees with `admission`
-    ///   because a quiesce is mid-way, or a listener open for a port whose
-    ///   steering entry is not yet removed. Steps that complete after the call
-    ///   returns are not reflected.
+    /// - **Postconditions:** an owned copy of the owner's per-CID tables, the
+    ///   hold and leaked-hold counts and the listener-task state. No lock or
+    ///   queue slot is held after return. The call starts no step: it
+    ///   registers no flow, sends no message and changes no state. Dropping
+    ///   the future before it completes has no effect on the owner
+    ///   (cancellation-safe).
+    /// - **Consistency point:** between two steps of every CID's serialized
+    ///   order (M-7) and of quiescence. It never reports a flow
+    ///   half-registered or a count that disagrees with `admission` because a
+    ///   quiesce is mid-way. The attach and the `Paired` send of one dispatch,
+    ///   and the release of one end record, are reported after the dispatch,
+    ///   never inside it.
     /// - **Edge cases:** an owner with no allocation returns empty `cids`,
-    ///   empty `holders`, `admission = Open` and `flow_listeners_running =
-    ///   true`. A flow, association or CID the owner no longer holds is
-    ///   absent; a CID in `Retiring` stays until `teardown` returns `Ok`
-    ///   (after which the pool, QPROJ-2, reports `Retiring` until `release`).
-    ///   `admission = Quiesced` iff `holders` is non-empty.
-    ///   `flow_listeners_running = false` after a listener-task exit until its
-    ///   recovery repairs it.
-    /// - **Observable invariants:** each `GuestConnKey` appears in at most one
-    ///   of a CID's `unread`, `guest_flows` and `session`; `intake` and
-    ///   `parked` are disjoint subsets of the CID's declared ports; `intake`
-    ///   is empty while `holders` is non-empty (M-7); a repeated call with no
-    ///   intervening owner step returns an equal value.
+    ///   both counts 0, `admission = Open` and `flow_listeners_running =
+    ///   true`. A flow, dial, association or CID the owner no longer holds is
+    ///   absent; an aborted or closed flow is absent. A CID in `Retiring`
+    ///   stays until `teardown` returns `Ok`. A dial that returned an error is
+    ///   absent. A dropped `GuestStream` is absent. `leaked_quiescence_holds`
+    ///   starts at 0 in every owner instance (a `serve` restart starts at 0).
+    /// - **Observable invariants:** `admission = Quiesced` iff
+    ///   `quiescence_holds > 0` (`LatchIffCount`); `leaked_quiescence_holds`
+    ///   never decreases, and `leaked_quiescence_holds > 0` implies
+    ///   `quiescence_holds > 0`; `held_flows` equals the number of the CID's
+    ///   entries in `guest_flows` and `datagrams` plus its
+    ///   `DialPurpose::Relay` entries in `dials` (D-UP-17) and never exceeds
+    ///   `GUEST_FLOW_MAX_PAIRS_PER_ALLOCATION` (`QuotaBound`); while
+    ///   `admission = Quiesced` every CID's `guest_flows`, `dials` and
+    ///   `datagrams` are empty (`QuiescedHoldsNoFlow`); every `ForwardId` in
+    ///   a phase names a pair or watch of the owner's current forwarder
+    ///   context whose end record the owner has not yet read, and every
+    ///   `generation` in a `Paired` phase equals `forwarder_generation`
+    ///   (QPROJ-8); `dials` is empty for a CID that is not Active; each
+    ///   `GuestConnKey` appears in at most one of a CID's `unread`,
+    ///   `guest_flows` and `session`; a repeated call with no intervening
+    ///   owner step returns an equal value.
     #[expect(
         clippy::unused_async,
-        reason = "RED scaffold body panics; DELIVER vsock new-step 7 lands the observation"
-    )]
-    #[expect(
-        dead_code,
-        reason = "RED scaffold — the owner_flows / intake / quiescence drivers read it at the attachment cut"
+        reason = "RED scaffold body panics; the attachment-cut step lands the observation"
     )]
     pub async fn flow_observation(&self) -> GuestOwnerObservation {
         panic!("{SCAFFOLD}")
@@ -113,30 +132,72 @@ impl HostSharedGuestNetworkOwner {
 }
 
 // ---------------------------------------------------------------------------
-// QPROJ-3 — host guest-flow owner observation
+// QPROJ-3 / QPROJ-8 — host guest-flow owner observation
 // ---------------------------------------------------------------------------
 
 /// QPROJ-3 snapshot of the host guest-flow owner.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GuestOwnerObservation {
-    /// D8a-HOLD holder set.
-    pub holders: BTreeSet<QuiescenceHolder>,
-    /// The admission latch, read apart from the holder set so that a
-    /// divergence between them is visible.
+    /// QHOLD: outstanding holds, leaked holds included.
+    pub quiescence_holds: u32,
+    /// QHOLD: holds of this owner's ledger dropped unredeemed since the owner
+    /// started (`QuiescenceLedger::leaked`, D-UP-4).
+    pub leaked_quiescence_holds: u32,
+    /// The admission latch, read apart from the count so a divergence
+    /// between them is visible.
     pub admission: GuestAdmission,
-    /// The flow and control listeners' accept tasks are all running
-    /// (`false` after a listener-task exit, until repaired).
+    /// The flow and control listeners' accept tasks are all running.
     pub flow_listeners_running: bool,
+    /// The generation of the forwarder context the owner holds:
+    /// `ForwarderGeneration::FIRST` after boot step 9's open, + 1 at each
+    /// `Forwarder` repair's successful open (EVMOD-CTL; QPROJ-8, U-EV-8). The
+    /// count of serving contexts this owner has opened, never decremented: a
+    /// repair's close does not change it, and phase 1's probe context
+    /// (`probe_forwarder`, D-8) is not one of them.
+    pub forwarder_generation: ForwarderGeneration,
+    /// `FlowForwarder::inventory()` of the context the owner holds, read in
+    /// the same snapshot (D-15; the owner's audit compares the same value
+    /// with its flow table).
+    pub forwarder_inventory: ForwarderInventoryRead,
+    /// Cumulative attaches and watches the forwarder refused `HalfEnded`,
+    /// each ended by the owner as a flow abort (EVMOD-ATTACH-END; QPROJ-8).
+    /// Never decremented.
+    pub forwarder_attach_ended: u64,
+    /// Cumulative attaches and watches the forwarder accepted (`Ok`), raised
+    /// in the dispatch that made the call, in every context this owner held
+    /// (QPROJ-8, `attRes`). Never decremented.
+    pub forwarder_attached: u64,
+    /// The last end record this owner consumed (`take_end` in its dispatch,
+    /// EVMOD-REC), from any context it held: depth 1, replaced at each
+    /// consumption, `None` until the first (D-11). A consumed flow has left
+    /// `cids`, so this is the only surface that still shows how it ended.
+    pub last_consumed_end: Option<ForwardEnd>,
+    /// Cumulative end records this owner consumed. Never decremented.
+    pub consumed_ends: u64,
     /// Per-CID tables.
     pub cids: BTreeMap<GuestCid, CidObservation>,
+}
+
+/// The forwarder inventory as one snapshot found it. Two distinct
+/// non-inventory states, so neither is a sentinel (D-15).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForwarderInventoryRead {
+    /// The context the owner holds answered `inventory()`.
+    Read(ForwarderInventory),
+    /// The owner holds no context: between a `Forwarder` repair's close and
+    /// its reopen, or after a failed reopen.
+    NoContext,
+    /// The held context's `inventory()` failed; the same failure is the
+    /// `Forwarder` component's damage, which the audit reports.
+    Unreadable,
 }
 
 /// The owner's admission latch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuestAdmission {
-    /// New flows are admitted.
+    /// New flows are admitted and dials served.
     Open,
-    /// New flows are refused `Quiesced` (D8a-HOLD).
+    /// New flows are refused `Quiesced`; dials answered `Quiesced` (QHOLD).
     Quiesced,
 }
 
@@ -152,21 +213,29 @@ pub struct CidObservation {
     /// Holder of the CID's `ClaimSet<GuestCid>` session claim.
     pub session: Option<GuestConnKey>,
     /// Control connections accepted on 1243 whose `ControlOpen` is not yet
-    /// read (flow connections are registered at accept, U-1, and appear in
-    /// `guest_flows` / `datagrams`).
+    /// read.
     pub unread: BTreeSet<GuestConnKey>,
-    /// Registered guest-opened flows (U-1), by connection.
+    /// Registered guest-opened TCP flows (U-1), by connection.
     pub guest_flows: BTreeMap<GuestConnKey, GuestFlowPhase>,
-    /// Host-opened `TcpAccept` flows, by host-origin flow id.
-    pub host_flows: BTreeMap<FlowId, HostFlowPhase>,
+    /// Host-opened flows: in-flight dials and open `GuestStream`s, by flow
+    /// id, each with its purpose (D-UP-17).
+    pub dials: BTreeMap<FlowId, DialObservation>,
     /// Datagram associations, by guest-origin flow id.
-    pub datagrams: BTreeMap<FlowId, AssociationPhase>,
-    /// The ports the guest's last `ListenState` reports listening.
-    pub last_listen_state: BTreeSet<ListenPort>,
-    /// Declared ports with an open (bound, listening) intake listener.
-    pub intake: BTreeSet<ListenPort>,
-    /// Serving ports a reported steer defect parked (D8a-CAP).
-    pub parked: BTreeSet<ListenPort>,
+    pub datagrams: BTreeMap<FlowId, AssociationObservation>,
+    /// Flows counted against the allocation's quota, half-closed ones
+    /// included: every entry of `guest_flows` and `datagrams`, and the
+    /// `DialPurpose::Relay` entries of `dials`. A `DialPurpose::Probe` dial
+    /// is not counted (PROBE-NOSAMPLE, D-UP-17).
+    pub held_flows: u32,
+}
+
+/// A host-opened flow at the owner, with the purpose it was dialled for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DialObservation {
+    /// `Relay` (leg-S) or `Probe` (the VM probe runner).
+    pub purpose: DialPurpose,
+    /// Awaiting the guest's reply, or paired and held by its stream.
+    pub phase: DialPhase,
 }
 
 /// The owner's per-CID lifecycle phase.
@@ -174,13 +243,14 @@ pub struct CidObservation {
 pub enum CidPhase {
     /// Registered by `provision`; not yet activated.
     Provisioned,
-    /// Activated: flows from this CID may be paired.
+    /// Activated: flows from this CID are admitted, dials served.
     Active,
     /// Teardown in progress.
     Retiring,
 }
 
-/// Kernel-reported identity of an accepted guest-opened host vsock connection.
+/// Kernel-reported identity of an accepted guest-opened host vsock
+/// connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GuestConnKey {
     /// The host vsock listener port that accepted it.
@@ -191,24 +261,30 @@ pub struct GuestConnKey {
     pub peer_port: VsockPort,
 }
 
-/// A registered guest-opened flow's phase at the owner.
+/// A registered guest-opened TCP flow's phase at the owner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuestFlowPhase {
     /// Admitted and registered (U-1); the request is not yet complete. Its
-    /// completion and the token comparison are one step: the flow becomes
-    /// `Attributed`, or is closed.
+    /// completion and the token comparison are one step.
     Registered {
         /// How much of the request the owner has read.
         request: RequestRead,
     },
-    /// The request's token matched the live token (registration complete).
+    /// The request's token matched the live token.
     Attributed,
-    /// The flow vsock is installed in the forwarder.
-    Installed,
     /// The non-blocking connect is issued; its completion is not processed.
     Connecting,
-    /// Paired.
-    Paired(FlowEndObservation),
+    /// The pair (`V_h`, D or L) is attached and `Paired` sent (EVMOD-PAIR).
+    /// Its per-direction state is `FlowForwarder::pair_state(pair)`; the flow
+    /// leaves the table, and `held_flows` drops, in the dispatch that reads
+    /// the pair's end record (EVMOD-AB). `generation` is the context
+    /// generation the pair was attached in (QPROJ-8).
+    Paired {
+        /// The pair's id in the owner's forwarder context.
+        pair: ForwardId,
+        /// The context generation the pair was attached in.
+        generation: ForwarderGeneration,
+    },
 }
 
 /// How much of a flow request the owner has read.
@@ -220,17 +296,32 @@ pub enum RequestRead {
     Partial,
 }
 
-/// A host-opened `TcpAccept` flow's phase at the owner.
+/// A host-opened flow's phase at the owner (INB-1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HostFlowPhase {
-    /// V_h connected and the request written; `Paired` not yet received.
-    /// `outer_eof`: the intake child read EOF before `Paired` (recorded).
-    AwaitingPaired {
-        /// The intake child read EOF before `Paired`.
-        outer_eof: bool,
+pub enum DialPhase {
+    /// `V_h` connected and the TcpAccept request written; no reply processed.
+    AwaitingReply,
+    /// `Paired` received; the flow is held by its `GuestStream`. `watch` is
+    /// the forwarder watch on `V_h`; `guest_end` is its end record's class
+    /// once the owner has read it; `host_shut` the holder's `SHUT_WR`;
+    /// `generation` the context generation the watch was made in.
+    Paired {
+        /// The watch on `V_h` (EVMOD-END).
+        watch: ForwardId,
+        /// The context generation the watch was made in.
+        generation: ForwarderGeneration,
+        /// The class of the watch's end record, once the owner read it.
+        guest_end: Option<GuestStreamEnd>,
+        /// The holder shut its direction down (`shutdown_write`).
+        host_shut: bool,
     },
-    /// Paired.
-    Paired(FlowEndObservation),
+}
+
+/// A datagram association at the owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AssociationObservation {
+    /// Requested or paired.
+    pub phase: AssociationPhase,
 }
 
 /// A datagram association's phase at the owner.
@@ -238,95 +329,145 @@ pub enum HostFlowPhase {
 pub enum AssociationPhase {
     /// Requested; `Paired` not yet sent.
     AwaitingPaired,
-    /// Paired.
-    Paired,
-}
-
-/// HALFCLOSE-SIGNAL state of one direction pair of a paired TCP flow, at
-/// this owner.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FlowEndObservation {
-    /// The outer leg read EOF.
-    pub outer_eof: bool,
-    /// This side's announcement of its direction.
-    pub announce: HalfCloseAnnounce,
-    /// This side acknowledged the peer's `HalfClose`.
-    pub peer_announced: bool,
-    /// This side shut its outer leg down for writing.
-    pub outer_shut: bool,
-}
-
-/// This side's `HalfClose` announcement of its direction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HalfCloseAnnounce {
-    /// Not announced.
-    None,
-    /// `HalfClose` sent; `HalfCloseAck` not yet received.
-    Pending,
-    /// `HalfCloseAck` received.
-    Done,
+    /// The datagram pair (`V_h`, H) is attached and `Paired` sent.
+    Paired {
+        /// The pair's id in the owner's forwarder context.
+        pair: ForwardId,
+        /// The context generation the pair was attached in.
+        generation: ForwarderGeneration,
+    },
 }
 
 // ---------------------------------------------------------------------------
-// D8a-HOLD — quiescence holders
+// QHOLD — the counted quiescence hold and its ledger (D-UP-4, PD-1, PD-2)
 // ---------------------------------------------------------------------------
 
-/// D8a-HOLD: who holds forwarding quiescence. One hold per holder at a time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum QuiescenceHolder {
-    /// The runtime supervisor's recovery of one shared component.
-    Recovery(SharedGuestNetworkComponent),
+/// The ledger's shared state: the count of its holds dropped unredeemed.
+#[derive(Debug, Default)]
+struct LedgerInner {
+    leaked: AtomicU32,
 }
 
-impl QuiescenceHolder {
-    /// The holder's canonical label.
+/// QHOLD: one outstanding quiescence of node forwarding. Not `Clone`; built
+/// only by `QuiescenceLedger::issue`; consumed only by the `redeem` of the
+/// ledger that issued it (reached through `restore`). It holds a shared
+/// reference to its issuing ledger's state, which is how a drop reaches that
+/// ledger: dropped unredeemed, it increments that ledger's leaked count (one
+/// atomic increment; no I/O, no lock, nothing awaited). The owner's hold
+/// count stays raised, so forwarding stays quiesced until the process ends.
+#[must_use]
+#[derive(Debug)]
+pub struct QuiescenceHold {
+    ledger: Arc<LedgerInner>,
+    redeemed: bool,
+}
+
+impl Drop for QuiescenceHold {
+    fn drop(&mut self) {
+        if !self.redeemed {
+            self.ledger.leaked.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+}
+
+/// QHOLD capability (D-UP-4 and PD-2; public so the sim owner uses it).
+/// Issues and redeems the `QuiescenceHold`s of one owner and counts those
+/// dropped without a redeem. Not `Clone`: each owner constructs and holds
+/// exactly one; a ledger is never shared between owners. The ledger keeps
+/// its inner state alive as long as any hold of it exists, so a hold dropped
+/// after its owner is dropped still increments a valid counter.
+#[derive(Debug)]
+pub struct QuiescenceLedger {
+    #[allow(
+        dead_code,
+        reason = "RED scaffold — `issue` / `redeem` / `leaked` read it in step 09-01"
+    )]
+    inner: Arc<LedgerInner>,
+}
+
+impl QuiescenceLedger {
+    /// A ledger with no hold issued and a leaked count of 0.
+    #[must_use]
+    pub fn new() -> Self {
+        Self { inner: Arc::new(LedgerInner::default()) }
+    }
+
+    /// A new hold bound to this ledger (it clones this ledger's inner `Arc`).
     ///
-    /// RED scaffold: the label vocabulary is not pinned by the design
-    /// (`SharedGuestNetworkComponent` carries no `as_str`); DELIVER lands it
-    /// with the attachment cut's component set (DG-2 row 10).
+    /// RED scaffold: lands with the counted quiescence (step 09-01 rework).
+    #[expect(clippy::unused_self, reason = "RED scaffold body panics")]
+    pub fn issue(&self) -> QuiescenceHold {
+        panic!("{SCAFFOLD}")
+    }
+
+    /// Consumes `hold` without counting a leak when this ledger issued it
+    /// (identity: `Arc::ptr_eq` of the hold's inner and this ledger's);
+    /// returns it unchanged otherwise.
+    ///
+    /// RED scaffold: lands with the counted quiescence (step 09-01 rework).
     #[expect(
         clippy::unused_self,
-        clippy::trivially_copy_pass_by_ref,
-        reason = "RED scaffold body panics; the vocabulary lands with the attachment cut (the `&self` signature is pinned)"
+        clippy::needless_pass_by_value,
+        reason = "RED scaffold body panics"
     )]
-    pub fn as_str(&self) -> &'static str {
+    pub fn redeem(&self, hold: QuiescenceHold) -> Result<(), QuiescenceHold> {
+        let _ = hold;
+        panic!("{SCAFFOLD}")
+    }
+
+    /// Holds of this ledger dropped without a redeem; never decreases.
+    ///
+    /// RED scaffold: lands with the counted quiescence (step 09-01 rework).
+    #[expect(clippy::unused_self, reason = "RED scaffold body panics")]
+    pub fn leaked(&self) -> u32 {
         panic!("{SCAFFOLD}")
     }
 }
 
-/// D8a-HOLD: proof that `holder()` holds quiescence. Not `Clone`, not
-/// constructible outside the owner; consumed only by `restore_forwarding`.
-/// Dropping it without a restore leaves the holder registered (forwarding
-/// stays quiesced; the supervisor's bounded recovery then fail-stops).
-#[must_use]
-#[derive(Debug)]
-pub struct QuiescenceHold {
-    pub(crate) holder: QuiescenceHolder,
+impl Default for QuiescenceLedger {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
-impl QuiescenceHold {
-    /// The holder this hold belongs to.
-    pub const fn holder(&self) -> QuiescenceHolder {
-        self.holder
+/// Why `restore` refused a hold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum QuiescenceRestoreError {
+    /// The hold was issued by another owner's ledger (a composition defect:
+    /// one supervisor is composed with one owner).
+    #[error("quiescence hold was issued by another owner's ledger")]
+    ForeignHold,
+}
+
+impl QuiescenceRestoreError {
+    /// The error's telemetry label.
+    ///
+    /// RED scaffold: lands with the counted quiescence (step 09-01 rework).
+    #[expect(clippy::unused_self, reason = "RED scaffold body panics")]
+    pub const fn as_str(self) -> &'static str {
+        panic!("Not yet implemented -- RED scaffold")
     }
 }
 
 // ---------------------------------------------------------------------------
-// Flow end (HALFCLOSE-SIGNAL, D26-PINS)
+// Flow end (EVMOD-REC, failure projection, D26-PINS)
 // ---------------------------------------------------------------------------
 
 /// Why the owner closed a flow (`guest_flow.closed { cause }`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlowCloseCause {
-    /// The far end read EOF and the flow closed cleanly.
+    /// The pair completed: both directions ended cleanly.
     PeerEof,
-    /// The far end reset.
+    /// The pair aborted on a peer's end: `PeerAbort`, a `SocketError` other
+    /// than a datagram destination's, `Unclassified` (an alarm), or a half
+    /// refused `HalfEnded` at attach (§ *[REF] vsock data path*, "Failure
+    /// projection").
     PeerReset,
     /// The flow was refused.
     Refused,
     /// The peer owner sent `Abort`.
     AbortReceived,
-    /// Forwarding quiesced (D8a-HOLD).
+    /// Forwarding quiesced (QHOLD).
     Quiesced,
     /// The allocation was torn down.
     Teardown,
@@ -334,14 +475,8 @@ pub enum FlowCloseCause {
     OwnerAbort,
     /// The request did not arrive within `FLOW_REQUEST_DEADLINE`.
     RequestTimeout,
-    /// The flow did not pair within `FLOW_PAIRING_DEADLINE`.
+    /// The flow did not pair within its pairing deadline.
     PairingTimeout,
-    /// A datagram leg had no matching request.
-    UnmatchedDatagram,
-    /// The two datagram requests disagree.
-    DatagramRequestMismatch,
-    /// A direction did not drain within `FLOW_DRAIN_DEADLINE`.
-    DrainTimeout,
     /// The control session was lost.
     ControlSessionLost,
     /// The control session carried a malformed message.
@@ -350,93 +485,28 @@ pub enum FlowCloseCause {
     NoControlSession,
     /// The record carried another launch's token (ATTR-TOKEN).
     StaleLaunch,
-    /// HALFCLOSE-SIGNAL: the flow vsock ended for a direction whose
-    /// `HalfClose` this side had not acknowledged — the peer owner is lost,
-    /// or the peer aborted and its vsock end overtook its `Abort` message.
-    UnannouncedVsockEnd,
     /// D26-PINS: the host-internal output rule rejected the transmit of a
-    /// forwarded datagram (reported on the owner's UDP socket).
+    /// forwarded datagram, or the destination refused it (the pair's
+    /// `SocketError` on its UDP half).
     DestinationUnreachable,
+    /// A datagram frame failed its magic or length check (`FrameInvalid`).
+    FrameInvalid,
+    /// A host-opened flow whose `GuestStream` was dropped with a direction
+    /// open.
+    StreamDropped,
 }
 
 impl FlowCloseCause {
     /// The cause's telemetry label.
     ///
-    /// RED scaffold: the label vocabulary is not pinned by the design;
-    /// DELIVER vsock new-step 7 lands it with the owner flows.
+    /// RED scaffold: the attachment-cut step lands the label vocabulary with
+    /// the owner flows.
     #[expect(
         clippy::unused_self,
-        reason = "RED scaffold body panics; DELIVER vsock new-step 7 lands it"
+        reason = "RED scaffold body panics; the attachment-cut step lands it"
     )]
     pub const fn as_str(self) -> &'static str {
         panic!("Not yet implemented -- RED scaffold")
-    }
-}
-
-// ---------------------------------------------------------------------------
-// probe_startup refusal vocabulary (INTAKE-BIND, IFACE-NO-STACK)
-// ---------------------------------------------------------------------------
-
-/// INTAKE-BIND (DG-13): what the intake host-port block meets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IntakePortBlockConflict {
-    /// The block intersects `ip_local_port_range` = `low..=high`.
-    EphemeralRange {
-        /// The range's low end.
-        low: u16,
-        /// The range's high end.
-        high: u16,
-    },
-    /// `serve` is configured to bind a TCP listener on `0.0.0.0:port`, a port
-    /// of the block.
-    HostListener {
-        /// The configured wildcard listener port.
-        port: u16,
-    },
-}
-
-/// IFACE-NO-STACK: how a root-namespace interface is stacked on another.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InterfaceStacking {
-    /// The interface has a master (a bridge or bond port).
-    Enslaved {
-        /// The master interface.
-        master: InterfaceIndex,
-    },
-    /// The interface is an upper device of a stacking link kind.
-    Upper {
-        /// The stacking link kind.
-        kind: StackedLinkKind,
-        /// The lower interface.
-        lower: InterfaceIndex,
-    },
-}
-
-/// IFACE-NO-STACK: the stacking link kinds `probe_startup` refuses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StackedLinkKind {
-    /// `vlan`.
-    Vlan,
-    /// `macvlan`.
-    Macvlan,
-    /// `macvtap`.
-    Macvtap,
-    /// `ipvlan`.
-    Ipvlan,
-    /// `ipvtap`.
-    Ipvtap,
-}
-
-impl StackedLinkKind {
-    /// The kernel's link kind name.
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Vlan => "vlan",
-            Self::Macvlan => "macvlan",
-            Self::Macvtap => "macvtap",
-            Self::Ipvlan => "ipvlan",
-            Self::Ipvtap => "ipvtap",
-        }
     }
 }
 
@@ -445,33 +515,26 @@ impl StackedLinkKind {
 // ---------------------------------------------------------------------------
 
 impl GuestAddressPool {
-    /// QPROJ-2: an owned copy of the pool's lease table and cursor.
+    /// QPROJ-2: an owned copy of the lease table and cursor.
     ///
     /// - **Preconditions:** none. Infallible; callable at any time on a live
     ///   pool.
-    /// - **Postconditions:** the returned value is an owned copy of the pool's
-    ///   lease table and cursor taken under one acquisition of the pool lock.
-    ///   The lock is released before return. `leases` holds exactly the
-    ///   Admitted and Retiring leases at that instant; a released lease is
-    ///   absent. `next_fit` is the cursor as stored, not normalised to a
-    ///   usable offset. The call attempts no claim, runs no `assign` walk,
-    ///   takes no lease and changes no state.
+    /// - **Postconditions:** an owned copy of the lease table and cursor,
+    ///   taken under one acquisition of the pool lock, released before
+    ///   return. `leases` holds exactly the Admitted and Retiring leases at
+    ///   that instant. The call runs no `assign` walk and changes no state.
     /// - **Consistency point:** between two pool operations (`assign`,
-    ///   `take_claim`, `retire`, `release`, the claim drop of a lease): never
-    ///   inside an `assign` walk, whose per-offset `claim` calls happen under
-    ///   the same lock.
-    /// - **Edge cases:** an empty pool returns an empty `leases` and the
-    ///   initial cursor. A lease whose claim was taken and passed to the VMM
-    ///   reports `claim_in_slot = false`; one whose claim was dropped unused
-    ///   also reports `false`. A Retiring lease keeps its CID, launch token
-    ///   and reserved ports until `release`.
-    /// - **Invariants:** `leases` has at most one entry per CID; the sum of
-    ///   `reserved_ports` never exceeds the steering capacity (D8a-CAP); a
-    ///   repeated call with no intervening pool operation returns an equal
-    ///   value.
+    ///   `retire`, `release`).
+    /// - **Edge cases:** an empty pool returns empty `leases` and the initial
+    ///   cursor. A Retiring lease keeps its CID and launch token until
+    ///   `release`, which runs only after the VMM has exited. A pool built
+    ///   after a `serve` restart reports no lease of the previous process
+    ///   (NO-SURVIVE).
+    /// - **Invariants:** at most one lease per CID (`CidUnique`); a repeated
+    ///   call with no intervening pool operation returns an equal value.
     #[expect(
         clippy::unused_self,
-        reason = "RED scaffold body panics; DELIVER vsock new-step 15 lands the CID lease table"
+        reason = "RED scaffold body panics; the attachment-cut step lands the CID lease table"
     )]
     pub fn lease_observation(&self) -> GuestLeaseObservation {
         panic!("{SCAFFOLD}")
@@ -481,7 +544,8 @@ impl GuestAddressPool {
 /// QPROJ-2 snapshot of the pool.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GuestLeaseObservation {
-    /// The CID at which the next `assign` walk starts (the cursor, M-9).
+    /// The CID at which the next `assign` walk starts (the next-fit cursor,
+    /// M-9).
     pub next_fit: GuestCid,
     /// Every Admitted and Retiring lease.
     pub leases: BTreeMap<AllocationId, GuestLeaseView>,
@@ -490,15 +554,10 @@ pub struct GuestLeaseObservation {
 /// One lease in a [`GuestLeaseObservation`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GuestLeaseView {
-    /// The leased CID.
+    /// `GUEST_CID_BASE + lease offset`.
     pub cid: GuestCid,
     /// The existing lease state: Admitted | Retiring.
     pub state: GuestAttachmentLease,
     /// The lease's launch token (ATTR-TOKEN).
     pub launch: LaunchToken,
-    /// The claim is still in the lease's take-once slot: not taken by the
-    /// VM driver and not dropped.
-    pub claim_in_slot: bool,
-    /// Declared TCP ports this lease reserves (D8a-CAP).
-    pub reserved_ports: u32,
 }

@@ -1,5 +1,6 @@
-//! `ProbeResultRow` — per-probe observation row, LWW per
-//! `(alloc_id, role, probe_idx)`.
+//! `ProbeResultRow` — per-probe observation row, one latest row per
+//! `(alloc_id, role, probe_idx)`, merged by the producer's run sequence
+//! (PROBE-RUN-COUNT, ADR-0191).
 //!
 //! Per ADR-0054 §5 as amended by ADR-0080 § D2: a probe's latest
 //! observed outcome is durable observation, never intent. Row identity
@@ -13,13 +14,15 @@
 //! `.claude/rules/development.md` § "Persist inputs, not derived
 //! state").
 //!
-//! Per ADR-0048 + ADR-0054 §5 QR1: rkyv envelope V1 with
-//! `#[repr(u8)]` discriminant pinning. Discriminant for V1 = 0;
-//! future V2/V3 append at the tail only. Fixture test pins both
-//! archived bytes AND variant discriminant value:
+//! Per ADR-0048 + ADR-0054 §5 QR1: rkyv envelope with `#[repr(u8)]`
+//! discriminant pinning. V1 = 0; V2 = 1 (PROBE-RUN-COUNT, ADR-0191:
+//! the run sequence and the producer's observed streak), appended at
+//! the tail. The fixture test pins both archived bytes AND variant
+//! discriminant values:
 //!
 //! ```text
 //! const FIXTURE_V1_DISCRIMINANT: u8 = 0;
+//! const FIXTURE_V2_DISCRIMINANT: u8 = 1;
 //! ```
 //!
 //! Cross-reference: auto-memory `feedback_rkyv_envelope_forward_
@@ -72,6 +75,208 @@ impl ProbeIdx {
 impl std::fmt::Display for ProbeIdx {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+/// Run sequence number of a written probe row: the producer's count of the
+/// rows it has written for one `(alloc_id, role, probe_idx)` key, starting
+/// at 1. A run that writes no row consumes no number (PROBE-RUN-COUNT,
+/// ADR-0191).
+///
+/// The observation merge keeps, per key, the row with the greater
+/// `run_seq` (see [`crate::traits::observation_store::ObservationStore::write_probe_result`]).
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(try_from = "u64", into = "u64")]
+pub struct ProbeRunSeq(u64);
+
+/// Parse / validation failure for [`ProbeRunSeq`].
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ProbeRunSeqParseError {
+    /// The value 0; a run sequence starts at 1.
+    #[error("probe run sequence must be at least 1, got 0")]
+    Zero,
+    /// The input is not a decimal `u64`.
+    #[error("probe run sequence is not a decimal u64: {0}")]
+    Malformed(String),
+}
+
+impl ProbeRunSeq {
+    /// The run sequence of the first row a probe task writes.
+    pub const FIRST: Self = Self(1);
+
+    /// Validating constructor; `Err(ProbeRunSeqParseError::Zero)` for 0.
+    ///
+    /// # Errors
+    ///
+    /// [`ProbeRunSeqParseError::Zero`] when `seq == 0`.
+    pub const fn new(seq: u64) -> Result<Self, ProbeRunSeqParseError> {
+        if seq == 0 {
+            return Err(ProbeRunSeqParseError::Zero);
+        }
+        Ok(Self(seq))
+    }
+
+    /// The run sequence as a `u64` (always ≥ 1).
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+
+    /// The next run sequence (saturating; one run per second for a `u64`
+    /// never reaches the ceiling).
+    // SCAFFOLD: true — RED scaffold (netns-density-295, PROBE-RUN-COUNT);
+    // implemented in DELIVER step 9.
+    #[must_use]
+    pub const fn succ(self) -> Self {
+        let _ = self;
+        panic!("Not yet implemented -- RED scaffold")
+    }
+}
+
+impl std::str::FromStr for ProbeRunSeq {
+    type Err = ProbeRunSeqParseError;
+
+    /// Decimal, ≥ 1.
+    // SCAFFOLD: true — RED scaffold; implemented in DELIVER step 9.
+    fn from_str(_s: &str) -> Result<Self, Self::Err> {
+        panic!("Not yet implemented -- RED scaffold")
+    }
+}
+
+impl std::fmt::Display for ProbeRunSeq {
+    /// Decimal.
+    // SCAFFOLD: true — RED scaffold; implemented in DELIVER step 9.
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        panic!("Not yet implemented -- RED scaffold")
+    }
+}
+
+impl TryFrom<u64> for ProbeRunSeq {
+    type Error = ProbeRunSeqParseError;
+
+    /// Same as [`ProbeRunSeq::new`].
+    fn try_from(seq: u64) -> Result<Self, Self::Error> {
+        Self::new(seq)
+    }
+}
+
+impl From<ProbeRunSeq> for u64 {
+    fn from(seq: ProbeRunSeq) -> Self {
+        seq.get()
+    }
+}
+
+/// The probe runner's observed streak: the number of consecutive written
+/// runs of one `(alloc_id, role, probe_idx)` key, ending with this row, that
+/// produced this row's status (PROBE-RUN-COUNT, ADR-0191). Always ≥ 1;
+/// independent of any threshold.
+///
+/// A `u32` because the thresholds it is compared with are `u32`.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(try_from = "u32", into = "u32")]
+pub struct SameStatusRuns(u32);
+
+/// Parse / validation failure for [`SameStatusRuns`].
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SameStatusRunsParseError {
+    /// The value 0; a streak counts at least the row that carries it.
+    #[error("probe same-status run count must be at least 1, got 0")]
+    Zero,
+    /// The input is not a decimal `u32`.
+    #[error("probe same-status run count is not a decimal u32: {0}")]
+    Malformed(String),
+}
+
+impl SameStatusRuns {
+    /// The streak of a row whose status differs from the previous written
+    /// row's, or of the first row a probe task writes.
+    pub const ONE: Self = Self(1);
+
+    /// Validating constructor; `Err(SameStatusRunsParseError::Zero)` for 0.
+    ///
+    /// # Errors
+    ///
+    /// [`SameStatusRunsParseError::Zero`] when `runs == 0`.
+    pub const fn new(runs: u32) -> Result<Self, SameStatusRunsParseError> {
+        if runs == 0 {
+            return Err(SameStatusRunsParseError::Zero);
+        }
+        Ok(Self(runs))
+    }
+
+    /// The streak as a `u32` (always ≥ 1).
+    #[must_use]
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+
+    /// The streak of the next written row of the same status (saturating).
+    // SCAFFOLD: true — RED scaffold; implemented in DELIVER step 9.
+    #[must_use]
+    pub const fn succ(self) -> Self {
+        let _ = self;
+        panic!("Not yet implemented -- RED scaffold")
+    }
+}
+
+impl std::str::FromStr for SameStatusRuns {
+    type Err = SameStatusRunsParseError;
+
+    /// Decimal, ≥ 1.
+    // SCAFFOLD: true — RED scaffold; implemented in DELIVER step 9.
+    fn from_str(_s: &str) -> Result<Self, Self::Err> {
+        panic!("Not yet implemented -- RED scaffold")
+    }
+}
+
+impl std::fmt::Display for SameStatusRuns {
+    /// Decimal.
+    // SCAFFOLD: true — RED scaffold; implemented in DELIVER step 9.
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        panic!("Not yet implemented -- RED scaffold")
+    }
+}
+
+impl TryFrom<u32> for SameStatusRuns {
+    type Error = SameStatusRunsParseError;
+
+    /// Same as [`SameStatusRuns::new`].
+    fn try_from(runs: u32) -> Result<Self, Self::Error> {
+        Self::new(runs)
+    }
+}
+
+impl From<SameStatusRuns> for u32 {
+    fn from(runs: SameStatusRuns) -> Self {
+        runs.get()
     }
 }
 
@@ -165,8 +370,8 @@ pub enum ProbeStatus {
 /// single probe for a single allocation.
 ///
 /// Composite PK: `(alloc_id, role, probe_idx)` per ADR-0080 § D2.
-/// LWW resolution per `last_observed_at` (logical timestamp inherited
-/// from the `ObservationRow` envelope; not duplicated here).
+/// Superseded as the latest payload by [`ProbeResultRowV2`]; retained as
+/// envelope variant V1 for decoding rows written before PROBE-RUN-COUNT.
 #[derive(
     Debug,
     Clone,
@@ -197,18 +402,71 @@ pub struct ProbeResultRowV1 {
     pub inferred: bool,
 }
 
-/// Public alias — `ProbeResultRow` is V1's payload.
+/// `ProbeResultRow` V2 payload (PROBE-RUN-COUNT, ADR-0191): every
+/// [`ProbeResultRowV1`] field, unchanged in name, type and meaning, plus the
+/// producer's run sequence and its observed streak.
+///
+/// Composite PK: `(alloc_id, role, probe_idx)` per ADR-0080 § D2. The merge
+/// keeps the row with the greater `run_seq`; `last_observed_at_unix_ms` is
+/// shown to operators and no longer decides the merge.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ProbeResultRowV2 {
+    /// Allocation this probe targets.
+    pub alloc_id: AllocationId,
+    /// 0-indexed position within the role array.
+    pub probe_idx: ProbeIdx,
+    /// Which role this probe is.
+    pub role: ProbeRole,
+    /// Latest observed outcome.
+    pub status: ProbeStatus,
+    /// Observation time shown to operators; no longer decides the merge.
+    pub last_observed_at_unix_ms: u64,
+    /// Whether this probe was inferred by the platform (ADR-0058).
+    pub inferred: bool,
+    /// The producer's run sequence for `(alloc_id, role, probe_idx)`.
+    pub run_seq: ProbeRunSeq,
+    /// The producer's observed streak of `status` ending with this run.
+    pub same_status_runs: SameStatusRuns,
+}
+
+/// Up-conversion of a V1 row: every field copied, `run_seq =
+/// ProbeRunSeq::FIRST`, `same_status_runs = SameStatusRuns::ONE`. A V1 row
+/// can only belong to an allocation of an earlier `serve` process, which
+/// boot reclamation reclaims before any probe runs, so it is never counted
+/// toward a live allocation (ADR-0191).
+#[allow(
+    clippy::fallible_impl_from,
+    reason = "RED scaffold body until DELIVER step 9; the implemented conversion copies every field"
+)]
+impl From<ProbeResultRowV1> for ProbeResultRowV2 {
+    // SCAFFOLD: true — RED scaffold; implemented in DELIVER step 9.
+    fn from(_v1: ProbeResultRowV1) -> Self {
+        panic!("Not yet implemented -- RED scaffold")
+    }
+}
+
+/// Public alias — `ProbeResultRow` is V2's payload.
 ///
 /// Per ADR-0048 alias-to-payload convention: public callers
 /// construct `ProbeResultRow { ... }` directly using struct-literal
 /// syntax. The codec-internal envelope is consumed only at the
 /// persistence boundary.
-pub type ProbeResultRow = ProbeResultRowV1;
+pub type ProbeResultRow = ProbeResultRowV2;
 
 /// Documentation alias for "the latest payload variant of
 /// [`ProbeResultRowEnvelope`]". Mirrors the alias-to-payload
 /// convention from ADR-0048 UI-02.
-pub type ProbeResultRowLatest = ProbeResultRowV1;
+pub type ProbeResultRowLatest = ProbeResultRowV2;
 
 /// Codec-internal envelope enum per ADR-0048.
 ///
@@ -216,55 +474,49 @@ pub type ProbeResultRowLatest = ProbeResultRowV1;
 /// persistence-boundary code in the worker / store-local adapters
 /// names this type.
 ///
-/// Discriminant pinning per ADR-0054 §5 QR1: `V1 = 0`. Future
-/// variants append at the tail only. The schema-evolution fixture
+/// Discriminant pinning per ADR-0054 §5 QR1: `V1 = 0`, `V2 = 1`.
+/// Future variants append at the tail only. The schema-evolution fixture
 /// at `crates/overdrive-core/tests/schema_evolution/probe_result_row.rs`
-/// pins both the archived bytes AND `FIXTURE_V1_DISCRIMINANT: u8 = 0`.
+/// pins the archived bytes AND the discriminant values.
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum ProbeResultRowEnvelope {
+    /// Discriminant 0 — the pre-PROBE-RUN-COUNT payload.
     V1(ProbeResultRowV1),
+    /// Discriminant 1 — PROBE-RUN-COUNT (ADR-0191).
+    V2(ProbeResultRowV2),
 }
 
 impl VersionedEnvelope for ProbeResultRowEnvelope {
-    type Latest = ProbeResultRowV1;
+    type Latest = ProbeResultRowV2;
 
     fn latest(payload: Self::Latest) -> Self {
-        Self::V1(payload)
+        Self::V2(payload)
     }
 
     fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
         match self {
-            Self::V1(v1) => Ok(v1),
+            Self::V1(v1) => Ok(v1.into()),
+            Self::V2(v2) => Ok(v2),
         }
     }
 
     /// Discriminant offset for `ProbeResultRowEnvelope` archives,
     /// measured from the END of the archive bytes.
     ///
-    /// Empirically determined for canonical V1 payloads — rkyv 0.8
-    /// places the outer enum's discriminant byte at a stable offset
-    /// from the END of the archive, independent of variable-length
-    /// payload growth. Pinned at the GREEN landing of slice 01-01
-    /// alongside the schema-evolution fixture's
-    /// `GOLDEN_DISCRIMINANT_OFFSET_V1` constant. Re-pin alongside
-    /// the fixture at every version bump per
+    /// rkyv 0.8 places the archived envelope root at the end of the
+    /// buffer and sizes it to its largest variant, so every archive (V1
+    /// or V2 variant) carries the tag at the root's first byte: 72 bytes
+    /// from the end (`tag` + 7 padding + the 64-byte archived
+    /// `ProbeResultRowV2`). Re-pinned at the V2 bump together with the
+    /// schema-evolution fixture's `GOLDEN_DISCRIMINANT_OFFSET` per
     /// `.claude/rules/development.md` § "Version-bump procedure".
     fn discriminant_offset_from_end() -> Option<usize> {
-        Some(56)
+        Some(72)
     }
 
     fn known_discriminants() -> &'static [u8] {
-        // V1 carries rkyv discriminant 0 (declaration order — first
-        // variant). Empirically verified by archiving a canonical
-        // `ProbeResultRowEnvelope::latest(...)` (alloc_id 14 chars,
-        // ProbeStatus::Pass — no string payload) and inspecting the
-        // byte at `bytes.len() - 56`; the perturbation surfaces
-        // `"invalid discriminant 'N' for enum
-        // 'ArchivedProbeResultRowEnvelope'"` at the top of the rkyv
-        // bytecheck error chain (no preceding `trace:` frame),
-        // confirming it is the outer-envelope tag and not a nested
-        // enum's tag.
-        &[0]
+        // V1 = 0, V2 = 1 (declaration order).
+        &[0, 1]
     }
 
     fn type_name() -> &'static str {

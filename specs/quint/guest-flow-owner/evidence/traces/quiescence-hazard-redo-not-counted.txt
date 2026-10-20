@@ -1,48 +1,92 @@
-# quiescence-hazard-redo-not-counted: counterexample, 10 state(s) (from the TLC trace)
+# quiescence-hazard-redo-not-counted: counterexample, 19 state(s) (from the TLC trace)
 
 State 1
   dmg = [C1 |-> FALSE, C2 |-> FALSE]
+  foreign = FALSE
   att = [C1 |-> 0, C2 |-> 0]
   stop = "none"
-  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE ]
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
   up = TRUE
   flowsOpen = 0
+  conf_step = [InitDown |-> [tag |-> "UNIT"]]
   rec = [C1 |-> "idle", C2 |-> "idle"]
+  leaked = 0
   cnt = 0
   table = TRUE
   repLeft = -1
   latch = FALSE
 
 State 2 [Damage]
-  dmg = [C1 |-> TRUE, C2 |-> FALSE]
+  dmg = [C1 |-> FALSE, C2 |-> TRUE]
 
-State 3 [RecQuiesce]
-  rec = [C1 |-> "held", C2 |-> "idle"]
+State 3 [LeakHold]
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+  leaked = 1
   cnt = 1
   latch = TRUE
 
-State 4 [RepFail]
-  att = [C1 |-> 1, C2 |-> 0]
-
-State 5 [RepFail]
-  att = [C1 |-> 2, C2 |-> 0]
-
-State 6 [Damage]
-  dmg = [C1 |-> TRUE, C2 |-> TRUE]
-
-State 7 [RecQuiesce]
-  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE ]
-  rec = [C1 |-> "held", C2 |-> "held"]
+State 4 [RecQuiesce]
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+  rec = [C1 |-> "idle", C2 |-> "held"]
   cnt = 2
 
-State 8 [RepFail]
-  att = [C1 |-> 2, C2 |-> 1]
+State 5 [RecRepair]
+  dmg = [C1 |-> FALSE, C2 |-> FALSE]
+  rec = [C1 |-> "idle", C2 |-> "repaired"]
 
-State 9 [RecRepair]
+State 6 [RecRestore]
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> TRUE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+  rec = [C1 |-> "idle", C2 |-> "idle"]
+  cnt = 1
+
+State 7 [FailStop]
+  stop = "failstop"
+  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> TRUE, failStopped |-> TRUE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+  up = FALSE
+  leaked = 0
+  cnt = 0
+  latch = FALSE
+
+State 8 [RestartWith]
+  stop = "none"
+  up = TRUE
+
+State 9 [Damage]
   dmg = [C1 |-> TRUE, C2 |-> FALSE]
-  rec = [C1 |-> "held", C2 |-> "repaired"]
 
 State 10 [Damage]
   dmg = [C1 |-> TRUE, C2 |-> TRUE]
 
--> loops back to State 8
+State 11 [RecQuiesce]
+  rec = [C1 |-> "held", C2 |-> "idle"]
+  cnt = 1
+  latch = TRUE
+
+State 12 [RecQuiesce]
+  rec = [C1 |-> "held", C2 |-> "held"]
+  cnt = 2
+
+State 13 [RepFail]
+  att = [C1 |-> 0, C2 |-> 1]
+
+State 14 [RecRepair]
+  dmg = [C1 |-> TRUE, C2 |-> FALSE]
+  rec = [C1 |-> "held", C2 |-> "repaired"]
+
+State 15 [RepFail]
+  att = [C1 |-> 1, C2 |-> 1]
+
+State 16 [RepFail]
+  att = [C1 |-> 2, C2 |-> 1]
+
+State 17 [Damage]
+  dmg = [C1 |-> TRUE, C2 |-> TRUE]
+
+State 18 [RecRedo]
+  rec = [C1 |-> "held", C2 |-> "held"]
+
+State 19 [RecRepair]
+  dmg = [C1 |-> TRUE, C2 |-> FALSE]
+  rec = [C1 |-> "held", C2 |-> "repaired"]
+
+-> loops back to State 17

@@ -7,7 +7,10 @@ proposing); ratified by the user 2026-06-11. Tags: phase-2, dataplane,
 kernel, appliance-os, image-factory, mtls, ktls, sockops, test-matrix.
 
 **Amended 2026-10-10** (§6, user ruling: the pinned kernel is Linux 7.0) and
-**2026-10-11** (§5 withdrawn, user ruling UDP-EMPTY of GH #295).
+**2026-10-11** (§5 withdrawn, user ruling UDP-EMPTY of GH #295) and
+**2026-10-17** (§7, GH #295, EVMOD-LIFE approved by the user; its reason
+restated under the user's ruling MODULE-REFCOUNT of 2026-10-20, before
+implementation): the image kernel configuration has no module unloading.
 
 **Tracks**: roadmap 2.4 / [#26](https://github.com/overdrive-sh/overdrive/issues/26)
 (transparent kernel mTLS — sockops + kTLS). This ADR settles the kernel
@@ -152,10 +155,11 @@ serves the vendored fork's `--vsock ...,backend=vhost-kernel` device
 §5 (accepted 2026-10-08) required the appliance image to configure
 root-namespace interfaces only at boot and never to configure a stacked
 root-namespace interface, because the #295 host forwarder attached an egress
-unframe program to every root-namespace interface present at boot. Under the
-user ruling UDP-EMPTY of 2026-10-11 the host's SEQPACKET verdict strips the
-frame of every guest datagram before it reaches a host socket (ADR-0165), so
-no guest-flow program runs on a root-namespace interface. §5's two image
+unframe program to every root-namespace interface present at boot. The host
+removes the frame of every guest datagram before it reaches a host socket —
+in the in-kernel forwarder since the user's approval of EVMOD-DGRAM on
+2026-10-17 (ADR-0201) — so no guest-flow program runs on a root-namespace
+interface. §5's two image
 requirements, its `overdrive serve` boot check and ADR-0181 are withdrawn.
 #295 places no requirement on root-namespace interface configuration.
 
@@ -190,6 +194,45 @@ consequence applies to the 7.0 pin; the ruling of 2026-10-10 selects 7.0
 with it. Wherever §1–§4, the Consequences, the Alternatives or the
 Propagation list name 6.18 as the pin, they record the decision of 2026-06-11
 and this section supersedes them.
+
+### 7 — Amendment (2026-10-17, GH #295, user approval of EVMOD-LIFE / ADR-0198; reason restated under MODULE-REFCOUNT, 2026-10-20): the image kernel has no module unloading
+
+The #295 flow forwarder `ovd_fwd` is a loadable module that unloads only when
+no context is open and no socket is hooked: it holds a module reference for
+each, and `delete_module` refuses while any reference is held
+(`kernel/module/main.c:730-751`, `:828 @ v7.0`; ADR-0198). Nothing on the
+appliance unloads a module: the module set is part of the image, and
+changing it is an image change with a reboot. The image kernel-configuration
+requirement, for the host and the guest image alike:
+
+- **`CONFIG_MODULE_UNLOAD` is off** (`# CONFIG_MODULE_UNLOAD is not set`).
+  The kernel then has no unload path at all: `delete_module` is not built
+  (`kernel/module/main.c:615-935 @ v7.0` is under `#ifdef
+  CONFIG_MODULE_UNLOAD`, the syscall at `:776`) and resolves to the not-implemented stub
+  (`COND_SYSCALL(delete_module)`, `kernel/sys_ni.c:92 @ v7.0`, which returns
+  `-ENOSYS`), the module reference calls are inline no-ops
+  (`include/linux/module.h:722-736 @ v7.0`), and `CONFIG_MODULE_FORCE_UNLOAD`
+  — the one path that bypasses the reference count (`kernel/module/main.c:714-721`,
+  `:747-751`) — cannot be enabled because it depends on the option
+  (`kernel/module/Kconfig:140-142 @ v7.0`). No kernel option depends on
+  `CONFIG_MODULE_UNLOAD` other than `MODULE_FORCE_UNLOAD` and
+  `MODULE_UNLOAD_TAINT_TRACKING` (`kernel/module/Kconfig:142`, `:152`).
+
+It is asserted over the kernel's `.config` when the image is built (the
+build fails otherwise) and confirmed by the pinned-kernel Tier-3 leg of § 2.
+
+The stock 7.0 kernels of the development and Tier-3 hosts keep
+`CONFIG_MODULE_UNLOAD=y` with `CONFIG_MODULE_FORCE_UNLOAD` off (measured: the
+`7.0.0-29-generic` configuration, #295 P-70). There the forwarder's
+reference count is what keeps it loaded while it is in use, and a
+development host reloads a changed module when it is idle (ADR-0205). They
+are not appliance images.
+
+Alternative evaluated and rejected: keep `CONFIG_MODULE_UNLOAD=y` on the
+image and require `CONFIG_MODULE_FORCE_UNLOAD` off. It is also correct (the
+forwarder's reference count governs unload), but it keeps an unload path the
+appliance never uses and needs a second configuration assertion that turning
+unloading off makes unnecessary.
 
 ## Consequences
 

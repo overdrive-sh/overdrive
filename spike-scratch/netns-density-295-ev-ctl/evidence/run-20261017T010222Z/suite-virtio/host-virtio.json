@@ -1,0 +1,98 @@
+[
+ {
+  "how": "close",
+  "traffic": 0,
+  "N": 32,
+  "host_peers_open_before": 32,
+  "guest_report": "RES how=0 traffic=0 reset=32 eof=0 open=0",
+  "guest_report_after_ms": 9.4,
+  "host_states": {
+   "eof": 32
+  },
+  "host_peer_end_latency_ms": {
+   "p50": 9.5,
+   "max": 9.6,
+   "min": 9.5
+  }
+ },
+ {
+  "how": "kill-9",
+  "traffic": 0,
+  "N": 32,
+  "host_peers_open_before": 32,
+  "guest_report": "RES how=1 traffic=0 reset=32 eof=0 open=0",
+  "guest_report_after_ms": 8.4,
+  "host_states": {
+   "eof": 32
+  },
+  "host_peer_end_latency_ms": {
+   "p50": 8.5,
+   "max": 8.5,
+   "min": 8.4
+  }
+ },
+ {
+  "how": "exit",
+  "traffic": 0,
+  "N": 32,
+  "host_peers_open_before": 32,
+  "guest_report": "RES how=2 traffic=0 reset=32 eof=0 open=0",
+  "guest_report_after_ms": 8.5,
+  "host_states": {
+   "eof": 32
+  },
+  "host_peer_end_latency_ms": {
+   "p50": 8.6,
+   "max": 8.7,
+   "min": 8.5
+  }
+ },
+ {
+  "how": "close",
+  "traffic": 1,
+  "N": 32,
+  "host_peers_open_before": 32,
+  "guest_report": "RES how=0 traffic=1 reset=32 eof=0 open=0",
+  "guest_report_after_ms": 24.5,
+  "host_states": {
+   "eof": 32
+  },
+  "host_peer_end_latency_ms": {
+   "p50": 25.2,
+   "max": 25.5,
+   "min": 24.6
+  }
+ },
+ {
+  "how": "kill-9",
+  "traffic": 1,
+  "N": 32,
+  "host_peers_open_before": 32,
+  "guest_report": "RES how=1 traffic=1 reset=32 eof=0 open=0",
+  "guest_report_after_ms": 19.8,
+  "host_states": {
+   "eof": 32
+  },
+  "host_peer_end_latency_ms": {
+   "p50": 20.6,
+   "max": 20.9,
+   "min": 19.9
+  }
+ },
+ {
+  "how": "exit",
+  "traffic": 1,
+  "N": 32,
+  "host_peers_open_before": 32,
+  "guest_report": "RES how=2 traffic=1 reset=32 eof=0 open=0",
+  "guest_report_after_ms": 21.3,
+  "host_states": {
+   "eof": 32
+  },
+  "host_peer_end_latency_ms": {
+   "p50": 22.1,
+   "max": 22.6,
+   "min": 21.4
+  }
+ }
+]

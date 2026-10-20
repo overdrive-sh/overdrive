@@ -4,6 +4,15 @@
     clippy::doc_markdown,
     reason = "the required per-test CONTRACT_SHAPE declaration is a literal protocol marker"
 )]
+#![cfg_attr(
+    not(feature = "integration-tests"),
+    allow(
+        dead_code,
+        unused_imports,
+        reason = "S-SVM-23 boots a real `serve` (real phase-1 forwarder probe and vsock \
+                  listeners), so it and its helpers are integration-tests only"
+    )
+)]
 
 use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
@@ -49,21 +58,52 @@ port = 8080
 protocol = "tcp"
 "#;
 
+/// Boots `serve` in-process through the CLI's one entry point (GH #295,
+/// NO-OVERRIDE-SEAMS / STORES-IN / PORTS-CONFIG): the real cgroupfs adapter,
+/// and a builder that takes the host bundle over the very `&ServerConfig`
+/// the boot receives and replaces by name only what this lane simulates —
+/// a hermetic `SimKek` (C1-AMEND) and a `SimDataplaneComposer` over a
+/// `SimDataplane` with `host_ipv4` 127.0.0.1 (the former
+/// `run_with_dataplane(.., SimDataplane, ..)`). Kernel-assigned vsock ports,
+/// so this boot never collides with another `serve` on the host. The boot
+/// runs the real phase-1 forwarder probe and the real flow and control
+/// listeners, so it is real infrastructure: `integration-tests` only, after
+/// the `ovd_fwd` lane prerequisite check (FWD-PREREQ).
+#[cfg(feature = "integration-tests")]
+#[expect(
+    clippy::result_large_err,
+    reason = "the bundle builder returns the boot's typed `ControlPlaneError` unboxed, as `run_server` does"
+)]
 async fn spawn_server() -> (ServeHandle, TempDir) {
+    use overdrive_control_plane::NodeAdapters;
+    use overdrive_core::guest_transport::NodeVsockPortConfig;
+    use overdrive_host::RealCgroupFs;
+    use overdrive_sim::adapters::dataplane::SimDataplane;
+    use overdrive_sim::adapters::{SimDataplaneComposer, SimKek};
+
     let tmp = TempDir::new().expect("tempdir");
     let data_dir = tmp.path().join("data");
     let config_dir = tmp.path().join("conf");
     std::fs::create_dir_all(&data_dir).expect("create data directory");
     std::fs::create_dir_all(&config_dir).expect("create config directory");
 
-    let handle = overdrive_cli::commands::serve::run_with_dataplane(
+    overdrive_testing::forwarder_module::expect_forwarder_module();
+    let handle = overdrive_cli::commands::serve::run_with_adapters(
         ServeArgs {
             bind: "127.0.0.1:0".parse::<SocketAddr>().expect("socket address"),
             data_dir,
             config_dir,
+            vsock_ports: NodeVsockPortConfig::kernel_assigned(),
         },
-        std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
-        std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
+        Arc::new(RealCgroupFs::new()),
+        |config, fs| {
+            let mut adapters = NodeAdapters::host(config, fs, Arc::new(SimKek::for_boot()))?;
+            adapters.boot.dataplane = Arc::new(SimDataplaneComposer::new(
+                Arc::new(SimDataplane::new()),
+                std::net::Ipv4Addr::LOCALHOST,
+            ));
+            Ok(adapters)
+        },
     )
     .await
     .expect("serve must start");
@@ -247,6 +287,7 @@ async fn spawn_stable_stream_server(
 /// S-SVM-23 — the detached `deploy` driving port sends exactly the existing
 /// Service request and preserves every field in its selected VM driver arm.
 /// CONTRACT_SHAPE: bounded-change.
+#[cfg(feature = "integration-tests")]
 #[tokio::test]
 #[serial(workload_cgroup)]
 async fn detached_service_deploy_forwards_vm_driver_without_parallel_request_shape() {

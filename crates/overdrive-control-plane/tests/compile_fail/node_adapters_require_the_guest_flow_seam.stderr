@@ -1,0 +1,5 @@
+error[E0063]: missing field `guest_flow` in initializer of `NodeAdapters`
+  --> tests/compile_fail/node_adapters_require_the_guest_flow_seam.rs:19:5
+   |
+19 |     NodeAdapters { boot, cgroup_fs, probers, vm }
+   |     ^^^^^^^^^^^^ missing `guest_flow`

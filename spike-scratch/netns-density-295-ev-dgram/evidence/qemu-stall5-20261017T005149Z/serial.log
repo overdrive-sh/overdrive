@@ -1,0 +1,21 @@
+c[?7l[2J[0mSeaBIOS (version 1.17.0-debian-1.17.0-1ubuntu1)
+Booting from ROM..c[?7l[2JGUEST_BOOT uname_r=7.0.0-29-generic
+evmod 53248 0 - Live 0xffffffffc0655000 (OE)
+vsock_loopback 12288 0 - Live 0xffffffffc0607000
+vmw_vsock_virtio_transport_common 57344 1 vsock_loopback, Live 0xffffffffc0608000
+vsock 73728 3 evmod,vsock_loopback,vmw_vsock_virtio_transport_common, Live 0xffffffffc0600000
+GUEST_MEM MemTotal: 8125512 kB MemAvailable: 7874672 kB SUnreclaim: 18892 kB 
+{"ev":"case","env":"k","case":"peer-stall","pass":true,"detail":{"h2g_ok":0,"h2g_lost":0,"h2g_reorder_dup":0,"h2g_corrupt":0,"h2g_extra":0,"sent":2746272,"send_errs":0,"oversize_sent":0,"drops_slot":2745906,"drops_app":0,"snmp_udp_RcvbufErrors_delta":2745906,"snmp_udp_SndbufErrors_delta":0,"slot_rmem_end":0,"attach_errno":0,"aborted":1,"completed":0,"dg_ab":366,"dg_ab_bytes":523746,"dg_ba":0,"dg_ba_bytes":0,"dg_empty":0,"dg_invalid":0,"dg_oversize":0,"dg_partial":2,"dg_trunc":0,"dg_wait":0,"err":0,"short_consume":0,"stall_dst":187,"stall_src":369,"end":"id=0 kind=2 cause=4 side=0 errno=0 ab=523746 ba=0","ms":13535,"end_needed_the_owners_detach":false,"mem_samples":136,"memavail_spread_kb":656,"sunreclaim_spread_kb":1156,"slab_spread_kb":1532,"udp_mem_pages_peak":0,"rx_ok":366,"rx_lost":0,"rx_reorder_dup":0,"rx_corrupt":0,"rx_extra":0,"rx_gaps":0,"rx_eof":true,"rx_read_errno":0,"tx_sent":0,"tx_err":0,"rx_peak_unread_bytes":492,"rx_ms":13535,"peer_vsock_buffer_size":262144,"wall_ms":14036}}
+{"ev":"case","env":"k","case":"stall-dest","pass":true,"detail":{"sent":2321942,"send_errs":0,"delivered_after_resume":218,"delivered_gaps_seen_in_seq":2321685,"dup":0,"corrupt":0,"drops_a_s_uh_d":"[0, 1162217, 0, 1159507]","drops_sum":2321724,"snmp_udp_RcvbufErrors_delta":2321724,"snmp_RcvbufErrors_equals_sum_of_socket_drops":true,"dg_ab":1159725,"dg_ba":1159725,"mem_samples":132,"memavail_spread_kb":688,"sunreclaim_spread_kb":372,"slab_spread_kb":372,"udp_mem_pages_peak":619,"end_pair1":"id=0 kind=2 cause=4 side=0 errno=0 ab=1659566475 ba=0","end_pair2":"id=1 kind=1 cause=0 side=0 errno=0 ab=0 ba=1659566475","wall_ms":13136}}
+{"ev":"case","env":"k","case":"stall-app","pass":true,"detail":{"sent":2302244,"send_errs":0,"delivered_after_resume":150,"delivered_gaps_seen_in_seq":2301911,"dup":0,"corrupt":0,"drops_a_s_uh_d":"[1158279, 0, 1143815, 0]","drops_sum":2302094,"snmp_udp_RcvbufErrors_delta":2302094,"snmp_RcvbufErrors_equals_sum_of_socket_drops":true,"dg_ab":1158429,"dg_ba":1158429,"mem_samples":131,"memavail_spread_kb":0,"sunreclaim_spread_kb":4,"slab_spread_kb":4,"udp_mem_pages_peak":559,"end_pair1":"id=0 kind=2 cause=4 side=0 errno=0 ab=0 ba=1657711899","end_pair2":"id=1 kind=1 cause=0 side=0 errno=0 ab=1657711899 ba=0","wall_ms":13036}}
+{"ev":"final","stats":"{"aborted": 3, "attached": 5, "buf_bytes": 65536, "bytes_t2t": 0, "bytes_t2v": 0, "bytes_v2t": 0, "completed": 2, "detached": 3, "dg_ab": 2318520, "dg_ab_bytes": 3317802120, "dg_ba": 2318154, "dg_ba_bytes": 3317278374, "dg_empty": 0, "dg_enobufs": 0, "dg_invalid": 0, "dg_oversize": 0, "dg_partial": 12162, "dg_trunc": 0, "dg_wait": 23989, "eof_fwd": 2, "err": 0, "fault_hits": 0, "held_max": 0, "kicks": 11752134, "live": 0, "pair_size": 280, "pool_miss": 0, "queued": 205704, "requeue": 0, "runs": 205704, "short_consume": 0, "stall_dst": 57105, "stall_src": 224993}"}
+DGPROBE_EXIT=0
+live=0 attached=5 detached=3 completed=2 aborted=3 err=0 runs=205704 kicks=11752134 queued=205704 requeue=0 bytes_v2t=0 bytes_t2v=0 bytes_t2t=0 stall_dst=57105 stall_src=224993 pool_miss=0 short_consume=0 fault_hits=0 eof_fwd=2 held_max=0 pair_size=280 buf_bytes=65536 dg_ab=2318520 dg_ba=2318154 dg_ab_bytes=3317802120 dg_ba_bytes=3317278374 dg_empty=0 dg_oversize=0 dg_partial=12162 dg_wait=23989 dg_invalid=0 dg_trunc=0 dg_enobufs=0
+[    0.000000] Command line: console=ttyS0 rdinit=/init panic=-1 loglevel=4
+[    0.017398] Kernel command line: console=ttyS0 rdinit=/init panic=-1 loglevel=4
+[    0.136980] PCI: Using host bridge windows from ACPI; if necessary, use "pci=nocrs" and report a bug
+[    0.758866] evmod: loading out-of-tree module taints kernel.
+[    0.758879] evmod: module verification failed: signature and/or required key missing - tainting kernel
+[    0.759959] evmod: loaded (per-cpu workqueue)
+DG_ALL_DONE
+[   41.074288] reboot: Power down

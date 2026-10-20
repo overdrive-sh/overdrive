@@ -29,6 +29,8 @@ State 1
   bHeldByOther = false
   act = "none"
   badAct = false
+  gSess = 0
+  conf_step = InitWith({ o: "g" })
 
 State 2
   alloc = "Provisioned"

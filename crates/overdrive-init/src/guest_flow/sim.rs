@@ -1,51 +1,74 @@
 //! Simulation seam for the guest flow owner (DG-5, QPROJ-7): [`SimGuestOwnerIo`]
-//! and [`SimGuestClock`]. `#[cfg(test)]` only; `overdrive-init` takes no
-//! `overdrive-sim` dev-dependency.
+//! and [`SimGuestClock`]. `#[cfg(test)]` only.
 //!
-//! A fixture, not a scaffold: fully functional, and it enforces the seam
+//! A test fixture, not a scaffold: fully functional, and it enforces the seam
 //! contract the real adapter has (`GuestOwnerIo` rustdoc):
 //!
 //! - a handle of another seam instance is `unreachable!`;
 //! - an operation on a `HostConn` / `AppConn` before its `Connected` event was
 //!   delivered fails `NotConnected`;
-//! - consuming calls are all-or-nothing (an `Err` aborts every consumed socket);
+//! - attaches are all-or-nothing: the guest forwarder holds both halves, or it
+//!   refused and the halves come back unattached;
 //! - writes are whole records (a control-session write is a 24-byte
 //!   `ControlOpen` or an 8-byte control message, a request write is 32 bytes);
 //! - every event is delivered once; a `Hangup` is level-triggered and reported
-//!   once per socket per kind while the socket is watched (the session
-//!   `HostConn`, a `CapturedConn`, every `GuestPairSocket`), and never after the
-//!   socket ends.
+//!   once per socket per kind while the socket is unattached and watched (the
+//!   session `HostConn`, a flow `HostConn` or an `InboundConn` before its
+//!   attach, a `CapturedConn` before `Paired`), and never after the socket
+//!   ends or is attached.
 //!
-//! **Time and blocking.** The owner and the sim read the same
+//! **The guest's kernel (decision B-1).** Every guest socket a forwarder pair
+//! can hold is an `overdrive-sim` [`SimSocket`] of its kind (vsock STREAM, TCP,
+//! UDP), and the guest's one forwarder context is an `overdrive-sim`
+//! [`SimFlowForwarder`] opened on its own [`SimForwarderDevice`] — the named
+//! arbiter of the guest forwarder's kernel facts (QPROJ-8: per-direction ends
+//! and target shutdowns, the class of each vsock transition, the queued end
+//! records, the live pairs, the context table). The seam's `attach_*`,
+//! `abort_forward`, `pair_state` and `inventory` call that context; its end
+//! records reach the owner as `ForwardEnded` events once the driver releases
+//! them ([`SimGuestOwnerIo::release_forward_end`], `take_end` on the context's
+//! readiness). The far sides of a flow's halves (the guest application behind
+//! I / C / S, the host behind V_g) are scripted on the halves' [`SimSocket`]s
+//! ([`SimGuestOwnerIo::flow_socket`], [`SimGuestOwnerIo::slot_socket`]); the
+//! forwarder's runs are stepped on the context
+//! ([`SimGuestOwnerIo::run_forwarder`]). Facts of unattached sockets (accept
+//! queues, readiness, hangups, connects, reads, the slot pool's readiness and
+//! release reports) are this seam's own: the QPROJ-7 arbiter surface
+//! [`SimGuestSocketObservation`].
+//!
+//! **Time and quiescence (DG-5-Q).** The owner and the sim read the same
 //! [`SimGuestClock`]; only the driver advances it. `next_event` returns the
-//! next *released* event; `Ok(None)` at once when the deadline it is given is
-//! at or before the clock's now; a call with no event released and no
-//! deadline passed is a driver defect (DG-5): it panics rather than block a
-//! single-threaded driver, with the typed payload [`SimWouldBlock`] (raised by
-//! `std::panic::panic_any`, distinguishable from every other panic). It never
-//! answers that case with an `Err`: an `Err` from `next_event` is the owner's
-//! fatal wait failure (`GuestOwnerFatal::EventWait`), which only
-//! `fail_event_wait` scripts. `test_support::settle` catches exactly that
-//! payload as the owner's blocking wait (the quiescence point).
+//! next *released* event, or `Ok(None)` when the deadline it is given is at or
+//! before the clock's now. A call with nothing released and no deadline passed
+//! is a driver defect: a correct driver dispatches only while
+//! [`SimGuestOwnerIo::released_undelivered`] or the owner's `next_deadline()`
+//! is due, so the sim treats that call as `unreachable!`, never as a signal.
+//! It never answers with an `Err` the production seam would not: an `Err` from
+//! `next_event` is the owner's fatal wait failure
+//! (`GuestOwnerFatal::EventWait`), which only `fail_event_wait` scripts.
 //!
 //! **Held until released.** Every effect the owner starts (a host or
 //! application connect, a read) and every guest-kernel fact (a V_g in the
-//! accept queue, a readiness event, a `sock_release` report) is held until the
-//! driver releases it through the stepping API below. A driver injection that
-//! *is* the release (the host writes a control message and it is read, the
-//! host ends a vsock, the application half-closes) makes the event deliverable
-//! at once.
+//! accept queue, a slot readiness event, a `sock_release` report, a forwarder
+//! end record) is held until the driver releases it through the stepping API
+//! below (D-UP-19: the driver chooses the accept order).
 //!
-//! **Read surface.** [`SimGuestOwnerIo::guest_socket_observation`] is the pinned
-//! QPROJ-7 arbiter surface (Tier-3 pairings R5-31, R5-28, R5-14, R5-27, R5-10,
-//! R5-45). Every other read below (`effects`, `slot_state`, `pending_connects`,
-//! …) is test support for acceptance oracles and must not feed a conformance
-//! `State` projection.
+//! **Read surface.** [`SimGuestOwnerIo::guest_socket_observation`] is the
+//! pinned QPROJ-7 arbiter surface (Tier-3 pairings: V-24, R5-14, V-EV-DGRAM,
+//! V-31 item 2c, R5-10); the forwarder's facts are read through
+//! [`SimGuestOwnerIo::forwarder_pair_state`],
+//! [`SimGuestOwnerIo::forwarder_inventory`] and
+//! [`SimGuestOwnerIo::forwarder_contexts`] (QPROJ-8, paired with V-EV-END,
+//! V-EV-CTL, V-EV-PAIR, V-EV-DGRAM and the module's Tier-3 suite). Every other
+//! read below (`effects`, `outbox`, `slot_state`, `pending_connects`, …) is
+//! test support for acceptance oracles and stimulus bookkeeping; it never
+//! feeds a conformance `State` projection.
 //!
-//! The sim decodes the records the owner writes with the core wire codec
-//! (`ControlMessage::decode`, `FlowRequest::decode`) and encodes the host's
-//! records with it; those paths panic until DELIVER vsock new-step 2 lands the
-//! codec.
+//! **Open seam gap (DISTILL blocker, routed to DESIGN).** DG-5 pins
+//! `attach_slot(..) -> Result<ForwardId, GuestAttachRefused>`, but
+//! `GuestAttachRefused` names an `outer` half and a slot socket has no handle
+//! type: a refused slot attach cannot be represented. The sim panics with that
+//! message if the forwarder refuses a slot attach.
 
 #![allow(
     clippy::expect_used,
@@ -54,12 +77,8 @@
     clippy::doc_markdown,
     clippy::significant_drop_tightening,
     clippy::struct_excessive_bools,
-    clippy::option_option,
     clippy::option_if_let_else,
-    clippy::collapsible_if,
-    clippy::map_unwrap_or,
-    clippy::manual_let_else,
-    clippy::single_match_else,
+    clippy::too_many_lines,
     reason = "test fixture: a seam-contract violation is a driver or owner defect and panics"
 )]
 
@@ -70,17 +89,23 @@ use std::num::NonZeroU64;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
+use overdrive_core::guest_transport::forwarder::{
+    AbortResult, FlowForwarder, ForwardEnd, ForwardId, ForwarderError, ForwarderInventory,
+    PairMode, PairSide, PairState,
+};
 use overdrive_core::guest_transport::wire::{
     CONTROL_MESSAGE_LEN, CONTROL_OPEN_LEN, ControlMessage, FLOW_REQUEST_LEN, FlowId, FlowRequest,
 };
 use overdrive_core::guest_transport::{GUEST_UDP_SLOT_BASE, GUEST_UDP_SLOTS};
-use overdrive_core::net::ListenPort;
+use overdrive_sim::adapters::{
+    SimContextState, SimFarEnd, SimFlowForwarder, SimForwarderDevice, SimLocalRead, SimShutdown,
+    SimSocket, SimSocketKind, SimSocketSetup,
+};
 
 use super::{
-    AppConn, CapturedConn, CellGeneration, GuestClock, GuestFlowDirection, GuestHangup,
-    GuestIoEvent, GuestListener, GuestOwnedSocket, GuestOwnerIo, GuestPair, GuestPairKey,
-    GuestPairSocket, GuestRecord, Handle, HostChannel, HostConn, InboundConn, InstalledConn,
-    SeamInstance, SlotEnd, SlotLegs, SocketCookie, SocketId,
+    AppConn, CapturedConn, GuestAttachRefused, GuestClock, GuestHangup, GuestIoEvent,
+    GuestListener, GuestOwnedSocket, GuestOwnerIo, GuestPair, GuestPairSocket, GuestRecord, Handle,
+    HostChannel, HostConn, InboundConn, SeamInstance, SocketCookie, SocketId,
 };
 
 // ---------------------------------------------------------------------------
@@ -95,16 +120,22 @@ pub(crate) struct SimGuestClock {
 }
 
 impl SimGuestClock {
-    /// A clock starting at the current host instant (any fixed origin works:
-    /// only differences are observed).
+    /// A clock at an arbitrary fixed origin.
     pub(crate) fn new() -> Self {
         Self { now: Mutex::new(Instant::now()) }
     }
 
-    /// Moves the clock forward by `by`.
+    /// Advances the clock by `by`.
     pub(crate) fn advance(&self, by: Duration) {
         let mut now = self.now.lock().unwrap_or_else(PoisonError::into_inner);
         *now += by;
+    }
+
+    /// Advances the clock to exactly `at`; never backwards.
+    pub(crate) fn advance_to(&self, at: Instant) {
+        let mut now = self.now.lock().unwrap_or_else(PoisonError::into_inner);
+        assert!(at >= *now, "driver defect: the guest clock never goes backwards");
+        *now = at;
     }
 }
 
@@ -115,19 +146,29 @@ impl GuestClock for SimGuestClock {
 }
 
 // ---------------------------------------------------------------------------
-// Test-support vocabulary
+// The pinned QPROJ-7 read surface and test-support vocabulary
 // ---------------------------------------------------------------------------
 
-/// The first terminal event a far end observes (no production type is pinned).
+/// The first terminal event a far end (the guest application) saw on a flow's
+/// outer leg.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FarEndEvent {
-    /// A FIN: the far end reads end of stream.
+    /// A clean end of stream.
     Eof,
-    /// A reset (linger close, abort).
+    /// A reset.
     Reset,
 }
 
-/// The QPROJ-7 read surface of the guest-owner seam sim (field names and
+impl From<SimFarEnd> for FarEndEvent {
+    fn from(end: SimFarEnd) -> Self {
+        match end {
+            SimFarEnd::Eof => Self::Eof,
+            SimFarEnd::Reset => Self::Reset,
+        }
+    }
+}
+
+/// QPROJ-7: the guest socket facts the owner does not hold (field names and
 /// meanings are the contract).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SimGuestSocketObservation {
@@ -135,125 +176,47 @@ pub(crate) struct SimGuestSocketObservation {
     pub(crate) queued_inbound: BTreeSet<FlowId>,
     /// V_g torn down there (K-A4).
     pub(crate) reset_in_queue: BTreeSet<FlowId>,
-    /// Control messages the guest wrote and the host has not consumed.
-    pub(crate) outbox: Vec<ControlMessage>,
-    /// The control session has ended (and no new one has connected since).
-    pub(crate) session_ended: bool,
-    /// Undispatched readiness events: slot, registration generation.
-    pub(crate) readiness: BTreeSet<(SocketAddrV4, CellGeneration)>,
-    /// Frames parked in each slot's framing cell, tagged by origin.
+    /// Undispatched readiness events, by slot.
+    pub(crate) readiness: BTreeSet<SocketAddrV4>,
+    /// Datagrams queued in each slot socket, by origin.
     pub(crate) parked: BTreeMap<SocketAddrV4, BTreeSet<(SocketCookie, SocketAddrV4)>>,
     /// Queued `sock_release` reports.
     pub(crate) release_reports: BTreeSet<SocketCookie>,
-    /// Datagram legs the guest closed and the host has not observed.
-    pub(crate) legs_closed_unobserved: BTreeSet<FlowId>,
-    /// Ends of the guest's flow vsocks the host has not observed.
-    pub(crate) vsock_ends_in_flight: BTreeSet<FlowId>,
-    /// The guest's flow vsocks that have ended (shutdown, abort, close).
-    pub(crate) vsock_ended: BTreeSet<FlowId>,
-    /// Each guest far end's (application leg's) first terminal event.
+    /// Each guest far end's first terminal event.
     pub(crate) far_end: BTreeMap<FlowId, FarEndEvent>,
 }
 
-/// The panic payload of a `next_event` call the sim cannot answer (DG-5:
-/// nothing released and no deadline passed, so a single-threaded driver would
-/// block). Raised with `std::panic::panic_any`; test support for
-/// `test_support::settle`, which stops at it and re-raises every other panic.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct SimWouldBlock {
-    /// The deadline the owner passed to the blocking wait (its earliest armed
-    /// deadline at that point; `None`: it waited for an event only).
-    pub(crate) deadline: Option<Instant>,
-}
-
-/// What one `next_event` call returned (test support for `settle`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SimWaitOutcome {
-    /// It returned a released event.
-    Event,
-    /// It returned `None`: its deadline had passed.
-    DeadlinePassed,
-    /// The scripted wait failure (`fail_event_wait`).
-    Failed,
-    /// Nothing released and no deadline passed: the sim panicked with
-    /// [`SimWouldBlock`] (the owner reached a blocking wait).
-    WouldBlock,
-}
-
-/// One `next_event` call of the owner.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct SimWait {
-    /// The deadline the owner passed (its earliest armed deadline).
-    pub(crate) deadline: Option<Instant>,
-    /// What the call returned.
-    pub(crate) outcome: SimWaitOutcome,
-}
-
-/// A seam operation that can be scripted to fail once with an `io::ErrorKind`.
+/// A seam operation whose next call [`SimGuestOwnerIo::fail_next`] scripts to
+/// fail.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum SimGuestOp {
-    /// `start_connect_host` (synchronous failure).
     StartConnectHost,
-    /// `start_read_host`.
     StartReadHost,
-    /// `start_read_inbound`.
     StartReadInbound,
-    /// `write_host`.
     WriteHost,
-    /// `inbound_ended`.
     InboundEnded,
-    /// `rearm_captured`.
-    RearmCaptured,
-    /// `install_outbound`.
-    InstallOutbound,
-    /// `write_request`.
     WriteRequest,
-    /// `route_outbound`.
-    RouteOutbound,
-    /// `install_inbound`.
-    InstallInbound,
-    /// `start_connect_app` (synchronous failure).
     StartConnectApp,
-    /// `route_inbound`.
-    RouteInbound,
-    /// `drained`.
-    Drained,
-    /// `remove_pair`.
-    RemovePair,
-    /// `shutdown_write`.
-    ShutdownWrite,
-    /// `clear_linger`.
     ClearLinger,
-    /// `slot_owner`.
     SlotOwner,
-    /// `install_slot_legs`.
-    InstallSlotLegs,
-    /// `write_slot_requests`.
-    WriteSlotRequests,
-    /// `route_slot`.
-    RouteSlot,
-    /// `retry_quarantined`.
-    RetryQuarantined,
-    /// `slot_counters`.
+    WriteSlotRequest,
     SlotCounters,
-    /// `live_cookies`.
     LiveCookies,
-    /// `listener_map`.
-    ListenerMap,
 }
 
-/// What a pending connect targets.
+/// What an in-flight connect targets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SimConnectTarget {
-    /// A host channel (CID 2).
+    /// A host channel.
     Host(HostChannel),
-    /// The guest application: C bound to `client`, connecting to `destination`.
+    /// C toward the application: bound to `client`, to `destination`, for the
+    /// dial `flow` whose request the owner had just checked.
     App {
-        /// The transparent client address C is bound to.
+        /// The bind address.
         client: SocketAddrV4,
         /// `workload_addr:listen_port`.
         destination: SocketAddrV4,
-        /// The flow of the installed V_g C is armed toward.
+        /// The dial.
         flow: Option<FlowId>,
     },
 }
@@ -261,126 +224,71 @@ pub(crate) enum SimConnectTarget {
 /// How the host ends the control session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SimSessionEnd {
-    /// The host closed it (EOF).
+    /// EOF / `POLLRDHUP` (the only shape K-A5 admits for a host close).
     Eof,
-    /// It was reset (host owner died, connection reset).
+    /// An I/O error on the session read (the guest's own read fails; K-A5 never
+    /// produces it from a host close, but a read can fail).
     Reset,
 }
 
-/// Which application connection an application-side stimulus targets.
+/// A half of a flow's guest pair.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SimAppTarget {
-    /// The captured connection of the application socket with this cookie.
-    Captured(SocketCookie),
-    /// The outer (application) leg of this flow.
-    Flow(FlowId),
+pub(crate) enum SimHalf {
+    /// V_g.
+    Vsock,
+    /// I (TcpConnect) or C (TcpAccept).
+    Outer,
 }
 
-/// What the application does to its connection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SimAppEnd {
-    /// Writes then `shutdown(SHUT_WR)`: the owner's leg reads EOF (`POLLRDHUP`).
-    HalfClose,
-    /// Errors / resets: the owner's leg reports `POLLERR` (`ECONNRESET`).
-    Reset,
-}
-
-/// Test-support snapshot of one slot in the sim's guest kernel.
+/// Test-support view of one UDP slot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SimSlotState {
-    /// The kernel slot map's owner.
+    /// The slot's (application socket, destination) owner.
     pub(crate) owner: Option<(SocketCookie, SocketAddrV4)>,
-    /// Free: claimable by a new (socket, destination).
-    pub(crate) in_pool: bool,
-    /// Quarantined by a cell-creation failure.
-    pub(crate) quarantined: bool,
-    /// The cells' current generation.
-    pub(crate) generation: CellGeneration,
-    /// Frames parked in the framing cell (count, not deduplicated).
-    pub(crate) parked_frames: usize,
-    /// The framing cell is routed to Q_g.
-    pub(crate) routed: bool,
-    /// The association's flow, once its requests were written.
+    /// The association the owner wrote a request for, if any.
     pub(crate) flow: Option<FlowId>,
-    /// T_g / Q_g are installed.
-    pub(crate) legs_installed: bool,
-    /// Frames forwarded to the host over the slot's lifetime.
-    pub(crate) forwarded_frames: u64,
+    /// The association's datagram pair.
+    pub(crate) attached: Option<ForwardId>,
+    /// The slot socket is connected to its application socket's address.
+    pub(crate) connected: bool,
+    /// Datagrams discarded unread by the owner's end-of-association order.
+    pub(crate) discarded: usize,
+    /// End-of-association orders the owner ran on this slot.
+    pub(crate) ended: usize,
 }
 
-/// Every seam call the owner made, in order (test-support oracle for ordering
-/// obligations; not a projection source).
+/// One seam call the owner made (test support: ordering oracles).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SimGuestEffect {
-    /// `start_connect_host`.
     ConnectHost { socket: SocketId, channel: HostChannel },
-    /// `start_read_host`.
     ReadHost { socket: SocketId, record: GuestRecord },
-    /// `start_read_inbound`.
-    ReadInbound { socket: SocketId },
-    /// `write_host` of a `ControlOpen`.
+    ReadInbound { socket: SocketId, flow: FlowId },
     WriteControlOpen { socket: SocketId },
-    /// `write_host` of a control message.
     WriteControl { socket: SocketId, message: ControlMessage },
-    /// `inbound_ended`.
     InboundEnded { socket: SocketId, ended: bool },
-    /// `rearm_captured`.
-    RearmCaptured { socket: SocketId },
-    /// `install_outbound`.
-    InstallOutbound { vsock: SocketId, child: SocketId },
-    /// `write_request`.
     WriteRequest { socket: SocketId, request: FlowRequest },
-    /// `route_outbound`.
-    RouteOutbound { pair: GuestPairKey, flow: Option<FlowId> },
-    /// `install_inbound`.
-    InstallInbound { socket: SocketId },
-    /// `start_connect_app`.
+    AttachOutbound { flow: Option<FlowId>, accepted: Option<ForwardId> },
     StartConnectApp { socket: SocketId, client: SocketAddrV4, destination: SocketAddrV4 },
-    /// `route_inbound`.
-    RouteInbound { pair: GuestPairKey, flow: Option<FlowId> },
-    /// `drained`.
-    Drained { pair: GuestPairKey, direction: GuestFlowDirection },
-    /// `remove_pair`.
-    RemovePair { pair: GuestPairKey },
-    /// `shutdown_write`.
-    ShutdownWrite { socket: SocketId, flow: Option<FlowId>, vsock: bool },
-    /// `clear_linger`.
+    AttachInbound { flow: Option<FlowId>, accepted: Option<ForwardId> },
+    AbortForward { id: ForwardId },
+    PairState { id: ForwardId },
+    Inventory,
     ClearLinger { socket: SocketId },
-    /// `abort`.
     Abort { socket: SocketId, flow: Option<FlowId> },
-    /// `close`.
     Close { socket: SocketId, flow: Option<FlowId> },
-    /// `slot_owner`.
     SlotOwner { slot: SocketAddrV4 },
-    /// `install_slot_legs`.
-    InstallSlotLegs { slot: SocketAddrV4 },
-    /// `write_slot_requests`.
-    WriteSlotRequests { slot: SocketAddrV4, flow: FlowId },
-    /// `route_slot`.
-    RouteSlot { slot: SocketAddrV4 },
-    /// `end_association`.
-    EndAssociation { slot: SocketAddrV4, end: SlotEnd },
-    /// `release_slot`.
+    WriteSlotRequest { socket: SocketId, request: FlowRequest },
+    AttachSlot { slot: SocketAddrV4, accepted: Option<ForwardId> },
+    EndAssociation { slot: SocketAddrV4 },
     ReleaseSlot { slot: SocketAddrV4 },
-    /// `retry_quarantined`.
-    RetryQuarantined { slot: SocketAddrV4 },
-    /// `slot_counters`.
     SlotCounters { slot: SocketAddrV4 },
-    /// `live_cookies`.
     LiveCookies,
-    /// `listener_map`.
-    ListenerMap,
 }
 
-/// A test-support cookie constructor (the production `SocketCookie::new` is a
-/// DELIVER step).
+/// A test-support cookie constructor (the owner's `SocketCookie::new` is a
+/// DELIVER scaffold; the sim names cookies directly).
 pub(crate) fn sim_cookie(raw: u64) -> SocketCookie {
     SocketCookie(NonZeroU64::new(raw).expect("sim cookies are non-zero"))
-}
-
-/// A test-support generation constructor.
-pub(crate) const fn sim_generation(raw: u64) -> CellGeneration {
-    CellGeneration(raw)
 }
 
 // ---------------------------------------------------------------------------
@@ -392,21 +300,15 @@ enum Stage {
     Host,
     Inbound,
     Captured,
-    Installed,
     App,
-    /// T_g of a slot's legs (the `SlotLegs` handle names it).
-    LegStream,
-    /// Q_g of a slot's legs (no handle of its own).
-    LegSeqpacket,
-    PairVsock,
-    PairOuter,
+    Pair,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Connect {
     None,
     InFlight,
-    /// The completion is deliverable, not yet delivered.
+    /// The completion is released, not yet delivered.
     Released,
     Delivered(Result<(), ErrorKind>),
 }
@@ -429,47 +331,47 @@ const fn hangup_key(h: GuestHangup) -> HangupKey {
 #[derive(Debug)]
 struct Sock {
     stage: Stage,
+    /// The kernel socket (a C has none until its connect completed `Ok`).
+    kernel: Option<SimSocket>,
     channel: Option<HostChannel>,
     connect: Connect,
     app_target: Option<(SocketAddrV4, SocketAddrV4)>,
     read_pending: Option<GuestRecord>,
     flow: Option<FlowId>,
-    cookie: Option<SocketCookie>,
-    /// The socket is app-facing (I or C): carries `SO_LINGER{1,0}` from creation.
+    /// An outer leg (I or C): carries `SO_LINGER{1,0}` from creation.
     outer: bool,
     linger: bool,
-    /// The host ended this vsock (V_h closed, host owner died).
+    /// The host closed this vsock (V_h closed) while unattached.
     peer_ended: bool,
     /// Terminal conditions present on the socket (level).
     conditions: BTreeMap<HangupKey, GuestHangup>,
     reported: BTreeSet<HangupKey>,
-    /// For a V_g installed toward I: the captured child.
-    routes_to: Option<SocketId>,
+    attached: Option<ForwardId>,
     slot: Option<SocketAddrV4>,
+    /// A guest-opened flow V_g's intake child I (linked at the connect the
+    /// owner issues in the dispatch of the child's `OutboundCaptured`).
     partner: Option<SocketId>,
-    pair: Option<GuestPairKey>,
     closed: bool,
 }
 
 impl Sock {
-    fn new(stage: Stage) -> Self {
+    fn new(stage: Stage, kernel: Option<SimSocket>) -> Self {
         Self {
             stage,
+            kernel,
             channel: None,
             connect: Connect::None,
             app_target: None,
             read_pending: None,
             flow: None,
-            cookie: None,
             outer: false,
             linger: false,
             peer_ended: false,
             conditions: BTreeMap::new(),
             reported: BTreeSet::new(),
-            routes_to: None,
+            attached: None,
             slot: None,
             partner: None,
-            pair: None,
             closed: false,
         }
     }
@@ -478,87 +380,97 @@ impl Sock {
         matches!(self.connect, Connect::Delivered(Ok(())))
     }
 
+    /// Unattached and of a watched kind (DG-5-E).
     const fn watched(&self) -> bool {
-        matches!(self.stage, Stage::Captured | Stage::PairVsock | Stage::PairOuter)
+        matches!(self.stage, Stage::Host | Stage::Inbound | Stage::Captured)
     }
 
-    /// A guest flow vsock (V_g in any stage), not the session and not a leg.
-    fn is_flow_vsock(&self) -> bool {
-        match self.stage {
-            Stage::Host => self.channel == Some(HostChannel::FlowStream) && self.slot.is_none(),
-            Stage::Inbound | Stage::Installed | Stage::PairVsock => true,
-            _ => false,
-        }
+    fn kernel(&self) -> &SimSocket {
+        self.kernel.as_ref().unwrap_or_else(|| unreachable!("the socket has no kernel socket yet"))
     }
 }
 
 #[derive(Debug)]
 struct InboundRec {
-    request: FlowRequest,
+    /// The request the host wrote, `None` when it wrote no byte.
+    request: Option<FlowRequest>,
     socket: Option<SocketId>,
+    /// The host closed V_h (after writing the request).
+    host_closed: bool,
 }
 
 #[derive(Debug)]
 struct SlotRec {
+    /// The slot socket S of the current association (renewed by each end of
+    /// association: the disconnect, then the next association's connect).
+    kernel: SimSocket,
     owner: Option<(SocketCookie, SocketAddrV4)>,
-    quarantined: bool,
-    generation: CellGeneration,
-    parked: BTreeSet<(SocketCookie, SocketAddrV4)>,
-    parked_frames: usize,
-    routed: bool,
     flow: Option<FlowId>,
-    legs: Option<(SocketId, SocketId)>,
-    to_host: u64,
-    to_guest: u64,
-    forwarded: u64,
-    fail_next_cell_creation: bool,
+    vsock: Option<SocketId>,
+    attached: Option<ForwardId>,
+    /// The origin of each datagram the application queued in S, oldest first
+    /// (the kernel queue length is S's own `queued()`).
+    origins: VecDeque<(SocketCookie, SocketAddrV4)>,
+    discarded: usize,
+    ended: usize,
+    connected: bool,
 }
 
-#[derive(Debug)]
+/// One pair the forwarder accepted.
+#[derive(Debug, Clone, Copy)]
 struct PairRec {
-    vsock: SocketId,
-    outer: SocketId,
+    flow: Option<FlowId>,
+    vsock: Option<SocketId>,
+    outer: Option<SocketId>,
+    slot: Option<SocketAddrV4>,
+    /// The half (`A` or `B`) V_g is in the pair.
+    vsock_side: PairSide,
 }
 
 #[derive(Debug)]
 struct SimState {
     seam: SeamInstance,
+    workload_addr: Ipv4Addr,
     next_socket: u64,
-    next_pair: u64,
     sockets: BTreeMap<SocketId, Sock>,
     deliverable: VecDeque<GuestIoEvent>,
-    waits: Vec<SimWait>,
     effects: Vec<SimGuestEffect>,
     failures: BTreeMap<SimGuestOp, VecDeque<ErrorKind>>,
     event_wait_failure: Option<ErrorKind>,
-    drained_default: bool,
-    drained: BTreeMap<(FlowId, GuestFlowDirection), bool>,
     session: Option<SocketId>,
     session_ended: bool,
-    /// The host has ended the session, and the guest has not observed it yet
-    /// (`host_end_session_deferred`): its buffered messages stay readable,
-    /// the guest's writes are lost, and the end is released by
-    /// `release_session_end`.
+    /// The host has ended the session and the guest has not observed it yet.
     host_closed: Option<SimSessionEnd>,
     host_messages: VecDeque<ControlMessage>,
     control_opens: Vec<[u8; CONTROL_OPEN_LEN]>,
     outbox: Vec<ControlMessage>,
     inbound: BTreeMap<FlowId, InboundRec>,
     reset_in_queue: BTreeSet<FlowId>,
-    pairs: BTreeMap<GuestPairKey, PairRec>,
+    /// The dial whose request the owner checked last (`inbound_ended` false):
+    /// the next `start_connect_app` is its C (the per-kind order).
+    last_checked_dial: Option<FlowId>,
+    /// The intake child / slot of the event dispatched last: the owner's
+    /// `start_connect_host(FlowStream)` in that dispatch opens its V_g (the
+    /// per-kind orders).
+    last_capture: Option<SocketId>,
+    last_slot: Option<SocketAddrV4>,
+    pairs: BTreeMap<ForwardId, PairRec>,
+    /// Far-end events the seam recorded at the guest's own closes (the first
+    /// one per flow); the kernel's `peer_end` of attached halves is merged in
+    /// at observation.
     far_end: BTreeMap<FlowId, FarEndEvent>,
-    vsock_ends_in_flight: BTreeSet<FlowId>,
     vsock_ended: BTreeSet<FlowId>,
-    legs_closed_unobserved: BTreeSet<FlowId>,
     slots: BTreeMap<SocketAddrV4, SlotRec>,
-    readiness: BTreeSet<(SocketAddrV4, CellGeneration)>,
+    readiness: BTreeSet<SocketAddrV4>,
     release_reports: BTreeSet<SocketCookie>,
     live_cookies: BTreeSet<SocketCookie>,
-    listener_map: BTreeSet<ListenPort>,
     exhausted_sends: u64,
+    requests: Vec<FlowRequest>,
+    /// End records taken from the context and not yet delivered.
+    taken_ends: VecDeque<ForwardEnd>,
 }
 
-fn lock(state: &Mutex<SimState>) -> MutexGuard<'_, SimState> {
+fn lock<T>(state: &Mutex<T>) -> MutexGuard<'_, T> {
     state.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
@@ -566,6 +478,10 @@ impl SimState {
     fn handle(&mut self) -> Handle {
         let id = SocketId(self.next_socket);
         self.next_socket += 1;
+        Handle { seam: self.seam, id }
+    }
+
+    const fn same(&self, id: SocketId) -> Handle {
         Handle { seam: self.seam, id }
     }
 
@@ -594,15 +510,22 @@ impl SimState {
         self.effects.push(effect);
     }
 
-    /// Adds a terminal condition to a socket; reported now if the socket is
-    /// watched and this kind was not reported yet, else when it becomes watched.
+    fn require_connected(&self, id: SocketId) -> io::Result<()> {
+        if self.sockets.get(&id).is_some_and(Sock::connected) {
+            Ok(())
+        } else {
+            Err(io::Error::from(ErrorKind::NotConnected))
+        }
+    }
+
+    /// Adds a terminal condition; reported now if the socket is watched and
+    /// this kind was not reported yet.
     fn condition(&mut self, id: SocketId, hangup: GuestHangup) {
         let sock = self.sock(id);
         if sock.closed {
             return;
         }
-        let key = hangup_key(hangup);
-        sock.conditions.entry(key).or_insert(hangup);
+        sock.conditions.entry(hangup_key(hangup)).or_insert(hangup);
         self.report_conditions(id);
     }
 
@@ -623,6 +546,19 @@ impl SimState {
         }
     }
 
+    /// A socket stops being watched: its undelivered hangups are dropped.
+    fn unwatch(&mut self, id: SocketId) {
+        self.deliverable
+            .retain(|e| !matches!(e, GuestIoEvent::Hangup { socket, .. } if *socket == id));
+    }
+
+    /// The far end of `flow`'s outer leg saw `event` (first one wins).
+    fn far(&mut self, flow: Option<FlowId>, event: FarEndEvent) {
+        if let Some(flow) = flow {
+            self.far_end.entry(flow).or_insert(event);
+        }
+    }
+
     /// The guest ended one of its sockets (`abort` / `close`).
     fn end_socket(&mut self, id: SocketId, reset: bool) {
         let session = self.session;
@@ -632,75 +568,32 @@ impl SimState {
         }
         sock.closed = true;
         sock.read_pending = None;
-        let flow = sock.flow;
-        let outer = sock.outer;
-        let linger = sock.linger;
-        let flow_vsock = sock.is_flow_vsock();
-        let stage = sock.stage;
-        let partner = sock.partner;
-        // A socket that ends is no longer watched: drop its undelivered hangups.
-        self.deliverable
-            .retain(|e| !matches!(e, GuestIoEvent::Hangup { socket, .. } if *socket == id));
+        let (flow, outer, linger, stage, channel) =
+            (sock.flow, sock.outer, sock.linger, sock.stage, sock.channel);
+        // the kernel's own far-end event of an attached outer half came first
+        let kernel_end =
+            if outer { sock.kernel.as_ref().and_then(SimSocket::peer_end) } else { None };
+        self.unwatch(id);
         if session == Some(id) {
             self.session = None;
             self.session_ended = true;
             self.host_messages.clear();
         }
-        if let Some(flow) = flow {
-            if outer {
-                let event = if reset || linger { FarEndEvent::Reset } else { FarEndEvent::Eof };
-                self.far_end.entry(flow).or_insert(event);
-            }
-            if flow_vsock && self.vsock_ended.insert(flow) {
-                self.vsock_ends_in_flight.insert(flow);
-            }
-            if matches!(stage, Stage::LegStream | Stage::LegSeqpacket) {
-                self.legs_closed_unobserved.insert(flow);
-            }
+        if outer {
+            let event = match kernel_end {
+                Some(end) => end.into(),
+                None if reset || linger => FarEndEvent::Reset,
+                None => FarEndEvent::Eof,
+            };
+            self.far(flow, event);
         }
-        if matches!(stage, Stage::LegStream) {
-            if let Some(q) = partner {
-                self.end_socket(q, reset);
-            }
-            if let Some(slot) = self.sockets.get(&id).and_then(|s| s.slot) {
-                if let Some(rec) = self.slots.get_mut(&slot) {
-                    rec.legs = None;
-                    rec.routed = false;
-                }
-            }
+        let flow_vsock = matches!(stage, Stage::Inbound)
+            || (matches!(stage, Stage::Host | Stage::Pair)
+                && channel == Some(HostChannel::FlowStream))
+            || matches!(stage, Stage::Pair) && !outer;
+        if flow_vsock && let Some(flow) = flow {
+            self.vsock_ended.insert(flow);
         }
-    }
-
-    fn consume_abort(&mut self, ids: &[SocketId]) {
-        for id in ids {
-            self.end_socket(*id, true);
-        }
-    }
-
-    fn require_connected(&self, id: SocketId) -> io::Result<()> {
-        if self.sockets.get(&id).is_some_and(Sock::connected) {
-            Ok(())
-        } else {
-            Err(io::Error::from(ErrorKind::NotConnected))
-        }
-    }
-
-    fn new_pair(&mut self, vsock: SocketId, outer: SocketId) -> (GuestPairKey, Option<FlowId>) {
-        let key = GuestPairKey(self.next_pair);
-        self.next_pair += 1;
-        let flow = self.sock(vsock).flow;
-        for (id, stage) in [(vsock, Stage::PairVsock), (outer, Stage::PairOuter)] {
-            let sock = self.sock(id);
-            sock.stage = stage;
-            sock.pair = Some(key);
-            if sock.flow.is_none() {
-                sock.flow = flow;
-            }
-        }
-        self.pairs.insert(key, PairRec { vsock, outer });
-        self.report_conditions(vsock);
-        self.report_conditions(outer);
-        (key, flow)
     }
 
     fn slot_mut(&mut self, slot: SocketAddrV4) -> &mut SlotRec {
@@ -708,27 +601,52 @@ impl SimState {
     }
 
     fn free_slot(&self) -> Option<SocketAddrV4> {
-        self.slots.iter().find(|(_, r)| r.owner.is_none() && !r.quarantined).map(|(s, _)| *s)
+        self.slots.iter().find(|(_, r)| r.owner.is_none()).map(|(s, _)| *s)
     }
 
-    fn park(&mut self, slot: SocketAddrV4, tag: (SocketCookie, SocketAddrV4)) {
-        let rec = self.slot_mut(slot);
-        if rec.routed {
-            rec.forwarded += 1;
-            rec.to_host += 1;
-        } else {
-            rec.parked.insert(tag);
-            rec.parked_frames += 1;
-            let generation = rec.generation;
-            self.readiness.insert((slot, generation));
-        }
-    }
-
+    /// The (open) socket of `flow` matching `pred`.
     fn flow_socket(&self, flow: FlowId, pred: impl Fn(&Sock) -> bool) -> Option<SocketId> {
         self.sockets
             .iter()
-            .find(|(_, s)| !s.closed && s.flow == Some(flow) && pred(s))
+            .filter(|(_, s)| !s.closed && s.flow == Some(flow) && pred(s))
             .map(|(id, _)| *id)
+            .next_back()
+    }
+
+    fn pair_of(&self, flow: FlowId) -> Option<ForwardId> {
+        self.pairs.iter().filter(|(_, p)| p.flow == Some(flow)).map(|(id, _)| *id).next_back()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The guest's forwarder context
+// ---------------------------------------------------------------------------
+
+/// The guest's one forwarder context, until the guest owner's death releases
+/// it (the device's context table keeps the record).
+#[derive(Debug)]
+struct GuestContext {
+    device: SimForwarderDevice,
+    ctx: Mutex<Option<SimFlowForwarder>>,
+}
+
+impl GuestContext {
+    fn open() -> Self {
+        let device = SimForwarderDevice::new();
+        let ctx = device.open();
+        Self { device, ctx: Mutex::new(Some(ctx)) }
+    }
+
+    fn with<R>(&self, f: impl FnOnce(&SimFlowForwarder) -> R) -> R {
+        let ctx = lock(&self.ctx);
+        f(ctx.as_ref().expect("driver defect: the guest forwarder context was released"))
+    }
+
+    fn release(&self) {
+        let ctx = lock(&self.ctx).take();
+        if let Some(ctx) = ctx {
+            ctx.release();
+        }
     }
 }
 
@@ -742,46 +660,41 @@ impl SimState {
 pub(crate) struct SimGuestOwnerIo {
     state: Arc<Mutex<SimState>>,
     clock: Arc<SimGuestClock>,
+    fwd: Arc<GuestContext>,
 }
 
 impl SimGuestOwnerIo {
-    /// A guest with `GUEST_UDP_SLOTS` slots bound on
-    /// `workload_addr:GUEST_UDP_SLOT_BASE + n` (all free, generation 0), an
-    /// empty listener map, and no session. Reads `clock` — the instance the
-    /// owner reads.
+    /// A guest with `GUEST_UDP_SLOTS` slot sockets bound on
+    /// `workload_addr:GUEST_UDP_SLOT_BASE + n` (all free), one open forwarder
+    /// context (the setup's `open_forwarder`), and no session. Reads `clock` —
+    /// the instance the owner reads.
     pub(crate) fn new(workload_addr: Ipv4Addr, clock: Arc<SimGuestClock>) -> Self {
         let slots = (0..GUEST_UDP_SLOTS)
             .map(|n| {
                 let slot = SocketAddrV4::new(workload_addr, GUEST_UDP_SLOT_BASE + n);
                 let rec = SlotRec {
+                    kernel: SimSocket::udp(),
                     owner: None,
-                    quarantined: false,
-                    generation: CellGeneration(0),
-                    parked: BTreeSet::new(),
-                    parked_frames: 0,
-                    routed: false,
                     flow: None,
-                    legs: None,
-                    to_host: 0,
-                    to_guest: 0,
-                    forwarded: 0,
-                    fail_next_cell_creation: false,
+                    vsock: None,
+                    attached: None,
+                    origins: VecDeque::new(),
+                    discarded: 0,
+                    ended: 0,
+                    connected: false,
                 };
                 (slot, rec)
             })
             .collect();
         let state = SimState {
             seam: SeamInstance::next(),
+            workload_addr,
             next_socket: 1,
-            next_pair: 1,
             sockets: BTreeMap::new(),
             deliverable: VecDeque::new(),
-            waits: Vec::new(),
             effects: Vec::new(),
             failures: BTreeMap::new(),
             event_wait_failure: None,
-            drained_default: true,
-            drained: BTreeMap::new(),
             session: None,
             session_ended: false,
             host_closed: None,
@@ -790,19 +703,21 @@ impl SimGuestOwnerIo {
             outbox: Vec::new(),
             inbound: BTreeMap::new(),
             reset_in_queue: BTreeSet::new(),
+            last_checked_dial: None,
+            last_capture: None,
+            last_slot: None,
             pairs: BTreeMap::new(),
             far_end: BTreeMap::new(),
-            vsock_ends_in_flight: BTreeSet::new(),
             vsock_ended: BTreeSet::new(),
-            legs_closed_unobserved: BTreeSet::new(),
             slots,
             readiness: BTreeSet::new(),
             release_reports: BTreeSet::new(),
             live_cookies: BTreeSet::new(),
-            listener_map: BTreeSet::new(),
             exhausted_sends: 0,
+            requests: Vec::new(),
+            taken_ends: VecDeque::new(),
         };
-        Self { state: Arc::new(Mutex::new(state)), clock }
+        Self { state: Arc::new(Mutex::new(state)), clock, fwd: Arc::new(GuestContext::open()) }
     }
 
     fn st(&self) -> MutexGuard<'_, SimState> {
@@ -814,11 +729,32 @@ impl SimGuestOwnerIo {
         Arc::clone(&self.clock)
     }
 
-    // ----- QPROJ-7 read surface -------------------------------------------
+    // ----- QPROJ-7 / QPROJ-8 read surfaces --------------------------------
 
-    /// QPROJ-7 arbiter read surface (see the module docs for its pairings).
+    /// QPROJ-7 arbiter: the guest's socket facts. `parked` lists, per slot,
+    /// the origins of the datagrams the slot socket's kernel queue still holds
+    /// (the newest `queued()` of the origins the seam recorded); `far_end`
+    /// merges the far-end events the seam recorded at the guest's closes with
+    /// the kernel's `peer_end` of every open outer half.
     pub(crate) fn guest_socket_observation(&self) -> SimGuestSocketObservation {
         let st = self.st();
+        let mut far_end = st.far_end.clone();
+        for sock in st.sockets.values().filter(|s| s.outer && !s.closed) {
+            if let (Some(flow), Some(end)) =
+                (sock.flow, sock.kernel.as_ref().and_then(SimSocket::peer_end))
+            {
+                far_end.entry(flow).or_insert_with(|| end.into());
+            }
+        }
+        let parked = st
+            .slots
+            .iter()
+            .filter_map(|(s, r)| {
+                let queued = r.kernel.queued();
+                let tags: BTreeSet<_> = r.origins.iter().rev().take(queued).copied().collect();
+                (!tags.is_empty()).then_some((*s, tags))
+            })
+            .collect();
         SimGuestSocketObservation {
             queued_inbound: st
                 .inbound
@@ -827,57 +763,56 @@ impl SimGuestOwnerIo {
                 .map(|(flow, _)| *flow)
                 .collect(),
             reset_in_queue: st.reset_in_queue.clone(),
-            outbox: st.outbox.clone(),
-            session_ended: st.session_ended,
             readiness: st.readiness.clone(),
-            parked: st
-                .slots
-                .iter()
-                .filter(|(_, r)| !r.parked.is_empty())
-                .map(|(s, r)| (*s, r.parked.clone()))
-                .collect(),
+            parked,
             release_reports: st.release_reports.clone(),
-            legs_closed_unobserved: st.legs_closed_unobserved.clone(),
-            vsock_ends_in_flight: st.vsock_ends_in_flight.clone(),
-            vsock_ended: st.vsock_ended.clone(),
-            far_end: st.far_end.clone(),
+            far_end,
         }
     }
 
-    // ----- waits and delivery -----------------------------------------------
-
-    /// Events released and not yet taken by `next_event`.
-    pub(crate) fn deliverable(&self) -> usize {
-        self.st().deliverable.len()
+    /// QPROJ-8 arbiter: `pair_state` of the guest's context (the port's own
+    /// read). `None` once the context is released.
+    pub(crate) fn forwarder_pair_state(&self, id: ForwardId) -> Option<PairState> {
+        let ctx = lock(&self.fwd.ctx);
+        ctx.as_ref().and_then(|c| c.pair_state(id).expect("the sim context is never in error"))
     }
 
-    /// The deadline of the owner's most recent `next_event` call (outer `None`:
-    /// no call yet).
-    pub(crate) fn last_wait(&self) -> Option<Option<Instant>> {
-        self.st().waits.last().map(|w| w.deadline)
+    /// QPROJ-8 arbiter: `inventory` of the guest's context; `None` once the
+    /// context is released.
+    pub(crate) fn forwarder_inventory(&self) -> Option<ForwarderInventory> {
+        let ctx = lock(&self.fwd.ctx);
+        ctx.as_ref().map(|c| c.inventory().expect("the sim context is never in error"))
     }
 
-    /// The owner's most recent `next_event` call: its deadline and what it
-    /// returned (`None`: no call yet).
-    pub(crate) fn last_wait_record(&self) -> Option<SimWait> {
-        self.st().waits.last().copied()
+    /// QPROJ-8 arbiter: the guest device's context table (open or released,
+    /// and what each context still holds).
+    pub(crate) fn forwarder_contexts(&self) -> Vec<SimContextState> {
+        self.fwd.device.contexts()
     }
 
-    /// The owner's earliest armed deadline as its most recent wait passed it,
-    /// while that deadline is still armed: the wait blocked
-    /// ([`SimWouldBlock`] — after `test_support::settle` this is the owner's
-    /// current earliest deadline, including one armed while handling its last
-    /// input) or returned an event. A wait that returned at its deadline
-    /// consumed it (`None` until the owner waits again). Test support for a
-    /// driver's time actions; never a projection source.
-    pub(crate) fn armed_deadline(&self) -> Option<Instant> {
-        match self.st().waits.last() {
-            Some(SimWait {
-                deadline,
-                outcome: SimWaitOutcome::Event | SimWaitOutcome::WouldBlock,
-            }) => *deadline,
-            _ => None,
-        }
+    /// Steps the guest forwarder's queued runs until none is queued (the
+    /// kernel's work items; never run behind the test's back). Returns how
+    /// many ran.
+    pub(crate) fn run_forwarder(&self) -> u32 {
+        self.fwd.with(SimFlowForwarder::run_until_idle)
+    }
+
+    /// Steps one bounded run of the direction of pair `id` whose source is
+    /// `source`; `false` when none is queued.
+    pub(crate) fn run_forwarder_once(&self, id: ForwardId, source: PairSide) -> bool {
+        self.fwd.with(|c| c.run(id, source))
+    }
+
+    /// The directions with a queued run, `(id, source half)`.
+    pub(crate) fn forwarder_pending_runs(&self) -> Vec<(ForwardId, PairSide)> {
+        self.fwd.with(SimFlowForwarder::pending_runs)
+    }
+
+    // ----- delivery and quiescence (DG-5-Q) -------------------------------
+
+    /// An event is released and not yet delivered (DG-5-Q).
+    pub(crate) fn released_undelivered(&self) -> bool {
+        !self.st().deliverable.is_empty()
     }
 
     /// Every seam call the owner made, in order.
@@ -902,19 +837,9 @@ impl SimGuestOwnerIo {
         self.st().event_wait_failure = Some(kind);
     }
 
-    /// Creating a new cell for `slot` fails at its next `end_association`.
-    pub(crate) fn fail_cell_creation(&self, slot: SocketAddrV4) {
-        self.st().slot_mut(slot).fail_next_cell_creation = true;
-    }
-
-    /// What `drained` answers when no per-flow answer is set (default `true`).
-    pub(crate) fn set_drained_default(&self, drained: bool) {
-        self.st().drained_default = drained;
-    }
-
-    /// What `drained` answers for `flow`'s `direction`.
-    pub(crate) fn set_drained(&self, flow: FlowId, direction: GuestFlowDirection, drained: bool) {
-        self.st().drained.insert((flow, direction), drained);
+    /// A listener's accept fails (`ListenerFailed`), released at once.
+    pub(crate) fn listener_failed(&self, listener: GuestListener, kind: ErrorKind) {
+        self.st().deliverable.push_back(GuestIoEvent::ListenerFailed { listener, kind });
     }
 
     // ----- connects the owner started -------------------------------------------
@@ -938,7 +863,10 @@ impl SimGuestOwnerIo {
             .collect()
     }
 
-    /// Releases the completion of `socket`'s connect.
+    /// Releases the completion of `socket`'s connect. A C whose connect
+    /// completes `Ok` gets its connected kernel TCP socket here (the
+    /// application accepted), unless [`Self::accept_app_connect`] already
+    /// made it.
     pub(crate) fn complete_connect(&self, socket: SocketId, result: Result<(), ErrorKind>) {
         let mut st = self.st();
         let sock = st.sock(socket);
@@ -947,7 +875,27 @@ impl SimGuestOwnerIo {
             "driver defect: {socket:?} has no connect in flight"
         );
         sock.connect = Connect::Released;
+        if sock.stage == Stage::App && result.is_ok() && sock.kernel.is_none() {
+            sock.kernel = Some(SimSocket::tcp());
+        }
         st.deliverable.push_back(GuestIoEvent::Connected { socket, result });
+    }
+
+    /// The application accepts the dial `flow`'s C: its kernel TCP socket is
+    /// connected (the application may write, half-close or reset at once),
+    /// and the completion stays held — the guest owner learns of it only when
+    /// [`Self::complete_app_connect`] releases it. Returns C's kernel socket.
+    pub(crate) fn accept_app_connect(&self, flow: FlowId) -> SimSocket {
+        let socket = self
+            .pending_connects()
+            .into_iter()
+            .find(|(_, t)| matches!(t, SimConnectTarget::App { flow: Some(f), .. } if *f == flow))
+            .map_or_else(
+                || panic!("driver defect: no application connect in flight for {flow:?}"),
+                |(id, _)| id,
+            );
+        let mut st = self.st();
+        st.sock(socket).kernel.get_or_insert_with(SimSocket::tcp).clone()
     }
 
     /// Releases the oldest in-flight host connect on `channel`.
@@ -960,13 +908,15 @@ impl SimGuestOwnerIo {
             .pending_connects()
             .into_iter()
             .find(|(_, t)| *t == SimConnectTarget::Host(channel))
-            .map(|(id, _)| id)
-            .unwrap_or_else(|| panic!("driver defect: no {channel:?} connect in flight"));
+            .map_or_else(
+                || panic!("driver defect: no {channel:?} connect in flight"),
+                |(id, _)| id,
+            );
         self.complete_connect(socket, result);
         socket
     }
 
-    /// Releases the in-flight application connect armed toward `flow`'s V_g.
+    /// Releases the in-flight application connect (C) of the dial `flow`.
     pub(crate) fn complete_app_connect(
         &self,
         flow: FlowId,
@@ -976,10 +926,10 @@ impl SimGuestOwnerIo {
             .pending_connects()
             .into_iter()
             .find(|(_, t)| matches!(t, SimConnectTarget::App { flow: Some(f), .. } if *f == flow))
-            .map(|(id, _)| id)
-            .unwrap_or_else(|| {
-                panic!("driver defect: no application connect in flight for {flow:?}")
-            });
+            .map_or_else(
+                || panic!("driver defect: no application connect in flight for {flow:?}"),
+                |(id, _)| id,
+            );
         self.complete_connect(socket, result);
         socket
     }
@@ -989,6 +939,11 @@ impl SimGuestOwnerIo {
     /// The live session socket (`Connected` delivered, not ended).
     pub(crate) fn session_socket(&self) -> Option<SocketId> {
         self.st().session
+    }
+
+    /// The session has ended (and no new one has connected since).
+    pub(crate) fn session_ended(&self) -> bool {
+        self.st().session_ended
     }
 
     /// Every `ControlOpen` the guest wrote, raw, in order.
@@ -1026,42 +981,30 @@ impl SimGuestOwnerIo {
         self.release_control_read();
     }
 
+    /// The messages the guest wrote and the host has not consumed.
+    pub(crate) fn outbox(&self) -> Vec<ControlMessage> {
+        self.st().outbox.clone()
+    }
+
     /// The host consumes every message the guest wrote and returns them.
     pub(crate) fn take_outbox(&self) -> Vec<ControlMessage> {
         std::mem::take(&mut self.st().outbox)
     }
 
-    /// The host consumes the first written message equal to `message`;
-    /// `false` when the outbox holds none.
-    pub(crate) fn host_take_message(&self, message: ControlMessage) -> bool {
+    /// The host consumes the oldest message the guest wrote that matches
+    /// `pred`.
+    pub(crate) fn host_take_first(
+        &self,
+        pred: impl Fn(&ControlMessage) -> bool,
+    ) -> Option<ControlMessage> {
         let mut st = self.st();
-        match st.outbox.iter().position(|m| *m == message) {
-            Some(i) => {
-                st.outbox.remove(i);
-                true
-            }
-            None => false,
-        }
+        let i = st.outbox.iter().position(pred)?;
+        Some(st.outbox.remove(i))
     }
 
-    /// The guest owner process dies (the driver dropped the owner): the kernel
-    /// closes every socket it held — linger resets each application leg, every
-    /// flow vsock and leg ends, the session ends.
-    pub(crate) fn guest_owner_dies(&self) {
-        let mut st = self.st();
-        let open: Vec<SocketId> =
-            st.sockets.iter().filter(|(_, s)| !s.closed).map(|(id, _)| *id).collect();
-        for id in open {
-            st.end_socket(id, true);
-        }
-        st.session = None;
-        st.session_ended = true;
-        st.host_closed = None;
-    }
-
-    /// The host ends the control session: a pending read completes at EOF (or
-    /// `ECONNRESET`); with no read pending, the session socket reports
-    /// `POLLHUP` (or `POLLERR`).
+    /// The host ends the control session now: a pending read completes at EOF
+    /// (or with the error); with no read pending, the session socket reports
+    /// `POLLRDHUP` (or `POLLERR`). K-A5: a host close is EOF / `EPOLLRDHUP`.
     pub(crate) fn end_session(&self, how: SimSessionEnd) {
         let mut st = self.st();
         let Some(session) = st.session.take() else { return };
@@ -1077,44 +1020,18 @@ impl SimGuestOwnerIo {
             st.deliverable.push_back(GuestIoEvent::Read { socket: session, result });
         } else {
             let hangup = match how {
-                SimSessionEnd::Eof => GuestHangup::Hangup,
+                SimSessionEnd::Eof => GuestHangup::ReadHangup,
                 SimSessionEnd::Reset => GuestHangup::Error(ErrorKind::ConnectionReset),
             };
-            st.sock(session).conditions.insert(hangup_key(hangup), hangup);
-            st.deliverable.push_back(GuestIoEvent::Hangup { socket: session, hangup });
-            st.sock(session).reported.insert(hangup_key(hangup));
+            st.condition(session, hangup);
         }
     }
 
-    /// The host owner dies (`serve` killed): every guest flow vsock ends with no
-    /// announcement, then the session is reset (P-42 order).
-    pub(crate) fn host_owner_dies(&self) {
-        let flows: Vec<FlowId> = {
-            let st = self.st();
-            let queued = st.inbound.iter().filter(|(_, r)| r.socket.is_none()).map(|(f, _)| *f);
-            let open = st
-                .sockets
-                .values()
-                .filter(|s| !s.closed && s.is_flow_vsock())
-                .filter_map(|s| s.flow);
-            queued.chain(open).collect()
-        };
-        for flow in flows {
-            self.host_vsock_end(flow);
-        }
-        self.end_session(SimSessionEnd::Reset);
-    }
-
-    /// The host ends the control session, and the guest has not observed it
-    /// yet (K-B4: an owner's in-flight messages are delivered before the
-    /// survivor observes the loss). `session_ended` holds from now on; the
-    /// host's buffered messages stay readable (`release_control_read`); the
-    /// guest's later writes are lost; nothing is delivered until
-    /// `release_session_end`.
+    /// The host ends the control session and the guest has not observed it
+    /// yet: nothing is delivered until [`Self::release_session_end`].
     pub(crate) fn host_end_session_deferred(&self, how: SimSessionEnd) {
         let mut st = self.st();
         assert!(st.session.is_some(), "driver defect: no live session to end");
-        st.session_ended = true;
         st.host_closed = Some(how);
     }
 
@@ -1123,36 +1040,62 @@ impl SimGuestOwnerIo {
         self.st().host_closed.is_some()
     }
 
-    /// Releases a deferred end (`host_end_session_deferred`) to the guest,
-    /// as `end_session` with the deferred kind.
+    /// Releases a deferred end to the guest.
     pub(crate) fn release_session_end(&self) {
         let how = self.st().host_closed.take().expect("driver defect: no deferred session end");
         self.end_session(how);
     }
 
-    /// The host consumes the oldest message the guest wrote (FIFO).
-    pub(crate) fn host_take_next(&self) -> Option<ControlMessage> {
+    /// The guest owner process dies with its VM (the driver dropped the
+    /// owner): the guest's forwarder context is released (every pair
+    /// aborted, no record) and the kernel closes every socket it held.
+    pub(crate) fn guest_owner_dies(&self) {
+        self.fwd.release();
         let mut st = self.st();
-        if st.outbox.is_empty() { None } else { Some(st.outbox.remove(0)) }
+        let open: Vec<SocketId> =
+            st.sockets.iter().filter(|(_, s)| !s.closed).map(|(id, _)| *id).collect();
+        for id in open {
+            st.end_socket(id, true);
+        }
+        st.session = None;
+        st.session_ended = true;
+        st.host_closed = None;
+        st.deliverable.clear();
     }
 
-    /// The host consumes the oldest message the guest wrote that matches
-    /// `pred`.
-    pub(crate) fn host_take_first(
-        &self,
-        pred: impl Fn(&ControlMessage) -> bool,
-    ) -> Option<ControlMessage> {
-        let mut st = self.st();
-        let i = st.outbox.iter().position(pred)?;
-        Some(st.outbox.remove(i))
+    /// The host owner dies (`serve` killed): its context's release shuts every
+    /// host flow vsock both ways, which reaches each guest flow vsock as a
+    /// `0x3` (V-31 item 2c): an attached V_g is classified by the guest
+    /// forwarder as an abort; an unattached one reports its end; a V_g still
+    /// queued is torn down there; then the session ends (EOF).
+    pub(crate) fn host_owner_dies(&self) {
+        let flows: Vec<FlowId> = {
+            let st = self.st();
+            let queued = st.inbound.iter().filter(|(_, r)| r.socket.is_none()).map(|(f, _)| *f);
+            let open = st
+                .sockets
+                .values()
+                .filter(|s| {
+                    !s.closed
+                        && !s.outer
+                        && (matches!(s.stage, Stage::Inbound | Stage::Pair)
+                            || s.channel == Some(HostChannel::FlowStream))
+                })
+                .filter_map(|s| s.flow);
+            queued.chain(open).collect()
+        };
+        for flow in flows {
+            self.host_vsock_end(flow);
+        }
+        self.end_session(SimSessionEnd::Eof);
     }
 
-    /// A scripted error on `flow`'s guest vsock (`POLLERR` with `kind`).
+    /// A scripted error on `flow`'s unattached guest vsock (`POLLERR`).
     pub(crate) fn flow_vsock_error(&self, flow: FlowId, kind: ErrorKind) {
         let mut st = self.st();
         let id = st
-            .flow_socket(flow, Sock::is_flow_vsock)
-            .expect("driver defect: no open vsock for that flow");
+            .flow_socket(flow, |s| !s.outer && matches!(s.stage, Stage::Host | Stage::Inbound))
+            .expect("driver defect: no unattached vsock for that flow");
         st.condition(id, GuestHangup::Error(kind));
     }
 
@@ -1164,7 +1107,18 @@ impl SimGuestOwnerIo {
         let FlowRequest::TcpAccept { flow, .. } = request else {
             panic!("driver defect: the host opens only TcpAccept flows on 1242");
         };
-        self.st().inbound.insert(flow, InboundRec { request, socket: None });
+        self.st()
+            .inbound
+            .insert(flow, InboundRec { request: Some(request), socket: None, host_closed: false });
+    }
+
+    /// The host connects V_h to the guest for host-origin `flow` and writes no
+    /// byte: V_g waits in the guest accept queue with nothing buffered (its
+    /// request read completes at EOF before any byte).
+    pub(crate) fn host_open_accept_without_request(&self, flow: FlowId) {
+        self.st()
+            .inbound
+            .insert(flow, InboundRec { request: None, socket: None, host_closed: false });
     }
 
     /// Releases the guest's accept of `flow`'s V_g (`InboundAccepted`).
@@ -1175,18 +1129,22 @@ impl SimGuestOwnerIo {
         let rec = st.inbound.get_mut(&flow).expect("driver defect: no V_g queued for that flow");
         assert!(rec.socket.is_none(), "driver defect: V_g already accepted");
         rec.socket = Some(id);
-        let mut sock = Sock::new(Stage::Inbound);
+        let host_closed = rec.host_closed;
+        let mut sock = Sock::new(Stage::Inbound, Some(SimSocket::vsock_stream()));
         sock.flow = Some(flow);
+        sock.connect = Connect::Delivered(Ok(()));
+        sock.peer_ended = host_closed;
         st.sockets.insert(id, sock);
         st.deliverable.push_back(GuestIoEvent::InboundAccepted { conn: InboundConn(handle) });
     }
 
-    /// Releases the pending read of `flow`'s request on V_g.
+    /// Releases the pending read of `flow`'s request on V_g (EOF before any
+    /// byte when the host wrote none).
     pub(crate) fn release_inbound_request(&self, flow: FlowId) {
         let mut st = self.st();
         let rec = st.inbound.get(&flow).expect("driver defect: no V_g for that flow");
         let id = rec.socket.expect("driver defect: V_g not accepted yet");
-        let bytes = rec.request.encode().to_vec();
+        let bytes = rec.request.map(|r| r.encode().to_vec()).unwrap_or_default();
         let sock = st.sock(id);
         assert!(
             sock.read_pending == Some(GuestRecord::FlowRequest),
@@ -1196,145 +1154,271 @@ impl SimGuestOwnerIo {
         st.deliverable.push_back(GuestIoEvent::Read { socket: id, result: Ok(bytes) });
     }
 
-    /// The host ends `flow`'s vsock (closes V_h, aborts, or dies): a V_g still in
-    /// the accept queue is torn down there (K-A4); an accepted V_g reports the
-    /// end through `inbound_ended`; a routed V_g reports `POLLRDHUP`.
+    /// The host closes V_h of `flow` (a dial's abort or deadline, a guest
+    /// flow's refusal, the host owner's death): a V_g still in the guest
+    /// accept queue is torn down there (K-A4); an accepted, unattached V_g
+    /// reports `POLLRDHUP` (DG-5-E) and `inbound_ended` reads true; an
+    /// unattached guest-opened flow V_g reports `POLLRDHUP`; an attached V_g
+    /// receives the host's `0x3` (the release's `SHUT_RDWR`, EVMOD-CTL), which
+    /// its pair's callback classifies in this call — the end record is held
+    /// until [`Self::release_forward_end`].
     pub(crate) fn host_vsock_end(&self, flow: FlowId) {
-        let mut st = self.st();
-        if st.inbound.get(&flow).is_some_and(|r| r.socket.is_none()) {
-            st.inbound.remove(&flow);
-            st.reset_in_queue.insert(flow);
-            return;
+        let attached = {
+            let mut st = self.st();
+            if let Some(rec) = st.inbound.get_mut(&flow) {
+                rec.host_closed = true;
+                if rec.socket.is_none() {
+                    st.inbound.remove(&flow);
+                    st.reset_in_queue.insert(flow);
+                    return;
+                }
+            }
+            let Some(id) = st.flow_socket(flow, |s| !s.outer) else { return };
+            if st.sock(id).stage == Stage::Pair {
+                Some(st.sock(id).kernel().clone())
+            } else {
+                st.sock(id).peer_ended = true;
+                st.condition(id, GuestHangup::ReadHangup);
+                None
+            }
+        };
+        if let Some(vsock) = attached {
+            vsock.peer_shutdown(SimShutdown::Both);
         }
-        let Some(id) = st.flow_socket(flow, Sock::is_flow_vsock) else { return };
-        st.sock(id).peer_ended = true;
-        st.condition(id, GuestHangup::ReadHangup);
     }
 
-    /// The host observes the guest's end of `flow`'s vsock.
-    pub(crate) fn host_observe_vsock_end(&self, flow: FlowId) {
-        self.st().vsock_ends_in_flight.remove(&flow);
+    /// The vsock flows the guest has closed (test support: the host's view of
+    /// its V_h's end).
+    pub(crate) fn vsock_ended(&self) -> BTreeSet<FlowId> {
+        self.st().vsock_ended.clone()
     }
 
-    /// The host observes the end of `flow`'s datagram legs.
-    pub(crate) fn host_observe_legs_end(&self, flow: FlowId) {
-        self.st().legs_closed_unobserved.remove(&flow);
-    }
+    // ----- guest-opened flows (TcpConnect) ----------------------------------------
 
-    // ----- application side -------------------------------------------------------
-
-    /// The application's `connect()` is captured: the intake child I is
-    /// accepted (`OutboundCaptured`). Marks `cookie` live.
-    pub(crate) fn app_connect(
-        &self,
-        cookie: SocketCookie,
-        original_destination: SocketAddrV4,
-        parked: bool,
-    ) -> SocketId {
+    /// An application's `connect()` is captured: the TCP intake accepts its
+    /// child I (unattached; the application's early bytes and FIN wait in its
+    /// queue), released at once (`OutboundCaptured`). Returns I's socket id.
+    pub(crate) fn app_connect(&self, cookie: SocketCookie, destination: SocketAddrV4) -> SocketId {
         let mut st = self.st();
         let handle = st.handle();
         let id = handle.id;
-        let mut sock = Sock::new(Stage::Captured);
-        sock.cookie = Some(cookie);
+        let mut sock = Sock::new(Stage::Captured, Some(SimSocket::tcp()));
         sock.outer = true;
         sock.linger = true;
+        sock.connect = Connect::Delivered(Ok(()));
         st.sockets.insert(id, sock);
         st.live_cookies.insert(cookie);
         st.deliverable.push_back(GuestIoEvent::OutboundCaptured {
             child: CapturedConn(handle),
-            original_destination,
+            original_destination: destination,
             cookie,
-            parked,
         });
         id
     }
 
-    /// The application half-closes or resets its connection.
-    pub(crate) fn app_end(&self, target: SimAppTarget, how: SimAppEnd) {
-        let mut st = self.st();
-        let id = match target {
-            SimAppTarget::Captured(cookie) => st
-                .sockets
-                .iter()
-                .find(|(_, s)| !s.closed && s.outer && s.cookie == Some(cookie))
-                .map(|(id, _)| *id),
-            SimAppTarget::Flow(flow) => st.flow_socket(flow, |s| s.outer),
-        }
-        .unwrap_or_else(|| panic!("driver defect: no open application leg for {target:?}"));
-        let hangup = match how {
-            SimAppEnd::HalfClose => GuestHangup::ReadHangup,
-            SimAppEnd::Reset => GuestHangup::Error(ErrorKind::ConnectionReset),
-        };
-        st.condition(id, hangup);
+    /// The flow id the owner wrote in the request on `socket` (a flow V_g).
+    pub(crate) fn flow_of(&self, socket: SocketId) -> Option<FlowId> {
+        self.st().sockets.get(&socket).and_then(|s| s.flow)
     }
 
-    /// The application sends a datagram to `destination` from socket `cookie`
-    /// (the guest capture program): the slot the pair owns, or the lowest free
-    /// slot; `Err(PermissionDenied)` when none is free (D25 exhaustion).
+    /// Every flow request the guest wrote, in order.
+    pub(crate) fn requests(&self) -> Vec<FlowRequest> {
+        self.st().requests.clone()
+    }
+
+    /// The kernel socket of a guest socket the sim issued (I by its socket id,
+    /// before the owner wrote any request).
+    pub(crate) fn kernel_socket(&self, socket: SocketId) -> SimSocket {
+        self.st().sock(socket).kernel().clone()
+    }
+
+    /// The application resets the captured connection `socket` (I) while it
+    /// is unattached: its kernel half is reset and the seam reports
+    /// `Hangup { Error }` (EVMOD-PAIR: an unattached intake child is observed
+    /// only for its error).
+    pub(crate) fn app_reset_captured(&self, socket: SocketId) {
+        let kernel = self.kernel_socket(socket);
+        kernel.peer_reset();
+        self.st().condition(socket, GuestHangup::Error(ErrorKind::ConnectionReset));
+    }
+
+    // ----- kernel facts of a flow's sockets ---------------------------------------
+
+    /// The pair the guest forwarder accepted for `flow`, if any.
+    pub(crate) fn pair_of(&self, flow: FlowId) -> Option<ForwardId> {
+        self.st().pair_of(flow)
+    }
+
+    /// The half of `flow`'s pair that V_g is (`A` for TcpAccept, `B` for
+    /// TcpConnect and datagram associations, "Sides and pairs").
+    pub(crate) fn vsock_side(&self, flow: FlowId) -> Option<PairSide> {
+        let st = self.st();
+        st.pair_of(flow).and_then(|id| st.pairs.get(&id)).map(|p| p.vsock_side)
+    }
+
+    /// The kernel socket of one half of `flow` (open or closed): V_g, or the
+    /// outer leg I / C. The far side of a half is scripted on it (`peer_*`)
+    /// and its far side's observations are read from it (`peer_received`,
+    /// `peer_end`); test support and the drivers' stimulus.
+    pub(crate) fn flow_socket(&self, flow: FlowId, half: SimHalf) -> Option<SimSocket> {
+        let st = self.st();
+        st.sockets
+            .values()
+            .filter(|s| s.flow == Some(flow) && s.outer == (half == SimHalf::Outer))
+            .filter(|s| s.slot.is_none())
+            .filter_map(|s| s.kernel.clone())
+            .next_back()
+    }
+
+    /// The application resets `flow`'s outer leg (`TcpRst` at the guest): the
+    /// kernel half's far peer resets (a hooked half's `sk_error_report` runs
+    /// in this call); an unattached intake child also reports `Hangup {
+    /// Error }`.
+    pub(crate) fn app_reset(&self, flow: FlowId) {
+        let (kernel, unattached) = {
+            let st = self.st();
+            let id = st
+                .sockets
+                .iter()
+                .filter(|(_, s)| s.flow == Some(flow) && s.outer && !s.closed)
+                .map(|(id, _)| *id)
+                .next_back()
+                .expect("driver defect: the flow has no open outer leg");
+            let sock = &st.sockets[&id];
+            (sock.kernel().clone(), (sock.stage == Stage::Captured).then_some(id))
+        };
+        kernel.peer_reset();
+        if let Some(id) = unattached {
+            self.st().condition(id, GuestHangup::Error(ErrorKind::ConnectionReset));
+        }
+    }
+
+    /// Releases the guest context's oldest queued end record as a
+    /// `ForwardEnded` event (`take_end` on the context's readiness). Returns
+    /// the record, `None` when none is queued.
+    pub(crate) fn release_forward_end(&self) -> Option<ForwardEnd> {
+        let end = self.fwd.with(|c| c.take_end().expect("the sim context is never in error"))?;
+        self.st().deliverable.push_back(GuestIoEvent::ForwardEnded { end });
+        Some(end)
+    }
+
+    /// Releases every queued end record (test support).
+    pub(crate) fn release_forward_ends(&self) -> Vec<ForwardEnd> {
+        std::iter::from_fn(|| self.release_forward_end()).collect()
+    }
+
+    /// `take_end` on the guest context's readiness, the record held — not yet
+    /// delivered to the owner — until [`Self::deliver_taken_forward_ends`]
+    /// (a driver that steps the context's read and the owner's dispatch of it
+    /// as two model steps). Returns the record, `None` when none is queued.
+    pub(crate) fn take_forward_end(&self) -> Option<ForwardEnd> {
+        let end = self.fwd.with(|c| c.take_end().expect("the sim context is never in error"))?;
+        self.st().taken_ends.push_back(end);
+        Some(end)
+    }
+
+    /// Delivers every record [`Self::take_forward_end`] holds as a
+    /// `ForwardEnded` event; `false` when none is held.
+    pub(crate) fn deliver_taken_forward_ends(&self) -> bool {
+        let mut st = self.st();
+        if st.taken_ends.is_empty() {
+            return false;
+        }
+        while let Some(end) = st.taken_ends.pop_front() {
+            st.deliverable.push_back(GuestIoEvent::ForwardEnded { end });
+        }
+        true
+    }
+
+    // ----- datagram slots -----------------------------------------------------------
+
+    /// An application socket `cookie` sends one datagram to `destination`: the
+    /// capture program assigns the slot this (socket, destination) owns, or
+    /// claims a free one; with no free slot the send is refused `EPERM` and
+    /// counted (`None`). The datagram is queued in the slot socket (its
+    /// kernel queue; the forwarder's run carries it once the slot is
+    /// attached); an unattached slot with no association raises a readiness
+    /// event (held until released).
     pub(crate) fn app_send(
         &self,
         cookie: SocketCookie,
         destination: SocketAddrV4,
-    ) -> Result<SocketAddrV4, ErrorKind> {
-        let mut st = self.st();
-        st.live_cookies.insert(cookie);
-        let tag = (cookie, destination);
-        let owned =
-            st.slots.iter().find(|(_, r)| r.owner == Some(tag) && !r.quarantined).map(|(s, _)| *s);
-        let slot = match owned.or_else(|| st.free_slot()) {
-            Some(slot) => slot,
-            None => {
-                st.exhausted_sends += 1;
-                return Err(ErrorKind::PermissionDenied);
-            }
+    ) -> Option<SocketAddrV4> {
+        let owned = {
+            let st = self.st();
+            st.slots.iter().find(|(_, r)| r.owner == Some((cookie, destination))).map(|(s, _)| *s)
         };
-        st.slot_mut(slot).owner = Some(tag);
-        st.park(slot, tag);
-        Ok(slot)
+        let Some(slot) = owned.or_else(|| self.st().free_slot()) else {
+            self.st().exhausted_sends += 1;
+            return None;
+        };
+        self.app_send_on(cookie, destination, slot);
+        Some(slot)
     }
 
-    /// As `app_send`, claiming `slot` (which must be free) for a new pair — the
-    /// driver's choice of the model's nondeterministic slot.
+    /// As [`Self::app_send`], on the slot `slot` the driver chose (the model's
+    /// nondeterministic claim): the slot must be free or already owned by
+    /// `(cookie, destination)`.
     pub(crate) fn app_send_on(
         &self,
         cookie: SocketCookie,
         destination: SocketAddrV4,
         slot: SocketAddrV4,
     ) {
-        let mut st = self.st();
-        st.live_cookies.insert(cookie);
-        let tag = (cookie, destination);
-        let rec = st.slot_mut(slot);
-        assert!(
-            rec.owner == Some(tag) || (rec.owner.is_none() && !rec.quarantined),
-            "driver defect: {slot} is owned by another (socket, destination)"
-        );
-        rec.owner = Some(tag);
-        st.park(slot, tag);
+        let kernel = {
+            let mut st = self.st();
+            st.live_cookies.insert(cookie);
+            let rec = st.slot_mut(slot);
+            assert!(
+                rec.owner.is_none() || rec.owner == Some((cookie, destination)),
+                "driver defect: {slot} is owned by another (socket, destination)"
+            );
+            rec.owner = Some((cookie, destination));
+            rec.origins.push_back((cookie, destination));
+            let idle = rec.attached.is_none() && rec.vsock.is_none() && rec.flow.is_none();
+            let kernel = rec.kernel.clone();
+            if idle {
+                st.readiness.insert(slot);
+            }
+            kernel
+        };
+        kernel.peer_send(&[1]);
     }
 
-    /// Sends that found no free slot (`guest_udp_slot_exhausted`).
+    /// Sends refused for lack of a free slot (`guest_udp_slot_exhausted`).
     pub(crate) fn exhausted_sends(&self) -> u64 {
         self.st().exhausted_sends
     }
 
-    /// The host forwards a datagram to the guest on `slot`'s association.
-    pub(crate) fn host_datagram(&self, slot: SocketAddrV4) {
+    /// Releases `slot`'s readiness event (`SlotReady`).
+    pub(crate) fn release_slot_ready(&self, slot: SocketAddrV4) {
         let mut st = self.st();
-        let rec = st.slot_mut(slot);
-        assert!(rec.routed, "driver defect: {slot} has no routed association");
-        rec.to_guest += 1;
+        assert!(st.readiness.remove(&slot), "driver defect: no readiness pending on {slot}");
+        st.deliverable.push_back(GuestIoEvent::SlotReady { slot });
     }
 
-    /// Releases the readiness event `(slot, generation)` (`SlotReady`).
-    pub(crate) fn release_slot_ready(&self, slot: SocketAddrV4, generation: CellGeneration) {
-        let mut st = self.st();
-        assert!(st.readiness.remove(&(slot, generation)), "driver defect: no such readiness event");
-        st.deliverable.push_back(GuestIoEvent::SlotReady { slot, generation });
+    /// The kernel slot socket S of `slot`'s current association (test support
+    /// and the drivers' stimulus; the application is its far peer).
+    pub(crate) fn slot_socket(&self, slot: SocketAddrV4) -> SimSocket {
+        self.st().slot_mut(slot).kernel.clone()
     }
 
-    /// The application socket `cookie` is released; `report` = the
-    /// `sock_release` report was queued (else it was lost, K-B2).
+    /// The V_g of `slot`'s current association (the host is its far peer).
+    pub(crate) fn slot_vsock(&self, slot: SocketAddrV4) -> Option<SimSocket> {
+        let mut st = self.st();
+        let id = st.slot_mut(slot).vsock?;
+        st.sockets.get(&id).and_then(|s| s.kernel.clone())
+    }
+
+    /// The host sends one datagram frame toward the guest on `slot`'s attached
+    /// association (`frame` is the ADR-0149 frame the host forwarder wrote).
+    pub(crate) fn host_datagram(&self, slot: SocketAddrV4, frame: &[u8]) {
+        let vsock = self.slot_vsock(slot).expect("driver defect: the slot has no V_g");
+        vsock.peer_send(frame);
+    }
+
+    /// The application socket `cookie` is released, its `sock_release` report
+    /// queued (held) when `report`, lost otherwise.
     pub(crate) fn app_close_socket(&self, cookie: SocketCookie, report: bool) {
         let mut st = self.st();
         st.live_cookies.remove(&cookie);
@@ -1343,88 +1427,74 @@ impl SimGuestOwnerIo {
         }
     }
 
-    /// Releases the queued `sock_release` report of `cookie` (`SocketReleased`).
+    /// Releases `cookie`'s `sock_release` report (`SocketReleased`).
     pub(crate) fn release_socket_report(&self, cookie: SocketCookie) {
         let mut st = self.st();
-        assert!(
-            st.release_reports.remove(&cookie),
-            "driver defect: no report queued for that cookie"
-        );
+        assert!(st.release_reports.remove(&cookie), "driver defect: no report queued for it");
         st.deliverable.push_back(GuestIoEvent::SocketReleased { cookie });
     }
 
-    /// Test-support snapshot of `slot` in the sim's guest kernel.
+    /// Test-support view of `slot`.
     pub(crate) fn slot_state(&self, slot: SocketAddrV4) -> SimSlotState {
         let mut st = self.st();
         let rec = st.slot_mut(slot);
         SimSlotState {
             owner: rec.owner,
-            in_pool: rec.owner.is_none() && !rec.quarantined,
-            quarantined: rec.quarantined,
-            generation: rec.generation,
-            parked_frames: rec.parked_frames,
-            routed: rec.routed,
             flow: rec.flow,
-            legs_installed: rec.legs.is_some(),
-            forwarded_frames: rec.forwarded,
+            attached: rec.attached,
+            connected: rec.connected,
+            discarded: rec.discarded,
+            ended: rec.ended,
         }
     }
 
-    // ----- listeners -----------------------------------------------------------------
-
-    /// Replaces the kernel listener map.
-    pub(crate) fn set_listener_map(&self, ports: BTreeSet<ListenPort>) {
-        self.st().listener_map = ports;
+    /// The datagram flow V_g of `slot`'s association (test support).
+    pub(crate) fn slot_flow(&self, slot: SocketAddrV4) -> Option<FlowId> {
+        self.st().slots.get(&slot).and_then(|r| r.flow)
     }
 
-    /// The listener map changed: a `ListenerMapWake` record.
-    pub(crate) fn listener_map_wake(&self) {
-        self.st().deliverable.push_back(GuestIoEvent::ListenerMapWake);
-    }
-
-    /// A setup listener's accept failed (`ListenerFailed`).
-    pub(crate) fn listener_failed(&self, listener: GuestListener, kind: ErrorKind) {
-        self.st().deliverable.push_back(GuestIoEvent::ListenerFailed { listener, kind });
+    /// The guest's workload address.
+    pub(crate) fn workload_addr(&self) -> Ipv4Addr {
+        self.st().workload_addr
     }
 }
+
+// ---------------------------------------------------------------------------
+// The seam implementation
+// ---------------------------------------------------------------------------
 
 impl GuestOwnerIo for SimGuestOwnerIo {
     fn next_event(&mut self, deadline: Option<Instant>) -> io::Result<Option<GuestIoEvent>> {
         let now = self.clock.now();
         let mut st = self.st();
         if let Some(kind) = st.event_wait_failure.take() {
-            st.waits.push(SimWait { deadline, outcome: SimWaitOutcome::Failed });
             return Err(io::Error::from(kind));
         }
         if let Some(event) = st.deliverable.pop_front() {
-            st.waits.push(SimWait { deadline, outcome: SimWaitOutcome::Event });
+            st.last_capture = None;
+            st.last_slot = None;
+            match &event {
+                GuestIoEvent::OutboundCaptured { child, .. } => st.last_capture = Some(child.id()),
+                GuestIoEvent::SlotReady { slot } => st.last_slot = Some(*slot),
+                _ => {}
+            }
             if let GuestIoEvent::Connected { socket, result } = &event {
                 let (socket, result) = (*socket, *result);
-                if let Some(sock) = st.sockets.get_mut(&socket) {
-                    sock.connect = Connect::Delivered(result);
-                    let session = result.is_ok()
-                        && !sock.closed
-                        && sock.channel == Some(HostChannel::Control);
-                    if session {
-                        st.session = Some(socket);
-                        st.session_ended = false;
-                    }
+                let sock = st.sock(socket);
+                sock.connect = Connect::Delivered(result);
+                let control = sock.channel == Some(HostChannel::Control);
+                if control && result.is_ok() {
+                    st.session = Some(socket);
+                    st.session_ended = false;
                 }
             }
             return Ok(Some(event));
         }
         match deadline {
-            Some(at) if now >= at => {
-                st.waits.push(SimWait { deadline, outcome: SimWaitOutcome::DeadlinePassed });
-                Ok(None)
-            }
-            _ => {
-                st.waits.push(SimWait { deadline, outcome: SimWaitOutcome::WouldBlock });
-                drop(st);
-                // DG-5: a driver defect panics rather than block; never an
-                // `Err` (that is the owner's fatal `EventWait`).
-                std::panic::panic_any(SimWouldBlock { deadline })
-            }
+            Some(d) if d <= now => Ok(None),
+            _ => unreachable!(
+                "driver defect (DG-5-Q): next_event called with nothing released and no deadline due"
+            ),
         }
     }
 
@@ -1432,28 +1502,32 @@ impl GuestOwnerIo for SimGuestOwnerIo {
         let mut st = self.st();
         st.scripted(SimGuestOp::StartConnectHost)?;
         let handle = st.handle();
-        let mut sock = Sock::new(Stage::Host);
+        let id = handle.id;
+        let mut sock = Sock::new(Stage::Host, Some(SimSocket::vsock_stream()));
         sock.channel = Some(channel);
         sock.connect = Connect::InFlight;
-        st.sockets.insert(handle.id, sock);
-        st.effect(SimGuestEffect::ConnectHost { socket: handle.id, channel });
+        if channel == HostChannel::FlowStream {
+            if let Some(child) = st.last_capture.take() {
+                sock.partner = Some(child);
+            } else if let Some(slot) = st.last_slot.take() {
+                sock.slot = Some(slot);
+            }
+        }
+        st.sockets.insert(id, sock);
+        if let Some(slot) = st.sockets[&id].slot {
+            st.slot_mut(slot).vsock = Some(id);
+        }
+        st.effect(SimGuestEffect::ConnectHost { socket: id, channel });
         Ok(HostConn(handle))
     }
 
     fn start_read_host(&mut self, conn: &HostConn, record: GuestRecord) -> io::Result<()> {
         let mut st = self.st();
         let id = st.check(&conn.0);
-        st.require_connected(id)?;
         st.scripted(SimGuestOp::StartReadHost)?;
-        st.effect(SimGuestEffect::ReadHost { socket: id, record });
-        if st.sock(id).channel == Some(HostChannel::Control) {
-            assert_eq!(
-                record,
-                GuestRecord::ControlMessage,
-                "seam contract: the session reads control messages"
-            );
-        }
+        st.require_connected(id)?;
         st.sock(id).read_pending = Some(record);
+        st.effect(SimGuestEffect::ReadHost { socket: id, record });
         Ok(())
     }
 
@@ -1461,19 +1535,21 @@ impl GuestOwnerIo for SimGuestOwnerIo {
         let mut st = self.st();
         let id = st.check(&conn.0);
         st.scripted(SimGuestOp::StartReadInbound)?;
-        st.effect(SimGuestEffect::ReadInbound { socket: id });
         st.sock(id).read_pending = Some(GuestRecord::FlowRequest);
+        let flow = st.sock(id).flow.expect("an accepted V_g carries its dial's flow");
+        st.effect(SimGuestEffect::ReadInbound { socket: id, flow });
         Ok(())
     }
 
     fn write_host(&mut self, conn: &HostConn, bytes: &[u8]) -> io::Result<()> {
         let mut st = self.st();
         let id = st.check(&conn.0);
-        st.require_connected(id)?;
-        if st.session != Some(id) {
-            return Err(io::Error::from(ErrorKind::BrokenPipe));
-        }
         st.scripted(SimGuestOp::WriteHost)?;
+        st.require_connected(id)?;
+        assert!(
+            st.session == Some(id),
+            "guest-owner seam: write_host on a socket other than the session"
+        );
         match bytes.len() {
             CONTROL_OPEN_LEN => {
                 let mut open = [0u8; CONTROL_OPEN_LEN];
@@ -1484,19 +1560,15 @@ impl GuestOwnerIo for SimGuestOwnerIo {
             CONTROL_MESSAGE_LEN => {
                 let mut raw = [0u8; CONTROL_MESSAGE_LEN];
                 raw.copy_from_slice(bytes);
-                let message = ControlMessage::decode(&raw).unwrap_or_else(|e| {
-                    panic!("owner defect: malformed control message written: {e}")
-                });
-                // A message written after the host ended the session (not yet
-                // observed by the guest) never reaches the host.
+                let message =
+                    ControlMessage::decode(&raw).expect("the guest writes valid messages");
+                st.effect(SimGuestEffect::WriteControl { socket: id, message });
+                // a write after the host ended the session reaches nobody
                 if st.host_closed.is_none() {
                     st.outbox.push(message);
                 }
-                st.effect(SimGuestEffect::WriteControl { socket: id, message });
             }
-            n => panic!(
-                "seam contract: a session write is one whole 24- or 8-byte record, not {n} bytes"
-            ),
+            n => panic!("guest-owner seam: a control-session write of {n} bytes is not a record"),
         }
         Ok(())
     }
@@ -1507,164 +1579,158 @@ impl GuestOwnerIo for SimGuestOwnerIo {
         st.scripted(SimGuestOp::InboundEnded)?;
         let ended = st.sock(id).peer_ended;
         st.effect(SimGuestEffect::InboundEnded { socket: id, ended });
-        Ok(ended)
-    }
-
-    fn rearm_captured(&mut self, child: &CapturedConn) -> io::Result<()> {
-        let mut st = self.st();
-        let id = st.check(&child.0);
-        st.scripted(SimGuestOp::RearmCaptured)?;
-        st.effect(SimGuestEffect::RearmCaptured { socket: id });
-        Ok(())
-    }
-
-    fn install_outbound(
-        &mut self,
-        vsock: HostConn,
-        child: &CapturedConn,
-    ) -> io::Result<InstalledConn> {
-        let mut st = self.st();
-        let v = st.check(&vsock.0);
-        let c = st.check(&child.0);
-        if let Err(e) =
-            st.require_connected(v).and_then(|()| st.scripted(SimGuestOp::InstallOutbound))
-        {
-            st.consume_abort(&[v]);
-            return Err(e);
+        if !ended {
+            st.last_checked_dial = st.sock(id).flow;
         }
-        let sock = st.sock(v);
-        sock.stage = Stage::Installed;
-        sock.routes_to = Some(c);
-        st.effect(SimGuestEffect::InstallOutbound { vsock: v, child: c });
-        Ok(InstalledConn(vsock.0))
+        Ok(ended)
     }
 
     fn write_request(
         &mut self,
-        vsock: &InstalledConn,
+        vsock: &HostConn,
         request: &[u8; FLOW_REQUEST_LEN],
     ) -> io::Result<()> {
         let mut st = self.st();
         let id = st.check(&vsock.0);
         st.scripted(SimGuestOp::WriteRequest)?;
-        let decoded = FlowRequest::decode(request)
-            .unwrap_or_else(|e| panic!("owner defect: malformed flow request: {e}"));
-        let FlowRequest::TcpConnect { flow, .. } = decoded else {
-            panic!("seam contract: write_request carries a TcpConnect request, got {decoded:?}");
-        };
-        let routes_to = st.sock(id).routes_to;
+        st.require_connected(id)?;
+        let request = FlowRequest::decode(request).expect("the guest writes valid requests");
+        assert!(
+            matches!(request, FlowRequest::TcpConnect { .. }),
+            "guest-owner seam: write_request carries a TcpConnect request"
+        );
+        let flow = request.flow();
         st.sock(id).flow = Some(flow);
-        if let Some(child) = routes_to {
+        if let Some(child) = st.sock(id).partner {
             st.sock(child).flow = Some(flow);
         }
-        st.effect(SimGuestEffect::WriteRequest { socket: id, request: decoded });
+        st.requests.push(request);
+        st.effect(SimGuestEffect::WriteRequest { socket: id, request });
         Ok(())
     }
 
-    fn route_outbound(
+    fn attach_outbound(
         &mut self,
-        vsock: InstalledConn,
         child: CapturedConn,
-    ) -> io::Result<GuestPair> {
+        vsock: HostConn,
+    ) -> Result<GuestPair, GuestAttachRefused> {
+        let (c, v, a, b) = {
+            let st = self.st();
+            let c = st.check(&child.0);
+            let v = st.check(&vsock.0);
+            (c, v, st.sockets[&c].kernel().clone(), st.sockets[&v].kernel().clone())
+        };
+        // FlowForwarder::attach(I, V_g, Stream): I is half A, V_g half B
+        let result = self.fwd.with(|ctx| ctx.attach(&a, &b, PairMode::Stream));
         let mut st = self.st();
-        let v = st.check(&vsock.0);
-        let c = st.check(&child.0);
-        if let Err(e) = st.scripted(SimGuestOp::RouteOutbound) {
-            st.consume_abort(&[v, c]);
-            return Err(e);
+        let flow = st.sock(v).flow;
+        match result {
+            Ok(id) => {
+                for s in [c, v] {
+                    st.sock(s).stage = Stage::Pair;
+                    st.sock(s).attached = Some(id);
+                    st.unwatch(s);
+                }
+                let rec = PairRec {
+                    flow,
+                    vsock: Some(v),
+                    outer: Some(c),
+                    slot: None,
+                    vsock_side: PairSide::B,
+                };
+                st.pairs.insert(id, rec);
+                st.effect(SimGuestEffect::AttachOutbound { flow, accepted: Some(id) });
+                Ok(GuestPair {
+                    id,
+                    vsock: GuestPairSocket(st.same(v)),
+                    outer: GuestPairSocket(st.same(c)),
+                })
+            }
+            Err(error) => {
+                st.effect(SimGuestEffect::AttachOutbound { flow, accepted: None });
+                Err(GuestAttachRefused { error, vsock: vsock.into(), outer: child.into() })
+            }
         }
-        let (key, flow) = st.new_pair(v, c);
-        st.effect(SimGuestEffect::RouteOutbound { pair: key, flow });
-        Ok(GuestPair { key, vsock: GuestPairSocket(vsock.0), outer: GuestPairSocket(child.0) })
-    }
-
-    fn install_inbound(&mut self, vsock: InboundConn) -> io::Result<InstalledConn> {
-        let mut st = self.st();
-        let id = st.check(&vsock.0);
-        if let Err(e) = st.scripted(SimGuestOp::InstallInbound) {
-            st.consume_abort(&[id]);
-            return Err(e);
-        }
-        st.sock(id).stage = Stage::Installed;
-        st.effect(SimGuestEffect::InstallInbound { socket: id });
-        Ok(InstalledConn(vsock.0))
     }
 
     fn start_connect_app(
         &mut self,
-        vsock: &InstalledConn,
         client: SocketAddrV4,
         destination: SocketAddrV4,
     ) -> io::Result<AppConn> {
         let mut st = self.st();
-        let v = st.check(&vsock.0);
         st.scripted(SimGuestOp::StartConnectApp)?;
-        let flow = st.sock(v).flow;
         let handle = st.handle();
-        let mut sock = Sock::new(Stage::App);
-        sock.connect = Connect::InFlight;
+        let id = handle.id;
+        let mut sock = Sock::new(Stage::App, None);
         sock.app_target = Some((client, destination));
-        sock.flow = flow;
+        sock.connect = Connect::InFlight;
         sock.outer = true;
         sock.linger = true;
-        st.sockets.insert(handle.id, sock);
-        st.effect(SimGuestEffect::StartConnectApp { socket: handle.id, client, destination });
+        sock.flow = st.last_checked_dial.take();
+        st.sockets.insert(id, sock);
+        st.effect(SimGuestEffect::StartConnectApp { socket: id, client, destination });
         Ok(AppConn(handle))
     }
 
-    fn route_inbound(&mut self, vsock: InstalledConn, app: AppConn) -> io::Result<GuestPair> {
-        let mut st = self.st();
-        let v = st.check(&vsock.0);
-        let a = st.check(&app.0);
-        if let Err(e) = st.require_connected(a).and_then(|()| st.scripted(SimGuestOp::RouteInbound))
-        {
-            st.consume_abort(&[v, a]);
-            return Err(e);
-        }
-        let (key, flow) = st.new_pair(v, a);
-        st.effect(SimGuestEffect::RouteInbound { pair: key, flow });
-        Ok(GuestPair { key, vsock: GuestPairSocket(vsock.0), outer: GuestPairSocket(app.0) })
-    }
-
-    fn drained(&mut self, pair: GuestPairKey, direction: GuestFlowDirection) -> io::Result<bool> {
-        let mut st = self.st();
-        st.scripted(SimGuestOp::Drained)?;
-        st.effect(SimGuestEffect::Drained { pair, direction });
-        let flow = st.pairs.get(&pair).and_then(|p| st.sockets.get(&p.vsock)).and_then(|s| s.flow);
-        let answer = flow
-            .and_then(|f| st.drained.get(&(f, direction)).copied())
-            .unwrap_or(st.drained_default);
-        Ok(answer)
-    }
-
-    fn remove_pair(&mut self, pair: GuestPairKey) -> io::Result<()> {
-        let mut st = self.st();
-        st.scripted(SimGuestOp::RemovePair)?;
-        st.pairs.remove(&pair);
-        st.effect(SimGuestEffect::RemovePair { pair });
-        Ok(())
-    }
-
-    fn shutdown_write(&mut self, socket: &GuestPairSocket) -> io::Result<()> {
-        let mut st = self.st();
-        let id = st.check(&socket.0);
-        st.scripted(SimGuestOp::ShutdownWrite)?;
-        let (flow, stage) = {
-            let s = st.sock(id);
-            (s.flow, s.stage)
+    fn attach_inbound(
+        &mut self,
+        vsock: InboundConn,
+        app: AppConn,
+    ) -> Result<GuestPair, GuestAttachRefused> {
+        let (v, c, a, b) = {
+            let st = self.st();
+            let v = st.check(&vsock.0);
+            let c = st.check(&app.0);
+            (v, c, st.sockets[&v].kernel().clone(), st.sockets[&c].kernel().clone())
         };
-        let vsock = stage == Stage::PairVsock;
-        if let Some(flow) = flow {
-            if vsock {
-                if st.vsock_ended.insert(flow) {
-                    st.vsock_ends_in_flight.insert(flow);
+        // FlowForwarder::attach(V_g, C, Stream): V_g is half A, C half B
+        let result = self.fwd.with(|ctx| ctx.attach(&a, &b, PairMode::Stream));
+        let mut st = self.st();
+        let flow = st.sock(v).flow;
+        match result {
+            Ok(id) => {
+                for s in [v, c] {
+                    st.sock(s).stage = Stage::Pair;
+                    st.sock(s).attached = Some(id);
+                    st.unwatch(s);
                 }
-            } else {
-                st.far_end.entry(flow).or_insert(FarEndEvent::Eof);
+                let rec = PairRec {
+                    flow,
+                    vsock: Some(v),
+                    outer: Some(c),
+                    slot: None,
+                    vsock_side: PairSide::A,
+                };
+                st.pairs.insert(id, rec);
+                st.effect(SimGuestEffect::AttachInbound { flow, accepted: Some(id) });
+                Ok(GuestPair {
+                    id,
+                    vsock: GuestPairSocket(st.same(v)),
+                    outer: GuestPairSocket(st.same(c)),
+                })
+            }
+            Err(error) => {
+                st.effect(SimGuestEffect::AttachInbound { flow, accepted: None });
+                Err(GuestAttachRefused { error, vsock: vsock.into(), outer: app.into() })
             }
         }
-        st.effect(SimGuestEffect::ShutdownWrite { socket: id, flow, vsock });
-        Ok(())
+    }
+
+    fn abort_forward(&mut self, id: ForwardId) -> Result<AbortResult, ForwarderError> {
+        let result = self.fwd.with(|ctx| ctx.abort(id));
+        self.st().effect(SimGuestEffect::AbortForward { id });
+        result
+    }
+
+    fn pair_state(&mut self, id: ForwardId) -> Result<Option<PairState>, ForwarderError> {
+        self.st().effect(SimGuestEffect::PairState { id });
+        self.fwd.with(|ctx| ctx.pair_state(id))
+    }
+
+    fn inventory(&mut self) -> Result<ForwarderInventory, ForwarderError> {
+        self.st().effect(SimGuestEffect::Inventory);
+        self.fwd.with(FlowForwarder::inventory)
     }
 
     fn clear_linger(&mut self, socket: &GuestPairSocket) -> io::Result<()> {
@@ -1678,7 +1744,14 @@ impl GuestOwnerIo for SimGuestOwnerIo {
 
     fn abort(&mut self, socket: GuestOwnedSocket) {
         let mut st = self.st();
-        let id = st.check(owned_handle(&socket));
+        let handle = match &socket {
+            GuestOwnedSocket::Host(h) => &h.0,
+            GuestOwnedSocket::Inbound(h) => &h.0,
+            GuestOwnedSocket::Captured(h) => &h.0,
+            GuestOwnedSocket::App(h) => &h.0,
+            GuestOwnedSocket::Pair(h) => &h.0,
+        };
+        let id = st.check(handle);
         let flow = st.sock(id).flow;
         st.end_socket(id, true);
         st.effect(SimGuestEffect::Abort { socket: id, flow });
@@ -1686,7 +1759,14 @@ impl GuestOwnerIo for SimGuestOwnerIo {
 
     fn close(&mut self, socket: GuestOwnedSocket) {
         let mut st = self.st();
-        let id = st.check(owned_handle(&socket));
+        let handle = match &socket {
+            GuestOwnedSocket::Host(h) => &h.0,
+            GuestOwnedSocket::Inbound(h) => &h.0,
+            GuestOwnedSocket::Captured(h) => &h.0,
+            GuestOwnedSocket::App(h) => &h.0,
+            GuestOwnedSocket::Pair(h) => &h.0,
+        };
+        let id = st.check(handle);
         let flow = st.sock(id).flow;
         st.end_socket(id, false);
         st.effect(SimGuestEffect::Close { socket: id, flow });
@@ -1702,161 +1782,116 @@ impl GuestOwnerIo for SimGuestOwnerIo {
         Ok(st.slot_mut(slot).owner)
     }
 
-    fn install_slot_legs(
+    fn write_slot_request(
         &mut self,
-        slot: SocketAddrV4,
-        stream: HostConn,
-        seqpacket: HostConn,
-    ) -> io::Result<SlotLegs> {
-        let mut st = self.st();
-        let t = st.check(&stream.0);
-        let q = st.check(&seqpacket.0);
-        assert_eq!(
-            st.sock(t).channel,
-            Some(HostChannel::FlowStream),
-            "seam contract: T_g is a 1240 STREAM"
-        );
-        assert_eq!(
-            st.sock(q).channel,
-            Some(HostChannel::FlowSeqpacket),
-            "seam contract: Q_g is a 1241 SEQPACKET"
-        );
-        let result = st
-            .require_connected(t)
-            .and_then(|()| st.require_connected(q))
-            .and_then(|()| st.scripted(SimGuestOp::InstallSlotLegs));
-        if let Err(e) = result {
-            st.consume_abort(&[t, q]);
-            return Err(e);
-        }
-        for (id, stage, partner) in [(t, Stage::LegStream, Some(q)), (q, Stage::LegSeqpacket, None)]
-        {
-            let sock = st.sock(id);
-            sock.stage = stage;
-            sock.slot = Some(slot);
-            sock.partner = partner;
-        }
-        let rec = st.slot_mut(slot);
-        assert!(rec.legs.is_none(), "owner defect: {slot} already has legs installed");
-        rec.legs = Some((t, q));
-        st.effect(SimGuestEffect::InstallSlotLegs { slot });
-        Ok(SlotLegs(stream.0))
-    }
-
-    fn write_slot_requests(
-        &mut self,
-        legs: &SlotLegs,
-        stream: &[u8; FLOW_REQUEST_LEN],
-        seqpacket: &[u8; FLOW_REQUEST_LEN],
+        vsock: &HostConn,
+        request: &[u8; FLOW_REQUEST_LEN],
     ) -> io::Result<()> {
         let mut st = self.st();
-        let t = st.check(&legs.0);
-        st.scripted(SimGuestOp::WriteSlotRequests)?;
-        let s = FlowRequest::decode(stream)
-            .unwrap_or_else(|e| panic!("owner defect: malformed request: {e}"));
-        let p = FlowRequest::decode(seqpacket)
-            .unwrap_or_else(|e| panic!("owner defect: malformed request: {e}"));
-        let (
-            FlowRequest::DatagramStream { flow, .. },
-            FlowRequest::DatagramSeqpacket { flow: flow_q, .. },
-        ) = (s, p)
-        else {
-            panic!(
-                "seam contract: DatagramStream on T_g and DatagramSeqpacket on Q_g, got {s:?} / {p:?}"
-            );
+        let id = st.check(&vsock.0);
+        st.scripted(SimGuestOp::WriteSlotRequest)?;
+        st.require_connected(id)?;
+        let request = FlowRequest::decode(request).expect("the guest writes valid requests");
+        let FlowRequest::DatagramStream { flow, .. } = request else {
+            panic!("guest-owner seam: write_slot_request carries a DatagramStream request");
         };
-        assert_eq!(flow, flow_q, "owner defect: the two legs name different flows");
-        let slot = st.sock(t).slot.expect("legs belong to a slot");
-        let q = st.sock(t).partner;
-        st.sock(t).flow = Some(flow);
-        if let Some(q) = q {
-            st.sock(q).flow = Some(flow);
-        }
-        st.slot_mut(slot).flow = Some(flow);
-        st.effect(SimGuestEffect::WriteSlotRequests { slot, flow });
+        // the association's slot: linked at the connect the owner issued in
+        // that slot's `SlotReady` dispatch (slot ready → connect → request)
+        let slot = st.sock(id).slot.expect("guest-owner seam: the V_g was opened for no slot");
+        let rec = st.slot_mut(slot);
+        rec.flow = Some(flow);
+        rec.vsock = Some(id);
+        st.sock(id).flow = Some(flow);
+        st.requests.push(request);
+        st.effect(SimGuestEffect::WriteSlotRequest { socket: id, request });
         Ok(())
     }
 
-    fn route_slot(&mut self, legs: &SlotLegs) -> io::Result<()> {
+    fn attach_slot(
+        &mut self,
+        slot: SocketAddrV4,
+        vsock: HostConn,
+    ) -> Result<ForwardId, GuestAttachRefused> {
+        let (v, s_kernel, v_kernel) = {
+            let mut st = self.st();
+            let v = st.check(&vsock.0);
+            let s_kernel = st.slot_mut(slot).kernel.clone();
+            (v, s_kernel, st.sockets[&v].kernel().clone())
+        };
+        // FlowForwarder::attach(S, V_g, Datagram { udp: A })
+        let result = self
+            .fwd
+            .with(|ctx| ctx.attach(&s_kernel, &v_kernel, PairMode::Datagram { udp: PairSide::A }));
         let mut st = self.st();
-        let t = st.check(&legs.0);
-        st.scripted(SimGuestOp::RouteSlot)?;
-        let slot = st.sock(t).slot.expect("legs belong to a slot");
-        let rec = st.slot_mut(slot);
-        rec.routed = true;
-        let frames = u64::try_from(rec.parked_frames).unwrap_or(u64::MAX);
-        rec.forwarded += frames;
-        rec.to_host += frames;
-        rec.parked.clear();
-        rec.parked_frames = 0;
-        st.effect(SimGuestEffect::RouteSlot { slot });
-        Ok(())
+        match result {
+            Ok(id) => {
+                let flow = st.sock(v).flow;
+                st.sock(v).stage = Stage::Pair;
+                st.sock(v).attached = Some(id);
+                st.unwatch(v);
+                let rec = st.slot_mut(slot);
+                rec.attached = Some(id);
+                rec.connected = true;
+                let pair = PairRec {
+                    flow,
+                    vsock: Some(v),
+                    outer: None,
+                    slot: Some(slot),
+                    vsock_side: PairSide::B,
+                };
+                st.pairs.insert(id, pair);
+                st.effect(SimGuestEffect::AttachSlot { slot, accepted: Some(id) });
+                Ok(id)
+            }
+            Err(error) => {
+                st.effect(SimGuestEffect::AttachSlot { slot, accepted: None });
+                drop(st);
+                panic!(
+                    "guest-owner seam: a refused slot attach ({error}) has no pinned outer half \
+                     for GuestAttachRefused (DISTILL blocker: attach_slot refusal shape)"
+                );
+            }
+        }
     }
 
-    fn end_association(&mut self, slot: SocketAddrV4, legs: Option<SlotLegs>) -> SlotEnd {
+    fn end_association(&mut self, slot: SocketAddrV4) {
         let mut st = self.st();
-        if let Some(legs) = &legs {
-            let t = st.check(&legs.0);
-            assert_eq!(
-                st.slot_mut(slot).legs.map(|(t, _)| t),
-                Some(t),
-                "owner defect: legs of another slot"
-            );
-            // steps 1-2: cut the reassembly output, close T_g and Q_g
-            st.end_socket(t, false);
-        }
         let rec = st.slot_mut(slot);
-        // step 3: the old cells close first — every parked frame is discarded
-        rec.parked.clear();
-        rec.parked_frames = 0;
-        rec.routed = false;
+        // discard S's receive queue without reading payload, then disconnect S
+        // (the next association connects a fresh S: a recycled slot carries
+        // none of the previous association's datagrams)
+        let mut discarded = 0;
+        while let SimLocalRead::Bytes(_) = rec.kernel.local_read(usize::MAX) {
+            discarded += 1;
+        }
+        rec.discarded += discarded;
+        rec.ended += 1;
+        rec.kernel = SimSocket::new(SimSocketKind::Udp, SimSocketSetup::Connected);
+        rec.origins.clear();
+        rec.connected = false;
+        rec.attached = None;
         rec.flow = None;
-        rec.legs = None;
-        let end = if std::mem::take(&mut rec.fail_next_cell_creation) {
-            rec.quarantined = true;
-            rec.owner = None;
-            SlotEnd::Quarantined
-        } else {
-            rec.generation = CellGeneration(rec.generation.0 + 1);
-            SlotEnd::Recreated(rec.generation)
-        };
-        // steps 4-5 (disconnect the slot socket, remove the unframe tuple) leave
-        // no state the sim models
-        st.effect(SimGuestEffect::EndAssociation { slot, end });
-        end
+        rec.vsock = None;
+        st.readiness.remove(&slot);
+        st.effect(SimGuestEffect::EndAssociation { slot });
     }
 
     fn release_slot(&mut self, slot: SocketAddrV4) {
         let mut st = self.st();
         let rec = st.slot_mut(slot);
-        assert!(
-            !rec.quarantined && rec.legs.is_none() && rec.flow.is_none() && !rec.routed,
-            "seam contract: release_slot on {slot} whose association has not ended (Recreated)"
-        );
+        assert!(rec.flow.is_none(), "guest-owner seam: release of a slot with a live association");
         rec.owner = None;
         st.effect(SimGuestEffect::ReleaseSlot { slot });
-    }
-
-    fn retry_quarantined(&mut self, slot: SocketAddrV4) -> io::Result<CellGeneration> {
-        let mut st = self.st();
-        st.effect(SimGuestEffect::RetryQuarantined { slot });
-        assert!(
-            st.slot_mut(slot).quarantined,
-            "seam contract: retry_quarantined on {slot}, which is not quarantined"
-        );
-        st.scripted(SimGuestOp::RetryQuarantined)?;
-        let rec = st.slot_mut(slot);
-        rec.quarantined = false;
-        rec.generation = CellGeneration(rec.generation.0 + 1);
-        Ok(rec.generation)
     }
 
     fn slot_counters(&mut self, slot: SocketAddrV4) -> io::Result<(u64, u64)> {
         let mut st = self.st();
         st.scripted(SimGuestOp::SlotCounters)?;
         st.effect(SimGuestEffect::SlotCounters { slot });
-        let rec = st.slot_mut(slot);
-        Ok((rec.to_host, rec.to_guest))
+        let attached = st.slot_mut(slot).attached;
+        drop(st);
+        let state = attached.and_then(|id| self.forwarder_pair_state(id));
+        Ok(state.map_or((0, 0), |s| (s.a_to_b.moved, s.b_to_a.moved)))
     }
 
     fn live_cookies(
@@ -1867,463 +1902,5 @@ impl GuestOwnerIo for SimGuestOwnerIo {
         st.scripted(SimGuestOp::LiveCookies)?;
         st.effect(SimGuestEffect::LiveCookies);
         Ok(cookies.intersection(&st.live_cookies).copied().collect())
-    }
-
-    fn listener_map(&mut self) -> io::Result<BTreeSet<ListenPort>> {
-        let mut st = self.st();
-        st.scripted(SimGuestOp::ListenerMap)?;
-        st.effect(SimGuestEffect::ListenerMap);
-        Ok(st.listener_map.clone())
-    }
-}
-
-const fn owned_handle(socket: &GuestOwnedSocket) -> &Handle {
-    match socket {
-        GuestOwnedSocket::Host(h) => &h.0,
-        GuestOwnedSocket::Inbound(h) => &h.0,
-        GuestOwnedSocket::Captured(h) => &h.0,
-        GuestOwnedSocket::Installed(h) => &h.0,
-        GuestOwnedSocket::App(h) => &h.0,
-        GuestOwnedSocket::Legs(h) => &h.0,
-        GuestOwnedSocket::Pair(h) => &h.0,
-    }
-}
-
-// ---------------------------------------------------------------------------
-// The sim's own invariants (default lane; no core codec, no owner)
-// ---------------------------------------------------------------------------
-
-#[cfg(test)]
-mod sim_tests {
-    use super::*;
-
-    const WL: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 7);
-
-    fn sim() -> (SimGuestOwnerIo, Arc<SimGuestClock>) {
-        let clock = Arc::new(SimGuestClock::new());
-        (SimGuestOwnerIo::new(WL, Arc::clone(&clock)), clock)
-    }
-
-    fn slot(n: u16) -> SocketAddrV4 {
-        SocketAddrV4::new(WL, GUEST_UDP_SLOT_BASE + n)
-    }
-
-    fn dest(n: u8) -> SocketAddrV4 {
-        SocketAddrV4::new(Ipv4Addr::new(93, 184, 216, n), 53)
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    fn next_event_returns_none_only_once_the_deadline_has_passed() {
-        let (mut io, clock) = sim();
-        let deadline = clock.now() + Duration::from_millis(250);
-        clock.advance(Duration::from_millis(250));
-        assert!(io.next_event(Some(deadline)).expect("wait ok").is_none());
-        assert_eq!(io.last_wait(), Some(Some(deadline)));
-    }
-
-    /// The payload of a `next_event` call that panicked with `SimWouldBlock`.
-    fn blocked_wait(io: &mut SimGuestOwnerIo, deadline: Option<Instant>) -> SimWouldBlock {
-        let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _ = io.next_event(deadline);
-        }))
-        .expect_err("a single-threaded driver would block: the sim panics");
-        *payload.downcast::<SimWouldBlock>().expect("the payload is the typed SimWouldBlock")
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    fn next_event_with_nothing_released_and_no_deadline_passed_panics_sim_would_block() {
-        let (mut io, clock) = sim();
-        let deadline = clock.now() + Duration::from_secs(1);
-        let before = io.guest_socket_observation();
-        assert_eq!(
-            blocked_wait(&mut io, Some(deadline)),
-            SimWouldBlock { deadline: Some(deadline) }
-        );
-        assert_eq!(
-            io.last_wait_record(),
-            Some(SimWait { deadline: Some(deadline), outcome: SimWaitOutcome::WouldBlock })
-        );
-        assert_eq!(io.guest_socket_observation(), before, "the blocked wait changes nothing else");
-        clock.advance(Duration::from_secs(1));
-        assert!(
-            io.next_event(Some(deadline)).expect("a passed deadline is no wait failure").is_none(),
-            "the seam is usable after the panic; the passed deadline returns None"
-        );
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    fn next_event_waiting_forever_with_nothing_released_panics_sim_would_block() {
-        let (mut io, _clock) = sim();
-        assert_eq!(blocked_wait(&mut io, None), SimWouldBlock { deadline: None });
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    fn armed_deadline_is_the_deadline_of_the_blocking_or_event_wait_until_consumed() {
-        let (mut io, clock) = sim();
-        assert_eq!(io.armed_deadline(), None, "no wait yet");
-        io.listener_map_wake();
-        let deadline = clock.now() + Duration::from_secs(1);
-        assert!(matches!(io.next_event(Some(deadline)), Ok(Some(GuestIoEvent::ListenerMapWake))));
-        assert_eq!(io.armed_deadline(), Some(deadline), "an event wait leaves it armed");
-        let later = deadline + Duration::from_secs(1);
-        blocked_wait(&mut io, Some(later));
-        assert_eq!(
-            io.armed_deadline(),
-            Some(later),
-            "the blocking wait names the current deadline"
-        );
-        clock.advance(Duration::from_secs(2));
-        assert!(io.next_event(Some(later)).expect("wait ok").is_none());
-        assert_eq!(io.armed_deadline(), None, "a wait that returned at its deadline consumed it");
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    fn a_deadline_at_now_returns_none_without_blocking() {
-        let (mut io, clock) = sim();
-        let now = clock.now();
-        assert!(io.next_event(Some(now)).expect("no wait failure").is_none());
-        assert_eq!(
-            io.last_wait_record(),
-            Some(SimWait { deadline: Some(now), outcome: SimWaitOutcome::DeadlinePassed })
-        );
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    fn an_event_pending_is_returned_even_past_the_deadline_and_only_once() {
-        let (mut io, clock) = sim();
-        io.listener_map_wake();
-        let past = clock.now();
-        clock.advance(Duration::from_secs(1));
-        assert!(matches!(io.next_event(Some(past)), Ok(Some(GuestIoEvent::ListenerMapWake))));
-        assert!(io.next_event(Some(past)).expect("wait ok").is_none(), "delivered once");
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    fn a_scripted_wait_failure_is_returned_once() {
-        let (mut io, clock) = sim();
-        io.fail_event_wait(ErrorKind::Interrupted);
-        assert_eq!(io.next_event(None).expect_err("scripted").kind(), ErrorKind::Interrupted);
-        io.listener_map_wake();
-        let _ = clock;
-        assert!(matches!(io.next_event(None), Ok(Some(GuestIoEvent::ListenerMapWake))));
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    fn host_connect_completes_only_when_released_and_session_ops_need_connected() {
-        let (mut io, _clock) = sim();
-        let conn = io.start_connect_host(HostChannel::Control).expect("connect starts");
-        assert_eq!(
-            io.pending_connects(),
-            vec![(conn.id(), SimConnectTarget::Host(HostChannel::Control))]
-        );
-        assert_eq!(
-            io.write_host(&conn, &[0u8; CONTROL_OPEN_LEN]).expect_err("before Connected").kind(),
-            ErrorKind::NotConnected
-        );
-        assert_eq!(
-            io.start_read_host(&conn, GuestRecord::ControlMessage)
-                .expect_err("before Connected")
-                .kind(),
-            ErrorKind::NotConnected
-        );
-        let released = io.complete_host_connect(HostChannel::Control, Ok(()));
-        assert_eq!(released, conn.id());
-        // Released but not yet delivered: still NotConnected.
-        assert_eq!(
-            io.write_host(&conn, &[0u8; CONTROL_OPEN_LEN]).expect_err("not delivered").kind(),
-            ErrorKind::NotConnected
-        );
-        match io.next_event(None) {
-            Ok(Some(GuestIoEvent::Connected { socket, result: Ok(()) })) => {
-                assert_eq!(socket, conn.id());
-            }
-            other => panic!("expected Connected, got {other:?}"),
-        }
-        assert_eq!(io.session_socket(), Some(conn.id()));
-        io.write_host(&conn, &[7u8; CONTROL_OPEN_LEN]).expect("whole ControlOpen");
-        assert_eq!(io.control_opens(), vec![[7u8; CONTROL_OPEN_LEN]]);
-        io.start_read_host(&conn, GuestRecord::ControlMessage).expect("read starts");
-        assert!(io.pending_connects().is_empty());
-        assert!(!io.guest_socket_observation().session_ended);
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    fn a_refused_control_connect_opens_no_session() {
-        let (mut io, _clock) = sim();
-        let conn = io.start_connect_host(HostChannel::Control).expect("connect starts");
-        io.complete_host_connect(HostChannel::Control, Err(ErrorKind::ConnectionRefused));
-        assert!(matches!(
-            io.next_event(None),
-            Ok(Some(GuestIoEvent::Connected { result: Err(ErrorKind::ConnectionRefused), .. }))
-        ));
-        assert_eq!(io.session_socket(), None);
-        assert_eq!(
-            io.write_host(&conn, &[0u8; 8]).expect_err("no session").kind(),
-            ErrorKind::NotConnected
-        );
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    fn session_end_completes_a_pending_read_at_eof_and_ends_the_session() {
-        let (mut io, _clock) = sim();
-        let conn = io.start_connect_host(HostChannel::Control).expect("connect");
-        io.complete_host_connect(HostChannel::Control, Ok(()));
-        let _ = io.next_event(None);
-        io.start_read_host(&conn, GuestRecord::ControlMessage).expect("read");
-        io.end_session(SimSessionEnd::Eof);
-        match io.next_event(None) {
-            Ok(Some(GuestIoEvent::Read { socket, result: Ok(bytes) })) => {
-                assert_eq!(socket, conn.id());
-                assert!(bytes.is_empty(), "EOF before any byte");
-            }
-            other => panic!("expected Read EOF, got {other:?}"),
-        }
-        assert!(io.guest_socket_observation().session_ended);
-        assert_eq!(
-            io.write_host(&conn, &[0u8; 8]).expect_err("ended").kind(),
-            ErrorKind::BrokenPipe
-        );
-        io.close(conn.into());
-        assert_eq!(io.session_socket(), None);
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    fn session_end_with_no_read_pending_reports_one_hangup() {
-        let (mut io, _clock) = sim();
-        let conn = io.start_connect_host(HostChannel::Control).expect("connect");
-        io.complete_host_connect(HostChannel::Control, Ok(()));
-        let _ = io.next_event(None);
-        io.end_session(SimSessionEnd::Reset);
-        match io.next_event(None) {
-            Ok(Some(GuestIoEvent::Hangup {
-                socket,
-                hangup: GuestHangup::Error(ErrorKind::ConnectionReset),
-            })) => {
-                assert_eq!(socket, conn.id());
-            }
-            other => panic!("expected Hangup, got {other:?}"),
-        }
-        assert_eq!(io.deliverable(), 0);
-        io.abort(conn.into());
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    fn a_hangup_is_reported_once_per_socket_per_kind_and_dropped_when_the_socket_ends() {
-        let (mut io, _clock) = sim();
-        let cookie = sim_cookie(9);
-        io.app_connect(cookie, dest(1), true);
-        let child = match io.next_event(None) {
-            Ok(Some(GuestIoEvent::OutboundCaptured { child, cookie: c, parked: true, .. })) => {
-                assert_eq!(c, cookie);
-                child
-            }
-            other => panic!("expected OutboundCaptured, got {other:?}"),
-        };
-        io.app_end(SimAppTarget::Captured(cookie), SimAppEnd::HalfClose);
-        io.app_end(SimAppTarget::Captured(cookie), SimAppEnd::HalfClose);
-        assert_eq!(io.deliverable(), 1, "level-triggered: one ReadHangup");
-        io.app_end(SimAppTarget::Captured(cookie), SimAppEnd::Reset);
-        assert_eq!(io.deliverable(), 2, "a different kind is reported once more");
-        io.abort(child.into());
-        assert_eq!(io.deliverable(), 0, "an ended socket reports nothing");
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    #[should_panic(expected = "another seam instance")]
-    fn a_handle_of_another_seam_instance_is_unreachable() {
-        let (mut a, _ca) = sim();
-        let (mut b, _cb) = sim();
-        let conn = a.start_connect_host(HostChannel::Control).expect("connect");
-        let _ = b.start_read_host(&conn, GuestRecord::ControlMessage);
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    fn consuming_install_of_unconnected_legs_fails_and_aborts_both() {
-        let (mut io, _clock) = sim();
-        let t = io.start_connect_host(HostChannel::FlowStream).expect("T_g");
-        let q = io.start_connect_host(HostChannel::FlowSeqpacket).expect("Q_g");
-        let err = io.install_slot_legs(slot(0), t, q).expect_err("not connected");
-        assert_eq!(err.kind(), ErrorKind::NotConnected);
-        assert!(io.pending_connects().is_empty(), "both consumed sockets aborted");
-        assert!(io.effects().iter().all(|e| !matches!(e, SimGuestEffect::InstallSlotLegs { .. })));
-        assert!(!io.slot_state(slot(0)).legs_installed);
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    fn the_kernel_claims_one_slot_per_socket_destination_lowest_first() {
-        let (io, _clock) = sim();
-        let k = sim_cookie(42);
-        assert_eq!(io.app_send(k, dest(1)), Ok(slot(0)));
-        assert_eq!(io.app_send(k, dest(2)), Ok(slot(1)));
-        assert_eq!(io.app_send(k, dest(1)), Ok(slot(0)), "an owned destination reuses its slot");
-        let obs = io.guest_socket_observation();
-        assert_eq!(
-            obs.readiness,
-            BTreeSet::from([(slot(0), sim_generation(0)), (slot(1), sim_generation(0))])
-        );
-        assert_eq!(obs.parked.get(&slot(0)), Some(&BTreeSet::from([(k, dest(1))])));
-        assert_eq!(io.slot_state(slot(0)).parked_frames, 2);
-        assert!(!io.slot_state(slot(0)).in_pool);
-        assert!(io.slot_state(slot(2)).in_pool);
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    fn the_kernel_refuses_a_new_destination_when_every_slot_is_owned() {
-        let (io, _clock) = sim();
-        let k = sim_cookie(1);
-        for n in 0..GUEST_UDP_SLOTS {
-            let [hi, lo] = n.to_be_bytes();
-            let d = SocketAddrV4::new(Ipv4Addr::new(10, 1, hi, lo), 9);
-            assert_eq!(io.app_send(k, d), Ok(slot(n)));
-        }
-        assert_eq!(io.app_send(k, dest(200)), Err(ErrorKind::PermissionDenied));
-        assert_eq!(io.exhausted_sends(), 1);
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    fn readiness_is_released_by_slot_and_generation() {
-        let (mut io, _clock) = sim();
-        let k = sim_cookie(3);
-        let s = io.app_send(k, dest(1)).expect("claims");
-        io.release_slot_ready(s, sim_generation(0));
-        match io.next_event(None) {
-            Ok(Some(GuestIoEvent::SlotReady { slot: got, generation })) => {
-                assert_eq!((got, generation), (s, sim_generation(0)));
-            }
-            other => panic!("expected SlotReady, got {other:?}"),
-        }
-        assert!(io.guest_socket_observation().readiness.is_empty());
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    fn ending_an_association_recreates_cells_and_keeps_the_slot_owned() {
-        let (mut io, _clock) = sim();
-        let k = sim_cookie(5);
-        let s = io.app_send(k, dest(1)).expect("claims");
-        io.app_send(k, dest(1)).expect("parks again");
-        let end = io.end_association(s, None);
-        assert_eq!(end, SlotEnd::Recreated(sim_generation(1)));
-        let state = io.slot_state(s);
-        assert_eq!(state.parked_frames, 0, "parked frames discarded");
-        assert_eq!(state.owner, Some((k, dest(1))), "U-2: the slot stays owned");
-        let obs = io.guest_socket_observation();
-        assert!(obs.parked.is_empty());
-        assert!(
-            obs.readiness.contains(&(s, sim_generation(0))),
-            "the old-generation event stays queued (stale)"
-        );
-        io.release_slot(s);
-        assert!(io.slot_state(s).in_pool);
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    fn a_cell_creation_failure_quarantines_until_the_retry_succeeds() {
-        let (mut io, _clock) = sim();
-        let k = sim_cookie(6);
-        let s = io.app_send(k, dest(1)).expect("claims");
-        io.fail_cell_creation(s);
-        assert_eq!(io.end_association(s, None), SlotEnd::Quarantined);
-        let state = io.slot_state(s);
-        assert!(state.quarantined && !state.in_pool && state.owner.is_none());
-        assert_eq!(io.app_send(k, dest(1)), Ok(slot(1)), "the next send takes a free slot");
-        io.fail_next(SimGuestOp::RetryQuarantined, ErrorKind::OutOfMemory);
-        assert_eq!(io.retry_quarantined(s).expect_err("scripted").kind(), ErrorKind::OutOfMemory);
-        assert!(io.slot_state(s).quarantined);
-        assert_eq!(io.retry_quarantined(s).expect("retry"), sim_generation(1));
-        assert!(io.slot_state(s).in_pool);
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    #[should_panic(expected = "has not ended")]
-    fn releasing_a_slot_with_installed_legs_violates_the_seam_contract() {
-        let (mut io, _clock) = sim();
-        let s = io.app_send(sim_cookie(7), dest(1)).expect("claims");
-        let t = io.start_connect_host(HostChannel::FlowStream).expect("T_g");
-        let q = io.start_connect_host(HostChannel::FlowSeqpacket).expect("Q_g");
-        io.complete_connect(t.id(), Ok(()));
-        io.complete_connect(q.id(), Ok(()));
-        let _ = io.next_event(None);
-        let _ = io.next_event(None);
-        let _legs = io.install_slot_legs(s, t, q).expect("installs");
-        io.release_slot(s);
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    fn release_reports_are_held_until_released_and_a_lost_report_is_not_queued() {
-        let (mut io, _clock) = sim();
-        let (a, b) = (sim_cookie(11), sim_cookie(12));
-        io.app_send(a, dest(1)).expect("claims");
-        io.app_send(b, dest(1)).expect("claims");
-        io.app_close_socket(a, true);
-        io.app_close_socket(b, false);
-        assert_eq!(io.guest_socket_observation().release_reports, BTreeSet::from([a]));
-        assert_eq!(io.deliverable(), 0, "held until released");
-        io.release_socket_report(a);
-        assert!(
-            matches!(io.next_event(None), Ok(Some(GuestIoEvent::SocketReleased { cookie })) if cookie == a)
-        );
-        let live = io.live_cookies(&BTreeSet::from([a, b])).expect("audit read");
-        assert!(live.is_empty(), "both sockets are gone");
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    fn guest_owner_death_resets_application_legs_and_ends_the_session() {
-        let (mut io, _clock) = sim();
-        let conn = io.start_connect_host(HostChannel::Control).expect("connect");
-        io.complete_host_connect(HostChannel::Control, Ok(()));
-        let _ = io.next_event(None);
-        let cookie = sim_cookie(4);
-        io.app_connect(cookie, dest(1), true);
-        let _child = io.next_event(None);
-        io.guest_owner_dies();
-        assert!(io.guest_socket_observation().session_ended);
-        assert_eq!(io.session_socket(), None);
-        assert!(io.pending_connects().is_empty());
-        drop(conn);
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    fn clones_share_one_state() {
-        let (io, _clock) = sim();
-        let driver = io.clone();
-        driver.listener_map_wake();
-        assert_eq!(io.deliverable(), 1);
-    }
-
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    fn scripted_failures_apply_to_the_next_call_of_that_op_only() {
-        let (mut io, _clock) = sim();
-        io.fail_next(SimGuestOp::StartConnectHost, ErrorKind::ConnectionRefused);
-        assert_eq!(
-            io.start_connect_host(HostChannel::Control).expect_err("scripted").kind(),
-            ErrorKind::ConnectionRefused
-        );
-        assert!(io.pending_connects().is_empty());
-        let _conn = io.start_connect_host(HostChannel::Control).expect("next call succeeds");
-        assert_eq!(io.pending_connects().len(), 1);
     }
 }

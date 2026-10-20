@@ -48,7 +48,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use overdrive_cli::commands::deploy::DeployArgs;
-use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
+use overdrive_cli::commands::serve::ServeHandle;
 use overdrive_control_plane::api::IdempotencyOutcome;
 use overdrive_core::aggregate::{IntentKey, WorkloadIntent};
 use overdrive_core::dataplane::backend_key::Proto;
@@ -64,15 +64,10 @@ async fn spawn_server() -> (ServeHandle, TempDir) {
     let config_dir = tmp.path().join("conf");
     std::fs::create_dir_all(&data_dir).expect("create data dir");
     std::fs::create_dir_all(&config_dir).expect("create operator config dir");
-    let args = ServeArgs { bind, data_dir, config_dir };
-    let handle = overdrive_cli::commands::serve::run_with_dataplane(
-        args,
-        std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
-        // Step 02-02 (C1-AMEND) — hermetic in-process boot KEK.
-        std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-    )
-    .await
-    .expect("serve::run");
+    let args = super::serve_fixture::serve_args(bind, data_dir, config_dir);
+    let handle = super::serve_fixture::serve(args, super::serve_fixture::DataplaneChoice::Sim)
+        .await
+        .expect("serve::run");
     (handle, tmp)
 }
 

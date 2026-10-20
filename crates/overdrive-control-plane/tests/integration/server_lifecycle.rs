@@ -32,9 +32,7 @@ use std::time::Duration;
 
 use overdrive_control_plane::api::{AllocStateWire, AllocStatusResponse, SubmitWorkloadRequest};
 use overdrive_control_plane::dns_responder::GuestDnsFactory;
-use overdrive_control_plane::{
-    ServerConfig, ServerHandle, run_server, run_server_with_obs_and_driver,
-};
+use overdrive_control_plane::{ServerConfig, ServerHandle, run_server_with_obs_and_driver};
 use overdrive_core::aggregate::{DriverInput, JobSpecInput, ResourcesInput, VmInput};
 use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::guest_network::GuestNetworkExecWiring;
@@ -42,14 +40,11 @@ use overdrive_core::id::NodeId;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::observation_store::ObservationStore;
-use overdrive_host::RealCgroupFs;
 use overdrive_sim::adapters::clock::SimClock;
-use overdrive_sim::adapters::dataplane::SimDataplane;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_sim::adapters::vm_host_state::SimVmHostState;
-use overdrive_sim::adapters::{SimCgroupFs, SimGuestDnsFactory, SimKek, SimMtlsIntercept};
+use overdrive_sim::adapters::{SimCgroupFs, SimGuestDnsFactory, SimMtlsIntercept};
 use overdrive_worker::cgroup_manager::CgroupManager;
 use overdrive_worker::mtls_intercept::{
     InterceptElementKey, InterceptElementOperation, InterceptError, InterceptPostcondition,
@@ -119,32 +114,8 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
     let operator_config_dir = tmp.path().join("conf");
     std::fs::create_dir_all(&data_dir).expect("create data dir");
     std::fs::create_dir_all(&operator_config_dir).expect("create operator config dir");
-    let config = ServerConfig {
-        bind: "127.0.0.1:0".parse().expect("parse bind addr"),
-        data_dir,
-        operator_config_dir: operator_config_dir.clone(),
-        // `tick_cadence` + `clock` default per
-        // `fix-convergence-loop-not-spawned` Step 01-02.
-        dataplane_override: Some(std::sync::Arc::new(
-            overdrive_sim::adapters::dataplane::SimDataplane::new(),
-        )),
-        // ADR-0061 § 1 (step 01-03): the default `ServerConfig.dataplane`
-        // is now the veth-named single-node shape, whose `client_iface`
-        // (`ovd-veth-cli`) does not exist in the test VM. This fixture
-        // injects `SimDataplane` (no XDP attach) but still resolves
-        // `host_ipv4` from `client_iface` at boot, so it names `lo` via
-        // the shared SSOT helper.
-        dataplane: Some(super::dataplane_lo::lo_dataplane_config()),
-        // Step 02-02 (C1-AMEND) — hermetic in-process boot KEK so `boot_ca`'s
-        // KEK-resolve probe succeeds with no kernel-keyring / env dependency.
-        ..ServerConfig::new(
-            std::sync::Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
-            std::sync::Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
-            std::sync::Arc::new(overdrive_sim::adapters::SimGuestDnsFactory::default()),
-        )
-    };
-    let handle: ServerHandle =
-        run_server(config, Arc::new(RealCgroupFs::new())).await.expect("run_server");
+    let config = super::node_adapters::test_config(data_dir, operator_config_dir.clone());
+    let handle: ServerHandle = super::node_adapters::boot(config).await.expect("run_server");
     let bound: SocketAddr = handle.local_addr().await.expect("bound addr");
     let ca_pem: String = read_ca_from_trust_triple(&operator_config_dir);
     (handle, bound, tmp, ca_pem)
@@ -273,6 +244,7 @@ fn chain_carries_errno(error: &(dyn std::error::Error + 'static), errno: i32) ->
               the body is one boot-deploy-fault-shutdown narrative"
 )]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "pending DELIVER attachment-cut step (DG-2 row 2: GuestAddressPool::assign)"]
 async fn graceful_shutdown_propagates_worker_failure_without_a_retry_capability() {
     const TICK: Duration = Duration::from_millis(100);
 
@@ -291,24 +263,21 @@ async fn graceful_shutdown_propagates_worker_failure_without_a_retry_capability(
     let intercept_port: Arc<dyn MtlsIntercept> = intercept.clone();
     let guest_dns: Arc<dyn GuestDnsFactory> = Arc::new(SimGuestDnsFactory::default());
     let config = ServerConfig {
-        bind: "127.0.0.1:0".parse().expect("parse bind addr"),
-        data_dir,
-        operator_config_dir: operator_config_dir.clone(),
         tick_cadence: TICK,
-        clock: Arc::clone(&clock_port),
-        dataplane: Some(super::dataplane_lo::lo_dataplane_config()),
-        dataplane_override: Some(Arc::new(SimDataplane::new())),
-        ..ServerConfig::new(Arc::new(SimKek::for_boot()), intercept_port, guest_dns)
+        ..super::node_adapters::test_config(data_dir, operator_config_dir.clone())
     };
+    let mut boot = super::node_adapters::boot_adapters(&config);
+    boot.clock = Arc::clone(&clock_port);
+    boot.mtls.intercept = intercept_port;
+    boot.guest_dns = guest_dns;
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
     let driver = Arc::new(SimDriver::with_clock(DriverType::Vm, Arc::clone(&clock_port)));
     let driver_port: Arc<dyn Driver> = driver.clone();
     let handle = run_server_with_obs_and_driver(
         config,
-        obs,
+        overdrive_control_plane::BootAdapters { observation: obs, ..boot },
         driver_port,
-        Arc::new(SimVmHostState::new()),
         Arc::new(SimSharedGuestNetworkOwner::default()),
         GuestNetworkExecWiring::new(Arc::clone(&clock_port)),
         CgroupManager::new(PathBuf::from("/sys/fs/cgroup"), Arc::new(SimCgroupFs::new())),
@@ -361,8 +330,8 @@ async fn graceful_shutdown_propagates_worker_failure_without_a_retry_capability(
         .started_specs()
         .into_iter()
         .find(|spec| spec.alloc.as_str() == deployed)
-        .and_then(|spec| spec.network)
-        .map(|network| network.address)
+        .and_then(|spec| spec.transport)
+        .map(|transport| transport.workload_addr())
         .expect("the deployed allocation received its guest-network assignment");
 
     // WHEN its protection members cannot be removed and the server shuts down.

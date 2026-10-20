@@ -16,6 +16,10 @@
 #![allow(clippy::unwrap_used)]
 
 mod integration {
+    // GH #295 (NO-OVERRIDE-SEAMS, PORTS-CONFIG, FWD-PREREQ): the one
+    // composition every in-process `serve` fixture boots through.
+    mod serve_fixture;
+
     mod cluster_and_node_commands;
     mod cluster_init_removed;
     mod endpoint_from_config;
@@ -157,4 +161,14 @@ mod integration {
     //     fail-stop request (selection, ten-second outer bound, status 1).
     mod serve_lifetime_fail_stop;
     mod serve_lifetime_support;
+
+    // netns-density-295 vsock native-metal lanes through `overdrive serve` +
+    // `overdrive deploy`: the walking skeleton (P6-S13, 10-01), the native
+    // fault matrix (P6-S14, 10-02) and the density / fail-closed cells
+    // (P6-S15, 08-04). Each file carries its own
+    // `#![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]`.
+    mod vsock_density;
+    mod vsock_fault_matrix;
+    mod vsock_support;
+    mod vsock_walking_skeleton;
 }

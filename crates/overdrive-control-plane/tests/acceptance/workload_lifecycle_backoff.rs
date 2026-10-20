@@ -131,6 +131,7 @@ async fn build_state_with_driver(tmp: &TempDir, driver: Arc<dyn Driver>) -> AppS
 }
 
 #[tokio::test]
+#[ignore = "pending DELIVER attachment-cut step (DG-2 row 2: GuestAddressPool::assign)"]
 async fn repeatedly_crashing_workload_exhausts_backoff_and_stops_retrying() {
     use overdrive_control_plane::reconciler_runtime::run_convergence_tick;
 

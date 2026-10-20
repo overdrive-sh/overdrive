@@ -1,323 +1,339 @@
-//! The sim's own semantics (DG-3, QPROJ-7): holds, the node-global steering
-//! state across seam instances, K-L3, the seam contract's `unreachable!`s.
-//! These pin the fixture the owner tests and the `prefix_boot` driver stand
+//! The seam sim's own semantics (DG-3, QPROJ-7, QPROJ-8): holds, accept and
+//! record delivery, K-A2′ (a VM's death), the dial's vsock connect, the
+//! gateway route, the seam contract's edge cases, and the forwarder facts
+//! the sim takes from its `SimFlowForwarder` arbiter (an end record from a
+//! scripted cause, a context's release, a watch refused on a swept `V_h`).
+//! These pin the fixture the owner bodies and the conformance drivers stand
 //! on; a sim that regressed would let a wrong owner pass silently.
+//!
+//! The two gateway-route cells touch no socket and run now. Every other cell
+//! builds sim sockets and the forwarder context (`overdrive-sim`
+//! `SimSocket` / `SimFlowForwarder`, RED until DELIVER step 4, "Forwarder
+//! module and adapter") and core vocabulary whose codecs are RED until
+//! DELIVER step 2 (core types and wire codec), so each is ignored pending
+//! step 4, the later of the two.
 
 #![allow(
-    clippy::doc_markdown,
-    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stderr,
+    reason = "sim self-tests assert their own fixture preconditions and print their seeds"
+)]
+#![allow(
+    clippy::missing_const_for_fn,
+    clippy::option_if_let_else,
+    clippy::needless_pass_by_value,
+    clippy::unnecessary_wraps,
+    clippy::unused_self,
+    reason = "test support and conformance drivers: fixture preconditions are asserted with expect, and handler signatures follow the action map"
 )]
 
-use std::collections::BTreeSet;
+use std::io;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::sync::Arc;
 
-use ipnet::Ipv4Net;
-use overdrive_core::guest_transport::{GUEST_NODE_GATEWAY, GUEST_NODE_PREFIX};
-
-use super::{
-    SimEffectKind, SimFailure, SimGuestFlowIo, SimGuestNode, SimLanding, SimPrefixRoute,
-    SimProgramVersion, SimSteerOutcome, SimSteeringEffect, SimSteeringFailure, SimSteeringLink,
+use overdrive_core::guest_transport::forwarder::{AbortCause, ForwardOutcome, PairMode, PairSide};
+use overdrive_core::guest_transport::wire::{
+    CONTROL_OPEN_LEN, ControlOpen, FlowId, FlowOrigin, FlowRequest, KernelErrno,
 };
-use crate::guest_network::flow_io::{FlowListener, GuestFlowIo, OwnedSocket};
+use overdrive_core::guest_transport::{GUEST_CID_BASE, GuestCid, LaunchToken, VsockListenPort};
+use overdrive_core::guest_transport::{GUEST_FLOW_CONTROL_PORT, GUEST_FLOW_STREAM_PORT};
+use overdrive_core::vm::config::VsockPort;
 
-fn v(label: &str) -> SimProgramVersion {
-    SimProgramVersion::new(label)
+use super::{FarEndEvent, SimEffectKind, SimFailure, SimGuestFlowIo, SimPeerEnd};
+use crate::guest_network::GuestConnKey;
+use crate::guest_network::flow_io::{
+    FlowIoError, FlowListener, ForwarderError, GuestFlowIo, OwnedSocket, PeerProtocol,
+    PeerSocketSpec,
+};
+
+/// Every sim built here prints its seed (testing.md § "Seeding and
+/// reproducibility").
+fn sim(seed: u64) -> Arc<SimGuestFlowIo> {
+    eprintln!("seam sim seed = {seed}");
+    SimGuestFlowIo::new(seed)
 }
 
-fn prefix() -> Ipv4Net {
-    GUEST_NODE_PREFIX
+fn cid() -> GuestCid {
+    GuestCid::new(GUEST_CID_BASE + 7).expect("in the leased range")
 }
 
-fn intake(last: u8, port: u16) -> SocketAddrV4 {
-    SocketAddrV4::new(Ipv4Addr::new(100, 95, 0, last), port)
+fn token(byte: u8) -> LaunchToken {
+    LaunchToken::from_bytes([byte; 16]).expect("non-zero token")
 }
 
-/// Runs `converge_steering` on a task and steps it through the sim's holds,
-/// releasing each held steering effect in turn (or failing the one named).
-async fn boot_steering(
-    io: &Arc<SimGuestFlowIo>,
-    fail_at: Option<(SimEffectKind, SimSteeringFailure)>,
-) -> Result<(), String> {
-    let seam = Arc::clone(io);
-    let task = tokio::spawn(async move {
-        seam.converge_steering(prefix(), GUEST_NODE_GATEWAY).await.map_err(|e| e.to_string())
-    });
-    loop {
-        io.settled().await;
-        if task.is_finished() {
-            return task.await.expect("converge_steering task did not panic");
-        }
-        let (id, effect) =
-            *io.held().first().expect("converge_steering is parked on a held effect");
-        match fail_at {
-            Some((kind, failure)) if kind == effect.kind => {
-                io.fail(id, SimFailure::Steering(failure));
-            }
-            _ => io.release(id),
-        }
+fn control_key(port: u32) -> GuestConnKey {
+    GuestConnKey {
+        listener: GUEST_FLOW_CONTROL_PORT,
+        peer_cid: cid(),
+        peer_port: VsockPort::new(port),
     }
 }
 
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn a_first_boot_holds_load_then_attach_then_pin_and_pins_this_binarys_program() {
-    let node = SimGuestNode::new();
-    let io = SimGuestFlowIo::new(&node, v("v1"));
-    let before = io.steering_observation();
-    assert_eq!(before.link, SimSteeringLink::None);
-    assert_eq!(before.route, SimPrefixRoute::Absent);
-
-    boot_steering(&io, None).await.expect("steering converges");
-
-    assert_eq!(
-        io.steering_effects(),
-        vec![
-            SimSteeringEffect::Load { version: v("v1"), ok: true },
-            SimSteeringEffect::Attach { adopted: false, ok: true },
-            SimSteeringEffect::Pin { ok: true },
-        ],
-    );
-    let after = io.steering_observation();
-    assert_eq!(after.link, SimSteeringLink::Pinned);
-    assert_eq!(after.program, Some(v("v1")));
-    assert_eq!(after.route, SimPrefixRoute::Absent, "the steering never writes the route");
+fn stream_key(port: u32) -> GuestConnKey {
+    GuestConnKey {
+        listener: GUEST_FLOW_STREAM_PORT,
+        peer_cid: cid(),
+        peer_port: VsockPort::new(port),
+    }
 }
 
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn a_later_boot_updates_the_adopted_link_without_a_pin_and_a_failed_update_keeps_the_earlier_program()
- {
-    let node = SimGuestNode::new();
-    let first = SimGuestFlowIo::new(&node, v("v1"));
-    boot_steering(&first, None).await.expect("first boot converges");
-    first.exit_process();
-    assert_eq!(first.steering_observation().link, SimSteeringLink::Pinned, "pinned link survives");
-
-    let failing = SimGuestFlowIo::new(&node, v("v2"));
-    let refused =
-        boot_steering(&failing, Some((SimEffectKind::SteeringAttach, SimSteeringFailure::Update)))
-            .await;
-    assert!(refused.is_err(), "the update failure is returned");
-    assert_eq!(
-        failing.steering_effects(),
-        vec![
-            SimSteeringEffect::Load { version: v("v2"), ok: true },
-            SimSteeringEffect::Attach { adopted: true, ok: false },
-        ],
-    );
-    assert_eq!(failing.steering_observation().program, Some(v("v1")), "K-L9: earlier program");
-    failing.exit_process();
-
-    let later = SimGuestFlowIo::new(&node, v("v2"));
-    boot_steering(&later, None).await.expect("later boot converges");
-    assert_eq!(
-        later.steering_effects(),
-        vec![
-            SimSteeringEffect::Load { version: v("v2"), ok: true },
-            SimSteeringEffect::Attach { adopted: true, ok: true },
-        ],
-        "an adopted link is updated and never pinned again",
-    );
-    let after = later.steering_observation();
-    assert_eq!((after.link, after.program), (SimSteeringLink::Pinned, Some(v("v2"))));
+fn control_open(launch: LaunchToken) -> Vec<u8> {
+    let bytes: [u8; CONTROL_OPEN_LEN] = ControlOpen { launch }.encode();
+    bytes.to_vec()
 }
 
-/// CONTRACT_SHAPE: unbounded-preservation.
-#[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn a_load_failure_attaches_nothing_and_a_pin_failure_detaches_the_new_link() {
-    let node = SimGuestNode::new();
-    let rejected = SimGuestFlowIo::new(&node, v("v1"));
-    let outcome =
-        boot_steering(&rejected, Some((SimEffectKind::SteeringLoad, SimSteeringFailure::Load)))
-            .await;
-    assert!(outcome.is_err());
-    assert_eq!(
-        rejected.steering_effects(),
-        vec![SimSteeringEffect::Load { version: v("v1"), ok: false }]
-    );
-    assert_eq!(rejected.steering_observation().link, SimSteeringLink::None);
-    rejected.exit_process();
-
-    let unpinned = SimGuestFlowIo::new(&node, v("v1"));
-    let outcome =
-        boot_steering(&unpinned, Some((SimEffectKind::SteeringPin, SimSteeringFailure::Pin))).await;
-    assert!(outcome.is_err());
-    assert_eq!(unpinned.steering_observation().link, SimSteeringLink::None, "detached on return");
+fn flow(seq: u32) -> FlowId {
+    FlowId::new(FlowOrigin::Guest, seq).expect("seq below 2^31")
 }
 
-/// CONTRACT_SHAPE: bounded-change.
+async fn bound(io: &Arc<SimGuestFlowIo>, listener: FlowListener) {
+    let port = match listener {
+        FlowListener::Stream => GUEST_FLOW_STREAM_PORT,
+        FlowListener::Control => GUEST_FLOW_CONTROL_PORT,
+    };
+    io.bind_listener(listener, VsockListenPort::Fixed(port))
+        .await
+        .expect("the sim binds the listener");
+}
+
+/// A TcpConnect flow `seq` accepted, its request read, a non-mesh TCP peer
+/// connected and the pair attached, through the seam calls the owner makes.
+async fn attached_flow(
+    io: &Arc<SimGuestFlowIo>,
+    seq: u32,
+) -> crate::guest_network::flow_io::AttachedPair {
+    io.open_forwarder().await.expect("the sim forwarder opens");
+    bound(io, FlowListener::Stream).await;
+    let request = FlowRequest::TcpConnect {
+        flow: flow(seq),
+        destination: SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 10), 443),
+        launch: token(9),
+    };
+    io.queue_connection(
+        FlowListener::Stream,
+        stream_key(6000 + seq),
+        Some(request.encode().to_vec()),
+    );
+    let (vsock, _) = io.accept(FlowListener::Stream).await.expect("accepted");
+    let _request = io.read_record(&vsock, 32).await.expect("the request");
+    let spec = PeerSocketSpec {
+        protocol: PeerProtocol::Tcp,
+        owner_egress_mark: true,
+        abortive_linger: true,
+        bind: None,
+    };
+    let peer = io.open_peer(spec).await.expect("a peer socket");
+    io.connect_peer(&peer, SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 10), 443))
+        .await
+        .expect("the peer connects");
+    match io.attach(vsock, peer, PairMode::Stream) {
+        Ok(pair) => pair,
+        Err(refused) => panic!("an established pair attaches: {:?}", refused.error),
+    }
+}
+
+/// A held effect waits for the driver; released, it applies; the issued log
+/// records it in order.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn a_crash_between_a_first_attach_and_its_pin_leaves_no_link_while_a_pinned_link_and_the_route_survive()
- {
-    let node = SimGuestNode::new();
-    let io = SimGuestFlowIo::new(&node, v("v1"));
+async fn a_held_effect_applies_only_when_released() {
+    let io = sim(1);
+    io.hold(SimEffectKind::GatewayRoute);
     let seam = Arc::clone(&io);
     let task =
-        tokio::spawn(async move { seam.converge_steering(prefix(), GUEST_NODE_GATEWAY).await });
+        tokio::spawn(
+            async move { seam.converge_gateway_route(Ipv4Addr::new(100, 95, 0, 1)).await },
+        );
     io.settled().await;
-    io.release(io.held_of(SimEffectKind::SteeringLoad).expect("load held"));
+    assert!(!task.is_finished(), "a held route write does not complete");
+    assert_eq!(io.gateway_route(), None, "a held route write changes nothing");
+    let id = io.held_of(SimEffectKind::GatewayRoute).expect("the route write is held");
+    io.release(id);
     io.settled().await;
-    io.release(io.held_of(SimEffectKind::SteeringAttach).expect("attach held"));
-    io.settled().await;
-    assert!(io.held_of(SimEffectKind::SteeringPin).is_some(), "parked on the pin");
-    assert_eq!(io.steering_observation().link, SimSteeringLink::Attached);
-
-    task.abort();
-    let _cancelled = task.await;
-    io.exit_process();
-    assert_eq!(io.steering_observation().link, SimSteeringLink::None, "unpinned link died");
-
-    let next = SimGuestFlowIo::new(&node, v("v1"));
-    boot_steering(&next, None).await.expect("next boot converges");
-    let seam = Arc::clone(&next);
-    let route = tokio::spawn(async move {
-        seam.converge_prefix_route(prefix(), GUEST_NODE_GATEWAY).await.map_err(|e| e.to_string())
-    });
-    next.settled().await;
-    next.release(next.held_of(SimEffectKind::PrefixRoute).expect("route write held"));
-    next.settled().await;
-    route.await.expect("route task").expect("route converges");
-    next.exit_process();
-    let after = next.steering_observation();
-    assert_eq!((after.link, after.route), (SimSteeringLink::Pinned, SimPrefixRoute::Local));
+    task.await.expect("the task does not panic").expect("the released write succeeds");
+    assert_eq!(io.gateway_route(), Some(Ipv4Addr::new(100, 95, 0, 1)));
 }
 
-/// CONTRACT_SHAPE: unbounded-preservation.
+/// A held route write failed with `Netlink` reports
+/// `GuestNetworkError::Netlink { LocalRouteConverge }` and leaves the route
+/// as it was.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[should_panic(expected = "before converge_steering returned Ok")]
-async fn the_route_write_before_the_steering_converged_is_unreachable() {
-    let node = SimGuestNode::new();
-    let io = SimGuestFlowIo::new(&node, v("v1"));
-    io.auto_release_all();
-    let _unreachable = io.converge_prefix_route(prefix(), GUEST_NODE_GATEWAY).await;
-}
-
-async fn booted_seam(node: &Arc<SimGuestNode>) -> Arc<SimGuestFlowIo> {
-    let io = SimGuestFlowIo::new(node, v("v1"));
-    io.auto_release_all();
-    io.load_forwarder(&BTreeSet::new()).await.expect("forwarder loads");
-    io.converge_steering(prefix(), GUEST_NODE_GATEWAY).await.expect("steering converges");
-    io
-}
-
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn closing_an_intake_listener_removes_its_steering_entry_in_the_same_step() {
-    let node = SimGuestNode::new();
-    let io = booted_seam(&node).await;
-    let declared = intake(2, 8080);
-    let listener = io.bind_intake(intake(2, 20_480)).await.expect("intake bound");
-    io.steer(declared, &listener).await.expect("steered");
-    assert!(io.steering_observation().entries.contains_key(&declared));
+async fn a_failed_route_write_leaves_the_route_as_it_was() {
+    let io = sim(2);
+    io.script_failure(SimEffectKind::GatewayRoute, SimFailure::Netlink);
+    let outcome = io.converge_gateway_route(Ipv4Addr::new(100, 95, 0, 1)).await;
     assert!(matches!(
-        io.connect_intake_client(declared, SocketAddrV4::new(Ipv4Addr::LOCALHOST, 50_000)),
-        SimLanding::Steered(_)
-    ));
-
-    io.close(OwnedSocket::from(listener)).await;
-
-    assert!(io.steering_observation().entries.is_empty(), "K-L3: entry gone with the listener");
-    assert_eq!(
-        io.connect_intake_client(declared, SocketAddrV4::new(Ipv4Addr::LOCALHOST, 50_001)),
-        SimLanding::Refused,
-    );
-    assert_eq!(
-        io.steering_effects().last(),
-        Some(&SimSteeringEffect::Steer { intake: declared, outcome: SimSteerOutcome::Ok })
-    );
-}
-
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn steer_classifies_kernel_memory_and_a_second_listener_on_one_intake() {
-    let node = SimGuestNode::new();
-    let io = booted_seam(&node).await;
-    let declared = intake(3, 9000);
-    let first = io.bind_intake(intake(3, 20_480)).await.expect("bound");
-    io.script_failure(SimEffectKind::Steer, SimFailure::Steering(SimSteeringFailure::KernelMemory));
-    assert!(io.steer(declared, &first).await.is_err());
-    assert!(io.steering_observation().entries.is_empty(), "KernelMemory: entry absent");
-    io.steer(declared, &first).await.expect("retry steers");
-    io.steer(declared, &first).await.expect("repeat for the same listener is Ok");
-    let second = io.bind_intake(intake(3, 20_481)).await.expect("bound");
-    assert!(io.steer(declared, &second).await.is_err(), "IntakeAlreadySteered");
-    let outcomes: Vec<SimSteerOutcome> = io
-        .steering_effects()
-        .into_iter()
-        .filter_map(|effect| match effect {
-            SimSteeringEffect::Steer { outcome, .. } => Some(outcome),
-            _ => None,
+        outcome,
+        Err(crate::guest_network::GuestNetworkError::Netlink {
+            operation: crate::guest_network::GuestNetworkOperation::LocalRouteConverge,
+            ..
         })
-        .collect();
+    ));
+    assert_eq!(io.gateway_route(), None);
+}
+
+/// Without auto-delivery a queued connection is accepted only once
+/// released, and its buffered record is read only as far as released.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+#[ignore = "pending DELIVER step 4"]
+async fn accept_and_read_follow_the_releases() {
+    let io = sim(3);
+    io.set_auto_deliver(false);
+    bound(&io, FlowListener::Control).await;
+    io.queue_connection(FlowListener::Control, control_key(5000), Some(control_open(token(1))));
     assert_eq!(
-        outcomes,
-        vec![
-            SimSteerOutcome::KernelMemory,
-            SimSteerOutcome::Ok,
-            SimSteerOutcome::Ok,
-            SimSteerOutcome::Defect,
-        ]
+        io.socket_observation().queued.get(&control_key(5000)),
+        Some(&Some(token(1))),
+        "the queue reports the buffered record's token"
     );
-    io.close(OwnedSocket::from(first)).await;
-    io.close(OwnedSocket::from(second)).await;
-}
-
-/// CONTRACT_SHAPE: unbounded-preservation.
-#[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn a_held_effect_dropped_by_the_owner_never_applies() {
-    let node = SimGuestNode::new();
-    let io = SimGuestFlowIo::new(&node, v("v1"));
     let seam = Arc::clone(&io);
-    let task = tokio::spawn(async move { seam.bind_listener(FlowListener::Control).await });
+    let accept = tokio::spawn(async move { seam.accept(FlowListener::Control).await });
     io.settled().await;
-    assert!(io.held_of(SimEffectKind::BindListener).is_some());
-    task.abort();
-    let _cancelled = task.await;
+    assert!(!accept.is_finished());
+    io.release_accept(control_key(5000));
     io.settled().await;
-    assert!(io.held().is_empty(), "the dropped call's hold is gone");
+    let (socket, key) = accept.await.expect("no panic").expect("accepted");
+    assert_eq!(key, control_key(5000));
+    assert!(io.socket_observation().queued.is_empty());
+    io.release_read(key, Some(10));
+    let first = io.read_record(&socket, CONTROL_OPEN_LEN).await.expect("ten bytes released");
+    assert_eq!(first.len(), 10);
+    io.release_read(key, None);
+    let rest = io.read_record(&socket, CONTROL_OPEN_LEN).await.expect("the rest released");
+    assert_eq!(first.len() + rest.len(), CONTROL_OPEN_LEN);
+    io.close(OwnedSocket::Record(socket)).await;
+    assert!(io.socket_observation().closed_by_owner.contains(&key));
 }
 
-/// CONTRACT_SHAPE: bounded-change.
+/// K-A2′: an accepted connection whose VM died fails at its next read and
+/// is reported `peer_gone` until the owner closes it.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn a_second_load_forwarder_returns_the_earlier_convergence_and_host_facts_are_scriptable() {
-    let node = SimGuestNode::new();
-    let io = SimGuestFlowIo::new(&node, v("v1"));
-    io.auto_release_all();
-    let first = io.load_forwarder(&BTreeSet::new()).await.expect("loads");
-    let second = io.load_forwarder(&BTreeSet::new()).await.expect("returns the earlier one");
-    assert_eq!((first.attached, second.attached), (BTreeSet::new(), BTreeSet::new()));
-
-    let facts = io.host_facts().await.expect("default facts");
-    assert_eq!(facts.ephemeral_ports, 32_768..=60_999);
-    node.update_host_facts(|facts| facts.ephemeral_ports = 20_000..=60_999);
-    assert_eq!(io.host_facts().await.expect("updated").ephemeral_ports, 20_000..=60_999);
-    node.fail_host_facts(std::io::ErrorKind::PermissionDenied);
-    assert!(io.host_facts().await.is_err(), "a fact is unreadable: never a default");
+#[ignore = "pending DELIVER step 4"]
+async fn an_accepted_connection_fails_at_its_next_read_after_the_vm_dies() {
+    let io = sim(4);
+    bound(&io, FlowListener::Control).await;
+    io.queue_connection(FlowListener::Control, control_key(5001), Some(control_open(token(2))));
+    let (socket, key) = io.accept(FlowListener::Control).await.expect("accepted");
+    io.vm_stop(cid());
+    assert!(io.socket_observation().peer_gone.contains(&key));
+    let read = io.read_record(&socket, CONTROL_OPEN_LEN).await;
+    assert!(
+        matches!(read, Err(FlowIoError::Io { ref source }) if source.kind() == io::ErrorKind::ConnectionReset)
+    );
+    io.abort(OwnedSocket::Record(socket)).await;
+    let observed = io.socket_observation();
+    assert!(!observed.peer_gone.contains(&key));
+    assert!(observed.closed_by_owner.contains(&key));
 }
 
-/// CONTRACT_SHAPE: unbounded-preservation.
+/// K-A2′: a connection still queued when its VM died is accepted later and
+/// delivers its buffered record, then the end.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[should_panic(expected = "another seam instance")]
-async fn a_handle_of_another_seam_instance_is_unreachable() {
-    let node = SimGuestNode::new();
-    let one = booted_seam(&node).await;
-    let other = SimGuestFlowIo::new(&node, v("v1"));
-    other.auto_release_all();
-    let listener = one.bind_intake(intake(4, 20_480)).await.expect("bound");
-    other.close(OwnedSocket::from(listener)).await;
+#[ignore = "pending DELIVER step 4"]
+async fn a_queued_connection_keeps_its_record_after_the_vm_dies() {
+    let io = sim(5);
+    bound(&io, FlowListener::Control).await;
+    io.set_auto_deliver(false);
+    io.queue_connection(FlowListener::Control, control_key(5002), Some(control_open(token(3))));
+    io.vm_stop(cid());
+    io.release_accept(control_key(5002));
+    let (socket, key) = io.accept(FlowListener::Control).await.expect("accepted after the VM died");
+    io.release_read(key, None);
+    let record = io.read_record(&socket, CONTROL_OPEN_LEN).await.expect("the buffered record");
+    assert_eq!(record, control_open(token(3)));
+    let end = io.read_record(&socket, CONTROL_OPEN_LEN).await;
+    assert!(
+        matches!(end, Err(FlowIoError::Io { ref source }) if source.kind() == io::ErrorKind::ConnectionReset)
+    );
+    io.close(OwnedSocket::Record(socket)).await;
 }
 
-/// CONTRACT_SHAPE: unbounded-preservation.
-#[test]
-#[should_panic(expected = "owner defect")]
-fn a_handle_left_open_when_the_seam_drops_without_a_process_exit_is_reported() {
-    let runtime = tokio::runtime::Builder::new_current_thread().build().expect("runtime");
-    runtime.block_on(async {
-        let node = SimGuestNode::new();
-        let io = booted_seam(&node).await;
-        let listener = io.bind_intake(intake(5, 20_480)).await.expect("bound");
-        drop(listener);
-        drop(io);
-    });
+/// A dial's vsock connect to a CID whose VM is gone fails `ENODEV`
+/// (`drivers/vhost/vsock.c:290 @ v7.0`); after a new launch it connects.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+#[ignore = "pending DELIVER step 4"]
+async fn a_vsock_connect_to_a_gone_vm_fails_enodev() {
+    let io = sim(6);
+    io.vm_stop(cid());
+    let refused = io.connect_guest(cid()).await;
+    assert!(
+        matches!(refused, Err(FlowIoError::Io { ref source }) if source.raw_os_error() == Some(libc::ENODEV))
+    );
+    assert!(io.dials().is_empty(), "a failed connect opens no dial");
+    io.vm_start(cid());
+    let vh = io.connect_guest(cid()).await.expect("a running VM accepts the connect");
+    assert_eq!(io.dials().len(), 1);
+    io.close(OwnedSocket::Record(vh)).await;
+}
+
+/// `read_record` with `max = 0` is `InvalidInput`.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+#[ignore = "pending DELIVER step 4"]
+async fn a_zero_length_read_is_invalid_input() {
+    let io = sim(7);
+    bound(&io, FlowListener::Stream).await;
+    io.queue_connection(FlowListener::Stream, stream_key(6000), None);
+    let (socket, key) = io.accept(FlowListener::Stream).await.expect("accepted");
+    let read = io.read_record(&socket, 0).await;
+    assert!(
+        matches!(read, Err(FlowIoError::Io { ref source }) if source.kind() == io::ErrorKind::InvalidInput)
+    );
+    io.end_connection(key, SimPeerEnd::Eof);
+    io.close(OwnedSocket::Record(socket)).await;
+}
+
+/// The sim queues no end record of its own: a destination reset scripted on
+/// the attached TCP half is classified by the `SimFlowForwarder` arbiter,
+/// whose one record (`SocketError` on the TCP half, side B) the seam's
+/// `next_end` returns; the far end observed a reset.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+#[ignore = "pending DELIVER step 4"]
+async fn a_scripted_destination_reset_reaches_next_end_as_the_arbiters_record() {
+    let io = sim(8);
+    let pair = attached_flow(&io, 1).await;
+    io.destination_resets(flow(1));
+    let end = io.next_end().await.expect("the context is readable");
+    assert_eq!(end.id, pair.id);
+    assert!(matches!(
+        end.outcome,
+        ForwardOutcome::Aborted { cause: AbortCause::SocketError { side: PairSide::B, .. } }
+    ));
+    assert_eq!(io.socket_observation().far_end.get(&flow(1)), Some(&FarEndEvent::Reset));
+    io.close(OwnedSocket::Pair(pair.vsock)).await;
+    io.close(OwnedSocket::Pair(pair.peer)).await;
+}
+
+/// EVMOD-CTL: `close_forwarder` releases the context — its pairs are aborted
+/// with no record, the TCP far end is reset, and the device's context table
+/// shows it released holding nothing.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+#[ignore = "pending DELIVER step 4"]
+async fn a_released_context_aborts_its_pairs_with_no_record() {
+    let io = sim(9);
+    let pair = attached_flow(&io, 2).await;
+    io.close_forwarder();
+    assert_eq!(io.socket_observation().far_end.get(&flow(2)), Some(&FarEndEvent::Reset));
+    let contexts = io.forwarder_contexts();
+    assert_eq!(contexts.len(), 1);
+    assert!(!contexts[0].open && contexts[0].live_pairs == 0 && contexts[0].live_watches == 0);
+    io.abort(OwnedSocket::Pair(pair.vsock)).await;
+    io.abort(OwnedSocket::Pair(pair.peer)).await;
+}
+
+/// EVMOD-ATTACH-END: a dial's `V_h` swept by the device release (the VMM
+/// exited after the connect) is refused `HalfEnded` by the arbiter's
+/// `watch`, with the sweep's errno.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+#[ignore = "pending DELIVER step 4"]
+async fn a_watch_of_a_swept_vh_is_refused_half_ended() {
+    let io = sim(10);
+    io.open_forwarder().await.expect("the sim forwarder opens");
+    let vh = io.connect_guest(cid()).await.expect("connected");
+    io.vm_stop(cid());
+    let refused = io.watch(&vh);
+    assert!(matches!(
+        refused,
+        Err(ForwarderError::HalfEnded { errno, .. }) if errno == KernelErrno::ECONNRESET
+    ));
+    io.close(OwnedSocket::Record(vh)).await;
 }

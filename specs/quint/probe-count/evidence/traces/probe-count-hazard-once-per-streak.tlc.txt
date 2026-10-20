@@ -2,6 +2,7 @@ State 1: <Initial predicate>
 /\ streak_bugOncePerStreak_probe_count_terms = 0
 /\ streak_bugOncePerStreak_probe_count_hist = <<>>
 /\ streak_bugOncePerStreak_probe_count_psame = 0
+/\ streak_bugOncePerStreak_probe_count_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ streak_bugOncePerStreak_probe_count_pst = ""
 /\ streak_bugOncePerStreak_probe_count_fs = 0
 /\ streak_bugOncePerStreak_probe_count_rst = ""
@@ -24,10 +25,11 @@ State 1: <Initial predicate>
 /\ streak_bugOncePerStreak_probe_count_running = TRUE
 /\ streak_bugOncePerStreak_probe_count_rseq = 0
 
-State 2: <streak_bugOncePerStreak_probe_count_ProbeRun line 348, col 3 to line 413, col 50 of module streak_bugOncePerStreak>
+State 2: <streak_bugOncePerStreak_probe_count_ProbeRun line 369, col 3 to line 440, col 57 of module streak_bugOncePerStreak>
 /\ streak_bugOncePerStreak_probe_count_terms = 0
 /\ streak_bugOncePerStreak_probe_count_hist = <<"Fail">>
 /\ streak_bugOncePerStreak_probe_count_psame = 1
+/\ streak_bugOncePerStreak_probe_count_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ streak_bugOncePerStreak_probe_count_pst = "Fail"
 /\ streak_bugOncePerStreak_probe_count_fs = 0
 /\ streak_bugOncePerStreak_probe_count_rst = "Fail"
@@ -50,10 +52,11 @@ State 2: <streak_bugOncePerStreak_probe_count_ProbeRun line 348, col 3 to line 4
 /\ streak_bugOncePerStreak_probe_count_running = TRUE
 /\ streak_bugOncePerStreak_probe_count_rseq = 1
 
-State 3: <streak_bugOncePerStreak_probe_count_ProbeRun line 348, col 3 to line 413, col 50 of module streak_bugOncePerStreak>
+State 3: <streak_bugOncePerStreak_probe_count_ProbeRun line 369, col 3 to line 440, col 57 of module streak_bugOncePerStreak>
 /\ streak_bugOncePerStreak_probe_count_terms = 0
 /\ streak_bugOncePerStreak_probe_count_hist = <<"Fail", "Fail">>
 /\ streak_bugOncePerStreak_probe_count_psame = 2
+/\ streak_bugOncePerStreak_probe_count_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ streak_bugOncePerStreak_probe_count_pst = "Fail"
 /\ streak_bugOncePerStreak_probe_count_fs = 0
 /\ streak_bugOncePerStreak_probe_count_rst = "Fail"
@@ -76,10 +79,11 @@ State 3: <streak_bugOncePerStreak_probe_count_ProbeRun line 348, col 3 to line 4
 /\ streak_bugOncePerStreak_probe_count_running = TRUE
 /\ streak_bugOncePerStreak_probe_count_rseq = 2
 
-State 4: <streak_bugOncePerStreak_probe_count_ProbeRun line 348, col 3 to line 413, col 50 of module streak_bugOncePerStreak>
+State 4: <streak_bugOncePerStreak_probe_count_ProbeRun line 369, col 3 to line 440, col 57 of module streak_bugOncePerStreak>
 /\ streak_bugOncePerStreak_probe_count_terms = 0
 /\ streak_bugOncePerStreak_probe_count_hist = <<"Fail", "Fail", "Fail">>
 /\ streak_bugOncePerStreak_probe_count_psame = 3
+/\ streak_bugOncePerStreak_probe_count_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ streak_bugOncePerStreak_probe_count_pst = "Fail"
 /\ streak_bugOncePerStreak_probe_count_fs = 0
 /\ streak_bugOncePerStreak_probe_count_rst = "Fail"
@@ -102,10 +106,11 @@ State 4: <streak_bugOncePerStreak_probe_count_ProbeRun line 348, col 3 to line 4
 /\ streak_bugOncePerStreak_probe_count_running = TRUE
 /\ streak_bugOncePerStreak_probe_count_rseq = 3
 
-State 5: <streak_bugOncePerStreak_probe_count_ConsumerLook line 549, col 3 to line 629, col 49 of module streak_bugOncePerStreak>
+State 5: <streak_bugOncePerStreak_probe_count_ConsumerLook line 576, col 3 to line 661, col 57 of module streak_bugOncePerStreak>
 /\ streak_bugOncePerStreak_probe_count_terms = 1
 /\ streak_bugOncePerStreak_probe_count_hist = <<"Fail", "Fail", "Fail">>
 /\ streak_bugOncePerStreak_probe_count_psame = 3
+/\ streak_bugOncePerStreak_probe_count_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ streak_bugOncePerStreak_probe_count_pst = "Fail"
 /\ streak_bugOncePerStreak_probe_count_fs = 0
 /\ streak_bugOncePerStreak_probe_count_rst = "Fail"
@@ -128,10 +133,11 @@ State 5: <streak_bugOncePerStreak_probe_count_ConsumerLook line 549, col 3 to li
 /\ streak_bugOncePerStreak_probe_count_running = TRUE
 /\ streak_bugOncePerStreak_probe_count_rseq = 3
 
-State 6: <streak_bugOncePerStreak_probe_count_ProbeRun line 348, col 3 to line 413, col 50 of module streak_bugOncePerStreak>
+State 6: <streak_bugOncePerStreak_probe_count_ProbeRun line 369, col 3 to line 440, col 57 of module streak_bugOncePerStreak>
 /\ streak_bugOncePerStreak_probe_count_terms = 1
 /\ streak_bugOncePerStreak_probe_count_hist = <<"Fail", "Fail", "Fail", "Fail">>
 /\ streak_bugOncePerStreak_probe_count_psame = 4
+/\ streak_bugOncePerStreak_probe_count_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ streak_bugOncePerStreak_probe_count_pst = "Fail"
 /\ streak_bugOncePerStreak_probe_count_fs = 0
 /\ streak_bugOncePerStreak_probe_count_rst = "Fail"
@@ -154,10 +160,11 @@ State 6: <streak_bugOncePerStreak_probe_count_ProbeRun line 348, col 3 to line 4
 /\ streak_bugOncePerStreak_probe_count_running = TRUE
 /\ streak_bugOncePerStreak_probe_count_rseq = 4
 
-State 7: <streak_bugOncePerStreak_probe_count_ConsumerLook line 549, col 3 to line 629, col 49 of module streak_bugOncePerStreak>
+State 7: <streak_bugOncePerStreak_probe_count_ConsumerLook line 576, col 3 to line 661, col 57 of module streak_bugOncePerStreak>
 /\ streak_bugOncePerStreak_probe_count_terms = 1
 /\ streak_bugOncePerStreak_probe_count_hist = <<"Fail", "Fail", "Fail", "Fail">>
 /\ streak_bugOncePerStreak_probe_count_psame = 4
+/\ streak_bugOncePerStreak_probe_count_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ streak_bugOncePerStreak_probe_count_pst = "Fail"
 /\ streak_bugOncePerStreak_probe_count_fs = 0
 /\ streak_bugOncePerStreak_probe_count_rst = "Fail"

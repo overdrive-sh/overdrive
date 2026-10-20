@@ -20,6 +20,7 @@
 
 #![allow(clippy::doc_markdown)]
 
+use overdrive_core::observation::{ProbeRunSeq, SameStatusRuns};
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -118,16 +119,24 @@ async fn accepted_probe_result_emits_once_and_lww_losers_are_silent() {
         status: ProbeStatus::Pass,
         last_observed_at_unix_ms: 42_000,
         inferred: false,
+        run_seq: ProbeRunSeq::new(u64::max(42_000, 1)).unwrap_or(ProbeRunSeq::FIRST),
+        same_status_runs: SameStatusRuns::ONE,
     };
     let newer = ProbeResultRow {
         last_observed_at_unix_ms: 50_000,
+        run_seq: ProbeRunSeq::new(50_000).unwrap_or(ProbeRunSeq::FIRST),
         status: ProbeStatus::Fail { last_fail_reason: "not ready".to_owned() },
         ..initial.clone()
     };
-    let stale = ProbeResultRow { last_observed_at_unix_ms: 40_000, ..initial.clone() };
+    let stale = ProbeResultRow {
+        last_observed_at_unix_ms: 40_000,
+        run_seq: ProbeRunSeq::new(u64::max(40_000, 1)).unwrap_or(ProbeRunSeq::FIRST),
+        ..initial.clone()
+    };
     let equal = ProbeResultRow {
         status: ProbeStatus::Pass,
         last_observed_at_unix_ms: 42_000,
+        run_seq: ProbeRunSeq::new(u64::max(42_000, 1)).unwrap_or(ProbeRunSeq::FIRST),
         ..initial.clone()
     };
 

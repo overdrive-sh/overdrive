@@ -43,7 +43,17 @@ libc.workspace = true
 # `vm_fixture` reuses the pure `KernelImage`/`HostArch` validation family
 # from `overdrive-core` rather than re-deriving kernel-format checks here.
 overdrive-core.workspace = true
+# The scripted guest vsock peer (`guest_peer`, `bin/guest_peer.rs`) drives the
+# guest's own `KernelFlowForwarder` context. overdrive-fwd in turn takes this
+# crate as a dev-dependency; cargo permits that cycle.
+overdrive-fwd.workspace  = true
 thiserror.workspace      = true
+
+# The scripted guest vsock peer: PID 1 (or a guest application) inside a
+# guest-kit microVM. Test support only.
+[[bin]]
+name = "overdrive-guest-peer"
+path = "bin/guest_peer.rs"
 
 [lints]
 workspace = true
