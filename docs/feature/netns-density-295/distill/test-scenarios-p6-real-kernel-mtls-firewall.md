@@ -50,7 +50,7 @@ the enforcement: `HostMtlsEnforcement::new(identity, limits, guest_prefix,
 guest_dial)`, `MtlsInterceptWorker::new` with four ports. R5-54's seeded half
 is authored (`overdrive-control-plane/src/guest_network/owner_acceptance/legs_dial.rs`);
 its Tier-3 half stays unauthored (`upstream-issues.md` T-9). The leg-F
-repair's real-kernel cell is `vsock_leg_f_repair.rs` (D-9, 10-02). The
+repair's real-kernel cell is `vsock_leg_f_repair.rs` (D-9, 14-02). The
 guest-program Tier-3 cells run through the serve + deploy lanes
 (`vsock_walking_skeleton`, `vsock_fault_matrix`, `vsock_density`) and the
 in-guest lane.

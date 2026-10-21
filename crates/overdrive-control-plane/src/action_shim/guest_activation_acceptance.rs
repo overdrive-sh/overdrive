@@ -412,7 +412,7 @@ fn start(name: &str) -> Action {
 /// guest opens its control session with the live launch token, then the CID
 /// becomes Active and EXEC is released exactly once.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (06-04 rework)"]
+#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn exec_is_released_only_after_the_allocation_is_active() {
     let fixture = ShimFixture::build().await;
     let (hold, _quiescence) = fixture.owner.quiesce().await;
@@ -468,7 +468,7 @@ async fn exec_is_released_only_after_the_allocation_is_active() {
 /// is refused with `PostconditionMismatch { operation: ForwardingActivate }`,
 /// the owner holds no CID for it, and no second EXEC is released.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (06-04 rework)"]
+#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn an_activation_after_teardown_is_refused_and_releases_no_exec() {
     let fixture = ShimFixture::build().await;
     let name = "nd295-p6-s12-row4";
@@ -603,7 +603,7 @@ async fn a_vmm_death_aborts_its_flows_and_a_stale_launch_flow_is_closed_unattrib
 /// with the guest network composed, then it is leased, its spec carries the
 /// transport, and EXEC follows its activation (C5b contrast).
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (06-04 rework)"]
+#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn an_allocation_without_a_guest_transport_runs_as_today() {
     let fixture = ShimFixture::build().await;
     let netns = RecordingNetnsProvisioner::default();

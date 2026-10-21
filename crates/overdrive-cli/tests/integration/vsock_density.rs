@@ -37,7 +37,7 @@
 //! Bounds: [`ATTACHMENTS`] VMs of 128 MiB guest RAM each; every case
 //! stops its Jobs and shuts `serve` down. Lane: `integration-tests,kvm-tests`,
 //! `cargo xtask metal run --`; module in `host-kernel-shared`. Pending
-//! DELIVER step 08-04.
+//! DELIVER step 14-05.
 
 #![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]
 #![allow(clippy::doc_markdown, reason = "kernel and protocol names in prose")]
@@ -143,7 +143,7 @@ fn assert_dial_reaches_no_host_socket(
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 08-04"]
+#[ignore = "pending DELIVER step 14-05"]
 async fn every_vm_at_density_round_trips_through_its_own_attachment() {
     let _bound = TeardownBound::arm();
     let peer = RemotePeer::start("vsock-density", 6).expect("precondition: the remote peer starts");
@@ -197,7 +197,7 @@ async fn every_vm_at_density_round_trips_through_its_own_attachment() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 08-04"]
+#[ignore = "pending DELIVER step 14-05"]
 async fn serve_down_at_density_is_fail_closed_and_the_next_boot_reclaims_every_vm() {
     let _bound = TeardownBound::arm();
     let mut lane = Lane::boot("vsock-density-down").await;

@@ -400,7 +400,7 @@ fn inventory(obs: &GuestOwnerObservation) -> (u32, u32) {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 10-01"]
+#[ignore = "pending DELIVER step 14-01"]
 async fn the_forwarder_inventory_counts_every_held_guest_flow_through_serve() {
     const N: u32 = 3;
     let peer = RemotePeer::start("d17-inv", 0).expect("precondition: the remote peer starts");
@@ -457,7 +457,7 @@ async fn the_forwarder_inventory_counts_every_held_guest_flow_through_serve() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 10-01"]
+#[ignore = "pending DELIVER step 14-01"]
 async fn a_killed_launchs_attachment_leaves_the_owner_and_the_next_launch_is_accepted() {
     let peer = RemotePeer::start("d17-kill", 0).expect("precondition: the remote peer starts");
     let node = Node::boot("d17-kill").await;
@@ -622,7 +622,7 @@ fn served_connections(alloc: &AllocationId) -> (Vec<TerminalEvent>, Vec<Terminal
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 10-01"]
+#[ignore = "pending DELIVER step 14-01"]
 async fn the_forwarder_inventory_counts_probe_and_relay_watches_through_serve() {
     let node = Node::boot("d17-dial").await;
     let service = node.deploy_listening_service("d17-dial-svc").await;
@@ -691,7 +691,7 @@ async fn the_forwarder_inventory_counts_probe_and_relay_watches_through_serve() 
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 10-01"]
+#[ignore = "pending DELIVER step 14-01"]
 async fn a_dropped_probe_stream_is_an_abort_at_the_guest_through_serve() {
     let node = Node::boot("d17-probe").await;
     let service = node.deploy_listening_service("d17-probe-svc").await;
@@ -731,7 +731,7 @@ async fn a_dropped_probe_stream_is_an_abort_at_the_guest_through_serve() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 10-01"]
+#[ignore = "pending DELIVER step 14-01"]
 async fn a_vmm_exit_under_a_held_relay_stream_resets_the_client_through_serve() {
     let node = Node::boot("d17-relay-kill").await;
     let service = node.deploy_listening_service("d17-relay-svc").await;

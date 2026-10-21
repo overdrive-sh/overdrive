@@ -54,7 +54,7 @@
 //!
 //! Observables: the worker's typed results, `leg_f_addr()`, the kernel's
 //! socket table (`/proc/net/tcp`, `ss -ltn`), this process's descriptor
-//! table, and a client connect to leg F. Pending DELIVER step 10-02.
+//! table, and a client connect to leg F. Pending DELIVER step 14-02.
 
 #![cfg(all(feature = "integration-tests", target_os = "linux"))]
 #![allow(
@@ -231,7 +231,7 @@ fn ss_shows_listen(addr: SocketAddrV4) -> (bool, String) {
 /// same address, a new listening socket with the old descriptor gone, the
 /// connect accepted, the audit `Ok`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "pending DELIVER step 10-02"]
+#[ignore = "pending DELIVER step 14-02"]
 async fn leg_f_repair_rebinds_transparent_listener() {
     // SAFETY: getuid is always safe.
     assert!(unsafe { libc::getuid() } == 0, "Tier-3 evidence requires root and CAP_NET_ADMIN");

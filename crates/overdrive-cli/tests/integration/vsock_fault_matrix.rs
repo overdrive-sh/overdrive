@@ -41,7 +41,7 @@
 //! its named bound; every case stops its Job and shuts `serve` down; the
 //! `TeardownBound` kills what a failed case left. Lane:
 //! `integration-tests,kvm-tests`, `cargo xtask metal run --`; module in
-//! `host-kernel-shared`. Pending DELIVER step 10-02.
+//! `host-kernel-shared`. Pending DELIVER step 14-02.
 
 #![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]
 #![allow(clippy::doc_markdown, reason = "kernel and protocol names in prose")]
@@ -153,7 +153,7 @@ const fn crashed(reason: Option<&TransitionReason>) -> bool {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 10-02"]
+#[ignore = "pending DELIVER step 14-02"]
 async fn the_serve_owners_death_resets_every_far_end_and_the_next_boot_reclaims_the_vm() {
     let _bound = TeardownBound::arm();
     let peer =
@@ -212,7 +212,7 @@ async fn the_serve_owners_death_resets_every_far_end_and_the_next_boot_reclaims_
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 10-02"]
+#[ignore = "pending DELIVER step 14-02"]
 async fn a_guest_reset_ends_the_vmm_and_resets_every_far_end() {
     let _bound = TeardownBound::arm();
     let peer =
@@ -251,7 +251,7 @@ async fn a_guest_reset_ends_the_vmm_and_resets_every_far_end() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 10-02"]
+#[ignore = "pending DELIVER step 14-02"]
 async fn a_killed_vmm_resets_the_far_end_of_its_flow() {
     let _bound = TeardownBound::arm();
     let peer = RemotePeer::start("vsock-fm-kill", 3).expect("precondition: the remote peer starts");
@@ -293,7 +293,7 @@ async fn a_killed_vmm_resets_the_far_end_of_its_flow() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 10-02"]
+#[ignore = "pending DELIVER step 14-02"]
 async fn a_far_reader_that_stops_blocks_the_sender_and_the_flow_resumes_in_order() {
     let _bound = TeardownBound::arm();
     let peer =
@@ -342,7 +342,7 @@ async fn a_far_reader_that_stops_blocks_the_sender_and_the_flow_resumes_in_order
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 10-02"]
+#[ignore = "pending DELIVER step 14-02"]
 async fn closed_udp_sockets_release_their_slots_before_and_after_pairing() {
     let _bound = TeardownBound::arm();
     let peer =

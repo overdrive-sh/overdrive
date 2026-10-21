@@ -590,7 +590,7 @@ mod tests {
     /// refused `ForeignHold`, changes no count and leaks at its issuing
     /// ledger; a dropped own hold keeps the count and is counted leaked.
     #[tokio::test]
-    #[ignore = "pending DELIVER attachment-cut step (09-01 rework)"]
+    #[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
     async fn quiescence_counts_holds_of_its_own_ledger_and_refuses_a_foreign_one() {
         let owner = SimSharedGuestNetworkOwner::default();
         let (first, _) = owner.quiesce().await;

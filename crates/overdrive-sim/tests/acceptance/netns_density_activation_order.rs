@@ -1225,7 +1225,7 @@ async fn fail_stop_withholds(seed: u64) {
 /// S-ND295-53 — Activation waits out a recovery and never turns it into a failure.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (06-04 rework)"]
+#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn activation_during_recovery_runs_once_after_reopen_without_a_failed_row() {
     for seed in seeds() {
         eprintln!(
@@ -1239,7 +1239,7 @@ async fn activation_during_recovery_runs_once_after_reopen_without_a_failed_row(
 /// S-ND295-53 — Activation waits out a recovery and never turns it into a failure.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (06-04 rework)"]
+#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn a_latched_activation_retries_after_reopen() {
     for seed in seeds() {
         eprintln!("seed={seed} body=a_latched_activation_retries_after_reopen");
@@ -1251,7 +1251,7 @@ async fn a_latched_activation_retries_after_reopen() {
 /// S-ND295-53 — Activation waits out a recovery and never turns it into a failure.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (06-04 rework)"]
+#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn fail_stop_withholds_activation_and_the_command() {
     for seed in seeds() {
         eprintln!("seed={seed} body=fail_stop_withholds_activation_and_the_command");

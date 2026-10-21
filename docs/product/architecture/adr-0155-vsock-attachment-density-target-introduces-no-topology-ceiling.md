@@ -39,9 +39,12 @@ lease derives the CID (ADR-0156).
      feature delta;
    - flow-level exhaustion is a per-flow typed refusal, never an attachment
      ceiling.
-3. **The CAP-295-A receipts are redefined for the vsock attachment** and
-   re-captured through production `serve` + `deploy` on qualified metal (V-9).
-   The bridge-era receipts (T1-BASE / T1-PORT4) do not carry over.
+3. **#295 captures no density receipts.** The bridge-era receipts (T1-BASE /
+   T1-PORT4) do not carry over. The density measurements for the vsock
+   attachment (V-9) are the benchmark
+   [GH #326](https://github.com/overdrive-sh/overdrive/issues/326) (user ruling
+   U-2, 2026-10-19). #295 verifies the attachment with `vsock_density.rs`, a
+   64-VM correctness test.
 
 ## Alternatives considered
 

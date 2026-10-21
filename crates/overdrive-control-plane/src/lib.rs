@@ -407,7 +407,7 @@ pub struct AppState {
     /// The one EXEC gate shared with the VM driver and supervisor.
     #[allow(
         dead_code,
-        reason = "threaded into the state now; action helpers consume it in DELIVER 06-04"
+        reason = "threaded into the state now; action helpers consume it in DELIVER 12-01"
     )]
     pub(crate) guest_network_exec: Arc<overdrive_core::guest_network::GuestNetworkExecGate>,
     /// The one node-wide guest address pool used by dispatch and hydration.
@@ -1080,7 +1080,7 @@ pub(crate) enum SharedNetworkSupervisorError {
 /// audit stretches the period instead of stacking calls.
 #[cfg_attr(
     not(all(test, feature = "integration-tests")),
-    allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01")
+    allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 12-01")
 )]
 const SHARED_NETWORK_AUDIT_PERIOD: Duration = Duration::from_secs(1);
 
@@ -1088,7 +1088,7 @@ const SHARED_NETWORK_AUDIT_PERIOD: Duration = Duration::from_secs(1);
 /// (ADR-0124, D-295-R13).
 #[cfg_attr(
     not(all(test, feature = "integration-tests")),
-    allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01")
+    allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 12-01")
 )]
 const SHARED_NETWORK_RETRY_PERIOD: Duration = Duration::from_millis(250);
 
@@ -1096,13 +1096,13 @@ const SHARED_NETWORK_RETRY_PERIOD: Duration = Duration::from_millis(250);
 /// D-295-R13).
 #[cfg_attr(
     not(all(test, feature = "integration-tests")),
-    allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01")
+    allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 12-01")
 )]
 const SHARED_NETWORK_RECOVERY_DEADLINE: Duration = Duration::from_secs(5);
 
 /// Completed recovery attempts after which the supervisor fail-stops
 /// (ADR-0124, D-295-R13).
-#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01")]
+#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 12-01")]
 const SHARED_NETWORK_RECOVERY_ATTEMPTS: u32 = 20;
 
 /// Bound on each owner call during detection; a call that misses it fails
@@ -1110,7 +1110,7 @@ const SHARED_NETWORK_RECOVERY_ATTEMPTS: u32 = 20;
 /// Rule: `max(1 s, 4 × L)`, L the largest single owner-call audit latency at
 /// T1-PORT4 (M-ND295-E18). It holds the rule's floor until the measurement
 /// sets it; the step that sets it records the measurement here.
-#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01")]
+#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 12-01")]
 const SHARED_NETWORK_AUDIT_CALL_BOUND: Duration = Duration::from_secs(1);
 
 /// Bound on each recovery's `quiesce()` call, itself capped by the
@@ -1119,7 +1119,7 @@ const SHARED_NETWORK_AUDIT_CALL_BOUND: Duration = Duration::from_secs(1);
 /// quiescence wall time at T1-PORT4 (M-ND295-E18). It holds the rule's floor
 /// until the measurement sets it; the step that sets it records the
 /// measurement here.
-#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01")]
+#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 12-01")]
 const SHARED_NETWORK_QUIESCE_CALL_BOUND: Duration = Duration::from_secs(1);
 
 /// Bound on each `cgroup.kill` write — per-VM and workloads-slice — in a
@@ -1131,13 +1131,13 @@ const SHARED_NETWORK_QUIESCE_CALL_BOUND: Duration = Duration::from_secs(1);
 /// or fail-stop. Rule: `max(1 s, 4 × W)`, W the largest single kill write at
 /// T1-PORT4 (M-ND295-E18). It holds the rule's floor until the measurement sets
 /// it; the step that sets it records the measurement here.
-#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01")]
+#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 12-01")]
 const SHARED_NETWORK_VM_KILL_CALL_BOUND: Duration = Duration::from_secs(1);
 
 /// The ports the one runtime shared-network supervisor task owns (D-295-R13,
 /// R14, R16). They replace `run_mtls_owner`'s parameters in DELIVER step
-/// 09-01.
-#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01")]
+/// 12-01.
+#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 12-01")]
 struct SharedNetworkSupervisorPorts {
     shared_guest_network: Arc<dyn guest_network::SharedGuestNetworkOwner>,
     mtls_worker: Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
@@ -1161,11 +1161,11 @@ mod vm_kill {
         reason = "the DESIGN pins `pub(super)`: visibility is stated relative to the supervisor module"
     )]
     pub(super) struct VmKillCapability {
-        #[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01")]
+        #[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 12-01")]
         cgroups: super::CgroupManager,
     }
 
-    #[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01")]
+    #[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 12-01")]
     impl VmKillCapability {
         /// Wrap the manager over the same cgroup root and `CgroupFs` every
         /// composed `VmDriver` writes through.
@@ -1175,29 +1175,29 @@ mod vm_kill {
 
         /// Write `1` to one allocation's scope `cgroup.kill`. An absent scope is
         /// `Ok`: the VMM can no longer execute.
-        #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 09-01")]
+        #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 12-01")]
         #[expect(
             clippy::unused_async,
-            reason = "RED scaffold — DELIVER step 09-01 awaits the kill write"
+            reason = "RED scaffold — DELIVER step 12-01 awaits the kill write"
         )]
         pub(super) async fn kill_allocation(
             &self,
             alloc: &super::AllocationId,
         ) -> std::io::Result<()> {
             let _ = alloc;
-            todo!("RED scaffold: D-295-R14 VmKillCapability::kill_allocation — DELIVER step 09-01")
+            todo!("RED scaffold: D-295-R14 VmKillCapability::kill_allocation — DELIVER step 12-01")
         }
 
         /// Write `1` to the workloads slice's `cgroup.kill`, killing every
         /// workload VMM.
-        #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 09-01")]
+        #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 12-01")]
         #[expect(
             clippy::unused_async,
-            reason = "RED scaffold — DELIVER step 09-01 awaits the kill write"
+            reason = "RED scaffold — DELIVER step 12-01 awaits the kill write"
         )]
         pub(super) async fn kill_workloads_slice(&self) -> std::io::Result<()> {
             todo!(
-                "RED scaffold: D-295-R14 VmKillCapability::kill_workloads_slice — DELIVER step 09-01"
+                "RED scaffold: D-295-R14 VmKillCapability::kill_workloads_slice — DELIVER step 12-01"
             )
         }
     }
@@ -1267,7 +1267,7 @@ impl SharedNetworkSupervisorHandle {
     ///   entry; a repeated call with no intervening supervisor step returns
     ///   an equal value.
     ///
-    /// RED scaffold: DELIVER lands it with the supervisor rework (09-01
+    /// RED scaffold: DELIVER lands it with the supervisor rework (12-01
     /// rework, inside the attachment cut), which keeps each recovery's
     /// episode beside the EXEC gate's per-recovery snapshots.
     #[cfg_attr(
@@ -1279,7 +1279,7 @@ impl SharedNetworkSupervisorHandle {
     )]
     #[expect(
         clippy::unused_self,
-        reason = "RED scaffold body panics; DELIVER 09-01 rework lands the episodes"
+        reason = "RED scaffold body panics; DELIVER 12-01 (09-01 rework) lands the episodes"
     )]
     pub fn recovery_observation(&self) -> BTreeMap<SharedGuestNetworkComponent, RecoveryEpisode> {
         panic!("Not yet implemented -- RED scaffold")
@@ -1334,12 +1334,12 @@ impl SharedNetworkSupervisorHandle {
     /// The one runtime shared-network supervisor (D-295-R13, R14, R15, R16):
     /// detection, component-specific quiescence, bounded recovery, per-VM
     /// kill scope, restore, and typed fail-stop. Replaces `run_mtls_owner`
-    /// in DELIVER step 09-01.
-    #[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 09-01")]
-    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 09-01")]
+    /// in DELIVER step 12-01.
+    #[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 12-01")]
+    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 12-01")]
     #[expect(
         clippy::unused_async,
-        reason = "RED scaffold — DELIVER step 09-01 awaits the owner calls"
+        reason = "RED scaffold — DELIVER step 12-01 awaits the owner calls"
     )]
     async fn run_shared_network_supervisor(
         ports: SharedNetworkSupervisorPorts,
@@ -1349,7 +1349,7 @@ impl SharedNetworkSupervisorHandle {
         shutdown: CancellationToken,
     ) -> std::result::Result<(), SharedNetworkSupervisorError> {
         let _ = (ports, exec, clock, request_tx, shutdown);
-        todo!("RED scaffold: D-295-R13 run_shared_network_supervisor — DELIVER step 09-01")
+        todo!("RED scaffold: D-295-R13 run_shared_network_supervisor — DELIVER step 12-01")
     }
 
     fn listener_task_exit_leg(
@@ -3072,7 +3072,7 @@ async fn boot_server(
         mtls: mtls_adapters,
         guest_dns,
     } = boot;
-    // RED scaffold (D-295-R14): consumed in DELIVER step 09-01, which wraps it
+    // RED scaffold (D-295-R14): consumed in DELIVER step 12-01, which wraps it
     // in the supervisor's kill-only `VmKillCapability`.
     let _ = vm_cgroups;
     // Boot step 1 for a supplied owner (D-8, "Entry points and the supplied

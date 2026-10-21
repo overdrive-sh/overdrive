@@ -138,10 +138,10 @@ green by accident:
 | Cell | RED at |
 |---|---|
 | `owner_acceptance::legs_dial` (4: authenticated dial and teardown release, no dial on a refused client, `GuestDial { NotServing }` closes leg C, no owner dial outside the prefix) — attachment-cut (9) | `net.rs:41` (`ListenPort::new`, step 2) in the lease set-up, then the owner and enforcement scaffolds |
-| `overdrive-worker` `vsock_leg_f_repair::leg_f_repair_rebinds_transparent_listener` (Tier 3, root) — 10-02 | `mtls_intercept_worker.rs:3133` (`leg_f_addr`, step 8) |
-| `prefix_boot_acceptance::phase_one_probes_the_forwarder_on_a_context_it_releases_and_refuses_a_bad_one` — (09-01 rework) | its refusal assertion against the phase-1 stub (§ *S-1*) |
-| `shared_network_recovery_acceptance::a_forwarder_that_fails_its_boot_probe_refuses_boot_before_any_effect` (G-V1 through the composed rig's phase 1, which now calls `run_server`'s own boot-step-1 function and its `health.startup.refused`) — (09-01 rework) | "AbiMismatch: the boot refuses with the forwarder's typed cause, got Ok(())" (the first scripted failure) |
-| `shared_network_recovery_acceptance::a_boot_opens_and_probes_the_forwarder_before_any_listener_or_route` — (09-01 rework) | "the forwarder opened" (`converge_shared` is a no-effect stub, S-1) |
+| `overdrive-worker` `vsock_leg_f_repair::leg_f_repair_rebinds_transparent_listener` (Tier 3, root) — 14-02 | `mtls_intercept_worker.rs:3133` (`leg_f_addr`, step 8) |
+| `prefix_boot_acceptance::phase_one_probes_the_forwarder_on_a_context_it_releases_and_refuses_a_bad_one` — (12-01 rework) | its refusal assertion against the phase-1 stub (§ *S-1*) |
+| `shared_network_recovery_acceptance::a_forwarder_that_fails_its_boot_probe_refuses_boot_before_any_effect` (G-V1 through the composed rig's phase 1, which now calls `run_server`'s own boot-step-1 function and its `health.startup.refused`) — (12-01 rework) | "AbiMismatch: the boot refuses with the forwarder's typed cause, got Ok(())" (the first scripted failure) |
+| `shared_network_recovery_acceptance::a_boot_opens_and_probes_the_forwarder_before_any_listener_or_route` — (12-01 rework) | "the forwarder opened" (`converge_shared` is a no-effect stub, S-1) |
 | `overdrive-fwd` `end_record_abi::take_end_returns_records_in_end_order` (abort and clean-close paths) — step 4 | not run (needs `ovd_fwd`, step 4); `KernelFlowForwarder::open` is its first scaffold |
 | `vsock_density` R5-25 fail-closed oracle (S-10); `vsock_fault_matrix` R5-62 plateau polling | the metal precondition above |
 
@@ -159,11 +159,11 @@ Counts are `#[ignore = "pending …"]` attributes in the tree on 2026-10-21 (1,0
 | `step 5` (187) | the guest owner, transport setup and `KernelRelease` scaffolds; the guest drivers; the in-guest lane cells |
 | `step 8` (13), `step 11` (7), `step 12` (20), `step 13` (15), `step 14` (13) | the mTLS registration, VIP placement, firewall single cut, guest-prefix boot checks and host-internal deny set scaffolds |
 | `step 9` (35) | the probe-run counting and VM probe runner dial |
-| `step 10-01` (6), `step 10-02` (6, the leg-F repair cell included), `step 08-04` (2) | the vsock serve + deploy lanes on metal (precondition until step 4, above; then the attachment cut) |
+| `step 14-01` (6), `step 14-02` (6, the leg-F repair cell included), `step 14-05` (2) | the vsock serve + deploy lanes on metal (precondition until step 4, above; then the attachment cut) |
 | `attachment-cut step (3)`, `(5)`, `(6)`, `(7)`, `(8)`, `(9)`, `(15)` (4, 3, 63, 166, 3, 48, 68) | the owner flows, the beacon relocation and the bound-port listeners (PORTS-CONFIG: `NodeVsockPortConfig::new` validation, `flow_ports`, `BeaconIntake::bound_port` on the kernel command line, `serve_kernel_assigned_vsock_ports`), the host dial and LEGS-DIAL relay, the pool and reclamation scaffolds; the R5-59 (a) accept-path cells (`(6)` beacon seam, `(7)` flow seam) |
-| `attachment-cut step (09-01 rework)` (27), `(06-04 rework)` (6) | the supervisor's QHOLD recovery and the activation gate |
+| `attachment-cut step (12-01 rework)` (27), `(12-01 rework)` (6) | the supervisor's QHOLD recovery and the activation gate |
 | `attachment-cut step (DG-2 …)` (55 + 1 + 14 + 13 + 4 + 3 + 2 + 1) | a VM start leasing the guest transport and taking READY from the node beacon intake; the guest lane leasing the transport; the IpRules recovery |
-| `step 10-03` (1), `step 09-01` (1) | carried composition cells |
+| `step 14-03` (1), `step 12-01` (1) | carried composition cells |
 | `step K` (1) | V-EV-UNLOAD's context half (`unload.rs`): the module skeleton and its references do not exist before step K |
 | `#325` (1) | `RedeployLeasedAtServeCrashIsPlacedAgain` on `lease_conf_325` (GH #325 is not fixed in #295) |
 
@@ -206,7 +206,7 @@ background convergence task, which shutdown discards.
 The 58 kept pending, each `pending DELIVER attachment-cut step (DG-2 rows
 2, 15: a VM start leases the guest transport and takes READY from the node
 beacon intake)` except the three `serve_lifetime_fail_stop` cells (`DG-2
-row 8, the 09-01 rework`), all driving a VM attachment:
+row 8, the 12-01 rework`), all driving a VM attachment:
 
 - `overdrive-cli/tests/integration/vm_resources_sizing.rs`: `declared_cpu_milli_2000_yields_two_guest_online_cpus`, `sub_core_cpu_milli_250_yields_one_guest_online_cpu_and_reaches_running`, `declared_memory_2gib_is_guest_observed_and_reported_by_describe`, `declared_cpu_and_memory_match_guest_observed_on_single_private_backing`
 - `overdrive-cli/tests/integration/vm_reclamation_tier3.rs`: `vm_survivor_with_no_vm_registry_entry_is_reclaimed_via_observed_empty`, `boot_epoch_reclamation_settles_before_adopt_on_restart_recovery`, `steady_state_sweep_reclaims_a_stranded_scope_without_restarting_serve`, `steady_state_sweep_kills_a_surviving_vmm_at_a_later_tick`, `restart_orphan_terminal_row_is_byte_unchanged_after_reclamation`, `failed_stop_orphan_terminal_row_is_byte_unchanged_after_reclamation`, `reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation`, `reclaim_then_fresh_start_retains_predecessor_and_resets_history`, `guest_self_exit_without_stop_leaves_no_rootfs_clone_in_operator_dir`, `hypervisor_death_without_stop_leaves_no_rootfs_clone_in_operator_dir`, `serve_restart_losing_in_memory_rootfs_plan_leaves_no_rootfs_clone`
@@ -228,6 +228,19 @@ row 8, the 09-01 rework`), all driving a VM attachment:
 | `overdrive-fwd` `paused_and_stall`, `datagram`, `attach_watch` | RED at `KernelFlowForwarder::open`'s scaffold (`pending DELIVER step 4`) | the adapter and module contract land in step 4 |
 | `overdrive-fwd` `unload_in_guest::*` (2 host) | precondition (`LaneNotPrepared` until step K, then the in-guest cell's `KernelFlowForwarder::open` scaffold, step 4); the stress case's oracles are no oops and the refcount on the stock 7.0 kernel; the ULP control polls each transition (`wait_refcnt`) and holds over `ULP_HOLD_WINDOW` only after its positive half, the stress's far ends are non-blocking | in-guest cells of the `integration` binary, staged by `guest-kit-prepare` |
 | `overdrive-init` `in_guest_lane` D-22 cases (6) | precondition (`LaneNotPrepared` until step K), then the in-guest owner cell's first scaffold (`GuestFlowOwner` construction / `dispatch_next`, `pending DELIVER step 5`); the aborted-flow checks run only after the owner has processed the aborted V_g (`serve_control_flow_after_abort`) and the R5-28 guest-accepted cell pins `consumed_ends` | the production guest owner lands in step 5 |
-| `guest_flow_through_serve::*` (D-17 and U-D17-DIAL) | precondition on metal until step K, then RED at `ServerHandle::guest_flow_observation`'s scaffold (`pending DELIVER step 10-01`) | the accessor is a RED scaffold |
+| `guest_flow_through_serve::*` (D-17 and U-D17-DIAL) | precondition on metal until step K, then RED at `ServerHandle::guest_flow_observation`'s scaffold (`pending DELIVER step 14-01`) | the accessor is a RED scaffold |
 | `overdrive-testing` `guest_kit::GuestKit::boot` (U-4 (a)) | compiles against the production `CloudHypervisorVmm`; on metal each kit cell stops at `LaneNotPrepared` until step K, then at `GuestCid::new` (step 2, `cid_bands` and the kit's launch) and the leased-CID launch argument (step 3) | the kit launches through `Vmm::create`; the production launch scaffolds land in steps 2 and 3 |
 | `vsock_host_internal_enforce` F-3, F-5, link-local | `pending DELIVER step 14` | controls precede the absence checks |
+
+## H3 test ownership: the persistent-TAP creator
+
+Roadmap step 12-01 deletes the production netlink persistent-TAP functions (`create_persistent_tap`, `set_persistent_tap_owner`, `observe_persistent_tap*`, `TapLinkState` and the decoders). DISTILL re-homed or removed every retained test that called them before 12-01 starts, under `.claude/rules/testing.md` and `development.md` § Deletion discipline. No production API was added.
+
+| Test or fixture | Decision | Reason |
+|---|---|---|
+| `overdrive-host/src/vmm.rs` `ScratchTap` and every `launch_seccomp` cell that uses it (S-ND295-43 `every_denied_request_returns_eperm_on_every_thread_under_the_production_hook`, `every_filtered_thread_reports_no_new_privs_and_filter_mode`, `foreign_syscall_abis_end_the_filtered_process`, S-ND295-41 descriptor cells) | Keep, re-homed | They defend a retained contract: the ADR-0143 launch filter refuses TAP-mutating requests on every thread (V-1(c); the design retains it, roadmap 11-04). `ScratchTap::create` now calls a test-local `create_persistent_scratch_tap` in the same test module (raw `/dev/net/tun`: `TUNSETIFF` with `IFF_TAP | IFF_NO_PI`, `TUNSETOFFLOAD` 0, `TUNSETOWNER` 0, `TUNSETPERSIST` 1; the TAP the old function made). Test bodies and assertions are untouched. Cleanup still uses `Client::del_link`, which is not in the deletion inventory |
+| `alloc_netns_lifecycle.rs` `terminal_teardown_reaps_platform_tap_stranded_before_netns_move` | Deleted now | Defended only `teardown_workload_netns` reaping a host-stranded platform-owned persistent TAP, i.e. the bridge-era per-VM TAP plan (`derive_vm_tap_plan`, `host_persistent_tap_state`) that 12-01 deletes. No retained contract |
+| `alloc_netns_lifecycle.rs` `terminal_teardown_never_deletes_a_foreign_host_tap` | Deleted now | Defended only the `TapIncompatible` fail-closed collision on that deleted TAP path. No retained contract |
+| `alloc_netns_lifecycle.rs` `HostTapGuard`, `host_persistent_tap_present`, the `create_persistent_tap` and `VethProvisionError` imports | Deleted now | Used only by the two deleted tests |
+
+Callers that remain when 12-01 starts, all inventoried deletions in the feature delta (§ bridge / TAP era A and B) and deleted with the functions in the same commit: `veth_provisioner.rs` persistent-TAP helpers; `overdrive-netlink/tests/integration/{scratch_tap,managed_link_address,tap_debug_msg_mask}.rs` (whole files); the `alloc_netns_lifecycle.rs` tests that call `derive_vm_tap_plan` / `VmTapPlan` (deleted with the plan: roadmap 12-01 "DELETE with tests"). The dataplane `guest_tcx_*` fixtures create TAPs with `ip tuntap` and never called the netlink functions.

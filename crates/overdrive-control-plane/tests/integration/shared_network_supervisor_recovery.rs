@@ -142,7 +142,7 @@ impl Node {
 /// quiescence, no restore, no activation, no shutdown request.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (09-01 rework)"]
+#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn a_healthy_owner_keeps_admission_open_without_recovery_effects() {
     let mut node = Node::boot().await;
     let boot_calls = node.owner.calls().len();
@@ -175,7 +175,7 @@ async fn a_healthy_owner_keeps_admission_open_without_recovery_effects() {
 /// owner once per one-second period.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (09-01 rework)"]
+#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn a_healthy_node_audits_the_shared_owner_every_second() {
     let node = Node::boot().await;
     let at_boot = node.audits();

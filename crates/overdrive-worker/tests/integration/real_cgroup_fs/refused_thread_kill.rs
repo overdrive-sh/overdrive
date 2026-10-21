@@ -7,13 +7,13 @@
 //! (`overdrive-host/src/cgroup_fs.rs`); under the release profile's
 //! `panic = "abort"` a `tokio::fs` write that needs a new blocking-pool thread
 //! the OS refuses would end the process (`tokio` panics when the blocking pool
-//! is empty and the OS refuses a thread). DELIVER step 09-01 moves the write
+//! is empty and the OS refuses a thread). DELIVER step 12-01 moves the write
 //! off `tokio::fs` to a fallible thread primitive, so the refusal becomes the
 //! write's `io::Error`.
 //!
-//! RED-against-the-no-panic-baseline: before 09-01 the kill write on the empty
+//! RED-against-the-no-panic-baseline: before 12-01 the kill write on the empty
 //! blocking pool panics/aborts under the `pids.max` cap; the body never reaches
-//! its assertion. After 09-01 the write either lands (needs no new thread) or
+//! its assertion. After 12-01 the write either lands (needs no new thread) or
 //! returns an `io::Error`, and the body reaches the assertion.
 
 #![allow(
@@ -39,7 +39,7 @@ use super::super::cgroup_cleanup::AllocCleanup;
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 09-01 (E23)"]
+#[ignore = "pending DELIVER step 12-01 (E23)"]
 fn a_kill_write_under_thread_refusal_returns_an_io_error_and_never_aborts() {
     let cgroup_root = Path::new("/sys/fs/cgroup");
     let fs: Arc<dyn CgroupFs> = Arc::new(RealCgroupFs::new());

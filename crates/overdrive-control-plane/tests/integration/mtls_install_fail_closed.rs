@@ -1275,7 +1275,7 @@ async fn assert_activation_failure_projection(
 ///
 /// The RETAINED ordering: start_alloc, the protection-live event, activation,
 /// the EXEC release, then the running hook. It holds with or without the EXEC
-/// gate wait; the wait itself is the sibling body pending 06-04. The seam
+/// gate wait; the wait itself is the sibling body pending 12-01. The seam
 /// fixture is all sim ports and needs no privilege.
 #[tokio::test]
 #[ignore = "pending DELIVER attachment-cut step (DG-2 row 2: GuestAddressPool::assign)"]
@@ -1595,7 +1595,7 @@ async fn drive_refused_activation(
 /// teardown; the driver starts and stops the allocation once each; EXEC is
 /// never released and the running hook never fires; protection is stopped
 /// once; and a dominating Failed row names the activation stage. The lease
-/// events and the EXEC-gate claim are the sibling body pending 06-04.
+/// events and the EXEC-gate claim are the sibling body pending 12-01.
 #[tokio::test]
 #[ignore = "pending DELIVER attachment-cut step (DG-2 row 2: GuestAddressPool::assign)"]
 async fn tap_activation_failure_stops_vmm_cleans_mtls_and_network_and_dominates_running() {

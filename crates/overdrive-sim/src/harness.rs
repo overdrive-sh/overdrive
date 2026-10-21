@@ -576,7 +576,7 @@ impl Harness {
                 crate::invariants::reply_source_rewrite_lockstep::evaluate_reply_source_rewrite_lockstep().await
             }
             // phase-2-xdp-service-map Slice 06 (US-06; S-2.2-22
-            // sibling). GREEN of step 06-04 lands the real evaluator
+            // sibling). GREEN of step 12-01 lands the real evaluator
             // body in `crate::invariants::sanity_checks_fire`. Sibling
             // to the Tier 3 mixed-batch test at
             // `crates/overdrive-dataplane/tests/integration/sanity_mixed_batch.rs`.

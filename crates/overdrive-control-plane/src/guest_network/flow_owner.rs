@@ -380,7 +380,7 @@ impl Drop for QuiescenceHold {
 pub struct QuiescenceLedger {
     #[allow(
         dead_code,
-        reason = "RED scaffold — `issue` / `redeem` / `leaked` read it in step 09-01"
+        reason = "RED scaffold — `issue` / `redeem` / `leaked` read it in step 12-01"
     )]
     inner: Arc<LedgerInner>,
 }
@@ -394,7 +394,7 @@ impl QuiescenceLedger {
 
     /// A new hold bound to this ledger (it clones this ledger's inner `Arc`).
     ///
-    /// RED scaffold: lands with the counted quiescence (step 09-01 rework).
+    /// RED scaffold: lands with the counted quiescence (step 12-01, the 09-01 rework).
     #[expect(clippy::unused_self, reason = "RED scaffold body panics")]
     pub fn issue(&self) -> QuiescenceHold {
         panic!("{SCAFFOLD}")
@@ -404,7 +404,7 @@ impl QuiescenceLedger {
     /// (identity: `Arc::ptr_eq` of the hold's inner and this ledger's);
     /// returns it unchanged otherwise.
     ///
-    /// RED scaffold: lands with the counted quiescence (step 09-01 rework).
+    /// RED scaffold: lands with the counted quiescence (step 12-01, the 09-01 rework).
     #[expect(
         clippy::unused_self,
         clippy::needless_pass_by_value,
@@ -417,7 +417,7 @@ impl QuiescenceLedger {
 
     /// Holds of this ledger dropped without a redeem; never decreases.
     ///
-    /// RED scaffold: lands with the counted quiescence (step 09-01 rework).
+    /// RED scaffold: lands with the counted quiescence (step 12-01, the 09-01 rework).
     #[expect(clippy::unused_self, reason = "RED scaffold body panics")]
     pub fn leaked(&self) -> u32 {
         panic!("{SCAFFOLD}")
@@ -442,7 +442,7 @@ pub enum QuiescenceRestoreError {
 impl QuiescenceRestoreError {
     /// The error's telemetry label.
     ///
-    /// RED scaffold: lands with the counted quiescence (step 09-01 rework).
+    /// RED scaffold: lands with the counted quiescence (step 12-01, the 09-01 rework).
     #[expect(clippy::unused_self, reason = "RED scaffold body panics")]
     pub const fn as_str(self) -> &'static str {
         panic!("Not yet implemented -- RED scaffold")

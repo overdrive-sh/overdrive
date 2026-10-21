@@ -112,12 +112,12 @@ pub enum SharedGuestNetworkFailStopCause {
     ///
     /// **D-list** (feature-delta § *Bridge-era code for DELIVER to delete*,
     /// scattered sites): no TAP exists under the vsock attachment; the
-    /// 09-01 rework deletes it with its control-plane users.
+    /// 12-01 (09-01 rework) deletes it with its control-plane users.
     TapQuiescenceUndetermined,
     /// A per-VM kill write for a known allocation failed other than with an
     /// absent scope, so the whole workloads slice was killed (D-295-R14).
     ///
-    /// RED scaffold (D-295-R14): constructed in DELIVER step 09-01.
+    /// RED scaffold (D-295-R14): constructed in DELIVER step 12-01.
     VmKillFailed,
     /// The supervisor returned without a fail-stop request.
     SupervisorReturned,
@@ -294,7 +294,7 @@ impl GuestNetworkExecSupervisor {
     /// Today's single-holder bookkeeping is kept: the first member of
     /// `remaining` in `Ord` becomes the recovery snapshot's component. The
     /// per-holder contract (§ *Owner and provisioner*, U-QP-3) lands with
-    /// the DELIVER 09-01 rework in the attachment cut.
+    /// the DELIVER 12-01 (09-01 rework) in the attachment cut.
     #[must_use]
     #[allow(
         clippy::needless_pass_by_value,
@@ -329,7 +329,7 @@ impl GuestNetworkExecSupervisor {
     /// lock (U-QP-3).
     ///
     /// Today's single-holder bookkeeping yields at most one entry; the
-    /// per-holder set (D8a-HOLD) lands with the DELIVER 09-01 rework in the
+    /// per-holder set (D8a-HOLD) lands with the DELIVER 12-01 (09-01 rework) in the
     /// attachment cut.
     #[must_use]
     pub fn recovery_progress(&self) -> Vec<SharedGuestNetworkRecovery> {

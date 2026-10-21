@@ -1442,7 +1442,7 @@ mod launch_seccomp_kernel {
         VmConfinement, VmRunDir, VmmIdentity,
     };
     #[cfg(target_arch = "x86_64")]
-    use overdrive_netlink::{Client, block_on_host_netlink, create_persistent_tap};
+    use overdrive_netlink::{Client, block_on_host_netlink};
 
     use super::io;
     #[cfg(not(target_arch = "x86_64"))]
@@ -1469,10 +1469,45 @@ mod launch_seccomp_kernel {
         fn create() -> Self {
             let sequence = SCRATCH_SEQUENCE.fetch_add(1, Ordering::Relaxed);
             let name = format!("nd295k{:x}{sequence:x}", std::process::id());
-            create_persistent_tap(&name, 0)
-                .unwrap_or_else(|error| panic!("create scratch TAP {name}: {error}"));
+            create_persistent_scratch_tap(&name);
             Self { name }
         }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    /// Create the persistent TAP `name` through `/dev/net/tun`, owned by uid
+    /// 0, with packet-info headers and every offload bit disabled. The
+    /// creator is test-local: this module's evidence (the ADR-0143 launch
+    /// filter refusing TAP-mutating requests) depends on a TAP existing, not
+    /// on any production TAP-creation function.
+    fn create_persistent_scratch_tap(name: &str) {
+        let tun = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/net/tun")
+            .expect("open /dev/net/tun");
+        let mut request = named_ifreq(name);
+        request.ifr_ifru.ifru_flags = libc::c_short::try_from(libc::IFF_TAP | libc::IFF_NO_PI)
+            .expect("TAP flags fit ifr_flags");
+        // SAFETY: `tun` is an open `/dev/net/tun` descriptor and `request` is a
+        // live, initialised `ifreq` for the whole call.
+        let created = unsafe { libc::ioctl(tun.as_raw_fd(), libc::TUNSETIFF, &raw mut request) };
+        assert_eq!(created, 0, "create scratch TAP {name}: {}", io::Error::last_os_error());
+        // SAFETY: `tun` owns the TAP just created; each request takes an
+        // integer argument by value.
+        let configured = unsafe {
+            [
+                libc::ioctl(tun.as_raw_fd(), libc::TUNSETOFFLOAD, 0),
+                libc::ioctl(tun.as_raw_fd(), libc::TUNSETOWNER, 0),
+                libc::ioctl(tun.as_raw_fd(), libc::TUNSETPERSIST, 1),
+            ]
+        };
+        assert_eq!(
+            configured,
+            [0, 0, 0],
+            "configure scratch TAP {name} (offload, owner, persist): {}",
+            io::Error::last_os_error(),
+        );
     }
 
     #[cfg(target_arch = "x86_64")]

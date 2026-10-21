@@ -67,9 +67,9 @@ impl CgroupPath {
     /// The workloads slice, `overdrive.slice/workloads.slice`, that contains
     /// every allocation scope.
     #[must_use]
-    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 09-01")]
+    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 12-01")]
     pub fn workloads_slice() -> Self {
-        todo!("RED scaffold: D-295-R14 workloads_slice — DELIVER step 09-01")
+        todo!("RED scaffold: D-295-R14 workloads_slice — DELIVER step 12-01")
     }
 
     /// Borrow the canonical relative-path string.

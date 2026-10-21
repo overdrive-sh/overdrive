@@ -558,7 +558,7 @@ impl State<QuiescenceDriver> for QuiescenceState {
     test = "SingleRecoveryQuiescesRepairsRestores",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER attachment-cut step (09-01 rework)"]
+#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 fn quiescence_single_recovery_quiesces_repairs_restores() -> impl Driver {
     QuiescenceDriver::fresh()
 }
@@ -570,7 +570,7 @@ fn quiescence_single_recovery_quiesces_repairs_restores() -> impl Driver {
     test = "TwoOverlappingRecoveriesKeepForwardingQuiescedUntilTheLastRestore",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER attachment-cut step (09-01 rework)"]
+#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 fn quiescence_two_overlapping_recoveries_keep_forwarding_quiesced() -> impl Driver {
     QuiescenceDriver::fresh()
 }
@@ -582,7 +582,7 @@ fn quiescence_two_overlapping_recoveries_keep_forwarding_quiesced() -> impl Driv
     test = "NoFlowOpensWhileCountedHoldRemains",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER attachment-cut step (09-01 rework)"]
+#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 fn quiescence_no_flow_opens_while_counted_hold_remains() -> impl Driver {
     QuiescenceDriver::fresh()
 }
@@ -594,7 +594,7 @@ fn quiescence_no_flow_opens_while_counted_hold_remains() -> impl Driver {
     test = "TwoOverlappingRecoveriesReopenOnlyAtZero",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER attachment-cut step (09-01 rework)"]
+#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 fn quiescence_two_overlapping_recoveries_reopen_only_at_zero() -> impl Driver {
     QuiescenceDriver::fresh()
 }
@@ -608,7 +608,7 @@ fn quiescence_two_overlapping_recoveries_reopen_only_at_zero() -> impl Driver {
     test = "DroppedHoldKeepsForwardingQuiescedThenFailStops",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER attachment-cut step (09-01 rework)"]
+#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 fn quiescence_dropped_hold_keeps_forwarding_quiesced_then_fail_stops() -> impl Driver {
     QuiescenceDriver::fresh()
 }
@@ -620,7 +620,7 @@ fn quiescence_dropped_hold_keeps_forwarding_quiesced_then_fail_stops() -> impl D
     test = "RepairFailureCountsAttemptThenRepairs",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER attachment-cut step (09-01 rework)"]
+#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 fn quiescence_repair_failure_counts_attempt_then_repairs() -> impl Driver {
     QuiescenceDriver::fresh()
 }
@@ -632,7 +632,7 @@ fn quiescence_repair_failure_counts_attempt_then_repairs() -> impl Driver {
     test = "PostRepairAuditFailureCountsAttempt",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER attachment-cut step (09-01 rework)"]
+#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 fn quiescence_post_repair_audit_failure_counts_attempt() -> impl Driver {
     QuiescenceDriver::fresh()
 }
@@ -644,7 +644,7 @@ fn quiescence_post_repair_audit_failure_counts_attempt() -> impl Driver {
     test = "SpentBudgetFailStopsAndRestartConverges",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER attachment-cut step (09-01 rework)"]
+#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 fn quiescence_spent_budget_fail_stops_and_restart_converges() -> impl Driver {
     QuiescenceDriver::fresh()
 }
@@ -656,7 +656,7 @@ fn quiescence_spent_budget_fail_stops_and_restart_converges() -> impl Driver {
     test = "CrashDuringRecoveryThenRestartRecovers",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER attachment-cut step (09-01 rework)"]
+#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 fn quiescence_crash_during_recovery_then_restart_recovers() -> impl Driver {
     QuiescenceDriver::fresh()
 }
@@ -676,7 +676,7 @@ fn quiescence_failed_boot_table_write_refuses_boot_then_retry_succeeds() -> impl
 /// Randomized traces of the conformance main (seed printed on failure).
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_run(spec = "../../specs/quint/guest-flow-owner/quiescence.qnt", main = "quiesce_conf")]
-#[ignore = "pending DELIVER attachment-cut step (09-01 rework)"]
+#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 fn quiescence_quiesce_conf_randomized() -> impl Driver {
     QuiescenceDriver::fresh()
 }

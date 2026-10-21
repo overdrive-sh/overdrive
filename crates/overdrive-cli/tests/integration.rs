@@ -163,9 +163,9 @@ mod integration {
     mod serve_lifetime_support;
 
     // netns-density-295 vsock native-metal lanes through `overdrive serve` +
-    // `overdrive deploy`: the walking skeleton (P6-S13, 10-01), the native
-    // fault matrix (P6-S14, 10-02) and the density / fail-closed cells
-    // (P6-S15, 08-04). Each file carries its own
+    // `overdrive deploy`: the walking skeleton (P6-S13, 14-01), the native
+    // fault matrix (P6-S14, 14-02) and the density / fail-closed cells
+    // (P6-S15, 14-05). Each file carries its own
     // `#![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]`.
     mod vsock_density;
     mod vsock_fault_matrix;

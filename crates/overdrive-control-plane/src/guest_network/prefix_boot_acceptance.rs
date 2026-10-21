@@ -522,7 +522,7 @@ async fn phase_one_over(
 /// phase 1 passes after exactly one forwarder probe, on one context that is
 /// released before it returns.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (09-01 rework)"]
+#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn phase_one_probes_the_forwarder_on_a_context_it_releases_and_refuses_a_bad_one() {
     let cases: Vec<ForwarderFailureCase> = vec![
         ("DeviceAbsent", SimFailure::Forwarder(SimForwarderFailure::DeviceAbsent), |e| {

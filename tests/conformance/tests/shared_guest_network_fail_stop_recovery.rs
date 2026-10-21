@@ -178,7 +178,7 @@ fn assert_detected_then_closed_until_request(trajectory: &Trajectory) -> (Durati
 /// S-ND295-33 — A failed handler shuts down before a fresh handler admits work
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER step 10-03 (S-ND295-33)"]
+#[ignore = "pending DELIVER step 14-03 (S-ND295-33)"]
 #[allow(
     clippy::too_many_lines,
     reason = "one conformance body preserves the complete fail-stop, drain, fresh-handler, event, API, and cleanup narrative"

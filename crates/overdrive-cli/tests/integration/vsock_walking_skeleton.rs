@@ -20,7 +20,7 @@
 //!
 //! Lane: `integration-tests,kvm-tests`, `cargo xtask metal run --` (root,
 //! the BPF object built). Module in `host-kernel-shared`. Pending DELIVER
-//! step 10-01 (the attachment end to end, after steps 1–15).
+//! step 14-01 (the attachment end to end, after steps 1–15).
 
 #![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]
 #![allow(clippy::doc_markdown, reason = "kernel and protocol names in prose")]
@@ -40,7 +40,7 @@ use super::vsock_support::{Lane, alloc_of, arg, console_of, hypervisor_of};
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 10-01"]
+#[ignore = "pending DELIVER step 14-01"]
 async fn a_vm_workload_round_trips_tcp_and_udp_through_serve_and_deploy() {
     let _bound = TeardownBound::arm();
     let peer = RemotePeer::start("vsock-ws", 0).expect("precondition: the remote peer starts");
