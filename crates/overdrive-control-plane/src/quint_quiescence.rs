@@ -43,7 +43,6 @@
 //! | `LeakHold` | the driver calls the composed owner's `quiesce()` and drops the returned hold unredeemed (D-UP-3; [`ComposedNode::leak_hold`]) |
 //! | `ForeignRestore` | the driver issues a hold from a second `QuiescenceLedger::new()` (PD-2) and calls the composed owner's `restore(hold)`; it requires `Err(ForeignHold)` (D-UP-4, PD-1; [`ComposedNode::restore_foreign_hold`]) |
 //! | `FailStop(c)` | `SimClock` to the audit tick (a leaked hold, cause `LeakedQuiescenceHold`) or past `SHARED_NETWORK_RECOVERY_DEADLINE` with the repair still failing (cause `RecoveryDeadlineExceeded`); the driver receives `ServeShutdownRequest::SharedGuestNetwork` and the process ends |
-//! | `RecRepairNoHold(c)` | hazard-only (`repairNoHold`): never enabled in a design instance — an error, never a no-op |
 //!
 //! **`FailStop` after `ForeignRestore`.** The supervisor's
 //! `ForeignQuiescenceHold` fail-stop is not driven: the foreign `restore` is
@@ -135,8 +134,6 @@ const FAIL_STOP_TICKS: u32 = 21;
 enum DriverError {
     #[error("action `{action}` is not enabled in the production state: {why}")]
     NotEnabled { action: &'static str, why: String },
-    #[error("action `{0}` is hazard-only: it is never enabled in a design instance")]
-    HazardOnly(&'static str),
     #[error(
         "`FailStop` enabled only by the driver's own `ForeignRestore`: the supervisor's \
          `ForeignQuiescenceHold` fail-stop is not drivable (no production path presents a foreign \
@@ -428,10 +425,6 @@ impl Driver for QuiescenceDriver {
             LeakHold => self.leak_hold()?,
             ForeignRestore => self.foreign_restore()?,
             FailStop(c: String) => self.fail_stop(&c)?,
-            RecRepairNoHold(c: String) => {
-                component(&c)?;
-                return Err(DriverError::HazardOnly("RecRepairNoHold").into());
-            }
         })
     }
 }

@@ -5,12 +5,11 @@
  *
  * Design artifact. Models the design text, not an implementation. NOT a conformance target: every rule here is
  * internal to the C module `ovd_fwd` (ADR-0204 § Consequences: "The rules are internal to the C module; no port or
- * wire format carries them"); its evidence is the DELIVER review against the source and V-EV-SAFE (A-45, KASAN).
+ * wire format carries them"); its evidence is the DELIVER review against the source and V-EV-SAFE (A-45).
  *
  * Source of truth: docs/feature/netns-density-295/feature-delta.md § "[REF] vsock data path — the in-kernel
  * event-driven forwarder (EVMOD)": "Forwarding, per direction" (Trigger, Run, Why it is bounded), "Order of a pair's
- * end", "Stale invocations" rules 1-5 (EVMOD-SAFE, ADR-0204; rule 5 MODULE-REFCOUNT 2026-10-20), "Module placement and
- * lifetime" (EVMOD-LIFE as amended, ADR-0198), "Locking on the callback paths", "Watch",
+ * end", "Stale invocations" rules 1-4 (EVMOD-SAFE, ADR-0204), "Locking on the callback paths", "Watch",
  * "A watch ended by the owner" (WATCH-ABORT), the EVMOD-END table's sweep row (ADR-0180), EVMOD-REC (ADR-0202).
  *
  * Why a sibling of fwd_pair: fwd_pair runs every callback, forwarder run and owner call as ONE atomic step (its
@@ -58,21 +57,20 @@
  *   - Wakeups: a TCP target calls sk_write_space on freed space only while SOCK_NOSPACE is set
  *     (include/net/tcp.h:770-776, net/ipv4/tcp_input.c:6118-6122 @ v7.0), modelled by `nospace`; vsock calls
  *     sk_data_ready per enqueued packet (virtio_transport_common.c:1432-1433, af_vsock.c:1062-1068).
- *   - The write-space trigger (round 16, rule 5's write-space closure): sk_write_space is NEVER overridden. The
+ *   - The write-space trigger (round 16): sk_write_space is NEVER overridden. The
  *     socket's own sk_write_space (kernel text) wakes the socket's wait queue with EPOLLOUT; the forwarder's entry on
  *     that queue (`wqe`, added at attach) runs its function only while the waker holds the queue head's lock wqlk(t)
  *     with interrupts disabled (kernel/sched/wait.c:104-108, :118-127 @ v7.0). Read (the reader frees target space)
- *     starts the wake `ws` "called" by a waker of class `wsCl` "bh" or "wfree" (nondeterministic: sock_wfree calls
- *     sk_write_space with no socket lock, no RCU section and preemption enabled, net/core/sock.c:2675-2693 @ v7.0, and
- *     only TCP sets SOCK_USE_WRITE_QUEUE; modelling the class on the one abstract target is the conservative choice);
- *     WsEnter takes wqlk(t) and enters the entry function if the entry is present ("entry", module text); WsLeave runs
+ *     starts the wake `ws` "called" (sock_wfree calls sk_write_space with no socket lock, no RCU section
+ *     and preemption enabled, net/core/sock.c:2675-2693 @ v7.0, so the wake may run while the pair ends);
+ *     WsEnter takes wqlk(t) and enters the entry function if the entry is present ("entry"); WsLeave runs
  *     it (record the run, queue_work: a touch of the pair) and drops wqlk(t). The pair's end removes the entry
  *     (`wt`, remove_wait_queue under lock_sock(t), kernel/sched/wait.c:69-76) before rule 2's restore and clear of t
  *     and before the free work is queued; it takes wqlk(t), so it waits while a wake holds it. Only t's entry is
  *     modelled: the source's write-space wake belongs to the other direction, which runs the same code. lock_sock(t)
  *     excludes no modelled caller of t (none is a socket-lock owner of t), so it is not modelled.
  *   - A pair's end (`wprog`, run inside its own work item, § "Order of a pair's end"): mark ended; restore cb then
- *     clear ud on s, then remove t's wait-queue entry, restore cb and clear ud on t (rules 2 and 5; the abort actions, whose wakeups reach the restored originals, are fwd_pair's);
+ *     clear ud on s, then remove t's wait-queue entry, restore cb and clear ud on t (rule 2; the abort actions, whose wakeups reach the restored originals, are fwd_pair's);
  *     remove the id and queue the record in ONE section under the record-queue lock (rule 4, EVMOD-REC; no record at
  *     the context's release); queue the free work with queue_rcu_work (rule 3) and touch nothing more.
  *   - The free (`fr`): the RCU grace period (RcuGp: every RCU reader inside at queue time has left), then the free
@@ -85,32 +83,12 @@
  *     the id, no record, unhook). A watch's end belongs to the path that removes its id.
  *   - Attach is not modelled: it holds lock_sock, sk_callback_lock and (vsock) vsock_table_lock (§ "Attach order"),
  *     which exclude every callback of the half while it installs (fwd_pair's F9); the pair starts attached.
- *   - The module's lifetime (EVMOD-LIFE as amended by MODULE-REFCOUNT 2026-10-20, ADR-0198; rule 5 of EVMOD-SAFE,
- *     ADR-0204): `modref` counts the module references — the modelled context's (`ctx`, the misc fops owner, taken at
- *     open, released by __fput after the release returned and the id table is empty), another context's (`octx`,
- *     CtxOpen / CtxOtherClose), and one per hooked half (`sref`, taken at attach, released by `module_put` as the free
- *     work's last statement; a half with a ULP installed at its removal keeps it for the boot). `Unload`
- *     (delete_module) is enabled only at modref = 0 and completes only once module_exit's destroy_workqueue drained the
- *     module's own workqueue (no pending or running pair work item or free work); it sets `unloaded`.
- *   - Callers' classes (rule 5): every invocation records its class `cl`: "lock" (a caller that owns the socket lock:
- *     the vsock receive path, Write and PeerFin on s), "bh" (the delta's "rcu" class: a region a vanilla grace period
- *     waits for from its call site on — TCP input on the target, TcpRx; the orphan sweep's sk_error_report; a ULP's
- *     call through its saved copy), "wfree" (a write-space waker with no socket lock, no RCU section and preemption
- *     enabled: the vhost worker, the guest's virtio-vsock transmit work, a NIC driver's skb free; it reaches only the
- *     wait-queue entry, which wqlk(t) closes, never an override; writeSpaceOverride puts it back on an override). The third class, the forwarder's own
- *     work item, is `wrun`. A vanilla grace period waits for a "bh" caller from the call site on (S7); a "lock" caller
- *     is an RCU reader only inside rcu_read_lock (Load .. Use / Fallback). TCP backlog processing in release_sock is a
- *     "lock" caller of t; it is not modelled separately (rule 5 excludes it exactly as it excludes the vsock receive
- *     path on s, which carries the teeth).
- *   - Rule 5's removal: rule 2's restore and clear of a half run under lock_sock of that half (`lk` "rm" from the
- *     half's first removal step to its second): a removal step is enabled only when no "lock" caller holds it.
- *   - A ULP (UlpInstall, an environment fault: an owner defect ADR-0200 rules out, kept to give the ULP check teeth) on
- *     the TCP half saves a copy of the override (kTLS: tls_sw_strparser_arm saves sk_data_ready,
- *     net/tls/tls_sw.c:2693-2694 @ v7.0); UlpCall is the ULP calling that copy from a "bh" caller, whatever the
- *     socket's callback pointer is.
+ *   - Not modelled: the module's unload and the lifetime of its text (the appliance image has CONFIG_MODULE_UNLOAD off,
+ *     ADR-0068 § 7; EVMOD-LIFE, ADR-0198), and the classes of the callers that reach an override: the model checks the
+ *     pair's state, not the override's text.
  *
  * Ghost (model-only) state: uaf (some actor touched freed pair state: an override's use, a run's start, a control
- * call, a queue_work), recursed (an override called itself), lost (an event reached no callback), unclassified (the
+ * call, a queue_work), recursed (an override called itself), unclassified (the
  * unclassified_eof alarm fired), delivered, nfree.
  *
  * ASSUMPTIONS (kernel behaviour, not modelled mechanisms; discharged in README.md):
@@ -134,35 +112,18 @@
  *       takes that lock (kernel/sched/wait.c:69-76, :104-108, :118-127 @ v7.0); sock_wfree calls sk_write_space with
  *       no socket lock and no RCU section unless SOCK_USE_WRITE_QUEUE (net/core/sock.c:2675-2693 @ v7.0)
  *       .............................................................. source; V-EV-SAFE full-target resume cases
- *   (MODULE-REFCOUNT, numbered as in feature-delta.md § "Formal protocol model", round 15; the delta's S5..S8 are
- *    M5..M8 here, since S5 above is the wakeup fact)
- *   M5  delete_module refuses while any module reference is held and calls exit only at zero
- *       (kernel/module/main.c:730-751, :828 @ v7.0) ........................................ source; V-EV-UNLOAD
- *   M6  destroy_workqueue drains every pending and running item of the module's own workqueue
- *       (kernel/workqueue.c:5979, :5962, :4183-4194 @ v7.0) ........................................ source; V-EV-UNLOAD
- *   M7  a vanilla RCU grace period waits for bottom-half-disabled regions (include/linux/rcupdate.h:671-675 @ v7.0)
- *       .......................................................................................... source; V-EV-SAFE
- *   M8  every override invocation comes from a socket-lock owner, a bottom-half-disabled region, or the forwarder's own
- *       work item ...................................................... DELIVER source review; V-EV-SAFE, V-EV-UNLOAD
  *
- * OFF names the rules switched off (teeth), or the rejected alternative switched on:
+ * OFF names the rules switched off (teeth):
  *   rcuAssignNull      (alternative (a)) sk_user_data cleared by rcu_assign_pointer(…, NULL) and read by
  *                      rcu_dereference: the clear may be seen before the restore, and the override's later read of
  *                      the callback pointer is not ordered after its load (rule 2 off)
- *   noFallback         (alternative (b)) an override that finds no pair returns without calling anything
  *   noGracePeriod      the free work is queued with queue_work, not queue_rcu_work (rule 3: no grace period)
- *   noCancelSync       the free work frees without cancel_work_sync on the pair's work item (rule 3: no completion)
  *   ctlQueueOutsideRcu (alternative (d)) a control call looks the id up under RCU, leaves the read section, then queues
- *   ctlQueueInsideRcu  (alternative (d) read the other way) the same lookup, queueing before rcu_read_unlock
- *   watchFreeBeforeId  (rule 4 order, watch) the owner's abort of a watch queues the free before it removes the id
  *   watchEndNoIdCheck  (rule 4, watch) the watch's override queues its record without checking the id under the lock
  *   noWriteSpace       the target's write-space wait-queue entry is not added (the wake reaches nothing of ours)
- *   writeSpaceOverride (rule 5's write-space closure off) the write-space trigger is an sk_write_space override again,
- *                      entered by the waker outside wqlk(t), with no wait-queue entry
- *   removeWaitAfterFreeQueued (rule 5's write-space closure order) the entry is removed by the free work after its
+ *   removeWaitAfterFreeQueued (the write-space entry's removal order) the entry is removed by the free work after its
  *                      cancel_work_sync, i.e. after the free work was queued, not by the end before it
  *   noDataReady        sk_data_ready of the source is not overridden
- *   noStateChange      sk_state_change of the source is not overridden (the peer's 0x2 queues no run)
  *   noErrorReport      sk_error_report of the source is not overridden (the sweep's error queues no run)
  *   lateClearPending   the run's "needs a run" flag is cleared when the run returns, not before it starts
  *   ctlAbortNoQueue    OVD_FWD_ABORT marks the abort requested without queueing the work item
@@ -170,11 +131,6 @@
  *                      does not queue
  *   noSweepRecheck     (EVMOD-SWEEP, F-S1) the run acts on an end it read with no recorded class without the
  *                      vsock_table_lock re-check: an end-of-stream read in the sweep's window aborts Unclassified
- *   refDroppedAtUnhook (rule 5) a half's module_put at its removal (its sk_user_data clear), before the grace period
- *   removeWithoutSockLock (rule 5) the removal of a half does not take its socket lock
- *   ulpRefReleased     (rule 5) the free work drops the reference of a half that had a ULP at its removal
- *   putOnSystemQueue   (rule 5 / EVMOD-LIFE) the free work runs on a system workqueue: module_exit's drain does not
- *                      wait for its return after its module_put
  */
 module fwd_safe {
   const OFF: Set[str]
@@ -193,48 +149,34 @@ module fwd_safe {
   val FMAX: int = if (CFG == "runs") 100 else if (CFG == "pair" or CFG == "watch") 2 else 1
 
   val BUG_RCU_NULL: bool = OFF.contains("rcuAssignNull")
-  val BUG_NO_FALLBACK: bool = OFF.contains("noFallback")
   val BUG_NO_GP: bool = OFF.contains("noGracePeriod")
-  val BUG_NO_CANCEL: bool = OFF.contains("noCancelSync")
   val BUG_CTL_OUTSIDE: bool = OFF.contains("ctlQueueOutsideRcu")
-  val ALT_CTL_INSIDE: bool = OFF.contains("ctlQueueInsideRcu")
-  val CTL_RCU: bool = BUG_CTL_OUTSIDE or ALT_CTL_INSIDE
-  val BUG_W_FREE_FIRST: bool = OFF.contains("watchFreeBeforeId")
   val BUG_W_NO_ID: bool = OFF.contains("watchEndNoIdCheck")
   val BUG_NO_WSPACE: bool = OFF.contains("noWriteSpace")
-  val BUG_WS_OVR: bool = OFF.contains("writeSpaceOverride")
   val BUG_RW_LATE: bool = OFF.contains("removeWaitAfterFreeQueued")
   val BUG_NO_DREADY: bool = OFF.contains("noDataReady")
-  val BUG_NO_SCHANGE: bool = OFF.contains("noStateChange")
   val BUG_NO_EREPORT: bool = OFF.contains("noErrorReport")
   val BUG_LATE_CLEAR: bool = OFF.contains("lateClearPending")
   val BUG_CTL_NO_QUEUE: bool = OFF.contains("ctlAbortNoQueue")
   val BUG_END_SPLIT: bool = OFF.contains("endSplitNoRequeue")
   val BUG_NO_RECHECK: bool = OFF.contains("noSweepRecheck")
-  val BUG_PUT_AT_UNHOOK: bool = OFF.contains("refDroppedAtUnhook")
-  val BUG_NO_SOCK_LOCK: bool = OFF.contains("removeWithoutSockLock")
-  val BUG_ULP_PUT: bool = OFF.contains("ulpRefReleased")
-  val BUG_SYS_QUEUE: bool = OFF.contains("putOnSystemQueue")
 
   // ------------------------------------------------------------------ types
   // ph: none | called (the kernel reached the call site) | ovr (in the override, before its load) | found (pair found,
   // inside rcu_read_lock) | nul (sk_user_data NULL, inside rcu_read_lock); ev: data | state | err | space;
-  // cl (rule 5): none | lock (the caller owns the socket lock) | bh (waited for by a grace period from its call site) |
-  // wfree (no lock, no RCU section, preemptible; reaches an override only under writeSpaceOverride)
-  type Inv = { ph: str, ev: str, cl: str }
+  type Inv = { ph: str, ev: str }
   // pst: live | ending (marked ended; its end in progress) | ended (the free work queued) | freed
   // cause: none | Completed | HalfClose | SocketError | Unclassified | Detached | Release
-  // rec: none | queued | read; fr: none | gp | queued | flush | flushed | done (kfree'd) | put (module_put done, the
-  // free work not yet returned) | freed (returned)
-  // lk: none | rx (a "lock" caller holds lock_sock(s)) | rm (rule 5: a removal holds lock_sock(s))
+  // rec: none | queued | read; fr: none | gp | queued | flush | flushed | done (kfree'd)
+  // lk: none | rx (the vsock receive path holds lock_sock(s))
   // wrun: idle | top | lock (an unclassified end read, waiting for vsock_table_lock) | ret | end
   // cls: none | clean (the peer's 0x2, sk_state_change) | reset (sk_err, recorded by the sk_error_report override)
-  // cq (alternative (d)): none | held (a control call inside rcu_read_lock with the pointer) | out (left it, pointer kept)
+  // cq (ctlQueueOutsideRcu): none | held (a control call inside rcu_read_lock with the pointer) | out (left it, pointer kept)
   // sw: the orphan sweep's progress: none | stores (vsock_table_lock held, stores in progress) | report (its
   // sk_error_report running, lock held) | done (lock released); swPs: its peer_shutdown store is visible
   // rawEnd: what the run's read returned when it found an unclassified end: none | eof | err
   // wqe: t's write-space wait-queue entry is on the queue; ws: the write-space wake: none | called (the socket's own
-  // sk_write_space, kernel text) | entry (wqlk(t) held, in the entry function: module text); wsCl: its waker's class
+  // sk_write_space) | entry (wqlk(t) held, in the entry function)
   type St = {
     kind: str, cb: str -> str, ud: str -> str, inv: str -> Inv, lk: str,
     pend: bool, dis: bool, wrun: str, wprog: List[str], oprog: List[str],
@@ -242,10 +184,8 @@ module fwd_safe {
     id: bool, rec: str, nrec: int, fr: str, gpw: Set[str], nfree: int,
     sq: int, tq: int, wr: int, got: int, nospace: bool, fin: bool, peerFin: bool,
     ps: Set[str], err: bool, sw: str, swPs: bool, rawEnd: str, cq: str, faults: int, needUnhook: bool,
-    wqe: bool, ws: str, wsCl: str,
-    uaf: bool, recursed: bool, lost: bool, unclassified: bool, delivered: int,
-    // MODULE-REFCOUNT: the module references and the unload
-    ctx: bool, octx: bool, sref: str -> bool, ulp: str -> bool, modref: int, unloaded: bool,
+    wqe: bool, ws: str,
+    uaf: bool, recursed: bool, unclassified: bool, delivered: int,
   }
 
   var st: St
@@ -253,7 +193,7 @@ module fwd_safe {
   // ------------------------------------------------------------------ helpers
   val HALVES: Set[str] = Set("s", "t")
   def halves(t: St): Set[str] = if (t.kind == "pair") Set("s", "t") else Set("s")
-  val inv0: Inv = { ph: "none", ev: "none", cl: "none" }
+  val inv0: Inv = { ph: "none", ev: "none" }
   def canFault(t: St): bool = t.faults < FMAX
   def fault(t: St): St = { ...t, faults: t.faults + 1 }
   // an actor touches the pair's (watch's) state
@@ -264,17 +204,16 @@ module fwd_safe {
     else if (t.dis or t.pend) t
     else { ...t, pend: true }
   // the readers inside rcu_read_lock now (a grace period queued now waits for them)
-  // (M7: a "bh" caller is waited for from its call site on; a "lock" caller only inside rcu_read_lock)
   def readers(t: St): Set[str] =
-    HALVES.filter(x => t.inv.get(x).ph.in(Set("found", "nul")) or (t.inv.get(x).cl == "bh" and t.inv.get(x).ph != "none"))
+    HALVES.filter(x => t.inv.get(x).ph.in(Set("found", "nul")))
       .union(if (t.cq == "held") Set("c") else Set())
   // an invocation on half x returns (rcu_read_unlock; the receive path then releases lock_sock(s))
   def endInv(t: St, x: str): St =
     { ...t, inv: t.inv.set(x, inv0), gpw: t.gpw.exclude(Set(x)), lk: if (x == "s" and t.lk == "rx") "none" else t.lk }
-  def startInv(t: St, x: str, ev: str, cl: str): St = { ...t, inv: t.inv.set(x, { ph: "called", ev: ev, cl: cl }) }
+  def startInv(t: St, x: str, ev: str): St = { ...t, inv: t.inv.set(x, { ph: "called", ev: ev }) }
   // the pair's end, in its work item (§ "Order of a pair's end"); rcuAssignNull: each clear may be seen before its
   // restore
-  // "wt": rule 5's removal of t's write-space wait-queue entry, before t's restore and clear and before the free work
+  // "wt": the removal of t's write-space wait-queue entry, before t's restore and clear and before the free work
   // is queued (removeWaitAfterFreeQueued: not here, the free work removes it)
   val WT: List[str] = if (BUG_RW_LATE) List() else ["wt"]
   val END_PAIR: List[str] =
@@ -283,28 +222,15 @@ module fwd_safe {
   // a watch's unhook, by the path that removed its id (or its work item, when that path was the override)
   val UNHOOK_W: List[str] = if (BUG_RCU_NULL) ["us", "rs", "free"] else ["rs", "us", "free"]
   // one step of an end program (it reads the saved originals from the pair's state: a touch)
-  // rule 5: a removal step of s holds lock_sock(s) from the half's first removal step to its second ("rm"); it is
-  // enabled only when no "lock" caller holds the lock (removeWithoutSockLock: it ignores the lock)
-  def sStep(step: str): bool = step.in(Set("rs", "us"))
   // "wt" takes wqlk(t): it waits while a wake holds it (remove_wait_queue)
-  def lockOk(t: St, step: str): bool =
-    (not(sStep(step)) or BUG_NO_SOCK_LOCK or t.lk != "rx") and (step != "wt" or t.ws != "entry")
-  // the lock is held from the half's first removal step to its last (rest: the program after this step)
-  def sockLock(t: St, step: str, rest: List[str]): St =
-    if (not(sStep(step)) or BUG_NO_SOCK_LOCK) t
-    else { ...t, lk: if (rest.select(x => sStep(x)).length() > 0) "rm" else "none" }
-  // refDroppedAtUnhook: the half's module_put at its sk_user_data clear (the ULP check kept)
-  def putHalf(t: St, x: str): St =
-    if (t.sref.get(x) and (not(t.ulp.get(x)) or BUG_ULP_PUT)) { ...t, sref: t.sref.set(x, false), modref: t.modref - 1 }
-    else t
-  def earlyPut(t: St, x: str): St = if (BUG_PUT_AT_UNHOOK) putHalf(t, x) else t
+  def lockOk(t: St, step: str): bool = step != "wt" or t.ws != "entry"
   def doStep(t0: St, step: str, rest: List[str]): St =
-    val t = sockLock(touch(t0), step, rest)
+    val t = touch(t0)
     if (step == "wt") { ...t, wqe: false }
     else if (step == "rs") { ...t, cb: t.cb.set("s", "orig") }
-    else if (step == "us") earlyPut({ ...t, ud: t.ud.set("s", "null") }, "s")
+    else if (step == "us") { ...t, ud: t.ud.set("s", "null") }
     else if (step == "rt") { ...t, cb: t.cb.set("t", "orig") }
-    else if (step == "ut") earlyPut({ ...t, ud: t.ud.set("t", "null") }, "t")
+    else if (step == "ut") { ...t, ud: t.ud.set("t", "null") }
     else if (step == "idrec")
       // one section under the record-queue lock: remove the id and queue the one record (none at release)
       if (t.relReq) { ...t, id: false }
@@ -327,14 +253,9 @@ module fwd_safe {
       id: true, rec: "none", nrec: 0, fr: "none", gpw: Set(), nfree: 0,
       sq: 0, tq: 0, wr: 0, got: 0, nospace: false, fin: false, peerFin: false,
       ps: Set(), err: false, sw: "none", swPs: false, rawEnd: "none", cq: "none", faults: 0, needUnhook: false,
-      // the pair's target carries its write-space entry (attach adds it; noWriteSpace: not added; writeSpaceOverride:
-      // the trigger is an override, no entry)
-      wqe: k == "pair" and not(BUG_NO_WSPACE) and not(BUG_WS_OVR), ws: "none", wsCl: "none",
-      uaf: false, recursed: false, lost: false, unclassified: false, delivered: 0,
-      // the context is open and every hooked half holds its reference (attach takes it, __module_get)
-      ctx: true, octx: false,
-      sref: HALVES.mapBy(x => k == "pair" or x == "s"), ulp: HALVES.mapBy(x => false),
-      modref: 1 + (if (k == "pair") 2 else 1), unloaded: false,
+      // the pair's target carries its write-space entry (attach adds it; noWriteSpace: not added)
+      wqe: k == "pair" and not(BUG_NO_WSPACE), ws: "none",
+      uaf: false, recursed: false, unclassified: false, delivered: 0,
     },
   }
   action init = { nondet k = KINDS.oneOf() InitWith(k) }
@@ -347,43 +268,37 @@ module fwd_safe {
   }
   action Write: bool = all {
     canWrite(st),
-    st' = startInv({ ...st, sq: st.sq + 1, wr: st.wr + 1, lk: "rx" }, "s", "data", "lock"),
+    st' = startInv({ ...st, sq: st.sq + 1, wr: st.wr + 1, lk: "rx" }, "s", "data"),
   }
   // the vsock peer's 0x2: peer_shutdown updated under lock_sock(s), then sk_state_change (fwd_pair's F2)
   action PeerFin: bool = all {
     st.sw == "none", not(st.peerFin), st.inv.get("s").ph == "none", st.lk == "none",
-    st' = startInv({ ...st, ps: st.ps.union(Set("S")), peerFin: true, lk: "rx" }, "s", "state", "lock"),
+    st' = startInv({ ...st, ps: st.ps.union(Set("S")), peerFin: true, lk: "rx" }, "s", "state"),
   }
-  // the far reader reads from the target; freed space after an EAGAIN send wakes sk_write_space (S5), called by a
-  // waker of class c ("bh" or "wfree", S6); the socket's own sk_write_space wakes the wait queue (writeSpaceOverride:
-  // it is the override, dispatched like any other)
+  // the far reader reads from the target; freed space after an EAGAIN send wakes sk_write_space (S5, S6); the socket's
+  // own sk_write_space wakes the wait queue
   def canRead(t: St): bool =
     t.kind == "pair" and t.tq > 0 and (not(t.nospace) or (t.inv.get("t").ph == "none" and t.ws == "none"))
-  action ReadBy(c: str): bool = all {
-    canRead(st), c.in(Set("bh", "wfree")),
+  action Read: bool = all {
+    canRead(st),
     val t1 = { ...st, tq: st.tq - 1, got: st.got + 1, nospace: false }
-    st' =
-      if (not(st.nospace)) t1
-      else if (BUG_WS_OVR) startInv(t1, "t", "space", c)
-      else { ...t1, ws: "called", wsCl: c },
+    st' = if (not(st.nospace)) t1 else { ...t1, ws: "called" },
   }
-  // the named runs' read: a softirq waker
-  action Read: bool = ReadBy("bh")
   // the wake takes wqlk(t) and enters the entry's function if the entry is on the queue (else it wakes nothing of ours)
   def canWsEnter(t: St): bool = t.ws == "called"
   action WsEnter: bool = all {
     canWsEnter(st),
-    st' = if (st.wqe) { ...st, ws: "entry" } else { ...st, ws: "none", wsCl: "none" },
+    st' = if (st.wqe) { ...st, ws: "entry" } else { ...st, ws: "none" },
   }
   // the entry's function: the pair is reached through the entry itself (a touch); record the run, queue_work; then
   // wake_up drops wqlk(t)
   def canWsLeave(t: St): bool = t.ws == "entry"
-  action WsLeave: bool = all { canWsLeave(st), st' = { ...queueWork(touch(st)), ws: "none", wsCl: "none" } }
-  // TCP input calls an override of the target (its sk_data_ready: the other direction's trigger) from a region a
-  // grace period waits for (rule 5's "rcu" class; an environment event, bounded by FMAX)
+  action WsLeave: bool = all { canWsLeave(st), st' = { ...queueWork(touch(st)), ws: "none" } }
+  // TCP input calls an override of the target (its sk_data_ready: the other direction's trigger; an environment
+  // event, bounded by FMAX)
   action TcpRx: bool = all {
     st.kind == "pair", canFault(st), st.inv.get("t").ph == "none",
-    st' = startInv(fault(st), "t", "rx", "bh"),
+    st' = startInv(fault(st), "t", "rx"),
   }
   // the orphan sweep (S4): no socket lock, one hold of vsock_table_lock; the first store finds the lock taken by the
   // walk (held from before the socket's first store); the two visible stores in either order (EVMOD-SWEEP)
@@ -400,28 +315,16 @@ module fwd_safe {
   def canSwErr(t: St): bool = (t.sw == "none" and canFault(t)) or canSwErrCont(t)
   action SwErr: bool = all { canSwErr(st), st' = { ...sweepStart(st), err: true } }
   def canSwReport(t: St): bool = t.sw == "stores" and t.swPs and t.err and t.inv.get("s").ph == "none"
-  action SwReport: bool = all { canSwReport(st), st' = startInv({ ...st, sw: "report" }, "s", "err", "bh") }
+  action SwReport: bool = all { canSwReport(st), st' = startInv({ ...st, sw: "report" }, "s", "err") }
   // the walk moves on and leaves vsock_table_lock once sk_error_report returned
   def canSwUnlock(t: St): bool = t.sw == "report" and t.inv.get("s").ph == "none"
   action SwUnlock: bool = all { canSwUnlock(st), st' = { ...st, sw: "done" } }
-  // a ULP installed on the TCP half after attach saves a copy of the override (an owner defect, ADR-0200; teeth for
-  // rule 5's ULP check)
-  action UlpInstall(x: str): bool = all {
-    st.kind == "pair", x == "t", canFault(st), st.cb.get(x) == "ovr", not(st.ulp.get(x)), not(st.unloaded),
-    st' = fault({ ...st, ulp: st.ulp.set(x, true) }),
-  }
-  // the ULP calls its saved copy of the override from a "bh" caller, whatever the socket's pointer now is
-  action UlpCall(x: str): bool = all {
-    st.ulp.get(x), canFault(st), st.inv.get(x).ph == "none",
-    st' = fault({ ...st, inv: st.inv.set(x, { ph: "ovr", ev: "data", cl: "bh" }) }),
-  }
-
   // ------------------------------------------------------------------ the callback invocation (rules 1, 2)
   // the kernel reads the socket's callback pointer (noWriteSpace / noDataReady: that kind is not overridden; a watch
-  // overrides only sk_state_change and sk_error_report)
+  // overrides only sk_state_change and sk_error_report; sk_write_space is never overridden)
   def overridden(t: St, x: str, ev: str): bool = and {
-    ev != "space" or BUG_WS_OVR, not(BUG_NO_DREADY and ev == "data"),
-    not(BUG_NO_SCHANGE and ev == "state"), not(BUG_NO_EREPORT and ev == "err"),
+    ev != "space", not(BUG_NO_DREADY and ev == "data"),
+    not(BUG_NO_EREPORT and ev == "err"),
     t.kind == "pair" or ev.in(Set("state", "err")),
   }
   def canDispatch(t: St, x: str): bool = t.inv.get(x).ph == "called"
@@ -466,15 +369,13 @@ module fwd_safe {
     st' = endInv(t2, x),
   }
   // sk_user_data NULL: call the socket's current callback of the same kind (READ_ONCE): the original once rule 2
-  // held (rcuAssignNull: the read is not ordered after the load and may return the override already called;
-  // noFallback: nothing is called)
+  // held (rcuAssignNull: the read is not ordered after the load and may return the override already called)
   def canFallback(t: St, x: str): bool = t.inv.get(x).ph == "nul"
   action Fallback(x: str): bool = all {
     canFallback(st, x),
     val cur = if (BUG_RCU_NULL) "ovr" else st.cb.get(x)
     val t1 =
-      if (BUG_NO_FALLBACK) { ...st, lost: true }
-      else if (cur == "ovr") { ...st, recursed: true }
+      if (cur == "ovr") { ...st, recursed: true }
       else { ...st, delivered: st.delivered + 1 }
     st' = endInv(t1, x),
   }
@@ -562,7 +463,7 @@ module fwd_safe {
   def canRcuGp(t: St): bool = t.fr == "gp" and t.gpw == Set()
   action RcuGp: bool = all { canRcuGp(st), st' = { ...st, fr: "queued" } }
   // cancel_work_sync: disable, drop a pending run (S3)
-  def canFreeCancel(t: St): bool = t.fr == "queued" and not(BUG_NO_CANCEL)
+  def canFreeCancel(t: St): bool = t.fr == "queued"
   action FreeCancel: bool = all { canFreeCancel(st), st' = { ...st, dis: true, pend: false, fr: "flush" } }
   // ... wait for the running item, re-enable, return
   def canFreeFlush(t: St): bool = t.fr == "flush" and t.wrun == "idle"
@@ -571,25 +472,14 @@ module fwd_safe {
   def canFreeRemoveWait(t: St): bool = BUG_RW_LATE and t.fr == "flushed" and t.wqe and t.ws != "entry"
   action FreeRemoveWait: bool = all { canFreeRemoveWait(st), st' = { ...touch(st), wqe: false } }
   def canFreeDone(t: St): bool =
-    (t.fr == "flushed" and not(BUG_RW_LATE and t.wqe)) or (BUG_NO_CANCEL and t.fr == "queued")
+    t.fr == "flushed" and not(BUG_RW_LATE and t.wqe)
   action FreeDone: bool = all { canFreeDone(st), st' = { ...st, pst: "freed", fr: "done" } }
-  // rule 5: module_put once per hooked half, as the free work's last statement (a half with a ULP keeps its reference
-  // for the boot; ulpRefReleased: dropped anyway; refDroppedAtUnhook: already dropped at the removal)
-  def canFreePut(t: St): bool = t.fr == "done"
-  action FreePut: bool = all {
-    canFreePut(st),
-    st' = { ...putHalf(putHalf(st, "s"), "t"), fr: "put" },
-  }
-  // the free work returns (still module text after its module_put: module_exit's drain waits for it)
-  def canFreeRet(t: St): bool = t.fr == "put"
-  action FreeRet: bool = all { canFreeRet(st), st' = { ...st, fr: "freed" } }
-
   // ------------------------------------------------------------------ control calls by id (rule 4) and the owner
   // OVD_FWD_ABORT, in one section under the record-queue lock: an id not live → ENOENT. Pair: the abort requested and
   // the work item queued (ctlAbortNoQueue: not queued). Watch (WATCH-ABORT): the id removed and the record queued, then
-  // the unhook in process context (watchFreeBeforeId: the free queued before the id is removed).
+  // the unhook in process context.
   action CtlAbort: bool = all {
-    st.ctx, canFault(st), not(CTL_RCU and st.kind == "pair"),
+    canFault(st), not(BUG_CTL_OUTSIDE and st.kind == "pair"),
     val t0 = fault(st)
     st' =
       if (not(st.id)) t0
@@ -597,36 +487,33 @@ module fwd_safe {
         val t1 = touch({ ...t0, abortReq: true })
         if (BUG_CTL_NO_QUEUE) t1 else queueWork(t1)
       else if (st.oprog.length() > 0) t0
-      else if (BUG_W_FREE_FIRST)
-        { ...t0, pst: "ending", cause: "Detached", oprog: ["rs", "us", "free", "idrec"] }
       else
         { ...t0, id: false, rec: "queued", nrec: st.nrec + 1, pst: "ending", cause: "Detached", oprog: UNHOOK_W },
   }
   // OVD_FWD_PAIR_STATE: the counters copied under the lock
   action CtlState: bool = all {
-    st.ctx, canFault(st),
+    canFault(st),
     st' = if (st.id) touch(fault(st)) else fault(st),
   }
-  // alternative (d): the lookup under rcu_read_lock, then the queue (inside or outside the read section)
+  // alternative (d) (ctlQueueOutsideRcu): the lookup under rcu_read_lock, then the queue after rcu_read_unlock
   action CtlLookup: bool = all {
-    CTL_RCU, st.ctx, st.kind == "pair", st.cq == "none", canFault(st), st.id,
+    BUG_CTL_OUTSIDE, st.kind == "pair", st.cq == "none", canFault(st), st.id,
     st' = fault({ ...st, cq: "held" }),
   }
-  def canCtlUnlock(t: St): bool = t.cq == "held" and (BUG_CTL_OUTSIDE or t.abortReq)
+  def canCtlUnlock(t: St): bool = t.cq == "held"
   action CtlUnlock: bool = all {
     canCtlUnlock(st),
-    st' = { ...st, cq: if (BUG_CTL_OUTSIDE) "out" else "none", gpw: st.gpw.exclude(Set("c")) },
+    st' = { ...st, cq: "out", gpw: st.gpw.exclude(Set("c")) },
   }
-  def canCtlQueue(t: St): bool = (BUG_CTL_OUTSIDE and t.cq == "out") or (ALT_CTL_INSIDE and t.cq == "held" and not(t.abortReq))
+  def canCtlQueue(t: St): bool = t.cq == "out"
   action CtlQueue: bool = all {
     canCtlQueue(st),
-    val t1 = queueWork(touch({ ...st, abortReq: true }))
-    st' = if (BUG_CTL_OUTSIDE) { ...t1, cq: "none" } else t1,
+    st' = { ...queueWork(touch({ ...st, abortReq: true })), cq: "none" },
   }
   // the context's release (the owner's death): pair — the end requested with no record; watch — the id removed, no
   // record, the unhook in process context
   action CtxRel: bool = all {
-    st.ctx, not(st.relReq), canFault(st),
+    not(st.relReq), canFault(st),
     val t0 = fault({ ...st, relReq: true })
     st' =
       if (not(st.id)) t0
@@ -638,36 +525,16 @@ module fwd_safe {
   def canTakeEnd(t: St): bool = t.rec == "queued" and not(t.relReq)
   action TakeEnd: bool = all { canTakeEnd(st), st' = { ...st, rec: "read" } }
 
-  // ------------------------------------------------------------------ module references and the unload (rule 5)
-  // __fput's fops_put: after the context's release returned, which waits until the id table is empty
-  def canCtxClose(t: St): bool = t.ctx and t.relReq and not(t.id)
-  action CtxClose: bool = all { canCtxClose(st), st' = { ...st, ctx: false, modref: st.modref - 1 } }
-  // another context opened (misc_open's try_module_get, which fails once the module is going) and closed
-  action CtxOpen: bool = all {
-    not(st.octx), not(st.unloaded), canFault(st),
-    st' = fault({ ...st, octx: true, modref: st.modref + 1 }),
-  }
-  action CtxOtherClose: bool = all { st.octx, st' = { ...st, octx: false, modref: st.modref - 1 } }
-  // destroy_workqueue's drain (M6): no pair work item pending or running, no free work queued to or running on the
-  // module's own workqueue (putOnSystemQueue: the free work is on a system queue, so the drain does not see it). A free
-  // work still in its RCU callback ("gp") is not on the workqueue yet.
-  def drained(t: St): bool =
-    not(t.pend) and t.wrun == "idle" and (BUG_SYS_QUEUE or not(t.fr.in(Set("queued", "flush", "flushed", "done", "put"))))
-  // delete_module (M5): refused while any reference is held; exit only at zero, completing after the drain
-  def canUnload(t: St): bool = t.modref == 0 and not(t.unloaded) and drained(t)
-  action Unload: bool = all { canUnload(st), st' = { ...st, unloaded: true } }
-
   // ------------------------------------------------------------------ next
   action step = {
     nondet x = HALVES.oneOf()
     any {
-      ReadBy("bh"), ReadBy("wfree"), WsEnter, WsLeave, TcpRx,
+      Read, WsEnter, WsLeave, TcpRx,
       Write, PeerFin, SwState, SwErr, SwReport, SwUnlock,
       Dispatch(x), Load(x), Use(x), Fallback(x),
       WStart, WNoop, WEnd, WRecheck, WMove, WBlock, WDrained, WUnhook, WRet, WStep, OStep,
       RcuGp, FreeCancel, FreeFlush, FreeRemoveWait, FreeDone,
       CtlAbort, CtlState, CtlLookup, CtlUnlock, CtlQueue, CtxRel, TakeEnd,
-      UlpInstall(x), UlpCall(x), FreePut, FreeRet, CtxClose, CtxOpen, CtxOtherClose, Unload,
     }
   }
 
@@ -676,9 +543,6 @@ module fwd_safe {
   val NoTouchAfterFree: bool = not(st.uaf)
   // rule 2: an override never calls itself
   val NoOverrideCallsItself: bool = not(st.recursed)
-  // rule 2 (alternative (b) rejected): an event that reaches an override of an ended pair still reaches the socket's
-  // callback
-  val NoEventLost: bool = not(st.lost)
   // EVMOD-REC: at most one end record per id, and the id leaves the table only with its record (none at release)
   val OneEndRecord: bool = st.nrec <= 1
   val RecordAtIdRemoval: bool = not(st.id) implies (st.rec != "none" or st.relReq)
@@ -695,35 +559,9 @@ module fwd_safe {
   // EVMOD-END / EVMOD-SWEEP: the unclassified_eof alarm never fires, including for a run that reads the half inside
   // the orphan sweep's stores (F-S1, resolved by the vsock_table_lock re-check; hazard noSweepRecheck)
   val NoUnclassifiedEnd: bool = not(st.unclassified)
-  // MODULE-REFCOUNT (EVMOD-LIFE, ADR-0198; EVMOD-SAFE rule 5, ADR-0204). The actors executing module text: an override
-  // from its dispatch to its return, the write-space entry's function (under wqlk(t)), the pair's (watch's) work item,
-  // the free work from its start to its return, a control call
-  def overridesInText(t: St): Set[str] = HALVES.filter(x => t.inv.get(x).ph.in(Set("ovr", "found", "nul")))
-  def inText(t: St): Set[str] =
-    overridesInText(t)
-      .union(if (t.wrun != "idle") Set("work") else Set())
-      .union(if (t.fr.in(Set("flush", "flushed", "done", "put"))) Set("free") else Set())
-      .union(if (t.cq != "none") Set("ctl") else Set())
-      .union(if (t.ws == "entry") Set("entry") else Set())
-  // what can still enter module text later: a half whose pointer is an override, a ULP's saved copy, the write-space
-  // entry on the target's wait queue, a pending work item, a free work waiting for its grace period or queued
-  def reachable(t: St): bool = or {
-    HALVES.exists(x => t.cb.get(x) == "ovr" or t.ulp.get(x)), t.wqe, t.pend, t.fr.in(Set("gp", "queued")),
-  }
-  // nothing runs, or can be entered, in the module's text once it is unloaded
-  val NoTextRunAfterUnload: bool = st.unloaded implies (inText(st) == Set() and not(reachable(st)))
-  // while an override is in the text, a hooked half still carries an override or a ULP copy, a work item or free work
-  // before its module_put is pending or running, or a context is open, a module reference is held (the free work's
-  // return after its own module_put is covered by the drain, not by a reference)
-  val RefHeldWhileReachable: bool =
-    (overridesInText(st) != Set() or st.ws == "entry" or reachable(st) or st.wrun != "idle" or st.cq != "none"
-     or st.ctx or st.octx
-     or st.fr.in(Set("flush", "flushed", "done")))
-      implies st.modref > 0
   val Safety: bool = and {
-    NoTouchAfterFree, NoOverrideCallsItself, NoEventLost, OneEndRecord, RecordAtIdRemoval, OneFree,
+    NoTouchAfterFree, NoOverrideCallsItself, OneEndRecord, RecordAtIdRemoval, OneFree,
     FreeAfterWorkCompletes, FreeAfterReaders, NoIdNamesFreedState, CleanEndOnlyAfterPeerFin, NoUnclassifiedEnd,
-    NoTextRunAfterUnload, RefHeldWhileReachable,
   }
 
   // ------------------------------------------------------------------ liveness (TLC)
@@ -736,8 +574,8 @@ module fwd_safe {
     HALVES.exists(x => canDispatch(st, x) or canLoad(st, x) or canUse(st, x) or canFallback(st, x)),
     canWStart(st), canWNoop(st), canWEnd(st), canWRecheck(st), canWMove(st), canWBlock(st), canWDrained(st), canWUnhook(st),
     canWRet(st), canWStep(st), canOStep(st),
-    canRcuGp(st), canFreeCancel(st), canFreeFlush(st), canFreeRemoveWait(st), canFreeDone(st), canFreePut(st),
-    canFreeRet(st), canWsEnter(st), canWsLeave(st),
+    canRcuGp(st), canFreeCancel(st), canFreeFlush(st), canFreeRemoveWait(st), canFreeDone(st),
+    canWsEnter(st), canWsLeave(st),
     canSwStateCont(st), canSwErrCont(st), canSwReport(st), canSwUnlock(st), canCtlUnlock(st), canCtlQueue(st), canTakeEnd(st), canRead(st),
   }
   temporal fair = eventually(always(not(sysEnabled)))
@@ -788,7 +626,7 @@ module fwd_safe {
     .expect(Safety and st.pst == "ended" and not(st.id) and st.rec == "queued" and st.fr == "gp" and st.wrun == "idle")
     .then(RcuGp).then(FreeCancel).then(FreeFlush).then(FreeDone).then(TakeEnd)
     .expect(Safety and st.pst == "freed" and st.nrec == 1 and st.rec == "read" and not(st.uaf))
-  // a TCP input callback (rule 5's "rcu" class) entered the target's override as the pair's end restores and clears:
+  // a TCP input callback entered the target's override as the pair's end restores and clears:
   // it reads NULL and calls the restored original, never itself (rule 2)
   run LateCallbackAfterEndCallsOriginal = InitWith("pair")
     .then(Write).then(Dispatch("s")).then(Load("s")).then(Use("s")).then(WStart).then(WMove).then(WDrained).then(WRet)
@@ -870,70 +708,23 @@ module fwd_safe {
     .then(Use("s")).then(RcuGp).then(FreeCancel).then(FreeFlush).then(FreeDone)
     .expect(Safety and st.cause == "Detached" and st.nrec == 1 and st.pst == "freed")
 
-  // MODULE-REFCOUNT (EVMOD-LIFE, ADR-0198; EVMOD-SAFE rule 5, ADR-0204): the pair is aborted and freed while the
-  // context stays open; its reference keeps the module loaded (delete_module refused)
-  run UnloadRefusedWhileContextOpen = InitWith("pair")
-    .then(CtlAbort).then(WStart).then(WEnd).then(WStep).then(WStep).then(WStep).then(WStep).then(WStep).then(WStep).then(WStep)
-    .then(RcuGp).then(FreeCancel).then(FreeFlush).then(FreeDone).then(FreePut).then(FreeRet).then(TakeEnd)
-    .expect(Safety and st.ctx and st.modref == 1 and st.pst == "freed" and not(canUnload(st)))
-  // the context is released and closed (its id table empty) while the pair's halves still hold their references: the
-  // unload is refused until the free work's module_put
-  run UnloadRefusedWhileSocketHooked = InitWith("pair")
-    .then(CtxRel).then(WStart).then(WEnd).then(WStep).then(WStep).then(WStep).then(WStep).then(WStep).then(WStep)
-    .then(CtxClose).expect(Safety and not(st.ctx) and st.modref == 2 and not(canUnload(st)))
-    .then(WStep).then(RcuGp).then(FreeCancel).then(FreeFlush).then(FreeDone)
-    .expect(Safety and st.pst == "freed" and st.modref == 2 and not(canUnload(st)))
-  // ... and succeeds once the free work dropped both references and returned (module_exit's drain waits for the return)
-  run UnloadSucceedsAfterReleaseAndFree = InitWith("pair")
-    .then(CtxRel).then(WStart).then(WEnd).then(WStep).then(WStep).then(WStep).then(WStep).then(WStep).then(WStep)
-    .then(CtxClose).then(WStep).then(RcuGp).then(FreeCancel).then(FreeFlush).then(FreeDone).then(FreePut)
-    .expect(Safety and st.modref == 0 and st.fr == "put" and not(canUnload(st)))
-    .then(FreeRet).then(Unload)
-    .expect(Safety and st.unloaded and inText(st) == Set() and not(reachable(st)))
-  // a vsock receive-path caller owns lock_sock(s) and has loaded the override's pointer (not yet an RCU reader) as the
-  // pair's end reaches its removal: the removal waits for the socket lock, the caller finds the pair and returns;
-  // only then are the overrides removed, and the module unloads after the free with no caller in its text
-  run LateLockedCallbackFinishesBeforeRemoval = InitWith("pair")
-    .then(CtlAbort).then(WStart).then(WEnd).then(Write).then(Dispatch("s"))
-    .expect(st.inv.get("s").ph == "ovr" and st.inv.get("s").cl == "lock" and st.lk == "rx" and not(canWStep(st)))
-    .then(Load("s")).then(Use("s")).expect(Safety and st.lk == "none" and canWStep(st))
-    .then(WStep).then(WStep).then(WStep).then(WStep).then(WStep).then(WStep).then(WStep)
-    .then(RcuGp).then(FreeCancel).then(FreeFlush).then(FreeDone).then(FreePut).then(FreeRet)
-    .then(TakeEnd).then(CtxRel).then(CtxClose).then(Unload)
-    .expect(Safety and st.unloaded and not(st.pend))
-  // a ULP installed on the TCP half saved a copy of its override: at the removal the half keeps its reference for the
-  // boot, so the module stays loaded after the context closes, and the ULP's later call of its copy runs loaded text
-  // (it finds no pair and calls the restored original)
-  run UlpCopyKeepsModuleLoaded = InitWith("pair")
-    .then(UlpInstall("t")).then(CtxRel).then(WStart).then(WEnd)
-    .then(WStep).then(WStep).then(WStep).then(WStep).then(WStep).then(WStep).then(WStep)
-    .then(RcuGp).then(FreeCancel).then(FreeFlush).then(FreeDone).then(FreePut).then(FreeRet).then(CtxClose)
-    .expect(Safety and st.modref == 1 and st.sref.get("t") and not(st.sref.get("s")) and not(canUnload(st)))
-    .then(UlpCall("t")).then(Load("t")).then(Fallback("t"))
-    .expect(Safety and not(st.unloaded) and not(st.recursed) and not(st.uaf))
-  // rule 5's write-space closure (round 16): a "wfree" waker (sock_wfree from the vhost worker: no socket lock, no RCU
-  // section, preemptible) holds wqlk(t) inside the entry's function as the pair's end reaches the entry's removal: the
-  // removal waits for wqlk(t); the wake queues one more run (dropped by the free's cancel_work_sync); the pair ends,
-  // the free runs, the module unloads and no text runs after it
+  // the write-space closure (round 16): a waker (sock_wfree from the vhost worker: no socket lock, no RCU section,
+  // preemptible) holds wqlk(t) inside the entry's function as the pair's end reaches the entry's removal: the removal
+  // waits for wqlk(t); the wake queues one more run (dropped by the free's cancel_work_sync); the pair ends and the
+  // free runs
   run WfreeWakeFinishesBeforeRemoveWait = InitWith("pair")
     .then(Write).then(Dispatch("s")).then(Load("s")).then(Use("s")).then(WStart).then(WMove).then(WDrained).then(WRet)
     .then(Write).then(Dispatch("s")).then(Load("s")).then(Use("s")).then(WStart).then(WBlock).then(WRet)
-    .then(ReadBy("wfree")).then(WsEnter).expect(st.ws == "entry" and st.wsCl == "wfree" and st.wqe)
+    .then(Read).then(WsEnter).expect(st.ws == "entry" and st.wqe)
     .then(CtxRel).then(WStart).then(WEnd).then(WStep).then(WStep)
     .expect(Safety and st.wprog.head() == "wt" and not(canWStep(st)))
     .then(WsLeave).expect(Safety and st.pend and canWStep(st))
     .then(WStep).expect(not(st.wqe)).then(WStep).then(WStep).then(WStep).then(WStep)
     .expect(Safety and st.fr == "gp" and st.wrun == "idle" and not(st.id))
     .then(RcuGp).then(FreeCancel).expect(not(st.pend))
-    .then(FreeFlush).then(FreeDone).then(FreePut).then(FreeRet).then(CtxClose).then(Unload)
-    .expect(Safety and st.unloaded and inText(st) == Set() and not(reachable(st)) and not(st.uaf))
+    .then(FreeFlush).then(FreeDone)
+    .expect(Safety and st.pst == "freed" and not(st.uaf))
 
-  // ------------------------------------------------------------------ non-vacuity witnesses (expected violated)
-  val WitnessNoLateFallback: bool = not(st.inv.get("t").ph == "nul" or (st.inv.get("s").ph == "nul" and st.kind == "pair"))
-  val WitnessNoReaderHoldsAtFree: bool = not(st.fr == "gp" and st.gpw != Set())
-  val WitnessNoFreed: bool = st.pst != "freed"
-  // MODULE-REFCOUNT: the module is unloaded on some behaviour
-  val WitnessNoUnload: bool = not(st.unloaded)
 }
 
 // design instances

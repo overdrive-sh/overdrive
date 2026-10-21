@@ -2,11 +2,9 @@
 
 ## Status
 
-**Accepted — EVMOD-LIFE, approved by the user 2026-10-17; its decision
-replaced by the user's ruling MODULE-REFCOUNT of 2026-10-20**, which amends
-EVMOD-LIFE and EVMOD-SAFE: `ovd_fwd` is no longer permanent; it is
-unload-safe by module reference counting. EVMOD-LIFE is not implemented, so
-the decision below is the current one, written in present tense. GH #295.
+**Accepted — EVMOD-LIFE, approved by the user 2026-10-17, with the user's
+ruling MODULE-REFCOUNT of 2026-10-20**: `ovd_fwd` is unload-safe by module
+reference counting. Not implemented. GH #295.
 Follows from ADR-0197 (accepted 2026-10-16) and the user's design input of
 that ruling: "the module is built into the appliance kernel, or otherwise
 cannot unload while any socket is hooked". This ADR decides only how long
@@ -117,13 +115,11 @@ returns `-EWOULDBLOCK` while any reference is held and succeeds at zero.
 
 ## Alternatives considered
 
-- **Permanent: `module_init` and no `module_exit`** (this ADR's earlier
-  decision, approved 2026-10-17 and never implemented). It is safe for any
+- **Permanent: `module_init` and no `module_exit`.** It is safe for any
   saved pointer, but a module change then needs a kernel boot. On a shared
   development VM that reboot ends every workspace's in-flight runs, and every
-  edit under `kmod/ovd_fwd/` (whose tree digest is the module's identity,
-  ADR-0203) invalidates the loaded module. Replaced by the user's ruling
-  MODULE-REFCOUNT.
+  module change (whose version is the module's identity, ADR-0203)
+  invalidates the loaded module. Rejected.
 - **Built into the appliance kernel.** The user's data-path ruling admits
   it, and it never unloads. It lost for three reasons:
   1. Building it in needs the module's source and a Kconfig entry inside the
@@ -132,11 +128,9 @@ returns `-EWOULDBLOCK` while any reference is held and succeeds at zero.
      configuration over unmodified source.
   2. The stock-kernel Tier-3 hosts need the loadable form anyway.
   3. Every forwarder change would become a kernel rebuild.
-- **A reference per hooked socket dropped at unhook.** This was the earlier
-  rejection's version, and it lost because a saved kTLS pointer outlives the
-  unhook. The decision differs in three ways: the reference is dropped only
-  after rule 5 and the grace period, a ULP present at unhook keeps it, and
-  ADR-0200 refuses a ULP socket at attach.
+- **A reference per hooked socket dropped at unhook.** It loses because a
+  saved kTLS pointer outlives the unhook: dropping the reference there lets
+  the module unload while the saved pointer is still live. Rejected.
 - **Unloadable, with an `exit` that detaches every pair first** (the
   spike's `exit`). An `exit` runs only after the count reached zero, so it
   cannot detach a pair that still holds a reference; detaching at `exit`
@@ -149,12 +143,8 @@ returns `-EWOULDBLOCK` while any reference is held and succeeds at zero.
   refuses a busy one with a message naming the holder class (an open
   context and its process; socket references whose free has not run yet,
   or a context reference not visible in `/proc`, such as a descriptor in
-  flight or an io_uring fixed file). No reboot is needed. The one exception
-  is a loaded build without `module_exit` (a spike build), which the kernel
-  never unloads (`kernel/module/main.c:818-825 @ v7.0`); `kmod-load` names
-  that case on its own, and only after a second `delete_module` on a module
-  whose `initstate` read `live` returns `EBUSY` again, since the first
-  `EBUSY` may have come from a module that was still initialising.
+  flight or an io_uring fixed file). No reboot is needed. Any `EBUSY` on a
+  live module is reported as busy ("retry"), never as a reboot.
 - On the appliance a module change is an image change, which reboots; the
   module is loaded once at boot and nothing unloads it.
 - A socket on which some subsystem installed a ULP after attach keeps its

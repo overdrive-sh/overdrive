@@ -12,8 +12,13 @@
 # ci (DR6-CLOSE rule): ci = true iff the check's own time (`Seconds`, start-up retries excluded) in the
 # latest full record is under 60 s — half the two-minute limit of .claude/rules/design.md, absorbing the
 # run-to-run variance of a 12-job record; every other check is ci = false. A new check is ci = true until
-# its first record; the rule is re-applied from each record at the next spec revision. The runner's own
+# its first record. The runner's own
 # warning (`ci_overrun`, over 120 s) stays the backstop.
+#
+# WITNESS-HAZARD-RULE: a hazard instance per design decision (an ADR-level rule), not per clause; a
+# non-vacuity witness only where no named run reaches its state. The witnesses kept: owner-flows-witness-phantom-connect,
+# fwd-pair-witness-watch-half-close, fwd-pair-dgram-witness-vmm-exit. An invariant's teeth are shown by the hazard of the
+# decision it defends.
 #
 # Modules: owner_flows (control sessions, flow admission, launch attribution, the dial, the beacon),
 # fwd_pair (the in-kernel forwarder, EVMOD), flow_quota (the per-allocation quota counts half-closed flows),
@@ -32,113 +37,40 @@ invariant = "Safety"
 backend = "tlc"
 expect = "holds"
 ci = false
-# measured 2026-10-14 alone (D-UP-8 gSess and the racing first connect): 1320 s with 4 workers, 844 s with 8;
-# 15,114,608 distinct states (before: 795 s, 11,820,680); 1649 s in the full record 300046-1792003180.873 (12 jobs)
 timeout_secs = 3600
 
+# Two concurrent host-opened dials (two dial slots): bounded Safety on the instance TLC's `owner-flows-safety-tlc` does
+# not cover (flows_ok carries one host-opened flow). Safety on this instance was otherwise checked along the core2 named
+# runs on flows_conf only.
 [[check]]
-name = "owner-flows-safety-apalache"
+name = "owner-flows-two-safety-apalache"
 spec = "owner_flows.qnt"
-main = "flows_ok"
+main = "flows_two"
 invariant = "Safety"
 backend = "apalache"
 max_steps = 10
 expect = "holds"
 ci = false
-
-# U-5 + K-A4: a guest TcpAccept half (accepted, or still in the guest's accept queue) whose host side
-# closed is eventually torn down
-timeout_secs = 1500
+timeout_secs = 1800
 
 [[check]]
 name = "owner-flows-guest-half-ends"
 spec = "owner_flows.qnt"
-main = "flows_ok"
+main = "flows_one"
 temporal = "GuestHalfEnds"
 backend = "tlc"
 expect = "holds"
 ci = false
-# measured 2026-10-14 (D-UP-8): 15,114,608 distinct states (before: 11,820,680, 1452 s with the default 2048 MiB heap).
-# Alone, 4 workers: 2713 s, peak 6314 MiB with a 10240 MiB heap. In a full record: 3088 s, peak 7160 MiB (3262 s in
-# record 300046-1792003180.873); with an
-# 8192 MiB heap a full record ran out of memory in a periodic liveness check at 8.75 M states (run
-# 269905-1791992269.654). The liveness peak varies from run to run, so the heap is 10240 MiB; that reservation still
-# lets the three long TLC checks start together. Workers stay at the default 4: 8 workers shorten this check alone
-# (1791 s) but hold 8 of the 12 CPUs, so the other long checks queue behind it in a full record
-heap_mb = 10240
-timeout_secs = 7200
-
-# Non-vacuity witnesses: each behaviour is reachable (expected violation)
-[[check]]
-name = "owner-flows-witness-paired"
-spec = "owner_flows.qnt"
-main = "flows_ok"
-invariant = "WitnessNoPaired"
-backend = "apalache"
-max_steps = 14
-expect = "violation"
-# 164 s measured 2026-10-14 (before 101 s): over the two-minute CI bound
-ci = false
-
-[[check]]
-name = "owner-flows-witness-reuse"
-spec = "owner_flows.qnt"
-main = "flows_ok"
-invariant = "WitnessNoReuse"
-backend = "apalache"
-max_steps = 14
-expect = "violation"
-ci = true
-
-[[check]]
-name = "owner-flows-witness-quiesce-abort"
-spec = "owner_flows.qnt"
-main = "flows_ok"
-invariant = "WitnessNoQuiesceAbort"
-backend = "apalache"
-max_steps = 14
-expect = "violation"
-ci = true
-# DR6-CLOSE rule: own time 41.5 s in record 198644-1792365750.873, under 60 s
-
-[[check]]
-name = "owner-flows-witness-late-completion"
-spec = "owner_flows.qnt"
-main = "flows_ok"
-invariant = "WitnessNoLateCompletion"
-backend = "apalache"
-max_steps = 14
-expect = "violation"
-ci = true
-# DR6-CLOSE rule: own time 52.9 s in record 198644-1792365750.873, under 60 s
-
-[[check]]
-name = "owner-flows-witness-accept-paired"
-spec = "owner_flows.qnt"
-main = "flows_ok"
-invariant = "WitnessNoAcceptPaired"
-backend = "apalache"
-max_steps = 14
-expect = "violation"
-ci = true
+# U-5 + K-A4: a guest TcpAccept half (accepted, or still in the guest's accept queue) whose host side closed is
+# eventually torn down. The property mentions the host-opened flow only, so it is checked on the one-flow instance
+# `flows_one` (one guest-opened flow, one host-opened flow), not on `flows_ok` (15.1 M states, 53 min, 10 GB heap)
+timeout_secs = 1800
 
 [[check]]
 name = "owner-flows-witness-phantom-connect"
 spec = "owner_flows.qnt"
 main = "flows_ok"
 invariant = "WitnessNoPhantomConnect"
-backend = "apalache"
-max_steps = 14
-expect = "violation"
-ci = true
-# DR6-CLOSE rule: own time 49.7 s in record 198644-1792365750.873, under 60 s
-
-# K-A4 removes a queued V_g whose host side closed before the guest accepted it (reachable)
-[[check]]
-name = "owner-flows-witness-queue-reset"
-spec = "owner_flows.qnt"
-main = "flows_ok"
-invariant = "WitnessNoQueueReset"
 backend = "apalache"
 max_steps = 14
 expect = "violation"
@@ -166,45 +98,10 @@ expect = "violation"
 ci = false
 
 [[check]]
-name = "owner-flows-hazard-admit-split"
-spec = "hazard/owner_flows_hazards.qnt"
-main = "flows_bugAdmitSplit"
-invariant = "NoAdmitWhenClosed"
-backend = "apalache"
-max_steps = 14
-expect = "violation"
-# 196 s in the 2026-10-14 record 300046-1792003180.873 (146 s in the ci-subset run): over the two-minute CI bound
-ci = false
-
-[[check]]
-name = "owner-flows-hazard-paired-no-recheck"
-spec = "hazard/owner_flows_hazards.qnt"
-main = "flows_bugPairedNoRecheck"
-invariant = "NoAdmitWhenClosed"
-backend = "apalache"
-max_steps = 14
-expect = "violation"
-ci = false
-# 789 s in the 2026-10-14 record 300046-1792003180.873 (648 s alone) against the 900 s default
-timeout_secs = 1800
-
-[[check]]
 name = "owner-flows-hazard-no-abort-on-loss"
 spec = "hazard/owner_flows_hazards.qnt"
 main = "flows_bugNoAbortOnLoss"
 invariant = "NoAdmitWhenClosed"
-backend = "apalache"
-max_steps = 14
-expect = "violation"
-ci = false
-# DR6-CLOSE rule: own time 71.9 s in record 198644-1792365750.873, not under 60 s; the full --record still runs it
-
-# ci = false: 276 s own time in the 2026-10-14 record 300046-1792003180.873, over the two-minute limit (Apalache)
-[[check]]
-name = "owner-flows-hazard-teardown-skips-flows"
-spec = "hazard/owner_flows_hazards.qnt"
-main = "flows_bugTeardownSkipsFlows"
-invariant = "CurrentGeneration"
 backend = "apalache"
 max_steps = 14
 expect = "violation"
@@ -246,40 +143,6 @@ backend = "tlc"
 expect = "violation"
 ci = true
 
-# K-A2′ (P-37): a dead launch's queued connection, its first record buffered, is accepted after the
-# CID's next lease exists (reachable)
-[[check]]
-name = "owner-flows-witness-stale-accept"
-spec = "owner_flows.qnt"
-main = "flows_ok"
-invariant = "WitnessNoStaleAccept"
-backend = "apalache"
-max_steps = 14
-expect = "violation"
-ci = true
-
-# ATTR-LIVE-CLAIM: a connection accepted while the CID was Provisioned
-# is still unread after teardown (reachable; the design closes it at its read)
-[[check]]
-name = "owner-flows-witness-read-after-teardown"
-spec = "owner_flows.qnt"
-main = "flows_ok"
-invariant = "WitnessNoReadAfterTeardown"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# Teeth (ATTR-TOKEN): attribution by peer CID alone under K-A2′
-[[check]]
-name = "owner-flows-hazard-peer-cid-only"
-spec = "hazard/owner_flows_hazards.qnt"
-main = "flows_bugPeerCidOnly"
-invariant = "CurrentGeneration"
-backend = "apalache"
-max_steps = 14
-expect = "violation"
-ci = true
-
 [[check]]
 name = "owner-flows-hazard-peer-cid-only-message"
 spec = "hazard/owner_flows_hazards.qnt"
@@ -289,21 +152,8 @@ backend = "tlc"
 expect = "violation"
 ci = true
 
-# Teeth (ATTR-LIVE-CLAIM order): the session claim taken at accept, before the ControlOpen is read — a
-# stale connection of one launch holds the claim when the next launch's session arrives. (Its
-# SessionBecomesLive check is not teeth for this rule — the stale holder is closed at its read, so
-# progress holds.)
-[[check]]
-name = "owner-flows-hazard-claim-before-token-held"
-spec = "hazard/owner_flows_hazards.qnt"
-main = "flows_bugClaimBeforeToken"
-invariant = "NoCrossLaunchSessionHeld"
-backend = "tlc"
-expect = "violation"
-ci = true
-
 # Teeth (ATTR-LIVE-CLAIM): the CID state checked at accept only, the claim
-# step comparing with the lease token (Retiring included). Its first-run counterexample: a dead
+# step comparing with the lease token (Retiring included). Its counterexample: a dead
 # launch's queued control connection accepted while Provisioned and read after teardown takes the
 # claim, which survives pool.release; the next lease's session is refused SessionHeld
 [[check]]
@@ -314,30 +164,6 @@ invariant = "NoCrossLaunchSessionHeld"
 backend = "tlc"
 expect = "violation"
 ci = true
-
-[[check]]
-name = "owner-flows-hazard-no-claim-recheck-current"
-spec = "hazard/owner_flows_hazards.qnt"
-main = "flows_bugNoClaimRecheck"
-invariant = "CurrentGeneration"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# Rejected alternative to ATTR-LIVE-CLAIM (recorded as its behaviour, not as design): teardown also
-# closes connections in `reading`, and the claim step compares with the lease token. Prediction: every
-# safety invariant holds in this model (whose only owner listener is the control session); the
-# design rejects it because its correctness rests on teardown knowing every unread connection
-# across the owner's listeners and the driver
-[[check]]
-name = "owner-flows-alt-teardown-closes-reading-safety"
-spec = "hazard/owner_flows_hazards.qnt"
-main = "flows_altTeardownClosesReading"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = false
-timeout_secs = 3600
 
 # Beacon (VM driver, port 1234; ADR-0157, ATTR-TOKEN, ATTR-LIVE-CLAIM): instance `flows_beacon`. READY is
 # read, then compared with the live launch's token and the beacon claim taken in one step; driver.stop ends
@@ -377,46 +203,6 @@ main = "flows_beacon"
 temporal = "ReadyReleased"
 backend = "tlc"
 expect = "holds"
-ci = true
-
-[[check]]
-name = "owner-flows-beacon-witness-ready"
-spec = "owner_flows.qnt"
-main = "flows_beacon"
-invariant = "WitnessNoReady"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# K-A2′ for the beacon: a dead launch's beacon connection (buffered READY) is read while the next launch is live
-[[check]]
-name = "owner-flows-beacon-witness-stale-read"
-spec = "owner_flows.qnt"
-main = "flows_beacon"
-invariant = "WitnessNoStaleBeaconRead"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# K-A4 dropped (environment variant): U-5's discard rule then orphans a guest TcpAccept half
-[[check]]
-name = "owner-flows-env-guest-misses-host-close"
-spec = "hazard/owner_flows_hazards.qnt"
-main = "flows_envGuestMissesHostClose"
-temporal = "GuestHalfEnds"
-backend = "tlc"
-expect = "violation"
-ci = true
-# DR6-CLOSE rule: own time 29.5 s in record 198644-1792365750.873, under 60 s
-
-# Prediction: a guest Abort tombstone does not remove the K-A4 dependence (session-loss path)
-[[check]]
-name = "owner-flows-alt-tombstone-misses-close"
-spec = "hazard/owner_flows_hazards.qnt"
-main = "flows_altTombstoneMissesClose"
-temporal = "GuestHalfEnds"
-backend = "tlc"
-expect = "violation"
 ci = true
 
 # D-UP-8, D-UP-9
@@ -700,15 +486,6 @@ expect = "holds"
 ci = true
 
 [[check]]
-name = "owner-flows-hazard-reconnect-before-loss-abort"
-spec = "hazard/owner_flows_hazards.qnt"
-main = "flows_bugReconnectBeforeLossAbort"
-invariant = "GuestFlowsDoNotOutliveSession"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
 name = "owner-flows-hazard-no-accepted-watch"
 spec = "hazard/owner_flows_hazards.qnt"
 main = "flows_bugNoAcceptedWatch"
@@ -716,21 +493,6 @@ temporal = "GuestHalfEnds"
 backend = "tlc"
 expect = "violation"
 ci = true
-
-# Two host-opened flows (instance flows_two, used by the all-flows session-loss run): the safety invariants,
-# bounded (the exhaustive TLC check of this instance does not finish in 900 s; flows_ok checks the same
-# invariants exhaustively with one host-opened flow, and every one of them is a per-flow predicate)
-[[check]]
-name = "owner-flows-two-safety-apalache"
-spec = "owner_flows.qnt"
-main = "flows_two"
-invariant = "Safety"
-backend = "apalache"
-max_steps = 10
-expect = "holds"
-ci = false
-# 765 s in the 2026-10-14 record 300046-1792003180.873 (609 s alone) against the 900 s default
-timeout_secs = 1800
 
 [[check]]
 name = "owner-flows-run-ok-accepted-vg-host-close-ends-flow-silently"
@@ -770,18 +532,6 @@ backend = "tlc"
 expect = "violation"
 ci = true
 
-# D-UP-9: the VMM exit releases the beacon claim, so a READY claimed without the live recheck no longer outlives its
-# launch to hold the next launch's READY out (beaconNoLiveRecheck keeps its teeth on BeaconCurrentLaunch). The claim
-# release itself is the rule BeaconNoCrossLaunchHeld rests on: the launch-end step that keeps the claim violates it.
-[[check]]
-name = "owner-flows-hazard-beacon-driver-stop-keeps-claim-held"
-spec = "hazard/owner_flows_beacon_hazards.qnt"
-main = "flows_bugDriverStopKeepsClaim"
-invariant = "BeaconNoCrossLaunchHeld"
-backend = "tlc"
-expect = "violation"
-ci = true
-
 # Teeth (ATTR-TOKEN, beacon): READY attributed by peer CID alone — a dead launch's buffered READY is
 # released as the next launch's
 [[check]]
@@ -789,15 +539,6 @@ name = "owner-flows-hazard-beacon-peer-cid-only"
 spec = "hazard/owner_flows_beacon_hazards.qnt"
 main = "flows_bugBeaconPeerCidOnly"
 invariant = "BeaconNoCrossLaunchReady"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "owner-flows-hazard-beacon-peer-cid-only-current"
-spec = "hazard/owner_flows_beacon_hazards.qnt"
-main = "flows_bugBeaconPeerCidOnly"
-invariant = "BeaconCurrentLaunch"
 backend = "tlc"
 expect = "violation"
 ci = true
@@ -991,58 +732,6 @@ backend = "apalache"
 max_steps = 14
 expect = "violation"
 ci = true
-# DR6-CLOSE rule: own time 48.8 s in record 198644-1792365750.873, under 60 s
-
-[[check]]
-name = "owner-flows-hazard-owner-deadline-shorter-late-paired"
-spec = "hazard/owner_flows_hazards.qnt"
-main = "flows_bugOwnerDeadlineShorter"
-invariant = "NoPairedAfterDialEnded"
-backend = "apalache"
-max_steps = 16
-expect = "violation"
-ci = false
-
-[[check]]
-name = "owner-flows-witness-dial-ok"
-spec = "owner_flows.qnt"
-main = "flows_ok"
-invariant = "WitnessNoDialOk"
-backend = "apalache"
-max_steps = 14
-expect = "violation"
-ci = true
-
-[[check]]
-name = "owner-flows-witness-dial-timed-out"
-spec = "owner_flows.qnt"
-main = "flows_ok"
-invariant = "WitnessNoDialTimedOut"
-backend = "apalache"
-max_steps = 14
-expect = "violation"
-ci = true
-
-[[check]]
-name = "owner-flows-witness-dial-deadline"
-spec = "owner_flows.qnt"
-main = "flows_ok"
-invariant = "WitnessNoDialDeadline"
-backend = "apalache"
-max_steps = 14
-expect = "violation"
-ci = true
-
-# INB-1 teeth, NoSession alone (M-5): the session check removed, the Active and quiesce checks kept
-[[check]]
-name = "owner-flows-hazard-dial-no-session-check"
-spec = "hazard/owner_flows_admission_hazards.qnt"
-main = "flows_bugDialNoSessionCheck"
-invariant = "NoAdmitWhenClosed"
-backend = "apalache"
-max_steps = 12
-expect = "violation"
-ci = true
 
 # INB-1 teeth (M-5): a typed admission refusal registers and closes the dial slot
 [[check]]
@@ -1067,7 +756,7 @@ expect = "violation"
 ci = true
 
 # ==== fwd_pair: the in-kernel event-driven forwarder (EVMOD-ADOPT, ADR-0197; EVMOD-END, EVMOD-PAIR, EVMOD-CTL,
-# EVMOD-DGRAM, EVMOD-AB proposed): one guest flow end to end, forwarded on each side
+# EVMOD-DGRAM, EVMOD-AB): one guest flow end to end, forwarded on each side
 # Safety on pair_ok (stream) and pair_watch (a dial), DgramSafety on pair_dgram, liveness on pair_live (and, for
 # EV-DGRAM D1, EveryEndResolves on pair_dlive); the named
 # runs on the conformance main pair_conf. Every model-checking instance carries at most one fault per trace (FMAX).
@@ -1080,8 +769,6 @@ invariant = "Safety"
 backend = "tlc"
 expect = "holds"
 ci = false
-# third iteration (T-1 to T-9): 1074 s alone, 3,531,620 distinct states (2026-10-17); 481 s in record
-# 320404-1792210836.093 before it
 timeout_secs = 2400
 
 [[check]]
@@ -1092,7 +779,30 @@ invariant = "Safety"
 backend = "tlc"
 expect = "holds"
 ci = false
-# 135.5 s alone after T-1 to T-9 (2026-10-17); 47.6 s in record 320404-1792210836.093
+
+# The multi-unit, multi-datagram instance: stream mode with 2 units and datagram mode with 2
+# datagrams, one direction, one fault per trace. MidSafety = Safety and DgramSafety.
+[[check]]
+name = "fwd-pair-mid-safety-tlc"
+spec = "fwd_pair.qnt"
+main = "pair_mid"
+invariant = "MidSafety"
+backend = "tlc"
+expect = "holds"
+ci = false
+timeout_secs = 1800
+
+# EVMOD-DGRAM off: a datagram consumed when only part of its frame was accepted (the teeth of the datagram invariants).
+# The cut frame corrupts the frame of the datagram that follows it, so the instance carries three datagrams in one
+# direction (`pair_dhaz`); with two (`pair_mid`) the hazard is not violated.
+[[check]]
+name = "fwd-pair-hazard-consume-partial-frame"
+spec = "hazard/fwd_pair_hazards_4.qnt"
+main = "pair_dhazConsumePartialFrame"
+invariant = "DatagramsOnceInOrder"
+backend = "tlc"
+expect = "violation"
+ci = false
 
 [[check]]
 name = "fwd-pair-dgram-safety-tlc"
@@ -1102,7 +812,6 @@ invariant = "DgramSafety"
 backend = "tlc"
 expect = "holds"
 ci = false
-# 802 s alone after T-1 to T-9 (2026-10-17); 321 s in record 320404-1792210836.093
 timeout_secs = 2700
 
 [[check]]
@@ -1113,7 +822,6 @@ temporal = "EveryUnitDelivered"
 backend = "tlc"
 expect = "holds"
 ci = false
-# 392-448 s alone on the Lima VM after T-1 to T-9 (2026-10-17; 176-178 s, 1,039,640 distinct states, before)
 timeout_secs = 1800
 
 [[check]]
@@ -1124,7 +832,6 @@ temporal = "EveryEndResolves"
 backend = "tlc"
 expect = "holds"
 ci = false
-# 392-448 s alone on the Lima VM after T-1 to T-9 (2026-10-17; 176-178 s, 1,039,640 distinct states, before)
 timeout_secs = 1800
 
 [[check]]
@@ -1135,7 +842,6 @@ temporal = "CleanHalfCloseCompletes"
 backend = "tlc"
 expect = "holds"
 ci = false
-# 392-448 s alone on the Lima VM after T-1 to T-9 (2026-10-17; 176-178 s, 1,039,640 distinct states, before)
 timeout_secs = 1800
 
 [[check]]
@@ -1147,91 +853,12 @@ backend = "tlc"
 expect = "holds"
 ci = true
 
-# non-vacuity: both pairs complete
-[[check]]
-name = "fwd-pair-witness-completion"
-spec = "fwd_pair.qnt"
-main = "pair_ok"
-invariant = "WitnessNoCompletion"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# non-vacuity: a peer abort is classified
-[[check]]
-name = "fwd-pair-witness-peer-abort"
-spec = "fwd_pair.qnt"
-main = "pair_ok"
-invariant = "WitnessNoPeerAbort"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# non-vacuity: a stopped reader blocks its writer with a full pipeline
-[[check]]
-name = "fwd-pair-witness-blocked-writer"
-spec = "fwd_pair.qnt"
-main = "pair_ok"
-invariant = "WitnessNoBlockedWriter"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# non-vacuity: a live pair holds a clean half-close and then the peer's 0x3 (CLEAN-FULL-END)
-[[check]]
-name = "fwd-pair-witness-clean-full-end"
-spec = "fwd_pair.qnt"
-main = "pair_ok"
-invariant = "WitnessNoCleanFullEnd"
-backend = "tlc"
-expect = "violation"
-ci = true
-
 # non-vacuity: a watch records the guest's clean half-close
 [[check]]
 name = "fwd-pair-witness-watch-half-close"
 spec = "fwd_pair.qnt"
 main = "pair_watch"
 invariant = "WitnessNoWatchHalfClose"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# non-vacuity: an empty datagram is delivered
-[[check]]
-name = "fwd-pair-witness-empty-datagram"
-spec = "fwd_pair.qnt"
-main = "pair_dgram"
-invariant = "WitnessNoEmptyDatagram"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# non-vacuity: a datagram is dropped at a full source queue
-[[check]]
-name = "fwd-pair-witness-source-drop"
-spec = "fwd_pair.qnt"
-main = "pair_dgram"
-invariant = "WitnessNoSourceDrop"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# consume only what the target accepted, off (the redirect's shape): units held outside the queues
-[[check]]
-name = "fwd-pair-hazard-consume-before-accept"
-spec = "hazard/fwd_pair_hazards.qnt"
-main = "pair_bugConsumeBeforeAccept"
-invariant = "QueuesWithinBounds"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-consume-before-accept-consume"
-spec = "hazard/fwd_pair_hazards.qnt"
-main = "pair_bugConsumeBeforeAccept"
-invariant = "ConsumeOnlyAfterAccept"
 backend = "tlc"
 expect = "violation"
 ci = true
@@ -1247,59 +874,10 @@ expect = "violation"
 ci = true
 
 [[check]]
-name = "fwd-pair-hazard-consume-on-short-send-prefix"
-spec = "hazard/fwd_pair_hazards.qnt"
-main = "pair_bugConsumeOnShortSend"
-invariant = "DeliveredIsInOrderPrefix"
-backend = "tlc"
-expect = "violation"
-ci = false
-# DR6-CLOSE rule: own time 60.3 s in record 198644-1792365750.873, not under 60 s
-
-# R2-END off: every vsock end forwarded as a FIN
-[[check]]
-name = "fwd-pair-hazard-eof-as-fin"
-spec = "hazard/fwd_pair_hazards_2.qnt"
-main = "pair_bugEofAsFin"
-invariant = "AbortNeverCleanEof"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
 name = "fwd-pair-hazard-eof-as-fin-peer-loss"
-spec = "hazard/fwd_pair_hazards_2.qnt"
+spec = "hazard/fwd_pair_hazards.qnt"
 main = "pair_bugEofAsFin"
 invariant = "NoEofOnPeerLoss"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# EVMOD-END off: the class computed at end-of-stream from the accumulated peer_shutdown
-[[check]]
-name = "fwd-pair-hazard-classify-accumulated"
-spec = "hazard/fwd_pair_hazards_3.qnt"
-main = "pair_bugClassifyAccumulated"
-invariant = "ClassFixedAtTransition"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-classify-accumulated-eof"
-spec = "hazard/fwd_pair_hazards_3.qnt"
-main = "pair_bugClassifyAccumulated"
-invariant = "AbortNeverCleanEof"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# ADR-0183 off: the target shut on the callback, before the vsock queue is empty
-[[check]]
-name = "fwd-pair-hazard-shutdown-on-callback"
-spec = "hazard/fwd_pair_hazards_3.qnt"
-main = "pair_bugShutdownOnCallback"
-invariant = "NoEarlyShutdown"
 backend = "tlc"
 expect = "violation"
 ci = true
@@ -1307,18 +885,9 @@ ci = true
 # EVMOD-CTL off: the context's release leaves its pairs forwarding
 [[check]]
 name = "fwd-pair-hazard-release-keeps-pairs"
-spec = "hazard/fwd_pair_ctl_hazards.qnt"
+spec = "hazard/fwd_pair_hazards_3.qnt"
 main = "pair_bugReleaseKeepsPairs"
 invariant = "ReleasedContextHoldsNoPair"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-release-keeps-pairs-forward"
-spec = "hazard/fwd_pair_ctl_hazards.qnt"
-main = "pair_bugReleaseKeepsPairs"
-invariant = "NoForwardAfterEnd"
 backend = "tlc"
 expect = "violation"
 ci = true
@@ -1326,48 +895,9 @@ ci = true
 # EVMOD-CTL off: an end record may be dropped
 [[check]]
 name = "fwd-pair-hazard-lossy-end-record"
-spec = "hazard/fwd_pair_ctl_hazards.qnt"
+spec = "hazard/fwd_pair_hazards_3.qnt"
 main = "pair_bugLossyEndRecord"
 invariant = "OneEndRecordPerPair"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# rejected alternative (the BPF sockmap redirect): credit returned at read, the target's egress queue unbounded
-[[check]]
-name = "fwd-pair-hazard-alt-sockmap-redirect"
-spec = "hazard/fwd_pair_hazards_2.qnt"
-main = "pair_altSockmapRedirect"
-invariant = "QueuesWithinBounds"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# EVMOD-DGRAM off: a datagram consumed when only part of its frame was accepted
-[[check]]
-name = "fwd-pair-hazard-consume-partial-frame"
-spec = "hazard/fwd_pair_dgram_hazards.qnt"
-main = "pair_bugConsumePartialFrame"
-invariant = "DatagramsOnceInOrder"
-backend = "tlc"
-expect = "violation"
-ci = false
-
-[[check]]
-name = "fwd-pair-hazard-consume-partial-frame-split"
-spec = "hazard/fwd_pair_dgram_hazards.qnt"
-main = "pair_bugConsumePartialFrame"
-invariant = "FrameNeverSplitAcrossDatagrams"
-backend = "tlc"
-expect = "violation"
-ci = false
-
-# EVMOD-DGRAM off: a frame whose UDP target would block is dropped by the forwarder
-[[check]]
-name = "fwd-pair-hazard-drop-when-target-blocked"
-spec = "hazard/fwd_pair_dgram_hazards.qnt"
-main = "pair_bugDropWhenTargetBlocked"
-invariant = "DropsOnlyAtSourceQueue"
 backend = "tlc"
 expect = "violation"
 ci = true
@@ -1375,52 +905,12 @@ ci = true
 # ADR-0183 off (liveness): the target shut in the callback strands the units still queued in the vsock
 [[check]]
 name = "fwd-pair-hazard-shutdown-on-callback-delivery"
-spec = "hazard/fwd_pair_end_hazards_2.qnt"
+spec = "hazard/fwd_pair_hazards_8.qnt"
 main = "pair_liveShutdownOnCallback"
 temporal = "EveryUnitDelivered"
 backend = "tlc"
 expect = "violation"
 ci = false
-
-# EVMOD-CTL off (liveness): the owner never reads a dropped record
-[[check]]
-name = "fwd-pair-hazard-lossy-end-record-resolves"
-spec = "hazard/fwd_pair_ctl_hazards_2.qnt"
-main = "pair_liveLossyEndRecord"
-temporal = "EveryEndResolves"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# non-vacuity: an end reaches a half before its attach (EVMOD-PAIR, U-EV-2)
-[[check]]
-name = "fwd-pair-witness-attach-time-end"
-spec = "fwd_pair.qnt"
-main = "pair_ok"
-invariant = "WitnessNoAttachTimeEnd"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# non-vacuity: the host's Forwarder recovery opens a new context (EVMOD-CTL)
-[[check]]
-name = "fwd-pair-witness-recovery"
-spec = "fwd_pair.qnt"
-main = "pair_ok"
-invariant = "WitnessNoRecovery"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# non-vacuity: the VMM exits, so CtxGoneIffVmDown (in Safety and DgramSafety) is checked with ctx(g) = gone reached
-[[check]]
-name = "fwd-pair-witness-vmm-exit"
-spec = "fwd_pair.qnt"
-main = "pair_ok"
-invariant = "WitnessNoVmmExit"
-backend = "tlc"
-expect = "violation"
-ci = true
 
 # CtxGoneIffVmDown is also part of DgramSafety: its `gone` side is reached on the datagram main too (VmmExit's guard
 # reads no mode; FMAX = 1 for CFG "dgram"; the datagram branch writes ctx(g) = gone as the stream branch does)
@@ -1437,84 +927,9 @@ ci = true
 # EVMOD-PAIR off: the state is read, a transition lands, then the callbacks are installed
 [[check]]
 name = "fwd-pair-hazard-check-then-hook"
-spec = "hazard/fwd_pair_end_hazards.qnt"
+spec = "hazard/fwd_pair_hazards_2.qnt"
 main = "pair_bugCheckThenHook"
 invariant = "AttachTimeEndClassifiedOnce"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-check-then-hook-alarm"
-spec = "hazard/fwd_pair_end_hazards.qnt"
-main = "pair_bugCheckThenHook"
-invariant = "NoUnclassifiedEof"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# the same, with the unclassified end-of-stream forwarded as a FIN
-[[check]]
-name = "fwd-pair-hazard-check-then-hook-class"
-spec = "hazard/fwd_pair_end_hazards.qnt"
-main = "pair_bugCheckThenHookFin"
-invariant = "ClassFixedAtTransition"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-check-then-hook-eof"
-spec = "hazard/fwd_pair_end_hazards.qnt"
-main = "pair_bugCheckThenHookFin"
-invariant = "AbortNeverCleanEof"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# EVMOD-END (TCP halves) off: a TCP half that read end-of-stream ignores a later sk_err
-[[check]]
-name = "fwd-pair-hazard-tcp-eof-is-clean"
-spec = "hazard/fwd_pair_end_hazards_2.qnt"
-main = "pair_bugTcpEofIsClean"
-invariant = "ResetNeverEndsClean"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# EVMOD-CTL (recovery order) off: the new context is opened while the old one still holds its pairs
-[[check]]
-name = "fwd-pair-hazard-reopen-before-release"
-spec = "hazard/fwd_pair_ctl_hazards_2.qnt"
-main = "pair_bugReopenBeforeRelease"
-invariant = "ReleasedContextHoldsNoPair"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-reopen-before-release-forward"
-spec = "hazard/fwd_pair_ctl_hazards_2.qnt"
-main = "pair_bugReopenBeforeRelease"
-invariant = "NoForwardAfterEnd"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-reopen-before-release-old"
-spec = "hazard/fwd_pair_ctl_hazards_2.qnt"
-main = "pair_bugReopenBeforeRelease"
-invariant = "NoPairOfReleasedContextForwards"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-reopen-before-release-one"
-spec = "hazard/fwd_pair_ctl_hazards_2.qnt"
-main = "pair_bugReopenBeforeRelease"
-invariant = "OneContextPerOwner"
 backend = "tlc"
 expect = "violation"
 ci = true
@@ -1763,7 +1178,7 @@ backend = "evaluator"
 expect = "holds"
 ci = true
 
-# third iteration (2026-10-17): the GuestStream's end (EVMOD-STREAM-END, F11 corrected), the watch's record before the
+# the GuestStream's end (EVMOD-STREAM-END, F11 corrected), the watch's record before the
 # wakeup (EVMOD-STREAM-END; EV-END change 3), CLEAN-FULL-END's send-shut flag, EV-DGRAM D1
 [[check]]
 name = "fwd-pair-dlive-every-end-resolves"
@@ -1775,225 +1190,15 @@ expect = "holds"
 ci = true
 
 [[check]]
-name = "fwd-pair-witness-end-before-record"
-spec = "fwd_pair.qnt"
-main = "pair_watch"
-invariant = "WitnessNoEndBeforeRecord"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-witness-holder-err-reported"
-spec = "fwd_pair.qnt"
-main = "pair_watch"
-invariant = "WitnessNoHolderErrReported"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-witness-truncated-end"
-spec = "fwd_pair.qnt"
-main = "pair_dgram"
-invariant = "WitnessNoTruncatedEnd"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
 name = "fwd-pair-hazard-holder-trusts-read"
-spec = "hazard/fwd_pair_watch_hazards.qnt"
+spec = "hazard/fwd_pair_hazards_6.qnt"
 main = "pair_bugHolderTrustsRead"
 invariant = "HolderOutcomeFromWatch"
 backend = "tlc"
 expect = "violation"
 ci = true
 
-[[check]]
-name = "fwd-pair-hazard-original-before-record"
-spec = "hazard/fwd_pair_watch_hazards.qnt"
-main = "pair_bugOriginalBeforeRecord"
-invariant = "WatchRecordBeforeWake"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-no-record-is-clean"
-spec = "hazard/fwd_pair_watch_hazards_2.qnt"
-main = "pair_bugNoRecordIsClean"
-invariant = "HolderOutcomeFromWatch"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-late-send-shut"
-spec = "hazard/fwd_pair_watch_hazards_2.qnt"
-main = "pair_bugLateSendShut"
-invariant = "ClassFixedAtTransition"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-truncated-frame-waits"
-spec = "hazard/fwd_pair_watch_hazards_3.qnt"
-main = "pair_bugTruncatedFrameWaits"
-invariant = "IncompleteFrameAtEndAborts"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-truncated-frame-waits-resolves"
-spec = "hazard/fwd_pair_watch_hazards_3.qnt"
-main = "pair_dliveTruncatedFrameWaits"
-temporal = "EveryEndResolves"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# run-based hazards: the named run fails under the weakened rule
-[[check]]
-name = "fwd-pair-hazard-consume-before-accept-run"
-spec = "hazard/fwd_pair_hazards.qnt"
-main = "pair_bugConsumeBeforeAccept"
-run = "TargetStallBlocksSenderThenResumes"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-consume-on-short-send-run"
-spec = "hazard/fwd_pair_hazards.qnt"
-main = "pair_bugConsumeOnShortSend"
-run = "TargetStallBlocksSenderThenResumes"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-alt-sockmap-redirect-run"
-spec = "hazard/fwd_pair_hazards_2.qnt"
-main = "pair_altSockmapRedirect"
-run = "TargetStallBlocksSenderThenResumes"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-eof-as-fin-run"
-spec = "hazard/fwd_pair_hazards_2.qnt"
-main = "pair_bugEofAsFin"
-run = "GuestAppResetReachesRemoteAsReset"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-classify-accumulated-run"
-spec = "hazard/fwd_pair_hazards_3.qnt"
-main = "pair_bugClassifyAccumulated"
-run = "GuestAppResetReachesRemoteAsReset"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-shutdown-on-callback-run"
-spec = "hazard/fwd_pair_hazards_3.qnt"
-main = "pair_bugShutdownOnCallback"
-run = "EarlyFinBeforeAttachCarriedOut"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-release-keeps-pairs-run"
-spec = "hazard/fwd_pair_ctl_hazards.qnt"
-main = "pair_bugReleaseKeepsPairs"
-run = "ContextReleaseResetsEveryPair"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-consume-partial-frame-run"
-spec = "hazard/fwd_pair_dgram_hazards.qnt"
-main = "pair_bugConsumePartialFrame"
-run = "PartialFrameResumedNotDuplicated"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-drop-when-target-blocked-run"
-spec = "hazard/fwd_pair_dgram_hazards.qnt"
-main = "pair_bugDropWhenTargetBlocked"
-run = "StalledUdpTargetDropsAtSource"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-timeout_secs = 2400
-
-[[check]]
-name = "fwd-pair-hazard-tcp-eof-is-clean-run"
-spec = "hazard/fwd_pair_end_hazards_2.qnt"
-main = "pair_bugTcpEofIsClean"
-run = "RemoteFinThenResetAbortsPair"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-holder-trusts-read-run"
-spec = "hazard/fwd_pair_watch_hazards.qnt"
-main = "pair_bugHolderTrustsRead"
-run = "OwnerAbortOfWatchLeavesVhAndStreamReportsAborted"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-original-before-record-run"
-spec = "hazard/fwd_pair_watch_hazards.qnt"
-main = "pair_bugOriginalBeforeRecord"
-run = "VmmExitWithWatchRecordInFlightResolvesFromRecord"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-no-record-is-clean-run"
-spec = "hazard/fwd_pair_watch_hazards_2.qnt"
-main = "pair_bugNoRecordIsClean"
-run = "VmmExitWithWatchRecordInFlightResolvesFromRecord"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-late-send-shut-run"
-spec = "hazard/fwd_pair_watch_hazards_2.qnt"
-main = "pair_bugLateSendShut"
-run = "HalfCloseThenPeerCloseIsClean"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-truncated-frame-waits-run"
-spec = "hazard/fwd_pair_watch_hazards_3.qnt"
-main = "pair_bugTruncatedFrameWaits"
-run = "TruncatedFrameAtPeerEndAbortsFrameInvalid"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-# ==== fwd_pair, third iteration (T-1 to T-9: P-69 to P-72, EV-PINS, WATCH-ABORT, EVMOD-ATTACH-END, EVMOD-STREAM-ABORT)
+# ==== fwd_pair, EV-PINS, WATCH-ABORT, EVMOD-ATTACH-END, EVMOD-STREAM-ABORT
 
 # T-4: a flow whose attach was refused HalfEnded is closed at both owners
 [[check]]
@@ -2004,7 +1209,6 @@ temporal = "EndedHalfFlowResolves"
 backend = "tlc"
 expect = "holds"
 ci = false
-# 416 s alone on the Lima VM (2026-10-17)
 timeout_secs = 1800
 
 # T-5: after the owner's abort of a watched stream the guest pair ends (Abort { flow })
@@ -2016,7 +1220,6 @@ temporal = "GuestPairEndsAfterOwnerAbort"
 backend = "tlc"
 expect = "holds"
 ci = true
-# 44-45 s alone on the Lima VM (2026-10-17)
 
 # T-6: after the holder's drop the guest pair ends
 [[check]]
@@ -2027,37 +1230,8 @@ temporal = "GuestPairEndsAfterHolderDrop"
 backend = "tlc"
 expect = "holds"
 ci = true
-# 44-45 s alone on the Lima VM (2026-10-17)
 
-# non-vacuity: an attach is refused HalfEnded; a reset record carries EPIPE; the guest takes Abort { flow }
-[[check]]
-name = "fwd-pair-witness-refusal"
-spec = "fwd_pair.qnt"
-main = "pair_ok"
-invariant = "WitnessNoRefusal"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-witness-epipe"
-spec = "fwd_pair.qnt"
-main = "pair_ok"
-invariant = "WitnessNoEpipe"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-witness-guest-abort-after-stream-abort"
-spec = "fwd_pair.qnt"
-main = "pair_watch"
-invariant = "WitnessNoGuestAbortAfterStreamAbort"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# third-iteration named runs (critical scenarios) on the conformance main
+# named runs (critical scenarios) on the conformance main
 [[check]]
 name = "fwd-pair-run-guest-app-fin-then-reset-aborts-pair-with-epipe"
 spec = "fwd_pair.qnt"
@@ -2157,211 +1331,33 @@ backend = "evaluator"
 expect = "holds"
 ci = true
 
-# T-1 off (TCP-ERR-REPORT): the reset is seen only by a later recvmsg / sendmsg (hazard 16)
-[[check]]
-name = "fwd-pair-hazard-tcp-no-error-report"
-spec = "hazard/fwd_pair_attach_hazards.qnt"
-main = "pair_bugTcpNoErrorReport"
-invariant = "TcpResetEndsPair"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-tcp-no-error-report-resolves"
-spec = "hazard/fwd_pair_attach_hazards.qnt"
-main = "pair_liveTcpNoErrorReport"
-temporal = "EveryEndResolves"
-backend = "tlc"
-expect = "violation"
-ci = false
-
-[[check]]
-name = "fwd-pair-hazard-tcp-no-error-report-run"
-spec = "hazard/fwd_pair_attach_hazards.qnt"
-main = "pair_bugTcpNoErrorReport"
-run = "RemoteFinThenResetAbortsPair"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-# T-2 off (ATTACH-SEED): callbacks installed, the attach-time state not classified (h_noseed)
-[[check]]
-name = "fwd-pair-hazard-no-seed"
-spec = "hazard/fwd_pair_attach_hazards_2.qnt"
-main = "pair_bugNoSeed"
-invariant = "NoUnclassifiedEof"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-no-seed-run"
-spec = "hazard/fwd_pair_attach_hazards_2.qnt"
-main = "pair_bugNoSeed"
-run = "EarlyVsockHalfCloseBeforeGuestAttachCompletes"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-# T-3 off (ATTACH-CLOSE-WAIT): attach refuses CLOSE_WAIT (h_strict); the owner aborts the flow
-[[check]]
-name = "fwd-pair-hazard-established-only"
-spec = "hazard/fwd_pair_attach_hazards_2.qnt"
-main = "pair_bugEstablishedOnly"
-invariant = "AbortOnlyAfterFault"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-established-only-run"
-spec = "hazard/fwd_pair_attach_hazards_2.qnt"
-main = "pair_bugEstablishedOnly"
-run = "AppWriteAndFinBeforePairedAttachesInCloseWaitAndCompletes"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
 # T-4 off: on HalfEnded the surviving TCP half is closed without SO_LINGER{1,0}
 [[check]]
 name = "fwd-pair-hazard-ended-attach-graceful-close"
-spec = "hazard/fwd_pair_attach_hazards_3.qnt"
+spec = "hazard/fwd_pair_hazards_2.qnt"
 main = "pair_bugEndedAttachGracefulClose"
 invariant = "EndedHalfNeverEndsClean"
 backend = "tlc"
 expect = "violation"
 ci = true
 
-[[check]]
-name = "fwd-pair-hazard-ended-attach-graceful-close-run"
-spec = "hazard/fwd_pair_attach_hazards_3.qnt"
-main = "pair_bugEndedAttachGracefulClose"
-run = "GuestCloseWithEmptyQueueBeforeHostAttachIsRefusedAndFlowAborts"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-# T-4 off: HalfEnded is treated as a retryable defect and the flow kept
-[[check]]
-name = "fwd-pair-hazard-ended-attach-ignored"
-spec = "hazard/fwd_pair_attach_hazards_4.qnt"
-main = "pair_liveEndedAttachIgnored"
-temporal = "EndedHalfFlowResolves"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-ended-attach-ignored-run"
-spec = "hazard/fwd_pair_attach_hazards_3.qnt"
-main = "pair_bugEndedAttachIgnored"
-run = "IntakeChildResetBeforePairedIsRefusedAndFlowAborts"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
 # T-5: the rejected EVMOD-WATCH-SHUT (the owner's abort of a watch shuts V_h)
 [[check]]
 name = "fwd-pair-hazard-watch-abort-shuts-vh"
-spec = "hazard/fwd_pair_stream_hazards.qnt"
+spec = "hazard/fwd_pair_hazards_5.qnt"
 main = "pair_bugWatchAbortShutsVh"
 invariant = "WatchAbortLeavesHolderSocket"
 backend = "tlc"
 expect = "violation"
 ci = true
 
-[[check]]
-name = "fwd-pair-hazard-watch-abort-shuts-vh-run"
-spec = "hazard/fwd_pair_stream_hazards.qnt"
-main = "pair_bugWatchAbortShutsVh"
-run = "OwnerAbortOfWatchLeavesVhAndStreamReportsAborted"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-# T-5: the stream trusts V_h's read (reads pass through after the owner's abort)
-[[check]]
-name = "fwd-pair-hazard-holder-trusts-read-late-read"
-spec = "hazard/fwd_pair_watch_hazards.qnt"
-main = "pair_bugHolderTrustsRead"
-invariant = "NoHolderReadAfterWatchAbort"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# T-5 off: no Abort { flow } for an aborted stream; the holder keeps the stream
-[[check]]
-name = "fwd-pair-hazard-no-guest-abort"
-spec = "hazard/fwd_pair_stream_hazards_2.qnt"
-main = "pair_wliveNoGuestAbort"
-temporal = "GuestPairEndsAfterOwnerAbort"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-no-guest-abort-run"
-spec = "hazard/fwd_pair_stream_hazards.qnt"
-main = "pair_bugNoGuestAbort"
-run = "OwnerAbortOfWatchLeavesVhAndStreamReportsAborted"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
 # T-6 off: the holder's drop only closes V_h; the forwarder's reference keeps it open (P-70 § 4.4)
 [[check]]
 name = "fwd-pair-hazard-drop-without-abort"
-spec = "hazard/fwd_pair_stream_hazards_2.qnt"
+spec = "hazard/fwd_pair_hazards_5.qnt"
 main = "pair_bugDropWithoutAbort"
 invariant = "NoLiveWatchAfterDrop"
 backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-drop-without-abort-resolves"
-spec = "hazard/fwd_pair_stream_hazards_3.qnt"
-main = "pair_wliveDropWithoutAbort"
-temporal = "GuestPairEndsAfterHolderDrop"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-drop-without-abort-run"
-spec = "hazard/fwd_pair_stream_hazards_2.qnt"
-main = "pair_bugDropWithoutAbort"
-run = "DroppedStreamAbortsWatchThenGuestSeesAbort"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-# T-8: the send-shut flag set after the 0x2 (h_lateshut)
-[[check]]
-name = "fwd-pair-hazard-late-send-shut-own-shut"
-spec = "hazard/fwd_pair_watch_hazards_2.qnt"
-main = "pair_bugLateSendShut"
-invariant = "OwnShutBeforeShutdownSent"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-late-send-shut-fault"
-spec = "hazard/fwd_pair_watch_hazards_2.qnt"
-main = "pair_bugLateSendShut"
-invariant = "AbortOnlyAfterFault"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-late-send-shut-racing-run"
-spec = "hazard/fwd_pair_watch_hazards_2.qnt"
-main = "pair_bugLateSendShut"
-run = "PeerCloseRacingOwnHalfCloseIsClean"
-backend = "evaluator"
 expect = "violation"
 ci = true
 
@@ -2404,42 +1400,6 @@ expect = "holds"
 ci = true
 
 [[check]]
-name = "cid-lease-witness-running"
-spec = "cid_lease.qnt"
-main = "lease_ok"
-invariant = "WitnessNoRunning"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "cid-lease-witness-orphan"
-spec = "cid_lease.qnt"
-main = "lease_ok"
-invariant = "WitnessNoOrphan"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "cid-lease-witness-reclaim"
-spec = "cid_lease.qnt"
-main = "lease_ok"
-invariant = "WitnessNoReclaim"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "cid-lease-hazard-release-before-vmm"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_bugReleaseBeforeVmm"
-invariant = "NoLaunchClash"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
 name = "cid-lease-hazard-release-before-vmm-outlives"
 spec = "hazard/cid_lease_hazards.qnt"
 main = "lease_bugReleaseBeforeVmm"
@@ -2453,15 +1413,6 @@ name = "cid-lease-hazard-assign-before-reclaim"
 spec = "hazard/cid_lease_hazards.qnt"
 main = "lease_bugAssignBeforeReclaim"
 invariant = "NoLaunchClash"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "cid-lease-hazard-assign-before-reclaim-order"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_bugAssignBeforeReclaim"
-invariant = "AssignAfterReclaim"
 backend = "tlc"
 expect = "violation"
 ci = true
@@ -2586,15 +1537,6 @@ backend = "tlc"
 expect = "violation"
 ci = true
 
-[[check]]
-name = "cid-lease-hazard-crash-forgets-stop-run"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_bugCrashForgetsStop"
-run = "StoppedWorkloadStaysStoppedAcrossServeCrash"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
 # ADR-0156 teeth (M-5): the next-fit assign walk is not atomic under the pool lock
 [[check]]
 name = "cid-lease-run-conf-ok-stopped-workload-stays-stopped-across-serve-crash"
@@ -2612,18 +1554,6 @@ main = "lease_conf_ok"
 run = "StoppedWorkloadIsPlacedAgainOnlyAfterRedeploy"
 backend = "evaluator"
 expect = "holds"
-ci = true
-
-# RESTART-SSOT (GH #324), the reconciler's restart decision (workload_lifecycle.rs:1114-1119): restart while
-# attempts < RESTART_BACKOFF_CEILING, and always after a platform reclaim or a generation replacement (Redeploy); the count
-# changes at placement. Exhaustion is reachable
-[[check]]
-name = "cid-lease-witness-exhaustion"
-spec = "cid_lease.qnt"
-main = "lease_ok"
-invariant = "WitnessNoExhaustion"
-backend = "tlc"
-expect = "violation"
 ci = true
 
 [[check]]
@@ -2710,7 +1640,7 @@ backend = "evaluator"
 expect = "holds"
 ci = true
 
-# D-18 (round 10): the same run on the recording main `lease_conf_three` (`lease_ok`'s three offsets, REC = true),
+# the same run on the recording main `lease_conf_three` (`lease_ok`'s three offsets, REC = true),
 # the main the cid_lease driver's #[quint_test] replays
 [[check]]
 name = "cid-lease-run-conf-three-pool-exhausted-restart-cleans-the-predecessor-then-places"
@@ -2721,7 +1651,7 @@ backend = "evaluator"
 expect = "holds"
 ci = true
 
-# PENDING GH #325 (RESTART-GEN-CRASH, user ruling 2026-10-18; feature-delta `cid_lease` item 9): a generation replacement
+# PENDING GH #325 (RESTART-GEN-CRASH; feature-delta `cid_lease` item 9): a generation replacement
 # leased at a serve crash is placed again — the behaviour #325 delivers; production loses it today. Checked on
 # `lease_conf_325`, the conformance main that keeps the #325 window (`lease_conf_ok` excludes it); its DISTILL
 # #[quint_test] is #[ignore = "pending #325"]
@@ -2744,24 +1674,6 @@ backend = "tlc"
 expect = "violation"
 ci = true
 
-[[check]]
-name = "cid-lease-hazard-retry-off-by-one-reclaim"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_bugRetryOffByOne"
-invariant = "ExhaustsOnlyOnACrashClassFailure"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "cid-lease-hazard-retry-off-by-one-run"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_conf_bugRetryOffByOne"
-run = "FifthCrashAtCeilingBoundaryIsPlacedAgain"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
 # Teeth (RESTART-SSOT, reclaimNotExempt): only the platform-reclaim exemption removed
 [[check]]
 name = "cid-lease-hazard-reclaim-not-exempt"
@@ -2770,46 +1682,6 @@ main = "lease_bugReclaimNotExempt"
 invariant = "ExhaustsOnlyOnACrashClassFailure"
 backend = "tlc"
 expect = "violation"
-ci = true
-
-[[check]]
-name = "cid-lease-hazard-reclaim-not-exempt-run"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_conf_bugReclaimNotExempt"
-run = "ServeCrashPlacesAWorkloadAtTheCeilingAgain"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-# Teeth (RESTART-SSOT, generationNotExempt): only the generation exemption removed. A removed transition: Safety still
-# holds on it (documented: no state invariant sees it), and the named run is its discriminator
-[[check]]
-name = "cid-lease-hazard-generation-not-exempt-safety"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_bugGenerationNotExempt"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-hazard-generation-not-exempt-run"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_conf_bugGenerationNotExempt"
-run = "RedeployPlacesAnExhaustedWorkloadAgainWithItsCount"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-# Teeth (PENDING GH #325, crashLosesPlacedGeneration; its conformance instance uses CFG = "conf_325"): today's production loses a generation replacement leased at a
-# serve crash. Safety still holds on it (documented); the named run is its discriminator
-[[check]]
-name = "cid-lease-hazard-crash-loses-placed-generation-safety"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_bugCrashLosesPlacedGeneration"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
 ci = true
 
 [[check]]
@@ -2870,55 +1742,6 @@ backend = "evaluator"
 expect = "violation"
 ci = true
 
-# Teeth (DR6-CLOSE, one hazard per item-7 rule). predecessorFirst (7.2) and predecessorCleanedAtAssign (7.3) change the
-# dispatch order, not CID safety: Safety holds on them (documented) and the conformance run is the discriminator
-[[check]]
-name = "cid-lease-hazard-predecessor-first-safety"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_bugPredecessorFirst"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-hazard-predecessor-first-run"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_conf_bugPredecessorFirst"
-run = "VmmCrashFreesItsCidAndPlacementRetries"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "cid-lease-hazard-predecessor-cleaned-at-assign-safety"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_bugPredecessorCleanedAtAssign"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-hazard-predecessor-cleaned-at-assign-run"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_conf_bugPredecessorCleanedAtAssign"
-run = "VmmCrashFreesItsCidAndPlacementRetries"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-# refusalKeepsPredecessor (7.4): a deferred cleanup delays the predecessor's release without leaking it (Safety holds,
-# documented); its run is a `lease_ok` run (three offsets)
-[[check]]
-name = "cid-lease-hazard-refusal-keeps-predecessor-safety"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_bugRefusalKeepsPredecessor"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = true
-
 [[check]]
 name = "cid-lease-hazard-refusal-keeps-predecessor-run"
 spec = "hazard/cid_lease_hazards.qnt"
@@ -2938,15 +1761,6 @@ backend = "tlc"
 expect = "violation"
 ci = true
 
-[[check]]
-name = "cid-lease-hazard-terminal-before-release-run"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_conf_bugTerminalBeforeRelease"
-run = "FailureAtCeilingExhaustsTheBudget"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
 # tickDuringPredecessorTeardown (7.3 step boundary): a tick runs while a predecessor teardown is held; Assign from `ended`
 # overwrites the retiring predecessor lease, which no workload then tracks
 [[check]]
@@ -2955,27 +1769,6 @@ spec = "hazard/cid_lease_hazards.qnt"
 main = "lease_bugTickDuringPredecessorTeardown"
 invariant = "NoUntrackedLease"
 backend = "tlc"
-expect = "violation"
-ci = true
-
-# vmmExitRetiresLease (7.1): the VMM's exit retires and releases its lease in the same step. The device and the lease are
-# freed together, so Safety holds (documented); the conformance run is the discriminator (lease.get(0) == 1 after
-# VmmCrash fails)
-[[check]]
-name = "cid-lease-hazard-vmm-exit-retires-lease-safety"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_bugVmmExitRetiresLease"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "cid-lease-hazard-vmm-exit-retires-lease-run"
-spec = "hazard/cid_lease_hazards.qnt"
-main = "lease_conf_bugVmmExitRetiresLease"
-run = "VmmCrashFreesItsCidAndPlacementRetries"
-backend = "evaluator"
 expect = "violation"
 ci = true
 
@@ -2998,20 +1791,6 @@ invariant = "Safety"
 backend = "tlc"
 expect = "holds"
 ci = true
-
-[[check]]
-name = "quiescence-safety-apalache"
-spec = "quiescence.qnt"
-main = "quiesce_ok"
-invariant = "Safety"
-backend = "apalache"
-max_steps = 12
-expect = "holds"
-# 251 s measured alone 2026-10-14 with D-UP-4's ForeignRestore (181 s alone and 179 s in record 300046-1792003180.873
-# before it; 68 s before D-UP-3). The growth is D-UP-3's LeakHold with the leaked-hold count and RepFail, then
-# D-UP-4's ForeignRestore with the process-scoped `foreign` flag: conf_step stays at its initial value on quiesce_ok
-# (REC = false), so it adds no branching. Over the two-minute CI bound
-ci = false
 
 [[check]]
 name = "quiescence-c1-episode-ends"
@@ -3079,73 +1858,10 @@ expect = "holds"
 ci = true
 
 [[check]]
-name = "quiescence-witness-overlap"
-spec = "quiescence.qnt"
-main = "quiesce_ok"
-invariant = "WitnessNoOverlap"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "quiescence-witness-still-quiesced"
-spec = "quiescence.qnt"
-main = "quiesce_ok"
-invariant = "WitnessNoStillQuiesced"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "quiescence-witness-fail-stop"
-spec = "quiescence.qnt"
-main = "quiesce_ok"
-invariant = "WitnessNoFailStop"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "quiescence-witness-dropped-hold"
-spec = "quiescence.qnt"
-main = "quiesce_ok"
-invariant = "WitnessNoDroppedHold"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "quiescence-witness-refused-boot"
-spec = "quiescence.qnt"
-main = "quiesce_ok"
-invariant = "WitnessNoRefusedBoot"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
 name = "quiescence-hazard-bool-latch"
 spec = "hazard/quiescence_hazards.qnt"
 main = "quiesce_bugBoolLatch"
 invariant = "NoReopenBeforeRepair"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "quiescence-hazard-bool-latch-preempts-repair"
-spec = "hazard/quiescence_hazards.qnt"
-main = "quiesce_live_bugBoolLatch"
-temporal = "C1Repaired"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "quiescence-hazard-drop-decrements-count"
-spec = "hazard/quiescence_hazards.qnt"
-main = "quiesce_bugDropDecrements"
-invariant = "CountCoversRecoveries"
 backend = "tlc"
 expect = "violation"
 ci = true
@@ -3156,24 +1872,6 @@ name = "quiescence-hazard-leak-ignored"
 spec = "hazard/quiescence_hazards.qnt"
 main = "quiesce_live_bugLeakIgnored"
 temporal = "LeakedHoldEndsInFailStop"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "quiescence-hazard-repair-without-hold"
-spec = "hazard/quiescence_hazards.qnt"
-main = "quiesce_bugRepairNoHold"
-invariant = "NoRepairWithoutHold"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "quiescence-hazard-redo-not-counted"
-spec = "hazard/quiescence_hazards.qnt"
-main = "quiesce_live_bugRedoNoCount"
-temporal = "C2EpisodeEnds"
 backend = "tlc"
 expect = "violation"
 ci = true
@@ -3286,16 +1984,6 @@ backend = "evaluator"
 expect = "holds"
 ci = true
 
-# QHOLD teeth (M-5): one hazard per invariant
-[[check]]
-name = "quiescence-hazard-restore-clears-latch"
-spec = "hazard/quiescence_hazards.qnt"
-main = "quiesce_bugRestoreClearsLatch"
-invariant = "LatchIffCount"
-backend = "tlc"
-expect = "violation"
-ci = true
-
 [[check]]
 name = "quiescence-hazard-quiesce-skips-flows"
 spec = "hazard/quiescence_hazards.qnt"
@@ -3346,16 +2034,8 @@ backend = "tlc"
 expect = "holds"
 ci = true
 
-[[check]]
-name = "udp-slots-release-liveness"
-spec = "udp_slots.qnt"
-main = "slots_live"
-temporal = "ReleasedSlotBecomesFree"
-backend = "tlc"
-expect = "holds"
-ci = true
-timeout_secs = 1800
-
+# Two destinations on one guest (slots_ok: DESTS {1, 2}, MAXFID 3): bounded Safety on the instance the exhaustive TLC
+# check above does not cover (slots_live carries one destination).
 [[check]]
 name = "udp-slots-safety-apalache"
 spec = "udp_slots.qnt"
@@ -3368,44 +2048,14 @@ ci = false
 timeout_secs = 1800
 
 [[check]]
-name = "udp-slots-witness-late-paired"
+name = "udp-slots-release-liveness"
 spec = "udp_slots.qnt"
-main = "slots_ok"
-invariant = "WitnessNoLatePaired"
-backend = "apalache"
-max_steps = 12
-expect = "violation"
+main = "slots_live"
+temporal = "ReleasedSlotBecomesFree"
+backend = "tlc"
+expect = "holds"
 ci = true
-
-[[check]]
-name = "udp-slots-witness-attached"
-spec = "udp_slots.qnt"
-main = "slots_ok"
-invariant = "WitnessNoAttached"
-backend = "apalache"
-max_steps = 12
-expect = "violation"
-ci = true
-
-[[check]]
-name = "udp-slots-witness-two-slots-one-socket"
-spec = "udp_slots.qnt"
-main = "slots_ok"
-invariant = "WitnessNoTwoSlotsOneSocket"
-backend = "apalache"
-max_steps = 12
-expect = "violation"
-ci = true
-
-[[check]]
-name = "udp-slots-witness-reassociation"
-spec = "udp_slots.qnt"
-main = "slots_ok"
-invariant = "WitnessNoReassociation"
-backend = "apalache"
-max_steps = 12
-expect = "violation"
-ci = true
+timeout_secs = 1800
 
 [[check]]
 name = "udp-slots-hazard-claim-split"
@@ -3437,17 +2087,6 @@ max_steps = 12
 expect = "violation"
 ci = true
 
-# ci = false: 223 s own time in the 2026-10-14 record 300046-1792003180.873 (the readiness events enlarge the search)
-[[check]]
-name = "udp-slots-hazard-late-paired-by-slot-data"
-spec = "hazard/udp_slots_hazards.qnt"
-main = "slots_bugLatePairedBySlot"
-invariant = "ReleasedSlotCarriesNoData"
-backend = "apalache"
-max_steps = 12
-expect = "violation"
-ci = false
-
 [[check]]
 name = "udp-slots-hazard-ignore-late-paired"
 spec = "hazard/udp_slots_hazards.qnt"
@@ -3455,26 +2094,6 @@ main = "slots_bugIgnoreLatePaired"
 invariant = "LatePairedAborted"
 backend = "apalache"
 max_steps = 12
-expect = "violation"
-ci = true
-
-# non-vacuity: an end of association discards a queued datagram, and the slot stays owned (EVMOD-DGRAM)
-[[check]]
-name = "udp-slots-witness-discard-at-end"
-spec = "udp_slots.qnt"
-main = "slots_live"
-invariant = "WitnessNoDiscardAtEnd"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# U-2 / EVMOD-DGRAM off, along the run: the datagram queued while the association was pending survives its end
-[[check]]
-name = "udp-slots-hazard-keep-frames-on-end-run"
-spec = "hazard/udp_slots_hazards.qnt"
-main = "slots_bugKeepFramesOnEnd"
-run = "DatagramQueuedBeforeAnEndIsDiscardedWithTheQueue"
-backend = "evaluator"
 expect = "violation"
 ci = true
 
@@ -3614,43 +2233,6 @@ backend = "tlc"
 expect = "holds"
 ci = true
 
-[[check]]
-name = "flow-quota-safety-apalache"
-spec = "flow_quota.qnt"
-main = "quota_ok"
-invariant = "Safety"
-backend = "apalache"
-max_steps = 12
-expect = "holds"
-ci = true
-
-[[check]]
-name = "flow-quota-witness-refusal"
-spec = "flow_quota.qnt"
-main = "quota_ok"
-invariant = "WitnessNoRefusal"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "flow-quota-witness-pending-drain"
-spec = "flow_quota.qnt"
-main = "quota_ok"
-invariant = "WitnessNoPendingDrain"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "flow-quota-witness-cross-allocation-admission"
-spec = "flow_quota.qnt"
-main = "quota_ok"
-invariant = "WitnessNoCrossAllocationAdmission"
-backend = "tlc"
-expect = "violation"
-ci = true
-
 # ADR-0147 off: the quota counts active flows only; a half-closed or ended flow keeps its place but not its count
 [[check]]
 name = "flow-quota-hazard-count-active-only-bound"
@@ -3666,16 +2248,6 @@ name = "flow-quota-hazard-node-wide-quota"
 spec = "hazard/flow_quota_hazards.qnt"
 main = "quota_bugNodeWideQuota"
 invariant = "QuotaRefusalOnlyAtOwnQuota"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# EVMOD-AB off: the place is released at the half-close while the pair still forwards
-[[check]]
-name = "flow-quota-hazard-free-at-half-close"
-spec = "hazard/flow_quota_hazards.qnt"
-main = "quota_bugFreeAtHalfClose"
-invariant = "DrainingFlowHoldsItsSlot"
 backend = "tlc"
 expect = "violation"
 ci = true
@@ -3741,33 +2313,6 @@ main = "quota_conf"
 run = "EndRecordsAreReleasedInQueueOrder"
 backend = "evaluator"
 expect = "holds"
-ci = true
-
-[[check]]
-name = "flow-quota-hazard-count-active-only-run"
-spec = "hazard/flow_quota_hazards.qnt"
-main = "quota_bugCountActiveOnly"
-run = "DrainingFlowStillCountsAgainstTheQuota"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "flow-quota-hazard-node-wide-quota-run"
-spec = "hazard/flow_quota_hazards.qnt"
-main = "quota_bugNodeWideQuota"
-run = "WithholdingGuestHoldsAtMostItsOwnQuota"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "flow-quota-hazard-free-at-half-close-run"
-spec = "hazard/flow_quota_hazards.qnt"
-main = "quota_bugFreeAtHalfClose"
-run = "DrainingFlowStillCountsAgainstTheQuota"
-backend = "evaluator"
-expect = "violation"
 ci = true
 
 # r2 (L-G): teeth for properties that had none
@@ -3909,131 +2454,9 @@ backend = "tlc"
 expect = "holds"
 ci = true
 
-# non-vacuity: an override reads NULL after the end; a reader holds the pair when the free is queued; the state is freed
-
-[[check]]
-name = "fwd-safe-witness-late-fallback"
-spec = "fwd_safe.qnt"
-main = "safe_pair"
-invariant = "WitnessNoLateFallback"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-safe-witness-reader-holds-at-free"
-spec = "fwd_safe.qnt"
-main = "safe_pair"
-invariant = "WitnessNoReaderHoldsAtFree"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-safe-witness-freed"
-spec = "fwd_safe.qnt"
-main = "safe_pair"
-invariant = "WitnessNoFreed"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-safe-witness-watch-freed"
-spec = "fwd_safe.qnt"
-main = "safe_watch"
-invariant = "WitnessNoFreed"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# MODULE-REFCOUNT non-vacuity: the module is unloaded (NoTextRunAfterUnload is not vacuous), on a pair and on a watch
-
-[[check]]
-name = "fwd-safe-witness-unload"
-spec = "fwd_safe.qnt"
-main = "safe_pair"
-invariant = "WitnessNoUnload"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-safe-witness-watch-unload"
-spec = "fwd_safe.qnt"
-main = "safe_watch"
-invariant = "WitnessNoUnload"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# MODULE-REFCOUNT teeth: rule 5 of EVMOD-SAFE with one clause switched off; each lets the module be unloaded while its
-# text runs or can still be entered (NoTextRunAfterUnload)
-
-[[check]]
-name = "fwd-safe-hazard-ref-dropped-at-unhook"
-spec = "hazard/fwd_safe_hazards_2.qnt"
-main = "safe_bugRefDroppedAtUnhook"
-invariant = "NoTextRunAfterUnload"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-safe-hazard-ref-dropped-at-unhook-ref"
-spec = "hazard/fwd_safe_hazards_2.qnt"
-main = "safe_bugRefDroppedAtUnhook"
-invariant = "RefHeldWhileReachable"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-safe-hazard-remove-without-sock-lock"
-spec = "hazard/fwd_safe_hazards_2.qnt"
-main = "safe_bugRemoveWithoutSockLock"
-invariant = "NoTextRunAfterUnload"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-safe-hazard-ulp-ref-released"
-spec = "hazard/fwd_safe_hazards_2.qnt"
-main = "safe_bugUlpRefReleased"
-invariant = "NoTextRunAfterUnload"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-safe-hazard-put-on-system-queue"
-spec = "hazard/fwd_safe_hazards_2.qnt"
-main = "safe_bugPutOnSystemQueue"
-invariant = "NoTextRunAfterUnload"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-# Round 16, rule 5's write-space closure (sock_wfree calls sk_write_space with no socket lock, no RCU section and
-# preemption enabled, net/core/sock.c:2675-2693 @ v7.0): the write-space trigger is a wait-queue entry, entered only
-# under wqlk(t) and removed by the end under lock_sock(t) before the free work is queued. Teeth: the trigger as an
-# sk_write_space override again (a "wfree" waker in its text is waited for by neither lock_sock nor the grace period),
-# and the entry removed after the free work was queued (the free work removes it after cancel_work_sync, so the
-# entry's queue_work lands on an item the free no longer cancels).
-
-[[check]]
-name = "fwd-safe-hazard-write-space-override"
-spec = "hazard/fwd_safe_hazards_2.qnt"
-main = "safe_bugWriteSpaceOverride"
-invariant = "NoTextRunAfterUnload"
-backend = "tlc"
-expect = "violation"
-ci = true
-
 [[check]]
 name = "fwd-safe-hazard-remove-wait-after-free-queued"
-spec = "hazard/fwd_safe_hazards_2.qnt"
+spec = "hazard/fwd_safe_hazards.qnt"
 main = "safe_bugRemoveWaitAfterFreeQueued"
 invariant = "NoTouchAfterFree"
 backend = "tlc"
@@ -4052,15 +2475,6 @@ expect = "violation"
 ci = true
 
 [[check]]
-name = "fwd-safe-hazard-no-fallback"
-spec = "hazard/fwd_safe_hazards.qnt"
-main = "safe_bugNoFallback"
-invariant = "NoEventLost"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
 name = "fwd-safe-hazard-no-grace-period"
 spec = "hazard/fwd_safe_hazards.qnt"
 main = "safe_bugNoGracePeriod"
@@ -4070,54 +2484,9 @@ expect = "violation"
 ci = true
 
 [[check]]
-name = "fwd-safe-hazard-no-grace-period-readers"
-spec = "hazard/fwd_safe_hazards.qnt"
-main = "safe_bugNoGracePeriod"
-invariant = "FreeAfterReaders"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-safe-hazard-no-cancel-sync"
-spec = "hazard/fwd_safe_hazards.qnt"
-main = "safe_bugNoCancelSync"
-invariant = "FreeAfterWorkCompletes"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-safe-hazard-no-cancel-sync-uaf"
-spec = "hazard/fwd_safe_hazards.qnt"
-main = "safe_bugNoCancelSync"
-invariant = "NoTouchAfterFree"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
 name = "fwd-safe-hazard-ctl-queue-outside-rcu"
 spec = "hazard/fwd_safe_hazards.qnt"
 main = "safe_bugCtlQueueOutsideRcu"
-invariant = "NoTouchAfterFree"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-safe-hazard-watch-free-before-id"
-spec = "hazard/fwd_safe_hazards.qnt"
-main = "safe_bugWatchFreeBeforeId"
-invariant = "NoIdNamesFreedState"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-safe-hazard-watch-free-before-id-uaf"
-spec = "hazard/fwd_safe_hazards.qnt"
-main = "safe_bugWatchFreeBeforeId"
 invariant = "NoTouchAfterFree"
 backend = "tlc"
 expect = "violation"
@@ -4146,15 +2515,6 @@ name = "fwd-safe-hazard-no-data-ready"
 spec = "hazard/fwd_safe_hazards.qnt"
 main = "safe_liveNoDataReady"
 temporal = "EveryUnitDelivered"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-safe-hazard-no-state-change"
-spec = "hazard/fwd_safe_hazards.qnt"
-main = "safe_liveNoStateChange"
-temporal = "SocketEndYieldsRecord"
 backend = "tlc"
 expect = "violation"
 ci = true
@@ -4193,17 +2553,6 @@ main = "safe_liveEndSplitNoRequeue"
 temporal = "EndProducesRecord"
 backend = "tlc"
 expect = "violation"
-ci = true
-
-# alternative (d) read as "queue before rcu_read_unlock": safe in this model (the grace period waits for the lookup)
-
-[[check]]
-name = "fwd-safe-alt-ctl-queue-inside-rcu-safety"
-spec = "hazard/fwd_safe_hazards.qnt"
-main = "safe_altCtlQueueInsideRcu"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
 ci = true
 
 # named runs (critical scenarios)
@@ -4325,53 +2674,6 @@ backend = "evaluator"
 expect = "holds"
 ci = true
 
-# MODULE-REFCOUNT (EVMOD-LIFE, ADR-0198; EVMOD-SAFE rule 5, ADR-0204): the module unloads only at zero references
-
-[[check]]
-name = "fwd-safe-run-unload-refused-while-context-open"
-spec = "fwd_safe.qnt"
-main = "safe_runs"
-run = "UnloadRefusedWhileContextOpen"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "fwd-safe-run-unload-refused-while-socket-hooked"
-spec = "fwd_safe.qnt"
-main = "safe_runs"
-run = "UnloadRefusedWhileSocketHooked"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "fwd-safe-run-unload-succeeds-after-release-and-free"
-spec = "fwd_safe.qnt"
-main = "safe_runs"
-run = "UnloadSucceedsAfterReleaseAndFree"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "fwd-safe-run-late-locked-callback-finishes-before-removal"
-spec = "fwd_safe.qnt"
-main = "safe_runs"
-run = "LateLockedCallbackFinishesBeforeRemoval"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "fwd-safe-run-ulp-copy-keeps-module-loaded"
-spec = "fwd_safe.qnt"
-main = "safe_runs"
-run = "UlpCopyKeepsModuleLoaded"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
 [[check]]
 name = "fwd-safe-run-wfree-wake-finishes-before-remove-wait"
 spec = "fwd_safe.qnt"
@@ -4379,44 +2681,6 @@ main = "safe_runs"
 run = "WfreeWakeFinishesBeforeRemoveWait"
 backend = "evaluator"
 expect = "holds"
-ci = true
-
-# run-based hazards: the named run fails under the weakened rule
-
-[[check]]
-name = "fwd-safe-hazard-rcu-assign-null-run"
-spec = "hazard/fwd_safe_hazards.qnt"
-main = "safe_runsRcuAssignNull"
-run = "LateCallbackAfterEndCallsOriginal"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-safe-hazard-no-cancel-sync-run"
-spec = "hazard/fwd_safe_hazards.qnt"
-main = "safe_runsNoCancelSync"
-run = "CallbackHoldingPairDelaysFree"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-safe-hazard-late-clear-pending-run"
-spec = "hazard/fwd_safe_hazards.qnt"
-main = "safe_runsLateClearPending"
-run = "WakeupDuringRunIsNotLost"
-backend = "evaluator"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-safe-hazard-no-sweep-recheck-run"
-spec = "hazard/fwd_safe_hazards.qnt"
-main = "safe_runsNoSweepRecheck"
-run = "SweepStoresBeforeErrReadRechecksUnderTableLock"
-backend = "evaluator"
-expect = "violation"
 ci = true
 
 # U-R1 (EVMOD-CTL recovery step 1, DR2-CLOSE): the recovery ends a held GuestStream whose watch already ended as an
@@ -4430,22 +2694,4 @@ main = "pair_conf"
 run = "RecoveryEndsHeldStreamWhoseWatchEnded"
 backend = "evaluator"
 expect = "holds"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-recovery-keeps-ended-stream"
-spec = "hazard/fwd_pair_stream_hazards_3.qnt"
-main = "pair_bugRecoveryKeepsEndedStream"
-invariant = "RecoveryEndsHeldStream"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "fwd-pair-hazard-recovery-keeps-ended-stream-run"
-spec = "hazard/fwd_pair_stream_hazards_4.qnt"
-main = "pair_confRecoveryKeepsEndedStream"
-run = "RecoveryEndsHeldStreamWhoseWatchEnded"
-backend = "evaluator"
-expect = "violation"
 ci = true

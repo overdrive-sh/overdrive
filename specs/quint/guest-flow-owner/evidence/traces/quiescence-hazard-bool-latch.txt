@@ -2,7 +2,7 @@
 
 State 1
   rec = [C1 |-> "idle", C2 |-> "idle"]
-  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+  g = [ reopenEarly |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
   up = TRUE
   stop = "none"
   cnt = 0
@@ -33,11 +33,11 @@ State 5 [Damage]
 
 State 6 [RecQuiesce]
   rec = [C1 |-> "repaired", C2 |-> "held"]
-  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+  g = [ reopenEarly |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
   cnt = 2
 
 State 7 [RecRestore]
   rec = [C1 |-> "idle", C2 |-> "idle"]
-  g = [ reopenEarly |-> TRUE, repairNoHold |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+  g = [ reopenEarly |-> TRUE, overlapped |-> TRUE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
   cnt = 0
   latch = FALSE

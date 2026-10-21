@@ -69,7 +69,7 @@ mod linux {
 
     pub(crate) mod app {
         use std::io::{self, Read, Write};
-        use std::net::{Shutdown, SocketAddrV4, TcpStream, UdpSocket};
+        use std::net::{Shutdown, SocketAddrV4, TcpListener, TcpStream, UdpSocket};
         use std::os::unix::process::CommandExt as _;
         use std::process::Command;
         use std::sync::Arc;
@@ -79,10 +79,10 @@ mod linux {
 
         use overdrive_testing::guest_app::{
             Direction, FLOOD_REPORT_PERIOD_MS, FLOOD_WRITTEN_PREFIX, FLOWING_LINE,
-            HOLD_FLOWING_BYTES, STREAM_CHUNK, StreamCheck, StreamGen, TERMINAL_LINE_PREFIX,
-            TerminalEvent, UDP_REPLY_TIMEOUT_MS, churn_datagram, datagram_request,
-            datagram_response, exit, flood_hello, hold_hello, subcommand, tag_is_valid,
-            tcp_request, tcp_response,
+            HOLD_FLOWING_BYTES, LISTENING_PREFIX, ListenConnEnd, STREAM_CHUNK, StreamCheck,
+            StreamGen, TERMINAL_LINE_PREFIX, TerminalEvent, UDP_REPLY_TIMEOUT_MS, churn_datagram,
+            datagram_request, datagram_response, exit, flood_hello, hold_hello, subcommand,
+            tag_is_valid, tcp_request, tcp_response,
         };
 
         fn usage(detail: &str) -> i32 {
@@ -133,8 +133,14 @@ mod linux {
                     }
                 }
                 [cmd] if *cmd == subcommand::IDLE => idle(),
+                [cmd, port, tag] if *cmd == subcommand::LISTEN => {
+                    match (port.parse::<u16>(), tag_is_valid(tag)) {
+                        (Ok(port), true) if port != 0 => listen(port),
+                        _ => usage("listen <port> <tag>"),
+                    }
+                }
                 [cmd, rest @ ..] if *cmd == subcommand::RUN_WITH_MODULES => run_with_modules(rest),
-                _ => usage("<round-trip|hold|flood|udp-churn|idle|run-with-modules> …"),
+                _ => usage("<round-trip|hold|flood|udp-churn|idle|listen|run-with-modules> …"),
             }
         }
 
@@ -212,6 +218,104 @@ mod linux {
                     Err(exit::UDP_IO)
                 }
             }
+        }
+
+        /// `listen <port> <tag>` (U-D17-DIAL): accepts until killed; one
+        /// thread per connection.
+        fn listen(port: u16) -> i32 {
+            let listener = match TcpListener::bind(("0.0.0.0", port)) {
+                Ok(listener) => listener,
+                Err(e) => {
+                    eprintln!("listen: bind 0.0.0.0:{port}: {e}");
+                    return exit::TCP_CONNECT;
+                }
+            };
+            println!("{LISTENING_PREFIX}{port}");
+            let mut accepted: u64 = 0;
+            loop {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        accepted += 1;
+                        let conn = accepted;
+                        thread::spawn(move || serve_listen_conn(conn, stream));
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                    Err(e) => {
+                        eprintln!("listen: accept: {e}");
+                        thread::sleep(Duration::from_millis(50));
+                    }
+                }
+            }
+        }
+
+        /// Serves one accepted connection: a `hold` client gets the
+        /// peer-to-guest stream back and its own stream verified; anything
+        /// else (a probe that connects and drops) is read until it ends.
+        /// Prints the connection's end line.
+        fn serve_listen_conn(conn: u64, mut stream: TcpStream) {
+            let mut buf = vec![0u8; STREAM_CHUNK];
+            let mut first_line: Vec<u8> = Vec::new();
+            let mut header_done = false;
+            let mut check: Option<StreamCheck> = None;
+            let terminal = loop {
+                match stream.read(&mut buf) {
+                    Ok(0) => break TerminalEvent::Eof,
+                    Ok(n) => {
+                        let mut chunk = &buf[..n];
+                        if !header_done {
+                            let Some(at) = chunk.iter().position(|b| *b == b'\n') else {
+                                first_line.extend_from_slice(chunk);
+                                continue;
+                            };
+                            first_line.extend_from_slice(&chunk[..=at]);
+                            chunk = &chunk[at + 1..];
+                            header_done = true;
+                            if let Some(tag) = hold_tag(&first_line) {
+                                start_listen_writer(&stream, &tag);
+                                check = Some(StreamCheck::new(&tag, Direction::GuestToPeer));
+                            }
+                        }
+                        if let Some(check) = check.as_mut()
+                            && let Err(at) = check.check(chunk)
+                        {
+                            eprintln!(
+                                "listen: conn {conn}: the client's stream is corrupt at byte {at}"
+                            );
+                        }
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                    Err(e) => break TerminalEvent::from_read_error(&e),
+                }
+            };
+            println!("{}", ListenConnEnd { conn, hello: check.is_some(), terminal });
+        }
+
+        /// The tag of a `hold` hello line, when `line` is exactly one.
+        fn hold_tag(line: &[u8]) -> Option<String> {
+            let text = std::str::from_utf8(line).ok()?;
+            let tag = text.strip_prefix("HOLD:")?.strip_suffix('\n')?;
+            (tag_is_valid(tag) && hold_hello(tag) == line).then(|| tag.to_owned())
+        }
+
+        /// Writes the peer-to-guest stream of `tag` on a clone of `stream`
+        /// until a write fails.
+        fn start_listen_writer(stream: &TcpStream, tag: &str) {
+            let Ok(mut writer) = stream.try_clone() else {
+                eprintln!("listen: clone for the writer failed");
+                return;
+            };
+            let tag = tag.to_owned();
+            thread::spawn(move || {
+                let mut stream_gen = StreamGen::new(&tag, Direction::PeerToGuest);
+                let mut chunk = vec![0u8; STREAM_CHUNK];
+                loop {
+                    stream_gen.fill(&mut chunk);
+                    if writer.write_all(&chunk).is_err() {
+                        return;
+                    }
+                    thread::sleep(Duration::from_millis(2));
+                }
+            });
         }
 
         fn crash_kernel() {

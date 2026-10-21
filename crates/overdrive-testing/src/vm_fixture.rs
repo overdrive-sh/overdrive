@@ -633,7 +633,7 @@ fn kernel_is_valid(path: &Path) -> bool {
 
 /// Reads up to [`KERNEL_MAGIC_WINDOW`] bytes — exactly what
 /// [`KernelImage::validate`] needs and no more.
-fn read_header(path: &Path) -> io::Result<Vec<u8>> {
+pub(crate) fn read_header(path: &Path) -> io::Result<Vec<u8>> {
     use std::io::Read;
     let file = fs::File::open(path)?;
     let mut buf = Vec::new();

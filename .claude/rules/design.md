@@ -151,6 +151,54 @@ produces.
 bookkeeping or revoke/retry protocol standing between a connection and its
 destination with no BPF alternative named in the ADR.
 
+## No unrequested scope — agents propose, the user adds
+
+**An agent may not add scope on its own initiative.** A new mechanism,
+protocol step, state, test lane, kernel config or build variant, tool, xtask
+subcommand, validation item, model check or hazard family, or public API that
+no user ruling and no accepted design requires is not the agent's to add. It
+goes into the agent's `open` / blockers as a **proposal**, stating:
+
+- **(a) the reachable production failure it prevents**, naming the production
+  path that produces it (`development.md` § "Ground the premise");
+- **(b) its cost**: runtime cost (hot-path latency, throughput, memory) and
+  validation cost (CI minutes, model-check count, wall time and memory, lanes,
+  toolchain);
+- **(c) the cheaper alternatives** and why each loses.
+
+Only the user adds it. This binds architects, modelers, acceptance designers,
+crafters, reviewers and orchestrators alike; it complements § "Correct, and no
+more than correct", which removes mechanism, by stopping mechanism from
+re-entering through the side door.
+
+- **Fix by removal first.** When a review finding can be closed by removing or
+  narrowing something, that is the preferred fix. Every fix states the simplest
+  correct alternative that was evaluated.
+- **"Small decision" means a choice within existing scope.** Anything that adds
+  surface is never a small decision and never passes on reviewer agreement
+  alone.
+- **Every review round includes a subtractive review** (a simplifier)
+  alongside the adversarial one, with equal weight. It flags mechanism, tests,
+  checks and text that defend an unreachable failure, duplicate a guarantee, or
+  exceed what the contract requires. A gate that only hunts for gaps ratchets
+  complexity: each round can add and none removes.
+- **Cost budgets.** A design states the hot-path performance budget of what it
+  adds and the validation budget (model-check count and time, lanes). Growth
+  beyond either needs user approval.
+
+**Symptoms during review:** a mechanism or test introduced inside an agent's
+fix with no user ruling behind it; a debug, sanitizer or instrumented build
+variant (e.g. KASAN) required by a test; a hazard or check added per clause
+"for completeness"; a fault or test seam, flag, enum variant or config surface
+whose only producer is a test; a finding closed by adding a component when
+removing one would also close it; validation cost growing round over round
+with no budget line.
+
+**Precedent:** a sanitizer-kernel stress lane and several test-only production
+branches entered a feature's design inside reviewer-driven fixes, none
+requested by the user, and validation cost grew until model checking exhausted
+host memory and disk.
+
 ## One ADR records one decision — never use an ADR as a design bucket
 
 An Architecture Decision Record captures **one independently decidable and
@@ -362,10 +410,24 @@ same way as `Lifecycle Gate Ownership`.
   needs checked against real-kernel or production state is modelled as
   actions over the production-reachable configuration transitions, not as a
   standalone pure function to be evaluated.
-- **A hazard variant per design rule.** Remove or weaken the rule and show the
-  checker finds a counterexample (`expect = "violation"` in `checks.toml`). An
-  invariant that never fails proves nothing; this is how the spec proves each
-  rule is load-bearing and each invariant has teeth.
+- **A hazard variant per design decision.** Remove or weaken the decision's
+  rule and show the checker finds a counterexample (`expect = "violation"` in
+  `checks.toml`). An invariant that never fails proves nothing; this is how the
+  spec proves each decision is load-bearing and each invariant has teeth. The
+  unit is the ADR-level decision, not a clause or sub-clause of it: one hazard
+  per decision.
+- **Witnesses only for states no named run reaches.** A witness (a
+  non-vacuity check expecting a violation) is added only for a state that no
+  named `run` reaches, because a named run already proves reachability. A
+  rejected alternative is recorded in the ADR, never as a model check. A bounded
+  check is not added beside an exhaustive check of the same invariant on the
+  same main.
+
+  **Symptoms during review:** several hazards for one decision, one per clause;
+  a witness for a state a named run already reaches; a `*-alt-*` check that
+  models a rejected alternative; an Apalache-bounded copy of an invariant TLC
+  checks exhaustively on the same main; validation cost growing with the number
+  of clauses rather than the number of decisions.
 - **Explicit assumptions.** Kernel, VMM, network and environment behaviour is
   an assumption in the model, never a modelled fact. Each assumption maps to
   the validation item, proven spike fact, or Tier-3 scenario that discharges

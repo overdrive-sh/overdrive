@@ -14,90 +14,61 @@ density target natively (`EXFULL` at the bridge's 1,024 port slots,
 `deliver/native-e18-bridge-capacity-falsification.md`). ADR-0145 records the
 decision.
 
-**Wave state.** The DESIGN of 2026-10-11 is applied (§ *Wave: DESIGN / [REF]
-vsock Attachment Replacement DESIGN*, *Status*). On 2026-10-16 the user
-adopted the in-kernel forwarder as the data path (EVMOD-ADOPT), and on
-2026-10-17 approved its contracts, EVMOD-LIFE to EVMOD-AB, for Linux guests,
-and the guest-neutral host side (§ *[REF] vsock data path — the in-kernel
-event-driven forwarder (EVMOD)*); its four contract-shaping spikes ran on
-Linux 7.0 and held. The guest hop of a guest that runs no Linux kernel
-(Unikraft) is [GH #321](https://github.com/overdrive-sh/overdrive/issues/321).
-DISTILL re-derives the scenario set for the changed contract.
+**Wave state.** DESIGN is complete (§ *Wave: DESIGN / [REF] vsock Attachment
+Replacement DESIGN*, *Status*) and DISTILL is authored (§ *Wave: DISTILL*).
+The data path is the in-kernel forwarder, approved for Linux guests with a
+guest-neutral host side (§ *[REF] vsock data path — the in-kernel
+event-driven forwarder (EVMOD)*); its contract-shaping spikes held on
+Linux 7.0. The guest hop of a guest that runs no Linux kernel (Unikraft) is
+[GH #321](https://github.com/overdrive-sh/overdrive/issues/321). DELIVER and
+the roadmap have not started.
 
-The bridge / TAP attachment design is superseded by ADR-0145; its code stays in
-the tree until DELIVER deletes it, as listed under *Bridge-era code for DELIVER
-to delete*.
+ADR-0145 replaces the bridge / TAP attachment; its code stays in the tree until
+DELIVER deletes it, as listed under *Bridge-era code for DELIVER to delete*.
 
 ## Wave: DESIGN / [REF] vsock Attachment Replacement DESIGN
 
 ### Status
 
-- The DESIGN of 2026-10-11 applies the user's rulings of 2026-10-11 — INB-1
-  (with the temporary leg-S bridge), END-STATE, R2-END, R2-DRAIN,
-  CID-NOCLAIM, RESET-EXIT, QHOLD and NO-SURVIVE — and the
-  KERNEL-7.0 ruling of 2026-10-10. Every other decision keeps its own approval
-  date (§ *Approval record*).
-- The user's rulings of 2026-10-13 are applied: LEGB-DIAL (same-node mesh
-  leg-B marks and source-binds its dial to a guest-prefix peer; no route
-  covers the guest prefix except the gateway `/32`), GW-LOCAL (the guest
-  gateway is the one host-local address of the prefix), PROBE-NOSAMPLE (a VM
-  probe dial is exempt from the allocation's flow quota; a `Capacity` or
-  `Quiesced` refusal records no sample), PROBE-RUN-COUNT (the probe runner
-  numbers each written run and records the observed streak in the row, the
-  row merges by run number, and `ServiceLifecycle` applies the threshold
-  when it reads the row, acting once per crossing, with D-1: a failed
-  liveness stop is retried on the next probe row still past the threshold
-  and never twice on one row), and PROBE-NOSAMPLE-EVENT (every probe run
-  that writes no row emits one `probe.not_sampled` event).
-- Open validation items are listed and classified in § *Validation plan*.
-- DISTILL re-derives the scenario set for the changed contract. DELIVER
-  remains stopped; `roadmap.json` is not edited by this DESIGN (§ *Roadmap
-  impact*).
-- 2026-10-14: the DISTILL upstream issues are answered by D-UP-1 to D-UP-20,
-  approved by the user 2026-10-14 and written into the sections that own
-  each contract (index: § *DISTILL upstream-issue closure*). D-UP-12 was
-  re-decided the same day: multiple probes per role are kept and a
-  per-allocation cap `GUEST_PROBE_SLOTS` (8) bounds the probes of a spec.
-  The contract surface the architect pinned while writing them down and the
-  user's dispositions are PD-1 to PD-9, decided by the user 2026-10-14
-  (§ *Approval record*): PD-1, PD-2, PD-4 (as `GUEST_PROBE_SLOTS`), PD-5 and
-  PD-6 approved; PD-3 replaced by the probe-cap error; PD-7 dropped (GH #319
-  stays open); PD-8 not contract-shaping (V-31-MV in DELIVER); PD-9 the new
-  record-time baseline, since superseded by RECORD-COST (an architect
-  disposition of 2026-10-18).
-- ADR corrections for D-UP-3, D-UP-4, D-UP-9 and D-UP-12 are written
-  (§ *Contract impact matrix*): ADR-0169 and ADR-0157 carry present-tense
-  corrections (not implemented); ADR-0057 § 1 and ADR-0080 § D1 carry dated
-  amendments of 2026-10-14 (implemented ADRs); ADR-0191 § 7 is unchanged
-  (its GH #319 citation stays in force).
-- Quint: specs/quint/probe-count — recorded run `252559-1791986812.704` (`evidence/summary.json`, 2026-10-14T14:06:52Z to 14:07:31Z, 38 s, head `b71c7748` dirty): 33 of 33 checks matched expect (19 hold, 14 expected violations), 33 ci = true, 15 evaluator runs and 18 on TLC, 9 named runs on the conformance main `probe_streak_conf` plus 6 hazard runs; model-checking main `probe_streak` (PROBE-RUN-COUNT as approved); hazard `streak_bugReconstruct` (the consumer reconstructs the streak from run sequences) violates `NoEarlyTerminate`, `streak_bugNoActOnce` violates `NoReactOnSameRow`, `streak_bugOncePerStreak` and `streak_bugOnceEver` violate `NoMissedTerminate` (D-1 option (a) is load-bearing), `streak_bugNoSampleFail` violates `MissingSampleInert`, `streak_bugLwwObservedAt` violates `StoreHoldsLatest`.
-- The user's rulings of 2026-10-15 are applied: the supervisor's fail-stop
-  on a foreign quiescence hold is checked by the model
+- Every decision keeps its own approval date in § *Approval record*, one row
+  per user ruling. Open validation items are listed and classified in
+  § *Validation plan*; no contract-shaping item is open and no DESIGN item is
+  open. DELIVER is stopped; `roadmap.json` is not edited by this DESIGN
+  (§ *Roadmap impact*).
+- Same-node mesh leg-B (LEGB-DIAL): the dial to a guest-prefix peer is
+  marked and source-bound; no route covers the guest prefix except the
+  gateway `/32` (GW-LOCAL: the guest gateway is the one host-local address
+  of the prefix).
+- Probes: a VM probe dial is exempt from the allocation's flow quota; a
+  `Capacity` or `Quiesced` refusal records no sample (PROBE-NOSAMPLE). The
+  probe runner numbers each written run; the row merges by run number;
+  `ServiceLifecycle` applies the threshold when it reads the row, acting
+  once per crossing; a failed liveness stop is retried on the next probe row
+  still past the threshold and never twice on one row (PROBE-RUN-COUNT, D-1).
+  Every probe run that writes no row emits one `probe.not_sampled` event.
+  Multiple probes per role are kept; `GUEST_PROBE_SLOTS` (8) bounds the
+  probes of a spec. An intent persisted with more probes than
+  `GUEST_PROBE_SLOTS` is not migrated (greenfield single cut; the Phase-1
+  upgrade deletes the intent store).
+- A foreign quiescence hold is a fail-stop, checked by the model
   (`quiescence-foreign-hold-ends-in-fail-stop`, run
   `ForeignHoldRestoreChangesNothingThenFailStops`, hazard
   `quiescence-hazard-foreign-ignored`) and by a unit test of the
   supervisor's mapping of `QuiescenceRestoreError::ForeignHold` to
-  `SharedGuestNetworkFailStopCause::ForeignQuiescenceHold`, with no test seam
-  (the production composition has one supervisor and one owner, so no
-  production path presents a foreign hold); an intent persisted by an
-  earlier build with more probes than `GUEST_PROBE_SLOTS` is not migrated
-  (greenfield single cut; the Phase-1 upgrade deletes the intent store); and
-  assumption K-A5 is proven by spike K-A5 (`spike/findings-ka5.md`, kernel
-  `7.0.0-29`).
-- Guest-slot spikes V-1 to V-4 are proven facts P-62 to P-65. Their V-4
-  consequences stand (END-IDEMPOTENT: a trailing end after a pair's end is a
-  no-op; CLEAN-FULL-END: a clean full end is `0x2` each way before close;
-  ADR-0180). The withdrawal of PSO-1 and of PSO-2's refusal (D-3) stands
-  (§ *Changed assumptions*).
-- **The data path is the event-driven in-kernel forwarder (EVMOD-ADOPT,
-  2026-10-16).** Guest-slot spike V-3 showed a sockmap redirect's queue
-  toward a non-reading target unbounded (P-64). The forwarder measured by
-  the evmod spike (P-67, P-68; ADR-0197) moves every flow's bytes on both
-  sides, consuming from a source only what its target accepted.
-- **The forwarder's contracts are approved (user, 2026-10-17, for Linux
-  guests).** EVMOD-LIFE (the module's lifetime, ADR-0198; amended by
-  MODULE-REFCOUNT 2026-10-20: unload-safe by module reference counting), EVMOD-BUILD (one
-  in-repository source, built per kernel release, ADR-0203), EVMOD-LOAD
+  `SharedGuestNetworkFailStopCause::ForeignQuiescenceHold`; there is no test
+  seam (the production composition has one supervisor and one owner).
+  Assumption K-A5 is discharged by spike K-A5 (`spike/findings-ka5.md`,
+  kernel `7.0.0-29`).
+- Proven facts P-62 to P-65 (guest-slot spikes V-1 to V-4) stand:
+  END-IDEMPOTENT (a trailing end after a pair's end is a no-op) and
+  CLEAN-FULL-END (a clean full end is `0x2` each way before close,
+  ADR-0180).
+- **The data path is the event-driven in-kernel forwarder (EVMOD-ADOPT).**
+  The forwarder (P-67, P-68; ADR-0197) moves every flow's bytes on both
+  sides, consuming from a source only what its target accepted. Its
+  contracts are approved for Linux guests: EVMOD-LIFE (the module's
+  lifetime, unload-safe by module reference counting, ADR-0198), EVMOD-BUILD
+  (one in-repository source, built per kernel release, ADR-0203), EVMOD-LOAD
   (loaded by the host image and by `overdrive-init`, never by `serve`,
   ADR-0205), EVMOD-GUEST-KIT (a Linux guest's kernel and module are one
   artifact, checked by the guest, ADR-0206), EVMOD-SAFE (late callbacks,
@@ -108,206 +79,131 @@ to delete*.
   abort reaches a `GuestStream` and the guest without touching `V_h`),
   EVMOD-ATTACH-END (an ended half is refused with its own errno class and
   the owner aborts the flow, ADR-0210), EVMOD-PORT, EVMOD-END (ADR-0180;
-  its watch of a dialled vsock, ADR-0216),
-  EVMOD-PAIR (ADR-0212), EVMOD-DGRAM (ADR-0201), EVMOD-KTLS (ADR-0200),
-  EVMOD-WQ and EVMOD-AB (the release point at the end record; no guest slot
-  pool, ADR-0209), with the spike corrections EV-PINS and the WATCH-ABORT
-  rule (ADR-0211) written into them. D3's flow bounds are recorded in their
-  own ADR-0208, apart from ADR-0147's one pair per flow.
-  The four contract-shaping spikes V-EV-END, V-EV-CTL, V-EV-PAIR and
-  V-EV-DGRAM ran and held on Linux 7.0 (P-69 to P-72; physical host
-  `7.0.0-38-generic`, guests `7.0.0-29-generic`). No contract-shaping
-  validation item is open.
-- **The host side is guest-neutral (HOST-NEUTRAL, user, 2026-10-17;
-  ADR-0207).** The flow request, the datagram frame and the end classes are
-  the host-side protocol of every guest; the host owner and the host
-  forwarder never branch on guest type. The guest hop of a guest that runs
-  no Linux kernel (Unikraft) is
-  [GH #321](https://github.com/overdrive-sh/overdrive/issues/321).
-- RESTART-GEN-CRASH is decided (user, 2026-10-18): the loss of a generation
-  replacement placed but not started at a `serve` crash is
+  its watch of a dialled vsock, ADR-0216), EVMOD-PAIR (ADR-0212),
+  EVMOD-DGRAM (ADR-0201), EVMOD-KTLS (ADR-0200), EVMOD-WQ and EVMOD-AB (the
+  release point at the end record; no guest slot pool, ADR-0209), with the
+  EV-PINS corrections and the WATCH-ABORT rule (ADR-0211). D3's flow bounds
+  are ADR-0208, apart from ADR-0147's one pair per flow. The contract-shaping
+  spikes V-EV-END, V-EV-CTL, V-EV-PAIR and V-EV-DGRAM held on Linux 7.0
+  (P-69 to P-72; physical host `7.0.0-38-generic`, guests
+  `7.0.0-29-generic`).
+- **The host side is guest-neutral (HOST-NEUTRAL, ADR-0207).** The flow
+  request, the datagram frame and the end classes are the host-side protocol
+  of every guest; the host owner and the host forwarder never branch on
+  guest type. The guest hop of a guest that runs no Linux kernel (Unikraft)
+  is [GH #321](https://github.com/overdrive-sh/overdrive/issues/321).
+- RESTART-GEN-CRASH: the loss of a generation replacement placed but not
+  started at a `serve` crash is
   [GH #325](https://github.com/overdrive-sh/overdrive/issues/325) and is
   **not** fixed in #295 (§ *Restart decision*, "Defect RESTART-GEN-CRASH").
   The `cid_lease` run `RedeployLeasedAtServeCrashIsPlacedAgain` and hazard
   `crashLosesPlacedGeneration` stay in the model, pending #325 for
-  conformance. The `cid_lease` model revisions of DR5-CLOSE (the crash-class
-  restart re-pinned to production's dispatch boundaries, § *Per-module
-  projection and action map*, `cid_lease` item 7) and DR6-CLOSE (`Finalize`
-  and `Redeploy` after boot reclamation, one hazard per item-7 rule
-  including rule 7.1, the #325-window guard pair, `cid_lease` items 6 to 9)
-  and the CI-flag rule (§ *Approval record*, DR6-CLOSE) are recorded. **No
-  DESIGN item is open.** RECORD-COST (the
-  `guest-flow-owner` record cost of the forwarder revision, 81.5 minutes
-  with 12 jobs, the new baseline, superseding PD-9) is an outcome-neutral
-  architect disposition of 2026-10-18, confirmed by adversarial review
+  conformance. RECORD-COST (the cost of the `guest-flow-owner` full
+  `--record` run) is an outcome-neutral architect disposition
   (§ *Approval record*, "Architect dispositions"); it is not a user approval.
-- Quint: specs/quint/guest-flow-owner — current recorded run
-  `707089-1792512180.793` (`evidence/summary.json`; 2026-10-20T16:03:00Z to
-  17:40:35Z, 97.6 minutes, 4 jobs, kernel `7.0.0-34-generic`, Quint 0.32.0,
-  Apalache 0.56.1, head `0f3120df`, dirty): 458 of 458 checks matched
-  expect (224 hold, 234 expected violations, 0 unexpected, 0 retries), 65
-  of them `cid_lease` and 66 `fwd_safe`; no open counterexample.
-  `cargo xtask quint verify-evidence --subsystem guest-flow-owner` passes.
-  It records the spec changes of rounds 14 to 16 on top of the 441 checks
-  of the previous record `570179-1792418105.836` (2026-10-19, 441 of 441,
-  12 jobs, 97.2 minutes), which it supersedes. Round 14 added the
-  `fwd_pair` invariant `CtxGoneIffVmDown` (in `Safety` and `DgramSafety`)
-  with its non-vacuity witness `fwd-pair-witness-vmm-exit` (`pair_ok`,
-  expect violation, violated). Round 15 (MODULE-REFCOUNT and the round-14
-  lows) added the datagram witness `fwd-pair-dgram-witness-vmm-exit`
-  (`pair_dgram`, expect violation, violated), changed `fwd_safe.qnt` and
-  `hazard/fwd_safe_hazards.qnt`, and added 12 `fwd_safe` checks (§
-  *Formal protocol model*, "Round 15 model change"). Round 16 (rule 5's
-  write-space closure) added the `wfree` caller class, the `RemoveWait`
-  step, the named run `WfreeWakeFinishesBeforeRemoveWait`
-  (`fwd-safe-run-wfree-wake-finishes-before-remove-wait`, evaluator, holds,
-  2.0 s) and the hazards `safe_bugWriteSpaceOverride`
-  (`fwd-safe-hazard-write-space-override`, violates
-  `NoTextRunAfterUnload`, TLC exhaustive, 18.3 s) and
-  `safe_bugRemoveWaitAfterFreeQueued`
-  (`fwd-safe-hazard-remove-wait-after-free-queued`, violates
-  `NoTouchAfterFree`, TLC exhaustive, 17.5 s), all three `ci = true` (§
-  *Formal protocol model*, "Round 16 model change"). The two earlier record
-  runs of rounds 14 and 15 were stopped at the host's 8 GiB free-disk stop
-  line and wrote no record. `verify-evidence` passes for `probe-count`
-  (unchanged, not re-run). The record `570179-1792418105.836` added one
-  check to its predecessor
-  `227088-1792372761.247` (440 of 440, 64 `cid_lease` checks), which
-  it superseded: D-18's recording main `lease_conf_three` and its check
-  `cid-lease-run-conf-three-pool-exhausted-restart-cleans-the-predecessor-then-places`
-  (evaluator, expect holds, `ci = true`, 2.5 s). The CI flags were not
-  re-applied from that record. All three records carry the final
-  DR6-CLOSE revision of `cid_lease`: the `reclaimed` guard on `Finalize` and
-  on `Redeploy`, the invariants `FailedHoldsNoLease` and `NoUntrackedLease`,
-  six hazards (one per item-7 rule, rule 7.1's `vmmExitRetiresLease`
-  included) and the #325-window guard pair with its positive twin
-  `CrashIsEnabledInThe325WindowWithoutTheGuard` (items 6 to 9), on top of
-  DR5-CLOSE (item 7: the predecessor lease `pred` / `pst`, the state
-  `ended`, `Finalize`, `AssignRefused`) and RESTART-SSOT (items 5 and 6),
-  with the CI flags set by the 60-second rule from the intermediate record
-  `198644-1792365750.873` (436 of 436, 60 `cid_lease` checks; the new D-18
-  check is `ci = true` as a new check). The current record also
-  supersedes that record, `170717-1792355648.294` (425 of 425, DR5-CLOSE)
-  and `143415-1792345488.113` (422 of 422). The modeller's deviations are
-  accepted in § *Formal protocol model*, "Result of the third iteration".
-- The user's rulings of 2026-10-18 are applied (§ *Approval record*): T-1
-  (the guest-kit microVM fixture is built; it is no longer a user question)
-  RESTART-SSOT (GH #324 is fixed in #295, not worked around:
-  § *Restart decision*; new step 0 of § *Roadmap impact*) and
-  RESTART-GEN-CRASH (GH #325, a separate issue, not fixed in #295).
-- **DISTILL round-8 gaps (architect, 2026-10-19).** The user's rulings of
-  2026-10-19 are applied: U-1 option (b) (since replaced by PORTS-CONFIG,
-  below), U-2 (V-9's
-  measurements are the benchmark GH #326; `vsock_density.rs` stays a
-  64-VM correctness test), E-3 (the pre-existing `mtls_guardrails` AC3
-  failure at HEAD is out of scope for #295; no issue) and **D-14
-  (LEGS-DIAL, option (a), approved)**: the inbound enforcement port, not the
-  mTLS worker, holds leg S's guest dial, so the dial follows the client's
-  authentication (§ *leg-S over vsock*; this amends D-UP-5). The interface
-  gaps D-8 to D-15 and the `cid_lease` projection sanction are closed in
-  the sections that own them, indexed in § *DISTILL upstream-issue
-  closure*, "Round-8 gaps". The closures are architect pins and small
-  decisions that stand once an adversarial reviewer agrees (standing rule);
-  none changes a Quint spec.
-- **Round-9 design review (architect, 2026-10-19).** The refuted
-  `GuestForwarding { Served, NotServed }` mechanism is dropped: production
-  boot does not branch on whether a `Vm` driver is composed, the forwarder
-  is opened, probed, audited and repaired on every node. (Its U-1 (b)
-  mechanism — simulation adapters injected through `ServerConfig` overrides
-  — is withdrawn under NO-OVERRIDE-SEAMS, below.) The forwarder probe
-  returns to boot phase 1, before any boot effect (D-8). D-12 names the
-  end-record-order cell; D-13 is re-pinned against the enforcement
-  (LEGS-DIAL); R5-54 is authorable.
-- **After-round-10 rulings (user, 2026-10-19), applied by the architect.**
-  PORTS-CONFIG (ADR-0218): the beacon, flow stream and control vsock ports
-  are node configuration with defaults 1234 / 1240 / 1243; a test binds
-  kernel-assigned ports and reads them back from their owners (§
-  *Composition*, "Node vsock ports (PORTS-CONFIG)"). GUEST-PORTS
-  (ADR-0217): the VM driver passes the three ports on the guest's kernel
-  command line. FWD-PREREQ: `ovd_fwd` is loaded on Lima and on metal by the
-  lane setup step `cargo xtask kmod-load`, and non-VM `serve` tests run the
-  real forwarder probe. NO-OVERRIDE-SEAMS (ADR-0219): `run_server` takes a
-  required `NodeAdapters` parameter; `ServerConfig.vm_override`,
-  `GuestFlowIoOverride` and the `guest_flow_io_override` field are removed.
-  Round-10 findings closed in the owning sections: D-9 (the production
-  event that ends leg F's accept task and the cell's evidence), D-14 (the
-  in-flight ledger, the relay's teardown and liveness), D-16 (control-
-  session loss without a VM fault), D-17 (the through-`serve` owner
-  observation reached from a control-plane `kvm-tests` lane), D-19 (stale
-  text), the `compose_guest_network` caller precondition and the
-  `cid_lease` S-4 projection. D-18's spec change is made and recorded: the
-  quint-modeler added the `cid_lease` recording main `lease_conf_three` and
-  its check, recorded in `570179-1792418105.836` (441 of 441) and in the
-  current record `707089-1792512180.793` (458 of 458, above). No
-  DESIGN item and no spec change is open.
-- **Round 11 (architect, 2026-10-19, after the user's NO-OVERRIDE-SEAMS
-  scope ruling).** `run_server(config, adapters)` takes every driven
-  adapter through `NodeAdapters` (boot-wide `BootAdapters` — clock,
-  entropy, transport, KEK, observation store, VM host state, dataplane
-  composer, mTLS intercept and enforcement factory, guest-DNS factory — plus
-  the cgroupfs adapter, the probers, `VmAdapters` with the cgroup
-  accounting, and the guest-flow seam); `ServerConfig` is configuration
-  only; the fault fields are replaced by sim adapters; the CLI has one test
-  entry point, `run_with_adapters` (§ *Composition*, "Driven adapters of
-  `run_server`"; ADR-0219, with an amendment to ADR-0083 § D8; ADR-0138,
-  #295's own and not yet implemented, states the result in present tense).
-  The round-11 adversarial mediums and lows are closed in their sections
-  (§ *DISTILL upstream-issue closure*, "Round 11"). No spec change.
-- **Round 13 (architect, 2026-10-19, after the user's STORES-IN and
-  PROBE-ROOT-ENV rulings and the round-12 adversarial findings).** The
-  intent store, view store, workflow journal and workload-identity CA (with
-  its root-key codec) are `BootAdapters.stores` / `.ca`, built by
-  `NodeAdapters::host(&config, ..)`; neither `run_server` nor `boot_server`
-  constructs an adapter over a host resource or a store, and the boot still
-  probes and adopts them before use. The CLI env seam `OVERDRIVE_TEST_PROBE_ROOT` is removed;
-  `run_with_adapters` probes the cgroupfs adapter before it builds the
-  bundle. The round-12 adversarial findings are closed in their sections
-  (§ *DISTILL upstream-issue closure*, "Round 13"). No spec change.
-- **Round 14 (architect, 2026-10-20, after the user's rulings after round
-  13).** The `[vsock]` node-configuration section is out of #295
-  (NODE-CONFIG-LOADER, GH #327); the forwarder module build and lane setup
-  are DELIVER step K, before step 0 (U-3 (b)); the stale-module identity
-  is the `kmod/ovd_fwd/` tree digest in the module's `version` (D-20);
-  `StoreAdapters` is not `Clone` and every boot reopens its stores (D-21);
-  the CA is supplied as a `CaFactory` the boot calls over its entropy.
-  Closures: § *DISTILL upstream-issue closure*, "Round 14". One spec change,
-  made by the quint-modeler: the `fwd_pair` invariant `CtxGoneIffVmDown`
-  with its witness check `fwd-pair-witness-vmm-exit` (round 15 adds the
-  datagram witness `fwd-pair-dgram-witness-vmm-exit`). It is recorded in
-  `707089-1792512180.793` (458 of 458, above): the witness is violated as
-  expected.
-- **Round 15 (architect, 2026-10-20, after the user's ruling
-  MODULE-REFCOUNT).** MODULE-REFCOUNT amends EVMOD-LIFE and EVMOD-SAFE.
-  `ovd_fwd` has a `module_exit` and holds a module reference for every open
-  context and every hooked socket. `delete_module` is refused while any
-  reference is held and succeeds at zero. The holders and their release
-  points are in § *Module placement and lifetime*, "Unload-safe by
-  reference count", and the new rule 5 of § *Pair end*, "Stale
-  invocations". The permanence probe, the `PERMANENT` flag and
-  `ForwarderError::NotPermanent` are removed.
-  - `cargo xtask kmod-load` reloads a stale idle module and refuses a busy
-    one with a message naming the holder class; no remedy is a reboot.
-  - Step K's skeleton has `module_exit` and the reference discipline.
-  - The round-14 adversarial lows are closed (§ *DISTILL upstream-issue
-    closure*, "Round 15").
-  - One spec change, made by the quint-modeler: `fwd_safe` gains the module
-    reference and an unload action (§ *Formal protocol model*, "Round 15
-    model change"). No model encoded permanence; it was named only in the
-    `guest-flow-owner` README prose. With it, the datagram witness
-    `fwd-pair-dgram-witness-vmm-exit` is added. Its 13 new checks (12
-    `fwd_safe`, 1 `fwd_pair`) are recorded in `707089-1792512180.793` (458
-    of 458, above), each matching its `expect`.
+- Quint `specs/quint/probe-count` (`evidence/summary.json`): 31 checks, each
+  matching its expect (19 hold, 12 expected violations), all `ci = true`; 9 named runs on the conformance main
+  `probe_streak_conf` plus 6 hazard runs; model-checking main `probe_streak`;
+  hazard `streak_bugReconstruct` violates `NoEarlyTerminate`,
+  `streak_bugNoActOnce` violates `NoReactOnSameRow`, `streak_bugOncePerStreak`
+  and `streak_bugOnceEver` violate `NoMissedTerminate` (D-1 option (a) is
+  load-bearing), `streak_bugNoSampleFail` violates `MissingSampleInert`,
+  `streak_bugLwwObservedAt` violates `StoreHoldsLatest`.
+- Composition (ADR-0219, ADR-0138): `run_server(config, adapters)` takes
+  every driven adapter through a required `NodeAdapters` parameter; the
+  intent store, view store, workflow journal and workload-identity CA are
+  part of it, built by `NodeAdapters::host(&config, ..)`; `ServerConfig`
+  is configuration only (§ *Composition*, "Driven adapters of `run_server`").
+  The forwarder is opened, probed, audited and repaired on every node, in
+  boot phase 1, before any boot effect (D-8). The vsock ports are node
+  configuration with defaults 1234 / 1240 / 1243 (PORTS-CONFIG, ADR-0218);
+  a test binds kernel-assigned ports and reads them back from their owners.
+  The VM driver passes the three ports on the guest's kernel command line
+  (GUEST-PORTS, ADR-0217). `[vsock]` node-TOML loading is
+  [GH #327](https://github.com/overdrive-sh/overdrive/issues/327), outside
+  #295. The inbound enforcement port holds leg S's guest dial (LEGS-DIAL,
+  D-14, § *leg-S over vsock*).
+- Lane prerequisites: `ovd_fwd` is loaded on Lima and on metal by the lane
+  setup step `cargo xtask kmod-load` (FWD-PREREQ); the module build and lane
+  setup are DELIVER step K, before step 0 (U-3 (b)). `kmod-load` reloads a
+  stale idle module and reports any `EBUSY` on a live module as busy/retry
+  with a message naming the holder class; no remedy is a reboot. The
+  module's identity is its `version`, the whole-tree digest (D-20,
+  ADR-0203). V-EV-SAFE and V-EV-UNLOAD
+  use no KASAN: their oracles are no oops and the refcount on the stock 7.0
+  kernel.
+- V-9's measurements are the benchmark
+  [GH #326](https://github.com/overdrive-sh/overdrive/issues/326);
+  `vsock_density.rs` is a 64-VM correctness test. The `mtls_guardrails` AC3
+  failure at HEAD is out of scope for #295 (no issue). The guest-kit
+  microVM fixture (T-1) is built, launching through the production
+  `CloudHypervisorVmm` (U-4 (a)). GH #324 is fixed in #295
+  (RESTART-SSOT, § *Restart decision*, step 0 of § *Roadmap impact*).
+- Quint `specs/quint/guest-flow-owner` (`evidence/summary.json`, kernel
+  `7.0.0-38-generic`, Quint 0.32.0, Apalache 0.56.1): 279 of 279 checks
+  matched expect (209 hold, 70 expected violations), 44 of them `cid_lease`
+  and 37 `fwd_safe`; no open counterexample. `cargo xtask quint
+  verify-evidence --subsystem guest-flow-owner` and `typecheck` pass;
+  `verify-evidence` passes for `probe-count`. Check inventory (§ *Formal
+  protocol model*): hazards are one per ADR-level decision; witnesses exist
+  only for states no named run reaches (`owner-flows-witness-phantom-connect`,
+  `fwd-pair-witness-watch-half-close`, `fwd-pair-dgram-witness-vmm-exit`);
+  there are no rejected-alternative checks and no bounded Apalache copy
+  beside an exhaustive TLC check, except the two on instances no exhaustive
+  check covers (`owner-flows-two-safety-apalache`, `flows_two` CFG `core2`,
+  two dial slots; `udp-slots-safety-apalache`, `slots_ok`, two
+  destinations; both `ci = false`). The 70 expected violations are 65 hazard
+  checks, 3 witnesses and the 2 violation-form checks of the #325-window
+  guard pair. Hazards per module: `fwd_pair` 11, `owner_flows` 15,
+  `cid_lease` 12, `fwd_safe` 12, `quiescence` 7, `udp_slots` 6, `flow_quota`
+  2. `GuestHalfEnds` runs on the one-flow instance `flows_one` (CFG "one":
+  one guest-opened and one host-opened flow). `fwd_pair` instances: `ok`,
+  `watch` and `live` carry one unit each way, `dgram` one datagram each way;
+  `pair_mid` (stream mode with 2 units and datagram mode with 2 datagrams,
+  one direction, `gh` only, one fault; no watch mode) runs under exhaustive
+  `fwd-pair-mid-safety-tlc` (invariant `MidSafety` = `DgramSafety` in a
+  datagram trace and `Safety` otherwise; 695,292 distinct states; `ci =
+  false`); the datagram-frame hazard runs on the hazard-only instance
+  `pair_dhazConsumePartialFrame` (CFG `dhaz`, 3 datagrams: with 2 the cut
+  frame is the last queued item and corrupts nothing). `fwd_safe` models no
+  module unload or text lifetime. Every `OFF` string in a module
+  belongs to a hazard `checks.toml` lists. `fwd_pair.qnt` has no ghost
+  `gh.recPend`, no `tcpErrSeen` definition and no `WatchRecord` step action.
+  The `WatchRecord` variant of `ConfStep` and the `WatchRecordBeforeWake`
+  invariant stay because both conformance drivers map the variant (to a
+  hazard-only error); no `step` action produces it.
 
 ### DISTILL handoff
 
-What DISTILL takes from this DESIGN beyond the scenario re-derivation:
+What DISTILL takes from this DESIGN:
 
-- **Round-8 closures (architect 2026-10-19; § *DISTILL upstream-issue
-  closure*, "Round-8 gaps").** (1) The composed rig boots through phase 1
+- **Quint record.** The oracle is `specs/quint/guest-flow-owner/` as
+  recorded in `evidence/summary.json` (279 checks; § *Status*, § *Formal
+  protocol model*). The run checks per recording main in `checks.toml` equal
+  the counts `distill/test-scenarios.md` records the drivers pin:
+  `flows_conf` 45, `flows_beacon_conf` 7, `pair_conf` 39, `quota_conf` 7,
+  `slots_conf` 12, `quiesce_conf` 11 (10 pinned), `lease_conf_ok` 23 (21
+  pinned, 2 model-only guard runs), `lease_conf_325` 3 (1 pinned, 2
+  guard-run checks) and `lease_conf_three` 1. The target inventory:
+  - `fwd_safe` has no module-unload runs; `safe_runs` has 14 runs. The
+    module-suite cells under V-EV-UNLOAD are real-kernel cells, not model
+    oracles.
+  - The scenario tables cite only hazards that exist in the record (the
+    hazard table in § *Formal protocol model*, 65 rows).
+  - `flows_one`, `flows_two`, `pair_mid` and the hazard-only
+    `pair_dhazConsumePartialFrame` are model-checking mains. None is a
+    driver target.
+  - V-EV-UNLOAD and U-EV-UNLOAD use the stock 7.0 kernel; the stress's
+    oracles are no oops and the refcount
+    (`the_unload_stress_never_faults_in_a_guest`). The unload tests
+    (`unload.rs`, `unload_in_guest.rs`) are dev-host and stock-kernel Tier-3
+    cells; the appliance has `CONFIG_MODULE_UNLOAD` off.
+  - `xtask`'s `kmod_load`: any `EBUSY` on a live module is busy/retry.
+- **Interface and fixture decisions (D-UP-1 to D-UP-20 and D-8 to D-22, each
+  pinned in its owning contract section).**
+  (1) The composed rig boots through phase 1
   (`probe_guest_flow_startup`) and `boot_server` with
-  `GuestNetworkSource::Composed`; the step-5 `// SCAFFOLD` probe goes. (2)
-  (Re-pinned under PORTS-CONFIG and NO-OVERRIDE-SEAMS, full scope, round
-  11; round 13.) Every `serve` test calls `run_server(config, adapters)` (or the
+  `GuestNetworkSource::Composed`. (2) Every `serve` test calls `run_server(config, adapters)` (or the
   CLI's `run_with_adapters(args, cgroup_fs, builder)`, whose builder
   receives the `&ServerConfig`) with a `NodeAdapters`, built
   from `NodeAdapters::host(&config, cgroup_fs, kek)` with the fields it
@@ -327,7 +223,7 @@ What DISTILL takes from this DESIGN beyond the scenario re-derivation:
   `run_server`"). Every `serve` test lane has `ovd_fwd` loaded by `cargo
   xtask kmod-load` (FWD-PREREQ; the hooks run it too) and runs the real
   forwarder probe; the lane's fixture compares the loaded module's
-  `version` (the `kmod/ovd_fwd/` tree digest, D-20) with the built one
+  `version` (the whole-tree digest, D-20) with the built one
   first and fails as a missing or stale
   lane prerequisite naming the step. These tests stay whole-binary members of `host-kernel-shared` (they
   still converge the gateway `/32` route and write the `overdrive-mtls`
@@ -339,28 +235,28 @@ What DISTILL takes from this DESIGN beyond the scenario re-derivation:
   and init) read `pr(s).out` / `.cause` / `.errno` / `rec = read` from
   `last_consumed_end`, and `ctx(s) = released` from the `SimFlowForwarder`
   context state, never from driver flags or taken records. (4) `cid_lease`
-  reads `leased` from the owner and stops comparing `up` / `reclaimed`;
+  reads `leased` from the owner and does not compare `up` / `reclaimed`;
   `lease` and `cursor` are not compared between a `Crash` and the next
-  boot's first step (S-4, below). (5) (Re-pinned 2026-10-19, D-16, D-9.)
+  boot's first step (S-4, below). (5) (D-16, D-9.)
   Control-session loss without a VM fault has no production stimulus and
   no entry point is added: its evidence is the seeded-sim composed rig plus
   the in-guest session cells (§ *Roadmap impact*, 10-02); the `Forwarder`
   recovery stays seeded-sim + R5-61; leg-F loss is seeded sim plus the
   worker-level Tier-3 repair cell `leg_f_repair_rebinds_transparent_listener`,
   stimulated by an `EMFILE` accept error with the listener still `LISTEN`
-  (§ *Validation plan* V-8). (6) (Re-pinned 2026-10-19, D-17.) R5-57 and the
+  (§ *Validation plan* V-8). (6) (D-17.) R5-57 and the
   through-`serve` halves of R5-41 / R5-63 read the owner through
   `ServerHandle::guest_flow_observation()` from an `overdrive-control-plane`
   `kvm-tests` lane that boots `run_server` with `NodeAdapters::host(..)`
   and a `SimKek` — the composition `overdrive serve` runs — and deploys through the server's
   public API, so no CLI hook exposes `ServerHandle`. (7) R5-54 is authored against
-  LEGS-DIAL (approved 2026-10-19): its seeded-sim half drives a leg-C
+  LEGS-DIAL: its seeded-sim half drives a leg-C
   connection through `SimMtlsEnforcement` built with the composed rig's
   `OwnerDial`. (8) The end-record-order Tier-3 cell
   `take_end_returns_records_in_end_order` (D-12). (9) The `GuestProcess`
   structure of the init drivers follows the lint ruling of § *Conformance
-  observation surface and action map*, "Owner field" (S-7). (10) (Round
-  10.) GUEST-PORTS changes the token every guest-kit fixture writes: the
+  observation surface and action map*, "Owner field" (S-7). (10)
+  GUEST-PORTS fixes the token every guest-kit fixture writes: the
   fixture's scripted host peer binds kernel-assigned beacon and control
   ports and passes them (with a stream port) as `beacon=`, `stream=`,
   `control=` on the kernel command line it builds; no fixture binds a fixed
@@ -370,10 +266,10 @@ What DISTILL takes from this DESIGN beyond the scenario re-derivation:
   `parse_transport_token`'s three new fields
   and their refusals, a kernel-assigned bind read back from
   `BeaconIntake::bound_port` / `flow_ports()` / `ServerHandle::vsock_ports`,
-  a listener repair that keeps the held socket and its port (round 11: no
+  a listener repair that keeps the held socket and its port (no
   close, no bind; the accept task re-spawned), a second `BeaconIo::bind`
   with another port returning the first port, and the D-14 `teardown`
-  awaiting the relay's end. (11) (Round 11, NO-OVERRIDE-SEAMS full scope.)
+  awaiting the relay's end. (11) (NO-OVERRIDE-SEAMS, full scope.)
   Every test entry point and fixture below migrates to `NodeAdapters` /
   `BootAdapters` (§ *Composition*, "Driven adapters of `run_server`", and
   its replacement table), by crate:
@@ -386,7 +282,7 @@ What DISTILL takes from this DESIGN beyond the scenario re-derivation:
     `tests/acceptance/`: `job_stop_idempotent.rs`, `job_stop_intent_key.rs`,
     `job_stop_unknown.rs`, `preflight_before_workloads_bootstrap.rs`,
     `required_serve_ports_source_scan.rs` (its declarations move: the
-    required ports are now `MtlsAdapters.{intercept, enforcement}` and
+    required ports are `MtlsAdapters.{intercept, enforcement}` and
     `BootAdapters.guest_dns`, the composition structs gain `NodeAdapters`,
     `BootAdapters` and `MtlsAdapters`, `ServerConfig` must declare no field
     whose type names a port trait, and the banned identifiers gain
@@ -431,9 +327,9 @@ What DISTILL takes from this DESIGN beyond the scenario re-derivation:
     paragraph.
   - **`overdrive-dataplane`.** `HostMtlsEnforcementFactory` (production
     surface; no test migrates).
-  - **Round 13 additions (STORES-IN, PROBE-ROOT-ENV, round-12 findings).**
+  - **Stores, CA and the probe root (STORES-IN, PROBE-ROOT-ENV).**
     Every fixture above that builds a bundle by hand or reaches the
-    supplied-owner path now also supplies `BootAdapters.stores` and `.ca`:
+    supplied-owner path also supplies `BootAdapters.stores` and `.ca`:
     host bundles get them from `NodeAdapters::host(&config, ..)`; the
     supplied-owner fixtures (`overdrive-sim`'s
     `invariants/netns_density_boot_order.rs` and `invariants/vm_reclamation.rs`,
@@ -444,13 +340,13 @@ What DISTILL takes from this DESIGN beyond the scenario re-derivation:
     `run_server_with_obs_and_drivers` / `_driver`) build
     `StoreAdapters::open(&config)` (or `SimViewStore` / `SimJournalStore`
     beside `IntentStoreAdapter::open`) and `CaAdapters::host()` (or one
-    over `SimCaFactory`; round 14: the CA is a factory the boot calls over
+    over `SimCaFactory`; the CA is a factory the boot calls over
     `boot.entropy`). Every fixture that boots twice over one `data_dir` (for
     example `built_in_ca_operator_composition/serve_persistent_ca.rs`, and
     the `cid_lease` driver, which also reads the surviving stores between
     a `Crash` and the next boot, S-4) builds a new bundle after the first
     server is down, reopening the stores from disk (`NodeAdapters::host` or
-    `StoreAdapters::open`) with a fresh `CaAdapters` (round 14, D-21: no
+    `StoreAdapters::open`) with a fresh `CaAdapters` (D-21: no
     boot reuses the previous boot's store handles; `StoreAdapters` is not
     `Clone`). A driver that reads the surviving stores between two boots
     opens them itself and drops them before the next boot opens them. Every CLI fixture listed under
@@ -467,149 +363,100 @@ What DISTILL takes from this DESIGN beyond the scenario re-derivation:
     that `boot_server`'s body names none of `LocalIntentStore::open`,
     `RedbViewStore::open`, `RedbJournalStore::new`, `RcgenCa::new`,
     `RootKeyAeadCodec::new`. `xtask` (`guest_kit_prepare::forwarder_module_path`,
-    `kmod-build`, `kmod-load` and its hooks form `--busy-ok` (round 15,
-    which replaces `--if-absent`: a stale idle module is reloaded, a busy
-    one is refused with the holder class; § *Composition*, "`kmod-load`"),
-    the mutants wrapper's
+    `kmod-build`, `kmod-load` and its hooks form `--busy-ok` (a stale idle module is
+    reloaded, a busy one is refused with the holder class; § *Composition*,
+    "`kmod-load`"), the mutants wrapper's
     `OVERDRIVE_KMOD_DIR`) and `overdrive-testing` (`guest_kit.rs`'s module
-    lookup from the workspace root) move off `cargo_target_dir`, with the
-    S-12 drift guard extended to the module path; round 14: the fixture
-    and `kmod-load` compare the module's `version` (the tree digest), not
-    `srcversion` (D-20). The init `fwd_pair` driver gates its comparisons
-    on the `VmmExit` it applied (the `fwd_pair` map); the spec's invariant
-    `CtxGoneIffVmDown` that justifies the gate is in `fwd_pair.qnt` and is
-    recorded, with its witnesses `fwd-pair-witness-vmm-exit` and
-    `fwd-pair-dgram-witness-vmm-exit` violated as expected, in the current
-    record `707089-1792512180.793` (458 of 458; § *Status*).
-  The list is the tree at round 13; a fixture added later follows the same
-  rule. (12) (Round 11.) The `quiescence` driver's `RestartWith` goes
+    lookup from the workspace root) read the module path from the workspace
+    root, not `cargo_target_dir`, with the S-12 drift guard extended to the
+    module path; the fixture and `kmod-load` compare the module's `version`
+    (the whole-tree digest), not `srcversion` (D-20). The init `fwd_pair`
+    driver gates its comparisons on the `VmmExit` it applied (the `fwd_pair`
+    map); the spec's invariant `CtxGoneIffVmDown` that justifies the gate is
+    in `fwd_pair.qnt` (no witness check).
+  A fixture added later follows the same rule. (12) The `quiescence` driver's `RestartWith` goes
   through the composed rig (`boot_server`), not `run_server`; the
   `cid_lease` driver replays `PoolExhaustedRestartCleansThePredecessorThenPlaces`
   on `lease_conf_three` with the background leases and relabelling of the
   `cid_lease` map; the D-9 cell follows the descriptor order in § *Roadmap
   impact* 10-02.
 
-- **Round 15 (MODULE-REFCOUNT, 2026-10-20).** Changes for DISTILL's sections
-  and test support:
-  - **Withdrawn surface.** The `PERMANENT` flag, the `flags` field of
-    `OVD_FWD_VERSION` (which now returns `abi_version` only),
-    `ForwarderError::NotPermanent`, and the probe's `/proc/modules` check are
-    withdrawn. Remove them from the `overdrive-fwd` UAPI mirror, the adapter
-    scaffold and the probe's `Version` stage. The probe gold test drops its
-    "module built with an `exit` function" injection.
+- **Module reference counting (MODULE-REFCOUNT).** Test support:
+  - **Version surface.** `OVD_FWD_VERSION` returns `abi_version` only; there
+    is no `PERMANENT` flag, no `ForwarderError::NotPermanent` and no
+    `/proc/modules` check in the probe's `Version` stage.
   - **The fixture's stale verdict** names `cargo xtask kmod-load`, which
     reloads an idle module, and never a reboot.
   - **`kmod-load`'s tests** cover four outcomes: absent → load; current →
     done; stale and idle → unload, then load; stale and busy → refused,
     naming the holder class.
   - **The hooks** run `kmod-load --busy-ok`.
-  - **The unload cell, V-EV-UNLOAD** (§ *Validation plan*), is a new
+  - **The unload cell, V-EV-UNLOAD** (§ *Validation plan*), is a
     real-kernel cell of the module suite. The `/sys/module/ovd_fwd/refcnt`
     oracle and the placement rule are in that item.
   - **Step K and step 4** (§ *Roadmap impact*) carry the context half and
     the socket half of the cell.
 
-- **T-1 is approved — build the fixture; do not route it to the user
-  (user ruling 2026-10-18).** The guest-kit Cloud Hypervisor microVM
+- **T-1: the guest-kit fixture.** The guest-kit Cloud Hypervisor microVM
   fixture is DISTILL-owned test support: an `overdrive-testing` helper that
   boots the CH fork with a guest kernel, `ovd_fwd.ko`, and `overdrive-init`
   or a scripted guest vsock peer, on the native-metal `kvm-tests` lane.
   R5-59 (a) (the real-adapter pair of the sim accept arbiters cited by
   `quint_udp_slots.rs` and `flow_io/sim.rs`), the guest-side `ovd_fwd` cells
-  and the in-guest real-kernel cells run on it. The *Wave: DISTILL*
-  sections that still list T-1 as a user decision and D-1 as "needs a guest
-  at CID 1" are DISTILL's to update to this ruling.
+  and the in-guest real-kernel cells run on it.
+  **U-4 (option (a)): the guest kit launches through the
+  production `CloudHypervisorVmm`.** The fixture holds no cloud-hypervisor
+  argv of its own: no second renderer, no exemption in the DWD-09 clause, no
+  new production API (§ *VMM backend contract*).
 - **RESTART-SSOT (GH #324).** DISTILL authors regression obligations 1–5 of
   § *Restart decision* for step 0, and the `cid_lease` driver projects
   `st` (`wait` / `done` / `failed`), `retry`, `ex` and `att` from the fixed
   `restart_status_for_alloc(target, kind, run_desired, row, generation)`,
   `attempt_index_for_alloc` and `current_alloc` over Service-kind workloads
   (QPROJ-2W; the `cid_lease` map, which pins every modelled variable and
-  the `Redeploy` map per pre-state). The final `cid_lease` map is recorded
-  in `227088-1792372761.247` (440 of 440, 64 `cid_lease` checks) and,
-  with D-18's main `lease_conf_three`, in `570179-1792418105.836` (441 of
-  441, 65 `cid_lease` checks) and the current record
-  `707089-1792512180.793` (458 of 458, 65 `cid_lease` checks): DR5-CLOSE's
-  item 7 (`VmmCrash` and `GuestReset` run no tick; `Assign` places a
+  the `Redeploy` map per pre-state). The `cid_lease` map, with the
+  recording main `lease_conf_three`, is recorded in `evidence/summary.json`
+  (44 `cid_lease` checks, of which 12 hazards): item 7
+  (`VmmCrash` and `GuestReset` run no tick; `Assign` places a
   successor while the predecessor's lease is still held; `Launch` cleans the
-  predecessor; new actions `Finalize` and `AssignRefused`; new projected
-  fields `pred` and `pst`; the model-only ghost `g.fin`) and DR6-CLOSE, and
-  the driver re-targets to it now. DR6-CLOSE changes no projected field and
-  no mapped action's production call: `Finalize` and `Redeploy` gain the
-  `reclaimed` guard (the driver never steps either before
+  predecessor; actions `Finalize` and `AssignRefused`; projected fields
+  `pred` and `pst`; the model-only ghost `g.fin`). `Finalize` and `Redeploy`
+  carry the `reclaimed` guard (the driver never steps either before
   `vm_reclamation_boot::converge` returned; `Redeploy` is a handler call,
   reachable only once the listener is bound after `converge`), the `retry`
-  / `ex` row no longer reads a launch clash's row (the clash path stays
-  unmapped), and the new hazards and guard runs are not driver targets. The
+  / `ex` row does not read a launch clash's row (the clash path stays
+  unmapped), and the hazards and guard runs are not driver targets. The
   driver's `#[quint_test]` set is every run listed under `cid_lease` item 8
   on `lease_conf_ok` except `CrashIsNotEnabledInThe325Window` and
   `CrashIsEnabledInThe325WindowWithoutTheGuard` (they check a model-only
   guard; production never refuses a `serve` crash), plus
   `RedeployLeasedAtServeCrashIsPlacedAgain` on `lease_conf_325` with
-  `#[ignore = "pending #325"]` (user ruling 2026-10-18, GH #325), plus
+  `#[ignore = "pending #325"]` (GH #325), plus
   `PoolExhaustedRestartCleansThePredecessorThenPlaces` on `lease_conf_three`
-  (D-18; the main exists and the run holds in the current record
-  `707089-1792512180.793`, so
-  the test's `#[ignore]` naming the missing main goes); its `#[quint_run]`
-  targets `lease_conf_ok`, which excludes the #325 window (item 9).
+  (D-18); its `#[quint_run]` targets `lease_conf_ok`, which excludes the
+  #325 window (item 9).
 
-- **Re-target the conformance drivers.** The *Wave: DISTILL* sections still
-  name the model-checking mains (`flows_ok`, `flows_two`, `flows_sess`,
-  `flows_beacon`, `quota_ok`, `empty_ok`, `quiesce_ok`, `quiesce_live`,
-  `probe_streak`) as driver targets. Those mains record no `conf_step`. Each
-  driver replays its module's recording main (QPROJ-1, D-UP-1, PD-6):
-  `flows_conf` (host and guest drivers) and `flows_beacon_conf` (VM driver)
-  for `owner_flows`; `pair_conf` for `fwd_pair`; `quota_conf`,
-  `lease_conf_ok`, `quiesce_conf`, `slots_conf`; `probe_streak_conf` for
-  `probe-count`. The acceptance designer re-targets them; the drivers of
-  the deleted `flow_end` (`end_all`) and `udp_empty` (`empty_conf`) modules
-  are deleted (§ *Formal protocol model*, "Change list for the
-  forwarder").
-- **The conformance-lint gate is red until DISTILL re-targets the drivers.**
-  `cargo xtask conformance-lint` reports 37 `unknown-quint-run` violations
-  against the forwarder revision of the specs:
-  - **25 from deleted modules.** `crates/overdrive-control-plane/src/guest_network/quint_flow_end.rs`
-    names `flow_end.qnt` (deleted with every run it pinned) and
-    `.../quint_udp_empty.rs` names `udp_empty.qnt` (deleted with
-    EVMOD-DGRAM). Both drivers are removed with their modules; their
-    scenarios move to `fwd_pair` (`pair_conf`) as listed under "Change list
-    for the forwarder".
-  - **12 from renamed runs** that existing drivers still pin:
-
-    | Module | Old run | New run | Drivers that pin it |
-    |---|---|---|---|
-    | `flow_quota` | `CompletedDrainAndEndReleaseTheSlot` | `CompletedPairReleasesTheSlotAtItsEndRecord` | host (`quint_flow_quota.rs`) |
-    | `flow_quota` | `AbortOfDrainingFlowReleasesSlotAndCell` | `AbortOfHalfClosedFlowReleasesTheSlotAtItsEndRecord` | host |
-    | `owner_flows` | `GuestOpenedFlowIsAdmittedReadInstalledAndPaired` | `GuestOpenedFlowIsAdmittedReadAttachedAndPaired` | host and guest (`quint_owner_flows.rs` in `overdrive-control-plane` and `overdrive-init`) |
-    | `owner_flows` | `RequestReadInPiecesInstallsOnlyAfterFullRead` | `RequestReadInPiecesAttachesOnlyAfterFullRead` | host and guest |
-    | `owner_flows` | `InstalledVgHostCloseEndsFlowSilently` | `AcceptedVgHostCloseEndsFlowSilently` | host and guest |
-    | `owner_flows` | `InstalledVgErrorAbortsWithAbort` | `AcceptedVgErrorAbortsWithAbort` | host and guest |
-    | `udp_slots` | `StaleGenerationReadinessEventIsDiscarded` | `DatagramQueuedBeforeAnEndIsDiscardedWithTheQueue` | host and guest (`quint_udp_slots.rs`) |
-
-    The `flow_quota` driver also names `main = "quota_ok"`, which records
-    no step; it re-targets `quota_conf`. The gate reports no other
-    violation.
-  - **The `fwd_pair` runs the `pair_conf` driver pins** (each holds in the
-    current record `707089-1792512180.793`, 458 of 458, which also records
-    round 14's `CtxGoneIffVmDown` and its witnesses (rounds 14 and 15); they
-    add no run, § *Status*),
-    each with
-    `#[quint_test]`. From the first
-    iteration: the nineteen of § *Formal protocol model* (the seventeen of
-    the change list and the prefixes `Paired` and `DgramPaired`). From the
-    second: `HostHalfCloseThenAbortBeforeGuestAttachIsAbort`,
-    `GuestCloseBeforeHostAttachAborts` (the in-flight branch: the guest's
-    `0x3` still in transit at the host's attach, U-EV3-1),
-    `RemoteFinThenResetAbortsPair`, `ForwarderRecoveryAbortsThenReopens` and
-    `ReleasedWatchWithNoRecordReadsAsAbort`. **Retired — no driver pins
-    them:** `OwnerAbortOfWatchShutsVhAndHolderSeesAbort` (second iteration;
-    it encoded the rejected EVMOD-WATCH-SHUT) and
-    `OwnerAbortedWatchHolderReadsNotConnectedAndReportsAbort` (a spec run of
-    the owner-shut watch abort, retired by the third iteration: its
-    subject, the holder's `ENOTCONN` after the owner's shut, no longer
-    exists under WATCH-ABORT;
-    the `Err` branch is `ContextReleaseShutsWatchedVhAndHolderReadsNotConnected`).
-    From the third: `GuestAppFinThenResetAbortsPairWithEpipe`,
+- **Conformance driver targets.** Each driver replays its module's
+  recording main (QPROJ-1, D-UP-1, PD-6): `flows_conf` (host and guest
+  drivers) and `flows_beacon_conf` (VM driver) for `owner_flows`;
+  `pair_conf` for `fwd_pair`; `quota_conf`, `lease_conf_ok`, `quiesce_conf`,
+  `slots_conf`; `probe_streak_conf` for `probe-count`. The model-checking
+  mains (`flows_ok`, `flows_two`, `flows_sess`, `flows_one`, `flows_beacon`,
+  `quota_ok`, `empty_ok`, `quiesce_ok`, `quiesce_live`, `probe_streak`)
+  record no `conf_step` and are not driver targets. There is no `flow_end`
+  or `udp_empty` module and no driver for either; their scenarios are
+  `fwd_pair` (`pair_conf`) runs (§ *Formal protocol model*, "Change list for
+  the forwarder").
+- **The `fwd_pair` runs the `pair_conf` driver pins** (each holds in the
+  recorded run in `evidence/summary.json`), each with
+  `#[quint_test]`: the nineteen of § *Formal protocol model* (the seventeen
+  of the change list and the prefixes `Paired` and `DgramPaired`);
+  `HostHalfCloseThenAbortBeforeGuestAttachIsAbort`,
+  `GuestCloseBeforeHostAttachAborts` (the in-flight branch: the guest's
+  `0x3` still in transit at the host's attach, U-EV3-1),
+  `RemoteFinThenResetAbortsPair`, `ForwarderRecoveryAbortsThenReopens` and
+  `ReleasedWatchWithNoRecordReadsAsAbort`; and
+  `GuestAppFinThenResetAbortsPairWithEpipe`,
     `EarlyVsockHalfCloseBeforeGuestAttachCompletes`,
     `AppWriteAndFinBeforePairedAttachesInCloseWaitAndCompletes`,
     `IntakeChildResetBeforePairedIsRefusedAndFlowAborts`,
@@ -625,12 +472,12 @@ What DISTILL takes from this DESIGN beyond the scenario re-derivation:
     replays randomized `#[quint_run]` traces on `pair_conf`. It projects
     `gen` and `cgen` from `flow_observation().forwarder_generation` and the
     `Paired` phases' `generation`, `oldCtx` from `SimFlowForwarder` (named
-    arbiter), `unclassified` from `inventory()`, and the third iteration's
-    variables by the spec's names as QPROJ-8, "The third iteration's
-    variables", classes them (`attRes` and `attEnded` through the owners'
-    `forwarder_attach_ended`; `hres` from the production `GuestStream`; the
-    holder's own observation `gh.hobs` and the other third-iteration ghosts
-    are model-only). It maps the action names the spec declares: `TcpRst`
+    arbiter), `unclassified` from `inventory()`, and the ended-half, watch and
+    stream variables by the spec's names as QPROJ-8, "Ended-half, watch and
+    stream variables", classes them (`attRes` and `attEnded` through the
+    owners' `forwarder_attach_ended`; `hres` from the production
+    `GuestStream`; the holder's own observation `gh.hobs` and the other
+    ghosts are model-only). It maps the action names the spec declares: `TcpRst`
     (not `EpRst`), `HolderDrop` (not `DialerDrop`), `GuestAbort`,
     `HolderEnd`, and the orphan sweep as `VmmExit` then `FwdErr(h)`
     (U-EV3-7). The instances `pair_wlive` and `pair_dlive` are
@@ -664,20 +511,73 @@ What DISTILL takes from this DESIGN beyond the scenario re-derivation:
   graceful close are indistinguishable at the guest. Scenarios and the
   guest-side driver wait for EOF / `EPOLLRDHUP`, never for `ECONNRESET` or
   `EPOLLERR`, and do not assert which kind of host close occurred.
-- **The forwarder (EVMOD-ADOPT 2026-10-16; EVMOD-LIFE to EVMOD-AB approved
-  2026-10-17).** The modeller's current record is `707089-1792512180.793`
-  (458 of 458, covering the spec changes of rounds 14 to 16; `verify-evidence`
-  passes, § *Status*);
-  V-EV-END,
-  V-EV-CTL, V-EV-PAIR and V-EV-DGRAM ran and held (P-69 to P-72), and their
-  shapes and hazard variants are the module suite's negative controls.
-  Every scenario, fixture and driver that exercises a sockmap forwarder —
-  a verdict, drain cells and counters, a flow-event ring, a raw-tracepoint
-  classifier, strparser and parking cells, SEQPACKET and empty-datagram
-  notices, guest drain slots — is re-derived against § *[REF] vsock data path
-  — the in-kernel event-driven forwarder (EVMOD)*; § *Lifecycle Gate
-  Ownership*, "EVMOD re-derivation of the boundary scenarios", lists each R5
-  scenario's disposition. No `guest_slots` or `flow_valve` module exists.
+- **The forwarder (EVMOD-ADOPT; EVMOD-LIFE to EVMOD-AB).** The record is
+  `evidence/summary.json` (279 checks; `verify-evidence` passes, § *Status*);
+  V-EV-END, V-EV-CTL, V-EV-PAIR and V-EV-DGRAM held (P-69 to P-72), and
+  their shapes and hazard variants are the module suite's negative controls.
+  Every scenario, fixture and driver exercises the in-kernel forwarder
+  (§ *[REF] vsock data path — the in-kernel event-driven forwarder
+  (EVMOD)*); § *Lifecycle Gate Ownership*, "EVMOD re-derivation of the
+  boundary scenarios", lists each R5 scenario's disposition.
+- **R5-28 / R5-31 Tier-3 half: the in-guest lane (D-22).** The Tier-3 half of R5-28 and R5-31 (the V-24 shape) runs in
+  the in-guest lane (`overdrive-init/tests/integration/in_guest_lane.rs`,
+  `kvm-tests`, native metal, the guest-kit fixture of the T-1 ruling), not
+  through `serve`. No in-guest observation surface is added to production
+  `overdrive-init`.
+  - **Roles.** The guest side is the production guest owner
+    (`GuestFlowOwner` over `KernelGuestOwnerIo`, the real `ovd_fwd` and a
+    Linux 7.0 guest on the Cloud Hypervisor fork), driven by an in-guest
+    cell of `guest_flow::real_kernel`. The host side is the lane's scripted
+    host peer over the real host vsock (vhost-vsock): it opens V_h to the
+    guest's stream port, writes the request and nothing else, then closes
+    V_h, in each order the rows name relative to the guest's accept (V_g
+    accepted before `Paired`, V_g still queued); it plays the control
+    session — a `Paired` for the aborted flow answered with nothing, an
+    `Abort` for a flow the guest does not yet hold, a session close
+    followed by a reconnect. This is V-24's host script, and the guest is
+    the production owner in place of V-24's userspace model.
+  - **Where the oracle is read.** Every read is in the guest, by the cell:
+    (1) the owner through its pinned crate-private
+    `GuestFlowOwner::guest_observation()` (DG-5; no new accessor) — the
+    flow leaves `accepted`, no pair is attached (`forwarder_attached`
+    unchanged), and the session is held again after the reconnect; (2) the
+    cell's in-guest application listener — no connection C (R5-31's "no C"
+    case) or C reset, and no byte; (3) the host peer's record of the control
+    session — no message for the flow; (4) the kernel shape itself on a V_g
+    the cell accepts with its own raw listener under the same host script:
+    the request read succeeds, then EOF, `POLLRDHUP`, `EPIPE` on the first
+    write — V-24's witness re-run in the lane, so the owner-path cells never
+    rest on a kernel fact the lane did not observe. (5) Within 1 s of the
+    abort the owner holds no socket of the flow (1) and the application side
+    has none (2). R5-31's abort-to-reset latency over a 1,000-flow burst is
+    reported (p50 / p99), not asserted. Placement: the
+    cell's owner is the guest's **only** owner — the lane boots the guest
+    kit with the scripted peer as PID 1 and no production `overdrive-init`
+    (`overdrive_testing::guest_lane::run_in_guest_owner_cell`), so no second
+    owner contends for the UDP slot binds, the capture programs or the
+    control port. R5-28's "counted" clause (the structured event
+    `guest_flow.control_discarded`) has no in-guest read surface and is
+    discharged by the seeded-sim half only; the lane asserts "no reply".
+  - **Why this is the Tier-3 half (`testing.md`, "DISTILL — prove composed
+    system behavior").** Neither cause has a production stimulus a `serve`
+    test can drive. Quiescence is entered only by a component recovery
+    (QHOLD), whose stimuli the approved design drives in seeded sim (R5-32);
+    driving one through `serve` needs a test seam (removed by
+    NO-OVERRIDE-SEAMS) or a foreign mutation of Overdrive's kernel state (not
+    a design driver on the appliance). Control-session loss without a VM
+    fault has no production stimulus (D-16, item (5) above). A through-`serve`
+    cell could only fabricate the cause, which `testing.md` forbids ("drive
+    causes, not fabricated consequences"), and an observation surface on
+    production `overdrive-init` would add production API to observe a state
+    no `serve` test can reach. The composed behaviour is instead proven in
+    two halves that meet at the wire: the host half — the production host
+    owner deciding the abort, closing V_h after the request with no write
+    (H-1) and discarding a late `Paired` — in the seeded-sim composed rig and
+    the `owner_flows` conformance drivers; the wire →
+    guest half — the real kernel's close propagation, the production guest
+    owner's reaction and the application's view — in this lane. The host
+    peer's script is exactly the wire behaviour the host half asserts, so
+    no participant of the contract is missing from both halves.
 - **Guest-neutral host side (ADR-0207).** Host-side scenarios and drivers
   assert the host's behaviour on the wire protocol only; none selects host
   behaviour by guest kind. The guest-side scenarios are those of a Linux
@@ -686,8 +586,8 @@ What DISTILL takes from this DESIGN beyond the scenario re-derivation:
 
 ### [REF] Approval record
 
-One table of every current decision id. A decision this design removed is not
-listed here; § *Changed assumptions* names each once. Details the architect
+One row per user ruling and per current decision id. § *Changed assumptions*
+quotes the operative contracts this design replaces. Details the architect
 pinned to make an approved ruling implementable (the `GuestStreamDial`
 signature, `NoSession`, the leaked-hold fail-stop, the lost-count reset, the
 dial constants) are recorded under the ruling they elaborate and carry its
@@ -705,42 +605,42 @@ date.
 | D8-PREFIX-CFG, D8-PREFIX-VIP, D19-LINKS | 2026-10-08 | User decisions of 2026-10-08 |
 | ATTR-TOKEN, ATTR-LIVE-CLAIM, TCPACCEPT-END, D26-PINS | 2026-10-09 | Approved under the user's directive of 2026-10-09 ("if design needs changing, then you remediate, and then proceed to DISTILL") |
 | QPROJ-1 to QPROJ-7, U-QP-1, U-QP-2 | 2026-10-09 | User approval of the conformance projection (§ *Conformance observation surface and action map*) |
-| DG-1 to DG-16, as current in § *DISTILL design-gap closure* | 2026-10-09 | Approved under user delegation |
+| DG-1 to DG-16 | 2026-10-09 | Approved under user delegation; each is pinned in its owning contract section |
 | DG-2-R2, DG-4-CTOR, DG-CONST, DG-5-A, DG-5-B, DG-5-C, DG-5-E, DG-5-F, DG-5-Q | 2026-10-10 | Approved by the user (delegated: "choose the correct solution; surface only if it breaks functionality") |
 | KERNEL-7.0 | 2026-10-10 | The pinned kernel is Linux 7.0; user ruling recorded in `CLAUDE.md` § "Vendored components" |
 | END-STATE | 2026-10-11 | User ruling "End-state guest networking": the guest is NIC-less and vsock-only; #303 adapts to it |
-| INB-1 (per-kind dial, `GuestStreamDial`, `NoSession`, the temporary leg-S bridge) | 2026-10-11 | User rulings "Finding 1" and "Finding 1 amended", recorded on [#303](https://github.com/overdrive-sh/overdrive/issues/303#issuecomment-6113302506) |
+| INB-1 (per-kind dial, `GuestStreamDial`, `NoSession`, the temporary leg-S bridge) | 2026-10-11 | User ruling "Finding 1", in its final form, recorded on [#303](https://github.com/overdrive-sh/overdrive/issues/303#issuecomment-6113302506) |
 | R2-END, R2-DRAIN, CID-NOCLAIM, RESET-EXIT, QHOLD, NO-SURVIVE | 2026-10-11 | User ruling "Items 2–6 approved" |
 | LEGB-DIAL | 2026-10-13 | User ruling "Leg-B dial contract replaces PREFIX-ROUTE-LO / INB-1-READ" |
 | GW-LOCAL | 2026-10-13 | User approval of ADR-0152 as written |
-| PROBE-NOSAMPLE | 2026-10-13 | User approval of ADR-0187 decisions 1–3; how a sample is counted moved to PROBE-RUN-COUNT |
-| PROBE-RUN-COUNT | 2026-10-13 | User ruling "Probe threshold counting (round-2 H-A)", and the user ruling of 2026-10-13 "Probe streak at source" (each row carries `same_status_runs`, counted by the probe runner; `ServiceLifecycle` applies the threshold at read time, keeps no streak, and acts once per crossing by the run sequence at which it last acted; a probe-runner restart resets the streak and is accepted). The run-sequence numbering, the run-sequence merge, the `SameStatusRuns` newtype, the act-once condition and the `ServiceLifecycleView` field are architect elaborations recorded under these rulings |
+| PROBE-NOSAMPLE | 2026-10-13 | User approval of ADR-0187 decisions 1–3; how a sample is counted is PROBE-RUN-COUNT |
+| PROBE-RUN-COUNT | 2026-10-13 | User ruling "Probe threshold counting", and the user ruling of 2026-10-13 "Probe streak at source" (each row carries `same_status_runs`, counted by the probe runner; `ServiceLifecycle` applies the threshold at read time, keeps no streak, and acts once per crossing by the run sequence at which it last acted; a probe-runner restart resets the streak and is accepted). The run-sequence numbering, the run-sequence merge, the `SameStatusRuns` newtype, the act-once condition and the `ServiceLifecycleView` field are architect elaborations recorded under these rulings |
 | PROBE-RUN-COUNT D-1 | 2026-10-13 | User decision "D-1 liveness stop retry", option (a): a failed liveness stop is retried on the next probe row that is still past the failure threshold (so at most once per probe run, bounded by the probe interval); a re-read of the same row never stops twice |
-| PROBE-NOSAMPLE-EVENT | 2026-10-13 | User ruling "Probe threshold counting (round-2 H-A)" ("each no-row case … emits an event"); recorded in its own ADR (ADR-0192). The event's name, fields, reasons and level are architect elaborations recorded under this ruling |
-| D-UP-1, D-UP-3, D-UP-4 (with the `ForeignHold` revision), D-UP-6, D-UP-8, D-UP-9, D-UP-10, D-UP-17 | 2026-10-14 | User approval "approve all" of the DISTILL design-gap closure. D-UP-1 as validated by spike QT1 (`spike/findings-qt1-conf-step.md`, WORKS): the step path is the single element `"<main>::<module>::conf_step"` and a driver's state projection matches qualified names; for `owner_flows`, with its two recording mains (PD-6), the paths are `"flows_conf::owner_flows::conf_step"` (host and guest drivers) and `"flows_beacon_conf::owner_flows::conf_step"` (the VM driver). D-UP-4 with the reviewer revision: restoring a foreign hold is a typed error, never `unreachable!`, and a dropped hold reaches its issuing ledger by a pinned path (an `Arc` to the issuing ledger's inner). The contract surface the architect pinned under these decisions is PD-1 to PD-9 below |
-| D-UP-12 | 2026-10-14; restated by EVMOD-AB 2026-10-17 | User decision (PD decisions, re-deciding D-UP-12): multiple probes per role are kept (`[[health_check.<role>]]` arrays, `Vec<ProbeDescriptor>`), and a spec whose startup, readiness and liveness probes together exceed `GUEST_PROBE_SLOTS` (8) is refused with one validation error at each ingress. Under EVMOD-AB the cap is the most quota-exempt probe dials one allocation holds (a node-capacity bulkhead); the guest has no drain-slot pool. The earlier option (a), one probe per role, is withdrawn. The error variant (`ParseError::ProbeCountExceeded`, `AggregateError::Validation { field: "probes" }`) and its `Display` text are architect elaborations recorded under this decision |
+| PROBE-NOSAMPLE-EVENT | 2026-10-13 | User ruling "Probe threshold counting" ("each no-row case … emits an event"); recorded in its own ADR (ADR-0192). The event's name, fields, reasons and level are architect elaborations recorded under this ruling |
+| D-UP-1, D-UP-3, D-UP-4 (with the typed `ForeignHold` error), D-UP-6, D-UP-8, D-UP-9, D-UP-10, D-UP-17 | 2026-10-14 | User approval "approve all" of the DISTILL design gaps. D-UP-1 as validated by spike QT1 (`spike/findings-qt1-conf-step.md`, WORKS): the step path is the single element `"<main>::<module>::conf_step"` and a driver's state projection matches qualified names; for `owner_flows`, with its two recording mains (PD-6), the paths are `"flows_conf::owner_flows::conf_step"` (host and guest drivers) and `"flows_beacon_conf::owner_flows::conf_step"` (the VM driver). D-UP-4: restoring a foreign hold is a typed error, never `unreachable!`, and a dropped hold reaches its issuing ledger by a pinned path (an `Arc` to the issuing ledger's inner). The contract surface the architect pinned under these decisions is PD-1 to PD-7 below |
+| D-UP-12 | 2026-10-14; as carried by EVMOD-AB 2026-10-17 | User decision (PD decisions): multiple probes per role are kept (`[[health_check.<role>]]` arrays, `Vec<ProbeDescriptor>`), and a spec whose startup, readiness and liveness probes together exceed `GUEST_PROBE_SLOTS` (8) is refused with one validation error at each ingress. The cap is the most quota-exempt probe dials one allocation holds (a node-capacity bulkhead); the guest has no drain-slot pool. The error variant (`ParseError::ProbeCountExceeded`, `AggregateError::Validation { field: "probes" }`) and its `Display` text are architect elaborations recorded under this decision |
 | D-UP-2, D-UP-5, D-UP-7, D-UP-11, D-UP-13 to D-UP-16, D-UP-18 to D-UP-20 | 2026-10-14 | Mechanical completions of approved decisions, confirmed by the user to stand as written |
 | FHOLD-CHECK | 2026-10-15 | User ruling "Foreign-hold fail-stop", option (b): the supervisor's fail-stop on a foreign quiescence hold is checked by the Quint model (`quiescence-foreign-hold-ends-in-fail-stop`, run `ForeignHoldRestoreChangesNothingThenFailStops`) and by a unit test of the supervisor's `ForeignHold` → `ForeignQuiescenceHold` mapping; no seam is added for a state production cannot reach |
 | OVERCAP-NOMIG | 2026-10-15 | User ruling "Over-cap persisted intents": an intent persisted with more than `GUEST_PROBE_SLOTS` probes is not migrated; greenfield single cut, the intent store is deleted on upgrade (the Phase-1 upgrade path) |
 | K-A5 | 2026-10-15 | User ruling: assumption K-A5 is discharged by spike K-A5 (`spike/findings-ka5.md`, WORKS, 4,750 trials, kernel `7.0.0-29`), with its wording: the guest owner detects an end by EOF or `EPOLLRDHUP`; `ECONNRESET` happens only at connect; a reset close is indistinguishable from a graceful close |
-| PSO-WITHDRAWN (D-3) | 2026-10-15 | User ruling: PSO-1 and PSO-2's refusal are withdrawn (§ *Changed assumptions*) |
 | END-IDEMPOTENT, CLEAN-FULL-END (V-4 consequences) | 2026-10-15 | User ruling: a trailing end after a flow's end is a no-op, with idempotent end handling (no double release, no recycled-id effect); a clean full end needs `0x2` each way before close (ADR-0180; P-65) |
 | VALVE-IN-295 | 2026-10-15 | User ruling: the unbounded redirect queue of guest-slot spike V-3 is fixed inside #295 by real backpressure, not an abort on a byte cap; ADR-0183's "slow reader is backpressure" claim must be made true. Discharged by EVMOD-ADOPT: the forwarder consumes from a source only what its target accepted (P-67, P-68) |
 | EVMOD-ADOPT | 2026-10-16 | User data-path ruling: the event-driven in-kernel forwarder (evmod) is #295's vsock data path, replacing the BPF sockmap redirect (ADR-0197). Design inputs pinned by the ruling: the module is built in or cannot unload while any socket is hooked; a TLS-record-aware peek with `close_notify` → FIN if a forwarded TCP half carries kTLS; a real control interface and pair-completion event in place of the spike's `ioctl` and `/proc` polling; a per-CPU workqueue by default. Removed by the ruling: the valve (VALVE-1 to VALVE-6), the drain goal and sent counters and their recursion misses, A10 and V-31-MV, V-3-DGRAM if moot, and the parts of A+B, GS-E1 to GS-E5 and the Quint models that existed only because of the redirect. Rejected by the ruling: the userspace pump (CPU cost), a kernel patch (P1), BPF only (shown impossible). The contracts pinned under it are EVMOD-LIFE to EVMOD-AB below |
-| EV-PINS | 2026-10-17 | User ruling "evmod spike corrections" ("proceed with recommendation"): fold the corrections of V-EV-END, V-EV-CTL, V-EV-PAIR and V-EV-DGRAM (`spike/findings-ev-{end,ctl,pair,dgram}.md`) into the EVMOD contracts — the TCP `sk_error_report` reset rule; attach accepts TCP `CLOSE_WAIT` and seeds the end classification at attach; an attach refused because a half reset or closed is a flow abort; a dropped `GuestStream` aborts its watch; `O_CLOEXEC`; the refusal precedence; the permanent-module probe and `CONFIG_MODULE_FORCE_UNLOAD` off; per-context inventory; datagram D1–D4; the CLEAN-FULL-END ordering. Written into the contracts of EVMOD-LIFE to EVMOD-AB below. (The permanent-module probe was withdrawn by MODULE-REFCOUNT, 2026-10-20; forced unload stays off.) |
+| EV-PINS | 2026-10-17 | User ruling "evmod spike corrections" ("proceed with recommendation"): fold the corrections of V-EV-END, V-EV-CTL, V-EV-PAIR and V-EV-DGRAM (`spike/findings-ev-{end,ctl,pair,dgram}.md`) into the EVMOD contracts — the TCP `sk_error_report` reset rule; attach accepts TCP `CLOSE_WAIT` and seeds the end classification at attach; an attach refused because a half reset or closed is a flow abort; a dropped `GuestStream` aborts its watch; `O_CLOEXEC`; the refusal precedence; `CONFIG_MODULE_FORCE_UNLOAD` off; per-context inventory; datagram D1–D4; the CLEAN-FULL-END ordering. Written into the contracts of EVMOD-LIFE to EVMOD-AB below |
 | WATCH-ABORT | 2026-10-17 | User ruling, the recommended option of EV-CTL § 4.3: a watch's abort never touches the holder's socket; the holder always reads the end record after its read ends (EOF or error); only a context release shuts watched sockets (ADR-0211). How an owner abort then reaches the stream and the guest is EVMOD-STREAM-ABORT |
-| EVMOD-LIFE, EVMOD-BUILD, EVMOD-LOAD, EVMOD-GUEST-KIT, EVMOD-SAFE, EVMOD-CTL, EVMOD-REC, EVMOD-STREAM-END, EVMOD-STREAM-ABORT, EVMOD-ATTACH-END, EVMOD-PORT, EVMOD-END, EVMOD-PAIR, EVMOD-DGRAM, EVMOD-KTLS, EVMOD-WQ, EVMOD-AB | 2026-10-17 | User approval "EVMOD approval" ("proceed with everything else"), for Linux guests: every contract of the table below. EVMOD-AB withdraws SLOT-RELEASE (the user's D-1), PROBE-DROP-ABORT (D-2) and ENDS-BEFORE-CLAIMS (B), approved 2026-10-15, with their elaborations GS-E1 to GS-E5 (§ *Changed assumptions*); EVMOD-DGRAM withdraws D4, UDP-EMPTY, D15-R4, UDP-SEQ and CELL-RECREATE (§ *Changed assumptions*) |
+| EVMOD-LIFE, EVMOD-BUILD, EVMOD-LOAD, EVMOD-GUEST-KIT, EVMOD-SAFE, EVMOD-CTL, EVMOD-REC, EVMOD-STREAM-END, EVMOD-STREAM-ABORT, EVMOD-ATTACH-END, EVMOD-PORT, EVMOD-END, EVMOD-PAIR, EVMOD-DGRAM, EVMOD-KTLS, EVMOD-WQ, EVMOD-AB | 2026-10-17 | User approval "EVMOD approval" ("proceed with everything else"), for Linux guests: every contract of the table below. EVMOD-AB carries the rulings SLOT-RELEASE (the user's D-1), PROBE-DROP-ABORT (D-2) and ENDS-BEFORE-CLAIMS (B), approved 2026-10-15; EVMOD-DGRAM carries D4, UDP-EMPTY, D15-R4, UDP-SEQ and CELL-RECREATE |
 | HOST-NEUTRAL | 2026-10-17 | User approval "EVMOD approval", new: the host-side frame protocol (request, datagram and end classes) is guest-neutral; the host forwarder never branches on guest type (ADR-0207; research `docs/research/networking/unikraft-guest-forwarder-research.md`). The Unikraft guest hop is separate work, [GH #321](https://github.com/overdrive-sh/overdrive/issues/321), created with user approval 2026-10-17 |
 | T-1 | 2026-10-18 | User ruling "DISTILL rulings", T-1 approved: build the guest-kit Cloud Hypervisor microVM fixture — an `overdrive-testing` helper booting the CH fork with a guest kernel, `ovd_fwd.ko`, and `overdrive-init` or a scripted guest vsock peer, on the native-metal `kvm-tests` lane. R5-59 (a), the guest-side `ovd_fwd` cells and the in-guest real-kernel cells run on it. DISTILL owns the fixture as test support (DR2-CLOSE D-1) |
-| RESTART-SSOT (GH #324) | 2026-10-18 | User rulings: GH #324 filed with approval ("`restart_status_for_alloc` disagrees with `WorkloadLifecycle`'s restart decision"), then "fix the accessor, do not work around it": one shared restart decision in `overdrive-reconcilers` used by both `WorkloadLifecycle` and `restart_status_for_alloc`; #295 lands the fix and closes #324; `cid_lease` projects `retry` from the fixed accessor. The function shapes (`restart_decision`, `restart_after_failure`, the accessor's `kind` / `run_desired` / `failed` / `desired_generation` inputs, `attempt_index_for_alloc`, `current_alloc` made `pub`), the Job, `Draining` and intent clauses, and the `cid_lease` projection of `att`, `ex` and `failed` are architect elaborations recorded under this ruling (§ *Restart decision*), adversarial review pending |
-| RESTART-GEN-CRASH (GH #325) | 2026-10-18 | User ruling: the loss of a generation replacement placed but not started at a `serve` crash is a separate issue, GH #325; #295 does **not** fix it. The `cid_lease` run `RedeployLeasedAtServeCrashIsPlacedAgain` and hazard `crashLosesPlacedGeneration` stay pending, citing #325, until #325 lands; the run's DISTILL `#[quint_test]` is `#[ignore = "pending #325"]`. The architect's PROPOSED fix (a pending generation stays pending until a row of the allocation placed for it is observed) is withdrawn from this delta; its design belongs to #325. The conformance-main exclusion of the window (`cid_lease` item 9) is an architect elaboration under this ruling |
-| U-2, E-3 | 2026-10-19 | User rulings "DISTILL rulings (2026-10-19)": U-2: V-9's density measurements are the benchmark GH #326; `vsock_density.rs` stays a 64-VM correctness test. E-3: the `mtls_guardrails` AC3 failure at HEAD is out of scope, no issue. (U-1 of the same ruling — non-VM `serve` tests never bind the vsock ports, which stay hardcoded — is replaced by PORTS-CONFIG below; its round-10 mechanism, `guest_flow_io_override` and `vm_override` with `SimVmm` + `SimBeaconIo`, is rejected by NO-OVERRIDE-SEAMS and removed from this delta) |
-| PORTS-CONFIG, GUEST-PORTS, FWD-PREREQ, NO-OVERRIDE-SEAMS | 2026-10-19 | User rulings "DISTILL rulings (after round 10)". PORTS-CONFIG (ADR-0218): the beacon, flow stream and control vsock ports are node configuration, production defaults 1234 / 1240 / 1243; a test configures a kernel-assigned port and reads the bound port back from its owner; non-VM `serve` tests run the real production listeners, no simulated seam swapped in. GUEST-PORTS (ADR-0217): the VM driver passes the ports to the guest at launch; `overdrive-init` no longer hard-codes them. FWD-PREREQ: `ovd_fwd` loaded on the test host is a declared lane prerequisite (a setup step), not an accident of suite order; non-VM `serve` tests run the real forwarder probe. NO-OVERRIDE-SEAMS (ADR-0219, amends ADR-0083 § D8): `run_server` receives its driven adapters as a parameter from the composition root (`overdrive serve` passes host adapters, tests pass sim adapters); `ServerConfig.vm_override` is removed and no adapter-swapping `ServerConfig` field is added; every VM test migrates; the round-10 `GuestFlowIoOverride::sim_vsock()` mechanism and `SimVmm` through `vm_override` for non-VM tests are rejected. Architect elaborations under these rulings, adversarial review pending: `VsockListenPort` / `NodeVsockPortConfig` and its validation (fixed ports above 1023, pairwise distinct, all fixed or all kernel-assigned; round 13: carried by `ServerConfig` and the CLI's `ServeArgs`, no file section), the bound-port accessors, a repair keeping the held listening socket (round 11), the three appended token fields, `NodeAdapters` / `VmAdapters` / `VmCapability` / `GuestFlowAdapter`, and the `cargo xtask kmod-load` setup step |
-| NO-OVERRIDE-SEAMS scope | 2026-10-19 | User ruling "NO-OVERRIDE-SEAMS scope" ("proceed with recommendations"): ALL of it, in #295. `run_server` takes every driven adapter from the composition root through `NodeAdapters`; nothing in `ServerConfig` swaps or carries an adapter. Moved into `NodeAdapters`: `mtls_intercept`, `guest_dns`, the dataplane (replacing `dataplane_override`; mTLS composition no longer keyed on its presence), the mTLS identity read (replacing `mtls_identity_override`), `clock` (no `SystemClock` default) and `kek`, and the adapters `run_server` built internally (the second `SystemClock`, a bug; the TCP/HTTP probers; `RealCgroupAccounting`; `RealVmHostState`; the observation wiring). Removed: `dataplane_probe_fault`, `mtls_probe_fault` (tests inject faults through sim adapters). Configuration that stays: `dataplane_pin_dir`, `dataplane_cgroup_attach_path`. Amends ADR-0138 (the two ports leave `ServerConfig`; the enforcement is built through a factory port). Architect elaborations under this ruling, adversarial review pending: the grouping (`BootAdapters`, `MtlsAdapters`, `ProbeAdapters`, `VmAdapters` with `cgroup_accounting`), `cgroup_fs` folded into the bundle, `entropy` and `transport` added beside `clock`, `NodeAdapters::host`, `DataplaneComposer` with `host_ipv4`, `MtlsEnforcementFactory` (the identity read is the factory's choice), `run_with_adapters`, and the supplied-owner path over `BootAdapters` |
-| STORES-IN, PROBE-ROOT-ENV | 2026-10-19 | User rulings ("proceed with recommendations") after round 12. STORES-IN: the intent store (`LocalIntentStore`), view store (`RedbViewStore`), workflow journal (`RedbJournalStore`) and the workload-identity CA (`RcgenCa` + `RootKeyAeadCodec`) also come from the composition root through the adapters bundle; `NodeAdapters::host` opens them; `run_server` / `boot_server` construct no driven adapter at all; no carve-out. PROBE-ROOT-ENV: the `OVERDRIVE_TEST_PROBE_ROOT` env seam is removed from `serve.rs`; `serve_probe_refusal` passes a failing cgroup adapter through `run_with_adapters`. Architect elaborations under these rulings, adversarial review pending: `StoreAdapters` / `IntentStoreAdapter` / `CaAdapters` and their constructors, the generate-or-adopt staying in the boot as the CA's probe step, one `CaAdapters` per boot, `NodeAdapters::host(&ServerConfig, ..)`, `run_with_adapters(args, cgroup_fs, builder)` |
-| NODE-CONFIG-LOADER, U-3, CA placement | 2026-10-20 | User rulings "Rulings after round 13". NODE-CONFIG-LOADER: `overdrive serve` loading the operator node TOML (ADR-0025 `[node]`, ADR-0049 `[dataplane]`, ADR-0218's `[vsock]`) is out of #295, [GH #327](https://github.com/overdrive-sh/overdrive/issues/327) (created with user approval); in #295 the vsock ports are set only through `ServerConfig.vsock_ports` / `ServeArgs.vsock_ports`; ADR-0218 keeps its `[vsock]` design text marked deferred to #327. U-3, option (b): the forwarder module build (module source and `cargo xtask kmod-build`) moves ahead of DELIVER step 0, provided it depends on none of steps 0–3 (checked: § *Roadmap impact*, step K). CA placement: the CA comes from the bundle, and generate-or-adopt with its probes stays in `boot_server`; this stands. Architect elaborations, adversarial review pending: the step-K skeleton, the tree-digest `version` (D-20), the non-`Clone` stores (D-21), and `CaFactory`. `CaFactory` refines the CA placement ruling: the bundle supplies the CA's factory, and the boot builds the instance over its one entropy before generate-or-adopt. It is surfaced for confirmation (§ *DISTILL upstream-issue closure*, "Round 14") |
-| MODULE-REFCOUNT (**amends EVMOD-LIFE and EVMOD-SAFE**, approved 2026-10-17) | 2026-10-20 | User ruling "Rulings after round 13", MODULE-REFCOUNT. `ovd_fwd` is no longer permanent; it is unload-safe by module reference counting, as the data-path ruling of 2026-10-16 allowed ("cannot unload while any socket is hooked"). Every hooked socket and every open control context holds a module reference (`try_module_get` / `module_put`). rmmod is refused while any reference is held and succeeds at zero. The module gains a `module_exit` that tears down its device and workqueue. `kmod-load` unloads and then loads a stale idle module, and fails a busy one with a clear "busy, retry" message, never a reboot. On the appliance the module is still loaded once at boot. A real-kernel cell proves the refusal while hooked and the success after release. **Amendment.** EVMOD-LIFE's "`module_init` and no `module_exit`; never unloaded" is replaced by ADR-0198's reference-counted lifetime. EVMOD-SAFE gains rule 5 (ADR-0204). EV-PINS' permanent-module probe is withdrawn; forced unload stays off. Neither contract was implemented, so ADR-0198 and ADR-0204 state the result in present tense. Architect elaborations, adversarial review pending: the holder table and release points, rule 5 (removal under the socket lock; a ULP present at removal keeps that socket's reference for the boot), `module_exit`'s order, the appliance keeping `CONFIG_MODULE_UNLOAD` off (ADR-0068 § 7), `OVD_FWD_VERSION` reporting `abi_version` only, `kmod-load`'s reload and busy messages, the hooks' `--busy-ok` form, the unload cell's placement, and the errno: the kernel refuses a held module with `EWOULDBLOCK` (`EAGAIN`), not `EBUSY` (`kernel/module/main.c:744-751 @ v7.0`; `EBUSY` is a module still initialising or going, `:810-816`) |
-| LEGS-DIAL (D-14) | 2026-10-19 | User ruling "D-14 (LEGS-DIAL)", option (a): the inbound enforcement dials leg S over vsock; `guest_dial` moves to the enforcement port (`HostMtlsEnforcement::new(identity, limits, guest_prefix, guest_dial)`, `SimMtlsEnforcement` likewise) and is removed from `MtlsInterceptWorker::new`. **Amends D-UP-5** (2026-10-14), whose worker parameter is withdrawn; the VM probe runner's `guest_dial` (the other half of D-UP-5) is unchanged. Pinned with the ruling: `establish` splits into a blocking handshake, an awaited leg-S dial and the relay; the leg-S `GuestStream` is torn down through its drop, never held as a raw descriptor; D-13's accessor moves to the enforcement; `compose_guest_network(ports, io, dial)` changes D-UP-16's shape. The split's internal shape is the crafter's |
+| U-4 | 2026-10-21 | User ruling "U-4", option (a): the guest kit (T-1) launches its microVM through the production `CloudHypervisorVmm` (`overdrive-host`); the kit renders no cloud-hypervisor command line of its own. Rejected: sanctioning a second renderer in dst-lint DWD-09 clause 1 (relaxes the gate), and exporting a pure argv renderer from `overdrive-host` (new production API) |
+| RESTART-SSOT (GH #324) | 2026-10-18 | User rulings: GH #324 filed with approval ("`restart_status_for_alloc` disagrees with `WorkloadLifecycle`'s restart decision"), then "fix the accessor, do not work around it": one shared restart decision in `overdrive-reconcilers` used by both `WorkloadLifecycle` and `restart_status_for_alloc`; #295 lands the fix and closes #324; `cid_lease` projects `retry` from the fixed accessor. The function shapes (`restart_decision`, `restart_after_failure`, the accessor's `kind` / `run_desired` / `failed` / `desired_generation` inputs, `attempt_index_for_alloc`, `current_alloc` made `pub`), the Job, `Draining` and intent clauses, and the `cid_lease` projection of `att`, `ex` and `failed` are architect elaborations recorded under this ruling (§ *Restart decision*) |
+| RESTART-GEN-CRASH (GH #325) | 2026-10-18 | User ruling: the loss of a generation replacement placed but not started at a `serve` crash is a separate issue, GH #325; #295 does **not** fix it. The `cid_lease` run `RedeployLeasedAtServeCrashIsPlacedAgain` and hazard `crashLosesPlacedGeneration` stay pending, citing #325, until #325 lands; the run's DISTILL `#[quint_test]` is `#[ignore = "pending #325"]`. The design of that fix belongs to #325. The conformance-main exclusion of the window (`cid_lease` item 9) is an architect elaboration under this ruling |
+| U-2, E-3 | 2026-10-19 | User rulings "DISTILL rulings (2026-10-19)": U-2: V-9's density measurements are the benchmark GH #326; `vsock_density.rs` stays a 64-VM correctness test. E-3: the `mtls_guardrails` AC3 failure at HEAD is out of scope, no issue. |
+| PORTS-CONFIG, GUEST-PORTS, FWD-PREREQ, NO-OVERRIDE-SEAMS | 2026-10-19 | User rulings "DISTILL rulings". PORTS-CONFIG (ADR-0218): the beacon, flow stream and control vsock ports are node configuration, production defaults 1234 / 1240 / 1243; a test configures a kernel-assigned port and reads the bound port back from its owner; non-VM `serve` tests run the real production listeners, no simulated seam swapped in. GUEST-PORTS (ADR-0217): the VM driver passes the ports to the guest at launch; `overdrive-init` hard-codes none of them. FWD-PREREQ: `ovd_fwd` loaded on the test host is a declared lane prerequisite (a setup step), not an accident of suite order; non-VM `serve` tests run the real forwarder probe. NO-OVERRIDE-SEAMS (ADR-0219, amends ADR-0083 § D8): `run_server` receives its driven adapters as a parameter from the composition root (`overdrive serve` passes host adapters, tests pass sim adapters); `ServerConfig.vm_override` is removed and no adapter-swapping `ServerConfig` field is added; every VM test migrates; a `GuestFlowIoOverride::sim_vsock()` mechanism and `SimVmm` through `vm_override` for non-VM tests are rejected. Architect elaborations under these rulings: `VsockListenPort` / `NodeVsockPortConfig` and its validation (fixed ports above 1023, pairwise distinct, all fixed or all kernel-assigned; carried by `ServerConfig` and the CLI's `ServeArgs`, no file section), the bound-port accessors, a repair keeping the held listening socket, the three appended token fields, `NodeAdapters` / `VmAdapters` / `VmCapability` / `GuestFlowAdapter`, and the `cargo xtask kmod-load` setup step |
+| NO-OVERRIDE-SEAMS scope | 2026-10-19 | User ruling "NO-OVERRIDE-SEAMS scope" ("proceed with recommendations"): ALL of it, in #295. `run_server` takes every driven adapter from the composition root through `NodeAdapters`; nothing in `ServerConfig` swaps or carries an adapter. Moved into `NodeAdapters`: `mtls_intercept`, `guest_dns`, the dataplane (replacing `dataplane_override`; mTLS composition is not keyed on its presence), the mTLS identity read (replacing `mtls_identity_override`), `clock` (no `SystemClock` default) and `kek`, and the adapters `run_server` built internally (the second `SystemClock`, a bug; the TCP/HTTP probers; `RealCgroupAccounting`; `RealVmHostState`; the observation wiring). Removed: `dataplane_probe_fault`, `mtls_probe_fault` (tests inject faults through sim adapters). Configuration that stays: `dataplane_pin_dir`, `dataplane_cgroup_attach_path`. Amends ADR-0138 (the two ports leave `ServerConfig`; the enforcement is built through a factory port). Architect elaborations under this ruling: the grouping (`BootAdapters`, `MtlsAdapters`, `ProbeAdapters`, `VmAdapters` with `cgroup_accounting`), `cgroup_fs` folded into the bundle, `entropy` and `transport` added beside `clock`, `NodeAdapters::host`, `DataplaneComposer` with `host_ipv4`, `MtlsEnforcementFactory` (the identity read is the factory's choice), `run_with_adapters`, and the supplied-owner path over `BootAdapters` |
+| STORES-IN, PROBE-ROOT-ENV | 2026-10-19 | User rulings ("proceed with recommendations"). STORES-IN: the intent store (`LocalIntentStore`), view store (`RedbViewStore`), workflow journal (`RedbJournalStore`) and the workload-identity CA (`RcgenCa` + `RootKeyAeadCodec`) also come from the composition root through the adapters bundle; `NodeAdapters::host` opens them; `run_server` / `boot_server` construct no driven adapter at all; no carve-out. PROBE-ROOT-ENV: the `OVERDRIVE_TEST_PROBE_ROOT` env seam is removed from `serve.rs`; `serve_probe_refusal` passes a failing cgroup adapter through `run_with_adapters`. Architect elaborations under these rulings: `StoreAdapters` / `IntentStoreAdapter` / `CaAdapters` and their constructors, the generate-or-adopt staying in the boot as the CA's probe step, one `CaAdapters` per boot, `NodeAdapters::host(&ServerConfig, ..)`, `run_with_adapters(args, cgroup_fs, builder)` |
+| NODE-CONFIG-LOADER, U-3, CA placement | 2026-10-20 | User rulings of 2026-10-20. NODE-CONFIG-LOADER: `overdrive serve` loading the operator node TOML (ADR-0025 `[node]`, ADR-0049 `[dataplane]`, ADR-0218's `[vsock]`) is out of #295, [GH #327](https://github.com/overdrive-sh/overdrive/issues/327) (created with user approval); in #295 the vsock ports are set only through `ServerConfig.vsock_ports` / `ServeArgs.vsock_ports`; ADR-0218 keeps its `[vsock]` design text marked deferred to #327. U-3, option (b): the forwarder module build (module source and `cargo xtask kmod-build`) moves ahead of DELIVER step 0, provided it depends on none of steps 0–3 (checked: § *Roadmap impact*, step K). CA placement: the CA comes from the bundle, and generate-or-adopt with its probes stays in `boot_server`; this stands. Architect elaborations: the step-K skeleton, the tree-digest `version` (D-20), the non-`Clone` stores (D-21), and `CaFactory`. `CaFactory` refines the CA placement ruling: the bundle supplies the CA's factory, and the boot builds the instance over its one entropy before generate-or-adopt |
+| MODULE-REFCOUNT (part of EVMOD-LIFE and EVMOD-SAFE) | 2026-10-20 | User ruling MODULE-REFCOUNT. `ovd_fwd` is not permanent; it is unload-safe by module reference counting, as the data-path ruling of 2026-10-16 allowed ("cannot unload while any socket is hooked"). Every hooked socket and every open control context holds a module reference (`try_module_get` / `module_put`). rmmod is refused while any reference is held and succeeds at zero. The module gains a `module_exit` that tears down its device and workqueue. `kmod-load` unloads and then loads a stale idle module, and fails a busy one with a clear "busy, retry" message, never a reboot. On the appliance the module is still loaded once at boot. A real-kernel cell proves the refusal while hooked and the success after release. The module's lifetime is ADR-0198's reference-counted lifetime; EVMOD-SAFE carries rule 5 (ADR-0204); forced unload stays off. Architect elaborations: the holder table and release points, rule 5 (removal under the socket lock; a ULP present at removal keeps that socket's reference for the boot), `module_exit`'s order, the appliance keeping `CONFIG_MODULE_UNLOAD` off (ADR-0068 § 7), `OVD_FWD_VERSION` reporting `abi_version` only, `kmod-load`'s reload and busy messages, the hooks' `--busy-ok` form, the unload cell's placement, and the errno: the kernel refuses a held module with `EWOULDBLOCK` (`EAGAIN`), not `EBUSY` (`kernel/module/main.c:744-751 @ v7.0`; `EBUSY` is a module still initialising or going, `:810-816`) |
+| LEGS-DIAL (D-14) | 2026-10-19 | User ruling "D-14 (LEGS-DIAL)", option (a): the inbound enforcement dials leg S over vsock; `guest_dial` moves to the enforcement port (`HostMtlsEnforcement::new(identity, limits, guest_prefix, guest_dial)`, `SimMtlsEnforcement` likewise) and is removed from `MtlsInterceptWorker::new`. D-UP-5 (2026-10-14) is read with it: the worker takes no `guest_dial`, and the VM probe runner's `guest_dial` (the other half of D-UP-5) is unchanged. Pinned with the ruling: `establish` splits into a blocking handshake, an awaited leg-S dial and the relay; the leg-S `GuestStream` is torn down through its drop, never held as a raw descriptor; D-13's accessor is the enforcement's; `compose_guest_network(ports, io, dial)` sets D-UP-16's shape. The split's internal shape is the crafter's |
 
 **Architect dispositions.** Settled small decisions the architect took
 without a user ruling, because neither changes a contract, a state meaning,
@@ -750,29 +650,27 @@ table above.
 
 | Id | Disposed | Disposition |
 |---|---|---|
-| RECORD-COST | 2026-10-18, architect disposition (outcome-neutral), confirmed by adversarial review | The `guest-flow-owner` full record of the forwarder revision, 81.5 minutes with 12 jobs (run `36080-1792257031.125`, about 1.9 times the 43-minute record), is the new baseline in place of PD-9's 1.56–1.72 times; PD-9 is superseded by it. The growth comes from `fwd_pair`'s T-1 to T-9 checks, each defending an approved EVMOD contract; the long checks (`fwd-pair-safety-tlc`, `fwd-pair-watch-safety-tlc`, `fwd-pair-dgram-safety-tlc`, the three `pair_live` liveness checks, `fwd-pair-ended-half-flow-resolves`) are already `ci = false`, so per-change CI cost is unchanged and only the full `--record` run, taken when a spec changes, pays it. Alternatives: (a) cut or merge `fwd_pair` checks or instances to restore PD-9's bound (rejected for the reason PD-9 gave: each check defends a decision); (b) lower the TLC bounds of the long checks (weakens the exhaustive check of the watch and datagram protocols for a cost paid only at record time); (c) ask the user (rejected: the cost is outcome-neutral, with no design consequence). Consequence for DISTILL: none (no check, run or recording main changes) |
-| ADR-SLUG | 2026-10-18, architect disposition (settled small decision) | An ADR's file slug must not misdescribe its decision. A faithful shortened prefix of the title is acceptable; a full-title slug is not required. A slug that names a decision the ADR no longer makes is renamed and every link updated in the same change (applied to ADR-0164, `adr-0164-guest-vip-tcp-resolves-as-mesh-and-datagrams-use-the-connect4-rewrite.md`, and ADR-0191, `adr-0191-the-probe-runner-records-each-runs-streak-and-servicelifecycle-applies-thresholds-at-read.md`). Alternatives: (a) full-title slugs for every ADR (long paths, no added fidelity); (b) keep stale slugs (a link then misdescribes the decision it points at). Consequence for DISTILL: none |
-| DR1-CLOSE | 2026-10-18, architect disposition (small decisions, recommended options); adversarial review pending — not settled until a reviewer agrees | The DESIGN-owned items of the first DISTILL round: **D-1** — both vsock accept adapters close a connection whose peer CID is not a `GuestCid` and never return it (the conversion stays total; no runtime path on the appliance), and R5-59 (a) runs against a scripted guest peer in a microVM instead of the loopback transport, on the T-1 fixture DISTILL builds (alternatives: widen `GuestCid` to admit 1, a test-only state in a production type; a typed accept error the owner must branch on for a state production never reaches). **D-3** — a dial's `dials` entry leaves only at the owner's abort, the stream's drop or a pre-`Paired` error, never at the watch record's read (alternative: a cumulative abort counter, a second fact for one state). **D-4** — the device context table's rows carry `queued_ends`, released contexts included. **D-5** — `forwarder_attached` (both owners, cumulative) and `SimGuestFlowIo::vsock_half`; the host's close with its record and the finality of a host owner death are model changes for the modeller. **D-6** — no `as_str` on `SharedGuestNetworkFailStopCause` (no consumer). **D-7** — wording only: observation types live with their owners; shared field types are core. **T-5** — superseded by DR2-CLOSE (the composition runs `WorkloadLifecycle`); the model change that makes a crash keep a stopped allocation `done` is kept. **O-1** — the D25 and D-UP-12 ingress refusals belong to new step 2. **FRAME-PARSE** — the frame parser files join the module source and the UAPI header names `OVD_FWD_FRAME_MAGIC`, `OVD_FWD_FRAME_HDR_LEN`, `OVD_FWD_FRAME_MAX_PAYLOAD`, `OVD_FWD_FRAME_MAX`. Consequence for DISTILL: the `fwd_pair` host and `cid_lease` drivers re-target to these projections and mappings once the model changes are recorded; R5-59 (a) waits on T-1 |
-| DR2-CLOSE | 2026-10-18, architect disposition after the adversarial check refuted four DR1-CLOSE items; adversarial review pending for the small decisions | **F-S1 (design defect, EVMOD-SWEEP)** — the orphan sweep's unlocked stores (`drivers/vhost/vsock.c:746-750 @ v7.0`) let a forwarder run read end-of-stream before the sweep's class is recorded. Fix: a run that reads an end from a vsock half with no recorded class takes `vsock_table_lock`, which the sweep holds across its stores and its `sk_error_report`, then acts on the class now recorded (`SocketError { ECONNRESET }`); `Unclassified` stays as the alarm for a forwarder defect only (§ *End classification*; ADR-0180). Alternatives: classify every unrecorded vsock end as the sweep's reset without the lock (removes the alarm); an unlocked `sk_err` re-read (no ordering); leave the end pending for the report (hangs the pair if none follows). **T-5 (theatre)** — the `cid_lease` composition runs `WorkloadLifecycle` through the production convergence tick and the real `submit_workload` / `stop_workload` / `restart_workload` handlers; the pool is touched only by the action shim; `provision` and `teardown` of the substituted provisioner are the held step boundaries; `wait` / `done` / `retry` project from the reconciler's `hydrate_desired` and `restart_status_for_alloc` (QPROJ-2W; `retry` reads the accessor as fixed by RESTART-SSOT, below — the adversarial check refuted reading the current one, which disagrees with the reconciler, GH #324). Alternatives: keep direct pool calls and rule `wait` / `done` model-only (leaves "a stopped workload is not placed again" unchecked against its owner); split the dispatch with a new shim seam (new API where the provisioner port already gives the boundary). **D-1** — R5-59 (a) is not dropped: the T-1 guest-kit microVM fixture is DISTILL-owned test support built this round (the fixture decision is the user's, approved 2026-10-18, row T-1 below; the adversarial check refuted taking it as an architect disposition); the accept rule (close a non-`GuestCid` peer) is kept. **#42** — closed; the BYO-kernel interim cites #259 instead. **Recovery step 1 (modeller's open item)** — corrected rather than confirmed: step 1 reads every queued record of the old context before closing, so a pair that completed with its record unread closes cleanly (linger cleared, D20), not as a reset; the record is not left queued. **U-R1** — recovery step 1 is an owner abort of every held stream, a watch already ended included: `strmAbort` true, `Abort { flow }` written while the session is live, later calls resolve owner-end-first, and what the stream already returned stays. Model changes, for the modeller: `fwd_safe` — a run that reads an end with no recorded class waits for the sweep's table-lock hold to end and re-reads the class (design), with hazard `noSweepRecheck` (today's behaviour) violating `fwd_safe`'s `NoUnclassifiedEnd` (`fwd-safe-hazard-no-sweep-recheck` and `-run`, which replace the former `fwd-safe-pair-unclassified-end-reachable`; recorded by the modeller as `103786-1792332392.725`); `fwd_pair` — the recovery's `CtxRelease(h)` first takes the old context's queued host records (`TakeEnd(h)`) and closes a completed pair cleanly, and sets `strmAbort` for a held stream whose watch ended; `cid_lease` — the two changes of the `cid_lease` map. Consequence for DISTILL: the `cid_lease` driver re-targets to the revised map once those changes are recorded |
-| DR5-CLOSE | 2026-10-18, architect disposition after the adversarial check refuted five items of the fifth DESIGN round; adversarial review pending for the small decisions — not settled until a reviewer agrees | **Granularity (blocker)** — the `cid_lease` map decomposed a crash-class restart as `VmmCrash` (its tick retiring the lease) → `Release` → `Assign`, which production does not do: below the ceiling no dispatch retires the crashed allocation's lease (the reclaim pass skips the pending restart owner below the attachment cap, `workload_lifecycle.rs:399-478`), and `RestartAllocation`'s dispatch assigns the successor before it retires and releases the predecessor (`action_shim/mod.rs:2707-2716`, `:1760-1789`, `:1808`). Re-pinned to production's steps (`cid_lease` item 7: `VmmCrash` runs no tick; a predecessor lease `pred` / `pst`; `Assign` from `ended`; `Launch` cleans the predecessor; `Finalize` and `AssignRefused`; three new runs), with the exact model change for the modeller. Alternatives: (a) make the `VmmCrash` step's tick retire the lease through a new reclaim-on-crash path (changes production to fit the model); (b) keep one lease per workload and project the predecessor lease as model-only (the predecessor's lease is real CID-pool state, and hiding it leaves `CidUnique` unchecked for it). **Names** — every `cid_lease` run, hazard, witness, invariant and instance is listed (item 8), and the scenario and hazard tables are complete. **Hazard claims** — item 6 and the hazard table claim only what a recorded check refutes (`retryOffByOne` refutes `ExhaustsOnlyAtCeiling`, `ExhaustsOnlyOnACrashClassFailure` and the run `FifthCrashAtCeilingBoundaryIsPlacedAgain`, not `ServeCrashPlacesAWorkloadAtTheCeilingAgain`). **Stale status** — the modeller recorded this revision as `170717-1792355648.294` (425 of 425, 49 `cid_lease` checks; verify-evidence passes), which superseded `143415-1792345488.113`; the record that carries this revision with DR6-CLOSE is `227088-1792372761.247` (440 of 440, 64 `cid_lease` checks), superseded by the current record `570179-1792418105.836` (441 of 441, 65 `cid_lease` checks, adding D-18's main; § *Status*). **Obligation 4** — the proptest covers `Job`, `Service` and `Schedule`. **CI limit** — replaced by DR6-CLOSE's 60-second rule: a disposition from one record's timings did not hold on the next record (`owner-flows-hazard-no-abort-on-loss` took 80.5 s and `owner-flows-env-guest-misses-host-close` 31.6 s in `170717-1792355648.294`). **#325 window** — excluded from `lease_conf_ok` by a guard, kept on `lease_conf_325` (item 9; alternative: ignore the driver's `#[quint_run]` too, which would drop all randomized `cid_lease` conformance until #325). Consequence for DISTILL: the `cid_lease` driver re-targets to item 7's map and item 8's run set (current record `570179-1792418105.836`) |
-| DR6-CLOSE | 2026-10-19, architect disposition after the adversarial check of DR5-CLOSE refuted three items; adversarial review pending for the small decisions — not settled until a reviewer agrees. **Model change closed 2026-10-19**: recorded in `227088-1792372761.247` (440 of 440, 64 `cid_lease` checks, every outcome as expected; verify-evidence passes); no DESIGN item is open | **CI flags (stable rule)** — `ci = true` iff the check's own time (`Seconds`, start-up retries excluded) in the latest full record is under **60 s**, half the two-minute limit of `.claude/rules/design.md`, which absorbs the run-to-run variance of a 12-job record (the same check took 32.2 s in one record and 131.0 s in the next); every other check is `ci = false`. The runner's own warning (`ci_overrun`, over 120 s, `xtask/src/quint.rs:1318`) stays the backstop. A new check is `ci = true` until its first record, and the rule is re-applied from each record at the next spec revision. Applied to `170717-1792355648.294`, sixteen flags change — to `ci = false` (13): `owner-flows-witness-quiesce-abort` (62.1 s), `owner-flows-witness-late-completion` (71.9 s), `owner-flows-witness-phantom-connect` (71.4 s), `owner-flows-hazard-split-claim` (86.8 s), `owner-flows-hazard-attach-before-read` (64.3 s), `owner-flows-hazard-late-paired-resurrects` (68.2 s), `owner-flows-hazard-dial-no-admission` (131.0 s), `owner-flows-hazard-owner-deadline-shorter` (114.4 s), `owner-flows-hazard-owner-deadline-shorter-late-paired` (98.9 s), `fwd-pair-hazard-consume-partial-frame` (89.2 s), `fwd-pair-hazard-consume-partial-frame-split` (65.9 s), `fwd-pair-hazard-shutdown-on-callback-delivery` (90.0 s), `fwd-pair-hazard-tcp-no-error-report-resolves` (88.7 s); to `ci = true` (3): `owner-flows-env-guest-misses-host-close` (31.6 s, reverting DR5-CLOSE), `owner-flows-hazard-no-accepted-watch` (44.0 s), `fwd-pair-hazard-recovery-keeps-ended-stream` (24.8 s). `owner-flows-hazard-no-abort-on-loss` (80.5 s) stays `ci = false`. The checks.toml header states the rule; before `227088-1792372761.247` was taken the modeller re-applied it from the intermediate record `198644-1792365750.873` (436 of 436, 60 `cid_lease` checks), each flag's comment citing its own time there. Alternatives: (a) keep the 120 s line on one record (flags flip each record, the refuted disposition); (b) the maximum over several records (needs records the runner does not keep; git history only); (c) shrink the slow models (weakens checks that defend approved decisions). No check outcome changes; the full `--record` runs every check. **Finalize and Redeploy after boot reclamation** — `run_server` runs `vm_reclamation_boot::converge` (`crates/overdrive-control-plane/src/lib.rs:4024` in the current tree) before it spawns the convergence loop (`:4281`) and before it binds the API listener (`:4437`), so no tick and no handler call runs before reclamation; `Finalize` gains the guard `reclaimed`, as `Assign` and `AssignRefused` have, and `Redeploy` (`handlers::restart_workload`, reachable only through the bound listener) gains it too (`Stop` and `Release` need none: after a `serve` crash neither is enabled until an `Assign` of the new process). Both guards keep conformance traces in production's boot order and carry no `Safety` property: `Assign` still needs `reclaimed`, and no lease survives a `serve` crash. **`retry` / `ex` row** — a launch clash's successor has no row while its `teardown` is held (`cleanup_restart_successor` runs before the successor's `Failed` row write, `action_shim/mod.rs:2873-2886`, row at `:2960-2985`); the row reads the placement allocation's row only for a crash's `ended` and for `Finalize`'s and a stop's `retiring`, and the clash's `retiring` (hazard-only, unmapped) is model-only. **One hazard per item-7 rule** (`.claude/rules/design.md` § "A hazard variant per design rule"; `cid_lease` items 6 and 7): `vmmExitRetiresLease` (rule 7.1), `predecessorFirst`, `predecessorCleanedAtAssign`, `refusalKeepsPredecessor`, `terminalBeforeRelease`, `tickDuringPredecessorTeardown`, with the two invariants `FailedHoldsNoLease` and `NoUntrackedLease` added to `Safety`. **#325 guard check** — the run `CrashIsNotEnabledInThe325Window` (its last `.expect` before `Crash` asserts every other precondition of `Crash`) holds on `lease_conf_ok` and is violated on `lease_conf_325`, and its positive twin `CrashIsEnabledInThe325WindowWithoutTheGuard` holds on `lease_conf_325` and is violated on `lease_conf_ok` (item 9). **GH #325** — not re-read this round (no `gh` in the architect's tools); the adversarial check of DR5-CLOSE read it as OPEN with no comments, its scope matching § *Restart decision*; the orchestrator created it on 2026-10-18 ("WorkloadLifecycle marks a generation observed before its successor exists: a serve crash in that window loses the restart"). Consequence for DISTILL: none to the `cid_lease` map's projected fields or mapped calls; `CrashIsNotEnabledInThe325Window` and `CrashIsEnabledInThe325WindowWithoutTheGuard` are not `#[quint_test]`s |
+| RECORD-COST | Architect disposition (outcome-neutral) | The `guest-flow-owner` full `--record` run is the baseline for record cost. The long checks (`fwd-pair-safety-tlc`, `fwd-pair-watch-safety-tlc`, `fwd-pair-dgram-safety-tlc`, the `pair_live` liveness checks) are `ci = false`, so per-change CI cost is unchanged and only the full `--record` run, taken when a spec changes, pays it. Alternatives: lowering the TLC bounds of the long checks (weakens the exhaustive check of the watch and datagram protocols for a cost paid only at record time); asking the user (the cost is outcome-neutral, with no design consequence). Consequence for DISTILL: none |
+| ADR-SLUG | Architect disposition (settled small decision) | An ADR's file slug must not misdescribe its decision. A faithful shortened prefix of the title is acceptable; a full-title slug is not required. ADR-0164 is `adr-0164-guest-vip-tcp-resolves-as-mesh-and-datagrams-use-the-connect4-rewrite.md` and ADR-0191 is `adr-0191-the-probe-runner-records-each-runs-streak-and-servicelifecycle-applies-thresholds-at-read.md`. Alternatives: full-title slugs for every ADR (long paths, no added fidelity); stale slugs (a link then misdescribes the decision it points at). Consequence for DISTILL: none |
+| DR1-CLOSE | Architect disposition (small decisions, recommended options) | **D-1** — both vsock accept adapters close a connection whose peer CID is not a `GuestCid` and never return it (the conversion stays total; no runtime path on the appliance); R5-59 (a) runs against a scripted guest peer in a microVM on the T-1 fixture (alternatives: widen `GuestCid` to admit 1, a test-only state in a production type; a typed accept error the owner must branch on for a state production never reaches). **D-3** — a dial's `dials` entry leaves only at the owner's abort, the stream's drop or a pre-`Paired` error, never at the watch record's read (alternative: a cumulative abort counter, a second fact for one state). **D-4** — the device context table's rows carry `queued_ends`, released contexts included. **D-5** — `forwarder_attached` (both owners, cumulative) and `SimGuestFlowIo::vsock_half`. **D-6** — no `as_str` on `SharedGuestNetworkFailStopCause` (no consumer). **D-7** — observation types live with their owners; shared field types are core. **O-1** — the D25 and D-UP-12 ingress refusals belong to step 2. **FRAME-PARSE** — the frame parser files join the module source and the UAPI header names `OVD_FWD_FRAME_MAGIC`, `OVD_FWD_FRAME_HDR_LEN`, `OVD_FWD_FRAME_MAX_PAYLOAD`, `OVD_FWD_FRAME_MAX`. Consequence for DISTILL: the `fwd_pair` host and `cid_lease` drivers project these and map these; R5-59 (a) runs on T-1 |
+| DR2-CLOSE | Architect disposition | **F-S1 (EVMOD-SWEEP)** — the orphan sweep's unlocked stores (`drivers/vhost/vsock.c:746-750 @ v7.0`) let a forwarder run read end-of-stream before the sweep's class is recorded. A run that reads an end from a vsock half with no recorded class takes `vsock_table_lock`, which the sweep holds across its stores and its `sk_error_report`, then acts on the class now recorded (`SocketError { ECONNRESET }`); `Unclassified` stays as the alarm for a forwarder defect only (§ *End classification*; ADR-0180). Alternatives: classify every unrecorded vsock end as the sweep's reset without the lock (removes the alarm); an unlocked `sk_err` re-read (no ordering); leave the end pending for the report (hangs the pair if none follows). The `fwd_safe` hazard `noSweepRecheck` violates `NoUnclassifiedEnd` (`fwd-safe-hazard-no-sweep-recheck` and `-run`). **T-5** — the `cid_lease` composition runs `WorkloadLifecycle` through the production convergence tick and the real `submit_workload` / `stop_workload` / `restart_workload` handlers; the pool is touched only by the action shim; `provision` and `teardown` of the substituted provisioner are the held step boundaries; `wait` / `done` / `retry` project from the reconciler's `hydrate_desired` and `restart_status_for_alloc` (QPROJ-2W; `retry` reads the accessor as fixed by RESTART-SSOT). Alternatives: direct pool calls with `wait` / `done` model-only (leaves "a stopped workload is not placed again" unchecked against its owner); a new shim seam (new API where the provisioner port already gives the boundary). **D-1** — R5-59 (a) runs on the T-1 guest-kit microVM fixture (the user's decision, row T-1); the accept rule (close a non-`GuestCid` peer) holds. **#42** — closed; the BYO-kernel interim cites #259. **Recovery step 1** — reads every queued record of the old context before closing, so a pair that completed with its record unread closes cleanly (linger cleared, D20), not as a reset; the record is not left queued. **U-R1** — recovery step 1 is an owner abort of every held stream, a watch already ended included: `strmAbort` true, `Abort { flow }` written while the session is live, later calls resolve owner-end-first, and what the stream already returned stays. In `fwd_pair` the recovery's `CtxRelease(h)` first takes the old context's queued host records (`TakeEnd(h)`) and closes a completed pair cleanly, and sets `strmAbort` for a held stream whose watch ended |
+| DR5-CLOSE | Architect disposition | **Granularity** — a crash-class restart in the `cid_lease` map follows production's steps (`cid_lease` item 7): `VmmCrash` runs no tick; a predecessor lease `pred` / `pst`; `Assign` from `ended`; `Launch` cleans the predecessor; `Finalize` and `AssignRefused`. Below the ceiling no dispatch retires the crashed allocation's lease (the reclaim pass skips the pending restart owner below the attachment cap, `workload_lifecycle.rs:399-478`), and `RestartAllocation`'s dispatch assigns the successor before it retires and releases the predecessor (`action_shim/mod.rs:2707-2716`, `:1760-1789`, `:1808`). Alternatives: make the `VmmCrash` step's tick retire the lease through a new reclaim-on-crash path (changes production to fit the model); keep one lease per workload and project the predecessor lease as model-only (the predecessor's lease is real CID-pool state, and hiding it leaves `CidUnique` unchecked for it). Every `cid_lease` run, hazard, witness, invariant and instance is listed (item 8). Item 6 and the hazard table claim only what a recorded check refutes (`retryOffByOne` refutes `ExhaustsOnlyAtCeiling`, not `ServeCrashPlacesAWorkloadAtTheCeilingAgain`). The restart-accessor proptest covers `Job`, `Service` and `Schedule`. The #325 window is excluded from `lease_conf_ok` by a guard and kept on `lease_conf_325` (item 9; alternative: ignore the driver's `#[quint_run]` too, which would drop all randomized `cid_lease` conformance until #325). Consequence for DISTILL: the `cid_lease` driver pins item 7's map and item 8's run set |
+| DR6-CLOSE | Architect disposition | **CI flags (stable rule)** — `ci = true` iff the check's own time (`Seconds`, start-up retries excluded) in the latest full record is under **60 s**, half the two-minute limit of `.claude/rules/design.md`, which absorbs the run-to-run variance of a multi-job record; every other check is `ci = false`. The runner's own warning (`ci_overrun`, over 120 s, `xtask/src/quint.rs`) is the backstop. The `checks.toml` header states the rule. Alternatives: keep the 120 s line on one record (flags flip each record); the maximum over several records (needs records the runner does not keep; git history only); shrink the slow models (weakens checks that defend approved decisions). **Finalize and Redeploy after boot reclamation** — `run_server` runs `vm_reclamation_boot::converge` before it spawns the convergence loop and before it binds the API listener, so no tick and no handler call runs before reclamation; `Finalize` carries the guard `reclaimed`, as `Assign` and `AssignRefused` do, and `Redeploy` (`handlers::restart_workload`, reachable only through the bound listener) carries it too (`Stop` and `Release` need none: after a `serve` crash neither is enabled until an `Assign` of the new process). Both guards keep conformance traces in production's boot order and carry no `Safety` property. **`retry` / `ex` row** — a launch clash's successor has no row while its `teardown` is held (`cleanup_restart_successor` runs before the successor's `Failed` row write, `action_shim/mod.rs:2873-2886`, row at `:2960-2985`); the row reads the placement allocation's row only for a crash's `ended` and for `Finalize`'s and a stop's `retiring`, and the clash's `retiring` (hazard-only, unmapped) is model-only. **Hazards of item 7's rules** (`cid_lease` items 6 and 7; one hazard per decision): `refusalKeepsPredecessor`, `terminalBeforeRelease`, `tickDuringPredecessorTeardown`, with the two invariants `FailedHoldsNoLease` and `NoUntrackedLease` in `Safety`; rules 7.1 to 7.3 carry no hazard check. **#325 guard check** — the run `CrashIsNotEnabledInThe325Window` (its last `.expect` before `Crash` asserts every other precondition of `Crash`) holds on `lease_conf_ok` and is violated on `lease_conf_325`; its positive twin `CrashIsEnabledInThe325WindowWithoutTheGuard` holds on `lease_conf_325` and is violated on `lease_conf_ok` (item 9). GH #325 is "WorkloadLifecycle marks a generation observed before its successor exists: a serve crash in that window loses the restart", scope matching § *Restart decision*. Consequence for DISTILL: `CrashIsNotEnabledInThe325Window` and `CrashIsEnabledInThe325WindowWithoutTheGuard` are not `#[quint_test]`s |
 
-**PD-1 to PD-9 — decided by the user 2026-10-14** ("PD decisions"). PD-1
+**PD-1 to PD-7 — decided by the user 2026-10-14** ("PD decisions"). PD-1
 to PD-6 are public or cross-crate contract surface the architect pinned
-while writing the 2026-10-14 decisions down; PD-7 to PD-9 are dispositions.
-Each is written into its owning section as present-tense contract.
+while writing the 2026-10-14 decisions down; PD-7 is a disposition. Each is
+written into its owning section as present-tense contract.
 
 | Id | Decision (2026-10-14) | Contract | Owner and boundary | Alternatives | Consequence for DISTILL |
 |---|---|---|---|---|---|
 | PD-1 | Approved | `QuiescenceRestoreError { ForeignHold }` (`thiserror`, `as_str`) as the error of `restore`, and `SharedGuestNetworkFailStopCause::ForeignQuiescenceHold`: a foreign hold changes nothing in the owner and the supervisor fail-stops `serve` at once (§ *Owner and provisioner*, § *Typed error taxonomy*) | `overdrive-control-plane` owner trait; core fail-stop cause; supervisor branches | (a) `restore` returns `ForwardingRestore` and a foreign hold is a third variant `ForwardingRestore::ForeignHold` with the same fail-stop; (b) the foreign hold counts as leaked and is reported at the next audit tick (`LeakedQuiescenceHold`, no new cause) | R5-32's foreign-hold step and its oracle |
 | PD-2 | Approved | The ledger's public surface: `QuiescenceLedger::{new, issue, redeem, leaked}`, non-`Clone`, public in `overdrive-control-plane` so the sim owner uses it; `QuiescenceHold` holds an `Arc` to its issuing ledger's inner (§ *Owner and provisioner*) | `overdrive-control-plane` public API; `overdrive-sim` consumer | (a) the ledger private to the owner and the sim owner keeps its own counter (the D-UP-4 problem: the sim cannot build a hold); (b) a `#[doc(hidden)]` constructor | Sim owner construction in every composition test |
-| PD-3 | Replaced (the per-role duplicate refusal is withdrawn with one-probe-per-role) | The single probe-cap refusal of D-UP-12: `ParseError::ProbeCountExceeded { count, max }` at the TOML ingress and `AggregateError::Validation { field: "probes" }` with the same `Display` text at the API ingress; no per-role duplicate refusal and no grammar change (§ *Core vocabulary*, § *Typed error taxonomy*) | `overdrive-core` spec parsing; the submit handler | (a) a new `AggregateError` variant at the API ingress (rejected: a second refusal family for one rule) | Deploy-refusal scenario R5-60 at both ingresses |
-| PD-4 | Approved as `GUEST_PROBE_SLOTS` = 8; `GUEST_FLOW_SLOTS` removed by EVMOD-AB 2026-10-17 | Core constant `GUEST_PROBE_SLOTS = 8` (in place of the withdrawn per-role constant, § *Changed assumptions*), and `GUEST_FLOW_MAX_PAIRS_PER_ALLOCATION` moved from the host owner crate into `overdrive_core::guest_transport` (§ *Core vocabulary*) | `overdrive-core` public constants; host owner and `overdrive-init` consumers | (b) the quota stays in the host crate and `overdrive-init` depends on it (forbidden: a guest binary would link the control plane) | The deploy-refusal fixtures |
+| PD-3 | Decided | The single probe-cap refusal of D-UP-12: `ParseError::ProbeCountExceeded { count, max }` at the TOML ingress and `AggregateError::Validation { field: "probes" }` with the same `Display` text at the API ingress; no per-role duplicate refusal and no grammar change (§ *Core vocabulary*, § *Typed error taxonomy*) | `overdrive-core` spec parsing; the submit handler | (a) a new `AggregateError` variant at the API ingress (rejected: a second refusal family for one rule) | Deploy-refusal scenario R5-60 at both ingresses |
+| PD-4 | Approved as `GUEST_PROBE_SLOTS` = 8 | Core constant `GUEST_PROBE_SLOTS = 8` (§ *Changed assumptions*), and `GUEST_FLOW_MAX_PAIRS_PER_ALLOCATION` moved from the host owner crate into `overdrive_core::guest_transport` (§ *Core vocabulary*) | `overdrive-core` public constants; host owner and `overdrive-init` consumers | (b) the quota stays in the host crate and `overdrive-init` depends on it (forbidden: a guest binary would link the control plane) | The deploy-refusal fixtures |
 | PD-5 | Approved | Scenarios R5-57 (forwarder slot inventory, the real-adapter pair of `SimGuestFlowIo::inventory()`), R5-58 (supervisor audit detection, invariants `AuditDetectsComponentExitWithinOneTick`, `RepairErrIsOneFailedAttempt`, `EpisodeEndsByRestoreOrFailStop`) and R5-59 (accept-path adapter equivalence) as the discharge of D-UP-17, Q-1 and D-UP-19 (§ *Required boundary scenarios*) | DISTILL obligations; no production API | (a) leave the discharges unnamed (rejected by the review: an arbiter or assumption with no named discharge is a design gap) | Three scenarios to author |
 | PD-6 | Approved | `owner_flows` has two conformance mains — `flows_conf` (host and guest drivers) and `flows_beacon_conf` (the VM driver) — so the D-UP-1 rule reads "one recording main per driver", not "one per module" (QPROJ-1) | Spec structure; DISTILL driver configuration | (a) one main with both step relations (the beacon instance's enabled actions, D-UP-20, would then admit host actions in a VM-driver trace) | Two `Config::nondet` paths for `owner_flows`; the *Wave: DISTILL* driver table is re-targeted to the recording mains |
-| PD-7 | Dropped | GH #319 ("ServiceLifecycle reads only probe index 0 of each role") stays open and in force: multiple probes per role remain, and `ServiceLifecycle`'s handling of the other indices is out of scope here. ADR-0191 § 7 and this delta cite it (§ *Core vocabulary*, § *VM probe runner*) | GitHub issue; ADR-0191 § 7; this delta | (rejected) close #319 — it had a subject only under the withdrawn one-probe-per-role | None (no scenario depends on #319) |
-| PD-8 | Decided 2026-10-14: not contract-shaping; withdrawn with its subject by EVMOD-ADOPT (2026-10-16) and the EVMOD-* approval (2026-10-17): the forwarder has no drain programs, `fexit` counters or `flow_end` model, so assumption A10 and V-31-MV are gone | Classification of the A10 remainder (§ *Formal protocol model*, assumptions; § *Validation plan*, V-31-MV): the guest side through the production guest owner (`dispatch_next` over `KernelGuestOwnerIo`) with forced `fexit` skips on the raw-tracepoint build inside a microVM is **not contract-shaping** and runs in DELIVER as part of V-31-MV, because a falsification is either a guest departure from the pinned sub-step order (fixed in the `overdrive-init` drain step) or a kernel action outside the model (fixed in the forwarder programs), and neither changes `dispatch_next`, the `flow_end` model's granularity, a wire format or a state meaning. No microVM run of the production guest owner with forced `fexit` skips exists; the production guest owner is built in DELIVER | Validation plan; DELIVER of R2-END / R2-DRAIN | (a) classify it contract-shaping and run it as a DESIGN spike before acceptance, with a stand-in guest owner that issues the pinned sub-step order (the only owner that exists before DELIVER; rejected) | None: DISTILL does not wait for it |
-| PD-9 | Accepted as the new baseline 2026-10-14; superseded by RECORD-COST 2026-10-18 (architect disposition, outcome-neutral) | The `guest-flow-owner` full record cost, about 1.56–1.72 times the earlier 43-minute record (67.1 minutes in the record `239090-1792052001.881` of 2026-10-15; 72.1 minutes in an earlier run on a loaded host), is the new baseline (§ *Formal protocol model*) | `specs/quint/guest-flow-owner/` checks | (a) cut checks or recording mains to restore the old time (rejected: each check defends a decision) | None |
+| PD-7 | Decided | GH #319 ("ServiceLifecycle reads only probe index 0 of each role") stays open and in force: multiple probes per role remain, and `ServiceLifecycle`'s handling of the other indices is out of scope here. ADR-0191 § 7 and this delta cite it (§ *Core vocabulary*, § *VM probe runner*) | GitHub issue; ADR-0191 § 7; this delta | Closing #319 (rejected: multiple probes per role remain, so it keeps its subject) | None (no scenario depends on #319) |
 
 Issue numbers #93, #259, #303, #308–#312, #317 and #319 are open GitHub
 issues whose scope matches their use here. #259 (the image factory, which
@@ -800,13 +698,13 @@ of a Linux guest, and a guest that runs no Linux kernel is
 
 | Id | Contract | Owner and boundary | Alternatives | Consequence for the next wave |
 |---|---|---|---|---|
-| EVMOD-LIFE (ADR-0198; amended by MODULE-REFCOUNT 2026-10-20) | One out-of-tree C module `ovd_fwd` (GPL-2.0) with `module_init` and `module_exit`, unload-safe by module reference counting. Every open control context holds a reference through the device's `fops` owner, and every hooked socket holds one (`__module_get` at attach or watch, `module_put` at the end of its free work, after rule 5). `delete_module` is refused `EWOULDBLOCK` while any reference is held and succeeds at zero (`kernel/module/main.c:730-751`, `:828-835 @ v7.0`). `module_exit` deregisters the device, destroys the workqueue (draining it) and frees the scratch pool. Forced unload stays off wherever modules can be unloaded. The appliance image kernel has no module unloading (`CONFIG_MODULE_UNLOAD` off; ADR-0068 § 7), so nothing unloads a module there. The probe checks the ABI version; no permanence check | Image kernel configuration; the module; `kmod-load` | (0) permanent: no `module_exit` (the 2026-10-17 contract; a module change then needs a kernel boot, which on a shared development VM ends every workspace's runs); (a) built into the appliance kernel (a modified kernel tree, which the charter excludes; the stock-kernel Tier-3 hosts need the loadable form anyway; every forwarder change a kernel rebuild); (b) a reference per hooked socket dropped at unhook (a saved kTLS callback outlives the unhook — answered here by rule 5 and the ULP check); (c) detach-all at exit instead of counting (panicked with a saved pointer) | A module change on a development host is a reload while the module is idle; the unload cell (§ *Validation plan*, V-EV-UNLOAD) |
+| EVMOD-LIFE (ADR-0198; MODULE-REFCOUNT) | One out-of-tree C module `ovd_fwd` (GPL-2.0) with `module_init` and `module_exit`, unload-safe by module reference counting. Every open control context holds a reference through the device's `fops` owner, and every hooked socket holds one (`__module_get` at attach or watch, `module_put` at the end of its free work, after rule 5). `delete_module` is refused `EWOULDBLOCK` while any reference is held and succeeds at zero (`kernel/module/main.c:730-751`, `:828-835 @ v7.0`). `module_exit` deregisters the device, destroys the workqueue (draining it) and frees the scratch pool. Forced unload stays off wherever modules can be unloaded. The appliance image kernel has no module unloading (`CONFIG_MODULE_UNLOAD` off; ADR-0068 § 7), so nothing unloads a module there. The probe checks the ABI version; no permanence check | Image kernel configuration; the module; `kmod-load` | (0) permanent: no `module_exit` (a module change then needs a kernel boot, which on a shared development VM ends every workspace's runs); (a) built into the appliance kernel (a modified kernel tree, which the charter excludes; the stock-kernel Tier-3 hosts need the loadable form anyway; every forwarder change a kernel rebuild); (b) a reference per hooked socket dropped at unhook (a saved kTLS callback outlives the unhook — answered here by rule 5 and the ULP check); (c) detach-all at exit instead of counting (panicked with a saved pointer) | A module change on a development host is a reload while the module is idle; the unload cell (§ *Validation plan*, V-EV-UNLOAD) |
 | EVMOD-BUILD (ADR-0203) | Source `kmod/ovd_fwd/` with the UAPI header (the C SSOT of the control ABI); built by `cargo xtask kmod-build --kernel-build-dir <dir>` (`W=1`, sparse, `checkpatch --strict` clean) to `target/kmod/<kernel-release>/ovd_fwd.ko`, once per supported kernel release (the pinned appliance kernel and the stock 7.0 kernels of the Tier-3 hosts and guest fixture; a module is checked against the kernel it was built for by its `vermagic` — with `CONFIG_MODVERSIONS` by `same_magic`, `kernel/module/version.c:97-105 @ v7.0`, which skips the release word for a module with CRCs, and by its symbol CRCs, `:13-94` — or, without `CONFIG_MODVERSIONS`, by the whole string); signed with the image's key when the kernel enforces module signatures | xtask; the release process | (a) a crate's `build.rs` builds it (a kernel tree and a C toolchain on every `cargo check` of that crate); (b) one module for every 7.0 release with forced loading (`MODULE_INIT_IGNORE_VERMAGIC`, against a layout it was not built for); (c) DKMS on the target (a compiler in the immutable image) | A DELIVER step for the module build |
-| EVMOD-LOAD (ADR-0205) | Host: the appliance image loads the module at boot, before `overdrive serve` starts; `serve` never loads modules and gains no `CAP_SYS_MODULE`; development hosts load the running workspace's build in the lane setup (`cargo xtask kmod-load`; round 13: not the Lima template or `infra/metal` provisioning, which several workspaces share; MODULE-REFCOUNT: it reloads a stale idle module and refuses a busy one with a "busy, retry" message naming the holder class, never a reboot); a missing module refuses `serve`'s start through the forwarder probe (G-V1). Guest: `overdrive-init` loads it with `finit_module` from `GUEST_FORWARDER_MODULE_PATH = "/lib/overdrive/ovd_fwd.ko"` before READY, then opens and probes its context (G-V7) | Image and provisioning (host); `overdrive-init` (guest) | (a) `serve` loads the module (needs `CAP_SYS_MODULE`, a boot-time image fact moved into the control plane); (b) a host-supplied boot medium per launch (the launch-injection option of EVMOD-GUEST-KIT) | A DELIVER step for host provisioning and the guest load |
+| EVMOD-LOAD (ADR-0205) | Host: the appliance image loads the module at boot, before `overdrive serve` starts; `serve` never loads modules and gains no `CAP_SYS_MODULE`; development hosts load the running workspace's build in the lane setup (`cargo xtask kmod-load`; not the Lima template or `infra/metal` provisioning, which several workspaces share; it reloads a stale idle module and refuses a busy one with a "busy, retry" message naming the holder class, never a reboot); a missing module refuses `serve`'s start through the forwarder probe (G-V1). Guest: `overdrive-init` loads it with `finit_module` from `GUEST_FORWARDER_MODULE_PATH = "/lib/overdrive/ovd_fwd.ko"` before READY, then opens and probes its context (G-V7) | Image and provisioning (host); `overdrive-init` (guest) | (a) `serve` loads the module (needs `CAP_SYS_MODULE`, a boot-time image fact moved into the control plane); (b) a host-supplied boot medium per launch (the launch-injection option of EVMOD-GUEST-KIT) | A DELIVER step for host provisioning and the guest load |
 | EVMOD-GUEST-KIT (ADR-0206; Linux guests) | A Linux guest kernel and its module are one Overdrive artifact, the **guest kit** (kernel image + `ovd_fwd.ko` built against it + `overdrive-init`), published per supported guest kernel: the pinned appliance kernel, and for Tier-3 the guest fixture's stock 7.0 kernel (module built at the fixture's provisioning). End state: the guest kernel is the pinned appliance kernel and the image factory (#259) builds every guest root filesystem with the kit's `overdrive-init` and module. While VM specs name their own kernel and root filesystem (an interim until the image factory, #259): the spec's kernel must be a kit's kernel and its root filesystem carries that kit's `overdrive-init` and module, the contract under which `overdrive-init` is already baked; any other kernel is unsupported. `overdrive-init` compares the module's `vermagic` release with `uname` before `finit_module`, on every kernel configuration — on a kernel with `CONFIG_MODVERSIONS` this is the only comparison of the release, because that kernel's `same_magic` (`kernel/module/version.c:97-105 @ v7.0`, not the `#else` stub of `internal.h:421-424`, which serves only kernels without `CONFIG_MODVERSIONS`) skips the release word for a module with CRCs and the kernel checks CRCs instead (`version.c:75-94`, `:13-73 @ v7.0`); the appliance image's configuration does not exclude `CONFIG_MODVERSIONS` — and fails before READY with `ForwarderModuleMissing { path }`, `ForwarderModuleRelease { module, kernel }` (`KernelRelease`, `overdrive-init`-private) or `ForwarderModuleLoad { source }` | `overdrive-init`; xtask and the release process; the image factory (#259); the VM spec contract | (a) inject the module at launch from the host, chosen by the kernel image's version string (a host-side lookup on the boot path, a second boot medium the VMM attaches, and a module store for every release a spec might name); (b) a digest allow-list of guest kernels checked by the VM driver before launch (the Tier-3 stock kernels differ per host, so the list cannot be a build constant; it would duplicate the check the guest makes with both facts in hand); (c) rely on `finit_module` alone (with `CONFIG_MODVERSIONS` a module of another release loads whenever its CRCs match; where it is refused, the refusal is a symptom, `ENOEXEC` or `EINVAL`, not the fact) | The kit becomes a release artifact; DISTILL adds the three pre-READY refusals (missing, other release, refused) to the guest-start scenarios |
-| EVMOD-SAFE (ADR-0204) | Overrides find their pair only through `sk_user_data` read with acquire semantics under `rcu_read_lock`; a pair's end restores each callback (`WRITE_ONCE`) and then clears `sk_user_data` with a release store, under `sk_callback_lock` for writing (not `rcu_assign_pointer(…, NULL)`, which has no barrier for a constant `NULL`); the state is freed in the order RCU grace period, then the completion of the pair's work item, then the free — the end runs inside the pair's own work item, which cannot cancel or wait for itself, so it queues a free work with `queue_rcu_work` that calls `cancel_work_sync` on the pair's work item before freeing; an override that finds no pair calls the socket's current callback, which is then the original; the control path by id (`OVD_FWD_ABORT`, `ABORT_ALL`, `PAIR_STATE`) looks the id up and queues the pair's work item or copies its counters only under the context's record-queue lock, and the end removes the id and queues the end record in one section under that lock before it queues the free work, so no enqueue races the free's `cancel_work_sync` (`kernel/workqueue.c:4481-4484 @ v7.0`); a watch's end belongs to the path that removes its id; holds with EVMOD-KTLS (no ULP saves an override). Rule 5 (MODULE-REFCOUNT, 2026-10-20; caller classes restated in round 16): `sk_write_space` is never overridden — the write-space trigger is a wait-queue entry, because `sock_wfree` calls `sk_write_space` on vsock and UDP sockets from preemptible process context with no lock; the removal takes each half's socket lock (`lock_sock`), removes the entry, then takes `sk_callback_lock`; and a hooked socket's module reference is dropped by `module_put` as the free work's last statement. That free work runs on the module's own workqueue, after the grace period and `cancel_work_sync`. A TCP half that has a ULP installed when it is removed keeps its reference for the boot. Checked by the DELIVER review against the source, by V-EV-SAFE (KASAN stress, control calls on ending ids included) and by V-EV-UNLOAD | The module | (f) for rule 5: drop the reference after the grace period without the socket lock at removal (a process-context caller holding the socket lock is no RCU reader and can enter the override after the text is freed); (a) `rcu_assign_pointer` + `rcu_dereference` (no ordering of the later callback read: an override can call itself); (b) an override that finds no pair returns (the event is lost to the socket's reader); (c) a per-pair reference count (same grace period needed, an atomic per callback); (d) an id lookup under RCU that queues the work after leaving the lock (an enqueue after the free work was queued: the work could run on freed state); (e) a reference held by each control call while it waits (the id check under the lock suffices) | Module-internal; no port or wire change |
-| EVMOD-STREAM-ABORT (under WATCH-ABORT) | An owner abort of an open `GuestStream` (quiescence's first hold, teardown, session loss, the `Forwarder` recovery) is one owner step: `abort(watch)` (record queued, `V_h` untouched); `Abort { flow }` on the control session while it is live, so the guest aborts its pair at once; the node slot and (for `Relay`) quota place released; every pending and later stream call returns `Err(ConnectionAborted)` at once, the owner waking a call parked on `V_h` through the stream's I/O (`GuestStreamIo`, the owner's adapter). A dropped stream aborts its watch, then closes `V_h` (`0x3` to the guest). The stream's resolution order: the owner's own end (`ConnectionAborted`), else the watch's record (`Ok(0)` for `HalfClose`, `ConnectionReset` for an abort), else wait for the in-flight record | Host owner; `GuestStream` | (a) the forwarder shuts `V_h` on an owner abort (it changes the holder's socket under it: its `read` then returns 0 or `ENOTCONN`, P-70 § 3.5; rejected by WATCH-ABORT); (b) leave the guest to learn only at the holder's close (a holder that keeps the stream after the error keeps the guest application's connection open while the host has released the flow) | `QuiescedHoldsNoFlow` holds on the host side at the hold; the guest pair ends on the `Abort` or the holder's close; Quint `fwd_pair` third iteration |
-| EVMOD-ATTACH-END (ADR-0210; under the user ruling of 2026-10-17, "attach reset/closed errnos are a flow abort") | Attach and watch refuse a half that has ended — a pending `sk_err` (TCP reset; the vsock orphan sweep, checked before the state) or a vsock `CLOSING` — with `ECONNABORTED`, `bad_side` and `end_errno` (its `sk_err`, else `ECONNRESET`); the adapter returns `ForwarderError::HalfEnded { side, errno }`; the owner ends the flow by its existing pre-`Paired` (or, on `Paired`, abort) path, closing each TCP half with `SO_LINGER{1,0}`, and counts `forwarder_attach_ended` (host `flow_observation()`, guest `guest_observation()`); `ENOTCONN` keeps meaning a never-connected, listening or self-shut half (an owner defect). Measured refusal and flow abort: P-70 § 3.6, P-71 | The module; both owners; `FlowForwarder` | (a) return the half's own errno directly, as the spike modules did (`ECONNRESET`, `EPIPE`, `ENOTCONN` for `CLOSING`): `ENOTCONN` collides with the never-connected defect and a pending `sk_err` may equal another refusal's errno; (b) accept ended halves and abort them in the first run, yielding an end record (unmeasured: both spike modules refused these states; against the user's ruling) | The attach error taxonomy and the owners' failure projection; Quint `fwd_pair` third iteration |
+| EVMOD-SAFE (ADR-0204) | Overrides find their pair only through `sk_user_data` read with acquire semantics under `rcu_read_lock`; a pair's end restores each callback (`WRITE_ONCE`) and then clears `sk_user_data` with a release store, under `sk_callback_lock` for writing (not `rcu_assign_pointer(…, NULL)`, which has no barrier for a constant `NULL`); the state is freed in the order RCU grace period, then the completion of the pair's work item, then the free — the end runs inside the pair's own work item, which cannot cancel or wait for itself, so it queues a free work with `queue_rcu_work` that calls `cancel_work_sync` on the pair's work item before freeing; an override that finds no pair calls the socket's current callback, which is then the original; the control path by id (`OVD_FWD_ABORT`, `ABORT_ALL`, `PAIR_STATE`) looks the id up and queues the pair's work item or copies its counters only under the context's record-queue lock, and the end removes the id and queues the end record in one section under that lock before it queues the free work, so no enqueue races the free's `cancel_work_sync` (`kernel/workqueue.c:4481-4484 @ v7.0`); a watch's end belongs to the path that removes its id; holds with EVMOD-KTLS (no ULP saves an override). Rule 5 (MODULE-REFCOUNT): `sk_write_space` is never overridden — the write-space trigger is a wait-queue entry, because `sock_wfree` calls `sk_write_space` on vsock and UDP sockets from preemptible process context with no lock; the removal takes each half's socket lock (`lock_sock`), removes the entry, then takes `sk_callback_lock`; and a hooked socket's module reference is dropped by `module_put` as the free work's last statement. That free work runs on the module's own workqueue, after the grace period and `cancel_work_sync`. A TCP half that has a ULP installed when it is removed keeps its reference for the boot. Checked by the DELIVER review against the source, by V-EV-SAFE (stress on the stock 7.0 kernel, control calls on ending ids included) and by V-EV-UNLOAD | The module | (f) for rule 5: drop the reference after the grace period without the socket lock at removal (a process-context caller holding the socket lock is no RCU reader and can enter the override after the text is freed); (a) `rcu_assign_pointer` + `rcu_dereference` (no ordering of the later callback read: an override can call itself); (b) an override that finds no pair returns (the event is lost to the socket's reader); (c) a per-pair reference count (same grace period needed, an atomic per callback); (d) an id lookup under RCU that queues the work after leaving the lock (an enqueue after the free work was queued: the work could run on freed state); (e) a reference held by each control call while it waits (the id check under the lock suffices) | Module-internal; no port or wire change |
+| EVMOD-STREAM-ABORT (under WATCH-ABORT) | An owner abort of an open `GuestStream` (quiescence's first hold, teardown, session loss, the `Forwarder` recovery) is one owner step: `abort(watch)` (record queued, `V_h` untouched); `Abort { flow }` on the control session while it is live, so the guest aborts its pair at once; the node slot and (for `Relay`) quota place released; every pending and later stream call returns `Err(ConnectionAborted)` at once, the owner waking a call parked on `V_h` through the stream's I/O (`GuestStreamIo`, the owner's adapter). A dropped stream aborts its watch, then closes `V_h` (`0x3` to the guest). The stream's resolution order: the owner's own end (`ConnectionAborted`), else the watch's record (`Ok(0)` for `HalfClose`, `ConnectionReset` for an abort), else wait for the in-flight record | Host owner; `GuestStream` | (a) the forwarder shuts `V_h` on an owner abort (it changes the holder's socket under it: its `read` then returns 0 or `ENOTCONN`, P-70 § 3.5; rejected by WATCH-ABORT); (b) leave the guest to learn only at the holder's close (a holder that keeps the stream after the error keeps the guest application's connection open while the host has released the flow) | `QuiescedHoldsNoFlow` holds on the host side at the hold; the guest pair ends on the `Abort` or the holder's close; Quint `fwd_pair` (T-5, T-6) |
+| EVMOD-ATTACH-END (ADR-0210; under the user ruling of 2026-10-17, "attach reset/closed errnos are a flow abort") | Attach and watch refuse a half that has ended — a pending `sk_err` (TCP reset; the vsock orphan sweep, checked before the state) or a vsock `CLOSING` — with `ECONNABORTED`, `bad_side` and `end_errno` (its `sk_err`, else `ECONNRESET`); the adapter returns `ForwarderError::HalfEnded { side, errno }`; the owner ends the flow by its existing pre-`Paired` (or, on `Paired`, abort) path, closing each TCP half with `SO_LINGER{1,0}`, and counts `forwarder_attach_ended` (host `flow_observation()`, guest `guest_observation()`); `ENOTCONN` keeps meaning a never-connected, listening or self-shut half (an owner defect). Measured refusal and flow abort: P-70 § 3.6, P-71 | The module; both owners; `FlowForwarder` | (a) return the half's own errno directly, as the spike modules did (`ECONNRESET`, `EPIPE`, `ENOTCONN` for `CLOSING`): `ENOTCONN` collides with the never-connected defect and a pending `sk_err` may equal another refusal's errno; (b) accept ended halves and abort them in the first run, yielding an end record (unmeasured: both spike modules refused these states; against the user's ruling) | The attach error taxonomy and the owners' failure projection; Quint `fwd_pair` (T-4) |
 | EVMOD-CTL (ADR-0199) | `/dev/ovd_fwd`; each `open()` (`O_CLOEXEC`) is a context owning its pairs and watches; the context's release aborts every live pair and watch (TCP reset, vsock `SHUT_RDWR`, a watched `V_h` included, the holder's descriptor kept) before it returns — the only operation that shuts a watched socket (WATCH-ABORT); one context per owner, held by value; the host `Forwarder` recovery aborts every flow, closes the old context, then opens and probes a new one; any other end of the host owner is the end of `serve`; operations `VERSION`, `ATTACH` (accepted states pinned; refusal precedence `EBADF`/`ENOTSOCK` → `EINVAL` → `ESOCKTNOSUPPORT` → `EPROTONOSUPPORT` → state (`ECONNABORTED` for an ended half, EVMOD-ATTACH-END; `ENOTCONN` for a never-connected one) → `EBUSY` → `EMSGSIZE`, `bad_side` the first offending half, a refused attach consumes an id; TCP halves `AF_INET` or `AF_INET6`), `WATCH`, `ABORT` (a watch's abort leaves its socket untouched), `ABORT_ALL`, `INVENTORY` (per context), `PAIR_STATE`; the host flow observation carries `forwarder_generation` and each `Paired` phase its `generation` (`ForwarderGeneration`, QPROJ-8). Measured: P-70 | Host owner and guest owner; the module; the supervisor's `Forwarder` recovery | (a) pairs that outlive the process (forwarding continues while `serve` is down, against ADR-0159); (b) a context reopened beside the failed one (orphan pairs); (c) an inheritable descriptor (a VMM child keeps the context alive); (d) a per-pair owner-liveness token (a second liveness mechanism) | The owners' recovery order and fail-closed death; `owner_flows` has no owner-death action |
 | EVMOD-REC (ADR-0202) | Each pair and watch yields exactly one 32-byte end record, preallocated with the pair, unless its context is released first; ids `u64`, never reused per context; records read whole with `read()`, signalled by `poll()`; an owner abort's record is queued before the abort returns. Measured: P-70 | Host owner and guest owner; the module | (a) generic netlink with multicast ends (drops on `ENOBUFS`); (b) a fixed ring (drops when full); (c) an `eventfd` per pair (two fds per flow, no cause); (d) `/proc` polling (latency, no cause); (e) reused ids with an epoch per record (the redirect's A2) | The owners' end handling and release points; no ring, epoch or loss count |
 | EVMOD-STREAM-END (under WATCH-ABORT; no ADR — contract § *Driving port — guest stream dial*, "How an end is resolved") | The `GuestStream` resolves every end it observes on `V_h` — a read of 0, any read or write error — never from the socket call's return, in this order: the owner's own end of the watch (`Err(ConnectionAborted)`); else the watch's record (`Ok(0)` for `GuestHalfClose` on a read, `Err(ConnectionReset)` for an abort); else it waits for the in-flight record. The wait is bounded because the module queues a watch's record **before** it calls the socket's original callback, in `sk_state_change` and `sk_error_report`, taking only the context's record-queue spinlock (`spin_lock_bh` on every path; no socket lock, no allocation), so the orphan sweep's atomic path under `vsock_table_lock` queues it before the holder is woken (§ *End classification*, "Watch" and "Locking on the callback paths"). Measured: P-69 (record present at the holder's observation 6,640 of 6,640, 640 on the sweep path) | Host owner; `GuestStream`; the module's watch overrides | (a) original callback first, then the record (held on the locked path, 1,200 of 1,200, hazard 8; on the sweep path the original's wakeup lets the holder read the end before the record exists); (b) the stream classifies from its `read` (an aborted dial reads EOF 2,000 of 2,000, P-69; against WATCH-ABORT) | `HolderOutcomeFromWatch`, `WatchRecordBeforeWake`; Quint `fwd_pair` |
@@ -816,7 +714,7 @@ of a Linux guest, and a guest that runs no Linux kernel is
 | EVMOD-DGRAM (ADR-0201) | A datagram association is one vsock STREAM (kind `2`, port 1240) with the ADR-0149 frame both ways; the forwarder frames UDP → vsock (peek with `MSG_TRUNC`, resume a partly sent frame, consume after the whole frame; oversize consumed and counted) and unframes vsock → UDP (one datagram per frame, empty included; the whole-frame wait keyed on `vsock_stream_has_data`; a bad frame aborts `FrameInvalid`; at the peer's end the callback's class decides first — an abort-class end, the only production one, aborts `PeerAbort` whatever is queued, and a clean-class end, which no owner produces, completes after the last whole frame or aborts `FrameInvalid` if a frame is left incomplete); datagram-mode attach refuses a vsock half whose `buffer_size` is below `MAX_GUEST_DATAGRAM_FRAME` (`BufferTooSmall`); slot sockets bind an explicit port, and the guest slot release aborts the pair, discards the slot socket's queue without reading payload, then disconnects; no `ENOBUFS` handling, `IP_RECVERR` off; every datagram, an empty one included, delivered once and in order. Measured: P-72 | Both owners; the module | (a) keep the sockmap for datagrams (two mechanisms; V-3-DGRAM open with no valve); (b) SEQPACKET from the guest under the forwarder (prefix-then-resend, P-3); (c) userspace moves (rejected with the pump) | Removes kind `3`, port 1241, UDP-SEQ, UDP-EMPTY, CELL-RECREATE, the framing and reassembly cells, `UnframeLo`, `udp_empty` |
 | EVMOD-KTLS (ADR-0200) | No socket the forwarder joins carries kTLS: attach and watch refuse a TCP socket with a ULP (`UpperLayerProtocol`), no owner installs one after attach; leg-S stays the temporary userspace relay over a watched `GuestStream` until #303; no record-aware peek is pinned | The module; leg-S (ADR-0186) | (a) leg-S kernel-forwarded (attach leg-C's kTLS socket to V_h with a control-buffer peek and `close_notify` → `SHUT_WR`): deletes the relay early, needs its own contract-shaping spike, serves a path #303 deletes; (b) allow kTLS after attach (every alert aborts) | No TLS code in the module |
 | EVMOD-WQ | Every pair runs on one per-CPU workqueue (`WQ_PERCPU`); no per-pair unbound option | The module | (a) a per-pair unbound option at attach (no production caller knows a flow will be large); (b) unbound for all (0.041 vs 0.106 GiB/s at 64 peers, 1 KiB) | None |
-| EVMOD-AB (ADR-0209) | The host releases a forwarded flow's quota place and node slot when it reads the flow's end record, and a dial's when the stream is dropped or aborted; no host place waits for the guest's final close; `shutdown_write` works for every stream, a probe stream included; the guest holds no drain-slot pool and makes no slot claim; `GUEST_PROBE_SLOTS` (8) and its refusal are the most quota-exempt probe dials one allocation holds (a node-capacity bulkhead); END-IDEMPOTENT and CLEAN-FULL-END hold. Withdraws SLOT-RELEASE, PROBE-DROP-ABORT and ENDS-BEFORE-CLAIMS with GS-E1 to GS-E5 (§ *Changed assumptions*) | Host owner (release point), guest owner, deploy validation | (a) keep SLOT-RELEASE: the host pair completes only once the vsock peer also released its socket (the callback can observe it), so a guest pair that outlives its host flow — a guest application that half-closed and stopped reading — counts against the quota; defends guest-internal memory the guest's own application holds, as on any Linux host; (b) keep PROBE-DROP-ABORT without SLOT-RELEASE (no subject) | Quint `flow_quota` release point; R5-20, R5-50, R5-53, R5-57, R5-60 re-derived |
+| EVMOD-AB (ADR-0209) | The host releases a forwarded flow's quota place and node slot when it reads the flow's end record, and a dial's when the stream is dropped or aborted; no host place waits for the guest's final close; `shutdown_write` works for every stream, a probe stream included; the guest holds no drain-slot pool and makes no slot claim; `GUEST_PROBE_SLOTS` (8) and its refusal are the most quota-exempt probe dials one allocation holds (a node-capacity bulkhead); END-IDEMPOTENT and CLEAN-FULL-END hold. Takes the place of SLOT-RELEASE, PROBE-DROP-ABORT and ENDS-BEFORE-CLAIMS | Host owner (release point), guest owner, deploy validation | (a) keep SLOT-RELEASE: the host pair completes only once the vsock peer also released its socket (the callback can observe it), so a guest pair that outlives its host flow — a guest application that half-closed and stopped reading — counts against the quota; defends guest-internal memory the guest's own application holds, as on any Linux host; (b) keep PROBE-DROP-ABORT without SLOT-RELEASE (no subject) | Quint `flow_quota` release point; R5-20, R5-50, R5-53, R5-57, R5-60 re-derived |
 | HOST-NEUTRAL (ADR-0207) | The flow request, the datagram frame (both directions) and the end classes (`0x2` clean half-close; `0x3` with a direction open or RST abort; `0x2` each way then close a clean full end) are the host-side protocol of every guest and carry no field naming a guest kind; the host owner and the host forwarder admit, pair, attach, watch, classify, frame, unframe and release the same way for every guest and never branch on guest type. A Linux guest implements its side with `overdrive-init` and its guest kit; a guest that runs no Linux kernel implements the same protocol in its own image ([GH #321](https://github.com/overdrive-sh/overdrive/issues/321)) | Host owner; host forwarder; the wire contracts | (a) a guest-kind field with host branches per kind (a guest's gap becomes host code on the path every flow crosses); (b) per-guest feature negotiation at session start (a capability matrix on the host) | Host-side scenarios assert the wire protocol only; no host scenario varies by guest kind |
 
 ### Charter and inputs
@@ -915,11 +813,11 @@ supported mechanisms this design does not contain.
 | P-63 | **Guest-slot V-2: K-PS2 — a released flow's end precedes the next request at the guest.** In 8,275 timed microVM trials the guest kernel received the released flow's end before any byte of a later request, and before the later connection's request when it was a fresh dial: four host release kinds (a dial dropped after its request write; a stream dropped after pairing; a host close and an `SO_LINGER{1,0}` abort of a guest-opened flow, which also yields SHUTDOWN), a fresh and a pre-established next connection, back to back, 0–1,000 µs random and a 25–1,000 µs grid, idle and under CPU load: 0 reorderings. A reversed-order control was flagged 250 of 250. The oracle is the guest's `vsock:virtio_transport_recv_pkt` order (`net/vmw_vsock/virtio_transport_common.c:1622 @ v7.0`, the classifier's site); the host queues every packet of the device on one queue (`drivers/vhost/vsock.c:296-297`, `:125-140`, `:238 @ v7.0`) and the guest handles its RX ring in order (`net/vmw_vsock/virtio_transport.c:624`, `:680 @ v7.0`). The released flow and the next request were different vsock connections of one device | [`spike/findings-v2-guest-slot.md`](spike/findings-v2-guest-slot.md); `spike-scratch/netns-density-295-v2/increment-b`; native metal x86_64, host and guest `7.0.0-29-generic`, CH fork `41a619d19`, guest 2 vCPUs | A userspace stand-in guest owner; the classifier site observed through the tracepoint, not the production raw-tracepoint program; the "classifier skipped, end pending as readiness" case (A4) not exercised (V-31-MV); control-session messages were not among the measured packets, only the same cross-connection order |
 | P-64 | **Guest-slot V-3: the sockmap redirect queue toward a target that does not read is unbounded.** An `sk_skb` stream verdict redirecting (egress) from a vsock source into a TCP socket whose peer never reads queued `fwd − sent` = 14,083,960 B per 16 MiB flow (100 of 100), with the sender never throttled (median 481 MB/s, `max_send_ms` 1); uncapped, the queue grew linearly to 338–398 MiB in under 1 s and the guest OOM-killed the owner and then its agent on a 1 GiB guest; the queue is not charged to the owner's memory cgroup (`memory.current` 6.1 MiB while `SUnreclaim` rose by 448 MiB); a TCP source behaves the same (129 MiB queued at a 100 MiB cap, never stalled); the guest→host direction queues on the host the same way (381–400 MiB, recovered after close). Kernel memory rises about 1.155× the queued bytes and is returned on close. Without a sockmap the vsock sender stops at exactly 262,144 B (`VSOCK_DEFAULT_BUFFER_SIZE`). Causes: vsock credit is returned before the verdict runs (`net/vmw_vsock/virtio_transport_common.c:1776-1781 @ v7.0`); `tcp_read_skb` orphans the skb from the TCP source (`net/ipv4/tcp.c:1782-1785`, `include/net/sock.h:2456-2465 @ v7.0`); the egress redirect queues with no limit (`net/core/skmsg.c:989 @ v7.0`). Removing the source from its sockmap at 8 MiB queued restored credit backpressure at once (the sender blocked after `fwd + 262,144` B); re-inserting it alone did not resume forwarding, and resuming needed the owner to read the 262,144 B residue | [`spike/findings-v3-guest-slot.md`](spike/findings-v3-guest-slot.md); `spike-scratch/netns-density-295-v3/`; native metal x86_64, host and guest `7.0.0-29-generic`, CH fork `41a619d19` | A minimal always-redirect verdict and a loopback TCP target, not the production verdict or path; ingress redirect not tested; peak queue lower-bounded (OOM between samples); a guest raising `SO_VM_SOCKETS_BUFFER_SIZE` not measured; the C5 resume probe discarded the residue, so it is not a design |
 | P-65 | **Guest-slot V-4: a guest `close()` of a flow vsock reaches the host as one SHUTDOWN `0x3` first.** 2,000 of 2,000 microVM trials, guest-opened and host-opened, ten pre-states (clean exchange, unread bytes 1 KiB and 128 KiB on the guest, the host or both, own or peer half-close first, `0x2` each way): exactly one SHUTDOWN `0x3`, no earlier RST or `0x3`, the record before the host's wake in 2,000 of 2,000 (record to wake p50 23.2 µs). Bytes the guest wrote before `close` stay readable at the host, then EOF; unread guest bytes are dropped with no extra record. With no host-unread bytes the host kernel answers the `0x3` with an RST within about 4 µs; with host-unread bytes it does not, and the guest's close timer sends an RST 8.14–8.39 s later (400 of 400 such flows; `VSOCK_CLOSE_TIMEOUT`, `net/vmw_vsock/virtio_transport_common.c:24`, `:1258-1275`, `:1306-1308 @ v7.0`). `close()` cannot express clean or abort: only the "`0x2` each way, then `close()`" history ends with no direction open. `EPOLLHUP` appears at the host only when its own write side was already shut (`net/vmw_vsock/af_vsock.c:1250-1259 @ v7.0`) | [`spike/findings-v4-guest-slot.md`](spike/findings-v4-guest-slot.md); `spike-scratch/netns-density-295-v4/increment-c`; native metal x86_64, host and guest `7.0.0-29-generic`, CH fork `41a619d19` | Tracepoint observation, not the production BPF classifier; a single-threaded stand-in guest owner; not tested: guest `SO_LINGER`, a guest close racing a host close, close with TX in flight, a reused flow id after the trailing RST; the 0.14–0.39 s excess over 8 s not isolated |
-| P-66 | **Valve spike: real backpressure through the `sk_skb` egress redirect.** Byte-verified (splitmix64) streams, host→guest (A), guest→host (B), guest-local TCP source (T). Controls reproduce P-64 (3/3 each hit the 160 MiB cap in ≤ 0.33 s). **vsock source — no verdict-side or sockmap-resident mechanism is lossless and bounded:** credit is returned before the verdict (`net/vmw_vsock/virtio_transport_common.c:1779`, `:1781 @ v7.0`), so `SK_PASS` and parking throttle nothing (`pass-A` 215,508 skbs, `park-A` 160 MiB); native knobs do not bound (`knobs-A`, `ingress-T`); removing the source above a bound stops the sender but loses an in-flight skb (`skmsg.c:1240-1254 @ v7.0`; 12/20, 20/40, 8/100 trials lost data); an `SO_RCVLOWAT`-gated removal gave 320/320 intact but loses data at 1 ms owner gaps (14/40) and overshoots with owner latency (40 MiB at +100 ms); re-joining deadlocked (20/20 with the gate left raised) or reordered (1/20). **Owner move (pure pump): lossless and bounded** — `purepump-A/B/T` 10/10 each, the sender blocked at 2.7–2.8 MiB for the whole 3 s stall, kernel memory flat, throttled to a 20 MiB/s reader. **TCP source — park valve: lossless and bounded with no removal** — verdict passes once `queued + len ≥ HIGH` or while parked bytes are unforwarded, the owner forwards parked bytes after `queued` reaches 0, the verdict resumes by itself: `park-T` 20/20 intact, peak 3.96–4.00 MiB at a 4 MiB bound; `parkstress-T` 100/100 (25.6 GiB verified), peak ≤ 4.00 MiB, kernel memory rise ≤ 0.5 MiB; slow readers, cycles and a 10 s stall all intact; parked bytes stay charged to the source (`pass-T` 15 skbs; 0.43 MiB over 10 s). Costs (1 GiB, fast sender): A redirect 427 / move 659 MiB/s; B 1,857 / 1,536; T 1,954 / 1,238 (park 1,196); owner CPU 0.46–0.83 s/GiB on the moved paths; small-message p99 A 517 → 1,674 µs, B and T unchanged within noise | `spike-scratch/netns-density-295-valve/` (`evidence/vm-*/`, `bpf/src/main.rs`, `probe/src/main.rs`, `vmrun.py`); the findings report is to be recorded at `spike/findings-v3-valve.md` (not yet written into `docs/`); native metal x86_64, host and guest `7.0.0-29-generic`, CH fork, BPF object sha256 `f3a5e587…` | One flow per probe; a minimal always-redirect verdict, a loopback TCP target, no mTLS/kTLS; half-close and FIN through park and move not exercised; the pump used plain `recv`, not `MSG_PEEK`; park and move were never combined on one flow, nor run through the production verdict, cells, records or owners (V-VALVE-COMPOSE, withdrawn with the valve) |
+| P-66 | **Valve spike: real backpressure through the `sk_skb` egress redirect.** Byte-verified (splitmix64) streams, host→guest (A), guest→host (B), guest-local TCP source (T). Controls reproduce P-64 (3/3 each hit the 160 MiB cap in ≤ 0.33 s). **vsock source — no verdict-side or sockmap-resident mechanism is lossless and bounded:** credit is returned before the verdict (`net/vmw_vsock/virtio_transport_common.c:1779`, `:1781 @ v7.0`), so `SK_PASS` and parking throttle nothing (`pass-A` 215,508 skbs, `park-A` 160 MiB); native knobs do not bound (`knobs-A`, `ingress-T`); removing the source above a bound stops the sender but loses an in-flight skb (`skmsg.c:1240-1254 @ v7.0`; 12/20, 20/40, 8/100 trials lost data); an `SO_RCVLOWAT`-gated removal gave 320/320 intact but loses data at 1 ms owner gaps (14/40) and overshoots with owner latency (40 MiB at +100 ms); re-joining deadlocked (20/20 with the gate left raised) or reordered (1/20). **Owner move (pure pump): lossless and bounded** — `purepump-A/B/T` 10/10 each, the sender blocked at 2.7–2.8 MiB for the whole 3 s stall, kernel memory flat, throttled to a 20 MiB/s reader. **TCP source — park valve: lossless and bounded with no removal** — verdict passes once `queued + len ≥ HIGH` or while parked bytes are unforwarded, the owner forwards parked bytes after `queued` reaches 0, the verdict resumes by itself: `park-T` 20/20 intact, peak 3.96–4.00 MiB at a 4 MiB bound; `parkstress-T` 100/100 (25.6 GiB verified), peak ≤ 4.00 MiB, kernel memory rise ≤ 0.5 MiB; slow readers, cycles and a 10 s stall all intact; parked bytes stay charged to the source (`pass-T` 15 skbs; 0.43 MiB over 10 s). Costs (1 GiB, fast sender): A redirect 427 / move 659 MiB/s; B 1,857 / 1,536; T 1,954 / 1,238 (park 1,196); owner CPU 0.46–0.83 s/GiB on the moved paths; small-message p99 A 517 → 1,674 µs, B and T unchanged within noise | `spike-scratch/netns-density-295-valve/` (`evidence/vm-*/`, `bpf/src/main.rs`, `probe/src/main.rs`, `vmrun.py`); [`spike/findings-v3-valve.md`](spike/findings-v3-valve.md); native metal x86_64, host and guest `7.0.0-29-generic`, CH fork, BPF object sha256 `f3a5e587…` | One flow per probe; a minimal always-redirect verdict, a loopback TCP target, no mTLS/kTLS; half-close and FIN through park and move not exercised; the pump used plain `recv`, not `MSG_PEEK`; park and move were never combined on one flow, nor run through the production verdict, cells, records or owners |
 | P-67 | **evmod: an event-driven in-kernel forwarder is bounded, byte-exact and fast.** A C module overriding each socket's `sk_data_ready`, `sk_write_space`, `sk_state_change` and `sk_error_report`, one work item per pair on a per-CPU workqueue, moving bytes by `MSG_PEEK` → non-blocking send → consume of the accepted count. **Bounded:** with a target that does not read, the pipeline plateaued at 2.62–2.77 MiB (vsock source → guest TCP, A), 2.58–8.05 MiB (TCP → TCP, T; TCP autotune, flat at 3.95 MiB over 10 s) and 0.25–2.95 MiB (TCP → vsock, G), flat for 3 s and 10 s stalls; the sender blocked for the whole stall and resumed 1.3–3.5 ms after the reader; guest unreclaimable slab rose ≤ 0.6 MiB; the sockmap control on the same VM queued 160 MiB in 0.36 s with +179 MiB slab. **Correct:** 504 trials, 64.6 GiB splitmix-verified, 0 bad; FIN propagated both ways in the module (eof 120/120, tiny 180/180, bidir 30/30); 27 of 27 injected loss / duplicate / reorder faults detected. **Fast:** at 16,384 peers, 64 KiB request/reply, 1.198 GiB/s against Aya 0.955, 2.71 against 3.18 core-s/GiB, p99 0.780 against 0.966 ms; parity at 64 peers; 16,466 kernel tasks (no proxy thread); 2.76 GiB unreclaimable slab (Aya 2.79, `shmproxy` 5.38). Kernel facts: a peek returns no credit, only a dequeue does (`net/vmw_vsock/virtio_transport_common.c:806-809`, `:536`, `:583`, `:654-655 @ v7.0`); the credit update wakes the writer (`:1440-1441`); the sockmap path returns credit before the verdict (`:1779`, `:1781`) | [`spike/findings-evmod.md`](spike/findings-evmod.md); `spike-scratch/netns-density-295-evmod/`; host and guest `7.0.0-29-generic`, CH fork, native metal; private QEMU host-role VM | Directions measured with the module in the guest (host role in P-68); spike-only `ioctl` control and `/proc` polling; `tcp_abort`, `rmmod` with a live pair and tight buffers on the final build in P-68; a vsock end-of-stream was forwarded as FIN whatever its cause (no classification); no datagram mode; no production owner. Measured with the `sk_write_space` override as the write-space trigger, which the design replaces with a wait-queue entry (ADR-0204): the resume times and the **Fast** throughput, core-s/GiB and p99 figures belong to that trigger and are re-measured with the entry under V-9's benchmark (GH #326). Through the entry a vsock target wakes on `sock_def_write_space`, only when `sock_writeable` holds (`net/core/sock.c:3617-3637`, `include/net/sock.h:2631-2641 @ v7.0`), so a credit update that arrives while transmit skbs are in flight no longer wakes it; the resume waits for a later `sock_wfree`. The bound and the correctness results do not depend on the trigger |
 | P-68 | **evmod follow-up: host role, lifecycle, workqueue, kTLS.** **Host role** (`bench-v3`, vsock source on vhost): byte-exact, plateau 4.69 MiB (v2t) and 0.65 MiB (t2v) flat over 3 s and 10 s, slab rise ≤ 0.5 MiB, resume p50 2.50 / 0.72 ms. **Abort propagation** (final build): cut-A, cut-G, rst-T, rst-G, kill-A, kill-T aborted 5–20 of 5–20 with `live = 0` (cut-A p50 0.37 ms, max 202 ms; rst-T p50 0.23 ms); a target that only `shutdown(SHUT_RD)`s and keeps its fd open looked like a stalled reader (cut-T 2 of 5 stayed open, 2.6 MB held; `tcp_shutdown` sends nothing for `SHUT_RD`, `net/ipv4/tcp.c:3113-3114 @ v7.0`). **Unload:** `rmmod` with live pairs 90/90 clean without kTLS, counters balanced. **Tight buffers** (64 KiB): pipeline 0.12–0.51 MiB. **Workqueue:** unbound was worse for many flows and small messages (0.041 vs 0.106 GiB/s at 64 peers, 1 KiB; −14 % at 16,384 peers, 64 KiB) and 1.1–1.4× better for one large flow. **kTLS:** installed before attach, byte-exact and bounded, but a `close_notify` aborted the pair (`tls_sw_recvmsg` returns `-EIO` for a non-data record without a control buffer, `net/tls/tls_sw.c:1844-1860`, `:2062 @ v7.0`); installed after attach, `rmmod` panicked the guest (the TLS ULP had saved the module's `sk_data_ready`, `:2511-2516`, `:2693-2694`, `:2603-2606`) | [`spike/findings-evmod-followup.md`](spike/findings-evmod-followup.md); `spike-scratch/netns-density-295-evmod/inc2/`; physical host `7.0.0-38-generic`, guest and QEMU host-role VM `7.0.0-29-generic` | Stand-in owners; one fault-injection trial was a no-op (injector bug); module-to-module chains (host and guest forwarders on one flow) not run; no datagram mode; no end classification |
 | P-69 | **V-EV-END: end classification with the forwarder on both sides of a microVM.** Per-transition classification in `sk_state_change`, plus `sk_err` in `sk_error_report`, chained host and guest, gave exactly R2-END at every far end: clean ends (guest first, remote first, simultaneous; 3 × 1,000) completed with every byte and EOF; CLEAN-FULL-END with the host or guest run lagging 15 ms 1,000/1,000 each; every reset and abort shape (guest RST, remote RST with both or one direction open, `close()` with unread data, host and guest owner abort in the 2 × 2 of direct `0x3` / `0x2` then `0x3` × direction open / closed, a stalled 6 MiB pipeline) reached the other far end as a reset, never EOF; 48 pairs reset at once (4,800 pairs) and 7,580 random event chains gave exactly one record per id and nothing live afterwards; a VMM `kill -9` gave one `SocketError { ECONNRESET }` record per host pair and watch and no clean EOF at any remote (0 of 1,920); `unclassified_eof` 0. A TCP reset errno is `ECONNRESET`, or `EPIPE` in `CLOSE_WAIT` (`net/ipv4/tcp_input.c:4905-4930 @ v7.0`). Watch: the record was present at the holder's observation in 6,640 of 6,640 (640 on the unlocked sweep path); an aborted dial read as EOF at the holder in 2,000 of 2,000. **Falsified sentence:** "a TCP half needs no classifier": after a FIN the forwarder stops reading the half and a later reset reaches only `sk_error_report` (hazard 16: 20 of 20 left the far end in `CLOSE_WAIT`). Hazard controls: every vsock end forwarded as a FIN reset nothing (100 % of reset shapes failed); classification from accumulated `peer_shutdown` aborted 100 of 100 clean lag shapes; a watch record queued from the work item was absent at the holder's end in 8–68 %; the original callback called before the record held 1,200 of 1,200 on the locked path. Permanence: `[permanent]` and `delete_module` `EBUSY` on host and guest | [`spike/findings-ev-end.md`](spike/findings-ev-end.md); `spike-scratch/netns-density-295-ev-end/`; metal host `7.0.0-38-generic` (AMD EPYC 8024P, `systemd-detect-virt` none), host-role QEMU VM and CH-fork guest `7.0.0-29-generic` | Nested L1/L2 timing is not production latency; payloads ≤ 32 KiB except the stalled shapes; VMM kill 40 rounds per shape; the sweep-path record order is evidence, not proof; datagram mode, kTLS and the attach errno matrix not covered; stand-in owners |
-| P-70 | **V-EV-CTL: the control context.** Release by `close()`, `kill -9` and `exit` with 48 pairs and 16 watches, idle or with 8 MiB queued: 48 of 48 far TCP ends reset at release return, before the parent's `waitpid` returned, every far vsock end classified `PeerAbort`, no record queued (68 of 68); `dup` and `fork` holders keep the context until the last close; 120 `SIGKILL`s inside attach, abort and abort-all ioctls left no unreset attached pair, no reset never-attached pair, no leak; the same over the real vhost device. A storm of 16,384 pair ends in six shapes: exactly one record per id, 0 lost or duplicated; `kill -9` of the owner reset all 16,384 far ends by `waitpid` return. Ids strictly increasing and never reused over 1,000,001 attaches and watches, one record each; ids are per context. Watch ordering under load: 400/400 per class and 4,096 parallel watches correct; **after the forwarder's `SHUT_RDWR` the holder's `read` failed `ENOTCONN` in 10/400 (`0x3`), 4/400 (`close()`) and 1,916/4,096 (parallel), not 0** (`net/vmw_vsock/af_vsock.c:1220`, `:2522-2531 @ v7.0`). `delete_module` `EBUSY` for flags 0, `O_NONBLOCK`, `O_TRUNC` and both, with and without live pairs (27/27), `CONFIG_MODULE_FORCE_UNLOAD` off. Attach refusals: seven pairwise distinct errno classes with a fixed precedence (42/42); `CLOSE_WAIT` TCP accepted; IPv6 TCP accepted; a reset TCP half and a `CLOSING` vsock refused `ENOTCONN`. kTLS installed after attach: byte-exact, one record, no oops, `delete_module` refused (18/18). Without `O_CLOEXEC` an exec'd child kept the context and its pairs forwarding (8 of 8); with it, 0 of 8. A holder's `close()` alone left its watch live | [`spike/findings-ev-ctl.md`](spike/findings-ev-ctl.md); `spike-scratch/netns-density-295-ev-ctl/`; metal host `7.0.0-38-generic`, CH-fork guests `7.0.0-29-generic` (module loaded only in guests) | The module in the vhost host role not run here (P-69 ran it); no `ENOMEM` injection; ULP-after-attach observed for four endings only; the forced-unload case not run; the recovery order (h), the owner-abort holder case (i) and the KASAN stale-invocation stress (j) of the planned item not run (§ *Validation plan*) |
+| P-70 | **V-EV-CTL: the control context.** Release by `close()`, `kill -9` and `exit` with 48 pairs and 16 watches, idle or with 8 MiB queued: 48 of 48 far TCP ends reset at release return, before the parent's `waitpid` returned, every far vsock end classified `PeerAbort`, no record queued (68 of 68); `dup` and `fork` holders keep the context until the last close; 120 `SIGKILL`s inside attach, abort and abort-all ioctls left no unreset attached pair, no reset never-attached pair, no leak; the same over the real vhost device. A storm of 16,384 pair ends in six shapes: exactly one record per id, 0 lost or duplicated; `kill -9` of the owner reset all 16,384 far ends by `waitpid` return. Ids strictly increasing and never reused over 1,000,001 attaches and watches, one record each; ids are per context. Watch ordering under load: 400/400 per class and 4,096 parallel watches correct; **after the forwarder's `SHUT_RDWR` the holder's `read` failed `ENOTCONN` in 10/400 (`0x3`), 4/400 (`close()`) and 1,916/4,096 (parallel), not 0** (`net/vmw_vsock/af_vsock.c:1220`, `:2522-2531 @ v7.0`). `delete_module` `EBUSY` for flags 0, `O_NONBLOCK`, `O_TRUNC` and both, with and without live pairs (27/27), `CONFIG_MODULE_FORCE_UNLOAD` off. Attach refusals: seven pairwise distinct errno classes with a fixed precedence (42/42); `CLOSE_WAIT` TCP accepted; IPv6 TCP accepted; a reset TCP half and a `CLOSING` vsock refused `ENOTCONN`. kTLS installed after attach: byte-exact, one record, no oops, `delete_module` refused (18/18). Without `O_CLOEXEC` an exec'd child kept the context and its pairs forwarding (8 of 8); with it, 0 of 8. A holder's `close()` alone left its watch live | [`spike/findings-ev-ctl.md`](spike/findings-ev-ctl.md); `spike-scratch/netns-density-295-ev-ctl/`; metal host `7.0.0-38-generic`, CH-fork guests `7.0.0-29-generic` (module loaded only in guests) | The module in the vhost host role not run here (P-69 ran it); no `ENOMEM` injection; ULP-after-attach observed for four endings only; the forced-unload case not run; the recovery order (h), the owner-abort holder case (i) and the stale-invocation stress (j) of the planned item not run (§ *Validation plan*) |
 | P-71 | **V-EV-PAIR: attach at pairing loses no early data.** 961,995 of 962,000 trials byte-exact both ways (FNV-1a and `memcmp`), every end record's byte counts exact; the 5 failures were the harness's `connect()` resets before any attach. Shapes: egress write + FIN before `Paired` (89–90 % found early bytes and an early FIN at attach; serial, ×8 and 8 × 10,000), egress server-first with and without an early FIN, egress no-FIN, a pending intake child that resets (attach refused), a destination reset before `Paired` (the attach-time abort branch ran 5,678 times), inbound server-first ± FIN, inbound client-first in H-1 order, and inbound client-first violating H-1; over vsock loopback and a real vhost device. Early data waited only in the source's queue, bounded by its buffer (≤ 262,144 B on vsock, ≈ 128 KB on a TCP intake child); kernel memory plateaued. Hazards: an `ESTABLISHED`-only attach refused 414 of 500 write-and-FIN flows (`h_strict`); no attach-time classification aborted 289–386 of 500 as `unclassified_eof` (`h_noseed`); no attach-time run stranded TCP early data (`h_nokick`); publishing "send shut" after the SHUTDOWN left aborted 270–300 of 300 clean flows (`h_lateshut`, the CLEAN-FULL-END race found and fixed in the module). A consumed `sk_err` reads as EOF (`net/ipv4/tcp.c:2794-2806 @ v7.0`) | [`spike/findings-ev-pair.md`](spike/findings-ev-pair.md); `spike-scratch/netns-density-295-ev-pair/`; metal host `7.0.0-38-generic`, CH-fork guest `7.0.0-29-generic` | The host pair ran on vsock loopback, not vhost; the destination-reset shape on vhost had the peer play the forwarder; datagram mode, kTLS halves, pending-cap exhaustion and a release with early data pending not tested; the module refused a reset TCP half and an empty-queue `0x3` vsock half with the half's errno (`ECONNRESET`, `EPIPE`, `ENOTCONN`), where the contract returns `ECONNABORTED` with the cause in `end_errno` (EVMOD-ATTACH-END; module code, checked in DELIVER) |
 | P-72 | **V-EV-DGRAM: datagram mode.** 0, 1, 1,431, 4,096, 4,097 and 59,000 B datagrams and 10,000 mixed sizes, connected and unconnected, both ways at once: delivered once, whole and in order, empties included (4,050 in the mixed run), over loopback vsock with the module at both ends and over a real vhost device to an independent host parser. 6,079 partial-send resumes under a 64 KiB credit window, 0 lost, duplicated or corrupt; frames written in random 1–5,000 B pieces 1,200/1,200; datagrams queued before attach forwarded. Oversize consumed and counted, no desync; a bad magic or length aborts `FrameInvalid`. A 10 s stall in four positions: every datagram accounted for (sent = delivered + drops), drops only at UDP receive queues (`net/ipv4/udp.c:1721-1731 @ v7.0`), kernel memory flat. ICMP refusal and the D26 rule ended the association `SocketError` (111, 1). The `recvmsg4` rewrite restored the original reply source (200/200). Slot release: abort then discard then reconnect carried 0 stale datagrams; without the discard 1,018 reached the next association; a port-0 slot changed port at disconnect (`net/ipv4/udp.c:2209-2235`, `net/ipv4/af_inet.c:562-563 @ v7.0`). Found: a frame left incomplete at the peer's end hung the pair (fixed: abort `FrameInvalid`); a frame larger than a lowered vsock buffer can never be queued; `ENOBUFS` never surfaces without `IP_RECVERR` (`net/ipv4/udp.c:1195-1201 @ v7.0`; 1,086,869 qdisc drops, `err` 0). Per-datagram CPU below the Aya path at every size and population | [`spike/findings-ev-dgram.md`](spike/findings-ev-dgram.md); `spike-scratch/netns-density-295-ev-dgram/`; metal host `7.0.0-38-generic`, QEMU VM and CH-fork guest `7.0.0-29-generic` | The host-side module on a real vhost transport not run; the spike's ioctl and end ring stood in for `/dev/ovd_fwd`; IPv6, `UDP_SEGMENT` / GRO and a natural vsock RST in datagram mode not covered; per-association kernel memory below the noise floor |
 
@@ -940,7 +838,7 @@ plan*.
 | A-17 | The fork VM boots and passes data under the production launch identity: uid drop, ADR-0129 hook, ADR-0143 launch filter, CH Landlock with the fork's one rule for `/dev/vhost-vsock`, the VMM opening the device itself (CID-NOCLAIM) | V-1(c) | DELIVER new step 3 |
 | A-19 | The ADR-0053 `connect4` program attached at `overdrive.slice` is effective for sockets of `overdrive.slice/control-plane.slice` (ancestor inheritance, `kernel/bpf/cgroup.c:442-447 @ v7.0`; already production behaviour for workload cgroups) | V-15 (inside V-6) | DELIVER new step 11 |
 | A-23 | The constant guest-prefix rules (ADR-0172) keep every packet to a guest-prefix address that is not diverted to leg-C from reaching a host socket or leaving the host by another route, for marked, unmarked and remote clients, and stay in place while `serve` is down | V-19 | DELIVER new step 9 |
-| A-45 | No override and no control call by id touches an ended pair's state, and no override calls itself: the release/acquire order of ADR-0204, its id-table locking and its free order (RCU grace period, then the completion of the pair's work item, then the free) hold under ≥ 10^5 pair ends while the sockets receive at line rate on every CPU and the owner issues `OVD_FWD_ABORT` and `OVD_FWD_PAIR_STATE` on ending ids, under KASAN (EVMOD-SAFE) | V-EV-SAFE (not contract-shaping: a failure is a module defect) | DELIVER of the forwarder step |
+| A-45 | No override and no control call by id touches an ended pair's state, and no override calls itself: the release/acquire order of ADR-0204, its id-table locking and its free order (RCU grace period, then the completion of the pair's work item, then the free) hold under ≥ 10^5 pair ends while the sockets receive at line rate on every CPU and the owner issues `OVD_FWD_ABORT` and `OVD_FWD_PAIR_STATE` on ending ids, on the stock 7.0 kernel (EVMOD-SAFE) | V-EV-SAFE (not contract-shaping: a failure is a module defect) | DELIVER of the forwarder step |
 | A-37 | The fork change that routes the guest-reset dispatch to the VMM exit path ends the VMM on a guest PID-1 crash under `panic=1` and on a triple fault, with no guest `EXIT` record; host flows are reset and the driver sees a VMM exit before or after READY and classifies it a failure (V-30 read the source only, P-51) | RESET-EXIT fork build test (ADR-0182) | DELIVER of the fork step |
 | A-38 | Boot reclamation kills every VMM the new `serve` process does not supervise before any `assign`, and a reclaimed VMM's vhost-vsock device is released before its cgroup can be removed (Quint K-C5). Source support for the second half, for the task that drops the last reference: `exit_files` (`kernel/exit.c:971`) queues the final `fput` as task work (`fs/file_table.c:528-531`), `exit_task_work` (`kernel/exit.c:976`) runs it, and the task leaves its cgroup only later, in `do_cgroup_task_dead` (`kernel/cgroup/cgroup.c:7072-7083`), called through `cgroup_task_dead` from `finish_task_switch` after the task's last schedule (`kernel/sched/core.c:5193 @ v7.0`); `cgroup_task_exit` (`kernel/exit.c:980`) only runs the subsystems' exit callbacks | V-RECLAIM: Tier-3 `serve`-restart reclamation scenario | DELIVER of the reclamation step |
 
@@ -972,7 +870,7 @@ table is not a current decision (§ *Changed assumptions*).
 |---|---|---|---|---|
 | D1 | Guest application traffic crosses the VM's virtio-vsock device and is forwarded only in the guest and host kernels — by the event-driven in-kernel forwarder since EVMOD-ADOPT; no guest NIC, TAP, bridge or per-VM netdevice | **APPROVED 2026-10-05**; forwarder **APPROVED 2026-10-16** (EVMOD-ADOPT) | [0145](../../product/architecture/adr-0145-vsock-kernel-forwarded-guest-transport-replaces-shared-bridge.md) (supersedes 0114; supersedes as moot 0126, 0127, 0130, 0142, 0144) | — |
 | EVMOD-ADOPT | Every guest flow is forwarded on each side by one event-driven in-kernel forwarder that peeks its source, sends without blocking and consumes only what the target accepted, so the source's own queue holds a stalled flow's bytes; a clean end is forwarded as `SHUT_WR` after the last accepted byte | **APPROVED 2026-10-16** | [0197](../../product/architecture/adr-0197-guest-flows-are-forwarded-by-an-event-driven-in-kernel-forwarder.md) | V-EV-END, V-EV-CTL, V-EV-PAIR, V-EV-DGRAM (contract-shaping; ran and held, P-69 to P-72) |
-| EVMOD-LIFE | The forwarder module `ovd_fwd` has `module_init` and `module_exit` and holds a module reference for every open context and every hooked socket, so it unloads only when nothing can call its text; the appliance image kernel has no module unloading | **APPROVED 2026-10-17; amended by MODULE-REFCOUNT 2026-10-20** | [0198](../../product/architecture/adr-0198-the-flow-forwarder-module-unloads-only-when-nothing-references-it.md), [0204](../../product/architecture/adr-0204-neither-a-late-forwarder-callback-nor-a-control-call-by-id-touches-an-ended-pairs-state.md) rule 5, [0068](../../product/architecture/adr-0068-pinned-appliance-kernel-floor.md) § 7 | V-EV-UNLOAD |
+| EVMOD-LIFE | The forwarder module `ovd_fwd` has `module_init` and `module_exit` and holds a module reference for every open context and every hooked socket, so it unloads only when nothing can call its text; the appliance image kernel has no module unloading | **APPROVED 2026-10-17; MODULE-REFCOUNT 2026-10-20** | [0198](../../product/architecture/adr-0198-the-flow-forwarder-module-unloads-only-when-nothing-references-it.md), [0204](../../product/architecture/adr-0204-neither-a-late-forwarder-callback-nor-a-control-call-by-id-touches-an-ended-pairs-state.md) rule 5, [0068](../../product/architecture/adr-0068-pinned-appliance-kernel-floor.md) § 7 | V-EV-UNLOAD |
 | EVMOD-BUILD | One in-repository C source, built by `cargo xtask kmod-build` once per supported kernel release | **APPROVED 2026-10-17** | [0203](../../product/architecture/adr-0203-the-flow-forwarder-module-is-built-from-one-source-once-per-supported-kernel-release.md) | — |
 | EVMOD-LOAD | The host image loads the module at boot and `overdrive-init` loads it before READY; `serve` never loads modules | **APPROVED 2026-10-17** | [0205](../../product/architecture/adr-0205-the-flow-forwarder-module-is-loaded-at-boot-by-the-host-image-and-by-overdrive-init-never-by-serve.md) | — |
 | EVMOD-GUEST-KIT | A Linux guest kernel and its module ship as one guest kit; `overdrive-init` checks the module's release against the running kernel before loading and fails before READY otherwise | **APPROVED 2026-10-17** (Linux guests) | [0206](../../product/architecture/adr-0206-a-guest-kernel-and-its-forwarder-module-ship-as-one-guest-kit.md) | — |
@@ -1021,7 +919,8 @@ table is not a current decision (§ *Changed assumptions*).
 | CID-NOCLAIM | No host-kernel CID claim: within one `serve` process lease uniqueness gives CID uniqueness, and boot reclamation runs before any `assign`; the VMM is the only holder of its vhost-vsock descriptor and no Overdrive process keeps a copy, so the device's last close resets every host flow of that guest; the lease is released only after the VMM has exited; a launch whose device cannot be opened fails before READY through the typed VMM-exit start failure | **APPROVED 2026-10-11** | [0146](../../product/architecture/adr-0146-vm-vsock-device-uses-kernel-vhost-backend-opened-by-the-vmm.md), [0156](../../product/architecture/adr-0156-guest-cid-derived-from-admission-lease.md) | V-RECLAIM (A-38); V-30 done (P-51) |
 | D17 | The beacon is accepted by one node-shared `AF_VSOCK` listener (`VMADDR_CID_ANY`:1234) and attributed by peer CID together with the launch token its READY carries (ATTR-TOKEN) | **APPROVED 2026-10-05**; launch token and live-launch claim approved under the user's directive of 2026-10-09 | [0157](../../product/architecture/adr-0157-beacon-on-node-shared-vsock-listener-keyed-by-peer-cid.md), [0177](../../product/architecture/adr-0177-guest-opened-host-vsock-connections-are-attributed-by-peer-cid-and-launch-token.md) | — (V-10 done, P-48; V-22 done, P-37) |
 | D18 | A flow's 32-byte request is written first on its own vsock connection and read by the acceptor before anything else touches the socket (H-1); every other pairing message (`Paired`, `Refused`, `Abort`, a host-opened flow's timeout reply) travels out of band on the control session | **APPROVED 2026-10-05** | [0158](../../product/architecture/adr-0158-a-flows-request-travels-in-band-and-every-other-pairing-message-out-of-band.md) | — |
-| U-1 | A flow's admission check and its registration in the allocation's flow table are one step relative to quiescence, teardown and control-session loss (the same for a dial); a pairing continuation attaches and sends `Paired` only for a flow still open, else closes its socket and sends nothing; a `Paired` for a closed host-opened flow is discarded | **APPROVED 2026-10-06** | [0213](../../product/architecture/adr-0213-a-flow-is-admitted-and-registered-in-one-step-and-never-acted-on-after-it-closed.md) | — || D18a | The control session is a dedicated per-VM vsock session to host port 1243, owned by the guest-flow owner, not multiplexed on the beacon; one live session per CID by atomic claim; a control message for an unknown or closed flow is discarded and counted with no reply, SLOT-ABORT excepted (U-5), relying on K-A4 for host-opened flows; a session is claimed only after its opening record names the CID's live launch token | **APPROVED 2026-10-05**; U-5 **confirmed by the user 2026-10-06**; launch token and live-launch claim approved under the user's directive of 2026-10-09 | [0166](../../product/architecture/adr-0166-flow-control-messages-travel-on-a-dedicated-per-vm-control-session.md), [0177](../../product/architecture/adr-0177-guest-opened-host-vsock-connections-are-attributed-by-peer-cid-and-launch-token.md) | — (V-22 done, P-37; V-24 done, P-38) |
+| U-1 | A flow's admission check and its registration in the allocation's flow table are one step relative to quiescence, teardown and control-session loss (the same for a dial); a pairing continuation attaches and sends `Paired` only for a flow still open, else closes its socket and sends nothing; a `Paired` for a closed host-opened flow is discarded | **APPROVED 2026-10-06** | [0213](../../product/architecture/adr-0213-a-flow-is-admitted-and-registered-in-one-step-and-never-acted-on-after-it-closed.md) | — |
+| D18a | The control session is a dedicated per-VM vsock session to host port 1243, owned by the guest-flow owner, not multiplexed on the beacon; one live session per CID by atomic claim; a control message for an unknown or closed flow is discarded and counted with no reply, SLOT-ABORT excepted (U-5), relying on K-A4 for host-opened flows; a session is claimed only after its opening record names the CID's live launch token | **APPROVED 2026-10-05**; U-5 **confirmed by the user 2026-10-06**; launch token and live-launch claim approved under the user's directive of 2026-10-09 | [0166](../../product/architecture/adr-0166-flow-control-messages-travel-on-a-dedicated-per-vm-control-session.md), [0177](../../product/architecture/adr-0177-guest-opened-host-vsock-connections-are-attributed-by-peer-cid-and-launch-token.md) | — (V-22 done, P-37; V-24 done, P-38) |
 | D19 | Guest forwarding kernel objects are unpinned and owned by their process — the guest capture links, and every forwarded pair through its process's control context (EVMOD-CTL); process exit fails closed and closes guest connections | **APPROVED 2026-10-05**; control context **APPROVED 2026-10-17** | [0159](../../product/architecture/adr-0159-guest-forwarding-kernel-objects-are-unpinned.md), [0199](../../product/architecture/adr-0199-forwarder-pairs-live-and-die-with-the-control-context-that-attached-them.md) | V-8 |
 | NO-SURVIVE | VMs do not survive a `serve` restart: boot reclamation kills every VM the new process does not supervise; survival across a restart is #312; the guest's control-session reconnect covers only a listener re-bound inside the same `serve` process | **APPROVED 2026-10-11** | [0159](../../product/architecture/adr-0159-guest-forwarding-kernel-objects-are-unpinned.md), [0166](../../product/architecture/adr-0166-flow-control-messages-travel-on-a-dedicated-per-vm-control-session.md) | V-RECLAIM (A-38) |
 | D19-LINKS | The guest's process-owned capture links have no runtime audit, damage recovery or gold-test detach injection; while `serve` holds them only an explicit detach removes them, and on the appliance only Overdrive could issue one (A-31) | **APPROVED 2026-10-08** | [0159](../../product/architecture/adr-0159-guest-forwarding-kernel-objects-are-unpinned.md) | — |
@@ -1040,7 +939,7 @@ table is not a current decision (§ *Changed assumptions*).
 | QHOLD | Forwarding quiescence is a counted, move-only hold: `quiesce()` increments the count and returns a `QuiescenceHold` (the first hold latches admission closed and aborts flows); `restore(hold)` consumes it and reopens admission only when the count reaches zero; a hold dropped without `restore` increments a leaked-hold count, keeps forwarding quiesced, and the recovery supervisor (ADR-0124) fail-stops `serve`; a failed boot write of the shared mTLS nft table (boot step 8) refuses boot | **APPROVED 2026-10-11** | [0169](../../product/architecture/adr-0169-forwarding-quiescence-is-a-counted-move-only-hold.md), [0184](../../product/architecture/adr-0184-a-failed-boot-write-of-the-shared-mtls-table-refuses-boot.md), [0124](../../product/architecture/adr-0124-bounded-shared-network-owner-recovery.md) | — |
 | KERNEL-7.0 | The pinned appliance kernel is Linux 7.0; `vendors/linux` at `v7.0` is the source every kernel claim is read in | **APPROVED 2026-10-10** | [0068](../../product/architecture/adr-0068-pinned-appliance-kernel-floor.md) | — |
 | QPROJ-1 to QPROJ-7 | The Quint conformance drivers run source-local in each owner's crate and project every compared variable from a pinned public read-only owner accessor or a pinned sim arbiter paired with a Tier-3 scenario; every other variable is classified ghost, model-internal, stimulus or hazard-only (§ *Conformance observation surface and action map*) | **APPROVED 2026-10-09** (with rulings U-QP-1, U-QP-2) | — | — |
-| DG-1 to DG-16 | DISTILL design-gap closures (§ *DISTILL design-gap closure*) | Approved under user delegation 2026-10-09; DG-2-R2, DG-4-CTOR, DG-CONST, DG-5-A to DG-5-C, DG-5-E, DG-5-F and DG-5-Q approved 2026-10-10 | — | — |
+| DG-1 to DG-16 | DISTILL design-gap decisions, each pinned in its owning contract section | Approved under user delegation 2026-10-09; DG-2-R2, DG-4-CTOR, DG-CONST, DG-5-A to DG-5-C, DG-5-E, DG-5-F and DG-5-Q approved 2026-10-10 | — | — |
 
 ### D15 re-derivation — pre-activation behaviour and READY
 
@@ -1243,7 +1142,7 @@ guest netdevice, L2, nft-on-bridge or netns.
 | 0137 | Members converge to empty at boot | **Revalidate** | Inbound nft members; the forwarder is empty by construction (0159); boot converges the gateway `local` route (keep identical / replace differing / add missing, never removed) (0152, GW-LOCAL) |
 | 0138 | Required serve ports | **Retained** | Port contents change |
 | 0139 | R18 intercept-mark guard | **Replaced** | 0153; R18's E14 receipts retained as artifacts |
-| 0140 | R19 TPROXY reorder | **Replaced (moot)** | Withdrawn 2026-10-03 |
+| 0140 | R19 TPROXY reorder | **Replaced (moot)** | Moot with its subject |
 | 0141 | CleanupPending from the live lease | **Retained** | — |
 | 0142 | TAP egress delivers only to the guest MAC | **Replaced** | 0145; the threat class is peer-CID authenticity (P-48, V-10) |
 | 0143 | VMM seccomp denies TAP ioctls | **Revalidate** | Launch-filter mechanism and probe stage retained; the deny list contains no `VHOST_*` request and is shown compatible with the fork's own open of `/dev/vhost-vsock` under the production launch (V-1(c)); #302 scope unchanged |
@@ -1258,29 +1157,27 @@ Counts (30 ADRs; 0119 absent): Replaced 11 (0114, 0115, 0117, 0126, 0127,
 
 | Item | Class | Note |
 |---|---|---|
-| ADR-0068 (appliance OS, pinned kernel) | **Amended** (dated amendments: KERNEL-7.0, user ruling 2026-10-10; § 7, EVMOD-LIFE, approved 2026-10-17) + **Correct** | The pinned kernel is Linux 7.0 (`vendors/linux` at `v7.0`); §5 (the root-namespace interface requirement) is removed; § 7: the image kernel of host and guest has `CONFIG_MODULE_UNLOAD` off (round 15: its reason restated under MODULE-REFCOUNT — nothing on the appliance unloads a module, and forced unload, the one bypass of the forwarder's reference count, is then unconfigurable). §4 correction: stock Cloud Hypervisor `--vsock` does not use `/dev/vhost-vsock` (P-12); only the fork's `backend=vhost-kernel` does. Kernel floor: host `CONFIG_VHOST_VSOCK`; guest `CONFIG_VIRTIO_VSOCKETS` and `CONFIG_DUMMY`; the forwarder module `ovd_fwd` built for the kernel (EVMOD-BUILD); BPF with BTF and cgroup socket hooks and `sock_release` for the guest capture programs; the nftables `fib` match in the output path; policy routing; `IP_TRANSPARENT`. No kernel version gate (KVER) |
+| ADR-0068 (appliance OS, pinned kernel) | **Amended** (dated amendments: KERNEL-7.0, user ruling 2026-10-10; § 7, EVMOD-LIFE, approved 2026-10-17) + **Correct** | The pinned kernel is Linux 7.0 (`vendors/linux` at `v7.0`); §5 (the root-namespace interface requirement) is removed; § 7: the image kernel of host and guest has `CONFIG_MODULE_UNLOAD` off (nothing on the appliance unloads a module, and forced unload, the one bypass of the forwarder's reference count, is then unconfigurable). §4 correction: stock Cloud Hypervisor `--vsock` does not use `/dev/vhost-vsock` (P-12); only the fork's `backend=vhost-kernel` does. Kernel floor: host `CONFIG_VHOST_VSOCK`; guest `CONFIG_VIRTIO_VSOCKETS` and `CONFIG_DUMMY`; the forwarder module `ovd_fwd` built for the kernel (EVMOD-BUILD); BPF with BTF and cgroup socket hooks and `sock_release` for the guest capture programs; the nftables `fib` match in the output path; policy routing; `IP_TRANSPARENT`. No kernel version gate (KVER) |
 | ADR-0087 § D7 retained `restart_status_for_alloc` | **Amended** (dated amendment 2026-10-18, RESTART-SSOT, GH #324, user ruling; not yet implemented) | The retained method and every `WorkloadLifecycle` ceiling check use one shared restart decision; the method takes the workload kind, whether a run is desired, the current row and the desired generation (§ *Restart decision*). D7's purpose (streaming, not a hydration cross-read) is unchanged |
 | ADR-0082 §D4 beacon | **Revalidate** | Message set and READY meaning unchanged. The transport is a node-shared `AF_VSOCK` listener (0157); READY carries `launch=<token>` (0177, ATTR-TOKEN). READY waits on no guest listener state (the guest keeps no listener map) |
 | ADR-0094 marked probes | **Amended** by 0173 (dated amendment 2026-10-11); amended by 0187 (PROBE-NOSAMPLE, approved 2026-10-13; not yet implemented) | A VM probe target is dialled through `GuestStreamDial`: a TCP-connect probe is healthy iff `dial` returns `Ok` (the stream is then dropped); an HTTP probe runs over the `GuestStream`; a never-accepting listener is healthy while its backlog has room, as a direct TCP probe is. The probe dials with `DialPurpose::Probe` (exempt from the allocation quota) and a dial refused `Capacity` (node flow slots) or `Quiesced` records no sample; `ServiceLifecycle` applies each threshold to the probe runner's recorded streak at read time ([0191](../../product/architecture/adr-0191-the-probe-runner-records-each-runs-streak-and-servicelifecycle-applies-thresholds-at-read.md), PROBE-RUN-COUNT). Exec / process probes unchanged, except the producer-recorded streak and the read-time threshold (PROBE-RUN-COUNT) |
-| ADR-0054 §5 probe row LWW | **Amended** by [0191](../../product/architecture/adr-0191-the-probe-runner-records-each-runs-streak-and-servicelifecycle-applies-thresholds-at-read.md) (dated amendment 2026-10-13, PROBE-RUN-COUNT; not yet implemented) | The probe row carries `run_seq` (`ProbeResultRowV2`) and a written row replaces the stored row only if its `run_seq` is greater; `last_observed_at_unix_ms` no longer decides the merge (§ *[REF] Observation row — ProbeResultRow V2 and the probe run sequence (PROBE-RUN-COUNT)*). Applies to every workload kind |
-| ADR-0055 probe counters in the `ServiceLifecycle` View | **Amended** by [0191](../../product/architecture/adr-0191-the-probe-runner-records-each-runs-streak-and-servicelifecycle-applies-thresholds-at-read.md) (dated amendment 2026-10-13, PROBE-RUN-COUNT with D-1; not yet implemented) | The thresholds are applied to the latest row's `same_status_runs` at read time; the four counter maps leave the View and `liveness_last_acted_run` joins it; a failed liveness stop is retried on the next row still past the threshold; a missing row no longer resets readiness (§ *[REF] VM probe runner*) |
+| ADR-0054 §5 probe row LWW | **Amended** by [0191](../../product/architecture/adr-0191-the-probe-runner-records-each-runs-streak-and-servicelifecycle-applies-thresholds-at-read.md) (dated amendment 2026-10-13, PROBE-RUN-COUNT; not yet implemented) | The probe row carries `run_seq` (`ProbeResultRowV2`) and a written row replaces the stored row only if its `run_seq` is greater; `last_observed_at_unix_ms` is the observation time shown to operators and takes no part in the merge (§ *[REF] Observation row — ProbeResultRow V2 and the probe run sequence (PROBE-RUN-COUNT)*). Applies to every workload kind |
+| ADR-0055 probe counters in the `ServiceLifecycle` View | **Amended** by [0191](../../product/architecture/adr-0191-the-probe-runner-records-each-runs-streak-and-servicelifecycle-applies-thresholds-at-read.md) (dated amendment 2026-10-13, PROBE-RUN-COUNT with D-1; not yet implemented) | The thresholds are applied to the latest row's `same_status_runs` at read time; the four counter maps leave the View and `liveness_last_acted_run` joins it; a failed liveness stop is retried on the next row still past the threshold; a missing row changes nothing for any role (§ *[REF] VM probe runner*) |
 | ADR-0080 § D5 / § D8 readiness counter relocation (Stage 2, not yet implemented) | **Amended** by [0191](../../product/architecture/adr-0191-the-probe-runner-records-each-runs-streak-and-servicelifecycle-applies-thresholds-at-read.md) (dated amendment 2026-10-13, PROBE-RUN-COUNT; not yet implemented) | No counter relocates: when § D5 lands, the relocated `compute_backend_healthy` applies the read-time threshold to the latest readiness row's `same_status_runs`, and `BackendDiscoveryBridgeView` gains no field. The owner of readiness → backend membership is unchanged |
 | ADR-0097 D2 startup-attempt de-duplication by observed-at | **Amended** by [0191](../../product/architecture/adr-0191-the-probe-runner-records-each-runs-streak-and-servicelifecycle-applies-thresholds-at-read.md) (dated amendment 2026-10-13, PROBE-RUN-COUNT; not yet implemented) | Replaced: the startup attempts are the latest startup row's `same_status_runs`, compared with `max_attempts`; `startup_attempts_per_alloc` and `startup_last_fail_seen_at` are removed. D1 unaffected |
-| ADR-0057 §1 / ADR-0080 § D1 per-role probe arrays | **Amended** (dated amendments 2026-10-14, D-UP-12; both ADRs are implemented; the amendment is not yet implemented) | The grammar is unchanged and a role may declare several probes; the spec's probes across startup, readiness and liveness together are capped at `GUEST_PROBE_SLOTS` (8), refused above it with `ParseError::ProbeCountExceeded` (TOML ingress) and `AggregateError::Validation { field: "probes" }` (API ingress) (§ *Core vocabulary*). The per-role `ProbeIdx` and the row key are unchanged. Applies to every Service spec. `ServiceLifecycle`'s handling of indices other than 0 is GH #319 |
+| ADR-0057 §1 / ADR-0080 § D1 per-role probe arrays | **Amended** (dated amendments 2026-10-14, D-UP-12; both ADRs are implemented; the amendment is not yet implemented) | The grammar is unchanged and a role may declare several probes; the spec's probes across startup, readiness and liveness together are capped at `GUEST_PROBE_SLOTS` (8), refused above it with `ParseError::ProbeCountExceeded` (TOML ingress) and `AggregateError::Validation { field: "probes" }` (API ingress) (§ *Core vocabulary*). The per-role `ProbeIdx` and the row key are unchanged. Applies to every Service spec. The probe cap bounds the quota-exempt probe dials one allocation holds. `ServiceLifecycle`'s handling of indices other than 0 is GH #319 |
 | ADR-0169 (counted quiescence hold; accepted, not implemented) | **Corrected** (D-UP-3, D-UP-4 with PD-1 and PD-2, approved 2026-10-14; present-tense correction, no amendment history) | A failed repair or post-repair audit is a counted attempt that keeps its hold, and a leaked hold comes only from an Overdrive defect (D-UP-3); holds are issued and redeemed by the owner's own ledger, a hold of another ledger is refused with a typed error that changes nothing and the supervisor fail-stops on it, a dropped hold reaches its issuing ledger, and the supervisor's shutdown cancellation drops a hold without a classified fail-stop (D-UP-4; § *Owner and provisioner*). Alternatives added: "a `?` as a leak path", "`unreachable!` on a foreign hold", "a foreign hold counted as leaked", "a private ledger" |
 | ADR-0157 (beacon listener; accepted, not implemented) | **Corrected** (D-UP-9, approved 2026-10-14; present-tense correction) | The driver's stop and the driver's observation of the launch's VMM exit each end the launch's liveness, close its beacon sessions and release its claim in one per-CID step, so the next launch's READY takes the claim (§ *Beacon intake*) |
 | ADR-0197 (new) | **New, accepted** (EVMOD-ADOPT, approved by the user 2026-10-16) | Guest flows are forwarded by an event-driven in-kernel forwarder, not by a sockmap redirect |
-| ADR-0198, ADR-0199, ADR-0200, ADR-0201, ADR-0202, ADR-0203, ADR-0204, ADR-0205, ADR-0206 (new) | **New, accepted** (EVMOD-LIFE, EVMOD-CTL, EVMOD-KTLS, EVMOD-DGRAM, EVMOD-REC, EVMOD-BUILD, EVMOD-SAFE, EVMOD-LOAD, EVMOD-GUEST-KIT, approved by the user 2026-10-17; ADR-0198 and ADR-0204 restated in present tense under MODULE-REFCOUNT 2026-10-20, before implementation) | The module that unloads only when nothing references it; the pairs' lifetime bound to their control context; no kTLS on a forwarded socket; datagram associations as one framed stream; one preallocated end record per pair and watch (the completion channel only; a `GuestStream`'s end resolution is EVMOD-STREAM-END, in this delta alone, and the `Unclassified` cause is EVMOD-END, ADR-0180); the per-release build; the load placement; the Linux guest kit; the late-callback rules |
+| ADR-0198, ADR-0199, ADR-0200, ADR-0201, ADR-0202, ADR-0203, ADR-0204, ADR-0205, ADR-0206 (new) | **New, accepted** (EVMOD-LIFE, EVMOD-CTL, EVMOD-KTLS, EVMOD-DGRAM, EVMOD-REC, EVMOD-BUILD, EVMOD-SAFE, EVMOD-LOAD, EVMOD-GUEST-KIT, approved by the user 2026-10-17; ADR-0198 and ADR-0204 carry MODULE-REFCOUNT 2026-10-20) | The module that unloads only when nothing references it; the pairs' lifetime bound to their control context; no kTLS on a forwarded socket; datagram associations as one framed stream; one preallocated end record per pair and watch (the completion channel only; a `GuestStream`'s end resolution is EVMOD-STREAM-END, in this delta alone, and the `Unclassified` cause is EVMOD-END, ADR-0180); the per-release build; the load placement; the Linux guest kit; the late-callback rules |
 | ADR-0207 (new) | **New, accepted** (HOST-NEUTRAL, approved by the user 2026-10-17) | The host side of the guest flow protocol is guest-neutral; the Unikraft guest hop is GH #321 |
 | ADR-0208, ADR-0209, ADR-0210, ADR-0211 (new) | **New, accepted**: ADR-0208 the flow bounds of D3 (approved 2026-10-05), ADR-0209 EVMOD-AB, ADR-0210 EVMOD-ATTACH-END, ADR-0211 WATCH-ABORT (approved 2026-10-17) | One decision each, linked from ADR-0147, ADR-0180, ADR-0212 and ADR-0199, each of which records one decision: the node pair capacity and per-allocation quota; the release point at the end record (no guest slot pool); the refusal of an ended half and the flow abort that follows; an owner's abort of a watch never touches the watched socket |
 | ADR-0212, ADR-0213, ADR-0214, ADR-0215 (new; split from ADR-0158) | **New, accepted**: ADR-0212 EVMOD-PAIR (approved 2026-10-17), ADR-0213 U-1 (approved 2026-10-06), ADR-0214 the dialled host end (INB-1, approved 2026-10-11), ADR-0215 the per-kind pairing-wait bounds (D15-R3 = (b), approved 2026-10-06) | One decision each: attach at pairing with early bytes in the source's own queue; one-step admission and registration and no continuation for a closed flow; the host end of a host-opened flow held by its dialer, never forwarded; each kind bounds its pairing wait at one side. ADR-0158 keeps D18 alone (the request in band and first, every other pairing message out of band); the guest's pending TcpConnect bound stays in ADR-0150 and non-blocking owner connects in ADR-0151 |
 | ADR-0216 (new; split from ADR-0214) | **New, accepted**: the watch clause of EVMOD-END, with EV-PINS's "a dropped `GuestStream` aborts its watch" (approved 2026-10-17) | The host forwarder watches every dialled vsock before the request is written; the stream takes its end from the owner's end of the watch or the watch's record, never from its `read`; dropping the stream aborts its watch, then closes `V_h`. Separately reversible from ADR-0214's INB-1 (the dialer holds the host end) |
 | ADR-0145, ADR-0147, ADR-0149, ADR-0150, ADR-0151, ADR-0158, ADR-0159, ADR-0180, ADR-0183 (accepted, not implemented) | **Corrected in present tense** for the forwarder (EVMOD-ADOPT 2026-10-16; EVMOD-LIFE to EVMOD-AB 2026-10-17) | Payload is forwarded by the in-kernel forwarder; the owners hold its control contexts; ADR-0147 is one pair per flow only; ADR-0149 is the frame on one stream each way (EVMOD-DGRAM); ADR-0158 is the out-of-band pairing order alone (D18); ADR-0180 classifies in the forwarder's callbacks (R2-END computed as EVMOD-END) with its V-4 consequences; ADR-0183 completes a half-close after the last accepted byte |
-| ADR-0148, ADR-0165, ADR-0193, ADR-0194, ADR-0195, ADR-0196 (not implemented) | **Withdrawn; files deleted** | ADR-0148 and ADR-0165 have no subject under EVMOD-DGRAM; ADR-0193 and ADR-0194 none under EVMOD-AB; ADR-0195 and ADR-0196 (the valve, never accepted) none under EVMOD-ADOPT (§ *Changed assumptions*) |
-| ADR-0057 § 1 and ADR-0080 § D1 amendments of 2026-10-14 (not implemented) | **Corrected in place** (EVMOD-AB, 2026-10-17) | The probe cap bounds the quota-exempt probe dials one allocation holds |
 | ADR-0187 (accepted, not implemented) | **Revalidate** | Decision 1's one-dial-per-probe bound holds because a dial's places are released at its stream's drop or abort (ADR-0209) |
 | ADR-0153, ADR-0154, ADR-0160, ADR-0162, ADR-0173, ADR-0186 (accepted, not implemented) | **Corrected in present tense** (EVMOD-ADOPT, EVMOD-DGRAM) | Their references to the host verdict, sockmap install and frame strip now name the forwarder |
-| ADR-0191 § 7 (GH #319 for probe indices other than 0) | **Retained** (PD-7 dropped by the user 2026-10-14) | Multiple probes per role remain, so `ServiceLifecycle` reading only index 0 of each role stays out of scope and tracked by GH #319 |
+| ADR-0191 § 7 (GH #319 for probe indices other than 0) | **Retained** (PD-7) | Multiple probes per role remain, so `ServiceLifecycle` reading only index 0 of each role stays out of scope and tracked by GH #319 |
 | ADR-0120 leg-S plaintext delivery | **Amended** by 0173 (dated amendment) | For a VM backend leg-S relays kTLS ↔ the `GuestStream` of a `GuestStreamDial` (temporary bridge, deleted with #303); for an exec / process backend it keeps its plaintext TCP connect |
 | ADR-0125 rules 5 and 8 | **Amended** by 0172 (dated amendment) | See the 0125 row above |
 | ADR-0124 containment | **Amended** by 0169 and 0184 (dated amendment) | See the 0124 row above |
@@ -1346,7 +1243,7 @@ DELIVER step that implements the amending decision:
 [0191](../../product/architecture/adr-0191-the-probe-runner-records-each-runs-streak-and-servicelifecycle-applies-thresholds-at-read.md) (the probe runner numbers each written run and records its streak; `ServiceLifecycle` applies the threshold at read time; PROBE-RUN-COUNT with D-1),
 [0192](../../product/architecture/adr-0192-a-probe-run-that-writes-no-row-emits-one-not-sampled-event.md) (a probe run that writes no row emits one not-sampled event; PROBE-NOSAMPLE-EVENT),
 [0197](../../product/architecture/adr-0197-guest-flows-are-forwarded-by-an-event-driven-in-kernel-forwarder.md) (the in-kernel forwarder; EVMOD-ADOPT),
-[0198](../../product/architecture/adr-0198-the-flow-forwarder-module-unloads-only-when-nothing-references-it.md) (the module unloads only when nothing references it; EVMOD-LIFE as amended by MODULE-REFCOUNT),
+[0198](../../product/architecture/adr-0198-the-flow-forwarder-module-unloads-only-when-nothing-references-it.md) (the module unloads only when nothing references it; EVMOD-LIFE with MODULE-REFCOUNT),
 [0199](../../product/architecture/adr-0199-forwarder-pairs-live-and-die-with-the-control-context-that-attached-them.md) (the control context; EVMOD-CTL),
 [0200](../../product/architecture/adr-0200-no-socket-the-flow-forwarder-joins-carries-ktls.md) (no kTLS on a forwarded socket; EVMOD-KTLS),
 [0201](../../product/architecture/adr-0201-a-datagram-association-is-one-framed-vsock-stream-forwarded-a-datagram-at-a-time.md) (datagram associations as one framed stream; EVMOD-DGRAM),
@@ -1407,19 +1304,18 @@ code for DELIVER to delete*).
 | 09-01 complete supervisor | **Rework** | Component set replaced; containment by the counted `QuiescenceHold` with leaked-hold fail-stop (QHOLD, ADR-0169); boot step 8 failure refuses boot (ADR-0184) |
 | 09-02 serve-lifetime evidence | **Retain** | — |
 | 10-01 walking skeleton on metal | **Replace** | The vsock attachment end to end (V-6) |
-| 10-02 native fault evidence (TAP deletion) | **Replace** | Faults: owner kill (host and guest; the host's control-context release aborts every pair, and no VMM child keeps the context, EVMOD-CTL), the `Forwarder` component recovery (every flow aborted, the old context closed before the new one opens), guest PID-1 crash ending the VMM (RESET-EXIT; the device release aborts every host pair), `serve` crash followed by boot reclamation (NO-SURVIVE), control-session loss without a VM fault, UDP slot released before `Paired`, a far reader that stops (the sender blocks within the per-flow bound); no link-detach injection (D19-LINKS). **Fault entry points (D-9, D-16; architect 2026-10-19, round 10):** control-session loss without a VM fault has no production stimulus through `serve` + `deploy`: in a deployed VM the session's guest end is held by the production `overdrive-init` (PID 1), which closes it only by exiting, and PID 1's exit ends the VM (RESET-EXIT); the owner closes the host end on a decode failure or a read error (§ *Control session*, "I/O", "Accept"), which only a defective `overdrive-init` or the VM's end produces, and at the allocation's teardown, which is not a fault. No entry point and no test-only guest is added to the production VM driver (the guest kit's scripted peer is PID 1 only on a VMM the fixture launches itself, and `deploy` never launches one). Its evidence is (i) the seeded-sim composed rig — the production owner, supervisor and action shim over `SimGuestFlowIo`, the session's close and a malformed message scripted at the seam, with § *Control session*, "Loss" as the oracle (every flow of that VM aborted on both sides, `NoSession` dials, activation waits, the next `ControlOpen` restores service) — and (ii) the in-guest session cells on the guest-kit lane, which run the production guest owner against a scripted host peer that closes the session or answers malformed, proving the guest side aborts every flow and reopens. The guest-driven 10-02 cell is withdrawn. Leg-F loss and the `Forwarder` component recovery have no production-reachable external stimulus on the appliance: only an Overdrive defect ends leg-F's accept task or fails the forwarder context, no foreign actor exists (CLAUDE.md, appliance threat model), and no test-only fault hook is added to `run_server` (`development.md` § "Production code is not shaped by simulation"). Their evidence is the seeded-sim composed rig — the production supervisor and owner, with the leg-F accept end scripted at `SimMtlsIntercept` and the context `Io` / inventory drift at `SimGuestFlowIo` (R5-61, the `quiescence` and `fwd_pair` drivers, `ForwarderRecoveryAbortsThenReopens`) — paired with Tier-3 proof of the kernel effects the recovery relies on: a context release resets every far end and aborts every vsock peer (R5-61 through `KernelFlowForwarder`; the `serve`-death cell, where process exit releases the context), and leg-F's repair on the real kernel — the worker-level Tier-3 cell `leg_f_repair_rebinds_transparent_listener` (below). **What ends leg F's accept task in production (D-9, round 10):** an `accept(2)` error on its listener — `shared_listener_task` returns the error and the task ends `TaskFailed { leg: F }` (`overdrive-worker` `mtls_intercept_worker.rs:1388`). The reachable errors leave the listener `LISTEN` with the pending connection still queued, because they fail before the connection is dequeued: descriptor exhaustion (`EMFILE` / `ENFILE` at `get_unused_fd_flags`, `include/linux/file.h:198-201`, through `FD_ADD` at `net/socket.c:2022 @ v7.0`) and socket allocation failure (`ENFILE` at `sock_alloc`, `net/socket.c:1965-1967 @ v7.0`, before `ops->accept` at `:1988`). **The cell's evidence:** stimulus `EMFILE` — the test lowers its own `RLIMIT_NOFILE` soft limit to its open-descriptor count, queues one TPROXY-captured connection, observes `TaskFailed { leg: F }` with the listener still `LISTEN` (`ss -ltn`), restores the limit, then drives the supervisor's repair port on the real `HostMtlsIntercept`. Oracle: the repair returns `Ok` — with no `EADDRINUSE`, which has teeth here because a second bind conflicts with a still-`LISTEN` `SO_REUSEADDR` socket (`inet_bind_conflict`, `net/ipv4/inet_connection_sock.c:177-181 @ v7.0`), so a repair that bound before releasing the old socket fails — the old descriptor is closed, the new listener is `LISTEN` on the same address with a new inode, and a new TPROXY-captured connection accepts on it. The `shutdown(SHUT_RD)` stimulus is withdrawn: it moves the old socket out of `LISTEN` (`net/ipv4/tcp.c:3409-3414 @ v7.0`), so a bind-before-release repair also succeeds there (`inet_connection_sock.c:170-176`), and it is no production event. The cell runs in a test binary of its own (the lowered limit is process-wide) under `host-kernel-shared`. **Order within the cell (round 11, for DISTILL):** every descriptor the stimulus needs exists before the limit is lowered — the client socket is created first (or the connection is opened from another process), because a socket created under the lowered limit fails `EMFILE` itself — and `ss -ltn` runs only after the limit is restored (spawning it needs pipes); the delayed `ss` still shows `LISTEN` because the worker's `SharedOwner` keeps the listener in its `leg_f_listener` slot after the task ends (`mtls_intercept_worker.rs:2479-2484`). The existing `mtls` Tier-3 suite proves only the first bind and accept |
+| 10-02 native fault evidence (TAP deletion) | **Replace** | Faults: owner kill (host and guest; the host's control-context release aborts every pair, and no VMM child keeps the context, EVMOD-CTL), the `Forwarder` component recovery (every flow aborted, the old context closed before the new one opens), guest PID-1 crash ending the VMM (RESET-EXIT; the device release aborts every host pair), `serve` crash followed by boot reclamation (NO-SURVIVE), control-session loss without a VM fault, UDP slot released before `Paired`, a far reader that stops (the sender blocks within the per-flow bound); no link-detach injection (D19-LINKS). **Fault entry points (D-9, D-16):** control-session loss without a VM fault has no production stimulus through `serve` + `deploy`: in a deployed VM the session's guest end is held by the production `overdrive-init` (PID 1), which closes it only by exiting, and PID 1's exit ends the VM (RESET-EXIT); the owner closes the host end on a decode failure or a read error (§ *Control session*, "I/O", "Accept"), which only a defective `overdrive-init` or the VM's end produces, and at the allocation's teardown, which is not a fault. No entry point and no test-only guest is added to the production VM driver (the guest kit's scripted peer is PID 1 only on a VMM the fixture launches itself, and `deploy` never launches one). Its evidence is (i) the seeded-sim composed rig — the production owner, supervisor and action shim over `SimGuestFlowIo`, the session's close and a malformed message scripted at the seam, with § *Control session*, "Loss" as the oracle (every flow of that VM aborted on both sides, `NoSession` dials, activation waits, the next `ControlOpen` restores service) — and (ii) the in-guest session cells on the guest-kit lane, which run the production guest owner against a scripted host peer that closes the session or answers malformed, proving the guest side aborts every flow and reopens. Leg-F loss and the `Forwarder` component recovery have no production-reachable external stimulus on the appliance: only an Overdrive defect ends leg-F's accept task or fails the forwarder context, no foreign actor exists (CLAUDE.md, appliance threat model), and no test-only fault hook is added to `run_server` (`development.md` § "Production code is not shaped by simulation"). Their evidence is the seeded-sim composed rig — the production supervisor and owner, with the leg-F accept end scripted at `SimMtlsIntercept` and the context `Io` / inventory drift at `SimGuestFlowIo` (R5-61, the `quiescence` and `fwd_pair` drivers, `ForwarderRecoveryAbortsThenReopens`) — paired with Tier-3 proof of the kernel effects the recovery relies on: a context release resets every far end and aborts every vsock peer (R5-61 through `KernelFlowForwarder`; the `serve`-death cell, where process exit releases the context), and leg-F's repair on the real kernel — the worker-level Tier-3 cell `leg_f_repair_rebinds_transparent_listener` (below). **What ends leg F's accept task in production (D-9):** an `accept(2)` error on its listener — `shared_listener_task` returns the error and the task ends `TaskFailed { leg: F }` (`overdrive-worker` `mtls_intercept_worker.rs:1388`). The reachable errors leave the listener `LISTEN` with the pending connection still queued, because they fail before the connection is dequeued: descriptor exhaustion (`EMFILE` / `ENFILE` at `get_unused_fd_flags`, `include/linux/file.h:198-201`, through `FD_ADD` at `net/socket.c:2022 @ v7.0`) and socket allocation failure (`ENFILE` at `sock_alloc`, `net/socket.c:1965-1967 @ v7.0`, before `ops->accept` at `:1988`). **The cell's evidence:** stimulus `EMFILE` — the test lowers its own `RLIMIT_NOFILE` soft limit to its open-descriptor count, queues one TPROXY-captured connection, observes `TaskFailed { leg: F }` with the listener still `LISTEN` (`ss -ltn`), restores the limit, then drives the supervisor's repair port on the real `HostMtlsIntercept`. Oracle: the repair returns `Ok` — with no `EADDRINUSE`, which has teeth here because a second bind conflicts with a still-`LISTEN` `SO_REUSEADDR` socket (`inet_bind_conflict`, `net/ipv4/inet_connection_sock.c:177-181 @ v7.0`), so a repair that bound before releasing the old socket fails — the old descriptor is closed, the new listener is `LISTEN` on the same address with a new inode, and a new TPROXY-captured connection accepts on it. A `shutdown(SHUT_RD)` stimulus is not used: it moves the old socket out of `LISTEN` (`net/ipv4/tcp.c:3409-3414 @ v7.0`), so a bind-before-release repair also succeeds there (`inet_connection_sock.c:170-176`), and it is no production event. The cell runs in a test binary of its own (the lowered limit is process-wide) under `host-kernel-shared`. **Order within the cell:** every descriptor the stimulus needs exists before the limit is lowered — the client socket is created first (or the connection is opened from another process), because a socket created under the lowered limit fails `EMFILE` itself — and `ss -ltn` runs only after the limit is restored (spawning it needs pipes); the delayed `ss` still shows `LISTEN` because the worker's `SharedOwner` keeps the listener in its `leg_f_listener` slot after the task ends (`mtls_intercept_worker.rs:2479-2484`). The existing `mtls` Tier-3 suite proves only the first bind and accept |
 | 10-03 conformance through required ports | **Revalidate** | Same ports; new owner |
 | 10-04 non-regression composition | **Revalidate** | Re-run against the vsock attachment |
 | 10-05 attachment-capacity receipts | **Replace** | CAP-295-A redefined (D11) |
 
 New steps (DELIVER owns IDs and order; the numbers are the references
-DISTILL's pending markers and § *DISTILL design-gap closure* DG-2 use):
+DISTILL's pending markers and the attachment-cut step (DG-2) use):
 
-K. **Forwarder module build and lane setup (EVMOD-BUILD; U-3 option (b),
-   user ruling 2026-10-20) — scheduled before step 0, the first DELIVER
-   step.** It lets FWD-PREREQ hold from the first commit, so the `serve`
-   fixtures and the hooks run as DISTILL authored them. It depends on no
-   other step (checked 2026-10-20): the C module includes only kernel
+K. **Forwarder module build and lane setup (EVMOD-BUILD; U-3 option (b))
+   — scheduled before step 0, the first DELIVER step.** It lets FWD-PREREQ
+   hold from the first commit, so the `serve` fixtures and the hooks run as
+   DISTILL authored them. It depends on no other step: the C module includes only kernel
    headers and its own UAPI header, which is the SSOT of the frame and
    control constants (the Rust-side equality assertions against
    `overdrive_core::guest_transport::wire` live in `overdrive-fwd`, step 4);
@@ -1427,7 +1323,7 @@ K. **Forwarder module build and lane setup (EVMOD-BUILD; U-3 option (b),
    `overdrive-*` crate; and until step 4 `serve`'s phase-1 forwarder probe
    does not open the module, so nothing in steps 0–3 reads it. Contents:
    - `kmod/ovd_fwd/` as a buildable, unloadable module skeleton
-     (EVMOD-LIFE as amended by MODULE-REFCOUNT, 2026-10-20). It contains:
+     (EVMOD-LIFE with MODULE-REFCOUNT). It contains:
      - `Kbuild`;
      - `ovd_fwd.c`, GPL-2.0, with `module_init` and `module_exit`;
      - the misc device `/dev/ovd_fwd`, whose `file_operations.owner` is
@@ -1436,8 +1332,8 @@ K. **Forwarder module build and lane setup (EVMOD-BUILD; U-3 option (b),
      - the module's per-CPU workqueue;
      - `module_exit` in § *Module placement and lifetime*'s order:
        deregister the device, destroy the workqueue;
-     - `MODULE_VERSION(OVD_FWD_TREE_DIGEST)`, with an `#error` when the
-       define is absent;
+     - `MODULE_VERSION` taken from the tree-digest define, with an `#error`
+       when it is absent;
      - `include/uapi/linux/ovd_fwd.h` (§ *Composition*, "Which module is
        loaded").
 
@@ -1445,11 +1341,12 @@ K. **Forwarder module build and lane setup (EVMOD-BUILD; U-3 option (b),
      tests that exercise it, including the per-socket references and rule
      5. This step adds no forwarding behaviour, because nothing before step
      4 can test it.
-   - `cargo xtask kmod-build [--kernel-build-dir <dir>]`: the tree digest,
+   - `cargo xtask kmod-build [--kernel-build-dir <dir>]`:
      `MO=<workspace>/target/kmod/<release>/`, `W=1`, `C=1` and
-     `checkpatch.pl --strict`. A source check rejects a module with no
-     `module_exit`, and a misc `file_operations` whose `owner` is not
-     `THIS_MODULE`.
+     `checkpatch.pl --strict`, and the whole-tree digest passed as the
+     `MODULE_VERSION` define (sorted relative paths and contents of
+     `kmod/ovd_fwd/`). No test greps the source; the module's `module_exit` and `THIS_MODULE` owner are checked by
+     the DELIVER review and by V-EV-UNLOAD's real-kernel cell.
    - `cargo xtask kmod-load [--busy-ok]` (§ *Composition*, "`kmod-load`"):
      load when absent, accept a current module, and reload a stale idle
      one; a busy one is refused with the holder class.
@@ -1625,7 +1522,8 @@ K. **Forwarder module build and lane setup (EVMOD-BUILD; U-3 option (b),
     differing / add missing; never removed; no runtime writer); no route
     covers the rest of the prefix. The leg-B dial of a guest-prefix peer marks
     and source-binds (LEGB-DIAL, [ADR-0190](../../product/architecture/adr-0190-leg-b-marks-and-loopback-binds-same-node-vm-dials.md); `HostMtlsEnforcement::new` takes
-    the required `guest_prefix`).
+    the required `guest_prefix` beside `guest_dial` — its one constructor
+    contract is LEGS-DIAL's, under § *Interface contracts*).
 14. **Host-internal deny set** (D26), built per D26-PINS — a masked dedicated
     mark bit, before every `accept` of its chain, plain `reject`, `fib daddr
     type != unicast`, one-transaction replacement, and the datagram projection
@@ -1635,11 +1533,10 @@ K. **Forwarder module build and lane setup (EVMOD-BUILD; U-3 option (b),
     has exited; boot reclamation of every VMM the new process does not
     supervise before any `assign` (NO-SURVIVE).
 
-The attachment-cut step of § *DISTILL design-gap closure* (DG-2) groups the
+The attachment-cut step (DG-2) groups the
 steps that move the VM attachment from TAP to vsock. The forwarder's
-contracts (EVMOD-LIFE to EVMOD-AB) were approved by the user 2026-10-17, and
-V-EV-END, V-EV-CTL, V-EV-PAIR and V-EV-DGRAM ran and held (P-69 to P-72);
-DELIVER stays stopped until DISTILL has re-derived its scenarios. Step 4 includes
+contracts (EVMOD-LIFE to EVMOD-AB) are approved, and V-EV-END, V-EV-CTL,
+V-EV-PAIR and V-EV-DGRAM held (P-69 to P-72); DELIVER has not started. Step 4 includes
 V-EV-BUILD and V-EV-SAFE; step 5 includes the Tier-3 fixture's guest kit
 (EVMOD-GUEST-KIT: the module built for the fixture's kernel at
 `GUEST_FORWARDER_MODULE_PATH` beside `overdrive-init`). The amendment pointers of § *Contract
@@ -1647,7 +1544,7 @@ impact matrix* are added by the step that implements the amending decision.
 
 #### Bridge-era code for DELIVER to delete
 
-Inventory of `crates/` and `tests/` at commit `73e643a87`, by `wc -l` and
+Inventory of `crates/` and `tests/` in the working tree, by `wc -l` and
 measured line ranges. Production modules are deleted by DELIVER with their
 tests (§ "Deletion discipline", `.claude/rules/development.md`); test bodies
 and conformance drivers that defend only removed mechanisms are removed or
@@ -1693,47 +1590,22 @@ intake, and the guest TCP intake listener on port 61000.
 |---|---|---|
 | `crates/overdrive-dataplane/src/guest_steering.rs` | guest-prefix steering (the whole module) | 294 |
 | `crates/overdrive-dataplane/proptest-regressions/guest_steering.txt` | same | 8 |
-| `crates/overdrive-dataplane/tests/integration/vsock_guest_steering.rs` | same | 694 |
-| `crates/overdrive-dataplane/tests/integration/vsock_egress_unframe.rs` | host egress unframe | 404 |
-| `crates/overdrive-dataplane/tests/integration/vsock_fragment_map.rs` | fragment-tracking map | 426 |
-| `crates/overdrive-dataplane/tests/integration/helpers/guest_net.rs` | fixture used only by the three files above | 490 |
-| `crates/overdrive-control-plane/src/guest_network/prefix_boot_conformance.rs` | conformance driver of the deleted `prefix_boot.qnt` | 508 |
-| `tests/conformance/src/prefix_landing.rs` | conformance driver of the deleted `prefix_landing.qnt` (QPROJ-8) | 1,127 |
-| `tests/conformance/tests/vsock_prefix_landing_conformance.rs` | same | 194 |
-| `crates/overdrive-init/src/guest_flow/quint_flows_half.rs` | conformance driver of the deleted `flows_half_guest` instance (`HalfClose`) | 1,025 |
-| `crates/overdrive-init/src/guest_flow/tests/half_close.rs` | the half-close control messages and the drain deadline | 150 |
-| **Subtotal** | | **5,320** |
-
-**Deleted now, not by DELIVER (R-D2).** The user's ruling R-D2 (2026-10-13)
-deletes the dead CID-claim port, with its tests, now rather than in
-DELIVER. These items are absent from the working tree (verified
-2026-10-15) and are not DELIVER work; their line counts at `73e643a87`
-are kept here only so the totals reconcile:
-
-| File | Items | Lines |
-|---|---|---|
-| `crates/overdrive-host/src/cid_claim.rs` | kernel CID claim host adapter (whole file) | 64 |
-| `crates/overdrive-host/tests/integration/vsock_cid_claim_handoff.rs` | its tests (whole file) | 185 |
-| `crates/overdrive-sim/src/adapters/guest_cid_claim.rs` | its sim adapter (whole file) | 163 |
-| `crates/overdrive-core/src/guest_transport/mod.rs` | the CID-claim port and its types (`ClaimedGuestCid`, `ClaimedVsockDevice`, the claim error and probe-stage enums), 250–353; `GuestTransportAssignment::take_claim`, 236–241 | 110 |
-| `crates/overdrive-host/src/vmm.rs` | `claimed_vsock_handoff` (`fd=` descriptor handoff), 369–381 | 13 |
-| **Subtotal** | | **535** |
+| **Subtotal** | | **302** |
 
 **D. Mechanisms removed by the 2026-10-11 rulings — ranges in files that stay**
 
 | File | Items | Lines |
 |---|---|---|
 | `crates/overdrive-dataplane/src/guest_flow.rs` | `IntakeListenerKey`, `ParkedIntake`, 38–47; `converge_unframe_interfaces`, `register_intake_listener`, `unregister_intake_listener`, `adopt_intake`, `begin_inbound`, `complete_inbound`, 95–158; `UnframeConvergence`, `UnframeAttachError`, 276–328 | 127 |
-| `crates/overdrive-control-plane/src/guest_network.rs` | error variants of the unframe, steering, intake and quiescence-holder mechanisms (`UnframeAttach`, `IntakePortBlockConflict`, `StackedInterface`, `IntakeCapacityReached`, `IntakeSteer` and the steering-converge and holder-busy variants), 551–604; `describe_stacking`, 610–619 (the CID-claim variants in this range, `GuestCidsHeldElsewhere` among them, were deleted under R-D2) | 64 |
+| `crates/overdrive-control-plane/src/guest_network.rs` | error variants of the unframe, steering, intake and quiescence-holder mechanisms (`UnframeAttach`, `IntakePortBlockConflict`, `StackedInterface`, `IntakeCapacityReached`, `IntakeSteer` and the steering-converge and holder-busy variants), 551–604; `describe_stacking`, 610–619 | 64 |
 | `crates/overdrive-control-plane/src/guest_network/flow_owner.rs` | the old flow-end observation, the half-close announcement and the quiescence holder enum, 245–295; `IntakePortBlockConflict`, `InterfaceStacking`, `StackedLinkKind`, 376–441 | 117 |
 | `crates/overdrive-control-plane/src/guest_network/prefix_boot_acceptance.rs` | steering boot-order bodies, 163–345; intake-listener bind bodies, 415–497; interface-stacking and boot unframe-attach bodies, 695–877 (the D8-PREFIX-CFG / D8-PREFIX-VIP, D24 and fd-budget bodies stay) | 449 |
 | `crates/overdrive-core/src/guest_transport/mod.rs` | intake steering capacity and host-port constants (`GUEST_INTAKE_STEERING_MAX`, `GUEST_INTAKE_HOST_PORT_BASE`, `GUEST_INTAKE_PORTS_PER_ALLOCATION_MAX`, `guest_intake_host_ports`, `guest_intake_host_port`), 393–421 | 29 |
 | `crates/overdrive-core/src/guest_transport/wire.rs` | the `ListenState` and half-close control-message variants, 256–274; `GUEST_UNFRAME_FRAGMENTS_MAX`, 439–441; the drain deadline constant, 452–453 | 24 |
 | **Subtotal** | | **810** |
 
-**E. The sockmap forwarder, removed by EVMOD-ADOPT (2026-10-16).** Measured
-on the working tree of 2026-10-16 (`grep -c ^`); not included in the total
-below, which counts lists A–D at `73e643a87`. Production files are
+**E. The sockmap forwarder (EVMOD-ADOPT).** Measured on the working tree
+(`grep -c ^`); not included in the total below, which counts lists A–D. Production files are
 DELIVER's to delete with their tests; test files are DISTILL's (they are in
 the uncommitted DISTILL work and defend only the removed forwarder).
 
@@ -1767,27 +1639,15 @@ program `UnframeLo` and the SEQPACKET listener on 1241, the empty-datagram
 handling (`crates/overdrive-control-plane/src/guest_network/owner_acceptance/datagrams.rs`'s
 empty-notice bodies) and `crates/overdrive-control-plane/src/guest_network/quint_udp_empty.rs`.
 
-**Total counted: 15,033 lines** (bridge / TAP era 8,368: A + B; mechanisms
-removed by the 2026-10-11 rulings 6,665: C 5,320 + D 810 + 535 deleted now
-under R-D2). The `guest_network.rs` row of list D, counted at `73e643a87`,
-includes the CID-claim error variants; those went with the R-D2 deletion,
-and the rest of the row remains DELIVER's.
-
-**Already absent from the working tree (checked 2026-10-15).** Besides the
-R-D2 items, these list C files are no longer in the tree:
-`vsock_guest_steering.rs`, `vsock_egress_unframe.rs`,
-`vsock_fragment_map.rs`, `helpers/guest_net.rs`,
-`prefix_boot_conformance.rs`, `prefix_landing.rs`,
-`vsock_prefix_landing_conformance.rs`, `quint_flows_half.rs` and
-`half_close.rs` (all test bodies or conformance drivers, which DISTILL owns).
-DELIVER deletes what remains of lists A–D when its step starts, and
-re-measures then.
+**Total counted: 9,480 lines** (bridge / TAP era 8,368: A + B; mechanisms
+removed by the 2026-10-11 rulings 1,112: C 302 + D 810). DELIVER deletes
+lists A–D when its step starts, and re-measures then.
 
 **Scattered sites, changed by the owning step (not counted).**
 `Vmm::create`'s CID argument and its callers (`overdrive-host/src/vmm.rs`,
 `overdrive-worker/src/vm_driver.rs`, `overdrive-sim/src/adapters/vmm.rs`
-and the tests that implement `Vmm`) take a plain `GuestCid` since the R-D2
-deletion of `ClaimedGuestCid`; step 3 passes the leased CID there; the holder-list quiescence (`StillQuiesced
+and the tests that implement `Vmm`) take a plain `GuestCid`; step 3 passes
+the leased CID there; the holder-list quiescence (`StillQuiesced
 { holders }`) at the owner, the supervisor (`overdrive-control-plane/src/lib.rs`)
 and `overdrive-sim/src/adapters/guest_network.rs` (09-01 rework);
 `outbound_sources` / `managed_guest_ips` in `overdrive-netlink/src/nft.rs`
@@ -2052,9 +1912,8 @@ The range lies above the guest kernel's default ephemeral range
 
 The guest holds no fixed pool of per-flow slots: a pair's state is
 allocated by the forwarder at attach (EVMOD-AB). Rejected (D-UP-12): one
-probe per role (withdrawn by the user 2026-10-14: it removes the existing
-multi-probe grammar); no cap (the quota-exempt dials of one allocation
-unbounded).
+probe per role (it removes the existing multi-probe grammar); no cap (the
+quota-exempt dials of one allocation unbounded).
 
 **Deploy refusal of a reserved port (D25).** A workload spec whose
 `[[listener]]` declares a port inside `guest_reserved_ports()`, of either
@@ -2127,7 +1986,8 @@ existing `AggregateError::Validation { field: "probes", message }` with the
 `Validation`, as for the reserved port above). Both ingresses read
 `GUEST_PROBE_SLOTS`; neither spells 8. Rejected (PD-3 alternatives): a new
 `AggregateError` variant at the API ingress (a second refusal family for one
-rule); a per-role limit (withdrawn with one-probe-per-role).
+rule); a per-role limit (a role may declare several probes, so the cap is
+per spec).
 
 `ServiceLifecycle` reads probe index 0 of each role
 (`crates/overdrive-reconcilers/src/service_lifecycle.rs:899-904`); acting on
@@ -2153,6 +2013,17 @@ Contracts:
   (`VHOST_VSOCK_SET_GUEST_CID` returns `EADDRINUSE`,
   `drivers/vhost/vsock.c:807-813 @ v7.0`), the fork exits before READY, and
   the existing pre-READY start failure retires the lease.
+- **Guest-kit CID bands (S-6; a test convention the pool does not
+  enforce).** The guest-kit CID bands (`PRODUCTION_BAND_WIDTH` = 0x1000,
+  fixture bands from 0x2000) are not guarded by the pool: its next-fit spans
+  `GUEST_CID_SPAN` (65,536 offsets) with no CID reuse inside one `serve`
+  process, so a `serve` past 4,096 placements enters the fixture bands.
+  Every `serve` test that can share a host with a guest-kit fixture makes
+  fewer than 0x1000 placements per `serve` process (the largest in-tree
+  cohort is the 64-VM density cell); the GH #326 benchmark, which exceeds it,
+  must not run beside guest-kit fixtures on the same host. The guest-kit
+  registry guard checks the bands only; the pool is not changed for a test
+  convention.
 - **Gateway.** The first host address of the node guest prefix, as today.
   `GuestAddressPool::new(node_prefix, gateway, entropy: Arc<dyn Entropy>)`
   drops `bridge` and `dns` (`dns` = `gateway`) and takes the entropy port as
@@ -2185,6 +2056,11 @@ Contracts:
 
 #### [REF] VMM backend contract — `overdrive-host::CloudHypervisorVmm`
 
+- **One launcher (U-4).** `CloudHypervisorVmm` is the only renderer of the
+  cloud-hypervisor command line. The T-1 guest kit launches its microVM
+  through it (a `Vmm::create` with a `VmConfig`), so the kit's scripted-peer
+  VM runs under the same launch argument, confinement and exit semantics as a
+  production VM.
 - **Launch argument.** Exactly one `--vsock cid=<cid>,backend=vhost-kernel`.
   No `socket=` field, no `fd=` field, no other vsock device. The VMM opens
   `/dev/vhost-vsock` itself, takes ownership and sets the guest CID on it
@@ -2942,8 +2818,8 @@ Tier-3.
 [ADR-0197](../../product/architecture/adr-0197-guest-flows-are-forwarded-by-an-event-driven-in-kernel-forwarder.md)).
 Its contracts below are approved by the user 2026-10-17, for Linux guests,
 one id each (§ *Approval record*, "EVMOD-LIFE to EVMOD-AB"): EVMOD-LIFE (the
-module unloads only when nothing references it, ADR-0198; amended by
-MODULE-REFCOUNT 2026-10-20, which also adds rule 5 to EVMOD-SAFE), EVMOD-BUILD (one in-repository source built
+module unloads only when nothing references it, ADR-0198; MODULE-REFCOUNT
+also gives EVMOD-SAFE its rule 5), EVMOD-BUILD (one in-repository source built
 per kernel release, ADR-0203), EVMOD-LOAD (loaded by the host image and by
 `overdrive-init`, never by `serve`, ADR-0205), EVMOD-GUEST-KIT (a Linux
 guest's kernel and module are one kit, ADR-0206), EVMOD-SAFE (a late
@@ -2980,30 +2856,26 @@ are those of a Linux guest. A guest that runs no Linux kernel carries no
 
 Each mechanism of the sockmap forwarder whose code is in the tree (§ *Bridge-era
 code for DELIVER to delete*, list E), why it existed, what the forwarder
-does instead, and its disposition: removed by EVMOD-ADOPT (2026-10-16) or by
-the contract named (approved 2026-10-17).
+does instead, and its disposition: removed by EVMOD-ADOPT or by the contract
+named.
 
 | # | Mechanism (where it was pinned) | Why it existed | Under the forwarder | Disposition |
 |---|---|---|---|---|
 | 1 | Host and guest `sk_skb` stream verdicts, sockhash routes, `sock_ops` arming of the host peer and the guest intake child (D6, D7, D18; § *Driven port — host forwarder*; DG-3, DG-5) | A sockmap moves bytes only between member sockets, and a socket installed after its data arrived loses or strands it (P-23, T4(b)) | The forwarder joins two connected sockets at any time; bytes that arrived earlier wait in the source's own receive queue and the attach-time run forwards them (`evmod.c` `ev_attach` queues one run for each direction) | **Removed.** Attach order: EVMOD-PAIR |
 | 2 | Install at establishment and at `connect()`, the `SO_RCVLOWAT` re-arm, T4(b), T4(c), the P-24 re-arm rules, the source checks for them | The redirect is driven by `sk_data_ready` once per skb and must be installed before the first byte | No verdict and no per-skb trigger: the forwarder's run reads the queue until it is empty or the target is full | **Removed** |
 | 3 | Guest TCP parking cells (`GUEST_TCP_PARK_CELLS`, loopback cell pairs, their re-arm at `Paired`) | Somewhere to hold the application's early bytes until `Paired`, because the intake child had to be installed at establishment | The intake child's own receive queue holds them; its window holds the application | **Removed.** The count bound stays as `GUEST_TCP_PENDING_MAX` (EVMOD-PAIR) |
-| 4 | Drain cells (`goal`, `armed`, `fired`, `sent`, `fwd`), `drain_sent_a` / `drain_sent_b` (`fexit(skb_send_sock)`), `drain_level_read` (`fentry(sock_poll)`), `DrainStep` order, `DrainComplete`, `recursion_misses` reads, counter reads at the audit tick, A1, A8, A9, A1-BOTH, H-3 (R2-DRAIN, ADR-0183) | A redirect queue reports nothing when it empties, so the owner needed a kernel count of accepted bytes | The forwarder reads a source's end only once the source queue is empty (`net/ipv4/tcp.c:2794-2795`, `net/vmw_vsock/af_vsock.c:2326-2328 @ v7.0`) and has consumed only bytes the target accepted; it then shuts the target's write side itself | **Removed.** ADR-0183 rewritten in present tense |
+| 4 | Drain cells (`goal`, `armed`, `fired`, `sent`, `fwd`), `drain_sent_a` / `drain_sent_b` (`fexit(skb_send_sock)`), `drain_level_read` (`fentry(sock_poll)`), `DrainStep` order, `DrainComplete`, `recursion_misses` reads, counter reads at the audit tick, A1, A8, A9, A1-BOTH, H-3 (R2-DRAIN, ADR-0183) | A redirect queue reports nothing when it empties, so the owner needed a kernel count of accepted bytes | The forwarder reads a source's end only once the source queue is empty (`net/ipv4/tcp.c:2794-2795`, `net/vmw_vsock/af_vsock.c:2326-2328 @ v7.0`) and has consumed only bytes the target accepted; it then shuts the target's write side itself | **Removed.** ADR-0183 states the replacement |
 | 5 | `RedirectRefused` and the cell's `drops` (A3) | A redirect into a vsock that left `ESTABLISHED` was dropped silently (T6) | The forwarder's send returns the error (`-EPIPE` once the peer shut its receive side, `net/vmw_vsock/af_vsock.c:2176-2177 @ v7.0`) and the pair aborts | **Removed** |
 | 6 | `FLOW_EVENT_RING`, the flow event record, `FlowCell`, `CellEpoch`, epochs (A2), `ring_lost` (A7), `ring_dropped` | A BPF ring buffer drops records when full, and slots are reused | One end record per pair, stored in the pair and queued when it ends; ids never reused (ADR-0202) | **Removed.** Replacement EVMOD-REC |
-| 7 | `flow_end_classifier` (raw tracepoint on `vsock:virtio_transport_recv_pkt`), A4, A5 and its source check, A6, A-34, V-31-MV, A10 and its remainder (PD-8) | An established vsock RST reads as EOF (P-49), and the redirect had no callback of its own on the vsock | The forwarder's own `sk_state_change` sees every received SHUTDOWN and RST with the socket lock held, before the end is readable (`net/vmw_vsock/virtio_transport_common.c:1443-1464`, `:1244-1253`, `:1661`, `:1705 @ v7.0`), and its `sk_error_report` sees the orphan sweep's `sk_err`; a TCP reset is seen by the TCP half's `sk_error_report` (`net/ipv4/tcp_input.c:4890-4902 @ v7.0`), which the forwarder needs because it stops reading a source after its FIN and a later reset reaches no `recvmsg` (P-69, hazard 16) | **Removed** (A10 and V-31-MV by the ruling). Replacement EVMOD-END (measured, P-69) |
-| 8 | VALVE-1 to VALVE-6, ADR-0195, ADR-0196, `GUEST_FLOW_REDIRECT_HIGH`, `GUEST_FLOW_MOVE_CHUNK`, `parked` / `pumped`, `ValveParked` / `ValveDrained`, the `TARGETS` sockhash, owner moves, `ValvePhase`, V-3-VALVE, V-VALVE-COMPOSE, `flow_valve` | Guest-slot V-3 (P-64): the redirect queue toward a target that does not read is unbounded | Consume-after-accept bounds every source by its own buffers (P-67, P-68) | **Withdrawn** (never approved); ADR-0195 and ADR-0196 deleted |
-| 9 | SEQPACKET from the guest, port 1241, request kind `3` `DatagramSeqpacket`, the host's matching of kinds 2 and 3, the UDP-SEQ length check and its `short` / `long` / `lt8` / `badmagic` / `oversize` counters, the `EMSGSIZE` buffer invariant, the split-send residual, V-32-MIX, A-39 (D4, UDP-SEQ; ADR-0148) | A stream verdict cannot see record boundaries, and a SEQPACKET send under credit pressure resends a whole record after a prefix (P-3, P-53) | The forwarder frames and unframes on one STREAM itself | **Removed** (EVMOD-DGRAM); ADR-0148 deleted |
+| 7 | `flow_end_classifier` (raw tracepoint on `vsock:virtio_transport_recv_pkt`), A4, A5 and its source check, A6, A-34, V-31-MV, A10 and its remainder | An established vsock RST reads as EOF (P-49), and the redirect had no callback of its own on the vsock | The forwarder's own `sk_state_change` sees every received SHUTDOWN and RST with the socket lock held, before the end is readable (`net/vmw_vsock/virtio_transport_common.c:1443-1464`, `:1244-1253`, `:1661`, `:1705 @ v7.0`), and its `sk_error_report` sees the orphan sweep's `sk_err`; a TCP reset is seen by the TCP half's `sk_error_report` (`net/ipv4/tcp_input.c:4890-4902 @ v7.0`), which the forwarder needs because it stops reading a source after its FIN and a later reset reaches no `recvmsg` (P-69, hazard 16) | **Removed** (A10 and V-31-MV by the ruling). Replacement EVMOD-END (measured, P-69) |
+| 9 | SEQPACKET from the guest, port 1241, request kind `3` `DatagramSeqpacket`, the host's matching of kinds 2 and 3, the UDP-SEQ length check and its `short` / `long` / `lt8` / `badmagic` / `oversize` counters, the `EMSGSIZE` buffer invariant, the split-send residual, V-32-MIX, A-39 (D4, UDP-SEQ; ADR-0148) | A stream verdict cannot see record boundaries, and a SEQPACKET send under credit pressure resends a whole record after a prefix (P-3, P-53) | The forwarder frames and unframes on one STREAM itself | **Removed** (EVMOD-DGRAM) |
 | 10 | Guest framing and reassembly strparser cells, CELL-RECREATE, cell generations, K-B3 (P-41) | The redirect needed a framing hop, and emptied cells refilled from hidden queues | The slot socket's receive queue is the only queue; the guest owner discards it at an association's end | **Removed** (EVMOD-DGRAM) |
-| 11 | The host verdict's frame strip, the `EmptyDatagram` notice and `empty_lost`, the owner-sent empty datagram, UE-1, UE-2, D15-R4 (UDP-EMPTY, ADR-0165) | A zero-length skb can be neither passed nor redirected (P-30, P-50) | The forwarder sends a zero-length datagram itself, in order | **Removed** (EVMOD-DGRAM); D15-R4 withdrawn; ADR-0165 deleted |
+| 11 | The host verdict's frame strip, the `EmptyDatagram` notice and `empty_lost`, the owner-sent empty datagram, UE-1, UE-2, D15-R4 (UDP-EMPTY, ADR-0165) | A zero-length skb can be neither passed nor redirected (P-30, P-50) | The forwarder sends a zero-length datagram itself, in order | **Removed** (EVMOD-DGRAM) |
 | 12 | The guest `lo` unframe TC program (`UnframeLo`, ADR-0150) | The host→guest redirect into the slot socket carried the frame | The forwarder sends the unframed payload on the slot socket | **Removed** (EVMOD-DGRAM) |
 | 13 | V-3-DGRAM | The redirect's datagram queues were unbounded | A UDP source's receive queue is bounded and the kernel drops beyond it (`net/ipv4/udp.c:1721-1731 @ v7.0`) | **Moot** (EVMOD-DGRAM); the bound is measured by V-EV-DGRAM |
 | 14 | `GUEST_INTAKE_RCVBUF`, T4(a), T4a-SRC, A-36 | `tcp_read_skb` hands each queued skb whole to the verdict (`net/ipv4/tcp.c:1778-1785 @ v7.0`), so an overlapping segment was forwarded twice | The forwarder reads with `tcp_recvmsg`, which copies from `copied_seq` (`net/ipv4/tcp.c:2731`, `:2767 @ v7.0`) | **Removed** |
 | 15 | Guest drain-cell slots `GUEST_FLOW_SLOTS`, `GUEST_FLOW_CELL_LEN`, the guest cell array | One drain cell per guest flow | A pair's state is allocated at attach (248 B in the spike) | **Removed** |
-| 16 | SLOT-RELEASE (D-1), GS-E1, GS-E2 | The guest's fixed slot pool must never fill with flows the host had released | No fixed guest pool | **Withdrawn** (EVMOD-AB) |
-| 17 | PROBE-DROP-ABORT (D-2), GS-E3, ADR-0193 | Under SLOT-RELEASE a cleanly ended probe stream would hold its slots until the guest's close | — | **Withdrawn** (EVMOD-AB); ADR-0193 deleted |
-| 18 | ENDS-BEFORE-CLAIMS (B), GS-E4, GS-E5, ADR-0194; K-PS2 (P-63) as a dependency | Guest slot claims | No claims | **Withdrawn** (EVMOD-AB); ADR-0194 deleted |
-| 19 | `GUEST_PROBE_SLOTS` (8) and `ParseError::ProbeCountExceeded` | A guaranteed guest drain slot per probe | A probe dial is quota-exempt; the cap bounds the node flow slots one allocation holds outside its quota | **Kept**, meaning restated (EVMOD-AB) |
+| 19 | `GUEST_PROBE_SLOTS` (8) and `ParseError::ProbeCountExceeded` | A guaranteed guest drain slot per probe | A probe dial is quota-exempt; the cap bounds the node flow slots one allocation holds outside its quota | **Kept** (EVMOD-AB) |
 | 20 | END-IDEMPOTENT, CLEAN-FULL-END (P-65) | A trailing RST or `0x3` after an end | The forwarder ignores transitions after a pair's or watch's end; an owner closes a flow's sockets only after its end record | **Kept** |
 | 21 | H-1, TCPACCEPT-END, K-A4 | The request must not reach the target | An attached socket's bytes are payload, so the acceptor reads the request before attach | **Kept** (H-1 reads "before attach") |
 | 22 | D20 `SO_LINGER{1,0}` on owner sockets | Owner death resets the far ends | The context's release aborts every attached pair; linger still covers owner sockets not yet attached | **Kept** |
@@ -3016,7 +2888,7 @@ errors, QHOLD, the quota's count of half-closed flows, policy and D26, D24 /
 D24a, LEGB-DIAL, GW-LOCAL, the probe contracts, the guest capture programs
 and the UDP slot sockets.
 
-##### Spike pins and their disposition (2026-10-17)
+##### Spike pins and their disposition
 
 The four contract-shaping spikes ran on Linux 7.0 (physical host
 `7.0.0-38-generic`, guests and the host-role VM `7.0.0-29-generic`) and held
@@ -3024,7 +2896,7 @@ The four contract-shaping spikes ran on Linux 7.0 (physical host
 
 | Spike, pin | Pin | Disposition (where pinned) |
 |---|---|---|
-| EV-END 1 | "A TCP half needs no classifier" is falsified for a half whose source direction already ended: a later reset is seen only by `sk_error_report` | The TCP rule of § *End classification*, "TCP halves", already pinned; the disposition table row 7 corrected |
+| EV-END 1 | "A TCP half needs no classifier" is falsified for a half whose source direction already ended: a later reset is seen only by `sk_error_report` | The TCP rule of § *End classification*, "TCP halves", already pinned; disposition table row 7 |
 | EV-END 2, EV-PAIR 9.6 | A TCP reset's errno is `ECONNRESET`, or `EPIPE` in `CLOSE_WAIT` (`net/ipv4/tcp_input.c:4905-4930 @ v7.0`); both are a reset | § *End classification*, "TCP halves"; § *Failure projection* |
 | EV-END 3 | Queue a watch's record before calling the original callback, in `sk_state_change` and `sk_error_report`; the sweep path takes no socket lock | § *End classification*, "Watch" |
 | EV-END 3, EV-CTL 4.3 | An owner's abort of a watch: unspecified in the spike (the spike's `ABORT` did not touch the socket); a forwarder `SHUT_RDWR` makes the holder's `read` fail `ENOTCONN` in part of the trials | **WATCH-ABORT, approved by the user 2026-10-17:** an owner abort never touches `V_h`; only a context release shuts watched sockets; the holder takes its outcome from the watch after its read ends (§ *End classification*, "A watch ended by the owner"; EVMOD-STREAM-END; EVMOD-STREAM-ABORT) |
@@ -3037,7 +2909,7 @@ The four contract-shaping spikes ran on Linux 7.0 (physical host
 | EV-CTL 4.6 | Pin the TCP families accepted | § *Control interface*: `AF_INET` and `AF_INET6` (the hooks are family-agnostic; the owners create IPv4 only, § *Scope*) |
 | EV-CTL 4.7 | kTLS installed after attach clobbers the saved callbacks | No owner installs a ULP on an attached socket (ADR-0200); unchanged. MODULE-REFCOUNT adds that a half which has a ULP at removal keeps its module reference for the boot (§ *Pair end*, "Stale invocations", rule 5) |
 | EV-CTL 4.8 | `O_CLOEXEC` is load-bearing | Already pinned; the probe's `Version` stage checks `FD_CLOEXEC` on the context descriptor |
-| EV-CTL 4.9 | Permanence rests on `CONFIG_MODULE_FORCE_UNLOAD` off; `/proc/modules` shows `[permanent]` | Superseded by MODULE-REFCOUNT (2026-10-20): the module is unload-safe by reference count (§ *Module placement and lifetime*; ADR-0198). Forced unload — the one bypass of the count — stays off wherever modules can be unloaded, and the appliance image kernel has no module unloading (ADR-0068 § 7), which makes it unconfigurable there. The probe makes no permanence check |
+| EV-CTL 4.9 | The module's unload safety | The module is unload-safe by reference count (§ *Module placement and lifetime*; ADR-0198). Forced unload — the one bypass of the count — stays off wherever modules can be unloaded, and the appliance image kernel has no module unloading (ADR-0068 § 7), which makes it unconfigurable there. The probe makes no permanence check |
 | EV-CTL 4.10 | Inventory counters are per context | § *Control interface* |
 | EV-PAIR 9.2 | Seed the classification at attach | Already pinned (§ *Forwarding*, "Attach order") |
 | EV-PAIR 9.4 | Record "this side shut its send" before the SHUTDOWN leaves | § *End classification*, CLEAN-FULL-END row |
@@ -3050,14 +2922,14 @@ The four contract-shaping spikes ran on Linux 7.0 (physical host
 | EV-DGRAM | No `ENOBUFS` handling; `IP_RECVERR` stays off | § *Datagram mode* |
 | Modeller U-EV-7 | No cause for an unclassified end | `AbortCause::Unclassified`, record cause `5` (§ *End classification*) |
 
-Items of the 2026-10-17 revision the spikes did not run, and their class:
+Items the spikes did not run, and their class:
 V-EV-CTL (h) the recovery order is a composition of measured facts (the
 release completes before it returns; one context's release leaves another's
 pairs running, P-70 § 3.8) and runs through the production owner in DELIVER
-(V-8); V-EV-CTL (i) the holder's observation after an owner abort no longer
-shapes a contract, because the holder's end is resolved from the watch
+(V-8); V-EV-CTL (i) the holder's observation after an owner abort does not
+shape a contract, because the holder's end is resolved from the watch
 whatever its `read` returns; V-EV-CTL (j) the stale-invocation stress under
-KASAN is V-EV-SAFE, a module-internal check in DELIVER (ADR-0204); the
+stock-kernel stress is V-EV-SAFE, a module-internal check in DELIVER (ADR-0204); the
 widened-window attach race of V-EV-PAIR is a module-internal check in
 DELIVER (the attach section's locks are read in the source, F9). The
 attach of an ended half needs no further run: the user's ruling refuses it
@@ -3071,8 +2943,7 @@ the class, which is module code checked by the module suite in DELIVER.
   GPL-2.0 (it calls GPL-only symbols such as `tcp_abort`,
   `net/ipv4/tcp.c:5141 @ v7.0`). Rust-for-Linux on 7.0 has no socket
   abstractions (`vendors/linux/rust/kernel/net.rs:6` declares only `phy`).
-- **Unload-safe by reference count (EVMOD-LIFE; MODULE-REFCOUNT,
-  2026-10-20).** `ovd_fwd` has `module_init` and `module_exit`. It holds a
+- **Unload-safe by reference count (EVMOD-LIFE; MODULE-REFCOUNT).** `ovd_fwd` has `module_init` and `module_exit`. It holds a
   module reference for every object through which the kernel can still call
   its text, so it unloads only when nothing can.
 
@@ -3137,9 +3008,8 @@ the class, which is module code checked by the module suite in DELIVER.
   The probe reads neither a flag nor `/proc/modules`.
 
   **Rejected:**
-  - Permanent, with no `module_exit` (the 2026-10-17 contract): a module
-    change needs a kernel boot, which on the shared development VM ends
-    every workspace's runs.
+  - Permanent, with no `module_exit`: a module change needs a kernel
+    boot, which on the shared development VM ends every workspace's runs.
   - Built into the appliance kernel (ADR-0198).
   - A reference dropped at unhook: a saved kTLS pointer outlives the unhook.
     Rule 5 and the ULP check close that.
@@ -3165,8 +3035,8 @@ the class, which is module code checked by the module suite in DELIVER.
   (§ *Composition*, "Where the built module lives"). Kbuild's outputs go to
   that directory through `MO=` (`Makefile:137-139`, `:195 @ v7.0`), so
   `kmod/ovd_fwd/` holds sources only. The module's `version` modinfo
-  field is the tree digest `kmod-build` computes (§ *Composition*, "Which
-  module is loaded"), the identity FWD-PREREQ's stale-module check
+  field is the whole-tree digest `kmod-build` passes as a define (§
+  *Composition*, "Which module is loaded"), the identity FWD-PREREQ's stale-module check
   compares. `finit_module` checks a module
   against the kernel it was built for through `same_magic`
   (`kernel/module/main.c:2593-2596 @ v7.0`): with `CONFIG_MODVERSIONS` that
@@ -3398,8 +3268,7 @@ TCP sockets (the spike's T direction belonged to the removed parking cell).
 
 ##### End classification (EVMOD-END, ADR-0180)
 
-The classification rule of R2-END is unchanged; where it is computed
-changes. For each vsock half the forwarder keeps the peer-shutdown bits it
+The classification rule of R2-END is computed in the forwarder. For each vsock half the forwarder keeps the peer-shutdown bits it
 has already acted on. In its `sk_state_change` override — called after every
 received SHUTDOWN with its flags recorded in `peer_shutdown`
 (`net/vmw_vsock/virtio_transport_common.c:1443-1461 @ v7.0`) and after an
@@ -3475,8 +3344,7 @@ re-check is discharged by the source reading above and the model, not by a
 measurement: in `fwd_safe` the design's run takes the lock and
 `NoUnclassifiedEnd` (part of `Safety`) holds (`fwd-safe-pair-safety-tlc`,
 `fwd-safe-watch-safety-tlc`); the hazard `noSweepRecheck`, which omits the
-re-check, violates it (`fwd-safe-hazard-no-sweep-recheck`, TLC, and its
-named-run form `fwd-safe-hazard-no-sweep-recheck-run`); the runs
+re-check, violates it (`fwd-safe-hazard-no-sweep-recheck`, TLC); the runs
 `SweepStoresBeforeErrReadRechecksUnderTableLock` and
 `SweepErrVisibleFirstRechecksUnderTableLock` hold (§ *Formal protocol
 model*). `NoUnclassifiedEof` is `fwd_pair`'s invariant, not `fwd_safe`'s.
@@ -3594,8 +3462,8 @@ rejected for the sweep path. Measured with this order: the record was
 present at the holder's observation in 6,640 of 6,640, including 640 on the
 sweep path; an aborted dial read as EOF at the holder in 2,000 of 2,000
 (P-69), which is why the read's return is never the classification.
-`GuestStream` keeps its contract — `Ok(0)` for a classified half-close,
-`Err(ConnectionReset)` for an abort — with no ring and no A4 rule.
+`GuestStream`'s contract is `Ok(0)` for a classified half-close and
+`Err(ConnectionReset)` for an abort.
 
 **A watch ended by the owner (U-EV-3; WATCH-ABORT, approved by the user
 2026-10-17, ADR-0211).** `OVD_FWD_ABORT` on a watch id, or `abort_all`, queues the
@@ -3887,7 +3755,7 @@ the holder).
   `sock_def_write_space`, a connected UDP socket (`SOCK_RCU_FREE`,
   `net/ipv4/udp.c:329 @ v7.0`) keeps `sock_wfree`'s fast path, which wakes
   the queue inside `rcu_read_lock` (`net/core/sock.c:2675-2685 @ v7.0`).
-  Resuming was measured with the earlier `sk_write_space` override (P-72
+  Resuming was measured with the `sk_write_space` override (P-72
   § 8); the wait-queue trigger is checked by V-EV-SAFE's full-target cases
   (§ *Validation plan*).
 - **The vsock half's buffer holds the largest frame.** Datagram-mode attach
@@ -3943,7 +3811,7 @@ the holder).
   queued datagrams of one association reached the next association's peer;
   with it, none (P-72 § 7). A datagram the application sends while the
   association ends may be discarded, which UDP permits; the next one starts
-  a new association. This replaces CELL-RECREATE.
+  a new association.
 - **Slot sockets bind an explicit port.** Each slot socket is bound to its
   own `GUEST_UDP_SLOT_BASE + n` (as § *Guest adaptation contract* pins),
   never port 0: `__udp_disconnect` unhashes the socket and clears its port
@@ -3955,11 +3823,9 @@ the holder).
   it is full the kernel drops new ones (`net/ipv4/udp.c:1721-1731 @ v7.0`),
   as for an unforwarded socket.
 - **Order and empties.** Every datagram, an empty one included, is delivered
-  once and in order; D15-R4 is withdrawn (measured: the strict-order check
-  held across 4,050 empties in the mixed run, P-72 § 1).
-- **Frame parser (FRAME-PARSE; architect disposition 2026-10-18,
-  outcome-neutral, requested by the user and confirmed by adversarial
-  review; ADR-0201).** The host and the guest forwarder interpret a frame
+  once and in order (measured: the strict-order check held across 4,050
+  empties in the mixed run, P-72 § 1).
+- **Frame parser (FRAME-PARSE, ADR-0201).** The host and the guest forwarder interpret a frame
   header received on a vsock half only through one pure C function in its
   own source file. It allocates nothing, takes no lock, touches no socket
   and calls no kernel API; it reads only `buf[0 .. min(buf_len, 8)]`, never
@@ -4100,7 +3966,13 @@ option is offered.
   (vsock source to TCP), up to 8 MiB (TCP autotune), 0.25–1.7 MiB (TCP
   source to vsock); host role 4.69 and 0.65 MiB; with 64 KiB buffers
   0.12–0.51 MiB; unreclaimable slab rise ≤ 0.6 MiB across 3 s and 10 s
-  stalls. The sockmap control queued 160 MiB in 0.36 s.
+  stalls. The sockmap control queued 160 MiB in 0.36 s. P-67's and P-72
+  § 8's resume times and throughput / core-s / p99 figures were measured with
+  the `sk_write_space` override and belong to that trigger; they are
+  re-measured with the wait-queue entry under V-9's benchmark (GH #326).
+  Through the entry a vsock target wakes only when `sock_writeable` holds, so
+  the resume waits for a later `sock_wfree`; V-EV-SAFE has full-target resume
+  cases for a TCP, a vsock and a UDP target and checks correctness only.
 - **The forwarder's own memory:** about 248 B per pair (spike) plus a
   scratch pool of `FWD_CHUNK` buffers, one per concurrently running work
   item (`pool_miss` 0 at 16,384 pairs with 8 buffers on 4 vCPUs); one queued
@@ -4166,12 +4038,9 @@ is EVMOD-CTL; the end record, `read` and `poll` are EVMOD-REC.
   errno, and a half's pending `sk_err` may be any errno, so returning it
   directly could collide with another refusal class. `ECONNABORTED` is used
   by no other refusal, and the half's own cause travels in `end_errno`; the
-  adapter maps it to `ForwarderError::HalfEnded { side, errno }`. The spike
-  modules refused the same states with the half's errno directly
-  (`ECONNRESET`, `EPIPE`) or `ENOTCONN` (vsock `CLOSING`) (P-70 § 3.6, P-71
-  § 9.3); which errno the module returns is module code, checked by the
-  module suite in DELIVER, and the kernel facts the class rests on are cited
-  above. A refused ended half is never hooked, so no end record follows; the
+  adapter maps it to `ForwarderError::HalfEnded { side, errno }`. The errno
+  the module returns is module code, checked by the module suite in DELIVER,
+  and the kernel facts the class rests on are cited above. A refused ended half is never hooked, so no end record follows; the
   owner's abort is the flow's only end (§ *Failure projection*, "Owner
   response to an ended half at attach").
 
@@ -4196,9 +4065,7 @@ is EVMOD-CTL; the end record, `read` and `poll` are EVMOD-REC.
   attach changes nothing on either half (the other half can still be
   attached or watched) and consumes an id: ids are never reused and not
   necessarily consecutive. Measured: the seven classes the spike module had
-  are pairwise distinct, and the precedence holds (P-70 § 3.6; 42 of 42);
-  `ECONNABORTED` takes the state check's place, which the spike filled with
-  `ENOTCONN`.
+  are pairwise distinct, and the precedence holds (P-70 § 3.6; 42 of 42).
 
 - **End record (EVMOD-REC)** (32 bytes, native byte order; it never leaves the machine):
 
@@ -4656,21 +4523,20 @@ test).
 
 ##### Lifecycle Gate Ownership impact
 
-No gate is added, moved or removed. G-V1's promise replaces "forwarder
-programs loaded and attached" with "forwarder context opened and probed";
-G-V7's guest network configuration includes the module loaded from
+The forwarder adds no gate. G-V1's promise is "forwarder context opened and
+probed"; G-V7's guest network configuration includes the module loaded from
 `GUEST_FORWARDER_MODULE_PATH` and its ABI version checked
-(READY's meaning unchanged; a missing module, a module of another kernel
+(READY's meaning is unchanged; a missing module, a module of another kernel
 release and any other refusal are `GuestTransportSetupError`'s
 `ForwarderModuleMissing`, `ForwarderModuleRelease` and
 `ForwarderModuleLoad`, each the existing pre-READY start failure;
 EVMOD-BUILD, EVMOD-LOAD and EVMOD-GUEST-KIT add no gate, they name who supplies the
 module the existing precondition already needs); G-V5's `Forwarder` repair closes the old
-context before opening the new (its promise unchanged); G-V9 keeps its owner (the side
-holding the direction's target), now the forwarder under that owner's
-context, and its promise (no half-close before the last accepted byte;
-every other end an abort), with its inputs replaced by the forwarder's
-classification and end record. Forwarding backpressure is flow control
+context before opening the new; G-V9's owner is the side
+holding the direction's target, here the forwarder under that owner's
+context, and its promise is no half-close before the last accepted byte and
+every other end an abort, with the forwarder's
+classification and end record as its inputs. Forwarding backpressure is flow control
 inside `Paired` and gates nothing (§ *Lifecycle Gate Ownership*).
 
 ##### Source, build and test
@@ -5337,10 +5203,11 @@ crates' composition tests need it from `overdrive-sim`); `unreachable!` on a
 foreign hold (a panic for a fault the type cannot exclude; the typed error
 keeps forwarding fail-closed and reaches the supervisor's fail-stop).
 
-- `GuestNetworkPlan` keeps `alloc()` and `node_prefix()`; removes `bridge()`;
-  `assignment()` returns `&GuestTransportAssignment`; adds
+- `GuestNetworkPlan` exposes `alloc()` and `node_prefix()`;
+  `assignment()` returns `&GuestTransportAssignment`; and
   `listen_ports(): &[ListenPort]` (the PORT-295-C TCP projection, distinct
-  and in ascending order): the ports `dial` serves for the CID.
+  and in ascending order) is the ports `dial` serves for the CID. It has no
+  `bridge()`.
 - **One writer per allocation (M-7).** For each CID the owner applies
   `provision`, `activate`, `teardown`, the quiescence abort, control-session
   open / loss, dial admission and every flow registration in one serialized
@@ -5595,12 +5462,10 @@ refusal; the rules close the check-then-connect window. Pinned by V-21
 | Datagram | UDP connected to `dst` (`gateway:53` reaches the `DnsResponder` through the host-local gateway, GW-LOCAL; a VIP is rewritten by `connect4`) | `Policy`, `HostInternal` |
 | TcpAccept | host side: the dialer's `GuestStream`; guest side: the application on the declared `listen_port`, reached from gateway:0 | `Refused { errno }` / `TimedOut { errno }` from the guest |
 
-Justification against today: under the bridge topology (superseded by
-ADR-0145), guest TCP to any address went to leg-F, whose non-mesh
-pass-through dialled `orig_dst` from the host with no mark and no deny list
-— guest TCP reached host loopback services and instance metadata. The
-replacement makes every guest flow an owner decision, so D26 makes the deny
-set explicit.
+Justification: every guest flow is an owner decision, so D26 makes the deny
+set explicit. A pass-through that dialled `orig_dst` from the host with no
+mark and no deny list would let guest TCP reach host loopback services and
+instance metadata.
 
 ```rust
 // Declared in overdrive_core::guest_transport (§ Core vocabulary, D-UP-12)
@@ -5660,7 +5525,7 @@ impl ServerHandle {
     /// (`run_server_with_obs_and_drivers`), whose owner exposes only
     /// `SharedGuestNetworkOwner`. Reads only; changes nothing.
     ///
-    /// Reached without a CLI hook (D-17, round 10): the through-`serve`
+    /// Reached without a CLI hook (D-17): the through-`serve`
     /// cells run in an `overdrive-control-plane` integration lane under the
     /// `kvm-tests` feature on native metal, which calls
     /// `run_server(config, adapters)` with `NodeAdapters::host(&config,
@@ -5694,7 +5559,7 @@ pub struct GuestOwnerObservation {
     /// after `converge_shared` returned Ok, so always at least `FIRST`.
     pub forwarder_generation: ForwarderGeneration,
     /// `FlowForwarder::inventory()` of the context the owner holds, read in
-    /// the same snapshot (D-15, architect 2026-10-19; the owner's audit
+    /// the same snapshot (D-15; the owner's audit
     /// compares the same value with its flow table).
     pub forwarder_inventory: ForwarderInventoryRead,
     /// Cumulative attaches and watches the forwarder refused `HalfEnded`,
@@ -5707,7 +5572,7 @@ pub struct GuestOwnerObservation {
     pub forwarder_attached: u64,
     /// The last end record this owner consumed (`take_end` in its dispatch,
     /// EVMOD-REC), from any context it held: depth 1, replaced at each
-    /// consumption, `None` until the first (D-11, architect 2026-10-19). A
+    /// consumption, `None` until the first (D-11). A
     /// consumed flow has left `cids`, so this is the only surface that still
     /// shows how it ended (development.md § "A convergent record cannot
     /// answer 'did it happen'").
@@ -5721,8 +5586,7 @@ pub struct GuestOwnerObservation {
 pub enum GuestAdmission { Open, Quiesced }
 
 /// The forwarder inventory as one snapshot found it. Two distinct
-/// non-inventory states, so neither is a sentinel (round-9, architect
-/// 2026-10-19).
+/// non-inventory states, so neither is a sentinel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ForwarderInventoryRead {
     /// The context the owner holds answered `inventory()`.
@@ -5945,7 +5809,7 @@ client→guest throughput than loopback TCP. End and reset fidelity:
 | both directions ended cleanly | close both legs |
 
 **Who dials leg S and relays it (D-14; LEGS-DIAL — option (a), approved by
-the user 2026-10-19; amends D-UP-5).** `HostMtlsEnforcement::enforce`
+the user 2026-10-19).** `HostMtlsEnforcement::enforce`
 (inbound) owns the whole inbound path: the leg-C server handshake and kTLS
 arm, then — only after the client authenticated — the leg-S dial
 (`dial_leg_s`, `mtls/inbound.rs`: "no leg S is dialed" on a handshake
@@ -5957,8 +5821,8 @@ the one component that knows the client authenticated. Contract:
 - `HostMtlsEnforcement::new(identity: Arc<dyn IdentityRead>, limits:
   MtlsLimits, guest_prefix: Ipv4Net, guest_dial: Arc<dyn GuestStreamDial>)
   -> Self` — `guest_dial` required (no default, no `Option`), appended
-  after `guest_prefix` (LEGB-DIAL); `SimMtlsEnforcement::new` gains the same
-  argument, appended after its existing ones, and honours the same
+  after `guest_prefix` (LEGB-DIAL); `SimMtlsEnforcement::new` takes the same
+  argument, appended after its other ones, and honours the same
   contract (its inbound arm dials `guest_dial` for a guest-prefix
   `orig_dst` and relays over the returned stream). `run_server` passes the
   boot's `OwnerDial` (§ *Owner and mTLS-worker composition*), created
@@ -5967,7 +5831,7 @@ the one component that knows the client authenticated. Contract:
 - `MtlsInterceptWorker::new(enforcement: Arc<dyn MtlsEnforcement>, resolve:
   Arc<dyn MtlsResolve>, clock: Arc<dyn Clock>, intercept: Arc<dyn
   MtlsIntercept>) -> Self` — today's four ports; it takes no `guest_dial`
-  (D-UP-5's worker parameter is withdrawn). The VM probe runner keeps its
+  (the dial is the enforcement's, D-14). The VM probe runner keeps its
   `guest_dial` (§ *VM probe runner*).
 - `MtlsEnforcement::enforce` keeps its signature. For `Routed::Inbound {
   orig_dst }` with `orig_dst.ip()` outside `guest_prefix`, the path is
@@ -5993,7 +5857,7 @@ the one component that knows the client authenticated. Contract:
      socket and the stream per the end-and-reset table above. The
      connection is registered as an `EnforcedConnection`; the
      self-teardown trigger and retirement end it.
-- **The in-flight ledger (round-10 wording correction).** The F4 in-flight
+- **The in-flight ledger.** The F4 in-flight
   slot is a pre-arm slot: `enforce` claims it on entry and releases it when
   `enforce` returns (`mtls/mod.rs:336-344`). For a guest-prefix target it
   therefore covers stages 1 and 2 — the handshake and the awaited dial, at
@@ -6016,7 +5880,7 @@ the one component that knows the client authenticated. Contract:
   relay task has not returned, `Gone` once it has returned or after
   `teardown`; never `Stalled` (the `pump_stall_deadline` predicate samples
   splice-pump progress and is reserved for those pumps, #232).
-  **What bounds a relay that stops progressing (round 11; the deliberate
+  **What bounds a relay that stops progressing (the deliberate
   replacement of a progress check).** No v1 component acts on `Stalled`:
   the splice pumps' liveness is the kernel's transport-death reaping
   (`TCP_USER_TIMEOUT` = `pump_stall_deadline` plus keepalive, armed on the
@@ -6158,7 +6022,9 @@ Owner: `overdrive-dataplane::mtls::HostMtlsEnforcement`
 ([ADR-0190](../../product/architecture/adr-0190-leg-b-marks-and-loopback-binds-same-node-vm-dials.md), **APPROVED 2026-10-13**). Evidence: V-LEGB-MARK (P-60).
 
 **Constructor (interface contract).** `guest_prefix` is a required input; no
-default, no builder, no `Option`:
+default, no builder, no `Option`. The constructor's fourth input, `guest_dial`,
+is the leg-S dial (LEGS-DIAL, D-14, § *leg-S over vsock*); the leg-B dial does
+not use it:
 
 ```rust
 use ipnet::Ipv4Net;
@@ -6166,23 +6032,25 @@ use ipnet::Ipv4Net;
 impl HostMtlsEnforcement {
     /// `guest_prefix`: the node's guest prefix. A leg-B peer inside it is a
     /// same-node VM and is dialled marked and source-bound (LEGB-DIAL).
+    /// `guest_dial`: the leg-S dial of a VM backend (LEGS-DIAL).
     #[must_use]
     pub fn new(
         identity: Arc<dyn IdentityRead>,
         limits: MtlsLimits,
         guest_prefix: Ipv4Net,
+        guest_dial: Arc<dyn GuestStreamDial>,
     ) -> Self;
 }
 ```
 
 `Ipv4Net` is the type of `GUEST_NODE_PREFIX`
-(`crates/overdrive-core/src/guest_transport/mod.rs:382`). Today's
-constructor takes `(identity, limits)` (`mod.rs:128`); every caller is
-updated in the same cut.
+(`crates/overdrive-core/src/guest_transport/mod.rs:382`). Every caller
+passes all four inputs.
 
 **Composition call site.** `run_server_with_obs_and_drivers`
 (`crates/overdrive-control-plane/src/lib.rs:7800-7804`) passes
-`GUEST_NODE_PREFIX`. Tests pass the prefix their topology uses.
+`GUEST_NODE_PREFIX` and the boot's `OwnerDial` (§ *leg-S over vsock*). Tests
+pass the prefix their topology uses.
 
 **The conditional (per leg-B dial, before `connect()`).**
 
@@ -6248,8 +6116,8 @@ No row reaches a host socket. The only host-local prefix address is the
 gateway (GW-LOCAL), and leg-B never dials it.
 
 **Observable consequence.** A same-node peer appears to leg-C as
-`127.0.0.1:<ephemeral>` on every host (today: the uplink address when a
-default route exists, V-LEGB-MARK S4 b2, Q3). Nothing in leg-C keys on the
+`127.0.0.1:<ephemeral>` on every host (an unmarked dial presents the uplink
+address when a default route exists, V-LEGB-MARK S4 b2, Q3). Nothing in leg-C keys on the
 client source address; identity is the peer SVID.
 
 **Routes.** No route covers `GUEST_NODE_PREFIX` except GW-LOCAL's gateway
@@ -6346,8 +6214,7 @@ guest prefix every network probe goes through `GuestStreamDial`; any other
 target keeps today's plaintext TCP connect, unchanged. The runner takes
 `guest_dial: Arc<dyn GuestStreamDial>` as a required constructor argument,
 appended after the existing ones, as in `HostMtlsEnforcement::new`
-(D-UP-5; the worker's half of D-UP-5 moved to the enforcement under
-LEGS-DIAL):
+(D-UP-5; the dial of leg S belongs to the enforcement, LEGS-DIAL):
 `ProbeRunner::new(tcp_prober: Arc<dyn TcpProber>, http_prober: Arc<dyn
 HttpProber>, clock: Arc<dyn Clock>, observation_store: Arc<dyn
 ObservationStore>, guest_dial: Arc<dyn GuestStreamDial>) -> Self`; the
@@ -6483,32 +6350,22 @@ emits one structured `tracing` event named `probe.not_sampled` with the
 fields `alloc` (the `AllocationId`), `role` (`ProbeRole::as_str`),
 `probe_idx` and `reason`, and, for `reason` `adapter_error` and
 `write_failed`, `detail` — the `Display` of the `ProbeRunnerError`
-(`ProbeAdapterFailed` / `ObservationWriteFailed`, `mod.rs:399-413`), which
-the replaced warn carried as `error`. `reason` is one of:
+(`ProbeAdapterFailed` / `ObservationWriteFailed`, `mod.rs:399-413`).
+`reason` is one of:
 
-| `reason` | Cause | Today's path |
-|---|---|---|
-| `node_capacity` | A VM probe dial refused `GuestDialError::Capacity` (node flow slots; PROBE-NOSAMPLE) | new |
-| `quiesced` | A VM probe dial refused `GuestDialError::Quiesced` (PROBE-NOSAMPLE) | new |
-| `adapter_error` | The prober adapter returned `Err` (`ProbeAdapterFailed`). `ProbeFailure` has one variant, `InvalidTarget` (`crates/overdrive-core/src/traits/prober.rs:156-162`): a target that escaped parse validation (`tcp_prober.rs:61-70`, `http_prober.rs:196-219`). Unreachable for a VM TCP probe: its target is inside the guest prefix, the probe is the dial, and every dial result is a sample or a no sample (the table above). A VM HTTP probe reaches it only when its request cannot be built from the spec's `path` — a path that passes the parse checks (`workload_spec.rs:1503-1518`) but is not a valid request target (today's `InvalidTarget`, `http_prober.rs:213-219`); that is a property of the spec, so every run of that probe writes no row | the `probe_tick.error` warn, `mod.rs:585-592` |
-| `write_failed` | `write_probe_result` returned `Err` (`ObservationWriteFailed`) | the `probe_tick.error` warn, `mod.rs:585-592` |
+| `reason` | Cause |
+|---|---|
+| `node_capacity` | A VM probe dial refused `GuestDialError::Capacity` (node flow slots; PROBE-NOSAMPLE) |
+| `quiesced` | A VM probe dial refused `GuestDialError::Quiesced` (PROBE-NOSAMPLE) |
+| `adapter_error` | The prober adapter returned `Err` (`ProbeAdapterFailed`). `ProbeFailure` has one variant, `InvalidTarget` (`crates/overdrive-core/src/traits/prober.rs:156-162`): a target that escaped parse validation (`tcp_prober.rs:61-70`, `http_prober.rs:196-219`). Unreachable for a VM TCP probe: its target is inside the guest prefix, the probe is the dial, and every dial result is a sample or a no sample (the table above). A VM HTTP probe reaches it only when its request cannot be built from the spec's `path` — a path that passes the parse checks (`workload_spec.rs:1503-1518`) but is not a valid request target (today's `InvalidTarget`, `http_prober.rs:213-219`); that is a property of the spec, so every run of that probe writes no row |
+| `write_failed` | `write_probe_result` returned `Err` (`ObservationWriteFailed`) |
 
 A key runs once per period, so the event fires at most once per probe per
-period. It is emitted at `warn` for every `reason`, the level of the event
-it replaces. It is
-the only event for these outcomes: there is no `probe.vm.not_sampled` event,
-and the bare `probe_tick.error` warn is removed.
+period. It is emitted at `warn` for every `reason`, and is the only event
+for these outcomes.
 
 **`ServiceLifecycle` applies the threshold at read time (PROBE-RUN-COUNT;
-the consumer).** Today the liveness failure streak advances on every reconcile
-pass whose latest row is a `Fail` (`liveness_terminate_action`,
-`crates/overdrive-reconcilers/src/service_lifecycle.rs:1044-1095`), the
-readiness success streak advances on every pass whose latest row is a
-`Pass` and resets on a missing row (`compute_backend_healthy`,
-`:1198-1239`), and startup attempts advance only when the latest failing
-row's observation time differs from the last one counted
-(`update_startup_attempts`, `:1260-1286`, reading
-`startup_last_fail_seen_at`). Reconcile passes are not tied to the probe
+the consumer).** Reconcile passes are not tied to the probe
 period and the evaluation broker coalesces submits for one (reconciler,
 target) (`crates/overdrive-core/src/eval_broker.rs:78`, `:109-124`), so a
 pass can see one run several times or several runs as one, of any status.
@@ -6518,7 +6375,7 @@ with the spec's threshold each time it reads the row. It does no arithmetic
 over the runs since it last looked, so coalesced or skipped looks cannot
 miscount, and a threshold changed in the spec applies at the next read.
 `ServiceLifecycleView` (`service_lifecycle.rs:273-348`, CBOR, additive)
-changes:
+carries:
 
 ```rust
 // overdrive_reconcilers::service_lifecycle::ServiceLifecycleView
@@ -6557,7 +6414,8 @@ with the key's latest row `(N, status, s)` (`N` its `run_seq`, `s` its
 
 1. **No new row ⇒ no change**, for every role: the latest row, and so every
    verdict, is the one last read, and the act-once condition is false for a
-   row already acted on. Readiness no longer resets on a missing row.
+   row already acted on. A missing row changes no verdict, readiness
+   included.
 2. **Act once per crossing; retry a failed stop (D-1, option (a), approved
    2026-10-13).** The runtime awaits the
    action-shim dispatch inside the reconcile tick
@@ -6573,8 +6431,7 @@ with the key's latest row `(N, status, s)` (`N` its `run_seq`, `s` its
    crossed streak emits the stop again (`N > A`). A failed stop is
    therefore retried once per new probe run while the failures continue —
    the retry interval is bounded by the probe period — and never twice on
-   one row. The existing reset of the failure counter
-   on emit (`:1078-1085`) has no successor: there is no counter.
+   one row. There is no failure counter to reset on emit.
 3. `ProbeRunSeq` and `SameStatusRuns` are compared through `get()`.
 4. Entries of an allocation leave the view with its other per-allocation
    entries (today they are never pruned:
@@ -6735,7 +6592,7 @@ pub struct ProbeResultRowV2 {
     pub probe_idx: ProbeIdx,
     pub role: ProbeRole,
     pub status: ProbeStatus,
-    /// Observation time shown to operators; no longer decides the merge.
+    /// Observation time shown to operators; does not decide the merge.
     pub last_observed_at_unix_ms: u64,
     pub inferred: bool,
     /// The producer's run sequence for `(alloc_id, role, probe_idx)`.
@@ -6744,8 +6601,8 @@ pub struct ProbeResultRowV2 {
     pub same_status_runs: SameStatusRuns,
 }
 
-pub type ProbeResultRow = ProbeResultRowV2;       // was V1 (:206)
-pub type ProbeResultRowLatest = ProbeResultRowV2; // was V1 (:211)
+pub type ProbeResultRow = ProbeResultRowV2;       // re-pointed at V2 (:206)
+pub type ProbeResultRowLatest = ProbeResultRowV2; // re-pointed at V2 (:211)
 
 pub enum ProbeResultRowEnvelope {                 // :224
     V1(ProbeResultRowV1), // discriminant 0, unchanged
@@ -6786,7 +6643,7 @@ one writer, its probe task — a written row replaces the stored row iff no
 row is stored, the stored row is undecodable (ADR-0048 § 3, unchanged), or
 its `run_seq` is strictly greater than the stored row's. An equal or smaller
 `run_seq` is dropped: no state change, no `SubscriptionEvent`. The
-observation time no longer decides the merge, so a backward wall-clock step
+observation time does not decide the merge, so a backward wall-clock step
 loses no row. The contract is the `ObservationStore::write_probe_result`
 rustdoc (`crates/overdrive-core/src/traits/observation_store.rs:2150-2208`,
 today "LWW resolution on `last_observed_at_unix_ms`"), restated on
@@ -7015,7 +6872,7 @@ host-side protocol in its own image (HOST-NEUTRAL;
       pub forwarder_attached: u64,
       /// The last end record the guest owner consumed in a dispatch (its
       /// pair's `take_end`, EVMOD-REC): depth 1, replaced at each
-      /// consumption, `None` until the first (D-11, architect 2026-10-19).
+      /// consumption, `None` until the first (D-11).
       pub last_consumed_end: Option<ForwardEnd>,
       /// Cumulative end records the guest owner consumed. Never decremented.
       pub consumed_ends: u64,
@@ -7097,8 +6954,7 @@ host-side protocol in its own image (HOST-NEUTRAL;
 
 **Boot** (`run_server` → `run_server_with_obs_and_drivers`):
 
-1. **Startup checks (phase 1 of the owner's two-phase boot, D-8, architect
-   2026-10-19).** Owner cgroup placement (D24), fd budget, no range of
+1. **Startup checks (phase 1 of the owner's two-phase boot, D-8).** Owner cgroup placement (D24), fd budget, no range of
    `vip_range` overlapping the guest prefix (D8-PREFIX-VIP) and no node
    interface address inside it (D8-PREFIX-CFG), all from one
    `GuestFlowIo::host_facts()` snapshot. They need only the seam and two
@@ -7133,7 +6989,7 @@ host-side protocol in its own image (HOST-NEUTRAL;
    when it is `Required`. The probe runner, the exec gate and the VM driver
    take `adapters.boot.clock`, the one clock of the boot. Guest forwarding does not depend on its outcome: the owner opens,
    probes, audits and repairs the forwarder and binds its listeners on
-   every node (round-9; on the appliance the pinned Cloud Hypervisor fork
+   every node (on the appliance the pinned Cloud Hypervisor fork
    is always present, ADR-0161, ADR-0068).
 3. CA, identity (as today), then the dataplane through
    `adapters.boot.dataplane.compose(plan)` (NO-OVERRIDE-SEAMS, below), which
@@ -7195,7 +7051,7 @@ host-side protocol in its own image (HOST-NEUTRAL;
 11. Supervisor.
 12. `open_after_boot()`.
 
-**The owner's two-phase boot (D-8, architect 2026-10-19).** The guest-flow
+**The owner's two-phase boot (D-8).** The guest-flow
 owner cannot exist at step 1: its ports need the mTLS worker, which needs
 the enforcement port (the CA identity of step 3) and the resolve built at
 step 5. Its startup checks need neither, so they are a function of the seam
@@ -7245,16 +7101,16 @@ is used.
   the mTLS enforcement only through the supplied factories (STORES-IN).
 - The in-crate composed rig (`shared_network_test_ports::composed`, T-8)
   boots the same way over `SimGuestFlowIo`: phase 1 over its seam, then
-  `boot_server` with `GuestNetworkSource::Composed`. It no longer builds an
+  `boot_server` with `GuestNetworkSource::Composed`. It builds no
   owner over a separately built worker, so D-UP-16's postcondition holds in
   the rig.
 - `run_server_with_obs_and_drivers` keeps its supplied
   `Arc<dyn SharedGuestNetworkOwner>` parameter: it is the owner's driven
   port, for owner-level doubles (`TestOwnerProcess` over `TestSharedOwner`,
   the FHOLD-CHECK supervisor mapping) that script the owner's answers. It
-  takes the boot-wide group `BootAdapters` (below) in place of its former
-  `obs` and `vm_host_state` parameters and of the adapter fields of
-  `ServerConfig`; `BootAdapters` carries the stores and the CA too
+  takes the boot-wide group `BootAdapters` (below); it has no `obs` or
+  `vm_host_state` parameter and no adapter field of `ServerConfig`;
+  `BootAdapters` carries the stores and the CA too
   (STORES-IN), so on this path as well the boot opens and constructs
   nothing: its caller passes `StoreAdapters::open(&config)` (or simulation
   view and journal stores beside an `IntentStoreAdapter::open` over its
@@ -7274,7 +7130,7 @@ is used.
   runs), and no test that asserts the owner ↔ worker composition, the
   forwarded-outbound registration or a leg-S / probe dial uses it.
 
-**No production branch on VM capability (round-9, architect 2026-10-19).**
+**No production branch on VM capability.**
 Production boot is the same on every node: the owner's startup probe
 includes the forwarder probe, `converge_shared` opens the serving forwarder
 context and binds the flow and control listeners, and `audit_shared` and
@@ -7288,14 +7144,12 @@ test configuration produces is given a production branch
 (`development.md` § "Ground the premise"; design.md § "Correct, and no more
 than correct").
 
-**Driven adapters of `run_server` (NO-OVERRIDE-SEAMS, user ruling
-2026-10-19, full scope ruled the same day; ADR-0219).** `run_server`
+**Driven adapters of `run_server` (NO-OVERRIDE-SEAMS, ADR-0219).** `run_server`
 receives every driven adapter it composes the node over as one required
 parameter, built by the composition root. `overdrive serve` passes the host
 adapters; a test passes simulation adapters or host adapters it names.
 Neither `run_server` nor the `boot_server` it delegates to constructs an
-adapter over a host resource or a store (STORES-IN, user ruling
-2026-10-19: no carve-out — the persistent stores and the workload-identity
+adapter over a host resource or a store (STORES-IN: no carve-out — the persistent stores and the workload-identity
 CA come from the composition root too; the CA as a `CaFactory` the boot
 calls over its one entropy). What they do build is composition over the
 supplied ports: `compose_vm_driver` builds the `VmDriver` (a `Driver`
@@ -7307,8 +7161,8 @@ carries or swaps an adapter, and no field injects a fault. Removed from `ServerC
 `mtls_intercept`, `guest_dns`, `mtls_identity_override`,
 `dataplane_probe_fault`, `mtls_probe_fault` and `vm_override` (DG-4); no
 guest-flow seam field exists (`GuestFlowIoOverride`, `sim_vsock` and
-`guest_flow_io_override` of round 10 are withdrawn). D-UP-16's
-"`ServerConfig` gains no field for the owner's seam" holds again. Removed
+`guest_flow_io_override` do not exist). D-UP-16's
+"`ServerConfig` gains no field for the owner's seam" holds. Removed
 from `run_server`'s body: the second `SystemClock` (`lib.rs:2864`, which
 ignored `config.clock`: the probe runner, the exec gate and the VM driver
 ran on a different clock from the convergence loop), the construction of
@@ -7341,10 +7195,10 @@ Configuration that stays in `ServerConfig`: `bind`, `data_dir`,
 `ServerConfig::new()` takes no argument (the fields keep today's defaults);
 `ServerConfig` derives `Debug` and stays without `Default`.
 
-**What decides the composition now.** The mTLS worker, its enforcement and
+**What decides the composition.** The mTLS worker, its enforcement and
 resolve, the DNS task owner and the shared-network supervisor are composed
-on every boot, whichever adapters are passed (ADR-0138; `compose_mtls` is
-already deleted and banned by
+on every boot, whichever adapters are passed (ADR-0138; no `compose_mtls`
+branch exists, as banned by
 `required_serve_ports_source_scan.rs:86-92`). No branch of the boot keys on
 which adapter a field holds: the dataplane is whatever the composer
 returns, and the node address `ServiceMapHydrator` registers local backends
@@ -7634,9 +7488,8 @@ pub async fn run_server(
     adapters: NodeAdapters,
 ) -> Result<ServerHandle, ControlPlaneError>;
 
-/// The supplied-owner path (above). `boot` replaces the former `obs` and
-/// `vm_host_state` parameters and carries the stores and the CA the boot
-/// formerly opened and constructed itself; preconditions: `drivers` and
+/// The supplied-owner path (above). `boot` carries the observation store,
+/// the VM host state, the stores and the CA; preconditions: `drivers` and
 /// `guest_network_exec` were built over `boot.clock` (the boot's one
 /// clock), and `boot.stores` / `boot.observation` / `boot.vm_host_state`
 /// are over `config.data_dir` or simulations.
@@ -7759,8 +7612,8 @@ support. Since `compose_guest_network(ports, io, dial)`'s caller now builds
 the enforcement through the factory with the same `dial`, the composition's
 D-13 binding holds for every factory that meets its postcondition.
 
-**`overdrive serve` and the CLI entry points (round 13: probe before the
-bundle; no env seam).** The CLI has one entry function and production is a
+**`overdrive serve` and the CLI entry points (probe before the bundle; no
+env seam).** The CLI has one entry function and production is a
 call of it:
 
 ```rust
@@ -7801,14 +7654,12 @@ the fields it simulates by struct update. This keeps production's order
 the same `&ServerConfig` the boot gets, so the bundle's paths cannot
 disagree with it. `run_with_adapters` replaces `run_with_dataplane`,
 `run_with_kek`, `run_with_kek_and_vm_override` and
-`run_with_dataplane_and_vm_override` (and round 11's
-`run_with_kek_and_adapters` / `run_with_dataplane_and_adapters`, and round
-12's `run_with_adapters(args, adapters)`, withdrawn). It is not
+`run_with_dataplane_and_vm_override`. It is not
 feature-gated (it carries no test-only behaviour: `run` is a call of it).
 The stale `run_with_kek` docstring claiming `compose_mtls =
 dataplane_override.is_none()` goes with it.
 
-**PROBE-ROOT-ENV (user ruling 2026-10-19).** The `OVERDRIVE_TEST_PROBE_ROOT`
+**PROBE-ROOT-ENV.** The `OVERDRIVE_TEST_PROBE_ROOT`
 environment variable (`serve.rs:44`, read by `build_probe_adapter`,
 `serve.rs:365-371`) is removed with `build_probe_adapter` and its `mutants:
 skip` comment: production `run` constructs `RealCgroupFs::new()` (probe
@@ -7830,7 +7681,7 @@ support).
 |---|---|---|
 | `dataplane_override: Some(SimDataplane)` | the CLI `run_with_dataplane` callers and every control-plane, sim and conformance fixture listed in the DISTILL handoff (11) | `boot.dataplane = SimDataplaneComposer` built over the `SimDataplane` with `host_ipv4` `127.0.0.1` |
 | `dataplane_override: None` (real dataplane) | `run_with_kek` callers; the S-BDB fixtures that configure their own interfaces | `boot.dataplane = HostDataplaneComposer::new()` (in `NodeAdapters::host`); `dataplane_pin_dir` / `dataplane_cgroup_attach_path` stay configuration |
-| `dataplane_probe_fault: Some(msg)` | S-BDB-14 only (`backend_discovery_bridge/boot_composition.rs:849`) | (round 13 correction) S-BDB-14 keeps its real-kernel boot: `boot.dataplane = HostDataplaneComposer::with_probe_fault(DataplaneError::LoadFailed(msg))` (below) with the fixture's veth pair and `dataplane_pin_dir`; it asserts, as today, the `DataplaneBoot(Probe { LoadFailed(_) })` refusal, the `health.startup.refused` event with reason `dataplane.probe`, and that the `SERVICE_MAP` pin under the pin directory is gone after `run_server` returns — the evidence for `DataplaneComposer::compose`'s "nothing the call created survives an Err" on the production composer. A scripted `SimDataplaneComposer` refusal is the simulated-boot counterpart for tests that never construct a real dataplane; it carries no pin evidence. (Round 12's claim that `EbpfDataplane::set_probe_fault` already covered the pin removal was wrong: its only use, `unconnected_udp_reply_hardening.rs:409`, checks that the typed error passes through intact.) |
+| `dataplane_probe_fault: Some(msg)` | S-BDB-14 only (`backend_discovery_bridge/boot_composition.rs:849`) | S-BDB-14 keeps its real-kernel boot: `boot.dataplane = HostDataplaneComposer::with_probe_fault(DataplaneError::LoadFailed(msg))` (below) with the fixture's veth pair and `dataplane_pin_dir`; it asserts, as today, the `DataplaneBoot(Probe { LoadFailed(_) })` refusal, the `health.startup.refused` event with reason `dataplane.probe`, and that the `SERVICE_MAP` pin under the pin directory is gone after `run_server` returns — the evidence for `DataplaneComposer::compose`'s "nothing the call created survives an Err" on the production composer. A scripted `SimDataplaneComposer` refusal is the simulated-boot counterpart for tests that never construct a real dataplane; it carries no pin evidence. (`EbpfDataplane::set_probe_fault` alone does not cover the pin removal: its only use, `unconnected_udp_reply_hardening.rs:409`, checks that the typed error passes through intact.) |
 | `mtls_probe_fault: Some(msg)` | none in the tree | a `SimMtlsEnforcementFactory` whose enforcement's probe is scripted to fail; `run_server`'s existing `mtls.probe` refusal (`MtlsBootError::Probe`) is the only refusal path. DISTILL decides whether a cell for it is added |
 | `mtls_identity_override: Some(read)` | none in the tree | a test factory that builds `HostMtlsEnforcement::new(read, deps.limits, deps.guest_prefix, deps.guest_dial)` |
 | `vm_override: Some(VmOverride { vmm, beacon })` | S-VM-13, S-VM-51, S-VM-75, the CLI VM lanes, `lib.rs` compose tests | `vm: VmAdapters { vmm, beacon, cgroup_accounting, capability: Required }` |
@@ -7842,7 +7693,7 @@ Every in-crate test of the deleted `host_ipv4_with_override_fallback` is
 deleted with it (`development.md` § "Deletion discipline"); the
 `compose_vm_driver` tests take `VmAdapters`.
 
-**Node vsock ports (PORTS-CONFIG, user ruling 2026-10-19; ADR-0218).** The
+**Node vsock ports (PORTS-CONFIG; ADR-0218).** The
 three node-global host vsock listener ports are node configuration. The
 constants `BEACON_VSOCK_PORT` (1234), `GUEST_FLOW_STREAM_PORT` (1240) and
 `GUEST_FLOW_CONTROL_PORT` (1243) remain only as the production defaults.
@@ -7977,7 +7828,7 @@ pub enum GuestFlowPortsError {
 
   A test that configured `kernel_assigned()` reads the ports here (or from
   the owner and intake in-crate) and never assumes a number.
-- **Repair (round-11 correction).** The owner's seam holds each listening
+- **Repair.** The owner's seam holds each listening
   socket for the process's life, apart from its accept task. What ends a
   listener's accept task in production is an `accept(2)` error that fails
   before the connection is dequeued (descriptor exhaustion,
@@ -8005,8 +7856,7 @@ pub enum GuestFlowPortsError {
   reads a port constant: the probe runner and leg S dial guest ports
   (`GUEST_INBOUND_PORT`, guest-side, unchanged), not host listeners.
 
-**Forwarder module as a lane prerequisite (FWD-PREREQ, user ruling
-2026-10-19).** `serve` never loads `ovd_fwd` (EVMOD-LOAD; on the appliance
+**Forwarder module as a lane prerequisite (FWD-PREREQ).** `serve` never loads `ovd_fwd` (EVMOD-LOAD; on the appliance
 the host image loads it). On a test host the lane's setup loads it, once per
 kernel boot, as a declared prerequisite: `cargo xtask kmod-build` (with no
 `--kernel-build-dir`, the module for the running kernel's
@@ -8017,46 +7867,24 @@ crate). On Lima: `cargo xtask lima run -- cargo xtask kmod-build` and
 steps through `cargo xtask metal run --`, listed in the lane setup of
 `infra/metal/README.md` before `guest-kit-prepare`.
 
-- **Which module is loaded (round-11 correction).** Every Conductor
+- **Which module is loaded.** Every Conductor
   workspace shares the one Lima VM, so "an `ovd_fwd` is loaded" does not
   mean "this workspace's `ovd_fwd` is loaded". The module's identity is its
-  **tree digest**. `kmod-build` computes SHA-256 over the regular files
-  under `kmod/ovd_fwd/` that git does not ignore: the paths `git ls-files
-  --cached --others --exclude-standard -- kmod/ovd_fwd/` lists, which are
-  the tracked files plus the untracked files that are not ignored. It reads
-  each file's working-tree contents, sorts by relative path, and digests the
-  path, length and contents of each entry. `Kbuild`, the `.c` files,
-  `ovd_fwd_frame.h` and `include/uapi/linux/ovd_fwd.h` are all included.
-  The file set has these properties (round 15):
-  - A source file not yet added to git is in the set, so a build is never
-    mistaken for a different one.
-  - Ignored strays (`.DS_Store`, `*.swp`, both in the repository's
-    `.gitignore`) are not in the set.
-  - A stray that is not ignored (an `*.orig`, an editor backup) only makes
-    the module read as stale, which a reload repairs. It is never a false
-    accept.
-
-  `kmod-build` passes the lowercase hex
-  digest to kbuild as `OVD_FWD_TREE_DIGEST=<hex>`; `Kbuild` turns it into a
-  `-D` define and the source declares `MODULE_VERSION(OVD_FWD_TREE_DIGEST)`,
-  with an `#error` when the define is absent, so a module built without
-  `kmod-build` does not compile. Because kbuild's outputs go to
-  `<workspace>/target/kmod/<release>/` (`MO=`), the tree holds no build
-  intermediates for the digest to pick up. `MODULE_VERSION` is
+  **version**: `MODULE_VERSION` is a digest of the whole `kmod/ovd_fwd/` tree.
+  `kmod-build` hashes the tree's files (sorted relative paths and contents)
+  and passes the hex digest to the module build as a define; the source uses
+  it for `MODULE_VERSION` and fails to compile (`#error`) without it. The
+  reason: workspaces that share the one Lima VM can have different
+  `ovd_fwd` builds loaded, and a digest tells builds of different sources
+  apart with no hand-kept bump to forget (ADR-0203). `MODULE_VERSION` is
   `MODULE_INFO(version, ..)` (`include/linux/module.h:277-280 @ v7.0`), so
   the field is in the module's `.modinfo`, and the loaded module exposes it as
   `/sys/module/ovd_fwd/version` (`MODINFO_ATTR(version)`,
   `kernel/module/main.c:607 @ v7.0`, listed at `:1059`; the attribute
-  exists only when the field does, `:590-593`). `srcversion` is not used:
-  `modpost` hashes each `source_` file but, of the `deps_` entries, only
-  those whose last `/` ends exactly at the object's own directory
-  (`scripts/mod/sumversion.c:347-374 @ v7.0`, the test at `:366-367`;
-  the "or subdirs" comment at `:324` does not match the code), so it
-  misses `include/uapi/linux/ovd_fwd.h` (the control ABI and the frame
-  constants), and it never covers `Kbuild` or its flags. The tree digest
-  covers all of them. The digest is computed in one place, `kmod-build`;
-  every check reads it back from a module's `version` field.
-- **Where the built module lives (round 13: workspace-scoped).**
+  exists only when the field does, `:590-593`). Every check reads the
+  version back from a module's `version` field. Any source edit changes the
+  digest, so it is detected as stale.
+- **Where the built module lives (workspace-scoped).**
   `kmod-build` writes `<workspace>/target/kmod/<kernel-release>/ovd_fwd.ko`,
   where `<workspace>` is the root of the repository checkout the command
   runs in — never the cargo target directory. The cargo target directory
@@ -8075,14 +7903,14 @@ steps through `cargo xtask metal run --`, listed in the lane setup of
   reads first — the precedent of `OVERDRIVE_BPF_OBJECT` (`testing.md`
   § "Mutation testing"). This is test support and xtask only; no production
   crate reads it.
-- **`kmod-load` (round 15, MODULE-REFCOUNT).** It loads this workspace's
+- **`kmod-load` (MODULE-REFCOUNT).** It loads this workspace's
   `<workspace>/target/kmod/<uname -r>/ovd_fwd.ko`. Load and unload are the
   kernel's own atomic calls, and their return codes are the verdicts
   (`.claude/rules/rust.md`, "Check-and-act must be atomic"). The one
-  separate read, `initstate` after an `EBUSY`, only classifies the `EBUSY`;
-  no verdict rests on it alone. A `live` reading is confirmed by a second
-  `delete_module` call, and an absent `initstate` sends `kmod-load` back to
-  step 1:
+  separate read, `initstate` after an `EBUSY`, only classifies the `EBUSY`: it
+  tells a module that finished unloading (back to step 1) from one still
+  present. Any `EBUSY` on a present module is busy/retry, with no retry of
+  its own:
   1. **Load.** It calls `finit_module`. `Ok` means the module was absent
      and is now loaded: done.
   2. **Compare.** On `EEXIST` it compares `/sys/module/ovd_fwd/version`
@@ -8094,10 +7922,9 @@ steps through `cargo xtask metal run --`, listed in the lane setup of
        the `.ko` is now loaded.
      - `ENOENT`: another process unloaded it first. Return to step 1.
      - `EWOULDBLOCK` / `EAGAIN` (references held, `kernel/module/main.c:744-751
-       @ v7.0`), or `EBUSY` while `/sys/module/ovd_fwd/initstate`
-       (`kernel/module/main.c:964-986 @ v7.0`) reads `coming` or `going`
-       (the module is initialising or going, `:810-816`): the module is
-       busy. `kmod-load` fails with "`ovd_fwd` is busy; retry when its
+       @ v7.0`), or any `EBUSY` while `/sys/module/ovd_fwd/initstate`
+       (`kernel/module/main.c:964-986 @ v7.0`) reads `coming`, `going` or
+       `live` (`:810-816`): the module is busy. `kmod-load` fails with "`ovd_fwd` is busy; retry when its
        holders are gone", naming both versions and the holder class:
        - **an open forwarder context:** a process with `/dev/ovd_fwd` open,
          found among `/proc/<pid>/fd` links and named by pid and `comm` (a
@@ -8116,33 +7943,16 @@ steps through `cargo xtask metal run --`, listed in the lane setup of
      - `EBUSY` and the `initstate` read fails with `ENOENT`: a `going`
        module finished unloading between the two calls. The module is gone;
        return to step 1.
-     - `EBUSY` while `initstate` reads `live`: the `EBUSY` may have come
-       from a `coming` module whose init completed before the read, so
-       `kmod-load` calls `delete_module("ovd_fwd", O_NONBLOCK)` once more and
-       acts on that return as in step 3 (`0` or `ENOENT`: step 1;
-       `EWOULDBLOCK` / `EAGAIN`: busy, as above). Only a second `EBUSY`
-       on a module that read `live` means the loaded module has an `init`
-       and no `exit` (`kernel/module/main.c:818-825 @ v7.0`): a live idle
-       module with an `exit` unloads, and a referenced one returns
-       `EWOULDBLOCK`. That is a build from before MODULE-REFCOUNT, such as a
-       spike build. The kernel never unloads it, so retrying cannot help.
-       `kmod-load` fails with "the loaded `ovd_fwd` has no `module_exit` and
-       cannot be unloaded; only a reboot of this host replaces it", naming
-       both versions. `--busy-ok` does not soften this outcome. If the
-       second call's `EBUSY` comes with `initstate` reading `coming` or
-       `going`, it is the busy outcome above.
 
-     For every state an `ovd_fwd` built from this source can be in, it
-     never names a reboot as the remedy; the one reboot message is for a
-     loaded build without `module_exit`, which this source cannot produce
-     (step K's source check rejects a missing `module_exit`).
+     `kmod-load` never names a reboot as the remedy.
 
   Steps 1–3 are bounded to two passes. If the second `finit_module` finds
-  another workspace's build loaded again, that is a race between
-  workspaces, and `kmod-load` reports it with both versions.
+  another workspace's build loaded again, `kmod-load` reports busy/retry
+  with the versions it read. It is never softened by `--busy-ok` and never
+  names a reboot.
 
   With `--busy-ok` (the hooks' form, below) a busy stale module (the
-  `EWOULDBLOCK` / transient-`EBUSY` case) prints the same message and exits 0, leaving the stale verdict to the `serve`
+  `EWOULDBLOCK` / `EBUSY` case) prints the same message and exits 0, leaving the stale verdict to the `serve`
   fixtures. Every other outcome is the same as the strict form.
   **Cost:** workspaces whose `ovd_fwd` sources differ still contend on the
   one Lima VM. Each workspace's setup reloads its own build whenever the
@@ -8161,10 +7971,8 @@ steps through `cargo xtask metal run --`, listed in the lane setup of
   So a
   missing or foreign module is never read as a boot regression, and a test
   runs only against a loaded module whose `version` equals that of the
-  module built from its own workspace's source (the `version` is the tree
-  digest of `kmod/ovd_fwd/`, headers and `Kbuild` included, so two
-  workspaces whose trees are byte-identical share a loaded module
-  legitimately, and two whose trees differ in any file do not).
+  module built from its own workspace's source (two workspaces whose
+  trees are byte-identical share a loaded module).
 - **The lanes that run it.** Every `serve` test, VM or not, runs the real
   phase-1 forwarder probe. CI runs the two steps (strict `kmod-load`) in
   every job that runs `serve` tests (the integration and mutation lanes);
@@ -8178,7 +7986,7 @@ steps through `cargo xtask metal run --`, listed in the lane setup of
   parallel, so a separate command would race it). The hooks therefore load
   an absent module (so a push never fails ~75 `serve` tests on a missing
   prerequisite), reload a stale idle one after any edit under
-  `kmod/ovd_fwd/` (round 15), and never fail on a busy one: the stale
+  `kmod/ovd_fwd/`, and never fail on a busy one: the stale
   verdict is then the fixtures', which fail only when a `serve` test
   actually runs, so a commit or push whose affected set has no `serve`
   test is not blocked by another workspace's module.
@@ -8476,8 +8284,8 @@ pub const fn restart_decision(
   reconciler's three ceiling checks (`:369`, `:426`, `:1116`) is replaced by
   a call to `restart_decision` with that site's row and view, the `:369`
   next-wake site passing its `restart_pending` as `generation_replacement`
-  (it omits it today; its only effect is that the next-wake boundary no
-  longer reports "no restart" for a lineage a pending generation replaces).
+  (so the next-wake boundary reports a restart for a lineage a pending
+  generation replaces).
   `restart_after_failure` below calls it. No other expression in
   `overdrive-reconcilers` or `overdrive-control-plane` compares a value
   against `RESTART_BACKOFF_CEILING`; the DELIVER reviewer rejects one.
@@ -8680,9 +8488,8 @@ impact*).**
 **Defect RESTART-GEN-CRASH — a generation replacement placed but not yet
 started is lost at a `serve` crash. Not fixed in #295: it is
 [GH #325](https://github.com/overdrive-sh/overdrive/issues/325) (user
-ruling 2026-10-18, § *Approval record*). Found by reading while pinning the
-`cid_lease` model's "leased at a `serve` crash" case, 2026-10-18; no test
-or model run against production has shown it yet.** When the reconciler places a successor for a pending
+ruling 2026-10-18, § *Approval record*). No test or model run against
+production has shown it yet.** When the reconciler places a successor for a pending
 generation it stamps `observed_generation = desired.generation` in the
 emitting tick's view (`workload_lifecycle.rs:1211-1213`; the fresh-placement
 branch likewise, `:1340-1342`), and the runtime writes that view through
@@ -8724,7 +8531,7 @@ into `lease_conf_ok` and activates the test.
 
 #### Sim counterparts (adapter-sim)
 
-- `SimSharedGuestNetworkOwner` reshaped to the new traits; scripts
+- `SimSharedGuestNetworkOwner` implements the owner traits above; scripts
   `ForwardingActivation` (all three), `ForwardingQuiescence`,
   `ForwardingRestore` (`Reopened` / `StillQuiesced`) over a hold count with
   a leaked-hold count, audit damage, teardown failures and the
@@ -8791,7 +8598,7 @@ into `lease_conf_ok` and activates the test.
   seeded entropy (`SimEntropy`) for launch tokens (ATTR-TOKEN).
 - `SimMtlsResolve` (existing) drives the owner's single resolution, including
   scripted VIP-branch outcomes (D24a).
-- `SimGuestAttachmentView` retained.
+- `SimGuestAttachmentView` is the attachment-view sim.
 - `SimFlowForwarder` is the forwarder port's sim. The owner's flow state
   machine runs under seeded simulation through `GuestFlowIo` (DG-3) and
   `FlowForwarder`, printing the seed and retaining the triggering sequence.
@@ -8873,13 +8680,13 @@ acceptance scaffolds and activation").
 
   Each driver names exactly one main — the one in its row — in
   `Config::nondet`, every `#[quint_test]` and every `#[quint_run]`. The
-  other mains of a module (`flows_ok`, `flows_two`, `flows_sess`,
+  other mains of a module (`flows_ok`, `flows_one`, `flows_sess`,
   `flows_beacon`, the `fwd_pair` model-checking mains, `quota_ok`,
   `lease_ok`, `lease_live`, `lease_five`, `quiesce_ok`, `quiesce_live`,
   `slots_ok`, `slots_live`, `probe_streak` and every hazard main) are
   model-checking mains: they record no step, so no driver replays them. The
   conformance mains' configurations cover them: `flows_conf` is `core2` (the
-  core with two host-opened flows, on which every core and `flows_two` run
+  core with two host-opened flows, on which every core and `core2` run
   replays), `quiesce_conf` joins `quiesce_ok`'s crash with `quiesce_live`'s
   unbounded repair failures, `lease_conf_ok` is the five offsets of the
   `/29` test pool, and the others equal their model-checking instance.
@@ -9047,9 +8854,8 @@ holds the lease the reconciler's actions take and return. The `cid_lease`
 driver reads the reconciler's decision inputs through the reconciler's own
 production hydration and the runtime's restart-budget accessor, and drives
 placement only through the runtime's convergence tick. Every surface below
-exists today except the restart-budget accessor's fixed signature, which
-RESTART-SSOT pins (§ *Restart decision*, GH #324); the projection reads the
-fixed accessor, never the current one.
+exists in the tree except the restart-budget accessor's signature, which
+RESTART-SSOT pins (§ *Restart decision*, GH #324).
 
 | Surface | Signature | Role |
 |---|---|---|
@@ -9182,7 +8988,7 @@ facts, named arbiters paired with the same runs. Model-only, never
 projected: `loss`, `lost`, `tcls`, `ucls`, `fwdAfterEnd`, `trail`,
 `faults`, `sdrop` / `rdrop` / `fdrop`, `conf_step`.
 
-**The second iteration's variables (U-EV-8, pinned 2026-10-17).**
+**Context-generation variables (U-EV-8).**
 
 | Variable | Class and source |
 |---|---|
@@ -9207,12 +9013,10 @@ value. This is the production check of `NoPairOfReleasedContextForwards`
 at the owner's boundary; the kernel half (no pair of a released context
 still forwards) is the arbiter's.
 
-**The third iteration's variables (pinned 2026-10-17 with EVMOD-ATTACH-END
-and EVMOD-STREAM-ABORT, named as the recorded spec names them).** One row
-per state variable, record field and derived definition the third iteration
-of `fwd_pair` declares (§ *Formal protocol model*, items T-1 to T-9;
-recorded `36080-1792257031.125`), named as the
-spec names them. A derived definition is not projected; it is computed from
+**Ended-half, watch and stream variables (EVMOD-ATTACH-END,
+EVMOD-STREAM-ABORT).** One row per state variable, record field and derived
+definition of `fwd_pair` that these contracts declare (§ *Formal protocol
+model*, items T-1 to T-9), named as the spec names them. A derived definition is not projected; it is computed from
 the projected variables it reads, so a driver compares it only through
 them.
 
@@ -9220,25 +9024,24 @@ them.
 |---|---|
 | `tcpErr(s)` — state variable: a TCP half's pending reset error, `"0"`, `"ECONNRESET"` or `"EPIPE"` (T-1) | S: `SimFlowForwarder`'s per-half `sk_err` of the TCP half, the named arbiter of the kernel's socket state. Tier-3 pair: P-69 hazard-16 shapes (`g-rst-hg-only`, `r-rst-gh-only`) in the module's suite. The projected outcome is O: the pair's end record as the owner consumed it, `ForwardEnd { outcome: Aborted { cause: SocketError { side, errno } } }`, which is `pr(s).cause` / `pr(s).errno` |
 | `tcpSt(t, s)` — derived definition over `tcpErr(s)`, the far writer's FIN and this side's own FIN (`est`, `closeWait`, `ended`, `defect`; T-3, T-4) | not projected (derived); its inputs are projected (`tcpErr` above, `dir(d).wfin` and `dir(d).dstShut` by the `fwd_pair` map) |
-| `vs(s).st` — the vsock half's state, `est` or `closing` (the delta's earlier `vsSt`; T-4) | S: `SimFlowForwarder`'s per-half state (`ESTABLISHED`, `CLOSING`), arbiter. Tier-3 pair: P-70 § 3.6 (vsock `CLOSING` refused) |
-| `vs(s).err` — the vsock half's `sk_err` (the delta's earlier `vsErr`; while a watch is live it is also the sweep's first step taken, the delta's earlier `swp(h)`; T-4, T-9) | S: `SimFlowForwarder`'s per-half `sk_err`, arbiter (row `vs(s)` of the `fwd_pair` map). Tier-3 pair: P-69 (the sweep's `sk_err`; 640 sweep-path observations) |
-| `vs(s).sshut` — this side's own `sk_shutdown & SEND_SHUTDOWN` on the vsock half (the delta's earlier `ownShut`; T-8) | S: `SimFlowForwarder`'s per-half own-shutdown flag, arbiter. Tier-3 pair: P-71 `h_lateshut`. (The README's model-only list names `sshut`; this row supersedes it, and the modeller aligns the README) |
-| `vs(s).misc` — a transition classified otherwise than with the socket's true send state (T-8) | model-only: ghost of `ClassFixedAtTransition`'s T-8 clause, set only under the hazard `lateSendShut`; discharged by P-71 `h_lateshut` |
+| `vs(s).st` — the vsock half's state, `est` or `closing` (T-4) | S: `SimFlowForwarder`'s per-half state (`ESTABLISHED`, `CLOSING`), arbiter. Tier-3 pair: P-70 § 3.6 (vsock `CLOSING` refused) |
+| `vs(s).err` — the vsock half's `sk_err` (while a watch is live it is also the sweep's first step taken; T-4, T-9) | S: `SimFlowForwarder`'s per-half `sk_err`, arbiter (row `vs(s)` of the `fwd_pair` map). Tier-3 pair: P-69 (the sweep's `sk_err`; 640 sweep-path observations) |
+| `vs(s).sshut` — this side's own `sk_shutdown & SEND_SHUTDOWN` on the vsock half (T-8) | S: `SimFlowForwarder`'s per-half own-shutdown flag, arbiter. Tier-3 pair: P-71 `h_lateshut`. (this row is the classification of `sshut`) |
+| `vs(s).misc` — a transition classified otherwise than with the socket's true send state (T-8) | model-only: ghost of `ClassFixedAtTransition`'s T-8 clause; discharged by P-71 `h_lateshut` |
 | `attRes(s)` — the attach / watch result the owner received, `none`, `ok` or `halfEnded` (T-3, T-4) | O through the owner's cumulative counters, which stay readable after the flow has left the owner's table (D-5): the driver builds a fresh owner per run and `fwd_pair` carries one flow per side, so `halfEnded` ⇔ `forwarder_attach_ended` = 1 (host `flow_observation()`, guest `guest_observation()`); `ok` ⇔ `forwarder_attached` = 1; `none` ⇔ both 0. Cross-checked while the flow is held: `ok` ⇔ its phase is `Paired { pair, .. }` (QPROJ-3, QPROJ-5) |
 | `attEnded(s)` — the owner's count of `halfEnded` refusals (T-4) | O: `forwarder_attach_ended` (above) |
 | `strmAbort` — the dial's stream ended by the host owner (T-5) | O: the dial's entry is absent from `flow_observation().cids[cid].dials` while the driver still holds the stream (it has not performed `HolderDrop`). By the entry's lifetime rule (§ *Owner and provisioner*, "A dial's entry in `dials`", D-3) only the owner's abort removes the entry of a held `Paired` stream; reading the watch's end record leaves it with `guest_end: Some(_)`, so a guest end and an owner abort are told apart. Cross-checked by C, the stream's next call returning `Err(ConnectionAborted)`. After a host owner death (`CtxRelease(h)` with a live pair, the `fwd_pair` map) the owner is gone and `strmAbort` is not projected; the stream's result (`hres`, C) still is |
-| `hres` — the outcome the `GuestStream` reported: `none`, `HalfClose`, `GuestAbort` or `OwnerAbort` (the delta's earlier `hres(h)`; T-5, T-9) | C: what the driver, playing the holder, receives from the production `GuestStream` — `read` returning `Ok(0)` / `Err(ConnectionReset)` / `Err(ConnectionAborted)`, and `end()` — cross-checked against O `dials[h]` `Paired { guest_end, .. }` while the dial is held |
+| `hres` — the outcome the `GuestStream` reported: `none`, `HalfClose`, `GuestAbort` or `OwnerAbort` (T-5, T-9) | C: what the driver, playing the holder, receives from the production `GuestStream` — `read` returning `Ok(0)` / `Err(ConnectionReset)` / `Err(ConnectionAborted)`, and `end()` — cross-checked against O `dials[h]` `Paired { guest_end, .. }` while the dial is held |
 | `guestAbortSent` — `Abort { flow }` written for an aborted stream and not yet taken (T-5) | model-only in `fwd_pair` (the message's delivery is `owner_flows`' `toGuestAbort`, which the `owner_flows` driver consumes from the seam); the guest pair's resulting end is projected as for any guest pair (`pr(g)`) |
 | `gh.hobs` — the holder's own end observation on `V_h`, `none`, `eof` or `err` (T-5, T-9) | model-only for the projection: it is the driver's own input — the action `HolderEnd` is the driver's `read` on `V_h` through the Sim vsock socket, which scripts the end fact (`Eof`, or `Err` with `ENOTCONN` / `ECONNRESET`); comparing it with the model would compare the driver with itself. What the stream reports for it is `hres` (above) |
 | `gh.woken` — a holder woken by a watch's end (T-9) | model-only: ghost of `WatchRecordBeforeWake`; discharged by P-69 (record present at the holder's observation in 6,640 of 6,640) and hazard 4 / hazard 8, kept in the module's suite |
-| `gh.recPend` — the record deferred past the original callback (T-9) | model-only: set only under the hazard `originalBeforeRecord` |
 | `gh.vhTouched` — an owner abort of a watch changed `V_h` (T-5) | model-only: ghost of `WatchAbortLeavesHolderSocket`; the projected fact is `vs(h)` and the queues `dir(gh).q1` / `dir(hg).q1` of the Sim vsock socket (S, arbiter; Tier-3 pair: the module suite's case "`ABORT` of a watch sends nothing on the vsock and changes no socket state", P-70 § 3.8 for the spike's behaviour) |
 | `gh.dropped` — the holder dropped its `GuestStream` (T-6) | model-only: the driver's own call (`HolderDrop` drops the stream); its effect is projected as `live(h)` below and the guest pair's end (`pr(g)`) |
-| `live(t, h)` in mode watch — derived: the watch is live (the delta's earlier `liveWatch(h)`; T-6) | not projected as such; its input `pr(h).ph` is, and it is cross-checked against O `FlowForwarder::inventory().live_watches` of the host context through `SimFlowForwarder` (QPROJ-7, row "node flow places") |
-| `headPartial(t, d)` over `dir(d).q1` in mode dgram — derived: the frame at the head of the vsock half's queue is incomplete (the delta's earlier `frq(d)`; T-7) | not projected as such; its input, the Sim vsock queue `dir(d).q1`, is S (arbiter). Tier-3 pair: P-72 § 8 (the truncated-frame control) |
+| `live(t, h)` in mode watch — derived: the watch is live (T-6) | not projected as such; its input `pr(h).ph` is, and it is cross-checked against O `FlowForwarder::inventory().live_watches` of the host context through `SimFlowForwarder` (QPROJ-7, row "node flow places") |
+| `headPartial(t, d)` over `dir(d).q1` in mode dgram — derived: the frame at the head of the vsock half's queue is incomplete (T-7) | not projected as such; its input, the Sim vsock queue `dir(d).q1`, is S (arbiter). Tier-3 pair: P-72 § 8 (the truncated-frame control) |
 
 `forwarder_attach_ended` and `forwarder_attached` are the owner observation
-surface the third iteration adds (on both owners; § *Owner and
+surface these variables read (on both owners; § *Owner and
 provisioner*, § *Guest adaptation contract*). Their contract: cumulative,
 never decremented, across every context the owner held; `forwarder_attach_ended`
 is raised in the same dispatch that ends the flow after a `HalfEnded`
@@ -9396,7 +9199,7 @@ offsets with `conf_step` recorded, for the one pool-exhaustion run (D-18).
 `lease_live` stays a model-checking instance with three abstract
 offsets and is not a conformance target, D-UP-20)
 
-**Projecting `lease_conf_three` onto the five-offset pool (round 11).** No
+**Projecting `lease_conf_three` onto the five-offset pool.** No
 pool prefix yields exactly three usable offsets: a pool's usable offsets
 are its prefix's addresses less the network, gateway and broadcast
 addresses, `2^k − 3` (1 for a /30, 5 for a /29). The driver therefore keeps
@@ -9437,7 +9240,7 @@ on `lease_conf_three`:
 |---|---|
 | `lease` | O QPROJ-2 `lease_observation().leases`: offset(`cid`) ↦ allocation, every lease; a free offset ↦ 0 |
 | `cursor` | O QPROJ-2 `next_fit`, as the model offset of the first usable offset at or after it |
-| `al(a).st` | The **placement lease** of `a` is the lease (QPROJ-2) of the allocation the workload's latest `Assign` step leased (C: the one lease that step added; none after a `Restart` until the next `Assign`); every other lease of an allocation of `a`'s workload is the **predecessor lease** (`pred`, below). `picked`: hazard-only (`assignSplit`, never reached by the design). With a placement lease: `leased` ⇔ Admitted ∧ S `vsock_device_holders()` maps the lease's CID to no VMM ∧ O the lease's allocation has no row in `hydrate_actual`'s `allocations` (the owner-read form, architect 2026-10-19: the substituted provisioner that holds the dispatch at `provision` is the step's pacing device only and is never read for a projected variable; at a step boundary an Admitted placement lease with no device holder and no row is exactly the dispatch held before `VmDriver::start`, because `Launch` creates the VMM and writes the `Running` row in one step and a crash-class end leaves a `Failed` / `Terminated` row); `running` ⇔ Admitted ∧ S `vsock_device_holders()` maps the lease's CID to the VMM the dispatch's `start` created; `ended` ⇔ Admitted ∧ no VMM holds its CID's device ∧ the lease allocation's row (`hydrate_actual`'s `allocations`) is `Failed` / `Terminated` (a crash-class end; no dispatch has run for it yet); `retiring` ⇔ Retiring. Without a placement lease, the placement owner's decision, O QPROJ-2W of `a`'s workload target, with `run` = `hydrate_desired`'s `job.is_some() ∧ ¬desired_to_stop`, `cur` = `current_alloc` over `hydrate_actual`'s `allocations` and `dec` = `restart_status_for_alloc(target, Service, run, cur, generation).1`: `done` ⇔ `desired_to_stop`; `failed` ⇔ `run` ∧ `cur` exists ∧ `cur.terminal` = `Some(BackoffExhausted { .. })` ∧ ¬`dec` (the budget-exhausted terminal `FinalizeFailed` wrote, `workload_lifecycle.rs:1172-1178`, with no pending generation that places it again); `ended` ⇔ `run` ∧ `cur` is `Failed` / `Terminated` with `cur.terminal` = `None` ∧ ¬`dec` (a budget-exhausted failure whose `FinalizeFailed` has not committed its terminal, e.g. after a `serve` crash); `wait` ⇔ `run` ∧ neither `failed` nor `ended` |
+| `al(a).st` | The **placement lease** of `a` is the lease (QPROJ-2) of the allocation the workload's latest `Assign` step leased (C: the one lease that step added; none after a `Restart` until the next `Assign`); every other lease of an allocation of `a`'s workload is the **predecessor lease** (`pred`, below). `picked`: hazard-only (`assignSplit`, never reached by the design). With a placement lease: `leased` ⇔ Admitted ∧ S `vsock_device_holders()` maps the lease's CID to no VMM ∧ O the lease's allocation has no row in `hydrate_actual`'s `allocations` (the owner-read form: the substituted provisioner that holds the dispatch at `provision` is the step's pacing device only and is never read for a projected variable; at a step boundary an Admitted placement lease with no device holder and no row is exactly the dispatch held before `VmDriver::start`, because `Launch` creates the VMM and writes the `Running` row in one step and a crash-class end leaves a `Failed` / `Terminated` row); `running` ⇔ Admitted ∧ S `vsock_device_holders()` maps the lease's CID to the VMM the dispatch's `start` created; `ended` ⇔ Admitted ∧ no VMM holds its CID's device ∧ the lease allocation's row (`hydrate_actual`'s `allocations`) is `Failed` / `Terminated` (a crash-class end; no dispatch has run for it yet); `retiring` ⇔ Retiring. Without a placement lease, the placement owner's decision, O QPROJ-2W of `a`'s workload target, with `run` = `hydrate_desired`'s `job.is_some() ∧ ¬desired_to_stop`, `cur` = `current_alloc` over `hydrate_actual`'s `allocations` and `dec` = `restart_status_for_alloc(target, Service, run, cur, generation).1`: `done` ⇔ `desired_to_stop`; `failed` ⇔ `run` ∧ `cur` exists ∧ `cur.terminal` = `Some(BackoffExhausted { .. })` ∧ ¬`dec` (the budget-exhausted terminal `FinalizeFailed` wrote, `workload_lifecycle.rs:1172-1178`, with no pending generation that places it again); `ended` ⇔ `run` ∧ `cur` is `Failed` / `Terminated` with `cur.terminal` = `None` ∧ ¬`dec` (a budget-exhausted failure whose `FinalizeFailed` has not committed its terminal, e.g. after a `serve` crash); `wait` ⇔ `run` ∧ neither `failed` nor `ended` |
 | `al(a).off` | O QPROJ-2 the placement lease's `cid` − `GUEST_CID_BASE`; −1 without one |
 | `al(a).pred`, `al(a).pst` | O QPROJ-2: the predecessor lease's offset (−1 and `none` without one) and its state: `held` ⇔ Admitted (the predecessor's VMM has exited; the restart dispatch has not cleaned it), `retiring` ⇔ Retiring (the restart dispatch's predecessor cleanup is held at the provisioner's `teardown`). The model holds at most one predecessor lease per workload |
 | `al(a).retry` | for a crash's `ended`, and for `Finalize`'s and a stop's `retiring`: O QPROJ-2W `restart_status_for_alloc(target, Service, run, row, generation).1`, where `row` is `hydrate_actual`'s row of the placement lease's allocation, or `cur` without a placement lease (a crash's row is terminal when its step returns: the exit observer wrote it; a stop's gives `run` false) and `run` and `generation` are `hydrate_desired`'s. For a launch clash's `retiring`: model-only — the successor has no row while its `teardown` is held (`cleanup_restart_successor` runs before the successor's `Failed` row write, `action_shim/mod.rs:2873-2886`, row at `:2960-2985`); the clash is hazard-only and unmapped, and the driver fails on it. `false` otherwise |
@@ -9446,7 +9249,7 @@ on `lease_conf_three`:
 | `al(a).chg` | model-only: the next placement charges one (the predecessor is a crash-class row). Not projected; its effect is projected through `att` after the next `Assign` |
 | `bootLeft` | stimulus |
 | `dev` | S `vsock_device_holders()` with O QPROJ-2: offset ↦ 0 if unheld; the lease's allocation if held by the VMM of that lease's launch; −2 if held by a VMM process the current pool leases nothing for (an orphan of the previous `serve` process) |
-| `up` | stimulus, not projected (architect 2026-10-19, `testing.md` checklist item 5): set and cleared by the driver's own `Restart` and `Crash` calls, so comparing it would compare the driver with itself. Its effects are projected at every step: `lease`, `cursor`, `al` and `att` from the composition while one exists; while none exists (from a `Crash` to the next boot's first step), `lease` and `cursor` are **not compared** — no pool exists to read (NO-SURVIVE), and a driver-chosen literal would be bookkeeping (`testing.md` checklist item 5); the model's own `Crash` empties them, so the next boot's first projected step compares them against the new pool — and `al` / `att` are read through the durable stores' hydration (round-9 S-4; round-10 refinement); `dev` across a crash |
+| `up` | stimulus, not projected (`testing.md` checklist item 5): set and cleared by the driver's own `Restart` and `Crash` calls, so comparing it would compare the driver with itself. Its effects are projected at every step: `lease`, `cursor`, `al` and `att` from the composition while one exists; while none exists (from a `Crash` to the next boot's first step), `lease` and `cursor` are **not compared** — no pool exists to read (NO-SURVIVE), and a driver-chosen literal would be bookkeeping (`testing.md` checklist item 5); the model's own `Crash` empties them, so the next boot's first projected step compares them against the new pool — and `al` / `att` are read from the durable stores that survive the crash (the node's `LocalIntentStore`, `SimObservationStore` and view store), through the same `hydrate_desired` / `hydrate_actual` / `restart_status_for_alloc` / `attempt_index_for_alloc` reads the next boot makes, over a `HydrationContext` the driver builds on those stores (S-4); `dev` is compared across a crash |
 | `reclaimed` | stimulus, not projected (same reason): set by the driver's own `Reclaim` call, which fails the step unless `vm_reclamation_boot::converge` returns `Ok`. Its effect is projected through `dev` (no orphan `−2` remains) and, for `Assign`'s guard (`AssignAfterReclaim`), through `lease` and `dev` together (no lease of a CID an orphan holds). For `Finalize` and `Redeploy` it is a fidelity guard on which no Safety property depends |
 | `g` | ghost (including `g.lastEnd`, below) |
 
@@ -9474,7 +9277,7 @@ Job: `WorkloadLifecycle` finalizes a Job's first natural exit, a crash
 included, and never places it again (`workload_lifecycle.rs:1035-1057`), so
 only a Service has the crash-then-place-again behaviour the model's
 `VmmCrash`, `GuestReset` and `Launch` clash steps assume. **T-5 ruling (architect,
-2026-10-18, revised the same day after the adversarial check):** the
+2026-10-18):** the
 production owner of placement is `WorkloadLifecycle`, so the composition
 runs it. Every lease the driver observes is taken and returned by the action
 shim dispatching that reconciler's actions; the driver never calls
@@ -9492,14 +9295,13 @@ workload and `Reclaim` run must take no lease. If the production reconciler
 does not decompose a step this way (for example, a crash's dispatch both
 releases and places in one tick), the step's comparison fails; that is a
 finding against the model's granularity and returns to DESIGN, not a driver
-fix. Model changes this requires, for the modeller:
+fix. The model's rules for this:
 
-1. (Kept from the first ruling.) `Crash` maps an allocation that was stopped
+1. `Crash` maps an allocation that was stopped
    and not yet released (`retiring` with `retry` false) to `done`, not
    `wait`: the stop sentinel survives a `serve` crash.
-2. (RESTART-SSOT, GH #324; scope revised 2026-10-18 after the adversarial
-   check.) **Budget exhaustion is in the model** (the modeller's choice,
-   accepted): `cid_lease` models the restart budget to and past its end,
+2. (RESTART-SSOT, GH #324.) **Budget exhaustion is in the model:**
+   `cid_lease` models the restart budget to and past its end,
    because the CID lease's behaviour differs there — an exhausted workload
    holds no lease and is never placed again until a `Redeploy` — and the
    boundary between the fifth and sixth failure is exactly where #324 was
@@ -9511,9 +9313,9 @@ fix. Model changes this requires, for the modeller:
      `Assign` sets the new allocation's count to `att + 1` when the
      predecessor is a crash-class row (`chg`), and to `att` under the
      platform-reclaim or the generation exemption; a first placement gets 0.
-     A failure does not change it. (The previous model incremented `att` at
-     the failure; that value is not any production allocation's count while
-     the lease is Retiring, so it has no owner accessor — withdrawn.)
+     A failure does not change it (a count raised at the failure would be no
+     production allocation's count while the lease is Retiring, so it would
+     have no owner accessor).
    - **The decision at a failure.** A crash-class failure (`VmmCrash`,
      `GuestReset`, a `Launch` clash; neither exemption) sets
      `retry = restart_decision(att, false, false)` = `att < CEIL` and
@@ -9543,12 +9345,10 @@ fix. Model changes this requires, for the modeller:
      workload's last ending, ghost `g.lastEnd(a)`, is a crash-class
      failure — never a reclamation and never a `Redeploy`), both in
      `Safety`.
-   The earlier bound (`RESTART_BACKOFF_CEILING − 1` = 4, `retry` always
-   true) is withdrawn: it stopped one failure short of the boundary and so
-   hid #324. The earlier statement that exhaustion is "outside the CID-lease
-   protocol" is withdrawn with it.
-3. **A leased but not yet launched workload at a `serve` crash** (the
-   modeller's underspecified point). The lease's allocation has no row (the
+   A bound of `RESTART_BACKOFF_CEILING − 1` = 4 with `retry` always true
+   would stop one failure short of the boundary and hide #324; exhaustion is
+   inside the CID-lease protocol.
+3. **A leased but not yet launched workload at a `serve` crash.** The lease's allocation has no row (the
    dispatch is held at `provision`; no dispatch writes a `Pending` row), so
    after the crash the workload's current allocation is its predecessor
    (or none). The model: the workload goes to `wait` with `att` = the
@@ -9560,8 +9360,7 @@ fix. Model changes this requires, for the modeller:
    is production today. For a **generation replacement** (a `Redeploy`'s
    placement leased at the crash) the model places it again — the behaviour
    GH #325 is to deliver; production today loses that restart (§ *Restart
-   decision*, "Defect RESTART-GEN-CRASH"; user ruling 2026-10-18: not fixed
-   in #295). Run `RedeployLeasedAtServeCrashIsPlacedAgain` and hazard
+   decision*, "Defect RESTART-GEN-CRASH"; not fixed in #295). Run `RedeployLeasedAtServeCrashIsPlacedAgain` and hazard
    `crashLosesPlacedGeneration` encode it, both **pending #325** (item 9).
    A predecessor lease of a leased successor is lost with the pool
    (`pred = −1`).
@@ -9581,8 +9380,7 @@ fix. Model changes this requires, for the modeller:
      (`pst = none`): `running` with `att = 4`; then `VmmCrash` (the fifth
      failure, at `att = 4`) gives `ended` with `retry`, `¬ex`, its lease
      still Admitted; `Assign` leases the successor with `att = 5`,
-     `pst = held`. (Replaces the modeller's
-     `LastFailureBelowCeilingIsRestarted`.)
+     `pst = held`.
    - `FailureAtCeilingExhaustsTheBudget` — continues: `Launch`, `Release`,
      `VmmCrash` at `att = 5` gives `ended` with `ex`; `Finalize` gives
      `retiring` with `ex`; `Release` gives `failed` with no lease; no
@@ -9607,12 +9405,12 @@ fix. Model changes this requires, for the modeller:
      leases the successor with `att = 1`, `pst = held`; `Crash` gives `wait`
      with `att = 0`, `chg` true and no lease (the predecessor lease is lost
      with the pool); `Restart`, `Assign` leases with `att = 1`.
-   - `ServeCrashDuringFinalizeFinalizesAfterRestart` (new) — from
+   - `ServeCrashDuringFinalizeFinalizesAfterRestart` — from
      `FifthCrashAtCeilingBoundaryIsPlacedAgain`: `Launch`, `Release`,
      `VmmCrash` (`ended`, `ex`), `Finalize` (`retiring`, `ex`); `Crash`
      gives `ended` with `ex` and no lease (the terminal was not written);
      `Restart`, `Finalize` gives `failed`.
-   - `StopOfAnEndedWorkloadReclaimsItsLease` (new) — `Assign`, `Launch`,
+   - `StopOfAnEndedWorkloadReclaimsItsLease` — `Assign`, `Launch`,
      `VmmCrash` (`ended`, lease Admitted); `Stop` gives `retiring` with
      `¬retry`, `¬ex`; `Release` gives `done` with no lease.
    - `RedeployLeasedAtServeCrashIsPlacedAgain` — `Assign`, `Launch`,
@@ -9630,99 +9428,55 @@ fix. Model changes this requires, for the modeller:
    a `lease_bug<Flag>` instance and, where a run is refuted, a
    `lease_conf_bug<Flag>` instance). Only checks in `checks.toml` are
    claimed:
-   - `retryOffByOne` — the full pre-fix accessor as the reconciler's
-     decision: exhaust iff `att + 1 ≥ CEIL`, with **no exemptions** (the
-     reclaim and generation exemptions both dropped). Refutes
-     `ExhaustsOnlyAtCeiling` (`cid-lease-hazard-retry-off-by-one`),
-     `ExhaustsOnlyOnACrashClassFailure` (`cid-lease-hazard-retry-off-by-one-reclaim`,
-     the dropped reclaim exemption) and the run
-     `FifthCrashAtCeilingBoundaryIsPlacedAgain`
-     (`cid-lease-hazard-retry-off-by-one-run`). Replaces the deleted
-     `budgetOffByOne`, which kept both exemptions.
+   - `retryOffByOne` — an off-by-one decision:
+     exhaust iff `att + 1 ≥ CEIL`, with **no exemptions** (the reclaim and
+     generation exemptions both dropped). Refutes `ExhaustsOnlyAtCeiling`
+     (`cid-lease-hazard-retry-off-by-one`).
    - `reclaimNotExempt` — only the platform-reclaim exemption removed
      (`att ≥ CEIL` exhausts after a reclamation). Refutes
-     `ExhaustsOnlyOnACrashClassFailure` (`cid-lease-hazard-reclaim-not-exempt`)
-     and the run `ServeCrashPlacesAWorkloadAtTheCeilingAgain`
-     (`cid-lease-hazard-reclaim-not-exempt-run`).
-   - `generationNotExempt` — only the generation exemption removed
-     (`Redeploy` of an exhausted workload does not place it). Refutes the
-     run `RedeployPlacesAnExhaustedWorkloadAgainWithItsCount`
-     (`cid-lease-hazard-generation-not-exempt-run`); `Safety` **holds** on it
-     (`cid-lease-hazard-generation-not-exempt-safety`, expect `holds`): the
-     hazard removes a transition rather than reaching a bad state, so the
-     named run is its only discriminator (stated, not a gap).
-   - `crashLosesPlacedGeneration` — today's production (GH #325): a
-     generation replacement leased at a `serve` crash returns to `done` /
-     `failed`. Refutes the run `RedeployLeasedAtServeCrashIsPlacedAgain`
+     `ExhaustsOnlyOnACrashClassFailure` (`cid-lease-hazard-reclaim-not-exempt`).
+   - `crashLosesPlacedGeneration` — production's behaviour today (GH
+     #325): a generation replacement leased at a `serve` crash returns to
+     `done` / `failed`. Refutes the run
+     `RedeployLeasedAtServeCrashIsPlacedAgain`
      (`cid-lease-hazard-crash-loses-placed-generation-run`, instance
      `lease_conf_bugCrashLosesPlacedGeneration`, which must enable the #325
-     window: `CFG = "conf_325"`, item 9); `Safety` **holds** on it
-     (`cid-lease-hazard-crash-loses-placed-generation-safety`). Pending #325.
+     window: `CFG = "conf_325"`, item 9). Pending #325.
    - `crashForgetsStop` — a `serve` crash forgets the stop intent. Refutes
-     `StoppedWorkloadNotPlaced` (`cid-lease-hazard-crash-forgets-stop`) and
-     the run `StoppedWorkloadStaysStoppedAcrossServeCrash`
-     (`cid-lease-hazard-crash-forgets-stop-run`).
-   - `releaseBeforeVmm` — refutes `NoLaunchClash`
-     (`cid-lease-hazard-release-before-vmm`) and `LeaseOutlivesVmm`
-     (`-outlives`). `assignBeforeReclaim` — refutes `NoLaunchClash`
-     (`cid-lease-hazard-assign-before-reclaim`) and `AssignAfterReclaim`
-     (`-order`). `resetReboots` — refutes `GuestResetEndsVmm`
+     `StoppedWorkloadNotPlaced` (`cid-lease-hazard-crash-forgets-stop`).
+   - `releaseBeforeVmm` — refutes `LeaseOutlivesVmm`
+     (`cid-lease-hazard-release-before-vmm-outlives`). `assignBeforeReclaim`
+     — refutes `NoLaunchClash` (`cid-lease-hazard-assign-before-reclaim`).
+     `resetReboots` — refutes `GuestResetEndsVmm`
      (`cid-lease-hazard-reset-reboots`). `assignSplit` — refutes
      `CidUnique` (`cid-lease-hazard-assign-split`).
      `reclaimNeverCompletes` — refutes `EventuallyPlaced`
      (`cid-lease-hazard-reclaim-never-completes`).
-   - **One hazard per item-7 rule (DR6-CLOSE).** Each new rule of item 7
-     gets an `OFF` flag; the exact definitions are in item 7's model
-     change. The two invariants they need are new in `Safety`:
-     `FailedHoldsNoLease` (a `failed` workload holds no lease: no offset
-     maps to it) and `NoUntrackedLease` (every leased offset is its
-     holder's placement lease `off` or predecessor lease `pred`; a lease no
-     workload tracks is a leaked CID).
-     - `vmmExitRetiresLease` — rule 7.1 (a VMM exit touches no lease; the
-       lease stays Admitted with no VMM): `vmmExit` (used by `VmmCrash` and
-       `GuestReset`) frees the lease in the same step as the device, so the
-       workload goes to `wait` with no lease if it retries, or to `ended`
-       with no lease if it is exhausted, and the restart keeps no
-       predecessor. Refutes the run `VmmCrashFreesItsCidAndPlacementRetries`
-       (`cid-lease-hazard-vmm-exit-retires-lease-run`, instance
-       `lease_conf_bugVmmExitRetiresLease`; it fails at the `.expect` right
-       after `VmmCrash`, `lease(0) = 1`); `Safety` **holds** on it
-       (`cid-lease-hazard-vmm-exit-retires-lease-safety`, instance
-       `lease_bugVmmExitRetiresLease`): the device and the lease are freed
-       together, so no CID leaks, and the conformance run is its
-       discriminator (stated, not a gap).
-     - `predecessorFirst` — rule 7.2 (the successor is leased before the
-       predecessor is retired): `Assign` from `ended` frees the old lease in
-       the same step and places with no predecessor lease. Refutes the run
-       `VmmCrashFreesItsCidAndPlacementRetries`
-       (`cid-lease-hazard-predecessor-first-run`, instance
-       `lease_conf_bugPredecessorFirst`); `Safety`
-       **holds** on it (`cid-lease-hazard-predecessor-first-safety`): the
-       order is production's dispatch structure, not a CID-safety rule, so
-       the conformance run is its discriminator (stated, not a gap).
-     - `predecessorCleanedAtAssign` — rule 7.3 (the predecessor is cleaned
-       only after the successor launches): `Assign` from `ended` sets
-       `pst = retiring` at once. Refutes the run
-       `VmmCrashFreesItsCidAndPlacementRetries`
-       (`cid-lease-hazard-predecessor-cleaned-at-assign-run`, instance
-       `lease_conf_bugPredecessorCleanedAtAssign`); `Safety` **holds**
-       (`-safety`), for the same reason.
+   - **Hazards of item 7's rules.** The two invariants item 7's rules need
+     are in `Safety`: `FailedHoldsNoLease` (a `failed` workload holds no
+     lease: no offset maps to it) and `NoUntrackedLease` (every leased
+     offset is its holder's placement lease `off` or predecessor lease
+     `pred`; a lease no workload tracks is a leaked CID). Rule 7.1 (a VMM
+     exit touches no lease), rule 7.2 (the successor is leased before the
+     predecessor is retired) and rule 7.3 (the predecessor is cleaned only
+     after the successor launches) are production's dispatch structure, not
+     CID-safety rules: `Safety` holds without them, and the conformance run
+     `VmmCrashFreesItsCidAndPlacementRetries` is their discriminator, so
+     they carry no hazard check.
      - `refusalKeepsPredecessor` — rule 7.4 (a pool refusal cleans the
        predecessor at once): `AssignRefused` leaves `pst = held`, the
        cleanup deferred to the next `Launch`. Refutes the run
        `PoolExhaustedRestartCleansThePredecessorThenPlaces`
        (`cid-lease-hazard-refusal-keeps-predecessor-run`, instance
        `lease_bugRefusalKeepsPredecessor`, `CFG = "ok"`: the run is a
-       `lease_ok` run); `Safety` **holds** (`-safety`) — the refusal is
-       reachable only on the three-offset instances, and a deferred
-       cleanup delays the predecessor's release without leaking it.
+       `lease_ok` run). `Safety` holds: the refusal is reachable only on the
+       three-offset instances, and a deferred cleanup delays the
+       predecessor's release without leaking it.
      - `terminalBeforeRelease` — rule 7.5 (`FinalizeFailed` retires and
        releases before it writes the terminal): `Finalize` with a lease
        writes `failed` at once, the lease released by a later `Release`.
        Refutes `FailedHoldsNoLease`
-       (`cid-lease-hazard-terminal-before-release`) and the run
-       `FailureAtCeilingExhaustsTheBudget`
-       (`cid-lease-hazard-terminal-before-release-run`).
+       (`cid-lease-hazard-terminal-before-release`).
      - `tickDuringPredecessorTeardown` — the step boundary of rule 7.3 (no
        tick of a workload runs while its dispatch is held at a predecessor
        `teardown`; the dispatch runs inside its tick): the `predRetiring`
@@ -9732,11 +9486,9 @@ fix. Model changes this requires, for the modeller:
        (`cid-lease-hazard-tick-during-predecessor-teardown`).
      - The boot-reclamation guard of `Finalize` (item 7) is not a new rule:
        it is the existing NO-SURVIVE rule "no tick before reclamation",
-       whose hazard `assignBeforeReclaim` already removes it for `Assign`.
+       whose hazard `assignBeforeReclaim` removes it for `Assign`.
        `assignBeforeReclaim` does not bypass `Finalize`'s guard.
-7. **Crash-class restart granularity (DR5-CLOSE, 2026-10-18; replaces the
-   previous `VmmCrash` → `Release` → `Assign` decomposition, which the
-   adversarial check refuted).** Production's steps and dispatch boundaries
+7. **Crash-class restart granularity (DR5-CLOSE).** Production's steps and dispatch boundaries
    for a crash-class failure of a Service below the ceiling, verified in
    `workload_lifecycle.rs` and `action_shim/mod.rs`:
    1. The VMM exits; the exit observer writes the terminal row. No dispatch
@@ -9764,7 +9516,7 @@ fix. Model changes this requires, for the modeller:
       backoff check (`workload_lifecycle.rs:1116-1179`); its dispatch
       retires the lease, tears it down and releases it, and only then writes
       the terminal (`action_shim/mod.rs:2146-2176`).
-   **Model change, for the modeller** (`cid_lease.qnt`):
+   **The model** (`cid_lease.qnt`):
    - `type A` gains `pred: int` (−1 none) and `pst: str`
      (`none` | `held` | `retiring`); `st` gains `ended` (the placement
      allocation ended crash-class; its lease, if any, still Admitted; no
@@ -9772,7 +9524,7 @@ fix. Model changes this requires, for the modeller:
      `pred(a)`.
    - `vmmExit(a)` (used by `VmmCrash` and `GuestReset`) frees the device
      and sets `st = ended` with `retry = restartDecision(a, false, false)`,
-     `ex = ¬retry`, `chg = retry`; the lease is unchanged. It no longer goes
+     `ex = ¬retry`, `chg = retry`; the lease is unchanged. It does not go
      to `retiring`.
    - `Assign(a)` is enabled from `wait`, or from `ended` with `retry` and
      `off ≥ 0`, with `pst ≠ retiring`, a free offset and the existing
@@ -9811,21 +9563,18 @@ fix. Model changes this requires, for the modeller:
      `ended ∧ retry` like `wait` and adds `weakFair(Release(a))` (a held
      predecessor teardown completes).
    - The runs `VmmCrashFreesItsCidAndPlacementRetries` and
-     `GuestResetEndsTheVmmAndPlacementRetries` become: `Assign`, `Launch`,
+     `GuestResetEndsTheVmmAndPlacementRetries` are: `Assign`, `Launch`,
      `VmmCrash` / `GuestReset` → `ended` with `retry`, `dev(0) = 0`,
      `lease(0) = 1` (and `¬g.rebooted`); `Assign` → `leased` at offset 1,
      `pred = 0`, `pst = held`, `att = 1`; `Launch` → `running`,
      `dev(1) = 1`, `pst = retiring`, `lease(0) = 1`; `Release` →
      `pst = none`, `lease(0) = 0`. The item 5 runs take the sequences
-     written there; the three new runs are added; checks.toml gains one
-     evaluator check per new run (`ci = true`).
-   - Every hazard keeps its flag; `retryOffByOne` and
-     `generationNotExempt` keep disabling `Redeploy` past the plain
-     decision.
-   **DR6-CLOSE model change** (`cid_lease.qnt`,
-   `hazard/cid_lease_hazards.qnt`, checks.toml, README; made on top of
-   `170717-1792355648.294` and recorded in `227088-1792372761.247`, 440 of
-   440, 64 `cid_lease` checks, every outcome as expected):
+     written there; each run is an evaluator check (`ci` per the
+     60-second rule).
+   - `retryOffByOne` disables the generation exemption of `Redeploy` along
+     with the plain decision.
+   **Guards, invariants and flags** (`cid_lease.qnt`,
+   `hazard/cid_lease_hazards.qnt`, `checks.toml`, README):
    - `Finalize(a)` gains the guard `reclaimed` (strict: `assignBeforeReclaim`
      does not bypass it). `Redeploy(a)` gains the guard `reclaimed` too (the
      handler is reachable only after the listener bind that follows
@@ -9837,15 +9586,7 @@ fix. Model changes this requires, for the modeller:
      `NoUntrackedLease = OFFS.forall(o => lease.get(o) != 0 implies { val b
      = lease.get(o); (hasOff(b) and al.get(b).off == o) or (hasPred(b) and
      al.get(b).pred == o) })`.
-   - Six `OFF` flags, each with its `BUG_*` val:
-     - `vmmExitRetiresLease`: in `vmmExit`, `lease(off) = 0` and `off = −1`
-       in the same step as the device release; the result is `wait` when
-       the decision retries and `ended` when it exhausts.
-     - `predecessorFirst`: in `Assign`'s `fromEnded` branch, free
-       `x.off` (`lease(x.off) = 0`) and take next-fit over the free offsets
-       with `x.off` included; `pred` and `pst` unchanged (`−1`, `none`).
-     - `predecessorCleanedAtAssign`: in `Assign`'s `fromEnded` branch,
-       `pst = "retiring"` instead of `"held"`.
+   - Three `OFF` flags, each with its `BUG_*` val and a hazard check:
      - `refusalKeepsPredecessor`: `AssignRefused` sets `pst = "held"`
        instead of `"retiring"`.
      - `terminalBeforeRelease`: `Finalize` with `off ≥ 0` sets
@@ -9855,36 +9596,22 @@ fix. Model changes this requires, for the modeller:
        sets `lease(off) = 0`, `off = −1`.
      - `tickDuringPredecessorTeardown`: the `not(predRetiring(a))` guard is
        dropped from `Assign`, `Stop` and `Finalize`.
-   - Instances (`hazard/cid_lease_hazards.qnt`): `lease_bugVmmExitRetiresLease`,
-     `lease_conf_bugVmmExitRetiresLease`, `lease_bugPredecessorFirst`,
-     `lease_conf_bugPredecessorFirst`, `lease_bugPredecessorCleanedAtAssign`,
-     `lease_conf_bugPredecessorCleanedAtAssign`,
-     `lease_bugRefusalKeepsPredecessor` (`CFG = "ok"`, `REC = false`; it
-     carries both its `Safety` and its run check), `lease_bugTerminalBeforeRelease`,
-     `lease_conf_bugTerminalBeforeRelease`,
+   - Instances (`hazard/cid_lease_hazards.qnt`):
+     `lease_bugRefusalKeepsPredecessor` (`CFG = "ok"`, `REC = false`),
+     `lease_bugTerminalBeforeRelease` and
      `lease_bugTickDuringPredecessorTeardown`. The `lease_bug*` instances
-     use `CFG = "ok"`, the `lease_conf_bug*` instances `CFG = "conf_ok"`,
-     all with `REC = false` (the `conf_ok` guard of item 9 applies only with
-     `REC`).
-   - Checks (all TLC exhaustive or evaluator runs, `ci` per the 60-second
-     rule): `cid-lease-hazard-vmm-exit-retires-lease-safety` (holds),
-     `cid-lease-hazard-vmm-exit-retires-lease-run` (violation),
-     `cid-lease-hazard-predecessor-first-safety` (holds),
-     `cid-lease-hazard-predecessor-first-run` (violation),
-     `cid-lease-hazard-predecessor-cleaned-at-assign-safety` (holds),
-     `cid-lease-hazard-predecessor-cleaned-at-assign-run` (violation),
-     `cid-lease-hazard-refusal-keeps-predecessor-safety` (holds),
-     `cid-lease-hazard-refusal-keeps-predecessor-run` (violation),
+     use `CFG = "ok"`, all with `REC = false` (the `conf_ok` guard of item 9
+     applies only with `REC`).
+   - Checks (TLC exhaustive or evaluator runs, `ci` per the 60-second
+     rule): `cid-lease-hazard-refusal-keeps-predecessor-run` (violation),
      `cid-lease-hazard-terminal-before-release` (`FailedHoldsNoLease`,
-     violation), `cid-lease-hazard-terminal-before-release-run`
-     (`FailureAtCeilingExhaustsTheBudget`, violation),
-     `cid-lease-hazard-tick-during-predecessor-teardown`
-     (`NoUntrackedLease`, violation), and the four item-9 checks.
-   - If a `-safety` check that the delta expects to hold is violated, the
-     counterexample is a finding for the architect, not an `expect` change.
-     None was: every check of `227088-1792372761.247` matched its `expect`.
-8. **Every `cid_lease` name, spec ↔ delta** (current record
-   `707089-1792512180.793`, 65 `cid_lease` checks). Runs (25):
+     violation), `cid-lease-hazard-tick-during-predecessor-teardown`
+     (`NoUntrackedLease`, violation), and the four item-9 checks. A hazard
+     is one check per decision, not one per clause or form. If a check
+     that the delta expects to hold is violated, the counterexample is a
+     finding for the architect, not an `expect` change.
+8. **Every `cid_lease` name, spec ↔ delta** (44 `cid_lease` checks: 28 runs, 12 hazards and
+   4 TLC checks). Runs (25):
    `AssignThenVmmOpensItsOwnDevice`, `ReleaseWhileTheVmmRunsIsRefused`,
    `StopExitsTheVmmThenReleaseIsLast`, `NextFitContinuesFromTheCursor`,
    `GuestResetEndsTheVmmAndPlacementRetries`,
@@ -9916,17 +9643,15 @@ fix. Model changes this requires, for the modeller:
    `cid_lease` with `OFF = Set()`, `CFG = "ok"`, `REC = true`, so the run is
    replayed by the driver's `#[quint_test]`; check
    `cid-lease-run-conf-three-pool-exhausted-restart-cleans-the-predecessor-then-places`,
-   evaluator, expect holds, `ci = true`, held in 2.0 s in the current
-   record `707089-1792512180.793`); every other run is
-   checked on `lease_conf_ok` and is a `#[quint_test]` of the driver. Hazard flags (16): `releaseBeforeVmm`,
+   evaluator, expect holds, `ci = true`); every other run is
+   checked on `lease_conf_ok` and is a `#[quint_test]` of the driver. Hazard flags (12, each with a
+   hazard check): `releaseBeforeVmm`,
    `assignBeforeReclaim`, `resetReboots`, `reclaimNeverCompletes`,
    `crashForgetsStop`, `retryOffByOne`, `reclaimNotExempt`,
-   `generationNotExempt`, `crashLosesPlacedGeneration`, `assignSplit`, and
-   the DR6-CLOSE flags `vmmExitRetiresLease`, `predecessorFirst`, `predecessorCleanedAtAssign`,
-   `refusalKeepsPredecessor`, `terminalBeforeRelease`,
-   `tickDuringPredecessorTeardown`.
-   Witnesses (expected violated, `lease_ok`): `WitnessNoRunning`,
-   `WitnessNoOrphan`, `WitnessNoReclaim`, `WitnessNoExhaustion`. Invariants:
+   `crashLosesPlacedGeneration`, `assignSplit`, `refusalKeepsPredecessor`,
+   `terminalBeforeRelease` and `tickDuringPredecessorTeardown`.
+   There are no non-vacuity witness checks: named runs reach every state.
+   Invariants:
    `CidUnique`, `NoLaunchClash`, `LeaseOutlivesVmm`, `AssignAfterReclaim`,
    `GuestResetEndsVmm`, `StoppedWorkloadNotPlaced`, `ExhaustsOnlyAtCeiling`,
    `ExhaustsOnlyOnACrashClassFailure`, `FailedHoldsNoLease`,
@@ -9945,10 +9670,9 @@ fix. Model changes this requires, for the modeller:
    not(al.get(a).st == "leased" and g.pendingGen.get(a) != ""))`. The new
    main `lease_conf_325` (`CFG = "conf_325"`, `REC = true`) keeps the window
    and carries the run `RedeployLeasedAtServeCrashIsPlacedAgain`
-   (the check `cid-lease-run-conf-ok-redeploy-leased-at-serve-crash-is-placed-again`
-   is renamed `cid-lease-run-conf-325-redeploy-leased-at-serve-crash-is-placed-again`
-   and moves to it; its DISTILL `#[quint_test]` is
-   `#[ignore = "pending #325"]`), and
+   (the check
+   `cid-lease-run-conf-325-redeploy-leased-at-serve-crash-is-placed-again`;
+   its DISTILL `#[quint_test]` is `#[ignore = "pending #325"]`), and
    `lease_conf_bugCrashLosesPlacedGeneration` uses `CFG = "conf_325"` so its
    run fails for the hazard's reason, not for the guard. `lease_five`
    (`REC = false`) and the model-checking instances keep the window. When
@@ -9972,13 +9696,11 @@ fix. Model changes this requires, for the modeller:
    on `lease_conf_325`, expect `holds`, and
    `cid-lease-run-conf-ok-crash-is-enabled-in-the-325-window-without-the-guard`
    on `lease_conf_ok`, expect `violation`. All four are evaluator checks,
-   with their expected outcomes in `227088-1792372761.247`,
-   `570179-1792418105.836` and the current record
-   `707089-1792512180.793`. When
+   with their expected outcomes in `evidence/summary.json`. When
    #325 lands, all four are deleted with the guard.
 
 **`owner_flows` `flows_conf`, host side** (`overdrive-control-plane`; the
-model-checking instances `flows_ok`, `flows_two` and `flows_sess` share this
+model-checking instances `flows_ok`, `flows_one` and `flows_sess` share this
 map and are not replayed)
 
 | Var | Source |
@@ -10107,14 +9829,14 @@ paired with V-EV-END, V-EV-CTL, V-EV-PAIR and the module's Tier-3 suite.
 
 | Var (at side `s`) | Source |
 |---|---|
-| `ctx(s)` | O `open` while the owner holds a context; `released` after the owner's context was released (`CtxRelease`, the owner's death included) — S `SimFlowForwarder` context state, arbiter. `gone` (round 13 classification) is **stimulus-only, not projected**: the model writes it only in `VmmExit`, for side `g`, in the same step that sets the stimulus `vmUp` false (`fwd_pair.qnt:1084-1091`), and nothing sets `vmUp` true again after `Init` (`:516`) or reopens side `g` (`Reopen` requires `s == "h"`, `:667`), so in every reachable state `ctx(g) = gone ⇔ ¬vmUp`; round 14 makes this a checked invariant of the spec, `CtxGoneIffVmDown` (`ctx.get("g") == "gone" iff not(vmUp)`, in `Safety` and `DgramSafety`, with the non-vacuity witness checks `fwd-pair-witness-vmm-exit` on `pair_ok` (round 14) and `fwd-pair-dgram-witness-vmm-exit` on `pair_dgram` (round 15)), rather than an argued one; it is recorded in the current record `707089-1792512180.793` (458 of 458; both witnesses violated as expected, § *Status*). **What the init driver compares after `VmmExit` (round 14).** The same model step also writes `pr(g).ph = gone` (unless the flow had already `ended` or been `refused`) and `ep(g) = gone` (`:1088-1089`). After `VmmExit` no guest kernel or guest owner exists to observe, so the init driver gates on the `VmmExit` stimulus it applied itself: from that step on it compares none of `ctx(g)`, the `pr(g)` fields, or the guest-side socket view (`vs(g)` and the guest-held halves' facts in `dir(d)`). Stimulus is driven and never projected (`vmUp` is listed as stimulus below), so the driver's own record that it applied `VmmExit` is the stimulus, not a projection from its bookkeeping (`testing.md` checklist item 5). Host-side variables (`ctx(h)`, `pr(h)`, `vs(h)`, which `VmmExit` sets `err`, and the host halves) are compared at every step as before. Before `VmmExit`, `ctx(g)` is `open` from O and `released` from the arbiter; `gone` is never projected from a driver flag (the round-10 `driver.gone` read goes). Side `h` never reaches `gone` |
-| `pr(s)` `.ph`, `.out`, `.cause`, `.errno` | O the flow's phase (QPROJ-3 `guest_flows[key]` / `dials[id]` / `datagrams[id]`; QPROJ-5 `flows[id]` / `accepted[id]` / `slots`), and the end record the owner consumed, read through the owner's `last_consumed_end` (host `flow_observation()`, guest `guest_observation()`; D-11, architect 2026-10-19): when its `id` is the flow's pair or watch id, `out` / `cause` / `errno` are its `outcome`, its `SocketError` errno included (QPROJ-8). The driver never compares a record it took from `SimGuestFlowIo` / `SimGuestOwnerIo` itself |
+| `ctx(s)` | O `open` while the owner holds a context; `released` after the owner's context was released (`CtxRelease`, the owner's death included) — S `SimFlowForwarder` context state, arbiter. `gone` is **stimulus-only, not projected**: the model writes it only in `VmmExit`, for side `g`, in the same step that sets the stimulus `vmUp` false (`fwd_pair.qnt:1084-1091`), and nothing sets `vmUp` true again after `Init` (`:516`) or reopens side `g` (`Reopen` requires `s == "h"`, `:667`), so in every reachable state `ctx(g) = gone ⇔ ¬vmUp`; this is a checked invariant of the spec, `CtxGoneIffVmDown` (`ctx.get("g") == "gone" iff not(vmUp)`, in `Safety` and `DgramSafety`; no witness check stands for it on the stream main because the named run `VmmExitAbortsHostHalf` reaches the state, and the datagram witness `fwd-pair-dgram-witness-vmm-exit` on `pair_dgram` is kept), rather than an argued one. **What the init driver compares after `VmmExit`.** The same model step also writes `pr(g).ph = gone` (unless the flow had already `ended` or been `refused`) and `ep(g) = gone` (`:1088-1089`). After `VmmExit` no guest kernel or guest owner exists to observe, so the init driver gates on the `VmmExit` stimulus it applied itself: from that step on it compares none of `ctx(g)`, the `pr(g)` fields, or the guest-side socket view (`vs(g)` and the guest-held halves' facts in `dir(d)`). Stimulus is driven and never projected (`vmUp` is listed as stimulus below), so the driver's own record that it applied `VmmExit` is the stimulus, not a projection from its bookkeeping (`testing.md` checklist item 5). Host-side variables (`ctx(h)`, `pr(h)`, `vs(h)`, which `VmmExit` sets `err`, and the host halves) are compared at every step as before. Before `VmmExit`, `ctx(g)` is `open` from O and `released` from the arbiter; `gone` is never projected from a driver flag (the driver keeps no `gone` flag). Side `h` never reaches `gone` |
+| `pr(s)` `.ph`, `.out`, `.cause`, `.errno` | O the flow's phase (QPROJ-3 `guest_flows[key]` / `dials[id]` / `datagrams[id]`; QPROJ-5 `flows[id]` / `accepted[id]` / `slots`), and the end record the owner consumed, read through the owner's `last_consumed_end` (host `flow_observation()`, guest `guest_observation()`; D-11): when its `id` is the flow's pair or watch id, `out` / `cause` / `errno` are its `outcome`, its `SocketError` errno included (QPROJ-8). The driver never compares a record it took from `SimGuestFlowIo` / `SimGuestOwnerIo` itself |
 | `pr(s)` `.rec`, `.nrec`, `.closed`, `.byRel` | `rec = read` ⇔ O the owner consumed the record: `last_consumed_end.id` is the flow's pair or watch id (the flow has left its table, `held_flows` dropped); `rec = queued` ⇔ S the flow's record is in the end queue of the context that attached it — the row of `SimForwarderDevice::contexts()` at the flow's `cgen` (row index `cgen − 1`; the host device has one owner per run), keyed by the flow's `ForwardId` in `SimContextState::queued_ends`, released contexts included, so a record left unread in a replaced context is compared (D-4); `rec = none` otherwise. `nrec` = 1 if the owner consumed the flow's record, plus the number of its records in that row's `queued_ends`. `closed` ⇔ O the flow left the owner's table and the S vsock half (`vsock_half`, row `vs(s)`) is closed. `byRel` ⇔ the flow left the owner's table and no record was produced for it — the owner consumed none and the row at its `cgen` holds none, or it was never attached (its context's release with the pair live, a close of a flow it never attached, or a `HalfEnded` refusal); a flow the `Forwarder` recovery dropped after an owner abort had queued its record is not `byRel` (its record is `queued` in the replaced context) — S arbiter for the record's absence |
-| `pr(s).cgen`, `gen(s)`, `oldCtx(s)` | QPROJ-8, "The second iteration's variables" |
+| `pr(s).cgen`, `gen(s)`, `oldCtx(s)` | QPROJ-8, "Context-generation variables" |
 | `dir(d)` `.srcEnd`, `.srcShut`, `.dstEnd`, `.dstShut` | O `FlowForwarder::pair_state(pair)` of the side holding the half: `source_end`, `target_shut` (QPROJ-8) |
 | `dir(d)` `.q0`, `.q1`, `.q2`, `.got`, `.eof`, `.rst`, `.shutRd`, `.wr`, `.wfin` | S the Sim sockets' queues and the far readers' and writers' facts, arbiters |
 | `vs(s)` `.ps`, `.sent`, `.err`, `.cls`, `.st`, `.sshut` | S the per-half facts of side `s`'s vsock half, arbiter, read on the half's shared `SimSocket` (D-5): `.ps` `received_shutdown()`, `.sent` `sent_shutdown()`, `.err` `sk_err()`, `.cls` `recorded_class()`, `.st` `vsock_state()`, `.sshut` `own_send_shut()`. Host side: the half is `SimGuestFlowIo::vsock_half(flow)` (QPROJ-7), which keeps returning it after the owner closed it; guest side: the handle `SimGuestOwnerIo` issued for the flow's `V_g`, kept the same way. After the owner's close the accessors report the half's facts at its close |
-| `tcpErr(s)`, `attRes(s)`, `attEnded(s)`, `strmAbort`, `hres`, `guestAbortSent` | QPROJ-8, "The third iteration's variables" |
+| `tcpErr(s)`, `attRes(s)`, `attEnded(s)`, `strmAbort`, `hres`, `guestAbortSent` | QPROJ-8, "Ended-half, watch and stream variables" |
 | `ctl(d)`, `terr(s)`, `ep(s)`, `dg(d)`, `vmUp`, `mode` | S scripted facts / stimulus |
 | `loss`, `lost`, `tcls`, `ucls`, `vs(s)` `.att`, `.clsAt`, `.ncls`, `.snap`, `.misc`, `gh` (every field except `gh.unclassified`, which is O `inventory().unclassified_eof`), `conf_step` | model-only (QPROJ-8) |
 
@@ -10125,27 +9847,27 @@ paired with V-EV-END, V-EV-CTL, V-EV-PAIR and the module's Tier-3 suite.
 | `Abort(s)` | side `s`'s owner aborts the id (teardown, quiescence, session loss): `FlowForwarder::abort` |
 | `CtxRelease(s)` | side not under test: the Sim context's release (`SimFlowForwarder::release`, scripted). Side under test `h`, one mapping chosen by the state, never by what follows: with no host pair or watch live, the `Forwarder` recovery's context close — the driver damages `Forwarder` with a scripted context `Io` failure, the supervisor's repair runs `abort_all` (a no-op, nothing is live) and `close_forwarder`, and its `open_forwarder` is held by the seam until `Reopen(h)`; with a pair or watch live, the host owner's death — the driver drops the host owner with its context, after which the host owner's O facts are not projected (no owner exists; production's successor is a new `serve` process whose boot reclamation ends the VM, NO-SURVIVE) and only S and C facts are. Side under test `g`: the driver drops the guest owner with its context (the guest owner is PID 1; its death ends the VM, RESET-EXIT) (D-3 to D-5) |
 | `TakeEnd(s)` | the owner's dispatch on its context's readiness: `take_end` and the flow's release; on the host this one dispatch also closes the flow's descriptors (the host's `OwnerClose`, below) |
-| `OwnerClose(s)` | guest: the owner closes the flow's descriptors after the record (datagram: the slot-queue discard), a dispatch of its own. Host: not a separate owner step — the host owner closes in the dispatch that reads the record, so the model takes `OwnerClose(h)` together with `TakeEnd(h)` as one step (model change below) |
+| `OwnerClose(s)` | guest: the owner closes the flow's descriptors after the record (datagram: the slot-queue discard), a dispatch of its own. Host: not a separate owner step — the host owner closes in the dispatch that reads the record, so the model takes `OwnerClose(h)` together with `TakeEnd(h)` as one step (rule 1 of the host-side projection pins below) |
 | `Hop0(d)`, `Hop1(d)`, `HopEnd0(d)`, `HopEnd1(d)`, `VCtl(d)`, `FwdErr(s)` | `SimFlowForwarder` runs and callbacks (scripted) |
 | `Write`, `Fin`, `Read`, `ReadEof`, `ShutRd`, `VmmExit`, `TrailingRst`, `SendDg`, `DRead`, `UdpBlock`, `UdpUnblock`, `UdpErr` | Sim socket and far-end faults (scripted); `VmmExit` is `SimVmm` exit, which sets the host half's `sk_err` and state — the first of the orphan sweep's two steps; its `sk_error_report` is the separate `FwdErr(h)` (T-9); `ReadEof` on the dialer is the stream's resolved result |
-| `TcpRst(s, after_fin)` (T-1; replaces `EpRst`) | Sim: the far TCP peer resets after or before its FIN; `SimFlowForwarder` runs the half's `sk_error_report` in the same step. `after_fin` equals the far writer's FIN in the state; a trace names it explicitly |
+| `TcpRst(s, after_fin)` (T-1) | Sim: the far TCP peer resets after or before its FIN; `SimFlowForwarder` runs the half's `sk_error_report` in the same step. `after_fin` equals the far writer's FIN in the state; a trace names it explicitly |
 | `Attach(s)` with an ended half (T-4) | the same owner dispatch as `Attach(s)`; `SimFlowForwarder::attach` / `watch` returns `HalfEnded { side, errno }` from the half's scripted state, and the owner ends the flow in that dispatch |
 | `Abort(h)` on a watch (T-5) | the host owner's stream abort (quiescence's first hold, teardown, session loss): `FlowForwarder::abort(watch)` and the owner's `Abort { flow }` write, in one owner step; the pending stream call the driver holds returns |
 | `GuestAbort(g)` (T-5) | the guest owner's `dispatch_next` of `Abort { flow }`: `FlowForwarder::abort(pair)` |
-| `HolderDrop(h)` (T-6; replaces `DialerDrop`) | the driver drops its `GuestStream` |
+| `HolderDrop(h)` (T-6) | the driver drops its `GuestStream` |
 | `HolderEnd(h)` (T-5, T-9) | the driver's own `read` on its `GuestStream`'s `V_h` in the Sim vsock socket, which scripts the end fact (`Eof`, or `Err`); not a driving port of the owner |
-| `Reopen(s)` (second iteration) | the host owner's `Forwarder` recovery: `abort_all` (`Abort` in the model), the drop of the old `KernelFlowForwarder` (`CtxRelease`), `KernelFlowForwarder::open()` and `probe()` (`Reopen`) |
-| `CloseUnattached(g)` (second iteration) | the guest owner's close of a flow it has not attached (`dispatch_next`) |
+| `Reopen(s)` | the host owner's `Forwarder` recovery: `abort_all` (`Abort` in the model), the drop of the old `KernelFlowForwarder` (`CtxRelease`), `KernelFlowForwarder::open()` and `probe()` (`Reopen`) |
+| `CloseUnattached(g)` | the guest owner's close of a flow it has not attached (`dispatch_next`) |
 | `DgHalfClose(d)` (T-7) | a scripted vsock fact of the Sim adapter: a datagram-mode `0x2` from the peer, which no owner path produces (U-EV-5, U-EV-9) |
 | `DropRecord(s)`, `AttachRead(s)` / `AttachHook(s)`, `UnclassifiedEof(s)`, `WatchRecord(h)`, `SendShutLate(s)` | hazard-only (`UnclassifiedEof` is otherwise the `unclassified_eof` counter of `inventory()`) |
 
-**Host-side projection pins (D-3 to D-5, architect 2026-10-18).** The host
+**Host-side projection pins (D-3 to D-5).** The host
 driver's per-step comparison covers `strmAbort` (the dial-entry lifetime
 rule), `pr(h).rec` / `.nrec` across a replaced context (the device's
 context table with its end queues), `attRes(h)` after the flow has left the
 owner's table (`forwarder_attached` / `forwarder_attach_ended`), and
-`vs(h)` in full (`vsock_half`). Two model changes follow from the
-production steps, for the modeller to make in `fwd_pair.qnt` and record:
+`vs(h)` in full (`vsock_half`). Two rules of `fwd_pair.qnt` follow from the
+production steps:
 
 1. **Host close with the record.** On side `h` outside watch mode (in watch
    mode the holder owns `V_h` and `OwnerClose` is not enabled), `TakeEnd(h)` also performs
@@ -10176,7 +9898,7 @@ node of two flow places)
 | `slot(s).own` | O `cids[cid].held_flows` for every allocation's CID, and the place ↔ flow bijection (a flow holds a node flow place from admission to the owner's read of its end record) with O `cids[cid].alloc` of the CID holding the flow; a place with no held flow ↦ 0 |
 | `slot(s).st` | `active` ⇔ the flow is held and `pair_state` shows no direction ended; `half` ⇔ one direction has `source_end = Some(Clean)` and `target_shut`, the other open; `ended` ⇔ the pair's end record is queued and not yet read (S `SimFlowForwarder` `queued_ends`, arbiter); `free` ⇔ no flow (QPROJ-3, QPROJ-8) |
 | `slot(s).fwd` | S the pair is live in `SimFlowForwarder` (attached, no end record queued), arbiter — model-only for the `clash` ghost |
-| `endq` — the places whose end records are queued and not yet read, in queue order (D-12, architect 2026-10-19) | S `SimFlowForwarder` `queued_ends` of the context row the owner holds, in queue order, each record's `ForwardId` relabelled to its place through the place ↔ flow bijection — the same arbiter `slot(s).st = ended` reads, so the two cannot disagree. Tier-3 pair: `take_end` returns the oldest queued record (the `FlowForwarder` contract); the module suite (EVMOD-REC, DELIVER step 4) carries the new cell `take_end_returns_records_in_end_order`: pair A is ended and its record observed queued (the context's readiness and `OVD_FWD_INVENTORY.queued_ends` = 1) before pair B is ended, so the queue order is fixed by an explicit sequence, not by EVMOD-WQ's per-CPU completion; then two `take_end` calls return A's record, then B's, compared in order. The existing `end_record_abi.rs:69-108` sorts the ids before comparing and does not discharge this. `ReadEnd` takes the head of `endq` |
+| `endq` — the places whose end records are queued and not yet read, in queue order (D-12) | S `SimFlowForwarder` `queued_ends` of the context row the owner holds, in queue order, each record's `ForwardId` relabelled to its place through the place ↔ flow bijection — the same arbiter `slot(s).st = ended` reads, so the two cannot disagree. Tier-3 pair: `take_end` returns the oldest queued record (the `FlowForwarder` contract); the module suite (EVMOD-REC, DELIVER step 4) carries the cell `take_end_returns_records_in_end_order`: pair A is ended and its record observed queued (the context's readiness and `OVD_FWD_INVENTORY.queued_ends` = 1) before pair B is ended, so the queue order is fixed by an explicit sequence, not by EVMOD-WQ's per-CPU completion; then two `take_end` calls return A's record, then B's, compared in order. The existing `end_record_abi.rs:69-108` sorts the ids before comparing and does not discharge this. `ReadEnd` takes the head of `endq` |
 | `g` | ghost |
 
 | Action | Production call or fault |
@@ -10255,7 +9977,7 @@ plus the leaked holds (D-UP-3).
 | `Damage(c)` | seam: component `c`'s task exits |
 | `OpenFlow` | seam: a guest-opened flow is admitted and paired |
 | `Crash` | drop the composition |
-| `RestartWith(writeOk)` (`Restart`) | recompose through the in-crate composed rig (round-11 correction): phase 1 over the rig's `SimGuestFlowIo`, then `boot_server` with `GuestNetworkSource::Composed { io, dial }` over that seam and the rig's `BootAdapters` (its intercept the `SimMtlsIntercept` the action maps), which is the same `boot_server` `run_server` calls; boot step 8's table transaction on that intercept scripted to succeed or fail; a failure makes `boot_server` return the typed refusal `ControlPlaneError::MtlsBoot(MtlsBootError::SharedOwner { .. })` with `health.startup.refused`, reason `mtls.shared_owner` (ADR-0184), and the driver tries again. Not `run_server`: it takes only `GuestFlowAdapter::host()`, so through it `Damage(c)` and `RepFail(c)` could not be scripted at the seam |
+| `RestartWith(writeOk)` (`Restart`) | recompose through the in-crate composed rig: phase 1 over the rig's `SimGuestFlowIo`, then `boot_server` with `GuestNetworkSource::Composed { io, dial }` over that seam and the rig's `BootAdapters` (its intercept the `SimMtlsIntercept` the action maps), which is the same `boot_server` `run_server` calls; boot step 8's table transaction on that intercept scripted to succeed or fail; a failure makes `boot_server` return the typed refusal `ControlPlaneError::MtlsBoot(MtlsBootError::SharedOwner { .. })` with `health.startup.refused`, reason `mtls.shared_owner` (ADR-0184), and the driver tries again. Not `run_server`: it takes only `GuestFlowAdapter::host()`, so through it `Damage(c)` and `RepFail(c)` could not be scripted at the seam |
 | `RecQuiesce(c)` | `SimClock` to the supervisor's audit tick (it calls `quiesce()` for `c`'s recovery) |
 | `RecRepair(c)` / `RepFail(c)` | the repair (`converge_shared` for `c`) returns `Ok` / a scripted `Err` |
 | `RecRedo(c)` | damage re-applied before the post-repair audit |
@@ -10271,7 +9993,8 @@ Each driver pins with `#[quint_test(main = <its conformance main>,
 max_samples = 1)]` every named run of its module's critical scenarios, and
 runs `#[quint_run]` randomized traces on the same conformance main with the
 seed printed on failure (D-UP-1; QPROJ-1). Every run below is checked in
-`checks.toml` on that main (`backend = "evaluator"`, `expect = "holds"`).
+`checks.toml` on that main (`backend = "evaluator"`, `expect = "holds"`) and
+holds in `evidence/summary.json`.
 The runs and the scenarios they encode
 (`specs/quint/guest-flow-owner/README.md` § "Critical scenarios ↔ named
 runs"):
@@ -10330,10 +10053,10 @@ runs"):
 | `cid_lease` (`lease_conf_ok`) | next-fit assign, the VMM opens its own device | `AssignThenVmmOpensItsOwnDevice`, `NextFitContinuesFromTheCursor` |
 | | release while the VMM runs is refused; stop exits the VMM, release is last | `ReleaseWhileTheVmmRunsIsRefused`, `StopExitsTheVmmThenReleaseIsLast` |
 | | guest reset ends the VMM; the successor is leased while the predecessor's lease is held, and the predecessor is released after the successor's launch (RESET-EXIT; DR5-CLOSE granularity) | `GuestResetEndsTheVmmAndPlacementRetries` |
-| | VMM crash frees its CID's device and leaves its lease Admitted; the restart dispatch cleans the predecessor's lease after the successor (DR5-CLOSE; hazards `vmmExitRetiresLease`, `predecessorFirst`, `predecessorCleanedAtAssign`) | `VmmCrashFreesItsCidAndPlacementRetries` |
+| | VMM crash frees its CID's device and leaves its lease Admitted; the restart dispatch cleans the predecessor's lease after the successor (DR5-CLOSE; item 6: rules 7.1 to 7.3 carry no hazard check) | `VmmCrashFreesItsCidAndPlacementRetries` |
 | | a crashed workload that is stopped has its lease reclaimed and stays stopped | `StopOfAnEndedWorkloadReclaimsItsLease` |
 | | a stopped workload stays stopped across a `serve` crash and is placed again only after a `Redeploy` (T-5; hazard `crashForgetsStop`) | `StoppedWorkloadStaysStoppedAcrossServeCrash`, `StoppedWorkloadIsPlacedAgainOnlyAfterRedeploy` |
-| | RESTART-SSOT (GH #324): the fifth crash-class failure (`att = 4`) is placed again; the sixth exhausts the budget and the workload is never placed again until a `Redeploy`, which places it with its count (re-sequenced by DR5-CLOSE; current record `707089-1792512180.793`; hazards `retryOffByOne`, `generationNotExempt`, `terminalBeforeRelease`) | `FifthCrashAtCeilingBoundaryIsPlacedAgain`, `FailureAtCeilingExhaustsTheBudget`, `RedeployPlacesAnExhaustedWorkloadAgainWithItsCount` |
+| | RESTART-SSOT (GH #324): the fifth crash-class failure (`att = 4`) is placed again; the sixth exhausts the budget and the workload is never placed again until a `Redeploy`, which places it with its count (DR5-CLOSE; hazards `retryOffByOne` and `terminalBeforeRelease`) | `FifthCrashAtCeilingBoundaryIsPlacedAgain`, `FailureAtCeilingExhaustsTheBudget`, `RedeployPlacesAnExhaustedWorkloadAgainWithItsCount` |
 | | RESTART-SSOT: a reclaimed workload at and past the ceiling is placed again and keeps its count (hazard `reclaimNotExempt`) | `ServeCrashPlacesAWorkloadAtTheCeilingAgain`, `ReclaimedWorkloadPastTheCeilingIsPlacedAgain` |
 | | a `serve` crash while `FinalizeFailed` is held before its terminal write finalizes again after the restart (DR5-CLOSE) | `ServeCrashDuringFinalizeFinalizesAfterRestart` |
 | | a successor leased but not launched at a `serve` crash is placed again with the same count | `ServeCrashBeforeLaunchPlacesTheSuccessorAgainWithItsCount` |
@@ -10341,7 +10064,7 @@ runs"):
 | | orphan exits by itself before reclamation; an unlaunched lease leaves nothing | `OrphanExitsByItselfBeforeReclamation`, `ServeCrashWithUnlaunchedLeaseLeavesNothingToReclaim` |
 | | two orphans: one boot reclamation (one `converge` call) kills both before any assign (D-UP-19) | `ReclamationKillsEveryOrphanBeforeAssign` |
 | `cid_lease` (`lease_conf_325`) | a generation replacement leased at a `serve` crash is placed again — **pending #325**: production loses it today (GH #325, not fixed in #295); `#[ignore = "pending #325"]`; hazard `crashLosesPlacedGeneration` | `RedeployLeasedAtServeCrashIsPlacedAgain` |
-| `cid_lease` (`lease_ok`; replayed on the recording main `lease_conf_three`, D-18, recorded in `707089-1792512180.793`) | a pool refusal of a successor cleans the predecessor's lease, then the workload is placed with its charged count (hazard `refusalKeepsPredecessor`) | `PoolExhaustedRestartCleansThePredecessorThenPlaces` |
+| `cid_lease` (`lease_ok`; replayed on the recording main `lease_conf_three`, D-18) | a pool refusal of a successor cleans the predecessor's lease, then the workload is placed with its charged count (hazard `refusalKeepsPredecessor`) | `PoolExhaustedRestartCleansThePredecessorThenPlaces` |
 | `cid_lease` (`lease_conf_ok` holds, `lease_conf_325` violated; model only, not a `#[quint_test]`) | the #325-window guard: a `serve` crash is not enabled on the recording conformance main while a generation replacement is leased and not launched, every other precondition of `Crash` holding (DR6-CLOSE, item 9) | `CrashIsNotEnabledInThe325Window` |
 | `cid_lease` (`lease_conf_325` holds, `lease_conf_ok` violated; model only, not a `#[quint_test]`) | the guard's positive twin: without the guard the same `serve` crash is enabled and leaves the workload `wait` with `Safety` holding (DR6-CLOSE, item 9) | `CrashIsEnabledInThe325WindowWithoutTheGuard` |
 | `quiescence` (`quiesce_conf`) | one recovery quiesces, repairs, restores (QHOLD) | `SingleRecoveryQuiescesRepairsRestores` |
@@ -10373,17 +10096,15 @@ hazard is the environment variant
 `owner-flows-sess-env-guest-misses-session-loss` (assumption K-A5 dropped),
 which violates it (§ *Formal protocol model*).
 
-#### [REF] DISTILL design-gap closure (DG-1 to DG-16)
+#### [REF] DISTILL interface contracts (DG-1 to DG-16)
 
 **Status: approved under user delegation 2026-10-09** (DG-2-R2, DG-4-CTOR,
 DG-5-A, DG-5-E, DG-5-F, DG-5-Q and DG-CONST approved by the user
-2026-10-10); the closures follow the contracts of INB-1, R2-END, R2-DRAIN,
+2026-10-10); the items follow the contracts of INB-1, R2-END, R2-DRAIN,
 CID-NOCLAIM, RESET-EXIT, UDP-EMPTY, QHOLD and NO-SURVIVE, approved by the
-user 2026-10-11. They close the DESIGN gaps of `distill/upstream-issues.md`.
-Each item below is an interface contract; what it does not name (private
-helpers, module-private types, the sims' stepping and scripting methods)
-stays the crafter's or DISTILL's. The ids DG-6 and DG-12 to DG-14 are not
-used.
+user 2026-10-11. Each item below is an interface contract; what it does not
+name (private helpers, module-private types, the sims' stepping and
+scripting methods) stays the crafter's or DISTILL's.
 
 ##### DG-1 — No binary identification of the VMM (user mandate)
 
@@ -10452,8 +10173,8 @@ numbers are those of the live source before the DISTILL increment.
 | 15 | per-VM Unix beacon listener (`vm_driver.rs:1197`, accepted at `:2020`); `VmDriver::new`'s parameter list | node beacon intake over the `BeaconIo` port; `VmDriver::new(.., beacon: BeaconIntake)` (DG-4) | `vm_driver.rs:1197, 1510, 2020`; `compose_vm_driver`; every test constructing `VmDriver` (out-of-crate ones pass `BeaconIntake::bind(SimBeaconIo)`) | the attachment-cut step (6) |
 | 16 | `overdrive.net=` parsing and TAP guest configuration (`overdrive-init/src/main.rs:398, 458, 462, 520, 781`) | DG-5 | `complete_pre_ready_init` | the attachment-cut step (5) |
 | 17 | `overdrive-control-plane/bin/netns_density_benchmark.rs` and `guest_network::e18_test_support` | deleted (V-9 replaces E18, 08-04 **Replace**) | — | deleted in DISTILL with its tests |
-| 18 | `ServerConfig.vm_override: Option<VmOverride { vmm, beacon }>` and `VmOverride` (`overdrive-control-plane/src/lib.rs`; formerly `vmm_override`) | removed; `run_server(config, adapters: NodeAdapters)` with `VmAdapters { vmm, beacon, cgroup_accounting, capability }` (NO-OVERRIDE-SEAMS, ADR-0219, § *Composition*); `ServerConfig.vsock_ports` (PORTS-CONFIG) | `lib.rs` composition; `overdrive-cli/src/commands/serve.rs` (`run` builds `NodeAdapters::host`; every test entry point becomes `run_with_adapters`, row 20); every `overdrive-cli` and `overdrive-control-plane` integration test that calls `run_server` or set `vm_override` | the attachment-cut step (6) |
-| 20 | `ServerConfig.{clock, kek, dataplane_override, mtls_intercept, guest_dns, mtls_identity_override, dataplane_probe_fault, mtls_probe_fault}`, `ServerConfig::new(kek, mtls_intercept, guest_dns)`, `run_server(config, fs)`'s internal adapter construction (`lib.rs:2806-2807` observation, `:2856-2857` seam, `:2864` second `SystemClock`, `:2875-2876` probers, `:2906-2908` cgroup accounting, `:2947-2952` VM host state, `:3508-3644` dataplane, `:3754-3755` / `:3779` / `:3835` entropy and transport, `:3855-3912` enforcement and its fault), `host_ipv4_with_override_fallback` (`:2752-2761`), `run_server_with_obs_and_driver(s)`'s `obs` / `vm_host_state` parameters, the CLI's `run_with_dataplane` / `run_with_kek`; (round 13) `boot_server`'s store and CA construction (`:3433-3437` intent, `:3453-3459` view store, `:3744-3750` journal, `:3778-3779` `RcgenCa`, `:3789` codec), the CLI's `OVERDRIVE_TEST_PROBE_ROOT` / `build_probe_adapter` (`serve.rs:44`, `:365-371`) | `NodeAdapters { boot: BootAdapters, cgroup_fs, probers, vm, guest_flow }` with `BootAdapters.stores` / `.ca` (`StoreAdapters`, `IntentStoreAdapter`, `CaAdapters`), `NodeAdapters::host(&ServerConfig, ..)`, `ServerConfig::new()`, `ServeArgs.vsock_ports`, `HostDataplaneComposer::with_probe_fault`, `DataplaneComposer` / `HostDataplaneComposer`, core `MtlsEnforcementFactory` / `MtlsEnforcementDeps` with `HostMtlsEnforcementFactory` (`overdrive-dataplane`), `SimDataplaneComposer` and `SimMtlsEnforcementFactory` (`overdrive-sim`), the supplied-owner path over `BootAdapters`, `run_with_adapters(args, cgroup_fs, builder)` (NO-OVERRIDE-SEAMS full scope, STORES-IN, PROBE-ROOT-ENV, § *Composition*) | `lib.rs` composition and `boot_server`; `overdrive-cli/src/commands/serve.rs`; `overdrive-dataplane` `mtls`; `overdrive-sim` adapters; every fixture of DISTILL handoff (11); `required_serve_ports_source_scan.rs` and the trybuild fixture `server_config_requires_intercept_and_dns_ports` (re-pointed at `NodeAdapters`) | the attachment-cut step (6), with row 18 |
+| 18 | `ServerConfig.vm_override: Option<VmOverride { vmm, beacon }>` and `VmOverride` (`overdrive-control-plane/src/lib.rs`) | removed; `run_server(config, adapters: NodeAdapters)` with `VmAdapters { vmm, beacon, cgroup_accounting, capability }` (NO-OVERRIDE-SEAMS, ADR-0219, § *Composition*); `ServerConfig.vsock_ports` (PORTS-CONFIG) | `lib.rs` composition; `overdrive-cli/src/commands/serve.rs` (`run` builds `NodeAdapters::host`; every test entry point becomes `run_with_adapters`, row 20); every `overdrive-cli` and `overdrive-control-plane` integration test that calls `run_server` or set `vm_override` | the attachment-cut step (6) |
+| 20 | `ServerConfig.{clock, kek, dataplane_override, mtls_intercept, guest_dns, mtls_identity_override, dataplane_probe_fault, mtls_probe_fault}`, `ServerConfig::new(kek, mtls_intercept, guest_dns)`, `run_server(config, fs)`'s internal adapter construction (`lib.rs:2806-2807` observation, `:2856-2857` seam, `:2864` second `SystemClock`, `:2875-2876` probers, `:2906-2908` cgroup accounting, `:2947-2952` VM host state, `:3508-3644` dataplane, `:3754-3755` / `:3779` / `:3835` entropy and transport, `:3855-3912` enforcement and its fault), `host_ipv4_with_override_fallback` (`:2752-2761`), `run_server_with_obs_and_driver(s)`'s `obs` / `vm_host_state` parameters, the CLI's `run_with_dataplane` / `run_with_kek`; `boot_server`'s store and CA construction (`:3433-3437` intent, `:3453-3459` view store, `:3744-3750` journal, `:3778-3779` `RcgenCa`, `:3789` codec), the CLI's `OVERDRIVE_TEST_PROBE_ROOT` / `build_probe_adapter` (`serve.rs:44`, `:365-371`) | `NodeAdapters { boot: BootAdapters, cgroup_fs, probers, vm, guest_flow }` with `BootAdapters.stores` / `.ca` (`StoreAdapters`, `IntentStoreAdapter`, `CaAdapters`), `NodeAdapters::host(&ServerConfig, ..)`, `ServerConfig::new()`, `ServeArgs.vsock_ports`, `HostDataplaneComposer::with_probe_fault`, `DataplaneComposer` / `HostDataplaneComposer`, core `MtlsEnforcementFactory` / `MtlsEnforcementDeps` with `HostMtlsEnforcementFactory` (`overdrive-dataplane`), `SimDataplaneComposer` and `SimMtlsEnforcementFactory` (`overdrive-sim`), the supplied-owner path over `BootAdapters`, `run_with_adapters(args, cgroup_fs, builder)` (NO-OVERRIDE-SEAMS full scope, STORES-IN, PROBE-ROOT-ENV, § *Composition*) | `lib.rs` composition and `boot_server`; `overdrive-cli/src/commands/serve.rs`; `overdrive-dataplane` `mtls`; `overdrive-sim` adapters; every fixture of DISTILL handoff (11); `required_serve_ports_source_scan.rs` and the trybuild fixture `server_config_requires_intercept_and_dns_ports` (re-pointed at `NodeAdapters`) | the attachment-cut step (6), with row 18 |
 | 19 | the VM probe runner's and leg-S's plaintext TCP connect to `workload_addr:port` of a VM backend | `GuestStreamDial::dial(target, purpose)` for a destination inside the guest prefix (leg-S `DialPurpose::Relay`, the VM probe runner `DialPurpose::Probe`); exec / process targets keep the TCP connect (INB-1, ADR-0173; § *Driving port — guest stream dial*, § *VM probe runner*, § *leg-S over vsock*) | `probe_runner` VM target; `overdrive-dataplane` `HostMtlsEnforcement` inbound leg-S backend dial (`mtls/mod.rs` `enforce_inbound`, `mtls/inbound.rs`; LEGS-DIAL) and `overdrive-sim` `SimMtlsEnforcement`; `MtlsInterceptWorker::new` unchanged; `run_server` passes the boot's `OwnerDial` to the probe runner and the enforcement | the attachment-cut step (9) |
 
 **The attachment-cut step.** This is the DELIVER step that implements rows
@@ -10880,19 +10601,18 @@ Precondition (the caller's — `run_server` and the composed rig): `dial` is
 the same `Arc` `ports.enforcement` was constructed with as its
 `guest_dial`. `compose_guest_network` receives an opaque `Arc<dyn
 MtlsEnforcement>` and cannot check that; the caller establishes it by
-constructing both from the one `OwnerDial` (round-10 finding; D-13's
+constructing both from the one `OwnerDial` (D-13's
 binding half covers `dial.owner()`, and only a `Relay` dial entry in the
 owner's `dials` shows the enforcement uses it, R5-54). Postcondition:
 `dial.owner()` is the returned owner; the returned worker was built over
 `ports.enforcement`; the owner's `GuestFlowOwnerPorts::mtls` is the
 returned worker; no other owner, worker or enforcement is constructed. How
 the cycle is closed inside is the crafter's. This signature — `dial` as a third argument and the worker
-built over an enforcement that already holds it — is the shape D-UP-16
-approved, changed under LEGS-DIAL (2026-10-19): D-UP-16 had the worker take
-`dial`; the enforcement now does.
+built over an enforcement that already holds it — is D-UP-16's shape under
+LEGS-DIAL: the enforcement holds the dial; the worker does not.
 
 **Showing that leg S's and the probe runner's dial is the composed owner
-(D-13, architect 2026-10-19; re-pinned under LEGS-DIAL).** No identity
+(D-13, LEGS-DIAL).** No identity
 accessor is added to the enforcement, the worker or the probe runner. The
 binding half is read directly, in-crate: `dial.owner()` and the returned
 owner are the same allocation (`Arc::ptr_eq`). The use half is the owner's
@@ -10908,7 +10628,7 @@ authorable now; the `Relay` half is authorable with R5-54.
 
 Every deadline (`FLOW_REQUEST_DEADLINE`, `FLOW_PAIRING_DEADLINE`, a dial's
 `GUEST_DIAL_PAIRING_DEADLINE`) and the audit cadence read `ports.clock`; the
-seam gains no method for time. No flow end has a deadline (R2-DRAIN). The
+seam has no method for time. No flow end has a deadline (R2-DRAIN). The
 runtime supervisor (RUN-295-B) is built through the existing crate-private
 `run_shared_network_supervisor(SharedNetworkSupervisorPorts, ..)`; an
 in-crate driver composes it over the same owner and a `SimClock` (crate
@@ -11524,7 +11244,7 @@ dev-dependency.
 
 ##### DG-7 — READY with an invalid launch token (UI-BEACON-1)
 
-`BeaconParseError` gains one variant; READY's arity becomes 3:
+`BeaconParseError` carries one variant for the launch token; READY's arity is 3:
 
 ```rust
 #[error("{kind} field launch is not a valid launch token: {source} in line {raw:?}")]
@@ -11683,8 +11403,8 @@ projections:
 | `owner_flows` | `HostDeadSessionLoss(c)` | appears on a trace from `dead`; mapped as `HostSessionLoss(c)` |
 | `owner_flows` | `HostClaimSession`, `HostCheckFlow`, `HostRegisterFlow` | hazard-only |
 | `fwd_pair` | `vs(s)`, `dir(d).q*`, the far readers' and writers' facts, `ctl`, `terr`, `ep`, `dg` | S `SimFlowForwarder` and the Sim sockets (the arbiters of kernel facts; Tier-3 pairs: the module's suite, which keeps the shapes of V-EV-END, V-EV-CTL, V-EV-PAIR and V-EV-DGRAM, P-69 to P-72) |
-| `fwd_pair` | `loss`, `lost`, `tcls`, `ucls`, `gh` (with its second-iteration ghosts `fwdOld`, `rstOpen`, `holderReadAfterAbort` and its third-iteration ghosts `hobs`, `woken`, `recPend`, `vhTouched`, `dropped`), `vs(s)` `.att`, `.clsAt`, `.ncls`, `.snap`, `.misc`, `guestAbortSent` | model-only (QPROJ-8) |
-| `fwd_pair` | `tcpErr`, `vs(s).st`, `vs(s).sshut`, `attRes`, `attEnded`, `strmAbort`, `hres` | QPROJ-8, "The third iteration's variables" (S arbiters `tcpErr`, `vs(s).st`, `vs(s).sshut`; O `attRes` through `forwarder_attached` / `forwarder_attach_ended`, `attEnded`, `strmAbort` through the dial-entry lifetime rule; C `hres` through the production `GuestStream`) |
+| `fwd_pair` | `loss`, `lost`, `tcls`, `ucls`, `gh` (with its ghosts `fwdOld`, `rstOpen`, `holderReadAfterAbort`, `hobs`, `woken`, `vhTouched`, `dropped`), `vs(s)` `.att`, `.clsAt`, `.ncls`, `.snap`, `.misc`, `guestAbortSent` | model-only (QPROJ-8) |
+| `fwd_pair` | `tcpErr`, `vs(s).st`, `vs(s).sshut`, `attRes`, `attEnded`, `strmAbort`, `hres` | QPROJ-8, "Ended-half, watch and stream variables" (S arbiters `tcpErr`, `vs(s).st`, `vs(s).sshut`; O `attRes` through `forwarder_attached` / `forwarder_attach_ended`, `attEnded`, `strmAbort` through the dial-entry lifetime rule; C `hres` through the production `GuestStream`) |
 | `fwd_pair` | `gen`, a pair's `cgen` | O `flow_observation().forwarder_generation` and the `generation` of the flow's `Paired` phase (QPROJ-8, U-EV-8); guest: constant 1 |
 | `fwd_pair` | `oldCtx` | S `SimFlowForwarder`'s context table (the device's open contexts; Tier-3 pair P-70 § 3.2, § 3.8 and the module suite) |
 | `fwd_pair` | `pr(s).rec = queued`, `pr(s).nrec` (D-4) | S the context table's `queued_ends` at the flow's `cgen`, released contexts included, with O the owner's consumption (the `fwd_pair` map, row `pr(s)`); Tier-3 pair: the module suite's one-record-per-id and release cases (V-EV-CTL; `OVD_FWD_INVENTORY.queued_ends` of the context before its release) |
@@ -11710,229 +11430,13 @@ Every `seam:` stimulus of the maps is an effect hold/release or an event
 injection on `SimGuestFlowIo` (DG-3), `SimBeaconIo` (DG-4) or
 `SimGuestOwnerIo` (DG-5), through a trait method listed there.
 
-##### DG-16 — Remaining dispositions
+##### DG-16 — Owner-level `NonMesh` scenario
 
 - **UI-P5-1.** P5-S9's owner-level `NonMesh` decision (route type check,
   marked connect, `DestinationUnreachable` projection) is a seeded-sim
   scenario over `SimGuestFlowIo`, authored in DISTILL (DG-2) and
   implemented in the attachment-cut step; the end-to-end non-mesh egress
   cell is P6-S13's (walking skeleton).
-- **UI-COV-1.** Closed by DG-3's scripted outcomes.
-- **UI-SCN-1.** Not a DESIGN gap (the piece doc is corrected; tests never
-  spawn the binary).
-- **UI-HOST-2.** No subject after DG-1.
-
-#### [REF] DISTILL upstream-issue closure (D-UP-1 to D-UP-20)
-
-Closes `docs/feature/netns-density-295/distill/upstream-issues.md` § A and
-§ B. Every decision is approved by the user 2026-10-14 (§ *Approval
-record*) and lives in the section that owns its contract; this index only
-points there. Surface added while writing them down is PD-1 to PD-9,
-decided by the user 2026-10-14 (§ *Approval record*).
-
-| Id | Closes | Where the contract lives |
-|---|---|---|
-| D-UP-1 | UI-V-QT1 | QPROJ-1 "Trace modes and the step record" and its conformance-main table (two mains for `owner_flows`: PD-6); "Named runs pinned by each driver"; DG-15 (`conf_step`); § *Formal protocol model*, "Conformance (DISTILL)" and *Probe-run counting* |
-| D-UP-2 | UI-V-PAIRKEY | § *[REF] Driven port — `FlowForwarder`* (`ForwardId`, issued by the context; the cell-derived pair key it closed has no subject under the forwarder) |
-| D-UP-3 | UI-V-QHOLD-DROP | § *Owner and provisioner* ("A recovery ends only by restore or fail-stop", "Leaked hold → fail-stop", "Shutdown cancellation"); QPROJ-6; the `quiescence` action map; G-V5 |
-| D-UP-4 | UI-V-QHOLD-SIM | § *Owner and provisioner* (`QuiescenceLedger`, `QuiescenceHold`, `restore`, `QuiescenceRestoreError`); § *Typed error taxonomy*; § *Sim counterparts*; § *Architecture enforcement* |
-| D-UP-5 | UI-V-LEGS-CTOR, UI-V-PROBERUNNER-ARG | § *leg-S over vsock*, § *VM probe runner* |
-| D-UP-6 | UI-V-QPROJ5-HOME | § *Owner and provisioner* (host observation types in `overdrive_control_plane::guest_network`; guest observation types in `overdrive-init`; shared field types in core); § *[REF] Driven port — `FlowForwarder`*; § *Guest adaptation contract* |
-| D-UP-7 | UI-V-FIRST-DISPATCH | DG-5 `GuestFlowOwner::new`, DG-5-A |
-| D-UP-8 | UI-V-OF-SESSION | § *Guest adaptation contract* ("The guest's session", QPROJ-5 `session`); DG-5 failure classes; the `owner_flows` guest-side map; DG-15 |
-| D-UP-9 | UI-V-BEACON-VMSTOP | § *Beacon intake*; § *Composition* (guest reset); the `flows_beacon_conf` map; run `VmExitEndsLaunchAndReleasesBeaconClaim` |
-| D-UP-10 | UI-V-FLOWEND-SPLIT, UI-V-FLOWEND-GUEST | the `fwd_pair` map (one owner dispatch per end record); DG-5-D |
-| D-UP-11 | UI-V-STREAM-TARGET | DG-3 `into_guest_stream` |
-| D-UP-12 | UI-V-FLOWCELL-BOUND | § *Core vocabulary* (`GUEST_PROBE_SLOTS` as a node-capacity bulkhead, the per-allocation probe cap `ProbeCountExceeded`); § *Typed error taxonomy*; § *Wire contracts*; § *Driving port — guest stream dial*; § *VM probe runner*; § *Guest adaptation contract* |
-| D-UP-13 | UI-V-PARSE-ERR | § *Wire contracts* |
-| D-UP-14 | UI-V-GUEST-ATTRIB | DG-5 `GuestPair` (its `ForwardId`, which the guest's end records name) |
-| D-UP-15 | UI-V-VMTAPPLAN | § *Bridge-era code*, scattered sites |
-| D-UP-16 | UI-V-COMPOSE-OWNER | DG-3 *Owner construction* |
-| D-UP-17 | UI-V-NODECAP | § *Owner and provisioner* (`DialObservation`, `held_flows`); QPROJ-3; QPROJ-7 (`inventory()`, R5-57) |
-| D-UP-18 | UI-V-GUEST-PROGRAMS, UI-V-NODELAY | § *Guest adaptation contract* ("Real-kernel reach of the guest programs") |
-| D-UP-19 | UI-V-BEACON-FIFO, UI-V-RECLAIM-ORDER | § *Sim counterparts* ("Accept order in the seam sims"); the `cid_lease` map (`Reclaim`); § *Formal protocol model*, bounds; run `ReclamationKillsEveryOrphanBeforeAssign`; R5-59 |
-| D-UP-20 | UI-V-BEACON-ACTIONS, UI-V-LEASE-LIVE, UI-V-SLOTS-TIME | the `flows_beacon_conf`, `cid_lease` and `udp_slots` maps |
-
-**Round-8 gaps (architect, 2026-10-19;
-`distill/upstream-issues.md`).** Architect pins and small decisions; each
-stands once an adversarial reviewer agrees (standing rule); LEGS-DIAL
-(D-14) is the user's ruling of 2026-10-19. No Quint spec changes: every
-closure is a projection source, a classification, or production surface
-outside the modelled state. The rows state the closures as current after
-the round-9 review.
-
-| Gap | Closure | Where |
-|---|---|---|
-| D-8 | Two-phase owner boot: `probe_guest_flow_startup(io, vip_range, node_prefix)` at step 1 over the boot's seam, before the owner exists and before any boot effect — the four startup checks, then the forwarder probe on a context it opens and releases (`GuestFlowIo::probe_forwarder`; refusal `guest_network.probe`); `compose_guest_network(ports, io, dial)` at step 5 over the same seam, forced there only by the CA identity and the resolve its ports need; step 9's `open_forwarder` probes the serving context again before use. `run_server_with_obs_and_drivers` keeps the supplied-owner parameter for owner-level doubles; the composed rig boots through `boot_server` with `GuestNetworkSource::Composed` (T-8) | § *Composition* ("The owner's two-phase boot", "Entry points and the supplied owner"); DG-3 seam; § *Typed error taxonomy*; § *Earned Trust*; G-V1 |
-| D-9 | As re-closed in round 10 (D-16, D-9 rows below): control-session loss without a VM fault is evidenced by the seeded-sim composed rig plus the in-guest session cells (no `serve` entry point); leg-F loss by seeded sim plus the worker-level Tier-3 cell `leg_f_repair_rebinds_transparent_listener`, stimulated by an `EMFILE` accept error that leaves the listener `LISTEN`; no test fault hook in `run_server`. The `Forwarder` recovery: seeded sim plus R5-61 and the `serve`-death cell | § *Roadmap impact* row 10-02; § *Validation plan* V-8 |
-| D-10 | R5-59 (a) lists 1240 (stream and datagram), 1243 and 1234; ATTR-TOKEN's port list corrected | R5-59; § *Decision index* ATTR-TOKEN |
-| D-11 | `last_consumed_end: Option<ForwardEnd>` (depth 1) and `consumed_ends: u64` on the host `GuestOwnerObservation` and the guest `GuestSideObservation`; `pr(s).out` / `.cause` / `.errno` / `rec = read` read from them, never from a record the driver took from a Sim adapter (also closes the guest-side checklist-5 finding) | § *Owner and provisioner*; DG-5; the `fwd_pair` map; the named-arbiter table |
-| D-12 | `flow_quota` `endq`: S `SimFlowForwarder` `queued_ends` in queue order, the arbiter `slot.st = ended` reads; Tier-3 pair: `take_end`'s oldest-first contract, proved by the new module-suite cell `take_end_returns_records_in_end_order` (DELIVER step 4, EVMOD-REC): two pairs ended in an explicit sequence — pair A's end observed recorded (readiness) before pair B is ended — then `take_end` twice returns A then B, compared in order, not sorted. The existing `end_record_abi.rs:69-108` sorts the ids and is order-blind; it does not discharge this | the `flow_quota` map; the named-arbiter table |
-| D-13 | One `OwnerDial` per boot, created unbound before the probe-runner gate, held by the VM probe runner and the inbound enforcement (LEGS-DIAL), bound by `compose_guest_network`; `OwnerDial::owner()` shows the binding; the use is shown by the composed owner's `dials` entries with `Probe` purpose (authorable now) and `Relay` purpose (with R5-54); no accessor on the enforcement, worker or runner | DG-3 *Owner and mTLS-worker composition* |
-| D-14 | **LEGS-DIAL, approved by the user 2026-10-19 (option (a)); amends D-UP-5:** `HostMtlsEnforcement::new(identity, limits, guest_prefix, guest_dial)` and `SimMtlsEnforcement` likewise; `MtlsInterceptWorker::new` takes no dial; `establish` splits into a blocking handshake, an awaited leg-S dial and the async relay; the leg-S `GuestStream` ends only by its drop; R5-54 authorable | § *leg-S over vsock*; § *Approval record* |
-| D-15 | `ServerHandle::guest_flow_observation()` (`integration-tests`); `GuestOwnerObservation.forwarder_inventory: ForwarderInventoryRead`; R5-57 through `serve` on native metal with the guest-kit fixture | § *Owner and provisioner*; R5-57 |
-| `cid_lease` sanction | `al(a).st = leased` read from the owner (QPROJ-2 Admitted ∧ no device holder ∧ no row); `up` / `reclaimed` are stimulus — driven, never projected or compared; the substituted provisioner is a pacing device only | the `cid_lease` map; the named-arbiter table |
-| U-1 (b) | Replaced by the user's PORTS-CONFIG and NO-OVERRIDE-SEAMS rulings (round 10, below): no simulation adapter is swapped in through `ServerConfig`; non-VM `serve` tests bind the real listeners on kernel-assigned ports; their binaries stay in `host-kernel-shared` for the gateway route and the nft table | § *Composition*, "Driven adapters of `run_server`", "Node vsock ports"; DG-4 |
-| U-2 | V-9's measurements are GH #326; `vsock_density.rs` is a 64-VM correctness test | § *Validation plan* V-9 |
-| E-3 | `mtls_guardrails::guardrails_fail_closed_limits_supervision_exemption_authn_boundary` fails identically at HEAD `0f3120dfe`; out of scope for #295 (user ruling 2026-10-19; no issue) | — |
-
-**Round-9 design review (architect, 2026-10-19).** Closures of the review
-of the round-8 closures; architect pins and small decisions, each standing
-once an adversarial reviewer agrees. No Quint spec changes.
-
-| Item | Closure | Where |
-|---|---|---|
-| `GuestForwarding` (refuted, high) | Dropped with every production branch on it (`converge_shared`, `audit_shared`, the supervisor's repairs, the `Option` on `forwarder_generation`); `VmOverride` is the DG-4 struct; the "VM deploy refused `NotAvailable` on a `NotServed` node" claim and its boundary cell are withdrawn. ADR-0205 ("a missing module is seen by `serve`'s forwarder probe, which refuses the start") and ADR-0159 ("the startup probes still check the forwarder context") hold unconditionally and need no change | § *Composition*, "No production branch on VM capability" |
-| U-1 (b) mechanism | Withdrawn: rejected by the user's NO-OVERRIDE-SEAMS ruling (round 10, below) | — |
-| `forwarder_inventory` | `ForwarderInventoryRead { Read(ForwarderInventory), NoContext, Unreadable }`, not an `Option` conflating two states (`rust.md` § "Sum types over sentinels") | § *Owner and provisioner* |
-| S-3 (owner death in host `fwd_pair`) | Accepted with its limit stated: dropping the owner's runtime runs the owner's destructors, which a SIGKILL never does, so the simulated death is more graceful than a real one. The cell therefore proves only the model's protocol; that no owner-held state needs a destructor to be released at a real death is proved by the Tier-3 `serve`-death cell (`kill_for_test`, every far end reset) and the kernel's context release (V-EV-CTL), not by this driver | the `fwd_pair` map |
-| S-4 | The text "while no `serve` is up only `dev`, `up` and `reclaimed` are compared" is withdrawn: `up` and `reclaimed` are stimulus, driven and never projected. Every other variable is compared at every step. While no `serve` process exists: `dev` from the named `SimVmm` device-holder arbiter; `lease` and `cursor` are not compared (round-10 correction: projecting "all free" and 0 would feed driver-chosen literals into `from_driver`, checklist item 5, and the comparison is vacuous because the model's `Crash` empties the same values; they are compared again from the next boot's first step, against the new pool); `al` and `att` from the durable stores that survive the crash (the node's `LocalIntentStore`, `SimObservationStore` and view store), through the same `hydrate_desired` / `hydrate_actual` / `restart_status_for_alloc` / `attempt_index_for_alloc` reads the next boot makes, over a `HydrationContext` the driver builds on those stores | the `cid_lease` map; `distill/upstream-issues.md` S-4 (DISTILL's to update) |
-| S-6 | The guest-kit CID bands (`PRODUCTION_BAND_WIDTH` = 0x1000, fixture bands from 0x2000) are a test convention the pool does not enforce: the pool's next-fit spans `GUEST_CID_SPAN` (65,536 offsets) with no CID reuse inside one `serve` process, so a `serve` past 4,096 placements enters the fixture bands. Stated, not guarded: every `serve` test that can share a host with a guest-kit fixture makes fewer than 0x1000 placements per `serve` process (the largest in-tree cohort is the 64-VM density cell); the GH #326 benchmark, which exceeds it, must not run beside guest-kit fixtures on the same host (a constraint for its methodology). The guest-kit registry guard checks the bands only. The pool is not changed for a test convention | this row; DISTILL's guest-kit docs carry the rule |
-| S-7 / lint ruling | Orchestrator ruling, per `testing.md` as written: a `// conformance-lint: sim-arbiter-ok` read may feed a projected variable, but does not satisfy checklist item 2 — every driver holds its production owner directly in a field. The init drivers hold `GuestFlowOwner` directly (not only through the `GuestProcess` enum); `GuestProcess` may remain as test support for the process's lifecycle, beside the owner field | § *Conformance observation surface and action map*, "Owner field" |
-| D-9, D-12, D-13, D-14 | As in the round-8 table above | — |
-
-**Round 10 (user rulings and architect closures, 2026-10-19).** The four
-rulings are the user's (§ *Approval record*); every shape pinned under
-them and every closure below is an architect pin or small decision that
-stands once an adversarial reviewer agrees. One spec change was needed
-(D-18); it is recorded in `570179-1792418105.836` and in the current
-record `707089-1792512180.793`.
-
-| Item | Closure | Where |
-|---|---|---|
-| PORTS-CONFIG (ruling; ADR-0218) | `VsockListenPort { Fixed, KernelAssigned }`, `NodeVsockPortConfig` (defaults 1234 / 1240 / 1243; refusals `Reserved`, `PortAny`, `Mixed`, `Collision`), `ServerConfig.vsock_ports`, the `[vsock]` file section (`0` = kernel-assigned) (superseded: withdrawn in round 13 and moved out of #295 to GH #327 by NODE-CONFIG-LOADER, round 14; ports are set only through `ServerConfig` / `ServeArgs`), `BeaconIntake::bound_port`, `SharedGuestNetworkOwner::flow_ports`, `ServerHandle::vsock_ports`; a repair keeps the held listening socket and its port (round 11); a restart re-reads the configuration (VMs reclaimed). Kernel facts: `VMADDR_PORT_ANY` is `-1U` (`vm_sockets.h:109 @ v7.0`), not 0 | § *Composition*, "Node vsock ports" |
-| GUEST-PORTS (ruling; ADR-0217) | `beacon=`, `stream=`, `control=` appended to the one `overdrive.transport=` token; the driver writes them from its intake and from `GuestTransportAssignment::flow_ports()`; `overdrive-init` refuses a bad field `TokenMalformed` naming `Beacon`, `Stream` or `Control` before setup; `GuestAddressPool::assign` takes `flow_ports` | § *Guest adaptation contract*; DG-5; core vocabulary |
-| FWD-PREREQ (ruling) | `cargo xtask kmod-build` + `cargo xtask kmod-load` on Lima and metal as lane setup; fixtures check the loaded module against the built one (round 11: `srcversion`; round 14: the tree-digest `version`, D-20) and fail as a missing or stale lane prerequisite; every `serve` test runs the real forwarder probe | § *Composition*, "Forwarder module as a lane prerequisite" |
-| NO-OVERRIDE-SEAMS (ruling; ADR-0219, amends ADR-0083 § D8; ADR-0138 states the result in place, round 13) | As extended to full scope in round 11 (below): `run_server(config, adapters: NodeAdapters)`; `vm_override`, `VmOverride`, `GuestFlowIoOverride`, `sim_vsock` and `guest_flow_io_override` removed | § *Composition*, "Driven adapters of `run_server`"; DG-2 rows 18 and 20; DG-4 |
-| D-9 | The production event ending leg F's accept task: an `accept(2)` error (`EMFILE` / `ENFILE` / socket-allocation failure) that leaves the listener `LISTEN`; the Tier-3 cell's stimulus is `EMFILE` and its "no `EADDRINUSE`" oracle has teeth because the old socket is still `LISTEN`; the `SHUT_RD` stimulus is withdrawn | § *Roadmap impact* 10-02; V-8 |
-| D-14 (adversarial lows) | The in-flight slot covers handshake + dial only (pre-arm); the relay is bounded by the owner's flow quota; `teardown` awaits the relay's end (and so the `GuestStream`'s drop); `liveness` of a relay is `Running` / `Gone`, never `Stalled` | § *leg-S over vsock* |
-| `compose_guest_network` | "built over an enforcement whose `guest_dial` is `dial`" moved from postcondition to the caller's precondition | DG-3 *Owner and mTLS-worker composition* |
-| D-16 | No production stimulus for control-session loss without a VM fault; no entry point added; evidence = seeded-sim composed rig + in-guest session cells; the guest-driven 10-02 cell withdrawn | § *Roadmap impact* 10-02; V-8; DISTILL handoff (5) |
-| D-17 | Through-`serve` owner observation from an `overdrive-control-plane` `kvm-tests` lane that calls `run_server` with the host `NodeAdapters`; no CLI pass-through | `ServerHandle::guest_flow_observation` docs; DISTILL handoff (6) |
-| D-18 (spec change, recorded) | Main `lease_conf_three` (`cid_lease` with `OFF = Set()`, `CFG = "ok"`, `REC = true`; nondet path `lease_conf_three::cid_lease::conf_step`) added by the quint-modeler with the check `cid-lease-run-conf-three-pool-exhausted-restart-cleans-the-predecessor-then-places` (evaluator, expect holds, `ci = true`); the README line that called the run "lease_ok only (not a conformance target)" is corrected. Recorded in `570179-1792418105.836` (441 of 441, 65 `cid_lease` checks) and in the current record `707089-1792512180.793` (458 of 458, 65 `cid_lease` checks; verify-evidence passes, § *Status*) | `cid_lease` item 8 |
-| D-19 | Stale round-9 text fixed: `simulated()` / `sim_vsock()` gone; `HostGuestFlowIo` construction sites; G-V1's Owner line names phase 1's free function | DISTILL handoff; DG-3; G-V1 |
-| S-4 (adversarial low) | `lease` / `cursor` not compared from a `Crash` to the next boot's first step, instead of projecting literals | the `cid_lease` map; round-9 S-4 row |
-
-**Round 11 (user scope ruling and architect closures, 2026-10-19).** The
-scope of NO-OVERRIDE-SEAMS ("ALL of it, in #295") is the user's; every
-shape below is an architect pin or small decision that stands once an
-adversarial reviewer agrees. No Quint spec changes. No lifecycle gate is
-added, moved or removed: the `vmm.probe` refusal keeps its owner (the
-composition root), promise and affected state, and its input changes from
-an override's presence to the declared `VmCapability`.
-
-| Item | Closure | Where |
-|---|---|---|
-| NO-OVERRIDE-SEAMS, full scope (ruling) | `NodeAdapters { boot: BootAdapters { clock, entropy, transport, kek, observation, vm_host_state, dataplane, mtls: MtlsAdapters { intercept, enforcement }, guest_dns }, cgroup_fs, probers: ProbeAdapters { tcp, http }, vm: VmAdapters { vmm, beacon, cgroup_accounting, capability }, guest_flow }`, every field required; `NodeAdapters::host(data_dir, cgroup_fs, kek)`; `run_server(config, adapters)`; the supplied-owner path over `BootAdapters`; `ServerConfig` configuration only, `ServerConfig::new()`; the dataplane as `DataplaneComposer` returning the dataplane and `host_ipv4`; the enforcement as core `MtlsEnforcementFactory`; the second `SystemClock` removed; `dataplane_probe_fault` / `mtls_probe_fault` / `mtls_identity_override` replaced by sim adapters; the CLI's one test entry point `run_with_adapters`; mTLS composition unconditional and no branch keyed on an adapter's identity | § *Composition*, "Driven adapters of `run_server`"; DG-2 row 20; ADR-0219; ADR-0138 and ADR-0083 amendments |
-| FWD-PREREQ stale module (adversarial medium) | (Identity replaced in round 14 by the tree-digest `version`, D-20.) `MODULE_VERSION` in the source so a `srcversion` always exists; `kmod-load` compares `/sys/module/ovd_fwd/srcversion` with the built `.ko`'s on `EEXIST` and fails as a stale prerequisite naming the reboot (a reboot suffices; "recreate" corrected here, in EVMOD-LOAD and in ADR-0205); the fixture check compares the same two values. (Superseded round 15, MODULE-REFCOUNT: `kmod-load` reloads a stale idle module and refuses a busy one; no remedy is a reboot) | § *Composition*, "Forwarder module as a lane prerequisite"; EVMOD-BUILD; EVMOD-LOAD |
-| FWD-PREREQ hook lanes (adversarial medium) | The hooks run the setup: pre-push gains `kmod-prepare` before `nextest`; pre-commit's `nextest-affected` script runs `kmod-build` and `kmod-load` before its `nextest` | same |
-| `quiescence` driver's driving port (adversarial medium) | `RestartWith(writeOk)` recomposes through the composed rig (`boot_server` with `GuestNetworkSource::Composed` over `SimGuestFlowIo`); step 8's typed refusal is `boot_server`'s; `Damage` / `RepFail` stay at the seam | the `quiescence` map |
-| `lease_conf_three` projection (adversarial medium) | No prefix yields three usable offsets; the /29 pool stays, two background Service leases hold offsets 0 and 1 (checked at every step), model offset `m` ↦ production `m + 2`, `lease` / `dev` compared on offsets 2–4 only, `cursor` at 0, 1 or past 4 ↦ model 0; `CEIL` 2 vs 5 agree for the run's `att` < 2, so no `#[quint_run]` on that main | the `cid_lease` map |
-| Auto-bind kernel claim (adversarial low) | Exact: per-netns counter seeded at random above 1023 (`af_vsock.c:787-788`), shared with outbound auto-bind (`:251-259`), `MAX_PORT_RETRIES` = 24 (`:229`); `af_vsock.h:19 @ v7.0` tagged | ADR-0218 |
-| Listener repair (adversarial low) | The owner holds each listener for the process's life; a repair re-spawns accept on the still-listening socket (`SO_ACCEPTCONN`), never closes or rebinds; no rebind path is built (nothing closes a held listener); the repair-window exposure is gone | § *Composition*, "Repair"; `GuestFlowIo::bind_listener` / `accept`; ADR-0218 |
-| Stale port text (adversarial low) | ADR-0177 (the removed 1241), ADR-0166, ADR-0201, c4 beacon label, the ownership-table rows now name the role and its default; ADR-0217's non-Linux-guest bullet replaced by a scope statement; ADR-0082 points at ADR-0219 | those files; § *Ownership of descriptors and kernel objects* |
-| `BeaconIo::bind` second call (adversarial low) | A second call returns the first bind's port; its `port` argument is not consulted | DG-4 `BeaconIo` |
-| D-9 cell ordering (adversarial low, DISTILL note) | The client socket is created (or the connection opened from another process) before the limit is lowered, and `ss -ltn` runs after it is restored; the listener stays `LISTEN` meanwhile because the worker's `SharedOwner` holds it in its `leg_f_listener` slot | § *Roadmap impact* 10-02 |
-| Relay stall vs #232 (adversarial low; recommended option) | The flow quota plus leg C's transport-death timeouts and the relay's terminal exits are the deliberate replacement: no v1 component consumes `Stalled` (`supervision.rs:11-20`) | § *leg-S over vsock* |
-| `VmCapability::Required` producer (adversarial low; recommended option) | The rationale is recorded in ADR-0219: `Required` parameterises the implemented § D8 refusal for a root that knows its VMM is present; no node-configuration producer is added | ADR-0219 Decision; `VmCapability` docs |
-
-**Round 13 (user rulings STORES-IN and PROBE-ROOT-ENV, and the round-12
-adversarial findings, 2026-10-19).** The two rulings are the user's; every
-shape below is an architect pin or small decision that stands once an
-adversarial reviewer agrees. No Quint spec changes. No lifecycle gate is
-added, moved or removed: the view-store and CA refusals keep their owner
-(the boot), promise and position; only where the adapters are constructed
-changes.
-
-| Item | Closure | Where |
-|---|---|---|
-| STORES-IN (ruling; adversarial high of round 12) | `BootAdapters` gains `stores: StoreAdapters { intent: IntentStoreAdapter, views: Arc<dyn ViewStore>, journal: Arc<dyn JournalStore> }` and `ca: CaAdapters { ca: Arc<dyn Ca>, root_key_codec: Arc<RootKeyAeadCodec> }` (superseded round 14: `CaAdapters { factory: Arc<dyn CaFactory>, root_key_codec }`, built by `CaAdapters::host()` with no argument; the boot calls `CaFactory::build(boot.entropy)`); `StoreAdapters::open(&ServerConfig)`, `IntentStoreAdapter::open(data_dir)` / `store()` / `path()`, `CaAdapters::host(entropy)` (superseded round 14, as above); `NodeAdapters::host` opens and constructs them (order: infallible adapters, stores, observation store, CA over the bundle's entropy); `boot_server` constructs nothing and keeps the view-store probes and the CA's generate-or-adopt with its Earned-Trust probes at today's positions; one bundle per boot; the supplied-owner path receives them in `BootAdapters`. The sentence "`run_server` constructs no driven adapter" is now true of `run_server` and `boot_server`; ADR-0219 § Consequences' carve-out is removed | § *Composition*, "Driven adapters of `run_server`" and "Entry points and the supplied owner"; ADR-0219 |
-| PROBE-ROOT-ENV (ruling) | `OVERDRIVE_TEST_PROBE_ROOT` and `build_probe_adapter` removed; `run` constructs `RealCgroupFs::new()`; `serve_probe_refusal.rs` passes `RealCgroupFs::new().with_probe_root(..)` through `run_with_adapters` | § *Composition*, "`overdrive serve` and the CLI entry points" |
-| Probe before the bundle; `data_dir` from the configuration (adversarial low) | `run_with_adapters(args, cgroup_fs, builder)` probes, then calls the builder with the `&ServerConfig` the boot gets; `run` is a call of it; `NodeAdapters::host(&ServerConfig, ..)` derives every path from `config.data_dir` | same; `NodeAdapters::host` docs |
-| CLI kernel-assigned ports (adversarial low) | `ServeArgs.vsock_ports: NodeVsockPortConfig`, copied into `ServerConfig`; `main` passes the default, CLI fixtures `kernel_assigned()`. The round-10 `[vsock]` file section is withdrawn: `serve` reads no node configuration file (`parse_dataplane_section` has no production caller), so its parser would be unreachable; an invalid port set is unrepresentable in `ServerConfig` | § *Composition*, "Node vsock ports"; ADR-0218 |
-| Stale module across workspaces (adversarial medium) | The built module lives at `<workspace>/target/kmod/<release>/ovd_fwd.ko`, never in the shared cargo target directory (`~/.cargo-target-lima`); xtask and `overdrive-testing` spell it from the workspace root; the mutation wrapper exports `OVERDRIVE_KMOD_DIR` (the `OVERDRIVE_BPF_OBJECT` precedent); the claim is now "a test runs only against a loaded module whose `srcversion` equals its own workspace's build" (superseded round 14, D-20: the identity compared is the tree-digest `version`, not `srcversion`) | § *Composition*, "Where the built module lives"; EVMOD-BUILD; ADR-0203 |
-| Hooks (adversarial low) | Hooks run `kmod-load --if-absent` (load when absent, never compare); the stale verdict is the fixtures'; CI keeps the strict form; the remedy states its cost (a Lima reboot ends every workspace's in-flight runs). (Superseded round 15, MODULE-REFCOUNT: the hooks run `kmod-load --busy-ok`, which reloads a stale idle module and exits 0 on a busy one; no reboot) | § *Composition*, "`kmod-load`" and "The lanes that run it"; EVMOD-LOAD; ADR-0205 |
-| S-BDB-14 real-kernel `Err` path (adversarial medium) | `HostDataplaneComposer::with_probe_fault(DataplaneError)` (`integration-tests` only; arms `EbpfDataplane::set_probe_fault`); S-BDB-14 keeps its real-kernel `run_server` boot and its pin-removed oracle through it; the replacement table's coverage claim is corrected | § *Composition*, `HostDataplaneComposer`; replacement table |
-| Stale docstrings (adversarial low) | `VsockListenPort::KernelAssigned` states the random-seeded per-netns counter and `MAX_PORT_RETRIES`; `converge_shared` / `flow_ports` state the held-socket repair (no close, no bind) | those docstrings |
-| ADR-0138 history (adversarial low) | The correction is folded into ADR-0138 in present tense (it is #295's and not implemented); ADR-0219's Status no longer calls it implemented; ADR-0083 keeps its dated amendment | ADR-0138; ADR-0219 Status |
-| init `fwd_pair` `ctx(g) = gone` (round-10/11 low) | Classified stimulus-only: `ctx(g) = gone ⇔ ¬vmUp` in every reachable state (written only by `VmmExit`); the init driver compares `ctx(g)` only while `vmUp` and never reads its own `driver.gone` | the `fwd_pair` map, `ctx(s)` row |
-
-**Round 14 (user rulings after round 13 and the round-13 adversarial and
-DISTILL-review design findings, 2026-10-20).** NODE-CONFIG-LOADER and U-3
-(b) are the user's; every other shape below is an architect pin or small
-decision that stands once an adversarial reviewer agrees. One spec change
-(the `fwd_pair` invariant below) is made in `fwd_pair.qnt` and
-`checks.toml` and is recorded in the current record
-`707089-1792512180.793` (458 of 458; § *Status*).
-No lifecycle gate is added, moved or removed.
-
-| Item | Closure | Where |
-|---|---|---|
-| NODE-CONFIG-LOADER (ruling) | The `[vsock]` node-configuration section is out of #295 and is GH #327, with ADR-0025 `[node]` and ADR-0049 `[dataplane]` loading. In #295 the ports are set only through `ServerConfig.vsock_ports` / `ServeArgs.vsock_ports`; production runs the defaults; tests `kernel_assigned()`. ADR-0218 keeps the section's design text under "Deferred to GH #327". `PortAny`'s message names `VsockListenPort::KernelAssigned` (no `0` convention exists in #295) | § *Composition*, "Node vsock ports"; ADR-0218 |
-| U-3 (ruling: option (b)) | DELIVER step K (the module skeleton — permanent in round 14; superseded round 15, MODULE-REFCOUNT: it has `module_exit` and the reference discipline — `kmod-build`, `kmod-load`, the development hosts' build prerequisites, CI, mutants, lefthook) precedes step 0. Checked: it depends on none of steps 0–3 (C sources and xtask only; `serve` does not open the module before step 4); step 4 grows the module to its full contract with its tests. The lefthook kmod changes land in step K | § *Roadmap impact*, step K and step 4 |
-| D-20 (adversarial medium; DISTILL review) | Identity of a built and a loaded module = the SHA-256 tree digest of `kmod/ovd_fwd/` (every file, `Kbuild` and the UAPI header included; round 15: every file git does not ignore, `git ls-files --cached --others --exclude-standard`), computed once by `kmod-build` and compiled in as `MODULE_VERSION`; kbuild outputs go to `target/kmod/<release>/` through `MO=`; `kmod-load` and the fixture compare `/sys/module/ovd_fwd/version` (`kernel/module/main.c:607`, `:1059 @ v7.0`) with the built `.ko`'s `version`. `srcversion` is dropped: it covers same-directory deps only (`scripts/mod/sumversion.c:366-367 @ v7.0`). Moving the header into the object directory was rejected: `srcversion` would still miss `Kbuild` and its flags | § *Composition*, "Which module is loaded", "`kmod-load`", "The fixture's check"; EVMOD-BUILD; ADR-0203 |
-| D-21 (adversarial medium; DISTILL review) | The clone allowance is withdrawn; `StoreAdapters` and `IntentStoreAdapter` are not `Clone`; restart and crash tests reopen through `NodeAdapters::host` / `StoreAdapters::open` | `StoreAdapters` / `NodeAdapters::host` docs; DISTILL handoff (11) |
-| Entropy / CA representability (adversarial low) | `CaAdapters { factory: Arc<dyn CaFactory>, root_key_codec }`; the boot calls `CaFactory::build(boot.entropy)` once, so a replaced `entropy` cannot leave the CA keyed elsewhere. New: core `CaFactory`, host `RcgenCaFactory`, sim `SimCaFactory`; `CaAdapters::host()` takes no argument. Rejected: a documented precondition (the round-12 `data_dir` class, left representable) | `CaAdapters` docs; ADR-0219 |
-| init `fwd_pair` after `VmmExit` (adversarial low) | The driver gates on the `VmmExit` stimulus it applied: from then on it compares none of `ctx(g)`, `pr(g)` or the guest-side socket view; host-side variables are compared throughout. Spec: invariant `CtxGoneIffVmDown` in `fwd_pair.qnt` (`Safety`, `DgramSafety`), witness check `fwd-pair-witness-vmm-exit`; recorded in `707089-1792512180.793` (witness violated as expected) | the `fwd_pair` map, `ctx(s)` row |
-| "constructs no driven adapter" wording (adversarial low) | Restated: the boot constructs no adapter over a host resource or a store; it composes `VmDriver`, `DriverRegistry`, the owner and the workflow engine over supplied ports and obtains the CA and the enforcement through supplied factories | § *Composition*, "Entry points" and "Driven adapters of `run_server`"; ADR-0219; brief |
-| S-BDB-14 contradiction (DISTILL review low) | Handoff (11)'s `SimDataplaneComposer` clause replaced: S-BDB-14 runs through `HostDataplaneComposer::with_probe_fault` | DISTILL handoff (11) |
-| `with_probe_fault` lock (DISTILL review low) | The fault slot is a `parking_lot::Mutex` (no poisoning) | `HostDataplaneComposer` docs |
-
-**Round 15 (the user's ruling MODULE-REFCOUNT and the round-14 adversarial
-lows, 2026-10-20).** MODULE-REFCOUNT is the user's; every shape below is an
-architect pin or small decision that stands once an adversarial reviewer
-agrees. One spec change (`fwd_safe`'s module reference and unload, and a
-datagram witness for `CtxGoneIffVmDown`; § *Formal protocol model*, "Round
-15 model change") is made by the quint-modeler: 13 new checks (`checks.toml`
-455). Its own record run was stopped when host free disk fell below the
-8 GiB stop line; the change is recorded, with round 14's and round 16's, in
-the current record `707089-1792512180.793` (458 of 458; § *Status*). No
-lifecycle gate is added, moved
-or removed: G-V1's forwarder probe keeps its owner, promise and position and
-only loses its permanence check.
-
-| Item | Closure | Where |
-|---|---|---|
-| MODULE-REFCOUNT (ruling; amends EVMOD-LIFE and EVMOD-SAFE) | `ovd_fwd` has `module_exit`. Module references are held by an open context (the misc `fops` owner) and by each hooked socket (`__module_get` at attach or watch, `module_put` as the free work's last statement). `delete_module` is refused `EWOULDBLOCK` while any reference is held. `module_exit` deregisters the device, destroys and drains the workqueue, then frees the pool. Rule 5 of EVMOD-SAFE: removal under `lock_sock`, and a ULP present at removal keeps that socket's reference for the boot. Forced unload stays off; the appliance keeps `CONFIG_MODULE_UNLOAD` off. Withdrawn: the `PERMANENT` flag and `OVD_FWD_VERSION`'s `flags`, the `/proc/modules` check, and `ForwarderError::NotPermanent` | § *Module placement and lifetime*; § *Pair end*, rule 5; ADR-0198; ADR-0204; ADR-0068 § 7 |
-| `kmod-load` and the hooks (ruling) | Absent → load; current → done; stale → `delete_module(O_NONBLOCK)` then load, or busy (`EWOULDBLOCK` / `EBUSY`) → "busy, retry" naming the holder class (an open context with its pid and `comm`, or socket references still being freed); never a reboot. The hooks run `--busy-ok` (busy → message, exit 0). The fixture's stale remedy is `kmod-load`. The round-14 reboot remedy and its cost text are removed from the delta, ADR-0203 and ADR-0205 | § *Composition*, "`kmod-load`", "The fixture's check", "The lanes that run it"; EVMOD-LOAD; ADR-0205 |
-| Step K and step 4 (ruling) | Step K's skeleton has `module_exit`, the misc device with `THIS_MODULE` as owner, the workqueue, and the context half of V-EV-UNLOAD; its source check rejects a missing `module_exit`. Step 4 adds the per-socket references, rule 5 and the socket half of V-EV-UNLOAD | § *Roadmap impact*, steps K and 4 |
-| Real-kernel cell (ruling) | V-EV-UNLOAD: refused while a context is open and while a socket is hooked (`refcnt` read back), succeeds once both are released, and a reload then serves. It has a ULP negative control and a KASAN unload stress, and runs only where unloading touches no other run (metal under its lease, or the guest-kit microVM; never shared Lima) | § *Validation plan*, V-EV-UNLOAD |
-| Quint (ruling consequence) | No model encoded permanence; only README prose named it. `fwd_safe` gains the module reference, `Unload`, `NoTextRunAfterUnload` and `RefHeldWhileReachable`, with one hazard per rule-5 clause and five named runs. The README prose is restated | § *Formal protocol model*, "Round 15 model change" |
-| kbuild intermediates parenthetical (round-14 adversarial low) | The "`M=kmod/ovd_fwd` intermediates are in that tree too" parenthetical is deleted; with `MO=` the source tree holds sources only | § *Composition*, "Where the built module lives" |
-| Digest file set (round-14 adversarial low) | The tree digest covers `git ls-files --cached --others --exclude-standard -- kmod/ovd_fwd/` with working-tree contents. An unadded source file stays covered (no false accept); ignored strays (`.DS_Store`, `*.swp`) are excluded; an unignored stray only reads as stale, which a reload repairs | § *Composition*, "Which module is loaded"; ADR-0203 |
-| D-21 overclaim (round-14 adversarial low) | Narrowed: the intent store's reuse is unrepresentable (private fields, `open` only, no `Clone`); reusing `views` or `journal` through the public `Arc` fields is a caller error the type does not prevent; every restart and crash test reopens through `StoreAdapters::open` / `NodeAdapters::host` | `StoreAdapters` docs |
-| Superseded closure rows (round-14 adversarial low) | Annotated: the round-10 PORTS-CONFIG `[vsock]` file section, the round-13 STORES-IN `CaAdapters { ca, .. }` / `CaAdapters::host(entropy)`, the round-13 `srcversion` claim, the round-11 reboot remedy, the round-13 hooks' `--if-absent`, and the round-14 permanent step-K skeleton | the rows above |
-| `CtxGoneIffVmDown` on the datagram main (round-14 adversarial low) | Stated: `VmmExit`'s guard (`vmUp ∧ canFault`) does not read the mode, `FMAX` = 1 for `dgram`, and the datagram branch writes `ctx(g) = gone` (`fwd_pair.qnt:293`, `:1084-1091`). The witness check `fwd-pair-dgram-witness-vmm-exit` (`pair_dgram`, expect violation) makes it mechanical; recorded in `707089-1792512180.793` (violated as expected) | § *Formal protocol model*, "Round 15 model change" |
-
-**Round 16 (the round-15 adversarial findings, 2026-10-20).** All
-module-internal; no port, wire format or state meaning changes, so no user
-decision. Each shape is an architect pin or small decision that stands once
-an adversarial reviewer agrees. One spec change was made by the
-quint-modeler (§ *Formal protocol model*, "Round 16 model change"); the
-current record `707089-1792512180.793` (458 of 458) covers rounds 14 to 16.
-
-| Item | Closure | Where |
-|---|---|---|
-| Rule 5 fails for `sk_write_space` (adversarial medium) | Verified and wider than reported: `sock_wfree` calls `sk_write_space` with no lock, outside RCU, from preemptible process context for every socket without `SOCK_USE_WRITE_QUEUE` — not only UDP (`virtio_net` teardown) but every vsock half, whose transmit skbs the host's vhost worker and the guest's virtio-vsock transmit work free on every send (`drivers/vhost/vsock.c:252`, `net/vmw_vsock/virtio_transport.c:361`, `virtio_transport_common.c:288-289`, `:475-491`, `net/core/sock.c:2675-2693 @ v7.0`). Closure: `sk_write_space` is never overridden; the write-space trigger is an entry on each half's socket wait queue, whose function runs only under the head's lock with interrupts disabled and which the pair's end removes under that lock before the free is queued (`kernel/sched/wait.c:69-76`, `:104-108`, `:118-127`). Rule 5 restated with the caller classes **lock**, **rcu** (any region a vanilla grace period waits for, `rcu_read_lock` included), **work**, and the new **wfree** class closed by the entry; error-queue completions excluded by precondition (no `MSG_ZEROCOPY`, no transmit timestamping on an attached socket). Rejected: `synchronize_rcu_tasks()` before `module_put` (a configuration dependency: on a `PREEMPTION` kernel with no `NEED_TASKS_RCU` selector it is a vanilla grace period, which does not wait for a preempted **wfree** caller; and a slow wait per pair end), an RCU section or module reference inside the override (its own prologue and epilogue stay exposed), and the override kept on TCP only (two mechanisms for one trigger) | § *Forwarding, per direction*, "Trigger" and "Attach order"; § *Pair end*, "Order of a pair's end" and rules 1, 3, 5; § *Datagram mode*; ADR-0204; ADR-0198 |
-| `inet_csk_has_ulp` on a non-TCP half (adversarial low) | The ULP check is made only on a TCP half (`sk_family` `AF_INET` / `AF_INET6`, `sk_protocol` `IPPROTO_TCP`); the helper reads `inet_connection_sock` fields (`include/net/inet_connection_sock.h:347-350 @ v7.0`). Added to the DELIVER review checklist | § *Module placement and lifetime* holder table; rule 5; ADR-0204 Consequences |
-| V-EV-UNLOAD's negative control (adversarial low) | "Expected to fault" is dropped as an oracle; the KASAN stress is a positive check only (now with senders on every vsock and UDP half). Rule 5's teeth are the deterministic `fwd_safe` hazards. Rejected: a debug-only delay build, which would have to oops a metal host or a guest to show a fault | § *Validation plan*, V-EV-UNLOAD |
-| Permanent `EBUSY` (adversarial low) | `kmod-load` reads `/sys/module/ovd_fwd/initstate` on `EBUSY`: `coming` / `going` is busy (retry); an absent `initstate` is gone (step 1); on `live` it retries `delete_module(O_NONBLOCK)` once, and only a second `EBUSY` on a live module is a loaded build with no `module_exit` (`kernel/module/main.c:818-825 @ v7.0`), reported on its own as unloadable until a reboot, not softened by `--busy-ok` (round 17) | § *Composition*, "`kmod-load`"; § *Module placement and lifetime*; ADR-0198 |
-| Holder message (adversarial low) | Widened: "or a context reference not visible in `/proc` (a descriptor in flight in `SCM_RIGHTS`, an io_uring fixed file)" | § *Composition*, "`kmod-load`"; ADR-0198 |
-| Resumption evidence (consequence) | The earlier override's measured resumption (P-67, P-72 § 8) is not evidence for the wait-queue entry; V-EV-SAFE gains full-target resume cases for a TCP, a vsock and a UDP target | § *Validation plan*, V-EV-SAFE |
-| ADR-0198 slug | The file is renamed (orchestrator) and its three links resolve; the ADR's note about the old slug is removed | ADR-0198 |
-
-**Round 17 (the round-16 adversarial lows, 2026-10-20).** All
-module-internal or documentation; no port, wire format or state meaning
-changes, so no user decision. Each is the fix the round-16 adversary
-proposed.
-
-| Item | Closure | Where |
-|---|---|---|
-| `kmod-load` `EBUSY` check-then-act (adversarial low) | The `initstate` read only classifies an `EBUSY`. `ENOENT` on the read means a `going` module finished unloading: step 1. `live` may be a `coming` module whose init completed before the read, so `kmod-load` calls `delete_module(O_NONBLOCK)` once more; only a repeated `EBUSY` on a live module means no `module_exit` (an idle module with an `exit` unloads; a referenced one returns `EWOULDBLOCK`, `kernel/module/main.c:744-751`, `:810-825 @ v7.0`). The claim that every check-and-act is the kernel's own atomic call is replaced by the narrower statement | § *Composition*, "`kmod-load`"; ADR-0198 Consequences |
-| `synchronize_rcu_tasks()` rejection reason (adversarial low) | Corrected: `TASKS_RCU` defaults to `NEED_TASKS_RCU && PREEMPTION` (`kernel/rcu/Kconfig:101-107 @ v7.0`); on a kernel without `PREEMPTION` the plain `synchronize_rcu` does wait for the non-preemptible **wfree** caller. The gap is `PREEMPTION` with no `NEED_TASKS_RCU` selector. The rejection stands on the configuration dependency and the slow wait per pair end | ADR-0204 Alternatives; Round 16 table above |
-| Error-queue exclusion (adversarial low) | Correct reason recorded: no new variant is needed, since `ForwarderError::UnsupportedSocket` (`ESOCKTNOSUPPORT`) exists. Attach and watch now refuse a half with `SOCK_ZEROCOPY` or a `SOF_TIMESTAMPING_TX_RECORD_MASK` bit in `sk_tsflags` under it. The refusal is partial (an owner can set either after attach), so the owner obligation and the DELIVER review item stay | § *Control interface* `OVD_FWD_ATTACH`; § *Pair end*, rule 5, "Excluded by precondition"; ADR-0204 |
-| P-67's performance figures (adversarial low) | Stated: P-67's resume times and throughput / core-s / p99 figures were measured with the `sk_write_space` override and belong to that trigger; they are re-measured with the wait-queue entry under V-9's benchmark (GH #326). Through the entry a vsock target wakes only when `sock_writeable` holds, so the resume waits for a later `sock_wfree`; V-EV-SAFE's resume cases check correctness only | P-67 row; § *Validation plan*, V-EV-SAFE |
-| Stale brief changelog sentence (adversarial low) | The MODULE-REFCOUNT changelog row's "rename pending" sentence is removed | brief.md changelog |
 
 ### Lifecycle Gate Ownership
 
@@ -12017,7 +11521,7 @@ through the production owners over `SimFlowForwarder`; kernel effects
 (bounds, sender blocking, memory, resets) are Tier-3 through
 `overdrive serve` + `overdrive deploy` (V-9) and the module's suite.
 
-#### Gate G-V0 — node attachment admission (restates G-295-0)
+#### Gate G-V0 — node attachment admission
 
 - **Existing evidence:** ADR-0132/0133; ADR-0156 (CID derived from the
   lease); `GuestAddressPool::assign`; shim `provision_and_inject_netns`;
@@ -12042,7 +11546,7 @@ through the production owners over `SimFlowForwarder`; kernel effects
   (`CidUnique`, `AssignAfterReclaim`, `ServeCrashOrphanIsReclaimedBeforeAnyAssign`);
   Tier-3 V-RECLAIM (R5-55).
 
-#### Gate G-V1 — shared forwarding startup (replaces G-295-1)
+#### Gate G-V1 — shared forwarding startup
 
 - **Existing evidence:** G-295-1 and its boot path
   (`run_server` → `run_server_with_obs_and_drivers`: `probe_startup`,
@@ -12120,7 +11624,7 @@ through the production owners over `SimFlowForwarder`; kernel effects
   R5-30, R5-40; Quint `quiescence` (`ServeRunsOnlyWithTable`,
   `FailedBootTableWriteRefusesBootThenRetrySucceeds`).
 
-#### Gate G-V2 — guest command release (restates G-295-2)
+#### Gate G-V2 — guest command release
 
 - **Existing evidence:** G-295-2; ADR-0131 (raise after intercept-live,
   before EXEC); the EXEC claim (`exec.claim_release()`) and
@@ -12143,7 +11647,7 @@ through the production owners over `SimFlowForwarder`; kernel effects
 - **Evidence lane:** seeded sim (activation racing quiescence and teardown;
   late activation after teardown); native walking skeleton (V-6).
 
-#### Gate G-V3 — allocation forwarding activation (replaces G-295-3)
+#### Gate G-V3 — allocation forwarding activation
 
 - **Existing evidence:** ADR-0131; shim `activate_guest_network`.
 - **Owner:** the owner's `activate`.
@@ -12170,7 +11674,7 @@ through the production owners over `SimFlowForwarder`; kernel effects
   connect before Active is refused, a dial before Active is `NotServing`);
   Tier-3 (R5-41, the V-22 kill-and-reuse shape through `serve`).
 
-#### Gate G-V4 — VMM vsock device (replaces G-295-4)
+#### Gate G-V4 — VMM vsock device
 
 - **Existing evidence:** G-295-4; ADR-0082 (VMM port), ADR-0129 (launch hook),
   ADR-0143 (launch filter), ADR-0146 (device opened by the VMM), ADR-0161
@@ -12219,7 +11723,7 @@ through the production owners over `SimFlowForwarder`; kernel effects
   (`LeaseOutlivesVmm`, `GuestResetEndsVmm`,
   `GuestResetEndsTheVmmAndPlacementRetries`).
 
-#### Gate G-V5 — runtime recovery reopen (restates G-295-5)
+#### Gate G-V5 — runtime recovery reopen
 
 - **Existing evidence:** G-295-5; ADR-0124 (1 s audit, 5 s bound, fail-stop),
   ADR-0160 (stop aborts, restore reopens admission only), ADR-0169 (counted
@@ -12272,7 +11776,7 @@ through the production owners over `SimFlowForwarder`; kernel effects
   `ForeignHold` → `ForeignQuiescenceHold` mapping, FHOLD-CHECK); native
   fault (V-8).
 
-#### Gate G-V6 — per-flow pairing (new)
+#### Gate G-V6 — per-flow pairing
 
 - **Owner:** the flow's acceptor (host owner for guest-opened flows,
   `overdrive-init` for host-opened flows — the `TcpAccept` a dial opens).
@@ -12312,13 +11816,13 @@ through the production owners over `SimFlowForwarder`; kernel effects
   V-6; V-28 Q3/Q4; R5-41, R5-53); unit + proptest (codec, launch token);
   Quint `owner_flows`.
 
-#### Gate G-V7 — guest network configuration before READY (restates READY's existing precondition)
+#### Gate G-V7 — guest network configuration before READY
 
 - **Existing evidence:** ADR-0082 §D4; ADR-0150; today `configure_guest_network`
   (`overdrive-init/src/main.rs`) before READY.
 - **Owner:** `overdrive-init`.
-- **Promise:** unchanged — the guest's network configuration is in place; it
-  consists of the configuration of § *Guest adaptation contract*: the guest
+- **Promise:** the guest's network configuration is in place (READY's
+  existing precondition); it consists of the configuration of § *Guest adaptation contract*: the guest
   address, the fwmark rule and `fwmark_reflect`, the attached guest capture
   programs (`Connect4`, `Sendmsg4`, `Getpeername4`, `Recvmsg4`,
   `SockRelease`), the forwarder module loaded from
@@ -12381,7 +11885,7 @@ through the production owners over `SimFlowForwarder`; kernel effects
   `0x3` from `0x2` then `0x3`; a deadline turns a slow reader into truncation
   or a spurious abort; counting only active flows against the quota lets a
   guest withholding credit hold unbounded node flow capacity.
-- **Evidence lane:** Quint `fwd_pair` (new; § *Formal protocol model*) and
+- **Evidence lane:** Quint `fwd_pair` (§ *Formal protocol model*) and
   `flow_quota`; seeded sim (the owners over `SimFlowForwarder`, scripting
   peer ends, stalled readers, socket errors and VMM death); Tier-3 (the
   module suite, which keeps V-EV-END's shapes, P-69; R5-10, R5-45, R5-49,
@@ -12394,14 +11898,20 @@ through the production owners over `SimFlowForwarder`; kernel effects
 | 1 | Available: state advances | Lease + CID `GUEST_CID_BASE + offset` | Boot completes | EXEC after Active | Active | VM boots with its CID on a device it opened | Last restore → `Reopened` | `Paired`; bytes flow, early bytes included | READY | Clean half-close propagated after drain; every byte delivered; clean EOF | `Ok(GuestStream)`; the guest application sees the gateway as peer |
 | 2 | Unavailable / timeout: typed failure in owner domain | `AdmissionCapReached`; `PoolExhausted` | `health.startup.refused` (`FdBudget`, `OwnerCgroupPlacement`, `GuestPrefixOverlapsNodeAddress`, `GuestPrefixOverlapsVipRange`, forwarder context open / probe, failed table write) | Activation failure projection | `QuiescenceLatched` / `ControlSessionPending` → retry (Quint `ActivationIsImpossibleWhileTheSessionIsPending`, `ActivationWithSessionPendingReturnsPendingThenActivates`, `ActivationWaitsForQuiescenceToEnd`); other error → activation failure | Pre-READY exit start failure (incl. a device that cannot be opened) | Fail-stop (attempts spent, or a leaked hold) | `Refused(code)`; `PairingTimeout` | Guest exits before READY | Abort with reset at every far end (0x3 with a direction open, RST, a socket error, the device release); no deadline | `Refused`, `TimedOut`, `PairingDeadline`, `NotServing`, `NoSession`, `Quiesced`, `Unreachable`, `Capacity`; no state change |
 | 3 | Unrelated state unchanged | Running allocations | — | READY unchanged | READY unchanged | Other VMs unaffected | Leases, control sessions, per-CID Active unchanged | Allocation stays Running/Stable | Other VMs unaffected | Other flows and the opposite direction unchanged | Every allocation state, quiescence and the session unchanged |
-| 4 | Late success cannot resurrect a newer terminal state | Late assign after retire refused | — | No EXEC after teardown | `activate` after `teardown` → `LeaseRetiring`, no state change (Quint `ActivateAfterTeardownIsRefusedAndChangesNothing`, `ActivateAfterTeardownNeverActivates`) | Late registration after stop torn down | Late restore after fail-stop ignored; a hold cannot be restored twice (move-only) | `Paired` after Retiring → aborted | Late READY after stop ignored An end or RST after a pair's end changes nothing (END-IDEMPOTENT); no record follows a context's release | A guest `Paired` after the dial ended is discarded and the guest half ended (U-5) |
+| 4 | Late success cannot resurrect a newer terminal state | Late assign after retire refused | — | No EXEC after teardown | `activate` after `teardown` → `LeaseRetiring`, no state change (Quint `ActivateAfterTeardownIsRefusedAndChangesNothing`, `ActivateAfterTeardownNeverActivates`) | Late registration after stop torn down | Late restore after fail-stop ignored; a hold cannot be restored twice (move-only) | `Paired` after Retiring → aborted | Late READY after stop ignored; an end or RST after a pair's end changes nothing (END-IDEMPOTENT); no record follows a context's release | A guest `Paired` after the dial ended is discarded and the guest half ended (U-5) |
 | 5 | Disconnect / reconnect | — | — | Beacon reconnect from a live CID refused; a beacon connection the CID's previous launch left queued, with its READY buffered, is closed unattributed and releases nothing (ATTR-TOKEN) | Control session lost before activate → `ControlSessionPending`; a session the CID's previous launch left queued is closed unattributed and never counts as live (ATTR-TOKEN) | VMM death or guest reset → VMM exit; host flows reset by the device release; driver observes the exit | Quiesce aborts flows; restore does not resurrect them; a quiesced host-opened flow whose V_g is still queued in the guest ends there: after the request read V_g reads EOF, reports `POLLRDHUP`, first write `EPIPE`; C is reset (K-A4, P-38) | Opener disconnect before `Paired`; control-session loss aborts every flow of the session (DG-5-F); a flow request queued by the CID's previous launch is closed unattributed, no control message (ATTR-TOKEN) | A guest reset ends the VMM (RESET-EXIT); the next launch draws a new token | `serve` SIGKILL → the context's release aborts every host pair, the guest receives 0x3 and aborts; guest PID-1 crash → VM ends → the device release aborts every host pair | Session loss ends a pending dial with `NoSession` and closes its vsock (Quint `SessionLossAbortsDialOnBothSides`); a dial after reconnect pairs (`DialAfterReconnectPairs`, `flows_two`) |
 | 6 | Feature disabled | Not applicable: single-cut replacement with no switch. Substitute: a sim-driver fixture with `transport: None` behaves as today's `network: None` | ← | ← | ← | ← | ← | ← | ← | ← | exec/process workloads keep today's plaintext TCP connect to `workload_addr:port`; the dial is used only for VM destinations |
 
 Rows 2, 4 and 5 for G-V2, G-V3, G-V5, G-V6, G-V9 and the dial need a seeded
 `overdrive-sim` invariant through the production owner path. Kernel effects
 (G-V1, G-V4, G-V6, G-V7, G-V9) need native Tier-3 on qualified metal through
-`overdrive serve` + `overdrive deploy`.
+`overdrive serve` + `overdrive deploy`, except where no `serve` stimulus
+exists: control-session loss without a VM fault (D-16) and the quiesced or
+session-lost aborted flow of R5-28 / R5-31 (D-22). There the accepted Tier-3
+lane is the in-guest lane (the guest kit's scripted host peer over the real
+vhost-vsock, the guest cell reading the production guest owner), paired with
+the seeded-sim composed rig for the host half; a `serve` cell could only
+fabricate the cause.
 
 **Additional obligations** (kernel effects Tier-3, ordering seeded sim):
 
@@ -12425,9 +11935,9 @@ Rows 2, 4 and 5 for G-V2, G-V3, G-V5, G-V6, G-V9 and the dial need a seeded
 | R5-25 | Graceful `serve` shutdown and SIGKILL leave the constant rules in place; while `serve` is down every new connection to a guest-prefix address other than the gateway (excluded, GW-LOCAL) is rejected (host-local) or dropped (remote) and reaches no host socket; the next boot converges the rules (ADR-0172) | G-V1 | Tier-3 (V-19) |
 | R5-26 | Admission racing quiescence, teardown and session loss: no flow is registered and no dial returns `Ok` on a check those events have made false; a non-blocking connect that completes after its flow was aborted sends no `Paired` and closes its socket (U-1) | G-V6 | seeded sim (+ Quint `owner_flows`) |
 | R5-27 | A datagram association to a destination refused `Policy` / `HostInternal`: its queued datagrams are discarded from the slot socket without reading payload, the slot is kept, no association is retried until the application sends again; each later send causes at most one attempt per pairing round trip — also after a 500-send burst refused every time; a connected socket aborted after `Paired` re-associates on its next datagram (U-2, EVMOD-DGRAM) | G-V6 | seeded sim (guest-owner seam) + Tier-3 |
-| R5-28 | A `Paired` from the guest for a host-opened flow the host aborted by quiescence is discarded and counted, with no reply; an `Abort` the guest receives for a flow it does not yet hold is discarded and counted, with no reply; in both orders the guest half ends through the host's close of V_h: after the request read, V_g reads EOF, reports `POLLRDHUP` and its first write fails `EPIPE` — the request read itself succeeds — and the guest owner ends the flow (U-5, K-A4, P-38) | G-V6 | seeded sim (+ Quint `owner_flows`) + Tier-3 (the V-24 shape through `serve`) |
+| R5-28 | A `Paired` from the guest for a host-opened flow the host aborted by quiescence is discarded and counted, with no reply; an `Abort` the guest receives for a flow it does not yet hold is discarded and counted, with no reply; in both orders the guest half ends through the host's close of V_h: after the request read, V_g reads EOF, reports `POLLRDHUP` and its first write fails `EPIPE` — the request read itself succeeds — and the guest owner ends the flow (U-5, K-A4, P-38) | G-V6 | seeded sim (+ Quint `owner_flows`) + Tier-3 (the V-24 shape in the in-guest lane, production guest owner, scripted host peer over vhost-vsock; § *DISTILL handoff*, D-22) |
 | R5-30 | The mTLS worker's single nft transaction writing the shared table fails (scripted) at boot: `serve` refuses to boot with its typed refusal before forwarding opens — no flow or control listener accepts and no allocation is placed; the service supervisor's restart retries, and a boot whose write succeeds serves; a failed replacement of an existing table at runtime leaves it complete; the table is observed only as absent or complete (ADR-0184) | G-V1, G-V5 | seeded sim (`SimMtlsIntercept`'s scripted failed table write) + Quint (`quiescence`: `ServeRunsOnlyWithTable`, `FailedBootTableWriteRefusesBootThenRetrySucceeds`); Tier-3 read-back R5-43, R5-48 |
-| R5-31 | The host aborts a host-opened flow before the guest accepts V_g — by quiescence, and by control-session loss followed by a reconnect: when the guest accepts V_g its request read succeeds, then V_g reads EOF, reports `POLLRDHUP` and its first write fails `EPIPE`; the guest owner ends the flow (no C, or C reset) and no guest connection of the flow is open 1 s after the abort; no byte reaches the application, which holds because the host wrote nothing on V_h after the request (H-1, P-38). Oracle: the outcome for every flow is asserted; the abort-to-reset latency is reported as p50 / p99 and not asserted (a 1,000-flow burst reached p99 112 ms on 2 vCPUs from guest scheduling, P-38) (K-A4) | G-V5, G-V6 | Tier-3 (the V-24 shape through `serve`) + seeded sim (guest-owner seam) |
+| R5-31 | The host aborts a host-opened flow before the guest accepts V_g — by quiescence, and by control-session loss followed by a reconnect: when the guest accepts V_g its request read succeeds, then V_g reads EOF, reports `POLLRDHUP` and its first write fails `EPIPE`; the guest owner ends the flow (no C, or C reset) and no guest connection of the flow is open 1 s after the abort; no byte reaches the application, which holds because the host wrote nothing on V_h after the request (H-1, P-38). Oracle: the outcome for every flow is asserted; the abort-to-reset latency is reported as p50 / p99 and not asserted (a 1,000-flow burst reached p99 112 ms on 2 vCPUs from guest scheduling, P-38) (K-A4) | G-V5, G-V6 | Tier-3 (the V-24 shape in the in-guest lane, production guest owner, scripted host peer over vhost-vsock; § *DISTILL handoff*, D-22) + seeded sim (guest-owner seam) |
 | R5-32 | Counted quiescence (QHOLD): the firewall recovery (`Recovery(IpRules)`) and a listener recovery (`Recovery(FlowListeners)`) each hold a `QuiescenceHold`; the listener recovery restores first → `StillQuiesced` (no holder list), admission stays refused and a dial returns `Quiesced`; the firewall recovery repairs, audits, restores → `Reopened`. A repair returning `Err` is a failed attempt: the recovery keeps its hold and repairs within its budget or fail-stops still holding it (D-UP-3). A hold leaked by a defect (the `LeakHold` stimulus: the composed owner's `quiesce()`, the hold dropped) raises the leaked-hold count, forwarding stays quiesced and the supervisor fail-stops `serve` with `LeakedQuiescenceHold`; the next boot converges and forwarding opens. A `restore` with a hold issued by another `QuiescenceLedger` returns `ForeignHold`, leaves the count, the latch and the leaked count unchanged, and the supervisor fail-stops with `ForeignQuiescenceHold` (D-UP-4). After every step the number of recoveries in progress plus the leaked count equals the hold count. No interleaving of recoveries reopens forwarding before every holding recovery has restored | G-V5 | seeded sim for every step up to the foreign `restore`'s unchanged owner state (+ Quint `quiescence`: the two-recovery runs, `DroppedHoldKeepsForwardingQuiescedThenFailStops` and `ForeignHoldRestoreChangesNothingThenFailStops`); the supervisor's `ForeignQuiescenceHold` fail-stop by the Quint check `quiescence-foreign-hold-ends-in-fail-stop` and the supervisor's unit test of its `ForeignHold` mapping, with no seam (FHOLD-CHECK) |
 | R5-40 | `vip_range` overlapping the guest prefix (D8-PREFIX-VIP): boot with `[dataplane.vip_allocator]` set to a range inside or straddling `100.95.0.0/16` (e.g. `100.95.255.0/24`, `100.94.0.0/15`) refuses `GuestPrefixOverlapsVipRange` naming the prefix and the range, with `health.startup.refused` reason `guest_network.probe`, before any boot effect: no veth pair, no address, no route, no nft table; a range adjacent to but disjoint from the prefix (`100.96.0.0/16`) and the default `10.96.0.0/16` boot. Proptest: refusal iff some range of the `VipRange` intersects the prefix | G-V1 | unit + proptest (overlap predicate) + seeded sim (no effect before refusal) |
 | R5-41 | Launch attribution (ATTR-TOKEN): an allocation's VM writes its control open, a flow request of each kind and READY, then its VMM is killed before the host accepts them; the CID's next allocation is placed and its VM boots. Every connection of the dead launch that the host then accepts — with the new allocation's CID as peer and its buffered first record intact — is closed unattributed (`StaleLaunch`): it takes no session or beacon claim, releases no READY, registers no flow beyond its check, sends no control message on the new session, and causes no resolution, connect or `Paired`; a queued connection with no buffered bytes fails its first read and is closed. The new launch's session, flows and READY are accepted. A connect of the new VM from a 4-tuple a stale entry still holds is refused until the host has accepted and closed that entry, then succeeds on retry (control session, beacon). The dead launch's session and beacon claims are released before the CID's next lease exists (teardown before `pool.release`), so the new launch's session and READY are never refused `SessionHeld`. A dead launch's control connection (and its beacon connection with a buffered READY) accepted while the CID is still Provisioned (launch live) and read only after teardown (`driver.stop`) is closed at its read (`StaleLaunch` / `NoLiveLaunch`) and takes no claim; after `pool.release` the next lease's session takes the claim, activation runs on that live session, and no `Abort` or other control message crosses launches (ATTR-LIVE-CLAIM). A guest reset ends the VMM (RESET-EXIT); the next launch draws a new token. Proptest (codec): every request kind, `ControlOpen` and READY round-trip with the token; an all-zero token is refused | G-V2, G-V3, G-V6 | unit + proptest (codec, `LaunchToken`) + seeded sim (production owner and VM driver, stale queued connections scripted at the private seam) + Quint (`owner_flows`) + Tier-3 (kill-and-reuse through `serve` + `deploy`, the P-37 shape) |
@@ -12442,9 +11952,9 @@ Rows 2, 4 and 5 for G-V2, G-V3, G-V5, G-V6, G-V9 and the dial need a seeded
 | R5-54 | leg-S over vsock (temporary until #303): a remote mesh client's request and the guest application's reply cross byte-exact both ways; FIN ↔ 0x2 in both directions; a TLS-peer RST makes leg-S close the vsock while open (0x3) and the guest application sees `ECONNRESET`; a guest-application RST arrives as `GuestStreamEnd::Abort` (through the forwarder's watch on V_h) and leg-S resets the TLS client (`SO_LINGER{1,0}`); VMM death mid-transfer gives the client a reset with no hang (V-28 Q2). LEGS-DIAL (D-14): the dial is made by the inbound enforcement after the handshake — a client refused by peer verification causes no dial (no `DialPurpose::Relay` entry ever appears in the owner's `dials`); a dial error resets leg C and returns `MtlsEnforcementError::GuestDial`; 0.5-RTT request bytes reach the guest before later bytes; ending the connection (TLS-peer RST, self-teardown) ends the relay and the `GuestStream`'s drop delivers `0x3` and releases the flow's quota (`held_flows` back to its prior value) | G-V9, dial | Tier-3 (through `serve` + `deploy`) + seeded sim (the composed rig's `SimMtlsEnforcement` built with its `OwnerDial`) |
 | R5-55 | CID lease without a kernel claim (CID-NOCLAIM, NO-SURVIVE): (a) every lease's CID is `GUEST_CID_BASE + offset` and unique among held leases, next-fit unchanged; (b) the VMM opens `/dev/vhost-vsock` itself and no Overdrive process holds a vhost-vsock fd at any time (`/proc/<pid>/fd` of `serve` and its children); (c) the lease is released only after the VMM has exited; (d) with VMs running, `serve` SIGKILL → the next boot ends every VMM it does not supervise before the first `assign`, their host flows are reset, and a deploy assigned a reclaimed CID boots on it (V-RECLAIM); (e) no VM keeps running across a `serve` restart (#312) | G-V0, G-V4 | unit + proptest (pool) + seeded sim + Quint (`cid_lease`) + Tier-3 |
 | R5-56 | A guest reset ends the VMM (RESET-EXIT): a guest PID-1 crash under `panic=1` before and after READY, a triple fault (`reboot=t`) and `reboot -f` each end the VMM; no second guest boot occurs under the same VMM; host flows to the guest are reset; the driver observes a pre-READY start failure (`VmGuestExitUnreported`) or a post-READY exit with no guest `EXIT` record (`WorkloadCrashedImmediately`), whatever the VMM's exit status, and a crash loop is charged against the restart budget until it is spent; a guest `poweroff` after `EXIT 0` lands `Terminated` as today | G-V4 | Tier-3 (fork build, V-30-FORK) + seeded sim (VM driver) + Quint (`cid_lease`) |
-| R5-57 | Forwarder inventory (D-UP-17; PD-5, approved 2026-10-14; the real-adapter pair of `SimFlowForwarder::inventory()`): through the production owner on the real `KernelFlowForwarder`, with N flows held on the node — guest-opened TCP flows, datagram associations, `DialPurpose::Relay` and `DialPurpose::Probe` dials — `inventory().live_pairs` and `live_watches` count every pair and watch those flows hold; each flow's end (clean close, abort, a dropped `GuestStream`, a dial's error) returns them to the count before it once its end record is read, and an allocation's teardown returns all of its pairs and watches. The same stimulus sequence driven against `SimFlowForwarder` (the composed rig) yields the same counts after every step. Bounds: N ≤ 64 per run; cleanup by teardown, then the inventory reads zero. **Through `serve` (D-15, architect 2026-10-19):** the counts are read from the running node's owner through `ServerHandle::guest_flow_observation()` (`integration-tests` only; § *Owner and provisioner*), whose `forwarder_inventory` is `ForwarderInventoryRead::Read` of the owner's own context's `inventory()` (any other variant fails the cell) — the node's one serving host context, so no node-wide sum is needed (phase 1's probe context is released before boot continues, D-8); the flows are opened by guest-kit microVMs (T-1, scripted guest peers) and by the probe runner and leg S of the same node | dial, G-V6 | Tier-3 through `overdrive serve` + the public deploy handler on native metal (`integration-tests,kvm-tests`, `cargo xtask metal run`, guest-kit fixture, `host-kernel-shared`) + seeded sim (composed rig) |
+| R5-57 | Forwarder inventory (D-UP-17; PD-5, approved 2026-10-14; the real-adapter pair of `SimFlowForwarder::inventory()`): through the production owner on the real `KernelFlowForwarder`, with N flows held on the node — guest-opened TCP flows, datagram associations, `DialPurpose::Relay` and `DialPurpose::Probe` dials — `inventory().live_pairs` and `live_watches` count every pair and watch those flows hold; each flow's end (clean close, abort, a dropped `GuestStream`, a dial's error) returns them to the count before it once its end record is read, and an allocation's teardown returns all of its pairs and watches. The same stimulus sequence driven against `SimFlowForwarder` (the composed rig) yields the same counts after every step. Bounds: N ≤ 64 per run; cleanup by teardown, then the inventory reads zero. **Through `serve` (D-15):** the counts are read from the running node's owner through `ServerHandle::guest_flow_observation()` (`integration-tests` only; § *Owner and provisioner*), whose `forwarder_inventory` is `ForwarderInventoryRead::Read` of the owner's own context's `inventory()` (any other variant fails the cell) — the node's one serving host context, so no node-wide sum is needed (phase 1's probe context is released before boot continues, D-8); the flows are opened by guest-kit microVMs (T-1, scripted guest peers) and by the probe runner and leg S of the same node | dial, G-V6 | Tier-3 through `overdrive serve` + the public deploy handler on native metal (`integration-tests,kvm-tests`, `cargo xtask metal run`, guest-kit fixture, `host-kernel-shared`) + seeded sim (composed rig) |
 | R5-58 | Supervisor audit detection and attempt counting (Q-1, UP-7; PD-5, approved 2026-10-14): seeded `overdrive-sim` scenario through the production runtime supervisor and the production owner (`SimClock`, the seam sims), seed printed and triggering sequence retained. Faults: a runtime component's task exits at a random instant; a repair scripted to return `Err` k times (k below and at the budget); a post-repair audit scripted to fail. Invariants: `AuditDetectsComponentExitWithinOneTick` — every component task exit is reported by the audit within one `SimClock` audit period (1 s) of the exit; `RepairErrIsOneFailedAttempt` — each repair `Err` and each failed post-repair audit raises that recovery's `failed_attempts` (QPROJ-6) and `recovery_progress()` `attempts` by exactly one, and the recovery keeps its hold (`quiescence_holds` unchanged); `EpisodeEndsByRestoreOrFailStop` — every episode ends by `restore` within the budget or by `ServeShutdownRequest::SharedGuestNetwork` when it is spent, never by its hold being dropped (`leaked_quiescence_holds` stays 0). Bounds: at most 3 components damaged per run, 10 s of sim time; cleanup by dropping the composition | G-V5 | seeded sim |
-| R5-59 | Accept-path adapter equivalence (D-UP-19; PD-5, approved 2026-10-14). Oracle for every pair, compared per connection and order-insensitively: no connection is observable through the adapter before `accept` returns it (the listener reports only readiness); each accepted connection carries its peer identity and its buffered first record byte-exact, whatever its queue position; one with no buffered record yields no record. The dead-peer facts (K-A2′) are R5-41's. **(a) Host seams** — `HostGuestFlowIo` / `SimGuestFlowIo` and `VsockBeaconIo` / `SimBeaconIo`: the same connections (distinct source ports, a first record buffered or none) are opened to the real listener and to the sim from a scripted guest vsock peer inside a CH microVM at a leased CID (D-1, architect 2026-10-18). The vsock loopback transport cannot serve: every loopback peer is `VMADDR_CID_LOCAL` (1), which is not a `GuestCid`, and both adapters close a connection from a peer CID outside the `GuestCid` range without returning it (`HostGuestFlowIo::accept`, `BeaconIo::accept`). That closing rule only keeps the kernel CID → `GuestCid` conversion total; it adds no runtime path on the appliance, where only a VMM launched with a leased CID reaches these listeners from a guest and no Overdrive process connects to them over the local transport. Widening `GuestCid` to admit 1 would put a test-only state in a production type (rejected). The microVM peer runs no Overdrive owner and opens raw connections to the host's ports 1240 (the `Stream` flow listener, which also takes datagram flows, kind 2, EVMOD-DGRAM), 1243 (`Control`) and 1234 (the beacon); there is no other host vsock listener; its packets enter through vhost's `virtio_transport_recv_pkt` (`drivers/vhost/vsock.c:555 @ v7.0`), which dispatches a request on a listener to `virtio_transport_recv_listen` (`net/vmw_vsock/virtio_transport_common.c:1685 @ v7.0`), so the child creation and accept-queue insertion are the production path (`net/vmw_vsock/virtio_transport_common.c:1557-1590 @ v7.0`), and the key each adapter returns carries the guest's real CID, so these runs also check CID attribution (K-A1, V-10). The fixture is the guest-kit microVM fixture with a scripted guest vsock peer (T-1), DISTILL-owned test support built in this DISTILL round; R5-59 (a) is a required cell, the named Tier-3 pair of the `SimBeaconIo` / `SimGuestFlowIo` accept arbiters, and is not replaced by R5-41 (which covers only the dead-peer facts, K-A2′). The lane is native metal (`integration-tests,kvm-tests`, `cargo xtask metal run`). The listeners bind fixed node-global ports, so these tests run in the `host-kernel-shared` nextest group. **(b) Guest seam** — `KernelGuestOwnerIo` / `SimGuestOwnerIo`: not run over host loopback, because `KernelGuestOwnerIo` is built only from `KernelGuestTransportOps`, whose setup (dummy device, workload address, fwmark rule, program loads) a host test cannot run without changing the host. It runs in the microVM lane: the production `overdrive-init` in a CH microVM, the host test opening connections to the guest's CID on `GUEST_INBOUND_PORT` with a `TcpAccept` request buffered or not; a connection with its request is served (the guest application accepts it and bytes round-trip), one without is closed with no application connection. The same connections driven through `SimGuestOwnerIo` into an in-process `GuestFlowOwner` yield the same per-connection outcome | — (owner I/O seams) | (a) native metal microVM (`integration-tests,kvm-tests`, `cargo xtask metal run`, source-local beside each seam, `host-kernel-shared`; T-1 fixture); (b) native metal microVM (`integration-tests,kvm-tests`, `cargo xtask metal run`) |
+| R5-59 | Accept-path adapter equivalence (D-UP-19; PD-5, approved 2026-10-14). Oracle for every pair, compared per connection and order-insensitively: no connection is observable through the adapter before `accept` returns it (the listener reports only readiness); each accepted connection carries its peer identity and its buffered first record byte-exact, whatever its queue position; one with no buffered record yields no record. The dead-peer facts (K-A2′) are R5-41's. **(a) Host seams** — `HostGuestFlowIo` / `SimGuestFlowIo` and `VsockBeaconIo` / `SimBeaconIo`: the same connections (distinct source ports, a first record buffered or none) are opened to the real listener and to the sim from a scripted guest vsock peer inside a CH microVM at a leased CID (D-1). The vsock loopback transport cannot serve: every loopback peer is `VMADDR_CID_LOCAL` (1), which is not a `GuestCid`, and both adapters close a connection from a peer CID outside the `GuestCid` range without returning it (`HostGuestFlowIo::accept`, `BeaconIo::accept`). That closing rule only keeps the kernel CID → `GuestCid` conversion total; it adds no runtime path on the appliance, where only a VMM launched with a leased CID reaches these listeners from a guest and no Overdrive process connects to them over the local transport. Widening `GuestCid` to admit 1 would put a test-only state in a production type (rejected). The microVM peer runs no Overdrive owner and opens raw connections to the host's ports 1240 (the `Stream` flow listener, which also takes datagram flows, kind 2, EVMOD-DGRAM), 1243 (`Control`) and 1234 (the beacon); there is no other host vsock listener; its packets enter through vhost's `virtio_transport_recv_pkt` (`drivers/vhost/vsock.c:555 @ v7.0`), which dispatches a request on a listener to `virtio_transport_recv_listen` (`net/vmw_vsock/virtio_transport_common.c:1685 @ v7.0`), so the child creation and accept-queue insertion are the production path (`net/vmw_vsock/virtio_transport_common.c:1557-1590 @ v7.0`), and the key each adapter returns carries the guest's real CID, so these runs also check CID attribution (K-A1, V-10). The fixture is the guest-kit microVM fixture with a scripted guest vsock peer (T-1), DISTILL-owned test support; R5-59 (a) is a required cell, the named Tier-3 pair of the `SimBeaconIo` / `SimGuestFlowIo` accept arbiters, and is not replaced by R5-41 (which covers only the dead-peer facts, K-A2′). The lane is native metal (`integration-tests,kvm-tests`, `cargo xtask metal run`). The listeners bind fixed node-global ports, so these tests run in the `host-kernel-shared` nextest group. **(b) Guest seam** — `KernelGuestOwnerIo` / `SimGuestOwnerIo`: not run over host loopback, because `KernelGuestOwnerIo` is built only from `KernelGuestTransportOps`, whose setup (dummy device, workload address, fwmark rule, program loads) a host test cannot run without changing the host. It runs in the microVM lane: the production `overdrive-init` in a CH microVM, the host test opening connections to the guest's CID on `GUEST_INBOUND_PORT` with a `TcpAccept` request buffered or not; a connection with its request is served (the guest application accepts it and bytes round-trip), one without is closed with no application connection. The same connections driven through `SimGuestOwnerIo` into an in-process `GuestFlowOwner` yield the same per-connection outcome | — (owner I/O seams) | (a) native metal microVM (`integration-tests,kvm-tests`, `cargo xtask metal run`, source-local beside each seam, `host-kernel-shared`; T-1 fixture); (b) native metal microVM (`integration-tests,kvm-tests`, `cargo xtask metal run`) |
 | R5-60 | Per-allocation probe cap (D-UP-12): `overdrive deploy` of a spec with 8 probes in total (e.g. 3 startup, 3 readiness, 2 liveness; and 8 startup probes, several probes of one role) is accepted and every probe runs; 9 in total (including 8 declared readiness and liveness probes with no startup section, so the inferred default startup probe is the ninth) is refused with `ParseError::ProbeCountExceeded { count: 9, max: 8 }` and its `Display` text, before any intent write; the API ingress refuses the same vectors with `AggregateError::Validation { field: "probes", .. }` carrying that text. With 8 probes on one allocation all dialling at once, every dial takes a node flow slot and pairs | — (deploy validation) | unit + proptest (count boundary) + seeded sim (8 concurrent probe dials, Sim guest) |
 | R5-PROBE-COUNT | Probe-run counting (PROBE-RUN-COUNT with D-1, PROBE-NOSAMPLE, PROBE-NOSAMPLE-EVENT). Seeded `overdrive-sim` scenario (seed printed, triggering sequence retained) over the production `ServiceLifecycle` reconciler driven by the reconciler runtime (`run_convergence_tick` with the evaluation broker), the production `ProbeRunner` probe tasks, and `SimObservationStore`, `SimClock` and the Sim `GuestStreamDial` at the driven ports; a VM allocation (today the only kind whose driver runs probes: its one `ProbeRunner::start_alloc` call, `vm_driver.rs:1922`; the `probe_runner` field, `:956`) with a TCP liveness (threshold 3), a TCP readiness (threshold 2) and a TCP startup probe. The probe target is the allocation's `workload_addr`, inside the guest prefix, so every probe run is a `GuestStreamDial::dial(…, DialPurpose::Probe)` and the runner's `TcpProber` / `HttpProber` adapters are never called: a written `Pass` run is a dial scripted `Ok` (the stream dropped at once), a written `Fail` run a dial scripted to fail (`Refused`), and a variant with HTTP probes runs the request over the Sim guest stream (2xx = `Pass`; non-2xx or the timeout = `Fail`). Healthy baseline: one look per written run. Faults, each against that baseline: (a) coalesced looks — several runs written between two looks, and many looks per run (broker submits coalescing at one (reconciler, target), `eval_broker.rs:109-124`); (b) adapter error — a second VM allocation whose HTTP liveness probe's `path` passes the parse checks but is not a valid request target, the only `adapter_error` a VM probe can reach (§ *[REF] VM probe runner*, *The not-sampled event*): every run writes no row and emits `probe.not_sampled { reason: "adapter_error", detail }`; (c) write failure (`SimObservationStore::inject_write_failure`); (d) a VM probe dial scripted `Capacity` (node slots) and `Quiesced`; (e) a backward wall-clock step between written runs; (f) resubmit after GC — the workload's intent is deleted, its allocation is stopped `SystemGc`, the workload is resubmitted (the `workload_gc_absent_intent.rs` scenario-2 shape): the new allocation's id differs from every earlier one, its first row carries `run_seq` 1 and `same_status_runs` 1 and is stored, and no row of the earlier allocation is read for it; (g) a status that changes between two looks — `Fail`, look, `Pass` and `Fail` written, look; (h) a failed stop — the driver port's `Driver::stop` scripted to return an error other than `NotFound` for the allocation's first liveness stop (the shim returns `ShimError::Driver`, `action_shim/mod.rs:3229-3233`, and the allocation stays `Running`), then further looks re-read the row and further `Fail` runs are written, and the next stop is scripted to succeed. Oracle, at every look and after the last: every written row's `same_status_runs` equals the true count of consecutive written runs of its status ending with it (faults a–g included); no liveness terminate unless the latest row is a `Fail` with `same_status_runs` ≥ 3 — so never before 3 consecutive written `Fail` runs, fault (g) included; the liveness stop calls at the driver port for the allocation are exactly: one at the look that first sees a crossed row, none from a re-read of a row already acted on, one more for each later crossed row seen while the allocation is still `Running` after a failed stop (fault h), and none after a stop that succeeded; `liveness_last_acted_run` equals the `run_seq` of the row last acted on; readiness backend-eligible only while the latest readiness row is a `Pass` with `same_status_runs` ≥ 2; a look that sees no new `run_seq` changes no verdict, emits no action and leaves `liveness_last_acted_run` unchanged; a run that writes no row writes or changes no row, emits exactly one `probe.not_sampled` with the matching `reason`, and the next written row reuses its number and continues the streak of the last written row; the stored row after every write is the row with the greatest `run_seq` (fault e included); after (f), the fresh allocation's verdicts follow its own rows only. Bounds: at most 6 runs per key and 3 looks per run; cleanup by dropping the composition. Pairs with `specs/quint/probe-count` runs `HappyPathThreeFailsTerminateAtThreshold`, `CoalescedFailsTerminateOnFirstLook`, `MissingSampleChangesNothing`, `ReReadAfterFailedStopDoesNotReTerminate`, `FailedStopRetriedOnNextRow`, `NewStreakAfterPassTerminatesAgain`, `FlipBetweenLooksNoEarlyTerminate`, `ReadinessReachesThreshold`, `ClockStepBackDoesNotLoseRow`; discharges assumptions PC-1 to PC-4, and is the production evidence for `NoReactOnSameRow` and `NoMissedTerminate`, whose terminate count the conformance driver does not project | Probes (Service Stable / backend eligibility) | seeded sim |
 | R5-PROBE-MERGE | The probe row merges by `run_seq` identically in both adapters: one sequence of `write_probe_result` calls per key — a greater `run_seq`, an equal one, a smaller one, a greater `run_seq` with an earlier `last_observed_at_unix_ms`, an undecodable stored row (host adapter), and a failed write of a greater `run_seq` followed by a write of the same `run_seq` — driven through `LocalObservationStore` (real redb in a `TempDir`) and `SimObservationStore`; after every call `list_probe_results_for_alloc` returns the same row from both, and a `SubscriptionEvent::Row` is emitted exactly for the accepted writes. The failed write returns `Err`, leaves the stored row as it was and emits no event, and the following write of that `run_seq` is accepted (the `write_probe_result` `Err` postcondition, PC-3). Host adapter: the failure is a probe-row write whose redb transaction aborts before commit, injected through a source-local fault seam of the shape of `AllocLifecycleWriteFault` (`crates/overdrive-store-local/src/observation_backend.rs:371-388`), so that case is a `#[cfg(test)]` test in `observation_backend.rs` beside the existing injected-write-failure tests (`:1649`, `:1691`) — test-support surface, DISTILL's; sim adapter: `SimObservationStore::inject_write_failure`. This is the real-adapter pairing for `SimObservationStore` as the named arbiter of the stored row in the `probe-count` conformance driver (§ *Formal protocol model*) | — | integration (`integration-tests`) |
@@ -12527,43 +12037,31 @@ items run through `cargo xtask metal run`. Completed spikes are proven facts
 (§ *Evidence classification*) and are not listed here.
 
 **Contract-shaping items.** V-5(c), V-10, V-21, V-22, V-24, V-28, V-29,
-V-30, V-31, V-32 and the drain probes T1–T6 have run, and their results are
-in the design. V-LEGB-MARK, the contract-shaping item of LEGB-DIAL, ran
-during DESIGN on Linux 7.0 before the decision was accepted and held (P-60).
-The guest-slot spikes V-1, V-2 and V-4 ran on Linux 7.0 during DESIGN and
-held for the claims the approved rulings rest on (P-62, P-63, P-65);
-K-PS2, the former contract-shaping item V-PSO2(a), is proven by V-2.
-Guest-slot V-3 ran and FALSIFIED "a slow reader is backpressure" for the
-sockmap redirect (P-64); the valve spike ran (P-66); the evmod spike and
-its follow-up ran (P-67, P-68) and the user adopted the in-kernel forwarder
-(EVMOD-ADOPT, 2026-10-16). With the redirect gone, V-3-VALVE,
-V-VALVE-COMPOSE, V-3-DGRAM, V-31-MV with its A10 remainder, A1-BOTH,
-V-32-MIX and T4a-SRC have no subject and are removed (§ *Changed
-assumptions*). The four contract-shaping forwarder spikes **V-EV-END,
-V-EV-CTL, V-EV-PAIR and V-EV-DGRAM ran on Linux 7.0 on 2026-10-16/17 and
-held** (physical host `7.0.0-38-generic`, guests and host-role VM
-`7.0.0-29-generic`): they are proven facts P-69 to P-72 (§ *Evidence
-classification*), and each pin they returned is written into the contract
-or answered (§ *[REF] vsock data path*, "Spike pins and their disposition"),
-as the user directed on 2026-10-17 (EV-PINS). **No contract-shaping item
-is open.** The attach of an ended half is refused and the flow aborted
-under the user's ruling of 2026-10-17 — the behaviour both spike modules
-measured (EVMOD-ATTACH-END) — so no attach state remains unmeasured. The
-user approved EVMOD-LIFE to EVMOD-AB on 2026-10-17. The parts of the planned V-EV
-items that did not run and do not shape a contract are listed with their
-class below the table. Each open item is classified by what its
-falsification would change (`.claude/rules/design.md` § "Run
+V-30, V-31, V-32, the drain probes T1–T6, the guest-slot spikes V-1, V-2
+and V-4 (P-62, P-63, P-65; K-PS2 is proven by V-2) and V-LEGB-MARK (P-60)
+have run on Linux 7.0 and held, and their results are in the design. The
+four contract-shaping forwarder spikes **V-EV-END, V-EV-CTL, V-EV-PAIR and
+V-EV-DGRAM ran on Linux 7.0 and held** (physical host `7.0.0-38-generic`,
+guests and host-role VM `7.0.0-29-generic`): they are proven facts P-69 to
+P-72 (§ *Evidence classification*), and each pin they returned is written
+into the contract or answered (§ *[REF] vsock data path*, "Spike pins and
+their disposition"; EV-PINS). **No contract-shaping item is open.** The
+attach of an ended half is refused and the flow aborted, the behaviour both
+spike modules measured (EVMOD-ATTACH-END), so no attach state is
+unmeasured. The parts of the planned V-EV items that did not run and do not
+shape a contract are listed with their class below the table. Each item is
+classified by what its falsification would change (`.claude/rules/design.md` § "Run
 contract-shaping validation before the design is accepted"); none changes a
 wire or persisted format, a port or driver signature, a handle shape or a
 state meaning.
 
 | ID | Item — prediction / falsification | Class | Blocks |
 |---|---|---|---|
-| V-EV-END | **Held (P-69, `spike/findings-ev-end.md`, 2026-10-17).** End classification between two forwarders on Linux 7.0: every abort a reset, every clean end EOF after the last byte, one record per id, `unclassified_eof` 0; the falsified "a TCP half needs no classifier" sentence is replaced by the `sk_error_report` rule; the watch record is queued before the original callback | Contract-shaping (ran) | Nothing (held) |
-| V-EV-CTL | **Held for (a)–(g) (P-70, `spike/findings-ev-ctl.md`, 2026-10-17); (h)–(j) reclassified below the table.** (Items (d) and (f) measured the module that had no `module_exit`; under MODULE-REFCOUNT, 2026-10-20, their successor is V-EV-UNLOAD below the table.) As planned: the module's character device run as pinned: (a) a context released with live pairs and watches by `close()` and by `kill -9` of its process — every TCP far end reads `ECONNRESET`, every vsock peer classifies an abort, no record is queued, the inventory reads zero; (b) a close storm of 16,384 pairs ending at once — exactly one record per id, none lost or duplicated, ids never reused across 10^6 attaches; (c) the watch record ordering of V-EV-END (h) under load; (d) `delete_module` returns `EBUSY` for the module with and without live pairs; (e) attach refusals with their distinct errnos (unsupported kind, a TCP socket with kTLS installed, not connected, already hooked, one socket twice); (f) a TLS ULP installed on a socket after attach (the panic shape of P-68) never panics with the permanent module; (g) a child process spawned (fork + exec of a stand-in VMM) while the context is open, then the owner killed: every pair aborts at the owner's exit, the child holds no context (`O_CLOEXEC`); (h) the recovery order: `abort_all`, close the context, open a new one — the old context's pairs are all aborted before the new open returns, and a stand-in that opens the new context before closing the old is shown keeping pairs forwarding (negative control); (i) owner abort of a watch: the holder's `read` returns end-of-stream after the record is queued, its write returns `EPIPE`, the guest classifies an abort, the holder's descriptor stays valid; (j) a stale-invocation stress: pairs ended while their sockets receive at line rate on all CPUs, ≥ 10^5 pair ends under KASAN, no use-after-free report. **Prediction:** as pinned. **Falsification:** a far end not reset at release, a lost or duplicated record, a reused id, an unload, an ambiguous errno, an oops, a context kept alive by a child, a pair forwarding after its context's release, a KASAN report | Contract-shaping (ran): a falsification would have changed the device operations, the record, the release rule or the module's lifetime | Nothing (held); pins in § *[REF] vsock data path*, "Spike pins" |
-| V-EV-PAIR | **Held (P-71, `spike/findings-ev-pair.md`, 2026-10-17), with four corrections pinned (EV-PINS); the refusal of an ended half followed by the owner's flow abort is the measured behaviour the contract keeps (EVMOD-ATTACH-END); the widened-window race moved to the module suite.** As planned (attach at pairing loses nothing, EVMOD-PAIR): the P-22 / P-23 shapes with the forwarder attached at the pinned points (host before `Paired`, guest TcpConnect on `Paired`, guest TcpAccept before `Paired`), 10,000 each: egress write + FIN before `Paired` (serial and ×8), egress server-first (the host's destination writes before the guest attaches), egress no-FIN, inbound server-first and client-first; plus a pending intake child that resets before `Paired`; and the attach-time states (U-EV-1, U-EV-2): a guest application write + FIN before `Paired` (intake child in `CLOSE_WAIT`), a reset after that FIN before `Paired` (`CLOSE` with `sk_err = EPIPE`), the destination's FIN forwarded by the host as `0x2` before the guest TcpConnect attaches and then a host abort (`0x3`) before it attaches, a guest owner close of `V_g` before the host attaches, and a stress of attach against a racing transition (a peer RST timed to land during attach, ≥ 10^5 trials, with an instrumented build that widens the window between the state read and the hook install as the negative control). **Prediction:** 10,000/10,000 byte-exact for each, every early end carried out, the reset before `Paired` aborts the flow; no attach of an accepted state returns `ENOTCONN`; the `0x2`-then-`0x3` shape aborts; under the race every transition is classified exactly once and `unclassified_eof` stays 0, while the widened control build shows unclassified ends; the source queue is the only place early bytes wait. **Falsification:** any lost, duplicated or stranded byte or end, an `ENOTCONN` for an accepted state, a clean end where an abort was sent, or an unclassified end in the production build | Contract-shaping (ran): a falsification would have changed the per-kind total orders or brought back a park | Nothing (held) |
-| V-EV-DGRAM | **Held (P-72, `spike/findings-ev-dgram.md`, 2026-10-17), with D1–D4 pinned.** As planned (datagram mode, EVMOD-DGRAM, host and guest, a real microVM): the module's datagram mode on one framed STREAM per association: sizes 0, 1, 1,431, 4,096, 4,097, 59,000 B both ways, connected and unconnected guest sockets; 10,000 mixed-size datagrams per run with sequence numbers in the payload; partial frames under credit pressure (host credit window 64 KiB); a datagram of 59,001 B and of 65,000 B; a non-reading target for 10 s (guest application and host destination); the D26 rule rejecting a transmit (`EPERM`) and an ICMP port-unreachable destination (`ECONNREFUSED`); the guest application's `recvfrom` source on replies (the existing `recvmsg4` rewrite); the guest slot release discarding a queued burst. **Prediction:** every datagram delivered once and in order, empties included; oversize dropped and counted; memory flat under the stall with drops only at the source UDP receive queue; the reply source is the original destination; the error cases end the association with `SocketError` and the expected errno; no discarded datagram reaches a later association. **Falsification:** a split, merged, duplicated, reordered or lost datagram outside the source receive-queue drop; growth under the stall; a wrong reply source | Contract-shaping (ran): a falsification would have changed the datagram mode, the frame handling or the slot release, or reopened D4 / UDP-SEQ | Nothing (held) |
-| V-LEGB-MARK | **Leg-B marks and source-binds a dial to a guest-prefix peer (LEGB-DIAL).** Netns probe with the production `fwmark 0x1 → table 100` rule and `local default dev lo table 100`, ADR-0172's constant rules, the gateway `/32` `local` route as the only route covering the prefix, and an `IP_TRANSPARENT` leg-C stand-in. Prediction: a dial marked `MTLS_TPROXY_MARK` and bound to `127.0.0.1:0` round-trips with no default route and with one (no packet on the uplink); leg-C sees `127.0.0.1:<ephemeral>`; a marked dial to a non-registered tuple is refused; a dial missing either half reaches no host socket. Falsification: `ENETUNREACH`/`EINVAL` on the full dial, another source, a packet on the uplink, delivery to a host socket. Evidence: P-60, [`spike/findings-v33-legb-mark.md`](spike/findings-v33-legb-mark.md). **Status: Held — Lima `7.0.0-38-generic` aarch64 and metal `7.0.0-29-generic` x86_64, 2026-10-13 (S1–S7; S8-equivalent with a real microVM)** | Contract-shaping: a falsification changes the leg-B dial contract or `HostMtlsEnforcement::new` | Nothing (held) |
+| V-EV-END | **Held (P-69, `spike/findings-ev-end.md`).** End classification between two forwarders on Linux 7.0: every abort a reset, every clean end EOF after the last byte, one record per id, `unclassified_eof` 0; a TCP half is classified by the `sk_error_report` rule; the watch record is queued before the original callback | Contract-shaping (ran) | Nothing (held) |
+| V-EV-CTL | **Held for (a)–(g) (P-70, `spike/findings-ev-ctl.md`); (h)–(j) are classified below the table.** (Items (d) and (f) measured the spike module; V-EV-UNLOAD below the table is their cell for the shipped module.) As planned: the module's character device run as pinned: (a) a context released with live pairs and watches by `close()` and by `kill -9` of its process — every TCP far end reads `ECONNRESET`, every vsock peer classifies an abort, no record is queued, the inventory reads zero; (b) a close storm of 16,384 pairs ending at once — exactly one record per id, none lost or duplicated, ids never reused across 10^6 attaches; (c) the watch record ordering of V-EV-END (h) under load; (d) `delete_module` returns `EBUSY` for the module with and without live pairs; (e) attach refusals with their distinct errnos (unsupported kind, a TCP socket with kTLS installed, not connected, already hooked, one socket twice); (f) a TLS ULP installed on a socket after attach (the panic shape of P-68) never panics with the spike's permanent module; (g) a child process spawned (fork + exec of a stand-in VMM) while the context is open, then the owner killed: every pair aborts at the owner's exit, the child holds no context (`O_CLOEXEC`); (h) the recovery order: `abort_all`, close the context, open a new one — the old context's pairs are all aborted before the new open returns, and a stand-in that opens the new context before closing the old is shown keeping pairs forwarding (negative control); (i) owner abort of a watch: the holder's `read` returns end-of-stream after the record is queued, its write returns `EPIPE`, the guest classifies an abort, the holder's descriptor stays valid; (j) a stale-invocation stress: pairs ended while their sockets receive at line rate on all CPUs, ≥ 10^5 pair ends on the stock 7.0 kernel, no oops. **Prediction:** as pinned. **Falsification:** a far end not reset at release, a lost or duplicated record, a reused id, an unload, an ambiguous errno, an oops, a context kept alive by a child, a pair forwarding after its context's release | Contract-shaping (ran): a falsification would have changed the device operations, the record, the release rule or the module's lifetime | Nothing (held); pins in § *[REF] vsock data path*, "Spike pins" |
+| V-EV-PAIR | **Held (P-71, `spike/findings-ev-pair.md`), with four pins (EV-PINS); an ended half is refused and the owner aborts the flow, the measured behaviour the contract keeps (EVMOD-ATTACH-END); the widened-window race is a module-suite check.** As planned (attach at pairing loses nothing, EVMOD-PAIR): the P-22 / P-23 shapes with the forwarder attached at the pinned points (host before `Paired`, guest TcpConnect on `Paired`, guest TcpAccept before `Paired`), 10,000 each: egress write + FIN before `Paired` (serial and ×8), egress server-first (the host's destination writes before the guest attaches), egress no-FIN, inbound server-first and client-first; plus a pending intake child that resets before `Paired`; and the attach-time states (U-EV-1, U-EV-2): a guest application write + FIN before `Paired` (intake child in `CLOSE_WAIT`), a reset after that FIN before `Paired` (`CLOSE` with `sk_err = EPIPE`), the destination's FIN forwarded by the host as `0x2` before the guest TcpConnect attaches and then a host abort (`0x3`) before it attaches, a guest owner close of `V_g` before the host attaches, and a stress of attach against a racing transition (a peer RST timed to land during attach, ≥ 10^5 trials, with an instrumented build that widens the window between the state read and the hook install as the negative control). **Prediction:** 10,000/10,000 byte-exact for each, every early end carried out, the reset before `Paired` aborts the flow; no attach of an accepted state returns `ENOTCONN`; the `0x2`-then-`0x3` shape aborts; under the race every transition is classified exactly once and `unclassified_eof` stays 0, while the widened control build shows unclassified ends; the source queue is the only place early bytes wait. **Falsification:** any lost, duplicated or stranded byte or end, an `ENOTCONN` for an accepted state, a clean end where an abort was sent, or an unclassified end in the production build | Contract-shaping (ran): a falsification would have changed the per-kind total orders or required a park | Nothing (held) |
+| V-EV-DGRAM | **Held (P-72, `spike/findings-ev-dgram.md`), with D1–D4 pinned.** As planned (datagram mode, EVMOD-DGRAM, host and guest, a real microVM): the module's datagram mode on one framed STREAM per association: sizes 0, 1, 1,431, 4,096, 4,097, 59,000 B both ways, connected and unconnected guest sockets; 10,000 mixed-size datagrams per run with sequence numbers in the payload; partial frames under credit pressure (host credit window 64 KiB); a datagram of 59,001 B and of 65,000 B; a non-reading target for 10 s (guest application and host destination); the D26 rule rejecting a transmit (`EPERM`) and an ICMP port-unreachable destination (`ECONNREFUSED`); the guest application's `recvfrom` source on replies (the existing `recvmsg4` rewrite); the guest slot release discarding a queued burst. **Prediction:** every datagram delivered once and in order, empties included; oversize dropped and counted; memory flat under the stall with drops only at the source UDP receive queue; the reply source is the original destination; the error cases end the association with `SocketError` and the expected errno; no discarded datagram reaches a later association. **Falsification:** a split, merged, duplicated, reordered or lost datagram outside the source receive-queue drop; growth under the stall; a wrong reply source | Contract-shaping (ran): a falsification would have changed the datagram mode, the frame handling or the slot release, or reopened D4 / UDP-SEQ | Nothing (held) |
+| V-LEGB-MARK | **Leg-B marks and source-binds a dial to a guest-prefix peer (LEGB-DIAL).** Netns probe with the production `fwmark 0x1 → table 100` rule and `local default dev lo table 100`, ADR-0172's constant rules, the gateway `/32` `local` route as the only route covering the prefix, and an `IP_TRANSPARENT` leg-C stand-in. Prediction: a dial marked `MTLS_TPROXY_MARK` and bound to `127.0.0.1:0` round-trips with no default route and with one (no packet on the uplink); leg-C sees `127.0.0.1:<ephemeral>`; a marked dial to a non-registered tuple is refused; a dial missing either half reaches no host socket. Falsification: `ENETUNREACH`/`EINVAL` on the full dial, another source, a packet on the uplink, delivery to a host socket. Evidence: P-60, [`spike/findings-v33-legb-mark.md`](spike/findings-v33-legb-mark.md). **Status: Held — Lima `7.0.0-38-generic` aarch64 and metal `7.0.0-29-generic` x86_64 (S1–S7; S8-equivalent with a real microVM)** | Contract-shaping: a falsification changes the leg-B dial contract or `HostMtlsEnforcement::new` | Nothing (held) |
 | V-LEGB-SERVE | **Same-node mesh dial to a VM backend through `overdrive serve` + `overdrive deploy`.** The production leg-B, leg-C, guest-flow owner and leased `workload_addr`, on a node with no default route and on one with a default route. Prediction: the dial round-trips through leg-C → leg-S → `GuestStreamDial`; leg-C's accepted peer is `127.0.0.1:<ephemeral>`; no packet on the uplink. Falsification: `ENETUNREACH` or `EINVAL` at the leg-B `connect()`, a hang, or a packet leaving by the uplink. Also in scope: concurrent same-node leg-B dials with `IP_BIND_ADDRESS_NO_PORT` set and unset, recording whether the unset run exhausts the ephemeral range on `127.0.0.1` at its size and the set run does not (V-LEGB-MARK did not compare them) | Not contract-shaping: the mechanism and its fail-closed shapes are measured (V-LEGB-MARK); this run confirms it through the production leg-B, leg-C, owner and `workload_addr`, and a failure is a DELIVER defect, not a contract change | DELIVER of the leg-B dial step |
 | V-30-FORK | **RESET-EXIT fork build.** The fork routes the guest-reset dispatch to the VMM exit path (today `vmm/src/lib.rs:2088-2094` in `vendors/cloud-hypervisor` calls `vm_reboot`). With the pinned build and the production VM driver: guest PID-1 crash under `panic=1` (before and after READY), triple fault (`reboot=t`), `sysrq-b`, `reboot -f`. Prediction: the VMM exits at the first reset in every case; no second guest boot; host flows reset; the driver observes a pre-READY `VmGuestExitUnreported` or a post-READY `WorkloadCrashedImmediately` (no guest `EXIT` record); a guest `poweroff` after `EXIT 0` lands `Terminated`. Falsification: any in-place reboot, a VMM alive after a reset, or a reset classified other than a failure (V-30 Q3 is a source reading, not a result) | Not contract-shaping: no contract depends on the reset exit's status (the driver classifies by the absence of a guest `EXIT` record, `crates/overdrive-worker/src/vm_driver.rs:2030-2043`), and whether the VMM exits at a reset is set by the patch source, not by runtime behaviour; a falsification changes the fork patch only | DELIVER of the fork step (ADR-0182, ADR-0161) |
 | V-RECLAIM | **Serve-restart reclamation (K-C5).** `serve` SIGKILLed with VMs running; the next boot's `vm_reclamation_boot::converge` ends every VMM it does not supervise, and each reclaimed VMM's device is released (host flows reset, CID free) before the pool's first `assign`. Prediction over repeated restarts: 0 launches failing on a CID in use; every host flow of the old VMs reset; no vhost-vsock fd in the new `serve`. Discharge also needs the source citations for ADR-0159's ordering claim (a reclaimed VMM's device is released before its cgroup can be removed: `kernel/exit.c`, `kernel/cgroup/cgroup.c`, `drivers/vhost/vsock.c`). Falsification: an `assign` of a CID whose device is still open | Not contract-shaping: a falsification changes what boot reclamation waits for before the first `assign` (ordering inside `run_server`), not the lease, a port or a state meaning | DELIVER of the boot reclamation step (NO-SURVIVE) |
@@ -12571,9 +12069,9 @@ state meaning.
 | K-B2 | **Lost guest release report.** The guest `sock_release` report may be lost; the level-triggered audit finds the slot (R5-14, Tier-3 through the production guest owner). Falsification: a slot whose socket closed and that stays held past the audit period | Not contract-shaping: changes the audit cadence or the slot scan | DELIVER of the guest UDP slot step |
 | V-1(c) | **Production launch identity.** Does the fork, opening `/dev/vhost-vsock` itself, boot and pass data under the production launch identity — uid drop, ADR-0129 hook, ADR-0143 filter, Landlock with the fork's device rule (`vmm/src/vm_config.rs:908-910` in `vendors/cloud-hypervisor`)? V-30 ran without Landlock. Prediction: yes, under the device mode the image sets (ADR-0068). Falsification: the open refused, or the filter ending the VMM | Not contract-shaping: changes the filter allowlist, the image's device mode or the fork's rule | DELIVER of the VMM launch step |
 | V-6 | **Walking skeleton** through `overdrive serve` + `overdrive deploy`: a VM service dials a mesh peer by name, reaches a non-mesh address over TCP and UDP (an empty datagram included) through the real NIC, reaches a mesh service's VIP over TCP (mTLS through leg-F, D24a) and a service VIP over UDP (`connect4`; includes the confirmation that the ADR-0053 attachment at `overdrive.slice` rewrites owner sockets in `overdrive.slice/control-plane.slice`), is reached inbound by a remote client through leg-C → leg-S → dial, and its TCP and HTTP probes over the dial follow the application's state | Not contract-shaping: a composition of proven mechanisms | DELIVER (10-01 replacement) |
-| V-8 | **Fail-closed in the production composition:** `serve` SIGKILL and guest PID-1 crash through `serve` + `deploy`; seeded sim for quiesce / restore, a leaked hold (P-27 partial), leg-F loss, the `Forwarder` recovery and control-session loss without a VM fault (D-16, round 10: no production stimulus exists through `serve` + `deploy`; the seeded-sim composed rig plus the in-guest session cells on the guest-kit lane are its evidence, Roadmap 10-02). Kernel effects at Tier 3: the `Forwarder` recovery's by R5-61; leg-F's repair by the worker-level cell `leg_f_repair_rebinds_transparent_listener` (`overdrive-worker` integration, its own test binary, real `HostMtlsIntercept` under `host-kernel-shared`: end leg F's accept task by an `EMFILE` accept error with the listener still `LISTEN`, drive the supervisor's repair port, assert the `IP_TRANSPARENT` re-bind returns no `EADDRINUSE`, the old descriptor closed, a new `LISTEN` inode, and a TPROXY-captured connection then accepts on it) — no `run_server` hook (D-9, Roadmap 10-02) | Not contract-shaping | DELIVER (10-02 replacement) |
+| V-8 | **Fail-closed in the production composition:** `serve` SIGKILL and guest PID-1 crash through `serve` + `deploy`; seeded sim for quiesce / restore, a leaked hold (P-27 partial), leg-F loss, the `Forwarder` recovery and control-session loss without a VM fault (D-16: no production stimulus exists through `serve` + `deploy`; the seeded-sim composed rig plus the in-guest session cells on the guest-kit lane are its evidence, Roadmap 10-02). Kernel effects at Tier 3: the `Forwarder` recovery's by R5-61; leg-F's repair by the worker-level cell `leg_f_repair_rebinds_transparent_listener` (`overdrive-worker` integration, its own test binary, real `HostMtlsIntercept` under `host-kernel-shared`: end leg F's accept task by an `EMFILE` accept error with the listener still `LISTEN`, drive the supervisor's repair port, assert the `IP_TRANSPARENT` re-bind returns no `EADDRINUSE`, the old descriptor closed, a new `LISTEN` inode, and a TPROXY-captured connection then accepts on it) — no `run_server` hook (D-9, Roadmap 10-02) | Not contract-shaping | DELIVER (10-02 replacement) |
 | V-19 | **Guest-prefix exposure through the production composition** (ADR-0172, GW-LOCAL): no packet to a guest-prefix address other than the gateway (excluded, GW-LOCAL) reaches a host socket or leaves the host by another route, with `serve` up and down and with and without a node default route; host-local packets are refused by the output rule (TCP `ECONNREFUSED`, UDP `EPERM` at `send()`) or fail at `connect()` with no route, and reach no host socket, remote packets dropped, leg-C-diverted connections pass both ways (R5-3, R5-25, R5-43) | Not contract-shaping: a falsification is a defect in the rules' wiring | DELIVER (the constant-rules step) |
-| V-9 | **Density and costs** through production at 1 / 64 / 1,024 / 4,096 / 16,384 attachments: audit and quiesce bounds (ADR-0124's 5 s per recovery); per-flow fds, threads and CPU separately for the forwarder (its kworkers and scratch pool) and the leg-F hop; boot time, and guest READY latency with 1,024 UDP slots (M-10); kernel memory per stalled flow and per node at 16,384 attachments; host fds and kernel memory held by pending TcpConnects to unresponsive destinations for the host's SYN-retry time (D15-R3); DNS association setup cost; cross-VM traffic with guests booted; the leg-S dial path with the production relay over a watched `V_h` — per-connection setup and bulk throughput against V-28's numbers (+~0.5 ms per connection, 12–37 % less client-to-guest bulk throughput than loopback TCP); end-record delivery under a close storm (every flow of 1,024 Active allocations half-closing at once): records per id, per-flow end latency; guest UDP delivery under concurrent associations through the production owner, every loss attributed to its stage. A result outside a pinned bound (ADR-0124's 5 s, a loss with no attributable stage) is surfaced to the user, never relaxed silently. **Classification (U-2, user ruling 2026-10-19):** the measurements — costs, latencies, throughput and memory at 1 to 16,384 attachments — are a benchmark (`testing.md` § "Classify external execution before writing it"), tracked with its methodology and baseline as [GH #326](https://github.com/overdrive-sh/overdrive/issues/326); #295's `vsock_density.rs` is a correctness test at 64 VMs (the pinned bounds and the per-id, attributable-loss contracts), not this benchmark | Not contract-shaping: bounds and costs | DELIVER (density step; replaces 08-04 / 10-05): the 64-VM correctness test; the measurements: GH #326 |
+| V-9 | **Density and costs** through production at 1 / 64 / 1,024 / 4,096 / 16,384 attachments: audit and quiesce bounds (ADR-0124's 5 s per recovery); per-flow fds, threads and CPU separately for the forwarder (its kworkers and scratch pool) and the leg-F hop; boot time, and guest READY latency with 1,024 UDP slots (M-10); kernel memory per stalled flow and per node at 16,384 attachments; host fds and kernel memory held by pending TcpConnects to unresponsive destinations for the host's SYN-retry time (D15-R3); DNS association setup cost; cross-VM traffic with guests booted; the leg-S dial path with the production relay over a watched `V_h` — per-connection setup and bulk throughput against V-28's numbers (+~0.5 ms per connection, 12–37 % less client-to-guest bulk throughput than loopback TCP); end-record delivery under a close storm (every flow of 1,024 Active allocations half-closing at once): records per id, per-flow end latency; guest UDP delivery under concurrent associations through the production owner, every loss attributed to its stage. A result outside a pinned bound (ADR-0124's 5 s, a loss with no attributable stage) is surfaced to the user, never relaxed silently. **Classification (U-2):** the measurements — costs, latencies, throughput and memory at 1 to 16,384 attachments — are a benchmark (`testing.md` § "Classify external execution before writing it"), tracked with its methodology and baseline as [GH #326](https://github.com/overdrive-sh/overdrive/issues/326); #295's `vsock_density.rs` is a correctness test at 64 VMs (the pinned bounds and the per-id, attributable-loss contracts), not this benchmark | Not contract-shaping: bounds and costs | DELIVER (density step; replaces 08-04 / 10-05): the 64-VM correctness test; the measurements: GH #326 |
 
 **V-EV-BUILD (not contract-shaping; DELIVER of the forwarder step).** The
 module builds with `cargo xtask kmod-build` against the build tree of each
@@ -12593,20 +12091,20 @@ falsification changes the build, the kit or provisioning, not a contract.
 **V-EV-SAFE (not contract-shaping; DELIVER of the forwarder step; the
 planned V-EV-CTL (j)).** Pairs ended while their sockets receive at line
 rate on every CPU and while the owner issues `OVD_FWD_ABORT` and
-`OVD_FWD_PAIR_STATE` on the ids that are ending, ≥ 10^5 pair ends, a KASAN
-build: no use-after-free, no
+`OVD_FWD_PAIR_STATE` on the ids that are ending, ≥ 10^5 pair ends, on the
+stock 7.0 kernel: no oops, no
 recursion into an override, and every event delivered to the restored
 callback (ADR-0204). In the same suite, a direction stalled on a full
 target resumes through the target's write-space wait-queue entry for each
 target kind: a TCP target, a vsock target with its peer's credit exhausted,
-and a UDP target whose send buffer is full (the earlier `sk_write_space`
+and a UDP target whose send buffer is full (the `sk_write_space`
 override's resumption, P-67 and P-72 § 8, is not evidence for the entry).
 These cases check correctness only; P-67's throughput and latency figures
 were measured with the override and are re-measured with the entry under
 V-9's benchmark (GH #326). A failure is a module defect fixed in the module; the
 port, the record and the release rule do not change.
 
-**V-EV-UNLOAD (MODULE-REFCOUNT, 2026-10-20; not contract-shaping; DELIVER
+**V-EV-UNLOAD (MODULE-REFCOUNT; not contract-shaping; DELIVER
 of step K for the context half, step 4 for the socket half).** It is the
 real-kernel cell of the unload-safety rules (ADR-0198; ADR-0204 rule 5),
 run against the built `ovd_fwd` (the kernel's refusal itself is a source
@@ -12615,8 +12113,9 @@ fact, `kernel/module/main.c:744-751`, `:828 @ v7.0`). Oracles:
 (`:889-896`).
 
 - **Context (step K).** With a context open, `refcnt` = 1 and
-  `delete_module` fails `EWOULDBLOCK`, with the module still listed and the
-  context still answering `OVD_FWD_VERSION`. After the context is closed,
+  `delete_module` fails `EWOULDBLOCK`, with the module still listed. The
+  context still answering `OVD_FWD_VERSION` is checked in step 4, where the
+  request numbers are first mirrored (`src/uapi.rs`). After the context is closed,
   `refcnt` = 0, `delete_module` returns 0 and `/sys/module/ovd_fwd` is gone.
   `finit_module` of the same `.ko` then succeeds, and a new context answers.
 - **Sockets (step 4).** With one context open:
@@ -12634,30 +12133,30 @@ fact, `kernel/module/main.c:744-751`, `:828 @ v7.0`). Oracles:
   context's, `delete_module` stays refused after the context closes, and
   the module logs the socket. The cell then ends that boot of the test
   kernel.
-- **Stress.** Under KASAN, a loop of attach, end, close and unload while
+- **Stress.** On the stock 7.0 kernel, a loop of attach, end, close and unload while
   the pairs' sockets receive at line rate on every CPU and the forwarder
   sends on every vsock and UDP half (so `sock_wfree` runs from the vhost
   worker, the guest's virtio-vsock transmit work and the NIC driver while
   pairs end), with `delete_module` attempted continuously from another CPU.
-  There is no oops, no use-after-free, and no unload while `refcnt` > 0.
-  The stress is a positive check only: it has no negative-control build,
-  because a race window hit by chance is not a dependable oracle. The
-  teeth of rule 5 are the `fwd_safe` hazard checks (`refDroppedAtUnhook`,
-  `removeWithoutSockLock`, `ulpRefReleased`, `putOnSystemQueue`, and
-  `writeSpaceOverride` of § *Formal protocol model*, "Round 16 model
-  change"), which find their violations deterministically.
+  There is no oops and no unload while `refcnt` > 0. The stress is a positive check only: it has no
+  negative-control build, because a race window hit by chance is not a
+  dependable oracle. Rule 5's unload and text-lifetime clauses are not
+  modelled (§ *Formal protocol model*); their evidence is the source reading, this cell,
+  and the module not being unloadable on the appliance
+  (`CONFIG_MODULE_UNLOAD` off, ADR-0068 § 7), so the exposure is a test
+  host's.
 
 **Placement.** The cell unloads the module, so it runs only where no other
 run depends on the loaded module. That is the native metal host under its
 exclusive lease, or inside the guest-kit microVM, whose guest kernel loads
 its own module per boot (T-1). It never runs on the shared Lima VM, where
 an unload would remove a module that another workspace's `serve` test
-holds or is about to use. The ULP control and the KASAN stress need a
-kernel boot of their own, the microVM or a KASAN guest. A failure is a
+holds or is about to use. The ULP control and the stress need a
+kernel boot of their own, the microVM. A failure is a
 module defect fixed in the module; the port, `kmod-load`'s contract and
 the release rule do not change.
 
-**Planned items that did not run, reclassified (2026-10-17).**
+**Planned items that did not run, and their class.**
 - **V-EV-CTL (h), the recovery order** (abort-all, close the old context,
   open the new one). A composition of measured kernel facts — the release
   completes before it returns and queues nothing, and one context's release
@@ -12707,39 +12206,150 @@ protocols above; everything below up to § *Probe-run counting*) and
 `specs/quint/probe-count/` (PROBE-RUN-COUNT and PROBE-NOSAMPLE; § *Probe-run counting — `specs/quint/probe-count`* at the
 end of this section).
 
-**Change list for the forwarder (EVMOD; written and recorded by the
-`quint-modeler`, first iteration).** The data-path ruling of 2026-10-16
-removes the protocol `flow_end` modelled (an owner-driven drain over kernel
-counters, ring records and classifier skips) and the empty-datagram notice
-`udp_empty` modelled; the never-written `guest_slots` and `flow_valve`
-plans are dropped. Every decision the modules encode was approved by the
-user on 2026-10-16 (EVMOD-ADOPT) and 2026-10-17 (the EVMOD-* ids).
+**Check inventory (WITNESS-HAZARD-RULE: hazards are one per ADR-level
+decision; witnesses exist only for states no named run reaches; see
+`.claude/rules/design.md` § "Concurrent protocols carry a model-checked
+Quint specification").** The `guest-flow-owner` subsystem keeps the checks
+below, recorded in `evidence/summary.json` (279 of 279 checks match
+`expect`, 209 hold and 70 expected violations). The authoritative
+list is `specs/quint/guest-flow-owner/checks.toml` with the README's
+§ *Hazards* and § *Critical scenarios ↔ named runs*; the table under
+"Hazard variants (teeth)" below is the README's § *Hazards*.
 
-**Result of the first iteration.** Recorded run `292615-1792199408.916`
-(superseded; the current evidence in
-`specs/quint/guest-flow-owner/evidence/summary.json` is
-`707089-1792512180.793`, § *Status*; this run: 2026-10-17T01:10:08Z to
-02:16:06Z; Quint 0.32.0, Apalache 0.56.1, TLC; 12 jobs; Lima kernel
-7.0.0-34; head `0f3120df`, dirty), written by `cargo xtask quint check
---subsystem guest-flow-owner --record`: 271 of 271 checks matched `expect` —
-146 hold and 125 expected violations (non-vacuity witnesses, hazards,
-rejected alternatives, environment drops); `cargo xtask quint
-verify-evidence --subsystem guest-flow-owner` passes. No open
-counterexample. `fwd_pair` as checked:
+1. **`owner-flows-guest-half-ends`** (`GuestHalfEnds`) is checked on the
+   one-flow instance `flows_one` (CFG "one": one guest-opened and one
+   host-opened flow). `flows_sess` proves a one-flow liveness instance.
+2. **Rejected alternatives are not model checks.** They stay recorded in
+   their ADRs (ADR-0183, ADR-0199, ADR-0204); no `ALT_*` knob exists in a
+   module.
+3. **No bounded copy beside an exhaustive check.** TLC checks the
+   invariants of `owner_flows`, `quiescence`, `flow_quota` and `udp_slots`
+   exhaustively on their mains. The two bounded Apalache checks,
+   `owner-flows-two-safety-apalache` and `udp-slots-safety-apalache`, run on
+   instances the exhaustive checks do not cover (item 9).
+4. **Witnesses only for a state no named run reaches.** Three:
+   `owner-flows-witness-phantom-connect`,
+   `fwd-pair-witness-watch-half-close` and
+   `fwd-pair-dgram-witness-vmm-exit`. Every other state is reached by a
+   named run of the critical-scenario table.
+5. **One hazard per ADR-level decision, not per clause.** There are 65
+   hazard checks (the 70 expected violations are these, the 3 witnesses and
+   the 2 violation-form checks of the #325-window guard pair): `fwd_pair`
+   11, `owner_flows` 15, `cid_lease` 12, `fwd_safe` 12, `quiescence` 7,
+   `udp_slots` 6, `flow_quota` 2. They are listed in the README § *Hazards*,
+   one row per decision. A hazard is one check, in the form (TLC safety or
+   liveness, or an evaluator run) that violates it. Two hazards are `run`
+   checks because their named run carries no invariant that sees the rule:
+   `cid-lease-hazard-crash-loses-placed-generation-run` (`lease_conf_325`,
+   pending GH #325) and `cid-lease-hazard-refusal-keeps-predecessor-run`
+   (`lease_conf_three`, D-18).
+6. **`fwd_pair` instance sizes.** `pair_ok`, `pair_watch` and `pair_live`
+   carry one unit each way and `pair_dgram` one datagram each way;
+   `pair_conf`, `pair_stall`, `pair_wlive` and `pair_dlive` have their own
+   bounds (`pair_conf` keeps its bounds because it records named runs).
+   `fwd-pair-safety-tlc` takes 355 s, `fwd-pair-watch-safety-tlc` 113 s,
+   `fwd-pair-dgram-safety-tlc` 169 s (in the record at 3 jobs). The four
+   `pair_live` liveness checks (`every-unit-delivered`, `every-end-resolves`,
+   `clean-half-close-completes`, `ended-half-flow-resolves`) take 312 to
+   448 s. The ordering invariants over several units or datagrams
+   (`DeliveredIsInOrderPrefix`, `DatagramsOnceInOrder`,
+   `FrameNeverSplitAcrossDatagrams`) are vacuous on the one-unit and
+   one-datagram instances; they are checked along the named runs on
+   `pair_conf` and exhaustively on `pair_mid` (two units, two datagrams;
+   item 9).
+7. **`fwd_safe`** (model-only) models pair-state-free safety (`Safety`: no
+   late callback or control call touches a freed pair's state, one end
+   record, no override calls itself, no event lost, free after readers and
+   after the work item), the end-record liveness (`EndProducesRecord`,
+   `SocketEndYieldsRecord`, `RequestedAbortEnds`, `EndedStateFreed`,
+   `EveryUnitDelivered`, `StalledPairResumes`) and its 12 hazards, one per
+   rule or trigger listed below (ADR-0204, EVMOD-SWEEP, EVMOD-WQ): 37 checks
+   (14 runs, 12 hazards, 11 TLC safety and liveness checks), under 6 minutes
+   summed. It models no
+   module unload and no text lifetime (no `Unload`, `modref`, `sref`, `ulp`
+   or `inText` state, no `NoTextRunAfterUnload` or `RefHeldWhileReachable`).
+   **Exposure.** An unload racing a late callback is reachable only on a
+   development or Tier-3 host that can unload modules; the appliance kernel
+   has `CONFIG_MODULE_UNLOAD` off (ADR-0068 § 7), so nothing unloads the
+   module there. Rule 5 of ADR-0204 is a design rule, discharged by the
+   source reading and V-EV-UNLOAD's real-kernel cell, not by a model.
+8. **`kmod-load` and `kmod-build`** carry no model; their contracts are in
+   § *Composition*, "`kmod-load`" and "Which module is loaded" (the module
+   identity is the whole-tree digest, ADR-0203).
+9. **Coverage on instances no exhaustive check reaches.** Four checks run on
+   instances no other exhaustive check covers (times alone, then in the
+   record at 3 jobs; all four are `ci = false`):
+   - **`owner_flows` on two concurrent host dials.**
+     `owner-flows-two-safety-apalache`: Safety, `max_steps` 10, on the
+     non-recording main `flows_two` (CFG `core2`: two host-opened flows, two
+     dial slots), so the cross-dial invariants (a late `Paired` resolves its
+     own dial, slot reuse) are checked outside the `core2` named runs. TLC Safety stays on
+     `flows_ok` (one host-opened flow).
+   - **`udp_slots` on two destinations.** `udp-slots-safety-apalache`:
+     Safety, `max_steps` 8, on `slots_ok` (`DESTS` {1,2}, `MAXFID` 3), so
+     `RouteCurrent`, `SlotHeldOnce` and the two-slots-one-socket case are
+     checked across destinations; the surviving TLC check runs on
+     `slots_live` (one destination).
+   - **One middle-sized `fwd_pair` instance under exhaustive Safety.**
+     `fwd-pair-mid-safety-tlc`: invariant `MidSafety` on `pair_mid`,
+     stream mode with 2 units and datagram mode with 2 datagrams, one
+     direction, `gh` only, one environment fault per trace, no watch mode.
+     `MidSafety` is `DgramSafety` in a datagram trace and `Safety`
+     otherwise (a datagram trace holds frame items in the vsock queue, so
+     `UnitsConserved` cannot hold there). It makes `UnitsConserved`,
+     `DeliveredIsInOrderPrefix`, `ConsumeOnlyAfterAccept`,
+     `DatagramsOnceInOrder` and `FrameNeverSplitAcrossDatagrams` observable
+     under a reset, a holder drop, a VMM exit or a send block while more
+     than one item is in flight.
+   - **The datagram-frame hazard**, one decision, one check on the
+     hazard-only instance `pair_dhazConsumePartialFrame` (CFG `dhaz`:
+     datagram mode, 3 datagrams, `gh`, one fault; no design module, because
+     an extra design module overran the Apalache compile heap on the hazard
+     file): `fwd-pair-hazard-consume-partial-frame`
+     (`DatagramsOnceInOrder`).
+     The hazard (a datagram consumed when only part of its frame was
+     accepted) needs a third datagram: with 2, the cut frame is the last
+     queued item and nothing joins it, and the hazard holds on `pair_mid`
+     (measured: 229 s, no violation). The separate instance keeps
+     `pair_mid` cheap. Not covered: `pair_mid` has no watch mode (the
+     `watch` instance carries one unit).
 
-- **Mains.** Six: `pair_ok` (stream, 3 units guest→host and 1 host→guest),
-  `pair_watch` (a dial: 2 / 1), `pair_dgram` (3 datagrams, one direction),
-  `pair_live` (liveness, one unit each way), `pair_stall`
-  (`StalledSenderIsBlocked`: 4 units one way, no fault) and the conformance
-  main `pair_conf` (every mode, 4 units and 3 datagrams each way, faults
-  unbounded, recording `conf_step`). Windows and credits are one unit (the
-  change list's `C` = `W` = 2 with streams of 3–4 units never blocked a
+   The cross-dial, cross-destination and datagram-ordering invariants are
+   therefore checked beyond the named runs by these four checks.
+   **`OFF` switches.** Every `OFF` string in a module belongs to a hazard
+   `checks.toml` lists. The `WatchRecord` variant of `ConfStep` and the
+   `WatchRecordBeforeWake` invariant serve the drivers' hazard-only
+   mapping.
+
+`fwd_safe` hazards (12): `fwd-safe-hazard-` `rcu-assign-null` (rule 2),
+`no-grace-period` (rule 3), `ctl-queue-outside-rcu` (rule 4),
+`watch-end-no-id-check` (rule 4, watch), `remove-wait-after-free-queued`
+(rule 5's wait-queue entry), `no-sweep-recheck` (EVMOD-SWEEP),
+`late-clear-pending` (EVMOD-WQ), `no-write-space`, `no-data-ready` and
+`no-error-report` (the three triggers), `ctl-abort-no-queue` (rule 4 /
+EVMOD-REC) and `end-split-no-requeue` (§ Order of a pair's end). Rule 1
+(`rcu_read_lock` + `smp_load_acquire`) has no hazard check of its own.
+
+**The modules of the forwarder (EVMOD).** Every decision the modules
+encode is approved (EVMOD-ADOPT and the EVMOD-* ids).
+
+**`fwd_pair` as checked.**
+
+- **Mains.** `pair_ok` (stream, one unit each way), `pair_watch` (a dial,
+  one unit each way), `pair_dgram` (one datagram each way), `pair_live`
+  (liveness, one unit each way), `pair_stall` (`StalledSenderIsBlocked`: 4
+  units one way, no fault), `pair_wlive` and `pair_dlive` (watch and datagram
+  liveness), `pair_mid` (item 9) and the conformance main `pair_conf` (every
+  mode, 4 units and 3 datagrams each way, faults unbounded, recording
+  `conf_step`). Windows and credits are one unit (a credit window and a
+  socket window of 2 units with streams of 3–4 units never blocked a
   writer); the datagram credit is three items, the largest frame.
-- **Named runs.** Nineteen, each an evaluator check on `pair_conf`: the
-  seventeen of the change list (below) and the two prefixes `Paired` and
-  `DgramPaired` (the pinned attach order, host first, guest on `Paired`).
+- **Named runs.** Each is an evaluator check on `pair_conf`: the
+  `pair_conf` rows of the critical-scenario table below and the two
+  prefixes `Paired` and `DgramPaired` (the pinned attach order, host first,
+  guest on `Paired`).
 - **Fault bound.** Every model-checking instance carries at most one
-  environment fault or owner abort per trace (`EpRst`, `DialerDrop`,
+  environment fault or owner abort per trace (`TcpRst`, `HolderDrop`,
   `VmmExit`, `UdpErr`, `Abort`, `CtxRelease`: `FMAX` = 1; the unbounded
   instance exceeded 9.7 M distinct states in 15 minutes). Two faults in one
   trace — a reset racing an owner's abort — are checked only along the named
@@ -12752,85 +12362,39 @@ counterexample. `fwd_pair` as checked:
   actions' guards, which TLC's liveness mode evaluates two orders of
   magnitude faster than per-action `weakFair`. The readers' read actions are
   not in `sysEnabled` (a reader may stop for ever).
-- **Deviations the modeller recorded.** `release-keeps-pairs` violates
+- **Hazard properties.** `release-keeps-pairs` violates
   `ReleasedContextHoldsNoPair` and `NoForwardAfterEnd`, not
   `NoEofOnPeerLoss` (a pair forwarding after its owner's death still
-  delivers every byte and shows no far end a false EOF); three more teeth
-  (`consume-on-short-send`, `drop-when-target-blocked`,
-  `shutdown-on-callback-delivery`).
+  delivers every byte and shows no far end a false EOF).
 
-**The modeller's underspecified points and the design's answers
-(2026-10-17).**
+**Pinned points of the model.**
 
 | Id | Point | Answer (where pinned) |
 |---|---|---|
-| U-EV-1 | `ENOTCONN` refused a TCP half in `CLOSE_WAIT` and a vsock half in `CLOSING`, against EVMOD-PAIR's early end | Attach accepts a still-connected half whose peer ended its direction: TCP `ESTABLISHED` and `CLOSE_WAIT` with no `sk_err`, vsock `ESTABLISHED` with any peer bits and no `sk_err` (proven, P-71). A half that has **ended** — a pending `sk_err` (TCP reset, the vsock orphan sweep) or a vsock `CLOSING` — is refused `ECONNABORTED` and the owner aborts the flow (user ruling 2026-10-17; EVMOD-ATTACH-END; § *Control interface*, "States attach and watch accept"). The second iteration's model accepted the ended states; the third iteration changes it (below) |
+| U-EV-1 | `ENOTCONN` refused a TCP half in `CLOSE_WAIT` and a vsock half in `CLOSING`, against EVMOD-PAIR's early end | Attach accepts a still-connected half whose peer ended its direction: TCP `ESTABLISHED` and `CLOSE_WAIT` with no `sk_err`, vsock `ESTABLISHED` with any peer bits and no `sk_err` (proven, P-71). A half that has **ended** — a pending `sk_err` (TCP reset, the vsock orphan sweep) or a vsock `CLOSING` — is refused `ECONNABORTED` and the owner aborts the flow (EVMOD-ATTACH-END; § *Control interface*, "States attach and watch accept"; T-4 below) |
 | U-EV-2 | How an end that reached a vsock half before attach is classified | The overrides are installed and the state read in one section under `lock_sock`, `sk_callback_lock` and, for vsock, `vsock_table_lock`, so no transition falls between them; the attach-time state is classified by the table with this side's send open — `SEND` only clean, any `RCV` or `RST` that left the socket connected abort; a pending `sk_err` or a vsock `CLOSING` refuses the attach (EVMOD-ATTACH-END) — and a `0x2`-then-`0x3` before attach is an abort as a direct `0x3` is (§ *Forwarding*, "Attach order"; § *End classification*, "Ends present at attach"). F9 is the design's rule; its discharge is V-EV-PAIR |
-| U-EV-3 | Whether `abort` of a watch and the context's release shut `V_h` | **The owner's abort does not; the release does** (WATCH-ABORT, approved by the user 2026-10-17). `abort` / `abort_all` of a watch: record queued, callbacks restored, reference dropped, `V_h` untouched; the guest learns from `Abort { flow }` and the holder's close (EVMOD-STREAM-ABORT). The release shuts every live watched `V_h` with `SHUT_RDWR`, after which the holder's `read` returns 0 or `ENOTCONN` (P-70 § 3.5). The holder's outcome is resolved by the owner — its own end of the watch, else the record, else the in-flight record (§ *Owners' use*, "`GuestStream`"). The second iteration's model (abort shuts `V_h`) changes in the third iteration (below) |
-| U-EV-4 | The host owner's death and its effect on sessions, claims, the flow table and dial results | The host owner is never replaced in-process; its end is the end of `serve`, which ends every session, claim, flow and dial, and the restart reclaims every VM (NO-SURVIVE). The only in-process context replacement is the `Forwarder` recovery, ordered abort-all → close old → open new (§ *Context lifetime and owner failure*). `owner_flows` correctly has no owner-death action; the recovery order is added to `fwd_pair` (second iteration) |
-| U-EV-5 | "`Completed` for a classified half-close" of a datagram pair names an end no owner path produces | Correct: a guest datagram association always ends by the guest owner's abort or a host abort; the host never half-closes a datagram vsock. The rule stays for a clean `0x2` (no production path sends one) and no trace is required to reach it |
-| U-EV-6 | A UDP target send blocks only on its own full send buffer; a stalled far receiver drops at its own receive queue | Correct; `DropsOnlyAtSourceQueue` reads "only at a UDP receive queue — the source's or the far receiver's — never in the forwarder or the vsock", which is the design's bound (§ *Datagram mode*, "Bound") |
+| U-EV-3 | Whether `abort` of a watch and the context's release shut `V_h` | **The owner's abort does not; the release does** (WATCH-ABORT). `abort` / `abort_all` of a watch: record queued, callbacks restored, reference dropped, `V_h` untouched; the guest learns from `Abort { flow }` and the holder's close (EVMOD-STREAM-ABORT). The release shuts every live watched `V_h` with `SHUT_RDWR`, after which the holder's `read` returns 0 or `ENOTCONN` (P-70 § 3.5). The holder's outcome is resolved by the owner — its own end of the watch, else the record, else the in-flight record (§ *Owners' use*, "`GuestStream`"; T-5 below) |
+| U-EV-4 | The host owner's death and its effect on sessions, claims, the flow table and dial results | The host owner is never replaced in-process; its end is the end of `serve`, which ends every session, claim, flow and dial, and the restart reclaims every VM (NO-SURVIVE). The only in-process context replacement is the `Forwarder` recovery, ordered abort-all → close old → open new (§ *Context lifetime and owner failure*). `owner_flows` has no owner-death action; the recovery order is in `fwd_pair` (`Reopen`) |
+| U-EV-5 | "`Completed` for a classified half-close" of a datagram pair names an end no owner path produces | A guest datagram association always ends by the guest owner's abort or a host abort; the host never half-closes a datagram vsock. The rule holds for a clean `0x2` (no production path sends one) and no trace is required to reach it |
+| U-EV-6 | A UDP target send blocks only on its own full send buffer; a stalled far receiver drops at its own receive queue | `DropsOnlyAtSourceQueue` reads "only at a UDP receive queue — the source's or the far receiver's — never in the forwarder or the vsock", which is the design's bound (§ *Datagram mode*, "Bound") |
 | U-EV-7 | No end-record cause for an end-of-stream whose class was never recorded | `AbortCause::Unclassified { side }`, record cause `5`; the owner releases, closes with `PeerReset` and raises an alarm event (§ *End classification*; § *Failure projection*). The model's label `Unclassified` is the design's cause |
-| U-EV-8 | QPROJ-8 names no accessor for the context generation and does not class the second iteration's ghosts | Pinned in QPROJ-8, "The second iteration's variables": `gen` and a pair's `cgen` are O (`flow_observation().forwarder_generation` and the `generation` of the flow's `Paired` phase, both `ForwarderGeneration`); `oldCtx` is S (`SimFlowForwarder`'s context table, named arbiter, Tier-3 pair P-70); `unclassified` is O (`inventory().unclassified_eof`); `att`, `clsAt`, `ncls`, `snap`, `fwdOld`, `rstOpen` and `holderReadAfterAbort` are model-only |
+| U-EV-8 | The accessor for the context generation and the class of the context-generation ghosts | Pinned in QPROJ-8, "Context-generation variables": `gen` and a pair's `cgen` are O (`flow_observation().forwarder_generation` and the `generation` of the flow's `Paired` phase, both `ForwarderGeneration`); `oldCtx` is S (`SimFlowForwarder`'s context table, named arbiter, Tier-3 pair P-70); `unclassified` is O (`inventory().unclassified_eof`); `att`, `clsAt`, `ncls`, `snap`, `fwdOld`, `rstOpen` and `holderReadAfterAbort` are model-only |
 
-**Result of the second iteration (recorded).** Recorded run
-`320404-1792210836.093` (superseded; the current evidence is
-`707089-1792512180.793`, § *Status*; this run: 2026-10-17T04:20:36Z to 05:30:50Z; Quint 0.32.0, Apalache 0.56.1, TLC; 12
-jobs; Lima kernel 7.0.0-34; head `0f3120df`, dirty): 291 of 291 checks
-matched `expect`; `cargo xtask quint verify-evidence --subsystem
-guest-flow-owner` passes; no open counterexample. It supersedes
-`292615-1792199408.916`. The modeller's deviations from the predictions
-below, each accepted as the more precise statement:
-- `fwd-pair-hazard-check-then-hook` violates `AttachTimeEndClassifiedOnce`
-  and `NoUnclassifiedEof` (the design's alarm aborts the unclassified end),
-  not `ClassFixedAtTransition` and `AbortNeverCleanEof`; those two are
-  violated only when the alarm is also replaced by a FIN
-  (`pair_bugCheckThenHookFin`: `fwd-pair-hazard-check-then-hook-class`,
-  `-eof`).
-- `fwd-pair-hazard-tcp-eof-is-clean` violates the new invariant
-  `ResetNeverEndsClean`, not `AbortNeverCleanEof`: in a FIN then a reset the
-  FIN is a genuine clean end of the peer's direction, and the defect is a
-  pair that completes cleanly although its peer reset with a direction open.
-- Two runs beyond the list: `GuestCloseBeforeHostAttachAborts` (the third
-  attach-time order) and `ReleasedWatchWithNoRecordReadsAsAbort`; two hazard
-  checks beyond it: `fwd-pair-hazard-watch-abort-keeps-vh` (U-EV-3 off,
-  `NoHolderReadAfterWatchAbort`) and its run.
-- The `fwd_pair` hazards are split over four files (`fwd_pair_hazards.qnt`,
-  `fwd_pair_ctl_hazards.qnt`, `fwd_pair_end_hazards.qnt`,
-  `fwd_pair_dgram_hazards.qnt`): one file of seventeen instances exceeded
-  the 2,048 MiB heap the Apalache server compiles a TLC check with.
-- `pair_live`'s three liveness checks (`EveryUnitDelivered`,
-  `EveryEndResolves`, `CleanHalfCloseCompletes`) are `ci = false` (176–229 s
-  each, 1,039,640 distinct states), as are `fwd-pair-safety-tlc` and
-  `fwd-pair-dgram-safety-tlc`.
+**Forwarder recovery (EVMOD-CTL).** A `Reopen(s)` action after
+`CtxRelease(s)` within one process (the `Forwarder` recovery) carries the
+invariants `NoPairOfReleasedContextForwards` and `OneContextPerOwner` and
+the run `ForwarderRecoveryAbortsThenReopens`: a new context is opened only
+after the old one is released.
 
-The six named runs the second iteration added, which DISTILL's `pair_conf`
-driver pins with `#[quint_test]` besides the nineteen of the first:
-`HostHalfCloseThenAbortBeforeGuestAttachIsAbort`,
-`GuestCloseBeforeHostAttachAborts`, `RemoteFinThenResetAbortsPair`,
-`ForwarderRecoveryAbortsThenReopens`,
-`OwnerAbortOfWatchShutsVhAndHolderSeesAbort`,
-`ReleasedWatchWithNoRecordReadsAsAbort`. Under WATCH-ABORT the third
-iteration retires `OwnerAbortOfWatchShutsVhAndHolderSeesAbort` and the
-hazard `fwd-pair-hazard-watch-abort-keeps-vh` (they encode the rejected
-EVMOD-WATCH-SHUT) and re-derives `GuestCloseBeforeHostAttachAborts` under
-EVMOD-ATTACH-END (item T-4 below).
-
-**Third iteration (recorded `15604-1792247867.103`, re-recorded unchanged
-in `36080-1792257031.125`, and carried by every later record to the
-current `707089-1792512180.793`; the results and the accepted
-deviations follow the items).** The spike results of 2026-10-17 (P-69 to
-P-72), the corrections the user directed (EV-PINS), the approved
-WATCH-ABORT rule and the contracts EVMOD-ATTACH-END and EVMOD-STREAM-ABORT
-(approved 2026-10-17) change `fwd_pair` at the points below. Each item names,
-for the `pair_conf` conformance main and the model-checking instance that
-checks it, the invariant it adds or keeps, the hazard that violates it
-(`expect = "violation"` in `checks.toml`), the named run (`backend =
-"evaluator"`, `expect = "holds"`), and the pinned accessor of every
-variable it adds (QPROJ-8, "The third iteration's variables", by the
-spec's names). The items are the design's statement of what the model
-checks; where the recorded spec states a point more precisely, the
-deviation is accepted below and the item is corrected to it.
+**The `fwd_pair` rules T-1 to T-9 (spike pins EV-PINS, WATCH-ABORT,
+EVMOD-ATTACH-END and EVMOD-STREAM-ABORT).** Each item names, for the
+`pair_conf` conformance main and the model-checking instance that checks it,
+the invariant it states, the hazard that violates it where one is kept
+(`expect = "violation"` in `checks.toml`; a rule with no kept hazard is
+checked by its invariants and named runs, one hazard per ADR-level decision),
+the named run (`backend = "evaluator"`, `expect = "holds"`), and the pinned
+accessor of every variable it adds (QPROJ-8, "Ended-half, watch and stream
+variables", by the spec's names).
 
 - **T-1 — the TCP error-report end (EV-END change 1, EV-PINS).** The far
   peer's reset of a TCP half is one action, `TcpRst(s, after_fin)`: it sets
@@ -12848,26 +12412,25 @@ deviation is accepted below and the item is corrected to it.
     report. Invariant `ResetErrnoMatchesState`: the record's errno is `EPIPE`
     iff the reset half was in `CLOSE_WAIT` at the reset, else
     `ECONNRESET`. Kept: `ResetNeverEndsClean`.
-  - Hazard `fwd-pair-hazard-tcp-no-error-report` (`OFF` `TCP-ERR-REPORT`:
-    the error is seen only by a later `recvmsg` / `sendmsg`, the spike's
-    hazard 16) must violate `TcpResetEndsPair` (on `pair_ok`) and
-    `EveryEndResolves` (on `pair_live`). Kept:
-    `fwd-pair-hazard-tcp-eof-is-clean` → `ResetNeverEndsClean`.
-  - Runs: `RemoteFinThenResetAbortsPair` (kept; now asserts `EPIPE`) and
+  - No hazard check stands for this rule: the spike's hazard 16 (the error
+    seen only by a later `recvmsg` / `sendmsg`) is the case `TcpResetEndsPair`
+    (on `pair_ok`) and `EveryEndResolves` (on `pair_live`) check along the
+    runs below.
+  - Runs: `RemoteFinThenResetAbortsPair` (asserts `EPIPE`) and
     `GuestAppFinThenResetAbortsPairWithEpipe` (the guest application's FIN,
     then its reset with the host→guest direction open; the spike's
     `g-rst-hg-only`).
 - **T-2 — attach-time seeding of an early end (EV-PAIR correction 2).**
   `Attach(s)` installs the callbacks and records the attach-time class in
-  one step (kept).
-  - Kept: `AttachTimeEndClassifiedOnce`, `NoUnclassifiedEof`.
-  - Hazard `fwd-pair-hazard-no-seed` (`OFF` `ATTACH-SEED`: callbacks
-    installed, the attach-time state not classified; the module's
-    `h_noseed`) must violate `NoUnclassifiedEof`, and `ResetNeverEndsClean`
-    is not expected to fail (the alarm aborts the end). Kept:
-    `fwd-pair-hazard-check-then-hook`.
+  one step.
+  - Invariants: `AttachTimeEndClassifiedOnce`, `NoUnclassifiedEof`.
+  - Hazard `fwd-pair-hazard-check-then-hook` (attach reads the half's state
+    and installs the callbacks in a later step) violates
+    `AttachTimeEndClassifiedOnce`; the alarm aborts the unclassified end,
+    so `ResetNeverEndsClean` does not fail. (The module's `h_noseed` is the
+    Tier-3 control of the same rule.)
   - Runs: `EarlyFinBeforeAttachCarriedOut`,
-    `HostHalfCloseThenAbortBeforeGuestAttachIsAbort` (kept) and
+    `HostHalfCloseThenAbortBeforeGuestAttachIsAbort` and
     `EarlyVsockHalfCloseBeforeGuestAttachCompletes` (the destination's
     banner and the host's `0x2` on `V_g` before the guest TcpConnect
     attaches; the spike's `eg-sffin`).
@@ -12879,9 +12442,9 @@ deviation is accepted below and the item is corrected to it.
     `HolderDrop`, `VmmExit`, `UdpErr`, `DgHalfClose` leaving a frame
     incomplete, `Abort`, `GuestAbort`, `CtxRelease`, `CloseUnattached`, a
     close with a direction open).
-  - Hazard `fwd-pair-hazard-established-only` (`OFF` `ATTACH-CLOSE-WAIT`:
-    attach refuses `closeWait`, the module's `h_strict`; the owner then
-    aborts the flow) must violate `AbortOnlyAfterFault`.
+  - No hazard check stands for this rule (the module's `h_strict` is its
+    Tier-3 control: attach refusing `closeWait` makes the owner abort the
+    flow, which `AbortOnlyAfterFault` forbids along the run below).
   - Run `AppWriteAndFinBeforePairedAttachesInCloseWaitAndCompletes` (the
     spike's `eg-wf`: bytes and FIN on the intake child before `Paired`;
     every unit delivered, EOF at the far end, record `Completed`).
@@ -12905,10 +12468,7 @@ deviation is accepted below and the item is corrected to it.
     at both owners.
   - Hazard `fwd-pair-hazard-ended-attach-graceful-close` (on `halfEnded`
     the owner closes the surviving TCP half without `SO_LINGER{1,0}`) must
-    violate `EndedHalfNeverEndsClean`. Hazard
-    `fwd-pair-hazard-ended-attach-ignored` (the owner treats `halfEnded` as
-    a retryable defect and keeps the flow) must violate
-    `EndedHalfFlowResolves`.
+    violate `EndedHalfNeverEndsClean`.
   - Runs: `IntakeChildResetBeforePairedIsRefusedAndFlowAborts` (the
     spike's `eg-rst`), `DestinationResetBeforeHostAttachIsRefusedAndFlowAborts`
     (`eg-drst`), `GuestCloseWithEmptyQueueBeforeHostAttachIsRefusedAndFlowAborts`
@@ -12932,7 +12492,7 @@ deviation is accepted below and the item is corrected to it.
   sends `Abort { flow }`, which the guest owner's next step takes by
   aborting its pair. `CtxRelease(h)` shuts every live watch's `V_h` with
   `SHUT_RDWR` (the guest sees `0x3`). The holder's read after a release is
-  non-deterministically `Eof` or `Err` (F11, corrected below).
+  non-deterministically `Eof` or `Err` (F11, below).
   - Invariant `WatchAbortLeavesHolderSocket`: no `Abort` step of a watch
     changes `vh`. Invariant `HolderOutcomeFromWatch`: the outcome the stream
     reports (`hres`: `HalfClose`, `GuestAbort` or `OwnerAbort`) is
@@ -12950,16 +12510,13 @@ deviation is accepted below and the item is corrected to it.
   - Hazards: `fwd-pair-hazard-watch-abort-shuts-vh` (the rejected
     EVMOD-WATCH-SHUT) must violate `WatchAbortLeavesHolderSocket`;
     `fwd-pair-hazard-holder-trusts-read` (the outcome taken from the read:
-    `Eof` → `HalfClose`) must violate `HolderOutcomeFromWatch`;
-    `fwd-pair-hazard-no-guest-abort` (the owner sends no `Abort { flow }`
-    and the holder keeps the stream) must violate
-    `GuestPairEndsAfterOwnerAbort`. Retired:
-    `fwd-pair-hazard-watch-abort-keeps-vh` (its rule is now the design).
-  - Runs: `OwnerAbortOfWatchLeavesVhAndStreamReportsAborted` (replaces
-    `OwnerAbortOfWatchShutsVhAndHolderSeesAbort`),
+    `Eof` → `HalfClose`) must violate `HolderOutcomeFromWatch`. The rule that
+    the owner sends `Abort { flow }` has no hazard check
+    (`GuestPairEndsAfterOwnerAbort` checks it on `pair_wlive`).
+  - Runs: `OwnerAbortOfWatchLeavesVhAndStreamReportsAborted`,
     `OwnerAbortSendsGuestAbortThenHolderDropIsInert`,
     `ContextReleaseShutsWatchedVhAndHolderReadsNotConnected` (the `Err`
-    branch of F11) and `ReleasedWatchWithNoRecordReadsAsAbort` (kept; the
+    branch of F11) and `ReleasedWatchWithNoRecordReadsAsAbort` (the
     outcome is the owner's own end).
 - **T-6 — a dropped `GuestStream` aborts its watch (EV-CTL 4.4).**
   `HolderDrop(h)` aborts the watch, then closes `V_h` (the guest sees
@@ -12982,25 +12539,22 @@ deviation is accepted below and the item is corrected to it.
   (`0x3`, `RST`) is classified by the callback first and aborts `PeerAbort`
   whatever is queued (the existing `ClassFixedAtTransition`); this is the
   precedence the design pins (§ *Datagram mode*, "The peer's end with
-  frames queued"; U-EV-9), and the model needs no change for it.
+  frames queued"; U-EV-9), and the model encodes it.
   - Invariant `IncompleteFrameAtEndAborts`: no pair is live with its head
     frame incomplete and the peer's direction ended.
-  - Hazard `fwd-pair-hazard-truncated-frame-waits` (the pair waits for a
-    whole frame after the peer's end) violates
-    `IncompleteFrameAtEndAborts` (on `pair_dgram`) and `EveryEndResolves`
-    (on the datagram liveness instance `pair_dlive`,
-    `fwd-pair-hazard-truncated-frame-waits-resolves`).
+  - No hazard check stands for this rule: `IncompleteFrameAtEndAborts` (on
+    `pair_dgram`) and `EveryEndResolves` (on the datagram liveness instance
+    `pair_dlive`) check it.
   - Run `TruncatedFrameAtPeerEndAbortsFrameInvalid`.
 - **T-8 — CLEAN-FULL-END: "send shut" recorded before the SHUTDOWN leaves
   (EV-PAIR correction 4).** `HopEnd` sets this side's `ownShut(s)` in the
   step that puts the `0x2` on the wire (kept).
   - Invariant `OwnShutBeforeShutdownSent`: whenever this side's `0x2` is in
-    flight or delivered, `ownShut(s)` is set. Kept, and now checked on the
-    racing trace: `ClassFixedAtTransition`, `AbortOnlyAfterFault` (T-3).
-  - Hazard `fwd-pair-hazard-late-send-shut` (`ownShut` set in a step after
-    the `0x2` is sent; the peer's `0x3` may be classified between them, the
-    module's `h_lateshut`) must violate `OwnShutBeforeShutdownSent` and
-    `AbortOnlyAfterFault`.
+    flight or delivered, `ownShut(s)` is set. Checked on the
+    racing trace with it: `ClassFixedAtTransition`, `AbortOnlyAfterFault` (T-3).
+  - No hazard check stands for this rule (the module's `h_lateshut` is its
+    Tier-3 control: `ownShut` set in a step after the `0x2` is sent lets the
+    peer's `0x3` be classified between them).
   - Run `PeerCloseRacingOwnHalfCloseIsClean` (the peer's `0x3` delivered in
     the step right after this side's `0x2`; record `Completed`, both far
     ends EOF), beside the kept `HalfCloseThenPeerCloseIsClean`.
@@ -13014,14 +12568,11 @@ deviation is accepted below and the item is corrected to it.
   action exists (U-EV3-7).
   - Invariant `WatchRecordBeforeWake`: a holder woken by a watch's end
     finds the watch's record queued; `HolderOutcomeFromWatch` (T-5).
-  - Hazards `fwd-pair-hazard-original-before-record` (the original
-    callback's wakeup before the record) → `WatchRecordBeforeWake` on the
-    sweep path; `fwd-pair-hazard-no-record-is-clean` (a stream that finds
-    no record takes the end as clean instead of waiting) →
-    `HolderOutcomeFromWatch` on the trace where the holder reads the
-    sweep's end before its callback.
+  - No hazard check stands for this rule: `WatchRecordBeforeWake` and
+    `HolderOutcomeFromWatch` check it on the sweep path (the trace where the
+    holder reads the sweep's end before its callback).
   - Run `VmmExitWithWatchRecordInFlightResolvesFromRecord`.
-- **F11 corrected (P-70 § 3.5).** "A vsock socket whose own receive side is
+- **F11 (P-70 § 3.5).** "A vsock socket whose own receive side is
   shut returns 0 from `recvmsg` at once" holds only while the socket is
   `ESTABLISHED` (`net/vmw_vsock/af_vsock.c:2545-2548 @ v7.0`); once it has
   left `ESTABLISHED`, `vsock_shutdown` having cleared `SOCK_DONE` (`:1220`),
@@ -13032,223 +12583,80 @@ deviation is accepted below and the item is corrected to it.
   `include/net/tcp_states.h:13 @ v7.0`), so the holder reads the queued
   bytes and then `-ECONNRESET` (`af_vsock.c:2326-2328`, `:2439-2440`), not 0
   (U-EV-11).
-- **U-EV-7.** `Unclassified` is the design's cause; no model change.
-- **Datagram mode, EV-DGRAM D2.** `udp_slots` already carries
-  `keepFramesOnEnd` (the discard off); no change.
-- **Assumptions to re-label in the README:** F2, F6, F10 proven (P-69,
-  P-70); F3 restated — a TCP reset is reported by `sk_error_report`
+- **U-EV-7.** `Unclassified` is the design's cause.
+- **Datagram mode, EV-DGRAM D2.** `udp_slots` carries `keepFramesOnEnd` (the
+  discard off).
+- **Assumptions and their discharge:** F2, F6, F10 proven (P-69, P-70); F3
+  — a TCP reset is reported by `sk_error_report`
   (`net/ipv4/tcp_input.c:4890-4902 @ v7.0`), and the next `recvmsg` /
   `sendmsg` returns it only while the forwarder still reads that half
   (P-69, hazard 16), so the model's `TcpRst` reports it at once (T-1); F8
-  restated — a frame of at most 59,008 B fits the vsock buffer because
+  — a frame of at most 59,008 B fits the vsock buffer because
   datagram-mode attach refuses a smaller `buffer_size` (P-72 D3); F9
   discharged by the source reading and P-71 (`h_noseed`), with the
-  widened-window stress a module-suite check; F11 as corrected above,
-  proven by P-70; K-B4 proven by P-72 § 7; a new F13 (numbered after the
-  existing F12, the datagram source rule; U-EV3-6) — the forwarder's
-  abort of a watch sends nothing on the vsock and changes no socket state
-  (module code; the spike's `ABORT`, P-70 § 3.8, and the module suite);
-  a new F14 — a vsock `CLOSING` is set only on a connected socket
+  widened-window stress a module-suite check; F11 above, proven by P-70;
+  K-B4 proven by P-72 § 7; F13 (the datagram source rule; U-EV3-6) — the
+  forwarder's abort of a watch sends nothing on the vsock and changes no
+  socket state (module code; the spike's `ABORT`, P-70 § 3.8, and the
+  module suite); F14 — a vsock `CLOSING` is set only on a connected socket
   (`net/vmw_vsock/virtio_transport_common.c:1249-1252 @ v7.0`), and the
   sweep writes the state (`drivers/vhost/vsock.c:748`) and then `sk_err`
   (`:749`) under `vsock_table_lock` (`net/vmw_vsock/af_vsock.c:458-471 @
   v7.0`), which the attach section holds, so an attach sees both or
-  neither (the README's F14 wording "`sk_err` set before its state write"
-  inverts the source order and is corrected to this; the order inside the
-  sweep is immaterial to attach), discharged by the source reading and
-  P-70 § 3.6 / P-71 (the refusals measured).
-- **README § Conformance granularity** lists the U-EV-8 classes and the
-  third iteration's classes of QPROJ-8.
+  neither (the order inside the sweep is immaterial to attach), discharged
+  by the source reading and P-70 § 3.6 / P-71 (the refusals measured).
 
-**Result of the third iteration (recorded).** Recorded run
-`15604-1792247867.103` (superseded by the re-record below;
-2026-10-17T14:37:47Z to 16:01:22Z; Quint 0.32.0, Apalache 0.56.1, TLC; 12
-jobs; kernel `7.0.0-38-generic`; head `0f3120df`, dirty): 344 of 344 checks
-matched `expect`; `cargo xtask quint verify-evidence --subsystem
-guest-flow-owner` passes; no open counterexample. It supersedes
-`320404-1792210836.093`. The re-record `36080-1792257031.125`
-(2026-10-17T17:10:31Z to 18:32:02Z, same tools and kernel, 12 jobs, 81.5
-minutes) re-ran the same 344 checks with the same outcome; it is superseded
-by `103786-1792332392.725` (405 of 405, DR2-CLOSE), by
-`143415-1792345488.113` (422 of 422, RESTART-SSOT), by
-`170717-1792355648.294` (425 of 425, 49 `cid_lease` checks, DR5-CLOSE), by
-`198644-1792365750.873` (436 of 436, 60 `cid_lease` checks, DR6-CLOSE's
-first pass, the record the 60-second CI rule was applied from), by
-`227088-1792372761.247` (440 of 440, 64 `cid_lease` checks; the final
-DR6-CLOSE revision: the `Redeploy` reclamation guard, rule 7.1's hazard
-`vmmExitRetiresLease` and the #325 guard's positive twin), by
-`570179-1792418105.836` (2026-10-19T13:55:05Z to 15:32:20Z, 97.2 minutes,
-12 jobs; 441 of 441, 65 `cid_lease` checks; the D-18 recording main
-`lease_conf_three` and its check
-`cid-lease-run-conf-three-pool-exhausted-restart-cleans-the-predecessor-then-places`;
-the CI flags were not re-applied from it) and then by the current evidence,
-`707089-1792512180.793` (2026-10-20T16:03:00Z to 17:40:35Z, 97.6 minutes,
-4 jobs, kernel `7.0.0-34-generic`, Quint 0.32.0, Apalache 0.56.1, head
-`0f3120df`, dirty; 458 of 458 checks matched `expect` — 224 hold, 234
-expected violations, 0 unexpected, 0 retries — 65 of them `cid_lease` and
-66 `fwd_safe`; § *Status*). It records round 14's change to `fwd_pair.qnt`
-(invariant `CtxGoneIffVmDown`) and `checks.toml` (witness
-`fwd-pair-witness-vmm-exit`), round 15's change to `fwd_safe.qnt`,
-`hazard/fwd_safe_hazards.qnt` and `checks.toml` (12 `fwd_safe` checks and
-the witness `fwd-pair-dgram-witness-vmm-exit`; "Round 15 model change",
-below) and round 16's change ("Round 16 model change", below: the run
-`WfreeWakeFinishesBeforeRemoveWait` and the hazards
-`safe_bugWriteSpaceOverride` and `safe_bugRemoveWaitAfterFreeQueued`). The
-record runs of rounds 14 and 15 were stopped below the 8 GiB host-disk stop
-line and wrote no record. `cargo xtask quint verify-evidence --subsystem
-guest-flow-owner` passes. No DESIGN item of the model is open.
-The modeller's deviations from T-1 to T-9, each
-**accepted** as the more precise statement of the design (README § *Deviations
-from the forwarder change list*):
+**Instances and actions.** `pair_wlive` (watch liveness: the temporal checks
+of T-5 and T-6) and `pair_dlive` (datagram liveness: `EveryEndResolves` for
+D1) are model-checking mains, record no step and are replayed by no driver.
+The actions are `TcpRst(s, after_fin)`, `HolderDrop` and `GuestAbort(g)`
+among others; the sweep's two steps are `VmmExit` and `FwdErr(h)` (U-EV3-7);
+the action map of § *Conformance observation surface and action map* uses
+these names. `GuestCloseBeforeHostAttachAborts` encodes the in-flight branch
+of T-4 (U-EV3-1). The hazard files are split into `fwd_pair_hazards*.qnt`
+(one or two instances per file): a file whose instances plus the eight of
+`fwd_pair.qnt` it imports exceed ten runs the Apalache server out of its
+fixed 2,048 MiB compile heap (a tool limit). `fwd-pair-safety-tlc` carries
+`timeout_secs = 2400`; `fwd-pair-watch-safety-tlc`,
+`fwd-pair-dgram-safety-tlc`, the three `pair_live` liveness checks and
+`fwd-pair-ended-half-flow-resolves` are outside the CI subset. A transition
+classified otherwise than with the socket's true send state is the ghost
+`vs(s).misc`. `IncompleteFrameAtEndAborts` is D1's state form; its teeth in
+time are `EveryEndResolves` on `pair_dlive`.
 
-- **Actions.** `TcpRst(s, after_fin)` replaces `EpRst`, `HolderDrop`
-  replaces `DialerDrop`, `GuestAbort(g)` is new; the sweep's two steps are
-  the existing `VmmExit` and `FwdErr(h)` (U-EV3-7). Accepted; the action
-  map of § *Conformance observation surface and action map* uses these
-  names.
-- **Retired runs.** `OwnerAbortOfWatchShutsVhAndHolderSeesAbort` and the
-  hazard `fwd-pair-hazard-watch-abort-keeps-vh` with its run, as T-5 says,
-  and also `OwnerAbortedWatchHolderReadsNotConnectedAndReportsAbort`: its
-  subject, the holder's `ENOTCONN` after the owner's shut, no longer exists
-  under WATCH-ABORT, and the `Err` branch of F11 is
-  `ContextReleaseShutsWatchedVhAndHolderReadsNotConnected`. Accepted: no
-  DISTILL driver pins either retired run (§ *DISTILL handoff*).
-- **`GuestCloseBeforeHostAttachAborts` encodes the in-flight branch**, not
-  the queued-data branch T-4 first named (U-EV3-1). Accepted and T-4 is
-  corrected: the queued-data branch has no production producer on `V_h`.
-- **New instances.** `pair_wlive` (watch liveness: the temporal checks of
-  T-5 and T-6) and `pair_dlive` (datagram liveness: `EveryEndResolves` for
-  D1, and the hazard `fwd-pair-hazard-truncated-frame-waits-resolves`).
-  Accepted; both are model-checking mains, record no step and are replayed
-  by no driver.
-- **Hazard files.** The `fwd_pair` hazards are split into
-  `fwd_pair_hazards*.qnt`, `fwd_pair_ctl_hazards*.qnt`,
-  `fwd_pair_end_hazards*.qnt`, `fwd_pair_dgram_hazards*.qnt`,
-  `fwd_pair_watch_hazards*.qnt`, `fwd_pair_attach_hazards*.qnt` (T-1 to
-  T-4) and `fwd_pair_stream_hazards*.qnt` (T-5, T-6), each file holding at
-  most two instances: a file whose instances plus the eight of
-  `fwd_pair.qnt` it imports exceeded ten ran the Apalache server out of its
-  fixed 2,048 MiB compile heap. Accepted (a tool limit, not a design
-  statement).
-- **Extra checks beyond the list.** The witnesses `WitnessNoEndBeforeRecord`
-  (the holder observes the end while the watch is live — the sweep's record
-  in flight), `WitnessNoHolderErrReported`, `WitnessNoTruncatedEnd`,
-  `WitnessNoRefusal`, `WitnessNoEpipe` and
-  `WitnessNoGuestAbortAfterStreamAbort`; the run hazards
-  `fwd-pair-hazard-late-send-shut-run` (fails
-  `HalfCloseThenPeerCloseIsClean`), a second late-send-shut run hazard on
-  `PeerCloseRacingOwnHalfCloseIsClean`, and
-  `fwd-pair-hazard-holder-trusts-read-late-read` (the teeth of
-  `NoHolderReadAfterWatchAbort`: a stream that passes reads to `V_h` after
-  the owner's abort). Accepted.
-- **The late-send-shut hazard** (`pair_bugLateSendShut`) violates
-  `OwnShutBeforeShutdownSent` and `AbortOnlyAfterFault` as T-8 predicted,
-  and also `ClassFixedAtTransition` through a new clause (a transition
-  classified otherwise than with the socket's true send state, ghost
-  `vs(s).misc`): the peer's `R` arriving between the SHUTDOWN and the late
-  flag is classified abort where the table gives none, and no unit or EOF
-  is affected, so `AbortNeverCleanEof` holds. Accepted; its run hazards on
-  `HalfCloseThenPeerCloseIsClean` and `PeerCloseRacingOwnHalfCloseIsClean`
-  carry the observable failure. `IncompleteFrameAtEndAborts` is
-  D1's state form; its teeth in time are `EveryEndResolves` on
-  `pair_dlive`.
-- **CI flags.** `fwd-pair-safety-tlc` takes over 900 s alone and carries
-  `timeout_secs = 2400`; `fwd-pair-watch-safety-tlc` (112–162 s) is now
-  `ci = false`; with `fwd-pair-dgram-safety-tlc`, the three `pair_live`
-  liveness checks and `fwd-pair-ended-half-flow-resolves` they are the
-  `fwd_pair` checks outside the CI subset. Accepted; the full record
-  (81.5 minutes, 12 jobs, in `36080-1792257031.125`; the current record
-  `707089-1792512180.793` took 97.6 minutes with 4 jobs) is the new baseline in
-  place of PD-9's (RECORD-COST, an architect disposition, § *Approval
-  record*, "Architect dispositions").
-
-**The modeller's underspecified points of the third iteration, and the
-design's answers (2026-10-17).**
+**Pinned points of the model, continued.**
 
 | Id | Point | Answer (where pinned) |
 |---|---|---|
-| U-EV-9 | EV-DGRAM D1 against U-EV-5: which cause wins when an abort-class end meets an incomplete frame, and how a datagram pair with whole frames queued completes at a clean end | **The callback's class decides first.** An abort-class end aborts `PeerAbort` whatever is queued; every production end of a datagram vsock is of this class, so after a production end the run never meets an incomplete frame. A clean-class end (`0x2`, no production producer) sends every whole frame and then completes, or aborts `FrameInvalid` when a frame is left incomplete — the forwarder's one correct effect for that input, not a defence of a reachable state (§ *Datagram mode*, "The peer's end with frames queued"; ADR-0201). The model already encodes both (`ClassFixedAtTransition`; T-7); no model change |
-| U-EV-10 | Both watch-shut runs | Resolved by WATCH-ABORT: both retired (above) |
-| U-EV-11 | After the orphan sweep the holder reads the queued bytes and then `-ECONNRESET`, not 0 | Correct (`drivers/vhost/vsock.c:748`, `af_vsock.c:2326-2328`, `:2439-2440 @ v7.0`); the resolution rule covers it (the error is readable before `sk_error_report`, and the stream waits for the in-flight record). Recorded in F11 above and in § *Driving port — guest stream dial*, "Contract of `GuestStream`" |
-| U-EV3-1 | Which branch `GuestCloseBeforeHostAttachAborts` encodes | The in-flight branch (T-4, corrected above); the queued-data branch is `HostHalfCloseThenAbortBeforeGuestAttachIsAbort` on the guest side |
-| U-EV3-2 | `EPIPE` "when the half had received the peer's FIN" is looser than the kernel | `EPIPE` iff the half is in `CLOSE_WAIT`; a half in `LAST_ACK` (it received the FIN after the forwarder sent its own) gets `ECONNRESET` (`net/ipv4/tcp_input.c:4918-4930 @ v7.0`). T-1 and the change list are corrected; the pair aborts either way and owners treat both as a reset (§ *Failure projection*) |
+| U-EV-9 | EV-DGRAM D1 against U-EV-5: which cause wins when an abort-class end meets an incomplete frame, and how a datagram pair with whole frames queued completes at a clean end | **The callback's class decides first.** An abort-class end aborts `PeerAbort` whatever is queued; every production end of a datagram vsock is of this class, so after a production end the run never meets an incomplete frame. A clean-class end (`0x2`, no production producer) sends every whole frame and then completes, or aborts `FrameInvalid` when a frame is left incomplete — the forwarder's one correct effect for that input, not a defence of a reachable state (§ *Datagram mode*, "The peer's end with frames queued"; ADR-0201). The model encodes both (`ClassFixedAtTransition`; T-7) |
+| U-EV-11 | After the orphan sweep the holder reads the queued bytes and then `-ECONNRESET`, not 0 | Source: `drivers/vhost/vsock.c:748`, `af_vsock.c:2326-2328`, `:2439-2440 @ v7.0`; the resolution rule covers it (the error is readable before `sk_error_report`, and the stream waits for the in-flight record). Recorded in F11 above and in § *Driving port — guest stream dial*, "Contract of `GuestStream`" |
+| U-EV3-1 | Which branch `GuestCloseBeforeHostAttachAborts` encodes | The in-flight branch (T-4); the queued-data branch is `HostHalfCloseThenAbortBeforeGuestAttachIsAbort` on the guest side |
+| U-EV3-2 | `EPIPE` "when the half had received the peer's FIN" is looser than the kernel | `EPIPE` iff the half is in `CLOSE_WAIT`; a half in `LAST_ACK` (it received the FIN after the forwarder sent its own) gets `ECONNRESET` (`net/ipv4/tcp_input.c:4918-4930 @ v7.0`). The pair aborts either way and owners treat both as a reset (§ *Failure projection*) |
 | U-EV3-3 | Is a connected UDP half with a pending `sk_err` (an ICMP error) refused at attach? | **No.** A connected UDP socket stays usable after an ICMP error, so the half has not ended; the attach-time run of the UDP → vsock direction reads it first (`__skb_recv_udp` returns a pending error before any queued datagram, `net/ipv4/udp.c:1986-1988 @ v7.0`) and the pair aborts `SocketError`, which the host owner reports as `DestinationUnreachable` (D26-PINS). The model's choice holds; § *Control interface*, accepted-state table, UDP row |
-| U-EV3-4 | `owner_flows` names a refused dial watch (`HostAbortAccept(h)`), but `fwd_pair`'s watch exists from the start | Correct: the watch is installed when `V_h` connects, before the request is written, so `fwd_pair` has no refused-watch state and needs none. In `owner_flows` a refused watch maps by its cause: the orphan sweep (`ECONNRESET`, the VMM exited) is the existing `VmStop` path (`VmExitDuringDialReturnsUnreachableReset`, no message); any other `HalfEnded` end of `V_h` before the request — a guest close of `V_g`, which no guest path produces before it read the request — is `HostAbortAccept(h)` (`Unreachable { errno }`, `Abort { flow }` while the session is live) (§ *Driving port — guest stream dial*, "Opening") |
-| U-EV3-5 | The session-loss branch of `GuestPairEndsAfterOwnerAbort` is not modelled | Accepted: `fwd_pair`'s only session-down state is the VM's end; a lost session aborts every flow on both sides, checked by `owner_flows` (T-5 corrected above) |
-| U-EV3-6 | The change list's new F12 and F13 collide with the existing F12 | They are F13 (a watch's abort sends nothing and changes no socket state) and F14 (vsock `CLOSING`; the sweep's writes under `vsock_table_lock`); the change list is corrected. F14's README wording on the sweep's write order is inverted against the source (state at `drivers/vhost/vsock.c:748`, `sk_err` at `:749`) and is corrected as above |
-| U-EV3-7 | The action map named `SweepState(h)` / `SweepReport(h)` | The spec's `VmmExit` and `FwdErr(h)`; the action map is corrected |
+| U-EV3-4 | `owner_flows` names a refused dial watch (`HostAbortAccept(h)`), but `fwd_pair`'s watch exists from the start | The watch is installed when `V_h` connects, before the request is written, so `fwd_pair` has no refused-watch state and needs none. In `owner_flows` a refused watch maps by its cause: the orphan sweep (`ECONNRESET`, the VMM exited) is the existing `VmStop` path (`VmExitDuringDialReturnsUnreachableReset`, no message); any other `HalfEnded` end of `V_h` before the request — a guest close of `V_g`, which no guest path produces before it read the request — is `HostAbortAccept(h)` (`Unreachable { errno }`, `Abort { flow }` while the session is live) (§ *Driving port — guest stream dial*, "Opening") |
+| U-EV3-5 | The session-loss branch of `GuestPairEndsAfterOwnerAbort` is not modelled | `fwd_pair`'s only session-down state is the VM's end; a lost session aborts every flow on both sides, checked by `owner_flows` (T-5) |
+| U-EV3-6 | The numbering of the new assumptions | F13 (a watch's abort sends nothing and changes no socket state) and F14 (vsock `CLOSING`; the sweep's writes under `vsock_table_lock`: state at `drivers/vhost/vsock.c:748`, `sk_err` at `:749`) follow the existing F12 |
+| U-EV3-7 | The sweep's two steps in the action map | The spec's `VmmExit` and `FwdErr(h)` |
 
-**What these answers change in the specification.** No state machine,
-invariant, hazard, run or check changes: every answer above either pins
-what the recorded spec already does (U-EV-9's precedence, U-EV3-1,
-U-EV3-2, U-EV3-3, U-EV3-5, U-EV3-6, U-EV3-7, U-EV-11) or changes only a
-conformance mapping (U-EV3-4). The `quint-modeler` aligns the README only,
-with no new `--record` run (`verify-evidence` hashes the specs and
-`checks.toml`, which do not change): move U-EV-9 to U-EV-11 and U-EV3-1 to
-U-EV3-7 under "Resolved"; correct F14's wording on the sweep's write order
-(state at `drivers/vhost/vsock.c:748`, then `sk_err` at `:749`, both under
-`vsock_table_lock`); and drop `sshut` from the model-only list of
-§ *Conformance granularity* (QPROJ-8 classes `vs(s).sshut` as an arbiter
-read). The revisions of this round outside the model — the appliance
-kernel without module unloading (EVMOD-LIFE), the `GuestStream` contract
-text, the record-queue locking — are not modelled (§ *Not modelled*).
+Conformance mappings of the sibling modules (§ *Conformance observation
+surface and action map*): in `owner_flows` a `halfEnded` refusal at the host
+attach is one more cause of `HostFlowEndsMsg(f, …)`, at the guest TcpAccept
+one more cause of `GuestPairOrRefuseOk(h, false)`, and a refused dial watch
+is the `VmStop` path when the sweep caused it and `HostAbortAccept(h)`
+otherwise (U-EV3-4); the owner's `Abort { flow }` for an aborted stream is
+the `QuiesceAbortsDialAndSendsAbort` path; in `flow_quota` a flow refused
+`halfEnded` is admitted and released in one step (`Admit(a)` then
+`ReadEnd(s)` with no `Complete`); in `udp_slots` a datagram attach refused
+`halfEnded` on `Paired` is the host-abort branch of the slot release.
 
-**Siblings.** No other module's state machine changes; only conformance
-mappings do (§ *Conformance observation surface and action map*):
-`owner_flows` — a `halfEnded` refusal at the host attach is one more cause
-of `HostFlowEndsMsg(f, …)`, at the guest TcpAccept one more cause of
-`GuestPairOrRefuseOk(h, false)`, and a refused dial watch is the existing
-`VmStop` path when the sweep caused it and `HostAbortAccept(h)` otherwise
-(U-EV3-4); the owner's `Abort { flow }` for an aborted stream is
-the existing `QuiesceAbortsDialAndSendsAbort` path; `flow_quota` — a flow
-refused `halfEnded` is admitted and released in one step (`Admit(a)` then
-`ReadEnd(s)` with no `Complete`); `udp_slots` — a datagram attach refused
-`halfEnded` on `Paired` is the existing host-abort branch of the slot
-release. `cid_lease`, `quiescence` and `probe-count` are unchanged.
+**The modules.**
 
-**What the second iteration added to `fwd_pair`** (recorded
-`320404-1792210836.093`; items the third iteration changes are marked):
-
-- **Attach-time state (U-EV-2).** `Attach(s)` reads the half's state and
-  installs the callbacks as one atomic step (it already is); add the
-  transitions that reach a half before attach in each order the design
-  names (a guest close before the host attach; a host `0x2` and then `0x3`
-  before the guest TcpConnect attach; an application FIN before `Paired`),
-  the invariant `AttachTimeEndClassifiedOnce` (an end present at attach is
-  classified exactly once, at attach), the run
-  `HostHalfCloseThenAbortBeforeGuestAttachIsAbort`, and the hazard
-  `fwd-pair-hazard-check-then-hook` (state read, then a transition, then
-  callbacks installed: the transition is classified by neither →
-  `ClassFixedAtTransition`, `AbortNeverCleanEof`).
-- **TCP reset after FIN (EVMOD-END, TCP halves).** A far peer's `Fin` then
-  `EpRst`: the half's `recvmsg` reads end-of-stream, its `sk_error_report`
-  aborts the pair while a direction is open; the run
-  `RemoteFinThenResetAbortsPair` and the hazard
-  `fwd-pair-hazard-tcp-eof-is-clean` (a TCP end-of-stream is taken as clean
-  regardless of `sk_err` → `AbortNeverCleanEof`).
-- **Forwarder recovery (EVMOD-CTL).** A `Reopen(s)` action after
-  `CtxRelease(s)` within one process (the `Forwarder` recovery): the
-  invariant `NoPairOfReleasedContextForwards` and `OneContextPerOwner`, the
-  run `ForwarderRecoveryAbortsThenReopens`, and the hazard
-  `fwd-pair-hazard-reopen-before-release` (a new context opened while the
-  old still holds pairs → `ReleasedContextHoldsNoPair`, `NoForwardAfterEnd`).
-- **Watch abort shuts `V_h` (U-EV-3)** and **end-of-stream with no record is
-  an abort**: the run `OwnerAbortOfWatchShutsVhAndHolderSeesAbort` —
-  retired by the third iteration (T-5, WATCH-ABORT).
-
-**The forwarder change list (first iteration), as the modules stand:**
-
-- **`flow_end` — DELETED** (with `end_all`, `end_clean`, `end_dv`,
-  `end_do`, `end_ring`, `end_abort`, `end_two`, `end_skip`, its 21 named
-  runs and its hazards). Its subject is gone: no goal, arm, `fired`, ring,
-  epoch or classifier skip exists. The properties that survive the
-  mechanism — `NoEarlyShutdown`, `NoEofOnPeerLoss`, `AbortNeverCleanEof`,
-  `EveryEndResolves`, `CleanHalfCloseCompletes` — move to `fwd_pair`.
-- **`udp_empty` — DELETED** with the empty-datagram notice (EVMOD-DGRAM;
-  with `empty_ok`, `empty_conf` and its five runs); empty-datagram order is checked by
-  `fwd_pair`'s datagram instance.
-- **`fwd_pair` — NEW** state-machine module (conformance main `pair_conf`,
-  recording `conf_step`; model-checking mains `pair_ok`, `pair_dgram`).
+- **The forwarder's end handling and empty-datagram order** — the properties
+  `NoEarlyShutdown`, `NoEofOnPeerLoss`, `AbortNeverCleanEof`,
+  `EveryEndResolves`, `CleanHalfCloseCompletes` — are `fwd_pair`'s.
+- **`fwd_pair`** is the state-machine module of the forwarder (conformance
+  main `pair_conf`, recording `conf_step`; the model-checking mains are
+  listed above).
   - *Abstraction.* One flow end to end: the guest application socket, the
     guest forwarder, the vsock connection (one credit window `C` = 2 units
     each way), the host forwarder, the host-facing socket and the far peer;
@@ -13286,25 +12694,9 @@ release. `cid_lease`, `quiescence` and `probe-count` are unchanged.
     `EveryEndResolves` (every pair ends after both clean ends or at an
     abort), `CleanHalfCloseCompletes`, `StalledSenderIsBlocked` (while a
     reader stops, its sender's send is eventually disabled).
-  - *Hazards (each must violate).* `fwd-pair-hazard-consume-before-accept`
-    (the redirect's shape: consume at read → `QueuesWithinBounds`);
-    `fwd-pair-hazard-eof-as-fin` (every vsock end forwarded as a FIN →
-    `AbortNeverCleanEof`); `fwd-pair-hazard-classify-accumulated` (class from
-    `peer_shutdown` at end-of-stream → `ClassFixedAtTransition`,
-    `AbortNeverCleanEof`); `fwd-pair-hazard-shutdown-on-callback` (the
-    target shut on the callback, before the queue empties →
-    `NoEarlyShutdown`); `fwd-pair-hazard-release-keeps-pairs` (the
-    context's release leaves pairs forwarding →
-    `ReleasedContextHoldsNoPair`, `NoEofOnPeerLoss`);
-    `fwd-pair-hazard-lossy-end-record` (an end record may be dropped →
-    `OneEndRecordPerPair`, the owner's `EveryEndResolves`);
-    `fwd-pair-hazard-attach-before-read` (attach before the request read →
-    H-1's `NoAttachBeforeRead` in `owner_flows`); datagram:
-    `fwd-pair-hazard-consume-partial-frame` (consume a datagram before its
-    whole frame was accepted → `DatagramsOnceInOrder`). Rejected
-    alternative, expected violation: `fwd-pair-alt-sockmap-redirect`
-    (credit returned at read, egress queue unbounded →
-    `QueuesWithinBounds`).
+  - *Hazards.* The 11 kept hazards, one per ADR-level decision, are the
+    `fwd-pair-hazard-*` rows of the table under "Hazard variants (teeth)"
+    below.
   - *Named runs* (critical scenarios; each a `[[check]]` with `run =`,
     `backend = "evaluator"`): `CleanBothWaysCompletes`,
     `TargetStallBlocksSenderThenResumes`, `EarlyBytesBeforeAttachDelivered`,
@@ -13314,15 +12706,17 @@ release. `cid_lease`, `quiescence` and `probe-count` are unchanged.
     `OwnerAbortResetsBothFarEnds`, `ContextReleaseResetsEveryPair`,
     `VmmExitAbortsHostHalf`, `TrailingRstAfterCompletionIsInert`,
     `WatchedStreamSeesGuestResetAsAbort`; datagram: `DatagramsInOrderWithEmpty`,
-    `PartialFrameResumedNotDuplicated`, `StalledUdpTargetDropsAtSource`.
+    `PartialFrameResumedNotDuplicated`, `StalledUdpTargetDropsAtSource`
+    (with the runs of T-1 to T-9 and the two prefixes, all in the
+    critical-scenario table below).
   - *Assumptions and their discharge.* A peek returns no credit and only a
     dequeue does; the callback runs per received SHUTDOWN / RST before the
     end is readable; a TCP reset is a `recvmsg` error; a vsock `SHUT_WR`
     never overtakes accepted bytes; `tcp_abort` sends a reset — kernel facts
     cited in § *[REF] vsock data path — the in-kernel event-driven forwarder
     (EVMOD)*, discharged by P-67, P-68, T3 (P-56) and V-EV-END, V-EV-CTL,
-    V-EV-PAIR, V-EV-DGRAM (P-69 to P-72; the corrections of F3, F8 and F11
-    and the new F13 and F14 are in the third iteration above).
+    V-EV-PAIR, V-EV-DGRAM (P-69 to P-72; F3, F8, F11, F13 and F14 are
+    stated under T-1 to T-9 above).
   - *Projection (pinned accessors).* Per-pair and per-direction state
     (`source_end`, `target_shut`, `moved`): `FlowForwarder::pair_state` —
     `KernelFlowForwarder` in Tier-3, `SimFlowForwarder` in the seeded and
@@ -13340,68 +12734,38 @@ release. `cid_lease`, `quiescence` and `probe-count` are unchanged.
     ports: the owners' dispatch (`dispatch_next` in the guest, the host
     owner's event step) and `FlowForwarder` calls; environment actions are
     the Sim adapters' scripted facts.
-- **`flow_quota` — CHANGED** (`quota_ok`, `quota_conf`). The release is at
-  the host's read of the pair's end record (or a dial's drop or abort),
-  under EVMOD-AB; `DrainingFlowHoldsItsSlot` stays (a half-closed pair holds
-  its place until its end record). The runs `CompletedDrainAndEndReleaseTheSlot` and
-  `AbortOfDrainingFlowReleasesSlotAndCell` became
+- **`flow_quota`** (`quota_ok`, `quota_conf`). The release is at the host's
+  read of the pair's end record (or a dial's drop or abort), under EVMOD-AB;
+  `DrainingFlowHoldsItsSlot` holds (a half-closed pair holds its place until
+  its end record). The runs are
   `CompletedPairReleasesTheSlotAtItsEndRecord` and
-  `AbortOfHalfClosedFlowReleasesTheSlotAtItsEndRecord` (no cell).
-- **`owner_flows` — CHANGED.** `NoInstallBeforeRead` becomes
-  `NoAttachBeforeRead`; the guest TcpConnect attaches at `Paired`, the
-  host and guest TcpAccept and datagram pairs before `Paired`
-  (EVMOD-PAIR); install, arm and parking steps are removed; the dialler's
-  end class comes from the watch record; the environment's classifier-skip
-  and ring actions are removed; the context's release is an action
-  (owner death). Its 52 named runs keep their scenarios; those that named
-  installs are renamed for attach: `GuestOpenedFlowIsAdmittedReadAttachedAndPaired`,
+  `AbortOfHalfClosedFlowReleasesTheSlotAtItsEndRecord`.
+- **`owner_flows`.** `NoAttachBeforeRead`: the guest TcpConnect attaches at
+  `Paired`, the host and guest TcpAccept and datagram pairs before `Paired`
+  (EVMOD-PAIR); there are no install, arm or parking steps; the dialler's end
+  class comes from the watch record; the context's release is an action
+  (owner death). Its named runs include
+  `GuestOpenedFlowIsAdmittedReadAttachedAndPaired`,
   `RequestReadInPiecesAttachesOnlyAfterFullRead`,
-  `AcceptedVgHostCloseEndsFlowSilently`, `AcceptedVgErrorAbortsWithAbort`.
-- **`udp_slots` — CHANGED** (EVMOD-DGRAM). Cells, cell
-  generations and recreation are removed; an association's end aborts its
-  pair and discards the slot socket's queue; `NoStaleGenerationStart` is
-  removed; `ReleasedSlotCarriesNoData` and
-  `NoReassociationWithoutNewDatagram` stay, now through the discard; the
-  hazard "cells emptied, not recreated" becomes "the slot queue not
-  discarded at an end" (`NoReassociationWithoutNewDatagram`); the run
-  `StaleGenerationReadinessEventIsDiscarded` became
-  `DatagramQueuedBeforeAnEndIsDiscardedWithTheQueue`, and the cell clauses
-  of `RecycledSlotNeverDeliversPreviousOwnersFrames` were re-derived.
-- **`cid_lease`, `quiescence` — unchanged** (quiescence's first hold now
-  aborts every pair through `abort_all`; `QuiescedHoldsNoFlow` unchanged).
-- **`probe-count` — unchanged.**
+  `AcceptedVgHostCloseEndsFlowSilently` and `AcceptedVgErrorAbortsWithAbort`.
+- **`udp_slots`** (EVMOD-DGRAM). There are no cells, cell generations or
+  recreation; an association's end aborts its pair and discards the slot
+  socket's queue; `ReleasedSlotCarriesNoData` and
+  `NoReassociationWithoutNewDatagram` hold through the discard; the hazard
+  is "the slot queue not discarded at an end"
+  (`NoReassociationWithoutNewDatagram`); the run
+  `DatagramQueuedBeforeAnEndIsDiscardedWithTheQueue` encodes the discard.
+- **`cid_lease`, `quiescence`.** Quiescence's first hold aborts every pair
+  through `abort_all`; `QuiescedHoldsNoFlow` holds.
+- **`probe-count`** is the PROBE-RUN-COUNT model (§ *Probe-run counting*).
 
-**Current record.** The recorded run `707089-1792512180.793`
-(`specs/quint/guest-flow-owner/evidence/summary.json`, `run_id`; started
-2026-10-20T16:03:00Z, finished 17:40:35Z; 4 jobs; kernel
-`7.0.0-34-generic`, Quint 0.32.0, Apalache 0.56.1; head `0f3120df`, dirty;
-458 of 458 checks matched `expect`, 224 hold and 234 expected violations,
-0 unexpected, 0 retries) is the subsystem's evidence, and `cargo xtask quint
-verify-evidence --subsystem guest-flow-owner` passes. It records round 14's
-`fwd_pair` change (`CtxGoneIffVmDown`, `fwd-pair-witness-vmm-exit`), round
-15's (`fwd-pair-dgram-witness-vmm-exit`; `fwd_safe`'s module reference, 12
-checks, "Round 15 model change", below) and round 16's (`fwd_safe`'s
-**wfree** caller class and `RemoveWait` step, the run
-`WfreeWakeFinishesBeforeRemoveWait` and two hazards, "Round 16 model
-change", below). It supersedes `570179-1792418105.836` (441 of 441); the
-record runs of rounds 14 and 15 were stopped below the 8 GiB host-disk
-stop line and wrote no record (§ *Status*). It includes the
-D-UP-4 / PD-1 checks (`quiescence-foreign-hold-ends-in-fail-stop`, the run
-`ForeignHoldRestoreChangesNothingThenFailStops` on `quiesce_conf`, the
-hazards `quiescence-hazard-foreign-decrements` and
-`quiescence-hazard-foreign-ignored`) and
-`owner-flows-sess-env-guest-misses-session-loss`. The record cost of about
-1.56–1.72 times the earlier 43-minute record is the baseline the user
-accepted (PD-9, 2026-10-14). The third iteration's re-record
-`36080-1792257031.125` took 81.5 minutes with 12 jobs (about 1.9 times the
-43-minute record; the third iteration's first record took about 84;
-`570179-1792418105.836`, with the later `cid_lease` growth, took 97.2
-minutes with 12 jobs; the current record took 97.6 minutes with 4 jobs),
-above that accepted baseline because
-`fwd_pair` grew by T-1 to T-9; it is the new baseline under RECORD-COST,
-an outcome-neutral architect disposition of 2026-10-18 confirmed by
-adversarial review, which supersedes PD-9 (§ *Approval record*, "Architect
-dispositions").
+**Record.** The recorded run
+(`specs/quint/guest-flow-owner/evidence/summary.json`; 279 of 279 checks
+match `expect`, 209 hold and 70 expected violations) is the subsystem's
+evidence, and `cargo xtask quint verify-evidence --subsystem
+guest-flow-owner` passes. Only the full `--record` run, taken when a spec
+changes, pays the cost of the long checks (RECORD-COST, § *Approval record*,
+"Architect dispositions").
 
 - **Location:** `specs/quint/guest-flow-owner/` — permanent, not a spike and
   not archived at FINALIZE: six module specs, the hazard files per module
@@ -13414,38 +12778,34 @@ dispositions").
   `cargo xtask lima run -- cargo xtask quint typecheck` and
   `cargo xtask lima run -- cargo xtask quint check --subsystem
   guest-flow-owner [--ci]`. A check is `ci = true` when its own time is under
-  60 s in the latest full record (DR6-CLOSE). `owner-flows-guest-half-ends` (TLC, exhaustive,
-  `GuestHalfEnds`) needs about 53 minutes (3,159.8 s in the current 4-job
-  record `707089-1792512180.793`) and carries `heap_mb = 8192`, `workers = 8`
-  and `timeout_secs = 7200`; `owner-flows-safety-tlc` (TLC, exhaustive,
-  `Safety`) needs about 27 minutes (1,618.6 s) and carries
-  `timeout_secs = 3600`; `fwd-pair-safety-tlc` needs about 19 minutes
-  (1,157.2 s, with `CtxGoneIffVmDown`) and carries
+  60 s in the latest full record (DR6-CLOSE). `owner-flows-guest-half-ends`
+  (TLC, exhaustive, `GuestHalfEnds`) runs on the one-flow instance
+  `flows_one` (item 1);
+  `owner-flows-safety-tlc` (TLC, exhaustive, `Safety`) is the slowest check
+  of the record and carries
+  `timeout_secs = 3600`; `fwd-pair-safety-tlc` carries
   `timeout_secs = 2400`. The `ci = false` checks are the exhaustive or deep
   safety and liveness checks of the large instances and the hazards whose
   counterexample is deep; `checks.toml` names each. A tool error or timeout
   fails the check.
 
 **Modules, instances and the properties each defends.** Every module is a
-state machine (`init`, `step`, named runs). In the forwarder revision six
-are conformance targets, each through its conformance main (QPROJ-1):
-`flows_conf` and `flows_beacon_conf` (`owner_flows`), `pair_conf`
-(`fwd_pair`), `quota_conf`, `lease_conf_ok`, `quiesce_conf`, `slots_conf`.
-The seventh, `fwd_safe`, is **model-only**: it has no conformance main and
-no driver (row below). The instances below are the model-checking mains;
-they record no step.
-`flow_end` and `udp_empty` are deleted (EVMOD-ADOPT; EVMOD-DGRAM), with
-their instances, runs and hazards.
+state machine (`init`, `step`, named runs). Six are conformance targets,
+each through its conformance main (QPROJ-1): `flows_conf` and
+`flows_beacon_conf` (`owner_flows`), `pair_conf` (`fwd_pair`), `quota_conf`,
+`lease_conf_ok`, `quiesce_conf`, `slots_conf`. The seventh, `fwd_safe`, is
+**model-only**: it has no conformance main and no driver (row below). The
+instances below are the model-checking mains; they record no step.
 
 | Module (model-checking instances) | Safety invariants | Temporal properties | Decisions |
 |---|---|---|---|
-| `owner_flows` (`flows_ok`, `flows_two`, `flows_sess`, `flows_beacon`) | `OneLiveSession`, `NoAttachBeforeRead`, `NoAdmitWhenClosed`, `CurrentGeneration`, `NoCrossLaunchMsg`, `NoCrossLaunchSessionHeld`, `ClosedIsTerminal`, `GuestFlowsDoNotOutliveSession`, `TypedRefusalChangesNothing` (`NotServing`, `Quiesced`, `NoSession`, `Unreachable` `ENODEV`; the dial's `Capacity` refusal is discharged by R5-53, and no Quint module models it), `ActivateOnlyWithLiveSession`, `DialDeadlineAfterGuestReply`, `NoPairedAfterDialEnded`, `BeaconCurrentLaunch`, `BeaconNoCrossLaunchReady`, `BeaconNoCrossLaunchHeld` | `GuestHalfEnds`, `SessionBecomesLive`, `ReadyReleased` | L-3, H-1, U-1, U-5, ATTR-TOKEN, ATTR-LIVE-CLAIM, INB-1, DG-5-E, DG-5-F, D18a, ADR-0157 |
-| `fwd_pair` (`pair_ok`, `pair_watch`, `pair_dgram`, `pair_live`, `pair_stall`, `pair_wlive`, `pair_dlive`; conformance main `pair_conf`) | `DeliveredIsInOrderPrefix`, `UnitsConserved`, `ConsumeOnlyAfterAccept`, `QueuesWithinBounds`, `NoEarlyShutdown`, `AbortNeverCleanEof`, `NoEofOnPeerLoss`, `ClassFixedAtTransition`, `OneEndRecordPerPair`, `ReleasedContextHoldsNoPair`, `NoForwardAfterEnd`, `NoPairOfReleasedContextForwards`, `OneContextPerOwner`, `AttachTimeEndClassifiedOnce`, `NoUnclassifiedEof`, `ResetNeverEndsClean`, `NoHolderReadAfterWatchAbort`; datagram `DatagramsOnceInOrder`, `FrameNeverSplitAcrossDatagrams`, `DropsOnlyAtSourceQueue`. Third iteration adds `TcpResetEndsPair`, `ResetErrnoMatchesState`, `AbortOnlyAfterFault`, `RefusedAttachLeavesNoPair`, `EndedHalfNeverEndsClean`, `WatchAbortLeavesHolderSocket`, `HolderOutcomeFromWatch`, `NoLiveWatchAfterDrop`, `IncompleteFrameAtEndAborts`, `OwnShutBeforeShutdownSent`, `WatchRecordBeforeWake`. Round 14 adds `CtxGoneIffVmDown` (witnesses `fwd-pair-witness-vmm-exit`, and `fwd-pair-dgram-witness-vmm-exit` from round 15; both violated as expected in the current record `707089-1792512180.793`) | `EveryUnitDelivered`, `EveryEndResolves`, `CleanHalfCloseCompletes`, `StalledSenderIsBlocked`; third iteration adds `EndedHalfFlowResolves`, `GuestPairEndsAfterOwnerAbort`, `GuestPairEndsAfterHolderDrop` | EVMOD-ADOPT, EVMOD-END, EVMOD-PAIR, EVMOD-CTL, EVMOD-REC, EVMOD-STREAM-END, EVMOD-DGRAM, WATCH-ABORT, EVMOD-STREAM-ABORT, EVMOD-ATTACH-END, R2-END, ADR-0183, D20 |
+| `owner_flows` (`flows_ok`, `flows_one`, `flows_sess`, `flows_beacon`) | `OneLiveSession`, `NoAttachBeforeRead`, `NoAdmitWhenClosed`, `CurrentGeneration`, `NoCrossLaunchMsg`, `NoCrossLaunchSessionHeld`, `ClosedIsTerminal`, `GuestFlowsDoNotOutliveSession`, `TypedRefusalChangesNothing` (`NotServing`, `Quiesced`, `NoSession`, `Unreachable` `ENODEV`; the dial's `Capacity` refusal is discharged by R5-53, and no Quint module models it), `ActivateOnlyWithLiveSession`, `DialDeadlineAfterGuestReply`, `NoPairedAfterDialEnded`, `BeaconCurrentLaunch`, `BeaconNoCrossLaunchReady`, `BeaconNoCrossLaunchHeld` | `GuestHalfEnds`, `SessionBecomesLive`, `ReadyReleased` | L-3, H-1, U-1, U-5, ATTR-TOKEN, ATTR-LIVE-CLAIM, INB-1, DG-5-E, DG-5-F, D18a, ADR-0157 |
+| `fwd_pair` (`pair_ok`, `pair_watch`, `pair_dgram`, `pair_live`, `pair_stall`, `pair_wlive`, `pair_dlive`; conformance main `pair_conf`) | `DeliveredIsInOrderPrefix`, `UnitsConserved`, `ConsumeOnlyAfterAccept`, `QueuesWithinBounds`, `NoEarlyShutdown`, `AbortNeverCleanEof`, `NoEofOnPeerLoss`, `ClassFixedAtTransition`, `OneEndRecordPerPair`, `ReleasedContextHoldsNoPair`, `NoForwardAfterEnd`, `NoPairOfReleasedContextForwards`, `OneContextPerOwner`, `AttachTimeEndClassifiedOnce`, `NoUnclassifiedEof`, `ResetNeverEndsClean`, `NoHolderReadAfterWatchAbort`; datagram `DatagramsOnceInOrder`, `FrameNeverSplitAcrossDatagrams`, `DropsOnlyAtSourceQueue`, `TcpResetEndsPair`, `ResetErrnoMatchesState`, `AbortOnlyAfterFault`, `RefusedAttachLeavesNoPair`, `EndedHalfNeverEndsClean`, `WatchAbortLeavesHolderSocket`, `HolderOutcomeFromWatch`, `NoLiveWatchAfterDrop`, `IncompleteFrameAtEndAborts`, `OwnShutBeforeShutdownSent`, `WatchRecordBeforeWake`, `CtxGoneIffVmDown` | `EveryUnitDelivered`, `EveryEndResolves`, `CleanHalfCloseCompletes`, `StalledSenderIsBlocked`, `EndedHalfFlowResolves`, `GuestPairEndsAfterOwnerAbort`, `GuestPairEndsAfterHolderDrop` | EVMOD-ADOPT, EVMOD-END, EVMOD-PAIR, EVMOD-CTL, EVMOD-REC, EVMOD-STREAM-END, EVMOD-DGRAM, WATCH-ABORT, EVMOD-STREAM-ABORT, EVMOD-ATTACH-END, R2-END, ADR-0183, D20 |
 | `flow_quota` (`quota_ok`) | `QuotaBound`, `QuotaRefusalOnlyAtOwnQuota`, `DrainingFlowHoldsItsSlot` | — | ADR-0183, ADR-0208, ADR-0209 (EVMOD-AB) |
 | `cid_lease` (`lease_ok`, `lease_five`, `lease_live`) | `CidUnique`, `NoLaunchClash`, `LeaseOutlivesVmm`, `AssignAfterReclaim`, `GuestResetEndsVmm` | `EventuallyPlaced` | CID-NOCLAIM, RESET-EXIT, NO-SURVIVE, D16 (ADR-0156) |
 | `quiescence` (`quiesce_ok`, `quiesce_live`) | `LatchIffCount`, `CountCoversRecoveries`, `NoReopenBeforeRepair`, `NoRepairWithoutHold`, `QuiescedHoldsNoFlow`, `ServeRunsOnlyWithTable`, `LeakedHoldKeepsForwardingQuiesced`, `ForeignRestoreChangesNothing` | `C1EpisodeEnds`, `C2EpisodeEnds`, `C1Repaired`, `ForeignHoldEndsInFailStop` | QHOLD, ADR-0124 (UP-7), ADR-0184, D-UP-4 / PD-1 |
 | `udp_slots` (`slots_ok`, `slots_live`) | `SlotHeldOnce`, `ReleasedSlotCarriesNoData`, `RouteCurrent`, `LatePairedAborted`, `NoReassociationWithoutNewDatagram` | `ReleasedSlotBecomesFree` | D25, SLOT-ABORT, U-2, EVMOD-DGRAM (the slot release's discard) |
-| `fwd_safe` (`safe_pair`, `safe_watch`, `safe_plive`, `safe_wlive`; named-run main `safe_runs`; **model-only, not a conformance target**) | `Safety`: `NoTouchAfterFree`, `NoOverrideCallsItself`, `NoEventLost`, `OneEndRecord`, `RecordAtIdRemoval`, `OneFree`, `FreeAfterWorkCompletes`, `FreeAfterReaders`, `NoIdNamesFreedState`, `CleanEndOnlyAfterPeerFin`, `NoUnclassifiedEnd`; round 15 adds `NoTextRunAfterUnload` and `RefHeldWhileReachable` (witness `WitnessNoUnload`; recorded in the current record `707089-1792512180.793`) (`fwd-safe-pair-safety-tlc`, `fwd-safe-watch-safety-tlc`) | `EveryUnitDelivered`, `StalledPairResumes`, `EndProducesRecord`, `SocketEndYieldsRecord`, `RequestedAbortEnds`, `EndedStateFreed` | EVMOD-SAFE (ADR-0204), EVMOD-WQ, EVMOD-REC, EVMOD-SWEEP / F-S1 (EVMOD-END, ADR-0180), MODULE-REFCOUNT (ADR-0198, ADR-0204 rule 5) |
+| `fwd_safe` (`safe_pair`, `safe_watch`, `safe_plive`, `safe_wlive`; named-run main `safe_runs`; **model-only, not a conformance target**) | `Safety`: `NoTouchAfterFree`, `NoOverrideCallsItself`, `NoEventLost`, `OneEndRecord`, `RecordAtIdRemoval`, `OneFree`, `FreeAfterWorkCompletes`, `FreeAfterReaders`, `NoIdNamesFreedState`, `CleanEndOnlyAfterPeerFin`, `NoUnclassifiedEnd` (`fwd-safe-pair-safety-tlc`, `fwd-safe-watch-safety-tlc`) | `EveryUnitDelivered`, `StalledPairResumes`, `EndProducesRecord`, `SocketEndYieldsRecord`, `RequestedAbortEnds`, `EndedStateFreed` | EVMOD-SAFE (ADR-0204), EVMOD-WQ, EVMOD-REC, EVMOD-SWEEP / F-S1 (EVMOD-END, ADR-0180) |
 
 **`fwd_safe` — the forwarder's late-callback, lock and RCU boundaries
 (model-only).** `fwd_pair` runs each callback, forwarder run and owner call
@@ -13467,7 +12827,7 @@ its `vsock_table_lock` release, `SwUnlock`), for one pair or one watch
   (QPROJ-8), and one end record per pair through `fwd_pair`'s `pr(s)`.
 - **Discharge of its assumptions.** S1–S4 (the RCU, release/acquire,
   workqueue and sweep-store-order facts) by the source reading of
-  § *End classification* and ADR-0204, and by V-EV-SAFE (KASAN, DELIVER of
+  § *End classification* and ADR-0204, and by V-EV-SAFE (DELIVER of
   step 4, not contract-shaping; § *Validation plan*). The F-S1 re-check has
   no measurement: the sweep window cannot be widened without changing the
   kernel (§ *End classification*).
@@ -13489,196 +12849,106 @@ its `vsock_table_lock` release, `SwUnlock`), for one pair or one watch
   | the context's release ends a pair with no record | `ReleaseEndsPairWithoutRecord` |
   | a watch's own end, then the owner's `ABORT` is `ENOENT` | `WatchOverrideEndThenOwnerAbortIsEnoent` |
   | the owner's `ABORT` of a watch racing the sweep: one record | `WatchOwnerAbortRacingSweepOneRecord` |
-  | MODULE-REFCOUNT: `delete_module` is refused while a context is open | `UnloadRefusedWhileContextOpen` (check `fwd-safe-run-unload-refused-while-context-open`; round 15) |
-  | MODULE-REFCOUNT: `delete_module` is refused while a socket is hooked | `UnloadRefusedWhileSocketHooked` (check `fwd-safe-run-unload-refused-while-socket-hooked`; round 15) |
-  | MODULE-REFCOUNT: unload succeeds once the context is released and the free work has returned | `UnloadSucceedsAfterReleaseAndFree` (check `fwd-safe-run-unload-succeeds-after-release-and-free`; round 15) |
-  | rule 5: a late callback of a lock-owning caller finishes before the removal under `lock_sock` | `LateLockedCallbackFinishesBeforeRemoval` (check `fwd-safe-run-late-locked-callback-finishes-before-removal`; round 15) |
-  | rule 5: a ULP present at removal keeps that socket's module reference | `UlpCopyKeepsModuleLoaded` (check `fwd-safe-run-ulp-copy-keeps-module-loaded`; round 15) |
-  | rule 5, **wfree** class: a `sock_wfree` caller's write-space wake through the wait-queue entry finishes before the pair's end removes the entry (`RemoveWait`) | `WfreeWakeFinishesBeforeRemoveWait` (check `fwd-safe-run-wfree-wake-finishes-before-remove-wait`; round 16, evaluator, 2.0 s) |
+  | rule 5, **wfree** class: a `sock_wfree` caller's write-space wake through the wait-queue entry finishes before the pair's end removes the entry (`RemoveWait`) | `WfreeWakeFinishesBeforeRemoveWait` (check `fwd-safe-run-wfree-wake-finishes-before-remove-wait`; evaluator) |
 
-  Every run above holds in the current record `707089-1792512180.793`.
+  `fwd_safe` has no unload or module-reference run (item 7).
 
 - **F-S1 hazard.** `noSweepRecheck` (no table-lock re-check) violates
   `NoUnclassifiedEnd`: `fwd-safe-hazard-no-sweep-recheck` (TLC, main
-  `safe_bugNoSweepRecheck`) and `fwd-safe-hazard-no-sweep-recheck-run`
-  (main `safe_runsNoSweepRecheck`, run
-  `SweepStoresBeforeErrReadRechecksUnderTableLock`, `expect = "violation"`).
+  `safe_bugNoSweepRecheck`; one check per decision).
   `NoUnclassifiedEnd` is `fwd_safe`'s invariant; `fwd_pair`'s is
   `NoUnclassifiedEof`.
 
-**Round 15 model change (MODULE-REFCOUNT; made by the quint-modeler, not
-yet recorded).** No module encoded the module's permanence. The only
-mentions were prose in `specs/quint/guest-flow-owner/README.md` ("one
-permanent module", the "`PERMANENT` flag" and "the appliance kernel without
-module unloading" under *Not modelled*), and `fwd_safe` never freed the
-module's text. MODULE-REFCOUNT adds a concurrent rule of exactly
-`fwd_safe`'s abstraction: the module's text may be freed while a late
-callback or a work item is still running, unless rule 5 holds. So `fwd_safe`
-gains the following.
+**Rule 5's write-space entry in `fwd_safe`.** `fwd_pair` keeps the
+invariant `CtxGoneIffVmDown` (in `Safety` and `DgramSafety`); `VmmExit`'s
+guard does not read the mode and the datagram branch writes `ctx(g) = gone`
+as the stream branch does (`fwd_pair.qnt:293`, `:1084-1091`); the named run
+`VmmExitAbortsHostHalf` reaches `VmmExit`, so the invariant has no witness
+on the stream main (item 4 covers the datagram branch).
 
-- **State.**
-  - `modref`: the module references held by the modelled context and its
-    hooked sockets.
-  - `unloaded: bool`.
-  - Per half, `ulp: bool`: a ULP installed after attach.
-  - `inText`: the set of actors executing module text. These are an
-    override (from its dispatch, which loads the callback pointer, to its
-    return) and the work item or free work (from start to return).
-- **Actions.**
-  - `CtxOpen` / `CtxClose`: the context reference.
-  - `Hook` at attach: +1 per half.
-  - `UlpInstall(s)`: an environment fault, an owner defect ADR-0200 rules
-    out, kept to give the ULP check teeth.
-  - The removal of rule 2, split into `LockSock(s)` → restore and clear →
-    `UnlockSock(s)`. An override dispatched by a lock-owning caller is
-    enabled only while that caller holds the socket lock. A
-    bottom-half-disabled caller's override counts as an RCU reader.
-  - `FreeWorkPut`: `module_put` per hooked half without a ULP, as the free
-    work's last step before its return.
-  - `Unload`: enabled iff `modref = 0` and the module is not unloaded. It
-    sets `unloaded`. `module_exit`'s drain is modelled as `Unload`
-    completing only after every work-item actor has returned.
-- **Invariant `NoTextRunAfterUnload`.** `unloaded ⇒ inText = ∅`, and no
-  dispatch can load a pointer to an override.
-- **Invariant `RefHeldWhileReachable`.** While any actor is in `inText`, or
-  a hooked half still carries an override or a ULP copy, `modref > 0`.
-- **Hazards, one per rule-5 clause.** Each violates `NoTextRunAfterUnload`:
-  - `refDroppedAtUnhook`: `module_put` at removal, before the grace
-    period;
-  - `removeWithoutSockLock`: the removal does not take the socket lock;
-  - `ulpRefReleased`: the reference is dropped despite `ulp`;
-  - `putOnSystemQueue`: the free work's return is not waited for by the
-    drain.
-- **Named runs on `safe_runs`.**
-  - `UnloadRefusedWhileContextOpen`
-  - `UnloadRefusedWhileSocketHooked`
-  - `UnloadSucceedsAfterReleaseAndFree`
-  - `LateLockedCallbackFinishesBeforeRemoval`
-  - `UlpCopyKeepsModuleLoaded`
-- **Non-vacuity witness.** One witness shows `unloaded` is reached.
-- **`fwd_pair` (round-14 adversarial low).** `CtxGoneIffVmDown` is
-  non-vacuous on the datagram main for a stated reason, and a witness makes
-  it mechanical:
-  - The reason: `VmmExit`'s guard is `vmUp ∧ canFault`, which does not read
-    the mode. `FMAX = 1` for `CFG = "dgram"` (`fwd_pair.qnt:293`), and the
-    datagram branch writes `ctx(g) = gone` exactly as the stream branch does
-    (`:1084-1091`). So the `gone` side is reached on `pair_dgram` as on
-    `pair_ok`.
-  - The witness: the modeller adds the check
-    `fwd-pair-dgram-witness-vmm-exit` (`WitnessNoVmmExit` on `pair_dgram`,
-    TLC, expect violation, `ci = true`) beside `fwd-pair-witness-vmm-exit`.
-- **README.** The three prose mentions above are restated: the module
-  unloads only at zero references; no permanence flag exists; the appliance
-  kernel has no module unloading.
-- **As made (round 15, the modeller's report).** The request above is
-  encoded at a finer grain; the deviations are pending adversarial review
-  (standing rule):
-  - State: two contexts `ctx` / `octx` (the modelled one and another),
-    `sref` (the reference each hooked half holds), per-half `ulp`,
-    `modref`, `unloaded`. In place of one `inText` set, each invocation
-    records its caller class — `lock` for Write and PeerFin, `bh` for Read,
-    SwReport and UlpCall. The grace period waits for a `bh` caller from its
-    call site on, and for a `lock` caller once it is inside
-    `rcu_read_lock`.
-  - Rule 5's removal: a half's restore and clear hold `lock_sock(s)` and
-    wait while a `lock` caller holds it.
-  - Actions: `UlpInstall` and `UlpCall` (environment fault); the free split
-    into `FreeDone` (kfree), `FreePut` (`module_put` per half without a
-    ULP) and `FreeRet` (the return, still module text); `CtxClose` (enabled
-    only after the release has emptied the id table), `CtxOpen` and
-    `CtxOtherClose`; `Unload`, enabled at `modref = 0` and completing only
-    after `destroy_workqueue`'s drain. Control calls need an open context.
-  - Invariants `NoTextRunAfterUnload` and `RefHeldWhileReachable` in
-    `Safety`; witness `WitnessNoUnload`; the five named runs on
-    `safe_runs`; the four hazard mains `safe_bugRefDroppedAtUnhook`,
-    `safe_bugRemoveWithoutSockLock`, `safe_bugUlpRefReleased`,
-    `safe_bugPutOnSystemQueue`.
-  - Checks (`checks.toml`, all `ci = true` as new checks; recorded in
-    `707089-1792512180.793`, each matching its `expect`):
-    `fwd-safe-witness-unload` (`safe_pair`) and
-    `fwd-safe-witness-watch-unload` (`safe_watch`), expect violation;
-    `fwd-safe-hazard-ref-dropped-at-unhook` (`NoTextRunAfterUnload`),
-    `fwd-safe-hazard-ref-dropped-at-unhook-ref` (`RefHeldWhileReachable`),
-    `fwd-safe-hazard-remove-without-sock-lock`,
-    `fwd-safe-hazard-ulp-ref-released` and
-    `fwd-safe-hazard-put-on-system-queue` (`NoTextRunAfterUnload`), expect
-    violation; the five `fwd-safe-run-*` checks of the table above, expect
-    holds; and `fwd-pair-dgram-witness-vmm-exit`. The round-15 record run
-    was stopped below the 8 GiB host-disk stop line with no run id; the
-    checks are recorded in `707089-1792512180.793` (458 of 458, § *Status*).
+`sock_wfree` calls `sk_write_space` from preemptible process context with no
+lock and no RCU section, on every vsock and UDP transmit-skb free (§ *Pair
+end*, "Stale invocations", rule 5). Rule 5 never overrides `sk_write_space`;
+the write-space trigger is a wait-queue entry. `fwd_safe` models it:
 
-**Round 16 model change (rule 5's write-space closure; made by the
-quint-modeler and recorded in `707089-1792512180.793`).** The round-15 adversary refuted rule 5's
-caller-class argument for `sk_write_space`: `sock_wfree` calls it from
-preemptible process context with no lock and no RCU section, on every vsock
-and UDP transmit-skb free (§ *Pair end*, "Stale invocations", rule 5).
-Rule 5 now never overrides `sk_write_space`; the write-space trigger is a
-wait-queue entry. `fwd_safe` models the target's write-space wake as a `bh`
-caller of an override (`Read`), which is no longer the design. The change:
-
-- **New caller class `wfree`.** A write-space wake whose waker holds no
-  socket lock, is in no RCU read-side region and has preemption enabled
-  (the vhost worker, the guest's virtio-vsock transmit work, a NIC driver's
-  skb free). The grace period does not wait for it and the socket lock does
-  not exclude it. `Read`'s write-space wake is delivered by a nondeterministic
-  choice of `bh` or `wfree` waker (a TCP target's waker is `bh` or `lock`;
-  modelling the class on the one abstract target is the conservative
-  choice).
-- **The entry, as designed.** The write-space wake no longer dispatches an
-  override. It enters the entry's function only while holding the target's
-  wait-queue lock `wqlk(t)` (the function is in `inText` only while
-  `wqlk(t)` is held), whatever the waker's class. The removal gains
-  `RemoveWait(t)`, under `lock_sock(t)` and before the restore and clear of
-  rule 2: it takes `wqlk(t)` (waiting while a wake holds it) and removes the
-  entry; a wake after it enters nothing. The free work is queued only after
-  `RemoveWait` of every half.
-- **Invariants.** Unchanged: `NoTextRunAfterUnload` and
-  `RefHeldWhileReachable` now also cover the entry function, and
-  `NoTouchAfterFree` counts the entry function as a holder of the pair until
-  `RemoveWait`.
-- **Hazard `writeSpaceOverride`** (one per removed closure): the write-space
-  trigger is an override again, entered by a `wfree` waker outside
-  `wqlk(t)`, so a `wfree` waker preempted in the override's text is waited
-  for by neither `lock_sock` nor the grace period; it violates
-  `NoTextRunAfterUnload`. Check `fwd-safe-hazard-write-space-override`
-  (TLC, expect violation, `ci = true`). A second hazard,
-  `removeWaitAfterFreeQueued` (the entry removed after the free work is
-  queued), violates `NoTouchAfterFree`; check
+- **Caller class `wfree`.** A write-space wake whose waker holds no socket
+  lock, is in no RCU read-side region and has preemption enabled (the vhost
+  worker, the guest's virtio-vsock transmit work, a NIC driver's skb free).
+  The grace period does not wait for it and the socket lock does not exclude
+  it. `Read`'s write-space wake is delivered by a nondeterministic choice of
+  `bh` or `wfree` waker (a TCP target's waker is `bh` or `lock`; modelling
+  the class on the one abstract target is the conservative choice).
+- **The entry.** The write-space wake enters the entry's function only while
+  holding the target's wait-queue lock `wqlk(t)`, whatever the waker's
+  class. The removal has `RemoveWait(t)`, under `lock_sock(t)` and before the
+  restore and clear of rule 2: it takes `wqlk(t)` (waiting while a wake
+  holds it) and removes the entry; a wake after it enters nothing. The free
+  work is queued only after `RemoveWait` of every half.
+- **Invariants.** `NoTouchAfterFree` counts the entry function as a holder
+  of the pair until `RemoveWait`.
+- **Hazard `removeWaitAfterFreeQueued`** (the entry removed after the free
+  work is queued) violates `NoTouchAfterFree`; check
   `fwd-safe-hazard-remove-wait-after-free-queued`.
 - **Named run** on `safe_runs`: `WfreeWakeFinishesBeforeRemoveWait` — a
-  `wfree` waker holding `wqlk(t)` delays `RemoveWait`, the pair ends, the
-  free runs, `Unload` succeeds, and no text runs after it (check
-  `fwd-safe-run-wfree-wake-finishes-before-remove-wait`, `expect = "holds"`).
-- **README.** The assumptions table gains the wait-queue fact (the function
-  runs under the head's lock with interrupts disabled, and
-  `remove_wait_queue` takes it; `kernel/sched/wait.c:69-76`, `:104-108`,
-  `:118-127 @ v7.0`), discharged by that source reading and by V-EV-SAFE's
-  full-target cases; and the `sock_wfree` fact (`net/core/sock.c:2675-2693
-  @ v7.0`). The caller-class prose (`lock`, `bh`) gains `wfree`, and
-  `fwd-safe-hazard-no-write-space`'s row says "the write-space wait-queue
-  entry not added".
-- **Record.** As made: `fwd_safe.qnt` has the **wfree** class, the
-  `RemoveWait` step and the run; `hazard/fwd_safe_hazards_2.qnt` has
-  `safe_bugWriteSpaceOverride` and `safe_bugRemoveWaitAfterFreeQueued`; all
-  three checks are `ci = true`. In `707089-1792512180.793`:
-  `fwd-safe-hazard-write-space-override` violates `NoTextRunAfterUnload`
-  (TLC, exhaustive, 18.3 s), `fwd-safe-hazard-remove-wait-after-free-queued`
-  violates `NoTouchAfterFree` (TLC, exhaustive, 17.5 s), and
-  `fwd-safe-run-wfree-wake-finishes-before-remove-wait` holds (evaluator,
-  2.0 s); each as expected. No existing run, main or projected variable was
-  renamed. `verify-evidence` passes.
+  `wfree` waker holding `wqlk(t)` delays `RemoveWait`, the pair ends, and
+  the free runs (check `fwd-safe-run-wfree-wake-finishes-before-remove-wait`,
+  `expect = "holds"`).
+- **Assumptions.** The wait-queue fact (the function runs under the head's
+  lock with interrupts disabled, and `remove_wait_queue` takes it;
+  `kernel/sched/wait.c:69-76`, `:104-108`, `:118-127 @ v7.0`), discharged by
+  that source reading and by V-EV-SAFE's full-target cases; and the
+  `sock_wfree` fact (`net/core/sock.c:2675-2693 @ v7.0`).
+- **Spec.** `fwd_safe.qnt` has the **wfree** class, the `RemoveWait` step
+  and the run; `hazard/fwd_safe_hazards_2.qnt` holds
+  `safe_bugRemoveWaitAfterFreeQueued`.
 
-The round-15 and round-16 spec changes, with `fwd_pair`'s round-14 change,
-are recorded in `707089-1792512180.793` (§ *Status*). `fwd_safe` is not a
-conformance target; no driver changes. Kernel facts the model assumes, each
-discharged by V-EV-UNLOAD and the DELIVER source review:
-- S5: `delete_module`'s count check (`kernel/module/main.c:730-751`, `:828`
-  @ v7.0);
-- S6: the drain of `destroy_workqueue` (`kernel/workqueue.c:5979`);
-- S7: a vanilla grace period waits for bottom-half-disabled regions
-  (`include/linux/rcupdate.h:671-675`);
-- S8: every override invocation comes from a socket-lock owner, a
-  bottom-half-disabled region, or the forwarder's own work item.
+`fwd_safe` is not a conformance target; no driver changes. The kernel facts
+the pair-state model assumes, by the ids of the spec README's assumptions
+table (`specs/quint/guest-flow-owner/README.md`), each with its discharging
+items. The README's S1 to S4 (RCU, release/acquire, workqueue, the vsock
+receive path) are not repeated here. M5 to M8 are the delta's own ids and
+are not in the README: M5 and M6 (the module's reference count and its
+workqueue drain) are not model assumptions, and M7 and M8 are discharged by
+the source reading, V-EV-SAFE and V-EV-UNLOAD, not by a model check:
+- **S5** (wakeup): a TCP target wakes `sk_write_space` after an `EAGAIN`
+  send once space frees, and a socket's own `sk_write_space` wakes its wait
+  queue with `EPOLLOUT` (`net/core/stream.c:34-51`, `:175-181`;
+  `net/core/sock.c:3617-3660` @ v7.0). Discharged by the source reading and
+  V-EV-SAFE's full-target resume cases (TCP, vsock and UDP targets). P-67
+  measured an `sk_write_space` override and is not evidence for the
+  wait-queue entry.
+- **S6** (the wait-queue fact): a wait-queue entry's function runs
+  only with the head's lock held and interrupts disabled, and
+  `remove_wait_queue` takes that lock (`kernel/sched/wait.c:69-76`,
+  `:104-108`, `:118-127` @ v7.0), so once removal returns no entry function
+  is running or can be entered, whatever the waker's class. Discharged by
+  the source reading and V-EV-SAFE's full-target resume cases.
+- **S6, `sock_wfree` half**: `sock_wfree` calls `sk_write_space`
+  with no socket lock, outside any RCU section and with bottom halves
+  enabled for every socket without `SOCK_USE_WRITE_QUEUE`
+  (`net/core/sock.c:2675-2693` @ v7.0; only TCP sets the flag,
+  `net/ipv4/tcp.c:477`). It is why `sk_write_space` is never overridden (the
+  model's `wfree` class). Discharged by the
+  source reading, V-EV-SAFE's full-target resume cases (the wake reaches a
+  vsock and a UDP target through this path), and the DELIVER source review
+  that finds no assignment to `sk_write_space`.
+- **M5** (not modelled): `delete_module` refuses while any module reference
+  is held and calls `exit` only at zero (`kernel/module/main.c:744-751`,
+  `:828` the refusal, `:834-835` the `exit` call @ v7.0). Discharged by the source reading and V-EV-UNLOAD.
+- **M6** (not modelled): `destroy_workqueue` drains every pending and running
+  item of the module's own workqueue (`kernel/workqueue.c:5979`, `:5962`,
+  `:4183-4194` @ v7.0). Discharged by the source reading and V-EV-UNLOAD.
+- **M7**: a vanilla RCU grace period waits for `rcu_read_lock` regions,
+  preemptible ones included, and for bottom-half-disabled and
+  preemption-disabled regions (`include/linux/rcupdate.h:671-675`,
+  `:687-691` @ v7.0). Discharged by the source reading and V-EV-SAFE.
+- **M8**: every override invocation (`sk_data_ready`, `sk_state_change`,
+  `sk_error_report`; `sk_write_space` is never overridden) comes from a
+  socket-lock owner, a region a vanilla grace period waits for, or the
+  forwarder's own work item (rule 5's classes **lock**, **rcu** and
+  **work**; the error-queue completions are excluded by attach and watch,
+  § *Pair end*). Discharged by the DELIVER source review of the module step,
+  V-EV-SAFE, and V-EV-UNLOAD's unload stress.
 
 What the properties say, in one line each:
 
@@ -13746,18 +13016,11 @@ What the properties say, in one line each:
 is a `[[check]]` with `backend = "evaluator"`, `expect = "holds"`, checked
 once on its module's conformance main; run-based hazards are evaluator
 checks with `expect = "violation"`. The table lists every named run the
-specs declare after the third iteration (`checks.toml` and the README are
-the per-check SSOT); the runs the third iteration added are marked (3).
-Every listed run holds in the current recorded run `707089-1792512180.793`,
-`ForeignHoldRestoreChangesNothingThenFailStops` included (rounds 14 to 16
-add no run to a conformance main: round 14's `fwd_pair` change and the
-round-15 datagram witness add none, and round 15's five runs and round
-16's `WfreeWakeFinishesBeforeRemoveWait` are on the model-only `fwd_safe`'s
-`safe_runs`, listed under "`fwd_safe`" above; the record covers all three
-rounds, § *Status*); the retired runs
-`OwnerAbortOfWatchShutsVhAndHolderSeesAbort` and
-`OwnerAbortedWatchHolderReadsNotConnectedAndReportsAbort` are not listed
-and no driver pins them. DISTILL
+specs declare (`checks.toml` and the README are the per-check SSOT). Every
+listed run holds in `evidence/summary.json`,
+`ForeignHoldRestoreChangesNothingThenFailStops` included
+(`WfreeWakeFinishesBeforeRemoveWait` is on the model-only `fwd_safe`'s
+`safe_runs`, listed under "`fwd_safe`" above). DISTILL
 pins each run with `#[quint_test]` on the conformance main named in the
 table (`flows_conf` for `owner_flows` unless noted; `pair_conf`,
 `quota_conf`, `lease_conf_ok`, `quiesce_conf`, `slots_conf`
@@ -13800,13 +13063,13 @@ ruling 2026-10-15; § *DISTILL handoff*).
 | Accepted V_g: host close ends silently, error aborts (DG-5-E) | `AcceptedVgHostCloseEndsFlowSilently`, `AcceptedVgErrorAbortsWithAbort` |
 | Beacon happy path and its boundaries (`flows_beacon_conf`) | `BeaconReadyReleasedThenDriverStopReleasesClaim`, `BeaconAfterDriverStopIsRefusedAtAccept`, `DriverStopBetweenAcceptAndReadyClosesWithoutClaim`, `StaleLaunchBeaconIsClosedAtReadyAndDoesNotPoisonClaim`, `SecondBeaconConnectionOfSameLaunchIsHeld`, `VmDeathClosesUnreadBeaconConnection` |
 | VMM exit ends the launch and releases the beacon claim in one step; the next launch's READY takes it (D-UP-9; `flows_beacon_conf`) | `VmExitEndsLaunchAndReleasesBeaconClaim` |
-| Forwarding (`pair_conf`): clean both ways; a stalled target blocks its sender, then resumes; early bytes and an early FIN before attach | `CleanBothWaysCompletes`, `TargetStallBlocksSenderThenResumes`, `EarlyBytesBeforeAttachDelivered`, `EarlyFinBeforeAttachCarriedOut`, `AppWriteAndFinBeforePairedAttachesInCloseWaitAndCompletes` (3), `EarlyVsockHalfCloseBeforeGuestAttachCompletes` (3) |
-| Resets and aborts reach the far ends as resets (`pair_conf`) | `GuestAppResetReachesRemoteAsReset`, `RemoteResetReachesGuestAppAsReset`, `PeerCloseWithDirectionOpenAborts`, `OwnerAbortResetsBothFarEnds`, `ContextReleaseResetsEveryPair`, `VmmExitAbortsHostHalf`, `RemoteFinThenResetAbortsPair`, `GuestAppFinThenResetAbortsPairWithEpipe` (3) |
-| Clean full end and trailing ends (`pair_conf`) | `HalfCloseThenPeerCloseIsClean`, `PeerCloseRacingOwnHalfCloseIsClean` (3), `TrailingRstAfterCompletionIsInert`, `ReadShutdownPeerStallsLikeSlowReader` |
-| Ends before attach (`pair_conf`) | `HostHalfCloseThenAbortBeforeGuestAttachIsAbort`, `GuestCloseBeforeHostAttachAborts` (the in-flight branch: the guest's `0x3` still in transit at the host's attach, accepted, then aborted by the callback; U-EV3-1), `IntakeChildResetBeforePairedIsRefusedAndFlowAborts` (3), `DestinationResetBeforeHostAttachIsRefusedAndFlowAborts` (3), `GuestCloseWithEmptyQueueBeforeHostAttachIsRefusedAndFlowAborts` (3) |
-| Watched streams (`pair_conf`) | `WatchedStreamSeesGuestResetAsAbort`, `ReleasedWatchWithNoRecordReadsAsAbort`, `OwnerAbortOfWatchLeavesVhAndStreamReportsAborted` (3, replaces the retired `OwnerAbortOfWatchShutsVhAndHolderSeesAbort`), `OwnerAbortSendsGuestAbortThenHolderDropIsInert` (3), `ContextReleaseShutsWatchedVhAndHolderReadsNotConnected` (3), `DroppedStreamAbortsWatchThenGuestSeesAbort` (3), `VmmExitWithWatchRecordInFlightResolvesFromRecord` (3) |
+| Forwarding (`pair_conf`): clean both ways; a stalled target blocks its sender, then resumes; early bytes and an early FIN before attach | `CleanBothWaysCompletes`, `TargetStallBlocksSenderThenResumes`, `EarlyBytesBeforeAttachDelivered`, `EarlyFinBeforeAttachCarriedOut`, `AppWriteAndFinBeforePairedAttachesInCloseWaitAndCompletes`, `EarlyVsockHalfCloseBeforeGuestAttachCompletes` |
+| Resets and aborts reach the far ends as resets (`pair_conf`) | `GuestAppResetReachesRemoteAsReset`, `RemoteResetReachesGuestAppAsReset`, `PeerCloseWithDirectionOpenAborts`, `OwnerAbortResetsBothFarEnds`, `ContextReleaseResetsEveryPair`, `VmmExitAbortsHostHalf`, `RemoteFinThenResetAbortsPair`, `GuestAppFinThenResetAbortsPairWithEpipe` |
+| Clean full end and trailing ends (`pair_conf`) | `HalfCloseThenPeerCloseIsClean`, `PeerCloseRacingOwnHalfCloseIsClean`, `TrailingRstAfterCompletionIsInert`, `ReadShutdownPeerStallsLikeSlowReader` |
+| Ends before attach (`pair_conf`) | `HostHalfCloseThenAbortBeforeGuestAttachIsAbort`, `GuestCloseBeforeHostAttachAborts` (the in-flight branch: the guest's `0x3` still in transit at the host's attach, accepted, then aborted by the callback; U-EV3-1), `IntakeChildResetBeforePairedIsRefusedAndFlowAborts`, `DestinationResetBeforeHostAttachIsRefusedAndFlowAborts`, `GuestCloseWithEmptyQueueBeforeHostAttachIsRefusedAndFlowAborts` |
+| Watched streams (`pair_conf`) | `WatchedStreamSeesGuestResetAsAbort`, `ReleasedWatchWithNoRecordReadsAsAbort`, `OwnerAbortOfWatchLeavesVhAndStreamReportsAborted`, `OwnerAbortSendsGuestAbortThenHolderDropIsInert`, `ContextReleaseShutsWatchedVhAndHolderReadsNotConnected`, `DroppedStreamAbortsWatchThenGuestSeesAbort`, `VmmExitWithWatchRecordInFlightResolvesFromRecord` |
 | Forwarder recovery (`pair_conf`) | `ForwarderRecoveryAbortsThenReopens` |
-| Datagram mode (`pair_conf`) | `DatagramsInOrderWithEmpty`, `PartialFrameResumedNotDuplicated`, `StalledUdpTargetDropsAtSource`, `TruncatedFrameAtPeerEndAbortsFrameInvalid` (3) |
+| Datagram mode (`pair_conf`) | `DatagramsInOrderWithEmpty`, `PartialFrameResumedNotDuplicated`, `StalledUdpTargetDropsAtSource`, `TruncatedFrameAtPeerEndAbortsFrameInvalid` |
 | Attach order prefixes (`pair_conf`) | `Paired`, `DgramPaired` |
 | Quota: admission stops at the allocation quota; half-closed flows count; release at the end record | `AdmissionStopsAtTheAllocationQuota`, `DrainingFlowStillCountsAgainstTheQuota`, `WithholdingGuestHoldsAtMostItsOwnQuota`, `CompletedPairReleasesTheSlotAtItsEndRecord`, `AbortOfHalfClosedFlowReleasesTheSlotAtItsEndRecord` |
 | Lease: next-fit, the VMM opens its own device, release last | `AssignThenVmmOpensItsOwnDevice`, `NextFitContinuesFromTheCursor`, `ReleaseWhileTheVmmRunsIsRefused`, `StopExitsTheVmmThenReleaseIsLast` |
@@ -13837,63 +13100,87 @@ success (`LatePairedForClosedHostFlowIsDiscarded`,
 a composition property outside the model (no VM driver composed, no owner
 started).
 
-**Hazard variants (teeth).** Each rule removed makes the checker find a
-counterexample (`expect = "violation"`); the per-check table is the README's
-§ "Hazards".
+**Hazard variants (teeth) — one per ADR-level decision (WITNESS-HAZARD-RULE).**
+Removing a decision's rule makes the checker find a counterexample
+(`expect = "violation"`). Each row below is one decision and one hazard
+check, in the form that violates it. The README's § "Hazards" is the same
+table.
 
-| Rule removed | Property that fails |
-|---|---|
-| L-3: session check and claim in two steps | `OneLiveSession` |
-| H-1: attach before the request is read (`fwd-pair-hazard-attach-before-read`) | `NoAttachBeforeRead` |
-| U-1: admission split, `Paired` without recheck, no abort on session loss, dial without the admission check | `NoAdmitWhenClosed` |
-| U-1 step 3 alone: a dial skips the live-session check (`owner-flows-hazard-dial-no-session-check`) | `NoAdmitWhenClosed` |
-| A typed dial refusal registers a dial slot (`owner-flows-hazard-refusal-registers`) | `TypedRefusalChangesNothing` |
-| G-V3: activation without the session and quiescence guard (`owner-flows-hazard-activate-no-guard`) | `ActivateOnlyWithLiveSession` |
-| Teardown skips flows | `CurrentGeneration` |
-| U-5: a late `Paired` resurrects a closed flow | `ClosedIsTerminal` |
-| ATTR-TOKEN: attribution by peer CID alone (flows, beacon) | `CurrentGeneration`, `NoCrossLaunchMsg`, `BeaconNoCrossLaunchReady`, `BeaconCurrentLaunch` |
-| ATTR-LIVE-CLAIM: claim before the token is read, or compared with the lease token (flows, beacon) | `NoCrossLaunchSessionHeld`, `CurrentGeneration`, `BeaconCurrentLaunch`, `BeaconNoCrossLaunchHeld` |
-| ADR-0157: driver stop closes the session but keeps the CID's beacon claim (`owner-flows-hazard-beacon-driver-stop-keeps-claim`, flag `driverStopKeepsClaim`, instance `flows_bugDriverStopKeepsClaim`) | `ReadyReleased` |
-| DG-5-F: reconnect before the loss abort | `GuestFlowsDoNotOutliveSession` |
-| DG-5-E: an accepted V_g not watched; K-A4 dropped; guest tombstone alternative | `GuestHalfEnds` |
-| INB-1: owner pairing deadline not above the guest connect timeout | `DialDeadlineAfterGuestReply`, `NoPairedAfterDialEnded` |
-| R2-END / EVMOD-END: every vsock end forwarded as a FIN (`fwd-pair-hazard-eof-as-fin`); class from accumulated `peer_shutdown` (`fwd-pair-hazard-classify-accumulated`) | `AbortNeverCleanEof`; `ClassFixedAtTransition`, `AbortNeverCleanEof` |
-| ADR-0183: consume at read (`fwd-pair-hazard-consume-before-accept`; rejected `fwd-pair-alt-sockmap-redirect`); shut the target on the callback (`fwd-pair-hazard-shutdown-on-callback`) | `QueuesWithinBounds`; `NoEarlyShutdown` |
-| EVMOD-CTL: release keeps pairs (`fwd-pair-hazard-release-keeps-pairs`); reopen before release (`fwd-pair-hazard-reopen-before-release`) | `ReleasedContextHoldsNoPair`, `NoForwardAfterEnd` |
-| EVMOD-REC: a lossy end record (`fwd-pair-hazard-lossy-end-record`) | `OneEndRecordPerPair`, `EveryEndResolves` |
-| EVMOD-PAIR: check then hook (`fwd-pair-hazard-check-then-hook`); no attach-time seeding (`fwd-pair-hazard-no-seed`, 3); `ESTABLISHED`-only attach (`fwd-pair-hazard-established-only`, 3) | `AttachTimeEndClassifiedOnce`, `NoUnclassifiedEof`; `NoUnclassifiedEof`; `AbortOnlyAfterFault` |
-| EVMOD-END TCP rule: a TCP EOF taken as clean (`fwd-pair-hazard-tcp-eof-is-clean`); no `sk_error_report` rule (`fwd-pair-hazard-tcp-no-error-report`, 3) | `ResetNeverEndsClean`; `TcpResetEndsPair`, `EveryEndResolves` |
-| CLEAN-FULL-END: "send shut" published after the SHUTDOWN (`fwd-pair-hazard-late-send-shut`, 3) | `OwnShutBeforeShutdownSent`, `AbortOnlyAfterFault` |
-| EVMOD-ATTACH-END: the surviving TCP half closed gracefully (`fwd-pair-hazard-ended-attach-graceful-close`, 3); a refusal kept as a defect (`fwd-pair-hazard-ended-attach-ignored`, 3) | `EndedHalfNeverEndsClean`; `EndedHalfFlowResolves` |
-| WATCH-ABORT / EVMOD-STREAM-ABORT: the watch's abort shuts `V_h` (`fwd-pair-hazard-watch-abort-shuts-vh`, 3); the outcome taken from the read (`fwd-pair-hazard-holder-trusts-read`, 3); no guest `Abort` (`fwd-pair-hazard-no-guest-abort`, 3); a drop that does not abort the watch (`fwd-pair-hazard-drop-without-abort`, 3) | `WatchAbortLeavesHolderSocket`; `HolderOutcomeFromWatch`; `GuestPairEndsAfterOwnerAbort`; `NoLiveWatchAfterDrop`, `GuestPairEndsAfterHolderDrop` |
-| EVMOD-STREAM-END sweep path: the original callback before the record (`fwd-pair-hazard-original-before-record`, 3); no record taken as clean (`fwd-pair-hazard-no-record-is-clean`, 3) | `WatchRecordBeforeWake`; `HolderOutcomeFromWatch` |
-| EVMOD-DGRAM: consume a partial frame (`fwd-pair-hazard-consume-partial-frame`); wait on a truncated frame (`fwd-pair-hazard-truncated-frame-waits`, 3) | `DatagramsOnceInOrder`; `IncompleteFrameAtEndAborts`, `EveryEndResolves` |
-| Quota counts active flows only; slot freed at half-close; one quota for the node | `QuotaBound`, `DrainingFlowHoldsItsSlot`, `QuotaRefusalOnlyAtOwnQuota` (and their runs) |
-| Lease released before the VMM exits | `NoLaunchClash`, `LeaseOutlivesVmm` |
-| Lease `assign` checks the CID and takes it in two steps (`cid-lease-hazard-assign-split`) | `CidUnique` |
-| `assign` before boot reclamation (NO-SURVIVE) | `NoLaunchClash`, `AssignAfterReclaim` |
-| Boot reclamation kills the orphans but never records completion (`cid-lease-hazard-reclaim-never-completes`, flag `reclaimNeverCompletes`, instance `lease_bugReclaimNeverCompletes`) | `EventuallyPlaced` |
-| Guest reset reboots inside the VMM (RESET-EXIT) | `GuestResetEndsVmm` |
-| T-5: a `serve` crash forgets the stop intent (`crashForgetsStop`; `cid-lease-hazard-crash-forgets-stop`, `-run`) | `StoppedWorkloadNotPlaced` (and the run `StoppedWorkloadStaysStoppedAcrossServeCrash`) |
-| RESTART-SSOT: the pre-fix accessor as the decision, `attempts + 1 < CEILING` with no exemptions (`retryOffByOne`; `cid-lease-hazard-retry-off-by-one`, `-reclaim`, `-run`) | `ExhaustsOnlyAtCeiling`, `ExhaustsOnlyOnACrashClassFailure` (the dropped reclaim exemption), and the run `FifthCrashAtCeilingBoundaryIsPlacedAgain` |
-| RESTART-SSOT: the platform-reclaim exemption removed (`reclaimNotExempt`; `cid-lease-hazard-reclaim-not-exempt`, `-run`) | `ExhaustsOnlyOnACrashClassFailure` (and the run `ServeCrashPlacesAWorkloadAtTheCeilingAgain`) |
-| RESTART-SSOT: the generation exemption removed (`generationNotExempt`; `cid-lease-hazard-generation-not-exempt-run`, and `-safety` expecting `holds`) | the run `RedeployPlacesAnExhaustedWorkloadAgainWithItsCount` only; `Safety` holds (a removed transition; no state invariant sees it) |
-| RESTART-GEN-CRASH, GH #325, pending #325 (not fixed in #295): a generation replacement leased at a `serve` crash is lost — today's production (`crashLosesPlacedGeneration`; `cid-lease-hazard-crash-loses-placed-generation-run` on `CFG = "conf_325"`, and `-safety` expecting `holds`) | the run `RedeployLeasedAtServeCrashIsPlacedAgain` only; `Safety` holds |
-| DR5-CLOSE rule 7.1: a VMM exit retires and frees the lease with the device (`vmmExitRetiresLease`; `cid-lease-hazard-vmm-exit-retires-lease-run`, and `-safety` expecting `holds`) | the run `VmmCrashFreesItsCidAndPlacementRetries` only (at the `.expect` after `VmmCrash`, `lease(0) = 1`); `Safety` holds (the device and lease are freed together; no CID leaks) |
-| DR5-CLOSE rule 7.2: the predecessor freed before the successor is leased (`predecessorFirst`; `cid-lease-hazard-predecessor-first-run`, and `-safety` expecting `holds`) | the run `VmmCrashFreesItsCidAndPlacementRetries` only; `Safety` holds (dispatch order, not a CID-safety rule) |
-| DR5-CLOSE rule 7.3: the predecessor cleaned at `Assign`, before the successor launches (`predecessorCleanedAtAssign`; `-run`, and `-safety` expecting `holds`) | the run `VmmCrashFreesItsCidAndPlacementRetries` only; `Safety` holds |
-| DR5-CLOSE rule 7.4: a pool refusal keeps the predecessor held (`refusalKeepsPredecessor`; `-run` on `lease_ok`, and `-safety` expecting `holds`) | the run `PoolExhaustedRestartCleansThePredecessorThenPlaces` only (which holds on `lease_ok` and on `lease_conf_three`); `Safety` holds (the cleanup is deferred, not lost) |
-| DR5-CLOSE rule 7.5: `FinalizeFailed` writes the terminal before the release (`terminalBeforeRelease`; `cid-lease-hazard-terminal-before-release`, `-run`) | `FailedHoldsNoLease` (and the run `FailureAtCeilingExhaustsTheBudget`) |
-| DR5-CLOSE step boundary: a tick of a workload runs while its dispatch is held at a predecessor `teardown` (`tickDuringPredecessorTeardown`; `cid-lease-hazard-tick-during-predecessor-teardown`) | `NoUntrackedLease` |
-| QHOLD: a boolean latch; a dropped hold decrements; leaked hold ignored by the supervisor | `NoReopenBeforeRepair`, `C1Repaired`, `CountCoversRecoveries`, `C1EpisodeEnds` |
-| Repair without a hold; failed post-repair audit not counted (UP-7) | `NoRepairWithoutHold`, `C2EpisodeEnds` |
-| QHOLD: a restore clears the latch while another hold remains (`quiescence-hazard-restore-clears-latch`) | `LatchIffCount` |
-| QHOLD: quiesce leaves flows open (`quiescence-hazard-quiesce-skips-flows`) | `QuiescedHoldsNoFlow` |
-| QHOLD: a dropped hold decrements the count (`quiescence-hazard-drop-decrements-leaked`) | `LeakedHoldKeepsForwardingQuiesced` |
-| D-UP-4: a foreign hold is redeemed as the owner's own (`quiescence-hazard-foreign-decrements`, instance `quiesce_bugForeignDecrements`) | `ForeignRestoreChangesNothing` |
-| PD-1: the supervisor ignores `ForeignHold` (`quiescence-hazard-foreign-ignored`, instance `quiesce_live_bugForeignIgnored`) | `ForeignHoldEndsInFailStop` |
-| ADR-0184: boot continues after a failed table write | `ServeRunsOnlyWithTable` |
-| UDP slots: claim split; frames kept on release or end (the slot queue not discarded, `keepFramesOnEnd`); late `Paired` by slot or ignored; dispatch by descriptor; no audit fairness | `SlotHeldOnce`, `ReleasedSlotCarriesNoData`, `RouteCurrent`, `LatePairedAborted`, `NoReassociationWithoutNewDatagram`, `ReleasedSlotBecomesFree`, `NoAuditFairness` (no audit fairness) |
+| Decision (rule removed) | The hazard check | Property that fails |
+|---|---|---|
+| L-3: session check and claim in two steps | `owner-flows-hazard-split-claim` | `OneLiveSession` |
+| H-1: attach before the request is read | `owner-flows-hazard-attach-before-read` | `NoAttachBeforeRead` |
+| DG-5-F: session loss does not abort the CID's flows | `owner-flows-hazard-no-abort-on-loss` | `NoAdmitWhenClosed` |
+| U-5: a late `Paired` resurrects a closed flow | `owner-flows-hazard-late-paired-resurrects` | `ClosedIsTerminal` |
+| D-UP-8 (assumption K-A5 dropped: the guest never observes a session loss) | `owner-flows-sess-env-guest-misses-session-loss` | `SessionBecomesLive` |
+| ATTR-TOKEN: attribution by peer CID alone | `owner-flows-hazard-peer-cid-only-message` | `NoCrossLaunchMsg` |
+| ATTR-LIVE-CLAIM: the claim step skips the live check | `owner-flows-hazard-no-claim-recheck-held` | `NoCrossLaunchSessionHeld` |
+| DG-5-E: an accepted V_g not watched | `owner-flows-hazard-no-accepted-watch` | `GuestHalfEnds` (on `flows_one`) |
+| ATTR-LIVE-CLAIM, beacon | `owner-flows-hazard-beacon-no-live-recheck` | `BeaconCurrentLaunch` |
+| ATTR-TOKEN, beacon | `owner-flows-hazard-beacon-peer-cid-only` | `BeaconNoCrossLaunchReady` |
+| INB-1: a dial skips the admission check | `owner-flows-hazard-dial-no-admission` | `NoAdmitWhenClosed` |
+| INB-1: the owner's pairing deadline not above the guest's connect timeout | `owner-flows-hazard-owner-deadline-shorter` | `DialDeadlineAfterGuestReply` |
+| INB-1: a typed dial refusal registers a dial slot | `owner-flows-hazard-refusal-registers` | `TypedRefusalChangesNothing` |
+| G-V3: activation without the session and quiescence guard | `owner-flows-hazard-activate-no-guard` | `ActivateOnlyWithLiveSession` |
+| ADR-0157, D-UP-9: driver stop keeps the CID's beacon claim | `owner-flows-hazard-beacon-driver-stop-keeps-claim` | `ReadyReleased` |
+| ADR-0183: a short send consumes the whole peek | `fwd-pair-hazard-consume-on-short-send` | `UnitsConserved` |
+| R2-END (ADR-0180): every vsock end forwarded as a FIN | `fwd-pair-hazard-eof-as-fin-peer-loss` | `NoEofOnPeerLoss` |
+| EVMOD-CTL (ADR-0199): release keeps pairs | `fwd-pair-hazard-release-keeps-pairs` | `ReleasedContextHoldsNoPair` |
+| EVMOD-REC (ADR-0202): a lossy end record | `fwd-pair-hazard-lossy-end-record` | `OneEndRecordPerPair` |
+| ADR-0183: the target is shut in the callback (liveness instance) | `fwd-pair-hazard-shutdown-on-callback-delivery` | `EveryUnitDelivered` |
+| EVMOD-PAIR (ADR-0212): check then hook | `fwd-pair-hazard-check-then-hook` | `AttachTimeEndClassifiedOnce` |
+| EVMOD-STREAM-END: the outcome taken from the holder's read | `fwd-pair-hazard-holder-trusts-read` | `HolderOutcomeFromWatch` |
+| EVMOD-ATTACH-END (ADR-0210): the surviving TCP half closed gracefully | `fwd-pair-hazard-ended-attach-graceful-close` | `EndedHalfNeverEndsClean` |
+| WATCH-ABORT (ADR-0211): the watch's abort shuts `V_h` | `fwd-pair-hazard-watch-abort-shuts-vh` | `WatchAbortLeavesHolderSocket` |
+| EVMOD-STREAM-ABORT: the holder's drop only closes `V_h` | `fwd-pair-hazard-drop-without-abort` | `NoLiveWatchAfterDrop` |
+| ADR-0209: slot freed at half-close, not at the end record | `flow-quota-hazard-count-active-only-bound` | `QuotaBound` |
+| ADR-0208: one quota for the node | `flow-quota-hazard-node-wide-quota` | `QuotaRefusalOnlyAtOwnQuota` |
+| CID-NOCLAIM: lease released before the VMM exits | `cid-lease-hazard-release-before-vmm-outlives` | `LeaseOutlivesVmm` |
+| NO-SURVIVE: `assign` before boot reclamation | `cid-lease-hazard-assign-before-reclaim` | `NoLaunchClash` |
+| RESET-EXIT: a guest reset reboots inside the VMM | `cid-lease-hazard-reset-reboots` | `GuestResetEndsVmm` |
+| T-5: a `serve` crash forgets the stop intent | `cid-lease-hazard-crash-forgets-stop` | `StoppedWorkloadNotPlaced` |
+| RESTART-SSOT: the pre-fix accessor as the decision (`attempts + 1 < CEILING`, no exemptions) | `cid-lease-hazard-retry-off-by-one` | `ExhaustsOnlyAtCeiling` |
+| RESTART-SSOT: a reclaimed workload not exempt | `cid-lease-hazard-reclaim-not-exempt` | `ExhaustsOnlyOnACrashClassFailure` |
+| RESTART-GEN-CRASH (GH #325, pending #325; not fixed in #295): a generation replacement leased at a `serve` crash is lost, today's production | `cid-lease-hazard-crash-loses-placed-generation-run` on `lease_conf_325` | the run `RedeployLeasedAtServeCrashIsPlacedAgain` only |
+| D16 (ADR-0156): the next-fit assign walk not one step under the pool lock | `cid-lease-hazard-assign-split` | `CidUnique` |
+| DR5-CLOSE item 7.4: a pool refusal leaves the predecessor held | `cid-lease-hazard-refusal-keeps-predecessor-run` on `lease_ok` (teeth for `lease_conf_three`) | the run `PoolExhaustedRestartCleansThePredecessorThenPlaces` only |
+| DR6-CLOSE item 7.5: `FinalizeFailed` writes the terminal before it releases the lease | `cid-lease-hazard-terminal-before-release` | `FailedHoldsNoLease` |
+| DR6-CLOSE item 7.3: a tick runs while the dispatch is held at a predecessor teardown | `cid-lease-hazard-tick-during-predecessor-teardown` | `NoUntrackedLease` |
+| NO-SURVIVE (liveness): boot reclamation never records that it completed | `cid-lease-hazard-reclaim-never-completes` | `EventuallyPlaced` |
+| QHOLD: a boolean latch | `quiescence-hazard-bool-latch` | `NoReopenBeforeRepair` |
+| ADR-0124 (D-UP-3): the supervisor does not consult the leaked-hold count | `quiescence-hazard-leak-ignored` | `LeakedHoldEndsInFailStop` |
+| ADR-0184: boot continues after a failed table write | `quiescence-hazard-boot-continues` | `ServeRunsOnlyWithTable` |
+| QHOLD: the first hold latches admission but does not abort the open flows | `quiescence-hazard-quiesce-skips-flows` | `QuiescedHoldsNoFlow` |
+| QHOLD (D-UP-3): a dropped hold releases the count | `quiescence-hazard-drop-decrements-leaked` | `LeakedHoldKeepsForwardingQuiesced` |
+| D-UP-4 (PD-1): a foreign hold is redeemed as the owner's own | `quiescence-hazard-foreign-decrements` (instance `quiesce_bugForeignDecrements`) | `ForeignRestoreChangesNothing` |
+| PD-1: the supervisor ignores `ForeignHold` | `quiescence-hazard-foreign-ignored` (instance `quiesce_live_bugForeignIgnored`) | `ForeignHoldEndsInFailStop` |
+| D25: a slot claim split in two steps | `udp-slots-hazard-claim-split` | `SlotHeldOnce` |
+| P-35: release returns the slot with datagrams in its socket's queue | `udp-slots-hazard-keep-frames` | `ReleasedSlotCarriesNoData` |
+| a late `Paired` matched by slot, not by flow id | `udp-slots-hazard-late-paired-by-slot-route` | `RouteCurrent` |
+| SLOT-ABORT: a late `Paired` is dropped silently | `udp-slots-hazard-ignore-late-paired` | `LatePairedAborted` |
+| U-2 / EVMOD-DGRAM: the slot queue not discarded at an end | `udp-slots-hazard-keep-frames-on-end` | `NoReassociationWithoutNewDatagram` |
+| liveness teeth: no fairness on the slot audit | `udp-slots-hazard-no-audit-fairness` | `NoAuditFairness` |
+| EVMOD-SWEEP (F-S1): no `vsock_table_lock` re-check | `fwd-safe-hazard-no-sweep-recheck` | `NoUnclassifiedEnd` |
+| EVMOD-SAFE rule 5: the write-space entry removed after the free work is queued | `fwd-safe-hazard-remove-wait-after-free-queued` | `NoTouchAfterFree` |
+| EVMOD-SAFE rule 2: `rcu_assign_pointer(…, NULL)` + `rcu_dereference` | `fwd-safe-hazard-rcu-assign-null` | `NoOverrideCallsItself` |
+| EVMOD-SAFE rule 3: no grace period before the free | `fwd-safe-hazard-no-grace-period` | `NoTouchAfterFree` |
+| EVMOD-SAFE rule 4: the id looked up under RCU, the work queued after `rcu_read_unlock` | `fwd-safe-hazard-ctl-queue-outside-rcu` | `NoTouchAfterFree` |
+| EVMOD-SAFE rule 4 (watch): the override queues the record without the id check | `fwd-safe-hazard-watch-end-no-id-check` | `OneEndRecord` |
+| § Forwarding, Trigger: no write-space wait-queue entry | `fwd-safe-hazard-no-write-space` | `StalledPairResumes` |
+| § Forwarding, Trigger: the source's `sk_data_ready` not overridden | `fwd-safe-hazard-no-data-ready` | `EveryUnitDelivered` |
+| § Forwarding, Trigger: the source's `sk_error_report` not overridden | `fwd-safe-hazard-no-error-report` | `SocketEndYieldsRecord` |
+| EVMOD-WQ: PENDING cleared at return, not before the run | `fwd-safe-hazard-late-clear-pending` | `StalledPairResumes` |
+| EVMOD-SAFE rule 4 / EVMOD-REC: `OVD_FWD_ABORT` does not queue the work item | `fwd-safe-hazard-ctl-abort-no-queue` | `RequestedAbortEnds` |
+| § Order of a pair's end: the end stops after the unhook and does not requeue | `fwd-safe-hazard-end-split-no-requeue` | `EndProducesRecord` |
+| EVMOD-DGRAM: a datagram consumed when only part of its frame was accepted (instance `pair_dhazConsumePartialFrame`, 3 datagrams) | `fwd-pair-hazard-consume-partial-frame` | `DatagramsOnceInOrder` |
+
+That is 65 hazard rows — 64 checks named `hazard` plus
+`owner-flows-sess-env-guest-misses-session-loss` — matching `summary.json`
+and the README § *Hazards*: `owner_flows` 15, `fwd_pair` 11, `flow_quota` 2,
+`cid_lease` 12, `quiescence` 7, `udp_slots` 6, `fwd_safe` 12.
+No hazard check stands for teardown skipping flows (`CurrentGeneration`), a
+dial skipping the live-session check, EVMOD-SAFE rule 1, `cid_lease` rules
+7.1 to 7.3, or the generation exemption of RESTART-SSOT alone.
 
 `SessionBecomesLive` has no design-rule hazard of its own: the stale holder
 is closed at its read, so progress holds under every hazard; the rule it
@@ -13903,8 +13190,7 @@ environment variant `owner-flows-sess-env-guest-misses-session-loss`
 `flows_sess_envGuestMissesSessionLoss`: assumption K-A5 dropped, `K-A5S` in
 the spec's `OFF` set): the guest owner never observes the end of the
 control connection it holds, never re-opens one, and the property fails
-(TLC, exhaustive, a violation as expected in 20.8 s in the current record
-`707089-1792512180.793`).
+(TLC, exhaustive, a violation as expected in 14.2 s).
 So the property depends on the guest observing that end, which spike K-A5
 proved (assumption K-A5 below).
 
@@ -13924,17 +13210,13 @@ statements):
   `HostReadOpen`, `HostClaimSession`, `HostSessionLoss`), selected by
   `CFG == "sess"`. `coreStep` cannot serve: its `nondet` picks of a flow id
   and a dial slot range over empty sets on this instance, which disables
-  every action of `coreStep` (TLC: `\E` over the empty set is FALSE). Before
-  2026-10-14 the instance did take `coreStep`, so only the life-cycle steps
-  ran and the check held vacuously on 34 states; with `sessStep` it explores
-  2,470 states (exhaustive, 18.0 s in the current record
-  `707089-1792512180.793`), and the
-  environment variant above, K-A5 dropped, violates it on the same
+  every action of `coreStep` (TLC: `\E` over the empty set is FALSE). With
+  `sessStep` the instance explores 2,470 states (exhaustive, 14.2 s), and
+  the environment variant above, K-A5 dropped, violates it on the same
   instance.
-- `owner-flows-safety-apalache` is bounded at `max_steps = 10` (the same
-  bound as `owner-flows-two-safety-apalache`; `timeout_secs = 1500`,
-  `ci = false`); TLC's `owner-flows-safety-tlc` is exhaustive on the same
-  instance.
+- No bounded Apalache copy stands beside a TLC-exhaustive check of the same
+  invariant on the same main (item 3); `owner-flows-safety-tlc` is the check
+  for `Safety`.
 - `fwd_pair`'s model-checking instances carry at most one environment
   fault or owner abort per trace (`FMAX` = 1); two faults in one trace meet
   only along the named runs on `pair_conf`, each of which checks `Safety`
@@ -13957,17 +13239,15 @@ statements):
   for the sweep, the two steps of T-9).
 
 **Model assumptions and what discharges them.** Nothing below is a modelled
-fact. A1, A5, A6, A8, A9, A10 and K-A3 left with `flow_end` and the sockmap,
-and K-B3, UE-1 and UE-2 with the framing cells and `udp_empty` (EVMOD-ADOPT;
-EVMOD-DGRAM; § *Changed assumptions*); `fwd_pair`'s assumptions (F1–F13)
-are in the change lists above and the README.
+fact. `fwd_pair`'s assumptions (F1–F14) are under T-1 to T-9 above and in
+the README.
 
 | Id | Assumption | Discharged by |
 |---|---|---|
 | K-A1 | Peer-CID attribution is authentic: vhost stamps the device's CID and a forged `src_cid` is dropped | Proven, V-10 (P-17, P-48); source: `drivers/vhost/vsock.c:551-558 @ v7.0` |
 | K-A2′ | At VMM death, established host connections of the CID fail at their next I/O; a connection still in a host accept queue stays queued and is accepted later, after the CID's reuse included, with its buffered first record; one with no buffered record fails its first read | Proven, V-22 (P-37); source: the device release sweeps every connected socket (`drivers/vhost/vsock.c:753-768 @ v7.0`), a child still in an accept queue included (inserted connected before it is queued, `net/vmw_vsock/virtio_transport_common.c:1589-1590 @ v7.0`), and marks it reset without dequeuing it or its buffered bytes (`drivers/vhost/vsock.c:721-750 @ v7.0`) |
 | K-A4 | The host's close of a host-opened V_h (aborted or session-lost dial) reaches the guest and tears down V_g, accepted or still queued | Proven, V-24 (P-38) |
-| K-A5 (`owner_flows`, D-UP-8; not the K-A5 removed by R2-DRAIN, § *Changed assumptions*) | The end of a control connection on the host (refused at accept or read, or lost) reaches the guest owner, which observes it; dropped, `SessionBecomesLive` fails (`owner-flows-sess-env-guest-misses-session-loss`) | **Proven**, spike K-A5 (`spike/findings-ka5.md`, WORKS; user ruling 2026-10-15): guest-opened vsock connections to the host, host and guest `7.0.0-29-generic`, CH fork `41a619d19`, native metal; 4,750 trials, 0 missed ends, 0 false ends. Every host close (plain, `SO_LINGER{1,0}`, SIGKILL of the holder with the connection accepted or still queued, listener close with it queued, data then close) reached the guest with no guest timer as EOF on `read` or `EPOLLIN\|EPOLLRDHUP`, with a p99 latency of at most 330 µs for a close and 1,251 µs for a process kill. `ECONNRESET` occurs only at `connect()` (no listener, full backlog); a reset close (`SO_LINGER{1,0}`) is indistinguishable at the guest from a graceful one, so the guest owner watches for EOF / `EPOLLRDHUP` and never relies on `ECONNRESET`, `EPOLLERR` or the kind of close. Source: the host's close sends SHUTDOWN with both directions (`net/vmw_vsock/virtio_transport_common.c:1280-1295 @ v7.0`), `vsock_linger` returns at once for a zero linger time (`net/vmw_vsock/af_vsock.c:1156-1158 @ v7.0`); the guest records the peer shutdown and wakes (`virtio_transport_common.c:1443-1461 @ v7.0`), `vsock_poll` reports `EPOLLRDHUP` (`af_vsock.c:1256-1258 @ v7.0`) and `recv` returns 0 (`af_vsock.c:2441 @ v7.0`); a refused connect is an RST to the connecting socket (`virtio_transport_common.c:1175-1214`, `:1345-1362 @ v7.0`). A lost session whose VM ended has no guest to observe it. Seeded sim: R5-18 and the `owner_flows` guest-side driver (`GuestSessionLossObserved`) |
+| K-A5 (`owner_flows`, D-UP-8) | The end of a control connection on the host (refused at accept or read, or lost) reaches the guest owner, which observes it; dropped, `SessionBecomesLive` fails (`owner-flows-sess-env-guest-misses-session-loss`) | **Proven**, spike K-A5 (`spike/findings-ka5.md`, WORKS): guest-opened vsock connections to the host, host and guest `7.0.0-29-generic`, CH fork `41a619d19`, native metal; 4,750 trials, 0 missed ends, 0 false ends. Every host close (plain, `SO_LINGER{1,0}`, SIGKILL of the holder with the connection accepted or still queued, listener close with it queued, data then close) reached the guest with no guest timer as EOF on `read` or `EPOLLIN\|EPOLLRDHUP`, with a p99 latency of at most 330 µs for a close and 1,251 µs for a process kill. `ECONNRESET` occurs only at `connect()` (no listener, full backlog); a reset close (`SO_LINGER{1,0}`) is indistinguishable at the guest from a graceful one, so the guest owner watches for EOF / `EPOLLRDHUP` and never relies on `ECONNRESET`, `EPOLLERR` or the kind of close. Source: the host's close sends SHUTDOWN with both directions (`net/vmw_vsock/virtio_transport_common.c:1280-1295 @ v7.0`), `vsock_linger` returns at once for a zero linger time (`net/vmw_vsock/af_vsock.c:1156-1158 @ v7.0`); the guest records the peer shutdown and wakes (`virtio_transport_common.c:1443-1461 @ v7.0`), `vsock_poll` reports `EPOLLRDHUP` (`af_vsock.c:1256-1258 @ v7.0`) and `recv` returns 0 (`af_vsock.c:2441 @ v7.0`); a refused connect is an RST to the connecting socket (`virtio_transport_common.c:1175-1214`, `:1345-1362 @ v7.0`). A lost session whose VM ended has no guest to observe it. Seeded sim: R5-18 and the `owner_flows` guest-side driver (`GuestSessionLossObserved`) |
 | K-C1 | A duplicate CID is refused at device creation and the first holder is unaffected; a CID is free right after the last reference closes | Proven, P-16; V-30 Q2d. Unreachable in the design (lease uniqueness); reached only by hazards |
 | K-C4 | The VMM is the only holder of its vhost-vsock descriptor, so the device is released and host flows reset at VMM exit | Proven, V-30 Q2c, Q2d; the reset is `vhost_vsock_dev_release` → `vsock_for_each_connected_socket(…, vhost_vsock_reset_orphans)` (`drivers/vhost/vsock.c:767 @ v7.0`), which sets `sk_err = ECONNRESET` on each orphan (`drivers/vhost/vsock.c:749 @ v7.0`) |
 | K-C5 | Boot reclamation kills every VMM the new process does not supervise before any `assign`, and a reclaimed VMM's device is released before its cgroup can be removed. Source: an exiting task drops its files (kernel/exit.c:971 @ v7.0) and runs its task work (kernel/exit.c:976 @ v7.0), where the final fput of a user task is deferred (fs/file_table.c:528-530 @ v7.0) and reaches vhost_vsock_dev_release; cgroup_rmdir waits in cgroup_drain_dying until every task has passed cgroup_task_dead (kernel/cgroup/cgroup.c:6309 @ v7.0). OPEN: the Tier-3 serve-restart reclamation scenario V-RECLAIM; not contract-shaping | OPEN validation item V-RECLAIM (Tier-3 serve-restart reclamation scenario of NO-SURVIVE; not contract-shaping) |
@@ -14027,15 +13307,14 @@ consumer's act-once memory) and its looks coalesce, so it carries its own
 specification (§ *[REF] VM probe runner*, § *[REF] Observation row —
 ProbeResultRow V2 and the probe run sequence (PROBE-RUN-COUNT)*).
 
-**Result.** 33 checks, 33 matched `expect`: 19 hold (ten invariants,
-`Safety` included, and nine named runs) and 14 are expected violations (two
-non-vacuity witnesses, six hazard invariants and six hazard runs). All 33
-carry `ci = true`; 15 are evaluator runs and 18 run on TLC (exhaustive);
-there is no Apalache check. The invariants and hazards run on the
-model-checking main `probe_streak`; the nine named runs on the conformance
-main `probe_streak_conf` (D-UP-1). Recorded run `252559-1791986812.704`
-(`specs/quint/probe-count/evidence/summary.json`, `run_id`; the current
-evidence; 2026-10-14T14:06:52Z, 38 s; Quint 0.32.0, TLC; Lima kernel 7.0.0-34), written by
+**Result.** 31 checks, 31 matched `expect`: 19 hold (ten invariants,
+`Safety` included, and nine named runs) and 12 are expected violations (six
+hazard invariants and six hazard runs). All 31 carry `ci = true`; 15 are
+evaluator runs and 16 run on TLC (exhaustive); there is no Apalache check.
+The invariants and hazards run on the model-checking main `probe_streak`;
+the nine named runs on the conformance main `probe_streak_conf` (D-UP-1).
+The recorded run
+(`specs/quint/probe-count/evidence/summary.json`) is written by
 `cargo xtask quint check --subsystem probe-count --record`; `cargo xtask
 quint verify-evidence --subsystem probe-count` passes.
 
@@ -14063,8 +13342,9 @@ quint verify-evidence --subsystem probe-count` passes.
   liveness and is not modelled apart. `ClockBack` is an environment action:
   a backward wall-clock step. Bound: seven producer actions (so
   `Fail ×3, Pass, Fail ×3` fits); looks are unbounded over a finite state
-  space. Ghost: `hist`, the true sequence of written outcomes, and the
-  terminates with the rows they acted on.
+  space. Ghosts: `hist`, the true sequence of written outcomes, and `g`,
+  `terms` and `tseqs`, the look facts, the terminates and the rows they acted
+  on.
 
 | Invariant | Decision | Meaning |
 |---|---|---|
@@ -14078,7 +13358,6 @@ quint verify-evidence --subsystem probe-count` passes.
 | `StoreHoldsLatest` | PROBE-RUN-COUNT (merge by `run_seq`) | the stored row is the last written row |
 | `NoStaleChange` | PROBE-RUN-COUNT | a look that sees no new row changes no consumer state and emits no terminate |
 | `Safety` | all | the conjunction |
-| `WitnessNeverTerminates`, `WitnessNeverReady` | non-vacuity | a terminate and a readiness are reachable (expected violations) |
 
 **Critical scenarios and the named runs that encode them** (each a
 `[[check]]` with `backend = "evaluator"`, on `probe_streak_conf`):
@@ -14341,15 +13620,16 @@ probes run before any allocation and leave nothing behind.
 
 - **The forwarder is C kernel code outside the Rust gates.** `cargo xtask
   kmod-build` builds it with `W=1` and `C=1` (sparse) and fails on any
-  warning; `checkpatch.pl --strict` runs in the same step. A source check
-  in the same step rejects a module with no `module_exit` and a misc
-  `file_operations` whose `owner` is not `THIS_MODULE` (EVMOD-LIFE as amended
-  by MODULE-REFCOUNT: the context's reference comes from that owner), and a
-  module whose source assigns `sk_write_space` (rule 5: the write-space
-  trigger is a wait-queue entry, never an override).
+  warning; `checkpatch.pl --strict` runs in the same step. No test greps
+  the module source: the DELIVER review checks that the module
+  has a `module_exit`, that its misc `file_operations` owner is
+  `THIS_MODULE` (EVMOD-LIFE with MODULE-REFCOUNT: the context's
+  reference comes from that owner), and that nothing assigns
+  `sk_write_space` (rule 5: the write-space trigger is a wait-queue entry,
+  never an override).
 
-  The reference discipline of rule 5 is enforced in three layers:
-  - **Structural:** the source check above, and the DELIVER review against
+  The reference discipline of rule 5 is enforced in two layers:
+  - **Structural:** the DELIVER review against
     the source. The review checks `__module_get` before the overrides are
     installed, `module_put` as the free work's last statement, removal under
     `lock_sock` with the wait-queue entry removed before the free work is
@@ -14357,8 +13637,7 @@ probes run before any allocation and leave nothing behind.
     timestamping send, the attach- and watch-time refusal of a half with
     `SOCK_ZEROCOPY` or a transmit-timestamping bit, and that work goes on the module's own workqueue
     only.
-  - **Behavioural, real kernel:** V-EV-UNLOAD.
-  - **Behavioural, stress:** V-EV-SAFE.
+  - **Behavioural, real kernel:** V-EV-UNLOAD, and the stress V-EV-SAFE.
 
   No compile-time check exists for reference balance in C.
 - **One ABI, two languages.** `include/uapi/linux/ovd_fwd.h` is the SSOT;
@@ -14470,7 +13749,7 @@ probes run before any allocation and leave nothing behind.
   cleartext pass-through to `orig_dst`." Replaced by D14 kernel forwarding.
 - **ADR-0082 §D4 (transport).** "Per-VM Unix socket `<run_dir>/vsock_1234`."
   Replaced by the node-shared listener (D17). READY's meaning is unchanged,
-  and READY no longer waits on any listener-map seed.
+  and READY waits on no listener-map seed.
 - **ADR-0082 §D4 (READY line).** "`READY pid=<pid> port=<port>`" (as built,
   `BeaconMessage::Ready { pid, port }`). Replaced by `READY pid=<pid>
   port=<port> launch=<LaunchToken>` (ATTR-TOKEN, ADR-0177): over a
@@ -14501,13 +13780,13 @@ probes run before any allocation and leave nothing behind.
   `:1198-1239`); startup attempts are de-duplicated by the failing row's
   observation time (`:1260-1286`), and the liveness failure counter is
   reset on the terminate it triggers to prevent a second terminate
-  (`:1078-1085`). `ServiceLifecycle` now keeps none of these counters: the
+  (`:1078-1085`). `ServiceLifecycle` keeps none of these counters: the
   probe runner records each row's `same_status_runs`, the thresholds are
   applied to the latest row at read time, for every workload kind, and a
   liveness terminate is emitted once per crossing by
   `liveness_last_acted_run`, a failed stop being retried on the next row
   still past the threshold (D-1); a key with no new row changes nothing, so
-  readiness no longer resets on a missing row; the probe row merges by
+  readiness does not reset on a missing row; the probe row merges by
   `run_seq`, not by `last_observed_at_unix_ms` (ADR-0054 § 5,
   "Strictly-dominate on `last_observed_at_unix_ms`" in
   `apply_probe_result_lww`,
@@ -14523,11 +13802,9 @@ probes run before any allocation and leave nothing behind.
   no route covers the guest prefix except the gateway `/32` (GW-LOCAL).
   LEGB-DIAL replaces the reliance: leg-B marks `MTLS_TPROXY_MARK` and binds
   `127.0.0.1:0` for a guest-prefix peer, and leg-C sees a same-node peer as
-  `127.0.0.1:<ephemeral>` on every host. A non-local `lo` route for the
-  prefix (PREFIX-ROUTE-LO, with its INB-1 reading INB-1-READ) was proposed,
-  never implemented, and is withdrawn; its probe V-PREFIX-ROUTE was run and
-  is kept only as a spike record
-  ([`spike/findings-prefix-route-lo.md`](spike/findings-prefix-route-lo.md)).
+  `127.0.0.1:<ephemeral>` on every host. PREFIX-ROUTE-LO (a non-local `lo`
+  route for the prefix) and INB-1-READ were never implemented and are
+  withdrawn; ADR numbers 0188 and 0189 are unused.
 - **leg-S delivery to a VM backend** (ADR-0120's inbound path; leg-S dials
   `server_dial_addr(orig_dst)` over TCP, `overdrive-dataplane/src/mtls/inbound.rs`).
   For VM backends replaced by `GuestStreamDial::dial`, a temporary bridge
@@ -14536,19 +13813,19 @@ probes run before any allocation and leave nothing behind.
 - **ADR-0116.** The gateway address is unchanged; with no bridge it is host
   local through one Overdrive-tagged `local <gateway>/32` route on `lo`
   (GW-LOCAL, ADR-0152).
-- **Pre-activation host-local connects.** Unanswered under TAP-down; now an
-  immediate `GuestDialError::NotServing` (D15-R1).
-- **Guest-owner crash.** Previously no owner existed. The guest owner is
+- **Pre-activation host-local connects.** Unanswered under TAP-down; replaced
+  by an immediate `GuestDialError::NotServing` (D15-R1).
+- **Guest-owner crash.** No guest owner existed. The guest owner is
   PID 1 (`overdrive-init`): its crash panics the guest, the VMM exits
   (RESET-EXIT), and the release of the VMM's vhost-vsock device sets
   `sk_err` on every host flow vsock of that guest (`drivers/vhost/vsock.c:749,767
   @ v7.0`), which aborts every host pair (R2-END, EVMOD-END).
 - **ADR-0053 reach.** Its `connect4` rewrite was a host-workload delivery
-  mechanism; it now also carries guest datagram VIP flows through the
+  mechanism; it also carries guest datagram VIP flows through the
   owner's sockets (D24). Guest TCP VIP flows are mesh-resolved instead
   (D24a).
 - **Mesh resolution has no VIP branch** (`mtls_resolve_adapter.rs`: "NO
-  VIP→backend translation in the resolve path"). Superseded by D24a for the
+  VIP→backend translation in the resolve path"). Replaced by D24a for the
   owner's guest flows: a service VIP classifies like its frontend.
 - **Guest destinations are unrestricted.** Under the bridge topology leg-F's
   pass-through dialled any `orig_dst` with no deny list. Replaced by D26.
@@ -14567,224 +13844,14 @@ probes run before any allocation and leave nothing behind.
   an earlier build is not migrated; the intent store is deleted on upgrade
   (OVERCAP-NOMIG, user ruling 2026-10-15).
 
-**Contracts this design removes.** Each line quotes the removed contract and
-names the ruling that removes it. They appear nowhere else in this delta.
-
-- **D-UP-12 option (a), one probe per role:** "a second
-  `[[health_check.<role>]]` entry is refused at deploy;
-  `GUEST_PROBES_PER_ALLOCATION = 3`." Withdrawn by the user 2026-10-14 (PD
-  decisions) in favour of the per-allocation cap `GUEST_PROBE_SLOTS`; never
-  implemented.
-
-- **The host releases a flow at `GuestStream` drop (INB-1 / R2-DRAIN text,
-  the earlier release point):** "Drop. Closes the host vsock. … After both
-  directions ended cleanly the guest treats the 0x3 as the end of a
-  completed flow, not as an abort. The drop releases the flow's quota slot
-  and owner registration", and the host owner's "Both directions completed →
-  `remove_pair`, `clear_linger` on the outer sockets, close". Never
-  implemented. The release point is EVMOD-AB's (approved 2026-10-17): a
-  forwarded flow's places at the host's read of its end record, a dial's at
-  its stream's drop or abort. ADR-0209 states it in present tense.
-- **SLOT-RELEASE** (the user's D-1, ruling 2026-10-15), with GS-E1 and
-  GS-E2: "the host holds the flow's places until the guest's final 0x3."
-  Withdrawn by EVMOD-AB, 2026-10-17: the guest has no fixed slot pool the
-  rule protected. Never implemented.
-- **PROBE-DROP-ABORT** (D-2, ruling 2026-10-15; ADR-0193), with GS-E3: "a
-  probe's `GuestStream` drop aborts the flow, so a cleanly ended probe
-  stream does not hold its slots until the guest's close." Withdrawn by
-  EVMOD-AB, 2026-10-17 (a dial's places are released at its stream's drop
-  or abort); ADR-0193 is deleted. Never implemented.
-- **ENDS-BEFORE-CLAIMS** (B, ruling 2026-10-15; ADR-0194), with GS-E4 and
-  GS-E5: "the guest owner processes every end before any slot claim in a
-  dispatch." Withdrawn by EVMOD-AB, 2026-10-17: there are no guest slot
-  claims; ADR-0194 is deleted. Never implemented.
-- **The guest drain-slot and parking constants:** `GUEST_FLOW_SLOTS` ("the
-  guest's drain-cell slots, `park + quota + probes`"),
-  `GUEST_TCP_PARK_CELLS` ("pending TcpConnect flows are parked in
-  loopback cells until `Paired`") and `GUEST_INTAKE_RCVBUF` ("the TCP
-  intake's receive buffer, T4(a)"). Removed by EVMOD-ADOPT and EVMOD-AB:
-  a pending flow waits in its intake child's own queue, counted against
-  `GUEST_TCP_PENDING_MAX`, and the forwarder allocates a pair's state at
-  attach. Never implemented as contract; the scaffold constants are deleted
-  in DELIVER.
-- **D4 / UDP-SEQ** (ADR-0148): "Datagram flows use STREAM toward the guest
-  and SEQPACKET from the guest on one vsock device; the guest reassembles,
-  the host never sends on SEQPACKET", with the SEQPACKET leg on port 1241
-  (request kind 3), the host verdict's length check and `TCP_NODELAY` on
-  every strparser parking-cell sender. Replaced by
-  EVMOD-DGRAM (ADR-0201), 2026-10-17: one framed STREAM per association on
-  port 1240, kind 2; ADR-0148 is deleted. Never implemented.
-- **UDP-EMPTY and D15-R4** (ADR-0165): "the host verdict drops a
-  declared-length-0 frame with one `EmptyDatagram` record and the owner
-  sends a zero-length datagram; empties may be reordered against their
-  neighbours." Replaced by EVMOD-DGRAM, 2026-10-17: the forwarder sends an
-  empty datagram itself, in order; ADR-0165 is deleted. Never implemented.
-- **CELL-RECREATE**: "an association's end recreates the slot's framing
-  and reassembly cells and bumps their generation; a readiness event of an
-  earlier generation is discarded." Replaced by EVMOD-DGRAM's slot release
-  order (abort, discard, disconnect), 2026-10-17. Never implemented.
-- **The guest setup steps of the redirect:** the `sock_common` layout check
-  (`KernelLayoutMismatch`) and the UDP slot SockHash install (`SlotInstall`).
-  Removed with the guest's redirect programs (EVMOD-ADOPT); the capture
-  programs read no `sock_common` field.
-- **PSO-1** (proposed 2026-10-15, never approved): "each probe of an
-  allocation has a fixed probe slot, the dial names it, and the guest's
-  probe slot `p` holds at most one flow — a newer dial for `p` takes the
-  slot from the older flow", with the core newtype `ProbeSlot` /
-  `ProbeSlotError`, `DialPurpose::Probe { slot: ProbeSlot }`, the kind-4
-  offset-12 probe-slot field `TcpAccept { probe_slot: Option<ProbeSlot> }`
-  with `WireField::ProbeSlot`, `GuestSideObservation.probe_slots`, the
-  counter `guest_flow.probe_slot_taken_over`, assumption K-PS1 and the Quint
-  module `probe_slots.qnt`. Withdrawn by the user 2026-10-15 (D-3). Rejected
-  alternatives it carried — a reserve of `2 × GUEST_PROBE_SLOTS`, a runner
-  wait for the guest's end, a guest refusal of a probe dial — stay rejected.
-- **PSO-2's refusal** (proposed 2026-10-15, never approved): "When none is
-  free: a TcpConnect is refused as parking exhaustion is …; a `Relay`
-  TcpAccept is answered `Refused { errno: ENOBUFS }`", with
-  `GuestSideObservation.general_slots`, the counters
-  `guest_flow_slot_exhausted` and `guest_flow_relay_slot_refused`, the claim
-  "is refused a slot only while a flow the host has released is draining
-  toward an application that has not read it", the Quint module
-  `general_slots.qnt`, and the validation items V-PSO2(a) (now run as
-  guest-slot V-2, P-63) and V-PSO2(b). Withdrawn by the user 2026-10-15
-  (D-3).
-- **"A slow reader is backpressure, not a fault"** (ADR-0183, R2-DRAIN):
-  FALSIFIED by guest-slot V-3 (P-64) for the sockmap redirect. Made true by
-  EVMOD-ADOPT (user ruling 2026-10-16): the forwarder consumes from a source
-  only what its target accepted (P-67, P-68); ADR-0183 is rewritten in
-  present tense.
-
-- **D8a-LOOKUP** (ADR-0171), with D8a's steering clause, D8a-ROUTE, U-4,
-  D8a-FENCE, STEER-PINS, gate G-V8 and assumptions A-33, K-L1–K-L10, K-D1,
-  K-D4, K-P1: "Local delivery to the guest prefix (gateway excluded) is
-  decided by an Aya `sk_lookup` program on the host root network namespace,
-  its link pinned under `GUEST_PREFIX_STEERING_PIN_DIR`." Removed by INB-1,
-  user ruling 2026-10-11.
-- **D8a-LOAD-SWAP** (ADR-0175): "Boot loads this binary's steering program
-  with its own new map …, swaps it into the pinned link with the atomic
-  `BPF_LINK_UPDATE` …, then keeps or adds the route." Removed by INB-1,
-  2026-10-11.
-- **D8a-CAP, D8a-CAP-RETRY** (ADR-0176) and A-MEM: "Declared TCP listener
-  ports are reserved with the lease in `GuestAddressPool::assign` against
-  `GUEST_INTAKE_STEERING_MAX = 262,144`." Removed by INB-1, 2026-10-11.
-- **D8-INTAKE as host intake listeners**, with U-6, M-7 and INTAKE-TAG-MAP:
-  "Inbound TCP terminates at a host intake listener on `workload_addr:port`
-  for a declared port of an Active allocation." Removed by INB-1,
-  2026-10-11.
-- **INTAKE-BIND** (ADR-0178): "The intake listener … binds
-  `workload_addr:(GUEST_INTAKE_HOST_PORT_BASE + i)`, a port of the fixed host
-  block `guest_intake_host_ports()` (20,480–24,575)." Removed by INB-1,
-  2026-10-11.
-- **INTAKE-PORTS** (ADR-0179): "A workload declares at most
-  `GUEST_INTAKE_PORTS_PER_ALLOCATION_MAX = 4,096` TCP listener ports."
-  Removed by INB-1, 2026-10-11.
-- **D23** (ADR-0163) and A-30: "A host intake listener exists only while the
-  guest application listens on that port, mirrored from a guest kernel
-  listener map." Removed by INB-1, 2026-10-11.
-- **PREFIX-REPLY** (ADR-0172, P-40): "Each constant guest-prefix rule is
-  immediately preceded by `ct state established,related accept`, in a chain
-  at or after conntrack's priority, so the rules decide only
-  connection-opening packets." Removed by INB-1, 2026-10-11: the reply it
-  admitted (source = destination inside the prefix) arises only from a
-  host-local connect under a `local` route for the prefix
-  (`net/ipv4/route.c:2848-2853 @ v7.0`), and INB-1 leaves no such route;
-  no production socket connects with a guest-prefix source (leg-S and the
-  probe runner dial through the owner; a same-node mesh leg-B binds
-  `127.0.0.1:0` before `connect()`, LEGB-DIAL, so its source is outside the
-  prefix).
-- **Peer address from the intake socket** (ADR-0174): the `TcpAccept` peer
-  is the remote address of the host intake child. Removed by INB-1,
-  2026-10-11: every host-opened flow carries the guest gateway with port 0.
-- **HALFCLOSE-SIGNAL** (ADR-0180): "the announcing owner drains, sends
-  `HalfClose`, and shuts down its vsock only after `HalfCloseAck`." Removed
-  by R2-END, user ruling 2026-10-11.
-- **D20's drain clause, DG-5-D, the K2 drain counter and K-A5:** "half-close
-  waits for the drain signal, else aborts after `FLOW_DRAIN_DEADLINE`"
-  (with `FLOW_DRAIN_RECHECK_PERIOD` and `DrainTimeout`). Removed by R2-DRAIN,
-  user ruling 2026-10-11.
-- **K-B4 (guest-owner death while the VM runs):** "When an owner dies, the
-  surviving owner observes the end of each of its flow vsocks." The guest
-  owner is PID 1; its death ends the VM (R2-END, RESET-EXIT, user ruling
-  2026-10-11).
-- **D5a's egress half**, with D5a-SET, D5a-IFACE, D5a-IFACE-BOOT, D5a-LATE,
-  D5a-SERVE-IFACE, USO-NO-SEGMENT and FRAG-MAP-LIFECYCLE: "a fragment-aware,
-  tuple-gated TC egress program on `lo` and every interface of the host root
-  namespace strips a valid frame on a registered tuple," and the verdict
-  keeps the frame "for empty datagrams and payloads that themselves parse as
-  a frame." Removed by UDP-EMPTY, user ruling 2026-10-11.
-- **IMG-IFACE-BOOT** (ADR-0068 § 5): "the appliance image configures
-  root-namespace network interfaces only at boot." Removed by UDP-EMPTY,
-  2026-10-11.
-- **IFACE-NO-STACK** (ADR-0181): "`probe_startup` refuses `StackedInterface`
-  before any boot effect." Removed by UDP-EMPTY, 2026-10-11.
-- **D16-CLAIM** (ADR-0170), with CLAIM-PINS, the fork's `fd=` handoff,
-  K-C2, K-C3 and V-25 as a contract: "`assign` takes a lease only together
-  with a host-kernel claim of its CID on a new `/dev/vhost-vsock` instance."
-  Removed by CID-NOCLAIM, user ruling 2026-10-11.
-- **D8a-HOLD** (holder names): "Forwarding quiescence is held by named
-  holders (`QuiescenceHolder::Recovery(component)`)." Removed by QHOLD, user
-  ruling 2026-10-11.
-- **Boot continues after a failed shared-table write:** "step 8's
-  transaction fails and the table stays as it was …; boot continues."
-  Removed by QHOLD (ADR-0184), user ruling 2026-10-11.
-- **VM survival across a `serve` restart** (ADR-0159): "A control-plane
-  restart closes every guest flow; VMs keep running and open new flows once
-  the owner returns." Removed by NO-SURVIVE, user ruling 2026-10-11, until
-  #312.
-- **QUINT** (ADR-0168): "a design that adds or changes a concurrent, ordered
-  or crash-sensitive protocol carries a Quint specification …". Removed as a
-  feature ADR in the DESIGN round of 2026-10-11; the discipline is
-  repository rule (`.claude/rules/design.md`, `.claude/rules/testing.md`).
-- **D21's runtime check:** the fork is "capability-checked again by
-  `Vmm::probe`." Removed in the DESIGN round of 2026-10-11: no runtime check
-  identifies the installed build (DG-1).
-- **`OwnerCgroupNotRoot`** (forwarder probe stage and
-  `GuestFlowError::OwnerCgroupIsRoot`): a second root-cgroup check. Removed
-  in the DESIGN round of 2026-10-11; `OwnerCgroupPlacement` covers it.
-- **The sockmap forwarder** (D1, D6, D7 as "forwarded only by Aya
-  programs"; § *Driven port — host forwarder*): "Payload is forwarded by Aya
-  Rust eBPF programs … the SK_SKB verdict, `sock_ops` on the owner cgroup,
-  the flow-end classifier, the drain programs and cells, `FLOW_EVENT_RING`."
-  Removed by EVMOD-ADOPT, user ruling 2026-10-16 (ADR-0197).
-- **R2-DRAIN's mechanism** (ADR-0183 before its rewrite): "per (flow,
-  direction) one exact cell in a mmapable array; the owner stores `goal`,
-  then `armed`, then reads `sent` … two independent `fexit(skb_send_sock)`
-  programs … a `fentry(sock_poll)` backstop … the owner reads both
-  programs' `recursion_misses` and the loss counts at every flow-event
-  dispatch and at the 1 s audit tick", with A1, A2, A3, A7, A8, A9, H-3,
-  A-35, A1-BOTH, T4(a) / `GUEST_INTAKE_RCVBUF` / A-36 / T4a-SRC, T4(b),
-  T4(c). Removed by EVMOD-ADOPT, 2026-10-16.
-- **A10's remainder and V-31-MV** (PD-8): "the guest side through the
-  production guest owner … with forced `fexit` skips on the raw-tracepoint
-  build inside a microVM … runs in DELIVER as part of V-31-MV." Removed by
-  EVMOD-ADOPT, 2026-10-16, with A-34.
-- **The valve** (VALVE-1 to VALVE-6, ADR-0195, ADR-0196; proposed
-  2026-10-16, never approved; both ADRs deleted): "No vsock source is redirected … each side's
-  owner moves its vsock-source direction itself … every TCP-source redirect
-  is valved", with `GUEST_FLOW_REDIRECT_HIGH`, `GUEST_FLOW_MOVE_CHUNK`, the
-  cell fields `parked` / `pumped` / `valve_armed` / `valve_fired`, the
-  records `ValveParked` / `ValveDrained`, V-3-VALVE, V-VALVE-COMPOSE and the
-  `flow_valve` module plan. Withdrawn by EVMOD-ADOPT, 2026-10-16.
-- **V-3-DGRAM**: "the host's `SEQPACKET → UDP H` redirect queues without
-  bound …". No subject under the forwarder (EVMOD-ADOPT); its bound is
-  measured by V-EV-DGRAM.
-- **V-32-MIX**: "the production guest strparser cell with `TCP_NODELAY` …".
-  Removed from the validation plan with the sockmap (EVMOD-ADOPT); A-39
-  is removed with EVMOD-DGRAM.
-- **The `guest_slots` module plan**: "a guest pool of `park + quota +
-  probes` slots … `GuestHeldWithinBound`, `ClaimAlwaysFindsSlot` …". Never
-  written; dropped by EVMOD-ADOPT with the drain-cell slots.
-- **EVMOD-WATCH-SHUT** (proposed 2026-10-17, never approved): "The owner's
-  abort of a watch (`abort`, `abort_all`) and the context's release shut the
-  watched `V_h` with `SHUT_RDWR` after queueing the record." Replaced by the
-  user's WATCH-ABORT ruling of 2026-10-17 (an owner abort never touches the
-  holder's socket; only the release shuts it) and EVMOD-STREAM-ABORT.
-- **The accepted ended attach states and V-EV-ATTACH** (proposed
-  2026-10-17, never approved): "Attach accepts … a TCP half in `CLOSE` with
-  a reset pending …; a vsock half in `CLOSING` …; the orphan sweep's state",
-  with the contract-shaping item V-EV-ATTACH and assumption A-44. Replaced
-  by the user's ruling of 2026-10-17 (an attach refused because a half
-  reset or closed is a flow abort) and EVMOD-ATTACH-END.
+**Mechanisms of earlier designs.** The sockmap forwarder, the guest slot
+pool, the guest framing and reassembly cells, the SEQPACKET datagram leg,
+host-local delivery to the guest prefix and the other mechanisms that
+preceded EVMOD-ADOPT and INB-1 are not contracts of this delta; the code
+that exists in the tree is listed in § *Bridge-era code for DELIVER to
+delete*. "A slow reader is backpressure, not a fault" (ADR-0183, R2-DRAIN)
+holds because the forwarder consumes from a source only what its target
+accepted (P-67, P-68).
 
 ## Wave: DISTILL / [REF] vsock Reconciliation and Status
 
@@ -14795,36 +13862,21 @@ impact) and `specs/quint/{guest-flow-owner,probe-count}/`. Language Rust
 (`[lang-mode] rust`); policy `docs/architecture/atdd-infrastructure-policy.md`
 inherited (`[policy-mode] inherit`); Mandate 8 maps to native before/after
 assertions on port-exposed observations (`[port-mode] n/a-rust`).
-Reconciliation: one SSOT (this document and the user decisions of
-`.context/round-2026-10-13/decisions.md`: the EVMOD approval of 2026-10-17,
-the DISTILL rulings of 2026-10-18 — the guest-kit fixture and lane T-1 /
-T-2, RESTART-SSOT fixing GH #324 in #295, GH #325 out of scope; those of
-2026-10-19 — U-2 / GH #326, E-3, D-14 LEGS-DIAL; and those after round 10 —
-PORTS-CONFIG, GUEST-PORTS, FWD-PREREQ, NO-OVERRIDE-SEAMS and its full
-scope, STORES-IN, PROBE-ROOT-ENV, which replace U-1 (b)) — 0 contradictions
-in the authored scope. R-D1 (`ProbeResultRow` V2 landed) and R-D2 (CID-claim
-port deleted) stand.
+Reconciliation: one SSOT (this document and the user rulings of § *Approval
+record*) — 0 contradictions in the authored scope. R-D1 (`ProbeResultRow`
+V2 landed) and R-D2 (the CID-claim port deleted) hold.
 
-**Status (2026-10-20, round-13 integration pass).** The round-13 driver
-partition and one integration pass over the round-11 to round-13 DESIGN
-edits (NO-OVERRIDE-SEAMS full scope, STORES-IN, PORTS-CONFIG, GUEST-PORTS,
-FWD-PREREQ, PROBE-ROOT-ENV). Every body is complete and compiled; every body
-whose owner is a RED scaffold carries `#[ignore = "pending DELIVER <step>"]`
-naming its Roadmap impact step. Every `serve` fixture boots over
-`NodeAdapters` (`NodeAdapters::host(&config, ..)` with its simulated fields
-replaced by name, stores reopened per boot, kernel-assigned vsock ports read
-back from their owners); `ServerConfig` carries configuration only. Gates on
-Lima (Linux 7.0.0-34): workspace `cargo check --all-targets` and `clippy -D
-warnings` with `integration-tests` and `integration-tests,kvm-tests` (clippy
-also without features); `cargo fmt --check`; `cargo xtask conformance-lint`
-(0 violations); the default nextest lane of the touched crates (2,695 run,
-41 failures, every one the FWD-PREREQ lane precondition — `ovd_fwd.ko` is not
-built before step 4; `distill/upstream-issues.md` U-3); one `#[quint_test]`
-per driver plus `cid_lease` `lease_conf_three`, each failing at a production
-RED scaffold. On native metal (7.0.0-38, the canonical lease, released): the
-walking skeleton and the density and fault cells each stop at the lane
-precondition (`ovd_fwd.ko` absent until step 4). Semantic RED per marker:
-`distill/red-classification.md`.
+**Status.** Every body is complete and compiled; every body whose
+owner is a RED scaffold carries `#[ignore = "pending DELIVER <step>"]` naming
+its Roadmap impact step. Every `serve` fixture boots over `NodeAdapters`
+(`NodeAdapters::host(&config, ..)` with its simulated fields replaced by name,
+stores reopened per boot, kernel-assigned vsock ports read back from their
+owners); `ServerConfig` carries configuration only. Lima 7.0.0-38: check,
+clippy `-D warnings`, fmt, conformance-lint and `quint verify-evidence` are
+clean; every default-lane failure is the FWD-PREREQ refusal (no `ovd_fwd.ko`
+built from this workspace). On metal (7.0.0-38) `guest-kit-prepare` stops at
+`kmod-build` (step K) and the Tier-3 cells stop at their precondition or
+their RED scaffold. Semantic RED per marker: `distill/red-classification.md`.
 
 ## Wave: DISTILL / [REF] vsock Scenario List
 
@@ -14845,7 +13897,8 @@ tier, pending step) live per partition; the index is
 | RESTART-SSOT (GH #324) | obligations 1–3 at the accessor (ceiling boundary, platform-reclaim and generation exemptions); 4 the agreement proptest of `restart_after_failure` against one `reconcile` over every kind and row class; 5 the Job stream's `will_restart` | `overdrive-control-plane` `reconciler_runtime` tests, `tests/acceptance/streaming_submit.rs`, `tests/integration/streaming_attempt_failed.rs`; `overdrive-reconcilers` `workload_lifecycle::restart_ssot_agreement` | default; Tier 1 proptest | step 0 |
 | Serve + deploy on native metal | P6-S13 walking skeleton: a VM Job round-trips TCP and UDP off the node, the peer sees the node's address, the VMM is gone afterwards; P6-S14 native fault matrix: `serve` killed (every far end resets, the next boot ends the VMM and re-places the Job on its reclaimed CID), guest kernel crash, VMM SIGKILL, stalled far reader, 1,100 UDP sockets churned; P6-S15 64 VMs each round-trip with unique addresses and CIDs, no VM address reachable with `serve` down, the next boot reclaims every VMM and re-places each Job on its CID | `overdrive-cli/tests/integration/vsock_{walking_skeleton, fault_matrix, density, support}.rs` | native metal, `kvm-tests` | steps 10-01, 10-02, 08-04 |
 
-Round-9 cells (`distill/test-scenarios.md` § *Round-9 cells*): R5-54's
+Boot, relay and forwarder cells (`distill/test-scenarios.md` § *Boot, relay
+and forwarder cells*): R5-54's
 seeded half (`owner_acceptance/legs_dial.rs`, LEGS-DIAL), phase 1's
 forwarder probe (`prefix_boot_acceptance.rs`, D-8), the end-record order
 `take_end_returns_records_in_end_order` (`overdrive-fwd`, D-12), the leg-F
@@ -14853,20 +13906,28 @@ repair `leg_f_repair_rebinds_transparent_listener` (`overdrive-worker`
 Tier 3, D-9), the R5-25 fail-closed oracle with a live host listener and
 R5-62's plateau polling (metal).
 
-Round-13 cells and fixtures: the PORTS-CONFIG cells
+PORTS-CONFIG and NO-OVERRIDE-SEAMS cells and fixtures: the PORTS-CONFIG cells
 (`vsock_node_port_config`, `serve_kernel_assigned_vsock_ports`, the beacon
-intake's bound port on the kernel command line), the round-13 fixture
-inventory of handoff (11) migrated, `compose_vm_driver`'s `VmCapability`
+intake's bound port on the kernel command line), the fixture inventory of
+handoff (11) migrated, `compose_vm_driver`'s `VmCapability`
 classification (`optional_capability_classifies_the_probe_failure_as_not_available`),
 the S-BDB-14 real-kernel composer `Err` cell
 (`HostDataplaneComposer::with_probe_fault`), and the trybuild fixture
 `node_adapters_require_the_guest_flow_seam`.
 
-Not authored: the Tier-3 half of R5-54, R5-63 through the probe runner over
-a real microVM, R5-41 kill-and-reuse through `serve`, the V-24 shapes of
-R5-28 / R5-31 (T-9); R5-57 through `serve` (D-17); control-session loss
-without a VM fault, which no entry point reaches through `serve` + deploy
-(D-16). `Forwarder` recovery is covered by seeded sim plus R5-61. V-9's
+Guest-kit and in-guest cells (`distill/test-scenarios.md` § *Guest-kit,
+in-guest and module-suite cells*):
+R5-28 / R5-31's Tier-3 half in the in-guest owner lane (D-22,
+`overdrive-init` `in_guest_lane.rs` + `guest_flow::real_kernel`); R5-57's
+`Probe` / `Relay` watch share and R5-63 (d) / (e) through `serve`
+(U-D17-DIAL, `guest_flow_through_serve.rs`); V-EV-SAFE's full-target
+resume cases; the zero-copy / TX-timestamping refusal; V-EV-UNLOAD's
+datagram half, step-4 version oracle, ULP control and stress in the guest
+kit (`unload.rs`, `unload_in_guest.rs`); `kmod-load`'s busy-on-live-module case.
+
+Not authored: control-session loss without a VM fault, which no entry
+point reaches through `serve` + deploy (D-16; seeded sim plus the in-guest
+session cells). `Forwarder` recovery is covered by seeded sim plus R5-61. V-9's
 measurements are the benchmark GH #326.
 
 ## Wave: DISTILL / [REF] vsock Conformance Drivers
@@ -14891,9 +13952,9 @@ panics in its construction.
 | `owner_flows` · `flows_conf` (host) | `overdrive-control-plane/src/guest_network/quint_owner_flows.rs` | 45 + 1 | attachment-cut (7) |
 | `owner_flows` · `flows_conf` (guest) | `overdrive-init/src/guest_flow/quint_owner_flows.rs` | 45 + 1 | step 5 |
 | `owner_flows` · `flows_beacon_conf` | `overdrive-worker/src/vm_driver/quint_flows_beacon.rs` | 7 + 1 | attachment-cut (6) |
-| `fwd_pair` · `pair_conf` (host) | `overdrive-control-plane/src/guest_network/quint_fwd_pair.rs` | 39 + 1 (`HostOwnerDeathIsFinal`, `RecoveryEndsHeldStreamWhoseWatchEnded` added) | attachment-cut (7) |
+| `fwd_pair` · `pair_conf` (host) | `overdrive-control-plane/src/guest_network/quint_fwd_pair.rs` | 39 + 1 (including `HostOwnerDeathIsFinal`, `RecoveryEndsHeldStreamWhoseWatchEnded`) | attachment-cut (7) |
 | `fwd_pair` · `pair_conf` (guest) | `overdrive-init/src/guest_flow/quint_fwd_pair.rs` | 37 + 1 | step 5 |
-| `flow_quota` · `quota_conf` | `…/guest_network/quint_flow_quota.rs` | 5 + 1 (`ReadEnd` in queue order, `endq` projected) | attachment-cut (7) |
+| `flow_quota` · `quota_conf` | `…/guest_network/quint_flow_quota.rs` | 7 + 1 (all 7 `quota_conf` runs, including the two M-1 queue-order runs; `ReadEnd` in queue order, `endq` projected) | attachment-cut (7) |
 | `udp_slots` · `slots_conf` (host) | `…/guest_network/quint_udp_slots.rs` | 12 + 1 | attachment-cut (7) |
 | `udp_slots` · `slots_conf` (guest) | `overdrive-init/src/guest_flow/quint_udp_slots.rs` | 12 + 1 | step 5 |
 | `cid_lease` · `lease_conf_ok`, `lease_conf_325`, `lease_conf_three` | `…/guest_network/quint_cid_lease.rs` (production `WorkloadLifecycle` through the convergence tick and the real handlers, DR2-CLOSE; `leased` read from the owner, `up` / `reclaimed` stimulus; while no `serve` is up `lease` / `cursor` are not compared, S-4) | 21 + 1, `RedeployLeasedAtServeCrashIsPlacedAgain` on `lease_conf_325` (`pending #325`), and `PoolExhaustedRestartCleansThePredecessorThenPlaces` on `lease_conf_three` (two background Service leases on usable offsets 0 and 1, model offset `m` ↦ usable `m + 2`, no `#[quint_run]` on that main) | attachment-cut (15); `retry` / `ex` / `att` read the RESTART-SSOT accessors (step 0) |
@@ -14907,8 +13968,8 @@ the composition's `OwnerDial` (D-13); the init one gates `ctx(g)`, the owner
 view (`pr(g)`, the attach counters, the guest-held `dir(d)` facts) and the
 guest socket view on the `VmmExit` stimulus it applied itself
 (`vmm_exit_applied`), while its spec side always decodes the spec's values
-and never reads `vmUp` (`gone` is stimulus-only, round 13; applied-`VmmExit`
-gate, round 16); the `cid_lease` driver reopens the node's stores through
+and never reads `vmUp` (`gone` is stimulus-only; applied-`VmmExit` gate);
+the `cid_lease` driver reopens the node's stores through
 `StoreAdapters::open` at every composition (D-21); `flow_quota`
 projects `endq` (D-12). Every composition reads its vsock ports back from
 the owner (`flow_ports()`, `BeaconIntake::bound_port()`), never a number.
@@ -14916,7 +13977,24 @@ The eight control-plane and worker drivers fail after `Replaying traces` at
 a production RED scaffold (`flow_quota` and `udp_slots` at the owner's
 `flow_ports`, `None` until attachment-cut step (6)); the three init drivers
 fail while constructing their `GuestFlowOwner`, at a step-2 `LaunchToken`
-scaffold. Open: review items S-2 to S-4, S-15 and S-17.
+scaffold.
+
+`fwd_safe` (`safe_runs`, 14 runs) has no driver by design: the module's
+ordering state has no accessor and the appliance never unloads the module.
+Its per-run record — where each run's observable consequence is checked (a
+`fwd_pair` conformance run, an `overdrive-fwd` module-suite cell, V-EV-SAFE /
+V-EV-UNLOAD, or the DELIVER source review of `sk_write_space`) — is the module doc of
+`overdrive-control-plane/src/guest_network/quint_fwd_pair.rs` (§ "`fwd_safe`
+has no driver"); `WatchOverrideEndThenOwnerAbortIsEnoent` is covered by
+V-EV-SAFE only. Named runs on a conformance main left unpinned, each with its
+reason in the driver: `cid_lease`'s two #325-window guard runs
+(`CrashIsNotEnabledInThe325Window`,
+`CrashIsEnabledInThe325WindowWithoutTheGuard`, model-only); the init
+`fwd_pair` driver's `HostOwnerDeathIsFinal` and
+`RecoveryEndsHeldStreamWhoseWatchEnded` (pinned on the host driver);
+`quiescence`'s `ForeignHoldRestoreChangesNothingThenFailStops` (FHOLD option
+(b)); `lease_ok`'s `PoolExhaustedRestartCleansThePredecessorThenPlaces`
+(pinned on `lease_conf_three`).
 
 ## Wave: DISTILL / [REF] vsock Walking Skeleton Strategy
 
@@ -14947,7 +14025,7 @@ metal*). Tier B is realised by the Quint conformance drivers.
 | `MtlsInterceptWorker` forwarded-outbound port | YES | `vsock_mesh_egress_mtls.rs` (step 8) |
 | `HostMtlsEnforcement` leg-B dial | YES | `vsock_legb_dial.rs` (step 13) |
 | Shared nft table: constant guest-prefix rules, D26 output rules | YES | `vsock_constant_guest_prefix_rules.rs` (step 12), `vsock_host_internal_enforce.rs` (step 14) |
-| `CloudHypervisorVmm` fork launch | YES (native metal) | `overdrive-host` `vsock_vmm_device.rs` (steps 1, 3); the serve + deploy lanes |
+| `CloudHypervisorVmm` fork launch | YES (native metal) | `overdrive-host` `vsock_vmm_device.rs` (steps 1, 3); the serve + deploy lanes; the guest kit's own VMs (U-4 (a): `GuestKit::boot` calls `Vmm::create`) |
 | `LocalObservationStore` run-sequence merge | YES (real redb) | `probe_result_merge.rs` (step 9) |
 | The gateway `local` route, the node beacon and the flow listeners in a real `serve` | YES (native metal) | `vsock_walking_skeleton.rs`, `vsock_fault_matrix.rs`, `vsock_density.rs` (10-01, 10-02, 08-04) |
 
@@ -14962,14 +14040,14 @@ plain data and constants are real). No unpinned public surface was added.
 | `overdrive-core` | `guest_transport::forwarder` (`FlowForwarder`, `ForwardId`, `ForwarderGeneration`, `PairMode`, `PairState`, `ForwardEnd`, `AbortResult`, `ForwarderInventory`, `ForwarderError`, the probe vocabulary); `guest_transport::{wire, dial}` and the core newtypes; `aggregate::workload_spec::ParseError::{ListenerPortReserved, ProbeCountExceeded}` (D25, D-UP-12; the ingress checks land with step 2); `MtlsEnforcementError::GuestDial { source: GuestDialError }` (LEGS-DIAL) |
 | `overdrive-dataplane` | `HostMtlsEnforcement::new(identity, limits, guest_prefix, guest_dial)` (LEGB-DIAL, LEGS-DIAL); `guest_prefix` and `guest_dial` are scaffold fields read in steps 13 and attachment-cut (9) |
 | `overdrive-fwd` (new crate, `adapter-host`; depends on `overdrive-core`, `nix`, `thiserror`) | `KernelFlowForwarder::{open, readiness_fd}` and its `FlowForwarder<dyn AsFd>` impl; the crate-private UAPI mirror with layout assertions |
-| `overdrive-sim` | `SimFlowForwarder`, `SimForwarderDevice`, `SimSocket` and their scripting vocabulary (test support; stepping contract in the rustdoc, `received_shutdown` read-back added for `vs(s).ps`); `SimGuestStreamDial`; `SimSharedGuestNetworkOwner` (its `flow_ports` from the first `Ok` converge); `SimMtlsEnforcement::new(identity, limits, guest_dial)` (LEGS-DIAL; the inbound leg-S arm lands with attachment-cut (9)) and `ScriptedTrip::PeerVerification` (test support, round 13); `SimMtlsEnforcementFactory`, `SimDataplaneComposer` (NO-OVERRIDE-SEAMS) |
+| `overdrive-sim` | `SimFlowForwarder`, `SimForwarderDevice`, `SimSocket` and their scripting vocabulary (test support; stepping contract in the rustdoc, with a `received_shutdown` read-back for `vs(s).ps`); `SimGuestStreamDial`; `SimSharedGuestNetworkOwner` (its `flow_ports` from the first `Ok` converge); `SimMtlsEnforcement::new(identity, limits, guest_dial)` (LEGS-DIAL; the inbound leg-S arm lands with attachment-cut (9)) and `ScriptedTrip::PeerVerification` (test support); `SimMtlsEnforcementFactory`, `SimDataplaneComposer` (NO-OVERRIDE-SEAMS) |
 | `overdrive-control-plane` | the owner's `assign` / `quiesce` / `restore` / dial and its observation accessors; `GuestAddressPool`; the supervisor's recovery; phase 1 `probe_guest_flow_startup(io, vip_range, node_prefix)` (D-8, run by `run_server` at boot step 1, a no-effect scaffold like the boot-path owner methods, S-1) and `GuestFlowIo::probe_forwarder` (`HostGuestFlowIo` RED; `SimGuestFlowIo` records `SimEffectKind::ProbeForwarder`); `compose_guest_network(ports, io, dial)` and `OwnerDial::{unbound, bind, owner}` (D-UP-16 under LEGS-DIAL, D-13); `GuestOwnerObservation::{forwarder_attached, forwarder_inventory, last_consumed_end, consumed_ends}` and `ForwarderInventoryRead` (D-5, D-11, D-15); `ReconcilerRuntime::restart_status_for_alloc(target, kind, run_desired, failed, desired_generation)` (RED scaffold; the Job stream keeps today's value until step 0) and `attempt_index_for_alloc` (RESTART-SSOT). `node_adapters`: `NodeAdapters`, `BootAdapters`, `MtlsAdapters`, `StoreAdapters::open`, `IntentStoreAdapter::open` (neither `Clone`, D-21), `CaAdapters { factory, root_key_codec }` with `CaAdapters::host()` over core `CaFactory` (host `RcgenCaFactory`, sim `SimCaFactory`; `boot_server` builds the CA once over `boot.entropy`), `ProbeAdapters`, `VmAdapters`, `VmCapability`, `GuestFlowAdapter::host`, `NodeAdapters::host(&ServerConfig, cgroup_fs, kek)`, `DataplaneComposer` / `HostDataplaneComposer` (`with_probe_fault`, `integration-tests`); `run_server(config, adapters)`, the supplied-owner path over `BootAdapters`, `ServerConfig::new()` and `ServerConfig.vsock_ports` (NO-OVERRIDE-SEAMS, STORES-IN, PORTS-CONFIG); the owner's `flow_ports()` and the pool's `assign(alloc, ports, flow_ports)` (the action shim's `None` arm a step-(6) RED scaffold). `ServerHandle::guest_flow_observation()` (RED, `integration-tests`; the D-17 lane `tests/integration/guest_flow_through_serve.rs`) |
 | `overdrive-reconcilers` | `restart_decision`, `restart_after_failure` (RED scaffolds), `current_alloc` made `pub`, all re-exported at the crate root (RESTART-SSOT) |
-| `overdrive-worker` | `MtlsInterceptWorker::new` with its four ports (LEGS-DIAL withdrew D-UP-5's worker `guest_dial`), `ProbeRunner::new(.., guest_dial)`, beacon intake (`BeaconIntake::bind(io, port)` and `bound_port()`, PORTS-CONFIG) |
+| `overdrive-worker` | `MtlsInterceptWorker::new` with its four ports (the dial is the enforcement's, LEGS-DIAL), `ProbeRunner::new(.., guest_dial)`, beacon intake (`BeaconIntake::bind(io, port)` and `bound_port()`, PORTS-CONFIG) |
 | `overdrive-host` | `VsockBeaconIo::bind(port)` (PORTS-CONFIG); the other `VsockBeaconIo` methods stay RED |
 | `overdrive-init` | `GuestTransportToken.ports` / `GuestHostPorts` (GUEST-PORTS), `GuestFlowOwner`, `KernelGuestOwnerIo`, `SocketCookie`, transport setup and `KernelRelease`, `GuestSideObservation::{forwarder_attached, last_consumed_end, consumed_ends}` (D-5, D-11); depends on `overdrive-fwd` |
-| `overdrive-testing` (test support) | `forwarder_module` (the FWD-PREREQ check every composed `serve` fixture runs first: this workspace's built module, loaded); the guest-kit microVM fixture: `guest_kit`, `guest_peer` + the `overdrive-guest-peer` binary, `guest_lane` (`InGuestTests::prepared`), `guest_app`, `vsock` (`distill/shared-test-infrastructure.md` § 3); the fixture builds nothing and refuses `LaneNotPrepared` |
-| `xtask` (build orchestration) | `cargo xtask guest-kit-prepare` (`xtask/src/guest_kit_prepare.rs`): the guest-kit lane setup, contract paths shared with `overdrive-testing`; `cargo xtask kmod-load [--busy-ok]` (FWD-PREREQ, MODULE-REFCOUNT: a pure decision core over a `ModuleKernel` trait comparing the D-20 `version`; `kmod-build` and the lefthook kmod lines land with step K) |
+| `overdrive-testing` (test support) | `forwarder_module` (the FWD-PREREQ check every composed `serve` fixture runs first: this workspace's built module, loaded); the guest-kit microVM fixture: `guest_kit`, `guest_peer` + the `overdrive-guest-peer` binary, `guest_lane` (`InGuestTests::prepared`), `guest_app`, `vsock` (`distill/shared-test-infrastructure.md` § 3); the fixture builds nothing and refuses `LaneNotPrepared`; it launches its microVMs through `overdrive-host`'s `CloudHypervisorVmm` (U-4 (a)), so `overdrive-testing` depends on `overdrive-host` |
+| `xtask` (build orchestration) | `cargo xtask guest-kit-prepare` (`xtask/src/guest_kit_prepare.rs`): the guest-kit lane setup, contract paths shared with `overdrive-testing`; `cargo xtask kmod-load [--busy-ok]` (FWD-PREREQ, MODULE-REFCOUNT: a pure decision core over a `ModuleKernel` trait comparing the D-20 `version` (the whole-tree digest); any `EBUSY` on a live module is busy/retry, never a reboot, and `--busy-ok` tolerates it; `kmod-build` and the lefthook kmod lines land with step K). `IN_GUEST_LANES` stages `overdrive-fwd --test integration` as well as the `overdrive-init` lanes (a new `InGuestTarget` kind), so the guest-side `ovd_fwd` cells (`unload_in_guest.rs`) run in the guest kit |
 
 ## Wave: DISTILL / [REF] vsock Test Placement
 
@@ -14990,7 +14068,7 @@ plain data and constants are real). No unpinned public surface was added.
 
 | Driving adapter (DESIGN) | Scenario through its protocol | Status |
 |---|---|---|
-| `overdrive serve` composition (`run_server`) | boot order G-V1, boot refusals, QHOLD and `Forwarder` recovery; `quiescence` driver; boots without a VM attachment (75 serve tests active again); the native fault matrix | RED (attachment cut, steps 12, 13, 10-02) |
+| `overdrive serve` composition (`run_server`) | boot order G-V1, boot refusals, QHOLD and `Forwarder` recovery; `quiescence` driver; boots without a VM attachment (75 serve tests active); the native fault matrix | RED (attachment cut, steps 12, 13, 10-02) |
 | `overdrive deploy` → public deploy handler | P6-S13 walking skeleton, P6-S14, P6-S15 | RED (10-01, 10-02, 08-04; precondition until step K) |
 | TOML ingress / API ingress | R5-21, R5-60 | RED (step 2) |
 | `FlowForwarder` (`KernelFlowForwarder`) | the P2 module suite, `guest_boundary` | RED (step 4) |
@@ -15003,32 +14081,34 @@ plain data and constants are real). No unpinned public surface was added.
 
 ## Wave: DISTILL / [REF] vsock Open blockers
 
-The consolidated list with routing is `distill/upstream-issues.md`. Closed
-this round: U-3 (user, option (b): step K precedes step 0), D-16, D-17,
-D-20 and D-21 (DESIGN closures, authored in round 16).
+The consolidated list with routing is `distill/upstream-issues.md`.
 
-- **DESIGN:** D-22 — R5-28 and R5-31's Tier-3 halves ("the V-24 shape
-  through `serve`") read the guest end of a host-opened flow; through
-  `serve` + deploy the guest is the production `overdrive-init`, which
-  exposes no in-guest view of V_g. DESIGN to pin where that oracle is read
-  (an in-guest observation surface, or the in-guest session lane as the
-  Tier-3 half). The seeded-sim halves stand.
-- **DISTILL follow-up (not authored, no scope growth):** U-D17-DIAL — the
-  through-`serve` dial share of R5-57 (`Probe` / `Relay` watches) and
-  R5-63's through-`serve` half need a guest that listens on an inbound TCP
-  port (a `guest_app` `listen` subcommand and a Service spec with a TCP
-  probe).
-- **Lane gap:** U-EV-UNLOAD — V-EV-UNLOAD's ULP negative control and its
-  KASAN unload stress each need a kernel boot of their own; no lane runs an
-  `overdrive-fwd` cell inside a guest yet. The context and socket halves
-  are authored (`overdrive-fwd/tests/integration/unload.rs`).
-- **REVIEW (standing rule):** S-1 to S-4, S-6, S-8 to S-18 — including
-  round 16's cells choices (S-18) and the init `fwd_pair` driver's
+- **USER:** none open.
+- **Lane prerequisites, open until DELIVER step K:** the 41 default-lane
+  refusals (FWD-PREREQ, "no `ovd_fwd.ko` built from this workspace") and every
+  guest-kit cell's `LaneNotPrepared` clear when step K lands
+  `cargo xtask kmod-build` (U-3). The U-4 (a) kit's production launch (the
+  launch uid, the `kvm` and `vhost-vsock` groups, the image clone) is
+  exercised on metal only after step K and steps 2 and 3 (`GuestCid::new`,
+  the vhost-kernel vsock argument); if it then needs API the design does not
+  name, it returns to DESIGN.
+- **REVIEW (standing rule):** S-1 to S-4, S-6, S-8 to S-20 — the cells
+  choices (S-19) and integration choices (S-20), the drivers'
+  `fwd_safe` per-run record, and the init `fwd_pair` driver's
   applied-`VmmExit` gate.
+- **Scope notes:** the U-D17-DIAL relay cells assume the production
+  composition mesh-resolves a VM Service's `workload_addr:port` for a
+  same-node VM client (LEGB-DIAL, V-LEGB-SERVE); if DELIVER finds no
+  production path resolves it they route back to DISTILL. In-guest cells
+  (`in_guest_*`, `guest_flow::real_kernel`) fail closed when run on a host.
 - **DELIVER notes:** O-2, O-3, O-5, O-7, O-8; test-support notes T-3, T-4,
-  T-6, T-7, T-9.
-- **ENV:** the pre-existing `overdrive-dataplane` guardrails failure (E-3,
-  out of scope for #295 by user ruling); the shared metal sync tree (E-4).
+  T-6, T-7.
+- **ENV:** the `overdrive-dataplane` guardrails failure at HEAD (E-3, out of
+  scope for #295 by user ruling); the shared metal sync tree (E-4); the Lima
+  VM's tool provisioning (E-5); two `overdrive-cli`
+  `guest_stack_mtls_egress::fault_fixture` cells that fail identically on
+  metal and on the committed checkpoint, classified pre-existing and
+  independent of #295 (E-6; no issue).
 
 ## Wave: DISTILL / [REF] vsock Prerequisites and Completeness
 
@@ -15047,7 +14127,8 @@ xtask bpf-build`, `OVERDRIVE_BPF_NATIVE=1` on metal) for crates that link
 `overdrive-dataplane`.
 
 AT-completeness (`nw-at-completeness-check`, 15 items): 15 pass →
-**COMPLETE**; documented gaps D-22, U-D17-DIAL, U-EV-UNLOAD and T-9
-(`distill/test-scenarios.md`). Mandate-12 step-reuse ratio: not applicable
+**COMPLETE**; documented gaps: D-16 (seeded sim plus in-guest session
+cells) and R5-28's "counted" clause (seeded sim only)
+(`distill/test-scenarios.md` § *Completeness*). Mandate-12 step-reuse ratio: not applicable
 (Rust `#[test]` bodies, no Gherkin step decorators; the domain vocabulary is
 the pinned newtypes and the seams' typed handles).

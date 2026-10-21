@@ -257,10 +257,6 @@ module probe_count {
   val Safety: bool = and { NoEarlyTerminate, NoReactOnSameRow, NoTerminateWhenStopped, NoMissedTerminate,
                            NoEarlyReady, StreakExact, MissingSampleInert, StoreHoldsLatest, NoStaleChange }
 
-  // non-vacuity witnesses (expected violations)
-  val WitnessNeverTerminates: bool = terms == 0
-  val WitnessNeverReady: bool = not(g.ready)
-
   // ------------------------------------------------------------------ named runs (critical scenarios)
   // happy path: three Fails, a look after each; terminate at the third; the stop succeeds
   run HappyPathThreeFailsTerminateAtThreshold = init

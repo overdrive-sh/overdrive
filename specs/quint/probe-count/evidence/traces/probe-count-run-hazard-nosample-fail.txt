@@ -6,16 +6,16 @@
 
   1) streak_bugNoSampleFail::probe_count::MissingSampleChangesNothing:
        Error [QNT508]: Expect condition does not hold true
-        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/probe-count/probe_count.qnt:278:37
-        278:   run MissingSampleChangesNothing = init
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/probe-count/probe_count.qnt:274:37
+        274:   run MissingSampleChangesNothing = init
                                                  ^^^^
-        279:     .then(ProbeRun("Fail", "")).then(ConsumerLook(true)).expect(rseq == 1 and rsame == 1)
+        275:     .then(ProbeRun("Fail", "")).then(ConsumerLook(true)).expect(rseq == 1 and rsame == 1)
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        280:     .then(ProbeRun("NoSample", "node_capacity")).then(ProbeRun("WriteFail", "")).then(ProbeRun("NoSample", "quiesced"))
+        276:     .then(ProbeRun("NoSample", "node_capacity")).then(ProbeRun("WriteFail", "")).then(ProbeRun("NoSample", "quiesced"))
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        281:     .expect(rseq == 1 and pseq == 1 and rsame == 1 and Safety)
+        277:     .expect(rseq == 1 and pseq == 1 and rsame == 1 and Safety)
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Use --seed=0x1e99a35462273afc --match=streak_bugNoSampleFail::probe_count::MissingSampleChangesNothing to repeat.
+    Use --seed=0x37a902ae67ccf49c --match=streak_bugNoSampleFail::probe_count::MissingSampleChangesNothing to repeat.
 
 
   Use --verbosity=3 to show executions.

@@ -707,11 +707,11 @@ pub enum ControlPlaneError {
     DnsResponderBoot(#[from] crate::dns_responder::responder::DnsResponderError),
 
     /// VM driver composition boot-time refusal (ADR-0082 §D8 / ADR-0083
-    /// §D8, GH #42, step 01-09). Fires ONLY when the composition root (or
-    /// an injected `ServerConfig.vmm_override` test seam declaring
-    /// cloud-hypervisor PRESENT) ran `Vmm::probe()` / `CgroupAccounting::
-    /// probe()` against an adapter it already knows is present, and that
-    /// probe caught a genuine substrate lie (ADR-0082 §D5's catalogued
+    /// §D8, GH #42, step 01-09). Fires ONLY when the composition root's
+    /// `NodeAdapters` declared the VM capability `VmCapability::Required` (a
+    /// root whose VMM adapter it constructed itself and knows is present)
+    /// and the boot's `Vmm::probe()` / `CgroupAccounting::probe()` against
+    /// that adapter caught a genuine substrate lie (ADR-0082 §D5's catalogued
     /// capability-flag / non-reflink classes). Distinct from capability
     /// ABSENCE (no cloud-hypervisor binary at all) — that path is NOT a
     /// fault (SD-5) and does not construct this variant; it soft-skips

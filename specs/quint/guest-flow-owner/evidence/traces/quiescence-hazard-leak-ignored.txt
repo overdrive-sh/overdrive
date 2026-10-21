@@ -5,7 +5,7 @@ State 1
   repLeft = -1
   rec = [C1 |-> "idle", C2 |-> "idle"]
   cnt = 0
-  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+  g = [ reopenEarly |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
   stop = "none"
   flowsOpen = 0
   conf_step = [InitDown |-> [tag |-> "UNIT"]]
@@ -16,53 +16,51 @@ State 1
   att = [C1 |-> 0, C2 |-> 0]
   latch = FALSE
 
-State 2 [ForeignRestore]
-  foreign = TRUE
-
-State 3 [FailStop]
-  up = FALSE
-  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> TRUE, dropped |-> FALSE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
-  stop = "failstop"
-  foreign = FALSE
-
-State 4 [RestartWith]
-  up = TRUE
-  stop = "none"
-
-State 5 [LeakHold]
+State 2 [LeakHold]
   cnt = 1
-  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> TRUE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+  g = [ reopenEarly |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
   leaked = 1
   latch = TRUE
 
-State 6 [Damage]
-  dmg = [C1 |-> FALSE, C2 |-> TRUE]
+State 3 [Damage]
+  dmg = [C1 |-> TRUE, C2 |-> FALSE]
 
-State 7 [RecQuiesce]
-  rec = [C1 |-> "idle", C2 |-> "held"]
-  cnt = 2
-  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> FALSE, failStopped |-> TRUE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
-
-State 8 [RepFail]
-  att = [C1 |-> 0, C2 |-> 1]
-
-State 9 [RepFail]
-  att = [C1 |-> 0, C2 |-> 2]
-
-State 10 [Damage]
+State 4 [Damage]
   dmg = [C1 |-> TRUE, C2 |-> TRUE]
 
-State 11 [RecQuiesce]
+State 5 [RecQuiesce]
+  rec = [C1 |-> "held", C2 |-> "idle"]
+  cnt = 2
+  g = [ reopenEarly |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+
+State 6 [RecRepair]
+  rec = [C1 |-> "repaired", C2 |-> "idle"]
+  dmg = [C1 |-> FALSE, C2 |-> TRUE]
+
+State 7 [RecRestore]
+  rec = [C1 |-> "idle", C2 |-> "idle"]
+  cnt = 1
+  g = [ reopenEarly |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> TRUE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+
+State 8 [RecQuiesce]
+  rec = [C1 |-> "idle", C2 |-> "held"]
+  cnt = 2
+
+State 9 [RepFail]
+  att = [C1 |-> 0, C2 |-> 1]
+
+State 10 [RepFail]
+  att = [C1 |-> 0, C2 |-> 2]
+
+State 11 [Damage]
+  dmg = [C1 |-> TRUE, C2 |-> TRUE]
+
+State 12 [RecQuiesce]
   rec = [C1 |-> "held", C2 |-> "held"]
   cnt = 3
 
-State 12 [RecRepair]
+State 13 [RecRepair]
   rec = [C1 |-> "repaired", C2 |-> "held"]
   dmg = [C1 |-> FALSE, C2 |-> TRUE]
 
-State 13 [RecRestore]
-  rec = [C1 |-> "idle", C2 |-> "held"]
-  cnt = 2
-  g = [ reopenEarly |-> FALSE, repairNoHold |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> TRUE, failStopped |-> TRUE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
-
--> stutters forever in State 13
+-> loops back to State 10

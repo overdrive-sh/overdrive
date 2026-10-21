@@ -107,6 +107,19 @@
 //! allocation ids and VMM pids are a relabelling the driver fixes when it
 //! first sees them, never a source of state.
 //!
+//! **Runs not pinned (model-only by design).** `CrashIsNotEnabledInThe325Window`
+//! (holds on `lease_conf_ok`, violated on `lease_conf_325`) and its positive
+//! twin `CrashIsEnabledInThe325WindowWithoutTheGuard` (holds on
+//! `lease_conf_325`, violated on `lease_conf_ok`) check the model's own
+//! #325-window guard — a `Crash` not enabled while a `Redeploy`'s placement
+//! is leased and not launched — which exists only to keep randomized
+//! `lease_conf_ok` traces off the GH #325 defect. No production owner
+//! refuses a `serve` crash, so there is nothing to drive (the spec README's
+//! `cid_lease` run table and the feature-delta `cid_lease` map list both as
+//! "model only, not a `#[quint_test]`"). The behaviour in that window is the
+//! pinned `RedeployLeasedAtServeCrashIsPlacedAgain` on `lease_conf_325`
+//! (`pending #325`).
+//!
 //! Lane: `integration-tests` (it spawns the `quint` CLI through
 //! quint-connect), `cargo xtask lima run --`.
 

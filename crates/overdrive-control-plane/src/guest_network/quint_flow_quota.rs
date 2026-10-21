@@ -27,7 +27,7 @@
 //! |---|---|
 //! | `init` | a fresh composition boots; the leases, sessions and the background flows are opened through the owner's driving ports |
 //! | `Admit(a)` | the guest of `a` opens a TcpConnect flow; the seam delivers it; the owner admits, reads, connects, attaches the pair and sends `Paired` |
-//! | `Refuse(a)` | the same, refused at admission with `Refused(Capacity)`: the flow is closed, nothing else changes |
+//! | `Refuse(a)` | the same stimulus; the model expects `Refused(Capacity)`: the flow is closed, nothing else changes. The driver records production's verdict (held or not), so a flow the owner admits instead occupies a place in the projection |
 //! | `HalfClose(s)` | the destination of the place's flow sends its FIN; the forwarder carries it after the last accepted byte |
 //! | `Complete(s)` | the guest half-closes its direction too: the pair completes and queues its record |
 //! | `Abort(s)` | the destination resets: the pair aborts and queues its record |
@@ -46,8 +46,12 @@
 //! D-12, the named arbiter whose Tier-3 pair is the module suite's
 //! `take_end_returns_records_in_end_order`).
 //! `slot(s).fwd` is model-only (the `clash` ghost); `g` is ghost;
-//! `conf_step` model-only. Sources: the owner is held directly
-//! (`HostSharedGuestNetworkOwner`, QPROJ-3's `flow_observation`); the
+//! `conf_step` model-only.
+//!
+//! Every named run of `quota_conf` is pinned with a `#[quint_test]`, the two
+//! M-1 queue-order runs (`EndRecordsAreReadInQueueOrder`,
+//! `EndRecordsAreReleasedInQueueOrder`) included. Sources: the owner is held
+//! directly (`HostSharedGuestNetworkOwner`, QPROJ-3's `flow_observation`); the
 //! forwarder facts are `SimFlowForwarder`'s, the named arbiter (QPROJ-7 /
 //! QPROJ-8).
 
@@ -265,9 +269,12 @@ impl QuotaDriver {
     }
 
     /// The guest of model allocation `a` opens one TcpConnect flow, which the
-    /// owner admits or refuses; with `expect_admitted` it takes the lowest
-    /// free place (the model's `minFree`).
-    fn open_model_flow(&mut self, a: i64, expect_admitted: bool, action: &'static str) -> Result {
+    /// owner admits or refuses. The driver records production's verdict, not
+    /// the action's expectation: a flow the owner holds after the settle takes
+    /// the lowest free place (the model's `minFree`), a flow it refused takes
+    /// none. A wrongly admitted `Refuse`, or a wrongly refused `Admit`, then
+    /// shows in the projected `slot` and `endq` and diverges from the spec.
+    fn open_model_flow(&mut self, a: i64, action: &'static str) -> Result {
         let lease = self
             .leases
             .get(&a)
@@ -277,10 +284,15 @@ impl QuotaDriver {
         let destination = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 30), 443);
         let (key, flow) = self.composition().open_tcp_flow(&lease, seq, destination, port);
         self.rt.block_on(self.composition().settle());
-        if expect_admitted {
+        let observed = self.rt.block_on(self.owner.flow_observation());
+        let admitted = observed.cids.values().any(|cid| cid.guest_flows.contains_key(&key));
+        if admitted {
             let place =
                 SLOTS.iter().copied().find(|s| !self.places.contains_key(s)).ok_or_else(|| {
-                    not_playable(action, "no free place in the driver's bijection")
+                    not_playable(
+                        action,
+                        "the owner admitted a flow with no free place in the driver's bijection",
+                    )
                 })?;
             self.places.insert(place, PlaceFlow { key, flow });
         }
@@ -414,8 +426,8 @@ impl Driver for QuotaDriver {
     fn step(&mut self, step: &Step) -> Result {
         switch!(step {
             init => self.init()?,
-            Admit(a: i64) => self.open_model_flow(a, true, "Admit")?,
-            Refuse(a: i64) => self.open_model_flow(a, false, "Refuse")?,
+            Admit(a: i64) => self.open_model_flow(a, "Admit")?,
+            Refuse(a: i64) => self.open_model_flow(a, "Refuse")?,
             HalfClose(s: i64) => self.half_close(s)?,
             Complete(s: i64) => self.complete(s)?,
             Abort(s: i64) => self.abort(s)?,
@@ -489,6 +501,40 @@ fn quint_flow_quota_completed_pair_releases_the_slot_at_its_end_record() -> impl
 )]
 #[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_flow_quota_abort_of_half_closed_flow_releases_the_slot_at_its_end_record() -> impl Driver {
+    QuotaDriver::new()
+}
+
+/// Named run `EndRecordsAreReadInQueueOrder` (`quota_conf`; M-1): two pairs
+/// end, place 2's first; the projected `endq` is `[2, 1]` (the order
+/// `take_end` reads the context's records). The run's closing
+/// `ReadEnd(1)` is not enabled in the model (`.fail()`), so the replayed
+/// trace ends at the second `Abort`; the queue order itself is the compared
+/// fact.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/flow_quota.qnt",
+    main = "quota_conf",
+    max_samples = 1,
+    test = "EndRecordsAreReadInQueueOrder"
+)]
+#[ignore = "pending DELIVER attachment-cut step (7)"]
+fn quint_flow_quota_end_records_are_read_in_queue_order() -> impl Driver {
+    QuotaDriver::new()
+}
+
+/// Named run `EndRecordsAreReleasedInQueueOrder` (`quota_conf`; M-1): two
+/// pairs end, place 2's first; the owner's first read releases place 2 and
+/// leaves place 1 ended with its record queued, the second releases place 1
+/// (`read_end` fails the step if the released record is not the head's).
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/guest-flow-owner/flow_quota.qnt",
+    main = "quota_conf",
+    max_samples = 1,
+    test = "EndRecordsAreReleasedInQueueOrder"
+)]
+#[ignore = "pending DELIVER attachment-cut step (7)"]
+fn quint_flow_quota_end_records_are_released_in_queue_order() -> impl Driver {
     QuotaDriver::new()
 }
 

@@ -29,9 +29,7 @@ State 1: <Initial predicate>
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -47,9 +45,7 @@ State 1: <Initial predicate>
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -129,13 +125,12 @@ State 1: <Initial predicate>
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
 
-State 2: <pair_bugReleaseKeepsPairs_fwd_pair_Attach line 3970, col 3 to line 3980, col 78 of module pair_bugReleaseKeepsPairs>
+State 2: <pair_bugReleaseKeepsPairs_fwd_pair_Attach line 3617, col 3 to line 3627, col 78 of module pair_bugReleaseKeepsPairs>
 /\ pair_bugReleaseKeepsPairs_fwd_pair_gen = [g |-> 0, h |-> 0]
 /\ pair_bugReleaseKeepsPairs_fwd_pair_vmUp = TRUE
 /\ pair_bugReleaseKeepsPairs_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
@@ -166,9 +161,7 @@ State 2: <pair_bugReleaseKeepsPairs_fwd_pair_Attach line 3970, col 3 to line 398
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -184,9 +177,7 @@ State 2: <pair_bugReleaseKeepsPairs_fwd_pair_Attach line 3970, col 3 to line 398
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -266,13 +257,12 @@ State 2: <pair_bugReleaseKeepsPairs_fwd_pair_Attach line 3970, col 3 to line 398
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
 
-State 3: <pair_bugReleaseKeepsPairs_fwd_pair_CtxRelease line 3373, col 3 to line 3426, col 53 of module pair_bugReleaseKeepsPairs>
+State 3: <pair_bugReleaseKeepsPairs_fwd_pair_CtxRelease line 2976, col 3 to line 3029, col 53 of module pair_bugReleaseKeepsPairs>
 /\ pair_bugReleaseKeepsPairs_fwd_pair_gen = [g |-> 0, h |-> 0]
 /\ pair_bugReleaseKeepsPairs_fwd_pair_vmUp = TRUE
 /\ pair_bugReleaseKeepsPairs_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
@@ -303,9 +293,7 @@ State 3: <pair_bugReleaseKeepsPairs_fwd_pair_CtxRelease line 3373, col 3 to line
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -321,9 +309,7 @@ State 3: <pair_bugReleaseKeepsPairs_fwd_pair_CtxRelease line 3373, col 3 to line
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -403,7 +389,6 @@ State 3: <pair_bugReleaseKeepsPairs_fwd_pair_CtxRelease line 3373, col 3 to line
   faults |-> 1,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> TRUE,

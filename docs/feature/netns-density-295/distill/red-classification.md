@@ -1,8 +1,8 @@
 # Pre-DELIVER fail-for-the-right-reason classification — netns-density-295 (EVMOD)
 
-DISTILL round-13 integration pass of 2026-10-20 over the approved EVMOD design
-(with the round-11 to round-13 DESIGN edits: NO-OVERRIDE-SEAMS full scope,
-STORES-IN, PORTS-CONFIG, GUEST-PORTS, FWD-PREREQ, PROBE-ROOT-ENV) (feature-delta
+DISTILL integration pass of 2026-10-21 over the approved EVMOD design
+(with the NO-OVERRIDE-SEAMS full scope, STORES-IN, PORTS-CONFIG, GUEST-PORTS,
+FWD-PREREQ and PROBE-ROOT-ENV edits) (feature-delta
 § *[REF] Interface contracts*, the EVMOD section, § *Restart decision*
 (RESTART-SSOT), Lifecycle Gate Ownership, Required boundary scenarios,
 Formal protocol model) and `specs/quint/{guest-flow-owner,probe-count}/`.
@@ -11,33 +11,21 @@ for the semantic reason recorded here (a RED scaffold of the step's own
 production surface, or the assertion that pins the defect the step fixes),
 never for an import, fixture or setup error.
 
-## Runs
+## Latest integration pass
 
-Round-13 integration pass, 2026-10-20. Lima (Linux `7.0.0-34-generic`,
-aarch64) unless named. The pass applied the round-13 shared edits to every
-call site the scaffolds left broken (the five-argument
-`GuestTransportAssignment::new` with the owner's `GuestFlowPorts`,
-`BeaconIntake::bind(io, port)`, `GuestFlowOwnerPorts` /
-`GuestNetworkCompositionPorts` `stream_port` / `control_port`,
-`SharedGuestNetworkOwner::flow_ports`, the guest `GuestTransportToken.ports`,
-`run_server_with_obs_and_driver(config, boot, ..)` over `BootAdapters`,
-`compose_vm_driver` over `VmAdapters`) — no new production surface
-(`upstream-issues.md` S-17).
+Lima (Linux `7.0.0-38-generic` aarch64) unless named; Quint record
+`114403-1792606203.594` (279 checks). No new production surface.
 
 | Command | Result |
 |---|---|
-| `cargo xtask lima run -- cargo check --keep-going --workspace --all-targets --features integration-tests` | clean |
-| `… --features integration-tests,kvm-tests` | clean |
-| `… cargo clippy --workspace --all-targets --features integration-tests,kvm-tests -- -D warnings` | clean; also clean with `integration-tests` alone and without features; the host `xtask` build is warning-free |
-| `cargo fmt --all --check` | clean |
-| `cargo xtask conformance-lint` | clean (0 violations) |
-| default lane `… nextest run -p overdrive-{core,sim,control-plane,worker,init,cli,host,dataplane,testing,fwd,reconcilers} -p xtask --no-fail-fast` | 2,695 run: 2,654 passed, 41 failed, 727 skipped — every failure the FWD-PREREQ lane precondition (§ *FWD-PREREQ in the default lane*); measured before the three beacon bind cells were re-activated (they pass, below) |
-| one `#[quint_test]` per driver (11) plus `cid_lease` `PoolExhaustedRestartCleansThePredecessorThenPlaces`, `--features integration-tests --run-ignored only` | 12 run, 12 fail, each at a production RED scaffold (table below) |
-| `cargo xtask metal run -- bash -c 'OVERDRIVE_BPF_NATIVE=1 cargo xtask bpf-build; cargo xtask guest-kit-prepare; cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests --run-ignored only --no-fail-fast -E "…vsock_walking_skeleton:: \| vsock_density:: \| vsock_fault_matrix::"'` (canonical lease, released on exit; metal `7.0.0-38-generic` x86_64) | `bpf-build` ok; `guest-kit-prepare` fails at `cargo xtask kmod-build` ("unrecognized subcommand", step 4); the 8 cells each stop at the precondition (§ *Walking skeleton on metal*) |
-
-Not re-run this pass: the round-9 S-1 boot-refusal cells and the round-9
-cells (their subjects did not change; § *S-1*, § *Round-9 cells* record the
-round-9 run).
+| `cargo xtask lima run -- cargo check --workspace --all-targets` with `integration-tests`, and with `integration-tests,kvm-tests` | clean |
+| `… cargo clippy --workspace --all-targets … -- -D warnings` with no features, `integration-tests`, and `integration-tests,kvm-tests` | clean |
+| `cargo fmt --all --check`; `cargo xtask conformance-lint`; `cargo xtask quint verify-evidence` | clean; exit 0 (0 violations); 2 subsystems verified (`guest-flow-owner`, `probe-count`) |
+| `xtask` (all tests, `integration-tests`: 325 of 325; 276 of 276 without the feature); `kmod_load` | pass: the decision core over a scripted kernel (any `EBUSY` on a live module is busy/retry) |
+| `acceptance::dst_lint_banned_apis::dst_lint_exits_zero_on_the_real_overdrive_workspace` (DWD-09) | passes: no `--disk` or `--vsock` literal remains in `overdrive-testing/src` (the guest kit launches through `CloudHypervisorVmm`, U-4) |
+| default lane `… nextest run --no-fail-fast -p overdrive-{control-plane,fwd,host,init,sim,testing,cli}` | 1,210 run: 1,169 passed, 41 failed, 476 skipped; `overdrive-cli` has no failure. All 41 are the FWD-PREREQ precondition in `overdrive-control-plane` (3 `acceptance` + 38 `integration`), each `forwarder_module.rs:225` "lane prerequisite missing: no ovd_fwd.ko built from this workspace"; no other failure (§ *FWD-PREREQ in the default lane*) |
+| one `#[quint_test]` per driver, `--features integration-tests --run-ignored only` (12: CP `owner_flows`, `fwd_pair`, `flow_quota`, `udp_slots`, `quiescence`, `probe_count`, `cid_lease` x2 (`AssignThenVmmOpensItsOwnDevice`, `PoolExhaustedRestartCleansThePredecessorThenPlaces`); worker `flows_beacon`; init `owner_flows`, `fwd_pair`, `udp_slots`) | 12 run, 12 fail, each at the RED scaffold of the § *Driver activation* table (`net.rs:41`, `guest_transport/mod.rs:66/343/369`, `flow_owner.rs:130/540`, `owner_acceptance/support.rs:236`, `action_shim/mod.rs:1488`, `vm_driver.rs:1034`); the `flow_quota` driver (`open_model_flow` records production's verdict) fails at `support.rs:236` before its first `open_model_flow` |
+| metal (`cargo xtask metal run --`, `7.0.0-38-generic` x86_64) | 76 cells run, 0 pass, each at its precondition or its RED scaffold (§ *Walking skeleton on metal*); the guest kit also needs `GuestCid::new` (step 2) and the leased-CID launch argument (step 3) once `guest-kit-prepare` works |
 
 ### FWD-PREREQ in the default lane
 
@@ -46,36 +34,16 @@ compile into the default lane (`overdrive-sim` depends on the crate with
 `integration-tests`). Their composed `serve` fixtures call
 `overdrive_testing::forwarder_module::expect_forwarder_module` first, which
 refuses "lane prerequisite missing: no ovd_fwd.ko built from this workspace
-at …/target/kmod/7.0.0-34-generic/ovd_fwd.ko" until DELIVER step 4 lands
-`cargo xtask kmod-build`. The 41 failures (all of `job_stop_*` (3),
+at …/target/kmod/7.0.0-38-generic/ovd_fwd.ko" until DELIVER step K lands
+`cargo xtask kmod-build`. The 41 default-lane failures are all in
+`overdrive-control-plane`; `overdrive-cli` has none in the default lane. The 41 failures (all of `job_stop_*` (3),
 `backend_discovery_bridge::boot_composition` (8),
 `built_in_ca_operator_composition::serve_persistent_ca` (7),
 `concurrent_submit_toctou` (2), `describe_round_trip` (6),
 `idempotent_resubmit` (5), `server_lifecycle` (5), `submit_round_trip` (5))
-are this refusal and nothing else; they passed in round 10. This is a
+are this refusal and nothing else. This is a
 precondition, not a semantic RED; routed to the user (`upstream-issues.md`
 U-3).
-
-### E-2 (seven worker real-cgroup tests) — diagnosed and fixed (earlier pass)
-
-Hypothesis: the seven tests need `overdrive.slice` to delegate
-`+cpu +memory +io +pids`, which only the control plane's boot cgroup
-bootstrap writes (ADR-0028); on a node where no `serve` has booted (a
-recreated VM) `workloads.slice/cgroup.subtree_control` refuses
-`+cpu …` with `ENOENT`. Prediction: with `overdrive.slice` removed, exactly
-those seven fail with `WriteFailed { NotFound }`; with the delegation
-written they pass. Observed: removing `overdrive.slice` reproduced the seven
-failures (`cpu_weight_out_of_range_returns_einval`, `writing_pid_to_cgroup_procs_moves_the_process_into_scope`,
-`cgroup_events_appears_at_mkdir_time`, `write_to_readonly_cgroup_events_propagates_real_eacces`,
-`cgroup_kill_terminates_every_pid_within_two_seconds`,
-`empty_scope_rmdir_succeeds_kernel_reaps_pseudo_files`,
-`no_internal_process_rule_returns_ebusy_dispatches_to_typed_variant`);
-the earlier green runs had a prior `serve` boot's delegation on the node. The
-VM's provisioning and delegation are correct; the tests lacked their
-precondition. Fix (test support): `cgroup_cleanup::delegate_overdrive_slice`
-establishes the delegation `serve` would have written, called before each
-`create_workloads_slice_with_controllers`; with `overdrive.slice` removed
-again the whole worker integration binary passes (160).
 
 ## Driver activation (one named run each)
 
@@ -105,8 +73,7 @@ production RED, not a fixture error; once step 2 lands each reaches
 `GuestFlowOwner`'s step-5 scaffolds (steps are ordered, step 2 first). The
 `cid_lease` run `PoolExhaustedRestartCleansThePredecessorThenPlaces` targets
 the declared main `lease_conf_three` (D-18 closed) and carries the
-`attachment-cut step (15)` marker like the rest of the driver; the round-13
-integration pass ran it (row above). Every driver step that fails before its
+`attachment-cut step (15)` marker like the rest of the driver. Every driver step that fails before its
 own pending step is a scaffold of an earlier step (2, (6)), so each turns
 into the driver's own step's RED as the steps land in order.
 
@@ -131,25 +98,25 @@ Job stream keeps today's value until step 0 (`streaming.rs`, a
 
 ## Walking skeleton on metal
 
-`vsock_walking_skeleton::a_vm_workload_round_trips_tcp_and_udp_through_serve_and_deploy`
-(pending step 10-01), the two `vsock_density` cells (08-04) and the five
-`vsock_fault_matrix` cells (10-02). The lane setup `cargo xtask
-guest-kit-prepare` builds `ovd_fwd.ko` with `cargo xtask kmod-build`
-(EVMOD-BUILD, step 4), which does not exist before step 4; the fixture
-checks for the artefact and refuses. Result of the metal run
-(`cargo xtask metal run`, the canonical lease `/run/lock/overdrive-metal-shared.lock`,
-released on exit; host kernel `7.0.0-38-generic` x86_64; BPF object rebuilt
-with `OVERDRIVE_BPF_NATIVE=1 cargo xtask bpf-build`): `guest-kit-prepare`
-exits 1 at the `kmod-build` step; every cell compiles, runs and fails at
-`vsock_support.rs:84` (round 13; `:85` in round 9), "precondition: the guest kit provisions (kernel,
-ovd_fwd.ko, guest programs): LaneNotPrepared { artifact: \"ovd_fwd.ko for
-kernel 7.0.0-38-generic\", path: \"…/target/kmod/7.0.0-38-generic/ovd_fwd.ko\" }"
-— as predicted (round 9: 8 run, 0 passed, 8 failed, 15 s; round 13: the
-same, 15 s, `guest-kit-prepare` failing on "unrecognized subcommand
-'kmod-build'"). This is the step-4
-dependency, not the cells' own RED; DELIVER step 4's PREPARE re-runs these
-cells after `guest-kit-prepare` to confirm they then reach the
-attachment-cut scaffolds.
+Metal `7.0.0-38-generic` x86_64, 76 cells, run through `cargo xtask metal run`
+(canonical lease `/run/lock/overdrive-metal-shared.lock`, released on exit;
+BPF object rebuilt with `OVERDRIVE_BPF_NATIVE=1 cargo xtask bpf-build`).
+`cargo xtask guest-kit-prepare` fails at `kmod-build` ("unrecognized
+subcommand", step K). The walking skeleton, both density cells and the five
+fault-matrix cells stop at `vsock_support.rs:84` (`LaneNotPrepared`,
+`ovd_fwd.ko` for the host kernel); the five `guest_flow_through_serve` cells
+(two D-17, three U-D17-DIAL) at `guest_flow_through_serve.rs:107` (the same
+precondition); the four `overdrive-fwd` `unload` cells at `unload.rs:128`
+(FWD-PREREQ); the two `unload_in_guest` host cases and the eleven
+`in_guest_lane` cases (six D-22) at `LaneNotPrepared`; the two in-guest
+`unload_in_guest::in_guest_*` cells refuse at `unload_in_guest.rs:74` ("not
+inside a scripted guest-kit guest" — they fail closed on a host by design);
+the `attach_watch` (20), `datagram` (15) and `paused_and_stall` (9) cells at
+`KernelFlowForwarder::open`'s RED scaffold (`overdrive-fwd/src/lib.rs:84`,
+step 4), one `datagram` cell first at the wire codec's scaffold
+(`guest_transport/wire.rs:505`, step 2). This is the step-K dependency, not
+the cells' own RED; DELIVER step K's PREPARE re-runs these cells after
+`guest-kit-prepare` to confirm they then reach the attachment-cut scaffolds.
 
 ## S-1 — boot-refusal cells against the no-effect stubs
 
@@ -166,37 +133,38 @@ green by accident:
 | `probe_startup_refuses_a_node_address_iff_one_lies_inside_the_guest_prefix` (proptest), `a_node_address_inside_the_prefix_refuses_before_any_boot_effect`, `a_node_that_overlaps_the_prefix_by_address_and_by_vip_range_names_the_vip_range` | stop first at `InterfaceIndex::new` (`net.rs:53`, step 2); after step 2 they reach the stub (the proptest draws half its addresses inside the prefix) |
 | `node_addresses_outside_the_prefix_pass_probe_startup_without_effect` | stops at `InterfaceIndex::new` (step 2); it is a pass case, so after step 2 it is GREEN against the stub — not evidence until step 13 lands the checks |
 
-## Round-9 cells
+## Cells pending their steps
 
 | Cell | RED at |
 |---|---|
 | `owner_acceptance::legs_dial` (4: authenticated dial and teardown release, no dial on a refused client, `GuestDial { NotServing }` closes leg C, no owner dial outside the prefix) — attachment-cut (9) | `net.rs:41` (`ListenPort::new`, step 2) in the lease set-up, then the owner and enforcement scaffolds |
 | `overdrive-worker` `vsock_leg_f_repair::leg_f_repair_rebinds_transparent_listener` (Tier 3, root) — 10-02 | `mtls_intercept_worker.rs:3133` (`leg_f_addr`, step 8) |
 | `prefix_boot_acceptance::phase_one_probes_the_forwarder_on_a_context_it_releases_and_refuses_a_bad_one` — (09-01 rework) | its refusal assertion against the phase-1 stub (§ *S-1*) |
-| `shared_network_recovery_acceptance::a_forwarder_that_fails_its_boot_probe_refuses_boot_before_any_effect` (G-V1 through the composed rig's phase 1, which now calls `run_server`'s own boot-step-1 function and its `health.startup.refused`) — (09-01 rework) | "NotPermanent: the boot refuses with the forwarder's typed cause, got Ok(())" |
+| `shared_network_recovery_acceptance::a_forwarder_that_fails_its_boot_probe_refuses_boot_before_any_effect` (G-V1 through the composed rig's phase 1, which now calls `run_server`'s own boot-step-1 function and its `health.startup.refused`) — (09-01 rework) | "AbiMismatch: the boot refuses with the forwarder's typed cause, got Ok(())" (the first scripted failure) |
 | `shared_network_recovery_acceptance::a_boot_opens_and_probes_the_forwarder_before_any_listener_or_route` — (09-01 rework) | "the forwarder opened" (`converge_shared` is a no-effect stub, S-1) |
 | `overdrive-fwd` `end_record_abi::take_end_returns_records_in_end_order` (abort and clean-close paths) — step 4 | not run (needs `ovd_fwd`, step 4); `KernelFlowForwarder::open` is its first scaffold |
 | `vsock_density` R5-25 fail-closed oracle (S-10); `vsock_fault_matrix` R5-62 plateau polling | the metal precondition above |
 
 ## Semantic RED by marker
 
-Counts are `#[ignore = "pending …"]` markers in the tree after the round-13 integration pass (2026-10-20).
+Counts are `#[ignore = "pending …"]` attributes in the tree on 2026-10-21 (1,061 in all).
 
 | Marker (count) | RED reason when activated |
 |---|---|
 | `step 0` (8) | RESTART-SSOT, above |
 | `step 1` (3) | the fork without RESET-EXIT: a guest PID-1 crash or triple fault reboots in place |
-| `step 2` (118, including the "GuestCid / LaunchToken newtypes" and "core types and wire codec" groups) | the core forwarder / wire / dial / guest-transport scaffolds; the two deploy-ingress checks (`ListenerPortReserved`, `ProbeCountExceeded`) are not wired |
+| `step 2` (119, including the "GuestCid / LaunchToken newtypes" and "core types and wire codec" groups) | the core forwarder / wire / dial / guest-transport scaffolds; the two deploy-ingress checks (`ListenerPortReserved`, `ProbeCountExceeded`) are not wired |
 | `step 3` (8) | the VMM launch arguments with the leased CID |
-| `step 4` (120) | `KernelFlowForwarder` (every `overdrive-fwd` case, `open` first; the `guest_boundary` kvm cells) and `SimFlowForwarder` / `SimSocket` |
-| `step 5` (175) | the guest owner, transport setup and `KernelRelease` scaffolds; the guest drivers; the in-guest lane cells |
+| `step 4` (131) | `KernelFlowForwarder` (every `overdrive-fwd` case, `open` first; the `guest_boundary` kvm cells) and `SimFlowForwarder` / `SimSocket` |
+| `step 5` (187) | the guest owner, transport setup and `KernelRelease` scaffolds; the guest drivers; the in-guest lane cells |
 | `step 8` (13), `step 11` (7), `step 12` (20), `step 13` (15), `step 14` (13) | the mTLS registration, VIP placement, firewall single cut, guest-prefix boot checks and host-internal deny set scaffolds |
 | `step 9` (35) | the probe-run counting and VM probe runner dial |
-| `step 10-01` (1), `step 10-02` (6, the leg-F repair cell included), `step 08-04` (2) | the vsock serve + deploy lanes on metal (precondition until step 4, above; then the attachment cut) |
-| `attachment-cut step (3)`, `(5)`, `(6)`, `(7)`, `(8)`, `(9)`, `(15)` (4, 3, 63, 164, 3, 48, 68) | the owner flows, the beacon relocation and the bound-port listeners (PORTS-CONFIG: `NodeVsockPortConfig::new` validation, `flow_ports`, `BeaconIntake::bound_port` on the kernel command line, `serve_kernel_assigned_vsock_ports`), the host dial and LEGS-DIAL relay, the pool and reclamation scaffolds; the R5-59 (a) accept-path cells (`(6)` beacon seam, `(7)` flow seam) |
+| `step 10-01` (6), `step 10-02` (6, the leg-F repair cell included), `step 08-04` (2) | the vsock serve + deploy lanes on metal (precondition until step 4, above; then the attachment cut) |
+| `attachment-cut step (3)`, `(5)`, `(6)`, `(7)`, `(8)`, `(9)`, `(15)` (4, 3, 63, 166, 3, 48, 68) | the owner flows, the beacon relocation and the bound-port listeners (PORTS-CONFIG: `NodeVsockPortConfig::new` validation, `flow_ports`, `BeaconIntake::bound_port` on the kernel command line, `serve_kernel_assigned_vsock_ports`), the host dial and LEGS-DIAL relay, the pool and reclamation scaffolds; the R5-59 (a) accept-path cells (`(6)` beacon seam, `(7)` flow seam) |
 | `attachment-cut step (09-01 rework)` (27), `(06-04 rework)` (6) | the supervisor's QHOLD recovery and the activation gate |
 | `attachment-cut step (DG-2 …)` (55 + 1 + 14 + 13 + 4 + 3 + 2 + 1) | a VM start leasing the guest transport and taking READY from the node beacon intake; the guest lane leasing the transport; the IpRules recovery |
 | `step 10-03` (1), `step 09-01` (1) | carried composition cells |
+| `step K` (1) | V-EV-UNLOAD's context half (`unload.rs`): the module skeleton and its references do not exist before step K |
 | `#325` (1) | `RedeployLeasedAtServeCrashIsPlacedAgain` on `lease_conf_325` (GH #325 is not fixed in #295) |
 
 Expected GREEN on activation (classify as such, not RED): the four
@@ -205,9 +173,7 @@ Expected GREEN on activation (classify as such, not RED): the four
 `vsock_beacon_intake::{binding_the_intake_binds_the_beacon_listener,
 a_bind_failure_is_typed_and_binds_nothing, the_bind_refusal_renders_its_pinned_message}`
 are live in the default lane (their subject, `BeaconIntake::bind(io, port)`
-and `bound_port`, is complete): the round-13 cells partition had marked all
-three `pending DELIVER attachment-cut step (6): PORTS-CONFIG bind(port)`;
-run activated they pass, so this pass removed the markers (3 run, 3 passed).
+and `bound_port`, is complete) and pass.
 The other `vsock_beacon_intake` cells RED at `LaunchToken` / `GuestCid`
 (step 2), then `VmDriver::beacon_observation`. `e10_vm_early_exit_spike` and
 `vm_finalize_failed_ownership_spike` (`(15)`) get past `BeaconIntake::bind`
@@ -250,16 +216,18 @@ row 8, the 09-01 rework`), all driving a VM attachment:
 - `overdrive-cli/tests/integration/vm_walking_skeleton.rs`: `vm_workload_runs_to_completion_and_exit_code_reaches_operator`, `vm_non_zero_guest_exit_code_is_reported_not_the_hypervisors`, `vm_guest_that_never_starts_is_never_reported_running`, `vm_workload_deploys_through_the_same_verb_as_a_process_workload`, `vm_platform_contains_the_hypervisor_it_started`, `every_cloud_hypervisor_thread_carries_the_launch_filter_under_its_own_filters`, `vm_deadline_arm_leaks_nothing`, `vm_guest_exit_report_is_never_overwritten_by_vmm_teardown_exit`, `vm_absent_boots_node_with_no_vm_entry_and_classifies_deploy_naming_capability`, `vm_that_exceeds_declared_memory_is_diagnosed_as_oom_not_bare_signal_9`, `two_vm_jobs_on_one_serve_each_boot_from_the_rootfs_their_own_spec_named`
 - `overdrive-cli/tests/integration/vm_boot_failure_vocabulary.rs`: `missing_configured_rootfs_is_named_precisely_and_leaks_no_vm_resources`, `kernel_deleted_after_composition_is_named_precisely_and_spawns_no_hypervisor`, `hypervisor_removed_after_composition_names_every_searched_path`, `guest_that_never_beacons_reports_the_boot_deadline_and_console_tail`, `kernel_replaced_with_an_incompatible_image_reads_as_a_format_problem`, `unmapped_start_failure_reads_as_unclassified_and_preserves_its_verbatim_cause`, `job_plus_vm_spec_is_accepted_and_its_allocation_reaches_running`, `absent_vm_capability_names_what_is_missing_not_an_internal_platform_error`, `unservable_rootfs_directory_names_the_directory_and_the_clone_requirement`
 
-## Round-16 cells pass (not run: no `cargo` this round)
-
-Authored, classification pending the integration run:
+## Kmod, kit-lane and in-guest cells
 
 | Cell | Expected classification | Reason |
 |---|---|---|
-| `xtask::kmod_load::tests::*` (14) | GREEN | pure decision core over a scripted kernel |
-| `overdrive_testing::forwarder_module::tests::*` | GREEN | D-20 `version` parsing and verdict |
+| `xtask::kmod_load::tests::*` | GREEN | the decision core over a scripted kernel (any `EBUSY` on a live module is busy/retry) |
+| `overdrive_testing::forwarder_module::tests::*` (5) | GREEN | D-20 `version` parsing and verdict |
 | `required_serve_ports_source_scan::the_file_wide_construction_rule_sees_helpers_unit_structs_and_defaults` | GREEN | planted sources |
-| `required_serve_ports_source_scan::no_optional_switch_gates_protection_dns_or_supervisor_composition` | GREEN expected; any report names a host construction left in `src/lib.rs` | the file-wide rule's real-tree run |
-| `overdrive-fwd` `unload::*` (2) | RED `MISSING_FUNCTIONALITY` (`pending DELIVER step K` / `step 4`) | the module skeleton and its references do not exist |
-| `guest_flow_through_serve::*` (2) | RED at `ServerHandle::guest_flow_observation`'s scaffold panic (`pending DELIVER step 10-01`) | the accessor is a RED scaffold |
-| `vsock_host_internal_enforce` F-3, F-5, link-local | unchanged (`pending DELIVER step 14`) | controls added before the absence checks |
+| `required_serve_ports_source_scan::no_optional_switch_gates_protection_dns_or_supervisor_composition` | GREEN (the real tree holds no host construction in `src/lib.rs`) | the file-wide rule's real-tree run |
+| `overdrive-fwd` `unload::*` | precondition (FWD-PREREQ, until step K); then RED `MISSING_FUNCTIONALITY` (`pending DELIVER step K` / `step 4`) | the module skeleton and its references do not exist |
+| `overdrive-fwd` `paused_and_stall`, `datagram`, `attach_watch` | RED at `KernelFlowForwarder::open`'s scaffold (`pending DELIVER step 4`) | the adapter and module contract land in step 4 |
+| `overdrive-fwd` `unload_in_guest::*` (2 host) | precondition (`LaneNotPrepared` until step K, then the in-guest cell's `KernelFlowForwarder::open` scaffold, step 4); the stress case's oracles are no oops and the refcount on the stock 7.0 kernel; the ULP control polls each transition (`wait_refcnt`) and holds over `ULP_HOLD_WINDOW` only after its positive half, the stress's far ends are non-blocking | in-guest cells of the `integration` binary, staged by `guest-kit-prepare` |
+| `overdrive-init` `in_guest_lane` D-22 cases (6) | precondition (`LaneNotPrepared` until step K), then the in-guest owner cell's first scaffold (`GuestFlowOwner` construction / `dispatch_next`, `pending DELIVER step 5`); the aborted-flow checks run only after the owner has processed the aborted V_g (`serve_control_flow_after_abort`) and the R5-28 guest-accepted cell pins `consumed_ends` | the production guest owner lands in step 5 |
+| `guest_flow_through_serve::*` (D-17 and U-D17-DIAL) | precondition on metal until step K, then RED at `ServerHandle::guest_flow_observation`'s scaffold (`pending DELIVER step 10-01`) | the accessor is a RED scaffold |
+| `overdrive-testing` `guest_kit::GuestKit::boot` (U-4 (a)) | compiles against the production `CloudHypervisorVmm`; on metal each kit cell stops at `LaneNotPrepared` until step K, then at `GuestCid::new` (step 2, `cid_bands` and the kit's launch) and the leased-CID launch argument (step 3) | the kit launches through `Vmm::create`; the production launch scaffolds land in steps 2 and 3 |
+| `vsock_host_internal_enforce` F-3, F-5, link-local | `pending DELIVER step 14` | controls precede the absence checks |

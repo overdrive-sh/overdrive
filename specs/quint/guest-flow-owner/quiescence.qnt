@@ -58,12 +58,9 @@
  * OFF names design rules switched off (hazard/quiescence_hazards.qnt):
  *   boolLatch       QHOLD: a boolean latch — any restore reopens and ends every hold
  *   dropDecrements  QHOLD: a dropped hold releases the count (the guard's Drop decrements, besides counting the leak)
- *   repairNoHold    a recovery repairs without holding quiescence
- *   redoNoCount     UP-7: a failed post-repair audit is not a failed attempt
  *   leakIgnored     ADR-0124 (D-UP-3): the supervisor does not consult the leaked-hold count (only a spent attempt
  *                   budget fail-stops), so a leaked hold keeps forwarding quiesced for good
  *   bootContinues   ADR-0184: boot continues with serve running after a failed table write
- *   restoreClearsLatch QHOLD: a restore reopens admission (clears the latch) whatever the remaining count
  *   quiesceSkipsFlows  QHOLD: the first hold latches admission but does not abort the open flows
  *   foreignDecrements  D-UP-4: a restore with a foreign hold is redeemed as if it were the owner's own (the count is
  *                   decremented and admission reopens at zero)
@@ -90,7 +87,6 @@ module quiescence_conf {
     | RecRestore({ c: str })
     | LeakHold
     | FailStop({ c: str })
-    | RecRepairNoHold({ c: str })
     | ForeignRestore
 }
 
@@ -113,7 +109,6 @@ module quiescence {
 
   type Ghost = {
     reopenEarly: bool,   // forwarding reopened while some recovery had not repaired
-    repairNoHold: bool,  // a repair ran without its recovery's hold
     overlapped: bool,    // two holds held at once (witness)
     stillQuiesced: bool, // a restore left the count above zero (witness)
     failStopped: bool,   // serve fail-stopped (witness)
@@ -121,7 +116,7 @@ module quiescence {
     refusedBoot: bool,   // a boot attempt was refused (witness)
     foreignChanged: bool, // D-UP-4: a restore with a foreign hold changed the count, the latch or the leaked count
   }
-  val g0: Ghost = { reopenEarly: false, repairNoHold: false, overlapped: false, stillQuiesced: false,
+  val g0: Ghost = { reopenEarly: false, overlapped: false, stillQuiesced: false,
                     failStopped: false, dropped: false, refusedBoot: false,
                     foreignChanged: false }
 
@@ -240,7 +235,7 @@ module quiescence {
   // ------------------------------------------------------------------ recovery of component c
   // the audit finds c damaged → quiesce_forwarding(): count + 1; the first hold latches admission and aborts the flows
   action RecQuiesce(c: str): bool = all {
-    up, rec.get(c) == "idle", dmg.get(c), not(bug("repairNoHold")),
+    up, rec.get(c) == "idle", dmg.get(c),
     cnt' = cnt + 1, latch' = true, rec' = rec.set(c, "held"), att' = att, leaked' = leaked, foreign' = foreign,
     flowsOpen' = if (cnt == 0 and not(bug("quiesceSkipsFlows"))) 0 else flowsOpen, keepEnv,
     g' = { ...g, overlapped: g.overlapped or cnt > 0 },
@@ -267,7 +262,7 @@ module quiescence {
   action RecRedo(c: str): bool = all {
     up, rec.get(c) == "repaired", dmg.get(c),
     rec' = rec.set(c, "held"),
-    att' = if (bug("redoNoCount")) att else att.set(c, att.get(c) + 1),
+    att' = att.set(c, att.get(c) + 1),
     cnt' = cnt, latch' = latch, flowsOpen' = flowsOpen, leaked' = leaked, foreign' = foreign, keepEnv, g' = g,
     conf_step' = if (REC) variant("RecRedo", { c: c }) else conf_step,
   }
@@ -280,7 +275,7 @@ module quiescence {
     val early = reopens and COMPONENTS.exists(d => d != c and unrepaired(d))
     all {
       cnt' = newCnt,
-      latch' = if (bug("restoreClearsLatch")) false else not(reopens),
+      latch' = not(reopens),
       rec' = if (bug("boolLatch")) COMPONENTS.mapBy(d => if (d == c or rec.get(d) == "held") "idle" else rec.get(d))
              else rec.set(c, "idle"),
       att' = if (bug("boolLatch")) att0 else att.set(c, 0),
@@ -304,17 +299,8 @@ module quiescence {
     g' = { ...g, failStopped: true },
     conf_step' = if (REC) variant("FailStop", { c: c }) else conf_step,
   }
-  // repairNoHold: the recovery repairs without quiescing
-  action RecRepairNoHold(c: str): bool = all {
-    bug("repairNoHold"), up, rec.get(c) == "idle", dmg.get(c),
-    dmg' = dmg.set(c, false), cnt' = cnt, latch' = latch, rec' = rec, att' = att, flowsOpen' = flowsOpen,
-    up' = up, stop' = stop, table' = table, repLeft' = repLeft, leaked' = leaked, foreign' = foreign,
-    g' = { ...g, repairNoHold: true },
-    conf_step' = if (REC) variant("RecRepairNoHold", { c: c }) else conf_step,
-  }
-
   action recStep(c: str): bool = any {
-    RecQuiesce(c), RecRepair(c), RecRedo(c), RecRestore(c), FailStop(c), RecRepairNoHold(c),
+    RecQuiesce(c), RecRepair(c), RecRedo(c), RecRestore(c), FailStop(c),
   }
   action step = {
     nondet c = COMPONENTS.oneOf()
@@ -329,8 +315,6 @@ module quiescence {
   val CountCoversRecoveries: bool = cnt == COMPONENTS.filter(c => holding(c)).size() + leaked
   // NoReopenBeforeRepair (QHOLD): forwarding never reopens while a recovery is between quiesce and repair
   val NoReopenBeforeRepair: bool = not(g.reopenEarly)
-  // no repair runs without that recovery's hold
-  val NoRepairWithoutHold: bool = not(g.repairNoHold)
   // quiescence aborted every flow, and none opens while quiesced
   val QuiescedHoldsNoFlow: bool = latch implies flowsOpen == 0
   // BootRefusedOnTableWriteFailure (ADR-0184): serve runs only with the shared table written
@@ -342,7 +326,7 @@ module quiescence {
   // count, nor the latch, nor the owner's leaked-hold count
   val ForeignRestoreChangesNothing: bool = not(g.foreignChanged)
   val Safety: bool = and {
-    ForeignRestoreChangesNothing, LeakedHoldKeepsForwardingQuiesced, LatchIffCount, CountCoversRecoveries, NoReopenBeforeRepair, NoRepairWithoutHold, QuiescedHoldsNoFlow,
+    ForeignRestoreChangesNothing, LeakedHoldKeepsForwardingQuiesced, LatchIffCount, CountCoversRecoveries, NoReopenBeforeRepair, QuiescedHoldsNoFlow,
     ServeRunsOnlyWithTable,
   }
 
@@ -431,12 +415,6 @@ module quiescence {
     .then(RestartWith(false)).expect(Safety and not(up) and stop == "refused")
     .then(RestartWith(true)).expect(Safety and up and stop == "none" and table)
 
-  // ------------------------------------------------------------------ witnesses (expected violated)
-  val WitnessNoOverlap: bool = not(g.overlapped)
-  val WitnessNoStillQuiesced: bool = not(g.stillQuiesced)
-  val WitnessNoFailStop: bool = not(g.failStopped)
-  val WitnessNoDroppedHold: bool = not(g.dropped)
-  val WitnessNoRefusedBoot: bool = not(g.refusedBoot)
 
   // ------------------------------------------------------------------ liveness (TLC)
   // fairness of component c's own recovery steps only (no fairness for any other recovery, for damage,

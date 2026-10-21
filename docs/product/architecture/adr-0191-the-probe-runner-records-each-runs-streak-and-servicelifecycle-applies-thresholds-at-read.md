@@ -3,11 +3,10 @@
 ## Status
 
 **Accepted — PROBE-RUN-COUNT approved by user 2026-10-13** (user ruling
-"Probe threshold counting (round-2 H-A)"); the threshold rule — the probe
+"Probe threshold counting"); the threshold rule — the probe
 runner records the observed streak, `ServiceLifecycle` applies the threshold
 when it reads the row and acts once per crossing — **approved by user
-2026-10-13** (user ruling "Probe streak at source (replaces
-PROBE-RUN-FLIP)"); the retry of a failed liveness stop (decision 5) — **D-1, option
+2026-10-13** (user ruling "Probe streak at source"); the retry of a failed liveness stop (decision 5) — **D-1, option
 (a), approved by user 2026-10-13** (user decision "D-1 liveness stop
 retry"). GH #295. Recorded in the #295 feature delta,
 `docs/feature/netns-density-295/feature-delta.md` § *[REF] vsock Attachment
@@ -95,11 +94,11 @@ per crossing.**
    starts from one, and a new task exists only for a new allocation, so a
    restart can only delay an action, never cause an early one.
 3. **The row merges by run sequence.** A written row replaces the stored row
-   for its key only if its run sequence is greater. Its observation time no
-   longer decides the merge; it remains the time shown to operators. The
+   for its key only if its run sequence is greater. Its observation time does
+   not decide the merge; it is the time shown to operators. The
    consumer's rule below depends on the stored row being the producer's
    latest: a merge by observation time could, after a backward clock step,
-   keep an older row whose streak is no longer the current one.
+   keep an older row whose streak is not the current one.
 4. **The consumer applies the threshold at read time.** A failure threshold
    is crossed when the latest row is a failure whose streak is at least the
    threshold, and a success threshold when the latest row is a pass whose
@@ -121,7 +120,7 @@ per crossing.**
    startup failure is already announced once per allocation, and readiness
    is a level re-derived at every read; neither needs this memory.
 6. **No new row changes nothing, for every role.** A key with no new row
-   leaves every verdict where it is; readiness no longer resets on a missing
+   leaves every verdict where it is; readiness does not reset on a missing
    row. Such a run is made visible by the not-sampled event (ADR-0192).
 7. **All workload kinds.** The rule applies to every probed workload, not
    only VMs, and to the probes ServiceLifecycle reads today (index 0 of each
@@ -193,10 +192,10 @@ exact threshold rule are in the feature delta.
   § "rkyv schema evolution". A row of the earlier version can only belong to
   an allocation of an earlier `serve` process, which boot reclamation
   reclaims before any probe runs.
-- ServiceLifecycle's view loses the liveness and readiness streaks, the
-  startup attempts and the startup attempts' last-seen observation time, and
-  gains the run sequence at which it last terminated each liveness probe.
-- The durable row now carries the streak an operator view could show; the
+- ServiceLifecycle's view holds no liveness or readiness streak, no startup
+  attempt count and no last-seen observation time; it holds the run sequence
+  at which it last terminated each liveness probe.
+- The durable row carries the streak an operator view could show; the
   API and CLI output are not changed by this decision.
 - A crash restart leaves its predecessor's probe tasks running (GH #318);
   they write under the predecessor's allocation id, a different key, so they

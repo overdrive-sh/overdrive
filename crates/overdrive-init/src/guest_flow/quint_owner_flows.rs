@@ -47,7 +47,7 @@
 //! | `GuestNeverReplies(h)` | stimulus: the guest's dial handling stalls — the seam releases nothing more for `h` |
 //! | `HostRecvPaired(h)`, `HostRecvRefused(h)`, `HostRecvTimedOut(h)`, `HostRecvAbort(h)` | the host consumes the guest's reply from the seam; a reply the guest did not write fails the step |
 //! | `Activate*`, `Release`, `Restore`, `HostAcceptSession`, `HostReadOpen`, `HostAcceptFlow`, `HostReadReqN`, `HostStartConnect`, `HostConnectDiscard`, `Dial{NotServing,Quiesced,NoSession,Unreachable}`, `HostAbortAccept`, `HostDialDeadline`, `DialCancel` | stimulus (host state; the guest observes its effects at the guest actions above) |
-//! | `HostClaimSession`, `HostCheckFlow`, `HostRegisterFlow` | hazard-only — an error, never a no-op |
+//! | `HostClaimSession` | hazard-only — an error, never a no-op |
 //! | `GuestOpenBeacon`, `HostAcceptBeacon`, `HostReadReady`, `DriverStop` | the beacon instance's actions (`flows_beacon_conf`, the VM driver's driver) — never enabled on `flows_conf`; an error |
 //!
 //! Projection (`State::from_driver`): `gf(h).st` ← O QPROJ-5
@@ -662,8 +662,6 @@ impl Driver for OwnerFlowsGuestDriver {
             HostDeadSessionLoss => self.host_aborts_flows(),
             GuestOpenFlow(f: i64) => self.guest_open_flow(f)?,
             HostAcceptFlow => self.settle(),
-            HostCheckFlow => return Err(DriverError::HazardOnly("HostCheckFlow").into()),
-            HostRegisterFlow => return Err(DriverError::HazardOnly("HostRegisterFlow").into()),
             HostReadReqN => self.settle(),
             HostStartConnect => self.settle(),
             HostConnectDone(f: i64) => self.host_connect_done(f),

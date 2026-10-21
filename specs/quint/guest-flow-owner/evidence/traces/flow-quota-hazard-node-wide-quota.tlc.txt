@@ -8,7 +8,7 @@ State 1: <Initial predicate>
   otherAdmitted |-> FALSE ]
 /\ quota_bugNodeWideQuota_flow_quota_conf_step = [init |-> [tag |-> "UNIT"]]
 
-State 2: <quota_bugNodeWideQuota_flow_quota_Admit line 396, col 3 to line 445, col 55 of module quota_bugNodeWideQuota>
+State 2: <quota_bugNodeWideQuota_flow_quota_Admit line 350, col 3 to line 399, col 55 of module quota_bugNodeWideQuota>
 /\ quota_bugNodeWideQuota_flow_quota_slot = << [own |-> 1, st |-> "active", fwd |-> TRUE],
    [own |-> 0, st |-> "free", fwd |-> FALSE] >>
 /\ quota_bugNodeWideQuota_flow_quota_endq = <<>>
@@ -18,7 +18,7 @@ State 2: <quota_bugNodeWideQuota_flow_quota_Admit line 396, col 3 to line 445, c
   otherAdmitted |-> FALSE ]
 /\ quota_bugNodeWideQuota_flow_quota_conf_step = [init |-> [tag |-> "UNIT"]]
 
-State 3: <quota_bugNodeWideQuota_flow_quota_Refuse line 451, col 3 to line 469, col 55 of module quota_bugNodeWideQuota>
+State 3: <quota_bugNodeWideQuota_flow_quota_Refuse line 405, col 3 to line 423, col 55 of module quota_bugNodeWideQuota>
 /\ quota_bugNodeWideQuota_flow_quota_slot = << [own |-> 1, st |-> "active", fwd |-> TRUE],
    [own |-> 0, st |-> "free", fwd |-> FALSE] >>
 /\ quota_bugNodeWideQuota_flow_quota_endq = <<>>

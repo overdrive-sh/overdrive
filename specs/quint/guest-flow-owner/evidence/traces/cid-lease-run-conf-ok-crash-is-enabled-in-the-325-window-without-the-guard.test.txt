@@ -6,18 +6,18 @@
 
   1) lease_conf_ok::cid_lease::CrashIsEnabledInThe325WindowWithoutTheGuard:
        Error [QNT508]: Cannot continue to "expect"
-        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/cid_lease.qnt:803:53
-        803:   run CrashIsEnabledInThe325WindowWithoutTheGuard = init
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/cid_lease.qnt:780:53
+        780:   run CrashIsEnabledInThe325WindowWithoutTheGuard = init
                                                                  ^^^^
-        804:     .then(Assign(1)).then(Launch(1)).then(Stop(1)).then(Release(1)).expect(Safety and st(1) == "done")
+        781:     .then(Assign(1)).then(Launch(1)).then(Stop(1)).then(Release(1)).expect(Safety and st(1) == "done")
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        805:     .then(Redeploy(1)).then(Assign(1))
+        782:     .then(Redeploy(1)).then(Assign(1))
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        806:     .expect(Safety and st(1) == "leased" and g.pendingGen.get(1) != "" and up and bootLeft != 0 and inGenWindow(1))
+        783:     .expect(Safety and st(1) == "leased" and g.pendingGen.get(1) != "" and up and bootLeft != 0 and inGenWindow(1))
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        807:     .then(Crash).expect(Safety and not(up) and st(1) == "wait")
+        784:     .then(Crash).expect(Safety and not(up) and st(1) == "wait")
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Use --seed=0xfa8abac72530a87c --match=lease_conf_ok::cid_lease::CrashIsEnabledInThe325WindowWithoutTheGuard to repeat.
+    Use --seed=0xbce9d0e9e2f1bc52 --match=lease_conf_ok::cid_lease::CrashIsEnabledInThe325WindowWithoutTheGuard to repeat.
 
 
   Use --verbosity=3 to show executions.

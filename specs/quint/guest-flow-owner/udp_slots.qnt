@@ -117,7 +117,6 @@ module udp_slots {
   val BUG_KEEP_FRAMES: bool = OFF.contains("keepFrames")                // P-35: release returns the slot with frames still parked
   val BUG_LATE_PAIRED_BY_SLOT: bool = OFF.contains("latePairedBySlot")  // late Paired matched to the slot it was opened from, not by fid
   val BUG_IGNORE_LATE_PAIRED: bool = OFF.contains("ignoreLatePaired")   // late Paired silently dropped instead of answered with Abort
-  val BUG_RELEASE_ONE_SLOT: bool = OFF.contains("releaseOneSlot")       // closing a socket releases only one of its slots (no check: the audit masks it)
   val ENV_REPORT_LOSS: bool = true                                       // sock_release reports may be lost (audit is the backstop)
   val BUG_KEEP_FRAMES_ON_END: bool = OFF.contains("keepFramesOnEnd")    // U-2 / EVMOD-DGRAM off: the slot socket's queue is not
                                                                          // discarded at an end of association (Refused / Abort / the pairing deadline)
@@ -388,8 +387,7 @@ module udp_slots {
     releasePending.get(k),
     releasePending' = releasePending.set(k, false),
     val mine = SLOTS.filter(s => slots.get(s).owned and slots.get(s).sock == k)
-    val one = if (mine == Set()) Set() else Set(mine.fold(1000000, (a, b) => if (a < b) a else b))
-    releaseSet(if (BUG_RELEASE_ONE_SLOT) one else mine),
+    releaseSet(mine),
     sockAlive' = sockAlive, picks' = picks, nextFid' = nextFid, host' = host,
     toGuestPaired' = toGuestPaired, toGuestRefused' = toGuestRefused, toGuestAbort' = toGuestAbort,
     toHostAbort' = toHostAbort, misdelivered' = misdelivered, lateIgnored' = lateIgnored, staleReassoc' = staleReassoc, guestEnded' = guestEnded,
@@ -567,15 +565,6 @@ module udp_slots {
     .then(GuestReady(0)).then(HostPair(1)).then(GuestRecvPaired(1))
     .expect(Safety and slots.get(0).attached and host.get(1).sock == 2 and host.get(1).dest == 2 and not(misdelivered))
 
-  // ------------------------------------------------------------------ non-vacuity witnesses
-  val WitnessNoLatePaired: bool = toHostAbort == Set()
-  val WitnessNoAttached: bool = SLOTS.forall(s => not(slots.get(s).attached))
-  val WitnessNoTwoSlotsOneSocket: bool = not(SOCKS.exists(k =>
-    SLOTS.filter(s => slots.get(s).owned and slots.get(s).sock == k).size() >= 2))
-  // EVMOD-DGRAM: an end of association discards a queued datagram
-  val WitnessNoDiscardAtEnd: bool = not(SLOTS.exists(s => slots.get(s).owned and endedNoNew.contains(s)))
-  val WitnessNoReassociation: bool = not(SLOTS.exists(s => slots.get(s).owned and slots.get(s).fid >= 2 and
-    host.get(slots.get(s).fid - 1).sock == slots.get(s).sock and host.get(slots.get(s).fid - 1).dest == slots.get(s).dest))
 }
 
 

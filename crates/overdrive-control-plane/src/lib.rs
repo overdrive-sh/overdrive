@@ -396,13 +396,13 @@ pub struct AppState {
     /// (`on_alloc_running` → `start_alloc`, `on_alloc_terminal` →
     /// `stop_alloc`).
     ///
-    /// `Option` (the sanctioned `ProbeRunner` shape, NOT a port-trait
-    /// dodge): `Some(worker)` ONLY on the production `run_server` boot
-    /// (and the Tier-3 e2e), where a REAL `EbpfDataplane` +
-    /// `HostMtlsEnforcement` + `MtlsDataplane` are composed AFTER
-    /// `IdentityMgr`; `None` for every non-mTLS fixture and the
-    /// `SimDataplane`-override boot (no real BPF to intercept on). The
-    /// action-shim reads `state.mtls_worker` and fires `if let Some`.
+    /// Required on every boot: mTLS composition is unconditional. The boot
+    /// builds the worker after `IdentityMgr` over the intercept and
+    /// enforcement of the composition root's `NodeAdapters` (`BootAdapters::
+    /// mtls`, `MtlsAdapters`) and the dataplane its `DataplaneComposer`
+    /// composed (NO-OVERRIDE-SEAMS, ADR-0219): host adapters under `overdrive
+    /// serve`, sim adapters under a simulated test. The action-shim fires it
+    /// on every allocation transition.
     pub mtls_worker: Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
     /// The one EXEC gate shared with the VM driver and supervisor.
     #[allow(
@@ -663,11 +663,11 @@ impl AppState {
         let mut registry = DriverRegistry::new();
         registry.insert(driver);
         let drivers = Arc::new(registry);
-        // The broad fixture surface has no transparent-mTLS layer (no real
-        // `EbpfDataplane` to intercept on) — `None` mirrors the
-        // empty-registry `WorkflowEngine` default above. The PRODUCTION
-        // boot path (`run_server`) and the Tier-3 e2e use
-        // [`Self::new_with_workflow_engine`] to inject `Some(worker)`.
+        // The caller supplies the transparent-mTLS worker (required; the
+        // fixture builds it over sim adapters). The production boot path
+        // (`run_server`) uses [`Self::new_with_workflow_engine`] with the
+        // worker composed over the `NodeAdapters` the composition root
+        // passed.
         Self::new_with_workflow_engine(
             store,
             intent_redb_path,
@@ -689,7 +689,7 @@ impl AppState {
             // convenience constructor need no change.
             Arc::new(NoopVmHostState),
             // Fixture surface: a fresh empty per-host frontend-address allocator
-            // (ripple-free, same posture as the `None` mtls_worker default). The
+            // (ripple-free, as the `NoopVmHostState` above). The
             // PRODUCTION boot path (`run_server`) constructs the ONE shared
             // instance and passes it through `new_with_workflow_engine` so it is
             // shared with the re-keyed `MtlsResolve` + the `DnsResponder`.
@@ -3525,9 +3525,9 @@ async fn boot_server(
         listener_facts,
         host_ipv4,
         workflow_engine,
-        // transparent-mtls-host-socket step 06-03: `Some(worker)` on the
-        // production / Tier-3 boot (real dataplane), `None` under a
-        // `SimDataplane` override.
+        // transparent-mtls-host-socket step 06-03: the worker composed over
+        // the `NodeAdapters`' mTLS adapters and the `DataplaneComposer`'s
+        // dataplane — required on every boot.
         mtls_worker,
         vm_host_state,
         // dial-by-name-responder step 02-01: the ONE shared per-host

@@ -960,8 +960,8 @@ PROBE-NOSAMPLE-EVENT (every probe run that writes no row emits one
 not-sampled event, ADR-0192) were approved by the user on 2026-10-13. On
 2026-10-16 the user adopted an event-driven in-kernel forwarder as the data
 path (EVMOD-ADOPT, ADR-0197). On 2026-10-17 the user approved the
-forwarder's contracts (EVMOD-LIFE to EVMOD-AB): its module lifetime (amended
-on 2026-10-20 by MODULE-REFCOUNT: the module unloads only when no context is
+forwarder's contracts (EVMOD-LIFE to EVMOD-AB): its module lifetime (with
+MODULE-REFCOUNT, 2026-10-20: the module unloads only when no context is
 open and no socket is hooked), build,
 loading and Linux guest kit, late-callback safety, control context and end
 record, end classification, attach order, datagram mode, kTLS exclusion,
@@ -6129,7 +6129,7 @@ implemented).** The row gains `run_seq` (`ProbeRunSeq`) and
 `same_status_runs` (`SameStatusRuns`, the producer's count of consecutive
 written runs of the row's status) as `ProbeResultRowEnvelope::V2`, and a
 written row replaces the stored row only
-if its `run_seq` is greater; the observation time no longer decides the
+if its `run_seq` is greater; the observation time does not decide the
 merge. Contract: the
 [#295 feature delta](../../feature/netns-density-295/feature-delta.md)
 § *[REF] Observation row — ProbeResultRow V2 and the probe run sequence
@@ -11486,10 +11486,11 @@ depends only on `overdrive-core`; no owner installs a ULP on a forwarded
 socket. Unchanged: no Overdrive process holds a `/dev/vhost-vsock`
 descriptor. The guest-flow owner's protocol is
 model-checked in `specs/quint/guest-flow-owner/` (current evidence: run
-`36080-1792257031.125`, `evidence/summary.json`) and replayed against the
+`114403-1792606203.594`, `evidence/summary.json`; 279 of 279 checks matched
+expect, 3051.1 s wall at 3 jobs) and replayed against the
 owner through quint-connect conformance drivers; probe-run counting
 (PROBE-RUN-COUNT with D-1, ADR-0191) is model-checked in
-`specs/quint/probe-count/` (current evidence: run `252559-1791986812.704`);
+`specs/quint/probe-count/` (current evidence: run `112574-1792606117.273`; 31 of 31 checks matched expect);
 kernel behaviour the model
 assumes is proven at Tier 3 on Linux 7.0 (spike findings under
 `docs/feature/netns-density-295/spike/`).
@@ -11520,8 +11521,8 @@ for current proposed contracts.
 
 | Date | Change |
 |---|---|
-| 2026-10-20 | **netns-density-295: MODULE-REFCOUNT (user ruling).** The flow forwarder `ovd_fwd` is no longer permanent: it holds a module reference for every open control context and every hooked socket, and unloads only at zero (ADR-0198 restated in present tense; ADR-0204 gains rule 5 — callbacks are removed under the socket lock, `sk_write_space` is never overridden (the write-space trigger is a socket wait-queue entry, since `sock_wfree` calls `sk_write_space` on vsock and UDP sockets from preemptible process context with no lock), and a ULP present at removal on a TCP half keeps that socket's reference). ADR-0068 § 7 keeps the image kernel without module unloading, for a restated reason. ADR-0203's tree digest covers the files git does not ignore. ADR-0205 and ADR-0203 replace the reboot remedy with `kmod-load`'s reload of an idle module. ADR-0200's two permanence references are restated. — Morgan. |
-| 2026-10-18 | **netns-density-295: dispositions recorded apart from approvals.** ADR-0164 and ADR-0191 take file names that no longer misdescribe their decisions; every link resolves. In the feature delta § *Approval record*, RECORD-COST moves out of the user-approval table into "Architect dispositions" (outcome-neutral, confirmed by adversarial review, not a user approval) and PD-9 is marked superseded by it; ADR-SLUG records the file-name rule (a slug must not misdescribe its decision; a faithful shortened prefix of the title suffices). — Morgan. |
+| 2026-10-20 | **netns-density-295: MODULE-REFCOUNT (user ruling).** The flow forwarder `ovd_fwd` is no longer permanent: it holds a module reference for every open control context and every hooked socket, and unloads only at zero (ADR-0198 restated in present tense; ADR-0204 gains rule 5 — callbacks are removed under the socket lock, `sk_write_space` is never overridden (the write-space trigger is a socket wait-queue entry, since `sock_wfree` calls `sk_write_space` on vsock and UDP sockets from preemptible process context with no lock), and a ULP present at removal on a TCP half keeps that socket's reference). ADR-0068 § 7 keeps the image kernel without module unloading, for a restated reason. ADR-0203's module identity is the whole-tree digest of `kmod/ovd_fwd/` as `MODULE_VERSION` (it tells apart builds from different Conductor workspaces sharing one Lima VM; SIMPLIFY-1 follow-up (a), user 2026-10-21). ADR-0205 and ADR-0203 replace the reboot remedy with `kmod-load`'s reload of an idle module. ADR-0200's two permanence references are restated. — Morgan. |
+| 2026-10-18 | **netns-density-295: dispositions recorded apart from approvals.** ADR-0164 and ADR-0191 take file names that no longer misdescribe their decisions; every link resolves. In the feature delta § *Approval record*, RECORD-COST moves out of the user-approval table into "Architect dispositions" (outcome-neutral, confirmed by adversarial review, not a user approval); ADR-SLUG records the file-name rule (a slug must not misdescribe its decision; a faithful shortened prefix of the title suffices). — Morgan. |
 | 2026-10-18 | **netns-density-295: review close-out.** ADR-0200, ADR-0202 and ADR-0214 take file names that match their titles; their links are updated. RECORD-COST is confirmed by adversarial review (feature delta § *Approval record*); no design item is open before DISTILL. — Morgan. |
 | 2026-10-18 | **netns-density-295: ADR-0214 split.** ADR-0214 keeps INB-1 alone (the dialer holds the host end of a host-opened flow, never forwarded); new ADR-0216 records the watch clause of EVMOD-END (the host forwarder watches a dialled vsock so the stream keeps the classified end; a dropped stream aborts its watch). ADR-0147, ADR-0158, ADR-0173, ADR-0180, ADR-0202, ADR-0211 and ADR-0212 link ADR-0216. ADR-0204 rule 4's sentence on whose end removes the id is reflowed. The `guest-flow-owner` full record cost (81.5 minutes, 12 jobs) is decided as the new baseline beside PD-9, the recommended option of a small choice, its adversarial-review confirmation pending (feature delta § *Approval record*, RECORD-COST). — Morgan. |
 | 2026-10-18 | **netns-density-295: ADR-0158 split into one decision per ADR.** ADR-0158 keeps D18 (the request in band and first, every other pairing message out of band); new ADR-0212 (EVMOD-PAIR: attach at pairing), ADR-0213 (U-1: one-step admission and registration, no continuation for a closed flow), ADR-0214 (INB-1 / EVMOD-END: the dialled host end held by its dialer and watched) and ADR-0215 (the per-kind pairing-wait bounds under D15-R3); the pending TcpConnect bound stays in ADR-0150 and non-blocking owner connects move to ADR-0151. ADR-0158, ADR-0180 and ADR-0204 take file names that match their decisions. — Morgan. |

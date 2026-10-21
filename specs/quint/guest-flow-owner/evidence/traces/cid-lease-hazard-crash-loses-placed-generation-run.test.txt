@@ -6,16 +6,16 @@
 
   1) lease_conf_bugCrashLosesPlacedGeneration::cid_lease::RedeployLeasedAtServeCrashIsPlacedAgain:
        Error [QNT508]: Expect condition does not hold true
-        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/cid_lease.qnt:785:49
-        785:   run RedeployLeasedAtServeCrashIsPlacedAgain = init
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/cid_lease.qnt:762:49
+        762:   run RedeployLeasedAtServeCrashIsPlacedAgain = init
                                                              ^^^^
-        786:     .then(Assign(1)).then(Launch(1)).then(Stop(1)).then(Release(1)).expect(Safety and st(1) == "done")
+        763:     .then(Assign(1)).then(Launch(1)).then(Stop(1)).then(Release(1)).expect(Safety and st(1) == "done")
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        787:     .then(Redeploy(1)).then(Assign(1)).expect(Safety and st(1) == "leased" and g.pendingGen.get(1) == "done")
+        764:     .then(Redeploy(1)).then(Assign(1)).expect(Safety and st(1) == "leased" and g.pendingGen.get(1) == "done")
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        788:     .then(Crash).expect(Safety and st(1) == "wait")
+        765:     .then(Crash).expect(Safety and st(1) == "wait")
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Use --seed=0x4183bdd0c0c68d54 --match=lease_conf_bugCrashLosesPlacedGeneration::cid_lease::RedeployLeasedAtServeCrashIsPlacedAgain to repeat.
+    Use --seed=0x4451107e6df720db --match=lease_conf_bugCrashLosesPlacedGeneration::cid_lease::RedeployLeasedAtServeCrashIsPlacedAgain to repeat.
 
 
   Use --verbosity=3 to show executions.

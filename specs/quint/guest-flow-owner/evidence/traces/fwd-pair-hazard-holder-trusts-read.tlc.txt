@@ -90,7 +90,6 @@ State 1: <Initial predicate>
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
@@ -102,9 +101,7 @@ State 1: <Initial predicate>
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -120,9 +117,7 @@ State 1: <Initial predicate>
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -135,7 +130,7 @@ State 1: <Initial predicate>
         loss |-> FALSE,
         lost |-> 0 ] ]
 
-State 2: <pair_bugHolderTrustsRead_fwd_pair_Attach line 3968, col 3 to line 3978, col 77 of module pair_bugHolderTrustsRead>
+State 2: <pair_bugHolderTrustsRead_fwd_pair_Attach line 3616, col 3 to line 3626, col 77 of module pair_bugHolderTrustsRead>
 /\ pair_bugHolderTrustsRead_fwd_pair_conf_step = [InitWith |-> [m |-> "watch"]]
 /\ pair_bugHolderTrustsRead_fwd_pair_strmAbort = FALSE
 /\ pair_bugHolderTrustsRead_fwd_pair_pr = [ g |->
@@ -227,7 +222,6 @@ State 2: <pair_bugHolderTrustsRead_fwd_pair_Attach line 3968, col 3 to line 3978
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
@@ -239,9 +233,7 @@ State 2: <pair_bugHolderTrustsRead_fwd_pair_Attach line 3968, col 3 to line 3978
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -257,9 +249,7 @@ State 2: <pair_bugHolderTrustsRead_fwd_pair_Attach line 3968, col 3 to line 3978
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -272,7 +262,7 @@ State 2: <pair_bugHolderTrustsRead_fwd_pair_Attach line 3968, col 3 to line 3978
         loss |-> FALSE,
         lost |-> 0 ] ]
 
-State 3: <pair_bugHolderTrustsRead_fwd_pair_Abort line 3999, col 3 to line 4006, col 51 of module pair_bugHolderTrustsRead>
+State 3: <pair_bugHolderTrustsRead_fwd_pair_Abort line 3647, col 3 to line 3654, col 51 of module pair_bugHolderTrustsRead>
 /\ pair_bugHolderTrustsRead_fwd_pair_conf_step = [InitWith |-> [m |-> "watch"]]
 /\ pair_bugHolderTrustsRead_fwd_pair_strmAbort = FALSE
 /\ pair_bugHolderTrustsRead_fwd_pair_pr = [ g |->
@@ -364,7 +354,6 @@ State 3: <pair_bugHolderTrustsRead_fwd_pair_Abort line 3999, col 3 to line 4006,
   faults |-> 1,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
@@ -376,9 +365,7 @@ State 3: <pair_bugHolderTrustsRead_fwd_pair_Abort line 3999, col 3 to line 4006,
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -394,9 +381,7 @@ State 3: <pair_bugHolderTrustsRead_fwd_pair_Abort line 3999, col 3 to line 4006,
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -409,7 +394,7 @@ State 3: <pair_bugHolderTrustsRead_fwd_pair_Abort line 3999, col 3 to line 4006,
         loss |-> TRUE,
         lost |-> 0 ] ]
 
-State 4: <pair_bugHolderTrustsRead_fwd_pair_VCtl line 4201, col 3 to line 4205, col 51 of module pair_bugHolderTrustsRead>
+State 4: <pair_bugHolderTrustsRead_fwd_pair_VCtl line 3841, col 3 to line 3845, col 51 of module pair_bugHolderTrustsRead>
 /\ pair_bugHolderTrustsRead_fwd_pair_conf_step = [InitWith |-> [m |-> "watch"]]
 /\ pair_bugHolderTrustsRead_fwd_pair_strmAbort = FALSE
 /\ pair_bugHolderTrustsRead_fwd_pair_pr = [ g |->
@@ -501,7 +486,6 @@ State 4: <pair_bugHolderTrustsRead_fwd_pair_VCtl line 4201, col 3 to line 4205, 
   faults |-> 1,
   hobs |-> "none",
   woken |-> TRUE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
@@ -513,9 +497,7 @@ State 4: <pair_bugHolderTrustsRead_fwd_pair_VCtl line 4201, col 3 to line 4205, 
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -531,9 +513,7 @@ State 4: <pair_bugHolderTrustsRead_fwd_pair_VCtl line 4201, col 3 to line 4205, 
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -546,7 +526,7 @@ State 4: <pair_bugHolderTrustsRead_fwd_pair_VCtl line 4201, col 3 to line 4205, 
         loss |-> TRUE,
         lost |-> 0 ] ]
 
-State 5: <pair_bugHolderTrustsRead_fwd_pair_HolderEnd line 2094, col 3 to line 2103, col 78 of module pair_bugHolderTrustsRead>
+State 5: <pair_bugHolderTrustsRead_fwd_pair_HolderEnd line 1958, col 3 to line 1967, col 78 of module pair_bugHolderTrustsRead>
 /\ pair_bugHolderTrustsRead_fwd_pair_conf_step = [InitWith |-> [m |-> "watch"]]
 /\ pair_bugHolderTrustsRead_fwd_pair_strmAbort = FALSE
 /\ pair_bugHolderTrustsRead_fwd_pair_pr = [ g |->
@@ -638,7 +618,6 @@ State 5: <pair_bugHolderTrustsRead_fwd_pair_HolderEnd line 2094, col 3 to line 2
   faults |-> 1,
   hobs |-> "eof",
   woken |-> TRUE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
@@ -650,9 +629,7 @@ State 5: <pair_bugHolderTrustsRead_fwd_pair_HolderEnd line 2094, col 3 to line 2
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -668,9 +645,7 @@ State 5: <pair_bugHolderTrustsRead_fwd_pair_HolderEnd line 2094, col 3 to line 2
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -683,7 +658,7 @@ State 5: <pair_bugHolderTrustsRead_fwd_pair_HolderEnd line 2094, col 3 to line 2
         loss |-> TRUE,
         lost |-> 0 ] ]
 
-State 6: <pair_bugHolderTrustsRead_fwd_pair_ReadEof line 3130, col 3 to line 3179, col 52 of module pair_bugHolderTrustsRead>
+State 6: <pair_bugHolderTrustsRead_fwd_pair_ReadEof line 3430, col 3 to line 3479, col 52 of module pair_bugHolderTrustsRead>
 /\ pair_bugHolderTrustsRead_fwd_pair_conf_step = [InitWith |-> [m |-> "watch"]]
 /\ pair_bugHolderTrustsRead_fwd_pair_strmAbort = FALSE
 /\ pair_bugHolderTrustsRead_fwd_pair_pr = [ g |->
@@ -775,7 +750,6 @@ State 6: <pair_bugHolderTrustsRead_fwd_pair_ReadEof line 3130, col 3 to line 317
   faults |-> 1,
   hobs |-> "eof",
   woken |-> TRUE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
@@ -787,9 +761,7 @@ State 6: <pair_bugHolderTrustsRead_fwd_pair_ReadEof line 3130, col 3 to line 317
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -805,9 +777,7 @@ State 6: <pair_bugHolderTrustsRead_fwd_pair_ReadEof line 3130, col 3 to line 317
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,

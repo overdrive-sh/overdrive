@@ -203,8 +203,14 @@ fn a_stalled_vsock_reader_fills_the_udp_source_queue_and_datagrams_drop_only_the
     for i in 0..sent {
         a.u_far.send(&payload(i, 40_000, 59_000)).expect("send");
     }
-    thread::sleep(Duration::from_secs(1));
-    let drops = udp_drops(port);
+    // Loopback delivery is synchronous in `send`, so the counter is final
+    // once the sends return; poll (bounded) rather than assume a settle.
+    let deadline = Instant::now() + END_WAIT;
+    let mut drops = udp_drops(port);
+    while drops == 0 && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(50));
+        drops = udp_drops(port);
+    }
     assert!(drops > 0, "with the vsock reader stopped the UDP source queue must overflow");
     let mut last: Option<u64> = None;
     let mut received = 0u64;
@@ -417,4 +423,63 @@ fn a_refused_udp_destination_aborts_with_a_socket_error() {
         "got {end:?}"
     );
     drop((v, v_far, h));
+}
+
+fn force_sndbuf(sock: &impl AsRawFd, bytes: libc::c_int) {
+    // SAFETY: valid option value of the passed length.
+    let ret = unsafe {
+        libc::setsockopt(
+            sock.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_SNDBUFFORCE,
+            (&raw const bytes).cast(),
+            mem::size_of::<libc::c_int>() as libc::socklen_t,
+        )
+    };
+    assert!(ret == 0, "SO_SNDBUFFORCE as root: {}", std::io::Error::last_os_error());
+}
+
+/// V-EV-SAFE, full-target resume, UDP target (ADR-0204 rule 5; the round-16
+/// wait-queue trigger; the `sock_wfree` fact, `net/core/sock.c:2675-2693 @
+/// v7.0`): the association's UDP half `H` has its send buffer forced below
+/// one datagram, so after each send the target is full until the previous
+/// datagram's skb is freed, and the forwarder's next send waits on the
+/// target's write-space wait-queue entry (UDP never takes
+/// `SOCK_USE_WRITE_QUEUE`, so the wake comes from `sock_wfree` on whatever
+/// context frees the skb). Every one of `COUNT` frames toward the UDP side
+/// arrives once, whole and in order — no frame is dropped at a full target
+/// and the direction never stalls — and the association stays live.
+///
+/// What this proves over loopback: resumption. `loopback_xmit` orphans the
+/// sender's skb (`drivers/net/loopback.c:80 @ v7.0`) inside
+/// `dev_queue_xmit`'s bottom-half-disabled section, so the target's
+/// write-space wake comes from the bottom-half class, not from the
+/// preemptible `sock_wfree` class a virtio transmit-free path takes. That
+/// class is discharged by the `fwd_safe` model and the DELIVER source review
+/// of `sk_write_space` (`test-scenarios.md`, "UDP resume over loopback").
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 4"]
+fn a_udp_target_whose_send_buffer_is_full_resumes_and_delivers_every_frame() {
+    const COUNT: usize = 2_000;
+    let a = associate(None);
+    force_sndbuf(&a.h, 4_096);
+    thread::scope(|s| {
+        s.spawn(|| {
+            let mut w = &a.v_far;
+            for i in 0..COUNT {
+                w.write_all(&frame(&payload(i, 16_000, 32_000))).expect("write a frame");
+            }
+        });
+        let mut buf = vec![0u8; 65_536];
+        for i in 0..COUNT {
+            let n = a.u_far.recv(&mut buf).expect("a datagram reaches the UDP far end");
+            assert!(
+                buf[..n] == payload(i, 16_000, 32_000),
+                "datagram {i} toward a full UDP target: whole, once, in order"
+            );
+        }
+    });
+    assert!(a.fwd.pair_state(a.id).expect("pair_state").is_some(), "the association is live");
+    assert_eq!(a.fwd.take_end().expect("take_end"), None, "a full target never ends the pair");
 }

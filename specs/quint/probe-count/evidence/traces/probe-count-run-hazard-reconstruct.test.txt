@@ -6,16 +6,16 @@
 
   1) streak_bugReconstruct::probe_count::FlipBetweenLooksNoEarlyTerminate:
        Error [QNT508]: Expect condition does not hold true
-        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/probe-count/probe_count.qnt:310:42
-        310:   run FlipBetweenLooksNoEarlyTerminate = init
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/probe-count/probe_count.qnt:306:42
+        306:   run FlipBetweenLooksNoEarlyTerminate = init
                                                       ^^^^
-        311:     .then(ProbeRun("Fail", "")).then(ConsumerLook(true))
+        307:     .then(ProbeRun("Fail", "")).then(ConsumerLook(true))
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        312:     .then(ProbeRun("Pass", "")).then(ProbeRun("Fail", ""))
+        308:     .then(ProbeRun("Pass", "")).then(ProbeRun("Fail", ""))
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        313:     .then(ConsumerLook(true)).expect(terms == 0 and rsame == 1 and Safety)
+        309:     .then(ConsumerLook(true)).expect(terms == 0 and rsame == 1 and Safety)
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Use --seed=0x8f7deb8a57d163cd --match=streak_bugReconstruct::probe_count::FlipBetweenLooksNoEarlyTerminate to repeat.
+    Use --seed=0xbbaf910e53097bc7 --match=streak_bugReconstruct::probe_count::FlipBetweenLooksNoEarlyTerminate to repeat.
 
 
   Use --verbosity=3 to show executions.

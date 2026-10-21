@@ -7,9 +7,9 @@ ADR decides only which process loads a built module, on the host and in a
 Linux guest. How the module is built is ADR-0203 (EVMOD-BUILD); which module
 a Linux guest's root filesystem carries is ADR-0206 (EVMOD-GUEST-KIT); the
 module's lifetime once loaded — it unloads only when nothing references it —
-is ADR-0198 (EVMOD-LIFE, as amended by the user's ruling MODULE-REFCOUNT of
-2026-10-20, which also changed this ADR's development-host reload and its
-consequences, before implementation). Each could be
+is ADR-0198 (EVMOD-LIFE with the user's ruling MODULE-REFCOUNT of
+2026-10-20, which gives this ADR's development-host reload its idle-module
+rule). Each could be
 replaced while this placement is kept. A guest that runs no Linux kernel
 loads no module; its hop is
 [GH #321](https://github.com/overdrive-sh/overdrive/issues/321). Follows

@@ -54,12 +54,12 @@ State 10 [Launch]
   dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 1)
   al = << [ st |-> "running", off |-> 2, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> 1, pst |-> "retiring" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
 
-State 11 [Release]
-  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 1)
-  al = << [ st |-> "running", off |-> 2, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
-
-State 12 [VmmCrash]
+State 11 [VmmCrash]
   dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "ended", off |-> 2, retry |-> FALSE, ex |-> TRUE, chg |-> FALSE, pred |-> 1, pst |-> "retiring" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+
+State 12 [Release]
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 1)
   al = << [ st |-> "ended", off |-> 2, retry |-> FALSE, ex |-> TRUE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
 
 State 13 [Finalize]

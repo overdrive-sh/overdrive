@@ -2,9 +2,8 @@
 
 ## Status
 
-**Accepted — EVMOD-SAFE, approved by the user 2026-10-17; rule 5 added
-under the user's ruling MODULE-REFCOUNT of 2026-10-20** (before
-implementation), which amends EVMOD-LIFE and EVMOD-SAFE. GH #295.
+**Accepted — EVMOD-SAFE, approved by the user 2026-10-17; rule 5 follows the
+user's ruling MODULE-REFCOUNT of 2026-10-20.** Not implemented. GH #295.
 ADR-0198 keeps the module's text alive while anything can still call it
 (EVMOD-LIFE, by module reference counting); this ADR keeps a pair's freed
 data from being touched (rules 1 to 4) and fixes when a hooked socket's
@@ -272,8 +271,9 @@ one on an attached socket).
   again then serves.
 - A Tier-3 stress of the module step ends pairs while their sockets receive
   at line rate on every CPU and while the owner issues `OVD_FWD_ABORT` and
-  `OVD_FWD_PAIR_STATE` on ids that are ending, at least 10^5 pair ends under
-  KASAN, and requires no use-after-free or recursion report (V-EV-SAFE; not
+  `OVD_FWD_PAIR_STATE` on ids that are ending, at least 10^5 pair ends on
+  the stock 7.0 kernel, and requires no kernel oops or recursion report
+  (V-EV-SAFE; not
   contract-shaping: a failure is a module defect, fixed in the module). The
   same suite shows a stalled direction resuming through the wait-queue entry
   for a TCP, a vsock and a UDP target; the earlier override's measured

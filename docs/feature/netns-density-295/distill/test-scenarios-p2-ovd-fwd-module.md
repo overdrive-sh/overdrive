@@ -68,8 +68,20 @@ build loaded, and leaves it loaded.
 | `an_open_context_refuses_the_unload_and_its_close_lets_it_succeed` | K | context open: `refcnt` 1, `delete_module(O_NONBLOCK)` `EWOULDBLOCK`, module present; closed: `refcnt` 0, unload `0`, `/sys/module/ovd_fwd` gone; reload of this workspace's `.ko`, a new context opens (`refcnt` 1) |
 | `hooked_sockets_hold_the_module_until_their_free_work_and_a_reload_then_serves` | 4 | pair `refcnt` 3, watch 4, refused at each; `ABORT_ALL` + records read → 1 within the bounded wait; a live pair at context close → 0; unload succeeds, reload, the forwarder probe passes |
 
-The ULP negative control and the KASAN stress need a kernel boot of their
-own and are not authored (upstream issues, U-EV-UNLOAD).
+The ULP negative control and the unload stress need a kernel boot of their
+own: they run in the guest-kit microVM (`unload_in_guest.rs`: two host cases,
+two in-guest cells, pending step 4; `upstream-issues.md` U-EV-UNLOAD). The
+ULP control reads each transition by the bounded `wait_refcnt` and holds a
+reference that must not return over one named window only after its positive
+half; the stress's sender far ends are non-blocking. Their oracles are no
+oops and the refcount on the stock 7.0 kernel.
+
+UDP full-target resume (`datagram.rs`): over loopback the case proves
+resumption through the bottom-half write-space wake (`loopback_xmit` orphans
+the sender's skb inside `dev_queue_xmit`'s bottom-half-disabled section,
+`drivers/net/loopback.c:80 @ v7.0`), not the preemptible `sock_wfree` class a
+virtio transmit-free path takes; that class is discharged by the `fwd_safe`
+model and the DELIVER source review of `sk_write_space`.
 
 ## Guest side of a real VM boundary (`tests/integration/guest_boundary.rs`, `kvm-tests`)
 

@@ -42,7 +42,7 @@
 //! | `HostDialDeadline(h)` | `SimClock` to the dial's `GUEST_DIAL_PAIRING_DEADLINE` |
 //! | `DialCancel(h)` | the driver drops the pending `dial` future |
 //! | guest actions (`GuestAcceptV`, `GuestPairOrRefuseOk`, `GuestConnectTimesOut`, `GuestNeverReplies`, `GuestRecvAbort`, `GuestSeesHostClose`, `GuestAcceptedError`, `GuestSessionLossObserved`, `GuestQueueReset`) | stimulus: the guest's next reply (if any) is recorded for its host delivery step; the owner is run to quiescence and the step compares its state unchanged |
-//! | `HostClaimSession`, `HostCheckFlow`, `HostRegisterFlow` | hazard-only: an error |
+//! | `HostClaimSession` | hazard-only: an error |
 //! | beacon actions | never enabled on `flows_conf` (the VM driver's `flows_beacon_conf`): an error |
 //!
 //! Projection (`State::from_driver`), O = QPROJ-2 / QPROJ-3, S = QPROJ-7
@@ -1060,8 +1060,6 @@ impl Driver for OwnerFlowsDriver {
                 HostDeadSessionLoss(c: i64) => self.host_dead_session_loss(c)?,
                 GuestOpenFlow(f: i64) => self.guest_open_flow(f)?,
                 HostAcceptFlow(f: i64) => self.host_accept_flow(f)?,
-                HostCheckFlow => return Err(DriverError::HazardOnly("HostCheckFlow").into()),
-                HostRegisterFlow => return Err(DriverError::HazardOnly("HostRegisterFlow").into()),
                 HostReadReqN(f: i64, n: i64) => self.host_read_req(f, n)?,
                 HostStartConnect(f: i64) => self.host_start_connect(f)?,
                 HostConnectDone(f: i64) => self.host_connect_done(f, "HostConnectDone")?,

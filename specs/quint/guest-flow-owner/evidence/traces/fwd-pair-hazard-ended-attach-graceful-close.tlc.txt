@@ -6,9 +6,7 @@ State 1: <Initial predicate>
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -24,9 +22,7 @@ State 1: <Initial predicate>
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -102,7 +98,6 @@ State 1: <Initial predicate>
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
@@ -135,7 +130,7 @@ State 1: <Initial predicate>
         nrec |-> 0,
         cgen |-> 0 ] ]
 
-State 2: <pair_bugEndedAttachGracefulClose_fwd_pair_CloseUnattached line 3355, col 3 to line 3371, col 62 of module pair_bugEndedAttachGracefulClose>
+State 2: <pair_bugEndedAttachGracefulClose_fwd_pair_CloseUnattached line 2954, col 3 to line 2970, col 62 of module pair_bugEndedAttachGracefulClose>
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_mode = "stream"
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_attRes = [g |-> "none", h |-> "none"]
@@ -143,9 +138,7 @@ State 2: <pair_bugEndedAttachGracefulClose_fwd_pair_CloseUnattached line 3355, c
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -161,9 +154,7 @@ State 2: <pair_bugEndedAttachGracefulClose_fwd_pair_CloseUnattached line 3355, c
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -239,7 +230,6 @@ State 2: <pair_bugEndedAttachGracefulClose_fwd_pair_CloseUnattached line 3355, c
   faults |-> 1,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
@@ -272,7 +262,7 @@ State 2: <pair_bugEndedAttachGracefulClose_fwd_pair_CloseUnattached line 3355, c
         nrec |-> 0,
         cgen |-> 0 ] ]
 
-State 3: <pair_bugEndedAttachGracefulClose_fwd_pair_VCtl line 4269, col 3 to line 4273, col 59 of module pair_bugEndedAttachGracefulClose>
+State 3: <pair_bugEndedAttachGracefulClose_fwd_pair_VCtl line 3909, col 3 to line 3913, col 59 of module pair_bugEndedAttachGracefulClose>
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_mode = "stream"
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_attRes = [g |-> "none", h |-> "none"]
@@ -280,9 +270,7 @@ State 3: <pair_bugEndedAttachGracefulClose_fwd_pair_VCtl line 4269, col 3 to lin
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -298,9 +286,7 @@ State 3: <pair_bugEndedAttachGracefulClose_fwd_pair_VCtl line 4269, col 3 to lin
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -376,7 +362,6 @@ State 3: <pair_bugEndedAttachGracefulClose_fwd_pair_VCtl line 4269, col 3 to lin
   faults |-> 1,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
@@ -409,7 +394,7 @@ State 3: <pair_bugEndedAttachGracefulClose_fwd_pair_VCtl line 4269, col 3 to lin
         nrec |-> 0,
         cgen |-> 0 ] ]
 
-State 4: <pair_bugEndedAttachGracefulClose_fwd_pair_Attach line 4030, col 3 to line 4041, col 59 of module pair_bugEndedAttachGracefulClose>
+State 4: <pair_bugEndedAttachGracefulClose_fwd_pair_Attach line 3678, col 3 to line 3689, col 59 of module pair_bugEndedAttachGracefulClose>
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_mode = "stream"
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_attRes = [g |-> "none", h |-> "halfEnded"]
@@ -417,9 +402,7 @@ State 4: <pair_bugEndedAttachGracefulClose_fwd_pair_Attach line 4030, col 3 to l
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -435,9 +418,7 @@ State 4: <pair_bugEndedAttachGracefulClose_fwd_pair_Attach line 4030, col 3 to l
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -513,7 +494,6 @@ State 4: <pair_bugEndedAttachGracefulClose_fwd_pair_Attach line 4030, col 3 to l
   faults |-> 1,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
@@ -546,7 +526,7 @@ State 4: <pair_bugEndedAttachGracefulClose_fwd_pair_Attach line 4030, col 3 to l
         nrec |-> 0,
         cgen |-> 0 ] ]
 
-State 5: <pair_bugEndedAttachGracefulClose_fwd_pair_ReadEof line 3174, col 3 to line 3229, col 60 of module pair_bugEndedAttachGracefulClose>
+State 5: <pair_bugEndedAttachGracefulClose_fwd_pair_ReadEof line 3481, col 3 to line 3536, col 60 of module pair_bugEndedAttachGracefulClose>
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_mode = "stream"
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_attRes = [g |-> "none", h |-> "halfEnded"]
@@ -554,9 +534,7 @@ State 5: <pair_bugEndedAttachGracefulClose_fwd_pair_ReadEof line 3174, col 3 to 
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -572,9 +550,7 @@ State 5: <pair_bugEndedAttachGracefulClose_fwd_pair_ReadEof line 3174, col 3 to 
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -650,7 +626,6 @@ State 5: <pair_bugEndedAttachGracefulClose_fwd_pair_ReadEof line 3174, col 3 to 
   faults |-> 1,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,

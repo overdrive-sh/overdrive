@@ -32,9 +32,7 @@
 //!    `ENOENT` returns to step 1; `EWOULDBLOCK` / `EAGAIN` (references held,
 //!    `kernel/module/main.c:744-751 @ v7.0`) is busy; `EBUSY` reads
 //!    `initstate` (`:964-986`): `coming` / `going` is busy, absent returns to
-//!    step 1, `live` retries the unload once — only a second `EBUSY` on a
-//!    `live` module is a loaded build with no `module_exit` (`:818-825`),
-//!    which only a reboot replaces.
+//!    step 1, `live` is busy: report it and retry later.
 //!
 //! A busy refusal names the holder class: a process with `/dev/ovd_fwd` open
 //! (pid and `comm`), or socket references still being freed / a context
@@ -158,28 +156,6 @@ pub enum LoadError {
     /// The stale module is busy (strict form).
     #[error("{0}")]
     Busy(Busy),
-    /// A loaded build with no `module_exit`: never unloadable.
-    #[error(
-        "the loaded ovd_fwd (version {loaded}) has no module_exit and cannot be unloaded; only a \
-         reboot of this host replaces it with this workspace's build (version {built})"
-    )]
-    NoModuleExit {
-        /// The loaded module's `version`.
-        loaded: String,
-        /// This workspace's build's `version`.
-        built: String,
-    },
-    /// The second pass found another workspace's build loaded again.
-    #[error(
-        "race between workspaces: after unloading, another build (version {loaded}) was loaded \
-         before this workspace's (version {built}); rerun `cargo xtask kmod-load`"
-    )]
-    Race {
-        /// The version loaded by the other workspace.
-        loaded: String,
-        /// This workspace's build's `version`.
-        built: String,
-    },
     /// A kernel call or sysfs read failed with an errno no step handles.
     #[error("{call}: errno {errno}")]
     Os {
@@ -243,8 +219,6 @@ enum Unload {
     Gone,
     /// Busy, with its holder class.
     Busy(HolderClass),
-    /// A live module with no `module_exit`.
-    NoExit,
 }
 
 fn busy_holders(kernel: &mut dyn ModuleKernel) -> HolderClass {
@@ -256,31 +230,28 @@ fn busy_holders(kernel: &mut dyn ModuleKernel) -> HolderClass {
     }
 }
 
-/// Step 3: unload a stale module, classifying `EBUSY` through `initstate`.
+/// Step 3: unload the stale module, classifying `EBUSY` through `initstate`;
+/// an `EBUSY` on a `live` module is busy.
 fn unload(kernel: &mut dyn ModuleKernel) -> std::result::Result<Unload, LoadError> {
-    let mut retried_live = false;
-    loop {
-        match kernel.delete_nonblock() {
-            Ok(()) => return Ok(Unload::Gone),
-            Err(e) if e == libc::ENOENT => return Ok(Unload::Gone),
-            Err(e) if e == libc::EWOULDBLOCK || e == libc::EAGAIN => {
-                return Ok(Unload::Busy(busy_holders(kernel)));
-            }
-            Err(e) if e == libc::EBUSY => {
-                match kernel.initstate().map_err(|errno| LoadError::Os {
-                    call: "read /sys/module/ovd_fwd/initstate",
-                    errno,
-                })? {
-                    None => return Ok(Unload::Gone),
-                    Some(InitState::Coming | InitState::Going) => {
-                        return Ok(Unload::Busy(HolderClass::Transitioning));
-                    }
-                    Some(InitState::Live) if retried_live => return Ok(Unload::NoExit),
-                    Some(InitState::Live) => retried_live = true,
-                }
-            }
-            Err(errno) => return Err(LoadError::Os { call: "delete_module(ovd_fwd)", errno }),
+    match kernel.delete_nonblock() {
+        Ok(()) => Ok(Unload::Gone),
+        Err(e) if e == libc::ENOENT => Ok(Unload::Gone),
+        Err(e) if e == libc::EWOULDBLOCK || e == libc::EAGAIN => {
+            Ok(Unload::Busy(busy_holders(kernel)))
         }
+        Err(e) if e == libc::EBUSY => {
+            match kernel.initstate().map_err(|errno| LoadError::Os {
+                call: "read /sys/module/ovd_fwd/initstate",
+                errno,
+            })? {
+                None => Ok(Unload::Gone),
+                Some(InitState::Coming | InitState::Going) => {
+                    Ok(Unload::Busy(HolderClass::Transitioning))
+                }
+                Some(InitState::Live) => Ok(Unload::Busy(busy_holders(kernel))),
+            }
+        }
+        Err(errno) => Err(LoadError::Os { call: "delete_module(ovd_fwd)", errno }),
     }
 }
 
@@ -288,15 +259,14 @@ fn unload(kernel: &mut dyn ModuleKernel) -> std::result::Result<Unload, LoadErro
 ///
 /// # Errors
 ///
-/// [`LoadError::Busy`] (unless `busy_ok`), [`LoadError::NoModuleExit`],
-/// [`LoadError::Race`], or [`LoadError::Os`].
+/// [`LoadError::Busy`] (unless `busy_ok`) or [`LoadError::Os`].
 pub fn load(
     kernel: &mut dyn ModuleKernel,
     built: &str,
     busy_ok: bool,
 ) -> std::result::Result<LoadOutcome, LoadError> {
     let mut unloaded: Option<String> = None;
-    for pass in 0..2 {
+    for _ in 0..2 {
         match kernel.finit() {
             Ok(()) => {
                 return Ok(unloaded
@@ -315,9 +285,6 @@ pub fn load(
         if loaded == built {
             return Ok(LoadOutcome::AlreadyCurrent);
         }
-        if pass == 1 {
-            return Err(LoadError::Race { loaded, built: built.to_owned() });
-        }
         match unload(kernel)? {
             Unload::Gone => unloaded = Some(loaded),
             Unload::Busy(holders) => {
@@ -327,9 +294,6 @@ pub fn load(
                 } else {
                     Err(LoadError::Busy(busy))
                 };
-            }
-            Unload::NoExit => {
-                return Err(LoadError::NoModuleExit { loaded, built: built.to_owned() });
             }
         }
     }
@@ -652,48 +616,26 @@ mod tests {
         assert!(matches!(load(&mut k, "aa", false), Ok(LoadOutcome::Reloaded { .. })));
     }
 
+    /// An `EBUSY` on a `live` module is busy, naming its holders;
+    /// `--busy-ok` tolerates it like any other busy module.
     #[test]
-    fn ebusy_on_live_is_confirmed_by_a_second_unload_before_any_reboot_verdict() {
-        // The first EBUSY came from a `coming` module whose init completed
-        // before the read: the second unload succeeds, so no reboot verdict.
-        let mut k = Scripted {
-            finit: [Err(libc::EEXIST), Ok(())].into(),
+    fn ebusy_on_a_live_module_is_busy_and_busy_ok_tolerates_it() {
+        let script = || Scripted {
+            finit: [Err(libc::EEXIST)].into(),
             version: [v("bb")].into(),
-            delete: [Err(libc::EBUSY), Ok(())].into(),
+            delete: [Err(libc::EBUSY)].into(),
             initstate: [Some(InitState::Live)].into(),
+            holders: vec![(4242, "overdrive".to_owned())],
             ..Scripted::default()
         };
-        assert!(matches!(load(&mut k, "aa", false), Ok(LoadOutcome::Reloaded { .. })));
-        assert_eq!(k.calls, ["finit", "version", "delete", "initstate", "delete", "finit"]);
-    }
-
-    #[test]
-    fn a_second_ebusy_on_a_live_module_is_no_module_exit_and_busy_ok_does_not_soften_it() {
-        for busy_ok in [false, true] {
-            let mut k = Scripted {
-                finit: [Err(libc::EEXIST)].into(),
-                version: [v("bb")].into(),
-                delete: [Err(libc::EBUSY), Err(libc::EBUSY)].into(),
-                initstate: [Some(InitState::Live), Some(InitState::Live)].into(),
-                ..Scripted::default()
-            };
-            let err = load(&mut k, "aa", busy_ok).expect_err("permanent EBUSY");
-            assert!(matches!(err, LoadError::NoModuleExit { .. }), "{err:?}");
-            assert!(err.to_string().contains("no module_exit"), "{err}");
-        }
-    }
-
-    #[test]
-    fn a_second_pass_that_finds_another_build_reports_a_race_without_a_second_unload() {
-        let mut k = Scripted {
-            finit: [Err(libc::EEXIST), Err(libc::EEXIST)].into(),
-            version: [v("bb"), v("cc")].into(),
-            delete: [Ok(())].into(),
-            ..Scripted::default()
-        };
-        let err = load(&mut k, "aa", false).expect_err("race");
-        assert_eq!(err, LoadError::Race { loaded: "cc".to_owned(), built: "aa".to_owned() });
-        assert_eq!(k.calls, ["finit", "version", "delete", "finit", "version"]);
+        let mut k = script();
+        let err = load(&mut k, "aa", false).expect_err("busy");
+        assert!(
+            matches!(&err, LoadError::Busy(b) if matches!(b.holders, HolderClass::OpenContext(_)))
+        );
+        assert!(err.to_string().contains("busy; retry"), "{err}");
+        assert_eq!(k.calls, ["finit", "version", "delete", "initstate"]);
+        assert!(matches!(load(&mut script(), "aa", true), Ok(LoadOutcome::BusyTolerated(_))));
     }
 
     #[test]

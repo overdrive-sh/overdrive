@@ -6,16 +6,16 @@
 
   1) streak_bugOncePerStreak::probe_count::FailedStopRetriedOnNextRow:
        Error [QNT508]: Expect condition does not hold true
-        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/probe-count/probe_count.qnt:294:36
-        294:   run FailedStopRetriedOnNextRow = init
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/probe-count/probe_count.qnt:290:36
+        290:   run FailedStopRetriedOnNextRow = init
                                                 ^^^^
-        295:     .then(ProbeRun("Fail", "")).then(ProbeRun("Fail", "")).then(ProbeRun("Fail", ""))
+        291:     .then(ProbeRun("Fail", "")).then(ProbeRun("Fail", "")).then(ProbeRun("Fail", ""))
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        296:     .then(ConsumerLook(false)).expect(terms == 1 and A == 3 and running)
+        292:     .then(ConsumerLook(false)).expect(terms == 1 and A == 3 and running)
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        297:     .then(ProbeRun("Fail", "")).then(ConsumerLook(true)).expect(terms == 2 and A == 4 and not(running) and Safety)
+        293:     .then(ProbeRun("Fail", "")).then(ConsumerLook(true)).expect(terms == 2 and A == 4 and not(running) and Safety)
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Use --seed=0x7aa98dcf07d82a7e --match=streak_bugOncePerStreak::probe_count::FailedStopRetriedOnNextRow to repeat.
+    Use --seed=0x79125f57afa4f56 --match=streak_bugOncePerStreak::probe_count::FailedStopRetriedOnNextRow to repeat.
 
 
   Use --verbosity=3 to show executions.

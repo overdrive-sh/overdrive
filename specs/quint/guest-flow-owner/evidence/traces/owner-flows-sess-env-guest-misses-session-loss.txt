@@ -1,4 +1,4 @@
-# owner-flows-sess-env-guest-misses-session-loss: counterexample, 13 state(s) (from the TLC trace)
+# owner-flows-sess-env-guest-misses-session-loss: counterexample, 15 state(s) (from the TLC trace)
 
 State 1
   bHeldByOther = FALSE
@@ -36,42 +36,51 @@ State 2 [Provision]
   gen = 1
   alloc = "Provisioned"
 
-State 3 [Teardown]
+State 3 [VmStart]
+  vmGen = 1
+  vmUp = TRUE
+
+State 4 [Teardown]
   alloc = "Retiring"
 
-State 4 [Release]
+State 5 [step]
+  gSess = 2
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 1]>>
+
+State 6 [step]
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "closed", gen |-> 1]>>
+
+State 7 [VmStop]
+  gSess = 0
+  vmUp = FALSE
+
+State 8 [Release]
   alloc = "Absent"
 
-State 5 [Provision]
+State 9 [Provision]
   gen = 2
   alloc = "Provisioned"
 
-State 6 [VmStart]
+State 10 [VmStart]
   vmGen = 2
   vmUp = TRUE
 
-State 7 [step]
-  gSess = 2
-  sess = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 2]>>
-
-State 8 [step]
-  sess = <<[st |-> "pending", gen |-> 2], [st |-> "pending", gen |-> 2]>>
-
-State 9 [step]
-  sess = <<[st |-> "reading", gen |-> 2], [st |-> "pending", gen |-> 2]>>
-
-State 10 [step]
-  sess = <<[st |-> "live", gen |-> 2], [st |-> "pending", gen |-> 2]>>
-  claim = 1
-
 State 11 [step]
-  sess = <<[st |-> "live", gen |-> 2], [st |-> "reading", gen |-> 2]>>
+  gSess = 1
+  sess = <<[st |-> "pending", gen |-> 2], [st |-> "closed", gen |-> 1]>>
 
 State 12 [step]
-  sess = <<[st |-> "live", gen |-> 2], [st |-> "closed", gen |-> 2]>>
+  sess = <<[st |-> "reading", gen |-> 2], [st |-> "closed", gen |-> 1]>>
 
 State 13 [step]
-  sess = <<[st |-> "closed", gen |-> 2], [st |-> "closed", gen |-> 2]>>
+  sess = <<[st |-> "live", gen |-> 2], [st |-> "closed", gen |-> 1]>>
+  claim = 1
+
+State 14 [step]
+  sess = <<[st |-> "closed", gen |-> 2], [st |-> "closed", gen |-> 1]>>
   claim = 0
 
--> stutters forever in State 13
+State 15 [step]
+  quiesced = TRUE
+
+-> loops back to State 14

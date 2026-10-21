@@ -24,6 +24,17 @@ use super::support::{
 /// (§ *Forwarding*, "Run").
 const FWD_CHUNK: usize = 64 * 1024;
 
+/// Absence hold window for a paused vsock reader: how long the half-close is
+/// observed NOT to arrive before the reader resumes.
+const PAUSED_ABSENCE_HOLD: Duration = Duration::from_secs(2);
+
+/// Absence hold window for a stalled or paused flow: how long it is observed
+/// to stay open, un-ended and un-aborted.
+const STALL_ABSENCE_HOLD: Duration = Duration::from_secs(3);
+
+/// Polling step while waiting for a positive control.
+const CONTROL_POLL: Duration = Duration::from_millis(50);
+
 /// Writes without blocking until the writer would block; returns the bytes
 /// accepted.
 fn fill_until_blocked(mut w: impl Write, data: &[u8]) -> usize {
@@ -60,7 +71,7 @@ fn a_paused_tcp_reader_never_sees_the_half_close_before_its_last_byte() {
             (&mut &flow.v_far).write_all(&data).expect("write");
             flow.v_far.shutdown(libc::SHUT_WR);
         });
-        let paused_until = Instant::now() + Duration::from_secs(2);
+        let paused_until = Instant::now() + PAUSED_ABSENCE_HOLD;
         while Instant::now() < paused_until {
             let state = flow.fwd.pair_state(flow.id).expect("pair_state").expect("live");
             assert!(!state.a_to_b.target_shut, "the target was shut before its last accepted byte");
@@ -86,7 +97,18 @@ fn a_paused_vsock_reader_never_sees_the_half_close_before_its_last_byte() {
             (&mut &flow.t_far).write_all(&data).expect("write");
             flow.t_far.shutdown(Shutdown::Write).expect("FIN");
         });
-        thread::sleep(Duration::from_secs(2));
+        // Positive control: the TCP → vsock direction is live and moving
+        // bytes, so the absent half-close below is the pause, not an idle
+        // pair.
+        let control_deadline = Instant::now() + END_WAIT;
+        while flow.fwd.pair_state(flow.id).expect("pair_state").expect("live").b_to_a.moved == 0 {
+            assert!(
+                Instant::now() < control_deadline,
+                "the pair never moved a byte toward the vsock"
+            );
+            thread::sleep(CONTROL_POLL);
+        }
+        thread::sleep(PAUSED_ABSENCE_HOLD);
         assert_eq!(
             flow.peer.take_end().expect("take_end"),
             None,
@@ -135,7 +157,7 @@ fn a_paused_flow_holds_open_with_no_deadline_while_other_flows_proceed() {
         assert_eq!(end, FarEnd::Eof);
         assert!(got == data, "the other flow proceeds byte-exact");
     });
-    thread::sleep(Duration::from_secs(3));
+    thread::sleep(STALL_ABSENCE_HOLD);
     assert_eq!(paused.fwd.take_end().expect("take_end"), None, "a paused flow is never aborted");
     assert!(paused.fwd.pair_state(paused.id).expect("pair_state").is_some());
     assert!(held > 0);
@@ -212,7 +234,7 @@ fn a_read_shutdown_only_peer_holds_the_flow_open_until_it_closes() {
     flow.t_far.shutdown(Shutdown::Read).expect("SHUT_RD");
     flow.v_far.set_nonblocking(true);
     let _held = fill_until_blocked(&flow.v_far, &pattern(36, 64 << 20));
-    thread::sleep(Duration::from_secs(3));
+    thread::sleep(STALL_ABSENCE_HOLD);
     assert_no_end(&flow.fwd);
     assert!(flow.fwd.pair_state(flow.id).expect("pair_state").is_some());
     let StreamFlow { fwd, id, v, v_far, t, t_far, .. } = flow;
@@ -226,4 +248,88 @@ fn a_read_shutdown_only_peer_holds_the_flow_open_until_it_closes() {
         "closing with unread bytes resets the TCP half, got {end:?}"
     );
     drop((v, v_far, t));
+}
+
+/// V-EV-SAFE, full-target resume, vsock target (ADR-0204 rule 5; the
+/// round-16 wait-queue trigger): a TCP source toward a vsock target whose
+/// peer's credit is exhausted — the guest-side reader stops, the source
+/// fills until its writer blocks, and the pair holds with no end. When the
+/// reader resumes, the stalled direction resumes through the target's
+/// write-space wait-queue entry alone (the vsock's credit update wakes the
+/// socket's wait queue; `sk_write_space` is never overridden): every byte
+/// arrives once and in order, then the half-close. The earlier override's
+/// resumption (P-67) is not evidence for the entry; this case is.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 4"]
+fn a_vsock_target_with_its_peers_credit_exhausted_resumes_byte_exact_to_eof() {
+    let flow = StreamFlow::with(|_, v_far, _, _| v_far.set_buffer_size(64 * 1024));
+    let data = pattern(37, 64 << 20);
+    flow.t_far.set_nonblocking(true).expect("nonblocking");
+    let accepted = fill_until_blocked(&flow.t_far, &data);
+    assert!(accepted < data.len(), "the source blocked against the exhausted credit");
+    thread::sleep(STALL_ABSENCE_HOLD);
+    assert_eq!(flow.fwd.take_end().expect("take_end"), None, "a stalled pair is never ended");
+    let state = flow.fwd.pair_state(flow.id).expect("pair_state").expect("live");
+    assert!(!state.b_to_a.target_shut, "the stalled target is not shut");
+
+    flow.t_far.set_nonblocking(false).expect("blocking");
+    thread::scope(|s| {
+        s.spawn(|| {
+            (&mut &flow.t_far).write_all(&data[accepted..]).expect("resume the source");
+            flow.t_far.shutdown(Shutdown::Write).expect("FIN");
+        });
+        let (got, end) = read_until_end(&flow.v_far);
+        assert_eq!(end, FarEnd::Eof, "the half-close follows the last byte");
+        assert!(
+            got == data,
+            "the vsock target resumes byte-exact: {} of {}",
+            got.len(),
+            data.len()
+        );
+    });
+    assert_eq!(flow.far_end(), ForwardOutcome::GuestHalfClose);
+}
+
+/// V-EV-SAFE, full-target resume, TCP target under the wait-queue trigger,
+/// repeated: the guest-side source refills the TCP target to its blocked
+/// point in three rounds; between rounds the far reader drains, and each
+/// round's resumption is a wake of the target's write-space wait-queue
+/// entry. The flow ends byte-exact with a clean half-close.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 4"]
+fn a_tcp_target_resumes_through_its_wait_queue_entry_on_every_refill() {
+    let flow = StreamFlow::new();
+    let data = pattern(38, 48 << 20);
+    flow.v_far.set_nonblocking(true);
+    let mut sent = 0usize;
+    let mut got: Vec<u8> = Vec::with_capacity(data.len());
+    let mut buf = vec![0u8; 1 << 20];
+    flow.t_far.set_read_timeout(Some(Duration::from_millis(200))).expect("timeout");
+    for _round in 0..3 {
+        sent += fill_until_blocked(&flow.v_far, &data[sent..]);
+        assert_eq!(flow.fwd.take_end().expect("take_end"), None, "stalled, not ended");
+        // Drain what the target delivered until it goes quiet.
+        loop {
+            match std::io::Read::read(&mut &flow.t_far, &mut buf) {
+                Ok(0) => panic!("the target half-closed before the source did"),
+                Ok(n) => got.extend_from_slice(&buf[..n]),
+                Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => break,
+                Err(e) => panic!("read: {e}"),
+            }
+        }
+    }
+    flow.v_far.set_nonblocking(false);
+    flow.t_far.set_read_timeout(Some(END_WAIT)).expect("timeout");
+    thread::scope(|s| {
+        s.spawn(|| {
+            (&mut &flow.v_far).write_all(&data[sent..]).expect("the rest");
+            flow.v_far.shutdown(libc::SHUT_WR);
+        });
+        let (rest, end) = read_until_end(&flow.t_far);
+        got.extend_from_slice(&rest);
+        assert_eq!(end, FarEnd::Eof);
+    });
+    assert!(got == data, "the TCP target resumes byte-exact: {} of {}", got.len(), data.len());
 }

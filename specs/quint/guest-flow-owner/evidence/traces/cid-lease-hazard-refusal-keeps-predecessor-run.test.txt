@@ -6,22 +6,22 @@
 
   1) lease_bugRefusalKeepsPredecessor::cid_lease::PoolExhaustedRestartCleansThePredecessorThenPlaces:
        Error [QNT508]: Expect condition does not hold true
-        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/cid_lease.qnt:812:60
-        812:   run PoolExhaustedRestartCleansThePredecessorThenPlaces = init
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/cid_lease.qnt:789:60
+        789:   run PoolExhaustedRestartCleansThePredecessorThenPlaces = init
                                                                         ^^^^
-        813:     .then(Assign(1)).then(Launch(1)).then(Assign(2)).then(Launch(2)).then(VmmCrash(1))
+        790:     .then(Assign(1)).then(Launch(1)).then(Assign(2)).then(Launch(2)).then(VmmCrash(1))
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        814:     .then(Assign(1)).expect(Safety and st(1) == "leased" and pstOf(1) == "held" and freeOffs == Set())
+        791:     .then(Assign(1)).expect(Safety and st(1) == "leased" and pstOf(1) == "held" and freeOffs == Set())
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        815:     .then(VmmCrash(2)).expect(Safety and st(2) == "ended" and al.get(2).retry and freeOffs == Set())
+        792:     .then(VmmCrash(2)).expect(Safety and st(2) == "ended" and al.get(2).retry and freeOffs == Set())
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        816:     .then(AssignRefused(2))
+        793:     .then(AssignRefused(2))
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        817:     .expect(Safety and st(2) == "wait" and pstOf(2) == "retiring" and att.get(2) == 0 and offOf(2) == -1
+        794:     .expect(Safety and st(2) == "wait" and pstOf(2) == "retiring" and att.get(2) == 0 and offOf(2) == -1
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        818:       and freeOffs == Set())
+        795:       and freeOffs == Set())
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Use --seed=0xa0eed77cf9c74c20 --match=lease_bugRefusalKeepsPredecessor::cid_lease::PoolExhaustedRestartCleansThePredecessorThenPlaces to repeat.
+    Use --seed=0xf46305e40e5aa3ee --match=lease_bugRefusalKeepsPredecessor::cid_lease::PoolExhaustedRestartCleansThePredecessorThenPlaces to repeat.
 
 
   Use --verbosity=3 to show executions.

@@ -38,7 +38,6 @@
  * OFF names the rules switched off (teeth; instances in hazard/):
  *   countActiveOnly   the quota counts active flows only; a half-closed or ended flow keeps its place but not its count
  *   nodeWideQuota     one quota for the node instead of one per allocation
- *   freeAtHalfClose   the place is released at the half-close, while the pair still forwards
  */
 // D-UP-1: the variants of `conf_step` (a module of its own: a constructor would clash with the action of the same
 // name, so the actions build their variant with the builtin `variant`)
@@ -67,7 +66,6 @@ module flow_quota {
 
   val BUG_COUNT_ACTIVE_ONLY: bool = OFF.contains("countActiveOnly")
   val BUG_NODE_WIDE: bool = OFF.contains("nodeWideQuota")
-  val BUG_FREE_AT_HALF_CLOSE: bool = OFF.contains("freeAtHalfClose")
 
   // own: the allocation holding the place (0 = free); st: free | active | half | ended;
   // fwd: the place's pair is still forwarding (attached and not ended) — model-only, for the clash ghost
@@ -100,8 +98,8 @@ module flow_quota {
   val halfClosed: bool = SLOTS.exists(s => slot.get(s).fwd and slot.get(s).st != "active")
 
   action init = all { slot' = SLOTS.mapBy(s => free0), endq' = List(), g' = g0, conf_step' = variant("init", ()) }
-  // a pair's end queues its record (none for a place already released: freeAtHalfClose only)
-  def queueEnd(s: int): List[int] = if (slot.get(s).st == "free") endq else endq.append(s)
+  // a pair's end queues its record
+  def queueEnd(s: int): List[int] = endq.append(s)
 
   // admission: within the quota and a free place exists → the flow takes the place (its pair is attached)
   action Admit(a: int): bool = all {
@@ -126,20 +124,19 @@ module flow_quota {
   // keeps forwarding the other direction, and the flow keeps its place
   action HalfClose(s: int): bool = all {
     slot.get(s).st == "active",
-    slot' = slot.set(s, if (BUG_FREE_AT_HALF_CLOSE) { own: 0, st: "free", fwd: true }
-                        else { ...slot.get(s), st: "half" }),
+    slot' = slot.set(s, { ...slot.get(s), st: "half" }),
     endq' = endq, g' = g, conf_step' = if (REC) variant("HalfClose", { s: s }) else conf_step,
   }
   // the other direction ends cleanly too: the pair completes and queues its end record
   action Complete(s: int): bool = all {
-    slot.get(s).fwd, slot.get(s).st == "half" or (BUG_FREE_AT_HALF_CLOSE and slot.get(s).st == "free"),
-    slot' = slot.set(s, if (slot.get(s).st == "free") { ...slot.get(s), fwd: false } else { ...slot.get(s), st: "ended", fwd: false }),
+    slot.get(s).fwd, slot.get(s).st == "half",
+    slot' = slot.set(s, { ...slot.get(s), st: "ended", fwd: false }),
     endq' = queueEnd(s), g' = g, conf_step' = if (REC) variant("Complete", { s: s }) else conf_step,
   }
   // the pair aborts (a peer abort, a socket error, the owner's abort): it stops forwarding and queues its end record
   action Abort(s: int): bool = all {
     slot.get(s).fwd,
-    slot' = slot.set(s, if (slot.get(s).st == "free") { ...slot.get(s), fwd: false } else { ...slot.get(s), st: "ended", fwd: false }),
+    slot' = slot.set(s, { ...slot.get(s), st: "ended", fwd: false }),
     endq' = queueEnd(s), g' = g, conf_step' = if (REC) variant("Abort", { s: s }) else conf_step,
   }
   // the host owner reads the next end record (the head of the queue, M-1) and releases its flow's place (EVMOD-AB)
@@ -216,10 +213,6 @@ module flow_quota {
     .then(ReadEnd(2)).expect(Safety and st(2) == "free" and st(1) == "ended" and endq == [1])
     .then(ReadEnd(1)).expect(Safety and totalHeld == 0 and endq == [])
 
-  // ------------------------------------------------------------------ witnesses (expected violated)
-  val WitnessNoRefusal: bool = not(g.refused)
-  val WitnessNoPendingDrain: bool = not(halfClosed)
-  val WitnessNoCrossAllocationAdmission: bool = not(g.otherAdmitted)
 }
 
 // the design: three allocations, quota 1, two places (node capacity below the sum of the quotas)

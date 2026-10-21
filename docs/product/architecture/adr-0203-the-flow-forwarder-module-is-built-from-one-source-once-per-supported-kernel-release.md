@@ -55,23 +55,19 @@ in-kernel event-driven forwarder (EVMOD)*, "Module placement and lifetime".
   it runs in, not under the cargo target directory, which several
   development workspaces can share. Kbuild's outputs go there too (`MO=`,
   `Makefile:137-139 @ v7.0`), so the source tree holds sources only.
-- **Module identity.** `kmod-build` computes one SHA-256 digest over the
-  files of `kmod/ovd_fwd/` that git does not ignore, using their
-  working-tree contents (headers and `Kbuild` included). The file set is
-  `git ls-files --cached --others --exclude-standard`: tracked files plus
-  untracked files that are not ignored. A source file not yet added is
-  therefore covered, so a build is never mistaken for another, and ignored
-  stray files (`.DS_Store`, `*.swp`, both in the repository's `.gitignore`)
-  are not. A stray file that is not ignored fails safe: the module reads as
-  stale and is reloaded. The digest is compiled
-  in as the module's `MODULE_VERSION`; the source does not build without
-  it. A loaded module's identity is `/sys/module/ovd_fwd/version`
-  (`kernel/module/main.c:607 @ v7.0`), which the lane setup and the test
-  fixtures compare with their own build. The kernel's `srcversion` is not
-  the identity: `modpost` digests the module's sources plus only those
-  dependencies in the object's own directory
-  (`scripts/mod/sumversion.c:366-367 @ v7.0`), so it misses the UAPI header
-  under `include/` and the build file.
+- **Module identity.** `MODULE_VERSION` is a digest of the whole
+  `kmod/ovd_fwd/` tree: `kmod-build` hashes the tree's files (sorted
+  relative paths and contents) and passes the hex digest to the module
+  build as a define; the source uses it for `MODULE_VERSION` and refuses to
+  compile (`#error`) without it. A loaded module's identity is
+  `/sys/module/ovd_fwd/version` (`kernel/module/main.c:607 @ v7.0`), which
+  the lane setup and the test fixtures compare with the `version` of their
+  own build. The reason for a digest and not a hand-kept string: every
+  Conductor workspace shares one Lima VM, so the loaded module can be another
+  workspace's build, and a hand-kept string would call two different sources
+  equal whenever its bump was forgotten. The digest tells builds of different
+  sources apart with nothing to remember; two workspaces whose trees are
+  byte-identical share one loaded module.
 - **One build per supported kernel release.** Overdrive builds and
   publishes a module for each kernel it supports: the pinned appliance
   kernel and the stock 7.0 kernels its Tier-3 hosts and guest fixture run.
@@ -101,10 +97,13 @@ in-kernel event-driven forwarder (EVMOD)*, "Module placement and lifetime".
 
 - Each supported kernel adds one module build to the release process; a
   kernel bump is a module rebuild.
-- Any edit to a tracked file under `kmod/ovd_fwd/` changes the module's
-  identity, so a development host's loaded module becomes stale. The lane
-  setup reloads it while it is idle (ADR-0205; ADR-0198, as amended by the
-  user's ruling MODULE-REFCOUNT of 2026-10-20). No reboot is needed.
+- A new module version makes a development host's loaded module stale. The
+  lane setup reloads it while it is idle (ADR-0205; ADR-0198, the module
+  unloads when nothing references it, MODULE-REFCOUNT). No reboot is needed.
+  Any source edit changes the tree digest, so it is detected as stale.
+- `kmod-build` computes a tree hash and passes it as a define, and the
+  source carries an `#error` guard. That is the cost of telling workspaces'
+  builds apart on a shared VM (user ruling, 2026-10-21).
 - The C source is checked by the kernel's own tooling (`W=1`, sparse,
   `checkpatch`) in CI, and its ABI by the adapter's layout assertions and
-  the probe's version check.
+  the probe's version check. No test greps the source.

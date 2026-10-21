@@ -42,7 +42,7 @@ State 3 [VmStart]
   drvLive = TRUE
 
 State 4 [step]
-  bcn = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 1]>>
+  bcn = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
 
 State 5 [VmStop]
   vmUp = FALSE
@@ -57,9 +57,9 @@ State 7 [VmStart]
   drvLive = TRUE
 
 State 8 [step]
-  bcn = <<[st |-> "none", gen |-> 0], [st |-> "reading", gen |-> 1]>>
+  bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
 
 State 9 [step]
-  bcn = <<[st |-> "none", gen |-> 0], [st |-> "live", gen |-> 1]>>
-  bclaim = 2
+  bcn = <<[st |-> "live", gen |-> 1], [st |-> "none", gen |-> 0]>>
+  bclaim = 1
   readyCross = TRUE

@@ -40,24 +40,62 @@ use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 /// The name of the scripted peer's binary target in `overdrive-testing`.
 pub const GUEST_PEER_BIN: &str = "overdrive-guest-peer";
 
+/// Which cargo target of a package an in-guest lane's libtest binary is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InGuestTarget {
+    /// A `bin` target's unit tests (`cargo test --bin <name>`).
+    Bin,
+    /// An integration-test target (`cargo test --test <name>`).
+    Test,
+}
+
+impl InGuestTarget {
+    /// The `cargo test` selector flag.
+    #[must_use]
+    pub const fn flag(self) -> &'static str {
+        match self {
+            Self::Bin => "--bin",
+            Self::Test => "--test",
+        }
+    }
+}
+
 /// One in-guest lane: a package's libtest binary built with `features` and
 /// staged for the guest-kit image.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InGuestLane {
     /// The package.
     pub package: &'static str,
-    /// Its `bin` target whose unit tests run in the guest.
+    /// The target whose tests run in the guest: a `bin` target or an
+    /// integration-test target, named `bin`.
     pub bin: &'static str,
+    /// Which kind of target `bin` names.
+    pub target: InGuestTarget,
     /// The features the binary is built with.
     pub features: &'static str,
 }
 
 /// Every in-guest lane this step stages.
-pub const IN_GUEST_LANES: &[InGuestLane] = &[InGuestLane {
-    package: "overdrive-init",
-    bin: "overdrive-init",
-    features: "integration-tests,kvm-tests",
-}];
+///
+/// - `overdrive-init`'s unit tests: the in-guest transport and guest-flow
+///   cells (T-2, D-22).
+/// - `overdrive-fwd`'s `integration` test binary: V-EV-UNLOAD's ULP negative
+///   control and unload stress (U-EV-UNLOAD, T-1), which unload the module
+///   and so run only in a guest whose PID 1 holds nothing of it.
+pub const IN_GUEST_LANES: &[InGuestLane] = &[
+    InGuestLane {
+        package: "overdrive-init",
+        bin: "overdrive-init",
+        target: InGuestTarget::Bin,
+        features: "integration-tests,kvm-tests",
+    },
+    InGuestLane {
+        package: "overdrive-fwd",
+        bin: "integration",
+        target: InGuestTarget::Test,
+        features: "integration-tests,kvm-tests",
+    },
+];
 
 /// Where the staged libtest binary of `package`'s `bin` target lives.
 #[must_use]
@@ -179,7 +217,7 @@ fn require(path: &Path, artefact: &str) -> Result<()> {
 fn build_in_guest_tests(workspace_root: &Path, lane: &InGuestLane) -> Result<PathBuf> {
     let output = run_step(
         Command::new("cargo")
-            .args(["test", "--no-run", "--package", lane.package, "--bin", lane.bin])
+            .args(["test", "--no-run", "--package", lane.package, lane.target.flag(), lane.bin])
             .args(["--features", lane.features, "--message-format", "json"])
             .current_dir(workspace_root),
         &format!("building the in-guest tests of {} {}", lane.package, lane.bin),
@@ -194,7 +232,12 @@ fn build_in_guest_tests(workspace_root: &Path, lane: &InGuestLane) -> Result<Pat
             return Ok(PathBuf::from(executable));
         }
     }
-    bail!("cargo reported no test executable for {} bin {}", lane.package, lane.bin)
+    bail!(
+        "cargo reported no test executable for {} {} {}",
+        lane.package,
+        lane.target.flag(),
+        lane.bin
+    )
 }
 
 #[cfg(test)]

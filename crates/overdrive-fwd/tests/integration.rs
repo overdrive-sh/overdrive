@@ -8,7 +8,9 @@
 //! xtask kmod-build` then `cargo xtask kmod-load`) and `vsock_loopback`
 //! available. The unload cell (`unload.rs`, V-EV-UNLOAD) unloads and reloads
 //! the module, so it is compiled only with `kvm-tests` and runs on the
-//! native metal host under its lease.
+//! native metal host under its lease; its ULP control and unload stress
+//! (`unload_in_guest.rs`) run inside the guest-kit microVM, as in-guest
+//! cells of this same binary (staged by `cargo xtask guest-kit-prepare`).
 //! Every case runs on the **host role**: both halves of a pair are host
 //! sockets, the vsock halves on the loopback transport (CID 1), which
 //! delivers through `virtio_transport_recv_pkt` like vhost
@@ -101,5 +103,9 @@ mod integration {
     // under its exclusive lease (never the shared Lima VM).
     #[cfg(feature = "kvm-tests")]
     mod unload;
+    // V-EV-UNLOAD's ULP control and unload stress: in-guest cells of this
+    // binary run inside the guest-kit microVM by host cases (U-EV-UNLOAD).
+    #[cfg(feature = "kvm-tests")]
+    mod unload_in_guest;
     mod watch;
 }

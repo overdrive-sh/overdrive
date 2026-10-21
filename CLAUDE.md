@@ -73,6 +73,14 @@ user, and both cost a rework cycle. The cost of surfacing a gap is one
 message; the cost of inventing past it is a wrong contract that
 propagates until someone notices.
 
+**Agents propose, the user adds.** The same discipline covers tests, test
+lanes, tooling, xtask subcommands, build variants and validation items: an
+agent never adds one on its own initiative, including inside a review fix. It
+surfaces the addition as a proposal with its production-reachable failure, its
+runtime and validation cost, and the cheaper alternatives, and the user decides.
+See `.claude/rules/design.md` § "No unrequested scope — agents propose, the
+user adds".
+
 ## Overdrive runs on its own appliance OS — design for that threat model
 
 Overdrive ships as an immutable appliance OS with a pinned kernel (ADR-0068):

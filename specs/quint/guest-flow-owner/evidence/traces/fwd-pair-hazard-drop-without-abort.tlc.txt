@@ -24,9 +24,7 @@ State 1: <Initial predicate>
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -42,9 +40,7 @@ State 1: <Initial predicate>
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -126,7 +122,6 @@ State 1: <Initial predicate>
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
@@ -135,7 +130,7 @@ State 1: <Initial predicate>
 /\ pair_bugDropWithoutAbort_fwd_pair_strmAbort = FALSE
 /\ pair_bugDropWithoutAbort_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 
-State 2: <pair_bugDropWithoutAbort_fwd_pair_HolderDrop line 3185, col 3 to line 3228, col 45 of module pair_bugDropWithoutAbort>
+State 2: <pair_bugDropWithoutAbort_fwd_pair_HolderDrop line 2680, col 3 to line 2723, col 45 of module pair_bugDropWithoutAbort>
 /\ pair_bugDropWithoutAbort_fwd_pair_vmUp = TRUE
 /\ pair_bugDropWithoutAbort_fwd_pair_pr = [ g |->
       [ ph |-> "unattached",
@@ -161,9 +156,7 @@ State 2: <pair_bugDropWithoutAbort_fwd_pair_HolderDrop line 3185, col 3 to line 
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -179,9 +172,7 @@ State 2: <pair_bugDropWithoutAbort_fwd_pair_HolderDrop line 3185, col 3 to line 
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -263,7 +254,6 @@ State 2: <pair_bugDropWithoutAbort_fwd_pair_HolderDrop line 3185, col 3 to line 
   faults |-> 1,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> TRUE,
   hostDead |-> FALSE,

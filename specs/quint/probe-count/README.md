@@ -1,9 +1,7 @@
-# Quint specification: probe-run counting (netns-density-295, round 2026-10-13)
+# Quint specification: probe-run counting (netns-density-295)
 
 Model-checked specification of the protocol between the probe task of one key (alloc, role, probe_idx) and
-ServiceLifecycle, per decisions PROBE-RUN-COUNT (ADR-0191; approved by the user 2026-10-13 including the
-producer-counted `same_status_runs`; the consumer act-once-per-row rule revised 2026-10-13 after design review) and PROBE-NOSAMPLE (ADR-0187 decisions 1-3,
-approved). No PROPOSED decision remains.
+ServiceLifecycle, per decisions PROBE-RUN-COUNT (ADR-0191; the producer-counted `same_status_runs` and the consumer act-once-per-row rule) and PROBE-NOSAMPLE (ADR-0187 decisions 1-3).
 `.claude/rules/design.md` § "Concurrent protocols carry a model-checked Quint specification";
 oracle for DISTILL `quint-connect` drivers (`.claude/rules/testing.md` § "Quint conformance").
 
@@ -14,7 +12,7 @@ Evidence: `evidence/summary.md` (written only by `--record`; `cargo xtask quint 
 ## Abstraction and rule
 
 One key, one producer, one consumer. Module `probe_count` (parameters `OFF`, `REC`); main instance `probe_streak` (`OFF = {}`, `REC = false`); conformance main `probe_streak_conf` (`REC = true`).
-LT = 3 (liveness), RT = 2 (readiness), bound MAXRUNS = 7 producer runs of any outcome (`Fail x3, Pass, Fail x3` fits); looks are unbounded (the state space is finite: A, running, run_seq are bounded by MAXRUNS), each TLC check takes about 6 s.
+LT = 3 (liveness), RT = 2 (readiness), bound MAXRUNS = 7 producer runs of any outcome (`Fail x3, Pass, Fail x3` fits); looks are unbounded (the state space is finite: A, running, run_seq are bounded by MAXRUNS).
 
 Producer action `ProbeRun(outcome, reason)`, outcome in Pass | Fail | NoSample | WriteFail (reason: `node_capacity` |
 `quiesced`). Pass / Fail write a row `{run_seq = last written + 1, status, same_status_runs}` where
@@ -56,7 +54,7 @@ It changes only on the conformance main `probe_streak_conf` (`REC = true`); each
 at `init` and their TLC state spaces are those of the rules alone. Only the named runs are checked on
 `probe_streak_conf`. A driver names it in `#[quint_test(main = "probe_streak_conf", …)]`, `#[quint_run]` and
 `Config::nondet` by its ITF name `probe_streak_conf::probe_count::conf_step` (Quint qualifies a variable with the main
-module and the module that declares it). D-UP-1 was approved by the user on 2026-10-14.
+module and the module that declares it).
 
 ## Invariants (named after the decision they defend)
 
@@ -73,7 +71,7 @@ module and the module that declares it). D-UP-1 was approved by the user on 2026
 | `NoStaleChange` | PROBE-RUN-COUNT | a look that sees no new row changes no consumer state and emits no terminate |
 | `Safety` | all | conjunction of the invariants above  |
 
-Witnesses (expected violations): `WitnessNeverTerminates`, `WitnessNeverReady` show both are reachable.
+No witnesses: the named runs `HappyPathThreeFailsTerminateAtThreshold` and `ReadinessReachesThreshold` reach a terminate and readiness.
 
 ## Finding
 
@@ -101,9 +99,9 @@ A probe-runner restart is not modelled as a same-key action, because a restart o
 
 | Instance | Rule removed | Violated | Failing run |
 |---|---|---|---|
-| `streak_bugReconstruct` | previous rule: consumer keeps `fs`, advances by N - M, resets on the other status | `NoEarlyTerminate` | `FlipBetweenLooksNoEarlyTerminate` |
+| `streak_bugReconstruct` | consumer-side reconstruction: consumer keeps `fs`, advances by N - M, resets on the other status | `NoEarlyTerminate` | `FlipBetweenLooksNoEarlyTerminate` |
 | `streak_bugNoActOnce` | no `A` check | `NoReactOnSameRow` | `ReReadAfterFailedStopDoesNotReTerminate` |
-| `streak_bugOncePerStreak` | previous condition `N - s >= A` (once per Fail streak) | `NoMissedTerminate` | `FailedStopRetriedOnNextRow` |
+| `streak_bugOncePerStreak` | condition `N - s >= A` (once per Fail streak) | `NoMissedTerminate` | `FailedStopRetriedOnNextRow` |
 | `streak_bugOnceEver` | emit only if `A == 0` | `NoMissedTerminate` | `FailedStopRetriedOnNextRow` |
 | `streak_bugNoSampleFail` | NoSample written as a Fail row | `MissingSampleInert` | `MissingSampleChangesNothing` |
 | `streak_bugLwwObservedAt` | merge by observed-at with ClockBack | `StoreHoldsLatest` | `ClockStepBackDoesNotLoseRow` |

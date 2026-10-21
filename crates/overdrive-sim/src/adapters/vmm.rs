@@ -98,8 +98,8 @@ struct CreateFault {
     persistent: bool,
     /// When `Some`, the refusal is the TYPED
     /// [`VmmError::ConfinementUnavailable`] naming this control — the
-    /// fail-closed producer S-VM-51 drives via the `ServerConfig.vmm_override`
-    /// seam (ADR-0083 §D8): a host that cannot supply a required confinement
+    /// fail-closed producer S-VM-51 drives through the VM adapters the
+    /// composition root passes in `NodeAdapters` (ADR-0083 §D8, ADR-0219): a host that cannot supply a required confinement
     /// control refuses the workload rather than starting it unconfined. When
     /// `None`, the refusal stays the existing unclassified [`VmmError::Create`]
     /// (S-VM-37's shape). No new injection mechanism — the SAME `create_fault`
@@ -131,9 +131,10 @@ struct State {
 /// injectable here — S-VM-75 proves it against a REAL non-reflink
 /// substrate instead (a real `CloudHypervisorVmm` constructed with
 /// `.with_image_dir(...)` pointed at a genuinely non-reflink directory,
-/// injected via the SAME `ServerConfig.vmm_override` seam this fault type
-/// serves — the seam is adapter-agnostic, `Arc<dyn Vmm>`, so either a
-/// faulty `SimVmm` or a differently-configured real adapter satisfies it).
+/// passed through the SAME `NodeAdapters` VM port this fault type serves —
+/// the port is adapter-agnostic, `Arc<dyn Vmm>`, so either a faulty
+/// `SimVmm` or a differently-configured real adapter satisfies it,
+/// ADR-0219).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SimVmmProbeFault {
     /// The installed `cloud-hypervisor` has no `--landlock` flag.
@@ -172,8 +173,9 @@ pub struct SimVmm {
     /// this to be exercisable on `SimVmm` too, per S-VM-90's driving
     /// sequence.
     create_fault: Arc<Mutex<Option<CreateFault>>>,
-    /// Consumed by the NEXT `probe` call only — ADR-0083 §D8's
-    /// `ServerConfig.vmm_override` fault-injection seam (S-VM-13).
+    /// Consumed by the NEXT `probe` call only — ADR-0083 §D8's probe fault,
+    /// injected at the `Vmm` port the composition root passes in
+    /// `NodeAdapters` (S-VM-13, ADR-0219).
     probe_fault: Arc<Mutex<Option<SimVmmProbeFault>>>,
     /// Console/stderr bytes the NEXT `create` call captures into its
     /// bounded diagnostics. The injected-script equivalent of a real
@@ -243,8 +245,9 @@ impl SimVmm {
     /// host cannot supply the required confinement `control` — the typed
     /// [`VmmError::ConfinementUnavailable`] carrying `detail` verbatim.
     ///
-    /// This is the injection S-VM-51 drives through the
-    /// `ServerConfig.vmm_override` seam (ADR-0083 §D8, US-VM-7 fail-closed):
+    /// This is the injection S-VM-51 drives through the VM adapters the
+    /// composition root passes in `NodeAdapters` (ADR-0083 §D8, ADR-0219,
+    /// US-VM-7 fail-closed):
     /// the Lima/metal test envelope runs one kernel, so no genuinely
     /// Landlock-less host exists in it (system constraint 1). Injecting the
     /// unavailable-control condition at the `Vmm` port boundary lets a REAL
@@ -322,9 +325,9 @@ impl SimVmm {
     }
 
     /// Arm a one-shot [`SimVmmProbeFault`] for the NEXT [`Vmm::probe`]
-    /// call (ADR-0083 §D8, step 01-09) — the `ServerConfig.vmm_override`
-    /// injection mechanism S-VM-13 drives through a real in-process
-    /// `overdrive serve` boot.
+    /// call (ADR-0083 §D8, step 01-09) — the fault S-VM-13 drives through a
+    /// real in-process `run_server` boot whose `NodeAdapters` carry this
+    /// `SimVmm` (ADR-0219).
     pub fn inject_probe_failure(&self, fault: SimVmmProbeFault) {
         *self.probe_fault.lock() = Some(fault);
     }

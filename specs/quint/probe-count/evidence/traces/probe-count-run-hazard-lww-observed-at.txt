@@ -6,14 +6,14 @@
 
   1) streak_bugLwwObservedAt::probe_count::ClockStepBackDoesNotLoseRow:
        Error [QNT508]: Expect condition does not hold true
-        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/probe-count/probe_count.qnt:322:37
-        322:   run ClockStepBackDoesNotLoseRow = init
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/probe-count/probe_count.qnt:318:37
+        318:   run ClockStepBackDoesNotLoseRow = init
                                                  ^^^^
-        323:     .then(ProbeRun("Fail", "")).then(ProbeRun("Fail", "")).then(ClockBack).then(ProbeRun("Fail", ""))
+        319:     .then(ProbeRun("Fail", "")).then(ProbeRun("Fail", "")).then(ClockBack).then(ProbeRun("Fail", ""))
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        324:     .expect(rseq == 3 and pseq == 3 and Safety)
+        320:     .expect(rseq == 3 and pseq == 3 and Safety)
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Use --seed=0x5475f09f62e97874 --match=streak_bugLwwObservedAt::probe_count::ClockStepBackDoesNotLoseRow to repeat.
+    Use --seed=0x753c2e57bcd345bd --match=streak_bugLwwObservedAt::probe_count::ClockStepBackDoesNotLoseRow to repeat.
 
 
   Use --verbosity=3 to show executions.

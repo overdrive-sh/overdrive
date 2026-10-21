@@ -73,7 +73,8 @@
  *
  * Abstraction:
  *   - CFG selects the instance: "core" (sessions, guest-opened flows, dials, the allocation lifecycle),
- *     "core2" (core with two dial slots, for the all-flows session-loss run), "sess" (core without
+ *     "core2" (core with two dial slots, for the all-flows session-loss run), "one" (core with one guest-opened flow: the
+ *     instance of the GuestHalfEnds liveness check), "sess" (core without
  *     guest-opened flows and dials: the instance of the SessionBecomesLive liveness check, whose property
  *     mentions sessions only) or "beacon" (VM start / exit, driver.stop and the beacon; ADR-0157). The parts
  *     share nothing else, so each is checked on its own instance; the state of the parts an instance switches
@@ -117,7 +118,7 @@
  *   K-A3  A flow socket attached before its request is read forwards the request bytes to the target as
  *         payload (why H-1 exists) .................................................... P-67 / R5-9
  *   K-A4  The host's close of V_h of an aborted or session-lost dial reliably tears down the guest-side
- *         connection V_g — accepted, or still in the guest's accept queue. OFF "K-A4" drops it ... V-24 (P-38)
+ *         connection V_g — accepted, or still in the guest's accept queue. ... V-24 (P-38)
  *   K-A5S The end of a control connection on the host (refused at accept or read, or lost) reaches the guest
  *         owner, which observes it (GuestSessionLossObserved) as EOF / EPOLLRDHUP. OFF "K-A5S" drops it
  *         ........................................................................ findings-ka5.md (WORKS)
@@ -136,7 +137,7 @@ module owner_flows_conf {
     | Teardown | Release | Quiesce | Restore
     | GuestOpenSession({ c: int }) | WorkloadOpenSession({ c: int }) | HostAcceptSession({ c: int }) | HostReadOpen({ c: int })
     | HostClaimSession({ c: int }) | HostSessionLoss({ c: int }) | HostDeadSessionLoss({ c: int })
-    | GuestOpenFlow({ f: int }) | HostAcceptFlow({ f: int }) | HostCheckFlow({ f: int }) | HostRegisterFlow({ f: int })
+    | GuestOpenFlow({ f: int }) | HostAcceptFlow({ f: int })
     | HostReadReqN({ f: int, n: int }) | HostStartConnect({ f: int })
     | HostConnectDone({ f: int }) | HostConnectDiscard({ f: int }) | HostFlowEndsMsg({ f: int, msg: bool })
     | DialOpen({ h: int }) | DialNotServing({ h: int, declared: bool }) | DialQuiesced({ h: int })
@@ -154,30 +155,25 @@ module owner_flows {
   import owner_flows_conf.ConfStep from "./owner_flows"
   // ------------------------------------------------------------------ parameters
   const OFF: Set[str]
-  const CFG: str            // "core" | "core2" | "sess" | "beacon"
+  const CFG: str            // "core" | "core2" | "one" | "sess" | "beacon"
   // D-UP-1: true only on a conformance main (`flows_conf`, `flows_beacon_conf`): `conf_step` records the action taken.
   // Every model-checking, liveness and hazard instance passes false and keeps `conf_step` at its initial value.
   const REC: bool
 
-  val CORE: bool = CFG == "core" or CFG == "core2" or CFG == "sess"
+  val CORE: bool = CFG == "core" or CFG == "core2" or CFG == "one" or CFG == "sess"
   val BEACON: bool = CFG == "beacon"
 
   val CONNS: Set[int] = Set(1, 2)
   val BCONNS: Set[int] = Set(1, 2)
-  val FLOW_IDS: Set[int] = if (CFG == "sess") Set() else Set(1, 2)
+  val FLOW_IDS: Set[int] = if (CFG == "sess") Set() else if (CFG == "one") Set(1) else Set(1, 2)
   val MAXGEN: int = 2
   val HFLOWS: Set[int] = if (CFG == "core2") Set(1, 2) else if (CFG == "sess") Set() else Set(1)
 
   val BUG_SESSION_SPLIT_CLAIM: bool = OFF.contains("sessionSplitClaim")     // L-3 violated: "no live claim?" checked, then claimed later
   val BUG_ATTACH_BEFORE_READ: bool = OFF.contains("attachBeforeRead")       // H-1 violated: the acceptor connects and attaches V_h before the full request is read
-  val BUG_ADMIT_SPLIT: bool = OFF.contains("admitSplit")                    // admission check done, flow registered in the CID table later
-  val BUG_PAIRED_NO_RECHECK: bool = OFF.contains("pairedNoRecheck")         // step 6 continuation ignores that the flow was aborted
   val BUG_NO_ABORT_ON_LOSS: bool = OFF.contains("noAbortOnLoss")            // control-session loss does not abort the CID's flows
-  val BUG_TEARDOWN_SKIPS_FLOWS: bool = OFF.contains("teardownSkipsFlows")   // teardown closes listeners/session but not the flows
   val BUG_LATE_PAIRED_RESURRECTS: bool = OFF.contains("latePairedResurrects") // U-5 off: the host acts on a Paired for a flow it closed
   val BUG_PEER_CID_ONLY: bool = OFF.contains("peerCidOnly")                 // ATTR-TOKEN off: attribution by peer CID alone
-  val BUG_CLAIM_BEFORE_TOKEN: bool = OFF.contains("claimBeforeToken")       // ATTR-LIVE-CLAIM order off: the session claim is taken at
-                                                                            // accept, before the ControlOpen is read
   val BUG_NO_CLAIM_RECHECK: bool = OFF.contains("noClaimRecheck")           // ATTR-LIVE-CLAIM off (comparison with the lease token): the claim
                                                                             // step compares with the LEASE token (Retiring included);
                                                                             // the CID state is checked at accept only
@@ -186,21 +182,12 @@ module owner_flows {
   val BUG_BEACON_PEER_CID_ONLY: bool = OFF.contains("beaconPeerCidOnly")    // ATTR-TOKEN off for the beacon: READY attributed by peer CID
   val BUG_DRIVER_STOP_KEEPS_CLAIM: bool = OFF.contains("driverStopKeepsClaim") // ADR-0157 off: driver.stop closes the session but does not
                                                                             // release the CID's beacon claim
-  val BUG_RECONNECT_BEFORE_LOSS_ABORT: bool = OFF.contains("reconnectBeforeLossAbort") // DG-5-F off: the guest may open a new session while a flow of
-                                                                            // the lost session is still open
   val BUG_NO_ACCEPTED_WATCH: bool = OFF.contains("noAcceptedWatch")         // DG-5-E off: an accepted, unattached V_g is not watched
-  val ENV_GUEST_MISSES_HOST_CLOSE: bool = OFF.contains("K-A4")              // drop K-A4: the guest never observes the host's close of V_h
   val ENV_GUEST_MISSES_SESSION_LOSS: bool = OFF.contains("K-A5S")            // drop K-A5S: the guest never observes the end of its control connection
-  val ALT_GUEST_ABORT_TOMBSTONE: bool = OFF.contains("altTombstone")        // candidate: the guest keeps an Abort for a host-origin id it
-                                                                            // has not accepted yet, and closes that flow at accept
   val BUG_DIAL_NO_ADMISSION: bool = OFF.contains("dialNoAdmission")         // the owner opens a dial without the Active ∧ session ∧ not-quiesced check
-  val BUG_DIAL_NO_SESSION_CHECK: bool = OFF.contains("dialNoSessionCheck")  // step 3 alone off: a dial opens to an Active, not-quiesced CID with no live session
   val BUG_REFUSAL_REGISTERS: bool = OFF.contains("refusalRegisters")        // a typed admission refusal registers (and closes) the dial slot
   val BUG_ACTIVATE_NO_GUARD: bool = OFF.contains("activateNoGuard")         // G-V3 off: activate marks the CID Active without a live session / while quiesced
   val BUG_OWNER_DEADLINE_SHORTER: bool = OFF.contains("ownerDeadlineShorter") // GUEST_DIAL_PAIRING_DEADLINE not above the guest timeout: the owner may abandon a dial the guest can still answer
-  val ALT_TEARDOWN_CLOSES_READING: bool = OFF.contains("altTeardownClosesReading") // rejected alternative to ATTR-LIVE-CLAIM: teardown
-                                                                            // also closes connections in `reading`, and the claim step
-                                                                            // compares with the lease token (no live check)
 
   // ------------------------------------------------------------------ types
   // st: none | pending (host accept queue) | reading (accepted, CID check passed, first record not
@@ -208,10 +195,9 @@ module owner_flows {
   //     owner) | closed
   // gen: the launch that opened it. Its first record is buffered at connect (a live guest writes it
   // at once). A queued connection with nothing buffered fails its first read and is closed with no
-  // effect — under claimBeforeToken it releases the claim exactly as a token mismatch does — so it
-  // adds no behaviour and is not modelled.
+  // effect, so it adds no behaviour and is not modelled.
   type Sess = { st: str, gen: int }
-  // st: none | queued (accept queue) | checked (bug only) | accepted (registered, request not yet
+  // st: none | queued (accept queue) | accepted (registered, request not yet
   //     fully read and compared) | read (token matched: registration complete) |
   //     connecting | paired | closed
   // req: request bytes read in userspace: 0, 1 (partial), 2 (all of it)
@@ -245,7 +231,7 @@ module owner_flows {
   // host-opened TcpAccept flows
   // hf.st: none | req (V_h connected, request written, awaiting Paired / Refused) | paired | closed
   var hf: int -> { st: str, gen: int }
-  // gf.st: none | tomb (ALT only) | acc (accepted, request read, unattached) | attached | closed | reset (K-A4: V_g torn down while still
+  // gf.st: none | acc (accepted, request read, unattached) | attached | closed | reset (K-A4: V_g torn down while still
   //        in the guest's accept queue)
   // gf.c: the guest's live control connection when it accepted V_g (0 = none)
   var gf: int -> { st: str, gen: int, c: int }
@@ -284,7 +270,7 @@ module owner_flows {
   val cidAcceptsSession: bool = alloc.in(Set("Provisioned", "Active"))
   // the CID's LIVE launch token (ATTR-LIVE-CLAIM): `gen` while the CID is Provisioned or Active
   def tokenMatches(g: int): bool = cidAcceptsSession and g == gen
-  // the CID's lease token (the rejected comparison; noClaimRecheck / altTeardownClosesReading)
+  // the CID's lease token (the rejected comparison; noClaimRecheck)
   def leaseTokenMatches(g: int): bool = alloc != "Absent" and g == gen
   val admissible: bool = alloc == "Active" and sessLive and not(quiesced)
   // the launch of the session control messages travel on (the claim holder), or -1
@@ -375,7 +361,7 @@ module owner_flows {
   // VMM exit (driver.stop's kill, or a crash). K-A2′: connections already accepted fail at their next
   // I/O (a live session becomes `dead`; an accepted session or beacon connection whose first record
   // is unread, and an accepted flow whose request is not fully read, fail their read and are closed,
-  // with no other effect; under claimBeforeToken such a session's claim is released by the close);
+  // with no other effect);
   // queued connections stay queued with their buffered first record. A live beacon session keeps its
   // claim until driver.stop. H-1 (r1): the device-release orphan sweep resets the host vsock of every dial
   // of this launch still awaiting its pairing reply (K-C4, ECONNRESET): the owner ends it and the dial returns
@@ -447,7 +433,7 @@ module owner_flows {
   // teardown: Retiring — which ends the CID's live launch token — closes the control session and
   // releases its claim, in one step; aborts every flow of the CID (registrations
   // awaiting their token check included, U-1). It does not touch connections in `reading`
-  // (ATTR-LIVE-CLAIM; the rejected alternative altTeardownClosesReading closes them too).
+  // (ATTR-LIVE-CLAIM).
   action Teardown = all {
     conf_step' = if (REC) variant("Teardown", ()) else conf_step, gSess' = gSess,
     CORE,   // UI-V-BEACON-ACTIONS: no VM-driver driving port
@@ -455,11 +441,11 @@ module owner_flows {
     alloc' = "Retiring",
     sess' = sess.keys().mapBy(c =>
       val s = sess.get(c)
-      if (s.st.in(Set("live", "dead", "checked")) or (ALT_TEARDOWN_CLOSES_READING and s.st == "reading"))
+      if (s.st.in(Set("live", "dead", "checked")))
         { ...s, st: "closed" }
       else s),
     claim' = 0,
-    flows' = if (BUG_TEARDOWN_SKIPS_FLOWS) flows else abortAll,
+    flows' = abortAll,
     gen' = gen, vmGen' = vmGen, vmUp' = vmUp, quiesced' = quiesced, badPaired' = badPaired, keepAttr,
     hf' = abortAllH, gf' = gf, toHostPaired' = Set(), toHostRefused' = Set(), toGuestAbort' = Set(), toHostAbort' = Set(),
     keepGhostsHNoDl, dl' = { ...dlEnd("NotServing"), tout: Set() }, keepX,
@@ -506,11 +492,10 @@ module owner_flows {
     gf.get(h).st.in(Set("acc", "attached")) and gf.get(h).c != 0 and not(connLive(gf.get(h).c)))
   // D-UP-8: the guest owner opens its session only while it holds none (it observed the loss of the one it held),
   // on a connection slot that is free or ended; DG-5-F: and with no flow of a lost session open
-  // (reconnectBeforeLossAbort: neither is waited for)
   action GuestOpenSession(c: int): bool = all {
     conf_step' = if (REC) variant("GuestOpenSession", { c: c }) else conf_step,
     vmUp, sess.get(c).st.in(Set("none", "closed")),
-    BUG_RECONNECT_BEFORE_LOSS_ABORT or and { gSess == 0, not(lostSessionFlowOpen) },
+    gSess == 0, not(lostSessionFlowOpen),
     sess' = sess.set(c, { st: "pending", gen: vmGen }),
     gSess' = c,
     claim' = claim, heldByOther' = heldByOther, keepSessRest,
@@ -528,19 +513,15 @@ module owner_flows {
     sess' = sess.set(c, { st: "pending", gen: vmGen }),
     gSess' = gSess, claim' = claim, heldByOther' = heldByOther, keepSessRest,
   }
-  // Accept: an early close for a CID not Provisioned or Active; it admits nothing. (claimBeforeToken:
-  // the claim is also taken here, before the ControlOpen is read; a held claim closes the connection.)
+  // Accept: an early close for a CID not Provisioned or Active; it admits nothing.
   action HostAcceptSession(c: int): bool = all {
     conf_step' = if (REC) variant("HostAcceptSession", { c: c }) else conf_step, gSess' = gSess,
     sess.get(c).st == "pending",
     if (not(cidAcceptsSession)) all {
       sess' = sess.set(c, { ...sess.get(c), st: "closed" }), claim' = claim, heldByOther' = heldByOther,
-    } else if (BUG_CLAIM_BEFORE_TOKEN and claim != 0) all {
-      sess' = sess.set(c, { ...sess.get(c), st: "closed" }), claim' = claim,
-      heldByOther' = (heldByOther or sess.get(claim).gen != sess.get(c).gen),
     } else all {
       sess' = sess.set(c, { ...sess.get(c), st: "reading" }),
-      claim' = if (BUG_CLAIM_BEFORE_TOKEN) c else claim, heldByOther' = heldByOther,
+      claim' = claim, heldByOther' = heldByOther,
     },
     keepSessRest,
   }
@@ -553,15 +534,10 @@ module owner_flows {
     sess.get(c).st == "reading",
     val s = sess.get(c)
     val tokOk = BUG_PEER_CID_ONLY or
-                (if (BUG_NO_CLAIM_RECHECK or ALT_TEARDOWN_CLOSES_READING) leaseTokenMatches(s.gen)
+                (if (BUG_NO_CLAIM_RECHECK) leaseTokenMatches(s.gen)
                  else tokenMatches(s.gen))
     val upSt = if (writerUp(s.gen)) "live" else "dead"
-    if (BUG_CLAIM_BEFORE_TOKEN) all {
-      // the claim is already this connection's (taken at accept)
-      sess' = sess.set(c, { ...s, st: if (tokOk) upSt else "closed" }),
-      claim' = if (tokOk) claim else (if (claim == c) 0 else claim),
-      heldByOther' = heldByOther,
-    } else if (not(tokOk)) all {
+    if (not(tokOk)) all {
       sess' = sess.set(c, { ...s, st: "closed" }), claim' = claim, heldByOther' = heldByOther,
     } else if (claim != 0) all {
       sess' = sess.set(c, { ...s, st: "closed" }), claim' = claim,
@@ -615,20 +591,8 @@ module owner_flows {
   // CID's flow table — one owner step (U-1). Otherwise close, no message.
   action HostAcceptFlow(f: int): bool = all {
     conf_step' = if (REC) variant("HostAcceptFlow", { f: f }) else conf_step, gSess' = gSess,
-    not(BUG_ADMIT_SPLIT), flows.get(f).st == "queued",
+    flows.get(f).st == "queued",
     flows' = flows.set(f, { ...flows.get(f), st: if (admissible) "accepted" else "closed" }),
-    badPaired' = badPaired, crossMsg' = crossMsg, keepFlowRest,
-  }
-  action HostCheckFlow(f: int): bool = all {
-    conf_step' = if (REC) variant("HostCheckFlow", { f: f }) else conf_step, gSess' = gSess,
-    BUG_ADMIT_SPLIT, flows.get(f).st == "queued",
-    flows' = flows.set(f, { ...flows.get(f), st: if (admissible) "checked" else "closed" }),
-    badPaired' = badPaired, crossMsg' = crossMsg, keepFlowRest,
-  }
-  action HostRegisterFlow(f: int): bool = all {
-    conf_step' = if (REC) variant("HostRegisterFlow", { f: f }) else conf_step, gSess' = gSess,
-    BUG_ADMIT_SPLIT, flows.get(f).st == "checked",
-    flows' = flows.set(f, { ...flows.get(f), st: "accepted" }),
     badPaired' = badPaired, crossMsg' = crossMsg, keepFlowRest,
   }
   // step 3: read the request in userspace (in one or two pieces); once all of it is read, compare
@@ -661,7 +625,7 @@ module owner_flows {
   action HostConnectDone(f: int): bool = all {
     conf_step' = if (REC) variant("HostConnectDone", { f: f }) else conf_step, gSess' = gSess,
     flows.get(f).inFlight,
-    flows.get(f).st == "connecting" or (BUG_PAIRED_NO_RECHECK and flows.get(f).st == "closed"),
+    flows.get(f).st == "connecting",
     flows' = flows.set(f, { ...flows.get(f), st: "paired", inFlight: false }),
     badPaired' = (badPaired or not(admissible and flows.get(f).gen == gen)),
     crossMsg' = (crossMsg or crossFor(flows.get(f).gen)),
@@ -670,7 +634,7 @@ module owner_flows {
   // the in-flight completion of an aborted flow is discarded
   action HostConnectDiscard(f: int): bool = all {
     conf_step' = if (REC) variant("HostConnectDiscard", { f: f }) else conf_step, gSess' = gSess,
-    flows.get(f).inFlight, flows.get(f).st == "closed", not(BUG_PAIRED_NO_RECHECK),
+    flows.get(f).inFlight, flows.get(f).st == "closed",
     flows' = flows.set(f, { ...flows.get(f), inFlight: false }),
     badPaired' = badPaired, crossMsg' = crossMsg, keepFlowRest,
   }
@@ -683,7 +647,7 @@ module owner_flows {
   }
   action HostFlowEndsMsg(f: int, msg: bool): bool = all {
     conf_step' = if (REC) variant("HostFlowEndsMsg", { f: f, msg: msg }) else conf_step, gSess' = gSess,
-    registered(flows.get(f).st) or flows.get(f).st == "checked",
+    registered(flows.get(f).st),
     val sends = msg and attributed(flows.get(f).st)
     all {
       flows' = flows.set(f, { ...flows.get(f), st: "closed" }),
@@ -700,12 +664,12 @@ module owner_flows {
   action keepCoreMsg = all { keepCore, crossMsg' = crossMsg }
   // V_g is in the guest's accept queue: the host connected V_h to this VM, the guest has not accepted
   def queuedV(h: int): bool = and {
-    gf.get(h).st.in(Set("none", "tomb")), hf.get(h).st != "none", hf.get(h).gen == vmGen, vmUp }
+    gf.get(h).st == "none", hf.get(h).st != "none", hf.get(h).gen == vmGen, vmUp }
   def guestHalf(h: int): bool = gf.get(h).st.in(Set("acc", "attached")) or queuedV(h)
   val liveConn: int = CONNS.fold(0, (acc, c) => if (sess.get(c).st == "live" and sess.get(c).gen == vmGen) c else acc)
   // the guest can still answer the dial: its VM and a live session exist and it has not decided
   def canStillReply(h: int): bool = and {
-    vmUp, hf.get(h).gen == vmGen, sessLive, gf.get(h).st.in(Set("none", "tomb", "acc")) }
+    vmUp, hf.get(h).gen == vmGen, sessLive, gf.get(h).st.in(Set("none", "acc")) }
   // steps 1-2 (INB-1): a platform client dialed an address that is an Active VM lease and a declared port, the
   // node is not quiesced and the VM is reachable: the owner connects V_h to (CID, 1242) and writes the request
   // with the lease token. The host side of the dial is handed to the dialer; the owner watches it (it is never
@@ -713,7 +677,7 @@ module owner_flows {
   action DialOpen(h: int): bool = all {
     conf_step' = if (REC) variant("DialOpen", { h: h }) else conf_step, gSess' = gSess,
     hf.get(h).st == "none", vmUp, vmGen == gen, alloc == "Active",
-    or { BUG_DIAL_NO_ADMISSION, admissible, BUG_DIAL_NO_SESSION_CHECK and not(quiesced) },
+    or { BUG_DIAL_NO_ADMISSION, admissible },
     hf' = hf.set(h, { st: "req", gen: gen }),
     dl' = { ...resSet(h, "pending"), adm: dl.adm.exclude(Set(h)) },
     gf' = gf, toHostPaired' = toHostPaired, toHostRefused' = toHostRefused, toGuestAbort' = toGuestAbort, toHostAbort' = toHostAbort,
@@ -763,8 +727,8 @@ module owner_flows {
   // step 3: the guest accepts V_g and reads the request (its own token); V_g stays unattached, held by the owner.
   action GuestAcceptV(h: int): bool = all {
     conf_step' = if (REC) variant("GuestAcceptV", { h: h }) else conf_step, gSess' = gSess,
-    hf.get(h).st != "none", hf.get(h).gen == vmGen, vmUp, gf.get(h).st.in(Set("none", "tomb")),
-    gf' = gf.set(h, { st: if (gf.get(h).st == "tomb") "closed" else "acc", gen: vmGen, c: liveConn }),
+    hf.get(h).st != "none", hf.get(h).gen == vmGen, vmUp, gf.get(h).st == "none",
+    gf' = gf.set(h, { st: "acc", gen: vmGen, c: liveConn }),
     hf' = hf, toHostPaired' = toHostPaired, toHostRefused' = toHostRefused, toGuestAbort' = toGuestAbort, toHostAbort' = toHostAbort,
     keepGhostsH, keepCoreMsg,
   }
@@ -875,8 +839,7 @@ module owner_flows {
     hf' = hf, toHostPaired' = toHostPaired, toHostRefused' = toHostRefused, toGuestAbort' = toGuestAbort, toHostAbort' = toHostAbort,
     keepGhostsH, keepCoreMsg,
   }
-  // the guest receives Abort: closes a known flow; an unknown one is discarded (U-5), or kept as a
-  // tombstone (ALT)
+  // the guest receives Abort: closes a known flow; an unknown one is discarded (U-5)
   action GuestRecvAbort(h: int): bool = all {
     conf_step' = if (REC) variant("GuestRecvAbort", { h: h }) else conf_step, gSess' = gSess,
     toGuestAbort.contains(h),
@@ -884,9 +847,8 @@ module owner_flows {
     val st = gf.get(h).st
     all {
       gf' = if (st.in(Set("acc", "attached"))) gf.set(h, { ...gf.get(h), st: "closed" })
-            else if (st == "none" and ALT_GUEST_ABORT_TOMBSTONE) gf.set(h, { st: "tomb", gen: vmGen, c: 0 })
             else gf,
-      abortDiscarded' = if (st == "none" and not(ALT_GUEST_ABORT_TOMBSTONE)) abortDiscarded.union(Set(h)) else abortDiscarded,
+      abortDiscarded' = if (st == "none") abortDiscarded.union(Set(h)) else abortDiscarded,
     },
     hf' = hf, toHostPaired' = toHostPaired, toHostRefused' = toHostRefused, dl' = dl,
     resurrected' = resurrected, phantom' = phantom, keepCoreMsg,
@@ -898,7 +860,7 @@ module owner_flows {
   // The flow is then Closed: a later pairing step (GuestPairOrRefuse) finds it Closed (U-1).
   action GuestSeesHostClose(h: int): bool = all {
     conf_step' = if (REC) variant("GuestSeesHostClose", { h: h }) else conf_step, gSess' = gSess,
-    not(ENV_GUEST_MISSES_HOST_CLOSE), hf.get(h).st == "closed",
+    hf.get(h).st == "closed",
     gf.get(h).st == "attached" or (gf.get(h).st == "acc" and not(BUG_NO_ACCEPTED_WATCH)),
     gf' = gf.set(h, { ...gf.get(h), st: "closed" }),
     hf' = hf, toHostPaired' = toHostPaired, toHostRefused' = toHostRefused, toGuestAbort' = toGuestAbort, toHostAbort' = toHostAbort,
@@ -943,7 +905,7 @@ module owner_flows {
   // K-A4: the host's close of V_h ends a V_g still in the guest's accept queue
   action GuestQueueReset(h: int): bool = all {
     conf_step' = if (REC) variant("GuestQueueReset", { h: h }) else conf_step, gSess' = gSess,
-    not(ENV_GUEST_MISSES_HOST_CLOSE), hf.get(h).st == "closed", queuedV(h),
+    hf.get(h).st == "closed", queuedV(h),
     gf' = gf.set(h, { st: "reset", gen: vmGen, c: 0 }),
     hf' = hf, toHostPaired' = toHostPaired, toHostRefused' = toHostRefused, toGuestAbort' = toGuestAbort, toHostAbort' = toHostAbort,
     keepGhostsH, keepCoreMsg,
@@ -1031,7 +993,7 @@ module owner_flows {
       Quiesce, Restore,
       GuestOpenSession(c), WorkloadOpenSession(c), HostAcceptSession(c), HostReadOpen(c), HostClaimSession(c),
       HostSessionLoss(c),
-      GuestOpenFlow(f), HostAcceptFlow(f), HostCheckFlow(f), HostRegisterFlow(f),
+      GuestOpenFlow(f), HostAcceptFlow(f),
       HostReadReq(f), HostStartConnect(f), HostConnectDone(f),
       HostConnectDiscard(f), HostFlowEnds(f),
     }
@@ -1351,7 +1313,7 @@ module owner_flows {
     .expect(Safety and hf.get(2).st == "paired" and dl.res.get(2) == "Ok" and dl.res.get(1) == "NoSession" and not(resurrected))
   // DG-5-F: the session is lost; the guest owner aborts EVERY flow of it in the one dispatch that observes the
   // loss. Until then `lostSessionFlowOpen` holds, which disables GuestOpenSession (no reconnect precedes the
-  // abort: GuestFlowsDoNotOutliveSession, with its teeth in the hazard reconnectBeforeLossAbort); then it reconnects
+  // abort: GuestFlowsDoNotOutliveSession); then it reconnects
   run SessionLossAbortsAllFlowsBeforeReconnect = ControlSessionOpensAndCidActivates
     .then(DialOpen(1)).then(GuestAcceptV(1)).then(GuestPairOrRefuseOk(1, true))
     .then(DialOpen(2)).then(GuestAcceptV(2))
@@ -1503,34 +1465,8 @@ module owner_flows {
     .then(Provision).then(VmStart).then(GuestOpenBeacon(1)).then(HostAcceptBeacon(1)).then(VmStop)
     .expect(BeaconSafety and bcn.get(1).st == "closed" and bclaim == 0)
 
-  // ------------------------------------------------------------------ non-vacuity witnesses
-  // Each is EXPECTED to be violated: the violation proves the behaviour is reachable.
-  val WitnessNoPaired: bool = FLOW_IDS.forall(f => flows.get(f).st != "paired")
-  val WitnessNoReuse: bool = gen < 2 or alloc != "Active"
-  val WitnessNoQuiesceAbort: bool = not(quiesced and FLOW_IDS.exists(f => flows.get(f).st == "closed" and flows.get(f).req == 2))
-  val WitnessNoLateCompletion: bool = not(FLOW_IDS.exists(f => flows.get(f).st == "closed" and flows.get(f).inFlight))
-  val WitnessNoAcceptPaired: bool = HFLOWS.forall(h => hf.get(h).st != "paired")
-  val WitnessNoDialOk: bool = HFLOWS.forall(h => dl.res.get(h) != "Ok")
-  val WitnessNoDialTimedOut: bool = HFLOWS.forall(h => dl.res.get(h) != "TimedOut")
-  val WitnessNoDialDeadline: bool = HFLOWS.forall(h => dl.res.get(h) != "PairingDeadline")
+  // non-vacuity witness kept: no named run reaches the phantom connect (violated: the state is reachable)
   val WitnessNoPhantomConnect: bool = not(phantom)
-  val WitnessNoQueueReset: bool = HFLOWS.forall(h => gf.get(h).st != "reset")
-  // K-A2′: a dead launch's queued connection, its first record buffered, is accepted by the host
-  // after the CID's next lease exists (a session being read, or a flow registered pending its check)
-  val WitnessNoStaleAccept: bool = not(and {
-    gen >= 2,
-    or {
-      CONNS.exists(c => sess.get(c).st == "reading" and sess.get(c).gen < gen),
-      FLOW_IDS.exists(f => flows.get(f).st == "accepted" and flows.get(f).gen < gen),
-    },
-  })
-  // a connection accepted while the CID was Provisioned is read after
-  // teardown (its CID Retiring) — the design then closes it at its read
-  val WitnessNoReadAfterTeardown: bool = not(alloc == "Retiring" and CONNS.exists(c => sess.get(c).st == "reading"))
-  // beacon: a launch's READY is released; a dead launch's beacon connection is read while the next
-  // launch is live
-  val WitnessNoReady: bool = not(readyLive)
-  val WitnessNoStaleBeaconRead: bool = not(drvLive and BCONNS.exists(b => bcn.get(b).st == "reading" and bcn.get(b).gen < vmGen))
 }
 
 
@@ -1540,7 +1476,10 @@ module owner_flows {
 module flows_ok { import owner_flows(OFF = Set(), CFG = "core", REC = false).* from "./owner_flows" }
 // the design, core, without guest-opened flows and dials: the instance of the SessionBecomesLive liveness check
 module flows_sess { import owner_flows(OFF = Set(), CFG = "sess", REC = false).* from "./owner_flows" }
-// the design, core, two host-opened flows: the guest-side session loss aborts every flow of the session in one step (DG-5-F)
+// the design, core, one guest-opened flow and one host-opened flow: the instance of the GuestHalfEnds liveness check
+// (the property mentions the host-opened flow only; TLC's liveness mode on `flows_ok` took 53 min and 10 GB)
+module flows_one { import owner_flows(OFF = Set(), CFG = "one", REC = false).* from "./owner_flows" }
+// the design, core, two host-opened flows (two dial slots): the instance of the bounded Safety check of two concurrent dials
 module flows_two { import owner_flows(OFF = Set(), CFG = "core2", REC = false).* from "./owner_flows" }
 // the design, beacon: one CID reused by 2 allocations, VM start / exit and driver.stop, 2 beacon connections
 module flows_beacon { import owner_flows(OFF = Set(), CFG = "beacon", REC = false).* from "./owner_flows" }

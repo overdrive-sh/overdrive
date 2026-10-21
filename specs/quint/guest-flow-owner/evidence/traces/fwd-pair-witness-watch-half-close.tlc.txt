@@ -70,7 +70,6 @@ State 1: <Initial predicate>
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
@@ -81,9 +80,7 @@ State 1: <Initial predicate>
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -99,9 +96,7 @@ State 1: <Initial predicate>
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -135,7 +130,7 @@ State 1: <Initial predicate>
         cgen |-> 0 ] ]
 /\ pair_watch_fwd_pair_hres = "none"
 
-State 2: <pair_watch_fwd_pair_Attach line 3212, col 3 to line 3219, col 63 of module pair_watch>
+State 2: <pair_watch_fwd_pair_Attach line 2904, col 3 to line 2911, col 63 of module pair_watch>
 /\ pair_watch_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
 /\ pair_watch_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_watch_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
@@ -207,7 +202,6 @@ State 2: <pair_watch_fwd_pair_Attach line 3212, col 3 to line 3219, col 63 of mo
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
@@ -218,9 +212,7 @@ State 2: <pair_watch_fwd_pair_Attach line 3212, col 3 to line 3219, col 63 of mo
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -236,9 +228,7 @@ State 2: <pair_watch_fwd_pair_Attach line 3212, col 3 to line 3219, col 63 of mo
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -272,7 +262,7 @@ State 2: <pair_watch_fwd_pair_Attach line 3212, col 3 to line 3219, col 63 of mo
         cgen |-> 0 ] ]
 /\ pair_watch_fwd_pair_hres = "none"
 
-State 3: <pair_watch_fwd_pair_Fin line 1837, col 3 to line 1864, col 61 of module pair_watch>
+State 3: <pair_watch_fwd_pair_Fin line 1355, col 3 to line 1382, col 61 of module pair_watch>
 /\ pair_watch_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
 /\ pair_watch_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_watch_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
@@ -344,7 +334,6 @@ State 3: <pair_watch_fwd_pair_Fin line 1837, col 3 to line 1864, col 61 of modul
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
@@ -355,9 +344,7 @@ State 3: <pair_watch_fwd_pair_Fin line 1837, col 3 to line 1864, col 61 of modul
       [ wr |-> 0,
         wfin |-> TRUE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -373,9 +360,7 @@ State 3: <pair_watch_fwd_pair_Fin line 1837, col 3 to line 1864, col 61 of modul
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -409,7 +394,7 @@ State 3: <pair_watch_fwd_pair_Fin line 1837, col 3 to line 1864, col 61 of modul
         cgen |-> 0 ] ]
 /\ pair_watch_fwd_pair_hres = "none"
 
-State 4: <pair_watch_fwd_pair_HopEnd0 line 2908, col 3 to line 2930, col 38 of module pair_watch>
+State 4: <pair_watch_fwd_pair_HopEnd0 line 2561, col 3 to line 2583, col 38 of module pair_watch>
 /\ pair_watch_fwd_pair_ctl = [gh |-> <<{"S"}>>, hg |-> <<>>]
 /\ pair_watch_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_watch_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
@@ -481,7 +466,6 @@ State 4: <pair_watch_fwd_pair_HopEnd0 line 2908, col 3 to line 2930, col 38 of m
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
@@ -492,9 +476,7 @@ State 4: <pair_watch_fwd_pair_HopEnd0 line 2908, col 3 to line 2930, col 38 of m
       [ wr |-> 0,
         wfin |-> TRUE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "clean",
         srcShut |-> TRUE,
@@ -510,9 +492,7 @@ State 4: <pair_watch_fwd_pair_HopEnd0 line 2908, col 3 to line 2930, col 38 of m
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -546,7 +526,7 @@ State 4: <pair_watch_fwd_pair_HopEnd0 line 2908, col 3 to line 2930, col 38 of m
         cgen |-> 0 ] ]
 /\ pair_watch_fwd_pair_hres = "none"
 
-State 5: <pair_watch_fwd_pair_VCtl line 3406, col 3 to line 3409, col 37 of module pair_watch>
+State 5: <pair_watch_fwd_pair_VCtl line 3092, col 3 to line 3095, col 37 of module pair_watch>
 /\ pair_watch_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
 /\ pair_watch_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_watch_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
@@ -618,7 +598,6 @@ State 5: <pair_watch_fwd_pair_VCtl line 3406, col 3 to line 3409, col 37 of modu
   faults |-> 0,
   hobs |-> "none",
   woken |-> TRUE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
@@ -629,9 +608,7 @@ State 5: <pair_watch_fwd_pair_VCtl line 3406, col 3 to line 3409, col 37 of modu
       [ wr |-> 0,
         wfin |-> TRUE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "clean",
         srcShut |-> TRUE,
@@ -647,9 +624,7 @@ State 5: <pair_watch_fwd_pair_VCtl line 3406, col 3 to line 3409, col 37 of modu
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,

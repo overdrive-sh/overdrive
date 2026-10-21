@@ -30,7 +30,7 @@ State 1: <Initial predicate>
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_reclaimed = TRUE
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 2: <lease_bugTickDuringPredecessorTeardown_cid_lease_Assign line 1495, col 3 to line 1618, col 70 of module lease_bugTickDuringPredecessorTeardown>
+State 2: <lease_bugTickDuringPredecessorTeardown_cid_lease_Assign line 1436, col 3 to line 1533, col 70 of module lease_bugTickDuringPredecessorTeardown>
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_cursor = 1
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
@@ -62,7 +62,7 @@ State 2: <lease_bugTickDuringPredecessorTeardown_cid_lease_Assign line 1495, col
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_reclaimed = TRUE
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 3: <lease_bugTickDuringPredecessorTeardown_cid_lease_Launch line 1682, col 3 to line 1784, col 70 of module lease_bugTickDuringPredecessorTeardown>
+State 3: <lease_bugTickDuringPredecessorTeardown_cid_lease_Launch line 1597, col 3 to line 1699, col 70 of module lease_bugTickDuringPredecessorTeardown>
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_cursor = 1
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
@@ -94,7 +94,7 @@ State 3: <lease_bugTickDuringPredecessorTeardown_cid_lease_Launch line 1682, col
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_reclaimed = TRUE
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
-State 4: <lease_bugTickDuringPredecessorTeardown_cid_lease_VmmCrash line 1790, col 3 to line 1802, col 70 of module lease_bugTickDuringPredecessorTeardown>
+State 4: <lease_bugTickDuringPredecessorTeardown_cid_lease_VmmCrash line 1705, col 3 to line 1717, col 70 of module lease_bugTickDuringPredecessorTeardown>
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_cursor = 1
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
@@ -126,7 +126,7 @@ State 4: <lease_bugTickDuringPredecessorTeardown_cid_lease_VmmCrash line 1790, c
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_reclaimed = TRUE
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 5: <lease_bugTickDuringPredecessorTeardown_cid_lease_Assign line 1495, col 3 to line 1618, col 70 of module lease_bugTickDuringPredecessorTeardown>
+State 5: <lease_bugTickDuringPredecessorTeardown_cid_lease_Assign line 1436, col 3 to line 1533, col 70 of module lease_bugTickDuringPredecessorTeardown>
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_cursor = 2
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
@@ -158,7 +158,7 @@ State 5: <lease_bugTickDuringPredecessorTeardown_cid_lease_Assign line 1495, col
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_reclaimed = TRUE
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 6: <lease_bugTickDuringPredecessorTeardown_cid_lease_Launch line 1682, col 3 to line 1784, col 70 of module lease_bugTickDuringPredecessorTeardown>
+State 6: <lease_bugTickDuringPredecessorTeardown_cid_lease_Launch line 1597, col 3 to line 1699, col 70 of module lease_bugTickDuringPredecessorTeardown>
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_cursor = 2
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
@@ -190,7 +190,7 @@ State 6: <lease_bugTickDuringPredecessorTeardown_cid_lease_Launch line 1682, col
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_reclaimed = TRUE
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_dev = (0 :> 0 @@ 1 :> 1 @@ 2 :> 0)
 
-State 7: <lease_bugTickDuringPredecessorTeardown_cid_lease_VmmCrash line 1790, col 3 to line 1802, col 70 of module lease_bugTickDuringPredecessorTeardown>
+State 7: <lease_bugTickDuringPredecessorTeardown_cid_lease_VmmCrash line 1705, col 3 to line 1717, col 70 of module lease_bugTickDuringPredecessorTeardown>
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_cursor = 2
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
@@ -222,7 +222,7 @@ State 7: <lease_bugTickDuringPredecessorTeardown_cid_lease_VmmCrash line 1790, c
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_reclaimed = TRUE
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 8: <lease_bugTickDuringPredecessorTeardown_cid_lease_Assign line 1495, col 3 to line 1618, col 70 of module lease_bugTickDuringPredecessorTeardown>
+State 8: <lease_bugTickDuringPredecessorTeardown_cid_lease_Assign line 1436, col 3 to line 1533, col 70 of module lease_bugTickDuringPredecessorTeardown>
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_cursor = 0
 /\ lease_bugTickDuringPredecessorTeardown_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,

@@ -7,9 +7,7 @@ State 1: <Initial predicate>
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -25,9 +23,7 @@ State 1: <Initial predicate>
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -129,13 +125,12 @@ State 1: <Initial predicate>
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
 
-State 2: <pair_bugConsumeOnShortSend_fwd_pair_Write line 3110, col 3 to line 3151, col 74 of module pair_bugConsumeOnShortSend>
+State 2: <pair_bugConsumeOnShortSend_fwd_pair_Write line 3407, col 3 to line 3448, col 74 of module pair_bugConsumeOnShortSend>
 /\ pair_bugConsumeOnShortSend_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugConsumeOnShortSend_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
 /\ pair_bugConsumeOnShortSend_fwd_pair_mode = "stream"
@@ -144,9 +139,7 @@ State 2: <pair_bugConsumeOnShortSend_fwd_pair_Write line 3110, col 3 to line 315
       [ wr |-> 1,
         wfin |-> FALSE,
         q0 |-> <<1>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -162,9 +155,7 @@ State 2: <pair_bugConsumeOnShortSend_fwd_pair_Write line 3110, col 3 to line 315
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -266,13 +257,12 @@ State 2: <pair_bugConsumeOnShortSend_fwd_pair_Write line 3110, col 3 to line 315
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
 
-State 3: <pair_bugConsumeOnShortSend_fwd_pair_Attach line 3995, col 3 to line 4005, col 79 of module pair_bugConsumeOnShortSend>
+State 3: <pair_bugConsumeOnShortSend_fwd_pair_Attach line 3640, col 3 to line 3650, col 79 of module pair_bugConsumeOnShortSend>
 /\ pair_bugConsumeOnShortSend_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugConsumeOnShortSend_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
 /\ pair_bugConsumeOnShortSend_fwd_pair_mode = "stream"
@@ -281,9 +271,7 @@ State 3: <pair_bugConsumeOnShortSend_fwd_pair_Attach line 3995, col 3 to line 40
       [ wr |-> 1,
         wfin |-> FALSE,
         q0 |-> <<1>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -299,9 +287,7 @@ State 3: <pair_bugConsumeOnShortSend_fwd_pair_Attach line 3995, col 3 to line 40
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -403,13 +389,12 @@ State 3: <pair_bugConsumeOnShortSend_fwd_pair_Attach line 3995, col 3 to line 40
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
 
-State 4: <pair_bugConsumeOnShortSend_fwd_pair_Attach line 3995, col 3 to line 4005, col 79 of module pair_bugConsumeOnShortSend>
+State 4: <pair_bugConsumeOnShortSend_fwd_pair_Attach line 3640, col 3 to line 3650, col 79 of module pair_bugConsumeOnShortSend>
 /\ pair_bugConsumeOnShortSend_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugConsumeOnShortSend_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
 /\ pair_bugConsumeOnShortSend_fwd_pair_mode = "stream"
@@ -418,9 +403,7 @@ State 4: <pair_bugConsumeOnShortSend_fwd_pair_Attach line 3995, col 3 to line 40
       [ wr |-> 1,
         wfin |-> FALSE,
         q0 |-> <<1>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -436,9 +419,7 @@ State 4: <pair_bugConsumeOnShortSend_fwd_pair_Attach line 3995, col 3 to line 40
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -540,13 +521,12 @@ State 4: <pair_bugConsumeOnShortSend_fwd_pair_Attach line 3995, col 3 to line 40
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
 
-State 5: <pair_bugConsumeOnShortSend_fwd_pair_Hop0 line 3506, col 3 to line 3518, col 53 of module pair_bugConsumeOnShortSend>
+State 5: <pair_bugConsumeOnShortSend_fwd_pair_Hop0 line 3107, col 3 to line 3119, col 53 of module pair_bugConsumeOnShortSend>
 /\ pair_bugConsumeOnShortSend_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugConsumeOnShortSend_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
 /\ pair_bugConsumeOnShortSend_fwd_pair_mode = "stream"
@@ -555,9 +535,7 @@ State 5: <pair_bugConsumeOnShortSend_fwd_pair_Hop0 line 3506, col 3 to line 3518
       [ wr |-> 1,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<1>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -573,9 +551,7 @@ State 5: <pair_bugConsumeOnShortSend_fwd_pair_Hop0 line 3506, col 3 to line 3518
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -677,13 +653,12 @@ State 5: <pair_bugConsumeOnShortSend_fwd_pair_Hop0 line 3506, col 3 to line 3518
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
 
-State 6: <pair_bugConsumeOnShortSend_fwd_pair_Write line 3110, col 3 to line 3151, col 74 of module pair_bugConsumeOnShortSend>
+State 6: <pair_bugConsumeOnShortSend_fwd_pair_Write line 3407, col 3 to line 3448, col 74 of module pair_bugConsumeOnShortSend>
 /\ pair_bugConsumeOnShortSend_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugConsumeOnShortSend_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
 /\ pair_bugConsumeOnShortSend_fwd_pair_mode = "stream"
@@ -692,9 +667,7 @@ State 6: <pair_bugConsumeOnShortSend_fwd_pair_Write line 3110, col 3 to line 315
       [ wr |-> 2,
         wfin |-> FALSE,
         q0 |-> <<2>>,
-        h0 |-> <<>>,
         q1 |-> <<1>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -710,9 +683,7 @@ State 6: <pair_bugConsumeOnShortSend_fwd_pair_Write line 3110, col 3 to line 315
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -814,13 +785,12 @@ State 6: <pair_bugConsumeOnShortSend_fwd_pair_Write line 3110, col 3 to line 315
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
 
-State 7: <pair_bugConsumeOnShortSend_fwd_pair_Hop0 line 3506, col 3 to line 3518, col 53 of module pair_bugConsumeOnShortSend>
+State 7: <pair_bugConsumeOnShortSend_fwd_pair_Hop0 line 3107, col 3 to line 3119, col 53 of module pair_bugConsumeOnShortSend>
 /\ pair_bugConsumeOnShortSend_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugConsumeOnShortSend_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
 /\ pair_bugConsumeOnShortSend_fwd_pair_mode = "stream"
@@ -829,9 +799,7 @@ State 7: <pair_bugConsumeOnShortSend_fwd_pair_Hop0 line 3506, col 3 to line 3518
       [ wr |-> 2,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<1>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -847,9 +815,7 @@ State 7: <pair_bugConsumeOnShortSend_fwd_pair_Hop0 line 3506, col 3 to line 3518
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -951,7 +917,6 @@ State 7: <pair_bugConsumeOnShortSend_fwd_pair_Hop0 line 3506, col 3 to line 3518
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,

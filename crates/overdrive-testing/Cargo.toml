@@ -47,7 +47,16 @@ overdrive-core.workspace = true
 # guest's own `KernelFlowForwarder` context. overdrive-fwd in turn takes this
 # crate as a dev-dependency; cargo permits that cycle.
 overdrive-fwd.workspace  = true
+# `guest_kit` launches its microVM through the production `CloudHypervisorVmm`
+# (U-4 (a)): the one renderer of the cloud-hypervisor command line. This crate
+# is an `adapter-host` fixture, so it may name the production host binding;
+# `overdrive-host` in turn takes this crate as a dev-dependency (a cargo-legal
+# dev-dependency cycle, as with `overdrive-fwd`).
+overdrive-host.path       = "../overdrive-host"
 thiserror.workspace      = true
+# The kit's own small runtime that drives `Vmm::create` / `Vmm::terminate`
+# and the exit watch behind the kit's synchronous surface.
+tokio.workspace          = true
 
 # The scripted guest vsock peer: PID 1 (or a guest application) inside a
 # guest-kit microVM. Test support only.

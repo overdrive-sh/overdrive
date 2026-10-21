@@ -21,27 +21,35 @@
 //! the lane's state is as it found it.
 //!
 //! **Not here.** The ULP negative control (a socket that had kTLS installed
-//! after attach keeps its reference for the boot) and the KASAN unload stress
-//! each need a kernel boot of their own — the ULP control leaves the module
-//! unloadable until a reboot — and run in the guest-kit microVM or a KASAN
-//! guest, not on the metal host (see the DISTILL upstream issues, U-EV-UNLOAD).
+//! after attach keeps its reference for the boot) and the unload stress each
+//! need a kernel boot of their own — the ULP control leaves the module
+//! unloadable until a reboot — and run inside the guest-kit microVM
+//! (`unload_in_guest.rs`, T-1, U-EV-UNLOAD), not on the metal host.
+//!
+//! **The step-K version oracle.** The step-K context cell checks the refused
+//! unload by the module staying listed and a reopened context; the request
+//! number of `OVD_FWD_VERSION` is written with the adapter in step 4
+//! (`src/uapi.rs`), so "the context still answers `OVD_FWD_VERSION`" is the
+//! step-4 cell [`an_open_context_answers_its_version_while_the_unload_is_refused`].
 
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::path::PathBuf;
 use std::time::Instant;
 
 use nix::libc;
-use overdrive_core::guest_transport::forwarder::FlowForwarder;
+use overdrive_core::guest_transport::forwarder::{FlowForwarder, PairMode, PairSide};
 use overdrive_fwd::KernelFlowForwarder;
 use overdrive_testing::forwarder_module::{built_module_path, kmod_dir, require_forwarder_module};
 
-use super::support::{END_WAIT, attach_stream, open_context, tcp_pair, vsock_pair, wait_end};
+use super::support::{
+    END_WAIT, attach_stream, open_context, tcp_pair, udp_pair, vsock_pair, wait_end, wait_end_of,
+};
 
-const MODULE_DIR: &str = "/sys/module/ovd_fwd";
+pub(super) const MODULE_DIR: &str = "/sys/module/ovd_fwd";
 const REFCNT: &str = "/sys/module/ovd_fwd/refcnt";
 
 /// The module's reference count.
-fn refcnt() -> u64 {
+pub(super) fn refcnt() -> u64 {
     std::fs::read_to_string(REFCNT)
         .unwrap_or_else(|e| panic!("precondition: ovd_fwd is loaded ({REFCNT}: {e})"))
         .trim()
@@ -51,7 +59,7 @@ fn refcnt() -> u64 {
 
 /// Waits (bounded by [`END_WAIT`]) until `refcnt` reads `want`: the free
 /// work drops a hooked socket's reference after an RCU grace period.
-fn wait_refcnt(want: u64) {
+pub(super) fn wait_refcnt(want: u64) {
     let deadline = Instant::now() + END_WAIT;
     loop {
         let got = refcnt();
@@ -67,7 +75,7 @@ fn wait_refcnt(want: u64) {
 }
 
 /// `delete_module("ovd_fwd", O_NONBLOCK)`: `Ok` or the errno.
-fn delete_nonblock() -> Result<(), i32> {
+pub(super) fn delete_nonblock() -> Result<(), i32> {
     // SAFETY: a valid NUL-terminated module name and the O_NONBLOCK flag; the
     // kernel's own reference check decides whether anything is unloaded.
     let rc =
@@ -205,4 +213,62 @@ fn hooked_sockets_hold_the_module_until_their_free_work_and_a_reload_then_serves
     drop(reloaded);
     wait_refcnt(0);
     drop((v, t, w, v2, t2));
+}
+
+/// Step 4, the socket half in datagram mode: an attached datagram
+/// association (a vsock half carrying frames and a UDP half) holds one
+/// reference per hooked socket — `refcnt` 3 with the context's — and the
+/// unload is refused `EWOULDBLOCK`; after its abort and once its end record
+/// is read, `refcnt` returns to the context's 1 within the bounded wait.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 4"]
+fn a_datagram_association_holds_one_reference_per_hooked_socket_until_its_record_is_read() {
+    precondition_idle_workspace_module();
+
+    let fwd = open_context();
+    assert_eq!(refcnt(), 1, "the context's reference");
+    let (v, _v_far) = vsock_pair();
+    let (u, _u_far) = udp_pair();
+    let id = fwd
+        .attach(&v, &u, PairMode::Datagram { udp: PairSide::B })
+        .expect("attach a datagram association");
+    assert_eq!(refcnt(), 3, "one reference per hooked half of the association");
+    assert_eq!(delete_nonblock(), Err(libc::EWOULDBLOCK), "refused with a live association");
+
+    fwd.abort(id).expect("abort the association");
+    let end = wait_end_of(&fwd, id);
+    assert_eq!(end.id, id, "the association's record was read");
+    wait_refcnt(1);
+    drop(fwd);
+    wait_refcnt(0);
+    drop((v, u));
+}
+
+/// Step 4, the context half's full oracle: with a context open the unload is
+/// refused `EWOULDBLOCK`, the module still answers `OVD_FWD_VERSION` (the
+/// forwarder probe's `Version` stage, on the probe's own context, passes
+/// with every later stage) and the held context still answers an ioctl
+/// (`inventory()`). After the context's close the unload succeeds and this
+/// workspace's build loads again.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER step 4"]
+fn an_open_context_answers_its_version_while_the_unload_is_refused() {
+    precondition_idle_workspace_module();
+
+    let fwd = KernelFlowForwarder::open().expect("open a context");
+    assert_eq!(refcnt(), 1, "the context's reference");
+    assert_eq!(delete_nonblock(), Err(libc::EWOULDBLOCK), "refused while the context is open");
+    fwd.probe().expect("the module answers OVD_FWD_VERSION and serves the probe");
+    let inventory = fwd.inventory().expect("the held context answers inventory()");
+    assert_eq!((inventory.live_pairs, inventory.live_watches), (0, 0));
+    wait_refcnt(1);
+    drop(fwd);
+    wait_refcnt(0);
+    assert_eq!(delete_nonblock(), Ok(()), "the unload succeeds once the context is closed");
+    load_workspace_module();
+    require_forwarder_module().unwrap_or_else(|e| panic!("the reload is this workspace's: {e}"));
 }

@@ -67,8 +67,11 @@ removed.
   the in-guest test binaries are built and staged at contract paths by the
   lane setup `cargo xtask guest-kit-prepare` (`xtask/src/guest_kit_prepare.rs`),
   and the fixture only checks they exist (`GuestKitError::LaneNotPrepared`); ext4 images with either as PID 1, the vsock modules, optionally the
-  forwarder and loopback modules; the CH fork launched directly with
-  `--vsock cid=<cid>,backend=vhost-kernel`; `GuestKitVm` kill / wait /
+  forwarder and loopback modules; the CH fork launched through the
+  production `overdrive-host` `CloudHypervisorVmm` (`Vmm::create` over a
+  `VmConfig`, U-4 (a): the one renderer of the launch argument,
+  `--vsock cid=<cid>,backend=vhost-kernel`, under the production confinement;
+  `overdrive-testing` depends on `overdrive-host`); `GuestKitVm` kill / wait /
   console); a CID-band registry of per-file bands from offset `0x2000`,
   above the production band, with a guard test; `guest_peer` +
   `bin/guest_peer.rs` (the scripted guest vsock peer: a typed line protocol

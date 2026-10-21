@@ -30,7 +30,7 @@ State 1: <Initial predicate>
 /\ lease_bugReleaseBeforeVmm_cid_lease_cursor = 0
 /\ lease_bugReleaseBeforeVmm_cid_lease_bootLeft = -1
 
-State 2: <lease_bugReleaseBeforeVmm_cid_lease_Assign line 1391, col 3 to line 1504, col 57 of module lease_bugReleaseBeforeVmm>
+State 2: <lease_bugReleaseBeforeVmm_cid_lease_Assign line 1336, col 3 to line 1424, col 57 of module lease_bugReleaseBeforeVmm>
 /\ lease_bugReleaseBeforeVmm_cid_lease_al = << [ st |-> "leased",
      off |-> 0,
      retry |-> FALSE,
@@ -62,7 +62,7 @@ State 2: <lease_bugReleaseBeforeVmm_cid_lease_Assign line 1391, col 3 to line 15
 /\ lease_bugReleaseBeforeVmm_cid_lease_cursor = 1
 /\ lease_bugReleaseBeforeVmm_cid_lease_bootLeft = -1
 
-State 3: <lease_bugReleaseBeforeVmm_cid_lease_Launch line 1568, col 3 to line 1657, col 57 of module lease_bugReleaseBeforeVmm>
+State 3: <lease_bugReleaseBeforeVmm_cid_lease_Launch line 1488, col 3 to line 1577, col 57 of module lease_bugReleaseBeforeVmm>
 /\ lease_bugReleaseBeforeVmm_cid_lease_al = << [ st |-> "running",
      off |-> 0,
      retry |-> FALSE,
@@ -94,7 +94,7 @@ State 3: <lease_bugReleaseBeforeVmm_cid_lease_Launch line 1568, col 3 to line 16
 /\ lease_bugReleaseBeforeVmm_cid_lease_cursor = 1
 /\ lease_bugReleaseBeforeVmm_cid_lease_bootLeft = -1
 
-State 4: <lease_bugReleaseBeforeVmm_cid_lease_Release line 1002, col 3 to line 1138, col 57 of module lease_bugReleaseBeforeVmm>
+State 4: <lease_bugReleaseBeforeVmm_cid_lease_Release line 947, col 3 to line 1083, col 57 of module lease_bugReleaseBeforeVmm>
 /\ lease_bugReleaseBeforeVmm_cid_lease_al = << [ st |-> "wait",
      off |-> -1,
      retry |-> FALSE,

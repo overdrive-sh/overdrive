@@ -1,5 +1,81 @@
 State 1: <Initial predicate>
-/\ pair_bugConsumePartialFrame_fwd_pair_vs = [ g |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_mode = "dgram"
+/\ pair_dhazConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_dhazConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_attRes = [g |-> "none", h |-> "none"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_strmAbort = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_pr = [ g |->
+      [ ph |-> "unattached",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "unattached",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_dhazConsumePartialFrame_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vmUp = TRUE
+/\ pair_dhazConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
+/\ pair_dhazConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_hres = "none"
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vs = [ g |->
       [ ps |-> {},
         sent |-> {},
         err |-> FALSE,
@@ -27,11 +103,8 @@ State 1: <Initial predicate>
         sshut |-> FALSE,
         misc |-> FALSE,
         st |-> "est" ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_attRes = [g |-> "none", h |-> "none"]
-/\ pair_bugConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
-/\ pair_bugConsumePartialFrame_fwd_pair_strmAbort = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_dg = [ gh |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_dg = [ gh |->
       [ got |-> <<>>,
         n |-> 0,
         sizes |-> <<>>,
@@ -53,10 +126,13 @@ State 1: <Initial predicate>
         sdrop |-> {},
         rdrop |-> {},
         fdrop |-> {} ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
-/\ pair_bugConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_vmUp = TRUE
-/\ pair_bugConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+/\ pair_dhazConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_dhazConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+
+State 2: <pair_dhazConsumePartialFrame_fwd_pair_SendDg line 1881, col 3 to line 1941, col 62 of module pair_dhazConsumePartialFrame>
+/\ pair_dhazConsumePartialFrame_fwd_pair_mode = "dgram"
+/\ pair_dhazConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
   fwdOld |-> FALSE,
   unclassified |-> FALSE,
   rstOpen |-> {},
@@ -65,52 +141,16 @@ State 1: <Initial predicate>
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
-/\ pair_bugConsumePartialFrame_fwd_pair_hres = "none"
-/\ pair_bugConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
-/\ pair_bugConsumePartialFrame_fwd_pair_dir = [ gh |->
-      [ wr |-> 0,
-        wfin |-> FALSE,
-        q0 |-> <<>>,
-        h0 |-> <<>>,
-        q1 |-> <<>>,
-        h1 |-> <<>>,
-        q2 |-> <<>>,
-        srcEnd |-> "none",
-        srcShut |-> FALSE,
-        dstEnd |-> "none",
-        dstShut |-> FALSE,
-        got |-> <<>>,
-        eof |-> FALSE,
-        rst |-> FALSE,
-        shutRd |-> FALSE,
-        loss |-> FALSE,
-        lost |-> 0 ],
-  hg |->
-      [ wr |-> 0,
-        wfin |-> FALSE,
-        q0 |-> <<>>,
-        h0 |-> <<>>,
-        q1 |-> <<>>,
-        h1 |-> <<>>,
-        q2 |-> <<>>,
-        srcEnd |-> "none",
-        srcShut |-> FALSE,
-        dstEnd |-> "none",
-        dstShut |-> FALSE,
-        got |-> <<>>,
-        eof |-> FALSE,
-        rst |-> FALSE,
-        shutRd |-> FALSE,
-        loss |-> FALSE,
-        lost |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
-/\ pair_bugConsumePartialFrame_fwd_pair_pr = [ g |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_attRes = [g |-> "none", h |-> "none"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_strmAbort = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_pr = [ g |->
       [ ph |-> "unattached",
         rec |-> "none",
         out |-> "none",
@@ -130,13 +170,44 @@ State 1: <Initial predicate>
         closed |-> FALSE,
         nrec |-> 0,
         cgen |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
-/\ pair_bugConsumePartialFrame_fwd_pair_mode = "dgram"
-/\ pair_bugConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
-
-State 2: <pair_bugConsumePartialFrame_fwd_pair_SendDg line 2013, col 3 to line 2073, col 61 of module pair_bugConsumePartialFrame>
-/\ pair_bugConsumePartialFrame_fwd_pair_vs = [ g |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vmUp = TRUE
+/\ pair_dhazConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
+/\ pair_dhazConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_hres = "none"
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vs = [ g |->
       [ ps |-> {},
         sent |-> {},
         err |-> FALSE,
@@ -164,11 +235,8 @@ State 2: <pair_bugConsumePartialFrame_fwd_pair_SendDg line 2013, col 3 to line 2
         sshut |-> FALSE,
         misc |-> FALSE,
         st |-> "est" ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_attRes = [g |-> "none", h |-> "none"]
-/\ pair_bugConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
-/\ pair_bugConsumePartialFrame_fwd_pair_strmAbort = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_dg = [ gh |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_dg = [ gh |->
       [ got |-> <<>>,
         n |-> 1,
         sizes |-> <<0>>,
@@ -190,10 +258,13 @@ State 2: <pair_bugConsumePartialFrame_fwd_pair_SendDg line 2013, col 3 to line 2
         sdrop |-> {},
         rdrop |-> {},
         fdrop |-> {} ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
-/\ pair_bugConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_vmUp = TRUE
-/\ pair_bugConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+/\ pair_dhazConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_dhazConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+
+State 3: <pair_dhazConsumePartialFrame_fwd_pair_Attach line 3728, col 3 to line 3738, col 81 of module pair_dhazConsumePartialFrame>
+/\ pair_dhazConsumePartialFrame_fwd_pair_mode = "dgram"
+/\ pair_dhazConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
   fwdOld |-> FALSE,
   unclassified |-> FALSE,
   rstOpen |-> {},
@@ -202,20 +273,40 @@ State 2: <pair_bugConsumePartialFrame_fwd_pair_SendDg line 2013, col 3 to line 2
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
-/\ pair_bugConsumePartialFrame_fwd_pair_hres = "none"
-/\ pair_bugConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
-/\ pair_bugConsumePartialFrame_fwd_pair_dir = [ gh |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_attRes = [g |-> "none", h |-> "ok"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_strmAbort = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_pr = [ g |->
+      [ ph |-> "unattached",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_dhazConsumePartialFrame_fwd_pair_dir = [ gh |->
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -231,9 +322,7 @@ State 2: <pair_bugConsumePartialFrame_fwd_pair_SendDg line 2013, col 3 to line 2
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -245,35 +334,12 @@ State 2: <pair_bugConsumePartialFrame_fwd_pair_SendDg line 2013, col 3 to line 2
         shutRd |-> FALSE,
         loss |-> FALSE,
         lost |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
-/\ pair_bugConsumePartialFrame_fwd_pair_pr = [ g |->
-      [ ph |-> "unattached",
-        rec |-> "none",
-        out |-> "none",
-        cause |-> "none",
-        errno |-> "none",
-        byRel |-> FALSE,
-        closed |-> FALSE,
-        nrec |-> 0,
-        cgen |-> 0 ],
-  h |->
-      [ ph |-> "unattached",
-        rec |-> "none",
-        out |-> "none",
-        cause |-> "none",
-        errno |-> "none",
-        byRel |-> FALSE,
-        closed |-> FALSE,
-        nrec |-> 0,
-        cgen |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
-/\ pair_bugConsumePartialFrame_fwd_pair_mode = "dgram"
-/\ pair_bugConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
-
-State 3: <pair_bugConsumePartialFrame_fwd_pair_Attach line 4073, col 3 to line 4083, col 80 of module pair_bugConsumePartialFrame>
-/\ pair_bugConsumePartialFrame_fwd_pair_vs = [ g |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_vmUp = TRUE
+/\ pair_dhazConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
+/\ pair_dhazConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_hres = "none"
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vs = [ g |->
       [ ps |-> {},
         sent |-> {},
         err |-> FALSE,
@@ -301,11 +367,8 @@ State 3: <pair_bugConsumePartialFrame_fwd_pair_Attach line 4073, col 3 to line 4
         sshut |-> FALSE,
         misc |-> FALSE,
         st |-> "est" ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_attRes = [g |-> "none", h |-> "ok"]
-/\ pair_bugConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
-/\ pair_bugConsumePartialFrame_fwd_pair_strmAbort = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_dg = [ gh |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_dg = [ gh |->
       [ got |-> <<>>,
         n |-> 1,
         sizes |-> <<0>>,
@@ -327,10 +390,13 @@ State 3: <pair_bugConsumePartialFrame_fwd_pair_Attach line 4073, col 3 to line 4
         sdrop |-> {},
         rdrop |-> {},
         fdrop |-> {} ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
-/\ pair_bugConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_vmUp = TRUE
-/\ pair_bugConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+/\ pair_dhazConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_dhazConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+
+State 4: <pair_dhazConsumePartialFrame_fwd_pair_Attach line 3728, col 3 to line 3738, col 81 of module pair_dhazConsumePartialFrame>
+/\ pair_dhazConsumePartialFrame_fwd_pair_mode = "dgram"
+/\ pair_dhazConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
   fwdOld |-> FALSE,
   unclassified |-> FALSE,
   rstOpen |-> {},
@@ -339,53 +405,17 @@ State 3: <pair_bugConsumePartialFrame_fwd_pair_Attach line 4073, col 3 to line 4
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
-/\ pair_bugConsumePartialFrame_fwd_pair_hres = "none"
-/\ pair_bugConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
-/\ pair_bugConsumePartialFrame_fwd_pair_dir = [ gh |->
-      [ wr |-> 0,
-        wfin |-> FALSE,
-        q0 |-> <<>>,
-        h0 |-> <<>>,
-        q1 |-> <<>>,
-        h1 |-> <<>>,
-        q2 |-> <<>>,
-        srcEnd |-> "none",
-        srcShut |-> FALSE,
-        dstEnd |-> "none",
-        dstShut |-> FALSE,
-        got |-> <<>>,
-        eof |-> FALSE,
-        rst |-> FALSE,
-        shutRd |-> FALSE,
-        loss |-> FALSE,
-        lost |-> 0 ],
-  hg |->
-      [ wr |-> 0,
-        wfin |-> FALSE,
-        q0 |-> <<>>,
-        h0 |-> <<>>,
-        q1 |-> <<>>,
-        h1 |-> <<>>,
-        q2 |-> <<>>,
-        srcEnd |-> "none",
-        srcShut |-> FALSE,
-        dstEnd |-> "none",
-        dstShut |-> FALSE,
-        got |-> <<>>,
-        eof |-> FALSE,
-        rst |-> FALSE,
-        shutRd |-> FALSE,
-        loss |-> FALSE,
-        lost |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
-/\ pair_bugConsumePartialFrame_fwd_pair_pr = [ g |->
-      [ ph |-> "unattached",
+/\ pair_dhazConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_strmAbort = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
         rec |-> "none",
         out |-> "none",
         cause |-> "none",
@@ -404,13 +434,44 @@ State 3: <pair_bugConsumePartialFrame_fwd_pair_Attach line 4073, col 3 to line 4
         closed |-> FALSE,
         nrec |-> 0,
         cgen |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
-/\ pair_bugConsumePartialFrame_fwd_pair_mode = "dgram"
-/\ pair_bugConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
-
-State 4: <pair_bugConsumePartialFrame_fwd_pair_Attach line 4073, col 3 to line 4083, col 80 of module pair_bugConsumePartialFrame>
-/\ pair_bugConsumePartialFrame_fwd_pair_vs = [ g |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vmUp = TRUE
+/\ pair_dhazConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
+/\ pair_dhazConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_hres = "none"
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vs = [ g |->
       [ ps |-> {},
         sent |-> {},
         err |-> FALSE,
@@ -438,11 +499,8 @@ State 4: <pair_bugConsumePartialFrame_fwd_pair_Attach line 4073, col 3 to line 4
         sshut |-> FALSE,
         misc |-> FALSE,
         st |-> "est" ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
-/\ pair_bugConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
-/\ pair_bugConsumePartialFrame_fwd_pair_strmAbort = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_dg = [ gh |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_dg = [ gh |->
       [ got |-> <<>>,
         n |-> 1,
         sizes |-> <<0>>,
@@ -464,10 +522,13 @@ State 4: <pair_bugConsumePartialFrame_fwd_pair_Attach line 4073, col 3 to line 4
         sdrop |-> {},
         rdrop |-> {},
         fdrop |-> {} ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
-/\ pair_bugConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_vmUp = TRUE
-/\ pair_bugConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+/\ pair_dhazConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_dhazConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+
+State 5: <pair_dhazConsumePartialFrame_fwd_pair_Hop0 line 3190, col 3 to line 3202, col 55 of module pair_dhazConsumePartialFrame>
+/\ pair_dhazConsumePartialFrame_fwd_pair_mode = "dgram"
+/\ pair_dhazConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
   fwdOld |-> FALSE,
   unclassified |-> FALSE,
   rstOpen |-> {},
@@ -476,52 +537,16 @@ State 4: <pair_bugConsumePartialFrame_fwd_pair_Attach line 4073, col 3 to line 4
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
-/\ pair_bugConsumePartialFrame_fwd_pair_hres = "none"
-/\ pair_bugConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
-/\ pair_bugConsumePartialFrame_fwd_pair_dir = [ gh |->
-      [ wr |-> 0,
-        wfin |-> FALSE,
-        q0 |-> <<>>,
-        h0 |-> <<>>,
-        q1 |-> <<>>,
-        h1 |-> <<>>,
-        q2 |-> <<>>,
-        srcEnd |-> "none",
-        srcShut |-> FALSE,
-        dstEnd |-> "none",
-        dstShut |-> FALSE,
-        got |-> <<>>,
-        eof |-> FALSE,
-        rst |-> FALSE,
-        shutRd |-> FALSE,
-        loss |-> FALSE,
-        lost |-> 0 ],
-  hg |->
-      [ wr |-> 0,
-        wfin |-> FALSE,
-        q0 |-> <<>>,
-        h0 |-> <<>>,
-        q1 |-> <<>>,
-        h1 |-> <<>>,
-        q2 |-> <<>>,
-        srcEnd |-> "none",
-        srcShut |-> FALSE,
-        dstEnd |-> "none",
-        dstShut |-> FALSE,
-        got |-> <<>>,
-        eof |-> FALSE,
-        rst |-> FALSE,
-        shutRd |-> FALSE,
-        loss |-> FALSE,
-        lost |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
-/\ pair_bugConsumePartialFrame_fwd_pair_pr = [ g |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_strmAbort = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_pr = [ g |->
       [ ph |-> "live",
         rec |-> "none",
         out |-> "none",
@@ -541,92 +566,11 @@ State 4: <pair_bugConsumePartialFrame_fwd_pair_Attach line 4073, col 3 to line 4
         closed |-> FALSE,
         nrec |-> 0,
         cgen |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
-/\ pair_bugConsumePartialFrame_fwd_pair_mode = "dgram"
-/\ pair_bugConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
-
-State 5: <pair_bugConsumePartialFrame_fwd_pair_Hop0 line 3579, col 3 to line 3591, col 54 of module pair_bugConsumePartialFrame>
-/\ pair_bugConsumePartialFrame_fwd_pair_vs = [ g |->
-      [ ps |-> {},
-        sent |-> {},
-        err |-> FALSE,
-        cls |-> "none",
-        tcls |-> "none",
-        ucls |-> "none",
-        att |-> "noend",
-        clsAt |-> "none",
-        ncls |-> 0,
-        snap |-> {},
-        sshut |-> FALSE,
-        misc |-> FALSE,
-        st |-> "est" ],
-  h |->
-      [ ps |-> {},
-        sent |-> {},
-        err |-> FALSE,
-        cls |-> "none",
-        tcls |-> "none",
-        ucls |-> "none",
-        att |-> "noend",
-        clsAt |-> "none",
-        ncls |-> 0,
-        snap |-> {},
-        sshut |-> FALSE,
-        misc |-> FALSE,
-        st |-> "est" ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
-/\ pair_bugConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
-/\ pair_bugConsumePartialFrame_fwd_pair_strmAbort = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_dg = [ gh |->
-      [ got |-> <<>>,
-        n |-> 1,
-        sizes |-> <<0>>,
-        dq0 |-> <<>>,
-        foff |-> 0,
-        blk |-> FALSE,
-        dq2 |-> <<>>,
-        sdrop |-> {},
-        rdrop |-> {},
-        fdrop |-> {} ],
-  hg |->
-      [ got |-> <<>>,
-        n |-> 0,
-        sizes |-> <<>>,
-        dq0 |-> <<>>,
-        foff |-> 0,
-        blk |-> FALSE,
-        dq2 |-> <<>>,
-        sdrop |-> {},
-        rdrop |-> {},
-        fdrop |-> {} ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
-/\ pair_bugConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_vmUp = TRUE
-/\ pair_bugConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
-  fwdOld |-> FALSE,
-  unclassified |-> FALSE,
-  rstOpen |-> {},
-  holderReadAfterAbort |-> FALSE,
-  trail |-> {},
-  faults |-> 0,
-  hobs |-> "none",
-  woken |-> FALSE,
-  recPend |-> FALSE,
-  vhTouched |-> FALSE,
-  dropped |-> FALSE,
-  hostDead |-> FALSE,
-  hresCls |-> "none" ]
-/\ pair_bugConsumePartialFrame_fwd_pair_hres = "none"
-/\ pair_bugConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
-/\ pair_bugConsumePartialFrame_fwd_pair_dir = [ gh |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_dir = [ gh |->
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<10>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -642,9 +586,7 @@ State 5: <pair_bugConsumePartialFrame_fwd_pair_Hop0 line 3579, col 3 to line 359
       [ wr |-> 0,
         wfin |-> FALSE,
         q0 |-> <<>>,
-        h0 |-> <<>>,
         q1 |-> <<>>,
-        h1 |-> <<>>,
         q2 |-> <<>>,
         srcEnd |-> "none",
         srcShut |-> FALSE,
@@ -656,35 +598,12 @@ State 5: <pair_bugConsumePartialFrame_fwd_pair_Hop0 line 3579, col 3 to line 359
         shutRd |-> FALSE,
         loss |-> FALSE,
         lost |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
-/\ pair_bugConsumePartialFrame_fwd_pair_pr = [ g |->
-      [ ph |-> "live",
-        rec |-> "none",
-        out |-> "none",
-        cause |-> "none",
-        errno |-> "none",
-        byRel |-> FALSE,
-        closed |-> FALSE,
-        nrec |-> 0,
-        cgen |-> 0 ],
-  h |->
-      [ ph |-> "live",
-        rec |-> "none",
-        out |-> "none",
-        cause |-> "none",
-        errno |-> "none",
-        byRel |-> FALSE,
-        closed |-> FALSE,
-        nrec |-> 0,
-        cgen |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
-/\ pair_bugConsumePartialFrame_fwd_pair_mode = "dgram"
-/\ pair_bugConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
-
-State 6: <pair_bugConsumePartialFrame_fwd_pair_SendDg line 2013, col 3 to line 2073, col 61 of module pair_bugConsumePartialFrame>
-/\ pair_bugConsumePartialFrame_fwd_pair_vs = [ g |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_vmUp = TRUE
+/\ pair_dhazConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
+/\ pair_dhazConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_hres = "none"
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vs = [ g |->
       [ ps |-> {},
         sent |-> {},
         err |-> FALSE,
@@ -712,11 +631,140 @@ State 6: <pair_bugConsumePartialFrame_fwd_pair_SendDg line 2013, col 3 to line 2
         sshut |-> FALSE,
         misc |-> FALSE,
         st |-> "est" ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
-/\ pair_bugConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
-/\ pair_bugConsumePartialFrame_fwd_pair_strmAbort = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_dg = [ gh |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 1,
+        sizes |-> <<0>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_dhazConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_dhazConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+
+State 6: <pair_dhazConsumePartialFrame_fwd_pair_SendDg line 1881, col 3 to line 1941, col 62 of module pair_dhazConsumePartialFrame>
+/\ pair_dhazConsumePartialFrame_fwd_pair_mode = "dgram"
+/\ pair_dhazConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_dhazConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_strmAbort = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_dhazConsumePartialFrame_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<10>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vmUp = TRUE
+/\ pair_dhazConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
+/\ pair_dhazConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_hres = "none"
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_dg = [ gh |->
       [ got |-> <<>>,
         n |-> 2,
         sizes |-> <<0, 2>>,
@@ -738,10 +786,13 @@ State 6: <pair_bugConsumePartialFrame_fwd_pair_SendDg line 2013, col 3 to line 2
         sdrop |-> {},
         rdrop |-> {},
         fdrop |-> {} ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
-/\ pair_bugConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_vmUp = TRUE
-/\ pair_bugConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+/\ pair_dhazConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_dhazConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+
+State 7: <pair_dhazConsumePartialFrame_fwd_pair_Hop0 line 3190, col 3 to line 3202, col 55 of module pair_dhazConsumePartialFrame>
+/\ pair_dhazConsumePartialFrame_fwd_pair_mode = "dgram"
+/\ pair_dhazConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
   fwdOld |-> FALSE,
   unclassified |-> FALSE,
   rstOpen |-> {},
@@ -750,52 +801,16 @@ State 6: <pair_bugConsumePartialFrame_fwd_pair_SendDg line 2013, col 3 to line 2
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
-/\ pair_bugConsumePartialFrame_fwd_pair_hres = "none"
-/\ pair_bugConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
-/\ pair_bugConsumePartialFrame_fwd_pair_dir = [ gh |->
-      [ wr |-> 0,
-        wfin |-> FALSE,
-        q0 |-> <<>>,
-        h0 |-> <<>>,
-        q1 |-> <<10>>,
-        h1 |-> <<>>,
-        q2 |-> <<>>,
-        srcEnd |-> "none",
-        srcShut |-> FALSE,
-        dstEnd |-> "none",
-        dstShut |-> FALSE,
-        got |-> <<>>,
-        eof |-> FALSE,
-        rst |-> FALSE,
-        shutRd |-> FALSE,
-        loss |-> FALSE,
-        lost |-> 0 ],
-  hg |->
-      [ wr |-> 0,
-        wfin |-> FALSE,
-        q0 |-> <<>>,
-        h0 |-> <<>>,
-        q1 |-> <<>>,
-        h1 |-> <<>>,
-        q2 |-> <<>>,
-        srcEnd |-> "none",
-        srcShut |-> FALSE,
-        dstEnd |-> "none",
-        dstShut |-> FALSE,
-        got |-> <<>>,
-        eof |-> FALSE,
-        rst |-> FALSE,
-        shutRd |-> FALSE,
-        loss |-> FALSE,
-        lost |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
-/\ pair_bugConsumePartialFrame_fwd_pair_pr = [ g |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_strmAbort = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_pr = [ g |->
       [ ph |-> "live",
         rec |-> "none",
         out |-> "none",
@@ -815,13 +830,44 @@ State 6: <pair_bugConsumePartialFrame_fwd_pair_SendDg line 2013, col 3 to line 2
         closed |-> FALSE,
         nrec |-> 0,
         cgen |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
-/\ pair_bugConsumePartialFrame_fwd_pair_mode = "dgram"
-/\ pair_bugConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
-
-State 7: <pair_bugConsumePartialFrame_fwd_pair_Hop0 line 3579, col 3 to line 3591, col 54 of module pair_bugConsumePartialFrame>
-/\ pair_bugConsumePartialFrame_fwd_pair_vs = [ g |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<10, 20>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vmUp = TRUE
+/\ pair_dhazConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
+/\ pair_dhazConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_hres = "none"
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vs = [ g |->
       [ ps |-> {},
         sent |-> {},
         err |-> FALSE,
@@ -849,11 +895,8 @@ State 7: <pair_bugConsumePartialFrame_fwd_pair_Hop0 line 3579, col 3 to line 359
         sshut |-> FALSE,
         misc |-> FALSE,
         st |-> "est" ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
-/\ pair_bugConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
-/\ pair_bugConsumePartialFrame_fwd_pair_strmAbort = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_dg = [ gh |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_dg = [ gh |->
       [ got |-> <<>>,
         n |-> 2,
         sizes |-> <<0, 2>>,
@@ -875,10 +918,13 @@ State 7: <pair_bugConsumePartialFrame_fwd_pair_Hop0 line 3579, col 3 to line 359
         sdrop |-> {},
         rdrop |-> {},
         fdrop |-> {} ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
-/\ pair_bugConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_vmUp = TRUE
-/\ pair_bugConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+/\ pair_dhazConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_dhazConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+
+State 8: <pair_dhazConsumePartialFrame_fwd_pair_Hop0 line 3190, col 3 to line 3202, col 55 of module pair_dhazConsumePartialFrame>
+/\ pair_dhazConsumePartialFrame_fwd_pair_mode = "dgram"
+/\ pair_dhazConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
   fwdOld |-> FALSE,
   unclassified |-> FALSE,
   rstOpen |-> {},
@@ -887,52 +933,16 @@ State 7: <pair_bugConsumePartialFrame_fwd_pair_Hop0 line 3579, col 3 to line 359
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
-/\ pair_bugConsumePartialFrame_fwd_pair_hres = "none"
-/\ pair_bugConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
-/\ pair_bugConsumePartialFrame_fwd_pair_dir = [ gh |->
-      [ wr |-> 0,
-        wfin |-> FALSE,
-        q0 |-> <<>>,
-        h0 |-> <<>>,
-        q1 |-> <<10, 20>>,
-        h1 |-> <<>>,
-        q2 |-> <<>>,
-        srcEnd |-> "none",
-        srcShut |-> FALSE,
-        dstEnd |-> "none",
-        dstShut |-> FALSE,
-        got |-> <<>>,
-        eof |-> FALSE,
-        rst |-> FALSE,
-        shutRd |-> FALSE,
-        loss |-> FALSE,
-        lost |-> 0 ],
-  hg |->
-      [ wr |-> 0,
-        wfin |-> FALSE,
-        q0 |-> <<>>,
-        h0 |-> <<>>,
-        q1 |-> <<>>,
-        h1 |-> <<>>,
-        q2 |-> <<>>,
-        srcEnd |-> "none",
-        srcShut |-> FALSE,
-        dstEnd |-> "none",
-        dstShut |-> FALSE,
-        got |-> <<>>,
-        eof |-> FALSE,
-        rst |-> FALSE,
-        shutRd |-> FALSE,
-        loss |-> FALSE,
-        lost |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
-/\ pair_bugConsumePartialFrame_fwd_pair_pr = [ g |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_strmAbort = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_pr = [ g |->
       [ ph |-> "live",
         rec |-> "none",
         out |-> "none",
@@ -952,13 +962,44 @@ State 7: <pair_bugConsumePartialFrame_fwd_pair_Hop0 line 3579, col 3 to line 359
         closed |-> FALSE,
         nrec |-> 0,
         cgen |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
-/\ pair_bugConsumePartialFrame_fwd_pair_mode = "dgram"
-/\ pair_bugConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
-
-State 8: <pair_bugConsumePartialFrame_fwd_pair_Hop0 line 3579, col 3 to line 3591, col 54 of module pair_bugConsumePartialFrame>
-/\ pair_bugConsumePartialFrame_fwd_pair_vs = [ g |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<10, 20, 21>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vmUp = TRUE
+/\ pair_dhazConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
+/\ pair_dhazConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_hres = "none"
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vs = [ g |->
       [ ps |-> {},
         sent |-> {},
         err |-> FALSE,
@@ -986,11 +1027,8 @@ State 8: <pair_bugConsumePartialFrame_fwd_pair_Hop0 line 3579, col 3 to line 359
         sshut |-> FALSE,
         misc |-> FALSE,
         st |-> "est" ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
-/\ pair_bugConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
-/\ pair_bugConsumePartialFrame_fwd_pair_strmAbort = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_dg = [ gh |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_dg = [ gh |->
       [ got |-> <<>>,
         n |-> 2,
         sizes |-> <<0, 2>>,
@@ -1012,10 +1050,13 @@ State 8: <pair_bugConsumePartialFrame_fwd_pair_Hop0 line 3579, col 3 to line 359
         sdrop |-> {},
         rdrop |-> {},
         fdrop |-> {} ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
-/\ pair_bugConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_vmUp = TRUE
-/\ pair_bugConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+/\ pair_dhazConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_dhazConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+
+State 9: <pair_dhazConsumePartialFrame_fwd_pair_Hop1 line 3773, col 3 to line 3785, col 55 of module pair_dhazConsumePartialFrame>
+/\ pair_dhazConsumePartialFrame_fwd_pair_mode = "dgram"
+/\ pair_dhazConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
   fwdOld |-> FALSE,
   unclassified |-> FALSE,
   rstOpen |-> {},
@@ -1024,52 +1065,16 @@ State 8: <pair_bugConsumePartialFrame_fwd_pair_Hop0 line 3579, col 3 to line 359
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
-/\ pair_bugConsumePartialFrame_fwd_pair_hres = "none"
-/\ pair_bugConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
-/\ pair_bugConsumePartialFrame_fwd_pair_dir = [ gh |->
-      [ wr |-> 0,
-        wfin |-> FALSE,
-        q0 |-> <<>>,
-        h0 |-> <<>>,
-        q1 |-> <<10, 20, 21>>,
-        h1 |-> <<>>,
-        q2 |-> <<>>,
-        srcEnd |-> "none",
-        srcShut |-> FALSE,
-        dstEnd |-> "none",
-        dstShut |-> FALSE,
-        got |-> <<>>,
-        eof |-> FALSE,
-        rst |-> FALSE,
-        shutRd |-> FALSE,
-        loss |-> FALSE,
-        lost |-> 0 ],
-  hg |->
-      [ wr |-> 0,
-        wfin |-> FALSE,
-        q0 |-> <<>>,
-        h0 |-> <<>>,
-        q1 |-> <<>>,
-        h1 |-> <<>>,
-        q2 |-> <<>>,
-        srcEnd |-> "none",
-        srcShut |-> FALSE,
-        dstEnd |-> "none",
-        dstShut |-> FALSE,
-        got |-> <<>>,
-        eof |-> FALSE,
-        rst |-> FALSE,
-        shutRd |-> FALSE,
-        loss |-> FALSE,
-        lost |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
-/\ pair_bugConsumePartialFrame_fwd_pair_pr = [ g |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_strmAbort = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_pr = [ g |->
       [ ph |-> "live",
         rec |-> "none",
         out |-> "none",
@@ -1089,13 +1094,44 @@ State 8: <pair_bugConsumePartialFrame_fwd_pair_Hop0 line 3579, col 3 to line 359
         closed |-> FALSE,
         nrec |-> 0,
         cgen |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
-/\ pair_bugConsumePartialFrame_fwd_pair_mode = "dgram"
-/\ pair_bugConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
-
-State 9: <pair_bugConsumePartialFrame_fwd_pair_Hop1 line 4118, col 3 to line 4130, col 54 of module pair_bugConsumePartialFrame>
-/\ pair_bugConsumePartialFrame_fwd_pair_vs = [ g |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<20, 21>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vmUp = TRUE
+/\ pair_dhazConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
+/\ pair_dhazConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_hres = "none"
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vs = [ g |->
       [ ps |-> {},
         sent |-> {},
         err |-> FALSE,
@@ -1123,11 +1159,8 @@ State 9: <pair_bugConsumePartialFrame_fwd_pair_Hop1 line 4118, col 3 to line 413
         sshut |-> FALSE,
         misc |-> FALSE,
         st |-> "est" ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
-/\ pair_bugConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
-/\ pair_bugConsumePartialFrame_fwd_pair_strmAbort = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_dg = [ gh |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_dg = [ gh |->
       [ got |-> <<>>,
         n |-> 2,
         sizes |-> <<0, 2>>,
@@ -1149,10 +1182,13 @@ State 9: <pair_bugConsumePartialFrame_fwd_pair_Hop1 line 4118, col 3 to line 413
         sdrop |-> {},
         rdrop |-> {},
         fdrop |-> {} ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
-/\ pair_bugConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_vmUp = TRUE
-/\ pair_bugConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+/\ pair_dhazConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_dhazConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+
+State 10: <pair_dhazConsumePartialFrame_fwd_pair_SendDg line 1881, col 3 to line 1941, col 62 of module pair_dhazConsumePartialFrame>
+/\ pair_dhazConsumePartialFrame_fwd_pair_mode = "dgram"
+/\ pair_dhazConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
   fwdOld |-> FALSE,
   unclassified |-> FALSE,
   rstOpen |-> {},
@@ -1161,52 +1197,16 @@ State 9: <pair_bugConsumePartialFrame_fwd_pair_Hop1 line 4118, col 3 to line 413
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
-/\ pair_bugConsumePartialFrame_fwd_pair_hres = "none"
-/\ pair_bugConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
-/\ pair_bugConsumePartialFrame_fwd_pair_dir = [ gh |->
-      [ wr |-> 0,
-        wfin |-> FALSE,
-        q0 |-> <<>>,
-        h0 |-> <<>>,
-        q1 |-> <<20, 21>>,
-        h1 |-> <<>>,
-        q2 |-> <<>>,
-        srcEnd |-> "none",
-        srcShut |-> FALSE,
-        dstEnd |-> "none",
-        dstShut |-> FALSE,
-        got |-> <<>>,
-        eof |-> FALSE,
-        rst |-> FALSE,
-        shutRd |-> FALSE,
-        loss |-> FALSE,
-        lost |-> 0 ],
-  hg |->
-      [ wr |-> 0,
-        wfin |-> FALSE,
-        q0 |-> <<>>,
-        h0 |-> <<>>,
-        q1 |-> <<>>,
-        h1 |-> <<>>,
-        q2 |-> <<>>,
-        srcEnd |-> "none",
-        srcShut |-> FALSE,
-        dstEnd |-> "none",
-        dstShut |-> FALSE,
-        got |-> <<>>,
-        eof |-> FALSE,
-        rst |-> FALSE,
-        shutRd |-> FALSE,
-        loss |-> FALSE,
-        lost |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
-/\ pair_bugConsumePartialFrame_fwd_pair_pr = [ g |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_strmAbort = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_pr = [ g |->
       [ ph |-> "live",
         rec |-> "none",
         out |-> "none",
@@ -1226,13 +1226,44 @@ State 9: <pair_bugConsumePartialFrame_fwd_pair_Hop1 line 4118, col 3 to line 413
         closed |-> FALSE,
         nrec |-> 0,
         cgen |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
-/\ pair_bugConsumePartialFrame_fwd_pair_mode = "dgram"
-/\ pair_bugConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
-
-State 10: <pair_bugConsumePartialFrame_fwd_pair_SendDg line 2013, col 3 to line 2073, col 61 of module pair_bugConsumePartialFrame>
-/\ pair_bugConsumePartialFrame_fwd_pair_vs = [ g |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<20, 21>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vmUp = TRUE
+/\ pair_dhazConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
+/\ pair_dhazConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_hres = "none"
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vs = [ g |->
       [ ps |-> {},
         sent |-> {},
         err |-> FALSE,
@@ -1260,11 +1291,8 @@ State 10: <pair_bugConsumePartialFrame_fwd_pair_SendDg line 2013, col 3 to line 
         sshut |-> FALSE,
         misc |-> FALSE,
         st |-> "est" ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
-/\ pair_bugConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
-/\ pair_bugConsumePartialFrame_fwd_pair_strmAbort = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_dg = [ gh |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_dg = [ gh |->
       [ got |-> <<>>,
         n |-> 3,
         sizes |-> <<0, 2, 0>>,
@@ -1286,10 +1314,13 @@ State 10: <pair_bugConsumePartialFrame_fwd_pair_SendDg line 2013, col 3 to line 
         sdrop |-> {},
         rdrop |-> {},
         fdrop |-> {} ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
-/\ pair_bugConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_vmUp = TRUE
-/\ pair_bugConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+/\ pair_dhazConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_dhazConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+
+State 11: <pair_dhazConsumePartialFrame_fwd_pair_Hop0 line 3190, col 3 to line 3202, col 55 of module pair_dhazConsumePartialFrame>
+/\ pair_dhazConsumePartialFrame_fwd_pair_mode = "dgram"
+/\ pair_dhazConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
   fwdOld |-> FALSE,
   unclassified |-> FALSE,
   rstOpen |-> {},
@@ -1298,52 +1329,16 @@ State 10: <pair_bugConsumePartialFrame_fwd_pair_SendDg line 2013, col 3 to line 
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
-/\ pair_bugConsumePartialFrame_fwd_pair_hres = "none"
-/\ pair_bugConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
-/\ pair_bugConsumePartialFrame_fwd_pair_dir = [ gh |->
-      [ wr |-> 0,
-        wfin |-> FALSE,
-        q0 |-> <<>>,
-        h0 |-> <<>>,
-        q1 |-> <<20, 21>>,
-        h1 |-> <<>>,
-        q2 |-> <<>>,
-        srcEnd |-> "none",
-        srcShut |-> FALSE,
-        dstEnd |-> "none",
-        dstShut |-> FALSE,
-        got |-> <<>>,
-        eof |-> FALSE,
-        rst |-> FALSE,
-        shutRd |-> FALSE,
-        loss |-> FALSE,
-        lost |-> 0 ],
-  hg |->
-      [ wr |-> 0,
-        wfin |-> FALSE,
-        q0 |-> <<>>,
-        h0 |-> <<>>,
-        q1 |-> <<>>,
-        h1 |-> <<>>,
-        q2 |-> <<>>,
-        srcEnd |-> "none",
-        srcShut |-> FALSE,
-        dstEnd |-> "none",
-        dstShut |-> FALSE,
-        got |-> <<>>,
-        eof |-> FALSE,
-        rst |-> FALSE,
-        shutRd |-> FALSE,
-        loss |-> FALSE,
-        lost |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
-/\ pair_bugConsumePartialFrame_fwd_pair_pr = [ g |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_strmAbort = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_pr = [ g |->
       [ ph |-> "live",
         rec |-> "none",
         out |-> "none",
@@ -1363,13 +1358,44 @@ State 10: <pair_bugConsumePartialFrame_fwd_pair_SendDg line 2013, col 3 to line 
         closed |-> FALSE,
         nrec |-> 0,
         cgen |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
-/\ pair_bugConsumePartialFrame_fwd_pair_mode = "dgram"
-/\ pair_bugConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
-
-State 11: <pair_bugConsumePartialFrame_fwd_pair_Hop0 line 3579, col 3 to line 3591, col 54 of module pair_bugConsumePartialFrame>
-/\ pair_bugConsumePartialFrame_fwd_pair_vs = [ g |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<20, 21, 30>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vmUp = TRUE
+/\ pair_dhazConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
+/\ pair_dhazConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_hres = "none"
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vs = [ g |->
       [ ps |-> {},
         sent |-> {},
         err |-> FALSE,
@@ -1397,11 +1423,8 @@ State 11: <pair_bugConsumePartialFrame_fwd_pair_Hop0 line 3579, col 3 to line 35
         sshut |-> FALSE,
         misc |-> FALSE,
         st |-> "est" ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
-/\ pair_bugConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
-/\ pair_bugConsumePartialFrame_fwd_pair_strmAbort = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_dg = [ gh |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_dg = [ gh |->
       [ got |-> <<>>,
         n |-> 3,
         sizes |-> <<0, 2, 0>>,
@@ -1423,10 +1446,13 @@ State 11: <pair_bugConsumePartialFrame_fwd_pair_Hop0 line 3579, col 3 to line 35
         sdrop |-> {},
         rdrop |-> {},
         fdrop |-> {} ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
-/\ pair_bugConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_vmUp = TRUE
-/\ pair_bugConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+/\ pair_dhazConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_dhazConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+
+State 12: <pair_dhazConsumePartialFrame_fwd_pair_DRead line 1947, col 3 to line 1974, col 81 of module pair_dhazConsumePartialFrame>
+/\ pair_dhazConsumePartialFrame_fwd_pair_mode = "dgram"
+/\ pair_dhazConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
   fwdOld |-> FALSE,
   unclassified |-> FALSE,
   rstOpen |-> {},
@@ -1435,52 +1461,16 @@ State 11: <pair_bugConsumePartialFrame_fwd_pair_Hop0 line 3579, col 3 to line 35
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
-/\ pair_bugConsumePartialFrame_fwd_pair_hres = "none"
-/\ pair_bugConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
-/\ pair_bugConsumePartialFrame_fwd_pair_dir = [ gh |->
-      [ wr |-> 0,
-        wfin |-> FALSE,
-        q0 |-> <<>>,
-        h0 |-> <<>>,
-        q1 |-> <<20, 21, 30>>,
-        h1 |-> <<>>,
-        q2 |-> <<>>,
-        srcEnd |-> "none",
-        srcShut |-> FALSE,
-        dstEnd |-> "none",
-        dstShut |-> FALSE,
-        got |-> <<>>,
-        eof |-> FALSE,
-        rst |-> FALSE,
-        shutRd |-> FALSE,
-        loss |-> FALSE,
-        lost |-> 0 ],
-  hg |->
-      [ wr |-> 0,
-        wfin |-> FALSE,
-        q0 |-> <<>>,
-        h0 |-> <<>>,
-        q1 |-> <<>>,
-        h1 |-> <<>>,
-        q2 |-> <<>>,
-        srcEnd |-> "none",
-        srcShut |-> FALSE,
-        dstEnd |-> "none",
-        dstShut |-> FALSE,
-        got |-> <<>>,
-        eof |-> FALSE,
-        rst |-> FALSE,
-        shutRd |-> FALSE,
-        loss |-> FALSE,
-        lost |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
-/\ pair_bugConsumePartialFrame_fwd_pair_pr = [ g |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_strmAbort = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_pr = [ g |->
       [ ph |-> "live",
         rec |-> "none",
         out |-> "none",
@@ -1500,13 +1490,44 @@ State 11: <pair_bugConsumePartialFrame_fwd_pair_Hop0 line 3579, col 3 to line 35
         closed |-> FALSE,
         nrec |-> 0,
         cgen |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
-/\ pair_bugConsumePartialFrame_fwd_pair_mode = "dgram"
-/\ pair_bugConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
-
-State 12: <pair_bugConsumePartialFrame_fwd_pair_DRead line 2079, col 3 to line 2106, col 80 of module pair_bugConsumePartialFrame>
-/\ pair_bugConsumePartialFrame_fwd_pair_vs = [ g |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<20, 21, 30>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vmUp = TRUE
+/\ pair_dhazConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
+/\ pair_dhazConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_hres = "none"
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vs = [ g |->
       [ ps |-> {},
         sent |-> {},
         err |-> FALSE,
@@ -1534,11 +1555,8 @@ State 12: <pair_bugConsumePartialFrame_fwd_pair_DRead line 2079, col 3 to line 2
         sshut |-> FALSE,
         misc |-> FALSE,
         st |-> "est" ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
-/\ pair_bugConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
-/\ pair_bugConsumePartialFrame_fwd_pair_strmAbort = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_dg = [ gh |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_dg = [ gh |->
       [ got |-> <<<<10>>>>,
         n |-> 3,
         sizes |-> <<0, 2, 0>>,
@@ -1560,10 +1578,13 @@ State 12: <pair_bugConsumePartialFrame_fwd_pair_DRead line 2079, col 3 to line 2
         sdrop |-> {},
         rdrop |-> {},
         fdrop |-> {} ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
-/\ pair_bugConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_vmUp = TRUE
-/\ pair_bugConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+/\ pair_dhazConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_dhazConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+
+State 13: <pair_dhazConsumePartialFrame_fwd_pair_Hop1 line 3773, col 3 to line 3785, col 55 of module pair_dhazConsumePartialFrame>
+/\ pair_dhazConsumePartialFrame_fwd_pair_mode = "dgram"
+/\ pair_dhazConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
   fwdOld |-> FALSE,
   unclassified |-> FALSE,
   rstOpen |-> {},
@@ -1572,52 +1593,16 @@ State 12: <pair_bugConsumePartialFrame_fwd_pair_DRead line 2079, col 3 to line 2
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
-/\ pair_bugConsumePartialFrame_fwd_pair_hres = "none"
-/\ pair_bugConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
-/\ pair_bugConsumePartialFrame_fwd_pair_dir = [ gh |->
-      [ wr |-> 0,
-        wfin |-> FALSE,
-        q0 |-> <<>>,
-        h0 |-> <<>>,
-        q1 |-> <<20, 21, 30>>,
-        h1 |-> <<>>,
-        q2 |-> <<>>,
-        srcEnd |-> "none",
-        srcShut |-> FALSE,
-        dstEnd |-> "none",
-        dstShut |-> FALSE,
-        got |-> <<>>,
-        eof |-> FALSE,
-        rst |-> FALSE,
-        shutRd |-> FALSE,
-        loss |-> FALSE,
-        lost |-> 0 ],
-  hg |->
-      [ wr |-> 0,
-        wfin |-> FALSE,
-        q0 |-> <<>>,
-        h0 |-> <<>>,
-        q1 |-> <<>>,
-        h1 |-> <<>>,
-        q2 |-> <<>>,
-        srcEnd |-> "none",
-        srcShut |-> FALSE,
-        dstEnd |-> "none",
-        dstShut |-> FALSE,
-        got |-> <<>>,
-        eof |-> FALSE,
-        rst |-> FALSE,
-        shutRd |-> FALSE,
-        loss |-> FALSE,
-        lost |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
-/\ pair_bugConsumePartialFrame_fwd_pair_pr = [ g |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_strmAbort = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_pr = [ g |->
       [ ph |-> "live",
         rec |-> "none",
         out |-> "none",
@@ -1637,13 +1622,44 @@ State 12: <pair_bugConsumePartialFrame_fwd_pair_DRead line 2079, col 3 to line 2
         closed |-> FALSE,
         nrec |-> 0,
         cgen |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
-/\ pair_bugConsumePartialFrame_fwd_pair_mode = "dgram"
-/\ pair_bugConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
-
-State 13: <pair_bugConsumePartialFrame_fwd_pair_Hop1 line 4118, col 3 to line 4130, col 54 of module pair_bugConsumePartialFrame>
-/\ pair_bugConsumePartialFrame_fwd_pair_vs = [ g |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vmUp = TRUE
+/\ pair_dhazConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
+/\ pair_dhazConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_hres = "none"
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vs = [ g |->
       [ ps |-> {},
         sent |-> {},
         err |-> FALSE,
@@ -1671,11 +1687,8 @@ State 13: <pair_bugConsumePartialFrame_fwd_pair_Hop1 line 4118, col 3 to line 41
         sshut |-> FALSE,
         misc |-> FALSE,
         st |-> "est" ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
-/\ pair_bugConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
-/\ pair_bugConsumePartialFrame_fwd_pair_strmAbort = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_dg = [ gh |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_dg = [ gh |->
       [ got |-> <<<<10>>>>,
         n |-> 3,
         sizes |-> <<0, 2, 0>>,
@@ -1697,10 +1710,13 @@ State 13: <pair_bugConsumePartialFrame_fwd_pair_Hop1 line 4118, col 3 to line 41
         sdrop |-> {},
         rdrop |-> {},
         fdrop |-> {} ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
-/\ pair_bugConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_vmUp = TRUE
-/\ pair_bugConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+/\ pair_dhazConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_dhazConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+
+State 14: <pair_dhazConsumePartialFrame_fwd_pair_DRead line 1947, col 3 to line 1974, col 81 of module pair_dhazConsumePartialFrame>
+/\ pair_dhazConsumePartialFrame_fwd_pair_mode = "dgram"
+/\ pair_dhazConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
   fwdOld |-> FALSE,
   unclassified |-> FALSE,
   rstOpen |-> {},
@@ -1709,52 +1725,16 @@ State 13: <pair_bugConsumePartialFrame_fwd_pair_Hop1 line 4118, col 3 to line 41
   faults |-> 0,
   hobs |-> "none",
   woken |-> FALSE,
-  recPend |-> FALSE,
   vhTouched |-> FALSE,
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
-/\ pair_bugConsumePartialFrame_fwd_pair_hres = "none"
-/\ pair_bugConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
-/\ pair_bugConsumePartialFrame_fwd_pair_dir = [ gh |->
-      [ wr |-> 0,
-        wfin |-> FALSE,
-        q0 |-> <<>>,
-        h0 |-> <<>>,
-        q1 |-> <<>>,
-        h1 |-> <<>>,
-        q2 |-> <<>>,
-        srcEnd |-> "none",
-        srcShut |-> FALSE,
-        dstEnd |-> "none",
-        dstShut |-> FALSE,
-        got |-> <<>>,
-        eof |-> FALSE,
-        rst |-> FALSE,
-        shutRd |-> FALSE,
-        loss |-> FALSE,
-        lost |-> 0 ],
-  hg |->
-      [ wr |-> 0,
-        wfin |-> FALSE,
-        q0 |-> <<>>,
-        h0 |-> <<>>,
-        q1 |-> <<>>,
-        h1 |-> <<>>,
-        q2 |-> <<>>,
-        srcEnd |-> "none",
-        srcShut |-> FALSE,
-        dstEnd |-> "none",
-        dstShut |-> FALSE,
-        got |-> <<>>,
-        eof |-> FALSE,
-        rst |-> FALSE,
-        shutRd |-> FALSE,
-        loss |-> FALSE,
-        lost |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
-/\ pair_bugConsumePartialFrame_fwd_pair_pr = [ g |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_strmAbort = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_dhazConsumePartialFrame_fwd_pair_pr = [ g |->
       [ ph |-> "live",
         rec |-> "none",
         out |-> "none",
@@ -1774,13 +1754,44 @@ State 13: <pair_bugConsumePartialFrame_fwd_pair_Hop1 line 4118, col 3 to line 41
         closed |-> FALSE,
         nrec |-> 0,
         cgen |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
-/\ pair_bugConsumePartialFrame_fwd_pair_mode = "dgram"
-/\ pair_bugConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
-
-State 14: <pair_bugConsumePartialFrame_fwd_pair_DRead line 2079, col 3 to line 2106, col 80 of module pair_bugConsumePartialFrame>
-/\ pair_bugConsumePartialFrame_fwd_pair_vs = [ g |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vmUp = TRUE
+/\ pair_dhazConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
+/\ pair_dhazConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_hres = "none"
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_dhazConsumePartialFrame_fwd_pair_vs = [ g |->
       [ ps |-> {},
         sent |-> {},
         err |-> FALSE,
@@ -1808,11 +1819,8 @@ State 14: <pair_bugConsumePartialFrame_fwd_pair_DRead line 2079, col 3 to line 2
         sshut |-> FALSE,
         misc |-> FALSE,
         st |-> "est" ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
-/\ pair_bugConsumePartialFrame_fwd_pair_gen = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
-/\ pair_bugConsumePartialFrame_fwd_pair_strmAbort = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_dg = [ gh |->
+/\ pair_dhazConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_dg = [ gh |->
       [ got |-> <<<<10>>, <<20, 21, 30>>>>,
         n |-> 3,
         sizes |-> <<0, 2, 0>>,
@@ -1834,84 +1842,6 @@ State 14: <pair_bugConsumePartialFrame_fwd_pair_DRead line 2079, col 3 to line 2
         sdrop |-> {},
         rdrop |-> {},
         fdrop |-> {} ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
-/\ pair_bugConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
-/\ pair_bugConsumePartialFrame_fwd_pair_vmUp = TRUE
-/\ pair_bugConsumePartialFrame_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
-  fwdOld |-> FALSE,
-  unclassified |-> FALSE,
-  rstOpen |-> {},
-  holderReadAfterAbort |-> FALSE,
-  trail |-> {},
-  faults |-> 0,
-  hobs |-> "none",
-  woken |-> FALSE,
-  recPend |-> FALSE,
-  vhTouched |-> FALSE,
-  dropped |-> FALSE,
-  hostDead |-> FALSE,
-  hresCls |-> "none" ]
-/\ pair_bugConsumePartialFrame_fwd_pair_hres = "none"
-/\ pair_bugConsumePartialFrame_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
-/\ pair_bugConsumePartialFrame_fwd_pair_dir = [ gh |->
-      [ wr |-> 0,
-        wfin |-> FALSE,
-        q0 |-> <<>>,
-        h0 |-> <<>>,
-        q1 |-> <<>>,
-        h1 |-> <<>>,
-        q2 |-> <<>>,
-        srcEnd |-> "none",
-        srcShut |-> FALSE,
-        dstEnd |-> "none",
-        dstShut |-> FALSE,
-        got |-> <<>>,
-        eof |-> FALSE,
-        rst |-> FALSE,
-        shutRd |-> FALSE,
-        loss |-> FALSE,
-        lost |-> 0 ],
-  hg |->
-      [ wr |-> 0,
-        wfin |-> FALSE,
-        q0 |-> <<>>,
-        h0 |-> <<>>,
-        q1 |-> <<>>,
-        h1 |-> <<>>,
-        q2 |-> <<>>,
-        srcEnd |-> "none",
-        srcShut |-> FALSE,
-        dstEnd |-> "none",
-        dstShut |-> FALSE,
-        got |-> <<>>,
-        eof |-> FALSE,
-        rst |-> FALSE,
-        shutRd |-> FALSE,
-        loss |-> FALSE,
-        lost |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
-/\ pair_bugConsumePartialFrame_fwd_pair_ctx = [g |-> "open", h |-> "open"]
-/\ pair_bugConsumePartialFrame_fwd_pair_pr = [ g |->
-      [ ph |-> "live",
-        rec |-> "none",
-        out |-> "none",
-        cause |-> "none",
-        errno |-> "none",
-        byRel |-> FALSE,
-        closed |-> FALSE,
-        nrec |-> 0,
-        cgen |-> 0 ],
-  h |->
-      [ ph |-> "live",
-        rec |-> "none",
-        out |-> "none",
-        cause |-> "none",
-        errno |-> "none",
-        byRel |-> FALSE,
-        closed |-> FALSE,
-        nrec |-> 0,
-        cgen |-> 0 ] ]
-/\ pair_bugConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
-/\ pair_bugConsumePartialFrame_fwd_pair_mode = "dgram"
-/\ pair_bugConsumePartialFrame_fwd_pair_attEnded = [g |-> 0, h |-> 0]
-/\ pair_bugConsumePartialFrame_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_dhazConsumePartialFrame_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+/\ pair_dhazConsumePartialFrame_fwd_pair_guestAbortSent = FALSE
+/\ pair_dhazConsumePartialFrame_fwd_pair_ep = [g |-> "alive", h |-> "alive"]

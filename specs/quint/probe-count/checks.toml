@@ -94,26 +94,6 @@ backend = "tlc"
 expect = "holds"
 ci = true
 
-# ---- non-vacuity witnesses
-
-[[check]]
-name = "probe-count-witness-terminates"
-spec = "probe_count.qnt"
-main = "probe_streak"
-invariant = "WitnessNeverTerminates"
-backend = "tlc"
-expect = "violation"
-ci = true
-
-[[check]]
-name = "probe-count-witness-ready"
-spec = "probe_count.qnt"
-main = "probe_streak"
-invariant = "WitnessNeverReady"
-backend = "tlc"
-expect = "violation"
-ci = true
-
 # ---- hazards
 
 [[check]]

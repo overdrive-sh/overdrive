@@ -3,8 +3,7 @@
 ## Status
 
 **Accepted — user ruling PORTS-CONFIG, 2026-10-19** ("DISTILL rulings, after
-round 10"), which replaces the earlier ruling of the same day that kept the
-ports hardcoded (U-1 (b)). Scope narrowed by the user's ruling
+round 10"). Scope narrowed by the user's ruling
 NODE-CONFIG-LOADER (2026-10-20): the node-configuration file section is GH
 #327, not #295 (Decision, "Deferred to GH #327"). GH #295. Not yet implemented. The configuration
 type, its validation and the owners' bound-port accessors are architect
@@ -102,7 +101,7 @@ load the operator node configuration file (ADR-0025 `[node]`, ADR-0049
 ## Alternatives considered
 
 - **Keep the ports hardcoded and keep non-VM tests from binding them** (the
-  round-10 `GuestFlowIoOverride` and `vm_override` seams). Puts simulation
+  `GuestFlowIoOverride` and `vm_override` seams). Puts simulation
   adapters into the production boot's configuration, and VM tests still
   collide across workspaces. Rejected by the user.
 - **Per-test network namespaces for `serve` tests.** The bound-port table

@@ -18,12 +18,13 @@
 //! build failure a test failure and contend for the target-dir lock the
 //! running `nextest` holds.
 //!
-//! This module provides three things, and nothing that `overdrive-host`'s
-//! production `CloudHypervisorVmm` provides (that adapter is never a
-//! dev-dependency of a test that needs a guest; this fixture launches the
-//! VMM itself, with the one vsock device shape production uses —
-//! `cid=<cid>,backend=vhost-kernel`, the VMM opening `/dev/vhost-vsock`
-//! itself, § *VMM backend contract*):
+//! This module provides three things. The microVM is launched through the
+//! production `overdrive-host` `CloudHypervisorVmm` (`Vmm::create` over a
+//! `VmConfig`, U-4 (a)): that adapter is the one renderer of the
+//! cloud-hypervisor command line, so the kit's VM runs under the production
+//! launch argument (`cid=<cid>,backend=vhost-kernel`, the VMM opening
+//! `/dev/vhost-vsock` itself, § *VMM backend contract*), confinement and
+//! exit semantics, and the kit carries no cloud-hypervisor argv of its own.
 //!
 //! - [`GuestKit::provision`]: the kernel, the module prepared for it, the
 //!   static `overdrive-init` and the prepared static scripted peer
@@ -57,12 +58,23 @@
 
 use std::fs;
 use std::io;
+use std::num::NonZeroU8;
+use std::os::unix::fs::MetadataExt as _;
+use std::os::unix::process::ExitStatusExt as _;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Command, ExitStatus};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
-use overdrive_core::guest_transport::GUEST_FORWARDER_MODULE_PATH;
-use overdrive_core::vm::config::{HostArch, KernelCmdline};
+use overdrive_core::AllocationId;
+use overdrive_core::cgroup::CgroupPath;
+use overdrive_core::guest_transport::{GUEST_FORWARDER_MODULE_PATH, GuestCid};
+use overdrive_core::traits::vmm::{VmControl, Vmm, VmmExit};
+use overdrive_core::vm::config::{
+    Gid, HostArch, KernelCmdline, KernelImage, MemoryPlan, OVERDRIVE_VMM_UID, RootfsPlan, VmConfig,
+    VmConfinement, VmRunDir, VmmIdentity,
+};
+use overdrive_host::CloudHypervisorVmm;
 
 use crate::guest_app::GUEST_PEER_GUEST_PATH;
 use crate::guest_peer::{CONTROL_PORT_PARAM, GuestPeer, GuestPeerControl, GuestPeerError};
@@ -247,10 +259,19 @@ pub mod cid_bands {
     /// `overdrive-init/tests/integration/in_guest_lane.rs`.
     pub const INIT_IN_GUEST_LANE: CidBand =
         CidBand { name: "overdrive-init in_guest_lane", first_offset: 0x2030, width: 16 };
+    /// `overdrive-fwd/tests/integration/unload_in_guest.rs` (V-EV-UNLOAD's
+    /// ULP control and unload stress, U-EV-UNLOAD).
+    pub const FWD_UNLOAD_IN_GUEST: CidBand =
+        CidBand { name: "overdrive-fwd unload_in_guest", first_offset: 0x2040, width: 16 };
 
     /// Every registered band.
-    pub const REGISTERED: [CidBand; 4] =
-        [FWD_GUEST_BOUNDARY, HOST_FLOW_ACCEPT_PATH, HOST_BEACON_ACCEPT_PATH, INIT_IN_GUEST_LANE];
+    pub const REGISTERED: [CidBand; 5] = [
+        FWD_GUEST_BOUNDARY,
+        HOST_FLOW_ACCEPT_PATH,
+        HOST_BEACON_ACCEPT_PATH,
+        INIT_IN_GUEST_LANE,
+        FWD_UNLOAD_IN_GUEST,
+    ];
 
     /// The guard the registry carries: bands are pairwise disjoint, above
     /// the production band, and inside the leased range.
@@ -464,18 +485,26 @@ impl GuestKit {
         Ok(GuestImage { rootfs })
     }
 
-    /// Launches a VMM over `boot.image` at `boot.cid`.
+    /// Launches a VMM over `boot.image` at `boot.cid`, through the
+    /// production `CloudHypervisorVmm` (`Vmm::create` over a `VmConfig`).
     ///
     /// # Errors
     ///
-    /// [`GuestKitError::Launch`] when the VMM cannot be spawned.
+    /// [`GuestKitError::Launch`] when the VMM cannot be launched.
     pub fn boot(&self, boot: &GuestBoot<'_>) -> Result<GuestKitVm, GuestKitError> {
         fs::create_dir_all(boot.run_dir)
             .map_err(staging(format!("creating {}", boot.run_dir.display())))?;
-        let console = boot.run_dir.join("console.log");
-        let stderr_path = boot.run_dir.join("vmm.stderr");
-        let api = boot.run_dir.join("api.sock");
-        let _ = fs::remove_file(&api);
+        let launch = |detail: String| GuestKitError::Launch { source: io::Error::other(detail) };
+        let alloc = AllocationId::new(&format!("kit-{}", boot.cid))
+            .map_err(|e| launch(format!("allocation id: {e}")))?;
+        let cid = GuestCid::new(boot.cid).map_err(|e| launch(format!("guest CID: {e}")))?;
+        let header = vm_fixture::read_header(&self.kernel_path)
+            .map_err(staging(format!("reading {}", self.kernel_path.display())))?;
+        let kernel = KernelImage::validate(self.kernel_path.clone(), HostArch::X86_64, &header)
+            .map_err(|e| launch(format!("kernel image: {e}")))?;
+        let rootfs_bytes = fs::metadata(&boot.image.rootfs)
+            .map_err(staging(format!("reading {}", boot.image.rootfs.display())))?
+            .len();
         let mut cmdline = KernelCmdline::platform_default(HostArch::X86_64);
         for token in &boot.cmdline_extra {
             assert!(
@@ -483,32 +512,46 @@ impl GuestKit {
                 "a kernel parameter has no whitespace: {token:?}"
             );
         }
-        let stderr = fs::File::create(&stderr_path).map_err(staging("the VMM stderr file"))?;
-        let child = Command::new(&self.cloud_hypervisor_bin)
-            .arg("--cpus")
-            .arg(format!("boot={}", boot.vcpus))
-            .arg("--memory")
-            .arg(format!("size={}M", boot.memory_mib))
-            .arg("--kernel")
-            .arg(&self.kernel_path)
-            .arg("--cmdline")
-            .arg(cmdline.as_str())
-            .arg("--disk")
-            .arg(format!("path={},image_type=raw", boot.image.rootfs.display()))
-            .arg("--serial")
-            .arg(format!("file={}", console.display()))
-            .arg("--console")
-            .arg("off")
-            .arg("--vsock")
-            .arg(format!("cid={},backend=vhost-kernel", boot.cid))
-            .arg("--api-socket")
-            .arg(&api)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(stderr)
-            .spawn()
-            .map_err(|source| GuestKitError::Launch { source })?;
-        Ok(GuestKitVm { child: Some(child), cid: boot.cid, console, stderr_path })
+        let vcpus =
+            NonZeroU8::new(boot.vcpus).unwrap_or_else(|| panic!("a guest has at least one vCPU"));
+        let config = VmConfig {
+            alloc: alloc.clone(),
+            kernel,
+            // The production launch clones the image (FICLONE) beside the
+            // run directory, on the same reflink-capable staging filesystem.
+            rootfs: RootfsPlan::for_alloc(
+                boot.image.rootfs.clone(),
+                rootfs_bytes,
+                &alloc,
+                boot.run_dir,
+                &boot.run_dir.join("clone-index"),
+            ),
+            cmdline,
+            memory: MemoryPlan::derive(u64::from(boot.memory_mib) * 1024 * 1024),
+            vcpus,
+            run_dir: VmRunDir::for_alloc(boot.run_dir, &alloc),
+            confinement: VmConfinement::confined(confined_identity()?, 1024),
+            cgroup_scope: CgroupPath::for_alloc(&alloc),
+        };
+        fs::create_dir_all(config.run_dir.path())
+            .map_err(staging(format!("creating {}", config.run_dir.path().display())))?;
+        let console = config.run_dir.console_log();
+        let vmm = CloudHypervisorVmm::new().with_binary(self.cloud_hypervisor_bin.clone());
+        let launcher = vmm.clone();
+        let process = run_on_kit_runtime(async move { launcher.create(&config, cid).await })
+            .map_err(|e| launch(e.to_string()))?;
+        let exit = Arc::new(Mutex::new(None));
+        let recorded = Arc::clone(&exit);
+        let mut watch = process.exit;
+        kit_runtime().spawn(async move {
+            let ended = watch.recv().await.unwrap_or(VmmExit {
+                exit_code: None,
+                signal: None,
+                stderr_tail: None,
+            });
+            *recorded.lock().unwrap_or_else(PoisonError::into_inner) = Some(ended);
+        });
+        Ok(GuestKitVm { vmm, control: Some(process.control), exit, cid: boot.cid, console })
     }
 
     /// Boots a [`GuestInit::ScriptedPeer`] image at `cid` and returns once
@@ -524,6 +567,23 @@ impl GuestKit {
         cid: u32,
         run_dir: &Path,
     ) -> Result<ScriptedGuest, GuestKitError> {
+        self.boot_scripted_with(image, cid, run_dir, &ScriptedBootExtra::default())
+    }
+
+    /// [`Self::boot_scripted`] with further kernel parameters and the guest's
+    /// RAM and vCPUs: the in-guest lanes whose cell reads its own parameters
+    /// (a transport token, a script port) from `/proc/cmdline`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::boot_scripted`].
+    pub fn boot_scripted_with(
+        &self,
+        image: &GuestImage,
+        cid: u32,
+        run_dir: &Path,
+        extra: &ScriptedBootExtra,
+    ) -> Result<ScriptedGuest, GuestKitError> {
         // PORTS-CONFIG / GUEST-PORTS: the control listener binds a
         // kernel-assigned port and the guest learns it from its command line,
         // so no scripted guest of any workspace holds a fixed host port.
@@ -531,18 +591,20 @@ impl GuestKit {
             GuestKitError::ControlBind { port: crate::vsock::VMADDR_PORT_ANY, source }
         })?;
         let port = control.port();
-        let mut vm = self.boot(&GuestBoot {
+        let mut cmdline_extra = vec![format!("{CONTROL_PORT_PARAM}{port}")];
+        cmdline_extra.extend(extra.cmdline.iter().cloned());
+        let vm = self.boot(&GuestBoot {
             image,
             cid,
-            cmdline_extra: vec![format!("{CONTROL_PORT_PARAM}{port}")],
-            memory_mib: 256,
-            vcpus: 2,
+            cmdline_extra,
+            memory_mib: extra.memory_mib.unwrap_or(256),
+            vcpus: extra.vcpus.unwrap_or(2),
             run_dir,
         })?;
         match control.accept_peer(cid, SCRIPTED_BOOT_BOUND) {
             Ok(peer) => Ok(ScriptedGuest { peer: Some(peer), vm }),
             Err(GuestPeerError::NeverConnected { .. }) => {
-                if let Some(status) = vm.try_exit()? {
+                if let Some(status) = vm.try_exit() {
                     return Err(vm.exited_error(status));
                 }
                 Err(GuestKitError::PeerNeverConnected { cid, console_tail: vm.console_tail(4096) })
@@ -550,6 +612,17 @@ impl GuestKit {
             Err(other) => Err(other.into()),
         }
     }
+}
+
+/// What [`GuestKit::boot_scripted_with`] adds to a scripted boot.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ScriptedBootExtra {
+    /// Kernel parameters after the scripted peer's own.
+    pub cmdline: Vec<String>,
+    /// Guest RAM; 256 MiB when `None`.
+    pub memory_mib: Option<u32>,
+    /// vCPUs; 2 when `None`.
+    pub vcpus: Option<u8>,
 }
 
 /// One VMM launch.
@@ -566,24 +639,37 @@ pub struct GuestBoot<'a> {
     pub memory_mib: u32,
     /// vCPUs.
     pub vcpus: u8,
-    /// Where the console log, the VMM's stderr and the API socket go.
+    /// The run root: the VMM's own run directory (`kit-<cid>`: console
+    /// log, API socket) and its image clone are created under it.
     pub run_dir: &'a Path,
 }
 
 /// A running VMM. Dropping it kills the VMM and reaps it.
-#[derive(Debug)]
 pub struct GuestKitVm {
-    child: Option<Child>,
+    vmm: CloudHypervisorVmm,
+    /// `None` once [`Self::kill`] has reaped the VMM.
+    control: Option<VmControl>,
+    /// The VMM's ending, recorded by the watcher task when it happens.
+    exit: Arc<Mutex<Option<VmmExit>>>,
     cid: u32,
     console: PathBuf,
-    stderr_path: PathBuf,
+}
+
+impl std::fmt::Debug for GuestKitVm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GuestKitVm")
+            .field("pid", &self.pid())
+            .field("cid", &self.cid)
+            .field("console", &self.console)
+            .finish_non_exhaustive()
+    }
 }
 
 impl GuestKitVm {
     /// The VMM's process id, while it is not reaped.
     #[must_use]
     pub fn pid(&self) -> Option<u32> {
-        self.child.as_ref().map(Child::id)
+        self.control.as_ref().map(|control| control.pid)
     }
 
     /// The vsock CID.
@@ -624,15 +710,8 @@ impl GuestKitVm {
     }
 
     /// The VMM's exit status if it has exited.
-    ///
-    /// # Errors
-    ///
-    /// `waitpid`'s error.
-    pub fn try_exit(&mut self) -> Result<Option<ExitStatus>, GuestKitError> {
-        let cid = self.cid;
-        self.child.as_mut().map_or(Ok(None), |child| {
-            child.try_wait().map_err(|source| GuestKitError::Wait { cid, source })
-        })
+    pub fn try_exit(&self) -> Option<ExitStatus> {
+        self.control.as_ref().and_then(|_| self.recorded_exit()).map(|exit| status_of(&exit))
     }
 
     /// Waits up to `bound` for the VMM to exit on its own.
@@ -640,10 +719,10 @@ impl GuestKitVm {
     /// # Errors
     ///
     /// `waitpid`'s error.
-    pub fn wait_exit(&mut self, bound: Duration) -> Result<Option<ExitStatus>, GuestKitError> {
+    pub fn wait_exit(&self, bound: Duration) -> Result<Option<ExitStatus>, GuestKitError> {
         let deadline = Instant::now() + bound;
         loop {
-            if let Some(status) = self.try_exit()? {
+            if let Some(status) = self.try_exit() {
                 return Ok(Some(status));
             }
             if Instant::now() >= deadline {
@@ -663,14 +742,32 @@ impl GuestKitVm {
     /// `kill` or `waitpid`'s error.
     pub fn kill(&mut self) -> Result<ExitStatus, GuestKitError> {
         let cid = self.cid;
-        let mut child = self.child.take().ok_or_else(|| GuestKitError::Wait {
+        let control = self.control.take().ok_or_else(|| GuestKitError::Wait {
             cid,
             source: io::Error::other("the VMM was already reaped"),
         })?;
-        if child.try_wait().map_err(|source| GuestKitError::Wait { cid, source })?.is_none() {
-            child.kill().map_err(|source| GuestKitError::Wait { cid, source })?;
+        let vmm = self.vmm.clone();
+        run_on_kit_runtime(async move { vmm.terminate(&control, Duration::ZERO).await })
+            .map_err(|e| GuestKitError::Wait { cid, source: io::Error::other(e.to_string()) })?;
+        // `terminate` returns once the reaper has the ending; the watcher
+        // task records it a moment later.
+        let deadline = Instant::now() + VMM_REAP_BOUND;
+        loop {
+            if let Some(exit) = self.recorded_exit() {
+                return Ok(status_of(&exit));
+            }
+            if Instant::now() >= deadline {
+                return Err(GuestKitError::Wait {
+                    cid,
+                    source: io::Error::other("the VMM's ending was not recorded"),
+                });
+            }
+            std::thread::sleep(Duration::from_millis(5));
         }
-        child.wait().map_err(|source| GuestKitError::Wait { cid, source })
+    }
+
+    fn recorded_exit(&self) -> Option<VmmExit> {
+        self.exit.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
 
     fn exited_error(&self, status: ExitStatus) -> GuestKitError {
@@ -678,18 +775,71 @@ impl GuestKitVm {
             cid: self.cid,
             status,
             console_tail: self.console_tail(4096),
-            stderr: fs::read_to_string(&self.stderr_path).unwrap_or_default(),
+            stderr: self.recorded_exit().and_then(|exit| exit.stderr_tail).unwrap_or_default(),
         }
     }
 }
 
 impl Drop for GuestKitVm {
     fn drop(&mut self) {
-        if let Some(mut child) = self.child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
+        if let Some(control) = self.control.take() {
+            let vmm = self.vmm.clone();
+            let _ =
+                run_on_kit_runtime(async move { vmm.terminate(&control, Duration::ZERO).await });
         }
     }
+}
+
+/// How long the watcher task has to record a reaped VMM's ending.
+const VMM_REAP_BOUND: Duration = Duration::from_secs(10);
+
+/// The kit's own runtime: it drives the production launcher's reaper and the
+/// exit watch behind the kit's synchronous surface (one worker thread).
+fn kit_runtime() -> &'static tokio::runtime::Runtime {
+    static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+    RUNTIME.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .thread_name("guest-kit-vmm")
+            .enable_all()
+            .build()
+            .unwrap_or_else(|e| panic!("the guest kit's runtime builds: {e}"))
+    })
+}
+
+/// Runs `future` on the kit's runtime and waits for it from any thread, in
+/// or out of another runtime's context.
+fn run_on_kit_runtime<T: Send + 'static>(
+    future: impl std::future::Future<Output = T> + Send + 'static,
+) -> T {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    kit_runtime().spawn(async move {
+        let _ = sender.send(future.await);
+    });
+    receiver.recv().unwrap_or_else(|_| panic!("the guest kit's runtime dropped a VMM task"))
+}
+
+/// A VMM's ending as the wait status a child process would report.
+fn status_of(exit: &VmmExit) -> ExitStatus {
+    let raw = match (exit.signal, exit.exit_code) {
+        (Some(signal), _) => i32::from(signal),
+        (None, Some(code)) => code << 8,
+        (None, None) => 0,
+    };
+    ExitStatus::from_raw(raw)
+}
+
+/// The identity the production launch drops the VMM to: the production VMM
+/// uid, and the groups that own `/dev/kvm` and `/dev/vhost-vsock` (the
+/// kernel's device nodes decide who may open them; no group is assumed).
+fn confined_identity() -> Result<VmmIdentity, GuestKitError> {
+    let group_of = |device: &str| {
+        fs::metadata(device).map(|m| Gid::new(m.gid())).map_err(staging(format!("stat {device}")))
+    };
+    let kvm = group_of("/dev/kvm")?;
+    let vhost = group_of("/dev/vhost-vsock")?;
+    let supplementary = if vhost == kvm { Vec::new() } else { vec![vhost] };
+    Ok(VmmIdentity { uid: OVERDRIVE_VMM_UID, gid: kvm, supplementary })
 }
 
 /// A scripted guest: its VMM and its agent's control connection.
@@ -740,6 +890,60 @@ fn install(stage: &Path, host: &Path, guest: &Path) -> Result<(), GuestKitError>
         vm_fixture::set_executable(&dest)?;
     }
     Ok(())
+}
+
+/// The running kernel's module `relative` (under
+/// `/lib/modules/<release>/kernel/`, without the `.ko` suffix, e.g.
+/// `net/tls/tls`) as an image file at `guest`.
+///
+/// It is decompressed into `dir` when the host ships it zstd-compressed (a
+/// guest's `finit_module` takes it uncompressed). For an in-guest cell that needs a module the kit
+/// does not stage (the ULP control's `tls`); the guest program's
+/// `run-with-modules` loads it.
+///
+/// # Errors
+///
+/// [`GuestKitError::Staging`] naming the module when the host has neither
+/// form, or when `zstd` fails.
+pub fn host_module_file(
+    kit: &GuestKit,
+    dir: &Path,
+    relative: &str,
+    guest: &Path,
+) -> Result<GuestFile, GuestKitError> {
+    let base = format!("/lib/modules/{}/kernel/{relative}", kit.kernel_release);
+    let compressed = PathBuf::from(format!("{base}.ko.zst"));
+    let plain = PathBuf::from(format!("{base}.ko"));
+    let host = if compressed.exists() {
+        let name = relative.replace('/', "-");
+        let out_path = dir.join(format!("{name}.ko"));
+        let out = Command::new("zstd")
+            .args(["-d", "-f", "-q"])
+            .arg(&compressed)
+            .arg("-o")
+            .arg(&out_path)
+            .output()
+            .map_err(staging(format!("spawning zstd for {}", compressed.display())))?;
+        if !out.status.success() {
+            return Err(GuestKitError::Staging {
+                detail: format!("zstd -d {}", compressed.display()),
+                source: io::Error::other(String::from_utf8_lossy(&out.stderr).into_owned()),
+            });
+        }
+        out_path
+    } else if plain.exists() {
+        plain
+    } else {
+        return Err(GuestKitError::Staging {
+            detail: format!(
+                "the running kernel ships no module {relative} (neither {} nor {})",
+                compressed.display(),
+                plain.display()
+            ),
+            source: io::Error::from(io::ErrorKind::NotFound),
+        });
+    };
+    Ok(GuestFile { host, guest: guest.to_path_buf(), with_shared_libraries: false })
 }
 
 fn stage_loopback_module(stage: &Path, release: &str) -> Result<(), GuestKitError> {

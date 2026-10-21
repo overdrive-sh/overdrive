@@ -1,4 +1,4 @@
-# probe-count-hazard-once-per-streak: counterexample, 7 state(s) (from the TLC trace)
+# probe-count-hazard-once-per-streak: counterexample, 8 state(s) (from the TLC trace)
 
 State 1
   terms = 0
@@ -21,10 +21,10 @@ State 1
   rseq = 0
 
 State 2 [ProbeRun]
-  hist = <<"Fail">>
+  hist = <<"Pass">>
   psame = 1
-  pst = "Fail"
-  rst = "Fail"
+  pst = "Pass"
+  rst = "Pass"
   pseq = 1
   clock = 1
   runs = 1
@@ -32,40 +32,50 @@ State 2 [ProbeRun]
   rseq = 1
 
 State 3 [ProbeRun]
-  hist = <<"Fail", "Fail">>
-  psame = 2
+  hist = <<"Pass", "Fail">>
+  pst = "Fail"
+  rst = "Fail"
   pseq = 2
   clock = 2
   runs = 2
-  rsame = 2
   rat = 1
   rseq = 2
 
 State 4 [ProbeRun]
-  hist = <<"Fail", "Fail", "Fail">>
-  psame = 3
+  hist = <<"Pass", "Fail", "Fail">>
+  psame = 2
   pseq = 3
   clock = 3
   runs = 3
-  rsame = 3
+  rsame = 2
   rat = 2
   rseq = 3
 
-State 5 [ConsumerLook]
-  terms = 1
-  A = 3
-  tseqs = {3}
-  g = [ missTouched |-> FALSE, staleChange |-> FALSE, early |-> FALSE, pt |-> 0, ready |-> FALSE, seen |-> 3, stoppedTerm |-> FALSE, missed |-> FALSE ]
-
-State 6 [ProbeRun]
-  hist = <<"Fail", "Fail", "Fail", "Fail">>
-  psame = 4
+State 5 [ProbeRun]
+  hist = <<"Pass", "Fail", "Fail", "Fail">>
+  psame = 3
   pseq = 4
   clock = 4
   runs = 4
-  rsame = 4
+  rsame = 3
   rat = 3
   rseq = 4
 
-State 7 [ConsumerLook]
-  g = [ missTouched |-> FALSE, staleChange |-> FALSE, early |-> FALSE, pt |-> 0, ready |-> FALSE, seen |-> 4, stoppedTerm |-> FALSE, missed |-> TRUE ]
+State 6 [ConsumerLook]
+  terms = 1
+  A = 4
+  tseqs = {4}
+  g = [ missTouched |-> FALSE, staleChange |-> FALSE, early |-> FALSE, pt |-> 0, ready |-> FALSE, seen |-> 4, stoppedTerm |-> FALSE, missed |-> FALSE ]
+
+State 7 [ProbeRun]
+  hist = <<"Pass", "Fail", "Fail", "Fail", "Fail">>
+  psame = 4
+  pseq = 5
+  clock = 5
+  runs = 5
+  rsame = 4
+  rat = 4
+  rseq = 5
+
+State 8 [ConsumerLook]
+  g = [ missTouched |-> FALSE, staleChange |-> FALSE, early |-> FALSE, pt |-> 0, ready |-> FALSE, seen |-> 5, stoppedTerm |-> FALSE, missed |-> TRUE ]

@@ -112,11 +112,11 @@ here.
 
 ## Alternatives considered
 
-- **Keep `vm_override` and add `guest_flow_io_override`** (round 10).
+- **Keep `vm_override` and add `guest_flow_io_override`.**
   Simulation substitutes inside the production configuration. Rejected by
   the user.
 - **Move only the VM and guest-flow ports; leave the other override and
-  adapter fields** (round 11). Leaves `dataplane_override` deciding the
+  adapter fields.** Leaves `dataplane_override` deciding the
   node address and `ServerConfig::new` defaulting the clock. Rejected by
   the user's scope ruling.
 - **Pass the constructed dataplane instead of a composer.** The production
@@ -134,8 +134,8 @@ here.
 - **Classify a failed VMM probe by its error variant instead of a declared
   capability.** Changes ADR-0083 § D8's absence-versus-refusal semantics for
   production. Rejected.
-- **Keep the persistent stores and the CA constructed inside the boot**
-  (round 12), because no test substituted them. Leaves the boot
+- **Keep the persistent stores and the CA constructed inside the boot**,
+  because no test substituted them. Leaves the boot
   constructing driven adapters, although simulation view and journal stores
   and a simulation CA exist, and splits the observation store (moved) from
   the stores opened the same way beside it. Rejected by the user (STORES-IN).

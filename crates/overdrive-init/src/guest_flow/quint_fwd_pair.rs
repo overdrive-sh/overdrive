@@ -56,7 +56,7 @@
 //! | `DgHalfClose(g)` | a peer outside the design shuts V_g's send direction |
 //! | `VmmExit` | the VM ends: the guest owner dies with its context (`guest_owner_dies`) |
 //! | `Attach(h)`, `Abort(h)`, `CtxRelease(h)`, `Reopen(h)`, `TakeEnd(h)`, `OwnerClose(h)`, `Hop1(gh)` (dgram), `HopEnd0(hg)`, `HopEnd1(gh)`, `VCtl(gh)`, `FwdErr(h)`, `Write(hg)` / `Fin(hg)` / `Read(gh)` / `ReadEof(gh)` / `ShutRd(gh)` (stream), `ReadEof(hg)`, `TcpRst(h, ·)`, `HolderDrop`, `HolderEnd(k)`, `TrailingRst(·)`, `SendDg(hg, ·)`, `DRead(gh)`, `UdpBlock(gh)`, `UdpUnblock(gh)`, `UdpErr(h)`, `DgHalfClose(h)` | stimulus of the other side or of the guest application's own observation: no guest fact changes until a guest action above delivers it |
-//! | `AttachRead`, `AttachHook`, `DropRecord`, `UnclassifiedEof`, `WatchRecord`, `SendShutLate` | hazard-only — an error, never a no-op |
+//! | `AttachRead`, `AttachHook`, `DropRecord`, `UnclassifiedEof`, `WatchRecord` | hazard-only — an error, never a no-op |
 //!
 //! Projection (`State::from_driver`, side `g` only). The driver holds the
 //! production `GuestFlowOwner` directly (S-7, "Owner field") and reads it
@@ -120,6 +120,15 @@
 //! (gated on the `VmmExit` the driver applied, which is stimulus; the spec's
 //! `vmUp` is stimulus too and is not read). Host-side variables are not this
 //! driver's; the host driver compares them at every step.
+//!
+//! **Runs pinned on the host driver only.** `HostOwnerDeathIsFinal` and
+//! `RecoveryEndsHeldStreamWhoseWatchEnded` are the host owner's death and its
+//! `Forwarder` recovery: their prefix (`Paired`,
+//! `WatchedStreamSeesGuestResetAsAbort`) is pinned here, and their own steps
+//! (`CtxRelease(h)`, `Reopen(h)`) are host stimulus with no guest delivery,
+//! asserting host facts (`gh.hostDead`, `strmAbort`, `hres`, `ctx(h)`,
+//! `gen(h)`) that this driver does not project. The host `fwd_pair` driver
+//! pins both (testing.md checklist item 6 is per spec main).
 //!
 //! **Pre-state stash.** `State::from_spec` stashes each step's state; a
 //! handler reads the pre-state for the stimulus the trace implies (the unit
@@ -880,7 +889,6 @@ impl Driver for FwdPairGuestDriver {
             DropRecord => return Err(DriverError::HazardOnly("DropRecord").into()),
             UnclassifiedEof => return Err(DriverError::HazardOnly("UnclassifiedEof").into()),
             WatchRecord => return Err(DriverError::HazardOnly("WatchRecord").into()),
-            SendShutLate => return Err(DriverError::HazardOnly("SendShutLate").into()),
         })
     }
 }

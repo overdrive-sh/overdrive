@@ -64,13 +64,14 @@ State 9
   gf = Map(1 -> { c: 2, gen: 1, st: "acc" })
 
 State 10
-  gf = Map(1 -> { c: 2, gen: 1, st: "attached" })
-  toHostPaired = Set(1)
-
-State 11
+  quiesced = true
   hf = Map(1 -> { gen: 1, st: "closed" })
   toGuestAbort = Set(1)
-  dl = { adm: Set(), earlyDl: false, lateReply: false, res: Map(1 -> "PairingDeadline"), tout: Set() }
+  dl = { adm: Set(), earlyDl: false, lateReply: false, res: Map(1 -> "Quiesced"), tout: Set() }
+
+State 11
+  gf = Map(1 -> { c: 2, gen: 1, st: "attached" })
+  toHostPaired = Set(1)
 
 State 12
   hf = Map(1 -> { gen: 1, st: "paired" })

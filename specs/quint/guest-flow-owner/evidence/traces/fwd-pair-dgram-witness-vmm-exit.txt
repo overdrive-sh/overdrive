@@ -1,7 +1,7 @@
 # fwd-pair-dgram-witness-vmm-exit: counterexample, 2 state(s) (from the TLC trace)
 
 State 1
-  gh = [ fwdAfterEnd |-> FALSE, fwdOld |-> FALSE, unclassified |-> FALSE, rstOpen |-> {}, holderReadAfterAbort |-> FALSE, trail |-> {}, faults |-> 0, hobs |-> "none", woken |-> FALSE, recPend |-> FALSE, vhTouched |-> FALSE, dropped |-> FALSE, hostDead |-> FALSE, hresCls |-> "none" ]
+  gh = [ fwdAfterEnd |-> FALSE, fwdOld |-> FALSE, unclassified |-> FALSE, rstOpen |-> {}, holderReadAfterAbort |-> FALSE, trail |-> {}, faults |-> 0, hobs |-> "none", woken |-> FALSE, vhTouched |-> FALSE, dropped |-> FALSE, hostDead |-> FALSE, hresCls |-> "none" ]
   strmAbort = FALSE
   attRes = [g |-> "none", h |-> "none"]
   terr = [g |-> FALSE, h |-> FALSE]
@@ -10,7 +10,7 @@ State 1
   pr = [ g |-> [ ph |-> "unattached", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ], h |-> [ ph |-> "unattached", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ] ]
   tcpErr = [g |-> "0", h |-> "0"]
   vs = [ g |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ], h |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ] ]
-  dir = [ gh |-> [ wr |-> 0, wfin |-> FALSE, q0 |-> <<>>, h0 |-> <<>>, q1 |-> <<>>, h1 |-> <<>>, q2 |-> <<>>, srcEnd |-> "none", srcShut |-> FALSE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> FALSE, shutRd |-> FALSE, loss |-> FALSE, lost |-> 0 ], hg |-> [ wr |-> 0, wfin |-> FALSE, q0 |-> <<>>, h0 |-> <<>>, q1 |-> <<>>, h1 |-> <<>>, q2 |-> <<>>, srcEnd |-> "none", srcShut |-> FALSE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> FALSE, shutRd |-> FALSE, loss |-> FALSE, lost |-> 0 ] ]
+  dir = [ gh |-> [ wr |-> 0, wfin |-> FALSE, q0 |-> <<>>, q1 |-> <<>>, q2 |-> <<>>, srcEnd |-> "none", srcShut |-> FALSE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> FALSE, shutRd |-> FALSE, loss |-> FALSE, lost |-> 0 ], hg |-> [ wr |-> 0, wfin |-> FALSE, q0 |-> <<>>, q1 |-> <<>>, q2 |-> <<>>, srcEnd |-> "none", srcShut |-> FALSE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> FALSE, shutRd |-> FALSE, loss |-> FALSE, lost |-> 0 ] ]
   attEnded = [g |-> 0, h |-> 0]
   vmUp = TRUE
   oldCtx = [g |-> "none", h |-> "none"]
@@ -23,7 +23,7 @@ State 1
   conf_step = [InitWith |-> [m |-> "dgram"]]
 
 State 2 [VmmExit]
-  gh = [ fwdAfterEnd |-> FALSE, fwdOld |-> FALSE, unclassified |-> FALSE, rstOpen |-> {}, holderReadAfterAbort |-> FALSE, trail |-> {}, faults |-> 1, hobs |-> "none", woken |-> FALSE, recPend |-> FALSE, vhTouched |-> FALSE, dropped |-> FALSE, hostDead |-> FALSE, hresCls |-> "none" ]
+  gh = [ fwdAfterEnd |-> FALSE, fwdOld |-> FALSE, unclassified |-> FALSE, rstOpen |-> {}, holderReadAfterAbort |-> FALSE, trail |-> {}, faults |-> 1, hobs |-> "none", woken |-> FALSE, vhTouched |-> FALSE, dropped |-> FALSE, hostDead |-> FALSE, hresCls |-> "none" ]
   pr = [ g |-> [ ph |-> "gone", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ], h |-> [ ph |-> "unattached", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ] ]
   vs = [ g |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ], h |-> [ ps |-> {}, sent |-> {}, err |-> TRUE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ] ]
   vmUp = FALSE

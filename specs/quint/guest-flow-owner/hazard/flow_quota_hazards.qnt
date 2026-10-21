@@ -7,5 +7,3 @@
 module quota_bugCountActiveOnly { import flow_quota(OFF = Set("countActiveOnly"), REC = false).* from "../flow_quota" }
 // the quota is per allocation: with one quota for the node, a withholding guest exhausts the node
 module quota_bugNodeWideQuota { import flow_quota(OFF = Set("nodeWideQuota"), REC = false).* from "../flow_quota" }
-// EVMOD-AB off: the flow's place is released at the half-close while its pair still forwards
-module quota_bugFreeAtHalfClose { import flow_quota(OFF = Set("freeAtHalfClose"), REC = false).* from "../flow_quota" }

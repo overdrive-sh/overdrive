@@ -6,18 +6,18 @@ the production owners (`.claude/rules/design.md` § "Concurrent protocols carry 
 specification", `.claude/rules/testing.md` § "Quint conformance").
 
 Every module here is a state machine (state variables, `init`, `step`) with named runs for its critical
-scenarios. Each run is listed in `checks.toml` (`backend = "evaluator"`). Every design rule has a
-hazard instance in `hazard/` that removes or weakens it, with `expect = "violation"`.
+scenarios. Each run is listed in `checks.toml` (`backend = "evaluator"`). Every design decision has a
+hazard instance in `hazard/` that removes or weakens its rule, with `expect = "violation"` (WITNESS-HAZARD-RULE, below).
 
 Run: `cargo xtask lima run -- cargo xtask quint typecheck`, then
 `cargo xtask lima run -- cargo xtask quint check --subsystem guest-flow-owner [--name <check>] [--ci]`.
 Evidence of the last full run: `evidence/summary.md` (written only by `--record`; `cargo xtask quint
 verify-evidence --subsystem guest-flow-owner` fails when it no longer matches the specs).
 
-Decision ids are the ones of the 2026-10-11 DESIGN round (INB-1, UDP-EMPTY, R2-END, R2-DRAIN,
-CID-NOCLAIM, RESET-EXIT, UDP-SEQ, QHOLD, NO-SURVIVE) and the ADRs they live in (ADR-0146, -0156,
+Decision ids are (INB-1, R2-END, R2-DRAIN,
+CID-NOCLAIM, RESET-EXIT, QHOLD, NO-SURVIVE) and the ADRs they live in (ADR-0146, -0156,
 -0157, -0160, -0165, -0166, -0169, -0173, -0177, -0180, -0182, -0183, -0184), and the DISTILL upstream-issue
-resolutions of the feature delta's § *DISTILL upstream-issue closure* (approved by the user on 2026-10-14):
+contracts (`docs/feature/netns-density-295/distill/upstream-issues.md`, pinned in their owning delta sections):
 D-UP-1 (the conformance step record), D-UP-3 (a leaked quiescence hold), D-UP-4 with PD-1 (a restore with a hold
 another ledger issued: `ForeignHold`, nothing changes, fail-stop `ForeignQuiescenceHold`), D-UP-8 (the guest-held control session),
 D-UP-9 (the VM driver's VMM-exit step), and the model abstractions
@@ -32,17 +32,24 @@ issued (`ForeignHold`); the hold is dropped; the second ledger's `leaked()` rise
 (see § *Model-only claims*). Spike evidence: `docs/feature/netns-density-295/spike/` (`findings-v29` ..
 `findings-v32`, `findings-ka5`, `findings-evmod`, `findings-evmod-followup`, `findings-v1..v4-guest-slot`).
 
-The vsock data path is the in-kernel event-driven forwarder of the user's data-path ruling of 2026-10-16
-(**EVMOD-ADOPT, approved**, ADR-0197): on each side one module (it unloads only at zero module references,
-MODULE-REFCOUNT 2026-10-20) forwards every guest flow by peeking its
-source, sending without blocking and consuming only what the target accepted. Its interface contracts are
-**PROPOSED 2026-10-16, awaiting the user** — EVMOD-END (end classification in the forwarder's callback),
-EVMOD-PAIR (attach at pairing), EVMOD-CTL (the context, ADR-0199), EVMOD-REC (the end-record completion channel,
-ADR-0202), EVMOD-STREAM-END (how a `GuestStream` resolves an end; split from EVMOD-REC 2026-10-17, no ADR),
-EVMOD-STREAM-ABORT, EVMOD-ATTACH-END, EVMOD-DGRAM (datagram mode, ADR-0201), EVMOD-AB (release at the end record) — and the modules that encode them (`fwd_pair`, the changes to
-`flow_quota`, `owner_flows` and `udp_slots`) are written as proposed; they are re-run if the user changes them. The
-modules of the BPF sockmap redirect — `flow_end` (drain cells, fexit counters, the flow-event ring, the
-raw-tracepoint classifier) and `udp_empty` (the empty-datagram notice) — are deleted with it.
+The vsock data path is the in-kernel event-driven forwarder (EVMOD-ADOPT, ADR-0197): on each side one module (it unloads
+only at zero module references, MODULE-REFCOUNT) forwards every guest flow by peeking its source, sending without
+blocking and consuming only what the target accepted. Its approved interface contracts are EVMOD-END (end classification
+in the forwarder's callback), EVMOD-PAIR (attach at pairing), EVMOD-CTL (the context, ADR-0199), EVMOD-REC (the end-record
+completion channel, ADR-0202), EVMOD-STREAM-END (how a `GuestStream` resolves an end), EVMOD-STREAM-ABORT,
+EVMOD-ATTACH-END, EVMOD-DGRAM (datagram mode, ADR-0201) and EVMOD-AB (release at the end record); the modules that encode
+them are `fwd_pair`, and the `flow_quota`, `owner_flows` and `udp_slots` rules that depend on them.
+
+**WITNESS-HAZARD-RULE.** Hazards are one per design decision (an ADR-level rule), not
+one per clause: a rule's variants (a check and its run, two invariants of one rule, a second instance of the same
+rule) are not separate hazards. A non-vacuity witness is kept only where no named run reaches its state; the others
+are cut, because a named run on a conformance main already shows the behaviour is reachable. The witnesses kept are
+`owner-flows-witness-phantom-connect`, `fwd-pair-witness-watch-half-close` and `fwd-pair-dgram-witness-vmm-exit`. An
+invariant's teeth are the hazard of the decision it defends. The `OFF` switches are only the rules of the hazards
+`checks.toml` lists: every `OFF` string in a module is the rule of one. A
+property that TLC checks exhaustively on a main is not repeated as a bounded Apalache check on the same main; the
+two bounded Apalache checks that remain, `owner-flows-two-safety-apalache` (`flows_two`: two concurrent host-opened
+dials) and `udp-slots-safety-apalache` (`slots_ok`: two destinations), cover instances no exhaustive check covers.
 
 ## The conformance step record `conf_step` (D-UP-1)
 
@@ -102,11 +109,14 @@ module and the module that declares it).
 | `udp_slots.qnt` | guest UDP slot pool and datagram associations | D25, SLOT-ABORT, U-2, EVMOD-DGRAM (the slot socket's queue discarded at an end) |
 
 The parts of each module an instance does not use stay constant. Instances (`const CFG`): `owner_flows`
-`core` / `core2` / `sess` / `beacon`; `fwd_pair` `ok` (stream: 3 units gh, 1 hg) / `watch` (a dial: 2 / 1) / `live`
+`core` / `core2` / `one` (the core with one guest-opened flow: the instance of `GuestHalfEnds`) / `sess` / `beacon` (`core2` has `flows_two`, the
+non-recording instance of the bounded Safety check, and `flows_conf`, the conformance main); `fwd_pair` `ok` (stream: one unit each way) / `watch` (a dial: one unit each way) / `live`
 (stream, one unit each way: the liveness instance) / `wlive` (a dial, 1 unit gh, none hg: the watch liveness
-instance of T-5 and T-6) / `stall` (stream, 4 units gh, none hg, no fault) / `dgram` (3
-datagrams gh, none hg) / `dlive` (1 datagram gh, none hg, no send-buffer toggles: the liveness instance of EV-DGRAM
-D1) / `conf`; `cid_lease` `ok` / `live` (three abstract offsets; D-UP-20) / `conf_ok`
+instance of T-5 and T-6) / `stall` (stream, 4 units gh, none hg, no fault) / `dgram` (one
+datagram each way) / `dlive` (1 datagram gh, none hg, no send-buffer toggles: the liveness instance of EV-DGRAM
+D1) / `mid` (stream mode with 2 units and datagram mode with 2 datagrams, gh only, one fault: the multi-unit and
+multi-datagram instance, `MidSafety`) / `dhaz` (datagram mode, 3 datagrams gh, one fault: only the hazard of the datagram
+invariants instantiates it) / `conf`; `cid_lease` `ok` / `live` (three abstract offsets; D-UP-20) / `conf_ok`
 (the five offsets of the /29 test pool: `lease_conf_ok`, and its non-recording `lease_five` for the safety check) /
 `conf_325` (as `conf_ok` with the #325 window kept: `lease_conf_325`, pending GH #325); `lease_conf_three` records
 `conf_step` on `ok` (D-18);
@@ -118,25 +128,30 @@ Coverage note (`fwd_pair`): every model-checking instance carries at most ONE en
 trace (`TcpRst`, `HolderDrop`, `VmmExit`, `UdpErr`, `Abort`, `CtxRelease`, `CloseUnattached`, `DgHalfClose`: `FMAX` = 1; the first unbounded instance
 had more than 9.7 M distinct states after 15 min). Two faults meeting in one trace — a reset racing an owner's
 abort — are therefore checked only along the named runs on `pair_conf`, each of which checks `Safety` (or
-`DgramSafety`) at every step. The datagram instance sends in direction gh only: the forwarding code is the same for
-both directions, and sends in both multiplied the state space past what TLC finished in 15 min (7.3 M states); the
-named runs exercise one direction too. The liveness instance carries one unit each way: TLC's liveness mode is two
+`DgramSafety`) at every step. The `ok`, `watch` and `dgram` instances carry one unit (one datagram) per direction The
+multi-unit and multi-datagram behaviour is checked exhaustively on `pair_mid` (`fwd-pair-mid-safety-tlc`: 2 units and
+2 datagrams in one direction with one fault, so a reset, an exit or a send block can arrive while the second unit or
+datagram is queued or mid-adoption), and along the named runs on `pair_conf` (4 units, 3 datagrams each way) and, for a
+short send, on `pair_stall`. `MidSafety` is `Safety` in a stream or watch trace and `DgramSafety` in a datagram trace
+(the stream invariants count units in the vsock queue, which holds frame items in datagram mode). The datagram
+invariants have teeth on `pair_dhaz` (3 datagrams): a datagram consumed with only part of its frame accepted corrupts the
+frame of the datagram that follows it, so two datagrams cannot violate `DatagramsOnceInOrder`. The liveness instance carries one unit each way: TLC's liveness mode is two
 orders of magnitude slower per state on this module than its safety mode.
 
 ### What the model contains nothing of
 
-Removed by the round and absent from every module: host-local delivery steering of the guest prefix,
+Absent from every module: host-local delivery steering of the guest prefix,
 intake listeners / the intake port block / listen-state mirroring, prefix landing and boot, the shared
 table's boot-continues path, the kernel CID claim (claim port, survivors, fd handoff), `HalfClose` /
 `HalfCloseAck` control messages, a drain deadline / recheck / `DrainTimeout`, quiescence holder names,
 `StillQuiesced { holders }`, `QuiescenceHolderBusy`, VM survival across a `serve` restart.
 
-Removed with the BPF sockmap redirect (data-path ruling of 2026-10-16) and absent from every module: the `sk_skb`
+Absent from every module (the data path is the in-kernel forwarder, not a BPF sockmap redirect): the `sk_skb`
 verdicts, sockhash routes and install at establishment, the `SO_RCVLOWAT` re-arm, the guest TCP parking cells, the
 drain cells (`goal`, `armed`, `fired`, `sent`), the two `fexit` counters and the `fentry` backstop, recursion-miss and
 lost-counter reads, `RedirectRefused`, the flow-event ring, `FlowCell` / `CellEpoch` and epochs, the raw-tracepoint
 classifier, the valve (never approved), and — on approval of EVMOD-DGRAM — SEQPACKET from the guest, the framing and
-reassembly cells and CELL-RECREATE, the empty-datagram notice and owner-sent empties (UDP-EMPTY), and the guest-`lo`
+reassembly cells and CELL-RECREATE, the empty-datagram notice and owner-sent empties, and the guest-`lo`
 unframe program.
 
 ### Not modelled, with the reason
@@ -148,7 +163,8 @@ unframe program.
   suite, the probe's gold test) and the seeded sim.
 - The module's build, load and guest packaging (EVMOD-BUILD, ADR-0203; EVMOD-LOAD, ADR-0205; EVMOD-GUEST-KIT,
   ADR-0206) and the appliance image kernel, which has no module unloading (`CONFIG_MODULE_UNLOAD` off, ADR-0068 § 7):
-  boot-time facts with no interleaving (the unload itself, on a kernel that can unload, is `fwd_safe`'s `Unload`);
+  boot-time facts with no interleaving; the module's unload, its references and the lifetime of its text are not
+  modelled at all (`fwd_safe` checks the pair's state, not the override's text);
   a missing or mismatched module is a refused start (G-V1, G-V7), checked by the probe tests, not a protocol state.
 - The ADR-0149 length check and oversize datagrams (`dgram_oversize`): a datagram's size is 0..2 units here.
 - GW-LOCAL (the gateway as the one host-local prefix address): a boot-converged route, no protocol.
@@ -203,7 +219,8 @@ was read in full — an attached socket's bytes are payload), `NoAdmitWhenClosed
 (INB-1, `GUEST_DIAL_PAIRING_DEADLINE` > `GUEST_INBOUND_CONNECT_TIMEOUT`), `BeaconCurrentLaunch`,
 `BeaconNoCrossLaunchReady`, `BeaconNoCrossLaunchHeld` (ATTR-TOKEN / ATTR-LIVE-CLAIM for the beacon),
 `GuestSessionOfCurrentLaunch` (D-UP-8: the session the guest holds belongs to the running launch).
-Temporal: `GuestHalfEnds` (U-5 with K-A4, DG-5-E), `SessionBecomesLive` (D18a; checked on instance `sess`: two control connections and two launches, no guest-opened flows and no dial slots, because the property mentions sessions only and the full `core` instance exceeded 900 s in TLC liveness checking; the instance takes its steps from `sessStep`, since `coreStep`'s flow and dial picks range over empty sets there and would disable every core action — before 2026-10-14 they did, and the check held vacuously on 34 states; it now explores 2,470; its teeth are the environment variant `owner-flows-sess-env-guest-misses-session-loss`, K-A5S dropped), `ReadyReleased` (ADR-0157).
+Temporal: `GuestHalfEnds` (U-5 with K-A4, DG-5-E; checked on instance `one` — one guest-opened flow, one host-opened flow —
+because the property mentions the host-opened flow only and `core` (15.1 M states) took 53 min and 10 GB), `SessionBecomesLive` (D18a; checked on instance `sess`: two control connections and two launches, no guest-opened flows and no dial slots, because the property mentions sessions only and the full `core` instance exceeded 900 s in TLC liveness checking; the instance takes its steps from `sessStep`, since `coreStep`'s flow and dial picks range over empty sets there and would disable every core action; its teeth are the environment variant `owner-flows-sess-env-guest-misses-session-loss`, K-A5S dropped), `ReadyReleased` (ADR-0157).
 
 ## `fwd_pair`: the in-kernel forwarder (EVMOD)
 
@@ -277,7 +294,7 @@ closed — the guest sees 0x3 — in one step; a stream the owner already ended 
 `TrailingRst`, `SendDg`, `DRead`, `UdpBlock` / `UdpUnblock` (the target UDP socket's send would block), `UdpErr`,
 `DgHalfClose` (a peer outside the design ends a datagram vsock's direction with a 0x2: the stimulus for EV-DGRAM D1,
 F12), and (hazard only) `DropRecord`, `AttachRead` / `AttachHook` (checkThenHook), `WatchRecord`
-(originalBeforeRecord), `SendShutLate` (lateSendShut). The orphan sweep's two steps (T-9) are `VmmExit` (the state
+(a `conf_step` variant no step produces). The orphan sweep's two steps (T-9) are `VmmExit` (the state
 becomes readable: `swp` holds while the watch is live with `vs(h).err`) and `FwdErr(h)` (its `sk_error_report`). The watch's callbacks (`VCtl`, `FwdErr` on V_h) queue the
 record and then call the original callback in one step (EVMOD-STREAM-END, EV-END change 3; ghost `woken`). In datagram mode a clean end
 of the incoming direction completes the pair once the vsock queue is empty, and a head frame left incomplete when the
@@ -297,15 +314,15 @@ the watch, else the class of the watch's record, whatever the holder's read retu
 it, ghost `gh.hresCls`, because a later owner end of the recovery leaves the reported end as it was, U-R1),
 `RecoveryEndsHeldStream` (EVMOD-CTL recovery step 1, U-R1: after the `Forwarder` recovery's close no stream the holder
 still holds is left un-ended by its owner), `WatchRecordBeforeWake` (EVMOD-STREAM-END, EV-END
-change 3: a holder woken by a watch's end finds the record queued), and the third iteration's `TcpResetEndsPair`
+change 3: a holder woken by a watch's end finds the record queued), `TcpResetEndsPair`
 (T-1: no pair is live once its TCP half's reset was reported), `ResetErrnoMatchesState` (T-1: `EPIPE` iff the reset
 half was in `CLOSE_WAIT`), `AbortOnlyAfterFault` (T-3, T-8: a pair or flow ends aborted only after a fault or abort
 action), `RefusedAttachLeavesNoPair` and `EndedHalfNeverEndsClean` (T-4: a `HalfEnded` attach creates no pair and no
 record, and no far end of the flow reads end-of-stream after it), `WatchAbortLeavesHolderSocket` (T-5),
-`NoLiveWatchAfterDrop` (T-6), `OwnShutBeforeShutdownSent` (T-8) and `CtxGoneIffVmDown` (round 14: `ctx(g) = gone`
+`NoLiveWatchAfterDrop` (T-6), `OwnShutBeforeShutdownSent` (T-8) and `CtxGoneIffVmDown` (`ctx(g) = gone`
 exactly when the VM is down, so the init conformance driver treats `ctx(g) = gone` as determined by the `VmmExit`
-stimulus it applied and never projects it; its non-vacuity witnesses are `fwd-pair-witness-vmm-exit` on `pair_ok` and
-`fwd-pair-dgram-witness-vmm-exit` on `pair_dgram`); `ClassFixedAtTransition` also requires that no
+stimulus it applied and never projects it; its non-vacuity witness is `fwd-pair-dgram-witness-vmm-exit` on `pair_dgram`: no named run
+exits the VMM in datagram mode); `ClassFixedAtTransition` also requires that no
 transition is classified otherwise than with the socket's true send state (CLEAN-FULL-END). Datagram mode
 (`DgramSafety`): `DatagramsOnceInOrder` (empties included), `FrameNeverSplitAcrossDatagrams`, `DropsOnlyAtSourceQueue`
 (a datagram is dropped only at a UDP receive queue — the source socket's when it is full or discarded at a slot
@@ -330,7 +347,7 @@ instances can occur only finitely often, so every behaviour ends in stuttering, 
 action is then equivalent to that formula; stated through `weakFair`, TLC's liveness mode evaluated the enabledness of
 every action in every state at about 1,000 states a minute.
 
-Host-side projection pins (D-3 to D-5, architect 2026-10-18), as modelled: the host owner reads an end record and
+Host-side projection pins (D-3 to D-5), as modelled: the host owner reads an end record and
 closes the flow's descriptors in one dispatch, so `TakeEnd(h)` carries `OwnerClose`'s effect outside watch mode and
 `OwnerClose` is the guest's own dispatch only (D-4); a `CtxRelease(h)` that finds the host pair or watch live is the
 host owner's death and is final — no `Reopen(h)` follows it (ghost `gh.hostDead`, run `HostOwnerDeathIsFinal`) —
@@ -351,11 +368,10 @@ actors at the points where another actor can enter, for one pair (or one watch) 
   (the callback pointer read); `Load` (`rcu_read_lock` + `smp_load_acquire(sk_user_data)`, rule 1); `Use` (the pair
   found: note the direction, queue the work; a watch queues its record first) or `Fallback` (NULL: call the
   socket's current callback, rule 2);
-- the write-space trigger (round 16, rule 5's write-space closure): `sk_write_space` is never overridden. `Read` (the
-  far reader frees target space while `SOCK_NOSPACE` is set) starts a wake through the socket's own
-  `sk_write_space` (`ws` = `called`, kernel text) by a waker of class `bh` or `wfree` (`ReadBy`, nondeterministic);
+- the write-space trigger: `sk_write_space` is never overridden. `Read` (the far reader frees target space
+  while `SOCK_NOSPACE` is set) starts a wake through the socket's own `sk_write_space` (`ws` = `called`);
   `WsEnter` takes the wait-queue head's lock `wqlk(t)` and enters the forwarder's wait-queue entry (`wqe`) if it is
-  on the queue (`ws` = `entry`, module text); `WsLeave` runs it (a touch of the pair, `queue_work`) and drops the
+  on the queue (`ws` = `entry`); `WsLeave` runs it (a touch of the pair, `queue_work`) and drops the
   lock. The end removes the entry (`wt`, `remove_wait_queue` under `lock_sock(t)`) before `t`'s restore and clear
   and before the free work is queued; `wt` waits while a wake holds `wqlk(t)`. Only `t`'s entry is modelled
   (the source's write-space wake belongs to the other direction, which runs the same code);
@@ -370,45 +386,30 @@ actors at the points where another actor can enter, for one pair (or one watch) 
   removal, `rt`, `ut`: separate steps), removes the
   id and queues the record in one section (`idrec`), queues the free with `queue_rcu_work` (`free`);
 - the free: `RcuGp` (every reader inside at queue time has left), `FreeCancel` (`cancel_work_sync`: disable, drop
-  PENDING), `FreeFlush` (wait for the running item), `FreeDone` (kfree), `FreePut` (`module_put` per hooked half, the
-  free work's last statement), `FreeRet` (its return, still module text);
-- the module's lifetime (MODULE-REFCOUNT, EVMOD-LIFE as amended, ADR-0198; rule 5 of EVMOD-SAFE, ADR-0204):
-  `modref` counts the context's reference (`ctx`, released by `CtxClose` at `__fput` after the release emptied the
-  id table), another context's (`CtxOpen` / `CtxOtherClose`) and one per hooked half (`sref`, released by
-  `FreePut`; a half with a ULP at its removal keeps it). Each invocation carries its caller class: `lock` (the vsock
-  receive path owns `lock_sock(s)`: `Write`, `PeerFin`), `bh` (the delta's `rcu` class, a region a vanilla grace
-  period waits for: TCP input's `TcpRx`, the sweep's `SwReport`, a ULP's `UlpCall`) or `wfree` (a write-space waker
-  with no socket lock, no RCU section and preemption enabled: `sock_wfree` from the vhost worker, the guest's
-  virtio-vsock transmit work or a NIC driver's skb free, `net/core/sock.c:2675-2693` @ v7.0; it reaches only the
-  wait-queue entry, which `wqlk(t)` closes, never an override); the grace period waits for a `bh` caller from its
-  call site on and for a `lock` caller only inside `rcu_read_lock`, and for a `wfree` caller never. Rule 5's removal holds `lock_sock(s)` (`lk` = `rm`) across the half's
-  restore and clear and waits for a `lock` caller. `UlpInstall` (an environment fault: an owner defect ADR-0200 rules
-  out) saves a copy of the TCP half's override. `Unload` is enabled at `modref = 0` and completes after
-  `destroy_workqueue`'s drain (no pending or running work item, no free work queued or running);
+  PENDING), `FreeFlush` (wait for the running item), `FreeDone` (kfree);
 - control calls by id under the record-queue lock: `CtlAbort` (`OVD_FWD_ABORT`, and `OVD_FWD_ABORT_ALL`, which acts
   on each id as `ABORT` does), `CtlState` (`PAIR_STATE`), the context's release `CtxRel`, the owner's `TakeEnd`;
-  alternative (d) as `CtlLookup` / `CtlUnlock` / `CtlQueue`. Attach is not modelled: it holds `lock_sock`,
-  `sk_callback_lock` and `vsock_table_lock`, which exclude every callback of the half (F9).
+  alternative (d) (the `ctlQueueOutsideRcu` hazard) as `CtlLookup` / `CtlUnlock` / `CtlQueue`. Attach is not
+  modelled: it holds `lock_sock`, `sk_callback_lock` and `vsock_table_lock`, which exclude every callback of the half
+  (F9).
+
+Not modelled: the module's unload and the lifetime of its text — the module
+references, `delete_module`, `module_exit`'s drain, a ULP's saved copy of an override, the classes of the callers that
+reach an override and rule 5's removal under `lock_sock(s)`. The appliance image has `CONFIG_MODULE_UNLOAD` off
+(ADR-0068 § 7), so the unload is a dev-host concern checked by the module suite (EVMOD-LIFE, ADR-0198), not a protocol
+state. The rules modelled are rules 1-4 of EVMOD-SAFE and the write-space entry's removal.
 
 Invariants (`Safety`): `NoTouchAfterFree` (no override, run, control call or `queue_work` touches freed state),
-`NoOverrideCallsItself`, `NoEventLost`, `OneEndRecord`, `RecordAtIdRemoval` (no lost record: the id leaves only with
+`NoOverrideCallsItself`, `OneEndRecord`, `RecordAtIdRemoval` (no lost record: the id leaves only with
 its record, none at release), `OneFree`, `FreeAfterWorkCompletes`, `FreeAfterReaders`, `NoIdNamesFreedState`,
 `CleanEndOnlyAfterPeerFin`, `NoUnclassifiedEnd` (the `unclassified_eof` alarm never fires, including for a run that
-reads the half inside the orphan sweep's stores: EVMOD-SWEEP's `vsock_table_lock` re-check, F-S1),
-`NoTextRunAfterUnload` (MODULE-REFCOUNT: once unloaded, no override, write-space entry function, work item, free work
-or control call is in the module's text, and no half's pointer, ULP copy, wait-queue entry, pending work item or
-pending free work can still enter it; `NoTouchAfterFree` counts the entry's function as a holder of the pair until the
-entry's removal) and
-`RefHeldWhileReachable` (while an override is in the text, a half still carries an override or a ULP copy, a work
-item or a free work before its `module_put` is pending or running, or a context is open, `modref > 0`; the free
-work's return after its own `module_put` is covered by the drain, not a reference). Their non-vacuity witnesses are
-`fwd-safe-witness-unload` (pair) and `fwd-safe-witness-watch-unload` (watch): the module is unloaded.
+reads the half inside the orphan sweep's stores: EVMOD-SWEEP's `vsock_table_lock` re-check, F-S1).
 Temporal, under weak fairness of every system step and of the far reader (not of the vsock peer's writes, the
 sweep's start, the control calls' start or the release), stated as `eventually(always(not(sysEnabled)))`:
 `EveryUnitDelivered`, `StalledPairResumes` (a pair stalled on a full target resumes once the reader reads),
 `EndProducesRecord`, `SocketEndYieldsRecord` (the peer's 0x2 or the sweep eventually yields the record),
 `RequestedAbortEnds`, `EndedStateFreed`. Each rule's hazard is in § Hazards; the wakeup hazards drop
-the write-space wait-queue entry, `sk_data_ready`, `sk_state_change` or `sk_error_report` and show the deadlock (the pair stalls, or
+the write-space wait-queue entry, `sk_data_ready` or `sk_error_report` and show the deadlock (the pair stalls, or
 the end never yields its record, for ever).
 
 ## `flow_quota`: the per-allocation quota counts half-closed flows
@@ -448,7 +449,7 @@ an exhausted workload's last ending, ghost `g.lastEnd`, is a crash-class failure
 `Redeploy`), `FailedHoldsNoLease` (DR6-CLOSE, item 7.5: a `failed` workload holds no lease) and `NoUntrackedLease`
 (DR6-CLOSE: every leased offset is its holder's placement lease `off` or predecessor lease `pred`; an untracked lease
 is a leaked CID), all in `Safety`. Temporal: `EventuallyPlaced`. `wait` / `done` are the
-node's persisted placement intent as the placement owner reads it (the T-5 ruling, revised 2026-10-18, DR2-CLOSE): the
+node's persisted placement intent as the placement owner reads it (T-5, DR2-CLOSE): the
 conformance composition runs `WorkloadLifecycle` through the production convergence tick and the real `submit` /
 `stop` / `restart` handlers, so `Assign` is a tick that places a `wait` workload, `Launch` / `Release` are the held
 provisioner `provision` / `teardown` boundaries of one dispatch, `Stop` is the stop handler then a tick, `Redeploy` is
@@ -486,7 +487,7 @@ reclamation kills (platform-reclaimed: the workload waits whatever its count, `c
 `done` and `failed`, is a generation replacement (waits whatever its count, `chg` false). A failed workload stays
 failed across a serve crash. A workload leased but not launched at a serve crash has no row, so it goes back to `wait`
 with its predecessor's count and `chg` (item 3). A generation replacement leased at the crash is placed again: the
-behaviour GH #325 is to deliver (RESTART-GEN-CRASH, user ruling 2026-10-18: production loses it today and #295 does not
+behaviour GH #325 is to deliver (RESTART-GEN-CRASH: production loses it today and #295 does not
 fix it; pending #325). `lease_conf_ok` does not enable `Crash` in that window; `lease_conf_325` keeps it (item 9). The
 ghost `g.pendingGen` records the
 `Redeploy`'s pre-state until the placed allocation's first row (`Launch`); it does not affect behaviour in the
@@ -494,17 +495,13 @@ design, and hazard `crashLosesPlacedGeneration` uses it. `att` stops at the ceil
 `CEIL` is the production 5 on `lease_conf_ok` / `lease_five` (the fifth crash-class failure, at `att` = 4, is placed
 again; the sixth, at `att` = 5, exhausts the budget) and is scaled to 2 on `lease_ok`, `lease_live` and the `lease_bug*`
 instances; the predicate's shape is the same. The pre-fix `restart_status_for_alloc` (`attempts + 1 < CEILING`, no
-exemptions) is hazard `retryOffByOne`. One hazard per exemption removes that exemption alone: `reclaimNotExempt` and
-`generationNotExempt`.
+exemptions) is hazard `retryOffByOne`. Hazard `reclaimNotExempt` removes the platform-reclaim exemption alone.
 
-One hazard per item-7 rule (DR6-CLOSE): `vmmExitRetiresLease` (7.1: the VMM's exit retires and releases its lease in
-the same step, so the restart holds no predecessor), `predecessorFirst` (7.2: the restart frees the old lease before it leases the
-successor), `predecessorCleanedAtAssign` (7.3: the predecessor is retired at the assign, not after the launch),
-`refusalKeepsPredecessor` (7.4: a pool refusal leaves the predecessor held until the next launch),
+Item-7 hazards (DR6-CLOSE): `refusalKeepsPredecessor` (7.4: a pool refusal leaves the predecessor held until the next launch),
 `terminalBeforeRelease` (7.5: FinalizeFailed writes the terminal before it releases the lease) and
 `tickDuringPredecessorTeardown` (the 7.3 step boundary: the `predRetiring` guard dropped from `Assign`, `Stop` and
-`Finalize`). The first four change the dispatch order without leaking a CID, so `Safety` holds on them (checked,
-`expect = "holds"`) and the named run is the discriminator. The #325-window guard of item 9 has its own checks: the
+`Finalize`). Those change the dispatch order without leaking a CID, so `Safety` holds on them and the named run is the
+discriminator. The #325-window guard of item 9 has its own checks: the
 run `CrashIsNotEnabledInThe325Window` (its last `expect` before `Crash` establishes every other precondition of
 `Crash`) holds on `lease_conf_ok` and is violated on `lease_conf_325`, and its positive twin
 `CrashIsEnabledInThe325WindowWithoutTheGuard` (the same prefix, then `Crash` taken) holds on `lease_conf_325` and is
@@ -526,7 +523,7 @@ does — a leaked-hold count above zero, cause `LeakedQuiescenceHold`, or a `For
 `ForeignQuiescenceHold`). Invariants: `ForeignRestoreChangesNothing` (D-UP-4: a foreign restore changes neither the
 count, nor the latch, nor the leaked-hold count), `LeakedHoldKeepsForwardingQuiesced`,
 `LatchIffCount`, `CountCoversRecoveries` (the count is the recoveries holding a hold plus the leaked holds),
-`NoReopenBeforeRepair`, `NoRepairWithoutHold`, `QuiescedHoldsNoFlow` (QHOLD), `ServeRunsOnlyWithTable` (ADR-0184).
+`NoReopenBeforeRepair`, `QuiescedHoldsNoFlow` (QHOLD), `ServeRunsOnlyWithTable` (ADR-0184).
 Temporal: `C1EpisodeEnds`, `C2EpisodeEnds`, `C1Repaired` (QHOLD, ADR-0124, UP-7), `LeakedHoldEndsInFailStop` (D-UP-3),
 `ForeignHoldEndsInFailStop` (D-UP-4, PD-1).
 
@@ -661,7 +658,7 @@ checked on its module's conformance main (D-UP-1), the main a driver pins it on 
 | orphan exits by itself before reclamation; unlaunched lease leaves nothing | `OrphanExitsByItselfBeforeReclamation`, `ServeCrashWithUnlaunchedLeaseLeavesNothingToReclaim` |
 | two orphans: one boot reclamation (one converge call) kills both before any assign (D-UP-19) | `ReclamationKillsEveryOrphanBeforeAssign` |
 | serve crashes after a stop and before the release: the workload stays stopped across the restart, and is placed again only after a redeploy (T-5 ruling) | `StoppedWorkloadStaysStoppedAcrossServeCrash`, `StoppedWorkloadIsPlacedAgainOnlyAfterRedeploy` |
-| RESTART-SSOT: the fifth crash-class failure (`att` = 4) is placed again; the sixth exhausts the budget and the workload is not placed again until a `Redeploy`, which places it with its count (hazards `retryOffByOne`, `generationNotExempt`) | `FifthCrashAtCeilingBoundaryIsPlacedAgain`, `FailureAtCeilingExhaustsTheBudget`, `RedeployPlacesAnExhaustedWorkloadAgainWithItsCount` |
+| RESTART-SSOT: the fifth crash-class failure (`att` = 4) is placed again; the sixth exhausts the budget and the workload is not placed again until a `Redeploy`, which places it with its count (hazard `retryOffByOne`) | `FifthCrashAtCeilingBoundaryIsPlacedAgain`, `FailureAtCeilingExhaustsTheBudget`, `RedeployPlacesAnExhaustedWorkloadAgainWithItsCount` |
 | RESTART-SSOT: a reclaimed workload at and past the ceiling is placed again and keeps its count (hazard `reclaimNotExempt`) | `ServeCrashPlacesAWorkloadAtTheCeilingAgain`, `ReclaimedWorkloadPastTheCeilingIsPlacedAgain` |
 | a successor leased but not launched at a serve crash is placed again with the same count | `ServeCrashBeforeLaunchPlacesTheSuccessorAgainWithItsCount` |
 | serve crash while FinalizeFailed's teardown is held: the restarted process finalises it (item 7) | `ServeCrashDuringFinalizeFinalizesAfterRestart` |
@@ -696,19 +693,13 @@ checked on its module's conformance main (D-UP-1), the main a driver pins it on 
 | the context's release ends a pair with no record | `ReleaseEndsPairWithoutRecord` |
 | a watch's own end (record, then the original), then the owner's `ABORT` is `ENOENT`; one record | `WatchOverrideEndThenOwnerAbortIsEnoent` |
 | the owner's `ABORT` of a watch races the sweep's callback inside the override: the abort owns the end; one record; the grace period waits for the override | `WatchOwnerAbortRacingSweepOneRecord` |
-| MODULE-REFCOUNT: the pair is aborted and freed while the context stays open; the context's reference refuses the unload | `UnloadRefusedWhileContextOpen` |
-| MODULE-REFCOUNT: the context is released and closed while the pair's halves still hold their references; the unload is refused until the free work's `module_put` | `UnloadRefusedWhileSocketHooked` |
-| MODULE-REFCOUNT: after the release and the free (both references put, the free work returned) the module unloads, nothing in its text | `UnloadSucceedsAfterReleaseAndFree` |
-| rule 5: a vsock receive-path caller owns `lock_sock(s)` and loaded the override's pointer as the end reaches the removal; the removal waits for the lock; the module later unloads with no caller in its text | `LateLockedCallbackFinishesBeforeRemoval` |
-| rule 5: a ULP on the TCP half saved a copy of the override; that half keeps its reference, the module stays loaded after the context closes, and the ULP's call of its copy finds no pair and calls the original | `UlpCopyKeepsModuleLoaded` |
-| rule 5's write-space closure (round 16): a `wfree` waker (`sock_wfree`, no lock, no RCU section) holds `wqlk(t)` inside the entry's function as the end reaches the entry's removal; the removal waits; the pair ends, the free runs, the module unloads, no text runs after it | `WfreeWakeFinishesBeforeRemoveWait` |
+| the write-space closure: a waker (`sock_wfree`, no lock, no RCU section) holds `wqlk(t)` inside the entry's function as the end reaches the entry's removal; the removal waits; the pair ends and the free runs | `WfreeWakeFinishesBeforeRemoveWait` |
 
 ### `udp_slots` (`slots_conf`)
 
 `DatagramAssociationClaimsPairsAndRoutes`, `TwoSocketsClaimDistinctSlots`,
 `RefusedDiscardsParkedFramesAndOnlyNewDatagramReassociates`,
-`HostAbortOfLiveAssociationEndsItAndKeepsSlotOwned`, `DatagramQueuedBeforeAnEndIsDiscardedWithTheQueue` (EVMOD-DGRAM:
-replaces `StaleGenerationReadinessEventIsDiscarded`),
+`HostAbortOfLiveAssociationEndsItAndKeepsSlotOwned`, `DatagramQueuedBeforeAnEndIsDiscardedWithTheQueue` (EVMOD-DGRAM),
 `LatePairedForReleasedSlotIsAnsweredWithAbort`, `LostReleaseReportIsFoundByAudit`,
 `SocketCloseReleasesEverySlotItOwns`, `IdleSlotReleaseEndsAssociation`,
 `AuditTickReleasesOrphansAndIdleSlotsInOneStep`, `PairingDeadlineAbortsAndLatePairedIsDiscarded`,
@@ -744,18 +735,14 @@ Nothing below is a modelled fact. Each is an input the model takes as given.
 | F10 | a TCP reset received after a FIN leaves `recvmsg` returning end-of-stream (`SOCK_DONE` is tested before `sk_err`, `net/ipv4/tcp.c:2794`, `:2797` @ v7.0; `SOCK_DONE` is set only by `tcp_fin`, `net/ipv4/tcp_input.c:4954`) and is reported by `sk_error_report` (`tcp_done_with_error`, `tcp_input.c:4890-4900`) | proven: P-69 (V-EV-END (c), the FIN-then-reset shape) |
 | F11 (corrected) | a vsock socket whose own receive side is shut returns 0 from `recvmsg` at once only while it is `ESTABLISHED` (`net/vmw_vsock/af_vsock.c:2545-2548` @ v7.0); once it left `ESTABLISHED` without `SOCK_DONE` (`vsock_shutdown` clears it, `:1220`) it returns `-ENOTCONN` (`:2522-2531`); a send on it fails. After the orphan sweep (which stores `SS_UNCONNECTED`, numerically `TCP_ESTABLISHED`, in `sk_state`, `drivers/vhost/vsock.c:746-750`) the queued bytes are read and then `-ECONNRESET` is returned (`af_vsock.c:2326-2328`, `:2439-2440`); after a peer SHUTDOWN, 0 once the queue is empty. The model's `HolderEnd` choices follow this | proven: P-70 § 3.5 (`findings-ev-ctl.md`: `ENOTCONN` in 10 / 400, 4 / 400, 1,916 / 4,096 after the forwarder's `SHUT_RDWR`); the sweep-path order: P-69 (640 of 640 records present at the holder's observation) |
 | F12 | the datagram source forwarder sends nothing on a vsock it shut (EPIPE); the only datagram-mode 0x2 is a peer outside the design (`DgHalfClose`; no Overdrive owner half-closes a datagram vsock, U-EV-5), by which EV-DGRAM D1 is checked | P-72 § 8 (`findings-ev-dgram.md`: an independent peer left a frame incomplete at its end and the pair hung; with the rule it aborted at once) |
-| F13 | the forwarder's abort of a watch sends nothing on the vsock and changes no socket state of V_h (WATCH-ABORT; the delta's third-iteration "F12", renumbered here because F12 is the datagram source rule above) | the module code; the spike's `ABORT` (P-70 § 3.8, `findings-ev-ctl.md`) and the module suite's case "`ABORT` of a watch sends nothing on the vsock and changes no socket state" (DELIVER) |
-| F14 | a vsock `CLOSING` is set only on a connected socket, when a packet leaves `peer_shutdown == SHUTDOWN_MASK` with the receive queue empty — a 0x3 (`virtio_transport_common.c:1448-1452`) or an RST (`:1463-1464`), both through `virtio_transport_do_close`, which sets `TCP_CLOSING` only when `vsock_stream_has_data` is 0 (`:1249-1252`); with bytes queued the socket stays `ESTABLISHED`, for an RST too — and the orphan sweep writes the state (`sk_state = SS_UNCONNECTED`, `drivers/vhost/vsock.c:748` @ v7.0) and then `sk_err = ECONNRESET` (`:749`), then runs `sk_error_report` (`:750`), all under `vsock_table_lock` (`net/vmw_vsock/af_vsock.c:458-471` @ v7.0), which the attach section holds, so an attach sees both writes or neither; the order inside the sweep is immaterial to attach (U-EV3-6; numbered F14 here, the delta's change list first called it "F13") | discharged: the source reading and P-70 § 3.6 / P-71 (`eg-rst`, `eg-drst`: the refusals measured, `findings-ev-ctl.md`, `findings-ev-pair.md`) |
-| S1 | RCU: a grace period started after a reader entered ends after it left; `queue_rcu_work` (`kernel/workqueue.c:2649-2664` @ v7.0) | the source reading; V-EV-SAFE (KASAN stress, DELIVER) |
+| F13 | the forwarder's abort of a watch sends nothing on the vsock and changes no socket state of V_h (WATCH-ABORT) | the module code; the spike's `ABORT` (P-70 § 3.8, `findings-ev-ctl.md`) and the module suite's case "`ABORT` of a watch sends nothing on the vsock and changes no socket state" (DELIVER) |
+| F14 | a vsock `CLOSING` is set only on a connected socket, when a packet leaves `peer_shutdown == SHUTDOWN_MASK` with the receive queue empty — a 0x3 (`virtio_transport_common.c:1448-1452`) or an RST (`:1463-1464`), both through `virtio_transport_do_close`, which sets `TCP_CLOSING` only when `vsock_stream_has_data` is 0 (`:1249-1252`); with bytes queued the socket stays `ESTABLISHED`, for an RST too — and the orphan sweep writes the state (`sk_state = SS_UNCONNECTED`, `drivers/vhost/vsock.c:748` @ v7.0) and then `sk_err = ECONNRESET` (`:749`), then runs `sk_error_report` (`:750`), all under `vsock_table_lock` (`net/vmw_vsock/af_vsock.c:458-471` @ v7.0), which the attach section holds, so an attach sees both writes or neither; the order inside the sweep is immaterial to attach (U-EV3-6) | discharged: the source reading and P-70 § 3.6 / P-71 (`eg-rst`, `eg-drst`: the refusals measured, `findings-ev-ctl.md`, `findings-ev-pair.md`) |
+| S1 | RCU: a grace period started after a reader entered ends after it left; `queue_rcu_work` (`kernel/workqueue.c:2649-2664` @ v7.0) | the source reading; V-EV-SAFE |
 | S2 | `smp_store_release` / `smp_load_acquire` order the restore before the clear for an override that reads NULL; `rcu_assign_pointer(p, NULL)` is a plain `WRITE_ONCE` (`include/linux/rcupdate.h:575-576` @ v7.0) | the source reading; V-EV-SAFE |
 | S3 | workqueue: PENDING cleared before the function runs (`kernel/workqueue.c:3254`, `:3288`), non-reentrant (`:1212-1214`), `cancel_work_sync` disables, drops a pending run and waits for a running one; a `queue_work` on a disabled item is dropped (`:4444-4466`, `:2415`) | the source reading; V-EV-SAFE |
 | S4 | the vsock receive path runs the callbacks under `lock_sock` (`virtio_transport_common.c:1661`, `:1705`); the orphan sweep stores `SOCK_DONE`, `peer_shutdown`, `sk_state`, `sk_err` in that order without the socket lock and then calls `sk_error_report` (`drivers/vhost/vsock.c:725-750`); a `recvmsg` that reads `peer_shutdown & SEND_SHUTDOWN` before `sk_err` returns 0 (`af_vsock.c:2326-2328`, `:2439-2442`) | the source reading; V-EV-SAFE; FINDING F-S1 |
-| S5 | a TCP target wakes `sk_write_space` after an `EAGAIN` send once space frees (`net/core/stream.c:175-181`, `include/net/tcp.h:770-776`, `net/ipv4/tcp_input.c:6118-6122`), and the socket's own `sk_write_space` wakes its wait queue with `EPOLLOUT` (`net/core/stream.c:34-51`, `net/core/sock.c:3617-3660`); a vsock enqueue calls `sk_data_ready` (`virtio_transport_common.c:1432-1433`, `af_vsock.c:1062-1068`) | the source reading; V-EV-SAFE's full-target resume cases (TCP, vsock and UDP targets, DELIVER). P-67 measured the earlier `sk_write_space` override and is not evidence for the wait-queue entry |
-| S6 | (round 16) the wait-queue function runs only with the head's lock held and interrupts disabled, and `remove_wait_queue` takes that lock (`kernel/sched/wait.c:69-76`, `:104-108`, `:118-127` @ v7.0); `sock_wfree` calls `sk_write_space` with no socket lock, outside any RCU section and with bottom halves enabled for every socket without `SOCK_USE_WRITE_QUEUE` (`net/core/sock.c:2675-2693` @ v7.0; only TCP sets it, `net/ipv4/tcp.c:477`) | the source reading; V-EV-SAFE's full-target resume cases |
-| M5 | (the delta's round-15 "S5"; renumbered because S5 is the wakeup fact above) `delete_module` refuses while any module reference is held and calls `exit` only at zero (`kernel/module/main.c:730-751`, `:828` @ v7.0) | the source reading; V-EV-UNLOAD (Tier-3, DELIVER of steps K and 4; not contract-shaping) |
-| M6 | (the delta's "S6") `destroy_workqueue` drains every pending and running item of the module's own workqueue (`kernel/workqueue.c:5979`, `:5962`, `:4183-4194` @ v7.0) | the source reading; V-EV-UNLOAD |
-| M7 | (the delta's "S7") a vanilla RCU grace period waits for bottom-half-disabled regions (`include/linux/rcupdate.h:671-675` @ v7.0) | the source reading; V-EV-SAFE (KASAN, DELIVER of step 4) |
-| M8 | (the delta's "S8") every override invocation (`sk_data_ready`, `sk_state_change`, `sk_error_report`; `sk_write_space` is never overridden) comes from a socket-lock owner, a region a vanilla grace period waits for, or the forwarder's own work item | the DELIVER source review of the module step; V-EV-SAFE; V-EV-UNLOAD (the KASAN unload stress and its rule-5 hazard builds) |
+| S5 | a TCP target wakes `sk_write_space` after an `EAGAIN` send once space frees (`net/core/stream.c:175-181`), and the socket's own `sk_write_space` wakes its wait queue with `EPOLLOUT` (`net/core/stream.c:34-51`, `net/core/sock.c:3617-3660` @ v7.0) | the source reading; V-EV-SAFE's full-target resume cases (TCP, vsock and UDP targets, DELIVER). P-67 measured the earlier `sk_write_space` override and is not evidence for the wait-queue entry |
+| S6 | the wait-queue function runs only with the head's lock held and interrupts disabled, and `remove_wait_queue` takes that lock (`kernel/sched/wait.c:69-76`, `:104-108`, `:118-127` @ v7.0); `sock_wfree` calls `sk_write_space` with no socket lock, outside any RCU section and with bottom halves enabled for every socket without `SOCK_USE_WRITE_QUEUE` (`net/core/sock.c:2675-2693` @ v7.0; only TCP sets it, `net/ipv4/tcp.c:477`) | the source reading; V-EV-SAFE's full-target resume cases |
 | Q-1 | A task exit of a runtime component is detected by the 1 s audit; a repair that returns `Err` is a failed attempt | OPEN validation item: DST invariant under UP-7 (ADR-0124) |
 
 ## Model-only claims and what discharges them
@@ -775,25 +762,25 @@ the Sim adapters' scripted facts. The projection reads `FlowForwarder::pair_stat
 forwarder's kernel facts — the queues, the per-direction state, the classification, the end records — and of the far
 readers' delivered units (`// conformance-lint: sim-arbiter-ok`), paired with the Tier-3 runs V-EV-END and V-EV-CTL
 and the module suite. Model-only, never projected: `loss`, `lost`, `tcls`, `ucls`, `fwdAfterEnd`, `trail`, `faults`,
-`sdrop` / `rdrop` / `fdrop`, `conf_step`, the second iteration's `att`, `clsAt`, `ncls`, `snap`, `fwdOld`, `rstOpen`
-and `holderReadAfterAbort` (QPROJ-8, U-EV-8), and the third iteration's `vs(s).misc`, `guestAbortSent`, `gh.hobs`,
-`gh.woken`, `gh.recPend`, `gh.vhTouched` and `gh.dropped` (the holder's observation and drop are the driver's own
+`sdrop` / `rdrop` / `fdrop`, `conf_step`, `att`, `clsAt`, `ncls`, `snap`, `fwdOld`, `rstOpen`
+and `holderReadAfterAbort` (QPROJ-8, U-EV-8), and `vs(s).misc`, `guestAbortSent`, `gh.hobs`,
+`gh.woken`, `gh.vhTouched` and `gh.dropped` (the holder's observation and drop are the driver's own
 calls on the `GuestStream`; the stream's reported end is `hres`). `vs(s).sshut` is not model-only: QPROJ-8 classes
 it as an arbiter read (`SimFlowForwarder`'s per-half own-shutdown flag, Tier-3 pair P-71 `h_lateshut`), as it does
-`vs(s).st` and `vs(s).err`. QPROJ-8 classes the second
-iteration's variables (U-EV-8): `gen` and a pair's `cgen` are owner observations
+`vs(s).st` and `vs(s).err`. QPROJ-8 classes the
+variables (U-EV-8): `gen` and a pair's `cgen` are owner observations
 (`flow_observation().forwarder_generation` and the `generation` of the flow's `Paired` phase, both
 `ForwarderGeneration`); `oldCtx` is read from `SimFlowForwarder`'s context table (named arbiter, Tier-3 pair P-70);
-`unclassified` is an owner observation (`inventory().unclassified_eof`). The second iteration's owner actions map to the
+`unclassified` is an owner observation (`inventory().unclassified_eof`). The owner actions map to the
 host owner's `Forwarder` recovery (`Abort` as `abort_all`, `CtxRelease` as the drop of the old
 `KernelFlowForwarder`, `Reopen` as `KernelFlowForwarder::open()` and `probe()`) and the guest owner's close of a flow
 it has not attached (`CloseUnattached`); `AttachRead` / `AttachHook` and `UnclassifiedEof` are reached only by
-hazards (the latter is the `unclassified_eof` counter of `inventory()`). The third iteration's actions: `HolderEnd`
+hazards (the latter is the `unclassified_eof` counter of `inventory()`). `HolderEnd`
 is the driver's own `read` on its `GuestStream`'s V_h in the Sim adapter (the scripted end fact, Eof or Err), `ReadEof`
 on the dialer the stream's resolved result; `DgHalfClose` is a scripted vsock fact of the Sim adapter (no owner path
-produces it); `WatchRecord` and `SendShutLate` are reached only by hazards.
+produces it); `WatchRecord` is a `conf_step` variant no step produces (the drivers map it to a hazard-only error).
 
-The variables T-1 to T-9 add, classed as QPROJ-8 ("The third iteration's variables") pins them: `tcpErr(s)` is the
+The variables of T-1 to T-9 are classed as QPROJ-8 pins them: `tcpErr(s)` is the
 `SimFlowForwarder` TCP half's `sk_err` (named arbiter; the projected outcome is the record
 `ForwardEnd { outcome: Aborted { cause: SocketError { side, errno } } }`, here `pr(s).cause` / `pr(s).errno`);
 `tcpSt(t, s)` is a derived definition over `tcpErr`, the far writer's FIN and this side's own FIN, not projected (its
@@ -807,21 +794,20 @@ cross-checked against `inventory().live_watches`); `vh` is `vs(h)` with the vsoc
 `dir(hg).q1` (the Sim vsock socket, arbiter; the ghost `vhTouched` is model-only); `frq(d)` is the derived
 `headPartial(t, d)`, not projected (its input `dir(d).q1` is the Sim vsock queue, arbiter); `ownShut(s)` is
 `vs(s).sshut` (arbiter); `swp(h)` is `vs(h).err` while the watch is live (the sweep's first step taken, its
-`sk_error_report` — `FwdErr(h)` — not yet run). Model-only: `dropped`, `vhTouched`. The third iteration's actions: `TcpRst(s, after_fin)` (the Sim far peer's reset after or before its FIN;
+`sk_error_report` — `FwdErr(h)` — not yet run). Model-only: `dropped`, `vhTouched`. Actions: `TcpRst(s, after_fin)` (the Sim far peer's reset after or before its FIN;
 `SimFlowForwarder` runs the half's `sk_error_report` in the same step; `after_fin` equals the far writer's FIN in the
 state, so a trace names it explicitly), `Attach(s)` with an ended half (the same dispatch; `HalfEnded { side, errno
 }`), `Abort(h)` on a watch (the owner's stream abort and its `Abort { flow }` write in one owner step), `GuestAbort(g)`
-(the guest owner's dispatch of `Abort { flow }`), `HolderDrop` (the driver drops its `GuestStream`; it replaces the
-second iteration's `DialerDrop`). `TcpRst` replaces `EpRst` (the reset and its report are one step, T-1).
+(the guest owner's dispatch of `Abort { flow }`), `HolderDrop` (the driver drops its `GuestStream`). The reset and its report are one step (`TcpRst`, T-1).
 
-## Underspecified points
+## Pinned design points
 
-The architect resolutions of the 2026-10-11 round are modelled:
+Each point below is a rule the design pins and the model encodes.
 
 1. INB-1: a dial to an `Active`, not quiesced allocation whose control session is not live is the typed result
    `NoSession` (immediate, no state change; `DialNoSession`, `TypedRefusalChangesNothing`). The load-bearing
-   rule that a dial never opens without a live session is covered by the existing `dialNoAdmission` hazard.
-   The order of decision (2026-10-13) follows only facts the owner observes: Active (else `NotServing`) →
+   rule that a dial never opens without a live session is covered by the `dialNoAdmission` hazard.
+   The order of decision follows only facts the owner observes: Active (else `NotServing`) →
    not quiesced (else `Quiesced`) → the control session live as the owner observes it (else `NoSession`,
    whatever `vmUp`) → the vsock connect, whose failure is `Unreachable`. The owner does not observe `vmUp`:
    `DialUnreachable` requires the session live to the owner (`sessLive`, which counts a `dead` session whose
@@ -830,388 +816,198 @@ The architect resolutions of the 2026-10-11 round are modelled:
    `LeakHold`; the recovery supervisor (ADR-0124) fail-stops serve at its audit tick when the count is above zero,
    whatever the recoveries do (`FailStop`; `LeakedHoldEndsInFailStop`; hazard `leakIgnored`). A failed repair is only
    `RepFail` (counted, the hold kept); no `Err` propagates out of a recovery with its hold.
-4. ADR-0147: no isolation claim beyond the quota; the model assumes no relation between node capacity and the
+3. ADR-0147: no isolation claim beyond the quota; the model assumes no relation between node capacity and the
    sum of quotas.
-5. H-1 (r1): a VMM exit while a dial awaits its pairing reply: the device-release orphan sweep resets the host dial
+4. H-1: a VMM exit while a dial awaits its pairing reply: the device-release orphan sweep resets the host dial
    vsock (`drivers/vhost/vsock.c:745-750` @ v7.0, `sk_err = ECONNRESET`); `VmStop` ends every requested host dial of the
    stopped launch with `Unreachable { ECONNRESET }`, no message. `PairingDeadline` remains for a running VM whose guest
    never replies.
-6. L-9 (r1): a dial in flight that the owner ends reports the admission variant of its cause: quiescence `Quiesced`,
+5. L-9: a dial in flight that the owner ends reports the admission variant of its cause: quiescence `Quiesced`,
    allocation teardown or retire `NotServing`, observed control-session loss `NoSession`. A vsock connect or I/O error
    (VM or device gone) is `Unreachable { errno }`. No owner-initiated end is `Unreachable { ECONNABORTED }`.
-9. M-4 (r1): `owner_flows` models neither capacity nor the quota; no Quint module models the
+6. M-4: `owner_flows` models neither capacity nor the quota; no Quint module models the
    `GuestStreamDial` capacity refusal (the dial's `Capacity` outcome); it is discharged by the seeded-sim scenario
    R5-53 against the production owner (`docs/feature/netns-density-295/feature-delta.md`). `flow_quota`
    (`AdmissionStopsAtTheAllocationQuota` and the quota invariants) models the admission quota only. Dial cancellation is `DialCancel`
    (`DroppedDialFutureEndsLikeThePairingDeadline`).
+7. U-EV-1: attach accepts a TCP half that received its FIN before attach (`TCP_CLOSE_WAIT`) and a vsock half whose
+   peer already ended its direction; the attach-time run carries an early end out (`EarlyFinBeforeAttachCarriedOut`).
+8. U-EV-2: an end that reached a vsock half before attach is classified at attach, once, from the accumulated flags
+   ({S} clean, R present abort), with this side's send open (F9).
+9. U-EV-3: a watch ended by its owner leaves V_h untouched (WATCH-ABORT); end-of-stream with no record is an abort.
+10. U-EV-4: the host owner is never replaced in-process; the `Forwarder` recovery is abort-all → close old → open
+    new, modelled in `fwd_pair`; `owner_flows` needs no owner-death action.
+11. U-EV-5: a clean class completes a datagram pair, but no owner path produces a datagram-mode 0x2; the model keeps
+    the rule and reaches it through `DgHalfClose`, a scripted fact of the Sim adapter.
+12. U-EV-6: a UDP target send returns `-EAGAIN` only when that socket's own send buffer is full; a far receiver that
+    stops reading drops at its own receive queue. The model has both (`UdpBlock`, `dq2` full) and
+    `DropsOnlyAtSourceQueue` reads "only at a UDP receive queue — the source's or the far receiver's — never inside the
+    forwarder or the vsock". The run `StalledUdpTargetDropsAtSource` is the blocked-send case.
+13. U-EV-7 / U-EV-8: `AbortCause::Unclassified` (record cause 5) is the model's label; § Conformance granularity
+    classes the variables.
+14. U-EV-9 (EVMOD-DGRAM D1): the callback's class decides first. An abort-class end (0x3, RST) aborts `PeerAbort`
+    whatever is queued; every production end of a datagram vsock is of this class. A clean-class end (0x2, no
+    production producer) sends every whole frame and then completes, or aborts `FrameInvalid` when a frame is left
+    incomplete (ADR-0201). The model encodes both (`ClassFixedAtTransition`; `DgHalfClose`). The conformance run
+    `TruncatedFrameAtPeerEndAbortsFrameInvalid` needs the Sim adapter to script the 0x2.
+15. WATCH-ABORT (ADR-0211): the owner's abort of a watch does not shut V_h; the `Err` branch of F11 is
+    `ContextReleaseShutsWatchedVhAndHolderReadsNotConnected`, the `Eof` branch `ReleasedWatchWithNoRecordReadsAsAbort`.
+16. U-EV-11: after the orphan sweep `sk_state` holds `SS_UNCONNECTED`, which equals `TCP_ESTABLISHED`
+    (`drivers/vhost/vsock.c:748`, `include/uapi/linux/net.h:50`, `include/net/tcp_states.h:13` @ v7.0), so the holder
+    reads the queued bytes and then `-ECONNRESET` (`net/vmw_vsock/af_vsock.c:2326-2328`, `:2439-2440`), not 0. The
+    error is readable before `sk_error_report`, and the stream waits for the in-flight record (T-9).
+17. T-4 (`GuestCloseBeforeHostAttachAborts`): the run encodes the in-flight branch (the guest's 0x3 still in transit at
+    the host's attach: accepted, then aborted by the callback). The queued-data branch has no production producer on
+    V_h — the host attaches before `Paired` (EVMOD-PAIR), reads the guest's request first (`NoAttachBeforeRead`), and
+    the guest sends nothing more on V_g before its own attach — and is reached on the guest side by
+    `HostHalfCloseThenAbortBeforeGuestAttachIsAbort`. A guest close processed before the host's attach with nothing
+    queued leaves V_h `CLOSING` and is refused (`GuestCloseWithEmptyQueueBeforeHostAttachIsRefusedAndFlowAborts`).
+18. T-1 (`ResetErrnoMatchesState`): `EPIPE` iff the half is in `CLOSE_WAIT`; a half in `LAST_ACK` gets `ECONNRESET`
+    (`net/ipv4/tcp_input.c:4918-4930 @ v7.0`); the pair aborts either way and the owners treat both as a reset.
+19. T-4, datagram mode: a connected UDP half with a pending `sk_err` (an ICMP error) is not refused at attach: the
+    attach-time run of the UDP → vsock direction reads the error first (`__skb_recv_udp`,
+    `net/ipv4/udp.c:1986-1988 @ v7.0`) and the pair aborts `SocketError`, which the host owner reports as
+    `DestinationUnreachable` (D26-PINS) (`UdpErr` → `FwdErr`). A refusal in datagram mode is reached only through V_g
+    `CLOSING` (the host's abort before the guest attaches).
+20. T-4, the dial's watch: the watch is installed when V_h connects, before the request is written, so `fwd_pair` has
+    no refused-watch state. In `owner_flows` a refused dial watch maps by its cause: the orphan sweep (`ECONNRESET`,
+    the VMM exited) is the `VmStop` path (`VmExitDuringDialReturnsUnreachableReset`, no message); any other
+    `HalfEnded` end of V_h before the request is `HostAbortAccept(h)` (`Unreachable { errno }`, `Abort { flow }` while
+    the session is live).
+21. T-5 (`GuestPairEndsAfterOwnerAbort`): `fwd_pair`'s only session-down state is the VM's end (`VmmExit`), after which
+    the guest side is gone; a lost session aborts every flow on both sides, which `owner_flows` checks
+    (`SessionLossAbortsDialOnBothSides`, `GuestFlowsDoNotOutliveSession`).
+22. F-S1 (EVMOD-SWEEP, ADR-0180; `fwd_safe`): the orphan sweep stores `peer_shutdown = SHUTDOWN_MASK` before
+    `sk_err = ECONNRESET` with no socket lock and no barrier (`drivers/vhost/vsock.c:747`, `:749` @ v7.0), so a
+    forwarder run already queued can read `V_h` inside the stores and see an end with no class recorded. The run takes
+    `vsock_table_lock`, which the sweep holds across its stores and its `sk_error_report`, re-reads the recorded class
+    and acts on it (`SocketError { ECONNRESET }`). Modelled as `WEnd` (the unlocked read; an unclassified end parks the
+    run in `wrun = "lock"`) and `WRecheck` (enabled only when the sweep does not hold the lock); the sweep's two
+    visible stores may land in either order. `NoUnclassifiedEnd` is part of `Safety`; the hazard is
+    `fwd-safe-hazard-no-sweep-recheck`, and the runs are `SweepStoresBeforeErrReadRechecksUnderTableLock` and
+    `SweepErrVisibleFirstRechecksUnderTableLock`. `fwd_pair`'s `VmmExit` sets the host half's `sk_err` with the state in
+    one step, so it has no window. `fwd_pair` names the invariant `NoUnclassifiedEof`; in `fwd_safe` it is
+    `NoUnclassifiedEnd`.
+23. U-R1 (EVMOD-CTL recovery step 1 with a held dial; D-3, D-5): a held `GuestStream` whose watch already ended
+    (`guest_end: Some(_)`) is ended by the recovery as an owner abort — its `dials` entry leaves, `Abort { flow }` is
+    written while the session is live — while what the stream already returned and its `end()` class stay as they
+    were. Modelled in `recoveryClose` (the `CtxRelease(h)` that found no live watch): `strmAbort` set,
+    `guestAbortSent` while the VM is up, `hres` unchanged; `HolderOutcomeFromWatch` is judged at the moment the stream
+    reports its end (ghost `gh.hresCls`); invariant `RecoveryEndsHeldStream`; run
+    `RecoveryEndsHeldStreamWhoseWatchEnded` on `pair_conf`.
+24. T-5 ruling: the composition drives `WorkloadLifecycle`; `wait` / `done` / `retry` come from QPROJ-2W. `Crash`
+    keeps a stopped, unreleased workload `done` (`StoppedWorkloadNotPlaced`, hazard `crashForgetsStop`), and the
+    conformance configuration bounds each workload's failures at 4. The D-4 / D-5 pins are modelled as stated in
+    § `fwd_pair`. M-1 is modelled in § `flow_quota`.
 
-Resolved by the design's 2026-10-17 revisions (feature delta § *Formal protocol model*, U-EV-1 .. U-EV-6) and
-modelled in the second iteration: U-EV-1 (attach accepts every state in which only the peer has ended), U-EV-2 (the
-atomic attach section, F9, and the attach-time classification with this side's send open), U-EV-3 (a watch ended by
-its owner shuts V_h — superseded in the third iteration by WATCH-ABORT; end-of-stream with no record is an abort), U-EV-4 (the host owner is never replaced in-process;
-the `Forwarder` recovery is abort-all → close old → open new, modelled in `fwd_pair`; `owner_flows` needs no
-owner-death action), U-EV-5 and U-EV-6 (the model's choices hold). The text of the first iteration follows for the
-record.
-
-Resolved by the design and modelled in the third iteration (2026-10-17): U-EV-7 (`AbortCause::Unclassified`, record
-cause 5, is the model's label) and U-EV-8 (QPROJ-8 classes the second iteration's variables; § Conformance
-granularity).
-
-Resolved by the design's answers to the third iteration (2026-10-17; feature delta § *Formal protocol model*,
-"The modeller's underspecified points of the third iteration, and the design's answers"). None changes a state
-machine, invariant, hazard, run or check; each pins what the recorded spec (`15604-1792247867.103`) already does or
-changes only a conformance mapping. The points as raised follow each answer.
-
-- U-EV-9 (EVMOD-DGRAM D1 against U-EV-5). **Answer:** the callback's class decides first. An abort-class end (0x3,
-  RST) aborts `PeerAbort` whatever is queued; every production end of a datagram vsock is of this class. A clean-class
-  end (0x2, no production producer) sends every whole frame and then completes, or aborts `FrameInvalid` when a frame
-  is left incomplete (delta § *Datagram mode*, "The peer's end with frames queued"; ADR-0201). The model encodes both
-  (`ClassFixedAtTransition`; T-7, `DgHalfClose`). As raised: an incomplete frame at the peer's end is reachable only
-  from a datagram-mode 0x2, which no Overdrive owner or forwarder sends; the model reaches D1 through `DgHalfClose`,
-  a scripted fact of the Sim adapter, so the conformance run `TruncatedFrameAtPeerEndAbortsFrameInvalid` needs the
-  Sim adapter to script it.
-- U-EV-10 (EVMOD-REC change list). **Answer:** resolved by WATCH-ABORT — both watch-shut runs retired (the owner's
-  abort no longer shuts V_h); the `Err` branch of F11 is `ContextReleaseShutsWatchedVhAndHolderReadsNotConnected`, the
-  `Eof` branch `ReleasedWatchWithNoRecordReadsAsAbort`.
-- U-EV-11 (raised under EVMOD-REC; EVMOD-STREAM-END since the 2026-10-17 split, F11). **Answer:** correct; recorded in F11 and in the delta's `GuestStream` contract. After the
-  orphan sweep `sk_state` holds `SS_UNCONNECTED`, which equals `TCP_ESTABLISHED` (`drivers/vhost/vsock.c:748`,
-  `include/uapi/linux/net.h:50`, `include/net/tcp_states.h:13` @ v7.0), so the holder reads the queued bytes and then
-  `-ECONNRESET` (`net/vmw_vsock/af_vsock.c:2326-2328`, `:2439-2440`), not 0. The error is readable before
-  `sk_error_report`, and the stream waits for the in-flight record (T-9).
-- U-EV3-1 (T-4, `GuestCloseBeforeHostAttachAborts`). **Answer:** the run encodes the in-flight branch (the guest's
-  0x3 still in transit at the host's attach: accepted, then aborted by the callback). The queued-data branch has no
-  production producer on V_h — the host attaches before `Paired` (EVMOD-PAIR), reads the guest's request first
-  (`NoAttachBeforeRead`), and the guest sends nothing more on V_g before its own attach — and is reached on the guest
-  side by `HostHalfCloseThenAbortBeforeGuestAttachIsAbort`. A guest close processed before the host's attach with
-  nothing queued leaves V_h `CLOSING` and is refused
-  (`GuestCloseWithEmptyQueueBeforeHostAttachIsRefusedAndFlowAborts`).
-- U-EV3-2 (T-1, `ResetErrnoMatchesState`). **Answer:** `EPIPE` iff the half is in `CLOSE_WAIT`; a half in
-  `LAST_ACK` (it received the FIN after the forwarder sent its own) gets `ECONNRESET`
-  (`net/ipv4/tcp_input.c:4918-4930 @ v7.0`). The model already follows the kernel; the pair aborts either way and the
-  owners treat both as a reset.
-- U-EV3-3 (T-4, datagram mode). **Answer:** a connected UDP half with a pending `sk_err` (an ICMP error) is **not**
-  refused at attach: the socket stays usable, the attach-time run of the UDP → vsock direction reads the error first
-  (`__skb_recv_udp`, `net/ipv4/udp.c:1986-1988 @ v7.0`) and the pair aborts `SocketError`, which the host owner reports
-  as `DestinationUnreachable` (D26-PINS). The model's choice holds (`UdpErr` → `FwdErr`); a refusal in datagram mode is
-  reached only through V_g `CLOSING` (the host's abort before the guest attaches).
-- U-EV3-4 (T-4, the dial's watch). **Answer:** the watch is installed when V_h connects, before the request is
-  written, so `fwd_pair` has no refused-watch state and needs none. In `owner_flows` a refused dial watch maps by its
-  cause: the orphan sweep (`ECONNRESET`, the VMM exited) is the existing `VmStop` path
-  (`VmExitDuringDialReturnsUnreachableReset`, no message); any other `HalfEnded` end of V_h before the request is
-  `HostAbortAccept(h)` (`Unreachable { errno }`, `Abort { flow }` while the session is live). A conformance mapping
-  only.
-- U-EV3-5 (T-5, `GuestPairEndsAfterOwnerAbort`). **Answer:** accepted. `fwd_pair`'s only session-down state is the
-  VM's end (`VmmExit`), after which the guest side is gone; a lost session aborts every flow on both sides, which
-  `owner_flows` checks (`SessionLossAbortsDialOnBothSides`, `GuestFlowsDoNotOutliveSession`).
-- U-EV3-6 (numbering). **Answer:** the delta's new assumptions are F13 (a watch's abort sends nothing and changes no
-  socket state) and F14 (vsock `CLOSING`; the sweep's writes under `vsock_table_lock`), as numbered here. F14's
-  former wording here ("the sweep's `sk_err` is set before its state write") inverted the source order and is
-  corrected: the state at `drivers/vhost/vsock.c:748`, then `sk_err` at `:749`, both under `vsock_table_lock`.
-- U-EV3-7 (T-9). **Answer:** the sweep's two steps are the existing `VmmExit` (the state becomes readable; it also
-  ends the guest side) and `FwdErr(h)` (its `sk_error_report`); no `SweepState` / `SweepReport` action exists, and the
-  delta's action map is corrected to these names.
-
-As raised in the forwarder revision (2026-10-16; each resolved above, U-EV-1 .. U-EV-6):
-
-- U-EV-1 (EVMOD-CTL against EVMOD-PAIR): the attach precondition `ENOTCONN` "a TCP or vsock half not `ESTABLISHED`"
-  refuses a TCP half that received its FIN before attach (`TCP_CLOSE_WAIT`), and the spike module does exactly that
-  (`spike-scratch/netns-density-295-evmod/inc2/module/evmod.c:461`), while EVMOD-PAIR (and the named run
-  `EarlyFinBeforeAttachCarriedOut`, V-EV-PAIR's "write + FIN before `Paired`" shape) requires that an early end is
-  carried out by the attach-time run. The model follows EVMOD-PAIR (attach accepts a half whose peer already ended
-  its direction). EVMOD-CTL's precondition must name the accepted states.
-- U-EV-2 (EVMOD-END, EVMOD-PAIR): how the attach-time run classifies an end that reached a vsock half before attach
-  (no callback was installed when it arrived) is not stated. Modelled as F9 (from the accumulated flags: {S} clean,
-  R present abort), which is safe only because an unattached side still sends.
-- U-EV-3 (EVMOD-CTL): whether `OVD_FWD_ABORT` on a watch id, and the context's release of a watch, shut V_h
-  (`SHUT_RDWR`) is not stated (the abort action names TCP and vsock halves of pairs). Modelled: yes; a watch ended by
-  the guest's classified end shuts nothing (the dialer holds V_h).
-- U-EV-4 (EVMOD-CTL with ADR-0124): the change list asks `owner_flows` for "the context's release as an action (owner
-  death)", but the design pins no effect of the host owner's death on its control state (sessions, claims, flow table,
-  dial results) nor the supervisor's restart at that abstraction. It is modelled at the forwarder only
-  (`fwd_pair` `CtxRelease`); `owner_flows` has no owner-death action.
-- U-EV-5 (EVMOD-DGRAM): "`Completed` for a classified half-close" of a datagram pair names an end no owner path
-  produces — a UDP half has no end of stream and every owner end of an association is an abort. The model keeps the
-  rule (a clean class completes a datagram pair) but no trace reaches it.
-- U-EV-6 (EVMOD-DGRAM): a UDP target send returns `-EAGAIN` only when that socket's own send buffer is full; a far
-  receiver that stops reading drops at its own receive queue (as for any UDP socket), not at the forwarder's source.
-  The model has both (`UdpBlock`, `dq2` full) and `DropsOnlyAtSourceQueue` reads "only at a UDP receive queue — the
-  source's or the far receiver's — never inside the forwarder or the vsock". The run name
-  `StalledUdpTargetDropsAtSource` is the blocked-send case.
-
-Points of this round (2026-10-18):
-
-- F-S1 (EVMOD-SWEEP, ADR-0180; `fwd_safe`), resolved this round by the architect's DR2-CLOSE fix: the orphan sweep
-  stores `peer_shutdown = SHUTDOWN_MASK` before `sk_err = ECONNRESET` with no socket lock and no barrier
-  (`drivers/vhost/vsock.c:747`, `:749` @ v7.0), so a forwarder run already queued can read `V_h` inside the stores and
-  see an end with no class recorded. The design's run now takes `vsock_table_lock`, which the sweep holds across its
-  stores and its `sk_error_report`, re-reads the recorded class and acts on it (`SocketError { ECONNRESET }`).
-  Modelled as `WEnd` (the unlocked read; an unclassified end parks the run in `wrun = "lock"`) and `WRecheck`
-  (enabled only when the sweep does not hold the lock); the sweep's two visible stores may land in either order.
-  `NoUnclassifiedEnd` is part of `Safety` and holds. The former finding check `fwd-safe-pair-unclassified-end-reachable`
-  is now the hazard `fwd-safe-hazard-no-sweep-recheck` (re-check removed: violation), and run
-  `SweepStoresBeforeErrReadAsUnclassifiedEnd` is replaced by `SweepStoresBeforeErrReadRechecksUnderTableLock` (its
-  hazard run `fwd-safe-hazard-no-sweep-recheck-run` fails) plus `SweepErrVisibleFirstRechecksUnderTableLock`.
-  `fwd_pair` is unchanged: its `VmmExit` sets the host half's `sk_err` with the state in one step, so it has no
-  window. The feature delta's F-S1 paragraph names the invariant `NoUnclassifiedEof` (`fwd_pair`'s name); in
-  `fwd_safe` it is `NoUnclassifiedEnd`.
-- U-R1 (EVMOD-CTL recovery step 1 with a held dial; D-3, D-5), pinned by the architect (DR2-CLOSE, feature delta
-  § Context lifetime and owner failure, recovery step 1): a held `GuestStream` whose watch already ended
-  (`guest_end: Some(_)`) is ended by the recovery as an owner abort — its `dials` entry leaves, `Abort { flow }` is
-  written while the session is live — while what the stream already returned and its `end()` class stay as they
-  were. Modelled in `recoveryClose` (the `CtxRelease(h)` that found no live watch): `strmAbort` set,
-  `guestAbortSent` while the VM is up, `hres` unchanged; `HolderOutcomeFromWatch` is judged at the moment the stream
-  reports its end (ghost `gh.hresCls`); new invariant `RecoveryEndsHeldStream` with hazard
-  `recoveryKeepsEndedStream`; new run `RecoveryEndsHeldStreamWhoseWatchEnded` on `pair_conf` (a conformance run:
-  DISTILL's `fwd_pair` host driver needs a `#[quint_test]` for it). The `strmAbort` projection (entry absent while the
-  stream is held) now agrees with the model on these traces.
-- The T-5 ruling as revised (DR2-CLOSE: the composition drives `WorkloadLifecycle`; `wait` / `done` / `retry` from
-  QPROJ-2W) needs no change to the model's actions or granularity; its two model changes are in: `Crash` keeps a
-  stopped, unreleased workload `done` (`StoppedWorkloadNotPlaced`, hazard `crashForgetsStop`), and the conformance
-  configuration bounds each workload's failures at 4. The D-4 / D-5 pins are modelled as the architect stated them
-  (§ `fwd_pair`). M-1 is modelled (§ `flow_quota`).
-
-## Deviations from the forwarder change list (feature delta § *Formal protocol model*)
+## Modelling choices for `fwd_pair`
 
 - Instances: besides `pair_ok`, `pair_dgram` and `pair_conf`, `fwd_pair` has `pair_watch` (the dial), `pair_live`
-  (liveness) and `pair_stall` (`StalledSenderIsBlocked`), because the stream instance with every fault exceeded TLC's
-  budget and TLC's liveness mode is far slower per state (§ *Modules*, coverage note). Windows and credits are one
-  unit (the change list's `C` = `W` = 2 with streams of 3-4 units never blocks a writer); the datagram credit is three
+  (liveness), `pair_wlive` (the watch's liveness), `pair_dlive` (the datagram liveness) and `pair_stall`
+  (`StalledSenderIsBlocked`), because the stream instance with every fault exceeds TLC's budget and TLC's liveness mode
+  is far slower per state (§ *Modules*, coverage note). Windows and credits are one unit; the datagram credit is three
   items, the largest frame.
-- Named runs: the 17 of the change list, plus the two prefixes `Paired` and `DgramPaired` (19 run checks).
-- Hazards: the eight of the change list (`attach-before-read` is `owner-flows-hazard-attach-before-read`, on
-  `owner_flows`), the rejected alternative, and three more teeth: `consume-on-short-send` (`UnitsConserved`),
-  `drop-when-target-blocked` (`DropsOnlyAtSourceQueue`) and `shutdown-on-callback-delivery` (`EveryUnitDelivered`).
-- `release-keeps-pairs` violates `ReleasedContextHoldsNoPair` and `NoForwardAfterEnd`, not `NoEofOnPeerLoss` as the
-  change list expected: a pair that keeps forwarding after its owner's death still delivers every byte and ends as
+- Hazard files: every `fwd_pair` hazard file holds at most two instances (`<name>.qnt`, `<name>_2.qnt`, …); a file whose
+  instances plus the instances of `fwd_pair.qnt` it imports exceed ten runs the Apalache server out of its fixed
+  2,048 MiB compile heap (`java.lang.OutOfMemoryError`, reported as a tool error).
+- `fwd-pair-hazard-release-keeps-pairs` violates `ReleasedContextHoldsNoPair` and `NoForwardAfterEnd`, not
+  `NoEofOnPeerLoss`: a pair that keeps forwarding after its owner's death still delivers every byte and ends as
   before; no far end is shown an EOF it should not see.
-- `owner_flows`: no owner-death action (U-EV-4).
-- Second iteration (2026-10-17). `fwd-pair-hazard-check-then-hook` (state read, a transition, callbacks installed)
-  violates `AttachTimeEndClassifiedOnce` and `NoUnclassifiedEof` on the design's alarm (the unclassified
-  end-of-stream aborts); it violates the change list's `ClassFixedAtTransition` and `AbortNeverCleanEof` only when the
-  alarm is also replaced by a FIN (`pair_bugCheckThenHookFin`: `fwd-pair-hazard-check-then-hook-class`, `-eof`).
-  `fwd-pair-hazard-tcp-eof-is-clean` violates the new `ResetNeverEndsClean`, not `AbortNeverCleanEof`: in a FIN then
-  a reset the FIN is a genuine clean end of the peer's direction, so the reader of that direction may read its EOF;
-  what the reset cuts is the direction toward the peer, whose reader (the peer) never reads an EOF — the defect is a
-  pair that completes cleanly although its peer reset with a direction open. Two runs beyond the change list:
-  `GuestCloseBeforeHostAttachAborts` (the third attach-time order the design names) and
-  `ReleasedWatchWithNoRecordReadsAsAbort` (end-of-stream with no record). Two hazard teeth beyond it:
-  `fwd-pair-hazard-watch-abort-keeps-vh` (U-EV-3 off, `NoHolderReadAfterWatchAbort`) and its run. The hazards of
-  `fwd_pair` are split over four files (`fwd_pair_hazards.qnt`, `fwd_pair_ctl_hazards.qnt`,
-  `fwd_pair_end_hazards.qnt`, `fwd_pair_dgram_hazards.qnt`): with the second iteration's state, one file of seventeen
-  instances exceeded the fixed 2,048 MiB heap the Apalache server compiles a TLC check with (`OutOfMemoryError`).
-- Third iteration (2026-10-17). The hazard `fwd-pair-hazard-late-send-shut` violates `ClassFixedAtTransition` through
-  its new clause (a transition classified otherwise than with the socket's true send state), not through
-  `ucls`/`tcls`: the peer's R arriving between the SHUTDOWN and the late flag is classified abort where the table
-  gives none, and no unit or EOF is affected, so `AbortNeverCleanEof` holds; the run-based
-  `fwd-pair-hazard-late-send-shut-run` fails `HalfCloseThenPeerCloseIsClean`. `IncompleteFrameAtEndAborts` is the
-  rule's state form; its hazard's teeth in time are `EveryEndResolves` on the new datagram liveness instance
-  `pair_dlive` (`fwd-pair-hazard-truncated-frame-waits-resolves`). Three witnesses beyond the list:
-  `WitnessNoEndBeforeRecord` (the holder observes the end while the watch is live — the sweep's record in flight),
-  `WitnessNoHolderErrReported` and `WitnessNoTruncatedEnd`. The new hazards are in a fifth file,
-  `fwd_pair_watch_hazards.qnt`. `fwd-pair-watch-safety-tlc` takes 112 s alone (47.6 s before) and is `ci = false`.
-- Third iteration, T-1 to T-9 (2026-10-17, P-69 to P-72, EV-PINS, WATCH-ABORT, EVMOD-ATTACH-END, EVMOD-STREAM-ABORT).
-  `TcpRst(s, after_fin)` replaces `EpRst` and `HolderDrop` replaces `DialerDrop`; `GuestAbort(g)` is new. The run
-  `OwnerAbortOfWatchShutsVhAndHolderSeesAbort` and the hazard `fwd-pair-hazard-watch-abort-keeps-vh` (and its run) are
-  retired as the list says, and so is `OwnerAbortedWatchHolderReadsNotConnectedAndReportsAbort` (its subject, the
-  holder's `ENOTCONN` after the owner's shut, is gone: the `Err` branch moved to
-  `ContextReleaseShutsWatchedVhAndHolderReadsNotConnected`). `GuestCloseBeforeHostAttachAborts` encodes the in-flight
-  branch (U-EV3-1). `NoHolderReadAfterWatchAbort` gets teeth from `holderTrustsRead` (a stream that passes reads to
-  V_h after the owner's abort: `fwd-pair-hazard-holder-trusts-read-late-read`). The temporal checks of T-5 and T-6 run
-  on a new watch liveness instance `pair_wlive`. Extra checks beyond the list: the witnesses `WitnessNoRefusal`,
-  `WitnessNoEpipe`, `WitnessNoGuestAbortAfterStreamAbort`, and a second run hazard for lateSendShut on
-  `PeerCloseRacingOwnHalfCloseIsClean`. The new hazards are in `fwd_pair_attach_hazards*.qnt` (T-1 to T-4) and
-  `fwd_pair_stream_hazards*.qnt` (T-5, T-6). With the third iteration's state, a hazard file whose instances plus the
-  eight instances of `fwd_pair.qnt` it imports exceed ten ran the Apalache server out of its fixed 2,048 MiB compile
-  heap (`java.lang.OutOfMemoryError`, reported as a tool error: Quint exited before the first pass); every `fwd_pair`
-  hazard file now holds at most two instances (`<name>.qnt`, `<name>_2.qnt`, …). `fwd-pair-safety-tlc` exceeds 900 s alone (481 s before) and
-  carries `timeout_secs = 2400`.
-- `udp_slots`: `NoStaleGenerationStart`, the generation hazards (`cells-emptied-only`, `fd-dispatch`) and the witness
-  `WitnessNoStaleEvent` are removed with the cells; "the slot queue not discarded at an end" is the existing
-  `keepFramesOnEnd` hazard, which already said U-2 off. The run `StaleGenerationReadinessEventIsDiscarded` is
-  re-derived as `DatagramQueuedBeforeAnEndIsDiscardedWithTheQueue`; the witness `WitnessNoRouted` is `WitnessNoAttached`
-  and `WitnessNoDiscardAtEnd` is added.
+- `fwd-pair-hazard-check-then-hook` (state read, a transition, callbacks installed) violates
+  `AttachTimeEndClassifiedOnce` and `NoUnclassifiedEof` on the design's alarm (the unclassified end-of-stream aborts).
+- `ClassFixedAtTransition` also requires that no transition is classified otherwise than with the socket's true send
+  state; `IncompleteFrameAtEndAborts` is the datagram rule's state form, and its teeth in time are `EveryEndResolves` on
+  `pair_dlive`.
+- `NoHolderReadAfterWatchAbort` has its teeth in `holderTrustsRead` (a stream that passes reads to V_h after the
+  owner's abort: `fwd-pair-hazard-holder-trusts-read`).
+- `owner_flows` has no owner-death action: the host owner is never replaced in-process, and the `Forwarder` recovery
+  (abort-all, close the old context, open a new one) is modelled in `fwd_pair`.
+- `udp_slots` has no generation cells: "the slot queue not discarded at an end" is the hazard `keepFramesOnEnd`
+  (U-2 off), and the run `DatagramQueuedBeforeAnEndIsDiscardedWithTheQueue` states the rule.
+- `fwd-pair-watch-safety-tlc` is `ci = false` and `fwd-pair-safety-tlc` carries `timeout_secs = 2400`: both exceed the
+  two-minute `ci` bound.
 
 ## Hazards
 
-Each row removes one design rule (or kernel assumption) and shows the checker finds a counterexample.
+One hazard per design decision (WITNESS-HAZARD-RULE): each row removes one design rule (or kernel assumption) and shows
+the checker finds a counterexample. A rule's variants — the same hazard as a named run, a second invariant of the same
+rule, a second instance — are not separate rows. Two hazards are `run` checks: `cid-lease-hazard-crash-loses-placed-generation-run` and
+`cid-lease-hazard-refusal-keeps-predecessor-run` are the teeth of the named runs of `lease_conf_325` (pending GH #325)
+and `lease_conf_three` (D-18), which carry one run each and no invariant that sees the rule.
 
 | Check | Instance | Rule removed | Property / run that fails |
 |---|---|---|---|
 | `owner-flows-hazard-split-claim` | `flows_bugSplitClaim` | L-3 off: session check and claim are two steps | `OneLiveSession` |
-| `owner-flows-hazard-attach-before-read` | `flows_bugAttachEarly` | H-1 off: the owner connects and attaches before the request is read in full (the change list's `fwd-pair-hazard-attach-before-read`) | `NoAttachBeforeRead` |
-| `owner-flows-hazard-admit-split` | `flows_bugAdmitSplit` | U-1 off: admission check and flow-table registration are two steps | `NoAdmitWhenClosed` |
-| `owner-flows-hazard-paired-no-recheck` | `flows_bugPairedNoRecheck` | U-1 off: the step-6 continuation ignores that the flow was closed | `NoAdmitWhenClosed` |
-| `owner-flows-hazard-no-abort-on-loss` | `flows_bugNoAbortOnLoss` | session loss does not abort the CID's flows | `NoAdmitWhenClosed` |
-| `owner-flows-hazard-teardown-skips-flows` | `flows_bugTeardownSkipsFlows` | teardown does not abort the CID's flows | `CurrentGeneration` |
+| `owner-flows-hazard-attach-before-read` | `flows_bugAttachEarly` | H-1 off: connect and attach before the request is read | `NoAttachBeforeRead` |
+| `owner-flows-hazard-no-abort-on-loss` | `flows_bugNoAbortOnLoss` | DG-5-F off: session loss does not abort the CID's flows | `NoAdmitWhenClosed` |
 | `owner-flows-hazard-late-paired-resurrects` | `flows_bugLatePairedResurrects` | U-5 off: the host acts on a Paired for a flow it already closed | `ClosedIsTerminal` |
-| `owner-flows-hazard-peer-cid-only` | `flows_bugPeerCidOnly` | ATTR-TOKEN off: attribution by peer CID alone (the peer-CID-only rule), under K-A2′ (V-22, P-37) | `CurrentGeneration` |
+| `owner-flows-sess-env-guest-misses-session-loss` | `flows_sess_envGuestMissesSessionLoss` | K-A5S dropped: the guest owner never observes the end of the control connection it holds (D-UP-8), so it never re-opens a session, and a launch whose session ended before it went live, or was lost, never holds one again | `SessionBecomesLive` |
 | `owner-flows-hazard-peer-cid-only-message` | `flows_bugPeerCidOnly` | ATTR-TOKEN off: attribution by peer CID alone (the peer-CID-only rule), under K-A2′ (V-22, P-37) | `NoCrossLaunchMsg` |
-| `owner-flows-hazard-claim-before-token-held` | `flows_bugClaimBeforeToken` | ATTR-LIVE-CLAIM order off: the session claim is taken at accept, before the ControlOpen is read | `NoCrossLaunchSessionHeld` |
-| `owner-flows-hazard-no-claim-recheck-held` | `flows_bugNoClaimRecheck` | ATTR-LIVE-CLAIM off (comparison with the lease token, its counterexample kept as teeth): the CID state is checked at accept only, and the claim step compares with the lease token, Retiring included | `NoCrossLaunchSessionHeld` |
-| `owner-flows-hazard-no-claim-recheck-current` | `flows_bugNoClaimRecheck` | ATTR-LIVE-CLAIM off (comparison with the lease token, its counterexample kept as teeth): the CID state is checked at accept only, and the claim step compares with the lease token, Retiring included | `CurrentGeneration` |
-| `owner-flows-alt-teardown-closes-reading-safety` | `flows_altTeardownClosesReading` | rejected alternative to ATTR-LIVE-CLAIM: teardown also closes connections in `reading`, and the claim step compares with the lease token (no live check) | `Safety` |
-| `owner-flows-env-guest-misses-host-close` | `flows_envGuestMissesHostClose` | K-A4 dropped: the guest never observes the host's close of V_h (V-24) | `GuestHalfEnds` |
-| `owner-flows-alt-tombstone-misses-close` | `flows_altTombstoneMissesClose` | candidate: the guest tombstones an Abort for an unaccepted flow, with K-A4 dropped | `GuestHalfEnds` |
-| `owner-flows-sess-env-guest-misses-session-loss` | `flows_sess_envGuestMissesSessionLoss` (`hazard/owner_flows_session_hazards.qnt`) | K-A5S dropped: the guest owner never observes the end of the control connection it holds, so it never re-opens one (D-UP-8) | `SessionBecomesLive` |
-| `owner-flows-hazard-reconnect-before-loss-abort` | `flows_bugReconnectBeforeLossAbort` | DG-5-F, D-UP-8 off: the guest may open a new control session before it observed the loss, while a flow of the lost session is still open | `GuestFlowsDoNotOutliveSession` |
-| `owner-flows-hazard-no-accepted-watch` | `flows_bugNoAcceptedWatch` | DG-5-E off: an accepted, unattached V_g is not watched for terminal readiness (the host's close of V_h and an error on it go unnoticed until the flow is attached) | `GuestHalfEnds` |
+| `owner-flows-hazard-no-claim-recheck-held` | `flows_bugNoClaimRecheck` | ATTR-LIVE-CLAIM off (comparison with the lease token): the CID state is checked at accept only, and the claim step compares with the lease token, Retiring included | `NoCrossLaunchSessionHeld` |
+| `owner-flows-hazard-no-accepted-watch` | `flows_bugNoAcceptedWatch` | DG-5-E off, on the instance GuestHalfEnds is checked on: an accepted, unattached V_g is not watched for terminal readiness (the host's close of V_h and an error on it go unnoticed until the flow is attached) | `GuestHalfEnds` |
 | `owner-flows-hazard-beacon-no-live-recheck` | `flows_bugBeaconNoLiveRecheck` | ATTR-LIVE-CLAIM off for the beacon: READY compared with the lease's token, without the live check | `BeaconCurrentLaunch` |
-| `owner-flows-hazard-beacon-driver-stop-keeps-claim-held` | `flows_bugDriverStopKeepsClaim` | ADR-0157, D-UP-9 off: the launch-end step (driver.stop or the VMM-exit step) keeps the beacon claim; the next launch's READY is refused SessionHeld across launches. (Since D-UP-9 releases the claim at VMM exit, a READY claimed without the live recheck no longer outlives its launch, so `beaconNoLiveRecheck` keeps its teeth on `BeaconCurrentLaunch` only.) | `BeaconNoCrossLaunchHeld` |
 | `owner-flows-hazard-beacon-peer-cid-only` | `flows_bugBeaconPeerCidOnly` | ATTR-TOKEN off for the beacon: READY attributed by peer CID alone | `BeaconNoCrossLaunchReady` |
-| `owner-flows-hazard-beacon-peer-cid-only-current` | `flows_bugBeaconPeerCidOnly` | ATTR-TOKEN off for the beacon: READY attributed by peer CID alone | `BeaconCurrentLaunch` |
-| `owner-flows-hazard-beacon-driver-stop-keeps-claim` | `flows_bugDriverStopKeepsClaim` | ADR-0157, D-UP-9 off: the launch-end step closes the beacon session but does not release the CID's claim; the next launch's READY is held out | `ReadyReleased` |
-| `owner-flows-hazard-dial-no-admission` | `flows_bugDialNoAdmission` | the owner opens a dial without the Active ∧ live session ∧ not-quiesced check | `NoAdmitWhenClosed` |
-| `owner-flows-hazard-dial-no-session-check` | `flows_bugDialNoSessionCheck` | INB-1 step 3 alone off: a dial opens to an Active, not quiesced CID with no live control session (the Active and quiesce checks kept) | `NoAdmitWhenClosed` |
+| `owner-flows-hazard-dial-no-admission` | `flows_bugDialNoAdmission` | INB-1: the owner opens a dial without the Active ∧ live session ∧ not-quiesced check | `NoAdmitWhenClosed` |
+| `owner-flows-hazard-owner-deadline-shorter` | `flows_bugOwnerDeadlineShorter` | INB-1: GUEST_DIAL_PAIRING_DEADLINE not above GUEST_INBOUND_CONNECT_TIMEOUT: the owner may abandon a dial the guest can still answer | `DialDeadlineAfterGuestReply` |
 | `owner-flows-hazard-refusal-registers` | `flows_bugRefusalRegisters` | INB-1 off: a typed admission refusal registers (and closes) the dial slot instead of changing nothing | `TypedRefusalChangesNothing` |
 | `owner-flows-hazard-activate-no-guard` | `flows_bugActivateNoGuard` | G-V3 off: activate marks the CID Active without a live control session or while quiesced | `ActivateOnlyWithLiveSession` |
-| `owner-flows-hazard-owner-deadline-shorter` | `flows_bugOwnerDeadlineShorter` | GUEST_DIAL_PAIRING_DEADLINE not above GUEST_INBOUND_CONNECT_TIMEOUT: the owner may abandon a dial the guest can still answer | `DialDeadlineAfterGuestReply` |
-| `owner-flows-hazard-owner-deadline-shorter-late-paired` | `flows_bugOwnerDeadlineShorter` | GUEST_DIAL_PAIRING_DEADLINE not above GUEST_INBOUND_CONNECT_TIMEOUT: the owner may abandon a dial the guest can still answer | `NoPairedAfterDialEnded` |
-| `cid-lease-hazard-release-before-vmm` | `lease_bugReleaseBeforeVmm` | release-last off: the lease is released while the VMM still holds the device | `NoLaunchClash` |
+| `fwd-pair-hazard-consume-on-short-send` | `pair_bugConsumeOnShortSend` | EVMOD-ADOPT (consume only what the target accepted) off: a short send consumes the whole peek (on the instance with more units than the pipeline holds: a short send needs a full target) | `UnitsConserved` |
+| `fwd-pair-hazard-eof-as-fin-peer-loss` | `pair_bugEofAsFin` | R2-END off: every vsock end is forwarded as a FIN | `NoEofOnPeerLoss` |
+| `fwd-pair-hazard-release-keeps-pairs` | `pair_bugReleaseKeepsPairs` | EVMOD-CTL off: the context's release leaves its pairs forwarding | `ReleasedContextHoldsNoPair` |
+| `fwd-pair-hazard-lossy-end-record` | `pair_bugLossyEndRecord` | EVMOD-REC off: an end record may be dropped | `OneEndRecordPerPair` |
+| `fwd-pair-hazard-consume-partial-frame` | `pair_dhazConsumePartialFrame` | EVMOD-DGRAM off: a datagram is consumed when only part of its frame was accepted; the next datagram's items then join the cut frame (three datagrams in one direction) | `DatagramsOnceInOrder` |
+| `fwd-pair-hazard-shutdown-on-callback-delivery` | `pair_liveShutdownOnCallback` | ADR-0183 off, on the liveness instance: the target is shut in the callback, so the units queued behind the early FIN are stranded | `EveryUnitDelivered` |
+| `fwd-pair-hazard-check-then-hook` | `pair_bugCheckThenHook` | EVMOD-PAIR off: attach reads the half's state and installs its callbacks in a later step (the transition between them is recorded by neither; the unclassified_eof alarm then aborts the pair) | `AttachTimeEndClassifiedOnce` |
+| `fwd-pair-hazard-holder-trusts-read` | `pair_bugHolderTrustsRead` | EVMOD-STREAM-END off: the GuestStream reports the holder's read result (0 → clean), not the watch's | `HolderOutcomeFromWatch` |
+| `fwd-pair-hazard-ended-attach-graceful-close` | `pair_bugEndedAttachGracefulClose` | EVMOD-ATTACH-END off: on HalfEnded the owner closes the surviving TCP half without SO_LINGER{1,0} (a FIN, not a reset) | `EndedHalfNeverEndsClean` |
+| `fwd-pair-hazard-watch-abort-shuts-vh` | `pair_bugWatchAbortShutsVh` | WATCH-ABORT off (the rejected EVMOD-WATCH-SHUT): the owner's abort of a watch shuts V_h | `WatchAbortLeavesHolderSocket` |
+| `fwd-pair-hazard-drop-without-abort` | `pair_bugDropWithoutAbort` | EVMOD-STREAM-ABORT (T-6) off: the holder's drop only closes V_h; the forwarder's reference keeps the socket open (P-70 § 4.4) | `NoLiveWatchAfterDrop` |
 | `cid-lease-hazard-release-before-vmm-outlives` | `lease_bugReleaseBeforeVmm` | release-last off: the lease is released while the VMM still holds the device | `LeaseOutlivesVmm` |
-| `cid-lease-hazard-assign-split` | `lease_bugAssignSplit` | ADR-0156 off: the next-fit assign walk is not one step under the pool lock (choose, then take later without a recheck) | `CidUnique` |
 | `cid-lease-hazard-assign-before-reclaim` | `lease_bugAssignBeforeReclaim` | NO-SURVIVE off: assign runs before boot reclamation killed the previous process's VMMs | `NoLaunchClash` |
-| `cid-lease-hazard-assign-before-reclaim-order` | `lease_bugAssignBeforeReclaim` | NO-SURVIVE off: assign runs before boot reclamation killed the previous process's VMMs | `AssignAfterReclaim` |
 | `cid-lease-hazard-reset-reboots` | `lease_bugResetReboots` | RESET-EXIT off: a guest reset reboots the guest inside the same VMM | `GuestResetEndsVmm` |
-| `cid-lease-hazard-reclaim-never-completes` | `lease_bugReclaimNeverCompletes` | NO-SURVIVE off (liveness): boot reclamation kills the orphans but never records its completion, so `assign` stays disabled and a waiting workload is never placed | `EventuallyPlaced` |
+| `cid-lease-hazard-crash-forgets-stop` | `lease_bugCrashForgetsStop` | T-5 ruling off: a serve crash forgets the stop intent, so a stopped workload is placed again after the restart | `StoppedWorkloadNotPlaced` |
+| `cid-lease-hazard-retry-off-by-one` | `lease_bugRetryOffByOne` | RESTART-SSOT off (retryOffByOne): the full pre-fix `restart_status_for_alloc` as the restart decision — restart iff attempts + 1 < CEILING, with no exemptions | `ExhaustsOnlyAtCeiling` |
+| `cid-lease-hazard-reclaim-not-exempt` | `lease_bugReclaimNotExempt` | RESTART-SSOT off (reclaimNotExempt): only the platform-reclaim exemption removed | `ExhaustsOnlyOnACrashClassFailure` |
+| `cid-lease-hazard-crash-loses-placed-generation-run` | `lease_conf_bugCrashLosesPlacedGeneration` | pending GH #325 off (crashLosesPlacedGeneration): its named run is the teeth for `lease_conf_325` | `run RedeployLeasedAtServeCrashIsPlacedAgain` |
+| `cid-lease-hazard-assign-split` | `lease_bugAssignSplit` | ADR-0156 off: the next-fit assign walk is not one step under the pool lock (choose, then take later without a recheck) | `CidUnique` |
+| `cid-lease-hazard-refusal-keeps-predecessor-run` | `lease_bugRefusalKeepsPredecessor` | item 7.4 off (refusalKeepsPredecessor): a pool refusal leaves the predecessor held until the next launch. Its run is a `lease_ok` run (three offsets): the teeth for `lease_conf_three` | `run PoolExhaustedRestartCleansThePredecessorThenPlaces` |
+| `cid-lease-hazard-terminal-before-release` | `lease_bugTerminalBeforeRelease` | item 7.5 off (terminalBeforeRelease): FinalizeFailed writes the terminal before it releases the lease | `FailedHoldsNoLease` |
+| `cid-lease-hazard-tick-during-predecessor-teardown` | `lease_bugTickDuringPredecessorTeardown` | item 7.3 step boundary off (tickDuringPredecessorTeardown): a tick runs while the workload's dispatch is held at a predecessor teardown; Assign from `ended` then overwrites the retiring predecessor lease | `NoUntrackedLease` |
 | `quiescence-hazard-bool-latch` | `quiesce_bugBoolLatch` | QHOLD: a boolean latch — the first recovery's restore reopens while the second is still repairing | `NoReopenBeforeRepair` |
-| `quiescence-hazard-bool-latch-preempts-repair` | `quiesce_live_bugBoolLatch` | QHOLD: a boolean latch (as above), on the liveness instance: another recovery's restore pre-empts a repair | `C1Repaired` |
-| `quiescence-hazard-drop-decrements-count` | `quiesce_bugDropDecrements` | QHOLD: a dropped hold releases the count (the guard's Drop decrements besides counting the leak) | `CountCoversRecoveries` |
-| `quiescence-hazard-restore-clears-latch` | `quiesce_bugRestoreClearsLatch` | QHOLD: a restore reopens admission whatever the remaining count | `LatchIffCount` |
-| `quiescence-hazard-quiesce-skips-flows` | `quiesce_bugQuiesceSkipsFlows` | QHOLD: the first hold latches admission but does not abort the open flows | `QuiescedHoldsNoFlow` |
-| `quiescence-hazard-drop-decrements-leaked` | `quiesce_bugDropDecrements` | QHOLD: a dropped hold releases the count, so forwarding reopens with a leaked hold | `LeakedHoldKeepsForwardingQuiesced` |
-| `quiescence-hazard-leak-ignored` | `quiesce_live_bugLeakIgnored` | ADR-0124, D-UP-3: the supervisor does not consult the leaked-hold count; a leaked hold keeps forwarding quiesced for good | `LeakedHoldEndsInFailStop` |
-| `quiescence-hazard-repair-without-hold` | `quiesce_bugRepairNoHold` | a recovery repairs without holding quiescence | `NoRepairWithoutHold` |
-| `quiescence-hazard-redo-not-counted` | `quiesce_live_bugRedoNoCount` | UP-7: a failed post-repair audit is not a failed attempt | `C2EpisodeEnds` |
+| `quiescence-hazard-leak-ignored` | `quiesce_live_bugLeakIgnored` | ADR-0124 (D-UP-3): the supervisor does not consult the leaked-hold count — a leaked hold keeps forwarding quiesced for good | `LeakedHoldEndsInFailStop` |
 | `quiescence-hazard-boot-continues` | `quiesce_bugBootContinues` | ADR-0184: boot continues with serve running after a failed write of the shared table | `ServeRunsOnlyWithTable` |
-| `quiescence-hazard-foreign-decrements` | `quiesce_bugForeignDecrements` | D-UP-4 (PD-1): a restore with a foreign hold is redeemed as the owner's own and decrements the count | `ForeignRestoreChangesNothing` |
-| `quiescence-hazard-foreign-ignored` | `quiesce_live_bugForeignIgnored` | D-UP-4 (PD-1): the supervisor does not fail-stop on `ForeignHold` | `ForeignHoldEndsInFailStop` |
+| `quiescence-hazard-quiesce-skips-flows` | `quiesce_bugQuiesceSkipsFlows` | QHOLD: the first hold latches admission but does not abort the open flows | `QuiescedHoldsNoFlow` |
+| `quiescence-hazard-drop-decrements-leaked` | `quiesce_bugDropDecrements` | QHOLD (D-UP-3): a dropped hold releases the count (the guard's Drop decrements, besides counting the leak) | `LeakedHoldKeepsForwardingQuiesced` |
+| `quiescence-hazard-foreign-decrements` | `quiesce_bugForeignDecrements` | D-UP-4 (PD-1): a restore with a hold another ledger issued is redeemed as the owner's own (decrements the count; admission reopens at zero) | `ForeignRestoreChangesNothing` |
+| `quiescence-hazard-foreign-ignored` | `quiesce_live_bugForeignIgnored` | D-UP-4 (PD-1): the supervisor does not fail-stop on ForeignHold — serve keeps running with a composition defect | `ForeignHoldEndsInFailStop` |
 | `udp-slots-hazard-claim-split` | `slots_bugClaimSplit` | slot claim is two steps (check, then take) | `SlotHeldOnce` |
 | `udp-slots-hazard-keep-frames` | `slots_bugKeepFrames` | P-35: release returns the slot with datagrams still in its socket's queue | `ReleasedSlotCarriesNoData` |
 | `udp-slots-hazard-late-paired-by-slot-route` | `slots_bugLatePairedBySlot` | a late Paired is matched by slot, not by flow id | `RouteCurrent` |
-| `udp-slots-hazard-late-paired-by-slot-data` | `slots_bugLatePairedBySlot` | a late Paired is matched by slot, not by flow id | `ReleasedSlotCarriesNoData` |
 | `udp-slots-hazard-ignore-late-paired` | `slots_bugIgnoreLatePaired` | SLOT-ABORT off: a late Paired is dropped silently | `LatePairedAborted` |
-| `udp-slots-hazard-keep-frames-on-end` | `slots_bugKeepFramesOnEnd` | U-2 / EVMOD-DGRAM off: the slot socket's queue is not discarded at an end of association (replaces "the cells emptied, not recreated") | `NoReassociationWithoutNewDatagram` |
-| `udp-slots-hazard-keep-frames-on-end-run` | `slots_bugKeepFramesOnEnd` | as above | `run DatagramQueuedBeforeAnEndIsDiscardedWithTheQueue` |
+| `udp-slots-hazard-keep-frames-on-end` | `slots_bugKeepFramesOnEnd` | U-2 / EVMOD-DGRAM off: Refused / Abort / the pairing deadline leaves the datagrams in the slot socket's queue (it is not discarded at an end of association) | `NoReassociationWithoutNewDatagram` |
 | `udp-slots-hazard-no-audit-fairness` | `slots_liveTeeth` | liveness teeth: no fairness on the audit — a lost sock_release report strands the slot | `NoAuditFairness` |
 | `flow-quota-hazard-count-active-only-bound` | `quota_bugCountActiveOnly` | ADR-0147 off: the quota counts active flows only — a half-closed or ended flow keeps its place but not its count, so one withholding guest holds more than its own quota | `QuotaBound` |
 | `flow-quota-hazard-node-wide-quota` | `quota_bugNodeWideQuota` | the quota is per allocation: with one quota for the node, a withholding guest exhausts the node | `QuotaRefusalOnlyAtOwnQuota` |
-| `flow-quota-hazard-free-at-half-close` | `quota_bugFreeAtHalfClose` | EVMOD-AB off: the flow's place is released at the half-close while its pair still forwards | `DrainingFlowHoldsItsSlot` |
-| `flow-quota-hazard-count-active-only-run` | `quota_bugCountActiveOnly` | ADR-0147 off (as above) | `run DrainingFlowStillCountsAgainstTheQuota` |
-| `flow-quota-hazard-node-wide-quota-run` | `quota_bugNodeWideQuota` | the quota is per allocation: with one quota for the node, a withholding guest exhausts the node | `run WithholdingGuestHoldsAtMostItsOwnQuota` |
-| `flow-quota-hazard-free-at-half-close-run` | `quota_bugFreeAtHalfClose` | EVMOD-AB off (as above) | `run DrainingFlowStillCountsAgainstTheQuota` |
-| `fwd-pair-hazard-consume-before-accept` | `pair_bugConsumeBeforeAccept` | consume only what the target accepted, off: the run consumes what it read and holds the rest in forwarder memory (the redirect's shape) | `QueuesWithinBounds` |
-| `fwd-pair-hazard-consume-before-accept-consume` | `pair_bugConsumeBeforeAccept` | as above | `ConsumeOnlyAfterAccept` |
-| `fwd-pair-hazard-consume-before-accept-run` | `pair_bugConsumeBeforeAccept` | as above | `run TargetStallBlocksSenderThenResumes` |
-| `fwd-pair-hazard-consume-on-short-send` | `pair_bugConsumeOnShortSend` | a short send consumes the whole peek: the unaccepted unit is lost | `UnitsConserved` |
-| `fwd-pair-hazard-consume-on-short-send-prefix` | `pair_bugConsumeOnShortSend` | as above | `DeliveredIsInOrderPrefix` |
-| `fwd-pair-hazard-consume-on-short-send-run` | `pair_bugConsumeOnShortSend` | as above | `run TargetStallBlocksSenderThenResumes` |
-| `fwd-pair-hazard-eof-as-fin` | `pair_bugEofAsFin` | R2-END off: every vsock end is forwarded as a FIN | `AbortNeverCleanEof` |
-| `fwd-pair-hazard-eof-as-fin-peer-loss` | `pair_bugEofAsFin` | as above | `NoEofOnPeerLoss` |
-| `fwd-pair-hazard-eof-as-fin-run` | `pair_bugEofAsFin` | as above | `run GuestAppResetReachesRemoteAsReset` |
-| `fwd-pair-hazard-classify-accumulated` | `pair_bugClassifyAccumulated` | EVMOD-END off: the class is computed at end-of-stream from the accumulated `peer_shutdown` (S set → clean) | `ClassFixedAtTransition` |
-| `fwd-pair-hazard-classify-accumulated-eof` | `pair_bugClassifyAccumulated` | as above | `AbortNeverCleanEof` |
-| `fwd-pair-hazard-classify-accumulated-run` | `pair_bugClassifyAccumulated` | as above | `run GuestAppResetReachesRemoteAsReset` |
-| `fwd-pair-hazard-shutdown-on-callback` | `pair_bugShutdownOnCallback` | ADR-0183 off: the target is shut in the callback, before the vsock queue is empty | `NoEarlyShutdown` |
-| `fwd-pair-hazard-shutdown-on-callback-run` | `pair_bugShutdownOnCallback` | as above | `run EarlyFinBeforeAttachCarriedOut` |
-| `fwd-pair-hazard-shutdown-on-callback-delivery` | `pair_liveShutdownOnCallback` | as above, on the liveness instance: the units queued behind the early FIN are stranded | `EveryUnitDelivered` |
-| `fwd-pair-hazard-release-keeps-pairs` | `pair_bugReleaseKeepsPairs` | EVMOD-CTL off: the context's release leaves its pairs forwarding | `ReleasedContextHoldsNoPair` |
-| `fwd-pair-hazard-release-keeps-pairs-forward` | `pair_bugReleaseKeepsPairs` | as above | `NoForwardAfterEnd` |
-| `fwd-pair-hazard-release-keeps-pairs-run` | `pair_bugReleaseKeepsPairs` | as above | `run ContextReleaseResetsEveryPair` |
-| `fwd-pair-hazard-lossy-end-record` | `pair_bugLossyEndRecord` | EVMOD-CTL off: an end record may be dropped | `OneEndRecordPerPair` |
-| `fwd-pair-hazard-lossy-end-record-resolves` | `pair_liveLossyEndRecord` | as above, on the liveness instance: the owner never reads the dropped record | `EveryEndResolves` |
-| `fwd-pair-hazard-alt-sockmap-redirect` | `pair_altSockmapRedirect` | rejected alternative (the BPF sockmap redirect): the vsock credit is returned at read and the target's egress queue is unbounded | `QueuesWithinBounds` |
-| `fwd-pair-hazard-alt-sockmap-redirect-run` | `pair_altSockmapRedirect` | as above | `run TargetStallBlocksSenderThenResumes` |
-| `fwd-pair-hazard-consume-partial-frame` | `pair_bugConsumePartialFrame` | EVMOD-DGRAM off: a datagram is consumed when the vsock accepted part of its frame | `DatagramsOnceInOrder` |
-| `fwd-pair-hazard-consume-partial-frame-split` | `pair_bugConsumePartialFrame` | as above | `FrameNeverSplitAcrossDatagrams` |
-| `fwd-pair-hazard-consume-partial-frame-run` | `pair_bugConsumePartialFrame` | as above | `run PartialFrameResumedNotDuplicated` |
-| `fwd-pair-hazard-drop-when-target-blocked` | `pair_bugDropWhenTargetBlocked` | EVMOD-DGRAM off: a frame whose UDP target send would block is dropped by the forwarder instead of waiting | `DropsOnlyAtSourceQueue` |
-| `fwd-pair-hazard-drop-when-target-blocked-run` | `pair_bugDropWhenTargetBlocked` | as above | `run StalledUdpTargetDropsAtSource` |
-| `fwd-pair-hazard-check-then-hook` | `pair_bugCheckThenHook` | EVMOD-PAIR off: attach reads the half's state, and installs the callbacks in a later step; a transition between them is recorded by neither | `AttachTimeEndClassifiedOnce` |
-| `fwd-pair-hazard-check-then-hook-alarm` | `pair_bugCheckThenHook` | as above (the unclassified end-of-stream fires the alarm) | `NoUnclassifiedEof` |
-| `fwd-pair-hazard-check-then-hook-class` | `pair_bugCheckThenHookFin` | as above, with the unclassified end-of-stream forwarded as a FIN | `ClassFixedAtTransition` |
-| `fwd-pair-hazard-check-then-hook-eof` | `pair_bugCheckThenHookFin` | as above | `AbortNeverCleanEof` |
-| `fwd-pair-hazard-tcp-eof-is-clean` | `pair_bugTcpEofIsClean` | EVMOD-END (TCP halves) off: a TCP half that read end-of-stream is taken as ended cleanly; a later `sk_err` is ignored | `ResetNeverEndsClean` |
-| `fwd-pair-hazard-tcp-eof-is-clean-run` | `pair_bugTcpEofIsClean` | as above | `run RemoteFinThenResetAbortsPair` |
-| `fwd-pair-hazard-reopen-before-release` | `pair_bugReopenBeforeRelease` | EVMOD-CTL (recovery order) off: the new context is opened while the old one still holds its pairs | `ReleasedContextHoldsNoPair` |
-| `fwd-pair-hazard-reopen-before-release-forward` | `pair_bugReopenBeforeRelease` | as above | `NoForwardAfterEnd` |
-| `fwd-pair-hazard-reopen-before-release-old` | `pair_bugReopenBeforeRelease` | as above | `NoPairOfReleasedContextForwards` |
-| `fwd-pair-hazard-reopen-before-release-one` | `pair_bugReopenBeforeRelease` | as above | `OneContextPerOwner` |
-| `fwd-pair-hazard-holder-trusts-read` | `pair_bugHolderTrustsRead` | EVMOD-STREAM-END off (WATCH-ABORT): the `GuestStream` reports the holder's read result (0 → clean), not the watch's | `HolderOutcomeFromWatch` |
-| `fwd-pair-hazard-holder-trusts-read-run` | `pair_bugHolderTrustsRead` | as above | `run OwnerAbortOfWatchLeavesVhAndStreamReportsAborted` |
-| `fwd-pair-hazard-holder-trusts-read-late-read` | `pair_bugHolderTrustsRead` | as above: the stream passes reads to V_h after the owner's abort | `NoHolderReadAfterWatchAbort` |
-| `fwd-pair-hazard-original-before-record` | `pair_bugOriginalBeforeRecord` | EVMOD-STREAM-END (EV-END change 3) off: the watch's `sk_error_report` wakes the holder before it queues the record (the sweep path) | `WatchRecordBeforeWake` |
-| `fwd-pair-hazard-original-before-record-run` | `pair_bugOriginalBeforeRecord` | as above | `run VmmExitWithWatchRecordInFlightResolvesFromRecord` |
-| `fwd-pair-hazard-no-record-is-clean` | `pair_bugNoRecordIsClean` | EVMOD-STREAM-END (3) off: a stream that finds no record and no end of its owner reports a clean end instead of waiting (the holder read the sweep's end before its callback) | `HolderOutcomeFromWatch` |
-| `fwd-pair-hazard-no-record-is-clean-run` | `pair_bugNoRecordIsClean` | as above | `run VmmExitWithWatchRecordInFlightResolvesFromRecord` |
-| `fwd-pair-hazard-late-send-shut` | `pair_bugLateSendShut` | CLEAN-FULL-END off: this side's send-shut flag is set in a step after the SHUTDOWN it sends | `ClassFixedAtTransition` |
-| `fwd-pair-hazard-late-send-shut-run` | `pair_bugLateSendShut` | as above | `run HalfCloseThenPeerCloseIsClean` |
-| `fwd-pair-hazard-truncated-frame-waits` | `pair_bugTruncatedFrameWaits` | EV-DGRAM D1 off: a frame left incomplete at the peer's end is waited for | `IncompleteFrameAtEndAborts` |
-| `fwd-pair-hazard-truncated-frame-waits-resolves` | `pair_dliveTruncatedFrameWaits` | as above, on the datagram liveness instance | `EveryEndResolves` |
-| `fwd-pair-hazard-truncated-frame-waits-run` | `pair_bugTruncatedFrameWaits` | as above | `run TruncatedFrameAtPeerEndAbortsFrameInvalid` |
-| `fwd-pair-hazard-late-send-shut-own-shut` | `pair_bugLateSendShut` | as `late-send-shut` (T-8) | `OwnShutBeforeShutdownSent` |
-| `fwd-pair-hazard-late-send-shut-fault` | `pair_bugLateSendShut` | as above: the peer's close is classified an abort with no fault in the trace | `AbortOnlyAfterFault` |
-| `fwd-pair-hazard-late-send-shut-racing-run` | `pair_bugLateSendShut` | as above | `run PeerCloseRacingOwnHalfCloseIsClean` |
-| `fwd-pair-hazard-tcp-no-error-report` | `pair_bugTcpNoErrorReport` | T-1 off (TCP-ERR-REPORT): a reset is seen only by a later `recvmsg` / `sendmsg` (hazard 16) | `TcpResetEndsPair` |
-| `fwd-pair-hazard-tcp-no-error-report-resolves` | `pair_liveTcpNoErrorReport` | as above, on the liveness instance | `EveryEndResolves` |
-| `fwd-pair-hazard-tcp-no-error-report-run` | `pair_bugTcpNoErrorReport` | as above | `run RemoteFinThenResetAbortsPair` |
-| `fwd-pair-hazard-no-seed` | `pair_bugNoSeed` | T-2 off (ATTACH-SEED): callbacks installed, the attach-time state not classified (`h_noseed`) | `NoUnclassifiedEof` |
-| `fwd-pair-hazard-no-seed-run` | `pair_bugNoSeed` | as above | `run EarlyVsockHalfCloseBeforeGuestAttachCompletes` |
-| `fwd-pair-hazard-established-only` | `pair_bugEstablishedOnly` | T-3 off (ATTACH-CLOSE-WAIT): attach refuses `CLOSE_WAIT` (`h_strict`); the owner aborts the flow | `AbortOnlyAfterFault` |
-| `fwd-pair-hazard-established-only-run` | `pair_bugEstablishedOnly` | as above | `run AppWriteAndFinBeforePairedAttachesInCloseWaitAndCompletes` |
-| `fwd-pair-hazard-ended-attach-graceful-close` | `pair_bugEndedAttachGracefulClose` | T-4 off: on `HalfEnded` the surviving TCP half is closed without `SO_LINGER{1,0}` | `EndedHalfNeverEndsClean` |
-| `fwd-pair-hazard-ended-attach-graceful-close-run` | `pair_bugEndedAttachGracefulClose` | as above | `run GuestCloseWithEmptyQueueBeforeHostAttachIsRefusedAndFlowAborts` |
-| `fwd-pair-hazard-ended-attach-ignored` | `pair_liveEndedAttachIgnored` | T-4 off: `HalfEnded` treated as a retryable defect, the flow kept | `EndedHalfFlowResolves` |
-| `fwd-pair-hazard-ended-attach-ignored-run` | `pair_bugEndedAttachIgnored` | as above | `run IntakeChildResetBeforePairedIsRefusedAndFlowAborts` |
-| `fwd-pair-hazard-watch-abort-shuts-vh` | `pair_bugWatchAbortShutsVh` | T-5: the rejected EVMOD-WATCH-SHUT — the owner's abort of a watch shuts V_h | `WatchAbortLeavesHolderSocket` |
-| `fwd-pair-hazard-watch-abort-shuts-vh-run` | `pair_bugWatchAbortShutsVh` | as above | `run OwnerAbortOfWatchLeavesVhAndStreamReportsAborted` |
-| `fwd-pair-hazard-no-guest-abort` | `pair_wliveNoGuestAbort` | T-5 off: no `Abort { flow }` for an aborted stream; the holder keeps the stream | `GuestPairEndsAfterOwnerAbort` |
-| `fwd-pair-hazard-no-guest-abort-run` | `pair_bugNoGuestAbort` | as above | `run OwnerAbortOfWatchLeavesVhAndStreamReportsAborted` |
-| `fwd-pair-hazard-drop-without-abort` | `pair_bugDropWithoutAbort` | T-6 off: the holder's drop only closes V_h; the forwarder's reference keeps it open (P-70 § 4.4) | `NoLiveWatchAfterDrop` |
-| `fwd-pair-hazard-drop-without-abort-resolves` | `pair_wliveDropWithoutAbort` | as above, on the watch liveness instance | `GuestPairEndsAfterHolderDrop` |
-| `fwd-pair-hazard-drop-without-abort-run` | `pair_bugDropWithoutAbort` | as above | `run DroppedStreamAbortsWatchThenGuestSeesAbort` |
-| `fwd-pair-hazard-recovery-keeps-ended-stream` (`ci = false`), `-run` | `pair_bugRecoveryKeepsEndedStream` (`watch`), `pair_confRecoveryKeepsEndedStream` (`conf`, its own file `fwd_pair_stream_hazards_4.qnt`: the conf instance does not fit the compile heap beside another) | U-R1 off: the recovery leaves a held stream whose watch already ended as it was (counterexample: guest `Fin`, the watch's `VCtl` records `HalfClose`, `CtxRelease(h)`) | `RecoveryEndsHeldStream`, `run RecoveryEndsHeldStreamWhoseWatchEnded` |
+| `cid-lease-hazard-reclaim-never-completes` | `lease_bugReclaimNeverCompletes` | NO-SURVIVE off (liveness): boot reclamation kills the orphans but never records that it completed, so a waiting workload is never placed | `EventuallyPlaced` |
+| `owner-flows-hazard-beacon-driver-stop-keeps-claim` | `flows_bugDriverStopKeepsClaim` | ADR-0157, D-UP-9 off: the launch-end step (driver.stop, or the VM driver's handling of the VMM exit) closes the beacon session but does not release the CID's beacon claim — the next launch's READY is held out forever | `ReadyReleased` |
+| `fwd-safe-hazard-no-sweep-recheck` | `safe_bugNoSweepRecheck` | EVMOD-SWEEP off (F-S1): a run acts on an end it read with no recorded class without the vsock_table_lock re-check | `NoUnclassifiedEnd` |
+| `fwd-safe-hazard-remove-wait-after-free-queued` | `safe_bugRemoveWaitAfterFreeQueued` | the write-space entry removed by the free work after its cancel_work_sync, i.e. after the free work was queued (violates NoTouchAfterFree) | `NoTouchAfterFree` |
+| `fwd-safe-hazard-rcu-assign-null` | `safe_bugRcuAssignNull` | rule 2 off (alternative (a)): rcu_assign_pointer(…, NULL) + rcu_dereference | `NoOverrideCallsItself` |
+| `fwd-safe-hazard-no-grace-period` | `safe_bugNoGracePeriod` | rule 3 off: no grace period before the free | `NoTouchAfterFree` |
+| `fwd-safe-hazard-ctl-queue-outside-rcu` | `safe_bugCtlQueueOutsideRcu` | rule 4 off (alternative (d)): the id looked up under RCU, the work queued after rcu_read_unlock | `NoTouchAfterFree` |
+| `fwd-safe-hazard-watch-end-no-id-check` | `safe_bugWatchEndNoIdCheck` | rule 4 off (watch): the override queues the record without checking the id under the lock | `OneEndRecord` |
+| `fwd-safe-hazard-no-write-space` | `safe_liveNoWriteSpace` | § Forwarding, Trigger off: the target's write-space wait-queue entry is not added | `StalledPairResumes` |
+| `fwd-safe-hazard-no-data-ready` | `safe_liveNoDataReady` | § Forwarding, Trigger off: the source's sk_data_ready is not overridden | `EveryUnitDelivered` |
+| `fwd-safe-hazard-no-error-report` | `safe_liveNoErrorReport` | § Forwarding, Trigger off: the source's sk_error_report is not overridden | `SocketEndYieldsRecord` |
+| `fwd-safe-hazard-late-clear-pending` | `safe_liveLateClearPending` | the workqueue's clear-before-run replaced by a flag cleared at return (a lost wakeup) | `StalledPairResumes` |
+| `fwd-safe-hazard-ctl-abort-no-queue` | `safe_liveCtlAbortNoQueue` | rule 4 / EVMOD-REC off: OVD_FWD_ABORT does not queue the work item | `RequestedAbortEnds` |
+| `fwd-safe-hazard-end-split-no-requeue` | `safe_liveEndSplitNoRequeue` | § Order of a pair's end off: the end stops after the unhook and does not requeue for its record and free | `EndProducesRecord` |
 
-| `cid-lease-hazard-crash-forgets-stop` | `lease_bugCrashForgetsStop` | the T-5 ruling off: a serve crash forgets the stop intent | `StoppedWorkloadNotPlaced` |
-| `cid-lease-hazard-crash-forgets-stop-run` | `lease_bugCrashForgetsStop` | as above | `run StoppedWorkloadStaysStoppedAcrossServeCrash` |
-| `cid-lease-hazard-retry-off-by-one` | `lease_bugRetryOffByOne` | RESTART-SSOT off: the full pre-fix accessor as the decision (restart iff `attempts + 1 < CEILING`, no exemptions); a crash-class failure at `att` = CEIL − 1 is finalised failed | `ExhaustsOnlyAtCeiling` |
-| `cid-lease-hazard-retry-off-by-one-reclaim` | `lease_bugRetryOffByOne` | as above: a reclaimed workload at `att + 1 >= CEIL` is finalised failed (the dropped reclaim exemption) | `ExhaustsOnlyOnACrashClassFailure` |
-| `cid-lease-hazard-retry-off-by-one-run` | `lease_conf_bugRetryOffByOne` | as above, CEIL 5: the fifth failure (`att` = 4) is finalised failed instead of placed again | `run FifthCrashAtCeilingBoundaryIsPlacedAgain` |
-| `cid-lease-hazard-reclaim-not-exempt` | `lease_bugReclaimNotExempt` | RESTART-SSOT off: only the platform-reclaim exemption removed; a reclaimed workload at the ceiling is finalised failed | `ExhaustsOnlyOnACrashClassFailure` |
-| `cid-lease-hazard-reclaim-not-exempt-run` | `lease_conf_bugReclaimNotExempt` | as above, CEIL 5 | `run ServeCrashPlacesAWorkloadAtTheCeilingAgain` |
-| `cid-lease-hazard-generation-not-exempt-safety` (`expect = "holds"`), `-run` | `lease_bugGenerationNotExempt`, `lease_conf_bugGenerationNotExempt` | RESTART-SSOT off: only the generation exemption removed; `Redeploy` of a workload at the ceiling does not place it. This removes a transition, so `Safety` still holds (documented); the run is the discriminator | `run RedeployPlacesAnExhaustedWorkloadAgainWithItsCount` |
-| `cid-lease-hazard-vmm-exit-retires-lease-safety` (`expect = "holds"`), `-run` | `lease_bugVmmExitRetiresLease`, `lease_conf_bugVmmExitRetiresLease` | item 7.1 off: the VMM's exit retires and releases its lease in the same step (no tick runs at a VMM exit in production). The device and the lease are freed together, so `Safety` holds (documented); the run is the discriminator (the lease is gone right after `VmmCrash`) | `run VmmCrashFreesItsCidAndPlacementRetries` |
-| `cid-lease-hazard-predecessor-first-safety` (`expect = "holds"`), `-run` | `lease_bugPredecessorFirst`, `lease_conf_bugPredecessorFirst` | item 7.2 off: the restart frees the crashed allocation's lease before it leases the successor. A dispatch order, not a CID-safety rule: `Safety` holds (documented); the run is the discriminator | `run VmmCrashFreesItsCidAndPlacementRetries` |
-| `cid-lease-hazard-predecessor-cleaned-at-assign-safety` (`expect = "holds"`), `-run` | `lease_bugPredecessorCleanedAtAssign`, `lease_conf_bugPredecessorCleanedAtAssign` | item 7.3 off: the predecessor is retired at the successor's assign, not after its launch. `Safety` holds (documented); the run is the discriminator | `run VmmCrashFreesItsCidAndPlacementRetries` |
-| `cid-lease-hazard-refusal-keeps-predecessor-safety` (`expect = "holds"`), `-run` | `lease_bugRefusalKeepsPredecessor` (`CFG = "ok"`, both checks) | item 7.4 off: a pool refusal leaves the predecessor held until the next launch; the release is delayed, not leaked, so `Safety` holds (documented) | `run PoolExhaustedRestartCleansThePredecessorThenPlaces` |
-| `cid-lease-hazard-terminal-before-release`, `-run` | `lease_bugTerminalBeforeRelease`, `lease_conf_bugTerminalBeforeRelease` | item 7.5 off: FinalizeFailed writes the terminal before it releases the lease | `FailedHoldsNoLease`; `run FailureAtCeilingExhaustsTheBudget` |
-| `cid-lease-hazard-tick-during-predecessor-teardown` | `lease_bugTickDuringPredecessorTeardown` | the 7.3 step boundary off: a tick runs while a predecessor teardown is held; `Assign` from `ended` overwrites the retiring predecessor lease | `NoUntrackedLease` |
-| `cid-lease-hazard-crash-loses-placed-generation-safety` (`expect = "holds"`), `-run` | `lease_bugCrashLosesPlacedGeneration`, `lease_conf_bugCrashLosesPlacedGeneration` | today's production, pending GH #325 (RESTART-GEN-CRASH): a generation replacement leased at a serve crash is lost, and the workload returns to `done` / `failed`. `Safety` still holds (documented); the run is the discriminator (its conformance instance uses `CFG = "conf_325"`) | `run RedeployLeasedAtServeCrashIsPlacedAgain` |
-| `fwd-safe-hazard-rcu-assign-null` | `safe_bugRcuAssignNull` | rule 2 off, alternative (a): `rcu_assign_pointer(…, NULL)` + `rcu_dereference` | `NoOverrideCallsItself` |
-| `fwd-safe-hazard-rcu-assign-null-run` | `safe_runsRcuAssignNull` | as above | `run LateCallbackAfterEndCallsOriginal` |
-| `fwd-safe-hazard-no-fallback` | `safe_bugNoFallback` | rule 2 off, alternative (b): an override that finds no pair returns | `NoEventLost` |
-| `fwd-safe-hazard-no-grace-period`, `-readers` | `safe_bugNoGracePeriod` | rule 3 off: the free queued with `queue_work` | `NoTouchAfterFree`, `FreeAfterReaders` |
-| `fwd-safe-hazard-no-cancel-sync`, `-uaf` | `safe_bugNoCancelSync` | rule 3 off: no `cancel_work_sync` before the free | `FreeAfterWorkCompletes`, `NoTouchAfterFree` |
-| `fwd-safe-hazard-no-cancel-sync-run` | `safe_runsNoCancelSync` | as above | `run CallbackHoldingPairDelaysFree` |
-| `fwd-safe-hazard-ctl-queue-outside-rcu` | `safe_bugCtlQueueOutsideRcu` | rule 4 off, alternative (d): lookup under RCU, queue after leaving it | `NoTouchAfterFree` |
-| `fwd-safe-hazard-watch-free-before-id`, `-uaf` | `safe_bugWatchFreeBeforeId` | rule 4 order off (watch): the free queued before the id is removed | `NoIdNamesFreedState`, `NoTouchAfterFree` |
-| `fwd-safe-hazard-watch-end-no-id-check` | `safe_bugWatchEndNoIdCheck` | rule 4 off (watch): the override queues its record without checking the id | `OneEndRecord` |
-| `fwd-safe-hazard-no-write-space` | `safe_liveNoWriteSpace` | § Forwarding, Trigger off: the write-space wait-queue entry not added | `StalledPairResumes` |
-| `fwd-safe-hazard-no-data-ready` | `safe_liveNoDataReady` | `sk_data_ready` not overridden | `EveryUnitDelivered` |
-| `fwd-safe-hazard-no-state-change` | `safe_liveNoStateChange` | `sk_state_change` not overridden (the peer's 0x2 queues no run) | `SocketEndYieldsRecord` |
-| `fwd-safe-hazard-no-error-report` | `safe_liveNoErrorReport` | `sk_error_report` not overridden (the sweep's error queues no run) | `SocketEndYieldsRecord` |
-| `fwd-safe-hazard-late-clear-pending`, `-run` | `safe_liveLateClearPending`, `safe_runsLateClearPending` | the workqueue's clear-before-run replaced by a flag cleared at return (a lost wakeup) | `StalledPairResumes`, `run WakeupDuringRunIsNotLost` |
-| `fwd-safe-hazard-ctl-abort-no-queue` | `safe_liveCtlAbortNoQueue` | `OVD_FWD_ABORT` does not queue the work item | `RequestedAbortEnds` |
-| `fwd-safe-hazard-end-split-no-requeue` | `safe_liveEndSplitNoRequeue` | the end stops after the unhook and does not requeue for its record and free | `EndProducesRecord` |
-| `fwd-safe-hazard-no-sweep-recheck`, `-run` | `safe_bugNoSweepRecheck`, `safe_runsNoSweepRecheck` | EVMOD-SWEEP off (F-S1): the run acts on an end it read with no recorded class without the `vsock_table_lock` re-check; the sweep's window reads as an unclassified end-of-stream and fires the alarm | `NoUnclassifiedEnd`, `run SweepStoresBeforeErrReadRechecksUnderTableLock` |
-| `fwd-safe-hazard-ref-dropped-at-unhook`, `-ref` | `safe_bugRefDroppedAtUnhook` | rule 5 off: a half's `module_put` at its removal, before the grace period | `NoTextRunAfterUnload`, `RefHeldWhileReachable` |
-| `fwd-safe-hazard-remove-without-sock-lock` | `safe_bugRemoveWithoutSockLock` | rule 5 off: the removal does not take the half's socket lock (a `lock` caller that loaded the pointer is no RCU reader) | `NoTextRunAfterUnload` |
-| `fwd-safe-hazard-ulp-ref-released` | `safe_bugUlpRefReleased` | rule 5 off: the reference of a half with a ULP at its removal is dropped | `NoTextRunAfterUnload` |
-| `fwd-safe-hazard-put-on-system-queue` | `safe_bugPutOnSystemQueue` | rule 5 / EVMOD-LIFE off: the free work on a system queue, so `module_exit`'s drain does not wait for its return after `module_put` | `NoTextRunAfterUnload` |
-| `fwd-safe-hazard-write-space-override` | `safe_bugWriteSpaceOverride` | rule 5's write-space closure off (round 16): the write-space trigger an `sk_write_space` override again, entered by a `wfree` waker outside `wqlk(t)`; neither `lock_sock` nor the grace period waits for it | `NoTextRunAfterUnload` |
-| `fwd-safe-hazard-remove-wait-after-free-queued` | `safe_bugRemoveWaitAfterFreeQueued` | rule 5's write-space closure order off: the entry removed by the free work after its `cancel_work_sync`, i.e. after the free work was queued; the entry's `queue_work` lands on an item the free no longer cancels | `NoTouchAfterFree` |
-| `fwd-safe-alt-ctl-queue-inside-rcu-safety` (holds) | `safe_altCtlQueueInsideRcu` | alternative (d) read as "queue before `rcu_read_unlock`": safe, the grace period waits for the lookup | `Safety` holds |
-
-`StalledSenderIsBlocked` has no hazard of its own: a writer of a bounded stream always ends unable to write (blocked or
-done), whatever the forwarder does; the bound it stands for is `QueuesWithinBounds`, whose teeth are
-`consume-before-accept` and the rejected sockmap alternative. `CleanHalfCloseCompletes` likewise has no dedicated
-hazard; `EveryUnitDelivered` and `EveryEndResolves` have the two liveness hazards above.
+Properties with no hazard of their own: `StalledSenderIsBlocked` (a writer of a bounded stream always ends unable to
+write, whatever the forwarder does; the bound it stands for is `QueuesWithinBounds`) and `CleanHalfCloseCompletes`.
+The ordering invariants over several units or datagrams (`DeliveredIsInOrderPrefix`, `DatagramsOnceInOrder`,
+`FrameNeverSplitAcrossDatagrams`) are vacuous on the one-unit and one-datagram instances; they are checked exhaustively
+on the middle-sized instance `pair_mid` (2 units and 2 datagrams in one direction, one fault) and along the named runs
+on `pair_conf`. `DatagramsOnceInOrder` has the hazard `fwd-pair-hazard-consume-partial-frame`
+(`pair_dhazConsumePartialFrame`, EVMOD-DGRAM off), violated on the three-datagram hazard instance
+`pair_dhaz`; on `pair_mid` it holds.

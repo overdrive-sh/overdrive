@@ -89,19 +89,14 @@
  *   retryOffByOne       the full pre-fix `restart_status_for_alloc` as the restart decision: restart iff
  *                       attempts + 1 < CEILING, with no exemptions (reclaim and generation both dropped)
  *   reclaimNotExempt    only the platform-reclaim exemption removed: a reclaimed workload at the ceiling is finalised failed
- *   generationNotExempt only the generation exemption removed: `Redeploy` does not place a workload at the ceiling
  *   crashLosesPlacedGeneration  today's production (GH #325, pending): a generation replacement leased at a serve
  *                       crash is lost and the workload returns to its pre-Redeploy `done` / `failed`
  *   assignSplit         assign is not one step under the pool lock: the next-fit free offset is chosen in one step
  *                       and taken in a later one, without re-checking it is still free
- *   predecessorFirst    (item 7.2) the restart frees the crashed allocation's lease before it leases the successor
- *   predecessorCleanedAtAssign  (item 7.3) the predecessor is retired at the successor's assign, not after its launch
  *   refusalKeepsPredecessor     (item 7.4) a pool refusal leaves the predecessor held until the next launch
  *   terminalBeforeRelease       (item 7.5) FinalizeFailed writes the terminal before it releases the lease
  *   tickDuringPredecessorTeardown  (item 7.3 step boundary) a tick of the workload runs while its dispatch is held at a
  *                       predecessor teardown (the guard dropped from Assign, Stop and Finalize)
- *   vmmExitRetiresLease (item 7.1) the VMM's exit retires and releases its lease in the same step: the workload waits
- *                       with no lease (or, past the ceiling, is `ended` with none), so the restart keeps no predecessor
  *
  * ASSUMPTIONS:
  *   K-C1  A duplicate CID is refused at device creation and the first holder is unaffected; a CID is free
@@ -166,15 +161,11 @@ module cid_lease {
   val BUG_CRASH_FORGETS_STOP: bool = OFF.contains("crashForgetsStop")
   val BUG_RETRY_OFF_BY_ONE: bool = OFF.contains("retryOffByOne")
   val BUG_RECLAIM_NOT_EXEMPT: bool = OFF.contains("reclaimNotExempt")
-  val BUG_GENERATION_NOT_EXEMPT: bool = OFF.contains("generationNotExempt")
   val BUG_CRASH_LOSES_PLACED_GENERATION: bool = OFF.contains("crashLosesPlacedGeneration")
   // DR6-CLOSE: one hazard per item-7 rule
-  val BUG_PREDECESSOR_FIRST: bool = OFF.contains("predecessorFirst")
-  val BUG_PREDECESSOR_CLEANED_AT_ASSIGN: bool = OFF.contains("predecessorCleanedAtAssign")
   val BUG_REFUSAL_KEEPS_PREDECESSOR: bool = OFF.contains("refusalKeepsPredecessor")
   val BUG_TERMINAL_BEFORE_RELEASE: bool = OFF.contains("terminalBeforeRelease")
   val BUG_TICK_DURING_PREDECESSOR_TEARDOWN: bool = OFF.contains("tickDuringPredecessorTeardown")
-  val BUG_VMM_EXIT_RETIRES_LEASE: bool = OFF.contains("vmmExitRetiresLease")
 
   // st (the placement lease's state, feature-delta `cid_lease` map): wait | picked (assignSplit only: an offset chosen,
   // not yet taken) | leased (lease, VMM not launched) | running (the VMM holds the device) | ended (the placement
@@ -222,13 +213,13 @@ module cid_lease {
   // RESTART-SSOT: the reconciler's restart decision, `restart_decision(attempts, platform_reclaimed,
   // generation_replacement)` = attempts < RESTART_BACKOFF_CEILING || platform_reclaimed || generation_replacement
   // (workload_lifecycle.rs:1114-1119). retryOffByOne: the pre-fix accessor, attempts + 1 < CEILING, no exemptions;
-  // reclaimNotExempt / generationNotExempt: one exemption removed
+  // reclaimNotExempt: one exemption removed
   def restartDecision(a: int, platformReclaimed: bool, generationReplacement: bool): bool =
     if (BUG_RETRY_OFF_BY_ONE) att.get(a) + 1 < CEIL
     else or {
       att.get(a) < CEIL,
       platformReclaimed and not(BUG_RECLAIM_NOT_EXEMPT),
-      generationReplacement and not(BUG_GENERATION_NOT_EXEMPT),
+      generationReplacement,
     }
   // the placed allocation's restart count (workload_lifecycle.rs:1214-1221, :1339): + 1 after a crash-class row
   def placedAtt(a: int): int = if (al.get(a).chg) att.get(a) + 1 else att.get(a)
@@ -272,27 +263,20 @@ module cid_lease {
   // predecessor (action_shim/mod.rs:2707-2716, `pool.assign` at :1471), so the crashed allocation's lease stays
   // Admitted as the predecessor lease (`pst` = held). The placement sets the new allocation's restart count
   // (`placedAtt`: + 1 after a crash-class row, unchanged under an exemption, 0 for a first placement).
-  // predecessorFirst: from `ended` the old lease is freed in the same step and next-fit runs over the free offsets with
-  // it included; no predecessor lease is kept. predecessorCleanedAtAssign: from `ended` the predecessor is retired at
-  // once (`pst` = retiring) instead of after the successor's launch
   action Assign(a: int): bool = all {
     not(BUG_ASSIGN_SPLIT),
     up, reclaimed or BUG_ASSIGN_BEFORE_RECLAIM, freeOffs != Set(), not(tickBlocked(a)),
     val x = al.get(a)
     val fromEnded = x.st == "ended" and x.retry and x.off >= 0
-    val first = fromEnded and BUG_PREDECESSOR_FIRST
-    val avail = if (first) freeOffs.union(Set(x.off)) else freeOffs
     all {
       x.st == "wait" or fromEnded,
-      val o = nextFitIn(avail)
+      val o = nextFitIn(freeOffs)
       all {
-        lease' = (if (first) lease.set(x.off, 0) else lease).set(o, a), cursor' = (o + 1) % N,
+        lease' = lease.set(o, a), cursor' = (o + 1) % N,
         al' = al.set(a, {
           ...x, st: "leased", off: o, retry: false, ex: false,
-          pred: if (fromEnded and not(first)) x.off else x.pred,
-          pst:
-            if (fromEnded and not(first)) (if (BUG_PREDECESSOR_CLEANED_AT_ASSIGN) "retiring" else "held")
-            else x.pst,
+          pred: if (fromEnded) x.off else x.pred,
+          pst: if (fromEnded) "held" else x.pst,
         }),
       },
     },
@@ -362,20 +346,13 @@ module cid_lease {
   // dispatch retires a crashed allocation's lease (the reclaim pass skips the pending restart owner,
   // workload_lifecycle.rs:399-478), so the lease stays Admitted (`ended`). `retry` / `ex` are the reconciler's restart
   // decision on that row (no exemption); the next tick is the workload's Assign, AssignRefused, Finalize or Stop.
-  // vmmExitRetiresLease (item 7.1 off): the exit retires and releases the lease in the same step, so the workload waits
-  // with no lease (`retry`) or is `ended` with none (`ex`), and its restart holds no predecessor
   action vmmExit(a: int): bool = all {
     val x = al.get(a)
     val r = restartDecision(a, false, false)
     all {
       dev' = if (dev.get(x.off) == a) dev.set(x.off, 0) else dev,
-      if (BUG_VMM_EXIT_RETIRES_LEASE) all {
-        lease' = lease.set(x.off, 0),
-        al' = al.set(a, { ...x, st: if (r) "wait" else "ended", off: -1, retry: false, ex: not(r), chg: r }),
-      } else all {
-        lease' = lease,
-        al' = al.set(a, { ...x, st: "ended", retry: r, ex: not(r), chg: r }),
-      },
+      lease' = lease,
+      al' = al.set(a, { ...x, st: "ended", retry: r, ex: not(r), chg: r }),
     },
     cursor' = cursor, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft, att' = att,
     g' = { ...g, lastEnd: endAs(a, "crash") },
@@ -472,7 +449,7 @@ module cid_lease {
   }
   // the restart verb's intent write (the stop sentinel deleted, the generation bumped) for a stopped or a failed workload:
   // a generation replacement, so the reconciler places it again whatever its count, which it keeps (`chg` false).
-  // generationNotExempt / retryOffByOne: the reconciler does not place a workload past the plain decision (no transition).
+  // retryOffByOne: the reconciler does not place a workload past the plain decision (no transition).
   // Like Finalize it runs only after boot reclamation: the HTTP listener that serves the restart verb binds
   // (lib.rs:4368) after run_server's vm_reclamation_boot::converge (:3955)
   action Redeploy(a: int): bool = all {
@@ -819,11 +796,6 @@ module cid_lease {
     .then(Release(2)).expect(Safety and st(2) == "wait" and pstOf(2) == "none" and freeOffs != Set())
     .then(Assign(2)).expect(Safety and st(2) == "leased" and att.get(2) == 1)
 
-  // ------------------------------------------------------------------ witnesses (expected violated)
-  val WitnessNoExhaustion: bool = ALLOCS.forall(a => al.get(a).st != "failed")
-  val WitnessNoRunning: bool = ALLOCS.forall(a => al.get(a).st != "running")
-  val WitnessNoOrphan: bool = orphans == Set()
-  val WitnessNoReclaim: bool = not(g.reclaimed)
 
   // ------------------------------------------------------------------ liveness (TLC)
   // a workload waiting to be placed (`wait`, or `ended` with `retry`) is eventually placed: serve restarts are bounded

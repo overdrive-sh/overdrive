@@ -3,14 +3,14 @@
 ## Status
 
 **Accepted — PROBE-NOSAMPLE-EVENT approved by user 2026-10-13**, under two
-rulings of that date: "Probe threshold counting (round-2 H-A)" ("No new
+rulings of that date: "Probe threshold counting" ("No new
 sample = no change (no failure, no success, no reset); each no-row case
 (adapter error, write failure) emits an event") for the adapter-error and
 failed-write cases, and the approval of PROBE-NOSAMPLE (ADR-0187, whose
 decision 2 includes the not-sampled event) for the node-capacity and
 quiesced cases. One event name for all four cases, its warning level and
 the removal of the `probe_tick.error` warning are architect elaborations
-recorded under those rulings. GH #295. The event's name, fields, reasons and
+under those rulings. GH #295. The event's name, fields, reasons and
 level are in the #295 feature delta,
 `docs/feature/netns-density-295/feature-delta.md` § *[REF] VM probe runner*,
 *The not-sampled event*; that section is the only home of its fields.
@@ -48,8 +48,8 @@ naming the probe and the reason, for every workload kind.**
    failed write carries the error itself.
 2. A probe runs once per period, so the event fires at most once per probe
    per period.
-3. It is emitted at the warning level of the event it replaces. It replaces
-   the bare `probe_tick.error` warning; there is no separate VM-only event.
+3. It is emitted at the warning level of the bare `probe_tick.error` warning
+   it replaces; there is no separate VM-only event.
 4. The event is a diagnostic emission, not state: it changes no row, no
    verdict and no reconciler view.
 
@@ -75,7 +75,8 @@ naming the probe and the reason, for every workload kind.**
 
 - A probe that records nothing is visible per probe and per period, with its
   cause, for every workload kind.
-- The bare `probe_tick.error` warning is removed; log queries that matched it
-  match the not-sampled event with reason adapter error or write failed.
+- The not-sampled event replaces the bare `probe_tick.error` warning; a log
+  query for that warning matches the not-sampled event with reason adapter
+  error or write failed.
 - The event is not durable: it is lost with the process's log stream, and
   nothing reconstructs a past no-sample window from the store.

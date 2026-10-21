@@ -1,4 +1,4 @@
-# udp-slots-hazard-no-audit-fairness: counterexample, 7 state(s) (from the TLC trace)
+# udp-slots-hazard-no-audit-fairness: counterexample, 10 state(s) (from the TLC trace)
 
 State 1
   toHostAbort = {}
@@ -19,28 +19,43 @@ State 1
   toGuestPaired = {}
   toGuestRefused = {}
 
-State 2 [AppClaim]
-  slots = ( 0 :> [ owned |-> FALSE, sock |-> 0, dest |-> 0, fid |-> 0, attached |-> FALSE, parked |-> {}, holders |-> 0 ] @@ 1 :> [ owned |-> TRUE, sock |-> 1, dest |-> 1, fid |-> 0, attached |-> FALSE, parked |-> {<<1, 1>>}, holders |-> 1 ] )
-
-State 3 [SockCloseReportLost]
+State 2 [SockCloseReportLost]
   sockAlive = <<FALSE, TRUE>>
 
-State 4 [SockCloseReportLost]
-  sockAlive = <<FALSE, FALSE>>
+State 3 [AppClaim]
+  slots = ( 0 :> [ owned |-> FALSE, sock |-> 0, dest |-> 0, fid |-> 0, attached |-> FALSE, parked |-> {}, holders |-> 0 ] @@ 1 :> [ owned |-> TRUE, sock |-> 2, dest |-> 1, fid |-> 0, attached |-> FALSE, parked |-> {<<2, 1>>}, holders |-> 1 ] )
 
-State 5 [GuestReady]
+State 4 [GuestReady]
   nextFid = 2
-  slots = ( 0 :> [ owned |-> FALSE, sock |-> 0, dest |-> 0, fid |-> 0, attached |-> FALSE, parked |-> {}, holders |-> 0 ] @@ 1 :> [ owned |-> TRUE, sock |-> 1, dest |-> 1, fid |-> 1, attached |-> FALSE, parked |-> {<<1, 1>>}, holders |-> 1 ] )
-  host = << [sock |-> 1, dest |-> 1, st |-> "req", slot |-> 1], [sock |-> 0, dest |-> 0, st |-> "none", slot |-> 0] >>
+  slots = ( 0 :> [ owned |-> FALSE, sock |-> 0, dest |-> 0, fid |-> 0, attached |-> FALSE, parked |-> {}, holders |-> 0 ] @@ 1 :> [ owned |-> TRUE, sock |-> 2, dest |-> 1, fid |-> 1, attached |-> FALSE, parked |-> {<<2, 1>>}, holders |-> 1 ] )
+  host = << [sock |-> 2, dest |-> 1, st |-> "req", slot |-> 1], [sock |-> 0, dest |-> 0, st |-> "none", slot |-> 0] >>
 
-State 6 [GuestPairingTimeout]
+State 5 [GuestPairingTimeout]
   toHostAbort = {1}
   endedNoNew = {1}
-  slots = ( 0 :> [ owned |-> FALSE, sock |-> 0, dest |-> 0, fid |-> 0, attached |-> FALSE, parked |-> {}, holders |-> 0 ] @@ 1 :> [ owned |-> TRUE, sock |-> 1, dest |-> 1, fid |-> 0, attached |-> FALSE, parked |-> {}, holders |-> 1 ] )
+  slots = ( 0 :> [ owned |-> FALSE, sock |-> 0, dest |-> 0, fid |-> 0, attached |-> FALSE, parked |-> {}, holders |-> 0 ] @@ 1 :> [ owned |-> TRUE, sock |-> 2, dest |-> 1, fid |-> 0, attached |-> FALSE, parked |-> {}, holders |-> 1 ] )
   guestEnded = {1}
 
-State 7 [HostRecvEnd]
-  toHostAbort = {}
-  host = << [sock |-> 1, dest |-> 1, st |-> "closed", slot |-> 1], [sock |-> 0, dest |-> 0, st |-> "none", slot |-> 0] >>
+State 6 [AppSendOnSlot]
+  endedNoNew = {}
+  slots = ( 0 :> [ owned |-> FALSE, sock |-> 0, dest |-> 0, fid |-> 0, attached |-> FALSE, parked |-> {}, holders |-> 0 ] @@ 1 :> [ owned |-> TRUE, sock |-> 2, dest |-> 1, fid |-> 0, attached |-> FALSE, parked |-> {<<2, 1>>}, holders |-> 1 ] )
 
--> stutters forever in State 7
+State 7 [GuestReady]
+  nextFid = 3
+  slots = ( 0 :> [ owned |-> FALSE, sock |-> 0, dest |-> 0, fid |-> 0, attached |-> FALSE, parked |-> {}, holders |-> 0 ] @@ 1 :> [ owned |-> TRUE, sock |-> 2, dest |-> 1, fid |-> 2, attached |-> FALSE, parked |-> {<<2, 1>>}, holders |-> 1 ] )
+  host = << [sock |-> 2, dest |-> 1, st |-> "req", slot |-> 1], [sock |-> 2, dest |-> 1, st |-> "req", slot |-> 1] >>
+
+State 8 [HostPair]
+  host = << [sock |-> 2, dest |-> 1, st |-> "paired", slot |-> 1], [sock |-> 2, dest |-> 1, st |-> "req", slot |-> 1] >>
+  toGuestPaired = {1}
+
+State 9 [SockCloseReportLost]
+  sockAlive = <<FALSE, FALSE>>
+
+State 10 [GuestPairingTimeout]
+  toHostAbort = {1, 2}
+  endedNoNew = {1}
+  slots = ( 0 :> [ owned |-> FALSE, sock |-> 0, dest |-> 0, fid |-> 0, attached |-> FALSE, parked |-> {}, holders |-> 0 ] @@ 1 :> [ owned |-> TRUE, sock |-> 2, dest |-> 1, fid |-> 0, attached |-> FALSE, parked |-> {}, holders |-> 1 ] )
+  guestEnded = {1, 2}
+
+-> stutters forever in State 10

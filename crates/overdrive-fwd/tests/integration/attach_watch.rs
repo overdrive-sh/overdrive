@@ -421,3 +421,129 @@ fn a_refused_attach_consumes_an_id_and_ids_strictly_increase() {
     let third = fwd.watch(&w as &dyn AsFd).expect("watch");
     assert!(third.get() > second.get(), "watches and pairs share one id sequence");
 }
+
+// ---------------------------------------------------------------------------
+// Error-queue exclusion (ADR-0204 rule 5, "Excluded by precondition")
+// ---------------------------------------------------------------------------
+
+/// `SO_ZEROCOPY` (`include/uapi/asm-generic/socket.h` @ v7.0).
+const SO_ZEROCOPY: libc::c_int = 60;
+/// `SO_TIMESTAMPING_OLD` (`include/uapi/asm-generic/socket.h` @ v7.0).
+const SO_TIMESTAMPING: libc::c_int = 37;
+/// `SOF_TIMESTAMPING_TX_SOFTWARE`, a bit of `SOF_TIMESTAMPING_TX_RECORD_MASK`
+/// (`include/uapi/linux/net_tstamp.h:59-63 @ v7.0`).
+const SOF_TIMESTAMPING_TX_SOFTWARE: libc::c_int = 1 << 1;
+/// `SOF_TIMESTAMPING_RX_SOFTWARE`: a receive-only bit, outside the mask.
+const SOF_TIMESTAMPING_RX_SOFTWARE: libc::c_int = 1 << 3;
+
+fn set_int_option(fd: std::os::fd::RawFd, name: libc::c_int, value: libc::c_int) {
+    // SAFETY: valid option value of the passed length.
+    let ret = unsafe {
+        libc::setsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            name,
+            (&raw const value).cast(),
+            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+        )
+    };
+    assert!(ret == 0, "setsockopt({name}, {value}): {}", std::io::Error::last_os_error());
+}
+
+/// A TCP half with `SOCK_ZEROCOPY` set is refused `UnsupportedSocket`
+/// naming it (the kernel's `ESOCKTNOSUPPORT`), nothing is hooked, and the
+/// same socket attaches once the option is cleared (negative control: the
+/// refusal is keyed on the option, not on the socket).
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+#[ignore = "pending DELIVER step 4"]
+fn a_tcp_half_with_zerocopy_set_is_refused_unsupported_socket() {
+    use std::os::fd::AsRawFd;
+    let fwd = open_context();
+    let (v, _v_far) = vsock_pair();
+    let (t, _t_far) = tcp_pair();
+    set_int_option(t.as_raw_fd(), SO_ZEROCOPY, 1);
+    match fwd.attach(&v as &dyn AsFd, &t as &dyn AsFd, PairMode::Stream) {
+        Err(ForwarderError::UnsupportedSocket { side }) => assert_eq!(side, PairSide::B),
+        other => panic!("a SO_ZEROCOPY TCP half must be UnsupportedSocket {{ B }}, got {other:?}"),
+    }
+    assert_eq!(live(&fwd), (0, 0, 0), "a refused attach hooks nothing");
+    set_int_option(t.as_raw_fd(), SO_ZEROCOPY, 0);
+    assert_nothing_hooked(&fwd, &v, &t);
+}
+
+/// A TCP half with a transmit-timestamping bit in `sk_tsflags` is refused
+/// `UnsupportedSocket` naming it; a receive-only timestamping bit (outside
+/// `SOF_TIMESTAMPING_TX_RECORD_MASK`) is not refused (negative control: the
+/// refusal is the transmit mask, not any timestamping).
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+#[ignore = "pending DELIVER step 4"]
+fn a_tcp_half_with_transmit_timestamping_is_refused_unsupported_socket() {
+    use std::os::fd::AsRawFd;
+    let fwd = open_context();
+    let (v, _v_far) = vsock_pair();
+    let (t, _t_far) = tcp_pair();
+    set_int_option(t.as_raw_fd(), SO_TIMESTAMPING, SOF_TIMESTAMPING_TX_SOFTWARE);
+    match fwd.attach(&v as &dyn AsFd, &t as &dyn AsFd, PairMode::Stream) {
+        Err(ForwarderError::UnsupportedSocket { side }) => assert_eq!(side, PairSide::B),
+        other => {
+            panic!("a TX-timestamping TCP half must be UnsupportedSocket {{ B }}, got {other:?}")
+        }
+    }
+    assert_eq!(live(&fwd), (0, 0, 0), "a refused attach hooks nothing");
+    set_int_option(t.as_raw_fd(), SO_TIMESTAMPING, SOF_TIMESTAMPING_RX_SOFTWARE);
+    assert_nothing_hooked(&fwd, &v, &t);
+}
+
+/// A UDP half with `SOCK_ZEROCOPY` set is refused in datagram mode, naming
+/// it; cleared, the same association attaches.
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+#[ignore = "pending DELIVER step 4"]
+fn a_udp_half_with_zerocopy_set_is_refused_unsupported_socket() {
+    use std::os::fd::AsRawFd;
+    let fwd = open_context();
+    let (v, _v_far) = vsock_pair();
+    let (u, _u_far) = udp_pair();
+    set_int_option(u.as_raw_fd(), SO_ZEROCOPY, 1);
+    let mode = PairMode::Datagram { udp: PairSide::B };
+    match fwd.attach(&v as &dyn AsFd, &u as &dyn AsFd, mode) {
+        Err(ForwarderError::UnsupportedSocket { side }) => assert_eq!(side, PairSide::B),
+        other => panic!("a SO_ZEROCOPY UDP half must be UnsupportedSocket {{ B }}, got {other:?}"),
+    }
+    set_int_option(u.as_raw_fd(), SO_ZEROCOPY, 0);
+    let id = fwd.attach(&v as &dyn AsFd, &u as &dyn AsFd, mode).expect("cleared, it attaches");
+    assert_eq!(fwd.abort(id).expect("abort"), AbortResult::Aborted);
+    let _ = wait_end_of(&fwd, id);
+}
+
+/// Watch refuses a vsock half with a transmit-timestamping bit, and the
+/// vsock half of an attach with the same bit is refused naming side A; with
+/// the bit cleared the same socket is watched (negative control).
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+#[ignore = "pending DELIVER step 4"]
+fn a_vsock_half_with_transmit_timestamping_is_refused_at_watch_and_attach() {
+    let fwd = open_context();
+    let (v, _v_far) = vsock_pair();
+    let (t, _t_far) = tcp_pair();
+    set_int_option(v.raw(), SO_TIMESTAMPING, SOF_TIMESTAMPING_TX_SOFTWARE);
+    match fwd.watch(&v as &dyn AsFd) {
+        Err(ForwarderError::UnsupportedSocket { .. }) => {}
+        other => {
+            panic!("watching a TX-timestamping vsock must be UnsupportedSocket, got {other:?}")
+        }
+    }
+    match fwd.attach(&v as &dyn AsFd, &t as &dyn AsFd, PairMode::Stream) {
+        Err(ForwarderError::UnsupportedSocket { side }) => assert_eq!(side, PairSide::A),
+        other => {
+            panic!("a TX-timestamping vsock half must be UnsupportedSocket {{ A }}, got {other:?}")
+        }
+    }
+    assert_eq!(live(&fwd), (0, 0, 0), "a refused watch or attach hooks nothing");
+    set_int_option(v.raw(), SO_TIMESTAMPING, 0);
+    let watch = fwd.watch(&v as &dyn AsFd).expect("cleared, the vsock half is watched");
+    assert_eq!(fwd.abort(watch).expect("abort"), AbortResult::Aborted);
+    let _ = wait_end_of(&fwd, watch);
+}

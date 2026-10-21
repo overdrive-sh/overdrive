@@ -42,7 +42,7 @@
 //! | `OwnerClose("g")` | stimulus: the guest owner's close after its record puts `{S, R}` on the vsock |
 //! | `HolderEnd(k)` | the driver's own read of its stream's `V_h` on the half's Sim vsock socket (`SimSocket::local_read`), which reports the scripted end fact: `Eof` for `eof`, `Err` for `err`; any other result fails the step. Not an owner port |
 //! | `DRead(d)`, `TrailingRst("g")` | stimulus: the far receiver's read (the Sim socket delivers to its far reader as it accepts, so the read is folded into the forwarder's run) and the guest-side trailing reset |
-//! | `DropRecord`, `AttachRead`, `AttachHook`, `UnclassifiedEof`, `WatchRecord`, `SendShutLate` | hazard-only: an error |
+//! | `DropRecord`, `AttachRead`, `AttachHook`, `UnclassifiedEof`, `WatchRecord` | hazard-only: an error |
 //!
 //! Projection (side `h`; QPROJ-8, "Host-side projection pins (D-3 to
 //! D-5)"; D-11). S — always projected: `ctx(h)`, `oldCtx(h)` ←
@@ -74,6 +74,41 @@
 //! variables. The flow's `(generation, ForwardId)` is a relabelling the
 //! driver fixes when it first sees the attached pair or the dial's watch,
 //! never a source of state.
+//!
+//! **`fwd_safe` has no driver (model-only; testing.md checklist item 6).**
+//! `fwd_safe.qnt`'s named-run main `safe_runs` is not a conformance target
+//! (feature-delta § *Formal protocol model*, "`fwd_safe`"). Its variables are
+//! orderings inside `ovd_fwd`: RCU readers, the work item's PENDING bit, the
+//! free's phase, socket-lock and wait-queue-lock holds, a store not yet
+//! visible, the module's reference count and whether its text may run. No
+//! owner accessor exposes them, and its actions are interleavings no driving
+//! port can schedule. No production owner unloads the module either: the
+//! appliance kernel has no module unloading, and `kmod-load` is development
+//! tooling. Each run is checked by the model only (`fwd-safe-run-*`,
+//! `expect = "holds"`), and each rule's teeth by its `fwd_safe` hazard. The
+//! run's observable consequence is checked where an owner or the module
+//! exposes it:
+//!
+//! | `safe_runs` run | Observable consequence, and where it is checked |
+//! |---|---|
+//! | `TargetStallResumesOnWriteSpace` | the stalled direction resumes byte-exact: this driver's `TargetStallBlocksSenderThenResumes`; module suite `stream_battery::stall_a_reader_that_stops_blocks_the_sender_and_resumes_byte_exact` (TCP target); V-EV-SAFE's full-target resume cases (vsock and UDP targets) |
+//! | `WakeupDuringRunIsNotLost` | every unit arrives: `CleanBothWaysCompletes`, `EarlyBytesBeforeAttachDelivered`; `stream_battery::burst_ten_thousand_small_writes_arrive_in_order` |
+//! | `CleanEndProducesOneRecordAndFrees` | one record per pair: `pr(h).nrec` in `CleanBothWaysCompletes`; `stream_battery::cycles_a_thousand_flows_each_end_with_one_record_and_leave_nothing_live` |
+//! | `LateCallbackAfterEndCallsOriginal` | a socket event after the end changes nothing: `TrailingRstAfterCompletionIsInert`; `stream_end::end_idempotent_a_trailing_reset_after_completion_adds_nothing`; the free order itself by V-EV-SAFE |
+//! | `CallbackHoldingPairDelaysFree` | none outside the kernel (a callback in flight across the grace period): V-EV-SAFE (A-45) |
+//! | `ControlCallAfterIdRemovalIsEnoent` | `FlowForwarder::abort` of an ended id answers `AbortResult::AlreadyEnded`: `watch::watch_abort_records_unhooks_and_never_touches_the_socket` (its stale-id abort); V-EV-SAFE's control calls on ending ids |
+//! | `AbortRacingEndIsCancelledByFree` | one record per id: `context_release::a_thousand_pair_close_storm_yields_exactly_one_record_per_id`; V-EV-SAFE |
+//! | `SweepReportedEndAbortsSocketError` | `VmmExitAbortsHostHalf`; `guest_boundary::a_vmm_exit_aborts_a_live_host_pair_with_the_device_releases_reset` |
+//! | `SweepStoresBeforeErrReadRechecksUnderTableLock`, `SweepErrVisibleFirstRechecksUnderTableLock` | no unclassified end: `gh.unclassified` ← `inventory().unclassified_eof`, compared at every step of this driver's `VmmExit` runs; the sweep's store order cannot be forced from outside the kernel, so the window itself has no measurement (§ *End classification*) |
+//! | `ReleaseEndsPairWithoutRecord` | `ContextReleaseResetsEveryPair`; `context_release::a_released_context_aborts_every_pair_and_watch_and_resets_every_far_end`; `watch::a_context_release_shuts_every_watched_socket_and_queues_no_record` |
+//! | `WatchOverrideEndThenOwnerAbortIsEnoent` | the same `AlreadyEnded` answer as `ControlCallAfterIdRemovalIsEnoent`; the module suite's stale-id abort removes the id by the owner's abort, not by the watch's own end, so the own-end case rests on V-EV-SAFE's control calls on ending ids |
+//! | `WatchOwnerAbortRacingSweepOneRecord` | `VmmExitWithWatchRecordInFlightResolvesFromRecord`; `guest_boundary::a_watched_half_records_the_sweep_before_its_holder_observes_the_reset` |
+//! | `UnloadRefusedWhileContextOpen` | V-EV-UNLOAD's context half, `unload::an_open_context_refuses_the_unload_and_its_close_lets_it_succeed` (`kvm-tests`, metal) |
+//! | `UnloadRefusedWhileSocketHooked` | V-EV-UNLOAD's socket half, `unload::hooked_sockets_hold_the_module_until_their_free_work_and_a_reload_then_serves` |
+//! | `UnloadSucceedsAfterReleaseAndFree` | both V-EV-UNLOAD cells above (the unload succeeds once the context closes and the free work returned) |
+//! | `LateLockedCallbackFinishesBeforeRemoval` | none outside the kernel (a lock-owning caller inside an override at the removal): V-EV-UNLOAD's unload stress and the DELIVER source review of rule 5 |
+//! | `UlpCopyKeepsModuleLoaded` | the ULP is an environment fault the owner rules out (ADR-0200): attach refuses a ULP half, `attach_watch::a_tcp_half_with_an_upper_layer_protocol_is_refused`; a ULP installed after attach is V-EV-UNLOAD's ULP control |
+//! | `WfreeWakeFinishesBeforeRemoveWait` | none outside the kernel (a `sock_wfree` waker inside the wait-queue entry): V-EV-SAFE's vsock and UDP resume cases, V-EV-UNLOAD's stress with senders on every vsock and UDP half, and the DELIVER source review of `sk_write_space` |
 
 #![allow(
     clippy::needless_pass_by_ref_mut,
@@ -1437,7 +1472,6 @@ impl Driver for FwdPairDriver {
             AttachHook => return Self::hazard("AttachHook"),
             UnclassifiedEof => return Self::hazard("UnclassifiedEof"),
             WatchRecord => return Self::hazard("WatchRecord"),
-            SendShutLate => return Self::hazard("SendShutLate"),
         })
     }
 }

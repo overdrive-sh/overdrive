@@ -106,9 +106,9 @@
  *     the original callback (the holder's wakeup) in the same step (`gh.woken`).
  *   - Writers (Write, Fin), readers (Read, ReadEof, ShutRd) and resets (TcpRst, HolderDrop, VmmExit, UdpErr,
  *     UdpBlock) are the environment. Readers are NOT fair: a reader may stop for ever or shut only its read side.
- *   - Instances (CFG): "ok" (stream; gh carries 3 units — a full pipeline — and hg 1), "watch" (gh 2, hg 1),
+ *   - Instances (CFG): "ok" (stream; one unit each way), "watch" (a dial; one unit each way),
  *     "live" (stream; one unit each way: the liveness instance), "stall" (stream; gh 4 units — more than the pipeline
- *     holds, so a stopped reader blocks its writer — hg none, no fault), "dgram" (gh 3 datagrams, hg none), "dlive" (gh 1
+ *     holds, so a stopped reader blocks its writer — hg none, no fault), "dgram" (one datagram each way), "dlive" (gh 1
  *     datagram, hg none, no send-buffer toggles: the datagram liveness instance), "wlive" (a dial; gh 1 unit, hg none:
  *     the watch liveness instance of T-5 and T-6) and "conf" (every mode; 4 units and 3 datagrams each
  *     way: the conformance instance, checked only along the named runs). On every model-checking instance a trace
@@ -123,7 +123,7 @@
  * Ghost (model-only) state: vs.sshut (this side's sk_shutdown & SEND_SHUTDOWN as the forwarder reads it under the
  * socket lock: set in the step that sends the SHUTDOWN, CLEAN-FULL-END), vs.misc (a transition classified otherwise
  * than the table gives with the socket's true send state), gh.hobs (the holder's end observation), gh.vhTouched (an
- * owner abort of a watch changed V_h), gh.dropped (the holder dropped its stream), guestAbortSent, gh.woken (a holder woken by a watch's end), gh.recPend (originalBeforeRecord only),
+ * owner abort of a watch changed V_h), gh.dropped (the holder dropped its stream), guestAbortSent, gh.woken (a holder woken by a watch's end),
  * dir.loss (the stream of a direction was cut — an abort, a reset, an owner's death or
  * the VMM's exit — before its writer's FIN), dir.lost (units consumed and not accepted), vs.tcls (the class of
  * the transition that ended the incoming direction, by the EVMOD-END table, whatever the forwarder did),
@@ -173,43 +173,20 @@
  *       receive queue empty (virtio_transport_common.c:1448-1452, :1463-1464, :1249-1252 @ v7.0); the sweep's sk_err is
  *       set before its state write (drivers/vhost/vsock.c:746-750) (the delta's "F13") ... source reading; P-70 § 3.6, P-71
  *
- * OFF names the rules switched off (teeth), or the rejected alternative switched on:
- *   consumeBeforeAccept  the run consumes from the source what it read whatever the target accepted, holding
- *                        the rest in forwarder memory (the redirect's shape)
+ * OFF names the rules switched off (teeth):
  *   consumeOnShortSend   a short send consumes the whole peek; the unaccepted unit is lost
  *   eofAsFin             every vsock end is forwarded as a FIN (no abort class)
- *   classifyAccumulated  the class is computed at end-of-stream from the accumulated peer_shutdown (S set → clean)
  *   shutdownOnCallback   the target is shut in the callback, before the vsock queue is empty
  *   releaseKeepsPairs    the context's release leaves its pairs forwarding
  *   lossyEndRecord       an end record may be dropped
  *   consumePartialFrame  a datagram is consumed when the vsock accepted part of its frame
- *   dropWhenTargetBlocked a frame whose UDP target send would block is dropped by the forwarder
- *   altSockmapRedirect   (rejected alternative) the vsock credit is returned at read and the target's egress
- *                        queue is unbounded
  *   checkThenHook        attach reads the half's state, and installs the callbacks in a later step: a transition
  *                        between them is recorded by neither (AttachRead / AttachHook)
- *   unclassifiedAsFin    an end-of-stream with no recorded class is forwarded as a FIN instead of aborting (with
- *                        checkThenHook: the only way an unclassified end arises)
- *   tcpEofIsClean        a TCP half that read end-of-stream is taken as ended cleanly: a later sk_err is ignored
- *   reopenBeforeRelease  the Forwarder recovery opens the new context while the old one still holds its pairs
  *   holderTrustsRead     the GuestStream reports the holder's read of V_h (Eof → HalfClose, Err → GuestAbort), not the
  *                        watch's, and passes reads to V_h after the owner ended it
- *   originalBeforeRecord the watch's sk_error_report calls the original callback (the holder's wakeup) before it
- *                        queues the record: the record is queued in a later step (WatchRecord)
- *   noRecordIsClean      a GuestStream that finds no record, and no end of its owner, reports a clean end instead of
- *                        waiting for the record in flight
- *   truncatedFrameWaits  (datagram) a frame left incomplete when the peer ends its direction is waited for, not
- *                        aborted FrameInvalid (EV-DGRAM D1 off)
- *   lateSendShut         this side's send-shut flag is set in a step after the SHUTDOWN it sends (SendShutLate)
- *   tcpNoErrorReport     (T-1) a TCP reset is not reported by sk_error_report; a later recvmsg / sendmsg finds it
- *   noSeed               (T-2) attach installs the callbacks without classifying the attach-time state
- *   establishedOnly      (T-3) attach refuses a TCP half in CLOSE_WAIT
  *   endedAttachGracefulClose (T-4) on HalfEnded the owner closes the surviving TCP half without SO_LINGER{1,0}
- *   endedAttachIgnored   (T-4) the owner treats HalfEnded as a retryable defect and keeps the flow
  *   watchAbortShutsVh    (T-5, the rejected EVMOD-WATCH-SHUT) the owner's abort of a watch shuts V_h
- *   noGuestAbort         (T-5) the owner writes no Abort { flow } for an aborted stream
  *   dropWithoutAbort     (T-6) the holder's drop only closes V_h; the forwarder's reference keeps it open
- *   recoveryKeepsEndedStream (U-R1) the recovery's step 1 leaves a held stream whose watch already ended as it was
  */
 // D-UP-1: the variants of `conf_step` (a module of its own: a constructor would clash with the action of the same
 // name, so the actions build their variant with the builtin `variant`)
@@ -249,7 +226,6 @@ module fwd_pair_conf {
     | UnclassifiedEof({ d: str })
     | HolderEnd({ k: str })
     | WatchRecord({ s: str })
-    | SendShutLate({ s: str })
     | DgHalfClose({ s: str })
     | GuestAbort({ s: str })
 }
@@ -257,7 +233,7 @@ module fwd_pair_conf {
 module fwd_pair {
   import fwd_pair_conf.ConfStep from "./fwd_pair"
   // OFF: design rules switched off (hazard instances in hazard/fwd_pair*_hazards.qnt); CFG: "ok" | "watch" | "live" |
-  // "stall" | "dgram" | "dlive" | "conf"
+  // "stall" | "dgram" | "dlive" | "mid" | "dhaz" | "conf"
   const OFF: Set[str]
   const CFG: str
   // D-UP-1: true only on the conformance main `pair_conf`; every model-checking and hazard instance passes false
@@ -271,61 +247,45 @@ module fwd_pair {
     if (CFG == "ok" or CFG == "live" or CFG == "stall") Set("stream")
     else if (CFG == "watch" or CFG == "wlive") Set("watch")
     else if (CFG == "dgram" or CFG == "dlive") Set("dgram")
+    else if (CFG == "mid") Set("stream", "dgram")
+    else if (CFG == "dhaz") Set("dgram")
     else Set("stream", "watch", "dgram")
   val W: int = 1    // a TCP socket's queue (units)
   val C: int = 1    // the vsock credit in stream mode (units)
   val CD: int = 3   // the vsock credit in datagram mode (frame items): at least the largest frame (F8)
   val WU: int = 1   // a UDP socket's receive queue (datagrams)
   val SIZES: Set[int] = Set(0, 1, 2)
-  // units each writer may write: "ok" 3 gh / 1 hg (a full pipeline: capacity 3), "live" 1 / 1, "stall" 4 gh
-  // (more than the pipeline holds: a stopped reader blocks the writer) / 0 hg, "watch" 2 / 1, "conf" 4 / 4
+  // units each writer may write: "ok", "live" and "watch" 1 gh / 1 hg (one unit per direction), "stall" 4 gh (more than
+  // the pipeline holds: a stopped reader blocks the writer) / 0 hg, "wlive" 1 gh / 0 hg, "mid" 2 gh / 0 hg, "conf" 4 / 4
   def nmax(d: str): int =
     if (CFG == "conf") 4
     else if (CFG == "stall") (if (d == "gh") 4 else 0)
     else if (CFG == "wlive") (if (d == "gh") 1 else 0)
-    else if (d == "hg") 1
-    else if (CFG == "live") 1
-    else if (CFG == "watch") 2
-    else 3
+    else if (CFG == "mid") (if (d == "gh") 2 else 0)
+    else 1
   // environment faults per trace (EpRst, DialerDrop, VmmExit, UdpErr) and owner aborts (Abort, CtxRelease): one on
   // the model-checking instances, which keeps them finite and small; none on "stall"; unbounded on the
   // conformance main
   val FMAX: int = if (CFG == "conf") 1000 else if (CFG == "stall") 0 else 1
-  // datagrams each source may send: "dgram" 3 gh / 0 hg (the forwarding code is the same for both directions;
-  // the reverse direction's sends multiply the state space past what TLC finishes), "conf" 3 / 3
-  // "dlive" (the datagram liveness instance) 1 / 0
+  // datagrams each source may send: "dgram" 1 gh / 1 hg (one datagram per direction), "conf" 3 / 3,
+  // "dlive" (the datagram liveness instance) 1 / 0, "mid" 2 / 0, "dhaz" 3 / 0
   def dnmax(d: str): int =
-    if (CFG == "conf") 3 else if (CFG == "dgram") (if (d == "gh") 3 else 0)
-    else if (CFG == "dlive") (if (d == "gh") 1 else 0) else 0
+    if (CFG == "conf") 3 else if (CFG == "dgram") 1
+    else if (CFG == "dlive") (if (d == "gh") 1 else 0)
+    else if (CFG == "mid") (if (d == "gh") 2 else 0)
+    else if (CFG == "dhaz") (if (d == "gh") 3 else 0) else 0
 
-  val BUG_CONSUME_BEFORE_ACCEPT: bool = OFF.contains("consumeBeforeAccept")
   val BUG_CONSUME_ON_SHORT_SEND: bool = OFF.contains("consumeOnShortSend")
   val BUG_EOF_AS_FIN: bool = OFF.contains("eofAsFin")
-  val BUG_CLASSIFY_ACC: bool = OFF.contains("classifyAccumulated")
   val BUG_SHUT_ON_CALLBACK: bool = OFF.contains("shutdownOnCallback")
   val BUG_RELEASE_KEEPS: bool = OFF.contains("releaseKeepsPairs")
   val BUG_LOSSY_RECORD: bool = OFF.contains("lossyEndRecord")
   val BUG_CONSUME_PARTIAL: bool = OFF.contains("consumePartialFrame")
-  val BUG_DROP_WHEN_BLOCKED: bool = OFF.contains("dropWhenTargetBlocked")
-  val ALT_SOCKMAP: bool = OFF.contains("altSockmapRedirect")
   val BUG_CHECK_THEN_HOOK: bool = OFF.contains("checkThenHook")
-  val BUG_UNCLASSIFIED_FIN: bool = OFF.contains("unclassifiedAsFin")
-  val BUG_TCP_EOF_CLEAN: bool = OFF.contains("tcpEofIsClean")
-  val BUG_REOPEN_EARLY: bool = OFF.contains("reopenBeforeRelease")
   val BUG_WATCH_SHUTS_VH: bool = OFF.contains("watchAbortShutsVh")
-  val BUG_NO_ERR_REPORT: bool = OFF.contains("tcpNoErrorReport")
-  val BUG_NO_SEED: bool = OFF.contains("noSeed")
-  val BUG_ESTABLISHED_ONLY: bool = OFF.contains("establishedOnly")
   val BUG_ENDED_GRACEFUL: bool = OFF.contains("endedAttachGracefulClose")
-  val BUG_ENDED_IGNORED: bool = OFF.contains("endedAttachIgnored")
-  val BUG_NO_GUEST_ABORT: bool = OFF.contains("noGuestAbort")
-  val BUG_RECOVERY_KEEPS_STREAM: bool = OFF.contains("recoveryKeepsEndedStream")
   val BUG_DROP_WITHOUT_ABORT: bool = OFF.contains("dropWithoutAbort")
   val BUG_HOLDER_TRUSTS_READ: bool = OFF.contains("holderTrustsRead")
-  val BUG_ORIG_BEFORE_REC: bool = OFF.contains("originalBeforeRecord")
-  val BUG_NO_RECORD_CLEAN: bool = OFF.contains("noRecordIsClean")
-  val BUG_TRUNC_WAITS: bool = OFF.contains("truncatedFrameWaits")
-  val BUG_LATE_SEND_SHUT: bool = OFF.contains("lateSendShut")
 
   // ------------------------------------------------------------------ types
   // ph: unattached | attaching (checkThenHook only) | live | ended | refused (attach returned HalfEnded: no pair was
@@ -339,12 +299,12 @@ module fwd_pair {
   // the pair was attached in
   type Pair = { ph: str, rec: str, out: str, cause: str, errno: str, byRel: bool, closed: bool, nrec: int, cgen: int }
   // Per direction d. Writer at srcOf(d): wr units written, wfin its FIN (in mode watch, hg's writer is the dialer:
-  // it writes q1 directly). q0 / q1 / q2 as above; h0 / h1 forwarder memory (consumeBeforeAccept only).
+  // it writes q1 directly). q0 / q1 / q2 as above.
   // srcEnd / srcShut: at the source side's pair, the TCP source's end ("none" | "clean") and the vsock target
   // shut (an {S} packet sent). dstEnd / dstShut: at the target side's pair, the vsock source's end and the TCP
   // target shut (a FIN toward the reader). Reader at dstOf(d): got the units read, eof end-of-stream read, rst a
   // reset observed, shutRd shutdown(SHUT_RD). Ghosts: loss, lost.
-  type Dir = { wr: int, wfin: bool, q0: List[int], h0: List[int], q1: List[int], h1: List[int], q2: List[int],
+  type Dir = { wr: int, wfin: bool, q0: List[int], q1: List[int], q2: List[int],
                srcEnd: str, srcShut: bool, dstEnd: str, dstShut: bool,
                got: List[int], eof: bool, rst: bool, shutRd: bool, loss: bool, lost: int }
   // The vsock half of a side: ps = peer_shutdown (flags received), sent = flags this side sent, err = sk_err
@@ -364,13 +324,13 @@ module fwd_pair {
   // slot release), rdrop (dropped at the far receiver's full queue), fdrop (dropped by the forwarder).
   type Dg = { n: int, sizes: List[int], dq0: List[int], foff: int, blk: bool, dq2: List[List[int]],
               got: List[List[int]], sdrop: Set[int], rdrop: Set[int], fdrop: Set[int] }
-  // hobs: the holder's end observation ("none" | "eof" | "err"); woken: a holder woken by a watch's end; recPend:
-  // originalBeforeRecord only; vhTouched: an owner abort of a watch changed V_h (T-5); dropped: the holder dropped
+  // hobs: the holder's end observation ("none" | "eof" | "err"); woken: a holder woken by a watch's end;
+  // vhTouched: an owner abort of a watch changed V_h (T-5); dropped: the holder dropped
   // its GuestStream (T-6)
   // hostDead: the host owner died (a CtxRelease(h) that found its pair or watch live): final in the trace, no Reopen
   // hresCls: the class of the watch (watchClass) at the moment the GuestStream reported its end (hres)
   type Gh = { fwdAfterEnd: bool, fwdOld: bool, unclassified: bool, rstOpen: Set[str], holderReadAfterAbort: bool,
-              trail: Set[str], faults: int, hobs: str, woken: bool, recPend: bool, vhTouched: bool, dropped: bool,
+              trail: Set[str], faults: int, hobs: str, woken: bool, vhTouched: bool, dropped: bool,
               hostDead: bool, hresCls: str }
   type St = { mode: str, vmUp: bool, ctx: str -> str, gen: str -> int, oldCtx: str -> str, pr: str -> Pair,
               dir: str -> Dir, vs: str -> Vs, ctl: str -> List[Set[str]], terr: str -> bool, ep: str -> str,
@@ -440,10 +400,10 @@ module fwd_pair {
   def setDg(t: St, d: str, x: Dg): St = { ...t, dg: t.dg.set(d, x) }
   // a packet from side s toward its peer
   // (CLEAN-FULL-END: this side's send-shut flag is set in the same step as the SHUTDOWN it sends — vsock_shutdown
-  // sets sk_shutdown before the packet leaves, af_vsock.c:1203, :1216, :1221 @ v7.0; lateSendShut: a later step)
+  // sets sk_shutdown before the packet leaves, af_vsock.c:1203, :1216, :1221 @ v7.0)
   def send(t: St, s: str, pkt: Set[str]): St =
     val v = t.vs.get(s)
-    val shutNow = pkt.contains("S") and not(BUG_LATE_SEND_SHUT and pkt == Set("S"))
+    val shutNow = pkt.contains("S")
     { ...t, ctl: t.ctl.set(outof(s), t.ctl.get(outof(s)).append(pkt)),
       vs: t.vs.set(s, { ...v, sent: v.sent.union(pkt), sshut: v.sshut or shutNow }) }
   // SHUT_RDWR / close of side s's vsock half: a {S, R} packet unless both flags were already sent
@@ -503,7 +463,7 @@ module fwd_pair {
     else abortSide(t, s, "PeerAbort", false)
 
   // ------------------------------------------------------------------ init
-  def dir0: Dir = { wr: 0, wfin: false, q0: List(), h0: List(), q1: List(), h1: List(), q2: List(),
+  def dir0: Dir = { wr: 0, wfin: false, q0: List(), q1: List(), q2: List(),
                     srcEnd: "none", srcShut: false, dstEnd: "none", dstShut: false,
                     got: List(), eof: false, rst: false, shutRd: false, loss: false, lost: 0 }
   def pair0: Pair = { ph: "unattached", rec: "none", out: "none", cause: "none", errno: "none", byRel: false,
@@ -525,7 +485,7 @@ module fwd_pair {
     ep' = SIDES.mapBy(s => "alive"),
     dg' = DIRS.mapBy(d => dg0),
     gh' = { fwdAfterEnd: false, fwdOld: false, unclassified: false, rstOpen: Set(), holderReadAfterAbort: false,
-            trail: Set(), faults: 0, hobs: "none", woken: false, recPend: false, vhTouched: false, dropped: false,
+            trail: Set(), faults: 0, hobs: "none", woken: false, vhTouched: false, dropped: false,
             hostDead: false, hresCls: "none" },
     tcpErr' = SIDES.mapBy(s => "0"),
     attRes' = SIDES.mapBy(s => if (m == "watch" and s == "h") "ok" else "none"),
@@ -551,27 +511,25 @@ module fwd_pair {
     else "est"
   // EVMOD-ATTACH-END: attach refuses a half that has ended — a pending sk_err on the TCP half (a reset) or on the
   // vsock half (the orphan sweep), or a vsock CLOSING; it accepts TCP ESTABLISHED and CLOSE_WAIT and a vsock
-  // ESTABLISHED half with any peer bits (establishedOnly: CLOSE_WAIT is refused too)
+  // ESTABLISHED half with any peer bits
   def halfEnded(t: St, s: str): bool = or {
-    tcpSt(t, s) == "ended", BUG_ESTABLISHED_ONLY and tcpSt(t, s) == "closeWait",
+    tcpSt(t, s) == "ended",
     t.vs.get(s).err, t.vs.get(s).st == "closing",
   }
   // HalfEnded: no pair is created and no record queued; the owner, in the same dispatch, ends the flow by its
   // pre-Paired close — the TCP half with SO_LINGER{1,0} (a reset toward its far end; endedAttachGracefulClose: a
   // graceful close, a FIN), the vsock half closed ({S, R}); the host also writes Abort { flow } while the session
-  // is live — and counts forwarder_attach_ended (endedAttachIgnored: the owner counts it and keeps the flow)
+  // is live — and counts forwarder_attach_ended
   def refuseEff(t: St, s: str): St =
     val t0 = { ...t, attRes: t.attRes.set(s, "halfEnded"), attEnded: t.attEnded.set(s, t.attEnded.get(s) + 1) }
-    if (BUG_ENDED_IGNORED) t0
-    else
-      val t1 = setPr(t0, s, { ...t0.pr.get(s), ph: "refused", out: "aborted", cause: "HalfEnded", byRel: true })
-      val hit = t1.mode != "dgram" and t1.ep.get(s) == "alive"
-      val t2 =
-        if (not(hit)) t1
-        else if (BUG_ENDED_GRACEFUL) setDir(t1, into(s), { ...t1.dir.get(into(s)), dstShut: true })
-        else setDir({ ...t1, ep: t1.ep.set(s, "reset") }, into(s), { ...t1.dir.get(into(s)), rst: true })
-      val t3 = shutAll(if (t2.mode == "dgram") t2 else cutBoth(t2), s)
-      if (s == "h" and t3.vmUp) { ...t3, guestAbortSent: true } else t3
+    val t1 = setPr(t0, s, { ...t0.pr.get(s), ph: "refused", out: "aborted", cause: "HalfEnded", byRel: true })
+    val hit = t1.mode != "dgram" and t1.ep.get(s) == "alive"
+    val t2 =
+      if (not(hit)) t1
+      else if (BUG_ENDED_GRACEFUL) setDir(t1, into(s), { ...t1.dir.get(into(s)), dstShut: true })
+      else setDir({ ...t1, ep: t1.ep.set(s, "reset") }, into(s), { ...t1.dir.get(into(s)), rst: true })
+    val t3 = shutAll(if (t2.mode == "dgram") t2 else cutBoth(t2), s)
+    if (s == "h" and t3.vmUp) { ...t3, guestAbortSent: true } else t3
   def attachEff(t: St, s: str, ps: Set[str]): St =
     if (halfEnded(t, s)) refuseEff(t, s)
     else
@@ -579,7 +537,6 @@ module fwd_pair {
     val t0 = setVs({ ...t, attRes: t.attRes.set(s, "ok") }, s, { ...v, att: if (v.ps == Set()) "noend" else "end" })
     val t1 = setPr(t0, s, { ...t0.pr.get(s), ph: "live", cgen: t0.gen.get(s) })
     if (ps == Set()) t1
-    else if (BUG_CLASSIFY_ACC or BUG_NO_SEED) t1
     else if (BUG_EOF_AS_FIN) (if (ps.contains("S")) markClean(noteCls(t1, s, "attach"), s) else t1)
     else if (ps.contains("R")) abortSide(noteCls(t1, s, "attach"), s, "PeerAbort", false)
     else markClean(noteCls(t1, s, "attach"), s)
@@ -613,14 +570,14 @@ module fwd_pair {
   }
   // the owner's abort (quiescence, teardown, control-session loss): Detached. On a watch (EVMOD-STREAM-ABORT) it is
   // one owner step: abort(watch) (record queued, V_h untouched), the stream marked ended by the owner, and
-  // Abort { flow } written while the session is live (noGuestAbort: not written)
+  // Abort { flow } written while the session is live
   def ownerAbort(t: St, s: str): St =
     val t1 = abortSide(fault(t), s, "Detached", false)
     if (not(watchSide(t, s))) t1
     else
       val touched = t1.vs.get("h") != t.vs.get("h") or t1.ctl.get("hg") != t.ctl.get("hg") or
                     t1.dir.get("gh").q1 != t.dir.get("gh").q1 or t1.dir.get("hg").q1 != t.dir.get("hg").q1
-      { ...t1, strmAbort: true, guestAbortSent: t1.vmUp and not(BUG_NO_GUEST_ABORT),
+      { ...t1, strmAbort: true, guestAbortSent: t1.vmUp,
         gh: { ...t1.gh, vhTouched: t1.gh.vhTouched or touched } }
   action Abort(s: str): bool = all {
     live(cur, s), sideUp(cur, s), canFault(cur),
@@ -643,14 +600,12 @@ module fwd_pair {
   // effect; its record stays queued in the released context and is never read).
   // U-R1: a held GuestStream whose watch already ended is ended as an owner abort (its dials entry leaves): the
   // stream is marked ended by the owner and Abort { flow } is written while the session is live; hres stays
-  // (recoveryKeepsEndedStream: the stream is left as it was)
   def recoveryClose(t: St): St =
     val p = t.pr.get("h")
     if (not(watchSide(t, "h")) and p.ph == "ended" and p.rec == "queued" and not(p.closed))
       shutAll(setPr(t, "h", { ...p, closed: true }), "h")
-    else if (watchSide(t, "h") and p.ph == "ended" and t.ep.get("h") == "alive" and not(t.strmAbort)
-             and not(BUG_RECOVERY_KEEPS_STREAM))
-      { ...t, strmAbort: true, guestAbortSent: t.vmUp and not(BUG_NO_GUEST_ABORT) }
+    else if (watchSide(t, "h") and p.ph == "ended" and t.ep.get("h") == "alive" and not(t.strmAbort))
+      { ...t, strmAbort: true, guestAbortSent: t.vmUp }
     else t
   action CtxRelease(s: str): bool = all {
     cur.ctx.get(s) == "open", sideUp(cur, s), canFault(cur),
@@ -661,11 +616,10 @@ module fwd_pair {
     commit(if (s == "h" and not(death)) recoveryClose(t2) else t2, variant("CtxRelease", { s: s })),
   }
   // the host's Forwarder recovery (EVMOD-CTL): after abort-all and the close of the old context, the owner opens
-  // and probes a new one; at most once per trace, never after the host owner's death (reopenBeforeRelease: while
-  // the old context is still open)
+  // and probes a new one; at most once per trace, never after the host owner's death
   action Reopen(s: str): bool = all {
     s == "h", cur.gen.get(s) == 0, not(cur.gh.hostDead),
-    cur.ctx.get(s) == "released" or (BUG_REOPEN_EARLY and cur.ctx.get(s) == "open"),
+    cur.ctx.get(s) == "released",
     commit({ ...cur, ctx: cur.ctx.set(s, "open"), oldCtx: cur.oldCtx.set(s, cur.ctx.get(s)), gen: cur.gen.set(s, 1) },
            variant("Reopen", { s: s })),
   }
@@ -703,15 +657,10 @@ module fwd_pair {
   // a run's send to the vsock fails once the peer shut its receive side (EPIPE)
   def sendErr(t: St, s: str): bool =
     t.mode != "dgram" and not(watchSide(t, s)) and t.vs.get(s).ps.contains("R") and
-    (t.dir.get(outof(s)).q0.length() > 0 or t.dir.get(outof(s)).h0.length() > 0)
+    t.dir.get(outof(s)).q0.length() > 0
   // A TCP half's reset is reported by its sk_error_report in the step that sets it (TcpRst, T-1), so no forwarder
-  // run finds it. tcpNoErrorReport: the error is seen only by a later recvmsg of that half (while the forwarder
-  // still reads it) or a sendmsg to it (a unit to send) — the spike's hazard 16. A UDP half's error (terr) is found
-  // by the next run.
-  def tcpErrSeen(t: St, s: str): bool =
-    BUG_NO_ERR_REPORT and t.mode != "dgram" and t.tcpErr.get(s) != "0" and
-    (t.dir.get(outof(s)).srcEnd == "none" or t.dir.get(into(s)).q1.length() > 0 or t.dir.get(into(s)).h1.length() > 0)
-  def errPending(t: St, s: str): bool = t.terr.get(s) or tcpErrSeen(t, s) or t.vs.get(s).err or sendErr(t, s)
+  // run finds it. A UDP half's error (terr) is found by the next run.
+  def errPending(t: St, s: str): bool = t.terr.get(s) or t.vs.get(s).err or sendErr(t, s)
   def fwdGhost(t: St, s: str): St =
     { ...t, gh: { ...t.gh, fwdAfterEnd: t.gh.fwdAfterEnd or not(pairCur(t, s)),
                   fwdOld: t.gh.fwdOld or t.pr.get(s).cgen != t.gen.get(s) } }
@@ -722,16 +671,13 @@ module fwd_pair {
     val x = t.dir.get(d)
     and {
       t.mode != "dgram", not(watchSide(t, s)), live(t, s), sideUp(t, s), not(errPending(t, s)),
-      not(x.srcShut), x.q0.length() > 0 or x.h0.length() > 0,
-      x.q1.length() < C or ((BUG_CONSUME_BEFORE_ACCEPT or BUG_CONSUME_ON_SHORT_SEND) and x.q0.length() > 0),
+      not(x.srcShut), x.q0.length() > 0,
+      x.q1.length() < C or (BUG_CONSUME_ON_SHORT_SEND and x.q0.length() > 0),
     }
   def hop0S(t: St, d: str): St =
     val x = t.dir.get(d)
     val x2 =
-      if (x.q1.length() < C)
-        (if (x.h0.length() > 0) { ...x, h0: x.h0.tail(), q1: x.q1.append(x.h0.head()) }
-         else { ...x, q0: x.q0.tail(), q1: x.q1.append(x.q0.head()) })
-      else if (BUG_CONSUME_BEFORE_ACCEPT) { ...x, q0: x.q0.tail(), h0: x.h0.append(x.q0.head()) }
+      if (x.q1.length() < C) { ...x, q0: x.q0.tail(), q1: x.q1.append(x.q0.head()) }
       else { ...x, q0: x.q0.tail(), lost: x.lost + 1 }
     fwdGhost(setDir(t, d, x2), srcOf(d))
   // datagram: the source side's run sends the next item of the head datagram's frame; the datagram is consumed
@@ -763,16 +709,13 @@ module fwd_pair {
     val x = t.dir.get(d)
     and {
       t.mode != "dgram", not(watchSide(t, s)), live(t, s), sideUp(t, s), not(errPending(t, s)),
-      not(x.dstShut), x.q1.length() > 0 or x.h1.length() > 0,
-      x.q2.length() < W or ALT_SOCKMAP or ((BUG_CONSUME_BEFORE_ACCEPT or BUG_CONSUME_ON_SHORT_SEND) and x.q1.length() > 0),
+      not(x.dstShut), x.q1.length() > 0,
+      x.q2.length() < W or (BUG_CONSUME_ON_SHORT_SEND and x.q1.length() > 0),
     }
   def hop1S(t: St, d: str): St =
     val x = t.dir.get(d)
     val x2 =
-      if (x.q2.length() < W or ALT_SOCKMAP)
-        (if (x.h1.length() > 0) { ...x, h1: x.h1.tail(), q2: x.q2.append(x.h1.head()) }
-         else { ...x, q1: x.q1.tail(), q2: x.q2.append(x.q1.head()) })
-      else if (BUG_CONSUME_BEFORE_ACCEPT) { ...x, q1: x.q1.tail(), h1: x.h1.append(x.q1.head()) }
+      if (x.q2.length() < W) { ...x, q1: x.q1.tail(), q2: x.q2.append(x.q1.head()) }
       else { ...x, q1: x.q1.tail(), lost: x.lost + 1 }
     fwdGhost(setDir(t, d, x2), dstOf(d))
   // datagram: the target side's run takes the whole frame at the head of the vsock (a bad header aborts the pair,
@@ -785,16 +728,16 @@ module fwd_pair {
     val x = t.dir.get(d)
     x.q1.length() > 0 and x.q1.head() % 10 == 0 and not(frameReady(t, d))
   // EV-DGRAM D1: the vsock peer has ended its direction (peer_shutdown & SEND_SHUTDOWN, read before the queued-byte
-  // count) while the head frame is incomplete: the run aborts FrameInvalid (truncatedFrameWaits: it waits)
+  // count) while the head frame is incomplete: the run aborts FrameInvalid
   def truncAtEnd(t: St, d: str): bool =
-    not(BUG_TRUNC_WAITS) and headPartial(t, d) and t.vs.get(dstOf(d)).ps.contains("S")
+    headPartial(t, d) and t.vs.get(dstOf(d)).ps.contains("S")
   def canHop1D(t: St, d: str): bool =
     val s = dstOf(d)
     and {
       t.mode == "dgram", live(t, s), sideUp(t, s), not(errPending(t, s)),
       or {
         truncAtEnd(t, d),
-        frameReady(t, d) and (not(t.dg.get(d).blk) or BUG_DROP_WHEN_BLOCKED or t.dir.get(d).q1.head() % 10 != 0),
+        frameReady(t, d) and (not(t.dg.get(d).blk) or t.dir.get(d).q1.head() % 10 != 0),
       },
     }
   def hop1D(t: St, d: str): St =
@@ -826,7 +769,7 @@ module fwd_pair {
     val x = t.dir.get(d)
     and {
       t.mode != "dgram", not(watchSide(t, s)), live(t, s), sideUp(t, s), not(errPending(t, s)),
-      x.wfin, x.q0.length() == 0, x.h0.length() == 0, x.srcEnd == "none",
+      x.wfin, x.q0.length() == 0, x.srcEnd == "none",
     }
   action HopEnd0(d: str): bool = all {
     canHopEnd0(cur, d),
@@ -835,14 +778,13 @@ module fwd_pair {
     commit(completeIfDone(t1, s), variant("HopEnd0", { d: d })),
   }
   // the vsock source's end, classified clean in the callback, is read once its queue is empty and forwarded as a
-  // FIN on the TCP target (classifyAccumulated: the class is computed here from the accumulated flags)
+  // FIN on the TCP target
   def canHopEnd1(t: St, d: str): bool =
     val s = dstOf(d)
     val x = t.dir.get(d)
     and {
       t.mode != "dgram", not(watchSide(t, s)), live(t, s), sideUp(t, s), not(errPending(t, s)),
-      x.q1.length() == 0, x.h1.length() == 0, x.dstEnd == "none",
-      t.vs.get(s).cls == "clean" or (BUG_CLASSIFY_ACC and t.vs.get(s).ps.contains("S")),
+      x.q1.length() == 0, x.dstEnd == "none", t.vs.get(s).cls == "clean",
     }
   action HopEnd1(d: str): bool = all {
     canHopEnd1(cur, d),
@@ -853,24 +795,19 @@ module fwd_pair {
     commit(completeIfDone(t2, s), variant("HopEnd1", { d: d })),
   }
   // a vsock end-of-stream whose class was recorded neither at attach nor by a callback: a broken invariant the
-  // attach order does not allow; the forwarder aborts the pair and counts unclassified_eof (unclassifiedAsFin:
-  // it is forwarded as a FIN instead)
+  // attach order does not allow; the forwarder aborts the pair and counts unclassified_eof
   def canUnclassifiedEof(t: St, d: str): bool =
     val s = dstOf(d)
     val x = t.dir.get(d)
     and {
-      t.mode != "dgram", not(watchSide(t, s)), live(t, s), sideUp(t, s), not(errPending(t, s)), not(BUG_CLASSIFY_ACC),
-      x.q1.length() == 0, x.h1.length() == 0, x.dstEnd == "none", t.vs.get(s).ps.contains("S"), t.vs.get(s).cls == "none",
+      t.mode != "dgram", not(watchSide(t, s)), live(t, s), sideUp(t, s), not(errPending(t, s)),
+      x.q1.length() == 0, x.dstEnd == "none", t.vs.get(s).ps.contains("S"), t.vs.get(s).cls == "none",
     }
   action UnclassifiedEof(d: str): bool = all {
     canUnclassifiedEof(cur, d),
     val s = dstOf(d)
     val t0 = noteCls({ ...cur, gh: { ...cur.gh, unclassified: true } }, s, "eof")
-    val t1 =
-      if (BUG_UNCLASSIFIED_FIN)
-        val u1 = setVs(t0, s, { ...t0.vs.get(s), cls: "clean", ucls: "clean" })
-        completeIfDone(setDir(u1, d, { ...u1.dir.get(d), dstEnd: "clean", dstShut: true }), s)
-      else abortSide(setVs(t0, s, { ...t0.vs.get(s), ucls: "abort" }), s, "Unclassified", false)
+    val t1 = abortSide(setVs(t0, s, { ...t0.vs.get(s), ucls: "abort" }), s, "Unclassified", false)
     commit(t1, variant("UnclassifiedEof", { d: d })),
   }
 
@@ -886,14 +823,13 @@ module fwd_pair {
     val trueSends = if (watchSide(t, s)) not(t.dir.get("hg").wfin) else not(v.sent.contains("S"))
     val c = classify(nw, v.ps, sends)
     // vsSt: the packet that leaves peer_shutdown == SHUTDOWN_MASK with the receive queue empty sets CLOSING
-    val closing = v.ps.union(pkt) == both and t.dir.get(d).q1.length() == 0 and t.dir.get(d).h1.length() == 0
+    val closing = v.ps.union(pkt) == both and t.dir.get(d).q1.length() == 0
     val v1 = { ...v, ps: v.ps.union(pkt), tcls: if (nw.contains("S") and v.tcls == "none") c else v.tcls,
                misc: v.misc or (live(t, s) and c != classify(nw, v.ps, trueSends)),
                st: if (closing) "closing" else v.st }
     val t1 = setVs({ ...t, ctl: t.ctl.set(d, t.ctl.get(d).tail()) }, s, v1)
     val r =
       if (not(live(t, s))) t1                      // unattached: recorded (F9); ended: ignored (END-IDEMPOTENT)
-      else if (BUG_CLASSIFY_ACC) t1
       else if (BUG_EOF_AS_FIN) (if (nw.contains("S")) markClean(noteCls(t1, s, "callback"), s) else t1)
       else if (c == "clean") markClean(noteCls(t1, s, "callback"), s)
       else if (c == "abort") peerAbort(withUcls(if (nw.contains("S")) noteCls(t1, s, "callback") else t1, s, nw), s)
@@ -907,28 +843,14 @@ module fwd_pair {
   }
   // a run (or sk_error_report) finds a socket error: SocketError (a watch records it)
   // On a watch this is its sk_error_report: the record is queued and then the original callback wakes the holder
-  // (originalBeforeRecord: the holder is woken now and the record queued by a later WatchRecord)
-  def canFwdErr(t: St, s: str): bool = live(t, s) and sideUp(t, s) and errPending(t, s) and not(t.gh.recPend)
+  def canFwdErr(t: St, s: str): bool = live(t, s) and sideUp(t, s) and errPending(t, s)
   def watchErr(t: St, s: str): St =
-    if (BUG_ORIG_BEFORE_REC) { ...t, gh: { ...t.gh, woken: true, recPend: true } }
-    else val t1 = setPr(t, s, ended(t.pr.get(s), "aborted", "SocketError", false))
-         { ...t1, gh: { ...t1.gh, woken: true } }
+    val t1 = setPr(t, s, ended(t.pr.get(s), "aborted", "SocketError", false))
+    { ...t1, gh: { ...t1.gh, woken: true } }
   action FwdErr(s: str): bool = all {
     canFwdErr(cur, s),
     val t1 = abortSide(cur, s, "SocketError", false)
-    val t2 = if (tcpErrSeen(cur, s)) setPr(t1, s, { ...t1.pr.get(s), errno: cur.tcpErr.get(s) }) else t1
-    commit(if (watchSide(cur, s)) watchErr(cur, s) else t2, variant("FwdErr", { s: s })),
-  }
-  // originalBeforeRecord: the record the woken holder should have found, queued after the wakeup
-  action WatchRecord(s: str): bool = all {
-    BUG_ORIG_BEFORE_REC, watchSide(cur, s), cur.gh.recPend, live(cur, s),
-    val t1 = setPr(cur, s, ended(cur.pr.get(s), "aborted", "SocketError", false))
-    commit({ ...t1, gh: { ...t1.gh, recPend: false } }, variant("WatchRecord", { s: s })),
-  }
-  // lateSendShut: the send-shut flag of a SHUTDOWN already sent is set now
-  action SendShutLate(s: str): bool = all {
-    BUG_LATE_SEND_SHUT, cur.vs.get(s).sent.contains("S"), not(cur.vs.get(s).sshut),
-    commit(setVs(cur, s, { ...cur.vs.get(s), sshut: true }), variant("SendShutLate", { s: s })),
+    commit(if (watchSide(cur, s)) watchErr(cur, s) else t1, variant("FwdErr", { s: s })),
   }
 
   // ------------------------------------------------------------------ environment: writers, readers, resets
@@ -1009,15 +931,12 @@ module fwd_pair {
   // its abort (strmAbort) or its context's release — → OwnerAbort (Err(ConnectionAborted)); (2) the watch's record —
   // HalfClose → HalfClose (Ok(0)), Aborted → GuestAbort (Err(ConnectionReset)); (3) otherwise the record is in flight
   // (only the orphan sweep's end is readable before its callback) and the stream waits. holderTrustsRead: from the
-  // holder's read of V_h (Eof → HalfClose); noRecordIsClean: (3) is a clean end; classifyAccumulated: from the
-  // accumulated flags.
+  // holder's read of V_h (Eof → HalfClose).
   def watchOutcome(t: St): str =
     val p = t.pr.get("h")
     if (BUG_HOLDER_TRUSTS_READ) (if (t.gh.hobs == "eof") "HalfClose" else "GuestAbort")
-    else if (BUG_CLASSIFY_ACC and p.ph == "live" and t.vs.get("h").ps.contains("S")) "HalfClose"
     else if (t.strmAbort or (p.ph == "ended" and p.byRel)) "OwnerAbort"
     else if (p.ph == "ended" and p.rec.in(Set("queued", "read"))) (if (p.out == "halfclose") "HalfClose" else "GuestAbort")
-    else if (BUG_NO_RECORD_CLEAN) "HalfClose"
     else "wait"
   // the reader reaches the end of the stream: end-of-stream after a FIN; the dialer's GuestStream reports the
   // resolved end — at once once the owner ended the stream, else of what its holder observed
@@ -1050,8 +969,6 @@ module fwd_pair {
   // the forwarder has not sent its own; tcp_reset, net/ipv4/tcp_input.c:4918-4930 @ v7.0), and its sk_error_report
   // runs in the same step: a live pair aborts SocketError { side, errno } (a live pair always has a direction open;
   // once both ended the pair is complete and the report is ignored). An unattached half is refused at attach (T-4).
-  // tcpNoErrorReport: no report (a later recvmsg / sendmsg finds the error); tcpEofIsClean: the report is ignored once
-  // the half read end-of-stream.
   action TcpRst(s: str, after_fin: bool): bool = all {
     cur.mode != "dgram", not(watchSide(cur, s)), cur.ep.get(s) == "alive", sideUp(cur, s), canFault(cur),
     after_fin == cur.dir.get(outof(s)).wfin,
@@ -1059,9 +976,8 @@ module fwd_pair {
     val open = cur.pr.get(s).ph.in(Set("unattached", "attaching", "live"))
     val t1 = fault(cutBoth({ ...cur, ep: cur.ep.set(s, "dead"), tcpErr: cur.tcpErr.set(s, e) }))
     val t2 = { ...t1, gh: { ...t1.gh, rstOpen: if (open) t1.gh.rstOpen.union(Set(s)) else t1.gh.rstOpen } }
-    val ignore = BUG_NO_ERR_REPORT or (BUG_TCP_EOF_CLEAN and cur.dir.get(outof(s)).srcEnd == "clean")
     val t3 =
-      if (live(t2, s) and not(ignore))
+      if (live(t2, s))
         val a = abortSide(t2, s, "SocketError", false)
         setPr(a, s, { ...a.pr.get(s), errno: e })
       else t2
@@ -1149,31 +1065,31 @@ module fwd_pair {
       Write(d), Fin(d), Read(d), ReadEof(d), ShutRd(d), TcpRst(s, cur.dir.get(outof(s)).wfin), HolderDrop, VmmExit,
       TrailingRst(s), GuestAbort(s),
       SendDg(d, sz), DRead(d), UdpBlock(d), UdpUnblock(d), UdpErr(s),
-      HolderEnd(k), WatchRecord(s), SendShutLate(s), DgHalfClose(s),
+      HolderEnd(k), DgHalfClose(s),
     }
   }
 
   // ------------------------------------------------------------------ invariants (stream and watch)
   def inflight(d: str): int =
     val x = dir.get(d)
-    x.q0.length() + x.h0.length() + x.q1.length() + x.h1.length() + x.q2.length()
+    x.q0.length() + x.q1.length() + x.q2.length()
   // each reader's units are exactly 1..k of its writer's: no loss, duplicate or reorder
   val DeliveredIsInOrderPrefix: bool = DIRS.forall(d => dir.get(d).got == range(1, dir.get(d).got.length() + 1))
-  // every unit written is in a queue, in forwarder memory or read
+  // every unit written is in a queue or read
   val UnitsConserved: bool = DIRS.forall(d => dir.get(d).wr == inflight(d) + dir.get(d).got.length())
   // no unit is off its source and not accepted by its target, outside one run
   val ConsumeOnlyAfterAccept: bool =
-    DIRS.forall(d => dir.get(d).h0.length() == 0 and dir.get(d).h1.length() == 0 and dir.get(d).lost == 0)
+    DIRS.forall(d => dir.get(d).lost == 0)
   // every queue within its window or credit; nothing else holds units
   val QueuesWithinBounds: bool = DIRS.forall(d => and {
     dir.get(d).q0.length() <= W, dir.get(d).q1.length() <= (if (mode == "dgram") CD else C),
-    dir.get(d).q2.length() <= W, dir.get(d).h0.length() == 0, dir.get(d).h1.length() == 0,
+    dir.get(d).q2.length() <= W,
     dg.get(d).dq0.length() <= WU, dg.get(d).dq2.length() <= WU,
   })
   // a target is shut only after its source's clean end and the acceptance of its last unit (ADR-0183)
   val NoEarlyShutdown: bool = DIRS.forall(d => and {
-    dir.get(d).srcShut implies (dir.get(d).srcEnd == "clean" and dir.get(d).q0.length() == 0 and dir.get(d).h0.length() == 0),
-    dir.get(d).dstShut implies (dir.get(d).dstEnd == "clean" and dir.get(d).q1.length() == 0 and dir.get(d).h1.length() == 0),
+    dir.get(d).srcShut implies (dir.get(d).srcEnd == "clean" and dir.get(d).q0.length() == 0),
+    dir.get(d).dstShut implies (dir.get(d).dstEnd == "clean" and dir.get(d).q1.length() == 0),
   })
   // a reader sees end-of-stream only after its writer ended cleanly and every unit was delivered (R2-END)
   val AbortNeverCleanEof: bool =
@@ -1308,6 +1224,9 @@ module fwd_pair {
     OneContextPerOwner, AttachTimeEndClassifiedOnce, IncompleteFrameAtEndAborts, AbortOnlyAfterFault,
     RefusedAttachLeavesNoPair, OwnShutBeforeShutdownSent, CtxGoneIffVmDown,
   }
+  // the instance "mid" carries stream and datagram mode in one search: the trace's mode picks its property set (the
+  // stream invariants count units in q1; in datagram mode q1 holds frame items)
+  val MidSafety: bool = if (mode == "dgram") DgramSafety else Safety
 
   // ------------------------------------------------------------------ liveness (TLC, instance "live")
   // Weak fairness of the system: the owners' attach and record reads, every forwarder run and callback, and the
@@ -1745,36 +1664,16 @@ module fwd_pair {
     .expect(DgramSafety and pr.get("h").out == "aborted" and pr.get("h").cause == "FrameInvalid"
             and pr.get("h").rec == "queued" and ctl.get("hg") == [both] and dg.get("gh").got == [])
 
-  // ------------------------------------------------------------------ non-vacuity witnesses (expected violated)
-  val WitnessNoCompletion: bool = not(SIDES.exists(s => pr.get(s).out == "completed"))
-  val WitnessNoPeerAbort: bool = not(SIDES.exists(s => pr.get(s).cause == "PeerAbort"))
-  val WitnessNoBlockedWriter: bool = not(DIRS.exists(d => dir.get(d).shutRd and inflight(d) == 3))
-  val WitnessNoCleanFullEnd: bool = not(SIDES.exists(s => live(cur, s) and vs.get(s).ps == both and vs.get(s).cls == "clean"))
+  // non-vacuity witness kept: no named run ends a watch in a half-close (violated: the end is reachable)
   val WitnessNoWatchHalfClose: bool = not(pr.get("h").out == "halfclose")
-  val WitnessNoEmptyDatagram: bool = not(DIRS.exists(d => dg.get(d).got.indices().exists(i => dg.get(d).got[i].length() == 1)))
-  val WitnessNoSourceDrop: bool = DIRS.forall(d => dg.get(d).sdrop == Set())
-  val WitnessNoAttachTimeEnd: bool = not(SIDES.exists(s => vs.get(s).att == "end"))
-  val WitnessNoRecovery: bool = SIDES.forall(s => gen.get(s) == 0)
   // the VMM exits (the true side of CtxGoneIffVmDown is reached)
   val WitnessNoVmmExit: bool = vmUp
-  // the holder observes the end of V_h while the watch is still live (the orphan sweep's record in flight)
-  val WitnessNoEndBeforeRecord: bool = not(mode == "watch" and gh.hobs != "none" and pr.get("h").ph == "live")
-  // the holder's read fails (Err) and its GuestStream reports the watch's end
-  val WitnessNoHolderErrReported: bool = not(gh.hobs == "err" and hres != "none")
-  // an attach is refused HalfEnded
-  val WitnessNoRefusal: bool = SIDES.forall(s => attRes.get(s) != "halfEnded")
-  // a TCP reset's record carries EPIPE
-  val WitnessNoEpipe: bool = SIDES.forall(s => pr.get(s).errno != "EPIPE")
-  // the guest owner takes Abort { flow } after the owner's abort of a watched stream
-  val WitnessNoGuestAbortAfterStreamAbort: bool = not(strmAbort and pr.get("g").cause == "Detached")
-  // a pair aborts FrameInvalid at its peer's end
-  val WitnessNoTruncatedEnd: bool = not(SIDES.exists(s => pr.get(s).cause == "FrameInvalid"))
 }
 
 // ------------------------------------------------------------------ design instances
-// stream mode: 3 units gh, 1 hg, one fault per trace
+// stream mode: 1 unit gh, 1 hg, one fault per trace
 module pair_ok { import fwd_pair(OFF = Set(), CFG = "ok", REC = false).* from "./fwd_pair" }
-// watch mode (a dial): 2 units gh, 1 hg, one fault per trace
+// watch mode (a dial): 1 unit gh, 1 hg, one fault per trace
 module pair_watch { import fwd_pair(OFF = Set(), CFG = "watch", REC = false).* from "./fwd_pair" }
 // stream mode for the liveness checks: 1 unit each way, one fault per trace (TLC's liveness mode evaluates the
 // fairness action's enabledness per state, which makes a larger instance take hours)
@@ -1784,10 +1683,13 @@ module pair_stall { import fwd_pair(OFF = Set(), CFG = "stall", REC = false).* f
 // watch mode for the liveness checks of WATCH-ABORT and the holder's drop (T-5, T-6): 1 unit gh, none hg, one fault per
 // trace
 module pair_wlive { import fwd_pair(OFF = Set(), CFG = "wlive", REC = false).* from "./fwd_pair" }
-// datagram mode: 3 datagrams gh, none hg, one fault per trace
+// datagram mode: 1 datagram gh, 1 hg, one fault per trace
 module pair_dgram { import fwd_pair(OFF = Set(), CFG = "dgram", REC = false).* from "./fwd_pair" }
 // datagram mode for the liveness check of EV-DGRAM D1: 1 datagram gh, none hg, one fault per trace, no send-buffer
 // toggles
 module pair_dlive { import fwd_pair(OFF = Set(), CFG = "dlive", REC = false).* from "./fwd_pair" }
+// stream and datagram mode, 2 units / 2 datagrams gh and none hg, one fault per trace: the multi-unit and multi-datagram
+// instance (a reset, an exit or a send block while the second unit or datagram is queued or mid-frame)
+module pair_mid { import fwd_pair(OFF = Set(), CFG = "mid", REC = false).* from "./fwd_pair" }
 // conformance main (D-UP-1): every mode, recording `conf_step`; only the named runs are checked on it
 module pair_conf { import fwd_pair(OFF = Set(), CFG = "conf", REC = true).* from "./fwd_pair" }

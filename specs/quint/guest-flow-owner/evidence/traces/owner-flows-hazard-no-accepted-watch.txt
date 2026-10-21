@@ -1,4 +1,4 @@
-# owner-flows-hazard-no-accepted-watch: counterexample, 11 state(s) (from the TLC trace)
+# owner-flows-hazard-no-accepted-watch: counterexample, 13 state(s) (from the TLC trace)
 
 State 1
   act = "none"
@@ -27,7 +27,7 @@ State 1
   gen = 0
   vmUp = FALSE
   toHostPaired = {}
-  flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE], [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
+  flows = <<[st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE]>>
   readyCross = FALSE
   drvLive = FALSE
   vmGen = 0
@@ -36,41 +36,47 @@ State 2 [Provision]
   alloc = "Provisioned"
   gen = 1
 
-State 3 [VmStart]
+State 3 [Teardown]
+  alloc = "Retiring"
+
+State 4 [Release]
+  alloc = "Absent"
+
+State 5 [Provision]
+  alloc = "Provisioned"
+  gen = 2
+
+State 6 [VmStart]
   vmUp = TRUE
-  vmGen = 1
-
-State 4 [step]
-  gSess = 1
-  sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
-
-State 5 [step]
-  sess = <<[st |-> "pending", gen |-> 1], [st |-> "pending", gen |-> 1]>>
-
-State 6 [step]
-  sess = <<[st |-> "pending", gen |-> 1], [st |-> "reading", gen |-> 1]>>
+  vmGen = 2
 
 State 7 [step]
-  sess = <<[st |-> "pending", gen |-> 1], [st |-> "live", gen |-> 1]>>
+  gSess = 2
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 2]>>
+
+State 8 [step]
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "reading", gen |-> 2]>>
+
+State 9 [step]
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "live", gen |-> 2]>>
   claim = 2
 
-State 8 [Activate]
+State 10 [Activate]
   act = "Activated"
   alloc = "Active"
 
-State 9 [step]
+State 11 [step]
   act = "none"
   dl = [ res |-> <<"pending">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
-  hf = <<[st |-> "req", gen |-> 1]>>
+  hf = <<[st |-> "req", gen |-> 2]>>
 
-State 10 [Teardown]
-  alloc = "Retiring"
-  dl = [ res |-> <<"NotServing">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
-  sess = <<[st |-> "pending", gen |-> 1], [st |-> "closed", gen |-> 1]>>
+State 12 [step]
+  dl = [ res |-> <<"NoSession">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "closed", gen |-> 2]>>
   claim = 0
-  hf = <<[st |-> "closed", gen |-> 1]>>
+  hf = <<[st |-> "closed", gen |-> 2]>>
 
-State 11 [step]
-  gf = <<[st |-> "acc", gen |-> 1, c |-> 0]>>
+State 13 [step]
+  gf = <<[st |-> "acc", gen |-> 2, c |-> 0]>>
 
--> stutters forever in State 11
+-> stutters forever in State 13

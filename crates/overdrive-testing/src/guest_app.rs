@@ -70,6 +70,17 @@ pub mod subcommand {
     pub const UDP_CHURN: &str = "udp-churn";
     /// `idle`: sleeps forever (a VM that only needs to be running).
     pub const IDLE: &str = "idle";
+    /// `listen <port> <tag>`: the server side of a Service VM (U-D17-DIAL).
+    /// Listens on TCP `0.0.0.0:<port>` and accepts connections until killed.
+    /// Each connection is served on its own thread: when its first line is a
+    /// [`super::hold_hello`], the program answers with the hello's
+    /// [`super::Direction::PeerToGuest`] stream and verifies the client's
+    /// [`super::Direction::GuestToPeer`] stream (the `hold` protocol, so a
+    /// `hold` workload can be its client); any other connection (a probe that
+    /// connects and drops) is only read. Every connection ends with one
+    /// [`super::LISTEN_CONN_TERMINAL_PREFIX`] line naming its read side's
+    /// first terminal event. It never exits.
+    pub const LISTEN: &str = "listen";
     /// `run-with-modules <module.ko>... -- <program> <args>...`: loads each
     /// module with `finit_module` (already loaded is success), then execs
     /// the program. The in-guest test lane's launcher (`guest_lane`).
@@ -119,6 +130,12 @@ pub const FLOWING_LINE: &str = "hold: flowing";
 pub const TERMINAL_LINE_PREFIX: &str = "observer guest-app: terminal=";
 /// Prefix of `flood`'s periodic report, followed by the decimal byte count.
 pub const FLOOD_WRITTEN_PREFIX: &str = "flood: written=";
+/// Printed by `listen` once its listener is bound, followed by the port.
+pub const LISTENING_PREFIX: &str = "listen: listening port=";
+/// Prefix of the line `listen` prints when one connection's read side ends:
+/// `listen: conn=<n> hello=<yes|no> terminal=<event>`, `n` counting accepts
+/// from 1, the event rendered by [`TerminalEvent`]'s `Display`.
+pub const LISTEN_CONN_TERMINAL_PREFIX: &str = "listen: conn=";
 
 /// The TCP port and the UDP port every [`RemotePeer`] serves.
 pub const PEER_TCP_PORT: u16 = 7000;
@@ -331,6 +348,69 @@ pub fn terminal_event_in_console(console: &str) -> Option<TerminalEvent> {
         line.find(TERMINAL_LINE_PREFIX)
             .and_then(|at| line[at + TERMINAL_LINE_PREFIX.len()..].trim().parse().ok())
     })
+}
+
+/// One connection `listen` served, as its console line reports it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ListenConnEnd {
+    /// The connection's accept ordinal, from 1.
+    pub conn: u64,
+    /// Its first line was a [`hold_hello`].
+    pub hello: bool,
+    /// Its read side's first terminal event.
+    pub terminal: TerminalEvent,
+}
+
+impl fmt::Display for ListenConnEnd {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{LISTEN_CONN_TERMINAL_PREFIX}{} hello={} terminal={}",
+            self.conn,
+            if self.hello { "yes" } else { "no" },
+            self.terminal
+        )
+    }
+}
+
+impl FromStr for ListenConnEnd {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let rest = s
+            .strip_prefix(LISTEN_CONN_TERMINAL_PREFIX)
+            .ok_or_else(|| format!("not a listen connection line: {s:?}"))?;
+        let mut words = rest.split(' ');
+        let conn = words
+            .next()
+            .and_then(|n| n.parse().ok())
+            .ok_or_else(|| format!("no connection ordinal in {s:?}"))?;
+        let hello = match words.next() {
+            Some("hello=yes") => true,
+            Some("hello=no") => false,
+            _ => return Err(format!("no hello field in {s:?}")),
+        };
+        let terminal = words
+            .next()
+            .and_then(|w| w.strip_prefix("terminal="))
+            .ok_or_else(|| format!("no terminal field in {s:?}"))?
+            .parse()?;
+        if words.next().is_some() {
+            return Err(format!("trailing fields in {s:?}"));
+        }
+        Ok(Self { conn, hello, terminal })
+    }
+}
+
+/// Every connection end a `listen` console log reports, in order.
+#[must_use]
+pub fn listen_conn_ends_in_console(console: &str) -> Vec<ListenConnEnd> {
+    console
+        .lines()
+        .filter_map(|line| {
+            line.find(LISTEN_CONN_TERMINAL_PREFIX).and_then(|at| line[at..].trim().parse().ok())
+        })
+        .collect()
 }
 
 /// Every `flood` written count a console log reports, in order.
@@ -902,6 +982,30 @@ mod tests {
         assert_eq!(terminal_event_in_console("nothing here"), None);
         let reports = format!("{FLOOD_WRITTEN_PREFIX}10\nx\n{FLOOD_WRITTEN_PREFIX}20\n");
         assert_eq!(flood_written_in_console(&reports), vec![10, 20]);
+    }
+
+    #[test]
+    fn listen_connection_ends_round_trip_through_the_console_line() {
+        let ends = [
+            ListenConnEnd { conn: 1, hello: false, terminal: TerminalEvent::Reset },
+            ListenConnEnd { conn: 2, hello: true, terminal: TerminalEvent::Eof },
+            ListenConnEnd { conn: 30, hello: false, terminal: TerminalEvent::Error(32) },
+        ];
+        let mut console = String::new();
+        for e in &ends {
+            console.push_str("[ 2.0] ");
+            console.push_str(&e.to_string());
+            console.push_str("\nunrelated line\n");
+        }
+        assert_eq!(listen_conn_ends_in_console(&console), ends.to_vec());
+        for bad in [
+            "listen: conn=x hello=no terminal=eof",
+            "listen: conn=1 hello=maybe terminal=eof",
+            "listen: conn=1 hello=no",
+            "listen: conn=1 hello=no terminal=eof extra",
+        ] {
+            assert!(bad.parse::<ListenConnEnd>().is_err(), "{bad:?}");
+        }
     }
 
     #[test]
