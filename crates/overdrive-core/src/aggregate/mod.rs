@@ -405,15 +405,13 @@ impl ServiceV1 {
     ///   onto [`AggregateError::Validation`]).
     /// * No two listeners share `(port, protocol)`.
     /// * `port != 0` per listener.
+    /// * The guest-reserved intake range is unavailable to listeners.
     /// * `protocol` parses to `Proto` (case-insensitive `tcp` / `udp`).
+    /// * The combined startup, readiness and liveness probe count does not
+    ///   exceed `GUEST_PROBE_SLOTS`.
     pub fn from_submit(
         input: crate::api::submit::ServiceSpecInput,
     ) -> Result<Self, AggregateError> {
-        use std::collections::BTreeSet;
-        use std::num::NonZeroU16;
-
-        use crate::dataplane::backend_key::Proto;
-
         let crate::api::submit::ServiceSpecInput {
             id,
             replicas,
@@ -440,50 +438,13 @@ impl ServiceV1 {
 
         let driver = validate_driver_input(driver)?;
 
-        // Listener validation.
-        if listeners.is_empty() {
-            return Err(AggregateError::Validation {
-                field: "listeners",
-                message: "a service requires at least one listener".to_string(),
-            });
-        }
-        let mut seen: BTreeSet<(u16, &'static str)> = BTreeSet::new();
-        let mut validated: Vec<Listener> = Vec::with_capacity(listeners.len());
-        for listener in listeners {
-            let port =
-                NonZeroU16::new(listener.port).ok_or_else(|| AggregateError::Validation {
-                    field: "listeners[].port",
-                    message: "listener port must be in 1..=65535".to_string(),
-                })?;
-            let protocol = match listener.protocol.to_ascii_lowercase().as_str() {
-                "tcp" => Proto::Tcp,
-                "udp" => Proto::Udp,
-                other => {
-                    return Err(AggregateError::Validation {
-                        field: "listeners[].protocol",
-                        message: format!(
-                            "unsupported listener protocol {other:?} (supported protocols: tcp, udp)"
-                        ),
-                    });
-                }
-            };
-            let key = (port.get(), protocol.as_str());
-            if !seen.insert(key) {
-                return Err(AggregateError::Validation {
-                    field: "listeners",
-                    message: format!(
-                        "duplicate listener (port={}, protocol={})",
-                        port.get(),
-                        protocol.as_str()
-                    ),
-                });
-            }
-            validated.push(Listener { port, protocol });
-        }
+        let validated = validate_service_listeners(listeners)?;
 
         validate_probe_mechanics(&startup_probes, "startup_probes")?;
         validate_probe_mechanics(&readiness_probes, "readiness_probes")?;
         validate_probe_mechanics(&liveness_probes, "liveness_probes")?;
+
+        validate_guest_probe_count(&startup_probes, &readiness_probes, &liveness_probes)?;
 
         // ADR-0080 § D1 — this is the SECOND ingress (the API/wire
         // path; the TOML parser is the first). `ProbeDescriptor.idx`
@@ -512,6 +473,84 @@ impl ServiceV1 {
             liveness_probes,
         })
     }
+}
+
+fn validate_service_listeners(
+    listeners: Vec<crate::api::submit::ListenerInput>,
+) -> Result<Vec<Listener>, AggregateError> {
+    use std::collections::BTreeSet;
+    use std::num::NonZeroU16;
+
+    use crate::dataplane::backend_key::Proto;
+    use crate::guest_transport::guest_reserved_ports;
+
+    if listeners.is_empty() {
+        return Err(AggregateError::Validation {
+            field: "listeners",
+            message: "a service requires at least one listener".to_string(),
+        });
+    }
+    let mut seen: BTreeSet<(u16, &'static str)> = BTreeSet::new();
+    let mut validated = Vec::with_capacity(listeners.len());
+    for listener in listeners {
+        let port = NonZeroU16::new(listener.port).ok_or_else(|| AggregateError::Validation {
+            field: "listeners[].port",
+            message: "listener port must be in 1..=65535".to_string(),
+        })?;
+        let reserved = guest_reserved_ports();
+        if reserved.contains(&port.get()) {
+            return Err(AggregateError::Validation {
+                field: "listeners[].port",
+                message: ParseError::ListenerPortReserved {
+                    port: port.get(),
+                    first: *reserved.start(),
+                    last: *reserved.end(),
+                }
+                .to_string(),
+            });
+        }
+        let protocol = match listener.protocol.to_ascii_lowercase().as_str() {
+            "tcp" => Proto::Tcp,
+            "udp" => Proto::Udp,
+            other => {
+                return Err(AggregateError::Validation {
+                    field: "listeners[].protocol",
+                    message: format!(
+                        "unsupported listener protocol {other:?} (supported protocols: tcp, udp)"
+                    ),
+                });
+            }
+        };
+        let key = (port.get(), protocol.as_str());
+        if !seen.insert(key) {
+            return Err(AggregateError::Validation {
+                field: "listeners",
+                message: format!(
+                    "duplicate listener (port={}, protocol={})",
+                    port.get(),
+                    protocol.as_str()
+                ),
+            });
+        }
+        validated.push(Listener { port, protocol });
+    }
+    Ok(validated)
+}
+
+fn validate_guest_probe_count(
+    startup: &[ProbeDescriptor],
+    readiness: &[ProbeDescriptor],
+    liveness: &[ProbeDescriptor],
+) -> Result<(), AggregateError> {
+    let count = startup.len().saturating_add(readiness.len()).saturating_add(liveness.len());
+    let max = crate::guest_transport::GUEST_PROBE_SLOTS;
+    if count <= max as usize {
+        return Ok(());
+    }
+    Err(AggregateError::Validation {
+        field: "probes",
+        message: ParseError::ProbeCountExceeded { count, max }.to_string(),
+    })
 }
 
 /// Project the supported wire driver arm into its intent representation.

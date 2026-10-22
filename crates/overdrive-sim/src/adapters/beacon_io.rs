@@ -611,7 +611,6 @@ mod tests {
 
     /// CONTRACT_SHAPE: unbounded-preservation.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 2 (core types and wire codec)"]
     async fn a_guest_cannot_connect_before_the_listener_is_bound() {
         let vmm = SimVmm::new();
         let io = SimBeaconIo::new(vmm.clone());
@@ -623,7 +622,6 @@ mod tests {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 2 (core types and wire codec)"]
     async fn a_queued_ready_is_observed_then_accepted_and_read() {
         let vmm = SimVmm::new();
         let io = bound(&vmm).await;
@@ -654,7 +652,6 @@ mod tests {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 2 (core types and wire codec)"]
     async fn a_queued_connection_with_nothing_buffered_or_no_valid_token_projects_none() {
         let vmm = SimVmm::new();
         let io = bound(&vmm).await;
@@ -672,7 +669,6 @@ mod tests {
     /// K-A2′: an accepted connection whose VM died fails its next I/O.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 2 (core types and wire codec)"]
     async fn an_accepted_connection_whose_vm_died_fails_its_next_io() {
         let vmm = SimVmm::new();
         let io = bound(&vmm).await;
@@ -696,7 +692,6 @@ mod tests {
     /// the exit is observed.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 2 (core types and wire codec)"]
     async fn a_parked_read_fails_when_its_vm_dies() {
         let vmm = SimVmm::new();
         let io = Arc::new(bound(&vmm).await);
@@ -723,7 +718,6 @@ mod tests {
     /// READY once accepted, then end of stream.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 2 (core types and wire codec)"]
     async fn a_queued_connection_whose_vm_died_delivers_its_buffered_ready() {
         let vmm = SimVmm::new();
         let io = bound(&vmm).await;
@@ -747,7 +741,6 @@ mod tests {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 2 (core types and wire codec)"]
     async fn a_line_over_4096_bytes_is_invalid_data_and_the_connection_stays() {
         let vmm = SimVmm::new();
         let io = bound(&vmm).await;
@@ -766,7 +759,6 @@ mod tests {
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 2 (core types and wire codec)"]
     async fn the_guest_closing_is_end_of_stream_after_its_buffer() {
         let vmm = SimVmm::new();
         let io = bound(&vmm).await;
@@ -783,7 +775,6 @@ mod tests {
     /// Cancellation safety: a dropped `read_line` / `accept` loses nothing.
     /// CONTRACT_SHAPE: unbounded-preservation.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 2 (core types and wire codec)"]
     async fn dropped_calls_lose_no_connection_and_no_line() {
         let vmm = SimVmm::new();
         let io = bound(&vmm).await;
@@ -804,7 +795,6 @@ mod tests {
     /// reports quiescence.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 2 (core types and wire codec)"]
     async fn stepped_mode_holds_every_delivery_until_granted() {
         let vmm = SimVmm::new();
         let io = Arc::new(SimBeaconIo::stepped(vmm.clone()));

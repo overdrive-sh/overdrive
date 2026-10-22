@@ -10,18 +10,9 @@
 //! from (EVMOD-REC) never leaves the machine; nothing here is a wire or
 //! persisted format other than the decimal text form of the two newtypes.
 //!
-//! RED scaffold (DISTILL, Mandate 7): the validating constructors, the
-//! accessors, the text and serde forms of [`ForwardId`] and
-//! [`ForwarderGeneration`], and the `as_str` labels panic until DELIVER
-//! step 2 ("core types and wire codec") lands them. Plain data — the enums,
-//! the structs, [`ForwarderGeneration::FIRST`] and the error `Display` texts
-//! — is real. No surface the design does not pin is added here.
-
-// SCAFFOLD: true — netns-density-295 DISTILL (vsock DELIVER step 2).
 #![allow(
-    clippy::unused_self,
     clippy::trivially_copy_pass_by_ref,
-    reason = "RED scaffold bodies panic before reading their inputs; `AbortCause::as_str(&self)` is the pinned signature"
+    reason = "the pinned `AbortCause::as_str(&self)` signature"
 )]
 
 use std::fmt;
@@ -32,7 +23,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::wire::KernelErrno;
 
-const SCAFFOLD: &str = "Not yet implemented -- RED scaffold";
+fn is_decimal(text: &str) -> bool {
+    !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit())
+}
 
 // ---------------------------------------------------------------------------
 // ForwardId
@@ -45,20 +38,20 @@ pub struct ForwardId(NonZeroU64);
 
 impl ForwardId {
     /// `0` → [`ForwardIdError::Zero`].
-    pub fn new(_raw: u64) -> Result<Self, ForwardIdError> {
-        panic!("{SCAFFOLD}")
+    pub fn new(raw: u64) -> Result<Self, ForwardIdError> {
+        NonZeroU64::new(raw).map(Self).ok_or(ForwardIdError::Zero)
     }
 
     /// The raw id.
     pub const fn get(self) -> u64 {
-        panic!("Not yet implemented -- RED scaffold")
+        self.0.get()
     }
 }
 
 /// Decimal form.
 impl fmt::Display for ForwardId {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        panic!("{SCAFFOLD}")
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -66,22 +59,27 @@ impl fmt::Display for ForwardId {
 impl FromStr for ForwardId {
     type Err = ForwardIdError;
 
-    fn from_str(_s: &str) -> Result<Self, Self::Err> {
-        panic!("{SCAFFOLD}")
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if !is_decimal(s) {
+            return Err(ForwardIdError::NotDecimal);
+        }
+        let raw = s.parse::<u64>().map_err(|_| ForwardIdError::NotDecimal)?;
+        Self::new(raw)
     }
 }
 
 /// Matches `Display`.
 impl Serialize for ForwardId {
-    fn serialize<S: Serializer>(&self, _serializer: S) -> Result<S::Ok, S::Error> {
-        panic!("{SCAFFOLD}")
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
     }
 }
 
 /// Matches `FromStr`.
 impl<'de> Deserialize<'de> for ForwardId {
-    fn deserialize<D: Deserializer<'de>>(_deserializer: D) -> Result<Self, D::Error> {
-        panic!("{SCAFFOLD}")
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        text.parse().map_err(serde::de::Error::custom)
     }
 }
 
@@ -113,25 +111,31 @@ impl ForwarderGeneration {
     pub const FIRST: Self = Self(NonZeroU64::MIN);
 
     /// `0` → [`ForwardIdError::Zero`].
-    pub fn new(_raw: u64) -> Result<Self, ForwardIdError> {
-        panic!("{SCAFFOLD}")
+    pub fn new(raw: u64) -> Result<Self, ForwardIdError> {
+        NonZeroU64::new(raw).map(Self).ok_or(ForwardIdError::Zero)
     }
 
     /// The raw generation.
     pub const fn get(self) -> u64 {
-        panic!("Not yet implemented -- RED scaffold")
+        self.0.get()
     }
 
     /// The next generation; `None` only at `u64::MAX`.
     pub const fn next(self) -> Option<Self> {
-        panic!("Not yet implemented -- RED scaffold")
+        let Some(raw) = self.0.get().checked_add(1) else {
+            return None;
+        };
+        match NonZeroU64::new(raw) {
+            Some(next) => Some(Self(next)),
+            None => None,
+        }
     }
 }
 
 /// Decimal form.
 impl fmt::Display for ForwarderGeneration {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        panic!("{SCAFFOLD}")
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -139,22 +143,27 @@ impl fmt::Display for ForwarderGeneration {
 impl FromStr for ForwarderGeneration {
     type Err = ForwardIdError;
 
-    fn from_str(_s: &str) -> Result<Self, Self::Err> {
-        panic!("{SCAFFOLD}")
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if !is_decimal(s) {
+            return Err(ForwardIdError::NotDecimal);
+        }
+        let raw = s.parse::<u64>().map_err(|_| ForwardIdError::NotDecimal)?;
+        Self::new(raw)
     }
 }
 
 /// Matches `Display`.
 impl Serialize for ForwarderGeneration {
-    fn serialize<S: Serializer>(&self, _serializer: S) -> Result<S::Ok, S::Error> {
-        panic!("{SCAFFOLD}")
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
     }
 }
 
 /// Matches `FromStr`.
 impl<'de> Deserialize<'de> for ForwarderGeneration {
-    fn deserialize<D: Deserializer<'de>>(_deserializer: D) -> Result<Self, D::Error> {
-        panic!("{SCAFFOLD}")
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        text.parse().map_err(serde::de::Error::custom)
     }
 }
 
@@ -174,7 +183,10 @@ pub enum PairSide {
 impl PairSide {
     /// The side's canonical label.
     pub const fn as_str(self) -> &'static str {
-        panic!("Not yet implemented -- RED scaffold")
+        match self {
+            Self::A => "A",
+            Self::B => "B",
+        }
     }
 }
 
@@ -229,7 +241,13 @@ impl AbortCause {
     /// The cause's canonical label (the cause class; never its side or
     /// errno).
     pub const fn as_str(&self) -> &'static str {
-        panic!("Not yet implemented -- RED scaffold")
+        match self {
+            Self::PeerAbort { .. } => "peer_abort",
+            Self::SocketError { .. } => "socket_error",
+            Self::FrameInvalid { .. } => "frame_invalid",
+            Self::Detached => "detached",
+            Self::Unclassified { .. } => "unclassified",
+        }
     }
 }
 

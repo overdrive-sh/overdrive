@@ -69,7 +69,6 @@ proptest! {
     /// and re-parses through `FromStr`; serde carries the same decimal text.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn every_non_zero_forward_id_round_trips(raw in 1u64..=u64::MAX) {
         let id = ForwardId::new(raw).expect("a non-zero id is accepted");
         prop_assert_eq!(id.get(), raw);
@@ -84,7 +83,6 @@ proptest! {
     /// order).
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn forward_ids_order_by_value(a in 1u64..=u64::MAX, b in 1u64..=u64::MAX) {
         let (ia, ib) = (ForwardId::new(a).expect("non-zero"), ForwardId::new(b).expect("non-zero"));
         prop_assert_eq!(ia.cmp(&ib), a.cmp(&b));
@@ -96,7 +94,6 @@ proptest! {
 /// is not a decimal `u64` is `NotDecimal`.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn a_forward_id_refuses_zero_and_non_decimal_text() {
     assert_eq!(ForwardId::new(0), Err(ForwardIdError::Zero));
     assert_eq!("0".parse::<ForwardId>(), Err(ForwardIdError::Zero));
@@ -117,7 +114,6 @@ proptest! {
     /// serde.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn every_non_zero_generation_round_trips(raw in 1u64..=u64::MAX) {
         let generation = ForwarderGeneration::new(raw).expect("a non-zero generation");
         prop_assert_eq!(generation.get(), raw);
@@ -135,7 +131,6 @@ proptest! {
     /// every generation below `u64::MAX`.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn next_is_the_generation_one_above(raw in 1u64..u64::MAX) {
         let generation = ForwarderGeneration::new(raw).expect("non-zero");
         let next = generation.next().expect("below u64::MAX there is a next generation");
@@ -148,7 +143,6 @@ proptest! {
 /// generation at `u64::MAX` has no next; zero is refused.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn the_first_generation_is_one_and_the_last_has_no_next() {
     assert_eq!(ForwarderGeneration::FIRST.get(), 1);
     assert_eq!(ForwarderGeneration::new(1), Ok(ForwarderGeneration::FIRST));
@@ -167,7 +161,6 @@ fn the_first_generation_is_one_and_the_last_has_no_next() {
 /// The two sides carry distinct, non-empty labels.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn the_two_pair_sides_have_distinct_labels() {
     let labels: BTreeSet<&str> =
         [PairSide::A, PairSide::B].map(PairSide::as_str).into_iter().collect();
@@ -180,7 +173,6 @@ fn the_two_pair_sides_have_distinct_labels() {
 /// another errno, has the same label.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn every_abort_cause_class_has_one_distinct_label() {
     let labels: BTreeSet<&str> = every_cause().iter().map(AbortCause::as_str).collect();
     assert_eq!(labels.len(), 5, "one label per cause class: {labels:?}");
@@ -304,7 +296,6 @@ fn forwarder_errors_render_their_pinned_messages() {
 /// (`KernelErrno`'s decimal `Display`).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn a_half_ended_refusal_names_its_side_and_errno() {
     assert_eq!(
         ForwarderError::HalfEnded { side: PairSide::B, errno: KernelErrno::ECONNRESET }.to_string(),

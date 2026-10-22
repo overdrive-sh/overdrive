@@ -74,7 +74,6 @@ proptest! {
     /// encoding is exactly magic, BE `u32` length, payload, pre-sized.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn every_payload_up_to_the_maximum_round_trips(
         payload in prop::collection::vec(any::<u8>(), 0..=MAX),
     ) {
@@ -98,7 +97,6 @@ proptest! {
     /// variant (the error set is closed — the match below is exhaustive).
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn every_accepted_byte_string_is_canonical(
         bytes in prop_oneof![
             prop::collection::vec(any::<u8>(), 0..=64),
@@ -127,7 +125,6 @@ proptest! {
     /// (short or long), and trailing bytes after the payload.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn every_non_canonical_frame_is_refused(
         payload in prop::collection::vec(any::<u8>(), 0..=256),
         magic_byte in 0usize..4,
@@ -171,7 +168,6 @@ proptest! {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn golden_empty_frame_is_the_header_alone() {
     let empty = DatagramFrame::new(&[]).expect("the empty datagram frames");
     assert_eq!(empty.encode(), GOLDEN_EMPTY.to_vec());
@@ -182,7 +178,6 @@ fn golden_empty_frame_is_the_header_alone() {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn golden_maximum_frame_carries_the_inclusive_bound() {
     let payload = golden_max_payload();
     let mut golden = GOLDEN_MAX_HEADER.to_vec();
@@ -196,7 +191,6 @@ fn golden_maximum_frame_carries_the_inclusive_bound() {
 /// The sizes the spike exercised (P-5 / P-29) round-trip byte-exact.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn the_spike_sizes_round_trip() {
     for len in [0usize, 1, 1_431, MAX] {
         let payload = vec![0xA5u8; len];
@@ -220,7 +214,6 @@ fn the_spike_sizes_round_trip() {
 /// datagram.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn the_empty_datagram_is_a_header_only_frame_distinct_from_every_payload() {
     let empty = DatagramFrame::new(&[]).expect("the empty datagram frames");
     let encoded = empty.encode();
@@ -253,7 +246,6 @@ proptest! {
     /// bytes unchanged.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn a_frame_shaped_payload_is_stripped_of_exactly_one_outer_frame(
         inner in prop::collection::vec(any::<u8>(), 0..=256),
     ) {
@@ -294,7 +286,6 @@ proptest! {
     /// once, between its neighbours.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn framed_datagrams_keep_their_order_and_every_empty_one(
         datagrams in prop::collection::vec(
             prop_oneof![Just(Vec::new()), prop::collection::vec(any::<u8>(), 0..=64)],
@@ -329,7 +320,6 @@ fn the_largest_frame_is_the_largest_payload_plus_the_header() {
 /// The golden maximum frame is exactly `MAX_GUEST_DATAGRAM_FRAME` bytes.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn the_golden_maximum_frame_is_max_guest_datagram_frame_bytes() {
     let payload = golden_max_payload();
     let encoded = DatagramFrame::new(&payload).expect("within the inclusive bound").encode();
@@ -342,7 +332,6 @@ fn the_golden_maximum_frame_is_max_guest_datagram_frame_bytes() {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn a_payload_over_the_maximum_is_refused_oversize_by_new() {
     let over = vec![0u8; MAX + 1];
     assert_eq!(
@@ -356,7 +345,6 @@ fn a_payload_over_the_maximum_is_refused_oversize_by_new() {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn a_declared_length_over_the_maximum_is_refused_oversize_by_decode() {
     // Declared one over the bound, carrying exactly that many bytes: the
     // length check, not the carried-bytes check, refuses it.
@@ -381,7 +369,6 @@ fn a_declared_length_over_the_maximum_is_refused_oversize_by_decode() {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn fewer_bytes_than_the_header_are_refused_truncated() {
     for len in 0..DATAGRAM_FRAME_HEADER_LEN {
         assert_eq!(
@@ -394,7 +381,6 @@ fn fewer_bytes_than_the_header_are_refused_truncated() {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn a_wrong_magic_is_refused_bad_magic() {
     for magic in [*b"OVD0", *b"ovd1", *b"OF\x02\x01", [0u8; 4]] {
         assert_eq!(
@@ -407,7 +393,6 @@ fn a_wrong_magic_is_refused_bad_magic() {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn a_body_shorter_or_longer_than_declared_is_refused_length_mismatch() {
     // Short: never a truncated payload accepted.
     let short = raw_frame(DATAGRAM_FRAME_MAGIC, 100, &[1u8; 10]);

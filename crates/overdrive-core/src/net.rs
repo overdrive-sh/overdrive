@@ -9,23 +9,14 @@
 //! (`ListenPort::new` / `get`, `InterfaceIndex::new` / `get`,
 //! `ListenPortError`, `InterfaceIndexError`); `FromStr` uses the same errors.
 //!
-//! RED scaffold (DISTILL, Mandate 7): the constructor, accessor, `FromStr` /
-//! `Display` / serde bodies panic until DELIVER step 2 lands them.
-//! The error enums are real.
-
-// SCAFFOLD: true — netns-density-295 DISTILL (DELIVER step 2).
-#![expect(
-    clippy::unused_self,
-    reason = "RED scaffold bodies panic before reading their inputs; the lint self-trips when DELIVER lands the bodies"
-)]
+//! `ListenPort` and `InterfaceIndex` are validated and carry one canonical
+//! decimal text form shared by `Display`, `FromStr` and serde.
 
 use std::fmt;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::str::FromStr;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-const SCAFFOLD: &str = "Not yet implemented -- RED scaffold";
 
 /// A kernel network interface index; never 0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -37,25 +28,25 @@ pub struct ListenPort(NonZeroU16);
 
 impl ListenPort {
     /// Validating constructor: `0` → [`ListenPortError::Zero`].
-    pub fn new(_raw: u16) -> Result<Self, ListenPortError> {
-        panic!("{SCAFFOLD}")
+    pub fn new(raw: u16) -> Result<Self, ListenPortError> {
+        NonZeroU16::new(raw).map(Self).ok_or(ListenPortError::Zero)
     }
 
     /// The port number.
     pub const fn get(self) -> u16 {
-        panic!("Not yet implemented -- RED scaffold")
+        self.0.get()
     }
 }
 
 impl InterfaceIndex {
     /// Validating constructor: `0` → [`InterfaceIndexError::Zero`].
-    pub fn new(_raw: u32) -> Result<Self, InterfaceIndexError> {
-        panic!("{SCAFFOLD}")
+    pub fn new(raw: u32) -> Result<Self, InterfaceIndexError> {
+        NonZeroU32::new(raw).map(Self).ok_or(InterfaceIndexError::Zero)
     }
 
     /// The interface index.
     pub const fn get(self) -> u32 {
-        panic!("Not yet implemented -- RED scaffold")
+        self.0.get()
     }
 }
 
@@ -83,8 +74,8 @@ pub enum InterfaceIndexError {
 
 /// Decimal form.
 impl fmt::Display for InterfaceIndex {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        panic!("{SCAFFOLD}")
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -93,27 +84,32 @@ impl fmt::Display for InterfaceIndex {
 impl FromStr for InterfaceIndex {
     type Err = InterfaceIndexError;
 
-    fn from_str(_s: &str) -> Result<Self, Self::Err> {
-        panic!("{SCAFFOLD}")
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if !is_decimal(s) {
+            return Err(InterfaceIndexError::Unparseable);
+        }
+        let raw = s.parse::<u32>().map_err(|_| InterfaceIndexError::Unparseable)?;
+        Self::new(raw)
     }
 }
 
 impl Serialize for InterfaceIndex {
-    fn serialize<S: Serializer>(&self, _serializer: S) -> Result<S::Ok, S::Error> {
-        panic!("{SCAFFOLD}")
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
     }
 }
 
 impl<'de> Deserialize<'de> for InterfaceIndex {
-    fn deserialize<D: Deserializer<'de>>(_deserializer: D) -> Result<Self, D::Error> {
-        panic!("{SCAFFOLD}")
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        text.parse().map_err(serde::de::Error::custom)
     }
 }
 
 /// Decimal form.
 impl fmt::Display for ListenPort {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        panic!("{SCAFFOLD}")
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -122,19 +118,28 @@ impl fmt::Display for ListenPort {
 impl FromStr for ListenPort {
     type Err = ListenPortError;
 
-    fn from_str(_s: &str) -> Result<Self, Self::Err> {
-        panic!("{SCAFFOLD}")
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if !is_decimal(s) {
+            return Err(ListenPortError::Unparseable);
+        }
+        let raw = s.parse::<u16>().map_err(|_| ListenPortError::Unparseable)?;
+        Self::new(raw)
     }
 }
 
 impl Serialize for ListenPort {
-    fn serialize<S: Serializer>(&self, _serializer: S) -> Result<S::Ok, S::Error> {
-        panic!("{SCAFFOLD}")
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
     }
 }
 
 impl<'de> Deserialize<'de> for ListenPort {
-    fn deserialize<D: Deserializer<'de>>(_deserializer: D) -> Result<Self, D::Error> {
-        panic!("{SCAFFOLD}")
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        text.parse().map_err(serde::de::Error::custom)
     }
+}
+
+fn is_decimal(text: &str) -> bool {
+    !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit())
 }

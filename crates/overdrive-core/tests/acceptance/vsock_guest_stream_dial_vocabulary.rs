@@ -169,7 +169,6 @@ fn a_stream_reports_the_target_it_was_dialled_for() {
 /// `HalfClose` (R2-END).
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 2"]
 async fn a_stream_delivers_guest_bytes_in_order_then_the_half_close() {
     let (mut stream, pipe) =
         stream_over(&[&b"HTTP/1.1 "[..], &b"200 OK"[..]], Some(GuestStreamEnd::HalfClose));
@@ -191,7 +190,6 @@ async fn a_stream_delivers_guest_bytes_in_order_then_the_half_close() {
 /// `Abort`.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 2"]
 async fn a_stream_reports_the_guest_abort() {
     let (mut stream, _pipe) = stream_over(&[], Some(GuestStreamEnd::Abort));
     let mut buf = [0u8; 8];
@@ -205,7 +203,6 @@ async fn a_stream_reports_the_guest_abort() {
 /// forwarded. The guest direction stays open (`end` is `None`) throughout.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 2"]
 async fn a_stream_forwards_writes_and_the_write_side_shutdown() {
     let (mut stream, pipe) = stream_over(&[], None);
     assert_eq!(stream.write(b"GET /healthz ").await.expect("open direction"), 13);
@@ -230,7 +227,6 @@ async fn a_stream_forwards_writes_and_the_write_side_shutdown() {
 /// `ConnectionAborted`, nothing is forwarded, and `end` reports `Abort`.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 2"]
 async fn an_owner_abort_reaches_every_stream_call_as_connection_aborted() {
     let (mut stream, pipe) = stream_over(&[&b"unread"[..]], None);
     {
@@ -268,7 +264,6 @@ async fn an_owner_abort_reaches_every_stream_call_as_connection_aborted() {
 /// label; an errno-carrying error's label names the class, not the errno.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn purposes_end_classes_and_dial_errors_have_distinct_labels() {
     let purposes: BTreeSet<&str> =
         [DialPurpose::Relay, DialPurpose::Probe].map(DialPurpose::as_str).into_iter().collect();
@@ -314,7 +309,6 @@ fn dial_errors_without_an_errno_render_their_pinned_text() {
 /// decimal (`KernelErrno`'s `Display`).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn dial_errors_with_an_errno_render_their_pinned_text_and_the_errno() {
     assert_eq!(
         GuestDialError::Refused { errno: KernelErrno::ECONNREFUSED }.to_string(),

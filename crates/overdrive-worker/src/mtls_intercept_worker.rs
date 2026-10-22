@@ -4361,7 +4361,6 @@ mod tests {
     /// Outcome anchor: DISCUSS Elevator Pitch
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 2 (GuestCid / LaunchToken newtypes)"]
     async fn enforcement_returning_after_retirement_tears_down_the_real_returned_handle_before_drain()
      {
         let enforcement = GatedEnforcement::new();
@@ -4493,7 +4492,6 @@ mod tests {
         clippy::too_many_lines,
         reason = "one bounded-change narrative retains first-source, identical-handle, reservation, retry, completion, and successor evidence"
     )]
-    #[ignore = "pending DELIVER step 2 (GuestCid / LaunchToken newtypes)"]
     async fn shared_teardown_failure_retains_the_exact_handle_drain_and_reservation_until_same_owner_retry()
      {
         let enforcement = RetryingSharedEnforcement::new();
@@ -4630,7 +4628,6 @@ mod tests {
     /// listener (`TestSharedIntercept::script_accept`), one after the other, so
     /// the teardown order is the publication order.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 2 (GuestCid / LaunchToken newtypes)"]
     async fn allocation_stop_surfaces_teardown_failure_and_retry_converges() {
         let enforcement = RetryingSharedEnforcement::failing_first(2);
         let (first_leg, orig_dst, _first_client) = accepted_leg_f();
@@ -4950,7 +4947,6 @@ mod tests {
     /// allocation — whose sources are `Arc::ptr_eq`, and the attempt called
     /// `remove_allocation_elements` once.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 2 (GuestCid / LaunchToken newtypes)"]
     async fn callers_joined_on_one_failed_stop_receive_equal_failures_with_shared_sources() {
         let intercept = Arc::new(TestSharedIntercept::new());
         let worker = shared_worker(&intercept);
@@ -5034,7 +5030,6 @@ mod tests {
         reason = "one repeated-race narrative keeps each round's claim count, both callers' \
                   results, and the superseded source together"
     )]
-    #[ignore = "pending DELIVER step 2 (GuestCid / LaunchToken newtypes)"]
     async fn the_first_stop_after_a_failure_starts_one_retry_for_simultaneous_callers() {
         /// Races of the two simultaneous callers, each after a failed attempt.
         const RULE_3_ROUNDS: usize = 16;
@@ -5180,7 +5175,6 @@ mod tests {
         reason = "one owner-shutdown narrative keeps the retained failure, the in-flight \
                   teardown, both late callers, and the stored result together"
     )]
-    #[ignore = "pending DELIVER step 2 (GuestCid / LaunchToken newtypes)"]
     async fn a_stop_after_owner_shutdown_began_starts_nothing_and_returns_its_shutdown_entry() {
         let intercept = Arc::new(TestSharedIntercept::new());
         let worker = shared_worker(&intercept);
@@ -5462,7 +5456,6 @@ mod tests {
     /// so the rebind is never refused by its own listener, and the audit then
     /// passes (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (`InterceptListener::accept` behaviour, and what the worker's use of it guarantees)).
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 2 (GuestCid / LaunchToken newtypes)"]
     async fn a_lost_listener_ends_only_its_own_task_and_the_owner_rebinds_the_recorded_address() {
         let intercept = Arc::new(TestSharedIntercept::new());
         let worker = shared_worker(&intercept);
@@ -5519,7 +5512,6 @@ mod tests {
     /// A later `ListenerLost` proves the task consumed the first script and
     /// kept waiting.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 2 (GuestCid / LaunchToken newtypes)"]
     async fn a_connection_whose_destination_cannot_be_read_is_dropped_and_the_task_keeps_waiting() {
         let intercept = Arc::new(TestSharedIntercept::new());
         let worker = shared_worker(&intercept);
@@ -5570,7 +5562,6 @@ mod tests {
     /// A listener whose bound address cannot be read makes the audit return
     /// `ListenerLocalAddr` for that leg with the adapter's cause (FD § "[REF] Driven port — intercept listener (DISTILL gap B-7) — pinned 2026-09-25" (`InterceptListener::local_addr` behaviour)).
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 2 (GuestCid / LaunchToken newtypes)"]
     async fn an_unreadable_listener_address_is_reported_by_the_audit() {
         let intercept = Arc::new(TestSharedIntercept::new());
         let worker = shared_worker(&intercept);
@@ -5694,7 +5685,6 @@ mod tests {
     /// callers share one sealed completion, and a later caller creates no
     /// second cleanup generation.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 2 (GuestCid / LaunchToken newtypes)"]
     async fn shared_replacement_shutdown_waits_for_the_same_authoritative_teardown() {
         let enforcement = GatedSharedEnforcement::new(true);
         let (worker, _intercept, _allocation, _client) = shared_allocation_with_one_handle(
@@ -5743,7 +5733,6 @@ mod tests {
     /// over a shared allocation: a same-allocation re-install cannot report
     /// readiness before the prior teardown ends.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 2 (GuestCid / LaunchToken newtypes)"]
     async fn shared_same_owner_reinstall_waits_for_prior_teardown_before_readiness() {
         let enforcement = GatedSharedEnforcement::new(false);
         let (worker, _intercept, allocation, _client) = shared_allocation_with_one_handle(
@@ -5783,7 +5772,6 @@ mod tests {
     /// over a shared allocation: a failed prior teardown keeps the replacement
     /// closed and retryable.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 2 (GuestCid / LaunchToken newtypes)"]
     async fn shared_same_owner_reinstall_failure_keeps_readiness_closed_until_retry() {
         let enforcement = GatedSharedEnforcement::new(true);
         let (worker, _intercept, allocation, _client) = shared_allocation_with_one_handle(
@@ -5836,7 +5824,6 @@ mod tests {
     /// shared allocation: a completed enforcement's handle is retained under
     /// the capability and torn down exactly once by stop.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 2 (GuestCid / LaunchToken newtypes)"]
     async fn shared_completed_enforce_handle_is_torn_down_not_orphaned() {
         let spy = GatedEnforcement::new();
         let (leg, orig_dst, _client) = accepted_leg_f();
@@ -5891,7 +5878,6 @@ mod tests {
     /// return while the enforce child is in flight, and when it returns the
     /// child has ended and its handle is torn down exactly once.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 2 (GuestCid / LaunchToken newtypes)"]
     async fn shared_allocation_stop_joins_an_inflight_enforce_child() {
         let spy = GatedEnforcement::new();
         let (leg, orig_dst, _client) = accepted_leg_f();
@@ -5947,7 +5933,6 @@ mod tests {
     /// allocation: stop joins every pass-through child before returning, so
     /// both relay legs are closed when it returns.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 2 (GuestCid / LaunchToken newtypes)"]
     async fn shared_allocation_stop_joins_a_passthrough_child() {
         let upstream = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
             .expect("bind upstream server");
@@ -6033,7 +6018,6 @@ mod tests {
     /// before the claim wait, or registers a relay after releasing its claim
     /// (the current `handle_shared_outbound` detach, `:3563-3567`), fails this.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 2 (GuestCid / LaunchToken newtypes)"]
     async fn shared_allocation_stop_ends_a_relay_classified_during_its_claim_wait() {
         let upstream = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
             .expect("bind upstream server");
@@ -6119,7 +6103,6 @@ mod tests {
     /// relays"): when `shutdown_owner` returns, every relay of every allocation
     /// has ended — a live pass-through relay's legs are both closed.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 2 (GuestCid / LaunchToken newtypes)"]
     async fn shared_owner_shutdown_ends_a_live_relay() {
         let upstream = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
             .expect("bind upstream server");
@@ -6183,7 +6166,6 @@ mod tests {
     /// over a shared allocation: a late install creates no listener, member, or
     /// child.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 2 (GuestCid / LaunchToken newtypes)"]
     async fn shared_allocation_start_after_owner_shutdown_is_rejected_before_install() {
         let intercept = Arc::new(TestSharedIntercept::new());
         let worker = shared_worker(&intercept);

@@ -13,26 +13,9 @@
 //! vsock (EVMOD-STREAM-END), and an owner abort ends it without touching the
 //! socket (EVMOD-STREAM-ABORT, WATCH-ABORT).
 //!
-//! RED scaffold (DISTILL, Mandate 7): the signatures are the pinned ones. The
-//! `as_str` labels and the `GuestStream` I/O delegation panic until DELIVER
-//! step 2 ("core types and wire codec") lands them; plain data (the
-//! `GuestStream` constructor and its target, the error `Display` texts) is
-//! real.
-
-// SCAFFOLD: true — netns-density-295 DISTILL (vsock DELIVER step 2).
-#![allow(
-    clippy::unused_self,
-    clippy::unused_async,
-    clippy::needless_pass_by_ref_mut,
-    clippy::missing_const_for_fn,
-    reason = "RED scaffold bodies panic before reading their inputs; the lints self-trip when DELIVER lands the bodies"
-)]
-
 use std::net::SocketAddrV4;
 
 use super::wire::KernelErrno;
-
-const SCAFFOLD: &str = "Not yet implemented -- RED scaffold";
 
 /// INB-1 (ADR-0173): opens a host-initiated TCP connection to a declared
 /// listen port of an Active VM allocation, carried by one host-opened vsock
@@ -99,7 +82,10 @@ pub enum DialPurpose {
 impl DialPurpose {
     /// The purpose's canonical label.
     pub const fn as_str(self) -> &'static str {
-        panic!("Not yet implemented -- RED scaffold")
+        match self {
+            Self::Relay => "relay",
+            Self::Probe => "probe",
+        }
     }
 }
 
@@ -166,31 +152,34 @@ impl GuestStream {
     }
 
     /// The address `dial` was called with.
+    #[expect(
+        clippy::missing_const_for_fn,
+        reason = "the feature delta pins this as a non-const public accessor"
+    )]
     pub fn target(&self) -> SocketAddrV4 {
         self.target
     }
 
     /// Reads guest application bytes; see the type-level contract.
-    pub async fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
-        let _ = &self.io;
-        panic!("{SCAFFOLD}")
+    pub async fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.io.read(buf).await
     }
 
     /// Writes bytes toward the guest application; see the type-level
     /// contract.
-    pub async fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
-        panic!("{SCAFFOLD}")
+    pub async fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.io.write(buf).await
     }
 
     /// Ends the host→guest direction cleanly: the guest receives a vsock
     /// SHUTDOWN with flags 0x2 and half-closes the application connection.
     pub async fn shutdown_write(&mut self) -> std::io::Result<()> {
-        panic!("{SCAFFOLD}")
+        self.io.shutdown_write().await
     }
 
     /// The classified end of the guest→host direction, once it has ended.
     pub fn end(&self) -> Option<GuestStreamEnd> {
-        panic!("{SCAFFOLD}")
+        self.io.end()
     }
 }
 
@@ -227,7 +216,10 @@ pub enum GuestStreamEnd {
 impl GuestStreamEnd {
     /// The end class's canonical label.
     pub const fn as_str(self) -> &'static str {
-        panic!("Not yet implemented -- RED scaffold")
+        match self {
+            Self::HalfClose => "half_close",
+            Self::Abort => "abort",
+        }
     }
 }
 
@@ -294,6 +286,15 @@ impl GuestDialError {
         reason = "the signature pinned by feature-delta § Driving port — guest stream dial takes `&self`"
     )]
     pub const fn as_str(&self) -> &'static str {
-        panic!("Not yet implemented -- RED scaffold")
+        match self {
+            Self::Refused { .. } => "refused",
+            Self::TimedOut { .. } => "timed_out",
+            Self::PairingDeadline => "pairing_deadline",
+            Self::NotServing => "not_serving",
+            Self::NoSession => "no_session",
+            Self::Quiesced => "quiesced",
+            Self::Unreachable { .. } => "unreachable",
+            Self::Capacity => "capacity",
+        }
     }
 }

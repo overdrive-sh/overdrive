@@ -77,7 +77,6 @@ fn allocation_spec(
 /// success/refusal outcomes.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 2 (GuestCid / LaunchToken newtypes): the fixture's allocation spec builds a GuestCid"]
 async fn one_server_boot_shares_exactly_one_trusted_probe_runner_with_vm_driver() {
     let tcp = Arc::new(CountingTcpProber { calls: AtomicUsize::new(0) });
     let clock = Arc::new(SimClock::default());

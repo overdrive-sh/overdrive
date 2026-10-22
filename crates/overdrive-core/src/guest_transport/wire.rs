@@ -11,14 +11,15 @@
 //! string. The forwarder's end record is not here: it is pinned with the
 //! forwarder (EVMOD-REC, [`super::forwarder`]) and never leaves the machine.
 //!
-//! RED scaffold (DISTILL, Mandate 7): every function and method body panics
-//! until DELIVER step 2 ("core types and wire codec") lands it. Constants
-//! carry the values the design pins.
+//! The request, control, datagram and scalar codecs implement the canonical
+//! encodings pinned by the feature delta. The legacy event-record items below
+//! remain only for the pre-cut dataplane scaffold that still consumes them;
+//! the attachment cut removes them with that caller.
 //!
 //! Items marked **E-list** are the redirect-era surface EVMOD-ADOPT and
 //! EVMOD-DGRAM remove (feature-delta § *Bridge-era code for DELIVER to
-//! delete*, list E): request kind `3` (`DatagramSeqpacket`), the flow event
-//! record (`FlowEvent`, `FlowCell`, `CellEpoch`, `FlowEventDirection`,
+//! delete*, list E): the flow event record (`FlowEvent`, `FlowCell`,
+//! `CellEpoch`, `FlowEventDirection`,
 //! `FlowEventKind`, `FLOW_EVENT_LEN`), `WireField::Event*` and
 //! `FlowWireError::UnknownEventKind`. They are not part of the pinned
 //! contract, no test defends them, and DELIVER deletes them together with
@@ -63,18 +64,29 @@ pub enum FlowOrigin {
 
 impl FlowId {
     /// `seq` must be < 2^31.
-    pub fn new(_origin: FlowOrigin, _seq: u32) -> Result<Self, FlowWireError> {
-        panic!("{SCAFFOLD}")
+    #[expect(
+        clippy::missing_const_for_fn,
+        reason = "the feature delta pins this as a non-const public constructor"
+    )]
+    pub fn new(origin: FlowOrigin, seq: u32) -> Result<Self, FlowWireError> {
+        if seq >= (1 << 31) {
+            return Err(FlowWireError::InvalidField { field: WireField::FlowSeq });
+        }
+        let origin_bit = match origin {
+            FlowOrigin::Guest => 0,
+            FlowOrigin::Host => 1 << 31,
+        };
+        Ok(Self(origin_bit | seq))
     }
 
     /// The flow's origin (the top bit).
     pub const fn origin(self) -> FlowOrigin {
-        panic!("Not yet implemented -- RED scaffold")
+        if self.0 & (1 << 31) == 0 { FlowOrigin::Guest } else { FlowOrigin::Host }
     }
 
     /// The raw 32-bit id, origin bit included.
     pub const fn get(self) -> u32 {
-        panic!("Not yet implemented -- RED scaffold")
+        self.0
     }
 }
 
@@ -85,7 +97,7 @@ impl FlowId {
 /// Length of an encoded [`FlowRequest`].
 pub const FLOW_REQUEST_LEN: usize = 32;
 
-/// The four flow kinds.
+/// The three flow kinds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlowKind {
     /// Kind 1: guest → host, STREAM 1240.
@@ -93,9 +105,6 @@ pub enum FlowKind {
     /// Kind 2: guest → host, STREAM 1240 (the association's one connection,
     /// EVMOD-DGRAM).
     DatagramStream,
-    /// **E-list.** The former kind 3 (SEQPACKET 1241). Kind `3` is not
-    /// defined (`UnknownKind`).
-    DatagramSeqpacket,
     /// Kind 4: host → guest, STREAM 1242.
     TcpAccept,
 }
@@ -103,7 +112,11 @@ pub enum FlowKind {
 impl FlowKind {
     /// The kind's canonical label.
     pub const fn as_str(self) -> &'static str {
-        panic!("Not yet implemented -- RED scaffold")
+        match self {
+            Self::TcpConnect => "tcp_connect",
+            Self::DatagramStream => "datagram_stream",
+            Self::TcpAccept => "tcp_accept",
+        }
     }
 }
 
@@ -128,15 +141,6 @@ pub enum FlowRequest {
         /// The opening launch's token.
         launch: LaunchToken,
     },
-    /// **E-list.** The former kind 3; not decoded (`UnknownKind`).
-    DatagramSeqpacket {
-        /// Guest-origin flow id.
-        flow: FlowId,
-        /// Original destination.
-        destination: SocketAddrV4,
-        /// The opening launch's token.
-        launch: LaunchToken,
-    },
     /// Kind 4 (INB-1): opened only by `GuestStreamDial`.
     TcpAccept {
         /// Host-origin flow id.
@@ -154,28 +158,125 @@ pub enum FlowRequest {
 
 impl FlowRequest {
     /// The request's kind.
+    #[expect(
+        clippy::missing_const_for_fn,
+        reason = "the feature delta pins this as a non-const public accessor"
+    )]
     pub fn kind(&self) -> FlowKind {
-        panic!("{SCAFFOLD}")
+        match self {
+            Self::TcpConnect { .. } => FlowKind::TcpConnect,
+            Self::DatagramStream { .. } => FlowKind::DatagramStream,
+            Self::TcpAccept { .. } => FlowKind::TcpAccept,
+        }
     }
 
     /// The request's flow id.
+    #[expect(
+        clippy::missing_const_for_fn,
+        reason = "the feature delta pins this as a non-const public accessor"
+    )]
     pub fn flow(&self) -> FlowId {
-        panic!("{SCAFFOLD}")
+        match self {
+            Self::TcpConnect { flow, .. }
+            | Self::DatagramStream { flow, .. }
+            | Self::TcpAccept { flow, .. } => *flow,
+        }
     }
 
     /// The request's launch token.
+    #[expect(
+        clippy::missing_const_for_fn,
+        reason = "the feature delta pins this as a non-const public accessor"
+    )]
     pub fn launch(&self) -> LaunchToken {
-        panic!("{SCAFFOLD}")
+        match self {
+            Self::TcpConnect { launch, .. }
+            | Self::DatagramStream { launch, .. }
+            | Self::TcpAccept { launch, .. } => *launch,
+        }
     }
 
     /// The canonical 32-byte encoding.
     pub fn encode(&self) -> [u8; FLOW_REQUEST_LEN] {
-        panic!("{SCAFFOLD}")
+        let mut bytes = [0; FLOW_REQUEST_LEN];
+        bytes[0..2].copy_from_slice(b"OF");
+        bytes[2] = 2;
+        let (kind, flow, address, port, listen_port, launch) = match self {
+            Self::TcpConnect { flow, destination, launch } => {
+                (1, *flow, destination.ip().octets(), destination.port(), 0, *launch)
+            }
+            Self::DatagramStream { flow, destination, launch } => {
+                (2, *flow, destination.ip().octets(), destination.port(), 0, *launch)
+            }
+            Self::TcpAccept { flow, peer, listen_port, launch } => {
+                (4, *flow, peer.octets(), 0, listen_port.get(), *launch)
+            }
+        };
+        bytes[3] = kind;
+        bytes[4..8].copy_from_slice(&flow.get().to_be_bytes());
+        bytes[8..12].copy_from_slice(&address);
+        bytes[12..14].copy_from_slice(&port.to_be_bytes());
+        bytes[14..16].copy_from_slice(&listen_port.to_be_bytes());
+        bytes[16..32].copy_from_slice(launch.as_bytes());
+        bytes
     }
 
     /// Decodes a canonical encoding.
-    pub fn decode(_bytes: &[u8; FLOW_REQUEST_LEN]) -> Result<Self, FlowWireError> {
-        panic!("{SCAFFOLD}")
+    pub fn decode(bytes: &[u8; FLOW_REQUEST_LEN]) -> Result<Self, FlowWireError> {
+        let observed = [bytes[0], bytes[1]];
+        if observed != *b"OF" {
+            return Err(FlowWireError::BadMagic { observed });
+        }
+        if bytes[2] != 2 {
+            return Err(FlowWireError::UnsupportedVersion { version: bytes[2] });
+        }
+        let kind = match bytes[3] {
+            1 => FlowKind::TcpConnect,
+            2 => FlowKind::DatagramStream,
+            4 => FlowKind::TcpAccept,
+            kind => return Err(FlowWireError::UnknownKind { kind }),
+        };
+        let flow = FlowId(u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]));
+        let expected_origin = match kind {
+            FlowKind::TcpConnect | FlowKind::DatagramStream => FlowOrigin::Guest,
+            FlowKind::TcpAccept => FlowOrigin::Host,
+        };
+        if flow.origin() != expected_origin {
+            return Err(FlowWireError::OriginMismatch { kind });
+        }
+        let address = Ipv4Addr::from([bytes[8], bytes[9], bytes[10], bytes[11]]);
+        let port = u16::from_be_bytes([bytes[12], bytes[13]]);
+        let listen_port_raw = u16::from_be_bytes([bytes[14], bytes[15]]);
+        let token_bytes: [u8; 16] = bytes[16..32]
+            .try_into()
+            .map_err(|_| FlowWireError::InvalidField { field: WireField::LaunchToken })?;
+        let launch = LaunchToken::from_bytes(token_bytes)
+            .map_err(|_| FlowWireError::InvalidField { field: WireField::LaunchToken })?;
+
+        match kind {
+            FlowKind::TcpConnect | FlowKind::DatagramStream => {
+                if port == 0 {
+                    return Err(FlowWireError::InvalidField { field: WireField::Port });
+                }
+                if listen_port_raw != 0 {
+                    return Err(FlowWireError::InvalidField { field: WireField::ListenPort });
+                }
+                let destination = SocketAddrV4::new(address, port);
+                if kind == FlowKind::TcpConnect {
+                    Ok(Self::TcpConnect { flow, destination, launch })
+                } else {
+                    Ok(Self::DatagramStream { flow, destination, launch })
+                }
+            }
+            FlowKind::TcpAccept => {
+                if port != 0 {
+                    return Err(FlowWireError::InvalidField { field: WireField::Port });
+                }
+                let listen_port = ListenPort::new(listen_port_raw)
+                    .map_err(|_| FlowWireError::InvalidField { field: WireField::ListenPort })?;
+                Ok(Self::TcpAccept { flow, peer: address, listen_port, launch })
+            }
+        }
     }
 }
 
@@ -196,12 +297,31 @@ pub struct ControlOpen {
 impl ControlOpen {
     /// The canonical 24-byte encoding.
     pub fn encode(&self) -> [u8; CONTROL_OPEN_LEN] {
-        panic!("{SCAFFOLD}")
+        let mut bytes = [0; CONTROL_OPEN_LEN];
+        bytes[0..2].copy_from_slice(b"OC");
+        bytes[2] = 1;
+        bytes[8..24].copy_from_slice(self.launch.as_bytes());
+        bytes
     }
 
     /// Decodes a canonical encoding.
-    pub fn decode(_bytes: &[u8; CONTROL_OPEN_LEN]) -> Result<Self, FlowWireError> {
-        panic!("{SCAFFOLD}")
+    pub fn decode(bytes: &[u8; CONTROL_OPEN_LEN]) -> Result<Self, FlowWireError> {
+        let observed = [bytes[0], bytes[1]];
+        if observed != *b"OC" {
+            return Err(FlowWireError::BadMagic { observed });
+        }
+        if bytes[2] != 1 {
+            return Err(FlowWireError::UnsupportedVersion { version: bytes[2] });
+        }
+        if bytes[3..8].iter().any(|byte| *byte != 0) {
+            return Err(FlowWireError::InvalidField { field: WireField::ControlOpenReserved });
+        }
+        let token_bytes: [u8; 16] = bytes[8..24]
+            .try_into()
+            .map_err(|_| FlowWireError::InvalidField { field: WireField::LaunchToken })?;
+        let launch = LaunchToken::from_bytes(token_bytes)
+            .map_err(|_| FlowWireError::InvalidField { field: WireField::LaunchToken })?;
+        Ok(Self { launch })
     }
 }
 
@@ -218,9 +338,6 @@ pub const CONTROL_MESSAGE_LEN: usize = 8;
 /// `FromStr` / `Display` are decimal; serde matches them. `FromStr::Err` is
 /// [`FlowWireError`]: `NotDecimal { field: ControlErrno }` for non-decimal
 /// text, `InvalidField { field: ControlErrno }` for 0 (D-UP-13).
-///
-/// RED scaffold: `new`, `get`, `Display`, `FromStr` and serde panic until
-/// DELIVER step 2; the named constants are plain data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct KernelErrno(NonZeroU16);
 
@@ -242,20 +359,22 @@ impl KernelErrno {
     pub const ECONNREFUSED: Self = errno_const(111);
 
     /// `0` → `InvalidField { field: ControlErrno }`.
-    pub fn new(_raw: u16) -> Result<Self, FlowWireError> {
-        panic!("{SCAFFOLD}")
+    pub fn new(raw: u16) -> Result<Self, FlowWireError> {
+        NonZeroU16::new(raw)
+            .map(Self)
+            .ok_or(FlowWireError::InvalidField { field: WireField::ControlErrno })
     }
 
     /// The errno value.
     pub const fn get(self) -> u16 {
-        panic!("Not yet implemented -- RED scaffold")
+        self.0.get()
     }
 }
 
 /// Decimal form.
 impl fmt::Display for KernelErrno {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        panic!("{SCAFFOLD}")
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -263,20 +382,27 @@ impl fmt::Display for KernelErrno {
 impl std::str::FromStr for KernelErrno {
     type Err = FlowWireError;
 
-    fn from_str(_s: &str) -> Result<Self, Self::Err> {
-        panic!("{SCAFFOLD}")
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if !is_decimal(s) {
+            return Err(FlowWireError::NotDecimal { field: WireField::ControlErrno });
+        }
+        let raw = s
+            .parse::<u16>()
+            .map_err(|_| FlowWireError::NotDecimal { field: WireField::ControlErrno })?;
+        Self::new(raw)
     }
 }
 
 impl Serialize for KernelErrno {
-    fn serialize<S: Serializer>(&self, _serializer: S) -> Result<S::Ok, S::Error> {
-        panic!("{SCAFFOLD}")
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
     }
 }
 
 impl<'de> Deserialize<'de> for KernelErrno {
-    fn deserialize<D: Deserializer<'de>>(_deserializer: D) -> Result<Self, D::Error> {
-        panic!("{SCAFFOLD}")
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        text.parse().map_err(serde::de::Error::custom)
     }
 }
 
@@ -290,8 +416,7 @@ pub enum FlowRefusal {
     /// Code 3: leg-F or the DNS responder unavailable, or the allocation not
     /// intercept-live.
     IntakeUnavailable,
-    /// Code 4: pair table, per-allocation quota or guest parking cells
-    /// exhausted.
+    /// Code 4: pair table or per-allocation quota exhausted.
     Capacity,
     /// Code 5: the request failed to decode.
     Malformed,
@@ -318,17 +443,44 @@ pub enum FlowRefusal {
 impl FlowRefusal {
     /// The refusal code on the wire.
     pub const fn as_u8(self) -> u8 {
-        panic!("Not yet implemented -- RED scaffold")
+        match self {
+            Self::NotActive => 1,
+            Self::Policy => 2,
+            Self::IntakeUnavailable => 3,
+            Self::Capacity => 4,
+            Self::Malformed => 5,
+            Self::Unsupported => 6,
+            Self::Quiesced => 7,
+            Self::MeshUnreachable => 8,
+            Self::ResolveFailed => 9,
+            Self::DestinationUnreachable => 10,
+            Self::ApplicationRefused { .. } => 11,
+            Self::HostInternal => 12,
+        }
     }
 
     /// The refusal's canonical label.
     pub const fn as_str(self) -> &'static str {
-        panic!("Not yet implemented -- RED scaffold")
+        match self {
+            Self::NotActive => "not_active",
+            Self::Policy => "policy",
+            Self::IntakeUnavailable => "intake_unavailable",
+            Self::Capacity => "capacity",
+            Self::Malformed => "malformed",
+            Self::Unsupported => "unsupported",
+            Self::Quiesced => "quiesced",
+            Self::MeshUnreachable => "mesh_unreachable",
+            Self::ResolveFailed => "resolve_failed",
+            Self::DestinationUnreachable => "destination_unreachable",
+            Self::ApplicationRefused { .. } => "application_refused",
+            Self::HostInternal => "host_internal",
+        }
     }
 }
 
-/// An 8-byte message on the per-VM control session. Pairing replies and
-/// aborts only: a flow's half-close never touches the session (R2-END).
+/// An 8-byte message on the per-VM control session. Pairing replies,
+/// timeouts and aborts use this channel; a flow's half-close never touches
+/// the session (R2-END).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlMessage {
     /// Type 1: the acceptor paired `flow`.
@@ -366,12 +518,81 @@ pub enum ControlMessage {
 impl ControlMessage {
     /// The canonical 8-byte encoding.
     pub fn encode(&self) -> [u8; CONTROL_MESSAGE_LEN] {
-        panic!("{SCAFFOLD}")
+        let (kind, detail, errno, flow) = match self {
+            Self::Paired { flow } => (1, 0, 0, *flow),
+            Self::Refused { flow, refusal } => {
+                let errno = match refusal {
+                    FlowRefusal::ApplicationRefused { errno } => errno.get(),
+                    _ => 0,
+                };
+                (2, refusal.as_u8(), errno, *flow)
+            }
+            Self::Abort { flow } => (3, 0, 0, *flow),
+            Self::TimedOut { flow, errno } => (4, 0, errno.get(), *flow),
+        };
+        let mut bytes = [0; CONTROL_MESSAGE_LEN];
+        bytes[0] = kind;
+        bytes[1] = detail;
+        bytes[2..4].copy_from_slice(&errno.to_be_bytes());
+        bytes[4..8].copy_from_slice(&flow.get().to_be_bytes());
+        bytes
     }
 
     /// Decodes a canonical encoding.
-    pub fn decode(_bytes: &[u8; CONTROL_MESSAGE_LEN]) -> Result<Self, FlowWireError> {
-        panic!("{SCAFFOLD}")
+    pub fn decode(bytes: &[u8; CONTROL_MESSAGE_LEN]) -> Result<Self, FlowWireError> {
+        let kind = bytes[0];
+        let detail = bytes[1];
+        let errno_raw = u16::from_be_bytes([bytes[2], bytes[3]]);
+        let flow = FlowId(u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]));
+        match kind {
+            1 => {
+                if detail != 0 {
+                    return Err(FlowWireError::InvalidField { field: WireField::ControlDetail });
+                }
+                if errno_raw != 0 {
+                    return Err(FlowWireError::InvalidField { field: WireField::ControlErrno });
+                }
+                Ok(Self::Paired { flow })
+            }
+            2 => {
+                let refusal = match detail {
+                    1 => FlowRefusal::NotActive,
+                    2 => FlowRefusal::Policy,
+                    3 => FlowRefusal::IntakeUnavailable,
+                    4 => FlowRefusal::Capacity,
+                    5 => FlowRefusal::Malformed,
+                    6 => FlowRefusal::Unsupported,
+                    7 => FlowRefusal::Quiesced,
+                    8 => FlowRefusal::MeshUnreachable,
+                    9 => FlowRefusal::ResolveFailed,
+                    10 => FlowRefusal::DestinationUnreachable,
+                    11 => FlowRefusal::ApplicationRefused { errno: KernelErrno::new(errno_raw)? },
+                    12 => FlowRefusal::HostInternal,
+                    code => return Err(FlowWireError::UnknownRefusal { code }),
+                };
+                if !matches!(refusal, FlowRefusal::ApplicationRefused { .. }) && errno_raw != 0 {
+                    return Err(FlowWireError::InvalidField { field: WireField::ControlErrno });
+                }
+                Ok(Self::Refused { flow, refusal })
+            }
+            3 => {
+                if detail != 0 {
+                    return Err(FlowWireError::InvalidField { field: WireField::ControlDetail });
+                }
+                if errno_raw != 0 {
+                    return Err(FlowWireError::InvalidField { field: WireField::ControlErrno });
+                }
+                Ok(Self::Abort { flow })
+            }
+            4 => {
+                if detail != 0 {
+                    return Err(FlowWireError::InvalidField { field: WireField::ControlDetail });
+                }
+                let errno = KernelErrno::new(errno_raw)?;
+                Ok(Self::TimedOut { flow, errno })
+            }
+            ty => Err(FlowWireError::UnknownControlType { ty }),
+        }
     }
 }
 
@@ -501,24 +722,66 @@ pub struct DatagramFrame<'a> {
 
 impl<'a> DatagramFrame<'a> {
     /// `Err(Oversize)` when `payload.len() > MAX_GUEST_DATAGRAM_PAYLOAD`.
-    pub fn new(_payload: &'a [u8]) -> Result<Self, DatagramFrameError> {
-        panic!("{SCAFFOLD}")
+    pub fn new(payload: &'a [u8]) -> Result<Self, DatagramFrameError> {
+        if payload.len() > MAX_GUEST_DATAGRAM_PAYLOAD as usize {
+            return Err(DatagramFrameError::Oversize {
+                length: u64::try_from(payload.len()).unwrap_or(u64::MAX),
+                max: MAX_GUEST_DATAGRAM_PAYLOAD,
+            });
+        }
+        Ok(Self { payload })
     }
 
     /// The logical payload.
+    #[expect(
+        clippy::missing_const_for_fn,
+        reason = "the feature delta pins this as a non-const public accessor"
+    )]
     pub fn payload(&self) -> &'a [u8] {
-        panic!("{SCAFFOLD}")
+        self.payload
     }
 
     /// Header + payload, pre-sized (`DATAGRAM_FRAME_HEADER_LEN + payload.len()`).
     pub fn encode(&self) -> Vec<u8> {
-        panic!("{SCAFFOLD}")
+        let mut bytes = Vec::with_capacity(DATAGRAM_FRAME_HEADER_LEN + self.payload.len());
+        bytes.extend_from_slice(&DATAGRAM_FRAME_MAGIC);
+        let length = u32::try_from(self.payload.len()).unwrap_or(u32::MAX);
+        bytes.extend_from_slice(&length.to_be_bytes());
+        bytes.extend_from_slice(self.payload);
+        bytes
     }
 
     /// Accepts exactly one canonical frame: magic, length ≤ max, and
     /// `bytes.len() == DATAGRAM_FRAME_HEADER_LEN + length`.
-    pub fn decode(_bytes: &'a [u8]) -> Result<Self, DatagramFrameError> {
-        panic!("{SCAFFOLD}")
+    pub fn decode(bytes: &'a [u8]) -> Result<Self, DatagramFrameError> {
+        if bytes.len() < DATAGRAM_FRAME_HEADER_LEN {
+            return Err(DatagramFrameError::Truncated { len: bytes.len() });
+        }
+        let observed: [u8; 4] = bytes
+            .get(..4)
+            .and_then(|slice| slice.try_into().ok())
+            .ok_or(DatagramFrameError::Truncated { len: bytes.len() })?;
+        if observed != DATAGRAM_FRAME_MAGIC {
+            return Err(DatagramFrameError::BadMagic { observed });
+        }
+        let length_bytes: [u8; 4] = bytes
+            .get(4..8)
+            .and_then(|slice| slice.try_into().ok())
+            .ok_or(DatagramFrameError::Truncated { len: bytes.len() })?;
+        let declared = u32::from_be_bytes(length_bytes);
+        if declared > MAX_GUEST_DATAGRAM_PAYLOAD {
+            return Err(DatagramFrameError::Oversize {
+                length: u64::from(declared),
+                max: MAX_GUEST_DATAGRAM_PAYLOAD,
+            });
+        }
+        let payload = bytes
+            .get(DATAGRAM_FRAME_HEADER_LEN..)
+            .ok_or(DatagramFrameError::Truncated { len: bytes.len() })?;
+        if payload.len() != declared as usize {
+            return Err(DatagramFrameError::LengthMismatch { declared, actual: payload.len() });
+        }
+        Ok(Self { payload })
     }
 }
 
@@ -562,6 +825,10 @@ pub enum DatagramFrameError {
 
 /// The node-wide bound on concurrent flows (the host's pair capacity).
 pub const GUEST_FLOW_MAX_PAIRS: u32 = 65_536;
+
+fn is_decimal(text: &str) -> bool {
+    !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit())
+}
 
 // ---------------------------------------------------------------------------
 // E-list: the flow event record of the removed sockmap forwarder (R2-END,
@@ -693,7 +960,7 @@ impl FlowEvent {
 // Deadlines (one SSOT)
 // ---------------------------------------------------------------------------
 
-/// Acceptor reading a request; host matching datagram kinds 2 and 3.
+/// Acceptor reading a flow request.
 pub const FLOW_REQUEST_DEADLINE: Duration = Duration::from_secs(2);
 /// Guest opener of a datagram association waiting for `Paired` / `Refused`.
 pub const FLOW_PAIRING_DEADLINE: Duration = Duration::from_secs(5);

@@ -10,11 +10,9 @@
 //! [`dial`]; the flow forwarder's vocabulary and driven port (EVMOD-PORT) in
 //! [`forwarder`].
 //!
-//! RED scaffold (DISTILL, Mandate 7): every signature below is the one the
-//! design pins; every validating constructor, codec and derivation body
-//! panics until DELIVER step 2 ("core types and wire codec") replaces it.
-//! Plain data — constants and the `GuestTransportAssignment` handoff record —
-//! is real. No surface the design does not pin is added here.
+//! Core transport values, launch attribution and the wire/dial/forwarder
+//! contracts are pinned by the feature delta. Remaining bridge-era items are
+//! marked for removal with their last users at the attachment cut.
 //!
 //! Items marked **D-list** or **E-list** are on the feature-delta's
 //! "Bridge-era code for DELIVER to delete" inventory (§ D, § E): they are not
@@ -22,11 +20,6 @@
 //! them together with their remaining users.
 
 // SCAFFOLD: true — netns-density-295 DISTILL (vsock DELIVER step 2).
-#![expect(
-    clippy::unused_self,
-    reason = "RED scaffold bodies panic before reading their inputs; the lints self-trip when DELIVER lands the bodies"
-)]
-
 pub mod dial;
 pub mod forwarder;
 pub mod wire;
@@ -62,20 +55,25 @@ pub struct GuestCid(u32);
 impl GuestCid {
     /// Accepts `GUEST_CID_BASE..GUEST_CID_BASE + GUEST_CID_SPAN` only. The
     /// edge cases 0, 1, 2 and `u32::MAX` are `OutOfRange`.
-    pub fn new(_raw: u32) -> Result<Self, GuestCidError> {
-        panic!("{SCAFFOLD}")
+    pub fn new(raw: u32) -> Result<Self, GuestCidError> {
+        let end = GUEST_CID_BASE + GUEST_CID_SPAN;
+        if (GUEST_CID_BASE..end).contains(&raw) {
+            Ok(Self(raw))
+        } else {
+            Err(GuestCidError::OutOfRange { raw })
+        }
     }
 
     /// The raw CID.
     pub const fn get(self) -> u32 {
-        panic!("Not yet implemented -- RED scaffold")
+        self.0
     }
 }
 
 /// Decimal form.
 impl fmt::Display for GuestCid {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        panic!("{SCAFFOLD}")
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -83,20 +81,25 @@ impl fmt::Display for GuestCid {
 impl FromStr for GuestCid {
     type Err = GuestCidError;
 
-    fn from_str(_s: &str) -> Result<Self, Self::Err> {
-        panic!("{SCAFFOLD}")
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if !is_decimal(s) {
+            return Err(GuestCidError::Unparseable);
+        }
+        let raw = s.parse::<u32>().map_err(|_| GuestCidError::Unparseable)?;
+        Self::new(raw)
     }
 }
 
 impl Serialize for GuestCid {
-    fn serialize<S: Serializer>(&self, _serializer: S) -> Result<S::Ok, S::Error> {
-        panic!("{SCAFFOLD}")
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
     }
 }
 
 impl<'de> Deserialize<'de> for GuestCid {
-    fn deserialize<D: Deserializer<'de>>(_deserializer: D) -> Result<Self, D::Error> {
-        panic!("{SCAFFOLD}")
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        text.parse().map_err(serde::de::Error::custom)
     }
 }
 
@@ -121,10 +124,6 @@ pub enum GuestCidError {
 /// Host listens, `SOCK_STREAM`: guest-opened TCP flows and datagram
 /// associations (EVMOD-DGRAM: one STREAM per association).
 pub const GUEST_FLOW_STREAM_PORT: VsockPort = VsockPort::new(1240);
-/// **E-list** (EVMOD-DGRAM removes the SEQPACKET listener): the former
-/// guest-opened datagram-record port. Not pinned; DELIVER deletes it with its
-/// remaining users.
-pub const GUEST_FLOW_DATAGRAM_PORT: VsockPort = VsockPort::new(1241);
 /// Guest listens, `SOCK_STREAM`: host-opened `TcpAccept` flows.
 pub const GUEST_INBOUND_PORT: VsockPort = VsockPort::new(1242);
 /// Host listens, `SOCK_STREAM`: the per-VM control session (D18a).
@@ -166,7 +165,11 @@ pub enum NodeVsockListener {
 impl NodeVsockListener {
     /// `"beacon"` | `"flow_stream"` | `"flow_control"`.
     pub const fn as_str(self) -> &'static str {
-        panic!("Not yet implemented -- RED scaffold")
+        match self {
+            Self::Beacon => "beacon",
+            Self::FlowStream => "flow_stream",
+            Self::FlowControl => "flow_control",
+        }
     }
 }
 
@@ -339,25 +342,34 @@ pub struct LaunchToken([u8; 16]);
 
 impl LaunchToken {
     /// `Err(LaunchTokenError::Zero)` for sixteen zero bytes.
-    pub fn from_bytes(_bytes: [u8; 16]) -> Result<Self, LaunchTokenError> {
-        panic!("{SCAFFOLD}")
+    pub fn from_bytes(bytes: [u8; 16]) -> Result<Self, LaunchTokenError> {
+        if bytes == [0; 16] { Err(LaunchTokenError::Zero) } else { Ok(Self(bytes)) }
     }
 
     /// Draws a token; redraws until non-zero. Called only by the pool.
-    pub fn generate(_entropy: &dyn Entropy) -> Self {
-        panic!("{SCAFFOLD}")
+    pub fn generate(entropy: &dyn Entropy) -> Self {
+        loop {
+            let mut bytes = [0; 16];
+            entropy.fill(&mut bytes);
+            if let Ok(token) = Self::from_bytes(bytes) {
+                return token;
+            }
+        }
     }
 
     /// The token's bytes.
     pub const fn as_bytes(&self) -> &[u8; 16] {
-        panic!("Not yet implemented -- RED scaffold")
+        &self.0
     }
 }
 
 /// Exactly 32 lowercase hex characters.
 impl fmt::Display for LaunchToken {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        panic!("{SCAFFOLD}")
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for byte in self.0 {
+            write!(f, "{byte:02x}")?;
+        }
+        Ok(())
     }
 }
 
@@ -365,20 +377,42 @@ impl fmt::Display for LaunchToken {
 impl FromStr for LaunchToken {
     type Err = LaunchTokenError;
 
-    fn from_str(_s: &str) -> Result<Self, Self::Err> {
-        panic!("{SCAFFOLD}")
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let input = s.as_bytes();
+        if input.len() != 32 {
+            return Err(LaunchTokenError::Unparseable);
+        }
+
+        let mut bytes = [0; 16];
+        for (index, pair) in input.chunks_exact(2).enumerate() {
+            let Some(high_byte) = pair.first().copied() else {
+                return Err(LaunchTokenError::Unparseable);
+            };
+            let Some(low_byte) = pair.get(1).copied() else {
+                return Err(LaunchTokenError::Unparseable);
+            };
+            let Some(high) = lowercase_hex_digit(high_byte) else {
+                return Err(LaunchTokenError::Unparseable);
+            };
+            let Some(low) = lowercase_hex_digit(low_byte) else {
+                return Err(LaunchTokenError::Unparseable);
+            };
+            bytes[index] = (high << 4) | low;
+        }
+        Self::from_bytes(bytes)
     }
 }
 
 impl Serialize for LaunchToken {
-    fn serialize<S: Serializer>(&self, _serializer: S) -> Result<S::Ok, S::Error> {
-        panic!("{SCAFFOLD}")
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
     }
 }
 
 impl<'de> Deserialize<'de> for LaunchToken {
-    fn deserialize<D: Deserializer<'de>>(_deserializer: D) -> Result<Self, D::Error> {
-        panic!("{SCAFFOLD}")
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        text.parse().map_err(serde::de::Error::custom)
     }
 }
 
@@ -489,8 +523,24 @@ pub const GUEST_FORWARDER_MODULE_PATH: &str = "/lib/overdrive/ovd_fwd.ko";
 
 /// The reserved guest port range, inclusive: `GUEST_TCP_INTAKE_PORT ..=
 /// GUEST_UDP_SLOT_BASE + GUEST_UDP_SLOTS - 1`.
+#[expect(
+    clippy::missing_const_for_fn,
+    reason = "the feature delta pins this as a non-const public function"
+)]
 pub fn guest_reserved_ports() -> RangeInclusive<u16> {
-    panic!("{SCAFFOLD}")
+    GUEST_TCP_INTAKE_PORT..=GUEST_UDP_SLOT_BASE + GUEST_UDP_SLOTS - 1
+}
+
+fn is_decimal(text: &str) -> bool {
+    !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+const fn lowercase_hex_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -1247,7 +1247,6 @@ fn allocation_spec(name: &str) -> AllocationSpec {
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 2 (GuestCid / LaunchToken newtypes)"]
 async fn stop_and_owner_shutdown_during_pending_registration_return_registration_retired_and_drain_once()
  {
     for owner_shutdown in [false, true] {
@@ -1499,7 +1498,6 @@ async fn stopping_one_shared_allocation_preserves_the_unrelated_handle_and_compl
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 2 (GuestCid / LaunchToken newtypes)"]
 async fn owner_shutdown_waits_the_active_claim_then_drains_every_shared_capability_and_listener() {
     let intercept = Arc::new(RecordingSharedIntercept::new());
     let enforcement = RecordingSharedEnforcement::new();

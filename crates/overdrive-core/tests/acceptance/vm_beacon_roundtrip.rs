@@ -99,7 +99,6 @@ proptest! {
     /// Every READY — arbitrary `pid` / `port` and launch token — round-trips
     /// bit-exact through `Display -> FromStr` and renders on one line (DG-7).
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn ready_roundtrips_through_display_and_from_str(msg in ready_strategy()) {
         let rendered = msg.to_string();
         prop_assert!(!rendered.contains('\n'));
@@ -114,7 +113,6 @@ proptest! {
 /// `spike/findings.md:230`) — pinned so a mutation reordering the fields or
 /// renaming a key is caught.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn ready_message_renders_the_measured_wire_shape() {
     let msg = BeaconMessage::Ready { pid: 1, port: VsockPort::new(1234), launch: launch() };
     assert_eq!(msg.to_string(), format!("READY pid=1 port=1234 launch={LAUNCH_HEX}"));
@@ -146,7 +144,6 @@ fn from_str_tolerates_an_unstripped_trailing_newline() {
 
 /// The same trailing-terminator tolerance holds for the three-field READY.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn from_str_tolerates_an_unstripped_trailing_newline_after_ready() {
     let parsed: BeaconMessage =
         format!("READY pid=1 port=1234 launch={LAUNCH_HEX}\n").parse().unwrap();
@@ -178,7 +175,6 @@ fn from_str_rejects_an_unrecognised_kind() {
 /// READY keeps its key discipline for `pid` (DG-7 moves READY to three
 /// fields; the three-field refusals are in `vsock_wire_codec.rs`).
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn from_str_rejects_ready_with_missing_key_prefix() {
     let err = format!("READY 1 port=2 launch={LAUNCH_HEX}").parse::<BeaconMessage>().unwrap_err();
     assert!(
@@ -188,7 +184,6 @@ fn from_str_rejects_ready_with_missing_key_prefix() {
 }
 
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn from_str_rejects_ready_with_non_integer_pid() {
     let err =
         format!("READY pid=abc port=2 launch={LAUNCH_HEX}").parse::<BeaconMessage>().unwrap_err();

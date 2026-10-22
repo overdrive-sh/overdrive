@@ -2801,7 +2801,6 @@ mod launch_seccomp_kernel {
     /// CONTRACT_SHAPE: bounded-change.
     #[cfg(not(target_arch = "x86_64"))]
     #[tokio::test]
-    #[ignore = "pending DELIVER step 2 (`GuestCid::new` is a RED scaffold)"]
     async fn launch_on_a_target_without_a_program_is_refused_before_any_effect() {
         use overdrive_core::guest_transport::{GUEST_CID_BASE, GuestCid};
 

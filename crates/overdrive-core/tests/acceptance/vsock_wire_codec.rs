@@ -226,7 +226,6 @@ proptest! {
     /// bit-exact (ATTR-TOKEN), and the flow id's origin matches the kind.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn every_flow_request_round_trips(req in a_flow_request()) {
         let bytes = req.encode();
         prop_assert_eq!(bytes.len(), FLOW_REQUEST_LEN);
@@ -248,7 +247,6 @@ proptest! {
     /// re-encode to exactly those bytes.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn every_accepted_request_is_canonical(bytes in any::<[u8; FLOW_REQUEST_LEN]>()) {
         if let Ok(req) = FlowRequest::decode(&bytes) {
             prop_assert_eq!(req.encode(), bytes);
@@ -260,7 +258,6 @@ proptest! {
     /// refused — the arbitrary-bytes property rarely reaches past the magic.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn every_mutated_request_is_canonical_or_refused(
         req in a_flow_request(),
         index in 2usize..FLOW_REQUEST_LEN,
@@ -277,7 +274,6 @@ proptest! {
     /// 24 bytes it accepts are canonical.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn control_open_round_trips_and_is_canonical(
         launch in a_token(),
         bytes in any::<[u8; CONTROL_OPEN_LEN]>(),
@@ -298,7 +294,6 @@ proptest! {
 /// port 0 and the declared port (INB-1, ADR-0174).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn golden_flow_requests_pin_every_kind() {
     let destination = SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 7), 443);
     let guest_one = [0x00, 0x00, 0x00, 0x01];
@@ -335,7 +330,6 @@ fn golden_flow_requests_pin_every_kind() {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn golden_control_open() {
     let mut golden = [0u8; CONTROL_OPEN_LEN];
     golden[0..2].copy_from_slice(b"OC");
@@ -350,7 +344,6 @@ fn golden_control_open() {
 /// that carries one.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn an_all_zero_launch_token_is_refused_everywhere() {
     assert_eq!(LaunchToken::from_bytes([0u8; 16]), Err(LaunchTokenError::Zero));
     assert_eq!(LaunchToken::from_str(&"0".repeat(32)), Err(LaunchTokenError::Zero));
@@ -381,7 +374,6 @@ fn an_all_zero_launch_token_is_refused_everywhere() {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn the_flow_id_carries_its_origin_in_the_top_bit() {
     let max = guest_flow((1 << 31) - 1);
     assert_eq!(max.origin(), FlowOrigin::Guest);
@@ -401,7 +393,6 @@ fn the_flow_id_carries_its_origin_in_the_top_bit() {
 /// Every malformed request is refused with its typed cause (C6b).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn malformed_flow_requests_are_refused_with_their_cause() {
     let connect = || request_bytes(1, [0, 0, 0, 1], [192, 0, 2, 7], 443, 0);
     let accept = || request_bytes(4, [0x80, 0, 0, 2], [100, 95, 0, 1], 0, 8080);
@@ -473,7 +464,6 @@ fn malformed_flow_requests_are_refused_with_their_cause() {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn malformed_control_opens_are_refused_with_their_cause() {
     let base = ControlOpen { launch: token() }.encode();
 
@@ -504,7 +494,6 @@ fn malformed_control_opens_are_refused_with_their_cause() {
 /// hex form as its third field and round-trips.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn golden_ready_line_carries_the_launch_token() {
     let ready = BeaconMessage::Ready { pid: 1, port: VsockPort::new(1234), launch: token() };
     let golden = format!("READY pid=1 port=1234 launch={TOKEN_HEX}");
@@ -516,7 +505,6 @@ fn golden_ready_line_carries_the_launch_token() {
 /// `FieldCount { expected: 3 }`.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn ready_without_or_with_an_extra_field_is_refused_field_count() {
     let without = "READY pid=1 port=1234";
     match without.parse::<BeaconMessage>() {
@@ -538,7 +526,6 @@ fn ready_without_or_with_an_extra_field_is_refused_field_count() {
 /// "launch" }`, naming the token found.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn ready_whose_third_field_is_not_launch_is_refused_missing_key() {
     for third in [format!("token={TOKEN_HEX}"), TOKEN_HEX.to_owned(), format!("launch:{TOKEN_HEX}")]
     {
@@ -557,7 +544,6 @@ fn ready_whose_third_field_is_not_launch_is_refused_missing_key() {
 /// length and non-hex are `Unparseable`; all zero is `Zero`.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn ready_with_an_invalid_launch_token_is_refused_invalid_launch_token() {
     let cases = [
         (TOKEN_HEX.to_uppercase(), LaunchTokenError::Unparseable),
@@ -589,7 +575,6 @@ proptest! {
     /// Every control message a valid sender writes round-trips.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn every_control_message_round_trips(msg in a_control_message()) {
         let bytes = msg.encode();
         prop_assert_eq!(bytes.len(), CONTROL_MESSAGE_LEN);
@@ -601,7 +586,6 @@ proptest! {
     /// (R2-END).
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn every_accepted_control_message_is_canonical(bytes in any::<[u8; CONTROL_MESSAGE_LEN]>()) {
         if let Ok(msg) = ControlMessage::decode(&bytes) {
             prop_assert_eq!(msg.encode(), bytes);
@@ -623,7 +607,6 @@ proptest! {
 /// `TimedOut` carry the guest's errno in bytes 2..4 (INB-1).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn golden_control_messages_pin_every_type_and_refusal_code() {
     let flow = guest_flow(3);
     let accept = host_flow(3);
@@ -665,7 +648,6 @@ fn golden_control_messages_pin_every_type_and_refusal_code() {
 /// Every malformed control message is refused with its typed cause (C6b).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn malformed_control_messages_are_refused_with_their_cause() {
     // Types 5 and 6 (the removed end-of-direction messages) are undefined.
     for ty in [0u8, 5, 6, 7, 255] {
@@ -709,7 +691,6 @@ fn malformed_control_messages_are_refused_with_their_cause() {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn kinds_and_refusals_have_distinct_labels() {
     let kinds: BTreeSet<&str> =
         [FlowKind::TcpConnect, FlowKind::DatagramStream, FlowKind::TcpAccept]
@@ -740,7 +721,6 @@ proptest! {
     /// same form (the mandatory newtype roundtrip).
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn every_non_zero_errno_round_trips(raw in 1u16..=u16::MAX) {
         let errno = KernelErrno::new(raw).expect("a non-zero errno is accepted");
         prop_assert_eq!(errno.get(), raw);
@@ -754,7 +734,6 @@ proptest! {
 /// Errno 0 is refused; the named constants carry their Linux values.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn errno_zero_is_refused_and_the_named_errnos_carry_their_values() {
     assert_eq!(
         KernelErrno::new(0),
@@ -771,7 +750,6 @@ fn errno_zero_is_refused_and_the_named_errnos_carry_their_values() {
 /// non-decimal or out-of-width text as `NotDecimal`, naming the errno field.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn errno_text_that_is_zero_or_not_decimal_is_refused() {
     assert_eq!(
         "0".parse::<KernelErrno>(),
@@ -840,7 +818,6 @@ fn the_deadlines_carry_their_pinned_values_and_the_dial_outwaits_the_guest() {
 /// reservation.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn the_declared_port_strategy_excludes_exactly_the_guest_reservation() {
     assert_eq!(guest_reserved_ports(), 61_000..=62_024);
 }

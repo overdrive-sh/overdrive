@@ -30,6 +30,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::dataplane::backend_key::Proto;
+use crate::guest_transport::{GUEST_PROBE_SLOTS, guest_reserved_ports};
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -124,8 +125,6 @@ pub enum ParseError {
 
     /// A `[[listener]]` declared a port the guest reserves for its intakes
     /// (GH #295 D25). `first` / `last` are `guest_reserved_ports()`'s bounds.
-    // SCAFFOLD: true — netns-density-295 DISTILL; the ingress check that
-    // produces this variant lands with DELIVER step 2.
     #[error(
         "listener port {port} is reserved for the guest transport ({first}..={last}); choose a port outside this range"
     )]
@@ -286,8 +285,6 @@ pub enum ParseError {
     /// The spec's startup, readiness and liveness probes together exceed
     /// `GUEST_PROBE_SLOTS` (D-UP-12). `count` includes an inferred default
     /// startup probe (ADR-0058); `max` is `GUEST_PROBE_SLOTS`.
-    // SCAFFOLD: true — netns-density-295 DISTILL; the ingress check that
-    // produces this variant lands with DELIVER step 2.
     #[error(
         "[[health_check.*]] declares {count} probes across startup, readiness and liveness (including any inferred default startup probe); at most {max} probes per workload are supported"
     )]
@@ -801,6 +798,17 @@ impl WorkloadSpecInput {
             // reconciler's liveness branch is a no-op for this Service).
             let liveness_probes = parse_liveness_probes(table)?;
 
+            let probe_count = startup_probes
+                .len()
+                .saturating_add(readiness_probes.len())
+                .saturating_add(liveness_probes.len());
+            if probe_count > GUEST_PROBE_SLOTS as usize {
+                return Err(ParseError::ProbeCountExceeded {
+                    count: probe_count,
+                    max: GUEST_PROBE_SLOTS,
+                });
+            }
+
             return Ok(Self::Service(ServiceSpec {
                 id,
                 replicas,
@@ -1052,6 +1060,14 @@ fn parse_one_listener(entry: &toml::value::Table) -> Result<Listener, ParseError
         section: "[[listener]]",
         message: "field `port` must be in 1..=65535".to_string(),
     })?;
+    let reserved = guest_reserved_ports();
+    if reserved.contains(&port_u16) {
+        return Err(ParseError::ListenerPortReserved {
+            port: port_u16,
+            first: *reserved.start(),
+            last: *reserved.end(),
+        });
+    }
     let port = NonZeroU16::new(port_u16).ok_or(ParseError::ListenerPortZero)?;
 
     // protocol — required string, case-insensitive `tcp` / `udp`.

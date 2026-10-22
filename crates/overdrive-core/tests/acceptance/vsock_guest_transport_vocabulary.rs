@@ -77,7 +77,6 @@ proptest! {
     /// round-trips through the same form.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn every_lease_offset_derives_a_cid_that_round_trips(offset in 0u32..GUEST_CID_SPAN) {
         let raw = GUEST_CID_BASE + offset;
         let cid = GuestCid::new(raw).expect("in-range CID accepted");
@@ -96,7 +95,6 @@ proptest! {
     /// derived CIDs order as their offsets.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn distinct_lease_offsets_never_share_a_cid(
         a in 0u32..GUEST_CID_SPAN,
         b in 0u32..GUEST_CID_SPAN,
@@ -109,7 +107,6 @@ proptest! {
     /// constructor and by `FromStr`.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn every_value_outside_the_span_is_out_of_range(
         raw in prop_oneof![0u32..GUEST_CID_BASE, (GUEST_CID_BASE + GUEST_CID_SPAN)..=u32::MAX],
     ) {
@@ -122,7 +119,6 @@ proptest! {
 /// are never leasable; the span's last CID is, the next one is not.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn the_kernel_reserved_cids_are_never_leasable() {
     for raw in [0u32, 1, 2, u32::MAX, GUEST_CID_BASE - 1, GUEST_CID_BASE + GUEST_CID_SPAN] {
         assert_eq!(GuestCid::new(raw), Err(GuestCidError::OutOfRange { raw }), "CID {raw}");
@@ -152,7 +148,6 @@ proptest! {
     /// lowercase hex form and serde.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn launch_token_round_trips(bytes in proptest::array::uniform16(any::<u8>())) {
         prop_assume!(bytes != [0u8; 16]);
         let token = LaunchToken::from_bytes(bytes).expect("non-zero bytes accepted");
@@ -171,7 +166,6 @@ proptest! {
     /// seed yields the same token, and a drawn token is never all zero.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn a_launch_token_is_drawn_from_the_injected_entropy(seed in any::<u64>()) {
         let first = token(seed);
         let again = token(seed);
@@ -182,7 +176,6 @@ proptest! {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn launch_token_rejects_all_zero_upper_case_and_wrong_length() {
     assert_eq!(LaunchToken::from_bytes([0u8; 16]), Err(LaunchTokenError::Zero));
     assert_eq!("0".repeat(32).parse::<LaunchToken>(), Err(LaunchTokenError::Zero));
@@ -209,7 +202,6 @@ fn launch_token_rejects_all_zero_upper_case_and_wrong_length() {
 /// with it (CID-NOCLAIM).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn the_handoff_reports_the_lease_the_pool_assigned() {
     let launch = token(0x295);
     let assignment = GuestTransportAssignment::new(
@@ -234,7 +226,6 @@ fn the_handoff_reports_the_lease_the_pool_assigned() {
 /// same handoff.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn a_new_launch_of_the_same_cid_is_a_different_handoff() {
     let first = GuestTransportAssignment::new(
         workload_addr(),
@@ -280,7 +271,6 @@ proptest! {
     /// / serde round-trip through the decimal form.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn listen_port_round_trips(raw in 1u16..=u16::MAX) {
         let port = ListenPort::new(raw).expect("a non-zero port is accepted");
         prop_assert_eq!(port.get(), raw);
@@ -294,7 +284,6 @@ proptest! {
     /// `FromStr` / serde round-trip.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn interface_index_round_trips(raw in 1u32..=u32::MAX) {
         let index = InterfaceIndex::new(raw).expect("a non-zero index is accepted");
         prop_assert_eq!(index.get(), raw);
@@ -308,7 +297,6 @@ proptest! {
     /// the plan's ascending `listen_ports()`).
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn listen_ports_order_by_value(a in 1u16..=u16::MAX, b in 1u16..=u16::MAX) {
         let pa = ListenPort::new(a).expect("non-zero");
         let pb = ListenPort::new(b).expect("non-zero");
@@ -319,7 +307,6 @@ proptest! {
     /// `Zero` and never accepted.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn non_decimal_text_is_unparseable(text in "[0-9]{0,3}[^0-9+][^0-9]{0,4}[0-9]{0,3}") {
         prop_assert_eq!(text.parse::<ListenPort>(), Err(ListenPortError::Unparseable));
         prop_assert_eq!(text.parse::<InterfaceIndex>(), Err(InterfaceIndexError::Unparseable));
@@ -328,7 +315,6 @@ proptest! {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn zero_is_refused_zero_by_the_constructors_from_str_and_serde() {
     assert_eq!(ListenPort::new(0), Err(ListenPortError::Zero));
     assert_eq!(InterfaceIndex::new(0), Err(InterfaceIndexError::Zero));
@@ -340,7 +326,6 @@ fn zero_is_refused_zero_by_the_constructors_from_str_and_serde() {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn out_of_range_and_malformed_text_is_unparseable() {
     for text in ["", "65536", "-1", "eighty", "0x50", " 80", "80 "] {
         assert_eq!(text.parse::<ListenPort>(), Err(ListenPortError::Unparseable), "{text:?}");
@@ -442,7 +427,6 @@ fn the_guest_kit_module_path_is_the_pinned_absolute_path() {
 /// guest kernel's default ephemeral range (32,768–60,999).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn the_reserved_range_holds_the_tcp_intake_and_every_udp_slot_above_the_ephemeral_range() {
     let range = guest_reserved_ports();
     assert_eq!(*range.start(), GUEST_TCP_INTAKE_PORT);

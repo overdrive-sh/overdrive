@@ -95,7 +95,6 @@ fn service_submit_with_listeners(ports: &[(u16, &str)]) -> ServiceSpecInput {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn deploy_refuses_reserved_listener_port_naming_the_range() {
     let range = guest_reserved_ports();
     let (first, last) = (*range.start(), *range.end());
@@ -123,7 +122,6 @@ fn deploy_refuses_reserved_listener_port_naming_the_range() {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn api_ingress_refuses_reserved_listener_port_with_validation() {
     // Same rule at the operator submit ingress → AggregateError::Validation
     // keyed on the listener-port field, carrying the ParseError Display text.
@@ -157,7 +155,6 @@ fn api_ingress_refuses_reserved_listener_port_with_validation() {
 /// the reserved port — the ordinary listener does not mask it.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn deploy_refuses_a_reserved_port_among_ordinary_listeners() {
     let toml = service_toml_with_listeners(&[(8080, "tcp"), (53, "udp"), (61_001, "udp")]);
     match WorkloadSpecInput::from_toml_str(&toml) {
@@ -182,7 +179,6 @@ proptest! {
     // port lies inside guest_reserved_ports(), for either protocol.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn deploy_refusal_iff_port_in_reserved_range(
         port in 60_000u16..=63_000,
         tcp in any::<bool>(),
@@ -249,7 +245,6 @@ fn service_submit_with_probes(startup: u32, readiness: u32, liveness: u32) -> Se
 /// survives into the intent.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn deploy_accepts_eight_probes_in_total_in_any_shape() {
     for (startup, readiness, liveness) in [(3usize, 3usize, 2usize), (8, 0, 0), (1, 0, 7)] {
         let toml = service_toml_with_probes(startup, readiness, liveness);
@@ -277,7 +272,6 @@ fn deploy_accepts_eight_probes_in_total_in_any_shape() {
 /// default startup probe is the ninth, and nine declared probes.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn deploy_refuses_nine_probes_counting_the_inferred_startup_probe() {
     for (startup, readiness, liveness) in [(0usize, 4usize, 4usize), (9, 0, 0), (3, 3, 3)] {
         let toml = service_toml_with_probes(startup, readiness, liveness);
@@ -300,7 +294,6 @@ fn deploy_refuses_nine_probes_counting_the_inferred_startup_probe() {
 /// "probes" }` carrying the `ProbeCountExceeded` text, and accepts eight.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 2"]
 fn api_ingress_refuses_nine_probes_with_validation() {
     let expected = ParseError::ProbeCountExceeded { count: 9, max: GUEST_PROBE_SLOTS }.to_string();
     for (startup, readiness, liveness) in [(1u32, 4u32, 4u32), (9, 0, 0), (0, 4, 5)] {
@@ -338,7 +331,6 @@ proptest! {
     // startup section is written — exceeds GUEST_PROBE_SLOTS.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 2"]
     fn deploy_refusal_iff_the_probe_count_exceeds_the_cap(
         startup in 0usize..=6,
         readiness in 0usize..=6,

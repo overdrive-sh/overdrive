@@ -304,10 +304,6 @@ fn strip_key<'a>(
 }
 
 /// Parses a `key=<u32>` field into its integer value.
-#[expect(
-    dead_code,
-    reason = "RED scaffold: `parse_ready` (DG-2 row 13) uses it again when the attachment cut lands"
-)]
 fn parse_u32_field(
     kind: &'static str,
     field: &'static str,
@@ -325,11 +321,12 @@ fn parse_u32_field(
 
 /// READY's wire form, `READY pid=<pid> port=<port> launch=<token>` (DG-7).
 ///
-/// RED scaffold (DISTILL): DG-2 row 13 — the READY `launch=` field lands in
-/// the attachment cut.
-// SCAFFOLD: true — netns-density-295 DISTILL (DG-2 row 13, attachment cut).
-fn fmt_ready(_message: &BeaconMessage, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    panic!("Not yet implemented -- RED scaffold")
+/// Renders the READY line with its launch token.
+fn fmt_ready(message: &BeaconMessage, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    let BeaconMessage::Ready { pid, port, launch } = message else {
+        return Err(fmt::Error);
+    };
+    write!(f, "READY pid={pid} port={} launch={launch}", port.as_u32())
 }
 
 /// Parses READY's three fields (DG-7): two or four fields →
@@ -337,11 +334,19 @@ fn fmt_ready(_message: &BeaconMessage, _f: &mut fmt::Formatter<'_>) -> fmt::Resu
 /// `MissingKey { field: "launch" }`; `v` failing `LaunchToken::from_str` →
 /// `InvalidLaunchToken`.
 ///
-/// RED scaffold (DISTILL): DG-2 row 13 — the READY `launch=` field lands in
-/// the attachment cut.
-// SCAFFOLD: true — netns-density-295 DISTILL (DG-2 row 13, attachment cut).
-fn parse_ready(_raw: &str, _rest: &[&str]) -> Result<BeaconMessage, BeaconParseError> {
-    panic!("Not yet implemented -- RED scaffold")
+/// Parses the READY line and validates its launch token.
+fn parse_ready(raw: &str, rest: &[&str]) -> Result<BeaconMessage, BeaconParseError> {
+    const KIND: &str = "READY";
+    check_field_count(KIND, 3, rest, raw)?;
+    let pid = parse_u32_field(KIND, "pid", rest[0], raw)?;
+    let port = parse_u32_field(KIND, "port", rest[1], raw)?;
+    let launch_text = strip_key(KIND, "launch", rest[2], raw)?;
+    let launch = launch_text.parse().map_err(|source| BeaconParseError::InvalidLaunchToken {
+        kind: KIND,
+        raw: raw.to_string(),
+        source,
+    })?;
+    Ok(BeaconMessage::Ready { pid, port: VsockPort::new(port), launch })
 }
 
 fn parse_exit(raw: &str, rest: &[&str]) -> Result<BeaconMessage, BeaconParseError> {

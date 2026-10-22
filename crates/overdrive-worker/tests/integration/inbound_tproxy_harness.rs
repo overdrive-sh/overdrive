@@ -146,39 +146,6 @@ pub fn nft_list_chain() -> Result<String, String> {
     }
 }
 
-/// Count the per-virt INBOUND capture rules whose match is
-/// `ip daddr <workload_addr> tcp dport <service_port>` in the chain dump. nft
-/// renders an appended inbound rule as e.g. `ip daddr 10.99.0.2 tcp dport 18555
-/// tproxy to 127.0.0.1:36533 ... # handle 3`.
-pub fn count_inbound_rules(dump: &str, workload_addr: Ipv4Addr, service_port: u16) -> usize {
-    let daddr = format!("ip daddr {workload_addr}");
-    let dport = format!("tcp dport {service_port}");
-    dump.lines()
-        .filter(|l| l.contains(&daddr) && l.contains(&dport) && l.contains("tproxy to 127.0.0.1:"))
-        .count()
-}
-
-/// The `tproxy to 127.0.0.1:<port>` redirect TARGET of the inbound rule for
-/// `(workload_addr, service_port)`, if present — the ephemeral leg-C port the
-/// production install threads in. Parses the single matching rule line.
-pub fn inbound_rule_tproxy_target_port(
-    dump: &str,
-    workload_addr: Ipv4Addr,
-    service_port: u16,
-) -> Option<u16> {
-    let daddr = format!("ip daddr {workload_addr}");
-    let dport = format!("tcp dport {service_port}");
-    let marker = "tproxy to 127.0.0.1:";
-    dump.lines().find(|l| l.contains(&daddr) && l.contains(&dport) && l.contains(marker)).and_then(
-        |line| {
-            let after = line.split(marker).nth(1)?;
-            // The port runs up to the first non-digit (a space before `meta`).
-            let digits: String = after.chars().take_while(char::is_ascii_digit).collect();
-            digits.parse::<u16>().ok()
-        },
-    )
-}
-
 /// Build an [`AllocationSpec`] for the inbound scenarios. `workload_addr` +
 /// `service_ports` are the channel the C3 provision seam + `WorkloadLifecycle`
 /// populate in production (01-02); the AT supplies them directly to drive the
