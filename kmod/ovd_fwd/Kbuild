@@ -1,0 +1,3 @@
+# SPDX-License-Identifier: GPL-2.0
+obj-m += ovd_fwd.o
+ccflags-y += -I$(src)/include/uapi

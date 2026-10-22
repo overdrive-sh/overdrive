@@ -206,6 +206,10 @@ log "shared provisioning (infra/provision)"
 # ---------------------------------------------------------------------------
 "${REPO}/infra/provision/common-system.sh"
 
+log "running-kernel module build prerequisites"
+apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends \
+	"linux-headers-$(uname -r)" musl-tools
+
 # ---------------------------------------------------------------------------
 log "Quint formal-methods toolchain (infra/provision/install-quint.sh)"
 # ---------------------------------------------------------------------------

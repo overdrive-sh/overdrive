@@ -100,6 +100,14 @@ enum Task {
     /// contract path. See `xtask/src/guest_kit_prepare.rs`.
     GuestKitPrepare,
 
+    /// Build the out-of-tree forwarder module for one kernel release.
+    /// The output is workspace-scoped at `target/kmod/<release>/`.
+    KmodBuild {
+        /// Kernel build tree. Defaults to `/lib/modules/$(uname -r)/build`.
+        #[arg(long, value_name = "DIR")]
+        kernel_build_dir: Option<std::path::PathBuf>,
+    },
+
     /// Lane setup (FWD-PREREQ, GH #295; MODULE-REFCOUNT): loads this
     /// workspace's forwarder module (`<workspace>/target/kmod/<uname
     /// -r>/ovd_fwd.ko`, built by `kmod-build`) into the running kernel. A
@@ -465,6 +473,10 @@ fn run() -> Result<()> {
         Task::GuestKitPrepare => {
             let root = workspace_root_dir()?;
             xtask::guest_kit_prepare::run(&root, &cargo_target_dir(&root))
+        }
+        Task::KmodBuild { kernel_build_dir } => {
+            let root = workspace_root_dir()?;
+            xtask::kmod_build::run(&root, kernel_build_dir.as_deref())
         }
         Task::KmodLoad { busy_ok } => {
             let root = workspace_root_dir()?;

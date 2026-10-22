@@ -11,6 +11,7 @@ pub mod conformance_lint;
 pub mod dev_setup;
 pub mod dst_lint;
 pub mod guest_kit_prepare;
+pub mod kmod_build;
 pub mod kmod_load;
 pub mod mutants;
 pub mod quint;

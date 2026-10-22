@@ -117,6 +117,10 @@ param:
   # not the number.
   WASMTIME_VERSION:         "v46.0.2"
   PWRU_VERSION:             "v1.0.11"
+  # Linux 7.0's checker-valid.sh probes __typeof_unqual__. The Ubuntu sparse
+  # package is older than that parser support, so install this validated
+  # sparse development revision until the distro package passes the probe.
+  SPARSE_COMMIT:             "c4640450b84718f4ec8f14138e5cb28256078f7b"
   # Quint formal-methods toolchain (specs/quint/**, `cargo xtask quint`).
   # Mirrors the pins in infra/provision/install-quint.sh (the CI installer);
   # keep the two aligned. Held at v0.32.0 below latest (v0.33.0, 2026-09-28):
@@ -171,6 +175,24 @@ provision:
           tcpdump iproute2 bridge-utils \
           python3 python3-venv python3-pip pipx \
           e2fsprogs
+
+      # The module must be built against the running kernel, including its
+      # generated headers rather than only the userspace UAPI headers.
+      apt-get install -y --no-install-recommends "linux-headers-$(uname -r)"
+
+      # Build the sparse revision that passes the pinned Linux 7.0
+      # checker's __typeof_unqual__ validation.
+      SPARSE_SOURCE="$(mktemp -d)"
+      trap 'rm -rf "${SPARSE_SOURCE}"' EXIT
+      git -C "${SPARSE_SOURCE}" init
+      git -C "${SPARSE_SOURCE}" remote add origin \
+        https://git.kernel.org/pub/scm/devel/sparse/sparse.git
+      git -C "${SPARSE_SOURCE}" fetch --depth=1 origin "{{ .Param.SPARSE_COMMIT }}"
+      git -C "${SPARSE_SOURCE}" checkout --detach FETCH_HEAD
+      test "$(git -C "${SPARSE_SOURCE}" rev-parse HEAD)" = "{{ .Param.SPARSE_COMMIT }}"
+      make -C "${SPARSE_SOURCE}" LLVM_CONFIG=/bin/false sparse
+      install -m 0755 "${SPARSE_SOURCE}/sparse" /usr/local/bin/sparse
+      sparse --version
 
       # Kernel-matched tools — linux-tools-generic covers the stock
       # kernel but the VM image may ship a newer one. Try the exact

@@ -171,13 +171,17 @@ pub fn run(workspace_root: &Path, target_dir: &Path) -> Result<()> {
     require(&forwarder_module_path(workspace_root, &release), "ovd_fwd.ko")?;
 
     let triple = musl_target_triple()?;
-    run_step(
-        Command::new("cargo")
-            .args(["build", "--package", "overdrive-testing", "--bin", GUEST_PEER_BIN])
-            .args(["--target", triple, "--release"])
-            .current_dir(workspace_root),
-        "building overdrive-guest-peer",
-    )?;
+    let mut guest_peer_build = Command::new("cargo");
+    guest_peer_build
+        .args(["build", "--package", "overdrive-testing", "--bin", GUEST_PEER_BIN])
+        .args(["--target", triple, "--release"])
+        .current_dir(workspace_root);
+    if triple == "x86_64-unknown-linux-musl" {
+        guest_peer_build
+            .env("CC_x86_64_unknown_linux_musl", "musl-gcc")
+            .env("CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER", "musl-gcc");
+    }
+    run_step(&mut guest_peer_build, "building overdrive-guest-peer")?;
     require(&guest_peer_path(target_dir, triple), GUEST_PEER_BIN)?;
 
     for lane in IN_GUEST_LANES {

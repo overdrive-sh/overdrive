@@ -172,6 +172,8 @@ pre-commit:
           echo "nextest-affected: no owning crate resolved for staged files; skipping"
           exit 0
         fi
+        cargo xtask lima run -- cargo xtask kmod-build
+        cargo xtask lima run -- cargo xtask kmod-load --busy-ok
         # Join crate names into `rdeps(c1) | rdeps(c2) | ...`.
         filter=$(echo "$pkgs" | awk 'BEGIN{sep=""} {printf "%srdeps(%s)", sep, $0; sep=" | "}')
         echo "nextest-affected: filter = $filter"
@@ -234,6 +236,10 @@ pre-push:
     - merge
     - rebase
   commands:
+    kmod-prepare:
+      run: |
+        cargo xtask lima run -- cargo xtask kmod-build
+        cargo xtask lima run -- cargo xtask kmod-load --busy-ok
     # Unit + integration + proptest via nextest. `cargo-nextest` must be
     # installed locally — run `cargo xtask dev-setup` once per clone, or
     # install manually via `cargo install cargo-nextest --locked` /

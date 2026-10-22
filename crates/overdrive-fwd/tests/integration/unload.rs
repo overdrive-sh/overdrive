@@ -141,7 +141,6 @@ fn precondition_idle_workspace_module() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step K"]
 fn an_open_context_refuses_the_unload_and_its_close_lets_it_succeed() {
     precondition_idle_workspace_module();
 

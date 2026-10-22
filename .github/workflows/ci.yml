@@ -434,6 +434,11 @@ jobs:
         if: steps.sccache-setup.outcome != 'success'
         run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
 
+      - name: Build and load forwarder module
+        run: |
+          cargo xtask lima run -- cargo xtask kmod-build
+          cargo xtask lima run -- cargo xtask kmod-load
+
       - name: cargo nextest run --workspace --features integration-tests (profile=ci)
         # Filter `binary(integration)` selects the integration entrypoint
         # binaries; the source-local host and control-plane modules are
@@ -1478,4 +1483,3 @@ jobs:
         if: always()
         timeout-minutes: 1
         run: limactl stop --force overdrive || true
-

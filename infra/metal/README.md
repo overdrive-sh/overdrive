@@ -47,6 +47,7 @@ anything inside a test. Run the lane setup first, in the same
 ```bash
 cargo xtask metal run -- bash -c 'OVERDRIVE_BPF_NATIVE=1 cargo xtask bpf-build \
   && cargo xtask guest-kit-prepare \
+  && cargo xtask kmod-load \
   && cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests …'
 ```
 
@@ -54,6 +55,11 @@ cargo xtask metal run -- bash -c 'OVERDRIVE_BPF_NATIVE=1 cargo xtask bpf-build \
 scripted guest peer and the in-guest test binaries, and stages each at the
 path the fixture reads (`xtask/src/guest_kit_prepare.rs`). A missing
 artefact makes the fixture refuse with `LaneNotPrepared`, naming the path.
+It also requires the running kernel's build tree and `sparse`, installed by
+`infra/metal/provision.sh`; sparse is built from the pinned upstream commit
+that passes the kernel's `checker-valid.sh`, and `musl-tools` builds the
+static guest peer. The separate `kmod-load` step loads this workspace's module
+on the host; the guest kit loads its own copy in its microVM.
 
 ## Things that cost time on 2026-08-10 — read before debugging
 

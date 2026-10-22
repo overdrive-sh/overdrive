@@ -51,6 +51,24 @@ apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends \
     python3 python3-venv python3-pip pipx \
     e2fsprogs xfsprogs rsync smartmontools
 
+# Ubuntu's sparse 0.6.4 package cannot parse the __typeof_unqual__ probe
+# required by the pinned Linux 7.0 checker. Install the validated upstream
+# revision in /usr/local/bin, ahead of the distro copy.
+log "sparse ${SPARSE_COMMIT}"
+SPARSE_SOURCE="$(mktemp -d)"
+trap 'rm -rf "${SPARSE_SOURCE}"' EXIT
+git -C "${SPARSE_SOURCE}" init
+git -C "${SPARSE_SOURCE}" remote add origin \
+  https://git.kernel.org/pub/scm/devel/sparse/sparse.git
+git -C "${SPARSE_SOURCE}" fetch --depth=1 origin "${SPARSE_COMMIT}"
+git -C "${SPARSE_SOURCE}" checkout --detach FETCH_HEAD
+test "$(git -C "${SPARSE_SOURCE}" rev-parse HEAD)" = "${SPARSE_COMMIT}"
+make -C "${SPARSE_SOURCE}" LLVM_CONFIG=/bin/false sparse
+install -m 0755 "${SPARSE_SOURCE}/sparse" /usr/local/bin/sparse
+sparse --version
+rm -rf "${SPARSE_SOURCE}"
+trap - EXIT
+
 # ---------------------------------------------------------------------------
 # Cloud Hypervisor — single static binary from the upstream release.
 # ---------------------------------------------------------------------------
