@@ -15,8 +15,10 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+set -a
 # shellcheck disable=SC1091
-set -a; . "${HERE}/versions.env"; set +a
+. "${HERE}/versions.env"
+set +a
 
 log() { printf '\n=== [common-system] %s\n' "$*"; }
 
@@ -70,31 +72,10 @@ sparse --version
 rm -rf "${SPARSE_SOURCE}"
 trap - EXIT
 
-# ---------------------------------------------------------------------------
-# Cloud Hypervisor — single static binary from the upstream release.
-# ---------------------------------------------------------------------------
-log "cloud-hypervisor ${CLOUD_HYPERVISOR_VERSION}"
-ARCH="$(uname -m)"
-case "${ARCH}" in
-  x86_64)  CH_ASSET="cloud-hypervisor-static" ;;
-  aarch64) CH_ASSET="cloud-hypervisor-static-aarch64" ;;
-  *) echo "unsupported arch: ${ARCH}" >&2; exit 1 ;;
-esac
-
-if ! command -v cloud-hypervisor >/dev/null 2>&1 \
-   || ! cloud-hypervisor --version 2>&1 | grep -qF "${CLOUD_HYPERVISOR_VERSION#v}"; then
-  curl -fsSL -o /usr/local/bin/cloud-hypervisor \
-    "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/${CLOUD_HYPERVISOR_VERSION}/${CH_ASSET}"
-  chmod +x /usr/local/bin/cloud-hypervisor
-fi
-cloud-hypervisor --version
-
-# Fail loudly if the build lacks Landlock. P5's confinement work depends on it,
-# and discovering its absence at probe time reads as an unrelated failure.
-if ! cloud-hypervisor --help 2>&1 | grep -q -- '--landlock'; then
-  echo "FATAL: this cloud-hypervisor build has no --landlock; P5 cannot run" >&2
-  exit 1
-fi
+# Cloud Hypervisor is intentionally not installed in root mode. The pinned
+# fork is built from source and checksum-gated by common-user.sh after the
+# user's Rust toolchain and native musl compiler are available.
+log "cloud-hypervisor installation deferred to common-user.sh"
 
 log "virtiofsd"
 [ -x "${VIRTIOFSD_BIN}" ] || { echo "FATAL: ${VIRTIOFSD_BIN} missing" >&2; exit 1; }

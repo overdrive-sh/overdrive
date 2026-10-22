@@ -29,6 +29,36 @@
 // module of the matching name shifts the lookup base so the per-scenario
 // files under `tests/integration/` resolve naturally.
 mod integration {
+    /// The production numeric VMM uid/gid pair with the groups that own the two
+    /// devices the confined fork opens. Native KVM tests share this one
+    /// test-support derivation so their launch identity cannot drift by
+    /// hard-coded host device gids.
+    #[cfg(feature = "kvm-tests")]
+    fn production_vmm_identity() -> overdrive_core::vm::config::VmmIdentity {
+        use std::os::unix::fs::MetadataExt as _;
+
+        use overdrive_core::vm::config::{Gid, OVERDRIVE_VMM_UID, VmmIdentity};
+
+        let group_of = |device: &str| {
+            Gid::new(
+                std::fs::metadata(device)
+                    .unwrap_or_else(|error| panic!("stat {device}: {error}"))
+                    .gid(),
+            )
+        };
+        let kvm = group_of("/dev/kvm");
+        let vhost = group_of("/dev/vhost-vsock");
+        // The production composition uses the reserved numeric pair 4200:4200
+        // and discovers the device groups into a non-empty supplementary set.
+        // Keep KVM first as the existing owner path does; add vhost-vsock only
+        // when it is a distinct group. `--groups=` must never render empty.
+        let mut supplementary = vec![kvm];
+        if vhost != kvm {
+            supplementary.push(vhost);
+        }
+        VmmIdentity { uid: OVERDRIVE_VMM_UID, gid: Gid::new(OVERDRIVE_VMM_UID), supplementary }
+    }
+
     // built-in-ca (GH #28) — RcgenCa real-crypto acceptance.
     mod rcgen_ca_chain_verify;
     mod rcgen_ca_root_key_envelope;

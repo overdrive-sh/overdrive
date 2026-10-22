@@ -655,7 +655,6 @@ mod tests {
     /// exits; `terminate` releases it.
     /// `CONTRACT_SHAPE`: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER attachment-cut step (3)"]
     async fn a_launch_holds_its_cid_device_until_terminate() {
         let root = tempfile::tempdir().expect("tempdir");
         let sim = SimVmm::new();
@@ -677,7 +676,6 @@ mod tests {
     /// dial) with the device-setup diagnostic; the holder keeps its device.
     /// `CONTRACT_SHAPE`: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER attachment-cut step (3)"]
     async fn a_launch_on_a_held_cid_exits_before_ready_and_the_holder_is_unaffected() {
         let root = tempfile::tempdir().expect("tempdir");
         let sim = SimVmm::new();
@@ -702,7 +700,6 @@ mod tests {
     /// device is released; the CID is free for the next launch at once.
     /// `CONTRACT_SHAPE`: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER attachment-cut step (3)"]
     async fn a_guest_reset_ends_the_vmm_and_frees_its_cid() {
         let root = tempfile::tempdir().expect("tempdir");
         let sim = SimVmm::new();
@@ -723,7 +720,6 @@ mod tests {
     /// running with its device until it is killed.
     /// `CONTRACT_SHAPE`: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER attachment-cut step (3)"]
     async fn an_orphan_keeps_its_device_until_killed() {
         let root = tempfile::tempdir().expect("tempdir");
         let sim = SimVmm::new();

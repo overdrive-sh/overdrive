@@ -25,8 +25,8 @@ use overdrive_core::cgroup::CgroupPath;
 use overdrive_core::guest_transport::{GUEST_CID_BASE, GuestCid};
 use overdrive_core::traits::vmm::{VmTermination, Vmm};
 use overdrive_core::vm::config::{
-    Gid, HostArch, KERNEL_MAGIC_WINDOW, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan,
-    VmConfig, VmConfinement, VmRunDir, VmmIdentity,
+    HostArch, KERNEL_MAGIC_WINDOW, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan, VmConfig,
+    VmConfinement, VmRunDir,
 };
 use overdrive_host::CloudHypervisorVmm;
 use overdrive_sim::SimVmm;
@@ -59,11 +59,8 @@ fn validated_kernel(fixture: &VmFixture) -> KernelImage {
         .expect("fixture-staged kernel validates for x86_64")
 }
 
-const fn sample_confinement() -> VmConfinement {
-    VmConfinement::confined(
-        VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: vec![] },
-        1024,
-    )
+fn sample_confinement() -> VmConfinement {
+    VmConfinement::confined(super::production_vmm_identity(), 1024)
 }
 
 /// Build a real, fully-resolved `VmConfig` sharing `fixture`'s staged
@@ -190,7 +187,6 @@ async fn vmm_equivalence_sim_vmm() {
 }
 
 #[tokio::test]
-#[ignore = "pending DELIVER step 3"]
 async fn vmm_equivalence_cloud_hypervisor_vmm() {
     let staging_root = default_staging_root();
     let fixture = VmFixture::provision(&staging_root).expect("fixture provisions on this host");
@@ -326,7 +322,6 @@ async fn vm_fixture_provision_is_idempotent_and_reuses_staged_artifacts() {
 /// operator reading a deadline failure and an operator reading the
 /// eventual exit row would be told different things about one process.
 #[tokio::test]
-#[ignore = "pending DELIVER step 3"]
 async fn vmm_live_console_tail_is_coherent_with_final_exit_stderr_tail_for_both_adapters() {
     let staging_root = default_staging_root();
     let fixture = VmFixture::provision(&staging_root).expect("fixture provisions on this host");
@@ -380,7 +375,6 @@ async fn vmm_live_console_tail_is_coherent_with_final_exit_stderr_tail_for_both_
 /// exact exit code, terminating signal, and final stderr tail through
 /// both the `SimVmm` and real Cloud Hypervisor adapters.
 #[tokio::test]
-#[ignore = "pending DELIVER step 3"]
 async fn vmm_early_exit_preserves_code_signal_and_stderr_tail_for_both_adapters() {
     let staging_root = default_staging_root();
     let fixture = VmFixture::provision(&staging_root).expect("fixture provisions on this host");

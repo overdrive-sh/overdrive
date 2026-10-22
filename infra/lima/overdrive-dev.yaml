@@ -108,9 +108,13 @@ env:
 # That duplication is a known second defect; see the note in that file.
 # ────────────────────────────────────────────────────────────────────────────
 param:
-  # v46.0 -> v53.0 (2026-08-10). vhost-user-fs restore is broken before v52.0
-  # (cloud-hypervisor#6931). Full rationale in infra/provision/versions.env.
-  CLOUD_HYPERVISOR_VERSION: "v53.0"
+  # Local fork source/build identity; binaries are built from the pinned source
+  # and checksum-gated in the user provision block. No release asset is used.
+  CLOUD_HYPERVISOR_FORK_REPO:       "overdrive-sh/cloud-hypervisor"
+  CLOUD_HYPERVISOR_FORK_REV:        "f252bb20b0d141d59e4c15a9ac09c5c2dd7c350d"
+  CLOUD_HYPERVISOR_BUILD_TOOLCHAIN: "1.89.0"
+  CLOUD_HYPERVISOR_SHA256_X86_64:   "6d54fbd2611e692fda00e476fc0723e9502bfd8acd53c8bc46edd96e84f3e842"
+  CLOUD_HYPERVISOR_SHA256_AARCH64:  "74195594db430695d4fbd9a8ecbc1d6d4b196f17c52afa6a3e96c967d86a91cc"
   # NOTE FOR THE NEXT READER: wasmtime's "v46" is NOT cloud-hypervisor's "v46".
   # Two unrelated projects that happen to collide on a version number, on
   # adjacent lines, at the exact moment CH is being moved OFF v46. Read the key,
@@ -178,7 +182,7 @@ provision:
           xdp-tools bpfcc-tools \
           tcpdump iproute2 bridge-utils \
           python3 python3-venv python3-pip pipx \
-          e2fsprogs
+          e2fsprogs musl-tools
 
       # The module must be built against the running kernel, including its
       # generated headers rather than only the userspace UAPI headers.
@@ -243,26 +247,6 @@ provision:
       net.ipv4.ip_forward = 1
       EOF
       sysctl --system >/dev/null
-
-  # -------------------------------------------------------------------------
-  # Cloud Hypervisor — single static binary. Replaces Firecracker + QEMU as
-  # the unified VMM (§6). Provides CPU/memory hotplug + virtiofs.
-  # -------------------------------------------------------------------------
-  - mode: system
-    script: |
-      #!/usr/bin/env bash
-      set -euxo pipefail
-      VER="{{ .Param.CLOUD_HYPERVISOR_VERSION }}"
-      ARCH="$(uname -m)"
-      case "${ARCH}" in
-        x86_64)  ASSET="cloud-hypervisor-static" ;;
-        aarch64) ASSET="cloud-hypervisor-static-aarch64" ;;
-        *) echo "unsupported arch: ${ARCH}"; exit 1 ;;
-      esac
-      curl -fsSL -o /usr/local/bin/cloud-hypervisor \
-        "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/${VER}/${ASSET}"
-      chmod +x /usr/local/bin/cloud-hypervisor
-      cloud-hypervisor --version
 
   # -------------------------------------------------------------------------
   # Wasmtime — the WASM driver runtime (§6, §16).
@@ -433,6 +417,99 @@ provision:
           | sh -s -- -y --default-toolchain none --profile minimal
       fi
       . "${HOME}/.cargo/env"
+
+      # Build and install the pinned Cloud Hypervisor fork locally. The source
+      # repository is never used as a release-binary location or stock fallback.
+      CH_REPO="{{ .Param.CLOUD_HYPERVISOR_FORK_REPO }}"
+      CH_REV="{{ .Param.CLOUD_HYPERVISOR_FORK_REV }}"
+      CH_TOOLCHAIN="{{ .Param.CLOUD_HYPERVISOR_BUILD_TOOLCHAIN }}"
+      CH_ARCH="$(uname -m)"
+      case "${CH_ARCH}" in
+        x86_64)
+          CH_TARGET="x86_64-unknown-linux-musl"
+          CH_EXPECTED="{{ .Param.CLOUD_HYPERVISOR_SHA256_X86_64 }}"
+          CH_BUILD_ARGS=(--all --release --features mshv --target "${CH_TARGET}" --locked)
+          ;;
+        aarch64)
+          CH_TARGET="aarch64-unknown-linux-musl"
+          CH_EXPECTED="{{ .Param.CLOUD_HYPERVISOR_SHA256_AARCH64 }}"
+          CH_BUILD_ARGS=(--all --release --target "${CH_TARGET}" --locked)
+          ;;
+        *) echo "FATAL: unsupported Cloud Hypervisor build architecture: ${CH_ARCH}" >&2; exit 1 ;;
+      esac
+      CH_ROOT="/var/tmp/overdrive/cloud-hypervisor/${CH_REV}"
+      CH_SOURCE="${CH_ROOT}/source"
+      CH_BUILD="${CH_ROOT}/build"
+      CH_ARTIFACT="${CH_ROOT}/artifacts/${CH_TARGET}/cloud-hypervisor"
+      CH_BUILD_BIN="${CH_BUILD}/${CH_TARGET}/release/cloud-hypervisor"
+      CH_INSTALLED="/usr/local/bin/cloud-hypervisor"
+      CH_ORIGIN="https://github.com/${CH_REPO}.git"
+      rustup toolchain install "${CH_TOOLCHAIN}" --profile minimal
+      rustup target add --toolchain "${CH_TOOLCHAIN}" "${CH_TARGET}"
+      command -v musl-gcc >/dev/null 2>&1 || { echo "FATAL: musl-gcc is required for ${CH_TARGET}" >&2; exit 1; }
+      command -v strip >/dev/null 2>&1 || { echo "FATAL: native strip is required for ${CH_TARGET}" >&2; exit 1; }
+      mkdir -p "${CH_ROOT}"
+      if [ -e "${CH_SOURCE}/.git" ]; then
+        echo "FATAL: Cloud Hypervisor source must be metadata-free: ${CH_SOURCE}" >&2
+        exit 1
+      fi
+      if [ ! -f "${CH_SOURCE}/Cargo.toml" ]; then
+        if [ -e "${CH_SOURCE}" ]; then
+          echo "FATAL: incomplete local Cloud Hypervisor source: ${CH_SOURCE}" >&2
+          exit 1
+        fi
+        CH_FETCH="$(mktemp -d "${CH_ROOT}/.fetch.XXXXXX")"
+        CH_SOURCE_TMP="$(mktemp -d "${CH_ROOT}/.source.XXXXXX")"
+        git -C "${CH_FETCH}" init --quiet
+        git -C "${CH_FETCH}" remote add origin "${CH_ORIGIN}"
+        git -C "${CH_FETCH}" fetch --depth=1 origin "${CH_REV}"
+        CH_FETCHED_REV="$(git -C "${CH_FETCH}" rev-parse FETCH_HEAD)"
+        if [ "${CH_FETCHED_REV}" != "${CH_REV}" ]; then
+          echo "FATAL: fetched Cloud Hypervisor source ${CH_FETCHED_REV}, expected ${CH_REV}" >&2
+          exit 1
+        fi
+        git -C "${CH_FETCH}" archive --format=tar "${CH_REV}" | tar -xf - -C "${CH_SOURCE_TMP}"
+        [ ! -e "${CH_SOURCE_TMP}/.git" ] || { echo "FATAL: source archive contains .git" >&2; exit 1; }
+        mv "${CH_SOURCE_TMP}" "${CH_SOURCE}"
+        rm -rf "${CH_FETCH}"
+      fi
+      [ -f "${CH_SOURCE}/Cargo.toml" ] || { echo "FATAL: pinned source missing at ${CH_SOURCE}" >&2; exit 1; }
+      if [ -e "${CH_ARTIFACT}" ]; then
+        [ -f "${CH_ARTIFACT}" ] || { echo "FATAL: staged artifact is not a file: ${CH_ARTIFACT}" >&2; exit 1; }
+        if ! printf '%s  %s\n' "${CH_EXPECTED}" "${CH_ARTIFACT}" | sha256sum --check --status; then
+          echo "FATAL: staged Cloud Hypervisor checksum mismatch: ${CH_ARTIFACT}" >&2
+          exit 1
+        fi
+      else
+        CARGO_TARGET_DIR="${CH_BUILD}" cargo "+${CH_TOOLCHAIN}" build \
+          --manifest-path "${CH_SOURCE}/Cargo.toml" "${CH_BUILD_ARGS[@]}"
+        [ -f "${CH_BUILD_BIN}" ] || { echo "FATAL: build artifact missing: ${CH_BUILD_BIN}" >&2; exit 1; }
+        strip "${CH_BUILD_BIN}"
+        if ! printf '%s  %s\n' "${CH_EXPECTED}" "${CH_BUILD_BIN}" | sha256sum --check --status; then
+          echo "FATAL: built Cloud Hypervisor checksum mismatch; refusing to stage or install" >&2
+          exit 1
+        fi
+        mkdir -p "$(dirname "${CH_ARTIFACT}")"
+        install -m 0755 "${CH_BUILD_BIN}" "${CH_ARTIFACT}"
+        if ! printf '%s  %s\n' "${CH_EXPECTED}" "${CH_ARTIFACT}" | sha256sum --check --status; then
+          echo "FATAL: staged Cloud Hypervisor checksum mismatch: ${CH_ARTIFACT}" >&2
+          exit 1
+        fi
+      fi
+      if [ ! -f "${CH_INSTALLED}" ] || [ ! -x "${CH_INSTALLED}" ] \
+         || ! printf '%s  %s\n' "${CH_EXPECTED}" "${CH_INSTALLED}" | sha256sum --check --status; then
+        sudo -n install -m 0755 "${CH_ARTIFACT}" "${CH_INSTALLED}"
+      fi
+      if ! printf '%s  %s\n' "${CH_EXPECTED}" "${CH_INSTALLED}" | sha256sum --check --status; then
+        echo "FATAL: installed Cloud Hypervisor checksum mismatch: ${CH_INSTALLED}" >&2
+        exit 1
+      fi
+      "${CH_INSTALLED}" --version
+      if ! "${CH_INSTALLED}" --help 2>&1 | grep -q -- '--landlock'; then
+        echo "FATAL: this Cloud Hypervisor build has no --landlock" >&2
+        exit 1
+      fi
+
       rustup component add rustfmt clippy rust-src || true
       # Pinned, NOT the floating `nightly` channel — bpf-linker's LLVM
       # support lags rustc nightly's LLVM major-version bumps (bpf-linker

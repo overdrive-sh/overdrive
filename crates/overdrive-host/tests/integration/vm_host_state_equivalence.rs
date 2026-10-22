@@ -27,8 +27,8 @@ use overdrive_core::guest_transport::{GUEST_CID_BASE, GuestCid};
 use overdrive_core::traits::vm_host_state::VmHostState;
 use overdrive_core::traits::vmm::Vmm;
 use overdrive_core::vm::config::{
-    Gid, HostArch, KERNEL_MAGIC_WINDOW, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan,
-    VmConfig, VmConfinement, VmRunDir, VmmIdentity, clone_index_dir,
+    HostArch, KERNEL_MAGIC_WINDOW, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan, VmConfig,
+    VmConfinement, VmRunDir, clone_index_dir,
 };
 use overdrive_host::{CloudHypervisorVmm, RealVmHostState};
 use overdrive_sim::SimVmHostState;
@@ -63,11 +63,8 @@ fn validated_kernel(fixture: &VmFixture) -> KernelImage {
         .expect("fixture-staged kernel validates for x86_64")
 }
 
-const fn sample_confinement() -> VmConfinement {
-    VmConfinement::confined(
-        VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: vec![] },
-        1024,
-    )
+fn sample_confinement() -> VmConfinement {
+    VmConfinement::confined(super::production_vmm_identity(), 1024)
 }
 
 /// Build a real, fully-resolved `VmConfig` sharing `fixture`'s staged
@@ -174,7 +171,6 @@ async fn vm_host_state_equivalence_sim() {
 
 #[tokio::test]
 #[serial(vm_host_state_real_cgroup)]
-#[ignore = "pending DELIVER step 3"]
 async fn vm_host_state_equivalence_real() {
     let staging_root = default_staging_root();
     let fixture = VmFixture::provision(&staging_root).expect("fixture provisions on this host");

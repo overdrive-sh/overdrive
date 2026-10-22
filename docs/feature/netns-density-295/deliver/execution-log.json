@@ -1303,6 +1303,27 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-10-22T10:50:57Z"
+    },
+    {
+      "sid": "11-04",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-10-22T10:57:37Z"
+    },
+    {
+      "sid": "11-04",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS: late-approved post-boot sysrq-c/sysrq-b body produced semantic RED on native x86_64 metal against pre-fix Cloud Hypervisor v53.0.0 built from fork HEAD 41a619d191f6472f79a3f22bcb9576c2a516906c with only EpollDispatch::Reset patch absent; 1 test collected, 0 passed/1 failed at sysrq-c first-reset-ends-VMM assertion, 34 filtered, no collection errors; evidence .context/netns-density-295/11-04/metal-reset-exit-red-baseline.log.",
+      "t": "2026-10-22T12:08:09Z"
+    },
+    {
+      "sid": "11-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-10-22T16:49:34Z"
     }
   ]
 }

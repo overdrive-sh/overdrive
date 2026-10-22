@@ -26,6 +26,10 @@ log() { printf '\n=== [common-user] %s\n' "$*"; }
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${REPO}"
 [ -f rust-toolchain.toml ] || { echo "FATAL: no rust-toolchain.toml at ${REPO}" >&2; exit 1; }
+set -a
+# shellcheck disable=SC1091
+. "${REPO}/infra/provision/versions.env"
+set +a
 
 log "rustup (repo: ${REPO})"
 if ! command -v rustup >/dev/null 2>&1; then
@@ -53,6 +57,137 @@ rustc --version
 MUSL_TARGET="$(uname -m)-unknown-linux-musl"
 log "rust target ${MUSL_TARGET}"
 rustup target add "${MUSL_TARGET}"
+
+# ---------------------------------------------------------------------------
+# Cloud Hypervisor — build the pinned fork locally, stage verified bytes, then
+# install only the architecture-selected artifact. No release binary fallback.
+# ---------------------------------------------------------------------------
+provision_cloud_hypervisor() {
+  local arch target expected
+  local root source_dir build_dir artifact build_binary installed remote fetch_dir source_tmp fetched_rev
+  local -a build_args
+
+  arch="$(uname -m)"
+  case "${arch}" in
+    x86_64)
+      target="x86_64-unknown-linux-musl"
+      expected="${CLOUD_HYPERVISOR_SHA256_X86_64}"
+      build_args=(--all --release --features mshv --target "${target}" --locked)
+      ;;
+    aarch64)
+      target="aarch64-unknown-linux-musl"
+      expected="${CLOUD_HYPERVISOR_SHA256_AARCH64}"
+      build_args=(--all --release --target "${target}" --locked)
+      ;;
+    *)
+      echo "FATAL: unsupported Cloud Hypervisor build architecture: ${arch}" >&2
+      return 1
+      ;;
+  esac
+
+  root="/var/tmp/overdrive/cloud-hypervisor/${CLOUD_HYPERVISOR_FORK_REV}"
+  source_dir="${root}/source"
+  build_dir="${root}/build"
+  artifact="${root}/artifacts/${target}/cloud-hypervisor"
+  build_binary="${build_dir}/${target}/release/cloud-hypervisor"
+  installed="/usr/local/bin/cloud-hypervisor"
+  remote="https://github.com/${CLOUD_HYPERVISOR_FORK_REPO}.git"
+
+  log "cloud-hypervisor ${CLOUD_HYPERVISOR_FORK_REPO}@${CLOUD_HYPERVISOR_FORK_REV} (${target})"
+  rustup toolchain install "${CLOUD_HYPERVISOR_BUILD_TOOLCHAIN}" --profile minimal
+  rustup target add --toolchain "${CLOUD_HYPERVISOR_BUILD_TOOLCHAIN}" "${target}"
+  command -v musl-gcc >/dev/null 2>&1 || {
+    echo "FATAL: musl-gcc is required for ${target}" >&2
+    return 1
+  }
+  command -v strip >/dev/null 2>&1 || {
+    echo "FATAL: native strip is required for ${target}" >&2
+    return 1
+  }
+
+  mkdir -p "${root}"
+  if [ -e "${source_dir}/.git" ]; then
+    echo "FATAL: Cloud Hypervisor source must be metadata-free: ${source_dir}" >&2
+    return 1
+  fi
+  if [ ! -f "${source_dir}/Cargo.toml" ]; then
+    if [ -e "${source_dir}" ]; then
+      echo "FATAL: incomplete local Cloud Hypervisor source: ${source_dir}" >&2
+      return 1
+    fi
+    fetch_dir="$(mktemp -d "${root}/.fetch.XXXXXX")"
+    source_tmp="$(mktemp -d "${root}/.source.XXXXXX")"
+    git -C "${fetch_dir}" init --quiet
+    git -C "${fetch_dir}" remote add origin "${remote}"
+    git -C "${fetch_dir}" fetch --depth=1 origin "${CLOUD_HYPERVISOR_FORK_REV}"
+    fetched_rev="$(git -C "${fetch_dir}" rev-parse FETCH_HEAD)"
+    if [ "${fetched_rev}" != "${CLOUD_HYPERVISOR_FORK_REV}" ]; then
+      echo "FATAL: fetched Cloud Hypervisor source ${fetched_rev}, expected ${CLOUD_HYPERVISOR_FORK_REV}" >&2
+      return 1
+    fi
+    git -C "${fetch_dir}" archive --format=tar "${CLOUD_HYPERVISOR_FORK_REV}" \
+      | tar -xf - -C "${source_tmp}"
+    [ ! -e "${source_tmp}/.git" ] || {
+      echo "FATAL: metadata-free Cloud Hypervisor source contains .git" >&2
+      return 1
+    }
+    mv "${source_tmp}" "${source_dir}"
+    rm -rf "${fetch_dir}"
+  fi
+  [ -f "${source_dir}/Cargo.toml" ] || {
+    echo "FATAL: pinned Cloud Hypervisor source missing at ${source_dir}" >&2
+    return 1
+  }
+
+  if [ -e "${artifact}" ]; then
+    [ -f "${artifact}" ] || {
+      echo "FATAL: staged Cloud Hypervisor artifact is not a file: ${artifact}" >&2
+      return 1
+    }
+    if ! printf '%s  %s\n' "${expected}" "${artifact}" | sha256sum --check --status; then
+      echo "FATAL: staged Cloud Hypervisor checksum mismatch: ${artifact}" >&2
+      return 1
+    fi
+  else
+    log "building local fork with Rust ${CLOUD_HYPERVISOR_BUILD_TOOLCHAIN}"
+    CARGO_TARGET_DIR="${build_dir}" cargo "+${CLOUD_HYPERVISOR_BUILD_TOOLCHAIN}" build \
+      --manifest-path "${source_dir}/Cargo.toml" "${build_args[@]}"
+    [ -f "${build_binary}" ] || {
+      echo "FATAL: Cloud Hypervisor build artifact missing: ${build_binary}" >&2
+      return 1
+    }
+    strip "${build_binary}"
+    if ! printf '%s  %s\n' "${expected}" "${build_binary}" | sha256sum --check --status; then
+      echo "FATAL: built Cloud Hypervisor checksum mismatch; refusing to stage or install" >&2
+      return 1
+    fi
+    mkdir -p "$(dirname "${artifact}")"
+    install -m 0755 "${build_binary}" "${artifact}"
+    if ! printf '%s  %s\n' "${expected}" "${artifact}" | sha256sum --check --status; then
+      echo "FATAL: staged Cloud Hypervisor checksum mismatch: ${artifact}" >&2
+      return 1
+    fi
+  fi
+
+  if [ ! -f "${installed}" ] || [ ! -x "${installed}" ] \
+     || ! printf '%s  %s\n' "${expected}" "${installed}" | sha256sum --check --status; then
+    log "installing checksum-verified Cloud Hypervisor at ${installed}"
+    sudo -n install -m 0755 "${artifact}" "${installed}"
+  else
+    log "installed Cloud Hypervisor already matches the pinned checksum"
+  fi
+  if ! printf '%s  %s\n' "${expected}" "${installed}" | sha256sum --check --status; then
+    echo "FATAL: installed Cloud Hypervisor checksum mismatch: ${installed}" >&2
+    return 1
+  fi
+  "${installed}" --version
+  if ! "${installed}" --help 2>&1 | grep -q -- '--landlock'; then
+    echo "FATAL: this Cloud Hypervisor build has no --landlock" >&2
+    return 1
+  fi
+}
+
+provision_cloud_hypervisor
 
 # ---------------------------------------------------------------------------
 # Cargo tooling. binstall pulls prebuilts where crates publish them; a cold

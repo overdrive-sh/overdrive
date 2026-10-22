@@ -370,11 +370,8 @@ fn register_launch_child_hook(
 /// no `fd=` field. The VMM opens `/dev/vhost-vsock` itself; the launcher
 /// passes no vsock descriptor and no Overdrive process holds one.
 ///
-/// RED scaffold (DISTILL): the leased-CID launch argument lands in DELIVER step
-/// 3 (launch args).
-// SCAFFOLD: true — netns-density-295 DISTILL (DELIVER step 3, launch args).
-fn vhost_kernel_vsock_arg(_cid: GuestCid) -> String {
-    panic!("Not yet implemented -- RED scaffold")
+fn vhost_kernel_vsock_arg(cid: GuestCid) -> String {
+    format!("cid={},backend=vhost-kernel", cid.get())
 }
 
 fn classify_launch_spawn_error(
@@ -1366,7 +1363,6 @@ mod tests {
         reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
     )]
     #[test]
-    #[ignore = "pending DELIVER step 3"]
     fn the_vsock_device_argument_names_the_leased_cid_and_the_vhost_kernel_backend_only() {
         use overdrive_core::guest_transport::{GUEST_CID_BASE, GUEST_CID_SPAN};
 
