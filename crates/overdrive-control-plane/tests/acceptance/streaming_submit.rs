@@ -1272,7 +1272,6 @@ async fn attempt_failed_exit_code_comes_from_workload_crashed_immediately_reason
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 0"]
 async fn a_job_crash_streams_attempt_failed_that_will_not_restart() {
     let tmp = TempDir::new().expect("tmpdir");
     let sim_clock = Arc::new(SimClock::new());

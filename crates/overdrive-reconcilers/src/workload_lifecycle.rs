@@ -44,18 +44,12 @@ pub const RESTART_BACKOFF_CEILING: u32 = 5;
 /// change it). `false`: the restart budget is spent and the reconciler
 /// finalizes the allocation. This is the only place the ceiling is compared.
 #[must_use]
-#[allow(
-    unused_variables,
-    reason = "RED scaffold — netns-density-295 DELIVER step 0 (RESTART-SSOT) lands the predicate"
-)]
 pub const fn restart_decision(
     attempts: u32,
     platform_reclaimed: bool,
     generation_replacement: bool,
 ) -> bool {
-    // SCAFFOLD: true — netns-density-295 DISTILL (DELIVER step 0, RESTART-SSOT,
-    // GH #324): the one shared restart predicate is new behaviour.
-    panic!("Not yet implemented -- RED scaffold")
+    attempts < RESTART_BACKOFF_CEILING || platform_reclaimed || generation_replacement
 }
 
 /// Backoff window between successive `RestartAllocation` emissions
@@ -391,7 +385,7 @@ impl Reconciler for WorkloadLifecycle {
 
             let failed = current.filter(|row| is_restartable(row))?;
             let attempts = view.restart_counts.get(&failed.alloc_id).copied().unwrap_or(0);
-            if attempts >= RESTART_BACKOFF_CEILING && !is_platform_reclaimed(failed) {
+            if !restart_decision(attempts, is_platform_reclaimed(failed), restart_pending) {
                 return None;
             }
             let seen_at = view.last_failure_seen_at.get(&failed.alloc_id)?;
@@ -448,10 +442,7 @@ fn pending_restart_owner<'a>(
     }
 
     let attempts = view.restart_counts.get(&current.alloc_id).copied().unwrap_or(0);
-    if attempts >= RESTART_BACKOFF_CEILING
-        && !is_platform_reclaimed(current)
-        && !generation_replacement
-    {
+    if !restart_decision(attempts, is_platform_reclaimed(current), generation_replacement) {
         return None;
     }
 
@@ -1138,10 +1129,7 @@ impl WorkloadLifecycle {
                     // reclamations.
                     let platform_reclaimed = is_platform_reclaimed(failed);
                     let generation_replacement = restart_pending;
-                    if attempts >= RESTART_BACKOFF_CEILING
-                        && !platform_reclaimed
-                        && !generation_replacement
-                    {
+                    if !restart_decision(attempts, platform_reclaimed, generation_replacement) {
                         // Idempotency guard: if the row already carries a
                         // finalised terminal claim the reconciler has
                         // already finalised this alloc on a prior tick —
@@ -1643,11 +1631,6 @@ fn restart_allocation_action(
 /// restartable nor an operator stop under a pending generation); otherwise
 /// [`restart_decision`].
 #[must_use]
-#[allow(
-    unused_variables,
-    clippy::needless_pass_by_value,
-    reason = "RED scaffold — netns-density-295 DELIVER step 0 (RESTART-SSOT) lands the decision"
-)]
 pub fn restart_after_failure(
     kind: WorkloadKind,
     run_desired: bool,
@@ -1655,9 +1638,16 @@ pub fn restart_after_failure(
     attempts: u32,
     generation_replacement: bool,
 ) -> bool {
-    // SCAFFOLD: true — netns-density-295 DISTILL (DELIVER step 0, RESTART-SSOT,
-    // GH #324): the failed-allocation decision is new behaviour.
-    panic!("Not yet implemented -- RED scaffold")
+    if !run_desired || failed.state == AllocState::Draining {
+        return false;
+    }
+    if kind == WorkloadKind::Job && is_natural_exit(failed) {
+        return false;
+    }
+    if !(is_restartable(failed) || generation_replacement && is_operator_stopped(failed)) {
+        return false;
+    }
+    restart_decision(attempts, is_platform_reclaimed(failed), generation_replacement)
 }
 
 /// True iff the alloc row is a candidate for a `RestartAllocation`
@@ -4010,8 +4000,7 @@ mod restart_ssot_agreement {
     proptest! {
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER step 0"]
-        fn restart_after_failure_agrees_with_one_reconcile(
+                fn restart_after_failure_agrees_with_one_reconcile(
             kind in kind_strategy(),
             attempts in 0..=2 * RESTART_BACKOFF_CEILING,
             generation_replacement in any::<bool>(),

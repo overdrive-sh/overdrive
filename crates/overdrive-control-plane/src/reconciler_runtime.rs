@@ -52,7 +52,7 @@ use overdrive_reconcilers::ServiceMapHydrator;
 use overdrive_reconcilers::service_lifecycle::ServiceLifecycleView;
 use overdrive_reconcilers::{
     AnyReconciler, AnyReconcilerView, AnyState, ServiceMapHydratorView, SvidLifecycleView,
-    WorkflowLifecycleView, WorkloadLifecycle, WorkloadLifecycleView,
+    WorkflowLifecycleView, WorkloadLifecycle, WorkloadLifecycleView, restart_after_failure,
 };
 use parking_lot::Mutex;
 
@@ -463,11 +463,6 @@ impl ReconcilerRuntime {
     /// run_desired, failed, attempts, view.observed_generation <
     /// desired_generation)` — the reconciler's own decision.
     #[must_use]
-    #[allow(
-        unused_variables,
-        clippy::unused_self,
-        reason = "RED scaffold — netns-density-295 DELIVER step 0 (RESTART-SSOT) lands the accessor"
-    )]
     pub fn restart_status_for_alloc(
         &self,
         target: &TargetResource,
@@ -476,10 +471,18 @@ impl ReconcilerRuntime {
         failed: &AllocStatusRow,
         desired_generation: u64,
     ) -> (u32, bool) {
-        // SCAFFOLD: true — netns-density-295 DISTILL (DELIVER step 0,
-        // RESTART-SSOT, GH #324): the accessor returns the reconciler's own
-        // decision (`restart_after_failure`), which is new behaviour.
-        panic!("Not yet implemented -- RED scaffold")
+        let view = self.view_for_workload_lifecycle(target);
+        let attempts = view.restart_counts.get(&failed.alloc_id).copied().unwrap_or(0);
+        (
+            attempts.saturating_add(1),
+            restart_after_failure(
+                kind,
+                run_desired,
+                failed,
+                attempts,
+                view.observed_generation < desired_generation,
+            ),
+        )
     }
 
     /// The 1-indexed attempt number of `alloc_id` in its lineage:
@@ -1891,7 +1894,6 @@ mod tests {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 0"]
     async fn restart_status_matches_the_reconciler_at_the_ceiling_boundary() {
         use overdrive_reconcilers::RESTART_BACKOFF_CEILING;
         let row = failed_payments_row(None);
@@ -1922,7 +1924,6 @@ mod tests {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 0"]
     async fn restart_status_exempts_a_platform_reclaimed_row_past_the_ceiling() {
         use overdrive_core::traits::observation_store::AllocState;
         use overdrive_core::transition_reason::{StoppedBy, TransitionReason};
@@ -1950,7 +1951,6 @@ mod tests {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 0"]
     async fn restart_status_exempts_a_generation_replacement_past_the_ceiling() {
         use overdrive_reconcilers::RESTART_BACKOFF_CEILING;
         let row = failed_payments_row(None);

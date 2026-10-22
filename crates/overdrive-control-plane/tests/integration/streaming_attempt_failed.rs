@@ -71,7 +71,6 @@ fn failed_lifecycle_event(
 
 /// Contract shape: pure-function.
 #[tokio::test]
-#[ignore = "pending DELIVER step 0"]
 async fn attempt_failed_first_attempt_of_a_job_will_not_restart() {
     let tmp = tempfile::tempdir().expect("tmpdir");
     let node = NodeId::from_str("node-a").expect("node id");
@@ -108,7 +107,6 @@ async fn attempt_failed_first_attempt_of_a_job_will_not_restart() {
 
 /// Contract shape: pure-function.
 #[tokio::test]
-#[ignore = "pending DELIVER step 0"]
 async fn attempt_failed_mid_budget_reports_correct_index() {
     let tmp = tempfile::tempdir().expect("tmpdir");
     let node = NodeId::from_str("node-a").expect("node id");
@@ -183,7 +181,6 @@ async fn attempt_failed_at_ceiling_will_not_restart() {
 
 /// Contract shape: pure-function.
 #[tokio::test]
-#[ignore = "pending DELIVER step 0"]
 async fn attempt_failed_empty_view_reports_the_first_attempt_that_will_not_restart() {
     let tmp = tempfile::tempdir().expect("tmpdir");
     let node = NodeId::from_str("node-a").expect("node id");

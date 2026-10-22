@@ -97,17 +97,20 @@ use axum::body::Bytes;
 use bytes::BytesMut;
 use futures::Stream;
 use overdrive_core::TransitionReason;
-use overdrive_core::id::WorkloadId;
-use overdrive_core::traits::observation_store::ObservationStore;
+use overdrive_core::aggregate::WorkloadKind;
+use overdrive_core::id::{NodeId, WorkloadId};
+use overdrive_core::reconcilers::{Reconciler, TargetResource};
+use overdrive_core::traits::observation_store::{
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
+};
 use tokio::sync::broadcast;
 
 use crate::AppState;
 use crate::action_shim::LifecycleEvent;
 use crate::api::{AllocStateWire, IdempotencyOutcome};
-use crate::reconciler_runtime::ReconcilerRuntime;
-use overdrive_core::reconcilers::TargetResource;
+use crate::reconciler_runtime::{ReconcilerRuntime, build_hydration_context};
 use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
-use overdrive_reconcilers::backoff_for_attempt;
+use overdrive_reconcilers::{WorkloadLifecycle, backoff_for_attempt};
 
 // `BytesMut` implements `BufMut` but not `io::Write`; the small
 // shim here adapts so `serde_json::to_writer` can drive into it.
@@ -247,12 +250,18 @@ pub fn build_workload_stream(
                             // (Pending / Running) or AttemptFailed
                             // (intermediate failure) or terminal
                             // (Succeeded / Failed).
-                            if let Some(emit) = workload_event_from_lifecycle(
-                                &*obs,
-                                &runtime,
+                            let projected = match workload_event_from_lifecycle_with_state(
+                                &state,
                                 &workload_id,
                                 &event,
                             ).await {
+                                Ok(projected) => projected,
+                                Err(err) => {
+                                    yield Err(err);
+                                    return;
+                                }
+                            };
+                            if let Some(emit) = projected {
                                 let is_terminal = matches!(
                                     emit,
                                     JobSubmitEvent::Succeeded { .. } | JobSubmitEvent::Failed { .. } | JobSubmitEvent::Stopped { .. }
@@ -393,35 +402,117 @@ pub async fn workload_event_from_lifecycle(
                 }
                 _ => 1,
             };
-            let target = TargetResource::new(&format!("workload/{workload_id}")).ok();
-            let attempt_index =
-                target.as_ref().map_or(1, |t| runtime.attempt_index_for_alloc(t, &event.alloc_id));
-            // SCAFFOLD: true — netns-density-295 DISTILL (DELIVER step 0,
-            // RESTART-SSOT, GH #324): today's value, kept until step 0 calls
-            // `restart_status_for_alloc(target, WorkloadKind::Job, run_desired,
-            // row, generation)` here (regression obligation 5 pins the fixed one).
-            let will_restart = attempt_index < overdrive_reconcilers::RESTART_BACKOFF_CEILING;
-            let next_attempt_delay = if will_restart {
-                Some(format!(
-                    "{}ms",
-                    backoff_for_attempt(attempt_index.saturating_sub(1)).as_millis()
-                ))
-            } else {
-                None
-            };
-            Some(JobSubmitEvent::AttemptFailed {
-                attempt_index,
-                exit_code,
-                duration: event.at.clone(),
-                will_restart,
-                next_attempt_delay,
-            })
+            let target = workload_target(workload_id);
+            let failed = failed_row_from_event(event);
+            Some(attempt_failed_event(runtime, &target, event, &failed, true, 0, exit_code))
         }
         // Terminated without a terminal claim is a transitional state
         // (the reconciler will stamp the terminal on the next tick).
         // Suspended / Draining are likewise non-terminal Job-kind
         // surfaces. Skip emission until the terminal claim arrives.
         AllocStateWire::Terminated | AllocStateWire::Draining | AllocStateWire::Suspended => None,
+    }
+}
+
+/// The production Job stream reads the same desired projection that
+/// `WorkloadLifecycle` consumes before asking its runtime for the restart
+/// decision. The event carries the failed row's allocation, state, reason and
+/// terminal claim from the observation write that emitted it.
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "guards lent into HydrationContext must outlive both hydrate awaits"
+)]
+async fn workload_event_from_lifecycle_with_state(
+    state: &AppState,
+    workload_id: &WorkloadId,
+    event: &LifecycleEvent,
+) -> Result<Option<JobSubmitEvent>, std::io::Error> {
+    if event.to != AllocStateWire::Failed || event.terminal.is_some() {
+        return Ok(
+            workload_event_from_lifecycle(&*state.obs, &state.runtime, workload_id, event).await
+        );
+    }
+
+    let target = workload_target(workload_id);
+    let allocator = state.allocator.lock().await;
+    let listener_facts = state.listener_facts.lock().await;
+    let ctx = build_hydration_context(state, &allocator, &listener_facts);
+    let reconciler = WorkloadLifecycle::canonical();
+    let desired = reconciler.hydrate_desired(&ctx, &target).await.map_err(std::io::Error::other)?;
+    let failed = failed_row_from_event(event);
+    let run_desired = desired.job.is_some() && !desired.desired_to_stop;
+    let exit_code = match &event.reason {
+        TransitionReason::WorkloadCrashedImmediately { exit_code, .. } => exit_code.unwrap_or(1),
+        _ => 1,
+    };
+    Ok(Some(attempt_failed_event(
+        &state.runtime,
+        &target,
+        event,
+        &failed,
+        run_desired,
+        desired.generation,
+        exit_code,
+    )))
+}
+
+fn workload_target(workload_id: &WorkloadId) -> TargetResource {
+    let Ok(target) = TargetResource::new(&format!("workload/{workload_id}")) else {
+        unreachable!("a WorkloadId under the canonical workload prefix is a valid target")
+    };
+    target
+}
+
+/// Project the event's state into the allocation-row fields read by the
+/// restart decision. `LifecycleEvent` is constructed from the successful row
+/// write's occurrence; the decision does not inspect the row's other fields.
+fn failed_row_from_event(event: &LifecycleEvent) -> AllocStatusRow {
+    let Ok(node_id) = NodeId::new("streaming") else {
+        unreachable!("the fixed stream writer id is valid")
+    };
+    AllocStatusRow {
+        alloc_id: event.alloc_id.clone(),
+        workload_id: event.workload_id.clone(),
+        node_id: node_id.clone(),
+        state: AllocState::Failed,
+        updated_at: LogicalTimestamp::dominating(0, node_id, None),
+        reason: Some(event.reason.clone()),
+        detail: event.detail.clone(),
+        terminal: event.terminal.clone(),
+        stderr_tail: None,
+        kind: WorkloadKind::Job,
+        listeners: Vec::new(),
+        started_at: None,
+        workload_addr: None,
+        last_terminated: None,
+        restart_count: 0,
+    }
+}
+
+fn attempt_failed_event(
+    runtime: &ReconcilerRuntime,
+    target: &TargetResource,
+    event: &LifecycleEvent,
+    failed: &AllocStatusRow,
+    run_desired: bool,
+    desired_generation: u64,
+    exit_code: i32,
+) -> JobSubmitEvent {
+    let (attempt_index, will_restart) = runtime.restart_status_for_alloc(
+        target,
+        WorkloadKind::Job,
+        run_desired,
+        failed,
+        desired_generation,
+    );
+    let next_attempt_delay = will_restart
+        .then(|| format!("{}ms", backoff_for_attempt(attempt_index.saturating_sub(1)).as_millis()));
+    JobSubmitEvent::AttemptFailed {
+        attempt_index,
+        exit_code,
+        duration: event.at.clone(),
+        will_restart,
+        next_attempt_delay,
     }
 }
 
