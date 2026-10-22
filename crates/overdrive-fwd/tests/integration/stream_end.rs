@@ -30,14 +30,17 @@ use super::support::{
 };
 
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn a_vsock_peer_half_close_is_forwarded_as_fin_after_the_last_byte() {
     // R5-45 (a): flags 0x2 (virtio_transport_common.c:1084-1096 @ v7.0).
     let flow = StreamFlow::new();
     let data = pattern(20, 3 << 20);
-    (&mut &flow.v_far).write_all(&data).expect("write");
-    flow.v_far.shutdown(libc::SHUT_WR);
-    assert_far_tcp_clean(&flow.t_far, &data);
+    thread::scope(|s| {
+        s.spawn(|| {
+            (&mut &flow.v_far).write_all(&data).expect("write");
+            flow.v_far.shutdown(libc::SHUT_WR);
+        });
+        assert_far_tcp_clean(&flow.t_far, &data);
+    });
     let state = flow.fwd.pair_state(flow.id).expect("pair_state").expect("still live: B→A open");
     assert_eq!(state.a_to_b.source_end, Some(SourceEnd::Clean));
     assert!(state.a_to_b.target_shut);
@@ -48,7 +51,6 @@ fn a_vsock_peer_half_close_is_forwarded_as_fin_after_the_last_byte() {
 }
 
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn a_tcp_fin_is_forwarded_as_a_guest_half_close_after_the_last_byte() {
     let flow = StreamFlow::new();
     let data = pattern(21, 1 << 20);
@@ -61,7 +63,6 @@ fn a_tcp_fin_is_forwarded_as_a_guest_half_close_after_the_last_byte() {
 }
 
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn a_vsock_peer_close_with_a_direction_open_aborts_and_resets_the_tcp_far_end() {
     // R5-45 (b): 0x3 with the peer's direction open.
     let flow = StreamFlow::new();
@@ -79,7 +80,6 @@ fn a_vsock_peer_close_with_a_direction_open_aborts_and_resets_the_tcp_far_end() 
 }
 
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn a_half_close_then_a_close_while_this_side_still_sends_is_an_abort() {
     // RCV_SHUTDOWN newly set while this side still sends: the peer stopped
     // receiving (a send would fail EPIPE, af_vsock.c:2176-2177 @ v7.0).
@@ -109,7 +109,6 @@ fn a_half_close_then_a_close_while_this_side_still_sends_is_an_abort() {
 }
 
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn a_tcp_reset_after_a_fin_aborts_with_epipe_and_resets_the_guest_side() {
     // R5-45 (c) and hazard 16: after its FIN the forwarder stops reading the
     // TCP half, so the later reset is seen only by sk_error_report
@@ -148,7 +147,6 @@ fn a_tcp_reset_after_a_fin_aborts_with_epipe_and_resets_the_guest_side() {
 }
 
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn a_tcp_reset_with_both_directions_open_aborts_with_econnreset() {
     let flow = StreamFlow::new();
     let StreamFlow { fwd, peer, id, far_watch, v, v_far, t, t_far } = flow;
@@ -168,7 +166,6 @@ fn a_tcp_reset_with_both_directions_open_aborts_with_econnreset() {
 }
 
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn clean_full_end_a_peer_close_after_both_half_closes_completes_every_time() {
     // CLEAN-FULL-END and the h_lateshut falsifier: the guest side closes the
     // instant it reads EOF, so its 0x3 races the forwarder's own SHUT_WR on
@@ -198,7 +195,6 @@ fn clean_full_end_a_peer_close_after_both_half_closes_completes_every_time() {
 }
 
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn end_idempotent_a_trailing_reset_after_completion_adds_nothing() {
     let flow = StreamFlow::new();
     flow.v_far.shutdown(libc::SHUT_WR);
@@ -216,7 +212,6 @@ fn end_idempotent_a_trailing_reset_after_completion_adds_nothing() {
 }
 
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn a_vsock_peer_close_with_a_stalled_pipeline_aborts_after_no_more_bytes() {
     // An abort never forwards a byte past it: with 6 MiB queued toward a
     // stopped TCP reader, the guest side closing aborts the pair and the TCP

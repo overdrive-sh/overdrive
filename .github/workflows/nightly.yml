@@ -66,6 +66,16 @@ jobs:
         if: steps.lima-cache.outputs.cache-hit == 'true'
         run: limactl start --timeout=30m overdrive
 
+      - name: Fuzz shipped ovd_fwd frame parser (userspace ASan + UBSan)
+        run: |
+          cargo xtask lima run -- cargo install --locked cargo-fuzz
+          cargo xtask lima run -- \
+            cargo +nightly-2026-08-05 fuzz run ovd_fwd_frame_parse -- \
+              -max_total_time=300 \
+              -timeout=10 \
+              -rss_limit_mb=2048 \
+              -max_len=59024
+
       - name: cargo xtask mutants --workspace
         run: |
           limactl shell overdrive bash -lc \

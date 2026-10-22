@@ -4,11 +4,12 @@
 //! Two modes, chosen by the process id:
 //!
 //! - **PID 1 — the scripted guest vsock peer** (`guest_peer`). Mounts
-//!   `/proc`, `/sys` and `/dev`, loads the vsock transport modules and the
-//!   guest kit's `ovd_fwd.ko` when the image carries it, dials the host on
-//!   the port the kernel parameter `overdrive.testpeer=` names, and executes
-//!   one [`PeerCommand`] per line. It runs no Overdrive owner. When the host
-//!   closes the control connection it powers the guest off.
+//!   `/proc`, `/sys` and `/dev`, brings loopback up, loads the vsock transport
+//!   modules and the guest kit's `ovd_fwd.ko` when the image carries it,
+//!   dials the host on the port the kernel parameter `overdrive.testpeer=`
+//!   names, and executes one [`PeerCommand`] per line. It runs no Overdrive
+//!   owner. When the host closes the control connection it powers the guest
+//!   off.
 //! - **Any other pid — the guest application** (`guest_app`): one of the
 //!   `guest_app::subcommand`s, run as a VM workload's operator command
 //!   under the production `overdrive-init`, or as the in-guest lane's
@@ -456,7 +457,20 @@ mod linux {
             let Some((program, rest)) = args[split + 1..].split_first() else {
                 return usage("run-with-modules <module.ko>... -- <program> <args>...");
             };
-            let error = Command::new(program).args(rest).exec();
+            let nofile = libc::rlimit { rlim_cur: 65_536, rlim_max: 65_536 };
+            // SAFETY: `nofile` is a valid live rlimit value; the in-guest
+            // launcher is PID 1's root child and owns this test process limit.
+            if unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &raw const nofile) } != 0 {
+                eprintln!(
+                    "run-with-modules: raising RLIMIT_NOFILE: {}",
+                    io::Error::last_os_error()
+                );
+                return exit::EXEC;
+            }
+            let error = Command::new(program)
+                .args(rest)
+                .env("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+                .exec();
             eprintln!("run-with-modules: exec {program}: {error}");
             exit::EXEC
         }
@@ -467,7 +481,7 @@ mod linux {
         use std::ffi::CString;
         use std::io::{self, Read, Write};
         use std::net::{TcpListener, TcpStream};
-        use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
+        use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
         use std::process::Command;
         use std::sync::{Arc, Mutex};
         use std::thread::{self, JoinHandle};
@@ -574,6 +588,48 @@ mod linux {
             }
         }
 
+        fn bring_loopback_up() -> io::Result<()> {
+            // SAFETY: `socket` has no pointer arguments; the returned descriptor is
+            // checked before it is transferred to `OwnedFd` exactly once.
+            let raw =
+                unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM | libc::SOCK_CLOEXEC, 0) };
+            if raw < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            // SAFETY: `raw` is a newly opened descriptor owned by this function.
+            let socket = unsafe { OwnedFd::from_raw_fd(raw) };
+            // SAFETY: all-zero is a valid initial representation for `ifreq`.
+            let mut request: libc::ifreq = unsafe { std::mem::zeroed() };
+            for (slot, byte) in request.ifr_name.iter_mut().zip("lo".bytes()) {
+                *slot = libc::c_char::from_ne_bytes([byte]);
+            }
+            #[cfg(target_env = "musl")]
+            let get_flags = libc::c_int::try_from(libc::SIOCGIFFLAGS)
+                .map_err(|_| io::Error::other("SIOCGIFFLAGS does not fit ioctl request"))?;
+            #[cfg(not(target_env = "musl"))]
+            let get_flags = libc::SIOCGIFFLAGS;
+            // SAFETY: `socket` is an open AF_INET datagram descriptor and `request`
+            // is a live, correctly sized `ifreq` naming `lo`.
+            let read = unsafe { libc::ioctl(socket.as_raw_fd(), get_flags, &raw mut request) };
+            if read != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            // SAFETY: SIOCGIFFLAGS initialized the flags member of the union.
+            let flags = unsafe { request.ifr_ifru.ifru_flags };
+            let up = libc::c_short::try_from(libc::IFF_UP)
+                .map_err(|_| io::Error::other("IFF_UP does not fit ifreq flags"))?;
+            request.ifr_ifru.ifru_flags = flags | up;
+            #[cfg(target_env = "musl")]
+            let set_flags = libc::c_int::try_from(libc::SIOCSIFFLAGS)
+                .map_err(|_| io::Error::other("SIOCSIFFLAGS does not fit ioctl request"))?;
+            #[cfg(not(target_env = "musl"))]
+            let set_flags = libc::SIOCSIFFLAGS;
+            // SAFETY: the same open socket and live `ifreq` now carry the existing
+            // flags with only IFF_UP added.
+            let written = unsafe { libc::ioctl(socket.as_raw_fd(), set_flags, &raw mut request) };
+            if written == 0 { Ok(()) } else { Err(io::Error::last_os_error()) }
+        }
+
         fn power_off() -> ! {
             // SAFETY: `sync` and `reboot` have no memory preconditions.
             unsafe {
@@ -597,6 +653,10 @@ mod linux {
             mount("proc", "/proc", "proc");
             mount("sysfs", "/sys", "sysfs");
             mount("devtmpfs", "/dev", "devtmpfs");
+            if let Err(e) = bring_loopback_up() {
+                eprintln!("overdrive-guest-peer: bringing loopback up: {e}");
+                power_off();
+            }
             for file in GUEST_VSOCK_MODULE_FILES {
                 let path = format!("{GUEST_VSOCK_MODULE_DIR}/{file}");
                 if std::path::Path::new(&path).exists()

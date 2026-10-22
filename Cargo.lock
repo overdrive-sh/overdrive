@@ -2458,6 +2458,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "overdrive-fwd-frame-parser-test"
+version = "0.0.0"
+dependencies = [
+ "cc",
+ "overdrive-core",
+ "proptest",
+]
+
+[[package]]
 name = "overdrive-host"
 version = "0.0.0"
 dependencies = [

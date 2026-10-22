@@ -134,6 +134,8 @@ fn checkpatch(kernel_build_dir: &Path, source_dir: &Path) -> Result<()> {
     for file in [
         source_dir.join("Kbuild"),
         source_dir.join("ovd_fwd.c"),
+        source_dir.join("ovd_fwd_frame.c"),
+        source_dir.join("ovd_fwd_frame.h"),
         source_dir.join("include/uapi/linux/ovd_fwd.h"),
     ] {
         let mut command = Command::new("perl");

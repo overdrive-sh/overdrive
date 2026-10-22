@@ -1,0 +1,25 @@
+[package]
+name = "overdrive-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+overdrive-fwd-frame-parser-test = {
+    path = "../tests/ovd-fwd-frame-parser",
+    features = ["c-sanitizers"],
+}
+
+# Keep libFuzzer's nightly-only binary out of stable workspace all-target runs.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "ovd_fwd_frame_parse"
+path = "fuzz_targets/ovd_fwd_frame_parse.rs"
+test = false
+doc = false

@@ -35,9 +35,6 @@ pub mod gc;
 /// Shared guest-network TCX semantic projection and canonical aya error.
 pub mod guest_tcx;
 
-/// Host forwarder for guest flows over vsock (netns-density-295, D1/D4/D5/D7).
-pub mod guest_flow;
-
 /// Guest-prefix `sk_lookup` steering (netns-density-295, D8a-LOOKUP).
 pub mod guest_steering;
 

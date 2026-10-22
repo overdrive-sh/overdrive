@@ -174,7 +174,6 @@ fn an_open_context_refuses_the_unload_and_its_close_lets_it_succeed() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn hooked_sockets_hold_the_module_until_their_free_work_and_a_reload_then_serves() {
     precondition_idle_workspace_module();
 
@@ -222,7 +221,6 @@ fn hooked_sockets_hold_the_module_until_their_free_work_and_a_reload_then_serves
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn a_datagram_association_holds_one_reference_per_hooked_socket_until_its_record_is_read() {
     precondition_idle_workspace_module();
 
@@ -254,7 +252,6 @@ fn a_datagram_association_holds_one_reference_per_hooked_socket_until_its_record
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn an_open_context_answers_its_version_while_the_unload_is_refused() {
     precondition_idle_workspace_module();
 

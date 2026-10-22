@@ -750,18 +750,42 @@ impl LoopbackTransportRemoved {
             Path::new("/sys/module/vsock_loopback").exists(),
             "precondition: vsock_loopback is loaded as a module"
         );
-        run("modprobe", &["-r", "vsock_loopback"]);
+        if Path::new(overdrive_testing::guest_kit::LOOPBACK_MODULE_GUEST_PATH).is_file() {
+            // SAFETY: a valid NUL-terminated module name and O_NONBLOCK; the
+            // disposable guest owns this module instance exclusively.
+            let rc = unsafe {
+                libc::syscall(libc::SYS_delete_module, c"vsock_loopback".as_ptr(), libc::O_NONBLOCK)
+            };
+            assert_eq!(rc, 0, "delete_module(vsock_loopback): {}", io::Error::last_os_error());
+        } else {
+            run("modprobe", &["-r", "vsock_loopback"]);
+        }
         Self(())
     }
 }
 
 impl Drop for LoopbackTransportRemoved {
     fn drop(&mut self) {
-        let status = Command::new("modprobe").arg("vsock_loopback").status();
-        if !matches!(status, Ok(s) if s.success()) {
-            eprintln!(
-                "cleanup: `modprobe vsock_loopback` failed ({status:?}); later cases will fail"
-            );
+        let module = Path::new(overdrive_testing::guest_kit::LOOPBACK_MODULE_GUEST_PATH);
+        if module.is_file() {
+            let result = fs::File::open(module).and_then(|file| {
+                // SAFETY: `file` is an open module ELF, params is an empty C
+                // string and flags are zero.
+                let rc = unsafe {
+                    libc::syscall(libc::SYS_finit_module, file.as_raw_fd(), c"".as_ptr(), 0_i32)
+                };
+                if rc == 0 { Ok(()) } else { Err(io::Error::last_os_error()) }
+            });
+            if let Err(error) = result {
+                eprintln!("cleanup: finit_module(vsock_loopback) failed: {error}");
+            }
+        } else {
+            let status = Command::new("modprobe").arg("vsock_loopback").status();
+            if !matches!(status, Ok(s) if s.success()) {
+                eprintln!(
+                    "cleanup: `modprobe vsock_loopback` failed ({status:?}); later cases will fail"
+                );
+            }
         }
     }
 }

@@ -508,7 +508,7 @@ pub fn run_scripted_in_guest_cell(
         &image,
         cid,
         &work.join(format!("{name}-run")),
-        &ScriptedBootExtra { cmdline: Vec::new(), memory_mib: Some(memory_mib), vcpus: Some(2) },
+        &ScriptedBootExtra { cmdline: Vec::new(), memory_mib: Some(memory_mib), vcpus: Some(16) },
     )?;
     let module_paths: Vec<&Path> = modules.iter().map(|m| m.guest.as_path()).collect();
     let argv = cell_argv(cell, &module_paths);

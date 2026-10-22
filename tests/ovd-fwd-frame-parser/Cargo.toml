@@ -1,0 +1,32 @@
+# Test support for FRAME-PARSE (ADR-0201). This package compiles and calls the
+# shipped kmod C parser; it contains no production adapter or API.
+
+[package]
+name        = "overdrive-fwd-frame-parser-test"
+version     = "0.0.0"
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+publish                = false
+build                  = "build.rs"
+
+[features]
+default = []
+# Workspace-wide command compatibility. The parser differential remains in
+# the default lane; this feature does not gate it.
+integration-tests = []
+# Enabled only by the isolated cargo-fuzz package. These are userspace C
+# ASan/UBSan flags, never kernel KASAN.
+c-sanitizers = []
+
+[dev-dependencies]
+overdrive-core.workspace = true
+proptest.workspace = true
+
+[build-dependencies]
+cc.workspace = true
+
+[lints]
+workspace = true

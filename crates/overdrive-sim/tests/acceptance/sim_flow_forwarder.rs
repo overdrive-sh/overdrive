@@ -86,7 +86,6 @@ fn frame(payload: &[u8]) -> Vec<u8> {
 /// accepted, and leaves the inventory.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn a_stream_pair_forwards_both_ways_and_completes_on_two_clean_ends() {
     let (_device, forwarder) = context();
     let (id, vsock, tcp) = stream_pair(&forwarder);
@@ -125,7 +124,6 @@ fn a_stream_pair_forwards_both_ways_and_completes_on_two_clean_ends() {
 /// byte past the abort.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn a_vsock_peer_abort_with_a_direction_open_resets_the_tcp_far_end() {
     let (_device, forwarder) = context();
     let (id, vsock, tcp) = stream_pair(&forwarder);
@@ -153,7 +151,6 @@ fn a_vsock_peer_abort_with_a_direction_open_resets_the_tcp_far_end() {
 /// not make it clean (hazard 16).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn a_tcp_reset_after_its_fin_aborts_the_pair_with_the_reset_errno() {
     let (_device, forwarder) = context();
     let (_id, vsock, tcp) = stream_pair(&forwarder);
@@ -178,7 +175,6 @@ fn a_tcp_reset_after_its_fin_aborts_the_pair_with_the_reset_errno() {
 /// and a trailing reset change nothing and queue no second record.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn ends_after_a_clean_full_end_change_nothing() {
     let (_device, forwarder) = context();
     let (id, vsock, tcp) = stream_pair(&forwarder);
@@ -202,7 +198,6 @@ fn ends_after_a_clean_full_end_change_nothing() {
 /// arrives in order.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn a_target_that_does_not_read_stops_the_sender_until_it_reads_again() {
     let (_device, forwarder) = context();
     let (_id, vsock, tcp) = stream_pair(&forwarder);
@@ -233,7 +228,6 @@ fn a_target_that_does_not_read_stops_the_sender_until_it_reads_again() {
 /// not touched.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn ids_unknown_to_a_context_are_already_ended_and_touch_nothing() {
     let device = SimForwarderDevice::new();
     let (first, second) = (device.open(), device.open());
@@ -255,7 +249,6 @@ fn ids_unknown_to_a_context_are_already_ended_and_touch_nothing() {
 /// ended is `AlreadyEnded` on a second abort.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn every_record_is_taken_once_and_a_second_abort_is_already_ended() {
     let (_device, forwarder) = context();
     let ids: Vec<ForwardId> = (0..5).map(|_| stream_pair(&forwarder).0).collect();
@@ -277,7 +270,6 @@ fn every_record_is_taken_once_and_a_second_abort_is_already_ended() {
 /// returns how many, and queues each record before it returns.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn abort_all_queues_one_detached_record_per_live_id() {
     let (_device, forwarder) = context();
     let (pair, _v, _t) = stream_pair(&forwarder);
@@ -297,7 +289,6 @@ fn abort_all_queues_one_detached_record_per_live_id() {
 /// alone.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn a_context_release_aborts_everything_it_holds_and_queues_no_record() {
     let device = SimForwarderDevice::new();
     let (released, kept) = (device.open(), device.open());
@@ -334,7 +325,6 @@ fn a_context_release_aborts_everything_it_holds_and_queues_no_record() {
 /// the refusal changes nothing: the other half can still be attached.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn an_ended_half_is_refused_half_ended_and_nothing_changes() {
     let (_device, forwarder) = context();
 
@@ -378,7 +368,6 @@ fn an_ended_half_is_refused_half_ended_and_nothing_changes() {
 /// `0x3` with bytes still queued aborts in the first run after no byte.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn ends_present_at_attach_are_carried_out_by_the_first_run() {
     let (_device, forwarder) = context();
 
@@ -413,7 +402,6 @@ fn ends_present_at_attach_are_carried_out_by_the_first_run() {
 /// TCP half with a ULP, and a half already hooked by another context.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn owner_defects_are_refused_with_their_typed_cause() {
     let device = SimForwarderDevice::new();
     let (forwarder, other) = (device.open(), device.open());
@@ -470,7 +458,6 @@ fn owner_defects_are_refused_with_their_typed_cause() {
 /// at once: `0x2` → `GuestHalfClose`, `0x3` → `Aborted { PeerAbort }`.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn a_watch_on_an_already_ended_vsock_queues_its_record_at_once() {
     let (_device, forwarder) = context();
     for (how, outcome) in [
@@ -503,7 +490,6 @@ fn a_watch_on_an_already_ended_vsock_queues_its_record_at_once() {
 /// runs — the record is there once the report has run.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn a_watch_record_is_queued_by_the_callback_that_classifies_the_end() {
     let (_device, forwarder) = context();
 
@@ -542,7 +528,6 @@ fn a_watch_record_is_queued_by_the_callback_that_classifies_the_end() {
 /// bytes still readable, the far end untouched.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn aborting_a_watch_changes_no_socket_fact() {
     let (_device, forwarder) = context();
     let vsock = SimSocket::vsock_stream();
@@ -578,7 +563,6 @@ fn aborting_a_watch_changes_no_socket_fact() {
 /// exactly `MAX_GUEST_DATAGRAM_FRAME`.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn a_datagram_vsock_half_below_the_largest_frame_is_buffer_too_small() {
     let (_device, forwarder) = context();
     let small = SimSocket::vsock_stream();
@@ -602,7 +586,6 @@ fn a_datagram_vsock_half_below_the_largest_frame_is_buffer_too_small() {
 /// and counted `dgram_oversize`, never framed.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn datagrams_cross_in_order_with_empties_and_oversize_is_counted() {
     let (_device, forwarder) = context();
     let (udp, vsock) = (SimSocket::udp(), SimSocket::vsock_stream());
@@ -628,7 +611,6 @@ fn datagrams_cross_in_order_with_empties_and_oversize_is_counted() {
 /// `FrameInvalid` on the vsock half; nothing of it reaches the UDP side.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn a_bad_frame_from_the_vsock_aborts_the_association_frame_invalid() {
     let (_device, forwarder) = context();
     let (udp, vsock) = (SimSocket::udp(), SimSocket::vsock_stream());
@@ -677,7 +659,6 @@ proptest! {
     /// read, and no id's record is ever read twice.
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "pending DELIVER step 4"]
     fn the_inventory_counts_every_hooked_id_and_every_unread_record(
         ops in prop::collection::vec(an_op(), 0..=24),
     ) {

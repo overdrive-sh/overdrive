@@ -175,7 +175,6 @@ async fn a_failed_route_write_leaves_the_route_as_it_was() {
 /// Without auto-delivery a queued connection is accepted only once
 /// released, and its buffered record is read only as far as released.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER step 4"]
 async fn accept_and_read_follow_the_releases() {
     let io = sim(3);
     io.set_auto_deliver(false);
@@ -208,7 +207,6 @@ async fn accept_and_read_follow_the_releases() {
 /// K-A2′: an accepted connection whose VM died fails at its next read and
 /// is reported `peer_gone` until the owner closes it.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER step 4"]
 async fn an_accepted_connection_fails_at_its_next_read_after_the_vm_dies() {
     let io = sim(4);
     bound(&io, FlowListener::Control).await;
@@ -229,7 +227,6 @@ async fn an_accepted_connection_fails_at_its_next_read_after_the_vm_dies() {
 /// K-A2′: a connection still queued when its VM died is accepted later and
 /// delivers its buffered record, then the end.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER step 4"]
 async fn a_queued_connection_keeps_its_record_after_the_vm_dies() {
     let io = sim(5);
     bound(&io, FlowListener::Control).await;
@@ -251,7 +248,6 @@ async fn a_queued_connection_keeps_its_record_after_the_vm_dies() {
 /// A dial's vsock connect to a CID whose VM is gone fails `ENODEV`
 /// (`drivers/vhost/vsock.c:290 @ v7.0`); after a new launch it connects.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER step 4"]
 async fn a_vsock_connect_to_a_gone_vm_fails_enodev() {
     let io = sim(6);
     io.vm_stop(cid());
@@ -268,7 +264,6 @@ async fn a_vsock_connect_to_a_gone_vm_fails_enodev() {
 
 /// `read_record` with `max = 0` is `InvalidInput`.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER step 4"]
 async fn a_zero_length_read_is_invalid_input() {
     let io = sim(7);
     bound(&io, FlowListener::Stream).await;
@@ -287,7 +282,6 @@ async fn a_zero_length_read_is_invalid_input() {
 /// whose one record (`SocketError` on the TCP half, side B) the seam's
 /// `next_end` returns; the far end observed a reset.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER step 4"]
 async fn a_scripted_destination_reset_reaches_next_end_as_the_arbiters_record() {
     let io = sim(8);
     let pair = attached_flow(&io, 1).await;
@@ -307,7 +301,6 @@ async fn a_scripted_destination_reset_reaches_next_end_as_the_arbiters_record() 
 /// with no record, the TCP far end is reset, and the device's context table
 /// shows it released holding nothing.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER step 4"]
 async fn a_released_context_aborts_its_pairs_with_no_record() {
     let io = sim(9);
     let pair = attached_flow(&io, 2).await;
@@ -324,7 +317,6 @@ async fn a_released_context_aborts_its_pairs_with_no_record() {
 /// exited after the connect) is refused `HalfEnded` by the arbiter's
 /// `watch`, with the sweep's errno.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER step 4"]
 async fn a_watch_of_a_swept_vh_is_refused_half_ended() {
     let io = sim(10);
     io.open_forwarder().await.expect("the sim forwarder opens");

@@ -15,6 +15,7 @@ members = [
     "crates/overdrive-store-local",
     "crates/overdrive-testing",
     "crates/overdrive-worker",
+    "tests/ovd-fwd-frame-parser",
     "tests/conformance",
     "xtask",
 ]
@@ -38,6 +39,7 @@ default-members = [
     "crates/overdrive-store-local",
     "crates/overdrive-testing",
     "crates/overdrive-worker",
+    "tests/ovd-fwd-frame-parser",
     "xtask",
 ]
 
@@ -209,6 +211,9 @@ x509-parser     = "0.18"
 toml            = "0.8"
 
 # --- Testing --------------------------------------------------------------
+# Test-only compilation of the shipped ovd_fwd C frame parser. No production
+# crate depends on this build helper.
+cc              = "1"
 proptest        = "1"
 rstest          = "0.23"
 insta           = "1"

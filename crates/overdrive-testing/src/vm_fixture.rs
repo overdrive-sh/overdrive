@@ -844,31 +844,44 @@ pub(crate) fn stage_vsock_modules(
         let src = PathBuf::from(format!(
             "/lib/modules/{kernel_release}/kernel/net/vmw_vsock/{filename}.zst"
         ));
-        if !src.exists() {
+        let dest = module_dir.join(filename);
+        if src.exists() {
+            let status = Command::new("zstd")
+                .arg("-d")
+                .arg("-f")
+                .arg("-q")
+                .arg(&src)
+                .arg("-o")
+                .arg(&dest)
+                .status()
+                .map_err(|source| {
+                    VmFixtureError::spawn(format!("zstd -d {}", src.display()), source)
+                })?;
+            if !status.success() {
+                return Err(VmFixtureError::rootfs_staging_failed(
+                    format!(
+                        "zstd -d {} -o {} exited {:?}",
+                        src.display(),
+                        dest.display(),
+                        status.code()
+                    ),
+                    io::Error::other(format!("zstd -d {} failed", src.display())),
+                ));
+            }
             continue;
         }
-        let dest = module_dir.join(filename);
-        let status = Command::new("zstd")
-            .arg("-d")
-            .arg("-f")
-            .arg("-q")
-            .arg(&src)
-            .arg("-o")
-            .arg(&dest)
-            .status()
-            .map_err(|source| {
-                VmFixtureError::spawn(format!("zstd -d {}", src.display()), source)
+        let nested_source = Path::new(GUEST_VSOCK_MODULE_DIR).join(filename);
+        if nested_source.is_file() {
+            fs::copy(&nested_source, &dest).map_err(|source| {
+                VmFixtureError::rootfs_staging_failed(
+                    format!(
+                        "copying nested guest module {} to {}",
+                        nested_source.display(),
+                        dest.display()
+                    ),
+                    source,
+                )
             })?;
-        if !status.success() {
-            return Err(VmFixtureError::rootfs_staging_failed(
-                format!(
-                    "zstd -d {} -o {} exited {:?}",
-                    src.display(),
-                    dest.display(),
-                    status.code()
-                ),
-                io::Error::other(format!("zstd -d {} failed", src.display())),
-            ));
         }
     }
     Ok(())
@@ -1029,6 +1042,10 @@ pub(crate) fn mknod_char_device(
 /// [`VmFixtureError::UnsupportedHostArch`], [`VmFixtureError::Spawn`], or
 /// [`VmFixtureError::OverdriveInitBuildFailed`].
 pub(crate) fn build_overdrive_init_static() -> Result<PathBuf, VmFixtureError> {
+    let nested_prebuilt = PathBuf::from("/opt/overdrive-testing/prebuilt-overdrive-init");
+    if nested_prebuilt.is_file() {
+        return Ok(nested_prebuilt);
+    }
     let target = musl_target_triple()?;
     let root = workspace_root();
     let output = Command::new("cargo")

@@ -23,7 +23,6 @@ use super::support::{
 };
 
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn a_guest_half_close_is_recorded_and_the_hosts_direction_stays_with_the_holder() {
     let fwd = open_context();
     let (v, v_far) = vsock_pair();
@@ -43,7 +42,6 @@ fn a_guest_half_close_is_recorded_and_the_hosts_direction_stays_with_the_holder(
 }
 
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn a_guest_close_with_a_direction_open_is_recorded_aborted() {
     let fwd = open_context();
     let (v, v_far) = vsock_pair();
@@ -56,7 +54,6 @@ fn a_guest_close_with_a_direction_open_is_recorded_aborted() {
 }
 
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn a_watch_on_a_vsock_whose_guest_direction_already_ended_records_at_once() {
     let fwd = open_context();
     let (v, v_far) = vsock_pair();
@@ -68,7 +65,6 @@ fn a_watch_on_a_vsock_whose_guest_direction_already_ended_records_at_once() {
 }
 
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn the_record_is_queued_before_the_holder_observes_the_end() {
     // Record first, then the original callback (hazard 8 is the opposite
     // order): a holder woken by its read's end always finds the record.
@@ -97,7 +93,6 @@ fn the_record_is_queued_before_the_holder_observes_the_end() {
 }
 
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn watch_abort_records_unhooks_and_never_touches_the_socket() {
     let fwd = open_context();
     let (v, v_far) = vsock_pair();
@@ -129,7 +124,6 @@ fn watch_abort_records_unhooks_and_never_touches_the_socket() {
 }
 
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn abort_all_records_every_watch_and_pair_and_returns_their_count() {
     let fwd = open_context();
     let (v1, _f1) = vsock_pair();
@@ -151,7 +145,6 @@ fn abort_all_records_every_watch_and_pair_and_returns_their_count() {
 }
 
 #[test]
-#[ignore = "pending DELIVER step 4"]
 fn a_context_release_shuts_every_watched_socket_and_queues_no_record() {
     let guest_view = open_context();
     let fwd = open_context();

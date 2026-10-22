@@ -7,30 +7,26 @@
 //! (§ *Control interface*, "End record"): 32 bytes, native byte order, it
 //! never leaves the machine.
 //!
-//! The `ioctl` argument structures of `OVD_FWD_ATTACH`, `OVD_FWD_WATCH`,
-//! `OVD_FWD_ABORT`, `OVD_FWD_INVENTORY` and `OVD_FWD_PAIR_STATE`, their
-//! request numbers and the ABI version number are written by DELIVER step 4
-//! together with the header, with the same `const` assertions; the delta
-//! pins their fields (§ *Control interface*, "Operations"), not their
-//! order.
-//!
-//! RED scaffold until DELIVER step 4.
+use overdrive_core::guest_transport::forwarder::{
+    AbortCause, ForwardEnd, ForwardId, ForwardOutcome, ForwardRecordField, ForwarderError, PairSide,
+};
+use overdrive_core::guest_transport::wire::{
+    DATAGRAM_FRAME_HEADER_LEN, DATAGRAM_FRAME_MAGIC, KernelErrno, MAX_GUEST_DATAGRAM_FRAME,
+    MAX_GUEST_DATAGRAM_PAYLOAD,
+};
 
-#![allow(
-    dead_code,
-    reason = "RED scaffold: the adapter's bodies consume these mirrors from DELIVER step 4"
-)]
-
-use overdrive_core::guest_transport::forwarder::{ForwardEnd, ForwarderError};
-
-const SCAFFOLD: &str = "Not yet implemented -- RED scaffold";
+nix::ioctl_read!(version_ioctl, 0xB9, 0x00, OvdFwdVersion);
+nix::ioctl_readwrite!(attach_ioctl, 0xB9, 0x01, OvdFwdAttach);
+nix::ioctl_readwrite!(watch_ioctl, 0xB9, 0x02, OvdFwdWatch);
+nix::ioctl_write_ptr!(abort_ioctl, 0xB9, 0x03, u64);
+nix::ioctl_none!(abort_all_ioctl, 0xB9, 0x04);
+nix::ioctl_read!(inventory_ioctl, 0xB9, 0x05, OvdFwdInventory);
+nix::ioctl_readwrite!(pair_state_ioctl, 0xB9, 0x06, OvdFwdPairState);
 
 /// The control device (§ *Control interface*, "Device").
 pub const FORWARDER_DEVICE_PATH: &str = "/dev/ovd_fwd";
 
-/// The ABI version this adapter speaks. DELIVER step 4 sets it equal to the
-/// header's `OVD_FWD_ABI_VERSION`; the probe's `Version` stage refuses any
-/// other value with [`ForwarderError::AbiMismatch`].
+/// The ABI version this adapter speaks, matching `OVD_FWD_ABI_VERSION`.
 pub const OVD_FWD_ABI_VERSION: u32 = 1;
 
 /// `OVD_FWD_VERSION` result: the ABI version only (MODULE-REFCOUNT,
@@ -45,6 +41,141 @@ pub struct OvdFwdVersion {
 
 const _: () = assert!(std::mem::size_of::<OvdFwdVersion>() == 4);
 const _: () = assert!(std::mem::offset_of!(OvdFwdVersion, abi_version) == 0);
+
+/// `OVD_FWD_ATTACH` request and response.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct OvdFwdAttach {
+    /// File descriptor for half A.
+    pub fd_a: i32,
+    /// File descriptor for half B.
+    pub fd_b: i32,
+    /// Stream `0`, datagram with UDP A `1`, datagram with UDP B `2`.
+    pub mode: u32,
+    /// Reserved; must be zero.
+    pub flags: u32,
+    /// The attached pair's id, written on success.
+    pub id: u64,
+    /// The first offending side, written on refusal.
+    pub bad_side: u8,
+    /// Reserved.
+    pub reserved0: u8,
+    /// `ECONNABORTED` only: the ended half's errno.
+    pub end_errno: u16,
+    /// Reserved.
+    pub reserved1: u32,
+}
+
+const _: () = assert!(std::mem::size_of::<OvdFwdAttach>() == 32);
+const _: () = assert!(std::mem::offset_of!(OvdFwdAttach, fd_a) == 0);
+const _: () = assert!(std::mem::offset_of!(OvdFwdAttach, fd_b) == 4);
+const _: () = assert!(std::mem::offset_of!(OvdFwdAttach, mode) == 8);
+const _: () = assert!(std::mem::offset_of!(OvdFwdAttach, flags) == 12);
+const _: () = assert!(std::mem::offset_of!(OvdFwdAttach, id) == 16);
+const _: () = assert!(std::mem::offset_of!(OvdFwdAttach, bad_side) == 24);
+const _: () = assert!(std::mem::offset_of!(OvdFwdAttach, end_errno) == 26);
+
+/// `OVD_FWD_WATCH` request and response.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct OvdFwdWatch {
+    /// File descriptor for the watched vsock.
+    pub fd: i32,
+    /// Reserved; must be zero.
+    pub flags: u32,
+    /// The watch's id, written on success.
+    pub id: u64,
+    /// The offending side, written on refusal (always A).
+    pub bad_side: u8,
+    /// Reserved.
+    pub reserved0: u8,
+    /// `ECONNABORTED` only: the ended half's errno.
+    pub end_errno: u16,
+    /// Reserved.
+    pub reserved1: u32,
+}
+
+const _: () = assert!(std::mem::size_of::<OvdFwdWatch>() == 24);
+const _: () = assert!(std::mem::offset_of!(OvdFwdWatch, fd) == 0);
+const _: () = assert!(std::mem::offset_of!(OvdFwdWatch, flags) == 4);
+const _: () = assert!(std::mem::offset_of!(OvdFwdWatch, id) == 8);
+const _: () = assert!(std::mem::offset_of!(OvdFwdWatch, bad_side) == 16);
+const _: () = assert!(std::mem::offset_of!(OvdFwdWatch, end_errno) == 18);
+
+/// `OVD_FWD_INVENTORY` request and response.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct OvdFwdInventory {
+    /// Live attached pairs.
+    pub live_pairs: u32,
+    /// Live watches.
+    pub live_watches: u32,
+    /// Queued end records.
+    pub queued_ends: u32,
+    /// Reserved.
+    pub reserved: u32,
+    /// Cumulative pairs attached.
+    pub attached: u64,
+    /// Cumulative pairs completed.
+    pub completed: u64,
+    /// Cumulative peer-aborted pairs and watches.
+    pub aborted_peer: u64,
+    /// Cumulative socket-error-aborted pairs and watches.
+    pub aborted_socket: u64,
+    /// Cumulative frame-invalid-aborted pairs.
+    pub aborted_frame: u64,
+    /// Cumulative owner-detached pairs and watches.
+    pub aborted_detached: u64,
+    /// Cumulative unclassified ends.
+    pub unclassified_eof: u64,
+    /// Cumulative oversized datagrams consumed.
+    pub dgram_oversize: u64,
+}
+
+const _: () = assert!(std::mem::size_of::<OvdFwdInventory>() == 80);
+const _: () = assert!(std::mem::offset_of!(OvdFwdInventory, live_pairs) == 0);
+const _: () = assert!(std::mem::offset_of!(OvdFwdInventory, live_watches) == 4);
+const _: () = assert!(std::mem::offset_of!(OvdFwdInventory, queued_ends) == 8);
+const _: () = assert!(std::mem::offset_of!(OvdFwdInventory, reserved) == 12);
+const _: () = assert!(std::mem::offset_of!(OvdFwdInventory, attached) == 16);
+const _: () = assert!(std::mem::offset_of!(OvdFwdInventory, dgram_oversize) == 72);
+
+/// `OVD_FWD_PAIR_STATE` request and response.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct OvdFwdPairState {
+    /// The live pair id.
+    pub id: u64,
+    /// Per direction: 0 none, 1 clean, 2 abort; A-to-B then B-to-A.
+    pub source_end: [u8; 2],
+    /// Per direction: target write side has been shut; A-to-B then B-to-A.
+    pub target_shut: [u8; 2],
+    /// Reserved.
+    pub reserved: [u8; 4],
+    /// Bytes accepted by each target; A-to-B then B-to-A.
+    pub moved: [u64; 2],
+}
+
+const _: () = assert!(std::mem::size_of::<OvdFwdPairState>() == 32);
+const _: () = assert!(std::mem::offset_of!(OvdFwdPairState, id) == 0);
+const _: () = assert!(std::mem::offset_of!(OvdFwdPairState, source_end) == 8);
+const _: () = assert!(std::mem::offset_of!(OvdFwdPairState, target_shut) == 10);
+const _: () = assert!(std::mem::offset_of!(OvdFwdPairState, moved) == 16);
+
+/// UAPI frame magic, matching the Rust guest transport codec.
+pub const OVD_FWD_FRAME_MAGIC: u32 = u32::from_be_bytes(DATAGRAM_FRAME_MAGIC);
+/// UAPI frame header length.
+pub const OVD_FWD_FRAME_HDR_LEN: u32 = 8;
+/// Largest UAPI datagram payload.
+pub const OVD_FWD_FRAME_MAX_PAYLOAD: u32 = MAX_GUEST_DATAGRAM_PAYLOAD;
+/// Largest UAPI datagram frame.
+pub const OVD_FWD_FRAME_MAX: u32 = MAX_GUEST_DATAGRAM_FRAME;
+
+const _: () = assert!(OVD_FWD_FRAME_MAGIC == u32::from_be_bytes(DATAGRAM_FRAME_MAGIC));
+const _: () = assert!(OVD_FWD_FRAME_HDR_LEN as usize == DATAGRAM_FRAME_HEADER_LEN);
+const _: () = assert!(OVD_FWD_FRAME_MAX_PAYLOAD == MAX_GUEST_DATAGRAM_PAYLOAD);
+const _: () = assert!(OVD_FWD_FRAME_MAX == MAX_GUEST_DATAGRAM_FRAME);
+const _: () = assert!(OVD_FWD_FRAME_MAX == OVD_FWD_FRAME_MAX_PAYLOAD + OVD_FWD_FRAME_HDR_LEN);
 
 /// Length of one end record; `read()` returns whole records only.
 pub const END_RECORD_LEN: usize = 32;
@@ -119,8 +250,76 @@ const _: () = assert!(std::mem::offset_of!(OvdFwdEndRecord, moved_ba) == 24);
 /// 3, or not 1–5 for kinds 2 and 4), `Side` (not 0 or 1 where a side is
 /// carried, non-zero elsewhere), `Errno` (zero for cause 2, non-zero
 /// elsewhere), `Reserved` (any reserved byte non-zero).
-pub fn decode_end_record(_bytes: &[u8; END_RECORD_LEN]) -> Result<ForwardEnd, ForwarderError> {
-    panic!("{SCAFFOLD}")
+pub fn decode_end_record(bytes: &[u8; END_RECORD_LEN]) -> Result<ForwardEnd, ForwarderError> {
+    let field_error = |field| ForwarderError::EndDecode { field };
+    let id = u64::from_ne_bytes([
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+    ]);
+    let id = ForwardId::new(id).map_err(|_| field_error(ForwardRecordField::Id))?;
+    let record_kind = bytes[8];
+    if !(1..=4).contains(&record_kind) {
+        return Err(field_error(ForwardRecordField::Kind));
+    }
+    let record_cause = bytes[9];
+    match record_kind {
+        kind::PAIR_COMPLETED | kind::WATCH_HALF_CLOSE if record_cause != 0 => {
+            return Err(field_error(ForwardRecordField::Cause));
+        }
+        kind::PAIR_ABORTED | kind::WATCH_ABORTED if !(1..=5).contains(&record_cause) => {
+            return Err(field_error(ForwardRecordField::Cause));
+        }
+        _ => {}
+    }
+    let side = bytes[10];
+    let side_is_used = matches!(
+        record_cause,
+        cause::PEER_ABORT | cause::SOCKET_ERROR | cause::FRAME_INVALID | cause::UNCLASSIFIED
+    );
+    if side > 1 || (!side_is_used && side != 0) {
+        return Err(field_error(ForwardRecordField::Side));
+    }
+    let errno_raw = u16::from_ne_bytes([bytes[12], bytes[13]]);
+    if (record_cause == cause::SOCKET_ERROR) == (errno_raw == 0) {
+        return Err(field_error(ForwardRecordField::Errno));
+    }
+    if bytes[11] != 0 || bytes[14] != 0 || bytes[15] != 0 {
+        return Err(field_error(ForwardRecordField::Reserved));
+    }
+    let pair_side = match side {
+        0 => PairSide::A,
+        1 => PairSide::B,
+        _ => return Err(field_error(ForwardRecordField::Side)),
+    };
+    let outcome = match record_kind {
+        kind::PAIR_COMPLETED => ForwardOutcome::Completed,
+        kind::WATCH_HALF_CLOSE => ForwardOutcome::GuestHalfClose,
+        kind::PAIR_ABORTED | kind::WATCH_ABORTED => {
+            let abort_cause = match record_cause {
+                cause::PEER_ABORT => AbortCause::PeerAbort { side: pair_side },
+                cause::SOCKET_ERROR => AbortCause::SocketError {
+                    side: pair_side,
+                    errno: KernelErrno::new(errno_raw)
+                        .map_err(|_| field_error(ForwardRecordField::Errno))?,
+                },
+                cause::FRAME_INVALID => AbortCause::FrameInvalid { side: pair_side },
+                cause::DETACHED => AbortCause::Detached,
+                cause::UNCLASSIFIED => AbortCause::Unclassified { side: pair_side },
+                _ => return Err(field_error(ForwardRecordField::Cause)),
+            };
+            ForwardOutcome::Aborted { cause: abort_cause }
+        }
+        _ => return Err(field_error(ForwardRecordField::Kind)),
+    };
+    Ok(ForwardEnd {
+        id,
+        outcome,
+        moved_ab: u64::from_ne_bytes([
+            bytes[16], bytes[17], bytes[18], bytes[19], bytes[20], bytes[21], bytes[22], bytes[23],
+        ]),
+        moved_ba: u64::from_ne_bytes([
+            bytes[24], bytes[25], bytes[26], bytes[27], bytes[28], bytes[29], bytes[30], bytes[31],
+        ]),
+    })
 }
 
 /// The `Version` stage's verdict over the ABI version `OVD_FWD_VERSION`
@@ -129,8 +328,15 @@ pub fn decode_end_record(_bytes: &[u8; END_RECORD_LEN]) -> Result<ForwardEnd, Fo
 /// # Errors
 ///
 /// [`ForwarderError::AbiMismatch`] for another ABI.
-pub fn version_verdict(_version: OvdFwdVersion) -> Result<(), ForwarderError> {
-    panic!("{SCAFFOLD}")
+pub const fn version_verdict(version: OvdFwdVersion) -> Result<(), ForwarderError> {
+    if version.abi_version == OVD_FWD_ABI_VERSION {
+        Ok(())
+    } else {
+        Err(ForwarderError::AbiMismatch {
+            expected: OVD_FWD_ABI_VERSION,
+            found: version.abi_version,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -177,7 +383,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "pending DELIVER step 4"]
     fn every_pinned_record_shape_decodes_to_its_forward_end() {
         let econnreset = KernelErrno::ECONNRESET;
         let cases = [
@@ -237,7 +442,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "pending DELIVER step 4"]
     fn a_record_outside_its_pinned_values_names_the_field() {
         let mut reserved0 = record(1, kind::PAIR_COMPLETED, 0, 0, 0, 0, 0);
         reserved0[11] = 1;
@@ -282,7 +486,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "pending DELIVER step 4"]
     fn the_version_stage_accepts_only_this_abi() {
         assert!(version_verdict(OvdFwdVersion { abi_version: OVD_FWD_ABI_VERSION }).is_ok());
         for found in [0, OVD_FWD_ABI_VERSION + 1, u32::MAX] {

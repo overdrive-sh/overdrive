@@ -498,6 +498,11 @@ impl GuestKit {
         let alloc = AllocationId::new(&format!("kit-{}", boot.cid))
             .map_err(|e| launch(format!("allocation id: {e}")))?;
         let cid = GuestCid::new(boot.cid).map_err(|e| launch(format!("guest CID: {e}")))?;
+        // Cloud Hypervisor's pathname Unix socket is limited by `sun_path`.
+        // Keep only per-launch runtime artifacts under this bounded path; the
+        // rootfs clone and its index stay under the caller's reflink-capable
+        // `boot.run_dir` below.
+        let runtime = WorkDir::create(Path::new("/run"), "ovd-gk")?;
         let header = vm_fixture::read_header(&self.kernel_path)
             .map_err(staging(format!("reading {}", self.kernel_path.display())))?;
         let kernel = KernelImage::validate(self.kernel_path.clone(), HostArch::X86_64, &header)
@@ -517,8 +522,9 @@ impl GuestKit {
         let config = VmConfig {
             alloc: alloc.clone(),
             kernel,
-            // The production launch clones the image (FICLONE) beside the
-            // run directory, on the same reflink-capable staging filesystem.
+            // Keep the production FICLONE target on the caller's
+            // reflink-capable staging filesystem; only Unix-socket/runtime
+            // artifacts use the short directory above.
             rootfs: RootfsPlan::for_alloc(
                 boot.image.rootfs.clone(),
                 rootfs_bytes,
@@ -529,7 +535,7 @@ impl GuestKit {
             cmdline,
             memory: MemoryPlan::derive(u64::from(boot.memory_mib) * 1024 * 1024),
             vcpus,
-            run_dir: VmRunDir::for_alloc(boot.run_dir, &alloc),
+            run_dir: VmRunDir::for_alloc(runtime.path(), &alloc),
             confinement: VmConfinement::confined(confined_identity()?, 1024),
             cgroup_scope: CgroupPath::for_alloc(&alloc),
         };
@@ -551,7 +557,14 @@ impl GuestKit {
             });
             *recorded.lock().unwrap_or_else(PoisonError::into_inner) = Some(ended);
         });
-        Ok(GuestKitVm { vmm, control: Some(process.control), exit, cid: boot.cid, console })
+        Ok(GuestKitVm {
+            vmm,
+            control: Some(process.control),
+            exit,
+            cid: boot.cid,
+            console,
+            _runtime: runtime,
+        })
     }
 
     /// Boots a [`GuestInit::ScriptedPeer`] image at `cid` and returns once
@@ -639,8 +652,9 @@ pub struct GuestBoot<'a> {
     pub memory_mib: u32,
     /// vCPUs.
     pub vcpus: u8,
-    /// The run root: the VMM's own run directory (`kit-<cid>`: console
-    /// log, API socket) and its image clone are created under it.
+    /// The reflink-capable image-work root: the rootfs clone and its index
+    /// are created under it. The fixture keeps the API socket and other
+    /// per-launch runtime artifacts on a separate bounded private path.
     pub run_dir: &'a Path,
 }
 
@@ -653,6 +667,8 @@ pub struct GuestKitVm {
     exit: Arc<Mutex<Option<VmmExit>>>,
     cid: u32,
     console: PathBuf,
+    /// Owns the short runtime path until the VMM has been terminated.
+    _runtime: WorkDir,
 }
 
 impl std::fmt::Debug for GuestKitVm {
@@ -830,16 +846,20 @@ fn status_of(exit: &VmmExit) -> ExitStatus {
 }
 
 /// The identity the production launch drops the VMM to: the production VMM
-/// uid, and the groups that own `/dev/kvm` and `/dev/vhost-vsock` (the
-/// kernel's device nodes decide who may open them; no group is assumed).
+/// numeric uid/gid and the supplementary groups that own `/dev/kvm` and
+/// `/dev/vhost-vsock` (the kernel's device nodes decide who may open them;
+/// no device group is assumed).
 fn confined_identity() -> Result<VmmIdentity, GuestKitError> {
     let group_of = |device: &str| {
         fs::metadata(device).map(|m| Gid::new(m.gid())).map_err(staging(format!("stat {device}")))
     };
     let kvm = group_of("/dev/kvm")?;
     let vhost = group_of("/dev/vhost-vsock")?;
-    let supplementary = if vhost == kvm { Vec::new() } else { vec![vhost] };
-    Ok(VmmIdentity { uid: OVERDRIVE_VMM_UID, gid: kvm, supplementary })
+    let mut supplementary = vec![kvm];
+    if vhost != kvm {
+        supplementary.push(vhost);
+    }
+    Ok(VmmIdentity { uid: OVERDRIVE_VMM_UID, gid: Gid::new(OVERDRIVE_VMM_UID), supplementary })
 }
 
 /// A scripted guest: its VMM and its agent's control connection.
@@ -1056,6 +1076,10 @@ pub(crate) fn prepared(path: PathBuf, artifact: &str) -> Result<PathBuf, GuestKi
 /// `xtask::guest_kit_prepare` contract path, see
 /// [`crate::forwarder_module`]).
 fn prepared_forwarder_module(release: &str) -> Result<PathBuf, GuestKitError> {
+    let nested_prebuilt = PathBuf::from(GUEST_FORWARDER_MODULE_PATH);
+    if nested_prebuilt.is_file() {
+        return Ok(nested_prebuilt);
+    }
     let module =
         crate::forwarder_module::built_module_path(&crate::forwarder_module::kmod_dir(), release);
     prepared(module, &format!("ovd_fwd.ko for kernel {release}"))
@@ -1064,6 +1088,10 @@ fn prepared_forwarder_module(release: &str) -> Result<PathBuf, GuestKitError> {
 /// The static scripted peer the lane setup step built for the host's musl
 /// target (`<target>/<musl-triple>/release/overdrive-guest-peer`).
 fn prepared_guest_peer() -> Result<PathBuf, GuestKitError> {
+    let nested_prebuilt = PathBuf::from(GUEST_PEER_GUEST_PATH);
+    if nested_prebuilt.is_file() {
+        return Ok(nested_prebuilt);
+    }
     let target = vm_fixture::musl_target_triple()?;
     let root = vm_fixture::workspace_root();
     let peer =
@@ -1071,8 +1099,11 @@ fn prepared_guest_peer() -> Result<PathBuf, GuestKitError> {
     prepared(peer, &format!("static {GUEST_PEER_BIN} for {target}"))
 }
 
-/// A per-test working directory under the shared staging root (never
-/// tmpfs: the VMM opens disk images `O_DIRECT`), removed on drop.
+/// A unique per-test directory under its caller-selected root, removed on
+/// drop.
+///
+/// Image callers select the reflink-capable staging root; the guest kit's
+/// private runtime caller selects `/run` only for non-disk artifacts.
 #[derive(Debug)]
 pub struct WorkDir {
     path: PathBuf,
