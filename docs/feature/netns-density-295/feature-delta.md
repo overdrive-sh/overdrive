@@ -633,6 +633,7 @@ date.
 | T-1 | 2026-10-18 | User ruling "DISTILL rulings", T-1 approved: build the guest-kit Cloud Hypervisor microVM fixture — an `overdrive-testing` helper booting the CH fork with a guest kernel, `ovd_fwd.ko`, and `overdrive-init` or a scripted guest vsock peer, on the native-metal `kvm-tests` lane. R5-59 (a), the guest-side `ovd_fwd` cells and the in-guest real-kernel cells run on it. DISTILL owns the fixture as test support (DR2-CLOSE D-1) |
 | U-4 | 2026-10-21 | User ruling "U-4", option (a): the guest kit (T-1) launches its microVM through the production `CloudHypervisorVmm` (`overdrive-host`); the kit renders no cloud-hypervisor command line of its own. Rejected: sanctioning a second renderer in dst-lint DWD-09 clause 1 (relaxes the gate), and exporting a pure argv renderer from `overdrive-host` (new production API) |
 | STEP3-SPLIT | 2026-10-22 | User ruling "STEP3-SPLIT": DG-2 step 3 (VMM adapter) is split. Its adapter half — the fork launch argument (`vhost_kernel_vsock_arg`), `SimVmm` and the host VMM equivalence cells — is implemented before the attachment cut, with fork provisioning (step 1), because the guest-kit Tier-3 cells of steps 1, 4 and 5 launch through `CloudHypervisorVmm::create`; it replaces only a RED-scaffold body. The `VmDriver` caller half (DG-2 rows 4–6, `AllocationSpec.transport`, the `launch=` transport token) stays in the attachment cut. Rejected: moving the guest-kit cells of steps 1, 4 and 5 into the cut (the forwarder and guest steps could not go GREEN before it) |
+| IOCTL-NUMBERS | 2026-10-22 | User ruling "IOCTL-NUMBERS": the `OVD_FWD_*` request numbers use magic `0xB9` and numbers `0x00`–`0x06` in the EVMOD-CTL operations-table order, with the standard `_IO`/`_IOR`/`_IOW`/`_IOWR` encodings; `abi_version` = 1; defined in the module UAPI header in step K and mirrored in `uapi.rs` in step 4 (§ *Forwarder control interface*, "Request numbers") |
 | RESTART-SSOT (GH #324) | 2026-10-18 | User rulings: GH #324 filed with approval ("`restart_status_for_alloc` disagrees with `WorkloadLifecycle`'s restart decision"), then "fix the accessor, do not work around it": one shared restart decision in `overdrive-reconcilers` used by both `WorkloadLifecycle` and `restart_status_for_alloc`; #295 lands the fix and closes #324; `cid_lease` projects `retry` from the fixed accessor. The function shapes (`restart_decision`, `restart_after_failure`, the accessor's `kind` / `run_desired` / `failed` / `desired_generation` inputs, `attempt_index_for_alloc`, `current_alloc` made `pub`), the Job, `Draining` and intent clauses, and the `cid_lease` projection of `att`, `ex` and `failed` are architect elaborations recorded under this ruling (§ *Restart decision*) |
 | RESTART-GEN-CRASH (GH #325) | 2026-10-18 | User ruling: the loss of a generation replacement placed but not started at a `serve` crash is a separate issue, GH #325; #295 does **not** fix it. The `cid_lease` run `RedeployLeasedAtServeCrashIsPlacedAgain` and hazard `crashLosesPlacedGeneration` stay pending, citing #325, until #325 lands; the run's DISTILL `#[quint_test]` is `#[ignore = "pending #325"]`. The design of that fix belongs to #325. The conformance-main exclusion of the window (`cid_lease` item 9) is an architect elaboration under this ruling |
 | U-2, E-3 | 2026-10-19 | User rulings "DISTILL rulings (2026-10-19)": U-2: V-9's density measurements are the benchmark GH #326; `vsock_density.rs` stays a 64-VM correctness test. E-3: the `mtls_guardrails` AC3 failure at HEAD is out of scope, no issue. |
@@ -4019,6 +4020,18 @@ is EVMOD-CTL; the end record, `read` and `poll` are EVMOD-REC.
 | `OVD_FWD_PAIR_STATE` | `id: u64` | per direction: `source_end: u8` (0 none, 1 clean, 2 abort), `target_shut: u8`, `moved: u64`, copied under the context's record-queue lock while the id is live (rule 4) | `ENOENT` |
 | `read()` | buffer of `n × 32` bytes | whole end records, oldest first; `EAGAIN` when none (non-blocking) | `EINVAL` for a buffer shorter than one record |
 | `poll()` | — | `EPOLLIN` while a record is queued | — |
+
+- **Request numbers (IOCTL-NUMBERS).** The module's UAPI header
+  `include/uapi/linux/ovd_fwd.h` defines them (it is the SSOT; step 4 mirrors
+  them in `overdrive-fwd/src/uapi.rs` with equality assertions). Magic `0xB9`,
+  unused in `Documentation/userspace-api/ioctl/ioctl-number.rst @ v7.0`; numbers
+  in the order of the table above: `OVD_FWD_VERSION` = `_IOR(0xB9, 0x00, struct
+  ovd_fwd_version)`, `OVD_FWD_ATTACH` = `_IOWR(0xB9, 0x01, struct ovd_fwd_attach)`,
+  `OVD_FWD_WATCH` = `_IOWR(0xB9, 0x02, struct ovd_fwd_watch)`, `OVD_FWD_ABORT` =
+  `_IOW(0xB9, 0x03, __u64)`, `OVD_FWD_ABORT_ALL` = `_IO(0xB9, 0x04)`,
+  `OVD_FWD_INVENTORY` = `_IOR(0xB9, 0x05, struct ovd_fwd_inventory)`,
+  `OVD_FWD_PAIR_STATE` = `_IOWR(0xB9, 0x06, struct ovd_fwd_pair_state)`.
+  `abi_version` is `1` (`OVD_FWD_ABI_VERSION`).
 
 - **States attach and watch accept (EVMOD-PAIR, U-EV-1;
   EVMOD-ATTACH-END, ADR-0210).** Attach accepts a half that is still connected even when its
