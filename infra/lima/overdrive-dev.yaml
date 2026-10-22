@@ -121,6 +121,9 @@ param:
   # package is older than that parser support, so install this validated
   # sparse development revision until the distro package passes the probe.
   SPARSE_COMMIT:             "c4640450b84718f4ec8f14138e5cb28256078f7b"
+  # The stock Linux 7.0 headers record CONFIG_PAHOLE_VERSION=131; keep the
+  # Kbuild host on the matching pahole release to avoid a Kbuild warning.
+  PAHOLE_PACKAGE_VERSION:    "1.31-2ubuntu1"
   # Quint formal-methods toolchain (specs/quint/**, `cargo xtask quint`).
   # Mirrors the pins in infra/provision/install-quint.sh (the CI installer);
   # keep the two aligned. Held at v0.32.0 below latest (v0.33.0, 2026-09-28):
@@ -167,6 +170,7 @@ provision:
           unzip xz-utils cpio bzip2 zstd file \
           clang lld mold llvm libclang-dev \
           libelf-dev libbpf-dev linux-libc-dev \
+          pahole={{ .Param.PAHOLE_PACKAGE_VERSION }} \
           linux-tools-common linux-tools-generic \
           zlib1g-dev libssl-dev libzstd-dev libudev-dev \
           qemu-system-x86 qemu-system-arm qemu-utils \

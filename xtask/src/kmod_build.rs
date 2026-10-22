@@ -160,7 +160,8 @@ fn build_module(
     output_dir: &Path,
     digest: &str,
 ) -> Result<()> {
-    let module_version = format!(r#"KCFLAGS=-DOVD_FWD_MODULE_VERSION=\"{digest}\""#);
+    let compiler = configured_kernel_compiler(kernel_build_dir)?;
+    let module_flags = format!(r#"KCFLAGS=-Werror -DOVD_FWD_MODULE_VERSION=\"{digest}\""#);
     let mut command = Command::new("make");
     command
         .arg("-C")
@@ -168,9 +169,41 @@ fn build_module(
         .arg(format!("M={}", source_dir.display()))
         .arg(format!("MO={}", output_dir.display()))
         .args(["W=1", "C=1"])
-        .arg(module_version)
+        .arg(format!("CC={compiler}"))
+        .arg(module_flags)
         .arg("modules");
     run_kernel_build(command)
+}
+
+fn configured_kernel_compiler(kernel_build_dir: &Path) -> Result<String> {
+    let auto_conf = kernel_build_dir.join("include/config/auto.conf");
+    let config = std::fs::read_to_string(&auto_conf)
+        .wrap_err_with(|| format!("reading configured compiler from {}", auto_conf.display()))?;
+    let compiler_text = config
+        .lines()
+        .find_map(|line| line.strip_prefix("CONFIG_CC_VERSION_TEXT="))
+        .map(str::trim)
+        .ok_or_else(|| {
+            color_eyre::eyre::eyre!(
+                "kernel configuration omits CONFIG_CC_VERSION_TEXT: {}",
+                auto_conf.display()
+            )
+        })?;
+    let compiler_text = compiler_text
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .unwrap_or(compiler_text);
+    let compiler = compiler_text
+        .split_whitespace()
+        .next()
+        .filter(|compiler| !compiler.is_empty())
+        .ok_or_else(|| {
+            color_eyre::eyre::eyre!(
+                "kernel configuration has an empty CONFIG_CC_VERSION_TEXT: {}",
+                auto_conf.display()
+            )
+        })?;
+    Ok(compiler.to_owned())
 }
 
 fn run_kernel_build(mut command: Command) -> Result<()> {
@@ -188,10 +221,19 @@ fn run_kernel_build(mut command: Command) -> Result<()> {
     if stdout.contains("C=1 specified, but") || stderr.contains("C=1 specified, but") {
         bail!("the kernel build tree disabled sparse despite `C=1`; install a compatible sparse");
     }
+    if output_has_warning(&stdout) || output_has_warning(&stderr) {
+        bail!(
+            "building ovd_fwd.ko emitted a warning; `kmod-build` requires a warning-free kernel build"
+        );
+    }
     if !output.status.success() {
         bail!("building ovd_fwd.ko with W=1 and C=1 failed with {}", output.status);
     }
     Ok(())
+}
+
+fn output_has_warning(output: &str) -> bool {
+    output.lines().any(|line| line.to_ascii_lowercase().contains("warning:"))
 }
 
 fn checked_output(mut command: Command, description: &str) -> Result<Output> {

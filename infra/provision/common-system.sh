@@ -42,6 +42,7 @@ apt-get -o DPkg::Lock::Timeout=600 install -y --no-install-recommends \
     unzip xz-utils cpio bzip2 zstd file \
     clang lld mold llvm libclang-dev \
     libelf-dev libbpf-dev linux-libc-dev \
+    "pahole=${PAHOLE_PACKAGE_VERSION}" \
     linux-tools-common linux-tools-generic \
     zlib1g-dev libssl-dev libzstd-dev libudev-dev \
     qemu-system-x86 qemu-system-arm qemu-utils \
