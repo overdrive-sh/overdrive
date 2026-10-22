@@ -1763,35 +1763,35 @@ the hook will silently bundle every other modified file into your
 commit on its way through. The previous commit you just landed will
 contain changes you never staged.
 
-**Pattern: stash the unrelated paths first, then commit.**
+**Use `des-commit` with explicit owned paths.** It holds an exclusive lock
+and builds the commit through a temporary index seeded from HEAD plus only
+those paths. Preserve unrelated working-tree and staged changes; do not use
+`git stash`.
 
 ```bash
-git stash push -m "unrelated-{summary}" -- \
-  <path-1> <path-2> ... <path-N>     && \
-git add <path-you-actually-want>     && \
-git commit -m "..."                  ; \
-git stash pop
+PYTHONPATH=/Users/marcus/.claude/lib/python /Users/marcus/.claude/bin/des-commit \
+  --owned-paths <all-files-owned-by-this-step> \
+  --step-id <step-id> \
+  --message "feat(scope): describe the change"
 ```
 
-Three things to note:
+**User clarification (2026-10-22):**
 
-- **`;` before `git stash pop`, not `&&`.** The stash must be restored
-  even if the commit fails (e.g. a pre-commit gate rejects it),
-  otherwise the unrelated work is left only in the stash and the
-  working tree appears empty. The `git stash` pre-tool hook in this
-  repo enforces the matched-pair shape — see the message it prints
-  when blocking.
-- **Path-scoped stash, not `git stash -u`.** Stashing the whole tree
-  would also stash the file you want to commit; pass paths to `git
-  stash push -- <paths>` so only the unrelated changes move.
-- **Verify with `git show --stat HEAD` after the commit.** "1 file
-  changed" should match what you intended to land. If the commit
-  bundles more, the stash scope was wrong — soft-reset and retry.
+> yes, i prohibit u from using git commit --no-verify ... not des-commit
 
-This pattern is the only safe shape for landing a focused fix when
-the working tree is dirty with parallel work. Do not reach for
-`--no-verify` to bypass the lefthook auto-staging — the hook is also
-running clippy and tests, and skipping it lands unverified code.
+The prohibition on invoking
+`git commit --no-verify` directly does **not** prohibit `des-commit`.
+`des-commit` is authorized as installed, including its internal use of
+`--no-verify`; no separate per-commit approval is required to use it. Do not
+patch or wrap the tool merely to remove that internal flag. This authorization
+does not waive GREEN verification or authorize direct hook bypasses; invoking
+`git commit --no-verify` directly still requires explicit approval for that
+commit.
+
+Run the step's required checks before committing. Pass every file owned by
+the step, retain the required commit attribution and `Step-Id` trailer, then
+verify the resulting commit's paths, stat and trailers. Never silently include
+unrelated dirty work.
 
 **Always-include path: `.nwave/des-config.json`.** When this file shows
 as modified, untracked, or otherwise affected in `git status`, it MUST
