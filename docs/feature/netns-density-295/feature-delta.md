@@ -633,6 +633,7 @@ date.
 | T-1 | 2026-10-18 | User ruling "DISTILL rulings", T-1 approved: build the guest-kit Cloud Hypervisor microVM fixture — an `overdrive-testing` helper booting the CH fork with a guest kernel, `ovd_fwd.ko`, and `overdrive-init` or a scripted guest vsock peer, on the native-metal `kvm-tests` lane. R5-59 (a), the guest-side `ovd_fwd` cells and the in-guest real-kernel cells run on it. DISTILL owns the fixture as test support (DR2-CLOSE D-1) |
 | U-4 | 2026-10-21 | User ruling "U-4", option (a): the guest kit (T-1) launches its microVM through the production `CloudHypervisorVmm` (`overdrive-host`); the kit renders no cloud-hypervisor command line of its own. Rejected: sanctioning a second renderer in dst-lint DWD-09 clause 1 (relaxes the gate), and exporting a pure argv renderer from `overdrive-host` (new production API) |
 | STEP3-SPLIT | 2026-10-22 | User ruling "STEP3-SPLIT": DG-2 step 3 (VMM adapter) is split. Its adapter half — the fork launch argument (`vhost_kernel_vsock_arg`), `SimVmm` and the host VMM equivalence cells — is implemented before the attachment cut, with fork provisioning (step 1), because the guest-kit Tier-3 cells of steps 1, 4 and 5 launch through `CloudHypervisorVmm::create`; it replaces only a RED-scaffold body. The `VmDriver` caller half (DG-2 rows 4–6, `AllocationSpec.transport`, the `launch=` transport token) stays in the attachment cut. Rejected: moving the guest-kit cells of steps 1, 4 and 5 into the cut (the forwarder and guest steps could not go GREEN before it) |
+| D21-LOCAL | 2026-10-22 | User ruling, exact words: "publish? what are u referring to? just keep it local wtf." Clarification: "u can push". The tested RESET-EXIT source commit may be pushed to the fork branch and pinned by full SHA, but no release tag, GitHub release, uploaded binary asset or other artifact publication is created. Each supported host architecture builds and stages its artifact locally from that pinned source, and provisioning installs it only after the architecture-specific SHA-256 matches. This supersedes only ADR-0161's release-publication/download mechanism; its one-source-pin, content-identity, no-stock-fallback and no-runtime-identification invariants remain. |
 | IOCTL-NUMBERS | 2026-10-22 | User ruling "IOCTL-NUMBERS": the `OVD_FWD_*` request numbers use magic `0xB9` and numbers `0x00`–`0x06` in the EVMOD-CTL operations-table order, with the standard `_IO`/`_IOR`/`_IOW`/`_IOWR` encodings; `abi_version` = 1; defined in the module UAPI header in step K and mirrored in `uapi.rs` in step 4 (§ *Forwarder control interface*, "Request numbers") |
 | RESTART-SSOT (GH #324) | 2026-10-18 | User rulings: GH #324 filed with approval ("`restart_status_for_alloc` disagrees with `WorkloadLifecycle`'s restart decision"), then "fix the accessor, do not work around it": one shared restart decision in `overdrive-reconcilers` used by both `WorkloadLifecycle` and `restart_status_for_alloc`; #295 lands the fix and closes #324; `cid_lease` projects `retry` from the fixed accessor. The function shapes (`restart_decision`, `restart_after_failure`, the accessor's `kind` / `run_desired` / `failed` / `desired_generation` inputs, `attempt_index_for_alloc`, `current_alloc` made `pub`), the Job, `Draining` and intent clauses, and the `cid_lease` projection of `att`, `ex` and `failed` are architect elaborations recorded under this ruling (§ *Restart decision*) |
 | RESTART-GEN-CRASH (GH #325) | 2026-10-18 | User ruling: the loss of a generation replacement placed but not started at a `serve` crash is a separate issue, GH #325; #295 does **not** fix it. The `cid_lease` run `RedeployLeasedAtServeCrashIsPlacedAgain` and hazard `crashLosesPlacedGeneration` stay pending, citing #325, until #325 lands; the run's DISTILL `#[quint_test]` is `#[ignore = "pending #325"]`. The design of that fix belongs to #325. The conformance-main exclusion of the window (`cid_lease` item 9) is an architect elaboration under this ruling |
@@ -929,7 +930,7 @@ table is not a current decision (§ *Changed assumptions*).
 | D20 | Stop aborts flows with reset; owner-held sockets whose far end is outside the owner carry `SO_LINGER{1,0}` — application side and remote side (the host's socket toward a non-mesh destination and leg-F's remote socket); restore reopens admission only; how a half-close completes is R2-DRAIN | **APPROVED 2026-10-05**; remote-side extension **APPROVED 2026-10-06** | [0160](../../product/architecture/adr-0160-forwarding-stop-aborts-flows-and-restore-reopens-admission-only.md) | — (V-13 done, P-42) |
 | R2-END | A flow's end is classified from the kernel's vsock `SHUTDOWN` flags: `0x2` = clean half-close of the peer's direction, `0x3` while any direction is open or `RST` = abort, computed in the forwarder's own callbacks per received `SHUTDOWN` / `RST` or once at attach (EVMOD-END); no control message announces a half-close; end handling is idempotent — a SHUTDOWN or RST after a pair's or watch's end (the trailing RST of P-65) is a no-op: no reclassification, no second release or count, and ids are never reused; a clean full end is `0x2` each way, then close | **APPROVED 2026-10-11**; idempotent end and clean full end **APPROVED 2026-10-15**; classification in the forwarder **APPROVED 2026-10-17** (EVMOD-END) | [0180](../../product/architecture/adr-0180-a-flows-end-is-classified-in-the-forwarders-socket-callbacks-from-the-kernels-end-facts.md) | — (P-69) |
 | R2-DRAIN | A half-close completes with no deadline: the forwarder shuts a direction's target for writing after its source's clean end, after the last byte the target accepted, consuming from a source only what its target accepted, so a slow reader is backpressure bounded by the flow's own socket buffers; the owner learns a flow is over from the pair's end record (EVMOD-REC); the per-allocation flow quota counts half-closed flows, so a guest withholding credit holds at most its own quota of node flow places | **APPROVED 2026-10-11**; carried out by the forwarder **APPROVED 2026-10-16** (EVMOD-ADOPT) | [0183](../../product/architecture/adr-0183-a-half-close-completes-in-the-kernel-forwarder-after-the-last-accepted-byte.md), [0160](../../product/architecture/adr-0160-forwarding-stop-aborts-flows-and-restore-reopens-admission-only.md), [0208](../../product/architecture/adr-0208-guest-flows-are-bounded-by-a-node-pair-capacity-and-a-per-allocation-quota.md) | — (P-67, P-68) |
-| D21 | The fork is built from one pinned SHA (carrying RESET-EXIT), published as a checksummed release per architecture and verified by SHA-256 at provisioning | **APPROVED 2026-10-05** | [0161](../../product/architecture/adr-0161-vendored-cloud-hypervisor-fork-is-built-pinned-and-provisioned-as-a-checksummed-release.md) | — |
+| D21 | The fork is built from one pinned SHA (carrying RESET-EXIT); x86_64 and aarch64 artifacts are built and staged only on their local provisioning hosts, then verified by their pinned SHA-256 before install. No tag, GitHub release or uploaded binary asset exists; the pushed source commit is the only remote object (D21-LOCAL) | **APPROVED 2026-10-05; publication mechanism replaced by explicit user ruling D21-LOCAL 2026-10-22** | [0161](../../product/architecture/adr-0161-vendored-cloud-hypervisor-fork-is-built-pinned-and-provisioned-as-a-checksummed-release.md) (one source pin, checksum identity and no runtime identification retained; release transport superseded) | — |
 | D24 | Guest service-VIP access uses the existing ADR-0053 `connect4` rewrite on the guest-flow owner's always-connected host sockets; the owner runs at `overdrive.slice/control-plane.slice` and refuses to start outside the attach subtree (D24-REFUSE); the guest keeps reporting the VIP | **APPROVED 2026-10-06** | [0164](../../product/architecture/adr-0164-guest-vip-tcp-resolves-as-mesh-and-datagrams-use-the-connect4-rewrite.md) | V-15 (A-19) |
 | D24a | Guest TCP to a service VIP is mesh-resolved before classification: the resolution adapter keys each service's `(VIP, port)` like its frontend; a TCP destination in the VIP ranges that matches no service is `MeshUnreachable`; `connect4` serves datagram VIP flows only | **APPROVED 2026-10-06** | [0164](../../product/architecture/adr-0164-guest-vip-tcp-resolves-as-mesh-and-datagrams-use-the-connect4-rewrite.md), [0153](../../product/architecture/adr-0153-vsock-flows-terminate-at-the-accepted-mtls-enforcement-boundary.md) | V-6 |
 | D25 | Guest intake model: reserved guest ports `61000` (TCP intake) and `61001–62024` (1,024 UDP slots) bound without address reuse and reserved from ephemeral use — an application bind fails `EADDRINUSE` only on a port holding an intake of that protocol (D25-BIND); a slot per (application socket, destination); every slot of a released socket released; idle slot release after `GUEST_DATAGRAM_SLOT_IDLE` (120 s); an association ended by `Refused` / `Abort` / pairing deadline discards the slot socket's queued datagrams and does not re-associate by itself (U-2); at most 4,096 pending guest TcpConnect flows (`GUEST_TCP_PENDING_MAX`); exhaustion → application reset (TCP) / `EPERM` (UDP); a VM spec declaring a listener port in the reserved range is refused at deploy (`ParseError::ListenerPortReserved`; `AggregateError::Validation` at the API ingress) | **APPROVED 2026-10-06**; D25-BIND and U-2 **APPROVED 2026-10-06** | [0150](../../product/architecture/adr-0150-guest-kernel-aya-adaptation-controlled-by-overdrive-init.md) | V-9 |
@@ -1385,9 +1386,11 @@ K. **Forwarder module build and lane setup (EVMOD-BUILD; U-3 option (b))
    decision* (the ceiling boundary, both exemptions, the agreement property
    across both kinds, the Job stream's `will_restart`). Single cut: the old
    signature is removed.
-1. **Fork provisioning** (ADR-0161, RESET-EXIT / ADR-0182): `versions.env`,
-   `common-system.sh`, `overdrive-dev.yaml`, the fork release workflow, on a
-   fork commit whose guest-reset dispatch (`EpollDispatch::Reset` /
+1. **Fork provisioning** (ADR-0161 as amended by D21-LOCAL, RESET-EXIT /
+   ADR-0182): `versions.env`, `common-system.sh`, `common-user.sh` and
+   `overdrive-dev.yaml` build and stage the fork artifact locally per host
+   architecture from the pinned source commit; no tag, release or uploaded
+   asset exists. The fork commit's guest-reset dispatch (`EpollDispatch::Reset` /
    `reset_evt`) goes to the VMM exit path instead of `vm_reboot`; the
    patch sets no particular exit status (§ *VMM backend contract*). The VMM
    opens `/dev/vhost-vsock` itself (`backend=vhost-kernel`, under the fork's
@@ -2120,41 +2123,81 @@ Contracts:
   device opened by the VMM was not exercised by V-30; it is part of the fork
   step's validation (§ *Validation plan*).
 
-#### [REF] VMM fork provisioning contract
+#### [REF] VMM fork local provisioning contract
 
-`infra/provision/versions.env` replaces `CLOUD_HYPERVISOR_VERSION` with:
+D21-LOCAL is a bounded amendment to ADR-0161. It replaces publication and
+download only. One pinned fork source, one exact artifact per supported host
+architecture, checksum identity, `/usr/local/bin/cloud-hypervisor`, no stock
+fallback and no runtime fork-identification API all remain mandatory.
 
-| Key | Meaning |
+`infra/provision/versions.env` replaces `CLOUD_HYPERVISOR_VERSION` with these
+exact values; the Lima template carries the same values in its existing
+hand-maintained parameter block:
+
+| Key | Exact value / meaning |
 |---|---|
-| `CLOUD_HYPERVISOR_FORK_REPO` | `overdrive-sh/cloud-hypervisor` |
-| `CLOUD_HYPERVISOR_FORK_REV` | Full 40-hex commit SHA; equals the `vendors/cloud-hypervisor` submodule pointer |
-| `CLOUD_HYPERVISOR_FORK_TAG` | Release tag, `v53.0-overdrive.<n>` |
-| `CLOUD_HYPERVISOR_SHA256_X86_64` | SHA-256 of the x86_64 static asset |
-| `CLOUD_HYPERVISOR_SHA256_AARCH64` | SHA-256 of the aarch64 static asset |
+| `CLOUD_HYPERVISOR_FORK_REPO` | `overdrive-sh/cloud-hypervisor`; source only, never a binary-release location |
+| `CLOUD_HYPERVISOR_FORK_REV` | `f252bb20b0d141d59e4c15a9ac09c5c2dd7c350d`; equals the `vendors/cloud-hypervisor` submodule pointer and carries both `backend=vhost-kernel` and RESET-EXIT |
+| `CLOUD_HYPERVISOR_BUILD_TOOLCHAIN` | `1.89.0`, the fork workflow's pinned Rust toolchain used for both local artifacts |
+| `CLOUD_HYPERVISOR_SHA256_X86_64` | `6d54fbd2611e692fda00e476fc0723e9502bfd8acd53c8bc46edd96e84f3e842` |
+| `CLOUD_HYPERVISOR_SHA256_AARCH64` | `74195594db430695d4fbd9a8ecbc1d6d4b196f17c52afa6a3e96c967d86a91cc` |
 
-- **What the pinned commit carries.** (a) `--vsock …,backend=vhost-kernel`
-  (`41a619d19`, today's submodule pointer). (b) RESET-EXIT (ADR-0182): the
-  guest-reset dispatch (`EpollDispatch::Reset`, fed by `reset_evt`) ends the
-  VMM through its exit path instead of calling `vm_reboot`; at `41a619d19`
-  it calls `vm_reboot` (`vmm/src/lib.rs:2088-2094`), which re-creates the
-  guest inside the same VMM process with the same CID and launch token
-  (V-30 Q1a/Q1c). (b) is DELIVER work on the fork. Its validation item — a
-  fork build with the change; a guest PID-1 crash under `panic=1` and a
-  triple fault each end the VMM, reset the host flows and reach the driver
-  as a VMM exit — is not contract-shaping (a falsification changes the fork
-  patch, not a contract DISTILL pins) and blocks DELIVER of the fork step.
-  `CLOUD_HYPERVISOR_FORK_REV` advances to the commit carrying both.
-- `infra/provision/common-system.sh` and `infra/lima/overdrive-dev.yaml`
-  download `https://github.com/${REPO}/releases/download/${TAG}/<asset>`,
-  verify SHA-256 before install, and refuse on mismatch; then refuse unless
-  `--help` lists `--landlock` (today's check). The checksum is the identity
-  check; nothing probes for the vsock backend or the reset behaviour (DG-1).
-- Asset names keep today's `cloud-hypervisor-static` /
-  `cloud-hypervisor-static-aarch64`.
-- The fork release workflow builds from `CLOUD_HYPERVISOR_FORK_REV` with
-  `--locked`.
-- A consistency test (xtask-side, no `overdrive-*` dependency) asserts that the
-  submodule pointer equals `CLOUD_HYPERVISOR_FORK_REV`.
+There is no `CLOUD_HYPERVISOR_FORK_TAG`: no release tag is created and no
+GitHub release or binary asset is uploaded. The source commit may be pushed to
+`overdrive/vhost-kernel-vsock`, per the user's clarification "u can push".
+
+**Local source and artifact lifecycle.** The local build owner fetches or reads
+exactly `CLOUD_HYPERVISOR_FORK_REV`, verifies the full `HEAD`, and copies it
+without `.git` metadata to the exact local build root below. Removing the
+metadata is part of the content contract: Cloud Hypervisor's build script
+otherwise embeds the local `git describe` result, producing different bytes
+for the same source commit depending on checkout history.
+
+```text
+/var/tmp/overdrive/cloud-hypervisor/<rev>/source
+/var/tmp/overdrive/cloud-hypervisor/<rev>/build
+/var/tmp/overdrive/cloud-hypervisor/<rev>/artifacts/<rust-target>/cloud-hypervisor
+```
+
+Cargo uses the `build` path above as `CARGO_TARGET_DIR`. After the native
+`strip`, the build owner first verifies the architecture-specific pinned
+checksum, then copies those exact bytes to the `artifacts` path. The build
+directory is never an install source. A rebuilt binary whose bytes differ is
+not silently re-pinned or installed; changing either checksum is a new
+reviewed artifact decision with the corresponding architecture evidence.
+
+The exact architecture mapping and build are:
+
+| `uname -m` | Rust target | Cargo arguments after `build` | Pinned checksum |
+|---|---|---|---|
+| `x86_64` | `x86_64-unknown-linux-musl` | `--all --release --features mshv --target x86_64-unknown-linux-musl --locked` | `CLOUD_HYPERVISOR_SHA256_X86_64` |
+| `aarch64` | `aarch64-unknown-linux-musl` | `--all --release --target aarch64-unknown-linux-musl --locked` | `CLOUD_HYPERVISOR_SHA256_AARCH64` |
+
+Both builds use `cargo +1.89.0`, the native `musl-gcc`, and the native `strip`.
+Any other host architecture is refused. x86_64 has the native RESET-EXIT,
+vsock-device, VMM-equivalence and launch-seccomp evidence; aarch64 retains the
+accepted compile-only status of ADR-0161.
+
+**Provisioning ownership and refusal.** `infra/provision/common-system.sh`
+removes the upstream Cloud Hypervisor download and installs no stock fallback.
+After the system packages and user Rust toolchain exist,
+`infra/provision/common-user.sh` on metal and the existing user-mode block in
+`infra/lima/overdrive-dev.yaml` own the local build/stage operation above and
+only then install the architecture-selected staged artifact at
+`/usr/local/bin/cloud-hypervisor`. An already-installed binary is
+accepted only when its bytes have that same checksum. A missing local source,
+unsupported architecture, build failure, missing artifact, checksum mismatch,
+or failed install refuses provisioning and leaves no accepted foreign stock
+binary. The installed file is checksum-verified again after installation, then
+the existing `--landlock` presence check runs. The checksum is the build
+identity check; nothing probes for the vsock backend or reset behavior (DG-1),
+and `VmmProbeError` gains no variant.
+
+The local cache is disposable and is never committed or uploaded. A revision
+change uses a new `<rev>` directory, new per-architecture checksums and the
+same validations. A mechanical consistency check asserts that the parent
+repository's submodule pointer equals `CLOUD_HYPERVISOR_FORK_REV`; it does not
+contact a release API.
 
 #### [REF] Wire contracts — flow request, control message, datagram frame
 
