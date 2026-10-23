@@ -6,6 +6,12 @@ Accepted. 2026-05-04. Decision-makers: User-ratified locked decisions
 Q1–Q9 from `phase-2-aya-rs-scaffolding` DESIGN dialogue. Tags:
 phase-2, dataplane, crate-boundary, build-pipeline.
 
+Amended 2026-10-23 by the explicitly approved TCP-CORRELATION replacement:
+the guest BPF build has one C/CO-RE `fentry/tcp_check_req` source beside the
+existing Rust/Aya objects. The same `cargo xtask bpf-build` command produces
+and embeds it under the exact toolchain/BTF contract below. Aya remains
+`0.13.1`; no runtime compiler or object lookup is added.
+
 ## Context
 
 Phase 2 of the Overdrive roadmap delivers the eBPF dataplane described
@@ -193,6 +199,26 @@ target and copies the produced ELF to a stable path:
 Stable output path decouples the loader's `include_bytes!` from
 cargo's nested target layout.
 
+**TCP-CORRELATION C/CO-RE amendment.** The single approved exception to the
+Rust/bpf-linker source rule is
+`crates/overdrive-bpf/src/tcp_correlation_candidate.bpf.c`, containing only
+the pinned-by-name `CHILD_CORRELATION` declaration and
+`fentry/tcp_check_req` program. After the Rust builds, `bpf-build` reads the
+target kernel BTF from `OVERDRIVE_BPF_TARGET_BTF` (Linux default
+`/sys/kernel/btf/vmlinux`), generates a target-directory-only `vmlinux.h`
+with `bpftool`, and invokes Clang/LLVM major 21 with `-g -O2 -target bpf`, the
+matching `__TARGET_ARCH_x86` or `__TARGET_ARCH_arm64`, the generated header
+and system libbpf headers. The stable output is exactly
+`target/bpf/overdrive_guest_tcp_correlation_candidate_bpf.o`.
+
+An absent tool, unsupported build architecture, unreadable BTF, failed dump
+or compile, or missing output fails the build; there is no fallback object.
+Guest-kit and release builds supply the BTF of the kernel they ship.
+`overdrive-init/build.rs` checks and embeds this object beside
+`overdrive_guest_bpf.o`; the guest loads it through Aya 0.13.1. The separate
+objects reuse the exact child map through ADR-0159's temporary staging pins,
+which are removed before program load, attachment and READY.
+
 **Secondary mechanism — `build.rs` shim in `overdrive-dataplane`:**
 
 ```rust
@@ -233,7 +259,7 @@ Cargo never sees `overdrive-bpf` as a transitive dep of
 `default-members`, and the `include_bytes!` argument is a path string,
 not a Cargo edge.
 
-### 4. Toolchain provisioning — `bpf-linker`
+### 4. Toolchain provisioning — `bpf-linker` and CO-RE tools
 
 Three provisioning surfaces, all using `cargo install --locked`:
 
@@ -250,6 +276,12 @@ Three provisioning surfaces, all using `cargo install --locked`:
 
 CI inherits the Lima image's tooling (Linux runners install via the
 same line). No CI-only install path.
+
+The TCP-CORRELATION amendment adds Clang/LLVM major 21, `bpftool`, libbpf
+headers and readable target-kernel BTF to those same three provisioning
+surfaces. They are build-time tools only. `bpf-build` validates them before
+producing the candidate object and prints an actionable failure; tests and
+the guest runtime never compile it.
 
 ### 5. `EbpfDataplane` impl shape
 

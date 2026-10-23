@@ -1,5 +1,15 @@
 # TCP capture correlation via the handshake-completing ACK
 
+> **Fast Open conclusion superseded 2026-10-23.** A production-composition
+> native run proved that Linux skips SockOps header parsing while a Fast Open
+> child is `TCP_SYN_RECV`; the final ACK therefore cannot perform the claimed
+> parse-callback `Pending -> Ready` transition. This probe closed its producer
+> immediately after `MSG_FASTOPEN`, so a FIN/later established packet made its
+> apparent Fast Open success a false positive. Ordinary/syncookie final-ACK
+> consumption, active socket storage, option production and staging-pin facts
+> remain valid. The native replacement evidence is
+> [`findings-tcp-correlation-candidate.md`](findings-tcp-correlation-candidate.md).
+
 ## Verdict
 
 **WORKS** on Linux `7.0.0-38-generic` aarch64 in the repository Lima VM with

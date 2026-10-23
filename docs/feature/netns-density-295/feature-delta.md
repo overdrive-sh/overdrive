@@ -14,10 +14,13 @@ density target natively (`EXFULL` at the bridge's 1,024 port slots,
 `deliver/native-e18-bridge-capacity-falsification.md`). ADR-0145 records the
 decision.
 
-**Wave state.** `TCP-CORRELATION` is approved (§ *[REF] TCP capture
-correlation*), closing STEP 11-06's `SPECIFICATION_AMBIGUITY`. Its one new
-parameterized Tier-3 cell remains a DISTILL prerequisite, and the reconciled
-roadmap requires final independent revalidation before DELIVER resumes.
+**Wave state.** Native STEP 11-06 evidence falsified `TCP-CORRELATION`'s Fast
+Open final-ACK SockOps consumer (§ *[REF] TCP capture correlation*). The
+native-proven handshake-only `fentry/tcp_check_req` replacement, seventh
+program, C/CO-RE build/loader and temporary ACTIVE/CHILD staging pins are now
+independently reviewed and explicitly approved. Final folded-roadmap review
+and the existing parameterized Tier-3 cell's DISTILL correction/review remain
+DELIVER prerequisites.
 The previously approved DESIGN and authored DISTILL artifacts remain the
 baseline outside that bounded addition.
 The data path is the in-kernel forwarder, approved for Linux guests with a
@@ -36,11 +39,12 @@ DELIVER deletes it, as listed under *Bridge-era code for DELIVER to delete*.
 ### Status
 
 - Every accepted decision keeps its own approval date in § *Approval record*,
-  one row per user ruling. `TCP-CORRELATION` is accepted: Linux 7.0 source and
-  the executed final-ACK spike prove the sixth-program contract required to
-  construct `GuestIoEvent::OutboundCaptured`. The one authorized Tier-3 cell
-  remains DISTILL work and the folded roadmap remains pending final independent
-  revalidation.
+  one row per user ruling. `TCP-CORRELATION`'s required outcome remains
+  accepted. Its prior Fast Open callback premise is invalid; Linux 7.0 source,
+  the production failure and the live-open replacement spike prove the
+  approved seventh handshake-only fentry program. The exact mechanism has
+  passed independent DESIGN review and user approval; DELIVER waits only for
+  final folded-roadmap validation and the bounded DISTILL correction.
 - Same-node mesh leg-B (LEGB-DIAL): the dial to a guest-prefix peer is
   marked and source-bound; no route covers the guest prefix except the
   gateway `/32` (GW-LOCAL: the guest gateway is the one host-local address
@@ -642,7 +646,7 @@ date.
 | D21-LOCAL | 2026-10-22 | User ruling, exact words: "publish? what are u referring to? just keep it local wtf." Clarification: "u can push". The tested RESET-EXIT source commit may be pushed to the fork branch and pinned by full SHA, but no release tag, GitHub release, uploaded binary asset or other artifact publication is created. Each supported host architecture builds and stages its artifact locally from that pinned source, and provisioning installs it only after the architecture-specific SHA-256 matches. This supersedes only ADR-0161's release-publication/download mechanism; its one-source-pin, content-identity, no-stock-fallback and no-runtime-identification invariants remain. |
 | IOCTL-NUMBERS | 2026-10-22 | User ruling "IOCTL-NUMBERS": the `OVD_FWD_*` request numbers use magic `0xB9` and numbers `0x00`–`0x06` in the EVMOD-CTL operations-table order, with the standard `_IO`/`_IOR`/`_IOW`/`_IOWR` encodings; `abi_version` = 1; defined in the module UAPI header in step K and mirrored in `uapi.rs` in step 4 (§ *Forwarder control interface*, "Request numbers") |
 | TCP-CORRELATION-NO-WEAKEN | 2026-10-23 | The user asked “whats correct?” The orchestrator answered: “Preserve admission below the quota. The extra TCP correlation hook is justified. Retaining abandoned correlation entries until they fill the map—and then resetting valid connections—is a lifecycle flaw, not an acceptable tradeoff. DESIGN should resolve cleanup while preserving correct connection identity and reset-before-accept behavior. I shouldn’t have asked you to waive that correctness requirement.” The user explicitly replied “proceed”. This authorizes invariant-preserving DESIGN remediation and rejects the reviewed 65,536-row/below-quota reset relaxation; it is not approval of an exact replacement until that replacement passes independent review. |
-| TCP-CORRELATION | 2026-10-23 | After independent DESIGN iteration 8 approved the exact correction for decision, the orchestrator asked: “Approve the reviewed correction [`.context/netns-density-295/11-06-design/correlation.md`], including that exception, the sixth correlation program, and one test in the existing lane?” The user replied: “approved. continue”. This approves `GuestProgram::TcpCorrelation`, the final-ACK ABI, capacity-free active socket storage, the 8,194-entry child handoff and combined 4,096-place count, the private pre-program-load create/pin/Aya-reuse/unlink exception to ADR-0159 with no runtime pin or adoption, the existing typed error mappings, neutral five-to-six assertion corrections and one parameterized Tier-3 cell in the existing guest-kit lane. |
+| TCP-CORRELATION | 2026-10-23 | After native falsification, independent scope validation and DESIGN review iteration 2, the orchestrator asked: “Approve the reviewed handshake-only replacement: seventh fentry program, C/CO-RE build and loader setup, and temporary ACTIVE/CHILD map staging pins removed before program load, attachment, and READY? It keeps Aya0.13.1 and existing lane, no steady established-data hook/runtime pins, preserves all invariants.” The user answered: “Approve and continue”. This approves exactly `TcpCorrelationCandidate`, the reviewed build/loader/staging contract, bounded compiler/caller/test fallout and stated x86_64/performance limits; no Aya upgrade, lane, model, benchmark or outcome weakening. |
 | SLOT-ATTACH-REFUSAL-SHAPE | 2026-10-23 | STEP 11-06 DELIVER exposed that `attach_slot` borrows the resident UDP slot S but the generic `GuestAttachRefused` requires two returned owned handles. The bounded correctness correction preserves the accepted resident-slot and EVMOD-ATTACH-END outcomes: stream attach refusals keep `GuestAttachRefused { error, vsock, outer }`; a guest datagram attach refusal is `GuestSlotAttachRefused { error, vsock }`, returns only V_g, leaves S resident, and the owner closes V_g then performs the existing discard/disconnect end-of-association sequence while retaining slot ownership. No `GuestOwnedSocket::Slot` or fake handle exists. Independent DESIGN review iteration 2 found zero open technical findings and identified one genuinely new source-local UDP-slot regression cell. In response to the exact request to cover ended V_g returned and closed, S resident, association cleanup, no guest pair/end record/control message, the host pair's normal end record and later reassociation, the user explicitly replied: “Approve the UDP-slot test”. This approves increasing `udp_slots` from 12 to 13 in the existing suite, with no new lane, Quint model or public test support. |
 | RESTART-SSOT (GH #324) | 2026-10-18 | User rulings: GH #324 filed with approval ("`restart_status_for_alloc` disagrees with `WorkloadLifecycle`'s restart decision"), then "fix the accessor, do not work around it": one shared restart decision in `overdrive-reconcilers` used by both `WorkloadLifecycle` and `restart_status_for_alloc`; #295 lands the fix and closes #324; `cid_lease` projects `retry` from the fixed accessor. The function shapes (`restart_decision`, `restart_after_failure`, the accessor's `kind` / `run_desired` / `failed` / `desired_generation` inputs, `attempt_index_for_alloc`, `current_alloc` made `pub`), the Job, `Draining` and intent clauses, and the `cid_lease` projection of `att`, `ex` and `failed` are architect elaborations recorded under this ruling (§ *Restart decision*) |
 | RESTART-GEN-CRASH (GH #325) | 2026-10-18 | User ruling: the loss of a generation replacement placed but not started at a `serve` crash is a separate issue, GH #325; #295 does **not** fix it. The `cid_lease` run `RedeployLeasedAtServeCrashIsPlacedAgain` and hazard `crashLosesPlacedGeneration` stay pending, citing #325, until #325 lands; the run's DISTILL `#[quint_test]` is `#[ignore = "pending #325"]`. The design of that fix belongs to #325. The conformance-main exclusion of the window (`cid_lease` item 9) is an architect elaboration under this ruling |
@@ -742,17 +746,22 @@ of a Linux guest, and a guest that runs no Linux kernel is
   sockets, maps, activation and lifecycle. Forbidden: a userspace payload
   relay, with one exception — the leg-S kTLS↔vsock relay for VM backends,
   temporary, deleted when #303 lands (INB-1, approved 2026-10-11); kernel
-  patches or a forked or patched kernel; TAP-based attachment; C eBPF. Native
-  validation on qualified metal. A VMM fork is not a kernel fork: D13 rules
-  the vendored Cloud Hypervisor fork in, and RESET-EXIT is a change to it.
+  patches or a forked or patched kernel; TAP-based attachment. C eBPF remains
+  forbidden except for the one user-approved
+  `tcp_correlation_candidate.bpf.c` C/CO-RE fentry, compiled and embedded by
+  the existing BPF pipeline under TCP-CORRELATION's exact build contract.
+  Native validation runs on qualified metal. A VMM fork is not a kernel fork:
+  D13 rules the vendored Cloud Hypervisor fork in, and RESET-EXIT is a change
+  to it.
   **The user's forwarding selection is the event-driven in-kernel
   forwarder (EVMOD-ADOPT, 2026-10-16, ADR-0197):** payload is forwarded by a
   loadable C module (`ovd_fwd`; an
   out-of-tree module, not a kernel patch — the kernel source stays
-  unmodified), on both sides; Aya Rust eBPF stays for the guest's socket
-  capture (cgroup socket hooks, `sock_release`). Rust-for-Linux on 7.0 has
-  no socket abstractions (`vendors/linux/rust/kernel/net.rs:6`), so the
-  module is C; the C-eBPF prohibition is unchanged.
+  unmodified), on both sides; six guest socket-capture programs stay Aya Rust
+  (cgroup socket hooks, SockOps, `sock_release`) and the approved handshake
+  candidate is the sole C/CO-RE eBPF exception. Rust-for-Linux on 7.0 has no
+  socket abstractions (`vendors/linux/rust/kernel/net.rs:6`), so the forwarder
+  module is C.
 - **Kernel.** Linux 7.0 is the pinned appliance kernel (KERNEL-7.0,
   2026-10-10). Every kernel claim in this design is read in `vendors/linux`
   at tag `v7.0` and cited `path:line @ v7.0`. Every spike of this design ran
@@ -874,224 +883,73 @@ assumptions needing focused validation.
 
 ### [REF] TCP capture correlation
 
-`TCP-CORRELATION` is **APPROVED 2026-10-23**. The exact approved correction
-adds the sixth guest program, the private pre-program-load staging-pin
-exception to ADR-0159 and the bounded DISTILL work recorded below.
+`TCP-CORRELATION` is **APPROVED 2026-10-23**, including the native-falsification
+replacement approved after independent DESIGN review. The user approved the
+reviewed decision in response to:
 
-User ruling `TCP-CORRELATION-NO-WEAKEN` (2026-10-23) requires the replacement
-to preserve admission below `GUEST_TCP_PENDING_MAX`, correct connection
-identity and reset-before-accept. It expressly rejects retaining abandoned
-correlation rows until a fixed map fills. The normative audit below removes
-that relaxation: every transient belongs to a live handshake or accepted
-child and has an exact consume-or-close cleanup.
+> Approve the reviewed handshake-only replacement: seventh fentry program,
+> C/CO-RE build and loader setup, and temporary ACTIVE/CHILD map staging pins
+> removed before program load, attachment, and READY? It keeps Aya 0.13.1 and
+> existing lane, no steady established-data hook/runtime pins, preserves all
+> invariants.
 
-The accepted event contract requires a TCP intake accept to yield
-`OutboundCaptured { child, original_destination, cookie }`, but the accepted
-program set names only `Connect4`, `Sendmsg4`, `Getpeername4`, `Recvmsg4` and
-`SockRelease`. On Linux 7.0, `tcp_v4_pre_connect` invokes `connect4` before
-`tcp_v4_connect` allocates an ephemeral local port
-(`net/ipv4/tcp_ipv4.c:206-218`, `:301-308 @ v7.0`). The accepted child exposes
-the application's allocated local port, but not the application's socket
-cookie or the destination that `connect4` replaced. `sock_release` cannot fill
-the gap: the verifier admits `src_port` only for post-bind programs, not for
-`BPF_CGROUP_INET_SOCK_RELEASE` (`net/core/filter.c:8960-9002 @ v7.0`).
+The answer was: **“Approve and continue”.** This authority includes the exact
+`TcpCorrelationCandidate` program, the C/CO-RE build/compiler/setup fallout,
+the pre-program-load `ACTIVE_CORRELATION` plus `CHILD_CORRELATION` staging-pin
+exception to ADR-0159, neutral six-to-seven setup assertions and correction of
+the one existing parameterized Tier-3 cell. It adds no Aya upgrade, map,
+runtime pin, lane, model, benchmark or outcome relaxation.
 
-The successful guest-capture spike carried the missing post-allocation join
-through a separate SockOps program: `connect4` stored the original destination
-by application socket cookie; `BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB`, after
-local-port allocation, used that cookie to publish the original destination by
-local port; the intake owner consumed that row using the accepted child's peer
-port
-(`spike-scratch/netns-density-295-guest-vsock-capture/bpf/src/main.rs:169-313`,
-`vfwd/src/owner.rs:1001-1017`). This ordering matches Linux 7.0: the active
-established callback runs in `tcp_finish_connect`
-(`net/ipv4/tcp_input.c:6753-6768 @ v7.0`) before the client sends the ACK
-(`:6994-7022`), while the server child becomes accept-visible only when that
-ACK completes the hashdance and queues the child
-(`net/ipv4/tcp_minisocks.c:933-945`,
-`net/ipv4/inet_connection_sock.c:1382-1442 @ v7.0`).
-The earlier active/full-tuple proposal was independently reviewed and rejected:
-an application release can precede passive establishment, while retaining
-abandoned active rows introduces a below-quota refusal. The user explicitly
-ruled that admission below the quota must be preserved; that proposed
-relaxation is removed.
+User ruling `TCP-CORRELATION-NO-WEAKEN` remains controlling: admit every valid
+connection below `GUEST_TCP_PENDING_MAX`, preserve exact identity and one-time
+capture, and reset before accept when correlation is missing. Retaining
+abandoned rows, requiring producer close/FIN/post-handshake payload, dropping
+Fast Open or weakening cleanup is forbidden.
 
-**Decision TCP-CORRELATION.** Keep the five accepted guest programs
-and their meanings unchanged, and add one guest-only
-`GuestProgram::TcpCorrelation` SockOps program. It is loaded and attached to
-the guest root cgroup before `Connect4`, before READY. It uses a guest-internal
-TCP option on the ACK that completes the local handshake, installs no socket
-in a sockmap, parks no bytes and moves no payload. EVMOD-PAIR and the deletion
-of the redirect machinery remain unchanged.
+The accepted event is
+`OutboundCaptured { child, original_destination, cookie }`. Linux invokes
+`connect4` before allocating the active socket's ephemeral local port
+(`net/ipv4/tcp_ipv4.c:206-218`, `:301-308 @ v7.0`), so exact accepted-child
+identity requires the correlation component.
 
-The option ABI is exactly 18 bytes: experimental kind `254`; length `18`;
-magic/version `0x4f56`; application `SocketCookie` as BE `u64`; original IPv4
-address in network order; original port as BE `u16`. It exists only on the
-guest-local TCP handshake to `workload_addr:GUEST_TCP_INTAKE_PORT` and is not
-a host wire or persisted format.
+**Native falsification.** The production STEP 11-06 guest-kit composition
+reached an open Fast Open child in `TCP_ESTABLISHED` while its child-cookie row
+remained `Pending`; the owner held its descriptor, active socket storage
+existed and no capture event was emitted
+(`.context/netns-density-295/11-06/in-guest-correlation-tfo-qdisc-restored-red.log:473-493`).
+Linux returns from `bpf_skops_parse_hdr` while a socket is `TCP_SYN_RECV`
+(`net/ipv4/tcp_input.c:147-179`). Fast Open validates its final ACK in that
+state and only afterward sets `TCP_ESTABLISHED`
+(`tcp_input.c:7228-7289`). The older option spike dropped its client before
+waiting for `Ready`, so FIN/later established traffic could produce its false
+Fast Open result. Its active producer and ordinary/syncookie consumers remain
+valid; its Fast Open consumer is superseded.
 
-`Connect4` only records the accepted per-socket original destination and then
-rewrites. After Linux allocates the ephemeral port,
-`BPF_SOCK_OPS_TCP_CONNECT_CB` copies that origin into
-`ACTIVE_CORRELATION`, `BPF_MAP_TYPE_SK_STORAGE` on that exact active socket,
-and arms the SockOps write and parse callbacks.
-`BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB` makes the storage eligible to emit and
-precedes the final ACK. While the storage exists in that phase, each non-SYN
-ACK reserves and writes the exact option. The first later non-SYN peer packet
-deletes it; without such a packet it follows the active socket to destruction.
-Application file release does not remove storage from the still-live orphaned
-TCP socket, so an ACK retransmission cannot lose its metadata.
+**Native-proven replacement.** The selected replacement is one global
+C/CO-RE `fentry/tcp_check_req` candidate program plus the existing Rust/Aya
+SockOps post-validation state callback. It passed in a fresh disposable x86_64
+Cloud Hypervisor guest on Metal through production GuestKit, Linux
+`7.0.0-38-generic`, Aya `0.13.1`, with all BPF/map/qdisc/socket/sysctl effects
+inside the guest. A real data-in-SYN Fast Open producer stayed open and sent no
+post-handshake payload before `Ready`; a live direct Fast Open producer reached
+`Rejected`; ordinary, forced-syncookie, terminal/delete monotonicity and
+preterminal release also passed. Established data invoked the candidate zero
+times. The evidence is
+[`spike/findings-tcp-correlation-candidate.md`](spike/findings-tcp-correlation-candidate.md)
+and
+`spike-scratch/netns-density-295-tcp-correlation-scope-validation/core-trace-native.log`
+(SHA-256
+`679f659450ae2a0d4a2c112dbe64dc07c28a3e47cded4475209cc93df00fb293`,
+`VERDICT=WORKS`).
 
-For an ordinary or syncookie handshake,
-`BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB` loads and validates the current final ACK
-with `bpf_load_hdr_opt(..., flags = 0)` and writes
-`Ready { application_cookie, original_destination }` to
-`CHILD_CORRELATION[child_cookie]`. For TCP Fast Open, passive establishment
-runs on the data-bearing SYN and writes `Pending`; the child's parse callback
-loads the later final ACK and changes that exact row to `Ready`. An absent,
-malformed or duplicate option never creates `Ready`.
-
-`KernelGuestOwnerIo` accepts the child and looks up its exact cookie. `Ready`
-is lookup-and-deleted once and yields the already-approved
-`OutboundCaptured`. A Fast Open `Pending` child reserves one
-`GUEST_TCP_PENDING_MAX` place immediately and is held without an owner event;
-its final-ACK callback submits a best-effort private wake, and the existing
-event wait scans every held Pending row before blocking and after every poll
-wake; the existing fixed one-second owner audit deadline is the quiescent
-fallback. `Ready` then yields the event;
-an absent row or a child that ends while pending is reset/dropped, releases
-the place, emits no `GuestIoEvent`, opens no flow and sends no control message.
-`SockRelease` deletes any child row for that exact cookie. A dropped wake can
-delay classification only until the next event-wait scan, at most the audit
-deadline when the owner is otherwise idle, but cannot lose it. No new public or
-`pub(crate)` owner-event variant is added.
-
-Linux and executed evidence pin the mechanism:
-
-- `tcp_connect` invokes `BPF_SOCK_OPS_TCP_CONNECT_CB` after ephemeral-port
-  allocation and before the SYN (`net/ipv4/tcp_output.c:4300-4305 @ v7.0`),
-  and active establishment precedes the final ACK
-  (`net/ipv4/tcp_input.c:6753-6768`, `:6994-7022`).
-- Linux's header-option selftest loads the current final ACK specifically when
-  syncookie mode has no saved SYN
-  (`tools/testing/selftests/bpf/progs/test_tcp_hdr_options.c:458-478 @ v7.0`).
-  A Fast Open child receives passive establishment on the SYN and changes to
-  `TCP_ESTABLISHED` on the final ACK (`net/ipv4/tcp_fastopen.c:326-371`,
-  `net/ipv4/tcp_input.c:7118-7291 @ v7.0`).
-- Linux builds SYN options, including Fast Open, before BPF reservation. The
-  program writes nothing on the SYN. On the stock guest
-  `tcp_ecn=2`, so the ordinary final ACK uses the 12-byte timestamp and leaves
-  28 of 40 option bytes for the exact 18-byte option
-  (`net/ipv4/tcp_ipv4.c:3508-3511`,
-  `net/ipv4/tcp_output.c:1148-1232 @ v7.0`).
-- The bounded Aya probe `spike/findings-tcp-correlation-option.md` ran the
-  final-ACK option on Linux `7.0.0-38-generic` with Aya eBPF 0.1.1 / Aya
-  0.13.1: ordinary immediate close, forced syncookie, actual data-in-SYN Fast
-  Open `Pending -> Ready`, direct rejection, post-handshake active-storage
-  deletion and refused-connect socket-lifetime cleanup all held. The same run
-  created the BTF-backed storage through Aya, removed its transient pin before
-  program attach and reached `VERDICT=WORKS`. The existing v20 probe
-  independently exercised socket-storage lifetime, syncookies, Fast Open and
-  SockOps state callbacks at scale.
-
-**Contract Shape — bounded-change.** The declared universe is one guest boot:
-
-- the accepted per-application-socket origin fact, unchanged by owner flow end
-  and removed only by `sock_release` / socket destruction;
-- `ACTIVE_CORRELATION = { phase, application_cookie,
-  original_destination }` as socket storage on each captured active TCP
-  socket, from `TCP_CONNECT_CB` until its first post-handshake non-SYN peer
-  packet or socket destruction;
-- the immutable 18-byte option on each non-SYN ACK while that active storage
-  exists;
-- `CHILD_CORRELATION[child_cookie] = Pending | Ready {
-  application_cookie, original_destination }` until classification or exact
-  child `sock_release`; and
-- the sixth BPF link and the one child currently being classified.
-
-`ACTIVE_CORRELATION` is socket-local storage with `max_entries = 0` and no
-fixed capacity: every value belongs to and is automatically removed with its
-exact active socket. Aya 0.13.1 loads its BTF-backed legacy declaration by a
-private bpffs staging pin. Setup creates the map and pin, lets
-`EbpfLoader::allow_unsupported_maps().map_pin_path(..)` reuse it, then unlinks
-the pin and staging directory before program load, attach or READY. The
-running owner holds only FDs; no pin exists during service or teardown. Any
-returned setup failure unlinks/closes the staging objects before returning; a
-PID-1 death in that pre-READY window ends the VM, so no next owner can adopt
-them. `CHILD_CORRELATION` is an ordinary preallocated, unpinned Aya hash map
-with exactly 8,194 entries: at most
-4,097 children in the intake accept queue for `listen(4096)`, at most 4,096
-accepted Fast Open `Pending` children, and one spare classification entry.
-`bind_tcp_intake` uses backlog 4,096 and enables `TCP_FASTOPEN` with backlog
-4,096 so existing `MSG_FASTOPEN` behavior is not silently disabled. No active
-collection, LRU, eviction, tuple conflict, runtime/persistent pin, adoption or
-new timer exists. Sequential connections cannot accumulate child rows, so
-correlation creates no admission bound below `GUEST_TCP_PENDING_MAX`.
-
-The only allowed state deltas are:
-
-1. `Connect4` records/replaces only that application socket's accepted origin,
-   then rewrites. Failure to retain it returns 0 before rewrite, so Linux
-   returns `EPERM` and creates no intake child
-   (`kernel/bpf/cgroup.c:1649-1702 @ v7.0`).
-2. At `TCP_CONNECT_CB`, `TcpCorrelation` creates that exact socket's active
-   storage from the origin and arms write/parse callbacks. `Connect4` never
-   owns SockOps arming. There is no active collection or capacity; a
-   kernel/map defect remains fail-closed rather than guessing.
-3. Active establishment makes the final non-SYN ACK writer eligible. Each ACK
-   while the active storage is in its emit phase writes exactly kind `254`, length `18`, magic
-   `0x4f56`, BE cookie, network-order IPv4 and BE port. It writes nothing on a
-   SYN. Reserve/store failure writes no partial identity.
-4. Ordinary/syncookie passive establishment validates the current ACK and
-   atomically replaces/creates the exact child `Ready` row. Fast Open passive
-   establishment creates `Pending`; its parse callback performs the same
-   validation on the final ACK. It
-   never infers identity from a port or tuple.
-5. The active parse callback deletes its storage on the first non-SYN peer
-   packet after emit; otherwise socket destruction removes it automatically.
-   `sock_release` removes the accepted application origin as before but does
-   not remove the active retransmission copy from a still-live orphaned TCP
-   socket. Child `sock_release` deletes that exact child row.
-6. Intake accept lookup-and-deletes `Ready` once. It holds and counts
-   `Pending`; every event wait scans it before blocking and after a wake, with
-   the next fixed audit as the idle fallback. Missing,
-   malformed, ended or second-consume state resets/drops with no event.
-7. `overdrive-init` teardown drops the unpinned runtime maps and BPF link. No
-   correlation state survives owner death, guest boot or VM end.
-
-Identity cannot alias: the full cookie and destination travel in the same
-connection's final ACK and materialize under that connection's child cookie.
-The active storage is neither port-keyed nor tuple-keyed and cannot alias
-another socket; the exact socket lifetime is its cleanup.
-
-`KernelGuestOwnerIo` owns the exact count of every accepted `CapturedConn`
-from accept through successful `attach_outbound` or consuming `abort`/`close`,
-including Fast Open children it still holds internally as `Pending`. It
-therefore enforces the same 4,096-place total across internal Pending children
-and already-emitted handles without changing `GuestOwnerIo`,
-`GuestIoEvent` or the owner model. The owner's existing event-side quota check
-remains a redundant guard for emitted handles.
-
-**Normative no-weakening audit.** The replacement removes no accepted
-`zero`, `never`, `must`, `exactly`, fail-closed or required outcome. D15's
-per-socket original-peer restoration remains through `sock_release`;
-`GUEST_TCP_PENDING_MAX` remains the first correlation-independent pending-flow
-bound and keeps its reset outcome; reset/release before accept keeps exact
-cookie/destination identity; missing/malformed metadata never opens a flow;
-EVMOD-PAIR still parks early bytes only in the intake child's receive queue.
-The only additive contract is the sixth pre-READY program, its guest-internal
-18-byte final-ACK option ABI, the two exact transient state lifecycles, the
-event wait's pending-child scans with the existing audit deadline fallback,
-`TCP_FASTOPEN` on the intake, and ADR-0159's approved private
-pre-program-load BTF/map create-pin-Aya-reuse-unlink staging exception. The
-staging pin is absent before program load, attach and READY; no runtime pin or
-adoption is permitted.
-
-The exact setup contract becomes:
+**Decision TCP-CORRELATION.** Keep the five accepted capture/lifecycle
+programs and root-cgroup SockOps `TcpCorrelation`, and add the exact seventh
+program in this READY order:
 
 ```rust
-enum GuestProgram {
+pub(crate) enum GuestProgram {
     TcpCorrelation,
+    TcpCorrelationCandidate,
     Connect4,
     Sendmsg4,
     Getpeername4,
@@ -1100,85 +958,214 @@ enum GuestProgram {
 }
 ```
 
-`TcpCorrelation::as_str()` is `"tcp_correlation"`. Its load failure maps to
-the existing `GuestTransportSetupError::ProgramLoad { program:
-GuestProgram::TcpCorrelation, source }`; its attach failure maps to the
-existing `ProgramAttach` variant with the same payload. No new setup-error,
-wire, owner-event or flow-lifecycle variant is added. Every active-storage
-BTF/create/staging-pin/reuse/unlink or child-map/ELF-map load failure is
-represented as that same
-`ProgramLoad { program: GuestProgram::TcpCorrelation, source:
-aya::EbpfError::MapError(..) }`, preserving the exact typed cause rather than
-encoding it in a diagnostic string. The intake `listen`/`TCP_FASTOPEN`
-configuration remains within `bind_tcp_intake`; its failures map to the
-existing `GuestTransportSetupError::IntakeBind { addr, source }`.
+`TcpCorrelationCandidate::as_str()` and its ELF symbol are exactly
+`"tcp_correlation_candidate"`; its section/target is
+`fentry/tcp_check_req`. Aya loads it as `FEntry` against the running guest's
+BTF and attaches one global process-owned link. `TcpCorrelation` stays
+root-cgroup SockOps; the five existing programs and their root-cgroup
+attachments are unchanged. The candidate runs once for each system
+`tcp_check_req`: ordinary calls return at `fastopen == false`; unrelated Fast
+Open calls return after exact-child cookie/map lookup; only a Fast Open child
+with an existing nonterminal row reads the TCP header. Established data takes
+`tcp_rcv_established` and never invokes it. CPU, throughput and tail latency
+are unmeasured; no performance claim is part of this decision.
 
-Rejected alternatives:
+The fentry typed function contract is the Linux 7.0 prototype proved natively:
 
-- Looking up the peer with socket diagnostics after `accept()` does not cover
-  an application socket already reset and released, and the accepted event
-  still requires its kernel cookie. It turns a capture fact into a timing
-  guess.
-- Encoding a correlation token in `SO_MARK` adds an unapproved mark protocol,
-  changes the workload socket's mark, and requires a new collision,
-  exhaustion and cleanup contract. It is neither the accepted five-program
-  mechanism nor the measured spike path.
-- Restoring the spike's passive-established sockmap parking branch would
-  reintroduce machinery EVMOD-PAIR explicitly removed. The proposed passive
-  callback only re-keys metadata under the accepted child's cookie; it never
-  installs or parks the child.
-- The reviewed SYN/saved-SYN/SK_STORAGE proposal is invalid: Fast Open consumes
-  the SYN option space and syncookie children have no saved SYN. It also needs
-  accepted-child storage whose load lifecycle was left unspecified. The
-  replacement writes the current final ACK, uses socket storage only for the
-  active lifetime where capacity-free ownership is necessary, and pins its
-  create/reuse/unlink staging entirely before program attach and READY.
+```c
+int BPF_PROG(tcp_correlation_candidate,
+             struct sock *sk,
+             struct sk_buff *skb,
+             struct request_sock *req,
+             bool fastopen,
+             bool *req_stolen,
+             enum skb_drop_reason *drop_reason)
+```
 
-Bounded production fallout: the design-owned, Rust `pub(crate)`
-`GuestProgram` enum and `GuestProgram::ALL`; `GuestTransportOps`' production
-load/attach dispatch; the guest Aya object's private option ABI, active/child
-storage/child map, BTF-backed create/reuse/unlink loader, parse callbacks and
-private wake record; `bind_tcp_intake`'s exact
-backlog and `TCP_FASTOPEN`; and the private `KernelGuestOwnerIo` pending-child
-table/audit integration. No
-language-level `pub` or cross-crate Rust type, host wire type, persisted
-format, owner-event variant, flow lifecycle or model variable changes. The
-exact guest setup contract and READY attachment set do change from five
-programs to six.
+It returns zero and cannot alter the kernel function result, packet verdict or
+packet bytes. `tcp_v4_rcv` has made the complete `doff`-sized TCP header linear
+before child processing (`tcp_ipv4.c:2168-2188`). `BPF_CORE_READ(skb, data)`
+relocates the real kernel field and `bpf_probe_read_kernel` copies the 20-byte
+base header and at most 23 18-byte candidate windows inside the maximum
+60-byte TCP header. Only experimental kind `254`, exact length `18` and
+magic/version `0x4f56` decode the existing BE `u64` application cookie,
+network-order IPv4 and BE `u16` original port. The hook reads no application
+payload. This option is guest-local handshake metadata, not host wire or a
+persisted format.
 
-**DISTILL authorization and validation.** Existing pre-authored
-transport tests receive neutral body corrections only: the program list,
-labels, setup order/call count and existing `ProgramLoad` / `ProgramAttach`
-cases change from five to six. Those are not a new behavioral scenario. One
-new parameterized Tier-3 correlation scenario is required because SockOps has
-no meaningful `BPF_PROG_TEST_RUN` substitute:
+`Connect4` records the per-application-socket original destination and
+rewrites to the intake. After ephemeral-port allocation,
+`BPF_SOCK_OPS_TCP_CONNECT_CB` copies the exact cookie/destination into
+capacity-free `ACTIVE_CORRELATION` socket storage and arms option callbacks.
+`BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB` enables emission; each eligible non-SYN
+ACK writes the exact option. The first later non-SYN peer packet deletes the
+active copy, or socket destruction does. Application file release does not
+remove storage from a still-live orphaned TCP socket, so retransmission remains
+exact.
 
-- in the existing disposable guest-kit owner lane on Metal, the source-local
-  `guest_flow::real_kernel` cell configures the production
-  `KernelGuestTransportOps` / `KernelGuestOwnerIo`; ordinary application TCP
-  connects to non-local destinations must yield `OutboundCaptured` values
-  whose destinations and application `SO_COOKIE`s are exact, and a second
-  take of an accepted child must yield no replay; active storage disappears
-  after the first post-handshake peer packet or socket destruction, and the
-  child map returns to baseline;
-- the application closes immediately after `connect()` and before userspace
-  accept; the passive callback must still preserve the exact cookie/destination;
-- forced syncookie and actual data-in-SYN Fast Open variants drive the current
-  final-ACK producer; Fast Open must pass through `Pending -> Ready`, consume
-  one pending place while held and release it after classification;
-- a direct, uncorrelated connection to the reserved intake drives the real
-  passive producer with no correlation option and is reset with no
-  `GuestIoEvent`, flow or control record;
-- the existing integration wrapper runs that one added source-local cell. No
-  seeded correlation state, raw-packet fixture, production branch or public
-  test-support API is authorized.
+For ordinary and syncookie handshakes,
+`BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB` reads the current final ACK and creates
+`Ready { application_cookie, original_destination }` under the exact child
+cookie. Passive writes are gated to the full IPv4 child at the configured
+workload address and TCP intake port; a direct ordinary intake child becomes
+`Rejected`. Fast Open passive establishment occurs on the SYN, creates
+`Pending`, and arms only the state callback.
 
-This changes `guest_flow::real_kernel` from 7 to 8 cells and the in-guest lane
-from 11 to 12 cells. It adds no new lane, model, benchmark or test-support
-surface. DISTILL owns the exact executable body and the
-roadmap's step-11-06 counts, correlation criterion and spike-source range
-(`spike/findings-tcp-correlation-option.md` and its standalone Aya sources);
-the scenario remains required before STEP 11-06 DELIVER resumes.
+The selected child reaches `tcp_rcv_state_process` with its socket lock held
+(`tcp_ipv4.c:1851-1907`; `tcp_minisocks.c:992-1017`). Fast Open calls
+`tcp_check_req(..., fastopen=true, ...)` under that lock before ACK validation
+(`tcp_input.c:7228-7266`). The candidate obtains the full child cookie, parses
+only an existing nonterminal row, and replaces that complete row with
+`CandidateReady { metadata }` or `CandidateRejected` using `BPF_EXIST`. Only a
+validated ACK reaches `tcp_set_state(TCP_ESTABLISHED)` (`:7268-7289`); its
+existing opted-in SockOps state callback runs under the same child lock before
+the state store (`net/ipv4/tcp.c:3034-3064`) and whole-row replaces the
+candidate with terminal `Ready` or `Rejected`, then sends one best-effort
+private wake. An invalid ACK leaves one charged candidate for a later ACK to
+replace. Terminal rows are no-ops.
+
+The exact lock-free 24-byte child ABI remains:
+
+```text
+u32 state; u32 pad; CorrelationMeta meta
+
+Pending
+CandidateReady { application_cookie, original_destination }
+CandidateRejected
+Ready { application_cookie, original_destination }
+Rejected
+```
+
+Candidate and promotion writers are serialized by the child socket lock and
+replace the whole value. Linux publishes a hash replacement atomically under
+the bucket lock through RCU (`kernel/bpf/hashtab.c:1166-1264`); the
+preallocated map's per-CPU extra element permits replacement of an existing key
+at the 8,194-row bound (`:1070-1115`). Owner consumption and `sock_release` may
+race those writers: deletion first makes `BPF_EXIST` return `ENOENT` without
+recreation; replacement first is removed by the later deletion; no
+post-passive program inserts a child row. The rejected ingress-only
+`bpf_spin_lock`, candidate BTF value, `BPF_F_LOCK` read and private cgroup are
+absent.
+
+`KernelGuestOwnerIo` holds `Pending` and both candidates within the same
+combined count, emits `Ready` only when the accepted fd also reports
+`TCP_ESTABLISHED`, and consumes `Rejected` once by enabling
+`SO_LINGER{1,0}`, closing and releasing its place with no event/flow/control.
+Nonterminal quota/end cleanup reset-closes first and lets synchronous
+`sock_release` delete. A terminal row is taken/deleted once. Runtime rejection
+always precedes owner-flow creation.
+
+`ACTIVE_CORRELATION.max_entries = 0` remains capacity-free socket storage.
+`CHILD_CORRELATION.max_entries = 8_194` remains 4,097 accept-queued children +
+4,096 accepted/held children + one classification boundary. Candidates and
+terminal states replace one already-charged row. The same combined 4,096 count
+covers held children and emitted `CapturedConn` handles. There is no additional
+map or tuple table, private cgroup, timer, LRU, eviction, retry or earlier
+admission bound.
+
+**C/CO-RE build and embedding.** Production adds exactly
+`crates/overdrive-bpf/src/tcp_correlation_candidate.bpf.c`. It uses a
+build-generated `vmlinux.h` and standard libbpf CO-RE/endian/helper/tracing
+headers, declares only pinned-by-name `CHILD_CORRELATION` and the one fentry
+program, and adds no diagnostic map. `cargo xtask bpf-build` keeps the existing
+pinned Rust-nightly/bpf-linker builds, reads the target kernel BTF from
+`OVERDRIVE_BPF_TARGET_BTF` (Linux default `/sys/kernel/btf/vmlinux`), generates
+a target-directory-only `vmlinux.h` with `bpftool`, and compiles the C source
+with Clang/LLVM major 21, `-g -O2 -target bpf`, and the matching x86 or arm64
+target macro. It writes exactly
+`target/bpf/overdrive_guest_tcp_correlation_candidate_bpf.o`.
+
+Clang 21, `bpftool`, target-kernel BTF and libbpf headers are build-time
+requirements added to `xtask dev-setup`, Lima provisioning and the existing CI
+BPF-build job. Missing tools, unsupported build architecture, unreadable BTF,
+dump/compile failure or a missing object fail the build without fallback.
+`guest-kit-prepare` builds against the same kernel/BTF shipped by that kit.
+`overdrive-init/build.rs` requires and tracks both objects and exports the
+candidate path as
+`OVERDRIVE_GUEST_TCP_CORRELATION_CANDIDATE_BPF_OBJECT_PATH`; the binary embeds
+both with aligned `include_bytes!`. The guest runs no compiler, `bpftool` or
+object-file lookup. This is the approved bounded amendment to ADR-0038's
+Rust/bpf-linker-only BPF pipeline. Aya stays `0.13.1`. The receipt proves
+x86_64 Linux `7.0.0-38-generic`; the build shape includes aarch64 but no native
+aarch64 receipt is claimed.
+
+**Two-object staging and lifetime.** The crate-private setup contract gains
+exactly:
+
+```rust
+fn prepare_guest_programs(&mut self) -> Result<(), GuestTransportSetupError>;
+```
+
+Before any program load/attach it creates and pins capacity-free
+`ACTIVE_CORRELATION` under the existing unique private staging directory,
+loads the Rust object through that Aya map-pin path so it creates and
+transiently pins ordinary lock-free `CHILD_CORRELATION`, loads the C object
+through the same path so it reuses the exact child map, then unlinks both pins
+and the directory. Only then does it load/attach the seven programs in `ALL`
+order. Both embedded Aya objects and every link remain process-owned until
+guest teardown. Runtime and teardown have no pin, discovery or adoption. READY
+is forbidden until both pins/directory are absent, the fentry program has
+loaded against the running BTF and attached, and all existing guest setup has
+completed.
+
+**Typed failures.** The exact existing envelopes apply:
+
+- Active-storage create/BTF/pin, Rust-object map reuse/load or shared staging
+  unlink failure is `ProgramLoad { program: TcpCorrelation, source:
+  aya::EbpfError }`, preserving a map cause when applicable.
+- Candidate object parse/load, `CHILD_CORRELATION` reuse, CO-RE relocation,
+  running BTF read, `tcp_check_req` resolution/prototype or `FEntry::load`
+  failure is `ProgramLoad { program: TcpCorrelationCandidate, source:
+  aya::EbpfError }`.
+- Candidate `FEntry::attach` failure is
+  `ProgramAttach { program: TcpCorrelationCandidate, source:
+  aya::programs::ProgramError }`.
+- Existing program and intake failures keep their existing exact mappings.
+- Missing/malformed validated metadata becomes private `Rejected`, reset-close
+  and no owner event/flow/control. A deleted row yields `ENOENT` and no
+  recreation, not an owner-visible error.
+
+No public/cross-crate error type, diagnostic-string semantic, wire, persisted
+format, owner event or flow-lifecycle variant is added.
+
+**No-weakening audit.** Exact cookie/destination, one-time consume, ordinary,
+syncookie and live-open Fast Open remain. Valid connections below 4,096 are
+not refused by correlation capacity. Candidate/promotion is child-lock
+serialized, whole-value replacement is atomic and `BPF_EXIST` makes deletion
+final. Every transient retains exact consume-or-socket-release cleanup.
+Missing/malformed metadata resets before owner-flow creation. Immediate
+application release cannot erase active retransmission metadata. No accepted
+`zero`, `never`, `must`, `exactly`, fail-closed or required outcome is removed
+or relaxed.
+
+**Bounded fallout and DISTILL correction.** Add the one C source/build object,
+build-tool provisioning/CI, build-script embedding, crate-private
+`TcpCorrelationCandidate`, `prepare_guest_programs`, two-object loader/staging,
+exhaustive matches and private candidate owner handling. Existing setup/build
+assertions receive neutral six-to-seven and candidate-artifact/error
+corrections. The one already-authorized parameterized Tier-3 cell and existing
+wrapper remain one cell/lane with source-local/wrapper counts 8/12. It keeps
+the Fast Open producer open and sends no post-handshake payload before
+`OutboundCaptured`; proves direct rejection/reset, delayed final ACK, parallel
+established sends, preterminal reset-close, ordinary/immediate-release/
+syncookie behavior, one-time consume, combined quota and both staging pins
+absent after setup. No new acceptance cell, lane, fixture, public test seam or
+model is added. The existing 279 global plus 8 new formal checks remain valid
+because no abstract contract input changes.
+
+**Alternatives.** Root-cgroup and private-intake-cgroup `CgroupSkb` ingress
+both worked, but each adds steady established-packet dispatch; the private form
+also adds a cgroup lifecycle and ingress-only lock. They are superseded by the
+smaller handshake hook. A listener socket filter still runs before the child
+lock and needs a different synchronization/detachment protocol. Two tracing
+programs are unnecessary because existing SockOps is the validated promoter.
+A full-tuple handoff races cleanup or retains capacity; the SYN option cannot
+cover Fast Open option space and syncookies. Requiring later payload/FIN/close,
+dropping Fast Open, or resetting valid Fast Open weakens accepted outcomes.
+TC/XDP/netfilter/SK_LOOKUP lack the exact full child at the boundary. Sockmap,
+parking, raw-packet input, userspace payload relay and a kernel patch remain
+unnecessary or forbidden.
+
 
 ### Decision index
 
@@ -1215,7 +1202,7 @@ table is not a current decision (§ *Changed assumptions*).
 | D3 | One forwarded socket set per transport flow, never multiplexed; node pair capacity `GUEST_FLOW_MAX_PAIRS = 65,536` (four flows per attachment at the target); per-allocation quota 4,096 as a bulkhead, counting half-closed, not yet completed flows (R2-DRAIN); both places are held until the host releases the flow at its end record, or a dial's at its drop or abort (EVMOD-AB) | **APPROVED 2026-10-05**; half-closed flows counted **APPROVED 2026-10-11**; release point **APPROVED 2026-10-17** (EVMOD-AB) | [0147](../../product/architecture/adr-0147-one-kernel-forwarded-pair-per-transport-flow.md) (one pair per flow), [0208](../../product/architecture/adr-0208-guest-flows-are-bounded-by-a-node-pair-capacity-and-a-per-allocation-quota.md) (the two bounds), [0209](../../product/architecture/adr-0209-a-guest-flows-places-are-released-when-the-host-reads-its-end-record.md) (release point) | V-9 (sizing) |
 | D5 | Every datagram is framed (4-byte magic + BE `u32` length; empty = header alone; bound 59,000 B) only inside the transport; the frame never reaches an application or a remote peer; on one vsock STREAM each way (EVMOD-DGRAM) | **APPROVED 2026-10-05**; carrier **APPROVED 2026-10-17** | [0149](../../product/architecture/adr-0149-length-prefixed-datagram-frame-with-empty-carrier.md), [0201](../../product/architecture/adr-0201-a-datagram-association-is-one-framed-vsock-stream-forwarded-a-datagram-at-a-time.md) | — |
 | D6 | Ordinary guest sockets are captured by guest-kernel Aya programs and paired by `overdrive-init`, which attaches each pair to the guest's in-kernel forwarder | **APPROVED 2026-10-05**; forwarding by the in-kernel forwarder **APPROVED 2026-10-16** (EVMOD-ADOPT) | [0150](../../product/architecture/adr-0150-guest-kernel-aya-adaptation-controlled-by-overdrive-init.md), [0197](../../product/architecture/adr-0197-guest-flows-are-forwarded-by-an-event-driven-in-kernel-forwarder.md) | — |
-| TCP-CORRELATION | The guest READY set has `TcpCorrelation` before `Connect4`: exact application cookie/destination travel in the final ACK; active metadata is capacity-free socket storage, and the child handoff is bounded to the complete queued/held universe with exact cleanup and the same 4,096 pending total | **APPROVED 2026-10-23** | [0150](../../product/architecture/adr-0150-guest-kernel-aya-adaptation-controlled-by-overdrive-init.md), [0159](../../product/architecture/adr-0159-guest-forwarding-kernel-objects-are-unpinned.md) | One parameterized Tier-3 cell in the existing guest-kit lane |
+| TCP-CORRELATION | The guest READY set has root-cgroup SockOps `TcpCorrelation`, global handshake-only `fentry/tcp_check_req` `TcpCorrelationCandidate`, then `Connect4`: exact application cookie/destination travel in the final ACK; the child-lock-serialized candidate and existing SockOps state callback whole-row replace `Pending | CandidateReady | CandidateRejected | Ready | Rejected` with `BPF_EXIST`; active metadata is capacity-free socket storage and the same 8,194-entry child universe carries the same combined 4,096 pending total; the Rust and C/CO-RE objects share temporary ACTIVE/CHILD staging pins removed before load/attach/READY and retain no runtime pin | **APPROVED 2026-10-23** after native falsification, scope validation, independent DESIGN review and explicit approval (“Approve and continue”) | [0150](../../product/architecture/adr-0150-guest-kernel-aya-adaptation-controlled-by-overdrive-init.md), [0159](../../product/architecture/adr-0159-guest-forwarding-kernel-objects-are-unpinned.md), [0038](../../product/architecture/adr-0038-ebpf-crate-layout-and-build-pipeline.md) | Correct the existing one parameterized Tier-3 cell and neutral setup/build assertions in the existing guest-kit lane; no new cell/lane/model |
 | D7 | One node-scoped guest-flow owner exclusively holds the host forwarder (its control context since EVMOD-ADOPT), the control and flow listeners, control sessions and host pair sockets | **APPROVED 2026-10-05**; forwarder **APPROVED 2026-10-16** (EVMOD-ADOPT) | [0151](../../product/architecture/adr-0151-one-node-guest-flow-owner-holds-forwarder-and-pair-sockets.md) | — |
 | INB-1 | There is no host-local delivery to the guest prefix (no `local` route for the prefix, steering, intake listeners or listener mirroring). Exec and process workloads keep the plaintext TCP connect of leg-S and the probe runner; for a VM workload, leg-S and the VM probe runner call `GuestStreamDial::dial(target, purpose)` (the `purpose` argument, `DialPurpose::{Relay, Probe}`, is part of PROBE-NOSAMPLE), which the owner answers for a declared TCP port of an Active VM lease by opening a host-initiated `TcpAccept` vsock flow (peer gateway:0, the CID's live launch token) and returning a `GuestStream` on `Paired`, or a typed `GuestDialError` — `Refused { errno }`, `TimedOut { errno }`, `PairingDeadline`, `NotServing`, `NoSession`, `Quiesced`, `Unreachable { errno }` or the existing typed capacity refusal; `GUEST_DIAL_PAIRING_DEADLINE` > `GUEST_INBOUND_CONNECT_TIMEOUT`; a TCP-connect probe is healthy iff `dial` returns `Ok`, an HTTP probe runs over the stream; leg-S over vsock is a temporary userspace kTLS↔vsock relay, deleted when #303 lands | **APPROVED 2026-10-11** | [0173](../../product/architecture/adr-0173-host-platform-clients-reach-a-vm-port-through-an-owner-opened-vsock-flow.md) (amends 0094, 0120); [0214](../../product/architecture/adr-0214-the-host-end-of-a-host-opened-flow-is-held-by-its-dialer-never-forwarded.md) (the dialled host end held by its dialer); [0216](../../product/architecture/adr-0216-the-host-forwarder-watches-a-dialled-vsock-so-its-stream-keeps-the-classified-end.md) (its watch, EVMOD-END 2026-10-17); [0186](../../product/architecture/adr-0186-leg-s-reaches-vm-backends-through-a-temporary-vsock-relay-until-303.md) (the temporary leg-S relay) | — (reset fidelity rests on R2-END, P-69) |
 | PROBE-NOSAMPLE | The VM probe runner dials with `DialPurpose::Probe` (leg-S with `DialPurpose::Relay`): a probe dial takes a node flow slot but does not count against the allocation's flow quota, and each probe task holds at most one dial in flight, so the in-flight probe dials of an allocation are bounded by the probe count its spec declares. A VM probe attempt whose dial returns `GuestDialError::Capacity` (for a probe dial: node flow slots only) or `GuestDialError::Quiesced` yields no sample: no `ProbeResultRow`, no startup-probe attempt consumed, no threshold advanced, the probe runs again at its next period, and one `probe.not_sampled` event (PROBE-NOSAMPLE-EVENT) per probe per period; every other `GuestDialError` is a probe failure with its `as_str` as detail. How a sample is counted: PROBE-RUN-COUNT | **APPROVED 2026-10-13** | [0187](../../product/architecture/adr-0187-a-vm-probe-refused-by-node-capacity-or-quiescence-records-no-sample.md); linked from [0173](../../product/architecture/adr-0173-host-platform-clients-reach-a-vm-port-through-an-owner-opened-vsock-flow.md) | — |
