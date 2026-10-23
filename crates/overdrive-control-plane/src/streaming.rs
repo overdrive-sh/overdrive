@@ -106,7 +106,7 @@ use overdrive_core::traits::observation_store::{
 use tokio::sync::broadcast;
 
 use crate::AppState;
-use crate::action_shim::LifecycleEvent;
+use crate::action_shim::{LifecycleEvent, build_alloc_status_row};
 use crate::api::{AllocStateWire, IdempotencyOutcome};
 use crate::reconciler_runtime::{ReconcilerRuntime, build_hydration_context};
 use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
@@ -439,7 +439,12 @@ async fn workload_event_from_lifecycle_with_state(
     let ctx = build_hydration_context(state, &allocator, &listener_facts);
     let reconciler = WorkloadLifecycle::canonical();
     let desired = reconciler.hydrate_desired(&ctx, &target).await.map_err(std::io::Error::other)?;
-    let failed = failed_row_from_event(event);
+    let failed = state
+        .obs
+        .alloc_status_row(&event.alloc_id)
+        .await
+        .map_err(std::io::Error::other)?
+        .unwrap_or_else(|| failed_row_from_event(event));
     let run_desired = desired.job.is_some() && !desired.desired_to_stop;
     let exit_code = match &event.reason {
         TransitionReason::WorkloadCrashedImmediately { exit_code, .. } => exit_code.unwrap_or(1),
@@ -470,23 +475,25 @@ fn failed_row_from_event(event: &LifecycleEvent) -> AllocStatusRow {
     let Ok(node_id) = NodeId::new("streaming") else {
         unreachable!("the fixed stream writer id is valid")
     };
-    AllocStatusRow {
-        alloc_id: event.alloc_id.clone(),
-        workload_id: event.workload_id.clone(),
-        node_id: node_id.clone(),
-        state: AllocState::Failed,
-        updated_at: LogicalTimestamp::dominating(0, node_id, None),
-        reason: Some(event.reason.clone()),
-        detail: event.detail.clone(),
-        terminal: event.terminal.clone(),
-        stderr_tail: None,
-        kind: WorkloadKind::Job,
-        listeners: Vec::new(),
-        started_at: None,
-        workload_addr: None,
-        last_terminated: None,
-        restart_count: 0,
-    }
+    let stderr_tail = match &event.reason {
+        TransitionReason::WorkloadCrashedImmediately { stderr_tail, .. } => stderr_tail.clone(),
+        _ => None,
+    };
+    build_alloc_status_row(
+        event.alloc_id.clone(),
+        event.workload_id.clone(),
+        node_id.clone(),
+        AllocState::Failed,
+        LogicalTimestamp::dominating(0, node_id, None),
+        Some(event.reason.clone()),
+        event.detail.clone(),
+        event.terminal.clone(),
+        stderr_tail,
+        WorkloadKind::Job,
+        None,
+        None,
+        None,
+    )
 }
 
 fn attempt_failed_event(
