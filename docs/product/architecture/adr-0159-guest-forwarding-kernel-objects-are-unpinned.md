@@ -7,6 +7,8 @@ of the forwarding links (D19-LINKS) approved 2026-10-08; NO-SURVIVE (VMs do
 not survive a `serve` restart until #312) approved 2026-10-11; the in-kernel
 forwarder (ADR-0197, EVMOD-ADOPT) approved 2026-10-16 and its pairs' binding
 to their control context (ADR-0199, EVMOD-CTL) approved 2026-10-17. GH #295.
+TCP-CORRELATION's private pre-program-load create/pin/Aya-reuse/unlink staging
+exception, with no runtime pin or adoption, was approved 2026-10-23.
 Recorded in the #295 feature delta, § *[REF] Ownership of descriptors and
 kernel objects*. Surviving a `serve` restart with VMs and flows intact is
 #312. Not yet implemented.
@@ -22,8 +24,8 @@ Forwarding state on each side is of two kinds:
   attached it, and the context's release aborts every live pair of it before
   it returns (ADR-0199). All host pairs belong to the owner process's one
   context (ADR-0151) and all guest pairs to `overdrive-init`'s (ADR-0150).
-- **Guest capture programs** (`connect4`, `sendmsg4`, `getpeername4`,
-  `recvmsg4`, `sock_release`) and their maps. A BPF link detaches when its
+- **Guest capture programs** (`tcp_correlation`, `connect4`, `sendmsg4`,
+  `getpeername4`, `recvmsg4`, `sock_release`) and their maps. A BPF link detaches when its
   last fd closes (the link file's release drops the last reference,
   `kernel/bpf/syscall.c:3347-3353 @ v7.0`, and a cgroup link's release
   detaches it, `kernel/bpf/cgroup.c:1377-1398 @ v7.0`), while a legacy
@@ -44,8 +46,23 @@ V-30).
 ## Decision
 
 - Every forwarding object, on host and guest, lives exactly as long as its
-  owner process: no bpffs pin, no pair that outlives its context, no context
-  shared with or inherited by another process (`O_CLOEXEC`, ADR-0199).
+  owner process: no runtime bpffs pin, no pair that outlives its context, no
+  context shared with or inherited by another process (`O_CLOEXEC`,
+  ADR-0199).
+- **TCP-CORRELATION has one pre-program-load staging exception.** Before it
+  loads the sixth program, `overdrive-init` creates the active socket-storage
+  map's minimal BTF and `BPF_MAP_TYPE_SK_STORAGE` fd, pins the map at a unique
+  process-private bpffs path, lets Aya 0.13.1 reuse that map through
+  `allow_unsupported_maps().map_pin_path(..)`, then unlinks the map pin and
+  removes the directory before `SockOps::load`, link attach or READY. It
+  drops the raw creation/BTF fds after Aya owns its fd. During service and
+  teardown only process-owned fds remain; boot never adopts the staging path.
+  A create/pin/reuse/unlink failure is the approved
+  `ProgramLoad { program: TcpCorrelation, source:
+  aya::EbpfError::MapError(..) }`; READY is not emitted. Normal returned
+  failures clean the staging objects. An unlink-cleanup failure fails boot;
+  `overdrive-init` is PID 1, so its failure ends the VM rather than leaving a
+  later owner that could adopt the residue.
 - **Every guest capture attachment is a BPF link** held by
   `overdrive-init`. No attachment uses an API that survives the process.
 - When the owner exits, forwarding stops and every flow the owner held
@@ -63,7 +80,7 @@ V-30).
 
 ## Alternatives considered
 
-- **Pin the objects and adopt them at boot.** The pins would outlive the
+- **Keep runtime pins and adopt them at boot.** The pins would outlive the
   sockets, adding a stale-state class that buys nothing until #312. Rejected.
 - **Pairs that outlive the owner process.** Forwarding would continue while
   `serve` is down. Rejected (ADR-0199).
@@ -81,6 +98,8 @@ V-30).
   production composition).
 - `sweep_stale` reduces to verifying that no residue exists.
 - The startup probes still check the forwarder context (Earned Trust) and,
-  in the guest, that every capture link attached at load.
+  in the guest, that every capture link attached at load. The
+  TCP-CORRELATION Tier-3 cell also checks that its staging pin and directory
+  are absent after setup and during service.
 - A `serve` restart closes every guest flow and ends every VM. Keeping VMs
   running across a restart is #312.

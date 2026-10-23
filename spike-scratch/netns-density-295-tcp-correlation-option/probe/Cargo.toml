@@ -1,0 +1,15 @@
+[package]
+name = "tcp-correlation-option-probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+aya = "0.13.1"
+libc = "=0.2.190"
+
+[[bin]]
+name = "tcp-correlation-option-probe"
+path = "src/main.rs"
+
+[workspace]
