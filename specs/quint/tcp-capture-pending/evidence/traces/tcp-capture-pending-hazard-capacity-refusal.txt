@@ -1,0 +1,27 @@
+# tcp-capture-pending-hazard-capacity-refusal: counterexample, 3 state(s) (from the TLC trace)
+
+State 1
+  ownerFlow = {}
+  charged = {}
+  rejected = {}
+  attempted = {}
+  eventCount = <<0, 0, 0, 0>>
+  g = [overflowUnderBound |-> FALSE, capacityRefusedUnderBound |-> FALSE]
+  place = <<0, 0, 0, 0>>
+  phase = <<"free", "free", "free", "free">>
+  controlTraffic = {}
+  acceptedPlace = <<0, 0, 0, 0>>
+  released = {}
+  row = <<"missing", "missing", "missing", "missing">>
+  capacityRefused = {}
+  overflowed = {}
+
+State 2 [PreparePending]
+  row = <<"pending", "missing", "missing", "missing">>
+
+State 3 [Accept]
+  rejected = {1}
+  attempted = {1}
+  g = [overflowUnderBound |-> FALSE, capacityRefusedUnderBound |-> TRUE]
+  row = <<"missing", "missing", "missing", "missing">>
+  capacityRefused = {1}

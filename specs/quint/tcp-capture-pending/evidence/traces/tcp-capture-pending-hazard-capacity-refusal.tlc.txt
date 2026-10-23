@@ -1,0 +1,47 @@
+State 1: <Initial predicate>
+/\ pending_bugCapacityRefusal_tcp_capture_pending_ownerFlow = {}
+/\ pending_bugCapacityRefusal_tcp_capture_pending_charged = {}
+/\ pending_bugCapacityRefusal_tcp_capture_pending_rejected = {}
+/\ pending_bugCapacityRefusal_tcp_capture_pending_attempted = {}
+/\ pending_bugCapacityRefusal_tcp_capture_pending_eventCount = <<0, 0, 0, 0>>
+/\ pending_bugCapacityRefusal_tcp_capture_pending_g = [overflowUnderBound |-> FALSE, capacityRefusedUnderBound |-> FALSE]
+/\ pending_bugCapacityRefusal_tcp_capture_pending_place = <<0, 0, 0, 0>>
+/\ pending_bugCapacityRefusal_tcp_capture_pending_phase = <<"free", "free", "free", "free">>
+/\ pending_bugCapacityRefusal_tcp_capture_pending_controlTraffic = {}
+/\ pending_bugCapacityRefusal_tcp_capture_pending_acceptedPlace = <<0, 0, 0, 0>>
+/\ pending_bugCapacityRefusal_tcp_capture_pending_released = {}
+/\ pending_bugCapacityRefusal_tcp_capture_pending_row = <<"missing", "missing", "missing", "missing">>
+/\ pending_bugCapacityRefusal_tcp_capture_pending_capacityRefused = {}
+/\ pending_bugCapacityRefusal_tcp_capture_pending_overflowed = {}
+
+State 2: <pending_bugCapacityRefusal_tcp_capture_pending_PreparePending line 164, col 3 to line 206, col 57 of module pending_bugCapacityRefusal>
+/\ pending_bugCapacityRefusal_tcp_capture_pending_ownerFlow = {}
+/\ pending_bugCapacityRefusal_tcp_capture_pending_charged = {}
+/\ pending_bugCapacityRefusal_tcp_capture_pending_rejected = {}
+/\ pending_bugCapacityRefusal_tcp_capture_pending_attempted = {}
+/\ pending_bugCapacityRefusal_tcp_capture_pending_eventCount = <<0, 0, 0, 0>>
+/\ pending_bugCapacityRefusal_tcp_capture_pending_g = [overflowUnderBound |-> FALSE, capacityRefusedUnderBound |-> FALSE]
+/\ pending_bugCapacityRefusal_tcp_capture_pending_place = <<0, 0, 0, 0>>
+/\ pending_bugCapacityRefusal_tcp_capture_pending_phase = <<"free", "free", "free", "free">>
+/\ pending_bugCapacityRefusal_tcp_capture_pending_controlTraffic = {}
+/\ pending_bugCapacityRefusal_tcp_capture_pending_acceptedPlace = <<0, 0, 0, 0>>
+/\ pending_bugCapacityRefusal_tcp_capture_pending_released = {}
+/\ pending_bugCapacityRefusal_tcp_capture_pending_row = <<"pending", "missing", "missing", "missing">>
+/\ pending_bugCapacityRefusal_tcp_capture_pending_capacityRefused = {}
+/\ pending_bugCapacityRefusal_tcp_capture_pending_overflowed = {}
+
+State 3: <pending_bugCapacityRefusal_tcp_capture_pending_Accept line 945, col 3 to line 1181, col 60 of module pending_bugCapacityRefusal>
+/\ pending_bugCapacityRefusal_tcp_capture_pending_ownerFlow = {}
+/\ pending_bugCapacityRefusal_tcp_capture_pending_charged = {}
+/\ pending_bugCapacityRefusal_tcp_capture_pending_rejected = {1}
+/\ pending_bugCapacityRefusal_tcp_capture_pending_attempted = {1}
+/\ pending_bugCapacityRefusal_tcp_capture_pending_eventCount = <<0, 0, 0, 0>>
+/\ pending_bugCapacityRefusal_tcp_capture_pending_g = [overflowUnderBound |-> FALSE, capacityRefusedUnderBound |-> TRUE]
+/\ pending_bugCapacityRefusal_tcp_capture_pending_place = <<0, 0, 0, 0>>
+/\ pending_bugCapacityRefusal_tcp_capture_pending_phase = <<"free", "free", "free", "free">>
+/\ pending_bugCapacityRefusal_tcp_capture_pending_controlTraffic = {}
+/\ pending_bugCapacityRefusal_tcp_capture_pending_acceptedPlace = <<0, 0, 0, 0>>
+/\ pending_bugCapacityRefusal_tcp_capture_pending_released = {}
+/\ pending_bugCapacityRefusal_tcp_capture_pending_row = <<"missing", "missing", "missing", "missing">>
+/\ pending_bugCapacityRefusal_tcp_capture_pending_capacityRefused = {1}
+/\ pending_bugCapacityRefusal_tcp_capture_pending_overflowed = {}

@@ -1,0 +1,21 @@
+
+  pending_bugCapacityRefusal
+    1) pending_bugCapacityRefusal::tcp_capture_pending::ReadyAtAcceptEmitsOnceThenAbortReusesThePlace failed after 1 test(s)
+
+  1 failed
+
+  1) pending_bugCapacityRefusal::tcp_capture_pending::ReadyAtAcceptEmitsOnceThenAbortReusesThePlace:
+       Error [QNT508]: Expect condition does not hold true
+        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/tcp-capture-pending/tcp_capture_pending.qnt:301:55
+        301:   run ReadyAtAcceptEmitsOnceThenAbortReusesThePlace = init
+                                                                   ^^^^
+        302:     .then(PrepareReady(1)).then(Accept(1))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        303:     .expect(Safety and phase.get(1) == "emitted" and place.get(1) == 1 and eventCount.get(1) == 1)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    Use --seed=0xe3eaf597da940c75 --match=pending_bugCapacityRefusal::tcp_capture_pending::ReadyAtAcceptEmitsOnceThenAbortReusesThePlace to repeat.
+
+
+  Use --verbosity=3 to show executions.
+  Further debug with: quint test --verbosity=3 /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/tcp-capture-pending/hazard/tcp_capture_pending_hazards.qnt
+error: Tests failed

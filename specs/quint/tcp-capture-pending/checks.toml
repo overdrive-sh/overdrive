@@ -1,0 +1,75 @@
+# Checks for the bounded TCP-CORRELATION shared pending-place protocol.
+# `pending_ok` has two places and four abstract children. TLC exhaustively checks the full Safety conjunction.
+# The one hazard switches off the combined pending-bound rule; its invariant and the affected critical run must fail.
+
+[[check]]
+name = "tcp-capture-pending-safety-tlc"
+spec = "tcp_capture_pending.qnt"
+main = "pending_ok"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "tcp-capture-pending-hazard-capacity-refusal"
+spec = "hazard/tcp_capture_pending_hazards.qnt"
+main = "pending_bugCapacityRefusal"
+invariant = "Safety"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "tcp-capture-pending-run-pending-to-ready-transfers-the-same-charge"
+spec = "tcp_capture_pending.qnt"
+main = "pending_ok"
+run = "PendingToReadyTransfersTheSameCharge"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "tcp-capture-pending-run-ready-at-accept-emits-once-then-abort-reuses-the-place"
+spec = "tcp_capture_pending.qnt"
+main = "pending_ok"
+run = "ReadyAtAcceptEmitsOnceThenAbortReusesThePlace"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "tcp-capture-pending-run-missing-refused-and-child-close-release-without-outputs"
+spec = "tcp_capture_pending.qnt"
+main = "pending_ok"
+run = "MissingRefusedAndChildCloseReleaseWithoutOutputs"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "tcp-capture-pending-run-overflow-resets-only-at-the-bound-then-a-release-makes-room"
+spec = "tcp_capture_pending.qnt"
+main = "pending_ok"
+run = "OverflowResetsOnlyAtTheBoundThenAReleaseMakesRoom"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "tcp-capture-pending-run-attach-abort-and-close-each-release-their-place"
+spec = "tcp_capture_pending.qnt"
+main = "pending_ok"
+run = "AttachAbortAndCloseEachReleaseTheirPlace"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "tcp-capture-pending-run-hazard-ready-below-bound-is-not-capacity-refused"
+spec = "hazard/tcp_capture_pending_hazards.qnt"
+main = "pending_bugCapacityRefusal"
+run = "ReadyAtAcceptEmitsOnceThenAbortReusesThePlace"
+backend = "evaluator"
+expect = "violation"
+ci = true
