@@ -20,6 +20,19 @@ vocabulary* for the intake constants and the deploy refusal's typed error,
 and § *[REF] vsock data path — the in-kernel event-driven forwarder
 (EVMOD)*. Not yet implemented.
 
+**GUEST-TRANSPARENT-ROUTE accepted (2026-10-24).** Native STEP 11-06 evidence
+invalidated only this ADR's `fwmark -> local table` premise. The production
+owner issued its transparent application connect and never completed; enabling
+accepted-child mark inheritance alone still failed. The exact dedicated guest
+mark/table/local-default configuration made the same native cell pass.
+Independent DESIGN review iteration 2 approved the bounded correction with no
+open finding and found that no further user decision is required because it
+restores already-approved D15, INB-1 and D8-PEER outcomes without changing
+them. The exact configuration, typed failures, ownership and cleanup contract
+live in the #295 feature delta, the
+[native record](../../feature/netns-density-295/deliver/native-11-06-guest-transparent-route-falsification.md),
+and its [independent review](../../feature/netns-density-295/deliver/design-review-11-06-guest-transparent-route.md).
+
 **TCP-CORRELATION amendment accepted 2026-10-23.** Native STEP 11-06
 evidence falsified the Fast Open SockOps final-ACK consumer. Independent scope
 validation and DESIGN review selected one handshake-only
@@ -63,6 +76,20 @@ device. It established that D15 holds: the workload address is on the dummy
 device and in `getsockname`; `getpeername` and `recvfrom` return the original
 peer; UDP of sizes 0 to 59,000 bytes worked connected and unconnected; and
 only fixed-size control I/O crossed either owner's syscalls.
+
+The accepted prose collapsed the guest return-routing configuration to a rule
+that looked up the kernel's reserved local table. STEP 11-06 reproduced the
+real consequence on Linux `7.0.0-38-generic`: the transparent socket's connect
+remained in progress and the owner observed no completion. The isolated
+contrast retained that rule and added `tcp_fwmark_accept=1`; it still failed.
+The same production cell passed with the guest-capture lineage's dedicated
+`0x295` mark, table 295 local-default route and both mark sysctls. Linux carries
+a socket's mark into IPv4 route lookup (`include/net/route.h:151-156 @ v7.0`),
+matches it in FIB rules (`net/core/fib_rules.c:278-310 @ v7.0`), and copies an
+incoming mark to the accepted child when `tcp_fwmark_accept` is enabled
+(`include/net/inet_sock.h:105-112`, `net/ipv4/tcp_input.c:7515-7536`,
+`net/ipv4/inet_connection_sock.c:1211-1233 @ v7.0`). The native contrast, not
+those source facts alone, establishes that the dedicated route is required.
 
 The forwarder of ADR-0197 joins two connected sockets at any time and reads
 its source from the start of its queue, so bytes that arrive before a flow is
@@ -252,15 +279,18 @@ The guest adaptation stays in the guest kernel, loaded and controlled by
 - **Pool exhaustion (D25).** With no free UDP slot, the capture program
   refuses the application's `connect()` or `sendmsg()` to a new destination
   (`EPERM`). It is counted.
-- **Inbound.** For a flow the host opens (ADR-0173), `overdrive-init` accepts
+- **Inbound (GUEST-TRANSPARENT-ROUTE).** For a flow the host opens (ADR-0173), `overdrive-init` accepts
   the flow vsock on its inbound listener, reads the request, and connects to
   the application's declared port with a socket bound by `IP_TRANSPARENT` to
   the address and port the request names — the guest gateway with port 0
-  (ADR-0174) — carrying a platform `SO_MARK`. A fwmark rule to the local
-  table returns the application's replies to it, and
-  `net.ipv4.fwmark_reflect=1` makes the guest kernel's own replies (a reset
-  for a port with no listener) carry the mark, so a refusal is delivered at
-  once. The connect is bounded by the guest's inbound connect timeout, which
+  (ADR-0174) — carrying the dedicated guest `SO_MARK=0x295`. A full-mask rule
+  sends that mark to dedicated table 295, whose host-scope local-default route
+  on `lo` returns the application's replies to it;
+  `net.ipv4.tcp_fwmark_accept=1` gives the accepted application child that
+  mark, and `net.ipv4.fwmark_reflect=1` gives the guest kernel's own reply (a
+  reset for a port with no listener) the mark, so a refusal is delivered at
+  once. Exact order, typed failures and lifecycle/cleanup remain normative in
+  the feature delta. The connect is bounded by the guest's inbound connect timeout, which
   is below the host's pairing deadline for a dialled flow (values in the
   feature delta); `overdrive-init` attaches the pair and answers on the
   control session with `Paired`, or answers `Refused` carrying the errno, or a
@@ -326,6 +356,17 @@ The guest adaptation stays in the guest kernel, loaded and controlled by
 - **vsock-aware workloads.** Breaks the unmodified-workload model. Rejected.
 - **Present inbound peers as the guest's own address.** The application would
   see itself as its client. Rejected (ADR-0174).
+- **Keep the rule pointed at the reserved local table and add only
+  `tcp_fwmark_accept`.** The bounded production-owner native contrast still
+  timed out. Rejected by reproduced evidence.
+- **Put the catch-all local route in table 255 or `main`.** This would affect
+  general local or unmarked guest routing instead of only the owner's marked
+  sockets. Rejected.
+- **Reuse the host leg-C/leg-F `0x1`/table-100 pair.** A v28 probe showed it is
+  feasible, but it couples guest-internal return routing to the host
+  transparent-mTLS configuration. The guest-capture lineage's dedicated
+  `0x295`/295 pair has the exact successful native production-owner contrast.
+  Not selected.
 
 ## Consequences
 
@@ -352,13 +393,19 @@ The guest adaptation stays in the guest kernel, loaded and controlled by
 
 - **READY keeps its meaning.** READY means guest platform init, including
   guest network configuration, completed (ADR-0082 §D4). Guest network
-  configuration is: the dummy device carries the workload address, the fwmark
-  rule and `fwmark_reflect` are set, the guest capture programs are loaded and
+  configuration is: the dummy device carries the workload address; the
+  GUEST-TRANSPARENT-ROUTE mark rule, local-default route,
+  `tcp_fwmark_accept` and `fwmark_reflect` are set; the guest capture programs are loaded and
   attached, the forwarder module is loaded and its context opened and probed,
   and the inbound vsock listener is bound. READY waits for exactly that and
   adds no dependency on the host. The per-VM control session is **not** a
   READY precondition; host activation requires it instead (feature delta,
   G-V3).
+- **The route adds no cleanup subsystem or lifecycle gate.** `overdrive-init`
+  owns it before READY in the VM's network namespace. Any setup refusal exits
+  before READY; later PID-1 loss ends the VM. Namespace destruction removes
+  the rule and route, so no live teardown, repair, adoption, persistence or
+  cross-boot cleanup is introduced.
 - **`overdrive-init` is the forwarding owner and is PID 1.** If it dies the
   guest kernel panics before its files close (`kernel/exit.c:929-930`,
   `:971 @ v7.0`), so no guest socket closes and no linger fires; the VM ends

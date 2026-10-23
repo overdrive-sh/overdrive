@@ -9,6 +9,13 @@ it.** GH #295. The request layout lives in the #295 feature delta,
 `docs/feature/netns-density-295/feature-delta.md` § *[REF] Wire contracts —
 flow request, control message, datagram frame, flow event record*.
 
+**GUEST-TRANSPARENT-ROUTE accepted (2026-10-24).** Native STEP 11-06
+invalidated the former `fwmark -> local table` implementation premise, not
+this ADR's accepted peer identity. Independent DESIGN review iteration 2
+approved the bounded `SO_MARK=0x295` / table-295 local-default contract, typed
+setup failures and cleanup recorded in ADR-0150 and the feature delta, with no
+open finding or further user decision required.
+
 ## Context
 
 Under the bridge topology every inbound connection a guest application
@@ -57,6 +64,9 @@ kernel choose the port at bind time (`net/ipv4/af_inet.c:542-544 @ v7.0`).
   connection, for remote mesh clients and host probes alike, as today.
 - The transparent bind needs the guest network setup of ADR-0150; without it
   the transparent bind fails (V-28 Q3).
-- The guest's reset toward the gateway is delivered at once because the guest
-  sets `net.ipv4.fwmark_reflect=1` (ADR-0150).
+- Under GUEST-TRANSPARENT-ROUTE, the guest's reset toward the
+  gateway is delivered at once through its dedicated `SO_MARK=0x295` rule and
+  table-295 local-default route: `tcp_fwmark_accept=1` marks the accepted
+  application child, and `fwmark_reflect=1` marks the kernel-generated reset
+  (ADR-0150). The peer remains the gateway under either configuration.
 - No policy or safety rule keys on the guest-side source address.

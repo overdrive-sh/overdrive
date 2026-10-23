@@ -14,13 +14,27 @@ density target natively (`EXFULL` at the bridge's 1,024 port slots,
 `deliver/native-e18-bridge-capacity-falsification.md`). ADR-0145 records the
 decision.
 
-**Wave state.** Native STEP 11-06 evidence falsified `TCP-CORRELATION`'s Fast
+**Wave state.** Native STEP 11-06 evidence has also falsified the guest
+transparent-routing premise `ip rule fwmark <platform mark> lookup local`:
+the production `KernelGuestOwnerIo` reached its transparent application
+connect but never completed, and adding `tcp_fwmark_accept=1` alone did not
+repair it. The exact guest-spike configuration (`SO_MARK=0x295`, full-mask
+fwmark rule to table 295, table 295 local-default route, `tcp_fwmark_accept=1`
+and `fwmark_reflect=1`) made the same native production-owner cell pass
+([falsification record](deliver/native-11-06-guest-transparent-route-falsification.md)).
+The bounded **GUEST-TRANSPARENT-ROUTE** replacement below passed independent
+DESIGN review iteration 2 and is accepted as the necessary private
+configuration correction that restores the already-approved D15, INB-1 and
+D8-PEER outcomes; the review found that no additional user decision is
+required. No other STEP 11-06 branch is invalidated by this evidence.
+
+Earlier native STEP 11-06 evidence falsified `TCP-CORRELATION`'s Fast
 Open final-ACK SockOps consumer (§ *[REF] TCP capture correlation*). The
 native-proven handshake-only `fentry/tcp_check_req` replacement, seventh
 program, C/CO-RE build/loader and temporary ACTIVE/CHILD staging pins are now
 independently reviewed and explicitly approved. Final folded-roadmap review
-and the existing parameterized Tier-3 cell's DISTILL correction/review remain
-DELIVER prerequisites.
+is complete; the existing parameterized Tier-3 cell's bounded DISTILL
+correction/review remains a DELIVER prerequisite.
 The previously approved DESIGN and authored DISTILL artifacts remain the
 baseline outside that bounded addition.
 The data path is the in-kernel forwarder, approved for Linux guests with a
@@ -29,7 +43,7 @@ event-driven forwarder (EVMOD)*); its contract-shaping spikes held on
 Linux 7.0. The guest hop of a guest that runs no Linux kernel (Unikraft) is
 [GH #321](https://github.com/overdrive-sh/overdrive/issues/321). DELIVER has
 completed through step 11-05; step 11-06 resumes after the bounded DISTILL
-addition and final roadmap revalidation.
+addition and its independent review.
 
 ADR-0145 replaces the bridge / TAP attachment; its code stays in the tree until
 DELIVER deletes it, as listed under *Bridge-era code for DELIVER to delete*.
@@ -44,7 +58,14 @@ DELIVER deletes it, as listed under *Bridge-era code for DELIVER to delete*.
   the production failure and the live-open replacement spike prove the
   approved seventh handshake-only fentry program. The exact mechanism has
   passed independent DESIGN review and user approval; DELIVER waits only for
-  final folded-roadmap validation and the bounded DISTILL correction.
+  the bounded DISTILL correction and its independent review.
+- **GUEST-TRANSPARENT-ROUTE is independently reviewed and accepted.** The
+  invalid `lookup local` branch is replaced. The correction keeps every accepted
+  `TcpAccept`, READY, ownership, timeout and no-payload outcome, and changes
+  only the guest-private mark/rule/route/sysctl configuration and the exact
+  typed setup stages that report its failures. Before STEP 11-06 resumes,
+  DISTILL aligns and independently reviews the existing source-local/guest-kit
+  P4 cells; no new cell, lane or model is added.
 - Same-node mesh leg-B (LEGB-DIAL): the dial to a guest-prefix peer is
   marked and source-bound; no route covers the guest prefix except the
   gateway `/32` (GW-LOCAL: the guest gateway is the one host-local address
@@ -608,6 +629,7 @@ date.
 | D1–D7, D9–D11, D13, D14, D16, D17, D18, D18a, D19, D20, D21 | 2026-10-05 | User approval of the decision index as proposed. Later rulings that restate a row are dated in that row of § *Decision index* |
 | D8-PEER | 2026-10-05 (as part of D8); restated under INB-1 2026-10-11 | Host-opened guest connections present the guest gateway (ADR-0174) |
 | D12 (#310), D15 (#308–#311), D19 restart scope (#312), S2Z (#93), G-MECH, G-CRASH | 2026-10-05 | User rulings on the replacement charter |
+| GUEST-TRANSPARENT-ROUTE | 2026-10-24 | Native STEP 11-06 falsification corrected the private guest-kernel configuration required to satisfy the already-approved D15, INB-1 and D8-PEER outcomes. Independent DESIGN review iteration 2 approved the exact `0x295`/table-295 route, both mark sysctls, four typed setup failures and VM-network-namespace cleanup with no open finding and no further user decision required ([review](deliver/design-review-11-06-guest-transparent-route.md)) |
 | D15-R1 | 2026-10-05 (acknowledged); restated under INB-1 2026-10-11 | Pre-activation host-local dials are refused at once (§ *D15 re-derivation*) |
 | D16 next-fit (M-9), D20 remote-side `SO_LINGER{1,0}` (H-5) | 2026-10-06 | Corrections inside approved decisions, confirmed by the user |
 | D8a, D15-R3 = (b), D24 (with D24-REFUSE), D24a, D25 (with D15-R2), D25-BIND, D26, U-1, U-2, U-5 (with assumption K-A4), SLOT-ABORT, KVER | 2026-10-06 | User rulings and approvals of 2026-10-06 |
@@ -1254,11 +1276,15 @@ table is not a current decision (§ *Changed assumptions*).
 
 **READY meaning (ADR-0082 §D4) is unchanged.** READY means "guest platform
 init, including guest network configuration, completed". Guest network
-configuration is: the dummy device with `workload_addr/32`, the fwmark rule and
-`net.ipv4.fwmark_reflect=1`, the guest capture programs loaded and attached,
-the forwarder module loaded and its context opened and probed (EVMOD-LOAD,
-EVMOD-GUEST-KIT), and the inbound vsock listener bound. READY waits
-for exactly that and nothing on the host; it includes no listener-map seed.
+configuration is: the dummy device with `workload_addr/32`; the guest-private
+transparent-route infrastructure for the owner's later `SO_MARK=0x295`
+application sockets — `ip rule priority 32765 fwmark 0x295/0xffffffff lookup
+295`, `ip route add local 0.0.0.0/0 dev lo table 295 proto boot scope host`,
+`net.ipv4.tcp_fwmark_accept=1`, then `net.ipv4.fwmark_reflect=1`; the guest
+capture programs loaded and attached; the forwarder module loaded and its
+context opened and probed (EVMOD-LOAD, EVMOD-GUEST-KIT); and the inbound vsock
+listener bound. READY waits for exactly that and nothing on the host; it
+includes no listener-map seed.
 The per-VM control session is not a READY precondition; host activation
 requires it (G-V3), and a dial to an Active allocation whose control session
 is not live returns `GuestDialError::NoSession`.
@@ -7097,10 +7123,22 @@ host-side protocol in its own image (HOST-NEUTRAL;
   assignment's `LaunchToken` (32 lowercase hex characters, ATTR-TOKEN);
   `overdrive-init` writes it in its `ControlOpen`, in every flow request it
   opens, and in READY, and checks it on every `TcpAccept` request.
-- **Guest network configuration** (before READY): `lo` up; a dummy device up
-  with `<workload_addr>/32`; `ip rule fwmark <platform mark> lookup local`;
-  `net.ipv4.fwmark_reflect=1` (so the guest kernel's own reset toward a
-  transparent client address is routed back at once, P-36);
+- **Guest network configuration** (before READY; **GUEST-TRANSPARENT-ROUTE,
+  independently reviewed and accepted 2026-10-24**): `lo` up; a dummy device up
+  with `<workload_addr>/32`; `ip rule priority 32765 fwmark
+  0x295/0xffffffff lookup 295`; `ip route add local 0.0.0.0/0 dev lo table
+  295 proto boot scope host`; `net.ipv4.tcp_fwmark_accept=1`; and
+  `net.ipv4.fwmark_reflect=1`. The guest owner's application-side transparent
+  socket uses `SO_MARK=0x295`; no host mark constant or table is reused. The
+  full-mask rule selects only that owner socket's traffic. The local-default
+  route makes its transparent connect and the application's marked replies
+  local; `tcp_fwmark_accept` copies the incoming mark to the application's
+  accepted child, and `fwmark_reflect` gives the same route to the guest
+  kernel's own reset toward a transparent client address (P-36). Native STEP
+  11-06 proved the former `lookup local` configuration still hangs after
+  adding `tcp_fwmark_accept=1`, while this exact configuration passes the same
+  production-owner cell
+  ([record](deliver/native-11-06-guest-transparent-route-falsification.md)).
   `net.ipv4.ip_local_reserved_ports` = `guest_reserved_ports()` and every
   intake bound (D25); IPv6 stays disabled; resolver `nameserver <gateway>`;
   the guest capture programs loaded and every attachment linked; the
@@ -7108,6 +7146,17 @@ host-side protocol in its own image (HOST-NEUTRAL;
   context opened and its `DeviceOpen` and `Version` probe stages passed
   (EVMOD-LOAD, EVMOD-GUEST-KIT); inbound vsock listener bound on
   (`VMADDR_CID_ANY`, `GUEST_INBOUND_PORT`).
+
+  **Ownership, lifecycle and cleanup.** `overdrive-init` is the sole owner of
+  the guest rule, route and sysctls and installs them before any intake,
+  capture attachment, application-side transparent connect or READY. Each
+  effect is confined to that VM's network namespace. Any setup failure takes
+  the existing pre-READY exit; later PID-1 loss ends the VM. Namespace
+  destruction removes the rule and route, so there is no live delete,
+  adoption, retry, repair, persisted record or cross-boot cleanup protocol.
+  The correction adds no lifecycle gate: it completes the already-owned G-V7
+  guest-setup input of READY and may not gate the control session, allocation
+  Running/Active, or Service Stable independently.
 - **Guest image.** Carries the guest kit's `overdrive-init` and `ovd_fwd`
   for its kernel (EVMOD-GUEST-KIT), the capture programs, and the
   socket-diagnostics support the slot audit uses.
@@ -7117,7 +7166,8 @@ host-side protocol in its own image (HOST-NEUTRAL;
   the host already closed it (TCPACCEPT-END, P-38) — the flow ends with no
   C and no message. Otherwise create C with `SO_LINGER{1,0}`,
   `IP_TRANSPARENT` bound to the request's `client` (the gateway with port 0;
-  the guest kernel picks the port, V-28 Q3) and the platform `SO_MARK`;
+  the guest kernel picks the port, V-28 Q3) and `SO_MARK=0x295`
+  (GUEST-TRANSPARENT-ROUTE);
   non-blocking `connect()` to `workload_addr:listen_port`, bounded by
   `GUEST_INBOUND_CONNECT_TIMEOUT`. Connected → attach V_g–C, send `Paired`
   (an attach refused `HalfEnded` ends the flow by § *[REF] vsock data path*,
@@ -7145,6 +7195,8 @@ host-side protocol in its own image (HOST-NEUTRAL;
       DummyDevice { source: std::io::Error },
       AddressAdd { source: std::io::Error },
       FwmarkRule { source: std::io::Error },
+      FwmarkRoute { source: std::io::Error },
+      TcpFwmarkAccept { source: std::io::Error },
       FwmarkReflect { source: std::io::Error },
       ProgramLoad { program: GuestProgram, source: aya::EbpfError },
       ProgramAttach { program: GuestProgram, source: aya::programs::ProgramError },
@@ -8564,6 +8616,7 @@ component: boot writes it and nothing changes it at runtime. Absent:
 | Fd budget / owner placement / node address inside the guest prefix / VIP range overlapping the guest prefix / the forwarder probe (boot step 1, phase 1, D-8) | `FdBudget`, `OwnerCgroupPlacement`, `GuestPrefixOverlapsNodeAddress`, `GuestPrefixOverlapsVipRange`, `Forwarder { source: ForwarderError::DeviceAbsent | AbiMismatch | Probe | ProbeMismatch | .. }` | `run_server` | `health.startup.refused`, reason `guest_network.probe`; no boot effect has run and no forwarder context is left open |
 | Boot step 8: the shared mTLS table write fails (QHOLD, ADR-0184) | `ControlPlaneError::MtlsBoot(MtlsBootError::SharedOwner { source })` | `run_server` | `health.startup.refused`, reason `mtls.shared_owner`; boot refuses before forwarding opens; the supervised restart retries |
 | Boot `converge_shared` fails (the serving forwarder context's open or probe, listener bind, gateway route) | `GuestNetworkError::Forwarder { source: ForwarderError::Probe | ProbeMismatch | DeviceAbsent | AbiMismatch | .. }`, `Io { FlowListenerBind | ControlListenerBind }`, `Netlink { LocalRouteConverge }` | `run_server` | `health.startup.refused`, reason `guest_network.converge` |
+| Guest GUEST-TRANSPARENT-ROUTE setup fails at its rule, local-default route, accepted-child mark inheritance, or kernel-reply mark reflection | `GuestTransportSetupError::FwmarkRule { source }`, `FwmarkRoute { source }`, `TcpFwmarkAccept { source }`, `FwmarkReflect { source }`, respectively | `overdrive-init` → VM driver | One cause-specific console line; guest exits before READY; the VM/network namespace ends and removes every partial guest route/rule effect; existing pre-READY start failure |
 | A guest-opened connection whose first record carries another launch's token (ATTR-TOKEN) | `guest_flow.connection_closed_unattributed { cause: StaleLaunch }` (owner); `vm_beacon.connection_closed_unattributed { cause: StaleLaunch }` (VM driver) | owner / VM driver | Connection closed; no control message, no refusal, no claim, no effect on any allocation |
 | A pair or watch ends (EVMOD-REC) | `ForwardEnd { outcome }` | owner / `overdrive-init` | § *[REF] vsock data path*, "Failure projection" |
 | The guest's forwarder module is missing, built for another kernel release, or refused by `finit_module` (EVMOD-GUEST-KIT) | `GuestTransportSetupError::ForwarderModuleMissing { path }`, `ForwarderModuleRelease { module, kernel }`, `ForwarderModuleLoad { source }` | `overdrive-init` → VM driver | Guest console names the cause (both releases for a mismatch, and that kernel and root filesystem must come from one guest kit); guest exits before READY; existing start failure |
@@ -11188,6 +11241,8 @@ pub(crate) trait GuestTransportOps {
     fn create_dummy_device(&mut self) -> std::io::Result<()>;                       // DummyDevice
     fn add_workload_address(&mut self, addr: Ipv4Addr) -> std::io::Result<()>;      // AddressAdd
     fn add_fwmark_rule(&mut self) -> std::io::Result<()>;                           // FwmarkRule
+    fn add_fwmark_route(&mut self) -> std::io::Result<()>;                          // FwmarkRoute
+    fn enable_tcp_fwmark_accept(&mut self) -> std::io::Result<()>;                  // TcpFwmarkAccept
     fn enable_fwmark_reflect(&mut self) -> std::io::Result<()>;                     // FwmarkReflect
     fn reserve_ports(&mut self, ports: std::ops::RangeInclusive<u16>) -> std::io::Result<()>; // ReservedPorts
     fn bind_tcp_intake(&mut self, addr: SocketAddrV4) -> std::io::Result<()>;       // IntakeBind { addr }
@@ -11206,11 +11261,12 @@ pub(crate) trait GuestTransportOps {
 }
 
 /// Runs the steps in this order and stops at the first failure: dummy
-/// device, workload address, fwmark rule, `fwmark_reflect`, reserved ports,
-/// TCP intake, every UDP slot (n ascending), each `GuestProgram` load then
-/// attach (enum order), forwarder module, forwarder context, inbound
+/// device, workload address, the exact GUEST-TRANSPARENT-ROUTE fwmark rule,
+/// its local-default route, `tcp_fwmark_accept`, `fwmark_reflect`, reserved
+/// ports, TCP intake, every UDP slot (n ascending), each `GuestProgram` load
+/// then attach (enum order), forwarder module, forwarder context, inbound
 /// listener. Today's `lo` bring-up and resolver write keep their place and
-/// error handling.
+/// error handling (GUEST-TRANSPARENT-ROUTE).
 pub(crate) fn configure_guest_transport(token: &GuestTransportToken, ops: &mut dyn GuestTransportOps) -> Result<(), GuestTransportSetupError>;
 ```
 
@@ -11229,6 +11285,8 @@ exactly one console line `overdrive-init: guest transport setup failed:
 | `DummyDevice` | `creating the transport dummy device failed: {source}` |
 | `AddressAdd` | `adding the workload address failed: {source}` |
 | `FwmarkRule` | `adding the fwmark lookup rule failed: {source}` |
+| `FwmarkRoute` | `adding the fwmark local route failed: {source}` |
+| `TcpFwmarkAccept` | `setting net.ipv4.tcp_fwmark_accept failed: {source}` |
 | `FwmarkReflect` | `setting net.ipv4.fwmark_reflect failed: {source}` |
 | `ProgramLoad { program }` | `loading guest program {program} failed: {source}` |
 | `ProgramAttach { program }` | `attaching guest program {program} failed: {source}` |
@@ -11846,7 +11904,7 @@ injection on `SimGuestFlowIo` (DG-3), `SimBeaconIo` (DG-4) or
 | VM vsock device | VMM (CH fork, `backend=vhost-kernel`) | The VMM opens `/dev/vhost-vsock` itself, sets the leased CID and is the only holder of that fd; no Overdrive process keeps a copy (CID-NOCLAIM) | Launch; the device open | Intercept-live, Active |
 | VMM process lifetime | VMM (CH fork) | A guest reset ends the VMM; the guest is never rebooted in place under the same VMM, CID and launch token (RESET-EXIT, ADR-0182) | Guest reset or poweroff; driver stop | Other allocations and their VMMs |
 | Forwarding quiescence | Guest-flow owner, through counted move-only `QuiescenceHold`s (QHOLD) | Admission refused while the hold count is > 0; the first hold aborts flows; admission reopens only when the last hold is restored; a hold dropped unredeemed (an Overdrive defect) keeps forwarding quiesced and raises the leaked-hold count; a foreign hold never reopens it (D-UP-3, D-UP-4) | Supervisor recoveries, each with its own hold | READY, Running, intercept-live, per-CID Active, control sessions |
-| Guest READY | `overdrive-init` + beacon intake | Guest init including guest network configuration completed (meaning unchanged) | Guest setup (G-V7) | Control session, Active, flows |
+| Guest READY | `overdrive-init` + beacon intake | Guest init including guest network configuration completed (meaning unchanged) | Guest setup (G-V7), including the exact guest-private mark/rule/local-default route and both mark sysctls of GUEST-TRANSPARENT-ROUTE | Control session, Active, flows |
 | Control session live | Guest-flow owner | Control messages for this CID's current launch can be delivered | Guest connect with a `ControlOpen` carrying the lease's launch token (ATTR-TOKEN); CID Provisioned/Active | READY, Running |
 | Allocation Running | Action shim | READY reached; Running row durable | Driver start | Active |
 | Allocation intercept-live | Action shim after `start_alloc` | Inbound elements and capability active | mTLS worker | READY, Running |
@@ -12220,16 +12278,24 @@ through the production owners over `SimFlowForwarder`; kernel effects
   (`overdrive-init/src/main.rs`) before READY.
 - **Owner:** `overdrive-init`.
 - **Promise:** the guest's network configuration is in place (READY's
-  existing precondition); it consists of the configuration of § *Guest adaptation contract*: the guest
-  address, the fwmark rule and `fwmark_reflect`, the attached guest capture
-  programs (`Connect4`, `Sendmsg4`, `Getpeername4`, `Recvmsg4`,
-  `SockRelease`), the forwarder module loaded from
+  existing precondition); it consists of the configuration of § *Guest
+  adaptation contract*: the guest address; the guest-private transparent-route
+  infrastructure for the owner's later `SO_MARK=0x295` application sockets —
+  the priority-32765 full-mask rule to table 295, table 295's host-scope
+  `local 0.0.0.0/0 dev lo` route with protocol `boot`,
+  `net.ipv4.tcp_fwmark_accept=1`, then `net.ipv4.fwmark_reflect=1`; the attached
+  guest capture programs (`Connect4`, `Sendmsg4`, `Getpeername4`, `Recvmsg4`,
+  `SockRelease`); the forwarder module loaded from
   `GUEST_FORWARDER_MODULE_PATH` after its release check (EVMOD-GUEST-KIT) and
   its context opened with its ABI `version` checked, the guest intake
   listener, and the inbound vsock listener (EVMOD-ADOPT; § *[REF] vsock data
   path*, "Lifecycle Gate Ownership impact").
-- **Failure projection:** `GuestTransportSetupError` → guest exits before
-  READY → existing start failure.
+- **Failure projection:** the route stages are respectively
+  `GuestTransportSetupError::FwmarkRule { source }`,
+  `GuestTransportSetupError::FwmarkRoute { source }`,
+  `GuestTransportSetupError::TcpFwmarkAccept { source }` and
+  `GuestTransportSetupError::FwmarkReflect { source }`; every setup failure →
+  guest exits before READY → existing start failure.
 - **Unaffected:** control session, Running, intercept-live, Active.
 - **Ordering:** after `lo` up; before READY; consumes the existing READY
   deadline.
@@ -14288,7 +14354,7 @@ tier, pending step) live per partition; the index is
 | P2 `ovd_fwd` module | probe (V-EV-CTL); attach order, accepted states, refusal precedence (EVMOD-PAIR, -ATTACH-END, -KTLS); the evmod stream battery; stream ends R5-45 (a)–(c), CLEAN-FULL-END, END-IDEMPOTENT; paused and stall R5-49 / R5-62; datagrams R5-51 / R5-52; watch (ADR-0216, WATCH-ABORT); context release R5-61; end-record ABI; R5-57 sim ↔ kernel equivalence; across a real VM boundary: the device-release orphan sweep and the battery (T-1) | `overdrive-fwd/tests/integration/*.rs` (82 host role), `guest_boundary.rs` (7, `kvm-tests`), `src/uapi.rs` (3) | Tier 3, `host-kernel-shared`; native metal | step 4 |
 | P3a host owner | admission and attribution; flow ends from end records (EVMOD-REC); quota (EVMOD-AB, D-UP-17); datagrams; the dial with its watch (ADR-0216, R5-63); policy; error taxonomy (C6c); R5-59 (a) flow seam (`HostGuestFlowIo` against `SimGuestFlowIo`, guest-kit peer) | `overdrive-control-plane/src/guest_network/owner_acceptance/*.rs`, `flow_io/sim/tests.rs`, `flow_io/accept_path_tier3.rs` (`kvm-tests`) | default (sim), Tier 1; native metal | attachment-cut (7), (8), (9); steps 4, 11, 13 |
 | P3b lease, quiescence, recovery, boot | next-fit lease and admission cap (G-V0, R5-55a); boot reclamation (NO-SURVIVE, R5-55d); QHOLD recovery R5-32, FHOLD-CHECK, R5-58; the `Forwarder` recovery R5-61; boot order G-V1; gateway route R5-11; failed boot table write R5-30; prefix boot checks R5-40; activation gate G-V3; the composed owner and worker (D-UP-16) | `overdrive-control-plane/src/{shared_network_recovery_acceptance, guest_network_composition, guest_network/{pool_acceptance, prefix_boot_acceptance}, vm_reclamation_boot, action_shim/guest_activation_acceptance}.rs`, `lib.rs` task-owner cells, `tests/integration/*`, `overdrive-sim` invariants and spikes, `tests/conformance` | default (sim), Tier 1 seeded | attachment-cut (15), (09-01 rework), (06-04 rework), (7); steps 12, 13 |
-| P4 guest `overdrive-init` | session (control open, audit tick, session loss, host restart, fatal set); `TcpAccept` INB-1 incl. TCPACCEPT-END and EVMOD-ATTACH-END; `TcpConnect`; flow end (EVMOD-REC); UDP slots (EVMOD-DGRAM, R5-14, R5-27); transport setup and the module release check; `main`; the in-guest lane (T-2) running the in-guest cells and a missing-module refusal (EVMOD-GUEST-KIT) | `src/guest_flow/tests/*.rs`, `src/transport/tests.rs`, `src/main.rs`; in-guest `transport::real_kernel`, `guest_flow::real_kernel`; `tests/integration/in_guest_lane.rs` (`kvm-tests`) | default (sim); in-guest on native metal | step 5; `main` attachment-cut (5) |
+| P4 guest `overdrive-init` | session (control open, audit tick, session loss, host restart, fatal set); `TcpAccept` INB-1 incl. TCPACCEPT-END and EVMOD-ATTACH-END; `TcpConnect`; flow end (EVMOD-REC); UDP slots (EVMOD-DGRAM, R5-14, R5-27); transport setup including the exact GUEST-TRANSPARENT-ROUTE rule, route, both sysctls, four typed failures and pre-READY cleanup boundary; the module release check; `main`; the in-guest lane (T-2) running the in-guest cells and a missing-module refusal (EVMOD-GUEST-KIT) | `src/guest_flow/tests/*.rs`, `src/transport/tests.rs`, `src/main.rs`; in-guest `transport::real_kernel`, `guest_flow::real_kernel`; `tests/integration/in_guest_lane.rs` (`kvm-tests`) | default (sim); in-guest on native metal | step 5; `main` attachment-cut (5) |
 | P5 VMM device, beacon | VMM-opened device, reset ends the VMM, beacon intake; R5-59 (a) beacon seam (`VsockBeaconIo` against `SimBeaconIo`) | `overdrive-host` `vsock_vmm_device.rs`, `vsock_beacon_accept_path.rs` (`kvm-tests`), `overdrive-worker` `vsock_beacon_intake.rs` | Tier 3 metal; default | steps 1, 3; attachment-cut (6) |
 | P6 mTLS, firewall | forwarded-outbound port, leg-B dial, constant guest-prefix rules, host-internal deny set, VIP branch | `overdrive-worker/tests/integration/vsock_*.rs`, `mtls_resolve_adapter` cells | Tier 3 | steps 8, 11–14 |
 | P7 probe-run counting | `ProbeResultRow` V2, run-sequence merge, R5-PROBE-COUNT | per `distill/test-scenarios-p7-probe-run-count.md` | default, real redb | step 9 |

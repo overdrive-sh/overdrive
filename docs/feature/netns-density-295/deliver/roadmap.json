@@ -9,11 +9,13 @@
     "estimate_basis": "Phases 01-04 carry their frozen 214h. Phases 11-14 add 18 dependency-ordered steps (574h); per-step effort_hours are advisory only. The attachment-cut step (12-01, 226h) is the sum of its pieces including step 10 DNS (4h). Total: 788h.",
     "design_refs": [
       "docs/feature/netns-density-295/feature-delta.md",
+      "docs/feature/netns-density-295/deliver/native-11-06-guest-transparent-route-falsification.md",
       "docs/feature/netns-density-295/distill/test-scenarios.md",
       "docs/feature/netns-density-295/distill/red-classification.md",
       "docs/product/architecture/brief.md",
       "docs/product/architecture/adr-0145-vsock-kernel-forwarded-guest-transport-replaces-shared-bridge.md",
       "docs/product/architecture/adr-0146-vm-vsock-device-uses-kernel-vhost-backend-opened-by-the-vmm.md",
+      "docs/product/architecture/adr-0150-guest-kernel-aya-adaptation-controlled-by-overdrive-init.md",
       "docs/product/architecture/adr-0151-one-node-guest-flow-owner-holds-forwarder-and-pair-sockets.md",
       "docs/product/architecture/adr-0152-only-the-guest-gateway-is-host-local-in-the-guest-prefix.md",
       "docs/product/architecture/adr-0154-guest-dns-reaches-node-responder-as-ordinary-datagram-association.md",
@@ -27,6 +29,7 @@
       "docs/product/architecture/adr-0169-forwarding-quiescence-is-a-counted-move-only-hold.md",
       "docs/product/architecture/adr-0172-constant-rules-refuse-guest-prefix-traffic-not-diverted-to-leg-c.md",
       "docs/product/architecture/adr-0173-host-platform-clients-reach-a-vm-port-through-an-owner-opened-vsock-flow.md",
+      "docs/product/architecture/adr-0174-host-opened-guest-connections-appear-from-the-guest-gateway.md",
       "docs/product/architecture/adr-0177-guest-opened-host-vsock-connections-are-attributed-by-peer-cid-and-launch-token.md",
       "docs/product/architecture/adr-0182-a-guest-reset-ends-the-vmm.md",
       "docs/product/architecture/adr-0184-a-failed-boot-write-of-the-shared-mtls-table-refuses-boot.md",
@@ -50,7 +53,8 @@
       "Each step's crafter runs the Lima-routed compile/clippy/nextest gates in its verification list before review; each reviewer records deliver/review-<step-id>.md with APPROVED before advancement. No deferral is introduced by this roadmap.",
       "OUT OF #295: V-9's density measurements and the CAP-295-A attachment-capacity receipts are the benchmark GH #326 (user ruling U-2, 2026-10-19; feature-delta lines 135-138). 14-05 keeps only the 64-VM correctness test vsock_density.rs. ADR-0155 decision 3 still says the receipts are re-captured through V-9; that text is superseded by U-2 and is for the architect to amend, not this roadmap.",
       "STEP3-SPLIT (user ruling 2026-10-22, approved): DG-2 puts step 3 (VMM adapter) inside the cut and steps 4/5 before it, but the guest-kit Tier-3 cells of steps 1, 4 and 5 launch through CloudHypervisorVmm::create, which panics at overdrive-host vmm.rs vhost_kernel_vsock_arg until step 3's launch argument exists. This roadmap keeps the split pending the ruling: the adapter half (launch argument rendering the leased CID, SimVmm, host equivalence cells, V-1(c) revalidation) is in 11-04 together with step 1; the caller half (VmDriver consuming AllocationSpec.transport, compose_vm_transport and the launch= transport-token field, DG-2 rows 4, 6 and 16) stays in 12-01. If the ruling rejects the split, the guest-kit Tier-3 cells of steps 1, 4 and 5 move into 12-01.",
-      "GUEST-KIT STAGING (EVMOD-GUEST-KIT, GUEST_FORWARDER_MODULE_PATH): feature-delta 'The attachment-cut step' paragraph assigns the Tier-3 fixture's guest-kit root filesystem (the module built for the fixture's kernel at GUEST_FORWARDER_MODULE_PATH) to step 5. DISTILL's markers put the overdrive-fwd in-guest cells (unload_in_guest 4, guest_boundary 8) at 'step 4' and they boot the kit, so this roadmap stages the module into the kit in 11-05 (step 4) and 11-06 (step 5) consumes it: overdrive-init's finit_module, release check and typed failures. This is a recorded divergence from the delta's step-5 assignment; the markers are authoritative."
+      "GUEST-KIT STAGING (EVMOD-GUEST-KIT, GUEST_FORWARDER_MODULE_PATH): feature-delta 'The attachment-cut step' paragraph assigns the Tier-3 fixture's guest-kit root filesystem (the module built for the fixture's kernel at GUEST_FORWARDER_MODULE_PATH) to step 5. DISTILL's markers put the overdrive-fwd in-guest cells (unload_in_guest 4, guest_boundary 8) at 'step 4' and they boot the kit, so this roadmap stages the module into the kit in 11-05 (step 4) and 11-06 (step 5) consumes it: overdrive-init's finit_module, release check and typed failures. This is a recorded divergence from the delta's step-5 assignment; the markers are authoritative.",
+      "GUEST-TRANSPARENT-ROUTE NATIVE FALSIFICATION (2026-10-24): STEP 11-06's accepted `lookup local` premise is invalid and replaced by the independently approved feature-delta contract: guest-private SO_MARK 0x295, priority-32765 full-mask rule to table 295, table-295 host-scope local-default route, tcp_fwmark_accept=1 and fwmark_reflect=1, with distinct FwmarkRule, FwmarkRoute, TcpFwmarkAccept and FwmarkReflect setup failures and VM-network-namespace cleanup. Independent DESIGN review iteration 2 found no open issue and no further user decision necessary. This adds no cell, lane, model, public API or runtime repair. Before STEP 11-06 resumes, DISTILL aligns and independently reviews the existing P4 transport/owner cells."
     ]
   },
   "phases": [
@@ -1679,7 +1683,7 @@
   },
   "validation": {
     "status": "approved",
-    "reviewer": "Independent TCP-CORRELATION-CANDIDATE folded-contract and STEP 11-06 roadmap review iteration 4 approved on 2026-10-23; the prior SLOT-ATTACH-REFUSAL-SHAPE roadmap approval remains incorporated. DELIVER remains gated until DISTILL authors and independently reviews the authorized neutral six-to-seven/build corrections, the one parameterized TCP-CORRELATION cell in the existing guest-kit lane, and the user-approved thirteenth source-local UDP-slot cell. The separately approved Quint-model work remains outside this fold.",
-    "approved_at": "2026-10-23T19:29:00Z"
+    "reviewer": "Independent GUEST-TRANSPARENT-ROUTE DESIGN review iteration 2 approved the native-proven bounded correction on 2026-10-24 with zero open findings and no further user decision required. The complete roadmap is revalidated with the exact accepted mark/rule/route/sysctl, typed-failure and namespace-cleanup contract. Before STEP 11-06 resumes, DISTILL must align and independently review the existing P4 transport/owner cells; no new cell, lane or model is authorized. Prior approved TCP-CORRELATION-CANDIDATE, SLOT-ATTACH-REFUSAL-SHAPE and Quint work remains incorporated.",
+    "approved_at": "2026-10-23T22:23:34Z"
   }
 }
