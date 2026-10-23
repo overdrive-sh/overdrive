@@ -13,8 +13,9 @@ EVMOD-ADOPT) approved 2026-10-16; attach at pairing (EVMOD-PAIR), datagram
 associations as one framed stream (EVMOD-DGRAM, ADR-0201), end
 classification in the forwarder (EVMOD-END, ADR-0180) and the Linux guest
 kit (EVMOD-GUEST-KIT, ADR-0206) approved 2026-10-17; TCP-CORRELATION and its
-bounded ADR-0159 staging-pin exception approved 2026-10-23. GH #295. Recorded in the
-#295 feature delta, § *[REF] Guest adaptation contract*, § *[REF] Core
+bounded ADR-0159 staging-pin exception, and the bounded guest UDP-slot
+attach-refusal carrier and regression cell approved 2026-10-23. GH #295.
+Recorded in the #295 feature delta, § *[REF] Guest adaptation contract*, § *[REF] Core
 vocabulary* for the intake constants and the deploy refusal's typed error,
 and § *[REF] vsock data path — the in-kernel event-driven forwarder
 (EVMOD)*. Not yet implemented.
@@ -146,7 +147,14 @@ The guest adaptation stays in the guest kernel, loaded and controlled by
   intake child to its flow vsock on `Paired`; the flow vsock it accepted to
   its connection to the application before it sends `Paired`; a UDP slot
   socket to its association's flow vsock on `Paired`. Until `Paired` an
-  intake child's bytes wait in its own receive queue.
+  intake child's bytes wait in its own receive queue. A refused guest
+  datagram attach returns only the consumed flow vsock in
+  `GuestSlotAttachRefused`; the slot socket was borrowed and remains resident.
+  The owner closes the flow vsock and ends the association by discarding and
+  disconnecting that resident socket, retaining the slot owner (ADR-0210).
+  One source-local cell in the existing guest-owner suite proves the ended-V_g
+  refusal, exact guest/host end paths and later slot reassociation; no lane,
+  Quint state or public test support is added.
 - **Pending TCP bound.** At most `GUEST_TCP_PENDING_MAX` guest TcpConnect
   flows are held before `Paired`; an intake child accepted beyond it is reset
   and counted (`guest_tcp_pending_exhausted`).

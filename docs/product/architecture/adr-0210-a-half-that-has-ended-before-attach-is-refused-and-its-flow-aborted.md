@@ -9,6 +9,15 @@ feature delta, § *[REF] vsock data path — the in-kernel event-driven
 forwarder (EVMOD)*, "Control interface" ("States attach and watch accept",
 "Attach refusals") and § *Failure projection*.
 
+**Interface correction, approved 2026-10-23.** STEP 11-06 exposed that the guest
+datagram attach borrows its resident UDP slot socket S and consumes only V_g;
+the generic two-owned-half refusal carrier cannot represent that ownership.
+The exact bounded carrier and owner handling are pinned below without changing
+the approved refusal or flow-abort outcome. Independent DESIGN review
+iteration 2 found zero open technical findings. The user explicitly approved
+the one additional source-local UDP-slot regression cell in the existing
+suite; no new lane, model or public test support is added.
+
 Related decisions, each separately reversible: attach at pairing and the
 states attach accepts (EVMOD-PAIR, ADR-0212); how an end already present on a
 still-connected half is classified (ADR-0180).
@@ -58,8 +67,22 @@ defect.
 - **The owner aborts the flow** by its existing path for a flow that is not
   yet `Paired` (or, for the guest's attach on `Paired`, the abort of a flow
   the host already attached), each TCP half closed with `SO_LINGER{1,0}`,
-  and counts the refusal. A refused half is never hooked, so no end record
-  follows; the owner's abort is the flow's only end.
+  and counts the refusal. A refused half is never hooked, so the refusing
+  forwarder creates no pair, id, or end record. For the guest datagram attach
+  after host `Paired`, closing V_g ends the already-attached host pair through
+  its normal host end record; the guest creates no end record and sends no
+  control message.
+- **The refusal carrier follows input ownership.** A stream attach consumes
+  two owned handles and returns both in `GuestAttachRefused { error, vsock,
+  outer }`. The guest datagram attach borrows resident S by slot identity and
+  consumes only V_g; its exact error is `GuestSlotAttachRefused { error,
+  vsock: V_g }`. S is never a `GuestOwnedSocket` and is not returned. On this
+  attach error the owner closes V_g and runs the existing association-end
+  order — discard S's receive queue, disconnect S, clear the association —
+  while retaining the slot's (application socket, destination) owner. It
+  increments `forwarder_attach_ended` exactly for `HalfEnded`; every other
+  `ForwarderError` keeps its owner-defect meaning and payload. A later datagram
+  may open a new association under U-2.
 
 ## Alternatives considered
 
@@ -70,12 +93,21 @@ defect.
   record.** It records an end for a flow that was never forwarded, a state
   neither spike module accepted, and goes against the user's ruling.
   Rejected.
+- **Add a slot arm to `GuestOwnedSocket`, or fabricate an application/host
+  handle for S.** S is a resident socket borrowed from the slot table, not an
+  owned per-association handle. Either representation permits the generic
+  close path to destroy or misidentify the resident slot. Rejected.
 
 ## Consequences
 
-- An attach error is either an owner defect (`ENOTCONN` and the other
-  classes) or a flow event (`ECONNABORTED`); the owners project only the
-  second into a flow abort.
+- Every guest datagram `attach_slot` error closes V_g and ends the local
+  association while keeping S resident. Only `HalfEnded` is classified and
+  counted as the accepted ended-half flow event; every other
+  `ForwarderError` retains its owner-defect meaning and payload even though
+  the same local ownership cleanup applies.
+- Stream callers keep their two-half refusal type. Only the crate-private
+  guest datagram seam, its kernel/sim adapters, owner refusal arm and the
+  source-local UDP-slot test use `GuestSlotAttachRefused`.
 - Which errno the module returns is module code, checked by the module's
   suite in DELIVER; the kernel facts the class rests on are cited above.
 - The refusal is the host's handling of what any guest sends (ADR-0207; a
