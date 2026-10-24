@@ -1328,3 +1328,189 @@ supplemental independent DESIGN approval recorded alongside the earlier STEP
 12-01 supplements. The corrected criterion may be folded into the accepted
 ADR-0166 / ADR-0213 / shared-network recovery contract. No additional user
 decision is required.
+
+---
+
+# Supplement — typed beacon-bind boot refusal
+
+## Supplement metadata
+
+| Field | Value |
+|---|---|
+| Review ID | `STEP12-01-BEACON-BIND-TYPED-REFUSAL-ARCH-REVIEW-01` |
+| Date | 2026-10-24 |
+| Reviewer | `nw-solution-architect-reviewer` |
+| Scope | The exact `VmmBootError::BeaconBind` public variant, nested typed-cause chain, Optional/Required disposition, `run_server` refusal event, composition ordering, and beacon-bind failure cleanup |
+| Verdict | **APPROVED** |
+| Open findings | 0 critical, 0 high, 0 medium |
+| Roadmap state during review | **PENDING / NON-EXECUTABLE** |
+
+This supplement changes only this review artifact. It changes no reviewed
+feature delta, roadmap field, production source, test body, DES event,
+execution log, model, lane, or kernel state. It performs no Metal run,
+mutation run, spike, commit, or implementation test.
+
+## Necessity and exact public contract
+
+The existing DG-4 contract already requires a failed node beacon-listener bind
+to refuse boot with `health.startup.refused` reason
+`vm_driver.beacon_bind`. The production composition currently reaches the
+fallible `BeaconIntake::bind` after the VM and cgroup-accounting probes, but
+its error arm is an explicit RED scaffold because no control-plane carrier was
+previously pinned (`overdrive-control-plane/src/lib.rs:3343-3354`). A typed
+carrier is therefore necessary to implement the accepted refusal without
+flattening the existing `BeaconIntakeError::Bind` into `Internal(String)`,
+misclassifying it as a probe failure, or inventing an unapproved generic
+envelope.
+
+The supplement closes that gap with exactly one public addition:
+
+```rust
+#[error("VM driver beacon intake bind refused: {source}")]
+BeaconBind {
+    #[source]
+    source: overdrive_worker::BeaconIntakeError,
+}
+```
+
+It is a variant of the existing public `VmmBootError`. Its field name, field
+type, source annotation, and `Display` text are pinned. The existing
+`Probe`, `CgroupAccountingProbe`, `KernelHeaderRead`, and `KernelFormat`
+variants retain their shapes and meanings, and the existing transparent
+`ControlPlaneError::VmmBoot(#[from] VmmBootError)` wrapper remains the outer
+carrier. No `From<BeaconIntakeError>` conversion is declared, so the
+composition boundary remains the one explicit semantic mapping point.
+
+The public enum's implementation rustdoc currently describes four causes and
+says `ControlPlaneError::VmmBoot` is reached only for Required-capability
+probe failures (`error.rs:709-729,746-808`). Updating those counts and scope
+when the new variant lands is bounded documentation fallout from the pinned
+contract, not another API choice or a reason to alter any existing variant.
+
+## Actual producer and caller path
+
+The reviewed production path has one unambiguous owner and effect order:
+
+1. `run_server` completes the cgroup bootstrap, guest-network phase-1 checks,
+   and probe-runner gate, creates an empty `DriverRegistry`, and calls
+   `compose_vm_driver` before `boot_server` (`lib.rs:2961-3020,3044-3053`).
+2. `compose_vm_driver` probes the exact supplied `Vmm` and
+   `CgroupAccounting` adapters before constructing the host layout and calling
+   `BeaconIntake::bind(beacon_io, beacon_port)` (`:3207-3251,3312-3354`). A
+   beacon bind failure is consequently downstream of successful capability
+   probes; it is evidence that the selected VM composition reached its
+   mandatory intake, not evidence that the optional VM capability is absent.
+3. On success only, the intake exposes its bound port, is moved into
+   `VmDriver::new`, and the resulting driver is returned (`:3355-3369`). On
+   error, none of those steps occurs.
+4. `run_server` inserts the `Vm` driver and stores the bound port only in the
+   `Ok` arm (`:3021-3024`). A refused compose result logs the one startup
+   refusal and returns before `boot_server` (`:3032-3044`).
+
+This path supports the supplement's hard-refusal rule for both
+`VmCapability::Optional` and `VmCapability::Required`. Capability controls
+the interpretation of a failed VM/cgroup capability probe. It cannot turn a
+later mandatory listener-bind failure into “not available” after those probes
+have succeeded. Mapping the bind error directly to
+`VmComposeError::Refused(VmmBootError::BeaconBind { source })` preserves that
+distinction without adding a public error or retry path. `VmComposeError` is
+crate-private, so its internal match mechanics remain the crafter's choice.
+
+## Typed cause and observable mapping
+
+| Layer / condition | Exact representation | Preserved information or outcome |
+|---|---|---|
+| `BeaconIo::bind(configured_port)` fails | `std::io::Error` | Original error kind, raw OS error when present, and diagnostic message |
+| `BeaconIntake::bind` projects that failure | `BeaconIntakeError::Bind { port, source }` | Exact configured `VsockListenPort` plus the original `io::Error` as `#[source]` (`beacon_intake.rs:58-71,256-268`) |
+| VM composition classifies the mandatory intake failure | `VmmBootError::BeaconBind { source }` | The complete `BeaconIntakeError::Bind` remains the typed source; no probe or capability-absence reinterpretation |
+| `run_server` refuses the node boot | `ControlPlaneError::VmmBoot(VmmBootError::BeaconBind { .. })` | Existing outer boot-error family; no new `ControlPlaneError` variant |
+| Operator observation | Exactly one `health.startup.refused`, reason `vm_driver.beacon_bind` | The bind-specific reason is distinct from `vmm.probe`; the returned value carries the same typed chain |
+
+Neither `BeaconIntake::bind` nor the `BeaconIo` adapters emit a startup-refusal
+event. The single event therefore belongs at the existing `run_server`
+disposition boundary. Selecting `vm_driver.beacon_bind` for `BeaconBind` and
+retaining `vmm.probe` for the existing probe family preserves the current
+one-event boot refusal pattern without a logging helper, second event, or new
+error discriminator.
+
+## Failure atomicity and cleanup ownership
+
+`BeaconIo::bind` already promises `Err: nothing bound`
+(`overdrive-core/src/vm/beacon.rs:420-440`). The host adapter does not publish
+its bound port or listener into adapter state until socket creation, bind,
+listen, `getsockname`, and `AsyncFd` construction all succeed; any earlier
+owned descriptor drops on return (`overdrive-host/src/beacon_io.rs:93-123`).
+The simulation adapter likewise consumes its one-shot fault and returns before
+setting `bound` (`overdrive-sim/src/adapters/beacon_io.rs:462-475`).
+
+`BeaconIntake::bind` constructs its state, cancellation token, and accept task
+only after `io.bind` succeeds (`beacon_intake.rs:58-71`). A bind `Err`
+therefore leaves:
+
+- no bound beacon listener or handle;
+- no `BeaconIntake` value or accept task;
+- no `VmDriver` value and no `Vm` registry entry;
+- no bound beacon port published on the server handle; and
+- no call to `boot_server`, so no later boot phase begins.
+
+The already-completed earlier preflight/probe work is not rolled back by this
+mapping and is not claimed to be. No beacon cleanup complement, secondary
+error, retry, delayed task, or compensating mechanism is needed because the
+port contract already supplies failure atomicity.
+
+## Accepted outcome and evidence alignment
+
+The existing `a_failed_beacon_bind_refuses_boot` composition scenario drives
+`run_server` with a `SimBeaconIo` one-shot bind fault and already observes the
+accepted external outcome: no listener is bound, one refusal reason equals
+`vm_driver.beacon_bind`, and `boot_server`'s later shared-table write never
+occurs (`shared_guest_network_startup.rs:442-456`). Aligning that scenario to
+assert the nested `ControlPlaneError::VmmBoot` →
+`VmmBootError::BeaconBind` → `BeaconIntakeError::Bind { port, source }`
+chain, and exercising its existing composition with both capability values,
+strengthens the oracle for the newly pinned representation. It does not add a
+new user journey, failure stimulus, test seam, lane, or model state.
+
+## Invariant and scope audit
+
+| Concern | Assessment |
+|---|---|
+| Exact public API | One `VmmBootError::BeaconBind { source: BeaconIntakeError }` addition with pinned `#[source]` and `Display`; all existing variants and the outer wrapper keep their shapes. |
+| Semantic error set | Complete: configured port and original `io::Error` survive in `BeaconIntakeError::Bind`, which survives in the boot-specific outer variant. |
+| Optional capability | Preserved: only a failed capability probe soft-skips composition; a mandatory intake bind failure after successful probes refuses boot. |
+| Required capability | Preserved: bind failure remains a hard refusal, with the bind-specific reason instead of the probe reason. |
+| Event cardinality | Exactly one refusal event at `run_server`; no producer below it emits another. |
+| Driver publication | None on failure: intake construction, driver construction, registry insertion, server boot, and bound-port publication all remain success-only. |
+| Cleanup | Existing `BeaconIo::bind` failure atomicity is sufficient; no new cleanup or retry mechanism is introduced. |
+| Persistence / wire / configuration | Unchanged; the configured beacon port is carried as typed failure context only. |
+| Tests and model | Existing failed-bind scenario alignment only; no new scenario, lane, seam, or model. |
+
+## Roadmap assessment
+
+| Mandatory check | Result | Evidence |
+|---|---|---|
+| External validity | Pass | The RED scaffold is reached by the real `run_server` → `compose_vm_driver` → `BeaconIntake::bind` production path, and the existing composition scenario drives that boundary. |
+| Acceptance-criterion coupling | Pass | Exact variant, payload, mapping, capability disposition, event reason, and cleanup outcome are all observable or caller-branching contract. |
+| Step decomposition | Pass | The public variant and its bounded `error.rs`/`lib.rs` caller fallout land with STEP 12-01's step-6 beacon composition cut. |
+| Implementation code | Pass | The design pins the public and cross-crate error contract and outcomes while leaving private match structure to the crafter. |
+| Concision and precision | Pass | There is one producer, one semantic variant, one existing outer wrapper, and one refusal reason; forbidden substitutes are explicit. |
+| Test boundary | Pass | The existing integration scenario can assert the chain and both capability dispositions without another scenario or mechanism. |
+| Mechanical validity | Pass | The reviewed feature-delta/roadmap diff passes `git diff --check`; `roadmap.json` parses and validation correctly remains pending during this review. |
+
+## Supplement verdict
+
+**APPROVED.** `VmmBootError::BeaconBind { source: BeaconIntakeError }` is the
+minimum exact public carrier needed to implement DG-4's already-accepted
+beacon-bind refusal. The complete typed chain preserves the configured port
+and original `io::Error`; `compose_vm_driver` hard-refuses after successful
+probes for both capability modes; `run_server` emits exactly one refusal with
+reason `vm_driver.beacon_bind` and returns the existing
+`ControlPlaneError::VmmBoot` wrapper. Existing bind atomicity leaves no
+listener, intake, accept task, driver entry, server boot, or published port.
+No accepted outcome is weakened, and no generalized error, cleanup, retry,
+scenario, lane, model, or architectural mechanism is added.
+
+The roadmap is eligible to return from `pending` to `approved` with this
+supplemental independent DESIGN approval recorded alongside the earlier STEP
+12-01 supplements. The typed beacon-bind mapping may be folded into the
+accepted DG-4 composition contract. No additional user decision is required.

@@ -6570,8 +6570,10 @@ Decision: D17.
 - At composition the driver binds exactly one host `AF_VSOCK` `SOCK_STREAM`
   listener on (`VMADDR_CID_ANY`, `BEACON_VSOCK_PORT`) —
   `BeaconIntake::bind(VsockBeaconIo)`, passed to `VmDriver::new`, over the
-  core port `BeaconIo` (DG-4). A bind failure is a driver probe refusal (`health.startup.refused`,
-  reason `vm_driver.beacon_bind`).
+  core port `BeaconIo` (DG-4). A bind failure is
+  `ControlPlaneError::VmmBoot(VmmBootError::BeaconBind { source })`, whose
+  source is the unchanged `BeaconIntakeError::Bind`; it refuses boot with
+  `health.startup.refused`, reason `vm_driver.beacon_bind`.
 - An accepted connection is attributed by kernel-reported peer CID together
   with the launch token its READY carries (ATTR-TOKEN, ADR-0177). No live
   launch holds that CID → closed without effect. Otherwise the connection is
@@ -8748,7 +8750,7 @@ component: boot writes it and nothing changes it at runtime. Absent:
 | Spec's startup, readiness and liveness probes together exceed `GUEST_PROBE_SLOTS` (D-UP-12) | `ParseError::ProbeCountExceeded` (TOML ingress) / `AggregateError::Validation { field: "probes" }` (API ingress) | `overdrive deploy` / the submit handler | Deploy refused before any intent write; nothing is placed |
 | Leaked quiescence hold (QHOLD; an Overdrive defect, D-UP-3) | `SharedGuestNetworkFailStopCause::LeakedQuiescenceHold` | supervisor | ADR-0124 typed fail-stop of `serve` at the next audit tick; forwarding stays quiesced until then. A hold dropped by the supervisor's shutdown cancellation is not classified (no audit tick follows; the shutdown exit is unchanged) |
 | `restore` of a hold another ledger issued (D-UP-4, PD-1) | `QuiescenceRestoreError::ForeignHold` → `SharedGuestNetworkFailStopCause::ForeignQuiescenceHold` | supervisor | ADR-0124 typed fail-stop of `serve` at once; the owner's count and latch unchanged (fail-closed) |
-| Beacon listener bind fails at composition (DG-4) | `BeaconIntakeError::Bind` | `compose_vm_driver` | `health.startup.refused`, reason `vm_driver.beacon_bind` |
+| Beacon listener bind fails at composition (DG-4) | `BeaconIntakeError::Bind` → `VmmBootError::BeaconBind { source }` → `ControlPlaneError::VmmBoot` | `compose_vm_driver` / `run_server` | Hard boot refusal, including after a successful probe under `VmCapability::Optional`; `health.startup.refused`, reason `vm_driver.beacon_bind`; the typed port and `io::Error` source are preserved, nothing is bound, no `Vm` driver is inserted and `boot_server` is not called |
 | vsock device setup fails at launch (the VMM cannot open `/dev/vhost-vsock`) | existing pre-READY VMM-exit start failure | VM driver → shim | Non-terminal start failure; retire, then release the lease after the VMM exited |
 | Guest reset (RESET-EXIT) | existing pre-READY `VmGuestExitUnreported` or post-READY `WorkloadCrashedImmediately` (no guest `EXIT` record; the VMM's exit status is not read) | VM driver → lifecycle | A failure; the restart budget is charged |
 | Guest setup fails before READY | `GuestTransportSetupError` (guest console) → existing "guest exited before READY" | VM driver → shim | Existing start failure |
@@ -11379,6 +11381,38 @@ pub enum BeaconIntakeError {
     Bind { port: VsockListenPort, #[source] source: std::io::Error },
 }
 ```
+
+The control-plane composition boundary (independently approved 2026-10-24)
+adds exactly this public variant to the existing `VmmBootError` set;
+`Probe`, `CgroupAccountingProbe`, `KernelHeaderRead` and `KernelFormat`
+remain unchanged:
+
+```rust
+// overdrive_control_plane::error — public addition
+#[derive(Debug, thiserror::Error)]
+pub enum VmmBootError {
+    // Existing variants unchanged.
+    #[error("VM driver beacon intake bind refused: {source}")]
+    BeaconBind {
+        #[source]
+        source: overdrive_worker::BeaconIntakeError,
+    },
+}
+```
+
+`compose_vm_driver` maps `BeaconIntakeError::Bind` one-for-one to
+`VmmBootError::BeaconBind`. Unlike a failed VMM or cgroup-accounting probe,
+the bind failure is never capability absence: those probes have already
+succeeded, so both `VmCapability::Optional` and `VmCapability::Required`
+take the hard refusal path. `run_server` emits exactly one
+`health.startup.refused` event with reason `vm_driver.beacon_bind` and
+returns the existing `ControlPlaneError::VmmBoot` wrapper carrying the same
+`VmmBootError`. No `ControlPlaneError` variant is added, and the cause is not
+encoded in `Internal(String)`, a diagnostic string, or an unrelated probe
+variant. Under the existing `BeaconIo::bind` contract, `Err` means nothing is
+bound; the intake and its accept task do not exist on
+error, the driver is not inserted, and boot does not continue. No second
+cleanup error or retry mechanism is introduced.
 
 `BeaconIo::bind` takes the port: `async fn bind(&self, port:
 VsockListenPort) -> Result<VsockPort, std::io::Error>` — binds and listens
