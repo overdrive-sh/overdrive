@@ -1,0 +1,18 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask metal sync`
+/usr/bin/ssh
+xtask: running metal sync (bootstrap.sh --sync-only)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=77d66c28387c640cde9b3e84 pid=1533694
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 4,041,573 bytes  received 156,944 bytes  254,455.58 bytes/sec
+total size is 3,543,720,926  speedup is 844.04
+
+########## [bootstrap] sync-only; skipping provisioning

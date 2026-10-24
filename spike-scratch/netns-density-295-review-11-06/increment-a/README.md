@@ -114,3 +114,22 @@ The final guest oracle accepts the designed EPERM refusal while a full pool is
 still being released. It does not require immediate admission after application
 close. One four-byte datagram is in flight per exchange; the 1,024 socket pool
 and 32 release cycles are bounded correctness stimuli, not a performance receipt.
+
+
+## Remote-only console retention and sync repair
+
+After the initial retention commit, DISTILL recovered the existing remote-only
+`evidence/manual/native-console.txt` without modifying the remote file. The
+reviewer independently matched its **35,460 bytes** to the remote under the
+canonical Metal lease: SHA-256
+`cef5cfb2dac91133f8317817d2a11d42f46f86cc25f0b8749d93cc3e3f4e2b22`.
+It reports `ALL_1024_SLOTS_ECHOED` and `RECYCLE_RESULT lost=32/32`; this is
+preserved existing output, not a new native validation or remediation result.
+The original thirteen files and all ten earlier raw captures remain unchanged.
+
+`evidence/manual/ownership-repair.json` retains the exact filesystem repair:
+only the remote `evidence/manual` directory and its `native-console.txt` file
+changed owner/group from root:root to ubuntu:ubuntu. Contents and modes stayed
+unchanged. No other artifact path, product source, NIC, network or module state
+was altered by the repair. The subsequent ordinary `cargo xtask metal sync`
+receipt is retained as `evidence/manual/rsync-repair-sync.log`.

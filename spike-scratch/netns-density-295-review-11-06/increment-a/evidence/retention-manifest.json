@@ -80,5 +80,16 @@
       "sha256": "a51d6420dae6607219659e30ea17219383606e77971b9ceb5a6ea92eb3e71ebf",
       "bytes": 5176
     }
+  ],
+  "additional_captures": [
+    {
+      "original": "ubuntu@151.115.99.251:/home/ubuntu/overdrive/spike-scratch/netns-density-295-review-11-06/increment-a/evidence/manual/native-console.txt",
+      "retained": "spike-scratch/netns-density-295-review-11-06/increment-a/evidence/manual/native-console.txt",
+      "sha256": "cef5cfb2dac91133f8317817d2a11d42f46f86cc25f0b8749d93cc3e3f4e2b22",
+      "bytes": 35460,
+      "recovery": "Already copied by DISTILL; reviewer independently verified exact remote bytes under the canonical Metal lease; no duplicate or overwrite.",
+      "classification": "Existing raw guest console from the manual reproduction, not a new validation run.",
+      "repair_receipt": "evidence/manual/ownership-repair.json"
+    }
   ]
 }

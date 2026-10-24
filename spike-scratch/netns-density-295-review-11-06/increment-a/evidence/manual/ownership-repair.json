@@ -1,0 +1,57 @@
+{
+  "started_utc": "2026-10-24T09:54:29.220179+00:00",
+  "target": "ubuntu@151.115.99.251",
+  "commit": "caeb760fc8f91f79876e44d9bd1b2eff66dfb3f2",
+  "lease_token": "60bfcde538f2e77a72c52233",
+  "scope": "/home/ubuntu/overdrive/spike-scratch/netns-density-295-review-11-06/increment-a/evidence/manual",
+  "recovered_missing": [],
+  "manual_before": {
+    "path": "/home/ubuntu/overdrive/spike-scratch/netns-density-295-review-11-06/increment-a/evidence/manual",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o755",
+    "bytes": 4096,
+    "sha256": null
+  },
+  "console_before": {
+    "path": "/home/ubuntu/overdrive/spike-scratch/netns-density-295-review-11-06/increment-a/evidence/manual/native-console.txt",
+    "uid": 0,
+    "gid": 0,
+    "mode": "0o644",
+    "bytes": 35460,
+    "sha256": "cef5cfb2dac91133f8317817d2a11d42f46f86cc25f0b8749d93cc3e3f4e2b22"
+  },
+  "local_console": {
+    "path": "spike-scratch/netns-density-295-review-11-06/increment-a/evidence/manual/native-console.txt",
+    "bytes": 35460,
+    "sha256": "cef5cfb2dac91133f8317817d2a11d42f46f86cc25f0b8749d93cc3e3f4e2b22",
+    "already_recovered_by_distill": true
+  },
+  "manual_after": {
+    "path": "/home/ubuntu/overdrive/spike-scratch/netns-density-295-review-11-06/increment-a/evidence/manual",
+    "uid": 1000,
+    "gid": 1000,
+    "mode": "0o755",
+    "bytes": 4096,
+    "sha256": null
+  },
+  "console_after": {
+    "path": "/home/ubuntu/overdrive/spike-scratch/netns-density-295-review-11-06/increment-a/evidence/manual/native-console.txt",
+    "uid": 1000,
+    "gid": 1000,
+    "mode": "0o644",
+    "bytes": 35460,
+    "sha256": "cef5cfb2dac91133f8317817d2a11d42f46f86cc25f0b8749d93cc3e3f4e2b22"
+  },
+  "finished_utc": "2026-10-24T09:54:36.748676+00:00",
+  "canonical_lease_released": true,
+  "normal_sync_command": [
+    "cargo",
+    "xtask",
+    "metal",
+    "sync"
+  ],
+  "normal_sync_exit_status": 0,
+  "normal_sync_log": "spike-scratch/netns-density-295-review-11-06/increment-a/evidence/manual/rsync-repair-sync.log",
+  "normal_sync_log_sha256": "bf75b577b236cd5e8b0ee487874f25ff65510f883d09543c16f87ec973652b05"
+}
