@@ -681,3 +681,311 @@ supplemental independent DESIGN approval recorded alongside the earlier STEP
 12-01 reconciliations. The feature delta's new interface wording may be folded
 into the accepted D8-PREFIX-VIP contract. No additional user decision is
 required.
+
+---
+
+# Supplement — host-local route convergence and IPv4 FIB route type
+
+## Supplement metadata
+
+| Field | Value |
+|---|---|
+| Review ID | `STEP12-01-NETLINK-ROUTE-INTERFACES-ARCH-REVIEW-01` |
+| Date | 2026-10-24 |
+| Reviewer | `nw-solution-architect-reviewer` |
+| Scope | The bounded `overdrive-netlink` host-local-route convergence and IPv4 FIB route-type interfaces, exact public types/errors, `GuestFlowIo` mappings, route ownership and failure preservation, and existing GW-LOCAL / D26 outcomes |
+| Verdict | **CHANGES_REQUESTED** |
+| Blocking findings | 0 critical, 2 high |
+| Roadmap state during review | **PENDING / NON-EXECUTABLE** |
+
+This supplement changes only this review artifact. It changes no reviewed
+feature delta, roadmap field, production source, test body, DES event,
+execution log, model, lane, or kernel state. It performs no Metal run,
+mutation run, spike, commit, or implementation test.
+
+## Necessity and API-shape assessment
+
+Both primitives are necessary. The accepted GW-LOCAL contract requires boot
+to keep, replace, or add exactly one Overdrive-tagged
+`local <gateway>/32 dev lo table local` route and to leave the prior route
+intact on a failed mutation. The existing `Client::add_local_route(table,
+oif)` owns a different object: a table-parameterized local default route
+(`0.0.0.0/0`) used by the mark-routing path. Reusing or generalizing it would
+either write the wrong prefix or expose table/prefix/interface/type/scope
+choices that GW-LOCAL does not own.
+
+The proposed mutation surface is correspondingly narrow:
+
+```rust
+pub async fn converge_ipv4_host_local_route(
+    &self,
+    destination: Ipv4Addr,
+    protocol: u8,
+) -> Result<(), NetlinkError>;
+```
+
+It fixes IPv4, `/32`, `RT_TABLE_LOCAL`, `lo`, `RouteType::Local`,
+`RouteScope::Host`, and no gateway. The sole production caller supplies the
+guest gateway and `GUEST_PREFIX_ROUTE_PROTOCOL` 247. The destination and
+protocol parameters are the two values the netlink crate cannot own without a
+reverse dependency on guest-network constants; no table, prefix, interface,
+kind, scope, gateway, priority, or replace-policy parameter is exposed.
+
+The accepted D26 owner check also needs the kernel's route decision for one
+destination. Current `HostGuestFlowIo::route_type` is an explicit DESIGN
+blocker, and the private `HostRouteType` duplicates the semantic projection.
+The proposed query and re-export remove that duplicate:
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FibRouteType {
+    Unicast,
+    Local,
+    Broadcast,
+    Multicast,
+    Anycast,
+    Other,
+}
+
+pub async fn ipv4_fib_route_type(
+    &self,
+    destination: Ipv4Addr,
+) -> Result<FibRouteType, NetlinkError>;
+```
+
+This is a destination-specific query, not a table dump or raw-route escape.
+The five route types D26 names remain distinct; all other kernel types collapse
+to `Other` because the owner branches only on `Unicast`, the gateway:53
+exception, and every other type. Exposing the complete `RouteMessage` or a raw
+route-type byte would add surface the owner cannot use.
+
+## Kernel and library feasibility
+
+The lookup contract matches Linux 7.0 and the checked-in rtnetlink version:
+
+- A `RouteMessageBuilder::<Ipv4Addr>` request carrying a destination attribute
+  causes rtnetlink 0.23's `RouteGetRequest` to send `RTM_GETROUTE` without
+  `NLM_F_DUMP`; the dump flag is added only when no destination attribute is
+  present (`rtnetlink-0.23.0/src/route/get.rs`).
+- Linux validates `/32` destination queries, runs the output lookup when no
+  input interface is supplied, and returns a unicast netlink reply
+  (`route.c:3290-3402,3440-3455 @ v7.0`). `rt_fill_info` copies the selected
+  route's `rt_type` to `rtm_type` (`route.c:2949-2973 @ v7.0`).
+- A normal no-route result is a typed kernel/netlink error. A successful
+  response stream containing no route message is therefore structurally
+  distinct and needs the source-less
+  `NetlinkError::FibLookupMissing { destination }` variant.
+- rtnetlink 0.23's `RouteAddRequest::replace()` emits one `RTM_NEWROUTE` with
+  `NLM_F_CREATE | NLM_F_REPLACE | NLM_F_ACK`. The kernel allocates the desired
+  replacement before changing the FIB alias and rolls back the alias if the
+  replacement notifier fails. A missing-route insertion likewise removes the
+  newly inserted alias if its notifier fails.
+
+The public error set is otherwise unchanged. Kernel/decoder failures stay in
+`NetlinkError::Route` with exact operation labels
+`"gateway-local-replace"` and `"fib-lookup"`; link resolution retains
+`LinkAbsent { iface: "lo" }`; `FibLookupMissing` carries the queried
+destination and maps to `errno() == None`. No string is used as a semantic
+substitute.
+
+## Ownership and failure mappings
+
+| Condition | Exact representation | Projection |
+|---|---|---|
+| `lo` cannot be resolved | `GuestNetworkError::Netlink { operation: LocalRouteConverge, source: NetlinkError::LinkAbsent { iface: "lo" } }` | Boot refuses at `guest_network.converge`; no route request was issued |
+| Atomic create-or-replace returns a route error | `GuestNetworkError::Netlink { operation: LocalRouteConverge, source: NetlinkError::Route { op: "gateway-local-replace", source } }` | Boot refuses; the kernel mutation leaves the prior route state |
+| FIB lookup returns a kernel/decoder error | `NetlinkError::Route { op: "fib-lookup", source }` | Owner returns flow-local `Refused(HostInternal)` before `open_peer` |
+| Successful FIB exchange returns no route message | `NetlinkError::FibLookupMissing { destination }` | Same fail-closed refusal |
+| Lookup returns `Unicast` | `FibRouteType::Unicast` | Direct peer-open path may continue |
+| Lookup returns local/broadcast/multicast/anycast/other | Corresponding semantic variant or `Other` | `HostInternal`, except the already-approved gateway:53 exception |
+
+The route mutator remains boot-only. It is absent from runtime audit and
+repair, never removes the route, and has one production caller. The FIB query
+is read-only and occurs before `open_peer`, so no outbound peer socket,
+destination connect, or forwarder attach can occur on lookup failure. The
+existing firewall rule remains the atomic enforcement against the check/connect
+race; this read does not replace it.
+
+The existing R5-11 and D26 evidence can be aligned to these adapter primitives,
+including the `FibLookupMissing` mapping, without a new scenario, lane, model,
+runtime hook, command invocation, or generalized netlink port.
+
+## Findings
+
+### N-01 — The lookup-error projection contradicts the real owner path
+
+- **Severity:** High; blocks approval under the exact outcome and production-
+  path rules.
+- **Claim:** The new taxonomy row and exact-netlink prose say a lookup error
+  produces `Refused(HostInternal)` before `open_peer` and that “no socket or
+  other flow-side effect” has occurred. The first half is correct; the second
+  is false for the real production path.
+- **Evidence:** `tcp_connect_pair` and `datagram_associate` receive an already
+  accepted guest `RecordSocket` before entering their policy path
+  (`owner_runtime.rs:700-708,846-858`). They perform `route_type` before
+  `open_peer` (`:790-799,868-882`), but on any resulting refusal their common
+  cleanup closes the existing guest-side socket (`:836-843`; the datagram
+  path has the same ownership pattern), and the owner emits the typed
+  `Refused(HostInternal)` control outcome. Thus no **outbound peer socket or
+  destination-side effect** occurs, while flow-local refusal and guest-socket
+  cleanup necessarily do occur.
+- **Consequence:** A crafter cannot simultaneously implement the specified
+  typed refusal and “no socket or other flow-side effect.” Interpreting the
+  latter literally would suppress the required refusal/cleanup or leak the
+  accepted guest socket.
+- **Required revision:** In the taxonomy row and exact-netlink prose, replace
+  “no socket or other flow-side effect” with the precise boundary: no outbound
+  peer socket is opened, no destination connect and no forwarder attach occur;
+  the already-accepted guest flow is refused `HostInternal` and its guest-side
+  socket/slot are closed and released by the ordinary refusal path. Do not
+  change the error type, owner ordering, refusal, test count, or mechanism.
+- **Disposition:** Open.
+
+### N-02 — The atomic failure-preservation claim cites lines before replacement and rollback
+
+- **Severity:** High under the repository's mandatory Linux-source citation
+  gate; the underlying mechanism is valid.
+- **Claim:** The feature delta says Linux's atomic insertion is why an error
+  preserves the prior route, but cites only
+  `net/ipv4/fib_trie.c:1194-1290 @ v7.0`. That range ends before the actual
+  alias replacement and does not include either rollback path.
+- **Evidence:** Replacement occurs at `fib_trie.c:1292`; a notifier failure
+  restores the prior alias at `:1299-1305`, and success releases the old alias
+  at `:1309-1318`. For a missing route, insertion occurs at `:1332-1355`, a
+  notifier failure removes the new alias at `:1365-1388`, and other failures
+  return through `:1389-1392`. These are the lines that establish the claimed
+  old-or-new result.
+- **Consequence:** The conclusion is correct, but the cited evidence does not
+  substantiate it. Repository DESIGN rules require a kernel claim to cite the
+  exact Linux 7.0 path that proves it.
+- **Required revision:** Replace the incomplete range with citations covering
+  replacement allocation/swap/rollback/success and missing-route insertion/
+  rollback, for example `fib_trie.c:1212-1216,1263-1318,1332-1392 @ v7.0`.
+  Preserve the one-request mechanism and all API/error mappings.
+- **Disposition:** Open.
+
+## Roadmap assessment
+
+| Mandatory check | Result | Evidence |
+|---|---|---|
+| External validity | Pass | GW-LOCAL is called by the production boot owner; D26 lookup is in both direct TCP and non-VIP datagram owner paths. |
+| Acceptance-criterion coupling | Pass | Fixed route shape, semantic enum and typed errors are DESIGN-owned interface contracts. |
+| Step decomposition | Pass | Both methods close explicit RED blockers in the STEP 12-01 host seam and reuse existing R5-11/D26 evidence. |
+| Implementation code | Pass | The design pins messages and semantics while leaving builder/helper structure to the crafter. |
+| Concision and precision | **Fail pending N-01** | The intended no-peer-open boundary is contradicted by the broader no-socket/no-flow-effect statement. |
+| Test boundary | Pass | Existing R5-11 and D26 cells can align to the adapters; no new scenario, lane or model is needed. |
+| Mechanical validity | Pass | `roadmap.json` parses and the reviewed feature-delta/roadmap diff passes `git diff --check`. |
+| Kernel evidence | **Fail pending N-02** | The source supports atomic old-or-new mutation, but the artifact's cited range omits the swap and rollback lines. |
+
+## Supplement verdict
+
+**CHANGES_REQUESTED.** The two exact `Client` methods, `FibRouteType`,
+`FibLookupMissing`, direct `NetlinkError` seam, `LocalRouteConverge` wrapper,
+and fail-closed `HostInternal` mapping are necessary, feasible, narrowly owned,
+and preserve the accepted GW-LOCAL and D26 outcomes. The fixed route shape and
+destination-specific semantic query add no generalized routing surface or new
+scenario.
+
+Approval is blocked by two bounded documentation defects: N-01 overstates the
+lookup-error universe despite the required flow-local refusal and guest-socket
+cleanup, and N-02 cites a kernel range that ends before the replacement and
+rollback that prove failure preservation. Until both are corrected and
+re-reviewed, roadmap validation must remain `pending` and this netlink
+supplement must not be folded into the accepted contract. Neither remediation
+requires a new user decision, API, error variant, mechanism, test, lane, model,
+or production change.
+
+## Netlink supplement review iteration 2
+
+### Iteration 2 metadata
+
+| Field | Value |
+|---|---|
+| Review ID | `STEP12-01-NETLINK-ROUTE-INTERFACES-ARCH-REVIEW-02` |
+| Date | 2026-10-24 |
+| Reviewer | `nw-solution-architect-reviewer` |
+| Scope | N-01 and N-02 remediation only; iteration 1's necessity, API-shape, typed-error, ownership, feasibility and roadmap assessments remain incorporated |
+| Verdict | **APPROVED** |
+| Open findings | 0 critical, 0 high, 0 medium |
+| Roadmap state during review | **PENDING / NON-EXECUTABLE** |
+
+This iteration changes only this review artifact. It changes no reviewed
+feature delta, roadmap field, production source, test body, DES event,
+execution log, model, lane, or kernel state. No new Metal run, mutation run,
+spike, or implementation test was needed; both findings concerned exact
+contract prose and primary-source citation over mechanisms already verified in
+iteration 1.
+
+### N-01 remediation verification
+
+N-01 is closed. The taxonomy row now states the complete real flow-local
+outcome (`feature-delta.md:8713`):
+
+- a lookup failure maps to `Refused(HostInternal)`;
+- no outbound peer socket is opened;
+- no destination connect or forwarder attach occurs; and
+- the ordinary refusal path sends the typed refusal and closes/releases the
+  already-accepted guest-side socket or datagram slot.
+
+The exact-netlink section carries the same boundary
+(`feature-delta.md:11006-11014`). It no longer claims that the flow had no
+socket or effect. The wording now matches `tcp_connect_pair` and
+`datagram_associate`: `route_type` precedes `open_peer`, while their common
+error cleanup still closes the accepted guest socket and their owner path
+emits the required control refusal. The correction changes no ordering,
+error, refusal, cleanup, quota/slot release, test, or implementation
+mechanism.
+
+### N-02 remediation verification
+
+N-02 is closed. The atomic failure-preservation claim now cites every Linux
+7.0 transition on which it relies (`feature-delta.md:10988-10996`):
+
+- desired `fib_info` construction at `fib_trie.c:1212-1216`;
+- replacement allocation, alias swap, notifier rollback and old-alias release
+  only after success at `:1263-1318`; and
+- missing-route insertion, notifier rollback, cleanup and return at
+  `:1332-1392`.
+
+Those citations match the vendored v7.0 source. A replacement error before the
+swap leaves the prior alias untouched; a notifier error after the tentative
+swap restores it; a missing-route notifier error removes the new alias. The
+one `RTM_NEWROUTE` create-or-replace request therefore provides the claimed
+old-or-new mutation boundary without delete/add exposure.
+
+### Finding disposition
+
+| Finding | Iteration 1 | Iteration 2 evidence | Disposition |
+|---|---|---|---|
+| N-01 — lookup failure claims no socket/flow effect despite ordinary refusal cleanup | High, blocking | Prose now distinguishes the absent outbound peer/connect/attach from the existing accepted guest socket, typed refusal and cleanup | **CLOSED** |
+| N-02 — failure-preservation citation ends before swap and rollback | High, blocking | Citation now covers desired-info creation, replacement swap/rollback/success and missing-route insertion/rollback | **CLOSED** |
+
+No new critical, high, or medium finding is present. The exact public surface
+remains unchanged from iteration 1:
+
+- `Client::converge_ipv4_host_local_route(destination, protocol)` owns one
+  fixed `/32` host-local route shape and one atomic create-or-replace;
+- `Client::ipv4_fib_route_type(destination)` performs one destination-specific
+  FIB lookup;
+- `FibRouteType::{Unicast, Local, Broadcast, Multicast, Anycast, Other}` is
+  the closed semantic projection;
+- `NetlinkError::FibLookupMissing { destination }` distinguishes an empty
+  successful response, and `errno()` returns `None` for it;
+- `GuestFlowIo::route_type` retains the typed `NetlinkError` directly; and
+- gateway convergence maps every netlink failure through
+  `GuestNetworkError::Netlink { operation: LocalRouteConverge, source }`.
+
+### Iteration 2 verdict
+
+**APPROVED.** The bounded netlink interfaces, semantic route-type vocabulary,
+typed failure mappings, atomic route replacement, boot-only route ownership,
+and fail-closed pre-peer-open owner behavior are exact and supported by the
+actual production caller path, rtnetlink request behavior, and vendored Linux
+7.0 source. They preserve GW-LOCAL and D26 without adding a generalized route
+API, new outcome, runtime repair, scenario, lane, model, or invariant
+weakening.
+
+The roadmap is eligible to return from `pending` to `approved` with this
+iteration-2 independent DESIGN approval recorded alongside the earlier STEP
+12-01 supplements. The netlink interface wording may be folded into the
+accepted GW-LOCAL / D26 contract. No additional user decision is required.

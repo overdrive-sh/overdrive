@@ -8709,6 +8709,8 @@ component: boot writes it and nothing changes it at runtime. Absent:
 | Fd budget / owner placement / node address inside the guest prefix / VIP range overlapping the guest prefix / the forwarder probe (boot step 1, phase 1, D-8) | `FdBudget`, `OwnerCgroupPlacement`, `GuestPrefixOverlapsNodeAddress`, `GuestPrefixOverlapsVipRange`, `Forwarder { source: ForwarderError::DeviceAbsent | AbiMismatch | Probe | ProbeMismatch | .. }` | `run_server` | `health.startup.refused`, reason `guest_network.probe`; no boot effect has run and no forwarder context is left open |
 | Boot step 8: the shared mTLS table write fails (QHOLD, ADR-0184) | `ControlPlaneError::MtlsBoot(MtlsBootError::SharedOwner { source })` | `run_server` | `health.startup.refused`, reason `mtls.shared_owner`; boot refuses before forwarding opens; the supervised restart retries |
 | Boot `converge_shared` fails (the serving forwarder context's open or probe, listener bind, gateway route) | `GuestNetworkError::Forwarder { source: ForwarderError::Probe | ProbeMismatch | DeviceAbsent | AbiMismatch | .. }`, `Io { FlowListenerBind | ControlListenerBind }`, `Netlink { LocalRouteConverge }` | `run_server` | `health.startup.refused`, reason `guest_network.converge` |
+| Gateway-route convergence cannot resolve `lo` or its atomic route replace fails | `GuestNetworkError::Netlink { operation: LocalRouteConverge, source: NetlinkError::LinkAbsent | Route }` | `run_server` through `HostGuestFlowIo` | `health.startup.refused`, reason `guest_network.converge`; the gateway route remains as it was |
+| The destination-specific IPv4 FIB lookup fails or returns no route message | `NetlinkError::Route { op: "fib-lookup", source }` or `NetlinkError::FibLookupMissing { destination }` at `GuestFlowIo::route_type` | host guest-flow owner | Flow-local `Refused(HostInternal)`; no outbound peer socket is opened, no destination connect and no forwarder attach occur. The ordinary refusal path sends the typed refusal and closes/releases the already-accepted guest-side socket or datagram slot |
 | Guest GUEST-TRANSPARENT-ROUTE setup fails at its rule, local-default route, accepted-child mark inheritance, or kernel-reply mark reflection | `GuestTransportSetupError::FwmarkRule { source }`, `FwmarkRoute { source }`, `TcpFwmarkAccept { source }`, `FwmarkReflect { source }`, respectively | `overdrive-init` → VM driver | One cause-specific console line; guest exits before READY; the VM/network namespace ends and removes every partial guest route/rule effect; existing pre-READY start failure |
 | A guest-opened connection whose first record carries another launch's token (ATTR-TOKEN) | `guest_flow.connection_closed_unattributed { cause: StaleLaunch }` (owner); `vm_beacon.connection_closed_unattributed { cause: StaleLaunch }` (VM driver) | owner / VM driver | Connection closed; no control message, no refusal, no claim, no effect on any allocation |
 | A pair or watch ends (EVMOD-REC) | `ForwardEnd { outcome }` | owner / `overdrive-init` | § *[REF] vsock data path*, "Failure projection" |
@@ -10727,6 +10729,40 @@ owner never holds a descriptor. Precedent: D-295-DISTILL-12A
 seam replaces.
 
 ```rust
+// overdrive_netlink — public, exact host-route primitives used by DG-3.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FibRouteType {
+    Unicast, Local, Broadcast, Multicast, Anycast, Other,
+}
+
+impl Client {
+    /// Converges exactly one `local <destination>/32 dev lo table local`
+    /// route carrying `protocol`. One atomic create-or-replace request:
+    /// an identical route remains equal, a differing route at that key is
+    /// replaced, and a missing route is added. Err leaves the prior route.
+    pub async fn converge_ipv4_host_local_route(
+        &self,
+        destination: Ipv4Addr,
+        protocol: u8,
+    ) -> Result<(), NetlinkError>;
+
+    /// Performs the kernel's IPv4 FIB lookup for `destination` and returns
+    /// its semantic route type. Pure read; this is not a route-table dump.
+    pub async fn ipv4_fib_route_type(
+        &self,
+        destination: Ipv4Addr,
+    ) -> Result<FibRouteType, NetlinkError>;
+}
+
+// Exact addition to the existing public NetlinkError set.
+pub enum NetlinkError {
+    /// A successful RTM_GETROUTE exchange returned no route message. A
+    /// normal no-route lookup is the kernel's typed netlink error instead.
+    #[error("IPv4 FIB lookup for {destination} returned no route message")]
+    FibLookupMissing { destination: Ipv4Addr },
+    // ... every existing variant is unchanged.
+}
+
 // overdrive_control_plane::guest_network::flow_io — crate-private
 // (`pub(crate)`), compiled in every build.
 
@@ -10791,8 +10827,7 @@ pub(crate) struct PeerSocketSpec {
 }
 
 /// The host's route type for a destination (D26 local-delivery check).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum HostRouteType { Unicast, Local, Broadcast, Multicast, Anycast, Other }
+pub(crate) use overdrive_netlink::FibRouteType as HostRouteType;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum FlowIoError {
@@ -10840,8 +10875,11 @@ pub(crate) trait GuestFlowIo: Send + Sync {
     async fn bind_listener(&self, listener: FlowListener, port: VsockListenPort) -> Result<VsockPort, FlowIoError>;
     /// GW-LOCAL: converges the one
     /// Overdrive-tagged `local <gateway>/32` route on `lo` (keep identical /
-    /// replace differing / add missing). Err:
-    /// `GuestNetworkError::Netlink`, the route as it was.
+    /// replace differing / add missing) by calling
+    /// `Client::converge_ipv4_host_local_route(gateway,
+    /// GUEST_PREFIX_ROUTE_PROTOCOL)`. Every `NetlinkError` maps to
+    /// `GuestNetworkError::Netlink { operation: LocalRouteConverge, source }`;
+    /// Err leaves the route as it was.
     async fn converge_gateway_route(&self, gateway: Ipv4Addr) -> Result<(), GuestNetworkError>;
     /// `sweep_stale`: true iff a process-scoped owner object of a previous run
     /// is present. Never reports the gateway route.
@@ -10901,8 +10939,11 @@ pub(crate) trait GuestFlowIo: Send + Sync {
     /// future; after a dropped call the peer's connect state is unspecified
     /// and the owner's only next step is `abort`.
     async fn connect_peer(&self, peer: &PeerSocket, destination: SocketAddrV4) -> Result<(), FlowIoError>;
-    /// The host's FIB route type for `destination` (D26 check 4). Pure read.
-    async fn route_type(&self, destination: Ipv4Addr) -> Result<HostRouteType, FlowIoError>;
+    /// The host's FIB route type for `destination` (D26 check 4), from
+    /// `Client::ipv4_fib_route_type`. Pure read. Retains the typed netlink
+    /// cause; the owner fail-closes any Err to `FlowRefusal::HostInternal`
+    /// before it opens a peer socket.
+    async fn route_type(&self, destination: Ipv4Addr) -> Result<HostRouteType, NetlinkError>;
 
     // --- forwarding: the `FlowForwarder` calls (§ *Driven port —
     //     `FlowForwarder*), made on the seam's handles through the context
@@ -10935,6 +10976,48 @@ pub(crate) trait GuestFlowIo: Send + Sync {
     async fn close(&self, socket: OwnedSocket);
 }
 ```
+
+**Exact netlink semantics (GW-LOCAL and D26; independently approved
+2026-10-24).**
+
+- `converge_ipv4_host_local_route` owns only the fixed host-local route shape:
+  IPv4 destination `/32`, table `RT_TABLE_LOCAL`, output interface `lo`, type
+  `Local`, scope `Host`, no gateway, and the caller-supplied protocol. The only
+  production call supplies `GUEST_PREFIX_ROUTE_PROTOCOL` (247). It issues one
+  `RTM_NEWROUTE` create-or-replace operation; it is not the existing
+  table-parameterized `add_local_route` for `local 0.0.0.0/0`, and it exposes
+  no table, prefix, interface, kind or scope parameter. Linux first creates
+  the desired `fib_info` (`net/ipv4/fib_trie.c:1212-1216 @ v7.0`); replacement
+  allocates and swaps one alias, restores the prior alias if notification
+  fails, and releases the old alias only after success (`:1263-1318`); a
+  missing-route insertion likewise removes its new alias on notification
+  failure (`:1332-1392`). Those old-or-new paths are why an error preserves
+  the prior route. `LinkAbsent { iface: "lo" }` remains
+  exact; the route request failure is the existing
+  `NetlinkError::Route { op: "gateway-local-replace", source }`.
+- `ipv4_fib_route_type` sends one destination-specific `RTM_GETROUTE` request
+  with a `/32` destination and no table dump or `RTM_F_FIB_MATCH`; Linux runs
+  the output-route lookup (`net/ipv4/route.c:3290-3402 @ v7.0`) and returns one
+  unicast reply whose `rtm_type` is the selected route's type
+  (`net/ipv4/route.c:2949-2973,3448-3455 @ v7.0`). `RTN_UNICAST`, `RTN_LOCAL`,
+  `RTN_BROADCAST`, `RTN_MULTICAST` and `RTN_ANYCAST` map one-to-one;
+  every other kernel route type maps to `FibRouteType::Other`. A kernel lookup
+  error remains `NetlinkError::Route { op: "fib-lookup", source }`; only an
+  empty successful response is `FibLookupMissing { destination }`.
+- `NetlinkError::errno()` returns `None` for `FibLookupMissing`; no caller
+  idempotently swallows it. `HostGuestFlowIo::route_type` returns the
+  `NetlinkError` without converting it to `std::io::Error` or a string. The
+  owner preserves the already-approved observable outcome: any lookup error
+  is `FlowRefusal::HostInternal`. Because the lookup precedes `open_peer`, no
+  outbound peer socket is opened, no destination connect and no forwarder
+  attach occur. The guest flow already owns its accepted `RecordSocket`; the
+  ordinary refusal path sends `Refused(HostInternal)` and closes/releases that
+  guest-side socket or datagram slot.
+
+These are the only new `Client` methods and the only new netlink semantic
+type/error. The control plane does not construct rtnetlink messages, inspect a
+raw `RouteMessage`, scrape `ip route`, call the existing local-default-route
+API, or gain a generalized route mutation/query surface.
 
 Contract (every method):
 
