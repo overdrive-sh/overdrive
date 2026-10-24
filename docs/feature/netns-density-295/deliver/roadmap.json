@@ -1036,6 +1036,7 @@
             "[step 7, rows 9-11] A guest-opened flow is admitted and registered in one step and never acted on after its session closed; a stale launch token is refused; Paired is sent only after both halves are attached; a dial before activation returns NotServing and while quiesced returns Quiesced.",
             "[step 7, rows 9-11] The Forwarder recovery aborts every flow, closes the old context before opening and probing the new one and advances forwarder_generation (ForwarderRecoveryAbortsThenReopens).",
             "[step 7, rows 9-11] DG-2 rows 9-11: HostSharedGuestNetworkOwner::new takes GuestFlowOwnerPorts; GuestNetworkOperation and the exact GuestNetworkError::Forwarder { source: ForwarderError } taxonomy, with no operation field on that variant, and the new SharedGuestNetworkComponent set replace the old; driver_neutral_allocation_replacement (3), shared_guest_network_startup (286,394), prefix_boot_acceptance:451 and guest_activation_acceptance:550 pending markers are removed.",
+            "[phase 1, D8-PREFIX-VIP interface] overdrive_dataplane::allocators::VipRange exposes exactly `pub fn first_overlapping_range(&self, other: Ipv4Net) -> Option<Ipv4Net>` as a pure read: it returns the first configured CIDR in operator-supplied order whose address set intersects `other`, or None iff every configured CIDR is disjoint; reserved VIP addresses do not alter configured-range overlap. probe_guest_flow_startup calls it with node_prefix before the other startup checks and maps Some(overlap) to GuestPrefixOverlapsVipRange { prefix: node_prefix, vip_range: overlap }. Do not use first_range(), expand host addresses, expose a ranges iterator/reserved set, clone the configured collection, or add a runtime probe. Production fallout is limited to VipRange and the phase-1 caller. DISTILL aligns the existing P4-S14 multi-range property to assert the exact first overlapping payload; no new scenario is added, and 12-01 does not edit that test body or its step-13 marker.",
             "[step 10, D10 / ADR-0154] The owner_acceptance/datagrams.rs gateway:53 cell (D10 / #310 host half, marker 'attachment-cut step (7)') is GREEN: a guest DNS query travels as an ordinary datagram association over a host UDP socket connected to gateway:53 and the reply source is the original destination; the association counts against the per-allocation quota. The gateway is host-local only because of the GW-LOCAL route converged in 13-05; the by-name DNS leg of V-6 is evidenced in 14-01.",
             "[06-04 rework, row 7] guest_activation_acceptance.rs:415,471,606 and netns_density_activation_order.rs:1228,1242,1254 (old 'attachment-cut step (06-04 rework)') are GREEN: activation is decided only after intercept-live and before EXEC, serialized with quiescence and session events.",
             "[06-04 rework, row 7] Until activation every guest flow request is refused NotActive and every dial returns NotServing; READY, Running and intercept-live are unaffected.",
@@ -1093,6 +1094,7 @@
           ],
           "files_to_modify": [
             "crates/overdrive-control-plane/src/guest_network.rs",
+            "crates/overdrive-dataplane/src/allocators/vip_range.rs",
             "crates/overdrive-control-plane/src/guest_network/pool_acceptance.rs",
             "crates/overdrive-control-plane/src/guest_network/quint_cid_lease.rs",
             "crates/overdrive-control-plane/src/vm_reclamation_boot.rs",
@@ -1683,7 +1685,7 @@
   },
   "validation": {
     "status": "approved",
-    "reviewer": "Independent supplementary STEP 12-01 DESIGN review APPROVED the exact eight-variant SharedGuestNetworkFailStopCause set and deletion of the obsolete supervisor VmKillCapability with zero open findings on 2026-10-24; see the supplement in docs/feature/netns-density-295/deliver/review-design-12-01-error-variants.md. The earlier independently approved GuestNetworkError reconciliation remains incorporated and unchanged. The accepted no-VM-kill shared-network boundary and the retained VM-lifecycle allocation-scoped cgroup kill are both preserved.",
-    "approved_at": "2026-10-24T13:32:46Z"
+    "reviewer": "Independent VipRange supplement APPROVED `VipRange::first_overlapping_range(&self, other: Ipv4Net) -> Option<Ipv4Net>` with zero open findings on 2026-10-24; see the VipRange supplement in docs/feature/netns-density-295/deliver/review-design-12-01-error-variants.md. It preserves the approved all-configured-ranges D8-PREFIX-VIP refusal, exact first operator-ordered offending-CIDR payload, reserved-address independence and pre-effect ordering. The earlier approved GuestNetworkError and fail-stop reconciliations remain incorporated and unchanged.",
+    "approved_at": "2026-10-24T13:56:08Z"
   }
 }

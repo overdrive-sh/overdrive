@@ -5424,7 +5424,11 @@ pub trait SharedGuestNetworkOwner: GuestNetworkProvisioner + GuestStreamDial {
     /// `GuestNetworkError::GuestPrefixOverlapsNodeAddress`; any range of the
     /// configured service VIP range overlapping the guest prefix →
     /// `GuestNetworkError::GuestPrefixOverlapsVipRange` (checked first, so a
-    /// node that would fail both names the VIP range). The production owner
+    /// node that would fail both names the VIP range). The overlap is the
+    /// first operator-ordered CIDR returned by
+    /// `VipRange::first_overlapping_range(node_prefix)`, so every configured
+    /// CIDR participates and the typed payload names the one that refused
+    /// startup. The production owner
     /// is constructed with the configured `VipRange` as a mandatory
     /// parameter — the same `config.vip_range` value the service VIP
     /// allocator and `ServiceBackendsResolve::new` receive; no default.
@@ -7488,7 +7492,18 @@ the enforcement port (the CA identity of step 3) and the resolve built at
 step 5. Its startup checks need neither, so they are a function of the seam
 and run first; the owner is built later over the same seam:
 
+**D8-PREFIX-VIP interface completion (independently approved 2026-10-24).**
+
 ```rust
+// overdrive_dataplane::allocators::VipRange — public
+impl VipRange {
+    /// Returns the first configured CIDR, in operator-supplied order, whose
+    /// address set intersects `other`; `None` iff every configured CIDR is
+    /// disjoint. Reserved VIP addresses do not change configured-range
+    /// overlap. Reads only; allocates nothing.
+    pub fn first_overlapping_range(&self, other: Ipv4Net) -> Option<Ipv4Net>;
+}
+
 // overdrive_control_plane::guest_network — crate-private
 /// Phase 1 (Composition step 1): every `probe_startup` check over one
 /// `io.host_facts()` snapshot — `GuestPrefixOverlapsVipRange` first, then
@@ -7504,6 +7519,21 @@ pub(crate) async fn probe_guest_flow_startup(
     node_prefix: Ipv4Net,
 ) -> Result<(), GuestNetworkError>;
 ```
+
+`probe_guest_flow_startup` calls
+`vip_range.first_overlapping_range(node_prefix)` before reading or acting on
+the node-address result. `Some(overlap)` returns
+`GuestNetworkError::GuestPrefixOverlapsVipRange { prefix: node_prefix,
+vip_range: overlap }`; `None` continues to the node-address, placement,
+fd-budget and forwarder checks. This considers every configured CIDR, not only
+`VipRange::first_range()`, and preserves the exact offending-CIDR payload. The
+new method is the one cross-crate primitive: no ranges iterator, reserved-set
+accessor, copied range collection, alternate overlap helper or runtime probe is
+added. `first_range()` cannot see later CIDRs; `contains(address)` deliberately
+excludes reserved VIPs and cannot return a CIDR; `allocatable_addrs()` expands
+host addresses and loses the prefix length required by the typed payload. The
+single overlap query is therefore the smallest surface that preserves both the
+all-ranges refusal and its exact cause.
 
 Phase 2 is `compose_guest_network(ports, io, dial)` at step 5 (§ *Owner
 and mTLS-worker composition (D-UP-16)*) over the `io` phase 1 checked. The
@@ -12466,7 +12496,7 @@ fabricate the cause.
 | R5-30 | The mTLS worker's single nft transaction writing the shared table fails (scripted) at boot: `serve` refuses to boot with its typed refusal before forwarding opens — no flow or control listener accepts and no allocation is placed; the service supervisor's restart retries, and a boot whose write succeeds serves; a failed replacement of an existing table at runtime leaves it complete; the table is observed only as absent or complete (ADR-0184) | G-V1, G-V5 | seeded sim (`SimMtlsIntercept`'s scripted failed table write) + Quint (`quiescence`: `ServeRunsOnlyWithTable`, `FailedBootTableWriteRefusesBootThenRetrySucceeds`); Tier-3 read-back R5-43, R5-48 |
 | R5-31 | The host aborts a host-opened flow before the guest accepts V_g — by quiescence, and by control-session loss followed by a reconnect: when the guest accepts V_g its request read succeeds, then V_g reads EOF, reports `POLLRDHUP` and its first write fails `EPIPE`; the guest owner ends the flow (no C, or C reset) and no guest connection of the flow is open 1 s after the abort; no byte reaches the application, which holds because the host wrote nothing on V_h after the request (H-1, P-38). Oracle: the outcome for every flow is asserted; the abort-to-reset latency is reported as p50 / p99 and not asserted (a 1,000-flow burst reached p99 112 ms on 2 vCPUs from guest scheduling, P-38) (K-A4) | G-V5, G-V6 | Tier-3 (the V-24 shape in the in-guest lane, production guest owner, scripted host peer over vhost-vsock; § *DISTILL handoff*, D-22) + seeded sim (guest-owner seam) |
 | R5-32 | Counted quiescence (QHOLD): the firewall recovery (`Recovery(IpRules)`) and a listener recovery (`Recovery(FlowListeners)`) each hold a `QuiescenceHold`; the listener recovery restores first → `StillQuiesced` (no holder list), admission stays refused and a dial returns `Quiesced`; the firewall recovery repairs, audits, restores → `Reopened`. A repair returning `Err` is a failed attempt: the recovery keeps its hold and repairs within its budget or fail-stops still holding it (D-UP-3). A hold leaked by a defect (the `LeakHold` stimulus: the composed owner's `quiesce()`, the hold dropped) raises the leaked-hold count, forwarding stays quiesced and the supervisor fail-stops `serve` with `LeakedQuiescenceHold`; the next boot converges and forwarding opens. A `restore` with a hold issued by another `QuiescenceLedger` returns `ForeignHold`, leaves the count, the latch and the leaked count unchanged, and the supervisor fail-stops with `ForeignQuiescenceHold` (D-UP-4). After every step the number of recoveries in progress plus the leaked count equals the hold count. No interleaving of recoveries reopens forwarding before every holding recovery has restored | G-V5 | seeded sim for every step up to the foreign `restore`'s unchanged owner state (+ Quint `quiescence`: the two-recovery runs, `DroppedHoldKeepsForwardingQuiescedThenFailStops` and `ForeignHoldRestoreChangesNothingThenFailStops`); the supervisor's `ForeignQuiescenceHold` fail-stop by the Quint check `quiescence-foreign-hold-ends-in-fail-stop` and the supervisor's unit test of its `ForeignHold` mapping, with no seam (FHOLD-CHECK) |
-| R5-40 | `vip_range` overlapping the guest prefix (D8-PREFIX-VIP): boot with `[dataplane.vip_allocator]` set to a range inside or straddling `100.95.0.0/16` (e.g. `100.95.255.0/24`, `100.94.0.0/15`) refuses `GuestPrefixOverlapsVipRange` naming the prefix and the range, with `health.startup.refused` reason `guest_network.probe`, before any boot effect: no veth pair, no address, no route, no nft table; a range adjacent to but disjoint from the prefix (`100.96.0.0/16`) and the default `10.96.0.0/16` boot. Proptest: refusal iff some range of the `VipRange` intersects the prefix | G-V1 | unit + proptest (overlap predicate) + seeded sim (no effect before refusal) |
+| R5-40 | `vip_range` overlapping the guest prefix (D8-PREFIX-VIP): boot with `[dataplane.vip_allocator]` set to a range inside or straddling `100.95.0.0/16` (e.g. `100.95.255.0/24`, `100.94.0.0/15`) refuses `GuestPrefixOverlapsVipRange` naming the prefix and the range, with `health.startup.refused` reason `guest_network.probe`, before any boot effect: no veth pair, no address, no route, no nft table; a range adjacent to but disjoint from the prefix (`100.96.0.0/16`) and the default `10.96.0.0/16` boot. Proptest: refusal iff some configured range of the `VipRange` intersects the prefix; when more than one intersects, the payload is the first such CIDR in operator-supplied order | G-V1 | unit + proptest (overlap predicate and exact first-overlap payload) + seeded sim (no effect before refusal) |
 | R5-41 | Launch attribution (ATTR-TOKEN): an allocation's VM writes its control open, a flow request of each kind and READY, then its VMM is killed before the host accepts them; the CID's next allocation is placed and its VM boots. Every connection of the dead launch that the host then accepts — with the new allocation's CID as peer and its buffered first record intact — is closed unattributed (`StaleLaunch`): it takes no session or beacon claim, releases no READY, registers no flow beyond its check, sends no control message on the new session, and causes no resolution, connect or `Paired`; a queued connection with no buffered bytes fails its first read and is closed. The new launch's session, flows and READY are accepted. A connect of the new VM from a 4-tuple a stale entry still holds is refused until the host has accepted and closed that entry, then succeeds on retry (control session, beacon). The dead launch's session and beacon claims are released before the CID's next lease exists (teardown before `pool.release`), so the new launch's session and READY are never refused `SessionHeld`. A dead launch's control connection (and its beacon connection with a buffered READY) accepted while the CID is still Provisioned (launch live) and read only after teardown (`driver.stop`) is closed at its read (`StaleLaunch` / `NoLiveLaunch`) and takes no claim; after `pool.release` the next lease's session takes the claim, activation runs on that live session, and no `Abort` or other control message crosses launches (ATTR-LIVE-CLAIM). A guest reset ends the VMM (RESET-EXIT); the next launch draws a new token. Proptest (codec): every request kind, `ControlOpen` and READY round-trip with the token; an all-zero token is refused | G-V2, G-V3, G-V6 | unit + proptest (codec, `LaunchToken`) + seeded sim (production owner and VM driver, stale queued connections scripted at the private seam) + Quint (`owner_flows`) + Tier-3 (kill-and-reuse through `serve` + `deploy`, the P-37 shape) |
 | R5-43 | Constant guest-prefix rules (ADR-0172) and the leg-B dial (LEGB-DIAL): with the production table, a new host-local connection to a guest-prefix address other than the gateway (excluded, GW-LOCAL) is rejected at once and a remote one dropped; every packet of a leg-C-diverted connection reaches leg-C, both for a remote peer and for a same-node mesh leg-B, which marks `MTLS_TPROXY_MARK` and binds `127.0.0.1:0` — in cells with no default route (as V-LEGB-MARK S1/S4) and with one (as S2: no packet on the uplink), leg-C accepts a peer of `127.0.0.1` and its replies are addressed outside the prefix, so no rule matches them; a marked dial to a tuple not in `inbound_destinations` is TCP `ECONNREFUSED`, UDP `EPERM` at `send()` and reaches no host listener or wildcard socket (S3); a leg-B dial missing the mark or the bind fails `ENETUNREACH` (or `EINVAL` with a default route) and reaches no host socket (S4); host-local traffic to the gateway (`gateway:53`) is not matched | G-V1 | Tier-3 |
 | R5-45 | Flow end across the VM boundary (R2-END): (a) a peer's `shutdown(SHUT_WR)` (flags 0x2, `net/vmw_vsock/virtio_transport_common.c:1084-1096 @ v7.0`) is classified at its transition a clean half-close of that direction and forwarded after the last accepted byte (R5-49); (b) a peer close with a direction open (0x3), an `RST`, or the device release's `sk_err` aborts the pair and every far end observes a reset, never EOF; (c) a TCP source's reset is a `recvmsg` error and aborts the pair (`SocketError`, `ECONNRESET` or, in `CLOSE_WAIT`, `EPIPE`); (d) an end already present when a half is attached is classified once, at attach, or the attach is refused `HalfEnded` and the flow aborted (EVMOD-ATTACH-END); (e) an outer leg that writes and half-closes before `Paired` — guest application on TcpConnect (to a server-first and a client-first destination), external client on a dialled stream — has its bytes delivered and its half-close carried out by the attach-time run, never aborted, while one that resets before `Paired` aborts the flow | G-V6, G-V9 | unit (classification) + seeded sim (owner event dispatch, both owners, over `SimFlowForwarder`) + Quint (`fwd_pair`) + Tier-3 (inside R5-10; the module's suite) |

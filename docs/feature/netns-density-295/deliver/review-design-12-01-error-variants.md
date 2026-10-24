@@ -505,3 +505,179 @@ supplemental independent DESIGN approval recorded alongside the already
 approved GuestNetworkError reconciliation. The feature delta's pending
 exact-set wording may be folded into the accepted contract. No additional
 user decision is required.
+
+---
+
+# Supplement — `VipRange::first_overlapping_range`
+
+## Supplement metadata
+
+| Field | Value |
+|---|---|
+| Review ID | `STEP12-01-VIP-RANGE-OVERLAP-ARCH-REVIEW-01` |
+| Date | 2026-10-24 |
+| Reviewer | `nw-solution-architect-reviewer` |
+| Scope | The bounded public `VipRange` overlap query, phase-1 caller and typed refusal mapping, exact all-configured-ranges invariant, deterministic offending-CIDR representation, and STEP 12-01 roadmap impact |
+| Verdict | **APPROVED** |
+| Open findings | 0 critical, 0 high, 0 medium |
+| Roadmap state during review | **PENDING / NON-EXECUTABLE** |
+
+This supplement changes only this review artifact. It changes no reviewed
+feature delta, roadmap field, production source, test body, DES event,
+execution log, model, lane, or kernel state. It performs no Metal run,
+mutation run, spike, commit, or implementation test.
+
+## Necessity and accepted outcome
+
+ADR-0185 requires startup to refuse before any boot effect when **any** CIDR
+of the configured service VIP range overlaps the guest prefix, and requires
+the typed refusal to name the overlapping range
+(`adr-0185-the-guest-prefix-holds-no-node-address-and-no-vip.md:35-55`). The
+feature delta restates the same approved D8-PREFIX-VIP invariant and R5-40
+oracle. The existing `VipRange` surface cannot implement both parts honestly:
+
+- `first_range()` exposes only the first operator-supplied CIDR, so it can
+  miss an overlap in every later CIDR.
+- `contains(Ipv4Addr)` deliberately returns false for reserved VIPs and
+  cannot return the CIDR needed by `GuestPrefixOverlapsVipRange`.
+- `allocatable_addrs()` expands allocatable host addresses, skips reserved
+  addresses, and discards each address's prefix length. It can take work
+  proportional to the configured address space, including a `/0`.
+- The backing `ranges: Vec<Ipv4Net>` is private, correctly preventing the
+  control plane from inspecting or copying allocator internals.
+
+A cross-crate query owned by `VipRange` is therefore necessary. The proposed
+surface is the smallest one that preserves both the refusal predicate and the
+exact typed cause:
+
+```rust
+pub fn first_overlapping_range(&self, other: Ipv4Net) -> Option<Ipv4Net>;
+```
+
+It adds no iterator, slice, cloned collection, reserved-set accessor, mutable
+capability, runtime probe, or guest-network dependency to the dataplane crate.
+The method is a pure read over an existing `Vec<Ipv4Net>` and can scan CIDRs
+directly in O(configured ranges) time with no allocation or host-address
+expansion. `Ipv4Net` is already the type stored and returned by the existing
+`first_range()` API, so the signature adds no dependency or representation.
+
+## Exact contract and deterministic representation
+
+The method contract is complete:
+
+| Input/state | Result |
+|---|---|
+| The first operator-ordered configured CIDR intersects `other` | `Some(that_cidr)` |
+| One or more later CIDRs intersect `other` while earlier CIDRs are disjoint | `Some(first_later_overlap)` |
+| Multiple configured CIDRs intersect `other` | `Some(first_overlap_in_operator_order)` |
+| Every configured CIDR is disjoint | `None` |
+| The intersection contains only addresses marked reserved | Still `Some(cidr)`; reservation does not change configured-range overlap |
+
+`VipRange` already preserves operator order structurally in its private
+`Vec<Ipv4Net>` (`vip_range.rs:38-47`), and its constructor rejects overlap
+between configured ranges while retaining that order (`:66-100`). Selecting
+the first overlapping CIDR is therefore bounded and deterministic.
+
+This ordering does not add a new startup outcome. The approved outcome is
+already binary: refuse iff any configured CIDR overlaps, otherwise continue.
+When several disjoint configured CIDRs lie within or cross the guest prefix,
+the existing typed error has room for one `Ipv4Net`. Operator order chooses a
+stable representative for that already-required payload; it does not permit a
+previously forbidden configuration, reject a previously valid one, or add a
+second error or retry path.
+
+## Producer and caller mapping
+
+The phase-1 mapping is exact and remains at the current owner boundary:
+
+1. `probe_guest_flow_startup` calls
+   `vip_range.first_overlapping_range(node_prefix)` before the node-address,
+   owner-placement, fd-budget and forwarder checks.
+2. `Some(overlap)` returns exactly
+   `GuestNetworkError::GuestPrefixOverlapsVipRange { prefix: node_prefix,
+   vip_range: overlap }`.
+3. `None` continues through the existing checks in their accepted order.
+4. The owner entry point delegates to the same phase-1 function over its own
+   seam and mandatory `VipRange`, so the supplied-owner and boot-seam paths
+   cannot disagree.
+5. `run_server` retains the existing `health.startup.refused` event with
+   reason `guest_network.probe`; no boot effect has run.
+
+The `GuestPrefixOverlapsVipRange` variant and both `Ipv4Net` payloads were
+already accepted and are unchanged. No generic error, string-carried CIDR,
+new operation discriminator, alternate outer error, or fallback mapping is
+introduced.
+
+## Reserved-address and all-ranges invariant
+
+Ignoring `reserved` in this query is required. ADR-0185 rejects overlap of the
+**configured range**, because boot route/address construction and mesh VIP
+classification are defined over that configured range. Allowing an overlap
+because the intersecting addresses happen to be unavailable to the allocator
+would reintroduce the rejected “exclude overlapping addresses from leasing”
+alternative and would weaken D8-PREFIX-VIP.
+
+The existing P4-S14 property already drives both phase-1 entry points and
+asserts refusal iff some configured CIDR overlaps. Its bounded DISTILL
+alignment must additionally generate reserved addresses and assert the exact
+first operator-ordered overlapping payload. This strengthens the existing
+property's oracle; it adds no scenario, lane, fixture, seam, or model. The
+STEP 13 marker remains because STEP 13 owns activation of the guest-prefix
+boot-check cells. STEP 12-01 only lands the required public primitive and its
+production caller; it does not edit the DISTILL-owned test body or activate
+the later step's marker.
+
+## Alternatives and scope
+
+| Alternative | Disposition |
+|---|---|
+| Use `first_range()` | Invalid: misses later configured CIDRs. |
+| Use `contains()` over selected addresses | Invalid: reservation-sensitive, address-shaped, and cannot recover the typed CIDR. |
+| Use `allocatable_addrs()` | Invalid: reservation-sensitive, potentially address-space-sized, and loses prefix length. |
+| Expose `ranges()` / a slice or iterator | Excess surface: exposes the whole private collection when the caller needs one closed query. |
+| Clone/copy configured ranges into the control plane | Duplicates ownership and widens the constructor/state contract. |
+| Add a guest-specific overlap method or guest-prefix constant to dataplane | Couples the allocator to a consumer-specific policy unnecessarily. |
+| Add a runtime route/address probe | Changes the approved configuration check into a later effect/observation mechanism. |
+
+The proposed query is a narrow semantic projection from the owner of the
+private collection. It is general only over the comparison `Ipv4Net` needed
+to keep the dataplane type independent of the guest-network constant; it does
+not create a general collection-inspection API.
+
+## Invariant and roadmap audit
+
+| Concern | Assessment |
+|---|---|
+| Every configured CIDR checked | Preserved by the full ordered scan; no first-range shortcut. |
+| Exact typed payload | Preserved as the actual first overlapping configured CIDR. |
+| Check ordering | Preserved: VIP overlap remains before node address, placement, fd budget and forwarder probe. |
+| Refusal timing | Preserved before every boot effect. |
+| Reserved addresses | Correctly irrelevant to configured-range intersection. |
+| Allocation/performance | Bounded by configured CIDR count; no address expansion or allocation. |
+| Public surface | One exact read-only method; no iterator, collection, reserved-set or mutation surface. |
+| Wire, persistence and configuration | Unchanged. |
+| Test architecture | Existing P4-S14 property strengthened by DISTILL; STEP 13 marker retained; no new scenario or lane. |
+| Scope | Necessary interface completion of the already-approved D8-PREFIX-VIP outcome. |
+
+The roadmap passes external-validity, decomposition, implementation-code,
+concision and test-boundary review for this correction. It names the exact
+public signature and result semantics because those are DESIGN-owned API and
+typed-error contracts, while leaving the private overlap implementation to the
+crafter. `roadmap.json` parses and the reviewed feature-delta/roadmap diff
+passes `git diff --check`.
+
+## Supplement verdict
+
+**APPROVED.** `VipRange::first_overlapping_range(&self, other: Ipv4Net) ->
+Option<Ipv4Net>` is necessary and is the minimum public surface that can
+preserve the approved all-configured-ranges D8-PREFIX-VIP refusal and its exact
+offending-CIDR payload. First operator order is a bounded deterministic
+representation of an existing typed refusal, not a new user-visible outcome.
+The reserved set correctly has no effect on configured-range overlap, and the
+phase-1 mapping, ordering and pre-effect refusal remain exact.
+
+The roadmap is eligible to return from `pending` to `approved` with this
+supplemental independent DESIGN approval recorded alongside the earlier STEP
+12-01 reconciliations. The feature delta's new interface wording may be folded
+into the accepted D8-PREFIX-VIP contract. No additional user decision is
+required.
