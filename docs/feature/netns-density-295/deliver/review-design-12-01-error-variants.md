@@ -1167,3 +1167,164 @@ supplemental independent DESIGN approval recorded alongside the earlier STEP
 12-01 supplements. The QHOLD audit-interface wording may be folded into the
 accepted ADR-0169 / ADR-0124 contract. No additional user decision is
 required.
+
+---
+
+# Supplement — per-CID control-session loss and `ControlListener` recovery
+
+## Supplement metadata
+
+| Field | Value |
+|---|---|
+| Review ID | `STEP12-01-CONTROL-SESSION-LOSS-ARCH-REVIEW-01` |
+| Date | 2026-10-24 |
+| Reviewer | `nw-solution-architect-reviewer` |
+| Scope | The roadmap-only correction separating per-CID control-session loss from shared `ControlListener` accept-task audit and repair, including exact loss detection, flow/dial outcomes, reconnect ordering, and the closed component taxonomy |
+| Verdict | **APPROVED** |
+| Open findings | 0 critical, 0 high, 0 medium |
+| Roadmap state during review | **PENDING / NON-EXECUTABLE** |
+
+This supplement changes only this review artifact. It changes no reviewed
+roadmap field, feature delta, ADR, production source, test body, DES event,
+execution log, model, lane, or kernel state. It performs no Metal run,
+mutation run, spike, commit, or implementation test.
+
+## Canonical ownership distinction
+
+The corrected criterion restores the ownership already accepted by ADR-0166,
+ADR-0213, and the feature delta:
+
+- `ControlListener` is the one shared host vsock listener and its accept task.
+  The closed `SharedGuestNetworkComponent` vocabulary therefore contains one
+  `ControlListener` entry, alongside `FlowListeners`, `Forwarder`, `LegF`,
+  `LegC`, `IpRules`, `IpSets`, `Dns`, and `Supervisor`; it contains no
+  per-CID session component (`overdrive-core/src/guest_network.rs:75-101`).
+- A live control session is allocation state owned by one CID. ADR-0166 pins
+  at most one live session per CID, an attributed atomic claim, direct loss
+  handling, and the rule that loss aborts every flow of that VM
+  (`adr-0166:26-55`). ADR-0213 makes flow and dial admission/registration one
+  per-CID step relative to that loss (`adr-0213:16-40`).
+- The feature delta retains the corresponding observable runs:
+  `SessionLossAbortsFlowsAndReconnectRestores`,
+  `GuestReopensSessionOnlyAfterObservingItsLoss`,
+  `SessionLossAbortsAllFlowsBeforeReconnect`,
+  `DialAfterObservedSessionLossWithVmGoneReturnsNoSession`, and
+  `DialAfterReconnectPairs` (`feature-delta.md:13700-13720`). It explicitly
+  assigns standalone loss without a VM fault to seeded simulation and the
+  in-guest session cells because no `serve` + deploy stimulus exists
+  (`:12569-12573,12734,14590-14592`).
+
+The removed roadmap wording treated absence of one per-CID connection as
+damage to a shared component and required the supervisor to repair it. That
+would conflate two different owners and invent a tenth component/failure
+mapping. The correction removes that contradiction; it does not remove loss
+detection or recovery behavior.
+
+## Actual production paths
+
+### Shared listener audit and repair
+
+`HostSharedGuestNetworkOwner::audit_shared` compares the forwarder inventory
+with the owner's pair/watch tables and checks the two held accept tasks. A
+finished stream accept task maps to `FlowListeners`; a finished control accept
+task maps to `ControlListener` (`guest_network.rs:1154-1221`). No branch audits
+whether each CID currently has a session.
+
+`ControlListener` repair calls `bind_listener(Control, control_port)`, then
+`restart_listener(Control)` (`guest_network.rs:1087-1096`). The port contract
+states that, when the accept task ended while the held socket still listens,
+`bind_listener` verifies that socket and `accept(listener)` serves it again;
+nothing is closed or rebound (`guest_network/flow_io.rs:275-300`). The revised
+criterion's “verify the held listener and re-spawn its accept task” is
+therefore the exact existing shared-component recovery boundary.
+
+### Per-CID loss detection and cleanup
+
+Each accepted control connection runs `control_session`. Its read loop treats
+EOF, read failure, write failure, sender closure, or cancellation as the end
+of that connection. If its key still owns the CID's live claim, it calls
+`session_lost` with `ControlSessionLost` before finishing and closing the
+connection (`owner_runtime.rs:199-331`). Detection is thus immediate in the
+connection owner; it does not wait for the one-second shared audit tick.
+
+The loss transition locks the CID state, verifies that the ending connection
+still owns the claim, clears `session`, `session_sender`, and
+`session_cancel`, snapshots every registered pair/task/dial, records
+`GuestDialError::NoSession` for every awaiting reply, cancels every dial and
+flow task, and aborts every registered pair and paired dial watch
+(`owner_runtime.rs:1072-1124`). The ordinary end-record path preserves the
+same typed mapping when a dial is still awaiting its result:
+`ControlSessionLost` becomes `GuestDialError::NoSession`
+(`owner_runtime.rs:910-963`). A new dial with no live session is also rejected
+as `NoSession` before opening its guest vsock (`guest_network/dial.rs:68-90`).
+
+The claim and all CID admission checks use the same owner-state lock. A new
+session may claim only the live launch token and only after the old claim has
+been cleared; a second live claim is refused (`owner_runtime.rs:228-258`). A
+guest-opened flow checks the same session state before registration and is
+closed unattributed when no session exists (`:489-529`). Together with the
+guest contract that holds the old session until it observes loss and reopens
+only afterwards, this preserves the accepted sequence: the old session's
+registered work is ended, the attributed replacement claims the CID, and a
+subsequent dial can pair. The correction neither creates a supervisor repair
+episode nor permits an unattributed or concurrent replacement session.
+
+## Exact outcome mapping
+
+| Condition | Owner and action | Typed / observable outcome |
+|---|---|---|
+| Shared stream accept task ends | Shared audit returns `FlowListeners`; supervisor verifies the held stream listener and re-spawns its accept task | Existing `SharedGuestNetworkComponent::FlowListeners` recovery |
+| Shared control accept task ends | Shared audit returns `ControlListener`; supervisor verifies the held control listener and re-spawns its accept task | Existing `SharedGuestNetworkComponent::ControlListener` recovery |
+| Forwarder inventory read or owner/inventory comparison fails | Shared audit returns `Forwarder` with the existing typed source | Existing `SharedGuestNetworkComponent::Forwarder` recovery |
+| One CID's live control connection ends | That connection's owner clears the CID claim and aborts its registered flows and dials | No shared component failure and no audit/recovery episode |
+| A pending dial exists when that session is lost | Per-CID loss transition resolves it | `GuestDialError::NoSession`; its guest-side vsock/watch is closed or aborted |
+| A dial starts while the CID has no live session | Per-CID dial admission refuses before opening a vsock | `GuestDialError::NoSession` with no admitted dial state |
+| Guest observes loss and opens a correctly attributed replacement | Per-CID atomic claim accepts the matching live launch token after the old claim is free | One live session; a later dial pairs normally |
+
+No semantic failure is flattened into a diagnostic string, and no new public
+variant, payload, trait method, repair operation, audit fact, persistence
+field, or wire record is required.
+
+## Invariant and scope audit
+
+| Concern | Assessment |
+|---|---|
+| Loss detection | Preserved: the connection task observes its own end and invokes the per-CID transition directly. |
+| Abort completeness | Preserved: the transition snapshots and ends all registered pairs, flow tasks, pending dials, and paired dial watches for that CID. |
+| Typed dial result | Preserved: observed session loss maps pending and newly attempted dials to `NoSession`. |
+| Attribution | Preserved: replacement requires the CID's live launch token and a free claim. |
+| Reconnect | Preserved: accepted model and guest-owner runs require observation of loss before reopen, then prove a dial after reconnect pairs. |
+| Shared repair taxonomy | Preserved at exactly nine variants; no per-CID connection is promoted to `SharedGuestNetworkComponent`. |
+| Listener ownership | Preserved: `ControlListener` means the held listener plus shared accept task, whose repair verifies and re-spawns. |
+| Failure bound | Preserved and correctly attributed: per-CID loss is handled on connection end rather than delayed until an audit tick. |
+| Tests and model | Existing named Quint/seeded-sim and in-guest cells remain the evidence; no new scenario, seam, lane, or model state is introduced. |
+
+## Roadmap assessment
+
+| Mandatory check | Result | Evidence |
+|---|---|---|
+| External validity | Pass | The actual accept-task, control-connection, per-CID state, dial, and repair paths have the ownership and ordering named by the corrected criterion. |
+| Acceptance-criterion coupling | Pass | The criterion now maps the shared task failures and per-CID connection loss to their accepted owners and outcomes. |
+| Step decomposition | Pass | This is a single stale criterion correction inside STEP 12-01's owner/audit rework; it adds no implementation dependency. |
+| Implementation code | Pass | It pins lifecycle meanings and outcomes while leaving private task and state-threading mechanics to the crafter. |
+| Concision and precision | Pass | `FlowListeners`, `ControlListener`, `Forwarder`, per-CID session loss, `NoSession`, and reconnect each have one exact meaning. |
+| Test boundary | Pass | Existing model and in-guest cells cover disconnect/reconnect; the correction does not manufacture a production stimulus that the accepted evidence says does not exist. |
+| Mechanical validity | Pass | The reviewed documentation diff is confined to the roadmap criterion and validation block; `roadmap.json` parses and `git diff --check` passes. |
+
+## Supplement verdict
+
+**APPROVED.** The corrected roadmap criterion matches the accepted component
+taxonomy and the actual production ownership split. Shared audit and repair
+continue to cover the `FlowListeners` and `ControlListener` accept tasks plus
+`Forwarder` damage. Each per-CID control connection detects its own end and
+drives the existing serialized CID transition, preserving complete flow/dial
+abort, the exact `NoSession` mapping, launch-token attribution, loss-before-
+reopen behavior, and successful dialing after reconnect. No accepted outcome
+or invariant is weakened, and no new API, error, supervisor mechanism,
+scenario, lane, model, or spike is warranted.
+
+The roadmap is eligible to return from `pending` to `approved` with this
+supplemental independent DESIGN approval recorded alongside the earlier STEP
+12-01 supplements. The corrected criterion may be folded into the accepted
+ADR-0166 / ADR-0213 / shared-network recovery contract. No additional user
+decision is required.
