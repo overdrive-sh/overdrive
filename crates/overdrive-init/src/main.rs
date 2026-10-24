@@ -122,9 +122,10 @@ fn run() -> Result<(), InitError> {
         connect_beacon,
         configure_guest_network,
         |(token, ops): (GuestTransportToken, KernelGuestTransportOps)| {
+            let owner_io = KernelGuestOwnerIo::new(ops).map_err(InitError::GuestTransportSetup)?;
             let _owner_thread = start_guest_flow_owner(
                 token,
-                Box::new(KernelGuestOwnerIo::new(ops)),
+                Box::new(owner_io),
                 Arc::new(MonotonicGuestClock),
                 report_guest_owner_fatal,
             )?;

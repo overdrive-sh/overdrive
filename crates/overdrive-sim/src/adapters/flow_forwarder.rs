@@ -255,9 +255,12 @@ fn abort_pair_sockets(pair: &SimPair) {
     for socket in &pair.halves {
         let mut state = socket.inner.lock();
         match state.kind {
-            SimSocketKind::Tcp => state.peer_end = Some(SimFarEnd::Reset),
+            SimSocketKind::Tcp if state.sk_err.is_none() => {
+                state.peer_reset = true;
+                state.peer_end.get_or_insert(SimFarEnd::Reset);
+            }
             SimSocketKind::VsockStream => state.sent_shutdown = Some(SimShutdown::Both),
-            SimSocketKind::Udp => {}
+            SimSocketKind::Tcp | SimSocketKind::Udp => {}
         }
     }
 }
@@ -1180,6 +1183,10 @@ pub struct SimSocket {
 /// The socket's private state: its kind and setup. DELIVER step 4 adds the
 /// queues, the peer bits, `sk_err`, the vsock state and the far side.
 #[derive(Debug)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent socket facts are the SimSocket arbiter's observable state"
+)]
 struct SocketState {
     kind: SimSocketKind,
     setup: SimSocketSetup,
@@ -1193,6 +1200,8 @@ struct SocketState {
     peer_received: Vec<u8>,
     peer_datagrams: Vec<Vec<u8>>,
     peer_end: Option<SimFarEnd>,
+    peer_reset: bool,
+    owner_closed: bool,
     received_shutdown: Option<SimShutdown>,
     sent_shutdown: Option<SimShutdown>,
     tcp_state: SimTcpState,
@@ -1227,6 +1236,8 @@ impl SimSocket {
                 peer_received: Vec::new(),
                 peer_datagrams: Vec::new(),
                 peer_end: None,
+                peer_reset: false,
+                owner_closed: false,
                 received_shutdown: None,
                 sent_shutdown: None,
                 tcp_state: SimTcpState::Established,
@@ -1314,7 +1325,10 @@ impl SimSocket {
                     if how == SimShutdown::Both && state.stream_rx.is_empty() {
                         state.vsock_state = SimVsockState::Closing;
                     }
-                    if let Some(class) = class {
+                    if let Some(class) = class
+                        && state.hooked.is_some()
+                        && state.recorded_class.is_none()
+                    {
                         state.recorded_class = Some(class);
                     }
                     (state.hooked.clone(), class)
@@ -1430,6 +1444,24 @@ impl SimSocket {
         state.sent_shutdown = Some(SimShutdown::Send);
     }
 
+    /// The local owner closes this socket. TCP exposes the first terminal
+    /// event its far peer can observe (reset for abort/linger, EOF otherwise);
+    /// a vsock STREAM sends `SHUTDOWN{S,R}`. A peer that already reset the TCP
+    /// half cannot observe a later local reset.
+    pub fn close_from_owner(&self, reset: bool) {
+        let mut state = self.inner.lock();
+        state.owner_closed = true;
+        match state.kind {
+            SimSocketKind::Tcp if state.sk_err.is_none() => {
+                let end = if reset { SimFarEnd::Reset } else { SimFarEnd::Eof };
+                state.peer_reset |= reset;
+                state.peer_end.get_or_insert(end);
+            }
+            SimSocketKind::VsockStream => state.sent_shutdown = Some(SimShutdown::Both),
+            SimSocketKind::Tcp | SimSocketKind::Udp => {}
+        }
+    }
+
     /// Sets a vsock STREAM's `buffer_size`.
     pub fn set_buffer_size(&self, bytes: u32) {
         self.inner.lock().buffer_size = bytes;
@@ -1484,6 +1516,18 @@ impl SimSocket {
         self.inner.lock().peer_received.clone()
     }
 
+    /// Stream bytes queued from the far peer for the local holder to read.
+    #[must_use]
+    pub fn stream_input(&self) -> Vec<u8> {
+        self.inner.lock().stream_rx.iter().copied().collect()
+    }
+
+    /// Stream bytes accepted locally and queued for the far peer to read.
+    #[must_use]
+    pub fn stream_output(&self) -> Vec<u8> {
+        self.inner.lock().stream_tx.iter().copied().collect()
+    }
+
     /// The datagrams the far side has received, in order, empty ones
     /// included (UDP).
     #[must_use]
@@ -1495,6 +1539,20 @@ impl SimSocket {
     #[must_use]
     pub fn peer_end(&self) -> Option<SimFarEnd> {
         self.inner.lock().peer_end
+    }
+
+    /// The local TCP half sent a reset its still-live far peer can observe,
+    /// including a reset after an earlier EOF observation.
+    #[must_use]
+    pub fn peer_was_reset(&self) -> bool {
+        self.inner.lock().peer_reset
+    }
+
+    /// The socket's owning userspace descriptor was closed, distinct from a
+    /// forwarder abort that only shuts/resets the transport half.
+    #[must_use]
+    pub fn closed_by_owner(&self) -> bool {
+        self.inner.lock().owner_closed
     }
 
     /// The SHUTDOWN this side sent on a vsock STREAM, the strongest once

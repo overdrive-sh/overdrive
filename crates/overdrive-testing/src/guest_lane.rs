@@ -28,11 +28,13 @@
 //!   kit does not load.
 //!
 //! **Ports (GUEST-PORTS, ADR-0217; PORTS-CONFIG, ADR-0218).** The lane binds
-//! its beacon, flow-stream and control listeners on kernel-assigned ports
-//! ([`HostListeners::bind`]) and writes the three bound ports on the guest's
+//! its token beacon, flow-stream and control listeners on kernel-assigned
+//! ports ([`HostListeners::bind`]) and writes those ports on the guest's
 //! kernel command line as `beacon=`, `stream=`, `control=`, exactly as the VM
-//! driver does; no lane binds a fixed host port, so lanes of different
-//! workspaces never collide on the node-global vsock port space.
+//! driver does. Until the attachment cut switches production init to that
+//! token, the production-init lane also holds the current fixed beacon port
+//! solely for its pre-cut bootstrap; the token and owner still exercise the
+//! kernel-assigned GUEST-PORTS values.
 //!
 //! The cell binary is the package's libtest binary built with
 //! `integration-tests,kvm-tests` for the host target by the lane's setup
@@ -68,7 +70,7 @@ use overdrive_core::guest_transport::{
     GUEST_CID_BASE, GUEST_INBOUND_PORT, GUEST_NODE_GATEWAY, LaunchToken,
 };
 use overdrive_core::net::ListenPort;
-use overdrive_core::vm::beacon::BeaconMessage;
+use overdrive_core::vm::beacon::{BEACON_VSOCK_PORT, BeaconMessage};
 
 use crate::guest_app::{GUEST_PEER_GUEST_PATH, subcommand};
 use crate::guest_kit::{
@@ -245,6 +247,11 @@ fn lane_error(detail: String) -> GuestKitError {
     GuestKitError::Staging { detail, source: io::Error::other("in-guest lane") }
 }
 
+fn bind_pre_cut_beacon() -> Result<VsockListener, GuestKitError> {
+    VsockListener::bind(VMADDR_CID_ANY, BEACON_VSOCK_PORT.as_u32())
+        .map_err(|source| GuestKitError::ControlBind { port: BEACON_VSOCK_PORT.as_u32(), source })
+}
+
 /// The workload address a lane guest at `cid` is given: inside the guest
 /// prefix, never the gateway.
 #[must_use]
@@ -284,9 +291,10 @@ pub fn run_in_guest_cell(
             }],
         },
     )?;
+    let beacon = bind_pre_cut_beacon()?;
     let listeners = HostListeners::bind()?;
     let token = listeners.transport_token(cid);
-    let HostListeners { beacon, stream: _stream, control } = listeners;
+    let HostListeners { beacon: _advertised_beacon, stream: _stream, control } = listeners;
     let _holder = Holder::start(control, cid);
     let run_dir = work.join(format!("{name}-run"));
     let vm = kit.boot(&GuestBoot {
@@ -313,7 +321,10 @@ pub fn run_in_guest_cell(
         }
     };
     let ready = read_line(&conn, READY_BOUND)
-        .map_err(|e| lane_error(format!("{cell}: reading READY: {e}")))?
+        .map_err(|e| {
+            let _ = vm.wait_exit(Duration::from_secs(5));
+            lane_error(format!("{cell}: reading READY: {e}; console:\n{}", vm.console_tail(16_384)))
+        })?
         .ok_or_else(|| {
             lane_error(format!("{cell}: no READY; console:\n{}", vm.console_tail(8192)))
         })?;
@@ -394,9 +405,10 @@ pub fn boot_to_ready(
     work: &Path,
 ) -> Result<BootOutcome, GuestKitError> {
     let image = kit.image(work, "boot-to-ready", spec)?;
+    let beacon = bind_pre_cut_beacon()?;
     let listeners = HostListeners::bind()?;
     let token = listeners.transport_token(cid);
-    let HostListeners { beacon, stream: _stream, control } = listeners;
+    let HostListeners { beacon: _advertised_beacon, stream: _stream, control } = listeners;
     let _holder = Holder::start(control, cid);
     let run_dir = work.join("boot-to-ready-run");
     let vm = kit.boot(&GuestBoot {
@@ -710,15 +722,20 @@ impl OwnerLaneHost {
     /// No connection within `bound`, or a short `ControlOpen`.
     pub fn accept_session(&self, bound: Duration) -> io::Result<VsockStream> {
         let deadline = Instant::now() + bound;
+        let mut unexpected_peers = Vec::new();
         let session = loop {
             let left = deadline.saturating_duration_since(Instant::now());
             match self.control.accept_within(left)? {
                 Some((stream, peer)) if peer.cid == self.cid => break stream,
-                Some(_) => {}
+                Some((_stream, peer)) => unexpected_peers.push(peer),
                 None => {
                     return Err(io::Error::new(
                         io::ErrorKind::TimedOut,
-                        format!("the guest owner opened no control session within {bound:?}"),
+                        format!(
+                            "the guest owner at CID {} opened no control session within {bound:?}; \
+                             unexpected peers: {unexpected_peers:?}",
+                            self.cid
+                        ),
                     ));
                 }
             }

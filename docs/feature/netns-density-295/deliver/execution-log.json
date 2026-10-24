@@ -1366,6 +1366,83 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-10-22T23:50:18Z"
+    },
+    {
+      "sid": "11-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-10-22T23:55:51Z"
+    },
+    {
+      "sid": "11-02",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: lint-only remediation; no semantic test or behavior change",
+      "t": "2026-10-23T20:03:27Z"
+    },
+    {
+      "sid": "11-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-10-23T20:03:32Z"
+    },
+    {
+      "sid": "11-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-10-23T20:04:10Z"
+    },
+    {
+      "sid": "11-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL: final-shaped Metal lane collected 12 tests and all failed without collection errors; approved TCP-CORRELATION cell failed the semantic sharing oracle at CorrelationMaps::discover (two CHILD_CORRELATION map IDs instead of one). Evidence: .context/netns-density-295/11-06/native-lane-handshake-candidate.log. Eleven other native failures surfaced a pre-cut beacon-port fixture mismatch (plus one V24 POLLRDHUP failure), routed to DISTILL.",
+      "t": "2026-10-23T21:04:05Z"
+    },
+    {
+      "sid": "11-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-10-23T21:07:55Z"
+    },
+    {
+      "sid": "11-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-10-23T21:13:09Z"
+    },
+    {
+      "sid": "11-04",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: lint-only cfg-dependent Result signature remediation has no behavior RED; the x86_64 Clippy finding was reproduced separately",
+      "t": "2026-10-24T08:37:42Z"
+    },
+    {
+      "sid": "11-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-10-24T08:37:44Z"
+    },
+    {
+      "sid": "11-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-10-24T08:38:10Z"
+    },
+    {
+      "sid": "11-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-10-24T08:43:00Z"
     }
   ]
 }

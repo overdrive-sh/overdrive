@@ -159,8 +159,20 @@ pub fn run(workspace_root: &Path, target_dir: &Path) -> Result<()> {
         .trim()
         .to_owned();
 
-    // EVMOD-BUILD: the module against the running kernel's build tree.
+    // Build both BPF artifacts before staging the in-guest test binary:
+    // overdrive-init embeds the guest-only capture object, while the dataplane
+    // loader consumes the host object. A clean lane must not compile either
+    // against stale or absent BPF.
     let xtask = std::env::current_exe().wrap_err("locating the running xtask")?;
+    run_step(
+        Command::new(&xtask)
+            .args(["bpf-build"])
+            .env("OVERDRIVE_BPF_NATIVE", "1")
+            .current_dir(workspace_root),
+        "cargo xtask bpf-build",
+    )?;
+
+    // EVMOD-BUILD: the module against the running kernel's build tree.
     let build_dir = format!("/lib/modules/{release}/build");
     run_step(
         Command::new(xtask)
@@ -246,9 +258,14 @@ fn build_in_guest_tests(workspace_root: &Path, lane: &InGuestLane) -> Result<Pat
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::doc_markdown, reason = "repository-mandated CONTRACT_SHAPE marker")]
+
     use super::*;
 
-    /// The contract paths `overdrive-testing` reads (see the module table).
+    /// The contract paths `overdrive-testing` reads and the two embedded guest
+    /// BPF objects the real `overdrive-init` build script requires, tracks and
+    /// exports (see the module table).
+    /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn the_artefact_paths_are_the_pinned_contract() {
         let target = Path::new("/t");
@@ -265,6 +282,70 @@ mod tests {
             in_guest_binary_path(target, "overdrive-init", "overdrive-init"),
             Path::new("/t/guest-kit/in-guest/overdrive-init--overdrive-init")
         );
+
+        let fixture = tempfile::tempdir().expect("temporary build-script workspace");
+        let manifest_dir = fixture.path().join("crates/overdrive-init");
+        let bpf_dir = fixture.path().join("target/bpf");
+        std::fs::create_dir_all(&manifest_dir).expect("create fake init crate");
+        std::fs::create_dir_all(&bpf_dir).expect("create fake BPF artifact directory");
+        let guest = bpf_dir.join("overdrive_guest_bpf.o");
+        let candidate = bpf_dir.join("overdrive_guest_tcp_correlation_candidate_bpf.o");
+        std::fs::write(&guest, b"guest").expect("write guest BPF fixture");
+
+        let build_script = fixture.path().join("overdrive-init-build-script");
+        let source =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../crates/overdrive-init/build.rs");
+        let compiled = Command::new(std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into()))
+            .arg(&source)
+            .arg("-o")
+            .arg(&build_script)
+            .output()
+            .expect("compile the real overdrive-init build script");
+        assert!(
+            compiled.status.success(),
+            "build-script compile failed: {}",
+            String::from_utf8_lossy(&compiled.stderr)
+        );
+        let run = || {
+            Command::new(&build_script)
+                .env("CARGO_MANIFEST_DIR", &manifest_dir)
+                .output()
+                .expect("run the real overdrive-init build script")
+        };
+
+        let missing = run();
+        assert!(
+            !missing.status.success(),
+            "the build script accepted a missing candidate object: {}",
+            String::from_utf8_lossy(&missing.stdout)
+        );
+
+        std::fs::write(&candidate, b"candidate").expect("write candidate BPF fixture");
+        let complete = run();
+        assert!(
+            complete.status.success(),
+            "the build script refused both objects: {}",
+            String::from_utf8_lossy(&complete.stderr)
+        );
+        let directives = String::from_utf8(complete.stdout).expect("build directives are UTF-8");
+        for (artifact, export) in [
+            (&guest, "OVERDRIVE_GUEST_BPF_OBJECT_PATH"),
+            (&candidate, "OVERDRIVE_GUEST_TCP_CORRELATION_CANDIDATE_BPF_OBJECT_PATH"),
+        ] {
+            assert!(
+                directives
+                    .lines()
+                    .any(|line| line == format!("cargo:rerun-if-changed={}", artifact.display())),
+                "the build script did not track {}: {directives}",
+                artifact.display()
+            );
+            assert!(
+                directives
+                    .lines()
+                    .any(|line| line == format!("cargo:rustc-env={export}={}", artifact.display())),
+                "the build script did not export {export}: {directives}"
+            );
+        }
     }
 
     /// S-12 drift guard (round 13: extended to the module path). xtask may

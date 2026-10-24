@@ -29,10 +29,14 @@
 use std::fs;
 use std::io::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream, UdpSocket};
+use std::os::fd::AsRawFd as _;
 use std::str::FromStr;
 
 use nix::errno::Errno;
-use nix::sys::socket::{AddressFamily, SockFlag, SockType, VsockAddr, bind, socket};
+use nix::sys::socket::{
+    AddressFamily, MsgFlags, NetlinkAddr, SockFlag, SockProtocol, SockType, VsockAddr, bind, recv,
+    sendto, socket,
+};
 use overdrive_core::guest_transport::{
     GUEST_FORWARDER_MODULE_PATH, GUEST_INBOUND_PORT, GUEST_TCP_INTAKE_PORT, GUEST_UDP_SLOT_BASE,
     GUEST_UDP_SLOTS, guest_reserved_ports,
@@ -56,21 +60,141 @@ fn read_trimmed(path: &str) -> String {
     fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}")).trim().to_owned()
 }
 
+fn rtnetlink_dump(request_type: u16, response_type: u16, payload: &[u8]) -> Vec<Vec<u8>> {
+    let fd = socket(
+        AddressFamily::Netlink,
+        SockType::Raw,
+        SockFlag::SOCK_CLOEXEC,
+        Some(SockProtocol::NetlinkRoute),
+    )
+    .expect("open route-netlink observation socket");
+    bind(fd.as_raw_fd(), &NetlinkAddr::new(0, 0)).expect("bind route-netlink observation socket");
+    let mut request = vec![0_u8; 16];
+    request.extend_from_slice(payload);
+    let request_len = u32::try_from(request.len()).expect("netlink request length fits");
+    request[0..4].copy_from_slice(&request_len.to_ne_bytes());
+    request[4..6].copy_from_slice(&request_type.to_ne_bytes());
+    request[6..8].copy_from_slice(&(1_u16 | 0x300).to_ne_bytes()); // REQUEST | DUMP
+    request[8..12].copy_from_slice(&1_u32.to_ne_bytes());
+    sendto(fd.as_raw_fd(), &request, &NetlinkAddr::new(0, 0), MsgFlags::empty())
+        .expect("request route-netlink dump");
+
+    let mut messages = Vec::new();
+    loop {
+        let mut response = vec![0_u8; 65_536].into_boxed_slice();
+        let count = recv(fd.as_raw_fd(), &mut response, MsgFlags::empty())
+            .expect("receive route-netlink dump");
+        let mut offset = 0usize;
+        while offset + 16 <= count {
+            let length = usize::try_from(u32::from_ne_bytes(
+                response[offset..offset + 4].try_into().expect("netlink length bytes"),
+            ))
+            .expect("netlink length fits usize");
+            assert!(length >= 16 && offset + length <= count, "valid netlink message length");
+            let kind = u16::from_ne_bytes(
+                response[offset + 4..offset + 6].try_into().expect("netlink type bytes"),
+            );
+            if kind == 3 {
+                return messages;
+            }
+            if kind == 2 {
+                let errno = i32::from_ne_bytes(
+                    response[offset + 16..offset + 20].try_into().expect("netlink error bytes"),
+                );
+                panic!("route-netlink dump failed with errno {}", -errno);
+            }
+            if kind == response_type {
+                messages.push(response[offset + 16..offset + length].to_vec());
+            }
+            offset += (length + 3) & !3;
+        }
+    }
+}
+
+fn netlink_attr_u32(message: &[u8], header_len: usize, expected: u16) -> Option<u32> {
+    let mut offset = header_len;
+    while offset + 4 <= message.len() {
+        let length = usize::from(u16::from_ne_bytes(
+            message[offset..offset + 2].try_into().expect("attribute length bytes"),
+        ));
+        assert!(length >= 4 && offset + length <= message.len(), "valid netlink attribute");
+        let kind = u16::from_ne_bytes(
+            message[offset + 2..offset + 4].try_into().expect("attribute type bytes"),
+        ) & 0x3fff;
+        if kind == expected && length == 8 {
+            return Some(u32::from_ne_bytes(
+                message[offset + 4..offset + 8].try_into().expect("u32 attribute"),
+            ));
+        }
+        offset += (length + 3) & !3;
+    }
+    None
+}
+
+fn assert_guest_transparent_route() {
+    const MARK: u32 = 0x295;
+    const TABLE: u32 = 295;
+    const PRIORITY: u32 = 32_765;
+
+    let mut rule_request = [0_u8; 12];
+    rule_request[0] = u8::try_from(nix::libc::AF_INET).expect("AF_INET fits u8");
+    let rules = rtnetlink_dump(34, 32, &rule_request); // RTM_GETRULE / RTM_NEWRULE
+    let boundary = rules
+        .iter()
+        .filter(|rule| {
+            netlink_attr_u32(rule, 12, 6) == Some(PRIORITY)
+                || netlink_attr_u32(rule, 12, 10) == Some(MARK)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(boundary.len(), 1, "one guest-private priority/mark rule: {boundary:?}");
+    let rule = boundary[0];
+    assert_eq!(rule[0], u8::try_from(nix::libc::AF_INET).expect("AF_INET fits u8"));
+    assert_eq!((rule[1], rule[2], rule[3], rule[7]), (0, 0, 0, 1));
+    assert_eq!(netlink_attr_u32(rule, 12, 6), Some(PRIORITY), "rule priority");
+    assert_eq!(netlink_attr_u32(rule, 12, 10), Some(MARK), "rule mark");
+    assert_eq!(netlink_attr_u32(rule, 12, 16), Some(u32::MAX), "rule full mask");
+    let rule_table = netlink_attr_u32(rule, 12, 15).unwrap_or_else(|| u32::from(rule[4]));
+    assert_eq!(rule_table, TABLE, "rule lookup table");
+
+    let mut route_request = [0_u8; 12];
+    route_request[0] = u8::try_from(nix::libc::AF_INET).expect("AF_INET fits u8");
+    let routes = rtnetlink_dump(26, 24, &route_request); // RTM_GETROUTE / RTM_NEWROUTE
+    let boundary = routes
+        .iter()
+        .filter(|route| {
+            netlink_attr_u32(route, 12, 15).unwrap_or_else(|| u32::from(route[4])) == TABLE
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(boundary.len(), 1, "one route in guest-private table 295: {boundary:?}");
+    let route = boundary[0];
+    assert_eq!(route[0], u8::try_from(nix::libc::AF_INET).expect("AF_INET fits u8"));
+    assert_eq!((route[1], route[2], route[3]), (0, 0, 0), "local default prefix");
+    assert_eq!(route[5], 3, "route protocol is boot");
+    assert_eq!(route[6], 254, "route scope is host");
+    assert_eq!(route[7], 2, "route type is local");
+    let loopback: u32 =
+        read_trimmed("/sys/class/net/lo/ifindex").parse().expect("loopback ifindex is u32");
+    assert_eq!(netlink_attr_u32(route, 12, 4), Some(loopback), "route output is lo");
+}
+
 /// The guest transport is configured on the real guest kernel before READY,
 /// with each step's observable postcondition: the workload address is local
-/// (a bind to it succeeds), `net.ipv4.fwmark_reflect = 1`,
+/// (a bind to it succeeds), the exact mark-0x295 full-mask rule to table 295,
+/// its host-scope local-default route on `lo`, `tcp_fwmark_accept = 1`,
+/// `fwmark_reflect = 1`,
 /// `net.ipv4.ip_local_reserved_ports` = `guest_reserved_ports()`, every intake
 /// is bound (TCP 61,000 and the 1,024 UDP slots refuse a second bind), the
 /// forwarder module is loaded and referenced and its device present, and the
 /// inbound vsock listener holds (`VMADDR_CID_ANY`, `GUEST_INBOUND_PORT`).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn the_guest_transport_is_configured_on_the_real_guest_kernel() {
     let token = in_guest();
     // the workload address is assigned to a local device
     let local = TcpListener::bind(SocketAddrV4::new(token.workload_addr, 0));
     assert!(local.is_ok(), "workload_addr {} is local: {local:?}", token.workload_addr);
+    assert_guest_transparent_route();
+    assert_eq!(read_trimmed("/proc/sys/net/ipv4/tcp_fwmark_accept"), "1");
     assert_eq!(read_trimmed("/proc/sys/net/ipv4/fwmark_reflect"), "1");
     let reserved = guest_reserved_ports();
     assert_eq!(
@@ -123,7 +247,6 @@ fn the_guest_transport_is_configured_on_the_real_guest_kernel() {
 /// kernel assigns falls in the reserved range.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn the_reserved_intake_ports_refuse_application_binds_of_their_protocol_only() {
     let token = in_guest();
     let last_slot = GUEST_UDP_SLOT_BASE + GUEST_UDP_SLOTS - 1;
@@ -180,7 +303,6 @@ fn the_reserved_intake_ports_refuse_application_binds_of_their_protocol_only() {
 /// is `ForwarderModuleRelease`, on every kernel configuration).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn the_guest_kits_module_release_matches_the_running_kernel() {
     in_guest();
     let module = fs::read(GUEST_FORWARDER_MODULE_PATH).expect("the guest kit's module is present");

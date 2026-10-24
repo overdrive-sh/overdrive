@@ -12,6 +12,9 @@ repository.workspace   = true
 publish                = false
 build                  = "build.rs"
 
+[package.metadata.overdrive]
+crate_class = "core"
+
 [features]
 default = []
 # Workspace-wide command compatibility. The parser differential remains in

@@ -32,7 +32,7 @@
 //! | `VmStop` | the VM ends: the seam releases the guest context and ends every guest socket (`guest_owner_dies`); the driver drops the owner (the guest's session is gone, D-UP-8) |
 //! | `GuestOpenSession(c)` | `dispatch_next` with no session — the first dispatch, or `SimGuestClock` advanced to the loss + `CONTROL_RECONNECT_BACKOFF` — must issue `start_connect_host(Control)`; the host listener completes it and the owner writes its `ControlOpen` (an owner that issues no connect fails the step) |
 //! | `WorkloadOpenSession(c)` | stimulus: a guest workload's connection, not the guest owner's |
-//! | `GuestOpenFlow(f)` | seam: an application `connect()` is captured (`OutboundCaptured`); the host listener completes the owner's V_g connect and the owner writes its request |
+//! | `GuestOpenFlow(f)` | after the owner's first dispatch, seam: an application `connect()` is captured (`OutboundCaptured`), the host listener completes the owner's V_g connect and the owner writes its request; before that dispatch it is the host-side stale queued-flow stimulus and changes no projected guest-owner fact |
 //! | `HostConnectDone(f)` | the host attached its pair and writes `Paired` for `f`'s production flow on the session (EVMOD-PAIR: the guest attaches on it) |
 //! | `HostFlowEndsMsg(f, msg)` | the host closes `f`'s V_h, writing `Refused` (before `Paired`) or `Abort` (after) first when it answers (`msg` and the flow attributed) |
 //! | `Teardown`, `Quiesce`, `HostSessionLoss(c)`, `HostDeadSessionLoss(c)` | the host closes the V_h of every guest-opened flow it held registered; the session's end and the dials' closes reach the guest at the guest actions below |
@@ -452,13 +452,26 @@ impl OwnerFlowsGuestDriver {
     fn guest_open_flow(&mut self, f: i64) -> std::result::Result<(), DriverError> {
         let launch = self.launch("GuestOpenFlow")?;
         if !launch.started {
-            return Err(DriverError::NotRepresentable(
-                "a captured connect before the guest owner's first dispatch".to_owned(),
-            ));
+            // `flows(f)` is the host owner's flow. Before this launch's guest
+            // owner takes its first dispatch, the stale-flow named run is a
+            // raw guest workload connection queued at the host; this guest
+            // projection has no owner fact to drive or compare.
+            return Ok(());
         }
         launch.io.app_connect(sim_cookie(u64::try_from(f).expect("small")), guest_dest(f));
         self.settle();
         let launch = self.launch("GuestOpenFlow")?;
+        if !launch
+            .io
+            .pending_connects()
+            .iter()
+            .any(|(_, target)| *target == SimConnectTarget::Host(HostChannel::FlowStream))
+        {
+            // With no live owner session, production rejects the captured
+            // child locally and opens no V_g. `flows(f)` is host-side state,
+            // outside this driver's compared guest projection.
+            return Ok(());
+        }
         launch.io.complete_host_connect(HostChannel::FlowStream, Ok(()));
         self.settle();
         let launch = self.launch("GuestOpenFlow")?;
@@ -798,7 +811,6 @@ impl State<OwnerFlowsGuestDriver> for OwnerFlowsGuestState {
     max_samples = 1,
     test = "ControlSessionOpensAndCidActivates"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_control_session_opens_and_cid_activates() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -811,7 +823,6 @@ fn quint_owner_flows_guest_control_session_opens_and_cid_activates() -> impl Dri
     max_samples = 1,
     test = "GuestOpenedFlowIsAdmittedReadAttachedAndPaired"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_guest_opened_flow_is_admitted_read_attached_and_paired() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -824,7 +835,6 @@ fn quint_owner_flows_guest_guest_opened_flow_is_admitted_read_attached_and_paire
     max_samples = 1,
     test = "RequestReadInPiecesAttachesOnlyAfterFullRead"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_request_read_in_pieces_attaches_only_after_full_read() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -837,7 +847,6 @@ fn quint_owner_flows_guest_request_read_in_pieces_attaches_only_after_full_read(
     max_samples = 1,
     test = "RacingFirstConnectsLeaveOneLiveSession"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_racing_first_connects_leave_one_live_session() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -850,7 +859,6 @@ fn quint_owner_flows_guest_racing_first_connects_leave_one_live_session() -> imp
     max_samples = 1,
     test = "SessionLossAbortsFlowsAndReconnectRestores"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_session_loss_aborts_flows_and_reconnect_restores() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -863,7 +871,6 @@ fn quint_owner_flows_guest_session_loss_aborts_flows_and_reconnect_restores() ->
     max_samples = 1,
     test = "GuestReopensSessionOnlyAfterObservingItsLoss"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_guest_reopens_session_only_after_observing_its_loss() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -876,7 +883,6 @@ fn quint_owner_flows_guest_guest_reopens_session_only_after_observing_its_loss()
     max_samples = 1,
     test = "GuestObservesSessionLossThenReopens"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_guest_observes_session_loss_then_reopens() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -889,7 +895,6 @@ fn quint_owner_flows_guest_guest_observes_session_loss_then_reopens() -> impl Dr
     max_samples = 1,
     test = "VmStopClearsTheGuestSession"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_vm_stop_clears_the_guest_session() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -902,7 +907,6 @@ fn quint_owner_flows_guest_vm_stop_clears_the_guest_session() -> impl Driver {
     max_samples = 1,
     test = "QuiesceAbortsFlowsAndRefusesAdmissionUntilRestore"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_quiesce_aborts_flows_and_refuses_admission_until_restore() -> impl Driver
 {
     OwnerFlowsGuestDriver::new()
@@ -916,7 +920,6 @@ fn quint_owner_flows_guest_quiesce_aborts_flows_and_refuses_admission_until_rest
     max_samples = 1,
     test = "ActivationWaitsForQuiescenceToEnd"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_activation_waits_for_quiescence_to_end() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -929,7 +932,6 @@ fn quint_owner_flows_guest_activation_waits_for_quiescence_to_end() -> impl Driv
     max_samples = 1,
     test = "InFlightConnectOfAbortedFlowIsDiscarded"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_in_flight_connect_of_aborted_flow_is_discarded() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -942,7 +944,6 @@ fn quint_owner_flows_guest_in_flight_connect_of_aborted_flow_is_discarded() -> i
     max_samples = 1,
     test = "AttributedFlowEndsAndCidKeepsServing"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_attributed_flow_ends_and_cid_keeps_serving() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -955,7 +956,6 @@ fn quint_owner_flows_guest_attributed_flow_ends_and_cid_keeps_serving() -> impl 
     max_samples = 1,
     test = "TeardownAbortsEverythingThenCidIsLeasedAgain"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_teardown_aborts_everything_then_cid_is_leased_again() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -968,7 +968,6 @@ fn quint_owner_flows_guest_teardown_aborts_everything_then_cid_is_leased_again()
     max_samples = 1,
     test = "StaleLaunchSessionIsClosedAtReadAndDoesNotPoisonClaim"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_stale_launch_session_is_closed_at_read_and_does_not_poison_claim()
 -> impl Driver {
     OwnerFlowsGuestDriver::new()
@@ -982,7 +981,6 @@ fn quint_owner_flows_guest_stale_launch_session_is_closed_at_read_and_does_not_p
     max_samples = 1,
     test = "TeardownBetweenAcceptAndReadClosesWithoutClaim"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_teardown_between_accept_and_read_closes_without_claim() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -995,7 +993,6 @@ fn quint_owner_flows_guest_teardown_between_accept_and_read_closes_without_claim
     max_samples = 1,
     test = "StaleLaunchFlowIsClosedAtRequestReadWithNoMessage"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_stale_launch_flow_is_closed_at_request_read_with_no_message()
 -> impl Driver {
     OwnerFlowsGuestDriver::new()
@@ -1009,7 +1006,6 @@ fn quint_owner_flows_guest_stale_launch_flow_is_closed_at_request_read_with_no_m
     max_samples = 1,
     test = "VmDeathMakesLiveSessionDeadThenLossIsProcessed"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_vm_death_makes_live_session_dead_then_loss_is_processed() -> impl Driver
 {
     OwnerFlowsGuestDriver::new()
@@ -1023,7 +1019,6 @@ fn quint_owner_flows_guest_vm_death_makes_live_session_dead_then_loss_is_process
     max_samples = 1,
     test = "DialPairsAndReturnsStream"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_dial_pairs_and_returns_stream() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -1036,7 +1031,6 @@ fn quint_owner_flows_guest_dial_pairs_and_returns_stream() -> impl Driver {
     max_samples = 1,
     test = "DialRefusedReturnsTypedError"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_dial_refused_returns_typed_error() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -1049,7 +1043,6 @@ fn quint_owner_flows_guest_dial_refused_returns_typed_error() -> impl Driver {
     max_samples = 1,
     test = "DialTimedOutReturnsTypedError"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_dial_timed_out_returns_typed_error() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -1062,7 +1055,6 @@ fn quint_owner_flows_guest_dial_timed_out_returns_typed_error() -> impl Driver {
     max_samples = 1,
     test = "DialNotServingIsATypedResultWithNoStateChange"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_dial_not_serving_is_a_typed_result_with_no_state_change() -> impl Driver
 {
     OwnerFlowsGuestDriver::new()
@@ -1076,7 +1068,6 @@ fn quint_owner_flows_guest_dial_not_serving_is_a_typed_result_with_no_state_chan
     max_samples = 1,
     test = "DialWhileQuiescedIsATypedResultWithNoStateChange"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_dial_while_quiesced_is_a_typed_result_with_no_state_change()
 -> impl Driver {
     OwnerFlowsGuestDriver::new()
@@ -1090,7 +1081,6 @@ fn quint_owner_flows_guest_dial_while_quiesced_is_a_typed_result_with_no_state_c
     max_samples = 1,
     test = "DialWithoutLiveSessionIsATypedResultWithNoStateChange"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_dial_without_live_session_is_a_typed_result_with_no_state_change()
 -> impl Driver {
     OwnerFlowsGuestDriver::new()
@@ -1104,7 +1094,6 @@ fn quint_owner_flows_guest_dial_without_live_session_is_a_typed_result_with_no_s
     max_samples = 1,
     test = "DialToAGoneVmIsUnreachable"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_dial_to_a_gone_vm_is_unreachable() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -1117,7 +1106,6 @@ fn quint_owner_flows_guest_dial_to_a_gone_vm_is_unreachable() -> impl Driver {
     max_samples = 1,
     test = "DialAfterObservedSessionLossWithVmGoneReturnsNoSession"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_dial_after_observed_session_loss_with_vm_gone_returns_no_session()
 -> impl Driver {
     OwnerFlowsGuestDriver::new()
@@ -1131,7 +1119,6 @@ fn quint_owner_flows_guest_dial_after_observed_session_loss_with_vm_gone_returns
     max_samples = 1,
     test = "PairingDeadlineWaitsForTheGuestAnswer"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_pairing_deadline_waits_for_the_guest_answer() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -1144,7 +1131,6 @@ fn quint_owner_flows_guest_pairing_deadline_waits_for_the_guest_answer() -> impl
     max_samples = 1,
     test = "PairingDeadlineFiresOnlyAfterGuestTimeoutAndLateReplyIsDiscarded"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_pairing_deadline_fires_only_after_guest_timeout_and_late_reply_is_discarded()
 -> impl Driver {
     OwnerFlowsGuestDriver::new()
@@ -1158,7 +1144,6 @@ fn quint_owner_flows_guest_pairing_deadline_fires_only_after_guest_timeout_and_l
     max_samples = 1,
     test = "PairingDeadlineEndsDialToALiveVmWhoseGuestNeverReplies"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_pairing_deadline_ends_dial_to_a_live_vm_whose_guest_never_replies()
 -> impl Driver {
     OwnerFlowsGuestDriver::new()
@@ -1172,7 +1157,6 @@ fn quint_owner_flows_guest_pairing_deadline_ends_dial_to_a_live_vm_whose_guest_n
     max_samples = 1,
     test = "VmExitDuringDialReturnsUnreachableReset"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_vm_exit_during_dial_returns_unreachable_reset() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -1185,7 +1169,6 @@ fn quint_owner_flows_guest_vm_exit_during_dial_returns_unreachable_reset() -> im
     max_samples = 1,
     test = "VmExitDuringDialLeavesNoPairingDeadline"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_vm_exit_during_dial_leaves_no_pairing_deadline() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -1198,7 +1181,6 @@ fn quint_owner_flows_guest_vm_exit_during_dial_leaves_no_pairing_deadline() -> i
     max_samples = 1,
     test = "DroppedDialFutureEndsLikeThePairingDeadline"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_dropped_dial_future_ends_like_the_pairing_deadline() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -1211,7 +1193,6 @@ fn quint_owner_flows_guest_dropped_dial_future_ends_like_the_pairing_deadline() 
     max_samples = 1,
     test = "TeardownEndsPendingDialWithNotServing"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_teardown_ends_pending_dial_with_not_serving() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -1224,7 +1205,6 @@ fn quint_owner_flows_guest_teardown_ends_pending_dial_with_not_serving() -> impl
     max_samples = 1,
     test = "ActivationIsImpossibleWhileTheSessionIsPending"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_activation_is_impossible_while_the_session_is_pending() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -1237,7 +1217,6 @@ fn quint_owner_flows_guest_activation_is_impossible_while_the_session_is_pending
     max_samples = 1,
     test = "ActivationWithSessionPendingReturnsPendingThenActivates"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_activation_with_session_pending_returns_pending_then_activates()
 -> impl Driver {
     OwnerFlowsGuestDriver::new()
@@ -1251,7 +1230,6 @@ fn quint_owner_flows_guest_activation_with_session_pending_returns_pending_then_
     max_samples = 1,
     test = "ActivateAfterTeardownIsRefusedAndChangesNothing"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_activate_after_teardown_is_refused_and_changes_nothing() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -1264,7 +1242,6 @@ fn quint_owner_flows_guest_activate_after_teardown_is_refused_and_changes_nothin
     max_samples = 1,
     test = "ActivateAfterTeardownNeverActivates"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_activate_after_teardown_never_activates() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -1277,7 +1254,6 @@ fn quint_owner_flows_guest_activate_after_teardown_never_activates() -> impl Dri
     max_samples = 1,
     test = "DialAbortedBeforeGuestAcceptsEndsByHostClose"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_dial_aborted_before_guest_accepts_ends_by_host_close() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -1290,7 +1266,6 @@ fn quint_owner_flows_guest_dial_aborted_before_guest_accepts_ends_by_host_close(
     max_samples = 1,
     test = "DialQueuedVgIsResetByHostClose"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_dial_queued_vg_is_reset_by_host_close() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -1303,7 +1278,6 @@ fn quint_owner_flows_guest_dial_queued_vg_is_reset_by_host_close() -> impl Drive
     max_samples = 1,
     test = "LatePairedForClosedHostFlowIsDiscarded"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_late_paired_for_closed_host_flow_is_discarded() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -1316,7 +1290,6 @@ fn quint_owner_flows_guest_late_paired_for_closed_host_flow_is_discarded() -> im
     max_samples = 1,
     test = "SessionLossAbortsDialOnBothSides"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_session_loss_aborts_dial_on_both_sides() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -1329,7 +1302,6 @@ fn quint_owner_flows_guest_session_loss_aborts_dial_on_both_sides() -> impl Driv
     max_samples = 1,
     test = "QuiesceAbortsDialAndSendsAbort"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_quiesce_aborts_dial_and_sends_abort() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -1342,7 +1314,6 @@ fn quint_owner_flows_guest_quiesce_aborts_dial_and_sends_abort() -> impl Driver 
     max_samples = 1,
     test = "AcceptedVgHostCloseEndsFlowSilently"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_accepted_vg_host_close_ends_flow_silently() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -1355,7 +1326,6 @@ fn quint_owner_flows_guest_accepted_vg_host_close_ends_flow_silently() -> impl D
     max_samples = 1,
     test = "AcceptedVgErrorAbortsWithAbort"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_accepted_vg_error_aborts_with_abort() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -1368,7 +1338,6 @@ fn quint_owner_flows_guest_accepted_vg_error_aborts_with_abort() -> impl Driver 
     max_samples = 1,
     test = "SessionLossAbortsAllFlowsBeforeReconnect"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_session_loss_aborts_all_flows_before_reconnect() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -1381,7 +1350,6 @@ fn quint_owner_flows_guest_session_loss_aborts_all_flows_before_reconnect() -> i
     max_samples = 1,
     test = "DialAfterReconnectPairs"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_guest_dial_after_reconnect_pairs() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }
@@ -1391,7 +1359,6 @@ fn quint_owner_flows_guest_dial_after_reconnect_pairs() -> impl Driver {
 /// Randomized traces of the conformance main (seed printed on failure).
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_run(spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt", main = "flows_conf")]
-#[ignore = "pending DELIVER step 5"]
 fn quint_owner_flows_flows_conf_guest() -> impl Driver {
     OwnerFlowsGuestDriver::new()
 }

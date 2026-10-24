@@ -2,8 +2,9 @@
 //! END-IDEMPOTENT; feature-delta § *Failure projection*): the guest owner
 //! takes no drain step — the guest forwarder carries each direction's end to
 //! its target after the last accepted byte and ends the pair — and handles
-//! each pair's one end record in one dispatch: the flow leaves its table, a
-//! completed TCP half's linger is cleared, both halves are closed. An
+//! each pair's one end record in one dispatch: the flow leaves its table.
+//! The next owner dispatch clears a completed TCP half's linger and closes
+//! both halves (`OwnerClose(g)`). An
 //! `Abort { flow }` for a paired flow aborts its pair; one for a flow the guest
 //! does not hold is discarded (R5-28, guest half).
 
@@ -27,12 +28,12 @@ fn paired(g: &mut Guest, n: u16) -> FlowId {
 /// forwarder carries the bytes then a `0x2` on V_g (the owner takes no step);
 /// the host's bytes and `0x2` reach the application as data then EOF; the pair
 /// completes only after both directions ended cleanly, and on its `Completed`
-/// record the owner — in that one dispatch — removes the flow, clears I's
-/// linger and closes both halves. The application reads every byte, then EOF.
+/// record the owner removes the flow in one dispatch; its next dispatch clears
+/// I's linger and closes both halves. The application reads every byte, then
+/// EOF.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
-fn a_clean_end_both_ways_completes_and_the_owner_closes_on_the_record() {
+fn a_clean_end_both_ways_completes_on_the_record_then_closes_next() {
     let mut g = Guest::new();
     let f = paired(&mut g, 1);
     let pair = g.pair(f);
@@ -62,6 +63,19 @@ fn a_clean_end_both_ways_completes_and_the_owner_closes_on_the_record() {
         !g.obs().flows.contains_key(&f),
         "the flow leaves in the dispatch that reads its record"
     );
+    assert!(
+        !g.io.effects().iter().any(|effect| matches!(
+            effect,
+            SimGuestEffect::ClearLinger { .. } | SimGuestEffect::Close { .. }
+        )),
+        "TakeEnd consumes the record without collapsing OwnerClose into that dispatch"
+    );
+    assert_eq!(
+        g.vsock(f).sent_shutdown(),
+        Some(SimShutdown::Send),
+        "V_g remains open between TakeEnd and OwnerClose"
+    );
+    g.step();
     let effects = g.io.effects();
     let clear = position(&effects, |e| matches!(e, SimGuestEffect::ClearLinger { .. }))
         .expect("linger cleared");
@@ -82,7 +96,6 @@ fn a_clean_end_both_ways_completes_and_the_owner_closes_on_the_record() {
 /// sends nothing (the host already ended it). The application reads a reset.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_peer_abort_record_closes_the_flow_and_the_application_reads_a_reset() {
     let mut g = Guest::new();
     let f = paired(&mut g, 1);
@@ -108,7 +121,6 @@ fn a_peer_abort_record_closes_the_flow_and_the_application_reads_a_reset() {
 /// pair — the `0x3` arrives after this side shut its send.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_half_close_then_the_peers_close_after_both_ends_is_clean() {
     let mut g = Guest::new();
     let f = paired(&mut g, 1);
@@ -129,7 +141,6 @@ fn a_half_close_then_the_peers_close_after_both_ends_is_clean() {
 /// both halves; the host's V_g is shut both ways.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn an_application_reset_while_paired_is_a_socket_error_record() {
     let mut g = Guest::new();
     let f = paired(&mut g, 1);
@@ -152,7 +163,6 @@ fn an_application_reset_while_paired_is_a_socket_error_record() {
 /// a FIN then a reset is never a clean end (`ResetNeverEndsClean`).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_fin_then_a_reset_from_the_application_aborts_the_pair() {
     let mut g = Guest::new();
     let f = paired(&mut g, 1);
@@ -170,11 +180,11 @@ fn a_fin_then_a_reset_from_the_application_aborts_the_pair() {
 }
 
 /// `Abort { flow }` for a paired flow aborts its pair (`abort_forward`): the
-/// `Detached` record follows; the owner closes both halves; the application
-/// is reset; no reply.
+/// `Detached` record follows; the owner retains both descriptors through the
+/// abort and record dispatch, then closes them in `OwnerClose(g)`. The
+/// application is reset; no reply.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn an_abort_message_for_a_paired_flow_aborts_its_pair() {
     let mut g = Guest::new();
     let f = paired(&mut g, 1);
@@ -182,8 +192,10 @@ fn an_abort_message_for_a_paired_flow_aborts_its_pair() {
     g.io.host_control(ControlMessage::Abort { flow: f });
     g.settle();
     assert!(g.io.effects().contains(&SimGuestEffect::AbortForward { id: pair }));
+    assert!(!g.outer(f).closed_by_owner() && !g.vsock(f).closed_by_owner());
     g.run_and_settle();
     assert!(!g.obs().flows.contains_key(&f));
+    assert!(g.outer(f).closed_by_owner() && g.vsock(f).closed_by_owner());
     assert_eq!(g.outer(f).peer_end(), Some(SimFarEnd::Reset));
     assert!(g.io.outbox().is_empty());
 }
@@ -192,7 +204,6 @@ fn an_abort_message_for_a_paired_flow_aborts_its_pair() {
 /// opened, or already ended — is discarded with no reply and changes nothing.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn an_abort_for_a_flow_the_guest_does_not_hold_is_discarded() {
     let mut g = Guest::new();
     let f = paired(&mut g, 1);
@@ -217,7 +228,6 @@ fn an_abort_for_a_flow_the_guest_does_not_hold_is_discarded() {
 /// again every byte arrives in order.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_slow_reader_holds_the_flow_without_any_deadline() {
     let mut g = Guest::new();
     let f = paired(&mut g, 1);
@@ -244,7 +254,6 @@ fn a_slow_reader_holds_the_flow_without_any_deadline() {
 /// closed it changes nothing: no second record, no owner step acts on it.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_trailing_reset_after_completion_is_inert() {
     let mut g = Guest::new();
     let f = paired(&mut g, 1);

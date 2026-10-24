@@ -11,21 +11,13 @@
 //! at attach", EVMOD-PAIR, EVMOD-REC, EVMOD-DGRAM), § *Per-kind total orders*
 //! and § *Control session*. Every item below is the one those sections pin.
 //!
-//! RED scaffold (DISTILL, Mandate 7): the owner ([`GuestFlowOwner`]), the
-//! [`SocketCookie`] constructors and codecs, and the production seam
-//! [`KernelGuestOwnerIo`] panic until DELIVER step 5 lands them. Plain data
-//! (the event, handle and label vocabulary, the observation types,
-//! [`GuestOwnerFatal`] with its pinned `Display`, the production clock) is
-//! written for real. The simulation seam [`sim`] (`#[cfg(test)]`) is a fully
-//! functional test fixture over `overdrive-sim`'s sim sockets and its
-//! `SimFlowForwarder` (decision B-1).
+//! The production owner ([`GuestFlowOwner`]) runs over the guest-owner port
+//! ([`GuestOwnerIo`]); [`KernelGuestOwnerIo`] supplies the guest-kernel
+//! adapter. The source-local [`sim`] fixture exercises the same owner over
+//! `overdrive-sim` sockets and its `SimFlowForwarder` (decision B-1).
 
-// SCAFFOLD: true — netns-density-295 DISTILL (DELIVER step 5).
-#![cfg_attr(
-    not(test),
-    expect(dead_code, reason = "RED scaffold — DELIVER step 5 wires it into main")
-)]
-#![cfg_attr(test, allow(dead_code, reason = "RED scaffold — DELIVER step 5 wires it into main"))]
+#![cfg_attr(not(test), expect(dead_code, reason = "some crate-private observations are test-only"))]
+#![cfg_attr(test, allow(dead_code, reason = "test scenarios use only relevant owner projections"))]
 #![allow(
     clippy::redundant_pub_crate,
     reason = "DG-5 pins `pub(crate)` visibility for these binary-crate items"
@@ -58,7 +50,6 @@ use std::fmt;
 use std::net::SocketAddrV4;
 use std::num::NonZeroU64;
 use std::str::FromStr;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
@@ -67,9 +58,7 @@ use overdrive_core::guest_transport::forwarder::{
 };
 use overdrive_core::guest_transport::wire::{FLOW_REQUEST_LEN, FlowId};
 
-use crate::transport::{GuestTransportToken, KernelGuestTransportOps};
-
-const SCAFFOLD: &str = "Not yet implemented -- RED scaffold";
+use crate::transport::GuestTransportToken;
 
 // ---------------------------------------------------------------------------
 // Newtypes
@@ -81,21 +70,20 @@ pub(crate) struct SocketCookie(NonZeroU64);
 
 impl SocketCookie {
     /// Validates a raw cookie (`0` is never a kernel cookie).
-    pub(crate) fn new(_raw: u64) -> Result<Self, SocketCookieError> {
-        panic!("{SCAFFOLD}")
+    pub(crate) fn new(raw: u64) -> Result<Self, SocketCookieError> {
+        NonZeroU64::new(raw).map(Self).ok_or(SocketCookieError::Zero)
     }
 
     /// The raw cookie.
-    pub(crate) fn get(self) -> u64 {
-        let _ = self;
-        panic!("{SCAFFOLD}")
+    pub(crate) const fn get(self) -> u64 {
+        self.0.get()
     }
 }
 
 /// Decimal form.
 impl fmt::Display for SocketCookie {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        panic!("{SCAFFOLD}")
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -103,8 +91,12 @@ impl fmt::Display for SocketCookie {
 impl FromStr for SocketCookie {
     type Err = SocketCookieError;
 
-    fn from_str(_s: &str) -> Result<Self, Self::Err> {
-        panic!("{SCAFFOLD}")
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() || !s.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(SocketCookieError::Unparseable);
+        }
+        let raw = s.parse::<u64>().map_err(|_| SocketCookieError::Unparseable)?;
+        Self::new(raw)
     }
 }
 
@@ -191,6 +183,17 @@ pub(crate) struct GuestAttachRefused {
     pub(crate) vsock: GuestOwnedSocket,
     /// The outer half, unattached.
     pub(crate) outer: GuestOwnedSocket,
+}
+
+/// A datagram attach the forwarder refused while the slot socket remains
+/// resident and only the consumed V_g is returned.
+#[must_use]
+#[derive(Debug)]
+pub(crate) struct GuestSlotAttachRefused {
+    /// The forwarder's refusal, with its existing semantic variant and payload.
+    pub(crate) error: ForwarderError,
+    /// The consumed flow vsock, unattached.
+    pub(crate) vsock: HostConn,
 }
 
 /// Any guest socket handle, for `abort` / `close`.
@@ -497,12 +500,13 @@ pub(crate) trait GuestOwnerIo: Send {
         request: &[u8; FLOW_REQUEST_LEN],
     ) -> std::io::Result<()>;
     /// Step 5, on `Paired`: `FlowForwarder::attach(S, V_g, Datagram { udp: A
-    /// })`. Consumes V_g; `Err` hands it back unattached (S stays the slot's).
+    /// })`. Consumes V_g; every `Err` hands it back unattached in
+    /// [`GuestSlotAttachRefused`] (S stays resident in its slot).
     fn attach_slot(
         &mut self,
         slot: SocketAddrV4,
         vsock: HostConn,
-    ) -> Result<ForwardId, GuestAttachRefused>;
+    ) -> Result<ForwardId, GuestSlotAttachRefused>;
     /// The end-of-association order after the pair's abort or end record (or
     /// V_g's close before `Paired`): discards S's receive queue without
     /// reading payload, then disconnects S (EVMOD-DGRAM, P-72). Never fails in
@@ -548,84 +552,8 @@ impl GuestClock for MonotonicGuestClock {
 // The owner
 // ---------------------------------------------------------------------------
 
-/// The guest flow owner: control session, flow table, UDP slot pool.
-pub(crate) struct GuestFlowOwner {
-    _scaffold: (),
-}
-
-impl GuestFlowOwner {
-    /// Takes the setup's results through `io`; opens nothing yet. Arms one
-    /// deadline, the session-open deadline at `clock.now()` (the reconnect
-    /// deadline with no backoff), so `next_deadline()` is `Some(now)` after
-    /// `new` and the first `dispatch_next` is that deadline's dispatch: it
-    /// starts the control-session connect and arms the first audit tick
-    /// (D-UP-7). Production and the drivers take the same first step.
-    pub(crate) fn new(
-        _token: GuestTransportToken,
-        _io: Box<dyn GuestOwnerIo>,
-        _clock: Arc<dyn GuestClock>,
-    ) -> Self {
-        panic!("{SCAFFOLD}")
-    }
-
-    /// Driving port: handles exactly one input — the next event, or the
-    /// earliest due deadline (request, pairing, the inbound connect timeout,
-    /// reconnect backoff, audit tick) computed from `clock.now()` — then
-    /// returns. It passes `next_deadline()` to `GuestOwnerIo::next_event`;
-    /// an event pending at the call is handled before a due deadline, and of
-    /// two due deadlines the earlier is handled (ties: the one armed first).
-    /// The first dispatch with no session starts the control-session
-    /// connect. Per-flow failures end that flow and return `Ok`. Blocking.
-    #[expect(
-        clippy::needless_pass_by_ref_mut,
-        reason = "RED scaffold body panics before mutating; DG-5 pins `&mut self`"
-    )]
-    pub(crate) fn dispatch_next(&mut self) -> Result<(), GuestOwnerFatal> {
-        let _ = self;
-        panic!("{SCAFFOLD}")
-    }
-
-    /// `dispatch_next` until it returns `Err`; runs on its own thread.
-    pub(crate) fn run(self) -> GuestOwnerFatal {
-        let _ = self;
-        panic!("{SCAFFOLD}")
-    }
-
-    /// QPROJ-5: an owned copy of the owner's session flag, flow tables and
-    /// slot table.
-    ///
-    /// - **Preconditions:** none. Infallible; callable on a constructed owner
-    ///   at any time, before and after the control session.
-    /// - **Postconditions:** the call accepts, routes, releases and closes
-    ///   nothing and changes no state.
-    /// - **Consistency point:** between two owner steps (one dispatch of the
-    ///   owner's serialized event handling).
-    /// - **Edge cases:** before the session opens, `session = false` and every
-    ///   table is empty except `slots`, which lists every slot with
-    ///   `owner = None`. A slot with an `owner` and no `association` has not
-    ///   started pairing; `attached` being `Some` implies `association` is
-    ///   `Some`. A flow the guest ended (closed, aborted, refused, timed out,
-    ///   or a V_g torn down in its accept queue) is absent. After the session
-    ///   ends, `session = false` and the tables hold only what the owner has
-    ///   not yet ended.
-    /// - **Observable invariants:** a `FlowId` in `awaiting_paired` is in
-    ///   neither `accepted` nor `flows`; an `accepted` entry in
-    ///   `Paired { pair }` is in `flows` with the same `pair`; a repeated
-    ///   call with no intervening owner step returns an equal value.
-    pub(crate) fn guest_observation(&self) -> GuestSideObservation {
-        let _ = self;
-        panic!("{SCAFFOLD}")
-    }
-
-    /// The earliest deadline the owner has armed, or `None` when none is
-    /// armed (DG-5-Q). Pure read; compiled in every build: it is the value
-    /// `dispatch_next` passes to `next_event`. Its only reader besides
-    /// `dispatch_next` is test support (the drivers' quiescence check).
-    pub(crate) fn next_deadline(&self) -> Option<Instant> {
-        let _ = self;
-        panic!("{SCAFFOLD}")
-    }
-}
+mod owner;
+pub(crate) use owner::GuestFlowOwner;
 
 /// The only failures the owner cannot recover from without a restart.
 /// `overdrive-init` writes `overdrive-init: guest flow owner failed:
@@ -662,121 +590,8 @@ pub(crate) enum GuestOwnerFatal {
 // Production seam
 // ---------------------------------------------------------------------------
 
-/// Production [`GuestOwnerIo`] over the guest kernel, built from the sockets,
-/// programs and forwarder context `configure_guest_transport` set up (the
-/// context's `readiness_fd` joins the seam's readiness wait).
-pub(crate) struct KernelGuestOwnerIo {
-    _scaffold: (),
-}
-
-impl KernelGuestOwnerIo {
-    /// Takes ownership of the setup's sockets, programs and forwarder context.
-    pub(crate) fn new(_ops: KernelGuestTransportOps) -> Self {
-        panic!("{SCAFFOLD}")
-    }
-}
-
-impl GuestOwnerIo for KernelGuestOwnerIo {
-    fn next_event(&mut self, _deadline: Option<Instant>) -> std::io::Result<Option<GuestIoEvent>> {
-        panic!("{SCAFFOLD}")
-    }
-    fn start_connect_host(&mut self, _channel: HostChannel) -> std::io::Result<HostConn> {
-        panic!("{SCAFFOLD}")
-    }
-    fn start_read_host(&mut self, _conn: &HostConn, _record: GuestRecord) -> std::io::Result<()> {
-        panic!("{SCAFFOLD}")
-    }
-    fn start_read_inbound(&mut self, _conn: &InboundConn) -> std::io::Result<()> {
-        panic!("{SCAFFOLD}")
-    }
-    fn write_host(&mut self, _conn: &HostConn, _bytes: &[u8]) -> std::io::Result<()> {
-        panic!("{SCAFFOLD}")
-    }
-    fn inbound_ended(&mut self, _conn: &InboundConn) -> std::io::Result<bool> {
-        panic!("{SCAFFOLD}")
-    }
-    fn write_request(
-        &mut self,
-        _vsock: &HostConn,
-        _request: &[u8; FLOW_REQUEST_LEN],
-    ) -> std::io::Result<()> {
-        panic!("{SCAFFOLD}")
-    }
-    fn attach_outbound(
-        &mut self,
-        _child: CapturedConn,
-        _vsock: HostConn,
-    ) -> Result<GuestPair, GuestAttachRefused> {
-        panic!("{SCAFFOLD}")
-    }
-    fn start_connect_app(
-        &mut self,
-        _client: SocketAddrV4,
-        _destination: SocketAddrV4,
-    ) -> std::io::Result<AppConn> {
-        panic!("{SCAFFOLD}")
-    }
-    fn attach_inbound(
-        &mut self,
-        _vsock: InboundConn,
-        _app: AppConn,
-    ) -> Result<GuestPair, GuestAttachRefused> {
-        panic!("{SCAFFOLD}")
-    }
-    fn abort_forward(&mut self, _id: ForwardId) -> Result<AbortResult, ForwarderError> {
-        panic!("{SCAFFOLD}")
-    }
-    fn pair_state(&mut self, _id: ForwardId) -> Result<Option<PairState>, ForwarderError> {
-        panic!("{SCAFFOLD}")
-    }
-    fn inventory(&mut self) -> Result<ForwarderInventory, ForwarderError> {
-        panic!("{SCAFFOLD}")
-    }
-    fn clear_linger(&mut self, _socket: &GuestPairSocket) -> std::io::Result<()> {
-        panic!("{SCAFFOLD}")
-    }
-    fn abort(&mut self, _socket: GuestOwnedSocket) {
-        panic!("{SCAFFOLD}")
-    }
-    fn close(&mut self, _socket: GuestOwnedSocket) {
-        panic!("{SCAFFOLD}")
-    }
-    fn slot_owner(
-        &mut self,
-        _slot: SocketAddrV4,
-    ) -> std::io::Result<Option<(SocketCookie, SocketAddrV4)>> {
-        panic!("{SCAFFOLD}")
-    }
-    fn write_slot_request(
-        &mut self,
-        _vsock: &HostConn,
-        _request: &[u8; FLOW_REQUEST_LEN],
-    ) -> std::io::Result<()> {
-        panic!("{SCAFFOLD}")
-    }
-    fn attach_slot(
-        &mut self,
-        _slot: SocketAddrV4,
-        _vsock: HostConn,
-    ) -> Result<ForwardId, GuestAttachRefused> {
-        panic!("{SCAFFOLD}")
-    }
-    fn end_association(&mut self, _slot: SocketAddrV4) {
-        panic!("{SCAFFOLD}")
-    }
-    fn release_slot(&mut self, _slot: SocketAddrV4) {
-        panic!("{SCAFFOLD}")
-    }
-    fn slot_counters(&mut self, _slot: SocketAddrV4) -> std::io::Result<(u64, u64)> {
-        panic!("{SCAFFOLD}")
-    }
-    fn live_cookies(
-        &mut self,
-        _cookies: &BTreeSet<SocketCookie>,
-    ) -> std::io::Result<BTreeSet<SocketCookie>> {
-        panic!("{SCAFFOLD}")
-    }
-}
+mod kernel_io;
+pub(crate) use kernel_io::KernelGuestOwnerIo;
 
 // ---------------------------------------------------------------------------
 // QPROJ-5 observation

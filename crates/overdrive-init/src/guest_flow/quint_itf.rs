@@ -144,6 +144,10 @@ pub(super) fn map_entries(value: &Value) -> Result<Vec<(&Value, &Value)>, ItfErr
 pub(super) fn set_elems(value: &Value) -> Result<Vec<&Value>, ItfError> {
     match value {
         Value::Set(set) => Ok(set.iter().collect()),
+        // Quint's ITF encoder cannot distinguish an empty set from an empty
+        // sequence once the value has no element witness. The caller supplies
+        // the set type by choosing this decoder.
+        Value::List(list) if list.is_empty() => Ok(Vec::new()),
         other => Err(shape("a set", other)),
     }
 }

@@ -2,8 +2,9 @@
 //! provisioning for `cargo xtask bpf-build`.
 //!
 //! Per ADR-0038 §4 / wave-decisions.md D4 / upstream-issue A1, the
-//! `bpf-build` task depends on three toolchain bits beyond stable
-//! Rust:
+//! Rust/Aya `bpf-build` path depends on three toolchain bits beyond stable
+//! Rust; the approved guest TCP-correlation C/CO-RE object additionally
+//! requires Clang 21, `bpftool`, libbpf headers and readable target-kernel BTF:
 //!
 //! 1. `bpf-linker` — installed via `cargo install --locked
 //!    bpf-linker`. The `--locked` flag is mandatory for
@@ -15,10 +16,10 @@
 //! 3. The `rust-src` component on `BPF_NIGHTLY_TOOLCHAIN` — required
 //!    to build `core` from source under `build-std=core`.
 //!
-//! The Lima YAML at `infra/lima/overdrive-dev.yaml` provisions all
-//! three at VM creation. This module is the symmetric surface for
+//! The Lima YAML at `infra/lima/overdrive-dev.yaml` provisions this complete
+//! toolchain at VM creation. This module is the symmetric surface for
 //! non-Lima Linux developers (a third surface alongside Lima and the
-//! `which_or_hint` runtime check inside `bpf_build()`).
+//! `bpf_build()` prerequisite checks).
 //!
 //! ## Architecture
 //!
@@ -49,7 +50,8 @@ use std::process::Command;
 
 use crate::BPF_NIGHTLY_TOOLCHAIN;
 
-/// Result of probing the host for the three toolchain dependencies.
+/// Result of probing the host for the Rust/Aya and C/CO-RE toolchain
+/// dependencies.
 ///
 /// Populated by [`probe`] in production and constructed directly in
 /// tests to drive [`plan`] through every permutation.
@@ -66,6 +68,21 @@ pub struct ProbeContext {
     /// only when `nightly_toolchain_installed == true`; otherwise
     /// treat as `false`.
     pub rust_src_on_nightly: bool,
+    /// C/CO-RE build prerequisites.
+    pub c_core: CCoreProbe,
+}
+
+/// Observed C/CO-RE compiler, tool, header and target-BTF prerequisites.
+#[derive(Debug, Clone, Copy)]
+pub struct CCoreProbe {
+    /// Major version reported by the available C BPF compiler.
+    pub clang_major: Option<u32>,
+    /// `bpftool` is available on `PATH`.
+    pub bpftool_on_path: bool,
+    /// The libbpf CO-RE helper headers are installed.
+    pub libbpf_headers_present: bool,
+    /// The selected target-kernel BTF file is readable.
+    pub target_btf_readable: bool,
 }
 
 /// One planned command — argv form so tests assert on shape without
@@ -80,15 +97,15 @@ pub struct PlannedCommand {
 }
 
 /// Ordered set of commands to invoke. Empty when the host already has
-/// every dependency.
+/// every Rust/Aya and C/CO-RE BPF dependency.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plan {
     pub commands: Vec<PlannedCommand>,
 }
 
 /// Pure planner — given a probe context, return the ordered set of
-/// install commands needed to bring the host up to the bpf-build
-/// dependency baseline.
+/// install and verification commands needed to bring the host up to the
+/// bpf-build dependency baseline.
 ///
 /// Order matters: install the nightly toolchain before any component
 /// adds (component-add against a missing toolchain would fail).
@@ -148,6 +165,28 @@ pub fn plan(probe: &ProbeContext) -> Plan {
         });
     }
 
+    let c_core = probe.c_core;
+    if c_core.clang_major != Some(21) || !c_core.bpftool_on_path || !c_core.libbpf_headers_present {
+        let script = concat!(
+            "set -e; ",
+            "wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh; ",
+            "chmod +x /tmp/llvm.sh; ",
+            "sudo bash /tmp/llvm.sh 21; ",
+            "sudo apt-get update; ",
+            "sudo apt-get install -y --no-install-recommends clang-21 bpftool libbpf-dev"
+        );
+        commands.push(PlannedCommand {
+            argv: vec!["bash".into(), "-c".into(), script.into()],
+            label: "install Clang 21, bpftool and libbpf headers".into(),
+        });
+    }
+    if !c_core.target_btf_readable {
+        commands.push(PlannedCommand {
+            argv: vec!["test".into(), "-r".into(), "/sys/kernel/btf/vmlinux".into()],
+            label: "verify readable target-kernel BTF at /sys/kernel/btf/vmlinux".into(),
+        });
+    }
+
     Plan { commands }
 }
 
@@ -203,7 +242,39 @@ fn probe() -> Result<ProbeContext> {
         false
     };
 
-    Ok(ProbeContext { bpf_linker_on_path, nightly_toolchain_installed, rust_src_on_nightly })
+    let clang_major = ["clang-21", "clang"].into_iter().find_map(|binary| {
+        Command::new(binary)
+            .arg("--version")
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .and_then(|output| {
+                String::from_utf8_lossy(&output.stdout)
+                    .split(|character: char| !character.is_ascii_digit())
+                    .find_map(|word| word.parse().ok())
+            })
+    });
+    let bpftool_on_path = Command::new("sh")
+        .arg("-c")
+        .arg("command -v bpftool")
+        .status()
+        .is_ok_and(|status| status.success());
+    let libbpf_headers_present = std::path::Path::new("/usr/include/bpf/bpf_helpers.h").is_file();
+    let target_btf = std::env::var_os("OVERDRIVE_BPF_TARGET_BTF")
+        .map_or_else(|| std::path::PathBuf::from("/sys/kernel/btf/vmlinux"), Into::into);
+    let target_btf_readable = std::fs::File::open(target_btf).is_ok();
+
+    Ok(ProbeContext {
+        bpf_linker_on_path,
+        nightly_toolchain_installed,
+        rust_src_on_nightly,
+        c_core: CCoreProbe {
+            clang_major,
+            bpftool_on_path,
+            libbpf_headers_present,
+            target_btf_readable,
+        },
+    })
 }
 
 /// Execute one planned command as a child process. Failures surface

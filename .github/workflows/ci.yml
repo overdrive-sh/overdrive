@@ -1083,6 +1083,15 @@ jobs:
           chmod +x /tmp/llvm.sh
           sudo bash /tmp/llvm.sh 22
 
+      - name: Install Clang 21 and C/CO-RE build prerequisites
+        run: |
+          sudo bash /tmp/llvm.sh 21
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends clang-21 bpftool libbpf-dev
+
+      - name: Verify readable target-kernel BTF
+        run: test -r "${OVERDRIVE_BPF_TARGET_BTF:-/sys/kernel/btf/vmlinux}"
+
       - name: Install bpf-linker
         # Pinned to 0.10.4 — the last release on the `llvm-22` feature
         # (0.11.0 moved to llvm-23, which skews against the LLVM-22
@@ -1112,7 +1121,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bpf-object
-          path: target/bpf/overdrive_bpf.o
+          path: |
+            target/bpf/overdrive_bpf.o
+            target/bpf/overdrive_guest_bpf.o
+            target/bpf/overdrive_guest_tcp_correlation_candidate_bpf.o
           retention-days: 14
           # if-no-files-found: error is load-bearing — without it a
           # missing artifact silently no-ops and the downstream job

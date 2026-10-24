@@ -504,8 +504,17 @@ impl UdpSlotsDriver {
     }
 
     fn guest_audit(&mut self, idle: &Value) -> std::result::Result<(), DriverError> {
-        let idle =
-            quint_itf::int_set(idle).map_err(|e| DriverError::DomainMismatch(e.to_string()))?;
+        // quint-connect unwraps a singleton set carried as a variant field to
+        // its sole ITF value. The action signature supplies the set type.
+        let idle = match idle {
+            Value::Number(_) | Value::BigInt(_) => std::iter::once(
+                quint_itf::int(idle).map_err(|e| DriverError::DomainMismatch(e.to_string()))?,
+            )
+            .collect(),
+            _ => {
+                quint_itf::int_set(idle).map_err(|e| DriverError::DomainMismatch(e.to_string()))?
+            }
+        };
         let tick = self.next_audit_tick();
         let pending = self.pending_associations();
         if idle.is_empty() {
@@ -739,7 +748,6 @@ impl State<UdpSlotsDriver> for UdpSlotsState {
     max_samples = 1,
     test = "DatagramAssociationClaimsPairsAndRoutes"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_udp_slots_datagram_association_claims_pairs_and_routes() -> impl Driver {
     UdpSlotsDriver::new()
 }
@@ -752,7 +760,6 @@ fn quint_udp_slots_datagram_association_claims_pairs_and_routes() -> impl Driver
     max_samples = 1,
     test = "TwoSocketsClaimDistinctSlots"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_udp_slots_two_sockets_claim_distinct_slots() -> impl Driver {
     UdpSlotsDriver::new()
 }
@@ -765,7 +772,6 @@ fn quint_udp_slots_two_sockets_claim_distinct_slots() -> impl Driver {
     max_samples = 1,
     test = "RefusedDiscardsParkedFramesAndOnlyNewDatagramReassociates"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_udp_slots_refused_discards_parked_frames_and_only_new_datagram_reassociates() -> impl Driver
 {
     UdpSlotsDriver::new()
@@ -779,7 +785,6 @@ fn quint_udp_slots_refused_discards_parked_frames_and_only_new_datagram_reassoci
     max_samples = 1,
     test = "HostAbortOfLiveAssociationEndsItAndKeepsSlotOwned"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_udp_slots_host_abort_of_live_association_ends_it_and_keeps_slot_owned() -> impl Driver {
     UdpSlotsDriver::new()
 }
@@ -792,7 +797,6 @@ fn quint_udp_slots_host_abort_of_live_association_ends_it_and_keeps_slot_owned()
     max_samples = 1,
     test = "DatagramQueuedBeforeAnEndIsDiscardedWithTheQueue"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_udp_slots_datagram_queued_before_an_end_is_discarded_with_the_queue() -> impl Driver {
     UdpSlotsDriver::new()
 }
@@ -805,7 +809,6 @@ fn quint_udp_slots_datagram_queued_before_an_end_is_discarded_with_the_queue() -
     max_samples = 1,
     test = "LatePairedForReleasedSlotIsAnsweredWithAbort"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_udp_slots_late_paired_for_released_slot_is_answered_with_abort() -> impl Driver {
     UdpSlotsDriver::new()
 }
@@ -818,7 +821,6 @@ fn quint_udp_slots_late_paired_for_released_slot_is_answered_with_abort() -> imp
     max_samples = 1,
     test = "LostReleaseReportIsFoundByAudit"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_udp_slots_lost_release_report_is_found_by_audit() -> impl Driver {
     UdpSlotsDriver::new()
 }
@@ -831,7 +833,6 @@ fn quint_udp_slots_lost_release_report_is_found_by_audit() -> impl Driver {
     max_samples = 1,
     test = "SocketCloseReleasesEverySlotItOwns"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_udp_slots_socket_close_releases_every_slot_it_owns() -> impl Driver {
     UdpSlotsDriver::new()
 }
@@ -844,7 +845,6 @@ fn quint_udp_slots_socket_close_releases_every_slot_it_owns() -> impl Driver {
     max_samples = 1,
     test = "IdleSlotReleaseEndsAssociation"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_udp_slots_idle_slot_release_ends_association() -> impl Driver {
     UdpSlotsDriver::new()
 }
@@ -857,7 +857,6 @@ fn quint_udp_slots_idle_slot_release_ends_association() -> impl Driver {
     max_samples = 1,
     test = "AuditTickReleasesOrphansAndIdleSlotsInOneStep"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_udp_slots_audit_tick_releases_orphans_and_idle_slots_in_one_step() -> impl Driver {
     UdpSlotsDriver::new()
 }
@@ -870,7 +869,6 @@ fn quint_udp_slots_audit_tick_releases_orphans_and_idle_slots_in_one_step() -> i
     max_samples = 1,
     test = "PairingDeadlineAbortsAndLatePairedIsDiscarded"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_udp_slots_pairing_deadline_aborts_and_late_paired_is_discarded() -> impl Driver {
     UdpSlotsDriver::new()
 }
@@ -883,7 +881,6 @@ fn quint_udp_slots_pairing_deadline_aborts_and_late_paired_is_discarded() -> imp
     max_samples = 1,
     test = "RecycledSlotNeverDeliversPreviousOwnersFrames"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_udp_slots_recycled_slot_never_delivers_previous_owners_frames() -> impl Driver {
     UdpSlotsDriver::new()
 }
@@ -893,7 +890,6 @@ fn quint_udp_slots_recycled_slot_never_delivers_previous_owners_frames() -> impl
 /// Randomized traces of the conformance main (seed printed on failure).
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_run(spec = "../../specs/quint/guest-flow-owner/udp_slots.qnt", main = "slots_conf")]
-#[ignore = "pending DELIVER step 5"]
 fn quint_udp_slots_slots_conf_guest() -> impl Driver {
     UdpSlotsDriver::new()
 }

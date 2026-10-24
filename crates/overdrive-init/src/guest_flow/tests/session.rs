@@ -9,7 +9,7 @@
 
 use std::io::ErrorKind;
 
-use overdrive_core::guest_transport::forwarder::ForwarderInventory;
+use overdrive_core::guest_transport::forwarder::{AbortCause, ForwardOutcome, ForwarderInventory};
 use overdrive_core::guest_transport::wire::{
     CONTROL_RECONNECT_BACKOFF, ControlMessage, ControlOpen, FlowRefusal,
 };
@@ -51,7 +51,6 @@ fn guest_owner_fatal_renders_its_pinned_display_texts() {
 /// equal.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn session_opens_with_a_control_open_carrying_the_guests_own_token() {
     let mut g = Guest::new();
     assert_eq!(g.owner.next_deadline(), Some(g.now()), "new arms the session-open deadline at now");
@@ -101,7 +100,6 @@ fn session_opens_with_a_control_open_carrying_the_guests_own_token() {
 /// deadline, so ticks do not accumulate. `next_deadline` is a pure read.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn the_audit_tick_is_fixed_rate_from_the_first_dispatch() {
     let mut g = Guest::new();
     let t0 = g.now();
@@ -125,13 +123,13 @@ fn the_audit_tick_is_fixed_rate_from_the_first_dispatch() {
 /// TcpAccept flow, an accepted one whose C is connecting, a paired TcpConnect
 /// flow, an unpaired TcpConnect flow and an attached datagram association. The
 /// one dispatch that observes the loss aborts every pair (`abort_forward`),
-/// aborts every unattached socket and ends every association, and no control
-/// connect precedes those aborts; every table is empty after it and every
-/// application far end reads a reset, never EOF. The reconnect is started
+/// aborts every unattached socket, and no control connect precedes those
+/// aborts. An attached association remains resident until its Detached record
+/// is consumed and the following owner dispatch ends it; every application far
+/// end reads a reset, never EOF. The reconnect is started
 /// `CONTROL_RECONNECT_BACKOFF` after the loss.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn session_loss_aborts_every_flow_in_the_observing_dispatch_before_any_reconnect() {
     let mut g = Guest::new();
     g.open_session();
@@ -154,7 +152,11 @@ fn session_loss_aborts_every_flow_in_the_observing_dispatch_before_any_reconnect
     let obs = g.obs();
     assert!(!obs.session, "the loss is observed");
     assert!(obs.accepted.is_empty() && obs.flows.is_empty() && obs.awaiting_paired.is_empty());
-    assert!(obs.slots.values().all(|x| x.association.is_none() && x.attached.is_none()));
+    assert_eq!(
+        (obs.slots[&s].association, obs.slots[&s].attached),
+        (Some(a), Some(p3)),
+        "the datagram pair stays attached until its Detached record is consumed"
+    );
     assert_eq!(obs.slots[&s].owner, Some((cookie(9), dest(3))), "the slot stays owned (U-2)");
     let effects = g.io.effects();
     for pair in [p1, p2, p3] {
@@ -163,7 +165,10 @@ fn session_loss_aborts_every_flow_in_the_observing_dispatch_before_any_reconnect
             "{pair:?} is aborted in the observing dispatch"
         );
     }
-    assert!(effects.contains(&SimGuestEffect::EndAssociation { slot: s }));
+    assert!(
+        !effects.contains(&SimGuestEffect::EndAssociation { slot: s }),
+        "the observing dispatch does not close the slot ahead of its end record"
+    );
     assert!(
         !effects.iter().any(|e| matches!(
             e,
@@ -185,7 +190,45 @@ fn session_loss_aborts_every_flow_in_the_observing_dispatch_before_any_reconnect
             "{flow:?}'s application reads a reset"
         );
     }
-    assert_eq!(g.obs(), obs, "the aborts' Detached records change nothing (the flows are ended)");
+    let after_records = g.obs();
+    assert!(
+        after_records.slots[&s].association.is_none() && after_records.slots[&s].attached.is_none(),
+        "the dispatch after consuming p3's record ends the association"
+    );
+    assert_eq!(
+        after_records.slots[&s].owner,
+        Some((cookie(9), dest(3))),
+        "session loss ends the association without releasing the slot"
+    );
+    assert!(
+        g.io.effects().contains(&SimGuestEffect::EndAssociation { slot: s }),
+        "the deferred owner close discards and disconnects the slot"
+    );
+    let last_consumed = after_records.last_consumed_end;
+    let consumed_ends = after_records.consumed_ends;
+    let mut without_allowed_delta = after_records;
+    without_allowed_delta.last_consumed_end = obs.last_consumed_end;
+    without_allowed_delta.consumed_ends = obs.consumed_ends;
+    without_allowed_delta.slots.get_mut(&s).expect("the slot remains resident").association =
+        obs.slots[&s].association;
+    without_allowed_delta.slots.get_mut(&s).expect("the slot remains resident").attached =
+        obs.slots[&s].attached;
+    assert_eq!(
+        without_allowed_delta, obs,
+        "record consumption changes only D-11 and the deferred slot association/attach fields"
+    );
+    assert_eq!(consumed_ends, obs.consumed_ends + 3, "one consumed record per aborted pair");
+    assert!(
+        matches!(
+            last_consumed,
+            Some(end)
+                if end.id == p3
+                    && end.outcome == ForwardOutcome::Aborted { cause: AbortCause::Detached }
+                    && end.moved_ab == 0
+                    && end.moved_ba == 0
+        ),
+        "the pinned queue order leaves p3's Detached record last: {last_consumed:?}"
+    );
 
     assert_eq!(
         g.owner.next_deadline().map(|d| d <= lost_at + CONTROL_RECONNECT_BACKOFF),
@@ -201,7 +244,6 @@ fn session_loss_aborts_every_flow_in_the_observing_dispatch_before_any_reconnect
 /// relies on `ECONNRESET` / `EPOLLERR` for the host's close.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn the_hosts_end_of_the_session_is_observed_as_eof_or_read_hangup() {
     for how in ["eof-on-read", "read-hangup"] {
         let mut g = Guest::new();
@@ -230,7 +272,6 @@ fn the_hosts_end_of_the_session_is_observed_as_eof_or_read_hangup() {
 /// listens again; no `GuestOwnerFatal` at any step.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn host_owner_restart_resets_flows_and_reopens_the_session_without_fatal() {
     let mut g = Guest::new();
     g.open_session();
@@ -284,7 +325,6 @@ fn host_owner_restart_resets_flows_and_reopens_the_session_without_fatal() {
 /// `CONTROL_RECONNECT_BACKOFF` later.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn every_session_loss_shape_is_recovered_not_fatal() {
     // the session read ends: EOF, or an error
     for how in [SimSessionEnd::Eof, SimSessionEnd::Reset] {
@@ -336,7 +376,6 @@ fn every_session_loss_shape_is_recovered_not_fatal() {
 /// the next only in a later dispatch, at the backoff.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn the_guest_holds_one_session_and_reopens_only_after_observing_its_loss() {
     let mut g = Guest::new();
     g.open_session();
@@ -369,7 +408,6 @@ fn the_guest_holds_one_session_and_reopens_only_after_observing_its_loss() {
 /// and every table stay unchanged.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_message_for_an_unknown_flow_leaves_the_session_and_every_table_unchanged() {
     let mut g = Guest::new();
     g.open_session();
@@ -396,7 +434,6 @@ fn a_message_for_an_unknown_flow_leaves_the_session_and_every_table_unchanged() 
 /// fails, so it is not driven here.)
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn only_event_wait_and_listener_failures_are_fatal() {
     let mut g = Guest::new();
     g.open_session();

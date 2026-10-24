@@ -59,7 +59,9 @@ const HEAD: &str = "overdrive.transport=vsock2,addr=100.95.0.7,dns=100.95.0.1,la
 /// GUEST_UDP_SLOTS - 1`), spelled out so the oracle does not depend on the
 /// scaffolded `guest_reserved_ports()`.
 const RESERVED: RangeInclusive<u16> = 61_000..=62_024;
-const ALL_PROGRAMS: [GuestProgram; 5] = [
+const ALL_PROGRAMS: [GuestProgram; 7] = [
+    GuestProgram::TcpCorrelation,
+    GuestProgram::TcpCorrelationCandidate,
     GuestProgram::Connect4,
     GuestProgram::Sendmsg4,
     GuestProgram::Getpeername4,
@@ -100,10 +102,13 @@ enum Step {
     DummyDevice,
     AddressAdd(Ipv4Addr),
     FwmarkRule,
+    FwmarkRoute,
+    TcpFwmarkAccept,
     FwmarkReflect,
     ReservePorts(RangeInclusive<u16>),
     BindTcpIntake(SocketAddrV4),
     BindUdpSlot(SocketAddrV4),
+    PrepareGuestPrograms,
     Load(GuestProgram),
     Attach(GuestProgram),
     LoadForwarderModule,
@@ -119,17 +124,25 @@ enum ModuleFailure {
     Load,
 }
 
+/// Which embedded object the scripted preparation step refuses.
+#[derive(Debug, Clone, Copy)]
+enum PrepareFailure {
+    RustObject,
+    CandidateObject,
+}
+
 /// Records every step and fails the one equal to `fail_on`.
 #[derive(Default)]
 struct RecordingOps {
     calls: Vec<Step>,
     fail_on: Option<Step>,
     module_failure: Option<ModuleFailure>,
+    prepare_failure: Option<PrepareFailure>,
 }
 
 impl RecordingOps {
     fn failing_on(step: Step) -> Self {
-        Self { calls: Vec::new(), fail_on: Some(step), module_failure: None }
+        Self { calls: Vec::new(), fail_on: Some(step), module_failure: None, prepare_failure: None }
     }
 
     fn failing_module(failure: ModuleFailure) -> Self {
@@ -137,6 +150,16 @@ impl RecordingOps {
             calls: Vec::new(),
             fail_on: Some(Step::LoadForwarderModule),
             module_failure: Some(failure),
+            prepare_failure: None,
+        }
+    }
+
+    fn failing_prepare(failure: PrepareFailure) -> Self {
+        Self {
+            calls: Vec::new(),
+            fail_on: Some(Step::PrepareGuestPrograms),
+            module_failure: None,
+            prepare_failure: Some(failure),
         }
     }
 
@@ -175,6 +198,12 @@ impl GuestTransportOps for RecordingOps {
     fn add_fwmark_rule(&mut self) -> io::Result<()> {
         self.io(Step::FwmarkRule)
     }
+    fn add_fwmark_route(&mut self) -> io::Result<()> {
+        self.io(Step::FwmarkRoute)
+    }
+    fn enable_tcp_fwmark_accept(&mut self) -> io::Result<()> {
+        self.io(Step::TcpFwmarkAccept)
+    }
     fn enable_fwmark_reflect(&mut self) -> io::Result<()> {
         self.io(Step::FwmarkReflect)
     }
@@ -186,6 +215,16 @@ impl GuestTransportOps for RecordingOps {
     }
     fn bind_udp_slot(&mut self, addr: SocketAddrV4) -> io::Result<()> {
         self.io(Step::BindUdpSlot(addr))
+    }
+    fn prepare_guest_programs(&mut self) -> Result<(), GuestTransportSetupError> {
+        if !self.record(Step::PrepareGuestPrograms) {
+            return Ok(());
+        }
+        let program = match self.prepare_failure.unwrap_or(PrepareFailure::RustObject) {
+            PrepareFailure::RustObject => GuestProgram::TcpCorrelation,
+            PrepareFailure::CandidateObject => GuestProgram::TcpCorrelationCandidate,
+        };
+        Err(GuestTransportSetupError::ProgramLoad { program, source: aya::EbpfError::NoBTF })
     }
     fn load_program(&mut self, program: GuestProgram) -> Result<(), aya::EbpfError> {
         if self.record(Step::Load(program)) { Err(aya::EbpfError::NoBTF) } else { Ok(()) }
@@ -237,11 +276,14 @@ fn expected_order() -> Vec<Step> {
         Step::DummyDevice,
         Step::AddressAdd(WL),
         Step::FwmarkRule,
+        Step::FwmarkRoute,
+        Step::TcpFwmarkAccept,
         Step::FwmarkReflect,
         Step::ReservePorts(RESERVED),
         Step::BindTcpIntake(SocketAddrV4::new(WL, 61_000)),
     ];
     steps.extend((61_001..=62_024).map(|port| Step::BindUdpSlot(SocketAddrV4::new(WL, port))));
+    steps.push(Step::PrepareGuestPrograms);
     for program in ALL_PROGRAMS {
         steps.push(Step::Load(program));
         steps.push(Step::Attach(program));
@@ -254,14 +296,10 @@ fn expected_order() -> Vec<Step> {
 // Plain data (real now): Display texts and labels
 // ---------------------------------------------------------------------------
 
-/// Every `GuestTransportSetupError` variant whose fields are plain data
-/// renders exactly the DG-5 table text.
-/// CONTRACT_SHAPE: pure-function.
-#[test]
-fn every_setup_error_renders_its_pinned_display_text() {
+fn setup_error_display_cases() -> Vec<(GuestTransportSetupError, String)> {
     let e = || io::Error::other("boom");
     let addr = SocketAddrV4::new(WL, 61_001);
-    let cases: Vec<(GuestTransportSetupError, String)> = vec![
+    vec![
         (
             GuestTransportSetupError::TokenMissing,
             "kernel command line has no overdrive.transport= token".into(),
@@ -287,22 +325,46 @@ fn every_setup_error_renders_its_pinned_display_text() {
             "adding the fwmark lookup rule failed: boom".into(),
         ),
         (
+            GuestTransportSetupError::FwmarkRoute { source: e() },
+            "adding the fwmark local route failed: boom".into(),
+        ),
+        (
+            GuestTransportSetupError::TcpFwmarkAccept { source: e() },
+            "setting net.ipv4.tcp_fwmark_accept failed: boom".into(),
+        ),
+        (
             GuestTransportSetupError::FwmarkReflect { source: e() },
             "setting net.ipv4.fwmark_reflect failed: boom".into(),
         ),
         (
             GuestTransportSetupError::ProgramLoad {
-                program: GuestProgram::SockRelease,
+                program: GuestProgram::TcpCorrelation,
                 source: aya::EbpfError::NoBTF,
             },
-            "loading guest program sock_release failed: no BTF parsed for object".into(),
+            "loading guest program tcp_correlation failed: no BTF parsed for object".into(),
         ),
         (
             GuestTransportSetupError::ProgramAttach {
-                program: GuestProgram::Recvmsg4,
+                program: GuestProgram::TcpCorrelation,
                 source: aya::programs::ProgramError::NotLoaded,
             },
-            "attaching guest program recvmsg4 failed: the program is not loaded".into(),
+            "attaching guest program tcp_correlation failed: the program is not loaded".into(),
+        ),
+        (
+            GuestTransportSetupError::ProgramLoad {
+                program: GuestProgram::TcpCorrelationCandidate,
+                source: aya::EbpfError::NoBTF,
+            },
+            "loading guest program tcp_correlation_candidate failed: no BTF parsed for object"
+                .into(),
+        ),
+        (
+            GuestTransportSetupError::ProgramAttach {
+                program: GuestProgram::TcpCorrelationCandidate,
+                source: aya::programs::ProgramError::NotLoaded,
+            },
+            "attaching guest program tcp_correlation_candidate failed: the program is not loaded"
+                .into(),
         ),
         (
             GuestTransportSetupError::InboundListenerBind { source: e() },
@@ -334,8 +396,15 @@ fn every_setup_error_renders_its_pinned_display_text() {
             },
             "opening the guest forwarder failed: forwarder ABI 2 is not the expected 1".into(),
         ),
-    ];
-    for (error, expected) in cases {
+    ]
+}
+
+/// Every `GuestTransportSetupError` variant whose fields are plain data
+/// renders exactly the DG-5 table text.
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+fn every_setup_error_renders_its_pinned_display_text() {
+    for (error, expected) in setup_error_display_cases() {
         assert_eq!(error.to_string(), expected, "{error:?}");
     }
 }
@@ -345,7 +414,6 @@ fn every_setup_error_renders_its_pinned_display_text() {
 /// step 5 lands.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn the_release_mismatch_renders_both_releases_and_the_guest_kit_rule() {
     let error = GuestTransportSetupError::ForwarderModuleRelease {
         module: module_release(),
@@ -362,7 +430,6 @@ fn the_release_mismatch_renders_both_releases_and_the_guest_kit_rule() {
 /// whitespace or NUL round-trips through `FromStr` / `Display`.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_kernel_release_roundtrips() {
     proptest!(|(release in "[A-Za-z0-9._+~-]{1,64}")| {
         let parsed = KernelRelease::from_str(&release).expect("a valid release");
@@ -374,7 +441,6 @@ fn a_kernel_release_roundtrips() {
 /// whitespace or NUL, each with its own variant.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn an_invalid_kernel_release_is_refused_by_kind() {
     assert_eq!(KernelRelease::from_str(""), Err(KernelReleaseError::Empty));
     assert_eq!(KernelRelease::from_str(&"a".repeat(65)), Err(KernelReleaseError::TooLong));
@@ -407,7 +473,15 @@ fn label_enums_render_lower_snake_case() {
     for (field, label) in fields {
         assert_eq!(field.as_str(), label);
     }
-    let labels = ["connect4", "sendmsg4", "getpeername4", "recvmsg4", "sock_release"];
+    let labels = [
+        "tcp_correlation",
+        "tcp_correlation_candidate",
+        "connect4",
+        "sendmsg4",
+        "getpeername4",
+        "recvmsg4",
+        "sock_release",
+    ];
     for (program, label) in ALL_PROGRAMS.into_iter().zip(labels) {
         assert_eq!(program.as_str(), label);
     }
@@ -422,7 +496,6 @@ fn label_enums_render_lower_snake_case() {
 /// the other parameters are ignored.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn well_formed_token_parses_and_other_parameters_are_ignored() {
     for cmdline in [
         VALID.to_owned(),
@@ -437,7 +510,6 @@ fn well_formed_token_parses_and_other_parameters_are_ignored() {
 /// No token → `TokenMissing`; two tokens → `TokenDuplicate` (even if equal).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn missing_and_duplicate_tokens_are_refused() {
     for cmdline in ["", "console=ttyS0 root=/dev/vda", "overdrive.net=10.0.0.2/30,10.0.0.1"] {
         assert!(
@@ -460,7 +532,6 @@ fn missing_and_duplicate_tokens_are_refused() {
 /// The first position whose key or value is invalid names the field.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn first_invalid_position_names_the_field() {
     let launch = "launch=0123456789abcdef0123456789abcdef";
     let cases: Vec<(String, TransportTokenField)> = vec![
@@ -553,7 +624,6 @@ fn first_invalid_position_names_the_field() {
 /// guest setup step: `parse_transport_token` is the only caller-visible step.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn an_invalid_host_port_field_names_that_field() {
     let field_cases: [(&str, TransportTokenField); 3] = [
         ("beacon", TransportTokenField::Beacon),
@@ -601,7 +671,6 @@ fn an_invalid_host_port_field_names_that_field() {
 /// A missing trailing field names the first missing one.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn missing_trailing_field_names_the_first_missing_one() {
     let cases = [
         ("overdrive.transport=vsock2".to_owned(), TransportTokenField::Addr),
@@ -624,8 +693,7 @@ proptest! {
     /// Every rendering of a valid `(addr, gateway, launch)` parses back to it.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 5"]
-    fn token_rendering_roundtrips(
+        fn token_rendering_roundtrips(
         addr in any::<u32>(),
         gateway in any::<u32>(),
         bytes in any::<[u8; 16]>(),
@@ -659,17 +727,21 @@ proptest! {
 // Setup order (G-V7 row 1) and stop at the first failure (row 2)
 // ---------------------------------------------------------------------------
 
-/// A clean run calls every step once, in the pinned order — the capture
-/// programs, then the forwarder module, then its context, then the inbound
-/// listener — and returns `Ok`.
+/// A clean run calls every step once, in the pinned order — two-object map
+/// preparation, then the seven capture programs, then the forwarder module,
+/// its context and the inbound listener — and returns `Ok`.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn configure_runs_every_step_in_the_pinned_order() {
     let mut ops = RecordingOps::default();
     configure_guest_transport(&token(), &mut ops).expect("no step fails");
-    assert_eq!(ops.calls.len(), 6 + 1_024 + 10 + 3);
+    assert_eq!(ops.calls.len(), 8 + 1_024 + 1 + 14 + 3);
     assert_eq!(ops.calls, expected_order());
+    let prepare =
+        ops.calls.iter().position(|s| *s == Step::PrepareGuestPrograms).expect("preparation");
+    let first_load =
+        ops.calls.iter().position(|s| matches!(s, Step::Load(_))).expect("program load");
+    assert!(prepare < first_load, "both embedded objects are prepared before any program load");
     let module = ops.calls.iter().position(|s| *s == Step::LoadForwarderModule).expect("module");
     let open = ops.calls.iter().position(|s| *s == Step::OpenForwarder).expect("context");
     let last_attach =
@@ -678,41 +750,73 @@ fn configure_runs_every_step_in_the_pinned_order() {
     assert_eq!(ops.calls.last(), Some(&Step::BindInboundVsock), "the inbound listener is last");
 }
 
-/// A failing step stops the run there (no later step is called) and maps to
-/// exactly its variant.
-/// CONTRACT_SHAPE: bounded-change.
-#[test]
-#[ignore = "pending DELIVER step 5"]
-fn configure_stops_at_the_first_failure_with_that_steps_variant() {
-    let tcp = SocketAddrV4::new(WL, 61_000);
-    let first_udp = SocketAddrV4::new(WL, 61_001);
-    let mid_udp = SocketAddrV4::new(WL, 61_513);
-    let last_udp = SocketAddrV4::new(WL, 62_024);
-    type Check = fn(&GuestTransportSetupError) -> bool;
-    let cases: Vec<(Step, Check)> = vec![
+type SetupCheck = fn(&GuestTransportSetupError) -> bool;
+
+fn network_setup_failure_cases() -> Vec<(Step, SetupCheck)> {
+    vec![
         (Step::DummyDevice, |e| matches!(e, GuestTransportSetupError::DummyDevice { .. })),
         (Step::AddressAdd(WL), |e| matches!(e, GuestTransportSetupError::AddressAdd { .. })),
         (Step::FwmarkRule, |e| matches!(e, GuestTransportSetupError::FwmarkRule { .. })),
+        (Step::FwmarkRoute, |e| matches!(e, GuestTransportSetupError::FwmarkRoute { .. })),
+        (Step::TcpFwmarkAccept, |e| matches!(e, GuestTransportSetupError::TcpFwmarkAccept { .. })),
         (Step::FwmarkReflect, |e| matches!(e, GuestTransportSetupError::FwmarkReflect { .. })),
         (Step::ReservePorts(RESERVED), |e| {
             matches!(e, GuestTransportSetupError::ReservedPorts { .. })
         }),
         (
-            Step::BindTcpIntake(tcp),
+            Step::BindTcpIntake(SocketAddrV4::new(WL, 61_000)),
             |e| matches!(e, GuestTransportSetupError::IntakeBind { addr, .. } if addr.port() == 61_000),
         ),
         (
-            Step::BindUdpSlot(first_udp),
+            Step::BindUdpSlot(SocketAddrV4::new(WL, 61_001)),
             |e| matches!(e, GuestTransportSetupError::IntakeBind { addr, .. } if addr.port() == 61_001),
         ),
         (
-            Step::BindUdpSlot(mid_udp),
+            Step::BindUdpSlot(SocketAddrV4::new(WL, 61_513)),
             |e| matches!(e, GuestTransportSetupError::IntakeBind { addr, .. } if addr.port() == 61_513),
         ),
         (
-            Step::BindUdpSlot(last_udp),
+            Step::BindUdpSlot(SocketAddrV4::new(WL, 62_024)),
             |e| matches!(e, GuestTransportSetupError::IntakeBind { addr, .. } if addr.port() == 62_024),
         ),
+    ]
+}
+
+fn program_setup_failure_cases() -> Vec<(Step, SetupCheck)> {
+    vec![
+        (Step::Load(GuestProgram::TcpCorrelation), |e| {
+            matches!(
+                e,
+                GuestTransportSetupError::ProgramLoad { program: GuestProgram::TcpCorrelation, .. }
+            )
+        }),
+        (Step::Attach(GuestProgram::TcpCorrelation), |e| {
+            matches!(
+                e,
+                GuestTransportSetupError::ProgramAttach {
+                    program: GuestProgram::TcpCorrelation,
+                    ..
+                }
+            )
+        }),
+        (Step::Load(GuestProgram::TcpCorrelationCandidate), |e| {
+            matches!(
+                e,
+                GuestTransportSetupError::ProgramLoad {
+                    program: GuestProgram::TcpCorrelationCandidate,
+                    ..
+                }
+            )
+        }),
+        (Step::Attach(GuestProgram::TcpCorrelationCandidate), |e| {
+            matches!(
+                e,
+                GuestTransportSetupError::ProgramAttach {
+                    program: GuestProgram::TcpCorrelationCandidate,
+                    ..
+                }
+            )
+        }),
         (Step::Load(GuestProgram::Connect4), |e| {
             matches!(
                 e,
@@ -751,8 +855,44 @@ fn configure_stops_at_the_first_failure_with_that_steps_variant() {
         (Step::BindInboundVsock, |e| {
             matches!(e, GuestTransportSetupError::InboundListenerBind { .. })
         }),
-    ];
+    ]
+}
+
+fn assert_preparation_failures_stop_before_load(full: &[Step]) {
+    let prepare_stop =
+        full.iter().position(|s| *s == Step::PrepareGuestPrograms).expect("preparation step");
+    for (failure, program) in [
+        (PrepareFailure::RustObject, GuestProgram::TcpCorrelation),
+        (PrepareFailure::CandidateObject, GuestProgram::TcpCorrelationCandidate),
+    ] {
+        let mut ops = RecordingOps::failing_prepare(failure);
+        let error =
+            configure_guest_transport(&token(), &mut ops).expect_err("program preparation fails");
+        assert!(
+            matches!(
+                error,
+                GuestTransportSetupError::ProgramLoad {
+                    program: observed,
+                    source: aya::EbpfError::NoBTF,
+                } if observed == program
+            ),
+            "{failure:?} mapped to {error:?}"
+        );
+        assert_eq!(
+            ops.calls,
+            full[..=prepare_stop].to_vec(),
+            "{failure:?}: no load or attach runs after preparation failure"
+        );
+    }
+}
+
+/// A failing step stops the run there (no later step is called) and maps to
+/// exactly its variant.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+fn configure_stops_at_the_first_failure_with_that_steps_variant() {
     let full = expected_order();
+    let cases = network_setup_failure_cases().into_iter().chain(program_setup_failure_cases());
     for (failing, check) in cases {
         let mut ops = RecordingOps::failing_on(failing.clone());
         let error =
@@ -761,6 +901,7 @@ fn configure_stops_at_the_first_failure_with_that_steps_variant() {
         let stop = full.iter().position(|s| *s == failing).expect("failing step is in the order");
         assert_eq!(ops.calls, full[..=stop].to_vec(), "no step after {failing:?} runs");
     }
+    assert_preparation_failures_stop_before_load(&full);
 }
 
 /// EVMOD-GUEST-KIT: each of the three forwarder-module failures — no module
@@ -771,7 +912,6 @@ fn configure_stops_at_the_first_failure_with_that_steps_variant() {
 /// before READY, the host sees the existing "guest exited before READY").
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn each_forwarder_module_failure_is_a_pre_ready_start_failure_of_its_own_kind() {
     let full = expected_order();
     let stop = full.iter().position(|s| *s == Step::LoadForwarderModule).expect("module step");

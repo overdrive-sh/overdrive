@@ -26,18 +26,29 @@
     reason = "real-kernel test cells: a failed precondition panics"
 )]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::{ErrorKind, Read, Write};
-use std::net::{Shutdown, SocketAddrV4, TcpListener};
-use std::os::fd::{AsRawFd, OwnedFd};
+use std::mem::size_of;
+use std::net::{Ipv4Addr, Shutdown, SocketAddrV4, TcpListener};
+use std::os::fd::{AsFd, AsRawFd, OwnedFd, RawFd};
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
 
-use nix::sys::socket::{AddressFamily, SockFlag, SockType, VsockAddr, connect, shutdown, socket};
-use overdrive_core::guest_transport::GUEST_INBOUND_PORT;
+use aya::maps::{MapType, loaded_maps};
+use nix::sys::socket::{
+    AddressFamily, MsgFlags, SockFlag, SockType, SockaddrIn, VsockAddr, connect, recv, send,
+    sendto, setsockopt, shutdown, socket, sockopt,
+};
+use nix::sys::time::{TimeVal, TimeValLike};
 use overdrive_core::guest_transport::wire::{FlowId, FlowOrigin, FlowRequest};
+use overdrive_core::guest_transport::{
+    GUEST_INBOUND_PORT, GUEST_TCP_INTAKE_PORT, GUEST_TCP_PENDING_MAX,
+};
 use overdrive_core::net::ListenPort;
+use overdrive_testing::guest_kit::TC_GUEST_PATH;
 
 use super::test_support::{ACCEPT_PATH_CASES, AcceptPathCase};
 use crate::transport::{GuestTransportToken, parse_transport_token};
@@ -93,7 +104,6 @@ enum Outcome {
 /// first record.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn the_accept_path_matches_the_sim_per_connection() {
     let token = in_guest();
     let mut listeners: BTreeMap<u16, TcpListener> = BTreeMap::new();
@@ -149,6 +159,789 @@ fn the_accept_path_matches_the_sim_per_connection() {
 }
 
 // ---------------------------------------------------------------------------
+// TCP-CORRELATION: the real Connect4 -> final ACK -> intake-owner path
+// ---------------------------------------------------------------------------
+
+const TCP_FASTOPEN: i32 = 23;
+const TCP_SYNCOOKIES_SYSCTL: &str = "/proc/sys/net/ipv4/tcp_syncookies";
+const TCP_FASTOPEN_SYSCTL: &str = "/proc/sys/net/ipv4/tcp_fastopen";
+const BPF_FS: &str = "/sys/fs/bpf";
+const CHILD_CORRELATION_MAX_ENTRIES: u32 = 8_194;
+const TFO_QDISC_CLASS: i32 = 0x0001_0003;
+
+/// Source-local inspection of the two private maps. Discovery uses the
+/// design-owned map shapes rather than a test-only production accessor:
+/// socket storage has `(key=4, max_entries=0)`, and the child hash has the
+/// exact 8,194-entry bound. The disposable guest has one production owner.
+#[derive(Clone, Copy)]
+struct CorrelationMaps {
+    active_id: u32,
+    child_id: u32,
+}
+
+impl CorrelationMaps {
+    fn discover() -> Self {
+        let mut active = Vec::new();
+        let mut child = Vec::new();
+        let u64_size = u32::try_from(size_of::<u64>()).expect("u64 size fits u32");
+        for info in loaded_maps() {
+            let info = info.expect("the guest's loaded BPF maps are observable");
+            match info.map_type().expect("the map type is known") {
+                MapType::SkStorage if info.key_size() == 4 && info.max_entries() == 0 => {
+                    active.push(info.id());
+                }
+                MapType::Hash
+                    if info.key_size() == u64_size
+                        && info.max_entries() == CHILD_CORRELATION_MAX_ENTRIES =>
+                {
+                    child.push(info.id());
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(active.len(), 1, "one capacity-free active-correlation socket-storage map");
+        assert_eq!(child.len(), 1, "one 8,194-entry child-correlation map");
+        Self { active_id: active[0], child_id: child[0] }
+    }
+
+    #[allow(
+        unsafe_code,
+        reason = "Aya 0.13.1 exposes no key-only iterator; the source-local Tier-3 fixture calls BPF_MAP_GET_NEXT_KEY over exact u64 buffers without constraining the private value representation"
+    )]
+    fn child_entries(&self) -> usize {
+        let info = aya::maps::MapInfo::from_id(self.child_id)
+            .expect("open the child-correlation map by id");
+        let map_fd = info.fd().expect("open the child-correlation map fd");
+        let mut current: Option<u64> = None;
+        let mut count = 0usize;
+        loop {
+            let mut next = 0u64;
+            let mut attr = [0u8; 32];
+            attr[0..4].copy_from_slice(&map_fd.as_fd().as_raw_fd().cast_unsigned().to_ne_bytes());
+            if let Some(key) = current.as_ref() {
+                attr[8..16].copy_from_slice(&(std::ptr::from_ref(key) as u64).to_ne_bytes());
+            }
+            attr[16..24].copy_from_slice(&(std::ptr::from_mut(&mut next) as u64).to_ne_bytes());
+            // SAFETY: BPF_MAP_GET_NEXT_KEY reads the optional live u64 key
+            // and writes one u64 into `next`, matching the map's key size.
+            let result =
+                unsafe { nix::libc::syscall(nix::libc::SYS_bpf, 4, attr.as_ptr(), attr.len()) };
+            if result == 0 {
+                count += 1;
+                current = Some(next);
+            } else {
+                let error = std::io::Error::last_os_error();
+                assert_eq!(
+                    error.raw_os_error(),
+                    Some(nix::libc::ENOENT),
+                    "iterate child-correlation keys"
+                );
+                return count;
+            }
+        }
+    }
+
+    #[allow(
+        unsafe_code,
+        reason = "Aya 0.13.1 has no typed userspace SK_STORAGE lookup; the source-local Tier-3 fixture calls BPF_MAP_LOOKUP_ELEM over exact buffers"
+    )]
+    fn active_contains(&self, socket_fd: RawFd) -> bool {
+        let info = aya::maps::MapInfo::from_id(self.active_id)
+            .expect("open the active-correlation map by id");
+        let map_fd = info.fd().expect("open the active-correlation map fd");
+        let key = socket_fd;
+        let mut value = vec![0u8; info.value_size() as usize];
+        let mut attr = [0u8; 32];
+        attr[0..4].copy_from_slice(&map_fd.as_fd().as_raw_fd().cast_unsigned().to_ne_bytes());
+        attr[8..16].copy_from_slice(&(std::ptr::from_ref(&key) as u64).to_ne_bytes());
+        attr[16..24].copy_from_slice(&(value.as_mut_ptr() as u64).to_ne_bytes());
+        // SAFETY: BPF_MAP_LOOKUP_ELEM reads the initialized attr, the live
+        // socket-fd key and the value-sized writable buffer for this map.
+        let result =
+            unsafe { nix::libc::syscall(nix::libc::SYS_bpf, 1, attr.as_ptr(), attr.len()) };
+        if result == 0 {
+            true
+        } else {
+            let error = std::io::Error::last_os_error();
+            assert_eq!(
+                error.raw_os_error(),
+                Some(nix::libc::ENOENT),
+                "active-correlation lookup for fd {socket_fd}"
+            );
+            false
+        }
+    }
+}
+
+struct ApplicationSocket(OwnedFd);
+
+impl ApplicationSocket {
+    fn new() -> Self {
+        Self(
+            socket(AddressFamily::Inet, SockType::Stream, SockFlag::SOCK_CLOEXEC, None)
+                .expect("create the application socket"),
+        )
+    }
+
+    fn raw_fd(&self) -> RawFd {
+        self.0.as_raw_fd()
+    }
+
+    #[allow(
+        unsafe_code,
+        reason = "nix 0.30 has no SO_COOKIE sockopt; this source-local Tier-3 fixture supplies an aligned u64 and its exact length"
+    )]
+    fn cookie(&self) -> SocketCookie {
+        let mut raw = 0u64;
+        let mut len =
+            nix::libc::socklen_t::try_from(size_of::<u64>()).expect("u64 size fits socklen_t");
+        // SAFETY: SO_COOKIE writes at most `len` bytes into the aligned u64.
+        let result = unsafe {
+            nix::libc::getsockopt(
+                self.raw_fd(),
+                nix::libc::SOL_SOCKET,
+                nix::libc::SO_COOKIE,
+                std::ptr::from_mut(&mut raw).cast(),
+                &raw mut len,
+            )
+        };
+        assert_eq!(result, 0, "SO_COOKIE: {}", std::io::Error::last_os_error());
+        SocketCookie::new(raw).expect("Linux socket cookies are non-zero")
+    }
+
+    fn connect(&self, destination: SocketAddrV4) {
+        connect(self.raw_fd(), &SockaddrIn::from(destination))
+            .unwrap_or_else(|e| panic!("connect to {destination}: {e}"));
+    }
+
+    fn fast_open(&self, destination: SocketAddrV4, payload: &[u8]) {
+        let written = sendto(
+            self.raw_fd(),
+            payload,
+            &SockaddrIn::from(destination),
+            MsgFlags::from_bits_retain(nix::libc::MSG_FASTOPEN),
+        )
+        .unwrap_or_else(|e| panic!("MSG_FASTOPEN to {destination}: {e}"));
+        assert_eq!(
+            written,
+            payload.len(),
+            "MSG_FASTOPEN to {destination} writes the complete payload"
+        );
+    }
+
+    fn select_tfo_gate(&self) {
+        setsockopt(&self.0, sockopt::Priority, &TFO_QDISC_CLASS)
+            .expect("select the private TFO qdisc class");
+    }
+
+    fn local_addr(&self) -> SocketAddrV4 {
+        let address: SockaddrIn = nix::sys::socket::getsockname(self.raw_fd())
+            .expect("read the application socket's local address");
+        address.into()
+    }
+
+    fn send_probe(&self) {
+        let byte = [0x5au8];
+        let written = send(self.raw_fd(), &byte, MsgFlags::MSG_NOSIGNAL)
+            .expect("send one post-handshake byte");
+        assert_eq!(written, 1, "the post-handshake send writes one byte");
+    }
+
+    fn expect_reset(&self) {
+        setsockopt(&self.0, sockopt::ReceiveTimeout, &TimeVal::seconds(2))
+            .expect("set the direct connection's receive timeout");
+        let mut byte = [0u8; 1];
+        let error = recv(self.raw_fd(), &mut byte, MsgFlags::empty())
+            .expect_err("an uncorrelated intake child is reset, not cleanly closed");
+        assert_eq!(error, nix::errno::Errno::ECONNRESET, "the direct intake terminal error");
+    }
+}
+
+/// Holds the final ACK from a real `MSG_FASTOPEN` producer long enough for
+/// the production owner to observe its child in `SYN_RECV`. Only the selected
+/// socket enters the delayed PRIO class; the default-priority capacity probe
+/// bypasses it. Removing the root qdisc releases all fixture state.
+struct TfoFinalAckGate;
+
+impl TfoFinalAckGate {
+    fn install() -> Self {
+        Self::run(&["qdisc", "add", "dev", "lo", "root", "handle", "1:", "prio", "bands", "3"]);
+        let gate = Self;
+        let output = Command::new(TC_GUEST_PATH)
+            .args([
+                "qdisc", "add", "dev", "lo", "parent", "1:3", "handle", "30:", "netem", "delay",
+                "1000ms", "limit", "1000",
+            ])
+            .output()
+            .expect("run tc to install the private TFO NETEM gate");
+        if !output.status.success() {
+            drop(gate);
+            panic!(
+                "install the private TFO NETEM gate: status={:?}, stderr={}",
+                output.status.code(),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        gate
+    }
+
+    fn remove(self) {
+        Self::run(&["qdisc", "del", "dev", "lo", "root"]);
+        std::mem::forget(self);
+    }
+
+    fn run(args: &[&str]) {
+        let output = Command::new(TC_GUEST_PATH)
+            .args(args)
+            .output()
+            .unwrap_or_else(|error| panic!("run {} {}: {error}", TC_GUEST_PATH, args.join(" ")));
+        assert!(
+            output.status.success(),
+            "{} {}: status={:?}, stderr={}",
+            TC_GUEST_PATH,
+            args.join(" "),
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+impl Drop for TfoFinalAckGate {
+    fn drop(&mut self) {
+        let _ = Command::new(TC_GUEST_PATH).args(["qdisc", "del", "dev", "lo", "root"]).output();
+    }
+}
+
+struct SysctlRestore {
+    path: &'static str,
+    original: String,
+}
+
+impl SysctlRestore {
+    fn set(path: &'static str, value: &str) -> Self {
+        let original = fs::read_to_string(path).unwrap_or_else(|e| panic!("read {path}: {e}"));
+        fs::write(path, value).unwrap_or_else(|e| panic!("write {path}={value}: {e}"));
+        Self { path, original }
+    }
+
+    fn restore(self) {
+        fs::write(self.path, self.original.trim())
+            .unwrap_or_else(|e| panic!("restore {}: {e}", self.path));
+    }
+}
+
+fn tcp_ext(name: &str) -> u64 {
+    let text = fs::read_to_string("/proc/net/netstat").expect("read /proc/net/netstat");
+    let mut lines = text.lines();
+    while let (Some(names), Some(values)) = (lines.next(), lines.next()) {
+        if !names.starts_with("TcpExt:") || !values.starts_with("TcpExt:") {
+            continue;
+        }
+        for (key, value) in names.split_whitespace().skip(1).zip(values.split_whitespace().skip(1))
+        {
+            if key == name {
+                return value.parse().expect("the TcpExt value is an integer");
+            }
+        }
+    }
+    panic!("TcpExt has no {name} counter")
+}
+
+fn bpffs_entries() -> BTreeSet<PathBuf> {
+    fn visit(root: &Path, directory: &Path, entries: &mut BTreeSet<PathBuf>) {
+        for entry in
+            fs::read_dir(directory).unwrap_or_else(|e| panic!("read {}: {e}", directory.display()))
+        {
+            let entry = entry.expect("read a bpffs directory entry");
+            let path = entry.path();
+            entries.insert(path.strip_prefix(root).expect("entry is below bpffs").to_path_buf());
+            if entry.file_type().expect("the bpffs entry has a type").is_dir() {
+                visit(root, &path, entries);
+            }
+        }
+    }
+    let root = Path::new(BPF_FS);
+    let mut entries = BTreeSet::new();
+    visit(root, root, &mut entries);
+    entries
+}
+
+fn captured_event(
+    event: GuestIoEvent,
+    destination: SocketAddrV4,
+    cookie: SocketCookie,
+) -> CapturedConn {
+    let GuestIoEvent::OutboundCaptured { child, original_destination, cookie: observed_cookie } =
+        event
+    else {
+        panic!("expected OutboundCaptured, got {event:?}");
+    };
+    assert_eq!(original_destination, destination, "the original destination is exact");
+    assert_eq!(observed_cookie, cookie, "the application SO_COOKIE is exact");
+    child
+}
+
+fn captured(
+    io: &mut KernelGuestOwnerIo,
+    destination: SocketAddrV4,
+    cookie: SocketCookie,
+) -> CapturedConn {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match io.next_event(Some(deadline)).expect("the kernel event wait succeeds") {
+            Some(event @ GuestIoEvent::OutboundCaptured { .. }) => {
+                return captured_event(event, destination, cookie);
+            }
+            Some(GuestIoEvent::SocketReleased { .. }) => {}
+            Some(other) => panic!("unexpected event before capture: {other:?}"),
+            None => panic!("no capture of {destination} within five seconds"),
+        }
+    }
+}
+
+fn no_capture_replay(io: &mut KernelGuestOwnerIo) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match io.next_event(Some(deadline)).expect("the kernel event wait succeeds") {
+            Some(GuestIoEvent::OutboundCaptured { .. }) => {
+                panic!("the consumed child correlation replayed")
+            }
+            Some(_) => {}
+            None => return,
+        }
+    }
+}
+
+fn wait_active_absent(maps: CorrelationMaps, socket: &ApplicationSocket) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while maps.active_contains(socket.raw_fd()) {
+        assert!(Instant::now() < deadline, "active socket storage survived peer input");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+fn assert_one_child_row(maps: CorrelationMaps, case: CorrelationCase) {
+    assert_eq!(
+        maps.child_entries(),
+        1,
+        "{case:?}: the real passive producer owns exactly one transient child row"
+    );
+}
+
+fn cleanup_capture(
+    io: &mut KernelGuestOwnerIo,
+    maps: CorrelationMaps,
+    app: &ApplicationSocket,
+    child: CapturedConn,
+) {
+    assert_eq!(maps.child_entries(), 0, "Ready is taken once");
+    app.send_probe();
+    wait_active_absent(maps, app);
+    io.abort(child.into());
+    assert_eq!(maps.child_entries(), 0, "abort leaves no child row");
+}
+
+fn finish_capture(
+    io: &mut KernelGuestOwnerIo,
+    maps: CorrelationMaps,
+    app: &ApplicationSocket,
+    child: CapturedConn,
+) {
+    cleanup_capture(io, maps, app, child);
+    no_capture_replay(io);
+}
+
+fn socket_fd_count() -> usize {
+    fs::read_dir("/proc/self/fd")
+        .expect("read this process's fd table")
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            fs::read_link(entry.path())
+                .is_ok_and(|target| target.to_string_lossy().starts_with("socket:["))
+        })
+        .count()
+}
+
+fn tcp_state(local_port: u16, remote_port: u16) -> Option<u8> {
+    fs::read_to_string("/proc/net/tcp")
+        .expect("read the guest IPv4 TCP table")
+        .lines()
+        .skip(1)
+        .find_map(|line| {
+            let mut fields = line.split_whitespace();
+            let _slot = fields.next()?;
+            let local = fields.next()?;
+            let remote = fields.next()?;
+            let state = fields.next()?;
+            let port = |address: &str| {
+                address.rsplit_once(':').and_then(|(_, port)| u16::from_str_radix(port, 16).ok())
+            };
+            (port(local) == Some(local_port) && port(remote) == Some(remote_port))
+                .then(|| u8::from_str_radix(state, 16).expect("TCP state is hexadecimal"))
+        })
+}
+
+fn thread_is_sleeping(tid: i32) -> bool {
+    fs::read_to_string(format!("/proc/self/task/{tid}/status"))
+        .expect("read the owner-wait thread status")
+        .lines()
+        .find_map(|line| line.strip_prefix("State:"))
+        .is_some_and(|state| state.trim_start().starts_with('S'))
+}
+
+fn fast_open_capture_through_owner_pending(
+    io: &mut KernelGuestOwnerIo,
+    maps: CorrelationMaps,
+    destination: SocketAddrV4,
+    overflow_destination: SocketAddrV4,
+) -> (ApplicationSocket, CapturedConn, usize) {
+    let app = ApplicationSocket::new();
+    let cookie = app.cookie();
+    let sockets_before_owner = socket_fd_count();
+    let (tid_tx, tid_rx) = std::sync::mpsc::sync_channel(0);
+    let (event_tx, event_rx) = std::sync::mpsc::sync_channel(1);
+
+    let child = std::thread::scope(|scope| {
+        let waiter = scope.spawn(|| {
+            tid_tx.send(nix::unistd::gettid().as_raw()).expect("publish owner-wait tid");
+            let end = Instant::now() + Duration::from_secs(7);
+            let event = loop {
+                let event = io
+                    .next_event(Some(Instant::now() + Duration::from_secs(1)))
+                    .expect("the owner wait succeeds");
+                if event.is_some() || Instant::now() >= end {
+                    break event;
+                }
+            };
+            event_tx.send(event).expect("publish the owner event");
+        });
+        let tid = tid_rx.recv().expect("the owner wait thread starts");
+        let sleeping_deadline = Instant::now() + Duration::from_secs(1);
+        while !thread_is_sleeping(tid) {
+            assert!(Instant::now() < sleeping_deadline, "the owner did not enter its event wait");
+            std::thread::yield_now();
+        }
+
+        let gate = TfoFinalAckGate::install();
+        app.select_tfo_gate();
+
+        // The ordinary socket produces every packet. The private PRIO/NETEM
+        // class delays only this socket's final ACK, leaving the real TFO
+        // child in SYN_RECV while default-priority overflow bypasses the gate.
+        app.fast_open(destination, b"data-in-syn");
+        let client = app.local_addr();
+        let pending_deadline = Instant::now() + Duration::from_millis(150);
+        loop {
+            match event_rx.try_recv() {
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Ok(event) => {
+                    panic!("Fast Open emitted before the Pending hold was observed: {event:?}")
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    panic!("the owner wait ended without an event")
+                }
+            }
+            let child_entries = maps.child_entries();
+            let child_tcp_state = tcp_state(GUEST_TCP_INTAKE_PORT, client.port());
+            let owner_socket_count = socket_fd_count();
+            if child_entries == 1
+                && child_tcp_state == Some(3)
+                && owner_socket_count == sockets_before_owner + 1
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < pending_deadline,
+                "the production owner did not hold the real SYN_RECV Fast Open child: \
+                 child_entries={child_entries}, tcp_state={child_tcp_state:?}, \
+                 socket_fds={owner_socket_count}, before_owner={sockets_before_owner}"
+            );
+            std::thread::yield_now();
+        }
+
+        let overflow = ApplicationSocket::new();
+        overflow.connect(overflow_destination);
+        overflow.expect_reset();
+        drop(overflow);
+        assert!(
+            matches!(event_rx.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)),
+            "the over-capacity refusal completes while Fast Open is still adapter-held Pending",
+        );
+        assert_eq!(maps.child_entries(), 1, "the held Pending row survives the refusal");
+        assert_eq!(
+            socket_fd_count(),
+            sockets_before_owner + 1,
+            "the owner still holds exactly the Pending child after refusing overflow",
+        );
+
+        let event = event_rx
+            .recv_timeout(Duration::from_secs(4))
+            .unwrap_or_else(|error| {
+                let child_entries = maps.child_entries();
+                let child_tcp_state = tcp_state(GUEST_TCP_INTAKE_PORT, client.port());
+                let owner_socket_count = socket_fd_count();
+                let active = maps.active_contains(app.raw_fd());
+                panic!(
+                    "the naturally released final ACK did not wake the held Pending child: \
+                     {error}; child_entries={child_entries}, tcp_state={child_tcp_state:?}, \
+                     socket_fds={owner_socket_count}, before_owner={sockets_before_owner}, \
+                     active={active}"
+                )
+            })
+            .expect("the held Pending child becomes an event");
+        gate.remove();
+        waiter.join().expect("the owner wait thread does not panic");
+        captured_event(event, destination, cookie)
+    });
+    assert_eq!(maps.child_entries(), 0, "Ready is taken once after the Pending hold");
+    assert_eq!(
+        socket_fd_count(),
+        sockets_before_owner + 1,
+        "the adapter-held Pending socket becomes the emitted CapturedConn without replacement"
+    );
+    (app, child, sockets_before_owner)
+}
+
+fn fill_emitted_pending_places(
+    io: &mut KernelGuestOwnerIo,
+    destination: SocketAddrV4,
+) -> Vec<(ApplicationSocket, CapturedConn)> {
+    let count = usize::try_from(GUEST_TCP_PENDING_MAX - 1).expect("the pending bound fits usize");
+    let mut held = Vec::with_capacity(count);
+    for _ in 0..count {
+        let app = ApplicationSocket::new();
+        let cookie = app.cookie();
+        app.connect(destination);
+        let child = captured(io, destination, cookie);
+        held.push((app, child));
+    }
+    held
+}
+
+fn assert_capture_refused_at_combined_max(io: &mut KernelGuestOwnerIo, destination: SocketAddrV4) {
+    let app = ApplicationSocket::new();
+    app.connect(destination);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match io.next_event(Some(deadline)).expect("the capacity-bound owner wait succeeds") {
+            Some(GuestIoEvent::OutboundCaptured { .. }) => {
+                panic!("a capture past the combined pending maximum was emitted")
+            }
+            Some(GuestIoEvent::SocketReleased { .. }) => {}
+            Some(event) => panic!("unexpected event at the combined pending maximum: {event:?}"),
+            None => break,
+        }
+    }
+    app.expect_reset();
+}
+
+fn release_emitted_pending_places(
+    io: &mut KernelGuestOwnerIo,
+    held: Vec<(ApplicationSocket, CapturedConn)>,
+) {
+    for (app, child) in held {
+        io.abort(child.into());
+        drop(app);
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum CorrelationCase {
+    DirectUncorrelated,
+    Ordinary,
+    ImmediateApplicationClose,
+    ForcedSyncookie,
+    DataInSynFastOpen,
+}
+
+impl CorrelationCase {
+    const ALL: [Self; 5] = [
+        Self::DirectUncorrelated,
+        Self::Ordinary,
+        Self::ImmediateApplicationClose,
+        Self::ForcedSyncookie,
+        Self::DataInSynFastOpen,
+    ];
+
+    fn destination(self) -> SocketAddrV4 {
+        let suffix = match self {
+            Self::DirectUncorrelated => 1,
+            Self::Ordinary => 2,
+            Self::ImmediateApplicationClose => 3,
+            Self::ForcedSyncookie => 4,
+            Self::DataInSynFastOpen => 5,
+        };
+        SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, suffix), 40_000 + u16::from(suffix))
+    }
+}
+
+fn run_fast_open_correlation_case(
+    io: &mut KernelGuestOwnerIo,
+    maps: CorrelationMaps,
+    destination: SocketAddrV4,
+) {
+    let restore = SysctlRestore::set(TCP_FASTOPEN_SYSCTL, "3");
+
+    // Prime Linux's client cookie cache against the production intake. This
+    // is another real Connect4/final-ACK traversal, not seeded correlation
+    // state.
+    let prime = ApplicationSocket::new();
+    let prime_cookie = prime.cookie();
+    prime.fast_open(destination, b"prime");
+    assert_one_child_row(maps, CorrelationCase::DataInSynFastOpen);
+    let prime_child = captured(io, destination, prime_cookie);
+    finish_capture(io, maps, &prime, prime_child);
+
+    let sockets_before_boundary = socket_fd_count();
+    let emitted =
+        fill_emitted_pending_places(io, SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 6), 40_006));
+    let emitted_count = usize::try_from(GUEST_TCP_PENDING_MAX - 1).expect("fits usize");
+    assert_eq!(
+        socket_fd_count(),
+        sockets_before_boundary + 2 * emitted_count,
+        "each emitted pending place owns its application socket and CapturedConn",
+    );
+
+    let before = tcp_ext("TCPFastOpenPassive");
+    let (app, child, sockets_before_owner) = fast_open_capture_through_owner_pending(
+        io,
+        maps,
+        destination,
+        SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 7), 40_007),
+    );
+    let after = tcp_ext("TCPFastOpenPassive");
+    assert!(after > before, "the payload travelled in the SYN");
+    assert_capture_refused_at_combined_max(
+        io,
+        SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 9), 40_009),
+    );
+    cleanup_capture(io, maps, &app, child);
+    assert_eq!(
+        socket_fd_count(),
+        sockets_before_owner,
+        "consuming abort releases the adapter-held/emitted Fast Open socket",
+    );
+    drop(app);
+
+    let recovery_destination = SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, 8), 40_008);
+    let recovery = ApplicationSocket::new();
+    let recovery_cookie = recovery.cookie();
+    recovery.connect(recovery_destination);
+    let recovery_child = captured(io, recovery_destination, recovery_cookie);
+    cleanup_capture(io, maps, &recovery, recovery_child);
+    drop(recovery);
+
+    release_emitted_pending_places(io, emitted);
+    assert_eq!(
+        socket_fd_count(),
+        sockets_before_boundary,
+        "every bounded admission place is released",
+    );
+    no_capture_replay(io);
+    restore.restore();
+}
+
+fn run_correlation_case(
+    case: CorrelationCase,
+    token: GuestTransportToken,
+    io: &mut KernelGuestOwnerIo,
+    maps: CorrelationMaps,
+) {
+    assert_eq!(maps.child_entries(), 0, "{case:?}: clean baseline");
+    match case {
+        CorrelationCase::DirectUncorrelated => {
+            let app = ApplicationSocket::new();
+            app.connect(SocketAddrV4::new(token.workload_addr, GUEST_TCP_INTAKE_PORT));
+            assert!(!maps.active_contains(app.raw_fd()), "a direct intake has no active origin");
+            let deadline = Instant::now() + Duration::from_secs(2);
+            match io.next_event(Some(deadline)).expect("the kernel event wait succeeds") {
+                None => {}
+                Some(event) => panic!("an uncorrelated intake emitted {event:?}"),
+            }
+            app.expect_reset();
+        }
+        CorrelationCase::Ordinary => {
+            let app = ApplicationSocket::new();
+            let cookie = app.cookie();
+            let destination = case.destination();
+            app.connect(destination);
+            assert!(maps.active_contains(app.raw_fd()), "ordinary active metadata is live");
+            assert_one_child_row(maps, case);
+            let child = captured(io, destination, cookie);
+            finish_capture(io, maps, &app, child);
+        }
+        CorrelationCase::ImmediateApplicationClose => {
+            let app = ApplicationSocket::new();
+            let cookie = app.cookie();
+            let destination = case.destination();
+            app.connect(destination);
+            assert!(maps.active_contains(app.raw_fd()), "metadata survives on the active socket");
+            assert_one_child_row(maps, case);
+            drop(app);
+            let child = captured(io, destination, cookie);
+            assert_eq!(maps.child_entries(), 0, "Ready is taken once");
+            io.abort(child.into());
+            assert_eq!(maps.child_entries(), 0, "close cleans the child");
+            no_capture_replay(io);
+        }
+        CorrelationCase::ForcedSyncookie => {
+            let restore = SysctlRestore::set(TCP_SYNCOOKIES_SYSCTL, "2");
+            let before = tcp_ext("SyncookiesRecv");
+            let app = ApplicationSocket::new();
+            let cookie = app.cookie();
+            let destination = case.destination();
+            app.connect(destination);
+            let after = tcp_ext("SyncookiesRecv");
+            assert!(after > before, "the forced-syncookie producer ran");
+            assert!(maps.active_contains(app.raw_fd()), "syncookie active metadata is live");
+            assert_one_child_row(maps, case);
+            let child = captured(io, destination, cookie);
+            finish_capture(io, maps, &app, child);
+            restore.restore();
+        }
+        CorrelationCase::DataInSynFastOpen => {
+            run_fast_open_correlation_case(io, maps, case.destination());
+        }
+    }
+    assert_eq!(maps.child_entries(), 0, "{case:?}: cleanup baseline");
+}
+
+/// TCP-CORRELATION, Tier 3: one production-composition table covers a direct
+/// uncorrelated intake, ordinary and immediate-close handshakes, forced
+/// syncookies, and real data-in-SYN Fast Open. Every captured connection has
+/// the application's exact `SO_COOKIE` and original destination, `Ready` is
+/// consumed once, and the Fast Open case witnesses the production adapter
+/// holding a real `Pending` child in one combined pending place before `Ready`
+/// emits it. With 4,095 emitted places already held, overflow is refused both
+/// while that child is adapter-held `Pending` and after it becomes an emitted
+/// `CapturedConn`; consuming it then admits one replacement, proving the
+/// same shared 4,096th place was retained and released.
+/// Post-handshake input or socket lifetime removes active storage, every
+/// child row returns to baseline, and setup leaves no staging bpffs object
+/// during service.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+fn tcp_correlation_preserves_exact_identity_and_cleans_transients_for_every_handshake_path() {
+    let token = in_guest();
+    let script = LaneScript::connect_from_guest();
+    let pins_before = bpffs_entries();
+    let mut ops = KernelGuestTransportOps::new();
+    configure_guest_transport(&token, &mut ops).expect("the production guest transport configures");
+    assert_eq!(bpffs_entries(), pins_before, "the private staging pin is gone before service");
+    let mut io = KernelGuestOwnerIo::new(ops)
+        .expect("the configured guest transport exposes the correlation maps");
+    let maps = CorrelationMaps::discover();
+    assert_eq!(maps.child_entries(), 0, "clean child-map baseline");
+
+    for case in CorrelationCase::ALL {
+        run_correlation_case(case, token, &mut io, maps);
+    }
+
+    assert_eq!(bpffs_entries(), pins_before, "service creates no runtime pin or staging residue");
+    script.say(owner_lane::DONE).expect("tell the host the correlation cell is complete");
+}
+
+// ---------------------------------------------------------------------------
 // D-22: the Tier-3 half of R5-28 and R5-31 — the V-24 shape in the in-guest
 // owner lane
 // ---------------------------------------------------------------------------
@@ -183,15 +976,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
-use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
-use nix::sys::socket::MsgFlags;
+use nix::poll::PollFlags;
 use overdrive_core::guest_transport::forwarder::ForwardOutcome;
 use overdrive_core::guest_transport::wire::FLOW_REQUEST_LEN;
 use overdrive_testing::guest_lane::{LaneScript, owner_lane};
 use overdrive_testing::vsock::{VMADDR_CID_ANY, VsockListener};
 
 use super::{
-    GuestAcceptPhase, GuestFlowOwner, GuestSideObservation, KernelGuestOwnerIo, MonotonicGuestClock,
+    CapturedConn, GuestAcceptPhase, GuestFlowOwner, GuestIoEvent, GuestOwnerIo,
+    GuestSideObservation, KernelGuestOwnerIo, MonotonicGuestClock, SocketCookie,
 };
 use crate::transport::{KernelGuestTransportOps, configure_guest_transport};
 
@@ -276,14 +1069,48 @@ fn app_end(c: &TcpStream, bound: Duration) -> (usize, AppEnd) {
     let mut r = c;
     let mut got = 0usize;
     let mut buf = [0u8; 4096];
+    let started = Instant::now();
     loop {
         match r.read(&mut buf) {
             Ok(0) => return (got, AppEnd::Eof),
             Ok(n) => got += n,
             Err(e) if e.kind() == ErrorKind::ConnectionReset => return (got, AppEnd::Reset),
-            Err(e) => return (got, AppEnd::Other(e.to_string())),
+            Err(e) => {
+                // Reading SO_ERROR can consume a pending socket error, so do
+                // it only after the required read oracle has already failed.
+                // The tuple and status flags distinguish the accepted C from
+                // another live application connection without changing the
+                // successful Reset/Eof observations.
+                let status_flags = app_socket_status_flags(c);
+                return (
+                    got,
+                    AppEnd::Other(format!(
+                        "{e}; fd={}; local={:?}; peer={:?}; status_flags={status_flags:?}; \
+                         nonblocking={}; so_error={:?}; read_elapsed={:?}",
+                        c.as_raw_fd(),
+                        c.local_addr(),
+                        c.peer_addr(),
+                        status_flags
+                            .as_ref()
+                            .is_ok_and(|flags| *flags & nix::libc::O_NONBLOCK != 0),
+                        c.take_error(),
+                        started.elapsed(),
+                    )),
+                );
+            }
         }
     }
+}
+
+#[allow(
+    unsafe_code,
+    reason = "the source-local diagnostic calls F_GETFL on the live accepted application fd"
+)]
+fn app_socket_status_flags(c: &TcpStream) -> std::io::Result<i32> {
+    // SAFETY: F_GETFL reads the status flags of the live descriptor and takes
+    // no third argument.
+    let flags = unsafe { nix::libc::fcntl(c.as_raw_fd(), nix::libc::F_GETFL) };
+    if flags < 0 { Err(std::io::Error::last_os_error()) } else { Ok(flags) }
 }
 
 /// The guest's only flow owner, configured by the production setup, with
@@ -309,7 +1136,10 @@ impl OwnerCell {
         );
         let owner = GuestFlowOwner::new(
             token,
-            Box::new(KernelGuestOwnerIo::new(ops)),
+            Box::new(
+                KernelGuestOwnerIo::new(ops)
+                    .expect("the configured guest transport exposes the correlation maps"),
+            ),
             Arc::new(MonotonicGuestClock),
         );
         let app = App::start(SocketAddrV4::new(token.workload_addr, owner_lane::APP_PORT));
@@ -457,10 +1287,18 @@ impl OwnerCell {
 /// declares no constant for it, so the libc bit is carried as-is.
 const POLLRDHUP: PollFlags = PollFlags::from_bits_retain(nix::libc::POLLRDHUP);
 
+#[allow(
+    unsafe_code,
+    reason = "nix 0.30 drops the complete revents value when Linux returns its undeclared POLLRDHUP bit; this source-local kernel witness retains the raw c_short"
+)]
 fn poll_revents(fd: &impl std::os::fd::AsFd, events: PollFlags) -> PollFlags {
-    let mut fds = [PollFd::new(fd.as_fd(), events)];
-    poll(&mut fds, PollTimeout::ZERO).expect("poll");
-    fds[0].revents().unwrap_or(PollFlags::empty())
+    let mut descriptor =
+        nix::libc::pollfd { fd: fd.as_fd().as_raw_fd(), events: events.bits(), revents: 0 };
+    // SAFETY: `descriptor` contains one live borrowed fd and points to one
+    // writable `pollfd` for the duration of the call.
+    let result = unsafe { nix::libc::poll(&raw mut descriptor, 1, 0) };
+    assert_eq!(result, 1, "the ended V_g is immediately poll-ready");
+    PollFlags::from_bits_retain(descriptor.revents)
 }
 
 /// V-24's kernel shape on a V_g the cell accepted (D-22 (4)): the request
@@ -470,7 +1308,8 @@ fn assert_v24_shape(v_g: &mut File) {
     v_g.read_exact(&mut request).expect("the request read itself succeeds");
     let mut more = [0u8; 16];
     assert_eq!(v_g.read(&mut more).expect("a read after the request"), 0, "then EOF");
-    assert!(poll_revents(v_g, POLLRDHUP).contains(POLLRDHUP), "V_g reports POLLRDHUP");
+    let end = poll_revents(v_g, POLLRDHUP);
+    assert!(end.contains(POLLRDHUP), "V_g reports POLLRDHUP: {end:?}");
     let written = nix::sys::socket::send(v_g.as_raw_fd(), b"x", MsgFlags::MSG_NOSIGNAL);
     assert_eq!(written, Err(nix::errno::Errno::EPIPE), "the first write fails EPIPE");
 }
@@ -478,12 +1317,11 @@ fn assert_v24_shape(v_g: &mut File) {
 /// D-22 (4): the V-24 shape re-witnessed in the lane, on a V_g this cell
 /// accepts with its own raw listener under the host's script: in the order
 /// "V_g still queued when the host closes" and in the order "V_g accepted
-/// before the host writes and closes", the request read succeeds, then
-/// EOF, `POLLRDHUP` and `EPIPE` on the first write. The owner-path cells
+/// before the host writes and closes", the request read succeeds, then EOF,
+/// `POLLRDHUP` and `EPIPE` on the first write. The owner-path cells
 /// rest on this kernel fact, observed here on the lane's own kernel.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn the_v24_kernel_shape_holds_in_both_accept_orders() {
     let _token = in_guest();
     let mut script = LaneScript::connect_from_guest();
@@ -515,7 +1353,6 @@ fn the_v24_kernel_shape_holds_in_both_accept_orders() {
 /// positive control flow is then served end to end.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_flow_aborted_before_its_v_g_is_accepted_ends_with_no_application_connection() {
     let mut cell = OwnerCell::start();
     let attached = cell.observe().forwarder_attached;
@@ -532,7 +1369,6 @@ fn a_flow_aborted_before_its_v_g_is_accepted_ends_with_no_application_connection
 /// positive control flow is then served on the new session.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_flow_aborted_by_session_loss_ends_and_the_session_is_held_again() {
     let mut cell = OwnerCell::start();
     let attached = cell.observe().forwarder_attached;
@@ -553,7 +1389,6 @@ fn a_flow_aborted_by_session_loss_ends_and_the_session_is_held_again() {
 /// nothing.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_flow_the_host_closes_after_the_guest_accepted_it_ends_on_the_guest() {
     let mut cell = OwnerCell::start();
     let flow = host_flow(owner_lane::ABORTED_FLOW);
@@ -598,6 +1433,10 @@ fn a_flow_the_host_closes_after_the_guest_accepted_it_ends_on_the_guest() {
             "a pair the close ended is an abort: {end:?}"
         );
     }
+    // Keep the positive control out of the application's accepted-C set
+    // until the aborted C has been observed. The owner is stopped while the
+    // host receives this private fixture line.
+    cell.say(owner_lane::PAUSED);
     cell.serve_control_flow();
     cell.say(owner_lane::DONE);
 }
@@ -611,7 +1450,6 @@ fn a_flow_the_host_closes_after_the_guest_accepted_it_ends_on_the_guest() {
 /// the `Abort` and no message for the flow.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn an_abort_for_a_flow_the_guest_does_not_hold_changes_nothing_and_the_flow_ends_on_the_close() {
     let mut cell = OwnerCell::start();
     let attached = cell.observe().forwarder_attached;
@@ -637,7 +1475,6 @@ fn an_abort_for_a_flow_the_guest_does_not_hold_changes_nothing_and_the_flow_ends
 /// scheduling).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 #[expect(clippy::print_stdout, reason = "R5-31's abort-to-reset latency is reported, not asserted")]
 fn a_burst_of_host_aborts_resets_every_application_connection() {
     let mut cell = OwnerCell::start();

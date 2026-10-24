@@ -10,12 +10,14 @@
 //! without reading payload, and disconnects S; a slot release then returns the
 //! slot, which is never re-associated.
 
-use overdrive_core::guest_transport::forwarder::PairSide;
+use overdrive_core::guest_transport::forwarder::{
+    AbortCause, FlowForwarder, ForwardOutcome, PairMode, PairSide,
+};
 use overdrive_core::guest_transport::wire::{
     ControlMessage, FLOW_PAIRING_DEADLINE, FlowRefusal, FlowRequest,
 };
 use overdrive_core::guest_transport::{GUEST_DATAGRAM_SLOT_IDLE, GUEST_OWNER_AUDIT_PERIOD};
-use overdrive_sim::adapters::SimShutdown;
+use overdrive_sim::adapters::{SimForwarderDevice, SimShutdown, SimSocket};
 
 use super::super::sim::SimGuestEffect;
 use super::*;
@@ -45,17 +47,19 @@ fn end_order(
 /// datagrams go straight through.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_first_datagram_claims_a_slot_associates_attaches_and_forwards() {
     let mut g = Guest::new();
     g.open_session();
     let s = g.io.app_send(cookie(1), dest(1)).expect("a free slot");
     g.settle();
+    let kernel = g.io.guest_socket_observation();
     assert_eq!(
-        g.obs().slots[&s].owner,
-        Some((cookie(1), dest(1))),
-        "the slot is owned at the claim"
+        kernel.parked.get(&s),
+        Some(&std::iter::once((cookie(1), dest(1))).collect()),
+        "the real slot queue carries the claiming socket and destination"
     );
+    assert!(kernel.readiness.contains(&s), "the claimed slot holds one readiness event");
+    assert!(g.obs().slots[&s].owner.is_none(), "the owner has not received SlotReady yet");
     assert!(
         g.obs().slots[&s].association.is_none(),
         "no association before readiness is dispatched"
@@ -90,7 +94,6 @@ fn a_first_datagram_claims_a_slot_associates_attaches_and_forwards() {
 /// holds N slots (R5-14).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn slots_are_held_per_socket_and_destination() {
     let mut g = Guest::new();
     g.open_session();
@@ -98,6 +101,9 @@ fn slots_are_held_per_socket_and_destination() {
     let b = g.io.app_send(cookie(2), dest(1)).unwrap();
     let c = g.io.app_send(cookie(1), dest(2)).unwrap();
     let again = g.io.app_send(cookie(1), dest(1)).unwrap();
+    for s in [a, b, c] {
+        g.io.release_slot_ready(s);
+    }
     g.settle();
     assert_eq!(again, a, "the same (socket, destination) reuses its slot");
     let owned = owned_slots(&g.obs());
@@ -107,11 +113,11 @@ fn slots_are_held_per_socket_and_destination() {
 /// R5-14: a socket that sent to N destinations frees N slots when it closes:
 /// on its `sock_release` report the owner releases every slot it owns, each in
 /// the release order — abort the pair (attached) or close V_g (pending), then
-/// discard S's queue and disconnect, then return the slot. The host sees each
-/// association end (its V_h reads `0x3`).
+/// consume an attached pair's end record, discard S's queue and disconnect,
+/// then return the slot. The host sees each association end (its V_h reads
+/// `0x3`).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_socket_close_releases_every_slot_it_owns_in_the_release_order() {
     let mut g = Guest::new();
     g.open_session();
@@ -127,12 +133,14 @@ fn a_socket_close_releases_every_slot_it_owns_in_the_release_order() {
     g.io.release_socket_report(cookie(1));
     g.settle();
     let obs = g.obs();
-    assert!(
-        obs.slots[&s1].owner.is_none() && obs.slots[&s2].owner.is_none(),
-        "both slots released"
+    assert_eq!(
+        (obs.slots[&s1].owner, obs.slots[&s1].association, obs.slots[&s1].attached),
+        (Some((cookie(1), dest(1))), Some(a1), p1),
+        "the attached slot remains resident until its end record is consumed"
     );
+    assert!(obs.slots[&s2].owner.is_none(), "the pending slot is released immediately");
     let effects = g.io.effects();
-    assert_eq!(end_order(&effects, s1, p1), ["abort", "discard+disconnect", "release"]);
+    assert_eq!(end_order(&effects, s1, p1), ["abort"]);
     assert_eq!(end_order(&effects, s2, None), ["discard+disconnect", "release"]);
     assert!(
         g.io.vsock_ended().contains(
@@ -150,7 +158,16 @@ fn a_socket_close_releases_every_slot_it_owns_in_the_release_order() {
         "the pending association's V_g is closed"
     );
     g.run_and_settle();
-    assert!(g.obs().slots[&s1].attached.is_none());
+    let after_record = g.obs();
+    assert!(
+        after_record.slots[&s1].owner.is_none()
+            && after_record.slots[&s1].association.is_none()
+            && after_record.slots[&s1].attached.is_none(),
+        "the dispatch after consuming the pair's end record releases the attached slot"
+    );
+    let effects = g.io.effects();
+    assert_eq!(end_order(&effects, s1, p1), ["abort", "discard+disconnect", "release"]);
+    assert_eq!(end_order(&effects, s2, None), ["discard+disconnect", "release"]);
 }
 
 /// K-B2 / R5-14: a lost `sock_release` report is recovered by the
@@ -158,7 +175,6 @@ fn a_socket_close_releases_every_slot_it_owns_in_the_release_order() {
 /// owner's cookie gone and releases its slot.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_lost_release_report_is_recovered_by_the_audit_tick() {
     let mut g = Guest::new();
     g.open_session();
@@ -172,17 +188,18 @@ fn a_lost_release_report_is_recovered_by_the_audit_tick() {
 
 /// DG-5-A / R5-14: an associated slot whose counters (both directions, the
 /// pair's `moved_ab` / `moved_ba`) do not change for `GUEST_DATAGRAM_SLOT_IDLE`
-/// is released by the first audit tick at or after its idle deadline (no
-/// timer of its own); a slot that keeps moving is not.
+/// is aborted by the first audit tick at or after its idle deadline (no timer
+/// of its own), then released after its end record and the following owner
+/// dispatch; a slot that keeps moving is not.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn an_idle_slot_is_released_by_the_audit_tick_after_the_idle_period() {
     let mut g = Guest::new();
     g.open_session();
     let idle = g.io.app_send(cookie(1), dest(1)).unwrap();
     let a = g.associate(idle);
     g.pair_slot(a);
+    let idle_pair = g.obs().slots[&idle].attached;
     let busy = g.io.app_send(cookie(2), dest(2)).unwrap();
     let b = g.associate(busy);
     g.pair_slot(b);
@@ -199,11 +216,27 @@ fn an_idle_slot_is_released_by_the_audit_tick_after_the_idle_period() {
         g.io.run_forwarder();
         g.advance(GUEST_OWNER_AUDIT_PERIOD);
     }
+    assert_eq!(
+        (
+            g.obs().slots[&idle].owner,
+            g.obs().slots[&idle].association,
+            g.obs().slots[&idle].attached,
+        ),
+        (Some((cookie(1), dest(1))), Some(a), idle_pair),
+        "the first due audit aborts the pair but retains the slot until its end record"
+    );
+    assert_eq!(end_order(&g.io.effects(), idle, idle_pair), ["abort"]);
+    assert!(g.obs().slots[&busy].owner.is_some(), "a moving slot stays");
+    g.run_and_settle();
     assert!(
         g.obs().slots[&idle].owner.is_none(),
-        "released at the first tick past the idle period"
+        "the post-record dispatch releases the idle slot"
     );
-    assert!(g.obs().slots[&busy].owner.is_some(), "a moving slot stays");
+    assert_eq!(
+        end_order(&g.io.effects(), idle, idle_pair),
+        ["abort", "discard+disconnect", "release"]
+    );
+    assert!(g.obs().slots[&busy].owner.is_some(), "a moving slot still stays");
 }
 
 /// R5-14 / EVMOD-DGRAM: a slot released with a burst queued in its slot socket
@@ -213,7 +246,6 @@ fn an_idle_slot_is_released_by_the_audit_tick_after_the_idle_period() {
 /// association's first frame carries the new owner's datagram only.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_released_burst_is_discarded_and_the_next_owner_gets_none_of_it() {
     let mut g = Guest::new();
     g.open_session();
@@ -246,7 +278,6 @@ fn a_released_burst_is_discarded_and_the_next_owner_gets_none_of_it() {
 /// application sends again; the next send starts exactly one new association.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_refused_association_discards_its_queue_and_retries_only_on_a_new_datagram() {
     let mut g = Guest::new();
     g.open_session();
@@ -273,12 +304,113 @@ fn a_refused_association_discards_its_queue_and_retries_only_on_a_new_datagram()
     assert_eq!(g.io.requests().len(), 2);
 }
 
+/// EVMOD-ATTACH-END / SLOT-ATTACH-REFUSAL-SHAPE: V_g ends after the host's
+/// `Paired` is in flight but before the guest forwarder attaches `(S, V_g)`.
+/// The owner receives V_g back from the typed datagram refusal, counts and
+/// closes it, then discards and disconnects resident S without releasing its
+/// owner. The refusing guest context creates no pair or end record and sends
+/// no control message; V_g's close follows the already-attached host pair's
+/// ordinary one-record path. A later datagram starts a fresh association.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+fn a_v_g_ending_during_paired_refuses_the_attach_and_the_slot_reassociates() {
+    let mut g = Guest::new();
+    g.open_session();
+    let s = g.io.app_send(cookie(1), dest(1)).expect("a free resident slot");
+    let first = g.associate(s);
+
+    // The host has already attached V_h to its outer half before it sends
+    // Paired. This context observes the normal end record produced when the
+    // guest's close of V_g reaches V_h as 0x3.
+    let host_device = SimForwarderDevice::new();
+    let host = host_device.open();
+    let (v_h, host_outer) = (SimSocket::vsock_stream(), SimSocket::tcp());
+    let host_pair = host.attach(&v_h, &host_outer, PairMode::Stream).expect("host pair");
+
+    let v_g = g.io.slot_vsock(s).expect("the pending association's V_g");
+    v_g.peer_reset();
+    let before = g.obs();
+    g.io.clear_effects();
+    g.io.host_control(ControlMessage::Paired { flow: first });
+    g.settle();
+
+    let after = g.obs();
+    assert_eq!(
+        after.forwarder_attach_ended,
+        before.forwarder_attach_ended + 1,
+        "the V_g HalfEnded refusal is counted once"
+    );
+    assert_eq!(
+        after.slots[&s].owner,
+        Some((cookie(1), dest(1))),
+        "resident S keeps its application/destination owner"
+    );
+    assert!(
+        after.slots[&s].association.is_none() && after.slots[&s].attached.is_none(),
+        "the refused association and guest pair are absent"
+    );
+    let slot_state = g.io.slot_state(s);
+    assert_eq!(slot_state.discarded, 1, "S's queued datagram is discarded");
+    assert_eq!(slot_state.ended, 1, "the association end order runs once");
+    assert!(!slot_state.connected, "resident S is disconnected");
+    assert!(g.io.vsock_ended().contains(&first), "the returned V_g is closed");
+    let effects = g.io.effects();
+    let refused = position(
+        &effects,
+        |effect| matches!(effect, SimGuestEffect::AttachSlot { slot, accepted: None } if *slot == s),
+    )
+    .expect("the datagram attach returns its typed refusal");
+    let close = position(
+        &effects,
+        |effect| matches!(effect, SimGuestEffect::Close { flow: Some(flow), .. } if *flow == first),
+    )
+    .expect("the exact returned V_g is closed");
+    let end = position(
+        &effects,
+        |effect| matches!(effect, SimGuestEffect::EndAssociation { slot } if *slot == s),
+    )
+    .expect("resident S runs its end-of-association order");
+    assert!(refused < close && close < end, "return V_g, close it, then end resident S");
+    assert!(
+        effects.iter().all(|effect| !matches!(effect, SimGuestEffect::AbortForward { .. })),
+        "no guest pair id exists to abort"
+    );
+    assert_eq!(
+        g.io.forwarder_inventory().map(|inventory| (inventory.attached, inventory.live_pairs)),
+        Some((0, 0)),
+        "the refusing guest forwarder allocates no pair id"
+    );
+    assert!(
+        g.io.forwarder_contexts().iter().all(|context| context.queued_ends.is_empty()),
+        "the refusing guest forwarder queues no end record"
+    );
+    assert!(g.io.outbox().is_empty(), "the guest writes no control message");
+
+    v_h.peer_shutdown(SimShutdown::Both);
+    host.run_until_idle();
+    let host_end = host.take_end().expect("host take_end").expect("one host end record");
+    assert_eq!(host_end.id, host_pair);
+    assert_eq!(
+        host_end.outcome,
+        ForwardOutcome::Aborted { cause: AbortCause::PeerAbort { side: PairSide::A } }
+    );
+    assert!(host.take_end().expect("host take_end").is_none(), "exactly one host record");
+
+    assert_eq!(
+        g.io.app_send(cookie(1), dest(1)),
+        Some(s),
+        "the next datagram reuses the retained resident slot"
+    );
+    let second = g.associate(s);
+    assert_ne!(second, first, "the later datagram starts a fresh association");
+    assert_eq!(g.obs().slots[&s].association, Some(second));
+}
+
 /// EVMOD-DGRAM: the host's `Abort` for a live association aborts its pair,
 /// discards S's queue, disconnects S and keeps the slot owned; the next
 /// datagram re-associates.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn an_abort_of_a_live_association_aborts_discards_disconnects_and_keeps_the_slot() {
     let mut g = Guest::new();
     g.open_session();
@@ -289,16 +421,25 @@ fn an_abort_of_a_live_association_aborts_discards_disconnects_and_keeps_the_slot
     g.io.clear_effects();
     g.io.host_control(ControlMessage::Abort { flow: a });
     g.settle();
+    assert_eq!(end_order(&g.io.effects(), s, pair), ["abort"]);
+    let obs = g.obs();
+    assert_eq!(obs.slots[&s].owner, Some((cookie(1), dest(1))));
+    assert_eq!(
+        (obs.slots[&s].association, obs.slots[&s].attached),
+        (Some(a), pair),
+        "the association remains resident until the pair's end record is consumed"
+    );
+    assert!(g.io.slot_state(s).connected, "S stays connected until the deferred owner close");
+    g.run_and_settle();
     assert_eq!(
         end_order(&g.io.effects(), s, pair),
         ["abort", "discard+disconnect"],
-        "no release: the slot is kept"
+        "the slot is kept after its record-driven association end"
     );
     let obs = g.obs();
     assert_eq!(obs.slots[&s].owner, Some((cookie(1), dest(1))));
     assert!(obs.slots[&s].association.is_none() && obs.slots[&s].attached.is_none());
-    assert!(!g.io.slot_state(s).connected, "S disconnected");
-    g.run_and_settle();
+    assert!(!g.io.slot_state(s).connected, "S disconnects after its record is consumed");
     g.io.app_send(cookie(1), dest(1));
     g.associate(s);
 }
@@ -309,7 +450,6 @@ fn an_abort_of_a_live_association_aborts_discards_disconnects_and_keeps_the_slot
 /// discarded.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_peer_abort_record_ends_the_association_and_a_late_abort_is_discarded() {
     let mut g = Guest::new();
     g.open_session();
@@ -333,7 +473,6 @@ fn a_peer_abort_record_ends_the_association_and_a_late_abort_is_discarded() {
 /// host's late `Paired` is discarded without a second `Abort` (U-5).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn the_pairing_deadline_aborts_and_a_late_paired_is_discarded() {
     let mut g = Guest::new();
     g.open_session();
@@ -356,7 +495,6 @@ fn the_pairing_deadline_aborts_and_a_late_paired_is_discarded() {
 /// nowhere.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_late_paired_for_a_released_slot_is_answered_with_abort() {
     let mut g = Guest::new();
     g.open_session();
@@ -379,7 +517,6 @@ fn a_late_paired_for_a_released_slot_is_answered_with_abort() {
 /// it starts the next attempt.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_refused_destination_gets_at_most_one_attempt_per_round_trip_under_a_burst() {
     let mut g = Guest::new();
     g.open_session();

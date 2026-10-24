@@ -14,8 +14,7 @@ proptest! {
     /// `Display` / `FromStr`.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 5"]
-    fn socket_cookie_roundtrips(raw in 1u64..) {
+        fn socket_cookie_roundtrips(raw in 1u64..) {
         let cookie = SocketCookie::new(raw).expect("non-zero cookie");
         prop_assert_eq!(cookie.get(), raw);
         prop_assert_eq!(cookie.to_string(), raw.to_string());
@@ -25,8 +24,7 @@ proptest! {
     /// Non-decimal input is refused as unparseable.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 5"]
-    fn non_decimal_input_is_refused(s in "[^0-9]{1,8}|[0-9]{1,4}[^0-9]{1,4}|-[0-9]{1,4}") {
+        fn non_decimal_input_is_refused(s in "[^0-9]{1,8}|[0-9]{1,4}[^0-9]{1,4}|-[0-9]{1,4}") {
         prop_assert_eq!(SocketCookie::from_str(&s), Err(SocketCookieError::Unparseable));
     }
 }
@@ -35,7 +33,6 @@ proptest! {
 /// unparseable.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn zero_cookie_overflow_and_empty_are_refused() {
     assert_eq!(SocketCookie::new(0), Err(SocketCookieError::Zero));
     assert_eq!(SocketCookie::from_str("0"), Err(SocketCookieError::Zero));

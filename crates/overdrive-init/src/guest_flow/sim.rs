@@ -104,8 +104,9 @@ use overdrive_sim::adapters::{
 
 use super::{
     AppConn, CapturedConn, GuestAttachRefused, GuestClock, GuestHangup, GuestIoEvent,
-    GuestListener, GuestOwnedSocket, GuestOwnerIo, GuestPair, GuestPairSocket, GuestRecord, Handle,
-    HostChannel, HostConn, InboundConn, SeamInstance, SocketCookie, SocketId,
+    GuestListener, GuestOwnedSocket, GuestOwnerIo, GuestPair, GuestPairSocket, GuestRecord,
+    GuestSlotAttachRefused, Handle, HostChannel, HostConn, InboundConn, SeamInstance, SocketCookie,
+    SocketId,
 };
 
 // ---------------------------------------------------------------------------
@@ -407,6 +408,9 @@ struct SlotRec {
     owner: Option<(SocketCookie, SocketAddrV4)>,
     flow: Option<FlowId>,
     vsock: Option<SocketId>,
+    /// Most recent association V_g, retained for QPROJ-8 after the
+    /// association leaves the live slot record (D-5).
+    last_vsock: Option<SocketId>,
     attached: Option<ForwardId>,
     /// The origin of each datagram the application queued in S, oldest first
     /// (the kernel queue length is S's own `queued()`).
@@ -568,11 +572,13 @@ impl SimState {
         }
         sock.closed = true;
         sock.read_pending = None;
-        let (flow, outer, linger, stage, channel) =
-            (sock.flow, sock.outer, sock.linger, sock.stage, sock.channel);
-        // the kernel's own far-end event of an attached outer half came first
-        let kernel_end =
-            if outer { sock.kernel.as_ref().and_then(SimSocket::peer_end) } else { None };
+        let (flow, outer, linger, stage, channel, kernel) =
+            (sock.flow, sock.outer, sock.linger, sock.stage, sock.channel, sock.kernel.clone());
+        if let Some(kernel) = &kernel {
+            kernel.close_from_owner(reset || linger);
+        }
+        // The SimSocket is the QPROJ-8 arbiter; its first far-end event wins.
+        let kernel_end = if outer { kernel.as_ref().and_then(SimSocket::peer_end) } else { None };
         self.unwatch(id);
         if session == Some(id) {
             self.session = None;
@@ -677,6 +683,7 @@ impl SimGuestOwnerIo {
                     owner: None,
                     flow: None,
                     vsock: None,
+                    last_vsock: None,
                     attached: None,
                     origins: VecDeque::new(),
                     discarded: 0,
@@ -1290,6 +1297,11 @@ impl SimGuestOwnerIo {
         kernel.peer_reset();
         if let Some(id) = unattached {
             self.st().condition(id, GuestHangup::Error(ErrorKind::ConnectionReset));
+        } else {
+            // An attached half's real `sk_error_report` runs the forwarder in
+            // the reset's own kernel step; preserve that event boundary in
+            // the sim rather than requiring a second driver stimulus.
+            self.run_forwarder();
         }
     }
 
@@ -1403,10 +1415,12 @@ impl SimGuestOwnerIo {
         self.st().slot_mut(slot).kernel.clone()
     }
 
-    /// The V_g of `slot`'s current association (the host is its far peer).
+    /// The V_g of `slot`'s current or most recently ended association (the
+    /// host is its far peer; D-5 keeps the arbiter readable after close).
     pub(crate) fn slot_vsock(&self, slot: SocketAddrV4) -> Option<SimSocket> {
         let mut st = self.st();
-        let id = st.slot_mut(slot).vsock?;
+        let rec = st.slot_mut(slot);
+        let id = rec.vsock.or(rec.last_vsock)?;
         st.sockets.get(&id).and_then(|s| s.kernel.clone())
     }
 
@@ -1515,7 +1529,9 @@ impl GuestOwnerIo for SimGuestOwnerIo {
         }
         st.sockets.insert(id, sock);
         if let Some(slot) = st.sockets[&id].slot {
-            st.slot_mut(slot).vsock = Some(id);
+            let rec = st.slot_mut(slot);
+            rec.vsock = Some(id);
+            rec.last_vsock = Some(id);
         }
         st.effect(SimGuestEffect::ConnectHost { socket: id, channel });
         Ok(HostConn(handle))
@@ -1719,7 +1735,13 @@ impl GuestOwnerIo for SimGuestOwnerIo {
 
     fn abort_forward(&mut self, id: ForwardId) -> Result<AbortResult, ForwarderError> {
         let result = self.fwd.with(|ctx| ctx.abort(id));
-        self.st().effect(SimGuestEffect::AbortForward { id });
+        let mut st = self.st();
+        if matches!(result, Ok(AbortResult::Aborted))
+            && let Some(flow) = st.pairs.get(&id).and_then(|pair| pair.flow)
+        {
+            st.vsock_ended.insert(flow);
+        }
+        st.effect(SimGuestEffect::AbortForward { id });
         result
     }
 
@@ -1801,6 +1823,7 @@ impl GuestOwnerIo for SimGuestOwnerIo {
         let rec = st.slot_mut(slot);
         rec.flow = Some(flow);
         rec.vsock = Some(id);
+        rec.last_vsock = Some(id);
         st.sock(id).flow = Some(flow);
         st.requests.push(request);
         st.effect(SimGuestEffect::WriteSlotRequest { socket: id, request });
@@ -1811,7 +1834,7 @@ impl GuestOwnerIo for SimGuestOwnerIo {
         &mut self,
         slot: SocketAddrV4,
         vsock: HostConn,
-    ) -> Result<ForwardId, GuestAttachRefused> {
+    ) -> Result<ForwardId, GuestSlotAttachRefused> {
         let (v, s_kernel, v_kernel) = {
             let mut st = self.st();
             let v = st.check(&vsock.0);
@@ -1845,11 +1868,7 @@ impl GuestOwnerIo for SimGuestOwnerIo {
             }
             Err(error) => {
                 st.effect(SimGuestEffect::AttachSlot { slot, accepted: None });
-                drop(st);
-                panic!(
-                    "guest-owner seam: a refused slot attach ({error}) has no pinned outer half \
-                     for GuestAttachRefused (DISTILL blocker: attach_slot refusal shape)"
-                );
+                Err(GuestSlotAttachRefused { error, vsock })
             }
         }
     }

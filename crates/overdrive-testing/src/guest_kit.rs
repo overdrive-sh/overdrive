@@ -29,13 +29,13 @@
 //! - [`GuestKit::provision`]: the kernel, the module prepared for it, the
 //!   static `overdrive-init` and the prepared static scripted peer
 //!   `overdrive-guest-peer` (this crate's `bin/guest_peer.rs`).
-//! - [`GuestKit::image`]: an ext4 root filesystem with either the production
-//!   `overdrive-init` as PID 1 ([`GuestInit::OverdriveInit`] — the image a
-//!   `[vm]` spec names for `overdrive deploy`, or the in-guest test lane's
-//!   guest) or the scripted peer as PID 1 ([`GuestInit::ScriptedPeer`]), the
-//!   guest program at [`crate::guest_app::GUEST_PEER_GUEST_PATH`], the vsock
-//!   transport modules, and — when asked — `ovd_fwd.ko` at
-//!   `GUEST_FORWARDER_MODULE_PATH` and the vsock loopback transport.
+//! - [`GuestKit::image`]: an ext4 root filesystem with the test-only scripted
+//!   peer as the module-loading PID 1. For [`GuestInit::OverdriveInit`] it
+//!   loads the stock dummy-link fixture prerequisite and `exec`s the staged
+//!   production init, which remains PID 1 and performs its own forwarder
+//!   module validation/load. [`GuestInit::ScriptedPeer`] stays in the peer.
+//!   Images also carry the guest program, vsock modules, stock dummy module,
+//!   and — when asked — `ovd_fwd.ko` and the vsock loopback transport.
 //! - [`GuestKit::boot`] / [`GuestKit::boot_scripted`]: a VMM at a CID from a
 //!   registered [`cid_bands`] band, its serial console captured to a file,
 //!   ended by [`GuestKitVm::kill`] (the VMM's exit is the vhost device's
@@ -84,6 +84,21 @@ use crate::vm_fixture::{self, VmFixture, VmFixtureError};
 /// ([`GuestImageSpec::loopback_module`]). Production guests do not load it;
 /// the in-guest test lane's launcher does (`guest_lane`).
 pub const LOOPBACK_MODULE_GUEST_PATH: &str = "/lib/overdrive-testing/modules/vsock_loopback.ko";
+/// The stock kernel dummy-link driver required before an owner cell invokes
+/// production guest transport setup.
+pub const DUMMY_MODULE_GUEST_PATH: &str = "/lib/overdrive-testing/modules/dummy.ko";
+/// The stock PRIO scheduler used by the scripted-guest Fast Open fixture.
+pub const PRIO_MODULE_GUEST_PATH: &str = "/lib/overdrive-testing/modules/sch_prio.ko";
+/// The stock NETEM scheduler used by the scripted-guest Fast Open fixture.
+pub const NETEM_MODULE_GUEST_PATH: &str = "/lib/overdrive-testing/modules/sch_netem.ko";
+/// The host's `tc` binary staged into scripted guest images with its dynamic
+/// library closure.
+pub const TC_GUEST_PATH: &str = "/usr/sbin/tc";
+/// The production init staged behind the guest-kit's module-loading PID 1.
+pub const OVERDRIVE_INIT_GUEST_PATH: &str = "/lib/overdrive/overdrive-init";
+/// Kernel parameter asking the test-only PID 1 to load fixture prerequisites
+/// and replace itself with production `overdrive-init`.
+pub const TEST_INIT_PARAM: &str = "overdrive.testinit=";
 
 /// The name of the scripted peer binary target of this crate.
 pub const GUEST_PEER_BIN: &str = "overdrive-guest-peer";
@@ -318,7 +333,7 @@ pub struct GuestFile {
 /// vsock transport modules.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GuestImageSpec {
-    /// PID 1.
+    /// PID 1 behavior after fixture module loading.
     pub init: GuestInit,
     /// `ovd_fwd.ko` at `GUEST_FORWARDER_MODULE_PATH` (EVMOD-GUEST-KIT).
     /// Without it the production `overdrive-init` refuses before READY with
@@ -360,6 +375,8 @@ impl GuestImageSpec {
 pub struct GuestImage {
     /// The ext4 image.
     pub rootfs: PathBuf,
+    /// Which PID 1 behavior this image carries.
+    pub init: GuestInit,
 }
 
 /// A provisioned guest kit.
@@ -456,14 +473,31 @@ impl GuestKit {
         ] {
             fs::create_dir_all(stage.join(sub)).map_err(staging(format!("creating /{sub}")))?;
         }
-        let init = match spec.init {
-            GuestInit::OverdriveInit => &self.init_bin,
-            GuestInit::ScriptedPeer => &self.peer_bin,
-        };
+        let init = &self.peer_bin;
         install(&stage, init, Path::new(vm_fixture::GUEST_INIT_SBIN_PATH))?;
         install(&stage, init, Path::new(vm_fixture::GUEST_INIT_PATH))?;
+        if spec.init == GuestInit::OverdriveInit {
+            install(&stage, &self.init_bin, Path::new(OVERDRIVE_INIT_GUEST_PATH))?;
+        }
         install(&stage, &self.peer_bin, Path::new(GUEST_PEER_GUEST_PATH))?;
         vm_fixture::stage_vsock_modules(&stage, &self.kernel_release)?;
+        let dummy =
+            host_module_file(self, dir, "drivers/net/dummy", Path::new(DUMMY_MODULE_GUEST_PATH))?;
+        install(&stage, &dummy.host, &dummy.guest)?;
+        if spec.init == GuestInit::ScriptedPeer {
+            for (relative, guest) in [
+                ("net/sched/sch_prio", PRIO_MODULE_GUEST_PATH),
+                ("net/sched/sch_netem", NETEM_MODULE_GUEST_PATH),
+            ] {
+                let module = host_module_file(self, dir, relative, Path::new(guest))?;
+                install(&stage, &module.host, &module.guest)?;
+            }
+            let tc = Path::new(TC_GUEST_PATH);
+            install(&stage, tc, tc)?;
+            for library in shared_libraries(tc)? {
+                install(&stage, &library, &library)?;
+            }
+        }
         if spec.forwarder_module {
             install(&stage, &self.forwarder_module, Path::new(GUEST_FORWARDER_MODULE_PATH))?;
         }
@@ -482,7 +516,7 @@ impl GuestKit {
         vm_fixture::mknod_char_device(&stage.join("dev/null"), 1, 3, 0o666)?;
         let rootfs = dir.join(format!("{name}.ext4"));
         mkfs(&stage, &rootfs)?;
-        Ok(GuestImage { rootfs })
+        Ok(GuestImage { rootfs, init: spec.init })
     }
 
     /// Launches a VMM over `boot.image` at `boot.cid`, through the
@@ -511,6 +545,10 @@ impl GuestKit {
             .map_err(staging(format!("reading {}", boot.image.rootfs.display())))?
             .len();
         let mut cmdline = KernelCmdline::platform_default(HostArch::X86_64);
+        if boot.image.init == GuestInit::OverdriveInit {
+            let token = format!("{TEST_INIT_PARAM}{OVERDRIVE_INIT_GUEST_PATH}");
+            assert!(cmdline.append_platform_token(&token));
+        }
         for token in &boot.cmdline_extra {
             assert!(
                 cmdline.append_platform_token(token),

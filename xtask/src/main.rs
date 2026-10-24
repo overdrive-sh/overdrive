@@ -67,10 +67,8 @@ enum Task {
         manifest_path: std::path::PathBuf,
     },
 
-    /// Compile `crates/overdrive-bpf` against `bpfel-unknown-none` and
-    /// copy the produced ELF to the load-bearing stable path
-    /// `target/bpf/overdrive_bpf.o` that the loader's
-    /// `include_bytes!` references.
+    /// Compile the host and guest Aya bins plus the approved C/CO-RE guest
+    /// candidate object, then copy all three ELFs to their stable loader paths.
     ///
     /// Per ADR-0038 §3.1 the build is a child-process invocation of
     /// `cargo +nightly build --release --target bpfel-unknown-none -Z
@@ -576,10 +574,10 @@ fn dev_setup() -> Result<()> {
         );
     }
 
-    // 3. bpf-build toolchain — bpf-linker, nightly rustup toolchain,
-    //    rust-src component on nightly. Per ADR-0038 §4 / step 02-03 /
-    //    upstream-issue A1; planning + execution split lives in
-    //    `xtask::dev_setup` so the argv shapes are unit-testable.
+    // 3. bpf-build toolchain — Rust/Aya nightly, bpf-linker, Clang 21,
+    //    bpftool, libbpf headers and target-kernel BTF. Per ADR-0038 §4 /
+    //    step 02-03 / upstream-issue A1 and the approved 11-06 CO-RE
+    //    extension; planning + execution split lives in `xtask::dev_setup`.
     xtask::dev_setup::run()?;
 
     eprintln!("xtask dev-setup: done");
@@ -990,11 +988,10 @@ fn which_or_hint(binary: &str, install_hint: &str) -> Result<()> {
     Ok(())
 }
 
-/// Compile `crates/overdrive-bpf` against `bpfel-unknown-none` and
-/// copy the resulting ELF to the load-bearing stable path
-/// `target/bpf/overdrive_bpf.o` that the loader's
-/// `include_bytes!` references (see ADR-0038 §3.1, architecture.md
-/// §3.1, wave-decisions.md D3).
+/// Compile the host and guest bins in `crates/overdrive-bpf` against
+/// `bpfel-unknown-none`, compile the approved guest C/CO-RE candidate against
+/// target-kernel BTF, and copy all three ELFs to their stable loader paths
+/// (see ADR-0038 §3.1, architecture.md §3.1, wave-decisions.md D3).
 ///
 /// Three failure modes, all surface as a structured `eyre::Report`
 /// with non-zero exit:
@@ -1004,7 +1001,9 @@ fn which_or_hint(binary: &str, install_hint: &str) -> Result<()> {
 ///    bpf-linker`, `cargo xtask dev-setup`, Lima re-provision).
 /// 2. The child `cargo +nightly build` exits non-zero — captured
 ///    stderr is propagated.
-/// 3. File I/O on the copy step (parent dir creation, `fs::copy`) —
+/// 3. Missing Clang 21, bpftool, target BTF or libbpf headers, BTF dump or
+///    CO-RE compile failure — propagated without a fallback.
+/// 4. File I/O on any copy step (parent dir creation, `fs::copy`) —
 ///    propagated with the source/destination paths.
 ///
 /// The copy is `fs::copy`, not move — keep the cargo-target ELF in
@@ -1075,8 +1074,10 @@ fn bpf_build() -> Result<()> {
     // redirected (e.g. Lima's `/home/marcus.guest/.cargo-target-lima`).
     let target_dir = cargo_target_dir(&workspace_root);
     let src = target_dir.join("bpfel-unknown-none/release/overdrive-bpf");
+    let guest_src = target_dir.join("bpfel-unknown-none/release/overdrive-guest-bpf");
     let dst_dir = workspace_root.join("target/bpf");
     let dst = dst_dir.join("overdrive_bpf.o");
+    let guest_dst = dst_dir.join("overdrive_guest_bpf.o");
 
     std::fs::create_dir_all(&dst_dir)
         .map_err(|e| color_eyre::eyre::eyre!("failed to create {}: {e}", dst_dir.display()))?;
@@ -1087,15 +1088,121 @@ fn bpf_build() -> Result<()> {
             dst.display()
         )
     })?;
+    std::fs::copy(&guest_src, &guest_dst).map_err(|e| {
+        color_eyre::eyre::eyre!(
+            "failed to copy guest BPF ELF {} -> {}: {e}",
+            guest_src.display(),
+            guest_dst.display()
+        )
+    })?;
+
+    let candidate = compile_tcp_correlation_candidate(&workspace_root, &dst_dir)?;
 
     eprintln!("xtask: bpf-build wrote {}", dst.display());
+    eprintln!("xtask: bpf-build wrote {}", guest_dst.display());
+    eprintln!("xtask: bpf-build wrote {}", candidate.display());
     Ok(())
+}
+
+fn clang_21() -> Result<String> {
+    for binary in ["clang", "clang-21"] {
+        let Ok(output) = Command::new(binary).arg("--version").output() else {
+            continue;
+        };
+        if !output.status.success() {
+            continue;
+        }
+        let version = String::from_utf8_lossy(&output.stdout);
+        let major = version
+            .split(|character: char| !character.is_ascii_digit())
+            .find_map(|part| part.parse::<u32>().ok());
+        if major == Some(21) {
+            return Ok(binary.to_owned());
+        }
+    }
+    bail!(
+        "Clang/LLVM major 21 is required for the guest TCP-correlation C/CO-RE object; install `clang-21` with `cargo xtask dev-setup`"
+    )
+}
+
+fn compile_tcp_correlation_candidate(
+    workspace_root: &std::path::Path,
+    stable_bpf_dir: &std::path::Path,
+) -> Result<std::path::PathBuf> {
+    which_or_hint(
+        "bpftool",
+        "`bpftool` not found on PATH. Install it with `cargo xtask dev-setup` or re-provision Lima.",
+    )?;
+    let target_btf = std::env::var_os("OVERDRIVE_BPF_TARGET_BTF")
+        .map_or_else(|| std::path::PathBuf::from("/sys/kernel/btf/vmlinux"), Into::into);
+    std::fs::File::open(&target_btf).map_err(|error| {
+        color_eyre::eyre::eyre!(
+            "target-kernel BTF is unreadable at {}: {error}",
+            target_btf.display()
+        )
+    })?;
+
+    std::fs::create_dir_all(stable_bpf_dir).map_err(|error| {
+        color_eyre::eyre::eyre!(
+            "failed to create {} for the C/CO-RE build: {error}",
+            stable_bpf_dir.display()
+        )
+    })?;
+    let vmlinux = stable_bpf_dir.join("vmlinux.h");
+    let dump = Command::new("bpftool")
+        .args(["btf", "dump", "file"])
+        .arg(&target_btf)
+        .args(["format", "c"])
+        .output()
+        .map_err(|error| {
+            color_eyre::eyre::eyre!("failed to run bpftool for target BTF: {error}")
+        })?;
+    if !dump.status.success() {
+        bail!(
+            "bpftool failed to generate vmlinux.h from {}: {}",
+            target_btf.display(),
+            String::from_utf8_lossy(&dump.stderr)
+        );
+    }
+    if dump.stdout.is_empty() {
+        bail!("bpftool produced an empty vmlinux.h from {}", target_btf.display());
+    }
+    std::fs::write(&vmlinux, dump.stdout).map_err(|error| {
+        color_eyre::eyre::eyre!("failed to write {}: {error}", vmlinux.display())
+    })?;
+
+    let target_arch = match std::env::consts::ARCH {
+        "x86_64" => "-D__TARGET_ARCH_x86",
+        "aarch64" => "-D__TARGET_ARCH_arm64",
+        other => bail!("unsupported C/CO-RE BPF build architecture: {other}"),
+    };
+    let clang = clang_21()?;
+    let source = workspace_root.join("crates/overdrive-bpf/src/tcp_correlation_candidate.bpf.c");
+    let candidate = stable_bpf_dir.join("overdrive_guest_tcp_correlation_candidate_bpf.o");
+    let mut compile = Command::new(&clang);
+    compile
+        .args(["-g", "-O2", "-target", "bpf", target_arch, "-I"])
+        .arg(stable_bpf_dir)
+        .args(["-I", "/usr/include", "-c"])
+        .arg(&source)
+        .arg("-o")
+        .arg(&candidate);
+    let status = compile.status().map_err(|error| {
+        color_eyre::eyre::eyre!("failed to run Clang/CO-RE compiler {clang}: {error}")
+    })?;
+    if !status.success() {
+        bail!("Clang/CO-RE compilation of {} failed with {status}", source.display());
+    }
+    if !candidate.is_file() {
+        bail!("Clang succeeded without producing {}", candidate.display());
+    }
+    Ok(candidate)
 }
 
 /// Run clippy against `crates/overdrive-bpf` under the same toolchain
 /// triple `bpf_build` uses (`+nightly`, `--target bpfel-unknown-none`,
-/// `-Z build-std=core`, `--features build-bpf-target`). The kernel-side
-/// `[[bin]]` is `#![no_std] #![no_main]`; the host workspace clippy
+/// `-Z build-std=core`, `--features build-bpf-target`). Both kernel-side
+/// bins are `#![no_std] #![no_main]`; the host workspace clippy
 /// run cannot lint it (rustc rejects it on the host triple with
 /// "unwinding panics are not supported without std"), so this is the
 /// dedicated path.

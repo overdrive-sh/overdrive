@@ -1,4 +1,4 @@
-//! SCHED_CLS guest endpoint classifier for the node-shared switch.
+//! `SCHED_CLS` guest endpoint classifier for the node-shared switch.
 
 use aya_ebpf::{bindings::TC_ACT_OK, macros::classifier, programs::TcContext};
 

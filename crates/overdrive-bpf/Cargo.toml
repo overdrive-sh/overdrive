@@ -92,5 +92,12 @@ required-features = ["build-bpf-target"]
 test  = false
 bench = false
 
+[[bin]]
+name = "overdrive-guest-bpf"
+path = "src/guest_main.rs"
+required-features = ["build-bpf-target"]
+test  = false
+bench = false
+
 [lints]
 workspace = true

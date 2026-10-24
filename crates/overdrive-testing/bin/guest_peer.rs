@@ -68,6 +68,17 @@ mod linux {
         if err.raw_os_error() == Some(libc::EEXIST) { Ok(()) } else { Err(err) }
     }
 
+    fn raise_nofile() -> io::Result<()> {
+        let nofile = libc::rlimit { rlim_cur: 65_536, rlim_max: 65_536 };
+        // SAFETY: `nofile` is a valid live rlimit value; the guest fixture's
+        // PID 1 owns this process limit and every child inherits it.
+        if unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &raw const nofile) } == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    }
+
     pub(crate) mod app {
         use std::io::{self, Read, Write};
         use std::net::{Shutdown, SocketAddrV4, TcpListener, TcpStream, UdpSocket};
@@ -457,14 +468,8 @@ mod linux {
             let Some((program, rest)) = args[split + 1..].split_first() else {
                 return usage("run-with-modules <module.ko>... -- <program> <args>...");
             };
-            let nofile = libc::rlimit { rlim_cur: 65_536, rlim_max: 65_536 };
-            // SAFETY: `nofile` is a valid live rlimit value; the in-guest
-            // launcher is PID 1's root child and owns this test process limit.
-            if unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &raw const nofile) } != 0 {
-                eprintln!(
-                    "run-with-modules: raising RLIMIT_NOFILE: {}",
-                    io::Error::last_os_error()
-                );
+            if let Err(e) = super::raise_nofile() {
+                eprintln!("run-with-modules: raising RLIMIT_NOFILE: {e}");
                 return exit::EXEC;
             }
             let error = Command::new(program)
@@ -482,6 +487,7 @@ mod linux {
         use std::io::{self, Read, Write};
         use std::net::{TcpListener, TcpStream};
         use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
+        use std::os::unix::process::CommandExt as _;
         use std::process::Command;
         use std::sync::{Arc, Mutex};
         use std::thread::{self, JoinHandle};
@@ -497,7 +503,10 @@ mod linux {
         use overdrive_testing::guest_app::{
             Direction, STREAM_CHUNK, StreamCheck, StreamGen, TerminalEvent,
         };
-        use overdrive_testing::guest_kit::LOOPBACK_MODULE_GUEST_PATH;
+        use overdrive_testing::guest_kit::{
+            DUMMY_MODULE_GUEST_PATH, LOOPBACK_MODULE_GUEST_PATH, NETEM_MODULE_GUEST_PATH,
+            PRIO_MODULE_GUEST_PATH, TEST_INIT_PARAM,
+        };
         use overdrive_testing::guest_peer::{
             CONTROL_PORT_PARAM, DrainEnd, PeerCommand, PeerEnd, PeerOutcome, PeerReply, PeerSide,
         };
@@ -648,6 +657,13 @@ mod linux {
                 .find_map(|p| p.strip_prefix(CONTROL_PORT_PARAM)?.parse().ok())
         }
 
+        fn test_init() -> Option<String> {
+            let cmdline = std::fs::read_to_string("/proc/cmdline").ok()?;
+            cmdline
+                .split_whitespace()
+                .find_map(|parameter| parameter.strip_prefix(TEST_INIT_PARAM).map(str::to_owned))
+        }
+
         /// PID 1 of a scripted guest.
         pub(crate) fn run() -> ! {
             mount("proc", "/proc", "proc");
@@ -665,7 +681,35 @@ mod linux {
                     eprintln!("overdrive-guest-peer: loading {path}: {e}");
                 }
             }
-            for optional in [GUEST_FORWARDER_MODULE_PATH, LOOPBACK_MODULE_GUEST_PATH] {
+            if let Some(program) = test_init() {
+                if let Err(e) = super::raise_nofile() {
+                    eprintln!(
+                        "overdrive-guest-peer: raising production fixture RLIMIT_NOFILE: {e}"
+                    );
+                    power_off();
+                }
+                for prerequisite in [DUMMY_MODULE_GUEST_PATH, LOOPBACK_MODULE_GUEST_PATH] {
+                    if std::path::Path::new(prerequisite).exists()
+                        && let Err(e) = super::load_module(prerequisite)
+                    {
+                        eprintln!(
+                            "overdrive-guest-peer: loading production fixture prerequisite \
+                             {prerequisite}: {e}"
+                        );
+                        power_off();
+                    }
+                }
+                let error = Command::new(&program).exec();
+                eprintln!("overdrive-guest-peer: exec {program}: {error}");
+                power_off();
+            }
+            for optional in [
+                GUEST_FORWARDER_MODULE_PATH,
+                LOOPBACK_MODULE_GUEST_PATH,
+                DUMMY_MODULE_GUEST_PATH,
+                PRIO_MODULE_GUEST_PATH,
+                NETEM_MODULE_GUEST_PATH,
+            ] {
                 if std::path::Path::new(optional).exists()
                     && let Err(e) = super::load_module(optional)
                 {

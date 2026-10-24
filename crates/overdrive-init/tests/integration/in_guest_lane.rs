@@ -60,7 +60,6 @@ fn run_cell(slot: u32, cell: &str) {
 /// listener held.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn the_guest_transport_is_configured_before_ready_in_a_real_guest() {
     run_cell(
         0,
@@ -72,7 +71,6 @@ fn the_guest_transport_is_configured_before_ready_in_a_real_guest() {
 /// protocol only, and no ephemeral port is reserved.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn the_reserved_intake_ports_refuse_application_binds_in_a_real_guest() {
     run_cell(
         1,
@@ -84,7 +82,6 @@ fn the_reserved_intake_ports_refuse_application_binds_in_a_real_guest() {
 /// guest kernel.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn the_guest_kits_module_matches_the_running_guest_kernel() {
     run_cell(2, "transport::real_kernel::the_guest_kits_module_release_matches_the_running_kernel");
 }
@@ -93,7 +90,6 @@ fn the_guest_kits_module_matches_the_running_guest_kernel() {
 /// table with the sim half's per-connection outcome.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn the_guest_accept_path_matches_the_sim_in_a_real_guest() {
     run_cell(3, "guest_flow::real_kernel::the_accept_path_matches_the_sim_per_connection");
 }
@@ -105,7 +101,6 @@ fn the_guest_accept_path_matches_the_sim_in_a_real_guest() {
 /// powers off (the VMM exits).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_guest_without_the_kits_module_refuses_before_ready() {
     let staging = default_staging_root();
     let kit = GuestKit::provision(&staging).expect("precondition: the guest kit provisions");
@@ -262,7 +257,6 @@ fn run_owner_cell(
 /// closes).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn the_v24_kernel_shape_holds_in_a_real_guest() {
     run_owner_cell(
         5,
@@ -298,7 +292,6 @@ fn the_v24_kernel_shape_holds_in_a_real_guest() {
 /// control flow. The guest writes no message for the aborted flow.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_host_abort_before_the_guest_accepts_ends_the_flow_in_a_real_guest() {
     run_owner_cell(
         6,
@@ -325,7 +318,6 @@ fn a_host_abort_before_the_guest_accepts_ends_the_flow_in_a_real_guest() {
 /// flow; the positive control flow pairs on the new session.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_session_loss_abort_ends_the_flow_and_the_owner_reconnects_in_a_real_guest() {
     run_owner_cell(
         7,
@@ -351,10 +343,11 @@ fn a_session_loss_abort_ends_the_flow_and_the_owner_reconnects_in_a_real_guest()
 /// request, keep it open until the cell reports the flow accepted, then
 /// close it with no write. A late `Paired` for the flow is answered with
 /// nothing (the host writes no control message); any other message for the
-/// flow fails.
+/// flow fails. The host waits until the cell has observed the aborted C
+/// before opening the positive control, so the two application connections
+/// cannot be mistaken for one another.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_host_close_after_the_guest_accepted_ends_the_flow_in_a_real_guest() {
     run_owner_cell(
         8,
@@ -381,6 +374,7 @@ fn a_host_close_after_the_guest_accepted_ends_the_flow_in_a_real_guest() {
                     "the guest wrote more than a late Paired for the flow: {other:?}"
                 ));
             }
+            expect_line(host, owner_lane::PAUSED)?;
             serve_control_flow(host, &session)?;
             expect_line(host, owner_lane::DONE)?;
             let rest = drain(&session)?;
@@ -397,7 +391,6 @@ fn a_host_close_after_the_guest_accepted_ends_the_flow_in_a_real_guest() {
 /// message for the flow.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn an_abort_for_an_unheld_flow_is_discarded_in_a_real_guest() {
     run_owner_cell(
         9,
@@ -428,7 +421,6 @@ fn an_abort_for_an_unheld_flow_is_discarded_in_a_real_guest() {
 /// write. The cell reports the abort-to-reset p50 / p99 (not asserted).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_burst_of_host_aborts_resets_every_connection_in_a_real_guest() {
     run_owner_cell(
         10,
@@ -455,5 +447,20 @@ fn a_burst_of_host_aborts_resets_every_connection_in_a_real_guest() {
             say(host, owner_lane::CLOSED_ALL)?;
             expect_line(host, owner_lane::DONE)
         },
+    );
+}
+
+/// TCP-CORRELATION: the existing disposable guest-kit owner lane runs the
+/// one source-local parameterized cell through production Connect4,
+/// TcpCorrelation and KernelGuestOwnerIo. The cell owns every identity,
+/// one-time-take, direct-refusal and transient-cleanup oracle; this wrapper
+/// proves that exact cell on the supported Cloud Hypervisor guest.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+fn tcp_correlation_preserves_identity_and_cleanup_in_a_real_guest() {
+    run_owner_cell(
+        11,
+        "guest_flow::real_kernel::tcp_correlation_preserves_exact_identity_and_cleans_transients_for_every_handshake_path",
+        |host| expect_line(host, owner_lane::DONE),
     );
 }

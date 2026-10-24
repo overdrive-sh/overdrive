@@ -29,7 +29,6 @@ use super::*;
 /// and `flows[h]` holds the same pair.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_dial_with_the_guests_token_attaches_at_connect_and_then_pairs() {
     let mut g = Guest::new();
     g.open_session();
@@ -84,7 +83,6 @@ fn a_dial_with_the_guests_token_attaches_at_connect_and_then_pairs() {
 /// guest owner reads no payload.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_paired_dial_forwards_both_ways_through_the_guest_pair() {
     let mut g = Guest::new();
     g.open_session();
@@ -110,7 +108,6 @@ fn a_paired_dial_forwards_both_ways_through_the_guest_pair() {
 /// message, creates no C and attaches nothing.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_dial_with_another_launchs_token_closes_v_g_silently() {
     let mut g = Guest::new();
     g.open_session();
@@ -131,16 +128,15 @@ fn a_dial_with_another_launchs_token_closes_v_g_silently() {
 /// request read finds it: the flow ends with no C and no message.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_v_g_the_host_closed_after_the_request_ends_with_no_c_and_no_message() {
     let mut g = Guest::new();
     g.open_session();
     let h = host_flow(1);
     g.io.host_open_accept(accept_request(h, 8080, launch()));
-    g.io.host_vsock_end(h);
     g.io.release_inbound_accept(h);
     g.settle();
     g.io.release_inbound_request(h);
+    g.io.host_vsock_end(h);
     g.settle();
     assert!(
         g.io.effects()
@@ -160,7 +156,6 @@ fn a_v_g_the_host_closed_after_the_request_ends_with_no_c_and_no_message() {
 /// (`ECONNREFUSED` when nothing listens), once.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_refused_application_connect_answers_refused_with_its_errno() {
     let mut g = Guest::new();
     g.open_session();
@@ -186,7 +181,6 @@ fn a_refused_application_connect_answers_refused_with_its_errno() {
 /// discarded (U-1).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn an_application_connect_past_the_inbound_timeout_answers_timed_out_once() {
     let mut g = Guest::new();
     g.open_session();
@@ -215,7 +209,6 @@ fn an_application_connect_past_the_inbound_timeout_answers_timed_out_once() {
 /// later `Connected` for C finds the flow closed and attaches nothing (U-1).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn an_accepted_v_g_closed_by_the_host_ends_silently_and_cannot_pair() {
     let mut g = Guest::new();
     g.open_session();
@@ -245,7 +238,6 @@ fn an_accepted_v_g_closed_by_the_host_ends_silently_and_cannot_pair() {
 /// `Abort { flow }` once.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn an_error_on_an_accepted_v_g_aborts_with_abort() {
     let mut g = Guest::new();
     g.open_session();
@@ -262,7 +254,6 @@ fn an_error_on_an_accepted_v_g_aborts_with_abort() {
 /// guest does not hold — is discarded with no reply (R5-28, guest half).
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_queued_v_g_closed_by_the_host_never_reaches_the_guest_and_its_abort_is_discarded() {
     let mut g = Guest::new();
     g.open_session();
@@ -282,7 +273,6 @@ fn a_queued_v_g_closed_by_the_host_never_reaches_the_guest_and_its_abort_is_disc
 /// record; no reply.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn abort_of_a_paired_dial_aborts_its_pair_and_resets_the_application() {
     let mut g = Guest::new();
     g.open_session();
@@ -306,7 +296,6 @@ fn abort_of_a_paired_dial_aborts_its_pair_and_resets_the_application() {
 /// ends.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn an_application_reset_before_the_attach_is_refused_and_answered_with_its_errno() {
     let mut g = Guest::new();
     g.open_session();
@@ -337,7 +326,6 @@ fn an_application_reset_before_the_attach_is_refused_and_answered_with_its_errno
 /// `forwarder_attach_ended`.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_v_g_ended_before_the_attach_is_refused_and_ends_with_no_message() {
     let mut g = Guest::new();
     g.open_session();
@@ -363,7 +351,6 @@ fn a_v_g_ended_before_the_attach_is_refused_and_ends_with_no_message() {
 /// is discarded without reply.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn control_messages_for_closed_dials_are_discarded_without_reply() {
     let mut g = Guest::new();
     g.open_session();
@@ -389,7 +376,6 @@ fn control_messages_for_closed_dials_are_discarded_without_reply() {
 /// attaches nothing (the flow was aborted by the loss, DG-5-F).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_connect_completing_after_session_loss_sends_nothing() {
     let mut g = Guest::new();
     g.open_session();
@@ -413,7 +399,6 @@ fn a_connect_completing_after_session_loss_sends_nothing() {
 /// `KernelGuestOwnerIo` and compares per connection.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn accept_path_outcomes_by_first_record() {
     for case in ACCEPT_PATH_CASES {
         let mut g = Guest::new();

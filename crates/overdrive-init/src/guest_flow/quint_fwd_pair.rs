@@ -27,8 +27,10 @@
 //! byte `k`.
 //!
 //! Action → driving port / seam stimulus (feature-delta § *Conformance
-//! observation surface and action map*, "`fwd_pair`"). Every handler ends by
-//! dispatching the owner until quiescent (DG-5-Q):
+//! observation surface and action map*, "`fwd_pair`"). Handlers that release
+//! an owner event dispatch it to quiescence (DG-5-Q); socket/forwarder and
+//! other-side stimuli do not consume a distinct pending owner dispatch behind
+//! the model action's back:
 //!
 //! | Action | Driver |
 //! |---|---|
@@ -90,7 +92,7 @@
 //!   else `none`. `pr(g).out` / `.cause` / `.errno` ← that consumed record's
 //!   outcome, compared once `rec = read` — never a record the driver took
 //!   from `SimGuestOwnerIo` itself. `closed` ⇔ the owner consumed the record,
-//!   the flow left its table and S V_g sent `{S, R}` at the owner's close;
+//!   the flow left its table and S V_g reports `closed_by_owner()`;
 //!   `byRel` ⇔ the flow left the table with no record consumed and none
 //!   queued. `attRes(g)`, `attEnded(g)` ← the cumulative
 //!   `forwarder_attached` / `forwarder_attach_ended` (QPROJ-8 third
@@ -98,10 +100,10 @@
 //!   ← S `pair_state(pair)` (`source_end`, `target_shut`), compared while the
 //!   pair is live.
 //! - S, until the driver applies `VmmExit`: stream / watch: `dir(gh).q0` ← the outer half's
-//!   `queued()` (the units after the `moved` ones); `dir(hg).q1` ← V_g's
-//!   `queued()`; `dir(hg).q2` and `.got` ← the pair's `moved` and the
-//!   application's `peer_received()`; `dir(hg).rst` ← the outer half's
-//!   `peer_end()`. `tcpErr(g)` ← the outer half's `sk_err()`. `vs(g).sent` ←
+//!   `stream_input()`; `dir(hg).q1` ← V_g's `stream_input()`;
+//!   `dir(hg).q2` / `.got` ← the outer half's `stream_output()` /
+//!   `peer_received()`; `dir(hg).rst` ← its `peer_was_reset()`.
+//!   `tcpErr(g)` ← the outer half's `sk_err()`. `vs(g).sent` ←
 //!   V_g's `sent_shutdown()`; `.cls` ← `recorded_class()`; `.st` ←
 //!   `vsock_state()`; `.sshut` ← `own_send_shut()`; `.err` ←
 //!   `sk_err().is_some()`; `.ps` ← the peer's SHUTDOWN flags
@@ -160,7 +162,7 @@ use overdrive_core::guest_transport::wire::{
 };
 use overdrive_core::net::ListenPort;
 use overdrive_core::vm::config::VsockPort;
-use overdrive_sim::adapters::{SimContextState, SimFarEnd, SimShutdown, SimSocket, SimVsockState};
+use overdrive_sim::adapters::{SimContextState, SimShutdown, SimSocket, SimVsockState};
 use quint_connect::{Config, Driver, Result, State, Step, quint_run, quint_test, switch};
 use serde::Deserialize;
 
@@ -349,8 +351,8 @@ impl FwdPairGuestDriver {
         }
     }
 
-    /// Dispatches the live guest owner until quiescent (DG-5-Q): the owner's
-    /// driving port, called by every handler.
+    /// Dispatches the live guest owner until quiescent (DG-5-Q) after a
+    /// handler has released an owner event.
     fn settle(&mut self) {
         if self.process.is_alive() {
             let (io, clock) = (self.io.clone(), Arc::clone(&self.clock));
@@ -410,11 +412,7 @@ impl FwdPairGuestDriver {
     }
 
     /// One run of the guest pair's direction whose source is `source`.
-    fn run(
-        &mut self,
-        action: &'static str,
-        source: PairSide,
-    ) -> std::result::Result<(), DriverError> {
+    fn run(&self, action: &'static str, source: PairSide) -> std::result::Result<(), DriverError> {
         let pair = self
             .pair
             .ok_or_else(|| DriverError::NotEnabled { action, why: "no guest pair".to_owned() })?;
@@ -424,7 +422,6 @@ impl FwdPairGuestDriver {
                 why: format!("no run of {source:?}'s direction is queued"),
             });
         }
-        self.settle();
         Ok(())
     }
 
@@ -521,6 +518,12 @@ impl FwdPairGuestDriver {
         // the guest's own Paired (watch) is consumed by the host side
         let _paired = self.io.host_take_first(|m| *m == ControlMessage::Paired { flow });
         self.note_pair();
+        if let Some(vsock) = self.vsock()
+            && vsock.received_shutdown() == Some(SimShutdown::Both)
+            && let Some(pair) = self.pair
+        {
+            let _ = self.io.run_forwarder_once(pair, self.vsock_side());
+        }
         if let Some(vsock) = self.vsock() {
             vsock.peer_stop_reading();
         }
@@ -586,32 +589,44 @@ impl FwdPairGuestDriver {
         self.settle();
     }
 
-    fn vctl_hg(&mut self) -> std::result::Result<(), DriverError> {
+    fn vctl_hg(&self) -> std::result::Result<(), DriverError> {
         let flags = pre_ctl_head("hg")?;
         let vsock = self
             .vsock()
             .ok_or_else(|| DriverError::NotEnabled { action: "VCtl", why: "no V_g".to_owned() })?;
+        let received_before = vsock.received_shutdown();
+        let sent_before = vsock.sent_shutdown();
+        let callback_abort = flags.contains("R")
+            && matches!(
+                (received_before, sent_before),
+                (None, _) | (Some(SimShutdown::Send), None)
+            );
         if flags.contains("R") {
             vsock.peer_shutdown(SimShutdown::Both);
         } else {
             vsock.peer_shutdown(SimShutdown::Send);
         }
-        self.settle();
+        let context_open = self.io.forwarder_contexts().first().is_some_and(|context| context.open);
+        if callback_abort
+            && context_open
+            && let Some(pair) = self.pair
+        {
+            let _ = self.io.run_forwarder_once(pair, self.vsock_side());
+        }
         Ok(())
     }
 
-    fn app_write(&mut self) -> std::result::Result<(), DriverError> {
+    fn app_write(&self) -> std::result::Result<(), DriverError> {
         let k = pre_dir_wr("gh")? + 1;
         let outer = self.outer().ok_or_else(|| DriverError::NotEnabled {
             action: "Write",
             why: "no outer half".to_owned(),
         })?;
         outer.peer_send(&[u8::try_from(k).map_err(|_| DriverError::Decode(format!("unit {k}")))?]);
-        self.settle();
         Ok(())
     }
 
-    fn host_unit_to_guest(&mut self) -> std::result::Result<(), DriverError> {
+    fn host_unit_to_guest(&self) -> std::result::Result<(), DriverError> {
         // the unit the host side moves next: its source queue's head (stream)
         // or the dialer's next write (watch)
         let k = match self.mode {
@@ -625,14 +640,13 @@ impl FwdPairGuestDriver {
             .vsock()
             .ok_or_else(|| DriverError::NotEnabled { action: "Hop0", why: "no V_g".to_owned() })?;
         vsock.peer_send(&[u8::try_from(k).map_err(|_| DriverError::Decode(format!("unit {k}")))?]);
-        self.settle();
         Ok(())
     }
 
     /// Datagram mode: the host forwarder sends the next item of the head
     /// datagram's frame to V_g — the 8-byte header, then one payload byte per
     /// item.
-    fn host_frame_item_to_guest(&mut self) -> std::result::Result<(), DriverError> {
+    fn host_frame_item_to_guest(&self) -> std::result::Result<(), DriverError> {
         let (_, dq0, sizes, foff) = pre_dg("hg")?;
         let k = *dq0.first().ok_or_else(|| DriverError::Decode("dg(hg).dq0 head".to_owned()))?;
         let sz = *sizes
@@ -651,21 +665,19 @@ impl FwdPairGuestDriver {
                 .peer_send(&[u8::try_from(10 * k + foff)
                     .map_err(|_| DriverError::Decode("item".to_owned()))?]);
         }
-        self.settle();
         Ok(())
     }
 
-    fn host_consumes_one(&mut self) -> std::result::Result<(), DriverError> {
+    fn host_consumes_one(&self) -> std::result::Result<(), DriverError> {
         let vsock = self
             .vsock()
             .ok_or_else(|| DriverError::NotEnabled { action: "Hop1", why: "no V_g".to_owned() })?;
         vsock.peer_resume_reading();
         vsock.peer_stop_reading();
-        self.settle();
         Ok(())
     }
 
-    fn app_reads_one(&mut self) -> std::result::Result<(), DriverError> {
+    fn app_reads_one(&self) -> std::result::Result<(), DriverError> {
         if self.app_shut_rd {
             return Err(DriverError::NotEnabled {
                 action: "Read",
@@ -678,11 +690,10 @@ impl FwdPairGuestDriver {
         })?;
         outer.peer_resume_reading();
         outer.peer_stop_reading();
-        self.settle();
         Ok(())
     }
 
-    fn app_send_dg(&mut self, sz: i64) -> std::result::Result<(), DriverError> {
+    fn app_send_dg(&self, sz: i64) -> std::result::Result<(), DriverError> {
         let (n, ..) = pre_dg("gh")?;
         let k = n + 1;
         let payload: Vec<u8> = (1..=sz)
@@ -693,11 +704,10 @@ impl FwdPairGuestDriver {
             why: "no slot socket".to_owned(),
         })?;
         outer.peer_send(&payload);
-        self.settle();
         Ok(())
     }
 
-    fn fwd_err_g(&mut self) -> std::result::Result<(), DriverError> {
+    fn fwd_err_g(&self) -> std::result::Result<(), DriverError> {
         let pair = self.pair.ok_or_else(|| DriverError::NotEnabled {
             action: "FwdErr",
             why: "no guest pair".to_owned(),
@@ -710,21 +720,15 @@ impl FwdPairGuestDriver {
                 why: "no run is queued to find the error".to_owned(),
             });
         }
-        self.settle();
         Ok(())
     }
 
-    fn step_action(
-        &mut self,
-        action: &'static str,
-        s: &str,
-    ) -> std::result::Result<(), DriverError> {
+    fn step_action(action: &'static str, s: &str) -> std::result::Result<(), DriverError> {
         if s == "g" {
             return Err(DriverError::NotRepresentable(format!(
                 "`{action}(g)` has no guest production path"
             )));
         }
-        self.settle();
         Ok(())
     }
 
@@ -782,108 +786,138 @@ impl Driver for FwdPairGuestDriver {
         switch!(step {
             InitWith(m: String) => self.init_with(&m)?,
             Attach(s: String) => {
-                if s == "g" { self.attach_g()? } else { self.settle() }
+                if s == "g" { self.attach_g()? }
             },
             CloseUnattached(s: String) => {
-                if s == "g" { self.close_unattached() } else { self.step_action("CloseUnattached", &s)? }
+                if s == "g" { self.close_unattached() } else { Self::step_action("CloseUnattached", &s)? }
             },
             Abort(s: String) => {
-                if s == "g" { self.guest_abort()? } else { self.settle() }
+                if s == "g" { self.guest_abort()? }
             },
             GuestAbort(s: String) => {
-                if s == "g" { self.guest_abort()? } else { self.step_action("GuestAbort", &s)? }
+                if s == "g" { self.guest_abort()? } else { Self::step_action("GuestAbort", &s)? }
             },
             CtxRelease(s: String) => {
-                if s == "g" { self.ctx_release_g() } else { self.settle() }
+                if s == "g" { self.ctx_release_g() }
             },
-            Reopen(s: String) => self.step_action("Reopen", &s)?,
+            Reopen(s: String) => Self::step_action("Reopen", &s)?,
             TakeEnd(s: String) => {
-                if s == "g" { self.take_end_g()? } else { self.settle() }
+                if s == "g" { self.take_end_g()? }
             },
             OwnerClose(s: String) => {
-                if s == "g" { self.owner_close_g() } else { self.settle() }
+                if s == "g" { self.owner_close_g() }
             },
             Hop0(d: String) => {
                 if d == "gh" { self.run("Hop0", self.outer_side())? } else { self.host_unit_to_guest()? }
             },
             Hop1(d: String) => {
                 if d == "hg" { self.run("Hop1", self.vsock_side())? }
-                else if self.mode == Mode::Dgram { self.settle() }
-                else { self.host_consumes_one()? }
+                else if self.mode != Mode::Dgram { self.host_consumes_one()? }
             },
             HopEnd0(d: String) => {
-                if d == "gh" { self.run("HopEnd0", self.outer_side())? } else { self.settle() }
+                if d == "gh" { self.run("HopEnd0", self.outer_side())? }
             },
             HopEnd1(d: String) => {
-                if d == "hg" { self.run("HopEnd1", self.vsock_side())? } else { self.settle() }
+                if d == "hg" { self.run("HopEnd1", self.vsock_side())? }
             },
             VCtl(d: String) => {
-                if d == "hg" { self.vctl_hg()? } else { self.settle() }
+                if d == "hg" { self.vctl_hg()? }
             },
             FwdErr(s: String) => {
-                if s == "g" { self.fwd_err_g()? } else { self.settle() }
+                if s == "g" { self.fwd_err_g()? }
             },
             Write(d: String) => {
                 if d == "gh" { self.app_write()? }
                 else if self.mode == Mode::Watch { self.host_unit_to_guest()? }
-                else { self.settle() }
             },
             Fin(d: String) => {
                 if d == "gh" {
                     let outer = self.outer().ok_or_else(|| DriverError::NotEnabled { action: "Fin", why: "no outer half".to_owned() })?;
                     outer.peer_shutdown(SimShutdown::Send);
                 }
-                self.settle();
             },
             Read(d: String) => {
                 if d == "hg" { self.app_reads_one()? }
                 else if self.mode == Mode::Watch { self.host_consumes_one()? }
-                else { self.settle() }
             },
-            ReadEof => self.settle(),
+            ReadEof(d: String) => {
+                if self.mode == Mode::Dgram {
+                    return Err(DriverError::NotEnabled {
+                        action: "ReadEof",
+                        why: "datagrams have no stream EOF".to_owned(),
+                    }.into());
+                }
+                // Application/holder observation only: validate the trace's
+                // approved pre-state signal without consuming a pending owner
+                // dispatch or manufacturing a socket effect.
+                pre_dir_list(&d, "q2")?;
+            },
             ShutRd(d: String) => {
                 if d == "hg" { self.app_shut_rd = true; }
-                self.settle();
             },
             TcpRst(s: String) => {
                 if s == "g" {
                     let outer = self.outer().ok_or_else(|| DriverError::NotEnabled { action: "TcpRst", why: "no outer half".to_owned() })?;
                     outer.peer_reset();
+                    if let Some(pair) = self.pair {
+                        let _ = self.io.run_forwarder_once(pair, self.outer_side());
+                    }
                 }
-                self.settle();
             },
-            HolderDrop => self.settle(),
+            HolderDrop => {
+                if self.mode != Mode::Watch {
+                    return Err(DriverError::NotEnabled {
+                        action: "HolderDrop",
+                        why: "no watch holder".to_owned(),
+                    }.into());
+                }
+                pre_dir_list("gh", "q2")?;
+            },
             VmmExit => self.vmm_exit(),
-            TrailingRst => self.settle(),
+            TrailingRst(s: String) => {
+                let direction = match s.as_str() {
+                    "g" => "hg",
+                    "h" => "gh",
+                    other => return Err(DriverError::Decode(format!("side {other:?}")).into()),
+                };
+                pre_dir_list(direction, "q2")?;
+            },
             SendDg(d: String, sz: i64) => {
-                if d == "gh" { self.app_send_dg(sz)? } else { self.settle() }
+                if d == "gh" { self.app_send_dg(sz)? }
             },
             DRead(d: String) => {
-                if d == "hg" { self.app_reads_one()? } else { self.settle() }
+                if d == "hg" { self.app_reads_one()? }
             },
             UdpBlock(d: String) => {
                 if d == "hg" && let Some(outer) = self.outer() { outer.peer_stop_reading(); }
-                self.settle();
             },
             UdpUnblock(d: String) => {
                 if d == "hg" && let Some(outer) = self.outer() { outer.peer_resume_reading(); }
-                self.settle();
             },
             UdpErr(s: String) => {
                 if s == "g" {
                     let outer = self.outer().ok_or_else(|| DriverError::NotEnabled { action: "UdpErr", why: "no slot socket".to_owned() })?;
                     outer.set_sk_err(KernelErrno::new(u16::try_from(libc::ECONNREFUSED).expect("errno")).expect("non-zero"));
                 }
-                self.settle();
             },
             DgHalfClose(s: String) => {
                 if s == "g" {
                     let vsock = self.vsock().ok_or_else(|| DriverError::NotEnabled { action: "DgHalfClose", why: "no V_g".to_owned() })?;
                     vsock.shutdown_send();
                 }
-                self.settle();
             },
-            HolderEnd => self.settle(),
+            HolderEnd(k: String) => {
+                if self.mode != Mode::Watch {
+                    return Err(DriverError::NotEnabled {
+                        action: "HolderEnd",
+                        why: "no watch holder".to_owned(),
+                    }.into());
+                }
+                if !matches!(k.as_str(), "eof" | "err") {
+                    return Err(DriverError::Decode(format!("holder end {k:?}")).into());
+                }
+                pre_dir_list("gh", "q2")?;
+            },
             AttachRead => return Err(DriverError::HazardOnly("AttachRead").into()),
             AttachHook => return Err(DriverError::HazardOnly("AttachHook").into()),
             DropRecord => return Err(DriverError::HazardOnly("DropRecord").into()),
@@ -1186,10 +1220,8 @@ impl FwdPairGuestDriver {
         } else {
             "none"
         };
-        // conformance-lint: sim-arbiter-ok QPROJ-8 closed: V_g sent {S, R} at the owner's close (the half's shared SimSocket, D-5), Tier-3 V-EV-END / V-EV-CTL and the module suite
-        let vsock_sent = self.vsock().and_then(|v| v.sent_shutdown());
-        // conformance-lint: sim-arbiter-ok QPROJ-8 the same SimSocket fact, compared with {S, R}
-        let vsock_closed = vsock_sent == Some(SimShutdown::Both);
+        // conformance-lint: sim-arbiter-ok QPROJ-8 closed: the retained V_g SimSocket records its userspace-owner close, distinct from the forwarder's earlier SHUT_RDWR, Tier-3 V-EV-END / V-EV-CTL and the module suite
+        let vsock_closed = self.vsock().is_some_and(|v| v.closed_by_owner());
         let closed = consumed.is_some() && !held && vsock_closed;
         let by_rel = self.flow.is_some() && !held && consumed.is_none() && !queued;
         let att_ended = i64::try_from(obs.forwarder_attach_ended).unwrap_or(i64::MAX);
@@ -1246,63 +1278,45 @@ impl FwdPairGuestDriver {
                 sshut: false,
                 err: false,
             },
-            |v| VsView {
-                // conformance-lint: sim-arbiter-ok QPROJ-8 vs(g).ps: V_g's peer_shutdown flags, Tier-3 V-EV-END and the module suite
-                ps: shutdown_set(v.received_shutdown()),
-                // conformance-lint: sim-arbiter-ok QPROJ-7 / QPROJ-8 SimSocket per-half facts, Tier-3 V-EV-END / V-EV-PAIR / V-EV-DGRAM and the module suite
-                sent: shutdown_set(v.sent_shutdown()),
-                cls: if v.recorded_class() == Some(SourceEnd::Clean) { "clean" } else { "none" }
+            |v| {
+                VsView {
+                    // conformance-lint: sim-arbiter-ok QPROJ-8 vs(g).ps: V_g's peer_shutdown flags, Tier-3 V-EV-END and the module suite
+                    ps: shutdown_set(v.received_shutdown()),
+                    // conformance-lint: sim-arbiter-ok QPROJ-7 / QPROJ-8 SimSocket per-half facts, Tier-3 V-EV-END / V-EV-PAIR / V-EV-DGRAM and the module suite
+                    sent: shutdown_set(v.sent_shutdown()),
+                    cls: if self.pair.is_some() && v.recorded_class() == Some(SourceEnd::Clean) {
+                        "clean"
+                    } else {
+                        "none"
+                    }
                     .to_owned(),
-                st: match v.vsock_state() {
-                    // conformance-lint: sim-arbiter-ok QPROJ-7 / QPROJ-8 SimSocket per-half facts, Tier-3 V-EV-END / V-EV-PAIR / V-EV-DGRAM and the module suite
-                    SimVsockState::Established => "est",
-                    // conformance-lint: sim-arbiter-ok QPROJ-7 / QPROJ-8 SimSocket per-half facts, Tier-3 V-EV-END / V-EV-PAIR / V-EV-DGRAM and the module suite
-                    SimVsockState::Closing => "closing",
+                    st: match v.vsock_state() {
+                        // conformance-lint: sim-arbiter-ok QPROJ-7 / QPROJ-8 SimSocket per-half facts, Tier-3 V-EV-END / V-EV-PAIR / V-EV-DGRAM and the module suite
+                        SimVsockState::Established => "est",
+                        // conformance-lint: sim-arbiter-ok QPROJ-7 / QPROJ-8 SimSocket per-half facts, Tier-3 V-EV-END / V-EV-PAIR / V-EV-DGRAM and the module suite
+                        SimVsockState::Closing => "closing",
+                    }
+                    .to_owned(),
+                    sshut: v.own_send_shut(),
+                    err: v.sk_err().is_some(),
                 }
-                .to_owned(),
-                sshut: v.own_send_shut(),
-                err: v.sk_err().is_some(),
             },
         );
-        // The forwarder's moved counts number the units the queues hold
-        // (relabelling of the Sim sockets' bytes, never a source of state).
-        // conformance-lint: sim-arbiter-ok QPROJ-8 SimFlowForwarder pair_state (moved counts), Tier-3 V-EV-END / V-EV-PAIR and the module suite
-        let state: Option<PairState> = self.pair.and_then(|p| self.io.forwarder_pair_state(p));
-        let (gh, hg) = match (state, self.outer_side()) {
-            (Some(s), PairSide::A) => (Some(s.a_to_b), Some(s.b_to_a)),
-            (Some(s), PairSide::B) => (Some(s.b_to_a), Some(s.a_to_b)),
-            (None, _) => (None, None),
-        };
-        let units = |from: u64, count: usize| -> Vec<i64> {
-            (0..count)
-                .map(|i| {
-                    i64::try_from(from).unwrap_or(i64::MAX)
-                        + 1
-                        + i64::try_from(i).unwrap_or(i64::MAX)
-                })
-                .collect()
-        };
+        let units = |bytes: Vec<u8>| bytes.into_iter().map(i64::from).collect();
         let queues = (self.mode != Mode::Dgram).then(|| {
-            let moved_guest_to_host = gh.map_or(0, |d| d.moved);
-            let moved_host_to_guest = hg.map_or(0, |d| d.moved);
             let got_hg: Vec<i64> = outer
                 .as_ref()
                 .map(|o| o.peer_received().iter().map(|b| i64::from(*b)).collect())
                 .unwrap_or_default();
-            let got_len = u64::try_from(got_hg.len()).unwrap_or(u64::MAX);
             QueuesView {
                 // conformance-lint: sim-arbiter-ok QPROJ-7 / QPROJ-8 SimSocket per-half facts, Tier-3 V-EV-END / V-EV-PAIR / V-EV-DGRAM and the module suite
-                q0_gh: units(moved_guest_to_host, outer.as_ref().map_or(0, SimSocket::queued)),
+                q0_gh: outer.as_ref().map_or_else(Vec::new, |socket| units(socket.stream_input())),
                 // conformance-lint: sim-arbiter-ok QPROJ-7 / QPROJ-8 SimSocket per-half facts, Tier-3 V-EV-END / V-EV-PAIR / V-EV-DGRAM and the module suite
-                q1_hg: units(moved_host_to_guest, vsock.as_ref().map_or(0, SimSocket::queued)),
-                q2_hg: units(
-                    got_len,
-                    usize::try_from(moved_host_to_guest.saturating_sub(got_len))
-                        .unwrap_or(usize::MAX),
-                ),
+                q1_hg: vsock.as_ref().map_or_else(Vec::new, |socket| units(socket.stream_input())),
+                q2_hg: outer.as_ref().map_or_else(Vec::new, |socket| units(socket.stream_output())),
                 got_hg,
                 // conformance-lint: sim-arbiter-ok QPROJ-7 / QPROJ-8 SimSocket per-half facts, Tier-3 V-EV-END / V-EV-PAIR / V-EV-DGRAM and the module suite
-                rst_hg: outer.as_ref().and_then(SimSocket::peer_end) == Some(SimFarEnd::Reset),
+                rst_hg: outer.as_ref().is_some_and(SimSocket::peer_was_reset),
             }
         });
         let dg_got = (self.mode == Mode::Dgram).then(|| {
@@ -1375,7 +1389,6 @@ impl State<FwdPairGuestDriver> for FwdPairGuestState {
     max_samples = 1,
     test = "Paired"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_paired() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1388,7 +1401,6 @@ fn quint_fwd_pair_guest_paired() -> impl Driver {
     max_samples = 1,
     test = "CleanBothWaysCompletes"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_clean_both_ways_completes() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1401,7 +1413,6 @@ fn quint_fwd_pair_guest_clean_both_ways_completes() -> impl Driver {
     max_samples = 1,
     test = "TargetStallBlocksSenderThenResumes"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_target_stall_blocks_sender_then_resumes() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1414,7 +1425,6 @@ fn quint_fwd_pair_guest_target_stall_blocks_sender_then_resumes() -> impl Driver
     max_samples = 1,
     test = "EarlyBytesBeforeAttachDelivered"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_early_bytes_before_attach_delivered() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1427,7 +1437,6 @@ fn quint_fwd_pair_guest_early_bytes_before_attach_delivered() -> impl Driver {
     max_samples = 1,
     test = "EarlyFinBeforeAttachCarriedOut"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_early_fin_before_attach_carried_out() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1440,7 +1449,6 @@ fn quint_fwd_pair_guest_early_fin_before_attach_carried_out() -> impl Driver {
     max_samples = 1,
     test = "GuestAppResetReachesRemoteAsReset"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_guest_app_reset_reaches_remote_as_reset() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1453,7 +1461,6 @@ fn quint_fwd_pair_guest_guest_app_reset_reaches_remote_as_reset() -> impl Driver
     max_samples = 1,
     test = "RemoteResetReachesGuestAppAsReset"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_remote_reset_reaches_guest_app_as_reset() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1466,7 +1473,6 @@ fn quint_fwd_pair_guest_remote_reset_reaches_guest_app_as_reset() -> impl Driver
     max_samples = 1,
     test = "HalfCloseThenPeerCloseIsClean"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_half_close_then_peer_close_is_clean() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1479,7 +1485,6 @@ fn quint_fwd_pair_guest_half_close_then_peer_close_is_clean() -> impl Driver {
     max_samples = 1,
     test = "PeerCloseWithDirectionOpenAborts"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_peer_close_with_direction_open_aborts() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1492,7 +1497,6 @@ fn quint_fwd_pair_guest_peer_close_with_direction_open_aborts() -> impl Driver {
     max_samples = 1,
     test = "ReadShutdownPeerStallsLikeSlowReader"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_read_shutdown_peer_stalls_like_slow_reader() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1505,7 +1509,6 @@ fn quint_fwd_pair_guest_read_shutdown_peer_stalls_like_slow_reader() -> impl Dri
     max_samples = 1,
     test = "OwnerAbortResetsBothFarEnds"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_owner_abort_resets_both_far_ends() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1518,7 +1521,6 @@ fn quint_fwd_pair_guest_owner_abort_resets_both_far_ends() -> impl Driver {
     max_samples = 1,
     test = "ContextReleaseResetsEveryPair"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_context_release_resets_every_pair() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1531,7 +1533,6 @@ fn quint_fwd_pair_guest_context_release_resets_every_pair() -> impl Driver {
     max_samples = 1,
     test = "VmmExitAbortsHostHalf"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_vmm_exit_aborts_host_half() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1544,7 +1545,6 @@ fn quint_fwd_pair_guest_vmm_exit_aborts_host_half() -> impl Driver {
     max_samples = 1,
     test = "TrailingRstAfterCompletionIsInert"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_trailing_rst_after_completion_is_inert() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1557,7 +1557,6 @@ fn quint_fwd_pair_guest_trailing_rst_after_completion_is_inert() -> impl Driver 
     max_samples = 1,
     test = "WatchedStreamSeesGuestResetAsAbort"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_watched_stream_sees_guest_reset_as_abort() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1570,7 +1569,6 @@ fn quint_fwd_pair_guest_watched_stream_sees_guest_reset_as_abort() -> impl Drive
     max_samples = 1,
     test = "DgramPaired"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_dgram_paired() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1583,7 +1581,6 @@ fn quint_fwd_pair_guest_dgram_paired() -> impl Driver {
     max_samples = 1,
     test = "DatagramsInOrderWithEmpty"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_datagrams_in_order_with_empty() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1596,7 +1593,6 @@ fn quint_fwd_pair_guest_datagrams_in_order_with_empty() -> impl Driver {
     max_samples = 1,
     test = "PartialFrameResumedNotDuplicated"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_partial_frame_resumed_not_duplicated() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1609,7 +1605,6 @@ fn quint_fwd_pair_guest_partial_frame_resumed_not_duplicated() -> impl Driver {
     max_samples = 1,
     test = "StalledUdpTargetDropsAtSource"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_stalled_udp_target_drops_at_source() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1622,7 +1617,6 @@ fn quint_fwd_pair_guest_stalled_udp_target_drops_at_source() -> impl Driver {
     max_samples = 1,
     test = "HostHalfCloseThenAbortBeforeGuestAttachIsAbort"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_host_half_close_then_abort_before_guest_attach_is_abort() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1635,7 +1629,6 @@ fn quint_fwd_pair_guest_host_half_close_then_abort_before_guest_attach_is_abort(
     max_samples = 1,
     test = "GuestCloseBeforeHostAttachAborts"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_guest_close_before_host_attach_aborts() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1648,7 +1641,6 @@ fn quint_fwd_pair_guest_guest_close_before_host_attach_aborts() -> impl Driver {
     max_samples = 1,
     test = "RemoteFinThenResetAbortsPair"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_remote_fin_then_reset_aborts_pair() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1661,7 +1653,6 @@ fn quint_fwd_pair_guest_remote_fin_then_reset_aborts_pair() -> impl Driver {
     max_samples = 1,
     test = "ForwarderRecoveryAbortsThenReopens"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_forwarder_recovery_aborts_then_reopens() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1674,7 +1665,6 @@ fn quint_fwd_pair_guest_forwarder_recovery_aborts_then_reopens() -> impl Driver 
     max_samples = 1,
     test = "ReleasedWatchWithNoRecordReadsAsAbort"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_released_watch_with_no_record_reads_as_abort() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1687,7 +1677,6 @@ fn quint_fwd_pair_guest_released_watch_with_no_record_reads_as_abort() -> impl D
     max_samples = 1,
     test = "VmmExitWithWatchRecordInFlightResolvesFromRecord"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_vmm_exit_with_watch_record_in_flight_resolves_from_record() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1700,7 +1689,6 @@ fn quint_fwd_pair_guest_vmm_exit_with_watch_record_in_flight_resolves_from_recor
     max_samples = 1,
     test = "TruncatedFrameAtPeerEndAbortsFrameInvalid"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_truncated_frame_at_peer_end_aborts_frame_invalid() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1713,7 +1701,6 @@ fn quint_fwd_pair_guest_truncated_frame_at_peer_end_aborts_frame_invalid() -> im
     max_samples = 1,
     test = "GuestAppFinThenResetAbortsPairWithEpipe"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_guest_app_fin_then_reset_aborts_pair_with_epipe() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1726,7 +1713,6 @@ fn quint_fwd_pair_guest_guest_app_fin_then_reset_aborts_pair_with_epipe() -> imp
     max_samples = 1,
     test = "EarlyVsockHalfCloseBeforeGuestAttachCompletes"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_early_vsock_half_close_before_guest_attach_completes() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1739,7 +1725,6 @@ fn quint_fwd_pair_guest_early_vsock_half_close_before_guest_attach_completes() -
     max_samples = 1,
     test = "AppWriteAndFinBeforePairedAttachesInCloseWaitAndCompletes"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_app_write_and_fin_before_paired_attaches_in_close_wait_and_completes()
 -> impl Driver {
     FwdPairGuestDriver::new()
@@ -1753,7 +1738,6 @@ fn quint_fwd_pair_guest_app_write_and_fin_before_paired_attaches_in_close_wait_a
     max_samples = 1,
     test = "IntakeChildResetBeforePairedIsRefusedAndFlowAborts"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_intake_child_reset_before_paired_is_refused_and_flow_aborts() -> impl Driver
 {
     FwdPairGuestDriver::new()
@@ -1767,7 +1751,6 @@ fn quint_fwd_pair_guest_intake_child_reset_before_paired_is_refused_and_flow_abo
     max_samples = 1,
     test = "DestinationResetBeforeHostAttachIsRefusedAndFlowAborts"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_destination_reset_before_host_attach_is_refused_and_flow_aborts()
 -> impl Driver {
     FwdPairGuestDriver::new()
@@ -1781,7 +1764,6 @@ fn quint_fwd_pair_guest_destination_reset_before_host_attach_is_refused_and_flow
     max_samples = 1,
     test = "GuestCloseWithEmptyQueueBeforeHostAttachIsRefusedAndFlowAborts"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_guest_close_with_empty_queue_before_host_attach_is_refused_and_flow_aborts()
 -> impl Driver {
     FwdPairGuestDriver::new()
@@ -1795,7 +1777,6 @@ fn quint_fwd_pair_guest_guest_close_with_empty_queue_before_host_attach_is_refus
     max_samples = 1,
     test = "OwnerAbortOfWatchLeavesVhAndStreamReportsAborted"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_owner_abort_of_watch_leaves_vh_and_stream_reports_aborted() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1808,7 +1789,6 @@ fn quint_fwd_pair_guest_owner_abort_of_watch_leaves_vh_and_stream_reports_aborte
     max_samples = 1,
     test = "OwnerAbortSendsGuestAbortThenHolderDropIsInert"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_owner_abort_sends_guest_abort_then_holder_drop_is_inert() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1821,7 +1801,6 @@ fn quint_fwd_pair_guest_owner_abort_sends_guest_abort_then_holder_drop_is_inert(
     max_samples = 1,
     test = "ContextReleaseShutsWatchedVhAndHolderReadsNotConnected"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_context_release_shuts_watched_vh_and_holder_reads_not_connected()
 -> impl Driver {
     FwdPairGuestDriver::new()
@@ -1835,7 +1814,6 @@ fn quint_fwd_pair_guest_context_release_shuts_watched_vh_and_holder_reads_not_co
     max_samples = 1,
     test = "DroppedStreamAbortsWatchThenGuestSeesAbort"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_dropped_stream_aborts_watch_then_guest_sees_abort() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1848,7 +1826,6 @@ fn quint_fwd_pair_guest_dropped_stream_aborts_watch_then_guest_sees_abort() -> i
     max_samples = 1,
     test = "PeerCloseRacingOwnHalfCloseIsClean"
 )]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_guest_peer_close_racing_own_half_close_is_clean() -> impl Driver {
     FwdPairGuestDriver::new()
 }
@@ -1858,7 +1835,6 @@ fn quint_fwd_pair_guest_peer_close_racing_own_half_close_is_clean() -> impl Driv
 /// Randomized traces of the conformance main (seed printed on failure).
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_run(spec = "../../specs/quint/guest-flow-owner/fwd_pair.qnt", main = "pair_conf")]
-#[ignore = "pending DELIVER step 5"]
 fn quint_fwd_pair_pair_conf_guest() -> impl Driver {
     FwdPairGuestDriver::new()
 }

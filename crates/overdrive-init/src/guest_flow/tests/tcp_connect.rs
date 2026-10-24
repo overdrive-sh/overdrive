@@ -23,7 +23,6 @@ use super::*;
 /// (I, V_g) and the flow moves to `flows`.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_captured_connect_writes_the_request_once_and_attaches_on_paired() {
     let mut g = Guest::new();
     g.open_session();
@@ -63,7 +62,6 @@ fn a_captured_connect_writes_the_request_once_and_attaches_on_paired() {
 /// both halves: the application reads EOF, never a reset.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn an_application_write_and_fin_before_paired_attach_in_close_wait_and_complete() {
     let mut g = Guest::new();
     g.open_session();
@@ -109,7 +107,6 @@ fn an_application_write_and_fin_before_paired_attach_in_close_wait_and_complete(
 /// `forwarder_attach_ended`.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn an_intake_child_reset_before_paired_is_refused_half_ended_and_the_flow_aborts() {
     let mut g = Guest::new();
     g.open_session();
@@ -136,7 +133,6 @@ fn an_intake_child_reset_before_paired_is_refused_half_ended_and_the_flow_aborts
 /// attach); the owner closes I with linger and V_g and counts it.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_v_g_reset_before_paired_is_refused_half_ended_and_i_is_reset() {
     let mut g = Guest::new();
     g.open_session();
@@ -158,7 +154,6 @@ fn a_v_g_reset_before_paired_is_refused_half_ended_and_i_is_reset() {
 /// — and the pending flows are unaffected.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_capture_past_the_pending_maximum_is_reset_locally() {
     let mut g = Guest::new();
     g.open_session();
@@ -184,7 +179,6 @@ fn a_capture_past_the_pending_maximum_is_reset_locally() {
 /// (the application sees a reset, not EOF), V_g closed — and no reply.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_refused_tcp_connect_resets_the_application() {
     let mut g = Guest::new();
     g.open_session();
@@ -202,7 +196,6 @@ fn a_refused_tcp_connect_resets_the_application() {
 /// `Abort { flow }`.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn an_application_reset_before_paired_aborts_and_sends_abort() {
     let mut g = Guest::new();
     g.open_session();
@@ -218,7 +211,6 @@ fn an_application_reset_before_paired_aborts_and_sends_abort() {
 /// `Paired`: the flow ends with no message and I is reset.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn the_hosts_close_of_an_unattached_v_g_resets_i_with_no_message() {
     let mut g = Guest::new();
     g.open_session();
@@ -235,7 +227,6 @@ fn the_hosts_close_of_an_unattached_v_g_resets_i_with_no_message() {
 /// `pair_state` is the per-direction state (EVMOD-PORT).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER step 5"]
 fn a_paired_tcp_connect_forwards_both_ways() {
     let mut g = Guest::new();
     g.open_session();

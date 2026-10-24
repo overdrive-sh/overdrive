@@ -9,15 +9,13 @@
 //! `parse_transport_token` and `configure_guest_transport` (DG-2 row 16,
 //! replacing `overdrive.net=`).
 //!
-//! RED scaffold (DISTILL, Mandate 7): `parse_transport_token`,
-//! `configure_guest_transport`, the [`KernelRelease`] codec and the production
-//! `KernelGuestTransportOps` panic until DELIVER step 5 lands them. The error
-//! enum with its pinned `Display` texts and the label enums with their
-//! `as_str` are plain data and are written for real.
+//! `parse_transport_token` validates the boot token and
+//! `configure_guest_transport` applies its ordered setup through
+//! [`GuestTransportOps`]. [`KernelGuestTransportOps`] provides the production
+//! network, capture-program, module, and forwarder operations. The typed
+//! failures retain the stages pinned by the feature delta.
 
-// SCAFFOLD: true — netns-density-295 DISTILL (DELIVER step 5).
-#![cfg_attr(not(test), expect(dead_code, reason = "RED scaffold — DELIVER step 5 lands it"))]
-#![cfg_attr(test, allow(dead_code, reason = "RED scaffold — DELIVER step 5 lands it"))]
+#![cfg_attr(test, allow(dead_code, reason = "test scenarios use only relevant setup projections"))]
 #![allow(
     clippy::redundant_pub_crate,
     reason = "DG-5 pins `pub(crate)` visibility for these binary-crate items"
@@ -41,9 +39,12 @@ use std::str::FromStr;
 
 use overdrive_core::guest_transport::LaunchToken;
 use overdrive_core::guest_transport::forwarder::ForwarderError;
+use overdrive_core::guest_transport::{
+    GUEST_TCP_INTAKE_PORT, GUEST_UDP_SLOT_BASE, GUEST_UDP_SLOTS, guest_reserved_ports,
+};
 use overdrive_core::vm::config::VsockPort;
 
-const SCAFFOLD: &str = "Not yet implemented -- RED scaffold";
+pub(crate) const GUEST_TPROXY_MARK: u32 = 0x295;
 
 /// The parsed `overdrive.transport=` kernel command-line token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,16 +82,86 @@ pub(crate) struct GuestHostPorts {
 /// trailing field names the first missing one; an eighth field is `Extra`.
 /// Other kernel parameters are ignored.
 pub(crate) fn parse_transport_token(
-    _cmdline: &str,
+    cmdline: &str,
 ) -> Result<GuestTransportToken, GuestTransportSetupError> {
-    panic!("{SCAFFOLD}")
+    let mut tokens = cmdline
+        .split_ascii_whitespace()
+        .filter_map(|part| part.strip_prefix("overdrive.transport="));
+    let token = tokens.next().ok_or(GuestTransportSetupError::TokenMissing)?;
+    if tokens.next().is_some() {
+        return Err(GuestTransportSetupError::TokenDuplicate);
+    }
+
+    let fields: Vec<&str> = token.split(',').collect();
+    let required = |index: usize, key: &str, field: TransportTokenField| {
+        let value =
+            fields.get(index).copied().ok_or(GuestTransportSetupError::TokenMalformed { field })?;
+        if index == 0 {
+            return Ok(value);
+        }
+        if value.starts_with(&format!("{key}=")) {
+            Ok(value)
+        } else {
+            Err(GuestTransportSetupError::TokenMalformed { field })
+        }
+    };
+    if required(0, "", TransportTokenField::Version)? != "vsock2" {
+        return Err(GuestTransportSetupError::TokenMalformed {
+            field: TransportTokenField::Version,
+        });
+    }
+    let workload_addr = required(1, "addr", TransportTokenField::Addr)?
+        .strip_prefix("addr=")
+        .and_then(|value| value.parse::<Ipv4Addr>().ok())
+        .ok_or(GuestTransportSetupError::TokenMalformed { field: TransportTokenField::Addr })?;
+    let gateway = required(2, "dns", TransportTokenField::Dns)?
+        .strip_prefix("dns=")
+        .and_then(|value| value.parse::<Ipv4Addr>().ok())
+        .ok_or(GuestTransportSetupError::TokenMalformed { field: TransportTokenField::Dns })?;
+    let launch = required(3, "launch", TransportTokenField::Launch)?
+        .strip_prefix("launch=")
+        .and_then(|value| LaunchToken::from_str(value).ok())
+        .ok_or(GuestTransportSetupError::TokenMalformed { field: TransportTokenField::Launch })?;
+
+    let mut port_values = [0u32; 3];
+    for (index, (key, field)) in [
+        ("beacon", TransportTokenField::Beacon),
+        ("stream", TransportTokenField::Stream),
+        ("control", TransportTokenField::Control),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let value = required(index + 4, key, field)?
+            .strip_prefix(&format!("{key}="))
+            .filter(|raw| !raw.is_empty() && raw.bytes().all(|byte| byte.is_ascii_digit()))
+            .and_then(|raw| raw.parse::<u32>().ok())
+            .filter(|port| (1024..u32::MAX).contains(port))
+            .filter(|port| !port_values[..index].contains(port))
+            .ok_or(GuestTransportSetupError::TokenMalformed { field })?;
+        port_values[index] = value;
+    }
+    if fields.len() > 7 {
+        return Err(GuestTransportSetupError::TokenMalformed { field: TransportTokenField::Extra });
+    }
+    Ok(GuestTransportToken {
+        workload_addr,
+        gateway,
+        launch,
+        ports: GuestHostPorts {
+            beacon: VsockPort::new(port_values[0]),
+            stream: VsockPort::new(port_values[1]),
+            control: VsockPort::new(port_values[2]),
+        },
+    })
 }
 
 /// The setup steps of G-V7, one method per step; each `Err` maps to exactly
 /// one `GuestTransportSetupError` variant (named per method). Stateful: the
 /// production ops keep every socket they bind, every program they load and
 /// the forwarder context they open, and hand them to the owner's seam
-/// (`KernelGuestOwnerIo::new(ops)`).
+/// (`KernelGuestOwnerIo::new(ops)?`), which returns the correlation maps or
+/// the existing `ProgramLoad { program: TcpCorrelation, source }` failure.
 pub(crate) trait GuestTransportOps {
     /// `Err` → `GuestTransportSetupError::DummyDevice`.
     fn create_dummy_device(&mut self) -> std::io::Result<()>;
@@ -98,6 +169,10 @@ pub(crate) trait GuestTransportOps {
     fn add_workload_address(&mut self, addr: Ipv4Addr) -> std::io::Result<()>;
     /// `Err` → `GuestTransportSetupError::FwmarkRule`.
     fn add_fwmark_rule(&mut self) -> std::io::Result<()>;
+    /// `Err` → `GuestTransportSetupError::FwmarkRoute`.
+    fn add_fwmark_route(&mut self) -> std::io::Result<()>;
+    /// `Err` → `GuestTransportSetupError::TcpFwmarkAccept`.
+    fn enable_tcp_fwmark_accept(&mut self) -> std::io::Result<()>;
     /// `Err` → `GuestTransportSetupError::FwmarkReflect`.
     fn enable_fwmark_reflect(&mut self) -> std::io::Result<()>;
     /// `Err` → `GuestTransportSetupError::ReservedPorts`.
@@ -106,6 +181,11 @@ pub(crate) trait GuestTransportOps {
     fn bind_tcp_intake(&mut self, addr: SocketAddrV4) -> std::io::Result<()>;
     /// `Err` → `GuestTransportSetupError::IntakeBind { addr }`.
     fn bind_udp_slot(&mut self, addr: SocketAddrV4) -> std::io::Result<()>;
+    /// Creates and shares the temporary active/child maps across the Rust
+    /// SockOps object and C/CO-RE candidate object, then removes both pins
+    /// before any program is loaded or attached.
+    /// `Err` → the exact `ProgramLoad` variant for the object/setup stage.
+    fn prepare_guest_programs(&mut self) -> Result<(), GuestTransportSetupError>;
     /// `Err` → `GuestTransportSetupError::ProgramLoad`.
     fn load_program(&mut self, program: GuestProgram) -> Result<(), aya::EbpfError>;
     /// `Err` → `GuestTransportSetupError::ProgramAttach`.
@@ -123,86 +203,51 @@ pub(crate) trait GuestTransportOps {
 }
 
 /// Runs the steps in this order and stops at the first failure: dummy
-/// device, workload address, fwmark rule, `fwmark_reflect`, reserved ports,
-/// TCP intake, every UDP slot (n ascending), each `GuestProgram` load then
-/// attach (enum order), forwarder module, forwarder context, inbound
-/// listener. Today's `lo` bring-up and resolver write keep their place and
-/// error handling.
+/// device, workload address, GUEST-TRANSPARENT-ROUTE fwmark rule and
+/// local-default route, `tcp_fwmark_accept`, `fwmark_reflect`, reserved ports,
+/// TCP intake, every UDP slot (n ascending), map/object preparation, each
+/// `GuestProgram` load then attach (enum order), forwarder module, forwarder
+/// context, inbound listener. Today's `lo` bring-up and resolver write keep
+/// their place and error handling.
 pub(crate) fn configure_guest_transport(
-    _token: &GuestTransportToken,
-    _ops: &mut dyn GuestTransportOps,
+    token: &GuestTransportToken,
+    ops: &mut dyn GuestTransportOps,
 ) -> Result<(), GuestTransportSetupError> {
-    panic!("{SCAFFOLD}")
+    ops.create_dummy_device().map_err(|source| GuestTransportSetupError::DummyDevice { source })?;
+    ops.add_workload_address(token.workload_addr)
+        .map_err(|source| GuestTransportSetupError::AddressAdd { source })?;
+    ops.add_fwmark_rule().map_err(|source| GuestTransportSetupError::FwmarkRule { source })?;
+    ops.add_fwmark_route().map_err(|source| GuestTransportSetupError::FwmarkRoute { source })?;
+    ops.enable_tcp_fwmark_accept()
+        .map_err(|source| GuestTransportSetupError::TcpFwmarkAccept { source })?;
+    ops.enable_fwmark_reflect()
+        .map_err(|source| GuestTransportSetupError::FwmarkReflect { source })?;
+    ops.reserve_ports(guest_reserved_ports())
+        .map_err(|source| GuestTransportSetupError::ReservedPorts { source })?;
+    let tcp_addr = SocketAddrV4::new(token.workload_addr, GUEST_TCP_INTAKE_PORT);
+    ops.bind_tcp_intake(tcp_addr)
+        .map_err(|source| GuestTransportSetupError::IntakeBind { addr: tcp_addr, source })?;
+    for offset in 0..GUEST_UDP_SLOTS {
+        let addr = SocketAddrV4::new(token.workload_addr, GUEST_UDP_SLOT_BASE + offset);
+        ops.bind_udp_slot(addr)
+            .map_err(|source| GuestTransportSetupError::IntakeBind { addr, source })?;
+    }
+    ops.prepare_guest_programs()?;
+    for program in GuestProgram::ALL {
+        ops.load_program(program)
+            .map_err(|source| GuestTransportSetupError::ProgramLoad { program, source })?;
+        ops.attach_program(program)
+            .map_err(|source| GuestTransportSetupError::ProgramAttach { program, source })?;
+    }
+    ops.load_forwarder_module()?;
+    ops.open_forwarder().map_err(|source| GuestTransportSetupError::Forwarder { source })?;
+    ops.bind_inbound_vsock()
+        .map_err(|source| GuestTransportSetupError::InboundListenerBind { source })?;
+    Ok(())
 }
 
-/// The production [`GuestTransportOps`] over the guest kernel (netlink,
-/// sysctl, sockets, aya, `finit_module`, `/dev/ovd_fwd`). Keeps every socket
-/// it binds, every program it loads and the forwarder context it opens for
-/// `KernelGuestOwnerIo::new`.
-pub(crate) struct KernelGuestTransportOps {
-    _scaffold: (),
-}
-
-impl KernelGuestTransportOps {
-    /// Production ops holding nothing yet: every socket, program and the
-    /// forwarder context are acquired by the setup steps.
-    pub(crate) const fn new() -> Self {
-        Self { _scaffold: () }
-    }
-}
-
-impl GuestTransportOps for KernelGuestTransportOps {
-    fn create_dummy_device(&mut self) -> std::io::Result<()> {
-        panic!("{SCAFFOLD}")
-    }
-
-    fn add_workload_address(&mut self, _addr: Ipv4Addr) -> std::io::Result<()> {
-        panic!("{SCAFFOLD}")
-    }
-
-    fn add_fwmark_rule(&mut self) -> std::io::Result<()> {
-        panic!("{SCAFFOLD}")
-    }
-
-    fn enable_fwmark_reflect(&mut self) -> std::io::Result<()> {
-        panic!("{SCAFFOLD}")
-    }
-
-    fn reserve_ports(&mut self, _ports: RangeInclusive<u16>) -> std::io::Result<()> {
-        panic!("{SCAFFOLD}")
-    }
-
-    fn bind_tcp_intake(&mut self, _addr: SocketAddrV4) -> std::io::Result<()> {
-        panic!("{SCAFFOLD}")
-    }
-
-    fn bind_udp_slot(&mut self, _addr: SocketAddrV4) -> std::io::Result<()> {
-        panic!("{SCAFFOLD}")
-    }
-
-    fn load_program(&mut self, _program: GuestProgram) -> Result<(), aya::EbpfError> {
-        panic!("{SCAFFOLD}")
-    }
-
-    fn attach_program(
-        &mut self,
-        _program: GuestProgram,
-    ) -> Result<(), aya::programs::ProgramError> {
-        panic!("{SCAFFOLD}")
-    }
-
-    fn load_forwarder_module(&mut self) -> Result<(), GuestTransportSetupError> {
-        panic!("{SCAFFOLD}")
-    }
-
-    fn open_forwarder(&mut self) -> Result<(), ForwarderError> {
-        panic!("{SCAFFOLD}")
-    }
-
-    fn bind_inbound_vsock(&mut self) -> std::io::Result<()> {
-        panic!("{SCAFFOLD}")
-    }
-}
+mod kernel;
+pub(crate) use kernel::KernelGuestTransportOps;
 
 /// Why `overdrive-init` exits before READY (G-V7). Rendered to the console as
 /// `overdrive-init: guest transport setup failed: <Display>`; the host sees the
@@ -233,9 +278,21 @@ pub(crate) enum GuestTransportSetupError {
         /// The kernel's error.
         source: std::io::Error,
     },
-    /// Adding `ip rule fwmark <platform mark> lookup local` failed.
+    /// Adding the priority-32765 full-mask guest mark rule to table 295 failed.
     #[error("adding the fwmark lookup rule failed: {source}")]
     FwmarkRule {
+        /// The kernel's error.
+        source: std::io::Error,
+    },
+    /// Adding the table-295 host-scope local-default route on `lo` failed.
+    #[error("adding the fwmark local route failed: {source}")]
+    FwmarkRoute {
+        /// The kernel's error.
+        source: std::io::Error,
+    },
+    /// Setting `net.ipv4.tcp_fwmark_accept=1` failed.
+    #[error("setting net.ipv4.tcp_fwmark_accept failed: {source}")]
+    TcpFwmarkAccept {
         /// The kernel's error.
         source: std::io::Error,
     },
@@ -361,6 +418,10 @@ impl TransportTokenField {
 /// The guest capture programs, in load-and-attach order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum GuestProgram {
+    /// `sock_ops`: carries connect identity through the final ACK.
+    TcpCorrelation,
+    /// `fentry/tcp_check_req`: records the pre-validation Fast Open option.
+    TcpCorrelationCandidate,
     /// `cgroup/connect4`: rewrites captured connects to the intakes.
     Connect4,
     /// `cgroup/sendmsg4`.
@@ -375,12 +436,21 @@ pub(crate) enum GuestProgram {
 
 impl GuestProgram {
     /// Every program, in load-and-attach (enum) order.
-    pub(crate) const ALL: [Self; 5] =
-        [Self::Connect4, Self::Sendmsg4, Self::Getpeername4, Self::Recvmsg4, Self::SockRelease];
+    pub(crate) const ALL: [Self; 7] = [
+        Self::TcpCorrelation,
+        Self::TcpCorrelationCandidate,
+        Self::Connect4,
+        Self::Sendmsg4,
+        Self::Getpeername4,
+        Self::Recvmsg4,
+        Self::SockRelease,
+    ];
 
     /// The program's lower snake case label.
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
+            Self::TcpCorrelation => "tcp_correlation",
+            Self::TcpCorrelationCandidate => "tcp_correlation_candidate",
             Self::Connect4 => "connect4",
             Self::Sendmsg4 => "sendmsg4",
             Self::Getpeername4 => "getpeername4",
@@ -400,8 +470,8 @@ pub(crate) struct KernelRelease(String);
 
 /// The release as written.
 impl fmt::Display for KernelRelease {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        panic!("{SCAFFOLD}")
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
     }
 }
 
@@ -409,8 +479,17 @@ impl fmt::Display for KernelRelease {
 impl FromStr for KernelRelease {
     type Err = KernelReleaseError;
 
-    fn from_str(_s: &str) -> Result<Self, Self::Err> {
-        panic!("{SCAFFOLD}")
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() {
+            return Err(KernelReleaseError::Empty);
+        }
+        if s.len() > 64 {
+            return Err(KernelReleaseError::TooLong);
+        }
+        if s.chars().any(|ch| ch.is_whitespace() || ch == '\0') {
+            return Err(KernelReleaseError::InvalidCharacter);
+        }
+        Ok(Self(s.to_owned()))
     }
 }
 
