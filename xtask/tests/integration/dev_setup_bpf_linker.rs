@@ -132,6 +132,7 @@ fn effective_shell_commands(section: &str) -> Vec<String> {
 }
 
 fn assert_c_core_provisioning(surface: &str, commands: &[String]) {
+    let rendered = commands.join("\n");
     let installs = commands
         .iter()
         .filter(|command| command.contains(" install "))
@@ -140,12 +141,18 @@ fn assert_c_core_provisioning(surface: &str, commands: &[String]) {
         .join(" ");
     assert!(installs.contains("libbpf"), "{surface} does not install libbpf headers: {commands:?}");
     assert!(
-        installs.contains("bpftool")
-            || commands.iter().any(|command| {
-                command.contains("bpftool")
-                    && (command.contains("install ") || command.contains("ln -s"))
-            }),
-        "{surface} does not install or resolve bpftool: {commands:?}"
+        rendered.contains("apt-cache policy bpftool")
+            && rendered.contains("Candidate:")
+            && rendered.contains("(none)")
+            && installs.contains("bpftool")
+            && installs.contains("linux-tools-common")
+            && installs.contains("linux-tools-generic")
+            && rendered.contains("/usr/lib/linux-tools-*/bpftool")
+            && rendered.contains("-type f -executable")
+            && rendered.contains("/usr/local/bin/bpftool")
+            && rendered.contains("command -v bpftool")
+            && rendered.contains("bpftool version"),
+        "{surface} does not resolve concrete versus virtual bpftool packaging: {commands:?}"
     );
     assert!(
         installs.contains("clang-21")
@@ -155,13 +162,12 @@ fn assert_c_core_provisioning(surface: &str, commands: &[String]) {
         "{surface} does not install or validate Clang major 21: {commands:?}"
     );
     assert!(
-        commands.iter().any(|command| {
-            command.contains("/sys/kernel/btf/vmlinux")
-                && (command.contains("test ")
-                    || command.contains("[ -r")
-                    || command.contains("stat "))
-        }),
-        "{surface} does not validate readable target-kernel BTF: {commands:?}"
+        rendered.contains("OVERDRIVE_BPF_TARGET_BTF")
+            && rendered.contains("/sys/kernel/btf/vmlinux")
+            && rendered.contains("test -r")
+            && rendered.contains("bpftool btf dump file")
+            && rendered.contains("format c"),
+        "{surface} does not validate and dump the declared target-kernel BTF: {commands:?}"
     );
 }
 
@@ -188,15 +194,29 @@ fn assert_missing_c_prerequisite_is_planned(
             })
         }
         MissingCPrerequisite::Bpftool => {
-            rendered.lines().any(|line| line.contains(" install ") && line.contains("bpftool"))
+            rendered.contains("apt-cache policy bpftool")
+                && rendered.contains("Candidate:")
+                && rendered.contains("(none)")
+                && rendered.contains(" install ")
+                && rendered.contains("bpftool")
+                && rendered.contains("linux-tools-common")
+                && rendered.contains("linux-tools-generic")
+                && rendered.contains("/usr/lib/linux-tools-*/bpftool")
+                && rendered.contains("-type f -executable")
+                && rendered.contains("/usr/local/bin/bpftool")
+                && rendered.contains("command -v bpftool")
+                && rendered.contains("bpftool version")
+                && rendered.contains("bpftool btf dump file")
+                && rendered.contains("OVERDRIVE_BPF_TARGET_BTF")
         }
         MissingCPrerequisite::LibbpfHeaders => {
             rendered.lines().any(|line| line.contains(" install ") && line.contains("libbpf"))
         }
-        MissingCPrerequisite::TargetBtf => commands.iter().any(|command| {
-            command.argv.iter().any(|argument| argument == "/sys/kernel/btf/vmlinux")
-                && command.argv.iter().any(|argument| argument == "-r")
-        }),
+        MissingCPrerequisite::TargetBtf => {
+            rendered.contains("OVERDRIVE_BPF_TARGET_BTF")
+                && rendered.contains("/sys/kernel/btf/vmlinux")
+                && rendered.contains("test -r")
+        }
     };
     assert!(handled, "{missing:?} is not independently handled by the plan: {commands:?}");
 }

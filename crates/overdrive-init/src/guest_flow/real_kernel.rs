@@ -38,6 +38,8 @@ use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 use aya::maps::{MapType, loaded_maps};
+use aya::programs::{ProgramType, loaded_programs};
+use aya::sys::{Stats, enable_stats};
 use nix::sys::socket::{
     AddressFamily, MsgFlags, SockFlag, SockType, SockaddrIn, VsockAddr, connect, recv, send,
     sendto, setsockopt, shutdown, socket, sockopt,
@@ -169,14 +171,55 @@ const BPF_FS: &str = "/sys/fs/bpf";
 const CHILD_CORRELATION_MAX_ENTRIES: u32 = 8_194;
 const TFO_QDISC_CLASS: i32 = 0x0001_0003;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+enum CorrelationPhase {
+    Pending = 1,
+    Ready = 2,
+    Rejected = 3,
+    CandidateReady = 4,
+    CandidateRejected = 5,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+struct CorrelationMeta {
+    application_cookie: u64,
+    destination_ip: u32,
+    destination_port: u16,
+    pad: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+struct CorrelationChildState {
+    phase: u32,
+    pad: u32,
+    meta: CorrelationMeta,
+}
+
+impl CorrelationChildState {
+    fn phase(self) -> CorrelationPhase {
+        match self.phase {
+            1 => CorrelationPhase::Pending,
+            2 => CorrelationPhase::Ready,
+            3 => CorrelationPhase::Rejected,
+            4 => CorrelationPhase::CandidateReady,
+            5 => CorrelationPhase::CandidateRejected,
+            other => panic!("unknown child-correlation phase {other}"),
+        }
+    }
+}
+
 /// Source-local inspection of the two private maps. Discovery uses the
 /// design-owned map shapes rather than a test-only production accessor:
 /// socket storage has `(key=4, max_entries=0)`, and the child hash has the
 /// exact 8,194-entry bound. The disposable guest has one production owner.
 #[derive(Clone, Copy)]
 struct CorrelationMaps {
-    active_id: u32,
-    child_id: u32,
+    active_map: u32,
+    child_map: u32,
+    candidate_program: u32,
 }
 
 impl CorrelationMaps {
@@ -201,19 +244,33 @@ impl CorrelationMaps {
         }
         assert_eq!(active.len(), 1, "one capacity-free active-correlation socket-storage map");
         assert_eq!(child.len(), 1, "one 8,194-entry child-correlation map");
-        Self { active_id: active[0], child_id: child[0] }
+        let child_id = child[0];
+        let candidates: Vec<_> = loaded_programs()
+            .map(|program| program.expect("the guest's loaded BPF programs are observable"))
+            .filter(|program| {
+                program.program_type().ok() == Some(ProgramType::Tracing)
+                    && program.name_as_str() == Some("tcp_correlation")
+                    && program
+                        .map_ids()
+                        .expect("read the candidate program's map ids")
+                        .is_some_and(|ids| ids.contains(&child_id))
+            })
+            .map(|program| program.id())
+            .collect();
+        assert_eq!(candidates.len(), 1, "one tracing candidate uses the child map");
+        Self { active_map: active[0], child_map: child_id, candidate_program: candidates[0] }
     }
 
     #[allow(
         unsafe_code,
         reason = "Aya 0.13.1 exposes no key-only iterator; the source-local Tier-3 fixture calls BPF_MAP_GET_NEXT_KEY over exact u64 buffers without constraining the private value representation"
     )]
-    fn child_entries(&self) -> usize {
-        let info = aya::maps::MapInfo::from_id(self.child_id)
+    fn child_cookies(&self) -> Vec<u64> {
+        let info = aya::maps::MapInfo::from_id(self.child_map)
             .expect("open the child-correlation map by id");
         let map_fd = info.fd().expect("open the child-correlation map fd");
         let mut current: Option<u64> = None;
-        let mut count = 0usize;
+        let mut cookies = Vec::new();
         loop {
             let mut next = 0u64;
             let mut attr = [0u8; 32];
@@ -227,7 +284,7 @@ impl CorrelationMaps {
             let result =
                 unsafe { nix::libc::syscall(nix::libc::SYS_bpf, 4, attr.as_ptr(), attr.len()) };
             if result == 0 {
-                count += 1;
+                cookies.push(next);
                 current = Some(next);
             } else {
                 let error = std::io::Error::last_os_error();
@@ -236,9 +293,57 @@ impl CorrelationMaps {
                     Some(nix::libc::ENOENT),
                     "iterate child-correlation keys"
                 );
-                return count;
+                return cookies;
             }
         }
+    }
+
+    fn child_entries(&self) -> usize {
+        self.child_cookies().len()
+    }
+
+    #[allow(
+        unsafe_code,
+        reason = "the source-local Tier-3 fixture reads the design-owned 24-byte child ABI through BPF_MAP_LOOKUP_ELEM"
+    )]
+    fn child_state(&self, cookie: u64) -> Option<CorrelationChildState> {
+        let info = aya::maps::MapInfo::from_id(self.child_map)
+            .expect("open the child-correlation map by id");
+        assert_eq!(
+            info.value_size(),
+            u32::try_from(size_of::<CorrelationChildState>()).expect("child state size fits u32"),
+            "the child-correlation value has the design-owned ABI"
+        );
+        let map_fd = info.fd().expect("open the child-correlation map fd");
+        let mut value = std::mem::MaybeUninit::<CorrelationChildState>::uninit();
+        let mut attr = [0u8; 32];
+        attr[0..4].copy_from_slice(&map_fd.as_fd().as_raw_fd().cast_unsigned().to_ne_bytes());
+        attr[8..16].copy_from_slice(&(std::ptr::from_ref(&cookie) as u64).to_ne_bytes());
+        attr[16..24].copy_from_slice(&(value.as_mut_ptr() as u64).to_ne_bytes());
+        // SAFETY: BPF_MAP_LOOKUP_ELEM reads the live u64 key and initializes
+        // exactly the map's asserted 24-byte value on success.
+        let result =
+            unsafe { nix::libc::syscall(nix::libc::SYS_bpf, 1, attr.as_ptr(), attr.len()) };
+        if result == 0 {
+            // SAFETY: the successful lookup initialized the complete value.
+            Some(unsafe { value.assume_init() })
+        } else {
+            let error = std::io::Error::last_os_error();
+            assert_eq!(
+                error.raw_os_error(),
+                Some(nix::libc::ENOENT),
+                "child-correlation lookup for cookie {cookie}"
+            );
+            None
+        }
+    }
+
+    fn candidate_run_count(&self) -> u64 {
+        loaded_programs()
+            .map(|program| program.expect("the candidate program remains observable"))
+            .find(|program| program.id() == self.candidate_program)
+            .expect("the candidate program remains loaded")
+            .run_count()
     }
 
     #[allow(
@@ -246,7 +351,7 @@ impl CorrelationMaps {
         reason = "Aya 0.13.1 has no typed userspace SK_STORAGE lookup; the source-local Tier-3 fixture calls BPF_MAP_LOOKUP_ELEM over exact buffers"
     )]
     fn active_contains(&self, socket_fd: RawFd) -> bool {
-        let info = aya::maps::MapInfo::from_id(self.active_id)
+        let info = aya::maps::MapInfo::from_id(self.active_map)
             .expect("open the active-correlation map by id");
         let map_fd = info.fd().expect("open the active-correlation map fd");
         let key = socket_fd;
@@ -334,6 +439,15 @@ impl ApplicationSocket {
             .expect("select the private TFO qdisc class");
     }
 
+    fn bypass_tfo_gate(&self) {
+        setsockopt(&self.0, sockopt::Priority, &0).expect("restore the default qdisc class");
+    }
+
+    fn reset_on_close(&self) {
+        let linger = nix::libc::linger { l_onoff: 1, l_linger: 0 };
+        setsockopt(&self.0, sockopt::Linger, &linger).expect("select reset-close");
+    }
+
     fn local_addr(&self) -> SocketAddrV4 {
         let address: SockaddrIn = nix::sys::socket::getsockname(self.raw_fd())
             .expect("read the application socket's local address");
@@ -347,6 +461,12 @@ impl ApplicationSocket {
         assert_eq!(written, 1, "the post-handshake send writes one byte");
     }
 
+    fn send_probes(&self, count: usize) {
+        for _ in 0..count {
+            self.send_probe();
+        }
+    }
+
     fn expect_reset(&self) {
         setsockopt(&self.0, sockopt::ReceiveTimeout, &TimeVal::seconds(2))
             .expect("set the direct connection's receive timeout");
@@ -354,6 +474,63 @@ impl ApplicationSocket {
         let error = recv(self.raw_fd(), &mut byte, MsgFlags::empty())
             .expect_err("an uncorrelated intake child is reset, not cleanly closed");
         assert_eq!(error, nix::errno::Errno::ECONNRESET, "the direct intake terminal error");
+    }
+}
+
+const fn expected_correlation_meta(
+    cookie: SocketCookie,
+    destination: SocketAddrV4,
+) -> CorrelationMeta {
+    CorrelationMeta {
+        application_cookie: cookie.get(),
+        destination_ip: u32::from_ne_bytes(destination.ip().octets()),
+        destination_port: destination.port(),
+        pad: 0,
+    }
+}
+
+fn wait_child_phase(
+    maps: CorrelationMaps,
+    cookie: u64,
+    phase: CorrelationPhase,
+) -> CorrelationChildState {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        if let Some(state) = maps.child_state(cookie)
+            && state.phase() == phase
+        {
+            return state;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "child {cookie} did not reach {phase:?}: {:?}",
+            maps.child_state(cookie)
+        );
+        std::thread::yield_now();
+    }
+}
+
+fn wait_only_child_cookie(maps: CorrelationMaps, what: &str) -> u64 {
+    let deadline = Instant::now() + Duration::from_secs(1);
+    loop {
+        let cookies = maps.child_cookies();
+        match cookies.as_slice() {
+            [cookie] => return *cookie,
+            [] => assert!(
+                Instant::now() < deadline,
+                "{what} created no child-correlation row within one second"
+            ),
+            _ => panic!("{what} created more than one child-correlation row: {cookies:?}"),
+        }
+        std::thread::yield_now();
+    }
+}
+
+fn wait_child_absent(maps: CorrelationMaps, cookie: u64) {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while maps.child_state(cookie).is_some() {
+        assert!(Instant::now() < deadline, "child {cookie} was not deleted");
+        std::thread::yield_now();
     }
 }
 
@@ -508,6 +685,28 @@ fn no_capture_replay(io: &mut KernelGuestOwnerIo) {
             }
             Some(_) => {}
             None => return,
+        }
+    }
+}
+
+fn drive_without_capture_until_child_absent(
+    io: &mut KernelGuestOwnerIo,
+    maps: CorrelationMaps,
+    child_cookie: u64,
+    what: &str,
+) {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while maps.child_state(child_cookie).is_some() {
+        assert!(
+            Instant::now() < deadline,
+            "the production adapter did not consume {what} child {child_cookie}: {:?}",
+            maps.child_state(child_cookie)
+        );
+        if let Some(GuestIoEvent::OutboundCaptured { .. }) = io
+            .next_event(Some(Instant::now() + Duration::from_millis(100)))
+            .expect("the rejected-child owner wait succeeds")
+        {
+            panic!("{what} emitted an outbound capture");
         }
     }
 }
@@ -748,6 +947,7 @@ fn release_emitted_pending_places(
 #[derive(Debug, Clone, Copy)]
 enum CorrelationCase {
     DirectUncorrelated,
+    DirectFastOpenRejected,
     Ordinary,
     ImmediateApplicationClose,
     ForcedSyncookie,
@@ -755,8 +955,9 @@ enum CorrelationCase {
 }
 
 impl CorrelationCase {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::DirectUncorrelated,
+        Self::DirectFastOpenRejected,
         Self::Ordinary,
         Self::ImmediateApplicationClose,
         Self::ForcedSyncookie,
@@ -766,13 +967,222 @@ impl CorrelationCase {
     fn destination(self) -> SocketAddrV4 {
         let suffix = match self {
             Self::DirectUncorrelated => 1,
-            Self::Ordinary => 2,
-            Self::ImmediateApplicationClose => 3,
-            Self::ForcedSyncookie => 4,
-            Self::DataInSynFastOpen => 5,
+            Self::DirectFastOpenRejected => 2,
+            Self::Ordinary => 3,
+            Self::ImmediateApplicationClose => 4,
+            Self::ForcedSyncookie => 5,
+            Self::DataInSynFastOpen => 6,
         };
         SocketAddrV4::new(Ipv4Addr::new(203, 0, 113, suffix), 40_000 + u16::from(suffix))
     }
+}
+
+fn run_direct_fast_open_rejection(
+    io: &mut KernelGuestOwnerIo,
+    maps: CorrelationMaps,
+    token: GuestTransportToken,
+) {
+    let restore = SysctlRestore::set(TCP_FASTOPEN_SYSCTL, "3");
+    let gate = TfoFinalAckGate::install();
+    let candidate_before = maps.candidate_run_count();
+    let app = ApplicationSocket::new();
+    app.select_tfo_gate();
+    app.fast_open(
+        SocketAddrV4::new(token.workload_addr, GUEST_TCP_INTAKE_PORT),
+        b"direct-fast-open",
+    );
+    assert!(!maps.active_contains(app.raw_fd()), "direct Fast Open has no active metadata");
+    let child_cookie = wait_only_child_cookie(maps, "direct Fast Open");
+    let rejected = wait_child_phase(maps, child_cookie, CorrelationPhase::Rejected);
+    assert_eq!(
+        rejected.meta,
+        CorrelationMeta { application_cookie: 0, destination_ip: 0, destination_port: 0, pad: 0 },
+        "the direct Fast Open terminal rejection carries no fabricated identity"
+    );
+    assert!(
+        maps.candidate_run_count() > candidate_before,
+        "the live direct Fast Open traversed TcpCorrelationCandidate before Rejected"
+    );
+    app.bypass_tfo_gate();
+    gate.remove();
+    let terminal_before = maps.candidate_run_count();
+    app.send_probe();
+    std::thread::sleep(Duration::from_millis(50));
+    assert_eq!(
+        maps.candidate_run_count(),
+        terminal_before,
+        "established data after direct rejection never invokes TcpCorrelationCandidate"
+    );
+    assert_eq!(
+        maps.child_state(child_cookie),
+        Some(rejected),
+        "established data cannot regress direct terminal rejection"
+    );
+    drive_without_capture_until_child_absent(io, maps, child_cookie, "rejected direct Fast Open");
+    app.expect_reset();
+    wait_child_absent(maps, child_cookie);
+    no_capture_replay(io);
+    restore.restore();
+}
+
+fn terminal_and_delete_are_monotonic(
+    io: &mut KernelGuestOwnerIo,
+    maps: CorrelationMaps,
+    destination: SocketAddrV4,
+) {
+    let gate = TfoFinalAckGate::install();
+    let app = ApplicationSocket::new();
+    let cookie = app.cookie();
+    let expected = expected_correlation_meta(cookie, destination);
+    app.select_tfo_gate();
+    let candidate_before = maps.candidate_run_count();
+    app.fast_open(destination, b"terminal-monotonic");
+    let child_cookie = wait_only_child_cookie(maps, "terminal Fast Open");
+    let pending = wait_child_phase(maps, child_cookie, CorrelationPhase::Pending);
+    assert_eq!(
+        pending.meta,
+        CorrelationMeta { application_cookie: 0, destination_ip: 0, destination_port: 0, pad: 0 },
+        "Pending carries no identity before candidate validation"
+    );
+
+    let (progress_tx, progress_rx) = std::sync::mpsc::channel();
+    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(0);
+    let (ready, cohort_sends) = std::thread::scope(|scope| {
+        let sender_app = &app;
+        let sender = scope.spawn(move || {
+            let mut sent = 0usize;
+            loop {
+                sender_app.send_probe();
+                sent += 1;
+                progress_tx.send(sent).expect("publish real established-send progress");
+                match ready_rx.try_recv() {
+                    Ok(()) => {
+                        sender_app.send_probe();
+                        sent += 1;
+                        progress_tx
+                            .send(sent)
+                            .expect("publish established-send progress after Ready");
+                        return sent;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => return sent,
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        });
+
+        assert_eq!(
+            progress_rx
+                .recv_timeout(Duration::from_millis(250))
+                .expect("the parallel established-send cohort makes progress while Pending"),
+            1,
+            "the cohort reports its first completed socket send"
+        );
+        assert_eq!(
+            maps.child_state(child_cookie),
+            Some(pending),
+            "a real established send completes while the final ACK remains delayed and Pending"
+        );
+
+        // The background socket keeps sending while this thread releases the
+        // real delayed ACK and observes promotion. It is stopped only after
+        // Ready is read, then performs one final send before joining, so the
+        // same live cohort demonstrably spans both sides of the transition.
+        gate.remove();
+        let ready = wait_child_phase(maps, child_cookie, CorrelationPhase::Ready);
+        let sends_when_ready = progress_rx.try_iter().last().unwrap_or(1);
+        ready_tx.send(()).expect("tell the established-send cohort Ready was observed");
+        let sent = sender.join().expect("the established-send cohort joins");
+        assert!(
+            sent > sends_when_ready,
+            "the same real socket cohort progresses after Ready is observed"
+        );
+        (ready, sent)
+    });
+    app.bypass_tfo_gate();
+    assert_eq!(ready.meta, expected, "the terminal row has the exact application identity");
+    assert_eq!(
+        maps.candidate_run_count(),
+        candidate_before + 1,
+        "only the gated Fast Open final ACK, not {cohort_sends} established sends, traverses \
+         TcpCorrelationCandidate"
+    );
+
+    let established_before = maps.candidate_run_count();
+    app.send_probes(32);
+    std::thread::sleep(Duration::from_millis(50));
+    assert_eq!(
+        maps.candidate_run_count(),
+        established_before,
+        "established application data never invokes TcpCorrelationCandidate"
+    );
+    assert_eq!(
+        maps.child_state(child_cookie),
+        Some(ready),
+        "established sends cannot regress or replace the terminal row"
+    );
+
+    let child = captured(io, destination, cookie);
+    assert_eq!(maps.child_state(child_cookie), None, "terminal consumption deletes the row once");
+    let deleted_before = maps.candidate_run_count();
+    app.send_probe();
+    wait_active_absent(maps, &app);
+    assert_eq!(
+        maps.candidate_run_count(),
+        deleted_before,
+        "established data after deletion never invokes the handshake candidate"
+    );
+    assert_eq!(maps.child_state(child_cookie), None, "established data cannot recreate deletion");
+    io.abort(child.into());
+    no_capture_replay(io);
+}
+
+fn preterminal_reset_deletion_is_final(
+    io: &mut KernelGuestOwnerIo,
+    maps: CorrelationMaps,
+    destination: SocketAddrV4,
+) {
+    let gate = TfoFinalAckGate::install();
+    let app = ApplicationSocket::new();
+    let sockets_before_owner = socket_fd_count();
+    app.select_tfo_gate();
+    app.fast_open(destination, b"preterminal-reset");
+    let client = app.local_addr();
+    let child_cookie = wait_only_child_cookie(maps, "preterminal-reset Fast Open");
+    wait_child_phase(maps, child_cookie, CorrelationPhase::Pending);
+    assert_eq!(
+        tcp_state(GUEST_TCP_INTAKE_PORT, client.port()),
+        Some(3),
+        "the reset starts while the real child is preterminal SYN_RECV"
+    );
+    let pending_event = io
+        .next_event(Some(Instant::now() + Duration::from_millis(250)))
+        .expect("the preterminal owner wait succeeds");
+    assert!(
+        pending_event.is_none(),
+        "the preterminal child emits no owner event before reset: {pending_event:?}"
+    );
+    assert_eq!(
+        socket_fd_count(),
+        sockets_before_owner + 1,
+        "the production adapter holds the preterminal child"
+    );
+
+    // The final ACK was already classified into the private delayed class.
+    // A reset generated after restoring the default class bypasses it and
+    // closes the real child while its row is still Pending.
+    app.bypass_tfo_gate();
+    app.reset_on_close();
+    drop(app);
+    drive_without_capture_until_child_absent(io, maps, child_cookie, "reset preterminal Fast Open");
+    gate.remove();
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(
+        maps.child_state(child_cookie),
+        None,
+        "the delayed candidate/promoter path cannot recreate a preterminal deletion"
+    );
+    no_capture_replay(io);
 }
 
 fn run_fast_open_correlation_case(
@@ -791,6 +1201,9 @@ fn run_fast_open_correlation_case(
     assert_one_child_row(maps, CorrelationCase::DataInSynFastOpen);
     let prime_child = captured(io, destination, prime_cookie);
     finish_capture(io, maps, &prime, prime_child);
+
+    terminal_and_delete_are_monotonic(io, maps, destination);
+    preterminal_reset_deletion_is_final(io, maps, destination);
 
     let sockets_before_boundary = socket_fd_count();
     let emitted =
@@ -860,6 +1273,9 @@ fn run_correlation_case(
             }
             app.expect_reset();
         }
+        CorrelationCase::DirectFastOpenRejected => {
+            run_direct_fast_open_rejection(io, maps, token);
+        }
         CorrelationCase::Ordinary => {
             let app = ApplicationSocket::new();
             let cookie = app.cookie();
@@ -906,19 +1322,23 @@ fn run_correlation_case(
     assert_eq!(maps.child_entries(), 0, "{case:?}: cleanup baseline");
 }
 
-/// TCP-CORRELATION, Tier 3: one production-composition table covers a direct
-/// uncorrelated intake, ordinary and immediate-close handshakes, forced
-/// syncookies, and real data-in-SYN Fast Open. Every captured connection has
-/// the application's exact `SO_COOKIE` and original destination, `Ready` is
-/// consumed once, and the Fast Open case witnesses the production adapter
-/// holding a real `Pending` child in one combined pending place before `Ready`
-/// emits it. With 4,095 emitted places already held, overflow is refused both
-/// while that child is adapter-held `Pending` and after it becomes an emitted
-/// `CapturedConn`; consuming it then admits one replacement, proving the
-/// same shared 4,096th place was retained and released.
-/// Post-handshake input or socket lifetime removes active storage, every
-/// child row returns to baseline, and setup leaves no staging bpffs object
-/// during service.
+/// TCP-CORRELATION, Tier 3: one production-composition table covers direct
+/// ordinary and Fast Open rejection, ordinary and immediate-close captured
+/// handshakes, forced syncookies, and real data-in-SYN Fast Open. Every
+/// captured connection has the application's exact `SO_COOKIE` and original
+/// destination, `Ready` is consumed once, and the Fast Open case witnesses
+/// `Pending` through terminal promotion while the producer stays open. A
+/// live direct producer traverses the candidate and reaches `Rejected` before
+/// any later send or close. Parallel established sends invoke the candidate
+/// zero times and cannot regress a terminal row; reset-close while Pending
+/// deletes the row before the delayed ACK and neither candidate nor promoter
+/// can recreate it. With 4,095 emitted places already held, overflow is
+/// refused both while the valid child is adapter-held `Pending` and after it
+/// becomes an emitted `CapturedConn`; consuming it then admits one
+/// replacement, proving the same shared 4,096th place was retained and
+/// released. Post-handshake input or socket lifetime removes active storage,
+/// every child row returns to baseline, and setup leaves no staging bpffs
+/// object during service.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn tcp_correlation_preserves_exact_identity_and_cleans_transients_for_every_handshake_path() {
@@ -930,6 +1350,7 @@ fn tcp_correlation_preserves_exact_identity_and_cleans_transients_for_every_hand
     assert_eq!(bpffs_entries(), pins_before, "the private staging pin is gone before service");
     let mut io = KernelGuestOwnerIo::new(ops)
         .expect("the configured guest transport exposes the correlation maps");
+    let _stats = enable_stats(Stats::RunTime).expect("enable candidate invocation counts");
     let maps = CorrelationMaps::discover();
     assert_eq!(maps.child_entries(), 0, "clean child-map baseline");
 

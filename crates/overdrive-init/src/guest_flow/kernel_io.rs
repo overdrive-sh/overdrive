@@ -207,7 +207,21 @@ impl KernelGuestOwnerIo {
                 continue;
             };
             match self.child_state_code(cookie) {
-                Some(CHILD_PENDING | CHILD_CANDIDATE_READY | CHILD_CANDIDATE_REJECTED) => {}
+                Some(CHILD_PENDING | CHILD_CANDIDATE_READY | CHILD_CANDIDATE_REJECTED) => {
+                    let fd = self.socket(child_socket)?.fd.as_raw_fd();
+                    if socket_hung_up(fd)? {
+                        // A held preterminal Fast Open child is not eligible
+                        // for capture after its peer reset it. Re-read the row
+                        // because the post-validation callback may have
+                        // promoted it while this scan was checking the fd;
+                        // a terminal Ready row keeps its normal capture path.
+                        match self.child_state_code(cookie) {
+                            Some(CHILD_READY) => {}
+                            Some(_) => self.reject_held_child(cookie)?,
+                            None => self.discard_held_child(cookie),
+                        }
+                    }
+                }
                 Some(CHILD_READY | CHILD_REJECTED) => {
                     let fd = self.socket(child_socket)?.fd.as_raw_fd();
                     let state = socket_tcp_state(fd)?;

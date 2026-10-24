@@ -1,0 +1,34 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask metal run -- bash -lc 'set -euo pipefail; uname -sr; dpkg-query -W bpftool clang-21 libbpf-dev linux-tools-common; clang-21 --version; bpftool version; rustup run nightly-2026-08-05 rustc --version; bpf-linker --version; cloud-hypervisor --version'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=6597af3ad1ae3f5e5d6fe546 pid=1585353
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 2,394,125 bytes  received 6,564 bytes  208,755.57 bytes/sec
+total size is 3,112,644,991  speedup is 1,296.56
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+Linux 7.0.0-38-generic
+bpftool	7.7.0+7.0.0-38.38
+clang-21	1:21.1.8-6ubuntu1
+libbpf-dev:amd64	1:1.6.3-1ubuntu1
+linux-tools-common	7.0.0-38.38
+Ubuntu clang version 21.1.8 (6ubuntu1)
+Target: x86_64-pc-linux-gnu
+Thread model: posix
+InstalledDir: /usr/lib/llvm-21/bin
+bpftool v7.7.0
+using libbpf v1.7
+features:
+rustc 1.99.0-nightly (1ed2df61a 2026-08-04)
+bpf-linker 0.12.0
+cloud-hypervisor v53.0.0
+Migration Protocol Versions: 0

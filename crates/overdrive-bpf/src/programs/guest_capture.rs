@@ -208,7 +208,9 @@ pub fn recvmsg4(ctx: SockAddrContext) -> i32 {
     1
 }
 
-/// Remove application origin and slot ownership for the exact released socket.
+/// Remove application origins and report a released socket to its owner.
+/// Resident UDP slots stay mapped and unavailable until the guest owner has
+/// aborted associations, discarded their queues and disconnected the slots.
 #[cgroup_sock(sock_release)]
 pub fn sock_release(ctx: SockContext) -> i32 {
     let cookie = unsafe { bpf_get_socket_cookie(ctx.sock.cast::<c_void>()) };
@@ -217,15 +219,10 @@ pub fn sock_release(ctx: SockContext) -> i32 {
     let _ = CHILD_CORRELATION.remove(&cookie);
     let mut released = false;
     for slot in 0..1_024 {
-        if let Some(value) = SLOT_META.get_ptr_mut(slot) {
-            let value = unsafe { &mut *value };
-            if value.cookie == cookie {
-                let key = SlotKey { cookie, ip: value.ip, port: value.port, pad: 0 };
-                let _ = SLOT_OWNER.remove(&key);
-                *value = SlotValue { cookie: 0, ip: 0, port: 0, pad: 0 };
-                let _ = FREE_SLOTS.push(&slot, 0);
-                released = true;
-            }
+        if let Some(value) = SLOT_META.get(slot)
+            && value.cookie == cookie
+        {
+            released = true;
         }
     }
     if released {

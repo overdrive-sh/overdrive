@@ -1,0 +1,24 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running `target/debug/xtask metal run -- bash -lc 'set -euo pipefail; sha256sum target/x86_64-unknown-linux-musl/release/overdrive-init target/x86_64-unknown-linux-musl/release/overdrive-guest-peer target/bpf/overdrive_guest_bpf.o target/bpf/overdrive_guest_tcp_correlation_candidate_bpf.o target/kmod/7.0.0-38-generic/ovd_fwd.ko; stat -c "%n %y" target/x86_64-unknown-linux-musl/release/overdrive-init'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=ad38169592d8eaea8caba5c7 pid=1599436
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 2,395,302 bytes  received 11,379 bytes  192,534.48 bytes/sec
+total size is 3,112,690,437  speedup is 1,293.35
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+dfaee53f1004df743632e13c71691488d6c53d3a8da79c491d8e4ad8c55c4841  target/x86_64-unknown-linux-musl/release/overdrive-init
+b67e3d0fa6665b79850895ab1ff095ef775e1a040cfedbd83b59897366a7c7d8  target/x86_64-unknown-linux-musl/release/overdrive-guest-peer
+d64aa16879c51705135d7d8e42d63432de202d72d1f339d03868a44d1cfd3c16  target/bpf/overdrive_guest_bpf.o
+84c8d7730fe591eb50ff98504e7ab0e3c3da027b034d44393bff7e6023d89094  target/bpf/overdrive_guest_tcp_correlation_candidate_bpf.o
+3579e8a43880fd42f9a39d16765953c369e4916175a1c4a7877223520ccdde24  target/kmod/7.0.0-38-generic/ovd_fwd.ko
+target/x86_64-unknown-linux-musl/release/overdrive-init 2026-10-24 10:19:37.523784558 +0000

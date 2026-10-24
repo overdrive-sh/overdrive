@@ -190,8 +190,25 @@ provision:
       chmod +x /tmp/llvm.sh
       bash /tmp/llvm.sh 21
       apt-get update
-      apt-get install -y --no-install-recommends clang-21 bpftool libbpf-dev
-      test -r "${OVERDRIVE_BPF_TARGET_BTF:-/sys/kernel/btf/vmlinux}"
+      apt-get install -y --no-install-recommends clang-21 libbpf-dev
+      BPFTOOL_CANDIDATE="$(apt-cache policy bpftool | awk '$1 == "Candidate:" {print $2}')"
+      if [ -n "${BPFTOOL_CANDIDATE}" ] && [ "${BPFTOOL_CANDIDATE}" != "(none)" ]; then
+        apt-get install -y --no-install-recommends bpftool
+      else
+        apt-get install -y --no-install-recommends \
+          linux-tools-common linux-tools-generic
+        BPFTOOL_BINARY="$(find /usr/lib -path '/usr/lib/linux-tools-*/bpftool' -type f -executable -print -quit)"
+        if [ -z "${BPFTOOL_BINARY}" ]; then
+          echo "linux-tools-generic did not install an executable bpftool" >&2
+          exit 1
+        fi
+        install -m 0755 "${BPFTOOL_BINARY}" /usr/local/bin/bpftool
+      fi
+      command -v bpftool
+      bpftool version
+      BTF="${OVERDRIVE_BPF_TARGET_BTF:-/sys/kernel/btf/vmlinux}"
+      test -r "${BTF}"
+      bpftool btf dump file "${BTF}" format c >/dev/null
 
       # The module must be built against the running kernel, including its
       # generated headers rather than only the userspace UAPI headers.
@@ -210,20 +227,6 @@ provision:
       make -C "${SPARSE_SOURCE}" LLVM_CONFIG=/bin/false sparse
       install -m 0755 "${SPARSE_SOURCE}/sparse" /usr/local/bin/sparse
       sparse --version
-
-      # Kernel-matched tools — linux-tools-generic covers the stock
-      # kernel but the VM image may ship a newer one. Try the exact
-      # match first; fall back silently if the package doesn't exist
-      # (the symlink below catches the generic fallback).
-      apt-get install -y --no-install-recommends \
-        "linux-tools-$(uname -r)" 2>/dev/null || true
-
-      # bpftool on a stable PATH. Prefer the kernel-matched binary;
-      # fall back to whichever linux-tools-* ships one.
-      if [ ! -x /usr/local/bin/bpftool ]; then
-        BPFTOOL="$(find /usr/lib/linux-tools-*/bpftool 2>/dev/null | sort -rV | head -n1 || true)"
-        if [ -n "${BPFTOOL}" ]; then ln -sf "${BPFTOOL}" /usr/local/bin/bpftool; fi
-      fi
 
   # -------------------------------------------------------------------------
   # KVM permissions via udev — cleaner than `usermod -a -G kvm`. The rule

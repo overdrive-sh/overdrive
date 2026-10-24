@@ -1,0 +1,39 @@
+Increment B remediation captures — exact commands and outcomes
+Captured 2026-10-24 on the leased x86_64 Metal host through disposable CH guests.
+
+Current self-contained reproduction runner (PASS, status 0):
+  bash spike-scratch/netns-density-295-review-11-06/increment-b/run.sh default-kit
+  capture: evidence/reruns/default-kit-20261024T102125Z-98537/runner.raw.log
+  exit status: evidence/reruns/default-kit-20261024T102125Z-98537/runner-exit-status.txt
+  This command has no `with-loopback` or `with-diag` flag.
+
+The runner's retained expansion on the Metal host was:
+  rustc --edition=2024 --target x86_64-unknown-linux-musl spike-scratch/netns-density-295-review-11-06/increment-b/src/guest.rs -o spike-scratch/netns-density-295-review-11-06/increment-b/target/review-guest
+  CARGO_TARGET_DIR=target cargo run --manifest-path spike-scratch/netns-density-295-review-11-06/increment-b/Cargo.toml --bin review-host -- spike-scratch/netns-density-295-review-11-06/increment-b/target/review-guest
+
+Historical F3 pre-fix admitted-loss reproduction (product baseline, status 101
+from the intentionally failing host oracle):
+  cargo xtask metal run -- bash -lc 'set -euo pipefail; rustc --edition=2024 --target x86_64-unknown-linux-musl spike-scratch/netns-density-295-review-11-06/increment-a/src/guest.rs -o /tmp/review-11-06-guest; CARGO_TARGET_DIR=target cargo run --manifest-path spike-scratch/netns-density-295-review-11-06/increment-a/Cargo.toml --bin review-host -- /tmp/review-11-06-guest with-loopback with-diag'
+  raw capture: reviewer-f3-pre-fix-admitted-loss.log
+  The exact pre-fix init/BPF/candidate digests are retained in pre-fix-artifact-identities-metal.log.
+
+F3 post-fix with optional loopback, using diagnostic modules preloaded by the
+updated GuestKit PID 1 (PASS, status 0):
+  cargo xtask metal run -- bash -lc 'set -euo pipefail; export OVERDRIVE_REVIEW_EVIDENCE_DIR=/tmp/review-11-06-f3-post-fix-no-manual-load; rustc --edition=2024 --target x86_64-unknown-linux-musl spike-scratch/netns-density-295-review-11-06/increment-a/src/guest.rs -o /tmp/review-11-06-guest; CARGO_TARGET_DIR=target cargo run --manifest-path spike-scratch/netns-density-295-review-11-06/increment-a/Cargo.toml --bin review-host -- /tmp/review-11-06-guest with-loopback'
+  raw capture: reviewer-f3-post-fix-loopback.log
+
+Retained harness double-load reproduction (not a product failure; guest exits
+101 because F2 support already loaded inet_diag before the workload's old
+`with-diag` branch calls finit_module again and receives EEXIST):
+  cargo xtask metal run -- bash -lc 'set -euo pipefail; export OVERDRIVE_REVIEW_EVIDENCE_DIR=/tmp/review-11-06-f3-post-fix; rustc --edition=2024 --target x86_64-unknown-linux-musl spike-scratch/netns-density-295-review-11-06/increment-a/src/guest.rs -o /tmp/review-11-06-guest; CARGO_TARGET_DIR=target cargo run --manifest-path spike-scratch/netns-density-295-review-11-06/increment-a/Cargo.toml --bin review-host -- /tmp/review-11-06-guest with-loopback with-diag'
+  raw capture: harness-double-diag-load-eexist.log
+
+Current product artifact identities were read on the same Metal host with:
+  cargo xtask metal run -- bash -lc 'set -euo pipefail; sha256sum target/x86_64-unknown-linux-musl/release/overdrive-init target/x86_64-unknown-linux-musl/release/overdrive-guest-peer target/bpf/overdrive_guest_bpf.o target/bpf/overdrive_guest_tcp_correlation_candidate_bpf.o target/kmod/7.0.0-38-generic/ovd_fwd.ko; stat -c "%n %y" target/x86_64-unknown-linux-musl/release/overdrive-init'
+  raw receipt: post-fix-artifact-identities-metal.log
+
+The tool versions used by the successful runner and BPF build are retained in
+metal-toolchain-versions.log. The local raw host logs from the manual Metal
+invocations are byte-for-byte copies of their `.context/netns-density-295/11-06/`
+captures; the timestamped run.sh capture is independently recorded in
+`evidence/reruns/`.

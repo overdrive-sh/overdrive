@@ -1,0 +1,39 @@
+{
+  "reason": "The canonical Metal rsync runs as ubuntu and the in-guest probe created output paths as root.",
+  "changed_paths_only": [
+    {
+      "path": "/home/ubuntu/overdrive/spike-scratch/netns-density-295-review-11-06/increment-b/target",
+      "kind": "directory",
+      "owner_before": "root:root",
+      "owner_after": "ubuntu:ubuntu",
+      "mode_after": "0755"
+    },
+    {
+      "path": "/home/ubuntu/overdrive/spike-scratch/netns-density-295-review-11-06/increment-b/target/review-guest",
+      "kind": "build output",
+      "owner_before": "root:root",
+      "owner_after": "ubuntu:ubuntu",
+      "mode_after": "0755",
+      "bytes": 4591912,
+      "sha256": "1b7ea097cc62df66bfbaec7f36101308d5b1f91fa5350a83216cc9fc5309b59e"
+    },
+    {
+      "path": "/home/ubuntu/overdrive/spike-scratch/netns-density-295-review-11-06/increment-b/evidence/reruns/default-kit-20261024T102125Z-98537/guest-console",
+      "kind": "directory",
+      "owner_before": "root:root",
+      "owner_after": "ubuntu:ubuntu",
+      "mode_after": "0755"
+    },
+    {
+      "path": "/home/ubuntu/overdrive/spike-scratch/netns-density-295-review-11-06/increment-b/evidence/reruns/default-kit-20261024T102125Z-98537/guest-console/native-console.txt",
+      "kind": "raw guest console",
+      "owner_before": "root:root",
+      "owner_after": "ubuntu:ubuntu",
+      "mode_after": "0644",
+      "bytes": 32250,
+      "sha256": "a78aafc2da754039c25ac437c77f579e77823bdd292b6f35671333c588b84c5c"
+    }
+  ],
+  "local_remote_sha256_match": true,
+  "canonical_metal_sync_exit_status": 0
+}

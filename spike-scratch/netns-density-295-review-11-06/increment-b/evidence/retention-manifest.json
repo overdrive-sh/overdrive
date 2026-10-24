@@ -1,0 +1,128 @@
+{
+  "increment": "b",
+  "preserves_increment_a": true,
+  "build_outputs_excluded": true,
+  "all_raw_captures_present": true,
+  "files": [
+    {
+      "path": "Cargo.toml",
+      "bytes": 350,
+      "sha256": "d714c35ef3e91a1971c41188bc0570ea0921048d2062f2bc4ee65ef818352fbf"
+    },
+    {
+      "path": "README.md",
+      "bytes": 4818,
+      "sha256": "fc6256a0ce846e2ec5edc6e3ff7049e1ad3b01232bc655a7211fc47288a32503"
+    },
+    {
+      "path": "SHA256SUMS",
+      "bytes": 2512,
+      "sha256": "3ec7c5c9abb9ae49f71faf0005314cf1250866b069be28fb1999ff823ecba97c"
+    },
+    {
+      "path": "evidence/commands-at-capture.txt",
+      "bytes": 3900,
+      "sha256": "3c89b64b9e446964f19e313102442a0d386655534baa0d92bdb98617a6ba9121"
+    },
+    {
+      "path": "evidence/default-kit-f1-f3-post-fix.log",
+      "bytes": 34241,
+      "sha256": "aad9c3a75ca7f737d954fdd79636424b3c785779b5384255f0fa092d559e215d"
+    },
+    {
+      "path": "evidence/guest-kit-prepare-metal.log",
+      "bytes": 1347,
+      "sha256": "27d3d8034232a00b213209ccdc0545e9404353a692999bb966fc671c25025963"
+    },
+    {
+      "path": "evidence/harness-double-diag-load-eexist.log",
+      "bytes": 31898,
+      "sha256": "7ee329dd77a4c6db3695e07e2e8ff615381d7f01a749f6a4f6a888a8abcd6efa"
+    },
+    {
+      "path": "evidence/metal-toolchain-versions.log",
+      "bytes": 1467,
+      "sha256": "683c639bb0c1dfd7ab760c658914fc45a1bf146a3d7066d44f7604430b468756"
+    },
+    {
+      "path": "evidence/ownership-repair.json",
+      "bytes": 1569,
+      "sha256": "024a85ddc778d5e66bddeef59fd71c5d3ec697bc9ed004b7565889c7061e5e86"
+    },
+    {
+      "path": "evidence/post-fix-artifact-identities-metal.log",
+      "bytes": 1843,
+      "sha256": "a2680c3f29c9c35188b9a7c0f08e2ef30f9bafcec9e5c9bf4cc2227d34330ba1"
+    },
+    {
+      "path": "evidence/pre-fix-artifact-identities-metal.log",
+      "bytes": 1552,
+      "sha256": "742de00781a122096a32afbbf7b7a9d3d9f3bf032aa4f8432dd5ab40d8995fb8"
+    },
+    {
+      "path": "evidence/reruns/default-kit-20261024T102125Z-98537/guest-console/native-console.txt",
+      "bytes": 32250,
+      "sha256": "a78aafc2da754039c25ac437c77f579e77823bdd292b6f35671333c588b84c5c"
+    },
+    {
+      "path": "evidence/reruns/default-kit-20261024T102125Z-98537/runner-exit-status.txt",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "evidence/reruns/default-kit-20261024T102125Z-98537/runner.raw.log",
+      "bytes": 34196,
+      "sha256": "2608c4465745c52a6fc066d0bbfb2414d1588466716e19630859b7ee84c947d7"
+    },
+    {
+      "path": "evidence/reviewer-f3-post-fix-loopback.log",
+      "bytes": 34289,
+      "sha256": "2de08f2b71bb043696cc26f103900615eeda2c1f7d13ca72dc168f2686ff8d23"
+    },
+    {
+      "path": "evidence/reviewer-f3-pre-fix-admitted-loss.log",
+      "bytes": 38083,
+      "sha256": "743834c1bdb4725d06daf908687d21347badf3a67fc4b46856a306dd5dc698f5"
+    },
+    {
+      "path": "evidence/source-and-artifact-identities.txt",
+      "bytes": 2037,
+      "sha256": "4a0e5a1a6e0a4d42d117f2178d88094da908796b0f0b2444331ac82ac43b7da9"
+    },
+    {
+      "path": "run.sh",
+      "bytes": 1975,
+      "sha256": "07f44a44bf6dfd9a01b0a9e6ad4a4c41ede69ccd4f1ee80b6ff99c4daad8728e"
+    },
+    {
+      "path": "source-at-capture/overdrive-bpf/programs/guest_capture.rs",
+      "bytes": 7318,
+      "sha256": "5951e0302b16849e46a5eddcdadf706d5472c50e5a8d1dccf0c758a538582df7"
+    },
+    {
+      "path": "source-at-capture/overdrive-init/transport/kernel.rs",
+      "bytes": 33130,
+      "sha256": "59e38a9056839e0f83f15fcc7efe891a1956d56dc5de6c2a43cbec97af1aca2a"
+    },
+    {
+      "path": "source-at-capture/overdrive-testing/bin/guest_peer.rs",
+      "bytes": 52543,
+      "sha256": "af2a67212603d960393a02fa327bb12273bc8790cde2083f5357ffa1461dc1ff"
+    },
+    {
+      "path": "source-at-capture/overdrive-testing/src/guest_kit.rs",
+      "bytes": 48076,
+      "sha256": "10e578528f7cb7e7066b5ddaa3e79a8fa2b264dccdeb781ea3218cd696c6bf6b"
+    },
+    {
+      "path": "src/guest.rs",
+      "bytes": 3380,
+      "sha256": "dca5e8cbd868b803499c28f77b56dca79f2c8f135da1e221d9bbaefe62b91334"
+    },
+    {
+      "path": "src/host.rs",
+      "bytes": 5345,
+      "sha256": "efe3fc5f36c21cbbf4982a4b7656e0bf4d4453b4808095aec590daf8b84581d9"
+    }
+  ]
+}

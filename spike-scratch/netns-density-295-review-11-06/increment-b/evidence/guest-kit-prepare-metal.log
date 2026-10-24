@@ -1,0 +1,23 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask metal run -- bash -lc 'set -euo pipefail; cargo xtask guest-kit-prepare'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=98aab54db9f01260a7c7bfd1 pid=1535678
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 2,382,700 bytes  received 11,169 bytes  154,443.16 bytes/sec
+total size is 3,112,732,022  speedup is 1,300.29
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running `target/debug/xtask guest-kit-prepare`
+guest-kit-prepare: overdrive-init overdrive-init -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-init--overdrive-init
+guest-kit-prepare: overdrive-fwd integration -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-fwd--integration
+guest-kit-prepare: kernel 7.0.0-38-generic, target x86_64-unknown-linux-musl: the lane is prepared

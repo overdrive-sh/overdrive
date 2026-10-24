@@ -34,8 +34,9 @@
 //!   loads the stock dummy-link fixture prerequisite and `exec`s the staged
 //!   production init, which remains PID 1 and performs its own forwarder
 //!   module validation/load. [`GuestInit::ScriptedPeer`] stays in the peer.
-//!   Images also carry the guest program, vsock modules, stock dummy module,
-//!   and — when asked — `ovd_fwd.ko` and the vsock loopback transport.
+//!   Images also carry the guest program, vsock modules, the stock dummy and
+//!   socket-diagnostic modules, and — when asked — `ovd_fwd.ko` and the vsock
+//!   loopback transport.
 //! - [`GuestKit::boot`] / [`GuestKit::boot_scripted`]: a VMM at a CID from a
 //!   registered [`cid_bands`] band, its serial console captured to a file,
 //!   ended by [`GuestKitVm::kill`] (the VMM's exit is the vhost device's
@@ -87,6 +88,11 @@ pub const LOOPBACK_MODULE_GUEST_PATH: &str = "/lib/overdrive-testing/modules/vso
 /// The stock kernel dummy-link driver required before an owner cell invokes
 /// production guest transport setup.
 pub const DUMMY_MODULE_GUEST_PATH: &str = "/lib/overdrive-testing/modules/dummy.ko";
+const SOCKET_DIAGNOSTIC_MODULES: [(&str, &str); 3] = [
+    ("net/ipv4/inet_diag", "/lib/overdrive-testing/modules/inet_diag.ko"),
+    ("net/ipv4/tcp_diag", "/lib/overdrive-testing/modules/tcp_diag.ko"),
+    ("net/ipv4/udp_diag", "/lib/overdrive-testing/modules/udp_diag.ko"),
+];
 /// The stock PRIO scheduler used by the scripted-guest Fast Open fixture.
 pub const PRIO_MODULE_GUEST_PATH: &str = "/lib/overdrive-testing/modules/sch_prio.ko";
 /// The stock NETEM scheduler used by the scripted-guest Fast Open fixture.
@@ -484,6 +490,10 @@ impl GuestKit {
         let dummy =
             host_module_file(self, dir, "drivers/net/dummy", Path::new(DUMMY_MODULE_GUEST_PATH))?;
         install(&stage, &dummy.host, &dummy.guest)?;
+        for (relative, guest) in SOCKET_DIAGNOSTIC_MODULES {
+            let module = host_module_file(self, dir, relative, Path::new(guest))?;
+            install(&stage, &module.host, &module.guest)?;
+        }
         if spec.init == GuestInit::ScriptedPeer {
             for (relative, guest) in [
                 ("net/sched/sch_prio", PRIO_MODULE_GUEST_PATH),

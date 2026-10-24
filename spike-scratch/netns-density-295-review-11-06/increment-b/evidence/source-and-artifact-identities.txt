@@ -1,0 +1,29 @@
+Increment B source and product identities
+Captured 2026-10-24.
+
+Current passing run (`evidence/reruns/default-kit-20261024T102125Z-98537/runner.raw.log`):
+  SOURCE commit=8c8b077581a48e6000fa73f8f12e0d444add6df9
+  source_digest=3c4fe43b2d7afe468922b70f4f94a431708be463cbbf123be8c59441c4265607
+  guest kernel=Linux 7.0.0-38-generic x86_64
+  `overdrive-init` SHA-256=dfaee53f1004df743632e13c71691488d6c53d3a8da79c491d8e4ad8c55c4841
+  scripted peer SHA-256=b67e3d0fa6665b79850895ab1ff095ef775e1a040cfedbd83b59897366a7c7d8
+  guest Rust BPF object SHA-256=d64aa16879c51705135d7d8e42d63432de202d72d1f339d03868a44d1cfd3c16
+  guest TCP-correlation candidate object SHA-256=84c8d7730fe591eb50ff98504e7ab0e3c3da027b034d44393bff7e6023d89094
+  `ovd_fwd.ko` SHA-256=3579e8a43880fd42f9a39d16765953c369e4916175a1c4a7877223520ccdde24
+  init artifact build time=2026-10-24 10:19:37.523784558 +0000
+
+The exact source snapshots used by the guest contain:
+  `transport/kernel.rs` SHA-256=59e38a9056839e0f83f15fcc7efe891a1956d56dc5de6c2a43cbec97af1aca2a
+  `guest_capture.rs` SHA-256=5951e0302b16849e46a5eddcdadf706d5472c50e5a8d1dccf0c758a538582df7
+  `guest_kit.rs` SHA-256=10e578528f7cb7e7066b5ddaa3e79a8fa2b264dccdeb781ea3218cd696c6bf6b
+  `guest_peer.rs` SHA-256=af2a67212603d960393a02fa327bb12273bc8790cde2083f5357ffa1461dc1ff
+The complete probe Cargo manifest and sources are copied under `Cargo.toml`
+and `src/`; their hashes are listed in `SHA256SUMS` and match Increment A.
+
+The F3 pre-fix capture retained in Increment B reports:
+  SOURCE commit=9d7463e8bf1c8bb89926dff8b9394cd68a9ad12f
+  source_digest=ca3b6625db5ebc605a89f71e990d82d2eacd7781d5c21edec13f3ed971307b8f
+  `overdrive-init` SHA-256=e76704f5246793eeaecfec704489162c26ed818549fba6c870730c04a1f06efa
+  guest Rust BPF object SHA-256=06d93a651df42484639044c6cf302805afcba4d07694dd509300c9980aa6851c
+  guest TCP-correlation candidate object SHA-256=84c8d7730fe591eb50ff98504e7ab0e3c3da027b034d44393bff7e6023d89094
+Those exact pre-fix hashes are also in `pre-fix-artifact-identities-metal.log`.

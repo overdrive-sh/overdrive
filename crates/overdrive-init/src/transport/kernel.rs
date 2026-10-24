@@ -23,7 +23,9 @@ use nix::sys::socket::{
     AddressFamily, NetlinkAddr, SockFlag, SockProtocol, SockType, VsockAddr, bind, recv, sendto,
     socket,
 };
-use overdrive_core::guest_transport::forwarder::FlowForwarder;
+use overdrive_core::guest_transport::forwarder::{
+    ForwarderError, ForwarderOp, ForwarderProbeObservation, ForwarderProbeStage,
+};
 use overdrive_core::guest_transport::{
     GUEST_FORWARDER_MODULE_PATH, GUEST_INBOUND_PORT, GUEST_TCP_INTAKE_PORT, GUEST_UDP_SLOT_BASE,
     GUEST_UDP_SLOTS,
@@ -43,8 +45,63 @@ const BPF_FS_MAGIC: libc::c_long = 0xcafe_4a11;
 const RULE_PRIORITY: u32 = 32_765;
 const GUEST_ROUTE_TABLE: u32 = 295;
 const INBOUND_VSOCK_BACKLOG: libc::c_int = 4_096;
+// Private mirror of overdrive-fwd's UAPI OVD_FWD_ABI_VERSION.
+const GUEST_FORWARDER_ABI_VERSION: u32 = 1;
+
+/// The guest-side mirror of the four-byte `OVD_FWD_VERSION` result.
+#[repr(C)]
+#[derive(Default)]
+struct GuestForwarderVersion {
+    abi_version: u32,
+}
+
+const _: () = assert!(std::mem::size_of::<GuestForwarderVersion>() == 4);
+const _: () = assert!(std::mem::offset_of!(GuestForwarderVersion, abi_version) == 0);
+nix::ioctl_read!(guest_forwarder_version_ioctl, 0xB9, 0x00, GuestForwarderVersion);
+
 #[repr(align(8))]
 struct AlignedBpfObject<const N: usize>([u8; N]);
+
+fn guest_forwarder_probe_stage<T>(
+    stage: ForwarderProbeStage,
+    result: Result<T, ForwarderError>,
+) -> Result<T, ForwarderError> {
+    result.map_err(|source| ForwarderError::Probe { stage, source: Box::new(source) })
+}
+
+fn probe_guest_forwarder_version(forwarder: &KernelFlowForwarder) -> Result<(), ForwarderError> {
+    let fd = forwarder.readiness_fd().as_raw_fd();
+    let mut version = GuestForwarderVersion::default();
+    // SAFETY: OVD_FWD_VERSION writes one four-byte `GuestForwarderVersion`.
+    unsafe { guest_forwarder_version_ioctl(fd, &raw mut version) }.map_err(|error| {
+        ForwarderError::Io {
+            op: ForwarderOp::Version,
+            source: io::Error::from_raw_os_error(error as i32),
+        }
+    })?;
+    if version.abi_version != GUEST_FORWARDER_ABI_VERSION {
+        return Err(ForwarderError::AbiMismatch {
+            expected: GUEST_FORWARDER_ABI_VERSION,
+            found: version.abi_version,
+        });
+    }
+
+    // SAFETY: fcntl reads flags from the owned forwarder context descriptor.
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+    if flags < 0 {
+        return Err(ForwarderError::Io {
+            op: ForwarderOp::Version,
+            source: io::Error::last_os_error(),
+        });
+    }
+    if flags & libc::FD_CLOEXEC == 0 {
+        return Err(ForwarderError::ProbeMismatch {
+            stage: ForwarderProbeStage::Version,
+            observed: ForwarderProbeObservation::ContextInheritable,
+        });
+    }
+    Ok(())
+}
 
 static BPF_OBJECT: AlignedBpfObject<
     { include_bytes!(env!("OVERDRIVE_GUEST_BPF_OBJECT_PATH")).len() },
@@ -331,8 +388,14 @@ impl GuestTransportOps for KernelGuestTransportOps {
     fn open_forwarder(
         &mut self,
     ) -> Result<(), overdrive_core::guest_transport::forwarder::ForwarderError> {
-        let forwarder = KernelFlowForwarder::open()?;
-        forwarder.probe()?;
+        let forwarder = guest_forwarder_probe_stage(
+            ForwarderProbeStage::DeviceOpen,
+            KernelFlowForwarder::open(),
+        )?;
+        guest_forwarder_probe_stage(
+            ForwarderProbeStage::Version,
+            probe_guest_forwarder_version(&forwarder),
+        )?;
         self.forwarder = Some(forwarder);
         Ok(())
     }

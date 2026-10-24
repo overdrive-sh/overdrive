@@ -46,7 +46,7 @@
 #![allow(clippy::expect_used)]
 
 use color_eyre::eyre::{Result, eyre};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use crate::BPF_NIGHTLY_TOOLCHAIN;
 
@@ -77,7 +77,7 @@ pub struct ProbeContext {
 pub struct CCoreProbe {
     /// Major version reported by the available C BPF compiler.
     pub clang_major: Option<u32>,
-    /// `bpftool` is available on `PATH`.
+    /// `bpftool` can dump the selected target-kernel BTF as C.
     pub bpftool_on_path: bool,
     /// The libbpf CO-RE helper headers are installed.
     pub libbpf_headers_present: bool,
@@ -168,12 +168,27 @@ pub fn plan(probe: &ProbeContext) -> Plan {
     let c_core = probe.c_core;
     if c_core.clang_major != Some(21) || !c_core.bpftool_on_path || !c_core.libbpf_headers_present {
         let script = concat!(
-            "set -e; ",
+            "set -euo pipefail; ",
             "wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh; ",
             "chmod +x /tmp/llvm.sh; ",
             "sudo bash /tmp/llvm.sh 21; ",
             "sudo apt-get update; ",
-            "sudo apt-get install -y --no-install-recommends clang-21 bpftool libbpf-dev"
+            "sudo apt-get install -y --no-install-recommends clang-21 libbpf-dev; ",
+            "BPFTOOL_CANDIDATE=\"$(apt-cache policy bpftool | awk '$1 == \"Candidate:\" {print $2}')\"; ",
+            "if [ -n \"$BPFTOOL_CANDIDATE\" ] && [ \"$BPFTOOL_CANDIDATE\" != \"(none)\" ]; then ",
+            "sudo apt-get install -y --no-install-recommends bpftool; ",
+            "else sudo apt-get install -y --no-install-recommends ",
+            "linux-tools-common linux-tools-generic; ",
+            "BPFTOOL_BINARY=\"$(find /usr/lib -path '/usr/lib/linux-tools-*/bpftool' ",
+            "-type f -executable -print -quit)\"; ",
+            "if [ -z \"$BPFTOOL_BINARY\" ]; then ",
+            "echo 'linux-tools-generic did not install an executable bpftool' >&2; exit 1; fi; ",
+            "sudo install -m 0755 \"$BPFTOOL_BINARY\" /usr/local/bin/bpftool; fi; ",
+            "command -v bpftool; ",
+            "bpftool version; ",
+            "BTF=\"${OVERDRIVE_BPF_TARGET_BTF:-/sys/kernel/btf/vmlinux}\"; ",
+            "test -r \"$BTF\"; ",
+            "bpftool btf dump file \"$BTF\" format c >/dev/null"
         );
         commands.push(PlannedCommand {
             argv: vec!["bash".into(), "-c".into(), script.into()],
@@ -182,7 +197,11 @@ pub fn plan(probe: &ProbeContext) -> Plan {
     }
     if !c_core.target_btf_readable {
         commands.push(PlannedCommand {
-            argv: vec!["test".into(), "-r".into(), "/sys/kernel/btf/vmlinux".into()],
+            argv: vec![
+                "bash".into(),
+                "-c".into(),
+                "test -r \"${OVERDRIVE_BPF_TARGET_BTF:-/sys/kernel/btf/vmlinux}\"".into(),
+            ],
             label: "verify readable target-kernel BTF at /sys/kernel/btf/vmlinux".into(),
         });
     }
@@ -254,15 +273,19 @@ fn probe() -> Result<ProbeContext> {
                     .find_map(|word| word.parse().ok())
             })
     });
-    let bpftool_on_path = Command::new("sh")
-        .arg("-c")
-        .arg("command -v bpftool")
-        .status()
-        .is_ok_and(|status| status.success());
-    let libbpf_headers_present = std::path::Path::new("/usr/include/bpf/bpf_helpers.h").is_file();
     let target_btf = std::env::var_os("OVERDRIVE_BPF_TARGET_BTF")
         .map_or_else(|| std::path::PathBuf::from("/sys/kernel/btf/vmlinux"), Into::into);
-    let target_btf_readable = std::fs::File::open(target_btf).is_ok();
+    let target_btf_readable = std::fs::File::open(&target_btf).is_ok();
+    let bpftool_on_path = target_btf_readable
+        && Command::new("bpftool")
+            .args(["btf", "dump", "file"])
+            .arg(&target_btf)
+            .args(["format", "c"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success());
+    let libbpf_headers_present = std::path::Path::new("/usr/include/bpf/bpf_helpers.h").is_file();
 
     Ok(ProbeContext {
         bpf_linker_on_path,

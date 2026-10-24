@@ -5,7 +5,8 @@
 //!
 //! - **PID 1 — the scripted guest vsock peer** (`guest_peer`). Mounts
 //!   `/proc`, `/sys` and `/dev`, brings loopback up, loads the vsock transport
-//!   modules and the guest kit's `ovd_fwd.ko` when the image carries it,
+//!   modules and the guest kit's stock socket-diagnostic prerequisites plus
+//!   `ovd_fwd.ko` when the image carries it,
 //!   dials the host on the port the kernel parameter `overdrive.testpeer=`
 //!   names, and executes one [`PeerCommand`] per line. It runs no Overdrive
 //!   owner. When the host closes the control connection it powers the guest
@@ -664,6 +665,24 @@ mod linux {
                 .find_map(|parameter| parameter.strip_prefix(TEST_INIT_PARAM).map(str::to_owned))
         }
 
+        const SOCKET_DIAGNOSTIC_MODULES: [&str; 3] = [
+            "/lib/overdrive-testing/modules/inet_diag.ko",
+            "/lib/overdrive-testing/modules/tcp_diag.ko",
+            "/lib/overdrive-testing/modules/udp_diag.ko",
+        ];
+
+        fn load_production_fixture_prerequisites() -> Result<(), (&'static str, io::Error)> {
+            for prerequisite in [DUMMY_MODULE_GUEST_PATH, LOOPBACK_MODULE_GUEST_PATH]
+                .into_iter()
+                .chain(SOCKET_DIAGNOSTIC_MODULES)
+            {
+                if std::path::Path::new(prerequisite).exists() {
+                    super::load_module(prerequisite).map_err(|error| (prerequisite, error))?;
+                }
+            }
+            Ok(())
+        }
+
         /// PID 1 of a scripted guest.
         pub(crate) fn run() -> ! {
             mount("proc", "/proc", "proc");
@@ -688,16 +707,12 @@ mod linux {
                     );
                     power_off();
                 }
-                for prerequisite in [DUMMY_MODULE_GUEST_PATH, LOOPBACK_MODULE_GUEST_PATH] {
-                    if std::path::Path::new(prerequisite).exists()
-                        && let Err(e) = super::load_module(prerequisite)
-                    {
-                        eprintln!(
-                            "overdrive-guest-peer: loading production fixture prerequisite \
-                             {prerequisite}: {e}"
-                        );
-                        power_off();
-                    }
+                if let Err((prerequisite, error)) = load_production_fixture_prerequisites() {
+                    eprintln!(
+                        "overdrive-guest-peer: loading production fixture prerequisite \
+                         {prerequisite}: {error}"
+                    );
+                    power_off();
                 }
                 let error = Command::new(&program).exec();
                 eprintln!("overdrive-guest-peer: exec {program}: {error}");
@@ -709,7 +724,10 @@ mod linux {
                 DUMMY_MODULE_GUEST_PATH,
                 PRIO_MODULE_GUEST_PATH,
                 NETEM_MODULE_GUEST_PATH,
-            ] {
+            ]
+            .into_iter()
+            .chain(SOCKET_DIAGNOSTIC_MODULES)
+            {
                 if std::path::Path::new(optional).exists()
                     && let Err(e) = super::load_module(optional)
                 {

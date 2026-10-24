@@ -3227,3 +3227,325 @@ without inventing guest-side effects. They close the hollow-handler lint gap
 while preserving QPROJ-8 retained-arbiter projections and the distinct
 `TakeEnd -> OwnerClose` ordering. Conformance lint, all 38 focused cases and
 targeted Clippy pass.
+
+---
+
+# Iteration 21 — DELIVER-review F2/F4 DISTILL remediation review
+
+## Iteration 21 metadata
+
+| Field | Value |
+|---|---|
+| Review ID | `NETNS-DENSITY-295-STEP11-06-DISTILL-REVIEW-21` |
+| Review date | 2026-10-24 |
+| Reviewer | Same independent DISTILL reviewer |
+| Scope | DELIVER review F2/F4 test-support and existing-cell remediation, plus neutral existing CI assertions |
+| Verdict | **CHANGES_REQUESTED** |
+| Blocking findings | 1 |
+
+No new acceptance scenario, lane, model, production accessor, public API or
+assertion weakening is reviewed or authorized. Prior iteration approvals remain
+incorporated.
+
+## F2 socket-diagnostic fixture disposition
+
+The F2 remediation is **APPROVED**.
+
+`GuestKit::image` now stages the supported stock kernel's exact
+`inet_diag.ko`, `tcp_diag.ko` and `udp_diag.ko` modules at private fixture paths
+in dependency order (`overdrive-testing/src/guest_kit.rs:91-95,493-496`). The
+existing test-only PID 1 loader conditionally loads dummy, loopback and those
+three staged diagnostic modules before `exec` of production init
+(`overdrive-testing/bin/guest_peer.rs:668-718`). The scripted-peer path uses
+the same diagnostic module list.
+
+This supplies the already-accepted guest-image prerequisite; it does not add a
+runtime capability API, recovery subsystem, owner branch or production
+accessor. Production init remains PID 1 after `exec` and the production owner
+still issues the real inet-diag requests.
+
+The retained increment-B native artifact proves the effect through the default
+workload kit:
+
+- production reaches READY;
+- all 1,024 initial UDP slot round trips echo;
+- the next 32 first sends are legitimately refused with `EPERM` while their old
+  owners still hold the slots;
+- each subsequent retry echoes; and
+- `RECYCLE_RESULT lost=0/32`.
+
+That is stronger than module-presence inspection and closes the reproduced
+`NLMSG_ERROR(-ENOENT)` prerequisite omission.
+
+## F4 approved subgroups
+
+The existing parameterized cell remains one six-case table and the wrapper
+count/lane are unchanged (`guest_flow/real_kernel.rs:947-978,1202-1308`). The
+following additions are **APPROVED**:
+
+### Live direct Fast Open rejection
+
+`DirectFastOpenRejected` uses a live ordinary application socket and real
+`MSG_FASTOPEN`, verifies that no active metadata exists, identifies the real
+child row, waits for terminal `Rejected`, requires zero fabricated identity,
+and requires the candidate program's kernel `run_count` to increase
+(`:980-1005`). Before owner consumption it sends established data and requires:
+
+- candidate `run_count` unchanged;
+- the exact terminal row unchanged;
+- no capture event;
+- production reset; and
+- final row absence/no replay (`:1006-1025`).
+
+Together the real candidate invocation, missing active metadata and terminal
+zero-identity rejection observe the approved
+`CandidateRejected -> Rejected` path without requiring an unreliable
+userspace sample of the lock-serialized transient itself.
+
+### Candidate program identity and invocation count
+
+The source-local map/program observer identifies exactly one tracing program
+whose kernel-truncated name is `tcp_correlation` and whose map IDs include the
+exact discovered 8,194-entry child map (`:214-261`). `enable_stats(RunTime)` is
+called before discovery, and `candidate_run_count` reopens the exact program ID
+for each observation (`:341-347,1298-1300`). The count therefore comes from the
+running production BPF program, not a fixture counter.
+
+### Terminal/delete observations after classification
+
+For a valid Fast Open connection the cell observes `Pending`, then exact
+terminal `Ready` metadata and a candidate invocation. It sends 32 established
+bytes and requires zero additional candidate invocations plus byte-identical
+terminal state. Owner capture must delete the row once; a later send must not
+invoke the candidate or recreate the deleted key; active storage must also
+become absent (`:1028-1083`). These assertions honestly cover the post-terminal
+and post-delete states, subject to I21-F01's missing overlap.
+
+### Preterminal reset/delete finality
+
+The reset case observes the exact real child key in `Pending`, the matching TCP
+connection in `SYN_RECV`, no owner event, and exactly one extra owner-held fd
+before reset (`:1085-1114`). It then restores the application's default qdisc
+class, performs abortive close, drives the production owner while forbidding a
+capture, requires deletion, releases the delayed gate and rechecks no row/no
+replay (`:1116-1131`).
+
+The test killed a real defect: before the original crafter's private cleanup
+fix, the native RED retained `CandidateReady` after reset; the corrected
+existing wrapper now passes 1/1 in
+`review-f4-correlation-native-green.log` (57.643 s). This is meaningful
+mutation-by-history evidence for cleanup finality.
+
+### Preserved earlier contract
+
+The same table still proves ordinary identity, immediate application release,
+forced syncookie traversal, real data-in-SYN `Pending -> Ready`, the shared
+4,096 boundary, replacement admission, one-time consumption, active storage
+cleanup, child-map baseline and staging-pin absence. None of those oracles was
+relaxed.
+
+## Finding I21-F01 — accepted parallel established-send overlap is still absent
+
+| Field | Value |
+|---|---|
+| Severity | **Blocker** |
+| Kind | Existing-cell coverage gap |
+| File | `crates/overdrive-init/src/guest_flow/real_kernel.rs:1028-1068` |
+| Disposition | **OPEN** |
+
+The accepted STEP 11-06 criterion requires:
+
+> A PRIO/NETEM-delayed real final ACK with **parallel established sends** and
+> preterminal reset-close proves child-lock-serialized terminal monotonicity
+> and BPF_EXIST deletion finality.
+
+The current terminal helper does not create that overlap:
+
+1. it sends Fast Open and waits first for `Pending`;
+2. it then waits synchronously until the row is already terminal `Ready`;
+3. only after `Ready` does it restore/remove the gate; and
+4. only then does `send_probes(32)` issue 32 sequential sends on the same
+   thread (`guest_flow/real_kernel.rs:1033-1058`; `send_probes` at `:464-468`).
+
+The resulting assertions prove that ordinary established data after promotion
+is a no-op. They cannot kill an implementation that is correct after `Ready`
+but regresses/replaces the row when established input overlaps the delayed
+final-ACK candidate/promotion boundary. The passing native result executes this
+same non-overlapping sequence, so it does not fill the gap.
+
+### Required bounded remediation
+
+Within the same helper and existing cell, overlap an ordinary-socket send
+cohort with release/processing of the real delayed final ACK, then join the
+sender and retain the existing exact assertions:
+
+- the candidate invocation count changes only for the handshake candidate,
+  not the established sends;
+- terminal `Ready` metadata remains exact;
+- the row cannot regress or be replaced;
+- one-time deletion remains final; and
+- all sockets/gate state are cleaned.
+
+A scoped thread/duplicated fd using the same real application socket is
+sufficient. Do not add a cell, lane, raw-packet path, seeded state, production
+seam or timing lottery. Preserve the current sequential post-terminal/delete
+checks if they continue to add distinct evidence.
+
+## Neutral CI assertion disposition
+
+The existing xtask body now checks the current intended bpftool provisioning
+shape: concrete-package detection, fallback to running-kernel tools when the
+package is virtual, final tool resolution, and a target-BTF dump smoke command.
+This is **APPROVED as source-contract alignment for the current plan**. The
+mocked 4/4 xtask result proves command/config plumbing only. It is not evidence
+that Ubuntu 24.04 Noble's real package resolver accepts the final plan.
+
+The original crafter's separate Noble validation remains mandatory. If that
+real environment requires a different valid package/fallback path, production
+and this same assertion body must be reconciled together before the final
+DELIVER review. This DISTILL review neither accepts a known-bad package plan
+nor requires the body to preserve one.
+
+## Mechanical evidence
+
+| Check | Result |
+|---|---|
+| Relevant init/testing/xtask Clippy | Pass. |
+| Existing xtask focused suite | Pass — 4/4. |
+| Formatting/scoped diff | Pass. |
+| F4 focused disposable guest | Pass — 1/1, 57.643 s, but does not close I21-F01. |
+| Formal/model inputs | Unchanged; no rerecord required. |
+| Mutation | Not run; final wave gate only. |
+
+# ITERATION 21 — CHANGES_REQUESTED
+
+F2 is approved. Direct live rejection, production run-count observation,
+post-terminal/delete assertions and preterminal reset/delete cleanup are
+approved. The only blocker is I21-F01: the accepted parallel established-send
+overlap is not exercised because all 32 sends begin after `Ready`. Close that
+gap inside the same helper/cell, then return for bounded re-review.
+
+---
+
+# Iteration 22 — I21-F01 parallel-overlap re-review
+
+## Iteration 22 metadata
+
+| Field | Value |
+|---|---|
+| Review ID | `NETNS-DENSITY-295-STEP11-06-DISTILL-REVIEW-22` |
+| Review date | 2026-10-24 |
+| Reviewer | Same independent DISTILL reviewer |
+| Scope | I21-F01 remediation in the same terminal/delete helper and existing parameterized cell; aligned existing bpftool fallback assertions |
+| Verdict | **APPROVED** |
+| Open findings | 0 |
+
+## I21-F01 disposition
+
+I21-F01 is **CLOSED**.
+
+After observing the real child row as exact `Pending`, the helper starts one
+scoped sender over the same production application socket
+(`guest_flow/real_kernel.rs:1048-1072`). The thread performs real
+`send(MSG_NOSIGNAL)` calls and publishes progress only after each syscall
+returns one written byte.
+
+The main thread requires the first completed send within 250 ms and then
+requires the child row to remain byte-identical `Pending`
+(`:1074-1085`). This is direct evidence that an application send completed
+while the real Fast Open final ACK remained behind the PRIO/NETEM gate; the
+thread's existence alone cannot satisfy the oracle.
+
+The same sender continues while the main thread:
+
+1. removes the gate;
+2. waits for the child row to reach terminal `Ready`; and
+3. samples accumulated send progress (`:1087-1093`).
+
+Only after `Ready` has been observed does the main thread send the synchronization
+message. The sender receives it, performs one additional real send, publishes
+that progress and returns. Joining must report a count greater than the count
+visible when `Ready` was observed (`:1094-1101`). The cohort therefore spans
+both sides of promotion; it is not a nominal background thread or a fixture
+flag.
+
+The production candidate program's kernel `run_count` must equal exactly
+`candidate_before + 1` across the complete spanning cohort
+(`:1102-1109`). That one invocation is the gated Fast Open final-ACK candidate;
+none of the established sends may dispatch the handshake hook.
+
+## Preserved distinct milestones
+
+The remediation retains the separate post-promotion and post-deletion checks:
+
+- after the spanning cohort, 32 further sequential established sends require
+  zero candidate-count delta and the exact terminal row unchanged;
+- owner consumption deletes the row once;
+- a later established send requires zero candidate-count delta;
+- deleted state cannot reappear;
+- active socket storage becomes absent; and
+- abort/no-replay cleanup remains exact.
+
+Thus overlap evidence does not replace the simpler terminal/delete complements;
+both are exercised.
+
+The approved shared-quota Fast Open target remains a separate connection in
+`fast_open_capture_through_owner_pending`. Its producer still sends no
+post-handshake application payload before exact `OutboundCaptured`. The new
+send cohort belongs only to the dedicated monotonicity case and does not weaken
+the quota/identity/SYN_RECV evidence.
+
+## Native and mechanical evidence
+
+| Check | Result |
+|---|---|
+| Existing native wrapper | Pass — 1/1 in `i21-f01-correlation-overlap-native.log`, 33.099 s. |
+| Actual Pending overlap | Pass — first completed real send precedes the exact Pending-row recheck. |
+| Same cohort across Ready | Pass — sender starts before gate release and must send again only after Ready synchronization. |
+| Candidate invocation count | Pass — exact `+1` across all spanning sends. |
+| Retained terminal/delete oracles | Pass — source retains zero-delta, byte-identical row and no-recreation checks. |
+| overdrive-init all-target Clippy | Pass — `i21-f01-overdrive-init-clippy-metal.log`. |
+| Scenario/lane/API/model | Unchanged. |
+| Mutation/formal rerecord | Not required for this bounded correction. |
+
+## F2/F4 final disposition
+
+| Group | Verdict |
+|---|---|
+| F2 stock socket-diagnostic staging/loading and default-kit native proof | **APPROVED** |
+| Live direct Fast Open `CandidateRejected -> Rejected` and reset | **APPROVED** |
+| Production candidate program discovery/run-count observation | **APPROVED** |
+| Parallel established sends across delayed-ACK promotion | **APPROVED** |
+| Post-terminal zero invocation and row monotonicity | **APPROVED** |
+| One-time deletion/post-delete zero invocation/no recreation | **APPROVED** |
+| Preterminal held-child reset/delete finality | **APPROVED** |
+| Existing identity, syncookie, 4,096 quota, pin and storage cleanup | **APPROVED; unchanged** |
+
+## Neutral bpftool fallback assertions
+
+The existing body is aligned with the current crafter plan: common tools plus
+generic kernel tools, concrete `bpftool` when available, otherwise resolution
+of an executable `/usr/lib/linux-tools-*/bpftool` into
+`/usr/local/bin/bpftool`, followed by command/version checks and a dump of the
+declared readable target BTF. The focused xtask suite passes 4/4 and targeted
+Clippy passes (`i21-bpftool-fallback-tests-metal.log`,
+`i21-bpftool-fallback-clippy-metal.log`).
+
+These are command/config plumbing assertions. They do not prove Ubuntu 24.04
+Noble's real apt virtual-package behavior. The original crafter's actual Noble
+receipt remains mandatory before final GREEN/commit; any necessary final
+production-path adjustment must keep this same body aligned. This limitation
+does not reopen the approved F2/F4 test contract.
+
+# ITERATION 22 — APPROVED
+
+I21-F01 is closed. The same real application-socket sender demonstrably makes
+progress while the child is `Pending`, spans gate release and terminal
+promotion, and progresses again after `Ready`; only the final ACK increments
+the production candidate count. All separate terminal, deletion, storage,
+quota and cleanup assertions remain.
+
+The F2/F4 DISTILL remediation is approved with no new scenario, lane, model,
+API or assertion weakening. Actual Noble package validation remains a separate
+final implementation/CI evidence obligation and is not inferred from mocked
+4/4 tests.

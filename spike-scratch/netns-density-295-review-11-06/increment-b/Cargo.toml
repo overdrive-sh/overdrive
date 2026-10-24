@@ -1,0 +1,15 @@
+[package]
+name = "review-11-06-native-spike"
+version = "0.0.0"
+edition = "2024"
+[workspace]
+[dependencies]
+overdrive-testing = { path = "../../../crates/overdrive-testing" }
+overdrive-core = { path = "../../../crates/overdrive-core" }
+libc = "0.2"
+[[bin]]
+name = "review-host"
+path = "src/host.rs"
+[[bin]]
+name = "review-guest"
+path = "src/guest.rs"

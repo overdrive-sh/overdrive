@@ -1036,12 +1036,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The apt calls in this job are the LLVM-22 install and the mold
-      # install below. Mask apt-daily / free the dpkg lock up front so
-      # they cannot block on GitHub's background apt-daily — the
-      # contention that hung the old Lima QEMU install and, on
-      # 2026-08-19, the mold install. The hardened action (mask the
-      # units, wait for — never SIGKILL — an in-flight transaction,
+      # The apt calls in this job install LLVM 21/22, mold, and the
+      # C/CO-RE build prerequisites below. Mask apt-daily / free the dpkg
+      # lock up front so they cannot block on GitHub's background
+      # apt-daily — the contention that hung the old Lima QEMU install
+      # and, on 2026-08-19, the mold install. The hardened action (mask
+      # the units, wait for — never SIGKILL — an in-flight transaction,
       # `dpkg --configure -a`, DPkg::Lock::Timeout) is what makes the
       # mold install below race-proof. Best-effort; never fails the job.
       - name: Free apt/dpkg lock (avoid LLVM/mold apt install hang)
@@ -1087,10 +1087,28 @@ jobs:
         run: |
           sudo bash /tmp/llvm.sh 21
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends clang-21 bpftool libbpf-dev
+          sudo apt-get install -y --no-install-recommends clang-21 libbpf-dev
+          BPFTOOL_CANDIDATE="$(apt-cache policy bpftool | awk '$1 == "Candidate:" {print $2}')"
+          if [ -n "${BPFTOOL_CANDIDATE}" ] && [ "${BPFTOOL_CANDIDATE}" != "(none)" ]; then
+            sudo apt-get install -y --no-install-recommends bpftool
+          else
+            sudo apt-get install -y --no-install-recommends \
+              linux-tools-common linux-tools-generic
+            BPFTOOL_BINARY="$(find /usr/lib -path '/usr/lib/linux-tools-*/bpftool' -type f -executable -print -quit)"
+            if [ -z "${BPFTOOL_BINARY}" ]; then
+              echo "linux-tools-generic did not install an executable bpftool" >&2
+              exit 1
+            fi
+            sudo install -m 0755 "${BPFTOOL_BINARY}" /usr/local/bin/bpftool
+          fi
+          command -v bpftool
+          bpftool version
 
-      - name: Verify readable target-kernel BTF
-        run: test -r "${OVERDRIVE_BPF_TARGET_BTF:-/sys/kernel/btf/vmlinux}"
+      - name: Verify bpftool can dump readable target-kernel BTF
+        run: |
+          BTF="${OVERDRIVE_BPF_TARGET_BTF:-/sys/kernel/btf/vmlinux}"
+          test -r "${BTF}"
+          bpftool btf dump file "${BTF}" format c >/dev/null
 
       - name: Install bpf-linker
         # Pinned to 0.10.4 — the last release on the `llvm-22` feature
