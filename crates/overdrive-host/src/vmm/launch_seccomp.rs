@@ -30,6 +30,10 @@ impl VmmLaunchSeccompFilter {
         clippy::missing_const_for_fn,
         reason = "the x86_64 target branch allocates the filter program"
     )]
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "the non-x86_64 cfg branch returns the designed typed unsupported-architecture error"
+    )]
     pub(super) fn for_target() -> Result<Self, LaunchSeccompUnsupportedArch> {
         #[cfg(target_arch = "x86_64")]
         {
