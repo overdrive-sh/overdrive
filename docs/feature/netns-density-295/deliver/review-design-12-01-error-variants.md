@@ -1514,3 +1514,167 @@ The roadmap is eligible to return from `pending` to `approved` with this
 supplemental independent DESIGN approval recorded alongside the earlier STEP
 12-01 supplements. The typed beacon-bind mapping may be folded into the
 accepted DG-4 composition contract. No additional user decision is required.
+
+---
+
+# Supplement — bounded VM probe run-sequence prerequisite
+
+## Supplement metadata
+
+| Field | Value |
+|---|---|
+| Review ID | `STEP12-01-VM-PROBE-RUN-SEQUENCE-SCOPE-ARCH-REVIEW-01` |
+| Date | 2026-10-24 |
+| Reviewer | `nw-solution-architect-reviewer` |
+| Scope | The roadmap-only split of the minimum VM guest-dial written-row sequence needed by STEP 12-01 from the complete PROBE-RUN-COUNT implementation retained by STEP 13-02 |
+| Verdict | **APPROVED** |
+| Open findings | 0 critical, 0 high, 0 medium |
+| Roadmap state during review | **PENDING / NON-EXECUTABLE** |
+
+This supplement changes only this review artifact. It changes no reviewed
+roadmap field, feature delta, ADR, production source, test body, DES event,
+execution log, model, lane, or kernel state. It performs no Metal run,
+mutation run, spike, commit, or implementation test.
+
+## Why the bounded prerequisite belongs in STEP 12-01
+
+STEP 12-01 owns the attachment-cut step-9 dial half. It activates four
+existing `run_numbering_tests` cells that drive VM probe tasks through
+`GuestStreamDial::dial(..., DialPurpose::Probe)`: TCP verdict mapping, HTTP
+over the guest stream, dial/request timeout, and eight concurrent VM probes.
+The timeout cell contains two successful row writes for the same
+`(alloc, role, probe_idx)` key: the unanswered dial times out and writes a
+`Fail` row, then the paired request times out and writes another `Fail` row.
+Its authored oracle requires the second row's `run_seq` to be newer than the
+first (`run_numbering_tests.rs:485-540`).
+
+The current producer still assigns `ProbeRunSeq::FIRST` to every row
+(`probe_runner/mod.rs:600-622`). Activating that unchanged timeout cell while
+deferring all sequence production to STEP 13-02 would therefore leave STEP
+12-01 RED for a reason created by the roadmap split itself. Supplying the
+task-local written-row sequence in STEP 12-01 is required fallout from the
+four cells that this step activates; it is not an adjacent enhancement or a
+new acceptance scenario.
+
+The prerequisite also matches the already-accepted ADR-0191 producer rule:
+the first row a task successfully writes is one, each later written row is
+the prior written row plus one, and a run that writes no row consumes no
+number (`adr-0191:66-95`). The feature delta's model uses the same transition:
+`Pass` and `Fail` write `last written + 1`; `NoSample` and `WriteFail` change
+nothing (`feature-delta.md:14021-14027`).
+
+## Exact STEP 12-01 contract
+
+The reconciled criterion is narrow and complete for the active producer path:
+
+| Condition for one live VM guest-dial probe task and key | Required `run_seq` behavior |
+|---|---|
+| No row has yet been written successfully | The first successful row carries `ProbeRunSeq::FIRST` |
+| A row was previously written successfully | The next successful row carries its exact successor |
+| Dial is refused `Capacity` or `Quiesced` | No row and no number consumed |
+| Probe processing produces another no-row outcome | No row and no number consumed |
+| `ObservationStore::write_probe_result` returns `Err` | The proposed number is not consumed; the next successful write reuses it |
+| Task ends and a different allocation/task begins | No sequence state is transferred; the new key starts at `FIRST` |
+
+“Successfully written” is the commit point. Advancing on probe execution or
+before the observation write would violate ADR-0191 and PC-3 after a failed
+write. Deriving the next value from the store would also be wrong: the
+accepted owner is the one live producer task, and the store merge belongs to
+STEP 13-02. The current task topology supports that owner directly: one task
+is spawned per descriptor, `start_alloc` never re-spawns tasks for a live
+allocation, and the descriptor supplies the key's role and per-role index
+(`probe_runner/mod.rs:291-360`; `supervisor.rs:81-89`).
+
+The prerequisite uses the already-declared `ProbeRunSeq` row field and
+`FIRST`/validated value semantics. It needs no public accessor, counter port,
+store read, persisted producer state, task registry field, wire field, or
+configuration. In particular, STEP 12-01 need not complete the existing
+public `ProbeRunSeq::succ`, parsing, display, serde/rkyv test, or schema
+scaffolds owned by STEP 13-02; private task-state arithmetic can satisfy the
+bounded producer contract without changing public API.
+
+## Existing active oracle preservation
+
+The four activated cells keep their bodies and meanings:
+
+| Existing cell | STEP 12-01 observable retained | Sequence dependency |
+|---|---|---|
+| `tcp_vm_probe_is_healthy_iff_the_dial_succeeds` | Each non-capacity/quiescence refusal writes `Fail`; a successful dial writes `Pass`; the healthy stream is dropped without half-close | Written rows for its one live key form one sequence; verdict behavior is unchanged |
+| `http_vm_probe_runs_its_request_over_the_guest_stream` | 200 writes `Pass`, 503 writes `Fail`, and `Capacity` leaves the stored row unchanged | The first write is `FIRST`, the second is its successor, and the no-row capacity run consumes none |
+| `a_probe_whose_dial_or_request_outlives_the_timeout_fails_and_drops_it` | Dial timeout and request timeout each write `Fail`; the dial future/stream is dropped | First timeout row is `FIRST`; second timeout row is the exact successor, which strictly satisfies the existing `later > before` assertion |
+| `eight_probes_of_one_vm_allocation_all_dial_in_one_period` | Eight independent keys each dial once and write one `Pass` row | Each task/key writes its own `FIRST`; no cross-key ordering is introduced |
+
+The criterion strengthens no test body and relaxes none. It states the
+production invariant needed to make the existing timeout oracle honest, while
+preserving verdict, timeout, stream-close, concurrency, quota-exemption, and
+no-sample behavior already owned by STEP 12-01.
+
+## Boundary retained by STEP 13-02
+
+The revised STEP 13-02 description and criterion still own the complete
+PROBE-RUN-COUNT protocol:
+
+- the fifth `run_numbering_tests` property over arbitrary outcome sequences;
+- `SameStatusRuns` production and status-change/reset rules;
+- complete numbering for every probed workload kind, beyond the VM
+  guest-dial slice;
+- all no-row reasons and the exact `probe.not_sampled` event contract;
+- `ProbeRunSeq` and `SameStatusRuns` parsing, display, roundtrips, V2 envelope,
+  V1 up-conversion, and schema fixtures;
+- `LocalObservationStore` and `SimObservationStore` merge by greater
+  `run_seq`, including failed-write atomicity;
+- ServiceLifecycle's read-time startup/readiness/liveness thresholds;
+- `liveness_last_acted_run`, no reaction to the same row, and retry on the
+  next crossed row after a failed stop;
+- the probe-streak conformance driver, all workload kinds, and deletion of the
+  old reconciler-side streak fields.
+
+Those are independent of the four dial-cut cells' immediate need for two
+ordered written rows. Leaving them in STEP 13-02 preserves the accepted
+consumer, store, schema, lifecycle, and all-outcomes scope and avoids pulling
+a later architectural slice into STEP 12-01.
+
+## Invariant and scope audit
+
+| Concern | Assessment |
+|---|---|
+| First written row | Preserved as `ProbeRunSeq::FIRST` for each live VM guest-dial task/key. |
+| Monotonicity | Preserved as the exact successor of the previous successful write, not merely any greater value. |
+| No-row behavior | Preserved: capacity, quiescence, adapter/no-row outcomes, and failed writes consume no number. |
+| Failed-write retry | Preserved: the next successful row reuses the uncommitted number; no gap is created. |
+| Key isolation | Preserved: each `(alloc, role, probe_idx)` task owns its sequence; eight probes each begin at `FIRST`. |
+| Task lifecycle | Preserved: `start_alloc`'s no-respawn rule keeps one writer per live key; a new allocation creates a new key. |
+| Active tests | Preserved unchanged; exact successor implies the timeout cell's existing strict-greater assertion. |
+| Public API | Unchanged; the row field and newtype already exist, and no counter accessor or port is added. |
+| Store/schema/consumer | Unchanged in STEP 12-01; merge, schema evolution, thresholds, streaks, and act-once remain STEP 13-02. |
+| Full accepted outcome | Preserved by the explicit STEP 13-02 completion list; no PROBE-RUN-COUNT element is dropped. |
+
+## Roadmap assessment
+
+| Mandatory check | Result | Evidence |
+|---|---|---|
+| External validity | Pass | The active timeout cell reaches the real per-descriptor producer task and performs two successful writes for one VM guest-dial key. |
+| Acceptance-criterion coupling | Pass | The task-local sequence is directly observed in `ProbeResultRow.run_seq`; no private implementation shape is prescribed. |
+| Step decomposition | Pass | STEP 12-01 owns only the minimum producer prerequisite its four activated cells require; STEP 13-02 retains the fifth property and the full protocol. |
+| Implementation code | Pass | The criterion pins commit-point semantics and ownership while leaving private counter threading/arithmetic to the crafter. |
+| Concision and precision | Pass | First, exact successor, no-row non-consumption, key identity, and both step boundaries are explicit. |
+| Test boundary | Pass | Existing bodies remain unchanged; the later all-outcomes property, merge/schema tests, and conformance suite remain in STEP 13-02. |
+| Mechanical validity | Pass | The reviewed roadmap-only diff passes `git diff --check`; `roadmap.json` parses and validation correctly remains pending during this review. |
+
+## Supplement verdict
+
+**APPROVED.** The bounded VM guest-dial written-row sequence is necessary to
+activate STEP 12-01's existing timeout cell honestly and is already required
+by ADR-0191. Its task-local owner, `FIRST` start, exact-successor rule, and
+advance-only-after-successful-write boundary preserve no-sample and
+failed-write behavior without a new API, store read, merge rule, schema
+change, lifecycle threshold, or test-body edit. STEP 13-02 still owns the
+fifth all-outcomes property and every remaining producer, streak, event,
+store, schema, consumer, and act-once obligation. No accepted outcome is
+weakened and no unnecessary later-step mechanism is pulled forward.
+
+The roadmap is eligible to return from `pending` to `approved` with this
+supplemental independent DESIGN approval recorded alongside the earlier STEP
+12-01 supplements. The bounded split may be folded into the accepted
+PROBE-RUN-COUNT / ADR-0191 delivery contract. No additional user decision is
+required.
