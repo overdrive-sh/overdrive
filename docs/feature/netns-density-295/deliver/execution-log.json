@@ -1492,6 +1492,13 @@
       "s": "EXECUTED",
       "d": "PASS: increment-C reproduces immediate-close UDP slot claim leak before the adapter correction and passes post-fix; unchanged increment-D observed-close contrast passes before and after; overdrive-init nextest 187/187 passed (3 skipped), native in_guest_lane 12/12 passed in disposable CH guests, overdrive-init all-target Clippy passed, rustfmt and git diff --check passed. Evidence retained in spike-scratch/netns-density-295-review-11-06/increment-{c,d} and .context/netns-density-295/11-06.",
       "t": "2026-10-24T12:29:01Z"
+    },
+    {
+      "sid": "11-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: committed accepted immediate-close UDP slot release correction and retained increment-C failure/control evidence in 6e8d2df862fdf73a049d217f3c6aa52b3db822e8; Marcus author and exact Codex plus Step-Id trailers verified.",
+      "t": "2026-10-24T12:29:56Z"
     }
   ]
 }
