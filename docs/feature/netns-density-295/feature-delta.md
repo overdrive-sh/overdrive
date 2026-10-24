@@ -5463,6 +5463,11 @@ pub trait SharedGuestNetworkOwner: GuestNetworkProvisioner + GuestStreamDial {
     /// the process (a listener repair keeps the held socket, so its port
     /// never changes). Reads only.
     fn flow_ports(&self) -> Option<GuestFlowPorts>;
+    /// QHOLD: holds issued by this owner's `QuiescenceLedger` and dropped
+    /// without a successful redeem since this owner started. Starts at 0,
+    /// never decreases, and performs no I/O or state transition.
+    #[must_use]
+    fn leaked_quiescence_holds(&self) -> u32;
     /// Non-repairing. Reports damage of the process-owned shared components
     /// and of the shared firewall state; the `Forwarder` component is
     /// damaged when its context fails `Io` or its `inventory()` disagrees
@@ -5572,7 +5577,8 @@ recovery by ADR-0124's typed fail-stop of `serve` at once, cause
 `SharedGuestNetworkFailStopCause::ForeignQuiescenceHold` (PD-1, approved
 2026-10-14); forwarding stays quiesced until then.
 
-**Leaked hold → fail-stop (QHOLD).** A hold is leaked when it is dropped
+**Leaked hold → fail-stop (QHOLD; audit interface independently approved
+2026-10-24).** A hold is leaked when it is dropped
 unredeemed. Because no recovery path drops one, a leak is an Overdrive
 defect, and the leaked-hold count bounds the effect of these defect classes:
 (1) an early return (`?`, `return`, `break`) out of a recovery between
@@ -5582,12 +5588,27 @@ timeout wrapper, an `abort()` of a recovery task; (3) a hold moved into a
 value that is dropped or overwritten (a replaced map entry, a dropped
 struct); (4) a panic that unwinds, in a profile that unwinds (the release
 profile aborts on panic, `panic = "abort"`, `Cargo.toml:284`, which ends the
-process instead). The supervisor reads the owner's leaked-hold count at
-every audit tick. A count above zero is an exhausted recovery: the
-supervisor takes ADR-0124's typed fail-stop of `serve` at once, cause
-`SharedGuestNetworkFailStopCause::LeakedQuiescenceHold` (beside
-`RecoveryDeadlineExceeded`). Forwarding stays quiesced until then; the
-supervised restart converges on boot (*Composition*, step 8 included).
+process instead). At the start of every audit tick, before `audit_shared`
+or any repair starts, the supervisor calls
+`SharedGuestNetworkOwner::leaked_quiescence_holds` through its
+`Arc<dyn SharedGuestNetworkOwner>`. A value above zero is an exhausted
+recovery: the supervisor takes ADR-0124's typed fail-stop of `serve` at
+once, cause `SharedGuestNetworkFailStopCause::LeakedQuiescenceHold` (beside
+`RecoveryDeadlineExceeded`), sends the existing shutdown request, and does
+not audit, repair or restore on that tick. Forwarding stays quiesced until
+then; the supervised restart converges on boot (*Composition*, step 8
+included).
+
+The method is an infallible synchronous observation of exactly that owner's
+ledger `leaked()` value; it has no semantic failure to map. The host owner,
+`SimSharedGuestNetworkOwner` and `TestSharedOwner` return their ledger value.
+Every owner adapter that wraps another `SharedGuestNetworkOwner` delegates
+the method to that same inner owner, including supplied-owner paths; it does
+not keep a second ledger. The trait method has no default-zero body and does
+not expose the full `GuestOwnerObservation`: either would respectively miss
+an external owner's leak or broaden the supervisor interface beyond QHOLD.
+The host owner's inherent `flow_observation()` remains the complete
+conformance and diagnostic observation.
 
 **Shutdown cancellation (D-UP-3).** `serve`'s shutdown stops the supervisor
 task through its cancellation token; a recovery in progress is dropped with
@@ -8651,8 +8672,9 @@ independently approved 2026-10-24):
   `SupervisorFailed`, `SupervisorPanicked`, `SupervisorCancelled`, and
   `RequestChannelClosed`.
 - `RecoveryDeadlineExceeded` is the exhausted five-second / twenty-attempt
-  component recovery. `LeakedQuiescenceHold` is the owner's non-zero leaked
-  hold count (QHOLD, D-UP-3). `ForeignQuiescenceHold` is
+  component recovery. `LeakedQuiescenceHold` is a non-zero result from
+  `SharedGuestNetworkOwner::leaked_quiescence_holds` at the start of an
+  audit tick (QHOLD, D-UP-3). `ForeignQuiescenceHold` is
   `QuiescenceRestoreError::ForeignHold` (PD-1, approved 2026-10-14).
   `SharedNetworkSupervisorHandle::shutdown_requested` maps the supervisor's
   abnormal return, typed failure, panic, cancellation and closed request

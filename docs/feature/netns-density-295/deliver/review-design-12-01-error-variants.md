@@ -989,3 +989,181 @@ The roadmap is eligible to return from `pending` to `approved` with this
 iteration-2 independent DESIGN approval recorded alongside the earlier STEP
 12-01 supplements. The netlink interface wording may be folded into the
 accepted GW-LOCAL / D26 contract. No additional user decision is required.
+
+---
+
+# Supplement — QHOLD leaked-count audit interface
+
+## Supplement metadata
+
+| Field | Value |
+|---|---|
+| Review ID | `STEP12-01-QHOLD-LEAKED-COUNT-ARCH-REVIEW-01` |
+| Date | 2026-10-24 |
+| Reviewer | `nw-solution-architect-reviewer` |
+| Scope | The exact `SharedGuestNetworkOwner::leaked_quiescence_holds` interface, owner/ledger identity, implementation fallout, audit-tick ordering, `LeakedQuiescenceHold` mapping, and existing R5-32 evidence |
+| Verdict | **APPROVED** |
+| Open findings | 0 critical, 0 high, 0 medium |
+| Roadmap state during review | **PENDING / NON-EXECUTABLE** |
+
+This supplement changes only this review artifact. It changes no reviewed
+feature delta, roadmap field, production source, test body, DES event,
+execution log, model, lane, or kernel state. It performs no Metal run,
+mutation run, spike, commit, or implementation test.
+
+## Necessity and accepted contract
+
+ADR-0169 already requires the supervisor to treat a leaked-hold count above
+zero as an exhausted recovery and issue ADR-0124's typed fail-stop at the next
+audit tick. The hold's drop increments the ledger that issued it, leaves the
+owner's hold count raised and performs no I/O. Forwarding therefore remains
+quiesced until process exit. This supplement supplies the missing interface by
+which a supervisor holding only `Arc<dyn SharedGuestNetworkOwner>` can read
+that exact owner's ledger.
+
+The existing surfaces do not provide an honest substitute:
+
+- `HostSharedGuestNetworkOwner::flow_observation()` includes the value, but is
+  an inherent, async, full diagnostic/conformance snapshot unavailable on the
+  owner trait object.
+- Downcasting the owner would exclude supplied-owner and simulated
+  compositions and couple the supervisor to concrete types.
+- A default trait body returning zero would silently suppress fail-stop for an
+  external owner that omitted the implementation.
+- A second supervisor ledger would observe different holds and break the
+  issuing-owner identity that makes QHOLD fail closed.
+- Folding a leak into `audit_shared` would conflate an exhausted recovery
+  defect with component damage and could start repair before the required
+  immediate fail-stop.
+
+The proposed method is therefore the minimum interface that realizes the
+accepted outcome:
+
+```rust
+#[must_use]
+fn leaked_quiescence_holds(&self) -> u32;
+```
+
+It is synchronous and infallible because it is one atomic read of the owner's
+existing `QuiescenceLedger::leaked()` counter. It performs no I/O, lock-taking
+protocol, state transition, audit, repair, restore, or allocation. The value
+starts at zero for each owner instance, counts holds of that owner's ledger
+dropped unredeemed, and never decreases during that owner's process lifetime.
+No new failure requires an error mapping.
+
+## Owner identity and implementation fallout
+
+The current repository has ten `SharedGuestNetworkOwner` implementations. The
+fallout is complete and ownership-preserving:
+
+| Implementation class | Implementations | Required mapping |
+|---|---|---|
+| Ledger owners | `HostSharedGuestNetworkOwner`, `SimSharedGuestNetworkOwner`, `TestSharedOwner` | Return `self`'s existing ledger `leaked()` value |
+| Delegating owner adapters | `ActivationFaultOwner`; the mTLS journal owner; `RecordingGuestNetwork`; the activation-order owner; the retiring-cleanup journal owner; `LeaseLedger`; `RecordingOwner` | Delegate to the same inner `SharedGuestNetworkOwner` |
+
+The seven adapters already delegate their startup, convergence, audit,
+quiescence and restore behavior to one inner owner. Delegating the leaked
+count preserves the same identity across every supplied-owner and simulation
+path. None may create a ledger, cache a count, return a fixture constant, or
+derive the value from its own journal.
+
+The three direct owners already hold the required state:
+
+- The production owner's `flow_observation()` reads `self.ledger.leaked()`.
+- `SimSharedGuestNetworkOwner` owns `SimQuiescence { ledger, holds }` and its
+  existing inherent leaked-count accessor reads that ledger.
+- `TestSharedOwner` owns one `QuiescenceLedger`, uses it for `quiesce` and
+  `restore`, and already exposes its leaked count to the R5-32 fixture.
+
+No constructor, hold type, ledger type, persistence shape, wire format,
+component vocabulary, error variant, or public diagnostic snapshot changes.
+The absence of a default trait body makes compiler fallout the enforcement
+that all ten owners preserve the contract.
+
+## Audit ordering and exact mapping
+
+The runtime ordering is exact:
+
+1. The one-second audit tick becomes ready unless intentional shutdown wins.
+2. Before `audit_shared`, component detection, `converge_shared`, repair, or
+   restore, the supervisor calls
+   `shared_guest_network.leaked_quiescence_holds()` through the trait object.
+3. Zero continues into the existing audit/recovery work.
+4. A value above zero calls the existing EXEC supervisor fail-stop with
+   `SharedGuestNetworkFailStopCause::LeakedQuiescenceHold`, sends the existing
+   `ServeShutdownRequest::SharedGuestNetwork`, and performs no audit, repair,
+   attempt increment, or restore on that tick.
+5. Forwarding stays quiesced until the process ends; the supervised restart
+   constructs a fresh owner whose counter begins at zero and converges on boot.
+
+The mapping reuses the already-approved cause and shutdown path. It does not
+create a second deadline, retry rule, component, recovery episode, or
+supervisor task. A leak is terminal at observation; it is not counted as a
+failed repair attempt and does not wait for the five-second recovery budget.
+
+Intentional shutdown remains distinct. Cancelling the supervisor drops any
+in-progress hold, but the cancelled task runs no later audit tick, so that
+drop produces no `LeakedQuiescenceHold` request. Forwarding remains quiesced
+until the already-requested process exit. The new read does not change this
+accepted safe-direction behavior.
+
+## Outcome and evidence assessment
+
+The existing R5-32 leaked-hold cell already supplies the required observable
+journey: a supplied/composed owner issues and leaks a hold, its leaked count
+rises while forwarding remains quiesced, a completed recovery cannot reopen
+the leaked hold, and the next audit tick produces exactly
+`LeakedQuiescenceHold`; the restart begins with zero and converges. Aligning
+that cell to drive the new trait method verifies the external-owner path
+without adding a scenario, seam, model variable, lane, downcast, or full owner
+snapshot.
+
+The existing R5-58 invariant remains complementary: ordinary recoveries keep
+their holds, so `leaked_quiescence_holds` stays zero and each episode ends only
+by restore or its existing budget fail-stop. The new check does not alter
+attempt counts or repair cadence in the no-leak universe.
+
+## Invariant and scope audit
+
+| Concern | Assessment |
+|---|---|
+| Exact owner | Preserved: direct owners read their own ledger; wrappers delegate to the same inner owner. |
+| Fail-closed hold semantics | Preserved: leaking never decrements the hold count or reopens admission. |
+| Detection bound | Preserved: the next one-second audit tick checks before any other audit/repair work. |
+| Typed failure | Preserved through the existing `LeakedQuiescenceHold` cause and shutdown request. |
+| Recovery budgets | Unchanged; a detected leak bypasses repair and the five-second budget as already accepted. |
+| Intentional shutdown | Unchanged; cancellation-and-join runs no subsequent audit tick and emits no leak cause. |
+| Interface size | One `u32` read; no full observation, downcast, error, default, ledger or mutation surface. |
+| Persistence / wire / configuration | Unchanged. |
+| Tests and models | Existing R5-32 alignment only; no new scenario, lane, seam or model state. |
+| Compiler fallout | Exactly the ten current trait implementations; three direct ledger reads and seven delegations. |
+
+## Roadmap assessment
+
+| Mandatory check | Result | Evidence |
+|---|---|---|
+| External validity | Pass | The runtime supervisor holds the production/supplied owner as `Arc<dyn SharedGuestNetworkOwner>` and reads the method at its actual audit boundary. |
+| Acceptance-criterion coupling | Pass | Exact trait signature, owner identity and fail-stop ordering are DESIGN-owned interface/lifecycle contracts. |
+| Step decomposition | Pass | The method lands with the STEP 12-01 supervisor rework that must implement the accepted QHOLD audit. |
+| Implementation code | Pass | The design pins observable semantics and delegation; private field/access mechanics remain with the crafter. |
+| Concision and precision | Pass | Return type, monotonic meaning, no-default rule, owner identity, ordering and mapping each have one interpretation. |
+| Test boundary | Pass | The existing R5-32 external-owner cell covers the behavior; no new scenario or lane is introduced. |
+| Mechanical validity | Pass | `roadmap.json` parses and the reviewed feature-delta/roadmap diff passes `git diff --check`. |
+
+## Supplement verdict
+
+**APPROVED.** The required
+`#[must_use] fn leaked_quiescence_holds(&self) -> u32` method is the minimum
+owner-port surface that lets the runtime supervisor implement the already-
+accepted QHOLD fail-stop through concrete, simulated and supplied owners. Its
+direct-ledger/delegating implementation boundary preserves one ledger per
+owner; its audit-first ordering maps nonzero directly to the existing
+`LeakedQuiescenceHold` shutdown request and performs no repair work on that
+tick. No outcome, mechanism, error, persistence, wire format, test scenario,
+lane, or model is added or weakened.
+
+The roadmap is eligible to return from `pending` to `approved` with this
+supplemental independent DESIGN approval recorded alongside the earlier STEP
+12-01 supplements. The QHOLD audit-interface wording may be folded into the
+accepted ADR-0169 / ADR-0124 contract. No additional user decision is
+required.
