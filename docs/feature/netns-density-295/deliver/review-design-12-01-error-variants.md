@@ -304,3 +304,204 @@ The roadmap is eligible to be restored from `pending` to `approved` with this
 independent DESIGN approval recorded. ADR-0122's bounded attachment-cut
 reconciliation is eligible to be folded from proposed/pending-review wording
 into the ADR's accepted status. No additional user decision is required.
+
+---
+
+# Supplement — fail-stop causes and obsolete supervisor VM-kill surface
+
+## Supplement metadata
+
+| Field | Value |
+|---|---|
+| Review ID | `STEP12-01-SHARED-NETWORK-FAIL-STOP-ARCH-REVIEW-01` |
+| Date | 2026-10-24 |
+| Reviewer | `nw-solution-architect-reviewer` |
+| Scope | The bounded post-attachment-cut `SharedGuestNetworkFailStopCause` set, deletion of the shared-network supervisor's VM-kill surface, supplied-owner signature fallout, and the corresponding STEP 12-01 roadmap reconciliation |
+| Verdict | **APPROVED** |
+| Open findings | 0 critical, 0 high, 0 medium |
+| Roadmap state during review | **PENDING / NON-EXECUTABLE** |
+
+This supplement changes only this review artifact. It changes no reviewed
+feature delta, roadmap field, production source, test body, DES event,
+execution log, model, lane, or kernel state. It performs no Metal run,
+mutation run, spike, commit, or implementation test.
+
+## Accepted authority and final outcome
+
+ADR-0124's accepted 2026-10-11 amendment makes the correction mandatory. The
+vsock attachment removes every per-VM TAP, TCX link, endpoint-map entry and
+bridge-guard member that formerly determined the supervisor's VM-kill scope.
+The amendment explicitly replaces TAP quiescence with counted forwarding
+quiescence, replaces per-TAP damage with shared guest-flow components, and
+replaces both per-VM and whole-workloads-slice kills with flow abort: a VM with
+no forwarded flow emits nothing, shared-network recovery kills no VM, and a
+failed recovery ends in the existing typed fail-stop
+(`adr-0124-bounded-shared-network-owner-recovery.md:70-105`).
+
+The reviewed correction does not choose a new recovery mechanism or weaken a
+security outcome. It removes the unimplemented bridge-era mechanism that the
+later accepted amendment already superseded. The retained sequence remains:
+the first counted hold refuses admission and aborts every live flow; each
+component repairs and audits under its own hold; a clean recovery restores
+that hold; an exhausted, leaked, foreign, or abnormal supervisor outcome
+fail-stops `serve`. VM lifecycle stop and boot reclamation remain separate
+owners of allocation-scoped VM termination.
+
+Earlier roadmap steps describe the bridge-era intermediate implementation
+that STEP 12-01 explicitly reworks at the attachment cut. The final STEP
+12-01 criterion and the accepted 2026-10-11 ADR amendment control the
+post-cut landing reviewed here.
+
+## Exact fail-stop vocabulary and mappings
+
+The post-cut `SharedGuestNetworkFailStopCause` set is exactly eight unit
+variants:
+
+| Semantic condition | Exact variant | Production owner / mapping |
+|---|---|---|
+| Twenty failed attempts or the five-second component-recovery bound | `RecoveryDeadlineExceeded` | Shared-network supervisor's bounded recovery path |
+| Owner reports a non-zero leaked quiescence-hold count at an audit tick | `LeakedQuiescenceHold` | Shared-network supervisor; forwarding remains quiesced |
+| `restore` returns `QuiescenceRestoreError::ForeignHold` | `ForeignQuiescenceHold` | Shared-network supervisor maps the typed owner error immediately |
+| Supervisor task returns `Ok(())` without a request | `SupervisorReturned` | `SharedNetworkSupervisorHandle::shutdown_requested` |
+| Supervisor task returns a typed error | `SupervisorFailed` | `shutdown_requested` |
+| Supervisor task panics | `SupervisorPanicked` | `shutdown_requested` from Tokio `JoinError` |
+| Supervisor task is unexpectedly cancelled | `SupervisorCancelled` | `shutdown_requested` from Tokio `JoinError` |
+| The fail-stop request channel closes | `RequestChannelClosed` | `shutdown_requested` |
+
+Intentional shutdown remains the separate cancellation-and-join path and
+produces no fail-stop cause. The five task/channel mappings exist in the
+current production owner (`overdrive-control-plane/src/lib.rs:1288-1331`),
+the typed foreign-hold mapping exists at `:1492-1526`, and the recovery-bound
+mapping exists at `:1556-1588`. The leaked-hold mapping is already pinned by
+QHOLD and the owner observation contract for the STEP 12-01 supervisor
+rework. None of the eight variants carries an underspecified payload, string
+classification, wire representation, or persisted representation.
+
+`TapQuiescenceUndetermined` and `VmKillFailed` have no post-cut semantic
+condition. In the current pre-cut tree they have no production producer or
+branch consumer; outside the enum declaration they appear only in the
+exhaustive acceptance cause table that DISTILL must align before DELIVER.
+Deleting them therefore closes the public enum over reachable post-cut
+outcomes without folding a semantic failure into a generic cause.
+
+## Supervisor capability and ownership audit
+
+The deleted VM-kill surface is entirely bridge-era and currently
+unimplemented:
+
+- `SHARED_NETWORK_VM_KILL_CALL_BOUND` is an unused RED-scaffold constant.
+- `SharedNetworkSupervisorPorts::vm_kill` is the only supervisor field that
+  grants VM-kill authority.
+- `vm_kill::VmKillCapability::{kill_allocation, kill_workloads_slice}` are RED
+  scaffold bodies. No production composition constructs the capability, and
+  the supervisor body has no live call to either method.
+- `CgroupPath::workloads_slice()` is a RED scaffold used by no caller outside
+  that capability design.
+- The `vm_cgroups` value is threaded through
+  `run_server_with_obs_and_driver`, `run_server_with_obs_and_drivers`, and
+  private `boot_server`, where the current code only assigns it to `_` for the
+  future capability.
+
+Removing these items restores the owner boundary required by the accepted
+amendment: the shared-network supervisor can quiesce and abort flows, repair
+components, audit, restore holds, and fail-stop; it cannot terminate VMs.
+This is subtractive and leaves no dead compatibility capability.
+
+## Retained VM lifecycle ownership
+
+The correction explicitly retains the VM lifecycle surface that remains
+reachable and required:
+
+- `CgroupManager::cgroup_kill(&CgroupPath)` remains the VM driver's
+  allocation-scoped cleanup mechanism for failed start, stop, and artifact
+  disposal (`overdrive-worker/src/vm_driver.rs:1069-1074,1398-1405`).
+- `CgroupPath::for_alloc` remains the canonical allocation scope used by the
+  VM driver, boot reclamation, action-shim reclamation, simulations, and
+  integration evidence.
+- Boot reclamation still kills every unsupervised VMM before the first lease
+  assignment and waits for its allocation-scoped host cleanup.
+- Production `run_server` still creates the workloads slice and composes the
+  VM driver over its own cgroup manager. Only the second manager reference
+  formerly reserved for the shared-network supervisor disappears.
+
+The deletion therefore does not weaken VM stop, crash cleanup, boot
+reclamation, NO-SURVIVE, lease-release ordering, or the VM driver's ownership
+of its process and allocation scope.
+
+## Interface and compiler fallout
+
+The feature delta now pins the two supplied-owner entry points without a
+`CgroupManager` parameter:
+
+```text
+run_server_with_obs_and_drivers(config, boot, drivers,
+    shared_guest_network, guest_network_exec)
+
+run_server_with_obs_and_driver(config, boot, driver,
+    shared_guest_network, guest_network_exec)
+```
+
+Private `boot_server` likewise loses `vm_cgroups`. The fallout is mechanical
+and bounded: the single-driver helper stops forwarding the argument, the
+registry helper and ordinary `run_server` stop passing it to `boot_server`,
+and the repository's supplied-owner test/simulation callers remove their
+neutral `CgroupManager::new(...)` argument and stale signature prose. Their
+supplied `Driver` or `DriverRegistry` already owns VM lifecycle effects; the
+parameter was not a capability those entry points otherwise used.
+
+Deleting the two enum variants requires the existing exhaustive core
+acceptance table to move from ten causes to the exact eight-cause set before
+DELIVER compilation. The roadmap correctly assigns that test-body alignment
+to DISTILL and allows only the necessary compiler fallout in STEP 12-01; it
+does not authorize the crafter to invent a replacement variant or rewrite an
+acceptance outcome.
+
+## Invariant and scope audit
+
+| Concern | Assessment |
+|---|---|
+| Admission during recovery | Preserved: the counted hold latches admission closed. |
+| Live forwarded flows | Preserved: the first hold aborts all of them with the accepted reset semantics. |
+| Bounded recovery | Preserved: 250 ms retry, twenty attempts and five seconds remain. |
+| Terminal recovery failure | Preserved through `RecoveryDeadlineExceeded`; no VM-kill sub-operation remains to fail. |
+| Leaked or foreign hold | Preserved as distinct typed fail-stop causes. |
+| Abnormal supervisor ownership | Preserved as five distinct typed causes; intentional shutdown remains separate. |
+| VM lifecycle stop and reclamation | Preserved under the VM driver and reclamation owners with allocation-scoped cgroups. |
+| Wire / persistence / CLI configuration | Unchanged; the cause travels only in the existing in-process typed shutdown request. |
+| Tests, lanes and models | No new item required; only DISTILL alignment of the existing exhaustive cause table and caller fallout. |
+| Scope | Subtractive consistency correction required by the accepted attachment-cut ADR; no new mechanism or authority. |
+
+The normative diff removes bridge-era kill requirements but does not relax an
+accepted post-cut `zero`, `never`, `must`, `exactly`, fail-closed, cleanup, or
+security invariant. “Recovery kills no VM” is itself the accepted post-cut
+contract; retaining the old kill capability would violate ownership and add
+unreachable machinery.
+
+## Roadmap review
+
+| Mandatory check | Result | Evidence |
+|---|---|---|
+| External validity | Pass | The retained supervisor remains composed through `run_server`; supplied-owner entry points retain the same driver, owner, EXEC wiring, and boot path without the unused cgroup capability. |
+| Acceptance-criterion coupling | Pass | Exact public causes and supplied-owner signatures are DESIGN-owned contracts; private supervisor implementation remains with the crafter. |
+| Step decomposition | Pass | The cause/capability deletions occur with the attachment cut that removes their TAP-based semantic inputs. |
+| Implementation code | Pass | The delta pins variants, ownership and signatures without prescribing private helper bodies. |
+| Concision and precision | Pass | The exact eight variants, deleted VM-kill surface, retained allocation-scoped surface, and compiler fallout are unambiguous. |
+| Test boundary | Pass | Existing exhaustive cause coverage is aligned by DISTILL; no new test, seam, lane, or model is required. |
+| Mechanical validity | Pass | `roadmap.json` parses, the reviewed diff passes `git diff --check`, and validation remains pending until this approval is folded. |
+
+## Supplement verdict
+
+**APPROVED.** The exact eight-variant
+`SharedGuestNetworkFailStopCause` set, deletion of
+`TapQuiescenceUndetermined` and `VmKillFailed`, deletion of the supervisor-only
+`VmKillCapability` / whole-workloads-slice path and kill-write deadline, and
+removal of the unused supplied-owner `vm_cgroups` parameter are consistent
+with ADR-0124's accepted 2026-10-11 amendment and the real producer/caller
+graph. The bounded compiler fallout is identified, while allocation-scoped VM
+stop and boot-reclamation ownership remain intact.
+
+The roadmap is eligible to return from `pending` to `approved` with this
+supplemental independent DESIGN approval recorded alongside the already
+approved GuestNetworkError reconciliation. The feature delta's pending
+exact-set wording may be folded into the accepted contract. No additional
+user decision is required.

@@ -2005,8 +2005,16 @@ the stale doc comments of
 `GUEST_PREFIX_ROUTE_PROTOCOL` (`overdrive-core/src/guest_transport/mod.rs:388-391`)
 and `GUEST_NODE_GATEWAY` (`:384-385`), which still describe that `local`
 route, are corrected in the same step; `SharedGuestNetworkComponent::IntakeListeners`
-and `SharedGuestNetworkFailStopCause::TapQuiescenceUndetermined`
-(`overdrive-core/src/guest_network.rs`); the public
+and `SharedGuestNetworkFailStopCause::{TapQuiescenceUndetermined,
+VmKillFailed}` (`overdrive-core/src/guest_network.rs`); the supervisor-only
+`SHARED_NETWORK_VM_KILL_CALL_BOUND`, `SharedNetworkSupervisorPorts::vm_kill`
+and private `vm_kill::VmKillCapability` (`overdrive-control-plane/src/lib.rs`);
+the `CgroupPath::workloads_slice()` scaffold used only by that capability
+(`overdrive-core/src/cgroup.rs`); and the supplied-owner
+`run_server_with_obs_and_driver(s)` / private `boot_server` `vm_cgroups`
+parameter and its callers. `CgroupManager::cgroup_kill`, `CgroupPath::for_alloc`
+and the VM driver's allocation-scoped cgroup ownership stay: VM stop and boot
+reclamation still use them. The public
 `WorkloadNetworkProvisioner::provision`
 (`overdrive-control-plane/src/action_shim/mod.rs:899-903`), which becomes
 `fn provision(&self, workload: &WorkloadNetnsPlan) -> Result<(),
@@ -7922,7 +7930,6 @@ pub async fn run_server_with_obs_and_drivers(
     drivers: Arc<DriverRegistry>,
     shared_guest_network: Arc<dyn SharedGuestNetworkOwner>,
     guest_network_exec: GuestNetworkExecWiring,
-    vm_cgroups: CgroupManager,
 ) -> Result<ServerHandle, ControlPlaneError>;
 /// Its single-driver convenience sibling, the same change.
 pub async fn run_server_with_obs_and_driver(
@@ -7931,7 +7938,6 @@ pub async fn run_server_with_obs_and_driver(
     driver: Arc<dyn Driver>,
     shared_guest_network: Arc<dyn SharedGuestNetworkOwner>,
     guest_network_exec: GuestNetworkExecWiring,
-    vm_cgroups: CgroupManager,
 ) -> Result<ServerHandle, ControlPlaneError>;
 
 /// Boot step 3's dataplane block (ADR-0052, ADR-0061: provision →
@@ -7990,6 +7996,13 @@ impl HostDataplaneComposer {
     pub fn with_probe_fault(fault: DataplaneError) -> Self;
 }
 ```
+
+The supplied-owner entry points take no `CgroupManager`: their supplied
+driver or registry already owns its VM lifecycle cgroup effects, and the
+post-attachment-cut shared-network supervisor has no VM-kill authority.
+Production `run_server` still constructs the `CgroupManager` used by
+`VmDriver`; this removes only the second reference that the bridge-era
+supervisor kill capability would have held.
 
 ```rust
 // overdrive_core::traits::mtls_enforcement — public, beside `MtlsEnforcement`
@@ -8600,13 +8613,34 @@ reconciliation independently approved 2026-10-24):
 **`GuestDialError`** (§ *Driving port — guest stream dial*) is returned to
 the dialer only; it never enters `GuestNetworkError`.
 
-**`SharedGuestNetworkFailStopCause`** (core) gains `LeakedQuiescenceHold`
-(QHOLD: a hold of the owner's ledger was dropped unredeemed — an Overdrive
-defect, D-UP-3) and `ForeignQuiescenceHold` (PD-1, approved 2026-10-14:
-`restore` returned `QuiescenceRestoreError::ForeignHold`, a composition
-defect). The enum has no `as_str` labels and gains none: the fail-stop
-request carries the typed cause, its consumers match on the variant, and no
-consumer needs a string label.
+**`SharedGuestNetworkFailStopCause`** (core; bounded exact-set reconciliation
+independently approved 2026-10-24):
+
+- The post-attachment-cut set is exactly `RecoveryDeadlineExceeded`,
+  `LeakedQuiescenceHold`, `ForeignQuiescenceHold`, `SupervisorReturned`,
+  `SupervisorFailed`, `SupervisorPanicked`, `SupervisorCancelled`, and
+  `RequestChannelClosed`.
+- `RecoveryDeadlineExceeded` is the exhausted five-second / twenty-attempt
+  component recovery. `LeakedQuiescenceHold` is the owner's non-zero leaked
+  hold count (QHOLD, D-UP-3). `ForeignQuiescenceHold` is
+  `QuiescenceRestoreError::ForeignHold` (PD-1, approved 2026-10-14).
+  `SharedNetworkSupervisorHandle::shutdown_requested` maps the supervisor's
+  abnormal return, typed failure, panic, cancellation and closed request
+  channel to the remaining five variants. Intentional shutdown remains the
+  separate cancellation-and-join path and produces no fail-stop cause.
+- The attachment cut removes `TapQuiescenceUndetermined` and `VmKillFailed`.
+  Both belonged only to ADR-0124's superseded bridge/TAP per-allocation and
+  whole-workloads-slice kill scope. Under ADR-0124's accepted 2026-10-11
+  amendment, the first counted quiescence hold refuses admission and aborts
+  every live forwarded flow; a VM with no forwarded flow emits nothing, so
+  shared-network recovery kills no VM. A recovery that cannot restore the
+  component uses `RecoveryDeadlineExceeded`; no second kill-failure cause,
+  supervisor `VmKillCapability`, whole-slice path or kill-write deadline
+  remains. VM lifecycle stop and boot reclamation retain their existing
+  allocation-scoped cgroup kills outside the shared-network supervisor.
+- The enum has no `as_str` labels and gains none: the fail-stop request carries
+  the typed cause, its consumers match on the variant, and no consumer needs a
+  string label.
 
 **`ParseError`** (core, TOML ingress) gains `ProbeCountExceeded { count,
 max }` (D-UP-12, approved 2026-10-14; § *Core vocabulary*).
