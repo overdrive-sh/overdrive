@@ -109,7 +109,7 @@ State 3: <flows_bugBeaconPeerCidOnly_owner_flows_VmStart line 748, col 3 to line
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
 
-State 4: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3774, col 9 to line 3775, col 58 of module flows_bugBeaconPeerCidOnly>
+State 4: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3810, col 9 to line 3811, col 58 of module flows_bugBeaconPeerCidOnly>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 1
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
@@ -257,7 +257,7 @@ State 7: <flows_bugBeaconPeerCidOnly_owner_flows_VmStart line 748, col 3 to line
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
 
-State 8: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3774, col 9 to line 3775, col 58 of module flows_bugBeaconPeerCidOnly>
+State 8: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3810, col 9 to line 3811, col 58 of module flows_bugBeaconPeerCidOnly>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 2
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
@@ -294,7 +294,7 @@ State 8: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3774, col 9 to line 3
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_badAct = FALSE
 
-State 9: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3774, col 9 to line 3775, col 58 of module flows_bugBeaconPeerCidOnly>
+State 9: <flows_bugBeaconPeerCidOnly_owner_flows_step line 3810, col 9 to line 3811, col 58 of module flows_bugBeaconPeerCidOnly>
 /\ flows_bugBeaconPeerCidOnly_owner_flows_resurrected = FALSE
 /\ flows_bugBeaconPeerCidOnly_owner_flows_vmGen = 2
 /\ flows_bugBeaconPeerCidOnly_owner_flows_bcn = <<[st |-> "live", gen |-> 1], [st |-> "none", gen |-> 0]>>

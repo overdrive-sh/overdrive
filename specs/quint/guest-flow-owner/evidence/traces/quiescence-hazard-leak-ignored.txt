@@ -16,31 +16,30 @@ State 1
   att = [C1 |-> 0, C2 |-> 0]
   latch = FALSE
 
-State 2 [LeakHold]
-  cnt = 1
-  g = [ reopenEarly |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
-  leaked = 1
-  latch = TRUE
-
-State 3 [Damage]
+State 2 [Damage]
   dmg = [C1 |-> TRUE, C2 |-> FALSE]
 
-State 4 [Damage]
-  dmg = [C1 |-> TRUE, C2 |-> TRUE]
-
-State 5 [RecQuiesce]
+State 3 [RecQuiesce]
   rec = [C1 |-> "held", C2 |-> "idle"]
+  cnt = 1
+  latch = TRUE
+
+State 4 [RecRepair]
+  rec = [C1 |-> "repaired", C2 |-> "idle"]
+  dmg = [C1 |-> FALSE, C2 |-> FALSE]
+
+State 5 [LeakHold]
   cnt = 2
   g = [ reopenEarly |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+  leaked = 1
 
-State 6 [RecRepair]
-  rec = [C1 |-> "repaired", C2 |-> "idle"]
-  dmg = [C1 |-> FALSE, C2 |-> TRUE]
-
-State 7 [RecRestore]
+State 6 [RecRestore]
   rec = [C1 |-> "idle", C2 |-> "idle"]
   cnt = 1
   g = [ reopenEarly |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> TRUE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+
+State 7 [Damage]
+  dmg = [C1 |-> FALSE, C2 |-> TRUE]
 
 State 8 [RecQuiesce]
   rec = [C1 |-> "idle", C2 |-> "held"]

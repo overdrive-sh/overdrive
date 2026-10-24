@@ -1,4 +1,4 @@
-# owner-flows-sess-env-guest-misses-session-loss: counterexample, 15 state(s) (from the TLC trace)
+# owner-flows-sess-env-guest-misses-session-loss: counterexample, 17 state(s) (from the TLC trace)
 
 State 1
   bHeldByOther = FALSE
@@ -44,18 +44,18 @@ State 4 [Teardown]
   alloc = "Retiring"
 
 State 5 [step]
-  gSess = 2
-  sess = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 1]>>
+  gSess = 1
+  sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
 
-State 6 [step]
-  sess = <<[st |-> "none", gen |-> 0], [st |-> "closed", gen |-> 1]>>
-
-State 7 [VmStop]
+State 6 [VmStop]
   gSess = 0
   vmUp = FALSE
 
-State 8 [Release]
+State 7 [Release]
   alloc = "Absent"
+
+State 8 [step]
+  sess = <<[st |-> "closed", gen |-> 1], [st |-> "none", gen |-> 0]>>
 
 State 9 [Provision]
   gen = 2
@@ -66,21 +66,28 @@ State 10 [VmStart]
   vmUp = TRUE
 
 State 11 [step]
-  gSess = 1
-  sess = <<[st |-> "pending", gen |-> 2], [st |-> "closed", gen |-> 1]>>
+  gSess = 2
+  sess = <<[st |-> "closed", gen |-> 1], [st |-> "pending", gen |-> 2]>>
 
 State 12 [step]
-  sess = <<[st |-> "reading", gen |-> 2], [st |-> "closed", gen |-> 1]>>
+  sess = <<[st |-> "closed", gen |-> 1], [st |-> "reading", gen |-> 2]>>
 
 State 13 [step]
-  sess = <<[st |-> "live", gen |-> 2], [st |-> "closed", gen |-> 1]>>
-  claim = 1
+  sess = <<[st |-> "closed", gen |-> 1], [st |-> "live", gen |-> 2]>>
+  claim = 2
 
 State 14 [step]
-  sess = <<[st |-> "closed", gen |-> 2], [st |-> "closed", gen |-> 1]>>
+  sess = <<[st |-> "closed", gen |-> 1], [st |-> "closed", gen |-> 2]>>
   claim = 0
 
 State 15 [step]
   quiesced = TRUE
 
--> loops back to State 14
+State 16 [ActivateQuiesced]
+  act = "QuiescenceLatched"
+
+State 17 [step]
+  quiesced = FALSE
+  act = "none"
+
+-> loops back to State 15

@@ -1,4 +1,4 @@
-# quiescence-hazard-foreign-ignored: counterexample, 21 state(s) (from the TLC trace)
+# quiescence-hazard-foreign-ignored: counterexample, 18 state(s) (from the TLC trace)
 
 State 1
   foreign = FALSE
@@ -19,13 +19,14 @@ State 1
 State 2 [Damage]
   dmg = [C1 |-> TRUE, C2 |-> FALSE]
 
-State 3 [RecQuiesce]
-  rec = [C1 |-> "held", C2 |-> "idle"]
+State 3 [LeakHold]
+  leaked = 1
+  g = [ reopenEarly |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
   cnt = 1
   latch = TRUE
 
-State 4 [LeakHold]
-  leaked = 1
+State 4 [RecQuiesce]
+  rec = [C1 |-> "held", C2 |-> "idle"]
   g = [ reopenEarly |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
   cnt = 2
 
@@ -54,47 +55,36 @@ State 9 [RestartWith]
   up = TRUE
   stop = "none"
 
-State 10 [Damage]
-  dmg = [C1 |-> TRUE, C2 |-> FALSE]
+State 10 [ForeignRestore]
+  foreign = TRUE
 
 State 11 [Damage]
+  dmg = [C1 |-> TRUE, C2 |-> FALSE]
+
+State 12 [Damage]
   dmg = [C1 |-> TRUE, C2 |-> TRUE]
 
-State 12 [RecQuiesce]
-  rec = [C1 |-> "held", C2 |-> "idle"]
+State 13 [RecQuiesce]
+  rec = [C1 |-> "idle", C2 |-> "held"]
   cnt = 1
   latch = TRUE
 
-State 13 [RepFail]
-  att = [C1 |-> 1, C2 |-> 0]
+State 14 [RepFail]
+  att = [C1 |-> 0, C2 |-> 1]
 
-State 14 [ForeignRestore]
-  foreign = TRUE
+State 15 [RepFail]
+  att = [C1 |-> 0, C2 |-> 2]
 
-State 15 [RecQuiesce]
+State 16 [RecQuiesce]
   rec = [C1 |-> "held", C2 |-> "held"]
   cnt = 2
 
-State 16 [RepFail]
-  att = [C1 |-> 1, C2 |-> 1]
-
-State 17 [RepFail]
-  att = [C1 |-> 1, C2 |-> 2]
-
-State 18 [RecRepair]
+State 17 [RecRepair]
   rec = [C1 |-> "repaired", C2 |-> "held"]
   dmg = [C1 |-> FALSE, C2 |-> TRUE]
 
-State 19 [RecRestore]
+State 18 [RecRestore]
   rec = [C1 |-> "idle", C2 |-> "held"]
   cnt = 1
-  att = [C1 |-> 0, C2 |-> 2]
 
-State 20 [Damage]
-  dmg = [C1 |-> TRUE, C2 |-> TRUE]
-
-State 21 [RecQuiesce]
-  rec = [C1 |-> "held", C2 |-> "held"]
-  cnt = 2
-
--> loops back to State 17
+-> loops back to State 15

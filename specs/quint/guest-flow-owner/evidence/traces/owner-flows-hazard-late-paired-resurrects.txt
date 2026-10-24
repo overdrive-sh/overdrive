@@ -61,13 +61,13 @@ State 8
   act = "none"
 
 State 9
-  gf = Map(1 -> { c: 2, gen: 1, st: "acc" })
-
-State 10
   quiesced = true
   hf = Map(1 -> { gen: 1, st: "closed" })
   toGuestAbort = Set(1)
   dl = { adm: Set(), earlyDl: false, lateReply: false, res: Map(1 -> "Quiesced"), tout: Set() }
+
+State 10
+  gf = Map(1 -> { c: 2, gen: 1, st: "acc" })
 
 State 11
   gf = Map(1 -> { c: 2, gen: 1, st: "attached" })

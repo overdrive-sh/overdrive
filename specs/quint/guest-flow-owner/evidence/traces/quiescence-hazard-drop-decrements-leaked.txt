@@ -1,4 +1,4 @@
-# quiescence-hazard-drop-decrements-leaked: counterexample, 3 state(s) (from the TLC trace)
+# quiescence-hazard-drop-decrements-leaked: counterexample, 2 state(s) (from the TLC trace)
 
 State 1
   dmg = [C1 |-> FALSE, C2 |-> FALSE]
@@ -16,9 +16,6 @@ State 1
   table = TRUE
   latch = FALSE
 
-State 2 [Damage]
-  dmg = [C1 |-> TRUE, C2 |-> FALSE]
-
-State 3 [LeakHold]
+State 2 [LeakHold]
   leaked = 1
   g = [ reopenEarly |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]

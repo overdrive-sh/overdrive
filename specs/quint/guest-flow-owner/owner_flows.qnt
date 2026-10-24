@@ -398,10 +398,11 @@ module owner_flows {
   }
   // activate (G-V3): the only Provisioned -> Active edge; requires a live session and no quiescence
   // (activateNoGuard: neither is checked)
+  def canActivate: bool = all {
+    CORE, alloc == "Provisioned", BUG_ACTIVATE_NO_GUARD or (sessLive and not(quiesced)) }
   action Activate = all {
     conf_step' = if (REC) variant("Activate", ()) else conf_step, gSess' = gSess,
-    CORE,   // UI-V-BEACON-ACTIONS: no VM-driver driving port
-    alloc == "Provisioned", BUG_ACTIVATE_NO_GUARD or (sessLive and not(quiesced)),
+    canActivate,   // UI-V-BEACON-ACTIONS: no VM-driver driving port
     alloc' = "Active", act' = "Activated", badAct' = (badAct or not(sessLive and not(quiesced))),
     gen' = gen, vmGen' = vmGen, vmUp' = vmUp, quiesced' = quiesced, claim' = claim, sess' = sess,
     flows' = flows, badPaired' = badPaired, keepAttr, keepH, keepB,
@@ -492,10 +493,11 @@ module owner_flows {
     gf.get(h).st.in(Set("acc", "attached")) and gf.get(h).c != 0 and not(connLive(gf.get(h).c)))
   // D-UP-8: the guest owner opens its session only while it holds none (it observed the loss of the one it held),
   // on a connection slot that is free or ended; DG-5-F: and with no flow of a lost session open
+  def canGuestOpenSession(c: int): bool = all {
+    vmUp, sess.get(c).st.in(Set("none", "closed")), gSess == 0, not(lostSessionFlowOpen) }
   action GuestOpenSession(c: int): bool = all {
     conf_step' = if (REC) variant("GuestOpenSession", { c: c }) else conf_step,
-    vmUp, sess.get(c).st.in(Set("none", "closed")),
-    gSess == 0, not(lostSessionFlowOpen),
+    canGuestOpenSession(c),
     sess' = sess.set(c, { st: "pending", gen: vmGen }),
     gSess' = c,
     claim' = claim, heldByOther' = heldByOther, keepSessRest,
@@ -674,10 +676,12 @@ module owner_flows {
   // node is not quiesced and the VM is reachable: the owner connects V_h to (CID, 1242) and writes the request
   // with the lease token. The host side of the dial is handed to the dialer; the owner watches it (it is never
   // forwarded).
+  def canDialOpen(h: int): bool = all {
+    hf.get(h).st == "none", vmUp, vmGen == gen, alloc == "Active",
+    or { BUG_DIAL_NO_ADMISSION, admissible } }
   action DialOpen(h: int): bool = all {
     conf_step' = if (REC) variant("DialOpen", { h: h }) else conf_step, gSess' = gSess,
-    hf.get(h).st == "none", vmUp, vmGen == gen, alloc == "Active",
-    or { BUG_DIAL_NO_ADMISSION, admissible },
+    canDialOpen(h),
     hf' = hf.set(h, { st: "req", gen: gen }),
     dl' = { ...resSet(h, "pending"), adm: dl.adm.exclude(Set(h)) },
     gf' = gf, toHostPaired' = toHostPaired, toHostRefused' = toHostRefused, toGuestAbort' = toGuestAbort, toHostAbort' = toHostAbort,
@@ -701,16 +705,20 @@ module owner_flows {
   // INB-1 (architect resolution, 2026-10-13 order of decision): the allocation is Active and the node is not
   // quiesced, but the CID's control session is not live as the owner observes it: the typed result NoSession,
   // immediate, no state change, whatever vmUp (a VM gone with its session loss observed is NoSession)
+  def canDialNoSession(h: int): bool = all {
+    hf.get(h).st == "none", alloc == "Active", not(quiesced), not(sessLive) }
   action DialNoSession(h: int): bool = all {
     conf_step' = if (REC) variant("DialNoSession", { h: h }) else conf_step, gSess' = gSess,
-    hf.get(h).st == "none", alloc == "Active", not(quiesced), not(sessLive),
+    canDialNoSession(h),
     refuse(h, "NoSession"),
   }
   // the owner believes the session live (its loss is not observed yet) but the VM / device is gone: the vsock
   // connect fails (ENODEV), Unreachable, no state change
+  def canDialUnreachable(h: int): bool = all {
+    hf.get(h).st == "none", alloc == "Active", not(quiesced), sessLive, not(vmUp) }
   action DialUnreachable(h: int): bool = all {
     conf_step' = if (REC) variant("DialUnreachable", { h: h }) else conf_step, gSess' = gSess,
-    hf.get(h).st == "none", alloc == "Active", not(quiesced), sessLive, not(vmUp),
+    canDialUnreachable(h),
     refuse(h, "Unreachable:ENODEV"),
   }
   // a typed admission refusal: the result, nothing else (refusalRegisters: the slot is registered and closed)
@@ -810,9 +818,11 @@ module owner_flows {
   // GUEST_DIAL_PAIRING_DEADLINE (strictly greater than GUEST_INBOUND_CONNECT_TIMEOUT): the owner abandons a dial
   // only once the guest has replied or timed out, or can no longer reply (VM gone, session lost). ownerDeadlineShorter
   // lets it fire while the guest can still answer.
+  def canHostDialDeadline(h: int): bool =
+    hf.get(h).st == "req" and (BUG_OWNER_DEADLINE_SHORTER or not(canStillReply(h)))
   action HostDialDeadline(h: int): bool = all {
     conf_step' = if (REC) variant("HostDialDeadline", { h: h }) else conf_step, gSess' = gSess,
-    hf.get(h).st == "req", BUG_OWNER_DEADLINE_SHORTER or not(canStillReply(h)),
+    canHostDialDeadline(h),
     hf' = hf.set(h, { ...hf.get(h), st: "closed" }),
     dl' = { ...resSet(h, "PairingDeadline"), earlyDl: dl.earlyDl or canStillReply(h) },
     toGuestAbort' = if (sessLive) toGuestAbort.union(Set(h)) else toGuestAbort, toHostAbort' = toHostAbort,
@@ -1175,7 +1185,7 @@ module owner_flows {
   // G-V3 (L-7): activation is not possible while the control session is pending
   run ActivationIsImpossibleWhileTheSessionIsPending = InitWith("g")
     .then(Provision).then(VmStart)
-    .then(Activate).fail()
+    .expect(Safety and not(canActivate))
   // G-V3 (L-7, rows 2 and 5): activation with the control session pending returns ControlSessionPending with no state
   // change, also after the session was lost before activation; it activates once the session is live
   run ActivationWithSessionPendingReturnsPendingThenActivates = InitWith("g")
@@ -1193,7 +1203,7 @@ module owner_flows {
     .then(ActivateRetiring).expect(Safety and act == "LeaseRetiring" and alloc == "Retiring" and claim == 0)
   run ActivateAfterTeardownNeverActivates = InitWith("g")
     .then(Provision).then(VmStart).then(GuestOpenSession(1)).then(HostAcceptSession(1)).then(HostReadOpen(1))
-    .then(Teardown).then(Activate).fail()
+    .then(Teardown).expect(Safety and not(canActivate))
   // U-1: the connect of a flow aborted while in flight completes later; the completion is discarded and
   // no Paired is sent
   run InFlightConnectOfAbortedFlowIsDiscarded = ControlSessionOpensAndCidActivates
@@ -1249,7 +1259,7 @@ module owner_flows {
   run GuestReopensSessionOnlyAfterObservingItsLoss = ControlSessionOpensAndCidActivates
     .expect(Safety and gSess == 1)
     .then(HostSessionLoss(1)).expect(Safety and sess.get(1).st == "closed" and gSess == 1)
-    .then(GuestOpenSession(2)).fail()
+    .expect(Safety and not(canGuestOpenSession(2)))
   run GuestObservesSessionLossThenReopens = ControlSessionOpensAndCidActivates
     .then(HostSessionLoss(1)).then(GuestSessionLossObserved(1)).expect(Safety and gSess == 0)
     .then(GuestOpenSession(2)).expect(Safety and gSess == 2 and sess.get(2).st == "pending")
@@ -1362,7 +1372,7 @@ module owner_flows {
     .then(DialNoSession(1))
     .expect(Safety and dl.res.get(1) == "NoSession" and hf.get(1).st == "none" and gf.get(1).st == "none"
             and toGuestAbort == Set() and toHostAbort == Set())
-    .then(DialOpen(1)).fail()
+    .expect(Safety and not(canDialOpen(1)))
   // INB-1: the VMM is gone while the lease is still Active and the owner has not yet observed the session's loss
   // (the session is `dead`, still live to the owner): step 3 passes, the vsock connect fails, the dial is
   // Unreachable, no state change; NoSession is not the answer while the loss is unobserved
@@ -1372,7 +1382,7 @@ module owner_flows {
     .then(DialUnreachable(1))
     .expect(Safety and dl.res.get(1) == "Unreachable:ENODEV" and dl.adm == Set(1) and hf.get(1).st == "none" and gf.get(1).st == "none"
             and toGuestAbort == Set() and toHostAbort == Set())
-    .then(DialNoSession(1)).fail()
+    .expect(Safety and not(canDialNoSession(1)))
   // INB-1: the VMM is gone and the owner has observed the session's loss: step 3 answers NoSession (the owner
   // cannot observe vmUp; it never reaches the vsock connect), immediate, no state change; Unreachable is not the answer
   run DialAfterObservedSessionLossWithVmGoneReturnsNoSession = ControlSessionOpensAndCidActivates
@@ -1381,13 +1391,13 @@ module owner_flows {
     .then(DialNoSession(1))
     .expect(Safety and dl.res.get(1) == "NoSession" and hf.get(1).st == "none" and gf.get(1).st == "none"
             and toGuestAbort == Set() and toHostAbort == Set())
-    .then(DialUnreachable(1)).fail()
+    .expect(Safety and not(canDialUnreachable(1)))
   // INB-1: the owner's pairing deadline is enabled only once the guest has replied or timed out (or cannot reply):
   // it cannot fire while the guest can still answer; after the guest's TimedOut the deadline fires, and the
   // late TimedOut that arrives afterwards is discarded
   run PairingDeadlineWaitsForTheGuestAnswer = ControlSessionOpensAndCidActivates
     .then(DialOpen(1)).then(GuestAcceptV(1))
-    .then(HostDialDeadline(1)).fail()
+    .expect(Safety and not(canHostDialDeadline(1)))
   run PairingDeadlineFiresOnlyAfterGuestTimeoutAndLateReplyIsDiscarded = ControlSessionOpensAndCidActivates
     .then(DialOpen(1)).then(GuestAcceptV(1)).then(GuestConnectTimesOut(1))
     .then(HostDialDeadline(1))
@@ -1400,7 +1410,7 @@ module owner_flows {
     .expect(Safety and not(vmUp) and hf.get(1).st == "closed" and dl.res.get(1) == "Unreachable:ECONNRESET"
             and not(dl.adm.contains(1)) and toGuestAbort == Set() and gf.get(1).st == "closed")
   run VmExitDuringDialLeavesNoPairingDeadline = ControlSessionOpensAndCidActivates
-    .then(DialOpen(1)).then(VmStop).then(HostDialDeadline(1)).fail()
+    .then(DialOpen(1)).then(VmStop).expect(Safety and not(canHostDialDeadline(1)))
   // INB-1: a live VM whose guest never replies (its dial handler stalls): the pairing deadline ends the dial
   // (PairingDeadline), V_h is closed and Abort is sent on the live session
   run PairingDeadlineEndsDialToALiveVmWhoseGuestNeverReplies = ControlSessionOpensAndCidActivates

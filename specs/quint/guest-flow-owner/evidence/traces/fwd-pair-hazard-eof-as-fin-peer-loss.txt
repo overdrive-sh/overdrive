@@ -22,14 +22,13 @@ State 1
   ctx = [g |-> "open", h |-> "open"]
   attEnded = [g |-> 0, h |-> 0]
 
-State 2 [CtxRelease]
+State 2 [CloseUnattached]
   ep = [g |-> "reset", h |-> "alive"]
   gh = [ fwdAfterEnd |-> FALSE, fwdOld |-> FALSE, unclassified |-> FALSE, rstOpen |-> {}, holderReadAfterAbort |-> FALSE, trail |-> {}, faults |-> 1, hobs |-> "none", woken |-> FALSE, vhTouched |-> FALSE, dropped |-> FALSE, hostDead |-> FALSE, hresCls |-> "none" ]
   pr = [ g |-> [ ph |-> "ended", rec |-> "none", out |-> "aborted", cause |-> "Detached", errno |-> "none", byRel |-> TRUE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ], h |-> [ ph |-> "unattached", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ] ]
   vs = [ g |-> [ ps |-> {}, sent |-> {"S", "R"}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> TRUE, misc |-> FALSE, st |-> "est" ], h |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ] ]
   dir = [ gh |-> [ wr |-> 0, wfin |-> FALSE, q0 |-> <<>>, q1 |-> <<>>, q2 |-> <<>>, srcEnd |-> "none", srcShut |-> FALSE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> FALSE, shutRd |-> FALSE, loss |-> TRUE, lost |-> 0 ], hg |-> [ wr |-> 0, wfin |-> FALSE, q0 |-> <<>>, q1 |-> <<>>, q2 |-> <<>>, srcEnd |-> "none", srcShut |-> FALSE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> TRUE, shutRd |-> FALSE, loss |-> TRUE, lost |-> 0 ] ]
   ctl = [gh |-> <<{"S", "R"}>>, hg |-> <<>>]
-  ctx = [g |-> "released", h |-> "open"]
 
 State 3 [Attach]
   pr = [ g |-> [ ph |-> "ended", rec |-> "none", out |-> "aborted", cause |-> "Detached", errno |-> "none", byRel |-> TRUE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ], h |-> [ ph |-> "live", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ] ]

@@ -24,9 +24,11 @@
  * Abstraction:
  *   - SOCKS: application UDP sockets (by cookie; a cookie is never reused, so a closed socket never
  *     reopens). DESTS: original destinations. SLOTS: the guest slot pool (1,024 in the design).
- *   - A slot is owned by ONE (socket, destination). Datagrams waiting in the slot socket's receive queue
- *     are a set of (socket, destination) tags (`parked`); a datagram is "delivered" when the association's
- *     pair is attached (`attached`) and the host association forwards it to ITS destination.
+ *   - `kernelSlots` is the capture program's QPROJ-7 claim, owned by ONE (socket, destination) as soon as the
+ *     first datagram is redirected. `slots` is the owner's QPROJ-5 view, which publishes that claim only when
+ *     `SlotReady` is consumed. Datagrams waiting in the slot socket's receive queue are a set of
+ *     (socket, destination) tags (`parked`); a datagram is "delivered" when the association's pair is attached
+ *     (`attached`) and the host association forwards it to ITS destination.
  *   - `fid`: the association's flow id (guest origin, allocated monotonically, never reused).
  *     host: the host's view of association `fid` (req → paired | closed) with ghost (sock, dest)
  *     and the slot index it was opened from.
@@ -49,10 +51,10 @@
  *     `GuestReleaseSock`). quint-connect reads the action and its picks from it (`Config::nondet`). Model-only; on
  *     the model-checking instances it stays `init` (see `rec`).
  *   - MAXFID only disables minting a new association id (DG-5-B); see its definition.
- *   - Readiness: the guest owner watches each unattached slot socket for readability (level-triggered);
- *     association set-up (Datagram step 2, `GuestReady`) runs while the socket's queue holds a datagram,
- *     the slot is owned and no association is pending or attached. An attached slot socket is the
- *     forwarder's (its sk_data_ready is overridden), so the owner sees no readiness for it.
+ *   - Readiness: the capture program's atomic claim and queued datagram precede the owner's observation.
+ *     Association set-up (Datagram step 2, `GuestReady`) consumes that readiness, publishes the owner and
+ *     starts the association in one dispatch. An attached slot socket is the forwarder's
+ *     (its sk_data_ready is overridden), so the owner sees no readiness for it.
  *   - The end of an association as the guest learns it — the `Abort` / `Refused` control message, or the
  *     guest pair's end record (the host's abort reaches the guest forwarder as a peer abort) — is one
  *     handling (`GuestRecvEnd`); whichever arrives second finds no association and changes nothing.
@@ -123,10 +125,14 @@ module udp_slots {
 
   type Tag = (int, int)                // (socket, destination) of a frame
   type Slot = { owned: bool, sock: int, dest: int, fid: int, attached: bool, parked: Set[Tag], holders: int }
+  type KernelSlot = { owned: bool, sock: int, dest: int }
   type Assoc = { st: str, sock: int, dest: int, slot: int }
 
   var sockAlive: int -> bool
   var releasePending: int -> bool       // a sock_release report is queued for overdrive-init
+  // QPROJ-7: the capture program's atomic slot claim exists before the
+  // owner consumes SlotReady and publishes it through QPROJ-5 `slots`.
+  var kernelSlots: int -> KernelSlot
   var slots: int -> Slot
   var picks: Set[{ k: int, d: int, s: int }]   // BUG_CLAIM_SPLIT only
   var nextFid: int
@@ -145,8 +151,10 @@ module udp_slots {
   var conf_step: ConfStep               // D-UP-1: the action that produced this state (model-only)
 
   val FIDS: Set[int] = 1.to(MAXFID)
+  val freeKernelSlot: KernelSlot = { owned: false, sock: 0, dest: 0 }
   val freeSlot: Slot = { owned: false, sock: 0, dest: 0, fid: 0, attached: false, parked: Set(), holders: 0 }
   def ownerOf(k: int, d: int): Set[int] = SLOTS.filter(s => slots.get(s).owned and slots.get(s).sock == k and slots.get(s).dest == d)
+  def kernelOwnerOf(k: int, d: int): Set[int] = SLOTS.filter(s => kernelSlots.get(s).owned and kernelSlots.get(s).sock == k and kernelSlots.get(s).dest == d)
   def mismatch(tags: Set[Tag], a: Assoc): bool = tags.exists(t => t != (a.sock, a.dest))
   // release (correct): abort the association's pair (the host observes it), discard the slot socket's queue,
   // return the slot
@@ -160,6 +168,7 @@ module udp_slots {
   action init = all {
     sockAlive' = SOCKS.mapBy(k => true),
     releasePending' = SOCKS.mapBy(k => false),
+    kernelSlots' = SLOTS.mapBy(s => freeKernelSlot),
     slots' = SLOTS.mapBy(s => freeSlot),
     picks' = Set(),
     nextFid' = 1,
@@ -174,7 +183,7 @@ module udp_slots {
   // A datagram to (k, d) on the slot that already owns (k, d): delivered if attached, else parked.
   action AppSendOnSlot(k: int, d: int, s: int): bool = all {
     conf_step' = if (REC) variant("AppSendOnSlot", { k: k, d: d, s: s }) else conf_step,
-    sockAlive.get(k), slots.get(s).owned, slots.get(s).sock == k, slots.get(s).dest == d,
+    sockAlive.get(k), kernelSlots.get(s).owned, kernelSlots.get(s).sock == k, kernelSlots.get(s).dest == d,
     val x = slots.get(s)
     if (x.attached) all {
       misdelivered' = (misdelivered or (host.get(x.fid).st == "paired" and mismatch(Set((k, d)), host.get(x.fid)))),
@@ -183,17 +192,19 @@ module udp_slots {
       misdelivered' = misdelivered,
       slots' = slots.set(s, { ...x, parked: x.parked.union(Set((k, d))) }),
     },
-    sockAlive' = sockAlive, releasePending' = releasePending, picks' = picks, nextFid' = nextFid,
+    sockAlive' = sockAlive, releasePending' = releasePending, kernelSlots' = kernelSlots, picks' = picks, nextFid' = nextFid,
     host' = host, toGuestPaired' = toGuestPaired, toGuestRefused' = toGuestRefused,
     toGuestAbort' = toGuestAbort, toHostAbort' = toHostAbort, toHostEnd' = toHostEnd,
     lateIgnored' = lateIgnored, endedNoNew' = endedNoNew.exclude(Set(s)), staleReassoc' = staleReassoc, guestEnded' = guestEnded,
   }
-  // First datagram to a new (k, d): claim a free slot — one atomic step (correct).
+  // First datagram to a new (k, d): the capture program atomically claims a
+  // free kernel slot and queues SlotReady. QPROJ-5 remains free until the
+  // owner consumes that event in GuestReady.
   action AppClaim(k: int, d: int, s: int): bool = all {
     conf_step' = if (REC) variant("AppClaim", { k: k, d: d, s: s }) else conf_step,
-    not(BUG_CLAIM_SPLIT), sockAlive.get(k), ownerOf(k, d) == Set(), not(slots.get(s).owned),
-    slots' = slots.set(s, { owned: true, sock: k, dest: d, fid: 0, attached: false,
-                           parked: slots.get(s).parked.union(Set((k, d))), holders: 1 }),
+    not(BUG_CLAIM_SPLIT), sockAlive.get(k), kernelOwnerOf(k, d) == Set(), not(kernelSlots.get(s).owned),
+    kernelSlots' = kernelSlots.set(s, { owned: true, sock: k, dest: d }),
+    slots' = slots.set(s, { ...slots.get(s), parked: slots.get(s).parked.union(Set((k, d))) }),
     sockAlive' = sockAlive, releasePending' = releasePending, picks' = picks, nextFid' = nextFid,
     host' = host, toGuestPaired' = toGuestPaired, toGuestRefused' = toGuestRefused,
     toGuestAbort' = toGuestAbort, toHostAbort' = toHostAbort, toHostEnd' = toHostEnd,
@@ -204,7 +215,7 @@ module udp_slots {
     BUG_CLAIM_SPLIT, sockAlive.get(k), ownerOf(k, d) == Set(), not(slots.get(s).owned),
     not(picks.exists(p => p.k == k and p.d == d)),
     picks' = picks.union(Set({ k: k, d: d, s: s })),
-    slots' = slots, sockAlive' = sockAlive, releasePending' = releasePending, nextFid' = nextFid,
+    slots' = slots, kernelSlots' = kernelSlots, sockAlive' = sockAlive, releasePending' = releasePending, nextFid' = nextFid,
     host' = host, toGuestPaired' = toGuestPaired, toGuestRefused' = toGuestRefused,
     toGuestAbort' = toGuestAbort, toHostAbort' = toHostAbort, toHostEnd' = toHostEnd,
     misdelivered' = misdelivered, lateIgnored' = lateIgnored, endedNoNew' = endedNoNew, staleReassoc' = staleReassoc, guestEnded' = guestEnded,
@@ -213,6 +224,7 @@ module udp_slots {
     conf_step' = if (REC) variant("AppTake", { k: k, d: d, s: s }) else conf_step,
     BUG_CLAIM_SPLIT, picks.contains({ k: k, d: d, s: s }),
     picks' = picks.exclude(Set({ k: k, d: d, s: s })),
+    kernelSlots' = kernelSlots.set(s, { owned: true, sock: k, dest: d }),
     slots' = slots.set(s, { ...slots.get(s), owned: true, sock: k, dest: d,
                            parked: slots.get(s).parked.union(Set((k, d))),
                            holders: slots.get(s).holders + 1 }),
@@ -223,21 +235,23 @@ module udp_slots {
   }
 
   // ------------------------------------------------------------------ association set-up
-  // Datagram step 2: the slot socket is readable (a datagram waits in its queue), the slot is owned and no
-  // association is pending or attached: claim a FlowId, open V_g (kind 2) and write the request. A slot with an
-  // empty queue gives no readiness, so no association starts without a datagram.
+  // Datagram step 2: the owner consumes SlotReady, publishes the kernel
+  // claim through QPROJ-5, claims a FlowId, opens V_g (kind 2), and writes the
+  // request in one dispatch. A slot with an empty queue gives no readiness.
   action GuestReady(s: int): bool = all {
     conf_step' = if (REC) variant("GuestReady", { s: s }) else conf_step,
     val x = slots.get(s)
+    val claim = kernelSlots.get(s)
     all {
-      x.owned, x.fid == 0, not(x.attached), x.parked != Set(), nextFid <= MAXFID,
-      slots' = slots.set(s, { ...x, fid: nextFid }),
-      host' = host.set(nextFid, { st: "req", sock: x.sock, dest: x.dest, slot: s }),
+      kernelSlots.get(s).owned, x.fid == 0, not(x.attached), x.parked != Set(), nextFid <= MAXFID,
+      slots' = slots.set(s, { ...x, owned: true, sock: claim.sock, dest: claim.dest,
+                              fid: nextFid, holders: if (x.owned) x.holders else 1 }),
+      host' = host.set(nextFid, { st: "req", sock: claim.sock, dest: claim.dest, slot: s }),
       nextFid' = nextFid + 1,
       staleReassoc' = (staleReassoc or endedNoNew.contains(s)),
       endedNoNew' = endedNoNew.exclude(Set(s)),
     },
-    sockAlive' = sockAlive, releasePending' = releasePending, picks' = picks,
+    sockAlive' = sockAlive, releasePending' = releasePending, kernelSlots' = kernelSlots, picks' = picks,
     toGuestPaired' = toGuestPaired, toGuestRefused' = toGuestRefused,
     toGuestAbort' = toGuestAbort, toHostAbort' = toHostAbort, toHostEnd' = toHostEnd,
     misdelivered' = misdelivered, lateIgnored' = lateIgnored, guestEnded' = guestEnded,
@@ -248,7 +262,7 @@ module udp_slots {
     host.get(i).st == "req",
     host' = host.set(i, { ...host.get(i), st: "paired" }),
     toGuestPaired' = toGuestPaired.union(Set(i)),
-    sockAlive' = sockAlive, releasePending' = releasePending, slots' = slots, picks' = picks,
+    sockAlive' = sockAlive, releasePending' = releasePending, kernelSlots' = kernelSlots, slots' = slots, picks' = picks,
     nextFid' = nextFid, toGuestRefused' = toGuestRefused, toGuestAbort' = toGuestAbort,
     toHostAbort' = toHostAbort, toHostEnd' = toHostEnd, misdelivered' = misdelivered,
     lateIgnored' = lateIgnored, endedNoNew' = endedNoNew, staleReassoc' = staleReassoc, guestEnded' = guestEnded,
@@ -258,7 +272,7 @@ module udp_slots {
     host.get(i).st == "req",
     host' = host.set(i, { ...host.get(i), st: "closed" }),
     toGuestRefused' = toGuestRefused.union(Set(i)),
-    sockAlive' = sockAlive, releasePending' = releasePending, slots' = slots, picks' = picks,
+    sockAlive' = sockAlive, releasePending' = releasePending, kernelSlots' = kernelSlots, slots' = slots, picks' = picks,
     nextFid' = nextFid, toGuestPaired' = toGuestPaired, toGuestAbort' = toGuestAbort,
     toHostAbort' = toHostAbort, toHostEnd' = toHostEnd, misdelivered' = misdelivered,
     lateIgnored' = lateIgnored, endedNoNew' = endedNoNew, staleReassoc' = staleReassoc, guestEnded' = guestEnded,
@@ -269,7 +283,7 @@ module udp_slots {
     host.get(i).st == "paired",
     host' = host.set(i, { ...host.get(i), st: "closed" }),
     toGuestAbort' = toGuestAbort.union(Set(i)),
-    sockAlive' = sockAlive, releasePending' = releasePending, slots' = slots, picks' = picks,
+    sockAlive' = sockAlive, releasePending' = releasePending, kernelSlots' = kernelSlots, slots' = slots, picks' = picks,
     nextFid' = nextFid, toGuestPaired' = toGuestPaired, toGuestRefused' = toGuestRefused,
     toHostAbort' = toHostAbort, toHostEnd' = toHostEnd, misdelivered' = misdelivered,
     lateIgnored' = lateIgnored, endedNoNew' = endedNoNew, staleReassoc' = staleReassoc, guestEnded' = guestEnded,
@@ -302,7 +316,7 @@ module udp_slots {
       slots' = slots, misdelivered' = misdelivered, toHostAbort' = toHostAbort.union(Set(i)),
       lateIgnored' = lateIgnored, endedNoNew' = endedNoNew, staleReassoc' = staleReassoc, guestEnded' = guestEnded,
     },
-    sockAlive' = sockAlive, releasePending' = releasePending, picks' = picks, nextFid' = nextFid,
+    sockAlive' = sockAlive, releasePending' = releasePending, kernelSlots' = kernelSlots, picks' = picks, nextFid' = nextFid,
     host' = host, toGuestRefused' = toGuestRefused, toGuestAbort' = toGuestAbort,
     toHostEnd' = toHostEnd,
   }
@@ -321,7 +335,7 @@ module udp_slots {
         else slots.get(s)),
       endedNoNew' = endedNoNew.union(ended),
     },
-    sockAlive' = sockAlive, releasePending' = releasePending, picks' = picks, nextFid' = nextFid,
+    sockAlive' = sockAlive, releasePending' = releasePending, kernelSlots' = kernelSlots, picks' = picks, nextFid' = nextFid,
     host' = host, toGuestPaired' = toGuestPaired, toHostAbort' = toHostAbort, toHostEnd' = toHostEnd,
     misdelivered' = misdelivered, lateIgnored' = lateIgnored, staleReassoc' = staleReassoc, guestEnded' = guestEnded,
   }
@@ -332,12 +346,19 @@ module udp_slots {
     val x = slots.get(s)
     all {
       x.owned, x.fid != 0, not(x.attached),
+      // The production clock settles every deadline due at this instant.
+      // A conformance step therefore names one pending association; the
+      // model-checking instances retain the full abstract-time interleaving.
+      not(REC) or SLOTS.filter(other => slots.get(other).fid != 0 and not(slots.get(other).attached)) == Set(s),
+      // A release audit whose cookie is already gone has an earlier deadline
+      // and releases the orphan before this 5 s pairing deadline.
+      not(SLOTS.exists(other => slots.get(other).owned and not(sockAlive.get(slots.get(other).sock)))),
       slots' = slots.set(s, { ...x, fid: 0, parked: parkedAfterEnd(x, false) }),
       toHostAbort' = toHostAbort.union(Set(x.fid)),
       guestEnded' = guestEnded.union(Set(x.fid)),
       endedNoNew' = endedNoNew.union(Set(s)),
     },
-    sockAlive' = sockAlive, releasePending' = releasePending, picks' = picks, nextFid' = nextFid,
+    sockAlive' = sockAlive, releasePending' = releasePending, kernelSlots' = kernelSlots, picks' = picks, nextFid' = nextFid,
     host' = host, toGuestPaired' = toGuestPaired, toGuestRefused' = toGuestRefused,
     toGuestAbort' = toGuestAbort, toHostEnd' = toHostEnd, misdelivered' = misdelivered,
     lateIgnored' = lateIgnored, staleReassoc' = staleReassoc,
@@ -349,7 +370,7 @@ module udp_slots {
     toHostAbort' = toHostAbort.exclude(Set(i)),
     toHostEnd' = toHostEnd.exclude(Set(i)),
     host' = host.set(i, { ...host.get(i), st: if (host.get(i).st == "none") "none" else "closed" }),
-    sockAlive' = sockAlive, releasePending' = releasePending, slots' = slots, picks' = picks,
+    sockAlive' = sockAlive, releasePending' = releasePending, kernelSlots' = kernelSlots, slots' = slots, picks' = picks,
     nextFid' = nextFid, toGuestPaired' = toGuestPaired, toGuestRefused' = toGuestRefused,
     toGuestAbort' = toGuestAbort, misdelivered' = misdelivered, lateIgnored' = lateIgnored, endedNoNew' = endedNoNew, staleReassoc' = staleReassoc, guestEnded' = guestEnded,
   }
@@ -360,7 +381,7 @@ module udp_slots {
     sockAlive.get(k),
     sockAlive' = sockAlive.set(k, false),
     releasePending' = releasePending.set(k, true),
-    slots' = slots, picks' = picks.filter(p => p.k != k), nextFid' = nextFid, host' = host,
+    kernelSlots' = kernelSlots, slots' = slots, picks' = picks.filter(p => p.k != k), nextFid' = nextFid, host' = host,
     toGuestPaired' = toGuestPaired, toGuestRefused' = toGuestRefused, toGuestAbort' = toGuestAbort,
     toHostAbort' = toHostAbort, toHostEnd' = toHostEnd, misdelivered' = misdelivered,
     lateIgnored' = lateIgnored, endedNoNew' = endedNoNew, staleReassoc' = staleReassoc, guestEnded' = guestEnded,
@@ -371,12 +392,13 @@ module udp_slots {
     ENV_REPORT_LOSS, sockAlive.get(k),
     sockAlive' = sockAlive.set(k, false),
     releasePending' = releasePending,
-    slots' = slots, picks' = picks.filter(p => p.k != k), nextFid' = nextFid, host' = host,
+    kernelSlots' = kernelSlots, slots' = slots, picks' = picks.filter(p => p.k != k), nextFid' = nextFid, host' = host,
     toGuestPaired' = toGuestPaired, toGuestRefused' = toGuestRefused, toGuestAbort' = toGuestAbort,
     toHostAbort' = toHostAbort, toHostEnd' = toHostEnd, misdelivered' = misdelivered,
     lateIgnored' = lateIgnored, endedNoNew' = endedNoNew, staleReassoc' = staleReassoc, guestEnded' = guestEnded,
   }
   action releaseSet(ss: Set[int]): bool = all {
+    kernelSlots' = kernelSlots.keys().mapBy(s => if (ss.contains(s)) freeKernelSlot else kernelSlots.get(s)),
     slots' = slots.keys().mapBy(s => if (ss.contains(s)) released(slots.get(s)) else slots.get(s)),
     toHostEnd' = toHostEnd.union(endOf(ss)),
     endedNoNew' = endedNoNew.exclude(ss),
@@ -409,6 +431,11 @@ module udp_slots {
     conf_step' = if (REC) variant("GuestAuditIdle", { idle: idle }) else conf_step,
     val orphans = SLOTS.filter(s => slots.get(s).owned and not(sockAlive.get(slots.get(s).sock)))
     all {
+      // In the conformance instance, omit audit stutters while an association
+      // has the earlier 5 s pairing deadline. They change no compared state;
+      // the model-checking instances retain them.
+      not(REC) or orphans != Set()
+        or not(SLOTS.exists(s => slots.get(s).fid != 0 and not(slots.get(s).attached))),
       idle.forall(s => slots.get(s).owned and slots.get(s).attached and slots.get(s).parked == Set() and not(orphans.contains(s))),
       releaseSet(orphans.union(idle)),
     },
@@ -436,16 +463,23 @@ module udp_slots {
   // (2a) A slot is held by at most one (socket, destination); one slot per (socket, destination).
   val SlotHeldOnce: bool = and {
     SLOTS.forall(s => slots.get(s).holders <= 1),
-    SLOTS.forall(a => SLOTS.forall(b => (a != b and slots.get(a).owned and slots.get(b).owned) implies
-      (slots.get(a).sock, slots.get(a).dest) != (slots.get(b).sock, slots.get(b).dest))),
+    SLOTS.forall(a => SLOTS.forall(b => (a != b and kernelSlots.get(a).owned and kernelSlots.get(b).owned) implies
+      (kernelSlots.get(a).sock, kernelSlots.get(a).dest) != (kernelSlots.get(b).sock, kernelSlots.get(b).dest))),
+    SLOTS.forall(s => slots.get(s).owned implies and {
+      kernelSlots.get(s).owned,
+      slots.get(s).sock == kernelSlots.get(s).sock,
+      slots.get(s).dest == kernelSlots.get(s).dest,
+    }),
   }
   // (2b) A released slot never carries data; an owned slot carries only its owner's frames; no frame
   //      ever reaches a host association of another (socket, destination).
   val ReleasedSlotCarriesNoData: bool = and {
-    SLOTS.forall(s => not(slots.get(s).owned) implies
-      (slots.get(s).parked == Set() and not(slots.get(s).attached) and slots.get(s).fid == 0)),
-    SLOTS.forall(s => slots.get(s).owned implies
-      slots.get(s).parked.forall(t => t == (slots.get(s).sock, slots.get(s).dest))),
+    SLOTS.forall(s => not(kernelSlots.get(s).owned) implies and {
+      not(slots.get(s).owned), slots.get(s).parked == Set(),
+      not(slots.get(s).attached), slots.get(s).fid == 0,
+    }),
+    SLOTS.forall(s => kernelSlots.get(s).owned implies
+      slots.get(s).parked.forall(t => t == (kernelSlots.get(s).sock, kernelSlots.get(s).dest))),
     not(misdelivered),
   }
   // an attached slot forwards to its own current association
@@ -475,20 +509,21 @@ module udp_slots {
   // `Safety` checked along the way. `readyFor(s)`: the guard of Datagram step 2 (the slot socket is readable and the
   // slot can start an association).
   def readyFor(s: int): bool = and {
-    slots.get(s).owned, slots.get(s).fid == 0, not(slots.get(s).attached), slots.get(s).parked != Set(), nextFid <= MAXFID,
+    kernelSlots.get(s).owned, slots.get(s).fid == 0, not(slots.get(s).attached), slots.get(s).parked != Set(), nextFid <= MAXFID,
   }
   // Datagram happy path: the first datagram claims a slot and waits in its socket's queue; readiness opens the
   // association; the host pairs; on Paired the guest attaches the pair and the attach-time run forwards the
   // waiting datagram; later datagrams are forwarded directly
   run DatagramAssociationClaimsPairsAndRoutes = init
-    .then(AppClaim(1, 1, 0)).expect(Safety and slots.get(0).owned and slots.get(0).parked == Set((1, 1)) and readyFor(0))
+    .then(AppClaim(1, 1, 0)).expect(Safety and not(slots.get(0).owned) and kernelOwnerOf(1, 1) == Set(0)
+                                        and slots.get(0).parked == Set((1, 1)) and readyFor(0))
     .then(GuestReady(0)).expect(Safety and slots.get(0).fid == 1 and host.get(1).st == "req" and not(readyFor(0)))
     .then(HostPair(1)).then(GuestRecvPaired(1))
     .expect(Safety and slots.get(0).attached and slots.get(0).parked == Set() and host.get(1).st == "paired")
     .then(AppSendOnSlot(1, 1, 0)).expect(Safety and not(misdelivered) and slots.get(0).attached)
   // two sockets claim distinct slots; each slot has exactly one owner
   run TwoSocketsClaimDistinctSlots = init
-    .then(AppClaim(1, 1, 0)).then(AppClaim(2, 1, 1))
+    .then(AppClaim(1, 1, 0)).then(GuestReady(0)).then(AppClaim(2, 1, 1)).then(GuestReady(1))
     .expect(Safety and ownerOf(1, 1) == Set(0) and ownerOf(2, 1) == Set(1) and slots.get(0).holders == 1 and slots.get(1).holders == 1)
   // U-2 / A-18: Refused discards the slot socket's queue, the slot stays owned and
   // does not re-associate; only a new datagram from the application starts a new association
@@ -523,12 +558,13 @@ module udp_slots {
   // K-B2: the sock_release report is lost; the level-triggered audit finds the slot whose cookie no
   // longer exists and releases it
   run LostReleaseReportIsFoundByAudit = init
-    .then(AppClaim(1, 1, 0)).then(SockCloseReportLost(1))
+    .then(AppClaim(1, 1, 0)).then(GuestReady(0)).then(SockCloseReportLost(1))
     .expect(Safety and slots.get(0).owned and not(sockAlive.get(1)) and not(releasePending.get(1)))
     .then(GuestAudit).expect(Safety and not(slots.get(0).owned) and slots.get(0).parked == Set())
   // closing a socket releases every slot it owns
   run SocketCloseReleasesEverySlotItOwns = init
-    .then(AppClaim(1, 1, 0)).then(AppClaim(1, 2, 1)).then(SockClose(1)).then(GuestReleaseSock(1))
+    .then(AppClaim(1, 1, 0)).then(GuestReady(0)).then(AppClaim(1, 2, 1)).then(GuestReady(1))
+    .then(SockClose(1)).then(GuestReleaseSock(1))
     .expect(Safety and not(slots.get(0).owned) and not(slots.get(1).owned))
   // GUEST_DATAGRAM_SLOT_IDLE: an idle attached association's slot is released by the audit tick (no timer of
   // its own, DG-5-A) and the host observes the end
@@ -559,11 +595,11 @@ module udp_slots {
   // P-35: a slot recycled to a new owner never carries the previous owner's datagrams: its socket's queue is
   // discarded at release, and the new owner's association delivers only its own datagrams to its own destination
   run RecycledSlotNeverDeliversPreviousOwnersFrames = init
-    .then(AppClaim(1, 1, 0)).then(SockClose(1)).then(GuestReleaseSock(1))
+    .then(AppClaim(1, 1, 0)).then(GuestReady(0)).then(SockClose(1)).then(GuestReleaseSock(1))
     .expect(Safety and not(slots.get(0).owned) and slots.get(0).parked == Set() and not(readyFor(0)))
     .then(AppClaim(2, 2, 0)).expect(Safety and slots.get(0).parked == Set((2, 2)) and readyFor(0))
-    .then(GuestReady(0)).then(HostPair(1)).then(GuestRecvPaired(1))
-    .expect(Safety and slots.get(0).attached and host.get(1).sock == 2 and host.get(1).dest == 2 and not(misdelivered))
+    .then(GuestReady(0)).then(HostPair(2)).then(GuestRecvPaired(2))
+    .expect(Safety and slots.get(0).attached and host.get(2).sock == 2 and host.get(2).dest == 2 and not(misdelivered))
 
 }
 

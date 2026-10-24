@@ -3,6 +3,7 @@
 State 1
   sockAlive = Map(1 -> true, 2 -> true)
   releasePending = Map(1 -> false, 2 -> false)
+  kernelSlots = Map(0 -> { dest: 0, owned: false, sock: 0 }, 1 -> { dest: 0, owned: false, sock: 0 })
   slots = Map(0 -> { attached: false, dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), sock: 0 }, 1 -> { attached: false, dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), sock: 0 })
   picks = Set()
   nextFid = 1
@@ -20,22 +21,23 @@ State 1
   conf_step = init({ tag: "UNIT" })
 
 State 2
-  slots = Map(0 -> { attached: false, dest: 2, fid: 0, holders: 1, owned: true, parked: Set((2, 2)), sock: 2 }, 1 -> { attached: false, dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), sock: 0 })
+  kernelSlots = Map(0 -> { dest: 0, owned: false, sock: 0 }, 1 -> { dest: 2, owned: true, sock: 2 })
+  slots = Map(0 -> { attached: false, dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), sock: 0 }, 1 -> { attached: false, dest: 0, fid: 0, holders: 0, owned: false, parked: Set((2, 2)), sock: 0 })
 
 State 3
-  slots = Map(0 -> { attached: false, dest: 2, fid: 1, holders: 1, owned: true, parked: Set((2, 2)), sock: 2 }, 1 -> { attached: false, dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), sock: 0 })
+  slots = Map(0 -> { attached: false, dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), sock: 0 }, 1 -> { attached: false, dest: 2, fid: 1, holders: 1, owned: true, parked: Set((2, 2)), sock: 2 })
   nextFid = 2
-  host = Map(1 -> { dest: 2, slot: 0, sock: 2, st: "req" }, 2 -> { dest: 0, slot: 0, sock: 0, st: "none" }, 3 -> { dest: 0, slot: 0, sock: 0, st: "none" })
+  host = Map(1 -> { dest: 2, slot: 1, sock: 2, st: "req" }, 2 -> { dest: 0, slot: 0, sock: 0, st: "none" }, 3 -> { dest: 0, slot: 0, sock: 0, st: "none" })
 
 State 4
-  slots = Map(0 -> { attached: false, dest: 2, fid: 0, holders: 1, owned: true, parked: Set((2, 2)), sock: 2 }, 1 -> { attached: false, dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), sock: 0 })
+  slots = Map(0 -> { attached: false, dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), sock: 0 }, 1 -> { attached: false, dest: 2, fid: 0, holders: 1, owned: true, parked: Set((2, 2)), sock: 2 })
   toHostAbort = Set(1)
-  endedNoNew = Set(0)
+  endedNoNew = Set(1)
   guestEnded = Set(1)
 
 State 5
-  slots = Map(0 -> { attached: false, dest: 2, fid: 2, holders: 1, owned: true, parked: Set((2, 2)), sock: 2 }, 1 -> { attached: false, dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), sock: 0 })
+  slots = Map(0 -> { attached: false, dest: 0, fid: 0, holders: 0, owned: false, parked: Set(), sock: 0 }, 1 -> { attached: false, dest: 2, fid: 2, holders: 1, owned: true, parked: Set((2, 2)), sock: 2 })
   nextFid = 3
-  host = Map(1 -> { dest: 2, slot: 0, sock: 2, st: "req" }, 2 -> { dest: 2, slot: 0, sock: 2, st: "req" }, 3 -> { dest: 0, slot: 0, sock: 0, st: "none" })
+  host = Map(1 -> { dest: 2, slot: 1, sock: 2, st: "req" }, 2 -> { dest: 2, slot: 1, sock: 2, st: "req" }, 3 -> { dest: 0, slot: 0, sock: 0, st: "none" })
   endedNoNew = Set()
   staleReassoc = true

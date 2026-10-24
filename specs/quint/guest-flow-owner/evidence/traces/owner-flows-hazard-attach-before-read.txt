@@ -48,19 +48,19 @@ State 5
   sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "reading" })
 
 State 6
-  flows = Map(1 -> { gen: 1, inFlight: false, req: 0, st: "queued" }, 2 -> { gen: 0, inFlight: false, req: 0, st: "none" })
-
-State 7
   claim = 2
   sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "live" })
+
+State 7
+  flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: false, req: 0, st: "queued" })
 
 State 8
   alloc = "Active"
   act = "Activated"
 
 State 9
-  flows = Map(1 -> { gen: 1, inFlight: false, req: 0, st: "accepted" }, 2 -> { gen: 0, inFlight: false, req: 0, st: "none" })
+  flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: false, req: 0, st: "accepted" })
   act = "none"
 
 State 10
-  flows = Map(1 -> { gen: 1, inFlight: true, req: 0, st: "connecting" }, 2 -> { gen: 0, inFlight: false, req: 0, st: "none" })
+  flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: true, req: 0, st: "connecting" })
