@@ -8548,28 +8548,54 @@ variant `Forwarder { source: ForwarderError }` (never flattened to
 `Forwarder { source: ForwarderError }`, are pinned in § *Guest adaptation
 contract*; `KernelRelease` is an `overdrive-init`-private newtype.
 
-**`GuestNetworkError`** (ADR-0122, revalidated):
+**`GuestNetworkError`** (ADR-0122, revalidated; bounded exact-set
+reconciliation independently approved 2026-10-24):
 
-- Kept: `PoolExhausted`, `ExecGateNotBootClosed`, `AdmissionCapReached`,
-  `LeaseRetiring`, `Netlink { operation, source }`, `Io { operation, source }`,
-  `PostconditionMismatch { operation, expected, observed }`,
-  `ScratchCleanupIncomplete`, `StartupProbeCleanup`.
-- `Tcx { … }` is removed; the forwarder's errors are `Forwarder { #[from]
-  source: ForwarderError }`.
-- Added: `Wire { operation, source: FlowWireError }`,
-  `FdBudget { required: u64, available: u64 }`,
-  `OwnerCgroupPlacement { owner: PathBuf, attach_point: PathBuf }` (D24: the
-  owner's cgroup is not at or below the `connect4` attach path; the root
-  cgroup never is),
+- The post-attachment-cut set is exactly
+  `PoolExhausted { held: u32, capacity: u32 }`,
+  `ExecGateNotBootClosed`,
+  `Netlink { operation: GuestNetworkOperation, source: NetlinkError }`,
+  `Forwarder { #[from] source: ForwarderError }`,
+  `Wire { operation: GuestNetworkOperation, source: FlowWireError }`,
+  `Io { operation: GuestNetworkOperation, source: std::io::Error }`,
+  `PostconditionMismatch { operation: GuestNetworkOperation, expected:
+  GuestNetworkFact, observed: Option<GuestNetworkFact> }`,
+  `AdmissionCapReached { held: u32, retiring: u32, cap: u32 }`,
+  `LeaseRetiring { alloc: AllocationId }`,
   `GuestPrefixOverlapsNodeAddress { prefix: Ipv4Net, interface:
-  InterfaceIndex, address: Ipv4Net }` (D8-PREFIX-CFG: the node's network
-  configuration, which the operator owns, places an interface address
-  inside the guest prefix; checked by `probe_startup` before any boot
-  effect; startup refuses, naming the address and the interface),
-  `GuestPrefixOverlapsVipRange { prefix: Ipv4Net, vip_range: Ipv4Net }`
-  (D8-PREFIX-VIP: a range of the configured service VIP range, which the
-  operator owns, overlaps the guest prefix; checked by `probe_startup`
-  before any boot effect; startup refuses, naming the range).
+  InterfaceIndex, address: Ipv4Net }`,
+  `GuestPrefixOverlapsVipRange { prefix: Ipv4Net, vip_range: Ipv4Net }`,
+  `FdBudget { required: u64, available: u64 }`, and
+  `OwnerCgroupPlacement { owner: PathBuf, attach_point: PathBuf }`.
+- The attachment cut removes `Tcx { … }`, `ScratchCleanupIncomplete`, and
+  `StartupProbeCleanup { primary: Option<Box<GuestNetworkError>>, cleanup:
+  Box<GuestNetworkError>, observed: GuestNetworkScratchComplement }`. The
+  latter two belonged only to the deleted bridge/TAP scratch-probe setup and
+  reverse-cleanup algorithm. They have no post-cut producer, branch consumer,
+  compatibility variant, payload mapping, wire representation, or persisted
+  representation.
+- The replacement startup path uses the already-approved forwarder taxonomy.
+  `probe_guest_flow_startup` maps `GuestFlowIo::probe_forwarder()` failure to
+  `GuestNetworkError::Forwarder { source }` without flattening it. A cleanup
+  operation failure is `ForwarderError::Probe { stage:
+  ForwarderProbeStage::Cleanup, source }`; non-zero cleanup inventory is
+  `ForwarderError::ProbeMismatch { stage: ForwarderProbeStage::Cleanup,
+  observed: ForwarderProbeObservation::ResidueRemains { pairs } }`.
+  Context-release failure names `ForwarderProbeStage::ContextRelease` through
+  the same `Probe` / `ProbeMismatch` representation. `open_forwarder()` at
+  boot step 9 and during `Forwarder` recovery uses the same outer
+  `GuestNetworkError::Forwarder { source }` mapping. The old simultaneous
+  primary-plus-reverse-cleanup payload has no post-cut producer: the probe
+  context is process-local, and `probe_forwarder()` releases that whole
+  context before returning on both success and failure, so no bridge, TAP,
+  pin, map or guard scratch object survives for a second cleanup owner to
+  classify. There is no second startup-cleanup aggregate and no
+  string-carried substitute.
+- `OwnerCgroupPlacement` means the owner's cgroup is not at or below the
+  `connect4` attach path; the root cgroup never is. D8-PREFIX-CFG and
+  D8-PREFIX-VIP retain their existing meanings: `probe_startup` checks them
+  before any boot effect, checks VIP overlap first, and names the rejected
+  interface address or VIP range in the typed payload.
 
 **`GuestDialError`** (§ *Driving port — guest stream dial*) is returned to
 the dialer only; it never enters `GuestNetworkError`.
@@ -8599,8 +8625,11 @@ max }` (D-UP-12, approved 2026-10-14; § *Core vocabulary*).
 `ControlSession { alloc, cid, live: bool }`,
 `AllocationForwarding { alloc, cid, pairs: u32 }`,
 `CleanupComplement`,
-`ScratchCleanupComplement`, `StartupProbe { stage: ForwarderProbeStage }`,
 `SharedComponent`.
+The attachment cut removes the bridge/TAP scratch facts
+`ScratchCleanupComplement` and `StartupProbe` with their scratch-probe types;
+forwarder-probe mismatches use `ForwarderError::ProbeMismatch` as pinned
+above.
 
 **`SharedGuestNetworkComponent`:** `Forwarder` (the context: an `Io` failure,
 or the owner's flow table against the forwarder's `inventory()` —
@@ -10590,7 +10619,7 @@ numbers are those of the live source before the DISTILL increment.
 | 8 | `SharedGuestNetworkOwner::{quiesce_managed_taps, restore_quiesced_taps}` (`:213`, `:216`) | `quiesce() -> (QuiescenceHold, ForwardingQuiescence)`, `restore(hold) -> Result<ForwardingRestore, QuiescenceRestoreError>` (QHOLD, D-UP-4, § *Owner and provisioner*) | `lib.rs:1587, 1654` (`run_mtls_owner`, replaced by the supervisor rework); sim `:350, 365` | the attachment-cut step (09-01 rework) |
 | 9 | `HostSharedGuestNetworkOwner::new()` (`pub(super)`, `:2525`), `with_scratch_io`, `with_allocation_io` and their private seams | `pub fn new(GuestFlowOwnerPorts)` and `#[cfg(test)] with_flow_io` (DG-3); the TAP allocation and scratch seams are deleted with their tests | `lib.rs:6890` (`run_server`) | the attachment-cut step (7) |
 | 10 | `SharedGuestNetworkComponent` variant set (`overdrive-core/src/guest_network.rs:66`) | § *Typed error taxonomy* set | `mtls_intercept_worker.rs:304`; the owner's audit; `lib.rs:1552-1557`; sim | the attachment-cut step (7, 08-03 rework) |
-| 11 | `GuestNetworkOperation` (`:241`); `GuestNetworkError::Tcx` (`:500`) | § *Typed error taxonomy*; `Flow { operation, source }` | `guest_network.rs`; `action_shim/mod.rs:1479, 1728, 1765`; `overdrive-sim/src/{adapters/guest_network.rs, invariants/netns_density_boot_order.rs}` | the attachment-cut step (7) |
+| 11 | `GuestNetworkOperation` (`:241`); `GuestNetworkError::Tcx` (`:500`) | § *Typed error taxonomy*; `Forwarder { #[from] source: ForwarderError }` | `guest_network.rs`; `action_shim/mod.rs:1479, 1728, 1765`; `overdrive-sim/src/{adapters/guest_network.rs, invariants/netns_density_boot_order.rs}` | the attachment-cut step (7) |
 | 12 | `GuestNetworkExecSupervisor::recovery_progress() -> Option<SharedGuestNetworkRecovery>` (`overdrive-core/src/guest_network.rs:301`) | `-> Vec<SharedGuestNetworkRecovery>`: every component under recovery with its attempt count; `begin_recovery` adds a recovery while Recovering, `complete_attempt(&self, remaining: BTreeSet<SharedGuestNetworkComponent>) -> bool` (§ *Owner and provisioner*) | `lib.rs:1657`; tests `overdrive-core/tests/acceptance/netns_density_exec_gate.rs`, `overdrive-control-plane/tests/integration/shared_network_supervisor_recovery.rs` (migrated) | the attachment-cut step (09-01 rework) |
 | 13 | `BeaconMessage::Ready { pid, port }` (`overdrive-core/src/vm/beacon.rs:177`) | `Ready { pid, port, launch: LaunchToken }`; `BeaconParseError::InvalidLaunchToken` (DG-7) | `beacon.rs:212, 310`; `vm_driver.rs:2029`; `overdrive-init/src/main.rs:142, 955` | the attachment-cut step (6, 5) |
 | 14 | `ServiceBackendsResolve::new(store, frontend)` (`mtls_resolve_adapter.rs:650`) | `new(store, frontend, vip_ranges)` | `lib.rs:7750` (passes the configured VIP range, which the resolve adapter does not consult until step 11, so today's behaviour holds); test `overdrive-sim/tests/integration/service_backend_projection.rs:1091` | step 11 |

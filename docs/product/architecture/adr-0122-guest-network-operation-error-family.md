@@ -28,6 +28,22 @@ are stated explicitly here and the Decision below is otherwise unchanged:
 
 The exact shapes live only in the #295 feature delta.
 
+**Bounded attachment-cut reconciliation accepted 2026-10-24 after independent
+DESIGN review iteration 2.** The already-accepted attachment cut deletes the
+bridge/TAP scratch probe and its complement types. Its post-cut
+`GuestNetworkError` therefore deletes `ScratchCleanupIncomplete` and
+`StartupProbeCleanup` rather than retaining unused compatibility variants.
+The replacement phase-1 and serving-context probes carry the existing exact
+`ForwarderError` through `GuestNetworkError::Forwarder { source }`; cleanup
+and context-release failures name `ForwarderProbeStage::Cleanup` or
+`ContextRelease`, and cleanup residue is a `ProbeMismatch` with
+`ResidueRemains { pairs }`. The process-local probe context is released before
+return on success and failure, so the deleted scratch probe's independent
+reverse-cleanup owner and dual-error payload have no post-cut counterpart. No
+user-visible outcome, refusal boundary, retry rule, wire format, or persisted
+format changes. The exact closed variant and payload set remains authoritative
+only in the #295 feature delta.
+
 ## Context
 
 The shared-bridge path deletes `NetSlotExhausted` and netns/veth-specific
@@ -106,6 +122,14 @@ public error and the complete complement, attempts the full reverse cleanup
 after success or failure, continues after the first cleanup failure, and
 queries all fifteen families. Public sim-owner scripting may return a completed
 port result to test composition reaction, but it is not host cleanup evidence.
+
+The two preceding startup-scratch paragraphs describe the operative pre-cut
+bridge/TAP contract. The attachment-cut reconciliation in **Status**
+supersedes them for the post-cut API: the scratch algorithm, its aggregate,
+its payload, and its two variants are removed together. The in-kernel
+forwarder's probe owns its cleanup and reports the exact approved
+`ForwarderError` stage through the single `GuestNetworkError::Forwarder`
+variant.
 
 The bridge adapter distinguishes its own input validation from kernel I/O.
 Invalid specification identifiers, fixed priority or marks, and invalid member
@@ -197,7 +221,11 @@ teardown, runtime convergence, and cleanup without compatibility branches.
 Negative: the public error and operation enums become a contract that must
 remain exhaustive and source-honest as shared-network effects evolve; semantic
 postcondition facts add a second, source-less error class that adapters must
-populate exactly. The startup cleanup aggregate uses boxed direct errors so the
-primary failure and active cleanup source survive one refused boot without
-string flattening, plus one explicit per-family observation whose unavailable
-states prevent false zero-complement claims.
+populate exactly. Before the attachment cut, the startup cleanup aggregate
+used boxed direct errors so the primary failure and active cleanup source
+survived one refused boot without string flattening, plus one explicit
+per-family observation whose unavailable states prevented false
+zero-complement claims. The attachment cut removes that scratch universe and
+aggregate; its forwarder probe preserves the replacement failure distinction
+through the typed `ForwarderError` stage carried by
+`GuestNetworkError::Forwarder`.
