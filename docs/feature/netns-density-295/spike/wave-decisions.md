@@ -242,3 +242,37 @@
   The bind is chosen over `src 127.0.0.1` on the table-100 route (open
   question 2). The production-composition run (V-LEGB-SERVE) remains a
   DELIVER validation item.
+
+## V-VDPA-SRIOV-METAL — hardware endpoint feasibility on the current metal box (2026-10-24)
+
+### Assumption Tested
+
+- The actual metal NIC/platform can support hardware-backed vDPA or direct
+  SR-IOV guest networking with a viable endpoint-count path for #295's
+  16,384-attachment placeholder, without reintroducing the failed per-VM
+  TAP-on-one-Linux-bridge resource.
+
+### Probe Verdict
+
+- **DOESN'T WORK on the current configuration.** The kernel, IOMMU/VFIO/vDPA
+  modules, `vdpa` tool and Cloud Hypervisor v53 `--vdpa`/`--device` surfaces
+  are present. The physical endpoint is not. The dual-port Broadcom BCM57414
+  exposes no `sriov_totalvfs`, both functions have permanent shared-NVM
+  `enable_sriov=false`, Linux 7.0 has no matching `bnxt` vDPA driver, and no
+  vDPA bus/device exists. Function `0000:01:00.0` carries the host's management
+  address/default route; the down `0000:01:00.1` is its sibling on the same
+  card. The separate down BCM5720 exposes neither SR-IOV nor vDPA. OVS
+  userspace tools are absent and cannot create the missing hardware endpoint.
+  See `findings-vdpa-sriov-metal.md` and
+  `spike-scratch/netns-density-295-vdpa-sriov/increment-a/`.
+
+### Promotion Decision
+
+- **DISCARD for this metal substrate; no architecture decision.** Do not
+  enable SR-IOV, reset/rebind either management-card function, load a software
+  vDPA simulator, install OVS, or pass through the link-down BCM5720 to make
+  the candidate appear green. None would prove a hardware-vDPA/SR-IOV
+  endpoint population for the density question. Reopening the candidate needs
+  a dedicated non-management NIC/DPU that already exposes hardware vDPA
+  devices or SR-IOV VFs, followed by a new increment. This does not reject
+  vDPA/SR-IOV generally and does not amend the accepted #295 design.
