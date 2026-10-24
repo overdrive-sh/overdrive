@@ -444,3 +444,250 @@ stop that affected path and return its exact shape for DESIGN rather than
 inventing a method, parameter or ownership protocol. DISTILL owns F2's existing
 kit/test-support correction and F4's existing approved cell obligation. The
 same reviewer will re-review after their completed handoffs.
+
+## Iteration 2 — replacement independent review
+
+| Field | Value |
+|---|---|
+| Reviewer | Fresh, isolated GPT-6 Sol DELIVER reviewer, explicitly authorized by the user for the same step and criteria |
+| Reviewed committed chain | Original `2f92c925d374a21f41f74e34bd9f58767d53429e`; formal `9d7463e8bf1c8bb89926dff8b9394cd68a9ad12f`; remediation `13b6a2d4d5b522af718474361b25688709a09cca`; DES `7a8f86763c4ec807aa85cf3014372fdd5f2b59e7` |
+| Date / iteration | 2026-10-24 / 2 |
+| Verdict on committed tree | **NEEDS_REVISION** — F1–F4 closed; new proven F5 remains on this committed tree |
+| Subsequent local work | Original crafter's private `kernel_io.rs` change and C/D captures are in progress and are **not** counted as committed remediation in this verdict |
+
+Two attempted turns by the original GPT-6.1 Sol reviewer and one fresh
+GPT-6.1 Sol replacement turn failed before a verdict. They are neither review
+iterations nor approvals. The user then authorized this GPT-6 Sol replacement
+without changing acceptance criteria. The iteration-1 findings and their raw
+evidence remain part of this artifact. I inspected the actual changed
+production, fixture, test and CI sources against the approved roadmap,
+feature delta and relevant ADRs, the retained native captures, the independent
+DISTILL iteration-22 record and the precise guest owner path. The user's
+unrelated dirty `AGENTS.md` and the original crafter's current production and
+DES edits were preserved. No production, test, model or DES source was edited
+by this reviewer; no mutation test was run.
+
+### F1–F4 remediation dispositions
+
+| Finding | Disposition and direct evidence |
+|---|---|
+| F1, extra guest forwarder probe | **CLOSED.** `KernelGuestTransportOps::open_forwarder` now opens the process-owned context and performs only DeviceOpen and Version (`transport/kernel.rs:388–400`). Its private ioctl and descriptor checks retain the existing `ForwarderError::Probe { stage, source }` representation (`:48–103`); the host's full `FlowForwarder::probe` is no longer called by guest setup. The default workload image, without the optional vsock loopback module, reaches READY in `increment-b/evidence/default-kit-f1-f3-post-fix.log`. This is the existing guest setup contract, not a new public probe method or knob. |
+| F2, stock socket-diagnostic prerequisites | **CLOSED.** `GuestKit` stages the stock kernel's `inet_diag`, `tcp_diag` and `udp_diag` modules (`guest_kit.rs:91–95,490–496`), and the existing PID-1 guest fixture loader loads staged prerequisites before it execs production init (`guest_peer.rs:668–718`). With this default image the real owner receives exact echoes for all 1,024 initial UDP slots; the earlier `NLMSG_ERROR(-ENOENT)` startup failure is absent (`increment-b/evidence/default-kit-f1-f3-post-fix.log`). The source still uses the approved `io::Result` diagnostic seam; there is no new public recovery/error interface. |
+| F3, premature kernel slot reuse | **CLOSED for the original admitted-loss trace.** `sock_release` now retains `SLOT_OWNER`, `SLOT_META` and the free-pool claim and reports the released cookie (`guest_capture.rs:214–232`). The owner releases after abort/end, discard and disconnect (`owner.rs:798–865`; `kernel_io.rs:684–711,1055–1069`). The default-kit native retry workload observes 1,024 initial echoes, 32 legitimate `EPERM` refusals while slots remain owned, 32 later echoes, zero admitted replacement losses, 1,056 host requests and guest EXIT 0 (`increment-b/evidence/default-kit-f1-f3-post-fix.log`). The C/D trace below exposes a distinct publication gap in this same accepted lifecycle; F3 closure alone cannot approve the step. |
+| F4, incomplete existing native correlation cell | **CLOSED.** The same parameterized cell now includes live direct `MSG_FASTOPEN` rejection, real candidate-program invocation observations, a sender cohort with a completed send while the child is Pending that continues across gate release and Ready, exact terminal metadata, post-terminal zero invocations, one-time deletion, preterminal reset/delete finality and active/child-map cleanup (`guest_flow/real_kernel.rs:948–1359`). The quota Fast Open target remains separate and sends no post-handshake payload before capture. The independent DISTILL review records iteration 22 **APPROVED** with zero open F2/F4 findings, and the existing native wrapper passed 1/1 in `i21-f01-correlation-overlap-native.log`. The cell uses the production adapter and running BPF program/map observations, not a fixture counter or new public accessor. |
+
+The accepted typed-error set remains as mapped in iteration 1. In the changed
+paths, a guest DeviceOpen or Version refusal remains
+`GuestTransportSetupError::Forwarder { source: ForwarderError::Probe { stage,
+source } }`, with Version's ABI mismatch or descriptor failure retained as the
+typed source. Missing, mismatched and other module-load failures still map to
+`ForwarderModuleMissing`, `ForwarderModuleRelease` and
+`ForwarderModuleLoad`, respectively; staging a matching diagnostic module
+adds no owner error variant. The C/CO-RE candidate still maps object/BTF/load
+failure to `ProgramLoad { program: TcpCorrelationCandidate, source: EbpfError }`
+and attach failure to `ProgramAttach { program: TcpCorrelationCandidate,
+source: ProgramError }`; malformed/missing correlation remains private
+Rejected with reset and no flow/control. UDP pool exhaustion is the designed
+capture refusal `EPERM`, and a diagnostic read error remains the existing
+`io::Result` path. F5 is the non-error `Ok(None)` source-port case at that seam;
+its missing cleanup requires no new typed error or public interface.
+
+The bpftool packaging correction is also within the approved build setup.
+CI and Lima test `apt-cache policy bpftool` for a concrete candidate; on Noble's
+virtual package they install `linux-tools-common` and `linux-tools-generic`,
+copy the actual executable under `/usr/lib/linux-tools-*/bpftool` to
+`/usr/local/bin/bpftool`, check its version, then dump the declared readable
+target BTF. The existing dev-setup probe now verifies an actual dump. The
+retained isolated Ubuntu 24.04 Noble proof records the virtual-package result,
+the packaged generic executable, `bpftool v7.4.0`, and a successful dump from
+Metal's read-only BTF with an Azure runner release simulated. It is **local
+Noble validation**, not a GitHub-hosted CI rerun; the branch has no upstream,
+open PR or Actions run. No new public configuration was added.
+
+The committed remediation has RED, GREEN and COMMIT entries recorded through
+DES and the two remediation commits retain Marcus as author with exactly the
+required Codex co-author and Step-Id trailers. The supplied post-remediation
+Metal checks report 187/187 package tests with three later-step skips, 12/12
+native guest-lane tests, the focused correlation wrapper 1/1, workspace
+check/Clippy/format, BPF Clippy, focused xtask 4/4 and unchanged formal
+279/279 over 24 matching input hashes. These are valid evidence at their
+respective boundaries; the existing 12 native wrappers contain no C/D
+immediate-release case. No new permanent test, lane, model or expectation
+runner is authorized or requested by this review.
+
+### F5 — High, blocking: an application closed before slot-owner publication can leave a kernel UDP claim permanently unavailable
+
+**Accepted contract and reachability.** A released application's UDP slots are
+returned after the owner discards and disconnects their resident slot sockets;
+the one-second level-triggered audit recovers a lost release report
+(`feature-delta.md:7106`; ADR-0201). Production ordinary unconnected UDP
+`send_to` enters `sendmsg4` and `alloc_slot`, which pops `FREE_SLOTS` and
+inserts the cookie/destination in `SLOT_META` and `SLOT_OWNER`
+(`guest_capture.rs:99–112,130–153`). Immediate socket close enters
+`sock_release`, which correctly retains that kernel claim while reporting the
+cookie (`:214–232`). The production PID-1 guest owner polls the resident slot,
+marks readiness reported and queues `GuestIoEvent::SlotReady`
+(`kernel_io.rs:422–435,489–495`). If close preceded its diagnostic lookup,
+`diagnostic_source_port(cookie)` returns `None` from the live socket dump
+(`:1249–1251`); on the **committed** `13b6` source, `slot_owner` returned
+`Ok(None)` without releasing the claim. `GuestFlowOwner::start_datagram` then
+returned before publishing `state.owner` (`owner.rs:758–769`). The queued
+`SocketReleased` handler selects only published owners (`:282–291`), as does
+`audit_slots` (`:879–894`); either ordering leaves this unpublished claim out
+of both cleanup paths. The process, control session and slot pool remain alive;
+there is no forced abort, canceled future or test-only owner state.
+
+**Native reproduction and necessity contrast.** The retained, standalone C
+workload drives the default production guest kit, actual PID-1 init, its BPF
+capture and the stock 7.0.0-38-generic kernel inside a disposable Cloud
+Hypervisor VM. It performs 1,100 ordinary send-and-close operations: 1,024
+sends admitted, 76 legitimate `EPERM` refusals, no prior application sockets
+left open. After three one-second audit periods a fresh held socket is still
+refused `EPERM`; `HOST_REQUESTS=0`, guest EXIT 2. The exact raw capture is
+`increment-c/evidence/reruns/default-kit-20261024T120620Z-2078/runner.raw.log`.
+The D control uses the same product, kit, peer, 1,100 sockets and audit wait,
+but waits for each exact echo before close, ensuring publication. It records
+1,100 echoes, `HOST_REQUESTS=1101`, a further post-audit echo and guest EXIT 0
+in `increment-d/evidence/reruns/default-kit-20261024T120950Z-5892/runner.raw.log`.
+The claim is **post-audit pool exhaustion with zero live prior application
+sockets**, not delivery of fire-and-forget UDP payloads or immediate admission
+while cleanup is pending. The C/D source, runner, raw logs and guest consoles
+are retained under `spike-scratch/netns-density-295-review-11-06/`; they are
+not yet committed and must remain preserved with the original crafter's
+remediation record per `.claude/rules/spike.md`.
+
+**Required disposition.** Close the unpublished-claim path through the
+already-approved resident-slot and kernel-map lifecycle. The original crafter
+currently has a private `slot_owner` change that drains/disconnects the
+unassociated resident slot and releases its claim when the diagnostic lookup
+returns `None`; its post-change C run records 1,032 admitted sends, 68 valid
+`EPERM` refusals while busy, a post-audit exact echo and EXIT 0, and unchanged
+D again records 1,100 echoes plus a post-audit echo and EXIT 0. Those captures
+support the proposed private HOW but are **not** a committed review closure:
+the original crafter still owns final verification, retention and DES commit.
+This finding does not prescribe or authorize a new owner table, generation,
+retry, persistence protocol, Sim seam, public method, test lane or changed
+model. The original UDP release invariant remains intact.
+
+### Iteration 2 gate and verdict
+
+| Gate | Disposition |
+|---|---|
+| Exact public API, typed failures and accepted ownership | PASS for F1–F4 remediation; F5 uses the existing private cleanup seam. |
+| Native F1–F4 and correlation evidence | PASS at the stated case boundaries. |
+| CI `bpftool` packaging | PASS for the local Noble package/binary/BTF proof; hosted CI has not run. |
+| F5 original committed source | **FAIL** — reproducible retained 1,024-slot exhaustion after all application sockets closed and three audits. |
+| Existing tests, Contract Shape and formal record | PASS as reported above; they do not exercise F5's immediate-release ordering. |
+| Mutation testing | Not run; the user forbids it anywhere in this workflow. |
+
+**NEEDS_REVISION.** F1–F4 are closed, but F5 is reproduced through the real
+production entry point and remains in the current committed tree. The original
+crafter's private fix, C/D evidence and checks must be committed before this
+same reviewer can record iteration 3. Step 12-01 stays held. The separate final
+full-slice Sol review remains due.
+
+## Iteration 3 — F5 remediation review
+
+| Field | Value |
+|---|---|
+| Reviewer | Same GPT-6 Sol DELIVER reviewer as iteration 2 |
+| Date / iteration | 2026-10-24 / 3 |
+| Production and retained-evidence commit | `6e8d2df862fdf73a049d217f3c6aa52b3db822e8` |
+| Initial DES follow-on | `094305325398680394e2f32ed7b76c2387f12d84` |
+| Append-only exact DES outcome correction / reviewed HEAD | `10ff04669aaec5a375073134faf6f9da12b838cc` |
+| Verdict | **APPROVED** — F1–F5 closed, zero open findings |
+
+### F5 disposition and contract fit
+
+**CLOSED.** The sole production edit is in
+`KernelGuestOwnerIo::slot_owner` (`kernel_io.rs:968–1007`). It first reads an
+existing nonzero cookie and destination from the kernel's `SLOT_META`. If the
+successful inet-diag lookup finds no live application socket with that cookie,
+it calls the existing `end_association(slot)`, then `release_slot(slot)`, and
+returns `Ok(None)` (`:992–1000`). `end_association` removes any slot-pair and
+readiness bookkeeping, discards the resident socket's receive queue, then
+disconnects it (`:1055–1065`). `release_slot` reads that slot's exact kernel
+metadata, removes its `(cookie, destination)` key from `SLOT_OWNER`, clears
+`SLOT_META`, and returns its index to `FREE_SLOTS` (`:684–711,1067–1069`).
+This is the approved no-pair release order at the existing guest-owner I/O
+boundary. It does not make the `sock_release` hook free a slot early or let a
+new kernel claim replace an unfinished association.
+
+The path is constrained by actual production ordering. `poll_once` emits a
+`SlotReady` only for a resident slot without a `slot_pairs` entry and not
+already marked readiness-reported (`:422–435,489–495`). `start_datagram`
+calls `slot_owner` **before** it publishes the current claim in `state.owner`,
+creates a guest flow or starts the forwarder pairing (`owner.rs:758–784`). The
+F5 immediate-close claim therefore has no active guest flow or pair to abort;
+an older owner value may remain after a previous association, but its pair and
+association have already ended before readiness is re-enabled. A live
+diagnostic cookie still follows the unchanged connect-and-return path
+(`kernel_io.rs:1002–1007`),
+so normal paired and later datagram reuse remain owner-controlled. An absent
+kernel claim (`raw_cookie == 0`) still returns `Ok(None)` without trying to
+free it; a netlink/map/read failure still propagates through `io::Result`
+because the diagnostic call retains `?`. No error is reclassified as socket
+absence, no typed error distinction is hidden in a string, and no new public
+method, enum variant, map, table, retry or configuration key was introduced.
+F1–F4's production paths and the Noble `bpftool` workflow are untouched by
+this commit.
+
+The retained [C probe](../../../../spike-scratch/netns-density-295-review-11-06/increment-c/README.md)
+and [D control](../../../../spike-scratch/netns-density-295-review-11-06/increment-d/README.md)
+keep their source, commands, raw runner output, guest consoles, exit statuses
+and ownership receipts under `spike-scratch`, now committed. C on the original
+committed adapter has 1,024 admitted sends, 76 valid busy-pool `EPERM`
+refusals, no live prior application sockets, and a fresh `EPERM` after three
+audits (guest EXIT 2, zero host requests). The identical C workload with the
+private correction records 1,032 admitted sends, 68 valid temporary refusals,
+and an exact post-audit echo (guest EXIT 0, one host request). D waits for each
+of 1,100 exact echoes before closing and passes before and after the change,
+including the post-audit echo (guest EXIT 0, 1,101 host requests). The exact
+captures are the C `default-kit-20261024T120620Z-2078` and
+`default-kit-20261024T121819Z-14810` `runner.raw.log` files, and the D
+`default-kit-20261024T120950Z-5892` and
+`default-kit-20261024T121945Z-16107` `runner.raw.log` files. The C/D
+[analysis and hashes](../../../../spike-scratch/netns-density-295-review-11-06/increment-c/evidence/f3-immediate-release-analysis.md)
+identify the sources and raw captures. Both variants drive the real production
+PID-1 init through the default GuestKit and the actual guest BPF on disposable
+Cloud Hypervisor guests with Linux 7.0.0-38-generic. The post-fix probe was
+run on the uncommitted candidate whose production diff is the exact private
+diff in `6e8d2df`; there is no intervening production source change.
+
+The follow-on Metal runs after this correction report 187/187 default
+`overdrive-init` package tests with three later-step skips
+(`init-nextest-increment-c-remediation-metal.log`), 12/12 native guest-lane
+tests with zero skips (`in-guest-lane-increment-c-remediation-metal.log`),
+and successful `overdrive-init` all-target Clippy, formatting and production
+diff checks. The formal inputs and 279-check record are unchanged from the
+24/24 hash-matched review in iteration 1. No permanent C/D test, lane,
+model change, expectation runner, mutation run or hosted-CI claim was added.
+The raw console captures retain their original carriage returns as evidence;
+the production Rust diff and this Markdown artifact have no whitespace errors.
+
+The original crafter committed the private source fix and all 37 retained C/D
+paths in `6e8d2df` without unrelated source or test-body changes. Marcus
+remains author and the commit carries exactly the required Codex co-author
+and Step-Id trailers. The latest effective step 11-06 DES events are
+`RED EXECUTED/PASS` at `12:17:09Z`, `GREEN EXECUTED/PASS` at `12:32:29Z`,
+and `COMMIT EXECUTED/PASS` at `12:32:30Z` on 2026-10-24. The earlier prose
+outcome events remain append-only history; `10ff04669` adds only the exact
+GREEN/COMMIT outcomes through the CLI. The pre-existing dirty `AGENTS.md`
+remains outside the reviewed commits.
+
+### Iteration 3 gate and verdict
+
+| Gate | Disposition |
+|---|---|
+| Original F1–F4, exact API and typed error mappings | **PASS**, closures from iteration 2 unaffected. |
+| F5 reachability, necessity contrast and cleanup order | **PASS**, native before/control/after captures and source path agree. |
+| Retained probe integrity and source scope | **PASS**, self-contained C/D sources and raw captures committed; only the private adapter method changed. |
+| Native, source-local, format and Clippy gates | **PASS** at their stated boundaries; no new behavior change after the runs. |
+| DES phase and attribution gate | **PASS** after append-only exact-outcome correction at HEAD `10ff04669`. |
+| Mutation testing | Not run; the user's prohibition applies to the whole workflow. |
+
+**APPROVED.** Step 11-06 now satisfies the accepted guest transport, owner,
+UDP release and TCP correlation criteria at the reviewed boundaries. There
+are zero open DELIVER review findings. Step 12-01 may start after the
+orchestrator's mechanical acceptance of this artifact. The separate final
+full-slice Sol review remains due.
