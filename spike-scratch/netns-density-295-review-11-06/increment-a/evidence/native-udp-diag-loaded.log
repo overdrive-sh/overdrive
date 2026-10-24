@@ -1,0 +1,41 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask metal run -- bash -lc 'rustc --edition=2024 --target x86_64-unknown-linux-musl .context/netns-density-295/review-11-06-spike/src/guest.rs -o /tmp/review-11-06-guest && CARGO_TARGET_DIR=target cargo run --manifest-path .context/netns-density-295/review-11-06-spike/Cargo.toml --bin review-host -- /tmp/review-11-06-guest with-loopback with-diag'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=6e4ac58ffd74350340ec5dd4 pid=1521988
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 3,218,921 bytes  received 156,113 bytes  217,744.13 bytes/sec
+total size is 3,542,202,732  speedup is 1,049.53
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+    Updating crates.io index
+     Locking 170 packages to latest Rust 1.95.0 compatible versions
+      Adding generic-array v0.14.7 (available: v0.14.9)
+   Compiling review-11-06-native-spike v0.0.0 (/home/ubuntu/overdrive/.context/netns-density-295/review-11-06-spike)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.62s
+     Running `target/debug/review-host /tmp/review-11-06-guest with-loopback with-diag`
+READY READY pid=1 port=1234 launch=6c616e652d6c61756e63682d746f6b65
+
+thread '<unnamed>' (1522573) panicked at src/host.rs:30:41:
+called `Result::unwrap()` on an `Err` value: Os { code: 24, kind: Uncategorized, message: "Too many open files" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+GUEST EXIT 2
+
+thread 'main' (1522333) panicked at src/host.rs:49:95:
+called `Result::unwrap()` on an `Err` value: Any { .. }
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 101[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1577[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

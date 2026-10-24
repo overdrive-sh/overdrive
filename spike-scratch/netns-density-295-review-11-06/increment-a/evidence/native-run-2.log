@@ -1,0 +1,36 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask metal run -- bash -lc 'rustc --edition=2024 --target x86_64-unknown-linux-musl .context/netns-density-295/review-11-06-spike/src/guest.rs -o /tmp/review-11-06-guest && CARGO_TARGET_DIR=target cargo run --manifest-path .context/netns-density-295/review-11-06-spike/Cargo.toml --bin review-host -- /tmp/review-11-06-guest'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=f1443dd5fdf5936d94741b63 pid=1518366
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 3,169,344 bytes  received 155,830 bytes  246,309.19 bytes/sec
+total size is 3,541,960,065  speedup is 1,065.20
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+    Updating crates.io index
+     Locking 170 packages to latest Rust 1.95.0 compatible versions
+      Adding generic-array v0.14.7 (available: v0.14.9)
+   Compiling review-11-06-native-spike v0.0.0 (/home/ubuntu/overdrive/.context/netns-density-295/review-11-06-spike)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.29s
+     Running `target/debug/review-host /tmp/review-11-06-guest`
+
+thread 'main' (1518712) panicked at src/host.rs:4:312:
+beacon line=[] read=Some(0)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 101[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1577[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

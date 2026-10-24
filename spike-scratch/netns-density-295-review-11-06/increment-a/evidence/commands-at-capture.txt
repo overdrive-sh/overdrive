@@ -1,0 +1,31 @@
+Historical wrapper invocations, retained verbatim. Original paths are documentary.
+
+artifact-identity-cleanup.log
+     Running `target/debug/xtask metal run -- bash -lc 'sha256sum target/x86_64-unknown-linux-musl/release/overdrive-init target/bpf/overdrive_guest_bpf.o target/bpf/overdrive_guest_tcp_correlation_candidate_bpf.o && stat -c "%n %y" target/x86_64-unknown-linux-musl/release/overdrive-init && test -z "$(pgrep -f "^target/debug/review-host" || true)"'`
+
+native-default-kit.log
+     Running `target/debug/xtask metal run -- bash -lc 'rustc --edition=2024 --target x86_64-unknown-linux-musl .context/netns-density-295/review-11-06-spike/src/guest.rs -o /tmp/review-11-06-guest && CARGO_TARGET_DIR=target cargo run --manifest-path .context/netns-density-295/review-11-06-spike/Cargo.toml --bin review-host -- /tmp/review-11-06-guest'`
+
+native-run-2.log
+     Running `target/debug/xtask metal run -- bash -lc 'rustc --edition=2024 --target x86_64-unknown-linux-musl .context/netns-density-295/review-11-06-spike/src/guest.rs -o /tmp/review-11-06-guest && CARGO_TARGET_DIR=target cargo run --manifest-path .context/netns-density-295/review-11-06-spike/Cargo.toml --bin review-host -- /tmp/review-11-06-guest'`
+
+native-run.log
+     Running `target/debug/xtask metal run -- bash -lc 'rustc --edition=2024 --target x86_64-unknown-linux-musl .context/netns-density-295/review-11-06-spike/src/guest.rs -o /tmp/review-11-06-guest && CARGO_TARGET_DIR=target cargo run --manifest-path .context/netns-density-295/review-11-06-spike/Cargo.toml --bin review-host -- /tmp/review-11-06-guest'`
+
+native-udp-admitted-loss.log
+     Running `target/debug/xtask metal run -- bash -lc 'rustc --edition=2024 --target x86_64-unknown-linux-musl .context/netns-density-295/review-11-06-spike/src/guest.rs -o /tmp/review-11-06-guest && CARGO_TARGET_DIR=target cargo run --manifest-path .context/netns-density-295/review-11-06-spike/Cargo.toml --bin review-host -- /tmp/review-11-06-guest with-loopback with-diag'`
+
+native-udp-diag-loaded.log
+     Running `target/debug/xtask metal run -- bash -lc 'rustc --edition=2024 --target x86_64-unknown-linux-musl .context/netns-density-295/review-11-06-spike/src/guest.rs -o /tmp/review-11-06-guest && CARGO_TARGET_DIR=target cargo run --manifest-path .context/netns-density-295/review-11-06-spike/Cargo.toml --bin review-host -- /tmp/review-11-06-guest with-loopback with-diag'`
+
+native-udp-diagnostic.log
+     Running `target/debug/xtask metal run -- bash -lc 'rustc --edition=2024 --target x86_64-unknown-linux-musl .context/netns-density-295/review-11-06-spike/src/guest.rs -o /tmp/review-11-06-guest && CARGO_TARGET_DIR=target cargo run --manifest-path .context/netns-density-295/review-11-06-spike/Cargo.toml --bin review-host -- /tmp/review-11-06-guest with-loopback'`
+
+native-udp-loopback-prerequisite.log
+     Running `target/debug/xtask metal run -- bash -lc 'rustc --edition=2024 --target x86_64-unknown-linux-musl .context/netns-density-295/review-11-06-spike/src/guest.rs -o /tmp/review-11-06-guest && CARGO_TARGET_DIR=target cargo run --manifest-path .context/netns-density-295/review-11-06-spike/Cargo.toml --bin review-host -- /tmp/review-11-06-guest with-loopback'`
+
+native-udp-recycle-wait-control.log
+     Running `target/debug/xtask metal run -- bash -lc 'rustc --edition=2024 --target x86_64-unknown-linux-musl .context/netns-density-295/review-11-06-spike/src/guest.rs -o /tmp/review-11-06-guest && CARGO_TARGET_DIR=target cargo run --manifest-path .context/netns-density-295/review-11-06-spike/Cargo.toml --bin review-host -- /tmp/review-11-06-guest with-loopback with-diag after-release-wait'`
+
+native-udp-recycle.log
+     Running `target/debug/xtask metal run -- bash -lc 'rustc --edition=2024 --target x86_64-unknown-linux-musl .context/netns-density-295/review-11-06-spike/src/guest.rs -o /tmp/review-11-06-guest && CARGO_TARGET_DIR=target cargo run --manifest-path .context/netns-density-295/review-11-06-spike/Cargo.toml --bin review-host -- /tmp/review-11-06-guest with-loopback with-diag'`

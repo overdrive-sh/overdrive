@@ -1,0 +1,84 @@
+{
+  "original_file_count": 13,
+  "all_original_bytes_preserved": true,
+  "originals": [
+    {
+      "original": ".context/netns-density-295/review-11-06-spike/Cargo.toml",
+      "retained": "spike-scratch/netns-density-295-review-11-06/increment-a/Cargo.toml",
+      "sha256": "d714c35ef3e91a1971c41188bc0570ea0921048d2062f2bc4ee65ef818352fbf",
+      "bytes": 350
+    },
+    {
+      "original": ".context/netns-density-295/review-11-06-spike/artifact-identity-cleanup.log",
+      "retained": "spike-scratch/netns-density-295-review-11-06/increment-a/evidence/artifact-identity-cleanup.log",
+      "sha256": "742de00781a122096a32afbbf7b7a9d3d9f3bf032aa4f8432dd5ab40d8995fb8",
+      "bytes": 1552
+    },
+    {
+      "original": ".context/netns-density-295/review-11-06-spike/native-default-kit.log",
+      "retained": "spike-scratch/netns-density-295-review-11-06/increment-a/evidence/native-default-kit.log",
+      "sha256": "0fefbff57df834e69b526642bafcbeba50db95ec72f5765108ca3cdbbf562a75",
+      "bytes": 30882
+    },
+    {
+      "original": ".context/netns-density-295/review-11-06-spike/native-run-2.log",
+      "retained": "spike-scratch/netns-density-295-review-11-06/increment-a/evidence/native-run-2.log",
+      "sha256": "de63b883dea8377c200ddac430bb354cd35cbc842543104041001d81932d8a03",
+      "bytes": 1978
+    },
+    {
+      "original": ".context/netns-density-295/review-11-06-spike/native-run.log",
+      "retained": "spike-scratch/netns-density-295-review-11-06/increment-a/evidence/native-run.log",
+      "sha256": "59edcfb710ea4483dd3f4a0101075a59fadfa0d282e19ffe37041e34c9fd9018",
+      "bytes": 7754
+    },
+    {
+      "original": ".context/netns-density-295/review-11-06-spike/native-udp-admitted-loss.log",
+      "retained": "spike-scratch/netns-density-295-review-11-06/increment-a/evidence/native-udp-admitted-loss.log",
+      "sha256": "31641e27c209aa999cabaa8bff5a6d3518578380144dcf065606948971b61fe0",
+      "bytes": 37829
+    },
+    {
+      "original": ".context/netns-density-295/review-11-06-spike/native-udp-diag-loaded.log",
+      "retained": "spike-scratch/netns-density-295-review-11-06/increment-a/evidence/native-udp-diag-loaded.log",
+      "sha256": "b53e6e4a3488876e698a5fa7fecdcee7d4248f7b762ab28b5309e06bf6e4a6be",
+      "bytes": 2310
+    },
+    {
+      "original": ".context/netns-density-295/review-11-06-spike/native-udp-diagnostic.log",
+      "retained": "spike-scratch/netns-density-295-review-11-06/increment-a/evidence/native-udp-diagnostic.log",
+      "sha256": "d7f999b3d30b55e4916a3569b06366cc14cc818aa562415619283f9377a58ff6",
+      "bytes": 164779
+    },
+    {
+      "original": ".context/netns-density-295/review-11-06-spike/native-udp-loopback-prerequisite.log",
+      "retained": "spike-scratch/netns-density-295-review-11-06/increment-a/evidence/native-udp-loopback-prerequisite.log",
+      "sha256": "d671d207024386f862bc2bece39c054bb379b0a73f81572d37d7fe7ae3e4c8aa",
+      "bytes": 31223
+    },
+    {
+      "original": ".context/netns-density-295/review-11-06-spike/native-udp-recycle-wait-control.log",
+      "retained": "spike-scratch/netns-density-295-review-11-06/increment-a/evidence/native-udp-recycle-wait-control.log",
+      "sha256": "c761ef756c68d3674fae18bec61f8fa56b984a9e6e1af2a45a824a09eacc9477",
+      "bytes": 31449
+    },
+    {
+      "original": ".context/netns-density-295/review-11-06-spike/native-udp-recycle.log",
+      "retained": "spike-scratch/netns-density-295-review-11-06/increment-a/evidence/native-udp-recycle.log",
+      "sha256": "bad2c09bce0ccde6dccfad706d5144b9286343f60cd2588e25da9e90be2fca36",
+      "bytes": 36506
+    },
+    {
+      "original": ".context/netns-density-295/review-11-06-spike/src/guest.rs",
+      "retained": "spike-scratch/netns-density-295-review-11-06/increment-a/src/guest.rs",
+      "sha256": "dca5e8cbd868b803499c28f77b56dca79f2c8f135da1e221d9bbaefe62b91334",
+      "bytes": 3380
+    },
+    {
+      "original": ".context/netns-density-295/review-11-06-spike/src/host.rs",
+      "retained": "spike-scratch/netns-density-295-review-11-06/increment-a/source-at-capture/host.rs",
+      "sha256": "a51d6420dae6607219659e30ea17219383606e77971b9ceb5a6ea92eb3e71ebf",
+      "bytes": 5176
+    }
+  ]
+}

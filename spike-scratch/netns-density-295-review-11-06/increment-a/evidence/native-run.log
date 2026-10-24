@@ -1,0 +1,195 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.21s
+     Running `target/debug/xtask metal run -- bash -lc 'rustc --edition=2024 --target x86_64-unknown-linux-musl .context/netns-density-295/review-11-06-spike/src/guest.rs -o /tmp/review-11-06-guest && CARGO_TARGET_DIR=target cargo run --manifest-path .context/netns-density-295/review-11-06-spike/Cargo.toml --bin review-host -- /tmp/review-11-06-guest'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=405a18bbf36ac86547f413d9 pid=1514719
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 5,396,999 bytes  received 155,837 bytes  336,535.52 bytes/sec
+total size is 3,541,947,892  speedup is 637.86
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+    Updating crates.io index
+     Locking 170 packages to latest Rust 1.95.0 compatible versions
+      Adding generic-array v0.14.7 (available: v0.14.9)
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.27
+   Compiling quote v1.0.47
+   Compiling libc v0.2.191
+   Compiling serde_core v1.0.229
+   Compiling cfg-if v1.0.5
+   Compiling serde v1.0.229
+   Compiling find-msvc-tools v0.1.15
+   Compiling shlex v2.0.1
+   Compiling zerocopy v0.8.63
+   Compiling hashbrown v0.17.1
+   Compiling typenum v1.20.1
+   Compiling memchr v2.8.3
+   Compiling equivalent v1.0.3
+   Compiling regex-syntax v0.8.11
+   Compiling futures-sink v0.3.34
+   Compiling num-conv v0.2.2
+   Compiling zmij v1.0.23
+   Compiling cc v1.10.0
+   Compiling futures-core v0.3.34
+   Compiling time-core v0.1.9
+   Compiling futures-task v0.3.34
+   Compiling powerfmt v0.2.1
+   Compiling serde_json v1.0.154
+   Compiling futures-channel v0.3.34
+   Compiling futures-io v0.3.34
+   Compiling smallvec v1.16.4
+   Compiling getrandom v0.4.3
+   Compiling time-macros v0.2.32
+   Compiling bitflags v2.13.2
+   Compiling autocfg v1.5.1
+   Compiling aho-corasick v1.1.5
+   Compiling thiserror v2.0.21
+   Compiling cfg_aliases v0.2.2
+   Compiling bytes v1.12.1
+   Compiling cpufeatures v0.3.1
+   Compiling arrayvec v0.7.8
+   Compiling nix v0.30.1
+   Compiling zeroize v1.9.1
+   Compiling base64 v0.23.1
+   Compiling rustix v1.1.5
+   Compiling memoffset v0.9.1
+   Compiling untrusted v0.9.0
+   Compiling rustls-pki-types v1.15.1
+   Compiling linux-raw-sys v0.12.1
+   Compiling generic-array v0.14.7
+   Compiling pem v4.0.0
+   Compiling syn v3.0.9
+   Compiling syn v2.0.119
+   Compiling blake3 v1.8.7
+   Compiling ring v0.17.14
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling digest v0.10.7
+   Compiling regex-automata v0.4.18
+   Compiling sha2 v0.10.9
+   Compiling getrandom v0.2.17
+   Compiling parking_lot_core v0.9.12
+   Compiling errno v0.3.14
+   Compiling socket2 v0.6.5
+   Compiling mio v1.2.4
+   Compiling linux-keyutils v0.2.5
+   Compiling signal-hook-registry v1.4.8
+   Compiling rand_core v0.6.4
+   Compiling parking_lot v0.12.5
+   Compiling indexmap v2.14.2
+   Compiling deranged v0.5.9
+   Compiling uuid v1.29.0
+   Compiling regex v1.13.1
+   Compiling time v0.3.55
+   Compiling serde_derive v1.0.229
+   Compiling ptr_meta_derive v0.3.2
+   Compiling futures-macro v0.3.34
+   Compiling bytecheck_derive v0.8.3
+   Compiling tokio-macros v2.7.2
+   Compiling rkyv_derive v0.8.18
+   Compiling thiserror-impl v2.0.21
+   Compiling async-trait v0.1.92
+   Compiling ptr_meta v0.3.2
+   Compiling rancor v0.1.3
+   Compiling tokio v1.54.1
+   Compiling bytecheck v0.8.3
+   Compiling futures-util v0.3.34
+   Compiling zerocopy-derive v0.8.63
+   Compiling munge_macro v0.4.7
+   Compiling tracing-attributes v0.1.31
+   Compiling utoipa-gen v5.5.0
+   Compiling yasna v0.6.0
+   Compiling rend v0.5.4
+   Compiling munge v0.4.7
+   Compiling rcgen v0.14.10
+   Compiling tracing v0.1.44
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling serde_norway v0.9.42
+   Compiling ipnet v2.12.2
+   Compiling toml_edit v0.22.27
+   Compiling futures-executor v0.3.34
+   Compiling futures v0.3.34
+   Compiling rkyv v0.8.18
+   Compiling utoipa v5.5.0
+   Compiling toml v0.8.23
+   Compiling half v2.7.1
+   Compiling ppv-lite86 v0.2.21
+   Compiling ciborium-ll v0.2.2
+   Compiling rand_chacha v0.3.1
+   Compiling ciborium v0.2.2
+   Compiling rand v0.8.8
+   Compiling overdrive-core v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-core)
+   Compiling overdrive-host v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-host)
+   Compiling overdrive-fwd v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-fwd)
+   Compiling overdrive-testing v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-testing)
+   Compiling review-11-06-native-spike v0.0.0 (/home/ubuntu/overdrive/.context/netns-density-295/review-11-06-spike)
+error[E0308]: mismatched types
+   --> src/host.rs:11:48
+    |
+ 11 |  let beacon=VsockListener::bind(VMADDR_CID_ANY,BEACON_VSOCK_PORT).unwrap();
+    |             -------------------                ^^^^^^^^^^^^^^^^^ expected `u32`, found `VsockPort`
+    |             |
+    |             arguments to this function are incorrect
+    |
+note: associated function defined here
+   --> /home/ubuntu/overdrive/crates/overdrive-testing/src/vsock.rs:139:12
+    |
+139 |     pub fn bind(cid: u32, port: u32) -> io::Result<Self> {
+    |            ^^^^
+
+error[E0599]: no method named `as_raw_fd` found for struct `VsockListener` in the current scope
+  --> src/host.rs:24:52
+   |
+24 |    let mut p=vec![libc::pollfd{fd:listeners.stream.as_raw_fd(),events:libc::POLLIN,revents:0}];
+   |                                                    ^^^^^^^^^
+   |
+help: there is a method `as_fd` with a similar name
+   |
+24 -    let mut p=vec![libc::pollfd{fd:listeners.stream.as_raw_fd(),events:libc::POLLIN,revents:0}];
+24 +    let mut p=vec![libc::pollfd{fd:listeners.stream.as_fd(),events:libc::POLLIN,revents:0}];
+   |
+
+error[E0599]: no method named `as_raw_fd` found for reference `&VsockStream` in the current scope
+  --> src/host.rs:25:49
+   |
+25 |    for (s,_) in &flows{p.push(libc::pollfd{fd:s.as_raw_fd(),events:libc::POLLIN,revents:0});}
+   |                                                 ^^^^^^^^^
+   |
+help: there is a method `as_fd` with a similar name
+   |
+25 -    for (s,_) in &flows{p.push(libc::pollfd{fd:s.as_raw_fd(),events:libc::POLLIN,revents:0});}
+25 +    for (s,_) in &flows{p.push(libc::pollfd{fd:s.as_fd(),events:libc::POLLIN,revents:0});}
+   |
+
+error[E0599]: no method named `as_raw_fd` found for struct `VsockStream` in the current scope
+  --> src/host.rs:36:42
+   |
+36 |     let got=unsafe{libc::recv(flows[i].0.as_raw_fd(),b.as_mut_ptr().cast(),b.len(),libc::MSG_DONTWAIT)};
+   |                                          ^^^^^^^^^
+   |
+help: there is a method `as_fd` with a similar name
+   |
+36 -     let got=unsafe{libc::recv(flows[i].0.as_raw_fd(),b.as_mut_ptr().cast(),b.len(),libc::MSG_DONTWAIT)};
+36 +     let got=unsafe{libc::recv(flows[i].0.as_fd(),b.as_mut_ptr().cast(),b.len(),libc::MSG_DONTWAIT)};
+   |
+
+Some errors have detailed explanations: E0308, E0599.
+For more information about an error, try `rustc --explain E0308`.
+error: could not compile `review-11-06-native-spike` (bin "review-host") due to 4 previous errors
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 101[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1577[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.
