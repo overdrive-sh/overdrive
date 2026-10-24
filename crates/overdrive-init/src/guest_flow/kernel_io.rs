@@ -970,13 +970,16 @@ impl GuestOwnerIo for KernelGuestOwnerIo {
         slot: SocketAddrV4,
     ) -> io::Result<Option<(SocketCookie, SocketAddrV4)>> {
         let Some(index) = self.slot_index(slot) else { return Ok(None) };
-        let bpf = self.ops.bpf.as_mut().ok_or_else(|| io::Error::from(ErrorKind::NotConnected))?;
-        let metadata = Array::<_, [u8; 16]>::try_from(
-            bpf.map_mut("SLOT_META")
-                .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "SLOT_META is missing"))?,
-        )
-        .map_err(map_to_io)?;
-        let value = metadata.get(&index, 0).map_err(map_to_io)?;
+        let value = {
+            let bpf =
+                self.ops.bpf.as_mut().ok_or_else(|| io::Error::from(ErrorKind::NotConnected))?;
+            let metadata = Array::<_, [u8; 16]>::try_from(
+                bpf.map_mut("SLOT_META")
+                    .ok_or_else(|| io::Error::new(ErrorKind::NotFound, "SLOT_META is missing"))?,
+            )
+            .map_err(map_to_io)?;
+            metadata.get(&index, 0).map_err(map_to_io)?
+        };
         let raw_cookie = u64::from_ne_bytes(value[0..8].try_into().unwrap_or([0; 8]));
         if raw_cookie == 0 {
             return Ok(None);
@@ -986,7 +989,16 @@ impl GuestOwnerIo for KernelGuestOwnerIo {
         );
         let port = u16::from_ne_bytes(value[12..14].try_into().unwrap_or([0; 2]));
         let destination = SocketAddrV4::new(ip, port);
-        let Some(source_port) = diagnostic_source_port(raw_cookie)? else { return Ok(None) };
+        let Some(source_port) = diagnostic_source_port(raw_cookie)? else {
+            // The application may close after the BPF claim but before this
+            // readiness dispatch can resolve its source port. No owner flow
+            // or forwarder pair exists yet, so release the resident slot in
+            // the normal discard, disconnect, then map-release order instead
+            // of losing the claim behind the unpublished owner table.
+            self.end_association(slot);
+            self.release_slot(slot);
+            return Ok(None);
+        };
         self.connect_slot_to_app(slot, source_port)?;
         Ok(Some((
             SocketCookie::new(raw_cookie)

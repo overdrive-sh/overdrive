@@ -1,0 +1,20 @@
+{
+  "reason": "The next canonical Metal sync needed these exact ignored build and native-console outputs, which the root-run guest fixture left root-owned remotely.",
+  "preserved_before_metadata_change": {
+    "review_guest_sha256": "bb7128dddd676fb781d7024abb88b67dcd173dfff57de560915734a5c58af566",
+    "native_console_sha256": "23b8b146de85752df96dc18d8fe2ba1203c2518f5fcc43bc9a4becced5cb3547",
+    "native_console_bytes": 29270
+  },
+  "metadata_only_repair": {
+    "paths": [
+      "increment-c/target",
+      "increment-c/target/review-guest",
+      "increment-c/evidence/reruns/default-kit-20261024T121819Z-14810/guest-console",
+      "increment-c/evidence/reruns/default-kit-20261024T121819Z-14810/guest-console/native-console.txt"
+    ],
+    "owner_before": "root:root",
+    "owner_after": "ubuntu:ubuntu",
+    "modes_and_bytes_preserved": true,
+    "sha256_rechecked_after_repair": true
+  }
+}

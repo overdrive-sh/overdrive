@@ -1478,6 +1478,20 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-10-24T11:15:12Z"
+    },
+    {
+      "sid": "11-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-10-24T12:17:09Z"
+    },
+    {
+      "sid": "11-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: increment-C reproduces immediate-close UDP slot claim leak before the adapter correction and passes post-fix; unchanged increment-D observed-close contrast passes before and after; overdrive-init nextest 187/187 passed (3 skipped), native in_guest_lane 12/12 passed in disposable CH guests, overdrive-init all-target Clippy passed, rustfmt and git diff --check passed. Evidence retained in spike-scratch/netns-density-295-review-11-06/increment-{c,d} and .context/netns-density-295/11-06.",
+      "t": "2026-10-24T12:29:01Z"
     }
   ]
 }

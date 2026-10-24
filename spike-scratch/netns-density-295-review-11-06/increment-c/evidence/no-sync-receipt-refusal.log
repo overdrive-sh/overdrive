@@ -1,0 +1,42 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask metal run --no-sync -- python3 -c 'import base64,hashlib,json,os,pathlib
+r=pathlib.Path.cwd()
+p=r/"spike-scratch/netns-density-295-review-11-06/increment-c"
+console=p/"evidence/reruns/default-kit-20261024T113339Z-73459/guest-console/native-console.txt"
+sources=["crates/overdrive-bpf/src/programs/guest_capture.rs","crates/overdrive-init/src/guest_flow/kernel_io.rs","crates/overdrive-init/src/guest_flow/owner.rs","crates/overdrive-init/src/transport/kernel.rs","crates/overdrive-testing/src/guest_kit.rs","crates/overdrive-testing/bin/guest_peer.rs"]
+artifacts=["target/x86_64-unknown-linux-musl/release/overdrive-init","target/x86_64-unknown-linux-musl/release/overdrive-guest-peer","target/bpf/overdrive_guest_bpf.o","target/bpf/overdrive_guest_tcp_correlation_candidate_bpf.o","target/kmod/7.0.0-38-generic/ovd_fwd.ko"]
+data={"console":base64.b64encode(console.read_bytes()).decode(),"console_sha256":hashlib.sha256(console.read_bytes()).hexdigest(),"source_receipt":(r/".overdrive-metal-source").read_text(),"kernel":os.uname().release,"sources":{f:hashlib.sha256((r/f).read_bytes()).hexdigest() for f in sources},"artifacts":{f:hashlib.sha256((r/f).read_bytes()).hexdigest() for f in artifacts},"ownership_before":{"uid":console.stat().st_uid,"gid":console.stat().st_gid}}
+u,g=r.stat().st_uid,r.stat().st_gid
+for f in [p,*p.rglob("*")]:os.chown(f,u,g)
+data["ownership_after"]={"uid":console.stat().st_uid,"gid":console.stat().st_gid}
+print("REVIEW_CAPTURE="+json.dumps(data))
+'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=1951f28e201dab877b30e3db pid=1667879
+
+########## [bootstrap] no-sync source identity check
+FATAL: --no-sync refused stale or mismatched metal source
+expected:
+  commit=7a8f86763c4ec807aa85cf3014372fdd5f2b59e7
+  workspace=/Users/marcus/conductor/workspaces/helios/wellington-v2
+  source_digest=7d010ff6ff8b596ca20fe65c9621490b4b62dd3fb2f2cfd904eaad4d4e68ddc6
+actual:
+  commit=7a8f86763c4ec807aa85cf3014372fdd5f2b59e7
+  workspace=/Users/marcus/conductor/workspaces/helios/wellington-v2
+  source_digest=da67bf5953259283088bda11ea4ce20d864e795c104a338b0334b52f1a987f03
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 1[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1577[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.
+

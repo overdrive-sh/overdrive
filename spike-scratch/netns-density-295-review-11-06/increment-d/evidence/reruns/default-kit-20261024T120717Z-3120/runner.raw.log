@@ -1,0 +1,29 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask metal run -- bash spike-scratch/netns-density-295-review-11-06/increment-d/run.sh --on-metal default-kit spike-scratch/netns-density-295-review-11-06/increment-d/evidence/reruns/default-kit-20261024T120717Z-3120`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=42dca842c0e4b339be71a031 pid=1669258
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+rsync: [generator] delete_file: unlink(spike-scratch/netns-density-295-review-11-06/increment-c/target/review-guest) failed: Permission denied (13)
+rsync: [generator] delete_file: unlink(spike-scratch/netns-density-295-review-11-06/increment-c/evidence/reruns/default-kit-20261024T120620Z-2078/guest-console/native-console.txt) failed: Permission denied (13)
+cannot delete non-empty directory: spike-scratch/netns-density-295-review-11-06/increment-c/target
+cannot delete non-empty directory: spike-scratch/netns-density-295-review-11-06/increment-c/evidence/reruns/default-kit-20261024T120620Z-2078/guest-console
+
+sent 3,241,170 bytes  received 158,392 bytes  271,964.96 bytes/sec
+total size is 3,554,476,488  speedup is 1,045.57
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1356) [sender=3.4.4]
+xtask failed: 
+   0: [91mmetal run (one bootstrap lease session) failed with exit status: 23[0m
+
+Location:
+   [35mxtask/src/main.rs[0m:[35m1577[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

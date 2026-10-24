@@ -1,0 +1,20 @@
+{
+  "reason": "The following canonical Metal sync reported rsync code 23 because these exact run outputs were root-owned remotely.",
+  "preserved_before_metadata_change": {
+    "review_guest_sha256": "bb7128dddd676fb781d7024abb88b67dcd173dfff57de560915734a5c58af566",
+    "native_console_sha256": "5e9c82b59584f44d7d77cb36a3877d49588c6cb7653fe9065c975662d4989616",
+    "native_console_bytes": 29346
+  },
+  "metadata_only_repair": {
+    "paths": [
+      "increment-c/target",
+      "increment-c/target/review-guest",
+      "increment-c/evidence/reruns/default-kit-20261024T120620Z-2078/guest-console",
+      "increment-c/evidence/reruns/default-kit-20261024T120620Z-2078/guest-console/native-console.txt"
+    ],
+    "owner_before": "root:root",
+    "owner_after": "ubuntu:ubuntu",
+    "modes_and_bytes_preserved": true,
+    "sha256_rechecked_after_repair": true
+  }
+}

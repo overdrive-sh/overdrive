@@ -1,0 +1,28 @@
+{
+  "console_sha256": "ac0622bbd266e40901762bf233cd010da4ebe0360faa56171c16d2fa7af1f3d6",
+  "source_receipt": "commit=7a8f86763c4ec807aa85cf3014372fdd5f2b59e7\nworkspace=/Users/marcus/conductor/workspaces/helios/wellington-v2\nsource_digest=da67bf5953259283088bda11ea4ce20d864e795c104a338b0334b52f1a987f03\n",
+  "kernel": "7.0.0-38-generic",
+  "sources": {
+    "crates/overdrive-bpf/src/programs/guest_capture.rs": "5951e0302b16849e46a5eddcdadf706d5472c50e5a8d1dccf0c758a538582df7",
+    "crates/overdrive-init/src/guest_flow/kernel_io.rs": "9c703ce9683157666ac5098f590fcf6cf4d8e54e447ff34a0106cc391efb4183",
+    "crates/overdrive-init/src/guest_flow/owner.rs": "8f986b3f381c302bce8b677f1c03dd0f07ed7794a6ca6abbdea95bb56508dcba",
+    "crates/overdrive-init/src/transport/kernel.rs": "59e38a9056839e0f83f15fcc7efe891a1956d56dc5de6c2a43cbec97af1aca2a",
+    "crates/overdrive-testing/src/guest_kit.rs": "e6902e58f41570148eef168fb8f4970325ead84deca89155edc9cd12aabf0251",
+    "crates/overdrive-testing/bin/guest_peer.rs": "ea3de0694b0164c7b8c84b3a08db2d6f275b72b252e29b10ef8eed31fb6cf8ea"
+  },
+  "artifacts": {
+    "target/x86_64-unknown-linux-musl/release/overdrive-init": "2b981ed9b0f7ae4963bf7df381fe5c0c1a5a3658ae35565f00522962a286730b",
+    "target/x86_64-unknown-linux-musl/release/overdrive-guest-peer": "c75bc9d5f15a57ea1f9d9e6d67048bc9ff616d827a858f8248af4f5a62e6b56d",
+    "target/bpf/overdrive_guest_bpf.o": "d64aa16879c51705135d7d8e42d63432de202d72d1f339d03868a44d1cfd3c16",
+    "target/bpf/overdrive_guest_tcp_correlation_candidate_bpf.o": "84c8d7730fe591eb50ff98504e7ab0e3c3da027b034d44393bff7e6023d89094",
+    "target/kmod/7.0.0-38-generic/ovd_fwd.ko": "3579e8a43880fd42f9a39d16765953c369e4916175a1c4a7877223520ccdde24"
+  },
+  "ownership_before": {
+    "uid": 0,
+    "gid": 0
+  },
+  "ownership_after": {
+    "uid": 1000,
+    "gid": 1000
+  }
+}
