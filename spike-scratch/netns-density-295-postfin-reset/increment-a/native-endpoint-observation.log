@@ -1,0 +1,9 @@
+command: cargo xtask metal run -- bash spike-scratch/netns-density-295-postfin-reset/increment-a/run.sh
+OVERDRIVE_METAL_RUN_ID=1c399d41d0b18d5213938a51
+OVERDRIVE_METAL_RUN_STARTED run_id=1c399d41d0b18d5213938a51
+7.0.0-38-generic
+candidate=SO_LINGER0 preclose_tcp_state=5 peer_state=7 peer_so_error=32 post_fin_recv=0 post_fin_recv_errno=0
+candidate=TCP_LINGER2_NEGATIVE preclose_tcp_state=5 peer_state=7 peer_so_error=32 post_fin_recv=0 post_fin_recv_errno=0
+candidate=TCP_REPAIR preclose_tcp_state=5 peer_state=8 peer_so_error=0 post_fin_recv=0 post_fin_recv_errno=0
+candidate=SOCK_DESTROY preclose_tcp_state=5 peer_state=7 peer_so_error=32 post_fin_recv=0 post_fin_recv_errno=0
+OVERDRIVE_METAL_RUN_COMPLETE run_id=1c399d41d0b18d5213938a51 exit_code=0 cause=command_returned

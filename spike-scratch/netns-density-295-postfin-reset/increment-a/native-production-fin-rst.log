@@ -1,0 +1,19 @@
+command: cargo xtask metal run -- bash spike-scratch/netns-density-295-postfin-reset/increment-a/capture-production-rst.sh
+OVERDRIVE_METAL_RUN_ID=944d48d864bb9263b521ef70
+OVERDRIVE_METAL_RUN_STARTED run_id=944d48d864bb9263b521ef70
+tcpdump: verbose output suppressed, use -v[v]... for full protocol decode
+listening on lo, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+2026-10-27 20:40:17.411300 IP 127.0.0.1.56426 > 127.0.0.1.37109: Flags [F.], seq 43803388, ack 1577861538, win 64, options [nop,nop,TS val 3619875312 ecr 3459210718], length 0
+2026-10-27 20:40:17.411409 IP 127.0.0.1.51480 > 127.0.0.1.43431: Flags [F.], seq 4050030704, ack 115148962, win 64, options [nop,nop,TS val 446547302 ecr 3713010134], length 0
+2026-10-27 20:40:17.411417 IP 127.0.0.1.43431 > 127.0.0.1.51480: Flags [F.], seq 1, ack 1, win 64, options [nop,nop,TS val 3713010134 ecr 446547302], length 0
+2026-10-27 20:40:17.411506 IP 127.0.0.1.37109 > 127.0.0.1.56426: Flags [F.], seq 1, ack 1, win 64, options [nop,nop,TS val 3459210719 ecr 3619875312], length 0
+2026-10-27 20:40:17.433660 IP 127.0.0.1.33519 > 127.0.0.1.35783: Flags [F.], seq 2661603074, ack 2113637841, win 64, options [nop,nop,TS val 757625860 ecr 3990209769], length 0
+2026-10-27 20:40:17.433683 IP 127.0.0.1.39876 > 127.0.0.1.43469: Flags [F.], seq 3564773018, ack 1574927012, win 70, options [nop,nop,TS val 4036496566 ecr 169128421], length 0
+2026-10-27 20:40:22.485841 IP 127.0.0.1.35783 > 127.0.0.1.33519: Flags [R.], seq 1, ack 1, win 64, options [nop,nop,TS val 3990214821 ecr 757625860], length 0
+2026-10-27 20:40:22.485909 IP 127.0.0.1.39876 > 127.0.0.1.43469: Flags [R.], seq 1, ack 1, win 70, options [nop,nop,TS val 4036501618 ecr 169128462], length 0
+
+8 packets captured
+16 packets received by filter
+0 packets dropped by kernel
+unchanged_test_exit=100
+OVERDRIVE_METAL_RUN_COMPLETE run_id=944d48d864bb9263b521ef70 exit_code=0 cause=command_returned

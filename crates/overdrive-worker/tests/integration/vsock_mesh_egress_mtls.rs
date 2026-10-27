@@ -82,6 +82,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream};
+use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
@@ -656,10 +657,11 @@ async fn observe_closure(stream: &mut TokioTcpStream) -> Closure {
 enum Termination {
     #[default]
     Open,
-    /// A FIN arrived. `reset_after_fin` records whether leg-F then aborted the
-    /// connection instead of finishing the close.
+    /// A FIN arrived. The terminal TCP state and the pending socket error
+    /// distinguish a clean close from a reset that arrived after that FIN.
     Fin {
-        reset_after_fin: bool,
+        tcp_state: u8,
+        pending_error: i32,
     },
     Reset,
     /// The TLS handshake or the request read failed.
@@ -911,10 +913,10 @@ fn run_peer_session(
 }
 
 /// Raw TCP reads after the exchange: a FIN (`Ok(0)`) or a reset ends the
-/// stream. After a FIN the peer (in [`PeerMode::FinishOnFin`]) finishes its
-/// own direction and watches for an abortive close from leg-F; in
-/// [`PeerMode::HoldOpenOnFin`] it keeps its own direction open and watches
-/// for a reset until the test stops it.
+/// stream. After a FIN the peer never reads again: Linux checks `SOCK_DONE`
+/// before `sk_err`, so a post-EOF read cannot reveal a later reset. Instead,
+/// the same peer socket is observed until `TCP_CLOSE`, then its pending
+/// `SO_ERROR` is recorded exactly once.
 fn watch_termination(
     rec: &mut RecordingTcp,
     stop: &AtomicBool,
@@ -938,35 +940,75 @@ fn watch_termination(
     }
     on_fin();
     if mode == PeerMode::HoldOpenOnFin {
-        loop {
-            if stop.load(Ordering::SeqCst) || Instant::now() >= give_up {
-                return Termination::Fin { reset_after_fin: false };
-            }
-            match rec.read(&mut buf) {
-                Ok(_) => {}
-                Err(error) if is_timeout(&error) => {}
-                Err(error) if is_reset(&error) => {
-                    return Termination::Fin { reset_after_fin: true };
-                }
-                Err(error) => panic!("mesh peer post-FIN read failed unexpectedly: {error}"),
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
+        return observe_fin_terminal(&rec.tcp, stop, give_up);
     }
     rec.tcp
         .shutdown(std::net::Shutdown::Write)
         .expect("peer finishes its own direction after leg-F's FIN");
-    let settle = Instant::now() + Duration::from_secs(2);
-    while Instant::now() < settle {
-        match rec.read(&mut buf) {
-            Ok(_) => {}
-            Err(error) if is_timeout(&error) => {}
-            Err(error) if is_reset(&error) => return Termination::Fin { reset_after_fin: true },
-            Err(error) => panic!("mesh peer post-FIN read failed unexpectedly: {error}"),
+    observe_fin_terminal(&rec.tcp, stop, Instant::now() + Duration::from_secs(2))
+}
+
+const TCP_CLOSE: u8 = 7;
+
+fn observe_fin_terminal(tcp: &TcpStream, stop: &AtomicBool, give_up: Instant) -> Termination {
+    while !stop.load(Ordering::SeqCst) && Instant::now() < give_up {
+        let tcp_state = tcp_state(tcp);
+        if tcp_state == TCP_CLOSE {
+            return Termination::Fin { tcp_state, pending_error: take_socket_error(tcp) };
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    Termination::Fin { reset_after_fin: false }
+    Termination::Open
+}
+
+fn tcp_state(tcp: &TcpStream) -> u8 {
+    // SAFETY: `tcp_info` is plain kernel output storage initialized before the
+    // call, and `length` bounds the live `TcpStream` descriptor's write.
+    let mut info: libc::tcp_info = unsafe { std::mem::zeroed() };
+    let mut length = libc::socklen_t::try_from(std::mem::size_of::<libc::tcp_info>())
+        .expect("tcp_info size fits socklen_t");
+    // SAFETY: the descriptor is owned by `tcp`; both output pointers are valid
+    // for the sizes passed for the duration of this call.
+    let result = unsafe {
+        libc::getsockopt(
+            tcp.as_raw_fd(),
+            libc::IPPROTO_TCP,
+            libc::TCP_INFO,
+            std::ptr::from_mut(&mut info).cast(),
+            std::ptr::from_mut(&mut length),
+        )
+    };
+    assert_eq!(
+        result,
+        0,
+        "mesh peer getsockopt(TCP_INFO) failed: {}",
+        std::io::Error::last_os_error()
+    );
+    info.tcpi_state
+}
+
+fn take_socket_error(tcp: &TcpStream) -> i32 {
+    let mut error = 0_i32;
+    let mut length = libc::socklen_t::try_from(std::mem::size_of::<i32>())
+        .expect("socket error size fits socklen_t");
+    // SAFETY: the descriptor is owned by `tcp`; `error` and `length` are valid
+    // output storage for `SO_ERROR` for the duration of this call.
+    let result = unsafe {
+        libc::getsockopt(
+            tcp.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_ERROR,
+            std::ptr::from_mut(&mut error).cast(),
+            std::ptr::from_mut(&mut length),
+        )
+    };
+    assert_eq!(
+        result,
+        0,
+        "mesh peer getsockopt(SO_ERROR) failed: {}",
+        std::io::Error::last_os_error()
+    );
+    error
 }
 
 fn is_timeout(error: &std::io::Error) -> bool {
@@ -1013,7 +1055,6 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 /// P5-S10 happy path. `@contract-shape:unbounded-preservation`.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER step 8"]
 async fn registered_mesh_flow_reaches_its_registered_backend_over_mtls_without_leg_f_resolving_again()
  {
     let rig = Rig::start("happy").await;
@@ -1077,7 +1118,6 @@ async fn registered_mesh_flow_reaches_its_registered_backend_over_mtls_without_l
 /// sessions, resolve calls, the forwarder connections' outcome.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER step 8"]
 async fn a_replayed_peer_and_an_unregistered_peer_are_closed_by_leg_f_without_resolution() {
     let rig = Rig::start("claim").await;
 
@@ -1132,7 +1172,6 @@ async fn a_replayed_peer_and_an_unregistered_peer_are_closed_by_leg_f_without_re
 /// through the first registration still carrying its flow), peer sessions.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER step 8"]
 async fn a_second_registration_for_the_same_forwarder_address_is_refused() {
     let rig = Rig::start("duplicate").await;
 
@@ -1180,7 +1219,6 @@ async fn a_second_registration_for_the_same_forwarder_address_is_refused() {
 /// capability.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER step 8"]
 async fn an_allocation_without_a_live_intercept_cannot_register_a_forwarded_flow() {
     let rig = Rig::start("not-live").await;
 
@@ -1239,7 +1277,6 @@ fn assert_not_intercept_live(
 /// Unclaimed: the registration is dropped before leg-F ever accepted the flow.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER step 8"]
 async fn dropping_an_unclaimed_registration_closes_the_flow_before_it_reaches_the_backend() {
     let rig = Rig::start("drop-unclaimed").await;
 
@@ -1271,7 +1308,6 @@ async fn dropping_an_unclaimed_registration_closes_the_flow_before_it_reaches_th
 /// forwarder side and the remote peer each see a reset, never a clean FIN.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER step 8"]
 async fn dropping_a_claimed_registration_with_the_loopback_leg_open_resets_both_sides() {
     let rig = Rig::start("drop-claimed").await;
 
@@ -1316,7 +1352,6 @@ async fn dropping_a_claimed_registration_with_the_loopback_leg_open_resets_both_
 /// registration afterwards releases it without resetting the finished peer.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER step 8"]
 async fn dropping_a_claimed_registration_after_a_clean_close_keeps_the_remote_fin() {
     let rig = Rig::start("drop-after-clean").await;
 
@@ -1333,7 +1368,7 @@ async fn dropping_a_claimed_registration_after_a_clean_close_keeps_the_remote_fi
             s.len() == 1 && s[0].termination != Termination::Open
         })
         .await;
-    assert_eq!(before[0].termination, Termination::Fin { reset_after_fin: false });
+    assert_eq!(before[0].termination, Termination::Fin { tcp_state: TCP_CLOSE, pending_error: 0 });
 
     // WHEN the owner drops the registration after the clean close.
     drop(registration);
@@ -1349,7 +1384,7 @@ async fn dropping_a_claimed_registration_after_a_clean_close_keeps_the_remote_fi
     // by the same recorder within `PEER_TERMINATION_DEADLINE`.
     let after = rig.peer.sessions();
     assert_eq!(after.len(), 1);
-    assert_eq!(after[0].termination, Termination::Fin { reset_after_fin: false });
+    assert_eq!(after[0].termination, Termination::Fin { tcp_state: TCP_CLOSE, pending_error: 0 });
     rig.finish().await;
 }
 
@@ -1360,7 +1395,6 @@ async fn dropping_a_claimed_registration_after_a_clean_close_keeps_the_remote_fi
 /// remote peer sees a reset after the FIN it already received.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER step 8"]
 async fn dropping_a_claimed_registration_with_the_loopback_leg_half_ended_resets_the_remote_peer() {
     let rig = Rig::start_with("drop-half-ended", PeerMode::HoldOpenOnFin).await;
 
@@ -1387,7 +1421,9 @@ async fn dropping_a_claimed_registration_with_the_loopback_leg_half_ended_resets
     // WHEN the owner drops the registration.
     drop(registration);
 
-    // THEN leg-F aborts the remote socket: the peer sees a reset after the FIN.
+    // THEN leg-F aborts the remote socket. The same peer socket that consumed
+    // FIN reaches TCP_CLOSE with EPIPE pending; another read after EOF is not
+    // a reset oracle on Linux 7.0.
     let sessions = rig
         .peer
         .wait_until(PEER_TERMINATION_DEADLINE, "the backend connection to end", |s| {
@@ -1396,8 +1432,8 @@ async fn dropping_a_claimed_registration_with_the_loopback_leg_half_ended_resets
         .await;
     assert_eq!(
         sessions[0].termination,
-        Termination::Fin { reset_after_fin: true },
-        "a half-ended loopback leg is not a clean close: the remote peer is reset (DG-10): {sessions:?}"
+        Termination::Fin { tcp_state: TCP_CLOSE, pending_error: libc::EPIPE },
+        "a half-ended loopback leg is not a clean close: the peer reaches TCP_CLOSE with pending EPIPE after FIN (DG-10): {sessions:?}"
     );
     // …and its side toward the forwarder.
     assert_eq!(observe_closure(&mut stream).await, Closure::Reset, "leg-F aborts its own side");
@@ -1412,7 +1448,6 @@ async fn dropping_a_claimed_registration_with_the_loopback_leg_half_ended_resets
 /// `DuplicateForwardedRegistration`), and the new registration carries a flow.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER step 8"]
 async fn an_unclaimed_drop_removes_the_registration_so_the_address_registers_again() {
     let rig = Rig::start("drop-unclaimed-reregister").await;
 
@@ -1463,7 +1498,6 @@ async fn an_unclaimed_drop_removes_the_registration_so_the_address_registers_aga
 /// owner refuses every registration, so it never holds one.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER step 8"]
 async fn forwarded_registration_refusals_follow_the_pinned_precedence() {
     let rig = Rig::start("precedence").await;
     let never_started = AllocationId::new("p5s10-precedence-other").expect("valid allocation id");
@@ -1558,7 +1592,6 @@ async fn forwarded_registration_refusals_follow_the_pinned_precedence() {
 /// reset. `@contract-shape:unbounded-preservation`.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER step 8"]
 async fn a_clean_close_of_both_directions_ends_the_remote_stream_with_fin() {
     let rig = Rig::start("clean-close").await;
 
@@ -1584,7 +1617,7 @@ async fn a_clean_close_of_both_directions_ends_the_remote_stream_with_fin() {
         .await;
     assert_eq!(
         sessions[0].termination,
-        Termination::Fin { reset_after_fin: false },
+        Termination::Fin { tcp_state: TCP_CLOSE, pending_error: 0 },
         "a clean close clears leg-F's abortive linger before closing (H-5)"
     );
 
@@ -1600,7 +1633,6 @@ async fn a_clean_close_of_both_directions_ends_the_remote_stream_with_fin() {
 /// every descriptor the worker held exactly as on a serve exit.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER step 8"]
 async fn a_serve_exit_mid_flow_resets_the_remote_peer() {
     if let Some(dir) = std::env::var_os(SERVE_CHILD_ENV) {
         serve_child(Path::new(&dir)).await;

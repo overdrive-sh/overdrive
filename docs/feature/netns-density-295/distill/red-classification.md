@@ -11,6 +11,61 @@ for the semantic reason recorded here (a RED scaffold of the step's own
 production surface, or the assertion that pins the defect the step fixes),
 never for an import, fixture or setup error.
 
+## STEP 13-01 PFRO-1 observation correction (2026-10-27)
+
+The activated existing cell
+`dropping_a_claimed_registration_with_the_loopback_leg_half_ended_resets_the_remote_peer`
+previously timed out after recording FIN because its peer recorder tried to
+observe a later RST with a second `read` after EOF. Native production capture
+proved that the same leg-B four-tuple emitted FIN then RST, while the peer
+reached `TCP_CLOSE` with pending `SO_ERROR=EPIPE` and subsequent reads stayed
+EOF. That preserved failure is therefore `WRONG_ASSERTION`, not
+`MISSING_FUNCTIONALITY`; see
+`../deliver/native-13-01-postfin-reset-observation.md` and approved PFRO-1.
+
+DISTILL has realigned only that existing cell's private observation support.
+After consuming FIN it performs no further read, and the cell requires the
+same peer socket to reach exactly `TCP_CLOSE` with pending `EPIPE`. The sibling
+open-drop cell still requires `Reset` before FIN, and both clean-close cells
+require `TCP_CLOSE` with zero pending socket error. Independent DISTILL review
+and the original crafter's existing Metal triple/full-suite run remain pending;
+until those gates pass, this correction is not classified GREEN. Full handoff:
+`../deliver/distill-13-01-postfin-reset-alignment.md`.
+
+The same package gate found three existing shared-owner lifecycle bodies whose
+fixture connected directly to leg F without the D9
+`register_forwarded_outbound` capability. Production's unregistered-tuple
+refusal is correct; the bodies failed before reaching their owner
+shutdown/drain or unrelated-handle assertions. They are classified
+`FIXTURE_BROKEN`, not `MISSING_FUNCTIONALITY`: one
+`netns_density_shared_owner` body in Metal run
+`e623caae0d03d4aa5ae30cad`, and two
+`outbound_enforce_substrate_splice` bodies in run
+`785ec2db92073e43085fc6c8`. DISTILL migrated only their existing source-bound
+client setup through the existing registration port, retaining the returned
+token for each flow and preserving every assertion and body. Independent
+review and the original crafter's exact three-body Metal replay remain pending.
+
+The first reviewed-fixture replay then passed the recording-enforcement body
+and reached the retained real-kernel teardown in both
+`outbound_enforce_substrate_splice` bodies. Those two failed only because the
+test-local peer helper rejected the expected abortive socket error at
+`SharedPeerOwner::finish` (Metal `ad70ecaabd63f14b53bc6012`, nextest
+`895a9f95-aa4a-4ca1-b9bd-6f844ecc5868`). This is also `FIXTURE_BROKEN`:
+production teardown correctly resets the still-open peer with
+`SO_LINGER{1,0}`. A failing diagnostic replay then captured errno 104 /
+`ConnectionReset` for all three owner-shutdown peers and the first allocation
+stopped by the independent-capability body (Metal
+`d612c668bf4e92d7fa10006e`, nextest
+`f74b2eeb-c710-49f9-82ca-d30e47448a88`). DISTILL now marks those four peers
+`AbortRequired`, accepting only `ConnectionReset`, `ConnectionAborted`, or
+`BrokenPipe` after a completed mTLS handshake. The unrelated second client is
+explicitly dropped before its final allocation stop, so only that cleanup peer
+is `EofOrAbort`. Handshake/authentication, echo, timeout, and all other
+errors remain failures. Existing byte-exact exchanges continue to prove
+traffic before stop/shutdown. Independent review and the same three-body replay
+remain pending.
+
 ## Latest integration pass
 
 Lima (Linux `7.0.0-38-generic` aarch64) unless named; Quint record

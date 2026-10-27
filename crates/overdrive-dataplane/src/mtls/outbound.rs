@@ -104,6 +104,11 @@ pub(super) fn establish(
     //     for the transport-death class.
     super::arm_transport_death_timeouts(leg_f_fd, limits.pump_stall_deadline)?;
     super::arm_transport_death_timeouts(leg_b_fd, limits.pump_stall_deadline)?;
+    // A process exit or an owner-held registration drop must reset the remote
+    // mesh peer. The reclaim path preserves this option for an abortive close;
+    // a clean peer FIN is observed before the owner releases the registration.
+    super::set_abortive_linger(leg_f_fd);
+    super::set_abortive_linger(leg_b_fd);
 
     // 4. Arm kTLS-TX/RX on leg B from the extracted secrets. TX so the forward
     //    write_all encrypts; RX so the return splice decrypts. The RX `rec_seq`

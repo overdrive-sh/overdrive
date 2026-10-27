@@ -54,7 +54,7 @@ use overdrive_worker::mtls_intercept::{InterceptPostcondition, Result as Interce
 use overdrive_worker::mtls_intercept_port::{
     HostMtlsIntercept, InterceptGuard, InterceptListener, MtlsIntercept,
 };
-use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
+use overdrive_worker::mtls_intercept_worker::{ForwardedOutbound, MtlsInterceptWorker};
 
 use async_trait::async_trait;
 use overdrive_core::traits::mtls_resolve::{
@@ -652,7 +652,26 @@ fn shared_peer_server_config(pki: &TestPki) -> Arc<rustls::ServerConfig> {
     Arc::new(config)
 }
 
-fn shared_peer_connection(mut tcp: std::net::TcpStream, config: Arc<rustls::ServerConfig>) -> bool {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SharedPeerEnd {
+    AbortRequired,
+    EofOrAbort,
+}
+
+fn is_abortive_reset(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::ConnectionAborted
+            | std::io::ErrorKind::BrokenPipe
+    )
+}
+
+fn shared_peer_connection(
+    mut tcp: std::net::TcpStream,
+    config: Arc<rustls::ServerConfig>,
+    expected_end: SharedPeerEnd,
+) -> bool {
     tcp.set_read_timeout(Some(Duration::from_secs(15))).ok();
     tcp.set_nodelay(true).ok();
     let mut connection = rustls::ServerConnection::new(config).expect("server connection");
@@ -664,13 +683,16 @@ fn shared_peer_connection(mut tcp: std::net::TcpStream, config: Arc<rustls::Serv
     while Instant::now() < deadline {
         let mut stream = rustls::Stream::new(&mut connection, &mut tcp);
         match stream.read(&mut buffer) {
-            Ok(0) => return true,
+            Ok(0) => return expected_end == SharedPeerEnd::EofOrAbort,
             Ok(read) => {
                 if stream.write_all(&buffer[..read]).and_then(|()| stream.flush()).is_err() {
                     return false;
                 }
             }
-            Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return true,
+            Err(error) if is_abortive_reset(&error) => return true,
+            Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => {
+                return expected_end == SharedPeerEnd::EofOrAbort;
+            }
             Err(error)
                 if error.kind() == std::io::ErrorKind::WouldBlock
                     || error.kind() == std::io::ErrorKind::TimedOut => {}
@@ -688,7 +710,7 @@ struct SharedPeerOwner {
 }
 
 impl SharedPeerOwner {
-    fn spawn(pki: &TestPki, connections: usize, block_third: bool) -> Self {
+    fn spawn(pki: &TestPki, expected_ends: Vec<SharedPeerEnd>, block_third: bool) -> Self {
         let bind = SocketAddrV4::new(MESH_BACKEND_IP.parse().expect("mesh ip"), MESH_BACKEND_PORT);
         let config = shared_peer_server_config(pki);
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
@@ -699,7 +721,7 @@ impl SharedPeerOwner {
             listener.set_nonblocking(true).expect("nonblocking shared mesh peer");
             ready_tx.send(()).expect("publish shared peer readiness");
             let mut children = Vec::new();
-            for index in 0..connections {
+            for (index, expected_end) in expected_ends.into_iter().enumerate() {
                 let (tcp, _) = accept_with_timeout(&listener, Duration::from_secs(15))
                     .expect("accept shared mesh connection");
                 if block_third && index == 2 {
@@ -707,7 +729,9 @@ impl SharedPeerOwner {
                     release_rx.recv().expect("release third-peer barrier");
                 }
                 let config = Arc::clone(&config);
-                children.push(std::thread::spawn(move || shared_peer_connection(tcp, config)));
+                children.push(std::thread::spawn(move || {
+                    shared_peer_connection(tcp, config, expected_end)
+                }));
             }
             children.into_iter().all(|child| child.join().is_ok_and(|result| result))
         });
@@ -769,10 +793,31 @@ impl Drop for SharedPeerOwner {
     }
 }
 
-async fn shared_client(source: std::net::Ipv4Addr, target: SocketAddrV4) -> tokio::net::TcpStream {
+async fn registered_shared_client(
+    worker: &MtlsInterceptWorker,
+    spec: &AllocationSpec,
+    source: std::net::Ipv4Addr,
+    target: SocketAddrV4,
+    backend: SocketAddrV4,
+) -> (ForwardedOutbound, tokio::net::TcpStream) {
     let socket = tokio::net::TcpSocket::new_v4().expect("create shared metal client");
     socket.bind(SocketAddrV4::new(source, 0).into()).expect("bind exact source capability");
-    socket.connect(target.into()).await.expect("connect shared leg F")
+    let forwarder_local = match socket.local_addr().expect("read registered forwarder address") {
+        std::net::SocketAddr::V4(address) => address,
+        std::net::SocketAddr::V6(address) => {
+            unreachable!("an IPv4 registered forwarder reported {address}")
+        }
+    };
+    let registration = worker
+        .register_forwarded_outbound(
+            &spec.alloc,
+            forwarder_local,
+            target,
+            ResolvedBackend { addr: backend, expected_svid: None },
+        )
+        .expect("register the exact forwarded flow before connecting to leg-F");
+    let stream = socket.connect(target.into()).await.expect("connect shared leg F");
+    (registration, stream)
 }
 
 async fn assert_shared_exchange(stream: &mut tokio::net::TcpStream, marker: &[u8]) {
@@ -863,11 +908,14 @@ async fn two_real_shared_capabilities_keep_the_unrelated_tls_handle_live_after_o
     ));
     enforcement.probe().await.expect("real enforcement probe");
     let intercept = MetalSharedIntercept::new();
-    let peer = SharedPeerOwner::spawn(&pki, 2, false);
+    let peer = SharedPeerOwner::spawn(
+        &pki,
+        vec![SharedPeerEnd::AbortRequired, SharedPeerEnd::EofOrAbort],
+        false,
+    );
     peer.wait_ready().await;
-    let resolve: Arc<dyn MtlsResolve> = Arc::new(AllMeshResolve {
-        peer: SocketAddrV4::new(MESH_BACKEND_IP.parse().expect("mesh ip"), MESH_BACKEND_PORT),
-    });
+    let backend = SocketAddrV4::new(MESH_BACKEND_IP.parse().expect("mesh ip"), MESH_BACKEND_PORT);
+    let resolve: Arc<dyn MtlsResolve> = Arc::new(AllMeshResolve { peer: backend });
     let worker = Arc::new(MtlsInterceptWorker::new(
         Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
         resolve,
@@ -892,8 +940,22 @@ async fn two_real_shared_capabilities_keep_the_unrelated_tls_handle_live_after_o
         &constant_identity,
         &[&first_spec, &second_spec],
     );
-    let mut first_client = shared_client("127.0.0.2".parse().unwrap(), leg_f).await;
-    let mut second_client = shared_client("127.0.0.3".parse().unwrap(), leg_f).await;
+    let (_first_registration, mut first_client) = registered_shared_client(
+        &worker,
+        &first_spec,
+        "127.0.0.2".parse().unwrap(),
+        leg_f,
+        backend,
+    )
+    .await;
+    let (_second_registration, mut second_client) = registered_shared_client(
+        &worker,
+        &second_spec,
+        "127.0.0.3".parse().unwrap(),
+        leg_f,
+        backend,
+    )
+    .await;
     assert_shared_exchange(&mut first_client, b"metal-shared-first-before-stop").await;
     assert_shared_exchange(&mut second_client, b"metal-shared-second-before-stop").await;
 
@@ -948,11 +1010,10 @@ async fn real_owner_shutdown_closes_admission_waits_one_claim_and_drains_every_s
     ));
     enforcement.probe().await.expect("real enforcement probe");
     let intercept = MetalSharedIntercept::new();
-    let peer = SharedPeerOwner::spawn(&pki, 3, true);
+    let peer = SharedPeerOwner::spawn(&pki, vec![SharedPeerEnd::AbortRequired; 3], true);
     peer.wait_ready().await;
-    let resolve: Arc<dyn MtlsResolve> = Arc::new(AllMeshResolve {
-        peer: SocketAddrV4::new(MESH_BACKEND_IP.parse().expect("mesh ip"), MESH_BACKEND_PORT),
-    });
+    let backend = SocketAddrV4::new(MESH_BACKEND_IP.parse().expect("mesh ip"), MESH_BACKEND_PORT);
+    let resolve: Arc<dyn MtlsResolve> = Arc::new(AllMeshResolve { peer: backend });
     let worker = Arc::new(MtlsInterceptWorker::new(
         Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
         resolve,
@@ -974,11 +1035,32 @@ async fn real_owner_shutdown_closes_admission_waits_one_claim_and_drains_every_s
         &constant_identity,
         &[&first_spec, &second_spec],
     );
-    let mut first_client = shared_client("127.0.0.4".parse().unwrap(), addresses[0]).await;
-    let mut second_client = shared_client("127.0.0.5".parse().unwrap(), addresses[0]).await;
+    let (_first_registration, mut first_client) = registered_shared_client(
+        &worker,
+        &first_spec,
+        "127.0.0.4".parse().unwrap(),
+        addresses[0],
+        backend,
+    )
+    .await;
+    let (_second_registration, mut second_client) = registered_shared_client(
+        &worker,
+        &second_spec,
+        "127.0.0.5".parse().unwrap(),
+        addresses[0],
+        backend,
+    )
+    .await;
     assert_shared_exchange(&mut first_client, b"metal-shutdown-first-live").await;
     assert_shared_exchange(&mut second_client, b"metal-shutdown-second-live").await;
-    let third_client = shared_client("127.0.0.5".parse().unwrap(), addresses[0]).await;
+    let (_third_registration, third_client) = registered_shared_client(
+        &worker,
+        &second_spec,
+        "127.0.0.5".parse().unwrap(),
+        addresses[0],
+        backend,
+    )
+    .await;
     peer.wait_third().await;
 
     let mut shutdown = tokio::spawn({

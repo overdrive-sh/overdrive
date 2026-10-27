@@ -104,7 +104,6 @@ async fn tcp_flows_to_host_internal_or_excluded_destinations_are_refused_by_clas
 ///
 /// CONTRACT_SHAPE: pure-function.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (8)"]
 async fn the_first_matching_class_decides_in_the_pinned_order() {
     let loopback = addr(127, 0, 0, 1, 443);
     let local_mesh = addr(192, 0, 2, 50, 443);
@@ -199,7 +198,6 @@ async fn a_non_mesh_flow_is_connected_directly_on_a_marked_lingering_socket() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (8)"]
 async fn a_mesh_destination_is_connected_to_leg_f_on_an_unmarked_loopback_socket() {
     let vip = addr(10, 96, 0, 10, 8080);
     let backend = ResolvedBackend { addr: addr(10, 0, 0, 4, 8080), expected_svid: None };
@@ -263,7 +261,6 @@ async fn an_unreachable_mesh_destination_or_a_resolve_error_fails_closed() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (8)"]
 async fn a_mesh_flow_of_an_allocation_not_intercept_live_is_intake_unavailable() {
     let vip = addr(10, 96, 0, 11, 8080);
     let backend = ResolvedBackend { addr: addr(10, 0, 0, 5, 8080), expected_svid: None };

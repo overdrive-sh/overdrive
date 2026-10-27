@@ -48,7 +48,9 @@ use overdrive_worker::mtls_intercept_port::{
     InterceptAcceptError, InterceptAccepted, InterceptGuard, InterceptListener, InterceptMembers,
     InterceptState, MtlsIntercept,
 };
-use overdrive_worker::mtls_intercept_worker::{MtlsInterceptWorker, MtlsSharedOwnerError};
+use overdrive_worker::mtls_intercept_worker::{
+    ForwardedOutbound, MtlsInterceptWorker, MtlsSharedOwnerError,
+};
 use parking_lot::Mutex;
 
 fn worker(intercept: Arc<dyn MtlsIntercept>) -> Arc<MtlsInterceptWorker> {
@@ -69,12 +71,15 @@ fn worker_with_enforcement(
     intercept: Arc<dyn MtlsIntercept>,
     enforcement: Arc<dyn MtlsEnforcement>,
 ) -> Arc<MtlsInterceptWorker> {
-    let peer = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 9443);
     let resolve: Arc<dyn MtlsResolve> = Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
         BTreeMap::new(),
-        MtlsResolution::Mesh(ResolvedBackend { addr: peer, expected_svid: None }),
+        MtlsResolution::Mesh(shared_backend()),
     ));
     Arc::new(MtlsInterceptWorker::new(enforcement, resolve, Arc::new(SimClock::new()), intercept))
+}
+
+const fn shared_backend() -> ResolvedBackend {
+    ResolvedBackend { addr: SocketAddrV4::new(Ipv4Addr::LOCALHOST, 9443), expected_svid: None }
 }
 
 /// Outcome anchor: DISCUSS Elevator Pitch
@@ -1415,6 +1420,30 @@ async fn connect_shared_source(source: Ipv4Addr, target: SocketAddrV4) -> tokio:
     socket.connect(target.into()).await.expect("connect through the shared leg-F listener")
 }
 
+async fn connect_registered_shared_source(
+    worker: &MtlsInterceptWorker,
+    spec: &AllocationSpec,
+    source: Ipv4Addr,
+    target: SocketAddrV4,
+) -> (ForwardedOutbound, tokio::net::TcpStream) {
+    let socket = tokio::net::TcpSocket::new_v4().expect("create registered shared client socket");
+    socket
+        .bind(SocketAddrV4::new(source, 0).into())
+        .expect("bind the allocation's immutable source address");
+    let forwarder_local = match socket.local_addr().expect("read registered forwarder address") {
+        std::net::SocketAddr::V4(address) => address,
+        std::net::SocketAddr::V6(address) => {
+            unreachable!("an IPv4 registered forwarder reported {address}")
+        }
+    };
+    let registration = worker
+        .register_forwarded_outbound(&spec.alloc, forwarder_local, target, shared_backend())
+        .expect("register the exact forwarded flow before connecting to leg-F");
+    let stream =
+        socket.connect(target.into()).await.expect("connect through the shared leg-F listener");
+    (registration, stream)
+}
+
 async fn wait_listener_closed(address: SocketAddrV4) {
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
@@ -1507,12 +1536,17 @@ async fn owner_shutdown_waits_the_active_claim_then_drains_every_shared_capabili
     let second = allocation_spec_at("shared-shutdown-second", Ipv4Addr::new(127, 0, 0, 5));
     worker.start_alloc(&first).await.expect("publish first capability");
     worker.start_alloc(&second).await.expect("publish second capability");
-    let _first_client = connect_shared_source(Ipv4Addr::new(127, 0, 0, 4), leg_f).await;
-    let _second_client = connect_shared_source(Ipv4Addr::new(127, 0, 0, 5), leg_f).await;
+    let (_first_registration, _first_client) =
+        connect_registered_shared_source(&worker, &first, Ipv4Addr::new(127, 0, 0, 4), leg_f).await;
+    let (_second_registration, _second_client) =
+        connect_registered_shared_source(&worker, &second, Ipv4Addr::new(127, 0, 0, 5), leg_f)
+            .await;
     enforcement.wait_for_active(2).await;
 
     enforcement.block_next_enforcement();
-    let _held_client = connect_shared_source(Ipv4Addr::new(127, 0, 0, 5), leg_f).await;
+    let (_held_registration, _held_client) =
+        connect_registered_shared_source(&worker, &second, Ipv4Addr::new(127, 0, 0, 5), leg_f)
+            .await;
     tokio::time::timeout(Duration::from_secs(2), enforcement.wait_blocked())
         .await
         .expect("third connection holds one immutable claim");

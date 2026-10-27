@@ -1701,7 +1701,16 @@
   },
   "validation": {
     "status": "approved",
-    "reviewer": "Fresh independent STEP 12-01 replacement-proof review APPROVED on 2026-10-27; see `deliver/review-12-01-replacement-proof.md`. The review reconciled the exact user-approved BFIFO1, PABORTERR1, ACTPRIORITY1, ADMISSIONREFUSAL1, QUIESCENCEOPEN1, CHCGROUP55RUNNER1, RELEASEPROJ1, CONTROLOPENRESET1 and RECROUND1 folds; verified all required current-source exact seeds and unchanged named/randomized conformance gates; and approved durable guest-flow-owner run `2796366-1793121937.068` (`--jobs 3`, 279/279 outcomes matching `expect`, 28/28 input hashes, 140 trace artifacts), Metal terminal/collection run `5ecc8ff499eb39ad2afdf3a4`, and verify-evidence run `065645e97a94e29acafe8cde`. Summary SHA-256 is `2123ffda061d93b1782284cba73e8cdb95a2cf9bd8f7f4cea8e6bd6b327f021c`; no API/error/wire weakening, filtered hazard, fabricated outcome, lost counterexample, or current design counterexample remains. This approves roadmap execution only; the fresh post-commit DELIVER review is still mandatory.",
-    "approved_at": "2026-10-27T18:56:09Z"
+    "reviewer": "PFRO-1 scoped validation APPROVED on 2026-10-27; see `deliver/review-design-13-01-postfin-reset-observation.md` iteration 4. The independent DISTILL source review is APPROVED (`deliver/review-distill-13-01-postfin-reset-alignment.md`, SHA-256 `e9447d4c6b1aa2e977add31e56421a9d9feaafd9db719aa7af93f39ae8bdf0e8`) against exact test-source SHA-256 `dffc6d6292288197618af686427948cdc241492ca5047930abdfa615ca7e86e0`. The original crafter's synchronized Metal triple passed 3/3 (run `965310ec95cc6ce433407d28`, nextest `305d03fd-81c6-4e4c-886f-b8380b576e3c`, exit 0) and the complete `vsock_mesh_egress_mtls` suite passed 12/12 (run `1410bdb09ac40587eb35ce6b`, nextest `c7378efd-0016-4094-9b6a-61347268031c`, exit 0). This closes only the explicit STEP 13-01 DG-10 reading 2 post-FIN observation scope: the same peer reaches `TCP_CLOSE` with one retained `SO_ERROR=EPIPE`, while open-reset and clean-close controls remain exact. It changes no outcome, mechanism, API, error, owner, scenario, lane or model; preserves STEP 12-01 and unrelated proofs; and does not claim broader STEP 13-01 GREEN or resolve the original crafter's separate 58 package-lane failure classification.",
+    "approved_at": "2026-10-27T22:04:01Z",
+    "prior_approval": {
+      "status": "approved",
+      "approved_at": "2026-10-27T18:56:09Z",
+      "scope": "STEP 12-01 replacement-proof review and roadmap execution through completed STEP 12-01; preserved without alteration",
+      "review_artifact": "deliver/review-12-01-replacement-proof.md"
+    },
+    "pending_scope": [
+      "STEP 13-01 DG-10 reading 2 post-FIN reset observation only"
+    ]
   }
 }

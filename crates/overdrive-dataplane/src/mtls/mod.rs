@@ -326,7 +326,11 @@ fn reclaim_connection(
     for aux in &mut state.aux_pumps {
         aux.request_stop();
     }
-    if !reset_peer {
+    if reset_peer {
+        for leg in &state.legs {
+            set_abortive_linger(leg.as_raw_fd());
+        }
+    } else {
         // Wake any pump parked inside a blocked syscall on a leg. Errors are
         // irrelevant (`ENOTCONN` on an already-dead leg): the goal is the wake,
         // and `drop(state.legs)` below is the authoritative release. A guest
@@ -337,6 +341,7 @@ fn reclaim_connection(
             unsafe {
                 libc::shutdown(leg.as_raw_fd(), libc::SHUT_RDWR);
             }
+            set_abortive_linger(leg.as_raw_fd());
         }
     }
     state.pump.join();
@@ -346,6 +351,21 @@ fn reclaim_connection(
     // legs drop here, closing the fds
     drop(state.legs);
     true
+}
+
+fn set_abortive_linger(fd: RawFd) {
+    let linger = libc::linger { l_onoff: 1, l_linger: 0 };
+    // SAFETY: `fd` is a live TCP descriptor owned by the connection table.
+    let _ = unsafe {
+        libc::setsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_LINGER,
+            std::ptr::from_ref(&linger).cast(),
+            libc::socklen_t::try_from(std::mem::size_of::<libc::linger>())
+                .unwrap_or(libc::socklen_t::MAX),
+        )
+    };
 }
 
 #[async_trait]
@@ -414,6 +434,9 @@ impl MtlsEnforcement for HostMtlsEnforcement {
         // pump threads.
         let conns = Arc::clone(&self.conns);
         let id = handle.id().clone();
+        if let Some(state) = conns.lock().get(&id) {
+            state.pump.state.reset_peer_on_reclaim.store(true, Ordering::SeqCst);
+        }
         tokio::task::spawn_blocking(move || reclaim_connection(&conns, &id)).await.map_err(
             |e| MtlsEnforcementError::TeardownFailed {
                 id: handle.id().clone(),

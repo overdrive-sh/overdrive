@@ -12,7 +12,7 @@
 //! Listener binding is supplied by [`MtlsIntercept`]. Production uses the
 //! host's transparent sockets; simulation uses socket-free listeners. Every
 //! accept path awaits [`MtlsResolve::resolve`] before deciding whether to
-//! enforce, pass through, or fail closed.
+//! enforce registered mesh flows or close unregistered accepts fail-closed.
 
 #![allow(
     clippy::result_large_err,
@@ -21,6 +21,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::num::{NonZeroU16, NonZeroU64};
+use std::sync::atomic::AtomicBool;
 #[cfg(any(test, feature = "integration-tests"))]
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
@@ -31,11 +32,10 @@ use overdrive_core::traits::mtls_enforcement::{
     EnforcedConnection, EnforcedConnectionId, InterceptedConnection, MtlsEnforcement,
     MtlsEnforcementError, Routed,
 };
-use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve, ResolvedBackend};
+use overdrive_core::traits::mtls_resolve::{MtlsResolve, ResolvedBackend};
 use overdrive_core::{AllocationId, SpiffeId};
 use parking_lot::{Mutex, RwLock};
-use tokio::sync::{Notify, mpsc, oneshot, watch};
-use tokio::task::JoinHandle;
+use tokio::sync::{Notify, mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
 use crate::mtls_intercept::{InterceptError, InterceptLeg, InterceptPostcondition};
@@ -124,20 +124,17 @@ pub enum MtlsInterceptInstallError {
         source: std::io::Error,
     },
 
-    // SCAFFOLD: true — netns-density-295 DISTILL (step 8).
     /// `register_forwarded_outbound` was asked to register a forwarded flow for
     /// an allocation that holds no active capability (D9).
     #[error("allocation {alloc} is not intercept-live; forwarded outbound refused")]
     NotInterceptLive { alloc: AllocationId },
 
-    // SCAFFOLD: true — netns-density-295 DISTILL (step 8).
     /// A forwarded-outbound registration for this forwarder-side address
     /// already exists (D9).
     #[error("a forwarded-outbound registration for {forwarder_local} already exists")]
     DuplicateForwardedRegistration { forwarder_local: SocketAddrV4 },
 }
 
-// SCAFFOLD: true — netns-density-295 DISTILL (step 8).
 /// One forwarded-outbound registration, held by the owner for the whole life
 /// of the flow.
 ///
@@ -155,12 +152,82 @@ pub enum MtlsInterceptInstallError {
 /// aborted the loopback leg, or it is still open (or half-ended) at the drop —
 /// leg-F aborts both (`SO_LINGER{1,0}`: the remote peer sees a reset).
 ///
-/// RED scaffold (DISTILL, Mandate 7): the shape the design pins
-/// (feature-delta § "[REF] mTLS forwarded-outbound port"); the private state
-/// lands in DELIVER (step 8).
 #[must_use]
 pub struct ForwardedOutbound {
-    _scaffold: (),
+    inner: Arc<CapabilityRegistryInner>,
+    forwarder_local: SocketAddrV4,
+    key: CapabilityKey,
+    state: Arc<ForwardedRegistrationState>,
+}
+
+/// The cancellation/teardown state shared by the owner-held registration and
+/// the worker task that enforces the claimed connection. The registration is
+/// the owner of this state: dropping it cancels an in-flight enforcement or
+/// tears down an established handle, while the worker keeps the opaque handle
+/// in the allocation record for the ordinary allocation-stop drain.
+struct ForwardedRegistrationState {
+    cancel: CancellationToken,
+    enforcement: Arc<dyn MtlsEnforcement>,
+    handle: Mutex<Option<EnforcedConnection>>,
+    retired: AtomicBool,
+}
+
+impl ForwardedRegistrationState {
+    fn new(enforcement: Arc<dyn MtlsEnforcement>) -> Self {
+        Self {
+            cancel: CancellationToken::new(),
+            enforcement,
+            handle: Mutex::new(None),
+            retired: AtomicBool::new(false),
+        }
+    }
+
+    fn retain_handle(&self, handle: EnforcedConnection) -> bool {
+        if self.cancel.is_cancelled() {
+            return false;
+        }
+        *self.handle.lock() = Some(handle);
+        !self.cancel.is_cancelled()
+    }
+
+    fn take_handle(&self) -> Option<EnforcedConnection> {
+        self.handle.lock().take()
+    }
+
+    fn close(&self) {
+        self.cancel.cancel();
+        if self.retired.load(std::sync::atomic::Ordering::SeqCst) {
+            let _ = self.take_handle();
+            return;
+        }
+        if let Ok(runtime) = tokio::runtime::Handle::try_current()
+            && let Some(handle) = self.take_handle()
+        {
+            let enforcement = Arc::clone(&self.enforcement);
+            runtime.spawn(async move {
+                let _ = enforcement.teardown(handle).await;
+            });
+        }
+    }
+
+    fn retire(&self) {
+        self.retired.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn cancel_for_retirement(&self) {
+        self.retire();
+        let _ = self.take_handle();
+        self.cancel.cancel();
+    }
+}
+
+struct ForwardedRegistration {
+    key: CapabilityKey,
+    #[allow(dead_code, reason = "the owner's resolved tuple is retained with the registration")]
+    original_destination: SocketAddrV4,
+    backend: ResolvedBackend,
+    state: Arc<ForwardedRegistrationState>,
+    claimed: bool,
 }
 
 /// One allocation's retirement attempt did not converge (D-295-R10).
@@ -806,14 +873,8 @@ impl MtlsInterceptInstallError {
             // on the per-connection accept loop, never on `start_alloc`'s
             // install path, so they cannot reach here.
             Self::Inbound(_) => "inbound_tproxy",
-            // SCAFFOLD: true — netns-density-295 DISTILL (step 8).
-            // DG-10 reading 1 pins the labels: `NotInterceptLive` →
-            // `"not_intercept_live"`, `DuplicateForwardedRegistration` →
-            // `"duplicate_forwarded_registration"`. DELIVER (step 8) lands
-            // them with the forwarded-outbound registration.
-            Self::NotInterceptLive { .. } | Self::DuplicateForwardedRegistration { .. } => {
-                panic!("Not yet implemented -- RED scaffold")
-            }
+            Self::NotInterceptLive { .. } => "not_intercept_live",
+            Self::DuplicateForwardedRegistration { .. } => "duplicate_forwarded_registration",
         }
     }
 }
@@ -886,7 +947,6 @@ struct CapabilityDrain {
     inner: Arc<CapabilityRegistryInner>,
     key: CapabilityKey,
     handles: Vec<EnforcedConnection>,
-    relays: Vec<JoinHandle<()>>,
     elements: CapabilityElements,
     removal: Option<(Ipv4Addr, Vec<SocketAddrV4>)>,
     completed: bool,
@@ -910,7 +970,6 @@ struct CapabilityRecord {
     elements: CapabilityElements,
     has_acquired_elements: bool,
     handles: Vec<EnforcedConnection>,
-    relays: Vec<JoinHandle<()>>,
     in_flight: usize,
     pending_owner: bool,
 }
@@ -921,6 +980,7 @@ struct RegistryState {
     allocations: BTreeMap<AllocationId, CapabilityKey>,
     sources: BTreeMap<Ipv4Addr, CapabilityKey>,
     destinations: BTreeMap<Ipv4Addr, CapabilityKey>,
+    forwarded: BTreeMap<SocketAddrV4, ForwardedRegistration>,
 }
 
 struct CapabilityRegistryInner {
@@ -936,6 +996,7 @@ impl RegistryState {
             allocations: BTreeMap::new(),
             sources: BTreeMap::new(),
             destinations: BTreeMap::new(),
+            forwarded: BTreeMap::new(),
         }
     }
 
@@ -1008,7 +1069,6 @@ impl CapabilityRegistry {
                 elements: CapabilityElements { outbound: None, inbound: Vec::new() },
                 has_acquired_elements: false,
                 handles: Vec::new(),
-                relays: Vec::new(),
                 in_flight: 0,
                 pending_owner: true,
             },
@@ -1021,6 +1081,7 @@ impl CapabilityRegistry {
         })
     }
 
+    #[allow(dead_code, reason = "source claims remain covered by the registry acceptance suite")]
     fn claim_source(&self, source_addr: Ipv4Addr) -> Option<CapabilityClaim> {
         let mut state = self.inner.state.lock();
         let key = state.sources.get(&source_addr)?.clone();
@@ -1041,6 +1102,71 @@ impl CapabilityRegistry {
         Self::claim_locked(&self.inner, &mut state, key)
     }
 
+    fn register_forwarded(
+        &self,
+        alloc: &AllocationId,
+        forwarder_local: SocketAddrV4,
+        original_destination: SocketAddrV4,
+        backend: ResolvedBackend,
+        enforcement: Arc<dyn MtlsEnforcement>,
+    ) -> Result<ForwardedOutbound, MtlsInterceptInstallError> {
+        let mut state = self.inner.state.lock();
+        let Some(key) = state.allocations.get(alloc).cloned() else {
+            return Err(MtlsInterceptInstallError::NotInterceptLive { alloc: alloc.clone() });
+        };
+        let live = state
+            .records
+            .get(&key)
+            .is_some_and(|record| record.lifecycle == CapabilityLifecycle::Active);
+        if !live {
+            return Err(MtlsInterceptInstallError::NotInterceptLive { alloc: alloc.clone() });
+        }
+        if state.forwarded.contains_key(&forwarder_local) {
+            return Err(MtlsInterceptInstallError::DuplicateForwardedRegistration {
+                forwarder_local,
+            });
+        }
+        let registration_state = Arc::new(ForwardedRegistrationState::new(enforcement));
+        state.forwarded.insert(
+            forwarder_local,
+            ForwardedRegistration {
+                key: key.clone(),
+                original_destination,
+                backend,
+                state: Arc::clone(&registration_state),
+                claimed: false,
+            },
+        );
+        Ok(ForwardedOutbound {
+            inner: Arc::clone(&self.inner),
+            forwarder_local,
+            key,
+            state: registration_state,
+        })
+    }
+
+    fn claim_forwarded(
+        &self,
+        forwarder_local: SocketAddrV4,
+        _original_destination: SocketAddrV4,
+    ) -> Option<(CapabilityClaim, Arc<ForwardedRegistrationState>, ResolvedBackend)> {
+        let mut state = self.inner.state.lock();
+        let (key, registration_state, backend) = {
+            let registration = state.forwarded.get(&forwarder_local)?;
+            if registration.claimed {
+                return None;
+            }
+            (
+                registration.key.clone(),
+                Arc::clone(&registration.state),
+                registration.backend.clone(),
+            )
+        };
+        let claim = Self::claim_locked(&self.inner, &mut state, key)?;
+        state.forwarded.get_mut(&forwarder_local)?.claimed = true;
+        Some((claim, registration_state, backend))
+    }
+
     fn begin_retire(&self, alloc: &AllocationId) -> Option<CapabilityRetirement> {
         let mut state = self.inner.state.lock();
         let key = state.allocations.get(alloc)?.clone();
@@ -1053,6 +1179,25 @@ impl CapabilityRegistry {
         }
         if was_active {
             state.remove_indexes(&key);
+        }
+        let forwarded = std::mem::take(&mut state.forwarded);
+        let mut retained = BTreeMap::new();
+        let mut forwarded_states = Vec::new();
+        for (address, registration) in forwarded {
+            if registration.key == key {
+                forwarded_states.push((registration.state, registration.claimed));
+            } else {
+                retained.insert(address, registration);
+            }
+        }
+        state.forwarded = retained;
+        drop(state);
+        for (registration, claimed) in forwarded_states {
+            if claimed {
+                registration.retire();
+            } else {
+                registration.cancel_for_retirement();
+            }
         }
         self.inner.wake.notify_waiters();
         Some(CapabilityRetirement { inner: Arc::clone(&self.inner), key })
@@ -1177,18 +1322,6 @@ impl CapabilityClaim {
         disposition
     }
 
-    fn retain_relay(&self, relay: JoinHandle<()>) {
-        let mut rejected = Some(relay);
-        if let Some(record) = self.inner.state.lock().records.get_mut(&self.key)
-            && let Some(relay) = rejected.take()
-        {
-            record.relays.push(relay);
-        }
-        if let Some(relay) = rejected {
-            relay.abort();
-        }
-    }
-
     fn release(mut self) {
         self.release_claim();
     }
@@ -1237,6 +1370,42 @@ impl Drop for CapabilityClaim {
     }
 }
 
+#[allow(
+    clippy::significant_drop_tightening,
+    reason = "the registry lock must be released before cancelling the owner-held registration"
+)]
+impl Drop for ForwardedOutbound {
+    fn drop(&mut self) {
+        let removed = {
+            let mut state = self.inner.state.lock();
+            let matches = state
+                .forwarded
+                .get(&self.forwarder_local)
+                .is_some_and(|registration| registration.key == self.key);
+            matches.then(|| state.forwarded.remove(&self.forwarder_local)).flatten()
+        };
+        if let Some(registration) = removed {
+            registration.state.close();
+        } else {
+            self.state.close();
+        }
+        self.inner.wake.notify_waiters();
+    }
+}
+
+fn spawn_forwarded_registration_reaper(state: Arc<ForwardedRegistrationState>) {
+    let cancel = state.cancel.clone();
+    tokio::spawn(async move {
+        cancel.cancelled().await;
+        if state.retired.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        if let Some(handle) = state.take_handle() {
+            let _ = state.enforcement.teardown(handle).await;
+        }
+    });
+}
+
 #[allow(clippy::significant_drop_tightening)]
 impl CapabilityRetirement {
     async fn wait_for_claims(self) -> CapabilityDrain {
@@ -1249,7 +1418,6 @@ impl CapabilityRetirement {
                         inner: Arc::clone(&self.inner),
                         key: self.key,
                         handles: Vec::new(),
-                        relays: Vec::new(),
                         elements: CapabilityElements { outbound: None, inbound: Vec::new() },
                         removal: None,
                         completed: false,
@@ -1261,7 +1429,6 @@ impl CapabilityRetirement {
                 {
                     Some((
                         std::mem::take(&mut record.handles),
-                        std::mem::take(&mut record.relays),
                         std::mem::replace(
                             &mut record.elements,
                             CapabilityElements { outbound: None, inbound: Vec::new() },
@@ -1282,12 +1449,11 @@ impl CapabilityRetirement {
                     None
                 }
             };
-            if let Some((handles, relays, elements, removal)) = ready {
+            if let Some((handles, elements, removal)) = ready {
                 return CapabilityDrain {
                     inner: Arc::clone(&self.inner),
                     key: self.key,
                     handles,
-                    relays,
                     elements,
                     removal: Some(removal),
                     completed: false,
@@ -1302,10 +1468,6 @@ impl CapabilityRetirement {
 impl CapabilityDrain {
     fn take_handles(&mut self) -> Vec<EnforcedConnection> {
         std::mem::take(&mut self.handles)
-    }
-
-    fn take_relays(&mut self) -> Vec<JoinHandle<()>> {
-        std::mem::take(&mut self.relays)
     }
 
     fn take_elements(&mut self) -> CapabilityElements {
@@ -1376,13 +1538,11 @@ fn shared_listener_task(
             match leg {
                 InterceptLeg::F => match accepted {
                     Ok(connection) => {
-                        worker
-                            .handle_shared_outbound(
-                                *connection.peer.ip(),
-                                connection.stream,
-                                connection.local,
-                            )
-                            .await;
+                        worker.handle_shared_outbound(
+                            connection.peer,
+                            connection.stream,
+                            connection.local,
+                        );
                     }
                     Err(InterceptAcceptError::Accept { source }) => return Err(source),
                     Err(InterceptAcceptError::OriginalDestination { source }) => {
@@ -2023,11 +2183,11 @@ pub struct MtlsInterceptWorker {
     /// the #242 anti-corruption boundary). The outbound accept loop resolves
     /// each captured connection's `getsockname`-recovered `orig_dst` against
     /// the mesh through this port and branches on the returned
-    /// [`MtlsResolution`] variant (the C1 3-arm decision —
-    /// `Mesh`→enforce / `NonMesh`→cleartext pass-through /
-    /// `MeshUnreachable`→fail-closed). Mandatory `new()` param, no builder
+    /// The retained composition dependency for the owner's resolution port.
+    /// Forwarded mesh accepts use the owner's registered backend and do not
+    /// resolve again. Mandatory `new()` param, no builder
     /// (`.claude/rules/development.md` § "Port-trait dependencies").
-    resolve: Arc<dyn MtlsResolve>,
+    _resolve: Arc<dyn MtlsResolve>,
     /// Injected `Clock` per the mandatory-port-dependency rule. Reserved
     /// for the deferred per-connection progress-stall watchdog
     /// ([#232](https://github.com/overdrive-sh/overdrive/issues/232));
@@ -2108,9 +2268,8 @@ impl MtlsInterceptWorker {
     ///
     /// As of step 04-02 the worker holds the [`MtlsResolve`] port: the outbound
     /// accept loop resolves each captured connection's recovered `orig_dst`
-    /// through it and branches on the [`MtlsResolution`] variant — production
-    /// wires `ServiceBackendsResolve` (reading `service_backends`), tests wire
-    /// `SimMtlsResolve`.
+    /// through it; registered forwarded flows carry the owner's resolved
+    /// backend and never call this port on leg-F.
     ///
     /// The [`MtlsIntercept`] port supplies the node-shared listener and
     /// shared-program effects. Production wires `HostMtlsIntercept`; test
@@ -2128,7 +2287,7 @@ impl MtlsInterceptWorker {
     ) -> Self {
         Self {
             enforcement,
-            resolve,
+            _resolve: resolve,
             _clock: clock,
             intercept,
             capabilities: CapabilityRegistry::new(),
@@ -2529,7 +2688,7 @@ impl MtlsInterceptWorker {
     /// for connections accepted by the node's leg-F and leg-C listeners. It
     /// never binds allocation-owned listeners. Re-firing for the same
     /// allocation first retires the prior capability and waits for its owned
-    /// enforcement and pass-through work to end.
+    /// enforcement work to end.
     ///
     /// Registration is fail-closed: if the shared owner is unavailable or a
     /// shared element cannot be installed, the error is returned to the action
@@ -2850,7 +3009,7 @@ impl MtlsInterceptWorker {
     }
 
     /// Invalidate the complete userspace dataplane owned by this worker and
-    /// wait until every accept/enforce/pass-through child has ended.
+    /// wait until every accept/enforce child has ended.
     ///
     /// This is owner supervision, not workload lifecycle cleanup: callers do
     /// not stop a process or author a terminal row. It mirrors process death's
@@ -2927,7 +3086,6 @@ impl MtlsInterceptWorker {
             for (alloc_id, stop) in active {
                 let result = if let Some(retirement) = owner.capabilities.begin_retire(&alloc_id) {
                     let mut drain = retirement.wait_for_claims().await;
-                    stop_cleartext_relays(drain.take_relays()).await;
                     let handles = drain.take_handles();
                     run_capability_stop_attempt(
                         &stop,
@@ -2970,61 +3128,34 @@ impl MtlsInterceptWorker {
     }
 
     /// Dispatch one connection accepted by the node-shared leg-F listener.
-    /// The source address is claimed before the asynchronous resolve/enforce
-    /// work starts, so the immutable generation remains attached to the
-    /// connection if that address is retired and reused meanwhile.
-    async fn handle_shared_outbound(
+    /// A mesh flow is admitted only when the owner registered the accepted
+    /// peer and original destination before connecting it to leg-F. The
+    /// registration is claimed before asynchronous enforcement starts, so the
+    /// immutable generation remains attached to the connection if the
+    /// allocation is retired and its address is reused meanwhile.
+    fn handle_shared_outbound(
         self: &Arc<Self>,
-        source_addr: Ipv4Addr,
+        forwarder_local: SocketAddrV4,
         leg_f: std::os::fd::OwnedFd,
         orig_dst: SocketAddrV4,
     ) {
-        let Some(claim) = self.capabilities.claim_source(source_addr) else {
+        let Some((claim, registration, backend)) =
+            self.capabilities.claim_forwarded(forwarder_local, orig_dst)
+        else {
             drop(leg_f);
             return;
         };
-        let resolution = match self.resolve.resolve(orig_dst).await {
-            Ok(resolution) => resolution,
-            Err(source) => {
-                tracing::warn!(
-                    name: "health.mtls.shared_resolve_failed",
-                    source_addr = %source_addr,
-                    orig_dst = %orig_dst,
-                    error = %source,
-                    "shared leg-F resolution failed; dropping the connection"
-                );
-                drop(claim);
-                drop(leg_f);
-                return;
-            }
-        };
-        match decide_outbound(&resolution) {
-            OutboundAction::Enforce { peer } => {
-                let alloc = claim.capability().key.alloc.clone();
-                self.spawn_shared_enforcement(
-                    claim,
-                    InterceptedConnection {
-                        leg: leg_f,
-                        routed: Routed::Outbound { peer },
-                        alloc,
-                        expected_peer: None,
-                    },
-                );
-            }
-            OutboundAction::PassThrough => {
-                let alloc = claim.capability().key.alloc.clone();
-                let runtime = tokio::runtime::Handle::current();
-                let (relay, connected) =
-                    spawn_cleartext_passthrough(&runtime, alloc, leg_f, orig_dst);
-                claim.retain_relay(relay);
-                let _ = connected.await;
-                claim.release();
-            }
-            OutboundAction::FailClosed => {
-                drop(claim);
-                drop(leg_f);
-            }
-        }
+        let alloc = claim.capability().key.alloc.clone();
+        self.spawn_forwarded_enforcement(
+            claim,
+            registration,
+            InterceptedConnection {
+                leg: leg_f,
+                routed: Routed::Outbound { peer: backend.addr },
+                alloc,
+                expected_peer: backend.expected_svid,
+            },
+        );
     }
 
     /// Dispatch one connection accepted by the node-shared leg-C listener.
@@ -3072,6 +3203,51 @@ impl MtlsInterceptWorker {
         });
     }
 
+    fn spawn_forwarded_enforcement(
+        self: &Arc<Self>,
+        claim: CapabilityClaim,
+        registration: Arc<ForwardedRegistrationState>,
+        connection: InterceptedConnection,
+    ) {
+        let enforcement = Arc::clone(&self.enforcement);
+        spawn_forwarded_registration_reaper(Arc::clone(&registration));
+        tokio::spawn(async move {
+            let result = tokio::select! {
+                () = registration.cancel.cancelled() => {
+                    claim.release();
+                    return;
+                }
+                result = enforcement.enforce(connection) => result,
+            };
+            match result {
+                Ok(handle) => {
+                    let retained = registration.retain_handle(handle.clone());
+                    if !retained {
+                        let _ = enforcement.teardown(handle).await;
+                        claim.release();
+                        return;
+                    }
+                    match claim.publish(handle) {
+                        PublishDisposition::Published => {}
+                        PublishDisposition::Retired(handle) => {
+                            let _ = enforcement.teardown(handle).await;
+                            registration.close();
+                        }
+                    }
+                }
+                Err(source) => {
+                    tracing::warn!(
+                        name: "health.mtls.shared_enforce_failed",
+                        error = %source,
+                        "shared mTLS enforcement refused the registered connection"
+                    );
+                    drop(claim);
+                    registration.close();
+                }
+            }
+        });
+    }
+
     /// The node-shared leg-C listener address while `alloc` has an active
     /// capability, or `None` when that allocation has no active capability.
     /// Every active allocation refers to the same listener address; the
@@ -3084,7 +3260,6 @@ impl MtlsInterceptWorker {
         self.intercepts.lock().get(alloc).map(|i| i.leg_c_addr)
     }
 
-    // SCAFFOLD: true — netns-density-295 DISTILL (step 8).
     /// Registers that the next connection accepted on leg-F whose peer is
     /// `forwarder_local` belongs to `alloc`'s current capability (resolved
     /// internally, ADR-0123), was dialled to `original_destination`, and must
@@ -3097,29 +3272,43 @@ impl MtlsInterceptWorker {
     /// active capability;
     /// [`MtlsInterceptInstallError::DuplicateForwardedRegistration`] when a
     /// registration for `forwarder_local` already exists.
-    #[expect(
-        clippy::unused_self,
-        reason = "RED scaffold body panics before reading its inputs; DELIVER (step 8) lands the body"
-    )]
     pub fn register_forwarded_outbound(
         &self,
-        _alloc: &AllocationId,
-        _forwarder_local: SocketAddrV4,
-        _original_destination: SocketAddrV4,
-        _backend: ResolvedBackend,
+        alloc: &AllocationId,
+        forwarder_local: SocketAddrV4,
+        original_destination: SocketAddrV4,
+        backend: ResolvedBackend,
     ) -> Result<ForwardedOutbound, MtlsInterceptInstallError> {
-        panic!("Not yet implemented -- RED scaffold")
+        if *self.lifecycle.read() == WorkerLifecycle::Shutdown {
+            return Err(MtlsInterceptInstallError::OwnerShutdown);
+        }
+        {
+            let state = self.shared_owner.lock();
+            if state.lifecycle != SharedOwnerLifecycle::Published {
+                return Err(MtlsInterceptInstallError::SharedOwner {
+                    source: match state.lifecycle {
+                        SharedOwnerLifecycle::ShuttingDown => MtlsSharedOwnerError::OwnerShutdown,
+                        _ => MtlsSharedOwnerError::NotStarted,
+                    },
+                });
+            }
+        }
+        self.capabilities.register_forwarded(
+            alloc,
+            forwarder_local,
+            original_destination,
+            backend,
+            Arc::clone(&self.enforcement),
+        )
     }
 
-    // SCAFFOLD: true — netns-density-295 DISTILL (step 8).
     /// Leg-F's loopback address for forwarded mesh flows.
     #[must_use]
-    #[expect(
-        clippy::unused_self,
-        reason = "RED scaffold body panics before reading the shared owner; DELIVER (step 8) lands the body"
-    )]
     pub fn leg_f_addr(&self) -> Option<SocketAddrV4> {
-        panic!("Not yet implemented -- RED scaffold")
+        let state = self.shared_owner.lock();
+        (state.lifecycle == SharedOwnerLifecycle::Published)
+            .then(|| state.owner.as_ref().map(|owner| owner.leg_f_addr))
+            .flatten()
     }
 }
 
@@ -3145,7 +3334,6 @@ fn start_capability_retirement(
                     tokio::task::yield_now().await;
                 }
             }
-            stop_cleartext_relays(drain.take_relays()).await;
             let handles = drain.take_handles();
             run_capability_stop_attempt(
                 &stop_for_work,
@@ -3294,123 +3482,6 @@ fn push_stop_failure_once(
     }
 }
 
-/// The OUTBOUND per-connection decision (the C1 3-arm action — a 1:1 projection
-/// of the [`MtlsResolution`] variant the resolve port returns). Kept as a
-/// distinct sum type so the decision is a pure, exhaustively-matched function
-/// ([`decide_outbound`]) the mutation gate targets per arm — a dropped arm is a
-/// security regression (a collapsed `FailClosed`→`PassThrough` = silent
-/// cleartext to a should-be-mesh peer).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum OutboundAction {
-    /// `Mesh` → enforce mTLS to the RESOLVED backend `peer` (the resolved
-    /// `ResolvedBackend.addr`, NOT `orig_dst`).
-    Enforce { peer: SocketAddrV4 },
-    /// `NonMesh` → cleartext pass-through to `orig_dst`, by design (the
-    /// classification arm — not an error, not a fail-closed).
-    PassThrough,
-    /// `MeshUnreachable` (or an untrusted resolve fault) → refuse, NO cleartext.
-    FailClosed,
-}
-
-/// The C1 3-arm decision: map an [`MtlsResolution`] to its [`OutboundAction`].
-///
-/// This is the security-critical core — each arm is independently
-/// mutation-killed by the per-arm DST assertions, because a dropped/swapped arm
-/// is a distinct bug:
-/// - `Mesh(b)` → `Enforce { peer: b.addr }` (the only handshake-driving arm);
-/// - `NonMesh` → `PassThrough` (cleartext, by design);
-/// - `MeshUnreachable` → `FailClosed` (refuse, NO cleartext — collapsing this
-///   to `PassThrough` is the silent-cleartext footgun the enrollment model
-///   exists to remove).
-///
-/// Takes `&MtlsResolution` so the decision is a pure read (the caller still owns
-/// the resolution); only the `Copy` `ResolvedBackend.addr` is projected out.
-const fn decide_outbound(resolution: &MtlsResolution) -> OutboundAction {
-    match resolution {
-        MtlsResolution::Mesh(backend) => OutboundAction::Enforce { peer: backend.addr },
-        MtlsResolution::NonMesh => OutboundAction::PassThrough,
-        MtlsResolution::MeshUnreachable => OutboundAction::FailClosed,
-    }
-}
-
-/// Spawn a `NonMesh` cleartext relay and report when its upstream connection is
-/// established or the task ends. The worker stores its join handle under the
-/// connection's capability before releasing the classification claim, so the
-/// allocation owner can abort and join it during retirement. A dial failure
-/// closes leg-F and completes the readiness signal.
-async fn stop_cleartext_relays(relays: Vec<JoinHandle<()>>) {
-    for relay in &relays {
-        relay.abort();
-    }
-    for relay in relays {
-        let _ = relay.await;
-    }
-}
-
-fn spawn_cleartext_passthrough(
-    runtime: &tokio::runtime::Handle,
-    alloc: AllocationId,
-    leg_f: std::os::fd::OwnedFd,
-    orig_dst: SocketAddrV4,
-) -> (JoinHandle<()>, oneshot::Receiver<()>) {
-    let (connected_tx, connected_rx) = oneshot::channel();
-    let task = runtime.spawn(async move {
-        let mut connected_tx = Some(connected_tx);
-        let downstream = std::net::TcpStream::from(leg_f);
-        if let Err(source) = downstream.set_nonblocking(true) {
-            tracing::warn!(
-                name: "health.mtls.passthrough_leg_failed",
-                alloc = %alloc,
-                error = %source,
-                "cleartext pass-through could not make captured leg asynchronous"
-            );
-            return;
-        }
-        let mut downstream = match tokio::net::TcpStream::from_std(downstream) {
-            Ok(stream) => stream,
-            Err(source) => {
-                tracing::warn!(
-                        name: "health.mtls.passthrough_leg_failed",
-                        alloc = %alloc,
-                        error = %source,
-                    "cleartext pass-through could not adopt captured leg"
-                );
-                return;
-            }
-        };
-        let mut upstream = match tokio::net::TcpStream::connect(orig_dst).await {
-            Ok(stream) => stream,
-            Err(source) => {
-                // The non-mesh upstream is unreachable — close leg-F. This is a
-                // plain connectivity failure on a cleartext path, NOT a mesh
-                // fail-closed (the resolve already classified it `NonMesh`).
-                tracing::warn!(
-                    name: "health.mtls.passthrough_dial_failed",
-                    alloc = %alloc,
-                    orig_dst = %orig_dst,
-                    error = %source,
-                    "cleartext pass-through dial failed; closing leg-F"
-                );
-                return;
-            }
-        };
-        if let Some(connected_tx) = connected_tx.take() {
-            let _ = connected_tx.send(());
-        }
-        if let Err(source) = tokio::io::copy_bidirectional(&mut downstream, &mut upstream).await {
-            tracing::warn!(
-                name: "health.mtls.passthrough_relay_ended",
-                alloc = %alloc,
-                orig_dst = %orig_dst,
-                error = %source,
-                "cleartext pass-through relay ended"
-            );
-        }
-        // Both streams drop here → both legs close.
-    });
-    (task, connected_rx)
-}
-
 #[cfg(test)]
 #[allow(
     clippy::expect_used,
@@ -3420,35 +3491,12 @@ fn spawn_cleartext_passthrough(
               test docstrings reference enum-variant names (NonMesh, StoreUnreadable, …) in prose"
 )]
 mod tests {
-    //! Default-lane tests for the node-shared per-connection resolve consumer
-    //! (ADR-0071 fact 4 / C1).
-    //!
-    //! The scenario
-    //! `outbound_resolve_consumer_drives_enforce_passthrough_failclosed_per_arm`
-    //! drives the worker's outbound handling
-    //! ([`MtlsInterceptWorker::handle_shared_outbound`], the driving port for the
-    //! resolve consumer) against a scripted [`SimMtlsResolve`] (01-02) per arm
-    //! and asserts the OBSERVABLE per-arm outcome at the driven-port boundary:
-    //!
-    //! - `Mesh(b)` → `enforce` is called with `Routed::Outbound { peer == b.addr }`
-    //!   (the RESOLVED backend addr, not `orig_dst`), `expected_peer == None`;
-    //! - `NonMesh` → `enforce` is NOT called; the captured leg is relayed
-    //!   cleartext to a real upstream that receives the workload's bytes
-    //!   (pass-through, by design);
-    //! - `MeshUnreachable` → `enforce` is NOT called; NO upstream is dialed; the
-    //!   captured leg is closed (the workload sees EOF — fail-closed, no
-    //!   cleartext).
-    //!
-    //! Each arm is asserted DISTINCTLY so an arm-match mutation in
-    //! [`decide_outbound`] (the security-critical 3-arm core — a collapsed
-    //! `FailClosed`→`PassThrough` is silent cleartext) is independently killed.
-    //! Authn-only boundary (Q4 / D-TME-8): the test asserts the
-    //! enforce/pass-through/fail-closed routing only — it does NOT call the
-    //! wrong-but-valid-peer case "protected" and does NOT thread `IdentityRead`
-    //! (`expected_peer` is `None` until #242).
+    //! Default-lane tests for the node-shared registration and retirement
+    //! lifecycle. The real forwarded-outbound port is covered by the Tier-3
+    //! integration suite; these bodies exercise the worker's owner and drain
+    //! invariants through its internal test adapters.
 
     use std::collections::{BTreeMap, BTreeSet, VecDeque};
-    use std::io::Read as _;
     use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
     use std::num::NonZeroU16;
     use std::path::PathBuf;
@@ -3472,7 +3520,7 @@ mod tests {
     use overdrive_sim::adapters::clock::SimClock;
     use parking_lot::Mutex;
 
-    use super::{MtlsInterceptWorker, OutboundAction, decide_outbound};
+    use super::MtlsInterceptWorker;
     use crate::mtls_intercept::{
         InterceptElementKey, InterceptElementOperation, InterceptError, InterceptLeg,
         InterceptPostcondition, InterceptSet,
@@ -4039,9 +4087,7 @@ mod tests {
         Arc::new(SimMtlsResolve::new(scripted, MtlsResolution::NonMesh))
     }
 
-    /// Test enforcement port for the pass-through lifecycle bodies. The
-    /// resolve result should keep these calls empty; recording them makes an
-    /// unexpected mTLS route observable without changing the fixture's wire.
+    /// Test enforcement port for shared registration lifecycle bodies.
     struct SpyEnforcement {
         calls: Arc<Mutex<Vec<()>>>,
         counter: std::sync::atomic::AtomicU64,
@@ -4147,45 +4193,7 @@ mod tests {
         (std::os::fd::OwnedFd::from(accepted), leg_f_addr, client)
     }
 
-    // ---- the pure 3-arm decision (the mutation-gate target, per arm) --------
-
-    /// C1 — the 3-arm decision IS the [`MtlsResolution`] variant: `Mesh(b)` →
-    /// `Enforce { peer: b.addr }`, `NonMesh` → `PassThrough`, `MeshUnreachable`
-    /// → `FailClosed`. Each arm is asserted DISTINCTLY so an arm-match mutation
-    /// (the canonical bug shape — a collapsed `FailClosed`→`PassThrough` is
-    /// silent cleartext) is independently killed.
-    /// CONTRACT_SHAPE: pure-function.
-    #[test]
-    fn decide_outbound_maps_each_resolution_arm_to_its_distinct_action() {
-        let backend_addr = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 7), 8443);
-
-        // Mesh → Enforce with the RESOLVED backend addr (not orig_dst).
-        assert_eq!(
-            decide_outbound(&MtlsResolution::Mesh(ResolvedBackend {
-                addr: backend_addr,
-                expected_svid: None,
-            })),
-            OutboundAction::Enforce { peer: backend_addr },
-            "Mesh must drive enforce to the resolved backend addr",
-        );
-
-        // NonMesh → PassThrough (cleartext, by design — NOT FailClosed).
-        assert_eq!(
-            decide_outbound(&MtlsResolution::NonMesh),
-            OutboundAction::PassThrough,
-            "NonMesh must pass through cleartext, never fail-closed",
-        );
-
-        // MeshUnreachable → FailClosed (refuse, NO cleartext — NOT PassThrough;
-        // collapsing this arm to PassThrough is the silent-cleartext footgun).
-        assert_eq!(
-            decide_outbound(&MtlsResolution::MeshUnreachable),
-            OutboundAction::FailClosed,
-            "MeshUnreachable must fail closed, never silently pass through cleartext",
-        );
-    }
-
-    // ---- the integrated resolve consumer, per arm (port-to-port) -----------
+    // ---- install-error vocabulary ------------------------------------------
 
     /// Each `MtlsInterceptInstallError` variant maps to its PINNED closed-
     /// vocabulary install-stage label (the `TransitionReason` cause-class the
@@ -4193,7 +4201,7 @@ mod tests {
     /// shim and any operator-facing diagnostic key off it — so each label is
     /// asserted EXACTLY, not merely "non-empty". This pins `leg_f_bind` (the
     /// stage for the leg-F IP_TRANSPARENT bind) alongside the two leg-C labels;
-    /// replacing any label string turns this RED.
+    /// replacing any label string breaks the closed vocabulary.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
     fn stage_label_is_pinned_per_install_error_variant() {
@@ -4240,7 +4248,6 @@ mod tests {
     /// install-stage labels.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 8"]
     fn forwarded_outbound_refusals_have_pinned_stage_labels() {
         use super::MtlsInterceptInstallError;
 
@@ -4352,7 +4359,7 @@ mod tests {
     async fn enforcement_returning_after_retirement_tears_down_the_real_returned_handle_before_drain()
      {
         let enforcement = GatedEnforcement::new();
-        let (leg, orig_dst, _client) = accepted_leg_f();
+        let (leg, orig_dst, client) = accepted_leg_f();
         let worker = Arc::new(MtlsInterceptWorker::new(
             Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
             resolve_scripting(
@@ -4368,9 +4375,21 @@ mod tests {
             .start_alloc(&shared_spec(allocation.clone(), Ipv4Addr::LOCALHOST))
             .await
             .expect("publish one real shared allocation capability");
+        let forwarder_local = match client.local_addr().expect("forwarder local address") {
+            std::net::SocketAddr::V4(address) => address,
+            std::net::SocketAddr::V6(address) => panic!("expected IPv4 forwarder, got {address}"),
+        };
+        let _registration = worker
+            .register_forwarded_outbound(
+                &allocation,
+                forwarder_local,
+                orig_dst,
+                ResolvedBackend { addr: orig_dst, expected_svid: None },
+            )
+            .expect("register the forwarded flow");
         tokio::spawn({
             let worker = Arc::clone(&worker);
-            async move { worker.handle_shared_outbound(Ipv4Addr::LOCALHOST, leg, orig_dst).await }
+            async move { worker.handle_shared_outbound(forwarder_local, leg, orig_dst) }
         })
         .await
         .expect("production shared outbound dispatch returns");
@@ -4483,7 +4502,7 @@ mod tests {
     async fn shared_teardown_failure_retains_the_exact_handle_drain_and_reservation_until_same_owner_retry()
      {
         let enforcement = RetryingSharedEnforcement::new();
-        let (leg, orig_dst, _client) = accepted_leg_f();
+        let (leg, orig_dst, client) = accepted_leg_f();
         let worker = Arc::new(MtlsInterceptWorker::new(
             Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
             resolve_scripting(
@@ -4500,9 +4519,21 @@ mod tests {
             .start_alloc(&shared_spec(allocation.clone(), address))
             .await
             .expect("publish shared allocation");
+        let forwarder_local = match client.local_addr().expect("forwarder local address") {
+            std::net::SocketAddr::V4(address) => address,
+            std::net::SocketAddr::V6(address) => panic!("expected IPv4 forwarder, got {address}"),
+        };
+        let _registration = worker
+            .register_forwarded_outbound(
+                &allocation,
+                forwarder_local,
+                orig_dst,
+                ResolvedBackend { addr: orig_dst, expected_svid: None },
+            )
+            .expect("register the forwarded flow");
         tokio::spawn({
             let worker = Arc::clone(&worker);
-            async move { worker.handle_shared_outbound(address, leg, orig_dst).await }
+            async move { worker.handle_shared_outbound(forwarder_local, leg, orig_dst) }
         })
         .await
         .expect("shared dispatch returns");
@@ -4639,14 +4670,27 @@ mod tests {
         let (leg_f, _leg_c) = shared_legs(&intercept, &worker, &allocation);
         // One connection at a time: each is published before the next is
         // delivered, so the capability's handle order is #0 then #1.
-        for (published, leg) in [(1, first_leg), (2, second_leg)] {
-            deliver_leg_f_connection(&intercept, leg_f, Ipv4Addr::LOCALHOST, orig_dst, leg);
+        let mut registrations = Vec::new();
+        for (published, (forwarder_local, leg)) in
+            [(40_000, first_leg), (40_001, second_leg)].into_iter().enumerate()
+        {
+            let forwarder_local = SocketAddrV4::new(Ipv4Addr::LOCALHOST, forwarder_local);
+            let registration = worker
+                .register_forwarded_outbound(
+                    &allocation,
+                    forwarder_local,
+                    orig_dst,
+                    ResolvedBackend { addr: orig_dst, expected_svid: None },
+                )
+                .expect("register the forwarded flow");
+            deliver_leg_f_connection(&intercept, leg_f, forwarder_local, orig_dst, leg);
             within_2s("the delivered connection reaches enforcement", || {
-                enforcement.counter.load(Ordering::SeqCst) == published
+                enforcement.counter.load(Ordering::SeqCst)
+                    == u64::try_from(published + 1).expect("tiny count")
             })
             .await;
-            wait_published(&worker, &allocation, usize::try_from(published).expect("tiny count"))
-                .await;
+            wait_published(&worker, &allocation, published + 1).await;
+            registrations.push(registration);
         }
 
         let first =
@@ -4702,6 +4746,7 @@ mod tests {
             ],
             "the retry tears down exactly the two retained handles, in order"
         );
+        drop(registrations);
         worker.shutdown_owner().await.expect("the shared owner joins");
     }
 
@@ -4776,7 +4821,7 @@ mod tests {
     fn deliver_leg_f_connection(
         intercept: &TestSharedIntercept,
         leg_f: SocketAddrV4,
-        source: Ipv4Addr,
+        forwarder_local: SocketAddrV4,
         orig_dst: SocketAddrV4,
         stream: std::os::fd::OwnedFd,
     ) {
@@ -4785,7 +4830,7 @@ mod tests {
                 leg_f,
                 TestAcceptScript::Connection(InterceptAccepted {
                     stream,
-                    peer: SocketAddrV4::new(source, 40_000),
+                    peer: forwarder_local,
                     local: orig_dst,
                 }),
             ),
@@ -5640,7 +5685,13 @@ mod tests {
     async fn shared_allocation_with_one_handle(
         enforcement: Arc<dyn MtlsEnforcement>,
         name: &str,
-    ) -> (Arc<MtlsInterceptWorker>, Arc<TestSharedIntercept>, AllocationId, TcpStream) {
+    ) -> (
+        Arc<MtlsInterceptWorker>,
+        Arc<TestSharedIntercept>,
+        AllocationId,
+        TcpStream,
+        super::ForwardedOutbound,
+    ) {
         let (leg, orig_dst, client) = accepted_leg_f();
         let intercept = Arc::new(TestSharedIntercept::new());
         let worker = Arc::new(MtlsInterceptWorker::new(
@@ -5659,9 +5710,18 @@ mod tests {
             .await
             .expect("publish one shared allocation");
         let (leg_f, _leg_c) = shared_legs(&intercept, &worker, &allocation);
-        deliver_leg_f_connection(&intercept, leg_f, Ipv4Addr::LOCALHOST, orig_dst, leg);
+        let forwarder_local = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 40_000);
+        let registration = worker
+            .register_forwarded_outbound(
+                &allocation,
+                forwarder_local,
+                orig_dst,
+                ResolvedBackend { addr: orig_dst, expected_svid: None },
+            )
+            .expect("register the forwarded flow");
+        deliver_leg_f_connection(&intercept, leg_f, forwarder_local, orig_dst, leg);
         wait_published(&worker, &allocation, 1).await;
-        (worker, intercept, allocation, client)
+        (worker, intercept, allocation, client, registration)
     }
 
     /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
@@ -5675,11 +5735,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn shared_replacement_shutdown_waits_for_the_same_authoritative_teardown() {
         let enforcement = GatedSharedEnforcement::new(true);
-        let (worker, _intercept, _allocation, _client) = shared_allocation_with_one_handle(
-            Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
-            "shared-shutdown-fence",
-        )
-        .await;
+        let (worker, _intercept, _allocation, _client, _registration) =
+            shared_allocation_with_one_handle(
+                Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
+                "shared-shutdown-fence",
+            )
+            .await;
 
         let leader = tokio::spawn({
             let worker = Arc::clone(&worker);
@@ -5723,11 +5784,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn shared_same_owner_reinstall_waits_for_prior_teardown_before_readiness() {
         let enforcement = GatedSharedEnforcement::new(false);
-        let (worker, _intercept, allocation, _client) = shared_allocation_with_one_handle(
-            Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
-            "shared-same-owner-reinstall-fence",
-        )
-        .await;
+        let (worker, _intercept, allocation, _client, _registration) =
+            shared_allocation_with_one_handle(
+                Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
+                "shared-same-owner-reinstall-fence",
+            )
+            .await;
 
         let mut replacement = tokio::spawn({
             let worker = Arc::clone(&worker);
@@ -5762,11 +5824,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn shared_same_owner_reinstall_failure_keeps_readiness_closed_until_retry() {
         let enforcement = GatedSharedEnforcement::new(true);
-        let (worker, _intercept, allocation, _client) = shared_allocation_with_one_handle(
-            Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
-            "shared-same-owner-reinstall-retry",
-        )
-        .await;
+        let (worker, _intercept, allocation, _client, _registration) =
+            shared_allocation_with_one_handle(
+                Arc::clone(&enforcement) as Arc<dyn MtlsEnforcement>,
+                "shared-same-owner-reinstall-retry",
+            )
+            .await;
 
         let first = tokio::spawn({
             let worker = Arc::clone(&worker);
@@ -5832,7 +5895,16 @@ mod tests {
             .await
             .expect("publish one shared allocation");
         let (leg_f, _leg_c) = shared_legs(&intercept, &worker, &the_alloc);
-        deliver_leg_f_connection(&intercept, leg_f, Ipv4Addr::LOCALHOST, orig_dst, leg);
+        let forwarder_local = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 40_000);
+        let _registration = worker
+            .register_forwarded_outbound(
+                &the_alloc,
+                forwarder_local,
+                orig_dst,
+                ResolvedBackend { addr: orig_dst, expected_svid: None },
+            )
+            .expect("register the forwarded flow");
+        deliver_leg_f_connection(&intercept, leg_f, forwarder_local, orig_dst, leg);
 
         tokio::time::timeout(Duration::from_secs(5), spy.entered())
             .await
@@ -5886,7 +5958,16 @@ mod tests {
             .await
             .expect("publish one shared allocation");
         let (leg_f, _leg_c) = shared_legs(&intercept, &worker, &the_alloc);
-        deliver_leg_f_connection(&intercept, leg_f, Ipv4Addr::LOCALHOST, orig_dst, leg);
+        let forwarder_local = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 40_000);
+        let _registration = worker
+            .register_forwarded_outbound(
+                &the_alloc,
+                forwarder_local,
+                orig_dst,
+                ResolvedBackend { addr: orig_dst, expected_svid: None },
+            )
+            .expect("register the forwarded flow");
+        deliver_leg_f_connection(&intercept, leg_f, forwarder_local, orig_dst, leg);
         tokio::time::timeout(Duration::from_secs(2), spy.entered())
             .await
             .expect("enforce child enters its blocking gate");
@@ -5911,239 +5992,6 @@ mod tests {
         assert_eq!(torn_down.len(), 1, "the late handle is torn down exactly once, never orphaned");
         assert_eq!(torn_down[0].alloc(), &the_alloc);
         worker.shutdown_owner().await.expect("the shared owner joins");
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
-    /// S-ND295-20 — Node-shared listener and capability lifecycle; exact-port rebind; port theft.
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// Twin of `allocation_stop_joins_a_passthrough_child` over a shared
-    /// allocation: stop joins every pass-through child before returning, so
-    /// both relay legs are closed when it returns.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn shared_allocation_stop_joins_a_passthrough_child() {
-        let upstream = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
-            .expect("bind upstream server");
-        let upstream_addr = match upstream.local_addr().expect("upstream local address") {
-            std::net::SocketAddr::V4(addr) => addr,
-            std::net::SocketAddr::V6(_) => panic!("test binds IPv4"),
-        };
-        let (accepted_tx, accepted_rx) = std::sync::mpsc::sync_channel(1);
-        let accept_thread = std::thread::spawn(move || {
-            let (stream, _) = upstream.accept().expect("accept pass-through dial");
-            accepted_tx.send(stream).expect("return accepted upstream leg");
-        });
-
-        let (spy, _calls) = SpyEnforcement::new();
-        let intercept = Arc::new(TestSharedIntercept::new());
-        let worker = Arc::new(MtlsInterceptWorker::new(
-            spy,
-            resolve_scripting(upstream_addr, MtlsResolution::NonMesh),
-            Arc::new(SimClock::new()),
-            Arc::clone(&intercept) as Arc<dyn MtlsIntercept>,
-        ));
-        let the_alloc = alloc("shared-stopped-passthrough-child");
-        worker.start_shared_owner().await.expect("publish the shared owner");
-        worker
-            .start_alloc(&shared_spec(the_alloc.clone(), Ipv4Addr::LOCALHOST))
-            .await
-            .expect("publish one shared allocation");
-        let (leg_f, _leg_c) = shared_legs(&intercept, &worker, &the_alloc);
-        let (leg, _addr, mut client) = accepted_leg_f();
-        deliver_leg_f_connection(&intercept, leg_f, Ipv4Addr::LOCALHOST, upstream_addr, leg);
-        let mut accepted = accepted_rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("pass-through child connects to upstream");
-        accept_thread.join().expect("upstream accept thread");
-
-        tokio::time::timeout(Duration::from_secs(10), worker.stop_alloc(&the_alloc))
-            .await
-            .expect("allocation stop is bounded")
-            .expect("allocation stop succeeds");
-
-        client.set_read_timeout(Some(Duration::from_secs(1))).expect("set client timeout");
-        accepted.set_read_timeout(Some(Duration::from_secs(1))).expect("set upstream timeout");
-        let mut byte = [0_u8; 1];
-        assert_eq!(client.read(&mut byte).expect("client leg closes after joined child"), 0);
-        assert_eq!(accepted.read(&mut byte).expect("upstream leg closes after joined child"), 0);
-        worker.shutdown_owner().await.expect("the shared owner joins");
-    }
-
-    /// An `MtlsResolve` whose `resolve` announces it has entered (the claim is
-    /// held) and then blocks until released, so a body can hold a relay's
-    /// classifying claim in flight while a stop runs.
-    struct GatedResolve {
-        arm: MtlsResolution,
-        entered: Arc<tokio::sync::Notify>,
-        release: Arc<tokio::sync::Notify>,
-    }
-
-    #[async_trait]
-    impl MtlsResolve for GatedResolve {
-        async fn probe(&self) -> overdrive_core::traits::mtls_resolve::Result<()> {
-            Ok(())
-        }
-
-        async fn resolve(
-            &self,
-            _orig_dst: SocketAddrV4,
-        ) -> overdrive_core::traits::mtls_resolve::Result<MtlsResolution> {
-            self.entered.notify_one();
-            self.release.notified().await;
-            Ok(self.arm.clone())
-        }
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
-    /// S-ND295-20 — Node-shared listener and capability lifecycle; exact-port rebind; port theft.
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// C-295-L pass-through obligation (FD § "Why a stop ends its pass-through
-    /// relays", 2026-09-25): a relay whose connection is classified WHILE the
-    /// stop's claim wait is in progress belongs to the retired generation, so
-    /// `stop_alloc` returns only after both of that relay's legs are closed and
-    /// no relay of the generation remains. An implementation that ends relays
-    /// before the claim wait, or registers a relay after releasing its claim
-    /// (the current `handle_shared_outbound` detach, `:3563-3567`), fails this.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn shared_allocation_stop_ends_a_relay_classified_during_its_claim_wait() {
-        let upstream = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
-            .expect("bind upstream server");
-        let upstream_addr = match upstream.local_addr().expect("upstream local address") {
-            std::net::SocketAddr::V4(addr) => addr,
-            std::net::SocketAddr::V6(_) => panic!("test binds IPv4"),
-        };
-        let (accepted_tx, accepted_rx) = std::sync::mpsc::sync_channel(1);
-        let accept_thread = std::thread::spawn(move || {
-            let (stream, _) = upstream.accept().expect("accept pass-through dial");
-            accepted_tx.send(stream).expect("return accepted upstream leg");
-        });
-
-        let (spy, _calls) = SpyEnforcement::new();
-        let entered = Arc::new(tokio::sync::Notify::new());
-        let release = Arc::new(tokio::sync::Notify::new());
-        let intercept = Arc::new(TestSharedIntercept::new());
-        let worker = Arc::new(MtlsInterceptWorker::new(
-            spy,
-            Arc::new(GatedResolve {
-                arm: MtlsResolution::NonMesh,
-                entered: Arc::clone(&entered),
-                release: Arc::clone(&release),
-            }) as Arc<dyn MtlsResolve>,
-            Arc::new(SimClock::new()),
-            Arc::clone(&intercept) as Arc<dyn MtlsIntercept>,
-        ));
-        let the_alloc = alloc("shared-relay-during-claim-wait");
-        worker.start_shared_owner().await.expect("publish the shared owner");
-        worker
-            .start_alloc(&shared_spec(the_alloc.clone(), Ipv4Addr::LOCALHOST))
-            .await
-            .expect("publish one shared allocation");
-        let (leg_f, _leg_c) = shared_legs(&intercept, &worker, &the_alloc);
-        let (leg, _addr, mut client) = accepted_leg_f();
-        deliver_leg_f_connection(&intercept, leg_f, Ipv4Addr::LOCALHOST, upstream_addr, leg);
-
-        // The classifying claim is now held in flight (resolve is blocked).
-        tokio::time::timeout(Duration::from_secs(2), entered.notified())
-            .await
-            .expect("the relay's classifying claim is taken and resolve is in flight");
-
-        // Stop begins while the claim is still in flight; it must not return
-        // until the relay it will produce has ended.
-        let mut stop = tokio::spawn({
-            let worker = Arc::clone(&worker);
-            let the_alloc = the_alloc.clone();
-            async move { worker.stop_alloc(&the_alloc).await }
-        });
-        assert!(
-            tokio::time::timeout(Duration::from_millis(25), &mut stop).await.is_err(),
-            "stop cannot return while a relay's classifying claim is in flight"
-        );
-
-        // Release the classification; the relay is established, then ended by
-        // the stop's claim wait.
-        release.notify_one();
-        let _accepted = accepted_rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("the classified relay connects to upstream");
-        accept_thread.join().expect("upstream accept thread");
-        tokio::time::timeout(Duration::from_secs(10), stop)
-            .await
-            .expect("stop is bounded")
-            .expect("stop task joins")
-            .expect("stop succeeds");
-
-        client.set_read_timeout(Some(Duration::from_secs(1))).expect("set client timeout");
-        let mut byte = [0_u8; 1];
-        assert_eq!(
-            client.read(&mut byte).expect("the relay's client leg is closed when stop returns"),
-            0,
-            "no relay of the retired generation remains after stop"
-        );
-        worker.shutdown_owner().await.expect("the shared owner joins");
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
-    /// S-ND295-20 — Node-shared listener and capability lifecycle; exact-port rebind; port theft.
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// C-295-L owner-shutdown obligation (FD § "Why a stop ends its pass-through
-    /// relays"): when `shutdown_owner` returns, every relay of every allocation
-    /// has ended — a live pass-through relay's legs are both closed.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn shared_owner_shutdown_ends_a_live_relay() {
-        let upstream = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
-            .expect("bind upstream server");
-        let upstream_addr = match upstream.local_addr().expect("upstream local address") {
-            std::net::SocketAddr::V4(addr) => addr,
-            std::net::SocketAddr::V6(_) => panic!("test binds IPv4"),
-        };
-        let (accepted_tx, accepted_rx) = std::sync::mpsc::sync_channel(1);
-        let accept_thread = std::thread::spawn(move || {
-            let (stream, _) = upstream.accept().expect("accept pass-through dial");
-            accepted_tx.send(stream).expect("return accepted upstream leg");
-        });
-
-        let (spy, _calls) = SpyEnforcement::new();
-        let intercept = Arc::new(TestSharedIntercept::new());
-        let worker = Arc::new(MtlsInterceptWorker::new(
-            spy,
-            resolve_scripting(upstream_addr, MtlsResolution::NonMesh),
-            Arc::new(SimClock::new()),
-            Arc::clone(&intercept) as Arc<dyn MtlsIntercept>,
-        ));
-        let the_alloc = alloc("shared-relay-owner-shutdown");
-        worker.start_shared_owner().await.expect("publish the shared owner");
-        worker
-            .start_alloc(&shared_spec(the_alloc.clone(), Ipv4Addr::LOCALHOST))
-            .await
-            .expect("publish one shared allocation");
-        let (leg_f, _leg_c) = shared_legs(&intercept, &worker, &the_alloc);
-        let (leg, _addr, mut client) = accepted_leg_f();
-        deliver_leg_f_connection(&intercept, leg_f, Ipv4Addr::LOCALHOST, upstream_addr, leg);
-        let mut accepted = accepted_rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("the live relay connects to upstream");
-        accept_thread.join().expect("upstream accept thread");
-
-        tokio::time::timeout(Duration::from_secs(10), worker.shutdown_owner())
-            .await
-            .expect("owner shutdown is bounded")
-            .expect("the shared owner joins");
-
-        client.set_read_timeout(Some(Duration::from_secs(1))).expect("set client timeout");
-        accepted.set_read_timeout(Some(Duration::from_secs(1))).expect("set upstream timeout");
-        let mut byte = [0_u8; 1];
-        assert_eq!(
-            client.read(&mut byte).expect("the relay's client leg is closed after owner shutdown"),
-            0
-        );
-        assert_eq!(
-            accepted
-                .read(&mut byte)
-                .expect("the relay's upstream leg is closed after owner shutdown"),
-            0
-        );
     }
 
     /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
