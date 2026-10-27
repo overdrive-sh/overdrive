@@ -8,8 +8,8 @@
 use std::collections::BTreeMap;
 use std::io;
 use std::os::fd::{AsRawFd, OwnedFd};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, OnceLock};
 
 use nix::sys::socket::{
     AddressFamily, Backlog, SockFlag, SockType, VsockAddr, bind, getpeername, getsockname, listen,
@@ -37,7 +37,6 @@ struct BeaconConnection {
     write_lock: tokio::sync::Mutex<()>,
 }
 
-#[derive(Default)]
 struct State {
     listener: Option<Arc<AsyncFd<OwnedFd>>>,
     bound_port: Option<VsockPort>,
@@ -45,11 +44,17 @@ struct State {
     next_sequence: u32,
 }
 
+impl State {
+    const fn new() -> Self {
+        Self { listener: None, bound_port: None, connections: BTreeMap::new(), next_sequence: 0 }
+    }
+}
+
 /// The node beacon listener on the host kernel: binds `VMADDR_CID_ANY`,
 /// accepts guest connections and reports each one's kernel peer
 /// (`BeaconConnKey`).
 pub struct VsockBeaconIo {
-    instance: u32,
+    instance: OnceLock<u32>,
     state: Mutex<State>,
 }
 
@@ -62,24 +67,25 @@ impl VsockBeaconIo {
         clippy::new_without_default,
         reason = "DG-4-CTOR pins no `Default`: the beacon adapter is constructed explicitly at the composition root"
     )]
-    pub fn new() -> Self {
-        Self {
-            instance: NEXT_INSTANCE.fetch_add(1, Ordering::Relaxed),
-            state: Mutex::new(State::default()),
-        }
+    pub const fn new() -> Self {
+        Self { instance: OnceLock::new(), state: Mutex::new(State::new()) }
+    }
+
+    fn instance(&self) -> u32 {
+        *self.instance.get_or_init(|| NEXT_INSTANCE.fetch_add(1, Ordering::Relaxed))
     }
 
     fn sequence(&self, socket: &BeaconSocket) -> u64 {
         let raw = socket.raw();
         let instance = u32::try_from(raw >> 32).unwrap_or(0);
-        if instance != self.instance {
+        if instance != self.instance() {
             unreachable!("a beacon handle another adapter issued was passed to VsockBeaconIo");
         }
         raw & u64::from(u32::MAX)
     }
 
     fn handle(&self, sequence: u32) -> BeaconSocket {
-        BeaconSocket::from_raw((u64::from(self.instance) << 32) | u64::from(sequence))
+        BeaconSocket::from_raw((u64::from(self.instance()) << 32) | u64::from(sequence))
     }
 
     fn connection(&self, socket: &BeaconSocket) -> Arc<BeaconConnection> {
