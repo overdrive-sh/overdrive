@@ -417,7 +417,7 @@ enum MetalAction {
     Shell,
     /// Sync, then run a command on the metal box (remaining args forwarded).
     ///
-    /// Default wraps the command in `sudo -E env "PATH=$PATH" ...` so it
+    /// Default wraps the command in `sudo -n env "HOME=$HOME" "PATH=$PATH" ...` so it
     /// runs as root — the permission surface the KVM / cgroup tests need
     /// (`$PATH` is expanded on the remote host, not locally). Pass
     /// `--no-sudo` to run as the login user, `--no-sync` to skip the
@@ -426,11 +426,16 @@ enum MetalAction {
         /// Skip the pre-run rsync; run against whatever is already on the box.
         #[arg(long)]
         no_sync: bool,
-        /// Run as the login user instead of wrapping in `sudo -E ...`.
+        /// Run as the login user instead of wrapping in `sudo -n env ...`.
         #[arg(long)]
         no_sudo: bool,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
         args: Vec<String>,
+    },
+    /// Collect a previously registered Metal run by its durable run id.
+    Collect {
+        /// Exactly 24 lowercase hexadecimal characters printed by `metal run`.
+        run_id: String,
     },
 }
 
@@ -486,7 +491,16 @@ fn run() -> Result<()> {
         Task::Mutants(args) => mutants(args),
         Task::Ci => ci(),
         Task::Lima { action } => lima(action),
-        Task::Metal { action } => metal(action),
+        Task::Metal { action } => {
+            let status = metal(action)?;
+            if status != 0 {
+                // Metal command and collection statuses are part of the
+                // operator-facing contract.  Keep every other xtask action
+                // on the normal Result-to-1 error path above.
+                std::process::exit(i32::from(status));
+            }
+            Ok(())
+        }
         Task::Hooks { action } => hooks(action),
         Task::Quint { action } => match action {
             QuintAction::Typecheck => xtask::quint::typecheck(),
@@ -911,42 +925,91 @@ fn metal_sync(target: &str) -> Result<()> {
 
 /// `cargo xtask metal …` — the metal sibling of `lima`. Resolves the
 /// target host, then syncs / shells / runs over ssh. `run` rsyncs first
-/// (unless `--no-sync`) and wraps in `sudo -n env "PATH=$PATH" …` by
+/// (unless `--no-sync`) and wraps in `sudo -n env "HOME=$HOME" "PATH=$PATH" …` by
 /// default (unless `--no-sudo`) so the KVM / cgroup tests get root.
-fn metal(action: MetalAction) -> Result<()> {
-    which_or_hint(
-        "ssh",
-        "install an OpenSSH client (ships with macOS; `apt-get install openssh-client` on Linux)",
-    )?;
-    let target = metal_target()?;
-
+fn metal(action: MetalAction) -> Result<u8> {
     match action {
-        MetalAction::Sync => metal_sync(&target),
-        MetalAction::Shell => sh(
-            "metal shell (bootstrap lease session)",
-            Command::new("bash").args([METAL_BOOTSTRAP, &target, "--shell"]),
-        ),
-        MetalAction::Run { no_sync, no_sudo, args } => {
-            if args.is_empty() {
-                bail!(
-                    "no command given; use `cargo xtask metal run -- cargo nextest run \
+        MetalAction::Collect { run_id } => {
+            if !valid_metal_run_id(&run_id) {
+                eprintln!("OVERDRIVE_METAL_RUNNER_ERROR error=invalid_run_id");
+                return Ok(64);
+            }
+            which_or_hint(
+                "ssh",
+                "install an OpenSSH client (ships with macOS; `apt-get install openssh-client` on Linux)",
+            )?;
+            let target = metal_target()?;
+            metal_collect(&target, &run_id)
+        }
+        action => {
+            which_or_hint(
+                "ssh",
+                "install an OpenSSH client (ships with macOS; `apt-get install openssh-client` on Linux)",
+            )?;
+            let target = metal_target()?;
+            match action {
+                MetalAction::Sync => {
+                    metal_sync(&target)?;
+                    Ok(0)
+                }
+                MetalAction::Shell => {
+                    sh(
+                        "metal shell (bootstrap lease session)",
+                        Command::new("bash").args([METAL_BOOTSTRAP, &target, "--shell"]),
+                    )?;
+                    Ok(0)
+                }
+                MetalAction::Run { no_sync, no_sudo, args } => {
+                    if args.is_empty() {
+                        bail!(
+                            "no command given; use `cargo xtask metal run -- cargo nextest run \
                      -p overdrive-cli --features integration-tests,kvm-tests`"
-                );
+                        );
+                    }
+                    let (kernel, rootfs) = metal_guest_artifacts()?;
+                    let mut command = Command::new("bash");
+                    command.args([METAL_BOOTSTRAP, &target, "--run"]);
+                    command.env(METAL_KERNEL_ENV, kernel).env(METAL_ROOTFS_ENV, rootfs);
+                    if no_sync {
+                        command.arg("--no-sync");
+                    }
+                    if no_sudo {
+                        command.arg("--no-sudo");
+                    }
+                    command.arg("--").args(args);
+                    sh_status("metal run (one bootstrap lease session)", &mut command)
+                }
+                MetalAction::Collect { .. } => unreachable!("collect handled above"),
             }
-            let (kernel, rootfs) = metal_guest_artifacts()?;
-            let mut command = Command::new("bash");
-            command.args([METAL_BOOTSTRAP, &target, "--run"]);
-            command.env(METAL_KERNEL_ENV, kernel).env(METAL_ROOTFS_ENV, rootfs);
-            if no_sync {
-                command.arg("--no-sync");
-            }
-            if no_sudo {
-                command.arg("--no-sudo");
-            }
-            command.arg("--").args(args);
-            sh("metal run (one bootstrap lease session)", &mut command)
         }
     }
+}
+
+/// The durable Metal runner accepts only the opaque id it emitted at
+/// submission time.  Validate before the value can reach a remote shell.
+fn valid_metal_run_id(run_id: &str) -> bool {
+    run_id.len() == 24
+        && run_id.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+/// Run a Metal command while preserving its actual process status.  The
+/// generic `sh` helper intentionally turns all nonzero statuses into a
+/// color-eyre error for the other xtask actions; the durable Metal contract
+/// needs the child's 0..=255 status to reach `main` unchanged.
+fn sh_status(label: &str, cmd: &mut Command) -> Result<u8> {
+    eprintln!("xtask: running {label}");
+    let status = cmd.status()?;
+    Ok(status.code().and_then(|code| u8::try_from(code).ok()).unwrap_or(255))
+}
+
+/// `cargo xtask metal collect` deliberately does not resolve guest artifacts
+/// or run the normal Metal preflight.  The bootstrap collector only needs the
+/// target and the validated opaque run id.
+fn metal_collect(target: &str, run_id: &str) -> Result<u8> {
+    sh_status(
+        "metal collect (read-only durable run record)",
+        Command::new("bash").args([METAL_BOOTSTRAP, target, "--collect", run_id]),
+    )
 }
 
 /// Single-quote-wrap an argument so it survives `bash -lc` re-parsing

@@ -98,7 +98,6 @@ memory_bytes = 67108864
 /// synchronously; the dispatch must reach the server.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(workload_cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake; the Service's listener is a step-2 ListenPort, whose scaffold panics in the server's submit path)"]
 async fn cli_submit_streaming_service_routes_to_service_submit_event_consumer() {
     let (handle, tmp) = spawn_server().await;
     let cfg = config_path(tmp.path());

@@ -59,6 +59,7 @@ use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 use overdrive_core::vm::config::VsockPort;
 use overdrive_dataplane::allocators::VipRange;
+use overdrive_netlink::FibRouteType;
 use overdrive_sim::adapters::ca::SimCa;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::dataplane::SimDataplane;
@@ -74,16 +75,18 @@ use super::{
     dispatch_with_workflow_intent_and_network_provisioner_for_test,
 };
 use crate::guest_network::flow_io::FlowListener;
-use crate::guest_network::flow_io::sim::SimGuestFlowIo;
+use crate::guest_network::flow_io::sim::{SimEffectKind, SimGuestFlowIo};
 use crate::guest_network::{
     CidPhase, GuestAddressPool, GuestConnKey, GuestFlowOwnerPorts, GuestNetworkError,
     GuestNetworkOperation, HostSharedGuestNetworkOwner, SharedGuestNetworkOwner,
 };
 use crate::shared_network_test_ports::worker_over;
-use crate::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
+use crate::veth_provisioner::{VethProvisionError, WorkloadNetnsPlan};
 
 const LISTEN_PORT: u16 = 8080;
 const DESTINATION: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(198, 51, 100, 9), 443);
+/// Bounded scheduler polls for the already-observable pre-activation state.
+const ACTIVATION_PENDING_POLLS: usize = 256;
 
 // ---------------------------------------------------------------------------
 // The recording VM driver (the test's driver-port double)
@@ -183,11 +186,7 @@ struct RecordingNetnsProvisioner {
 }
 
 impl WorkloadNetworkProvisioner for RecordingNetnsProvisioner {
-    fn provision(
-        &self,
-        _workload: &WorkloadNetnsPlan,
-        _vm_tap: &VmTapPlan,
-    ) -> Result<(), VethProvisionError> {
+    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
         *self.provisioned.lock() += 1;
         Ok(())
     }
@@ -223,6 +222,7 @@ impl ShimFixture {
         let worker = worker_over(Arc::clone(&intercept), Arc::clone(&clock));
         worker.start_shared_owner().await.expect("the shared mTLS owner starts over the sim");
         let io = SimGuestFlowIo::new(0x0295_0612);
+        io.auto_release(SimEffectKind::ProbeForwarder);
         let owner = Arc::new(HostSharedGuestNetworkOwner::with_flow_io(
             GuestFlowOwnerPorts {
                 clock: clock.clone(),
@@ -313,6 +313,36 @@ impl ShimFixture {
         self.pool.lease_observation().leases.get(alloc).map(|lease| (lease.cid, lease.launch))
     }
 
+    /// Wait until the concurrent start has provisioned and started the VM but
+    /// cannot activate it because no control session exists. This uses the
+    /// fixture's existing owner/driver/pool observations rather than the Sim
+    /// seam's paused-time idle signal: the production activation retry is
+    /// intentionally runnable while it waits for the session.
+    async fn activation_pending(&self, alloc: &AllocationId) -> (GuestCid, LaunchToken) {
+        for _ in 0..ACTIVATION_PENDING_POLLS {
+            if let Some((cid, launch)) = self.lease(alloc) {
+                let started = self.driver.started().iter().any(|spec| &spec.alloc == alloc);
+                let exec_released = self.driver.exec_released().contains(alloc);
+                let observed = self.owner.flow_observation().await;
+                let pending = observed
+                    .cids
+                    .get(&cid)
+                    .is_some_and(|cid| cid.phase == CidPhase::Provisioned && cid.session.is_none());
+                if started && pending && !exec_released {
+                    return (cid, launch);
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+        panic!(
+            "the concurrent start did not reach session-pending activation within \
+             {ACTIVATION_PENDING_POLLS} scheduler polls; lease={:?}, started={:?}, exec={:?}",
+            self.lease(alloc),
+            self.driver.started(),
+            self.driver.exec_released(),
+        );
+    }
+
     /// The guest of `cid` opens its control session with `launch`.
     async fn open_control_session(&self, cid: GuestCid, launch: LaunchToken) {
         let key = GuestConnKey {
@@ -324,6 +354,7 @@ impl ShimFixture {
             FlowListener::Control,
             key,
             Some(ControlOpen { launch }.encode().to_vec()),
+            Some(launch),
         );
         self.io.settled().await;
     }
@@ -331,10 +362,7 @@ impl ShimFixture {
     /// The guest of `cid` opens a TCP flow to [`DESTINATION`] carrying
     /// `launch`; returns its connection key.
     async fn open_flow(&self, cid: GuestCid, launch: LaunchToken, peer_port: u32) -> GuestConnKey {
-        self.io.set_route_type(
-            *DESTINATION.ip(),
-            crate::guest_network::flow_io::HostRouteType::Unicast,
-        );
+        self.io.set_route_type(*DESTINATION.ip(), FibRouteType::Unicast);
         let key = GuestConnKey {
             listener: self.flow_ports().stream(),
             peer_cid: cid,
@@ -345,7 +373,12 @@ impl ShimFixture {
             destination: DESTINATION,
             launch,
         };
-        self.io.queue_connection(FlowListener::Stream, key, Some(request.encode().to_vec()));
+        self.io.queue_connection(
+            FlowListener::Stream,
+            key,
+            Some(request.encode().to_vec()),
+            Some(launch),
+        );
         self.io.settled().await;
         key
     }
@@ -412,15 +445,13 @@ fn start(name: &str) -> Action {
 /// guest opens its control session with the live launch token, then the CID
 /// becomes Active and EXEC is released exactly once.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn exec_is_released_only_after_the_allocation_is_active() {
     let fixture = ShimFixture::build().await;
     let (hold, _quiescence) = fixture.owner.quiesce().await;
     let name = "nd295-p6-s12";
 
     let (dispatched, ()) = tokio::join!(fixture.dispatch(start(name)), async {
-        fixture.io.settled().await;
-        let (cid, launch) = fixture.lease(&alloc_id(name)).expect("the allocation is leased");
+        let (cid, launch) = fixture.activation_pending(&alloc_id(name)).await;
         let started = fixture.driver.started();
         assert_eq!(started.len(), 1, "the VM is started once");
         let transport = started[0].transport.as_ref().expect("the spec carries the transport");
@@ -442,7 +473,8 @@ async fn exec_is_released_only_after_the_allocation_is_active() {
             Ok(crate::guest_network::ForwardingRestore::Reopened),
             "the owner's own hold is redeemed at its ledger and reopens at zero"
         );
-        fixture.io.settled().await;
+        let (pending_cid, pending_launch) = fixture.activation_pending(&alloc_id(name)).await;
+        assert_eq!((pending_cid, pending_launch), (cid, launch), "the pending lease is stable");
         assert_eq!(
             fixture.cid_phase(cid).await,
             Some(CidPhase::Provisioned),
@@ -457,6 +489,10 @@ async fn exec_is_released_only_after_the_allocation_is_active() {
     let (cid, _) = fixture.lease(&alloc_id(name)).expect("still leased");
     assert_eq!(fixture.cid_phase(cid).await, Some(CidPhase::Active));
     assert_eq!(fixture.driver.exec_released(), vec![alloc_id(name)], "EXEC released exactly once");
+    fixture
+        .dispatch(Action::StopAllocation { alloc_id: alloc_id(name), terminal: None })
+        .await
+        .expect("fixture cleanup tears down the active allocation");
 }
 
 /// P6-S12 (row 4) — An activation after teardown began never releases EXEC:
@@ -468,13 +504,11 @@ async fn exec_is_released_only_after_the_allocation_is_active() {
 /// is refused with `PostconditionMismatch { operation: ForwardingActivate }`,
 /// the owner holds no CID for it, and no second EXEC is released.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn an_activation_after_teardown_is_refused_and_releases_no_exec() {
     let fixture = ShimFixture::build().await;
     let name = "nd295-p6-s12-row4";
     let (dispatched, ()) = tokio::join!(fixture.dispatch(start(name)), async {
-        fixture.io.settled().await;
-        let (cid, launch) = fixture.lease(&alloc_id(name)).expect("leased");
+        let (cid, launch) = fixture.activation_pending(&alloc_id(name)).await;
         fixture.open_control_session(cid, launch).await;
     });
     dispatched.expect("the start completes");
@@ -516,7 +550,6 @@ async fn an_activation_after_teardown_is_refused_and_releases_no_exec() {
 /// Running, the owner holds no CID for it, and the pool holds no lease for
 /// it.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn a_vmm_exit_before_ready_releases_no_exec_and_no_lease_survives() {
     let fixture = ShimFixture::build().await;
     fixture.driver.script(StartScript::ExitBeforeReady);
@@ -547,13 +580,11 @@ async fn a_vmm_exit_before_ready_releases_no_exec_and_no_lease_survives() {
 /// carrying the dead launch's token reaches the flow listener from its CID,
 /// then the owner closes it, holds no CID and registers no flow for it.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn a_vmm_death_aborts_its_flows_and_a_stale_launch_flow_is_closed_unattributed() {
     let fixture = ShimFixture::build().await;
     let name = "nd295-p6-s10-death";
     let (dispatched, ()) = tokio::join!(fixture.dispatch(start(name)), async {
-        fixture.io.settled().await;
-        let (cid, launch) = fixture.lease(&alloc_id(name)).expect("leased");
+        let (cid, launch) = fixture.activation_pending(&alloc_id(name)).await;
         fixture.open_control_session(cid, launch).await;
     });
     dispatched.expect("the start completes");
@@ -603,7 +634,6 @@ async fn a_vmm_death_aborts_its_flows_and_a_stale_launch_flow_is_closed_unattrib
 /// with the guest network composed, then it is leased, its spec carries the
 /// transport, and EXEC follows its activation (C5b contrast).
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn an_allocation_without_a_guest_transport_runs_as_today() {
     let fixture = ShimFixture::build().await;
     let netns = RecordingNetnsProvisioner::default();
@@ -636,8 +666,7 @@ async fn an_allocation_without_a_guest_transport_runs_as_today() {
 
     let enabled = "nd295-p6-s12b-on";
     let (dispatched, ()) = tokio::join!(fixture.dispatch(start(enabled)), async {
-        fixture.io.settled().await;
-        let (cid, launch) = fixture.lease(&alloc_id(enabled)).expect("leased");
+        let (cid, launch) = fixture.activation_pending(&alloc_id(enabled)).await;
         assert!(
             !fixture.driver.exec_released().contains(&alloc_id(enabled)),
             "no EXEC before activation"
@@ -655,4 +684,8 @@ async fn an_allocation_without_a_guest_transport_runs_as_today() {
         vec![alloc_id(disabled), alloc_id(enabled)],
         "EXEC once each, the composed one after activation"
     );
+    fixture
+        .dispatch(Action::StopAllocation { alloc_id: alloc_id(enabled), terminal: None })
+        .await
+        .expect("fixture cleanup tears down the active guest allocation");
 }

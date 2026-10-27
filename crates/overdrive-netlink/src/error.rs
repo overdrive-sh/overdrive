@@ -15,6 +15,7 @@
 //! could silently reclassify a genuine failure on the packet-corruption
 //! path.
 
+use std::net::Ipv4Addr;
 use std::num::NonZeroI32;
 
 /// `-EEXIST` (address / kernel-auto on-link route already present). Netlink
@@ -74,6 +75,11 @@ pub enum NetlinkError {
         /// see [`NetlinkError::Link`].
         source: Box<rtnetlink::Error>,
     },
+    /// A successful destination-specific IPv4 FIB lookup returned no route
+    /// message. A normal no-route result remains the kernel's typed route
+    /// error.
+    #[error("IPv4 FIB lookup for {destination} returned no route message")]
+    FibLookupMissing { destination: Ipv4Addr },
     /// The named link was absent when an operation that requires it (address
     /// add, set-up, route add) tried to resolve its ifindex. Carries a
     /// synthetic `-ENODEV` so the converge executor swallows it as the
@@ -218,8 +224,9 @@ impl NetlinkError {
             | Self::Nft { source, .. }
             | Self::Setns { source, .. }
             | Self::Netns { source, .. } => source.raw_os_error().map(|raw| -raw.abs()),
-            // A connect failure carries no kernel errno (structural).
-            Self::Connect { .. } => None,
+            // A connect failure carries no kernel errno (structural); a
+            // successful FIB lookup with no route message has no errno either.
+            Self::Connect { .. } | Self::FibLookupMissing { .. } => None,
         }
     }
 }

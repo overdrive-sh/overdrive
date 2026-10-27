@@ -30,7 +30,9 @@ sim forwarder. Semantic RED: the owner scaffold
 
 `flow_io/sim/tests.rs` (10): the seam's self-tests, seeded. The two
 gateway-route tests are active; the arbiter tests are pending step 4: a
-destination reset gives `next_end` `SocketError { B }` and far end `Reset`;
+destination reset gives `next_end` `SocketError { B, ECONNRESET }`, sends
+`SHUT_RDWR` on V_h so the opposite guest far end resets, and produces no
+echoed QPROJ-7 event at the initiating destination;
 `close_forwarder` releases its context row; watching a swept `V_h` is
 refused `HalfEnded { ECONNRESET }`; the D-UP-19 accept order; the QPROJ-7
 `socket_observation`. Test-support additions to the seam: `vsock_of_opt`,

@@ -491,7 +491,6 @@ impl ElementFaultIntercept {
         Ok(Some(overdrive_worker::mtls_intercept_port::InterceptState {
             program,
             policy_route: true,
-            intercept_mark_guard: false,
             members,
         }))
     }
@@ -681,6 +680,10 @@ impl SharedGuestNetworkOwner for RecordingGuestNetwork {
 
     fn flow_ports(&self) -> Option<GuestFlowPorts> {
         self.inner.flow_ports()
+    }
+
+    fn leaked_quiescence_holds(&self) -> u32 {
+        self.inner.leaked_quiescence_holds()
     }
 
     async fn audit_shared(&self) -> Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError> {

@@ -1,6 +1,7 @@
-# quiescence-hazard-leak-ignored: counterexample, 13 state(s) (from the TLC trace)
+# quiescence-hazard-leak-ignored: counterexample, 12 state(s) (from the TLC trace)
 
 State 1
+  roundState = [C1 |-> "outside", C2 |-> "outside"]
   up = TRUE
   repLeft = -1
   rec = [C1 |-> "idle", C2 |-> "idle"]
@@ -16,50 +17,50 @@ State 1
   att = [C1 |-> 0, C2 |-> 0]
   latch = FALSE
 
-State 2 [Damage]
-  dmg = [C1 |-> TRUE, C2 |-> FALSE]
+State 2 [ForeignRestore]
+  foreign = TRUE
 
-State 3 [RecQuiesce]
-  rec = [C1 |-> "held", C2 |-> "idle"]
-  cnt = 1
-  latch = TRUE
+State 3 [recStep]
+  up = FALSE
+  g = [ reopenEarly |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> TRUE, dropped |-> FALSE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+  stop = "failstop"
+  foreign = FALSE
 
-State 4 [RecRepair]
-  rec = [C1 |-> "repaired", C2 |-> "idle"]
-  dmg = [C1 |-> FALSE, C2 |-> FALSE]
+State 4 [RestartWith]
+  up = TRUE
+  stop = "none"
 
 State 5 [LeakHold]
-  cnt = 2
-  g = [ reopenEarly |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
-  leaked = 1
-
-State 6 [RecRestore]
-  rec = [C1 |-> "idle", C2 |-> "idle"]
   cnt = 1
-  g = [ reopenEarly |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> TRUE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+  g = [ reopenEarly |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> TRUE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+  leaked = 1
+  latch = TRUE
+
+State 6 [Damage]
+  dmg = [C1 |-> FALSE, C2 |-> TRUE]
 
 State 7 [Damage]
-  dmg = [C1 |-> FALSE, C2 |-> TRUE]
-
-State 8 [RecQuiesce]
-  rec = [C1 |-> "idle", C2 |-> "held"]
-  cnt = 2
-
-State 9 [RepFail]
-  att = [C1 |-> 0, C2 |-> 1]
-
-State 10 [RepFail]
-  att = [C1 |-> 0, C2 |-> 2]
-
-State 11 [Damage]
   dmg = [C1 |-> TRUE, C2 |-> TRUE]
 
-State 12 [RecQuiesce]
-  rec = [C1 |-> "held", C2 |-> "held"]
-  cnt = 3
+State 8 [recStep]
+  roundState = [C1 |-> "pending", C2 |-> "outside"]
+  rec = [C1 |-> "held", C2 |-> "idle"]
+  cnt = 2
+  g = [ reopenEarly |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> FALSE, failStopped |-> TRUE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
 
-State 13 [RecRepair]
-  rec = [C1 |-> "repaired", C2 |-> "held"]
+State 9 [RecRepair]
+  rec = [C1 |-> "repaired", C2 |-> "idle"]
   dmg = [C1 |-> FALSE, C2 |-> TRUE]
 
--> loops back to State 10
+State 10 [RecRestore]
+  roundState = [C1 |-> "outside", C2 |-> "pending"]
+  rec = [C1 |-> "idle", C2 |-> "held"]
+  g = [ reopenEarly |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> TRUE, failStopped |-> TRUE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+
+State 11 [RepFail]
+  att = [C1 |-> 0, C2 |-> 1]
+
+State 12 [RepFail]
+  att = [C1 |-> 0, C2 |-> 2]
+
+-> stutters forever in State 12

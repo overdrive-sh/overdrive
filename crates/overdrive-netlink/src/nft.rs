@@ -90,20 +90,17 @@ const NLA_F_NESTED: u16 = 0x8000;
 // families / versions.
 /// `NFPROTO_IPV4` — the `ip` family the shared `overdrive-mtls` table lives in.
 const NFPROTO_IPV4: u8 = 2;
-const NFPROTO_BRIDGE: u8 = 7;
 
 /// Closed private nft family discriminator shared by the one codec.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NftFamily {
     Ipv4,
-    Bridge,
 }
 
 impl NftFamily {
     const fn nfproto(self) -> u8 {
         match self {
             Self::Ipv4 => NFPROTO_IPV4,
-            Self::Bridge => NFPROTO_BRIDGE,
         }
     }
 }
@@ -137,10 +134,8 @@ const NFTA_SET_USERDATA: u16 = 13;
 // flowtable/object attrs.
 const NFTA_FLOWTABLE_TABLE: u16 = 1;
 const NFTA_FLOWTABLE_NAME: u16 = 2;
-const NFTA_FLOWTABLE_HANDLE: u16 = 6;
 const NFTA_OBJ_TABLE: u16 = 1;
 const NFTA_OBJ_NAME: u16 = 2;
-const NFTA_OBJ_HANDLE: u16 = 6;
 const NFTA_SET_ELEM_KEY: u16 = 1;
 const NFTA_SET_ELEM_LIST_TABLE: u16 = 1;
 const NFTA_SET_ELEM_LIST_SET: u16 = 2;
@@ -169,7 +164,6 @@ const NFTA_COUNTER_BYTES: u16 = 1;
 const NFTA_COUNTER_PACKETS: u16 = 2;
 // data.
 const NFTA_DATA_VALUE: u16 = 1;
-const NFT_IFNAME_KEY_TYPE: u32 = 41;
 const NFTA_DATA_VERDICT: u16 = 2;
 const NFTA_VERDICT_CODE: u16 = 1;
 // payload.
@@ -573,15 +567,6 @@ fn e_iifname_eq(host_veth: &str) -> Vec<u8> {
     ex
 }
 
-fn e_iifname_lookup(set: &str) -> Vec<u8> {
-    let mut ex = e_meta_load(NFT_META_IIFNAME, NFT_REG_1);
-    let mut data = Vec::new();
-    attr(&mut data, NFTA_LOOKUP_SET, &cstr(set));
-    attr_be32(&mut data, NFTA_LOOKUP_SREG, NFT_REG_1);
-    ex.extend(expr("lookup", &data));
-    ex
-}
-
 fn e_lookup(set: &str, sreg: u32) -> Vec<u8> {
     let mut data = Vec::new();
     attr(&mut data, NFTA_LOOKUP_SET, &cstr(set));
@@ -965,50 +950,10 @@ fn newset_payload_schema_family(
     payload
 }
 
-fn newset_payload_family(family: NftFamily, table: &str, set: &str) -> Vec<u8> {
-    // `NFT_DATA_VALUE` is informational for an ifname key.  The kernel uses
-    // the explicit key length and validates the family-specific set schema.
-    newset_payload_schema_family(
-        family,
-        table,
-        set,
-        NFT_IFNAME_KEY_TYPE,
-        IFNAMSIZ as u32,
-        1,
-        &[0x00, 0x04, 0x01, 0x00, 0x00, 0x00],
-    )
-}
-
 fn delete_set_payload_family(family: NftFamily, table: &str, set: &str) -> Vec<u8> {
     let mut payload = nfgenmsg(family.nfproto(), 0);
     attr(&mut payload, NFTA_SET_TABLE, &cstr(table));
     attr(&mut payload, NFTA_SET_NAME, &cstr(set));
-    payload
-}
-
-fn set_elem_payload_family(
-    family: NftFamily,
-    table: &str,
-    set: &str,
-    member: &[u8; IFNAMSIZ],
-) -> Vec<u8> {
-    let mut element = Vec::new();
-    let mut key = Vec::new();
-    attr(&mut key, NFTA_DATA_VALUE, member);
-    // `NFTA_SET_ELEM_LIST_ELEMENTS` is a list: each element receives its own
-    // nested index attribute, whose payload is the nested key attribute.
-    // Omitting either wrapper produces an indistinguishable-looking packet
-    // but the kernel rejects it with EINVAL.
-    let mut key_element = Vec::new();
-    attr(&mut key_element, NFTA_SET_ELEM_KEY | NLA_F_NESTED, &key);
-    attr(&mut element, NLA_F_NESTED | 1, &key_element);
-    let mut payload = nfgenmsg(family.nfproto(), 0);
-    attr(&mut payload, NFTA_SET_ELEM_LIST_TABLE, &cstr(table));
-    attr(&mut payload, NFTA_SET_ELEM_LIST_SET, &cstr(set));
-    // The kernel requires the numeric set id on NEW/DELSETELEM requests;
-    // it is the id assigned by NEWSET above, not an ABI-visible public id.
-    attr_be32(&mut payload, NFTA_SET_ELEM_LIST_SET_ID, 1);
-    attr(&mut payload, NFTA_SET_ELEM_LIST_ELEMENTS_NESTED, &element);
     payload
 }
 
@@ -1211,11 +1156,7 @@ fn canonical_attr_set(data: &[u8], nested_data_kinds: &[u16]) -> std::io::Result
     Ok(canonical)
 }
 
-fn canonical_expression_data(
-    name: &str,
-    data: &[u8],
-    allow_unknown: bool,
-) -> std::io::Result<Vec<u8>> {
+fn canonical_expression_data(name: &str, data: &[u8]) -> std::io::Result<Vec<u8>> {
     match name {
         "cmp" => canonical_attr_set(data, &[NFTA_CMP_DATA]),
         "immediate" => canonical_attr_set(data, &[NFTA_IMMEDIATE_DATA]),
@@ -1240,13 +1181,6 @@ fn canonical_expression_data(
             }
             Ok(canonical)
         }
-        // The bridge adapter must retain a well-formed expression it does not
-        // understand as a semantic conflict.  Preserve its canonical
-        // attribute framing here; the closed bridge projection names it as an
-        // `Unknown` expression without exposing raw ABI bytes.  The existing
-        // IPv4 decoder remains strict and still fails closed on unknown
-        // expressions.
-        _ if allow_unknown => canonical_attr_set(data, &[]),
         _ => Err(invalid_data(format!("unknown nft expression {name:?}"))),
     }
 }
@@ -1254,14 +1188,6 @@ fn canonical_expression_data(
 fn normalize_rule_program(
     expressions: &[u8],
     require_sampled_counter: bool,
-) -> std::io::Result<(Vec<u8>, Option<RuleCounterSnapshot>)> {
-    normalize_rule_program_with_unknown(expressions, require_sampled_counter, false)
-}
-
-fn normalize_rule_program_with_unknown(
-    expressions: &[u8],
-    require_sampled_counter: bool,
-    allow_unknown: bool,
 ) -> std::io::Result<(Vec<u8>, Option<RuleCounterSnapshot>)> {
     let mut normalized = Vec::with_capacity(expressions.len());
     let mut counter = None;
@@ -1322,7 +1248,7 @@ fn normalize_rule_program_with_unknown(
             });
             normalized.extend(e_anonymous_counter());
         } else {
-            normalized.extend(expr(name, &canonical_expression_data(name, data, allow_unknown)?));
+            normalized.extend(expr(name, &canonical_expression_data(name, data)?));
         }
     }
     Ok((normalized, counter))
@@ -1377,11 +1303,7 @@ fn decode_rule_message_family(
                 userdata = Some(value.to_vec());
             }
             NFTA_RULE_EXPRESSIONS if program.is_none() => {
-                program = Some(normalize_rule_program_with_unknown(
-                    value,
-                    true,
-                    family == NftFamily::Bridge,
-                )?);
+                program = Some(normalize_rule_program(value, true)?);
             }
             NFTA_RULE_TABLE
             | NFTA_RULE_CHAIN
@@ -1863,71 +1785,6 @@ fn send_atomic_rule_transaction(mutations: &[AtomicRuleMutation<'_>]) -> Result<
     Ok(())
 }
 
-struct BridgeRuleMutation<'a> {
-    table: &'a str,
-    chain: &'a str,
-    expressions: &'a [u8],
-    userdata: &'a [u8],
-    append: bool,
-}
-
-fn send_atomic_bridge_rule_transaction(
-    mutations: &[BridgeRuleMutation<'_>],
-) -> Result<(), NetlinkError> {
-    if mutations.is_empty() {
-        return Ok(());
-    }
-    let sock = NfSock::open()
-        .map_err(|error| NetlinkError::nft("bridge-atomic-rule-transaction", error))?;
-    let mut batch = Vec::new();
-    nlmsg(
-        &mut batch,
-        NFNL_MSG_BATCH_BEGIN,
-        NLM_F_REQUEST,
-        1,
-        &nfgenmsg(AF_UNSPEC, NFNL_SUBSYS_NFTABLES),
-    );
-    for (index, mutation) in mutations.iter().enumerate() {
-        let mut flags = NLM_F_CREATE;
-        if mutation.append {
-            flags |= NLM_F_APPEND;
-        }
-        nlmsg(
-            &mut batch,
-            nft_msg_type(NFT_MSG_NEWRULE),
-            NLM_F_REQUEST | NLM_F_ACK | flags,
-            index as u32 + 2,
-            &newrule_payload_family(
-                NftFamily::Bridge,
-                mutation.table,
-                mutation.chain,
-                mutation.expressions,
-                mutation.userdata,
-            ),
-        );
-    }
-    nlmsg(
-        &mut batch,
-        NFNL_MSG_BATCH_END,
-        NLM_F_REQUEST,
-        mutations.len() as u32 + 2,
-        &nfgenmsg(AF_UNSPEC, NFNL_SUBSYS_NFTABLES),
-    );
-    sock.send(&batch)
-        .map_err(|error| NetlinkError::nft("bridge-atomic-rule-transaction", error))?;
-    let end = mutations.len() as u32 + 2;
-    let mut pending = (2..end).collect::<BTreeSet<_>>();
-    while !pending.is_empty() {
-        let mut buffer = vec![0_u8; 32_768];
-        let received = sock
-            .recv(&mut buffer)
-            .map_err(|error| NetlinkError::nft("bridge-atomic-rule-transaction", error))?;
-        collect_atomic_rule_acks(&buffer[..received], &mut pending)
-            .map_err(|error| NetlinkError::nft("bridge-atomic-rule-transaction", error))?;
-    }
-    Ok(())
-}
-
 /// Send one batched nftables mutation (`BATCH_BEGIN` + `msg` + `BATCH_END`) and
 /// read its ACK. `op` is the `NFT_MSG_*` op; `flags` the extra flags on the
 /// mutation message (`NLM_F_ACK` is always added). `-EEXIST` is NOT swallowed
@@ -1961,53 +1818,6 @@ fn send_batched(
     let mut buf = vec![0u8; 32768];
     let n = sock.recv(&mut buf).map_err(|e| NetlinkError::nft(sock_op, e))?;
     batch_ack(&buf[..n]).map_err(|e| NetlinkError::nft(sock_op, e))
-}
-
-fn send_batched_family(
-    family: NftFamily,
-    op: u16,
-    flags: u16,
-    payload: &[u8],
-    sock_op: &'static str,
-) -> Result<(), NetlinkError> {
-    let sock = NfSock::open().map_err(|e| NetlinkError::nft(sock_op, e))?;
-    let mut batch = Vec::with_capacity(40 + (16 + payload.len()).next_multiple_of(4));
-    nlmsg(
-        &mut batch,
-        NFNL_MSG_BATCH_BEGIN,
-        NLM_F_REQUEST,
-        1,
-        &nfgenmsg(AF_UNSPEC, NFNL_SUBSYS_NFTABLES),
-    );
-    nlmsg(&mut batch, nft_msg_type(op), NLM_F_REQUEST | NLM_F_ACK | flags, 2, payload);
-    nlmsg(
-        &mut batch,
-        NFNL_MSG_BATCH_END,
-        NLM_F_REQUEST,
-        3,
-        &nfgenmsg(AF_UNSPEC, NFNL_SUBSYS_NFTABLES),
-    );
-    // Keep the family argument at this private codec boundary explicit.  The
-    // family is carried in the operation payload; the transaction envelope is
-    // intentionally AF_UNSPEC per nf_tables ABI.
-    let _ = family;
-    sock.send(&batch).map_err(|e| NetlinkError::nft(sock_op, e))?;
-    let mut buf = vec![0u8; 32_768];
-    let n = sock.recv(&mut buf).map_err(|e| NetlinkError::nft(sock_op, e))?;
-    batch_ack(&buf[..n]).map_err(|e| NetlinkError::nft(sock_op, e))
-}
-
-fn send_batched_family_idempotent(
-    family: NftFamily,
-    op: u16,
-    payload: &[u8],
-    sock_op: &'static str,
-) -> Result<(), NetlinkError> {
-    match send_batched_family(family, op, NLM_F_CREATE, payload, sock_op) {
-        Ok(()) => Ok(()),
-        Err(error) if error.errno() == Some(NEG_EEXIST) => Ok(()),
-        Err(error) => Err(error),
-    }
 }
 
 /// Send a mutation, swallowing `-EEXIST` as idempotent success (the netlink
@@ -2315,15 +2125,10 @@ fn list_rules_family(
     .map_err(|source| NetlinkError::nft("list-rules", source))
 }
 
-/// One raw chain identity recovered from a family-specific GETCHAIN dump.
-///
-/// This stays private to the codec.  The bridge adapter projects it into its
-/// closed semantic chain shape only after the complete dump has been read.
+/// One raw chain identity recovered from an IPv4 GETCHAIN dump.
 #[derive(Debug, Clone)]
 struct RawChainInfo {
-    table: String,
     name: String,
-    handle: u64,
     hook: Option<(u32, i32)>,
     chain_type: Option<String>,
     policy: Option<u32>,
@@ -2336,19 +2141,6 @@ struct RawSetInfo {
     key_len: u32,
     id: u32,
     userdata: Option<Vec<u8>>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RawOtherChildKind {
-    Flowtable,
-    StatefulObject,
-}
-
-#[derive(Debug, Clone)]
-struct RawOtherChildInfo {
-    kind: RawOtherChildKind,
-    name: String,
-    handle: Option<u64>,
 }
 
 /// Complete one family-specific multipart dump, preserving every data
@@ -2661,13 +2453,12 @@ fn list_chain_info_family(
                 // them from this table-local projection.
                 return Ok(None);
             }
+            let _handle = handle.ok_or_else(|| {
+                NetlinkError::nft("list-chains", invalid_data("chain handle is missing"))
+            })?;
             Ok(Some(RawChainInfo {
-                table: observed_table,
                 name: name.ok_or_else(|| {
                     NetlinkError::nft("list-chains", invalid_data("chain name is missing"))
-                })?,
-                handle: handle.ok_or_else(|| {
-                    NetlinkError::nft("list-chains", invalid_data("chain handle is missing"))
                 })?,
                 hook,
                 chain_type,
@@ -2760,28 +2551,11 @@ fn list_set_info_family(family: NftFamily, table: &str) -> Result<Vec<RawSetInfo
     Ok(entries.into_iter().flatten().collect())
 }
 
-fn list_other_children_family(
-    family: NftFamily,
-    table: &str,
-) -> Result<Vec<RawOtherChildInfo>, NetlinkError> {
-    let mut children = Vec::new();
-    for (operation, kind, label, table_attr, name_attr, handle_attr) in [
-        (
-            NFT_MSG_GETFLOWTABLE,
-            RawOtherChildKind::Flowtable,
-            "list-flowtables",
-            NFTA_FLOWTABLE_TABLE,
-            NFTA_FLOWTABLE_NAME,
-            NFTA_FLOWTABLE_HANDLE,
-        ),
-        (
-            NFT_MSG_GETOBJ,
-            RawOtherChildKind::StatefulObject,
-            "list-objects",
-            NFTA_OBJ_TABLE,
-            NFTA_OBJ_NAME,
-            NFTA_OBJ_HANDLE,
-        ),
+fn has_other_children_family(family: NftFamily, table: &str) -> Result<bool, NetlinkError> {
+    let mut found = false;
+    for (operation, label, table_attr, name_attr) in [
+        (NFT_MSG_GETFLOWTABLE, "list-flowtables", NFTA_FLOWTABLE_TABLE, NFTA_FLOWTABLE_NAME),
+        (NFT_MSG_GETOBJ, "list-objects", NFTA_OBJ_TABLE, NFTA_OBJ_NAME),
     ] {
         let bodies = receive_nft_dump_family(
             family,
@@ -2792,7 +2566,6 @@ fn list_other_children_family(
         for body in bodies {
             let mut observed_table = None;
             let mut name = None;
-            let mut handle = None;
             for (attribute, raw_attribute, payload) in
                 exact_attrs(&body[4..]).map_err(|source| NetlinkError::nft(label, source))?
             {
@@ -2819,33 +2592,20 @@ fn list_other_children_family(
                                 .to_owned(),
                         );
                     }
-                    attr_kind
-                        if attr_kind == handle_attr
-                            && raw_attribute & NLA_F_NESTED == 0
-                            && handle.is_none() =>
-                    {
-                        handle = Some(
-                            exact_be_u64(payload, "child handle")
-                                .map_err(|source| NetlinkError::nft(label, source))?,
-                        );
-                    }
                     _ => {}
                 }
             }
             let observed_table = observed_table
                 .ok_or_else(|| NetlinkError::nft(label, invalid_data("child table is missing")))?;
             if observed_table == table {
-                children.push(RawOtherChildInfo {
-                    kind,
-                    name: name.ok_or_else(|| {
-                        NetlinkError::nft(label, invalid_data("child name is missing"))
-                    })?,
-                    handle,
-                });
+                let _name = name.ok_or_else(|| {
+                    NetlinkError::nft(label, invalid_data("child name is missing"))
+                })?;
+                found = true;
             }
         }
     }
-    Ok(children)
+    Ok(found)
 }
 
 fn read_nft_generation() -> Result<u32, NetlinkError> {
@@ -3064,245 +2824,6 @@ pub fn converge_shared_ip_intercept_members_atomically(
     shared_ip::converge_members(expected_program, expected)
 }
 
-/// Observe the intercept-owned guard table `ip overdrive-mtls-guard` (D-295-R18).
-///
-/// Returns `Ok(true)` exactly when the table, its `prerouting` chain, and its
-/// single drop rule match the guard identity; `Ok(false)` when the table is
-/// absent. A partial, duplicate, malformed, or foreign-conflicting table is a
-/// typed error.
-#[doc(hidden)]
-pub fn observe_intercept_mark_guard() -> Result<bool, NetlinkError> {
-    intercept_mark_guard::observe()
-}
-
-/// Create whatever is missing of the intercept-owned guard table in one atomic
-/// batch, then require [`observe_intercept_mark_guard`] to return `true`
-/// (D-295-R18).
-///
-/// Never rewrites a present non-matching rule; that case returns the typed
-/// error.
-#[doc(hidden)]
-pub fn converge_intercept_mark_guard() -> Result<(), NetlinkError> {
-    intercept_mark_guard::converge()
-}
-
-/// Private semantic codec for D-295-R18's independent IPv4 intercept-mark
-/// guard. It shares the strict nft dump and expression codec above without
-/// extending the public API.
-mod intercept_mark_guard {
-    use std::collections::BTreeSet;
-
-    use super::{
-        AF_UNSPEC, BaseChainSpec, ChainKind, NF_ACCEPT, NF_INET_PRE_ROUTING, NFNL_MSG_BATCH_BEGIN,
-        NFNL_MSG_BATCH_END, NFNL_SUBSYS_NFTABLES, NFT_MSG_NEWCHAIN, NFT_MSG_NEWRULE,
-        NFT_MSG_NEWTABLE, NLM_F_ACK, NLM_F_APPEND, NLM_F_CREATE, NLM_F_REQUEST, NetlinkError,
-        NfSock, NftFamily, RawChainInfo, RuleInfo, collect_atomic_rule_acks, e_drop, e_mark_equals,
-        e_tcp_protocol, invalid_data, list_chain_info_family, list_other_children_family,
-        list_rules_family, list_set_info_family, list_table_names_family, newchain_payload_family,
-        newrule_payload_family, newtable_payload_family, nfgenmsg, nft_msg_type, nlmsg,
-        normalized_rule_program_identity, read_nft_generation,
-    };
-
-    const TABLE: &str = "overdrive-mtls-guard";
-    const CHAIN: &str = "prerouting";
-    const USERDATA: &[u8] = b"ovd295-ip-guard-0";
-    const INTERCEPT_MARK: u32 = 0x295a;
-
-    #[derive(Clone, Copy, Default)]
-    struct Components {
-        table: bool,
-        chain: bool,
-        rule: bool,
-    }
-
-    fn invalid(reason: &'static str) -> NetlinkError {
-        NetlinkError::nft("intercept-mark-guard", invalid_data(reason))
-    }
-
-    fn expected_chain(chain: &RawChainInfo) -> bool {
-        chain.table == TABLE
-            && chain.name == CHAIN
-            && chain.hook == Some((NF_INET_PRE_ROUTING, 0))
-            && chain.chain_type.as_deref() == Some("filter")
-            && chain.policy == Some(NF_ACCEPT)
-    }
-
-    fn expected_rule_program() -> Result<Vec<u8>, NetlinkError> {
-        let mut expressions = e_mark_equals(INTERCEPT_MARK);
-        expressions.extend(e_tcp_protocol());
-        expressions.extend(e_drop());
-        normalized_rule_program_identity(&expressions)
-            .map_err(|source| NetlinkError::nft("intercept-mark-guard", source))
-    }
-
-    fn expected_rule(rule: &RuleInfo) -> Result<bool, NetlinkError> {
-        Ok(rule.userdata == USERDATA
-            && rule.counter.is_none()
-            && rule.normalized_program == expected_rule_program()?)
-    }
-
-    /// Read the complete table-local shape inside one stable ruleset generation.
-    /// Existing mismatches are errors; missing owned components remain available
-    /// for `converge` to create.
-    fn inspect() -> Result<Components, NetlinkError> {
-        let generation_before = read_nft_generation()?;
-        let table_names = list_table_names_family(NftFamily::Ipv4)?;
-        let matching_tables = table_names.iter().filter(|name| name.as_str() == TABLE).count();
-        if matching_tables > 1 {
-            return Err(invalid("duplicate intercept-mark guard tables"));
-        }
-        if matching_tables == 0 {
-            let generation_after = read_nft_generation()?;
-            if generation_before != generation_after {
-                return Err(invalid(
-                    "intercept-mark guard observation crossed a ruleset generation",
-                ));
-            }
-            return Ok(Components::default());
-        }
-
-        let chains = list_chain_info_family(NftFamily::Ipv4, TABLE)?;
-        let sets = list_set_info_family(NftFamily::Ipv4, TABLE)?;
-        let other_children = list_other_children_family(NftFamily::Ipv4, TABLE)?;
-        if !sets.is_empty() || !other_children.is_empty() {
-            return Err(invalid("intercept-mark guard table contains foreign children"));
-        }
-
-        let chain = match chains.as_slice() {
-            [] => None,
-            [chain] if expected_chain(chain) => Some(chain),
-            [_] => return Err(invalid("intercept-mark guard chain identity conflicts")),
-            _ => return Err(invalid("intercept-mark guard table contains duplicate chains")),
-        };
-        let rules = if chain.is_some() {
-            list_rules_family(NftFamily::Ipv4, TABLE, CHAIN)?
-        } else {
-            Vec::new()
-        };
-        let rule = match rules.as_slice() {
-            [] => false,
-            [rule] if expected_rule(rule)? => true,
-            [_] => return Err(invalid("intercept-mark guard rule identity conflicts")),
-            _ => return Err(invalid("intercept-mark guard chain contains duplicate rules")),
-        };
-
-        let generation_after = read_nft_generation()?;
-        if generation_before != generation_after {
-            return Err(invalid("intercept-mark guard observation crossed a ruleset generation"));
-        }
-        Ok(Components { table: true, chain: chain.is_some(), rule })
-    }
-
-    pub(super) fn observe() -> Result<bool, NetlinkError> {
-        let observed = inspect()?;
-        if !observed.table {
-            return Ok(false);
-        }
-        if observed.chain && observed.rule {
-            Ok(true)
-        } else {
-            Err(invalid("intercept-mark guard table is partial"))
-        }
-    }
-
-    fn create_missing(observed: Components) -> Result<(), NetlinkError> {
-        let mut mutations = Vec::with_capacity(3);
-        if !observed.table {
-            mutations.push((
-                NFT_MSG_NEWTABLE,
-                NLM_F_CREATE,
-                newtable_payload_family(NftFamily::Ipv4, TABLE),
-            ));
-        }
-        if !observed.chain {
-            mutations.push((
-                NFT_MSG_NEWCHAIN,
-                NLM_F_CREATE,
-                newchain_payload_family(
-                    NftFamily::Ipv4,
-                    TABLE,
-                    CHAIN,
-                    BaseChainSpec {
-                        hooknum: NF_INET_PRE_ROUTING,
-                        priority: 0,
-                        kind: ChainKind::Filter,
-                    },
-                ),
-            ));
-        }
-        if !observed.rule {
-            let mut expressions = e_mark_equals(INTERCEPT_MARK);
-            expressions.extend(e_tcp_protocol());
-            expressions.extend(e_drop());
-            mutations.push((
-                NFT_MSG_NEWRULE,
-                NLM_F_CREATE | NLM_F_APPEND,
-                newrule_payload_family(NftFamily::Ipv4, TABLE, CHAIN, &expressions, USERDATA),
-            ));
-        }
-        send_transaction(&mutations)
-    }
-
-    fn send_transaction(mutations: &[(u16, u16, Vec<u8>)]) -> Result<(), NetlinkError> {
-        const OP: &str = "intercept-mark-guard-atomic-transaction";
-        if mutations.is_empty() {
-            return Ok(());
-        }
-        let socket = NfSock::open().map_err(|source| NetlinkError::nft(OP, source))?;
-        let mut batch = Vec::new();
-        nlmsg(
-            &mut batch,
-            NFNL_MSG_BATCH_BEGIN,
-            NLM_F_REQUEST,
-            1,
-            &nfgenmsg(AF_UNSPEC, NFNL_SUBSYS_NFTABLES),
-        );
-        for (index, (operation, flags, payload)) in mutations.iter().enumerate() {
-            nlmsg(
-                &mut batch,
-                nft_msg_type(*operation),
-                NLM_F_REQUEST | NLM_F_ACK | *flags,
-                index as u32 + 2,
-                payload,
-            );
-        }
-        let end_sequence = mutations.len() as u32 + 2;
-        nlmsg(
-            &mut batch,
-            NFNL_MSG_BATCH_END,
-            NLM_F_REQUEST,
-            end_sequence,
-            &nfgenmsg(AF_UNSPEC, NFNL_SUBSYS_NFTABLES),
-        );
-        socket.send(&batch).map_err(|source| NetlinkError::nft(OP, source))?;
-
-        let mut pending = (2..end_sequence).collect::<BTreeSet<_>>();
-        while !pending.is_empty() {
-            let mut buffer = vec![0u8; 32_768];
-            let received =
-                socket.recv(&mut buffer).map_err(|source| NetlinkError::nft(OP, source))?;
-            collect_atomic_rule_acks(&buffer[..received], &mut pending)
-                .map_err(|source| NetlinkError::nft(OP, source))?;
-        }
-        Ok(())
-    }
-
-    pub(super) fn converge() -> Result<(), NetlinkError> {
-        let observed = inspect()?;
-        if observed.table && observed.chain && observed.rule {
-            return Ok(());
-        }
-        create_missing(observed)?;
-        if observe()? {
-            Ok(())
-        } else {
-            Err(invalid("intercept-mark guard read-back is absent after convergence"))
-        }
-    }
-}
-
-/// Private semantic IPv4 shared-intercept adapter used by the worker's
-/// module-private `SharedInterceptProgramIo` seam.
 mod shared_ip {
     #![allow(
         clippy::expect_used,
@@ -3610,7 +3131,7 @@ mod shared_ip {
             }
             let name = name.ok_or_else(|| invalid_data("shared IP expression name is missing"))?;
             let data = data.ok_or_else(|| invalid_data("shared IP expression data is missing"))?;
-            let mut data = canonical_expression_data(name, data, false)?;
+            let mut data = canonical_expression_data(name, data)?;
             if name == "immediate" && matches!((chain, index), (Chain::Prerouting, 1 | 3)) {
                 let (rewritten, port) = canonicalize_dynamic_port(&data)?;
                 data = rewritten;
@@ -3729,30 +3250,8 @@ mod shared_ip {
 
     fn collect_once() -> Result<Option<SharedProgram>, NetlinkError> {
         let tables = list_table_names_family(NftFamily::Ipv4)?;
-        // The approved #295 topology intentionally uses the same table name
-        // in the independent IPv4 and bridge nft families: `ip overdrive-mtls`
-        // owns the constant TPROXY rules while `bridge overdrive-mtls` owns
-        // the managed-TAP proof-mark guard. Family identity is part of the
-        // kernel object graph, so a bridge-family table with this name is not
-        // a conflict for the IPv4 observer.
         if !tables.iter().any(|table| table == SHARED_IP_TABLE) {
             return Ok(None);
-        }
-        let bridge_tables = list_table_names_family(NftFamily::Bridge)?;
-        if bridge_tables.iter().any(|name| name == SHARED_IP_TABLE) {
-            let bridge_chains = list_chain_info_family(NftFamily::Bridge, SHARED_IP_TABLE)?;
-            let accepted_companion = bridge_chains.len() == 1
-                && bridge_chains.first().is_some_and(|chain| {
-                    chain.name == "prerouting"
-                        && chain.hook == Some((0, -300))
-                        && chain.chain_type.as_deref() == Some("filter")
-                        && chain.policy == Some(NF_ACCEPT)
-                });
-            if !accepted_companion {
-                return Err(invalid_shared_ip(
-                    "shared IP companion bridge table has an incomplete or foreign identity",
-                ));
-            }
         }
 
         let chains = list_chain_info_family(NftFamily::Ipv4, SHARED_IP_TABLE)?;
@@ -3865,7 +3364,7 @@ mod shared_ip {
                 }
             }
         }
-        if !list_other_children_family(NftFamily::Ipv4, SHARED_IP_TABLE)?.is_empty() {
+        if has_other_children_family(NftFamily::Ipv4, SHARED_IP_TABLE)? {
             return Err(invalid_shared_ip("shared IP table contains foreign stateful children"));
         }
 
@@ -4962,1366 +4461,6 @@ mod shared_ip {
     }
 }
 
-/// Semantic bridge-family proof-mark guard adapter (GH #295).
-///
-/// Raw nft family numbers, attributes, userdata and expression encodings stay
-/// private to this parent module. This public boundary carries only the exact
-/// semantic identities approved by D-295-DISTILL-9.
-pub mod bridge {
-    #![allow(
-        dead_code,
-        clippy::panic,
-        clippy::expect_used,
-        clippy::unnecessary_wraps,
-        reason = "semantic adapter keeps exact validation and source projection local"
-    )]
-    use std::collections::BTreeSet;
-
-    use super::{
-        BaseChainSpec, BridgeRuleMutation, ChainKind, NF_ACCEPT, NFT_META_MARK, NFT_MSG_DELCHAIN,
-        NFT_MSG_DELSET, NFT_MSG_DELSETELEM, NFT_MSG_DELTABLE, NFT_MSG_NEWCHAIN, NFT_MSG_NEWSET,
-        NFT_MSG_NEWSETELEM, NFT_MSG_NEWTABLE, NFT_REG_2, NetlinkError, NftFamily, RawChainInfo,
-        RawOtherChildKind, RuleCounterSnapshot, e_anonymous_counter, e_cmp_eq, e_iifname_lookup,
-        e_immediate_value, e_immediate_verdict, e_meta_load, e_meta_set, invalid_data,
-        list_chain_info_family, list_other_children_family, list_set_elements_family,
-        list_set_info_family, list_table_names_family, newchain_payload_family,
-        newset_payload_family, newtable_payload_family, normalized_rule_program_identity,
-        read_nft_generation, send_atomic_bridge_rule_transaction, send_batched_family,
-        send_batched_family_idempotent, set_elem_payload_family,
-    };
-
-    const MAX_IDENTIFIER_BYTES: usize = 255;
-    const MAX_MEMBER_BYTES: usize = 15;
-    const REQUIRED_PRIORITY: i32 = -300;
-    const REQUIRED_INTERCEPT_MARK: u32 = 0x295a;
-    const REQUIRED_ACCEPTED_MARK: u32 = 0x295b;
-    const NF_BR_PRE_ROUTING: u32 = 0;
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct BridgeGuardSpec {
-        table: String,
-        chain: String,
-        managed_taps_set: String,
-        priority: i32,
-        intercept_mark: u32,
-        accepted_mark: u32,
-    }
-
-    impl BridgeGuardSpec {
-        /// Validate the fixed guard identity without performing I/O.
-        pub fn new(
-            table: String,
-            chain: String,
-            managed_taps_set: String,
-            priority: i32,
-            intercept_mark: u32,
-            accepted_mark: u32,
-        ) -> Result<Self, BridgeGuardValidationError> {
-            validate_identifier(BridgeGuardIdentifier::Table, &table)?;
-            validate_identifier(BridgeGuardIdentifier::Chain, &chain)?;
-            validate_identifier(BridgeGuardIdentifier::ManagedTapsSet, &managed_taps_set)?;
-            if priority != REQUIRED_PRIORITY {
-                return Err(BridgeGuardValidationError::PriorityMismatch {
-                    expected: REQUIRED_PRIORITY,
-                    actual: priority,
-                });
-            }
-            if intercept_mark != REQUIRED_INTERCEPT_MARK {
-                return Err(BridgeGuardValidationError::InterceptMarkMismatch {
-                    expected: REQUIRED_INTERCEPT_MARK,
-                    actual: intercept_mark,
-                });
-            }
-            if accepted_mark != REQUIRED_ACCEPTED_MARK {
-                return Err(BridgeGuardValidationError::AcceptedMarkMismatch {
-                    expected: REQUIRED_ACCEPTED_MARK,
-                    actual: accepted_mark,
-                });
-            }
-            Ok(Self { table, chain, managed_taps_set, priority, intercept_mark, accepted_mark })
-        }
-
-        /// Sole public construction of the expected ordered semantic rule program.
-        #[must_use]
-        pub fn expected_rule_facts(&self) -> Vec<BridgeGuardRuleFact> {
-            vec![
-                BridgeGuardRuleFact {
-                    identity: BridgeGuardRuleIdentity::Owned(BridgeGuardRuleKind::InterceptAccept),
-                    program: BridgeGuardRuleProgram {
-                        expressions: vec![
-                            BridgeGuardRuleExpression::IngressInterfaceInSet {
-                                set: self.managed_taps_set.clone(),
-                            },
-                            BridgeGuardRuleExpression::MarkEquals { value: self.intercept_mark },
-                            BridgeGuardRuleExpression::Accept,
-                        ],
-                    },
-                },
-                BridgeGuardRuleFact {
-                    identity: BridgeGuardRuleIdentity::Owned(BridgeGuardRuleKind::AcceptedClear),
-                    program: BridgeGuardRuleProgram {
-                        expressions: vec![
-                            BridgeGuardRuleExpression::IngressInterfaceInSet {
-                                set: self.managed_taps_set.clone(),
-                            },
-                            BridgeGuardRuleExpression::MarkEquals { value: self.accepted_mark },
-                            BridgeGuardRuleExpression::SetMark { value: 0 },
-                            BridgeGuardRuleExpression::Accept,
-                        ],
-                    },
-                },
-                BridgeGuardRuleFact {
-                    identity: BridgeGuardRuleIdentity::Owned(BridgeGuardRuleKind::DefaultDrop),
-                    program: BridgeGuardRuleProgram {
-                        expressions: vec![
-                            BridgeGuardRuleExpression::IngressInterfaceInSet {
-                                set: self.managed_taps_set.clone(),
-                            },
-                            BridgeGuardRuleExpression::Counter,
-                            BridgeGuardRuleExpression::Drop,
-                        ],
-                    },
-                },
-            ]
-        }
-    }
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-    pub enum BridgeGuardRuleKind {
-        InterceptAccept,
-        AcceptedClear,
-        DefaultDrop,
-    }
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum BridgeGuardObservedFamily {
-        Bridge,
-        Inet,
-        Ipv4,
-        Ipv6,
-        Arp,
-        Netdev,
-        Other,
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct BridgeGuardTableFact {
-        pub family: BridgeGuardObservedFamily,
-        pub name: String,
-    }
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum BridgeGuardChainType {
-        Filter,
-        Route,
-        Nat,
-        Other,
-    }
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum BridgeGuardChainHook {
-        Prerouting,
-        Input,
-        Forward,
-        Output,
-        Postrouting,
-        Ingress,
-        Egress,
-        Other,
-    }
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum BridgeGuardChainPolicy {
-        Accept,
-        Drop,
-        Other,
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub enum BridgeGuardChainDefinition {
-        Base {
-            chain_type: BridgeGuardChainType,
-            hook: BridgeGuardChainHook,
-            priority: i32,
-            policy: Option<BridgeGuardChainPolicy>,
-        },
-        Regular,
-        Unsupported,
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct BridgeGuardChainOccurrence {
-        pub table: BridgeGuardTableFact,
-        pub name: String,
-        pub handle: Option<u64>,
-        pub definition: BridgeGuardChainDefinition,
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct BridgeGuardSetFact {
-        pub table: BridgeGuardTableFact,
-        pub name: String,
-        pub key_len: u32,
-        pub ifname_key: bool,
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub enum BridgeGuardRuleIdentity {
-        Owned(BridgeGuardRuleKind),
-        Foreign,
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub enum BridgeGuardRuleExpression {
-        IngressInterfaceInSet { set: String },
-        MarkEquals { value: u32 },
-        SetMark { value: u32 },
-        Counter,
-        Accept,
-        Drop,
-        Unknown { name: String },
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct BridgeGuardRuleProgram {
-        pub expressions: Vec<BridgeGuardRuleExpression>,
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct BridgeGuardRuleFact {
-        pub identity: BridgeGuardRuleIdentity,
-        pub program: BridgeGuardRuleProgram,
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct BridgeGuardRuleOccurrence {
-        pub table: BridgeGuardTableFact,
-        pub chain: String,
-        pub handle: u64,
-        pub fact: BridgeGuardRuleFact,
-        pub counter: Option<RuleCounterSnapshot>,
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub enum BridgeGuardMemberIdentity {
-        Ifname(String),
-        ForeignEncoding { encoded_len: usize },
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct BridgeGuardMemberOccurrence {
-        pub table: BridgeGuardTableFact,
-        pub set: String,
-        pub identity: BridgeGuardMemberIdentity,
-    }
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum BridgeGuardOtherChildKind {
-        Flowtable,
-        StatefulObject,
-        Other,
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct BridgeGuardOtherChildOccurrence {
-        pub table: BridgeGuardTableFact,
-        pub kind: BridgeGuardOtherChildKind,
-        pub name: Option<String>,
-        pub handle: Option<u64>,
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct BridgeGuardInventory {
-        pub generation: u32,
-        pub tables: Vec<BridgeGuardTableFact>,
-        pub chains: Vec<BridgeGuardChainOccurrence>,
-        pub sets: Vec<BridgeGuardSetFact>,
-        pub rules: Vec<BridgeGuardRuleOccurrence>,
-        pub members: Vec<BridgeGuardMemberOccurrence>,
-        pub other_children: Vec<BridgeGuardOtherChildOccurrence>,
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub enum BridgeGuardObservation {
-        Absent { inventory: BridgeGuardInventory },
-        Exact { inventory: BridgeGuardInventory },
-        Conflict { inventory: BridgeGuardInventory },
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub enum BridgeGuardMutationOutcome {
-        Converged { observed: BridgeGuardInventory },
-        Conflict { observed: BridgeGuardInventory },
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub enum BridgeGuardDeleteOutcome {
-        Absent { observed: BridgeGuardInventory },
-        Deleted { observed: BridgeGuardInventory },
-        Conflict { observed: BridgeGuardInventory },
-    }
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum BridgeGuardIdentifier {
-        Table,
-        Chain,
-        ManagedTapsSet,
-    }
-
-    #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-    pub enum BridgeGuardValidationError {
-        #[error("bridge guard {identifier:?} identifier is empty")]
-        EmptyIdentifier { identifier: BridgeGuardIdentifier },
-        #[error("bridge guard {identifier:?} identifier contains NUL at byte {index}")]
-        IdentifierContainsNul { identifier: BridgeGuardIdentifier, index: usize },
-        #[error("bridge guard {identifier:?} identifier is {length} bytes; maximum is {maximum}")]
-        IdentifierTooLong { identifier: BridgeGuardIdentifier, length: usize, maximum: usize },
-        #[error("bridge guard priority must be {expected}, got {actual}")]
-        PriorityMismatch { expected: i32, actual: i32 },
-        #[error("bridge guard intercept mark must be {expected:#x}, got {actual:#x}")]
-        InterceptMarkMismatch { expected: u32, actual: u32 },
-        #[error("bridge guard accepted mark must be {expected:#x}, got {actual:#x}")]
-        AcceptedMarkMismatch { expected: u32, actual: u32 },
-        #[error("bridge guard managed TAP name is empty")]
-        EmptyMember,
-        #[error("bridge guard managed TAP name contains NUL at byte {index}")]
-        MemberContainsNul { index: usize },
-        #[error("bridge guard managed TAP name is {length} bytes; maximum is {maximum}")]
-        MemberTooLong { length: usize, maximum: usize },
-    }
-
-    #[derive(Debug, thiserror::Error)]
-    pub enum BridgeGuardError {
-        #[error(transparent)]
-        Validation(#[from] BridgeGuardValidationError),
-        #[error(transparent)]
-        Netlink(#[from] NetlinkError),
-    }
-
-    fn validate_identifier(
-        identifier: BridgeGuardIdentifier,
-        value: &str,
-    ) -> Result<(), BridgeGuardValidationError> {
-        if value.is_empty() {
-            return Err(BridgeGuardValidationError::EmptyIdentifier { identifier });
-        }
-        if let Some(index) = value.as_bytes().iter().position(|byte| *byte == 0) {
-            return Err(BridgeGuardValidationError::IdentifierContainsNul { identifier, index });
-        }
-        if value.len() > MAX_IDENTIFIER_BYTES {
-            return Err(BridgeGuardValidationError::IdentifierTooLong {
-                identifier,
-                length: value.len(),
-                maximum: MAX_IDENTIFIER_BYTES,
-            });
-        }
-        Ok(())
-    }
-
-    fn validate_member(value: &str) -> Result<(), BridgeGuardValidationError> {
-        if value.is_empty() {
-            return Err(BridgeGuardValidationError::EmptyMember);
-        }
-        if let Some(index) = value.as_bytes().iter().position(|byte| *byte == 0) {
-            return Err(BridgeGuardValidationError::MemberContainsNul { index });
-        }
-        if value.len() > MAX_MEMBER_BYTES {
-            return Err(BridgeGuardValidationError::MemberTooLong {
-                length: value.len(),
-                maximum: MAX_MEMBER_BYTES,
-            });
-        }
-        Ok(())
-    }
-
-    fn expected_inventory(spec: &BridgeGuardSpec) -> BridgeGuardInventory {
-        let table = BridgeGuardTableFact {
-            family: BridgeGuardObservedFamily::Bridge,
-            name: spec.table.clone(),
-        };
-        let chain = BridgeGuardChainOccurrence {
-            table: table.clone(),
-            name: spec.chain.clone(),
-            handle: None,
-            definition: BridgeGuardChainDefinition::Base {
-                chain_type: BridgeGuardChainType::Filter,
-                hook: BridgeGuardChainHook::Prerouting,
-                priority: spec.priority,
-                policy: Some(BridgeGuardChainPolicy::Accept),
-            },
-        };
-        BridgeGuardInventory {
-            generation: 0,
-            tables: vec![table.clone()],
-            chains: vec![chain],
-            sets: vec![BridgeGuardSetFact {
-                table: table.clone(),
-                name: spec.managed_taps_set.clone(),
-                key_len: 16,
-                ifname_key: true,
-            }],
-            rules: spec
-                .expected_rule_facts()
-                .into_iter()
-                .map(|fact| BridgeGuardRuleOccurrence {
-                    table: table.clone(),
-                    chain: spec.chain.clone(),
-                    handle: 0,
-                    fact,
-                    counter: None,
-                })
-                .collect(),
-            members: Vec::new(),
-            other_children: Vec::new(),
-        }
-    }
-
-    fn table_fact(name: &str) -> BridgeGuardTableFact {
-        BridgeGuardTableFact { family: BridgeGuardObservedFamily::Bridge, name: name.to_owned() }
-    }
-
-    fn project_chain(raw: RawChainInfo) -> BridgeGuardChainOccurrence {
-        let definition = match (raw.hook, raw.chain_type.as_deref(), raw.policy) {
-            (Some((hooknum, priority)), Some(chain_type), policy) => {
-                BridgeGuardChainDefinition::Base {
-                    chain_type: match chain_type {
-                        "filter" => BridgeGuardChainType::Filter,
-                        "route" => BridgeGuardChainType::Route,
-                        "nat" => BridgeGuardChainType::Nat,
-                        _ => BridgeGuardChainType::Other,
-                    },
-                    hook: match hooknum {
-                        0 => BridgeGuardChainHook::Prerouting,
-                        1 => BridgeGuardChainHook::Input,
-                        2 => BridgeGuardChainHook::Forward,
-                        3 => BridgeGuardChainHook::Output,
-                        4 => BridgeGuardChainHook::Postrouting,
-                        _ => BridgeGuardChainHook::Other,
-                    },
-                    priority,
-                    policy: policy.map(|policy| match policy {
-                        NF_ACCEPT => BridgeGuardChainPolicy::Accept,
-                        0 => BridgeGuardChainPolicy::Drop,
-                        _ => BridgeGuardChainPolicy::Other,
-                    }),
-                }
-            }
-            (None, None, None) => BridgeGuardChainDefinition::Regular,
-            _ => BridgeGuardChainDefinition::Unsupported,
-        };
-        BridgeGuardChainOccurrence {
-            table: table_fact(&raw.table),
-            name: raw.name,
-            handle: Some(raw.handle),
-            definition,
-        }
-    }
-
-    fn rule_expressions(spec: &BridgeGuardSpec, index: usize) -> Vec<u8> {
-        let mut expressions = e_iifname_lookup(&spec.managed_taps_set);
-        match index {
-            0 => {
-                expressions.extend(e_meta_load(NFT_META_MARK, NFT_REG_2));
-                expressions.extend(e_cmp_eq(NFT_REG_2, &spec.intercept_mark.to_ne_bytes()));
-                expressions.extend(e_immediate_verdict(NF_ACCEPT));
-            }
-            1 => {
-                expressions.extend(e_meta_load(NFT_META_MARK, NFT_REG_2));
-                expressions.extend(e_cmp_eq(NFT_REG_2, &spec.accepted_mark.to_ne_bytes()));
-                expressions.extend(e_immediate_value(NFT_REG_2, &0_u32.to_ne_bytes()));
-                expressions.extend(e_meta_set(NFT_META_MARK, NFT_REG_2));
-                expressions.extend(e_immediate_verdict(NF_ACCEPT));
-            }
-            _ => {
-                expressions.extend(e_anonymous_counter());
-                expressions.extend(e_immediate_verdict(0));
-            }
-        }
-        expressions
-    }
-
-    fn expected_rule_programs(spec: &BridgeGuardSpec) -> Vec<Vec<u8>> {
-        (0..spec.expected_rule_facts().len())
-            .map(|index| {
-                normalized_rule_program_identity(&rule_expressions(spec, index)).unwrap_or_default()
-            })
-            .collect()
-    }
-
-    fn rule_expression_names(program: &[u8]) -> Vec<String> {
-        let Ok(elements) = super::exact_attrs(program) else {
-            return vec!["malformed".to_owned()];
-        };
-        elements
-            .into_iter()
-            .filter_map(|(kind, _, element)| {
-                if kind != super::NFTA_LIST_ELEM {
-                    return Some("malformed".to_owned());
-                }
-                super::exact_attrs(element).ok()?.into_iter().find_map(|(attribute, _, value)| {
-                    (attribute == super::NFTA_EXPR_NAME)
-                        .then(|| {
-                            super::exact_cstr(value, "expression name").ok().map(str::to_owned)
-                        })
-                        .flatten()
-                })
-            })
-            .collect()
-    }
-
-    fn project_rule(
-        spec: &BridgeGuardSpec,
-        table: &BridgeGuardTableFact,
-        chain: &str,
-        rule: &super::RuleInfo,
-        expected_programs: &[Vec<u8>],
-    ) -> BridgeGuardRuleOccurrence {
-        let expected_rules = spec.expected_rule_facts();
-        let owned_index = rule
-            .userdata
-            .strip_prefix(b"ovd295-bridge-")
-            .and_then(|value| std::str::from_utf8(value).ok())
-            .and_then(|value| value.parse::<usize>().ok());
-        let expression_names = rule_expression_names(&rule.normalized_program);
-        let fact = owned_index
-            .and_then(|index| expected_rules.get(index).cloned())
-            .and_then(|fact| {
-                let index = owned_index?;
-                if expected_programs.get(index) == Some(&rule.normalized_program) {
-                    Some(fact)
-                } else {
-                    Some(BridgeGuardRuleFact {
-                        identity: fact.identity,
-                        program: BridgeGuardRuleProgram {
-                            expressions: expression_names
-                                .clone()
-                                .into_iter()
-                                .map(|name| BridgeGuardRuleExpression::Unknown { name })
-                                .collect(),
-                        },
-                    })
-                }
-            })
-            .unwrap_or_else(|| BridgeGuardRuleFact {
-                identity: BridgeGuardRuleIdentity::Foreign,
-                program: BridgeGuardRuleProgram {
-                    expressions: expression_names
-                        .into_iter()
-                        .map(|name| BridgeGuardRuleExpression::Unknown { name })
-                        .collect(),
-                },
-            });
-        BridgeGuardRuleOccurrence {
-            table: table.clone(),
-            chain: chain.to_owned(),
-            handle: rule.handle,
-            fact,
-            counter: rule.counter,
-        }
-    }
-
-    fn encode_member(value: &str) -> Result<[u8; 16], BridgeGuardValidationError> {
-        validate_member(value)?;
-        let mut encoded = [0_u8; 16];
-        encoded[..value.len()].copy_from_slice(value.as_bytes());
-        Ok(encoded)
-    }
-
-    #[allow(dead_code, reason = "activated by D9 generation-bracketed observe implementation")]
-    fn classify_inventory(
-        spec: &BridgeGuardSpec,
-        expected_members: &BTreeSet<String>,
-        observed_inventory: BridgeGuardInventory,
-    ) -> BridgeGuardObservation {
-        let expected = expected_inventory(spec);
-        if observed_inventory.tables.is_empty() {
-            return BridgeGuardObservation::Absent { inventory: observed_inventory };
-        }
-        let owned_rules_match = observed_inventory.rules.len() == expected.rules.len()
-            && observed_inventory.rules.iter().zip(expected.rules.iter()).all(
-                |(observed, expected)| {
-                    observed.table == expected.table
-                        && observed.chain == expected.chain
-                        && observed.fact == expected.fact
-                },
-            );
-        let chains_match = observed_inventory.chains.len() == expected.chains.len()
-            && observed_inventory.chains.iter().zip(expected.chains.iter()).all(
-                |(observed, expected)| {
-                    observed.table == expected.table
-                        && observed.name == expected.name
-                        && observed.definition == expected.definition
-                },
-            );
-        if observed_inventory.tables == expected.tables
-            && chains_match
-            && observed_inventory.sets == expected.sets
-            && owned_rules_match
-            && observed_inventory
-                .members
-                .iter()
-                .filter_map(|member| match &member.identity {
-                    BridgeGuardMemberIdentity::Ifname(name) => Some(name.clone()),
-                    BridgeGuardMemberIdentity::ForeignEncoding { .. } => None,
-                })
-                .collect::<BTreeSet<_>>()
-                == *expected_members
-            && observed_inventory.other_children.is_empty()
-        {
-            BridgeGuardObservation::Exact { inventory: observed_inventory }
-        } else {
-            BridgeGuardObservation::Conflict { inventory: observed_inventory }
-        }
-    }
-
-    pub fn converge_table(
-        spec: &BridgeGuardSpec,
-    ) -> Result<BridgeGuardMutationOutcome, BridgeGuardError> {
-        if list_table_names_family(NftFamily::Bridge)?.iter().any(|name| name == &spec.table) {
-            return Ok(BridgeGuardMutationOutcome::Converged {
-                observed: expected_inventory(spec),
-            });
-        }
-        send_batched_family_idempotent(
-            NftFamily::Bridge,
-            NFT_MSG_NEWTABLE,
-            &newtable_payload_family(NftFamily::Bridge, &spec.table),
-            "bridge-newtable",
-        )?;
-        Ok(BridgeGuardMutationOutcome::Converged { observed: expected_inventory(spec) })
-    }
-    pub fn converge_chain(
-        spec: &BridgeGuardSpec,
-    ) -> Result<BridgeGuardMutationOutcome, BridgeGuardError> {
-        if let Some(existing) = list_chain_info_family(NftFamily::Bridge, &spec.table)?
-            .into_iter()
-            .find(|chain| chain.name == spec.chain)
-        {
-            let observed = project_chain(existing);
-            let expected = expected_inventory(spec).chains[0].clone();
-            if observed.table == expected.table
-                && observed.name == expected.name
-                && observed.definition == expected.definition
-            {
-                return Ok(BridgeGuardMutationOutcome::Converged {
-                    observed: expected_inventory(spec),
-                });
-            }
-            let observed = match observe(spec, &BTreeSet::new())? {
-                BridgeGuardObservation::Absent { inventory }
-                | BridgeGuardObservation::Exact { inventory }
-                | BridgeGuardObservation::Conflict { inventory } => inventory,
-            };
-            return Ok(BridgeGuardMutationOutcome::Conflict { observed });
-        }
-        send_batched_family_idempotent(
-            NftFamily::Bridge,
-            NFT_MSG_NEWCHAIN,
-            &newchain_payload_family(
-                NftFamily::Bridge,
-                &spec.table,
-                &spec.chain,
-                BaseChainSpec {
-                    hooknum: NF_BR_PRE_ROUTING,
-                    priority: spec.priority,
-                    kind: ChainKind::Filter,
-                },
-            ),
-            "bridge-newchain",
-        )?;
-        Ok(BridgeGuardMutationOutcome::Converged { observed: expected_inventory(spec) })
-    }
-    pub fn converge_set(
-        spec: &BridgeGuardSpec,
-    ) -> Result<BridgeGuardMutationOutcome, BridgeGuardError> {
-        if let Some(existing) = list_set_info_family(NftFamily::Bridge, &spec.table)?
-            .into_iter()
-            .find(|set| set.name == spec.managed_taps_set)
-        {
-            if existing.key_type == super::NFT_IFNAME_KEY_TYPE
-                && existing.key_len == super::IFNAMSIZ as u32
-            {
-                return Ok(BridgeGuardMutationOutcome::Converged {
-                    observed: expected_inventory(spec),
-                });
-            }
-            let observed = match observe(spec, &BTreeSet::new())? {
-                BridgeGuardObservation::Absent { inventory }
-                | BridgeGuardObservation::Exact { inventory }
-                | BridgeGuardObservation::Conflict { inventory } => inventory,
-            };
-            return Ok(BridgeGuardMutationOutcome::Conflict { observed });
-        }
-        send_batched_family_idempotent(
-            NftFamily::Bridge,
-            NFT_MSG_NEWSET,
-            &newset_payload_family(NftFamily::Bridge, &spec.table, &spec.managed_taps_set),
-            "bridge-newset",
-        )?;
-        Ok(BridgeGuardMutationOutcome::Converged { observed: expected_inventory(spec) })
-    }
-    pub fn converge_rules(
-        spec: &BridgeGuardSpec,
-    ) -> Result<BridgeGuardMutationOutcome, BridgeGuardError> {
-        let expected_programs = expected_rule_programs(spec);
-        match super::list_rules_family(NftFamily::Bridge, &spec.table, &spec.chain) {
-            Ok(existing) if !existing.is_empty() => {
-                let mut owned = BTreeSet::new();
-                let mut conflict = false;
-                for rule in &existing {
-                    let Some(index) = rule
-                        .userdata
-                        .strip_prefix(b"ovd295-bridge-")
-                        .and_then(|value| std::str::from_utf8(value).ok())
-                        .and_then(|value| value.parse::<usize>().ok())
-                    else {
-                        conflict = true;
-                        continue;
-                    };
-                    if index >= spec.expected_rule_facts().len()
-                        || !owned.insert(index)
-                        || expected_programs.get(index) != Some(&rule.normalized_program)
-                    {
-                        conflict = true;
-                    }
-                }
-                if !conflict && owned.len() == spec.expected_rule_facts().len() {
-                    return Ok(BridgeGuardMutationOutcome::Converged {
-                        observed: expected_inventory(spec),
-                    });
-                }
-                let observation = observe(spec, &BTreeSet::new())?;
-                let BridgeGuardObservation::Conflict { inventory } = observation else {
-                    return Ok(BridgeGuardMutationOutcome::Conflict {
-                        observed: expected_inventory(spec),
-                    });
-                };
-                return Ok(BridgeGuardMutationOutcome::Conflict { observed: inventory });
-            }
-            Ok(_) => {}
-            Err(error) if error.errno() == Some(-libc::ENOENT) => {}
-            Err(error) => return Err(BridgeGuardError::Netlink(error)),
-        }
-        let mut mutations = Vec::with_capacity(3);
-        for index in 0..3 {
-            let mut expressions = e_iifname_lookup(&spec.managed_taps_set);
-            match index {
-                0 => {
-                    expressions.extend(e_meta_load(NFT_META_MARK, NFT_REG_2));
-                    expressions.extend(e_cmp_eq(NFT_REG_2, &spec.intercept_mark.to_ne_bytes()));
-                    expressions.extend(e_immediate_verdict(NF_ACCEPT));
-                }
-                1 => {
-                    expressions.extend(e_meta_load(NFT_META_MARK, NFT_REG_2));
-                    expressions.extend(e_cmp_eq(NFT_REG_2, &spec.accepted_mark.to_ne_bytes()));
-                    expressions.extend(e_immediate_value(NFT_REG_2, &0_u32.to_ne_bytes()));
-                    expressions.extend(e_meta_set(NFT_META_MARK, NFT_REG_2));
-                    expressions.extend(e_immediate_verdict(NF_ACCEPT));
-                }
-                _ => {
-                    expressions.extend(e_anonymous_counter());
-                    expressions.extend(e_immediate_verdict(0));
-                }
-            }
-            let userdata = format!("ovd295-bridge-{index}").into_bytes();
-            mutations.push((expressions, userdata, index != 0));
-        }
-        let bridge_mutations = mutations
-            .iter()
-            .map(|(expressions, userdata, append)| BridgeRuleMutation {
-                table: &spec.table,
-                chain: &spec.chain,
-                expressions,
-                userdata,
-                append: *append,
-            })
-            .collect::<Vec<_>>();
-        send_atomic_bridge_rule_transaction(&bridge_mutations)?;
-        Ok(BridgeGuardMutationOutcome::Converged { observed: expected_inventory(spec) })
-    }
-
-    pub fn observe(
-        spec: &BridgeGuardSpec,
-        expected_members: &BTreeSet<String>,
-    ) -> Result<BridgeGuardObservation, BridgeGuardError> {
-        let before = read_nft_generation()?;
-        let tables = list_table_names_family(NftFamily::Bridge)?;
-        if !tables.iter().any(|name| name == &spec.table) {
-            let after = read_nft_generation()?;
-            if before != after {
-                return Err(BridgeGuardError::Netlink(NetlinkError::nft(
-                    "bridge-observe-generation",
-                    invalid_data("bridge inventory changed while table was absent"),
-                )));
-            }
-            return Ok(BridgeGuardObservation::Absent {
-                inventory: BridgeGuardInventory {
-                    generation: before,
-                    tables: Vec::new(),
-                    chains: Vec::new(),
-                    sets: Vec::new(),
-                    rules: Vec::new(),
-                    members: Vec::new(),
-                    other_children: Vec::new(),
-                },
-            });
-        }
-
-        let table = table_fact(&spec.table);
-        let raw_chains = list_chain_info_family(NftFamily::Bridge, &spec.table)?;
-        let chains = raw_chains.iter().cloned().map(project_chain).collect::<Vec<_>>();
-        let raw_sets = list_set_info_family(NftFamily::Bridge, &spec.table)?;
-        let sets = raw_sets
-            .iter()
-            .map(|set| BridgeGuardSetFact {
-                table: table.clone(),
-                name: set.name.clone(),
-                key_len: set.key_len,
-                ifname_key: set.key_type == super::NFT_IFNAME_KEY_TYPE,
-            })
-            .collect::<Vec<_>>();
-        let expected_programs = expected_rule_programs(spec);
-        let mut rules = Vec::new();
-        for chain in &chains {
-            for rule in super::list_rules_family(NftFamily::Bridge, &spec.table, &chain.name)? {
-                rules.push(project_rule(spec, &table, &chain.name, &rule, &expected_programs));
-            }
-        }
-        let mut members = Vec::new();
-        if let Some(set) = raw_sets.iter().find(|set| set.name == spec.managed_taps_set) {
-            for member in list_set_elements_family(
-                NftFamily::Bridge,
-                &spec.table,
-                &spec.managed_taps_set,
-                set.id,
-            )? {
-                let identity = if member.len() == super::IFNAMSIZ {
-                    let nul = member.iter().position(|byte| *byte == 0).unwrap_or(member.len());
-                    std::str::from_utf8(&member[..nul]).map_or(
-                        BridgeGuardMemberIdentity::ForeignEncoding { encoded_len: member.len() },
-                        |name| BridgeGuardMemberIdentity::Ifname(name.to_owned()),
-                    )
-                } else {
-                    BridgeGuardMemberIdentity::ForeignEncoding { encoded_len: member.len() }
-                };
-                members.push(BridgeGuardMemberOccurrence {
-                    table: table.clone(),
-                    set: set.name.clone(),
-                    identity,
-                });
-            }
-        }
-        let other_children = list_other_children_family(NftFamily::Bridge, &spec.table)?
-            .into_iter()
-            .map(|child| BridgeGuardOtherChildOccurrence {
-                table: table.clone(),
-                kind: match child.kind {
-                    RawOtherChildKind::Flowtable => BridgeGuardOtherChildKind::Flowtable,
-                    RawOtherChildKind::StatefulObject => BridgeGuardOtherChildKind::StatefulObject,
-                },
-                name: Some(child.name),
-                handle: child.handle,
-            })
-            .collect::<Vec<_>>();
-        let after = read_nft_generation()?;
-        if before != after {
-            return Err(BridgeGuardError::Netlink(NetlinkError::nft(
-                "bridge-observe-generation",
-                invalid_data("bridge inventory changed during generation-bracketed observation"),
-            )));
-        }
-        let observed = BridgeGuardInventory {
-            generation: before,
-            tables: vec![table],
-            chains,
-            sets,
-            rules,
-            members,
-            other_children,
-        };
-        Ok(classify_inventory(spec, expected_members, observed))
-    }
-
-    pub fn insert_member(
-        spec: &BridgeGuardSpec,
-        tap: &str,
-    ) -> Result<BridgeGuardMutationOutcome, BridgeGuardError> {
-        let member = encode_member(tap)?;
-        send_batched_family_idempotent(
-            NftFamily::Bridge,
-            NFT_MSG_NEWSETELEM,
-            &set_elem_payload_family(
-                NftFamily::Bridge,
-                &spec.table,
-                &spec.managed_taps_set,
-                &member,
-            ),
-            "bridge-insert-member",
-        )?;
-        Ok(BridgeGuardMutationOutcome::Converged { observed: expected_inventory(spec) })
-    }
-
-    pub fn delete_member(
-        spec: &BridgeGuardSpec,
-        tap: &str,
-    ) -> Result<BridgeGuardMutationOutcome, BridgeGuardError> {
-        let member = encode_member(tap)?;
-        match send_batched_family(
-            NftFamily::Bridge,
-            NFT_MSG_DELSETELEM,
-            0,
-            &set_elem_payload_family(
-                NftFamily::Bridge,
-                &spec.table,
-                &spec.managed_taps_set,
-                &member,
-            ),
-            "bridge-delete-member",
-        ) {
-            Ok(()) => {}
-            Err(error) if error.errno() == Some(-libc::ENOENT) => {}
-            Err(error) => return Err(BridgeGuardError::Netlink(error)),
-        }
-        Ok(BridgeGuardMutationOutcome::Converged { observed: expected_inventory(spec) })
-    }
-
-    pub fn delete_rules(
-        spec: &BridgeGuardSpec,
-    ) -> Result<BridgeGuardDeleteOutcome, BridgeGuardError> {
-        let rules = super::list_rules_family(NftFamily::Bridge, &spec.table, &spec.chain)
-            .map_err(BridgeGuardError::Netlink)?;
-        for rule in rules {
-            if rule.userdata.starts_with(b"ovd295-bridge-") {
-                send_batched_family(
-                    NftFamily::Bridge,
-                    super::NFT_MSG_DELRULE,
-                    0,
-                    &super::delrule_payload_family(
-                        NftFamily::Bridge,
-                        &spec.table,
-                        &spec.chain,
-                        rule.handle,
-                    ),
-                    "bridge-delete-rule",
-                )?;
-            }
-        }
-        Ok(BridgeGuardDeleteOutcome::Deleted { observed: expected_inventory(spec) })
-    }
-    pub fn delete_set(
-        spec: &BridgeGuardSpec,
-    ) -> Result<BridgeGuardDeleteOutcome, BridgeGuardError> {
-        send_batched_family(
-            NftFamily::Bridge,
-            NFT_MSG_DELSET,
-            0,
-            &newset_payload_family(NftFamily::Bridge, &spec.table, &spec.managed_taps_set),
-            "bridge-delete-set",
-        )?;
-        Ok(BridgeGuardDeleteOutcome::Deleted { observed: expected_inventory(spec) })
-    }
-    pub fn delete_chain(
-        spec: &BridgeGuardSpec,
-    ) -> Result<BridgeGuardDeleteOutcome, BridgeGuardError> {
-        send_batched_family(
-            NftFamily::Bridge,
-            NFT_MSG_DELCHAIN,
-            0,
-            &super::get_by_table_chain_family(
-                NftFamily::Bridge,
-                &spec.table,
-                &spec.chain,
-                super::NFTA_CHAIN_NAME,
-                super::NFTA_CHAIN_TABLE,
-            ),
-            "bridge-delete-chain",
-        )?;
-        Ok(BridgeGuardDeleteOutcome::Deleted { observed: expected_inventory(spec) })
-    }
-    pub fn delete_table(
-        spec: &BridgeGuardSpec,
-    ) -> Result<BridgeGuardDeleteOutcome, BridgeGuardError> {
-        send_batched_family(
-            NftFamily::Bridge,
-            NFT_MSG_DELTABLE,
-            0,
-            &newtable_payload_family(NftFamily::Bridge, &spec.table),
-            "bridge-delete-table",
-        )?;
-        Ok(BridgeGuardDeleteOutcome::Deleted { observed: expected_inventory(spec) })
-    }
-
-    pub fn delete_owned_guard(
-        spec: &BridgeGuardSpec,
-        expected_members: &BTreeSet<String>,
-    ) -> Result<BridgeGuardDeleteOutcome, BridgeGuardError> {
-        match observe(spec, expected_members)? {
-            BridgeGuardObservation::Absent { inventory } => {
-                Ok(BridgeGuardDeleteOutcome::Absent { observed: inventory })
-            }
-            BridgeGuardObservation::Conflict { inventory } => {
-                Ok(BridgeGuardDeleteOutcome::Conflict { observed: inventory })
-            }
-            BridgeGuardObservation::Exact { inventory } => {
-                let _ = delete_rules(spec)?;
-                let _ = delete_set(spec)?;
-                let _ = delete_chain(spec)?;
-                let _ = delete_table(spec)?;
-                Ok(BridgeGuardDeleteOutcome::Deleted { observed: inventory })
-            }
-        }
-    }
-
-    #[cfg(test)]
-    #[allow(clippy::doc_markdown, clippy::expect_used)]
-    mod acceptance {
-        use super::*;
-        use crate::nft::NftFamily;
-
-        fn spec() -> BridgeGuardSpec {
-            BridgeGuardSpec::new(
-                "overdrive-mtls".to_owned(),
-                "prerouting".to_owned(),
-                "managed_taps".to_owned(),
-                REQUIRED_PRIORITY,
-                REQUIRED_INTERCEPT_MARK,
-                REQUIRED_ACCEPTED_MARK,
-            )
-            .expect("canonical bridge guard spec")
-        }
-
-        /// CONTRACT_SHAPE: pure-function.
-        #[test]
-        fn private_family_projection_is_closed_and_exact() {
-            assert_eq!(NftFamily::Ipv4.nfproto(), 2);
-            assert_eq!(NftFamily::Bridge.nfproto(), 7);
-        }
-
-        /// CONTRACT_SHAPE: pure-function.
-        #[test]
-        fn error_algebra_keeps_validation_distinct_from_source_bearing_netlink_failure() {
-            let validation = BridgeGuardError::from(BridgeGuardValidationError::EmptyMember);
-            assert!(matches!(validation, BridgeGuardError::Validation(_)));
-            let netlink = BridgeGuardError::from(NetlinkError::nft(
-                "bridge-observe",
-                std::io::Error::from_raw_os_error(libc::EIO),
-            ));
-            assert!(matches!(
-                netlink,
-                BridgeGuardError::Netlink(NetlinkError::Nft { op: "bridge-observe", .. })
-            ));
-        }
-
-        /// CONTRACT_SHAPE: pure-function.
-        #[test]
-        fn expected_rule_facts_are_the_single_ordered_semantic_program() {
-            let facts = spec().expected_rule_facts();
-            assert_eq!(facts.len(), 3);
-            assert!(matches!(
-                facts[0].identity,
-                BridgeGuardRuleIdentity::Owned(BridgeGuardRuleKind::InterceptAccept)
-            ));
-            assert!(matches!(
-                facts[1].identity,
-                BridgeGuardRuleIdentity::Owned(BridgeGuardRuleKind::AcceptedClear)
-            ));
-            assert!(matches!(
-                facts[2].identity,
-                BridgeGuardRuleIdentity::Owned(BridgeGuardRuleKind::DefaultDrop)
-            ));
-            assert_eq!(
-                facts[2].program.expressions,
-                [
-                    BridgeGuardRuleExpression::IngressInterfaceInSet {
-                        set: "managed_taps".to_owned()
-                    },
-                    BridgeGuardRuleExpression::Counter,
-                    BridgeGuardRuleExpression::Drop,
-                ]
-            );
-        }
-
-        fn exact_inventory(sut: &BridgeGuardSpec) -> BridgeGuardInventory {
-            let table = BridgeGuardTableFact {
-                family: BridgeGuardObservedFamily::Bridge,
-                name: sut.table.clone(),
-            };
-            BridgeGuardInventory {
-                generation: 7,
-                tables: vec![table.clone()],
-                chains: vec![BridgeGuardChainOccurrence {
-                    table: table.clone(),
-                    name: sut.chain.clone(),
-                    handle: Some(11),
-                    definition: BridgeGuardChainDefinition::Base {
-                        chain_type: BridgeGuardChainType::Filter,
-                        hook: BridgeGuardChainHook::Prerouting,
-                        priority: sut.priority,
-                        policy: Some(BridgeGuardChainPolicy::Accept),
-                    },
-                }],
-                sets: vec![BridgeGuardSetFact {
-                    table: table.clone(),
-                    name: sut.managed_taps_set.clone(),
-                    key_len: 16,
-                    ifname_key: true,
-                }],
-                rules: sut
-                    .expected_rule_facts()
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, fact)| BridgeGuardRuleOccurrence {
-                        table: table.clone(),
-                        chain: sut.chain.clone(),
-                        handle: u64::try_from(index + 20).expect("small handle"),
-                        fact,
-                        counter: None,
-                    })
-                    .collect(),
-                members: vec![BridgeGuardMemberOccurrence {
-                    table,
-                    set: sut.managed_taps_set.clone(),
-                    identity: BridgeGuardMemberIdentity::Ifname("ovd-tp-0002".to_owned()),
-                }],
-                other_children: Vec::new(),
-            }
-        }
-
-        /// CONTRACT_SHAPE: pure-function.
-        #[test]
-        fn semantic_classification_preserves_absent_exact_and_every_conflict_partition() {
-            let sut = spec();
-            let expected_members = BTreeSet::from(["ovd-tp-0002".to_owned()]);
-            let empty = BridgeGuardInventory {
-                generation: 1,
-                tables: Vec::new(),
-                chains: Vec::new(),
-                sets: Vec::new(),
-                rules: Vec::new(),
-                members: Vec::new(),
-                other_children: Vec::new(),
-            };
-            assert!(matches!(
-                classify_inventory(&sut, &expected_members, empty),
-                BridgeGuardObservation::Absent { .. }
-            ));
-            assert!(matches!(
-                classify_inventory(&sut, &expected_members, exact_inventory(&sut)),
-                BridgeGuardObservation::Exact { .. }
-            ));
-
-            let mut conflicts = Vec::new();
-            let mut wrong_family = exact_inventory(&sut);
-            wrong_family.tables[0].family = BridgeGuardObservedFamily::Ipv4;
-            conflicts.push(wrong_family);
-            let mut regular_chain = exact_inventory(&sut);
-            regular_chain.chains.push(BridgeGuardChainOccurrence {
-                table: regular_chain.tables[0].clone(),
-                name: "foreign".to_owned(),
-                handle: Some(91),
-                definition: BridgeGuardChainDefinition::Regular,
-            });
-            conflicts.push(regular_chain);
-            let mut reordered = exact_inventory(&sut);
-            reordered.rules.swap(0, 1);
-            conflicts.push(reordered);
-            let mut duplicate = exact_inventory(&sut);
-            duplicate.rules.push(duplicate.rules[0].clone());
-            conflicts.push(duplicate);
-            let mut unknown = exact_inventory(&sut);
-            unknown.rules[0]
-                .fact
-                .program
-                .expressions
-                .push(BridgeGuardRuleExpression::Unknown { name: "quota".to_owned() });
-            conflicts.push(unknown);
-            let mut foreign_member = exact_inventory(&sut);
-            foreign_member.members[0].identity =
-                BridgeGuardMemberIdentity::ForeignEncoding { encoded_len: 16 };
-            conflicts.push(foreign_member);
-            let mut foreign_child = exact_inventory(&sut);
-            foreign_child.other_children.push(BridgeGuardOtherChildOccurrence {
-                table: foreign_child.tables[0].clone(),
-                kind: BridgeGuardOtherChildKind::Flowtable,
-                name: Some("foreign".to_owned()),
-                handle: Some(99),
-            });
-            conflicts.push(foreign_child);
-
-            for inventory in conflicts {
-                let expected = inventory.clone();
-                assert_eq!(
-                    classify_inventory(&sut, &expected_members, inventory),
-                    BridgeGuardObservation::Conflict { inventory: expected }
-                );
-            }
-        }
-
-        /// CONTRACT_SHAPE: pure-function.
-        #[test]
-        fn specification_validation_covers_identifier_and_fixed_policy_boundaries() {
-            let identifier_cases = [
-                (
-                    "",
-                    BridgeGuardValidationError::EmptyIdentifier {
-                        identifier: BridgeGuardIdentifier::Table,
-                    },
-                ),
-                (
-                    "bad\0table",
-                    BridgeGuardValidationError::IdentifierContainsNul {
-                        identifier: BridgeGuardIdentifier::Table,
-                        index: 3,
-                    },
-                ),
-            ];
-            for (table, expected) in identifier_cases {
-                let error = BridgeGuardSpec::new(
-                    table.to_owned(),
-                    "prerouting".to_owned(),
-                    "managed_taps".to_owned(),
-                    REQUIRED_PRIORITY,
-                    REQUIRED_INTERCEPT_MARK,
-                    REQUIRED_ACCEPTED_MARK,
-                )
-                .expect_err("invalid table identifier");
-                assert_eq!(error, expected);
-            }
-            for length in [255, 256] {
-                let table = "é".repeat(length / 2) + if length % 2 == 1 { "a" } else { "" };
-                let result = BridgeGuardSpec::new(
-                    table,
-                    "prerouting".to_owned(),
-                    "managed_taps".to_owned(),
-                    REQUIRED_PRIORITY,
-                    REQUIRED_INTERCEPT_MARK,
-                    REQUIRED_ACCEPTED_MARK,
-                );
-                assert_eq!(result.is_ok(), length == 255, "UTF-8 byte length {length}");
-            }
-            assert!(matches!(
-                BridgeGuardSpec::new(
-                    "overdrive-mtls".to_owned(),
-                    "prerouting".to_owned(),
-                    "managed_taps".to_owned(),
-                    -299,
-                    REQUIRED_INTERCEPT_MARK,
-                    REQUIRED_ACCEPTED_MARK,
-                ),
-                Err(BridgeGuardValidationError::PriorityMismatch { .. })
-            ));
-            assert!(matches!(
-                BridgeGuardSpec::new(
-                    "overdrive-mtls".to_owned(),
-                    "prerouting".to_owned(),
-                    "managed_taps".to_owned(),
-                    REQUIRED_PRIORITY,
-                    0,
-                    REQUIRED_ACCEPTED_MARK,
-                ),
-                Err(BridgeGuardValidationError::InterceptMarkMismatch { .. })
-            ));
-            assert!(matches!(
-                BridgeGuardSpec::new(
-                    "overdrive-mtls".to_owned(),
-                    "prerouting".to_owned(),
-                    "managed_taps".to_owned(),
-                    REQUIRED_PRIORITY,
-                    REQUIRED_INTERCEPT_MARK,
-                    0,
-                ),
-                Err(BridgeGuardValidationError::AcceptedMarkMismatch { .. })
-            ));
-        }
-
-        /// CONTRACT_SHAPE: bounded-change.
-        #[test]
-        fn member_validation_rejects_without_entering_the_netlink_scaffold() {
-            let sut = spec();
-            for (tap, expected) in [
-                ("", BridgeGuardValidationError::EmptyMember),
-                ("bad\0tap", BridgeGuardValidationError::MemberContainsNul { index: 3 }),
-                (
-                    "0123456789abcdef",
-                    BridgeGuardValidationError::MemberTooLong {
-                        length: 16,
-                        maximum: MAX_MEMBER_BYTES,
-                    },
-                ),
-                (
-                    "éééééééé",
-                    BridgeGuardValidationError::MemberTooLong {
-                        length: 16,
-                        maximum: MAX_MEMBER_BYTES,
-                    },
-                ),
-            ] {
-                assert!(matches!(
-                    insert_member(&sut, tap),
-                    Err(BridgeGuardError::Validation(actual)) if actual == expected
-                ));
-                assert!(matches!(
-                    delete_member(&sut, tap),
-                    Err(BridgeGuardError::Validation(actual)) if actual == expected
-                ));
-            }
-        }
-
-        /// CONTRACT_SHAPE: pure-function.
-        #[test]
-        fn member_encoding_accepts_one_through_fifteen_utf8_bytes_and_never_truncates() {
-            for tap in ["a", "ovd-tp-0002", "123456789012345", "ééééééé"] {
-                let encoded = encode_member(tap).expect("valid member");
-                assert_eq!(&encoded[..tap.len()], tap.as_bytes());
-                assert!(encoded[tap.len()..].iter().all(|byte| *byte == 0));
-            }
-        }
-
-        /// CONTRACT_SHAPE: bounded-change.
-        #[test]
-        #[allow(clippy::print_stderr, reason = "the root-required skip notice is the only output")]
-        fn observe_and_delete_preserve_order_duplicates_foreign_children_and_full_conflicts() {
-            // This is a real-kernel adapter test; the source-local lane is
-            // also runnable in isolation, so establish the exact production
-            // guard through the adapter before taking its read-only receipt.
-            if unsafe { libc::geteuid() } != 0 {
-                eprintln!("SKIP bridge source observation: root required");
-                return;
-            }
-            let sut = spec();
-            let expected_members =
-                BTreeSet::from(["ovd-tp-0002".to_owned(), "ovd-tp-0003".to_owned()]);
-            let _ = converge_table(&sut).expect("converge source-local bridge table");
-            let _ = converge_chain(&sut).expect("converge source-local bridge chain");
-            let _ = converge_set(&sut).expect("converge source-local bridge set");
-            let _ = converge_rules(&sut).expect("converge source-local bridge rules");
-            for member in &expected_members {
-                let _ = insert_member(&sut, member).expect("converge source-local bridge member");
-            }
-            let observation = observe(&sut, &expected_members).expect("read-only observation");
-            let BridgeGuardObservation::Exact { inventory } = observation else {
-                panic!("healthy production guard is exact");
-            };
-            let expected_rules = sut.expected_rule_facts();
-            assert_eq!(
-                inventory.rules.iter().map(|rule| &rule.fact).collect::<Vec<_>>(),
-                expected_rules.iter().collect::<Vec<_>>()
-            );
-            assert_eq!(inventory.members.len(), expected_members.len());
-            assert!(inventory.other_children.is_empty());
-            assert!(matches!(
-                delete_owned_guard(&sut, &expected_members).expect("typed aggregate deletion"),
-                BridgeGuardDeleteOutcome::Deleted { .. }
-            ));
-            assert!(matches!(
-                observe(&sut, &BTreeSet::new()).expect("post-delete observation"),
-                BridgeGuardObservation::Absent { .. }
-            ));
-        }
-    }
-}
-
-/// True iff a recv chunk carries an `NLMSG_DONE` terminator.
 #[cfg(test)]
 mod tests {
     use super::*;

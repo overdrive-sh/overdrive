@@ -14,7 +14,7 @@ use base64::Engine;
 use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
 use overdrive_control_plane::api::{SubmitWorkloadRequest, SubmitWorkloadResponse};
 use overdrive_control_plane::dataplane_config::DataplaneConfig;
-use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, WorkloadNetnsPlan};
 use overdrive_control_plane::{
     BootAdapters, NodeAdapters, ServerConfig, run_server_with_obs_and_driver,
 };
@@ -54,11 +54,7 @@ static SERVER_SCENARIO_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_
 struct NoopNetworkProvisioner;
 
 impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
-    fn provision(
-        &self,
-        _workload: &WorkloadNetnsPlan,
-        _vm_tap: &VmTapPlan,
-    ) -> Result<(), VethProvisionError> {
+    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
         Ok(())
     }
 
@@ -498,10 +494,6 @@ async fn drive(effect: Effect) {
         driver.clone(),
         Arc::new(SimSharedGuestNetworkOwner::default()),
         wiring,
-        overdrive_worker::cgroup_manager::CgroupManager::new(
-            std::path::PathBuf::from("/sys/fs/cgroup"),
-            std::sync::Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
-        ),
     )
     .await
     .unwrap();
@@ -566,7 +558,6 @@ async fn drive(effect: Effect) {
 /// CONTRACT_SHAPE: bounded-change.
 /// Independent convergence while a start effect is pending.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn slow_start_does_not_block_independent_convergence() {
     drive(Effect::Start).await;
 }
@@ -574,7 +565,6 @@ async fn slow_start_does_not_block_independent_convergence() {
 /// CONTRACT_SHAPE: bounded-change.
 /// Independent convergence while a stop effect is pending.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn slow_stop_does_not_block_independent_convergence() {
     drive(Effect::Stop).await;
 }
@@ -582,7 +572,6 @@ async fn slow_stop_does_not_block_independent_convergence() {
 /// CONTRACT_SHAPE: bounded-change.
 /// Healthy complete-owner convergence control.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn healthy_driver_control_progresses() {
     drive(Effect::Healthy).await;
 }
@@ -593,7 +582,6 @@ async fn healthy_driver_control_progresses() {
 /// requeue. The held SimClock remains before that retry deadline, so a third
 /// admission must not occur until the wall-clock boundary is reached.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn convergence_owner_defers_no_action_retry_before_deadline() {
     let _serial = SERVER_SCENARIO_LOCK.lock().await;
     let seed = 283_001;
@@ -619,10 +607,6 @@ async fn convergence_owner_defers_no_action_retry_before_deadline() {
         driver,
         Arc::new(SimSharedGuestNetworkOwner::default()),
         wiring,
-        overdrive_worker::cgroup_manager::CgroupManager::new(
-            std::path::PathBuf::from("/sys/fs/cgroup"),
-            std::sync::Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
-        ),
     )
     .await
     .unwrap();
@@ -741,10 +725,6 @@ async fn capacity_case(effect: Effect, held: usize, close_admission: bool) {
         driver.clone(),
         Arc::new(SimSharedGuestNetworkOwner::default()),
         wiring,
-        overdrive_worker::cgroup_manager::CgroupManager::new(
-            std::path::PathBuf::from("/sys/fs/cgroup"),
-            std::sync::Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
-        ),
     )
     .await
     .unwrap();
@@ -1025,7 +1005,6 @@ async fn capacity_case(effect: Effect, held: usize, close_admission: bool) {
 /// CONTRACT_SHAPE: bounded-change.
 /// S-VLL-02: seven pending starts leave capacity for independent convergence.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn seven_held_starts_leave_one_progress_slot() {
     capacity_case(Effect::Start, 7, false).await;
 }
@@ -1033,7 +1012,6 @@ async fn seven_held_starts_leave_one_progress_slot() {
 /// CONTRACT_SHAPE: bounded-change.
 /// S-VLL-02: seven pending stops leave capacity for independent convergence.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn seven_held_stops_leave_one_progress_slot() {
     capacity_case(Effect::Stop, 7, false).await;
 }
@@ -1041,7 +1019,6 @@ async fn seven_held_stops_leave_one_progress_slot() {
 /// CONTRACT_SHAPE: bounded-change.
 /// S-VLL-03: at eight starts the ninth waits, then one completion refills it.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn eight_held_starts_bound_and_refill_admission() {
     capacity_case(Effect::Start, 8, false).await;
 }
@@ -1049,7 +1026,6 @@ async fn eight_held_starts_bound_and_refill_admission() {
 /// CONTRACT_SHAPE: bounded-change.
 /// S-VLL-03: at eight stops the ninth waits, then one completion refills it.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn eight_held_stops_bound_and_refill_admission() {
     capacity_case(Effect::Stop, 8, false).await;
 }
@@ -1059,7 +1035,6 @@ async fn eight_held_stops_bound_and_refill_admission() {
 /// Match every admitted target/tick to its Driver return, shim row and owner
 /// completion before the sole drain event; the ninth crosses no boundary.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn admission_close_drains_owned_starts_without_admitting_ninth() {
     capacity_case(Effect::Start, 8, true).await;
 }
@@ -1069,7 +1044,6 @@ async fn admission_close_drains_owned_starts_without_admitting_ninth() {
 /// Match every admitted target/tick to its Driver return, shim row and owner
 /// completion before the sole drain event; the ninth crosses no boundary.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn admission_close_drains_owned_stops_without_admitting_ninth() {
     capacity_case(Effect::Stop, 8, true).await;
 }
@@ -1289,7 +1263,6 @@ async fn runtime_job_input(state: &overdrive_control_plane::AppState, id: &str) 
 /// observes latest stop intent. Independent targets remain able to progress.
 /// Compare complete target Views, allocation rows and final Driver membership.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn same_workload_reconcilers_share_the_complete_evaluation_lease() {
     let _serial = SERVER_SCENARIO_LOCK.lock().await;
     let _ = trace_state();
@@ -1323,10 +1296,6 @@ async fn same_workload_reconcilers_share_the_complete_evaluation_lease() {
         driver.clone(),
         Arc::new(SimSharedGuestNetworkOwner::default()),
         wiring,
-        overdrive_worker::cgroup_manager::CgroupManager::new(
-            std::path::PathBuf::from("/sys/fs/cgroup"),
-            std::sync::Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
-        ),
     )
     .await
     .unwrap();
@@ -1504,7 +1473,6 @@ async fn same_workload_reconcilers_share_the_complete_evaluation_lease() {
 /// Exercise consumed exit-event write failure through its existing four
 /// attempts (50/100/200ms) before join; unread-queue draining is not promised.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn convergence_exit_report_is_the_owner_snapshot_not_final_server_backlog() {
     let _serial = SERVER_SCENARIO_LOCK.lock().await;
     let trace = trace_state();
@@ -1551,10 +1519,6 @@ async fn convergence_exit_report_is_the_owner_snapshot_not_final_server_backlog(
         driver.clone(),
         Arc::new(SimSharedGuestNetworkOwner::default()),
         wiring,
-        overdrive_worker::cgroup_manager::CgroupManager::new(
-            std::path::PathBuf::from("/sys/fs/cgroup"),
-            std::sync::Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
-        ),
     )
     .await
     .unwrap();

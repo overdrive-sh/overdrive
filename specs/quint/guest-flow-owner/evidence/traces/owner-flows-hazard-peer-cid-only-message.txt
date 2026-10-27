@@ -23,6 +23,7 @@ State 1
   abortDiscarded = {}
   gen = 0
   sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+  bq = <<>>
   toHostPaired = {}
   dl = [ res |-> <<"none">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
   gSess = 0
@@ -40,34 +41,35 @@ State 3 [VmStart]
   vmUp = TRUE
   vmGen = 1
 
-State 4 [Teardown]
-  alloc = "Retiring"
-
-State 5 [step]
+State 4 [step]
   sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
   gSess = 1
 
-State 6 [VmStop]
+State 5 [step]
+  sess = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
+
+State 6 [Teardown]
+  alloc = "Retiring"
+
+State 7 [step]
+  claim = 1
+  sess = <<[st |-> "live", gen |-> 1], [st |-> "none", gen |-> 0]>>
+
+State 8 [VmStop]
   vmUp = FALSE
+  sess = <<[st |-> "dead", gen |-> 1], [st |-> "none", gen |-> 0]>>
   gSess = 0
 
-State 7 [Release]
+State 9 [Release]
   alloc = "Absent"
 
-State 8 [Provision]
+State 10 [Provision]
   alloc = "Provisioned"
   gen = 2
 
-State 9 [VmStart]
+State 11 [VmStart]
   vmUp = TRUE
   vmGen = 2
-
-State 10 [step]
-  sess = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
-
-State 11 [step]
-  claim = 1
-  sess = <<[st |-> "dead", gen |-> 1], [st |-> "none", gen |-> 0]>>
 
 State 12 [Activate]
   act = "Activated"

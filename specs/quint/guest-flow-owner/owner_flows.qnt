@@ -208,8 +208,9 @@ module owner_flows {
   type Flow = { st: str, gen: int, req: int, inFlight: bool }
   // INB-1: the dialer's observation of its dials. res: none | pending | Ok | Refused | TimedOut | PairingDeadline | NotServing |
   // Quiesced | NoSession | Unreachable:ENODEV (the vsock connect failed: no state change) | Unreachable:ECONNRESET (the VMM
-  // exited while the dial was in flight) | Unreachable:io (a vsock I/O error before pairing) | Cancelled (the dialer dropped
-  // the future; nothing is returned). NotServing / Quiesced / NoSession are also the results of a dial the owner ended in
+  // exited while the dial was in flight, or a payload-free guest Abort arrived before Paired) | Unreachable:io (another
+  // vsock I/O error before pairing) | Cancelled (the dialer dropped the future; nothing is returned). NotServing /
+  // Quiesced / NoSession are also the results of a dial the owner ended in
   // flight by teardown / quiescence / observed session loss (L-9). adm: slots whose current result is a typed admission
   // refusal (ghost). tout: TimedOut replies in flight. earlyDl: the owner abandoned a dial the guest could still answer
   // (ghost). lateReply: the guest replied to a dial the owner had already abandoned (ghost).
@@ -248,6 +249,7 @@ module owner_flows {
   var drvLive: bool        // the driver's launch (vmGen) is live: started, not stopped
   var bclaim: int          // the CID's beacon claim (ClaimSet<GuestCid>): the connection holding it (0 = none)
   var bcn: int -> Sess     // beacon connections: none | pending | reading | live (claim held: READY released) | closed
+  var bq: List[int]        // BFIFO1: pending beacon connection IDs in the one listener's FIFO accept order
   var readyCross: bool     // ghost: a READY of one launch was released while another launch is the CID's
   var bHeldByOther: bool   // ghost: a beacon connection was refused because one of another launch held the claim
   // activation (G-V3)
@@ -303,7 +305,8 @@ module owner_flows {
   action keepGhostsHNoDl = all { resurrected' = resurrected, abortDiscarded' = abortDiscarded, phantom' = phantom }
   action keepAttr = all { crossMsg' = crossMsg, heldByOther' = heldByOther }
   action keepB = all {
-    drvLive' = drvLive, bclaim' = bclaim, bcn' = bcn, readyCross' = readyCross, bHeldByOther' = bHeldByOther,
+    drvLive' = drvLive, bclaim' = bclaim, bcn' = bcn, bq' = bq,
+    readyCross' = readyCross, bHeldByOther' = bHeldByOther,
   }
   // not an activation attempt: no activation result in this step
   action keepAct = all { act' = "none", badAct' = badAct }
@@ -329,7 +332,7 @@ module owner_flows {
     toHostPaired' = Set(), toHostRefused' = Set(), toGuestAbort' = Set(), toHostAbort' = Set(),
     resurrected' = false, abortDiscarded' = Set(), phantom' = false,
     dl' = { res: HFLOWS.mapBy(h => "none"), adm: Set(), tout: Set(), earlyDl: false, lateReply: false },
-    drvLive' = false, bclaim' = 0, bcn' = BCONNS.mapBy(b => { st: "none", gen: 0 }),
+    drvLive' = false, bclaim' = 0, bcn' = BCONNS.mapBy(b => { st: "none", gen: 0 }), bq' = List(),
     readyCross' = false, bHeldByOther' = false,
     act' = "none", badAct' = false,
     gSess' = 0,
@@ -356,7 +359,8 @@ module owner_flows {
     vmUp' = true, vmGen' = gen, drvLive' = BEACON,
     alloc' = alloc, gen' = gen, quiesced' = quiesced, claim' = claim, sess' = sess, flows' = flows,
     badPaired' = badPaired, keepAttr, keepH,
-    bclaim' = bclaim, bcn' = bcn, readyCross' = readyCross, bHeldByOther' = bHeldByOther, keepAct,
+    bclaim' = bclaim, bcn' = bcn, bq' = bq,
+    readyCross' = readyCross, bHeldByOther' = bHeldByOther, keepAct,
   }
   // VMM exit (driver.stop's kill, or a crash). K-A2′: connections already accepted fail at their next
   // I/O (a live session becomes `dead`; an accepted session or beacon connection whose first record
@@ -394,7 +398,7 @@ module owner_flows {
     // beacon claim in this one per-CID step (the step shape of driver.stop; driverStopKeepsClaim keeps it)
     gSess' = 0,
     drvLive' = false, bclaim' = if (BUG_DRIVER_STOP_KEEPS_CLAIM) bclaim else 0,
-    readyCross' = readyCross, bHeldByOther' = bHeldByOther, keepAct,
+    bq' = bq, readyCross' = readyCross, bHeldByOther' = bHeldByOther, keepAct,
   }
   // activate (G-V3): the only Provisioned -> Active edge; requires a live session and no quiescence
   // (activateNoGuard: neither is checked)
@@ -407,9 +411,8 @@ module owner_flows {
     gen' = gen, vmGen' = vmGen, vmUp' = vmUp, quiesced' = quiesced, claim' = claim, sess' = sess,
     flows' = flows, badPaired' = badPaired, keepAttr, keepH, keepB,
   }
-  // activate refused, no state change: no live control session (ControlSessionPending) or quiesced
-  // (QuiescenceLatched) — both retried under the EXEC claim. When both hold, either may be returned (the
-  // order of the two checks is not pinned).
+  // activate refused, no state change: quiescence has priority over a missing live control session;
+  // both outcomes are retried under the EXEC claim.
   action keepActRefused = all {
     alloc' = alloc, gen' = gen, vmGen' = vmGen, vmUp' = vmUp, quiesced' = quiesced, claim' = claim, sess' = sess,
     flows' = flows, badPaired' = badPaired, keepAttr, keepH, keepB, badAct' = badAct,
@@ -417,7 +420,7 @@ module owner_flows {
   action ActivatePending = all {
     conf_step' = if (REC) variant("ActivatePending", ()) else conf_step, gSess' = gSess,
     CORE,   // UI-V-BEACON-ACTIONS: no VM-driver driving port
-    alloc == "Provisioned", not(sessLive), act' = "ControlSessionPending", keepActRefused,
+    alloc == "Provisioned", not(quiesced), not(sessLive), act' = "ControlSessionPending", keepActRefused,
   }
   action ActivateQuiesced = all {
     conf_step' = if (REC) variant("ActivateQuiesced", ()) else conf_step, gSess' = gSess,
@@ -538,18 +541,20 @@ module owner_flows {
     val tokOk = BUG_PEER_CID_ONLY or
                 (if (BUG_NO_CLAIM_RECHECK) leaseTokenMatches(s.gen)
                  else tokenMatches(s.gen))
-    val upSt = if (writerUp(s.gen)) "live" else "dead"
     if (not(tokOk)) all {
       sess' = sess.set(c, { ...s, st: "closed" }), claim' = claim, heldByOther' = heldByOther,
+      keepSessRest,
     } else if (claim != 0) all {
       sess' = sess.set(c, { ...s, st: "closed" }), claim' = claim,
       heldByOther' = (heldByOther or sess.get(claim).gen != s.gen),
+      keepSessRest,
     } else if (BUG_SESSION_SPLIT_CLAIM) all {
       sess' = sess.set(c, { ...s, st: "checked" }), claim' = claim, heldByOther' = heldByOther,
-    } else all {
-      sess' = sess.set(c, { ...s, st: upSt }), claim' = c, heldByOther' = heldByOther,
-    },
-    keepSessRest,
+      keepSessRest,
+    } else if (writerUp(s.gen)) all {
+      sess' = sess.set(c, { ...s, st: "live" }), claim' = c, heldByOther' = heldByOther,
+      keepSessRest,
+    } else sessionLoss(c),
   }
   // BUG_SESSION_SPLIT_CLAIM: ... then claim, without re-checking.
   action HostClaimSession(c: int): bool = all {
@@ -590,7 +595,9 @@ module owner_flows {
     badPaired' = badPaired, crossMsg' = crossMsg, keepFlowRest,
   }
   // step 3: accept V_h; check Active + live session + not quiesced (+ quota); register in the
-  // CID's flow table — one owner step (U-1). Otherwise close, no message.
+  // CID's flow table — one owner step (U-1). A Quiesced refusal remains outside admitted state,
+  // reads the already-buffered complete request, emits Refused { Quiesced } and closes in this
+  // same formal action; other unavailable-boundary cases close without a message.
   action HostAcceptFlow(f: int): bool = all {
     conf_step' = if (REC) variant("HostAcceptFlow", { f: f }) else conf_step, gSess' = gSess,
     flows.get(f).st == "queued",
@@ -894,7 +901,7 @@ module owner_flows {
     toHostAbort.contains(h),
     toHostAbort' = toHostAbort.exclude(Set(h)),
     hf' = if (hOpen(hf.get(h).st)) hf.set(h, { ...hf.get(h), st: "closed" }) else hf,
-    dl' = dlEndOne(h, "Unreachable:io"),
+    dl' = dlEndOne(h, "Unreachable:ECONNRESET"),
     gf' = gf, toHostPaired' = toHostPaired, toHostRefused' = toHostRefused, toGuestAbort' = toGuestAbort,
     keepGhostsHNoDl, keepCoreMsg,
   }
@@ -939,6 +946,7 @@ module owner_flows {
     conf_step' = if (REC) variant("GuestOpenBeacon", { b: b }) else conf_step, gSess' = gSess,
     BEACON, vmUp, bcn.get(b).st == "none" or (bcn.get(b).st == "closed" and not(guestHasBeacon)),
     bcn' = bcn.set(b, { st: "pending", gen: vmGen }),
+    bq' = bq.append(b),
     drvLive' = drvLive, bclaim' = bclaim, readyCross' = readyCross, bHeldByOther' = bHeldByOther,
     keepAllButB,
   }
@@ -946,8 +954,9 @@ module owner_flows {
   // unclaimed while its first line is read
   action HostAcceptBeacon(b: int): bool = all {
     conf_step' = if (REC) variant("HostAcceptBeacon", { b: b }) else conf_step, gSess' = gSess,
-    BEACON, bcn.get(b).st == "pending",
+    BEACON, bcn.get(b).st == "pending", bq.length() > 0, bq.head() == b,
     bcn' = bcn.set(b, { ...bcn.get(b), st: if (drvLive) "reading" else "closed" }),
+    bq' = bq.tail(),
     drvLive' = drvLive, bclaim' = bclaim, readyCross' = readyCross, bHeldByOther' = bHeldByOther,
     keepAllButB,
   }
@@ -973,7 +982,7 @@ module owner_flows {
       bcn' = bcn.set(b, { ...x, st: "live" }), bclaim' = b,
       readyCross' = (readyCross or x.gen != vmGen), bHeldByOther' = bHeldByOther,
     },
-    drvLive' = drvLive, keepAllButB,
+    drvLive' = drvLive, bq' = bq, keepAllButB,
   }
   // driver.stop: ends the launch's liveness, closes its beacon session and releases the claim — one
   // step; it does not touch connections in `reading` (each is closed at its read). The VMM's exit
@@ -983,6 +992,7 @@ module owner_flows {
     BEACON, drvLive,
     drvLive' = false,
     bcn' = bcn.keys().mapBy(b => if (bcn.get(b).st == "live") { ...bcn.get(b), st: "closed" } else bcn.get(b)),
+    bq' = bq,
     bclaim' = (if (BUG_DRIVER_STOP_KEEPS_CLAIM) bclaim else 0), readyCross' = readyCross, bHeldByOther' = bHeldByOther,
     keepAllButB,
   }
@@ -1095,7 +1105,14 @@ module owner_flows {
   val BeaconNoCrossLaunchReady: bool = not(readyCross)
   // no beacon connection is refused because a connection of another launch holds the claim
   val BeaconNoCrossLaunchHeld: bool = not(bHeldByOther)
-  val BeaconSafety: bool = and { BeaconCurrentLaunch, BeaconNoCrossLaunchReady, BeaconNoCrossLaunchHeld }
+  val BeaconQueueExact: bool = and {
+    bq.indices().forall(i => BCONNS.contains(bq[i])),
+    bq.indices().forall(i => bq.indices().forall(j => i == j or bq[i] != bq[j])),
+    BCONNS.forall(b => (bq.indices().exists(i => bq[i] == b)) iff bcn.get(b).st == "pending"),
+  }
+  val BeaconSafety: bool = and {
+    BeaconCurrentLaunch, BeaconNoCrossLaunchReady, BeaconNoCrossLaunchHeld, BeaconQueueExact,
+  }
 
 
   // ------------------------------------------------------------------ liveness (TLC)
@@ -1109,7 +1126,7 @@ module owner_flows {
   // session steps and of the guest's connect / write, per connection
   val allVars = (alloc, gen, vmGen, vmUp, quiesced, claim, sess, flows, badPaired, crossMsg,
                  heldByOther, hf, gf, toHostPaired, toHostRefused, toGuestAbort, resurrected,
-                 abortDiscarded, phantom, drvLive, bclaim, bcn, readyCross, bHeldByOther, toHostAbort, dl, act, badAct,
+                 abortDiscarded, phantom, drvLive, bclaim, bcn, bq, readyCross, bHeldByOther, toHostAbort, dl, act, badAct,
                  gSess)
   val awaitingSession: bool = alloc == "Provisioned" and vmUp and vmGen == gen
   val launchLive: bool = CONNS.exists(c => sess.get(c).st == "live" and sess.get(c).gen == gen)
@@ -1345,7 +1362,8 @@ module owner_flows {
   run AcceptedVgErrorAbortsWithAbort = ControlSessionOpensAndCidActivates
     .then(DialOpen(1)).then(GuestAcceptV(1))
     .then(GuestAcceptedError(1)).expect(Safety and gf.get(1).st == "closed" and toHostAbort == Set(1) and hf.get(1).st == "req")
-    .then(HostRecvAbort(1)).expect(Safety and hf.get(1).st == "closed" and toHostAbort == Set() and toGuestAbort == Set() and not(resurrected))
+    .then(HostRecvAbort(1)).expect(Safety and hf.get(1).st == "closed" and dl.res.get(1) == "Unreachable:ECONNRESET"
+                                  and toHostAbort == Set() and toGuestAbort == Set() and not(resurrected))
   // INB-1: the guest's own connect to the application exceeds GUEST_INBOUND_CONNECT_TIMEOUT: TimedOut reaches the
   // dialer and the dial returns the typed error
   run DialTimedOutReturnsTypedError = ControlSessionOpensAndCidActivates

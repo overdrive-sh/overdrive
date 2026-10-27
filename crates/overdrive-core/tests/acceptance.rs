@@ -361,7 +361,6 @@ mod acceptance {
     // listener bounds (feature-delta § "[REF] Core vocabulary", § "[REF] Wire
     // contracts"). RED: the pinned surface is scaffolded and every body is
     // `#[ignore = "pending DELIVER step 2"]` (core codec and newtypes) or
-    // `#[ignore = "pending DELIVER attachment-cut step"]` (the READY line).
     mod vsock_datagram_frame;
     mod vsock_deploy_validation;
     mod vsock_forwarder_vocabulary;

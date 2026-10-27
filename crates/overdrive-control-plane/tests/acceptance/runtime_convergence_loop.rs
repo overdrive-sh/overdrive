@@ -33,7 +33,7 @@ use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
 use overdrive_control_plane::reconciler_runtime::{
     ReconcilerRuntime, run_convergence_tick, run_convergence_tick_with_network_provisioner_for_test,
 };
-use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, WorkloadNetnsPlan};
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{
@@ -61,11 +61,7 @@ use tempfile::TempDir;
 struct NoopNetworkProvisioner;
 
 impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
-    fn provision(
-        &self,
-        _workload: &WorkloadNetnsPlan,
-        _vm_tap: &VmTapPlan,
-    ) -> Result<(), VethProvisionError> {
+    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
         Ok(())
     }
 
@@ -91,6 +87,12 @@ async fn build_converged_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState 
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
     );
+    let guest_owner = crate::acceptance::serve_ports::owner();
+    overdrive_control_plane::guest_network::SharedGuestNetworkOwner::converge_shared(
+        guest_owner.as_ref(),
+    )
+    .await
+    .expect("the fixture's shared guest-network owner is converged");
     AppState::new(
         store,
         store_path,
@@ -108,7 +110,7 @@ async fn build_converged_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState 
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
         crate::acceptance::serve_ports::worker(),
-        crate::acceptance::serve_ports::owner(),
+        guest_owner,
         crate::acceptance::serve_ports::exec_gate(),
         crate::acceptance::serve_ports::pool(),
     )
@@ -849,7 +851,6 @@ async fn stop_after_failed_alloc_drains_broker() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 row 2: GuestAddressPool::assign)"]
 async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart() {
     use std::collections::BTreeMap;
     use std::time::Instant;
@@ -885,6 +886,12 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
     );
+    let restart_guest_owner = crate::acceptance::serve_ports::owner();
+    overdrive_control_plane::guest_network::SharedGuestNetworkOwner::converge_shared(
+        restart_guest_owner.as_ref(),
+    )
+    .await
+    .expect("the restart fixture's shared guest owner reports its bound ports");
     let state = AppState::new(
         store,
         store_path,
@@ -902,7 +909,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
         crate::acceptance::serve_ports::worker(),
-        crate::acceptance::serve_ports::owner(),
+        restart_guest_owner,
         crate::acceptance::serve_ports::exec_gate(),
         crate::acceptance::serve_ports::pool(),
     );

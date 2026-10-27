@@ -842,10 +842,6 @@ async fn run_server_refuses_boot_when_the_guest_dns_probe_fails_through_the_requ
         driver,
         owner_port,
         wiring,
-        overdrive_worker::cgroup_manager::CgroupManager::new(
-            std::path::PathBuf::from("/sys/fs/cgroup"),
-            Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
-        ),
     )
     .await;
 

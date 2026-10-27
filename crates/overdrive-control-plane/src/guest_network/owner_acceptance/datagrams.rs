@@ -24,10 +24,11 @@ use overdrive_core::guest_transport::wire::{
     ControlMessage, DatagramFrame, FlowId, FlowRefusal, KernelErrno,
 };
 use overdrive_core::guest_transport::{GUEST_NODE_GATEWAY, GUEST_NODE_PREFIX};
+use overdrive_netlink::FibRouteType;
 
 use super::support::{Composition, EventCapture, Lease, guest_flow, remote, sent_to};
+use crate::guest_network::flow_io::PeerProtocol;
 use crate::guest_network::flow_io::sim::{SimEffectKind, SimEffectTarget};
-use crate::guest_network::flow_io::{HostRouteType, PeerProtocol};
 use crate::guest_network::{AssociationPhase, FlowCloseCause, GuestConnKey};
 
 /// The D26 rule's verdict on a forwarded datagram's transmit (`EPERM`).
@@ -70,7 +71,6 @@ fn closed_with(capture: &EventCapture, cause: FlowCloseCause) -> usize {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn concurrent_associations_pair_independently_and_count_against_the_quota() {
     let c = Composition::booted(80).await;
     let (lease, _session) = c.active_lease("dgram-pair", &[]).await;
@@ -106,7 +106,6 @@ async fn concurrent_associations_pair_independently_and_count_against_the_quota(
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn datagrams_cross_whole_and_in_order_with_an_empty_one() {
     let c = Composition::booted(88).await;
     let (lease, _session) = c.active_lease("dgram-order", &[]).await;
@@ -136,11 +135,10 @@ async fn datagrams_cross_whole_and_in_order_with_an_empty_one() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn dns_to_the_gateway_pairs_and_other_prefix_addresses_are_policy() {
     let c = Composition::booted(81).await;
     let (lease, _session) = c.active_lease("dgram-dns", &[]).await;
-    c.io.set_route_type(GUEST_NODE_GATEWAY, HostRouteType::Local);
+    c.io.set_route_type(GUEST_NODE_GATEWAY, FibRouteType::Local);
     let dns = associate(&c, &lease, 1, SocketAddrV4::new(GUEST_NODE_GATEWAY, 53)).await;
     assert!(c.observe().await.cids[&lease.cid].datagrams.contains_key(&dns.flow));
 
@@ -206,14 +204,13 @@ async fn a_vip_association_is_rewritten_by_connect4_and_checked_on_its_kernel_pe
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn a_transmit_rejected_on_h_ends_the_association_destination_unreachable() {
     let (capture, _guard) = EventCapture::install();
     let c = Composition::booted(92).await;
     let (lease, _session) = c.active_lease("r5-7", &[]).await;
     let late_local = SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 77), 5353);
     let association = associate(&c, &lease, 1, late_local).await;
-    c.io.set_route_type(*late_local.ip(), HostRouteType::Local);
+    c.io.set_route_type(*late_local.ip(), FibRouteType::Local);
     c.io.destination_socket_error(association.flow, eperm());
     let ended = c.observe().await;
     assert!(!ended.cids[&lease.cid].datagrams.contains_key(&association.flow));
@@ -239,7 +236,6 @@ async fn a_transmit_rejected_on_h_ends_the_association_destination_unreachable()
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn a_refused_association_holds_nothing_between_attempts() {
     let c = Composition::booted(93).await;
     let (lease, _session) = c.active_lease("r5-27", &[]).await;
@@ -269,7 +265,6 @@ async fn a_refused_association_holds_nothing_between_attempts() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn the_guests_slot_release_ends_the_association() {
     let (capture, _guard) = EventCapture::install();
     let c = Composition::booted(94).await;
@@ -288,7 +283,6 @@ async fn the_guests_slot_release_ends_the_association() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn a_bad_frame_aborts_the_association_frame_invalid() {
     let (capture, _guard) = EventCapture::install();
     let c = Composition::booted(95).await;
@@ -308,7 +302,6 @@ async fn a_bad_frame_aborts_the_association_frame_invalid() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn control_messages_for_unknown_flows_are_discarded_and_an_abort_ends_its_association() {
     let (capture, _guard) = EventCapture::install();
     let c = Composition::booted(82).await;

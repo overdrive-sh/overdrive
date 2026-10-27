@@ -9,13 +9,15 @@ State 1
   up = TRUE
   rec = [C1 |-> "idle", C2 |-> "idle"]
   foreign = FALSE
-  flowsOpen = 0
+  flowsOpen = 1
   conf_step = [InitDown |-> [tag |-> "UNIT"]]
   cnt = 0
   stop = "none"
   table = TRUE
+  roundState = [C1 |-> "outside", C2 |-> "outside"]
   latch = FALSE
 
 State 2 [LeakHold]
   leaked = 1
   g = [ reopenEarly |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+  flowsOpen = 0

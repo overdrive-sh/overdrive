@@ -8,7 +8,7 @@ State 1: <Initial predicate>
    [own |-> 0, st |-> "free", fwd |-> FALSE] >>
 /\ quota_bugCountActiveOnly_flow_quota_endq = <<>>
 
-State 2: <quota_bugCountActiveOnly_flow_quota_Admit line 347, col 3 to line 396, col 57 of module quota_bugCountActiveOnly>
+State 2: <quota_bugCountActiveOnly_flow_quota_Admit line 353, col 3 to line 402, col 57 of module quota_bugCountActiveOnly>
 /\ quota_bugCountActiveOnly_flow_quota_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ quota_bugCountActiveOnly_flow_quota_g = [ refusedUnder |-> FALSE,
   clash |-> FALSE,
@@ -28,7 +28,7 @@ State 3: <quota_bugCountActiveOnly_flow_quota_HalfClose line 172, col 3 to line 
    [own |-> 0, st |-> "free", fwd |-> FALSE] >>
 /\ quota_bugCountActiveOnly_flow_quota_endq = <<>>
 
-State 4: <quota_bugCountActiveOnly_flow_quota_Admit line 347, col 3 to line 396, col 57 of module quota_bugCountActiveOnly>
+State 4: <quota_bugCountActiveOnly_flow_quota_Admit line 353, col 3 to line 402, col 57 of module quota_bugCountActiveOnly>
 /\ quota_bugCountActiveOnly_flow_quota_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ quota_bugCountActiveOnly_flow_quota_g = [ refusedUnder |-> FALSE,
   clash |-> FALSE,

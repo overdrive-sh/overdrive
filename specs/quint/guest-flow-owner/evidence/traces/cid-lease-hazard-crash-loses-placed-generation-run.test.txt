@@ -6,18 +6,18 @@
 
   1) lease_conf_bugCrashLosesPlacedGeneration::cid_lease::RedeployLeasedAtServeCrashIsPlacedAgain:
        Error [QNT508]: Expect condition does not hold true
-        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/cid_lease.qnt:762:49
-        762:   run RedeployLeasedAtServeCrashIsPlacedAgain = init
+        at /home/ubuntu/overdrive/specs/quint/guest-flow-owner/cid_lease.qnt:775:49
+        775:   run RedeployLeasedAtServeCrashIsPlacedAgain = init
                                                              ^^^^
-        763:     .then(Assign(1)).then(Launch(1)).then(Stop(1)).then(Release(1)).expect(Safety and st(1) == "done")
+        776:     .then(Assign(1)).then(Launch(1)).then(Stop(1)).then(Release(1)).expect(Safety and st(1) == "done")
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        764:     .then(Redeploy(1)).then(Assign(1)).expect(Safety and st(1) == "leased" and g.pendingGen.get(1) == "done")
+        777:     .then(Redeploy(1)).then(Assign(1)).expect(Safety and st(1) == "leased" and g.pendingGen.get(1) == "done")
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        765:     .then(Crash).expect(Safety and st(1) == "wait")
+        778:     .then(Crash).expect(Safety and st(1) == "wait")
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Use --seed=0x7efb8e79c67fd032 --match=lease_conf_bugCrashLosesPlacedGeneration::cid_lease::RedeployLeasedAtServeCrashIsPlacedAgain to repeat.
+    Use --seed=0xfd33ffde363986d8 --match=lease_conf_bugCrashLosesPlacedGeneration::cid_lease::RedeployLeasedAtServeCrashIsPlacedAgain to repeat.
 
 
   Use --verbosity=3 to show executions.
-  Further debug with: quint test --verbosity=3 /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/hazard/cid_lease_hazards.qnt
+  Further debug with: quint test --verbosity=3 /home/ubuntu/overdrive/specs/quint/guest-flow-owner/hazard/cid_lease_hazards.qnt
 error: Tests failed

@@ -20,6 +20,7 @@ State 1
   toHostRefused = {}
   conf_step = [InitWith |-> [o |-> "g"]]
   bHeldByOther = FALSE
+  bq = <<>>
   claim = 0
   dl = [ res |-> <<"none">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
   drvLive = FALSE
@@ -43,6 +44,7 @@ State 3 [VmStart]
 
 State 4 [step]
   bcn = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+  bq = <<1>>
 
 State 5 [VmStop]
   vmUp = FALSE
@@ -58,6 +60,7 @@ State 7 [VmStart]
 
 State 8 [step]
   bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
+  bq = <<>>
 
 State 9 [step]
   bcn = <<[st |-> "live", gen |-> 1], [st |-> "none", gen |-> 0]>>

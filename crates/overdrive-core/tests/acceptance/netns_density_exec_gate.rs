@@ -2,7 +2,7 @@
 
 #![allow(clippy::doc_markdown)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -24,16 +24,14 @@ const COMPONENTS: [SharedGuestNetworkComponent; 9] = [
     SharedGuestNetworkComponent::Supervisor,
 ];
 
-/// Every fail-stop cause in declaration order (FD § "[REF] Runtime shared-network supervisor (D-295-R13, R14, R15, R16) — ACCEPTED 2026-09-24 (R14 kill scope user ruling of the same date)" (the core addition: two fail-stop causes)). The gate is
-/// cause-agnostic, so the two D-295-R14 causes and the two QHOLD causes
-/// (`LeakedQuiescenceHold`, `ForeignQuiescenceHold`, D-UP-3 / D-UP-4) are
-/// closed exactly like the original six.
-const CAUSES: [SharedGuestNetworkFailStopCause; 10] = [
+/// Every post-attachment-cut fail-stop cause in declaration order (FD
+/// § "Typed error taxonomy and who branches"). The gate is cause-agnostic,
+/// so every member of the exact closed set produces the same terminal gate
+/// transition and participates in the first-request-wins contract.
+const CAUSES: [SharedGuestNetworkFailStopCause; 8] = [
     SharedGuestNetworkFailStopCause::RecoveryDeadlineExceeded,
     SharedGuestNetworkFailStopCause::LeakedQuiescenceHold,
     SharedGuestNetworkFailStopCause::ForeignQuiescenceHold,
-    SharedGuestNetworkFailStopCause::TapQuiescenceUndetermined,
-    SharedGuestNetworkFailStopCause::VmKillFailed,
     SharedGuestNetworkFailStopCause::SupervisorReturned,
     SharedGuestNetworkFailStopCause::SupervisorFailed,
     SharedGuestNetworkFailStopCause::SupervisorPanicked,
@@ -41,32 +39,44 @@ const CAUSES: [SharedGuestNetworkFailStopCause; 10] = [
     SharedGuestNetworkFailStopCause::RequestChannelClosed,
 ];
 // The generated `FailStop(index)` range below indexes `CAUSES`.
-const _: () = assert!(CAUSES.len() == 10);
+const _: () = assert!(CAUSES.len() == 8);
 
 #[derive(Clone, Copy, Debug)]
 enum Operation {
     OpenAfterBoot,
     BeginRecovery(u8),
-    CompleteAttempt(Option<u8>),
+    CompleteAttempt(u16),
     FailStop(u8),
     Claim,
     DropClaim,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum ModelState {
     BootClosed,
     Open,
-    Recovering { component: SharedGuestNetworkComponent, attempts: u32 },
+    Recovering {
+        attempts: BTreeMap<SharedGuestNetworkComponent, u32>,
+        joined_since_attempt: BTreeSet<SharedGuestNetworkComponent>,
+        latest: SharedGuestNetworkComponent,
+    },
     FailStop,
+}
+
+fn component_set(mask: u16) -> BTreeSet<SharedGuestNetworkComponent> {
+    COMPONENTS
+        .iter()
+        .enumerate()
+        .filter_map(|(index, component)| ((mask & (1 << index)) != 0).then_some(*component))
+        .collect()
 }
 
 fn operation_strategy() -> impl Strategy<Value = Operation> {
     prop_oneof![
         Just(Operation::OpenAfterBoot),
         (0_u8..9).prop_map(Operation::BeginRecovery),
-        prop::option::of(0_u8..9).prop_map(Operation::CompleteAttempt),
-        (0_u8..10).prop_map(Operation::FailStop),
+        (0_u16..(1_u16 << COMPONENTS.len())).prop_map(Operation::CompleteAttempt),
+        (0_u8..8).prop_map(Operation::FailStop),
         Just(Operation::Claim),
         Just(Operation::DropClaim),
     ]
@@ -165,59 +175,104 @@ proptest! {
 
                 for operation in operations {
                     match operation {
-                Operation::OpenAfterBoot => {
-                    let accepted = supervisor.open_after_boot();
-                    let expected = model == ModelState::BootClosed;
-                    prop_assert_eq!(accepted, expected);
-                    if expected {
-                        model = ModelState::Open;
-                    }
-                }
-                Operation::BeginRecovery(index) => {
-                    let component = COMPONENTS[usize::from(index)];
-                    let accepted = supervisor.begin_recovery(component);
-                    let expected = model == ModelState::Open;
-                    prop_assert_eq!(accepted, expected);
-                    if expected {
-                        model = ModelState::Recovering { component, attempts: 0 };
-                    }
-                }
-                Operation::CompleteAttempt(remaining) => {
-                    let remaining = remaining.map(|index| COMPONENTS[usize::from(index)]);
-                    let accepted = supervisor.complete_attempt(remaining.into_iter().collect());
-                    let ModelState::Recovering { attempts, .. } = model else {
-                        prop_assert!(!accepted);
-                        continue;
-                    };
-                    prop_assert!(accepted);
-                    model = remaining.map_or(ModelState::Open, |component| {
-                        ModelState::Recovering {
-                            component,
-                            attempts: attempts.saturating_add(1),
-                        }
-                    });
-                }
-                        Operation::FailStop(index) => {
-                    let cause = CAUSES[usize::from(index)];
-                    let receipt = supervisor.fail_stop(cause);
-                    if model == ModelState::FailStop {
-                        prop_assert!(receipt.is_none());
-                    } else {
-                        let receipt = receipt.expect("the first terminal transition returns a receipt");
-                        let (component, attempts) = match model {
-                            ModelState::Recovering { component, attempts } => (component, attempts),
-                            ModelState::BootClosed | ModelState::Open => {
-                                (SharedGuestNetworkComponent::Supervisor, 0)
+                        Operation::OpenAfterBoot => {
+                            let accepted = supervisor.open_after_boot();
+                            let expected = model == ModelState::BootClosed;
+                            prop_assert_eq!(accepted, expected);
+                            if expected {
+                                model = ModelState::Open;
                             }
-                            ModelState::FailStop => unreachable!(),
-                        };
-                        prop_assert_eq!(receipt.component, component);
-                        prop_assert_eq!(receipt.attempts, attempts);
-                        prop_assert_eq!(receipt.cause, cause);
-                        model = ModelState::FailStop;
-                    }
                         }
-                        Operation::Claim => match model {
+                        Operation::BeginRecovery(index) => {
+                            let component = COMPONENTS[usize::from(index)];
+                            let accepted = supervisor.begin_recovery(component);
+                            let expected = match &model {
+                                ModelState::Open => true,
+                                ModelState::Recovering { attempts, .. } => {
+                                    !attempts.contains_key(&component)
+                                }
+                                ModelState::BootClosed | ModelState::FailStop => false,
+                            };
+                            prop_assert_eq!(accepted, expected);
+                            if expected {
+                                if matches!(&model, ModelState::Open) {
+                                    model = ModelState::Recovering {
+                                        attempts: BTreeMap::from([(component, 0)]),
+                                        joined_since_attempt: BTreeSet::new(),
+                                        latest: component,
+                                    };
+                                } else if let ModelState::Recovering {
+                                        attempts,
+                                        joined_since_attempt,
+                                        latest,
+                                    } = &mut model
+                                {
+                                    attempts.insert(component, 0);
+                                    joined_since_attempt.insert(component);
+                                    *latest = component;
+                                } else {
+                                    unreachable!();
+                                }
+                            }
+                        }
+                        Operation::CompleteAttempt(mask) => {
+                            let remaining = component_set(mask);
+                            let accepted = supervisor.complete_attempt(remaining.clone());
+                            let expected = matches!(&model, ModelState::Recovering { .. });
+                            prop_assert_eq!(accepted, expected);
+                            if expected {
+                                let mut reopen = false;
+                                if let ModelState::Recovering {
+                                    attempts,
+                                    joined_since_attempt,
+                                    latest,
+                                } = &mut model
+                                {
+                                    attempts.retain(|component, count| {
+                                        if !remaining.contains(component) {
+                                            return false;
+                                        }
+                                        if !joined_since_attempt.contains(component) {
+                                            *count = count.saturating_add(1);
+                                        }
+                                        true
+                                    });
+                                    joined_since_attempt.clear();
+                                    if let Some(first) = attempts.keys().next().copied() {
+                                        *latest = first;
+                                    } else {
+                                        reopen = true;
+                                    }
+                                }
+                                if reopen {
+                                    model = ModelState::Open;
+                                }
+                            }
+                        }
+                        Operation::FailStop(index) => {
+                            let cause = CAUSES[usize::from(index)];
+                            let receipt = supervisor.fail_stop(cause);
+                            if model == ModelState::FailStop {
+                                prop_assert!(receipt.is_none());
+                            } else {
+                                let receipt = receipt
+                                    .expect("the first terminal transition returns a receipt");
+                                let (component, attempts) = match &model {
+                                    ModelState::Recovering { attempts, latest, .. } => {
+                                        (*latest, attempts[latest])
+                                    }
+                                    ModelState::BootClosed | ModelState::Open => {
+                                        (SharedGuestNetworkComponent::Supervisor, 0)
+                                    }
+                                    ModelState::FailStop => unreachable!(),
+                                };
+                                prop_assert_eq!(receipt.component, component);
+                                prop_assert_eq!(receipt.attempts, attempts);
+                                prop_assert_eq!(receipt.cause, cause);
+                                model = ModelState::FailStop;
+                            }
+                        }
+                        Operation::Claim => match &model {
                             ModelState::Open => {
                                 active_claims.push(
                                     gate.claim_release().await.expect("Open grants a claim"),
@@ -247,7 +302,7 @@ proptest! {
                         if waiting_claims[waiting].is_finished() {
                             let waiter = waiting_claims.swap_remove(waiting);
                             let claim = waiter.await.expect("generated waiter joins");
-                            match model {
+                            match &model {
                                 ModelState::Open => active_claims.push(
                                     claim.expect("a waiter woken into Open receives a claim"),
                                 ),
@@ -264,15 +319,18 @@ proptest! {
                     }
 
                     prop_assert_eq!(supervisor.is_boot_closed(), model == ModelState::BootClosed);
-                    match (model, supervisor.recovery_progress().as_slice()) {
-                        (ModelState::Recovering { component, attempts }, [progress]) => {
-                            prop_assert_eq!(progress.component, component);
-                            prop_assert_eq!(progress.attempts, attempts);
+                    let progress = supervisor.recovery_progress();
+                    match &model {
+                        ModelState::Recovering { attempts, .. } => {
+                            prop_assert_eq!(progress.len(), attempts.len());
+                            for ((component, count), observed) in attempts.iter().zip(&progress) {
+                                prop_assert_eq!(observed.component, *component);
+                                prop_assert_eq!(observed.attempts, *count);
+                            }
                         }
-                        (ModelState::Recovering { .. }, _) => {
-                            prop_assert!(false, "Recovering has exactly one snapshot");
+                        ModelState::BootClosed | ModelState::Open | ModelState::FailStop => {
+                            prop_assert!(progress.is_empty());
                         }
-                        (_, progress) => prop_assert!(progress.is_empty()),
                     }
                 }
                 for waiter in waiting_claims {
@@ -285,8 +343,8 @@ proptest! {
 }
 
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
-/// S-ND295-27 — One guest-command gate; every fail-stop cause, the two
-/// D-295-R14 causes included, closes it and the first request wins.
+/// S-ND295-27 — One guest-command gate; every post-attachment-cut fail-stop
+/// cause closes it and the first request wins.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn every_fail_stop_cause_is_closed_and_first_request_wins() {
@@ -330,7 +388,8 @@ fn illegal_event_from_every_gate_state_is_rejected() {
     assert!(recovering.open_after_boot());
     assert!(recovering.begin_recovery(SharedGuestNetworkComponent::Forwarder));
     assert!(!recovering.open_after_boot());
-    assert!(!recovering.begin_recovery(SharedGuestNetworkComponent::Dns));
+    assert!(recovering.begin_recovery(SharedGuestNetworkComponent::Dns));
+    assert!(!recovering.begin_recovery(SharedGuestNetworkComponent::Forwarder));
 
     let failed = GuestNetworkExecWiring::new(Arc::new(SimClock::new())).supervisor();
     assert!(failed.fail_stop(SharedGuestNetworkFailStopCause::SupervisorFailed).is_some());

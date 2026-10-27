@@ -658,7 +658,6 @@ async fn poll_until_reclaimed(
 // process-global state (`.claude/rules/testing.md` § "Tests that mutate
 // process-global state").
 #[serial(cgroup, env)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn vm_survivor_with_no_vm_registry_entry_is_reclaimed_via_observed_empty() {
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
     let tmp = tempfile::Builder::new()
@@ -727,7 +726,6 @@ async fn vm_survivor_with_no_vm_registry_entry_is_reclaimed_via_observed_empty()
 /// indirectly: if the ordering regressed, this boot would refuse.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn boot_epoch_reclamation_settles_before_adopt_on_restart_recovery() {
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
     let tmp = tempfile::Builder::new()
@@ -804,7 +802,6 @@ async fn boot_epoch_reclamation_settles_before_adopt_on_restart_recovery() {
 /// reclaims it. Proves the WAKE mechanism (§105a.8) actually fires.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn steady_state_sweep_reclaims_a_stranded_scope_without_restarting_serve() {
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
     let tmp = tempfile::Builder::new()
@@ -897,7 +894,6 @@ async fn steady_state_sweep_reclaims_a_stranded_scope_without_restarting_serve()
 /// gone AFTER the sweep, alongside the scope/run-dir/clone.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn steady_state_sweep_kills_a_surviving_vmm_at_a_later_tick() {
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
     let tmp = tempfile::Builder::new()
@@ -966,7 +962,6 @@ async fn steady_state_sweep_kills_a_surviving_vmm_at_a_later_tick() {
 /// the row is BYTE-UNCHANGED at every field this wire surface exposes.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn restart_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
     let tmp = tempfile::Builder::new()
@@ -1060,7 +1055,6 @@ async fn restart_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
 /// shape (a).
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn failed_stop_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
     let tmp = tempfile::Builder::new()
@@ -1231,7 +1225,6 @@ async fn failed_stop_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation() {
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
     let tmp = tempfile::Builder::new()
@@ -1365,7 +1358,6 @@ async fn reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation() {
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn reclaim_then_fresh_start_retains_predecessor_and_resets_history() {
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
     let tmp = tempfile::Builder::new()
@@ -1549,7 +1541,6 @@ async fn reclaim_then_fresh_start_retains_predecessor_and_resets_history() {
 /// Activate as `#[tokio::test]` `#[serial(cgroup)]`.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn guest_self_exit_without_stop_leaves_no_rootfs_clone_in_operator_dir() {
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
     let tmp = tempfile::Builder::new()
@@ -1630,7 +1621,6 @@ async fn guest_self_exit_without_stop_leaves_no_rootfs_clone_in_operator_dir() {
 /// Activate as `#[tokio::test]` `#[serial(cgroup)]`.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn hypervisor_death_without_stop_leaves_no_rootfs_clone_in_operator_dir() {
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
     let tmp = tempfile::Builder::new()
@@ -1718,7 +1708,6 @@ async fn hypervisor_death_without_stop_leaves_no_rootfs_clone_in_operator_dir() 
 /// `#[serial(cgroup)]`.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn serve_restart_losing_in_memory_rootfs_plan_leaves_no_rootfs_clone() {
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
     let tmp = tempfile::Builder::new()

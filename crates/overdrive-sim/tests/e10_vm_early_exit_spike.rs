@@ -826,7 +826,6 @@ async fn drive(seed: u64, restart: bool) {
 /// occurrence history. Registered terminal-unclaimed disposal removes the
 /// substrate while the authored ending and every occurrence remain unchanged.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn no_intervening_restart_reclamation_preserves_authored_ending_control() {
     drive(257_205, false).await;
 }

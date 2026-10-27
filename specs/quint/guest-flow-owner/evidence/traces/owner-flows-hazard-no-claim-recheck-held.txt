@@ -27,6 +27,7 @@ State 1
   toGuestAbort = {}
   alloc = "Absent"
   toHostAbort = {}
+  bq = <<>>
   gen = 0
   dl = [ res |-> <<"none">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
   claim = 0
@@ -44,19 +45,20 @@ State 4 [step]
   sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
   gSess = 1
 
-State 5 [VmStop]
-  gSess = 0
-  vmUp = FALSE
-
-State 6 [step]
+State 5 [step]
   sess = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
 
-State 7 [Teardown]
+State 6 [Teardown]
   alloc = "Retiring"
 
-State 8 [step]
-  sess = <<[st |-> "dead", gen |-> 1], [st |-> "none", gen |-> 0]>>
+State 7 [step]
+  sess = <<[st |-> "live", gen |-> 1], [st |-> "none", gen |-> 0]>>
   claim = 1
+
+State 8 [VmStop]
+  sess = <<[st |-> "dead", gen |-> 1], [st |-> "none", gen |-> 0]>>
+  gSess = 0
+  vmUp = FALSE
 
 State 9 [Release]
   alloc = "Absent"

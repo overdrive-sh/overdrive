@@ -39,11 +39,13 @@ pub use supervisor::{AllocSupervisor, ProbeTaskHandle};
 pub use tcp_prober::TokioTcpProber;
 
 use std::collections::BTreeMap;
+use std::net::{Ipv4Addr, SocketAddrV4};
 use std::sync::Arc;
 use std::time::Duration;
 
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
-use overdrive_core::guest_transport::dial::GuestStreamDial;
+use overdrive_core::guest_transport::GUEST_NODE_PREFIX;
+use overdrive_core::guest_transport::dial::{DialPurpose, GuestDialError, GuestStreamDial};
 use overdrive_core::id::AllocationId;
 use overdrive_core::observation::{
     ProbeIdx, ProbeResultRow, ProbeRole, ProbeRunSeq, ProbeStatus, SameStatusRuns,
@@ -99,13 +101,6 @@ pub struct ProbeRunner {
     /// `.claude/rules/development.md` § "Port-trait dependencies": the
     /// production composition passes the guest-flow owner, tests pass
     /// `SimGuestStreamDial`.
-    // SCAFFOLD: true — netns-density-295 DISTILL (DG-2 row 19); the VM probe
-    // dispatch through this port, the run numbering and the
-    // `probe.not_sampled` event are DELIVER step 9.
-    #[allow(
-        dead_code,
-        reason = "consumed by the VM probe dispatch of DELIVER step 9 (DG-2 row 19)"
-    )]
     guest_dial: Arc<dyn GuestStreamDial>,
     /// Per-alloc supervisors. `BTreeMap` per
     /// `.claude/rules/development.md` § "Ordered-collection choice"
@@ -229,16 +224,22 @@ impl ProbeRunner {
         // verbatim (the public API contract); the spawned loop in
         // `start_alloc` instead uses the stored `Arc<dyn Clock>` /
         // `Arc<dyn ObservationStore>`.
-        probe_tick(
+        let mut run_state = ProbeRunState::default();
+        let row = probe_tick(
             self.tcp_prober.as_ref(),
             self.http_prober.as_ref(),
+            None,
             clock,
             observation_store,
             alloc_id,
             probe_idx,
             descriptor,
+            &mut run_state,
         )
-        .await
+        .await?;
+        Ok(row.unwrap_or_else(|| {
+            unreachable!("the adapter-only single-tick path cannot produce a guest no-sample")
+        }))
     }
 
     /// Register an allocation supervisor — owns its
@@ -340,6 +341,7 @@ impl ProbeRunner {
             let child_token = handle.cancellation_token();
             let tcp_prober = Arc::clone(&self.tcp_prober);
             let http_prober = Arc::clone(&self.http_prober);
+            let guest_dial = Arc::clone(&self.guest_dial);
             let clock = Arc::clone(&self.clock);
             let observation_store = Arc::clone(&self.observation_store);
             let alloc_id_for_task = spec.alloc.clone();
@@ -347,6 +349,7 @@ impl ProbeRunner {
                 supervised_probe_loop(
                     tcp_prober,
                     http_prober,
+                    guest_dial,
                     clock,
                     observation_store,
                     alloc_id_for_task,
@@ -509,23 +512,44 @@ fn unix_ms_from_clock(clock: &dyn Clock) -> u64 {
 async fn probe_tick(
     tcp_prober: &dyn TcpProber,
     http_prober: &dyn HttpProber,
+    guest_dial: Option<&dyn GuestStreamDial>,
     clock: &dyn Clock,
     observation_store: &dyn ObservationStore,
     alloc_id: &AllocationId,
     probe_idx: ProbeIdx,
     descriptor: &ProbeDescriptor,
-) -> Result<ProbeResultRow, ProbeRunnerError> {
+    run_state: &mut ProbeRunState,
+) -> Result<Option<ProbeResultRow>, ProbeRunnerError> {
     let timeout = Duration::from_secs(u64::from(descriptor.timeout_seconds));
     let outcome = match &descriptor.mechanic {
         ProbeMechanic::Tcp { host, port } => {
             let host = http_probe_host(Some(host.as_str()));
-            tcp_prober.probe(host, *port, timeout).await.map_err(|err| {
-                ProbeRunnerError::ProbeAdapterFailed {
-                    alloc_id: alloc_id.clone(),
-                    probe_idx,
-                    source: err,
+            match (guest_dial, guest_probe_target(host, *port)) {
+                (Some(guest_dial), Some(target)) => {
+                    match tokio::time::timeout(timeout, guest_dial.dial(target, DialPurpose::Probe))
+                        .await
+                    {
+                        Err(_) => {
+                            ProbeOutcome::Fail { reason: format!("timeout after {timeout:?}") }
+                        }
+                        Ok(Ok(stream)) => {
+                            drop(stream);
+                            ProbeOutcome::Pass
+                        }
+                        Ok(Err(GuestDialError::Capacity | GuestDialError::Quiesced)) => {
+                            return Ok(None);
+                        }
+                        Ok(Err(error)) => ProbeOutcome::Fail { reason: error.as_str().to_owned() },
+                    }
                 }
-            })?
+                _ => tcp_prober.probe(host, *port, timeout).await.map_err(|err| {
+                    ProbeRunnerError::ProbeAdapterFailed {
+                        alloc_id: alloc_id.clone(),
+                        probe_idx,
+                        source: err,
+                    }
+                })?,
+            }
         }
         ProbeMechanic::Http { path, port, host } => {
             // Host defaults to loopback for single-node Phase 1 when
@@ -534,13 +558,42 @@ async fn probe_tick(
             // loopback address, mirroring the TCP-probe host contract.
             let host = http_probe_host(host.as_deref());
             let url = format!("http://{host}:{port}{path}");
-            http_prober.probe(&url, timeout).await.map_err(|err| {
-                ProbeRunnerError::ProbeAdapterFailed {
-                    alloc_id: alloc_id.clone(),
-                    probe_idx,
-                    source: err,
+            match (guest_dial, guest_probe_target(host, *port)) {
+                (Some(guest_dial), Some(target)) => {
+                    let request =
+                        http_prober::build_guest_probe_request(&url).map_err(|source| {
+                            ProbeRunnerError::ProbeAdapterFailed {
+                                alloc_id: alloc_id.clone(),
+                                probe_idx,
+                                source,
+                            }
+                        })?;
+                    match tokio::time::timeout(timeout, async {
+                        let stream = guest_dial.dial(target, DialPurpose::Probe).await?;
+                        Ok::<_, GuestDialError>(
+                            http_prober::probe_guest_stream(stream, request).await,
+                        )
+                    })
+                    .await
+                    {
+                        Err(_) => {
+                            ProbeOutcome::Fail { reason: format!("timeout after {timeout:?}") }
+                        }
+                        Ok(Ok(outcome)) => outcome,
+                        Ok(Err(GuestDialError::Capacity | GuestDialError::Quiesced)) => {
+                            return Ok(None);
+                        }
+                        Ok(Err(error)) => ProbeOutcome::Fail { reason: error.as_str().to_owned() },
+                    }
                 }
-            })?
+                _ => http_prober.probe(&url, timeout).await.map_err(|source| {
+                    ProbeRunnerError::ProbeAdapterFailed {
+                        alloc_id: alloc_id.clone(),
+                        probe_idx,
+                        source,
+                    }
+                })?,
+            }
         }
     };
     let status = match outcome {
@@ -555,11 +608,11 @@ async fn probe_tick(
         status,
         last_observed_at_unix_ms,
         inferred: descriptor.inferred,
-        // SCAFFOLD: true — netns-density-295 DISTILL. The probe task's run
-        // numbering and observed streak (PROBE-RUN-COUNT, ADR-0191: the
-        // previous written row's run_seq + 1, and the same-status streak)
-        // are DELIVER step 9; until then every row carries the first values.
-        run_seq: ProbeRunSeq::FIRST,
+        // STEP 12-01 carries the minimum sequence required to distinguish
+        // successfully written guest-dial runs. Full producer streak handling
+        // remains with STEP 13-02.
+        run_seq: run_state.next_run(),
+        // SCAFFOLD: true — PROBE-RUN-COUNT's same-status streak is DELIVER 13-02.
         same_status_runs: SameStatusRuns::ONE,
     };
     observation_store.write_probe_result(row.clone()).await.map_err(|err| {
@@ -569,7 +622,28 @@ async fn probe_tick(
             source: err,
         }
     })?;
-    Ok(row)
+    run_state.record_written(row.run_seq);
+    Ok(Some(row))
+}
+
+#[derive(Default)]
+struct ProbeRunState {
+    last_written: Option<ProbeRunSeq>,
+}
+
+impl ProbeRunState {
+    fn next_run(&self) -> ProbeRunSeq {
+        self.last_written.map_or(ProbeRunSeq::FIRST, ProbeRunSeq::succ)
+    }
+
+    const fn record_written(&mut self, run_seq: ProbeRunSeq) {
+        self.last_written = Some(run_seq);
+    }
+}
+
+fn guest_probe_target(host: &str, port: u16) -> Option<SocketAddrV4> {
+    let address = host.parse::<Ipv4Addr>().ok()?;
+    GUEST_NODE_PREFIX.contains(&address).then_some(SocketAddrV4::new(address, port))
 }
 
 /// Per-descriptor supervised tick loop body — runs as a `tokio::spawn`
@@ -592,6 +666,7 @@ async fn probe_tick(
 async fn supervised_probe_loop(
     tcp_prober: Arc<dyn TcpProber>,
     http_prober: Arc<dyn HttpProber>,
+    guest_dial: Arc<dyn GuestStreamDial>,
     clock: Arc<dyn Clock>,
     observation_store: Arc<dyn ObservationStore>,
     alloc_id: AllocationId,
@@ -600,6 +675,7 @@ async fn supervised_probe_loop(
     child_token: CancellationToken,
 ) {
     let interval = Duration::from_secs(u64::from(descriptor.interval_seconds));
+    let mut run_state = ProbeRunState::default();
     loop {
         tokio::select! {
             biased;
@@ -608,11 +684,13 @@ async fn supervised_probe_loop(
                 if let Err(err) = probe_tick(
                     tcp_prober.as_ref(),
                     http_prober.as_ref(),
+                    Some(guest_dial.as_ref()),
                     clock.as_ref(),
                     observation_store.as_ref(),
                     &alloc_id,
                     probe_idx,
                     &descriptor,
+                    &mut run_state,
                 ).await {
                     tracing::warn!(
                         name: "probe_tick.error",

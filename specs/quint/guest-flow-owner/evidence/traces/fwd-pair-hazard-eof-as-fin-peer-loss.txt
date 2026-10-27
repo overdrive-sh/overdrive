@@ -8,6 +8,7 @@ State 1
   vmUp = TRUE
   hres = "none"
   gen = [g |-> 0, h |-> 0]
+  strmHeld = FALSE
   oldCtx = [g |-> "none", h |-> "none"]
   pr = [ g |-> [ ph |-> "unattached", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ], h |-> [ ph |-> "unattached", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ] ]
   attRes = [g |-> "none", h |-> "none"]

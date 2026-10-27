@@ -1,4 +1,4 @@
-# quiescence-hazard-foreign-decrements: counterexample, 4 state(s) (from the TLC trace)
+# quiescence-hazard-foreign-decrements: counterexample, 3 state(s) (from the TLC trace)
 
 State 1
   table = TRUE
@@ -6,6 +6,7 @@ State 1
   flowsOpen = 0
   conf_step = [InitDown |-> [tag |-> "UNIT"]]
   leaked = 0
+  roundState = [C1 |-> "outside", C2 |-> "outside"]
   latch = FALSE
   foreign = FALSE
   dmg = [C1 |-> FALSE, C2 |-> FALSE]
@@ -16,16 +17,14 @@ State 1
   repLeft = 1
   rec = [C1 |-> "idle", C2 |-> "idle"]
 
-State 2 [Damage]
-  dmg = [C1 |-> TRUE, C2 |-> FALSE]
-
-State 3 [RecQuiesce]
+State 2 [LeakHold]
   cnt = 1
+  leaked = 1
   latch = TRUE
-  rec = [C1 |-> "held", C2 |-> "idle"]
+  g = [ reopenEarly |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
 
-State 4 [ForeignRestore]
+State 3 [ForeignRestore]
   cnt = 0
   latch = FALSE
   foreign = TRUE
-  g = [ reopenEarly |-> TRUE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> FALSE, refusedBoot |-> FALSE, foreignChanged |-> TRUE ]
+  g = [ reopenEarly |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> FALSE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> TRUE ]

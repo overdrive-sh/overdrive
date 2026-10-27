@@ -758,11 +758,12 @@ pub enum ControlPlaneError {
 /// the remaining fallible steps `compose_vm_driver` folds into the same
 /// Earned-Trust composition gate (ADR-0082 §D8 "Composition") —
 /// `CgroupAccounting`'s probe, the kernel-header read, and the
-/// kernel-format validation. The SAME enum backs both the hard
-/// [`crate::VmComposeError::Refused`]-shaped disposition and the soft
-/// not-available one at the `compose_vm_driver` call site — the
-/// soft/hard split lives entirely in which wrapper holds it, never in a
-/// second copy of these four causes.
+/// kernel-format validation. `BeaconBind` carries the typed refusal from
+/// the required node beacon listener after the VMM probes succeed; it refuses
+/// boot for both optional and required VM capabilities. The SAME enum backs
+/// the hard [`crate::VmComposeError::Refused`]-shaped disposition and the
+/// soft not-available one at the `compose_vm_driver` call site for probe
+/// failures; the beacon bind is always hard.
 #[derive(Debug, Error)]
 pub enum VmmBootError {
     /// [`overdrive_core::traits::vmm::Vmm::probe`] caught a genuine
@@ -804,6 +805,16 @@ pub enum VmmBootError {
     KernelFormat {
         #[source]
         source: KernelFormatError,
+    },
+
+    /// The node's one host vsock beacon listener could not bind (DG-4,
+    /// PORTS-CONFIG). This is a hard boot refusal whether VM capability is
+    /// `Optional` or `Required`: a probed VMM without its beacon listener
+    /// cannot serve the composed guest-transport contract.
+    #[error("VM driver beacon intake bind refused: {source}")]
+    BeaconBind {
+        #[source]
+        source: overdrive_worker::BeaconIntakeError,
     },
 }
 

@@ -20,6 +20,9 @@
 use overdrive_core::aggregate::{
     ParseError, ProbeDescriptor, ProbeMechanic, ServiceSpec, WorkloadSpecInput,
 };
+use overdrive_core::guest_transport::{
+    GUEST_PROBE_SLOTS, GUEST_TCP_INTAKE_PORT, GUEST_UDP_SLOT_BASE, GUEST_UDP_SLOTS,
+};
 use overdrive_core::observation::ProbeRole;
 use proptest::prelude::*;
 
@@ -40,7 +43,7 @@ proptest! {
     #[test]
     fn health_check_startup_http_parses_with_defaults(
         id in service_id_strategy(),
-        port in port_strategy(),
+        port in listener_port_strategy(),
         path in http_path_strategy(),
     ) {
         let toml = format!(
@@ -359,7 +362,11 @@ proptest! {
 // ---------------------------------------------------------------------
 
 fn port_strategy() -> impl Strategy<Value = u16> {
-    1u16..=65535u16
+    1_u16..=u16::MAX
+}
+
+fn listener_port_strategy() -> impl Strategy<Value = u16> {
+    prop_oneof![1_u16..GUEST_TCP_INTAKE_PORT, (GUEST_UDP_SLOT_BASE + GUEST_UDP_SLOTS)..=u16::MAX,]
 }
 
 fn service_id_strategy() -> impl Strategy<Value = String> {
@@ -411,7 +418,7 @@ proptest! {
     #[test]
     fn service_without_probes_with_listener_infers_default_tcp_startup_probe(
         id in service_id_strategy(),
-        port in port_strategy(),
+        port in listener_port_strategy(),
     ) {
         let toml = format!(
             r#"
@@ -461,7 +468,7 @@ proptest! {
     #[test]
     fn service_with_empty_startup_array_opts_out_of_default_inference(
         id in service_id_strategy(),
-        port in port_strategy(),
+        port in listener_port_strategy(),
     ) {
         let toml = format!(
             r#"
@@ -732,10 +739,11 @@ fn tcp_probe_block(section: &str, n: usize) -> String {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
 
-    /// For ANY combination of declared probe counts (including >1 per
-    /// role and 0 for a role), every descriptor's `idx` equals its
-    /// position in its OWN role array, and every `(role, idx)` pair is
-    /// unique across the concatenation of all three arrays.
+    /// For ANY valid combination of declared probe counts (including >1 per
+    /// role and 0 for a role, with the total within `GUEST_PROBE_SLOTS`),
+    /// every descriptor's `idx` equals its position in its OWN role array,
+    /// and every `(role, idx)` pair is unique across the concatenation of all
+    /// three arrays.
     ///
     /// `startup` is drawn from `1..=3` because an omitted startup
     /// section triggers ADR-0058 default inference, which is covered by
@@ -746,6 +754,11 @@ proptest! {
         readiness_n in 0usize..=3,
         liveness_n in 0usize..=3,
     ) {
+        prop_assume!(
+            u32::try_from(startup_n + readiness_n + liveness_n)
+                .expect("generated probe count fits u32")
+                <= GUEST_PROBE_SLOTS
+        );
         let toml = format!(
             "{SERVICE_PRELUDE}\n{}{}{}",
             tcp_probe_block("startup", startup_n),

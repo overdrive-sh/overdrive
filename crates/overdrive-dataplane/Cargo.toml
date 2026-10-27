@@ -164,7 +164,7 @@ hex.workspace                   = true
 # `mtls::ktls`, not the `ktls` crate. `rcgen` is now a PRODUCTION dep (above) for
 # `probe`'s throwaway self-test sentinel (SD-5 / D-MTLS-12); the test PKI consumes
 # the same production `rcgen` dep — no separate dev-dep entry needed.
-ktls.workspace  = true
+ktls = { workspace = true, default-features = false, features = ["ring"] }
 
 [lints]
 workspace = true

@@ -64,6 +64,7 @@ tokio-util      = { version = "0.7", features = ["rt"] }
 async-trait     = "0.1"
 futures         = "0.3"
 parking_lot     = "0.12"
+socket2         = { version = "0.5", features = ["all"] }
 
 # --- Serialization --------------------------------------------------------
 serde           = { version = "1", features = ["derive"] }
@@ -99,7 +100,7 @@ rustls          = { version = "0.23", default-features = false, features = ["rin
 # proxy (ADR-0069, GH #26). `findings.md` #4: NewSessionTicket/KeyUpdate → EIO on
 # raw kTLS RX; `ktls::CorkStream` + `config_ktls_*` run the control-message loop.
 # MIT/Apache-2.0 (OSS-first honoured; the one new dep DESIGN sanctioned).
-ktls            = "6"
+ktls            = { version = "6", default-features = false }
 
 # --- Networking / HTTP ----------------------------------------------------
 hyper           = { version = "1", features = ["full"] }
@@ -193,14 +194,11 @@ ethtool         = "0.2"
 # has no safe std equivalent. `overdrive-host::vmm::CloudHypervisorVmm`
 # (microvm-driver-cloud-hypervisor step 01-06, GH #42) calls
 # `rustix::fs::ioctl_ficlone` for the per-launch rootfs clone (ADR-0082
-# §D5's self-application rule: the FICLONE ioctl directly, never `cp`) — a
-# SAFE function whose `unsafe` is encapsulated inside rustix itself, which
-# is what lets `overdrive-host` call it under its crate-wide
-# `#![forbid(unsafe_code)]` (mirrors the `linux-keyutils` precedent already
-# in that crate). `default-features = false` + explicit `fs` opts out of
-# rustix's wider surface (net, mm, process, ...) this workspace does not
-# need yet.
-rustix          = { version = "1", default-features = false, features = ["std", "fs"] }
+# §D5's self-application rule: the FICLONE ioctl directly, never `cp`) and
+# `rustix::net` for the safe nonblocking AF_VSOCK socket/accept/readiness
+# operations of the node beacon adapter. `default-features = false` keeps the
+# dependency limited to those consumed syscall families.
+rustix          = { version = "1", default-features = false, features = ["std", "fs", "net"] }
 # `ipnet` — IPv4/IPv6 CIDR types used by the VIP-pool allocator (ADR-0049).
 # `serde` feature gates `Deserialize` / `Serialize` impls for `Ipv4Net`,
 # used by the `[dataplane.vip_allocator]` TOML parser in

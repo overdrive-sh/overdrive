@@ -232,15 +232,6 @@ pub enum InterceptError {
         "shared mTLS policy route is absent: the fwmark 0x1 rule to table 100 or table 100's local 0.0.0.0/0 route on lo is missing"
     )]
     PolicyRouteAbsent,
-    /// The worker's verdict over an observation whose `intercept_mark_guard`
-    /// is `false`: the guard table `ip overdrive-mtls-guard` is absent.
-    /// Source-less. No adapter returns it; only `MtlsInterceptWorker`'s boot
-    /// read-back and runtime audit construct it. Native RED reproduced the
-    /// IP-program-loss exposure, so R18 and this missing-guard classification
-    /// remain in force.
-    // RED scaffold (DR-08 (a)): not constructed before DELIVER step 08-02.
-    #[error("shared mTLS intercept-mark guard table ip overdrive-mtls-guard is absent")]
-    InterceptMarkGuardAbsent,
     /// The worker's verdict when converging the dynamic member sets to the
     /// empty set returned `Ok` but the read-back still holds `observed`
     /// (boot step 6.2), or when boot step 6.6's read-back holds members.

@@ -1627,7 +1627,6 @@ async fn durable_alloc_snapshot(
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn the_same_guest_reaches_a_non_mesh_destination_in_the_clear() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision shared VM fixture");
@@ -1722,7 +1721,6 @@ async fn the_same_guest_reaches_a_non_mesh_destination_in_the_clear() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transit_hop() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision shared VM fixture");
@@ -2380,7 +2378,6 @@ async fn restart_observation_failure_awaits_cleanup_before_reporting() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn operator_exit_78_after_ready_is_an_ordinary_result() {
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
     let tmp = tempfile::Builder::new()

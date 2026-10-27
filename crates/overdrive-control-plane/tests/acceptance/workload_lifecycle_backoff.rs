@@ -107,6 +107,12 @@ async fn build_state_with_driver(tmp: &TempDir, driver: Arc<dyn Driver>) -> AppS
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
     );
+    let guest_owner = crate::acceptance::serve_ports::owner();
+    overdrive_control_plane::guest_network::SharedGuestNetworkOwner::converge_shared(
+        guest_owner.as_ref(),
+    )
+    .await
+    .expect("the fixture's shared guest-network owner is converged");
     AppState::new(
         store,
         store_path,
@@ -124,14 +130,13 @@ async fn build_state_with_driver(tmp: &TempDir, driver: Arc<dyn Driver>) -> AppS
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
         crate::acceptance::serve_ports::worker(),
-        crate::acceptance::serve_ports::owner(),
+        guest_owner,
         crate::acceptance::serve_ports::exec_gate(),
         crate::acceptance::serve_ports::pool(),
     )
 }
 
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 row 2: GuestAddressPool::assign)"]
 async fn repeatedly_crashing_workload_exhausts_backoff_and_stops_retrying() {
     use overdrive_control_plane::reconciler_runtime::run_convergence_tick;
 

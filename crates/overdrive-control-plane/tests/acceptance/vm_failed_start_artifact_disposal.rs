@@ -16,7 +16,7 @@ use overdrive_control_plane::action_shim::{
 };
 use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::veth_provisioner::{
-    NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
+    NetSlotAllocator, VethProvisionError, WorkloadNetnsPlan,
 };
 use overdrive_core::SpiffeId;
 use overdrive_core::aggregate::WorkloadKind;
@@ -67,12 +67,7 @@ struct RecordingNetworkProvisioner {
 }
 
 impl WorkloadNetworkProvisioner for RecordingNetworkProvisioner {
-    fn provision(
-        &self,
-        _workload: &WorkloadNetnsPlan,
-        vm_tap: &VmTapPlan,
-    ) -> Result<(), VethProvisionError> {
-        let _ = vm_tap;
+    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
         self.provisions.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
@@ -232,7 +227,6 @@ async fn dispatch(
     reason = "one production-composition journey retains the Failed write, reclamation plan, stale-action replay, and sibling complement"
 )]
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (beacon relocation, step 6: BeaconIntake::bind; VMM launch with the leased CID, step 3)"]
 async fn failed_vm_cleanup_hands_only_stranded_vm_artifacts_to_disposal() {
     let tmp = TempDir::new().expect("tempdir");
     let (kernel, master) = stage_artifacts(&tmp);

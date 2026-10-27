@@ -138,12 +138,11 @@ impl ProbeRunSeq {
 
     /// The next run sequence (saturating; one run per second for a `u64`
     /// never reaches the ceiling).
-    // SCAFFOLD: true — RED scaffold (netns-density-295, PROBE-RUN-COUNT);
-    // implemented in DELIVER step 9.
+    // Bounded prerequisite for the attachment-cut VM guest-dial probes:
+    // each successfully written task row follows the prior row.
     #[must_use]
     pub const fn succ(self) -> Self {
-        let _ = self;
-        panic!("Not yet implemented -- RED scaffold")
+        Self(self.0.saturating_add(1))
     }
 }
 

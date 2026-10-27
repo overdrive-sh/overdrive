@@ -103,7 +103,6 @@ fn read_ca_from_trust_triple(operator_config_dir: &std::path::Path) -> String {
 
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 row 2: GuestAddressPool::assign)"]
 async fn submitted_job_reaches_running_via_real_server_boot() {
     let temp = TempDir::new().expect("tempdir");
     let data_dir = temp.path().join("data");
@@ -141,10 +140,6 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
         Arc::clone(&driver),
         Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
         wiring,
-        overdrive_worker::cgroup_manager::CgroupManager::new(
-            std::path::PathBuf::from("/sys/fs/cgroup"),
-            std::sync::Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
-        ),
     )
     .await
     .expect("server boot");

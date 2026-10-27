@@ -189,6 +189,18 @@ impl VipRange {
             .unwrap_or_else(|| unreachable!("VipRange::new rejects empty ranges (ZeroCapacity)"))
     }
 
+    /// Returns the first configured CIDR, in operator-supplied order, whose
+    /// address set intersects `other`; `None` iff every configured CIDR is
+    /// disjoint. Reserved VIP addresses do not change configured-range
+    /// overlap. Reads only; allocates nothing.
+    #[must_use]
+    pub fn first_overlapping_range(&self, other: Ipv4Net) -> Option<Ipv4Net> {
+        self.ranges
+            .iter()
+            .copied()
+            .find(|range| range.contains(&other.network()) || other.contains(&range.network()))
+    }
+
     /// Returns `true` if `addr` is contained in any configured range
     /// AND not reserved. Used by Earned Trust probes (step 01-03) to
     /// verify persisted entries still project into the live range.

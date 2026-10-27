@@ -52,18 +52,14 @@ use overdrive_control_plane::action_shim::{
     LifecycleEvent, WorkloadNetworkProvisioner, dispatch_with_network_provisioner,
 };
 use overdrive_control_plane::veth_provisioner::NetSlotAllocator;
-use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, WorkloadNetnsPlan};
 use overdrive_control_plane::worker::exit_observer;
 
 #[derive(Debug, Default)]
 struct NoopNetworkProvisioner;
 
 impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
-    fn provision(
-        &self,
-        _workload: &WorkloadNetnsPlan,
-        _vm_tap: &VmTapPlan,
-    ) -> Result<(), VethProvisionError> {
+    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
         Ok(())
     }
 

@@ -4,6 +4,7 @@ State 1
   gh = [ fwdAfterEnd |-> FALSE, fwdOld |-> FALSE, unclassified |-> FALSE, rstOpen |-> {}, holderReadAfterAbort |-> FALSE, trail |-> {}, faults |-> 0, hobs |-> "none", woken |-> FALSE, vhTouched |-> FALSE, dropped |-> FALSE, hostDead |-> FALSE, hresCls |-> "none" ]
   strmAbort = FALSE
   attRes = [g |-> "none", h |-> "none"]
+  strmHeld = FALSE
   terr = [g |-> FALSE, h |-> FALSE]
   mode = "dgram"
   gen = [g |-> 0, h |-> 0]

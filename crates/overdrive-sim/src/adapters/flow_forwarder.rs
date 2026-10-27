@@ -87,6 +87,8 @@ struct ContextState {
     summary: SimContextState,
     next_id: u64,
     live: BTreeMap<ForwardId, SimItem>,
+    live_pair_count: usize,
+    live_watch_count: usize,
     ends: VecDeque<ForwardEnd>,
     runs: VecDeque<(ForwardId, PairSide)>,
     attached: u64,
@@ -170,6 +172,8 @@ impl SimForwarderDevice {
             },
             next_id: 1,
             live: BTreeMap::new(),
+            live_pair_count: 0,
+            live_watch_count: 0,
             ends: VecDeque::new(),
             runs: VecDeque::new(),
             attached: 0,
@@ -225,15 +229,59 @@ fn io_error(op: ForwarderOp, errno: i32) -> ForwarderError {
     ForwarderError::Io { op, source: std::io::Error::from_raw_os_error(errno) }
 }
 
-fn refresh_summary(context: &mut ContextState) {
-    context.summary.live_pairs = u32::try_from(
-        context.live.values().filter(|item| matches!(item, SimItem::Pair(_))).count(),
-    )
-    .unwrap_or(u32::MAX);
-    context.summary.live_watches = u32::try_from(
-        context.live.values().filter(|item| matches!(item, SimItem::Watch(_))).count(),
-    )
-    .unwrap_or(u32::MAX);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LiveKind {
+    Pair,
+    Watch,
+}
+
+const fn live_kind(item: &SimItem) -> LiveKind {
+    match item {
+        SimItem::Pair(_) => LiveKind::Pair,
+        SimItem::Watch(_) => LiveKind::Watch,
+    }
+}
+
+fn update_live_counts(
+    context: &mut ContextState,
+    removed: Option<LiveKind>,
+    inserted: Option<LiveKind>,
+) {
+    if removed != inserted {
+        if let Some(kind) = removed {
+            let count = match kind {
+                LiveKind::Pair => &mut context.live_pair_count,
+                LiveKind::Watch => &mut context.live_watch_count,
+            };
+            *count = count.checked_sub(1).unwrap_or_else(|| {
+                unreachable!("a live {kind:?} exists only when its count is nonzero")
+            });
+        }
+        if let Some(kind) = inserted {
+            let count = match kind {
+                LiveKind::Pair => &mut context.live_pair_count,
+                LiveKind::Watch => &mut context.live_watch_count,
+            };
+            *count = count.checked_add(1).unwrap_or_else(|| {
+                unreachable!("the live {kind:?} count cannot exceed the live map capacity")
+            });
+        }
+    }
+    context.summary.live_pairs = u32::try_from(context.live_pair_count).unwrap_or(u32::MAX);
+    context.summary.live_watches = u32::try_from(context.live_watch_count).unwrap_or(u32::MAX);
+}
+
+fn insert_live(context: &mut ContextState, id: ForwardId, item: SimItem) -> Option<SimItem> {
+    let inserted = live_kind(&item);
+    let removed = context.live.insert(id, item);
+    update_live_counts(context, removed.as_ref().map(live_kind), Some(inserted));
+    removed
+}
+
+fn remove_live(context: &mut ContextState, id: ForwardId) -> Option<SimItem> {
+    let removed = context.live.remove(&id);
+    update_live_counts(context, removed.as_ref().map(live_kind), None);
+    removed
 }
 
 fn queue_end(context: &mut ContextState, end: ForwardEnd) {
@@ -272,7 +320,7 @@ fn finish_item(
     queue_record: bool,
     release: bool,
 ) -> bool {
-    let Some(item) = context.live.remove(&id) else {
+    let Some(item) = remove_live(context, id) else {
         return false;
     };
     context.runs.retain(|(queued, _)| *queued != id);
@@ -317,7 +365,6 @@ fn finish_item(
     if queue_record {
         queue_end(context, end);
     }
-    refresh_summary(context);
     true
 }
 
@@ -594,6 +641,14 @@ fn clean_source_end(socket: &SimSocket) -> bool {
     }
 }
 
+fn unclassified_source_end(socket: &SimSocket) -> bool {
+    let state = socket.inner.lock();
+    state.kind == SimSocketKind::VsockStream
+        && state.vsock_state == SimVsockState::Closing
+        && state.recorded_class.is_none()
+        && state.stream_rx.is_empty()
+}
+
 fn source_abort(socket: &SimSocket, side: PairSide) -> Option<AbortCause> {
     if let Some(cause) = socket_error(socket, side) {
         return Some(cause);
@@ -604,13 +659,15 @@ fn source_abort(socket: &SimSocket, side: PairSide) -> Option<AbortCause> {
         return Some(AbortCause::PeerAbort { side });
     }
     drop(state);
+    if unclassified_source_end(socket) {
+        return Some(AbortCause::Unclassified { side });
+    }
     None
 }
 
 fn target_half_close(target: &SimSocket) {
     let mut state = target.inner.lock();
     state.sent_shutdown = Some(SimShutdown::Send);
-    state.peer_end.get_or_insert(SimFarEnd::Eof);
 }
 
 enum DirectionRun {
@@ -644,6 +701,7 @@ fn run_stream_direction(pair: &mut SimPair, source: PairSide) -> DirectionRun {
                 if accepted < bytes.len()
                     || source_socket.queued() > 0
                     || clean_source_end(&source_socket)
+                    || unclassified_source_end(&source_socket)
                 {
                     DirectionRun::Again
                 } else {
@@ -817,11 +875,11 @@ fn run_datagram_direction(
 }
 
 fn run_pair(context: &mut ContextState, id: ForwardId, source: PairSide) -> bool {
-    let Some(item) = context.live.remove(&id) else {
+    let Some(item) = remove_live(context, id) else {
         return false;
     };
     let SimItem::Pair(mut pair) = item else {
-        context.live.insert(id, item);
+        let _ = insert_live(context, id, item);
         return false;
     };
     let result = if let Some(cause) = pair.abort {
@@ -834,7 +892,7 @@ fn run_pair(context: &mut ContextState, id: ForwardId, source: PairSide) -> bool
             }
         }
     };
-    context.live.insert(id, SimItem::Pair(pair));
+    let _ = insert_live(context, id, SimItem::Pair(pair));
     match result {
         DirectionRun::End(outcome) => finish_item(context, id, outcome, true, false),
         DirectionRun::Again => {
@@ -872,7 +930,6 @@ impl SimFlowForwarder {
         context.summary.open = false;
         context.runs.clear();
         context.ends.clear();
-        refresh_summary(context);
         drop(device);
     }
 
@@ -976,7 +1033,8 @@ impl FlowForwarder<SimSocket> for SimFlowForwarder {
         install_hook(b, hook_b);
         seed_vsock_class(a);
         seed_vsock_class(b);
-        context.live.insert(
+        let _ = insert_live(
+            context,
             id,
             SimItem::Pair(SimPair {
                 halves: [a.clone(), b.clone()],
@@ -987,7 +1045,6 @@ impl FlowForwarder<SimSocket> for SimFlowForwarder {
             }),
         );
         context.attached += 1;
-        refresh_summary(context);
         enqueue_run(context, id, PairSide::A);
         enqueue_run(context, id, PairSide::B);
         drop(device);
@@ -1011,8 +1068,7 @@ impl FlowForwarder<SimSocket> for SimFlowForwarder {
         );
         seed_vsock_class(vsock);
         let existing_class = vsock.inner.lock().recorded_class;
-        context.live.insert(id, SimItem::Watch(vsock.clone()));
-        refresh_summary(context);
+        let _ = insert_live(context, id, SimItem::Watch(vsock.clone()));
         if let Some(class) = existing_class {
             let outcome = match class {
                 SourceEnd::Clean => ForwardOutcome::GuestHalfClose,
@@ -1404,14 +1460,10 @@ impl SimSocket {
     // -- kernel facts of this socket (stimulus) ------------------------------
 
     /// Sets `sk_err` without reporting it — on a vsock, the first of the
-    /// device release's orphan-sweep steps (with the state and peer bits);
-    /// [`Self::report_error`] is the second.
+    /// device release's orphan-sweep steps; [`Self::report_error`] is the
+    /// second. An error does not itself receive a peer SHUTDOWN.
     pub fn set_sk_err(&self, errno: KernelErrno) {
-        let mut state = self.inner.lock();
-        state.sk_err = Some(errno);
-        if state.kind == SimSocketKind::VsockStream {
-            state.received_shutdown = Some(SimShutdown::Both);
-        }
+        self.inner.lock().sk_err = Some(errno);
     }
 
     /// Runs the socket's `sk_error_report` for its pending `sk_err` (a
@@ -1433,7 +1485,14 @@ impl SimSocket {
 
     /// Sets a vsock STREAM's state directly.
     pub fn set_vsock_state(&self, state: SimVsockState) {
-        self.inner.lock().vsock_state = state;
+        let hook = {
+            let mut socket = self.inner.lock();
+            socket.vsock_state = state;
+            socket.hooked.clone()
+        };
+        if let Some(hook) = hook {
+            schedule_hook(&hook, hook.side);
+        }
     }
 
     /// This side shuts its own send direction (`SHUT_WR`; a vsock sends
@@ -1483,13 +1542,13 @@ impl SimSocket {
             SimLocalRead::Bytes(state.stream_rx.drain(..n).collect())
         } else if let Some(errno) = state.sk_err {
             SimLocalRead::Err(errno)
+        } else if state.kind == SimSocketKind::VsockStream && state.received_shutdown.is_some() {
+            SimLocalRead::Eof
         } else if state.kind == SimSocketKind::VsockStream
             && state.vsock_state == SimVsockState::Closing
         {
             SimLocalRead::Err(errno(107))
-        } else if (state.kind == SimSocketKind::VsockStream && state.received_shutdown.is_some())
-            || (state.kind == SimSocketKind::Tcp && state.tcp_state == SimTcpState::CloseWait)
-        {
+        } else if state.kind == SimSocketKind::Tcp && state.tcp_state == SimTcpState::CloseWait {
             SimLocalRead::Eof
         } else if state.setup != SimSocketSetup::Connected {
             SimLocalRead::Err(errno(107))

@@ -62,6 +62,5 @@ mod acceptance {
     mod vm_driver_clone_index;
     // netns-density-295 DG-4 / QPROJ-4 (D17) — the node beacon intake over
     // the core `BeaconIo` port (`SimBeaconIo`) and `VmDriver::beacon_observation`.
-    // RED: `#[ignore = "pending DELIVER attachment-cut step"]` (beacon relocation, step 6).
     mod vsock_beacon_intake;
 }

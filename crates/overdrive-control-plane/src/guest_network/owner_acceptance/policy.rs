@@ -24,12 +24,13 @@ use std::net::{Ipv4Addr, SocketAddrV4};
 use overdrive_core::guest_transport::GUEST_NODE_GATEWAY;
 use overdrive_core::guest_transport::wire::{ControlMessage, FlowRefusal};
 use overdrive_core::traits::mtls_resolve::{MtlsResolution, ResolvedBackend};
+use overdrive_netlink::FibRouteType;
 use overdrive_sim::adapters::SimMtlsResolve;
 
 use super::support::{Composition, remote, sent_to};
 use crate::guest_network::GuestFlowPhase;
 use crate::guest_network::flow_io::sim::{SimEffectKind, SimEffectTarget, SimFailure};
-use crate::guest_network::flow_io::{HostRouteType, PeerProtocol, PeerSocketSpec};
+use crate::guest_network::flow_io::{PeerProtocol, PeerSocketSpec};
 
 fn addr(a: u8, b: u8, c: u8, d: u8, port: u16) -> SocketAddrV4 {
     SocketAddrV4::new(Ipv4Addr::new(a, b, c, d), port)
@@ -53,17 +54,16 @@ fn peer_specs(c: &Composition) -> Vec<PeerSocketSpec> {
 ///
 /// CONTRACT_SHAPE: pure-function.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn tcp_flows_to_host_internal_or_excluded_destinations_are_refused_by_class() {
     let c = Composition::booted(90).await;
     let (lease, session) = c.active_lease("r5-6", &[]).await;
     let host_own = addr(192, 0, 2, 10, 8080);
-    c.io.set_route_type(*host_own.ip(), HostRouteType::Local);
-    c.io.set_route_type(GUEST_NODE_GATEWAY, HostRouteType::Local);
+    c.io.set_route_type(*host_own.ip(), FibRouteType::Local);
+    c.io.set_route_type(GUEST_NODE_GATEWAY, FibRouteType::Local);
     let broadcast = addr(198, 51, 100, 255, 9);
-    c.io.set_route_type(*broadcast.ip(), HostRouteType::Broadcast);
+    c.io.set_route_type(*broadcast.ip(), FibRouteType::Broadcast);
     let anycast = addr(198, 51, 100, 1, 9);
-    c.io.set_route_type(*anycast.ip(), HostRouteType::Anycast);
+    c.io.set_route_type(*anycast.ip(), FibRouteType::Anycast);
     let cases = [
         (addr(0, 0, 0, 1, 80), FlowRefusal::Policy),
         (addr(224, 0, 0, 9, 80), FlowRefusal::Policy),
@@ -120,8 +120,8 @@ async fn the_first_matching_class_decides_in_the_pinned_order() {
     c.boot().await;
     let (lease, _session) = c.active_lease("r5-6-order", &[]).await;
     c.intercept_live(&lease).await;
-    c.io.set_route_type(*local_mesh.ip(), HostRouteType::Local);
-    c.io.set_route_type(GUEST_NODE_GATEWAY, HostRouteType::Local);
+    c.io.set_route_type(*local_mesh.ip(), FibRouteType::Local);
+    c.io.set_route_type(GUEST_NODE_GATEWAY, FibRouteType::Local);
 
     let (_k1, refused) = c.open_tcp_flow(&lease, 1, loopback, 5001);
     let (k2, _meshed) = c.open_tcp_flow(&lease, 2, local_mesh, 5002);
@@ -149,7 +149,6 @@ async fn the_first_matching_class_decides_in_the_pinned_order() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn a_rejected_non_mesh_connect_is_destination_unreachable() {
     let c = Composition::booted(93).await;
     let (lease, _session) = c.active_lease("r5-7t", &[]).await;
@@ -176,7 +175,6 @@ async fn a_rejected_non_mesh_connect_is_destination_unreachable() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn a_non_mesh_flow_is_connected_directly_on_a_marked_lingering_socket() {
     let c = Composition::booted(94).await;
     let (lease, _session) = c.active_lease("d14", &[]).await;
@@ -229,7 +227,6 @@ async fn a_mesh_destination_is_connected_to_leg_f_on_an_unmarked_loopback_socket
 ///
 /// CONTRACT_SHAPE: pure-function.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn an_unreachable_mesh_destination_or_a_resolve_error_fails_closed() {
     let unreachable = addr(10, 96, 0, 99, 8080);
     let resolve = SimMtlsResolve::new(

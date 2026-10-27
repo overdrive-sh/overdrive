@@ -47,13 +47,14 @@ overdrive-core.workspace = true
 async-trait.workspace    = true
 bytes.workspace          = true
 rand.workspace           = true
-# `rustix` (`fs` feature) — `CloudHypervisorVmm::create`'s per-launch
+# `rustix` (`fs` and `net` features) — `CloudHypervisorVmm::create`'s per-launch
 # rootfs clone calls `rustix::fs::ioctl_ficlone`, a SAFE wrapper around the
 # FICLONE ioctl (ADR-0082 §D5 self-application: the ioctl directly, never
 # `cp --reflink=auto`, which silently degrades to a full copy on
 # EOPNOTSUPP/EXDEV). Needs no `unsafe` block under this crate's
 # `#![deny(unsafe_code)]` because rustix encapsulates the `unsafe`
-# internally — same shape as the `linux-keyutils` precedent below.
+# internally — same shape as the `linux-keyutils` precedent below. The
+# beacon adapter also uses the safe nonblocking socket and accept wrappers.
 rustix.workspace         = true
 # `parking_lot` — `CloudHypervisorVmm` tracks live spawned processes (for
 # `terminate`'s pid-keyed lookup) behind a short-critical-section
@@ -86,6 +87,7 @@ linux-keyutils.workspace = true
 # `#[allow(unsafe_code)]` (ADR-0129). The FICLONE call still goes through the
 # safe `rustix` wrapper above.
 libc.workspace           = true
+nix.workspace             = true
 tokio.workspace          = true
 # `tracing` — `SystemdCredsKeyring` (the production `Kek` provider) emits
 # the gated-dev-fallback warnings (`ca.kek.dev_fallback_refused` /

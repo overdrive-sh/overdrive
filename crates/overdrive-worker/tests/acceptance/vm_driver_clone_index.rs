@@ -260,7 +260,6 @@ fn link_present(p: &Path) -> bool {
 /// S-VM-85 / `@ac-08` `@real-io` `@mandatory:mutation_target` — the
 /// clone-index link's lifetime CONTAINS the clone's.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn no_clone_index_link_implies_no_clone_at_every_interruption_point() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -399,7 +398,6 @@ async fn no_clone_index_link_implies_no_clone_at_every_interruption_point() {
 /// the FICLONE and stop) keeps its index entry rather than becoming the
 /// invisible orphan the reclamation sweep can never enumerate.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn stop_keeps_the_index_link_when_the_clone_removal_fails() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);

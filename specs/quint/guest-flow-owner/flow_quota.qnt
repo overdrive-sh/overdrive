@@ -140,8 +140,10 @@ module flow_quota {
     endq' = queueEnd(s), g' = g, conf_step' = if (REC) variant("Abort", { s: s }) else conf_step,
   }
   // the host owner reads the next end record (the head of the queue, M-1) and releases its flow's place (EVMOD-AB)
+  def canReadEnd(s: int): bool =
+    slot.get(s).st == "ended" and endq.length() > 0 and endq.head() == s
   action ReadEnd(s: int): bool = all {
-    slot.get(s).st == "ended", endq.length() > 0, endq.head() == s,
+    canReadEnd(s),
     slot' = slot.set(s, free0), endq' = endq.tail(), g' = g, conf_step' = if (REC) variant("ReadEnd", { s: s }) else conf_step,
   }
 
@@ -207,7 +209,7 @@ module flow_quota {
   run EndRecordsAreReadInQueueOrder = init
     .then(Admit(1)).then(Admit(2)).then(Abort(2)).then(Abort(1))
     .expect(Safety and endq == [2, 1] and st(1) == "ended" and st(2) == "ended")
-    .then(ReadEnd(1)).fail()
+    .expect(not(canReadEnd(1)))
   run EndRecordsAreReleasedInQueueOrder = init
     .then(Admit(1)).then(Admit(2)).then(Abort(2)).then(Abort(1))
     .then(ReadEnd(2)).expect(Safety and st(2) == "free" and st(1) == "ended" and endq == [1])

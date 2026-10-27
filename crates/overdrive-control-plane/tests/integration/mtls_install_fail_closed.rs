@@ -116,7 +116,7 @@ use overdrive_control_plane::guest_network::{
     SharedGuestNetworkOwner,
 };
 use overdrive_control_plane::veth_provisioner::{
-    NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan, derive_workload_netns_plan,
+    NetSlotAllocator, VethProvisionError, WorkloadNetnsPlan, derive_workload_netns_plan,
     responder_addr_for_slot,
 };
 
@@ -645,8 +645,16 @@ impl GuestNetworkProvisioner for JournalOwner {
         let result = if self.refuse_activation {
             Err(GuestNetworkError::PostconditionMismatch {
                 operation: GuestNetworkOperation::ForwardingActivate,
-                expected: GuestNetworkFact::LinkUp { ifindex: 295, up: true },
-                observed: Some(GuestNetworkFact::LinkUp { ifindex: 295, up: false }),
+                expected: GuestNetworkFact::ControlSession {
+                    alloc: plan.alloc().clone(),
+                    cid: plan.assignment().cid(),
+                    live: true,
+                },
+                observed: Some(GuestNetworkFact::ControlSession {
+                    alloc: plan.alloc().clone(),
+                    cid: plan.assignment().cid(),
+                    live: false,
+                }),
             })
         } else {
             self.inner.activate(plan).await
@@ -696,6 +704,10 @@ impl SharedGuestNetworkOwner for JournalOwner {
 
     fn flow_ports(&self) -> Option<GuestFlowPorts> {
         self.inner.flow_ports()
+    }
+
+    fn leaked_quiescence_holds(&self) -> u32 {
+        self.inner.leaked_quiescence_holds()
     }
 
     async fn audit_shared(&self) -> Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError> {
@@ -764,6 +776,10 @@ impl SeamFixture {
             .register(overdrive_control_plane::noop_heartbeat())
             .await
             .expect("register heartbeat");
+        owner
+            .converge_shared()
+            .await
+            .expect("the fixture's shared guest-network owner is converged");
         let state = overdrive_control_plane::AppState::new(
             Arc::clone(&store),
             store_path,
@@ -922,11 +938,7 @@ impl CountingNetwork {
 }
 
 impl WorkloadNetworkProvisioner for CountingNetwork {
-    fn provision(
-        &self,
-        _workload: &WorkloadNetnsPlan,
-        _vm_tap: &VmTapPlan,
-    ) -> Result<(), VethProvisionError> {
+    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
         self.provisions.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
@@ -1205,7 +1217,6 @@ fn assert_running_write_rejection_retires_then_releases(
 /// retires the lease before its attachment's teardown and releases it last.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 row 2: GuestAddressPool::assign)"]
 async fn start_running_write_rejection_retires_the_lease_before_teardown_and_releases_it_last() {
     let outcome = drive_running_write_rejection_over_the_seam(Arm::Start).await;
     assert_running_write_rejection_retires_then_releases("fresh start", &outcome);
@@ -1217,7 +1228,6 @@ async fn start_running_write_rejection_retires_the_lease_before_teardown_and_rel
 /// follows the same retire-then-release unwind for the successor.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 row 2: GuestAddressPool::assign)"]
 async fn restart_running_write_rejection_retires_the_lease_before_teardown_and_releases_it_last() {
     let outcome = drive_running_write_rejection_over_the_seam(Arm::Restart).await;
     assert_running_write_rejection_retires_then_releases("restart", &outcome);
@@ -1278,7 +1288,6 @@ async fn assert_activation_failure_projection(
 /// gate wait; the wait itself is the sibling body pending 12-01. The seam
 /// fixture is all sim ports and needs no privilege.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 row 2: GuestAddressPool::assign)"]
 async fn tap_activation_occurs_after_intercept_success_and_before_exec_release() {
     let (fixture, journal, _trace_guard) =
         journaled_fixture(Arc::new(SimSharedGuestNetworkOwner::default()), false).await;
@@ -1331,7 +1340,6 @@ fn journal_has(journal: &Journal, alloc: &AllocationId, step: Step) -> bool {
 /// `activate`, no EXEC release, and no running hook; the reopen lets it
 /// activate exactly once, release the command, and keep its Running row.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 row 2: GuestAddressPool::assign)"]
 async fn tap_activation_waits_on_a_recovering_exec_gate_and_runs_once_after_reopen() {
     let (fixture, journal, _trace_guard) =
         journaled_fixture(Arc::new(SimSharedGuestNetworkOwner::default()), false).await;
@@ -1499,7 +1507,6 @@ impl Driver for HoldingReleaseDriver {
 /// release is held drops the same release future, and neither the release nor
 /// the running hook completes afterwards.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 row 2: GuestAddressPool::assign)"]
 async fn cancelling_dispatch_while_the_exec_release_is_held_drops_that_release() {
     let journal: Journal = Arc::new(parking_lot::Mutex::new(Vec::new()));
     let _trace_guard = tracing::subscriber::set_default(
@@ -1597,7 +1604,6 @@ async fn drive_refused_activation(
 /// once; and a dominating Failed row names the activation stage. The lease
 /// events and the EXEC-gate claim are the sibling body pending 12-01.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 row 2: GuestAddressPool::assign)"]
 async fn tap_activation_failure_stops_vmm_cleans_mtls_and_network_and_dominates_running() {
     let (fixture, journal, _trace_guard, alloc) =
         drive_refused_activation("gti-activation-refused").await;
@@ -1669,7 +1675,6 @@ async fn tap_activation_failure_stops_vmm_cleans_mtls_and_network_and_dominates_
 /// teardown, and the lease released last, then a dominating Failed row
 /// carrying the typed refusal the owner port returned.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 row 2: GuestAddressPool::assign)"]
 async fn tap_activation_failure_retires_the_lease_and_releases_it_last() {
     let (fixture, journal, _trace_guard, alloc) =
         drive_refused_activation("gti-activation-refused-lease").await;
@@ -1789,11 +1794,7 @@ struct RestartAbortNetwork {
 }
 
 impl WorkloadNetworkProvisioner for RestartAbortNetwork {
-    fn provision(
-        &self,
-        _workload: &WorkloadNetnsPlan,
-        _vm_tap: &VmTapPlan,
-    ) -> Result<(), VethProvisionError> {
+    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
         self.provisions.fetch_add(1, Ordering::SeqCst);
         if self.scenario == RestartAbortScenario::Provision {
             return Err(VethProvisionError::SysctlSetFailed {
@@ -1983,7 +1984,6 @@ fn assert_restart_abort_identities(outcome: &RestartAbortOutcome) {
 /// exact-old predecessor cleanup, releasing both slots.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 4, 15: the VM start carries the leased transport)"]
 async fn restart_provision_failure_tears_down_old_and_replacement_networks_and_releases_the_slot() {
     let outcome = drive_restart_abort(RestartAbortScenario::Provision).await;
     assert_restart_abort_identities(&outcome);
@@ -2010,7 +2010,6 @@ async fn restart_provision_failure_tears_down_old_and_replacement_networks_and_r
 /// successor unwind, then completes exact-old predecessor cleanup.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 4, 15: the VM start carries the leased transport)"]
 async fn restart_identity_failure_stops_prior_intercept_before_network_release() {
     let outcome = drive_restart_abort(RestartAbortScenario::Identity).await;
     assert_restart_abort_identities(&outcome);
@@ -2031,7 +2030,6 @@ async fn restart_identity_failure_stops_prior_intercept_before_network_release()
 /// then completes exact-old predecessor cleanup.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 4, 15: the VM start carries the leased transport)"]
 async fn restart_driver_start_failure_stops_prior_intercept_before_network_release() {
     let outcome = drive_restart_abort(RestartAbortScenario::DriverStart).await;
     assert_restart_abort_identities(&outcome);
@@ -2058,7 +2056,6 @@ async fn restart_driver_start_failure_stops_prior_intercept_before_network_relea
 /// accepted Running, and retains both distinct owners for later convergence.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 4, 15: the VM start carries the leased transport)"]
 async fn restart_driver_stop_failure_retains_mtls_and_network_protection() {
     let outcome = drive_restart_abort(RestartAbortScenario::DriverStop).await;
     assert_restart_abort_identities(&outcome);

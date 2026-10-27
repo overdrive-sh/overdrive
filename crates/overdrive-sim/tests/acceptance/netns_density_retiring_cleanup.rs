@@ -72,9 +72,9 @@
 //!   different address;
 //! - after the disarm exactly one `lease_released` for the predecessor
 //!   follows a removal of its source that succeeded;
-//! - the next start's `provision`, and the network assignment in the spec the
-//!   `SimDriver` received for it (the C-295-A handoff), carry the
-//!   predecessor's address.
+//! - after release the next start follows the pool's next-fit cursor, and its
+//!   `provision` address equals the network assignment in the spec the
+//!   `SimDriver` received (the C-295-A handoff).
 //!
 //! # Evidence tier and reproduction
 //!
@@ -395,6 +395,10 @@ impl SharedGuestNetworkOwner for JournalOwner {
         self.inner.flow_ports()
     }
 
+    fn leaked_quiescence_holds(&self) -> u32 {
+        self.inner.leaked_quiescence_holds()
+    }
+
     async fn audit_shared(&self) -> Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError> {
         self.inner.audit_shared().await
     }
@@ -595,6 +599,10 @@ impl Fixture {
                  shared owner did not start over the sim ports: {error}"
             )
         });
+        owner
+            .converge_shared()
+            .await
+            .setup(seed, "fixture owner reports bound ports before AppState construction");
 
         let allocator =
             overdrive_control_plane::test_default_allocator(store.clone() as Arc<dyn IntentStore>);
@@ -968,7 +976,24 @@ async fn retiring_cleanup_schedule(seed: u64) {
         fixture.gap(&mut rng);
     }
 
-    // The next start after the release.
+    // The next start after the release follows the cursor after the most
+    // recently assigned address; release makes the predecessor eligible when
+    // next-fit wraps to it, but does not rewind the cursor.
+    let prior_entries = fixture.journal.entries();
+    let expected_next_fit = prior_entries
+        .iter()
+        .filter_map(|entry| match entry {
+            Entry::Provision { address, .. } => Some(*address),
+            _ => None,
+        })
+        .next_back()
+        .map(|address| {
+            Ipv4Addr::from(
+                u32::from(address)
+                    .checked_add(1)
+                    .expect("the bounded schedule cannot exhaust the guest prefix"),
+            )
+        });
     fixture.gap(&mut rng);
     let next = format!("e8n-{tag}");
     let next_placement =
@@ -1086,12 +1111,13 @@ async fn retiring_cleanup_schedule(seed: u64) {
             .map(|transport| transport.workload_addr())
     });
     fixture.verdict(
-        "E8-REUSE-AFTER-RELEASE",
-        next_address == Some(pred_address) && spec_address == Some(pred_address),
+        "E8-NEXT-FIT-AFTER-RELEASE",
+        next_address == expected_next_fit && spec_address == expected_next_fit,
         &format!(
-            "the first start after {pred_alloc}'s release ({next_alloc:?}) must receive its address \
-             {pred_address}; its lease carried {next_address:?} and the spec the driver received \
-             carried {spec_address:?}"
+            "the first start after {pred_alloc}'s release ({next_alloc:?}) must continue from the \
+             next-fit cursor at {expected_next_fit:?}; its lease carried {next_address:?} and the \
+             spec the driver received carried {spec_address:?}; released {pred_address} remains \
+             eligible when the cursor wraps"
         ),
     );
     eprintln!("seed={seed} S-ND295-07 E8 schedule: GREEN");
@@ -1101,7 +1127,6 @@ async fn retiring_cleanup_schedule(seed: u64) {
 /// S-ND295-07 — Stop removes the predecessor completely before its address is reused.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn a_failed_element_removal_keeps_the_address_until_a_retry_converges() {
     for seed in seeds() {
         eprintln!(

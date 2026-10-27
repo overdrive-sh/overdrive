@@ -119,20 +119,14 @@ pub struct HostMtlsEnforcement {
     /// fail-closed (`InFlightLimitExceeded`) — one workload cannot exhaust the agent
     /// by opening many stalled connections.
     inflight: InFlightLedger,
-    /// The node's guest prefix: a leg-B peer inside it is a same-node VM,
-    /// dialled marked and source-bound (LEGB-DIAL, ADR-0190).
-    // SCAFFOLD: true — netns-density-295 DISTILL; the leg-B dial reads it in
-    // DELIVER step 13.
-    #[expect(dead_code, reason = "read by the LEGB-DIAL leg-B dial (DELIVER step 13)")]
+    /// The node's guest prefix: inbound leg-S destinations inside it use the
+    /// guest-flow owner's vsock dial (LEGS-DIAL). Leg-B same-node VM dials
+    /// also use it for the marked loopback route (LEGB-DIAL, step 13).
     guest_prefix: Ipv4Net,
     /// The guest-flow owner's dial port: leg S to a VM backend (an inbound
     /// `orig_dst` inside `guest_prefix`) is
     /// `guest_dial.dial(orig_dst, DialPurpose::Relay)`, made only after leg
     /// C's client authenticated (LEGS-DIAL, D-14).
-    // SCAFFOLD: true — netns-density-295 DISTILL; the inbound path's
-    // handshake / awaited dial / relay split reads it in the attachment-cut
-    // step (9) (DG-2 row 19).
-    #[expect(dead_code, reason = "read by the LEGS-DIAL leg-S dial (attachment-cut step 9)")]
     guest_dial: Arc<dyn GuestStreamDial>,
 }
 
@@ -323,30 +317,31 @@ fn reclaim_connection(
     let Some(mut state) = conns.lock().remove(id) else {
         return false; // already reclaimed by a racing teardown / sibling self-teardown
     };
-    // Signal EVERY pump BEFORE waking it, so a pump woken out of a blocked syscall
-    // classifies its exit as a deliberate teardown (`stop == true`): no spurious
-    // (B) self-teardown re-fire, no half-close forward, no lying
-    // `mtls.pump.stalled` event — the stop-guards in `splice::mark_exited` /
-    // `splice::forward_half_close_if_source_eof` key on exactly this flag.
-    state.pump.state.stop.store(true, Ordering::SeqCst);
-    for aux in &state.aux_pumps {
-        aux.state.stop.store(true, Ordering::SeqCst);
+    let reset_peer = state.pump.state.reset_peer_on_reclaim.load(Ordering::SeqCst);
+    // Signal EVERY pump BEFORE waking it, so a pump woken out of a blocked
+    // syscall classifies its exit as deliberate teardown (`stop == true`): no
+    // spurious self-teardown re-fire or half-close forward. The async relay also
+    // receives its cancellation before socket shutdown can look like a client FIN.
+    state.pump.request_stop();
+    for aux in &mut state.aux_pumps {
+        aux.request_stop();
     }
-    // Wake any pump parked inside a blocked syscall on a leg. Errors are
-    // irrelevant (`ENOTCONN` on an already-dead leg): the goal is the wake, and
-    // the `drop(state.legs)` below is the authoritative release. This is the
-    // reclaim-side counterpart of the accept-loop discipline — a cooperative flag
-    // cannot interrupt a blocked syscall; something must make the syscall return.
-    for leg in &state.legs {
-        // SAFETY: `leg` is a live fd owned by `state.legs` until the drop below;
-        // `shutdown(2)` does not close or free it.
-        unsafe {
-            libc::shutdown(leg.as_raw_fd(), libc::SHUT_RDWR);
+    if !reset_peer {
+        // Wake any pump parked inside a blocked syscall on a leg. Errors are
+        // irrelevant (`ENOTCONN` on an already-dead leg): the goal is the wake,
+        // and `drop(state.legs)` below is the authoritative release. A guest
+        // abort instead skips shutdown so the last close preserves SO_LINGER{1,0}.
+        for leg in &state.legs {
+            // SAFETY: `leg` is a live fd owned by `state.legs` until the drop
+            // below; `shutdown(2)` does not close or free it.
+            unsafe {
+                libc::shutdown(leg.as_raw_fd(), libc::SHUT_RDWR);
+            }
         }
     }
-    state.pump.stop_and_join();
+    state.pump.join();
     for aux in &mut state.aux_pumps {
-        aux.stop_and_join();
+        aux.join();
     }
     // legs drop here, closing the fds
     drop(state.legs);
@@ -911,13 +906,27 @@ impl HostMtlsEnforcement {
         let leg_c = conn.leg;
         let id = self.next_id(alloc.clone());
 
-        let established = tokio::task::spawn_blocking(move || {
-            inbound::establish(leg_c, orig_dst, &svid, &bundle, &alloc, limits)
-        })
-        .await
-        .map_err(|e| {
-            MtlsEnforcementError::Io(std::io::Error::other(format!("enforce task: {e}")))
-        })??;
+        let established = if self.guest_prefix.contains(orig_dst.ip()) {
+            inbound::establish_guest(
+                leg_c,
+                orig_dst,
+                &svid,
+                &bundle,
+                &alloc,
+                limits,
+                Arc::clone(&self.guest_dial),
+                tokio::runtime::Handle::current(),
+            )
+            .await?
+        } else {
+            tokio::task::spawn_blocking(move || {
+                inbound::establish_tcp(leg_c, orig_dst, &svid, &bundle, &alloc, limits)
+            })
+            .await
+            .map_err(|error| {
+                MtlsEnforcementError::Io(std::io::Error::other(format!("enforce task: {error}")))
+            })??
+        };
 
         Ok(self.register(id, established))
     }

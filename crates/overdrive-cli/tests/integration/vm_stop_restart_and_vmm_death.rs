@@ -947,7 +947,6 @@ fn build_marker_or_spin_binary(tmp: &Path) -> PathBuf {
 /// ```
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn guest_exit_without_agent_report_is_unreported_crash_never_completed() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -1058,7 +1057,6 @@ async fn guest_exit_without_agent_report_is_unreported_crash_never_completed() {
 /// classifier and reconciler, with no VM-specific exit path.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn host_killed_hypervisor_is_a_crash_treated_like_a_crashed_process() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -1184,7 +1182,6 @@ async fn host_killed_hypervisor_is_a_crash_treated_like_a_crashed_process() {
 /// Failed) assert.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn agent_reported_exit_zero_reaches_the_completed_terminal() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -1245,7 +1242,6 @@ async fn agent_reported_exit_zero_reaches_the_completed_terminal() {
 /// ```
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn operator_stop_is_terminated_and_consumes_no_restart_budget() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -1357,7 +1353,6 @@ async fn operator_stop_is_terminated_and_consumes_no_restart_budget() {
 /// ```
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn stopping_a_vm_reaches_the_operator_stop_terminal_like_a_process() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -1467,7 +1462,6 @@ async fn stopping_a_vm_reaches_the_operator_stop_terminal_like_a_process() {
 /// ```
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn unresponsive_guest_is_stopped_within_bounded_grace_never_a_crash() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -1609,7 +1603,6 @@ async fn unresponsive_guest_is_stopped_within_bounded_grace_never_a_crash() {
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn restarted_vm_boots_from_a_clean_unmodified_rootfs_copy() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -2173,7 +2166,6 @@ fn assert_strace_ownership(
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn predecessor_cleanup_cannot_bind_or_remove_replacement_vm_artifacts() {
     let mut strace = AllocationOwnershipStrace::attach();
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
@@ -2535,7 +2527,6 @@ async fn stop_and_shutdown(handle: ServeHandle, cfg: &Path, workload_id: &str) {
 )]
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn hypervisor_runs_bounded_nonroot_and_landlock_confined() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -2604,7 +2595,6 @@ async fn hypervisor_runs_bounded_nonroot_and_landlock_confined() {
 /// ```
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn confinement_ruleset_follows_declared_rootfs_path_not_a_hardcoded_dir() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -2680,7 +2670,6 @@ async fn confinement_ruleset_follows_declared_rootfs_path_not_a_hardcoded_dir() 
 )]
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn vm_landlock_rules_are_exactly_the_exclusive_run_dir_write() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -2781,7 +2770,6 @@ fn path_mode(path: &Path) -> u32 {
 /// ```
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn confined_deploy_leaves_operator_kernel_and_rootfs_mode_and_bytes_unchanged() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -2904,7 +2892,6 @@ async fn confined_deploy_leaves_operator_kernel_and_rootfs_mode_and_bytes_unchan
 /// ```
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn host_that_cannot_confine_refuses_the_workload_and_never_starts_unconfined() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -3027,7 +3014,6 @@ async fn host_that_cannot_confine_refuses_the_workload_and_never_starts_unconfin
 /// ```
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn confinement_adds_no_new_operator_surface() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -4806,7 +4792,6 @@ fn assert_normal_vmm_reap(events: &Arc<Mutex<Vec<CapturedLifecycleEvent>>>, allo
 #[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn guest_supervisor_reaps_its_command_group_and_preserves_direct_child_status() {
     let (events, _trace_enabled) = install_lifecycle_trace();
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
@@ -5059,7 +5044,6 @@ async fn guest_supervisor_reaps_its_command_group_and_preserves_direct_child_sta
 #[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn guest_control_stream_errors_keep_bounded_teardown_and_original_error() {
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision VM fixture");
     let never_run = "exit 0";
@@ -5168,7 +5152,6 @@ async fn guest_control_stream_errors_keep_bounded_teardown_and_original_error() 
 )]
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials() {
     let report_origin = std::time::Instant::now();
     let (events, trace_enabled) = install_lifecycle_trace();

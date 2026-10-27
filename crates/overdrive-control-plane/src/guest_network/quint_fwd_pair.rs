@@ -22,10 +22,10 @@
 //! |---|---|
 //! | `InitWith("stream")` | a fresh composition boots; one lease activated; the guest opens a TcpConnect flow; the owner admits it, reads it and opens D; D's connect is held |
 //! | `InitWith("watch")` | the same lease; the driver dials it through the composition's one `OwnerDial` — the inbound enforcement's leg-S `guest_dial` (`dial`, `Relay`; D-13 under LEGS-DIAL, its binding to the owner checked with `OwnerDial::owner()`): `V_h` connects, the watch is installed and the request written |
-//! | `InitWith("dgram")` | the guest opens a datagram association; the owner reads it, opens and connects H; its kernel-peer check is held |
-//! | `Attach("h")` | the held connect / check is answered; the owner attaches the pair and sends `Paired` |
+//! | `InitWith("dgram")` | the guest opens a datagram association; the owner reads it, completes route lookup, opens H and is held at `ConnectUdp` |
+//! | `Attach("h")` | stream: release `ConnectPeer`; datagram: release `ConnectUdp`, validate the connected peer, then synchronously attach; the owner sends `Paired` |
 //! | `Attach("g")` | the guest takes `Paired` (watch: the guest's `Paired` reaches the owner and the dial returns its `GuestStream`) |
-//! | `Abort("h")` | quiescence's first hold (`quiesce`): the owner aborts the flow (stream / dgram: `abort`; watch: the stream abort, `Abort { flow }`) |
+//! | `Abort("h")` | quiescence's first hold (`quiesce`): stream / dgram abort; watch: pending-dial cancellation before handoff, held-stream abort after handoff, and `Abort { flow }` |
 //! | `CtxRelease("h")` | one mapping chosen by the state (D-5): with no host pair or watch live (S: the current context's inventory), the `Forwarder` component's repair after a context `Io` failure (`audit_shared` reports it) — `converge_shared` closes the old context and its `open()` is held; with one live, the host owner's death — the seam's process exit (`exit_process`: every handle and held effect dies, the context's release aborts every pair) and the end of the runtime the owner's tasks run on; no host owner step follows (the model makes the death final) |
 //! | `Reopen("h")` | the held `open()` is answered: the repair opens and probes the next context |
 //! | `TakeEnd("h")` | the owner's dispatch reads the pair's end record (held ends: one released) and, outside watch mode, closes the flow's descriptors in the same dispatch (the model's `TakeEnd(h)` carries `OwnerClose(h)`'s effect) |
@@ -35,7 +35,7 @@
 //! | `VmmExit` | the orphan sweep's first step: `sk_err` and state on every host vsock to the guest, no callback |
 //! | `Write`, `Fin`, `Read`, `ReadEof`, `ShutRd` at the host far end | D's peer sends, FINs, stops reading (stream); the dialer's calls on its production `GuestStream` (watch) |
 //! | `TcpRst("h", _)` | D's peer resets (the half's `sk_error_report` runs in the step) |
-//! | `HolderDrop` | the driver drops its `GuestStream` |
+//! | `HolderDrop` | the driver cancels its pending dial while the watch is live, or drops its actual `GuestStream` after handoff |
 //! | `SendDg("hg", sz)`, `UdpBlock("gh")`, `UdpUnblock("gh")`, `UdpErr("h")`, `DgHalfClose("h")` | H's peer sends a datagram of `sz` bytes, stops / resumes reading, H's `sk_err` (`EPERM`), `V_h`'s send shut by a peer outside the design |
 //! | guest-side actions (`g`) | stimulus: the guest's pair and the packets it puts on the vsock |
 //! | `OwnerClose("h")` | never enabled (the host closes in its `TakeEnd` dispatch): an error |
@@ -141,7 +141,9 @@ use overdrive_core::guest_transport::forwarder::{
     AbortCause, ForwardEnd, ForwardId, ForwardOutcome, ForwarderGeneration, ForwarderOp, PairSide,
     SourceEnd,
 };
-use overdrive_core::guest_transport::wire::{ControlMessage, DatagramFrame, FlowId, KernelErrno};
+use overdrive_core::guest_transport::wire::{
+    ControlMessage, DatagramFrame, FlowId, FlowRefusal, KernelErrno,
+};
 use overdrive_sim::adapters::{
     SimContextState, SimLocalRead, SimShutdown, SimSocket, SimVsockState,
 };
@@ -149,7 +151,7 @@ use quint_connect::{Config, Driver, Result, State, Step, quint_run, quint_test, 
 use serde::Deserialize;
 use tokio::task::JoinHandle;
 
-use super::flow_io::sim::{SimEffectKind, SimFailure, SimForwarderFailure};
+use super::flow_io::sim::{OwnerShutdownRead, SimEffectKind, SimFailure, SimForwarderFailure};
 use super::owner_acceptance::support::{Composition, Lease, paused_runtime, remote};
 use super::quint_itf::{self, ItfError, Qualified};
 use super::{
@@ -223,6 +225,8 @@ pub(super) struct PairStateH {
     tcp_err: String,
     vs: VsH,
     hres: String,
+    /// The actual move-only GuestStream is currently held by this driver.
+    strm_held: bool,
     /// `None` after the host owner's death (`gh.hostDead`): no owner exists.
     owner: Option<OwnerH>,
 }
@@ -286,6 +290,7 @@ impl PairStateH {
             tcp_err: quint_itf::string(at_h(q.var("tcpErr")?)?)?,
             vs,
             hres: quint_itf::string(q.var("hres")?)?,
+            strm_held: quint_itf::boolean(q.var("strmHeld")?)?,
             owner,
         })
     }
@@ -401,6 +406,9 @@ pub(super) struct FwdPairDriver {
     /// watch live): its seam exited and its runtime ended; it takes no step
     /// and is not projected.
     owner_dead: bool,
+    /// The owner's last actual serving generation, captured before its
+    /// process/seam exits so post-mortem projection performs no owner I/O.
+    dead_forwarder_generation: Option<ForwarderGeneration>,
     /// The flow's pair or watch: relabelling fixed when first seen.
     ids: Option<(ForwarderGeneration, ForwardId)>,
     /// The composition the owner stands on (its seam sim and pool).
@@ -410,11 +418,19 @@ pub(super) struct FwdPairDriver {
     mode: Mode,
     flow: Option<FlowId>,
     key: Option<GuestConnKey>,
+    /// The exact host peer socket a pre-attach stimulus reached. The Sim seam
+    /// learns its flow only at attach, so retain the same socket for QPROJ-8
+    /// after owner cleanup removes its live handle.
+    host_peer: Option<SimSocket>,
     destination: SocketAddrV4,
     dial: Option<JoinHandle<std::result::Result<GuestStream, GuestDialError>>>,
     stream: Option<GuestStream>,
     quiesce: Option<JoinHandle<(QuiescenceHold, ForwardingQuiescence)>>,
     repair: Option<JoinHandle<super::Result<()>>>,
+    /// The counted hold the real supervisor acquires before a Forwarder
+    /// recovery attempt and restores only after the repaired owner audits
+    /// clean (ADR-0124 / ADR-0169).
+    recovery_hold: Option<QuiescenceHold>,
     /// C: the outcome the production `GuestStream` returned at `ReadEof`.
     hres: &'static str,
     guest: GuestSide,
@@ -448,6 +464,7 @@ impl FwdPairDriver {
             rt,
             owner: Arc::clone(&c.owner),
             owner_dead: false,
+            dead_forwarder_generation: None,
             ids: None,
             c,
             lease: None,
@@ -455,11 +472,13 @@ impl FwdPairDriver {
             mode: Mode::Stream,
             flow: None,
             key: None,
+            host_peer: None,
             destination: remote(PORT),
             dial: None,
             stream: None,
             quiesce: None,
             repair: None,
+            recovery_hold: None,
             hres: "none",
             guest: GuestSide::new(),
             to_host: VecDeque::new(),
@@ -566,7 +585,7 @@ impl FwdPairDriver {
                 self.flow = Some(flow);
             }
             Mode::Dgram => {
-                c.io.hold(SimEffectKind::RouteType);
+                c.io.hold(SimEffectKind::ConnectUdp);
                 let (key, flow) = c.open_datagram(&lease, 1, self.destination, 2_000);
                 self.key = Some(key);
                 self.flow = Some(flow);
@@ -609,7 +628,7 @@ impl FwdPairDriver {
     fn attach_h(&mut self) -> Result {
         let kind = match self.mode {
             Mode::Stream => SimEffectKind::ConnectPeer,
-            Mode::Dgram => SimEffectKind::RouteType,
+            Mode::Dgram => SimEffectKind::ConnectUdp,
             Mode::Watch => {
                 return Err(not_playable("Attach", "a dial's watch exists from its start"));
             }
@@ -661,6 +680,8 @@ impl FwdPairDriver {
     /// the runtime the owner's tasks run on ends with them. The driver keeps
     /// only the sockets' facts (S) and its stream's results (C).
     fn owner_death(&mut self) {
+        self.dead_forwarder_generation =
+            Some(self.rt.block_on(self.owner.flow_observation()).forwarder_generation);
         self.c.io.exit_process();
         self.dial = None;
         self.quiesce = None;
@@ -676,8 +697,7 @@ impl FwdPairDriver {
     /// (`converge_shared`) ends every flow in the owner's table, closes the
     /// old context and is held at its `open()` until `Reopen("h")`.
     fn forwarder_recovery_close(&mut self) -> Result {
-        let c = self.composition();
-        c.io.script_failure(
+        self.composition().io.script_failure(
             SimEffectKind::Inventory,
             SimFailure::Forwarder(SimForwarderFailure::ContextIo(ForwarderOp::Inventory)),
         );
@@ -688,7 +708,12 @@ impl FwdPairDriver {
                 "the context's Io failure did not damage Forwarder",
             ));
         }
-        c.io.hold(SimEffectKind::OpenForwarder);
+        if self.recovery_hold.is_some() {
+            return Err(not_playable("CtxRelease", "a Forwarder recovery hold is already active"));
+        }
+        let (hold, _unconfirmed) = self.rt.block_on(self.owner.quiesce());
+        self.recovery_hold = Some(hold);
+        self.composition().io.hold(SimEffectKind::OpenForwarder);
         let owner = Arc::clone(&self.owner);
         let _runtime = self.rt.enter();
         self.repair = Some(tokio::spawn(async move { owner.converge_shared().await }));
@@ -699,16 +724,27 @@ impl FwdPairDriver {
     fn reopen_h(&mut self) -> Result {
         self.alive("Reopen")?;
         let c = self.composition();
-        let held =
+        let open_effect =
             c.io.held_of(SimEffectKind::OpenForwarder)
                 .ok_or_else(|| not_playable("Reopen", "no repair is waiting on its open()"))?;
-        c.io.release(held);
+        c.io.release(open_effect);
         self.settle();
         let repair = self.repair.take().ok_or_else(|| not_playable("Reopen", "no repair"))?;
         self.rt
             .block_on(repair)
             .map_err(|error| not_playable("Reopen", error.to_string()))?
             .map_err(|error| not_playable("Reopen", error.to_string()))?;
+        self.rt
+            .block_on(self.owner.audit_shared())
+            .map_err(|error| not_playable("Reopen", error.to_string()))?;
+        let quiescence_hold = self
+            .recovery_hold
+            .take()
+            .ok_or_else(|| not_playable("Reopen", "the Forwarder recovery holds no quiescence"))?;
+        self.rt
+            .block_on(self.owner.restore(quiescence_hold))
+            .map_err(|error| not_playable("Reopen", error.to_string()))?;
+        self.settle();
         Ok(())
     }
 
@@ -723,13 +759,26 @@ impl FwdPairDriver {
     /// half's Sim vsock socket (QPROJ-8: not an owner port), which reports
     /// the scripted end fact.
     fn holder_end(&mut self, k: &str) -> Result {
+        if self.mode == Mode::Watch && self.stream.is_none() {
+            return Err(not_playable("HolderEnd", "the dial has no held stream"));
+        }
         let flow = self.flow("HolderEnd")?;
         let vsock = self
             .composition()
             .io
             .vsock_half(flow)
             .ok_or_else(|| not_playable("HolderEnd", "the dial has no V_h"))?;
-        let observed = match vsock.local_read(usize::MAX) {
+        let selected = match k {
+            "eof" => OwnerShutdownRead::Eof,
+            "err" => OwnerShutdownRead::NotConnected,
+            other => return Err(not_playable("HolderEnd", format!("unknown end result {other}"))),
+        };
+        let read = self
+            .composition()
+            .io
+            .owner_shutdown_read(flow, usize::MAX, selected)
+            .unwrap_or_else(|| vsock.local_read(usize::MAX));
+        let observed = match read {
             SimLocalRead::Eof => "eof",
             SimLocalRead::Err(_) => "err",
             other => {
@@ -749,27 +798,42 @@ impl FwdPairDriver {
         Ok(())
     }
 
-    fn pair_id(&self, action: &'static str) -> Result<ForwardId> {
-        self.alive(action)?;
+    /// The pair identity the production owner currently exposes. An
+    /// unattached or already-ended flow has no pair to run; after owner death
+    /// there is no owner observation to make.
+    fn observed_pair(
+        &self,
+        action: &'static str,
+    ) -> Result<Option<(ForwarderGeneration, ForwardId)>> {
+        if self.owner_dead {
+            return Ok(None);
+        }
         let flow = self.flow(action)?;
         self.rt.block_on(self.composition().settle());
         let observed = self.rt.block_on(self.owner.flow_observation());
-        let cid = observed
-            .cids
-            .get(&self.lease().cid)
-            .ok_or_else(|| not_playable(action, "the lease's CID left the owner"))?;
+        let Some(cid) = observed.cids.get(&self.lease().cid) else { return Ok(None) };
         let pair = match self.mode {
             Mode::Stream => self.key.and_then(|key| match cid.guest_flows.get(&key) {
-                Some(GuestFlowPhase::Paired { pair, .. }) => Some(*pair),
+                Some(GuestFlowPhase::Paired { pair, generation }) => Some((*generation, *pair)),
                 _ => None,
             }),
             Mode::Dgram => match cid.datagrams.get(&flow).map(|assoc| assoc.phase) {
-                Some(AssociationPhase::Paired { pair, .. }) => Some(pair),
+                Some(AssociationPhase::Paired { pair, generation }) => Some((generation, pair)),
                 _ => None,
             },
             Mode::Watch => None,
         };
-        pair.ok_or_else(|| not_playable(action, "the host pair is not attached"))
+        Ok(pair.filter(|(generation, pair)| {
+            *generation == observed.forwarder_generation
+                && self.composition().io.forwarder_pair_state(*pair).is_some()
+        }))
+    }
+
+    fn pair_id(&self, action: &'static str) -> Result<ForwardId> {
+        self.alive(action)?;
+        self.observed_pair(action)?
+            .map(|(_, pair)| pair)
+            .ok_or_else(|| not_playable(action, "the host pair is not attached"))
     }
 
     fn run_h(&mut self, source: PairSide, action: &'static str) -> Result {
@@ -781,15 +845,30 @@ impl FwdPairDriver {
 
     fn fwd_err_h(&mut self) -> Result {
         let flow = self.flow("FwdErr")?;
-        if self.vmm_exited && !self.swept {
+        let sweep_callback = self.vmm_exited && !self.swept;
+        let udp_callback = !sweep_callback && self.udp_err_h;
+        if !sweep_callback && !udp_callback {
+            return self.run_h(PairSide::B, "FwdErr");
+        }
+        let pair_to_run =
+            if self.mode == Mode::Watch { None } else { self.observed_pair("FwdErr")? };
+        if sweep_callback {
             self.swept = true;
             self.composition().io.finish_sweep_of(flow);
-        } else if self.udp_err_h {
+        } else {
             self.udp_err_h = false;
             self.peer_socket("FwdErr")?.report_error();
             self.composition().io.caused();
-        } else {
-            return self.run_h(PairSide::B, "FwdErr");
+        }
+        if let Some((generation, pair)) = pair_to_run
+            && !self.composition().io.run_forwarder_once(pair, PairSide::A)
+        {
+            return Err(not_playable(
+                "FwdErr",
+                format!(
+                    "error callback queued no run for attached pair {pair:?} in generation {generation}"
+                ),
+            ));
         }
         self.settle();
         Ok(())
@@ -798,12 +877,17 @@ impl FwdPairDriver {
     // ----- the host far end -----
 
     /// D / H: the attached socket, or the one the owner holds before attach.
-    fn peer_socket(&self, action: &'static str) -> Result<SimSocket> {
-        let c = self.composition();
-        self.flow
-            .and_then(|flow| c.io.peer_of_opt(flow))
-            .or_else(|| c.io.latest_peer_socket())
-            .ok_or_else(|| not_playable(action, "the owner holds no peer socket"))
+    fn peer_socket(&mut self, action: &'static str) -> Result<SimSocket> {
+        let socket = {
+            let c = self.composition();
+            self.flow
+                .and_then(|flow| c.io.peer_of_opt(flow))
+                .or_else(|| self.host_peer.clone())
+                .or_else(|| c.io.latest_peer_socket())
+        }
+        .ok_or_else(|| not_playable(action, "the owner holds no peer socket"))?;
+        self.host_peer = Some(socket.clone());
+        Ok(socket)
     }
 
     fn on_peer(&mut self, action: &'static str, cause: impl FnOnce(&SimSocket)) -> Result {
@@ -889,13 +973,19 @@ impl FwdPairDriver {
     }
 
     fn holder_drop(&mut self) {
-        drop(self.stream.take());
+        if let Some(stream) = self.stream.take() {
+            drop(stream);
+        } else if let Some(dial) = self.dial.take() {
+            dial.abort();
+            drop(self.rt.block_on(dial));
+        }
         self.settle();
     }
 
     fn vmm_exit(&mut self) {
         let cid = self.lease().cid;
-        self.composition().io.vm_stop_before_callbacks(cid);
+        let launch = self.lease().launch;
+        self.composition().io.vm_stop_before_callbacks(cid, launch);
         self.vmm_exited = true;
         if !matches!(self.guest.phase, GuestPhase::Ended | GuestPhase::Refused) {
             self.guest.phase = GuestPhase::Gone;
@@ -940,28 +1030,86 @@ impl FwdPairDriver {
         if self.guest.phase != GuestPhase::Unattached {
             return Err(not_playable("Attach", "the guest pair is not unattached"));
         }
+        let closing = self.guest.ps == Packet::Close.flags() && self.guest.inflight == 0;
+        let attach_refused = self.guest.tcp_err || closing;
         match self.mode {
             Mode::Watch => {
-                let session = self.session.ok_or_else(|| not_playable("Attach", "no session"))?;
                 let flow = self.flow("Attach")?;
-                self.composition().guest_sends(session, ControlMessage::Paired { flow });
-                self.settle();
-                let dial =
-                    self.dial.take().ok_or_else(|| not_playable("Attach", "no dial in flight"))?;
-                let stream = self
-                    .rt
-                    .block_on(dial)
-                    .map_err(|error| not_playable("Attach", error.to_string()))?
-                    .map_err(|error| not_playable("Attach", error.to_string()))?;
-                self.stream = Some(stream);
+                let watch_live = !self.owner_dead
+                    && self.composition().io.forwarder_inventory().live_watches > 0;
+                let expect_stream = watch_live && !attach_refused;
+                let expect_refused = watch_live && attach_refused;
+                // Guest actions are stimulus in the host driver. After the
+                // host owner/process died there is no host control connection
+                // to receive this locally produced reply; the guest attach
+                // still occurs, but it must not write through the dead host
+                // seam. While the owner lives, drive the real dial unchanged.
+                if !self.owner_dead {
+                    let session =
+                        self.session.ok_or_else(|| not_playable("Attach", "no session"))?;
+                    let reply = if attach_refused {
+                        ControlMessage::Refused {
+                            flow,
+                            refusal: FlowRefusal::ApplicationRefused {
+                                errno: KernelErrno::ECONNREFUSED,
+                            },
+                        }
+                    } else {
+                        ControlMessage::Paired { flow }
+                    };
+                    self.composition().guest_sends(session, reply);
+                    self.settle();
+                }
+                if let Some(dial) = self.dial.take() {
+                    let result = self
+                        .rt
+                        .block_on(dial)
+                        .map_err(|error| not_playable("Attach", error.to_string()))?;
+                    match (expect_stream, expect_refused, result) {
+                        (true, false, Ok(stream)) => self.stream = Some(stream),
+                        (
+                            false,
+                            true,
+                            Err(GuestDialError::Refused { errno: KernelErrno::ECONNREFUSED }),
+                        ) => {}
+                        (false, false, Err(_fixed_error)) => {}
+                        (true, false, Err(error)) => {
+                            return Err(not_playable(
+                                "Attach",
+                                format!("the live successful handoff returned {error}"),
+                            ));
+                        }
+                        (false, _, Ok(_stream)) => {
+                            return Err(not_playable(
+                                "Attach",
+                                "a refused or late Paired handed out a stream",
+                            ));
+                        }
+                        (false, true, Err(error)) => {
+                            return Err(not_playable(
+                                "Attach",
+                                format!(
+                                    "the live refused handoff returned {error}, not Refused(ECONNREFUSED)"
+                                ),
+                            ));
+                        }
+                        (true, true, _) => {
+                            return Err(not_playable(
+                                "Attach",
+                                "a handoff cannot expect both a stream and refusal",
+                            ));
+                        }
+                    }
+                } else if expect_stream || expect_refused {
+                    return Err(not_playable("Attach", "the live handoff has no dial future"));
+                }
             }
             Mode::Stream | Mode::Dgram => {
                 let cid = self.lease().cid;
                 let _paired = self.composition().io.take_outbox(cid);
             }
         }
-        let closing = self.guest.ps == Packet::Close.flags() && self.guest.inflight == 0;
-        if self.guest.tcp_err || closing {
+        if attach_refused {
             self.guest.phase = GuestPhase::Refused;
             self.guest_shut_all();
         } else {
@@ -1014,12 +1162,27 @@ impl FwdPairDriver {
             .to_host
             .pop_front()
             .ok_or_else(|| not_playable("VCtl", "no guest packet in flight"))?;
+        let pair_to_run = if matches!(packet, Packet::Close | Packet::Rst) {
+            self.observed_pair("VCtl")?
+        } else {
+            None
+        };
         let flow = self.flow("VCtl")?;
         let io = &self.composition().io;
         match packet {
             Packet::Shut => io.guest_half_closes(flow),
             Packet::Close => io.guest_closes(flow),
             Packet::Rst => io.guest_resets(flow),
+        }
+        if let Some((generation, pair)) = pair_to_run
+            && !io.run_forwarder_once(pair, PairSide::A)
+        {
+            return Err(not_playable(
+                "VCtl",
+                format!(
+                    "abort callback queued no run for attached pair {pair:?} in generation {generation}"
+                ),
+            ));
         }
         self.settle();
         Ok(())
@@ -1116,18 +1279,55 @@ impl FwdPairDriver {
         let c = self.composition();
         // conformance-lint: sim-arbiter-ok QPROJ-8 oldCtx/ctx: SimFlowForwarder's context table, Tier-3 pair P-70 § 3.2 and § 3.8
         let contexts = c.io.forwarder_contexts();
+        // The device table also retains phase 1's released probe context.
+        // `forwarder_generation` counts only contexts this serving owner
+        // opened, so it supplies the exact suffix modeled by `ctx`/`oldCtx`.
+        // Keep the phase row in the arbiter and validate its full complement:
+        // a second prefix row or any retained phase-1 resource is a fixture
+        // divergence, never something the projection silently filters away.
+        let forwarder_generation = if self.owner_dead {
+            self.dead_forwarder_generation.ok_or_else(|| {
+                anyhow::anyhow!("the dead owner has no pre-exit forwarder generation snapshot")
+            })?
+        } else {
+            self.rt.block_on(self.owner.flow_observation()).forwarder_generation
+        };
+        let serving_count = usize::try_from(forwarder_generation.get())?;
+        let phase_count = contexts.len().checked_sub(serving_count).ok_or_else(|| {
+            anyhow::anyhow!(
+                "owner generation {serving_count} exceeds the device's {} context rows",
+                contexts.len()
+            )
+        })?;
+        if phase_count != 1 {
+            anyhow::bail!(
+                "the device has {phase_count} non-serving context rows; phase 1 opens exactly one"
+            );
+        }
+        let phase = &contexts[0];
+        if phase.open
+            || phase.live_pairs != 0
+            || phase.live_watches != 0
+            || !phase.queued_ends.is_empty()
+        {
+            anyhow::bail!("phase 1's released probe context retained resources: {phase:?}");
+        }
+        let serving_contexts = &contexts[phase_count..];
         // The host owner's death releases its context (the seam's process
         // exit), so the table alone says whether the current context is open.
-        let current_open = contexts.last().is_some_and(|row| row.open);
-        let old_ctx = match contexts.len() {
+        let current_open = serving_contexts.last().is_some_and(|row| row.open);
+        let old_ctx = match serving_contexts.len() {
             0 | 1 => "none",
-            n if contexts[n - 2].open => "open",
+            n if serving_contexts[n - 2].open => "open",
             _ => "released",
         };
         let flow = self.flow;
         // conformance-lint: sim-arbiter-ok QPROJ-8 tcpErr: D's sk_err in SimFlowForwarder's socket model, Tier-3 pair P-69 hazard-16 shapes
-        let peer =
-            flow.and_then(|flow| c.io.peer_of_opt(flow)).or_else(|| c.io.latest_peer_socket());
+        let peer = flow
+            .and_then(|flow| c.io.peer_of_opt(flow))
+            // conformance-lint: sim-arbiter-ok QPROJ-8 tcpErr: retained clone of the same actual host-peer SimSocket selected by the pre-attach stimulus, Tier-3 P-69 reset classification and P-71 destination-reset-before-attach
+            .or_else(|| self.host_peer.clone())
+            .or_else(|| c.io.latest_peer_socket());
         let tcp_err = match (self.mode, peer.and_then(|socket| socket.sk_err())) {
             (Mode::Stream, Some(errno)) => errno_label(errno),
             _ => "0".to_owned(),
@@ -1146,13 +1346,15 @@ impl FwdPairDriver {
             st: vsock_state_label(socket),
             sshut: socket.own_send_shut(),
         });
-        let owner = if self.owner_dead { None } else { Some(self.project_owner(&contexts)?) };
+        let owner =
+            if self.owner_dead { None } else { Some(self.project_owner(serving_contexts)?) };
         Ok(PairStateH {
             ctx: if current_open { "open" } else { "released" }.to_owned(),
             old_ctx: old_ctx.to_owned(),
             tcp_err,
             vs,
             hres: self.hres.to_owned(),
+            strm_held: self.stream.is_some(),
             owner,
         })
     }
@@ -1366,7 +1568,7 @@ impl Driver for FwdPairDriver {
                 let _ = s;
                 let cid = self.lease().cid;
                 let _abort = self.composition().io.take_outbox(cid);
-                self.guest_abort(true);
+                self.guest_abort(self.mode != Mode::Watch);
             }
             CloseUnattached(s: String) => {
                 let _ = s;
@@ -1409,7 +1611,20 @@ impl Driver for FwdPairDriver {
             TcpRst(s: String, after_fin: bool) => {
                 let _ = after_fin;
                 if s == "h" {
-                    self.on_peer("TcpRst", SimSocket::peer_reset)?;
+                    let pair_to_run = self.observed_pair("TcpRst")?;
+                    self.peer_socket("TcpRst")?.peer_reset();
+                    self.composition().io.caused();
+                    if let Some((generation, pair)) = pair_to_run
+                        && !self.composition().io.run_forwarder_once(pair, PairSide::B)
+                    {
+                        return Err(not_playable(
+                            "TcpRst",
+                            format!(
+                                "reset callback queued no side-B run for attached pair {pair:?} in generation {generation}"
+                            ),
+                        ));
+                    }
+                    self.settle();
                 } else {
                     self.guest.tcp_err = true;
                     self.guest_abort(false);
@@ -1485,7 +1700,6 @@ impl Driver for FwdPairDriver {
     max_samples = 1,
     test = "Paired"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_paired() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1497,7 +1711,6 @@ fn quint_fwd_pair_paired() -> impl Driver {
     max_samples = 1,
     test = "CleanBothWaysCompletes"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_clean_both_ways_completes() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1509,7 +1722,6 @@ fn quint_fwd_pair_clean_both_ways_completes() -> impl Driver {
     max_samples = 1,
     test = "TargetStallBlocksSenderThenResumes"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_target_stall_blocks_sender_then_resumes() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1521,7 +1733,6 @@ fn quint_fwd_pair_target_stall_blocks_sender_then_resumes() -> impl Driver {
     max_samples = 1,
     test = "EarlyBytesBeforeAttachDelivered"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_early_bytes_before_attach_delivered() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1533,7 +1744,6 @@ fn quint_fwd_pair_early_bytes_before_attach_delivered() -> impl Driver {
     max_samples = 1,
     test = "EarlyFinBeforeAttachCarriedOut"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_early_fin_before_attach_carried_out() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1545,7 +1755,6 @@ fn quint_fwd_pair_early_fin_before_attach_carried_out() -> impl Driver {
     max_samples = 1,
     test = "GuestAppResetReachesRemoteAsReset"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_guest_app_reset_reaches_remote_as_reset() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1557,7 +1766,6 @@ fn quint_fwd_pair_guest_app_reset_reaches_remote_as_reset() -> impl Driver {
     max_samples = 1,
     test = "RemoteResetReachesGuestAppAsReset"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_remote_reset_reaches_guest_app_as_reset() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1569,7 +1777,6 @@ fn quint_fwd_pair_remote_reset_reaches_guest_app_as_reset() -> impl Driver {
     max_samples = 1,
     test = "HalfCloseThenPeerCloseIsClean"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_half_close_then_peer_close_is_clean() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1581,7 +1788,6 @@ fn quint_fwd_pair_half_close_then_peer_close_is_clean() -> impl Driver {
     max_samples = 1,
     test = "PeerCloseWithDirectionOpenAborts"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_peer_close_with_direction_open_aborts() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1593,7 +1799,6 @@ fn quint_fwd_pair_peer_close_with_direction_open_aborts() -> impl Driver {
     max_samples = 1,
     test = "ReadShutdownPeerStallsLikeSlowReader"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_read_shutdown_peer_stalls_like_slow_reader() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1605,7 +1810,6 @@ fn quint_fwd_pair_read_shutdown_peer_stalls_like_slow_reader() -> impl Driver {
     max_samples = 1,
     test = "OwnerAbortResetsBothFarEnds"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_owner_abort_resets_both_far_ends() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1617,7 +1821,6 @@ fn quint_fwd_pair_owner_abort_resets_both_far_ends() -> impl Driver {
     max_samples = 1,
     test = "ContextReleaseResetsEveryPair"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_context_release_resets_every_pair() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1629,7 +1832,6 @@ fn quint_fwd_pair_context_release_resets_every_pair() -> impl Driver {
     max_samples = 1,
     test = "VmmExitAbortsHostHalf"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_vmm_exit_aborts_host_half() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1641,7 +1843,6 @@ fn quint_fwd_pair_vmm_exit_aborts_host_half() -> impl Driver {
     max_samples = 1,
     test = "TrailingRstAfterCompletionIsInert"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_trailing_rst_after_completion_is_inert() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1653,7 +1854,6 @@ fn quint_fwd_pair_trailing_rst_after_completion_is_inert() -> impl Driver {
     max_samples = 1,
     test = "WatchedStreamSeesGuestResetAsAbort"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_watched_stream_sees_guest_reset_as_abort() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1665,7 +1865,6 @@ fn quint_fwd_pair_watched_stream_sees_guest_reset_as_abort() -> impl Driver {
     max_samples = 1,
     test = "DgramPaired"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_dgram_paired() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1677,7 +1876,6 @@ fn quint_fwd_pair_dgram_paired() -> impl Driver {
     max_samples = 1,
     test = "DatagramsInOrderWithEmpty"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_datagrams_in_order_with_empty() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1689,7 +1887,6 @@ fn quint_fwd_pair_datagrams_in_order_with_empty() -> impl Driver {
     max_samples = 1,
     test = "PartialFrameResumedNotDuplicated"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_partial_frame_resumed_not_duplicated() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1701,7 +1898,6 @@ fn quint_fwd_pair_partial_frame_resumed_not_duplicated() -> impl Driver {
     max_samples = 1,
     test = "StalledUdpTargetDropsAtSource"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_stalled_udp_target_drops_at_source() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1713,7 +1909,6 @@ fn quint_fwd_pair_stalled_udp_target_drops_at_source() -> impl Driver {
     max_samples = 1,
     test = "HostHalfCloseThenAbortBeforeGuestAttachIsAbort"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_host_half_close_then_abort_before_guest_attach_is_abort() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1725,7 +1920,6 @@ fn quint_fwd_pair_host_half_close_then_abort_before_guest_attach_is_abort() -> i
     max_samples = 1,
     test = "GuestCloseBeforeHostAttachAborts"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_guest_close_before_host_attach_aborts() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1737,7 +1931,6 @@ fn quint_fwd_pair_guest_close_before_host_attach_aborts() -> impl Driver {
     max_samples = 1,
     test = "RemoteFinThenResetAbortsPair"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_remote_fin_then_reset_aborts_pair() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1749,7 +1942,6 @@ fn quint_fwd_pair_remote_fin_then_reset_aborts_pair() -> impl Driver {
     max_samples = 1,
     test = "ForwarderRecoveryAbortsThenReopens"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_forwarder_recovery_aborts_then_reopens() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1761,7 +1953,6 @@ fn quint_fwd_pair_forwarder_recovery_aborts_then_reopens() -> impl Driver {
     max_samples = 1,
     test = "ReleasedWatchWithNoRecordReadsAsAbort"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_released_watch_with_no_record_reads_as_abort() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1773,7 +1964,6 @@ fn quint_fwd_pair_released_watch_with_no_record_reads_as_abort() -> impl Driver 
     max_samples = 1,
     test = "VmmExitWithWatchRecordInFlightResolvesFromRecord"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_vmm_exit_with_watch_record_in_flight_resolves_from_record() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1785,7 +1975,6 @@ fn quint_fwd_pair_vmm_exit_with_watch_record_in_flight_resolves_from_record() ->
     max_samples = 1,
     test = "TruncatedFrameAtPeerEndAbortsFrameInvalid"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_truncated_frame_at_peer_end_aborts_frame_invalid() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1797,7 +1986,6 @@ fn quint_fwd_pair_truncated_frame_at_peer_end_aborts_frame_invalid() -> impl Dri
     max_samples = 1,
     test = "GuestAppFinThenResetAbortsPairWithEpipe"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_guest_app_fin_then_reset_aborts_pair_with_epipe() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1809,7 +1997,6 @@ fn quint_fwd_pair_guest_app_fin_then_reset_aborts_pair_with_epipe() -> impl Driv
     max_samples = 1,
     test = "EarlyVsockHalfCloseBeforeGuestAttachCompletes"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_early_vsock_half_close_before_guest_attach_completes() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1821,7 +2008,6 @@ fn quint_fwd_pair_early_vsock_half_close_before_guest_attach_completes() -> impl
     max_samples = 1,
     test = "AppWriteAndFinBeforePairedAttachesInCloseWaitAndCompletes"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_app_write_and_fin_before_paired_attaches_in_close_wait_and_completes()
 -> impl Driver {
     FwdPairDriver::new()
@@ -1834,7 +2020,6 @@ fn quint_fwd_pair_app_write_and_fin_before_paired_attaches_in_close_wait_and_com
     max_samples = 1,
     test = "IntakeChildResetBeforePairedIsRefusedAndFlowAborts"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_intake_child_reset_before_paired_is_refused_and_flow_aborts() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1846,7 +2031,6 @@ fn quint_fwd_pair_intake_child_reset_before_paired_is_refused_and_flow_aborts() 
     max_samples = 1,
     test = "DestinationResetBeforeHostAttachIsRefusedAndFlowAborts"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_destination_reset_before_host_attach_is_refused_and_flow_aborts() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1858,7 +2042,6 @@ fn quint_fwd_pair_destination_reset_before_host_attach_is_refused_and_flow_abort
     max_samples = 1,
     test = "GuestCloseWithEmptyQueueBeforeHostAttachIsRefusedAndFlowAborts"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_guest_close_with_empty_queue_before_host_attach_is_refused_and_flow_aborts()
 -> impl Driver {
     FwdPairDriver::new()
@@ -1871,7 +2054,6 @@ fn quint_fwd_pair_guest_close_with_empty_queue_before_host_attach_is_refused_and
     max_samples = 1,
     test = "OwnerAbortOfWatchLeavesVhAndStreamReportsAborted"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_owner_abort_of_watch_leaves_vh_and_stream_reports_aborted() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1883,7 +2065,6 @@ fn quint_fwd_pair_owner_abort_of_watch_leaves_vh_and_stream_reports_aborted() ->
     max_samples = 1,
     test = "OwnerAbortSendsGuestAbortThenHolderDropIsInert"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_owner_abort_sends_guest_abort_then_holder_drop_is_inert() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1895,7 +2076,6 @@ fn quint_fwd_pair_owner_abort_sends_guest_abort_then_holder_drop_is_inert() -> i
     max_samples = 1,
     test = "ContextReleaseShutsWatchedVhAndHolderReadsNotConnected"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_context_release_shuts_watched_vh_and_holder_reads_not_connected() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1907,7 +2087,6 @@ fn quint_fwd_pair_context_release_shuts_watched_vh_and_holder_reads_not_connecte
     max_samples = 1,
     test = "DroppedStreamAbortsWatchThenGuestSeesAbort"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_dropped_stream_aborts_watch_then_guest_sees_abort() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1919,7 +2098,6 @@ fn quint_fwd_pair_dropped_stream_aborts_watch_then_guest_sees_abort() -> impl Dr
     max_samples = 1,
     test = "PeerCloseRacingOwnHalfCloseIsClean"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_peer_close_racing_own_half_close_is_clean() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1932,7 +2110,6 @@ fn quint_fwd_pair_peer_close_racing_own_half_close_is_clean() -> impl Driver {
     max_samples = 1,
     test = "HostOwnerDeathIsFinal"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_host_owner_death_is_final() -> impl Driver {
     FwdPairDriver::new()
 }
@@ -1946,14 +2123,12 @@ fn quint_fwd_pair_host_owner_death_is_final() -> impl Driver {
     max_samples = 1,
     test = "RecoveryEndsHeldStreamWhoseWatchEnded"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_fwd_pair_recovery_ends_held_stream_whose_watch_ended() -> impl Driver {
     FwdPairDriver::new()
 }
 
 /// Randomized `pair_conf` traces; the seed is printed on failure.
 #[quint_run(spec = "../../specs/quint/guest-flow-owner/fwd_pair.qnt", main = "pair_conf")]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn pair_conf_randomized_traces() -> impl Driver {
     FwdPairDriver::new()
 }

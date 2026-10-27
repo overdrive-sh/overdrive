@@ -50,15 +50,24 @@ struct GuestNetworkExecState {
 }
 
 struct RecoverySnapshot {
-    component: SharedGuestNetworkComponent,
     started_at: Instant,
     completed_attempts: u32,
+}
+
+struct RecoveringState {
+    recoveries: std::collections::BTreeMap<SharedGuestNetworkComponent, RecoverySnapshot>,
+    /// Components added after the previous complete attempt have not yet
+    /// received a repair attempt in that cycle.
+    joined_since_attempt: BTreeSet<SharedGuestNetworkComponent>,
+    /// The most recently observed failing component; a completed audit
+    /// selects the first remaining component in `Ord`.
+    latest_component: SharedGuestNetworkComponent,
 }
 
 enum GuestNetworkExecGateState {
     BootClosed,
     Open,
-    Recovering(RecoverySnapshot),
+    Recovering(RecoveringState),
     FailStop,
 }
 
@@ -107,18 +116,6 @@ pub enum SharedGuestNetworkFailStopCause {
     /// latch and leaked count are unchanged; the supervisor fail-stops
     /// `serve` at once and forwarding stays quiesced until then.
     ForeignQuiescenceHold,
-    /// The set of TAPs that failed to go down cannot be determined, so the
-    /// whole workloads slice was killed (D-295-R14).
-    ///
-    /// **D-list** (feature-delta § *Bridge-era code for DELIVER to delete*,
-    /// scattered sites): no TAP exists under the vsock attachment; the
-    /// 12-01 (09-01 rework) deletes it with its control-plane users.
-    TapQuiescenceUndetermined,
-    /// A per-VM kill write for a known allocation failed other than with an
-    /// absent scope, so the whole workloads slice was killed (D-295-R14).
-    ///
-    /// RED scaffold (D-295-R14): constructed in DELIVER step 12-01.
-    VmKillFailed,
     /// The supervisor returned without a fail-stop request.
     SupervisorReturned,
     /// The supervisor returned a typed failure.
@@ -270,16 +267,43 @@ impl GuestNetworkExecSupervisor {
     pub fn begin_recovery(&self, component: SharedGuestNetworkComponent) -> bool {
         let began = {
             let mut shared = self.shared.state.lock();
-            if matches!(shared.state, GuestNetworkExecGateState::Open) {
-                shared.state = GuestNetworkExecGateState::Recovering(RecoverySnapshot {
-                    component,
-                    started_at: self.shared.clock.now(),
-                    completed_attempts: 0,
-                });
-                true
-            } else {
-                false
-            }
+            let began = match &mut shared.state {
+                GuestNetworkExecGateState::Open => {
+                    let recoveries = std::collections::BTreeMap::from([(
+                        component,
+                        RecoverySnapshot {
+                            started_at: self.shared.clock.now(),
+                            completed_attempts: 0,
+                        },
+                    )]);
+                    shared.state = GuestNetworkExecGateState::Recovering(RecoveringState {
+                        recoveries,
+                        joined_since_attempt: BTreeSet::new(),
+                        latest_component: component,
+                    });
+                    true
+                }
+                GuestNetworkExecGateState::Recovering(recovering) => {
+                    if let std::collections::btree_map::Entry::Vacant(entry) =
+                        recovering.recoveries.entry(component)
+                    {
+                        entry.insert(RecoverySnapshot {
+                            started_at: self.shared.clock.now(),
+                            completed_attempts: 0,
+                        });
+                        recovering.joined_since_attempt.insert(component);
+                        recovering.latest_component = component;
+                        true
+                    } else {
+                        false
+                    }
+                }
+                GuestNetworkExecGateState::BootClosed | GuestNetworkExecGateState::FailStop => {
+                    false
+                }
+            };
+            drop(shared);
+            began
         };
         if began {
             self.shared.notify.notify_waiters();
@@ -287,33 +311,38 @@ impl GuestNetworkExecSupervisor {
         began
     }
 
-    /// Record one completed attempt and either remain recovering or reopen.
-    /// `remaining` is the set of components still failing after the
-    /// attempt's full audit; an empty set reopens the gate.
-    ///
-    /// Today's single-holder bookkeeping is kept: the first member of
-    /// `remaining` in `Ord` becomes the recovery snapshot's component. The
-    /// per-holder contract (§ *Owner and provisioner*, U-QP-3) lands with
-    /// the DELIVER 12-01 (09-01 rework) in the attachment cut.
+    /// Record one completed repair-and-audit attempt for every component
+    /// recovery already active at the start of that attempt. `remaining` is
+    /// the set still failing after its full audit; recovered components leave
+    /// their episodes, while retained components increment once. A component
+    /// that joined during the attempt keeps its zero-attempt snapshot until
+    /// the next completed attempt. An empty recovery set reopens the gate.
     #[must_use]
     #[allow(
         clippy::needless_pass_by_value,
         reason = "the EXEC gate contract pins `remaining` by value; the per-holder bookkeeping consumes it"
     )]
     pub fn complete_attempt(&self, remaining: BTreeSet<SharedGuestNetworkComponent>) -> bool {
-        let first_remaining = remaining.first().copied();
         let completed = {
             let mut shared = self.shared.state.lock();
-            let GuestNetworkExecGateState::Recovering(snapshot) = &mut shared.state else {
+            let GuestNetworkExecGateState::Recovering(recovering) = &mut shared.state else {
                 return false;
             };
-            let attempts = snapshot.completed_attempts.saturating_add(1);
-            match first_remaining {
-                Some(component) => {
-                    snapshot.component = component;
-                    snapshot.completed_attempts = attempts;
+            recovering.recoveries.retain(|component, snapshot| {
+                if !remaining.contains(component) {
+                    return false;
                 }
-                None => shared.state = GuestNetworkExecGateState::Open,
+                if !recovering.joined_since_attempt.contains(component) {
+                    snapshot.completed_attempts = snapshot.completed_attempts.saturating_add(1);
+                }
+                true
+            });
+            recovering.joined_since_attempt.clear();
+            if let Some(component) = remaining.first() {
+                recovering.latest_component = *component;
+            }
+            if recovering.recoveries.is_empty() {
+                shared.state = GuestNetworkExecGateState::Open;
             }
             true
         };
@@ -327,23 +356,23 @@ impl GuestNetworkExecSupervisor {
     /// repair, ascending by [`SharedGuestNetworkComponent`]'s `Ord`; empty in
     /// every state except Recovering. A value snapshot taken under the gate
     /// lock (U-QP-3).
-    ///
-    /// Today's single-holder bookkeeping yields at most one entry; the
-    /// per-holder set (D8a-HOLD) lands with the DELIVER 12-01 (09-01 rework) in the
-    /// attachment cut.
     #[must_use]
     pub fn recovery_progress(&self) -> Vec<SharedGuestNetworkRecovery> {
         let shared = self.shared.state.lock();
         let GuestNetworkExecGateState::Recovering(snapshot) = &shared.state else {
             return Vec::new();
         };
-        let progress = SharedGuestNetworkRecovery {
-            component: snapshot.component,
-            attempts: snapshot.completed_attempts,
-            elapsed: self.shared.clock.now().saturating_duration_since(snapshot.started_at),
-        };
+        let progress = snapshot
+            .recoveries
+            .iter()
+            .map(|(component, recovery)| SharedGuestNetworkRecovery {
+                component: *component,
+                attempts: recovery.completed_attempts,
+                elapsed: self.shared.clock.now().saturating_duration_since(recovery.started_at),
+            })
+            .collect();
         drop(shared);
-        vec![progress]
+        progress
     }
 
     /// Enter FailStop once and return the first public request receipt.
@@ -355,17 +384,34 @@ impl GuestNetworkExecSupervisor {
     ) -> Option<SharedGuestNetworkFailStop> {
         let request = {
             let mut shared = self.shared.state.lock();
-            let (component, attempts, elapsed) = match &shared.state {
-                GuestNetworkExecGateState::FailStop => return None,
-                GuestNetworkExecGateState::Recovering(snapshot) => (
-                    snapshot.component,
-                    snapshot.completed_attempts,
-                    self.shared.clock.now().saturating_duration_since(snapshot.started_at),
-                ),
-                GuestNetworkExecGateState::BootClosed | GuestNetworkExecGateState::Open => {
-                    (SharedGuestNetworkComponent::Supervisor, 0, Duration::ZERO)
-                }
-            };
+            let (component, attempts, elapsed) =
+                match &shared.state {
+                    GuestNetworkExecGateState::FailStop => return None,
+                    GuestNetworkExecGateState::Recovering(snapshot) => {
+                        let component =
+                            if snapshot.recoveries.contains_key(&snapshot.latest_component) {
+                                snapshot.latest_component
+                            } else {
+                                snapshot.recoveries.keys().next().map_or_else(
+                            || unreachable!(
+                                "Recovering always holds at least one component recovery"
+                            ),
+                            |component| *component,
+                        )
+                            };
+                        let recovery = snapshot.recoveries.get(&component).unwrap_or_else(|| {
+                            unreachable!("the fail-stop component has a recovery snapshot")
+                        });
+                        (
+                            component,
+                            recovery.completed_attempts,
+                            self.shared.clock.now().saturating_duration_since(recovery.started_at),
+                        )
+                    }
+                    GuestNetworkExecGateState::BootClosed | GuestNetworkExecGateState::Open => {
+                        (SharedGuestNetworkComponent::Supervisor, 0, Duration::ZERO)
+                    }
+                };
             shared.state = GuestNetworkExecGateState::FailStop;
             let request = SharedGuestNetworkFailStop { component, cause, attempts, elapsed };
             drop(shared);

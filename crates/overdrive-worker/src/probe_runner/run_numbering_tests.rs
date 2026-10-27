@@ -330,7 +330,6 @@ proptest! {
 /// aborts the flow (EVMOD-STREAM-ABORT, EVMOD-AB): no half-close is sent.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn tcp_vm_probe_is_healthy_iff_the_dial_succeeds() {
     let probed = Probed::start().await;
     let target = SocketAddrV4::new(WORKLOAD_ADDR, LIVENESS_PORT);
@@ -420,7 +419,6 @@ async fn liveness_row_of(
 /// dial refused `Capacity` writes no row (INB-1, PROBE-NOSAMPLE, R5-53).
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn http_vm_probe_runs_its_request_over_the_guest_stream() {
     let port = 8090;
     let (runner, obs, clock, dial, alloc) = start_with(vec![http_liveness_descriptor(port)]).await;
@@ -492,7 +490,6 @@ async fn elapse(clock: &SimClock, by: Duration) {
 /// deadline) or the stream (R5-53, probes).
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn a_probe_whose_dial_or_request_outlives_the_timeout_fails_and_drops_it() {
     let port = 8091;
     let (runner, obs, clock, dial, alloc) = start_with(vec![http_liveness_descriptor(port)]).await;
@@ -549,7 +546,6 @@ async fn a_probe_whose_dial_or_request_outlives_the_timeout_fails_and_drops_it()
 /// row. The parse-time refusal of a ninth probe is the deploy validation's.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn eight_probes_of_one_vm_allocation_all_dial_in_one_period() {
     let roles = [(ProbeRole::Startup, 3_u32), (ProbeRole::Readiness, 3), (ProbeRole::Liveness, 2)];
     let mut descriptors = Vec::new();

@@ -383,7 +383,6 @@ fn the_bind_refusal_renders_its_pinned_message() {
 /// collections, and a repeated call returns an equal value.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn a_fresh_driver_reports_an_empty_beacon_observation() {
     let driver = fresh_driver(SimVmm::new()).await;
     let first = driver.beacon_observation();
@@ -407,7 +406,6 @@ async fn a_fresh_driver_reports_an_empty_beacon_observation() {
 /// nothing is unread, and the driver closed nothing.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn a_ready_of_the_live_launch_takes_the_claim_and_completes_the_start() {
     let node = Node::new().await;
     let launch = token(0x5a);
@@ -446,7 +444,6 @@ async fn a_ready_of_the_live_launch_takes_the_claim_and_completes_the_start() {
 /// poison the claim — the live launch's own READY then takes it.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn a_stale_queued_ready_is_closed_and_does_not_poison_the_claim() {
     let node = Node::new().await;
     let stale = token(0x11);
@@ -490,7 +487,6 @@ async fn a_stale_queued_ready_is_closed_and_does_not_poison_the_claim() {
 /// takes nothing — `stop` ended the launch's liveness — and is closed.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn a_ready_read_after_stop_takes_nothing() {
     let node = Node::new().await;
     let launch = token(0x33);
@@ -527,7 +523,6 @@ async fn a_ready_read_after_stop_takes_nothing() {
 /// (`SessionHeld`); the claim stays with the first.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn a_second_connection_of_the_same_launch_is_closed_session_held() {
     let node = Node::new().await;
     let launch = token(0x44);
@@ -553,7 +548,6 @@ async fn a_second_connection_of_the_same_launch_is_closed_session_held() {
 /// own READY then takes the claim.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn a_connection_closed_with_nothing_buffered_is_closed_without_effect() {
     let node = Node::new().await;
     let launch = token(0x55);
@@ -576,7 +570,6 @@ async fn a_connection_closed_with_nothing_buffered_is_closed_without_effect() {
 /// whatever it is (another beacon message, a malformed line).
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn a_first_line_that_is_not_ready_closes_the_connection_without_effect() {
     for (n, line) in [(1, "EXIT 0"), (2, "SHUTDOWN"), (3, "READY pid=1 port=1234"), (4, "garbage")]
     {
@@ -602,7 +595,6 @@ async fn a_first_line_that_is_not_ready_closes_the_connection_without_effect() {
 /// (`NoLiveLaunch`), before any read.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn a_connection_from_a_cid_with_no_live_launch_is_closed_at_accept() {
     let node = Node::new().await;
     let other = GuestCid::new(GUEST_CID_BASE + 7).expect("an in-range guest CID");
@@ -627,7 +619,6 @@ async fn a_connection_from_a_cid_with_no_live_launch_is_closed_at_accept() {
 /// refused `SessionHeld`. Quint run `VmExitEndsLaunchAndReleasesBeaconClaim`.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn a_vmm_exit_ends_the_launch_and_releases_its_claim_for_the_next_launch() {
     let node = Node::new().await;
     let first = token(0x66);
@@ -679,7 +670,6 @@ async fn a_vmm_exit_ends_the_launch_and_releases_its_claim_for_the_next_launch()
 /// driver writing 1234 / 1240 / 1243 (or any constant) fails here.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn the_launch_token_names_the_bound_beacon_and_the_assignments_flow_ports() {
     let tmp = TempDir::new().expect("tmpdir");
     let root = tmp.path().to_path_buf();

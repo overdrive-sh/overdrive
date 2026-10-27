@@ -25,6 +25,7 @@ State 1: <Initial predicate>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostPaired = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmGen = 0
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmUp = FALSE
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bq = <<>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_act = "none"
 /\ flows_bugDriverStopKeepsClaim_owner_flows_dl = [ res |-> <<"none">>,
   adm |-> {},
@@ -35,7 +36,7 @@ State 1: <Initial predicate>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_readyCross = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 
-State 2: <flows_bugDriverStopKeepsClaim_owner_flows_Provision line 1226, col 3 to line 1259, col 54 of module flows_bugDriverStopKeepsClaim>
+State 2: <flows_bugDriverStopKeepsClaim_owner_flows_Provision line 1239, col 3 to line 1272, col 54 of module flows_bugDriverStopKeepsClaim>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_resurrected = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gSess = 0
@@ -62,6 +63,7 @@ State 2: <flows_bugDriverStopKeepsClaim_owner_flows_Provision line 1226, col 3 t
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostPaired = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmGen = 0
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmUp = FALSE
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bq = <<>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_act = "none"
 /\ flows_bugDriverStopKeepsClaim_owner_flows_dl = [ res |-> <<"none">>,
   adm |-> {},
@@ -72,7 +74,7 @@ State 2: <flows_bugDriverStopKeepsClaim_owner_flows_Provision line 1226, col 3 t
 /\ flows_bugDriverStopKeepsClaim_owner_flows_readyCross = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 
-State 3: <flows_bugDriverStopKeepsClaim_owner_flows_VmStart line 792, col 3 to line 831, col 56 of module flows_bugDriverStopKeepsClaim>
+State 3: <flows_bugDriverStopKeepsClaim_owner_flows_VmStart line 801, col 3 to line 842, col 56 of module flows_bugDriverStopKeepsClaim>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_resurrected = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gSess = 0
@@ -99,6 +101,7 @@ State 3: <flows_bugDriverStopKeepsClaim_owner_flows_VmStart line 792, col 3 to l
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostPaired = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmGen = 1
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmUp = TRUE
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bq = <<>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_act = "none"
 /\ flows_bugDriverStopKeepsClaim_owner_flows_dl = [ res |-> <<"none">>,
   adm |-> {},
@@ -109,13 +112,13 @@ State 3: <flows_bugDriverStopKeepsClaim_owner_flows_VmStart line 792, col 3 to l
 /\ flows_bugDriverStopKeepsClaim_owner_flows_readyCross = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 
-State 4: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to line 3869, col 61 of module flows_bugDriverStopKeepsClaim>
+State 4: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3890, col 9 to line 3891, col 61 of module flows_bugDriverStopKeepsClaim>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_resurrected = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gSess = 0
 /\ flows_bugDriverStopKeepsClaim_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostRefused = {}
-/\ flows_bugDriverStopKeepsClaim_owner_flows_bcn = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 1]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_drvLive = TRUE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_bHeldByOther = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_badPaired = FALSE
@@ -136,6 +139,7 @@ State 4: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to lin
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostPaired = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmGen = 1
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmUp = TRUE
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bq = <<2>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_act = "none"
 /\ flows_bugDriverStopKeepsClaim_owner_flows_dl = [ res |-> <<"none">>,
   adm |-> {},
@@ -146,13 +150,13 @@ State 4: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to lin
 /\ flows_bugDriverStopKeepsClaim_owner_flows_readyCross = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 
-State 5: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to line 3869, col 61 of module flows_bugDriverStopKeepsClaim>
+State 5: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3890, col 9 to line 3891, col 61 of module flows_bugDriverStopKeepsClaim>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_resurrected = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gSess = 0
 /\ flows_bugDriverStopKeepsClaim_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostRefused = {}
-/\ flows_bugDriverStopKeepsClaim_owner_flows_bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "reading", gen |-> 1]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_drvLive = TRUE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_bHeldByOther = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_badPaired = FALSE
@@ -173,6 +177,7 @@ State 5: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to lin
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostPaired = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmGen = 1
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmUp = TRUE
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bq = <<>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_act = "none"
 /\ flows_bugDriverStopKeepsClaim_owner_flows_dl = [ res |-> <<"none">>,
   adm |-> {},
@@ -183,13 +188,13 @@ State 5: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to lin
 /\ flows_bugDriverStopKeepsClaim_owner_flows_readyCross = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 
-State 6: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to line 3869, col 61 of module flows_bugDriverStopKeepsClaim>
+State 6: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3890, col 9 to line 3891, col 61 of module flows_bugDriverStopKeepsClaim>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_resurrected = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gSess = 0
 /\ flows_bugDriverStopKeepsClaim_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostRefused = {}
-/\ flows_bugDriverStopKeepsClaim_owner_flows_bcn = <<[st |-> "live", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "live", gen |-> 1]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_drvLive = TRUE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_bHeldByOther = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_badPaired = FALSE
@@ -200,7 +205,7 @@ State 6: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to lin
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toGuestAbort = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gen = 1
-/\ flows_bugDriverStopKeepsClaim_owner_flows_bclaim = 1
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bclaim = 2
 /\ flows_bugDriverStopKeepsClaim_owner_flows_crossMsg = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
@@ -210,6 +215,7 @@ State 6: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to lin
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostPaired = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmGen = 1
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmUp = TRUE
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bq = <<>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_act = "none"
 /\ flows_bugDriverStopKeepsClaim_owner_flows_dl = [ res |-> <<"none">>,
   adm |-> {},
@@ -220,13 +226,13 @@ State 6: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to lin
 /\ flows_bugDriverStopKeepsClaim_owner_flows_readyCross = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 
-State 7: <flows_bugDriverStopKeepsClaim_owner_flows_VmStop line 837, col 3 to line 1033, col 56 of module flows_bugDriverStopKeepsClaim>
+State 7: <flows_bugDriverStopKeepsClaim_owner_flows_VmStop line 848, col 3 to line 1046, col 56 of module flows_bugDriverStopKeepsClaim>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_resurrected = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gSess = 0
 /\ flows_bugDriverStopKeepsClaim_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostRefused = {}
-/\ flows_bugDriverStopKeepsClaim_owner_flows_bcn = <<[st |-> "closed", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "closed", gen |-> 1]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_drvLive = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_bHeldByOther = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_badPaired = FALSE
@@ -237,7 +243,7 @@ State 7: <flows_bugDriverStopKeepsClaim_owner_flows_VmStop line 837, col 3 to li
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toGuestAbort = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gen = 1
-/\ flows_bugDriverStopKeepsClaim_owner_flows_bclaim = 1
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bclaim = 2
 /\ flows_bugDriverStopKeepsClaim_owner_flows_crossMsg = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
@@ -247,6 +253,7 @@ State 7: <flows_bugDriverStopKeepsClaim_owner_flows_VmStop line 837, col 3 to li
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostPaired = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmGen = 1
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmUp = FALSE
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bq = <<>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_act = "none"
 /\ flows_bugDriverStopKeepsClaim_owner_flows_dl = [ res |-> <<"none">>,
   adm |-> {},
@@ -257,13 +264,13 @@ State 7: <flows_bugDriverStopKeepsClaim_owner_flows_VmStop line 837, col 3 to li
 /\ flows_bugDriverStopKeepsClaim_owner_flows_readyCross = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 
-State 8: <flows_bugDriverStopKeepsClaim_owner_flows_Provision line 1226, col 3 to line 1259, col 54 of module flows_bugDriverStopKeepsClaim>
+State 8: <flows_bugDriverStopKeepsClaim_owner_flows_Provision line 1239, col 3 to line 1272, col 54 of module flows_bugDriverStopKeepsClaim>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_resurrected = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gSess = 0
 /\ flows_bugDriverStopKeepsClaim_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostRefused = {}
-/\ flows_bugDriverStopKeepsClaim_owner_flows_bcn = <<[st |-> "closed", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "closed", gen |-> 1]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_drvLive = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_bHeldByOther = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_badPaired = FALSE
@@ -274,7 +281,7 @@ State 8: <flows_bugDriverStopKeepsClaim_owner_flows_Provision line 1226, col 3 t
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toGuestAbort = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gen = 2
-/\ flows_bugDriverStopKeepsClaim_owner_flows_bclaim = 1
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bclaim = 2
 /\ flows_bugDriverStopKeepsClaim_owner_flows_crossMsg = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
@@ -284,6 +291,7 @@ State 8: <flows_bugDriverStopKeepsClaim_owner_flows_Provision line 1226, col 3 t
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostPaired = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmGen = 1
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmUp = FALSE
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bq = <<>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_act = "none"
 /\ flows_bugDriverStopKeepsClaim_owner_flows_dl = [ res |-> <<"none">>,
   adm |-> {},
@@ -294,13 +302,13 @@ State 8: <flows_bugDriverStopKeepsClaim_owner_flows_Provision line 1226, col 3 t
 /\ flows_bugDriverStopKeepsClaim_owner_flows_readyCross = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 
-State 9: <flows_bugDriverStopKeepsClaim_owner_flows_VmStart line 792, col 3 to line 831, col 56 of module flows_bugDriverStopKeepsClaim>
+State 9: <flows_bugDriverStopKeepsClaim_owner_flows_VmStart line 801, col 3 to line 842, col 56 of module flows_bugDriverStopKeepsClaim>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_resurrected = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gSess = 0
 /\ flows_bugDriverStopKeepsClaim_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostRefused = {}
-/\ flows_bugDriverStopKeepsClaim_owner_flows_bcn = <<[st |-> "closed", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "closed", gen |-> 1]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_drvLive = TRUE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_bHeldByOther = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_badPaired = FALSE
@@ -311,7 +319,7 @@ State 9: <flows_bugDriverStopKeepsClaim_owner_flows_VmStart line 792, col 3 to l
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toGuestAbort = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gen = 2
-/\ flows_bugDriverStopKeepsClaim_owner_flows_bclaim = 1
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bclaim = 2
 /\ flows_bugDriverStopKeepsClaim_owner_flows_crossMsg = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
@@ -321,6 +329,7 @@ State 9: <flows_bugDriverStopKeepsClaim_owner_flows_VmStart line 792, col 3 to l
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostPaired = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmGen = 2
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmUp = TRUE
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bq = <<>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_act = "none"
 /\ flows_bugDriverStopKeepsClaim_owner_flows_dl = [ res |-> <<"none">>,
   adm |-> {},
@@ -331,13 +340,13 @@ State 9: <flows_bugDriverStopKeepsClaim_owner_flows_VmStart line 792, col 3 to l
 /\ flows_bugDriverStopKeepsClaim_owner_flows_readyCross = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 
-State 10: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to line 3869, col 61 of module flows_bugDriverStopKeepsClaim>
+State 10: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3890, col 9 to line 3891, col 61 of module flows_bugDriverStopKeepsClaim>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_resurrected = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gSess = 0
 /\ flows_bugDriverStopKeepsClaim_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostRefused = {}
-/\ flows_bugDriverStopKeepsClaim_owner_flows_bcn = <<[st |-> "closed", gen |-> 1], [st |-> "pending", gen |-> 2]>>
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 2]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_drvLive = TRUE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_bHeldByOther = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_badPaired = FALSE
@@ -348,7 +357,7 @@ State 10: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to li
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toGuestAbort = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gen = 2
-/\ flows_bugDriverStopKeepsClaim_owner_flows_bclaim = 1
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bclaim = 2
 /\ flows_bugDriverStopKeepsClaim_owner_flows_crossMsg = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
@@ -358,6 +367,7 @@ State 10: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to li
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostPaired = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmGen = 2
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmUp = TRUE
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bq = <<2>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_act = "none"
 /\ flows_bugDriverStopKeepsClaim_owner_flows_dl = [ res |-> <<"none">>,
   adm |-> {},
@@ -368,13 +378,13 @@ State 10: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to li
 /\ flows_bugDriverStopKeepsClaim_owner_flows_readyCross = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 
-State 11: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to line 3869, col 61 of module flows_bugDriverStopKeepsClaim>
+State 11: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3890, col 9 to line 3891, col 61 of module flows_bugDriverStopKeepsClaim>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_resurrected = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gSess = 0
 /\ flows_bugDriverStopKeepsClaim_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostRefused = {}
-/\ flows_bugDriverStopKeepsClaim_owner_flows_bcn = <<[st |-> "closed", gen |-> 1], [st |-> "reading", gen |-> 2]>>
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bcn = <<[st |-> "pending", gen |-> 2], [st |-> "pending", gen |-> 2]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_drvLive = TRUE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_bHeldByOther = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_badPaired = FALSE
@@ -385,7 +395,7 @@ State 11: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to li
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toGuestAbort = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gen = 2
-/\ flows_bugDriverStopKeepsClaim_owner_flows_bclaim = 1
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bclaim = 2
 /\ flows_bugDriverStopKeepsClaim_owner_flows_crossMsg = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
@@ -395,6 +405,7 @@ State 11: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to li
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostPaired = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmGen = 2
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmUp = TRUE
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bq = <<2, 1>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_act = "none"
 /\ flows_bugDriverStopKeepsClaim_owner_flows_dl = [ res |-> <<"none">>,
   adm |-> {},
@@ -405,15 +416,15 @@ State 11: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to li
 /\ flows_bugDriverStopKeepsClaim_owner_flows_readyCross = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 
-State 12: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to line 3869, col 61 of module flows_bugDriverStopKeepsClaim>
+State 12: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3890, col 9 to line 3891, col 61 of module flows_bugDriverStopKeepsClaim>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_resurrected = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gSess = 0
 /\ flows_bugDriverStopKeepsClaim_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostRefused = {}
-/\ flows_bugDriverStopKeepsClaim_owner_flows_bcn = <<[st |-> "closed", gen |-> 1], [st |-> "closed", gen |-> 2]>>
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bcn = <<[st |-> "pending", gen |-> 2], [st |-> "reading", gen |-> 2]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_drvLive = TRUE
-/\ flows_bugDriverStopKeepsClaim_owner_flows_bHeldByOther = TRUE
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bHeldByOther = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_badPaired = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_alloc = "Provisioned"
 /\ flows_bugDriverStopKeepsClaim_owner_flows_quiesced = FALSE
@@ -422,7 +433,7 @@ State 12: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to li
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toGuestAbort = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gen = 2
-/\ flows_bugDriverStopKeepsClaim_owner_flows_bclaim = 1
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bclaim = 2
 /\ flows_bugDriverStopKeepsClaim_owner_flows_crossMsg = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
@@ -432,6 +443,7 @@ State 12: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to li
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostPaired = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmGen = 2
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmUp = TRUE
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bq = <<1>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_act = "none"
 /\ flows_bugDriverStopKeepsClaim_owner_flows_dl = [ res |-> <<"none">>,
   adm |-> {},
@@ -442,7 +454,7 @@ State 12: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to li
 /\ flows_bugDriverStopKeepsClaim_owner_flows_readyCross = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 
-State 13: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to line 3869, col 61 of module flows_bugDriverStopKeepsClaim>
+State 13: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3890, col 9 to line 3891, col 61 of module flows_bugDriverStopKeepsClaim>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_resurrected = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gSess = 0
@@ -450,7 +462,7 @@ State 13: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to li
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostRefused = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_bcn = <<[st |-> "pending", gen |-> 2], [st |-> "closed", gen |-> 2]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_drvLive = TRUE
-/\ flows_bugDriverStopKeepsClaim_owner_flows_bHeldByOther = TRUE
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bHeldByOther = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_badPaired = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_alloc = "Provisioned"
 /\ flows_bugDriverStopKeepsClaim_owner_flows_quiesced = FALSE
@@ -459,7 +471,7 @@ State 13: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to li
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toGuestAbort = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gen = 2
-/\ flows_bugDriverStopKeepsClaim_owner_flows_bclaim = 1
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bclaim = 2
 /\ flows_bugDriverStopKeepsClaim_owner_flows_crossMsg = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
@@ -469,6 +481,7 @@ State 13: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to li
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostPaired = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmGen = 2
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmUp = TRUE
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bq = <<1>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_act = "none"
 /\ flows_bugDriverStopKeepsClaim_owner_flows_dl = [ res |-> <<"none">>,
   adm |-> {},
@@ -479,7 +492,7 @@ State 13: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to li
 /\ flows_bugDriverStopKeepsClaim_owner_flows_readyCross = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 
-State 14: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to line 3869, col 61 of module flows_bugDriverStopKeepsClaim>
+State 14: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3890, col 9 to line 3891, col 61 of module flows_bugDriverStopKeepsClaim>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_resurrected = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gSess = 0
@@ -487,7 +500,7 @@ State 14: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to li
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostRefused = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_bcn = <<[st |-> "reading", gen |-> 2], [st |-> "closed", gen |-> 2]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_drvLive = TRUE
-/\ flows_bugDriverStopKeepsClaim_owner_flows_bHeldByOther = TRUE
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bHeldByOther = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_badPaired = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_alloc = "Provisioned"
 /\ flows_bugDriverStopKeepsClaim_owner_flows_quiesced = FALSE
@@ -496,7 +509,7 @@ State 14: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to li
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toGuestAbort = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gen = 2
-/\ flows_bugDriverStopKeepsClaim_owner_flows_bclaim = 1
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bclaim = 2
 /\ flows_bugDriverStopKeepsClaim_owner_flows_crossMsg = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
@@ -506,6 +519,7 @@ State 14: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to li
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostPaired = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmGen = 2
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmUp = TRUE
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bq = <<>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_act = "none"
 /\ flows_bugDriverStopKeepsClaim_owner_flows_dl = [ res |-> <<"none">>,
   adm |-> {},
@@ -516,7 +530,7 @@ State 14: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to li
 /\ flows_bugDriverStopKeepsClaim_owner_flows_readyCross = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 
-State 15: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to line 3869, col 61 of module flows_bugDriverStopKeepsClaim>
+State 15: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3890, col 9 to line 3891, col 61 of module flows_bugDriverStopKeepsClaim>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_resurrected = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gSess = 0
@@ -524,7 +538,7 @@ State 15: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to li
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostRefused = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_bcn = <<[st |-> "closed", gen |-> 2], [st |-> "closed", gen |-> 2]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_drvLive = TRUE
-/\ flows_bugDriverStopKeepsClaim_owner_flows_bHeldByOther = TRUE
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bHeldByOther = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_badPaired = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_alloc = "Provisioned"
 /\ flows_bugDriverStopKeepsClaim_owner_flows_quiesced = FALSE
@@ -533,7 +547,7 @@ State 15: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to li
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toGuestAbort = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gen = 2
-/\ flows_bugDriverStopKeepsClaim_owner_flows_bclaim = 1
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bclaim = 2
 /\ flows_bugDriverStopKeepsClaim_owner_flows_crossMsg = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_flows = << [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE],
    [st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE] >>
@@ -543,6 +557,7 @@ State 15: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to li
 /\ flows_bugDriverStopKeepsClaim_owner_flows_toHostPaired = {}
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmGen = 2
 /\ flows_bugDriverStopKeepsClaim_owner_flows_vmUp = TRUE
+/\ flows_bugDriverStopKeepsClaim_owner_flows_bq = <<>>
 /\ flows_bugDriverStopKeepsClaim_owner_flows_act = "none"
 /\ flows_bugDriverStopKeepsClaim_owner_flows_dl = [ res |-> <<"none">>,
   adm |-> {},
@@ -553,4 +568,4 @@ State 15: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to li
 /\ flows_bugDriverStopKeepsClaim_owner_flows_readyCross = FALSE
 /\ flows_bugDriverStopKeepsClaim_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 
-Back to state 13: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3868, col 9 to line 3869, col 61 of module flows_bugDriverStopKeepsClaim>
+Back to state 13: <flows_bugDriverStopKeepsClaim_owner_flows_step line 3890, col 9 to line 3891, col 61 of module flows_bugDriverStopKeepsClaim>

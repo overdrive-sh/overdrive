@@ -21,8 +21,9 @@ contracts (`docs/feature/netns-density-295/distill/upstream-issues.md`, pinned i
 D-UP-1 (the conformance step record), D-UP-3 (a leaked quiescence hold), D-UP-4 with PD-1 (a restore with a hold
 another ledger issued: `ForeignHold`, nothing changes, fail-stop `ForeignQuiescenceHold`), D-UP-8 (the guest-held control session),
 D-UP-9 (the VM driver's VMM-exit step), and the model abstractions
-D-UP-19 (no accept order and no reclamation order: any pending connection is accepted, and `Reclaim` kills every
-orphan in one step) and D-UP-20 (the beacon instance's enabled actions; `lease_live` on three abstract offsets; the
+D-UP-19 (accept order remains abstract only for order-insensitive owner models; BFIFO1 records the beacon listener's
+FIFO in `bq`; reclamation order remains abstract and `Reclaim` kills every orphan in one step) and D-UP-20 (the
+beacon instance's enabled actions; `lease_live` on three abstract offsets; the
 idle release of an attached slot only). D-UP-4's ledger is modelled only through its observable rule: `quiescence` has
 one owner, and a hold another ledger issued enters it only as the component-free stimulus `ForeignRestore`. The
 claim that such a hold, dropped unredeemed, counts as leaked at the ledger that issued it is **model-only**: that
@@ -176,7 +177,7 @@ unframe program.
 
 State: `alloc` (CID table state), `gen` / `vmGen` / `vmUp` (lease and launch), `quiesced`, `claim` and `sess`
 (the control-session `ClaimSet` and connections), `flows` (guest-opened flows), `hf` / `gf` / `dl` and the
-control-message sets (host-opened flows and the dialer's results), `drvLive` / `bclaim` / `bcn` (the VM
+control-message sets (host-opened flows and the dialer's results), `drvLive` / `bclaim` / `bcn` / `bq` (the VM
 driver's beacon), `gSess` (D-UP-8: the control connection the guest owner holds as its session; guest-side state),
 `conf_step`, ghosts (`badPaired`,
 `crossMsg`, `heldByOther`, `resurrected`, `phantom`, `readyCross`, `bHeldByOther`, `abortDiscarded`).
@@ -189,19 +190,37 @@ in the guest while the guest owner's own first connect is still unresolved on th
 used; it does not touch `gSess`. QPROJ-5 `session` ⇔ `gSess` ≠ none.
 D-UP-9: `VmStop` is the VM driver's one per-CID step for a launch's VMM exit (a guest reset included): it ends the
 launch's liveness (`drvLive`), closes its beacon sessions and releases the beacon claim, as `driver.stop` does.
-D-UP-19: an accept takes any pending connection of its listener (no accept order is modelled; no invariant depends on
-it). D-UP-20: on `flows_beacon` only `Provision` (a new assignment, once the previous launch ended), `VmStart`,
+D-UP-19: accept order remains abstract for order-insensitive owner models. BFIFO1 is the bounded beacon exception:
+`bq` records the one listener's FIFO; `GuestOpenBeacon` appends, `HostAcceptBeacon` accepts and removes only the head,
+and launch/VMM transitions preserve queued stale children. The conformance driver releases one real accept and the
+existing post-state projection proves the returned identity; it owns no shadow queue. D-UP-20: on `flows_beacon` only
+`Provision` (a new assignment, once the previous launch ended), `VmStart`,
 `VmStop`, `DriverStop` and the beacon actions are enabled.
 
+RELEASEPROJ1 makes QPROJ-2 pool lease presence and launch authoritative for
+`alloc` and its compared generation. No pool lease projects `Absent`; a
+Retiring lease projects `Retiring`; an Admitted lease requires the matching
+QPROJ-3 CID/allocation/launch row in `Provisioned` or `Active`. QPROJ-3 may
+retain a `Retiring` row after release only as the exact accepted-unread cleanup
+tombstone: no session authority or serving flow/dial/datagram/pair/watch state,
+zero held flows, and `control_tasks` exactly equal to `unread` with the old
+launch identity. That row continues to project its connection as `reading`
+but is not a lease; same-CID replacement retains the old task identity so its
+late read closes stale without claiming or clearing the new launch.
+
 Actions: `Provision`, `VmStart`, `VmStop` (a VMM exit also resets every requested host dial of the stopped launch: the dial
-returns `Unreachable { ECONNRESET }`), `Activate`, `ActivatePending`, `ActivateQuiesced`, `ActivateRetiring` (the refused activations),
+returns `Unreachable { ECONNRESET }`), `Activate`, `ActivatePending`, `ActivateQuiesced`, `ActivateRetiring` (the refused activations;
+for a Provisioned CID quiescence has priority, then a missing session),
 `Teardown`, `Release`, `Quiesce`, `Restore`;
 `GuestOpenSession`, `WorkloadOpenSession`, `HostAcceptSession`, `HostReadOpen`, `HostClaimSession`, `HostSessionLoss`, `HostDeadSessionLoss`;
-`GuestOpenFlow`, `HostAcceptFlow`, `HostReadReq`, `HostStartConnect`, `HostConnectDone` (attach (V_h, D), then `Paired`:
+`GuestOpenFlow`, `HostAcceptFlow` (admitted: release accept only; Quiesced: release the complete buffered request in
+the same action, require the real `Refused { Quiesced }`, close with zero admitted state/place), `HostReadReq`,
+`HostStartConnect`, `HostConnectDone` (attach (V_h, D), then `Paired`:
 EVMOD-PAIR),
 `HostConnectDiscard`, `HostFlowEnds`; the dial `DialOpen`, `DialNotServing`, `DialQuiesced`,
 `DialNoSession`, `DialUnreachable`, `GuestAcceptV`, `GuestPairOrRefuse`, `GuestConnectTimesOut`, `HostRecvPaired`,
-`HostRecvRefused`, `HostRecvTimedOut`, `HostDialDeadline`, `DialCancel`, `GuestNeverReplies`, `HostAbortAccept`, `HostRecvAbort`,
+`HostRecvRefused`, `HostRecvTimedOut`, `HostDialDeadline`, `DialCancel`, `GuestNeverReplies`, `HostAbortAccept`,
+`HostRecvAbort` (a payload-free pre-Paired peer abort fixes `Unreachable:ECONNRESET`),
 `GuestRecvAbort`, `GuestSeesHostClose`, `GuestAcceptedError`, `GuestSessionLossObserved`,
 `GuestQueueReset`; the beacon `GuestOpenBeacon`, `HostAcceptBeacon`, `HostReadReady`, `DriverStop`.
 
@@ -218,6 +237,7 @@ was read in full — an attached socket's bytes are payload), `NoAdmitWhenClosed
 (DG-5-F), `TypedRefusalChangesNothing` (INB-1; `NotServing`, `Quiesced`, `NoSession`, `Unreachable`), `DialDeadlineAfterGuestReply` and `NoPairedAfterDialEnded`
 (INB-1, `GUEST_DIAL_PAIRING_DEADLINE` > `GUEST_INBOUND_CONNECT_TIMEOUT`), `BeaconCurrentLaunch`,
 `BeaconNoCrossLaunchReady`, `BeaconNoCrossLaunchHeld` (ATTR-TOKEN / ATTR-LIVE-CLAIM for the beacon),
+`BeaconQueueExact` (the FIFO contains exactly the distinct pending beacon IDs),
 `GuestSessionOfCurrentLaunch` (D-UP-8: the session the guest holds belongs to the running launch).
 Temporal: `GuestHalfEnds` (U-5 with K-A4, DG-5-E; checked on instance `one` — one guest-opened flow, one host-opened flow —
 because the property mentions the host-opened flow only and `core` (15.1 M states) took 53 min and 10 GB), `SessionBecomesLive` (D18a; checked on instance `sess`: two control connections and two launches, no guest-opened flows and no dial slots, because the property mentions sessions only and the full `core` instance exceeded 900 s in TLC liveness checking; the instance takes its steps from `sessStep`, since `coreStep`'s flow and dial picks range over empty sets there and would disable every core action; its teeth are the environment variant `owner-flows-sess-env-guest-misses-session-loss`, K-A5S dropped), `ReadyReleased` (ADR-0157).
@@ -274,23 +294,31 @@ the TCP half with `SO_LINGER{1,0}` and the vsock half ({S, R}), the host also wr
 session is live, and `attEnded` rises by one), `GuestAbort` (the guest owner takes `Abort { flow }`: it aborts the
 flow's pair, or closes the flow it has not attached), `CloseUnattached` (the guest owner
 closes a flow it has not attached — a pending intake child that reset, the pairing deadline, session loss — with
-`SO_LINGER{1,0}` on the TCP half, D20, and {S, R} on V_g; no record), `Abort` (Detached; of a watch — WATCH-ABORT, EVMOD-STREAM-ABORT, T-5 —
-one owner step: the record queued, the callbacks restored, the module's reference dropped and V_h untouched; the
-stream ended by the owner, `strmAbort`, so every later call returns `ConnectionAborted`; `Abort { flow }` written
+`SO_LINGER{1,0}` on the TCP half, D20, and {S, R} on V_g; no record), `Abort` (Detached; for a non-watch pair the
+owner queues the record and closes its owned descriptors in the same step (`closed`, vsock {S,R}); in watch mode the
+pre-handoff `strmHeld = false` branch cancels the pending dial and closes owner-held V_h, while the held-stream
+branch is WATCH-ABORT / EVMOD-STREAM-ABORT: record queued, callbacks restored, module reference dropped, V_h
+untouched, `strmAbort` set so every later stream call returns `ConnectionAborted`; both write `Abort { flow }`
 while the session is live), `CtxRelease` (the owner's death, or the close of
 the old context in the recovery: attached pairs and watches abort with no record, a watched V_h is shut
 `SHUT_RDWR`; a flow not yet attached is closed
 by the owner's descriptors with `SO_LINGER{1,0}`, D20), `Reopen` (the host's `Forwarder` recovery opens a new context
-after the old one was closed; at most once per trace; a record queued in the old context is never read), `TakeEnd`,
+after the old one was closed; at most once per trace; a record queued in the old context is never read), `TakeEnd`
+(first records the existing end as read; for a holder-free host
+watch with an alive dialer, that same dispatch idempotently closes owner-held
+V_h and records the existing pending-dial guest Abort only when cleanup was
+newly required while the VM is live; held streams and dead endpoints keep the
+no-close result),
 `OwnerClose` (the vsock close's {S, R}; in datagram mode the guest discards the slot socket's queue). Environment:
 `Write`, `Fin`, `Read`, `HolderEnd(k)` (the holder's end observation on V_h, F11 corrected: `eof` (a read of 0) or
 `err` (a read error); after the release's `SHUT_RDWR` either, queued bytes or not; after a guest SHUTDOWN `eof` once the
 queue is empty; after the orphan sweep `err` (`ECONNRESET`) once the queue is empty — and before the sweep's
 `sk_error_report` (`FwdErr`) has run, because `VmmExit` and `FwdErr` are two steps), `ReadEof` (for the dialer: the
-`GuestStream`'s reported end, `hres` — `OwnerAbort` at once when the owner ended the stream (its abort or its
-context's release); else the watch's record, `HalfClose` or `GuestAbort`; else it waits for the record in flight;
-EVMOD-STREAM-END), `ShutRd`, `TcpRst`, `HolderDrop` (T-6: the holder drops its `GuestStream`: the watch is aborted, then V_h
-closed — the guest sees 0x3 — in one step; a stream the owner already ended only closes V_h), `VmmExit`,
+`GuestStream`'s reported end, `hres` — enabled only while `strmHeld`; `OwnerAbort` at once when the owner ended the stream (its abort or its
+context's release); else a watch record only after the owner read it, `HalfClose` or `GuestAbort`; a queued or absent record waits;
+EVMOD-STREAM-END), `ShutRd`, `TcpRst`, `HolderDrop` (T-6: with `strmHeld`, drop the actual stream, abort a live
+watch and close V_h, clearing `strmHeld` and `strmAbort`; before handoff, cancel a still-live pending dial and close
+owner-held V_h without a stream-drop ghost; with neither holder nor live watch the action is disabled), `VmmExit`,
 `TrailingRst`, `SendDg`, `DRead`, `UdpBlock` / `UdpUnblock` (the target UDP socket's send would block), `UdpErr`,
 `DgHalfClose` (a peer outside the design ends a datagram vsock's direction with a 0x2: the stimulus for EV-DGRAM D1,
 F12), and (hazard only) `DropRecord`, `AttachRead` / `AttachHook` (checkThenHook), `WatchRecord`
@@ -299,6 +327,42 @@ becomes readable: `swp` holds while the watch is live with `vs(h).err`) and `Fwd
 record and then call the original callback in one step (EVMOD-STREAM-END, EV-END change 3; ghost `woken`). In datagram mode a clean end
 of the incoming direction completes the pair once the vsock queue is empty, and a head frame left incomplete when the
 peer ended its direction aborts the pair `FrameInvalid` at the next run (`Hop1`, EV-DGRAM D1).
+
+`UdpBlock(d)` and `UdpUnblock(d)` describe the send state of the
+association-owned target UDP socket at `dstOf(d)`, not an independent far
+reader after that local socket is gone. They therefore share
+`ownsUdpSocket(cur, dstOf(d))` with the association ownership meaning used by
+`UdpErr`: pre-attach and live sockets remain eligible; ended, refused, gone,
+closed or released ownership does not. The guest's resident slot after an
+association ends is disconnected and is eligible again only after a later
+association owns it.
+
+`SendDg(d, sz)` likewise requires `ownsUdpSocket(cur, srcOf(d))`: it is a
+source application/destination datagram queued on that association's owned
+source UDP socket, not a freestanding external send that remains queued after
+the local socket disappeared. `srcOf`, rather than the block actions'
+`dstOf`, is load-bearing. Sizes (empty included), per-direction send bounds,
+source-side liveness and queue-full drop accounting remain unchanged.
+
+Watch mode represents the existing dial-future → `GuestStream` ownership cut
+directly with `strmHeld`. `InitWith("watch")` starts false. A successful guest
+`Attach("g")` sets it only when the host watch was live and the real dial
+future returned a stream; a refused attach or late `Paired` after host
+cancellation leaves it false. Dialer `Write`/`Fin`/`Read`, `HolderEnd` and
+`ReadEof` require it. `GuestAbort("g")` instead follows the actual guest pair:
+it aborts a live pair even without a host stream and discards the message for
+watch-mode unattached, ended or refused state, always clearing the message.
+When `Attach("g")` refuses an ended guest half while the host watch is live,
+the same action carries the dial's existing `Refused(ECONNREFUSED)` cleanup:
+the watch ends with one queued `Detached` record, owner-held V_h closes, the
+dial holds no stream, and no reciprocal guest `Abort` is sent.
+Recovery marks an already-ended watch as owner-aborted only while its stream
+is still held. With no held stream, it preserves the watch's terminal record
+and, while the dialer endpoint remains alive, idempotently closes owner-held
+V_h; it adds the existing pending-dial guest Abort only when that close was
+still pending and the VM is live. A completed holder drop leaves the endpoint
+dead and therefore preserves its already-reported `hres`. No new action or
+phase represents the handoff.
 
 Invariants (`Safety`): `DeliveredIsInOrderPrefix`, `UnitsConserved`, `ConsumeOnlyAfterAccept`, `QueuesWithinBounds`,
 `NoEarlyShutdown` (ADR-0183), `AbortNeverCleanEof` and `NoEofOnPeerLoss` (R2-END), `ClassFixedAtTransition`
@@ -310,15 +374,16 @@ is classified twice), `NoUnclassifiedEof` (the `unclassified_eof` alarm never fi
 whose TCP half was reset while the pair was open never completes, whatever its `recvmsg` returned) and
 `NoHolderReadAfterWatchAbort` (U-EV-3: the holder of a watch its owner aborted reads no further byte),
 `HolderOutcomeFromWatch` (EVMOD-STREAM-END, F11, T-5: the `GuestStream`'s reported end is `OwnerAbort` iff the owner ended
-the watch, else the class of the watch's record, whatever the holder's read returned — judged when the stream reports
+the watch, else the class of the watch's owner-read record, whatever the holder's read returned — judged when the stream reports
 it, ghost `gh.hresCls`, because a later owner end of the recovery leaves the reported end as it was, U-R1),
-`RecoveryEndsHeldStream` (EVMOD-CTL recovery step 1, U-R1: after the `Forwarder` recovery's close no stream the holder
-still holds is left un-ended by its owner), `WatchRecordBeforeWake` (EVMOD-STREAM-END, EV-END
+`RecoveryEndsHeldStream` (EVMOD-CTL recovery step 1, U-R1: after the `Forwarder` recovery's close no `strmHeld`
+stream is left un-ended by its owner), `WatchRecordBeforeWake` (EVMOD-STREAM-END, EV-END
 change 3: a holder woken by a watch's end finds the record queued), `TcpResetEndsPair`
 (T-1: no pair is live once its TCP half's reset was reported), `ResetErrnoMatchesState` (T-1: `EPIPE` iff the reset
 half was in `CLOSE_WAIT`), `AbortOnlyAfterFault` (T-3, T-8: a pair or flow ends aborted only after a fault or abort
 action), `RefusedAttachLeavesNoPair` and `EndedHalfNeverEndsClean` (T-4: a `HalfEnded` attach creates no pair and no
-record, and no far end of the flow reads end-of-stream after it), `WatchAbortLeavesHolderSocket` (T-5),
+record, and no far end of the flow reads end-of-stream after it), `WatchAbortLeavesHolderSocket` (T-5:
+holder-owned V_h is unchanged and `strmAbort` implies `strmHeld`),
 `NoLiveWatchAfterDrop` (T-6), `OwnShutBeforeShutdownSent` (T-8) and `CtxGoneIffVmDown` (`ctx(g) = gone`
 exactly when the VM is down, so the init conformance driver treats `ctx(g) = gone` as determined by the `VmmExit`
 stimulus it applied and never projects it; its non-vacuity witness is `fwd-pair-dgram-witness-vmm-exit` on `pair_dgram`: no named run
@@ -353,6 +418,9 @@ closes the flow's descriptors in one dispatch, so `TakeEnd(h)` carries `OwnerClo
 host owner's death and is final — no `Reopen(h)` follows it (ghost `gh.hostDead`, run `HostOwnerDeathIsFinal`) —
 while one that finds none live is the `Forwarder` recovery's close, after its step 1 closed the descriptors of a host
 flow whose record is queued and unread (the record stays queued in the released context and is never read) (D-5).
+The final-death run factors `Reopen`'s exact guard as `canReopen` and asserts
+it false in the terminal state, avoiding quint-connect's empty terminal state
+for `.fail()` without changing the action or the run's state sequence.
 D-3 needs no model change: `strmAbort` is set only by the owner's abort of the stream; the dial-entry lifetime rule
 is the projection.
 
@@ -425,7 +493,9 @@ EVMOD-AB). Invariants: `QuotaBound`, `QuotaRefusalOnlyAtOwnQuota`, `DrainingFlow
 forwards — a half-closed one included — holds its place until its end record is read; ADR-0147, EVMOD-AB).
 Property: a half-closed flow holds its quota place exactly like an open flow; a guest withholding reads holds at
 most its own quota. M-1: the end records are queued in the order the pairs ended (`endq`) and `ReadEnd(s)` reads the
-record of place `s` only at the head of the queue, as production `take_end` does. No node-capacity assumption. If the user keeps SLOT-RELEASE instead of EVMOD-AB, the release
+record of place `s` only at the head of the queue, as production `take_end` does. The disabled out-of-order witness
+factors that exact guard as `canReadEnd` and asserts it false, avoiding quint-connect's empty terminal state for
+`.fail()` without changing the action, state sequence or refusal outcome. No node-capacity assumption. If the user keeps SLOT-RELEASE instead of EVMOD-AB, the release
 waits for the vsock peer's release and a hazard `release-at-host-end` is added (feature delta, change list).
 
 ## `cid_lease`: CID lease, reclamation, guest reset
@@ -512,7 +582,8 @@ violated on `lease_conf_ok`, which pins both violations to the guard.
 `up` / `stop` / `table` (serve process and the shared mTLS nft table), `cnt` (hold count), `latch`, `rec`
 (per-component recovery: idle / held / repaired), `dmg`, `att`, `repLeft`, `flowsOpen`, `leaked` (D-UP-3: the
 owner's leaked-hold count, process-scoped), `foreign` (D-UP-4: the supervisor's `restore` returned `ForeignHold`;
-process-scoped, until the fail-stop), ghosts, `conf_step`. Actions: `Damage`, `OpenFlow`, `ForeignRestore` (D-UP-4,
+process-scoped, until the fail-stop), model-only RECROUND1 `roundState` (`outside` / `pending` / `keep` / `restore`),
+ghosts, `conf_step`. Actions: `Damage`, `OpenFlow`, `ForeignRestore` (D-UP-4,
 PD-1: the supervisor restores a hold another `QuiescenceLedger` issued — a composition defect, no recovery involved;
 nothing in the owner changes, `foreign` is set), `LeakHold` (D-UP-3:
 a hold taken from the owner and dropped without a restore — an Overdrive defect, no recovery involved: count + 1, the
@@ -523,9 +594,64 @@ does — a leaked-hold count above zero, cause `LeakedQuiescenceHold`, or a `For
 `ForeignQuiescenceHold`). Invariants: `ForeignRestoreChangesNothing` (D-UP-4: a foreign restore changes neither the
 count, nor the latch, nor the leaked-hold count), `LeakedHoldKeepsForwardingQuiesced`,
 `LatchIffCount`, `CountCoversRecoveries` (the count is the recoveries holding a hold plus the leaked holds),
-`NoReopenBeforeRepair`, `QuiescedHoldsNoFlow` (QHOLD), `ServeRunsOnlyWithTable` (ADR-0184).
+`NoReopenBeforeRepair`, `QuiescedHoldsNoFlow` (QHOLD), `ServeRunsOnlyWithTable` (ADR-0184),
+`RoundStateIsRecovery` (RECROUND1 membership/result consistency).
+`RecQuiesce` factors its exact start guard as `canRecQuiesce`: on a normal
+instance, a nonzero leaked-hold count disables the next periodic audit before
+it can start another recovery because that same supervisor tick fail-stops
+first. Otherwise `nextDamagedIdle` selects C1 before C2 while skipping a
+component whose recovery already exists, matching the full audit's first
+eligible finding and still allowing a later component to begin an overlapping
+recovery on a following tick. The `leakIgnored` hazard keeps recovery start
+enabled, preserving the counterexample in which the supervisor does not
+consult the ledger. An already-started recovery may still repair, audit and
+restore its own hold;
+`DroppedHoldKeepsForwardingQuiescedThenFailStops` retains that sequence.
+RECROUND1 represents the supervisor's private attempt round without extending
+QPROJ-6. `pending` is an active-round task with no result; `keep` / `restore`
+are collected unhealthy / healthy results waiting for another pending member;
+`outside` is idle or a recovery that joined after the round started.
+`RecQuiesce` starts a round from every then-held recovery only when no round
+exists; a later joiner stays outside. `RecRepair`, `RepFail`, `RecRedo` and
+`RecRestore` require `pending`. Result actions mark `keep` / `restore`; only
+the last pending result publishes one barrier: keeps return to held and gain
+one attempt, restores become idle and consume one hold, outside joiners remain
+uncharged, and every remaining held recovery enters the next round. The
+`boolLatch` hazard retains its first-restore defect at that barrier.
+
+The post-repair audit remains the production full-component audit.
+`auditFinding` selects C1 before C2. A finding at or before the repaired
+component is `RecRedo`; a later finding is `RecRestore`. A different idle
+finding takes its own hold immediately but stays outside the completing round,
+so it is neither restored nor charged by that barrier. `waitingOnRound(c)`
+extends canonical fail-stop/deadline liveness for a joiner or collected result
+waiting behind another pending member. That deadline is not added to the
+recording conformance handler. `roundState` is absent from driver projection,
+QPROJ-6, production and API state.
+The named disabled-flow witness factors `OpenFlow`'s exact guard as
+`canOpenFlow` and asserts it false while a counted hold remains. This avoids
+quint-connect's empty terminal state for `.fail()` without changing the
+action, state sequence or refusal outcome. QUIESCENCEOPEN1 also requires C1,
+the flow-listener component, to be undamaged: a queued child cannot become the
+admitted/paired flow represented by `OpenFlow` while that accept task is dead.
 Temporal: `C1EpisodeEnds`, `C2EpisodeEnds`, `C1Repaired` (QHOLD, ADR-0124, UP-7), `LeakedHoldEndsInFailStop` (D-UP-3),
 `ForeignHoldEndsInFailStop` (D-UP-4, PD-1).
+`OwnFair(c)` includes `roundState` in the tuples of result/deadline actions
+whose enabledness reads it, preserving each recovery's eventual restore or
+fail-stop independently of another round member.
+The recording conformance main's randomized `step` selection does not choose
+`FailStop` solely from its driver-owned `ForeignRestore`: no production path
+hands that foreign hold to the supervisor. The `FailStop` action itself stays
+canonical, so the direct evaluator run and model-checking instances retain the
+`ForeignQuiescenceHold` transition/property; the production supervisor cell
+drives its real `restore -> ForeignHold` input (FHOLD-CHECK).
+The same recording selector chooses `RecQuiesce` only while no episode is
+`repaired`: the composed fixture's one held DNS gate releases every pending
+full audit, so attempting a periodic detection then would simultaneously
+complete the repaired episode. That combined result is already represented by
+`RecRedo` / `RecRestore`, including discovery of another component. Direct
+named actions and every non-`conf` model-checking/hazard instance retain the
+canonical concurrent `RecQuiesce` transition.
 
 ## `udp_slots`: guest UDP slots
 
@@ -609,7 +735,7 @@ checked on its module's conformance main (D-UP-1), the main a driver pins it on 
 | the owner's death: the context's release aborts its pair with no record; both far ends see resets (EVMOD-CTL) | `ContextReleaseResetsEveryPair` |
 | the VMM exits: the host vsock's error aborts the host pair and resets the far peer | `VmmExitAbortsHostHalf` |
 | an RST after the pair completed is inert (END-IDEMPOTENT) | `TrailingRstAfterCompletionIsInert` |
-| a dial: the guest application resets; the watch's record is an abort before the end is readable, so `GuestStream` returns `Err(ConnectionReset)` | `WatchedStreamSeesGuestResetAsAbort` |
+| a dial: the guest application resets; the watch queues an abort record, the raw holder end is observable but the stream waits until the owner reads that record, then `GuestStream` returns `Err(ConnectionReset)` | `WatchedStreamSeesGuestResetAsAbort` |
 | datagrams of sizes 1, 0 and 2 delivered once, whole and in order (EVMOD-DGRAM) | `DatagramsInOrderWithEmpty` |
 | the vsock accepts part of a frame; the datagram stays queued and the run resumes, nothing duplicated or lost | `PartialFrameResumedNotDuplicated` |
 | the target's send blocks: the vsock fills, the source queue fills, the next datagram is dropped there only | `StalledUdpTargetDropsAtSource` |
@@ -631,7 +757,7 @@ checked on its module's conformance main (D-UP-1), the main a driver pins it on 
 | U-R1: the watch already ended (the guest reset, the stream reported `GuestAbort`); the `Forwarder` recovery's close ends the held stream as an owner abort (`strmAbort`, `Abort { flow }` written), the reported end stays `GuestAbort`, and the new context opens | `RecoveryEndsHeldStreamWhoseWatchEnded` |
 | the context's release ends a watch with no record: the `GuestStream` resolves the holder's end from the owner's own end of the watch, `OwnerAbort` (EVMOD-STREAM-END) | `ReleasedWatchWithNoRecordReadsAsAbort` |
 | the holder drops its stream: the watch is aborted and V_h closed; the guest aborts on the 0x3 (T-6) | `DroppedStreamAbortsWatchThenGuestSeesAbort` |
-| the VMM exits with a dial live: the orphan sweep's end is readable before its `sk_error_report`; the holder reads the error, finds no record and no owner end and waits; the callback queues the record and then wakes it; the stream reports the record's abort (EV-END change 3, EVMOD-STREAM-END) | `VmmExitWithWatchRecordInFlightResolvesFromRecord` |
+| the VMM exits with a dial live: the orphan sweep's end is readable before its `sk_error_report`; the holder reads the error, finds no record and no owner end and waits; the callback queues the record and wakes it, but the stream continues waiting until the owner reads that record, then reports its abort (EV-END change 3, EVMOD-STREAM-END) | `VmmExitWithWatchRecordInFlightResolvesFromRecord` |
 | a datagram vsock's peer ends the direction (0x2) with only the header of a frame queued: the run aborts the pair `FrameInvalid` instead of waiting (EV-DGRAM D1) | `TruncatedFrameAtPeerEndAbortsFrameInvalid` |
 
 ### `flow_quota` (`quota_conf`)
@@ -786,7 +912,8 @@ The variables of T-1 to T-9 are classed as QPROJ-8 pins them: `tcpErr(s)` is the
 `tcpSt(t, s)` is a derived definition over `tcpErr`, the far writer's FIN and this side's own FIN, not projected (its
 inputs are: `tcpErr`, `dir(d).wfin`, `dir(d).dstShut`); `vsSt(s)` / `vsErr(s)` are `vs(s).st` / `vs(s).err` (`SimFlowForwarder`'s per-half state and
 `sk_err`, arbiter); `attRes(s)` is the attach / watch result the owner's dispatch received and `attEnded(s)` the
-owner's `forwarder_attach_ended` (host `flow_observation()`, guest `guest_observation()`); `strmAbort` is the dial's
+owner's `forwarder_attach_ended` (host `flow_observation()`, guest `guest_observation()`); `strmHeld` is the host
+driver's actual `self.stream.is_some()` move-only holder fact, projected even after owner death; `strmAbort` is the dial's
 entry leaving `flow_observation().cids[cid].dials` in the aborting owner step; `hres` is what the driver, as the
 holder, observes from the `GuestStream`; `guestAbortSent` is model-only (its delivery is `owner_flows`'
 `toGuestAbort`); `liveWatch` is the derived `live(t, h)` in mode watch, not projected (its input `pr(h).ph` is,
@@ -797,8 +924,10 @@ cross-checked against `inventory().live_watches`); `vh` is `vs(h)` with the vsoc
 `sk_error_report` — `FwdErr(h)` — not yet run). Model-only: `dropped`, `vhTouched`. Actions: `TcpRst(s, after_fin)` (the Sim far peer's reset after or before its FIN;
 `SimFlowForwarder` runs the half's `sk_error_report` in the same step; `after_fin` equals the far writer's FIN in the
 state, so a trace names it explicitly), `Attach(s)` with an ended half (the same dispatch; `HalfEnded { side, errno
-}`), `Abort(h)` on a watch (the owner's stream abort and its `Abort { flow }` write in one owner step), `GuestAbort(g)`
-(the guest owner's dispatch of `Abort { flow }`), `HolderDrop` (the driver drops its `GuestStream`). The reset and its report are one step (`TcpRst`, T-1).
+}`), `Abort(h)` on a watch (pending-dial cancellation or held-stream abort, selected by `strmHeld`, plus its
+`Abort { flow }` write), `GuestAbort(g)` (the guest owner's dispatch follows the actual guest pair phase and always
+clears the message), `HolderDrop` (the driver cancels a live pending dial or drops its actual `GuestStream`). The
+reset and its report are one step (`TcpRst`, T-1).
 
 ## Pinned design points
 
@@ -814,7 +943,8 @@ Each point below is a rule the design pins and the model encodes.
    loss is unprocessed) and the VM gone; `DialNoSession` requires only `not(sessLive)`.
 2. QHOLD (D-UP-3): a dropped hold increments the owner's leaked-hold count; the stimulus is the component-free
    `LeakHold`; the recovery supervisor (ADR-0124) fail-stops serve at its audit tick when the count is above zero,
-   whatever the recoveries do (`FailStop`; `LeakedHoldEndsInFailStop`; hazard `leakIgnored`). A failed repair is only
+   before that tick starts a new component recovery and whatever an already-started recovery does (`FailStop`;
+   `LeakedHoldEndsInFailStop`; hazard `leakIgnored`). A failed repair is only
    `RepFail` (counted, the hold kept); no `Err` propagates out of a recovery with its hold.
 3. ADR-0147: no isolation claim beyond the quota; the model assumes no relation between node capacity and the
    sum of quotas.
@@ -855,7 +985,7 @@ Each point below is a rule the design pins and the model encodes.
 16. U-EV-11: after the orphan sweep `sk_state` holds `SS_UNCONNECTED`, which equals `TCP_ESTABLISHED`
     (`drivers/vhost/vsock.c:748`, `include/uapi/linux/net.h:50`, `include/net/tcp_states.h:13` @ v7.0), so the holder
     reads the queued bytes and then `-ECONNRESET` (`net/vmw_vsock/af_vsock.c:2326-2328`, `:2439-2440`), not 0. The
-    error is readable before `sk_error_report`, and the stream waits for the in-flight record (T-9).
+    error is readable before `sk_error_report`, and the stream waits until the owner reads the in-flight record (T-9).
 17. T-4 (`GuestCloseBeforeHostAttachAborts`): the run encodes the in-flight branch (the guest's 0x3 still in transit at
     the host's attach: accepted, then aborted by the callback). The queued-data branch has no production producer on
     V_h — the host attaches before `Paired` (EVMOD-PAIR), reads the guest's request first (`NoAttachBeforeRead`), and
@@ -868,7 +998,10 @@ Each point below is a rule the design pins and the model encodes.
     attach-time run of the UDP → vsock direction reads the error first (`__skb_recv_udp`,
     `net/ipv4/udp.c:1986-1988 @ v7.0`) and the pair aborts `SocketError`, which the host owner reports as
     `DestinationUnreachable` (D26-PINS) (`UdpErr` → `FwdErr`). A refusal in datagram mode is reached only through V_g
-    `CLOSING` (the host's abort before the guest attaches).
+    `CLOSING` (the host's abort before the guest attaches). `UdpErr(s)` requires the side's association-owned UDP
+    socket: its context is open, its phase is `unattached` or `live`, and its descriptors are not closed. This is
+    symmetric for H and the guest association. The guest slot S remains resident after an association ends, but it is
+    disconnected and no longer the connected association's `SO_ERROR` producer; a later association owns it again.
 20. T-4, the dial's watch: the watch is installed when V_h connects, before the request is written, so `fwd_pair` has
     no refused-watch state. In `owner_flows` a refused dial watch maps by its cause: the orphan sweep (`ECONNRESET`,
     the VMM exited) is the `VmStop` path (`VmExitDuringDialReturnsUnreachableReset`, no message); any other
@@ -907,9 +1040,12 @@ Each point below is a rule the design pins and the model encodes.
   (`StalledSenderIsBlocked`), because the stream instance with every fault exceeds TLC's budget and TLC's liveness mode
   is far slower per state (§ *Modules*, coverage note). Windows and credits are one unit; the datagram credit is three
   items, the largest frame.
-- Hazard files: every `fwd_pair` hazard file holds at most two instances (`<name>.qnt`, `<name>_2.qnt`, …); a file whose
-  instances plus the instances of `fwd_pair.qnt` it imports exceed ten runs the Apalache server out of its fixed
-  2,048 MiB compile heap (`java.lang.OutOfMemoryError`, reported as a tool error).
+- Hazard files: every `fwd_pair` hazard wrapper imports one instance when the imported model's compiled size would
+  exhaust the Apalache server's fixed 2,048 MiB heap. The wrappers keep each model instantiation unchanged and move
+  only the second import to an append-only numeric wrapper (`<name>_10.qnt`, …); `checks.toml` then repoints that
+  check's `spec` only. A compile-server `java.lang.OutOfMemoryError` is reported as a startup tool error, before TLC
+  checks the invariant. The first split's consume and moved-EOF checks were each falsified at jobs 1 without recording:
+  both found their unchanged expected violation in 43 seconds under the same 2,048 MiB heap, with no OOM.
 - `fwd-pair-hazard-release-keeps-pairs` violates `ReleasedContextHoldsNoPair` and `NoForwardAfterEnd`, not
   `NoEofOnPeerLoss`: a pair that keeps forwarding after its owner's death still delivers every byte and ends as
   before; no far end is shown an EOF it should not see.

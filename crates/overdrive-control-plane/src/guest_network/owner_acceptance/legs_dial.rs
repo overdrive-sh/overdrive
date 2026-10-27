@@ -70,7 +70,7 @@ use tokio::task::JoinHandle;
 
 use super::support::{Composition, Lease, vip_range};
 use crate::guest_network::flow_io::GuestFlowIo;
-use crate::guest_network::flow_io::sim::{SimGuestFlowIo, VsockShutdownOp};
+use crate::guest_network::flow_io::sim::{SimEffectKind, SimGuestFlowIo, VsockShutdownOp};
 use crate::guest_network::{DialObservation, GuestAddressPool, GuestConnKey};
 use crate::guest_network_composition::OwnerDial;
 
@@ -107,6 +107,7 @@ enum Verification {
 fn compose(seed: u64, verification: Verification) -> (Composition, Arc<SimMtlsEnforcement>) {
     eprintln!("legs-dial composition seed = {seed}");
     let io = SimGuestFlowIo::new(seed);
+    io.auto_release(SimEffectKind::ProbeForwarder);
     let clock = SimClock::new();
     let resolve = Arc::new(SimMtlsResolve::new(BTreeMap::new(), MtlsResolution::NonMesh));
     let server = AllocationId::new(SERVER).expect("valid allocation id");
@@ -225,7 +226,6 @@ fn relay_dials(observed: &crate::guest_network::GuestOwnerObservation, lease: &L
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn an_authenticated_client_dials_leg_s_once_and_its_teardown_releases_the_flow() {
     let (c, enforcement, lease, session) = serving(54_001, Verification::Anchored).await;
     let prior = c.observe().await.cids[&lease.cid].held_flows;
@@ -267,7 +267,6 @@ async fn an_authenticated_client_dials_leg_s_once_and_its_teardown_releases_the_
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn a_client_refused_by_peer_verification_causes_no_leg_s_dial() {
     let (c, enforcement, lease, _session) = serving(54_002, Verification::Anchored).await;
     let prior = c.observe().await.cids[&lease.cid].held_flows;
@@ -318,7 +317,6 @@ async fn relayed(
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn a_client_half_close_of_leg_c_is_the_guests_0x2() {
     let (c, enforcement, lease, session) = serving(54_005, Verification::Anchored).await;
     let (client, _handle, flow) = relayed(&c, &enforcement, &lease, session).await;
@@ -346,7 +344,6 @@ async fn a_client_half_close_of_leg_c_is_the_guests_0x2() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn a_client_reset_of_leg_c_is_the_guests_0x3_and_releases_the_flow() {
     let (c, enforcement, lease, session) = serving(54_006, Verification::Anchored).await;
     let prior = c.observe().await.cids[&lease.cid].held_flows;
@@ -378,7 +375,6 @@ async fn a_client_reset_of_leg_c_is_the_guests_0x3_and_releases_the_flow() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn a_leg_s_dial_error_closes_leg_c_and_returns_guest_dial() {
     let (c, enforcement) = compose(54_003, Verification::Anchored);
     c.boot().await;
@@ -411,7 +407,6 @@ async fn a_leg_s_dial_error_closes_leg_c_and_returns_guest_dial() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn a_target_outside_the_guest_prefix_makes_no_owner_dial() {
     let (c, enforcement, _lease, _session) = serving(54_004, Verification::Anchored).await;
     let outside = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 5), PORT);

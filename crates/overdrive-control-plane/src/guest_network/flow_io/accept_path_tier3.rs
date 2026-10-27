@@ -201,7 +201,6 @@ async fn drive(
 /// same identities and records.
 /// CONTRACT_SHAPE: pure-function.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn the_flow_listeners_accept_path_matches_the_sim_per_connection() {
     let staging = default_staging_root();
     let kit = GuestKit::provision(&staging).expect("precondition: the guest kit provisions");
@@ -261,6 +260,7 @@ async fn the_flow_listeners_accept_path_matches_the_sim_per_connection() {
             case.listener,
             key,
             case.record.map(|tag| record_bytes(case.listener, tag)),
+            None,
         );
     }
     let sim_seen =
@@ -281,7 +281,6 @@ async fn the_flow_listeners_accept_path_matches_the_sim_per_connection() {
 /// call asks for a different fixed port: the answer is still the first.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn a_repair_of_a_held_listener_keeps_its_socket_and_its_port() {
     let staging = default_staging_root();
     let kit = GuestKit::provision(&staging).expect("precondition: the guest kit provisions");

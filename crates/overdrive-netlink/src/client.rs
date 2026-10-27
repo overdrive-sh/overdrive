@@ -16,235 +16,33 @@
 use std::net::{IpAddr, Ipv4Addr};
 use std::os::fd::AsRawFd;
 
-#[cfg(target_os = "linux")]
-use std::fs::OpenOptions;
-
 use futures::stream::TryStreamExt;
-use rtnetlink::packet_core::Nla;
-use rtnetlink::packet_route::link::{
-    InfoData, InfoKind, InfoTun, LinkAttribute, LinkFlags, LinkInfo, LinkMessage,
-};
+use rtnetlink::packet_route::link::LinkFlags;
 use rtnetlink::packet_route::route::{
-    RouteAddress, RouteAttribute, RouteMessage, RouteScope, RouteType,
+    RouteAddress, RouteAttribute, RouteMessage, RouteProtocol, RouteScope, RouteType,
 };
 use rtnetlink::packet_route::rule::{RuleAction, RuleAttribute, RuleMessage};
 use rtnetlink::{
-    Handle, IpVersion, LinkBridge, LinkUnspec, LinkVeth, NetworkNamespace, RouteMessageBuilder,
-    new_connection,
+    Handle, IpVersion, LinkUnspec, LinkVeth, NetworkNamespace, RouteMessageBuilder, new_connection,
 };
 
 use crate::error::{NEG_ENODEV, NetlinkError};
 
-const IFLA_TUN_TYPE: u16 = 3;
-const IFLA_TUN_PERSIST: u16 = 6;
-const IFLA_TUN_OWNER: u16 = 1;
-const NLA_TYPE_MASK: u16 = 0x3fff;
-
-/// Typed actual state for one desired persistent TAP name.
-///
-/// `Incompatible` means the name exists, but the kernel's `IFLA_LINKINFO`
-/// does not identify a persistent `tun`-kind interface whose
-/// `IFLA_TUN_TYPE` is `IFF_TAP`. Callers must fail closed on that collision;
-/// treating it as the desired TAP would route guest traffic through an
-/// unrelated device.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TapLinkState {
-    /// No link owns the name in the observed network namespace.
-    Absent,
-    /// A link owns the name, but it is not the desired persistent TAP.
-    Incompatible,
-    /// The exact persistent TAP exists, including its administrative state.
-    Persistent { up: bool, owner_uid: Option<u32> },
-}
-
-/// Semantic link kind exposed to the private guest-network allocation leaf.
-#[doc(hidden)]
+/// Semantic IPv4 route type returned by a kernel FIB lookup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ObservedLinkKind {
-    Bridge,
-    Tap,
-    Tun,
-    Veth,
+pub enum FibRouteType {
+    /// An ordinary forwarding route.
+    Unicast,
+    /// A route delivered to a local host socket.
+    Local,
+    /// An IPv4 broadcast route.
+    Broadcast,
+    /// An IPv4 multicast route.
+    Multicast,
+    /// An IPv4 anycast route.
+    Anycast,
+    /// Any other kernel route type.
     Other,
-}
-
-/// Complete semantic identity of one observed host link.
-#[doc(hidden)]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ObservedLinkIdentity {
-    pub name: String,
-    pub ifindex: u32,
-    pub kind: ObservedLinkKind,
-    pub up: bool,
-    pub master_ifindex: Option<u32>,
-    pub mac: Option<[u8; 6]>,
-}
-
-/// Exact persistent-TAP classification retaining incompatible actual state.
-#[doc(hidden)]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PersistentTapIdentity {
-    Absent { name: String },
-    Incompatible { link: ObservedLinkIdentity, persistent: Option<bool>, owner_uid: Option<u32> },
-    Persistent { link: ObservedLinkIdentity, owner_uid: Option<u32> },
-}
-
-#[cfg(target_os = "linux")]
-nix::ioctl_write_ptr_bad!(tun_set_iff, libc::TUNSETIFF, libc::ifreq);
-#[cfg(target_os = "linux")]
-nix::ioctl_write_int_bad!(tun_set_persist, libc::TUNSETPERSIST);
-#[cfg(target_os = "linux")]
-nix::ioctl_write_int_bad!(tun_set_owner, libc::TUNSETOWNER);
-#[cfg(target_os = "linux")]
-nix::ioctl_write_int_bad!(tun_set_offload, libc::TUNSETOFFLOAD);
-
-/// Create a persistent TAP interface through `/dev/net/tun` without a CLI.
-///
-/// `TUNSETIFF` creates the named L2 device with packet-info headers disabled;
-/// `TUNSETPERSIST(1)` transfers its lifetime from this file descriptor to the
-/// kernel before the descriptor is closed.
-///
-/// The interface is created in the caller's network namespace. Use
-/// [`Client::move_link_to_netns`] immediately afterward to issue
-/// `RTM_SETLINK` with `IFLA_NET_NS_FD` and place it in a workload namespace.
-///
-/// # Errors
-///
-/// [`NetlinkError::Netns`] identifies name validation, `/dev/net/tun` open,
-/// `TUNSETIFF`, or `TUNSETPERSIST` failures by its `op` value.
-#[cfg(target_os = "linux")]
-pub fn create_persistent_tap(name: &str, owner_uid: u32) -> Result<(), NetlinkError> {
-    let request = tap_request(name)?;
-    let owner_uid = tap_owner_arg(owner_uid)?;
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open("/dev/net/tun")
-        .map_err(|source| NetlinkError::netns("tuntap-open", source))?;
-
-    // SAFETY: `file` is an open `/dev/net/tun` descriptor and `request`
-    // remains alive and correctly initialized for the complete ioctl call.
-    unsafe { tun_set_iff(file.as_raw_fd(), &raw const request) }
-        .map_err(|errno| NetlinkError::netns("tunsetiff", std::io::Error::from(errno)))?;
-    // A direct-host TAP must deliver complete L4 checksums to the TCX ingress
-    // classifier and AF_PACKET evidence. Disable every TUN offload bit on the
-    // persistent device before Cloud Hypervisor reopens it.
-    unsafe { tun_set_offload(file.as_raw_fd(), 0) }
-        .map_err(|errno| NetlinkError::netns("tunsetoffload", std::io::Error::from(errno)))?;
-    // SAFETY: the fd owns the newly created TAP. Grant the exact numeric uid
-    // that the composition root later drops Cloud Hypervisor to before the fd
-    // is made persistent and closed.
-    unsafe { tun_set_owner(file.as_raw_fd(), owner_uid) }
-        .map_err(|errno| NetlinkError::netns("tunsetowner", std::io::Error::from(errno)))?;
-    // SAFETY: `file` is still the descriptor that owns the TAP just created;
-    // integer value 1 is the documented enable-persistence argument.
-    unsafe { tun_set_persist(file.as_raw_fd(), 1) }
-        .map_err(|errno| NetlinkError::netns("tunsetpersist", std::io::Error::from(errno)))?;
-    Ok(())
-}
-
-#[cfg(target_os = "linux")]
-fn tap_request(name: &str) -> Result<libc::ifreq, NetlinkError> {
-    let name_bytes = name.as_bytes();
-    if name_bytes.is_empty() || name_bytes.len() >= libc::IFNAMSIZ || name_bytes.contains(&b'\0') {
-        return Err(NetlinkError::netns(
-            "tuntap-name",
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "TAP name must contain 1..IFNAMSIZ non-NUL bytes",
-            ),
-        ));
-    }
-
-    let mut ifr_name = [0; libc::IFNAMSIZ];
-    // SAFETY: both buffers are valid for `name_bytes.len()` bytes; the input
-    // length guard above leaves at least one zero terminator in `ifr_name`.
-    // Copy bytes directly because libc models `c_char` as signed on x86_64
-    // Linux and unsigned on aarch64 Linux.
-    unsafe {
-        std::ptr::copy_nonoverlapping(
-            name_bytes.as_ptr(),
-            ifr_name.as_mut_ptr().cast::<u8>(),
-            name_bytes.len(),
-        );
-    }
-    let ifru_flags = libc::c_short::try_from(libc::IFF_TAP | libc::IFF_NO_PI).map_err(|_| {
-        NetlinkError::netns(
-            "tuntap-flags",
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "kernel TAP flags do not fit ifreq.ifru_flags",
-            ),
-        )
-    })?;
-    Ok(libc::ifreq { ifr_name, ifr_ifru: libc::__c_anonymous_ifr_ifru { ifru_flags } })
-}
-
-#[cfg(target_os = "linux")]
-fn tap_owner_arg(owner_uid: u32) -> Result<libc::c_int, NetlinkError> {
-    libc::c_int::try_from(owner_uid).map_err(|_| {
-        NetlinkError::netns(
-            "tuntap-owner",
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "TAP owner uid does not fit the kernel ioctl argument",
-            ),
-        )
-    })
-}
-
-/// Converge the owner uid of an existing persistent TAP in the caller's
-/// current network namespace.
-///
-/// Reopening the named TAP with `TUNSETIFF` attaches this descriptor to the
-/// persistent device; `TUNSETOWNER` then updates the uid permitted to reopen
-/// it. Root may call this idempotently after restart to repair an older or
-/// drifted owner before the confined VMM launches.
-#[cfg(target_os = "linux")]
-pub fn set_persistent_tap_owner(name: &str, owner_uid: u32) -> Result<(), NetlinkError> {
-    let request = tap_request(name)?;
-    let owner_uid = tap_owner_arg(owner_uid)?;
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open("/dev/net/tun")
-        .map_err(|source| NetlinkError::netns("tuntap-open", source))?;
-    // SAFETY: attach this owned tun fd to the named existing TAP.
-    unsafe { tun_set_iff(file.as_raw_fd(), &raw const request) }
-        .map_err(|errno| NetlinkError::netns("tunsetiff", std::io::Error::from(errno)))?;
-    unsafe { tun_set_offload(file.as_raw_fd(), 0) }
-        .map_err(|errno| NetlinkError::netns("tunsetoffload", std::io::Error::from(errno)))?;
-    // SAFETY: update the owner on the TAP attached to this fd.
-    unsafe { tun_set_owner(file.as_raw_fd(), owner_uid) }
-        .map_err(|errno| NetlinkError::netns("tunsetowner", std::io::Error::from(errno)))?;
-    Ok(())
-}
-
-/// Persistent TAP creation is a Linux-only kernel facility.
-///
-/// # Errors
-///
-/// Always returns [`std::io::ErrorKind::Unsupported`] off Linux.
-#[cfg(not(target_os = "linux"))]
-pub fn create_persistent_tap(_name: &str, _owner_uid: u32) -> Result<(), NetlinkError> {
-    Err(NetlinkError::netns(
-        "tuntap-unsupported",
-        std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "persistent TAP creation is supported only on Linux",
-        ),
-    ))
-}
-
-#[cfg(not(target_os = "linux"))]
-pub fn set_persistent_tap_owner(_name: &str, _owner_uid: u32) -> Result<(), NetlinkError> {
-    Err(NetlinkError::netns(
-        "tuntap-unsupported",
-        std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "persistent TAP ownership is supported only on Linux",
-        ),
-    ))
 }
 
 /// `ip netns add <name>` via rtnetlink's [`NetworkNamespace::add`].
@@ -312,113 +110,6 @@ impl Client {
             Ok(Some(message)) => Ok(Some(message.header.flags.contains(LinkFlags::Up))),
             Ok(None) => Ok(None),
             Err(err) => absent_or_err("get", err),
-        }
-    }
-
-    /// Create the host bridge `name`, administratively down, with link-layer
-    /// address `mac` (`IFLA_ADDRESS`) from creation, or adopt the link already
-    /// named `name` without writing to it. The caller's read-back decides
-    /// whether an adopted link meets the bridge contract.
-    ///
-    /// # Errors
-    ///
-    /// [`NetlinkError::Link`] with `op: "get"` for an `RTM_GETLINK` failure
-    /// other than `ENODEV`, and with `op: "add-bridge"` for a refused create.
-    pub async fn ensure_bridge(&self, name: &str, mac: [u8; 6]) -> Result<(), NetlinkError> {
-        if self.observe_link(name).await?.is_none() {
-            self.handle
-                .link()
-                .add(LinkBridge::new(name).address(mac.to_vec()).down().build())
-                .execute()
-                .await
-                .map_err(|err| NetlinkError::link("add-bridge", err))?;
-        }
-        Ok(())
-    }
-
-    /// Set a link administratively down.
-    pub async fn set_link_down(&self, iface: &str) -> Result<(), NetlinkError> {
-        let index = self.require_index(iface).await?;
-        self.handle
-            .link()
-            .set(LinkUnspec::new_with_index(index).down().build())
-            .execute()
-            .await
-            .map_err(|err| NetlinkError::link("set-down", err))
-    }
-
-    /// Set a link's locally administered MAC address.
-    pub async fn set_link_mac(&self, iface: &str, mac: [u8; 6]) -> Result<(), NetlinkError> {
-        let index = self.require_index(iface).await?;
-        self.handle
-            .link()
-            .set(LinkUnspec::new_with_index(index).address(mac.to_vec()).build())
-            .execute()
-            .await
-            .map_err(|err| NetlinkError::link("set-mac", err))
-    }
-
-    /// Enslave one link to the named bridge/master by ifindex.
-    #[doc(hidden)]
-    pub async fn set_link_master(&self, iface: &str, master: &str) -> Result<(), NetlinkError> {
-        let index = self.require_index(iface).await?;
-        let master_index = self.require_index(master).await?;
-        self.handle
-            .link()
-            .set(LinkUnspec::new_with_index(index).controller(master_index).build())
-            .execute()
-            .await
-            .map_err(|err| NetlinkError::link("set-master", err))
-    }
-
-    /// Observe whether `name` is the exact persistent TAP resource.
-    ///
-    /// This inspects typed `RTM_GETLINK` attributes: `IFLA_INFO_KIND=tun`,
-    /// `IFLA_TUN_TYPE=IFF_TAP`, and `IFLA_TUN_PERSIST=1`. A dummy, veth, TUN,
-    /// or non-persistent TAP with the same name is [`TapLinkState::Incompatible`],
-    /// never accepted as desired state.
-    ///
-    /// # Errors
-    ///
-    /// [`NetlinkError::Link`] for any non-`ENODEV` `RTM_GETLINK` failure.
-    pub async fn observe_persistent_tap(&self, name: &str) -> Result<TapLinkState, NetlinkError> {
-        let mut stream = self.handle.link().get().match_name(name.to_owned()).execute();
-        match stream.try_next().await {
-            Ok(Some(message)) => Ok(persistent_tap_state(&message)),
-            Ok(None) => Ok(TapLinkState::Absent),
-            Err(err) => absent_or_err("get-tap", err).map(|_| TapLinkState::Absent),
-        }
-    }
-
-    /// Observe one persistent TAP without collapsing incompatible identity.
-    #[doc(hidden)]
-    pub async fn observe_persistent_tap_identity(
-        &self,
-        name: &str,
-    ) -> Result<PersistentTapIdentity, NetlinkError> {
-        let mut stream = self.handle.link().get().match_name(name.to_owned()).execute();
-        match stream.try_next().await {
-            Ok(Some(message)) => Ok(persistent_tap_identity_from_message(name, Some(&message))),
-            Ok(None) => Ok(PersistentTapIdentity::Absent { name: name.to_owned() }),
-            Err(err) => absent_or_err("get-tap-identity", err)
-                .map(|_| PersistentTapIdentity::Absent { name: name.to_owned() }),
-        }
-    }
-
-    /// Observe one named link as a semantic identity without a desired-state verdict.
-    #[doc(hidden)]
-    pub async fn observe_link_identity(
-        &self,
-        name: &str,
-    ) -> Result<Option<ObservedLinkIdentity>, NetlinkError> {
-        let mut stream = self.handle.link().get().match_name(name.to_owned()).execute();
-        match stream.try_next().await {
-            Ok(Some(message)) => Ok(observed_link_identity_from_message(name, Some(&message))),
-            Ok(None) => Ok(None),
-            Err(err) => {
-                let typed = NetlinkError::link("get-link-identity", err);
-                if typed.errno() == Some(NEG_ENODEV) { Ok(None) } else { Err(typed) }
-            }
         }
     }
 
@@ -753,6 +444,58 @@ impl Client {
             .map_err(|err| NetlinkError::route("add-default", err))
     }
 
+    /// Converges exactly one `local <destination>/32 dev lo table local`
+    /// route carrying `protocol`. One atomic create-or-replace request keeps
+    /// an identical route, replaces a differing route at that key, or adds a
+    /// missing route; an error leaves the previous route in place.
+    pub async fn converge_ipv4_host_local_route(
+        &self,
+        destination: Ipv4Addr,
+        protocol: u8,
+    ) -> Result<(), NetlinkError> {
+        let lo = self.require_index("lo").await?;
+        let route = RouteMessageBuilder::<Ipv4Addr>::new()
+            .kind(RouteType::Local)
+            .scope(RouteScope::Host)
+            .protocol(RouteProtocol::Other(protocol))
+            .table_id(u32::from(libc::RT_TABLE_LOCAL))
+            .destination_prefix(destination, 32)
+            .output_interface(lo)
+            .build();
+        self.handle
+            .route()
+            .add(route)
+            .replace()
+            .execute()
+            .await
+            .map_err(|error| NetlinkError::route("host-local-replace", error))
+    }
+
+    /// Performs the kernel's IPv4 FIB lookup for one destination and returns
+    /// the semantic type from its route reply. This is a destination lookup,
+    /// not a route-table dump.
+    pub async fn ipv4_fib_route_type(
+        &self,
+        destination: Ipv4Addr,
+    ) -> Result<FibRouteType, NetlinkError> {
+        let request =
+            RouteMessageBuilder::<Ipv4Addr>::new().destination_prefix(destination, 32).build();
+        let mut stream = self.handle.route().get(request).execute();
+        let route = stream
+            .try_next()
+            .await
+            .map_err(|error| NetlinkError::route("fib-lookup", error))?
+            .ok_or(NetlinkError::FibLookupMissing { destination })?;
+        Ok(match route.header.kind {
+            RouteType::Unicast => FibRouteType::Unicast,
+            RouteType::Local => FibRouteType::Local,
+            RouteType::Broadcast => FibRouteType::Broadcast,
+            RouteType::Multicast => FibRouteType::Multicast,
+            RouteType::Anycast => FibRouteType::Anycast,
+            _ => FibRouteType::Other,
+        })
+    }
+
     /// Observe whether a `default via <gateway>` route is present — the
     /// structured replacement for the `ip route show default` text scrape.
     /// Dumps the route table and matches a route whose destination prefix
@@ -1019,166 +762,6 @@ impl Drop for Client {
     }
 }
 
-/// Classify one typed `RTM_GETLINK` reply as the exact persistent TAP or an
-/// incompatible same-name link.
-fn persistent_tap_state(message: &LinkMessage) -> TapLinkState {
-    let mut kind_is_tun = false;
-    let mut tun_type = None;
-    let mut persistent = None;
-    let mut owner_uid = None;
-
-    for attribute in &message.attributes {
-        let LinkAttribute::LinkInfo(infos) = attribute else {
-            continue;
-        };
-        for info in infos {
-            match info {
-                LinkInfo::Kind(InfoKind::Tun) => kind_is_tun = true,
-                LinkInfo::Data(InfoData::Tun(tun_infos)) => {
-                    for tun_info in tun_infos {
-                        let InfoTun::Other(nla) = tun_info else {
-                            continue;
-                        };
-                        match nla.kind() & NLA_TYPE_MASK {
-                            IFLA_TUN_TYPE => tun_type = nla_u8(nla),
-                            IFLA_TUN_PERSIST => persistent = nla_u8(nla),
-                            IFLA_TUN_OWNER => owner_uid = nla_u32(nla),
-                            _ => {}
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    let is_tap = tun_type == u8::try_from(libc::IFF_TAP).ok();
-    if kind_is_tun && is_tap && persistent == Some(1) {
-        TapLinkState::Persistent { up: message.header.flags.contains(LinkFlags::Up), owner_uid }
-    } else {
-        TapLinkState::Incompatible
-    }
-}
-
-fn persistent_tap_identity_from_message(
-    name: &str,
-    message: Option<&LinkMessage>,
-) -> PersistentTapIdentity {
-    let Some(message) = message else {
-        return PersistentTapIdentity::Absent { name: name.to_owned() };
-    };
-    let link = observed_link_identity_from_message(name, Some(message)).unwrap_or_else(|| {
-        ObservedLinkIdentity {
-            name: name.to_owned(),
-            ifindex: message.header.index,
-            kind: ObservedLinkKind::Other,
-            up: message.header.flags.contains(LinkFlags::Up),
-            master_ifindex: None,
-            mac: None,
-        }
-    });
-    let mut kind_is_tun = false;
-    let mut tun_type = None;
-    let mut persistent = None;
-    let mut owner_uid = None;
-    for attribute in &message.attributes {
-        let LinkAttribute::LinkInfo(infos) = attribute else { continue };
-        for info in infos {
-            match info {
-                LinkInfo::Kind(InfoKind::Tun) => kind_is_tun = true,
-                LinkInfo::Data(InfoData::Tun(tun_infos)) => {
-                    for tun_info in tun_infos {
-                        let InfoTun::Other(nla) = tun_info else { continue };
-                        match nla.kind() & NLA_TYPE_MASK {
-                            IFLA_TUN_TYPE => tun_type = nla_u8(nla),
-                            IFLA_TUN_PERSIST => persistent = nla_u8(nla),
-                            IFLA_TUN_OWNER => owner_uid = nla_u32(nla),
-                            _ => {}
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    let is_tap = tun_type == u8::try_from(libc::IFF_TAP).ok();
-    if kind_is_tun && is_tap && persistent == Some(1) {
-        PersistentTapIdentity::Persistent { link, owner_uid }
-    } else {
-        PersistentTapIdentity::Incompatible {
-            link,
-            persistent: kind_is_tun.then_some(persistent == Some(1)),
-            owner_uid: kind_is_tun.then_some(owner_uid).flatten(),
-        }
-    }
-}
-
-fn observed_link_identity_from_message(
-    name: &str,
-    message: Option<&LinkMessage>,
-) -> Option<ObservedLinkIdentity> {
-    let message = message?;
-    let mut kind = ObservedLinkKind::Other;
-    for attribute in &message.attributes {
-        let LinkAttribute::LinkInfo(infos) = attribute else { continue };
-        for info in infos {
-            match info {
-                LinkInfo::Kind(InfoKind::Bridge) => kind = ObservedLinkKind::Bridge,
-                LinkInfo::Kind(InfoKind::Tun) => kind = ObservedLinkKind::Tun,
-                LinkInfo::Kind(InfoKind::Veth) => kind = ObservedLinkKind::Veth,
-                LinkInfo::Kind(InfoKind::Other(_)) => kind = ObservedLinkKind::Other,
-                LinkInfo::Data(InfoData::Tun(tun_infos))
-                    if tun_infos.iter().any(|tun_info| {
-                        matches!(tun_info, InfoTun::Other(nla) if nla.kind() & NLA_TYPE_MASK == IFLA_TUN_TYPE && nla_u8(nla) == u8::try_from(libc::IFF_TAP).ok())
-                    }) =>
-                {
-                    kind = ObservedLinkKind::Tap;
-                }
-                _ => {}
-            }
-        }
-    }
-    let master_ifindex = message.attributes.iter().find_map(|attribute| match attribute {
-        LinkAttribute::Controller(index) => Some(*index),
-        _ => None,
-    });
-    let mac = message.attributes.iter().find_map(|attribute| match attribute {
-        LinkAttribute::Address(address) if address.len() == 6 => {
-            Some([address[0], address[1], address[2], address[3], address[4], address[5]])
-        }
-        _ => None,
-    });
-    Some(ObservedLinkIdentity {
-        name: name.to_owned(),
-        ifindex: message.header.index,
-        kind,
-        up: message.header.flags.contains(LinkFlags::Up),
-        master_ifindex,
-        mac,
-    })
-}
-
-/// Read the one-byte payload used by the kernel's `IFLA_TUN_*` attributes.
-fn nla_u8(nla: &impl Nla) -> Option<u8> {
-    if nla.value_len() != 1 {
-        return None;
-    }
-    let mut value = [0_u8; 1];
-    nla.emit_value(&mut value);
-    Some(value[0])
-}
-
-fn nla_u32(nla: &impl Nla) -> Option<u32> {
-    if nla.value_len() != 4 {
-        return None;
-    }
-    let mut value = [0_u8; 4];
-    nla.emit_value(&mut value);
-    Some(u32::from_ne_bytes(value))
-}
-
-/// Map an `RTM_GETLINK` error to `Ok(None)` when it is `-ENODEV` (absent),
-/// else surface it as a typed [`NetlinkError::Link`].
 fn absent_or_err(op: &'static str, err: rtnetlink::Error) -> Result<Option<bool>, NetlinkError> {
     let typed = NetlinkError::link(op, err);
     if typed.errno() == Some(NEG_ENODEV) { Ok(None) } else { Err(typed) }
@@ -1241,249 +824,9 @@ mod tests {
     use std::net::Ipv4Addr;
 
     use rtnetlink::RouteMessageBuilder;
-    use rtnetlink::packet_core::DefaultNla;
-    use rtnetlink::packet_route::link::{
-        InfoData, InfoKind, InfoTun, LinkAttribute, LinkFlags, LinkInfo, LinkMessage,
-    };
     use rtnetlink::packet_route::rule::{RuleAttribute, RuleMessage};
 
-    use super::{
-        IFLA_TUN_OWNER, IFLA_TUN_PERSIST, IFLA_TUN_TYPE, ObservedLinkIdentity, ObservedLinkKind,
-        PersistentTapIdentity, RouteScope, RouteType, TapLinkState, fib_rule_matches_fwmark_lookup,
-        local_route_matches, observed_link_identity_from_message,
-        persistent_tap_identity_from_message, persistent_tap_state,
-    };
-
-    fn tun_link(tun_type: u8, persistent: u8, owner_uid: u32) -> LinkMessage {
-        let mut message = LinkMessage::default();
-        message.header.flags = LinkFlags::Up;
-        message.attributes.push(LinkAttribute::LinkInfo(vec![
-            LinkInfo::Kind(InfoKind::Tun),
-            LinkInfo::Data(InfoData::Tun(vec![
-                InfoTun::Other(DefaultNla::new(IFLA_TUN_TYPE, vec![tun_type])),
-                InfoTun::Other(DefaultNla::new(IFLA_TUN_PERSIST, vec![persistent])),
-                InfoTun::Other(DefaultNla::new(IFLA_TUN_OWNER, owner_uid.to_ne_bytes().to_vec())),
-            ])),
-        ]));
-        message
-    }
-
-    /// Typed TAP classification requires all three kernel facts: tun-kind,
-    /// `IFF_TAP`, and persistence. Same-kind TUN or non-persistent TAP states
-    /// remain incompatible.
-    /// CONTRACT_SHAPE: pure-function.
-    #[allow(
-        clippy::doc_markdown,
-        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
-    )]
-    #[test]
-    fn persistent_tap_classifier_requires_tap_type_and_persistence() {
-        let iff_tap = u8::try_from(libc::IFF_TAP).expect("IFF_TAP fits the kernel u8 NLA");
-        let iff_tun = u8::try_from(libc::IFF_TUN).expect("IFF_TUN fits the kernel u8 NLA");
-        assert_eq!(
-            persistent_tap_state(&tun_link(iff_tap, 1, 4_200)),
-            TapLinkState::Persistent { up: true, owner_uid: Some(4_200) },
-        );
-        assert_eq!(persistent_tap_state(&tun_link(iff_tap, 0, 4_200)), TapLinkState::Incompatible,);
-        assert_eq!(persistent_tap_state(&tun_link(iff_tun, 1, 4_200)), TapLinkState::Incompatible,);
-    }
-
-    fn link(
-        name: &str,
-        ifindex: u32,
-        kind: InfoKind,
-        up: bool,
-        master_ifindex: Option<u32>,
-        mac: [u8; 6],
-        tun: Option<(u8, u8, Option<u32>)>,
-    ) -> LinkMessage {
-        let mut message = LinkMessage::default();
-        message.header.index = ifindex;
-        if up {
-            message.header.flags = LinkFlags::Up;
-        }
-        message
-            .attributes
-            .extend([LinkAttribute::IfName(name.to_owned()), LinkAttribute::Address(mac.to_vec())]);
-        if let Some(master) = master_ifindex {
-            message.attributes.push(LinkAttribute::Controller(master));
-        }
-        let mut infos = vec![LinkInfo::Kind(kind)];
-        if let Some((tun_type, persistent, owner_uid)) = tun {
-            let mut tun_info = vec![
-                InfoTun::Other(DefaultNla::new(IFLA_TUN_TYPE, vec![tun_type])),
-                InfoTun::Other(DefaultNla::new(IFLA_TUN_PERSIST, vec![persistent])),
-            ];
-            if let Some(owner_uid) = owner_uid {
-                tun_info.push(InfoTun::Other(DefaultNla::new(
-                    IFLA_TUN_OWNER,
-                    owner_uid.to_ne_bytes().to_vec(),
-                )));
-            }
-            infos.push(LinkInfo::Data(InfoData::Tun(tun_info)));
-        }
-        message.attributes.push(LinkAttribute::LinkInfo(infos));
-        message
-    }
-
-    /// S-ND295-11 — D12A retains exact raw TAP/link identity through one parser.
-    /// CONTRACT_SHAPE: pure-function.
-    #[allow(
-        clippy::doc_markdown,
-        clippy::too_many_lines,
-        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
-    )]
-    #[test]
-    fn persistent_tap_and_bridge_projection_preserves_every_observable_identity_field() {
-        let uid = 4_200;
-        let iff_tap = u8::try_from(libc::IFF_TAP).expect("IFF_TAP fits u8");
-        let iff_tun = u8::try_from(libc::IFF_TUN).expect("IFF_TUN fits u8");
-        let mac = [0x02, 0x00, 100, 95, 0, 2];
-        let tap = link(
-            "ovd-tp-0002",
-            295,
-            InfoKind::Tun,
-            true,
-            Some(29),
-            mac,
-            Some((iff_tap, 1, Some(uid))),
-        );
-        let tap_missing_owner =
-            link("ovd-tp-0002", 295, InfoKind::Tun, true, Some(29), mac, Some((iff_tap, 1, None)));
-        let non_persistent = link(
-            "ovd-tp-0002",
-            295,
-            InfoKind::Tun,
-            false,
-            Some(29),
-            mac,
-            Some((iff_tap, 0, Some(uid))),
-        );
-        let tun = link(
-            "ovd-tp-0002",
-            295,
-            InfoKind::Tun,
-            false,
-            None,
-            mac,
-            Some((iff_tun, 1, Some(uid))),
-        );
-        let dummy = link("ovd-tp-0002", 295, InfoKind::Dummy, false, None, mac, None);
-        let veth = link("ovd-tp-0002", 295, InfoKind::Veth, false, None, mac, None);
-        let other = link(
-            "ovd-tp-0002",
-            295,
-            InfoKind::Other("future-kind".to_owned()),
-            false,
-            None,
-            mac,
-            None,
-        );
-        let bridge_mac = [0x02, 0x01, 0, 0, 0, 1];
-        let bridge = link("ovd-gbr0", 29, InfoKind::Bridge, true, None, bridge_mac, None);
-        let wrong_bridge_dummy =
-            link("ovd-gbr0", 30, InfoKind::Dummy, true, None, bridge_mac, None);
-        let wrong_bridge_veth = link("ovd-gbr0", 31, InfoKind::Veth, true, None, bridge_mac, None);
-        let wrong_bridge_tun = link(
-            "ovd-gbr0",
-            32,
-            InfoKind::Tun,
-            true,
-            None,
-            bridge_mac,
-            Some((iff_tun, 1, Some(uid))),
-        );
-
-        assert_eq!(
-            persistent_tap_identity_from_message("ovd-tp-0002", None),
-            PersistentTapIdentity::Absent { name: "ovd-tp-0002".to_owned() }
-        );
-        assert_eq!(
-            persistent_tap_identity_from_message("ovd-tp-0002", Some(&tap)),
-            PersistentTapIdentity::Persistent {
-                link: ObservedLinkIdentity {
-                    name: "ovd-tp-0002".to_owned(),
-                    ifindex: 295,
-                    kind: ObservedLinkKind::Tap,
-                    up: true,
-                    master_ifindex: Some(29),
-                    mac: Some(mac),
-                },
-                owner_uid: Some(uid),
-            }
-        );
-        assert_eq!(
-            persistent_tap_identity_from_message("ovd-tp-0002", Some(&tap_missing_owner)),
-            PersistentTapIdentity::Persistent {
-                link: ObservedLinkIdentity {
-                    name: "ovd-tp-0002".to_owned(),
-                    ifindex: 295,
-                    kind: ObservedLinkKind::Tap,
-                    up: true,
-                    master_ifindex: Some(29),
-                    mac: Some(mac),
-                },
-                owner_uid: None,
-            }
-        );
-        for (message, kind, persistent, owner_uid) in [
-            (&non_persistent, ObservedLinkKind::Tap, Some(false), Some(uid)),
-            (&tun, ObservedLinkKind::Tun, Some(true), Some(uid)),
-            (&dummy, ObservedLinkKind::Other, None, None),
-            (&veth, ObservedLinkKind::Veth, None, None),
-            (&other, ObservedLinkKind::Other, None, None),
-        ] {
-            assert!(matches!(
-                persistent_tap_identity_from_message("ovd-tp-0002", Some(message)),
-                PersistentTapIdentity::Incompatible {
-                    link: ObservedLinkIdentity {
-                        name,
-                        ifindex: 295,
-                        kind: actual_kind,
-                        up: false,
-                        master_ifindex,
-                        mac: Some(actual_mac),
-                    },
-                    persistent: actual_persistent,
-                    owner_uid: actual_owner,
-                } if name == "ovd-tp-0002"
-                    && actual_kind == kind
-                    && actual_persistent == persistent
-                    && actual_owner == owner_uid
-                    && master_ifindex == if kind == ObservedLinkKind::Tap { Some(29) } else { None }
-                    && actual_mac == mac
-            ));
-        }
-        assert_eq!(observed_link_identity_from_message("ovd-gbr0", None), None);
-        assert_eq!(
-            observed_link_identity_from_message("ovd-gbr0", Some(&bridge)),
-            Some(ObservedLinkIdentity {
-                name: "ovd-gbr0".to_owned(),
-                ifindex: 29,
-                kind: ObservedLinkKind::Bridge,
-                up: true,
-                master_ifindex: None,
-                mac: Some(bridge_mac),
-            })
-        );
-        for (message, ifindex, kind) in [
-            (&wrong_bridge_dummy, 30, ObservedLinkKind::Other),
-            (&wrong_bridge_veth, 31, ObservedLinkKind::Veth),
-            (&wrong_bridge_tun, 32, ObservedLinkKind::Tun),
-        ] {
-            assert_eq!(
-                observed_link_identity_from_message("ovd-gbr0", Some(message)),
-                Some(ObservedLinkIdentity {
-                    name: "ovd-gbr0".to_owned(),
-                    ifindex,
-                    kind,
-                    up: true,
-                    master_ifindex: None,
-                    mac: Some(bridge_mac),
-                })
-            );
-        }
-    }
+    use super::{RouteScope, RouteType, fib_rule_matches_fwmark_lookup, local_route_matches};
 
     /// The local-route deletion classifier follows the kernel collision key:
     /// table, local/default shape, host scope, and output interface.

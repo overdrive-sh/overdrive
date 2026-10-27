@@ -263,13 +263,19 @@ module cid_lease {
   // predecessor (action_shim/mod.rs:2707-2716, `pool.assign` at :1471), so the crashed allocation's lease stays
   // Admitted as the predecessor lease (`pst` = held). The placement sets the new allocation's restart count
   // (`placedAtt`: + 1 after a crash-class row, unchanged under an exemption, 0 for a first placement).
-  action Assign(a: int): bool = all {
-    not(BUG_ASSIGN_SPLIT),
-    up, reclaimed or BUG_ASSIGN_BEFORE_RECLAIM, freeOffs != Set(), not(tickBlocked(a)),
+  def canAssign(a: int): bool =
     val x = al.get(a)
     val fromEnded = x.st == "ended" and x.retry and x.off >= 0
     all {
+      not(BUG_ASSIGN_SPLIT),
+      up, reclaimed or BUG_ASSIGN_BEFORE_RECLAIM, freeOffs != Set(), not(tickBlocked(a)),
       x.st == "wait" or fromEnded,
+    }
+  action Assign(a: int): bool = all {
+    canAssign(a),
+    val x = al.get(a)
+    val fromEnded = x.st == "ended" and x.retry and x.off >= 0
+    all {
       val o = nextFitIn(freeOffs)
       all {
         lease' = lease.set(o, a), cursor' = (o + 1) % N,
@@ -418,11 +424,19 @@ module cid_lease {
   // a predecessor still held (the clash path) is then retired, its cleanup held at its teardown. Otherwise the
   // predecessor's teardown (`pst` = retiring) is released: its offset is freed.
   // releaseBeforeVmm: the placement lease is released while the VMM still holds the device
+  def canRelease(a: int): bool =
+    val x = al.get(a)
+    up and
+      if (x.st == "retiring" or (BUG_RELEASE_BEFORE_VMM and x.st == "running" and x.pst != "retiring"))
+        devAt(x.off) != a or BUG_RELEASE_BEFORE_VMM
+      else if (BUG_TERMINAL_BEFORE_RELEASE and x.st == "failed" and x.off >= 0)
+        true
+      else
+        x.pst == "retiring" and devAt(x.pred) != a
   action Release(a: int): bool = all {
-    up,
+    canRelease(a),
     val x = al.get(a)
     if (x.st == "retiring" or (BUG_RELEASE_BEFORE_VMM and x.st == "running" and x.pst != "retiring")) all {
-      devAt(x.off) != a or BUG_RELEASE_BEFORE_VMM,
       lease' = lease.set(x.off, 0),
       al' = al.set(a, {
         ...x,
@@ -439,7 +453,6 @@ module cid_lease {
       // terminalBeforeRelease only: the lease of a workload whose terminal was written first is released afterwards
       lease' = lease.set(x.off, 0), al' = al.set(a, { ...x, off: -1 }), g' = g,
     } else all {
-      x.pst == "retiring", devAt(x.pred) != a,
       lease' = lease.set(x.pred, 0),
       al' = al.set(a, { ...x, pred: -1, pst: "none" }),
       g' = g,
@@ -605,7 +618,7 @@ module cid_lease {
   // the lease is released only after the VMM has exited: a release while the VMM runs is refused; a stop exits
   // the VMM (device released), then the release frees the offset
   run ReleaseWhileTheVmmRunsIsRefused = AssignThenVmmOpensItsOwnDevice
-    .then(Release(1)).fail()
+    .expect(not(canRelease(1)))
   run StopExitsTheVmmThenReleaseIsLast = AssignThenVmmOpensItsOwnDevice
     .then(Stop(1)).expect(Safety and st(1) == "retiring" and dev.get(0) == 0 and lease.get(0) == 1)
     .then(Release(1)).expect(Safety and st(1) == "done" and lease.get(0) == 0)
@@ -641,7 +654,7 @@ module cid_lease {
     .then(Assign(1)).then(Launch(1)).then(Crash)
     .expect(Safety and not(up) and dev.get(0) == -2 and lease == OFFS.mapBy(o => 0) and cursor == 0 and st(1) == "wait")
     .then(Restart).expect(Safety and up and not(reclaimed) and orphans == Set(0))
-    .then(Assign(1)).fail()
+    .expect(not(canAssign(1)))
   run ReclamationReleasesTheOrphanDeviceThenAssignProceeds = init
     .then(Assign(1)).then(Launch(1)).then(Crash).then(Restart)
     .then(Reclaim).expect(Safety and reclaimed and dev.get(0) == 0 and g.reclaimed)
@@ -665,7 +678,7 @@ module cid_lease {
     .then(Assign(1)).then(Launch(1)).then(Stop(1)).expect(Safety and st(1) == "retiring" and not(al.get(1).retry))
     .then(Crash).expect(Safety and st(1) == "done" and lease == OFFS.mapBy(o => 0))
     .then(Restart).expect(Safety and up and reclaimed)
-    .then(Assign(1)).fail()
+    .expect(not(canAssign(1)))
   run StoppedWorkloadIsPlacedAgainOnlyAfterRedeploy = init
     .then(Assign(1)).then(Launch(1)).then(Stop(1)).then(Crash).then(Restart).expect(Safety and st(1) == "done")
     .then(Redeploy(1)).expect(Safety and st(1) == "wait")
@@ -703,7 +716,7 @@ module cid_lease {
     .expect(Safety and st(1) == "ended" and not(al.get(1).retry) and al.get(1).ex and att.get(1) == CEIL)
     .then(Finalize(1)).expect(Safety and st(1) == "retiring" and al.get(1).ex)
     .then(Release(1)).expect(Safety and st(1) == "failed" and offOf(1) == -1 and lease == OFFS.mapBy(o => 0))
-    .then(Assign(1)).fail()
+    .expect(not(canAssign(1)))
   // continues (generation replacement): Redeploy places the exhausted workload again with its count, so its next
   // crash-class failure exhausts the budget at once
   run RedeployPlacesAnExhaustedWorkloadAgainWithItsCount = FifthCrashAtCeilingBoundaryIsPlacedAgain
@@ -748,7 +761,7 @@ module cid_lease {
     .expect(Safety and st(1) == "ended" and al.get(1).ex and offOf(1) == -1 and lease == OFFS.mapBy(o => 0))
     .then(Restart).expect(Safety and up and reclaimed)
     .then(Finalize(1)).expect(Safety and st(1) == "failed" and offOf(1) == -1)
-    .then(Assign(1)).fail()
+    .expect(not(canAssign(1)))
   // item 7: a workload stopped after its VMM crashed and before the restart tick: the reclaim pass reclaims the ended
   // allocation's lease (no VMM to stop), and its release leaves the workload done with no lease
   run StopOfAnEndedWorkloadReclaimsItsLease = init
@@ -756,7 +769,7 @@ module cid_lease {
     .expect(Safety and st(1) == "ended" and lease.get(0) == 1 and dev.get(0) == 0)
     .then(Stop(1)).expect(Safety and st(1) == "retiring" and not(al.get(1).retry) and not(al.get(1).ex) and lease.get(0) == 1)
     .then(Release(1)).expect(Safety and st(1) == "done" and offOf(1) == -1 and lease == OFFS.mapBy(o => 0))
-    .then(Assign(1)).fail()
+    .expect(not(canAssign(1)))
   // PENDING GH #325 (checked on `lease_conf_325`; production loses this placement today): a Redeploy's placement leased
   // at a serve crash is not lost; the restarted process places it again
   run RedeployLeasedAtServeCrashIsPlacedAgain = init

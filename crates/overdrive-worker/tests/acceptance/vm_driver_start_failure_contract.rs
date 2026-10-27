@@ -383,7 +383,6 @@ impl Vmm for SilentButNoisy {
 /// Changing only a `VmmError`'s rendered prose cannot change the VM start
 /// class selected from its structured facts.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn vm_start_failure_class_is_independent_of_vmm_diagnostic_wording() {
     // Same structured absence, three unrelated diagnostics.
     let prose = ["cloud-hypervisor is gone", "binaire introuvable", "spawn ...: whatever"];
@@ -425,7 +424,6 @@ async fn vm_start_failure_class_is_independent_of_vmm_diagnostic_wording() {
 /// The low-level diagnostic crosses `VmDriver` unchanged and separately
 /// from the structured VM cause.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn vm_start_failure_preserves_verbatim_vmm_diagnostic_detail() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -458,7 +456,6 @@ async fn vm_start_failure_preserves_verbatim_vmm_diagnostic_detail() {
 /// When the VMM exits before READY, the start rejection retains the
 /// process exit code, terminating signal, and final stderr tail.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn vm_early_exit_failure_preserves_exit_code_signal_and_final_stderr_tail() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -491,7 +488,6 @@ async fn vm_early_exit_failure_preserves_exit_code_signal_and_final_stderr_tail(
 /// deadline in milliseconds and the LIVE console tail — the only source
 /// available, since no `VmmExit` exists on this arm.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn vm_boot_deadline_failure_preserves_deadline_milliseconds_and_live_console_tail() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -555,7 +551,6 @@ async fn vm_boot_deadline_failure_preserves_deadline_milliseconds_and_live_conso
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn initial_and_restart_start_expose_identical_cause_and_detail_pairs() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -592,7 +587,6 @@ async fn initial_and_restart_start_expose_identical_cause_and_detail_pairs() {
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn duplicate_start_request_is_rejected_without_replacement_cross_ownership_or_leak() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -729,7 +723,6 @@ async fn duplicate_start_request_is_rejected_without_replacement_cross_ownership
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn failed_start_cleanup_twice_converges_to_the_same_residue_free_state() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -812,7 +805,6 @@ async fn failed_start_cleanup_twice_converges_to_the_same_residue_free_state() {
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn every_vm_start_rejection_leaves_no_vm_resources() {
     // Three genuinely different rejection arms: pre-provision preflight,
     // `Vmm::create` refusal, and the boot-race VMM-exit arm.
@@ -888,7 +880,6 @@ async fn every_vm_start_rejection_leaves_no_vm_resources() {
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn run_directory_create_failure_attempts_the_complete_known_cleanup_partition() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -937,7 +928,6 @@ async fn run_directory_create_failure_attempts_the_complete_known_cleanup_partit
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn cgroup_create_failure_attempts_cleanup_and_removes_the_run_directory() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -980,7 +970,6 @@ async fn cgroup_create_failure_attempts_cleanup_and_removes_the_run_directory() 
 /// § Errors discipline at the one boundary where a wrong diagnosis sends
 /// an operator to check the wrong thing entirely.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn a_permission_error_is_never_reported_as_a_missing_artifact() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);

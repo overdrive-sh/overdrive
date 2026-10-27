@@ -11,8 +11,8 @@ use overdrive_control_plane::action_shim::{
 };
 use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::veth_provisioner::{
-    NetSlot, NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
-    derive_vm_tap_plan, derive_workload_netns_plan, responder_addr_for_slot,
+    NetSlot, NetSlotAllocator, VethProvisionError, WorkloadNetnsPlan, derive_workload_netns_plan,
+    responder_addr_for_slot,
 };
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
@@ -40,11 +40,7 @@ struct RecordingProvisioner {
 }
 
 impl WorkloadNetworkProvisioner for RecordingProvisioner {
-    fn provision(
-        &self,
-        _workload: &WorkloadNetnsPlan,
-        _vm_tap: &VmTapPlan,
-    ) -> Result<(), VethProvisionError> {
+    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
         Ok(())
     }
 
@@ -85,78 +81,70 @@ async fn seed_running_row(
 }
 
 /// ADR-0098 D4: a genuine terminal with a missing ephemeral binding reclaims
-/// only the exact plan whose prior Running address proves ownership. Both the
-/// allocation-network Exec transit carve and VM guest carve reach this same
-/// production dispatcher path.
+/// only the exact allocation-network transit plan whose prior Running address
+/// proves ownership.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn terminal_cleanup_recovers_only_exact_unheld_slot_from_prior_running_address() {
-    for (suffix, workload_addr) in [("exec", false), ("vm", true)] {
-        let slot = NetSlot::new(23).expect("valid slot");
-        let plan = derive_workload_netns_plan(slot, responder_addr_for_slot(slot));
-        let assigned = if workload_addr {
-            derive_vm_tap_plan(slot, responder_addr_for_slot(slot)).guest_addr
-        } else {
-            plan.workload_addr
-        };
-        let alloc_id = AllocationId::new(&format!("adr-0098-{suffix}")).expect("valid alloc");
-        let obs = Arc::new(SimObservationStore::single_peer(
-            NodeId::new("adr-0098-store").expect("valid node"),
-            0,
-        ));
-        seed_running_row(obs.as_ref(), &alloc_id, assigned).await;
+    let slot = NetSlot::new(23).expect("valid slot");
+    let plan = derive_workload_netns_plan(slot, responder_addr_for_slot(slot));
+    let assigned = plan.workload_addr;
+    let alloc_id = AllocationId::new("adr-0098-exec").expect("valid alloc");
+    let obs = Arc::new(SimObservationStore::single_peer(
+        NodeId::new("adr-0098-store").expect("valid node"),
+        0,
+    ));
+    seed_running_row(obs.as_ref(), &alloc_id, assigned).await;
 
-        let tempdir = TempDir::new().expect("tempdir");
-        let intent: Arc<dyn IntentStore> = Arc::new(
-            LocalIntentStore::open(tempdir.path().join("intent.redb")).expect("open intent"),
-        );
-        let vip_allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
-            VipRange::default(),
-            intent,
-        )));
-        let provisioner = RecordingProvisioner::default();
-        let now = Instant::now();
-        let tick = TickContext {
-            now,
-            now_unix: UnixInstant::from_unix_duration(Duration::from_secs(2)),
-            tick: 1,
-            deadline: now + Duration::from_secs(1),
-        };
-        let (lifecycle_tx, _lifecycle_rx) = tokio::sync::broadcast::channel(4);
-        let drivers = DriverRegistry::new();
+    let tempdir = TempDir::new().expect("tempdir");
+    let intent: Arc<dyn IntentStore> =
+        Arc::new(LocalIntentStore::open(tempdir.path().join("intent.redb")).expect("open intent"));
+    let vip_allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
+        VipRange::default(),
+        intent,
+    )));
+    let provisioner = RecordingProvisioner::default();
+    let now = Instant::now();
+    let tick = TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(2)),
+        tick: 1,
+        deadline: now + Duration::from_secs(1),
+    };
+    let (lifecycle_tx, _lifecycle_rx) = tokio::sync::broadcast::channel(4);
+    let drivers = DriverRegistry::new();
 
-        let mtls_worker_0501_0 = crate::acceptance::serve_ports::worker();
-        dispatch_with_network_provisioner(
-            vec![Action::FinalizeFailed { alloc_id: alloc_id.clone(), terminal: None }],
-            &drivers,
-            &AllocDriverIndex::default(),
-            obs.as_ref(),
-            &SimDataplane::new(),
-            &SimCa::new(Arc::new(SimEntropy::new(0))),
-            &SimClock::new(),
-            &IdentityMgr::new(None),
-            &lifecycle_tx,
-            &tick,
-            &NodeId::new("adr-0098-writer").expect("valid node"),
-            vip_allocator,
-            &parking_lot::Mutex::new(EvaluationBroker::new()),
-            None,
-            &mtls_worker_0501_0,
-            &NetSlotAllocator::new(),
-            &provisioner,
-            &SimVmHostState::new(),
-        )
+    let mtls_worker_0501_0 = crate::acceptance::serve_ports::worker();
+    dispatch_with_network_provisioner(
+        vec![Action::FinalizeFailed { alloc_id: alloc_id.clone(), terminal: None }],
+        &drivers,
+        &AllocDriverIndex::default(),
+        obs.as_ref(),
+        &SimDataplane::new(),
+        &SimCa::new(Arc::new(SimEntropy::new(0))),
+        &SimClock::new(),
+        &IdentityMgr::new(None),
+        &lifecycle_tx,
+        &tick,
+        &NodeId::new("adr-0098-writer").expect("valid node"),
+        vip_allocator,
+        &parking_lot::Mutex::new(EvaluationBroker::new()),
+        None,
+        &mtls_worker_0501_0,
+        &NetSlotAllocator::new(),
+        &provisioner,
+        &SimVmHostState::new(),
+    )
+    .await
+    .expect("genuine terminal cleanup and write succeed");
+
+    assert_eq!(provisioner.teardowns.lock().as_slice(), &[plan]);
+    let row = obs
+        .alloc_status_rows()
         .await
-        .expect("genuine terminal cleanup and write succeed");
-
-        assert_eq!(provisioner.teardowns.lock().as_slice(), &[plan]);
-        let row = obs
-            .alloc_status_rows()
-            .await
-            .expect("read terminal row")
-            .into_iter()
-            .find(|row| row.alloc_id == alloc_id)
-            .expect("terminal row exists");
-        assert_eq!(row.state, AllocState::Failed);
-    }
+        .expect("read terminal row")
+        .into_iter()
+        .find(|row| row.alloc_id == alloc_id)
+        .expect("terminal row exists");
+    assert_eq!(row.state, AllocState::Failed);
 }

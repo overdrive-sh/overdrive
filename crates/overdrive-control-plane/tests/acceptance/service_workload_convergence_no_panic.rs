@@ -44,6 +44,12 @@ async fn build_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator =
         overdrive_control_plane::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
+    let guest_owner = crate::acceptance::serve_ports::owner();
+    overdrive_control_plane::guest_network::SharedGuestNetworkOwner::converge_shared(
+        guest_owner.as_ref(),
+    )
+    .await
+    .expect("the fixture's shared guest-network owner is converged");
     AppState::new(
         store,
         store_path,
@@ -61,7 +67,7 @@ async fn build_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
         crate::acceptance::serve_ports::worker(),
-        crate::acceptance::serve_ports::owner(),
+        guest_owner,
         crate::acceptance::serve_ports::exec_gate(),
         crate::acceptance::serve_ports::pool(),
     )
@@ -71,7 +77,6 @@ async fn build_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
 /// not panic via `unreachable!()`. A convergence tick against a stored
 /// `WorkloadIntent::Service` must complete without panic.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2-4: the guest lane leases the transport)"]
 async fn service_workload_convergence_tick_does_not_panic() {
     let tmp = TempDir::new().expect("tempdir");
     let clock = Arc::new(SimClock::new());

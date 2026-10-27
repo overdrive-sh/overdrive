@@ -14,6 +14,7 @@ State 1: <Initial predicate>
   hresCls |-> "none" ]
 /\ pair_dgram_fwd_pair_strmAbort = FALSE
 /\ pair_dgram_fwd_pair_attRes = [g |-> "none", h |-> "none"]
+/\ pair_dgram_fwd_pair_strmHeld = FALSE
 /\ pair_dgram_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
 /\ pair_dgram_fwd_pair_mode = "dgram"
 /\ pair_dgram_fwd_pair_gen = [g |-> 0, h |-> 0]
@@ -130,7 +131,7 @@ State 1: <Initial predicate>
 /\ pair_dgram_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
 /\ pair_dgram_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
 
-State 2: <pair_dgram_fwd_pair_VmmExit line 2172, col 3 to line 2220, col 23 of module pair_dgram>
+State 2: <pair_dgram_fwd_pair_VmmExit line 2255, col 3 to line 2303, col 23 of module pair_dgram>
 /\ pair_dgram_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
   fwdOld |-> FALSE,
   unclassified |-> FALSE,
@@ -146,6 +147,7 @@ State 2: <pair_dgram_fwd_pair_VmmExit line 2172, col 3 to line 2220, col 23 of m
   hresCls |-> "none" ]
 /\ pair_dgram_fwd_pair_strmAbort = FALSE
 /\ pair_dgram_fwd_pair_attRes = [g |-> "none", h |-> "none"]
+/\ pair_dgram_fwd_pair_strmHeld = FALSE
 /\ pair_dgram_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
 /\ pair_dgram_fwd_pair_mode = "dgram"
 /\ pair_dgram_fwd_pair_gen = [g |-> 0, h |-> 0]

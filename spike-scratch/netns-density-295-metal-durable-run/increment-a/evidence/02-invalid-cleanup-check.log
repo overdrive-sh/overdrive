@@ -1,0 +1,23 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask metal run --no-sync -- bash -c 'test '\!' -e /tmp/overdrive-metal-v-mdr1.VxEZmc && '\!' systemctl show overdrive-metal-v-mdr1-20261027T155628Z-2611707.service >/dev/null 2>&1 && printf "fixture_directory_absent=yes\nfixture_unit_absent=yes\n"'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=170bfa7d881c7df08e005371 pid=2612112
+
+########## [bootstrap] no-sync source identity check
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+xtask failed:
+   0: metal run (one bootstrap lease session) failed with exit status: 1
+
+Location:
+   xtask/src/main.rs:1577
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

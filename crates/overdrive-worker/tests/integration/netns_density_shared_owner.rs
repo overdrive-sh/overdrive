@@ -191,7 +191,6 @@ struct RecordingSharedIntercept {
     /// Members deleted from the kernel behind the worker's back.
     lost_members: Arc<Mutex<BTreeSet<SharedElement>>>,
     policy_route: AtomicBool,
-    intercept_mark_guard: AtomicBool,
     /// Committed program creates and target replacements.
     program_writes: AtomicUsize,
     converge_elements_script: Mutex<Option<ConvergeElementsScript>>,
@@ -284,7 +283,6 @@ impl RecordingSharedIntercept {
             recorded_identity: Arc::new(Mutex::new(None)),
             lost_members: Arc::new(Mutex::new(BTreeSet::new())),
             policy_route: AtomicBool::new(true),
-            intercept_mark_guard: AtomicBool::new(true),
             program_writes: AtomicUsize::new(0),
             converge_elements_script: Mutex::new(None),
         }
@@ -323,7 +321,6 @@ impl RecordingSharedIntercept {
         Some(InterceptState {
             program,
             policy_route: self.policy_route.load(Ordering::SeqCst),
-            intercept_mark_guard: self.intercept_mark_guard.load(Ordering::SeqCst),
             members: intercept_members(&present),
         })
     }
@@ -705,10 +702,9 @@ impl MtlsIntercept for RecordingSharedIntercept {
             *self.shared_observation.lock() = Some(requested.clone());
             self.program_writes.fetch_add(1, Ordering::SeqCst);
         }
-        // The policy route and the intercept-mark guard table are ensured
-        // add-if-missing on every successful converge.
+        // The policy route is ensured add-if-missing on every successful
+        // converge.
         self.policy_route.store(true, Ordering::SeqCst);
-        self.intercept_mark_guard.store(true, Ordering::SeqCst);
         *self.recorded_identity.lock() = Some(requested.clone());
         Ok(Box::new(RecordingNodeGuard {
             requested,
@@ -1175,7 +1171,6 @@ impl MtlsIntercept for ActivationBarrierIntercept {
         Ok(self.shared.shared_observation.lock().clone().map(|program| InterceptState {
             program,
             policy_route: true,
-            intercept_mark_guard: true,
             members: intercept_members(&self.allocation_elements.lock()),
         }))
     }

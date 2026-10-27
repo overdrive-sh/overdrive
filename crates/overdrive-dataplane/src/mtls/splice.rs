@@ -36,6 +36,7 @@
 //! bytes-moved progress counter (`liveness` reads it via [`PumpHandle`]) and a stop
 //! flag (`teardown` sets it). SD-2: the port owns the pump.
 
+use std::future::Future;
 use std::io::Write;
 use std::net::TcpStream;
 use std::os::fd::{FromRawFd, RawFd};
@@ -68,6 +69,9 @@ pub(super) struct PumpState {
     /// applies while a record is actually pending (a purely idle connection is
     /// `Running`, never `Stalled`).
     pub record_pending: AtomicBool,
+    /// The peer must observe a TCP reset when the last owned leg is dropped.
+    /// Used by the LEGS-DIAL stream relay when the guest reports an abort.
+    pub reset_peer_on_reclaim: AtomicBool,
     /// Wall-clock nanos (since the process monotonic origin) of the last progress
     /// advance, for the `Stalled { since }` computation.
     pub last_progress_unix_nanos: AtomicU64,
@@ -119,6 +123,7 @@ impl PumpState {
 /// shared state and the worker-thread join handle.
 pub(super) struct PumpHandle {
     pub state: Arc<PumpState>,
+    stop_tx: Option<tokio::sync::oneshot::Sender<()>>,
     join: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -147,7 +152,7 @@ impl PumpHandle {
         let pump_state = Arc::clone(&state);
         let join =
             std::thread::spawn(move || run_decrypt_pump(src_fd, dst_fd, &early, &pump_state));
-        Self { state, join: Some(join) }
+        Self { state, stop_tx: None, join: Some(join) }
     }
 
     /// Spawn an ENCRYPT pump: a BLOCKING `splice(src_fd → pipe → dst_fd)` where
@@ -176,7 +181,31 @@ impl PumpHandle {
         let pump_state = Arc::clone(&state);
         let join =
             std::thread::spawn(move || run_encrypt_pump(src_fd, dst_fd, &prelude, &pump_state));
-        Self { state, join: Some(join) }
+        Self { state, stop_tx: None, join: Some(join) }
+    }
+
+    /// Spawn one tracked pump whose async I/O needs the runtime supplied by
+    /// its owner. The pump still runs on its own thread so synchronous kTLS
+    /// setup and connection teardown keep their existing join boundary.
+    pub(super) fn spawn_async<F, Fut>(
+        runtime: tokio::runtime::Handle,
+        now_unix_nanos: u64,
+        run: F,
+    ) -> Self
+    where
+        F: FnOnce(Arc<PumpState>, tokio::sync::oneshot::Receiver<()>) -> Fut + Send + 'static,
+        Fut: Future<Output = PumpExit> + Send + 'static,
+    {
+        let state = Arc::new(PumpState::default());
+        state.running.store(true, Ordering::SeqCst);
+        state.last_progress_unix_nanos.store(now_unix_nanos, Ordering::SeqCst);
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
+        let pump_state = Arc::clone(&state);
+        let join = std::thread::spawn(move || {
+            let exit = runtime.block_on(run(Arc::clone(&pump_state), stop_rx));
+            mark_exited(&pump_state, exit);
+        });
+        Self { state, stop_tx: Some(stop_tx), join: Some(join) }
     }
 
     /// Signal the pump to stop and join its thread (idempotent).
@@ -187,16 +216,27 @@ impl PumpHandle {
     /// (`super::reclaim_connection`) therefore `shutdown(2)`s the connection's legs
     /// before calling this, forcing any blocked syscall to return so the join is
     /// bounded.
-    pub(super) fn stop_and_join(&mut self) {
+    pub(super) fn request_stop(&mut self) {
         self.state.stop.store(true, Ordering::SeqCst);
+        if let Some(stop_tx) = self.stop_tx.take() {
+            let _ = stop_tx.send(());
+        }
+    }
+
+    pub(super) fn join(&mut self) {
         if let Some(handle) = self.join.take() {
             let _ = handle.join();
         }
     }
+
+    pub(super) fn stop_and_join(&mut self) {
+        self.request_stop();
+        self.join();
+    }
 }
 
 /// Record one progress advance of `n` bytes moved to the destination.
-fn record_progress(state: &PumpState, n: u64) {
+pub(super) fn record_progress(state: &PumpState, n: u64) {
     state.bytes_spliced.fetch_add(n, Ordering::SeqCst);
     state.last_progress_unix_nanos.store(now_nanos(), Ordering::SeqCst);
 }
@@ -214,7 +254,7 @@ fn record_progress(state: &PumpState, n: u64) {
 /// primary-only install) is what preserves the D-MTLS-16 intent that a clean
 /// half-close MUST NOT nuke a connection whose request path is still live.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum PumpExit {
+pub(super) enum PumpExit {
     /// Clean EOF on a leg, or a deliberate `teardown` set `stop` — NOT a death.
     Graceful,
     /// A leg error / the (C) kernel-reaped `ETIMEDOUT` — the connection is dead.

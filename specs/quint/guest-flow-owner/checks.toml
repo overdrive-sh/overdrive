@@ -875,7 +875,7 @@ ci = true
 
 [[check]]
 name = "fwd-pair-hazard-eof-as-fin-peer-loss"
-spec = "hazard/fwd_pair_hazards.qnt"
+spec = "hazard/fwd_pair_hazards_10.qnt"
 main = "pair_bugEofAsFin"
 invariant = "NoEofOnPeerLoss"
 backend = "tlc"
@@ -895,7 +895,7 @@ ci = true
 # EVMOD-CTL off: an end record may be dropped
 [[check]]
 name = "fwd-pair-hazard-lossy-end-record"
-spec = "hazard/fwd_pair_hazards_3.qnt"
+spec = "hazard/fwd_pair_hazards_12.qnt"
 main = "pair_bugLossyEndRecord"
 invariant = "OneEndRecordPerPair"
 backend = "tlc"
@@ -1334,7 +1334,7 @@ ci = true
 # T-4 off: on HalfEnded the surviving TCP half is closed without SO_LINGER{1,0}
 [[check]]
 name = "fwd-pair-hazard-ended-attach-graceful-close"
-spec = "hazard/fwd_pair_hazards_2.qnt"
+spec = "hazard/fwd_pair_hazards_11.qnt"
 main = "pair_bugEndedAttachGracefulClose"
 invariant = "EndedHalfNeverEndsClean"
 backend = "tlc"
@@ -1354,7 +1354,7 @@ ci = true
 # T-6 off: the holder's drop only closes V_h; the forwarder's reference keeps it open (P-70 § 4.4)
 [[check]]
 name = "fwd-pair-hazard-drop-without-abort"
-spec = "hazard/fwd_pair_hazards_5.qnt"
+spec = "hazard/fwd_pair_hazards_13.qnt"
 main = "pair_bugDropWithoutAbort"
 invariant = "NoLiveWatchAfterDrop"
 backend = "tlc"

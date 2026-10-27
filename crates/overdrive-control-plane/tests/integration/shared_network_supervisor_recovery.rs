@@ -58,7 +58,6 @@ use overdrive_core::guest_network::{
 use overdrive_core::id::NodeId;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::observation_store::ObservationStore;
-use overdrive_sim::adapters::SimCgroupFs;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
@@ -107,10 +106,6 @@ impl Node {
             driver,
             Arc::clone(&owner) as _,
             wiring,
-            overdrive_worker::cgroup_manager::CgroupManager::new(
-                std::path::PathBuf::from("/sys/fs/cgroup"),
-                Arc::new(SimCgroupFs::new()),
-            ),
         )
         .await
         .expect("a healthy node boots");
@@ -142,7 +137,6 @@ impl Node {
 /// quiescence, no restore, no activation, no shutdown request.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn a_healthy_owner_keeps_admission_open_without_recovery_effects() {
     let mut node = Node::boot().await;
     let boot_calls = node.owner.calls().len();
@@ -175,7 +169,6 @@ async fn a_healthy_owner_keeps_admission_open_without_recovery_effects() {
 /// owner once per one-second period.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn a_healthy_node_audits_the_shared_owner_every_second() {
     let node = Node::boot().await;
     let at_boot = node.audits();

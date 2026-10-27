@@ -87,7 +87,6 @@ proptest! {
     /// accepted configuration reports back the ports it was given.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER attachment-cut step (6): PORTS-CONFIG"]
     fn new_refuses_exactly_the_specified_configurations(
         beacon in arb_port(),
         stream in arb_port(),
@@ -109,7 +108,6 @@ proptest! {
 /// The pinned boundaries and the order between refusal classes.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER attachment-cut step (6): PORTS-CONFIG"]
 fn the_refusal_boundaries_and_their_order() {
     // 1023 is reserved, 1024 is not; u32::MAX - 1 is a valid fixed port.
     assert_eq!(
@@ -151,7 +149,6 @@ fn the_refusal_boundaries_and_their_order() {
 /// kernel-assigned ports and is itself valid.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER attachment-cut step (6): PORTS-CONFIG"]
 fn the_default_is_the_production_ports_and_kernel_assigned_is_valid() {
     let default = NodeVsockPortConfig::default();
     assert_eq!(default.beacon(), VsockListenPort::Fixed(BEACON_VSOCK_PORT));
@@ -176,7 +173,6 @@ fn the_default_is_the_production_ports_and_kernel_assigned_is_valid() {
 /// The listener labels and the refusal messages an operator reads.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER attachment-cut step (6): PORTS-CONFIG"]
 fn the_labels_and_refusal_messages_are_the_pinned_text() {
     let labels: Vec<&str> = LISTENERS.iter().map(|l| l.as_str()).collect();
     assert_eq!(labels, ["beacon", "flow_stream", "flow_control"]);

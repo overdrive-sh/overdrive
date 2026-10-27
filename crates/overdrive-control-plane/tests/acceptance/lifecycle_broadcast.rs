@@ -39,7 +39,7 @@ use proptest::prelude::*;
 use overdrive_control_plane::action_shim::{
     LifecycleEvent, ShimError, WorkloadNetworkProvisioner, dispatch_with_network_provisioner,
 };
-use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, WorkloadNetnsPlan};
 use overdrive_core::SpiffeId;
 use overdrive_core::TransitionReason;
 use overdrive_core::UnixInstant;
@@ -208,11 +208,7 @@ impl Driver for FailingDriver {
 struct NoopNetworkProvisioner;
 
 impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
-    fn provision(
-        &self,
-        _workload: &WorkloadNetnsPlan,
-        _vm_tap: &VmTapPlan,
-    ) -> Result<(), VethProvisionError> {
+    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
         Ok(())
     }
 

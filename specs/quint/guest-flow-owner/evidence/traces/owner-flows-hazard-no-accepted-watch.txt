@@ -1,4 +1,4 @@
-# owner-flows-hazard-no-accepted-watch: counterexample, 14 state(s) (from the TLC trace)
+# owner-flows-hazard-no-accepted-watch: counterexample, 12 state(s) (from the TLC trace)
 
 State 1
   act = "none"
@@ -12,6 +12,7 @@ State 1
   heldByOther = FALSE
   bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
   conf_step = [InitWith |-> [o |-> "g"]]
+  bq = <<>>
   resurrected = FALSE
   badAct = FALSE
   alloc = "Absent"
@@ -44,42 +45,35 @@ State 4 [step]
   flows = <<[st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE]>>
 
 State 5 [step]
-  flows = <<[st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE]>>
-
-State 6 [step]
   gSess = 1
   sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
 
-State 7 [step]
+State 6 [step]
   sess = <<[st |-> "pending", gen |-> 1], [st |-> "pending", gen |-> 1]>>
 
-State 8 [step]
+State 7 [step]
   sess = <<[st |-> "pending", gen |-> 1], [st |-> "reading", gen |-> 1]>>
 
-State 9 [step]
+State 8 [step]
   sess = <<[st |-> "pending", gen |-> 1], [st |-> "live", gen |-> 1]>>
   claim = 2
 
-State 10 [Activate]
+State 9 [Activate]
   act = "Activated"
   alloc = "Active"
 
-State 11 [step]
+State 10 [step]
   act = "none"
   dl = [ res |-> <<"pending">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
   hf = <<[st |-> "req", gen |-> 1]>>
 
-State 12 [Teardown]
-  alloc = "Retiring"
-  dl = [ res |-> <<"NotServing">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
+State 11 [step]
+  dl = [ res |-> <<"NoSession">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
   sess = <<[st |-> "pending", gen |-> 1], [st |-> "closed", gen |-> 1]>>
   claim = 0
   hf = <<[st |-> "closed", gen |-> 1]>>
 
-State 13 [step]
-  sess = <<[st |-> "closed", gen |-> 1], [st |-> "closed", gen |-> 1]>>
-
-State 14 [step]
+State 12 [step]
   gf = <<[st |-> "acc", gen |-> 1, c |-> 0]>>
 
--> stutters forever in State 14
+-> stutters forever in State 12

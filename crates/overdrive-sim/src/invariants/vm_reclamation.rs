@@ -493,7 +493,6 @@ mod service_vm_boot_redrive {
     use overdrive_core::traits::vm_host_state::VmHostState;
     use overdrive_core::wall_clock::UnixInstant;
     use overdrive_store_local::LocalIntentStore;
-    use overdrive_worker::cgroup_manager::CgroupManager;
 
     use crate::adapters::clock::SimClock;
     use crate::adapters::dataplane::SimDataplane;
@@ -650,7 +649,6 @@ mod service_vm_boot_redrive {
             driver.clone() as Arc<dyn Driver>,
             shared_owner,
             wiring,
-            CgroupManager::new(PathBuf::from("/sys/fs/cgroup"), Arc::new(SimCgroupFs::new())),
         )
         .await
         .map_err(|error| format!("seed={seed}: fresh production boot: {error}"))?;
@@ -719,7 +717,6 @@ mod service_vm_boot_redrive {
         clippy::doc_markdown,
         reason = "the required Contract Shape declaration uses an exact parser token"
     )]
-    #[ignore = "pending DELIVER attachment-cut step (15)"]
     async fn a_service_vm_running_before_process_loss_is_reclaimed_and_replaced_after_boot() {
         const SEED: u64 = 0;
         let result = run_service_vm_reclaim(SEED).await;

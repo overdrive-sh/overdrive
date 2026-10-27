@@ -36,8 +36,6 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::traits::entropy::Entropy;
 use crate::vm::config::VsockPort;
 
-const SCAFFOLD: &str = "Not yet implemented -- RED scaffold";
-
 // ---------------------------------------------------------------------------
 // Guest CID
 // ---------------------------------------------------------------------------
@@ -193,11 +191,54 @@ impl NodeVsockPortConfig {
     /// ports mixed → `Mixed`; two equal fixed ports → `Collision` (listeners
     /// in [`NodeVsockListener`] order).
     pub fn new(
-        _beacon: VsockListenPort,
-        _flow_stream: VsockListenPort,
-        _flow_control: VsockListenPort,
+        beacon: VsockListenPort,
+        flow_stream: VsockListenPort,
+        flow_control: VsockListenPort,
     ) -> Result<Self, NodeVsockPortConfigError> {
-        panic!("{SCAFFOLD}")
+        let configured = [
+            (NodeVsockListener::Beacon, beacon),
+            (NodeVsockListener::FlowStream, flow_stream),
+            (NodeVsockListener::FlowControl, flow_control),
+        ];
+
+        for (listener, port) in configured {
+            if let VsockListenPort::Fixed(port) = port
+                && port.as_u32() <= 1_023
+            {
+                return Err(NodeVsockPortConfigError::Reserved { listener, port: port.as_u32() });
+            }
+        }
+
+        for (listener, port) in configured {
+            if matches!(port, VsockListenPort::Fixed(port) if port.as_u32() == u32::MAX) {
+                return Err(NodeVsockPortConfigError::PortAny { listener });
+            }
+        }
+
+        let fixed_count =
+            configured.iter().filter(|(_, port)| matches!(port, VsockListenPort::Fixed(_))).count();
+        if fixed_count != 0 && fixed_count != configured.len() {
+            return Err(NodeVsockPortConfigError::Mixed);
+        }
+
+        for first in 0..configured.len() {
+            for second in first + 1..configured.len() {
+                let (first_listener, first_port) = configured[first];
+                let (second_listener, second_port) = configured[second];
+                if let (VsockListenPort::Fixed(first_fixed), VsockListenPort::Fixed(second_fixed)) =
+                    (first_port, second_port)
+                    && first_fixed == second_fixed
+                {
+                    return Err(NodeVsockPortConfigError::Collision {
+                        first: first_listener,
+                        second: second_listener,
+                        port: first_fixed.as_u32(),
+                    });
+                }
+            }
+        }
+
+        Ok(Self { beacon, flow_stream, flow_control })
     }
 
     /// All three `KernelAssigned` (what tests configure).
@@ -249,7 +290,7 @@ pub enum NodeVsockPortConfigError {
     },
     /// A fixed `VMADDR_PORT_ANY`.
     #[error(
-        "vsock port 4294967295 (VMADDR_PORT_ANY) is not a fixed port for the {listener} listener; use 0 for a kernel-assigned port"
+        "vsock port 4294967295 (VMADDR_PORT_ANY) is not a fixed port for the {listener} listener; use VsockListenPort::KernelAssigned for a kernel-assigned port"
     )]
     PortAny {
         /// The listener configured with it.
@@ -561,35 +602,3 @@ pub const GUEST_NODE_GATEWAY: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 1);
 /// converges only a route carrying it. No other route covers the guest
 /// prefix (LEGB-DIAL). Unassigned in the kernel's `RTPROT_*` table.
 pub const GUEST_PREFIX_ROUTE_PROTOCOL: u8 = 247;
-
-// ---------------------------------------------------------------------------
-// D-list: intake steering capacity (D8a-CAP) and intake host ports
-// (INTAKE-BIND, INTAKE-PORTS), removed by INB-1. Kept only while the
-// `overdrive-dataplane` guest steering and the control-plane intake code
-// still name them; DELIVER deletes them with those users.
-// ---------------------------------------------------------------------------
-
-/// Node capacity of steered intake listeners: the guest-prefix steering map's
-/// `max_entries`, and the bound admission reserves declared TCP listener
-/// ports against.
-pub const GUEST_INTAKE_STEERING_MAX: u32 = 262_144;
-
-/// First port of the host block intake listeners bind on their workload
-/// address.
-pub const GUEST_INTAKE_HOST_PORT_BASE: u16 = 20_480;
-
-/// The most TCP listener ports one workload may declare, and the size of the
-/// intake host-port block.
-pub const GUEST_INTAKE_PORTS_PER_ALLOCATION_MAX: u16 = 4_096;
-
-/// The intake host-port block, inclusive (20,480..=24,575).
-pub fn guest_intake_host_ports() -> RangeInclusive<u16> {
-    panic!("{SCAFFOLD}")
-}
-
-/// The host port the intake listener for the declared TCP port at `index`
-/// binds on its workload address: `GUEST_INTAKE_HOST_PORT_BASE + index`.
-/// `None` for `index >= GUEST_INTAKE_PORTS_PER_ALLOCATION_MAX`.
-pub fn guest_intake_host_port(_index: u16) -> Option<u16> {
-    panic!("{SCAFFOLD}")
-}

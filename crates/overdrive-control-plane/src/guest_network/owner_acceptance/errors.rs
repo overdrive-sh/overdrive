@@ -43,8 +43,6 @@ const fn taxonomy_name(error: &GuestNetworkError) -> &'static str {
         GuestNetworkError::Wire { .. } => "Wire",
         GuestNetworkError::Io { .. } => "Io",
         GuestNetworkError::PostconditionMismatch { .. } => "PostconditionMismatch",
-        GuestNetworkError::ScratchCleanupIncomplete => "ScratchCleanupIncomplete",
-        GuestNetworkError::StartupProbeCleanup { .. } => "StartupProbeCleanup",
         GuestNetworkError::AdmissionCapReached { .. } => "AdmissionCapReached",
         GuestNetworkError::LeaseRetiring { .. } => "LeaseRetiring",
         GuestNetworkError::GuestPrefixOverlapsNodeAddress { .. } => {
@@ -153,7 +151,6 @@ async fn every_probe_startup_refusal_is_its_own_variant_and_changes_nothing() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn a_forwarder_that_cannot_be_opened_or_probed_refuses_boot_typed() {
     let failures = [
         SimForwarderFailure::DeviceAbsent,
@@ -204,7 +201,6 @@ async fn a_forwarder_that_cannot_be_opened_or_probed_refuses_boot_typed() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn a_listener_bind_failure_refuses_at_its_own_operation() {
     let bind = Composition::non_mesh(11);
     bind.io.script_failure(SimEffectKind::BindListener, SimFailure::Io(io::ErrorKind::AddrInUse));
@@ -279,7 +275,6 @@ async fn boot_converges_over_a_route_left_behind_and_is_idempotent() {
 ///
 /// CONTRACT_SHAPE: pure-function.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn runtime_owner_failures_are_taxonomy_variants() {
     let c = Composition::booted(14).await;
     let (lease, _session) = c.active_lease("c6c", &[]).await;

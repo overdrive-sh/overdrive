@@ -6,24 +6,24 @@
 
   1) lease_bugRefusalKeepsPredecessor::cid_lease::PoolExhaustedRestartCleansThePredecessorThenPlaces:
        Error [QNT508]: Expect condition does not hold true
-        at /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/cid_lease.qnt:789:60
-        789:   run PoolExhaustedRestartCleansThePredecessorThenPlaces = init
+        at /home/ubuntu/overdrive/specs/quint/guest-flow-owner/cid_lease.qnt:802:60
+        802:   run PoolExhaustedRestartCleansThePredecessorThenPlaces = init
                                                                         ^^^^
-        790:     .then(Assign(1)).then(Launch(1)).then(Assign(2)).then(Launch(2)).then(VmmCrash(1))
+        803:     .then(Assign(1)).then(Launch(1)).then(Assign(2)).then(Launch(2)).then(VmmCrash(1))
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        791:     .then(Assign(1)).expect(Safety and st(1) == "leased" and pstOf(1) == "held" and freeOffs == Set())
+        804:     .then(Assign(1)).expect(Safety and st(1) == "leased" and pstOf(1) == "held" and freeOffs == Set())
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        792:     .then(VmmCrash(2)).expect(Safety and st(2) == "ended" and al.get(2).retry and freeOffs == Set())
+        805:     .then(VmmCrash(2)).expect(Safety and st(2) == "ended" and al.get(2).retry and freeOffs == Set())
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        793:     .then(AssignRefused(2))
+        806:     .then(AssignRefused(2))
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        794:     .expect(Safety and st(2) == "wait" and pstOf(2) == "retiring" and att.get(2) == 0 and offOf(2) == -1
+        807:     .expect(Safety and st(2) == "wait" and pstOf(2) == "retiring" and att.get(2) == 0 and offOf(2) == -1
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        795:       and freeOffs == Set())
+        808:       and freeOffs == Set())
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Use --seed=0x502c165f135aa064 --match=lease_bugRefusalKeepsPredecessor::cid_lease::PoolExhaustedRestartCleansThePredecessorThenPlaces to repeat.
+    Use --seed=0xe57a09ab125785bb --match=lease_bugRefusalKeepsPredecessor::cid_lease::PoolExhaustedRestartCleansThePredecessorThenPlaces to repeat.
 
 
   Use --verbosity=3 to show executions.
-  Further debug with: quint test --verbosity=3 /Users/marcus/conductor/workspaces/helios/wellington-v2/specs/quint/guest-flow-owner/hazard/cid_lease_hazards.qnt
+  Further debug with: quint test --verbosity=3 /home/ubuntu/overdrive/specs/quint/guest-flow-owner/hazard/cid_lease_hazards.qnt
 error: Tests failed

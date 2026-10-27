@@ -30,16 +30,16 @@
 //!
 //! | Action | Driver |
 //! |---|---|
-//! | `InitWith(fl)` | a fresh node booted through the composed boot (phase 1, then `boot_server` with `GuestNetworkSource::Composed`; boot step 8 writes the table); with `fl = 1` one guest-opened flow is admitted, read, attached and paired on an Active allocation |
+//! | `InitWith(fl)` | a fresh node booted through the composed boot (phase 1, then `boot_server` with `GuestNetworkSource::Composed`; boot step 8 writes the table), then one fixture allocation is provisioned and activated over its real control session; with `fl = 1` one guest-opened flow is additionally admitted, read, attached and paired |
 //! | `InitDown` | a fresh node, never booted: no process, no table |
 //! | `Damage(c)` | seam: component `c`'s accept task exits (`fail_listener`) |
 //! | `OpenFlow` | seam: a guest-opened flow is admitted, read, attached, paired |
 //! | `Crash` | drop the composition (`ServerHandle::kill_for_test`); the kernel keeps the shared table |
-//! | `RestartWith(writeOk)` | recompose through the in-crate composed rig: phase 1 over a fresh `SimGuestFlowIo`, then `boot_server` with `GuestNetworkSource::Composed` over that seam and a fresh `BootAdapters` (the same `boot_server` `run_server` calls; not `run_server`, which takes only `GuestFlowAdapter::host()`, so `Damage` / `RepFail` could not be scripted at the seam); boot step 8's table transaction on the node's `SimMtlsIntercept` succeeds, or is scripted to fail (`fail_next_table_transaction`) and `boot_server` returns the typed refusal `MtlsBoot(SharedOwner)` of ADR-0184 |
-//! | `RecQuiesce(c)` | `SimClock` to the supervisor's audit tick (`SHARED_NETWORK_AUDIT_PERIOD`); the detecting audit is released; the supervisor's recovery of `c` calls `quiesce()` |
-//! | `RecRepair(c)` / `RepFail(c)` | `SimClock` to the retry tick; `c`'s repair (`converge_shared`, parked at its `bind_listener` on the held socket) returns `Ok` (still listening: accept re-spawned, nothing closed or bound) / a scripted `Err` (the held socket found not listening, a failed attempt) |
-//! | `RecRedo(c)` | the post-repair audit is released over the damage the trace's preceding `Damage(c)` re-applied |
-//! | `RecRestore(c)` | the clean post-repair audit is released; the supervisor calls `restore(hold)` |
+//! | `RestartWith(writeOk)` | recompose through the in-crate composed rig: phase 1 over a fresh `SimGuestFlowIo`, then `boot_server` with `GuestNetworkSource::Composed` over that seam and a fresh `BootAdapters` (the same `boot_server` `run_server` calls; not `run_server`, which takes only `GuestFlowAdapter::host()`, so `Damage` / `RepFail` could not be scripted at the seam); boot step 8's table transaction on the node's `SimMtlsIntercept` succeeds, after which the same invisible fixture allocation/control-session precondition is established, or is scripted to fail (`fail_next_table_transaction`) and `boot_server` returns the typed refusal `MtlsBoot(SharedOwner)` of ADR-0184 |
+//! | `RecQuiesce(c)` | `SimClock` to the supervisor's audit tick (`SHARED_NETWORK_AUDIT_PERIOD`); the detecting audit is released; the supervisor's recovery of `c` calls `quiesce()`; RECROUND1 records first-round membership only in model state, and a later joiner stays outside that active round |
+//! | `RecRepair(c)` / `RepFail(c)` | `SimClock` to the retry tick; the existing `held_repair(c)` driving-point check requires `c` to belong to the model's pending round; `c`'s repair (`converge_shared`, parked at its `bind_listener` on the held socket) returns `Ok` (still listening: accept re-spawned, nothing closed or bound) / a scripted `Err` (the held socket found not listening); the model publishes attempts only at its existing result barrier |
+//! | `RecRedo(c)` | the post-repair audit is released over the damage the trace's preceding `Damage(c)` re-applied; model-only round state publishes the unhealthy result only when the round completes |
+//! | `RecRestore(c)` | the clean post-repair audit is released; the supervisor calls `restore(hold)` at the completed round barrier represented only in the model |
 //! | `LeakHold` | the driver calls the composed owner's `quiesce()` and drops the returned hold unredeemed (D-UP-3; [`ComposedNode::leak_hold`]) |
 //! | `ForeignRestore` | the driver issues a hold from a second `QuiescenceLedger::new()` (PD-2) and calls the composed owner's `restore(hold)`; it requires `Err(ForeignHold)` (D-UP-4, PD-1; [`ComposedNode::restore_foreign_hold`]) |
 //! | `FailStop(c)` | `SimClock` to the audit tick (a leaked hold, cause `LeakedQuiescenceHold`) or past `SHARED_NETWORK_RECOVERY_DEADLINE` with the repair still failing (cause `RecoveryDeadlineExceeded`); the driver receives `ServeShutdownRequest::SharedGuestNetwork` and the process ends |
@@ -69,6 +69,10 @@
 //! composition is dropped); `table` ← S
 //! `SimMtlsIntercept::shared_table_state()` (`Complete` ⇔ true; the QPROJ-7
 //! arbiter, Tier-3 pair R5-30).
+//! RECROUND1 `roundState` is model-only and is deliberately absent from
+//! `QuiescenceState`, `State::from_spec`, `State::from_driver`, QPROJ-6 and
+//! driver bookkeeping. The existing `held_repair(c)` check remains the sole
+//! driving-point proof for repair-result actions.
 //!
 //! While no process runs: `stop` ← C (how the driver's own last call ended:
 //! `crash` after it dropped the composition, `failstop` after it received the
@@ -99,6 +103,7 @@
 )]
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use itf::Value;
@@ -110,6 +115,7 @@ use quint_connect::{Config, Driver, Result, State, Step, quint_run, quint_test, 
 use serde::Deserialize;
 
 use crate::error::{ControlPlaneError, MtlsBootError};
+use crate::guest_network::flow_io::sim::SimGuestFlowIo;
 use crate::guest_network::quint_itf::{self, ItfError, Qualified};
 use crate::guest_network::{GuestAdmission, QuiescenceRestoreError};
 use crate::shared_network_test_ports::composed::{C1, C2, ComposedNode, NodeStop};
@@ -179,36 +185,67 @@ struct QuiescenceDriver {
     foreign: bool,
 }
 
+fn process_runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .start_paused(true)
+        .build()
+        .expect("current-thread runtime with paused time")
+}
+
 impl QuiescenceDriver {
     fn fresh() -> Self {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .start_paused(true)
-            .build()
-            .expect("current-thread runtime with paused time");
+        let rt = process_runtime();
         Self { rt, node: ComposedNode::fresh(), foreign: false }
     }
 
     fn init_with(&mut self, flows: i64) -> Result {
+        self.stop_live_process();
         let mut node = ComposedNode::fresh();
-        self.rt.block_on(async {
-            node.boot().await.map_err(|refusal| DriverError::BootDiverged {
+        let booted = self.rt.block_on(node.boot_with_deferred_refusal_exit());
+        if let Err((refusal, io)) = booted {
+            self.replace_process_runtime(Some(io));
+            return Err(DriverError::BootDiverged {
                 expected: "succeed",
                 observed: format!("refused: {refusal}"),
-            })?;
-            if flows == 1 {
-                node.open_guest_flow().await;
             }
-            Ok::<(), DriverError>(())
-        })?;
+            .into());
+        }
+        self.rt.block_on(node.ensure_active_cid());
+        if flows == 1 {
+            self.rt.block_on(node.open_guest_flow());
+        }
         self.node = node;
         self.foreign = false;
         Ok(())
     }
 
     fn init_down(&mut self) {
+        self.stop_live_process();
         self.node = ComposedNode::fresh();
         self.foreign = false;
+    }
+
+    /// Replace one stopped process's runtime, destroying every detached owner
+    /// child before the old seam is released. This synchronous driver method
+    /// is outside any Tokio future, so Runtime drop never occurs in async
+    /// context.
+    fn replace_process_runtime(&mut self, exited_io: Option<Arc<SimGuestFlowIo>>) {
+        let ended = std::mem::replace(&mut self.rt, process_runtime());
+        drop(ended);
+        if let Some(io) = exited_io {
+            io.exit_process();
+        }
+    }
+
+    /// The runner reuses one driver across traces and then drops it after the
+    /// last trace. End any still-live process, drop its complete runtime, then
+    /// release its seam before replacing or dropping the node.
+    fn stop_live_process(&mut self) {
+        if self.node.process.is_some() {
+            let io = self.rt.block_on(self.node.detach_crashed_process());
+            self.replace_process_runtime(Some(io));
+        }
     }
 
     fn damage(&mut self, c: &str) -> Result {
@@ -226,25 +263,29 @@ impl QuiescenceDriver {
     }
 
     fn crash(&mut self) -> Result {
-        let rt = &self.rt;
-        let node = &mut self.node;
-        rt.block_on(node.crash());
+        let io = self.rt.block_on(self.node.detach_crashed_process());
+        self.replace_process_runtime(Some(io));
         self.foreign = false;
         Ok(())
     }
 
     fn restart_with(&mut self, write_ok: bool) -> Result {
-        let rt = &self.rt;
-        let node = &mut self.node;
         if !write_ok {
-            node.intercept.fail_next_table_transaction(SimInterceptFault::NftRuleInstall {
+            self.node.intercept.fail_next_table_transaction(SimInterceptFault::NftRuleInstall {
                 op: "shared-table-transaction",
                 errno: libc::EBUSY,
             });
         }
-        let booted = rt.block_on(node.boot());
+        let (booted, refused_io): (
+            std::result::Result<(), ControlPlaneError>,
+            Option<Arc<SimGuestFlowIo>>,
+        ) = match self.rt.block_on(self.node.boot_with_deferred_refusal_exit()) {
+            Ok(()) => (Ok(()), None),
+            Err((refusal, io)) => (Err(refusal), Some(io)),
+        };
+        let prepare_active_cid = write_ok && booted.is_ok();
         self.foreign = false;
-        match (write_ok, booted) {
+        let result = match (write_ok, booted) {
             (true, Ok(())) => Ok(()),
             (false, Err(ControlPlaneError::MtlsBoot(MtlsBootError::SharedOwner { .. }))) => Ok(()),
             (true, Err(refusal)) => Err(DriverError::BootDiverged {
@@ -262,7 +303,16 @@ impl QuiescenceDriver {
                 observed: "succeeded".to_owned(),
             }
             .into()),
+        };
+        if let Some(io) = refused_io {
+            // A typed boot refusal ends that process incarnation. A later
+            // RestartWith starts on a fresh runtime, as a new `serve` process.
+            self.replace_process_runtime(Some(io));
         }
+        if result.is_ok() && prepare_active_cid {
+            self.rt.block_on(self.node.ensure_active_cid());
+        }
+        result
     }
 
     fn rec_quiesce(&mut self, c: &str) -> Result {
@@ -396,9 +446,18 @@ impl QuiescenceDriver {
             }
             .into());
         }
-        rt.block_on(node.end_after_fail_stop());
+        let (_ended_request, io) = rt.block_on(node.detach_after_fail_stop());
+        self.replace_process_runtime(Some(io));
         self.foreign = false;
         Ok(())
+    }
+}
+
+impl Drop for QuiescenceDriver {
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            self.stop_live_process();
+        }
     }
 }
 
@@ -558,7 +617,6 @@ impl State<QuiescenceDriver> for QuiescenceState {
     test = "SingleRecoveryQuiescesRepairsRestores",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 fn quiescence_single_recovery_quiesces_repairs_restores() -> impl Driver {
     QuiescenceDriver::fresh()
 }
@@ -570,7 +628,6 @@ fn quiescence_single_recovery_quiesces_repairs_restores() -> impl Driver {
     test = "TwoOverlappingRecoveriesKeepForwardingQuiescedUntilTheLastRestore",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 fn quiescence_two_overlapping_recoveries_keep_forwarding_quiesced() -> impl Driver {
     QuiescenceDriver::fresh()
 }
@@ -582,7 +639,6 @@ fn quiescence_two_overlapping_recoveries_keep_forwarding_quiesced() -> impl Driv
     test = "NoFlowOpensWhileCountedHoldRemains",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 fn quiescence_no_flow_opens_while_counted_hold_remains() -> impl Driver {
     QuiescenceDriver::fresh()
 }
@@ -594,7 +650,6 @@ fn quiescence_no_flow_opens_while_counted_hold_remains() -> impl Driver {
     test = "TwoOverlappingRecoveriesReopenOnlyAtZero",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 fn quiescence_two_overlapping_recoveries_reopen_only_at_zero() -> impl Driver {
     QuiescenceDriver::fresh()
 }
@@ -608,7 +663,6 @@ fn quiescence_two_overlapping_recoveries_reopen_only_at_zero() -> impl Driver {
     test = "DroppedHoldKeepsForwardingQuiescedThenFailStops",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 fn quiescence_dropped_hold_keeps_forwarding_quiesced_then_fail_stops() -> impl Driver {
     QuiescenceDriver::fresh()
 }
@@ -620,7 +674,6 @@ fn quiescence_dropped_hold_keeps_forwarding_quiesced_then_fail_stops() -> impl D
     test = "RepairFailureCountsAttemptThenRepairs",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 fn quiescence_repair_failure_counts_attempt_then_repairs() -> impl Driver {
     QuiescenceDriver::fresh()
 }
@@ -632,7 +685,6 @@ fn quiescence_repair_failure_counts_attempt_then_repairs() -> impl Driver {
     test = "PostRepairAuditFailureCountsAttempt",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 fn quiescence_post_repair_audit_failure_counts_attempt() -> impl Driver {
     QuiescenceDriver::fresh()
 }
@@ -644,7 +696,6 @@ fn quiescence_post_repair_audit_failure_counts_attempt() -> impl Driver {
     test = "SpentBudgetFailStopsAndRestartConverges",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 fn quiescence_spent_budget_fail_stops_and_restart_converges() -> impl Driver {
     QuiescenceDriver::fresh()
 }
@@ -656,7 +707,6 @@ fn quiescence_spent_budget_fail_stops_and_restart_converges() -> impl Driver {
     test = "CrashDuringRecoveryThenRestartRecovers",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 fn quiescence_crash_during_recovery_then_restart_recovers() -> impl Driver {
     QuiescenceDriver::fresh()
 }
@@ -676,7 +726,6 @@ fn quiescence_failed_boot_table_write_refuses_boot_then_retry_succeeds() -> impl
 /// Randomized traces of the conformance main (seed printed on failure).
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_run(spec = "../../specs/quint/guest-flow-owner/quiescence.qnt", main = "quiesce_conf")]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 fn quiescence_quiesce_conf_randomized() -> impl Driver {
     QuiescenceDriver::fresh()
 }

@@ -602,6 +602,10 @@ impl SharedGuestNetworkOwner for LeaseLedger {
         self.inner.flow_ports()
     }
 
+    fn leaked_quiescence_holds(&self) -> u32 {
+        self.inner.leaked_quiescence_holds()
+    }
+
     async fn audit_shared(
         &self,
     ) -> std::result::Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError> {
@@ -1328,7 +1332,6 @@ enum Block {
 /// S-ND295-05D — Across a whole node, held attachments never exceed the cap.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn node_wide_attachment_admission_never_exceeds_the_t1_cap_across_workloads() {
     for seed in seeds() {
         eprintln!(

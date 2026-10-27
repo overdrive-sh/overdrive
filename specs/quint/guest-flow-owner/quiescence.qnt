@@ -116,6 +116,14 @@ module quiescence {
     refusedBoot: bool,   // a boot attempt was refused (witness)
     foreignChanged: bool, // D-UP-4: a restore with a foreign hold changed the count, the latch or the leaked count
   }
+  type RoundProjection = {
+    phases: str -> str,
+    attempts: str -> int,
+    count: int,
+    latched: bool,
+    scheduler: str -> str,
+    ghost: Ghost,
+  }
   val g0: Ghost = { reopenEarly: false, overlapped: false, stillQuiesced: false,
                     failStopped: false, dropped: false, refusedBoot: false,
                     foreignChanged: false }
@@ -132,16 +140,68 @@ module quiescence {
   var flowsOpen: int         // open flows (0 or 1)
   var leaked: int            // D-UP-3: the owner's leaked-hold count (holds dropped without a restore; process-scoped)
   var foreign: bool          // D-UP-4: the supervisor's restore returned ForeignHold (process-scoped, until fail-stop)
+  var roundState: str -> str // RECROUND1: model-only attempt-round membership/result barrier
   var g: Ghost
   var conf_step: ConfStep    // D-UP-1: the action that produced this state (model-only)
 
   val recIdle: str -> str = COMPONENTS.mapBy(c => "idle")
   val att0: str -> int = COMPONENTS.mapBy(c => 0)
+  val roundOutside: str -> str = COMPONENTS.mapBy(c => "outside")
   def dec(x: int): int = if (x < 0) x else x - 1
   // a recovery that has quiesced and not yet repaired
   def unrepaired(c: str): bool = rec.get(c) == "held"
   // a recovery that holds its `QuiescenceHold` (from its quiesce to its restore)
   def holding(c: str): bool = rec.get(c).in(Set("held", "repaired"))
+
+  def phaseHolding(phase: str): bool = phase.in(Set("held", "repaired"))
+  def inRound(c: str): bool = roundState.get(c) != "outside"
+  def resultPending(c: str): bool = roundState.get(c) == "pending"
+  def beginRound(nextRec: str -> str): str -> str =
+    COMPONENTS.mapBy(c => if (nextRec.get(c) == "held") "pending" else "outside")
+  def roundExists: bool = COMPONENTS.exists(c => inRound(c))
+  def roundComplete(nextRound: str -> str): bool = and {
+    COMPONENTS.exists(c => nextRound.get(c).in(Set("keep", "restore"))),
+    not(COMPONENTS.exists(c => nextRound.get(c) == "pending")),
+  }
+  def restoreCount(nextRound: str -> str): int =
+    nextRound.keys().filter(c => nextRound.get(c) == "restore").size()
+  def publishRound(
+    nextRec: str -> str,
+    nextAtt: str -> int,
+    nextCnt: int,
+    nextLatch: bool,
+    nextRound: str -> str,
+    nextGhost: Ghost
+  ): RoundProjection =
+    if (not(roundComplete(nextRound)))
+      { phases: nextRec, attempts: nextAtt, count: nextCnt, latched: nextLatch,
+        scheduler: nextRound, ghost: nextGhost }
+    else
+      val hasRestore = restoreCount(nextRound) > 0
+      val boolFault = bug("boolLatch") and hasRestore
+      val postRec = COMPONENTS.mapBy(c =>
+        if (boolFault and phaseHolding(nextRec.get(c))) "idle"
+        else if (nextRound.get(c) == "keep") "held"
+        else if (nextRound.get(c) == "restore") "idle"
+        else nextRec.get(c))
+      val postAtt =
+        if (boolFault) att0
+        else COMPONENTS.mapBy(c =>
+          if (nextRound.get(c) == "keep") nextAtt.get(c) + 1
+          else if (nextRound.get(c) == "restore") 0
+          else nextAtt.get(c))
+      val postCnt = if (boolFault) 0 else nextCnt - restoreCount(nextRound)
+      val postLatch = postCnt > 0
+      val heldRemain = COMPONENTS.exists(c => postRec.get(c) == "held")
+      val early = not(postLatch) and COMPONENTS.exists(c =>
+        phaseHolding(nextRec.get(c)) and nextRound.get(c) != "restore")
+      val postGhost = {
+        ...nextGhost,
+        reopenEarly: nextGhost.reopenEarly or early,
+        stillQuiesced: nextGhost.stillQuiesced or (hasRestore and postLatch),
+      }
+      { phases: postRec, attempts: postAtt, count: postCnt, latched: postLatch,
+        scheduler: if (heldRemain) beginRound(postRec) else roundOutside, ghost: postGhost }
 
   action keepEnv = all { up' = up, stop' = stop, table' = table, dmg' = dmg, repLeft' = repLeft }
 
@@ -150,12 +210,14 @@ module quiescence {
   action InitDown = all {
     up' = false, stop' = "crash", table' = false, cnt' = 0, latch' = false, rec' = recIdle,
     dmg' = COMPONENTS.mapBy(c => false), att' = att0, repLeft' = REPAIR_FAILS, flowsOpen' = 0, leaked' = 0, foreign' = false, g' = g0,
+    roundState' = roundOutside,
     conf_step' = variant("InitDown", ()),
   }
   // `fl`: whether a flow is open when the first hold is taken
   action InitWith(fl: int): bool = all {
     up' = true, stop' = "none", table' = true, cnt' = 0, latch' = false, rec' = recIdle,
     dmg' = COMPONENTS.mapBy(c => false), att' = att0, repLeft' = REPAIR_FAILS, flowsOpen' = fl, leaked' = 0, foreign' = false, g' = g0,
+    roundState' = roundOutside,
     conf_step' = if (REC) variant("InitWith", { fl: fl }) else variant("InitDown", ()),
   }
 
@@ -165,18 +227,21 @@ module quiescence {
     up, not(dmg.get(c)),
     dmg' = dmg.set(c, true), up' = up, stop' = stop, table' = table, repLeft' = repLeft,
     cnt' = cnt, latch' = latch, rec' = rec, att' = att, flowsOpen' = flowsOpen, leaked' = leaked, foreign' = foreign, g' = g,
+    roundState' = roundState,
     conf_step' = if (REC) variant("Damage", { c: c }) else conf_step,
   }
   // a new flow opens while admission is open
+  def canOpenFlow: bool = up and not(latch) and flowsOpen == 0 and not(dmg.get("C1"))
   action OpenFlow = all {
-    up, not(latch), flowsOpen == 0,
-    flowsOpen' = 1, cnt' = cnt, latch' = latch, rec' = rec, att' = att, leaked' = leaked, foreign' = foreign, keepEnv, g' = g,
+    canOpenFlow,
+    flowsOpen' = 1, cnt' = cnt, latch' = latch, rec' = rec, att' = att, leaked' = leaked, foreign' = foreign,
+    roundState' = roundState, keepEnv, g' = g,
     conf_step' = if (REC) variant("OpenFlow", ()) else conf_step,
   }
   action Crash = all {
     ALLOW_CRASH, up,
     up' = false, stop' = "crash", cnt' = 0, latch' = false, rec' = recIdle, att' = att0, flowsOpen' = 0, leaked' = 0, foreign' = false,
-    dmg' = COMPONENTS.mapBy(c => false), table' = table, repLeft' = repLeft, g' = g,
+    dmg' = COMPONENTS.mapBy(c => false), table' = table, repLeft' = repLeft, roundState' = roundOutside, g' = g,
     conf_step' = if (REC) variant("Crash", ()) else conf_step,
   }
   // boot step 8 writes the table in one transaction. It succeeds (serve runs, forwarding opens), or fails and
@@ -190,7 +255,7 @@ module quiescence {
     up' = (writeOk or bug("bootContinues")), stop' = if (writeOk or bug("bootContinues")) "none" else "refused",
     table' = (table or writeOk),
     cnt' = cnt, latch' = latch, rec' = rec, att' = att, flowsOpen' = flowsOpen, dmg' = dmg, repLeft' = repLeft,
-    leaked' = leaked, foreign' = foreign,
+    leaked' = leaked, foreign' = foreign, roundState' = roundState,
     g' = { ...g, refusedBoot: g.refusedBoot or not(writeOk) },
     conf_step' = if (REC) variant("RestartWith", { writeOk: writeOk }) else conf_step,
   }
@@ -207,7 +272,7 @@ module quiescence {
       latch' = after > 0,
       flowsOpen' = if (cnt == 0 and not(bug("quiesceSkipsFlows"))) 0 else flowsOpen,
     },
-    leaked' = leaked + 1, foreign' = foreign, rec' = rec, att' = att, keepEnv,
+    leaked' = leaked + 1, foreign' = foreign, rec' = rec, att' = att, roundState' = roundState, keepEnv,
     g' = { ...g, dropped: true, overlapped: g.overlapped or cnt > 0 },
     conf_step' = if (REC) variant("LeakHold", ()) else conf_step,
   }
@@ -228,58 +293,98 @@ module quiescence {
       g' = { ...g, reopenEarly: g.reopenEarly or early,
              foreignChanged: g.foreignChanged or newCnt != cnt or newLatch != latch },
     },
-    foreign' = true, leaked' = leaked, rec' = rec, att' = att, flowsOpen' = flowsOpen, keepEnv,
+    foreign' = true, leaked' = leaked, rec' = rec, att' = att, flowsOpen' = flowsOpen,
+    roundState' = roundState, keepEnv,
     conf_step' = if (REC) variant("ForeignRestore", ()) else conf_step,
   }
 
   // ------------------------------------------------------------------ recovery of component c
+  // The supervisor checks the owner's leaked-hold ledger before starting a periodic audit. A real leak therefore
+  // fail-stops before that tick can discover and start another recovery; leakIgnored is the explicit hazard where
+  // this priority is absent. The audit starts only its first damaged idle component; components already recovering
+  // are skipped, so a later damaged idle component can begin an overlapping recovery on a following tick.
+  def nextDamagedIdle: str =
+    if (dmg.get("C1") and rec.get("C1") == "idle") "C1"
+    else if (dmg.get("C2") and rec.get("C2") == "idle") "C2"
+    else "none"
+  def canRecQuiesce(c: str): bool = and {
+    up, c == nextDamagedIdle, leaked == 0 or bug("leakIgnored"),
+  }
   // the audit finds c damaged → quiesce_forwarding(): count + 1; the first hold latches admission and aborts the flows
   action RecQuiesce(c: str): bool = all {
-    up, rec.get(c) == "idle", dmg.get(c),
-    cnt' = cnt + 1, latch' = true, rec' = rec.set(c, "held"), att' = att, leaked' = leaked, foreign' = foreign,
+    canRecQuiesce(c),
+    val nextRec = rec.set(c, "held")
+    all {
+      rec' = nextRec,
+      roundState' = if (roundExists) roundState else beginRound(nextRec),
+    },
+    cnt' = cnt + 1, latch' = true, att' = att, leaked' = leaked, foreign' = foreign,
     flowsOpen' = if (cnt == 0 and not(bug("quiesceSkipsFlows"))) 0 else flowsOpen, keepEnv,
     g' = { ...g, overlapped: g.overlapped or cnt > 0 },
     conf_step' = if (REC) variant("RecQuiesce", { c: c }) else conf_step,
   }
   // the repair of c
   action RecRepair(c: str): bool = all {
-    up, rec.get(c) == "held", att.get(c) < MAXATT,
+    up, resultPending(c), rec.get(c) == "held", att.get(c) < MAXATT,
     dmg' = dmg.set(c, false), rec' = rec.set(c, "repaired"),
     cnt' = cnt, latch' = latch, att' = att, flowsOpen' = flowsOpen, up' = up, stop' = stop, table' = table,
-    repLeft' = repLeft, leaked' = leaked, foreign' = foreign, g' = g,
+    repLeft' = repLeft, leaked' = leaked, foreign' = foreign, roundState' = roundState, g' = g,
     conf_step' = if (REC) variant("RecRepair", { c: c }) else conf_step,
   }
   // D-UP-3 / UP-7: the repair returns Err — a failed attempt, counted; the recovery keeps its hold (the only cause of
   // a failed repair)
   action RepFail(c: str): bool = all {
-    up, rec.get(c) == "held", att.get(c) < MAXATT, repLeft != 0,
-    att' = att.set(c, att.get(c) + 1), repLeft' = dec(repLeft),
-    cnt' = cnt, latch' = latch, rec' = rec, flowsOpen' = flowsOpen, up' = up, stop' = stop, dmg' = dmg, table' = table,
-    leaked' = leaked, foreign' = foreign, g' = g,
+    up, resultPending(c), rec.get(c) == "held", att.get(c) < MAXATT, repLeft != 0,
+    val published = publishRound(rec, att, cnt, latch, roundState.set(c, "keep"), g)
+    all {
+      rec' = published.phases, att' = published.attempts,
+      cnt' = published.count, latch' = published.latched,
+      roundState' = published.scheduler, g' = published.ghost,
+    },
+    repLeft' = dec(repLeft), flowsOpen' = flowsOpen, up' = up, stop' = stop, dmg' = dmg, table' = table,
+    leaked' = leaked, foreign' = foreign,
     conf_step' = if (REC) variant("RepFail", { c: c }) else conf_step,
   }
-  // the post-repair audit finds c damaged again: a failed attempt (UP-7); repair again under the hold
+  // A full post-repair audit returns the first damaged component in fixed component order. That finding is healthy
+  // for c only when it follows c; an idle finding starts its own recovery in the same supervisor result step.
+  def auditFinding: str = if (dmg.get("C1")) "C1" else if (dmg.get("C2")) "C2" else "none"
+  def findingBlocks(c: str, finding: str): bool =
+    finding == c or (c == "C2" and finding == "C1")
+  def startsFinding(finding: str): bool =
+    finding != "none" and rec.get(finding) == "idle"
+  // the post-repair audit finds c or an earlier component damaged: c's failed attempt is counted and held again;
+  // an earlier idle finding starts its own recovery under a new hold in that same supervisor step
   action RecRedo(c: str): bool = all {
-    up, rec.get(c) == "repaired", dmg.get(c),
-    rec' = rec.set(c, "held"),
-    att' = att.set(c, att.get(c) + 1),
-    cnt' = cnt, latch' = latch, flowsOpen' = flowsOpen, leaked' = leaked, foreign' = foreign, keepEnv, g' = g,
+    up, resultPending(c), rec.get(c) == "repaired", findingBlocks(c, auditFinding),
+    val starts = startsFinding(auditFinding) and auditFinding != c
+    val nextRec = if (starts) rec.set(auditFinding, "held") else rec
+    val nextCnt = cnt + (if (starts) 1 else 0)
+    val nextGhost = { ...g, overlapped: g.overlapped or starts }
+    val nextRound = roundState.set(c, "keep")
+    val published = publishRound(nextRec, att, nextCnt, true, nextRound, nextGhost)
+    all {
+      rec' = published.phases, att' = published.attempts,
+      cnt' = published.count, latch' = published.latched,
+      roundState' = published.scheduler, g' = published.ghost,
+    },
+    flowsOpen' = flowsOpen, leaked' = leaked, foreign' = foreign, keepEnv,
     conf_step' = if (REC) variant("RecRedo", { c: c }) else conf_step,
   }
-  // clean audit → restore_forwarding(hold): the hold is consumed, the count decremented; admission reopens only
-  // when the count reaches zero. boolLatch: the restore reopens and ends every hold.
+  // A clean audit for c has no finding at or before c. A later idle finding begins its own recovery, then c restores
+  // its hold in the same supervisor result step; admission reopens only when the resulting count reaches zero.
+  // boolLatch: the restore reopens and ends every hold, including a newly found one.
   action RecRestore(c: str): bool = all {
-    up, rec.get(c) == "repaired", not(dmg.get(c)),
-    val newCnt = if (bug("boolLatch")) 0 else cnt - 1
-    val reopens = newCnt == 0
-    val early = reopens and COMPONENTS.exists(d => d != c and unrepaired(d))
+    up, resultPending(c), rec.get(c) == "repaired", not(findingBlocks(c, auditFinding)),
+    val starts = startsFinding(auditFinding)
+    val nextRec = if (starts) rec.set(auditFinding, "held") else rec
+    val nextCnt = cnt + (if (starts) 1 else 0)
+    val nextGhost = { ...g, overlapped: g.overlapped or starts }
+    val nextRound = roundState.set(c, "restore")
+    val published = publishRound(nextRec, att, nextCnt, latch, nextRound, nextGhost)
     all {
-      cnt' = newCnt,
-      latch' = not(reopens),
-      rec' = if (bug("boolLatch")) COMPONENTS.mapBy(d => if (d == c or rec.get(d) == "held") "idle" else rec.get(d))
-             else rec.set(c, "idle"),
-      att' = if (bug("boolLatch")) att0 else att.set(c, 0),
-      g' = { ...g, reopenEarly: g.reopenEarly or early, stillQuiesced: g.stillQuiesced or not(reopens) },
+      rec' = published.phases, att' = published.attempts,
+      cnt' = published.count, latch' = published.latched,
+      roundState' = published.scheduler, g' = published.ghost,
     },
     flowsOpen' = flowsOpen, leaked' = leaked, foreign' = foreign, keepEnv,
     conf_step' = if (REC) variant("RecRestore", { c: c }) else conf_step,
@@ -288,19 +393,36 @@ module quiescence {
   // spent, or (D-UP-3, cause LeakedQuiescenceHold) the owner's leaked-hold count is above zero, or (D-UP-4 / PD-1, cause
   // ForeignQuiescenceHold) a restore returned ForeignHold — the last two independent of any component's recovery (c then
   // only names the supervisor's step). leakIgnored: the leaked count is not consulted; foreignIgnored: nor ForeignHold.
+  def waitingOnRound(c: str): bool = and {
+    holding(c),
+    not(resultPending(c)),
+    COMPONENTS.exists(d => resultPending(d)),
+  }
   action FailStop(c: str): bool = all {
     up, or {
       unrepaired(c) and att.get(c) >= MAXATT,
       leaked > 0 and not(bug("leakIgnored")),
       foreign and not(bug("foreignIgnored")),
+      waitingOnRound(c),
     },
     up' = false, stop' = "failstop", cnt' = 0, latch' = false, rec' = recIdle, att' = att0, flowsOpen' = 0, leaked' = 0, foreign' = false,
-    dmg' = COMPONENTS.mapBy(d => false), table' = table, repLeft' = repLeft,
+    dmg' = COMPONENTS.mapBy(d => false), table' = table, repLeft' = repLeft, roundState' = roundOutside,
     g' = { ...g, failStopped: true },
     conf_step' = if (REC) variant("FailStop", { c: c }) else conf_step,
   }
+  def conformanceFailStopDrivable(c: str): bool = or {
+    CFG != "conf", unrepaired(c) and att.get(c) >= MAXATT, leaked > 0,
+  }
+  // The conformance fixture's one DNS gate releases every pending full audit.
+  // While any repaired episode awaits its post-repair audit, a periodic
+  // RecQuiesce step would also complete that episode and is represented by
+  // RecRedo / RecRestore instead. Canonical/model-checking actions are full.
+  def conformanceRecQuiesceDrivable: bool =
+    CFG != "conf" or COMPONENTS.forall(c => rec.get(c) != "repaired")
   action recStep(c: str): bool = any {
-    RecQuiesce(c), RecRepair(c), RecRedo(c), RecRestore(c), FailStop(c),
+    all { conformanceRecQuiesceDrivable, RecQuiesce(c) },
+    RecRepair(c), RecRedo(c), RecRestore(c),
+    all { conformanceFailStopDrivable(c), FailStop(c) },
   }
   action step = {
     nondet c = COMPONENTS.oneOf()
@@ -313,6 +435,15 @@ module quiescence {
   // CountCoversRecoveries (QHOLD, D-UP-3): the hold count is the number of recoveries holding a hold (from quiesce to
   // restore) plus the leaked holds
   val CountCoversRecoveries: bool = cnt == COMPONENTS.filter(c => holding(c)).size() + leaked
+  val RoundStateIsRecovery: bool = and {
+    COMPONENTS.forall(c =>
+      roundState.get(c).in(Set("outside", "pending", "keep", "restore"))),
+    COMPONENTS.forall(c => inRound(c).implies(holding(c))),
+    COMPONENTS.forall(c =>
+      (roundState.get(c) == "restore").implies(rec.get(c) == "repaired")),
+    not(COMPONENTS.exists(c => roundState.get(c).in(Set("keep", "restore"))))
+      or COMPONENTS.exists(c => resultPending(c)),
+  }
   // NoReopenBeforeRepair (QHOLD): forwarding never reopens while a recovery is between quiesce and repair
   val NoReopenBeforeRepair: bool = not(g.reopenEarly)
   // quiescence aborted every flow, and none opens while quiesced
@@ -327,7 +458,7 @@ module quiescence {
   val ForeignRestoreChangesNothing: bool = not(g.foreignChanged)
   val Safety: bool = and {
     ForeignRestoreChangesNothing, LeakedHoldKeepsForwardingQuiesced, LatchIffCount, CountCoversRecoveries, NoReopenBeforeRepair, QuiescedHoldsNoFlow,
-    ServeRunsOnlyWithTable,
+    ServeRunsOnlyWithTable, RoundStateIsRecovery,
   }
 
   // ------------------------------------------------------------------ named runs (critical scenarios)
@@ -346,12 +477,14 @@ module quiescence {
   run TwoOverlappingRecoveriesKeepForwardingQuiescedUntilTheLastRestore = InitWith(1)
     .then(Damage("C1")).then(Damage("C2"))
     .then(RecQuiesce("C1")).then(RecQuiesce("C2"))
-    .expect(Safety and cnt == 2 and latch and g.overlapped and flowsOpen == 0)
+    .expect(Safety and cnt == 2 and latch and g.overlapped and flowsOpen == 0
+            and roundState.get("C1") == "pending" and roundState.get("C2") == "outside")
     .then(RecRepair("C1")).then(RecRestore("C1"))
-    .expect(Safety and cnt == 1 and latch and g.stillQuiesced and not(g.reopenEarly) and rec.get("C2") == "held")
+    .expect(Safety and cnt == 1 and latch and g.stillQuiesced and not(g.reopenEarly) and rec.get("C2") == "held"
+            and roundState.get("C2") == "pending")
   // ... and no flow opens while the count is above zero
   run NoFlowOpensWhileCountedHoldRemains = TwoOverlappingRecoveriesKeepForwardingQuiescedUntilTheLastRestore
-    .then(OpenFlow).fail()
+    .expect(not(canOpenFlow))
   run TwoOverlappingRecoveriesReopenOnlyAtZero = TwoOverlappingRecoveriesKeepForwardingQuiescedUntilTheLastRestore
     .then(RecRepair("C2")).then(RecRestore("C2"))
     .expect(Safety and cnt == 0 and not(latch) and not(g.reopenEarly))
@@ -420,9 +553,11 @@ module quiescence {
   // fairness of component c's own recovery steps only (no fairness for any other recovery, for damage,
   // crash, restart, leak)
   temporal OwnFair(c: str): bool = and {
-    weakFair(RecQuiesce(c), (rec, cnt, dmg)), weakFair(RecRepair(c), (rec, cnt, dmg)),
-    weakFair(RecRedo(c), (rec, cnt, dmg)), weakFair(RecRestore(c), (rec, cnt, dmg)),
-    weakFair(FailStop(c), (rec, cnt, dmg, up)),
+    weakFair(RecQuiesce(c), (rec, cnt, dmg)),
+    weakFair(RecRepair(c), (rec, cnt, dmg, roundState)),
+    weakFair(RecRedo(c), (rec, cnt, dmg, roundState)),
+    weakFair(RecRestore(c), (rec, cnt, dmg, roundState)),
+    weakFair(FailStop(c), (rec, cnt, dmg, up, roundState)),
   }
   // (QHOLD, ADR-0124, UP-7) a recovery episode ends — restored, or serve stopped — under the recovery's own
   // fairness, whatever the other recovery and recurring damage do

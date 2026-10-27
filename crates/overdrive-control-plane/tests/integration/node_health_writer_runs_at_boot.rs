@@ -67,10 +67,6 @@ async fn boot_writes_exactly_one_node_health_row_to_observation_store() {
         driver,
         Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
         wiring,
-        overdrive_worker::cgroup_manager::CgroupManager::new(
-            std::path::PathBuf::from("/sys/fs/cgroup"),
-            std::sync::Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
-        ),
     )
     .await
     .expect("run_server_with_obs_and_driver");
@@ -139,10 +135,6 @@ async fn boot_writes_node_health_row_visible_via_get_v1_nodes() {
         driver,
         Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
         wiring,
-        overdrive_worker::cgroup_manager::CgroupManager::new(
-            std::path::PathBuf::from("/sys/fs/cgroup"),
-            std::sync::Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
-        ),
     )
     .await
     .expect("run_server_with_obs_and_driver");

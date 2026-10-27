@@ -1,4 +1,4 @@
-# owner-flows-sess-env-guest-misses-session-loss: counterexample, 17 state(s) (from the TLC trace)
+# owner-flows-sess-env-guest-misses-session-loss: counterexample, 18 state(s) (from the TLC trace)
 
 State 1
   bHeldByOther = FALSE
@@ -20,6 +20,7 @@ State 1
   badAct = FALSE
   toHostPaired = {}
   claim = 0
+  bq = <<>>
   readyCross = FALSE
   toHostRefused = {}
   dl = [res |-> << >>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE]
@@ -32,56 +33,56 @@ State 1
   toGuestAbort = {}
   flows = << >>
 
-State 2 [Provision]
+State 2 [step]
+  quiesced = TRUE
+
+State 3 [Provision]
   gen = 1
   alloc = "Provisioned"
 
-State 3 [VmStart]
+State 4 [VmStart]
   vmGen = 1
   vmUp = TRUE
 
-State 4 [Teardown]
+State 5 [Teardown]
   alloc = "Retiring"
 
-State 5 [step]
+State 6 [step]
   gSess = 1
   sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
 
-State 6 [VmStop]
+State 7 [VmStop]
   gSess = 0
   vmUp = FALSE
 
-State 7 [Release]
+State 8 [Release]
   alloc = "Absent"
 
-State 8 [step]
+State 9 [step]
   sess = <<[st |-> "closed", gen |-> 1], [st |-> "none", gen |-> 0]>>
 
-State 9 [Provision]
+State 10 [Provision]
   gen = 2
   alloc = "Provisioned"
 
-State 10 [VmStart]
+State 11 [VmStart]
   vmGen = 2
   vmUp = TRUE
 
-State 11 [step]
+State 12 [step]
   gSess = 2
   sess = <<[st |-> "closed", gen |-> 1], [st |-> "pending", gen |-> 2]>>
 
-State 12 [step]
+State 13 [step]
   sess = <<[st |-> "closed", gen |-> 1], [st |-> "reading", gen |-> 2]>>
 
-State 13 [step]
+State 14 [step]
   sess = <<[st |-> "closed", gen |-> 1], [st |-> "live", gen |-> 2]>>
   claim = 2
 
-State 14 [step]
+State 15 [step]
   sess = <<[st |-> "closed", gen |-> 1], [st |-> "closed", gen |-> 2]>>
   claim = 0
-
-State 15 [step]
-  quiesced = TRUE
 
 State 16 [ActivateQuiesced]
   act = "QuiescenceLatched"
@@ -90,4 +91,7 @@ State 17 [step]
   quiesced = FALSE
   act = "none"
 
--> loops back to State 15
+State 18 [step]
+  quiesced = TRUE
+
+-> loops back to State 16

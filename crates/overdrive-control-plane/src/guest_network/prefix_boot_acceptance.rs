@@ -77,12 +77,12 @@ use super::{
 /// The owner's ports with the configured service VIP range `vip`; everything
 /// else as in production (`GUEST_NODE_PREFIX` / `GUEST_NODE_GATEWAY`), the
 /// time and resolution ports simulated.
-fn owner_ports(vip: &[Ipv4Net]) -> GuestFlowOwnerPorts {
+fn owner_ports(vip: &[Ipv4Net], reserved: BTreeSet<Ipv4Addr>) -> GuestFlowOwnerPorts {
     GuestFlowOwnerPorts {
         clock: Arc::new(SimClock::new()),
         resolve: Arc::new(SimMtlsResolve::new(BTreeMap::new(), MtlsResolution::NonMesh)),
         mtls: crate::shared_network_test_ports::mtls_worker(),
-        vip_range: VipRange::new(vip.to_vec(), BTreeSet::new()).expect("valid VIP range"),
+        vip_range: VipRange::new(vip.to_vec(), reserved).expect("valid VIP range"),
         node_prefix: GUEST_NODE_PREFIX,
         gateway: GUEST_NODE_GATEWAY,
         stream_port: VsockListenPort::KernelAssigned,
@@ -112,6 +112,7 @@ struct Serve {
 impl Serve {
     fn start(ports: GuestFlowOwnerPorts) -> Self {
         let io = SimGuestFlowIo::new(0x0295_0013);
+        io.auto_release(SimEffectKind::ProbeForwarder);
         let seam: Arc<dyn GuestFlowIo> = Arc::clone(&io) as Arc<dyn GuestFlowIo>;
         let owner = Arc::new(HostSharedGuestNetworkOwner::with_flow_io(ports, seam));
         Self { io, owner }
@@ -222,7 +223,7 @@ fn overlaps(a: Ipv4Net, b: Ipv4Net) -> bool {
 #[ignore = "pending DELIVER step 13"]
 async fn a_vip_range_overlapping_the_prefix_refuses_before_any_boot_effect() {
     for overlapping in ["100.95.255.0/24", "100.94.0.0/15"] {
-        let serve = Serve::start(owner_ports(&[net(overlapping)]));
+        let serve = Serve::start(owner_ports(&[net(overlapping)], BTreeSet::new()));
         let refused = serve.owner.probe_startup().await.expect_err("probe_startup refuses");
         assert!(
             matches!(
@@ -240,8 +241,8 @@ async fn a_vip_range_overlapping_the_prefix_refuses_before_any_boot_effect() {
     }
     for entry in [PhaseOne::BootSeam, PhaseOne::Owner] {
         for disjoint in ["100.96.0.0/16", "10.96.0.0/16"] {
-            let serve = Serve::start(owner_ports(&[net(disjoint)]));
-            phase_one_over(&serve, entry, &[net(disjoint)])
+            let serve = Serve::start(owner_ports(&[net(disjoint)], BTreeSet::new()));
+            phase_one_over(&serve, entry, &[net(disjoint)], BTreeSet::new())
                 .await
                 .unwrap_or_else(|e| panic!("{entry:?} {disjoint} boots: {e}"));
             phase_one_witness(&serve.io).unwrap_or_else(|w| panic!("{entry:?} {disjoint}: {w}"));
@@ -251,24 +252,47 @@ async fn a_vip_range_overlapping_the_prefix_refuses_before_any_boot_effect() {
 }
 
 /// P4-S14 (D8-PREFIX-VIP) — `probe_startup` refuses exactly when some range of
-/// the configured VIP range meets the guest prefix.
+/// the configured VIP range meets the guest prefix and names the first such
+/// range in operator order.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[test]
 #[ignore = "pending DELIVER step 13"]
 fn probe_startup_refuses_a_vip_range_iff_one_of_its_ranges_meets_the_guest_prefix() {
-    proptest!(|(ranges in proptest::collection::vec(arb_vip_member(), 1..5))| {
-        prop_assume!(VipRange::new(ranges.clone(), BTreeSet::new()).is_ok());
+    proptest!(|(
+        ranges in proptest::collection::vec(arb_vip_member(), 1..5),
+        reserved_words in proptest::collection::vec(any::<u32>(), 0..5),
+    )| {
+        let reserved: BTreeSet<_> = reserved_words
+            .iter()
+            .enumerate()
+            .map(|(index, raw)| {
+                let range = ranges[index % ranges.len()];
+                let host_bits = 32 - u32::from(range.prefix_len());
+                let host_mask = if host_bits == 32 { u32::MAX } else { (1_u32 << host_bits) - 1 };
+                Ipv4Addr::from(u32::from(range.network()) | (*raw & host_mask))
+            })
+            .collect();
+        prop_assume!(VipRange::new(ranges.clone(), reserved.clone()).is_ok());
         let runtime = tokio::runtime::Builder::new_current_thread().build().expect("runtime");
-        let expect_refusal = ranges.iter().any(|range| overlaps(*range, GUEST_NODE_PREFIX));
+        let expected_overlap =
+            ranges.iter().copied().find(|range| overlaps(*range, GUEST_NODE_PREFIX));
         for entry in [PhaseOne::BootSeam, PhaseOne::Owner] {
-            let serve = Serve::start(owner_ports(&ranges));
-            let outcome = runtime.block_on(phase_one_over(&serve, entry, &ranges));
-            prop_assert_eq!(
-                matches!(outcome, Err(GuestNetworkError::GuestPrefixOverlapsVipRange { .. })),
-                expect_refusal,
-                "{:?}", entry
-            );
-            if expect_refusal {
+            let serve = Serve::start(owner_ports(&ranges, reserved.clone()));
+            let outcome = runtime.block_on(phase_one_over(
+                &serve,
+                entry,
+                &ranges,
+                reserved.clone(),
+            ));
+            if let Some(expected) = expected_overlap {
+                prop_assert!(
+                    matches!(
+                        &outcome,
+                        Err(GuestNetworkError::GuestPrefixOverlapsVipRange { prefix, vip_range })
+                            if *prefix == GUEST_NODE_PREFIX && *vip_range == expected
+                    ),
+                    "{entry:?}: names the first operator-ordered overlapping range {expected}, got {outcome:?}",
+                );
                 prop_assert!(boot_effects(&serve.io).is_empty(), "no effect before the refusal");
             } else {
                 prop_assert!(outcome.is_ok(), "{:?}: a disjoint range passes: {:?}", entry, outcome);
@@ -294,7 +318,7 @@ async fn a_node_address_inside_the_prefix_refuses_before_any_boot_effect() {
     let eth0 = ifindex(2);
     let eth1 = ifindex(3);
     for inside in ["100.95.7.1/24", "100.95.255.254/32", "100.95.0.2/16"] {
-        let serve = Serve::start(owner_ports(&disjoint_vip()))
+        let serve = Serve::start(owner_ports(&disjoint_vip(), BTreeSet::new()))
             .with_interfaces(vec![(eth0, vec!["10.0.2.15/24"]), (eth1, vec![inside])]);
         let refused = serve.owner.probe_startup().await.expect_err("probe_startup refuses");
         assert!(
@@ -320,7 +344,7 @@ async fn a_node_address_inside_the_prefix_refuses_before_any_boot_effect() {
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 #[ignore = "pending DELIVER step 13"]
 async fn a_node_that_overlaps_the_prefix_by_address_and_by_vip_range_names_the_vip_range() {
-    let serve = Serve::start(owner_ports(&[net("100.95.128.0/17")]))
+    let serve = Serve::start(owner_ports(&[net("100.95.128.0/17")], BTreeSet::new()))
         .with_interfaces(vec![(ifindex(2), vec!["100.95.7.1/24"])]);
     let refused = serve.owner.probe_startup().await.expect_err("probe_startup refuses");
     assert!(
@@ -342,10 +366,11 @@ async fn a_node_that_overlaps_the_prefix_by_address_and_by_vip_range_names_the_v
 #[ignore = "pending DELIVER step 13"]
 async fn node_addresses_outside_the_prefix_pass_probe_startup_without_effect() {
     for entry in [PhaseOne::BootSeam, PhaseOne::Owner] {
-        let serve = Serve::start(owner_ports(&disjoint_vip())).with_interfaces(vec![
-            (ifindex(2), vec!["10.0.2.15/24"]),
-            (ifindex(3), vec!["100.94.255.254/16", "100.96.0.1/16"]),
-        ]);
+        let serve =
+            Serve::start(owner_ports(&disjoint_vip(), BTreeSet::new())).with_interfaces(vec![
+                (ifindex(2), vec!["10.0.2.15/24"]),
+                (ifindex(3), vec!["100.94.255.254/16", "100.96.0.1/16"]),
+            ]);
         phase_one(&serve, entry)
             .await
             .unwrap_or_else(|e| panic!("{entry:?}: no node address in the prefix passes: {e}"));
@@ -381,7 +406,7 @@ fn probe_startup_refuses_a_node_address_iff_one_lies_inside_the_guest_prefix() {
             .flatten()
             .any(|address| GUEST_NODE_PREFIX.contains(&address.addr()));
         for entry in [PhaseOne::BootSeam, PhaseOne::Owner] {
-            let serve = Serve::start(owner_ports(&disjoint_vip()));
+            let serve = Serve::start(owner_ports(&disjoint_vip(), BTreeSet::new()));
             serve.io.update_host_facts(|facts| {
                 facts.interfaces = inventory
                     .iter()
@@ -419,7 +444,7 @@ fn probe_startup_refuses_a_node_address_iff_one_lies_inside_the_guest_prefix() {
 #[ignore = "pending DELIVER step 11"]
 async fn an_owner_outside_the_connect4_attach_path_refuses_before_any_boot_effect() {
     for outside in ["/sys/fs/cgroup/system.slice", "/sys/fs/cgroup"] {
-        let serve = Serve::start(owner_ports(&disjoint_vip()));
+        let serve = Serve::start(owner_ports(&disjoint_vip(), BTreeSet::new()));
         serve.io.update_host_facts(|facts| facts.owner_cgroup = PathBuf::from(outside));
         let refused = serve.owner.probe_startup().await.expect_err("refuses OwnerCgroupPlacement");
         assert!(
@@ -436,7 +461,7 @@ async fn an_owner_outside_the_connect4_attach_path_refuses_before_any_boot_effec
         );
         serve.exit();
     }
-    let serve = Serve::start(owner_ports(&disjoint_vip()));
+    let serve = Serve::start(owner_ports(&disjoint_vip(), BTreeSet::new()));
     serve.io.update_host_facts(|facts| {
         facts.owner_cgroup = PathBuf::from("/sys/fs/cgroup/overdrive.slice/control-plane.slice");
     });
@@ -448,13 +473,12 @@ async fn an_owner_outside_the_connect4_attach_path_refuses_before_any_boot_effec
 /// before any boot effect, naming what is available.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn an_rlimit_nofile_below_the_owner_budget_refuses_before_any_boot_effect() {
-    let serve = Serve::start(owner_ports(&disjoint_vip()));
+    let serve = Serve::start(owner_ports(&disjoint_vip(), BTreeSet::new()));
     serve.io.update_host_facts(|facts| facts.nofile_limit = 1_024);
     let refused = serve.owner.probe_startup().await.expect_err("refuses FdBudget");
     assert!(
-        matches!(refused, GuestNetworkError::FdBudget { required, available: 1_024 } if required > 1_024),
+        matches!(refused, GuestNetworkError::FdBudget { required: 376_832, available: 1_024 }),
         "FdBudget naming RLIMIT_NOFILE, got {refused:?}",
     );
     assert!(
@@ -482,7 +506,7 @@ enum PhaseOne {
 }
 
 async fn phase_one(serve: &Serve, entry: PhaseOne) -> Result<(), GuestNetworkError> {
-    phase_one_over(serve, entry, &disjoint_vip()).await
+    phase_one_over(serve, entry, &disjoint_vip(), BTreeSet::new()).await
 }
 
 /// Phase 1 through `entry`, where the boot-seam entry is given `vip` — the
@@ -492,10 +516,11 @@ async fn phase_one_over(
     serve: &Serve,
     entry: PhaseOne,
     vip: &[Ipv4Net],
+    reserved: BTreeSet<Ipv4Addr>,
 ) -> Result<(), GuestNetworkError> {
     match entry {
         PhaseOne::BootSeam => {
-            let vip = VipRange::new(vip.to_vec(), BTreeSet::new()).expect("valid VIP range");
+            let vip = VipRange::new(vip.to_vec(), reserved).expect("valid VIP range");
             let seam: &dyn GuestFlowIo = &*serve.io;
             probe_guest_flow_startup(seam, &vip, GUEST_NODE_PREFIX).await
         }
@@ -522,7 +547,6 @@ async fn phase_one_over(
 /// phase 1 passes after exactly one forwarder probe, on one context that is
 /// released before it returns.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn phase_one_probes_the_forwarder_on_a_context_it_releases_and_refuses_a_bad_one() {
     let cases: Vec<ForwarderFailureCase> = vec![
         ("DeviceAbsent", SimFailure::Forwarder(SimForwarderFailure::DeviceAbsent), |e| {
@@ -566,7 +590,7 @@ async fn phase_one_probes_the_forwarder_on_a_context_it_releases_and_refuses_a_b
     ];
     for entry in [PhaseOne::BootSeam, PhaseOne::Owner] {
         for (name, failure, is_cause) in &cases {
-            let serve = Serve::start(owner_ports(&disjoint_vip()));
+            let serve = Serve::start(owner_ports(&disjoint_vip(), BTreeSet::new()));
             serve.io.script_failure(SimEffectKind::ProbeForwarder, *failure);
             match phase_one(&serve, entry).await {
                 Err(GuestNetworkError::Forwarder { source }) if is_cause(&source) => {}
@@ -587,7 +611,7 @@ async fn phase_one_probes_the_forwarder_on_a_context_it_releases_and_refuses_a_b
             serve.exit();
         }
 
-        let serve = Serve::start(owner_ports(&disjoint_vip()));
+        let serve = Serve::start(owner_ports(&disjoint_vip(), BTreeSet::new()));
         phase_one(&serve, entry)
             .await
             .unwrap_or_else(|e| panic!("{entry:?}: a good forwarder passes: {e}"));

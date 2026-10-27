@@ -44,7 +44,7 @@ safe_liveNoErrorReport_fwd_safe_st = [ kind |-> "pair",
   unclassified |-> FALSE,
   delivered |-> 0 ]
 
-State 2: <safe_liveNoErrorReport_fwd_safe_SwState line 1370, col 3 to line 1379, col 7 of module safe_liveNoErrorReport>
+State 2: <safe_liveNoErrorReport_fwd_safe_SwErr line 1385, col 3 to line 1391, col 7 of module safe_liveNoErrorReport>
 safe_liveNoErrorReport_fwd_safe_st = [ kind |-> "pair",
   cb |-> [s |-> "ovr", t |-> "ovr"],
   ud |-> [s |-> "P", t |-> "P"],
@@ -75,10 +75,10 @@ safe_liveNoErrorReport_fwd_safe_st = [ kind |-> "pair",
   nospace |-> FALSE,
   fin |-> FALSE,
   peerFin |-> FALSE,
-  ps |-> {"S", "R"},
-  err |-> FALSE,
+  ps |-> {},
+  err |-> TRUE,
   sw |-> "stores",
-  swPs |-> TRUE,
+  swPs |-> FALSE,
   rawEnd |-> "none",
   cq |-> "none",
   faults |-> 1,
@@ -90,7 +90,7 @@ safe_liveNoErrorReport_fwd_safe_st = [ kind |-> "pair",
   unclassified |-> FALSE,
   delivered |-> 0 ]
 
-State 3: <safe_liveNoErrorReport_fwd_safe_SwErr line 1385, col 3 to line 1391, col 7 of module safe_liveNoErrorReport>
+State 3: <safe_liveNoErrorReport_fwd_safe_SwState line 1370, col 3 to line 1379, col 7 of module safe_liveNoErrorReport>
 safe_liveNoErrorReport_fwd_safe_st = [ kind |-> "pair",
   cb |-> [s |-> "ovr", t |-> "ovr"],
   ud |-> [s |-> "P", t |-> "P"],

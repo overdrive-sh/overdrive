@@ -23,10 +23,17 @@ use std::time::Duration;
 
 use overdrive_core::guest_transport::wire::{
     ControlMessage, FLOW_PAIRING_DEADLINE, FLOW_REQUEST_DEADLINE, FlowRefusal, FlowRequest,
+    GUEST_FLOW_MAX_PAIRS,
 };
+use overdrive_core::traits::mtls_resolve::MtlsResolution;
+use overdrive_sim::adapters::SimMtlsResolve;
+use tokio_util::sync::CancellationToken;
 
-use super::support::{Composition, foreign_token, guest_flow, remote, sent_to};
+use super::support::{
+    Composition, Lease, conn_key, foreign_token, guest_flow, remote, sent_to, vip_range,
+};
 use crate::guest_network::flow_io::sim::{SimEffectKind, SimEffectTarget, SimFailure, SimPeerEnd};
+use crate::guest_network::flow_owner::FlowTask;
 use crate::guest_network::{
     CidPhase, FlowCloseCause, ForwardingActivation, ForwardingRestore, GuestAdmission,
     GuestFlowPhase, GuestNetworkError, GuestNetworkOperation, GuestNetworkProvisioner, RequestRead,
@@ -37,6 +44,193 @@ fn attaches(c: &Composition) -> usize {
     c.io.issued_count(SimEffectKind::Attach)
 }
 
+#[derive(Clone, Copy)]
+enum RefusalReaderEnd {
+    Teardown,
+    SessionReplacement,
+}
+
+fn owner_shutdown(c: &Composition) -> CancellationToken {
+    c.owner.runtime.tasks.lock().as_ref().expect("the booted owner has live tasks").shutdown.clone()
+}
+
+fn refusal_reader_count(c: &Composition) -> u32 {
+    c.owner.runtime.state.lock().refusal_reader_count()
+}
+
+fn seed_refusal_readers_to_one_below_cap(
+    c: &Composition,
+    lease: &Lease,
+    shutdown: &CancellationToken,
+) -> Vec<crate::guest_network::GuestConnKey> {
+    let listener = c.flow_ports().stream();
+    let mut synthetic = Vec::new();
+    let mut state = c.owner.runtime.state.lock();
+    for index in 0..(GUEST_FLOW_MAX_PAIRS - 1) {
+        let key = conn_key(listener, lease.cid, 100_000 + index);
+        synthetic.push(key);
+        let replaced = state.insert_flow_task(
+            lease.cid,
+            key,
+            FlowTask {
+                cancel: shutdown.child_token(),
+                task: None,
+                owner_launch: Some(lease.launch),
+                flow: None,
+            },
+        );
+        assert!(replaced.is_none());
+    }
+    assert_eq!(state.refusal_reader_count(), GUEST_FLOW_MAX_PAIRS - 1);
+
+    let ordinary = conn_key(listener, lease.cid, 10_000);
+    let datagram = conn_key(listener, lease.cid, 10_001);
+    for (key, owner_launch, flow) in
+        [(ordinary, None, None), (datagram, None, Some(guest_flow(99)))]
+    {
+        let replaced = state.insert_flow_task(
+            lease.cid,
+            key,
+            FlowTask { cancel: shutdown.child_token(), task: None, owner_launch, flow },
+        );
+        assert!(replaced.is_none());
+        synthetic.push(key);
+    }
+    assert_eq!(
+        state.refusal_reader_count(),
+        GUEST_FLOW_MAX_PAIRS - 1,
+        "ordinary streams and decoded datagrams are not refusal readers"
+    );
+    drop(state);
+    synthetic
+}
+
+async fn assert_refusal_reader_cap_rearm_and_shutdown() {
+    let c = Composition::booted(61).await;
+    let (lease, _session) = c.active_lease("admission-reader-cap", &[]).await;
+    let (_hold, _) = c.owner.quiesce().await;
+    c.io.set_auto_deliver(false);
+    let shutdown = owner_shutdown(&c);
+    let synthetic = seed_refusal_readers_to_one_below_cap(&c, &lease, &shutdown);
+
+    let (first, first_flow) = c.open_tcp_flow(&lease, 1, remote(443), 5_000);
+    let (second, second_flow) = c.open_tcp_flow(&lease, 2, remote(443), 5_001);
+    c.io.release_accept(first);
+    c.io.release_accept(second);
+    c.settle().await;
+    {
+        let state = c.owner.runtime.state.lock();
+        assert_eq!(state.refusal_reader_count(), GUEST_FLOW_MAX_PAIRS);
+        assert!(state.cids[&lease.cid].flow_tasks[&first].is_refusal_reader());
+        assert!(!state.cids[&lease.cid].flow_tasks.contains_key(&second));
+        assert!(state.cids[&lease.cid].guest_flows.is_empty());
+        drop(state);
+    }
+    assert!(c.io.socket_observation().queued.contains_key(&second));
+
+    c.io.release_read(first, None);
+    c.settle().await;
+    assert_eq!(
+        sent_to(&c, lease.cid),
+        vec![ControlMessage::Refused { flow: first_flow, refusal: FlowRefusal::Quiesced }]
+    );
+    {
+        let state = c.owner.runtime.state.lock();
+        assert_eq!(state.refusal_reader_count(), GUEST_FLOW_MAX_PAIRS);
+        assert!(!state.cids[&lease.cid].flow_tasks.contains_key(&first));
+        assert!(state.cids[&lease.cid].flow_tasks[&second].is_refusal_reader());
+        drop(state);
+    }
+    let sockets = c.io.socket_observation();
+    assert!(!sockets.queued.contains_key(&second));
+    assert!(!sockets.closed_by_owner.contains(&second), "the second reader is parked on its read");
+
+    let (third, third_flow) = c.open_tcp_flow(&lease, 3, remote(443), 5_002);
+    c.io.release_accept(third);
+    c.settle().await;
+    assert!(c.io.socket_observation().queued.contains_key(&third));
+    shutdown.cancel();
+    c.io.release_read(second, None);
+    c.settle().await;
+    assert_eq!(
+        sent_to(&c, lease.cid),
+        vec![ControlMessage::Refused { flow: first_flow, refusal: FlowRefusal::Quiesced }],
+        "root cancellation wins over the ready second request and never accepts the third"
+    );
+    assert!(!sent_to(&c, lease.cid).iter().any(|message| {
+        matches!(message, ControlMessage::Refused { flow, .. } if *flow == second_flow || *flow == third_flow)
+    }));
+    assert!(c.io.socket_observation().closed_by_owner.contains(&second));
+    assert!(c.io.socket_observation().queued.contains_key(&third));
+
+    let mut state = c.owner.runtime.state.lock();
+    assert_eq!(state.refusal_reader_count(), GUEST_FLOW_MAX_PAIRS - 1);
+    for key in synthetic {
+        let _ = state.remove_flow_task(lease.cid, key);
+    }
+    assert_eq!(state.refusal_reader_count(), 0);
+    drop(state);
+}
+
+async fn assert_refusal_reader_lifecycle(end: RefusalReaderEnd) {
+    let c = Composition::booted(match end {
+        RefusalReaderEnd::Teardown => 62,
+        RefusalReaderEnd::SessionReplacement => 63,
+    })
+    .await;
+    let (lease, session) = c.active_lease("admission-reader-lifecycle", &[]).await;
+    let (hold, _) = c.owner.quiesce().await;
+    c.io.set_auto_deliver(false);
+    let (key, _flow) = c.open_tcp_flow(&lease, 1, remote(443), 6_000);
+    c.io.release_accept(key);
+    c.settle().await;
+    assert_eq!(refusal_reader_count(&c), 1);
+    assert!(c.owner.runtime.state.lock().cids[&lease.cid].flow_tasks[&key].is_refusal_reader());
+    assert!(!c.io.socket_observation().queued.contains_key(&key));
+    assert!(sent_to(&c, lease.cid).is_empty());
+
+    match end {
+        RefusalReaderEnd::Teardown => {
+            c.owner.teardown(&lease.plan).await.expect("teardown cancels the refusal reader");
+            assert!(!c.observe().await.cids.contains_key(&lease.cid));
+        }
+        RefusalReaderEnd::SessionReplacement => {
+            c.io.end_connection(session, SimPeerEnd::Eof);
+            c.settle().await;
+            c.io.set_auto_deliver(true);
+            let replacement = c.open_session(&lease, 6_001);
+            c.settle().await;
+            assert_eq!(c.observe().await.cids[&lease.cid].session, Some(replacement));
+        }
+    }
+    assert_eq!(refusal_reader_count(&c), 0);
+    assert!(c.io.socket_observation().closed_by_owner.contains(&key));
+    assert!(sent_to(&c, lease.cid).is_empty(), "no response crosses a lifecycle boundary");
+    assert_eq!(c.owner.restore(hold).await, Ok(ForwardingRestore::Reopened));
+}
+
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn admission_refusal_readers_are_bounded_rearmed_and_cancelled_without_cross_lifecycle_response()
+ {
+    assert_refusal_reader_cap_rearm_and_shutdown().await;
+    for end in [RefusalReaderEnd::Teardown, RefusalReaderEnd::SessionReplacement] {
+        assert_refusal_reader_lifecycle(end).await;
+    }
+}
+
+/// A booted owner whose pool has exactly one usable guest address/CID. The
+/// launch-attribution cells use it because their subject is a stale
+/// connection from the previous launch of the same CID.
+async fn one_cid_composition(seed: u64) -> Composition {
+    let prefix = "100.95.0.0/30".parse().expect("a valid one-CID prefix");
+    let gateway = Ipv4Addr::new(100, 95, 0, 1);
+    let resolve = SimMtlsResolve::new(std::collections::BTreeMap::new(), MtlsResolution::NonMesh);
+    let composition = Composition::with_prefix(resolve, vip_range(), prefix, gateway, seed);
+    composition.boot().await;
+    composition
+}
+
 /// R5-9 / H-1 (G-V6 row 1, EVMOD-PAIR): the owner attaches a flow's pair
 /// only after the whole 32-byte request was read in userspace and its token
 /// matched, and only after the destination connected; a request read in
@@ -45,7 +239,6 @@ fn attaches(c: &Composition) -> usize {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn the_request_is_read_in_full_before_the_pair_is_attached() {
     let c = Composition::booted(3).await;
     let (lease, _session) = c.active_lease("r5-9", &[]).await;
@@ -92,7 +285,6 @@ async fn the_request_is_read_in_full_before_the_pair_is_attached() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn paired_follows_the_attach_and_a_server_first_banner_is_delivered() {
     let c = Composition::booted(4).await;
     let (lease, session) = c.active_lease("g-v6-paired", &[]).await;
@@ -137,7 +329,6 @@ async fn paired_follows_the_attach_and_a_server_first_banner_is_delivered() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn quiescence_aborts_a_connecting_flow_and_its_late_completion_attaches_nothing() {
     let c = Composition::booted(5).await;
     let (lease, _session) = c.active_lease("r5-26q", &[]).await;
@@ -174,6 +365,16 @@ async fn quiescence_aborts_a_connecting_flow_and_its_late_completion_attaches_no
             refusal: FlowRefusal::Quiesced
         })
     );
+    let after_refusal = c.observe().await;
+    assert!(
+        after_refusal.cids[&lease.cid].guest_flows.is_empty(),
+        "the Quiesced refusal never enters admitted owner state"
+    );
+    assert_eq!(
+        after_refusal.cids[&lease.cid].held_flows, 0,
+        "the Quiesced refusal holds no flow place"
+    );
+    assert_eq!(attaches(&c), 0, "the Quiesced refusal creates no forwarder pair");
     assert!(c.io.socket_observation().closed_by_owner.contains(&refused_key));
 
     assert_eq!(c.owner.restore(hold).await, Ok(ForwardingRestore::Reopened));
@@ -188,7 +389,6 @@ async fn quiescence_aborts_a_connecting_flow_and_its_late_completion_attaches_no
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn teardown_aborts_a_connecting_flow_and_leaves_nothing_of_the_cid() {
     let c = Composition::booted(6).await;
     let (lease, _session) = c.active_lease("r5-26t", &[]).await;
@@ -213,7 +413,6 @@ async fn teardown_aborts_a_connecting_flow_and_leaves_nothing_of_the_cid() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn session_loss_aborts_a_connecting_flow() {
     let c = Composition::booted(7).await;
     let (lease, session) = c.active_lease("r5-26l", &[]).await;
@@ -242,7 +441,6 @@ async fn session_loss_aborts_a_connecting_flow() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn quiescence_finds_an_admitted_flow_whose_request_is_unread() {
     let c = Composition::booted(17).await;
     let (lease, _session) = c.active_lease("r5-26r", &[]).await;
@@ -263,7 +461,6 @@ async fn quiescence_finds_an_admitted_flow_whose_request_is_unread() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn a_flow_from_a_cid_without_a_session_is_closed_unattributed() {
     let (capture, _guard) = super::support::EventCapture::install();
     let c = Composition::booted(8).await;
@@ -286,11 +483,11 @@ async fn a_flow_from_a_cid_without_a_session_is_closed_unattributed() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn a_flow_carrying_another_launchs_token_is_closed_with_no_message() {
     let (capture, _guard) = super::support::EventCapture::install();
     let c = Composition::booted(9).await;
     let (lease, _session) = c.active_lease("r5-16t", &[]).await;
+    let (hold, _) = c.owner.quiesce().await;
     let before = c.observe().await;
     let (key, _flow) = c.open_tcp_flow_with(&lease, 1, remote(443), 5000, foreign_token());
     let after = c.observe().await;
@@ -302,18 +499,27 @@ async fn a_flow_carrying_another_launchs_token_is_closed_with_no_message() {
     let events = capture.named("guest_flow.connection_closed_unattributed");
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].field("cause"), Some(FlowCloseCause::StaleLaunch.as_str()));
+    assert_eq!(
+        c.owner.restore(hold).await,
+        Ok(ForwardingRestore::Reopened),
+        "stale attribution takes priority over the snapshotted Quiesced refusal"
+    );
 }
 
 /// R5-17 / L-4: a datagram association whose `DatagramStream` request fails
 /// to decode (destination port 0) is refused `Malformed`, its `V_h` closed;
-/// no association is registered and no host UDP socket is made.
+/// an attributable unsupported version is `Unsupported`; both take priority
+/// over the snapshotted Quiesced refusal. No association is registered and no
+/// host UDP socket is made. The two refusal readers are concurrent, so the
+/// oracle requires one exact response per flow without imposing cross-flow
+/// response order.
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn a_malformed_datagram_request_is_refused_malformed() {
     let c = Composition::booted(10).await;
     let (lease, _session) = c.active_lease("r5-17", &[]).await;
+    let (hold, _) = c.owner.quiesce().await;
     let flow = guest_flow(1);
     let mut record =
         FlowRequest::DatagramStream { flow, destination: remote(53), launch: lease.launch }
@@ -322,16 +528,51 @@ async fn a_malformed_datagram_request_is_refused_malformed() {
     // Offset 12, the destination port: never 0 for kinds 1 and 2.
     record[12] = 0;
     record[13] = 0;
-    let key = c.open_raw_flow(&lease, record, 6000);
+    let malformed_key = c.open_raw_flow(&lease, record, 6000);
+    let unsupported = guest_flow(2);
+    let mut unsupported_record = FlowRequest::DatagramStream {
+        flow: unsupported,
+        destination: remote(53),
+        launch: lease.launch,
+    }
+    .encode()
+    .to_vec();
+    unsupported_record[2] = 3;
+    let unsupported_key = c.open_raw_flow(&lease, unsupported_record, 6001);
     let after = c.observe().await;
     assert!(after.cids[&lease.cid].datagrams.is_empty());
     assert_eq!(after.cids[&lease.cid].held_flows, 0);
+    let refusals = sent_to(&c, lease.cid);
+    assert_eq!(refusals.len(), 2, "exactly one response per concurrent refusal reader");
     assert_eq!(
-        sent_to(&c, lease.cid),
-        vec![ControlMessage::Refused { flow, refusal: FlowRefusal::Malformed }]
+        refusals
+            .iter()
+            .filter(|message| {
+                **message == ControlMessage::Refused { flow, refusal: FlowRefusal::Malformed }
+            })
+            .count(),
+        1,
+        "flow 1 keeps its exact Malformed classification"
     );
-    assert!(c.io.socket_observation().closed_by_owner.contains(&key));
+    assert_eq!(
+        refusals
+            .iter()
+            .filter(|message| {
+                **message
+                    == ControlMessage::Refused {
+                        flow: unsupported,
+                        refusal: FlowRefusal::Unsupported,
+                    }
+            })
+            .count(),
+        1,
+        "flow 2 keeps its exact Unsupported classification; concurrent readers impose no response order"
+    );
+    let closed = c.io.socket_observation().closed_by_owner;
+    assert!(closed.contains(&malformed_key));
+    assert!(closed.contains(&unsupported_key));
     assert_eq!(c.io.issued_count(SimEffectKind::OpenPeer), 0);
+    assert_eq!(c.owner.restore(hold).await, Ok(ForwardingRestore::Reopened));
 }
 
 /// R5-18 / L-3: two control sessions of the current launch race; exactly
@@ -340,7 +581,6 @@ async fn a_malformed_datagram_request_is_refused_malformed() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn racing_sessions_leave_one_claim_and_a_stale_session_takes_none() {
     let c = Composition::booted(11).await;
     let lease = c.lease("r5-18", &[]).await;
@@ -365,9 +605,8 @@ async fn racing_sessions_leave_one_claim_and_a_stale_session_takes_none() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn a_previous_launchs_queued_session_never_takes_the_claim() {
-    let c = Composition::booted(18).await;
+    let c = one_cid_composition(18).await;
     let old = c.lease("r5-18-old", &[]).await;
     c.io.set_auto_deliver(false);
     let old_session = c.open_session(&old, 1024);
@@ -399,9 +638,8 @@ async fn a_previous_launchs_queued_session_never_takes_the_claim() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn a_dead_launchs_queued_connections_are_closed_at_their_read() {
-    let c = Composition::booted(12).await;
+    let c = one_cid_composition(12).await;
     let old = c.lease("r5-41-old", &[]).await;
     c.io.set_auto_deliver(false);
     let old_session = c.open_session(&old, 1024);
@@ -414,15 +652,31 @@ async fn a_dead_launchs_queued_connections_are_closed_at_their_read() {
     c.pool.release(&old.alloc);
 
     let new = c.lease("r5-41-new", &[]).await;
-    for key in [old_session, old_flow, old_datagram, empty] {
-        c.io.release_accept(key);
-        c.settle().await;
-        c.io.release_read(key, None);
-    }
+    c.io.release_accept(old_session);
+    c.settle().await;
+    c.io.release_read(old_session, None);
+
+    // The stale flow records exercise ATTR-TOKEN at their read, which first
+    // requires the known CID's current control session to be live. Without
+    // it, the production no-session admission boundary correctly closes them
+    // at accept before any request can be read.
     let new_session = c.open_session(&new, 2048);
     c.io.release_accept(new_session);
     c.settle().await;
     c.io.release_read(new_session, None);
+    c.settle().await;
+    let claimed = c.observe().await;
+    assert_eq!(
+        claimed.cids[&new.cid].session,
+        Some(new_session),
+        "the current launch's ControlOpen takes the claim before any stale flow is accepted"
+    );
+
+    for key in [old_flow, old_datagram, empty] {
+        c.io.release_accept(key);
+        c.settle().await;
+        c.io.release_read(key, None);
+    }
     let after = c.observe().await;
 
     let closed = c.io.socket_observation().closed_by_owner;
@@ -450,7 +704,6 @@ async fn a_dead_launchs_queued_connections_are_closed_at_their_read() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn a_non_mesh_connect_has_no_owner_deadline() {
     let c = Composition::booted(13).await;
     let (lease, _session) = c.active_lease("r5-20", &[]).await;
@@ -486,7 +739,6 @@ async fn a_non_mesh_connect_has_no_owner_deadline() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn activate_after_teardown_is_refused_and_changes_nothing() {
     let c = Composition::booted(14).await;
     let (lease, _session) = c.active_lease("g-v3-r4", &[]).await;
@@ -509,7 +761,6 @@ async fn activate_after_teardown_is_refused_and_changes_nothing() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn activation_waits_for_the_session_and_for_quiescence_to_end() {
     let c = Composition::booted(15).await;
     let lease = c.lease("g-v3-r12", &[]).await;
@@ -542,7 +793,6 @@ async fn activation_waits_for_the_session_and_for_quiescence_to_end() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn a_per_flow_refusal_leaves_the_cid_and_its_other_flows_unchanged() {
     let c = Composition::booted(16).await;
     let (lease, _session) = c.active_lease("g-v6-r3", &[]).await;

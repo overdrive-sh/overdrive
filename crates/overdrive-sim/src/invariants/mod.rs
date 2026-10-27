@@ -20,7 +20,7 @@ use std::fmt::{self, Display};
 use std::str::FromStr;
 
 use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
-use overdrive_control_plane::veth_provisioner::{VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, WorkloadNetnsPlan};
 
 pub(crate) mod serve_ports {
     use std::collections::BTreeMap;
@@ -74,17 +74,13 @@ pub(crate) mod serve_ports {
 }
 
 /// In-memory network adapter for simulator compositions. The production
-/// action shim still receives the complete VM plan; this adapter keeps the
-/// simulator's driven boundary free of host netns I/O.
+/// action shim still receives the complete workload-netns plan; this adapter
+/// keeps the simulator's driven boundary free of host netns I/O.
 #[derive(Debug, Default)]
 pub(crate) struct NoopNetworkProvisioner;
 
 impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
-    fn provision(
-        &self,
-        _workload: &WorkloadNetnsPlan,
-        _vm_tap: &VmTapPlan,
-    ) -> Result<(), VethProvisionError> {
+    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
         Ok(())
     }
 
@@ -488,7 +484,7 @@ pub enum Invariant {
     /// guest-stack-transparent-mtls-intercept ADR-0089 §6 — safety,
     /// liveness, and convergence invariant. A blocker holds slot 0; a VM
     /// allocation obtains slot 1 and the seeded Sim provisioner creates a
-    /// non-empty proper subset of its logical netns/veth/TAP/route/resolver
+    /// non-empty proper subset of its logical netns/veth/route/resolver
     /// artifacts before failing through the real
     /// `WorkloadNetworkProvisioner` port. The production action shim must
     /// record `Failed { WorkloadNetnsProvisionFailed }`, invoke structural

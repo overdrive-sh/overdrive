@@ -353,6 +353,31 @@ impl QuotaDriver {
         let observed = self.rt.block_on(self.owner.flow_observation());
         // conformance-lint: sim-arbiter-ok QPROJ-8 / D-12 SimFlowForwarder context table (queued_ends: the end records queued and not yet read, in queue order), Tier-3 pairs V-EV-CTL and take_end_returns_records_in_end_order (the module suite through KernelFlowForwarder)
         let contexts = self.c.io.forwarder_contexts();
+        // The device retains phase 1's released probe context, while the
+        // owner's `forwarder_generation` counts only serving contexts. Keep
+        // the probe row visible and validate its full complement before
+        // projecting a serving generation over the exact table suffix.
+        let serving_count = usize::try_from(observed.forwarder_generation.get())?;
+        let phase_count = contexts.len().checked_sub(serving_count).ok_or_else(|| {
+            anyhow::anyhow!(
+                "owner generation {serving_count} exceeds the device's {} context rows",
+                contexts.len()
+            )
+        })?;
+        if phase_count != 1 {
+            anyhow::bail!(
+                "the device has {phase_count} non-serving context rows; phase 1 opens exactly one"
+            );
+        }
+        let phase = &contexts[0];
+        if phase.open
+            || phase.live_pairs != 0
+            || phase.live_watches != 0
+            || !phase.queued_ends.is_empty()
+        {
+            anyhow::bail!("phase 1's released probe context retained resources: {phase:?}");
+        }
+        let serving_contexts = &contexts[phase_count..];
         let mut place_of: BTreeMap<(ForwarderGeneration, ForwardId), i64> = BTreeMap::new();
         for (s, place) in &self.places {
             let holder =
@@ -375,7 +400,7 @@ impl QuotaDriver {
             let row = usize::try_from(generation.get())
                 .ok()
                 .and_then(|g| g.checked_sub(1))
-                .and_then(|i| contexts.get(i))
+                .and_then(|i| serving_contexts.get(i))
                 .ok_or_else(|| anyhow::anyhow!("place {s}'s pair names no context row"))?;
             let st = if row.queued_ends.contains(&pair) {
                 "ended"
@@ -403,7 +428,7 @@ impl QuotaDriver {
         // model's flows end (the background never does), so every queued id
         // has a place.
         let mut endq = Vec::new();
-        for (index, row) in contexts.iter().enumerate() {
+        for (index, row) in serving_contexts.iter().enumerate() {
             let generation = ForwarderGeneration::new(u64::try_from(index + 1)?)?;
             for id in &row.queued_ends {
                 let place = place_of.get(&(generation, *id)).ok_or_else(|| {
@@ -446,7 +471,6 @@ impl Driver for QuotaDriver {
     max_samples = 1,
     test = "AdmissionStopsAtTheAllocationQuota"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_flow_quota_admission_stops_at_the_allocation_quota() -> impl Driver {
     QuotaDriver::new()
 }
@@ -459,7 +483,6 @@ fn quint_flow_quota_admission_stops_at_the_allocation_quota() -> impl Driver {
     max_samples = 1,
     test = "DrainingFlowStillCountsAgainstTheQuota"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_flow_quota_draining_flow_still_counts_against_the_quota() -> impl Driver {
     QuotaDriver::new()
 }
@@ -472,7 +495,6 @@ fn quint_flow_quota_draining_flow_still_counts_against_the_quota() -> impl Drive
     max_samples = 1,
     test = "WithholdingGuestHoldsAtMostItsOwnQuota"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_flow_quota_withholding_guest_holds_at_most_its_own_quota() -> impl Driver {
     QuotaDriver::new()
 }
@@ -485,7 +507,6 @@ fn quint_flow_quota_withholding_guest_holds_at_most_its_own_quota() -> impl Driv
     max_samples = 1,
     test = "CompletedPairReleasesTheSlotAtItsEndRecord"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_flow_quota_completed_pair_releases_the_slot_at_its_end_record() -> impl Driver {
     QuotaDriver::new()
 }
@@ -499,7 +520,6 @@ fn quint_flow_quota_completed_pair_releases_the_slot_at_its_end_record() -> impl
     max_samples = 1,
     test = "AbortOfHalfClosedFlowReleasesTheSlotAtItsEndRecord"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_flow_quota_abort_of_half_closed_flow_releases_the_slot_at_its_end_record() -> impl Driver {
     QuotaDriver::new()
 }
@@ -517,7 +537,6 @@ fn quint_flow_quota_abort_of_half_closed_flow_releases_the_slot_at_its_end_recor
     max_samples = 1,
     test = "EndRecordsAreReadInQueueOrder"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_flow_quota_end_records_are_read_in_queue_order() -> impl Driver {
     QuotaDriver::new()
 }
@@ -533,7 +552,6 @@ fn quint_flow_quota_end_records_are_read_in_queue_order() -> impl Driver {
     max_samples = 1,
     test = "EndRecordsAreReleasedInQueueOrder"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_flow_quota_end_records_are_released_in_queue_order() -> impl Driver {
     QuotaDriver::new()
 }
@@ -546,7 +564,6 @@ fn quint_flow_quota_end_records_are_released_in_queue_order() -> impl Driver {
     main = "quota_conf",
     max_samples = 8
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_flow_quota_randomized_traces() -> impl Driver {
     QuotaDriver::new()
 }

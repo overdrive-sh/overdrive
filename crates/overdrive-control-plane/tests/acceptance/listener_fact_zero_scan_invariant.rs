@@ -174,7 +174,12 @@ fn proto_strategy() -> impl Strategy<Value = Proto> {
 }
 
 prop_compose! {
-    fn listener_strategy()(port in 1u16..=65535, protocol in proto_strategy()) -> Listener {
+    fn listener_strategy()(
+        port in (1u16..=65535).prop_filter("listener port is not guest-reserved", |port| {
+            !overdrive_core::guest_transport::guest_reserved_ports().contains(port)
+        }),
+        protocol in proto_strategy(),
+    ) -> Listener {
         Listener { port: NonZeroU16::new(port).expect("port 1..=65535 is non-zero"), protocol }
     }
 }

@@ -33,7 +33,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use overdrive_control_plane::error::{ControlPlaneError, MtlsBootError};
+use overdrive_control_plane::error::{ControlPlaneError, MtlsBootError, VmmBootError};
 use overdrive_control_plane::guest_network::GuestNetworkError;
 use overdrive_control_plane::{NodeAdapters, ServerConfig, VmCapability, run_server};
 use overdrive_core::guest_transport::GUEST_NODE_PREFIX;
@@ -41,6 +41,7 @@ use overdrive_dataplane::allocators::VipRange;
 use overdrive_sim::adapters::{
     SimBeaconIo, SimInterceptFault, SimMtlsIntercept, SimSharedTable, SimVmm,
 };
+use overdrive_worker::BeaconIntakeError;
 use serial_test::serial;
 use tempfile::TempDir;
 use tracing::field::{Field, Visit};
@@ -283,7 +284,6 @@ impl Drop for NofileGuard {
 /// ran after boot reclamation, and no refusal was emitted.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn serve_boots_through_the_pinned_order_with_the_guest_network_composed() {
     let node = Node::new();
     let collector = EventCollector::default();
@@ -391,7 +391,6 @@ async fn a_node_address_inside_the_guest_prefix_refuses_boot_naming_the_interfac
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
 #[serial(cgroup, rlimit)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn an_rlimit_nofile_below_the_owner_budget_refuses_boot() {
     let node = Node::new();
     let _limit = NofileGuard::lower_soft_to(1_024);
@@ -446,13 +445,23 @@ async fn a_failed_step8_table_write_refuses_boot_and_the_restart_converges() {
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn a_failed_beacon_bind_refuses_boot() {
     let node = Node::new();
     node.beacon.fail_next_bind(std::io::ErrorKind::AddrInUse);
+    let config = node.config();
+    let expected_port = config.vsock_ports.beacon();
 
-    let (refusal, events) = refused_boot(&node, node.config()).await;
+    let (refusal, events) = refused_boot(&node, config).await;
 
+    assert!(
+        matches!(
+            &refusal,
+            ControlPlaneError::VmmBoot(VmmBootError::BeaconBind {
+                source: BeaconIntakeError::Bind { port, source },
+            }) if *port == expected_port && source.kind() == std::io::ErrorKind::AddrInUse
+        ),
+        "the typed refusal preserves the configured port and bind error: {refusal:?}"
+    );
     assert!(!node.beacon.is_bound(), "nothing is bound: {refusal:?}");
     assert_eq!(events.refusal_reasons(), vec!["vm_driver.beacon_bind".to_owned()]);
     assert_eq!(node.intercept.shared_table_state(), SimSharedTable::Absent, "nothing written");

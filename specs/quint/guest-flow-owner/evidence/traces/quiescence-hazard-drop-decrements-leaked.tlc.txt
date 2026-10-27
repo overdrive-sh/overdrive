@@ -13,14 +13,15 @@ State 1: <Initial predicate>
 /\ quiesce_bugDropDecrements_quiescence_up = TRUE
 /\ quiesce_bugDropDecrements_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
 /\ quiesce_bugDropDecrements_quiescence_foreign = FALSE
-/\ quiesce_bugDropDecrements_quiescence_flowsOpen = 0
+/\ quiesce_bugDropDecrements_quiescence_flowsOpen = 1
 /\ quiesce_bugDropDecrements_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
 /\ quiesce_bugDropDecrements_quiescence_cnt = 0
 /\ quiesce_bugDropDecrements_quiescence_stop = "none"
 /\ quiesce_bugDropDecrements_quiescence_table = TRUE
+/\ quiesce_bugDropDecrements_quiescence_roundState = [C1 |-> "outside", C2 |-> "outside"]
 /\ quiesce_bugDropDecrements_quiescence_latch = FALSE
 
-State 2: <quiesce_bugDropDecrements_quiescence_LeakHold line 678, col 3 to line 723, col 58 of module quiesce_bugDropDecrements>
+State 2: <quiesce_bugDropDecrements_quiescence_LeakHold line 746, col 3 to line 793, col 58 of module quiesce_bugDropDecrements>
 /\ quiesce_bugDropDecrements_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
 /\ quiesce_bugDropDecrements_quiescence_att = [C1 |-> 0, C2 |-> 0]
 /\ quiesce_bugDropDecrements_quiescence_repLeft = 1
@@ -40,4 +41,5 @@ State 2: <quiesce_bugDropDecrements_quiescence_LeakHold line 678, col 3 to line 
 /\ quiesce_bugDropDecrements_quiescence_cnt = 0
 /\ quiesce_bugDropDecrements_quiescence_stop = "none"
 /\ quiesce_bugDropDecrements_quiescence_table = TRUE
+/\ quiesce_bugDropDecrements_quiescence_roundState = [C1 |-> "outside", C2 |-> "outside"]
 /\ quiesce_bugDropDecrements_quiescence_latch = FALSE

@@ -30,7 +30,7 @@ State 1: <Initial predicate>
      pred |-> -1,
      pst |-> "none" ] >>
 
-State 2: <lease_bugCrashForgetsStop_cid_lease_Assign line 1334, col 3 to line 1422, col 57 of module lease_bugCrashForgetsStop>
+State 2: <lease_bugCrashForgetsStop_cid_lease_Assign line 1253, col 3 to line 1334, col 57 of module lease_bugCrashForgetsStop>
 /\ lease_bugCrashForgetsStop_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugCrashForgetsStop_cid_lease_reclaimed = TRUE
 /\ lease_bugCrashForgetsStop_cid_lease_g = [ clash |-> FALSE,
@@ -62,7 +62,7 @@ State 2: <lease_bugCrashForgetsStop_cid_lease_Assign line 1334, col 3 to line 14
      pred |-> -1,
      pst |-> "none" ] >>
 
-State 3: <lease_bugCrashForgetsStop_cid_lease_Launch line 1486, col 3 to line 1575, col 57 of module lease_bugCrashForgetsStop>
+State 3: <lease_bugCrashForgetsStop_cid_lease_Launch line 1398, col 3 to line 1487, col 57 of module lease_bugCrashForgetsStop>
 /\ lease_bugCrashForgetsStop_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugCrashForgetsStop_cid_lease_reclaimed = TRUE
 /\ lease_bugCrashForgetsStop_cid_lease_g = [ clash |-> FALSE,
@@ -126,7 +126,7 @@ State 4: <lease_bugCrashForgetsStop_cid_lease_Stop line 550, col 3 to line 619, 
      pred |-> -1,
      pst |-> "none" ] >>
 
-State 5: <lease_bugCrashForgetsStop_cid_lease_Crash line 1635, col 3 to line 1707, col 57 of module lease_bugCrashForgetsStop>
+State 5: <lease_bugCrashForgetsStop_cid_lease_Crash line 1679, col 3 to line 1751, col 57 of module lease_bugCrashForgetsStop>
 /\ lease_bugCrashForgetsStop_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugCrashForgetsStop_cid_lease_reclaimed = FALSE
 /\ lease_bugCrashForgetsStop_cid_lease_g = [ clash |-> FALSE,

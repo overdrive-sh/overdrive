@@ -8,12 +8,10 @@
 //! # Composition (D-295-R16)
 //!
 //! [`DirectHandlerHarness::start`] composes
-//! `run_server_with_obs_and_driver(ServerConfig::new(kek, mtls_intercept,
-//! guest_dns), obs, driver, vm_host_state, shared_guest_network,
-//! guest_network_exec, vm_cgroups)` with the required protection and DNS ports
+//! `run_server_with_obs_and_driver(config, boot, driver,
+//! shared_guest_network, guest_network_exec)` with the required protection and DNS ports
 //! supplied as `SimMtlsIntercept` and `SimGuestDnsFactory`, the caller's
-//! `SimSharedGuestNetworkOwner`, and `vm_cgroups` as a `CgroupManager` over a
-//! `SimCgroupFs`, so no in-process case writes a real `cgroup.kill`.
+//! `SimSharedGuestNetworkOwner`, and the boot bundle's simulated host ports.
 //!
 //! # In-process observation (`test-scenarios.md` § *In-process observation*)
 //!
@@ -647,19 +645,9 @@ impl DirectHandlerHarness {
         let supervisor = wiring.supervisor();
         let owner_port: Arc<dyn overdrive_control_plane::guest_network::SharedGuestNetworkOwner> =
             owner.clone();
-        let handle = run_server_with_obs_and_driver(
-            config,
-            boot,
-            driver,
-            owner_port,
-            wiring,
-            overdrive_worker::cgroup_manager::CgroupManager::new(
-                std::path::PathBuf::from("/sys/fs/cgroup"),
-                std::sync::Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
-            ),
-        )
-        .await
-        .expect("start production server handler");
+        let handle = run_server_with_obs_and_driver(config, boot, driver, owner_port, wiring)
+            .await
+            .expect("start production server handler");
         let address = handle.local_addr().await.expect("server handler bound address");
         let trust_path = self.config_dir.join(".overdrive/config");
         let api = PublicApi::from_trust_config(&trust_path).expect("load server trust triple");

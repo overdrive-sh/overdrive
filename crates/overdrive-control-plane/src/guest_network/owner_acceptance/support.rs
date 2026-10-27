@@ -78,7 +78,7 @@ use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
 use parking_lot::Mutex;
 use tokio::task::JoinHandle;
 
-use crate::guest_network::flow_io::sim::SimGuestFlowIo;
+use crate::guest_network::flow_io::sim::{SimEffectKind, SimGuestFlowIo};
 use crate::guest_network::flow_io::{FlowListener, GuestFlowIo};
 use crate::guest_network::{
     GuestAddressPool, GuestConnKey, GuestFlowPhase, GuestNetworkPlan, GuestNetworkProvisioner,
@@ -167,6 +167,7 @@ impl Composition {
     ) -> Self {
         eprintln!("guest-flow owner composition seed = {seed}");
         let io = SimGuestFlowIo::new(seed);
+        io.auto_release(SimEffectKind::ProbeForwarder);
         let clock = SimClock::new();
         let resolve = Arc::new(resolve);
         // `run_server`'s construction of the owner and its mTLS worker
@@ -289,6 +290,7 @@ impl Composition {
             FlowListener::Control,
             key,
             Some(ControlOpen { launch }.encode().to_vec()),
+            Some(lease.launch),
         );
         key
     }
@@ -335,7 +337,12 @@ impl Composition {
         let flow = guest_flow(seq);
         let key = conn_key(self.flow_ports().stream(), lease.cid, peer_port);
         let request = FlowRequest::TcpConnect { flow, destination, launch };
-        self.io.queue_connection(FlowListener::Stream, key, Some(request.encode().to_vec()));
+        self.io.queue_connection(
+            FlowListener::Stream,
+            key,
+            Some(request.encode().to_vec()),
+            Some(lease.launch),
+        );
         (key, flow)
     }
 
@@ -352,7 +359,12 @@ impl Composition {
         let flow = guest_flow(seq);
         let key = conn_key(self.flow_ports().stream(), lease.cid, peer_port);
         let request = FlowRequest::DatagramStream { flow, destination, launch: lease.launch };
-        self.io.queue_connection(FlowListener::Stream, key, Some(request.encode().to_vec()));
+        self.io.queue_connection(
+            FlowListener::Stream,
+            key,
+            Some(request.encode().to_vec()),
+            Some(lease.launch),
+        );
         (key, flow)
     }
 
@@ -365,7 +377,7 @@ impl Composition {
         peer_port: u32,
     ) -> GuestConnKey {
         let key = conn_key(self.flow_ports().stream(), lease.cid, peer_port);
-        self.io.queue_connection(FlowListener::Stream, key, Some(record));
+        self.io.queue_connection(FlowListener::Stream, key, Some(record), Some(lease.launch));
         key
     }
 

@@ -11,27 +11,6 @@
 //! string. The forwarder's end record is not here: it is pinned with the
 //! forwarder (EVMOD-REC, [`super::forwarder`]) and never leaves the machine.
 //!
-//! The request, control, datagram and scalar codecs implement the canonical
-//! encodings pinned by the feature delta. The legacy event-record items below
-//! remain only for the pre-cut dataplane scaffold that still consumes them;
-//! the attachment cut removes them with that caller.
-//!
-//! Items marked **E-list** are the redirect-era surface EVMOD-ADOPT and
-//! EVMOD-DGRAM remove (feature-delta § *Bridge-era code for DELIVER to
-//! delete*, list E): the flow event record (`FlowEvent`, `FlowCell`,
-//! `CellEpoch`, `FlowEventDirection`,
-//! `FlowEventKind`, `FLOW_EVENT_LEN`), `WireField::Event*` and
-//! `FlowWireError::UnknownEventKind`. They are not part of the pinned
-//! contract, no test defends them, and DELIVER deletes them together with
-//! their remaining users (the sockmap forwarder of `overdrive-dataplane`
-//! and the redirect-era owner seams).
-
-// SCAFFOLD: true — netns-density-295 DISTILL (vsock DELIVER step 2).
-#![expect(
-    clippy::unused_self,
-    reason = "RED scaffold bodies panic before reading their inputs; the lint self-trips when DELIVER lands the bodies"
-)]
-
 use std::fmt;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::num::NonZeroU16;
@@ -41,8 +20,6 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::LaunchToken;
 use crate::net::ListenPort;
-
-const SCAFFOLD: &str = "Not yet implemented -- RED scaffold";
 
 // ---------------------------------------------------------------------------
 // Flow id
@@ -615,12 +592,6 @@ pub enum WireField {
     LaunchToken,
     /// A reserved byte of the control open.
     ControlOpenReserved,
-    /// **E-list.** The removed flow event record's cell.
-    EventCell,
-    /// **E-list.** The removed flow event record's direction byte.
-    EventDirection,
-    /// **E-list.** The removed flow event record's reserved bytes.
-    EventReserved,
 }
 
 /// Why bytes are not a canonical encoding.
@@ -667,12 +638,6 @@ pub enum FlowWireError {
     UnknownRefusal {
         /// The code read.
         code: u8,
-    },
-    /// **E-list.** The removed flow event record's kind.
-    #[error("flow event kind {kind} is not defined")]
-    UnknownEventKind {
-        /// The kind byte read.
-        kind: u8,
     },
     /// `FromStr` of a wire newtype: the text is not a decimal integer of the
     /// newtype's width (D-UP-13).
@@ -828,132 +793,6 @@ pub const GUEST_FLOW_MAX_PAIRS: u32 = 65_536;
 
 fn is_decimal(text: &str) -> bool {
     !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-// ---------------------------------------------------------------------------
-// E-list: the flow event record of the removed sockmap forwarder (R2-END,
-// R2-DRAIN, A3, UDP-EMPTY). Replaced by the forwarder's end record
-// (EVMOD-REC). Not built by step 2; DELIVER deletes it with its users.
-// ---------------------------------------------------------------------------
-
-/// Length of an encoded [`FlowEvent`].
-pub const FLOW_EVENT_LEN: usize = 24;
-
-/// A flow's slot in a side's drain cell array; cells `2 × slot` (dir 0) and
-/// `2 × slot + 1` (dir 1). Below the side's slot count.
-///
-/// RED scaffold: `new`, `get` and `Display` panic until DELIVER step 2.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct FlowCell(u32);
-
-impl FlowCell {
-    /// Rejects `raw` at or above the side's slot bound with
-    /// `InvalidField { field: EventCell }`.
-    pub fn new(_raw: u32) -> Result<Self, FlowWireError> {
-        panic!("{SCAFFOLD}")
-    }
-
-    /// The slot index.
-    pub const fn get(self) -> u32 {
-        panic!("Not yet implemented -- RED scaffold")
-    }
-}
-
-/// Decimal form.
-impl fmt::Display for FlowCell {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        panic!("{SCAFFOLD}")
-    }
-}
-
-/// Incremented each time a slot's cells are initialised for a new flow.
-///
-/// RED scaffold: `new`, `get` and `Display` panic until DELIVER step 2.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct CellEpoch(u32);
-
-impl CellEpoch {
-    /// Every `u32` is an epoch.
-    pub fn new(_raw: u32) -> Self {
-        panic!("{SCAFFOLD}")
-    }
-
-    /// The epoch value.
-    pub const fn get(self) -> u32 {
-        panic!("Not yet implemented -- RED scaffold")
-    }
-}
-
-/// Decimal form.
-impl fmt::Display for CellEpoch {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        panic!("{SCAFFOLD}")
-    }
-}
-
-/// The direction byte of a [`FlowEvent`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FlowEventDirection {
-    /// `0`: into the flow vsock (host: `FlowDirection::TowardGuest`).
-    IntoVsock,
-    /// `1`: out of the flow vsock (host: `FromGuest`).
-    OutOfVsock,
-}
-
-/// The kind byte of a [`FlowEvent`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FlowEventKind {
-    /// `1`: the peer ended its direction cleanly (vsock SHUTDOWN 0x2).
-    EndHalfClose,
-    /// `2`: a RST, or a SHUTDOWN 0x3 while a direction was still open.
-    EndAbort,
-    /// `3`: a drain cell's `sent` met its goal.
-    DrainComplete,
-    /// `4`: a redirect to the cell's route target was refused for the first
-    /// time.
-    RedirectRefused,
-    /// `5` (host only, UDP-EMPTY): a SEQPACKET record of an association
-    /// declared length 0.
-    EmptyDatagram,
-}
-
-impl FlowEventKind {
-    /// The kind's canonical label.
-    pub const fn as_str(self) -> &'static str {
-        panic!("Not yet implemented -- RED scaffold")
-    }
-}
-
-/// One record of a side's `FLOW_EVENT_RING` (native byte order: the record
-/// never leaves the machine that wrote it). A record is acted on only when
-/// its `cell` names a live flow and its `epoch` equals that flow's epoch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FlowEvent {
-    /// The flow's slot.
-    pub cell: FlowCell,
-    /// The cell's epoch when the record was written.
-    pub epoch: CellEpoch,
-    /// The direction.
-    pub dir: FlowEventDirection,
-    /// What happened.
-    pub kind: FlowEventKind,
-    /// Non-zero only for `DrainComplete`: the cell's `sent` that met its goal.
-    pub sent: u64,
-}
-
-impl FlowEvent {
-    /// The 24-byte record.
-    pub fn encode(&self) -> [u8; FLOW_EVENT_LEN] {
-        panic!("{SCAFFOLD}")
-    }
-
-    /// Decodes a record: an unknown kind is `UnknownEventKind`; a direction
-    /// other than 0 or 1 is `InvalidField { field: EventDirection }`; a
-    /// non-zero reserved byte, or a non-zero `sent` on a kind other than
-    /// `DrainComplete`, is `InvalidField { field: EventReserved }`.
-    pub fn decode(_bytes: &[u8; FLOW_EVENT_LEN]) -> Result<Self, FlowWireError> {
-        panic!("{SCAFFOLD}")
-    }
 }
 
 // ---------------------------------------------------------------------------

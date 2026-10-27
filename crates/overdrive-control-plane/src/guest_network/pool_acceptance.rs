@@ -293,7 +293,6 @@ proptest! {
     /// and Retiring leases with their CIDs and launch tokens.
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "pending DELIVER attachment-cut step (15)"]
     fn next_fit_leases_carry_unique_offset_derived_cids_over_any_operation_sequence(
         operations in prop::collection::vec(lease_op(), 0..160),
     ) {
@@ -315,7 +314,6 @@ proptest! {
     /// release) draws a new token; no token is all zero.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER attachment-cut step (15)"]
     fn launch_tokens_come_from_the_injected_entropy_and_a_new_lease_draws_a_new_token(
         seed in any::<u64>(),
         count in 1_u16..12,
@@ -349,7 +347,6 @@ proptest! {
     /// `release` frees it, after which a fresh `assign` of the same allocation
     /// admits it again.
     #[test]
-    #[ignore = "pending DELIVER attachment-cut step (15)"]
     fn retirement_is_monotonic_and_a_retiring_lease_keeps_its_cid_and_token_until_release(
         admitted in 1_u16..24,
         retire_mask in any::<u32>(),
@@ -429,7 +426,6 @@ proptest! {
     /// Admitted replay still returns its plan and a Retiring replay is refused
     /// as retiring.
     #[test]
-    #[ignore = "pending DELIVER attachment-cut step (15)"]
     fn admission_refuses_at_the_cap_over_held_leases_for_every_retiring_mix(
         retiring in prop_oneof![Just(0_usize), Just(CAP - 1), 1_usize..CAP - 1],
         offset in 0_usize..CAP - 1,
@@ -490,7 +486,6 @@ proptest! {
     /// changes nothing: the pinned observation is equal before and after and a
     /// second read is equal.
     #[test]
-    #[ignore = "pending DELIVER attachment-cut step (15)"]
     fn observe_reads_occupancy_and_requested_leases_in_one_snapshot_and_changes_nothing(
         operations in prop::collection::vec(lease_op(), 0..128),
         requested in prop::collection::vec(0_u16..KEYS + 16, 0..24),
@@ -518,7 +513,6 @@ proptest! {
 /// repeated observation with no operation between is equal.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn the_first_assign_admits_the_first_usable_offset_and_the_observation_gains_exactly_that_lease() {
     let prefix: Ipv4Net = "100.95.0.0/16".parse().expect("node prefix");
     let pool = pool();
@@ -551,7 +545,6 @@ fn the_first_assign_admits_the_first_usable_offset_and_the_observation_gains_exa
 /// (leases and cursor) is equal before and after.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[test]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn pool_exhaustion_below_the_cap_is_typed_and_changes_nothing() {
     let pool = pool_over("100.95.0.0/30", 0x295);
     pool.assign(
@@ -584,7 +577,6 @@ fn pool_exhaustion_below_the_cap_is_typed_and_changes_nothing() {
 /// `assign` (`vm_reclamation_boot` cells; `quint_cid_lease`).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn a_pool_built_after_a_serve_restart_reports_no_lease_of_the_previous_process() {
     let prefix: Ipv4Net = "100.95.0.0/16".parse().expect("node prefix");
     let previous = pool();

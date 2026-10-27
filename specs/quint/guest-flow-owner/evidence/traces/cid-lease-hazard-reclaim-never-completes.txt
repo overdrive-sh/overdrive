@@ -1,4 +1,4 @@
-# cid-lease-hazard-reclaim-never-completes: counterexample, 9 state(s) (from the TLC trace)
+# cid-lease-hazard-reclaim-never-completes: counterexample, 6 state(s) (from the TLC trace)
 
 State 1
   att = <<0, 0>>
@@ -13,43 +13,29 @@ State 1
   lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
 State 2 [Assign]
-  al = << [ st |-> "leased", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+  al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "leased", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
   cursor = 1
-  lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  lease = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
 
 State 3 [Launch]
-  dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
-  al = << [ st |-> "running", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+  dev = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "running", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
 
-State 4 [Stop]
-  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {1}, lastEnd |-> <<"stop", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
-  dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-  al = << [ st |-> "retiring", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
-
-State 5 [Assign]
-  al = << [ st |-> "retiring", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "leased", off |-> 1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
-  cursor = 2
-  lease = (0 :> 1 @@ 1 :> 2 @@ 2 :> 0)
-
-State 6 [Launch]
-  dev = (0 :> 0 @@ 1 :> 2 @@ 2 :> 0)
-  al = << [ st |-> "retiring", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "running", off |-> 1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
-
-State 7 [Crash]
+State 4 [Crash]
   reclaimed = FALSE
   up = FALSE
-  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {1}, lastEnd |-> <<"stop", "reclaim">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
-  dev = (0 :> 0 @@ 1 :> -2 @@ 2 :> 0)
-  al = << [ st |-> "done", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "reclaim">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
+  dev = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
   cursor = 0
   bootLeft = 0
   lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 8 [Restart]
+State 5 [Restart]
   up = TRUE
 
-State 9 [Reclaim]
-  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> TRUE, stopped |-> {1}, lastEnd |-> <<"stop", "reclaim">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
+State 6 [Reclaim]
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> TRUE, stopped |-> {}, lastEnd |-> <<"none", "reclaim">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
   dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
--> stutters forever in State 9
+-> stutters forever in State 6

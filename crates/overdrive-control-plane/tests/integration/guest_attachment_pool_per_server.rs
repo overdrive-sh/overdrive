@@ -23,7 +23,7 @@
 )]
 
 use std::net::Ipv4Addr;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -36,12 +36,10 @@ use overdrive_core::id::NodeId;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{AllocationSpec, Driver, DriverType};
 use overdrive_core::traits::observation_store::ObservationStore;
-use overdrive_sim::adapters::SimCgroupFs;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_worker::cgroup_manager::CgroupManager;
 use tempfile::TempDir;
 
 use super::workload_lifecycle::wait::advance_and_settle;
@@ -119,7 +117,6 @@ impl Server {
             driver_port,
             Arc::new(SimSharedGuestNetworkOwner::default()),
             GuestNetworkExecWiring::new(Arc::clone(&clock_port)),
-            CgroupManager::new(PathBuf::from("/sys/fs/cgroup"), Arc::new(SimCgroupFs::new())),
         )
         .await
         .expect("production boot");
@@ -193,7 +190,6 @@ fn first_address(started: &[AllocationSpec]) -> Option<Ipv4Addr> {
 /// the same roots starts with an empty pool, so the first guest-network
 /// assignment it makes is again the smallest free address, `100.95.0.2`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn a_killed_restart_starts_with_an_empty_pool() {
     let roots = TempDir::new().expect("tempdir");
     let obs: Arc<dyn ObservationStore> =

@@ -59,11 +59,11 @@ use std::sync::Arc;
 
 use itf::Value;
 use overdrive_core::guest_transport::wire::{ControlMessage, KernelErrno};
+use overdrive_netlink::FibRouteType;
 use quint_connect::{Config, Driver, Result, State, Step, quint_run, quint_test, switch};
 use serde::Deserialize;
 
-use super::flow_io::HostRouteType;
-use super::flow_io::sim::{SimEffectKind, SimEffectTarget};
+use super::flow_io::sim::{SimEffectId, SimEffectKind, SimEffectTarget};
 use super::owner_acceptance::support::{Composition, Lease, guest_flow, paused_runtime};
 use super::quint_itf::{self, ItfError, Qualified};
 use super::{AssociationPhase, GuestConnKey, HostSharedGuestNetworkOwner};
@@ -145,6 +145,8 @@ pub(super) struct SlotsDriver {
     next_fid: i64,
     /// Association id ↦ its 1240 connection and destination.
     assocs: BTreeMap<i64, (GuestConnKey, SocketAddrV4)>,
+    /// Stimulus-only identity of each association's actual held route check.
+    route_checks: BTreeMap<i64, SimEffectId>,
     next_port: u32,
 }
 
@@ -164,6 +166,7 @@ impl SlotsDriver {
             slot_dest: BTreeMap::new(),
             next_fid: 1,
             assocs: BTreeMap::new(),
+            route_checks: BTreeMap::new(),
             next_port: 6_000,
         }
     }
@@ -238,9 +241,43 @@ impl SlotsDriver {
         self.next_port += 1;
         let target = destination(d);
         let lease = self.lease().clone();
+        let before: BTreeSet<SimEffectId> = self
+            .composition()
+            .io
+            .held()
+            .into_iter()
+            .filter_map(|(id, effect)| (effect.kind == SimEffectKind::RouteType).then_some(id))
+            .collect();
         let (key, _flow) = self.composition().open_datagram(&lease, seq, target, self.next_port);
         self.assocs.insert(i, (key, target));
         self.settle();
+        let mut added = self
+            .composition()
+            .io
+            .held()
+            .into_iter()
+            .filter(|(id, effect)| effect.kind == SimEffectKind::RouteType && !before.contains(id))
+            .collect::<Vec<_>>();
+        if added.len() != 1 {
+            return Err(not_playable(
+                "GuestReady",
+                format!("association {i} issued {} new held route checks", added.len()),
+            ));
+        }
+        let (route_check, effect) = added.pop().expect("the unique new route check");
+        let expected = SimEffectTarget::Ip(*target.ip());
+        if effect.target != expected {
+            return Err(not_playable(
+                "GuestReady",
+                format!(
+                    "association {i}'s route check targets {:?}, expected {expected:?}",
+                    effect.target
+                ),
+            ));
+        }
+        if self.route_checks.insert(i, route_check).is_some() {
+            return Err(not_playable("GuestReady", format!("association {i} reused its id")));
+        }
         Ok(())
     }
 
@@ -250,17 +287,31 @@ impl SlotsDriver {
 
     // ----- host steps -----
 
-    fn release_route_check(&self, target: SocketAddrV4, action: &'static str) -> Result {
+    fn release_route_check(
+        &mut self,
+        i: i64,
+        target: SocketAddrV4,
+        action: &'static str,
+    ) -> Result {
+        let id = self
+            .route_checks
+            .remove(&i)
+            .ok_or_else(|| not_playable(action, format!("association {i} has no route ticket")))?;
         let c = self.composition();
-        let id =
+        let effect =
             c.io.held()
                 .into_iter()
-                .find(|(_, effect)| {
-                    effect.kind == SimEffectKind::RouteType
-                        && effect.target == SimEffectTarget::Ip(*target.ip())
-                })
-                .map(|(id, _)| id)
-                .ok_or_else(|| not_playable(action, format!("no held route check for {target}")))?;
+                .find_map(|(held, effect)| (held == id).then_some(effect))
+                .ok_or_else(|| {
+                    not_playable(action, format!("association {i}'s route ticket is gone"))
+                })?;
+        let expected = SimEffectTarget::Ip(*target.ip());
+        if effect.kind != SimEffectKind::RouteType || effect.target != expected {
+            return Err(not_playable(
+                action,
+                format!("association {i}'s route ticket is {effect:?}, expected {expected:?}"),
+            ));
+        }
         c.io.release(id);
         self.settle();
         Ok(())
@@ -268,14 +319,14 @@ impl SlotsDriver {
 
     fn host_pair(&mut self, i: i64) -> Result {
         let (_key, target) = self.assoc(i, "HostPair")?;
-        self.composition().io.set_route_type(*target.ip(), HostRouteType::Unicast);
-        self.release_route_check(target, "HostPair")
+        self.composition().io.set_route_type(*target.ip(), FibRouteType::Unicast);
+        self.release_route_check(i, target, "HostPair")
     }
 
     fn host_refuse(&mut self, i: i64) -> Result {
         let (_key, target) = self.assoc(i, "HostRefuse")?;
-        self.composition().io.set_route_type(*target.ip(), HostRouteType::Local);
-        self.release_route_check(target, "HostRefuse")
+        self.composition().io.set_route_type(*target.ip(), FibRouteType::Local);
+        self.release_route_check(i, target, "HostRefuse")
     }
 
     fn host_abort_assoc(&mut self, i: i64) -> Result {
@@ -370,7 +421,6 @@ impl Driver for SlotsDriver {
     max_samples = 1,
     test = "DatagramAssociationClaimsPairsAndRoutes"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_udp_slots_datagram_association_claims_pairs_and_routes() -> impl Driver {
     SlotsDriver::new()
 }
@@ -382,7 +432,6 @@ fn quint_udp_slots_datagram_association_claims_pairs_and_routes() -> impl Driver
     max_samples = 1,
     test = "TwoSocketsClaimDistinctSlots"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_udp_slots_two_sockets_claim_distinct_slots() -> impl Driver {
     SlotsDriver::new()
 }
@@ -394,7 +443,6 @@ fn quint_udp_slots_two_sockets_claim_distinct_slots() -> impl Driver {
     max_samples = 1,
     test = "RefusedDiscardsParkedFramesAndOnlyNewDatagramReassociates"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_udp_slots_refused_discards_parked_frames_and_only_new_datagram_reassociates() -> impl Driver
 {
     SlotsDriver::new()
@@ -407,7 +455,6 @@ fn quint_udp_slots_refused_discards_parked_frames_and_only_new_datagram_reassoci
     max_samples = 1,
     test = "HostAbortOfLiveAssociationEndsItAndKeepsSlotOwned"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_udp_slots_host_abort_of_live_association_ends_it_and_keeps_slot_owned() -> impl Driver {
     SlotsDriver::new()
 }
@@ -419,7 +466,6 @@ fn quint_udp_slots_host_abort_of_live_association_ends_it_and_keeps_slot_owned()
     max_samples = 1,
     test = "DatagramQueuedBeforeAnEndIsDiscardedWithTheQueue"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_udp_slots_datagram_queued_before_an_end_is_discarded_with_the_queue() -> impl Driver {
     SlotsDriver::new()
 }
@@ -431,7 +477,6 @@ fn quint_udp_slots_datagram_queued_before_an_end_is_discarded_with_the_queue() -
     max_samples = 1,
     test = "LatePairedForReleasedSlotIsAnsweredWithAbort"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_udp_slots_late_paired_for_released_slot_is_answered_with_abort() -> impl Driver {
     SlotsDriver::new()
 }
@@ -443,7 +488,6 @@ fn quint_udp_slots_late_paired_for_released_slot_is_answered_with_abort() -> imp
     max_samples = 1,
     test = "LostReleaseReportIsFoundByAudit"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_udp_slots_lost_release_report_is_found_by_audit() -> impl Driver {
     SlotsDriver::new()
 }
@@ -455,7 +499,6 @@ fn quint_udp_slots_lost_release_report_is_found_by_audit() -> impl Driver {
     max_samples = 1,
     test = "SocketCloseReleasesEverySlotItOwns"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_udp_slots_socket_close_releases_every_slot_it_owns() -> impl Driver {
     SlotsDriver::new()
 }
@@ -467,7 +510,6 @@ fn quint_udp_slots_socket_close_releases_every_slot_it_owns() -> impl Driver {
     max_samples = 1,
     test = "IdleSlotReleaseEndsAssociation"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_udp_slots_idle_slot_release_ends_association() -> impl Driver {
     SlotsDriver::new()
 }
@@ -479,7 +521,6 @@ fn quint_udp_slots_idle_slot_release_ends_association() -> impl Driver {
     max_samples = 1,
     test = "AuditTickReleasesOrphansAndIdleSlotsInOneStep"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_udp_slots_audit_tick_releases_orphans_and_idle_slots_in_one_step() -> impl Driver {
     SlotsDriver::new()
 }
@@ -491,7 +532,6 @@ fn quint_udp_slots_audit_tick_releases_orphans_and_idle_slots_in_one_step() -> i
     max_samples = 1,
     test = "PairingDeadlineAbortsAndLatePairedIsDiscarded"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_udp_slots_pairing_deadline_aborts_and_late_paired_is_discarded() -> impl Driver {
     SlotsDriver::new()
 }
@@ -503,14 +543,12 @@ fn quint_udp_slots_pairing_deadline_aborts_and_late_paired_is_discarded() -> imp
     max_samples = 1,
     test = "RecycledSlotNeverDeliversPreviousOwnersFrames"
 )]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn quint_udp_slots_recycled_slot_never_delivers_previous_owners_frames() -> impl Driver {
     SlotsDriver::new()
 }
 
 /// Randomized `slots_conf` traces; the seed is printed on failure.
 #[quint_run(spec = "../../specs/quint/guest-flow-owner/udp_slots.qnt", main = "slots_conf")]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 fn slots_conf_randomized_traces() -> impl Driver {
     SlotsDriver::new()
 }

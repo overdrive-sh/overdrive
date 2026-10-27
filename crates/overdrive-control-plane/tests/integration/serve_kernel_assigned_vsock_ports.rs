@@ -54,7 +54,6 @@ fn held(port: VsockPort, what: &str) {
 /// `None`; when one is, it is a kernel-assigned port too.
 /// `CONTRACT_SHAPE`: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER attachment-cut step (6): PORTS-CONFIG"]
 async fn kernel_assigned_listener_ports_are_reported_held_and_distinct_across_two_serves() {
     let (first_tmp, second_tmp) = (TempDir::new().expect("tmp"), TempDir::new().expect("tmp"));
     let first = boot(test_config(first_tmp.path().join("data"), first_tmp.path().join("conf")))

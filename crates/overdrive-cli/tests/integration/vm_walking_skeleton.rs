@@ -211,7 +211,6 @@
 //! entry, ADR-0083 §D2a) was never at fault.
 //!
 //! Every pre-#295 scenario that boots a VM now carries
-//! `#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15 …)"]`:
 //! a VM start leases the guest transport and takes READY from the node
 //! beacon intake, which only that step wires, so these bodies are RED until
 //! it lands and are activated by it. The GH
@@ -800,7 +799,6 @@ fn tap_admin_up(name: &str) -> std::io::Result<Option<bool>> {
 /// the operator.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn vm_workload_runs_to_completion_and_exit_code_reaches_operator() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -849,7 +847,6 @@ async fn vm_workload_runs_to_completion_and_exit_code_reaches_operator() {
 /// inside the guest returned).
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn vm_non_zero_guest_exit_code_is_reported_not_the_hypervisors() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -907,7 +904,6 @@ async fn vm_non_zero_guest_exit_code_is_reported_not_the_hypervisors() {
 /// observes a state OTHER than Running (K2 guardrail).
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn vm_guest_that_never_starts_is_never_reported_running() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -967,7 +963,6 @@ async fn vm_guest_that_never_starts_is_never_reported_running() {
 /// (no full boot-to-completion needed; that is S-VM-01/02's claim).
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn vm_workload_deploys_through_the_same_verb_as_a_process_workload() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -1050,7 +1045,6 @@ pub(super) fn find_cloud_hypervisor_pid() -> u32 {
 /// feature deliberately re-proves closed).
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn vm_platform_contains_the_hypervisor_it_started() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -1386,7 +1380,6 @@ fn send_host_broadcast_arp_probes(tap: &str, guest: Ipv4Addr, count: usize) {
 )]
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn every_cloud_hypervisor_thread_carries_the_launch_filter_under_its_own_filters() {
     let _teardown = TeardownBound::arm();
     let fixture =
@@ -1763,7 +1756,6 @@ pub(super) fn no_cloud_hypervisor_process_running() -> bool {
 /// DISTILL set for S-VM-67).
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn vm_deadline_arm_leaks_nothing() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -1874,7 +1866,6 @@ async fn vm_deadline_arm_leaks_nothing() {
 /// scenario's internal drain-then-classify ordering is what makes true.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn vm_guest_exit_report_is_never_overwritten_by_vmm_teardown_exit() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -2033,7 +2024,6 @@ fn path_without_cloud_hypervisor() -> String {
 /// for the explicit gap flag.
 #[tokio::test]
 #[serial(cgroup, env)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn vm_absent_boots_node_with_no_vm_entry_and_classifies_deploy_naming_capability() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
@@ -2338,7 +2328,6 @@ fn build_memory_hog_binary(tmp: &Path) -> PathBuf {
 /// artificially-tightened value this test wrote afterward).
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn vm_that_exceeds_declared_memory_is_diagnosed_as_oom_not_bare_signal_9() {
     const DECLARED_MEMORY_BYTES: u64 = 134_217_728; // 128 MiB -- matches every other scenario's proven-to-boot budget
     const TIGHTENED_MEMORY_MAX_BYTES: u64 = 24 * 1024 * 1024; // 24 MiB
@@ -2532,7 +2521,6 @@ async fn vm_that_exceeds_declared_memory_is_diagnosed_as_oom_not_bare_signal_9()
 /// box (commit `28dbefdc`), doubled here because there are two of them.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2, 15: a VM start leases the guest transport and takes READY from the node beacon intake)"]
 async fn two_vm_jobs_on_one_serve_each_boot_from_the_rootfs_their_own_spec_named() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");

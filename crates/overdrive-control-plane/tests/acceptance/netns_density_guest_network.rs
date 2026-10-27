@@ -31,8 +31,7 @@ use overdrive_control_plane::action_shim::{
 use overdrive_control_plane::guest_network::{
     ForwardingActivation, ForwardingQuiescence, ForwardingRestore, GuestAddressPool,
     GuestNetworkError, GuestNetworkOperation, GuestNetworkPlan, GuestNetworkProvisioner,
-    GuestNetworkScratchComplement, GuestNetworkScratchCount, QuiescenceHold,
-    QuiescenceRestoreError, SharedGuestNetworkAudit, SharedGuestNetworkAuditError,
+    QuiescenceHold, QuiescenceRestoreError, SharedGuestNetworkAudit, SharedGuestNetworkAuditError,
     SharedGuestNetworkOwner,
 };
 use overdrive_control_plane::{AppState, noop_heartbeat};
@@ -73,54 +72,11 @@ use overdrive_worker::mtls_intercept_port::{
 };
 use overdrive_worker::mtls_intercept_worker::{MtlsInterceptStopError, MtlsInterceptWorker};
 use parking_lot::Mutex;
-use proptest::prelude::*;
 use tempfile::TempDir;
 use tokio::sync::broadcast::error::TryRecvError;
 use tracing::field::{Field, Visit};
 use tracing::{Event, Subscriber};
 use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
-
-fn scratch_complement(counts: &[Option<u32>]) -> GuestNetworkScratchComplement {
-    assert_eq!(counts.len(), 15);
-    let count = |index: usize| {
-        counts[index]
-            .map_or(GuestNetworkScratchCount::Unavailable, GuestNetworkScratchCount::Observed)
-    };
-    GuestNetworkScratchComplement {
-        bridges: count(0),
-        taps: count(1),
-        endpoint_maps: count(2),
-        counter_maps: count(3),
-        endpoint_entries: count(4),
-        tcx_programs: count(5),
-        tcx_links: count(6),
-        endpoint_map_pins: count(7),
-        counter_map_pins: count(8),
-        tcx_link_pins: count(9),
-        bridge_guard_tables: count(10),
-        bridge_guard_chains: count(11),
-        bridge_guard_sets: count(12),
-        bridge_guard_rules: count(13),
-        bridge_guard_members: count(14),
-    }
-}
-
-proptest! {
-    /// CONTRACT_SHAPE: pure-function.
-    /// Outcome anchor: DISCUSS Elevator Pitch.
-    #[test]
-    fn scratch_complement_never_fabricates_zero(
-        counts in prop::collection::vec(prop::option::of(0_u32..4), 15..=15),
-    ) {
-        let complement = scratch_complement(&counts);
-        let all_observed = counts.iter().all(Option::is_some);
-        let all_zero = counts.iter().all(|count| *count == Some(0));
-
-        prop_assert_eq!(complement.is_fully_observed(), all_observed);
-        prop_assert_eq!(complement.is_empty(), all_zero);
-        prop_assert!(!complement.is_empty() || complement.is_fully_observed());
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Ordered step trace (test vocabulary, never production types).
@@ -639,6 +595,10 @@ impl SharedGuestNetworkOwner for ActivationFaultOwner {
         self.inner.flow_ports()
     }
 
+    fn leaked_quiescence_holds(&self) -> u32 {
+        self.inner.leaked_quiescence_holds()
+    }
+
     async fn audit_shared(&self) -> Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError> {
         self.inner.audit_shared().await
     }
@@ -762,6 +722,10 @@ where
         let allocator = overdrive_control_plane::test_default_allocator(
             Arc::clone(&store) as Arc<dyn IntentStore>
         );
+        owner
+            .converge_shared()
+            .await
+            .expect("the fixture's shared guest-network owner is converged");
         // The constructor call. Until DELIVER 05-01 cuts the pinned
         // constructors (FD § "Gate G-V3 — allocation forwarding activation (replaces G-295-3)" (the `AppState` constructors)) it passes today's inputs; 05-01 appends
         // `Arc::clone(&worker)`, `Arc::clone(&owner) as Arc<dyn SharedGuestNetworkOwner>`,
@@ -952,7 +916,6 @@ fn tick(counter: u64) -> TickContext {
 /// S-ND295-06 — Start publishes no partial attachment
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn provision_refusal_stops_before_driver_start_and_preserves_the_typed_owner_cause() {
     const REFUSED: &str = "nd295-provision-refused";
     let fixture = SeamFixture::with_sim_owner().await;
@@ -1002,11 +965,11 @@ async fn provision_refusal_stops_before_driver_start_and_preserves_the_typed_own
 // ---------------------------------------------------------------------------
 
 /// Outcome anchor: OUT-ND295-SHARED-SWITCH
-/// S-ND295-07 — Stop removes the predecessor completely before its address is reused
+/// S-ND295-07 — Stop removes the predecessor completely before release; the
+/// pool then continues from its next-fit cursor.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
-async fn teardown_failure_holds_the_lease_until_retry_completes_then_allows_exact_address_reuse() {
+async fn teardown_failure_holds_the_lease_until_retry_completes_then_next_fit_continues() {
     const PREDECESSOR: &str = "nd295-predecessor";
     let fixture = SeamFixture::with_sim_owner().await;
     fixture.start_protection_and_open_exec().await;
@@ -1092,11 +1055,24 @@ async fn teardown_failure_holds_the_lease_until_retry_completes_then_allows_exac
         .await
         .expect("successor starts after predecessor complement is empty");
     let successor = fixture.started_assignment(2);
-    assert_eq!(successor.workload_addr(), predecessor.workload_addr());
-    assert_eq!(successor.cid(), predecessor.cid());
+    assert_eq!(
+        successor.workload_addr(),
+        Ipv4Addr::new(100, 95, 0, 4),
+        "release frees the predecessor, while next-fit continues after the still-held .3 lease",
+    );
+    assert_eq!(
+        successor.cid().get(),
+        while_held.cid().get() + 1,
+        "CID and address advance together at the next-fit cursor",
+    );
+    // `calls()` is the owner's complete fixture-lifetime journal. The
+    // production-equivalent startup convergence opens the shared forwarder
+    // before any allocation action; workload attach/activate/abort operations
+    // follow in their original order.
     assert_eq!(
         fixture.sim_owner.calls(),
         [
+            GuestNetworkOperation::ForwarderOpen,
             GuestNetworkOperation::PairAttach,
             GuestNetworkOperation::ForwardingActivate,
             GuestNetworkOperation::PairAbort,
@@ -1106,7 +1082,7 @@ async fn teardown_failure_holds_the_lease_until_retry_completes_then_allows_exac
             GuestNetworkOperation::PairAttach,
             GuestNetworkOperation::ForwardingActivate,
         ],
-        "each successful start activates exactly once before release; teardown/retry remains effect-first"
+        "startup opens the shared forwarder once; each successful start activates exactly once before release; teardown/retry remains effect-first"
     );
 }
 
@@ -1152,7 +1128,6 @@ impl SeamFixture<ActivationFaultOwner> {
 /// S-ND295-56 — Reclaim cleans an allocation's network without touching its row
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn reclaim_cleans_a_leased_finished_allocation_without_a_row() {
     const FINISHED: &str = "nd295-reclaim-finished";
     let fixture = SeamFixture::with_activation_fault_owner().await;
@@ -1185,7 +1160,6 @@ async fn reclaim_cleans_a_leased_finished_allocation_without_a_row() {
 /// S-ND295-56 — Reclaim cleans an allocation's network without touching its row
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn reclaim_without_a_lease_does_nothing() {
     const NEVER_LEASED: &str = "nd295-reclaim-never-leased";
     const RELEASED: &str = "nd295-reclaim-released";
@@ -1228,7 +1202,6 @@ async fn reclaim_without_a_lease_does_nothing() {
 /// S-ND295-56 — Reclaim cleans an allocation's network without touching its row
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn a_failed_reclaim_step_keeps_the_lease_for_the_next_attempt() {
     const FINISHED: &str = "nd295-reclaim-failing";
     let fixture = SeamFixture::with_activation_fault_owner().await;
@@ -1326,7 +1299,6 @@ async fn a_failed_reclaim_step_keeps_the_lease_for_the_next_attempt() {
 /// band. The reclaim's element removal and teardown converge on that absence,
 /// and the lease is released last.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn a_reclaim_whose_parts_were_removed_out_of_band_releases_the_lease() {
     const FINISHED: &str = "nd295-reclaim-out-of-band";
     let fixture = SeamFixture::with_activation_fault_owner().await;
@@ -1401,7 +1373,6 @@ async fn a_reclaim_whose_parts_were_removed_out_of_band_releases_the_lease() {
 /// reclaim records `lease_retired` before the element removal and the owner's
 /// teardown, and `lease_released` after them.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn a_reclaim_retires_an_admitted_lease_before_its_teardown_and_releases_it_after() {
     const CRASHED: &str = "nd295-reclaim-crashed";
     let fixture = SeamFixture::with_sim_owner().await;

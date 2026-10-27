@@ -1,5 +1,6 @@
 State 1: <Initial predicate>
 /\ pair_watch_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_watch_fwd_pair_strmHeld = FALSE
 /\ pair_watch_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_watch_fwd_pair_attRes = [g |-> "none", h |-> "ok"]
 /\ pair_watch_fwd_pair_vs = [ g |->
@@ -130,8 +131,9 @@ State 1: <Initial predicate>
         cgen |-> 0 ] ]
 /\ pair_watch_fwd_pair_hres = "none"
 
-State 2: <pair_watch_fwd_pair_Attach line 2904, col 3 to line 2911, col 63 of module pair_watch>
+State 2: <pair_watch_fwd_pair_Attach line 3249, col 3 to line 3256, col 63 of module pair_watch>
 /\ pair_watch_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_watch_fwd_pair_strmHeld = TRUE
 /\ pair_watch_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_watch_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
 /\ pair_watch_fwd_pair_vs = [ g |->
@@ -262,8 +264,9 @@ State 2: <pair_watch_fwd_pair_Attach line 2904, col 3 to line 2911, col 63 of mo
         cgen |-> 0 ] ]
 /\ pair_watch_fwd_pair_hres = "none"
 
-State 3: <pair_watch_fwd_pair_Fin line 1355, col 3 to line 1382, col 61 of module pair_watch>
+State 3: <pair_watch_fwd_pair_Fin line 1381, col 3 to line 1409, col 61 of module pair_watch>
 /\ pair_watch_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_watch_fwd_pair_strmHeld = TRUE
 /\ pair_watch_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_watch_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
 /\ pair_watch_fwd_pair_vs = [ g |->
@@ -394,8 +397,9 @@ State 3: <pair_watch_fwd_pair_Fin line 1355, col 3 to line 1382, col 61 of modul
         cgen |-> 0 ] ]
 /\ pair_watch_fwd_pair_hres = "none"
 
-State 4: <pair_watch_fwd_pair_HopEnd0 line 2561, col 3 to line 2583, col 38 of module pair_watch>
+State 4: <pair_watch_fwd_pair_HopEnd0 line 2691, col 3 to line 2713, col 38 of module pair_watch>
 /\ pair_watch_fwd_pair_ctl = [gh |-> <<{"S"}>>, hg |-> <<>>]
+/\ pair_watch_fwd_pair_strmHeld = TRUE
 /\ pair_watch_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_watch_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
 /\ pair_watch_fwd_pair_vs = [ g |->
@@ -526,8 +530,9 @@ State 4: <pair_watch_fwd_pair_HopEnd0 line 2561, col 3 to line 2583, col 38 of m
         cgen |-> 0 ] ]
 /\ pair_watch_fwd_pair_hres = "none"
 
-State 5: <pair_watch_fwd_pair_VCtl line 3092, col 3 to line 3095, col 37 of module pair_watch>
+State 5: <pair_watch_fwd_pair_VCtl line 3274, col 3 to line 3277, col 37 of module pair_watch>
 /\ pair_watch_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_watch_fwd_pair_strmHeld = TRUE
 /\ pair_watch_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_watch_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
 /\ pair_watch_fwd_pair_vs = [ g |->

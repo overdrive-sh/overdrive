@@ -63,26 +63,9 @@
 //!   only the fixed records; the forwarding methods carry the
 //!   `FlowForwarder` contract unchanged.
 //!
-//! RED scaffold (DISTILL, Mandate 7): the production adapter
-//! [`HostGuestFlowIo`] panics until the attachment-cut step (7) lands it; the
-//! owner composes it from `HostSharedGuestNetworkOwner::new(GuestFlowOwnerPorts)`
-//! (DG-2 row 9).
+//! The production adapter [`HostGuestFlowIo`] is composed by the owner from
+//! `HostSharedGuestNetworkOwner::new(GuestFlowOwnerPorts)` (DG-2 row 9).
 
-// SCAFFOLD: true — netns-density-295 DISTILL (vsock attachment cut, DG-3).
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "RED scaffold — the attachment cut (DG-2 row 9) drives the seam from the owner"
-    )
-)]
-#![cfg_attr(
-    test,
-    allow(
-        dead_code,
-        reason = "RED scaffold — the attachment cut (DG-2 row 9) composes the production adapter"
-    )
-)]
 #![allow(
     clippy::redundant_pub_crate,
     reason = "DG-3 pins `pub(crate)` visibility for the seam's items"
@@ -90,6 +73,9 @@
 
 #[cfg(test)]
 pub(crate) mod sim;
+
+mod host;
+pub(crate) use host::HostGuestFlowIo;
 
 // R5-59 (a), flow seam: `HostGuestFlowIo` against `SimGuestFlowIo` with a
 // guest-kit microVM as the peer (native metal, kvm-tests).
@@ -106,6 +92,8 @@ use overdrive_core::guest_transport::wire::FlowId;
 use overdrive_core::guest_transport::{GuestCid, VsockListenPort};
 use overdrive_core::net::InterfaceIndex;
 use overdrive_core::vm::config::VsockPort;
+pub(crate) use overdrive_netlink::FibRouteType as HostRouteType;
+use overdrive_netlink::NetlinkError;
 
 /// The forwarder's own types (§ *[REF] Driven port — `FlowForwarder`*): the
 /// pair / watch id, the context generation, an end record, a pair's
@@ -117,8 +105,6 @@ pub(crate) use overdrive_core::guest_transport::forwarder::{
 };
 
 use super::{GuestConnKey, GuestNetworkError};
-
-const SCAFFOLD: &str = "Not yet implemented -- RED scaffold";
 
 /// One handle issued by one seam instance. Private: the adapters name it;
 /// the owner cannot build or inspect it.
@@ -238,23 +224,6 @@ pub(crate) struct PeerSocketSpec {
     /// to leg-F (its local address is registered before the connect, D9);
     /// `None` binds at connect.
     pub(crate) bind: Option<SocketAddrV4>,
-}
-
-/// The host's route type for a destination (D26 local-delivery check).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum HostRouteType {
-    /// `unicast`.
-    Unicast,
-    /// `local`.
-    Local,
-    /// `broadcast`.
-    Broadcast,
-    /// `multicast`.
-    Multicast,
-    /// `anycast`.
-    Anycast,
-    /// Any other route type.
-    Other,
 }
 
 /// Why a socket operation of the seam failed.
@@ -392,8 +361,10 @@ pub(crate) trait GuestFlowIo: Send + Sync {
         peer: &PeerSocket,
         destination: SocketAddrV4,
     ) -> Result<(), FlowIoError>;
-    /// The host's FIB route type for `destination` (D26 check 4). Pure read.
-    async fn route_type(&self, destination: Ipv4Addr) -> Result<HostRouteType, FlowIoError>;
+    /// The host's destination-specific IPv4 FIB route type (D26 check 4).
+    /// Pure read. Preserves the netlink error until the owner maps it to the
+    /// approved flow-local `HostInternal` refusal.
+    async fn route_type(&self, destination: Ipv4Addr) -> Result<HostRouteType, NetlinkError>;
 
     // --- forwarding: the `FlowForwarder` calls, made on the seam's handles
     //     through the context the seam holds; same preconditions, results and
@@ -420,6 +391,7 @@ pub(crate) trait GuestFlowIo: Send + Sync {
     /// Cancellation-safe: a dropped call loses no record.
     async fn next_end(&self) -> Result<ForwardEnd, ForwarderError>;
     /// `FlowForwarder::pair_state(id)`; read-only.
+    #[allow(dead_code, reason = "DG-3 pins the forwarder's read-only pair-state operation")]
     fn pair_state(&self, id: ForwardId) -> Result<Option<PairState>, ForwarderError>;
     /// `FlowForwarder::inventory()`; read-only.
     fn inventory(&self) -> Result<ForwarderInventory, ForwarderError>;
@@ -432,149 +404,4 @@ pub(crate) trait GuestFlowIo: Send + Sync {
     async fn abort(&self, socket: OwnedSocket);
     /// Closes. Consumes the handle.
     async fn close(&self, socket: OwnedSocket);
-}
-
-// ---------------------------------------------------------------------------
-// Production adapter
-// ---------------------------------------------------------------------------
-
-/// The production `GuestFlowIo` (DG-3): holds the handle table (seam ids →
-/// `OwnedFd` with `tokio::io::unix::AsyncFd` readiness), the
-/// `KernelFlowForwarder` after `open_forwarder` (its `readiness_fd`
-/// registered with the same reactor), and the netlink client; built only by
-/// `HostSharedGuestNetworkOwner::new`. Each forwarding method calls
-/// `KernelFlowForwarder` with the handles' descriptors as `&dyn AsFd`. `new`
-/// touches no kernel state.
-///
-/// RED scaffold: every method panics until the attachment-cut step (7) lands
-/// the adapter.
-pub(crate) struct HostGuestFlowIo {
-    _scaffold: (),
-}
-
-impl HostGuestFlowIo {
-    /// The adapter with an empty handle table; touches no kernel state.
-    /// `HostSharedGuestNetworkOwner::new` and `run_server`'s composition
-    /// (`compose_guest_network`, D-UP-16) build it.
-    pub(crate) const fn new() -> Self {
-        Self { _scaffold: () }
-    }
-}
-
-#[async_trait::async_trait]
-impl GuestFlowIo for HostGuestFlowIo {
-    async fn host_facts(&self) -> Result<GuestHostFacts, GuestNetworkError> {
-        panic!("{SCAFFOLD}")
-    }
-    async fn probe_forwarder(&self) -> Result<(), ForwarderError> {
-        panic!("{SCAFFOLD}")
-    }
-    async fn open_forwarder(&self) -> Result<ForwarderGeneration, ForwarderError> {
-        panic!("{SCAFFOLD}")
-    }
-    fn close_forwarder(&self) {
-        panic!("{SCAFFOLD}")
-    }
-    async fn bind_listener(
-        &self,
-        _listener: FlowListener,
-        _port: VsockListenPort,
-    ) -> Result<VsockPort, FlowIoError> {
-        panic!("{SCAFFOLD}")
-    }
-    async fn converge_gateway_route(&self, _gateway: Ipv4Addr) -> Result<(), GuestNetworkError> {
-        panic!("{SCAFFOLD}")
-    }
-    async fn stale_objects_present(&self) -> Result<bool, GuestNetworkError> {
-        panic!("{SCAFFOLD}")
-    }
-    async fn accept(
-        &self,
-        _listener: FlowListener,
-    ) -> Result<(RecordSocket, GuestConnKey), FlowIoError> {
-        panic!("{SCAFFOLD}")
-    }
-    async fn read_record(
-        &self,
-        _socket: &RecordSocket,
-        _max: usize,
-    ) -> Result<Vec<u8>, FlowIoError> {
-        panic!("{SCAFFOLD}")
-    }
-    async fn write_record(&self, _socket: &RecordSocket, _bytes: &[u8]) -> Result<(), FlowIoError> {
-        panic!("{SCAFFOLD}")
-    }
-    async fn connect_guest(&self, _cid: GuestCid) -> Result<RecordSocket, FlowIoError> {
-        panic!("{SCAFFOLD}")
-    }
-    fn watch(&self, _vsock: &RecordSocket) -> Result<ForwardId, ForwarderError> {
-        panic!("{SCAFFOLD}")
-    }
-    fn into_guest_stream(
-        &self,
-        _vsock: RecordSocket,
-        _watch: ForwardId,
-        _flow: FlowId,
-        _target: SocketAddrV4,
-    ) -> GuestStream {
-        panic!("{SCAFFOLD}")
-    }
-    async fn open_peer(&self, _spec: PeerSocketSpec) -> Result<PeerSocket, FlowIoError> {
-        panic!("{SCAFFOLD}")
-    }
-    fn local_addr(&self, _peer: &PeerSocket) -> Result<SocketAddrV4, FlowIoError> {
-        panic!("{SCAFFOLD}")
-    }
-    fn peer_addr(&self, _peer: &PeerSocket) -> Result<SocketAddrV4, FlowIoError> {
-        panic!("{SCAFFOLD}")
-    }
-    async fn connect_udp(
-        &self,
-        _peer: &PeerSocket,
-        _destination: SocketAddrV4,
-    ) -> Result<(), FlowIoError> {
-        panic!("{SCAFFOLD}")
-    }
-    async fn connect_peer(
-        &self,
-        _peer: &PeerSocket,
-        _destination: SocketAddrV4,
-    ) -> Result<(), FlowIoError> {
-        panic!("{SCAFFOLD}")
-    }
-    async fn route_type(&self, _destination: Ipv4Addr) -> Result<HostRouteType, FlowIoError> {
-        panic!("{SCAFFOLD}")
-    }
-    fn attach(
-        &self,
-        _vsock: RecordSocket,
-        _peer: PeerSocket,
-        _mode: PairMode,
-    ) -> Result<AttachedPair, AttachRefused> {
-        panic!("{SCAFFOLD}")
-    }
-    fn abort_forward(&self, _id: ForwardId) -> Result<AbortResult, ForwarderError> {
-        panic!("{SCAFFOLD}")
-    }
-    fn abort_all(&self) -> Result<u32, ForwarderError> {
-        panic!("{SCAFFOLD}")
-    }
-    async fn next_end(&self) -> Result<ForwardEnd, ForwarderError> {
-        panic!("{SCAFFOLD}")
-    }
-    fn pair_state(&self, _id: ForwardId) -> Result<Option<PairState>, ForwarderError> {
-        panic!("{SCAFFOLD}")
-    }
-    fn inventory(&self) -> Result<ForwarderInventory, ForwarderError> {
-        panic!("{SCAFFOLD}")
-    }
-    async fn clear_linger(&self, _socket: &PairSocket) -> Result<(), FlowIoError> {
-        panic!("{SCAFFOLD}")
-    }
-    async fn abort(&self, _socket: OwnedSocket) {
-        panic!("{SCAFFOLD}")
-    }
-    async fn close(&self, _socket: OwnedSocket) {
-        panic!("{SCAFFOLD}")
-    }
 }

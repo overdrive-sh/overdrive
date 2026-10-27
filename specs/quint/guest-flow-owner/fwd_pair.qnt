@@ -87,11 +87,13 @@
  *     as they were, and later calls resolve the owner's own end first.
  *     D-4: the host owner reads a record and closes the flow's descriptors in one dispatch (TakeEnd(h) carries
  *     OwnerClose's effect outside watch mode); OwnerClose is the guest's own dispatch.
- *   - A watch ended by the owner (WATCH-ABORT, EVMOD-STREAM-ABORT, T-5): Abort of the watch queues its record,
- *     restores the callbacks, drops the module's reference and changes nothing of V_h; in the same owner step the
- *     stream is marked ended by the owner (`strmAbort`: every later call returns ConnectionAborted) and Abort { flow }
- *     is written while the session is live. Only the context's release shuts a watched V_h (SHUT_RDWR, an {S, R}
- *     packet; no record). The holder's drop (HolderDrop, T-6) aborts the watch and closes V_h in one step.
+ *   - Dial handoff and owner abort (R5-53, WATCH-ABORT, EVMOD-STREAM-ABORT, T-5): `strmHeld` is false while the
+ *     dial future owns V_h and becomes true only when a successful guest Attach/Paired hands out GuestStream.
+ *     Before handoff, Abort queues the watch record and closes owner-held V_h; after handoff it queues the record,
+ *     restores callbacks, drops the module reference and changes nothing of holder-owned V_h while `strmAbort`
+ *     makes every stream call return ConnectionAborted. Both write Abort { flow } while the session is live.
+ *     HolderDrop cancels and closes a pending dial with no stream-drop ghost, or drops an actual stream, aborting a
+ *     live watch and closing V_h; once neither holder nor watch exists it is disabled.
  *   - The holder's end observation (HolderEnd, F11 corrected): what its read returns at the end of V_h — Eof (0) or
  *     Err (a read error). After the release's SHUT_RDWR either, at once (0 while V_h is ESTABLISHED, af_vsock.c:2545-2548;
  *     ENOTCONN once it left ESTABLISHED, vsock_shutdown having cleared SOCK_DONE, :1220, :2522-2531 @ v7.0); after a
@@ -335,7 +337,7 @@ module fwd_pair {
   type St = { mode: str, vmUp: bool, ctx: str -> str, gen: str -> int, oldCtx: str -> str, pr: str -> Pair,
               dir: str -> Dir, vs: str -> Vs, ctl: str -> List[Set[str]], terr: str -> bool, ep: str -> str,
               dg: str -> Dg, gh: Gh, tcpErr: str -> str, attRes: str -> str, attEnded: str -> int,
-              strmAbort: bool, hres: str, guestAbortSent: bool }
+              strmHeld: bool, strmAbort: bool, hres: str, guestAbortSent: bool }
 
   // ------------------------------------------------------------------ state
   var mode: str                   // stream | watch | dgram
@@ -351,6 +353,7 @@ module fwd_pair {
   var tcpErr: str -> str          // side -> its TCP half's pending reset error: "0" | "ECONNRESET" | "EPIPE" (T-1)
   var attRes: str -> str          // side -> the attach (watch) result its owner received: none | ok | halfEnded (T-4)
   var attEnded: str -> int        // side -> forwarder_attach_ended: the owner's count of HalfEnded refusals (T-4)
+  var strmHeld: bool              // the dial future returned a GuestStream and its holder has not dropped it (T-5/T-6)
   var strmAbort: bool             // the dial's GuestStream was ended by the host owner (T-5)
   var hres: str                   // the outcome the GuestStream reported: none | HalfClose | GuestAbort | OwnerAbort
   var guestAbortSent: bool        // Abort { flow } written to the guest and not yet taken (model-only, T-5)
@@ -373,12 +376,13 @@ module fwd_pair {
 
   val cur: St = { mode: mode, vmUp: vmUp, ctx: ctx, gen: gen, oldCtx: oldCtx, pr: pr, dir: dir, vs: vs, ctl: ctl,
                   terr: terr, ep: ep, dg: dg, gh: gh, tcpErr: tcpErr, attRes: attRes, attEnded: attEnded,
-                  strmAbort: strmAbort, hres: hres, guestAbortSent: guestAbortSent }
+                  strmHeld: strmHeld, strmAbort: strmAbort, hres: hres, guestAbortSent: guestAbortSent }
   action commit(n: St, c: ConfStep): bool = all {
     mode' = n.mode, vmUp' = n.vmUp, ctx' = n.ctx, gen' = n.gen, oldCtx' = n.oldCtx, pr' = n.pr, dir' = n.dir,
     vs' = n.vs, ctl' = n.ctl,
     terr' = n.terr, ep' = n.ep, dg' = n.dg, gh' = n.gh, tcpErr' = n.tcpErr, attRes' = n.attRes,
-    attEnded' = n.attEnded, strmAbort' = n.strmAbort, hres' = n.hres, guestAbortSent' = n.guestAbortSent,
+    attEnded' = n.attEnded, strmHeld' = n.strmHeld, strmAbort' = n.strmAbort,
+    hres' = n.hres, guestAbortSent' = n.guestAbortSent,
     conf_step' = if (REC) c else conf_step,
   }
 
@@ -490,7 +494,7 @@ module fwd_pair {
     tcpErr' = SIDES.mapBy(s => "0"),
     attRes' = SIDES.mapBy(s => if (m == "watch" and s == "h") "ok" else "none"),
     attEnded' = SIDES.mapBy(s => 0),
-    strmAbort' = false, hres' = "none", guestAbortSent' = false,
+    strmHeld' = false, strmAbort' = false, hres' = "none", guestAbortSent' = false,
     conf_step' = variant("InitWith", { m: m }),
   }
   action init = { nondet m = MODES.oneOf() InitWith(m) }
@@ -540,6 +544,19 @@ module fwd_pair {
     else if (BUG_EOF_AS_FIN) (if (ps.contains("S")) markClean(noteCls(t1, s, "attach"), s) else t1)
     else if (ps.contains("R")) abortSide(noteCls(t1, s, "attach"), s, "PeerAbort", false)
     else markClean(noteCls(t1, s, "attach"), s)
+  // Watch-mode guest attach is also the Paired handoff. Only a successful attach while the host watch was live
+  // returns the move-only GuestStream; a refused or late attach leaves the already-fixed dial result unchanged.
+  def attachAndHandoff(t: St, s: str, ps: Set[str]): St =
+    val attached = attachEff(t, s, ps)
+    if (t.mode == "watch" and s == "g" and live(t, "h") and attached.attRes.get("g") == "ok")
+      { ...attached, strmHeld: true }
+    else if (t.mode == "watch" and s == "g" and live(t, "h") and attached.attRes.get("g") == "halfEnded")
+      // Refused reaches the live host watch as its fixed dial error. The dial's
+      // existing error cleanup aborts the watch, queues Detached and closes the
+      // still-owner-held V_h; Refused is reciprocal, so no guest Abort follows.
+      val ended = abortSide(attached, "h", "Detached", false)
+      { ...shutAll(ended, "h"), strmHeld: false, strmAbort: false, hres: "none", guestAbortSent: false }
+    else attached
   // (the guest attaches on Paired: never after the host's attach was refused — the host then writes Abort { flow })
   def canAttach(t: St, s: str): bool = and {
     not(watchSide(t, s)), t.ctx.get(s) == "open", t.pr.get(s).ph == "unattached", sideUp(t, s),
@@ -548,7 +565,7 @@ module fwd_pair {
   }
   action Attach(s: str): bool = all {
     not(BUG_CHECK_THEN_HOOK), canAttach(cur, s),
-    commit(attachEff(cur, s, cur.vs.get(s).ps), variant("Attach", { s: s })),
+    commit(attachAndHandoff(cur, s, cur.vs.get(s).ps), variant("Attach", { s: s })),
   }
   // checkThenHook: the state is read in one step and the callbacks installed in a later one
   action AttachRead(s: str): bool = all {
@@ -559,7 +576,7 @@ module fwd_pair {
   def canAttachHook(t: St, s: str): bool = t.pr.get(s).ph == "attaching" and sideUp(t, s) and t.ctx.get(s) == "open"
   action AttachHook(s: str): bool = all {
     canAttachHook(cur, s),
-    commit(attachEff(cur, s, cur.vs.get(s).snap), variant("AttachHook", { s: s })),
+    commit(attachAndHandoff(cur, s, cur.vs.get(s).snap), variant("AttachHook", { s: s })),
   }
   // the guest owner closes a flow it has not attached (a pending intake child that reset, the pairing deadline,
   // session loss): its TCP half with SO_LINGER{1,0} (D20, a reset toward the application) and V_g ({S, R}); no
@@ -573,7 +590,10 @@ module fwd_pair {
   // Abort { flow } written while the session is live
   def ownerAbort(t: St, s: str): St =
     val t1 = abortSide(fault(t), s, "Detached", false)
-    if (not(watchSide(t, s))) t1
+    if (not(watchSide(t, s)))
+      shutAll(setPr(t1, s, { ...t1.pr.get(s), closed: true }), s)
+    else if (not(t.strmHeld))
+      { ...shutAll(t1, "h"), strmAbort: false, hres: "none", guestAbortSent: t1.vmUp }
     else
       val touched = t1.vs.get("h") != t.vs.get("h") or t1.ctl.get("hg") != t.ctl.get("hg") or
                     t1.dir.get("gh").q1 != t.dir.get("gh").q1 or t1.dir.get("hg").q1 != t.dir.get("hg").q1
@@ -585,11 +605,14 @@ module fwd_pair {
   }
   // the guest owner takes Abort { flow } (owner_flows' toGuestAbort): it aborts the flow's pair, or closes the flow it
   // has not attached (no record)
-  def canGuestAbort(t: St): bool =
-    t.guestAbortSent and t.vmUp and t.ctx.get("g") == "open" and t.pr.get("g").ph.in(Set("live", "unattached"))
+  def canGuestAbort(t: St): bool = t.guestAbortSent and t.vmUp and t.ctx.get("g") == "open"
   action GuestAbort(s: str): bool = all {
     s == "g", canGuestAbort(cur),
-    val t1 = abortSide(cur, s, "Detached", cur.pr.get(s).ph == "unattached")
+    val phase = cur.pr.get(s).ph
+    val t1 =
+      if (phase == "live") abortSide(cur, s, "Detached", false)
+      else if (cur.mode != "watch" and phase == "unattached") abortSide(cur, s, "Detached", true)
+      else cur
     commit({ ...t1, guestAbortSent: false }, variant("GuestAbort", { s: s })),
   }
   // The context's release aborts every pair of the context, with no record (F6). Side h, one meaning chosen by the
@@ -599,13 +622,20 @@ module fwd_pair {
   // failure): a non-watch flow whose record is queued and unread has its descriptors closed then (OwnerClose's
   // effect; its record stays queued in the released context and is never read).
   // U-R1: a held GuestStream whose watch already ended is ended as an owner abort (its dials entry leaves): the
-  // stream is marked ended by the owner and Abort { flow } is written while the session is live; hres stays
+  // stream is marked ended by the owner and Abort { flow } is written while the session is live; hres stays.
+  // A holder-free ended watch with an alive dialer keeps its record and closes owner-held V_h; a still-pending
+  // cleanup writes Abort only while the VM is live, and an already-closed V_h makes that branch idempotent.
   def recoveryClose(t: St): St =
     val p = t.pr.get("h")
     if (not(watchSide(t, "h")) and p.ph == "ended" and p.rec == "queued" and not(p.closed))
       shutAll(setPr(t, "h", { ...p, closed: true }), "h")
-    else if (watchSide(t, "h") and p.ph == "ended" and t.ep.get("h") == "alive" and not(t.strmAbort))
+    else if (watchSide(t, "h") and t.strmHeld and p.ph == "ended" and t.ep.get("h") == "alive" and not(t.strmAbort))
       { ...t, strmAbort: true, guestAbortSent: t.vmUp }
+    else if (watchSide(t, "h") and not(t.strmHeld) and p.ph == "ended" and t.ep.get("h") == "alive")
+      val cleanupPending = t.vs.get("h").sent != both
+      val closed = shutAll(t, "h")
+      { ...closed, strmAbort: false, hres: "none",
+        guestAbortSent: t.guestAbortSent or (cleanupPending and t.vmUp) }
     else t
   action CtxRelease(s: str): bool = all {
     cur.ctx.get(s) == "open", sideUp(cur, s), canFault(cur),
@@ -617,9 +647,11 @@ module fwd_pair {
   }
   // the host's Forwarder recovery (EVMOD-CTL): after abort-all and the close of the old context, the owner opens
   // and probes a new one; at most once per trace, never after the host owner's death
+  def canReopen(t: St, s: str): bool = and {
+    s == "h", t.gen.get(s) == 0, not(t.gh.hostDead), t.ctx.get(s) == "released",
+  }
   action Reopen(s: str): bool = all {
-    s == "h", cur.gen.get(s) == 0, not(cur.gh.hostDead),
-    cur.ctx.get(s) == "released",
+    canReopen(cur, s),
     commit({ ...cur, ctx: cur.ctx.set(s, "open"), oldCtx: cur.oldCtx.set(s, cur.ctx.get(s)), gen: cur.gen.set(s, 1) },
            variant("Reopen", { s: s })),
   }
@@ -636,12 +668,20 @@ module fwd_pair {
       setDg(t1, outof(s), { ...x, dq0: List(), foff: 0, sdrop: x.sdrop.union(lset(x.dq0)) })
     else t1
   // D-4 (architect 2026-10-18): the host owner reads the record and closes the flow's descriptors in ONE dispatch,
-  // so outside watch mode TakeEnd(h) performs OwnerClose(h)'s effect in the same step (in watch mode the holder owns
-  // V_h); the guest's close stays a dispatch of its own
+  // so outside watch mode TakeEnd(h) performs OwnerClose(h)'s effect in the same step. In watch mode a held stream
+  // keeps V_h; a holder-free alive dialer completes its existing pending-error cleanup after the record read. The
+  // guest's close stays a dispatch of its own.
   action TakeEnd(s: str): bool = all {
     canTakeEnd(cur, s),
     val t1 = setPr(cur, s, { ...cur.pr.get(s), rec: "read" })
-    commit(if (s == "h" and not(watchSide(cur, s))) closeEff(t1, s) else t1, variant("TakeEnd", { s: s })),
+    val t2 =
+      if (s == "h" and watchSide(cur, "h") and not(cur.strmHeld) and cur.ep.get("h") == "alive")
+        val cleanupPending = cur.vs.get("h").sent != both
+        val closed = shutAll(t1, "h")
+        { ...closed, strmAbort: false, hres: "none",
+          guestAbortSent: cur.guestAbortSent or (cleanupPending and cur.vmUp) }
+      else t1
+    commit(if (s == "h" and not(watchSide(cur, s))) closeEff(t2, s) else t2, variant("TakeEnd", { s: s })),
   }
   action OwnerClose(s: str): bool = all {
     s == "g", cur.pr.get(s).rec == "read", not(cur.pr.get(s).closed), sideUp(cur, s),
@@ -869,7 +909,7 @@ module fwd_pair {
     t.mode != "dgram", t.ep.get(srcOf(d)) == "alive", sideUp(t, srcOf(d)),
     not(t.dir.get(d).wfin), t.dir.get(d).wr < nmax(d),
     if (dialerSide(t, d, srcOf(d)))
-      and { t.attRes.get("g") == "ok", not(t.strmAbort), t.dir.get(d).q1.length() < C, not(t.vs.get("h").err),
+      and { t.strmHeld, t.attRes.get("g") == "ok", not(t.strmAbort), t.dir.get(d).q1.length() < C, not(t.vs.get("h").err),
             not(t.vs.get("h").ps.contains("R")), not(t.vs.get("h").sent.contains("S")) }
     else canWriteS(t, d),
   }
@@ -885,7 +925,7 @@ module fwd_pair {
     cur.mode != "dgram", cur.ep.get(srcOf(d)) == "alive", sideUp(cur, srcOf(d)), not(cur.dir.get(d).wfin),
     if (dialerSide(cur, d, srcOf(d)))
       all {
-        cur.attRes.get("g") == "ok", not(cur.strmAbort), not(cur.vs.get("h").sent.contains("S")),
+        cur.strmHeld, cur.attRes.get("g") == "ok", not(cur.strmAbort), not(cur.vs.get("h").sent.contains("S")),
         commit(send(setDir(cur, d, { ...cur.dir.get(d), wfin: true, srcEnd: "clean", srcShut: true }), "h", Set("S")),
                variant("Fin", { d: d })),
       }
@@ -897,7 +937,7 @@ module fwd_pair {
   def canReadAny(t: St, d: str): bool = and {
     t.mode != "dgram", t.ep.get(dstOf(d)) == "alive", sideUp(t, dstOf(d)),
     if (dialerSide(t, d, dstOf(d)))
-      and { t.attRes.get("g") == "ok", not(t.strmAbort) or BUG_HOLDER_TRUSTS_READ, t.dir.get(d).q1.length() > 0,
+      and { t.strmHeld, t.attRes.get("g") == "ok", not(t.strmAbort) or BUG_HOLDER_TRUSTS_READ, t.dir.get(d).q1.length() > 0,
             not(t.vs.get("h").sent.contains("R")) }
     else canReadS(t, d),
   }
@@ -915,7 +955,7 @@ module fwd_pair {
   // SHUTDOWN, Eof once the queue is empty; after the orphan sweep, Err (ECONNRESET) once the queue is empty, the sweep's
   // callback (FwdErr) run or not
   def holderReadable(t: St): Set[str] =
-    if (not(and { t.mode == "watch", t.ep.get("h") == "alive", t.attRes.get("g") == "ok", t.gh.hobs == "none" }))
+    if (not(and { t.mode == "watch", t.strmHeld, t.ep.get("h") == "alive", t.attRes.get("g") == "ok", t.gh.hobs == "none" }))
       Set()
     else if (t.vs.get("h").sent.contains("R")) Set("eof", "err")
     else if (t.dir.get("gh").q1.length() > 0) Set()
@@ -928,15 +968,15 @@ module fwd_pair {
     commit({ ...cur, gh: { ...cur.gh, hobs: k } }, variant("HolderEnd", { k: k })),
   }
   // The GuestStream's resolution of its end (EVMOD-STREAM-END, EVMOD-STREAM-ABORT): (1) the owner's own end of the watch —
-  // its abort (strmAbort) or its context's release — → OwnerAbort (Err(ConnectionAborted)); (2) the watch's record —
-  // HalfClose → HalfClose (Ok(0)), Aborted → GuestAbort (Err(ConnectionReset)); (3) otherwise the record is in flight
-  // (only the orphan sweep's end is readable before its callback) and the stream waits. holderTrustsRead: from the
-  // holder's read of V_h (Eof → HalfClose).
+  // its abort (strmAbort) or its context's release — → OwnerAbort (Err(ConnectionAborted)); (2) a watch record the
+  // owner read — HalfClose → HalfClose (Ok(0)), Aborted → GuestAbort (Err(ConnectionReset)); (3) a queued or absent
+  // record is not authoritative yet and the stream waits. holderTrustsRead: from the holder's read of V_h
+  // (Eof → HalfClose).
   def watchOutcome(t: St): str =
     val p = t.pr.get("h")
     if (BUG_HOLDER_TRUSTS_READ) (if (t.gh.hobs == "eof") "HalfClose" else "GuestAbort")
     else if (t.strmAbort or (p.ph == "ended" and p.byRel)) "OwnerAbort"
-    else if (p.ph == "ended" and p.rec.in(Set("queued", "read"))) (if (p.out == "halfclose") "HalfClose" else "GuestAbort")
+    else if (p.ph == "ended" and p.rec == "read") (if (p.out == "halfclose") "HalfClose" else "GuestAbort")
     else "wait"
   // the reader reaches the end of the stream: end-of-stream after a FIN; the dialer's GuestStream reports the
   // resolved end — at once once the owner ended the stream, else of what its holder observed
@@ -945,7 +985,7 @@ module fwd_pair {
     not(t.dir.get(d).eof), not(t.dir.get(d).rst),
     if (dialerSide(t, d, dstOf(d)))
       and {
-        t.attRes.get("g") == "ok",
+        t.strmHeld, t.attRes.get("g") == "ok",
         (t.strmAbort and not(BUG_HOLDER_TRUSTS_READ)) or (t.gh.hobs != "none" and watchOutcome(t) != "wait"),
       }
     else and { not(t.dir.get(d).shutRd), t.dir.get(d).q2.length() == 0, t.dir.get(d).dstShut },
@@ -983,18 +1023,21 @@ module fwd_pair {
       else t2
     commit(t3, variant("TcpRst", { s: s, after_fin: after_fin })),
   }
-  // T-6 (EV-CTL 4.4): the holder drops its GuestStream: the stream aborts its watch (record queued, the module's
-  // reference dropped) and then closes V_h — the guest sees 0x3 — in one step; a stream the owner already ended only
-  // closes V_h. dropWithoutAbort: the drop only closes the descriptor; the forwarder's reference keeps V_h open
-  // (P-70 § 4.4), so nothing is sent and the watch stays live.
+  // T-6 (EV-CTL 4.4): an actual GuestStream drop aborts a live watch, closes V_h, and clears both holder facts; if
+  // the owner already ended the watch, only V_h closes. Before handoff, dropping the pending dial future aborts the
+  // watch and closes its owner-held V_h but is not a stream drop. Once neither holder nor watch exists, it is disabled.
+  // dropWithoutAbort applies only to the actual-stream branch: close the descriptor but leave the live watch.
   action HolderDrop: bool = all {
-    cur.mode == "watch", cur.ep.get("h") == "alive", canFault(cur),
-    val t1 = fault(cutBoth({ ...cur, ep: cur.ep.set("h", "dead"), gh: { ...cur.gh, dropped: true } }))
+    cur.mode == "watch", cur.ep.get("h") == "alive", canFault(cur), cur.strmHeld or live(cur, "h"),
+    val t0 = fault(cutBoth({ ...cur, ep: cur.ep.set("h", "dead") }))
+    val t1 = if (cur.strmHeld) { ...t0, gh: { ...t0.gh, dropped: true } } else t0
     val t2 =
-      if (live(t1, "h") and BUG_DROP_WITHOUT_ABORT) t1
+      if (cur.strmHeld and live(t1, "h") and BUG_DROP_WITHOUT_ABORT) t1
       else if (live(t1, "h")) shutAll(setPr(t1, "h", ended(t1.pr.get("h"), "aborted", "Detached", false)), "h")
       else shutAll(t1, "h")
-    commit(t2, variant("HolderDrop", ())),
+    val t3 = { ...t2, strmHeld: false, strmAbort: false,
+               guestAbortSent: if (not(cur.strmHeld)) t2.vmUp else t2.guestAbortSent }
+    commit(t3, variant("HolderDrop", ())),
   }
   // the VMM exits (a guest reset included, RESET-EXIT): the guest side is gone; the host vsock gets sk_err (F7)
   action VmmExit: bool = all {
@@ -1015,10 +1058,15 @@ module fwd_pair {
   }
 
   // ------------------------------------------------------------------ environment: datagram mode
+  def ownsUdpSocket(t: St, s: str): bool = and {
+    t.mode == "dgram", t.ctx.get(s) == "open",
+    t.pr.get(s).ph.in(Set("unattached", "live")), not(t.pr.get(s).closed),
+  }
   // the source application (guest) or the destination (host) sends datagram n+1 of size sz to the source UDP
   // socket; a full queue drops it (F8)
   action SendDg(d: str, sz: int): bool = all {
-    cur.mode == "dgram", sideUp(cur, srcOf(d)), cur.dg.get(d).n < dnmax(d), SIZES.contains(sz),
+    ownsUdpSocket(cur, srcOf(d)), sideUp(cur, srcOf(d)),
+    cur.dg.get(d).n < dnmax(d), SIZES.contains(sz),
     val y = cur.dg.get(d)
     val k = y.n + 1
     val y2 = if (y.dq0.length() < WU) { ...y, n: k, sizes: y.sizes.append(sz), dq0: y.dq0.append(k) }
@@ -1033,16 +1081,16 @@ module fwd_pair {
   }
   // the target UDP socket's send would block (EAGAIN: its send buffer is full) / no longer
   action UdpBlock(d: str): bool = all {
-    cur.mode == "dgram", CFG != "dlive", not(cur.dg.get(d).blk),
+    ownsUdpSocket(cur, dstOf(d)), CFG != "dlive", not(cur.dg.get(d).blk),
     commit(setDg(cur, d, { ...cur.dg.get(d), blk: true }), variant("UdpBlock", { d: d })),
   }
   action UdpUnblock(d: str): bool = all {
-    cur.mode == "dgram", cur.dg.get(d).blk,
+    ownsUdpSocket(cur, dstOf(d)), cur.dg.get(d).blk,
     commit(setDg(cur, d, { ...cur.dg.get(d), blk: false }), variant("UdpUnblock", { d: d })),
   }
   // the connected UDP socket at side s reports an error (ECONNREFUSED from ICMP, or the D26 rule's EPERM)
   action UdpErr(s: str): bool = all {
-    cur.mode == "dgram", sideUp(cur, s), not(cur.terr.get(s)), canFault(cur),
+    ownsUdpSocket(cur, s), sideUp(cur, s), not(cur.terr.get(s)), canFault(cur),
     commit(fault({ ...cur, terr: cur.terr.set(s, true) }), variant("UdpErr", { s: s })),
   }
   // a peer outside the design shuts the write side of side s's datagram vsock (a 0x2) — no Overdrive owner or
@@ -1143,7 +1191,8 @@ module fwd_pair {
   // EVMOD-CTL recovery step 1 (U-R1): after the host Forwarder recovery's close (a release that found no live watch,
   // not the owner's death), no GuestStream the holder still holds is left un-ended by its owner
   val RecoveryEndsHeldStream: bool =
-    (mode == "watch" and not(gh.hostDead) and (ctx.get("h") == "released" or gen.get("h") == 1) and ep.get("h") == "alive")
+    (mode == "watch" and strmHeld and not(gh.hostDead)
+      and (ctx.get("h") == "released" or gen.get("h") == 1) and ep.get("h") == "alive")
       implies strmAbort
   // T-1: no pair is live once its TCP half's reset was reported (a live pair always has a direction open)
   val TcpResetEndsPair: bool = SIDES.forall(s => tcpErr.get(s) != "0" implies not(live(cur, s)))
@@ -1163,7 +1212,7 @@ module fwd_pair {
     SIDES.exists(s => attRes.get(s) == "halfEnded") implies DIRS.forall(d => not(dir.get(d).eof))
   // T-5 (WATCH-ABORT): the owner's abort of a watch changes nothing of V_h — its shut flags, the flags it sent, its
   // queues
-  val WatchAbortLeavesHolderSocket: bool = not(gh.vhTouched)
+  val WatchAbortLeavesHolderSocket: bool = not(gh.vhTouched) and (strmAbort implies strmHeld)
   // T-6: after the holder's drop no watch of the dial is live (the forwarder holds no reference to V_h)
   val NoLiveWatchAfterDrop: bool = (mode == "watch" and gh.dropped) implies not(live(cur, "h"))
   // T-8 (CLEAN-FULL-END): whenever this side's 0x2 is in flight or delivered, its own send-shut flag is set
@@ -1386,7 +1435,9 @@ module fwd_pair {
             and not(canRead("gh")))
   // the owner's abort resets both far ends: the host's TCP half by tcp_abort, the guest's through the 0x3
   run OwnerAbortResetsBothFarEnds = Paired
-    .then(Abort("h")).expect(Safety and pr.get("h").cause == "Detached" and pr.get("h").rec == "queued" and dir.get("gh").rst)
+    .then(Abort("h")).expect(Safety and pr.get("h").cause == "Detached" and pr.get("h").rec == "queued"
+                                    and pr.get("h").closed and vs.get("h").sent == both and vs.get("h").sshut
+                                    and dir.get("gh").rst)
     .then(VCtl("hg"))
     .expect(Safety and pr.get("g").cause == "PeerAbort" and dir.get("hg").rst and ep.get("g") == "reset" and ep.get("h") == "reset")
   // the owner's death: the context's release aborts its pair with no record; both far ends see resets
@@ -1410,8 +1461,12 @@ module fwd_pair {
     .then(Attach("g")).then(Write("gh")).then(Hop0("gh")).then(Read("gh"))
     .then(TcpRst("g", false)).then(VCtl("gh"))
     .expect(Safety and pr.get("h").out == "aborted" and pr.get("h").cause == "PeerAbort" and pr.get("h").rec == "queued"
-            and gh.woken)
-    .then(HolderEnd("eof")).then(ReadEof("gh"))
+            and gh.woken and watchOutcome(cur) == "wait" and not(canReadEof(cur, "gh")))
+    .then(HolderEnd("eof"))
+    .expect(Safety and watchOutcome(cur) == "wait" and not(canReadEof(cur, "gh")))
+    .then(TakeEnd("h"))
+    .expect(Safety and pr.get("h").rec == "read" and watchOutcome(cur) == "GuestAbort" and canReadEof(cur, "gh"))
+    .then(ReadEof("gh"))
     .expect(Safety and dir.get("gh").rst and not(dir.get("gh").eof) and dir.get("gh").got == [1] and hres == "GuestAbort")
   // ---- ends present at attach (EVMOD-PAIR, U-EV-2)
   // the host forwards the destination's FIN as 0x2 and then aborts (0x3) before the guest TcpConnect attaches on
@@ -1551,7 +1606,7 @@ module fwd_pair {
   run HostOwnerDeathIsFinal = Paired
     .then(CtxRelease("h"))
     .expect(Safety and gh.hostDead and pr.get("h").byRel and pr.get("h").rec == "none" and ep.get("h") == "reset")
-    .then(Reopen("h")).fail()
+    .expect(not(canReopen(cur, "h")))
   // ---- a watch ended by its owner (WATCH-ABORT, EVMOD-STREAM-ABORT, T-5) or dropped by its holder (T-6)
   // the owner aborts the watched stream of a dial: the watch's record is queued and V_h is untouched (no flag sent,
   // its queue as it was); the stream is ended by the owner — the holder can neither read the queued unit nor write,
@@ -1616,14 +1671,16 @@ module fwd_pair {
     .then(TakeEnd("h")).expect(Safety and pr.get("h").rec == "read")
   // the VMM exits with a dial live: the orphan sweep makes V_h's end readable before its sk_error_report runs; the
   // holder reads the error first, finds no record and no end of its owner, and waits; the callback queues the
-  // record and then wakes it; the GuestStream reports the record's abort
+  // record, the owner reads it, and only then does the GuestStream report the record's abort
   run VmmExitWithWatchRecordInFlightResolvesFromRecord = InitWith("watch")
     .then(Attach("g")).then(Write("gh")).then(Hop0("gh")).then(Read("gh"))
     .then(VmmExit).expect(Safety and vs.get("h").err and live(cur, "h") and holderReadable(cur) == Set("err"))
     .then(HolderEnd("err")).expect(Safety and live(cur, "h") and watchOutcome(cur) == "wait" and not(canReadEof(cur, "gh")))
     .then(FwdErr("h"))
     .expect(Safety and pr.get("h").out == "aborted" and pr.get("h").cause == "SocketError" and pr.get("h").rec == "queued"
-            and gh.woken)
+            and gh.woken and watchOutcome(cur) == "wait" and not(canReadEof(cur, "gh")))
+    .then(TakeEnd("h"))
+    .expect(Safety and pr.get("h").rec == "read" and watchOutcome(cur) == "GuestAbort" and canReadEof(cur, "gh"))
     .then(ReadEof("gh"))
     .expect(Safety and dir.get("gh").rst and not(dir.get("gh").eof) and dir.get("gh").got == [1] and hres == "GuestAbort")
   // ---- datagram mode (EVMOD-DGRAM)

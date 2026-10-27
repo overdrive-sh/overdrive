@@ -32,7 +32,6 @@
 
 use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, SocketAddrV4};
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -53,8 +52,7 @@ use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_sim::adapters::{SimCgroupFs, SimGuestDnsFactory, SimMtlsIntercept};
-use overdrive_worker::cgroup_manager::CgroupManager;
+use overdrive_sim::adapters::{SimGuestDnsFactory, SimMtlsIntercept};
 use overdrive_worker::mtls_intercept::{
     InterceptElementKey, InterceptElementOperation, InterceptError, InterceptPostcondition,
     InterceptSet, NetlinkError, Result as InterceptResult,
@@ -346,7 +344,6 @@ impl Node {
             driver_port,
             Arc::new(SimSharedGuestNetworkOwner::default()),
             wiring,
-            CgroupManager::new(PathBuf::from("/sys/fs/cgroup"), Arc::new(SimCgroupFs::new())),
         )
         .await
         .expect("production boot");
@@ -483,7 +480,6 @@ fn vm_job(id: &str) -> SubmitSpecInput {
 /// excluded from `replicas_running`; once the removal succeeds on a retry the
 /// allocation is `Terminated` and no longer pending.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2-4: the guest lane leases the transport)"]
 async fn a_stuck_stop_is_reported_cleanup_pending_and_is_not_a_running_replica() {
     let node = Node::boot().await;
     node.submit(vm_service("cleanup-svc")).await;
@@ -561,7 +557,6 @@ async fn a_stuck_stop_is_reported_cleanup_pending_and_is_not_a_running_replica()
 /// already-Retiring lease emits `lease_retired` again is not pinned, so the
 /// retired events are not counted exactly; the release is.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 row 2: GuestAddressPool::assign)"]
 async fn crashed_and_reclaiming_allocations_are_reported_cleanup_pending() {
     // Installed before boot so no lease event is missed.
     lease_event_log();

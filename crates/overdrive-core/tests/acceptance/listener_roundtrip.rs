@@ -14,6 +14,7 @@
 
 use overdrive_core::aggregate::{Listener, WorkloadSpecInput};
 use overdrive_core::dataplane::backend_key::Proto;
+use overdrive_core::guest_transport::guest_reserved_ports;
 use proptest::prelude::*;
 
 // ---------------------------------------------------------------------------
@@ -31,10 +32,16 @@ fn arb_proto() -> impl Strategy<Value = Proto> {
 /// platform-issued service-wide. The generator carries only the
 /// `(port, protocol)` pair.
 fn arb_listener() -> impl Strategy<Value = Listener> {
-    (1u16..=65535u16, arb_proto()).prop_map(|(port, protocol)| Listener {
-        port: std::num::NonZeroU16::new(port).expect("port > 0 by generator constraint"),
-        protocol,
-    })
+    (
+        (1u16..=65535u16).prop_filter("listener port is not guest-reserved", |port| {
+            !guest_reserved_ports().contains(port)
+        }),
+        arb_proto(),
+    )
+        .prop_map(|(port, protocol)| Listener {
+            port: std::num::NonZeroU16::new(port).expect("port > 0 by generator constraint"),
+            protocol,
+        })
 }
 
 /// Generate 1..=8 listeners with distinct `(port, protocol)` pairs.

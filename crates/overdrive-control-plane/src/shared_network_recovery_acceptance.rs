@@ -238,7 +238,6 @@ const fn failed_table_write() -> SimInterceptFault {
 /// episode, no leaked hold — and the aborted flow is not resurrected, while
 /// a new guest flow pairs.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn a_listener_recovery_quiesces_under_its_hold_and_reopens_at_count_zero() {
     let mut node = ComposedNode::fresh();
     node.boot().await.expect("the node boots");
@@ -309,7 +308,6 @@ async fn a_listener_recovery_quiesces_under_its_hold_and_reopens_at_count_zero()
 /// recovery repairs and restores, then the count reaches zero and admission
 /// reopens; a guest flow then pairs.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn overlapping_recoveries_reopen_only_when_the_last_hold_is_restored() {
     let mut node = ComposedNode::fresh();
     node.boot().await.expect("the node boots");
@@ -449,7 +447,6 @@ async fn the_shared_table_is_absent_or_complete_across_crash_and_failed_write() 
 /// `QuiescenceLatched` and its CID stays Provisioned. When the recovery
 /// restores, then a retried activation returns `Activated`.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn activation_waits_for_quiescence_to_end_then_activates() {
     let mut node = ComposedNode::fresh();
     node.boot().await.expect("the node boots");
@@ -502,7 +499,6 @@ async fn activation_waits_for_quiescence_to_end_then_activates() {
 /// `Quiesced`; the table is complete throughout. When the node restarts,
 /// then forwarding is open with no hold.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn a_spent_recovery_budget_fail_stops_and_the_restart_converges() {
     let mut node = ComposedNode::fresh();
     node.boot().await.expect("the node boots");
@@ -562,7 +558,6 @@ async fn a_spent_recovery_budget_fail_stops_and_the_restart_converges() {
 /// node restarts, then the new owner holds no hold, admission is open, no
 /// flow of the dead process is held, and a guest flow pairs.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn a_crash_during_a_recovery_ends_its_hold_and_the_restart_converges() {
     let mut node = ComposedNode::fresh();
     node.boot().await.expect("the node boots");
@@ -604,7 +599,6 @@ async fn a_crash_during_a_recovery_ends_its_hold_and_the_restart_converges() {
 /// cause `LeakedQuiescenceHold`. After the restart, forwarding is open with no
 /// hold, no leak, and a guest flow pairs.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn a_leaked_hold_keeps_forwarding_quiesced_until_the_supervisor_fail_stops() {
     let mut node = ComposedNode::fresh();
     node.boot().await.expect("the node boots");
@@ -675,7 +669,6 @@ async fn a_leaked_hold_keeps_forwarding_quiesced_until_the_supervisor_fail_stops
 /// exactly one per foreign hold. (Model-only claim of `quiescence.qnt`
 /// discharged here: no variable of the model represents the second ledger.)
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn a_foreign_hold_changes_nothing_at_the_owner_and_leaks_at_its_issuing_ledger() {
     let mut node = ComposedNode::fresh();
     node.boot().await.expect("the node boots");
@@ -725,7 +718,6 @@ async fn a_foreign_hold_changes_nothing_at_the_owner_and_leaks_at_its_issuing_le
 /// is unchanged by the refused restore (forwarding stays quiesced until the
 /// process ends).
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn a_restore_answered_foreign_hold_fail_stops_with_foreign_quiescence_hold() {
     let owner = Arc::new(TestSharedOwner::new());
     owner.script_foreign_restores(true);
@@ -804,7 +796,6 @@ async fn damage_component(node: &ComposedNode, component: SharedGuestNetworkComp
 /// exists, `Held`, under one hold of its own.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 #[allow(clippy::print_stderr, reason = "the seed is printed so a failure reproduces")]
 async fn the_audit_detects_every_component_exit_within_one_audit_period() {
     for seed in seeds() {
@@ -846,7 +837,6 @@ async fn the_audit_detects_every_component_exit_within_one_audit_period() {
 /// by the shutdown request; no hold is ever dropped.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 #[allow(clippy::print_stderr, reason = "the seed is printed so a failure reproduces")]
 async fn each_failed_attempt_counts_once_and_every_episode_ends_by_restore_or_fail_stop() {
     for seed in seeds() {
@@ -944,7 +934,6 @@ fn position_of(kinds: &[SimEffectKind], from: usize, kind: SimEffectKind) -> Opt
 /// open with generation `G + 1`, no flow of the old context is held, and a
 /// new guest flow pairs.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn the_forwarder_recovery_aborts_every_flow_closes_the_old_context_then_reopens() {
     let mut node = ComposedNode::fresh();
     node.boot().await.expect("the node boots");
@@ -1017,7 +1006,6 @@ fn forwarder_failures() -> Vec<ForwarderFailureCase> {
 /// process runs, and the refused boot issued no listener bind and no gateway
 /// route. A following boot with a good forwarder serves at generation 1.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn a_forwarder_that_fails_its_boot_probe_refuses_boot_before_any_effect() {
     for (name, failure, is_cause) in forwarder_failures() {
         let collector = RefusalCollector::default();
@@ -1061,7 +1049,6 @@ async fn a_forwarder_that_fails_its_boot_probe_refuses_boot_before_any_effect() 
 /// or converges the gateway route.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn a_boot_opens_and_probes_the_forwarder_before_any_listener_or_route() {
     let mut node = ComposedNode::fresh();
     node.boot().await.expect("the node boots");

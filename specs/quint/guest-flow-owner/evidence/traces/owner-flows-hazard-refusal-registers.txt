@@ -25,6 +25,7 @@ State 1
   drvLive = false
   bclaim = 0
   bcn = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 0, st: "none" })
+  bq = List()
   readyCross = false
   bHeldByOther = false
   act = "none"

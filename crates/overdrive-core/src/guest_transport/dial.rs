@@ -265,7 +265,9 @@ pub enum GuestDialError {
     /// session live: the vsock connect failed (`ENODEV` when no device holds
     /// the CID), or the VMM exited with the dial in flight and the device
     /// release reset the host vsock (`ECONNRESET`), or another connect or I/O
-    /// error of the host vsock before pairing.
+    /// error of the host vsock before pairing. A payload-free guest
+    /// `Abort { flow }` received while the dial awaits `Paired` maps to the
+    /// fixed `ECONNRESET` payload because that wire message carries no errno.
     #[error("the VM is unreachable over vsock: errno {errno}")]
     Unreachable {
         /// The host kernel's errno.

@@ -63,7 +63,7 @@
     reason = "a conformance driver asserts its own preconditions; CONTRACT_SHAPE lines are machine-read"
 )]
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -237,9 +237,6 @@ struct FlowsBeaconDriver {
     launch: Option<Launch>,
     /// The VMM pid each connection's guest dialed from (stimulus).
     conn_vm: BTreeMap<i64, u32>,
-    /// The order the guest queued its connections in (the kernel accept
-    /// queue is FIFO).
-    accept_order: VecDeque<i64>,
 }
 
 /// The CID every assignment of this node uses: the first usable offset of
@@ -344,7 +341,6 @@ impl FlowsBeaconDriver {
             generation: 0,
             launch: None,
             conn_vm: BTreeMap::new(),
-            accept_order: VecDeque::new(),
         }
     }
 
@@ -497,21 +493,10 @@ impl FlowsBeaconDriver {
             DriverError::NotEnabled { action: "GuestOpenBeacon", why: error.to_string() }
         })?;
         self.conn_vm.insert(b, pid);
-        self.accept_order.push_back(b);
         self.settle("the queued connection waits for accept")
     }
 
-    fn host_accept_beacon(&mut self, b: i64) -> std::result::Result<(), DriverError> {
-        if self.accept_order.front() != Some(&b) {
-            return Err(DriverError::NotEnabled {
-                action: "HostAcceptBeacon",
-                why: format!(
-                    "the accept queue is FIFO; connection {:?} is ahead of {b}",
-                    self.accept_order.front()
-                ),
-            });
-        }
-        self.accept_order.pop_front();
+    fn host_accept_beacon(&mut self, _b: i64) -> std::result::Result<(), DriverError> {
         self.io.release_accept();
         self.settle("the accept is delivered")
     }
@@ -632,7 +617,6 @@ impl State<FlowsBeaconDriver> for FlowsBeaconState {
     test = "BeaconReadyReleasedThenDriverStopReleasesClaim",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 fn quint_flows_beacon_ready_released_then_driver_stop_releases_claim() -> impl Driver {
     FlowsBeaconDriver::new()
 }
@@ -645,7 +629,6 @@ fn quint_flows_beacon_ready_released_then_driver_stop_releases_claim() -> impl D
     test = "BeaconAfterDriverStopIsRefusedAtAccept",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 fn quint_flows_beacon_after_driver_stop_is_refused_at_accept() -> impl Driver {
     FlowsBeaconDriver::new()
 }
@@ -659,7 +642,6 @@ fn quint_flows_beacon_after_driver_stop_is_refused_at_accept() -> impl Driver {
     test = "DriverStopBetweenAcceptAndReadyClosesWithoutClaim",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 fn quint_flows_beacon_driver_stop_between_accept_and_ready_closes_without_claim() -> impl Driver {
     FlowsBeaconDriver::new()
 }
@@ -673,7 +655,6 @@ fn quint_flows_beacon_driver_stop_between_accept_and_ready_closes_without_claim(
     test = "StaleLaunchBeaconIsClosedAtReadyAndDoesNotPoisonClaim",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 fn quint_flows_beacon_stale_launch_is_closed_at_ready_and_does_not_poison_claim() -> impl Driver {
     FlowsBeaconDriver::new()
 }
@@ -686,7 +667,6 @@ fn quint_flows_beacon_stale_launch_is_closed_at_ready_and_does_not_poison_claim(
     test = "SecondBeaconConnectionOfSameLaunchIsHeld",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 fn quint_flows_beacon_second_connection_of_same_launch_is_held() -> impl Driver {
     FlowsBeaconDriver::new()
 }
@@ -701,7 +681,6 @@ fn quint_flows_beacon_second_connection_of_same_launch_is_held() -> impl Driver 
     test = "VmExitEndsLaunchAndReleasesBeaconClaim",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 fn quint_flows_beacon_vm_exit_ends_launch_and_releases_claim() -> impl Driver {
     FlowsBeaconDriver::new()
 }
@@ -714,7 +693,6 @@ fn quint_flows_beacon_vm_exit_ends_launch_and_releases_claim() -> impl Driver {
     test = "VmDeathClosesUnreadBeaconConnection",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 fn quint_flows_beacon_vm_death_closes_unread_connection() -> impl Driver {
     FlowsBeaconDriver::new()
 }
@@ -727,7 +705,6 @@ fn quint_flows_beacon_vm_death_closes_unread_connection() -> impl Driver {
     spec = "../../specs/quint/guest-flow-owner/owner_flows.qnt",
     main = "flows_beacon_conf"
 )]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 fn quint_flows_beacon_randomized() -> impl Driver {
     FlowsBeaconDriver::new()
 }

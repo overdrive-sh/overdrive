@@ -1061,7 +1061,6 @@ mod boot_reclamation_before_assign {
     /// offset, hence the same CID — launches a VMM that opens the device.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER attachment-cut step (15)"]
     async fn boot_reclamation_ends_the_previous_processs_vmm_before_the_first_assign() {
         let tmp = TempDir::new().expect("tmpdir");
         let prefix: Ipv4Net = PREFIX.parse().expect("prefix");
@@ -1107,7 +1106,6 @@ mod boot_reclamation_before_assign {
     /// clash.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER attachment-cut step (15)"]
     async fn one_boot_reclamation_kills_every_orphan_before_the_first_assign() {
         let tmp = TempDir::new().expect("tmpdir");
         let prefix: Ipv4Net = PREFIX.parse().expect("prefix");
@@ -1158,7 +1156,6 @@ mod boot_reclamation_before_assign {
     /// orphan keeps its device.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER attachment-cut step (15)"]
     async fn a_launch_on_an_orphans_cid_before_reclamation_fails_at_device_setup() {
         let tmp = TempDir::new().expect("tmpdir");
         let prefix: Ipv4Net = PREFIX.parse().expect("prefix");
@@ -1198,7 +1195,6 @@ mod boot_reclamation_before_assign {
     /// with its device.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER attachment-cut step (15)"]
     async fn boot_reclamation_leaves_a_supervised_vmm_running() {
         let tmp = TempDir::new().expect("tmpdir");
         let prefix: Ipv4Net = PREFIX.parse().expect("prefix");

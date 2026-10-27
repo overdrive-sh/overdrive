@@ -106,10 +106,6 @@ async fn spawn_server_with_obs_handle()
         driver,
         Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
         wiring,
-        overdrive_worker::cgroup_manager::CgroupManager::new(
-            std::path::PathBuf::from("/sys/fs/cgroup"),
-            std::sync::Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
-        ),
     )
     .await
     .expect("run_server_with_obs_and_driver");

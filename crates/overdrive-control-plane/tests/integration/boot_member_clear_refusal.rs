@@ -393,10 +393,6 @@ async fn refused_boot(intercept: &Arc<RecordingBootIntercept>) -> RefusedBoot {
         driver,
         owner_port,
         wiring,
-        overdrive_worker::cgroup_manager::CgroupManager::new(
-            std::path::PathBuf::from("/sys/fs/cgroup"),
-            Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
-        ),
     )
     .await;
     let error = match result {

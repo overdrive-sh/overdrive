@@ -394,7 +394,6 @@ impl Vmm for DiesBeforeBeacon {
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn create_failure_retains_disposition_claim_and_cleans_up_run_directory() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -474,7 +473,6 @@ async fn create_failure_retains_disposition_claim_and_cleans_up_run_directory() 
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn vmm_exits_before_beacon_retains_disposition_claim_and_cleans_up() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -552,7 +550,6 @@ async fn vmm_exits_before_beacon_retains_disposition_claim_and_cleans_up() {
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn accepted_connection_close_before_ready_preserves_exact_unreported_vmm_exit() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -605,7 +602,6 @@ async fn accepted_connection_close_before_ready_preserves_exact_unreported_vmm_e
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn boot_deadline_elapses_retains_disposition_claim_and_cleans_up() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -713,7 +709,6 @@ async fn boot_deadline_elapses_retains_disposition_claim_and_cleans_up() {
 /// reflect the guest's report (`Crashed { exit_code: Some(7), .. }`),
 /// never a fallback derived from the VMM's own exit.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn guest_exit_report_is_authoritative_over_subsequent_vmm_teardown() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -736,24 +731,29 @@ async fn guest_exit_report_is_authoritative_over_subsequent_vmm_teardown() {
     // post-condition in `overdrive_core::traits::driver`).
     driver.release_for_exit_emission(&handle).await;
 
-    // The VMM's OWN teardown exit (the same event a self-powered-off
-    // guest triggers on the real substrate) resolves FIRST this time
-    // (01-07 review D4) — forcing the exit watcher's
-    // `GUEST_REPORT_DRAIN_MAX_YIELDS` retry loop to actually iterate
-    // while it waits out the guest's own report, written only after a
-    // short cooperative-yield delay below. A prior version of this test
-    // wrote the guest's EXIT line BEFORE calling `terminate`, which let
-    // the watcher's FIRST `select!` poll win on the guest-line arm
-    // outright and never exercised the retry loop at all.
+    // The guest writes its report while its VMM is still alive. Wait on the
+    // Sim beacon's existing parked-call observation until the writer has
+    // consumed that line and is waiting for another; this is the receipt
+    // boundary, not a scheduler delay or a fabricated queue mutation.
+    stream.write("EXIT 7");
+    assert!(
+        !beacon.io.parked(),
+        "the queued EXIT line makes the beacon reader immediately deliverable"
+    );
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while !beacon.io.parked() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the beacon writer consumes the guest EXIT report while the VMM is alive");
+
+    // The VMM's OWN teardown exit (the same event a self-powered-off guest
+    // triggers on the real substrate) follows the already-received guest
+    // report. The classification must retain the guest's status.
     let control =
         VmControl { pid: handle.pid.expect("VmDriver populates pid"), api_socket: PathBuf::new() };
     sim.terminate(&control, Duration::ZERO).await.expect("terminate the VMM process");
-
-    // THEN the guest reports its supervised workload's exit status,
-    // deliberately delayed so the watcher's retry loop has already
-    // started polling before this line becomes readable.
-    yield_for_task_poll().await;
-    stream.write("EXIT 7");
 
     let event = exit_rx.recv().await.expect("exit watcher emits exactly one ExitEvent");
     assert_eq!(event.alloc, alloc);
@@ -782,7 +782,6 @@ async fn guest_exit_report_is_authoritative_over_subsequent_vmm_teardown() {
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn start_defers_exec_message_until_the_running_gate_is_released() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -904,7 +903,6 @@ impl<V: Vmm> Vmm for SignalsOnceLive<V> {
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn stop_sequence_a_pre_beacon_stop_skips_write_and_terminates() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -970,7 +968,6 @@ async fn stop_sequence_a_pre_beacon_stop_skips_write_and_terminates() {
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn stop_sequence_b_writer_and_vmm_waits_begin_together() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -1019,7 +1016,6 @@ async fn stop_sequence_b_writer_and_vmm_waits_begin_together() {
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn backpressured_exec_release_cannot_delay_stop_deadline() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -1298,7 +1294,6 @@ impl Vmm for HoldsFirstTermination {
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn cancelling_backpressured_release_cannot_leave_an_exec_sender_running() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -1403,7 +1398,6 @@ async fn cancelling_backpressured_release_cannot_leave_an_exec_sender_running() 
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn stop_sequence_c_already_dead_vmm_returns_ok() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -1455,7 +1449,6 @@ async fn stop_sequence_c_already_dead_vmm_returns_ok() {
 /// AC #3's "never a crash" contract, not a claim about which arm fires
 /// — but only the `Err(NotFound)` arm is reachable post-fix.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn stop_sequence_d_double_stop_is_idempotent_and_never_panics() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -1556,7 +1549,6 @@ impl Vmm for NeverSignalsExit {
 /// ONLY path that can move this allocation out of `Live` here is
 /// `stop`'s own synchronous transition.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn stop_ok_then_status_reports_not_found() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -1595,7 +1587,6 @@ async fn stop_ok_then_status_reports_not_found() {
 /// membership in the reported set); `release_supervision` is idempotent
 /// — a second call, or a call against an unknown id, is a no-op.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn live_allocations_reports_membership_and_release_supervision_is_idempotent() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -1669,7 +1660,6 @@ async fn live_allocations_reports_membership_and_release_supervision_is_idempote
 /// stays RED — `expect_err` fails on the silent success, which is
 /// exactly the defect ADR-0082 §D4's amendment closes.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn resize_rejects_with_resize_unsupported_naming_gh_92() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -1749,7 +1739,6 @@ async fn resize_rejects_with_resize_unsupported_naming_gh_92() {
 /// CONTRACT_SHAPE: bounded-change.
 #[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn exit_event_is_gated_until_running_confirmed_release() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -1876,7 +1865,6 @@ async fn exit_event_is_gated_until_running_confirmed_release() {
 /// this SimVmm adapter test does not claim a normal real-guest exit or latency.
 #[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn completed_shutdown_write_has_no_two_second_floor() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
@@ -1921,7 +1909,6 @@ async fn completed_shutdown_write_has_no_two_second_floor() {
     reason = "exact per-test contract declaration; the named writer-outcome decision table is intentionally one acceptance scenario"
 )]
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed() {
     // Completed writer + held VMM: the small SHUTDOWN write completes at
     // once, but completion must not turn the two-second *maximum* into a

@@ -13,6 +13,7 @@
 #   infra/metal/bootstrap.sh root@1.2.3.4 --data-disk /dev/sdb
 #   infra/metal/bootstrap.sh root@1.2.3.4 --sync-only
 #   infra/metal/bootstrap.sh root@1.2.3.4 --run -- cargo nextest run
+#   infra/metal/bootstrap.sh root@1.2.3.4 --collect <RUN_ID>
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -32,6 +33,8 @@ SYNC_ONLY=0
 WITH_GIT=0
 RUN_MODE=0
 SHELL_MODE=0
+COLLECT_MODE=0
+COLLECT_RUN_ID=""
 NO_SYNC=0
 NO_SUDO=0
 RUN_ARGS=()
@@ -43,6 +46,9 @@ while [ $# -gt 0 ]; do
     --with-git)  WITH_GIT=1; shift ;;
     --run) RUN_MODE=1; shift ;;
     --shell) SHELL_MODE=1; shift ;;
+    --collect)
+      [ $# -ge 2 ] || { echo "FATAL: --collect requires a run id" >&2; exit 64; }
+      COLLECT_MODE=1; COLLECT_RUN_ID="$2"; shift 2 ;;
     --no-sync) NO_SYNC=1; shift ;;
     --no-sudo) NO_SUDO=1; shift ;;
     --) shift; RUN_ARGS=("$@"); break ;;
@@ -50,8 +56,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-[ $((SYNC_ONLY + RUN_MODE + SHELL_MODE)) -le 1 ] || {
-  echo "FATAL: choose only one of --sync-only, --run, or --shell" >&2
+[ $((SYNC_ONLY + RUN_MODE + SHELL_MODE + COLLECT_MODE)) -le 1 ] || {
+  echo "FATAL: choose only one of --sync-only, --run, --shell, or --collect" >&2
   exit 1
 }
 [ "${RUN_MODE}" -eq 0 ] || [ "${#RUN_ARGS[@]}" -gt 0 ] || {
@@ -59,16 +65,34 @@ done
   exit 1
 }
 
+if [ "${COLLECT_MODE}" -eq 1 ] && ! [[ "${COLLECT_RUN_ID}" =~ ^[0-9a-f]{24}$ ]]; then
+  echo "OVERDRIVE_METAL_RUNNER_ERROR error=invalid_run_id" >&2
+  exit 64
+fi
+
+RUN_ID=""
+if [ "${RUN_MODE}" -eq 1 ]; then
+  RUN_ID="$(printf '%s-%s-%s' "$$" "$(date +%s%N)" "${RANDOM}" | shasum -a 256 | cut -c1-24)"
+  printf 'OVERDRIVE_METAL_RUN_ID=%s\n' "${RUN_ID}" >&2
+fi
+
 METAL_LOCK_PATH="${OVERDRIVE_METAL_LOCK_PATH:-/run/lock/overdrive-metal-shared.lock}"
 METAL_OWNER_PATH="${OVERDRIVE_METAL_OWNER_PATH:-/run/lock/overdrive-metal-shared.owner}"
 METAL_LEASE_TIMEOUT_SECONDS="${OVERDRIVE_METAL_LEASE_TIMEOUT_SECONDS:-120}"
-LEASE_TOKEN="$(printf '%s-%s-%s' "$$" "$(date +%s)" "${RANDOM}" | shasum -a 256 | cut -c1-24)"
+METAL_RUNS_ROOT="/var/lib/overdrive-metal/runs"
+LEASE_TOKEN="${RUN_ID:-$(printf '%s-%s-%s' "$$" "$(date +%s)" "${RANDOM}" | shasum -a 256 | cut -c1-24)}"
 LEASE_TMP=""
 LEASE_PID=""
+RUN_CONTROL_OPEN=0
+START_SENT=0
 
 cleanup_lease() {
   if [ -n "${LEASE_TMP}" ]; then
+    if [ "${RUN_MODE}" -eq 1 ] && [ "${START_SENT}" -eq 0 ] && [ "${RUN_CONTROL_OPEN}" -eq 1 ]; then
+      printf 'ABORT\n' >&9 2>/dev/null || true
+    fi
     exec 9>&- 2>/dev/null || true
+    RUN_CONTROL_OPEN=0
     if [ -n "${LEASE_PID}" ]; then
       wait "${LEASE_PID}" 2>/dev/null || true
     fi
@@ -152,6 +176,28 @@ else
 fi
 log "remote user=${REMOTE_USER} home=${REMOTE_HOME} sudo='${SUDO:-<none, already root>}'"
 
+collect_remote() {
+  local helper_b64 remote_command status
+  helper_b64="$(base64 < "${REPO}/infra/metal/lease-holder.sh" | tr -d '\n')"
+  # Decode the repository-local collector into bash -c's command argument.
+  # The collector itself validates the run id again before deriving any unit
+  # or path, and it never opens the canonical lease.
+  printf -v remote_command \
+    'lease_script=$(printf %%s %q | base64 -d); exec %s bash -c "$lease_script" overdrive-metal-lease --collect %q %q %q %q' \
+    "${helper_b64}" "${SUDO}" "${COLLECT_RUN_ID:-$1}" \
+    "${METAL_LEASE_TIMEOUT_SECONDS}" "${METAL_LOCK_PATH}" "${METAL_OWNER_PATH}"
+  set +e
+  ssh "${SSH_OPTS[@]}" "${TARGET}" "${remote_command}"
+  status=$?
+  set -e
+  return "${status}"
+}
+
+if [ "${COLLECT_MODE}" -eq 1 ]; then
+  collect_remote "${COLLECT_RUN_ID}"
+  exit $?
+fi
+
 # ---------------------------------------------------------------------------
 log "acquire canonical metal lease (${METAL_LOCK_PATH})"
 # ---------------------------------------------------------------------------
@@ -174,19 +220,53 @@ SOURCE_DIGEST="$({
 LEASE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/overdrive-metal-lease.XXXXXX")"
 mkfifo "${LEASE_TMP}/release"
 LEASE_HELPER_B64="$(base64 < "${REPO}/infra/metal/lease-holder.sh" | tr -d '\n')"
-# Decode the helper into `bash -c`'s command argument. Its stdin therefore
-# remains the SSH session's release stream, with no remote helper file written
-# before the canonical lock exists (and no extra fd for sudo to close).
-# Positional metadata is quoted by bash's own `%q`, never concatenated raw.
-printf -v REMOTE_LEASE_CMD \
-  'lease_script=$(printf %%s %q | base64 -d); exec %s bash -c "$lease_script" overdrive-metal-lease %q %q %q %q %q %q %q %q' \
-  "${LEASE_HELPER_B64}" "${SUDO}" "${METAL_LOCK_PATH}" "${METAL_OWNER_PATH}" \
-  "${METAL_LEASE_TIMEOUT_SECONDS}" "${LEASE_TOKEN}" "${ACTION}" "${SCENARIO}" \
-  "${WORKSPACE}" "${COMMIT}"
+if [ "${RUN_MODE}" -eq 1 ]; then
+  # A durable run service needs the login user's PATH and HOME explicitly:
+  # the transient service is root-owned, while the command still starts in
+  # the target user's login shell before the existing sudo transition.
+  # The supervisor resolves the login PATH after it owns the canonical lease;
+  # no extra SSH mutation/query is performed while a writer is still waiting.
+  REMOTE_PATH=""
+  JOINED=""
+  for arg in "${RUN_ARGS[@]}"; do
+    printf -v QUOTED '%q' "${arg}"
+    JOINED+="${QUOTED} "
+  done
+  if [ "${NO_SUDO}" -eq 1 ]; then
+    INNER="cd ${REMOTE_DIR} && ${JOINED}"
+    EXECUTION_MODE="login"
+  else
+    printf -v METAL_RUN_ENV \
+      'OVERDRIVE_METAL_KERNEL=%q OVERDRIVE_METAL_ROOTFS=%q' \
+      "${OVERDRIVE_METAL_KERNEL:-}" "${OVERDRIVE_METAL_ROOTFS:-}"
+    INNER="cd ${REMOTE_DIR} && sudo -n env \"HOME=\$HOME\" \"PATH=\$PATH\" ${METAL_RUN_ENV} ${JOINED}"
+    EXECUTION_MODE="privileged"
+  fi
+  # Decode the helper into bash -c's argument. Every durable argument is
+  # quoted by bash's own `%q`; systemd-run receives the exact command string
+  # and --expand-environment=no prevents it from interpreting its dollar
+  # signs.
+  printf -v REMOTE_LEASE_CMD \
+    'lease_script=$(printf %%s %q | base64 -d); exec %s systemd-run --quiet --unit=%q --pipe --wait --collect --expand-environment=no --property=Type=exec --property=KillMode=mixed bash -c "$lease_script" overdrive-metal-lease --durable %q %q %q %q %q %q %q %q %q %q %q %q %q %q %q' \
+    "${LEASE_HELPER_B64}" "${SUDO}" "overdrive-metal-run-${RUN_ID}.service" \
+    "${METAL_LOCK_PATH}" "${METAL_OWNER_PATH}" "${METAL_LEASE_TIMEOUT_SECONDS}" \
+    "${RUN_ID}" "${SCENARIO}" "${WORKSPACE}" "${COMMIT}" "${SOURCE_DIGEST}" \
+    "${REMOTE_DIR}" "${REMOTE_USER}" "${EXECUTION_MODE}" "${REMOTE_HOME}" \
+    "${REMOTE_PATH}" "${INNER}" "${METAL_RUNS_ROOT}"
+else
+  # Existing sync/shell lease holder: its stdin remains the release stream,
+  # with no remote helper file written before the canonical lock exists.
+  printf -v REMOTE_LEASE_CMD \
+    'lease_script=$(printf %%s %q | base64 -d); exec %s bash -c "$lease_script" overdrive-metal-lease %q %q %q %q %q %q %q %q' \
+    "${LEASE_HELPER_B64}" "${SUDO}" "${METAL_LOCK_PATH}" "${METAL_OWNER_PATH}" \
+    "${METAL_LEASE_TIMEOUT_SECONDS}" "${LEASE_TOKEN}" "${ACTION}" "${SCENARIO}" \
+    "${WORKSPACE}" "${COMMIT}"
+fi
 ssh "${SSH_OPTS[@]}" "${TARGET}" "${REMOTE_LEASE_CMD}" \
   <"${LEASE_TMP}/release" >"${LEASE_TMP}/status" 2>&1 &
 LEASE_PID=$!
 exec 9>"${LEASE_TMP}/release"
+RUN_CONTROL_OPEN=1
 
 # Poll for acknowledgement no longer than the lease's own acquisition
 # window (the remote holder's `flock -w ${METAL_LEASE_TIMEOUT_SECONDS}`)
@@ -197,23 +277,58 @@ exec 9>"${LEASE_TMP}/release"
 # production default's ~120s if death-detection is ever slow to observe an
 # already-timed-out holder under load.
 LEASE_POLL_ATTEMPTS=$(( (METAL_LEASE_TIMEOUT_SECONDS + 5) * 10 ))
-for _attempt in $(seq 1 "${LEASE_POLL_ATTEMPTS}"); do
-  if grep -q "OVERDRIVE_METAL_LEASE_ACQUIRED token=${LEASE_TOKEN}" "${LEASE_TMP}/status"; then
-    break
-  fi
-  if ! kill -0 "${LEASE_PID}" 2>/dev/null; then
+if [ "${RUN_MODE}" -eq 1 ]; then
+  for _attempt in $(seq 1 "${LEASE_POLL_ATTEMPTS}"); do
+    if grep -q "OVERDRIVE_METAL_LEASE_ACQUIRED token=${LEASE_TOKEN}" "${LEASE_TMP}/status"; then
+      break
+    fi
+    if ! kill -0 "${LEASE_PID}" 2>/dev/null; then
+      exec 9>&- || true
+      RUN_CONTROL_OPEN=0
+      wait "${LEASE_PID}" 2>/dev/null || true
+      cat "${LEASE_TMP}/status" >&2
+      COLLECT_RUN_ID="${RUN_ID}"
+      set +e
+      collect_remote "${RUN_ID}"
+      status=$?
+      set -e
+      exit "${status}"
+    fi
+    sleep 0.1
+  done
+  if ! grep -q "OVERDRIVE_METAL_LEASE_ACQUIRED token=${LEASE_TOKEN}" "${LEASE_TMP}/status"; then
+    echo "FATAL: durable lease holder did not acknowledge acquisition" >&2
     cat "${LEASE_TMP}/status" >&2
-    wait "${LEASE_PID}" || true
+    exec 9>&- || true
+    RUN_CONTROL_OPEN=0
+    wait "${LEASE_PID}" 2>/dev/null || true
+    COLLECT_RUN_ID="${RUN_ID}"
+    set +e
+    collect_remote "${RUN_ID}"
+    status=$?
+    set -e
+    exit "${status}"
+  fi
+  cat "${LEASE_TMP}/status"
+else
+  for _attempt in $(seq 1 "${LEASE_POLL_ATTEMPTS}"); do
+    if grep -q "OVERDRIVE_METAL_LEASE_ACQUIRED token=${LEASE_TOKEN}" "${LEASE_TMP}/status"; then
+      break
+    fi
+    if ! kill -0 "${LEASE_PID}" 2>/dev/null; then
+      cat "${LEASE_TMP}/status" >&2
+      wait "${LEASE_PID}" || true
+      exit 75
+    fi
+    sleep 0.1
+  done
+  if ! grep -q "OVERDRIVE_METAL_LEASE_ACQUIRED token=${LEASE_TOKEN}" "${LEASE_TMP}/status"; then
+    echo "FATAL: lease holder did not acknowledge acquisition" >&2
+    cat "${LEASE_TMP}/status" >&2
     exit 75
   fi
-  sleep 0.1
-done
-if ! grep -q "OVERDRIVE_METAL_LEASE_ACQUIRED token=${LEASE_TOKEN}" "${LEASE_TMP}/status"; then
-  echo "FATAL: lease holder did not acknowledge acquisition" >&2
-  cat "${LEASE_TMP}/status" >&2
-  exit 75
+  cat "${LEASE_TMP}/status"
 fi
-cat "${LEASE_TMP}/status"
 
 if [ "${NO_SYNC}" -eq 0 ]; then
 ssh "${SSH_OPTS[@]}" "${TARGET}" 'command -v rsync >/dev/null' || {
@@ -329,22 +444,59 @@ if [ "${RUN_MODE}" -eq 1 ]; then
     "${REMOTE_DIR}/infra/metal/native-preflight.sh"
   ssh "${SSH_OPTS[@]}" "${TARGET}" "${REMOTE_PREFLIGHT_CMD}"
 
-  JOINED=""
-  for arg in "${RUN_ARGS[@]}"; do
-    printf -v QUOTED '%q' "${arg}"
-    JOINED+="${QUOTED} "
-  done
-  if [ "${NO_SUDO}" -eq 1 ]; then
-    INNER="cd ${REMOTE_DIR} && ${JOINED}"
+  # START is the one controller word.  Closing the pipe immediately after it
+  # lets the service detach all three inherited descriptors and makes an SSH
+  # disconnect harmless; it never retries or submits the command again.
+  START_SENT=1
+  printf 'START\n' >&9 2>/dev/null || true
+  exec 9>&- || true
+  RUN_CONTROL_OPEN=0
+
+  PHASE_PATH="${METAL_RUNS_ROOT}/${RUN_ID}/phase.v1"
+  STARTED=0
+  printf -v STARTED_QUERY_BODY \
+    'test -f %q && grep -qx %q %q' \
+    "${PHASE_PATH}" "phase=running" "${PHASE_PATH}"
+  if [ -n "${SUDO}" ]; then
+    # Keep this as a login-shell read-only query so it observes the same
+    # target-user environment as the pre-start command boundary.  The sudo
+    # env wrapper carries the selected guest paths without executing them.
+    printf -v STARTED_QUERY_ENV \
+      'sudo -n env "HOME=$HOME" "PATH=$PATH" OVERDRIVE_METAL_KERNEL=%q OVERDRIVE_METAL_ROOTFS=%q bash -c %q' \
+      "${OVERDRIVE_METAL_KERNEL:-}" "${OVERDRIVE_METAL_ROOTFS:-}" "${STARTED_QUERY_BODY}"
+    printf -v REMOTE_STARTED_QUERY 'bash -lc %q' "${STARTED_QUERY_ENV}"
   else
-    printf -v METAL_RUN_ENV \
-      'OVERDRIVE_METAL_KERNEL=%q OVERDRIVE_METAL_ROOTFS=%q' \
-      "${OVERDRIVE_METAL_KERNEL:-}" "${OVERDRIVE_METAL_ROOTFS:-}"
-    INNER="cd ${REMOTE_DIR} && sudo -n env \"HOME=\$HOME\" \"PATH=\$PATH\" ${METAL_RUN_ENV} ${JOINED}"
+    printf -v REMOTE_STARTED_QUERY 'bash -lc %q' "${STARTED_QUERY_BODY}"
   fi
-  printf -v REMOTE_RUN 'bash -lc %q' "${INNER}"
-  ssh "${SSH_OPTS[@]}" "${TARGET}" "${REMOTE_RUN}"
-  exit $?
+  STARTED_POLL_ATTEMPTS=$(( (METAL_LEASE_TIMEOUT_SECONDS + 5) * 10 ))
+  for _attempt in $(seq 1 "${STARTED_POLL_ATTEMPTS}"); do
+    if ssh "${SSH_OPTS[@]}" "${TARGET}" "${REMOTE_STARTED_QUERY}" >/dev/null 2>&1; then
+      STARTED=1
+      break
+    fi
+    if ! kill -0 "${LEASE_PID}" 2>/dev/null; then
+      break
+    fi
+    sleep 0.1
+  done
+  if [ "${STARTED}" -eq 1 ]; then
+    printf 'OVERDRIVE_METAL_RUN_STARTED run_id=%s\n' "${RUN_ID}" >&2
+  fi
+
+  set +e
+  wait "${LEASE_PID}"
+  CONTROLLER_STATUS=$?
+  set -e
+  if [ "${STARTED}" -eq 0 ] \
+    && ssh "${SSH_OPTS[@]}" "${TARGET}" "${REMOTE_STARTED_QUERY}" >/dev/null 2>&1; then
+    printf 'OVERDRIVE_METAL_RUN_STARTED run_id=%s\n' "${RUN_ID}" >&2
+  fi
+  COLLECT_RUN_ID="${RUN_ID}"
+  set +e
+  collect_remote "${RUN_ID}"
+  status=$?
+  set -e
+  exit "${status}"
 fi
 
 if [ "${SHELL_MODE}" -eq 1 ]; then

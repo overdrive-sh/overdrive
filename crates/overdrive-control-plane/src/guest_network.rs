@@ -6,11 +6,6 @@
 //! § "[REF] Owner and provisioner", § "[REF] Typed error taxonomy and who
 //! branches", § DG-2 rows 1–3 and 7–9, § DG-3.
 
-#![expect(
-    clippy::use_self,
-    reason = "exact accepted API scaffold precedes implementation and names GuestNetworkError explicitly"
-)]
-
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
@@ -19,7 +14,7 @@ use std::sync::Arc;
 use ipnet::Ipv4Net;
 use overdrive_core::guest_network::SharedGuestNetworkComponent;
 use overdrive_core::guest_transport::dial::GuestStreamDial;
-use overdrive_core::guest_transport::wire::FlowWireError;
+use overdrive_core::guest_transport::wire::{FlowWireError, GUEST_FLOW_MAX_PAIRS};
 use overdrive_core::guest_transport::{GuestCid, GuestFlowPorts, GuestTransportAssignment};
 use overdrive_core::id::AllocationId;
 use overdrive_core::net::{InterfaceIndex, ListenPort};
@@ -29,15 +24,12 @@ use overdrive_core::traits::{
 };
 use overdrive_netlink::NetlinkError;
 
-use overdrive_core::guest_transport::forwarder::ForwarderError;
-pub use overdrive_dataplane::guest_tcx::TcxAttachPoint;
-pub use overdrive_netlink::nft::bridge::{
-    BridgeGuardRuleExpression, BridgeGuardRuleFact, BridgeGuardRuleIdentity, BridgeGuardRuleProgram,
-};
+use overdrive_core::guest_transport::forwarder::{ForwarderError, ForwarderGeneration};
 
 mod dial;
 pub(crate) mod flow_io;
 mod flow_owner;
+mod owner_runtime;
 
 /// Source-local pool acceptance bodies (CID-NOCLAIM, ATTR-TOKEN, G-V0).
 #[cfg(test)]
@@ -208,6 +200,11 @@ pub trait SharedGuestNetworkOwner: GuestNetworkProvisioner + GuestStreamDial {
     /// the process (a listener repair keeps the held socket, so its port
     /// never changes). Reads only.
     fn flow_ports(&self) -> Option<GuestFlowPorts>;
+    /// QHOLD: holds issued by this owner's `QuiescenceLedger` and dropped
+    /// without a successful redeem since this owner started. Starts at 0,
+    /// never decreases, and performs no I/O or state transition.
+    #[must_use]
+    fn leaked_quiescence_holds(&self) -> u32;
     /// Non-repairing. Reports damage of the process-owned shared components
     /// and of the shared firewall state; the `Forwarder` component is
     /// damaged when its context fails `Io` or its `inventory()` disagrees
@@ -300,221 +297,14 @@ pub enum GuestNetworkOperation {
     ForwardingRestore,
 }
 
-/// Closed semantic startup-probe stages.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GuestNetworkProbeStage {
-    Classifier,
-    OriginalDestination,
-    DetachedLinkGuard,
-}
-
-/// One resource-family observation; unavailable is never zero.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GuestNetworkScratchCount {
-    Observed(u32),
-    Unavailable,
-}
-
-/// Complete scratch-resource observation; deliberately has no `Default`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct GuestNetworkScratchComplement {
-    pub bridges: GuestNetworkScratchCount,
-    pub taps: GuestNetworkScratchCount,
-    pub endpoint_maps: GuestNetworkScratchCount,
-    pub counter_maps: GuestNetworkScratchCount,
-    pub endpoint_entries: GuestNetworkScratchCount,
-    pub tcx_programs: GuestNetworkScratchCount,
-    pub tcx_links: GuestNetworkScratchCount,
-    pub endpoint_map_pins: GuestNetworkScratchCount,
-    pub counter_map_pins: GuestNetworkScratchCount,
-    pub tcx_link_pins: GuestNetworkScratchCount,
-    pub bridge_guard_tables: GuestNetworkScratchCount,
-    pub bridge_guard_chains: GuestNetworkScratchCount,
-    pub bridge_guard_sets: GuestNetworkScratchCount,
-    pub bridge_guard_rules: GuestNetworkScratchCount,
-    pub bridge_guard_members: GuestNetworkScratchCount,
-}
-
-impl GuestNetworkScratchComplement {
-    #[must_use]
-    pub const fn is_fully_observed(&self) -> bool {
-        matches!(
-            self,
-            Self {
-                bridges: GuestNetworkScratchCount::Observed(_),
-                taps: GuestNetworkScratchCount::Observed(_),
-                endpoint_maps: GuestNetworkScratchCount::Observed(_),
-                counter_maps: GuestNetworkScratchCount::Observed(_),
-                endpoint_entries: GuestNetworkScratchCount::Observed(_),
-                tcx_programs: GuestNetworkScratchCount::Observed(_),
-                tcx_links: GuestNetworkScratchCount::Observed(_),
-                endpoint_map_pins: GuestNetworkScratchCount::Observed(_),
-                counter_map_pins: GuestNetworkScratchCount::Observed(_),
-                tcx_link_pins: GuestNetworkScratchCount::Observed(_),
-                bridge_guard_tables: GuestNetworkScratchCount::Observed(_),
-                bridge_guard_chains: GuestNetworkScratchCount::Observed(_),
-                bridge_guard_sets: GuestNetworkScratchCount::Observed(_),
-                bridge_guard_rules: GuestNetworkScratchCount::Observed(_),
-                bridge_guard_members: GuestNetworkScratchCount::Observed(_),
-            }
-        )
-    }
-    #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        matches!(
-            self,
-            Self {
-                bridges: GuestNetworkScratchCount::Observed(0),
-                taps: GuestNetworkScratchCount::Observed(0),
-                endpoint_maps: GuestNetworkScratchCount::Observed(0),
-                counter_maps: GuestNetworkScratchCount::Observed(0),
-                endpoint_entries: GuestNetworkScratchCount::Observed(0),
-                tcx_programs: GuestNetworkScratchCount::Observed(0),
-                tcx_links: GuestNetworkScratchCount::Observed(0),
-                endpoint_map_pins: GuestNetworkScratchCount::Observed(0),
-                counter_map_pins: GuestNetworkScratchCount::Observed(0),
-                tcx_link_pins: GuestNetworkScratchCount::Observed(0),
-                bridge_guard_tables: GuestNetworkScratchCount::Observed(0),
-                bridge_guard_chains: GuestNetworkScratchCount::Observed(0),
-                bridge_guard_sets: GuestNetworkScratchCount::Observed(0),
-                bridge_guard_rules: GuestNetworkScratchCount::Observed(0),
-                bridge_guard_members: GuestNetworkScratchCount::Observed(0),
-            }
-        )
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GuestLinkKind {
-    Bridge,
-    Tap,
-    Tun,
-    Other,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GuestBpfMapKind {
-    Endpoint,
-    Counter,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct GuestEndpointFact {
-    pub source_ip: Ipv4Addr,
-    pub source_mac: [u8; 6],
-    pub bridge_mac: [u8; 6],
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GuestNetworkFact {
-    Tap {
-        name: String,
-        ifindex: Option<u32>,
-        link_kind: GuestLinkKind,
-        persistent: bool,
-        up: bool,
-        owner_uid: Option<u32>,
-    },
-    Bridge {
-        name: String,
-        ifindex: Option<u32>,
-        link_kind: GuestLinkKind,
-        mac: [u8; 6],
-        up: bool,
-        gateway: Option<Ipv4Net>,
-    },
-    BridgeLinkIdentity {
-        name: String,
-        ifindex: Option<u32>,
-        link_kind: GuestLinkKind,
-    },
-    LinkMaster {
-        ifindex: u32,
-        master_ifindex: Option<u32>,
-    },
-    LinkUp {
-        ifindex: u32,
-        up: bool,
-    },
-    TcxAttachment {
-        ifindex: u32,
-        program_id: Option<u32>,
-        attach_point: Option<TcxAttachPoint>,
-    },
-    BpfMap {
-        kind: GuestBpfMapKind,
-        path: PathBuf,
-        map_id: Option<u32>,
-        key_size: u32,
-        value_size: u32,
-        max_entries: u32,
-    },
-    BpfLinkPin {
-        path: PathBuf,
-        link_id: Option<u32>,
-    },
-    EndpointMapEntry {
-        ifindex: u32,
-        value: Option<GuestEndpointFact>,
-    },
-    BridgeGuard {
-        tap: String,
-        member: bool,
-        rules: Vec<BridgeGuardRuleFact>,
-    },
-    CleanupComplement {
-        taps: u32,
-        tcx_links: u32,
-        pins: u32,
-        endpoint_entries: u32,
-        guard_members: u32,
-    },
-    ScratchCleanupComplement {
-        complement: GuestNetworkScratchComplement,
-    },
-    StartupProbe {
-        stage: GuestNetworkProbeStage,
-        passed: bool,
-    },
-    SharedComponent {
-        component: SharedGuestNetworkComponent,
-        healthy: bool,
-    },
-    /// The forwarding state of one allocation's CID (§ *Typed error
-    /// taxonomy*).
-    AllocationForwarding {
-        alloc: AllocationId,
-        cid: GuestCid,
-        pairs: u32,
-    },
-    /// A managed TAP's host-side MAC, judged by the host-side MAC invariant
-    /// (D-295-R21). The expected fact is `address: Unreserved`; the observed
-    /// fact is `Reserved` or `Missing`.
-    TapHostMac {
-        ifindex: u32,
-        address: TapHostAddress,
-    },
-    /// A TAP's ethtool debug message mask: expected is 0, observed is the
-    /// live one (the ADR-0130 read-back set).
-    TapDebugMsgMask {
-        ifindex: u32,
-        mask: u32,
-    },
-}
-
-/// The standing of a managed TAP's host-side MAC under the invariant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TapHostAddress {
-    /// A 6-byte address outside the reserved set. It appears only as the
-    /// expected fact; an unreserved address is never reported.
-    Unreserved,
-    /// A reserved address: `GUEST_BRIDGE_MAC`, or the guest MAC of an
-    /// allocation the owner holds outside `Condemned`, the TAP's own included.
-    /// The address itself names its holder: the bridge, or the guest whose
-    /// IPv4 address it encodes.
-    Reserved([u8; 6]),
-    /// The read-back carried no 6-byte address.
-    Missing,
+    Forwarder { generation: ForwarderGeneration, live_pairs: u32, live_watches: u32 },
+    FlowListener { port: overdrive_core::vm::config::VsockPort, bound: bool },
+    ControlSession { alloc: AllocationId, cid: GuestCid, live: bool },
+    AllocationForwarding { alloc: AllocationId, cid: GuestCid, pairs: u32 },
+    CleanupComplement,
+    SharedComponent { component: SharedGuestNetworkComponent, healthy: bool },
 }
 
 /// Source-honest orchestration error for all guest-network effects (§ *Typed
@@ -559,15 +349,6 @@ pub enum GuestNetworkError {
         expected: GuestNetworkFact,
         observed: Option<GuestNetworkFact>,
     },
-    #[error("guest-network scratch cleanup complement is non-empty")]
-    ScratchCleanupIncomplete,
-    #[error("guest-network startup probe cleanup failed")]
-    StartupProbeCleanup {
-        primary: Option<Box<GuestNetworkError>>,
-        #[source]
-        cleanup: Box<GuestNetworkError>,
-        observed: GuestNetworkScratchComplement,
-    },
     #[error("guest-network admission cap reached: {held} held ({retiring} retiring) of {cap}")]
     AdmissionCapReached { held: u32, retiring: u32, cap: u32 },
     #[error("allocation {alloc} holds a retiring guest-network lease")]
@@ -608,7 +389,9 @@ pub type Result<T, E = GuestNetworkError> = std::result::Result<T, E>;
 pub struct GuestAddressPool {
     node_prefix: Ipv4Net,
     gateway: Ipv4Addr,
-    #[allow(dead_code, reason = "RED scaffold — `assign` draws each lease's launch token from it")]
+    first_usable_offset: Option<u32>,
+    last_usable_offset: Option<u32>,
+    capacity: u32,
     entropy: Arc<dyn Entropy>,
     held: Arc<parking_lot::Mutex<GuestAddressPoolState>>,
 }
@@ -623,12 +406,43 @@ impl std::fmt::Debug for GuestAddressPool {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct GuestAddressPoolState {
-    plans: BTreeMap<AllocationId, GuestNetworkPlan>,
-    leases: BTreeMap<AllocationId, GuestAttachmentLease>,
+    next_fit: GuestCid,
+    leases: BTreeMap<AllocationId, PoolLease>,
+    held_offsets: Vec<u64>,
     /// Retiring entries in `leases`; maintained to keep the admission check O(1).
     retiring: u32,
+}
+
+#[derive(Debug)]
+struct PoolLease {
+    plan: GuestNetworkPlan,
+    state: GuestAttachmentLease,
+}
+
+impl GuestAddressPoolState {
+    fn new(next_fit: GuestCid) -> Self {
+        Self {
+            next_fit,
+            leases: BTreeMap::new(),
+            held_offsets: vec![0; (overdrive_core::guest_transport::GUEST_CID_SPAN / 64) as usize],
+            retiring: 0,
+        }
+    }
+
+    fn offset_is_held(&self, offset: u32) -> bool {
+        let word = self.held_offsets[(offset / 64) as usize];
+        word & (1_u64 << (offset % 64)) != 0
+    }
+
+    fn hold_offset(&mut self, offset: u32) {
+        self.held_offsets[(offset / 64) as usize] |= 1_u64 << (offset % 64);
+    }
+
+    fn release_offset(&mut self, offset: u32) {
+        self.held_offsets[(offset / 64) as usize] &= !(1_u64 << (offset % 64));
+    }
 }
 
 impl GuestAddressPool {
@@ -639,11 +453,46 @@ impl GuestAddressPool {
     #[doc(hidden)]
     #[must_use]
     pub fn new(node_prefix: Ipv4Net, gateway: Ipv4Addr, entropy: Arc<dyn Entropy>) -> Self {
+        let network = u32::from(node_prefix.network());
+        let broadcast = u32::from(node_prefix.broadcast());
+        let (first_address, last_address) = if node_prefix.prefix_len() <= 30 {
+            (network.saturating_add(1), broadcast.saturating_sub(1))
+        } else {
+            (network, broadcast)
+        };
+        let last_address = last_address
+            .min(network.saturating_add(overdrive_core::guest_transport::GUEST_CID_SPAN - 1));
+        let gateway_offset = u32::from(gateway).checked_sub(network);
+        let address_range =
+            (first_address <= last_address).then_some((first_address, last_address));
+        let first_usable_offset = address_range.and_then(|(first, last)| {
+            (first..=last)
+                .map(|address| address - network)
+                .find(|offset| Some(*offset) != gateway_offset)
+        });
+        let last_usable_offset = address_range.and_then(|(first, last)| {
+            (first..=last)
+                .rev()
+                .map(|address| address - network)
+                .find(|offset| Some(*offset) != gateway_offset)
+        });
+        let capacity = address_range.map_or(0, |(first, last)| {
+            let gateway_in_range = gateway_offset
+                .is_some_and(|offset| first <= network + offset && network + offset <= last);
+            last - first + 1 - u32::from(gateway_in_range)
+        });
+        let initial_offset = first_usable_offset.unwrap_or(0);
+        let next_fit =
+            GuestCid::new(overdrive_core::guest_transport::GUEST_CID_BASE + initial_offset)
+                .unwrap_or_else(|_| unreachable!("the initial CID cursor is in the leased range"));
         Self {
             node_prefix,
             gateway,
+            first_usable_offset,
+            last_usable_offset,
+            capacity,
             entropy,
-            held: Arc::new(parking_lot::Mutex::new(GuestAddressPoolState::default())),
+            held: Arc::new(parking_lot::Mutex::new(GuestAddressPoolState::new(next_fit))),
         }
     }
 
@@ -660,12 +509,12 @@ impl GuestAddressPool {
     pub(crate) fn assign(
         &self,
         alloc: AllocationId,
-        _listen_ports: &[ListenPort],
-        _flow_ports: GuestFlowPorts,
+        listen_ports: &[ListenPort],
+        flow_ports: GuestFlowPorts,
     ) -> Result<GuestNetworkPlan> {
-        let state = self.held.lock();
-        if let Some(plan) = state.plans.get(&alloc) {
-            if state.leases.get(&alloc) == Some(&GuestAttachmentLease::Retiring) {
+        let mut state = self.held.lock();
+        match state.leases.get(&alloc) {
+            Some(PoolLease { state: GuestAttachmentLease::Retiring, .. }) => {
                 let occupancy = guest_pool_occupancy(&state);
                 drop(state);
                 tracing::info!(
@@ -678,8 +527,10 @@ impl GuestAddressPool {
                 );
                 return Err(GuestNetworkError::LeaseRetiring { alloc });
             }
-            let plan = plan.clone();
-            return Ok(plan);
+            Some(PoolLease { plan, state: GuestAttachmentLease::Admitted }) => {
+                return Ok(plan.clone());
+            }
+            None => {}
         }
 
         let occupancy = guest_pool_occupancy(&state);
@@ -699,12 +550,61 @@ impl GuestAddressPool {
                 cap: overdrive_core::guest_network::MAX_GUEST_NETWORK_ATTACHMENTS,
             });
         }
-        drop(state);
+        let Some(offset) = self.next_free_offset(state.next_fit, &state) else {
+            drop(state);
+            return Err(GuestNetworkError::PoolExhausted {
+                held: occupancy.held,
+                capacity: self.capacity,
+            });
+        };
 
-        // SCAFFOLD: true — netns-density-295 DISTILL (vsock attachment-cut step, DG-2 row 2):
-        // the next-fit offset walk (M-9), the CID derivation (CID-NOCLAIM) and the
-        // launch-token draw (ATTR-TOKEN) are new behaviour.
-        panic!("Not yet implemented -- RED scaffold")
+        let workload_addr = Ipv4Addr::from(u32::from(self.node_prefix.network()) + offset);
+        let cid = GuestCid::new(overdrive_core::guest_transport::GUEST_CID_BASE + offset)
+            .unwrap_or_else(|_| unreachable!("the pool walks only leased CID offsets"));
+        let launch = overdrive_core::guest_transport::LaunchToken::generate(self.entropy.as_ref());
+        let mut listen_ports = listen_ports.to_vec();
+        listen_ports.sort_unstable();
+        listen_ports.dedup();
+        let plan = GuestNetworkPlan {
+            alloc: alloc.clone(),
+            node_prefix: self.node_prefix,
+            assignment: GuestTransportAssignment::new(
+                workload_addr,
+                self.gateway,
+                cid,
+                launch,
+                flow_ports,
+            ),
+            listen_ports,
+        };
+        state.next_fit = self.cursor_after(offset);
+        state.hold_offset(offset);
+        state
+            .leases
+            .insert(alloc, PoolLease { plan: plan.clone(), state: GuestAttachmentLease::Admitted });
+        drop(state);
+        Ok(plan)
+    }
+
+    fn next_free_offset(&self, cursor: GuestCid, state: &GuestAddressPoolState) -> Option<u32> {
+        let (first, last) = (self.first_usable_offset?, self.last_usable_offset?);
+        let cursor_offset = cursor.get() - overdrive_core::guest_transport::GUEST_CID_BASE;
+        let start = cursor_offset.clamp(first, last);
+        let gateway_offset =
+            u32::from(self.gateway).checked_sub(u32::from(self.node_prefix.network()));
+        let available =
+            |offset: &u32| Some(*offset) != gateway_offset && !state.offset_is_held(*offset);
+        let first_run = (start..=last).find(available);
+        first_run.or_else(|| (start > first).then(|| (first..start).find(available)).flatten())
+    }
+
+    fn cursor_after(&self, offset: u32) -> GuestCid {
+        let next = match self.last_usable_offset {
+            Some(last) if offset < last => offset + 1,
+            _ => self.first_usable_offset.unwrap_or(0),
+        };
+        GuestCid::new(overdrive_core::guest_transport::GUEST_CID_BASE + next)
+            .unwrap_or_else(|_| unreachable!("the next-fit cursor is in the leased CID range"))
     }
 
     /// Returns the lease's offset to the free set. Its caller invokes it only
@@ -712,16 +612,24 @@ impl GuestAddressPool {
     pub(crate) fn release(&self, alloc: &AllocationId) {
         {
             let mut state = self.held.lock();
-            let lease = state.leases.remove(alloc);
-            if lease == Some(GuestAttachmentLease::Retiring) {
-                state.retiring -= 1;
+            if let Some(lease) = state.leases.remove(alloc) {
+                if lease.state == GuestAttachmentLease::Retiring {
+                    state.retiring -= 1;
+                }
+                let offset = u32::from(lease.plan.assignment().workload_addr())
+                    - u32::from(self.node_prefix.network());
+                state.release_offset(offset);
             }
-            state.plans.remove(alloc);
         }
     }
 
     pub(crate) fn snapshot(&self) -> BTreeMap<AllocationId, GuestNetworkPlan> {
-        self.held.lock().plans.clone()
+        self.held
+            .lock()
+            .leases
+            .iter()
+            .map(|(alloc, lease)| (alloc.clone(), lease.plan.clone()))
+            .collect()
     }
 
     /// Move an Admitted lease to Retiring; `true` only for that transition.
@@ -732,8 +640,8 @@ impl GuestAddressPool {
         {
             let mut state = self.held.lock();
             match state.leases.get_mut(alloc) {
-                Some(lease) if *lease == GuestAttachmentLease::Admitted => {
-                    *lease = GuestAttachmentLease::Retiring;
+                Some(lease) if lease.state == GuestAttachmentLease::Admitted => {
+                    lease.state = GuestAttachmentLease::Retiring;
                     state.retiring += 1;
                     true
                 }
@@ -749,7 +657,7 @@ impl GuestAddressPool {
         let occupancy = guest_pool_occupancy(&state);
         let leases = allocs
             .iter()
-            .filter_map(|alloc| state.leases.get(alloc).map(|lease| (alloc.clone(), *lease)))
+            .filter_map(|alloc| state.leases.get(alloc).map(|lease| (alloc.clone(), lease.state)))
             .collect();
         drop(state);
         GuestAttachmentObservation { occupancy, leases }
@@ -792,26 +700,90 @@ impl GuestAttachmentView for GuestPoolAttachmentView {
 /// by the seam on the owner's behalf (EVMOD-CTL: one context per owner, held
 /// by value, replaced only by the `Forwarder` recovery).
 pub struct HostSharedGuestNetworkOwner {
-    // RED scaffold: read by the guest-flow owner the attachment cut lands.
-    #[allow(dead_code, reason = "RED scaffold — the guest-flow owner reads its ports")]
     ports: GuestFlowOwnerPorts,
-    #[allow(
-        dead_code,
-        reason = "RED scaffold — the guest-flow owner reaches every effect through it"
-    )]
     io: Arc<dyn flow_io::GuestFlowIo>,
     /// QHOLD (D-UP-4): this owner's one ledger; it issues and redeems the
     /// owner's holds and counts those dropped unredeemed.
-    #[allow(
-        dead_code,
-        reason = "RED scaffold — `quiesce` / `restore` use it at the attachment cut"
-    )]
     ledger: QuiescenceLedger,
+    runtime: Arc<flow_owner::OwnerRuntime>,
 }
 
 impl std::fmt::Debug for HostSharedGuestNetworkOwner {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.debug_struct("HostSharedGuestNetworkOwner").finish_non_exhaustive()
+    }
+}
+
+impl Drop for HostSharedGuestNetworkOwner {
+    fn drop(&mut self) {
+        if let Some(tasks) = self.runtime.tasks.lock().as_ref() {
+            tasks.shutdown.cancel();
+        }
+    }
+}
+
+impl HostSharedGuestNetworkOwner {
+    /// Cancel and join this composed owner's listener and per-connection task
+    /// tree before the serve owner releases the adapters those tasks hold.
+    pub(crate) async fn shutdown_tasks(&self) {
+        owner_runtime::shutdown(self).await;
+    }
+}
+
+async fn wait_for_drained_refusal_readers(
+    runtime: &Arc<flow_owner::OwnerRuntime>,
+    readers: &[(GuestCid, GuestConnKey)],
+) {
+    loop {
+        let notified = runtime.refusal_reader_capacity.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+
+        let pending = {
+            let state = runtime.state.lock();
+            readers.iter().any(|(cid, key)| {
+                state
+                    .cids
+                    .get(cid)
+                    .and_then(|entry| entry.flow_tasks.get(key))
+                    .is_some_and(|task| task.is_refusal_reader() && task.task.is_none())
+            })
+        };
+        if !pending {
+            return;
+        }
+        notified.await;
+    }
+}
+
+struct SharedRepairInFlight {
+    runtime: Arc<flow_owner::OwnerRuntime>,
+    component: SharedGuestNetworkComponent,
+}
+
+impl Drop for SharedRepairInFlight {
+    fn drop(&mut self) {
+        self.runtime.state.lock().repairs_in_flight.remove(&self.component);
+    }
+}
+
+fn mark_shared_repair_component(
+    runtime: &flow_owner::OwnerRuntime,
+    component: SharedGuestNetworkComponent,
+) {
+    let mut state = runtime.state.lock();
+    if !state.repairs_in_flight.contains(&component) {
+        state.repair_component = Some(component);
+    }
+}
+
+fn retain_failed_shared_repair(
+    runtime: &flow_owner::OwnerRuntime,
+    component: SharedGuestNetworkComponent,
+) {
+    let mut state = runtime.state.lock();
+    if state.repair_component.is_none() && !state.repairs_in_flight.contains(&component) {
+        state.repair_component = Some(component);
     }
 }
 
@@ -830,7 +802,11 @@ impl HostSharedGuestNetworkOwner {
         ports: GuestFlowOwnerPorts,
         io: Arc<dyn flow_io::GuestFlowIo>,
     ) -> Self {
-        Self { ports, io, ledger: QuiescenceLedger::new() }
+        let runtime = Arc::new(flow_owner::OwnerRuntime::new(
+            Arc::clone(&ports.clock),
+            ports.vip_range.clone(),
+        ));
+        Self { ports, io, ledger: QuiescenceLedger::new(), runtime }
     }
 }
 
@@ -844,87 +820,679 @@ impl HostSharedGuestNetworkOwner {
 /// [`HostSharedGuestNetworkOwner::probe_startup`] is this function over the
 /// owner's own seam, `vip_range` and `node_prefix`, so the two cannot
 /// disagree.
-// SCAFFOLD: true — netns-density-295 DISTILL (vsock attachment cut; GW-LOCAL
-// step 13): the four startup checks and the forwarder probe are new behaviour.
-// Like the owner's boot methods below, the body returns `Ok(())` with no effect
-// until that step, so `run_server` boots; the refusals are pinned by bodies
-// pending the attachment-cut step and step 13, which fail on their assertions.
-#[allow(
-    clippy::unused_async,
-    reason = "RED scaffold body; the attachment-cut step awaits the seam"
-)]
 pub(crate) async fn probe_guest_flow_startup(
     io: &dyn flow_io::GuestFlowIo,
     vip_range: &overdrive_dataplane::allocators::VipRange,
     node_prefix: Ipv4Net,
 ) -> Result<()> {
-    let _ = (io, vip_range, node_prefix);
+    let facts = io.host_facts().await?;
+    if let Some(vip_range) = vip_range.first_overlapping_range(node_prefix) {
+        return Err(GuestNetworkError::GuestPrefixOverlapsVipRange {
+            prefix: node_prefix,
+            vip_range,
+        });
+    }
+    for (interface, addresses) in &facts.interfaces {
+        if let Some(address) =
+            addresses.iter().find(|address| node_prefix.contains(&address.addr()))
+        {
+            return Err(GuestNetworkError::GuestPrefixOverlapsNodeAddress {
+                prefix: node_prefix,
+                interface: *interface,
+                address: *address,
+            });
+        }
+    }
+
+    let attach_point = PathBuf::from(overdrive_dataplane::DEFAULT_CGROUP_ATTACH_PATH);
+    if !facts.owner_cgroup.starts_with(&attach_point) {
+        return Err(GuestNetworkError::OwnerCgroupPlacement {
+            owner: facts.owner_cgroup,
+            attach_point,
+        });
+    }
+
+    // ADMISSIONREFUSAL1 retains the accepted four-place-per-attachment node
+    // baseline and adds one descriptor for each bounded refusal reader.
+    let required =
+        u64::from(GUEST_FLOW_MAX_PAIRS) * 4 + u64::from(GUEST_FLOW_MAX_PAIRS) + 16_384 + 1 + 32_767;
+    if facts.nofile_limit < required {
+        return Err(GuestNetworkError::FdBudget { required, available: facts.nofile_limit });
+    }
+
+    io.probe_forwarder().await.map_err(|source| GuestNetworkError::Forwarder { source })?;
     Ok(())
 }
 
-// SCAFFOLD: true — netns-density-295 DISTILL (vsock attachment cut, DG-2 rows 7, 9):
-// the guest-flow owner's provisioning, activation and teardown over `GuestFlowIo`
-// are new behaviour; DELIVER lands them in the attachment-cut step (7).
-#[async_trait::async_trait]
-impl GuestNetworkProvisioner for HostSharedGuestNetworkOwner {
-    async fn provision(&self, _plan: &GuestNetworkPlan) -> Result<()> {
-        panic!("Not yet implemented -- RED scaffold")
-    }
-
-    async fn activate(&self, _plan: &GuestNetworkPlan) -> Result<ForwardingActivation> {
-        panic!("Not yet implemented -- RED scaffold")
-    }
-
-    async fn teardown(&self, _plan: &GuestNetworkPlan) -> Result<()> {
-        panic!("Not yet implemented -- RED scaffold")
+fn listener_io_error(
+    operation: GuestNetworkOperation,
+    error: flow_io::FlowIoError,
+) -> GuestNetworkError {
+    match error {
+        flow_io::FlowIoError::Io { source } => GuestNetworkError::Io { operation, source },
     }
 }
 
-// SCAFFOLD: true — netns-density-295 DISTILL (vsock attachment cut, DG-2 rows 8, 9;
-// GW-LOCAL step 13): boot, audit and counted quiescence (QHOLD) of the
-// guest-flow owner are new behaviour; DELIVER lands them in the attachment-cut step.
-//
-// The three boot methods return `Ok(())` with no effect until that step (the
-// forwarder probe, the listener binds and the gateway route need the forwarder
-// module, step 4), so `run_server` boots and every serve test that serves no
-// VM runs. The RED stays on the guest-flow paths: provisioning, activation,
-// teardown, the dial, audit and quiescence panic; the boot refusals are
-// pinned by bodies pending the attachment-cut step and step 13, which fail on
-// their assertions.
 #[async_trait::async_trait]
-impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
-    async fn probe_startup(&self) -> Result<()> {
+#[allow(
+    clippy::too_many_lines,
+    reason = "the allocation owner operations share the locked lease and session lifecycle invariants"
+)]
+impl GuestNetworkProvisioner for HostSharedGuestNetworkOwner {
+    async fn provision(&self, plan: &GuestNetworkPlan) -> Result<()> {
+        let assignment = plan.assignment();
+        let cid = assignment.cid();
+        let mut state = self.runtime.state.lock();
+        match state.cids.get(&cid) {
+            Some(cid)
+                if cid.alloc == *plan.alloc()
+                    && cid.launch == assignment.launch()
+                    && cid.phase != CidPhase::Retiring =>
+            {
+                return Ok(());
+            }
+            Some(_) | None => {}
+        }
+        let replace_retiring = state.cids.get(&cid).is_some_and(|old| {
+            old.phase == CidPhase::Retiring
+                && old.launch != assignment.launch()
+                && old.session.is_none()
+                && old.session_sender.is_none()
+                && old.session_cancel.is_none()
+                && old.guest_flows.is_empty()
+                && old.flow_tasks.is_empty()
+                && old.flow_ids.is_empty()
+                && old.dials.is_empty()
+                && old.dial_replies.is_empty()
+                && old.dial_cancels.is_empty()
+                && old.dial_requests.is_empty()
+                && old.datagrams.is_empty()
+                && old.control_tasks.len() == old.unread.len()
+                && old.unread.iter().all(|key| {
+                    old.control_tasks
+                        .get(key)
+                        .is_some_and(|task| task.owner_launch == Some(old.launch))
+                })
+                && !state.pairs.values().any(|pair| pair.cid == cid)
+                && !state.dial_watches.values().any(|(owner_cid, _)| *owner_cid == cid)
+        });
+        if state.cids.contains_key(&cid) && !replace_retiring {
+            return Err(GuestNetworkError::PostconditionMismatch {
+                operation: GuestNetworkOperation::PoolAssign,
+                expected: GuestNetworkFact::AllocationForwarding {
+                    alloc: plan.alloc().clone(),
+                    cid,
+                    pairs: 0,
+                },
+                observed: None,
+            });
+        }
+
+        let mut replacement = flow_owner::CidState::provisioned(
+            plan.alloc().clone(),
+            assignment.launch(),
+            assignment.workload_addr(),
+            plan.listen_ports().iter().copied(),
+        );
+        if replace_retiring {
+            let mut retired = state
+                .cids
+                .remove(&cid)
+                .unwrap_or_else(|| unreachable!("the checked Retiring CID remains present"));
+            replacement.unread = std::mem::take(&mut retired.unread);
+            replacement.control_tasks = std::mem::take(&mut retired.control_tasks);
+            replacement.dial_outcomes = std::mem::take(&mut retired.dial_outcomes);
+        }
+        state.cids.insert(cid, replacement);
+        drop(state);
         Ok(())
     }
 
+    async fn activate(&self, plan: &GuestNetworkPlan) -> Result<ForwardingActivation> {
+        let mut state = self.runtime.state.lock();
+        let cid = plan.assignment().cid();
+        let observed = state.cids.get(&cid);
+        let Some(observed) = observed
+            .filter(|entry| entry.alloc == *plan.alloc() && entry.phase != CidPhase::Retiring)
+        else {
+            return Err(GuestNetworkError::PostconditionMismatch {
+                operation: GuestNetworkOperation::ForwardingActivate,
+                expected: GuestNetworkFact::AllocationForwarding {
+                    alloc: plan.alloc().clone(),
+                    cid,
+                    pairs: 0,
+                },
+                observed: observed.map(|entry| GuestNetworkFact::AllocationForwarding {
+                    alloc: entry.alloc.clone(),
+                    cid,
+                    pairs: u32::try_from(
+                        entry.guest_flows.len() + entry.datagrams.len() + entry.dials.len(),
+                    )
+                    .unwrap_or(u32::MAX),
+                }),
+            });
+        };
+        if state.admission == flow_owner::GuestAdmission::Quiesced {
+            return Ok(ForwardingActivation::QuiescenceLatched);
+        }
+        if observed.phase == CidPhase::Active {
+            return Ok(ForwardingActivation::Activated);
+        }
+        if observed.session.is_none() {
+            return Ok(ForwardingActivation::ControlSessionPending);
+        }
+        state
+            .cids
+            .get_mut(&cid)
+            .unwrap_or_else(|| unreachable!("the activated CID remains present under the lock"))
+            .phase = CidPhase::Active;
+        drop(state);
+        Ok(ForwardingActivation::Activated)
+    }
+
+    async fn teardown(&self, plan: &GuestNetworkPlan) -> Result<()> {
+        let cid = plan.assignment().cid();
+        let (session_cancel, control_tasks, flow_drain, dial_watches) = {
+            let mut state = self.runtime.state.lock();
+            let Some(owner) = state.cids.get_mut(&cid) else { return Ok(()) };
+            if owner.alloc != *plan.alloc() {
+                return Ok(());
+            }
+            owner.phase = CidPhase::Retiring;
+            owner.session = None;
+            owner.session_sender = None;
+            let session_cancel = owner.session_cancel.take();
+            let unread = owner.unread.clone();
+            let mut control_tasks = Vec::new();
+            for (key, task) in std::mem::take(&mut owner.control_tasks) {
+                if unread.contains(&key) {
+                    owner.control_tasks.insert(key, task);
+                } else {
+                    control_tasks.push(task);
+                }
+            }
+            let flow_drain = owner.take_flow_tasks_for_drain();
+            let mut watches = Vec::new();
+            for (flow, dial) in &owner.dials {
+                if matches!(dial.phase, flow_owner::DialPhase::AwaitingReply) {
+                    owner.dial_outcomes.insert(
+                        *flow,
+                        overdrive_core::guest_transport::dial::GuestDialError::NotServing,
+                    );
+                }
+                if let Some(cancel) = owner.dial_cancels.get(flow) {
+                    cancel.cancel();
+                }
+                if let flow_owner::DialPhase::Paired { watch, .. } = dial.phase {
+                    watches.push((*flow, watch));
+                }
+            }
+            let snapshot = (session_cancel, control_tasks, flow_drain, watches);
+            drop(state);
+            snapshot
+        };
+        let mut tasks = control_tasks;
+        tasks.extend(flow_drain.tasks);
+        if let Some(cancel) = session_cancel {
+            cancel.cancel();
+        }
+        for (_, cancel) in &flow_drain.refusal_readers {
+            cancel.cancel();
+        }
+        for task in &tasks {
+            task.cancel.cancel();
+        }
+        for mut task in tasks {
+            if let Some(join) = task.task.take() {
+                let _ = join.await;
+            }
+        }
+        let drained_readers =
+            flow_drain.refusal_readers.iter().map(|(key, _)| (cid, *key)).collect::<Vec<_>>();
+        wait_for_drained_refusal_readers(&self.runtime, &drained_readers).await;
+
+        for (flow, watch) in dial_watches {
+            self.io.abort_forward(watch)?;
+            self.runtime.state.lock().dial_watches.remove(&watch);
+            if let Some(owner) = self.runtime.state.lock().cids.get_mut(&cid) {
+                owner.dials.remove(&flow);
+                owner.dial_replies.remove(&flow);
+                owner.dial_cancels.remove(&flow);
+                owner.dial_requests.remove(&flow);
+            }
+            tracing::info!(name: "guest_flow.closed", alloc = %plan.alloc(), cid = %cid, flow = flow.get(), kind = "host_dial", cause = FlowCloseCause::Teardown.as_str());
+        }
+
+        let pair_ids = {
+            let state = self.runtime.state.lock();
+            state
+                .pairs
+                .iter()
+                .filter_map(|(id, pair)| (pair.cid == cid).then_some(*id))
+                .collect::<Vec<_>>()
+        };
+        for id in pair_ids {
+            let pair = {
+                let mut state = self.runtime.state.lock();
+                self.io.abort_forward(id)?;
+                state.abort_causes.insert(id, FlowCloseCause::Teardown);
+                let pair = state.pairs.remove(&id);
+                if let Some(pair) = &pair
+                    && let Some(owner) = state.cids.get_mut(&cid)
+                {
+                    owner.flow_ids.remove(&pair.flow);
+                    owner.guest_flows.retain(|_, phase| {
+                        !matches!(phase, flow_owner::GuestFlowPhase::Paired { pair: observed, .. } if *observed == id)
+                    });
+                    owner.datagrams.remove(&pair.flow);
+                }
+                drop(state);
+                pair
+            };
+            if let Some(pair) = pair {
+                self.io.close(pair.peer.into()).await;
+                self.io.close(pair.vsock.into()).await;
+            }
+        }
+
+        let mut state = self.runtime.state.lock();
+        let Some(owner) = state.cids.get(&cid) else { return Ok(()) };
+        let remaining = owner.session.is_some()
+            || !owner.guest_flows.is_empty()
+            || !owner.dials.is_empty()
+            || !owner.datagrams.is_empty()
+            || !owner.flow_tasks.is_empty()
+            || owner.control_tasks.keys().any(|key| !owner.unread.contains(key))
+            || state.pairs.values().any(|pair| pair.cid == cid);
+        if remaining {
+            return Err(GuestNetworkError::PostconditionMismatch {
+                operation: GuestNetworkOperation::PairAbort,
+                expected: GuestNetworkFact::AllocationForwarding {
+                    alloc: owner.alloc.clone(),
+                    cid,
+                    pairs: 0,
+                },
+                observed: Some(GuestNetworkFact::AllocationForwarding {
+                    alloc: owner.alloc.clone(),
+                    cid,
+                    pairs: u32::try_from(owner.held_flows()).unwrap_or(u32::MAX),
+                }),
+            });
+        }
+        if owner.unread.is_empty() && owner.control_tasks.is_empty() {
+            state.cids.remove(&cid);
+        }
+        drop(state);
+        Ok(())
+    }
+}
+
+// The boot, audit and counted quiescence operations of the guest-flow owner
+// are composed by `run_server` and drive the same production owner instance.
+#[allow(
+    clippy::too_many_lines,
+    reason = "the shared-owner port implementation keeps ordered convergence, audit, repair and hold transitions together"
+)]
+#[async_trait::async_trait]
+impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
+    async fn probe_startup(&self) -> Result<()> {
+        probe_guest_flow_startup(self.io.as_ref(), &self.ports.vip_range, self.ports.node_prefix)
+            .await
+    }
+
     async fn sweep_stale(&self) -> Result<()> {
+        if self.io.stale_objects_present().await? {
+            return Err(GuestNetworkError::PostconditionMismatch {
+                operation: GuestNetworkOperation::CleanupComplement,
+                expected: GuestNetworkFact::CleanupComplement,
+                observed: Some(GuestNetworkFact::CleanupComplement),
+            });
+        }
         Ok(())
     }
 
     async fn converge_shared(&self) -> Result<()> {
+        let repair = {
+            let mut state = self.runtime.state.lock();
+            let repair = state.repair_component.take();
+            if let Some(component) = repair {
+                state.repairs_in_flight.insert(component);
+            }
+            repair
+        };
+        if let Some(component) = repair {
+            let in_flight = SharedRepairInFlight { runtime: Arc::clone(&self.runtime), component };
+            let result = async {
+                match component {
+                    SharedGuestNetworkComponent::Forwarder => {
+                        self.io.close_forwarder();
+                        self.runtime.state.lock().forwarder_inventory =
+                            ForwarderInventoryRead::NoContext;
+                        let generation = self.io.open_forwarder().await?;
+                        let inventory = self.io.inventory()?;
+                        let mut state = self.runtime.state.lock();
+                        state.forwarder_generation = generation;
+                        state.forwarder_inventory = ForwarderInventoryRead::Read(inventory);
+                        drop(state);
+                        Ok(())
+                    }
+                    SharedGuestNetworkComponent::FlowListeners => {
+                        self.io
+                            .bind_listener(flow_io::FlowListener::Stream, self.ports.stream_port)
+                            .await
+                            .map_err(|error| {
+                                listener_io_error(GuestNetworkOperation::FlowListenerBind, error)
+                            })?;
+                        owner_runtime::restart_listener(self, flow_io::FlowListener::Stream);
+                        self.runtime.state.lock().flow_listeners_running = true;
+                        Ok(())
+                    }
+                    SharedGuestNetworkComponent::ControlListener => {
+                        self.io
+                            .bind_listener(flow_io::FlowListener::Control, self.ports.control_port)
+                            .await
+                            .map_err(|error| {
+                                listener_io_error(GuestNetworkOperation::ControlListenerBind, error)
+                            })?;
+                        owner_runtime::restart_listener(self, flow_io::FlowListener::Control);
+                        self.runtime.state.lock().flow_listeners_running = true;
+                        Ok(())
+                    }
+                    _ => Ok(()),
+                }
+            }
+            .await;
+            drop(in_flight);
+            if result.is_err() {
+                retain_failed_shared_repair(&self.runtime, component);
+            }
+            return result;
+        }
+        if self.runtime.state.lock().flow_ports.is_some() {
+            owner_runtime::start(self);
+            return Ok(());
+        }
+
+        let generation = self.io.open_forwarder().await?;
+        let inventory = self.io.inventory()?;
+        {
+            let mut state = self.runtime.state.lock();
+            state.forwarder_generation = generation;
+            state.forwarder_inventory = ForwarderInventoryRead::Read(inventory);
+        }
+
+        let stream = self
+            .io
+            .bind_listener(flow_io::FlowListener::Stream, self.ports.stream_port)
+            .await
+            .map_err(|error| listener_io_error(GuestNetworkOperation::FlowListenerBind, error))?;
+        let control = self
+            .io
+            .bind_listener(flow_io::FlowListener::Control, self.ports.control_port)
+            .await
+            .map_err(|error| {
+                listener_io_error(GuestNetworkOperation::ControlListenerBind, error)
+            })?;
+        let flow_ports =
+            GuestFlowPorts::new(stream, control).map_err(|error| GuestNetworkError::Io {
+                operation: GuestNetworkOperation::ControlListenerBind,
+                source: std::io::Error::new(std::io::ErrorKind::InvalidData, error),
+            })?;
+        self.io.converge_gateway_route(self.ports.gateway).await?;
+
+        let mut state = self.runtime.state.lock();
+        state.flow_ports = Some(flow_ports);
+        state.flow_listeners_running = true;
+        state.gateway_converged = true;
+        drop(state);
+        owner_runtime::start(self);
         Ok(())
     }
 
     fn flow_ports(&self) -> Option<GuestFlowPorts> {
-        // SCAFFOLD: the listeners are bound in the attachment-cut step (6);
-        // until then the owner has bound nothing to report.
-        None
+        self.runtime.state.lock().flow_ports
+    }
+
+    fn leaked_quiescence_holds(&self) -> u32 {
+        self.ledger.leaked()
     }
 
     async fn audit_shared(
         &self,
     ) -> std::result::Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError> {
-        panic!("Not yet implemented -- RED scaffold")
+        let repairs_in_flight = self.runtime.state.lock().repairs_in_flight.clone();
+        let (expected_pairs, expected_watches) = {
+            let state = self.runtime.state.lock();
+            let pairs = u32::try_from(state.pairs.len()).unwrap_or(u32::MAX);
+            let watches = u32::try_from(state.dial_watches.len()).unwrap_or(u32::MAX);
+            let snapshot = (pairs, watches);
+            drop(state);
+            snapshot
+        };
+        let generation = self.runtime.state.lock().forwarder_generation;
+        if !repairs_in_flight.contains(&SharedGuestNetworkComponent::Forwarder) {
+            let inventory = self.io.inventory().map_err(|source| {
+                mark_shared_repair_component(&self.runtime, SharedGuestNetworkComponent::Forwarder);
+                SharedGuestNetworkAuditError {
+                    component: SharedGuestNetworkComponent::Forwarder,
+                    source: GuestNetworkError::Forwarder { source },
+                }
+            })?;
+            if inventory.live_pairs != expected_pairs || inventory.live_watches != expected_watches
+            {
+                mark_shared_repair_component(&self.runtime, SharedGuestNetworkComponent::Forwarder);
+                return Err(SharedGuestNetworkAuditError {
+                    component: SharedGuestNetworkComponent::Forwarder,
+                    source: GuestNetworkError::PostconditionMismatch {
+                        operation: GuestNetworkOperation::SharedAudit,
+                        expected: GuestNetworkFact::Forwarder {
+                            generation,
+                            live_pairs: expected_pairs,
+                            live_watches: expected_watches,
+                        },
+                        observed: Some(GuestNetworkFact::Forwarder {
+                            generation,
+                            live_pairs: inventory.live_pairs,
+                            live_watches: inventory.live_watches,
+                        }),
+                    },
+                });
+            }
+        }
+        let task_failure = {
+            let tasks = self.runtime.tasks.lock();
+            tasks.as_ref().and_then(|tasks| {
+                if !tasks.shutdown.is_cancelled()
+                    && !repairs_in_flight.contains(&SharedGuestNetworkComponent::FlowListeners)
+                    && tasks
+                        .stream_accept
+                        .as_ref()
+                        .is_some_and(tokio::task::JoinHandle::is_finished)
+                {
+                    Some(SharedGuestNetworkComponent::FlowListeners)
+                } else if !tasks.shutdown.is_cancelled()
+                    && !repairs_in_flight.contains(&SharedGuestNetworkComponent::ControlListener)
+                    && tasks
+                        .control_accept
+                        .as_ref()
+                        .is_some_and(tokio::task::JoinHandle::is_finished)
+                {
+                    Some(SharedGuestNetworkComponent::ControlListener)
+                } else {
+                    None
+                }
+            })
+        };
+        if let Some(component) = task_failure {
+            mark_shared_repair_component(&self.runtime, component);
+            return Err(SharedGuestNetworkAuditError {
+                component,
+                source: GuestNetworkError::PostconditionMismatch {
+                    operation: GuestNetworkOperation::SharedAudit,
+                    expected: GuestNetworkFact::SharedComponent { component, healthy: true },
+                    observed: Some(GuestNetworkFact::SharedComponent { component, healthy: false }),
+                },
+            });
+        }
+        Ok(SharedGuestNetworkAudit::default())
     }
 
     async fn quiesce(&self) -> (QuiescenceHold, ForwardingQuiescence) {
-        panic!("Not yet implemented -- RED scaffold")
+        let hold = self.ledger.issue();
+        let (pairs, tasks, refusal_readers, allocations, dials, first) = {
+            let mut state = self.runtime.state.lock();
+            state.quiescence_holds = state.quiescence_holds.saturating_add(1);
+            let first = state.quiescence_holds == 1;
+            if first {
+                state.admission = flow_owner::GuestAdmission::Quiesced;
+                let allocations = state
+                    .cids
+                    .iter()
+                    .filter(|(_, cid)| cid.held_flows() > 0)
+                    .map(|(guest_cid, cid)| {
+                        (
+                            cid.alloc.clone(),
+                            *guest_cid,
+                            u32::try_from(cid.held_flows()).unwrap_or(u32::MAX),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let dials = state
+                    .cids
+                    .iter()
+                    .flat_map(|(guest_cid, cid)| {
+                        cid.dials.iter().filter_map(move |(flow, dial)| match dial.phase {
+                            flow_owner::DialPhase::Paired { watch, .. } => Some((
+                                *guest_cid,
+                                *flow,
+                                watch,
+                                cid.alloc.clone(),
+                                cid.session_sender.clone(),
+                            )),
+                            flow_owner::DialPhase::AwaitingReply => None,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                let mut tasks = Vec::new();
+                let mut refusal_readers = Vec::new();
+                for (guest_cid, cid) in &mut state.cids {
+                    cid.guest_flows.clear();
+                    cid.datagrams.clear();
+                    for (flow, dial) in &cid.dials {
+                        if matches!(dial.phase, flow_owner::DialPhase::AwaitingReply) {
+                            cid.dial_outcomes.insert(
+                                *flow,
+                                overdrive_core::guest_transport::dial::GuestDialError::Quiesced,
+                            );
+                        }
+                        if let Some(cancel) = cid.dial_cancels.get(flow) {
+                            cancel.cancel();
+                        }
+                    }
+                    cid.dials.clear();
+                    cid.dial_replies.clear();
+                    cid.dial_cancels.clear();
+                    cid.dial_requests.clear();
+                    cid.flow_ids.clear();
+                    let drain = cid.take_flow_tasks_for_drain();
+                    tasks.extend(drain.tasks);
+                    refusal_readers.extend(
+                        drain
+                            .refusal_readers
+                            .into_iter()
+                            .map(|(key, cancel)| (*guest_cid, key, cancel)),
+                    );
+                }
+                let watches = dials
+                    .iter()
+                    .map(|(_, _, watch, _, _)| *watch)
+                    .collect::<std::collections::BTreeSet<_>>();
+                state.dial_watches.retain(|watch, _| !watches.contains(watch));
+                let pairs = std::mem::take(&mut state.pairs);
+                let snapshot = (pairs, tasks, refusal_readers, allocations, dials, true);
+                drop(state);
+                snapshot
+            } else {
+                drop(state);
+                (BTreeMap::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), false)
+            }
+        };
+        let mut unconfirmed = BTreeMap::new();
+        if first {
+            for task in &tasks {
+                task.cancel.cancel();
+            }
+            for (_, _, cancel) in &refusal_readers {
+                cancel.cancel();
+            }
+            if self.io.abort_all().is_err() {
+                for (allocation, cid, pairs) in allocations {
+                    unconfirmed.insert(
+                        allocation.clone(),
+                        GuestNetworkError::PostconditionMismatch {
+                            operation: GuestNetworkOperation::PairAbort,
+                            expected: GuestNetworkFact::AllocationForwarding {
+                                alloc: allocation.clone(),
+                                cid,
+                                pairs: 0,
+                            },
+                            observed: Some(GuestNetworkFact::AllocationForwarding {
+                                alloc: allocation,
+                                cid,
+                                pairs,
+                            }),
+                        },
+                    );
+                }
+            }
+            for mut task in tasks {
+                if let Some(join) = task.task.take() {
+                    let _ = join.await;
+                }
+            }
+            let drained_readers =
+                refusal_readers.iter().map(|(cid, key, _)| (*cid, *key)).collect::<Vec<_>>();
+            wait_for_drained_refusal_readers(&self.runtime, &drained_readers).await;
+            for (_, pair) in pairs {
+                tracing::info!(name: "guest_flow.closed", alloc = %pair.alloc, cid = %pair.cid, kind = if pair.mode == flow_io::PairMode::Stream { "tcp_connect" } else { "datagram" }, cause = FlowCloseCause::Quiesced.as_str());
+                self.io.close(pair.peer.into()).await;
+                self.io.close(pair.vsock.into()).await;
+            }
+            for (guest_cid, flow, _, allocation, sender) in dials {
+                if let Some(sender) = sender {
+                    let _ =
+                        sender.send(overdrive_core::guest_transport::wire::ControlMessage::Abort {
+                            flow,
+                        });
+                }
+                tracing::info!(name: "guest_flow.closed", alloc = %allocation, cid = %guest_cid, flow = flow.get(), kind = "host_dial", cause = FlowCloseCause::Quiesced.as_str());
+            }
+        }
+        (hold, ForwardingQuiescence { unconfirmed })
     }
 
     async fn restore(
         &self,
-        _hold: QuiescenceHold,
+        hold: QuiescenceHold,
     ) -> std::result::Result<ForwardingRestore, QuiescenceRestoreError> {
-        panic!("Not yet implemented -- RED scaffold")
+        if let Err(hold) = self.ledger.redeem(hold) {
+            drop(hold);
+            return Err(QuiescenceRestoreError::ForeignHold);
+        }
+        let mut state = self.runtime.state.lock();
+        if state.quiescence_holds == 0 {
+            return Err(QuiescenceRestoreError::ForeignHold);
+        }
+        state.quiescence_holds -= 1;
+        if state.quiescence_holds == 0 {
+            state.admission = flow_owner::GuestAdmission::Open;
+            let result = Ok(ForwardingRestore::Reopened);
+            drop(state);
+            result
+        } else {
+            let result = Ok(ForwardingRestore::StillQuiesced);
+            drop(state);
+            result
+        }
     }
 }

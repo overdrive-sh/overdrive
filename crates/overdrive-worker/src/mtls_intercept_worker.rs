@@ -22,8 +22,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::num::{NonZeroU16, NonZeroU64};
 #[cfg(any(test, feature = "integration-tests"))]
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use overdrive_core::traits::clock::Clock;
@@ -2381,11 +2380,6 @@ impl MtlsInterceptWorker {
                 source: InterceptError::PolicyRouteAbsent,
             });
         }
-        if !observed.intercept_mark_guard {
-            return Err(MtlsSharedOwnerError::Intercept {
-                source: InterceptError::InterceptMarkGuardAbsent,
-            });
-        }
         if observed.members != crate::mtls_intercept_port::InterceptMembers::default() {
             return Err(MtlsSharedOwnerError::BootMemberClear {
                 source: InterceptError::MembersRemain { observed: observed.members },
@@ -2455,11 +2449,6 @@ impl MtlsInterceptWorker {
         if !observed.policy_route {
             return Err(MtlsSharedOwnerError::Intercept {
                 source: InterceptError::PolicyRouteAbsent,
-            });
-        }
-        if !observed.intercept_mark_guard {
-            return Err(MtlsSharedOwnerError::Intercept {
-                source: InterceptError::InterceptMarkGuardAbsent,
             });
         }
         if observed.members != expected_members {
@@ -3773,7 +3762,6 @@ mod tests {
             Some(crate::mtls_intercept_port::InterceptState {
                 program,
                 policy_route: true,
-                intercept_mark_guard: true,
                 members: self.members.lock().members.clone(),
             })
         }

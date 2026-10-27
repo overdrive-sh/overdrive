@@ -4,6 +4,7 @@ State 1: <Initial predicate>
 /\ quiesce_bugForeignDecrements_quiescence_flowsOpen = 0
 /\ quiesce_bugForeignDecrements_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
 /\ quiesce_bugForeignDecrements_quiescence_leaked = 0
+/\ quiesce_bugForeignDecrements_quiescence_roundState = [C1 |-> "outside", C2 |-> "outside"]
 /\ quiesce_bugForeignDecrements_quiescence_latch = FALSE
 /\ quiesce_bugForeignDecrements_quiescence_foreign = FALSE
 /\ quiesce_bugForeignDecrements_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
@@ -20,15 +21,16 @@ State 1: <Initial predicate>
 /\ quiesce_bugForeignDecrements_quiescence_repLeft = 1
 /\ quiesce_bugForeignDecrements_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
 
-State 2: <quiesce_bugForeignDecrements_quiescence_Damage line 304, col 3 to line 341, col 61 of module quiesce_bugForeignDecrements>
+State 2: <quiesce_bugForeignDecrements_quiescence_LeakHold line 746, col 3 to line 794, col 61 of module quiesce_bugForeignDecrements>
 /\ quiesce_bugForeignDecrements_quiescence_table = TRUE
-/\ quiesce_bugForeignDecrements_quiescence_cnt = 0
+/\ quiesce_bugForeignDecrements_quiescence_cnt = 1
 /\ quiesce_bugForeignDecrements_quiescence_flowsOpen = 0
 /\ quiesce_bugForeignDecrements_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
-/\ quiesce_bugForeignDecrements_quiescence_leaked = 0
-/\ quiesce_bugForeignDecrements_quiescence_latch = FALSE
+/\ quiesce_bugForeignDecrements_quiescence_leaked = 1
+/\ quiesce_bugForeignDecrements_quiescence_roundState = [C1 |-> "outside", C2 |-> "outside"]
+/\ quiesce_bugForeignDecrements_quiescence_latch = TRUE
 /\ quiesce_bugForeignDecrements_quiescence_foreign = FALSE
-/\ quiesce_bugForeignDecrements_quiescence_dmg = [C1 |-> TRUE, C2 |-> FALSE]
+/\ quiesce_bugForeignDecrements_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
 /\ quiesce_bugForeignDecrements_quiescence_up = TRUE
 /\ quiesce_bugForeignDecrements_quiescence_att = [C1 |-> 0, C2 |-> 0]
 /\ quiesce_bugForeignDecrements_quiescence_stop = "none"
@@ -36,21 +38,22 @@ State 2: <quiesce_bugForeignDecrements_quiescence_Damage line 304, col 3 to line
   overlapped |-> FALSE,
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE,
-  dropped |-> FALSE,
+  dropped |-> TRUE,
   refusedBoot |-> FALSE,
   foreignChanged |-> FALSE ]
 /\ quiesce_bugForeignDecrements_quiescence_repLeft = 1
 /\ quiesce_bugForeignDecrements_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
 
-State 3: <quiesce_bugForeignDecrements_quiescence_RecQuiesce line 422, col 3 to line 461, col 61 of module quiesce_bugForeignDecrements>
+State 3: <quiesce_bugForeignDecrements_quiescence_ForeignRestore line 800, col 3 to line 862, col 61 of module quiesce_bugForeignDecrements>
 /\ quiesce_bugForeignDecrements_quiescence_table = TRUE
-/\ quiesce_bugForeignDecrements_quiescence_cnt = 1
+/\ quiesce_bugForeignDecrements_quiescence_cnt = 0
 /\ quiesce_bugForeignDecrements_quiescence_flowsOpen = 0
 /\ quiesce_bugForeignDecrements_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
-/\ quiesce_bugForeignDecrements_quiescence_leaked = 0
-/\ quiesce_bugForeignDecrements_quiescence_latch = TRUE
-/\ quiesce_bugForeignDecrements_quiescence_foreign = FALSE
-/\ quiesce_bugForeignDecrements_quiescence_dmg = [C1 |-> TRUE, C2 |-> FALSE]
+/\ quiesce_bugForeignDecrements_quiescence_leaked = 1
+/\ quiesce_bugForeignDecrements_quiescence_roundState = [C1 |-> "outside", C2 |-> "outside"]
+/\ quiesce_bugForeignDecrements_quiescence_latch = FALSE
+/\ quiesce_bugForeignDecrements_quiescence_foreign = TRUE
+/\ quiesce_bugForeignDecrements_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
 /\ quiesce_bugForeignDecrements_quiescence_up = TRUE
 /\ quiesce_bugForeignDecrements_quiescence_att = [C1 |-> 0, C2 |-> 0]
 /\ quiesce_bugForeignDecrements_quiescence_stop = "none"
@@ -58,30 +61,8 @@ State 3: <quiesce_bugForeignDecrements_quiescence_RecQuiesce line 422, col 3 to 
   overlapped |-> FALSE,
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE,
-  dropped |-> FALSE,
-  refusedBoot |-> FALSE,
-  foreignChanged |-> FALSE ]
-/\ quiesce_bugForeignDecrements_quiescence_repLeft = 1
-/\ quiesce_bugForeignDecrements_quiescence_rec = [C1 |-> "held", C2 |-> "idle"]
-
-State 4: <quiesce_bugForeignDecrements_quiescence_ForeignRestore line 730, col 3 to line 790, col 61 of module quiesce_bugForeignDecrements>
-/\ quiesce_bugForeignDecrements_quiescence_table = TRUE
-/\ quiesce_bugForeignDecrements_quiescence_cnt = 0
-/\ quiesce_bugForeignDecrements_quiescence_flowsOpen = 0
-/\ quiesce_bugForeignDecrements_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
-/\ quiesce_bugForeignDecrements_quiescence_leaked = 0
-/\ quiesce_bugForeignDecrements_quiescence_latch = FALSE
-/\ quiesce_bugForeignDecrements_quiescence_foreign = TRUE
-/\ quiesce_bugForeignDecrements_quiescence_dmg = [C1 |-> TRUE, C2 |-> FALSE]
-/\ quiesce_bugForeignDecrements_quiescence_up = TRUE
-/\ quiesce_bugForeignDecrements_quiescence_att = [C1 |-> 0, C2 |-> 0]
-/\ quiesce_bugForeignDecrements_quiescence_stop = "none"
-/\ quiesce_bugForeignDecrements_quiescence_g = [ reopenEarly |-> TRUE,
-  overlapped |-> FALSE,
-  stillQuiesced |-> FALSE,
-  failStopped |-> FALSE,
-  dropped |-> FALSE,
+  dropped |-> TRUE,
   refusedBoot |-> FALSE,
   foreignChanged |-> TRUE ]
 /\ quiesce_bugForeignDecrements_quiescence_repLeft = 1
-/\ quiesce_bugForeignDecrements_quiescence_rec = [C1 |-> "held", C2 |-> "idle"]
+/\ quiesce_bugForeignDecrements_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]

@@ -12,6 +12,7 @@ State 1
   conf_step = [InitDown |-> [tag |-> "UNIT"]]
   foreign = FALSE
   rec = [C1 |-> "idle", C2 |-> "idle"]
+  roundState = [C1 |-> "outside", C2 |-> "outside"]
   stop = "crash"
   cnt = 0
   up = FALSE

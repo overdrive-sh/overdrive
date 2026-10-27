@@ -25,7 +25,6 @@
 //! enter through the required `ServerConfig.mtls_intercept` port.
 
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -44,8 +43,7 @@ use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_sim::adapters::{SimCgroupFs, SimGuestDnsFactory, SimMtlsIntercept};
-use overdrive_worker::cgroup_manager::CgroupManager;
+use overdrive_sim::adapters::{SimGuestDnsFactory, SimMtlsIntercept};
 use overdrive_worker::mtls_intercept::{
     InterceptElementKey, InterceptElementOperation, InterceptError, InterceptPostcondition,
     InterceptSet, NetlinkError, Result as InterceptResult,
@@ -244,7 +242,6 @@ fn chain_carries_errno(error: &(dyn std::error::Error + 'static), errno: i32) ->
               the body is one boot-deploy-fault-shutdown narrative"
 )]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 row 2: GuestAddressPool::assign)"]
 async fn graceful_shutdown_propagates_worker_failure_without_a_retry_capability() {
     const TICK: Duration = Duration::from_millis(100);
 
@@ -280,7 +277,6 @@ async fn graceful_shutdown_propagates_worker_failure_without_a_retry_capability(
         driver_port,
         Arc::new(SimSharedGuestNetworkOwner::default()),
         GuestNetworkExecWiring::new(Arc::clone(&clock_port)),
-        CgroupManager::new(PathBuf::from("/sys/fs/cgroup"), Arc::new(SimCgroupFs::new())),
     )
     .await
     .expect("production boot");

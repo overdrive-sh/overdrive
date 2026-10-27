@@ -221,7 +221,6 @@ proptest! {
     /// declared descriptor is unchanged.
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "pending DELIVER attachment-cut step (9)"]
     fn vm_wildcard_tcp_target_projects_each_provisioned_guest_addr(
         third in 0_u8..=255,
         fourth in 2_u8..=254,
@@ -272,7 +271,6 @@ proptest! {
 /// CONTRACT_SHAPE: bounded-change.
 /// Outcome anchor: DISCUSS Elevator Pitch
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn vm_default_and_wildcard_network_probe_targets_resolve_to_workload_addr_once() {
     let http = Arc::new(CapturingHttpProber::new(ProbeOutcome::Pass));
     let clock = Arc::new(SimClock::default());
@@ -322,7 +320,6 @@ async fn vm_default_and_wildcard_network_probe_targets_resolve_to_workload_addr_
 /// CONTRACT_SHAPE: unbounded-preservation.
 /// Outcome anchor: DISCUSS Elevator Pitch
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn explicit_network_probe_hosts_are_preserved_for_vm() {
     let name = "vm";
     let driver = vm_payload();
@@ -368,7 +365,6 @@ async fn explicit_network_probe_hosts_are_preserved_for_vm() {
 /// allocation Running observation.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn vm_tcp_probe_records_guest_connect_outcome_without_owning_running() {
     let clock = Arc::new(SimClock::default());
     let obs = Arc::new(SimObservationStore::single_peer(
@@ -414,7 +410,6 @@ async fn vm_tcp_probe_records_guest_connect_outcome_without_owning_running() {
 /// CONTRACT_SHAPE: bounded-change.
 /// Outcome anchor: DISCUSS Elevator Pitch
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn vm_http_probe_preserves_status_policy_and_bounded_body_handling() {
     for status in [204_u16, 302, 404, 503] {
         let clock = Arc::new(SimClock::default());
@@ -470,7 +465,6 @@ async fn vm_http_probe_preserves_status_policy_and_bounded_body_handling() {
 /// the same existing hooks as `ExecDriver`; no new Driver method exists.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn vm_driver_delegates_existing_probe_lifecycle_hooks_to_shared_runner() {
     let (driver, runner) = shared_vm_driver().await;
     let mut readiness = tcp_descriptor("0.0.0.0");
@@ -504,7 +498,6 @@ async fn vm_driver_delegates_existing_probe_lifecycle_hooks_to_shared_runner() {
 /// `AllocationSpec`, while exactly one supervisor/task set remains live.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn vm_restart_reregistration_is_idempotent_and_does_not_duplicate_probe_tasks() {
     let (driver, runner) = shared_vm_driver().await;
     let initial = allocation_spec(

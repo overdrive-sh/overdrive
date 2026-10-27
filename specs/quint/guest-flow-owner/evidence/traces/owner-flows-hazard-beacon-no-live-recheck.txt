@@ -4,6 +4,7 @@ State 1
   bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
   bHeldByOther = FALSE
   badPaired = FALSE
+  bq = <<>>
   vmUp = FALSE
   dl = [ res |-> <<"none">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
   alloc = "Absent"
@@ -43,9 +44,11 @@ State 3 [VmStart]
 
 State 4 [step]
   bcn = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+  bq = <<1>>
 
 State 5 [step]
   bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
+  bq = <<>>
 
 State 6 [step]
   drvLive = FALSE

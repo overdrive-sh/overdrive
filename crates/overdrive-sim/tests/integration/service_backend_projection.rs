@@ -522,7 +522,6 @@ async fn registered_runtime(
 /// Existing green control, separately reported from the multi-listener RED:
 /// no readiness means eligible before startup passes; equal rows do not churn.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2-4: the guest lane leases the transport)"]
 async fn single_listener_preterminal_control_is_healthy_and_stable() {
     let mut spec = input(&[(18081, "tcp")], 1);
     spec.startup_probes = vec![startup()];
@@ -541,7 +540,6 @@ async fn single_listener_preterminal_control_is_healthy_and_stable() {
 /// Start and operator Stop keep SVID wakes and also wake the sole backend
 /// projection owner. Repeated operator-stopped reconciliation does not restart.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2-4: the guest lane leases the transport)"]
 async fn workload_start_and_stop_wake_the_service_projection_owner() {
     let mut world = World::new(257_226, input(&[(18081, "tcp")], 1), true).await;
     world.run("workload-lifecycle").await;
@@ -601,7 +599,6 @@ fn assert_service_and_svid_wakes(world: &World) {
 /// also wakes ServiceLifecycle. No retry count, terminal row, restart view, or
 /// replacement Action is seeded to reach exhaustion.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2-4: the guest lane leases the transport)"]
 async fn liveness_restart_budget_and_finalization_keep_projection_handoffs() {
     use overdrive_core::transition_reason::{ServiceFailureReason, TerminalCondition};
     let mut spec = input(&[(18081, "tcp")], 1);
@@ -678,7 +675,6 @@ async fn liveness_restart_budget_and_finalization_keep_projection_handoffs() {
 /// tick-ahead readback, and prior-ahead readback after normal runtime/tick reload.
 /// Correlation identity is content-derived from the allocator-issued VIP.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2-4: the guest lane leases the transport)"]
 async fn deciding_tick_orders_complete_row_handoffs_before_failure() {
     use overdrive_core::dataplane::fingerprint::fingerprint;
     use overdrive_core::id::{ContentHash, CorrelationKey};
@@ -769,7 +765,6 @@ async fn deciding_tick_orders_complete_row_handoffs_before_failure() {
 /// attaching it to a fresh successor. A subsequent reconciliation repairs the
 /// rejected row from observation, not emit memory.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2-4: the guest lane leases the transport)"]
 async fn failed_withdrawal_drains_terminal_and_repairs_after_view_reload() {
     let mut spec = input(&[(18081, "tcp")], 1);
     spec.startup_probes = vec![startup()];
@@ -893,7 +888,6 @@ impl Drop for World {
 /// row; no-readiness is eligible and an equal row is not rewritten.
 /// Multi-allocation membership/order coverage is deferred to GitHub issue #282.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2-4: the guest lane leases the transport)"]
 async fn complete_listener_projection_is_idempotent() {
     for (seed, listeners, replicas) in [
         (257_210, vec![(18081, "tcp")], 1),
@@ -953,7 +947,6 @@ async fn empty_membership_and_absent_dataplane_are_distinct() {
 /// fails, the next observed-state reconciliation repairs it without inventing
 /// retry scheduling or depending on a readiness transition.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2-4: the guest lane leases the transport)"]
 async fn rejected_first_publication_is_repaired_from_observed_state() {
     let mut spec = input(&[(18081, "tcp")], 1);
     spec.startup_probes = vec![startup()];
@@ -990,7 +983,6 @@ async fn rejected_first_publication_is_repaired_from_observed_state() {
 /// startup decision preserve the policy owner's predecessor-scoped veto
 /// through bounded reconciliation.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2-4: the guest lane leases the transport)"]
 async fn startup_failure_withdraws_then_fresh_successor_starts_unobserved() {
     for seed in [257_209, 257_216] {
         let mut spec = input(&[(18081, "tcp")], 1);
@@ -1050,7 +1042,6 @@ async fn startup_failure_withdraws_then_fresh_successor_starts_unobserved() {
 /// a real failing probe withdraws and later Pass observations recover without
 /// marking startup terminal or altering the normal allocation identity.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2-4: the guest lane leases the transport)"]
 async fn readiness_threshold_is_listener_independent_and_recovers() {
     for listener_count in [1, 3] {
         let listeners = [(18081, "tcp"), (18082, "tcp"), (18081, "udp")];
@@ -1089,7 +1080,6 @@ async fn readiness_threshold_is_listener_independent_and_recovers() {
 /// List/Watch and queued hydrator convergence -> prober recovery. DNS and new
 /// mesh resolves are observed; established connections and VM map paths are not.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2-4: the guest lane leases the transport)"]
 async fn existing_consumers_follow_withdrawal_and_recovery_asynchronously() {
     Box::pin(consumer_trajectory(true)).await;
 }
@@ -1099,7 +1089,6 @@ async fn existing_consumers_follow_withdrawal_and_recovery_asynchronously() {
 /// DNS projection follow healthy -> failing -> recovering ProbeRunner outcomes,
 /// independently of the new direct hydrator handoff being implemented.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2-4: the guest lane leases the transport)"]
 async fn mesh_and_dns_watch_control_follows_real_readiness_outcomes() {
     Box::pin(consumer_trajectory(false)).await;
 }

@@ -584,6 +584,11 @@ fn compose(node: &Node, boot: u32) -> Composed {
         // subject here.
         let owner = crate::shared_network_test_ports::shared_guest_network_owner();
         owner.converge_shared().await.expect("the test owner's converge_shared passes");
+        let mtls_worker = crate::shared_network_test_ports::mtls_worker();
+        mtls_worker
+            .start_shared_owner()
+            .await
+            .expect("the test mTLS owner's start_shared_owner passes");
         let allocator = crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
         let mut state = AppState::new(
             store,
@@ -599,7 +604,7 @@ fn compose(node: &Node, boot: u32) -> Composed {
             allocator,
             crate::test_empty_listener_facts(),
             Ipv4Addr::LOCALHOST,
-            crate::shared_network_test_ports::mtls_worker(),
+            mtls_worker,
             owner,
             wiring.gate(),
             Arc::clone(&pool),
@@ -909,6 +914,33 @@ impl CidLeaseDriver {
         Ok(())
     }
 
+    /// Takes the finished restart tick whose successor was refused by the
+    /// full CID pool. The action shim preserves that typed refusal as the
+    /// tick's error after it completes the predecessor cleanup; the model's
+    /// `AssignRefused` action includes both effects in that order.
+    fn reap_pool_refused_tick(
+        &mut self,
+        action: &'static str,
+        a: i64,
+    ) -> std::result::Result<(), DriverError> {
+        let serve = self.serve_mut(action)?;
+        let Some(tick) = serve.ticks.remove(&a) else {
+            return Err(not_enabled(action, format!("{a} has no refused restart tick")));
+        };
+        if !tick.is_finished() {
+            serve.ticks.insert(a, tick);
+            return Ok(());
+        }
+        let outcome = serve.rt.block_on(tick).expect("the tick did not panic");
+        match outcome {
+            Err(ConvergenceError::Shim(crate::action_shim::ShimError::GuestNetwork(
+                super::GuestNetworkError::PoolExhausted { .. },
+            ))) => Ok(()),
+            Ok(()) => Err(not_enabled(action, "the pool-refused restart returned Ok")),
+            Err(error) => Err(DriverError::Production(format!("the tick failed: {error}"))),
+        }
+    }
+
     /// `a`'s dispatch is held at one of the provisioner's boundaries.
     fn held_for(&self, a: i64) -> Option<(Held, AllocationId)> {
         let serve = self.serve.as_ref()?;
@@ -1155,7 +1187,7 @@ impl CidLeaseDriver {
         self.settle("the VMM opens its device, or the dispatch ends", |driver| {
             driver.launch_vmm(&alloc, cid).is_some()
                 || driver.tick_finished(a)
-                || driver.held_for(a).is_some()
+                || driver.held_for(a).is_some_and(|(kind, _)| kind == Held::Teardown)
         })?;
         let Some(pid) = self.launch_vmm(&alloc, cid) else {
             return Err(DriverError::HazardOnly("Launch with its CID's device held (a clash)"));
@@ -1261,6 +1293,7 @@ impl CidLeaseDriver {
 
     fn release(&mut self, a: i64) -> std::result::Result<(), DriverError> {
         let placement = self.placement.get(&a).cloned();
+        let pool_refused_restart = placement.is_none();
         let provisioner = Arc::clone(&self.serve("Release")?.provisioner);
         let released = match &placement {
             Some(alloc) if provisioner.is_held(Held::Teardown, alloc) => {
@@ -1282,7 +1315,11 @@ impl CidLeaseDriver {
                 || driver.held_for(a).is_some_and(|(_, alloc)| alloc != released)
         })?;
         if self.held_for(a).is_none() {
-            self.reap_tick("Release", a)?;
+            if pool_refused_restart {
+                self.reap_pool_refused_tick("Release", a)?;
+            } else {
+                self.reap_tick("Release", a)?;
+            }
             let reading = self.reading(a)?;
             if reading.desired.desired_to_stop && self.placement_lease(a).is_none() {
                 self.tick_takes_no_lease("Release", a)?;
@@ -1829,7 +1866,6 @@ impl State<CidLeaseThreeDriver> for CidLeaseStateThree {
     max_samples = 1,
     test = "AssignThenVmmOpensItsOwnDevice"
 )]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn quint_cid_lease_assign_then_vmm_opens_its_own_device() -> impl Driver {
     CidLeaseDriver::new()
 }
@@ -1841,7 +1877,6 @@ fn quint_cid_lease_assign_then_vmm_opens_its_own_device() -> impl Driver {
     max_samples = 1,
     test = "NextFitContinuesFromTheCursor"
 )]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn quint_cid_lease_next_fit_continues_from_the_cursor() -> impl Driver {
     CidLeaseDriver::new()
 }
@@ -1853,7 +1888,6 @@ fn quint_cid_lease_next_fit_continues_from_the_cursor() -> impl Driver {
     max_samples = 1,
     test = "ReleaseWhileTheVmmRunsIsRefused"
 )]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn quint_cid_lease_release_while_the_vmm_runs_is_refused() -> impl Driver {
     CidLeaseDriver::new()
 }
@@ -1865,7 +1899,6 @@ fn quint_cid_lease_release_while_the_vmm_runs_is_refused() -> impl Driver {
     max_samples = 1,
     test = "StopExitsTheVmmThenReleaseIsLast"
 )]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn quint_cid_lease_stop_exits_the_vmm_then_release_is_last() -> impl Driver {
     CidLeaseDriver::new()
 }
@@ -1879,7 +1912,6 @@ fn quint_cid_lease_stop_exits_the_vmm_then_release_is_last() -> impl Driver {
     max_samples = 1,
     test = "GuestResetEndsTheVmmAndPlacementRetries"
 )]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn quint_cid_lease_guest_reset_ends_the_vmm_and_placement_retries() -> impl Driver {
     CidLeaseDriver::new()
 }
@@ -1891,7 +1923,6 @@ fn quint_cid_lease_guest_reset_ends_the_vmm_and_placement_retries() -> impl Driv
     max_samples = 1,
     test = "VmmCrashFreesItsCidAndPlacementRetries"
 )]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn quint_cid_lease_vmm_crash_frees_its_cid_and_placement_retries() -> impl Driver {
     CidLeaseDriver::new()
 }
@@ -1903,7 +1934,6 @@ fn quint_cid_lease_vmm_crash_frees_its_cid_and_placement_retries() -> impl Drive
     max_samples = 1,
     test = "StopOfAnEndedWorkloadReclaimsItsLease"
 )]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn quint_cid_lease_stop_of_an_ended_workload_reclaims_its_lease() -> impl Driver {
     CidLeaseDriver::new()
 }
@@ -1915,7 +1945,6 @@ fn quint_cid_lease_stop_of_an_ended_workload_reclaims_its_lease() -> impl Driver
     max_samples = 1,
     test = "StoppedWorkloadStaysStoppedAcrossServeCrash"
 )]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn quint_cid_lease_stopped_workload_stays_stopped_across_serve_crash() -> impl Driver {
     CidLeaseDriver::new()
 }
@@ -1927,7 +1956,6 @@ fn quint_cid_lease_stopped_workload_stays_stopped_across_serve_crash() -> impl D
     max_samples = 1,
     test = "StoppedWorkloadIsPlacedAgainOnlyAfterRedeploy"
 )]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn quint_cid_lease_stopped_workload_is_placed_again_only_after_redeploy() -> impl Driver {
     CidLeaseDriver::new()
 }
@@ -1940,7 +1968,6 @@ fn quint_cid_lease_stopped_workload_is_placed_again_only_after_redeploy() -> imp
     max_samples = 1,
     test = "FifthCrashAtCeilingBoundaryIsPlacedAgain"
 )]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn quint_cid_lease_fifth_crash_at_ceiling_boundary_is_placed_again() -> impl Driver {
     CidLeaseDriver::new()
 }
@@ -1952,7 +1979,6 @@ fn quint_cid_lease_fifth_crash_at_ceiling_boundary_is_placed_again() -> impl Dri
     max_samples = 1,
     test = "FailureAtCeilingExhaustsTheBudget"
 )]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn quint_cid_lease_failure_at_ceiling_exhausts_the_budget() -> impl Driver {
     CidLeaseDriver::new()
 }
@@ -1964,7 +1990,6 @@ fn quint_cid_lease_failure_at_ceiling_exhausts_the_budget() -> impl Driver {
     max_samples = 1,
     test = "RedeployPlacesAnExhaustedWorkloadAgainWithItsCount"
 )]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn quint_cid_lease_redeploy_places_an_exhausted_workload_again_with_its_count() -> impl Driver {
     CidLeaseDriver::new()
 }
@@ -1976,7 +2001,6 @@ fn quint_cid_lease_redeploy_places_an_exhausted_workload_again_with_its_count() 
     max_samples = 1,
     test = "ServeCrashPlacesAWorkloadAtTheCeilingAgain"
 )]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn quint_cid_lease_serve_crash_places_a_workload_at_the_ceiling_again() -> impl Driver {
     CidLeaseDriver::new()
 }
@@ -1988,7 +2012,6 @@ fn quint_cid_lease_serve_crash_places_a_workload_at_the_ceiling_again() -> impl 
     max_samples = 1,
     test = "ReclaimedWorkloadPastTheCeilingIsPlacedAgain"
 )]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn quint_cid_lease_reclaimed_workload_past_the_ceiling_is_placed_again() -> impl Driver {
     CidLeaseDriver::new()
 }
@@ -2000,7 +2023,6 @@ fn quint_cid_lease_reclaimed_workload_past_the_ceiling_is_placed_again() -> impl
     max_samples = 1,
     test = "ServeCrashDuringFinalizeFinalizesAfterRestart"
 )]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn quint_cid_lease_serve_crash_during_finalize_finalizes_after_restart() -> impl Driver {
     CidLeaseDriver::new()
 }
@@ -2012,7 +2034,6 @@ fn quint_cid_lease_serve_crash_during_finalize_finalizes_after_restart() -> impl
     max_samples = 1,
     test = "ServeCrashBeforeLaunchPlacesTheSuccessorAgainWithItsCount"
 )]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn quint_cid_lease_serve_crash_before_launch_places_the_successor_again_with_its_count()
 -> impl Driver {
     CidLeaseDriver::new()
@@ -2025,7 +2046,6 @@ fn quint_cid_lease_serve_crash_before_launch_places_the_successor_again_with_its
     max_samples = 1,
     test = "ServeCrashOrphanIsReclaimedBeforeAnyAssign"
 )]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn quint_cid_lease_serve_crash_orphan_is_reclaimed_before_any_assign() -> impl Driver {
     CidLeaseDriver::new()
 }
@@ -2037,7 +2057,6 @@ fn quint_cid_lease_serve_crash_orphan_is_reclaimed_before_any_assign() -> impl D
     max_samples = 1,
     test = "ReclamationReleasesTheOrphanDeviceThenAssignProceeds"
 )]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn quint_cid_lease_reclamation_releases_the_orphan_device_then_assign_proceeds() -> impl Driver {
     CidLeaseDriver::new()
 }
@@ -2050,7 +2069,6 @@ fn quint_cid_lease_reclamation_releases_the_orphan_device_then_assign_proceeds()
     max_samples = 1,
     test = "ReclamationKillsEveryOrphanBeforeAssign"
 )]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn quint_cid_lease_reclamation_kills_every_orphan_before_assign() -> impl Driver {
     CidLeaseDriver::new()
 }
@@ -2062,7 +2080,6 @@ fn quint_cid_lease_reclamation_kills_every_orphan_before_assign() -> impl Driver
     max_samples = 1,
     test = "OrphanExitsByItselfBeforeReclamation"
 )]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn quint_cid_lease_orphan_exits_by_itself_before_reclamation() -> impl Driver {
     CidLeaseDriver::new()
 }
@@ -2074,7 +2091,6 @@ fn quint_cid_lease_orphan_exits_by_itself_before_reclamation() -> impl Driver {
     max_samples = 1,
     test = "ServeCrashWithUnlaunchedLeaseLeavesNothingToReclaim"
 )]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn quint_cid_lease_serve_crash_with_unlaunched_lease_leaves_nothing_to_reclaim() -> impl Driver {
     CidLeaseDriver::new()
 }
@@ -2118,7 +2134,6 @@ fn quint_cid_lease_redeploy_leased_at_serve_crash_is_placed_again() -> impl Driv
     max_samples = 1,
     test = "PoolExhaustedRestartCleansThePredecessorThenPlaces"
 )]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn quint_cid_lease_pool_exhausted_restart_cleans_the_predecessor_then_places() -> impl Driver {
     CidLeaseThreeDriver { inner: CidLeaseDriver::over(THREE) }
 }
@@ -2128,7 +2143,6 @@ fn quint_cid_lease_pool_exhausted_restart_cleans_the_predecessor_then_places() -
 /// Randomized traces of the conformance main (seed printed on failure).
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_run(spec = "../../specs/quint/guest-flow-owner/cid_lease.qnt", main = "lease_conf_ok")]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 fn quint_cid_lease_lease_conf_ok() -> impl Driver {
     CidLeaseDriver::new()
 }

@@ -18,6 +18,7 @@ State 1: <Initial predicate>
 /\ pair_bugEofAsFin_fwd_pair_vmUp = TRUE
 /\ pair_bugEofAsFin_fwd_pair_hres = "none"
 /\ pair_bugEofAsFin_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugEofAsFin_fwd_pair_strmHeld = FALSE
 /\ pair_bugEofAsFin_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
 /\ pair_bugEofAsFin_fwd_pair_pr = [ g |->
       [ ph |-> "unattached",
@@ -130,7 +131,7 @@ State 1: <Initial predicate>
 /\ pair_bugEofAsFin_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugEofAsFin_fwd_pair_attEnded = [g |-> 0, h |-> 0]
 
-State 2: <pair_bugEofAsFin_fwd_pair_CloseUnattached line 2588, col 3 to line 2599, col 46 of module pair_bugEofAsFin>
+State 2: <pair_bugEofAsFin_fwd_pair_CloseUnattached line 2679, col 3 to line 2690, col 46 of module pair_bugEofAsFin>
 /\ pair_bugEofAsFin_fwd_pair_ep = [g |-> "reset", h |-> "alive"]
 /\ pair_bugEofAsFin_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugEofAsFin_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
@@ -150,6 +151,7 @@ State 2: <pair_bugEofAsFin_fwd_pair_CloseUnattached line 2588, col 3 to line 259
 /\ pair_bugEofAsFin_fwd_pair_vmUp = TRUE
 /\ pair_bugEofAsFin_fwd_pair_hres = "none"
 /\ pair_bugEofAsFin_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugEofAsFin_fwd_pair_strmHeld = FALSE
 /\ pair_bugEofAsFin_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
 /\ pair_bugEofAsFin_fwd_pair_pr = [ g |->
       [ ph |-> "ended",
@@ -262,7 +264,7 @@ State 2: <pair_bugEofAsFin_fwd_pair_CloseUnattached line 2588, col 3 to line 259
 /\ pair_bugEofAsFin_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugEofAsFin_fwd_pair_attEnded = [g |-> 0, h |-> 0]
 
-State 3: <pair_bugEofAsFin_fwd_pair_Attach line 3219, col 3 to line 3226, col 69 of module pair_bugEofAsFin>
+State 3: <pair_bugEofAsFin_fwd_pair_Attach line 3587, col 3 to line 3594, col 69 of module pair_bugEofAsFin>
 /\ pair_bugEofAsFin_fwd_pair_ep = [g |-> "reset", h |-> "alive"]
 /\ pair_bugEofAsFin_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugEofAsFin_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
@@ -282,6 +284,7 @@ State 3: <pair_bugEofAsFin_fwd_pair_Attach line 3219, col 3 to line 3226, col 69
 /\ pair_bugEofAsFin_fwd_pair_vmUp = TRUE
 /\ pair_bugEofAsFin_fwd_pair_hres = "none"
 /\ pair_bugEofAsFin_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugEofAsFin_fwd_pair_strmHeld = FALSE
 /\ pair_bugEofAsFin_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
 /\ pair_bugEofAsFin_fwd_pair_pr = [ g |->
       [ ph |-> "ended",
@@ -394,7 +397,7 @@ State 3: <pair_bugEofAsFin_fwd_pair_Attach line 3219, col 3 to line 3226, col 69
 /\ pair_bugEofAsFin_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugEofAsFin_fwd_pair_attEnded = [g |-> 0, h |-> 0]
 
-State 4: <pair_bugEofAsFin_fwd_pair_VCtl line 3418, col 3 to line 3421, col 43 of module pair_bugEofAsFin>
+State 4: <pair_bugEofAsFin_fwd_pair_VCtl line 3612, col 3 to line 3615, col 43 of module pair_bugEofAsFin>
 /\ pair_bugEofAsFin_fwd_pair_ep = [g |-> "reset", h |-> "alive"]
 /\ pair_bugEofAsFin_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugEofAsFin_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
@@ -414,6 +417,7 @@ State 4: <pair_bugEofAsFin_fwd_pair_VCtl line 3418, col 3 to line 3421, col 43 o
 /\ pair_bugEofAsFin_fwd_pair_vmUp = TRUE
 /\ pair_bugEofAsFin_fwd_pair_hres = "none"
 /\ pair_bugEofAsFin_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugEofAsFin_fwd_pair_strmHeld = FALSE
 /\ pair_bugEofAsFin_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
 /\ pair_bugEofAsFin_fwd_pair_pr = [ g |->
       [ ph |-> "ended",
@@ -526,7 +530,7 @@ State 4: <pair_bugEofAsFin_fwd_pair_VCtl line 3418, col 3 to line 3421, col 43 o
 /\ pair_bugEofAsFin_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugEofAsFin_fwd_pair_attEnded = [g |-> 0, h |-> 0]
 
-State 5: <pair_bugEofAsFin_fwd_pair_HopEnd1 line 2884, col 3 to line 2933, col 44 of module pair_bugEofAsFin>
+State 5: <pair_bugEofAsFin_fwd_pair_HopEnd1 line 3025, col 3 to line 3074, col 44 of module pair_bugEofAsFin>
 /\ pair_bugEofAsFin_fwd_pair_ep = [g |-> "reset", h |-> "alive"]
 /\ pair_bugEofAsFin_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugEofAsFin_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
@@ -546,6 +550,7 @@ State 5: <pair_bugEofAsFin_fwd_pair_HopEnd1 line 2884, col 3 to line 2933, col 4
 /\ pair_bugEofAsFin_fwd_pair_vmUp = TRUE
 /\ pair_bugEofAsFin_fwd_pair_hres = "none"
 /\ pair_bugEofAsFin_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugEofAsFin_fwd_pair_strmHeld = FALSE
 /\ pair_bugEofAsFin_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
 /\ pair_bugEofAsFin_fwd_pair_pr = [ g |->
       [ ph |-> "ended",
@@ -658,7 +663,7 @@ State 5: <pair_bugEofAsFin_fwd_pair_HopEnd1 line 2884, col 3 to line 2933, col 4
 /\ pair_bugEofAsFin_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugEofAsFin_fwd_pair_attEnded = [g |-> 0, h |-> 0]
 
-State 6: <pair_bugEofAsFin_fwd_pair_ReadEof line 3050, col 3 to line 3095, col 44 of module pair_bugEofAsFin>
+State 6: <pair_bugEofAsFin_fwd_pair_ReadEof line 3191, col 3 to line 3236, col 44 of module pair_bugEofAsFin>
 /\ pair_bugEofAsFin_fwd_pair_ep = [g |-> "reset", h |-> "alive"]
 /\ pair_bugEofAsFin_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugEofAsFin_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
@@ -678,6 +683,7 @@ State 6: <pair_bugEofAsFin_fwd_pair_ReadEof line 3050, col 3 to line 3095, col 4
 /\ pair_bugEofAsFin_fwd_pair_vmUp = TRUE
 /\ pair_bugEofAsFin_fwd_pair_hres = "none"
 /\ pair_bugEofAsFin_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugEofAsFin_fwd_pair_strmHeld = FALSE
 /\ pair_bugEofAsFin_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
 /\ pair_bugEofAsFin_fwd_pair_pr = [ g |->
       [ ph |-> "ended",

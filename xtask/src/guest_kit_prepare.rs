@@ -82,6 +82,13 @@ pub struct InGuestLane {
 /// - `overdrive-fwd`'s `integration` test binary: V-EV-UNLOAD's ULP negative
 ///   control and unload stress (U-EV-UNLOAD, T-1), which unload the module
 ///   and so run only in a guest whose PID 1 holds nothing of it.
+/// - `overdrive-dataplane`'s `integration` test binary: the existing R5-54
+///   inbound guest-relay cells, executed by the existing guest-suite runner
+///   so their loopback kTLS effects stay inside a disposable guest.
+/// - `overdrive-control-plane`'s `acceptance` and `integration` test binaries,
+///   and `overdrive-worker`'s `integration` test binary: the unchanged 55
+///   real-cgroup cells, executed by the existing guest-suite runner inside
+///   fresh disposable guests with a private cgroup-v2 mount.
 pub const IN_GUEST_LANES: &[InGuestLane] = &[
     InGuestLane {
         package: "overdrive-init",
@@ -94,6 +101,30 @@ pub const IN_GUEST_LANES: &[InGuestLane] = &[
         bin: "integration",
         target: InGuestTarget::Test,
         features: "integration-tests,kvm-tests",
+    },
+    InGuestLane {
+        package: "overdrive-dataplane",
+        bin: "integration",
+        target: InGuestTarget::Test,
+        features: "integration-tests",
+    },
+    InGuestLane {
+        package: "overdrive-control-plane",
+        bin: "acceptance",
+        target: InGuestTarget::Test,
+        features: "integration-tests",
+    },
+    InGuestLane {
+        package: "overdrive-control-plane",
+        bin: "integration",
+        target: InGuestTarget::Test,
+        features: "integration-tests",
+    },
+    InGuestLane {
+        package: "overdrive-worker",
+        bin: "integration",
+        target: InGuestTarget::Test,
+        features: "integration-tests",
     },
 ];
 

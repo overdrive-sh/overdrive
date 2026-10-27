@@ -5,12 +5,11 @@
 //!
 //! GH #295 E23 (user decision 2 of 2026-09-30): "OUR CODE MUST NEVER PANIC. IT
 //! MUST ALWAYS BE RECOVERABLE AND/OR SELF HEALING." Under the release profile's
-//! `panic = "abort"` a panic on any owner, kill, or supervisor path would end
-//! every workload's network owner with no fail-stop. The no-panic contract is
-//! exercised by refusing the one resource those paths need to create a worker
-//! thread — an OS thread — and asserting each subject returns its typed failure
-//! (`NetlinkError::Connect`, a per-TAP `unconfirmed` entry, or a kill write's
-//! `io::Error`) rather than aborting.
+//! `panic = "abort"` a panic in the retained VM-lifecycle allocation-scoped
+//! `cgroup.kill` path would end the process instead of returning its typed
+//! failure. The no-panic contract is exercised by refusing the OS thread that
+//! write would need and asserting `CgroupManager::cgroup_kill` returns its
+//! `io::Error` rather than aborting.
 //!
 //! Real kernel only; requires root + cgroup v2 (the Lima dev VM). The kernel's
 //! `pids` controller returns `EAGAIN` from `cgroup_can_fork`

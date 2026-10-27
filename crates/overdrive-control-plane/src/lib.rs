@@ -183,7 +183,7 @@ use axum_server::Handle as AxumHandle;
 use axum_server::tls_rustls::RustlsConfig;
 use futures::stream::{FuturesUnordered, StreamExt};
 use overdrive_core::guest_network::SharedGuestNetworkComponent;
-use overdrive_core::id::{AllocationId, NodeId};
+use overdrive_core::id::NodeId;
 use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Dataplane;
@@ -192,7 +192,6 @@ use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
 use overdrive_store_local::LocalIntentStore;
-use overdrive_worker::cgroup_manager::CgroupManager;
 use tokio_util::sync::CancellationToken;
 
 use crate::identity_mgr::IdentityMgr;
@@ -668,7 +667,7 @@ impl AppState {
         // (`run_server`) uses [`Self::new_with_workflow_engine`] with the
         // worker composed over the `NodeAdapters` the composition root
         // passed.
-        Self::new_with_workflow_engine(
+        let state = Self::new_with_workflow_engine(
             store,
             intent_redb_path,
             obs,
@@ -697,7 +696,17 @@ impl AppState {
             shared_guest_network,
             guest_network_exec,
             guest_pool,
-        )
+        );
+        // The single-driver fixture convenience path can be built over an
+        // owner its fixture has already converged. Carry those existing
+        // ports into the action shim; production boot uses
+        // `new_with_workflow_engine` and records ports after convergence.
+        if let Some(flow_ports) = state.shared_guest_network.flow_ports()
+            && state.guest_flow_ports.set(flow_ports).is_err()
+        {
+            unreachable!("a new fixture AppState has an empty guest-flow port slot");
+        }
+        state
     }
 
     /// The full constructor that injects the [`workflow_runtime::WorkflowEngine`]
@@ -1051,6 +1060,10 @@ pub struct ServerHandle {
     /// PORTS-CONFIG: the beacon intake's bound port; `None` when no `Vm`
     /// driver was composed or on the supplied-owner path.
     beacon_port: Option<overdrive_core::vm::config::VsockPort>,
+    /// D-17: the concrete composed guest-flow owner retained for its
+    /// read-only observation surface. The supplied-owner entry point does
+    /// not expose an observation it cannot obtain through the owner trait.
+    guest_flow_owner: Option<Arc<guest_network::HostSharedGuestNetworkOwner>>,
 }
 
 /// The node-global host vsock listener ports a running server bound
@@ -1078,31 +1091,18 @@ pub(crate) enum SharedNetworkSupervisorError {
 /// Period between the starts of two full shared-network audits while EXEC is
 /// Open: ADR-0124's one-second security detection bound (D-295-R13). A slow
 /// audit stretches the period instead of stacking calls.
-#[cfg_attr(
-    not(all(test, feature = "integration-tests")),
-    allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 12-01")
-)]
 const SHARED_NETWORK_AUDIT_PERIOD: Duration = Duration::from_secs(1);
 
 /// Period between two bounded recovery attempts while EXEC is Recovering
 /// (ADR-0124, D-295-R13).
-#[cfg_attr(
-    not(all(test, feature = "integration-tests")),
-    allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 12-01")
-)]
 const SHARED_NETWORK_RETRY_PERIOD: Duration = Duration::from_millis(250);
 
 /// Recovery window from detection to the typed fail-stop (ADR-0124,
 /// D-295-R13).
-#[cfg_attr(
-    not(all(test, feature = "integration-tests")),
-    allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 12-01")
-)]
 const SHARED_NETWORK_RECOVERY_DEADLINE: Duration = Duration::from_secs(5);
 
 /// Completed recovery attempts after which the supervisor fail-stops
 /// (ADR-0124, D-295-R13).
-#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 12-01")]
 const SHARED_NETWORK_RECOVERY_ATTEMPTS: u32 = 20;
 
 /// Bound on each owner call during detection; a call that misses it fails
@@ -1110,7 +1110,6 @@ const SHARED_NETWORK_RECOVERY_ATTEMPTS: u32 = 20;
 /// Rule: `max(1 s, 4 × L)`, L the largest single owner-call audit latency at
 /// T1-PORT4 (M-ND295-E18). It holds the rule's floor until the measurement
 /// sets it; the step that sets it records the measurement here.
-#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 12-01")]
 const SHARED_NETWORK_AUDIT_CALL_BOUND: Duration = Duration::from_secs(1);
 
 /// Bound on each recovery's `quiesce()` call, itself capped by the
@@ -1119,88 +1118,34 @@ const SHARED_NETWORK_AUDIT_CALL_BOUND: Duration = Duration::from_secs(1);
 /// quiescence wall time at T1-PORT4 (M-ND295-E18). It holds the rule's floor
 /// until the measurement sets it; the step that sets it records the
 /// measurement here.
-#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 12-01")]
 const SHARED_NETWORK_QUIESCE_CALL_BOUND: Duration = Duration::from_secs(1);
-
-/// Bound on each `cgroup.kill` write — per-VM and workloads-slice — in a
-/// report's kill loop, measured on the injected clock (D-295-R14; kill loop,
-/// user decision 1 of 2026-09-30). A write still pending at it counts as a
-/// failed kill: per-VM, the workloads-slice kill then `VmKillFailed`; slice, its
-/// recorded `vm_kill` outcome then the fail-stop. The recovery deadline does NOT
-/// cap it — a report's kill loop runs to its end before any further owner call
-/// or fail-stop. Rule: `max(1 s, 4 × W)`, W the largest single kill write at
-/// T1-PORT4 (M-ND295-E18). It holds the rule's floor until the measurement sets
-/// it; the step that sets it records the measurement here.
-#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 12-01")]
-const SHARED_NETWORK_VM_KILL_CALL_BOUND: Duration = Duration::from_secs(1);
 
 /// The ports the one runtime shared-network supervisor task owns (D-295-R13,
 /// R14, R16). They replace `run_mtls_owner`'s parameters in DELIVER step
 /// 12-01.
-#[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 12-01")]
 struct SharedNetworkSupervisorPorts {
     shared_guest_network: Arc<dyn guest_network::SharedGuestNetworkOwner>,
     mtls_worker: Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
-    dns: DnsServeTaskOwner,
+    dns: Arc<tokio::sync::Mutex<DnsServeTaskOwner>>,
     dns_factory: Arc<dyn dns_responder::GuestDnsFactory>,
     dns_deps: dns_responder::GuestDnsDeps,
-    vm_kill: vm_kill::VmKillCapability,
 }
 
-/// Kill-only capability over VMM cgroups (review finding H3). The
-/// `CgroupManager` field and the constructor are private to this child
-/// module and the two kill methods are `pub(super)`, so the enclosing
-/// supervisor module can call exactly `kill_allocation` and
-/// `kill_workloads_slice` and reach no other `CgroupManager` surface (no
-/// create, placement, limit, removal, or bootstrap authority) — "exposes
-/// exactly two methods" holds structurally (review finding L4).
-mod vm_kill {
-    /// Writes `1` to VMM cgroups' `cgroup.kill`; nothing else.
-    #[allow(
-        clippy::redundant_pub_crate,
-        reason = "the DESIGN pins `pub(super)`: visibility is stated relative to the supervisor module"
-    )]
-    pub(super) struct VmKillCapability {
-        #[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 12-01")]
-        cgroups: super::CgroupManager,
-    }
+#[derive(Debug, Clone, Copy)]
+struct SharedNetworkAuditFinding {
+    component: SharedGuestNetworkComponent,
+    listener_task_exit: Option<overdrive_worker::mtls_intercept::InterceptLeg>,
+}
 
-    #[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 12-01")]
-    impl VmKillCapability {
-        /// Wrap the manager over the same cgroup root and `CgroupFs` every
-        /// composed `VmDriver` writes through.
-        pub(super) const fn new(cgroups: super::CgroupManager) -> Self {
-            Self { cgroups }
-        }
+struct ActiveSharedNetworkRecovery {
+    hold: guest_network::QuiescenceHold,
+    listener_task_exit: Option<overdrive_worker::mtls_intercept::InterceptLeg>,
+}
 
-        /// Write `1` to one allocation's scope `cgroup.kill`. An absent scope is
-        /// `Ok`: the VMM can no longer execute.
-        #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 12-01")]
-        #[expect(
-            clippy::unused_async,
-            reason = "RED scaffold — DELIVER step 12-01 awaits the kill write"
-        )]
-        pub(super) async fn kill_allocation(
-            &self,
-            alloc: &super::AllocationId,
-        ) -> std::io::Result<()> {
-            let _ = alloc;
-            todo!("RED scaffold: D-295-R14 VmKillCapability::kill_allocation — DELIVER step 12-01")
-        }
-
-        /// Write `1` to the workloads slice's `cgroup.kill`, killing every
-        /// workload VMM.
-        #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 12-01")]
-        #[expect(
-            clippy::unused_async,
-            reason = "RED scaffold — DELIVER step 12-01 awaits the kill write"
-        )]
-        pub(super) async fn kill_workloads_slice(&self) -> std::io::Result<()> {
-            todo!(
-                "RED scaffold: D-295-R14 VmKillCapability::kill_workloads_slice — DELIVER step 12-01"
-            )
-        }
-    }
+struct SharedNetworkAttemptResult {
+    component: SharedGuestNetworkComponent,
+    healthy: bool,
+    finding: Option<SharedNetworkAuditFinding>,
 }
 
 /// QPROJ-6: one component's recovery episode at the runtime shared-network
@@ -1227,11 +1172,304 @@ struct SharedNetworkSupervisorHandle {
     request_rx: tokio::sync::mpsc::Receiver<overdrive_core::guest_network::ServeShutdownRequest>,
     task: Option<tokio::task::JoinHandle<std::result::Result<(), SharedNetworkSupervisorError>>>,
     exec: Arc<overdrive_core::guest_network::GuestNetworkExecSupervisor>,
+    episodes: Arc<parking_lot::Mutex<BTreeMap<SharedGuestNetworkComponent, RecoveryEpisode>>>,
     shutdown: CancellationToken,
 }
 
+async fn with_clock_bound<T>(
+    clock: &dyn Clock,
+    bound: Duration,
+    future: impl std::future::Future<Output = T>,
+) -> Option<T> {
+    tokio::select! {
+        biased;
+        result = future => Some(result),
+        () = clock.sleep(bound) => None,
+    }
+}
+
+fn clone_guest_dns_deps(deps: &dns_responder::GuestDnsDeps) -> dns_responder::GuestDnsDeps {
+    dns_responder::GuestDnsDeps {
+        store: Arc::clone(&deps.store),
+        clock: Arc::clone(&deps.clock),
+        gateway: deps.gateway,
+        frontend: deps.frontend.clone(),
+    }
+}
+
+async fn audit_shared_network_components(
+    ports: &SharedNetworkSupervisorPorts,
+    clock: &dyn Clock,
+    mtls_repair_in_flight: bool,
+) -> Option<SharedNetworkAuditFinding> {
+    let mut findings = Vec::new();
+
+    // DNS is awaited first so a held DNS read parks a full audit before its
+    // other readbacks begin; the findings are still selected in the
+    // component enum's fixed declaration order below.
+    {
+        let mut dns = ports.dns.lock().await;
+        if dns.has_exited() {
+            let _exit = dns.wait_failure().await;
+            findings.push(SharedNetworkAuditFinding {
+                component: SharedGuestNetworkComponent::Dns,
+                listener_task_exit: None,
+            });
+        } else if dns.state != DnsServeTaskState::Running {
+            findings.push(SharedNetworkAuditFinding {
+                component: SharedGuestNetworkComponent::Dns,
+                listener_task_exit: None,
+            });
+        } else if let Some(responder) = dns.responder.as_ref() {
+            if !matches!(
+                with_clock_bound(clock, SHARED_NETWORK_AUDIT_CALL_BOUND, responder.audit()).await,
+                Some(Ok(()))
+            ) {
+                findings.push(SharedNetworkAuditFinding {
+                    component: SharedGuestNetworkComponent::Dns,
+                    listener_task_exit: None,
+                });
+            }
+        } else {
+            findings.push(SharedNetworkAuditFinding {
+                component: SharedGuestNetworkComponent::Dns,
+                listener_task_exit: None,
+            });
+        }
+        drop(dns);
+    }
+
+    match with_clock_bound(
+        clock,
+        SHARED_NETWORK_AUDIT_CALL_BOUND,
+        ports.shared_guest_network.audit_shared(),
+    )
+    .await
+    {
+        None => findings.push(SharedNetworkAuditFinding {
+            component: SharedGuestNetworkComponent::Forwarder,
+            listener_task_exit: None,
+        }),
+        Some(Err(failure)) => findings.push(SharedNetworkAuditFinding {
+            component: failure.component,
+            listener_task_exit: None,
+        }),
+        Some(Ok(_)) => {}
+    }
+
+    if !mtls_repair_in_flight {
+        match with_clock_bound(
+            clock,
+            SHARED_NETWORK_AUDIT_CALL_BOUND,
+            ports.mtls_worker.audit_shared_owner(),
+        )
+        .await
+        {
+            None => findings.push(SharedNetworkAuditFinding {
+                component: SharedGuestNetworkComponent::LegF,
+                listener_task_exit: None,
+            }),
+            Some(Err(failure)) => findings.push(SharedNetworkAuditFinding {
+                component: failure.component(),
+                listener_task_exit: SharedNetworkSupervisorHandle::listener_task_exit_leg(&failure),
+            }),
+            Some(Ok(())) => {}
+        }
+    }
+
+    findings.into_iter().min_by_key(|finding| finding.component)
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "a component attempt keeps repair, bounded audit and typed owner failure handling in one ordered step"
+)]
+async fn run_shared_network_recovery_attempt(
+    component: SharedGuestNetworkComponent,
+    listener_task_exit: Option<overdrive_worker::mtls_intercept::InterceptLeg>,
+    ports: Arc<SharedNetworkSupervisorPorts>,
+    exec: Arc<overdrive_core::guest_network::GuestNetworkExecSupervisor>,
+    clock: Arc<dyn Clock>,
+    episodes: Arc<parking_lot::Mutex<BTreeMap<SharedGuestNetworkComponent, RecoveryEpisode>>>,
+    shutdown: CancellationToken,
+) -> SharedNetworkAttemptResult {
+    if let Some(leg) = listener_task_exit {
+        match SharedNetworkSupervisorHandle::consume_listener_task_exit(
+            &ports.mtls_worker,
+            leg,
+            &shutdown,
+        )
+        .await
+        {
+            Ok(true) => {}
+            Ok(false) => {
+                return SharedNetworkAttemptResult { component, healthy: false, finding: None };
+            }
+            Err(source) => {
+                return SharedNetworkAttemptResult {
+                    component,
+                    healthy: false,
+                    finding: Some(SharedNetworkAuditFinding {
+                        component: source.component(),
+                        listener_task_exit: SharedNetworkSupervisorHandle::listener_task_exit_leg(
+                            &source,
+                        ),
+                    }),
+                };
+            }
+        }
+    }
+
+    let progress =
+        exec.recovery_progress().into_iter().find(|progress| progress.component == component);
+    let remaining = progress.map_or(Duration::ZERO, |progress| {
+        SHARED_NETWORK_RECOVERY_DEADLINE.saturating_sub(progress.elapsed)
+    });
+    let repaired = if remaining.is_zero() {
+        None
+    } else {
+        with_clock_bound(&*clock, remaining, async {
+            match component {
+                SharedGuestNetworkComponent::Forwarder
+                | SharedGuestNetworkComponent::FlowListeners
+                | SharedGuestNetworkComponent::ControlListener => {
+                    ports.shared_guest_network.converge_shared().await.map_err(|source| {
+                        tracing::warn!(
+                            name: "guest_network.shared_owner_repair_failed",
+                            component = ?component,
+                            error = %source,
+                            "shared guest-network component repair returned a typed failure"
+                        );
+                    })
+                }
+                SharedGuestNetworkComponent::LegF
+                | SharedGuestNetworkComponent::LegC
+                | SharedGuestNetworkComponent::IpRules
+                | SharedGuestNetworkComponent::IpSets
+                | SharedGuestNetworkComponent::Supervisor => {
+                    ports.mtls_worker.converge_shared_owner().await.map_err(|source| {
+                        tracing::warn!(
+                            name: "guest_network.shared_owner_repair_failed",
+                            component = ?source.component(),
+                            error = %source,
+                            "shared mTLS component repair returned a typed failure"
+                        );
+                    })
+                }
+                SharedGuestNetworkComponent::Dns => {
+                    let replacement =
+                        ports.dns_factory.responder(clone_guest_dns_deps(&ports.dns_deps));
+                    if let Err(source) = replacement.probe().await {
+                        tracing::warn!(
+                            name: "guest_network.shared_owner_repair_failed",
+                            component = ?component,
+                            error = %source,
+                            "DNS responder replacement probe returned a typed failure"
+                        );
+                        return Err(());
+                    }
+                    ports
+                        .dns
+                        .lock()
+                        .await
+                        .replace(replacement, SHARED_NETWORK_AUDIT_CALL_BOUND, move |responder| {
+                            tokio::spawn(responder.serve())
+                        })
+                        .await
+                        .map_err(|source| {
+                            tracing::warn!(
+                                name: "guest_network.shared_owner_repair_failed",
+                                component = ?component,
+                                error = %source,
+                                "DNS responder replacement did not complete"
+                            );
+                        })?;
+                    Ok(())
+                }
+            }
+        })
+        .await
+    };
+    if !matches!(repaired, Some(Ok(()))) {
+        return SharedNetworkAttemptResult {
+            component,
+            healthy: false,
+            finding: Some(SharedNetworkAuditFinding { component, listener_task_exit: None }),
+        };
+    }
+    if let Some(episode) = episodes.lock().get_mut(&component) {
+        episode.phase = RecoveryPhase::Repaired;
+    }
+
+    let finding = audit_shared_network_components(&ports, &*clock, false).await;
+    let healthy = finding.is_none_or(|finding| finding.component > component);
+    SharedNetworkAttemptResult { component, healthy, finding }
+}
+
+enum RecoveryHoldAcquire {
+    Started(ActiveSharedNetworkRecovery),
+    AlreadyActive,
+    Shutdown,
+    TimedOut,
+}
+
+async fn acquire_shared_network_recovery_hold(
+    finding: SharedNetworkAuditFinding,
+    ports: &SharedNetworkSupervisorPorts,
+    exec: &overdrive_core::guest_network::GuestNetworkExecSupervisor,
+    clock: &dyn Clock,
+    episodes: &parking_lot::Mutex<BTreeMap<SharedGuestNetworkComponent, RecoveryEpisode>>,
+    shutdown: &CancellationToken,
+) -> RecoveryHoldAcquire {
+    if !exec.begin_recovery(finding.component) {
+        return RecoveryHoldAcquire::AlreadyActive;
+    }
+    let quiescence = tokio::select! {
+        biased;
+        () = shutdown.cancelled() => return RecoveryHoldAcquire::Shutdown,
+        result = with_clock_bound(
+            clock,
+            SHARED_NETWORK_QUIESCE_CALL_BOUND,
+            ports.shared_guest_network.quiesce(),
+        ) => result,
+    };
+    let Some((hold, _unconfirmed)) = quiescence else {
+        return RecoveryHoldAcquire::TimedOut;
+    };
+    episodes.lock().insert(
+        finding.component,
+        RecoveryEpisode { phase: RecoveryPhase::Held, failed_attempts: 0 },
+    );
+    RecoveryHoldAcquire::Started(ActiveSharedNetworkRecovery {
+        hold,
+        listener_task_exit: finding.listener_task_exit,
+    })
+}
+
+async fn issue_shared_network_fail_stop(
+    cause: overdrive_core::guest_network::SharedGuestNetworkFailStopCause,
+    exec: &overdrive_core::guest_network::GuestNetworkExecSupervisor,
+    episodes: &parking_lot::Mutex<BTreeMap<SharedGuestNetworkComponent, RecoveryEpisode>>,
+    request_tx: &tokio::sync::mpsc::Sender<overdrive_core::guest_network::ServeShutdownRequest>,
+) -> bool {
+    let receipt = {
+        let mut episodes = episodes.lock();
+        let receipt = exec.fail_stop(cause);
+        if receipt.is_some() {
+            episodes.clear();
+        }
+        receipt
+    };
+    let Some(receipt) = receipt else { return false };
+    request_tx
+        .send(overdrive_core::guest_network::ServeShutdownRequest::SharedGuestNetwork(receipt))
+        .await
+        .is_ok()
+}
+
 impl SharedNetworkSupervisorHandle {
-    const fn new(
+    #[cfg(test)]
+    fn new(
         request_rx: tokio::sync::mpsc::Receiver<
             overdrive_core::guest_network::ServeShutdownRequest,
         >,
@@ -1239,7 +1477,25 @@ impl SharedNetworkSupervisorHandle {
         exec: Arc<overdrive_core::guest_network::GuestNetworkExecSupervisor>,
         shutdown: CancellationToken,
     ) -> Self {
-        Self { request_rx, task: Some(task), exec, shutdown }
+        Self::new_with_episodes(
+            request_rx,
+            task,
+            exec,
+            Arc::new(parking_lot::Mutex::new(BTreeMap::new())),
+            shutdown,
+        )
+    }
+
+    fn new_with_episodes(
+        request_rx: tokio::sync::mpsc::Receiver<
+            overdrive_core::guest_network::ServeShutdownRequest,
+        >,
+        task: tokio::task::JoinHandle<std::result::Result<(), SharedNetworkSupervisorError>>,
+        exec: Arc<overdrive_core::guest_network::GuestNetworkExecSupervisor>,
+        episodes: Arc<parking_lot::Mutex<BTreeMap<SharedGuestNetworkComponent, RecoveryEpisode>>>,
+        shutdown: CancellationToken,
+    ) -> Self {
+        Self { request_rx, task: Some(task), exec, episodes, shutdown }
     }
 
     /// QPROJ-6: an owned copy of the supervisor's per-component episodes.
@@ -1267,22 +1523,34 @@ impl SharedNetworkSupervisorHandle {
     ///   entry; a repeated call with no intervening supervisor step returns
     ///   an equal value.
     ///
-    /// RED scaffold: DELIVER lands it with the supervisor rework (12-01
-    /// rework, inside the attachment cut), which keeps each recovery's
-    /// episode beside the EXEC gate's per-recovery snapshots.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "RED scaffold — read by the quiescence conformance driver and the recovery acceptance bodies"
-        )
-    )]
-    #[expect(
-        clippy::unused_self,
-        reason = "RED scaffold body panics; DELIVER 12-01 (09-01 rework) lands the episodes"
+    #[allow(
+        dead_code,
+        reason = "QPROJ-6: production-compiled observation read from the crate-private supervisor handle by source-local conformance tests"
     )]
     pub fn recovery_observation(&self) -> BTreeMap<SharedGuestNetworkComponent, RecoveryEpisode> {
-        panic!("Not yet implemented -- RED scaffold")
+        let episodes = self.episodes.lock();
+        self.exec
+            .recovery_progress()
+            .into_iter()
+            .map(|progress| {
+                let phase = episodes
+                    .get(&progress.component)
+                    .map_or(RecoveryPhase::Held, |episode| episode.phase);
+                (progress.component, RecoveryEpisode { phase, failed_attempts: progress.attempts })
+            })
+            .collect()
+    }
+
+    fn fail_stop(
+        &self,
+        cause: overdrive_core::guest_network::SharedGuestNetworkFailStopCause,
+    ) -> Option<overdrive_core::guest_network::SharedGuestNetworkFailStop> {
+        let mut episodes = self.episodes.lock();
+        let receipt = self.exec.fail_stop(cause);
+        if receipt.is_some() {
+            episodes.clear();
+        }
+        receipt
     }
 
     async fn shutdown_requested(&mut self) -> overdrive_core::guest_network::ServeShutdownRequest {
@@ -1311,45 +1579,402 @@ impl SharedNetworkSupervisorHandle {
                     }
                     Err(_) => unreachable!("Tokio JoinError has only panic and cancellation states"),
                 };
-                let Some(request) = self.exec.fail_stop(cause) else {
+                let Some(request) = self.fail_stop(cause) else {
                     unreachable!("the retained supervisor writes its first fail-stop request");
                 };
                 overdrive_core::guest_network::ServeShutdownRequest::SharedGuestNetwork(request)
             }
             request = self.request_rx.recv() => {
-                if let Some(request) = request {
-                    request
-                } else {
-                    let Some(request) = self.exec.fail_stop(
+                request.unwrap_or_else(|| {
+                    let Some(request) = self.fail_stop(
                         overdrive_core::guest_network::SharedGuestNetworkFailStopCause::RequestChannelClosed,
                     ) else {
                         unreachable!("the retained supervisor writes its first fail-stop request");
                     };
                     overdrive_core::guest_network::ServeShutdownRequest::SharedGuestNetwork(request)
-                }
+                })
             }
         }
     }
 
     /// The one runtime shared-network supervisor (D-295-R13, R14, R15, R16):
-    /// detection, component-specific quiescence, bounded recovery, per-VM
-    /// kill scope, restore, and typed fail-stop. Replaces `run_mtls_owner`
-    /// in DELIVER step 12-01.
-    #[allow(dead_code, reason = "RED scaffold: consumed in DELIVER step 12-01")]
-    #[expect(clippy::todo, reason = "RED scaffold — DELIVER step 12-01")]
-    #[expect(
-        clippy::unused_async,
-        reason = "RED scaffold — DELIVER step 12-01 awaits the owner calls"
+    /// detection, component-specific quiescence, bounded recovery, restore,
+    /// and typed fail-stop. Replaces `run_mtls_owner` in DELIVER step 12-01.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the sole supervisor loop owns audit, recovery ordering, attempt accounting and fail-stop publication"
     )]
     async fn run_shared_network_supervisor(
         ports: SharedNetworkSupervisorPorts,
         exec: Arc<overdrive_core::guest_network::GuestNetworkExecSupervisor>,
         clock: Arc<dyn Clock>,
+        started_at: Instant,
         request_tx: tokio::sync::mpsc::Sender<overdrive_core::guest_network::ServeShutdownRequest>,
         shutdown: CancellationToken,
+        episodes: Arc<parking_lot::Mutex<BTreeMap<SharedGuestNetworkComponent, RecoveryEpisode>>>,
     ) -> std::result::Result<(), SharedNetworkSupervisorError> {
-        let _ = (ports, exec, clock, request_tx, shutdown);
-        todo!("RED scaffold: D-295-R13 run_shared_network_supervisor — DELIVER step 12-01")
+        let ports = Arc::new(ports);
+        let mut recoveries =
+            BTreeMap::<SharedGuestNetworkComponent, ActiveSharedNetworkRecovery>::new();
+        let mut attempts = tokio::task::JoinSet::<SharedNetworkAttemptResult>::new();
+        let mut audits = tokio::task::JoinSet::<Option<SharedNetworkAuditFinding>>::new();
+        let mut round_pending = BTreeSet::new();
+        let mut round_results = BTreeMap::<SharedGuestNetworkComponent, bool>::new();
+        let mut audit_in_flight = false;
+        let mut next_audit = started_at + SHARED_NETWORK_AUDIT_PERIOD;
+        let mut retry_at = None;
+
+        'supervisor: loop {
+            let now = clock.now();
+            let audit_due = !audit_in_flight && now >= next_audit;
+            if audit_due {
+                let leaked = ports.shared_guest_network.leaked_quiescence_holds();
+                if leaked > 0 {
+                    attempts.abort_all();
+                    audits.abort_all();
+                    tracing::error!(
+                        name: "guest_network.shared_owner_fail_stop",
+                        cause = ?overdrive_core::guest_network::SharedGuestNetworkFailStopCause::LeakedQuiescenceHold,
+                        leaked,
+                        "shared guest-network owner observed a leaked quiescence hold"
+                    );
+                    if issue_shared_network_fail_stop(
+                        overdrive_core::guest_network::SharedGuestNetworkFailStopCause::LeakedQuiescenceHold,
+                        &exec,
+                        &episodes,
+                        &request_tx,
+                    )
+                    .await
+                    {
+                        shutdown.cancelled().await;
+                    }
+                    break;
+                }
+            }
+            if exec.recovery_progress().iter().any(|progress| {
+                progress.attempts >= SHARED_NETWORK_RECOVERY_ATTEMPTS
+                    || progress.elapsed >= SHARED_NETWORK_RECOVERY_DEADLINE
+            }) {
+                attempts.abort_all();
+                audits.abort_all();
+                tracing::error!(
+                    name: "guest_network.shared_owner_fail_stop",
+                    cause = ?overdrive_core::guest_network::SharedGuestNetworkFailStopCause::RecoveryDeadlineExceeded,
+                    "shared guest-network recovery reached its per-component bound"
+                );
+                if issue_shared_network_fail_stop(
+                    overdrive_core::guest_network::SharedGuestNetworkFailStopCause::RecoveryDeadlineExceeded,
+                    &exec,
+                    &episodes,
+                    &request_tx,
+                )
+                .await
+                {
+                    shutdown.cancelled().await;
+                }
+                break;
+            }
+
+            if audit_due {
+                let mtls_repair_in_flight = round_pending.iter().any(|component| {
+                    matches!(
+                        component,
+                        SharedGuestNetworkComponent::LegF
+                            | SharedGuestNetworkComponent::LegC
+                            | SharedGuestNetworkComponent::IpRules
+                            | SharedGuestNetworkComponent::IpSets
+                            | SharedGuestNetworkComponent::Supervisor
+                    )
+                });
+                let audit_ports = Arc::clone(&ports);
+                let audit_clock = Arc::clone(&clock);
+                audits.spawn(async move {
+                    audit_shared_network_components(
+                        &audit_ports,
+                        &*audit_clock,
+                        mtls_repair_in_flight,
+                    )
+                    .await
+                });
+                audit_in_flight = true;
+            }
+
+            if attempts.is_empty()
+                && round_pending.is_empty()
+                && !recoveries.is_empty()
+                && retry_at.is_none_or(|at| now >= at)
+            {
+                round_results.clear();
+                for (component, recovery) in &mut recoveries {
+                    round_pending.insert(*component);
+                    let attempt_ports = Arc::clone(&ports);
+                    let attempt_exec = Arc::clone(&exec);
+                    let attempt_clock = Arc::clone(&clock);
+                    let attempt_episodes = Arc::clone(&episodes);
+                    let attempt_shutdown = shutdown.clone();
+                    let listener_task_exit = recovery.listener_task_exit.take();
+                    let component = *component;
+                    attempts.spawn(async move {
+                        run_shared_network_recovery_attempt(
+                            component,
+                            listener_task_exit,
+                            attempt_ports,
+                            attempt_exec,
+                            attempt_clock,
+                            attempt_episodes,
+                            attempt_shutdown,
+                        )
+                        .await
+                    });
+                }
+                retry_at = None;
+            }
+
+            let mut next_wake = (!audit_in_flight).then_some(next_audit);
+            if attempts.is_empty() && !recoveries.is_empty() {
+                let retry = retry_at.unwrap_or(now);
+                next_wake = Some(next_wake.map_or(retry, |audit| audit.min(retry)));
+            }
+            let delay = next_wake
+                .map_or(SHARED_NETWORK_AUDIT_PERIOD, |wake| wake.saturating_duration_since(now));
+            tokio::select! {
+                biased;
+                () = shutdown.cancelled() => break,
+                audited = audits.join_next(), if audit_in_flight => {
+                    audit_in_flight = false;
+                    let completed_at = clock.now();
+                    while next_audit <= completed_at {
+                        next_audit += SHARED_NETWORK_AUDIT_PERIOD;
+                    }
+                    match audited {
+                        Some(Ok(Some(finding))) => {
+                            tracing::warn!(
+                                name: "guest_network.shared_owner_unhealthy",
+                                component = ?finding.component,
+                                "shared guest-network owner entered bounded recovery"
+                            );
+                            if let Some(recovery) = recoveries.get_mut(&finding.component) {
+                                if recovery.listener_task_exit.is_none() {
+                                    recovery.listener_task_exit = finding.listener_task_exit;
+                                }
+                            } else {
+                                match acquire_shared_network_recovery_hold(
+                                    finding,
+                                    &ports,
+                                    &exec,
+                                    &*clock,
+                                    &episodes,
+                                    &shutdown,
+                                ).await {
+                                    RecoveryHoldAcquire::Started(recovery) => {
+                                        recoveries.insert(finding.component, recovery);
+                                    }
+                                    RecoveryHoldAcquire::AlreadyActive => {}
+                                    RecoveryHoldAcquire::Shutdown => break 'supervisor,
+                                    RecoveryHoldAcquire::TimedOut => {
+                                        attempts.abort_all();
+                                        audits.abort_all();
+                                        let _ = issue_shared_network_fail_stop(
+                                            overdrive_core::guest_network::SharedGuestNetworkFailStopCause::RecoveryDeadlineExceeded,
+                                            &exec,
+                                            &episodes,
+                                            &request_tx,
+                                        ).await;
+                                        shutdown.cancelled().await;
+                                        break 'supervisor;
+                                    }
+                                }
+                            }
+                        }
+                        Some(Ok(None)) => {}
+                        Some(Err(join_error)) => {
+                            attempts.abort_all();
+                            audits.abort_all();
+                            let cause = if join_error.is_panic() {
+                                overdrive_core::guest_network::SharedGuestNetworkFailStopCause::SupervisorPanicked
+                            } else {
+                                overdrive_core::guest_network::SharedGuestNetworkFailStopCause::SupervisorCancelled
+                            };
+                            if issue_shared_network_fail_stop(cause, &exec, &episodes, &request_tx).await {
+                                shutdown.cancelled().await;
+                            }
+                            break 'supervisor;
+                        }
+                        None => unreachable!("the retained audit task has a join result"),
+                    }
+                }
+                attempted = attempts.join_next(), if !attempts.is_empty() => {
+                    match attempted {
+                        Some(Ok(result)) => {
+                            round_pending.remove(&result.component);
+                            round_results.insert(result.component, result.healthy);
+                            if let Some(finding) = result.finding {
+                                if let Some(recovery) = recoveries.get_mut(&finding.component) {
+                                    if recovery.listener_task_exit.is_none() {
+                                        recovery.listener_task_exit = finding.listener_task_exit;
+                                    }
+                                } else {
+                                    match acquire_shared_network_recovery_hold(
+                                        finding,
+                                        &ports,
+                                        &exec,
+                                        &*clock,
+                                        &episodes,
+                                        &shutdown,
+                                    ).await {
+                                        RecoveryHoldAcquire::Started(recovery) => {
+                                            recoveries.insert(finding.component, recovery);
+                                        }
+                                        RecoveryHoldAcquire::AlreadyActive => {}
+                                        RecoveryHoldAcquire::Shutdown => break 'supervisor,
+                                        RecoveryHoldAcquire::TimedOut => {
+                                            attempts.abort_all();
+                                            audits.abort_all();
+                                            let _ = issue_shared_network_fail_stop(
+                                                overdrive_core::guest_network::SharedGuestNetworkFailStopCause::RecoveryDeadlineExceeded,
+                                                &exec,
+                                                &episodes,
+                                                &request_tx,
+                                            ).await;
+                                            shutdown.cancelled().await;
+                                            break 'supervisor;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if round_pending.is_empty() {
+                                let successful = round_results
+                                    .iter()
+                                    .filter_map(|(component, healthy)| healthy.then_some(*component))
+                                    .collect::<BTreeSet<_>>();
+                                for component in successful.iter().copied() {
+                                    let progress = exec
+                                        .recovery_progress()
+                                        .into_iter()
+                                        .find(|progress| progress.component == component);
+                                    if progress.is_some_and(|progress| {
+                                        progress.elapsed >= SHARED_NETWORK_RECOVERY_DEADLINE
+                                    }) {
+                                        attempts.abort_all();
+                                        audits.abort_all();
+                                        let _ = issue_shared_network_fail_stop(
+                                            overdrive_core::guest_network::SharedGuestNetworkFailStopCause::RecoveryDeadlineExceeded,
+                                            &exec,
+                                            &episodes,
+                                            &request_tx,
+                                        ).await;
+                                        shutdown.cancelled().await;
+                                        break 'supervisor;
+                                    }
+                                    let Some(recovery) = recoveries.remove(&component) else {
+                                        continue;
+                                    };
+                                    match ports.shared_guest_network.restore(recovery.hold).await {
+                                        Ok(restored) => tracing::info!(
+                                            name: "guest_network.shared_owner_restored",
+                                            component = ?component,
+                                            restored = ?restored,
+                                            "shared guest-network recovery restored its quiescence hold"
+                                        ),
+                                        Err(error) => {
+                                            attempts.abort_all();
+                                            audits.abort_all();
+                                            tracing::error!(
+                                                name: "guest_network.shared_owner_fail_stop",
+                                                component = ?component,
+                                                error = error.as_str(),
+                                                "shared guest-network recovery restored a foreign quiescence hold"
+                                            );
+                                            let _ = issue_shared_network_fail_stop(
+                                                overdrive_core::guest_network::SharedGuestNetworkFailStopCause::ForeignQuiescenceHold,
+                                                &exec,
+                                                &episodes,
+                                                &request_tx,
+                                            ).await;
+                                            shutdown.cancelled().await;
+                                            break 'supervisor;
+                                        }
+                                    }
+                                }
+
+                                let remaining = recoveries.keys().copied().collect::<BTreeSet<_>>();
+                                if !exec.complete_attempt(remaining) {
+                                    break 'supervisor;
+                                }
+                                let progress = exec.recovery_progress();
+                                {
+                                    let mut observed = episodes.lock();
+                                    observed.retain(|component, _| {
+                                        progress.iter().any(|entry| entry.component == *component)
+                                    });
+                                    for entry in &progress {
+                                        observed
+                                            .entry(entry.component)
+                                            .and_modify(|episode| {
+                                                episode.phase = RecoveryPhase::Held;
+                                                episode.failed_attempts = entry.attempts;
+                                            })
+                                            .or_insert(RecoveryEpisode {
+                                                phase: RecoveryPhase::Held,
+                                                failed_attempts: entry.attempts,
+                                            });
+                                    }
+                                }
+                                let exhausted = progress.iter().find(|entry| {
+                                    entry.attempts >= SHARED_NETWORK_RECOVERY_ATTEMPTS
+                                        || entry.elapsed >= SHARED_NETWORK_RECOVERY_DEADLINE
+                                });
+                                if let Some(progress) = exhausted {
+                                    attempts.abort_all();
+                                    audits.abort_all();
+                                    tracing::error!(
+                                        name: "guest_network.shared_owner_fail_stop",
+                                        component = ?progress.component,
+                                        attempts = progress.attempts,
+                                        elapsed = ?progress.elapsed,
+                                        "shared guest-network component recovery reached its bound"
+                                    );
+                                    if issue_shared_network_fail_stop(
+                                        overdrive_core::guest_network::SharedGuestNetworkFailStopCause::RecoveryDeadlineExceeded,
+                                        &exec,
+                                        &episodes,
+                                        &request_tx,
+                                    ).await {
+                                        shutdown.cancelled().await;
+                                    }
+                                    break 'supervisor;
+                                }
+                                retry_at = (!recoveries.is_empty())
+                                    .then_some(clock.now() + SHARED_NETWORK_RETRY_PERIOD);
+                            }
+                        }
+                        Some(Err(join_error)) => {
+                            attempts.abort_all();
+                            audits.abort_all();
+                            let cause = if join_error.is_panic() {
+                                overdrive_core::guest_network::SharedGuestNetworkFailStopCause::SupervisorPanicked
+                            } else {
+                                overdrive_core::guest_network::SharedGuestNetworkFailStopCause::SupervisorCancelled
+                            };
+                            if issue_shared_network_fail_stop(cause, &exec, &episodes, &request_tx).await {
+                                shutdown.cancelled().await;
+                            }
+                            break 'supervisor;
+                        }
+                        None => unreachable!("the recovery task has a join result"),
+                    }
+                }
+                () = clock.sleep(delay) => {}
+            }
+        }
+
+        attempts.abort_all();
+        while attempts.join_next().await.is_some() {}
+        audits.abort_all();
+        while audits.join_next().await.is_some() {}
+        ports.dns.lock().await.shutdown(SHARED_NETWORK_AUDIT_CALL_BOUND).await;
+        Ok(())
     }
 
     fn listener_task_exit_leg(
@@ -1390,203 +2015,6 @@ impl SharedNetworkSupervisorHandle {
                 Some(leg) if leg == expected_leg => return Ok(true),
                 Some(_) => {}
                 None => return Err(error),
-            }
-        }
-    }
-
-    #[expect(
-        clippy::too_many_lines,
-        reason = "RUN-295-B keeps the cadence/deadline state machine in one exact private owner future"
-    )]
-    async fn run_mtls_owner(
-        shared_guest_network: Arc<dyn guest_network::SharedGuestNetworkOwner>,
-        mtls_worker: Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
-        exec: Arc<overdrive_core::guest_network::GuestNetworkExecSupervisor>,
-        clock: Arc<dyn Clock>,
-        request_tx: tokio::sync::mpsc::Sender<overdrive_core::guest_network::ServeShutdownRequest>,
-        shutdown: CancellationToken,
-    ) -> std::result::Result<(), SharedNetworkSupervisorError> {
-        let requires_quiescence =
-            |component: overdrive_core::guest_network::SharedGuestNetworkComponent| {
-                !matches!(
-                    component,
-                    overdrive_core::guest_network::SharedGuestNetworkComponent::LegF
-                        | overdrive_core::guest_network::SharedGuestNetworkComponent::LegC
-                        | overdrive_core::guest_network::SharedGuestNetworkComponent::Dns
-                )
-            };
-        loop {
-            tokio::select! {
-                biased;
-                () = shutdown.cancelled() => return Ok(()),
-                () = clock.sleep(Duration::from_secs(1)) => {}
-            }
-
-            let (component, listener_task_exit) = match mtls_worker.audit_shared_owner().await {
-                Ok(()) => continue,
-                Err(source) => (source.component(), Self::listener_task_exit_leg(&source)),
-            };
-            if !exec.begin_recovery(component) {
-                return Ok(());
-            }
-            tracing::warn!(
-                name: "guest_network.shared_owner_unhealthy",
-                component = ?component,
-                "shared guest-network owner entered bounded recovery"
-            );
-            if let Some(leg) = listener_task_exit {
-                match Self::consume_listener_task_exit(&mtls_worker, leg, &shutdown).await {
-                    Ok(true) => {}
-                    Ok(false) => return Ok(()),
-                    Err(source) => return Err(source.into()),
-                }
-            }
-            // QHOLD (ADR-0169): this recovery's counted, move-only hold. Kept
-            // for the life of the recovery and consumed by `restore` after the
-            // clean post-repair audit; dropped unrestored it raises the
-            // owner's leaked-hold count and forwarding stays quiesced.
-            let mut quiesced: Option<guest_network::QuiescenceHold> =
-                if requires_quiescence(component) {
-                    let (hold, _quiescence) = shared_guest_network.quiesce().await;
-                    Some(hold)
-                } else {
-                    None
-                };
-
-            loop {
-                let retry_deadline = clock.now() + Duration::from_millis(250);
-                let mut supervisor_failure = None;
-                loop {
-                    let remaining = retry_deadline.saturating_duration_since(clock.now());
-                    if remaining.is_zero() {
-                        break;
-                    }
-                    tokio::select! {
-                        biased;
-                        () = shutdown.cancelled() => return Ok(()),
-                        source = mtls_worker.wait_shared_owner_failure() => {
-                            if Self::listener_task_exit_leg(&source).is_none() {
-                                supervisor_failure = Some(source);
-                                break;
-                            }
-                        }
-                        () = clock.sleep(remaining) => break,
-                    }
-                }
-
-                let first_remaining = if let Some(source) = supervisor_failure {
-                    Some((source.component(), None))
-                } else {
-                    match mtls_worker.converge_shared_owner().await {
-                        Ok(()) => match mtls_worker.audit_shared_owner().await {
-                            Ok(()) => None,
-                            Err(source) => {
-                                Some((source.component(), Self::listener_task_exit_leg(&source)))
-                            }
-                        },
-                        Err(source) => {
-                            Some((source.component(), Self::listener_task_exit_leg(&source)))
-                        }
-                    }
-                };
-                if first_remaining.is_none() {
-                    if exec.complete_attempt(BTreeSet::new()) {
-                        if let Some(hold) = quiesced.take() {
-                            match shared_guest_network.restore(hold).await {
-                                Ok(restored) => tracing::info!(
-                                    name: "guest_network.shared_owner_restored",
-                                    component = ?component,
-                                    restored = ?restored,
-                                    "shared guest-network recovery restored its quiescence hold"
-                                ),
-                                // D-UP-4 / PD-1: a hold another ledger issued
-                                // changes nothing at the owner; the
-                                // composition is defective, so `serve`
-                                // fail-stops at once (ADR-0124).
-                                Err(error) => {
-                                    tracing::error!(
-                                        name: "guest_network.shared_owner_fail_stop",
-                                        component = ?component,
-                                        error = error.as_str(),
-                                        "shared guest-network recovery restored a foreign quiescence hold"
-                                    );
-                                    let Some(request) = exec.fail_stop(
-                                        overdrive_core::guest_network::SharedGuestNetworkFailStopCause::ForeignQuiescenceHold,
-                                    ) else {
-                                        return Ok(());
-                                    };
-                                    let _ = request_tx
-                                        .send(
-                                            overdrive_core::guest_network::ServeShutdownRequest::SharedGuestNetwork(
-                                                request,
-                                            ),
-                                        )
-                                        .await;
-                                    shutdown.cancelled().await;
-                                    return Ok(());
-                                }
-                            }
-                        }
-                        tracing::info!(
-                            name: "guest_network.shared_owner_recovered",
-                            component = ?component,
-                            "shared guest-network owner recovered before the deadline"
-                        );
-                        break;
-                    }
-                    return Ok(());
-                }
-                let Some((component, listener_task_exit)) = first_remaining else {
-                    unreachable!("a failed recovery attempt always has a remaining component");
-                };
-                if let Some(leg) = listener_task_exit {
-                    match Self::consume_listener_task_exit(&mtls_worker, leg, &shutdown).await {
-                        Ok(true) => {}
-                        Ok(false) => return Ok(()),
-                        Err(source) => return Err(source.into()),
-                    }
-                }
-                if !exec.complete_attempt(BTreeSet::from([component])) {
-                    return Ok(());
-                }
-                if quiesced.is_none() && requires_quiescence(component) {
-                    let (hold, _quiescence) = shared_guest_network.quiesce().await;
-                    quiesced = Some(hold);
-                }
-                let Some(progress) = exec.recovery_progress().into_iter().next() else {
-                    return Ok(());
-                };
-                tracing::warn!(
-                    name: "guest_network.shared_owner_retry",
-                    component = ?progress.component,
-                    attempt = progress.attempts,
-                    elapsed = ?progress.elapsed,
-                    "shared guest-network owner retry remains unhealthy"
-                );
-                if progress.attempts >= 20 || progress.elapsed >= Duration::from_secs(5) {
-                    tracing::error!(
-                        name: "guest_network.shared_owner_fail_stop",
-                        component = ?progress.component,
-                        attempts = progress.attempts,
-                        elapsed = ?progress.elapsed,
-                        cleanup = "abandoned_to_shutdown",
-                        "shared guest-network owner reached its bounded recovery deadline"
-                    );
-                    let Some(request) = exec.fail_stop(
-                        overdrive_core::guest_network::SharedGuestNetworkFailStopCause::RecoveryDeadlineExceeded,
-                    ) else {
-                        return Ok(());
-                    };
-                    let _ = request_tx
-                        .send(
-                            overdrive_core::guest_network::ServeShutdownRequest::SharedGuestNetwork(
-                                request,
-                            ),
-                        )
-                        .await;
-                    shutdown.cancelled().await;
-                    return Ok(());
-                }
             }
         }
     }
@@ -1637,6 +2065,11 @@ impl DnsServeTaskOwner {
         task: tokio::task::JoinHandle<()>,
     ) -> Self {
         Self { state: DnsServeTaskState::Running, responder: Some(responder), task: Some(task) }
+    }
+
+    fn has_exited(&self) -> bool {
+        matches!(self.state, DnsServeTaskState::Running)
+            && self.task.as_ref().is_some_and(tokio::task::JoinHandle::is_finished)
     }
 
     async fn wait_failure(&mut self) -> DnsServeTaskExit {
@@ -2255,14 +2688,9 @@ impl ServerHandle {
     /// holds the returned `ServerHandle`, and deploys through the server's
     /// public API.
     #[cfg(feature = "integration-tests")]
-    #[expect(
-        clippy::unused_async,
-        reason = "RED scaffold body panics; the attachment-cut step lands the observation"
-    )]
     pub async fn guest_flow_observation(&self) -> Option<guest_network::GuestOwnerObservation> {
-        // SCAFFOLD: true — netns-density-295 DISTILL (D-17; the attachment-cut
-        // step holds the composed owner on the handle).
-        panic!("Not yet implemented -- RED scaffold")
+        let owner = self.guest_flow_owner.as_ref()?;
+        Some(owner.flow_observation().await)
     }
 
     /// PORTS-CONFIG (ADR-0218): the ports this server's node-global vsock
@@ -2271,9 +2699,9 @@ impl ServerHandle {
     /// assumes a number.
     #[must_use]
     pub fn vsock_ports(&self) -> BoundVsockPorts {
-        // SCAFFOLD: true — netns-density-295 DISTILL (attachment-cut step 6):
-        // the host owner binds its listeners and reports their ports there.
-        let Some(flow) = self.flow_ports else { panic!("Not yet implemented -- RED scaffold") };
+        let Some(flow) = self.flow_ports else {
+            unreachable!("a successfully booted owner has reported its bound flow ports")
+        };
         BoundVsockPorts { beacon: self.beacon_port, flow }
     }
 
@@ -2320,9 +2748,9 @@ impl ServerHandle {
     ///    the dead owner held survive as after `SIGKILL`, while its sockets,
     ///    listener threads, and store handles are released.
     ///
-    /// Workload processes (spawned `kill_on_drop(false)`), cgroups, TAPs, the
-    /// bridge, pinned TCX links and nft objects are never touched. The
-    /// production graceful path ([`Self::shutdown`]) is unchanged.
+    /// Workload processes (spawned `kill_on_drop(false)`), cgroups and the
+    /// kernel objects their dead owners held are never touched. The production
+    /// graceful path ([`Self::shutdown`]) is unchanged.
     #[doc(hidden)]
     #[cfg(any(test, feature = "integration-tests"))]
     pub async fn kill_for_test(self) -> AbruptServerResidue {
@@ -2342,6 +2770,7 @@ impl ServerHandle {
             shared_network_supervisor,
             flow_ports: _,
             beacon_port: _,
+            guest_flow_owner,
         } = self;
 
         // The axum server owns one `AppState` clone and each accepted
@@ -2368,8 +2797,11 @@ impl ServerHandle {
             let _ = task.await;
         }
 
-        mtls_resolve_owner.shutdown().await;
         shared_network_supervisor.shutdown().await;
+        if let Some(owner) = guest_flow_owner {
+            owner.shutdown_tasks().await;
+        }
+        mtls_resolve_owner.shutdown().await;
         release_killed_worker_without_host_authority(mtls_worker_owner).await;
         AbruptServerResidue
     }
@@ -2457,18 +2889,74 @@ impl ServerHandle {
             let _ = task.await;
         }
 
-        // 5. Join the complete worker-owned userspace dataplane. This does
-        // not stop workloads or author lifecycle state; it only releases the
-        // listeners/connections whose lifetime is this serve owner's lifetime.
-        // Active allocation rule guards are relinquished without deletion.
+        // 5. Stop the shared supervisor before its owners, then join every
+        // userspace task that can still use the guest-flow owner or resolver.
+        // This does not stop workloads or author lifecycle state. Active
+        // allocation rule guards are relinquished without deletion.
+        self.shared_network_supervisor.shutdown().await;
         let worker_failure =
             self.mtls_worker_owner.shutdown_owner().await.err().map(ServerShutdownError::new);
+        if let Some(owner) = &self.guest_flow_owner {
+            owner.shutdown_tasks().await;
+        }
         self.mtls_resolve_owner.shutdown().await;
-        self.shared_network_supervisor.shutdown().await;
         worker_failure.map_or(Ok(()), Err)
     }
 }
 
+async fn shutdown_failed_boot_network_owners(
+    mtls_worker: &Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
+    mtls_resolve: &Arc<crate::mtls_resolve_adapter::ServiceBackendsResolve>,
+    guest_flow_owner: Option<&Arc<guest_network::HostSharedGuestNetworkOwner>>,
+) {
+    let _ = mtls_worker.shutdown_owner().await;
+    if let Some(owner) = guest_flow_owner {
+        owner.shutdown_tasks().await;
+    }
+    mtls_resolve.shutdown().await;
+}
+
+struct FailedBootTasks {
+    convergence_shutdown: CancellationToken,
+    convergence_task: tokio::task::JoinHandle<()>,
+    emit_drain_shutdown: CancellationToken,
+    emit_drain_task: tokio::task::JoinHandle<()>,
+    interest_router_shutdown: CancellationToken,
+    interest_router_task: tokio::task::JoinHandle<()>,
+    exit_observer_shutdown: CancellationToken,
+    exit_observer_tasks: Vec<tokio::task::JoinHandle<()>>,
+    mtls_worker: Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
+    mtls_resolve: Arc<crate::mtls_resolve_adapter::ServiceBackendsResolve>,
+    shared_network_supervisor: Option<SharedNetworkSupervisorHandle>,
+    dns_owner: Option<DnsServeTaskOwner>,
+    guest_flow_owner: Option<Arc<guest_network::HostSharedGuestNetworkOwner>>,
+}
+
+impl FailedBootTasks {
+    async fn shutdown(self) {
+        self.convergence_shutdown.cancel();
+        let _ = self.convergence_task.await;
+        self.emit_drain_shutdown.cancel();
+        let _ = self.emit_drain_task.await;
+        self.interest_router_shutdown.cancel();
+        let _ = self.interest_router_task.await;
+        self.exit_observer_shutdown.cancel();
+        for task in self.exit_observer_tasks {
+            let _ = task.await;
+        }
+        if let Some(supervisor) = self.shared_network_supervisor {
+            supervisor.shutdown().await;
+        }
+        if let Some(mut dns_owner) = self.dns_owner {
+            dns_owner.shutdown(Duration::from_secs(1)).await;
+        }
+        let _ = self.mtls_worker.shutdown_owner().await;
+        if let Some(owner) = self.guest_flow_owner {
+            owner.shutdown_tasks().await;
+        }
+        self.mtls_resolve.shutdown().await;
+    }
+}
 /// Start the control-plane server.
 ///
 /// Mints a fresh ephemeral CA, writes the trust triple under
@@ -2630,9 +3118,12 @@ pub async fn run_server(
             tracing::error!(
                 name: "health.startup.refused",
                 target: "overdrive::health",
-                reason = "vmm.probe",
+                reason = match &cause {
+                    error::VmmBootError::BeaconBind { .. } => "vm_driver.beacon_bind",
+                    _ => "vmm.probe",
+                },
                 cause = %cause,
-                "VM driver probe refused; composition root will not start"
+                "VM driver startup refused; composition root will not start"
             );
             return Err(error::ControlPlaneError::VmmBoot(cause));
         }
@@ -2644,7 +3135,6 @@ pub async fn run_server(
         Arc::new(registry),
         GuestNetworkSource::Composed { io: guest_flow_io, dial: owner_dial },
         guest_network_exec,
-        bootstrap_manager,
     )
     .await?;
     handle.beacon_port = beacon_port;
@@ -2735,11 +3225,12 @@ enum VmComposeError {
     /// The composition root passed `VmCapability::Required` — it declares
     /// "cloud-hypervisor IS present" — and the VMM's probe (or
     /// `CgroupAccounting`'s probe, or the kernel-header read/validate)
-    /// failed. Unambiguously a genuine substrate lie, never absence: the
-    /// caller refuses the whole boot with `health.startup.refused`,
-    /// converting directly into `ControlPlaneError::VmmBoot` — the SAME
-    /// typed [`error::VmmBootError`] value, no re-stringification at the
-    /// boundary.
+    /// failed. A node beacon bind failure is also hard for both capability
+    /// settings because the composed guest-transport contract requires that
+    /// listener. The caller refuses the whole boot with
+    /// `health.startup.refused`, converting directly into
+    /// `ControlPlaneError::VmmBoot` — the SAME typed
+    /// [`error::VmmBootError`] value, no re-stringification at the boundary.
     Refused(error::VmmBootError),
 }
 
@@ -2941,14 +3432,11 @@ async fn compose_vm_driver(
     // DG-4 boot step 2: after `Vmm::probe`, bind the node beacon intake on
     // the configured port (`BeaconIntake::bind`) and pass it to
     // `VmDriver::new`.
-    #[allow(clippy::match_wild_err_arm, reason = "RED scaffold arm until the attachment-cut step")]
     let beacon = match overdrive_worker::BeaconIntake::bind(beacon_io, beacon_port).await {
         Ok(beacon) => beacon,
-        // SCAFFOLD: true — netns-density-295 DISTILL (attachment-cut step 6):
-        // the `vm_driver.beacon_bind` startup refusal is new behaviour, and no
-        // `VmmBootError` / `ControlPlaneError` variant carrying
-        // `BeaconIntakeError` is pinned (DG-4) — surfaced as a DISTILL blocker.
-        Err(_source) => panic!("Not yet implemented -- RED scaffold"),
+        Err(source) => {
+            return Err(VmComposeError::Refused(error::VmmBootError::BeaconBind { source }));
+        }
     };
     let bound = beacon.bound_port();
 
@@ -3002,7 +3490,6 @@ pub async fn run_server_with_obs_and_driver(
     driver: Arc<dyn Driver>,
     shared_guest_network: Arc<dyn guest_network::SharedGuestNetworkOwner>,
     guest_network_exec: GuestNetworkExecWiring,
-    vm_cgroups: CgroupManager,
 ) -> Result<ServerHandle, error::ControlPlaneError> {
     let mut registry = DriverRegistry::new();
     registry.insert(driver);
@@ -3012,7 +3499,6 @@ pub async fn run_server_with_obs_and_driver(
         Arc::new(registry),
         shared_guest_network,
         guest_network_exec,
-        vm_cgroups,
     )
     .await
 }
@@ -3034,7 +3520,6 @@ pub async fn run_server_with_obs_and_drivers(
     drivers: Arc<DriverRegistry>,
     shared_guest_network: Arc<dyn guest_network::SharedGuestNetworkOwner>,
     guest_network_exec: GuestNetworkExecWiring,
-    vm_cgroups: CgroupManager,
 ) -> Result<ServerHandle, error::ControlPlaneError> {
     boot_server(
         config,
@@ -3042,7 +3527,6 @@ pub async fn run_server_with_obs_and_drivers(
         drivers,
         GuestNetworkSource::Supplied(shared_guest_network),
         guest_network_exec,
-        vm_cgroups,
     )
     .await
 }
@@ -3055,7 +3539,6 @@ async fn boot_server(
     drivers: Arc<DriverRegistry>,
     guest_network: GuestNetworkSource,
     guest_network_exec: GuestNetworkExecWiring,
-    vm_cgroups: CgroupManager,
 ) -> Result<ServerHandle, error::ControlPlaneError> {
     // NO-OVERRIDE-SEAMS / STORES-IN (ADR-0219): every driven adapter of the
     // boot comes from the composition root; this function constructs none.
@@ -3072,9 +3555,6 @@ async fn boot_server(
         mtls: mtls_adapters,
         guest_dns,
     } = boot;
-    // RED scaffold (D-295-R14): consumed in DELIVER step 12-01, which wraps it
-    // in the supervisor's kill-only `VmKillCapability`.
-    let _ = vm_cgroups;
     // Boot step 1 for a supplied owner (D-8, "Entry points and the supplied
     // owner"). A composed owner's step 1 is phase 1, which its caller ran over
     // the seam before this function (`run_server`, the composed rig).
@@ -3371,7 +3851,7 @@ async fn boot_server(
     // write happens.
     let mtls_resolve_after_frontend_rebuild;
     let mtls_resolve_owner;
-    let (mtls_worker, shared_guest_network) = {
+    let (mtls_worker, shared_guest_network, guest_flow_owner) = {
         // (1) the root's enforcement factory builds the enforcement port over
         // the held identity, the F7 limits, the guest prefix and the boot's
         // guest dial (NO-OVERRIDE-SEAMS, LEGS-DIAL). `IdentityMgr` impls
@@ -3460,7 +3940,7 @@ async fn boot_server(
                         clock.clone(),
                         Arc::clone(&mtls_adapters.intercept),
                     ));
-                (worker, owner)
+                (worker, owner, None)
             }
             GuestNetworkSource::Composed { io, dial } => {
                 // D-UP-16 / D-8 phase 2: the owner takes this worker, and the
@@ -3482,11 +3962,14 @@ async fn boot_server(
                     io,
                     dial,
                 );
-                (worker, owner as Arc<dyn guest_network::SharedGuestNetworkOwner>)
+                (
+                    worker,
+                    Arc::clone(&owner) as Arc<dyn guest_network::SharedGuestNetworkOwner>,
+                    Some(owner),
+                )
             }
         }
     };
-
     // microvm-driver-cloud-hypervisor step 02-02 (ADR-0083 §D7, brief.md
     // §105a.2, GH #42): `VmHostState` is composed UNCONDITIONALLY — never
     // gated on the `Vm` registry entry or the `integration-tests` feature
@@ -3528,7 +4011,7 @@ async fn boot_server(
         // transparent-mtls-host-socket step 06-03: the worker composed over
         // the `NodeAdapters`' mTLS adapters and the `DataplaneComposer`'s
         // dataplane — required on every boot.
-        mtls_worker,
+        Arc::clone(&mtls_worker),
         vm_host_state,
         // dial-by-name-responder step 02-01: the ONE shared per-host
         // `FrontendAddrAllocator` (DDN-2). Cloned (self-shares the held map) so
@@ -3558,15 +4041,16 @@ async fn boot_server(
         phase = "vm_reclamation",
         transition = "started",
     );
-    vm_reclamation_boot::converge(&state).await.map_err(|source| {
+    if let Err(source) = vm_reclamation_boot::converge(&state).await {
         tracing::warn!(
             name: "health.startup.refused",
             reason = "vm_reclamation.boot",
             error = %source,
             "boot-epoch VmReclamation drive failed; refusing to boot"
         );
-        error::ControlPlaneError::VmReclamationBoot(source)
-    })?;
+        shutdown_failed_boot_network_owners(&mtls_worker, &mtls_resolve_owner, None).await;
+        return Err(error::ControlPlaneError::VmReclamationBoot(source));
+    }
     tracing::info!(
         name: "guest_network.shared_owner_boot_phase",
         node_id = %state.node_id,
@@ -3587,6 +4071,12 @@ async fn boot_server(
             cause = %cause,
             "shared guest-network stale sweep refused"
         );
+        shutdown_failed_boot_network_owners(
+            &mtls_worker,
+            &mtls_resolve_owner,
+            guest_flow_owner.as_ref(),
+        )
+        .await;
         return Err(error::ControlPlaneError::from(cause));
     }
     tracing::info!(
@@ -3603,18 +4093,21 @@ async fn boot_server(
             cause = %cause,
             "shared guest-network convergence refused"
         );
+        shutdown_failed_boot_network_owners(
+            &mtls_worker,
+            &mtls_resolve_owner,
+            guest_flow_owner.as_ref(),
+        )
+        .await;
         return Err(error::ControlPlaneError::from(cause));
     }
     // PORTS-CONFIG (ADR-0218): from the first `Ok` converge the owner reports
     // the ports its stream and control listeners bound; the boot reads them
     // once into the action shim's state.
-    // SCAFFOLD: true — netns-density-295 DISTILL (attachment-cut step 6): the
-    // host owner binds no listener until that step and reports `None`; the
-    // `unreachable!` on `None` after an `Ok` converge lands with it.
-    let flow_ports = shared_guest_network.flow_ports();
-    if let Some(ports) = flow_ports
-        && state.guest_flow_ports.set(ports).is_err()
-    {
+    let Some(flow_ports) = shared_guest_network.flow_ports() else {
+        unreachable!("an owner that converged successfully reports its bound flow ports")
+    };
+    if state.guest_flow_ports.set(flow_ports).is_err() {
         unreachable!("the boot sets the guest-flow ports once, after step 9");
     }
 
@@ -3630,12 +4123,18 @@ async fn boot_server(
             cause = %source,
             "shared mTLS listener owner failed to start"
         );
+        shutdown_failed_boot_network_owners(
+            &mtls_worker,
+            &mtls_resolve_owner,
+            guest_flow_owner.as_ref(),
+        )
+        .await;
         return Err(error::ControlPlaneError::MtlsBoot(error::MtlsBootError::SharedOwner {
             source,
         }));
     }
 
-    let (dns_responder_owner, dns_factory, dns_responder_deps) = {
+    let (mut dns_responder_owner, dns_factory, dns_responder_deps) = {
         // Ordinary shared-switch stale cleanup follows the boot-epoch VM
         // reclamation drive.
         // Reclamation has already killed every unsupervised non-terminal VM and
@@ -3670,6 +4169,12 @@ async fn boot_server(
                     "adopt-on-restart §5 nft-rule sweep failed; refusing to boot \
                      (surviving per-workload TPROXY rules could not be reaped)"
                 );
+                shutdown_failed_boot_network_owners(
+                    &mtls_worker,
+                    &mtls_resolve_owner,
+                    guest_flow_owner.as_ref(),
+                )
+                .await;
                 return Err(error::ControlPlaneError::NftRuleSweep(source));
             }
         }
@@ -3706,6 +4211,12 @@ async fn boot_server(
         )
         .await
         {
+            shutdown_failed_boot_network_owners(
+                &mtls_worker,
+                &mtls_resolve_owner,
+                guest_flow_owner.as_ref(),
+            )
+            .await;
             return Err(source.into());
         }
         if let Err(source) = mtls_resolve_after_frontend_rebuild.probe().await {
@@ -3715,7 +4226,12 @@ async fn boot_server(
                 error = %source,
                 "transparent-mTLS resolve refresh after frontend rebuild failed; refusing to boot"
             );
-            mtls_resolve_owner.shutdown().await;
+            shutdown_failed_boot_network_owners(
+                &mtls_worker,
+                &mtls_resolve_owner,
+                guest_flow_owner.as_ref(),
+            )
+            .await;
             return Err(error::ControlPlaneError::MtlsBoot(error::MtlsBootError::ResolveProbe {
                 source,
             }));
@@ -3770,6 +4286,12 @@ async fn boot_server(
                 "dial-by-name DNS responder probe failed; refusing to boot \
                  (a lazily-bound responder would start and then fail to answer)"
             );
+            shutdown_failed_boot_network_owners(
+                &mtls_worker,
+                &mtls_resolve_owner,
+                guest_flow_owner.as_ref(),
+            )
+            .await;
             return Err(error::ControlPlaneError::DnsResponderBoot(source));
         }
         // Probe Ok — spawn the source-pinned serve loop and hold both the task
@@ -3852,9 +4374,29 @@ async fn boot_server(
     // The router is wired here regardless (vertical slice: the production
     // entry spawns the mechanism, not a test) — S-266-01.
     let interest_table = build_interest_table(state.runtime.reconcilers_iter());
-    let interest_subscription = state.obs.subscribe_all_events().await.map_err(|e| {
-        error::ControlPlaneError::internal("subscribe_all_events for interest router", e)
-    })?;
+    let interest_subscription = match state.obs.subscribe_all_events().await {
+        Ok(subscription) => subscription,
+        Err(source) => {
+            let error = error::ControlPlaneError::internal(
+                "subscribe_all_events for interest router",
+                source,
+            );
+            convergence_shutdown.cancel();
+            let _ = convergence_task.await;
+            exit_observer_shutdown.cancel();
+            for task in exit_observer_tasks {
+                let _ = task.await;
+            }
+            dns_responder_owner.shutdown(Duration::from_secs(1)).await;
+            shutdown_failed_boot_network_owners(
+                &mtls_worker,
+                &mtls_resolve_owner,
+                guest_flow_owner.as_ref(),
+            )
+            .await;
+            return Err(error);
+        }
+    };
     let interest_router_shutdown = CancellationToken::new();
     let interest_router_task = spawn_interest_router(
         state.obs.clone(),
@@ -3895,65 +4437,65 @@ async fn boot_server(
     let supervisor_shutdown = CancellationToken::new();
     let (request_tx, request_rx) = tokio::sync::mpsc::channel(1);
     let supervisor_exec = guest_network_exec.supervisor();
-    let supervisor_guest_network = Arc::clone(&shared_guest_network);
-    let supervisor_clock = clock.clone();
-    let supervisor_worker = mtls_worker_owner.clone();
+    let supervisor_episodes = Arc::new(parking_lot::Mutex::new(BTreeMap::new()));
+    let task_episodes = Arc::clone(&supervisor_episodes);
+    let dns_deps = crate::dns_responder::GuestDnsDeps {
+        store: Arc::clone(&dns_responder_deps.0),
+        clock: Arc::clone(&dns_responder_deps.1),
+        gateway: dns_responder_deps.2,
+        frontend: dns_responder_deps.3.clone(),
+    };
+    let supervisor_ports = SharedNetworkSupervisorPorts {
+        shared_guest_network: Arc::clone(&shared_guest_network),
+        mtls_worker: Arc::clone(&mtls_worker_owner),
+        dns: Arc::new(tokio::sync::Mutex::new(dns_responder_owner)),
+        dns_factory,
+        dns_deps,
+    };
+    let supervisor_clock = Arc::clone(&clock);
+    let supervisor_started_at = supervisor_clock.now();
     let supervisor_task_shutdown = supervisor_shutdown.clone();
-    let supervisor_task = tokio::spawn(async move {
-        let mut dns_owner = dns_responder_owner;
-        let mut mtls_future = Box::pin(SharedNetworkSupervisorHandle::run_mtls_owner(
-            supervisor_guest_network,
-            supervisor_worker,
+    let supervisor_task =
+        tokio::spawn(SharedNetworkSupervisorHandle::run_shared_network_supervisor(
+            supervisor_ports,
             supervisor_exec,
             supervisor_clock,
+            supervisor_started_at,
             request_tx,
-            supervisor_task_shutdown.clone(),
+            supervisor_task_shutdown,
+            task_episodes,
         ));
-        loop {
-            tokio::select! {
-                biased;
-                () = supervisor_task_shutdown.cancelled() => {
-                    let result = (&mut mtls_future).await;
-                    dns_owner.shutdown(Duration::from_secs(1)).await;
-                    break result;
-                }
-                result = &mut mtls_future => {
-                    dns_owner.shutdown(Duration::from_secs(1)).await;
-                    break result;
-                }
-                _exit = dns_owner.wait_failure() => {
-                    let (store, clock, gateway, frontend) = &dns_responder_deps;
-                    let replacement = dns_factory.responder(crate::dns_responder::GuestDnsDeps {
-                        store: Arc::clone(store),
-                        clock: Arc::clone(clock),
-                        gateway: *gateway,
-                        frontend: frontend.clone(),
-                    });
-                    if let Err(source) = replacement.probe().await {
-                        break Err(SharedNetworkSupervisorError::Dns(source));
-                    }
-                    if let Err(source) = dns_owner
-                        .replace(replacement, Duration::from_secs(1), |responder| {
-                            tokio::spawn(responder.serve())
-                        })
-                        .await
-                    {
-                        break Err(SharedNetworkSupervisorError::Dns(
-                            crate::dns_responder::responder::DnsResponderError::Probe {
-                                reason: source.to_string(),
-                            },
-                        ));
-                    }
-                }
-            }
-        }
-    });
-    let shared_network_supervisor = SharedNetworkSupervisorHandle::new(
+    let shared_network_supervisor = SharedNetworkSupervisorHandle::new_with_episodes(
         request_rx,
         supervisor_task,
         guest_network_exec.supervisor(),
+        supervisor_episodes,
         supervisor_shutdown,
     );
+
+    macro_rules! refuse_after_owner_start {
+        ($error:expr) => {{
+            let error = $error;
+            FailedBootTasks {
+                convergence_shutdown,
+                convergence_task,
+                emit_drain_shutdown,
+                emit_drain_task,
+                interest_router_shutdown,
+                interest_router_task,
+                exit_observer_shutdown,
+                exit_observer_tasks,
+                mtls_worker: mtls_worker_owner,
+                mtls_resolve: mtls_resolve_owner,
+                shared_network_supervisor: Some(shared_network_supervisor),
+                dns_owner: None,
+                guest_flow_owner,
+            }
+            .shutdown()
+            .await;
+            return Err(error);
+        }};
+    }
 
     // The retained supervisor has completed the fresh-process owner
     // composition above; only now may the dependency-neutral EXEC capability
@@ -3963,7 +4505,7 @@ async fn boot_server(
     // its durable Running write and block a later public stop evaluation on
     // the same target.
     if !guest_network_exec.supervisor().open_after_boot() {
-        return Err(error::ControlPlaneError::GuestNetworkBoot(
+        refuse_after_owner_start!(error::ControlPlaneError::GuestNetworkBoot(
             guest_network::GuestNetworkError::ExecGateNotBootClosed,
         ));
     }
@@ -3984,11 +4526,16 @@ async fn boot_server(
 
     // Bind the listener synchronously so we can surface bind errors
     // before spawning the serve task.
-    let std_listener = std::net::TcpListener::bind(config.bind)
-        .map_err(|e| error::ControlPlaneError::internal(format!("bind {}", config.bind), e))?;
-    std_listener
-        .set_nonblocking(true)
-        .map_err(|e| error::ControlPlaneError::internal("set_nonblocking", e))?;
+    let std_listener = match std::net::TcpListener::bind(config.bind) {
+        Ok(listener) => listener,
+        Err(source) => refuse_after_owner_start!(error::ControlPlaneError::internal(
+            format!("bind {}", config.bind),
+            source,
+        )),
+    };
+    if let Err(source) = std_listener.set_nonblocking(true) {
+        refuse_after_owner_start!(error::ControlPlaneError::internal("set_nonblocking", source));
+    }
 
     // Write the trust triple using the RESOLVED listener address so
     // clients (tests, the CLI) load a config whose `endpoint` names
@@ -4003,11 +4550,18 @@ async fn boot_server(
     // `<data_dir>/.overdrive/config`, which the CLI never read —
     // the production-default path was broken
     // (`fix-cli-cannot-reach-control-plane`).
-    let bound = std_listener
-        .local_addr()
-        .map_err(|e| error::ControlPlaneError::internal("local_addr", e))?;
+    let bound = match std_listener.local_addr() {
+        Ok(bound) => bound,
+        Err(source) => {
+            refuse_after_owner_start!(error::ControlPlaneError::internal("local_addr", source));
+        }
+    };
     let endpoint = format!("https://{bound}");
-    tls_bootstrap::write_trust_triple(&config.operator_config_dir, &endpoint, &material)?;
+    if let Err(error) =
+        tls_bootstrap::write_trust_triple(&config.operator_config_dir, &endpoint, &material)
+    {
+        refuse_after_owner_start!(error::ControlPlaneError::from(error));
+    }
 
     let axum_handle = AxumHandle::new();
     let server =
@@ -4029,8 +4583,9 @@ async fn boot_server(
         mtls_worker_owner,
         mtls_resolve_owner,
         shared_network_supervisor,
-        flow_ports,
+        flow_ports: Some(flow_ports),
         beacon_port: None,
+        guest_flow_owner,
     })
 }
 

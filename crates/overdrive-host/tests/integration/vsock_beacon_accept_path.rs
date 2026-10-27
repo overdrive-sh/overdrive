@@ -99,7 +99,6 @@ async fn drive(
 /// with the same identities and first lines.
 /// CONTRACT_SHAPE: pure-function.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "pending DELIVER attachment-cut step (6)"]
 async fn the_beacon_listeners_accept_path_matches_the_sim_per_connection() {
     let staging = default_staging_root();
     let kit = GuestKit::provision(&staging).expect("precondition: the guest kit provisions");

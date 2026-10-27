@@ -1658,7 +1658,7 @@ async fn run_convergence_tick_inner(
                 .await
                 .map_err(ConvergenceError::Shim),
             #[cfg(not(any(test, feature = "integration-tests")))]
-            (None, Some(_)) | (Some(_), Some(_)) => {
+            (None | Some(_), Some(_)) => {
                 action_shim::dispatch_with_workflow_intent(actions, state, &tick)
                     .await
                     .map_err(ConvergenceError::Shim)

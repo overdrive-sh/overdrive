@@ -42,6 +42,7 @@ use overdrive_core::aggregate::{
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::codec::decode_envelope_bytes;
+use overdrive_core::guest_transport::GUEST_PROBE_SLOTS;
 use overdrive_core::observation::{ProbeIdx, ProbeRole};
 use proptest::prelude::*;
 
@@ -124,8 +125,15 @@ fn arb_probe_vec() -> impl Strategy<Value = Vec<ProbeDescriptor>> {
 }
 
 fn arb_service_spec_input() -> impl Strategy<Value = ServiceSpecInput> {
-    (arb_probe_vec(), arb_probe_vec(), arb_probe_vec()).prop_map(
-        |(startup_probes, readiness_probes, liveness_probes)| ServiceSpecInput {
+    (arb_probe_vec(), arb_probe_vec(), arb_probe_vec())
+        .prop_filter(
+            "combined probe count must fit guest slots",
+            |(startup, readiness, liveness)| {
+                startup.len() + readiness.len() + liveness.len()
+                    <= usize::try_from(GUEST_PROBE_SLOTS).expect("probe-slot count fits usize")
+            },
+        )
+        .prop_map(|(startup_probes, readiness_probes, liveness_probes)| ServiceSpecInput {
             id: "svc-test".to_string(),
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
@@ -139,8 +147,23 @@ fn arb_service_spec_input() -> impl Strategy<Value = ServiceSpecInput> {
             startup_probes,
             readiness_probes,
             liveness_probes,
-        },
+        })
+}
+
+fn arb_non_empty_probe_vecs()
+-> impl Strategy<Value = (Vec<ProbeDescriptor>, Vec<ProbeDescriptor>, Vec<ProbeDescriptor>)> {
+    (
+        proptest::collection::vec(arb_probe_descriptor(), 1..=3),
+        proptest::collection::vec(arb_probe_descriptor(), 1..=3),
+        proptest::collection::vec(arb_probe_descriptor(), 1..=3),
     )
+        .prop_filter(
+            "combined probe count must fit guest slots",
+            |(startup, readiness, liveness)| {
+                startup.len() + readiness.len() + liveness.len()
+                    <= usize::try_from(GUEST_PROBE_SLOTS).expect("probe-slot count fits usize")
+            },
+        )
 }
 
 // ---------------------------------------------------------------------------
@@ -434,9 +457,7 @@ proptest! {
     /// fail this regression on the other two.
     #[test]
     fn at_05_non_empty_probes_remain_non_empty_through_from_submit(
-        startup in proptest::collection::vec(arb_probe_descriptor(), 1..=3),
-        readiness in proptest::collection::vec(arb_probe_descriptor(), 1..=3),
-        liveness in proptest::collection::vec(arb_probe_descriptor(), 1..=3),
+        (startup, readiness, liveness) in arb_non_empty_probe_vecs(),
     ) {
         let input = ServiceSpecInput {
             id: "svc-guard".to_string(),

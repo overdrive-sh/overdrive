@@ -85,7 +85,6 @@ fn dial_of(
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn a_dial_watches_vh_then_writes_a_tcp_accept_request_with_the_live_token() {
     let (c, lease, _session) = serving(40).await;
     let pending = c.spawn_dial(lease.target(PORT), DialPurpose::Relay);
@@ -126,7 +125,6 @@ async fn a_dial_watches_vh_then_writes_a_tcp_accept_request_with_the_live_token(
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn paired_returns_the_stream_and_its_drop_aborts_the_watch_then_closes_vh() {
     let (c, lease, session) = serving(41).await;
     let (mut stream, flow) = paired_stream(&c, &lease, session).await;
@@ -164,7 +162,6 @@ async fn paired_returns_the_stream_and_its_drop_aborts_the_watch_then_closes_vh(
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn the_guests_refusal_is_returned_with_its_errno() {
     let (c, lease, session) = serving(42).await;
     let pending = c.spawn_dial(lease.target(PORT), DialPurpose::Relay);
@@ -194,7 +191,6 @@ async fn the_guests_refusal_is_returned_with_its_errno() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn the_guests_connect_timeout_is_returned_with_its_errno() {
     let (c, lease, session) = serving(43).await;
     let pending = c.spawn_dial(lease.target(PORT), DialPurpose::Relay);
@@ -217,7 +213,6 @@ async fn the_guests_connect_timeout_is_returned_with_its_errno() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn the_pairing_deadline_ends_a_dial_and_a_late_paired_is_discarded() {
     let (capture, _guard) = EventCapture::install();
     let (c, lease, session) = serving(44).await;
@@ -247,7 +242,6 @@ async fn the_pairing_deadline_ends_a_dial_and_a_late_paired_is_discarded() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn a_target_no_active_lease_serves_is_not_serving_with_no_state_change() {
     let (c, lease, _session) = serving(45).await;
     let before = c.observe().await;
@@ -275,7 +269,6 @@ async fn a_target_no_active_lease_serves_is_not_serving_with_no_state_change() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn a_provisioned_lease_is_not_serving() {
     let c = Composition::booted(46).await;
     let lease = c.lease("inb1-prov", &[PORT]).await;
@@ -294,7 +287,6 @@ async fn a_provisioned_lease_is_not_serving() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn a_dial_while_quiesced_is_quiesced_with_no_state_change() {
     let (c, lease, _session) = serving(47).await;
     let (hold, _) = c.owner.quiesce().await;
@@ -316,7 +308,6 @@ async fn a_dial_while_quiesced_is_quiesced_with_no_state_change() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn a_dial_after_observed_session_loss_is_no_session() {
     let (c, lease, session) = serving(48).await;
     c.io.end_connection(session, SimPeerEnd::Eof);
@@ -341,7 +332,6 @@ async fn a_dial_after_observed_session_loss_is_no_session() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn a_dial_to_a_gone_vm_whose_loss_is_unobserved_is_unreachable() {
     let (c, lease, session) = serving(49).await;
     c.io.set_auto_deliver(false);
@@ -365,7 +355,6 @@ async fn a_dial_to_a_gone_vm_whose_loss_is_unobserved_is_unreachable() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn a_vmm_exit_during_a_dial_is_unreachable_reset() {
     let (c, lease, _session) = serving(50).await;
     let pending = c.spawn_dial(lease.target(PORT), DialPurpose::Relay);
@@ -387,7 +376,6 @@ async fn a_vmm_exit_during_a_dial_is_unreachable_reset() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn teardown_ends_a_pending_dial_with_not_serving() {
     let (c, lease, _session) = serving(51).await;
     let pending = c.spawn_dial(lease.target(PORT), DialPurpose::Relay);
@@ -404,7 +392,6 @@ async fn teardown_ends_a_pending_dial_with_not_serving() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn quiescence_ends_a_pending_dial_with_quiesced_and_sends_abort() {
     let (c, lease, _session) = serving(52).await;
     let pending = c.spawn_dial(lease.target(PORT), DialPurpose::Relay);
@@ -425,7 +412,6 @@ async fn quiescence_ends_a_pending_dial_with_quiesced_and_sends_abort() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn session_loss_ends_a_pending_dial_with_no_session() {
     let (c, lease, session) = serving(53).await;
     let pending = c.spawn_dial(lease.target(PORT), DialPurpose::Relay);
@@ -444,7 +430,6 @@ async fn session_loss_ends_a_pending_dial_with_no_session() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn a_dropped_dial_future_ends_the_dial_like_the_pairing_deadline() {
     let (c, lease, session) = serving(54).await;
     let pending = c.spawn_dial(lease.target(PORT), DialPurpose::Relay);
@@ -469,7 +454,6 @@ async fn a_dropped_dial_future_ends_the_dial_like_the_pairing_deadline() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn the_quota_refuses_relay_dials_with_capacity_and_exempts_probe_dials() {
     let (c, lease, _session) = serving(55).await;
     let quota = usize::try_from(GUEST_FLOW_MAX_PAIRS_PER_ALLOCATION).expect("fits usize");
@@ -512,7 +496,6 @@ async fn the_quota_refuses_relay_dials_with_capacity_and_exempts_probe_dials() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn teardown_releases_every_dial_and_stream_of_the_allocation() {
     let (c, lease, session) = serving(56).await;
     let (mut stream, _flow) = paired_stream(&c, &lease, session).await;
@@ -534,7 +517,6 @@ async fn teardown_releases_every_dial_and_stream_of_the_allocation() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn a_stream_reports_the_guests_half_close_and_keeps_its_own_direction() {
     let (c, lease, session) = serving(57).await;
     let (mut stream, flow) = paired_stream(&c, &lease, session).await;
@@ -580,7 +562,6 @@ async fn a_stream_reports_the_guests_half_close_and_keeps_its_own_direction() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn a_guest_abort_is_reported_as_a_reset_whatever_the_read_returned() {
     let (c, lease, session) = serving(58).await;
     let (mut stream, flow) = paired_stream(&c, &lease, session).await;
@@ -601,7 +582,6 @@ async fn a_guest_abort_is_reported_as_a_reset_whatever_the_read_returned() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn an_owner_abort_ends_a_blocked_read_at_once_and_leaves_vh_untouched() {
     let (c, lease, session) = serving(59).await;
     let (mut stream, flow) = paired_stream(&c, &lease, session).await;
@@ -642,11 +622,10 @@ async fn an_owner_abort_ends_a_blocked_read_at_once_and_leaves_vh_untouched() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn a_vmm_exit_is_resolved_from_the_record_in_flight() {
     let (c, lease, session) = serving(60).await;
     let (stream, _flow) = paired_stream(&c, &lease, session).await;
-    c.io.vm_stop_before_callbacks(lease.cid);
+    c.io.vm_stop_before_callbacks(lease.cid, lease.launch);
     let reader = tokio::spawn(async move {
         let mut stream = stream;
         let mut buf = [0_u8; 8];
@@ -672,7 +651,6 @@ async fn a_vmm_exit_is_resolved_from_the_record_in_flight() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn the_forwarder_recovery_ends_streams_then_reopens_the_context() {
     let (c, lease, session) = serving(61).await;
     let (mut stream, _flow) = paired_stream(&c, &lease, session).await;
@@ -698,8 +676,19 @@ async fn the_forwarder_recovery_ends_streams_then_reopens_the_context() {
     let repaired = c.observe().await;
     assert_eq!(repaired.forwarder_generation, generation.next().expect("a next generation"));
     let contexts = c.io.forwarder_contexts();
-    assert_eq!(contexts.len(), 2);
-    assert!(!contexts[0].open && contexts[0].live_pairs == 0 && contexts[0].live_watches == 0);
+    assert_eq!(contexts.len(), 3, "phase-1 probe, old serving, replacement serving");
+    assert!(
+        !contexts[0].open && contexts[0].live_pairs == 0 && contexts[0].live_watches == 0,
+        "the phase-1 probe context is released empty"
+    );
+    assert!(
+        !contexts[1].open && contexts[1].live_pairs == 0 && contexts[1].live_watches == 0,
+        "the old serving context is released empty before replacement"
+    );
+    assert!(
+        contexts[2].open && contexts[2].live_pairs == 0 && contexts[2].live_watches == 0,
+        "the replacement serving context is open and initially empty"
+    );
     c.owner.audit_shared().await.expect("the audit after the repair is clean");
     assert_eq!(c.owner.restore(hold).await, Ok(ForwardingRestore::Reopened));
     drop(stream);
@@ -720,7 +709,6 @@ async fn the_forwarder_recovery_ends_streams_then_reopens_the_context() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn a_context_release_is_reported_as_the_owners_abort() {
     let (c, lease, session) = serving(64).await;
     let (mut stream, flow) = paired_stream(&c, &lease, session).await;
@@ -757,7 +745,6 @@ async fn a_context_release_is_reported_as_the_owners_abort() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn a_paired_for_a_quiesced_dial_is_discarded_with_no_reply() {
     let (capture, _guard) = EventCapture::install();
     let (c, lease, session) = serving(62).await;
@@ -784,7 +771,6 @@ async fn a_paired_for_a_quiesced_dial_is_discarded_with_no_reply() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn a_dial_aborted_by_session_loss_writes_nothing_more_and_a_new_dial_pairs() {
     let (c, lease, session) = serving(63).await;
     let pending = c.spawn_dial(lease.target(PORT), DialPurpose::Relay);

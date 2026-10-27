@@ -25,6 +25,7 @@ State 1
   drvLive = false
   bclaim = 0
   bcn = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 0, st: "none" })
+  bq = List()
   readyCross = false
   bHeldByOther = false
   act = "none"
@@ -60,9 +61,9 @@ State 9
   sess = Map(1 -> { gen: 1, st: "checked" }, 2 -> { gen: 1, st: "checked" })
 
 State 10
-  claim = 2
-  sess = Map(1 -> { gen: 1, st: "checked" }, 2 -> { gen: 1, st: "live" })
+  claim = 1
+  sess = Map(1 -> { gen: 1, st: "live" }, 2 -> { gen: 1, st: "checked" })
 
 State 11
-  claim = 1
+  claim = 2
   sess = Map(1 -> { gen: 1, st: "live" }, 2 -> { gen: 1, st: "live" })

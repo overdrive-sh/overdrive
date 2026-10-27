@@ -41,7 +41,7 @@ use overdrive_control_plane::action_shim::{
     ShimError, WorkloadNetworkProvisioner, dispatch, dispatch_with_network_provisioner,
 };
 use overdrive_control_plane::veth_provisioner::{
-    NET_SLOT_MAX, NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
+    NET_SLOT_MAX, NetSlotAllocator, VethProvisionError, WorkloadNetnsPlan,
 };
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
@@ -170,11 +170,7 @@ impl CountingNetworkProvisioner {
 }
 
 impl WorkloadNetworkProvisioner for CountingNetworkProvisioner {
-    fn provision(
-        &self,
-        _workload: &WorkloadNetnsPlan,
-        _vm_tap: &VmTapPlan,
-    ) -> Result<(), VethProvisionError> {
+    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
         Ok(())
     }
 
@@ -216,11 +212,7 @@ impl ProvisionFailureNetwork {
 }
 
 impl WorkloadNetworkProvisioner for ProvisionFailureNetwork {
-    fn provision(
-        &self,
-        _workload: &WorkloadNetnsPlan,
-        _vm_tap: &VmTapPlan,
-    ) -> Result<(), VethProvisionError> {
+    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
         self.trace.lock().push("provision");
         Err(Self::error("provision"))
     }

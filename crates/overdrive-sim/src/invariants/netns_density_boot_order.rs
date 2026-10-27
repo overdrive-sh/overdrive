@@ -37,7 +37,6 @@ mod tests {
     use overdrive_core::traits::driver::{Driver, DriverType};
     use overdrive_core::traits::observation_store::ObservationStore;
     use overdrive_core::traits::vm_host_state::VmHostState;
-    use overdrive_worker::cgroup_manager::CgroupManager;
     use overdrive_worker::mtls_intercept::{InterceptPostcondition, Result as InterceptResult};
     use overdrive_worker::mtls_intercept_port::{
         InterceptGuard, InterceptListener, InterceptMembers, InterceptState, MtlsIntercept,
@@ -565,10 +564,6 @@ mod tests {
         read_back
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one seeded scenario: seed the prior VM, boot over the host bundle, read back the order"
-    )]
     async fn run_seed(seed: u64) {
         eprintln!(
             "seed={seed} invariant=reclamation_completes_before_stale_shared_network_sweep_for_every_seeded_prior_vm"
@@ -632,18 +627,11 @@ mod tests {
         let supervisor = wiring.supervisor();
         intercept.bind_supervisor(Arc::clone(&supervisor));
 
-        let handle = run_server_with_obs_and_driver(
-            config,
-            boot,
-            driver,
-            owner_port,
-            wiring,
-            CgroupManager::new(PathBuf::from("/sys/fs/cgroup"), Arc::new(SimCgroupFs::new())),
-        )
-        .await
-        .unwrap_or_else(|error| {
-            panic!("seed={seed}: production boot failed before oracle: {error}")
-        });
+        let handle = run_server_with_obs_and_driver(config, boot, driver, owner_port, wiring)
+            .await
+            .unwrap_or_else(|error| {
+                panic!("seed={seed}: production boot failed before oracle: {error}")
+            });
         let recorded = intercept.calls();
         let opened = !supervisor.is_boot_closed();
 

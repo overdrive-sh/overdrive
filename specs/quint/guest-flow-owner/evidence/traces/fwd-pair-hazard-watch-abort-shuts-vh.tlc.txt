@@ -62,6 +62,7 @@ State 1: <Initial predicate>
         sshut |-> FALSE,
         misc |-> FALSE,
         st |-> "est" ] ]
+/\ pair_bugWatchAbortShutsVh_fwd_pair_strmHeld = FALSE
 /\ pair_bugWatchAbortShutsVh_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
 /\ pair_bugWatchAbortShutsVh_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugWatchAbortShutsVh_fwd_pair_dg = [ gh |->
@@ -130,7 +131,140 @@ State 1: <Initial predicate>
         cgen |-> 0 ] ]
 /\ pair_bugWatchAbortShutsVh_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
 
-State 2: <pair_bugWatchAbortShutsVh_fwd_pair_Abort line 3644, col 3 to line 3651, col 52 of module pair_bugWatchAbortShutsVh>
+State 2: <pair_bugWatchAbortShutsVh_fwd_pair_Attach line 4037, col 3 to line 4047, col 78 of module pair_bugWatchAbortShutsVh>
+/\ pair_bugWatchAbortShutsVh_fwd_pair_conf_step = [InitWith |-> [m |-> "watch"]]
+/\ pair_bugWatchAbortShutsVh_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
+/\ pair_bugWatchAbortShutsVh_fwd_pair_mode = "watch"
+/\ pair_bugWatchAbortShutsVh_fwd_pair_dir = [ gh |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ],
+  hg |->
+      [ wr |-> 0,
+        wfin |-> FALSE,
+        q0 |-> <<>>,
+        q1 |-> <<>>,
+        q2 |-> <<>>,
+        srcEnd |-> "none",
+        srcShut |-> FALSE,
+        dstEnd |-> "none",
+        dstShut |-> FALSE,
+        got |-> <<>>,
+        eof |-> FALSE,
+        rst |-> FALSE,
+        shutRd |-> FALSE,
+        loss |-> FALSE,
+        lost |-> 0 ] ]
+/\ pair_bugWatchAbortShutsVh_fwd_pair_vs = [ g |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "noend",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ],
+  h |->
+      [ ps |-> {},
+        sent |-> {},
+        err |-> FALSE,
+        cls |-> "none",
+        tcls |-> "none",
+        ucls |-> "none",
+        att |-> "none",
+        clsAt |-> "none",
+        ncls |-> 0,
+        snap |-> {},
+        sshut |-> FALSE,
+        misc |-> FALSE,
+        st |-> "est" ] ]
+/\ pair_bugWatchAbortShutsVh_fwd_pair_strmHeld = TRUE
+/\ pair_bugWatchAbortShutsVh_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
+/\ pair_bugWatchAbortShutsVh_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugWatchAbortShutsVh_fwd_pair_dg = [ gh |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ],
+  hg |->
+      [ got |-> <<>>,
+        n |-> 0,
+        sizes |-> <<>>,
+        dq0 |-> <<>>,
+        foff |-> 0,
+        blk |-> FALSE,
+        dq2 |-> <<>>,
+        sdrop |-> {},
+        rdrop |-> {},
+        fdrop |-> {} ] ]
+/\ pair_bugWatchAbortShutsVh_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
+/\ pair_bugWatchAbortShutsVh_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
+/\ pair_bugWatchAbortShutsVh_fwd_pair_vmUp = TRUE
+/\ pair_bugWatchAbortShutsVh_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
+  fwdOld |-> FALSE,
+  unclassified |-> FALSE,
+  rstOpen |-> {},
+  holderReadAfterAbort |-> FALSE,
+  trail |-> {},
+  faults |-> 0,
+  hobs |-> "none",
+  woken |-> FALSE,
+  vhTouched |-> FALSE,
+  dropped |-> FALSE,
+  hostDead |-> FALSE,
+  hresCls |-> "none" ]
+/\ pair_bugWatchAbortShutsVh_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
+/\ pair_bugWatchAbortShutsVh_fwd_pair_hres = "none"
+/\ pair_bugWatchAbortShutsVh_fwd_pair_guestAbortSent = FALSE
+/\ pair_bugWatchAbortShutsVh_fwd_pair_gen = [g |-> 0, h |-> 0]
+/\ pair_bugWatchAbortShutsVh_fwd_pair_attEnded = [g |-> 0, h |-> 0]
+/\ pair_bugWatchAbortShutsVh_fwd_pair_strmAbort = FALSE
+/\ pair_bugWatchAbortShutsVh_fwd_pair_pr = [ g |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ],
+  h |->
+      [ ph |-> "live",
+        rec |-> "none",
+        out |-> "none",
+        cause |-> "none",
+        errno |-> "none",
+        byRel |-> FALSE,
+        closed |-> FALSE,
+        nrec |-> 0,
+        cgen |-> 0 ] ]
+/\ pair_bugWatchAbortShutsVh_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
+
+State 3: <pair_bugWatchAbortShutsVh_fwd_pair_Abort line 3840, col 3 to line 3847, col 52 of module pair_bugWatchAbortShutsVh>
 /\ pair_bugWatchAbortShutsVh_fwd_pair_conf_step = [InitWith |-> [m |-> "watch"]]
 /\ pair_bugWatchAbortShutsVh_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugWatchAbortShutsVh_fwd_pair_mode = "watch"
@@ -173,7 +307,7 @@ State 2: <pair_bugWatchAbortShutsVh_fwd_pair_Abort line 3644, col 3 to line 3651
         cls |-> "none",
         tcls |-> "none",
         ucls |-> "none",
-        att |-> "none",
+        att |-> "noend",
         clsAt |-> "none",
         ncls |-> 0,
         snap |-> {},
@@ -194,6 +328,7 @@ State 2: <pair_bugWatchAbortShutsVh_fwd_pair_Abort line 3644, col 3 to line 3651
         sshut |-> TRUE,
         misc |-> FALSE,
         st |-> "est" ] ]
+/\ pair_bugWatchAbortShutsVh_fwd_pair_strmHeld = TRUE
 /\ pair_bugWatchAbortShutsVh_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<{"S", "R"}>>]
 /\ pair_bugWatchAbortShutsVh_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugWatchAbortShutsVh_fwd_pair_dg = [ gh |->
@@ -234,14 +369,14 @@ State 2: <pair_bugWatchAbortShutsVh_fwd_pair_Abort line 3644, col 3 to line 3651
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
-/\ pair_bugWatchAbortShutsVh_fwd_pair_attRes = [g |-> "none", h |-> "ok"]
+/\ pair_bugWatchAbortShutsVh_fwd_pair_attRes = [g |-> "ok", h |-> "ok"]
 /\ pair_bugWatchAbortShutsVh_fwd_pair_hres = "none"
 /\ pair_bugWatchAbortShutsVh_fwd_pair_guestAbortSent = TRUE
 /\ pair_bugWatchAbortShutsVh_fwd_pair_gen = [g |-> 0, h |-> 0]
 /\ pair_bugWatchAbortShutsVh_fwd_pair_attEnded = [g |-> 0, h |-> 0]
 /\ pair_bugWatchAbortShutsVh_fwd_pair_strmAbort = TRUE
 /\ pair_bugWatchAbortShutsVh_fwd_pair_pr = [ g |->
-      [ ph |-> "unattached",
+      [ ph |-> "live",
         rec |-> "none",
         out |-> "none",
         cause |-> "none",

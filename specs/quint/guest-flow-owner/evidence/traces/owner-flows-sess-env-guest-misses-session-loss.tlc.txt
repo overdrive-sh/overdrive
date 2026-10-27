@@ -18,6 +18,7 @@ State 1: <Initial predicate>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_badAct = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostPaired = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_claim = 0
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bq = <<>>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_readyCross = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostRefused = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_dl = [res |-> << >>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE]
@@ -30,12 +31,45 @@ State 1: <Initial predicate>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toGuestAbort = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_flows = << >>
 
-State 2: <flows_sess_envGuestMissesSessionLoss_owner_flows_Provision line 1234, col 3 to line 1267, col 61 of module flows_sess_envGuestMissesSessionLoss>
+State 2: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3924, col 9 to line 3925, col 66 of module flows_sess_envGuestMissesSessionLoss>
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bHeldByOther = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_vmGen = 0
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_heldByOther = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_gen = 0
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = TRUE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_resurrected = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_crossMsg = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_gSess = 0
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_phantom = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_alloc = "Absent"
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_badPaired = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_act = "none"
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_abortDiscarded = {}
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_drvLive = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_badAct = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostPaired = {}
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_claim = 0
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bq = <<>>
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_readyCross = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostRefused = {}
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_dl = [res |-> << >>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE]
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bclaim = 0
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_vmUp = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_gf = << >>
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_hf = << >>
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostAbort = {}
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_toGuestAbort = {}
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_flows = << >>
+
+State 3: <flows_sess_envGuestMissesSessionLoss_owner_flows_Provision line 1247, col 3 to line 1280, col 61 of module flows_sess_envGuestMissesSessionLoss>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_bHeldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_vmGen = 0
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_heldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_gen = 1
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = TRUE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_resurrected = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_crossMsg = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_gSess = 0
@@ -50,6 +84,7 @@ State 2: <flows_sess_envGuestMissesSessionLoss_owner_flows_Provision line 1234, 
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_badAct = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostPaired = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_claim = 0
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bq = <<>>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_readyCross = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostRefused = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_dl = [res |-> << >>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE]
@@ -62,12 +97,12 @@ State 2: <flows_sess_envGuestMissesSessionLoss_owner_flows_Provision line 1234, 
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toGuestAbort = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_flows = << >>
 
-State 3: <flows_sess_envGuestMissesSessionLoss_owner_flows_VmStart line 798, col 3 to line 837, col 63 of module flows_sess_envGuestMissesSessionLoss>
+State 4: <flows_sess_envGuestMissesSessionLoss_owner_flows_VmStart line 807, col 3 to line 848, col 63 of module flows_sess_envGuestMissesSessionLoss>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_bHeldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_vmGen = 1
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_heldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_gen = 1
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = TRUE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_resurrected = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_crossMsg = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_gSess = 0
@@ -82,6 +117,7 @@ State 3: <flows_sess_envGuestMissesSessionLoss_owner_flows_VmStart line 798, col
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_badAct = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostPaired = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_claim = 0
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bq = <<>>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_readyCross = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostRefused = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_dl = [res |-> << >>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE]
@@ -94,12 +130,12 @@ State 3: <flows_sess_envGuestMissesSessionLoss_owner_flows_VmStart line 798, col
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toGuestAbort = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_flows = << >>
 
-State 4: <flows_sess_envGuestMissesSessionLoss_owner_flows_Teardown line 1332, col 3 to line 1390, col 61 of module flows_sess_envGuestMissesSessionLoss>
+State 5: <flows_sess_envGuestMissesSessionLoss_owner_flows_Teardown line 1346, col 3 to line 1404, col 61 of module flows_sess_envGuestMissesSessionLoss>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_bHeldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_vmGen = 1
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_heldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_gen = 1
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = TRUE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_resurrected = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_crossMsg = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_gSess = 0
@@ -114,6 +150,7 @@ State 4: <flows_sess_envGuestMissesSessionLoss_owner_flows_Teardown line 1332, c
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_badAct = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostPaired = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_claim = 0
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bq = <<>>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_readyCross = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostRefused = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_dl = [res |-> << >>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE]
@@ -126,12 +163,12 @@ State 4: <flows_sess_envGuestMissesSessionLoss_owner_flows_Teardown line 1332, c
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toGuestAbort = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_flows = << >>
 
-State 5: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3903, col 9 to line 3904, col 66 of module flows_sess_envGuestMissesSessionLoss>
+State 6: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3924, col 9 to line 3925, col 66 of module flows_sess_envGuestMissesSessionLoss>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_bHeldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_vmGen = 1
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_heldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_gen = 1
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = TRUE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_resurrected = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_crossMsg = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_gSess = 1
@@ -146,6 +183,7 @@ State 5: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3903, col 9
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_badAct = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostPaired = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_claim = 0
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bq = <<>>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_readyCross = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostRefused = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_dl = [res |-> << >>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE]
@@ -158,12 +196,12 @@ State 5: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3903, col 9
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toGuestAbort = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_flows = << >>
 
-State 6: <flows_sess_envGuestMissesSessionLoss_owner_flows_VmStop line 843, col 3 to line 1041, col 63 of module flows_sess_envGuestMissesSessionLoss>
+State 7: <flows_sess_envGuestMissesSessionLoss_owner_flows_VmStop line 854, col 3 to line 1054, col 63 of module flows_sess_envGuestMissesSessionLoss>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_bHeldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_vmGen = 1
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_heldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_gen = 1
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = TRUE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_resurrected = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_crossMsg = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_gSess = 0
@@ -178,6 +216,7 @@ State 6: <flows_sess_envGuestMissesSessionLoss_owner_flows_VmStop line 843, col 
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_badAct = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostPaired = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_claim = 0
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bq = <<>>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_readyCross = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostRefused = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_dl = [res |-> << >>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE]
@@ -190,12 +229,12 @@ State 6: <flows_sess_envGuestMissesSessionLoss_owner_flows_VmStop line 843, col 
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toGuestAbort = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_flows = << >>
 
-State 7: <flows_sess_envGuestMissesSessionLoss_owner_flows_Release line 1396, col 3 to line 1425, col 61 of module flows_sess_envGuestMissesSessionLoss>
+State 8: <flows_sess_envGuestMissesSessionLoss_owner_flows_Release line 1410, col 3 to line 1439, col 61 of module flows_sess_envGuestMissesSessionLoss>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_bHeldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_vmGen = 1
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_heldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_gen = 1
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = TRUE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_resurrected = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_crossMsg = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_gSess = 0
@@ -210,6 +249,7 @@ State 7: <flows_sess_envGuestMissesSessionLoss_owner_flows_Release line 1396, co
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_badAct = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostPaired = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_claim = 0
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bq = <<>>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_readyCross = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostRefused = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_dl = [res |-> << >>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE]
@@ -222,12 +262,12 @@ State 7: <flows_sess_envGuestMissesSessionLoss_owner_flows_Release line 1396, co
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toGuestAbort = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_flows = << >>
 
-State 8: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3903, col 9 to line 3904, col 66 of module flows_sess_envGuestMissesSessionLoss>
+State 9: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3924, col 9 to line 3925, col 66 of module flows_sess_envGuestMissesSessionLoss>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_bHeldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_vmGen = 1
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_heldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_gen = 1
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = TRUE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_resurrected = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_crossMsg = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_gSess = 0
@@ -242,6 +282,7 @@ State 8: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3903, col 9
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_badAct = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostPaired = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_claim = 0
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bq = <<>>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_readyCross = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostRefused = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_dl = [res |-> << >>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE]
@@ -254,12 +295,12 @@ State 8: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3903, col 9
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toGuestAbort = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_flows = << >>
 
-State 9: <flows_sess_envGuestMissesSessionLoss_owner_flows_Provision line 1234, col 3 to line 1267, col 61 of module flows_sess_envGuestMissesSessionLoss>
+State 10: <flows_sess_envGuestMissesSessionLoss_owner_flows_Provision line 1247, col 3 to line 1280, col 61 of module flows_sess_envGuestMissesSessionLoss>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_bHeldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_vmGen = 1
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_heldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_gen = 2
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = TRUE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_resurrected = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_crossMsg = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_gSess = 0
@@ -274,6 +315,7 @@ State 9: <flows_sess_envGuestMissesSessionLoss_owner_flows_Provision line 1234, 
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_badAct = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostPaired = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_claim = 0
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bq = <<>>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_readyCross = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostRefused = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_dl = [res |-> << >>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE]
@@ -286,12 +328,12 @@ State 9: <flows_sess_envGuestMissesSessionLoss_owner_flows_Provision line 1234, 
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toGuestAbort = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_flows = << >>
 
-State 10: <flows_sess_envGuestMissesSessionLoss_owner_flows_VmStart line 798, col 3 to line 837, col 63 of module flows_sess_envGuestMissesSessionLoss>
+State 11: <flows_sess_envGuestMissesSessionLoss_owner_flows_VmStart line 807, col 3 to line 848, col 63 of module flows_sess_envGuestMissesSessionLoss>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_bHeldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_vmGen = 2
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_heldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_gen = 2
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = TRUE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_resurrected = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_crossMsg = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_gSess = 0
@@ -306,6 +348,7 @@ State 10: <flows_sess_envGuestMissesSessionLoss_owner_flows_VmStart line 798, co
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_badAct = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostPaired = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_claim = 0
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bq = <<>>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_readyCross = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostRefused = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_dl = [res |-> << >>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE]
@@ -318,12 +361,12 @@ State 10: <flows_sess_envGuestMissesSessionLoss_owner_flows_VmStart line 798, co
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toGuestAbort = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_flows = << >>
 
-State 11: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3903, col 9 to line 3904, col 66 of module flows_sess_envGuestMissesSessionLoss>
+State 12: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3924, col 9 to line 3925, col 66 of module flows_sess_envGuestMissesSessionLoss>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_bHeldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_vmGen = 2
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_heldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_gen = 2
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = TRUE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_resurrected = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_crossMsg = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_gSess = 2
@@ -338,6 +381,7 @@ State 11: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3903, col 
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_badAct = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostPaired = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_claim = 0
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bq = <<>>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_readyCross = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostRefused = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_dl = [res |-> << >>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE]
@@ -350,12 +394,12 @@ State 11: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3903, col 
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toGuestAbort = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_flows = << >>
 
-State 12: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3903, col 9 to line 3904, col 66 of module flows_sess_envGuestMissesSessionLoss>
+State 13: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3924, col 9 to line 3925, col 66 of module flows_sess_envGuestMissesSessionLoss>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_bHeldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_vmGen = 2
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_heldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_gen = 2
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = TRUE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_resurrected = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_crossMsg = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_gSess = 2
@@ -370,6 +414,7 @@ State 12: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3903, col 
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_badAct = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostPaired = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_claim = 0
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bq = <<>>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_readyCross = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostRefused = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_dl = [res |-> << >>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE]
@@ -382,12 +427,12 @@ State 12: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3903, col 
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toGuestAbort = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_flows = << >>
 
-State 13: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3903, col 9 to line 3904, col 66 of module flows_sess_envGuestMissesSessionLoss>
+State 14: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3924, col 9 to line 3925, col 66 of module flows_sess_envGuestMissesSessionLoss>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_bHeldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_vmGen = 2
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_heldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_gen = 2
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = TRUE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_resurrected = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_crossMsg = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_gSess = 2
@@ -402,6 +447,7 @@ State 13: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3903, col 
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_badAct = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostPaired = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_claim = 2
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bq = <<>>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_readyCross = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostRefused = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_dl = [res |-> << >>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE]
@@ -414,39 +460,7 @@ State 13: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3903, col 
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toGuestAbort = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_flows = << >>
 
-State 14: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3903, col 9 to line 3904, col 66 of module flows_sess_envGuestMissesSessionLoss>
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bHeldByOther = FALSE
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_vmGen = 2
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_heldByOther = FALSE
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_gen = 2
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = FALSE
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_resurrected = FALSE
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_crossMsg = FALSE
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_gSess = 2
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_phantom = FALSE
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_sess = <<[st |-> "closed", gen |-> 1], [st |-> "closed", gen |-> 2]>>
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_alloc = "Provisioned"
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_badPaired = FALSE
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_act = "none"
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_abortDiscarded = {}
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_drvLive = FALSE
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_badAct = FALSE
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostPaired = {}
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_claim = 0
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_readyCross = FALSE
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostRefused = {}
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_dl = [res |-> << >>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE]
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bclaim = 0
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_vmUp = TRUE
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_gf = << >>
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_hf = << >>
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostAbort = {}
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_toGuestAbort = {}
-/\ flows_sess_envGuestMissesSessionLoss_owner_flows_flows = << >>
-
-State 15: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3903, col 9 to line 3904, col 66 of module flows_sess_envGuestMissesSessionLoss>
+State 15: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3924, col 9 to line 3925, col 66 of module flows_sess_envGuestMissesSessionLoss>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_bHeldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_vmGen = 2
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_heldByOther = FALSE
@@ -466,6 +480,7 @@ State 15: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3903, col 
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_badAct = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostPaired = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_claim = 0
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bq = <<>>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_readyCross = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostRefused = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_dl = [res |-> << >>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE]
@@ -478,7 +493,7 @@ State 15: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3903, col 
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toGuestAbort = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_flows = << >>
 
-State 16: <flows_sess_envGuestMissesSessionLoss_owner_flows_ActivateQuiesced line 1300, col 3 to line 1311, col 70 of module flows_sess_envGuestMissesSessionLoss>
+State 16: <flows_sess_envGuestMissesSessionLoss_owner_flows_ActivateQuiesced line 1314, col 3 to line 1325, col 70 of module flows_sess_envGuestMissesSessionLoss>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_bHeldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_vmGen = 2
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_heldByOther = FALSE
@@ -498,6 +513,7 @@ State 16: <flows_sess_envGuestMissesSessionLoss_owner_flows_ActivateQuiesced lin
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_badAct = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostPaired = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_claim = 0
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bq = <<>>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_readyCross = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostRefused = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_dl = [res |-> << >>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE]
@@ -510,7 +526,7 @@ State 16: <flows_sess_envGuestMissesSessionLoss_owner_flows_ActivateQuiesced lin
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toGuestAbort = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_flows = << >>
 
-State 17: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3903, col 9 to line 3904, col 66 of module flows_sess_envGuestMissesSessionLoss>
+State 17: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3924, col 9 to line 3925, col 66 of module flows_sess_envGuestMissesSessionLoss>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_bHeldByOther = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_vmGen = 2
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_heldByOther = FALSE
@@ -530,6 +546,7 @@ State 17: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3903, col 
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_badAct = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostPaired = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_claim = 0
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bq = <<>>
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_readyCross = FALSE
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostRefused = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_dl = [res |-> << >>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE]
@@ -542,4 +559,37 @@ State 17: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3903, col 
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_toGuestAbort = {}
 /\ flows_sess_envGuestMissesSessionLoss_owner_flows_flows = << >>
 
-Back to state 15: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3903, col 9 to line 3904, col 66 of module flows_sess_envGuestMissesSessionLoss>
+State 18: <flows_sess_envGuestMissesSessionLoss_owner_flows_step line 3924, col 9 to line 3925, col 66 of module flows_sess_envGuestMissesSessionLoss>
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bHeldByOther = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_vmGen = 2
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_heldByOther = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_gen = 2
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_quiesced = TRUE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_resurrected = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_crossMsg = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_gSess = 2
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_phantom = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_sess = <<[st |-> "closed", gen |-> 1], [st |-> "closed", gen |-> 2]>>
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_alloc = "Provisioned"
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_badPaired = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_act = "none"
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_abortDiscarded = {}
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_drvLive = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_badAct = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostPaired = {}
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_claim = 0
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bq = <<>>
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_readyCross = FALSE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostRefused = {}
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_dl = [res |-> << >>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE]
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_bclaim = 0
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_vmUp = TRUE
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_gf = << >>
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_hf = << >>
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_toHostAbort = {}
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_toGuestAbort = {}
+/\ flows_sess_envGuestMissesSessionLoss_owner_flows_flows = << >>
+
+Back to state 16: <flows_sess_envGuestMissesSessionLoss_owner_flows_ActivateQuiesced line 1314, col 3 to line 1325, col 70 of module flows_sess_envGuestMissesSessionLoss>

@@ -100,6 +100,12 @@ async fn build_state_with_clock(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppStat
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
     );
+    let guest_owner = crate::acceptance::serve_ports::owner();
+    overdrive_control_plane::guest_network::SharedGuestNetworkOwner::converge_shared(
+        guest_owner.as_ref(),
+    )
+    .await
+    .expect("the fixture's shared guest-network owner is converged");
     AppState::new(
         store,
         store_path,
@@ -117,7 +123,7 @@ async fn build_state_with_clock(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppStat
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
         crate::acceptance::serve_ports::worker(),
-        crate::acceptance::serve_ports::owner(),
+        guest_owner,
         crate::acceptance::serve_ports::exec_gate(),
         crate::acceptance::serve_ports::pool(),
     )
@@ -130,7 +136,6 @@ async fn build_state_with_clock(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppStat
 /// / `SystemTime::now()` directly (the failure mode the §18 contract
 /// forbids), the call count stays at zero.
 #[tokio::test]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 row 2: GuestAddressPool::assign)"]
 async fn run_convergence_tick_populates_now_unix_from_state_clock() {
     let tmp = TempDir::new().expect("tempdir");
     let sim = Arc::new(SimClock::new());

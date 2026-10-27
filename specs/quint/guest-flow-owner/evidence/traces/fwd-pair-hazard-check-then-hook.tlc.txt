@@ -129,8 +129,9 @@ State 1: <Initial predicate>
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
+/\ pair_bugCheckThenHook_fwd_pair_strmHeld = FALSE
 
-State 2: <pair_bugCheckThenHook_fwd_pair_AttachRead line 1304, col 3 to line 1323, col 78 of module pair_bugCheckThenHook>
+State 2: <pair_bugCheckThenHook_fwd_pair_AttachRead line 1350, col 3 to line 1369, col 78 of module pair_bugCheckThenHook>
 /\ pair_bugCheckThenHook_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugCheckThenHook_fwd_pair_dir = [ gh |->
       [ wr |-> 0,
@@ -261,8 +262,9 @@ State 2: <pair_bugCheckThenHook_fwd_pair_AttachRead line 1304, col 3 to line 132
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
+/\ pair_bugCheckThenHook_fwd_pair_strmHeld = FALSE
 
-State 3: <pair_bugCheckThenHook_fwd_pair_AttachHook line 3588, col 3 to line 3597, col 78 of module pair_bugCheckThenHook>
+State 3: <pair_bugCheckThenHook_fwd_pair_AttachHook line 3994, col 3 to line 4003, col 78 of module pair_bugCheckThenHook>
 /\ pair_bugCheckThenHook_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugCheckThenHook_fwd_pair_dir = [ gh |->
       [ wr |-> 0,
@@ -393,8 +395,9 @@ State 3: <pair_bugCheckThenHook_fwd_pair_AttachHook line 3588, col 3 to line 359
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
+/\ pair_bugCheckThenHook_fwd_pair_strmHeld = FALSE
 
-State 4: <pair_bugCheckThenHook_fwd_pair_AttachRead line 1304, col 3 to line 1323, col 78 of module pair_bugCheckThenHook>
+State 4: <pair_bugCheckThenHook_fwd_pair_AttachRead line 1350, col 3 to line 1369, col 78 of module pair_bugCheckThenHook>
 /\ pair_bugCheckThenHook_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugCheckThenHook_fwd_pair_dir = [ gh |->
       [ wr |-> 0,
@@ -525,8 +528,9 @@ State 4: <pair_bugCheckThenHook_fwd_pair_AttachRead line 1304, col 3 to line 132
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
+/\ pair_bugCheckThenHook_fwd_pair_strmHeld = FALSE
 
-State 5: <pair_bugCheckThenHook_fwd_pair_Fin line 1634, col 3 to line 1671, col 72 of module pair_bugCheckThenHook>
+State 5: <pair_bugCheckThenHook_fwd_pair_Fin line 1672, col 3 to line 1710, col 72 of module pair_bugCheckThenHook>
 /\ pair_bugCheckThenHook_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugCheckThenHook_fwd_pair_dir = [ gh |->
       [ wr |-> 0,
@@ -657,8 +661,9 @@ State 5: <pair_bugCheckThenHook_fwd_pair_Fin line 1634, col 3 to line 1671, col 
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
+/\ pair_bugCheckThenHook_fwd_pair_strmHeld = FALSE
 
-State 6: <pair_bugCheckThenHook_fwd_pair_HopEnd0 line 3174, col 3 to line 3199, col 49 of module pair_bugCheckThenHook>
+State 6: <pair_bugCheckThenHook_fwd_pair_HopEnd0 line 3333, col 3 to line 3358, col 49 of module pair_bugCheckThenHook>
 /\ pair_bugCheckThenHook_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugCheckThenHook_fwd_pair_dir = [ gh |->
       [ wr |-> 0,
@@ -789,8 +794,9 @@ State 6: <pair_bugCheckThenHook_fwd_pair_HopEnd0 line 3174, col 3 to line 3199, 
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
+/\ pair_bugCheckThenHook_fwd_pair_strmHeld = FALSE
 
-State 7: <pair_bugCheckThenHook_fwd_pair_VCtl line 3795, col 3 to line 3798, col 48 of module pair_bugCheckThenHook>
+State 7: <pair_bugCheckThenHook_fwd_pair_VCtl line 4009, col 3 to line 4012, col 48 of module pair_bugCheckThenHook>
 /\ pair_bugCheckThenHook_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugCheckThenHook_fwd_pair_dir = [ gh |->
       [ wr |-> 0,
@@ -921,8 +927,9 @@ State 7: <pair_bugCheckThenHook_fwd_pair_VCtl line 3795, col 3 to line 3798, col
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
+/\ pair_bugCheckThenHook_fwd_pair_strmHeld = FALSE
 
-State 8: <pair_bugCheckThenHook_fwd_pair_AttachHook line 3588, col 3 to line 3597, col 78 of module pair_bugCheckThenHook>
+State 8: <pair_bugCheckThenHook_fwd_pair_AttachHook line 3994, col 3 to line 4003, col 78 of module pair_bugCheckThenHook>
 /\ pair_bugCheckThenHook_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugCheckThenHook_fwd_pair_dir = [ gh |->
       [ wr |-> 0,
@@ -1053,3 +1060,4 @@ State 8: <pair_bugCheckThenHook_fwd_pair_AttachHook line 3588, col 3 to line 359
   dropped |-> FALSE,
   hostDead |-> FALSE,
   hresCls |-> "none" ]
+/\ pair_bugCheckThenHook_fwd_pair_strmHeld = FALSE

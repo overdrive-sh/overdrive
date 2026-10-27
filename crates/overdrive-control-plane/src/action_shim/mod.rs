@@ -44,18 +44,16 @@ use crate::api::{AllocStateWire, TransitionSource};
 use crate::guest_network::GuestNetworkProvisioner;
 use crate::identity_mgr::IdentityMgr;
 use crate::journal::WorkflowId;
-#[cfg(any(test, feature = "integration-tests"))]
 use overdrive_core::guest_transport::GuestTransportAssignment;
 use overdrive_core::net::ListenPort;
-// transparent-mtls-enrollment (D-TME-12 G1/G2/G3 + JOIN; step 04-01) — the C3
-// lifecycle wiring: per-host slot allocator, slot→plan derivation, the
-// gateway-as-responder helper, and the netns provision/teardown executors.
-use crate::veth_provisioner::{NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan};
+// The retained exec/process namespace lifecycle wiring: per-host slot
+// allocator, slot→plan derivation, gateway-as-responder helper, and netns
+// provision/teardown executors. VM guest networking uses GuestNetworkPlan.
+use crate::veth_provisioner::{NetSlotAllocator, VethProvisionError, WorkloadNetnsPlan};
 #[cfg(any(test, feature = "integration-tests"))]
 use crate::veth_provisioner::{
-    NetSlotExhausted, derive_vm_tap_plan, derive_workload_netns_plan, provision_vm_tap,
-    provision_workload_netns, responder_addr_for_slot, slot_from_assigned_workload_addr,
-    teardown_workload_netns,
+    NetSlotExhausted, derive_workload_netns_plan, provision_workload_netns,
+    responder_addr_for_slot, slot_from_assigned_workload_addr, teardown_workload_netns,
 };
 use crate::workflow_runtime::WorkflowEngine;
 // transparent-mtls-host-socket (D-MTLS-16/17, GH #26; step 06-03) — the
@@ -901,16 +899,12 @@ pub type AllocDriverIndex =
 /// it acknowledges the exact derived plans and the shim still injects every
 /// field before `Driver::start`.
 pub trait WorkloadNetworkProvisioner: Send + Sync {
-    /// Converge the derived workload plan and its VM TAP plan.
+    /// Converge the derived exec/process workload netns plan.
     ///
     /// # Errors
     ///
     /// Returns the exact typed provision failure authored by the adapter.
-    fn provision(
-        &self,
-        workload: &WorkloadNetnsPlan,
-        vm_tap: &VmTapPlan,
-    ) -> Result<(), VethProvisionError>;
+    fn provision(&self, workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError>;
 
     /// Tear down the derived workload plan.
     ///
@@ -926,14 +920,8 @@ struct HostNetworkProvisioner;
 
 #[cfg(any(test, feature = "integration-tests"))]
 impl WorkloadNetworkProvisioner for HostNetworkProvisioner {
-    fn provision(
-        &self,
-        workload: &WorkloadNetnsPlan,
-        vm_tap: &VmTapPlan,
-    ) -> Result<(), VethProvisionError> {
-        provision_workload_netns(workload)?;
-        provision_vm_tap(workload, vm_tap)?;
-        Ok(())
+    fn provision(&self, workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        provision_workload_netns(workload)
     }
 
     fn teardown(&self, workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
@@ -954,11 +942,7 @@ impl ProductionNetworkGuard {
 }
 
 impl WorkloadNetworkProvisioner for ProductionNetworkGuard {
-    fn provision(
-        &self,
-        _workload: &WorkloadNetnsPlan,
-        _vm_tap: &VmTapPlan,
-    ) -> Result<(), VethProvisionError> {
+    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
         Err(Self::refused())
     }
 
@@ -1458,12 +1442,10 @@ pub async fn dispatch_with_guest_network_provisioner_for_test(
     preflight_err.map_or(dispatch_result, Err)
 }
 
-/// C3 PROVISION SEAM (transparent-mtls-enrollment D-TME-12 G1/G2/G3 + JOIN-2,
-/// step 04-01). At the TOP of each `Start`/`RestartAllocation` arm, BEFORE
-/// `Driver::start`: assign the per-host network slot, derive the netns+veth
-/// plan (responder = the per-netns gateway, G1), derive the same-slot
-/// [`VmTapPlan`], provision the netns+veth+TAP (fail-closed — G2), and inject
-/// the complete VM network channel into the transient allocation spec.
+/// Compose guest-network registration before the `Start`/`RestartAllocation`
+/// arm reaches `Driver::start`, and inject the owner's transport assignment
+/// into the transient allocation spec. The legacy exec/process netns path
+/// remains available only to its existing test compositions.
 ///
 /// Every admitted allocation is a VM allocation and receives the complete
 /// current network plan independently of whether the optional mTLS
@@ -1473,8 +1455,8 @@ pub async fn dispatch_with_guest_network_provisioner_for_test(
 ///
 /// - [`ShimError::NetSlotExhausted`] — no free slot (the alloc is refused
 ///   rather than dropped onto a shared veth/subnet).
-/// - [`ShimError::WorkloadNetnsProvision`] — the netns/veth/tap provision failed
-///   (fail-closed: the workload must not spawn without its netns).
+/// - [`ShimError::WorkloadNetnsProvision`] — the exec/process netns provision
+///   failed (fail-closed: the process must not spawn without its netns).
 async fn provision_and_inject_netns(
     spec: &mut AllocationSpec,
     net_slot_allocator: &NetSlotAllocator,
@@ -1482,10 +1464,9 @@ async fn provision_and_inject_netns(
     guest_network: GuestNetworkProvisionerAndPool<'_>,
 ) -> Result<Option<crate::guest_network::GuestNetworkPlan>, ShimError> {
     if let Some((guest_provisioner, guest_pool, flow_ports)) = guest_network {
-        // SCAFFOLD: true — netns-density-295 DISTILL (attachment-cut step 6):
-        // the owner reports its bound ports from its first `Ok` converge; the
-        // host owner binds no listener until that step.
-        let Some(flow_ports) = flow_ports else { panic!("Not yet implemented -- RED scaffold") };
+        let Some(flow_ports) = flow_ports else {
+            unreachable!("a successfully booted shared owner has reported its bound flow ports")
+        };
         let plan =
             guest_pool.assign(spec.alloc.clone(), &declared_tcp_listen_ports(spec), flow_ports)?;
         guest_provisioner.provision(&plan).await?;
@@ -1495,12 +1476,12 @@ async fn provision_and_inject_netns(
     #[cfg(not(any(test, feature = "integration-tests")))]
     {
         let _ = (net_slot_allocator, network_provisioner);
-        return Err(ShimError::GuestNetwork(crate::guest_network::GuestNetworkError::Io {
+        Err(ShimError::GuestNetwork(crate::guest_network::GuestNetworkError::Io {
             operation: crate::guest_network::GuestNetworkOperation::PoolAssign,
             source: std::io::Error::other(
                 "production dispatch requires the shared guest-network owner",
             ),
-        }));
+        }))
     }
     #[cfg(any(test, feature = "integration-tests"))]
     {
@@ -1517,13 +1498,9 @@ async fn provision_and_inject_netns(
         // provision failure aborts the start (the `?` surfaces
         // ShimError::WorkloadNetnsProvision). Idempotent converge-on-boot: a
         // re-provision under the same slot (Restart) is a no-op.
-        // ADR-0089 C3 VM path: reuse the SAME slot as the transit plan and
-        // converge the guest-half wire. No guest transport is handed off on
-        // this lane: only the pool's `assign` constructs a
-        // `GuestTransportAssignment` (D16-CLAIM), so `spec.transport` stays
-        // `None` (sim-driver fixtures only).
-        let vm_tap = derive_vm_tap_plan(slot, plan.responder_addr);
-        network_provisioner.provision(&plan, &vm_tap)?;
+        // This path composes only the exec/process namespace. VM transport
+        // assignments are produced by the shared guest-network owner above.
+        network_provisioner.provision(&plan)?;
         Ok(None)
     }
 }
@@ -1696,7 +1673,14 @@ async fn activate_guest_network(
         match activation.map_err(ShimError::from)? {
             crate::guest_network::ForwardingActivation::Activated => return Ok(true),
             crate::guest_network::ForwardingActivation::QuiescenceLatched
-            | crate::guest_network::ForwardingActivation::ControlSessionPending => {}
+            | crate::guest_network::ForwardingActivation::ControlSessionPending => {
+                // The owner can report either retryable state without awaiting:
+                // quiescence is serialized by the existing EXEC gate, while a
+                // control session may still be queued on this runtime. Yield
+                // after releasing the claim so the existing accept/session
+                // task can run before the next owner observation.
+                tokio::task::yield_now().await;
+            }
         }
     }
 }
@@ -4715,13 +4699,13 @@ mod admission_refusal_acceptance {
     use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
     use parking_lot::Mutex;
     use tempfile::TempDir;
-    use tokio::sync::broadcast::error::TryRecvError;
+    use tokio::sync::broadcast::{Receiver, error::TryRecvError};
     use tracing::field::{Field, Visit};
     use tracing::{Event, Subscriber};
     use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
 
-    use super::{ShimError, dispatch_with_guest_network_provisioner_for_test};
-    use crate::guest_network::{GuestAddressPool, GuestNetworkError};
+    use super::{LifecycleEvent, ShimError, dispatch_with_guest_network_provisioner_for_test};
+    use crate::guest_network::{GuestAddressPool, GuestNetworkError, SharedGuestNetworkOwner};
     use crate::shared_network_test_ports::{TestCallOutcome, TestOwnerCall, TestSharedOwner};
 
     const SUCCESSOR: &str = "nd295-refused-successor";
@@ -4760,6 +4744,7 @@ mod admission_refusal_acceptance {
 
     struct LeaseEventLayer {
         owner: Arc<TestSharedOwner>,
+        owner_call_baseline: usize,
         events: Arc<Mutex<Vec<LeaseEvent>>>,
     }
 
@@ -4776,7 +4761,12 @@ mod admission_refusal_acceptance {
             }
             let mut fields = FieldCapture::default();
             event.record(&mut fields);
-            let owner_calls = self.owner.journal().len();
+            let owner_calls = self
+                .owner
+                .journal()
+                .len()
+                .checked_sub(self.owner_call_baseline)
+                .unwrap_or_else(|| unreachable!("the owner journal never shrinks"));
             self.events.lock().push(LeaseEvent { name, fields: fields.0, owner_calls });
         }
     }
@@ -4788,6 +4778,9 @@ mod admission_refusal_acceptance {
         /// The one owner instance: `AppState`'s owner from DELIVER 05-01 and
         /// the seam's `provisioner`.
         owner: Arc<TestSharedOwner>,
+        /// Owner calls made by the fixture's boot convergence, excluded from
+        /// allocation-effect assertions below.
+        owner_call_baseline: usize,
         #[allow(
             dead_code,
             reason = "its gate reaches AppState through the pinned constructor from DELIVER 05-01"
@@ -4827,6 +4820,8 @@ mod admission_refusal_acceptance {
                 Arc::new(SimMtlsIntercept::new()) as Arc<dyn MtlsIntercept>,
             ));
             worker.start_shared_owner().await.expect("sim shared mTLS owner starts");
+            owner.converge_shared().await.expect("the fixture owner converges before AppState");
+            let owner_call_baseline = owner.journal().len();
             let driver = Arc::new(SimDriver::new(DriverType::Vm));
 
             let mut runtime =
@@ -4862,14 +4857,18 @@ mod admission_refusal_acceptance {
                 Arc::clone(&pool),
             );
             let events = Arc::new(Mutex::new(Vec::new()));
-            let events_guard =
-                tracing::subscriber::set_default(tracing_subscriber::registry().with(
-                    LeaseEventLayer { owner: Arc::clone(&owner), events: Arc::clone(&events) },
-                ));
+            let events_guard = tracing::subscriber::set_default(
+                tracing_subscriber::registry().with(LeaseEventLayer {
+                    owner: Arc::clone(&owner),
+                    owner_call_baseline,
+                    events: Arc::clone(&events),
+                }),
+            );
             Self {
                 state,
                 driver,
                 owner,
+                owner_call_baseline,
                 wiring,
                 pool,
                 worker,
@@ -5029,6 +5028,20 @@ mod admission_refusal_acceptance {
         }
     }
 
+    fn drain_lifecycle_allocations(lifecycle: &mut Receiver<LifecycleEvent>) -> Vec<AllocationId> {
+        let mut published = Vec::new();
+        loop {
+            match lifecycle.try_recv() {
+                Ok(event) => published.push(event.alloc_id),
+                Err(TryRecvError::Empty | TryRecvError::Closed) => break,
+                Err(TryRecvError::Lagged(missed)) => {
+                    panic!("the lifecycle bus lagged by {missed}: its events cannot be checked")
+                }
+            }
+        }
+        published
+    }
+
     /// Outcome anchor: OUT-ND295-SHARED-SWITCH
     /// S-ND295-05E — A refused admission writes nothing and says how full the node is
     /// CONTRACT_SHAPE: bounded-change.
@@ -5040,7 +5053,6 @@ mod admission_refusal_acceptance {
     /// `guest_network.admission_refused` event naming the allocation, held,
     /// retiring, and the cap.
     #[tokio::test]
-    #[ignore = "pending DELIVER attachment-cut step (15)"]
     async fn admission_refusal_writes_nothing_and_reports_held_and_retiring() {
         let fixture = AdmissionFixture::build().await;
         fixture.fill_to_the_cap_with_one_retiring();
@@ -5059,7 +5071,11 @@ mod admission_refusal_acceptance {
             .await;
 
         assert_cap_refusal(result);
-        assert!(fixture.owner.journal().is_empty(), "no network effect precedes the refusal");
+        assert_eq!(
+            fixture.owner.journal().len(),
+            fixture.owner_call_baseline,
+            "no allocation network effect precedes the refusal"
+        );
         assert!(fixture.driver.started_specs().is_empty(), "no VMM is started");
         assert_eq!(
             fixture.state.obs.alloc_status_rows().await.expect("rows readable"),
@@ -5103,7 +5119,6 @@ mod admission_refusal_acceptance {
     /// row, no lifecycle occurrence, and no lifecycle event, and the one
     /// refusal event names it.
     #[tokio::test]
-    #[ignore = "pending DELIVER attachment-cut step (15)"]
     async fn a_refused_restart_successor_still_cleans_up_its_predecessor_once() {
         let fixture = AdmissionFixture::build().await;
         fixture.fill_to_the_cap_with_one_retiring();
@@ -5113,7 +5128,6 @@ mod admission_refusal_acceptance {
             "the predecessor holds an Admitted lease"
         );
         let mut lifecycle = fixture.state.lifecycle_events.subscribe();
-
         let result = fixture
             .dispatch(Action::RestartAllocation {
                 alloc_id: alloc_id(PREDECESSOR),
@@ -5123,7 +5137,13 @@ mod admission_refusal_acceptance {
             .await;
 
         assert_cap_refusal(result);
-        let journal: Vec<_> = fixture.owner.journal().into_iter().map(|entry| entry.call).collect();
+        let journal: Vec<_> = fixture
+            .owner
+            .journal()
+            .into_iter()
+            .skip(fixture.owner_call_baseline)
+            .map(|entry| entry.call)
+            .collect();
         assert_eq!(
             journal,
             [TestOwnerCall::Teardown {
@@ -5176,16 +5196,7 @@ mod admission_refusal_acceptance {
                 .is_empty(),
             "the refused successor has no lifecycle occurrence"
         );
-        let mut published = Vec::new();
-        loop {
-            match lifecycle.try_recv() {
-                Ok(event) => published.push(event.alloc_id),
-                Err(TryRecvError::Empty | TryRecvError::Closed) => break,
-                Err(TryRecvError::Lagged(missed)) => {
-                    panic!("the lifecycle bus lagged by {missed}: its events cannot be checked")
-                }
-            }
-        }
+        let published = drain_lifecycle_allocations(&mut lifecycle);
         assert!(
             !published.contains(&alloc_id(SUCCESSOR)),
             "no lifecycle event names the refused successor: {published:?}"

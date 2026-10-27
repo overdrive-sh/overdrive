@@ -16,11 +16,12 @@ State 1: <Initial predicate>
 /\ quiesce_bugBootContinues_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
 /\ quiesce_bugBootContinues_quiescence_foreign = FALSE
 /\ quiesce_bugBootContinues_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
+/\ quiesce_bugBootContinues_quiescence_roundState = [C1 |-> "outside", C2 |-> "outside"]
 /\ quiesce_bugBootContinues_quiescence_stop = "crash"
 /\ quiesce_bugBootContinues_quiescence_cnt = 0
 /\ quiesce_bugBootContinues_quiescence_up = FALSE
 
-State 2: <quiesce_bugBootContinues_quiescence_RestartWith line 826, col 3 to line 868, col 57 of module quiesce_bugBootContinues>
+State 2: <quiesce_bugBootContinues_quiescence_RestartWith line 901, col 3 to line 945, col 57 of module quiesce_bugBootContinues>
 /\ quiesce_bugBootContinues_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
 /\ quiesce_bugBootContinues_quiescence_repLeft = 1
 /\ quiesce_bugBootContinues_quiescence_table = FALSE
@@ -38,6 +39,7 @@ State 2: <quiesce_bugBootContinues_quiescence_RestartWith line 826, col 3 to lin
 /\ quiesce_bugBootContinues_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
 /\ quiesce_bugBootContinues_quiescence_foreign = FALSE
 /\ quiesce_bugBootContinues_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
+/\ quiesce_bugBootContinues_quiescence_roundState = [C1 |-> "outside", C2 |-> "outside"]
 /\ quiesce_bugBootContinues_quiescence_stop = "none"
 /\ quiesce_bugBootContinues_quiescence_cnt = 0
 /\ quiesce_bugBootContinues_quiescence_up = TRUE

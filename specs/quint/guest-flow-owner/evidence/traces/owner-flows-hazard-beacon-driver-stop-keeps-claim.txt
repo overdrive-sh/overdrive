@@ -26,6 +26,7 @@ State 1
   toHostPaired = {}
   vmGen = 0
   vmUp = FALSE
+  bq = <<>>
   act = "none"
   dl = [ res |-> <<"none">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
   heldByOther = FALSE
@@ -42,17 +43,19 @@ State 3 [VmStart]
   vmUp = TRUE
 
 State 4 [step]
-  bcn = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+  bcn = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 1]>>
+  bq = <<2>>
 
 State 5 [step]
-  bcn = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
+  bcn = <<[st |-> "none", gen |-> 0], [st |-> "reading", gen |-> 1]>>
+  bq = <<>>
 
 State 6 [step]
-  bcn = <<[st |-> "live", gen |-> 1], [st |-> "none", gen |-> 0]>>
-  bclaim = 1
+  bcn = <<[st |-> "none", gen |-> 0], [st |-> "live", gen |-> 1]>>
+  bclaim = 2
 
 State 7 [VmStop]
-  bcn = <<[st |-> "closed", gen |-> 1], [st |-> "none", gen |-> 0]>>
+  bcn = <<[st |-> "none", gen |-> 0], [st |-> "closed", gen |-> 1]>>
   drvLive = FALSE
   vmUp = FALSE
 
@@ -65,20 +68,23 @@ State 9 [VmStart]
   vmUp = TRUE
 
 State 10 [step]
-  bcn = <<[st |-> "closed", gen |-> 1], [st |-> "pending", gen |-> 2]>>
+  bcn = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 2]>>
+  bq = <<2>>
 
 State 11 [step]
-  bcn = <<[st |-> "closed", gen |-> 1], [st |-> "reading", gen |-> 2]>>
+  bcn = <<[st |-> "pending", gen |-> 2], [st |-> "pending", gen |-> 2]>>
+  bq = <<2, 1>>
 
 State 12 [step]
-  bcn = <<[st |-> "closed", gen |-> 1], [st |-> "closed", gen |-> 2]>>
-  bHeldByOther = TRUE
+  bcn = <<[st |-> "pending", gen |-> 2], [st |-> "reading", gen |-> 2]>>
+  bq = <<1>>
 
 State 13 [step]
   bcn = <<[st |-> "pending", gen |-> 2], [st |-> "closed", gen |-> 2]>>
 
 State 14 [step]
   bcn = <<[st |-> "reading", gen |-> 2], [st |-> "closed", gen |-> 2]>>
+  bq = <<>>
 
 State 15 [step]
   bcn = <<[st |-> "closed", gen |-> 2], [st |-> "closed", gen |-> 2]>>

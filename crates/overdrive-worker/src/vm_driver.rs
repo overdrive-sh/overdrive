@@ -19,7 +19,7 @@
 
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::SeekFrom;
+use std::io::{self, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -40,19 +40,18 @@ use overdrive_core::traits::driver::{
 use overdrive_core::traits::vmm::{
     VMM_CONSOLE_TAIL_MAX_BYTES, VmControl, VmExitWatch, Vmm, VmmDiagnostics, VmmError, VmmExit,
 };
-use overdrive_core::vm::beacon::{BeaconConnKey, BeaconMessage};
+use overdrive_core::vm::beacon::{BeaconConnKey, BeaconIo, BeaconMessage, BeaconSocket};
 use overdrive_core::vm::config::{
     HostArch, KERNEL_MAGIC_WINDOW, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan, VmConfig,
     VmConfinement, VmRunDir, vcpus_for,
 };
 use parking_lot::Mutex;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader};
-use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use tracing::warn;
 
-use crate::beacon_intake::BeaconIntake;
+use crate::beacon_intake::{BeaconIntake, BeaconState};
 use crate::cgroup_manager::{CgroupManager, CgroupPath};
 use crate::probe_runner::ProbeRunner;
 
@@ -122,17 +121,32 @@ impl GuestConsoleTailReader for FsGuestConsoleTailReader {
 }
 
 /// The launch's platform kernel command line: the platform default plus the
-/// one `overdrive.transport=vsock2,addr=<workload_addr>,dns=<gateway>,launch=<LaunchToken>`
+/// one `overdrive.transport=vsock2,addr=<workload_addr>,dns=<gateway>,launch=<LaunchToken>,beacon=<port>,stream=<port>,control=<port>`
 /// token (§ *Guest adaptation contract*, replaces `overdrive.net=`).
 ///
-/// RED scaffold (DISTILL): DG-2 rows 4 / 16 — the transport token lands in the
-/// attachment cut.
-// SCAFFOLD: true — netns-density-295 DISTILL (DG-2 rows 4 and 16, attachment cut).
+/// The guest-visible platform transport token for this launch.
 fn compose_vm_transport(
-    _arch: HostArch,
-    _transport: &GuestTransportAssignment,
+    arch: HostArch,
+    transport: &GuestTransportAssignment,
+    beacon_port: overdrive_core::vm::config::VsockPort,
 ) -> Result<KernelCmdline, DriverError> {
-    panic!("Not yet implemented -- RED scaffold")
+    let flow_ports = transport.flow_ports();
+    let token = format!(
+        "overdrive.transport=vsock2,addr={},dns={},launch={},beacon={},stream={},control={}",
+        transport.workload_addr(),
+        transport.gateway(),
+        transport.launch(),
+        beacon_port.as_u32(),
+        flow_ports.stream().as_u32(),
+        flow_ports.control().as_u32(),
+    );
+    let mut cmdline = KernelCmdline::platform_default(arch);
+    if !cmdline.append_platform_token(&token) {
+        return Err(start_rejected_unclassified(
+            "the validated guest transport token could not be appended to the kernel command line",
+        ));
+    }
+    Ok(cmdline)
 }
 
 /// Construct a `DriverError::StartRejected` carrying a typed VM cause plus
@@ -509,7 +523,7 @@ struct ExecReleaseCompletion {
 /// the independent stop watch so it can pre-empt a backpressured command even
 /// while this bounded queue is full.
 struct ExecWriteCommand {
-    bytes: Box<[u8]>,
+    line: String,
     cancel: watch::Receiver<bool>,
     acknowledged: oneshot::Sender<ExecReleaseCompletion>,
     gate_sender: Option<oneshot::Sender<()>>,
@@ -546,28 +560,48 @@ impl Drop for ExecCancellationGuard {
 struct BeaconWriter {
     commands: mpsc::Sender<ExecWriteCommand>,
     stop: watch::Sender<bool>,
+    force_close: watch::Sender<bool>,
     closed: watch::Receiver<bool>,
     emergency_gates: Arc<Mutex<Vec<oneshot::Sender<()>>>>,
     task: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl BeaconWriter {
-    fn spawn(write_half: OwnedWriteHalf, vmm: Arc<dyn Vmm>, control: VmControl) -> Arc<Self> {
+    fn spawn(
+        io: Arc<dyn BeaconIo>,
+        socket: BeaconSocket,
+        vmm: Arc<dyn Vmm>,
+        control: VmControl,
+    ) -> (Arc<Self>, mpsc::Receiver<io::Result<Option<String>>>) {
         let (commands, command_rx) = mpsc::channel(1);
         let (stop, stop_rx) = watch::channel(false);
+        let (force_close, force_close_rx) = watch::channel(false);
         let (closed_tx, closed) = watch::channel(false);
+        let (lines_tx, lines_rx) = mpsc::channel(1);
         let emergency_gates = Arc::new(Mutex::new(Vec::new()));
         let state = BeaconWriterTaskState {
-            write_half: Some(write_half),
+            io,
+            socket: Some(socket),
             active: None,
             commands: command_rx,
+            lines: lines_tx,
             vmm,
             control,
             closed: closed_tx,
             emergency_gates: Arc::clone(&emergency_gates),
         };
-        let task = tokio::spawn(run_beacon_writer(state, stop_rx));
-        Arc::new(Self { commands, stop, closed, emergency_gates, task: Mutex::new(Some(task)) })
+        let task = tokio::spawn(run_beacon_writer(state, stop_rx, force_close_rx));
+        (
+            Arc::new(Self {
+                commands,
+                stop,
+                force_close,
+                closed,
+                emergency_gates,
+                task: Mutex::new(Some(task)),
+            }),
+            lines_rx,
+        )
     }
 
     async fn release_exec(
@@ -579,7 +613,7 @@ impl BeaconWriter {
         let mut cancellation = ExecCancellationGuard { cancel, armed: true };
         let (acknowledged, acknowledgement) = oneshot::channel();
         let command = ExecWriteCommand {
-            bytes: format!("{message}\n").into_bytes().into_boxed_slice(),
+            line: message.to_string(),
             cancel: cancel_rx,
             acknowledged,
             gate_sender,
@@ -644,16 +678,23 @@ impl BeaconWriter {
         let _ = self.stop.send(true);
         self.task.lock().take()
     }
+
+    /// Cancel an in-flight graceful `SHUTDOWN` write when the driver's
+    /// existing shutdown bound expires, so the writer can finish the
+    /// required socket close instead of being aborted mid-cleanup.
+    fn force_close_after_deadline(&self) {
+        let _ = self.force_close.send(true);
+    }
 }
 
 /// All socket and gate-bearing writer state is dropped through this one owner.
-/// Its `Drop` order is load-bearing for task abort/runtime shutdown: close the
-/// socket first, then release active/queued/emergency gates, then publish the
-/// closed notification.
+/// Normal termination awaits `BeaconIo::close` before publishing completion.
 struct BeaconWriterTaskState {
-    write_half: Option<OwnedWriteHalf>,
+    io: Arc<dyn BeaconIo>,
+    socket: Option<BeaconSocket>,
     active: Option<ExecWriteCommand>,
     commands: mpsc::Receiver<ExecWriteCommand>,
+    lines: mpsc::Sender<io::Result<Option<String>>>,
     vmm: Arc<dyn Vmm>,
     control: VmControl,
     closed: watch::Sender<bool>,
@@ -661,8 +702,10 @@ struct BeaconWriterTaskState {
 }
 
 impl BeaconWriterTaskState {
-    fn close_socket(&mut self) {
-        drop(self.write_half.take());
+    async fn close_socket(&mut self) {
+        if let Some(socket) = self.socket.take() {
+            self.io.close(socket).await;
+        }
     }
 
     fn acknowledge_active(&mut self, outcome: ExecReleaseOutcome) {
@@ -678,7 +721,6 @@ impl BeaconWriterTaskState {
 
 impl Drop for BeaconWriterTaskState {
     fn drop(&mut self) {
-        self.close_socket();
         drop(self.active.take());
         self.commands.close();
         while let Ok(command) = self.commands.try_recv() {
@@ -694,7 +736,7 @@ impl Drop for BeaconWriter {
     fn drop(&mut self) {
         let _ = self.stop.send(true);
         if let Some(task) = self.task.get_mut().take() {
-            task.abort();
+            drop(task);
         }
     }
 }
@@ -710,70 +752,99 @@ async fn wait_for_signal(signal: &mut watch::Receiver<bool>) {
     }
 }
 
-async fn run_beacon_writer(mut state: BeaconWriterTaskState, mut stop: watch::Receiver<bool>) {
+async fn run_beacon_writer(
+    mut state: BeaconWriterTaskState,
+    mut stop: watch::Receiver<bool>,
+    mut force_close: watch::Receiver<bool>,
+) {
     loop {
         if *stop.borrow() {
-            if let Some(write_half) = state.write_half.as_mut() {
-                let _ = write_half.write_all(b"SHUTDOWN\n").await;
-                let _ = write_half.flush().await;
-            }
+            stop_beacon_writer(&mut state, &mut force_close).await;
             return;
         }
-        let command = tokio::select! {
+        tokio::select! {
             biased;
             () = wait_for_signal(&mut stop) => {
-                if let Some(write_half) = state.write_half.as_mut() {
-                    let _ = write_half.write_all(b"SHUTDOWN\n").await;
-                    let _ = write_half.flush().await;
-                }
+                stop_beacon_writer(&mut state, &mut force_close).await;
                 return;
             }
             command = state.commands.recv() => {
-                let Some(command) = command else { return };
-                command
-            }
-        };
-
-        state.active = Some(command);
-        let (outcome, keep_session) = {
-            let (Some(active), Some(write_half)) =
-                (state.active.as_mut(), state.write_half.as_mut())
-            else {
-                return;
-            };
-            let write = async {
-                write_half.write_all(&active.bytes).await?;
-                write_half.flush().await
-            };
-            tokio::pin!(write);
-            tokio::select! {
-                biased;
-                () = wait_for_signal(&mut stop) => (ExecReleaseOutcome::Stopped, false),
-                () = wait_for_signal(&mut active.cancel) => {
-                    (ExecReleaseOutcome::Cancelled, false)
+                let Some(command) = command else {
+                    state.close_socket().await;
+                    return;
+                };
+                state.active = Some(command);
+                let (outcome, keep_session) = {
+                    let (Some(active), Some(socket)) =
+                        (state.active.as_mut(), state.socket.as_ref())
+                    else {
+                        return;
+                    };
+                    let write = state.io.write_line(socket, &active.line);
+                    tokio::pin!(write);
+                    tokio::select! {
+                        biased;
+                        () = wait_for_signal(&mut stop) => (ExecReleaseOutcome::Stopped, false),
+                        () = wait_for_signal(&mut active.cancel) => {
+                            (ExecReleaseOutcome::Cancelled, false)
+                        }
+                        result = &mut write => match result {
+                            Ok(()) => (ExecReleaseOutcome::Written, true),
+                            Err(error) => (ExecReleaseOutcome::WriteFailed(error.to_string()), false),
+                        },
+                    }
+                };
+                if !keep_session {
+                    // A cancelled write may have put a partial record on the
+                    // wire. Close it before releasing the Running gate.
+                    state.close_socket().await;
+                    if matches!(outcome, ExecReleaseOutcome::Cancelled) {
+                        let _ = state.vmm.terminate(&state.control, Duration::ZERO).await;
+                    }
                 }
-                result = &mut write => match result {
-                    Ok(()) => (ExecReleaseOutcome::Written, true),
-                    Err(error) => (ExecReleaseOutcome::WriteFailed(error.to_string()), false),
-                },
+                state.acknowledge_active(outcome);
+                if !keep_session {
+                    return;
+                }
             }
-        };
-        if !keep_session {
-            // Dropping the sole write half is the fail-closed response to an
-            // interrupted partial line. Appending SHUTDOWN could turn that
-            // prefix into a malformed newline-terminated EXEC command.
-            state.close_socket();
-            if matches!(outcome, ExecReleaseOutcome::Cancelled) {
-                // No caller remains to perform the hook's normal write-error
-                // termination. Complete the equivalent fail-closed boundary
-                // here before releasing the gate owned by the command.
-                let _ = state.vmm.terminate(&state.control, Duration::ZERO).await;
+            line = async {
+                let socket = state.socket.as_ref().unwrap_or_else(|| {
+                    unreachable!("a live beacon writer owns its accepted socket")
+                });
+                state.io.read_line(socket).await
+            } => {
+                let terminal = match line {
+                    Ok(Some(line)) => state.lines.send(Ok(Some(line))).await.is_err(),
+                    Ok(None) => {
+                        let _ = state.lines.send(Ok(None)).await;
+                        true
+                    }
+                    Err(error) => {
+                        let _ = state.lines.send(Err(error)).await;
+                        true
+                    }
+                };
+                if terminal {
+                    state.close_socket().await;
+                    return;
+                }
             }
-            state.acknowledge_active(outcome);
-            return;
         }
-        state.acknowledge_active(outcome);
     }
+}
+
+async fn stop_beacon_writer(
+    state: &mut BeaconWriterTaskState,
+    force_close: &mut watch::Receiver<bool>,
+) {
+    if let Some(socket) = state.socket.as_ref() {
+        tokio::select! {
+            biased;
+            () = wait_for_signal(force_close) => {},
+            _ = state.io.write_line(socket, "SHUTDOWN") => {},
+        }
+    }
+    state.close_socket().await;
 }
 
 /// The claim's `Held` payload once `Vmm::create` has returned
@@ -942,6 +1013,12 @@ pub struct BeaconObservation {
     pub unread: BTreeSet<BeaconConnKey>,
 }
 
+fn clear_beacon_launch(state: &mut BeaconState, alloc: &AllocationId) {
+    if let Some((cid, _)) = state.live.remove(alloc) {
+        state.claims.remove(&cid);
+    }
+}
+
 // ---------------------------------------------------------------------
 // VmDriver
 // ---------------------------------------------------------------------
@@ -959,6 +1036,7 @@ pub struct VmDriver {
     /// The node's bound beacon listener (D17, DG-4): every launch's READY
     /// session arrives through it.
     beacon: Arc<BeaconIntake>,
+    beacon_state: Arc<Mutex<BeaconState>>,
     live: Arc<LiveMap>,
     exit_tx: mpsc::Sender<ExitEvent>,
     exit_rx: Arc<Mutex<Option<mpsc::Receiver<ExitEvent>>>>,
@@ -990,6 +1068,7 @@ impl VmDriver {
     ) -> Self {
         let (exit_tx, exit_rx) = mpsc::channel(EXIT_CHANNEL_CAPACITY);
         let cgroup_manager = CgroupManager::new(layout.cgroup_root.clone(), fs);
+        let beacon_state = beacon.state();
         Self {
             vmm,
             clock,
@@ -999,6 +1078,7 @@ impl VmDriver {
             guest_network_exec,
             layout,
             beacon: Arc::new(beacon),
+            beacon_state,
             live: Arc::new(Mutex::new(BTreeMap::new())),
             exit_tx,
             exit_rx: Arc::new(Mutex::new(Some(exit_rx))),
@@ -1025,13 +1105,13 @@ impl VmDriver {
     /// - **Observable invariants:** each `BeaconConnKey` appears at most once
     ///   across `claims` values and `unread`; a repeated call with no
     ///   intervening beacon step returns an equal value.
-    // SCAFFOLD: true — netns-density-295 DISTILL (attachment-cut step 6, beacon relocation).
-    #[expect(
-        clippy::unused_self,
-        reason = "RED scaffold body panics before reading the driver; the lint self-trips when DELIVER lands the body"
-    )]
     pub fn beacon_observation(&self) -> BeaconObservation {
-        panic!("Not yet implemented -- RED scaffold")
+        let state = self.beacon_state.lock();
+        BeaconObservation {
+            live: state.live.values().map(|(cid, launch)| (*cid, *launch)).collect(),
+            claims: state.claims.iter().map(|(cid, (_, key))| (*cid, *key)).collect(),
+            unread: state.unread.clone(),
+        }
     }
 
     #[cfg(test)]
@@ -1152,7 +1232,7 @@ impl VmDriver {
         let Some(transport) = spec.transport.as_ref() else {
             return Err(DriverError::GuestTransportMissing { alloc: spec.alloc.clone() });
         };
-        let cmdline = compose_vm_transport(self.layout.arch, transport)?;
+        let cmdline = compose_vm_transport(self.layout.arch, transport, self.beacon.bound_port())?;
 
         // Step 0 (brief §105a.3, transition 1): take the supervision
         // claim BEFORE the run directory exists. The ordinal is
@@ -1364,7 +1444,7 @@ impl VmDriver {
         &self,
         alloc: AllocationId,
         exit: VmExitWatch,
-        reader: BufReader<OwnedReadHalf>,
+        exit_lines: mpsc::Receiver<io::Result<Option<String>>>,
         scope: CgroupPath,
         limit_bytes: u64,
         gate_receiver: oneshot::Receiver<()>,
@@ -1375,11 +1455,12 @@ impl VmDriver {
         let watcher_cgroup_manager = self.cgroup_manager.clone();
         let watcher_cgroup_accounting = Arc::clone(&self.cgroup_accounting);
         let watcher_cgroup_root = self.layout.cgroup_root.clone();
+        let watcher_beacon_state = Arc::clone(&self.beacon_state);
         tokio::spawn(async move {
             run_exit_watcher(
                 alloc,
                 exit,
-                reader,
+                exit_lines,
                 watcher_live,
                 watcher_tx,
                 watcher_cgroup_manager,
@@ -1389,6 +1470,7 @@ impl VmDriver {
                 limit_bytes,
                 gate_receiver,
                 beacon,
+                watcher_beacon_state,
             )
             .await;
         });
@@ -1409,7 +1491,7 @@ async fn cleanup_driver_artifacts(cgroup_manager: &CgroupManager, live_vm: &Live
 /// `match` reads as the design's own three arms rather than an
 /// anonymous tuple.
 enum BootRaceOutcome {
-    Beacon(std::io::Result<(BufReader<OwnedReadHalf>, OwnedWriteHalf)>),
+    Beacon(io::Result<(BeaconSocket, BeaconConnKey)>),
     /// Carries the RESOLVED [`VmmExit`] rather than discarding it: the
     /// hypervisor's exit code, terminating signal, and final stderr tail
     /// are the operator-visible facts this arm exists to preserve
@@ -1462,23 +1544,33 @@ impl Driver for VmDriver {
         // brief §105a.3's transition table treats Starting|Live as one
         // "Held" state — this is the internal refinement, not a new
         // transition).
-        self.live.lock().insert(
-            spec.alloc.clone(),
-            VmSupervision::Live(LiveVm {
-                control: control.clone(),
-                beacon: None,
-                pending_exec: None,
-                scope: scope.clone(),
-                run_dir: run_dir.clone(),
-                rootfs: rootfs.clone(),
-                // Minted in the beacon-win arm below, once the guest has
-                // dialled and the exit watcher is about to spawn — there
-                // is no watcher to gate until then.
-                gate_sender: None,
-            }),
-        );
+        let Some(transport) = spec.transport.as_ref() else {
+            unreachable!("provision_vmm rejects a VM launch with no guest transport")
+        };
+        {
+            let mut live = self.live.lock();
+            let mut beacon_state = self.beacon_state.lock();
+            live.insert(
+                spec.alloc.clone(),
+                VmSupervision::Live(LiveVm {
+                    control: control.clone(),
+                    beacon: None,
+                    pending_exec: None,
+                    scope: scope.clone(),
+                    run_dir: run_dir.clone(),
+                    rootfs: rootfs.clone(),
+                    // Minted in the beacon-win arm below, once the guest has
+                    // dialled and the exit watcher is about to spawn — there
+                    // is no watcher to gate until then.
+                    gate_sender: None,
+                }),
+            );
+            drop(live);
+            beacon_state.live.insert(spec.alloc.clone(), (transport.cid(), transport.launch()));
+        }
 
         if let Err(err) = self.cgroup_manager.place_pid_in_scope(&scope, control.pid).await {
+            clear_beacon_launch(&mut self.beacon_state.lock(), &spec.alloc);
             let primary = start_rejected_unclassified(format!("place VMM pid in scope: {err}"));
             return Err(self
                 .cleanup_after_start_failure(
@@ -1498,13 +1590,15 @@ impl Driver for VmDriver {
         // whose ending belongs to the exit watcher, not to `start`.
         let outcome = tokio::select! {
             biased;
-            accepted = accept_ready(&self.beacon, spec) => BootRaceOutcome::Beacon(accepted),
+            accepted = accept_ready(&self.beacon, spec) => {
+                BootRaceOutcome::Beacon(accepted)
+            },
             ended = exit.recv() => BootRaceOutcome::VmmExited(ended),
             () = self.clock.sleep(VM_BOOT_DEADLINE) => BootRaceOutcome::Deadline,
         };
 
         match outcome {
-            BootRaceOutcome::Beacon(Ok((reader, write_half))) => {
+            BootRaceOutcome::Beacon(Ok((socket, _key))) => {
                 tracing::info!(name: "vm.lifecycle.ready", alloc = %spec.alloc, "VM READY accepted");
                 // ADR-0089 §1 / Q9: retain the existing EXEC reply on the
                 // guest-initiated session, but do NOT write it here. `start`
@@ -1532,8 +1626,12 @@ impl Driver for VmDriver {
                 // write into the observer's `find_prior_row → NoPriorRow`
                 // silent-drop.
                 let (gate_sender, gate_receiver) = oneshot::channel::<()>();
-                let beacon =
-                    BeaconWriter::spawn(write_half, Arc::clone(&self.vmm), control.clone());
+                let (beacon, exit_lines) = BeaconWriter::spawn(
+                    self.beacon.io(),
+                    socket,
+                    Arc::clone(&self.vmm),
+                    control.clone(),
+                );
                 let beacon_witness = Arc::downgrade(&beacon);
                 {
                     let mut live = self.live.lock();
@@ -1551,7 +1649,7 @@ impl Driver for VmDriver {
                 self.spawn_exit_watcher_task(
                     spec.alloc.clone(),
                     exit,
-                    reader,
+                    exit_lines,
                     scope,
                     memory.cgroup_max_bytes(),
                     gate_receiver,
@@ -1564,6 +1662,7 @@ impl Driver for VmDriver {
             // claim (brief §113 / ADR-0082 §D3's "the arm an
             // implementation is most likely to leak on").
             BootRaceOutcome::Beacon(Err(err)) => {
+                clear_beacon_launch(&mut self.beacon_state.lock(), &spec.alloc);
                 // A session was accepted but closed before a complete READY
                 // line. PID 1's emergency path powers the guest off in this
                 // shape, so consume the VMM ending before cleanup and retain
@@ -1598,6 +1697,7 @@ impl Driver for VmDriver {
             // code and terminating signal become the typed cause, and the
             // hypervisor's captured stderr becomes the verbatim detail.
             BootRaceOutcome::VmmExited(ended) => {
+                clear_beacon_launch(&mut self.beacon_state.lock(), &spec.alloc);
                 let guest_console = self.guest_console_tail(&run_dir).await;
                 let primary = guest_exit_unreported_failure(ended, guest_console.as_deref());
                 Err(self
@@ -1615,6 +1715,7 @@ impl Driver for VmDriver {
             // still up — `VmmExit` does not exist yet on this arm, so the
             // tail can come from nowhere else.
             BootRaceOutcome::Deadline => {
+                clear_beacon_launch(&mut self.beacon_state.lock(), &spec.alloc);
                 let console_tail = diagnostics.console_tail();
                 let deadline_ms = u64::try_from(VM_BOOT_DEADLINE.as_millis()).unwrap_or(u64::MAX);
                 let primary = start_rejected(
@@ -1643,8 +1744,9 @@ impl Driver for VmDriver {
     }
 
     async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
-        let extracted = {
+        let (extracted, ready_candidate) = {
             let mut live = self.live.lock();
+            let mut beacon_state = self.beacon_state.lock();
             let owns_live_entry = matches!(live.get(&handle.alloc), Some(VmSupervision::Live(_)));
             let live_vm = if owns_live_entry {
                 match live.remove(&handle.alloc) {
@@ -1688,12 +1790,24 @@ impl Driver for VmDriver {
             // exists to catch exactly that.
             if live_vm.is_some() {
                 live.insert(handle.alloc.clone(), VmSupervision::EndingInFlight);
+                drop(live);
+                let cid = beacon_state.live.get(&handle.alloc).map(|(cid, _)| *cid);
+                let ready_candidate = cid.and_then(|cid| beacon_state.ready.remove(&cid));
+                clear_beacon_launch(&mut beacon_state, &handle.alloc);
+                drop(beacon_state);
+                (live_vm, ready_candidate)
+            } else {
+                drop(live);
+                drop(beacon_state);
+                (live_vm, None)
             }
-            live_vm
         };
         let Some(mut live_vm) = extracted else {
             return Err(DriverError::NotFound { alloc: handle.alloc.clone() });
         };
+        if let Some(candidate) = ready_candidate {
+            self.beacon.close(candidate.socket).await;
+        }
         drop(live_vm.gate_sender.take());
         let control = live_vm.control.clone();
         let beacon = live_vm.beacon.take();
@@ -1711,7 +1825,7 @@ impl Driver for VmDriver {
         // timeout aborts/joins it while the same VMM wait continues.
         let termination = self.vmm.terminate(&control, VM_STOP_GRACE);
         tokio::pin!(termination);
-        match beacon.and_then(|writer| writer.request_stop()) {
+        match beacon.as_ref().and_then(|writer| writer.request_stop()) {
             None => {
                 tracing::info!(
                     name: "vm.lifecycle.writer_finished",
@@ -1727,14 +1841,29 @@ impl Driver for VmDriver {
                 tokio::select! {
                     biased;
                     _ = &mut termination => {
-                        writer_task.abort();
-                        let _ = writer_task.await;
-                        tracing::info!(
-                            name: "vm.lifecycle.writer_finished",
-                            alloc = %handle.alloc,
-                            disposition = "aborted",
-                            "VM beacon writer consumed"
-                        );
+                        tokio::select! {
+                            biased;
+                            _ = &mut writer_task => {
+                                tracing::info!(
+                                    name: "vm.lifecycle.writer_finished",
+                                    alloc = %handle.alloc,
+                                    disposition = "completed",
+                                    "VM beacon writer consumed"
+                                );
+                            }
+                            () = &mut writer_deadline => {
+                                if let Some(writer) = beacon.as_ref() {
+                                    writer.force_close_after_deadline();
+                                }
+                                let _ = writer_task.await;
+                                tracing::info!(
+                                    name: "vm.lifecycle.writer_finished",
+                                    alloc = %handle.alloc,
+                                    disposition = "completed",
+                                    "VM beacon writer consumed"
+                                );
+                            }
+                        }
                     }
                     _ = &mut writer_task => {
                         tracing::info!(
@@ -1746,12 +1875,14 @@ impl Driver for VmDriver {
                         let _ = termination.await;
                     }
                     () = &mut writer_deadline => {
-                        writer_task.abort();
+                        if let Some(writer) = beacon.as_ref() {
+                            writer.force_close_after_deadline();
+                        }
                         let _ = writer_task.await;
                         tracing::info!(
                             name: "vm.lifecycle.writer_finished",
                             alloc = %handle.alloc,
-                            disposition = "aborted",
+                            disposition = "completed",
                             "VM beacon writer consumed"
                         );
                         let _ = termination.await;
@@ -1915,7 +2046,11 @@ impl Driver for VmDriver {
     /// Idempotent by construction: removing an absent key from a
     /// `BTreeMap` is already a safe no-op.
     fn release_supervision(&self, alloc: &AllocationId) {
-        self.live.lock().remove(alloc);
+        let mut live = self.live.lock();
+        let mut beacon_state = self.beacon_state.lock();
+        live.remove(alloc);
+        drop(live);
+        clear_beacon_launch(&mut beacon_state, alloc);
     }
 
     fn on_alloc_running(&self, spec: &AllocationSpec) {
@@ -1991,19 +2126,17 @@ fn guest_exit_unreported_failure(
 /// `NoLiveLaunch`, `SessionHeld`). A cancelled call (the exit or deadline arm
 /// wins instead) takes nothing.
 ///
-/// RED scaffold (DISTILL): DG-2 row 15 — the node beacon intake replaces the
-/// per-VM Unix listener in the attachment cut; DELIVER also reshapes the
-/// session halves onto the intake's `BeaconSocket` (internal structure).
-// SCAFFOLD: true — netns-density-295 DISTILL (DG-2 row 15, attachment cut).
-#[allow(
-    clippy::unused_async,
-    reason = "RED scaffold body panics before awaiting; DELIVER lands the awaiting body"
-)]
+/// Returns the session socket and its kernel-reported peer after the intake
+/// has validated READY against this launch's live token.
 async fn accept_ready(
-    _intake: &BeaconIntake,
-    _spec: &AllocationSpec,
-) -> std::io::Result<(BufReader<OwnedReadHalf>, OwnedWriteHalf)> {
-    panic!("Not yet implemented -- RED scaffold")
+    intake: &BeaconIntake,
+    spec: &AllocationSpec,
+) -> io::Result<(BeaconSocket, BeaconConnKey)> {
+    let Some(transport) = spec.transport.as_ref() else {
+        unreachable!("provision_vmm rejects a VM launch with no guest transport")
+    };
+    let candidate = intake.take_ready(transport.cid()).await?;
+    Ok((candidate.socket, candidate.key))
 }
 
 /// ADR-0082 §D3 / brief §103's exit-classification join. The guest's
@@ -2021,36 +2154,6 @@ fn classify_vm_exit(guest_report: Option<i32>, vmm_signal: Option<u8>) -> ExitKi
     }
 }
 
-/// Cancel-safe single-line read over `reader`, accumulating into
-/// `accumulated` across repeated calls. Uses `fill_buf`/`consume`
-/// (both cancel-safe per tokio's `AsyncBufReadExt` contract) rather
-/// than `read_line`, whose partial-read data loss on cancellation
-/// (documented on `AsyncBufReadExt::read_line`: "if the method is used
-/// as the event in a `tokio::select!` ... and some other branch
-/// completes first, then it is possible that a line was partially
-/// read") is exactly the hazard `drain_guest_report` below would hit —
-/// this future IS raced, and re-created, inside a `select!` loop.
-async fn read_one_line(
-    reader: &mut BufReader<OwnedReadHalf>,
-    accumulated: &mut Vec<u8>,
-) -> std::io::Result<Option<String>> {
-    loop {
-        if let Some(pos) = accumulated.iter().position(|&b| b == b'\n') {
-            let line_bytes: Vec<u8> = accumulated.drain(..=pos).collect();
-            return Ok(Some(String::from_utf8_lossy(&line_bytes).into_owned()));
-        }
-        let n = {
-            let buf = reader.fill_buf().await?;
-            if buf.is_empty() {
-                return Ok(None); // EOF -- peer closed the connection.
-            }
-            accumulated.extend_from_slice(buf);
-            buf.len()
-        };
-        reader.consume(n);
-    }
-}
-
 /// Race the guest's `EXIT <status>` beacon line against the VMM's own
 /// process exit, with the read side preferred (`biased;`) and a bounded
 /// cooperative-yield drain if the VMM's exit resolves first at a poll —
@@ -2060,13 +2163,11 @@ async fn read_one_line(
 /// `classify_vm_exit`, never reads the VMM's own `exit_code`.
 async fn drain_guest_report(
     exit: &mut VmExitWatch,
-    mut reader: BufReader<OwnedReadHalf>,
+    mut lines: mpsc::Receiver<io::Result<Option<String>>>,
 ) -> (Option<i32>, Option<u8>) {
-    let mut accumulated = Vec::new();
-
     let vmm_signal = tokio::select! {
         biased;
-        line = read_one_line(&mut reader, &mut accumulated) => {
+        line = next_beacon_line(&mut lines) => {
             let (guest_report, _) = finish_guest_report_line(line, None);
             let vmm_signal = exit.recv().await.and_then(|e| e.signal);
             return (guest_report, vmm_signal);
@@ -2077,7 +2178,7 @@ async fn drain_guest_report(
     for _ in 0..GUEST_REPORT_DRAIN_MAX_YIELDS {
         tokio::select! {
             biased;
-            line = read_one_line(&mut reader, &mut accumulated) => {
+            line = next_beacon_line(&mut lines) => {
                 let (guest_report, _) = finish_guest_report_line(line, vmm_signal);
                 return (guest_report, vmm_signal);
             }
@@ -2085,6 +2186,12 @@ async fn drain_guest_report(
         }
     }
     (None, vmm_signal)
+}
+
+async fn next_beacon_line(
+    lines: &mut mpsc::Receiver<io::Result<Option<String>>>,
+) -> io::Result<Option<String>> {
+    lines.recv().await.unwrap_or(Ok(None))
 }
 
 /// Parses one drained line into the guest-reported exit status, if
@@ -2122,7 +2229,7 @@ fn finish_guest_report_line(
 async fn run_exit_watcher(
     alloc: AllocationId,
     mut exit: VmExitWatch,
-    reader: BufReader<OwnedReadHalf>,
+    exit_lines: mpsc::Receiver<io::Result<Option<String>>>,
     live: Arc<LiveMap>,
     exit_tx: mpsc::Sender<ExitEvent>,
     cgroup_manager: CgroupManager,
@@ -2132,8 +2239,18 @@ async fn run_exit_watcher(
     limit_bytes: u64,
     gate_receiver: oneshot::Receiver<()>,
     beacon: Weak<BeaconWriter>,
+    beacon_state: Arc<Mutex<BeaconState>>,
 ) {
-    let (guest_report, vmm_signal) = drain_guest_report(&mut exit, reader).await;
+    let (guest_report, vmm_signal) = drain_guest_report(&mut exit, exit_lines).await;
+    if let Some(writer) = beacon.upgrade()
+        && let Some(task) = writer.request_stop()
+    {
+        let _ = task.await;
+    }
+    {
+        let mut state = beacon_state.lock();
+        clear_beacon_launch(&mut state, &alloc);
+    }
     let kind = classify_vm_exit(guest_report, vmm_signal);
     let oom = if guest_report.is_none() {
         let memory_events_path = scope.resolve(&cgroup_root).join("memory.events");
@@ -2233,7 +2350,6 @@ mod tests {
     use overdrive_sim::adapters::observation_store::SimObservationStore;
     use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
     use overdrive_sim::{SimCgroupFs, SimOp, SimVmm};
-    use tokio::net::UnixStream;
 
     use super::*;
 
@@ -2571,7 +2687,6 @@ mod tests {
         reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
     )]
     #[tokio::test]
-    #[ignore = "pending DELIVER attachment-cut step (6)"]
     async fn diagnostic_selection_is_total_and_never_masks_rejection_or_cleanup() {
         let cases = [
             (ConsoleOutcome::Content, "guest resolver setup failed"),
@@ -2620,7 +2735,6 @@ mod tests {
         reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
     )]
     #[tokio::test]
-    #[ignore = "pending DELIVER attachment-cut step (6)"]
     async fn cleanup_failures_are_total_and_make_the_composite_rejection_authoritative() {
         let temp = tempfile::TempDir::new().expect("cleanup fixture");
         let layout = VmHostLayout {
@@ -2766,7 +2880,7 @@ mod tests {
         // accepted-session `Live` entry and emit (transition 3). `Starting`
         // is intentionally not a valid watcher claim; the source-local
         // ownership complement below pins that refusal.
-        let (beacon, beacon_witness) = test_beacon_writer();
+        let (beacon, beacon_witness, line_rx) = test_beacon_writer().await;
         let live: Arc<LiveMap> = Arc::new(Mutex::new(BTreeMap::from([(
             alloc.clone(),
             VmSupervision::Live(LiveVm {
@@ -2786,13 +2900,9 @@ mod tests {
             }),
         )])));
 
-        // Closed beacon connection -> immediate EOF, so `drain_guest_report`
-        // resolves on its biased read arm with no guest report (`None`),
-        // which then routes through the cgroup OOM read.
-        let (near, far) = UnixStream::pair().expect("unix socketpair");
-        drop(far);
-        let (read_half, _write_half) = near.into_split();
-        let reader = BufReader::new(read_half);
+        // Closed simulated beacon connection -> immediate `Ok(None)` from the
+        // writer actor, so `drain_guest_report` resolves on its biased line arm
+        // with no guest report and routes through the cgroup OOM read.
 
         // A `VmExitWatch` the biased read arm never consults (EOF wins
         // first), but the watcher requires one; the unused sender half
@@ -2812,7 +2922,7 @@ mod tests {
             run_exit_watcher(
                 alloc.clone(),
                 exit,
-                reader,
+                line_rx,
                 Arc::clone(&live),
                 exit_tx,
                 CgroupManager::new(PathBuf::from("/sys/fs/cgroup"), Arc::new(SimCgroupFs::new())),
@@ -2822,6 +2932,7 @@ mod tests {
                 0,
                 gate_receiver,
                 beacon_witness,
+                Arc::new(Mutex::new(BeaconState::default())),
             )
             .await;
             exit_rx.recv().await
@@ -2840,17 +2951,33 @@ mod tests {
         );
     }
 
-    fn test_beacon_writer() -> (Arc<BeaconWriter>, Weak<BeaconWriter>) {
-        let (near, far) = UnixStream::pair().expect("beacon socketpair");
-        drop(far);
-        let (_read_half, write_half) = near.into_split();
-        let beacon = BeaconWriter::spawn(
-            write_half,
-            Arc::new(SimVmm::new()),
+    async fn test_beacon_writer()
+    -> (Arc<BeaconWriter>, Weak<BeaconWriter>, mpsc::Receiver<std::io::Result<Option<String>>>)
+    {
+        let vmm = SimVmm::new();
+        let io = Arc::new(SimBeaconIo::new(vmm.clone()));
+        overdrive_core::vm::beacon::BeaconIo::bind(&*io, VsockListenPort::KernelAssigned)
+            .await
+            .expect("bind the simulated beacon listener");
+        let key = BeaconConnKey {
+            peer_cid: GuestCid::new(GUEST_CID_BASE).expect("an in-range guest CID"),
+            peer_port: overdrive_core::vm::config::VsockPort::new(50_001),
+        };
+        io.queue_connection(key, 0, &[]).expect("queue the test beacon connection");
+        assert!(io.guest_close(key), "the test guest closes its beacon side");
+        let (socket, accepted) = overdrive_core::vm::beacon::BeaconIo::accept(&*io)
+            .await
+            .expect("accept the test beacon connection");
+        assert_eq!(accepted, key);
+        let io: Arc<dyn overdrive_core::vm::beacon::BeaconIo> = io;
+        let (beacon, line_rx) = BeaconWriter::spawn(
+            io,
+            socket,
+            Arc::new(vmm),
             VmControl { pid: 0, api_socket: PathBuf::new() },
         );
         let witness = Arc::downgrade(&beacon);
-        (beacon, witness)
+        (beacon, witness, line_rx)
     }
 
     /// CONTRACT_SHAPE: bounded-change.
@@ -2865,22 +2992,24 @@ mod tests {
 
         // Starting is still Held for supervision, but an exit watcher may
         // claim only a Live entry carrying its own accepted-session writer.
-        let (starting_beacon, starting_witness) = test_beacon_writer();
+        let (starting_beacon, starting_witness, _starting_lines) = test_beacon_writer().await;
         let starting_live =
             Arc::new(Mutex::new(BTreeMap::from([(alloc.clone(), VmSupervision::Starting)])));
         let mut starting_guard =
             ClaimGuard::new(alloc.clone(), Arc::clone(&starting_live), starting_witness);
         assert!(starting_guard.try_begin_ending().is_none());
         drop(starting_guard);
-        let starting_map = starting_live.lock();
-        assert_eq!(starting_map.len(), 1);
-        assert!(matches!(starting_map.get(&alloc), Some(VmSupervision::Starting)));
-        drop(starting_map);
+        {
+            let starting_map = starting_live.lock();
+            assert_eq!(starting_map.len(), 1);
+            assert!(matches!(starting_map.get(&alloc), Some(VmSupervision::Starting)));
+            drop(starting_map);
+        }
         drop(starting_beacon);
 
         // A pre-beacon Live entry is not an accepted session and remains
         // unchanged when this watcher refuses it.
-        let (pre_beacon, pre_beacon_witness) = test_beacon_writer();
+        let (pre_beacon, pre_beacon_witness, _pre_beacon_lines) = test_beacon_writer().await;
         let pre_beacon_live = Arc::new(Mutex::new(BTreeMap::from([(
             alloc.clone(),
             VmSupervision::Live(LiveVm {
@@ -2903,19 +3032,22 @@ mod tests {
             ClaimGuard::new(alloc.clone(), Arc::clone(&pre_beacon_live), pre_beacon_witness);
         assert!(pre_beacon_guard.try_begin_ending().is_none());
         drop(pre_beacon_guard);
-        let pre_beacon_map = pre_beacon_live.lock();
-        assert_eq!(pre_beacon_map.len(), 1);
-        assert!(matches!(
-            pre_beacon_map.get(&alloc),
-            Some(VmSupervision::Live(LiveVm { beacon: None, .. }))
-        ));
-        drop(pre_beacon_map);
+        {
+            let pre_beacon_map = pre_beacon_live.lock();
+            assert_eq!(pre_beacon_map.len(), 1);
+            assert!(matches!(
+                pre_beacon_map.get(&alloc),
+                Some(VmSupervision::Live(LiveVm { beacon: None, .. }))
+            ));
+            drop(pre_beacon_map);
+        }
         drop(pre_beacon);
 
         // A different accepted session occupying the same allocation key is
         // not this watcher's claim and must survive both refusal and Drop.
-        let (watcher_beacon, watcher_witness) = test_beacon_writer();
-        let (replacement_beacon, replacement_witness) = test_beacon_writer();
+        let (watcher_beacon, watcher_witness, _watcher_lines) = test_beacon_writer().await;
+        let (replacement_beacon, replacement_witness, _replacement_lines) =
+            test_beacon_writer().await;
         let replacement_live = Arc::new(Mutex::new(BTreeMap::from([(
             alloc.clone(),
             VmSupervision::Live(LiveVm {
@@ -2938,21 +3070,23 @@ mod tests {
             ClaimGuard::new(alloc.clone(), Arc::clone(&replacement_live), watcher_witness);
         assert!(replacement_guard.try_begin_ending().is_none());
         drop(replacement_guard);
-        let replacement_map = replacement_live.lock();
-        assert_eq!(replacement_map.len(), 1);
-        assert!(matches!(
-            replacement_map.get(&alloc),
-            Some(VmSupervision::Live(LiveVm { beacon: Some(beacon), .. }))
-                if Arc::ptr_eq(beacon, &replacement_beacon)
-        ));
-        drop(replacement_map);
+        {
+            let replacement_map = replacement_live.lock();
+            assert_eq!(replacement_map.len(), 1);
+            assert!(matches!(
+                replacement_map.get(&alloc),
+                Some(VmSupervision::Live(LiveVm { beacon: Some(beacon), .. }))
+                    if Arc::ptr_eq(beacon, &replacement_beacon)
+            ));
+            drop(replacement_map);
+        }
         drop(watcher_beacon);
         drop(replacement_witness);
 
         // A matching accepted session transitions exactly once to
         // EndingInFlight; the guard's Drop then leaves that terminal-pending
         // state intact.
-        let (original_beacon, original_witness) = test_beacon_writer();
+        let (original_beacon, original_witness, _original_lines) = test_beacon_writer().await;
         let original_live = Arc::new(Mutex::new(BTreeMap::from([(
             alloc.clone(),
             VmSupervision::Live(LiveVm {
@@ -2974,28 +3108,32 @@ mod tests {
         let mut original_guard =
             ClaimGuard::new(alloc.clone(), Arc::clone(&original_live), original_witness);
         assert!(original_guard.try_begin_ending().is_some());
-        let ending_map = original_live.lock();
-        assert_eq!(ending_map.len(), 1);
-        assert!(matches!(ending_map.get(&alloc), Some(VmSupervision::EndingInFlight)));
-        drop(ending_map);
+        {
+            let ending_map = original_live.lock();
+            assert_eq!(ending_map.len(), 1);
+            assert!(matches!(ending_map.get(&alloc), Some(VmSupervision::EndingInFlight)));
+            drop(ending_map);
+        }
         drop(original_guard);
 
         // EndingInFlight and an absent allocation are exact no-ops for a
         // late watcher and its failed-claim Drop.
-        let (ending_beacon, ending_witness) = test_beacon_writer();
+        let (ending_beacon, ending_witness, _ending_lines) = test_beacon_writer().await;
         let ending_live =
             Arc::new(Mutex::new(BTreeMap::from([(alloc.clone(), VmSupervision::EndingInFlight)])));
         let mut ending_guard =
             ClaimGuard::new(alloc.clone(), Arc::clone(&ending_live), ending_witness);
         assert!(ending_guard.try_begin_ending().is_none());
         drop(ending_guard);
-        let ending_map = ending_live.lock();
-        assert_eq!(ending_map.len(), 1);
-        assert!(matches!(ending_map.get(&alloc), Some(VmSupervision::EndingInFlight)));
-        drop(ending_map);
+        {
+            let ending_map = ending_live.lock();
+            assert_eq!(ending_map.len(), 1);
+            assert!(matches!(ending_map.get(&alloc), Some(VmSupervision::EndingInFlight)));
+            drop(ending_map);
+        }
         drop(ending_beacon);
 
-        let (absent_beacon, absent_witness) = test_beacon_writer();
+        let (absent_beacon, absent_witness, _absent_lines) = test_beacon_writer().await;
         let absent_live = Arc::new(Mutex::new(BTreeMap::new()));
         let mut absent_guard = ClaimGuard::new(alloc, absent_live.clone(), absent_witness);
         assert!(absent_guard.try_begin_ending().is_none());

@@ -46,7 +46,7 @@ use overdrive_control_plane::action_shim::{
 };
 use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::veth_provisioner::{
-    NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
+    NetSlotAllocator, VethProvisionError, WorkloadNetnsPlan,
 };
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
@@ -73,17 +73,13 @@ use tempfile::TempDir;
 
 #[derive(Debug, Default)]
 struct SimNetworkProvisioner {
-    provisions: parking_lot::Mutex<Vec<(WorkloadNetnsPlan, VmTapPlan)>>,
+    provisions: parking_lot::Mutex<Vec<WorkloadNetnsPlan>>,
     teardowns: parking_lot::Mutex<Vec<WorkloadNetnsPlan>>,
 }
 
 impl WorkloadNetworkProvisioner for SimNetworkProvisioner {
-    fn provision(
-        &self,
-        workload: &WorkloadNetnsPlan,
-        vm_tap: &VmTapPlan,
-    ) -> Result<(), VethProvisionError> {
-        self.provisions.lock().push((workload.clone(), vm_tap.clone()));
+    fn provision(&self, workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        self.provisions.lock().push(workload.clone());
         Ok(())
     }
 

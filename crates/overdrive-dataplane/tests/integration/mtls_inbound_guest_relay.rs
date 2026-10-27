@@ -479,7 +479,6 @@ fn join<T>(handle: std::thread::JoinHandle<T>) -> T {
 /// the host direction already closed (no 0x3).
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER attachment-cut step (9): LEGS-DIAL establish split"]
 async fn an_authenticated_client_is_relayed_to_the_guest_application_byte_exact() {
     let dial = ScriptedDial::new(DialScript::Pair { delay: Duration::from_millis(300) });
     let rig = Rig::new(Arc::clone(&dial), MtlsLimits::default()).await;
@@ -547,7 +546,6 @@ async fn an_authenticated_client_is_relayed_to_the_guest_application_byte_exact(
 /// `GUEST_DIAL_PAIRING_DEADLINE`) still relays.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER attachment-cut step (9): LEGS-DIAL establish split"]
 async fn a_dial_slower_than_the_handshake_deadline_still_relays() {
     let limits =
         MtlsLimits { handshake_deadline: Duration::from_millis(400), ..MtlsLimits::default() };
@@ -583,23 +581,46 @@ async fn a_dial_slower_than_the_handshake_deadline_still_relays() {
 }
 
 /// R5-54 / LEGS-DIAL: a client whose certificate does not chain to the trust
-/// bundle fails peer verification in the handshake, and no dial is made — the
-/// guest application never sees a connection and no flow quota is taken.
+/// bundle is refused by peer verification, observes no application plaintext
+/// before the connection ends, and causes no dial — the guest application
+/// never sees a connection and no flow quota is taken.
 /// (The seeded-sim half's `AbsentBundle` is a node with no bundle; this is a
 /// real bad client against a real bundle.)
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER attachment-cut step (9): LEGS-DIAL establish split"]
 async fn a_client_failing_peer_verification_causes_no_dial() {
     let dial = ScriptedDial::new(DialScript::Pair { delay: Duration::ZERO });
     let rig = Rig::new(Arc::clone(&dial), MtlsLimits::default()).await;
-    let (conn, client) = rig.intercept(Presents::RogueClient, |client| client.is_ok());
+    let (conn, client) = rig.intercept(Presents::RogueClient, |client| match client {
+        Err(error) => (Vec::new(), Err(error)),
+        Ok(mut client) => loop {
+            let observation = client.read_up_to(1);
+            if matches!(
+                &observation,
+                (plaintext, Err(error))
+                    if plaintext.is_empty() && error.kind() == ErrorKind::Interrupted
+            ) {
+                continue;
+            }
+            break observation;
+        },
+    });
     let result = rig.enforcement.enforce(conn).await;
     assert!(
         matches!(result, Err(MtlsEnforcementError::PeerVerificationFailed { .. })),
         "a client certificate that does not chain refuses the connection; got {result:?}"
     );
-    assert!(!join(client), "the client's handshake fails");
+    let (plaintext, terminal) = join(client);
+    assert!(plaintext.is_empty(), "the refused client receives zero application plaintext");
+    if let Err(error) = terminal {
+        assert!(
+            !matches!(
+                error.kind(),
+                ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::Interrupted
+            ),
+            "the refused client reaches EOF or a terminal TLS/TCP error within {WAIT:?}; got {error}"
+        );
+    }
     assert!(dial.calls().is_empty(), "no dial was made for an unauthenticated client");
     assert!(dial.events().is_empty(), "no leg S existed");
 }
@@ -610,7 +631,6 @@ async fn a_client_failing_peer_verification_causes_no_dial() {
 /// `MtlsEnforcementError::GuestDial` naming the dial's outcome.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER attachment-cut step (9): LEGS-DIAL establish split"]
 async fn a_dial_error_resets_leg_c_and_is_typed() {
     let dial = ScriptedDial::new(DialScript::Refuse {
         delay: Duration::from_millis(500),
@@ -639,7 +659,6 @@ async fn a_dial_error_resets_leg_c_and_is_typed() {
 /// application sees its connection end; it never sees a clean 0x2).
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER attachment-cut step (9): LEGS-DIAL establish split"]
 async fn a_client_reset_drops_leg_s_with_its_direction_open() {
     let dial = ScriptedDial::new(DialScript::Pair { delay: Duration::ZERO });
     let rig = Rig::new(Arc::clone(&dial), MtlsLimits::default()).await;
@@ -672,7 +691,6 @@ async fn a_client_reset_drops_leg_s_with_its_direction_open() {
 /// client sees a reset, not a clean end.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER attachment-cut step (9): LEGS-DIAL establish split"]
 async fn a_guest_application_reset_resets_leg_c() {
     let dial = ScriptedDial::new(DialScript::Pair { delay: Duration::ZERO });
     let rig = Rig::new(Arc::clone(&dial), MtlsLimits::default()).await;
@@ -697,7 +715,6 @@ async fn a_guest_application_reset_resets_leg_c() {
 /// assertion after it.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER attachment-cut step (9): LEGS-DIAL establish split"]
 async fn teardown_returns_only_after_the_relay_dropped_leg_s() {
     let dial = ScriptedDial::new(DialScript::Pair { delay: Duration::ZERO });
     let rig = Rig::new(Arc::clone(&dial), MtlsLimits::default()).await;

@@ -20,14 +20,17 @@
 //! structural guard"). The observable surface the contract pins and this double
 //! mirrors:
 //!
-//! - **`enforce` outcome** = a pure function of the preloaded identity read:
+//! - **`enforce` outcome** starts with the preloaded identity read:
 //!   - `svid_for(conn.alloc) == None` ⇒ `Err(AbsentSvid)` (the held-set
 //!     fail-closed signal — `identity_read.rs` clause 3);
 //!   - `current_bundle() == None` ⇒ `Err(AbsentBundle)` (no anchor to verify the
 //!     peer against);
-//!   - both present ⇒ `Ok(EnforcedConnection)` — steady-state-established. The
-//!     real kTLS / handshake / pump mechanics the host adapter performs are NOT
-//!     modelled (no crypto in the sim); the outcome IS the observable contract.
+//!   - both present and an inbound target in the guest prefix ⇒ await the
+//!     injected `GuestStreamDial` with `DialPurpose::Relay`; a dial refusal is
+//!     returned as `GuestDial` and a paired stream is held by the simulated
+//!     relay until its end or teardown.
+//!   - other routes ⇒ `Ok(EnforcedConnection)` after the identity reads. The
+//!     real TLS handshake and kTLS arm are NOT modelled (no crypto in the sim).
 //! - **`liveness`** — `Running` while established, `Gone` after teardown (or for
 //!   an unknown handle — the post-teardown observable, mirroring `Driver::status`
 //!   returning `NotFound` after `stop`).
@@ -56,20 +59,29 @@
 //! `HostMtlsEnforcement::new`.
 
 use std::collections::BTreeMap;
-use std::os::fd::OwnedFd;
+use std::io;
+use std::net::TcpStream as StdTcpStream;
+use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 use overdrive_core::AllocationId;
-use overdrive_core::guest_transport::dial::GuestStreamDial;
+use overdrive_core::guest_transport::GUEST_NODE_PREFIX;
+use overdrive_core::guest_transport::dial::{
+    DialPurpose, GuestStream, GuestStreamDial, GuestStreamEnd,
+};
 use overdrive_core::traits::IdentityRead;
 use overdrive_core::traits::mtls_enforcement::{
     EnforcedConnection, EnforcedConnectionId, InterceptedConnection, MtlsEnforcement,
-    MtlsEnforcementError, MtlsLimits, PumpLiveness, Result,
+    MtlsEnforcementError, MtlsLimits, PumpLiveness, Result, Routed,
 };
 use overdrive_core::wall_clock::UnixInstant;
 use parking_lot::Mutex;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 
 /// A scripted fail-closed limit trip the DST equivalence harness arms for the NEXT
 /// `enforce` of a given allocation.
@@ -94,20 +106,31 @@ pub enum ScriptedTrip {
     PeerVerification,
 }
 
-/// Per-connection adapter-private tracking — the owned leg the double closes on
-/// teardown. Keyed by [`EnforcedConnectionId`], mirroring the host adapter's
-/// `ConnState` (which additionally holds the real pump handles the sim has no
-/// equivalent for).
+/// Per-connection adapter-private tracking — the owned leg or relay the double
+/// closes on teardown. Keyed by [`EnforcedConnectionId`], mirroring the host
+/// adapter's `ConnState` while replacing its kernel pump with a Tokio relay.
 struct SimConnState {
     /// The agent-owned leg handed over by `enforce` (`conn.leg`). Dropped on
     /// teardown — closing it makes the fd-reclaim invariant observable.
-    _leg: OwnedFd,
+    _leg: Option<OwnedFd>,
+    /// The simulated relay owns leg C and its `GuestStream` while active.
+    relay: Option<JoinHandle<()>>,
+    /// Stops the relay before teardown waits for it.
+    relay_stop: Option<oneshot::Sender<()>>,
     /// F6: when set by [`SimMtlsEnforcement::mark_stalled`], `liveness` reports
     /// `Stalled { since }` for this connection (the harness drives the
     /// Running→Stalled transition the worker's supervisor reacts to). The host
     /// adapter derives this from the real pump's frozen progress metric; the sim
     /// scripts it, so the equivalence is on the `Stalled`-then-teardown OUTCOME.
     stalled_since: Option<UnixInstant>,
+}
+
+impl Drop for SimConnState {
+    fn drop(&mut self) {
+        if let Some(stop) = self.relay_stop.take() {
+            let _ = stop.send(());
+        }
+    }
 }
 
 /// In-memory [`MtlsEnforcement`] double for DST.
@@ -135,9 +158,6 @@ pub struct SimMtlsEnforcement {
     /// dials it for an `orig_dst` inside the guest prefix, after the client
     /// authenticated, and relays over the returned stream — the same contract
     /// as `HostMtlsEnforcement`.
-    // SCAFFOLD: true — netns-density-295 DISTILL; the inbound leg-S arm reads
-    // it in the attachment-cut step (9) (DG-2 row 19).
-    #[expect(dead_code, reason = "read by the LEGS-DIAL inbound arm (attachment-cut step 9)")]
     guest_dial: Arc<dyn GuestStreamDial>,
 }
 
@@ -243,10 +263,8 @@ impl MtlsEnforcement for SimMtlsEnforcement {
             });
         }
 
-        // The handshake OUTCOME is a pure function of the preloaded identity read,
-        // identical in both directions (the observable contract does not branch on
-        // `conn.routed`). Read the held SVID + bundle through the injected port —
-        // fail-closed on absence (no real crypto; the outcome IS the contract).
+        // The sim models only the authentication outcome, not TLS or kTLS. Read
+        // the held SVID + bundle through the injected port before any leg-S dial.
         let svid = self
             .identity
             .svid_for(&conn.alloc)
@@ -257,11 +275,32 @@ impl MtlsEnforcement for SimMtlsEnforcement {
         // not perform the handshake, so it is not otherwise consumed.
         let _ = &svid;
 
-        // Steady-state-established: mint a stable per-connection id and take ownership
-        // of the leg (closed on teardown — fd-reclaim invariant observable).
+        let allocation = conn.alloc;
+        let (owned_leg, relay, relay_stop) = match conn.routed {
+            Routed::Inbound { orig_dst } if GUEST_NODE_PREFIX.contains(orig_dst.ip()) => {
+                let stream = match self.guest_dial.dial(orig_dst, DialPurpose::Relay).await {
+                    Ok(stream) => stream,
+                    Err(source) => {
+                        reset_owned_leg(&conn.leg);
+                        return Err(MtlsEnforcementError::GuestDial { source });
+                    }
+                };
+                let leg = tcp_stream_from_leg(conn.leg).map_err(MtlsEnforcementError::Io)?;
+                let (relay_stop, stop) = oneshot::channel();
+                let relay = tokio::spawn(relay_guest_stream(leg, stream, stop));
+                (None, Some(relay), Some(relay_stop))
+            }
+            _ => (Some(conn.leg), None, None),
+        };
+
+        // Steady-state-established: mint a stable per-connection id and retain
+        // either the untouched leg or its paired guest relay until teardown.
         let counter = self.next_counter.fetch_add(1, Ordering::Relaxed);
-        let id = EnforcedConnectionId::new(conn.alloc, counter);
-        self.conns.lock().insert(id.clone(), SimConnState { _leg: conn.leg, stalled_since: None });
+        let id = EnforcedConnectionId::new(allocation, counter);
+        self.conns.lock().insert(
+            id.clone(),
+            SimConnState { _leg: owned_leg, relay, relay_stop, stalled_since: None },
+        );
         Ok(EnforcedConnection::new(id))
     }
 
@@ -271,20 +310,189 @@ impl MtlsEnforcement for SimMtlsEnforcement {
         // supervisor reacts to it); Running otherwise. The sim's stall is scripted
         // (`mark_stalled`) where the host adapter derives it from the real pump's
         // frozen progress metric — the equivalence is on the variant.
-        let stalled = self.conns.lock().get(handle.id()).map(|state| state.stalled_since);
-        match stalled {
-            None => PumpLiveness::Gone,
-            Some(None) => PumpLiveness::Running,
-            Some(Some(since)) => PumpLiveness::Stalled { since },
+        {
+            let conns = self.conns.lock();
+            conns.get(handle.id()).map_or_else(
+                || PumpLiveness::Gone,
+                |state| {
+                    state.stalled_since.map_or_else(
+                        || {
+                            if state.relay.as_ref().is_some_and(JoinHandle::is_finished) {
+                                PumpLiveness::Gone
+                            } else {
+                                PumpLiveness::Running
+                            }
+                        },
+                        |since| PumpLiveness::Stalled { since },
+                    )
+                },
+            )
         }
     }
 
     async fn teardown(&self, handle: EnforcedConnection) -> Result<()> {
-        // Idempotent: tearing down an unknown/already-torn handle is Ok. Removing the
-        // entry drops the owned leg (closes the fd) — no leg leak.
-        self.conns.lock().remove(handle.id());
+        // Idempotent: tearing down an unknown/already-torn handle is Ok. Stop
+        // and join a simulated relay before its owned GuestStream is dropped.
+        let Some(mut state) = self.conns.lock().remove(handle.id()) else { return Ok(()) };
+        if let Some(stop) = state.relay_stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(relay) = state.relay.take() {
+            let _ = relay.await;
+        }
         Ok(())
     }
+}
+
+fn tcp_stream_from_leg(leg: OwnedFd) -> io::Result<TcpStream> {
+    let raw_fd = leg.into_raw_fd();
+    // SAFETY: `InterceptedConnection` supplies a connected TCP leg C owned by
+    // this `OwnedFd`; ownership transfers to the standard stream exactly once.
+    let stream = unsafe { StdTcpStream::from_raw_fd(raw_fd) };
+    stream.set_nonblocking(true)?;
+    TcpStream::from_std(stream)
+}
+
+fn reset_owned_leg(leg: &OwnedFd) {
+    let linger = libc::linger { l_onoff: 1, l_linger: 0 };
+    // SAFETY: `leg` is the live accepted TCP descriptor; zero linger requests
+    // the reset required when the owner dial refuses.
+    let _ = unsafe {
+        libc::setsockopt(
+            leg.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_LINGER,
+            std::ptr::from_ref(&linger).cast(),
+            libc::socklen_t::try_from(std::mem::size_of_val(&linger))
+                .unwrap_or(libc::socklen_t::MAX),
+        )
+    };
+}
+
+enum RelayRead {
+    Stopped,
+    Leg(io::Result<usize>),
+    Guest(io::Result<usize>),
+}
+
+async fn relay_guest_stream(
+    mut leg: TcpStream,
+    mut guest: GuestStream,
+    mut stop: oneshot::Receiver<()>,
+) {
+    let mut leg_open = true;
+    let mut guest_open = true;
+    let mut leg_bytes = vec![0_u8; 16 * 1024];
+    let mut guest_bytes = vec![0_u8; 16 * 1024];
+
+    while leg_open || guest_open {
+        let event = tokio::select! {
+            biased;
+            _ = &mut stop => RelayRead::Stopped,
+            result = leg.read(&mut leg_bytes), if leg_open => RelayRead::Leg(result),
+            result = guest.read(&mut guest_bytes), if guest_open => RelayRead::Guest(result),
+        };
+
+        match event {
+            RelayRead::Stopped | RelayRead::Leg(Err(_)) => return,
+            RelayRead::Leg(Ok(0)) => {
+                leg_open = false;
+                let result = tokio::select! {
+                    biased;
+                    _ = &mut stop => return,
+                    result = guest.shutdown_write() => result,
+                };
+                if result.is_err() {
+                    return;
+                }
+            }
+            RelayRead::Leg(Ok(read)) => {
+                if write_guest(&mut guest, &leg_bytes[..read], &mut stop).await.is_err() {
+                    reset_tcp_stream(&leg);
+                    return;
+                }
+            }
+            RelayRead::Guest(Ok(0)) => match guest.end() {
+                Some(GuestStreamEnd::HalfClose) => {
+                    guest_open = false;
+                    if leg.shutdown().await.is_err() {
+                        return;
+                    }
+                }
+                Some(GuestStreamEnd::Abort) | None => {
+                    reset_tcp_stream(&leg);
+                    return;
+                }
+            },
+            RelayRead::Guest(Ok(read)) => {
+                if write_leg(&mut leg, &guest_bytes[..read], &mut stop).await.is_err() {
+                    reset_tcp_stream(&leg);
+                    return;
+                }
+            }
+            RelayRead::Guest(Err(_)) => {
+                reset_tcp_stream(&leg);
+                return;
+            }
+        }
+    }
+}
+
+async fn write_guest(
+    guest: &mut GuestStream,
+    bytes: &[u8],
+    stop: &mut oneshot::Receiver<()>,
+) -> io::Result<()> {
+    let mut written = 0;
+    while written < bytes.len() {
+        let result = tokio::select! {
+            biased;
+            _ = &mut *stop => return Err(io::Error::new(io::ErrorKind::Interrupted, "relay stopped")),
+            result = guest.write(&bytes[written..]) => result,
+        };
+        match result {
+            Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+            Ok(count) => written += count,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+async fn write_leg(
+    leg: &mut TcpStream,
+    bytes: &[u8],
+    stop: &mut oneshot::Receiver<()>,
+) -> io::Result<()> {
+    let mut written = 0;
+    while written < bytes.len() {
+        let result = tokio::select! {
+            biased;
+            _ = &mut *stop => return Err(io::Error::new(io::ErrorKind::Interrupted, "relay stopped")),
+            result = leg.write(&bytes[written..]) => result,
+        };
+        match result {
+            Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+            Ok(count) => written += count,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn reset_tcp_stream(stream: &TcpStream) {
+    let linger = libc::linger { l_onoff: 1, l_linger: 0 };
+    // SAFETY: `stream` owns this live TCP leg; zero linger requests a reset.
+    let _ = unsafe {
+        libc::setsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_LINGER,
+            std::ptr::from_ref(&linger).cast(),
+            libc::socklen_t::try_from(std::mem::size_of_val(&linger))
+                .unwrap_or(libc::socklen_t::MAX),
+        )
+    };
 }
 
 /// The simulation [`MtlsEnforcementFactory`](overdrive_core::traits::mtls_enforcement::MtlsEnforcementFactory).

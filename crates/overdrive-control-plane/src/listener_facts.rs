@@ -1040,10 +1040,16 @@ mod tests {
     }
 
     fn listener_strategy() -> impl Strategy<Value = Listener> {
-        (1u16..=65535, proto_strategy()).prop_map(|(port, proto)| Listener {
-            port: NonZeroU16::new(port).unwrap(),
-            protocol: proto,
-        })
+        (
+            (1u16..=65535).prop_filter("listener port is not guest-reserved", |port| {
+                !overdrive_core::guest_transport::guest_reserved_ports().contains(port)
+            }),
+            proto_strategy(),
+        )
+            .prop_map(|(port, proto)| Listener {
+                port: NonZeroU16::new(port).unwrap(),
+                protocol: proto,
+            })
     }
 
     prop_compose! {

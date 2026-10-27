@@ -85,7 +85,6 @@ fn closed_with(capture: &EventCapture, cause: FlowCloseCause) -> usize {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn a_flow_ended_cleanly_both_ways_completes_and_closes_peer_eof() {
     let (capture, _guard) = EventCapture::install();
     let p = paired(60).await;
@@ -130,7 +129,6 @@ async fn a_flow_ended_cleanly_both_ways_completes_and_closes_peer_eof() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn the_guests_half_close_reaches_the_destination_after_its_bytes() {
     let p = paired(61).await;
     p.c.io.guest_sends(p.flow, b"abc");
@@ -165,7 +163,6 @@ async fn the_guests_half_close_reaches_the_destination_after_its_bytes() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn the_guests_close_with_a_direction_open_aborts_the_flow() {
     let (capture, _guard) = EventCapture::install();
     let p = paired(62).await;
@@ -181,7 +178,6 @@ async fn the_guests_close_with_a_direction_open_aborts_the_flow() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn a_guest_reset_aborts_the_flow() {
     let p = paired(63).await;
     p.c.io.guest_resets(p.flow);
@@ -196,7 +192,6 @@ async fn a_guest_reset_aborts_the_flow() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn a_destination_reset_after_its_fin_aborts_the_flow() {
     let (capture, _guard) = EventCapture::install();
     let p = paired(64).await;
@@ -216,7 +211,6 @@ async fn a_destination_reset_after_its_fin_aborts_the_flow() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn an_unclassified_end_aborts_with_peer_reset_and_raises_the_alarm() {
     let (capture, _guard) = EventCapture::install();
     let p = paired(65).await;
@@ -243,7 +237,6 @@ async fn an_unclassified_end_aborts_with_peer_reset_and_raises_the_alarm() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn a_destination_reset_before_the_attach_ends_the_flow_with_abort() {
     let (capture, _guard) = EventCapture::install();
     let c = Composition::booted(66).await;
@@ -274,7 +267,6 @@ async fn a_destination_reset_before_the_attach_ends_the_flow_with_abort() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn a_guest_close_before_the_attach_is_refused_and_resets_the_destination() {
     let c = Composition::booted(67).await;
     let (lease, _session) = c.active_lease("attach-end-v", &[]).await;
@@ -302,7 +294,6 @@ async fn a_guest_close_before_the_attach_is_refused_and_resets_the_destination()
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn an_end_before_the_attach_is_carried_out_by_the_attach_time_run() {
     let c = Composition::booted(68).await;
     let (lease, _session) = c.active_lease("attach-time", &[]).await;
@@ -329,7 +320,6 @@ async fn an_end_before_the_attach_is_carried_out_by_the_attach_time_run() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn a_trailing_reset_after_completion_changes_nothing() {
     let p = paired(69).await;
     let (next_key, _next, _next_pair) = p.c.paired_tcp(&p.lease, 2, remote(8443), 5001).await;
@@ -356,7 +346,6 @@ async fn a_trailing_reset_after_completion_changes_nothing() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn a_stalled_reader_is_backpressure_not_an_abort() {
     let p = paired(70).await;
     p.c.io.destination_stops_reading(p.flow);
@@ -380,7 +369,6 @@ async fn a_stalled_reader_is_backpressure_not_an_abort() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn quiescence_aborts_a_stalled_flow_with_resets() {
     let (capture, _guard) = EventCapture::install();
     let p = paired(71).await;
@@ -402,7 +390,6 @@ async fn quiescence_aborts_a_stalled_flow_with_resets() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn the_owners_death_resets_its_non_mesh_far_end() {
     let p = paired(72).await;
     p.c.io.guest_sends(p.flow, b"mid-transfer");
@@ -431,7 +418,6 @@ async fn the_owners_death_resets_its_non_mesh_far_end() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn the_vms_end_aborts_its_flows_through_the_device_release() {
     let (capture, _guard) = EventCapture::install();
     let p = paired(73).await;
@@ -449,7 +435,6 @@ async fn the_vms_end_aborts_its_flows_through_the_device_release() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn the_owner_touches_an_attached_pair_only_after_its_record() {
     let p = paired(74).await;
     let at_pairing = p.c.io.issued().len();

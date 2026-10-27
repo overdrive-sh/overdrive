@@ -104,7 +104,7 @@ fn a_stream_pair_forwards_both_ways_and_completes_on_two_clean_ends() {
     assert!(state.a_to_b.target_shut, "the clean end reached the target");
     assert_eq!(state.a_to_b.moved, 18);
     assert_eq!(state.b_to_a.source_end, None);
-    assert_eq!(tcp.peer_end(), Some(SimFarEnd::Eof));
+    assert_eq!(tcp.peer_end(), None, "a directional shutdown is not a terminal socket close");
 
     tcp.peer_shutdown(SimShutdown::Send);
     forwarder.run_until_idle();
@@ -190,7 +190,11 @@ fn ends_after_a_clean_full_end_change_nothing() {
     tcp.peer_reset();
     forwarder.run_until_idle();
     assert_eq!(forwarder.take_end().expect("take_end"), None, "at most one record per id");
-    assert_eq!(tcp.peer_end(), Some(SimFarEnd::Eof), "the far end saw the clean end, no reset");
+    assert_eq!(
+        tcp.peer_end(),
+        None,
+        "the completed pair carries both clean directions; its owner still owns the socket close"
+    );
 }
 
 /// A target whose reader stops reading stops the sender: the source keeps

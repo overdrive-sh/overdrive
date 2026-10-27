@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use futures::{FutureExt, StreamExt};
+use overdrive_control_plane::guest_network::SharedGuestNetworkOwner;
 use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::reconciler_runtime::{
     ReconcilerRuntime, run_convergence_tick_with_guest_network_provisioner_for_test,
@@ -484,7 +485,6 @@ async fn converge_service_wakes(
 /// a late accepted readiness Pass is checked against terminal eligibility.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 rows 2-4: the guest lane leases the transport)"]
 async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
     let seed = SEED;
     eprintln!("service-kind-vm readiness-wake seed={seed}");
@@ -523,6 +523,16 @@ async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
     let allocator =
         overdrive_control_plane::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
     let exec_wiring = opened_exec_wiring();
+    let guest_network = guest_owner();
+    guest_network
+        .converge_shared()
+        .await
+        .expect("the fixture owner reports its bound ports before AppState construction");
+    let mtls_worker = crate::acceptance::serve_ports::worker();
+    mtls_worker
+        .start_shared_owner()
+        .await
+        .expect("the fixture starts the shared intercept owner before allocation dispatch");
     let state = AppState::new(
         Arc::clone(&store),
         temp.path().join("intent.redb"),
@@ -537,8 +547,8 @@ async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         Ipv4Addr::LOCALHOST,
-        crate::acceptance::serve_ports::worker(),
-        guest_owner(),
+        mtls_worker,
+        guest_network,
         exec_wiring.gate(),
         crate::acceptance::serve_ports::pool(),
     );

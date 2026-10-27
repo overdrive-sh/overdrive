@@ -267,7 +267,7 @@ fn init_failure_console_line(err: &InitError) -> String {
 /// READY with the launch token of the guest's `overdrive.transport=` token
 /// (ATTR-TOKEN, DG-7).
 const fn ready_message(pid: u32, token: &GuestTransportToken) -> BeaconMessage {
-    BeaconMessage::Ready { pid, port: beacon::BEACON_VSOCK_PORT, launch: token.launch }
+    BeaconMessage::Ready { pid, port: token.ports.beacon, launch: token.launch }
 }
 
 fn ensure_guest_directories_at(root: &Path) -> Result<(), InitError> {
@@ -1650,7 +1650,6 @@ mod tests {
     /// CONTRACT_SHAPE: bounded-change (the resolver write keeps its place
     /// after the transport setup, and its failure suppresses READY).
     #[test]
-    #[ignore = "pending DELIVER attachment-cut step (5)"]
     fn resolver_write_failure_suppresses_ready_and_exec() {
         let configured = Cell::new(false);
         let (result, trace) = lifecycle_trace(
@@ -1779,7 +1778,6 @@ mod tests {
     /// owner's only exit, a `GuestOwnerFatal`, reaches the fatal handler.
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "pending DELIVER attachment-cut step (5)"]
     fn the_guest_flow_owner_runs_on_its_own_thread_before_ready() {
         use std::sync::Mutex;
         use std::sync::mpsc;
@@ -1827,7 +1825,7 @@ mod tests {
         assert!(started, "the guest flow owner runs on its own thread before READY");
         assert!(no_session, "READY is not gated on the control session");
         let fatal = rx.recv_timeout(Duration::from_secs(10)).expect("the owner's run returned");
-        assert_eq!(fatal, "waiting for guest transport events failed: Interrupted");
+        assert_eq!(fatal, "waiting for guest transport events failed: operation interrupted");
     }
 
     /// DG-7 / ATTR-TOKEN: READY carries the launch token of the guest's one
@@ -1837,7 +1835,6 @@ mod tests {
     /// (GUEST-PORTS).
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "pending DELIVER attachment-cut step (5)"]
     fn ready_carries_the_launch_token_of_the_transport_token() {
         let ready_line = std::cell::RefCell::new(None::<String>);
         let result = complete_pre_ready_init(

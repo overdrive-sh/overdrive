@@ -3,6 +3,7 @@
 State 1
   cnt = 0
   latch = FALSE
+  roundState = [C1 |-> "outside", C2 |-> "outside"]
   stop = "none"
   repLeft = 1
   up = TRUE

@@ -73,6 +73,14 @@ filter = 'package(overdrive-control-plane) & binary(integration) & test(submit_t
 slow-timeout = { period = "60s", terminate-after = 4 }
 test-group = 'host-kernel-shared'
 
+# STEP 12-01's quota randomized run performs eight independent, full-capacity
+# traces; each realizes the same 65,534-flow fixture. The user approved only
+# this test's finite 240-second wall-clock exception; all eight samples and
+# their assertions remain unchanged.
+[[profile.default.overrides]]
+filter = 'package(overdrive-control-plane) & test(quint_flow_quota_randomized_traces)'
+slow-timeout = { period = "60s", terminate-after = 4 }
+
 # trybuild compiles every compile_fail / compile_pass fixture from
 # scratch on each run. Under cargo-mutants the tree is reproduced in
 # /tmp with a cold target dir and the per-fixture compile time stacks

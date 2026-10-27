@@ -1,0 +1,52 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.31s
+     Running `target/debug/xtask metal run -- bash spike-scratch/netns-density-295-metal-durable-run/increment-a/probe.sh`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=30fa19c179ca9b733af85c77 pid=2611358
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/wellington-v2 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive
+
+sent 3,465,449 bytes  received 160,392 bytes  426,569.53 bytes/sec
+total size is 3,729,447,160  speedup is 1,028.57
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+V_MDR1_BEGIN
+kernel=7.0.0-38-generic
+systemd=systemd 259 (259.5-0ubuntu3.4)
+unit=overdrive-metal-v-mdr1-20261027T155628Z-2611707.service
+probe_dir=/tmp/overdrive-metal-v-mdr1.VxEZmc
+phase_before_start=acquired
+phase_before_disconnect=running
+active_before_disconnect=active
+spike-scratch/netns-density-295-metal-durable-run/increment-a/probe.sh: line 95: 2611716 Killed                     systemd-run --quiet --unit="${unit}" --pipe --wait --collect --expand-environment=no --property=Type=exec --property=KillMode=mixed bash -c '
+    set -euo pipefail
+    probe_dir="$1"
+    exec 8>"${probe_dir}/fixture.lock"
+    flock 8
+    printf "acquired\n" >"${probe_dir}/phase"
+    IFS= read -r control
+    [ "${control}" = START ]
+    trap "" PIPE
+    exec </dev/null >"${probe_dir}/service.log" 2>&1
+    printf "running\n" >"${probe_dir}/phase"
+    printf "service-detached\n"
+    sleep 5
+    printf "complete\n" >"${probe_dir}/terminal"
+    printf "service-complete\n"
+  ' v-mdr1-service "${probe_dir}" < "${probe_dir}/control" > "${probe_dir}/controller-output" 2>&1
+fixture_controller_destroyed=yes
+active_after_disconnect=active
+lock_held_after_disconnect=yes
+terminal=complete
+lock_released_after_completion=yes
+service_log_begin
+service-detached
+service-complete
+service_log_end
+V_MDR1_VERDICT=WORKS

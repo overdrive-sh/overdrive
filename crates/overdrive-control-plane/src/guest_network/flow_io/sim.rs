@@ -107,10 +107,10 @@ use overdrive_core::vm::config::VsockPort;
 /// The first port a kernel-assigned sim bind takes (above the reserved
 /// range, as `VMADDR_PORT_ANY` binds are).
 const SIM_FIRST_ASSIGNED_PORT: u32 = 49_152;
-use overdrive_netlink::NetlinkError;
+use overdrive_netlink::{FibRouteType, NetlinkError};
 use overdrive_sim::adapters::{
     SimContextState, SimFarEnd, SimFlowForwarder, SimForwarderDevice, SimLocalRead, SimShutdown,
-    SimSocket, SimVsockState,
+    SimSocket, SimSocketKind, SimVsockState,
 };
 use parking_lot::Mutex;
 use tokio::sync::{Notify, oneshot};
@@ -118,8 +118,8 @@ use tokio::sync::{Notify, oneshot};
 use super::{
     AbortResult, AttachRefused, AttachedPair, FlowIoError, FlowListener, ForwardEnd, ForwardId,
     ForwarderError, ForwarderGeneration, ForwarderInventory, GuestFlowIo, GuestHostFacts,
-    HostRouteType, OwnedSocket, PairMode, PairSocket, PairState, PeerProtocol, PeerSocket,
-    PeerSocketSpec, RecordSocket, SeamHandle,
+    OwnedSocket, PairMode, PairSocket, PairState, PeerProtocol, PeerSocket, PeerSocketSpec,
+    RecordSocket, SeamHandle,
 };
 use crate::guest_network::{GuestConnKey, GuestNetworkError, GuestNetworkOperation};
 
@@ -314,6 +314,18 @@ pub(crate) enum SimPeerEnd {
     Reset,
 }
 
+/// The kernel-permitted result selected for one holder read after the local
+/// owner shut a watched vsock both ways. Native V-EV-CTL observes both results
+/// from this exact state; the choice is an input to the conformance step, not
+/// persistent socket or model state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OwnerShutdownRead {
+    /// `recvmsg` returned zero while the socket was still established.
+    Eof,
+    /// `recvmsg` failed `ENOTCONN` after the local shutdown transition.
+    NotConnected,
+}
+
 /// What a forwarder id the sim issued carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SimPairKind {
@@ -402,6 +414,9 @@ struct ListenerState {
 #[derive(Debug)]
 struct QueuedConn {
     key: GuestConnKey,
+    /// Trusted fixture identity of the VMM process that opened this socket.
+    /// Kept separate from the untrusted first-record launch token.
+    physical_launch: Option<LaunchToken>,
     record: Vec<u8>,
     released: bool,
     /// The peer VM died while queued: buffered bytes, then this end.
@@ -418,6 +433,8 @@ struct RecordState {
     origin: RecordOrigin,
     conn: Option<GuestConnKey>,
     peer_cid: GuestCid,
+    /// [`QueuedConn::physical_launch`], preserved across accept.
+    physical_launch: Option<LaunchToken>,
     first_record: Vec<u8>,
     buffered: VecDeque<u8>,
     ready: VecDeque<u8>,
@@ -521,7 +538,7 @@ struct SimState {
     /// the kernel's `VMADDR_PORT_ANY` counter; deterministic per seam).
     next_assigned_port: u32,
     handles: BTreeMap<u64, HandleState>,
-    route_types: BTreeMap<Ipv4Addr, HostRouteType>,
+    route_types: BTreeMap<Ipv4Addr, FibRouteType>,
     connect4: BTreeMap<SocketAddrV4, SocketAddrV4>,
     vm_gone: BTreeSet<GuestCid>,
     closed_by_owner: BTreeSet<GuestConnKey>,
@@ -532,9 +549,10 @@ struct SimState {
     outbox: BTreeMap<GuestCid, Vec<ControlMessage>>,
     dials: BTreeMap<u64, SimDialRecord>,
     peer_connects: Vec<SocketAddrV4>,
-    /// Every host vsock the sim made, by its guest CID (the device release's
-    /// orphan sweep reaches each).
-    cid_vsocks: Vec<(GuestCid, SimSocket)>,
+    /// Every host vsock the sim made, by its guest CID and trusted physical
+    /// launch (`None` for a host dial). A stepped device release reaches only
+    /// the stopped launch; the low-level CID-wide helper reaches every row.
+    cid_vsocks: Vec<(GuestCid, Option<LaunchToken>, SimSocket)>,
     flow_sockets: BTreeMap<FlowId, FlowSockets>,
     /// Live ids the sim issued, by (generation, id).
     pairs: BTreeMap<(ForwarderGeneration, ForwardId), SimPairInfo>,
@@ -945,7 +963,7 @@ impl SimGuestFlowIo {
     }
 
     /// `route_type(destination)` answers `route` (default `Unicast`).
-    pub(crate) fn set_route_type(&self, destination: Ipv4Addr, route: HostRouteType) {
+    pub(crate) fn set_route_type(&self, destination: Ipv4Addr, route: FibRouteType) {
         self.state.lock().route_types.insert(destination, route);
     }
 
@@ -1019,12 +1037,36 @@ impl SimGuestFlowIo {
     }
 
     /// The host peer socket of `flow` (D, L or H), the destination being its
-    /// far side.
+    /// far side. Before attach, resolves the one unattached peer only when it
+    /// is unambiguous; parallel in-flight peers are never guessed. Releasing a
+    /// held connect makes its result eligible before the owner task next polls.
     pub(crate) fn peer_of(&self, flow: FlowId) -> SimSocket {
-        self.flow_sockets(flow).peer.map_or_else(
-            || panic!("test bug: {flow:?} has no host peer socket yet"),
-            |(_, socket)| socket,
-        )
+        let st = self.state.lock();
+        if let Some((_, socket)) = st
+            .flow_sockets
+            .get(&flow)
+            .unwrap_or_else(|| panic!("test bug: the sim made no socket of {flow:?}"))
+            .peer
+            .as_ref()
+        {
+            return socket.clone();
+        }
+        assert!(
+            !st.held.values().any(|held| held.effect.kind == SimEffectKind::ConnectPeer),
+            "test bug: {flow:?} cannot receive a destination cause while its connect is held"
+        );
+        let mut pending = st.handles.values().filter_map(|handle| match handle {
+            HandleState::Peer(peer) if peer.flow.is_none() => Some(peer.socket.clone()),
+            HandleState::Record(_) | HandleState::Peer(_) | HandleState::Pair(_) => None,
+        });
+        let peer = pending
+            .next()
+            .unwrap_or_else(|| panic!("test bug: {flow:?} has no host peer socket yet"));
+        assert!(
+            pending.next().is_none(),
+            "test bug: {flow:?} cannot select among multiple unattached host peers"
+        );
+        peer
     }
 
     /// The shared `SimSocket` of `flow`'s host vsock half, keyed from the
@@ -1034,6 +1076,41 @@ impl SimGuestFlowIo {
     /// id the seam never saw (D-5; the `fwd_pair` row `vs(s)`).
     pub(crate) fn vsock_half(&self, flow: FlowId) -> Option<SimSocket> {
         self.state.lock().flow_sockets.get(&flow).map(|sockets| sockets.vsock.clone())
+    }
+
+    /// Select one native holder-read result from the exact state the Sim
+    /// otherwise collapses after the local owner shuts a watched V_h both
+    /// ways. Returns `None` for every other socket state so ordinary reads,
+    /// peer shutdown, queued bytes and pending errors keep using
+    /// [`SimSocket::local_read`] unchanged.
+    pub(crate) fn owner_shutdown_read(
+        &self,
+        flow: FlowId,
+        max: usize,
+        selected: OwnerShutdownRead,
+    ) -> Option<SimLocalRead> {
+        let socket = self.vsock_half(flow)?;
+        let collapsed = socket.kind() == SimSocketKind::VsockStream
+            && socket.sent_shutdown() == Some(SimShutdown::Both)
+            && socket.stream_input().is_empty()
+            && socket.received_shutdown().is_none()
+            && socket.sk_err().is_none()
+            && socket.vsock_state() == SimVsockState::Established;
+        if !collapsed {
+            return None;
+        }
+        let observed = socket.local_read(max);
+        assert_eq!(
+            observed,
+            SimLocalRead::WouldBlock,
+            "the post-owner-SHUT_RDWR read selector only replaces the Sim's collapsed WouldBlock"
+        );
+        Some(match selected {
+            OwnerShutdownRead::Eof => SimLocalRead::Eof,
+            OwnerShutdownRead::NotConnected => SimLocalRead::Err(
+                KernelErrno::new(107).unwrap_or_else(|_| unreachable!("ENOTCONN is non-zero")),
+            ),
+        })
     }
 
     /// [`Self::peer_of`], `None` before the flow's peer socket was attached.
@@ -1160,16 +1237,20 @@ impl SimGuestFlowIo {
 
     /// A guest opens a connection to `listener`; it waits outside the accept
     /// queue with `record` buffered (`None`: nothing buffered).
+    /// `physical_launch` is trusted fixture metadata naming the VMM process
+    /// that opened the socket, independent of the untrusted record bytes.
     pub(crate) fn queue_connection(
         &self,
         listener: FlowListener,
         key: GuestConnKey,
         record: Option<Vec<u8>>,
+        physical_launch: Option<LaunchToken>,
     ) {
         let mut st = self.state.lock();
         let released = st.auto_deliver;
         st.listeners.entry(listener).or_default().queue.push_back(QueuedConn {
             key,
+            physical_launch,
             record: record.unwrap_or_default(),
             released,
             end: None,
@@ -1260,24 +1341,52 @@ impl SimGuestFlowIo {
     /// at their next I/O; queued ones keep their buffered record, then end;
     /// the device release's orphan sweep sets `sk_err = ECONNRESET` on every
     /// host vsock of the CID and then runs its `sk_error_report`, so every
-    /// attached pair and every watch of the CID queues its record. A new
+    /// attached pair and every watch of the CID queues its record. After the
+    /// sweep, auto-delivery releases accepted-connection loss to their owner
+    /// tasks. A new
     /// vsock connect to the CID fails `ENODEV` until [`Self::vm_start`].
     pub(crate) fn vm_stop(&self, cid: GuestCid) {
-        self.vm_stop_before_callbacks(cid);
+        self.vm_stop_before_callbacks_matching(cid, None);
         self.finish_sweep(cid);
+        let mut st = self.state.lock();
+        if st.auto_deliver {
+            for handle in st.handles.values_mut() {
+                if let HandleState::Record(record) = handle
+                    && record.peer_cid == cid
+                    && record.peer_gone
+                {
+                    record.peer_gone_released = true;
+                }
+            }
+        }
+        drop(st);
+        self.bump();
     }
 
     /// The orphan sweep's first step only (`drivers/vhost/vsock.c:746-750 @
     /// v7.0`): `sk_err` and the state of every host vsock of `cid` are set
     /// and readable; the forwarder's `sk_error_report` has not run, so no
     /// record is queued yet (U-EV-11, the `VmmExit` action of `fwd_pair`).
-    pub(crate) fn vm_stop_before_callbacks(&self, cid: GuestCid) {
+    /// Accepted-connection loss also remains unreleased: a stepped driver may
+    /// order it independently through [`Self::release_peer_gone`]. The
+    /// trusted `stopped_launch` selects physical sockets and is never decoded
+    /// from their untrusted first records.
+    pub(crate) fn vm_stop_before_callbacks(&self, cid: GuestCid, stopped_launch: LaunchToken) {
+        self.vm_stop_before_callbacks_matching(cid, Some(stopped_launch));
+    }
+
+    fn vm_stop_before_callbacks_matching(
+        &self,
+        cid: GuestCid,
+        stopped_launch: Option<LaunchToken>,
+    ) {
         let mut st = self.state.lock();
         st.vm_gone.insert(cid);
-        let auto = st.auto_deliver;
         for listener in st.listeners.values_mut() {
             for conn in &mut listener.queue {
-                if conn.key.peer_cid == cid {
+                if conn.key.peer_cid == cid
+                    && stopped_launch.is_none_or(|launch| conn.physical_launch == Some(launch))
+                {
                     conn.end = Some(SimPeerEnd::Reset);
                 }
             }
@@ -1285,21 +1394,28 @@ impl SimGuestFlowIo {
         for handle in st.handles.values_mut() {
             if let HandleState::Record(record) = handle
                 && record.peer_cid == cid
+                && (record.origin == RecordOrigin::Dialed
+                    || stopped_launch.is_none_or(|launch| record.physical_launch == Some(launch)))
             {
                 if record.origin == RecordOrigin::Dialed {
                     record.end = Some(SimPeerEnd::Reset);
                     record.end_released = true;
                 } else {
                     record.peer_gone = true;
-                    record.peer_gone_released = auto;
+                    record.peer_gone_released = false;
                 }
             }
         }
         let vsocks: Vec<SimSocket> = st
             .cid_vsocks
             .iter()
-            .filter(|(of, _)| *of == cid)
-            .map(|(_, socket)| socket.clone())
+            .filter(|(of, physical_launch, _)| {
+                *of == cid
+                    && stopped_launch.is_none_or(|launch| {
+                        physical_launch.is_none() || *physical_launch == Some(launch)
+                    })
+            })
+            .map(|(_, _, socket)| socket.clone())
             .collect();
         drop(st);
         for vsock in vsocks {
@@ -1317,8 +1433,8 @@ impl SimGuestFlowIo {
             .lock()
             .cid_vsocks
             .iter()
-            .filter(|(of, _)| *of == cid)
-            .map(|(_, socket)| socket.clone())
+            .filter(|(of, _, _)| *of == cid)
+            .map(|(_, _, socket)| socket.clone())
             .collect();
         for vsock in vsocks {
             vsock.report_error();
@@ -1546,6 +1662,7 @@ impl SimGuestFlowIo {
                 if let Some(conn) = record.conn {
                     st.closed_by_owner.insert(conn);
                 }
+                record.vsock.close_from_owner(abortive);
                 if record.origin == RecordOrigin::Dialed
                     && let Some(flow) = record.dial_flow
                 {
@@ -1586,6 +1703,7 @@ impl SimGuestFlowIo {
                     };
                     st.local_far_end.entry(flow).or_insert(event);
                 }
+                pair.socket.close_from_owner(abortive);
             }
         }
     }
@@ -1635,9 +1753,13 @@ impl SimGuestFlowIo {
     }
 
     /// A new host vsock of `cid` (the device release's sweep reaches it).
-    fn new_vsock(st: &mut SimState, cid: GuestCid) -> SimSocket {
+    fn new_vsock(
+        st: &mut SimState,
+        cid: GuestCid,
+        physical_launch: Option<LaunchToken>,
+    ) -> SimSocket {
         let socket = SimSocket::vsock_stream();
-        st.cid_vsocks.push((cid, socket.clone()));
+        st.cid_vsocks.push((cid, physical_launch, socket.clone()));
         socket
     }
 }
@@ -1825,10 +1947,10 @@ impl Drop for SimGuestStreamIo {
     /// to release the node slot and, for `Relay`, the quota place
     /// (EVMOD-AB).
     fn drop(&mut self) {
-        let (generation, watch) = {
+        let (generation, watch, vsock) = {
             let mut pipe = self.pipe.lock();
             pipe.dropped = true;
-            (pipe.generation, pipe.watch)
+            (pipe.generation, pipe.watch, pipe.vsock.clone())
         };
         let mut st = self.state.lock();
         let live_context = st
@@ -1841,6 +1963,7 @@ impl Drop for SimGuestStreamIo {
         {
             let _record_queued_or_already_ended = ctx.abort(watch);
         }
+        vsock.close_from_owner(false);
         st.to_guest.entry(self.flow).or_default().push(VsockShutdownOp::Close);
         for dial in st.dials.values_mut() {
             if dial.streamed && dial.request.map(|request| request.flow()) == Some(self.flow) {
@@ -2044,7 +2167,7 @@ impl GuestFlowIo for SimGuestFlowIo {
             };
             let state = st.listeners.entry(listener).or_default();
             let conn = state.queue.remove(pick)?;
-            let vsock = Self::new_vsock(st, conn.key.peer_cid);
+            let vsock = Self::new_vsock(st, conn.key.peer_cid, conn.physical_launch);
             if listener == FlowListener::Stream
                 && let Some(request) = request_of(&conn.record)
             {
@@ -2057,6 +2180,7 @@ impl GuestFlowIo for SimGuestFlowIo {
                 origin: RecordOrigin::Accepted(listener),
                 conn: Some(conn.key),
                 peer_cid: conn.key.peer_cid,
+                physical_launch: conn.physical_launch,
                 first_record: conn.record.clone(),
                 buffered: VecDeque::new(),
                 ready: VecDeque::new(),
@@ -2176,11 +2300,12 @@ impl GuestFlowIo for SimGuestFlowIo {
             // No device holds the CID: `drivers/vhost/vsock.c:290 @ v7.0`.
             return Err(FlowIoError::Io { source: io::Error::from_raw_os_error(libc::ENODEV) });
         }
-        let vsock = Self::new_vsock(&mut st, cid);
+        let vsock = Self::new_vsock(&mut st, cid, None);
         let record = RecordState {
             origin: RecordOrigin::Dialed,
             conn: None,
             peer_cid: cid,
+            physical_launch: None,
             first_record: Vec::new(),
             buffered: VecDeque::new(),
             ready: VecDeque::new(),
@@ -2379,7 +2504,7 @@ impl GuestFlowIo for SimGuestFlowIo {
         Ok(())
     }
 
-    async fn route_type(&self, destination: Ipv4Addr) -> Result<HostRouteType, FlowIoError> {
+    async fn route_type(&self, destination: Ipv4Addr) -> Result<FibRouteType, NetlinkError> {
         match self.gate(SimEffectKind::RouteType, SimEffectTarget::Ip(destination)).await {
             None => Ok(self
                 .state
@@ -2387,8 +2512,9 @@ impl GuestFlowIo for SimGuestFlowIo {
                 .route_types
                 .get(&destination)
                 .copied()
-                .unwrap_or(HostRouteType::Unicast)),
-            Some(SimFailure::Io(kind)) => Err(io_error(kind)),
+                .unwrap_or(FibRouteType::Unicast)),
+            Some(SimFailure::Io(kind)) => Err(NetlinkError::connect(io::Error::from(kind))),
+            Some(SimFailure::Netlink) => Err(NetlinkError::FibLookupMissing { destination }),
             Some(other) => mismatched("route_type", other),
         }
     }

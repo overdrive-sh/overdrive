@@ -36,7 +36,6 @@ async fn fill(c: &Composition, lease: &Lease, first: u32, count: u32) {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn admission_stops_at_the_allocation_quota_and_spares_other_allocations() {
     let c = Composition::booted(100).await;
     let (lease, _session) = c.active_lease("quota-a", &[]).await;
@@ -75,7 +74,6 @@ async fn admission_stops_at_the_allocation_quota_and_spares_other_allocations() 
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn a_half_closed_flow_counts_against_the_quota_until_its_end_record() {
     let c = Composition::booted(101).await;
     let (lease, _session) = c.active_lease("quota-half", &[]).await;
@@ -112,7 +110,6 @@ async fn a_half_closed_flow_counts_against_the_quota_until_its_end_record() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn an_abort_of_a_half_closed_flow_releases_its_place_at_its_record() {
     let c = Composition::booted(102).await;
     let (lease, _session) = c.active_lease("quota-abort", &[]).await;
@@ -132,7 +129,6 @@ async fn an_abort_of_a_half_closed_flow_releases_its_place_at_its_record() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (9)"]
 async fn held_flows_counts_flows_associations_and_relay_dials_only() {
     let c = Composition::booted(103).await;
     let (lease, session) = c.active_lease("quota-mix", &[8080]).await;
@@ -157,7 +153,6 @@ async fn held_flows_counts_flows_associations_and_relay_dials_only() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn unresponsive_connects_exhaust_only_their_own_vms_quota() {
     let c = Composition::booted(104).await;
     let (stuck, _stuck_session) = c.active_lease("quota-stuck", &[]).await;

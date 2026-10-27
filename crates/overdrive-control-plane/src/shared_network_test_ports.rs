@@ -363,6 +363,10 @@ impl SharedGuestNetworkOwner for TestSharedOwner {
         *self.flow_ports.lock()
     }
 
+    fn leaked_quiescence_holds(&self) -> u32 {
+        self.ledger.leaked()
+    }
+
     async fn audit_shared(
         &self,
     ) -> std::result::Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError> {
@@ -456,6 +460,28 @@ struct TestAuditGate {
     held: AtomicBool,
     pending: AtomicU32,
     permits: tokio::sync::Semaphore,
+}
+
+/// One audit parked at [`TestAuditGate::permits`]. The production supervisor
+/// bounds an audit call with cancellation, so the test gate must retire its
+/// pending count when that future is dropped as well as when it acquires a
+/// permit normally.
+struct PendingAudit<'a> {
+    count: &'a AtomicU32,
+}
+
+impl<'a> PendingAudit<'a> {
+    fn new(count: &'a AtomicU32) -> Self {
+        count.fetch_add(1, Ordering::SeqCst);
+        Self { count }
+    }
+}
+
+impl Drop for PendingAudit<'_> {
+    fn drop(&mut self) {
+        let previous = self.count.fetch_sub(1, Ordering::SeqCst);
+        debug_assert!(previous > 0, "a pending DNS audit count cannot underflow");
+    }
 }
 
 impl Default for TestAuditGate {
@@ -566,9 +592,9 @@ impl GuestDns for TestGuestDns {
 
     async fn audit(&self) -> DnsResult<()> {
         if self.audits.held.load(Ordering::SeqCst) {
-            self.audits.pending.fetch_add(1, Ordering::SeqCst);
+            let pending = PendingAudit::new(&self.audits.pending);
             let permit = self.audits.permits.acquire().await;
-            self.audits.pending.fetch_sub(1, Ordering::SeqCst);
+            drop(pending);
             match permit {
                 Ok(permit) => permit.forget(),
                 Err(_closed) => unreachable!("the audit gate's semaphore is never closed"),
@@ -774,7 +800,6 @@ pub mod composed {
 
     use std::io;
     use std::net::{Ipv4Addr, SocketAddrV4};
-    use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -796,9 +821,7 @@ pub mod composed {
     use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcementFactory;
     use overdrive_sim::adapters::observation_store::SimObservationStore;
     use overdrive_sim::adapters::transport::SimTransport;
-    use overdrive_sim::adapters::{
-        SimCgroupFs, SimKek, SimMtlsIntercept, SimSharedTable, SimVmHostState,
-    };
+    use overdrive_sim::adapters::{SimKek, SimMtlsIntercept, SimSharedTable, SimVmHostState};
     use tempfile::TempDir;
 
     use super::{TestDataplaneComposer, TestGuestDnsFactory, TestSharedOwner};
@@ -807,7 +830,7 @@ pub mod composed {
         SimEffectId, SimEffectKind, SimEffectTarget, SimFailure, SimForwarderFailure,
         SimGuestFlowIo,
     };
-    use crate::guest_network::flow_io::{FlowListener, GuestFlowIo, HostRouteType};
+    use crate::guest_network::flow_io::{FlowListener, GuestFlowIo};
     use crate::guest_network::{
         ForwardingActivation, ForwardingRestore, GuestAddressPool, GuestConnKey, GuestNetworkPlan,
         GuestNetworkProvisioner, GuestOwnerObservation, HostSharedGuestNetworkOwner,
@@ -819,6 +842,7 @@ pub mod composed {
         StoreAdapters, run_server_with_obs_and_drivers,
     };
     use overdrive_core::guest_transport::forwarder::ForwarderOp;
+    use overdrive_netlink::FibRouteType;
 
     /// The seam seed of a node's first boot; each later boot adds its boot
     /// number, so every process of a node draws its own accept order.
@@ -897,6 +921,10 @@ pub mod composed {
         /// The seam of the last refused boot (its issued effects stay
         /// readable).
         refused_io: Option<Arc<SimGuestFlowIo>>,
+        /// A fail-stop request already observed non-blockingly by the
+        /// fixture. Ending that same process consumes this cached request
+        /// instead of awaiting the one-shot receiver a second time.
+        fail_stop_request: Option<ServeShutdownRequest>,
         boots: u32,
         dirs: TempDir,
     }
@@ -917,6 +945,7 @@ pub mod composed {
                 last_stop: Some(NodeStop::Crash),
                 next_forwarder_open: None,
                 refused_io: None,
+                fail_stop_request: None,
                 boots: 0,
                 dirs: TempDir::new().expect("node tempdir"),
             }
@@ -946,12 +975,29 @@ pub mod composed {
         /// boot's `OwnerDial`. `Ok` → the process runs; `Err` → the typed
         /// boot refusal, no process, `last_stop = Refused`.
         pub async fn boot(&mut self) -> std::result::Result<(), ControlPlaneError> {
+            match self.boot_with_deferred_refusal_exit().await {
+                Ok(()) => Ok(()),
+                Err((refusal, io)) => {
+                    io.exit_process();
+                    Err(refusal)
+                }
+            }
+        }
+
+        /// Boot one process while deferring a refused process's seam exit to
+        /// a fixture that owns and must first destroy that process runtime.
+        /// Successful boot has the same retained [`Process`] as [`Self::boot`].
+        pub async fn boot_with_deferred_refusal_exit(
+            &mut self,
+        ) -> std::result::Result<(), (ControlPlaneError, Arc<SimGuestFlowIo>)> {
             assert!(self.process.is_none(), "boot needs a stopped node");
+            self.fail_stop_request = None;
             self.boots += 1;
             // A fresh seam per process: every effect auto-released, accepts
             // and record bytes delivered at once (the seam's defaults); the
             // accept order is drawn from a per-boot seed (D-UP-19).
             let io = SimGuestFlowIo::new(SEAM_SEED + u64::from(self.boots));
+            io.auto_release(SimEffectKind::ProbeForwarder);
             if let Some(failure) = self.next_forwarder_open.take() {
                 io.script_failure(SimEffectKind::ProbeForwarder, failure);
             }
@@ -974,10 +1020,9 @@ pub mod composed {
                     Ok(())
                 }
                 Err(refusal) => {
-                    io.exit_process();
-                    self.refused_io = Some(io);
+                    self.refused_io = Some(Arc::clone(&io));
                     self.last_stop = Some(NodeStop::Refused);
-                    Err(refusal)
+                    Err((refusal, io))
                 }
             }
         }
@@ -1012,10 +1057,6 @@ pub mod composed {
                     dial: Arc::clone(dial),
                 },
                 GuestNetworkExecWiring::new(self.clock.clone()),
-                overdrive_worker::cgroup_manager::CgroupManager::new(
-                    PathBuf::from("/sys/fs/cgroup"),
-                    Arc::new(SimCgroupFs::new()),
-                ),
             )
             .await
         }
@@ -1084,32 +1125,72 @@ pub mod composed {
         /// paired with R5-30) and the seam's node-global objects; every
         /// process-scoped object — the owner, its holds, its flows — ends.
         pub async fn crash(&mut self) {
+            let io = self.detach_crashed_process().await;
+            io.exit_process();
+        }
+
+        /// Phase A of abrupt process death for a fixture that owns the whole
+        /// process runtime. Abort and join the server-owned tasks, but leave
+        /// the seam live until that runtime has been dropped and therefore no
+        /// detached owner child can call it.
+        pub async fn detach_crashed_process(&mut self) -> Arc<SimGuestFlowIo> {
             let process = self.process.take().expect("a crash needs a live process");
+            self.fail_stop_request = None;
             self.intercept.script_crash_retains_table();
-            process.io.exit_process();
-            let _residue = process.server.kill_for_test().await;
-            drop(process.owner);
+            let io = Self::kill_process(process).await;
             self.last_stop = Some(NodeStop::Crash);
+            io
         }
 
         /// The supervisor's fail-stop request has been received; the process
         /// then ends as `serve` does on that request (the table stays).
         pub async fn end_after_fail_stop(&mut self) -> ServeShutdownRequest {
-            let request = self.process_mut().server.shutdown_requested().await;
+            let (request, io) = self.detach_after_fail_stop().await;
+            io.exit_process();
+            request
+        }
+
+        /// Phase A of a fail-stop process end for a fixture that owns the
+        /// whole process runtime. The cached one-shot request is consumed
+        /// exactly once; seam exit follows only after that runtime is gone.
+        pub async fn detach_after_fail_stop(
+            &mut self,
+        ) -> (ServeShutdownRequest, Arc<SimGuestFlowIo>) {
+            let request = match self.fail_stop_request.take() {
+                Some(request) => request,
+                None => self.process_mut().server.shutdown_requested().await,
+            };
             let process = self.process.take().expect("a fail-stop ends a live process");
             self.intercept.script_crash_retains_table();
-            process.io.exit_process();
-            let _residue = process.server.kill_for_test().await;
-            drop(process.owner);
+            let io = Self::kill_process(process).await;
             self.last_stop = Some(NodeStop::FailStop);
-            request
+            (request, io)
+        }
+
+        /// End the server-owned part of one composed test process. The
+        /// process-local owner and dial references go first, then the server
+        /// abort/join fence. A fixture that owns the whole process runtime can
+        /// now destroy its detached children before releasing the returned
+        /// seam; ambient-runtime callers retain their existing immediate-exit
+        /// behavior.
+        async fn kill_process(process: Process) -> Arc<SimGuestFlowIo> {
+            let Process { io, owner, dial, server, dns: _, cid: _ } = process;
+            drop(owner);
+            drop(dial);
+            let _residue = server.kill_for_test().await;
+            io
         }
 
         /// The fail-stop request, if the supervisor has made one, without
         /// waiting.
         pub fn fail_stop_requested(&mut self) -> Option<ServeShutdownRequest> {
             use futures::FutureExt as _;
-            self.process_mut().server.shutdown_requested().now_or_never()
+            if let Some(request) = &self.fail_stop_request {
+                return Some(request.clone());
+            }
+            let request = self.process_mut().server.shutdown_requested().now_or_never();
+            self.fail_stop_request.clone_from(&request);
+            request
         }
 
         /// Advance the injected clock by `by` and settle.
@@ -1274,8 +1355,13 @@ pub mod composed {
                 peer_port: VsockPort::new(49_000),
             };
             let launch = plan.assignment().launch();
-            self.deliver(FlowListener::Control, control, ControlOpen { launch }.encode().to_vec())
-                .await;
+            self.deliver(
+                FlowListener::Control,
+                control,
+                ControlOpen { launch }.encode().to_vec(),
+                launch,
+            )
+            .await;
         }
 
         /// Make one allocation Active with a live control session (lease,
@@ -1322,7 +1408,7 @@ pub mod composed {
                 active.next_flow_seq += 1;
                 (active.plan.assignment().cid(), active.plan.assignment().launch(), peer_port, seq)
             };
-            self.process().io.set_route_type(*FLOW_DESTINATION.ip(), HostRouteType::Unicast);
+            self.process().io.set_route_type(*FLOW_DESTINATION.ip(), FibRouteType::Unicast);
             let key = GuestConnKey {
                 listener: self.flow_ports().stream(),
                 peer_cid: cid,
@@ -1333,14 +1419,20 @@ pub mod composed {
                 destination: FLOW_DESTINATION,
                 launch,
             };
-            self.deliver(FlowListener::Stream, key, request.encode().to_vec()).await;
+            self.deliver(FlowListener::Stream, key, request.encode().to_vec(), launch).await;
             key
         }
 
         /// A guest connection on `listener` with `record` buffered; the seam
         /// delivers its accept and its bytes at once (auto-delivery).
-        pub async fn deliver(&self, listener: FlowListener, key: GuestConnKey, record: Vec<u8>) {
-            self.process().io.queue_connection(listener, key, Some(record));
+        pub async fn deliver(
+            &self,
+            listener: FlowListener,
+            key: GuestConnKey,
+            record: Vec<u8>,
+            physical_launch: LaunchToken,
+        ) {
+            self.process().io.queue_connection(listener, key, Some(record), Some(physical_launch));
             self.settle().await;
         }
 
@@ -1390,10 +1482,6 @@ pub mod composed {
                 Arc::new(registry),
                 Arc::clone(&owner) as Arc<dyn crate::guest_network::SharedGuestNetworkOwner>,
                 GuestNetworkExecWiring::new(clock.clone()),
-                overdrive_worker::cgroup_manager::CgroupManager::new(
-                    PathBuf::from("/sys/fs/cgroup"),
-                    Arc::new(SimCgroupFs::new()),
-                ),
             )
             .await
             .expect("the composition over the test-local owner boots");

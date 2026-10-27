@@ -2,6 +2,7 @@
 
 State 1
   gen = [g |-> 0, h |-> 0]
+  strmHeld = FALSE
   vmUp = TRUE
   tcpErr = [g |-> "0", h |-> "0"]
   hres = "none"

@@ -13,7 +13,6 @@
 
 pub mod backend_map;
 pub mod drop_counter;
-pub mod guest_tcx;
 pub mod hash_of_maps;
 pub mod local_backend_map;
 pub mod maglev_map;

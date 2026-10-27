@@ -32,6 +32,8 @@ use std::io;
 use std::net::SocketAddr;
 use std::os::fd::AsRawFd;
 use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -41,9 +43,13 @@ use hyper::{Request, Uri};
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
+use overdrive_core::guest_transport::dial::GuestStream;
 use overdrive_core::traits::prober::{HttpProber, ProbeFailure, ProbeOutcome};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::{TcpSocket, TcpStream};
 use tower_service::Service;
+
+pub(super) type GuestProbeRequest = Request<Empty<Bytes>>;
 
 /// Connector for trusted, host-side health probes.
 ///
@@ -191,33 +197,9 @@ fn format_duration(d: Duration) -> String {
 #[async_trait]
 impl HttpProber for HyperHttpProber {
     async fn probe(&self, url: &str, timeout: Duration) -> Result<ProbeOutcome, ProbeFailure> {
-        // Input validation mirrors the sim adapter — per
-        // `nw-tdd-methodology` § "Test Doubles Must Validate Inputs".
-        if url.is_empty() {
-            return Err(ProbeFailure::InvalidTarget {
-                reason: "http probe url must be non-empty".to_owned(),
-            });
-        }
-        if !url.starts_with("http://") {
-            return Err(ProbeFailure::InvalidTarget {
-                reason: format!("http probe url must start with `http://`; got {url:?}"),
-            });
-        }
-
-        // GET only per US-02. Empty request body. The client is
-        // constructed per-probe — probes are infrequent (interval ≥ 2s)
-        // so connection-pool reuse across probes buys nothing, and a
-        // fresh client guarantees no stale-connection masking.
+        let request = build_guest_probe_request(url)?;
         let client: Client<_, Empty<Bytes>> =
             Client::builder(TokioExecutor::new()).build(MarkedHttpConnector);
-        let request = match Request::builder().method("GET").uri(url).body(Empty::<Bytes>::new()) {
-            Ok(req) => req,
-            Err(err) => {
-                return Err(ProbeFailure::InvalidTarget {
-                    reason: format!("http probe url failed to build request: {err}"),
-                });
-            }
-        };
 
         match tokio::time::timeout(timeout, client.request(request)).await {
             // Per-request timeout elapsed before the client returned.
@@ -231,6 +213,153 @@ impl HttpProber for HyperHttpProber {
             // Transport-layer error (connection refused, reset, DNS).
             Ok(Err(err)) => Ok(ProbeOutcome::Fail { reason: client_error_to_reason(&err) }),
         }
+    }
+}
+
+/// Build the GET request before a VM probe dials, so an invalid request target
+/// remains an adapter error without opening a guest flow.
+pub(super) fn build_guest_probe_request(url: &str) -> Result<GuestProbeRequest, ProbeFailure> {
+    // Input validation mirrors the sim adapter — per
+    // `nw-tdd-methodology` § "Test Doubles Must Validate Inputs".
+    if url.is_empty() {
+        return Err(ProbeFailure::InvalidTarget {
+            reason: "http probe url must be non-empty".to_owned(),
+        });
+    }
+    if !url.starts_with("http://") {
+        return Err(ProbeFailure::InvalidTarget {
+            reason: format!("http probe url must start with `http://`; got {url:?}"),
+        });
+    }
+
+    Request::builder().method("GET").uri(url).body(Empty::<Bytes>::new()).map_err(|err| {
+        ProbeFailure::InvalidTarget {
+            reason: format!("http probe url failed to build request: {err}"),
+        }
+    })
+}
+
+/// Run a prepared GET request over the already-paired owner `GuestStream`.
+/// The caller owns the timeout around both the preceding dial and this
+/// request, so a slow owner pairing and a hung guest application share the
+/// probe's existing deadline.
+pub(super) async fn probe_guest_stream(
+    stream: GuestStream,
+    request: GuestProbeRequest,
+) -> ProbeOutcome {
+    let client: Client<_, Empty<Bytes>> =
+        Client::builder(TokioExecutor::new()).build(GuestStreamConnector::new(stream));
+
+    match client.request(request).await {
+        Ok(response) => classify_http_status(response.status().as_u16()),
+        Err(err) => ProbeOutcome::Fail { reason: client_error_to_reason(&err) },
+    }
+}
+
+#[derive(Clone)]
+struct GuestStreamConnector {
+    stream: Arc<parking_lot::Mutex<Option<GuestStream>>>,
+}
+
+impl GuestStreamConnector {
+    fn new(stream: GuestStream) -> Self {
+        Self { stream: Arc::new(parking_lot::Mutex::new(Some(stream))) }
+    }
+}
+
+impl Service<Uri> for GuestStreamConnector {
+    type Response = TokioIo<GuestStreamIo>;
+    type Error = io::Error;
+    type Future = Pin<Box<dyn Future<Output = io::Result<Self::Response>> + Send>>;
+
+    fn poll_ready(&mut self, _context: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, _uri: Uri) -> Self::Future {
+        let stream = self.stream.lock().take();
+        Box::pin(async move {
+            let stream = stream.ok_or_else(|| {
+                io::Error::new(io::ErrorKind::NotConnected, "guest probe stream already consumed")
+            })?;
+            Ok(TokioIo::new(GuestStreamIo { stream, request_written: false, pending_read: None }))
+        })
+    }
+}
+
+/// Tokio's poll-based byte-stream interface over the cancellation-safe
+/// `GuestStream` operations. Hyper polls each operation with exclusive access;
+/// pending futures are recreated on the next poll, which is safe under the
+/// accepted GuestStream cancellation contract.
+struct GuestStreamIo {
+    stream: GuestStream,
+    request_written: bool,
+    pending_read: Option<Waker>,
+}
+
+impl hyper_util::client::legacy::connect::Connection for GuestStreamIo {
+    fn connected(&self) -> hyper_util::client::legacy::connect::Connected {
+        hyper_util::client::legacy::connect::Connected::new()
+    }
+}
+
+impl AsyncRead for GuestStreamIo {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        buffer: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
+        if !this.request_written {
+            this.pending_read = Some(context.waker().clone());
+            return Poll::Pending;
+        }
+        let result = {
+            let read = this.stream.read(buffer.initialize_unfilled());
+            tokio::pin!(read);
+            read.as_mut().poll(context)
+        };
+        match result {
+            Poll::Ready(Ok(read)) => {
+                buffer.advance(read);
+                Poll::Ready(Ok(()))
+            }
+            Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl AsyncWrite for GuestStreamIo {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+        buffer: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        let this = self.get_mut();
+        let result = {
+            let write = this.stream.write(buffer);
+            tokio::pin!(write);
+            write.as_mut().poll(context)
+        };
+        if matches!(&result, Poll::Ready(Ok(written)) if *written > 0) && !this.request_written {
+            this.request_written = true;
+            if let Some(pending_read) = this.pending_read.take() {
+                pending_read.wake();
+            }
+        }
+        result
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
+        let shutdown = this.stream.shutdown_write();
+        tokio::pin!(shutdown);
+        shutdown.as_mut().poll(context)
     }
 }
 

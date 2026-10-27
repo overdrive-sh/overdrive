@@ -37,6 +37,40 @@ Bare metal removes the nesting. That is the whole reason this exists.
    infra/metal/bootstrap.sh ubuntu@<ip> --sync-only
    ```
 
+## Durable runs and collection
+
+`cargo xtask metal run -- COMMAND [ARG ...]` now registers a run record before
+sync and native preflight, then starts the command under a root transient
+systemd service. The service owns the shared Metal lease through sync,
+preflight, command execution, combined stdout/stderr log finalization, and
+terminal publication. The runner prints an opaque 24-character run id:
+
+```text
+OVERDRIVE_METAL_RUN_ID=<run-id>
+```
+
+After `OVERDRIVE_METAL_RUN_STARTED` has been observed, losing the local SSH
+route or the local `cargo xtask` process does not cancel the command. Collect
+the retained log and exact command status later with:
+
+```bash
+cargo xtask metal collect <run-id>
+```
+
+Collection is read-only and can be repeated or run concurrently. It prints the
+combined command log to stdout and emits a terminal marker on stderr. A command
+status, including 255, is returned unchanged. Runner failures have stable
+diagnostics for not-found, supervisor loss, malformed records, or a run that
+never reached command start. Records live under
+`/var/lib/overdrive-metal/runs/<run-id>/` on the box and are retained without
+automatic pruning.
+
+The transient unit is intentionally not installed or reboot-persistent. A
+reboot or an unrecordable supervisor/storage loss can leave a run without a
+terminal record; collection reports supervisor loss and never invents a
+command result. Generated files in the remote checkout still require an
+explicit manual retrieval before a later one-way sync.
+
 ## Running the guest-kit `kvm-tests` lanes
 
 The guest-kit lanes (the vsock walking skeleton, fault matrix and density

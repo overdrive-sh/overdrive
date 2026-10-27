@@ -417,12 +417,8 @@ pub struct VmmIdentity {
 }
 
 /// Reserved numeric uid used by the production Cloud Hypervisor process.
-///
-/// Guest TAP ownership and the VMM privilege drop must consume the same value:
-/// a persistent TAP created by root cannot be reopened by the confined VMM
-/// unless `TUNSETOWNER` grants this uid. Keeping the value beside
-/// [`VmmIdentity`] prevents the network provisioner and composition root from
-/// drifting onto different principals.
+/// Keeping the value beside [`VmmIdentity`] pins the confined process identity
+/// at the VM composition boundary.
 pub const OVERDRIVE_VMM_UID: u32 = 4_200;
 
 /// `identity` + `rlimit_nofile`, plus the seccomp mode Cloud Hypervisor

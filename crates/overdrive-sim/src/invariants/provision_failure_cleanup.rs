@@ -46,8 +46,8 @@ use overdrive_control_plane::action_shim::{
 };
 use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::veth_provisioner::{
-    NetSlot, NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
-    derive_workload_netns_plan, responder_addr_for_slot,
+    NetSlot, NetSlotAllocator, VethProvisionError, WorkloadNetnsPlan, derive_workload_netns_plan,
+    responder_addr_for_slot,
 };
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
@@ -87,9 +87,6 @@ enum NetworkArtifact {
     WorkloadVeth(String),
     ResolverDirectory(String),
     TransitRoute(String),
-    GuestTap(String),
-    GuestRoute(String),
-    ReturnRoute(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -145,13 +142,9 @@ impl SimPartialFailureNetwork {
 }
 
 impl WorkloadNetworkProvisioner for SimPartialFailureNetwork {
-    fn provision(
-        &self,
-        workload: &WorkloadNetnsPlan,
-        vm_tap: &VmTapPlan,
-    ) -> Result<(), VethProvisionError> {
+    fn provision(&self, workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
         let owner = workload.netns.as_str().to_owned();
-        let mut all = network_artifacts(workload, vm_tap);
+        let mut all = network_artifacts(workload);
         let draw = self.entropy.u64();
 
         let mut state = self.state.lock();
@@ -205,24 +198,15 @@ impl WorkloadNetworkProvisioner for SimPartialFailureNetwork {
     }
 }
 
-fn network_artifacts(workload: &WorkloadNetnsPlan, vm_tap: &VmTapPlan) -> Vec<NetworkArtifact> {
+fn network_artifacts(workload: &WorkloadNetnsPlan) -> Vec<NetworkArtifact> {
     let owner = workload.netns.as_str();
-    let mut artifacts = vec![
+    vec![
         NetworkArtifact::Namespace(owner.to_owned()),
         NetworkArtifact::HostVeth(workload.host_veth.clone()),
         NetworkArtifact::WorkloadVeth(workload.workload_veth.clone()),
         NetworkArtifact::ResolverDirectory(format!("/etc/netns/{owner}")),
         NetworkArtifact::TransitRoute(workload.subnet.to_string()),
-    ];
-    artifacts.extend([
-        NetworkArtifact::GuestTap(vm_tap.tap.clone()),
-        NetworkArtifact::GuestRoute(vm_tap.guest_network.to_string()),
-        NetworkArtifact::ReturnRoute(format!(
-            "{} via {} dev {}",
-            vm_tap.guest_network, workload.workload_addr, workload.host_veth
-        )),
-    ]);
-    artifacts
+    ]
 }
 
 struct Fixture {
@@ -536,7 +520,7 @@ fn check_evidence(evidence: &Evidence) -> Result<(), String> {
             _ => None,
         })
         .collect();
-    if created.is_empty() || created.len() >= 8 {
+    if created.is_empty() || created.len() >= 5 {
         return Err(format!(
             "seed {} safety precondition: injected failure did not leave a non-empty proper partial artifact set; created={created:?}",
             evidence.seed

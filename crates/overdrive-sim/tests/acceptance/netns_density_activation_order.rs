@@ -369,6 +369,10 @@ impl SharedGuestNetworkOwner for ActivationOwner {
         self.inner.flow_ports()
     }
 
+    fn leaked_quiescence_holds(&self) -> u32 {
+        self.inner.leaked_quiescence_holds()
+    }
+
     async fn audit_shared(&self) -> Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError> {
         self.inner.audit_shared().await
     }
@@ -565,6 +569,10 @@ impl Fixture {
             Arc::new(SimMtlsIntercept::new()),
         ));
         worker.start_shared_owner().await.expect("worker shared owner starts over sim ports");
+        owner
+            .converge_shared()
+            .await
+            .expect("the fixture owner reports its bound ports before AppState construction");
 
         let allocator =
             overdrive_control_plane::test_default_allocator(store.clone() as Arc<dyn IntentStore>);
@@ -1225,7 +1233,6 @@ async fn fail_stop_withholds(seed: u64) {
 /// S-ND295-53 — Activation waits out a recovery and never turns it into a failure.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn activation_during_recovery_runs_once_after_reopen_without_a_failed_row() {
     for seed in seeds() {
         eprintln!(
@@ -1239,7 +1246,6 @@ async fn activation_during_recovery_runs_once_after_reopen_without_a_failed_row(
 /// S-ND295-53 — Activation waits out a recovery and never turns it into a failure.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn a_latched_activation_retries_after_reopen() {
     for seed in seeds() {
         eprintln!("seed={seed} body=a_latched_activation_retries_after_reopen");
@@ -1251,7 +1257,6 @@ async fn a_latched_activation_retries_after_reopen() {
 /// S-ND295-53 — Activation waits out a recovery and never turns it into a failure.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
 async fn fail_stop_withholds_activation_and_the_command() {
     for seed in seeds() {
         eprintln!("seed={seed} body=fail_stop_withholds_activation_and_the_command");

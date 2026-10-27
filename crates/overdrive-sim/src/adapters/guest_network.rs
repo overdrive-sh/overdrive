@@ -367,6 +367,10 @@ impl SharedGuestNetworkOwner for SimSharedGuestNetworkOwner {
         GuestFlowPorts::new(GUEST_FLOW_STREAM_PORT, GUEST_FLOW_CONTROL_PORT).ok()
     }
 
+    fn leaked_quiescence_holds(&self) -> u32 {
+        self.quiescence.ledger.leaked()
+    }
+
     /// One-shot error first, then the first armed standing component in
     /// canonical order; otherwise `Ok` naming each scripted damaged
     /// allocation not yet condemned.
@@ -590,7 +594,6 @@ mod tests {
     /// refused `ForeignHold`, changes no count and leaks at its issuing
     /// ledger; a dropped own hold keeps the count and is counted leaked.
     #[tokio::test]
-    #[ignore = "pending DELIVER attachment-cut step (12-01 rework)"]
     async fn quiescence_counts_holds_of_its_own_ledger_and_refuses_a_foreign_one() {
         let owner = SimSharedGuestNetworkOwner::default();
         let (first, _) = owner.quiesce().await;

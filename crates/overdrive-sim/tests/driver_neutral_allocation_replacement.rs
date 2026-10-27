@@ -32,7 +32,7 @@ use overdrive_control_plane::reconciler_runtime::{
     ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
 };
 use overdrive_control_plane::veth_provisioner::{
-    NetSlotAllocator, VethProvisionError, VmTapPlan, WorkloadNetnsPlan,
+    NetSlotAllocator, VethProvisionError, WorkloadNetnsPlan,
 };
 use overdrive_control_plane::view_store::redb::RedbViewStore;
 use overdrive_control_plane::view_store::{
@@ -594,11 +594,7 @@ impl MtlsInterceptLifecycle for RecordingMtlsLifecycle {
 }
 
 impl WorkloadNetworkProvisioner for RecordingNetwork {
-    fn provision(
-        &self,
-        workload: &WorkloadNetnsPlan,
-        _vm_tap: &VmTapPlan,
-    ) -> Result<(), VethProvisionError> {
+    fn provision(&self, workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
         self.trace.lock().push(TraceEvent::Provision(workload.netns.as_str().to_owned()));
         Ok(())
     }
@@ -786,7 +782,6 @@ async fn seeded_predecessor(
 /// for the one post-successor exact-old cleanup attempt.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn successor_outcome_precedes_blocked_predecessor_cleanup_for_every_driver() {
     eprintln!("seed={SEED}: successor-first driver-neutral replacement");
     for driver_type in [DriverType::Vm] {
@@ -899,7 +894,6 @@ async fn successor_outcome_precedes_blocked_predecessor_cleanup_for_every_driver
 /// structured tracing.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn successor_and_cleanup_outcomes_follow_the_ratified_precedence_table() {
     eprintln!("seed={SEED}: successor/cleanup precedence table");
     let captured = CapturedEvents::default();
@@ -1236,7 +1230,6 @@ impl ObservationStore for RejectFreshPublication {
 /// invent a second allocation proposal inside the shim.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (7)"]
 async fn rejected_successor_publication_fully_unwinds_without_immediate_second_proposal() {
     let (inner, predecessor, successor, workload) = seeded_predecessor(DriverType::Vm).await;
     let before = inner.alloc_status_row(&predecessor).await.unwrap().unwrap();

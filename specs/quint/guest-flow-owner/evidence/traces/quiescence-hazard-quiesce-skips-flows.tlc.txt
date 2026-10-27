@@ -1,6 +1,7 @@
 State 1: <Initial predicate>
 /\ quiesce_bugQuiesceSkipsFlows_quiescence_cnt = 0
 /\ quiesce_bugQuiesceSkipsFlows_quiescence_latch = FALSE
+/\ quiesce_bugQuiesceSkipsFlows_quiescence_roundState = [C1 |-> "outside", C2 |-> "outside"]
 /\ quiesce_bugQuiesceSkipsFlows_quiescence_stop = "none"
 /\ quiesce_bugQuiesceSkipsFlows_quiescence_repLeft = 1
 /\ quiesce_bugQuiesceSkipsFlows_quiescence_up = TRUE
@@ -20,9 +21,10 @@ State 1: <Initial predicate>
 /\ quiesce_bugQuiesceSkipsFlows_quiescence_leaked = 0
 /\ quiesce_bugQuiesceSkipsFlows_quiescence_table = TRUE
 
-State 2: <quiesce_bugQuiesceSkipsFlows_quiescence_LeakHold line 679, col 3 to line 725, col 61 of module quiesce_bugQuiesceSkipsFlows>
+State 2: <quiesce_bugQuiesceSkipsFlows_quiescence_LeakHold line 747, col 3 to line 795, col 61 of module quiesce_bugQuiesceSkipsFlows>
 /\ quiesce_bugQuiesceSkipsFlows_quiescence_cnt = 1
 /\ quiesce_bugQuiesceSkipsFlows_quiescence_latch = TRUE
+/\ quiesce_bugQuiesceSkipsFlows_quiescence_roundState = [C1 |-> "outside", C2 |-> "outside"]
 /\ quiesce_bugQuiesceSkipsFlows_quiescence_stop = "none"
 /\ quiesce_bugQuiesceSkipsFlows_quiescence_repLeft = 1
 /\ quiesce_bugQuiesceSkipsFlows_quiescence_up = TRUE

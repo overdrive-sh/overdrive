@@ -23,6 +23,7 @@ State 1: <Initial predicate>
         cgen |-> 0 ] ]
 /\ pair_bugLossyEndRecord_fwd_pair_attRes = [g |-> "none", h |-> "none"]
 /\ pair_bugLossyEndRecord_fwd_pair_vmUp = TRUE
+/\ pair_bugLossyEndRecord_fwd_pair_strmHeld = FALSE
 /\ pair_bugLossyEndRecord_fwd_pair_hres = "none"
 /\ pair_bugLossyEndRecord_fwd_pair_vs = [ g |->
       [ ps |-> {},
@@ -130,7 +131,7 @@ State 1: <Initial predicate>
         lost |-> 0 ] ]
 /\ pair_bugLossyEndRecord_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
 
-State 2: <pair_bugLossyEndRecord_fwd_pair_CloseUnattached line 2904, col 3 to line 2920, col 52 of module pair_bugLossyEndRecord>
+State 2: <pair_bugLossyEndRecord_fwd_pair_CloseUnattached line 3009, col 3 to line 3025, col 52 of module pair_bugLossyEndRecord>
 /\ pair_bugLossyEndRecord_fwd_pair_ctl = [gh |-> <<{"S", "R"}>>, hg |-> <<>>]
 /\ pair_bugLossyEndRecord_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugLossyEndRecord_fwd_pair_pr = [ g |->
@@ -155,6 +156,7 @@ State 2: <pair_bugLossyEndRecord_fwd_pair_CloseUnattached line 2904, col 3 to li
         cgen |-> 0 ] ]
 /\ pair_bugLossyEndRecord_fwd_pair_attRes = [g |-> "none", h |-> "none"]
 /\ pair_bugLossyEndRecord_fwd_pair_vmUp = TRUE
+/\ pair_bugLossyEndRecord_fwd_pair_strmHeld = FALSE
 /\ pair_bugLossyEndRecord_fwd_pair_hres = "none"
 /\ pair_bugLossyEndRecord_fwd_pair_vs = [ g |->
       [ ps |-> {},
@@ -262,7 +264,7 @@ State 2: <pair_bugLossyEndRecord_fwd_pair_CloseUnattached line 2904, col 3 to li
         lost |-> 0 ] ]
 /\ pair_bugLossyEndRecord_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
 
-State 3: <pair_bugLossyEndRecord_fwd_pair_Attach line 3606, col 3 to line 3616, col 75 of module pair_bugLossyEndRecord>
+State 3: <pair_bugLossyEndRecord_fwd_pair_Attach line 4017, col 3 to line 4027, col 75 of module pair_bugLossyEndRecord>
 /\ pair_bugLossyEndRecord_fwd_pair_ctl = [gh |-> <<{"S", "R"}>>, hg |-> <<>>]
 /\ pair_bugLossyEndRecord_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugLossyEndRecord_fwd_pair_pr = [ g |->
@@ -287,6 +289,7 @@ State 3: <pair_bugLossyEndRecord_fwd_pair_Attach line 3606, col 3 to line 3616, 
         cgen |-> 0 ] ]
 /\ pair_bugLossyEndRecord_fwd_pair_attRes = [g |-> "none", h |-> "ok"]
 /\ pair_bugLossyEndRecord_fwd_pair_vmUp = TRUE
+/\ pair_bugLossyEndRecord_fwd_pair_strmHeld = FALSE
 /\ pair_bugLossyEndRecord_fwd_pair_hres = "none"
 /\ pair_bugLossyEndRecord_fwd_pair_vs = [ g |->
       [ ps |-> {},
@@ -394,7 +397,7 @@ State 3: <pair_bugLossyEndRecord_fwd_pair_Attach line 3606, col 3 to line 3616, 
         lost |-> 0 ] ]
 /\ pair_bugLossyEndRecord_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
 
-State 4: <pair_bugLossyEndRecord_fwd_pair_VCtl line 3829, col 3 to line 3833, col 49 of module pair_bugLossyEndRecord>
+State 4: <pair_bugLossyEndRecord_fwd_pair_VCtl line 4048, col 3 to line 4052, col 49 of module pair_bugLossyEndRecord>
 /\ pair_bugLossyEndRecord_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<{"S", "R"}>>]
 /\ pair_bugLossyEndRecord_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugLossyEndRecord_fwd_pair_pr = [ g |->
@@ -419,6 +422,7 @@ State 4: <pair_bugLossyEndRecord_fwd_pair_VCtl line 3829, col 3 to line 3833, co
         cgen |-> 0 ] ]
 /\ pair_bugLossyEndRecord_fwd_pair_attRes = [g |-> "none", h |-> "ok"]
 /\ pair_bugLossyEndRecord_fwd_pair_vmUp = TRUE
+/\ pair_bugLossyEndRecord_fwd_pair_strmHeld = FALSE
 /\ pair_bugLossyEndRecord_fwd_pair_hres = "none"
 /\ pair_bugLossyEndRecord_fwd_pair_vs = [ g |->
       [ ps |-> {},
@@ -526,7 +530,7 @@ State 4: <pair_bugLossyEndRecord_fwd_pair_VCtl line 3829, col 3 to line 3833, co
         lost |-> 0 ] ]
 /\ pair_bugLossyEndRecord_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
 
-State 5: <pair_bugLossyEndRecord_fwd_pair_DropRecord line 1393, col 3 to line 1406, col 79 of module pair_bugLossyEndRecord>
+State 5: <pair_bugLossyEndRecord_fwd_pair_DropRecord line 1432, col 3 to line 1445, col 79 of module pair_bugLossyEndRecord>
 /\ pair_bugLossyEndRecord_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<{"S", "R"}>>]
 /\ pair_bugLossyEndRecord_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugLossyEndRecord_fwd_pair_pr = [ g |->
@@ -551,6 +555,7 @@ State 5: <pair_bugLossyEndRecord_fwd_pair_DropRecord line 1393, col 3 to line 14
         cgen |-> 0 ] ]
 /\ pair_bugLossyEndRecord_fwd_pair_attRes = [g |-> "none", h |-> "ok"]
 /\ pair_bugLossyEndRecord_fwd_pair_vmUp = TRUE
+/\ pair_bugLossyEndRecord_fwd_pair_strmHeld = FALSE
 /\ pair_bugLossyEndRecord_fwd_pair_hres = "none"
 /\ pair_bugLossyEndRecord_fwd_pair_vs = [ g |->
       [ ps |-> {},

@@ -39,6 +39,7 @@ use overdrive_core::guest_transport::wire::{
 use overdrive_core::guest_transport::{GUEST_CID_BASE, GuestCid, LaunchToken, VsockListenPort};
 use overdrive_core::guest_transport::{GUEST_FLOW_CONTROL_PORT, GUEST_FLOW_STREAM_PORT};
 use overdrive_core::vm::config::VsockPort;
+use overdrive_sim::adapters::SimShutdown;
 
 use super::{FarEndEvent, SimEffectKind, SimFailure, SimGuestFlowIo, SimPeerEnd};
 use crate::guest_network::GuestConnKey;
@@ -114,6 +115,7 @@ async fn attached_flow(
         FlowListener::Stream,
         stream_key(6000 + seq),
         Some(request.encode().to_vec()),
+        None,
     );
     let (vsock, _) = io.accept(FlowListener::Stream).await.expect("accepted");
     let _request = io.read_record(&vsock, 32).await.expect("the request");
@@ -179,7 +181,12 @@ async fn accept_and_read_follow_the_releases() {
     let io = sim(3);
     io.set_auto_deliver(false);
     bound(&io, FlowListener::Control).await;
-    io.queue_connection(FlowListener::Control, control_key(5000), Some(control_open(token(1))));
+    io.queue_connection(
+        FlowListener::Control,
+        control_key(5000),
+        Some(control_open(token(1))),
+        None,
+    );
     assert_eq!(
         io.socket_observation().queued.get(&control_key(5000)),
         Some(&Some(token(1))),
@@ -210,7 +217,12 @@ async fn accept_and_read_follow_the_releases() {
 async fn an_accepted_connection_fails_at_its_next_read_after_the_vm_dies() {
     let io = sim(4);
     bound(&io, FlowListener::Control).await;
-    io.queue_connection(FlowListener::Control, control_key(5001), Some(control_open(token(2))));
+    io.queue_connection(
+        FlowListener::Control,
+        control_key(5001),
+        Some(control_open(token(2))),
+        None,
+    );
     let (socket, key) = io.accept(FlowListener::Control).await.expect("accepted");
     io.vm_stop(cid());
     assert!(io.socket_observation().peer_gone.contains(&key));
@@ -231,7 +243,12 @@ async fn a_queued_connection_keeps_its_record_after_the_vm_dies() {
     let io = sim(5);
     bound(&io, FlowListener::Control).await;
     io.set_auto_deliver(false);
-    io.queue_connection(FlowListener::Control, control_key(5002), Some(control_open(token(3))));
+    io.queue_connection(
+        FlowListener::Control,
+        control_key(5002),
+        Some(control_open(token(3))),
+        None,
+    );
     io.vm_stop(cid());
     io.release_accept(control_key(5002));
     let (socket, key) = io.accept(FlowListener::Control).await.expect("accepted after the VM died");
@@ -267,7 +284,7 @@ async fn a_vsock_connect_to_a_gone_vm_fails_enodev() {
 async fn a_zero_length_read_is_invalid_input() {
     let io = sim(7);
     bound(&io, FlowListener::Stream).await;
-    io.queue_connection(FlowListener::Stream, stream_key(6000), None);
+    io.queue_connection(FlowListener::Stream, stream_key(6000), None, None);
     let (socket, key) = io.accept(FlowListener::Stream).await.expect("accepted");
     let read = io.read_record(&socket, 0).await;
     assert!(
@@ -280,7 +297,8 @@ async fn a_zero_length_read_is_invalid_input() {
 /// The sim queues no end record of its own: a destination reset scripted on
 /// the attached TCP half is classified by the `SimFlowForwarder` arbiter,
 /// whose one record (`SocketError` on the TCP half, side B) the seam's
-/// `next_end` returns; the far end observed a reset.
+/// `next_end` returns. The forwarder resets the opposite guest far end through
+/// V_h; it does not echo another reset to the destination that initiated it.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn a_scripted_destination_reset_reaches_next_end_as_the_arbiters_record() {
     let io = sim(8);
@@ -288,11 +306,22 @@ async fn a_scripted_destination_reset_reaches_next_end_as_the_arbiters_record() 
     io.destination_resets(flow(1));
     let end = io.next_end().await.expect("the context is readable");
     assert_eq!(end.id, pair.id);
-    assert!(matches!(
+    assert_eq!(
         end.outcome,
-        ForwardOutcome::Aborted { cause: AbortCause::SocketError { side: PairSide::B, .. } }
-    ));
-    assert_eq!(io.socket_observation().far_end.get(&flow(1)), Some(&FarEndEvent::Reset));
+        ForwardOutcome::Aborted {
+            cause: AbortCause::SocketError { side: PairSide::B, errno: KernelErrno::ECONNRESET },
+        }
+    );
+    assert_eq!(
+        io.vsock_half(flow(1)).expect("the attached V_h remains observable").sent_shutdown(),
+        Some(SimShutdown::Both),
+        "the reset reaches the opposite guest far end",
+    );
+    assert_eq!(
+        io.socket_observation().far_end.get(&flow(1)),
+        None,
+        "the destination that initiated the reset receives no echoed owner event",
+    );
     io.close(OwnedSocket::Pair(pair.vsock)).await;
     io.close(OwnedSocket::Pair(pair.peer)).await;
 }

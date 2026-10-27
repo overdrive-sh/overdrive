@@ -623,7 +623,6 @@ fn an_operator_interrupt_stops_a_healthy_serve_with_status_zero() {
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 row 8, the 12-01 rework: the composed owner's quiesce and restore in the IpRules recovery)"]
 fn a_shared_network_fail_stop_wins_over_a_ready_interrupt_and_exits_status_one() {
     let capture = Capture::new();
     let (verdicts, trace) = on_current_thread(&capture, async {
@@ -714,7 +713,6 @@ fn a_shared_network_fail_stop_wins_over_a_ready_interrupt_and_exits_status_one()
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 row 8, the 12-01 rework: the composed owner's quiesce and restore in the IpRules recovery)"]
 fn a_shared_network_fail_stop_shutdown_is_abandoned_when_the_ten_second_bound_elapses() {
     let capture = Capture::new();
     let (verdicts, trace) = on_current_thread(&capture, async {
@@ -811,7 +809,6 @@ fn a_shared_network_fail_stop_shutdown_is_abandoned_when_the_ten_second_bound_el
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER attachment-cut step (DG-2 row 8, the 12-01 rework: the composed owner's quiesce and restore in the IpRules recovery)"]
 fn a_repaired_shared_network_loss_never_ends_serve() {
     let capture = Capture::new();
     let (verdicts, trace) = on_current_thread(&capture, async {

@@ -478,14 +478,12 @@ async fn drive(seed: u64, finalize: bool) {
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn vm_finalize_failed_reclamation_preserves_terminal_seeded_convergence() {
     drive(257_204, true).await;
 }
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER attachment-cut step (15)"]
 async fn vm_orderly_stop_retains_owner_until_termination_control() {
     drive(257_204, false).await;
 }
