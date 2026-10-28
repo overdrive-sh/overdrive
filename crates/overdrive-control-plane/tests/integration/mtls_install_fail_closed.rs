@@ -1238,7 +1238,6 @@ async fn assert_activation_failure_projection(
         [
             Step::Provision,
             Step::DriverStart,
-            Step::InterceptInstalled,
             Step::InstallSuccessEvent,
             Step::Activate,
             Step::DriverStop,
@@ -1299,7 +1298,6 @@ async fn tap_activation_occurs_after_intercept_success_and_before_exec_release()
         [
             Step::Provision,
             Step::DriverStart,
-            Step::InterceptInstalled,
             Step::InstallSuccessEvent,
             Step::Activate,
             Step::ReleaseForExitEmission,
@@ -1365,7 +1363,7 @@ async fn tap_activation_waits_on_a_recovering_exec_gate_and_runs_once_after_reop
     assert!(!task.is_finished(), "the start waits on the recovering EXEC gate");
     assert_eq!(
         steps_for(&journal, &alloc),
-        [Step::Provision, Step::DriverStart, Step::InterceptInstalled, Step::InstallSuccessEvent],
+        [Step::Provision, Step::DriverStart, Step::InstallSuccessEvent],
         "while Recovering there is no activation, no EXEC release, and no running hook"
     );
 
@@ -1383,7 +1381,6 @@ async fn tap_activation_waits_on_a_recovering_exec_gate_and_runs_once_after_reop
         [
             Step::Provision,
             Step::DriverStart,
-            Step::InterceptInstalled,
             Step::InstallSuccessEvent,
             Step::Activate,
             Step::ReleaseForExitEmission,
@@ -1542,7 +1539,7 @@ async fn cancelling_dispatch_while_the_exec_release_is_held_drops_that_release()
     assert!(!task.is_finished(), "dispatch remains pending inside the held release future");
     assert_eq!(
         steps_for(&journal, &alloc),
-        [Step::Provision, Step::InterceptInstalled, Step::InstallSuccessEvent, Step::Activate],
+        [Step::Provision, Step::InstallSuccessEvent, Step::Activate],
         "provision, protection, the protection-live event, and activation precede the release"
     );
     assert!(!driver.release_completed.load(Ordering::SeqCst));
