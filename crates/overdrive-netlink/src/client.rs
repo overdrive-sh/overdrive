@@ -468,7 +468,7 @@ impl Client {
             .replace()
             .execute()
             .await
-            .map_err(|error| NetlinkError::route("host-local-replace", error))
+            .map_err(|error| NetlinkError::route("gateway-local-replace", error))
     }
 
     /// Performs the kernel's IPv4 FIB lookup for one destination and returns
