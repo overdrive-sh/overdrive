@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/overdrive-bench",
     "crates/overdrive-bpf",
     "crates/overdrive-core",
     "crates/overdrive-cli",
@@ -26,6 +27,7 @@ members = [
 # The kernel-side crate is built explicitly via `cargo xtask bpf-build`
 # (Phase 2.1 step 02-01). See architecture.md §5.1 and ADR-0038.
 default-members = [
+    "crates/overdrive-bench",
     "crates/overdrive-core",
     "crates/overdrive-cli",
     "crates/overdrive-control-plane",
