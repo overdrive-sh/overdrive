@@ -1,0 +1,46 @@
+# CodSpeed performance benchmarks for the pure `overdrive-core` hot paths
+# (Maglev permutation, backend-set fingerprint, workload spec parsing, id
+# parsing, guest datagram framing).
+#
+# Lives in its own package rather than under `overdrive-core/benches/`
+# because bench targets compile the owning crate's dev-dependencies, and
+# `overdrive-core`'s dev-deps (`overdrive-sim`, `overdrive-reconcilers`)
+# transitively pull `overdrive-dataplane`, whose build.rs requires the
+# prebuilt BPF object. This package depends on `overdrive-core` only, so
+# `cargo codspeed build -p overdrive-bench` runs on a stock Linux host.
+#
+# `codspeed-divan-compat` is renamed to `divan` so benchmark sources use
+# the stock divan API; outside `cargo codspeed` it behaves like plain
+# divan (`cargo bench -p overdrive-bench`).
+
+[package]
+name        = "overdrive-bench"
+version     = "0.0.0"
+description = "CodSpeed benchmarks for Overdrive pure hot paths."
+edition.workspace       = true
+rust-version.workspace  = true
+license.workspace       = true
+authors.workspace       = true
+repository.workspace    = true
+homepage.workspace      = true
+publish.workspace       = true
+
+[package.metadata.overdrive]
+crate_class = "core"
+
+[lints]
+workspace = true
+
+[features]
+# Workspace-wide convention — every member declares this feature so
+# `cargo {check,test,mutants} --features integration-tests` resolves
+# uniformly. No integration-shaped code lives here; deliberate no-op.
+integration-tests = []
+
+[dev-dependencies]
+divan = { version = "6.0.0", package = "codspeed-divan-compat" }
+overdrive-core.workspace = true
+
+[[bench]]
+name    = "core"
+harness = false
