@@ -33,7 +33,9 @@ use std::time::{Duration, Instant};
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Job, Node, Vm, WorkloadDriver, WorkloadKind};
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
-use overdrive_core::observation::ProbeStatus;
+use overdrive_core::observation::{
+    ProbeIdx, ProbeResultRow, ProbeRole, ProbeRunSeq, ProbeStatus, SameStatusRuns,
+};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
@@ -77,6 +79,8 @@ fn tick_at(now_unix_secs: u64) -> TickContext {
 // ---- ServiceLifecycle side ----
 
 fn liveness_running_fact(alloc_id: &AllocationId) -> ServiceAllocFact {
+    let status = ProbeStatus::Fail { last_fail_reason: "liveness refused".to_string() };
+    let probe_idx = ProbeIdx::new(0);
     ServiceAllocFact {
         alloc_id: alloc_id.clone(),
         state: AllocState::Running,
@@ -94,12 +98,23 @@ fn liveness_running_fact(alloc_id: &AllocationId) -> ServiceAllocFact {
         readiness_success_threshold: 1,
         backend_spiffe: overdrive_core::SpiffeId::for_allocation(&jid(WORKLOAD), alloc_id),
         backend_ip: std::net::Ipv4Addr::LOCALHOST,
-        latest_liveness_probe: Some(ProbeStatus::Fail {
-            last_fail_reason: "liveness refused".to_string(),
-        }),
+        latest_liveness_probe: Some(status.clone()),
         has_liveness_probe: true,
         // threshold 1 → a single Fail this tick trips the terminate.
         liveness_failure_threshold: 1,
+        probe_rows: BTreeMap::from([(
+            (ProbeRole::Liveness, probe_idx),
+            ProbeResultRow {
+                alloc_id: alloc_id.clone(),
+                probe_idx,
+                role: ProbeRole::Liveness,
+                status,
+                last_observed_at_unix_ms: 1,
+                inferred: false,
+                run_seq: ProbeRunSeq::FIRST,
+                same_status_runs: SameStatusRuns::ONE,
+            },
+        )]),
     }
 }
 

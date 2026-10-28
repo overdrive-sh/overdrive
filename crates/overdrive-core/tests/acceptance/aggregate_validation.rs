@@ -529,8 +529,8 @@ fn service_from_submit_rejects_duplicate_listener_port_protocol_with_validation_
 // worker, and caused an indefinite service hang — the probe loop
 // built `http://127.0.0.1:8080health`, hyper rejected it, and
 // `supervised_probe_loop` swallowed the error without writing a
-// `ProbeResultRow`, so `startup_attempts_per_alloc` stayed at 0
-// and the startup window never closed.
+// `ProbeResultRow`, so no startup attempt was consumed and the startup
+// window never closed.
 // ---------------------------------------------------------------------------
 
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};

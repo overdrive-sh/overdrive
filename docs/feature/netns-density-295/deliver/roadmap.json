@@ -1701,16 +1701,14 @@
   },
   "validation": {
     "status": "approved",
-    "reviewer": "PFRO-1 scoped validation APPROVED on 2026-10-27; see `deliver/review-design-13-01-postfin-reset-observation.md` iteration 4. The independent DISTILL source review is APPROVED (`deliver/review-distill-13-01-postfin-reset-alignment.md`, SHA-256 `e9447d4c6b1aa2e977add31e56421a9d9feaafd9db719aa7af93f39ae8bdf0e8`) against exact test-source SHA-256 `dffc6d6292288197618af686427948cdc241492ca5047930abdfa615ca7e86e0`. The original crafter's synchronized Metal triple passed 3/3 (run `965310ec95cc6ce433407d28`, nextest `305d03fd-81c6-4e4c-886f-b8380b576e3c`, exit 0) and the complete `vsock_mesh_egress_mtls` suite passed 12/12 (run `1410bdb09ac40587eb35ce6b`, nextest `c7378efd-0016-4094-9b6a-61347268031c`, exit 0). This closes only the explicit STEP 13-01 DG-10 reading 2 post-FIN observation scope: the same peer reaches `TCP_CLOSE` with one retained `SO_ERROR=EPIPE`, while open-reset and clean-close controls remain exact. It changes no outcome, mechanism, API, error, owner, scenario, lane or model; preserves STEP 12-01 and unrelated proofs; and does not claim broader STEP 13-01 GREEN or resolve the original crafter's separate 58 package-lane failure classification.",
-    "approved_at": "2026-10-27T22:04:01Z",
+    "reviewer": "STEP 13-02 PROBE-RUN-COUNT exact hydration carrier PRCI-1 was APPROVED by fresh independent DESIGN contract review iteration 1 on 2026-10-28; see `deliver/review-design-13-02-probe-input-shape.md`. The only approved carrier is `#[doc(hidden)] pub ServiceAllocFact::probe_rows: BTreeMap<(ProbeRole, ProbeIdx), ProbeResultRow>`; ADR-0101's exact three-field `ServiceLifecycleState`, existing field types and private helper signatures remain unchanged. This restores execution authority only for exact implementation and DISTILL alignment against PRCI-1; their separate review gates remain required. The prior PFRO-1 and completed STEP 12-01 approvals are preserved without alteration.",
+    "approved_at": "2026-10-28T00:20:29Z",
     "prior_approval": {
       "status": "approved",
-      "approved_at": "2026-10-27T18:56:09Z",
-      "scope": "STEP 12-01 replacement-proof review and roadmap execution through completed STEP 12-01; preserved without alteration",
-      "review_artifact": "deliver/review-12-01-replacement-proof.md"
+      "approved_at": "2026-10-27T22:04:01Z",
+      "scope": "PFRO-1 scoped validation through the independently reviewed STEP 13-01 post-FIN reset observation and DISTILL alignment; preserved without alteration",
+      "review_artifact": "deliver/review-design-13-01-postfin-reset-observation.md"
     },
-    "pending_scope": [
-      "STEP 13-01 DG-10 reading 2 post-FIN reset observation only"
-    ]
+    "pending_scope": []
   }
 }

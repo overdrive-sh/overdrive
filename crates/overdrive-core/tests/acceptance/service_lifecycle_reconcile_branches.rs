@@ -29,7 +29,9 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::id::AllocationId;
-use overdrive_core::observation::ProbeStatus;
+use overdrive_core::observation::{
+    ProbeIdx, ProbeResultRow, ProbeRole, ProbeRunSeq, ProbeStatus, SameStatusRuns,
+};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
 use overdrive_core::traits::observation_store::AllocState;
 use overdrive_core::transition_reason::{ServiceFailureReason, StoppedBy, TerminalCondition};
@@ -88,17 +90,62 @@ fn fact(
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
+        probe_rows: BTreeMap::new(),
     }
 }
 
 fn one_alloc_state(f: ServiceAllocFact) -> ServiceLifecycleState {
-    let mut allocs = BTreeMap::new();
-    allocs.insert(f.alloc_id.clone(), f);
-    ServiceLifecycleState {
-        allocs,
-        service_dataplane: BTreeMap::new(),
-        observed_backend_rows: BTreeMap::new(),
+    let alloc_id = f.alloc_id.clone();
+    let probe_statuses = [
+        (ProbeRole::Startup, f.latest_startup_probe.clone()),
+        (ProbeRole::Readiness, f.latest_readiness_probe.clone()),
+        (ProbeRole::Liveness, f.latest_liveness_probe.clone()),
+    ];
+    let mut state = ServiceLifecycleState {
+        allocs: BTreeMap::from([(alloc_id.clone(), f)]),
+        ..ServiceLifecycleState::default()
+    };
+    for (role, status) in probe_statuses {
+        if let Some(status) = status {
+            put_probe_row(&mut state, &alloc_id, role, status, 1, 1);
+        }
     }
+    state
+}
+
+fn put_probe_row(
+    state: &mut ServiceLifecycleState,
+    alloc_id: &AllocationId,
+    role: ProbeRole,
+    status: ProbeStatus,
+    run_seq: u64,
+    same_status_runs: u32,
+) {
+    let observed_at = UnixInstant::from_unix_duration(Duration::from_millis(run_seq));
+    let fact = state.allocs.get_mut(alloc_id).expect("fixture allocation");
+    match role {
+        ProbeRole::Startup => {
+            fact.latest_startup_probe = Some(status.clone());
+            fact.latest_startup_probe_observed_at = Some(observed_at);
+        }
+        ProbeRole::Readiness => fact.latest_readiness_probe = Some(status.clone()),
+        ProbeRole::Liveness => fact.latest_liveness_probe = Some(status.clone()),
+    }
+    let probe_idx = ProbeIdx::new(0);
+    fact.probe_rows.insert(
+        (role, probe_idx),
+        ProbeResultRow {
+            alloc_id: alloc_id.clone(),
+            probe_idx,
+            role,
+            status,
+            last_observed_at_unix_ms: run_seq,
+            inferred: false,
+            run_seq: ProbeRunSeq::new(run_seq).expect("fixture run sequence is non-zero"),
+            same_status_runs: SameStatusRuns::new(same_status_runs)
+                .expect("fixture streak is non-zero"),
+        },
+    );
 }
 
 fn tick_at_ms(now_unix_ms: u64) -> TickContext {
@@ -561,20 +608,16 @@ fn startup_probe_failed_fires_when_all_three_gates_met() {
     );
     f.latest_startup_probe_observed_at =
         Some(UnixInstant::from_unix_duration(Duration::from_secs(60)));
-    let actual = one_alloc_state(f);
-    let mut attempts_map = BTreeMap::new();
-    // GAP-10: seed the PRIOR consecutive-fail count (29). This tick
-    // observes one more Fail, so the body increments to 30 == max_attempts
-    // BEFORE the gate reads it. The reported `attempts` is the
-    // post-increment streak length (30).
-    attempts_map.insert(aid("alloc-svc-2"), 29u32);
-    // ADR-0097 D2: a prior streak is paired with its last counted observation;
-    // the current observation is strictly later, not an unpaired legacy count.
-    let view = ServiceLifecycleView {
-        startup_attempts_per_alloc: attempts_map,
-        startup_last_fail_seen_at: BTreeMap::from([(aid("alloc-svc-2"), 59_000)]),
-        ..Default::default()
-    };
+    let mut actual = one_alloc_state(f);
+    put_probe_row(
+        &mut actual,
+        &aid("alloc-svc-2"),
+        ProbeRole::Startup,
+        ProbeStatus::Fail { last_fail_reason: "tcp_refused".to_string() },
+        30,
+        30,
+    );
+    let view = ServiceLifecycleView::default();
     // elapsed = 61_000 - 1_000 = 60_000 >= 60_000 (deadline).
     let tick = tick_at_ms(61_000);
     let r = ServiceLifecycleReconciler::new();
@@ -614,19 +657,22 @@ fn startup_probe_failed_does_not_fire_when_attempts_below_max() {
         30,
         Duration::from_secs(60),
     );
-    let mut attempts_map = BTreeMap::new();
-    // GAP-10: seed PRIOR count 28; this tick's Fail increments to 29,
-    // which is still < max(30), so StartupProbeFailed must NOT fire.
-    attempts_map.insert(aid("alloc-svc-2"), 28u32);
-    let view =
-        ServiceLifecycleView { startup_attempts_per_alloc: attempts_map, ..Default::default() };
+    let mut actual = one_alloc_state(f);
+    put_probe_row(
+        &mut actual,
+        &aid("alloc-svc-2"),
+        ProbeRole::Startup,
+        ProbeStatus::Fail { last_fail_reason: "x".to_string() },
+        29,
+        29,
+    );
+    let view = ServiceLifecycleView::default();
     let tick = tick_at_ms(61_000);
     let r = ServiceLifecycleReconciler::new();
-    let (actions, _) =
-        r.reconcile(&ServiceLifecycleState::default(), &one_alloc_state(f), &view, &tick);
+    let (actions, _) = r.reconcile(&ServiceLifecycleState::default(), &actual, &view, &tick);
     assert!(
         actions.is_empty(),
-        "post-increment attempts(29) < max(30) => no StartupProbeFailed; got {actions:?}"
+        "producer streak(29) < max(30) => no StartupProbeFailed; got {actions:?}"
     );
 }
 
@@ -644,15 +690,20 @@ fn startup_probe_failed_does_not_fire_when_elapsed_below_deadline() {
         30,
         Duration::from_secs(60),
     );
-    let mut attempts_map = BTreeMap::new();
-    attempts_map.insert(aid("alloc-svc-2"), 30u32);
-    let view =
-        ServiceLifecycleView { startup_attempts_per_alloc: attempts_map, ..Default::default() };
+    let mut actual = one_alloc_state(f);
+    put_probe_row(
+        &mut actual,
+        &aid("alloc-svc-2"),
+        ProbeRole::Startup,
+        ProbeStatus::Fail { last_fail_reason: "x".to_string() },
+        30,
+        30,
+    );
+    let view = ServiceLifecycleView::default();
     // elapsed = 30_000 - 1_000 = 29_000 < 60_000 deadline.
     let tick = tick_at_ms(30_000);
     let r = ServiceLifecycleReconciler::new();
-    let (actions, _) =
-        r.reconcile(&ServiceLifecycleState::default(), &one_alloc_state(f), &view, &tick);
+    let (actions, _) = r.reconcile(&ServiceLifecycleState::default(), &actual, &view, &tick);
     assert!(actions.is_empty(), "elapsed < deadline => no StartupProbeFailed; got {actions:?}");
 }
 
@@ -671,15 +722,13 @@ fn startup_probe_failed_does_not_fire_when_pass_observed() {
         30,
         Duration::from_secs(60),
     );
-    let mut attempts_map = BTreeMap::new();
-    attempts_map.insert(aid("alloc-svc-2"), 30u32);
-    let view =
-        ServiceLifecycleView { startup_attempts_per_alloc: attempts_map, ..Default::default() };
+    let mut actual = one_alloc_state(f);
+    put_probe_row(&mut actual, &aid("alloc-svc-2"), ProbeRole::Startup, ProbeStatus::Pass, 30, 30);
+    let view = ServiceLifecycleView::default();
     let tick = tick_at_ms(61_000);
     let r = ServiceLifecycleReconciler::new();
-    let (actions, _) =
-        r.reconcile(&ServiceLifecycleState::default(), &one_alloc_state(f), &view, &tick);
-    // attempts >= max, elapsed >= deadline, but Pass observed => no_pass=false => no emission.
+    let (actions, _) = r.reconcile(&ServiceLifecycleState::default(), &actual, &view, &tick);
+    // A Pass row contributes zero failed attempts, and no_pass=false, so no emission.
     // Also no Stable because state != Running.
     assert!(
         actions.is_empty(),
@@ -712,44 +761,6 @@ fn startup_probe_failed_does_not_fire_with_only_two_of_three_gates() {
         actions.is_empty(),
         "first gate false => no StartupProbeFailed (kills && → ||); got {actions:?}"
     );
-}
-
-/// StartupProbeFailed extracts last_fail = "" when probe is None
-/// (kills line 307 `delete match arm Some(Fail { last_fail_reason })` —
-/// with the arm deleted, all-cases-default returns String::new()
-/// regardless. We need a Some(Fail) case asserting last_fail is NOT
-/// empty: that's the prior test `startup_probe_failed_fires_when_all_three_gates_met`
-/// which sets last_fail to "tcp_refused" — flipping the arm would set
-/// last_fail to "" and break that assertion).
-///
-/// Here we pin the None case explicitly: last_fail should be "".
-/// Note: when probe is None, no_pass = !matches!(None, Some(Pass)) = true,
-/// so StartupProbeFailed CAN fire. We also need attempts >= max + elapsed >= deadline.
-/// CONTRACT_SHAPE: bounded-change.
-#[test]
-fn startup_probe_failed_last_fail_empty_when_probe_is_none() {
-    let f = fact("alloc-svc-2", AllocState::Pending, 1_000, None, None, 5, Duration::from_secs(60));
-    let mut attempts_map = BTreeMap::new();
-    attempts_map.insert(aid("alloc-svc-2"), 5u32);
-    let view =
-        ServiceLifecycleView { startup_attempts_per_alloc: attempts_map, ..Default::default() };
-    let tick = tick_at_ms(61_000);
-    let r = ServiceLifecycleReconciler::new();
-    let (actions, _) =
-        r.reconcile(&ServiceLifecycleState::default(), &one_alloc_state(f), &view, &tick);
-    assert_eq!(actions.len(), 1, "StartupProbeFailed must fire here; got {actions:?}");
-    match &actions[0] {
-        Action::FinalizeFailed {
-            terminal:
-                Some(TerminalCondition::ServiceFailed {
-                    reason: ServiceFailureReason::StartupProbeFailed { last_fail, .. },
-                }),
-            ..
-        } => {
-            assert_eq!(last_fail, "", "None probe => last_fail must be empty string");
-        }
-        other => panic!("expected StartupProbeFailed, got {other:?}"),
-    }
 }
 
 // =====================================================================
@@ -903,15 +914,16 @@ fn reconcile_terminal_failed_clears_mid_window_and_dedups() {
     );
     f.latest_startup_probe_observed_at =
         Some(UnixInstant::from_unix_duration(Duration::from_secs(60)));
-    let actual = one_alloc_state(f);
-    let mut attempts_map = BTreeMap::new();
-    // GAP-10: seed PRIOR count 4; this tick's Fail increments to 5 == max.
-    attempts_map.insert(aid("alloc-svc-8"), 4u32);
-    let view = ServiceLifecycleView {
-        startup_attempts_per_alloc: attempts_map,
-        startup_last_fail_seen_at: BTreeMap::from([(aid("alloc-svc-8"), 59_000)]),
-        ..Default::default()
-    };
+    let mut actual = one_alloc_state(f);
+    put_probe_row(
+        &mut actual,
+        &aid("alloc-svc-8"),
+        ProbeRole::Startup,
+        ProbeStatus::Fail { last_fail_reason: "tcp_refused".to_string() },
+        5,
+        5,
+    );
+    let view = ServiceLifecycleView::default();
     let tick = tick_at_ms(61_000); // elapsed 60_000 >= deadline 60_000
 
     let r = ServiceLifecycleReconciler::new();
@@ -993,234 +1005,6 @@ fn pre_running_failed_alloc_is_terminal_and_not_mid_startup_window() {
     );
 }
 
-// =====================================================================
-// Category F — GAP-10: startup_attempts_per_alloc increment/reset
-// =====================================================================
-//
-// Before GAP-10 the counter was READ by the StartupProbeFailed gate but
-// NEVER WRITTEN, so `attempts` stayed 0 and the terminal was unreachable
-// for any real spec (max_attempts >= 1) — a failure-path busy-loop. The
-// fix increments by exactly 1 per observed startup-probe Fail and resets
-// to 0 on the first Pass. These tests pin the four mutation-surface
-// behaviours per the GAP-10 correctness checklist:
-//   (a) +1 per observed Fail (no over/under-count)
-//   (b) reset to 0 on Pass
-//   (c) StartupProbeFailed fires at exactly attempts == max_attempts
-//   (d) a Pass before max_attempts prevents StartupProbeFailed
-//
-// Observable surface: the counter is port-exposed via the returned
-// `next_view.startup_attempts_per_alloc` (state-delta over a View slot)
-// and via the emitted `StartupProbeFailed { attempts }` action.
-
-/// (a) Each observed startup-probe Fail increments the per-alloc counter
-/// by exactly 1. Kills `saturating_add(1)` → `saturating_add(0)` (no
-/// movement → busy-loop returns) and `→ saturating_add(2)`/`* 2`
-/// (over-count). State-delta: only the target alloc's slot moves, by +1.
-/// CONTRACT_SHAPE: bounded-change.
-#[test]
-fn startup_attempt_counter_increments_by_one_per_observed_fail() {
-    // Pending so no terminal branch fires; max high so StartupProbeFailed
-    // does not consume the alloc — we observe the raw counter delta.
-    let mut f = fact(
-        "alloc-svc-f",
-        AllocState::Pending,
-        1_000,
-        None,
-        Some(ProbeStatus::Fail { last_fail_reason: "tcp_refused".to_string() }),
-        u32::MAX,
-        Duration::from_secs(60),
-    );
-    f.latest_startup_probe_observed_at =
-        Some(UnixInstant::from_unix_duration(Duration::from_millis(1_500)));
-    let mut actual = one_alloc_state(f);
-    let r = ServiceLifecycleReconciler::new();
-    let tick = tick_at_ms(2_000);
-
-    // Tick 1: absent entry (0) + one Fail → 1.
-    let (actions1, view1) = r.reconcile(
-        &ServiceLifecycleState::default(),
-        &actual,
-        &ServiceLifecycleView::default(),
-        &tick,
-    );
-    assert!(actions1.is_empty(), "mid-window Fail emits no action; got {actions1:?}");
-    assert_eq!(
-        view1.startup_attempts_per_alloc.get(&aid("alloc-svc-f")).copied(),
-        Some(1),
-        "first observed Fail must set the counter to exactly 1"
-    );
-
-    // ADR-0097 D2: another reconciliation of the same observation is a no-op.
-    let (duplicate_actions, duplicate_view) =
-        r.reconcile(&ServiceLifecycleState::default(), &actual, &view1, &tick);
-    assert!(duplicate_actions.is_empty());
-    assert_eq!(duplicate_view, view1, "the same observed Fail must not increment again");
-
-    // A strictly later Fail: 1 + one distinct observation → 2.
-    actual
-        .allocs
-        .get_mut(&aid("alloc-svc-f"))
-        .expect("fixture allocation")
-        .latest_startup_probe_observed_at =
-        Some(UnixInstant::from_unix_duration(Duration::from_secs(2)));
-    let (_actions2, view2) = r.reconcile(&ServiceLifecycleState::default(), &actual, &view1, &tick);
-    assert_eq!(
-        view2.startup_attempts_per_alloc.get(&aid("alloc-svc-f")).copied(),
-        Some(2),
-        "second observed Fail must increment to exactly 2 (kills +0 and +2 mutants)"
-    );
-}
-
-/// (b) A Pass resets the per-alloc counter to 0. Kills a mutant that
-/// drops the reset arm (counter would stay at its prior streak value,
-/// letting a recovered-then-flapping alloc fire StartupProbeFailed
-/// prematurely). The alloc here is Pending (not Running) so branch (a)
-/// Stable does NOT consume it — we observe the reset directly.
-/// CONTRACT_SHAPE: bounded-change.
-#[test]
-fn startup_attempt_counter_resets_to_zero_on_pass() {
-    let f = fact(
-        "alloc-svc-g",
-        AllocState::Pending,
-        1_000,
-        None,
-        Some(ProbeStatus::Pass),
-        30,
-        Duration::from_secs(60),
-    );
-    let actual = one_alloc_state(f);
-    // Seed a prior streak of 17 fails.
-    let mut seeded = BTreeMap::new();
-    seeded.insert(aid("alloc-svc-g"), 17u32);
-    let view = ServiceLifecycleView { startup_attempts_per_alloc: seeded, ..Default::default() };
-    let tick = tick_at_ms(2_000);
-    let r = ServiceLifecycleReconciler::new();
-    let (_actions, next_view) =
-        r.reconcile(&ServiceLifecycleState::default(), &actual, &view, &tick);
-    assert_eq!(
-        next_view.startup_attempts_per_alloc.get(&aid("alloc-svc-g")).copied(),
-        None,
-        "an observed Pass must clear the consecutive-fail streak to 0 (entry removed)"
-    );
-}
-
-/// (c)+(d) Boundary: with max_attempts = 3, three consecutive observed
-/// Fails (past the deadline) reach the terminal at exactly the 3rd Fail
-/// — and a Pass on the 2nd tick prevents it. This is the real never-binds
-/// shape (max_attempts = 3) the GAP-10 busy-loop manifested on: the
-/// terminal becomes reachable, flipping Shape B's predicate false.
-/// CONTRACT_SHAPE: bounded-change.
-#[test]
-fn startup_probe_failed_reachable_at_exactly_max_and_prevented_by_pass() {
-    let mut failing = fact(
-        "alloc-svc-h",
-        AllocState::Running,
-        1_000,
-        None,
-        Some(ProbeStatus::Fail { last_fail_reason: "connection refused".to_string() }),
-        3,
-        Duration::from_secs(10),
-    );
-    failing.latest_startup_probe_observed_at =
-        Some(UnixInstant::from_unix_duration(Duration::from_secs(12)));
-    // Past the deadline so the wall-clock gate is satisfied throughout.
-    let tick = tick_at_ms(20_000); // elapsed 19_000 >= 10_000 deadline
-    let r = ServiceLifecycleReconciler::new();
-    let mut actual = one_alloc_state(failing.clone());
-
-    // Fail 1 → attempts 1 < 3: no terminal.
-    let (a1, v1) = r.reconcile(
-        &ServiceLifecycleState::default(),
-        &actual,
-        &ServiceLifecycleView::default(),
-        &tick,
-    );
-    assert!(a1.is_empty(), "1st Fail (attempts=1 < max=3) must not fire; got {a1:?}");
-
-    // Fail 2 → attempts 2 < 3: no terminal.
-    actual
-        .allocs
-        .get_mut(&aid("alloc-svc-h"))
-        .expect("fixture allocation")
-        .latest_startup_probe_observed_at =
-        Some(UnixInstant::from_unix_duration(Duration::from_secs(13)));
-    let (a2, v2) = r.reconcile(&ServiceLifecycleState::default(), &actual, &v1, &tick);
-    assert!(a2.is_empty(), "2nd Fail (attempts=2 < max=3) must not fire; got {a2:?}");
-
-    // Fail 3 → attempts 3 == 3: terminal fires at EXACTLY max, reports 3.
-    actual
-        .allocs
-        .get_mut(&aid("alloc-svc-h"))
-        .expect("fixture allocation")
-        .latest_startup_probe_observed_at =
-        Some(UnixInstant::from_unix_duration(Duration::from_secs(14)));
-    let (a3, v3) = r.reconcile(&ServiceLifecycleState::default(), &actual, &v2, &tick);
-    assert_eq!(a3.len(), 1, "3rd Fail (attempts == max) must fire StartupProbeFailed; got {a3:?}");
-    match &a3[0] {
-        Action::FinalizeFailed {
-            terminal:
-                Some(TerminalCondition::ServiceFailed {
-                    reason: ServiceFailureReason::StartupProbeFailed { attempts, last_fail, .. },
-                }),
-            ..
-        } => {
-            assert_eq!(*attempts, 3, "reported attempts is the post-increment streak == max");
-            assert_eq!(last_fail, "connection refused");
-        }
-        other => panic!("expected StartupProbeFailed at max, got {other:?}"),
-    }
-    // No-busy-loop proof: the alloc is now terminal, so the Shape B
-    // predicate flips false — the runtime stops re-enqueueing.
-    assert!(
-        v3.terminal_announced.contains(&aid("alloc-svc-h")),
-        "terminal must be recorded so view_has_backoff_pending returns false"
-    );
-    assert!(
-        !v3.has_alloc_mid_startup_window(),
-        "reachable terminal closes the busy-loop (predicate false)"
-    );
-
-    // (d) Prevention: a distinct Pass on the 2nd tick clears the streak
-    // and recovers to Stable instead of StartupProbeFailed. No later startup
-    // failure is supplied after this Running allocation reaches Stable.
-    let mut passing = fact(
-        "alloc-svc-h",
-        AllocState::Running,
-        1_000,
-        None,
-        Some(ProbeStatus::Pass),
-        3,
-        Duration::from_secs(10),
-    );
-    passing.latest_startup_probe_observed_at =
-        Some(UnixInstant::from_unix_duration(Duration::from_secs(13)));
-    let (_pa1, pv1) = r.reconcile(
-        &ServiceLifecycleState::default(),
-        &one_alloc_state(failing),
-        &ServiceLifecycleView::default(),
-        &tick,
-    );
-    // Pass tick: counter reset to 0 AND state == Running + Pass ⇒ Stable.
-    let (pa2, pv2) =
-        r.reconcile(&ServiceLifecycleState::default(), &one_alloc_state(passing), &pv1, &tick);
-    assert_eq!(pa2.len(), 1, "Pass on a Running alloc fires Stable; got {pa2:?}");
-    assert!(
-        matches!(
-            &pa2[0],
-            Action::FinalizeFailed { terminal: Some(TerminalCondition::Stable { .. }), .. }
-        ),
-        "Pass after one Fail recovers to Stable, NOT StartupProbeFailed; got {pa2:?}"
-    );
-    assert!(
-        pv2.startup_attempts_per_alloc.get(&aid("alloc-svc-h")).copied().unwrap_or(0) == 0,
-        "Pass cleared the streak so StartupProbeFailed is prevented"
-    );
-    assert!(
-        !pv2.startup_last_fail_seen_at.contains_key(&aid("alloc-svc-h")),
-        "Pass also clears the last counted observation identity"
-    );
-}
-
 proptest! {
     /// Property: settled_in_ms (observable via Stable's TerminalCondition)
     /// equals now_ms.saturating_sub(started_at_ms). Kills mutants that
@@ -1262,8 +1046,8 @@ proptest! {
 
 // -------------------------------------------------------------------
 // E. Readiness branch (Slice 04 / step 03-01) — Backend.healthy is
-//    recomputed every tick from the readiness input + the live
-//    success_threshold + the View consecutive-Pass counter. These
+//    recomputed every tick from the latest producer row + the live
+//    success_threshold. These
 //    tests are CO-LOCATED in overdrive-core (not just the control-plane
 //    acceptance suite) so cargo-mutants `--package overdrive-core` kills
 //    the `compute_backend_healthy` / `readiness_backend_row_action`
@@ -1310,6 +1094,7 @@ fn readiness_fact(
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
+        probe_rows: BTreeMap::new(),
     }
 }
 
@@ -1326,18 +1111,26 @@ fn readiness_dataplane() -> overdrive_reconcilers::service_lifecycle::ServiceDat
 }
 
 fn readiness_state(facts: Vec<ServiceAllocFact>) -> ServiceLifecycleState {
-    let mut allocs = BTreeMap::new();
-    for f in facts {
-        allocs.insert(f.alloc_id.clone(), f);
-    }
-    ServiceLifecycleState {
-        allocs,
+    let mut state = ServiceLifecycleState {
         service_dataplane: BTreeMap::from([(
             overdrive_core::id::ServiceId::new(7).expect("service id"),
             readiness_dataplane(),
         )]),
-        observed_backend_rows: BTreeMap::new(),
+        ..ServiceLifecycleState::default()
+    };
+    for f in facts {
+        let alloc_id = f.alloc_id.clone();
+        let startup = f.latest_startup_probe.clone();
+        let readiness = f.latest_readiness_probe.clone();
+        state.allocs.insert(alloc_id.clone(), f);
+        if let Some(status) = startup {
+            put_probe_row(&mut state, &alloc_id, ProbeRole::Startup, status, 1, 1);
+        }
+        if let Some(status) = readiness {
+            put_probe_row(&mut state, &alloc_id, ProbeRole::Readiness, status, 1, 1);
+        }
     }
+    state
 }
 
 fn readiness_tick(now_ms: u64) -> TickContext {
@@ -1389,8 +1182,8 @@ proptest! {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(96))]
     // E2 — readiness Pass with success_threshold>1 ⇒ healthy iff the
-    // post-increment count reaches threshold. Pins the `>= threshold`
-    // comparison AND the `(latest==Pass) && (counter>=threshold)`
+    // producer row's streak reaches threshold. Pins the `>= threshold`
+    // comparison AND the `(latest==Pass) && (same_status_runs>=threshold)`
     // conjunction (both operands vary independently). Kills `&&→||`
     // and `>=→<`.
     /// CONTRACT_SHAPE: bounded-change.
@@ -1401,12 +1194,24 @@ proptest! {
     ) {
         let reconciler = ServiceLifecycleReconciler::new();
         let fact = readiness_fact(0, Some(ProbeStatus::Pass), true, threshold);
-        let key = (fact.alloc_id.clone(), overdrive_core::observation::ProbeIdx::new(0));
-        let mut view = ServiceLifecycleView::default();
-        view.readiness_consecutive_successes.insert(key, seed);
-        let state = readiness_state(vec![fact]);
-        let (actions, _v) = reconciler.reconcile(&state, &state, &view, &readiness_tick(100));
-        let expected = seed.saturating_add(1) >= threshold;
+        let alloc_id = fact.alloc_id.clone();
+        let mut state = readiness_state(vec![fact]);
+        let streak = seed.saturating_add(1);
+        put_probe_row(
+            &mut state,
+            &alloc_id,
+            ProbeRole::Readiness,
+            ProbeStatus::Pass,
+            u64::from(streak),
+            streak,
+        );
+        let (actions, _v) = reconciler.reconcile(
+            &state,
+            &state,
+            &ServiceLifecycleView::default(),
+            &readiness_tick(100),
+        );
+        let expected = streak >= threshold;
         prop_assert_eq!(single_backend_row_healthy(&actions), expected);
     }
 }
@@ -1525,21 +1330,8 @@ fn liveness_fact(
         latest_liveness_probe,
         has_liveness_probe: true,
         liveness_failure_threshold: failure_threshold,
+        probe_rows: BTreeMap::new(),
     }
-}
-
-/// Pre-seed the next-View's liveness counter so the post-update streak
-/// reaches the desired value WITHOUT requiring N separate Fail ticks
-/// (the reconciler increments once per tick on a Fail observation).
-/// `seed` is the counter BEFORE this tick's Fail observation, so a
-/// seed of `k` followed by one Fail observation yields `k + 1`.
-fn view_with_liveness_counter(alloc_id: &str, seed: u32) -> ServiceLifecycleView {
-    let mut v = ServiceLifecycleView::default();
-    if seed > 0 {
-        v.liveness_consecutive_failures
-            .insert((aid(alloc_id), overdrive_core::observation::ProbeIdx::new(0)), seed);
-    }
-    v
 }
 
 // -------------------------------------------------------------------
@@ -1566,19 +1358,27 @@ proptest! {
         failure_threshold in 1u32..=10,
     ) {
         let state = if running { AllocState::Running } else { AllocState::Pending };
-        // Seed to observed_failures - 1; this tick's Fail increments to observed_failures.
         let fact = liveness_fact(
             "svc-live-0",
             state,
             Some(ProbeStatus::Fail { last_fail_reason: "liveness refused".to_string() }),
             failure_threshold,
         );
-        let view = view_with_liveness_counter("svc-live-0", observed_failures - 1);
+        let alloc_id = fact.alloc_id.clone();
+        let mut actual = one_alloc_state(fact);
+        put_probe_row(
+            &mut actual,
+            &alloc_id,
+            ProbeRole::Liveness,
+            ProbeStatus::Fail { last_fail_reason: "liveness refused".to_string() },
+            u64::from(observed_failures),
+            observed_failures,
+        );
         let recon = ServiceLifecycleReconciler::new();
         let (actions, _next) = recon.reconcile(
             &ServiceLifecycleState::default(),
-            &one_alloc_state(fact),
-            &view,
+            &actual,
+            &ServiceLifecycleView::default(),
             &tick_at_ms(10_000),
         );
 
@@ -1621,85 +1421,53 @@ proptest! {
             prop_assert_eq!(stops.len(), 0, "no StopAllocation below threshold / non-Running; got {:?}", actions);
         }
     }
-
-    /// S-SHCP-RECON-10 (retained) — a Pass below threshold resets the
-    /// consecutive-failure counter to 0 and emits no terminate.
-    /// CONTRACT_SHAPE: bounded-change.
-    #[test]
-    fn liveness_recovery_resets_counter(
-        seed in 1u32..=5,
-        failure_threshold in 3u32..=10,
-    ) {
-        let fact = liveness_fact(
-            "svc-rec-0",
-            AllocState::Running,
-            Some(ProbeStatus::Pass),
-            failure_threshold,
-        );
-        let view = view_with_liveness_counter("svc-rec-0", seed);
-        let recon = ServiceLifecycleReconciler::new();
-        let (actions, next) = recon.reconcile(
-            &ServiceLifecycleState::default(),
-            &one_alloc_state(fact),
-            &view,
-            &tick_at_ms(10_000),
-        );
-        let key = ("svc-rec-0", overdrive_core::observation::ProbeIdx::new(0));
-        let counter = next
-            .liveness_consecutive_failures
-            .get(&(aid(key.0), key.1))
-            .copied()
-            .unwrap_or(0);
-        prop_assert_eq!(counter, 0, "a Pass resets the counter to 0");
-        prop_assert!(
-            !actions.iter().any(|a| matches!(a, Action::StopAllocation { .. })),
-            "recovery emits no StopAllocation; got {:?}", actions
-        );
-    }
 }
 
-/// S-ROH-A-09 (idempotency) — on a liveness terminate the
-/// consecutive-failure counter is CLEARED (reset-on-emit), so the next
-/// Running tick does not immediately re-terminate before probes re-fire.
+/// S-ROH-A-09 (idempotency) — on a liveness terminate the acted row's
+/// run sequence is recorded, so re-reading that same row does not emit a
+/// second terminate.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-fn liveness_terminate_resets_counter_on_emit() {
+fn liveness_terminate_records_run_and_same_row_does_not_reemit() {
     let recon = ServiceLifecycleReconciler::new();
-    // Tick 1: streak reaches threshold (3) → one StopAllocation, counter cleared.
+    // Tick 1: the producer row's streak reaches threshold (3) → one stop.
     let fact1 = liveness_fact(
         "svc-idem-0",
         AllocState::Running,
         Some(ProbeStatus::Fail { last_fail_reason: "refused".to_string() }),
         3,
     );
-    let view1 = view_with_liveness_counter("svc-idem-0", 2);
+    let alloc_id = fact1.alloc_id.clone();
+    let mut actual = one_alloc_state(fact1);
+    put_probe_row(
+        &mut actual,
+        &alloc_id,
+        ProbeRole::Liveness,
+        ProbeStatus::Fail { last_fail_reason: "refused".to_string() },
+        3,
+        3,
+    );
     let (actions1, next1) = recon.reconcile(
         &ServiceLifecycleState::default(),
-        &one_alloc_state(fact1),
-        &view1,
+        &actual,
+        &ServiceLifecycleView::default(),
         &tick_at_ms(10_000),
     );
     let stops1 = actions1.iter().filter(|a| matches!(a, Action::StopAllocation { .. })).count();
     assert_eq!(stops1, 1, "tick 1 emits exactly one StopAllocation; got {actions1:?}");
-    let key = (aid("svc-idem-0"), overdrive_core::observation::ProbeIdx::new(0));
+    let key = (aid("svc-idem-0"), ProbeIdx::new(0));
     assert_eq!(
-        next1.liveness_consecutive_failures.get(&key).copied().unwrap_or(0),
-        0,
-        "the counter is cleared on the liveness terminate (reset-on-emit)",
+        next1.liveness_last_acted_run.get(&key),
+        Some(&ProbeRunSeq::new(3).expect("fixture run sequence is non-zero")),
+        "the row acted on is recorded",
     );
 
-    // Tick 2: no fresh liveness observation yet (None). With the counter
-    // cleared, the predicate is false — no second terminate.
-    let fact2 = liveness_fact("svc-idem-0", AllocState::Running, None, 3);
-    let (actions2, _next2) = recon.reconcile(
-        &ServiceLifecycleState::default(),
-        &one_alloc_state(fact2),
-        &next1,
-        &tick_at_ms(11_000),
-    );
+    // Tick 2: no fresh row. Re-reading run 3 emits no second terminate.
+    let (actions2, _next2) =
+        recon.reconcile(&ServiceLifecycleState::default(), &actual, &next1, &tick_at_ms(11_000));
     assert!(
         !actions2.iter().any(|a| matches!(a, Action::StopAllocation { .. })),
-        "tick 2 emits no StopAllocation — the counter was reset and probes have not re-fired; got {actions2:?}",
+        "tick 2 emits no StopAllocation for the row already acted on; got {actions2:?}",
     );
 }
 
@@ -1941,17 +1709,21 @@ fn startup_probe_failed_suppresses_liveness_restart_same_tick() {
             Duration::from_secs(60),
         )
     };
-    // Pre-seed liveness counter to 2; this tick's Fail bumps it to 3 == threshold.
-    let view = view_with_liveness_counter(id, 2);
+    let mut actual = one_alloc_state(f);
+    put_probe_row(
+        &mut actual,
+        &aid(id),
+        ProbeRole::Liveness,
+        ProbeStatus::Fail { last_fail_reason: "liveness refused".to_string() },
+        3,
+        3,
+    );
+    let view = ServiceLifecycleView::default();
 
     let recon = ServiceLifecycleReconciler::new();
     // 61s after started_at=1s → elapsed=60s >= deadline=60s.
-    let (actions, next) = recon.reconcile(
-        &ServiceLifecycleState::default(),
-        &one_alloc_state(f),
-        &view,
-        &tick_at_ms(61_000),
-    );
+    let (actions, next) =
+        recon.reconcile(&ServiceLifecycleState::default(), &actual, &view, &tick_at_ms(61_000));
 
     let startup_failed = actions
         .iter()
@@ -2009,15 +1781,20 @@ fn stable_announced_suppresses_liveness_restart_same_tick() {
             Duration::from_secs(60),
         )
     };
-    let view = view_with_liveness_counter(id, 2);
+    let mut actual = one_alloc_state(f);
+    put_probe_row(
+        &mut actual,
+        &aid(id),
+        ProbeRole::Liveness,
+        ProbeStatus::Fail { last_fail_reason: "liveness refused".to_string() },
+        3,
+        3,
+    );
+    let view = ServiceLifecycleView::default();
 
     let recon = ServiceLifecycleReconciler::new();
-    let (actions, next) = recon.reconcile(
-        &ServiceLifecycleState::default(),
-        &one_alloc_state(f),
-        &view,
-        &tick_at_ms(10_000),
-    );
+    let (actions, next) =
+        recon.reconcile(&ServiceLifecycleState::default(), &actual, &view, &tick_at_ms(10_000));
 
     let stable = actions
         .iter()
@@ -2067,17 +1844,22 @@ fn liveness_resumes_after_prior_tick_stable_announcement() {
         )
     };
     // Prior tick already announced Stable (durable set) + observed.
-    let mut view = view_with_liveness_counter(id, 2);
+    let mut actual = one_alloc_state(f);
+    put_probe_row(
+        &mut actual,
+        &aid(id),
+        ProbeRole::Liveness,
+        ProbeStatus::Fail { last_fail_reason: "liveness refused".to_string() },
+        3,
+        3,
+    );
+    let mut view = ServiceLifecycleView::default();
     view.stable_announced.insert(aid(id));
     view.observed.insert(aid(id));
 
     let recon = ServiceLifecycleReconciler::new();
-    let (actions, _next) = recon.reconcile(
-        &ServiceLifecycleState::default(),
-        &one_alloc_state(f),
-        &view,
-        &tick_at_ms(20_000),
-    );
+    let (actions, _next) =
+        recon.reconcile(&ServiceLifecycleState::default(), &actual, &view, &tick_at_ms(20_000));
 
     // Startup loop skips (already in stable_announced — correct dedup);
     // liveness loop MUST resume and terminate on the met threshold.

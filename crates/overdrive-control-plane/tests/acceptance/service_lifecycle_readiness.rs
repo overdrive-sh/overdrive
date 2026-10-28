@@ -38,7 +38,9 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, Instant};
 
 use overdrive_core::id::{AllocationId, NodeId, ServiceId, ServiceVip, SpiffeId};
-use overdrive_core::observation::{ProbeIdx, ProbeStatus};
+use overdrive_core::observation::{
+    ProbeIdx, ProbeResultRow, ProbeRole, ProbeRunSeq, ProbeStatus, SameStatusRuns,
+};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
 use overdrive_core::traits::observation_store::AllocState;
 use overdrive_core::wall_clock::UnixInstant;
@@ -106,6 +108,7 @@ fn fact_with_readiness(
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
+        probe_rows: BTreeMap::new(),
     }
 }
 
@@ -134,22 +137,82 @@ fn fact_without_readiness(index: usize) -> ServiceAllocFact {
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
+        probe_rows: BTreeMap::new(),
     }
 }
 
 fn state_with(facts: Vec<ServiceAllocFact>) -> ServiceLifecycleState {
-    let mut allocs = BTreeMap::new();
-    for fact in facts {
-        allocs.insert(fact.alloc_id.clone(), fact);
-    }
-    ServiceLifecycleState {
-        allocs,
+    let mut state = ServiceLifecycleState {
         service_dataplane: BTreeMap::from([(
             ServiceId::new(42).expect("service id"),
             dataplane_identity(),
         )]),
-        observed_backend_rows: BTreeMap::new(),
+        ..ServiceLifecycleState::default()
+    };
+    for fact in facts {
+        let alloc_id = fact.alloc_id.clone();
+        let startup = fact.latest_startup_probe.clone();
+        let readiness = fact.latest_readiness_probe.clone();
+        state.allocs.insert(alloc_id.clone(), fact);
+        if let Some(status) = startup {
+            put_startup_row(&mut state, &alloc_id, status);
+        }
+        if let Some(status) = readiness {
+            put_readiness_row(&mut state, &alloc_id, status, 1, 1);
+        }
     }
+    state
+}
+
+fn put_readiness_row(
+    state: &mut ServiceLifecycleState,
+    alloc_id: &AllocationId,
+    status: ProbeStatus,
+    run_seq: u64,
+    same_status_runs: u32,
+) {
+    let probe_idx = ProbeIdx::new(0);
+    let fact = state.allocs.get_mut(alloc_id).expect("fixture allocation");
+    fact.latest_readiness_probe = Some(status.clone());
+    fact.probe_rows.insert(
+        (ProbeRole::Readiness, probe_idx),
+        ProbeResultRow {
+            alloc_id: alloc_id.clone(),
+            probe_idx,
+            role: ProbeRole::Readiness,
+            status,
+            last_observed_at_unix_ms: run_seq,
+            inferred: false,
+            run_seq: ProbeRunSeq::new(run_seq).expect("fixture run sequence is non-zero"),
+            same_status_runs: SameStatusRuns::new(same_status_runs)
+                .expect("fixture streak is non-zero"),
+        },
+    );
+}
+
+fn put_startup_row(
+    state: &mut ServiceLifecycleState,
+    alloc_id: &AllocationId,
+    status: ProbeStatus,
+) {
+    let probe_idx = ProbeIdx::new(0);
+    let fact = state.allocs.get_mut(alloc_id).expect("fixture allocation");
+    fact.latest_startup_probe = Some(status.clone());
+    fact.latest_startup_probe_observed_at =
+        Some(UnixInstant::from_unix_duration(Duration::from_millis(1)));
+    fact.probe_rows.insert(
+        (ProbeRole::Startup, probe_idx),
+        ProbeResultRow {
+            alloc_id: alloc_id.clone(),
+            probe_idx,
+            role: ProbeRole::Startup,
+            status,
+            last_observed_at_unix_ms: 1,
+            inferred: false,
+            run_seq: ProbeRunSeq::FIRST,
+            same_status_runs: SameStatusRuns::ONE,
+        },
+    );
 }
 
 /// Extract the single `WriteServiceBackendRow` from a reconcile's
@@ -176,14 +239,14 @@ fn assert_no_restart(actions: &[Action]) {
 }
 
 // S-SHCP-RECON-07 (US-04 / K2) — for every (backend count 1..=3) ×
-// (per-backend readiness ∈ {Pass, Fail}) × (seed consecutive_successes
+// (per-backend readiness ∈ {Pass, Fail}) × (producer streak
 // 0..=10), reconcile emits one WriteServiceBackendRow whose every
 // backend carries `healthy = (latest == Pass AND
-// consecutive_successes_after_this_tick >= success_threshold)`.
+// same_status_runs >= success_threshold)`.
 //
 // success_threshold = 1 (default), so a single Pass this tick is
 // sufficient. Universe = the emitted row's per-backend `healthy`
-// flags. The seed counter exercises the persisted-input read path.
+// flags. The generated streak exercises the producer-row input path.
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(96))]
     /// CONTRACT_SHAPE: bounded-change.
@@ -205,19 +268,31 @@ proptest! {
                 fact_with_readiness(i, Some(status), 1)
             })
             .collect();
-        // Seed the persisted consecutive-Pass counter for every alloc
-        // BEFORE moving `facts` into the state (avoids a redundant clone).
-        let mut view = ServiceLifecycleView::default();
-        for fact in &facts {
-            view
-                .readiness_consecutive_successes
-                .insert((fact.alloc_id.clone(), ProbeIdx::new(0)), seed_counter);
+        let mut actual = state_with(facts);
+        let streak = seed_counter.saturating_add(1);
+        for (i, &passes) in statuses.iter().enumerate() {
+            let status = if passes {
+                ProbeStatus::Pass
+            } else {
+                ProbeStatus::Fail { last_fail_reason: "conn refused".to_string() }
+            };
+            put_readiness_row(
+                &mut actual,
+                &alloc(&format!("svc-{i}")),
+                status,
+                u64::from(streak),
+                streak,
+            );
         }
-        let actual = state_with(facts);
         let desired = actual.clone();
         let tick = tick_at(2000);
 
-        let (actions, _next_view) = reconciler.reconcile(&desired, &actual, &view, &tick);
+        let (actions, _next_view) = reconciler.reconcile(
+            &desired,
+            &actual,
+            &ServiceLifecycleView::default(),
+            &tick,
+        );
         assert_no_restart(&actions);
         let backends = backend_row_backends(&actions);
 
@@ -225,8 +300,8 @@ proptest! {
         // Backends are emitted in BTreeMap iteration order; facts were
         // keyed `svc-0 .. svc-N` so index aligns with `statuses`.
         for (i, &passes) in statuses.iter().enumerate() {
-            // success_threshold = 1; on Pass the counter becomes
-            // seed+1 >= 1, so Pass ⇒ healthy. Fail ⇒ not healthy.
+            // success_threshold = 1; any Pass row's streak is at least one,
+            // so Pass ⇒ healthy. Fail ⇒ not healthy.
             prop_assert_eq!(
                 backends[i].healthy,
                 passes,
@@ -239,9 +314,9 @@ proptest! {
 
 // S-SHCP-RECON-07b (US-04 / ADR-0055 §6 success_threshold gate) — for
 // a readiness Pass with `success_threshold > 1`, the backend is healthy
-// THIS TICK iff the post-increment consecutive-Pass count reaches the
-// threshold: `healthy == (seed_counter + 1 >= success_threshold)`.
-// Universe = (seed consecutive_successes 0..=10) × (success_threshold
+// THIS TICK iff the producer row's streak reaches the threshold:
+// `healthy == (same_status_runs >= success_threshold)`.
+// Universe = (prior written Pass runs 0..=10) × (success_threshold
 // 2..=6). This pins the `>= success_threshold` comparison AND the
 // `latest == Pass AND counter >= threshold` conjunction (both operands
 // vary independently here, unlike the threshold-1 RECON-07 case where
@@ -256,22 +331,33 @@ proptest! {
     ) {
         let reconciler = ServiceLifecycleReconciler::new();
         let fact = fact_with_readiness(0, Some(ProbeStatus::Pass), success_threshold);
-        let key = (fact.alloc_id.clone(), ProbeIdx::new(0));
-        let mut view = ServiceLifecycleView::default();
-        view.readiness_consecutive_successes.insert(key, seed_counter);
-        let actual = state_with(vec![fact]);
+        let alloc_id = fact.alloc_id.clone();
+        let mut actual = state_with(vec![fact]);
+        let streak = seed_counter.saturating_add(1);
+        put_readiness_row(
+            &mut actual,
+            &alloc_id,
+            ProbeStatus::Pass,
+            u64::from(streak),
+            streak,
+        );
         let desired = actual.clone();
         let tick = tick_at(7000);
 
-        let (actions, _next_view) = reconciler.reconcile(&desired, &actual, &view, &tick);
+        let (actions, _next_view) = reconciler.reconcile(
+            &desired,
+            &actual,
+            &ServiceLifecycleView::default(),
+            &tick,
+        );
         assert_no_restart(&actions);
         let backends = backend_row_backends(&actions);
         prop_assert_eq!(backends.len(), 1);
-        let expected_healthy = seed_counter.saturating_add(1) >= success_threshold;
+        let expected_healthy = streak >= success_threshold;
         prop_assert_eq!(
             backends[0].healthy,
             expected_healthy,
-            "Pass with threshold {}: healthy iff (seed {} + 1) >= threshold",
+            "Pass with threshold {}: healthy iff producer streak ({} + 1) >= threshold",
             success_threshold,
             seed_counter
         );

@@ -7,7 +7,7 @@
 //! Additive variants per ADR-0037 §5.
 //!
 //! Per ADR-0055 §3 / DDD-5: `ServiceLifecycleView` carries
-//! **inputs only** (counters, sets) — the `Stable` predicate, the
+//! **inputs only** (sets and the liveness act-once row) — the `Stable` predicate, the
 //! readiness `healthy` gate, the liveness restart-trigger
 //! predicate, the deadline computations — ALL recomputed every
 //! tick against the live spec policy per
@@ -112,11 +112,9 @@ pub struct ServiceAllocFact {
     /// Latest-observed startup probe outcome at index 0. `None` if
     /// no probe result has yet been written for this alloc.
     pub latest_startup_probe: Option<ProbeStatus>,
-    /// Instant of the same latest Startup/index-0 observation as
-    /// [`Self::latest_startup_probe`]. This transient hydration input identifies
-    /// one durable LWW result so reconciliation counts it once rather than once
-    /// per tick. Hydration converts the observation row's persisted epoch
-    /// milliseconds at its adapter boundary.
+    /// Legacy hydration stamp retained for source compatibility with existing
+    /// fact fixtures. Probe-run counting reads the producer's typed
+    /// `same_status_runs` from the hydrated row instead of this timestamp.
     pub latest_startup_probe_observed_at: Option<UnixInstant>,
     /// Operator-spec-declared maximum number of startup probe
     /// attempts before `StartupProbeFailed` fires. Default per
@@ -150,9 +148,9 @@ pub struct ServiceAllocFact {
     ///
     /// Per `.claude/rules/development.md` § "Persist inputs, not
     /// derived state": this is the OBSERVED INPUT; `Backend.healthy`
-    /// is RECOMPUTED every tick from this status + the live
-    /// `success_threshold` + the consecutive-Pass counter in the
-    /// View. It is never a cached `healthy: bool`.
+    /// is RECOMPUTED every tick from this status, the producer's
+    /// `same_status_runs`, and the live `success_threshold`. It is never a
+    /// cached `healthy: bool`.
     pub latest_readiness_probe: Option<ProbeStatus>,
     /// `true` IFF this alloc declares at least one readiness probe.
     /// `false` → the backend is unconditionally `healthy = true`
@@ -179,13 +177,13 @@ pub struct ServiceAllocFact {
     /// Latest-observed liveness probe outcome at index 0. `None` when
     /// no liveness `ProbeResultRow` has yet been written for this alloc
     /// (no liveness observation this tick — neither a failure nor a
-    /// recovery; the consecutive-failure counter is left untouched).
+    /// recovery; the latest stored row remains unchanged).
     ///
     /// Per `.claude/rules/development.md` § "Persist inputs, not
     /// derived state": this is the OBSERVED INPUT. The restart-trigger
-    /// predicate is RECOMPUTED every tick from this status + the live
-    /// `liveness_failure_threshold` + the consecutive-failure counter
-    /// in the View. It is never a cached `should_restart: bool`.
+    /// predicate is RECOMPUTED every tick from this status, the producer's
+    /// `same_status_runs`, the live `liveness_failure_threshold`, and the
+    /// act-once row sequence. It is never a cached `should_restart: bool`.
     pub latest_liveness_probe: Option<ProbeStatus>,
     /// `true` IFF this alloc declares at least one liveness probe.
     /// `false` → the liveness branch is a no-op for this alloc (no
@@ -205,6 +203,13 @@ pub struct ServiceAllocFact {
     /// (the sole restart authority) owns the budget and rebuilds the
     /// restart spec from live intent.
     pub liveness_failure_threshold: u32,
+
+    /// Latest raw probe rows for this allocation, keyed by role and
+    /// per-role probe index. Hydration builds this transient input from the
+    /// same allocation-scoped observation snapshot as the retained status
+    /// projections (PROBE-RUN-COUNT).
+    #[doc(hidden)]
+    pub probe_rows: BTreeMap<(ProbeRole, ProbeIdx), ProbeResultRow>,
 }
 
 /// `ServiceLifecycleState` — typed projection of intent +
@@ -272,33 +277,11 @@ pub struct ServiceDataplaneIdentity {
 /// boundary.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServiceLifecycleView {
-    /// Per-alloc count of consecutive startup-probe attempts that
-    /// have not yet yielded a Pass.
-    pub startup_attempts_per_alloc: BTreeMap<AllocationId, u32>,
-
-    /// Per-`(alloc, probe_idx)` consecutive-failure counter for
-    /// liveness probes. Used to gate `RestartAllocation` per
-    /// US-05; reset to 0 on the first Pass per the recovery rule.
-    pub liveness_consecutive_failures: BTreeMap<(AllocationId, ProbeIdx), u32>,
-
-    /// Per-`(alloc, probe_idx)` consecutive-Pass counter for
-    /// readiness probes. Gates `Backend.healthy` per ADR-0055 §6
-    /// + P2-Q8: requires `success_threshold` consecutive Pass
-    ///   observations before flipping `healthy = true`.
-    pub readiness_consecutive_successes: BTreeMap<(AllocationId, ProbeIdx), u32>,
-
     /// Per-alloc set of allocs that have already had their Stable
     /// terminal condition announced. Used to dedup per-tick
     /// re-emission of Stable (per DDD-6: encoded as `BTreeSet`,
     /// NOT a flag on `TerminalCondition`, per ADR-0037 §5 layering).
     pub stable_announced: BTreeSet<AllocationId>,
-
-    /// Per-alloc wall-clock at which the most recent
-    /// startup-probe Fail was observed. Used to compute the
-    /// `startup_deadline` deadline at read time (not persisted —
-    /// the deadline IS derived state per the rule). Stored as
-    /// UNIX-epoch milliseconds.
-    pub startup_last_fail_seen_at: BTreeMap<AllocationId, u64>,
 
     /// GAP-9 — per-alloc set of allocs the reconciler has OBSERVED in
     /// a non-terminal state (i.e. it has begun watching the alloc's
@@ -351,10 +334,6 @@ pub struct ServiceLifecycleView {
     /// ADR-0191, act once per crossing: a terminate is emitted only on a
     /// newer row). An input, not a derived value; written only when a
     /// terminate is emitted. Absent ⇒ never terminated on this key.
-    // SCAFFOLD: true — netns-density-295 DISTILL; the read-time threshold
-    // rule that consumes and writes this field, and the removal of the
-    // three streak fields and `startup_last_fail_seen_at` it replaces, are
-    // DELIVER step 9.
     #[serde(default)]
     pub liveness_last_acted_run: BTreeMap<(AllocationId, ProbeIdx), ProbeRunSeq>,
 }
@@ -522,20 +501,6 @@ impl Reconciler for ServiceLifecycleReconciler {
             // runtime spinning.
             next_view.observed.insert(alloc_id.clone());
 
-            // GAP-10 — maintain the consecutive-startup-probe-fail
-            // counter that the StartupProbeFailed gate below reads (it was
-            // read-but-never-written, making the terminal unreachable and
-            // Shape B a failure-path busy-loop). See `update_startup_attempts`
-            // for the ADR-0057 §2 semantics; the terminal CONDITION is
-            // unchanged — only the `attempts` INPUT now moves.
-            update_startup_attempts(
-                &mut next_view.startup_attempts_per_alloc,
-                &mut next_view.startup_last_fail_seen_at,
-                alloc_id,
-                fact.latest_startup_probe.as_ref(),
-                fact.latest_startup_probe_observed_at,
-            );
-
             // Branch (a'): Empty-probes opt-out — operator declared
             // `[[health_check.startup]] = []` per ADR-0058 §4 /
             // ADR-0059 Q5. Operator's deliberate first-Running-IS-Stable
@@ -637,10 +602,13 @@ impl Reconciler for ServiceLifecycleReconciler {
 
             // Branch (b): StartupProbeFailed — attempts exhausted AND
             // deadline elapsed AND no Pass observed. Extracted into
-            // `startup_probe_failed_action` (terminal CONDITION verbatim);
-            // the `attempts` it reads is the post-`update_startup_attempts`
-            // value recorded above.
-            let attempts = next_view.startup_attempts_per_alloc.get(alloc_id).copied().unwrap_or(0);
+            // Startup attempts are the producer's observed streak on the
+            // latest written startup row. A missing row consumes no attempt.
+            let attempts = fact
+                .probe_rows
+                .get(&(ProbeRole::Startup, ProbeIdx::new(0)))
+                .filter(|row| matches!(&row.status, ProbeStatus::Fail { .. }))
+                .map_or(0, |row| row.same_status_runs.get());
             if let Some(action) =
                 startup_probe_failed_action(alloc_id, fact, attempts, tick.now_unix)
             {
@@ -878,9 +846,7 @@ fn latest_probe_row(
     role: ProbeRole,
     probe_idx: ProbeIdx,
 ) -> Option<&ProbeResultRow> {
-    rows.iter()
-        .filter(|p| p.role == role && p.probe_idx == probe_idx)
-        .max_by_key(|p| p.last_observed_at_unix_ms)
+    rows.iter().filter(|p| p.role == role && p.probe_idx == probe_idx).max_by_key(|p| p.run_seq)
 }
 
 /// Per-workload projection of every `AllocStatusRow` into `ServiceAllocFact`,
@@ -908,6 +874,10 @@ async fn hydrate_service_alloc_facts(
             .list_probe_results_for_alloc(&row.alloc_id)
             .await
             .map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
+        let probe_rows_by_key = probe_rows
+            .iter()
+            .map(|probe_row| ((probe_row.role, probe_row.probe_idx), probe_row.clone()))
+            .collect();
         let latest_startup_probe =
             latest_probe_row(&probe_rows, ProbeRole::Startup, ProbeIdx::new(0));
         let latest_readiness_probe =
@@ -944,6 +914,7 @@ async fn hydrate_service_alloc_facts(
             latest_liveness_probe: latest_liveness_probe.map(|row| row.status.clone()),
             has_liveness_probe,
             liveness_failure_threshold,
+            probe_rows: probe_rows_by_key,
         };
         allocs.insert(row.alloc_id, fact);
     }
@@ -991,8 +962,8 @@ async fn hydrate_service_lifecycle_actual(
     Ok(ServiceLifecycleState { allocs, service_dataplane, observed_backend_rows })
 }
 
-/// ADR-0087 D2 — walk every alloc declaring a liveness probe, maintain
-/// its consecutive-failure counter in the View, and emit a liveness
+/// ADR-0087 D2 / ADR-0191 — walk every alloc declaring a liveness probe,
+/// apply the producer-recorded streak, and emit a liveness
 /// TERMINATE (`StopAllocation { terminal: Stopped { by: LivenessProbe } }`)
 /// when the trigger predicate holds. `ServiceLifecycle` makes NO
 /// restart-vs-finalize decision and reads NO budget — the termination IS
@@ -1010,91 +981,38 @@ fn collect_liveness_actions(
         if next_view.terminal_announced.contains(alloc_id) || stable_this_tick.contains(alloc_id) {
             continue;
         }
-        // Idempotency (ADR-0087 D2): the counter reset-on-emit below,
-        // combined with the `state == Running` guard inside
-        // `liveness_terminate_action`, prevents a double-terminate while
-        // the shim's stop is in flight — once the row leaves Running the
-        // predicate is false, and after restart the fresh Running alloc
-        // starts with a clean counter. No `terminal_announced` marker is
-        // needed: a `StopAllocation` is not a terminal claim.
-        if let Some(action) = liveness_terminate_action(alloc_id, fact, next_view) {
+        let latest_row = fact.probe_rows.get(&(ProbeRole::Liveness, ProbeIdx::new(0)));
+        if let Some(action) = liveness_terminate_action(alloc_id, fact, latest_row, next_view) {
             actions.push(action);
         }
     }
 }
 
-/// ADR-0087 D2 — maintain the per-(alloc, probe_idx) liveness
-/// consecutive-failure counter (the View INPUT) and, when the
-/// recomputed liveness-threshold predicate holds this tick, emit a
-/// liveness TERMINATE. `ServiceLifecycle` is demoted to a liveness
-/// DETECTOR: it makes NO restart-vs-finalize decision, reads NO restart
-/// budget, and carries no `restart_count` / `restart_spec` — the
-/// termination IS the signal (kubelet shape), and `WorkloadLifecycle`
-/// (the sole restart authority) restarts the liveness-terminated row
-/// under its single budget.
-///
-/// Counter maintenance (mirrors the readiness consecutive-Pass shape,
-/// inverted for failures):
-/// - `Some(Fail)` → streak grows by one (saturating at `u32::MAX`).
-/// - `Some(Pass)` → recovery: streak resets to 0 (entry removed;
-///   absence == 0). Per S-SHCP-RECON-10 a Pass below threshold clears
-///   the counter and emits NO terminate.
-/// - `None` → no liveness observation this tick; leave the counter
-///   untouched.
-///
-/// Trigger predicate (recomputed every tick from the post-update
-/// counter + the live `failure_threshold`, never persisted):
-/// `state == Running AND consecutive_failures >= failure_threshold`.
-/// When it holds, emit exactly one
-/// `StopAllocation { terminal: Stopped { by: LivenessProbe } }` — the
-/// cause travels on the shared observed `AllocStatusRow.terminal`
-/// (ADR-0087 D3), never in a budget read or a restart-cause field.
-///
-/// Returns `None` when the alloc declares no liveness probe, or when
-/// the predicate does not hold (Running-but-below-threshold, recovery,
-/// non-Running state).
+/// ADR-0087 D2 / ADR-0191 — apply the producer-recorded liveness streak at
+/// read time. A crossed row emits at most once, keyed by its `run_seq`; a
+/// failed stop is retried on a newer crossed row while the allocation remains
+/// Running. `ServiceLifecycle` remains the detector and `WorkloadLifecycle`
+/// remains the restart authority.
 fn liveness_terminate_action(
     alloc_id: &AllocationId,
     fact: &ServiceAllocFact,
+    latest_row: Option<&ProbeResultRow>,
     next_view: &mut ServiceLifecycleView,
 ) -> Option<Action> {
     if !fact.has_liveness_probe {
         return None;
     }
-
+    let row = latest_row?;
+    let crossed = matches!(&row.status, ProbeStatus::Fail { .. })
+        && row.same_status_runs.get() >= fact.liveness_failure_threshold;
     let key = (alloc_id.clone(), ProbeIdx::new(0));
-    let consecutive_failures = match &fact.latest_liveness_probe {
-        Some(ProbeStatus::Fail { .. }) => {
-            let entry = next_view.liveness_consecutive_failures.entry(key.clone()).or_insert(0);
-            *entry = entry.saturating_add(1);
-            *entry
-        }
-        // Recovery (Pass) OR no observation yet → streak resets to 0.
-        // Removing the entry keeps the persisted map minimal
-        // (absence == 0) — per S-SHCP-RECON-10.
-        Some(ProbeStatus::Pass) => {
-            next_view.liveness_consecutive_failures.remove(&key);
-            0
-        }
-        None => next_view.liveness_consecutive_failures.get(&key).copied().unwrap_or(0),
-    };
-
-    // Predicate recomputed this tick from the counter INPUT + the live
-    // policy threshold. Below threshold OR not Running → no action.
-    let triggered = fact.state == AllocState::Running
-        && consecutive_failures >= fact.liveness_failure_threshold;
-    if !triggered {
+    let newer_than_last_action =
+        next_view.liveness_last_acted_run.get(&key).is_none_or(|last| row.run_seq > *last);
+    if fact.state != AllocState::Running || !crossed || !newer_than_last_action {
         return None;
     }
 
-    // Reset the consecutive-failure counter on emit (ADR-0087 D2,
-    // retained load-bearing). Combined with the `state == Running` guard
-    // above this prevents a double-terminate while the shim's stop is in
-    // flight: once the row leaves Running the predicate is false, and the
-    // restarted fresh alloc starts with a clean counter (no stale
-    // threshold-exceeding value re-firing a terminate on the first
-    // post-restart Running tick before probes have re-fired).
-    next_view.liveness_consecutive_failures.remove(&key);
+    next_view.liveness_last_acted_run.insert(key, row.run_seq);
 
     // The liveness TERMINATE. The cause travels on the observed row's
     // `terminal` (`Stopped { by: LivenessProbe }`); `WorkloadLifecycle`
@@ -1114,15 +1032,11 @@ fn liveness_terminate_action(
 ///   default — the service serves traffic the instant it is Stable,
 ///   S-SHCP-RECON-08b).
 /// - alloc HAS a readiness probe → `healthy = (latest_readiness == Pass
-///   AND consecutive_successes >= success_threshold)`. The
-///   consecutive-Pass counter is the View INPUT, incremented on Pass
-///   and reset to 0 on Fail (or no observation yet). Initial state
-///   (no Pass row yet) → counter 0 → `healthy = false`
+///   AND producer same_status_runs >= success_threshold)`. Initial state
+///   (no Pass row yet) → `healthy = false`
 ///   (S-SHCP-RECON-08c — avoids the inverse race).
 ///
-/// Mutates `next_view.readiness_consecutive_successes` in place (the
-/// persisted INPUT). Empty membership is still a desired empty row, while
-/// no current listener identities produces no managed row keys.
+/// The threshold is read from the latest producer row on every reconcile.
 fn service_backend_row_actions(
     actual: &ServiceLifecycleState,
     next_view: &mut ServiceLifecycleView,
@@ -1135,7 +1049,7 @@ fn service_backend_row_actions(
 
     // Readiness is an allocation-level policy. Compute it once per current
     // Running allocation, then reuse the result for every listener so adding
-    // listeners never multiplies the consecutive-Pass counter.
+    // listeners never multiplies the producer-row read.
     let mut healthy_by_alloc: BTreeMap<AllocationId, bool> = BTreeMap::new();
     for (alloc_id, fact) in &actual.allocs {
         if fact.state != AllocState::Running {
@@ -1203,12 +1117,15 @@ fn service_backend_row_actions(
     actions
 }
 
-/// Recompute one backend's `healthy` flag for the current tick and
-/// update the persisted consecutive-Pass counter INPUT in
-/// `next_view`. See [`service_backend_row_actions`] for the row projection
+/// Recompute one backend's `healthy` flag from the latest producer row at the
+/// current read. See [`service_backend_row_actions`] for the row projection
 /// contract.
+#[allow(
+    clippy::needless_pass_by_ref_mut,
+    reason = "ADR-0101 pins the existing four-argument helper shape; the retained mutable view parameter is no longer mutated after producer-row threshold relocation"
+)]
 fn compute_backend_healthy(
-    alloc_id: &AllocationId,
+    _alloc_id: &AllocationId,
     fact: &ServiceAllocFact,
     next_view: &mut ServiceLifecycleView,
     startup_failed_this_tick: bool,
@@ -1230,71 +1147,11 @@ fn compute_backend_healthy(
         return true;
     }
 
-    let key = (alloc_id.clone(), ProbeIdx::new(0));
-    let counter = match &fact.latest_readiness_probe {
-        Some(ProbeStatus::Pass) => {
-            // Consecutive-Pass streak grows by one this tick.
-            let entry = next_view.readiness_consecutive_successes.entry(key).or_insert(0);
-            *entry = entry.saturating_add(1);
-            *entry
-        }
-        // Fail OR no observation yet → streak resets to 0. Removing the
-        // entry keeps the persisted map minimal (absence == 0).
-        Some(ProbeStatus::Fail { .. }) | None => {
-            next_view.readiness_consecutive_successes.remove(&key);
-            0
-        }
+    let Some(row) = fact.probe_rows.get(&(ProbeRole::Readiness, ProbeIdx::new(0))) else {
+        return false;
     };
-
-    matches!(fact.latest_readiness_probe, Some(ProbeStatus::Pass))
-        && counter >= fact.readiness_success_threshold
-}
-
-/// GAP-10 — maintain the per-alloc consecutive-startup-probe-fail
-/// counter that the `StartupProbeFailed` gate reads.
-///
-/// Semantics per ADR-0057 §2 (`attempts` = CONSECUTIVE startup-probe
-/// failures):
-///
-/// - A new `Some(Fail)` LWW observation → increment by exactly 1 (saturating
-///   at `u32::MAX`); the unchanged observation leaves the count untouched.
-///   A legacy counter without its paired observed timestamp is reset to one
-///   for the current observation.
-/// - `Some(Pass)` → reset to 0 by removing the entry (recovery clears
-///   the streak; the alloc proceeds to Stable in branch (a)).
-/// - `None` → leave the map untouched (no probe observed this tick:
-///   neither a failure nor a recovery).
-///
-/// Extracted from `reconcile` so the per-alloc body stays under the
-/// `too_many_lines` budget and the increment/reset logic is unit-pinned
-/// indirectly through the reconcile branch tests.
-#[inline]
-fn update_startup_attempts(
-    counters: &mut BTreeMap<AllocationId, u32>,
-    last_fail_seen_at: &mut BTreeMap<AllocationId, u64>,
-    alloc_id: &AllocationId,
-    latest_startup_probe: Option<&ProbeStatus>,
-    latest_startup_probe_observed_at: Option<UnixInstant>,
-) {
-    match (latest_startup_probe, latest_startup_probe_observed_at) {
-        (Some(ProbeStatus::Fail { .. }), Some(observed_at)) => {
-            let observed_at_unix_ms =
-                u64::try_from(observed_at.as_unix_duration().as_millis()).unwrap_or(u64::MAX);
-            if counters.contains_key(alloc_id) && !last_fail_seen_at.contains_key(alloc_id) {
-                counters.insert(alloc_id.clone(), 1);
-                last_fail_seen_at.insert(alloc_id.clone(), observed_at_unix_ms);
-            } else if last_fail_seen_at.get(alloc_id).copied() != Some(observed_at_unix_ms) {
-                let counter = counters.entry(alloc_id.clone()).or_insert(0);
-                *counter = counter.saturating_add(1);
-                last_fail_seen_at.insert(alloc_id.clone(), observed_at_unix_ms);
-            }
-        }
-        (Some(ProbeStatus::Pass), _) => {
-            counters.remove(alloc_id);
-            last_fail_seen_at.remove(alloc_id);
-        }
-        _ => {}
-    }
+    matches!(&row.status, ProbeStatus::Pass)
+        && row.same_status_runs.get() >= fact.readiness_success_threshold
 }
 
 /// Branch (b) — StartupProbeFailed terminal action, or `None` when the
@@ -1302,9 +1159,8 @@ fn update_startup_attempts(
 ///
 /// The terminal CONDITION is unchanged from the inline branch it was
 /// extracted from: `attempts >= max_attempts && elapsed_ms >=
-/// deadline_ms && no_pass`. The `attempts` argument is the
-/// post-[`update_startup_attempts`] consecutive-fail count the caller
-/// recorded for this tick.
+/// deadline_ms && no_pass`. The `attempts` argument is the producer-recorded
+/// consecutive-fail count from the latest startup row.
 ///
 /// `started_at == None` means the alloc never reached Running — no
 /// probes ran to fail — so the branch is skipped (returns `None`).
@@ -1387,6 +1243,7 @@ fn elapsed_ms_from(now: UnixInstant, started_at: UnixInstant) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use overdrive_core::observation::SameStatusRuns;
     use proptest::prelude::*;
     use std::time::Instant;
 
@@ -1399,13 +1256,14 @@ mod tests {
 
         /// CONTRACT_SHAPE: pure-function.
         /// ADR-0101 policy complement: the terminal veto dominates readiness;
-        /// otherwise absent/Fail resets, Pass advances exactly once with
-        /// saturation, and no-readiness leaves every View input untouched.
+        /// otherwise the producer row's current streak is compared directly
+        /// with the threshold, and no-readiness leaves every View input
+        /// untouched.
         /// This is a pure policy truth table, not a claim that a seeded View is
         /// reachable. The composed Sim tests establish that separate premise.
         #[test]
         fn backend_policy_preserves_veto_threshold_and_unrelated_view_inputs(
-            count in prop_oneof![Just(0), Just(u32::MAX), any::<u32>()],
+            same_status_runs in prop_oneof![Just(1), Just(u32::MAX), 1_u32..=u32::MAX],
             threshold in prop_oneof![Just(1), Just(u32::MAX), 1_u32..=u32::MAX],
         ) {
             let alloc = AllocationId::new("policy-property").unwrap();
@@ -1413,7 +1271,7 @@ mod tests {
             for enabled in [false, true] {
                 for veto in [false, true] {
                     for status in [None, Some(ProbeStatus::Pass), Some(ProbeStatus::Fail { last_fail_reason: "refused".into() })] {
-                        let fact = ServiceAllocFact {
+                        let mut fact = ServiceAllocFact {
                             alloc_id: alloc.clone(), state: AllocState::Running,
                             started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
                             exit_code: None, latest_startup_probe: None,
@@ -1425,28 +1283,37 @@ mod tests {
                             backend_spiffe: SpiffeId::new("spiffe://overdrive.local/workload/policy/alloc/0").unwrap(),
                             backend_ip: "192.0.2.10".parse().unwrap(),
                             latest_liveness_probe: None, has_liveness_probe: false, liveness_failure_threshold: 3,
+                            probe_rows: BTreeMap::new(),
                         };
-                        let key = (alloc.clone(), ProbeIdx::new(0));
-                        let other_key = (unrelated.clone(), ProbeIdx::new(0));
-                        let mut actual = ServiceLifecycleView {
-                            readiness_consecutive_successes: BTreeMap::from([(key.clone(), count), (other_key, 7)]),
-                            ..ServiceLifecycleView::default()
-                        };
+                        let probe_idx = ProbeIdx::new(0);
+                        if let Some(status) = status.clone() {
+                            fact.probe_rows.insert(
+                                (ProbeRole::Readiness, probe_idx),
+                                ProbeResultRow {
+                                    alloc_id: alloc.clone(),
+                                    probe_idx,
+                                    role: ProbeRole::Readiness,
+                                    status,
+                                    last_observed_at_unix_ms: 1_000,
+                                    inferred: false,
+                                    run_seq: ProbeRunSeq::FIRST,
+                                    same_status_runs: SameStatusRuns::new(same_status_runs)
+                                        .expect("generated streak is non-zero"),
+                                },
+                            );
+                        }
+                        let mut actual = ServiceLifecycleView::default();
                         actual.terminal_announced.insert(unrelated.clone());
                         actual.stable_announced.insert(unrelated.clone());
                         actual.observed.insert(alloc.clone());
-                        let mut expected = actual.clone();
+                        let expected = actual.clone();
                         let passes = matches!(status, Some(ProbeStatus::Pass));
-                        let next = u32::try_from((u64::from(count) + 1).min(u64::from(u32::MAX))).unwrap();
                         let startup_gate_blocks = !fact.startup_probes_empty
                             && !expected.terminal_announced.is_empty()
                             && !matches!(fact.latest_startup_probe, Some(ProbeStatus::Pass));
-                        if enabled && !veto && !startup_gate_blocks {
-                            if passes { expected.readiness_consecutive_successes.insert(key.clone(), next); }
-                            else { expected.readiness_consecutive_successes.remove(&key); }
-                        }
                         let expected_healthy =
-                            !startup_gate_blocks && !veto && (!enabled || (passes && next >= threshold));
+                            !startup_gate_blocks && !veto
+                                && (!enabled || (passes && same_status_runs >= threshold));
                         let healthy = compute_backend_healthy(&alloc, &fact, &mut actual, veto);
                         prop_assert_eq!(healthy, expected_healthy);
                         prop_assert_eq!(actual, expected);
@@ -1454,57 +1321,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    /// CONTRACT_SHAPE: pure-function.
-    #[test]
-    fn startup_attempts_count_each_lww_failure_once_and_normalize_legacy_view() {
-        let alloc = AllocationId::new("startup-observation-accounting").expect("valid alloc id");
-        let failure = ProbeStatus::Fail { last_fail_reason: "refused".to_owned() };
-        let mut counters = BTreeMap::from([(alloc.clone(), 20)]);
-        let mut timestamps = BTreeMap::new();
-
-        let instant = |unix_ms| UnixInstant::from_unix_duration(Duration::from_millis(unix_ms));
-        update_startup_attempts(
-            &mut counters,
-            &mut timestamps,
-            &alloc,
-            Some(&failure),
-            Some(instant(100)),
-        );
-        assert_eq!(counters[&alloc], 1);
-        assert_eq!(timestamps[&alloc], 100);
-
-        update_startup_attempts(
-            &mut counters,
-            &mut timestamps,
-            &alloc,
-            Some(&failure),
-            Some(instant(100)),
-        );
-        assert_eq!(counters[&alloc], 1);
-
-        update_startup_attempts(
-            &mut counters,
-            &mut timestamps,
-            &alloc,
-            Some(&ProbeStatus::Pass),
-            Some(instant(101)),
-        );
-        assert!(counters.is_empty());
-        assert!(timestamps.is_empty());
-
-        for observed_at in [102, 103, 104] {
-            update_startup_attempts(
-                &mut counters,
-                &mut timestamps,
-                &alloc,
-                Some(&failure),
-                Some(instant(observed_at)),
-            );
-        }
-        assert_eq!(counters[&alloc], 3);
-        assert_eq!(timestamps[&alloc], 104);
     }
 
     /// CONTRACT_SHAPE: pure-function.
@@ -1534,6 +1350,7 @@ mod tests {
             latest_liveness_probe: None,
             has_liveness_probe: false,
             liveness_failure_threshold: 3,
+            probe_rows: BTreeMap::new(),
         };
         let actual = ServiceLifecycleState {
             allocs: BTreeMap::from([(alloc_id.clone(), fact)]),

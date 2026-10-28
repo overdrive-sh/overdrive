@@ -64,7 +64,7 @@
 //! Every named run that encodes a critical scenario is pinned with
 //! `#[quint_test(max_samples = 1)]` (a named run is deterministic: one
 //! sample replays it); `#[quint_run]` replays randomized traces (seed printed
-//! on failure). All are pending DELIVER step 9.
+//! on failure).
 
 #![allow(
     clippy::single_option_map,
@@ -368,7 +368,6 @@ enum ItfError {
     test = "HappyPathThreeFailsTerminateAtThreshold",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER step 9"]
 fn probe_count_happy_path_three_fails_terminate_at_threshold() -> impl Driver {
     ProbeCountDriver::new()
 }
@@ -381,7 +380,6 @@ fn probe_count_happy_path_three_fails_terminate_at_threshold() -> impl Driver {
     test = "CoalescedFailsTerminateOnFirstLook",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER step 9"]
 fn probe_count_coalesced_fails_terminate_on_first_look() -> impl Driver {
     ProbeCountDriver::new()
 }
@@ -395,7 +393,6 @@ fn probe_count_coalesced_fails_terminate_on_first_look() -> impl Driver {
     test = "MissingSampleChangesNothing",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER step 9"]
 fn probe_count_missing_sample_changes_nothing() -> impl Driver {
     ProbeCountDriver::new()
 }
@@ -408,7 +405,6 @@ fn probe_count_missing_sample_changes_nothing() -> impl Driver {
     test = "ReReadAfterFailedStopDoesNotReTerminate",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER step 9"]
 fn probe_count_re_read_after_failed_stop_does_not_re_terminate() -> impl Driver {
     ProbeCountDriver::new()
 }
@@ -422,7 +418,6 @@ fn probe_count_re_read_after_failed_stop_does_not_re_terminate() -> impl Driver 
     test = "FailedStopRetriedOnNextRow",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER step 9"]
 fn probe_count_failed_stop_retried_on_next_row() -> impl Driver {
     ProbeCountDriver::new()
 }
@@ -435,7 +430,6 @@ fn probe_count_failed_stop_retried_on_next_row() -> impl Driver {
     test = "NewStreakAfterPassTerminatesAgain",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER step 9"]
 fn probe_count_new_streak_after_pass_terminates_again() -> impl Driver {
     ProbeCountDriver::new()
 }
@@ -448,7 +442,6 @@ fn probe_count_new_streak_after_pass_terminates_again() -> impl Driver {
     test = "FlipBetweenLooksNoEarlyTerminate",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER step 9"]
 fn probe_count_flip_between_looks_no_early_terminate() -> impl Driver {
     ProbeCountDriver::new()
 }
@@ -461,7 +454,6 @@ fn probe_count_flip_between_looks_no_early_terminate() -> impl Driver {
     test = "ReadinessReachesThreshold",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER step 9"]
 fn probe_count_readiness_reaches_threshold() -> impl Driver {
     ProbeCountDriver::new()
 }
@@ -474,7 +466,6 @@ fn probe_count_readiness_reaches_threshold() -> impl Driver {
     test = "ClockStepBackDoesNotLoseRow",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER step 9"]
 fn probe_count_clock_step_back_does_not_lose_row() -> impl Driver {
     ProbeCountDriver::new()
 }
@@ -482,7 +473,6 @@ fn probe_count_clock_step_back_does_not_lose_row() -> impl Driver {
 /// Randomized `probe_streak_conf` traces against the production owners.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_run(spec = "../../specs/quint/probe-count/probe_count.qnt", main = "probe_streak_conf")]
-#[ignore = "pending DELIVER step 9"]
 fn probe_count_conformance_probe_streak_conf() -> impl Driver {
     ProbeCountDriver::new()
 }

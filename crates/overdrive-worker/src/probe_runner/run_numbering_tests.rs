@@ -269,7 +269,6 @@ proptest! {
     /// `DialPurpose::Probe` dial of the allocation's `workload_addr`.
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "pending DELIVER step 9"]
     fn every_written_run_counts_once_and_missing_samples_count_nothing(
         runs in proptest::collection::vec(arb_run(), 1..=8)
     ) {

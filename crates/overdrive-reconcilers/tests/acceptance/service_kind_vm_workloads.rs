@@ -13,7 +13,9 @@ use std::time::{Duration, Instant};
 use overdrive_core::aggregate::{Job, Vm, WorkloadDriver, WorkloadKind};
 use overdrive_core::guest_network::GuestAttachmentOccupancy;
 use overdrive_core::id::{NodeId, ServiceId, ServiceVip};
-use overdrive_core::observation::ProbeStatus;
+use overdrive_core::observation::{
+    ProbeIdx, ProbeResultRow, ProbeRole, ProbeRunSeq, ProbeStatus, SameStatusRuns,
+};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
 use overdrive_core::traits::GuestAttachmentObservation;
 use overdrive_core::traits::driver::Resources;
@@ -74,12 +76,55 @@ fn running_fact(
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
+        probe_rows: BTreeMap::new(),
     }
 }
 
 fn state_for(fact: ServiceAllocFact) -> ServiceLifecycleState {
     let alloc_id = fact.alloc_id.clone();
-    ServiceLifecycleState { allocs: BTreeMap::from([(alloc_id, fact)]), ..Default::default() }
+    let startup = fact.latest_startup_probe.clone();
+    let mut state = ServiceLifecycleState {
+        allocs: BTreeMap::from([(alloc_id.clone(), fact)]),
+        ..Default::default()
+    };
+    if let Some(status) = startup {
+        record_probe_run(&mut state, &alloc_id, ProbeRole::Startup, status, 1, 1);
+    }
+    state
+}
+
+fn record_probe_run(
+    state: &mut ServiceLifecycleState,
+    alloc_id: &AllocationId,
+    role: ProbeRole,
+    status: ProbeStatus,
+    run_seq: u64,
+    same_status_runs: u32,
+) {
+    let observed_at = UnixInstant::from_unix_duration(Duration::from_secs(run_seq));
+    let fact = state.allocs.get_mut(alloc_id).expect("allocation fact");
+    match role {
+        ProbeRole::Startup => {
+            fact.latest_startup_probe = Some(status.clone());
+            fact.latest_startup_probe_observed_at = Some(observed_at);
+        }
+        ProbeRole::Readiness => fact.latest_readiness_probe = Some(status.clone()),
+        ProbeRole::Liveness => fact.latest_liveness_probe = Some(status.clone()),
+    }
+    let probe_idx = ProbeIdx::new(0);
+    fact.probe_rows.insert(
+        (role, probe_idx),
+        ProbeResultRow {
+            alloc_id: alloc_id.clone(),
+            probe_idx,
+            role,
+            status,
+            last_observed_at_unix_ms: run_seq * 1_000,
+            inferred: false,
+            run_seq: ProbeRunSeq::new(run_seq).expect("run sequence is non-zero"),
+            same_status_runs: SameStatusRuns::new(same_status_runs).expect("streak is non-zero"),
+        },
+    );
 }
 
 fn service_dataplane() -> ServiceDataplaneIdentity {
@@ -99,11 +144,19 @@ fn service_dataplane() -> ServiceDataplaneIdentity {
 #[test]
 fn vm_startup_failure_leaves_running_owned_by_beacon_and_fails_only_startup() {
     let alloc_id = alloc_id();
-    let actual = state_for(running_fact(
+    let mut actual = state_for(running_fact(
         alloc_id.clone(),
         ProbeStatus::Fail { last_fail_reason: "guest TCP port 18081 refused".to_string() },
         1,
     ));
+    record_probe_run(
+        &mut actual,
+        &alloc_id,
+        ProbeRole::Startup,
+        ProbeStatus::Fail { last_fail_reason: "guest TCP port 18081 refused".to_string() },
+        1,
+        1,
+    );
 
     let (actions, next_view) = ServiceLifecycleReconciler::new().reconcile(
         &actual,
@@ -144,6 +197,14 @@ fn startup_probe_failure_vetoes_backend_eligibility_before_terminal_publication(
         ProbeStatus::Fail { last_fail_reason: "guest TCP port 18081 refused".to_string() },
         1,
     ));
+    record_probe_run(
+        &mut actual,
+        &alloc_id,
+        ProbeRole::Startup,
+        ProbeStatus::Fail { last_fail_reason: "guest TCP port 18081 refused".to_string() },
+        1,
+        1,
+    );
     actual.service_dataplane =
         BTreeMap::from([(ServiceId::new(42).expect("service id"), service_dataplane())]);
 
@@ -190,10 +251,18 @@ fn startup_probe_failure_vetoes_backend_eligibility_before_terminal_publication(
 
     let fresh_alloc = AllocationId::new("alloc-service-vm-e08-1").expect("valid allocation ID");
     let mut fresh = state_for(running_fact(
-        fresh_alloc,
+        fresh_alloc.clone(),
         ProbeStatus::Fail { last_fail_reason: "first observation".to_string() },
         2,
     ));
+    record_probe_run(
+        &mut fresh,
+        &fresh_alloc,
+        ProbeRole::Startup,
+        ProbeStatus::Fail { last_fail_reason: "first observation".to_string() },
+        1,
+        1,
+    );
     fresh.service_dataplane =
         BTreeMap::from([(ServiceId::new(42).expect("service id"), service_dataplane())]);
     let (fresh_actions, _) = ServiceLifecycleReconciler::new().reconcile(
@@ -218,7 +287,8 @@ fn startup_probe_failure_vetoes_backend_eligibility_before_terminal_publication(
 #[test]
 fn vm_startup_pass_changes_only_service_stable() {
     let alloc_id = alloc_id();
-    let actual = state_for(running_fact(alloc_id.clone(), ProbeStatus::Pass, 30));
+    let mut actual = state_for(running_fact(alloc_id.clone(), ProbeStatus::Pass, 30));
+    record_probe_run(&mut actual, &alloc_id, ProbeRole::Startup, ProbeStatus::Pass, 1, 1);
 
     let (actions, next_view) = ServiceLifecycleReconciler::new().reconcile(
         &actual,
@@ -242,8 +312,7 @@ fn vm_startup_pass_changes_only_service_stable() {
     ));
     assert!(next_view.stable_announced.contains(&alloc_id));
     assert!(next_view.terminal_announced.is_empty());
-    assert!(next_view.readiness_consecutive_successes.is_empty());
-    assert!(next_view.liveness_consecutive_failures.is_empty());
+    assert!(next_view.liveness_last_acted_run.is_empty());
 }
 
 /// S-SVM-20 — readiness 204 -> 503 -> 204 flips only
@@ -260,6 +329,7 @@ fn vm_readiness_flaps_only_backend_eligibility_and_recovers() {
         Some(ProbeStatus::Pass);
     actual.allocs.get_mut(&alloc_id).expect("allocation fact").has_readiness_probe = true;
     actual.allocs.get_mut(&alloc_id).expect("allocation fact").readiness_success_threshold = 1;
+    record_probe_run(&mut actual, &alloc_id, ProbeRole::Readiness, ProbeStatus::Pass, 1, 1);
 
     let reconciler = ServiceLifecycleReconciler::new();
     assert_eq!(
@@ -283,8 +353,14 @@ fn vm_readiness_flaps_only_backend_eligibility_and_recovers() {
     assert_eq!(initial_row.vip, Ipv4Addr::new(10, 96, 0, 42));
     actual.observed_backend_rows.insert(service_id, initial_row.clone());
 
-    actual.allocs.get_mut(&alloc_id).expect("allocation fact").latest_readiness_probe =
-        Some(ProbeStatus::Fail { last_fail_reason: "HTTP status 503".to_string() });
+    record_probe_run(
+        &mut actual,
+        &alloc_id,
+        ProbeRole::Readiness,
+        ProbeStatus::Fail { last_fail_reason: "HTTP status 503".to_string() },
+        2,
+        1,
+    );
     let (withdraw_actions, unready_view) =
         reconciler.reconcile(&actual, &actual, &stable_view, &tick(16));
 
@@ -293,7 +369,7 @@ fn vm_readiness_flaps_only_backend_eligibility_and_recovers() {
     assert_eq!(withdrawn_row.backends[0].alloc, initial_row.backends[0].alloc);
     assert_eq!(actual.allocs[&alloc_id].state, AllocState::Running);
     assert!(unready_view.stable_announced.contains(&alloc_id));
-    assert!(unready_view.readiness_consecutive_successes.is_empty());
+    assert!(unready_view.liveness_last_acted_run.is_empty());
     assert!(!has_restart(&withdraw_actions));
     assert!(!withdraw_actions.iter().any(|action| matches!(
         action,
@@ -301,8 +377,7 @@ fn vm_readiness_flaps_only_backend_eligibility_and_recovers() {
     )));
     actual.observed_backend_rows.insert(service_id, withdrawn_row.clone());
 
-    actual.allocs.get_mut(&alloc_id).expect("allocation fact").latest_readiness_probe =
-        Some(ProbeStatus::Pass);
+    record_probe_run(&mut actual, &alloc_id, ProbeRole::Readiness, ProbeStatus::Pass, 3, 1);
     let (restore_actions, ready_view) =
         reconciler.reconcile(&actual, &actual, &unready_view, &tick(17));
 
@@ -311,7 +386,7 @@ fn vm_readiness_flaps_only_backend_eligibility_and_recovers() {
     assert_eq!(restored_row.backends[0].alloc, initial_row.backends[0].alloc);
     assert_eq!(actual.allocs[&alloc_id].state, AllocState::Running);
     assert!(ready_view.stable_announced.contains(&alloc_id));
-    assert_eq!(ready_view.readiness_consecutive_successes.len(), 1);
+    assert!(ready_view.liveness_last_acted_run.is_empty());
     assert!(!has_restart(&restore_actions));
     assert!(!restore_actions.iter().any(|action| matches!(
         action,
@@ -411,8 +486,8 @@ fn workload_states(
 }
 
 /// S-SVM-21A — the liveness threshold makes `ServiceLifecycle` emit only the
-/// existing liveness `StopAllocation`; success before threshold resets the
-/// counter.
+/// existing liveness `StopAllocation`; a success before threshold starts a
+/// new producer-recorded failure streak.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn vm_liveness_threshold_emits_only_the_existing_liveness_stop() {
@@ -428,36 +503,71 @@ fn vm_liveness_threshold_emits_only_the_existing_liveness_stop() {
     )));
 
     let mut observed = actual.clone();
-    observed.allocs.get_mut(&alloc_id).expect("allocation fact").latest_liveness_probe =
-        Some(ProbeStatus::Fail { last_fail_reason: "HTTP status 503".to_string() });
+    record_probe_run(
+        &mut observed,
+        &alloc_id,
+        ProbeRole::Liveness,
+        ProbeStatus::Fail { last_fail_reason: "HTTP status 503".to_string() },
+        1,
+        1,
+    );
     let (first_fail, first_fail_view) =
         reconciler.reconcile(&observed, &observed, &view, &tick(16));
     assert!(first_fail.is_empty(), "one liveness failure is below the threshold");
     view = first_fail_view;
 
+    record_probe_run(
+        &mut observed,
+        &alloc_id,
+        ProbeRole::Liveness,
+        ProbeStatus::Fail { last_fail_reason: "HTTP status 503".to_string() },
+        2,
+        2,
+    );
     let (second_fail, second_fail_view) =
         reconciler.reconcile(&observed, &observed, &view, &tick(17));
     assert!(second_fail.is_empty(), "two liveness failures are below the threshold");
     view = second_fail_view;
 
-    observed.allocs.get_mut(&alloc_id).expect("allocation fact").latest_liveness_probe =
-        Some(ProbeStatus::Pass);
+    record_probe_run(&mut observed, &alloc_id, ProbeRole::Liveness, ProbeStatus::Pass, 3, 1);
     let (recovered, recovered_view) = reconciler.reconcile(&observed, &observed, &view, &tick(18));
     assert!(recovered.is_empty(), "a liveness Pass resets without stopping the allocation");
-    assert!(recovered_view.liveness_consecutive_failures.is_empty());
+    assert!(recovered_view.liveness_last_acted_run.is_empty());
     view = recovered_view;
 
-    observed.allocs.get_mut(&alloc_id).expect("allocation fact").latest_liveness_probe =
-        Some(ProbeStatus::Fail { last_fail_reason: "HTTP status 503".to_string() });
+    record_probe_run(
+        &mut observed,
+        &alloc_id,
+        ProbeRole::Liveness,
+        ProbeStatus::Fail { last_fail_reason: "HTTP status 503".to_string() },
+        4,
+        1,
+    );
     let (new_first_fail, new_first_fail_view) =
         reconciler.reconcile(&observed, &observed, &view, &tick(19));
     assert!(new_first_fail.is_empty(), "the recovered streak starts at one");
     view = new_first_fail_view;
+    record_probe_run(
+        &mut observed,
+        &alloc_id,
+        ProbeRole::Liveness,
+        ProbeStatus::Fail { last_fail_reason: "HTTP status 503".to_string() },
+        5,
+        2,
+    );
     let (new_second_fail, new_second_fail_view) =
         reconciler.reconcile(&observed, &observed, &view, &tick(20));
     assert!(new_second_fail.is_empty(), "the recovered streak is still below threshold");
     view = new_second_fail_view;
 
+    record_probe_run(
+        &mut observed,
+        &alloc_id,
+        ProbeRole::Liveness,
+        ProbeStatus::Fail { last_fail_reason: "HTTP status 503".to_string() },
+        6,
+        3,
+    );
     let (threshold_actions, threshold_view) =
         reconciler.reconcile(&observed, &observed, &view, &tick(21));
     assert_eq!(threshold_actions.len(), 1, "threshold emits only one existing liveness stop");
@@ -468,7 +578,10 @@ fn vm_liveness_threshold_emits_only_the_existing_liveness_stop() {
             terminal: Some(TerminalCondition::Stopped { by: StoppedBy::LivenessProbe }),
         } if action_alloc_id == &alloc_id
     ));
-    assert!(threshold_view.liveness_consecutive_failures.is_empty());
+    assert_eq!(
+        threshold_view.liveness_last_acted_run.get(&(alloc_id.clone(), ProbeIdx::new(0))),
+        Some(&ProbeRunSeq::new(6).expect("run sequence is non-zero")),
+    );
     assert_eq!(observed.allocs[&alloc_id].state, AllocState::Running);
     assert!(!has_restart(&threshold_actions));
     assert!(

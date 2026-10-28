@@ -27,9 +27,10 @@
 //! # LWW merge
 //!
 //! On receive (whether a local write or a gossip delivery), the peer
-//! compares the incoming row's `updated_at` (alloc-status) or
-//! `last_heartbeat` (node-health) against the current index entry via
-//! the shared comparator [`LogicalTimestamp::dominates`] in
+//! compares the incoming row's `updated_at` (alloc-status),
+//! `last_heartbeat` (node-health), or producer `run_seq` (probe-result)
+//! against the current index entry via the appropriate comparator
+//! (`LogicalTimestamp::dominates` for timestamped rows) in
 //! `overdrive-core`. Full rows only: losers are dropped wholesale and
 //! NEVER fan out on the broadcast channel; winners replace the prior
 //! row wholesale. No field-diff merge is ever applied (§4 guardrail).
@@ -125,8 +126,8 @@ struct PeerState {
     /// `probe_results` LWW index — keyed on
     /// `(alloc_id, role, probe_idx)` per ADR-0054 §5 as amended by
     /// ADR-0080 § D2. One row per `(alloc_id, role, probe_idx)`
-    /// carrying the latest observed outcome; LWW resolution on
-    /// `last_observed_at_unix_ms`.
+    /// carrying the latest observed outcome; LWW resolution on the
+    /// producer's `run_seq` (`last_observed_at_unix_ms` is informational).
     ///
     /// `role` is load-bearing in the key, exactly as in the byte-keyed
     /// `LocalObservationStore`: `probe_idx` is 0-indexed within its
@@ -514,9 +515,9 @@ impl PeerState {
 
     /// LWW merge for `probe_results`. Keyed on
     /// `(alloc_id, role, probe_idx)` per ADR-0054 §5 as amended by
-    /// ADR-0080 § D2. Strictly-dominate on
-    /// `last_observed_at_unix_ms` — equal timestamps are no-ops
-    /// (idempotent re-write).
+    /// ADR-0080 § D2. Strictly-dominate on the producer's `run_seq` —
+    /// equal sequences are no-ops (idempotent re-write), and observation
+    /// time is informational only.
     fn apply_probe_result(&self, incoming: &ProbeResultRow) -> bool {
         let key = (incoming.alloc_id.clone(), incoming.role, incoming.probe_idx);
         let mut by_pr = self.by_probe_results.lock();
@@ -525,9 +526,7 @@ impl PeerState {
                 by_pr.insert(key, incoming.clone());
                 true
             }
-            Some(existing)
-                if incoming.last_observed_at_unix_ms > existing.last_observed_at_unix_ms =>
-            {
+            Some(existing) if incoming.run_seq > existing.run_seq => {
                 by_pr.insert(key, incoming.clone());
                 true
             }

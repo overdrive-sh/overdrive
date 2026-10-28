@@ -384,6 +384,7 @@ async fn runtime_skips_write_through_when_service_map_hydrator_view_equals_in_me
 #[tokio::test]
 async fn runtime_skips_write_through_when_service_lifecycle_view_equals_in_memory() {
     use overdrive_core::id::AllocationId;
+    use overdrive_core::observation::{ProbeIdx, ProbeRunSeq};
     use overdrive_reconcilers::service_lifecycle::{
         ServiceLifecycleReconciler, ServiceLifecycleView,
     };
@@ -404,7 +405,10 @@ async fn runtime_skips_write_through_when_service_lifecycle_view_equals_in_memor
     // (bypasses the very `persist_view` gate this test asserts on).
     let mut seeded = ServiceLifecycleView::default();
     let alloc_id = AllocationId::new("alloc-svc-0").expect("valid AllocationId");
-    seeded.startup_attempts_per_alloc.insert(alloc_id.clone(), 3);
+    let key = (alloc_id, ProbeIdx::new(0));
+    seeded
+        .liveness_last_acted_run
+        .insert(key.clone(), ProbeRunSeq::new(3).expect("non-zero run sequence"));
     runtime.seed_service_lifecycle_view_for_test(&t, seeded.clone());
 
     // Reset the counter — `register` calls `probe()` which itself
@@ -435,7 +439,9 @@ async fn runtime_skips_write_through_when_service_lifecycle_view_equals_in_memor
     //     Pinning this in the same test prevents the dual regression
     //     where the gate short-circuits on every call.
     let mut changed = seeded.clone();
-    changed.startup_attempts_per_alloc.insert(alloc_id, 4);
+    changed
+        .liveness_last_acted_run
+        .insert(key, ProbeRunSeq::new(4).expect("non-zero run sequence"));
     runtime
         .apply_next_service_lifecycle_view_for_test(&n, &t, changed.clone())
         .await

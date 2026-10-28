@@ -507,6 +507,7 @@ fn unix_ms_from_clock(clock: &dyn Clock) -> u64 {
 /// silently.
 #[allow(
     clippy::too_many_arguments,
+    clippy::too_many_lines,
     reason = "per-mechanic prober dispatch needs each injected adapter (tcp + http) plus the clock, store, and per-tick identity; bundling them into a struct would hide the explicit-injection contract the call sites rely on"
 )]
 async fn probe_tick(
@@ -521,79 +522,111 @@ async fn probe_tick(
     run_state: &mut ProbeRunState,
 ) -> Result<Option<ProbeResultRow>, ProbeRunnerError> {
     let timeout = Duration::from_secs(u64::from(descriptor.timeout_seconds));
-    let outcome = match &descriptor.mechanic {
-        ProbeMechanic::Tcp { host, port } => {
-            let host = http_probe_host(Some(host.as_str()));
-            match (guest_dial, guest_probe_target(host, *port)) {
-                (Some(guest_dial), Some(target)) => {
-                    match tokio::time::timeout(timeout, guest_dial.dial(target, DialPurpose::Probe))
-                        .await
-                    {
-                        Err(_) => {
-                            ProbeOutcome::Fail { reason: format!("timeout after {timeout:?}") }
-                        }
-                        Ok(Ok(stream)) => {
-                            drop(stream);
-                            ProbeOutcome::Pass
-                        }
-                        Ok(Err(GuestDialError::Capacity | GuestDialError::Quiesced)) => {
-                            return Ok(None);
-                        }
-                        Ok(Err(error)) => ProbeOutcome::Fail { reason: error.as_str().to_owned() },
-                    }
-                }
-                _ => tcp_prober.probe(host, *port, timeout).await.map_err(|err| {
-                    ProbeRunnerError::ProbeAdapterFailed {
-                        alloc_id: alloc_id.clone(),
-                        probe_idx,
-                        source: err,
-                    }
-                })?,
-            }
-        }
-        ProbeMechanic::Http { path, port, host } => {
-            // Host defaults to loopback for single-node Phase 1 when
-            // omitted at parse time (carried as `None`). The bind-side
-            // wildcard `0.0.0.0` is translated to the reachable
-            // loopback address, mirroring the TCP-probe host contract.
-            let host = http_probe_host(host.as_deref());
-            let url = format!("http://{host}:{port}{path}");
-            match (guest_dial, guest_probe_target(host, *port)) {
-                (Some(guest_dial), Some(target)) => {
-                    let request =
-                        http_prober::build_guest_probe_request(&url).map_err(|source| {
-                            ProbeRunnerError::ProbeAdapterFailed {
-                                alloc_id: alloc_id.clone(),
-                                probe_idx,
-                                source,
-                            }
-                        })?;
-                    match tokio::time::timeout(timeout, async {
-                        let stream = guest_dial.dial(target, DialPurpose::Probe).await?;
-                        Ok::<_, GuestDialError>(
-                            http_prober::probe_guest_stream(stream, request).await,
+    let mut no_sample_reason = None;
+    let outcome_result: Result<Option<ProbeOutcome>, ProbeRunnerError> = async {
+        let outcome = match &descriptor.mechanic {
+            ProbeMechanic::Tcp { host, port } => {
+                let host = http_probe_host(Some(host.as_str()));
+                match (guest_dial, guest_probe_target(host, *port)) {
+                    (Some(guest_dial), Some(target)) => {
+                        match tokio::time::timeout(
+                            timeout,
+                            guest_dial.dial(target, DialPurpose::Probe),
                         )
-                    })
-                    .await
-                    {
-                        Err(_) => {
-                            ProbeOutcome::Fail { reason: format!("timeout after {timeout:?}") }
+                        .await
+                        {
+                            Err(_) => {
+                                ProbeOutcome::Fail { reason: format!("timeout after {timeout:?}") }
+                            }
+                            Ok(Ok(stream)) => {
+                                drop(stream);
+                                ProbeOutcome::Pass
+                            }
+                            Ok(Err(
+                                error @ (GuestDialError::Capacity | GuestDialError::Quiesced),
+                            )) => {
+                                no_sample_reason = Some(guest_dial_error_reason(&error));
+                                return Ok(None);
+                            }
+                            Ok(Err(error)) => {
+                                ProbeOutcome::Fail { reason: error.as_str().to_owned() }
+                            }
                         }
-                        Ok(Ok(outcome)) => outcome,
-                        Ok(Err(GuestDialError::Capacity | GuestDialError::Quiesced)) => {
-                            return Ok(None);
-                        }
-                        Ok(Err(error)) => ProbeOutcome::Fail { reason: error.as_str().to_owned() },
                     }
+                    _ => tcp_prober.probe(host, *port, timeout).await.map_err(|err| {
+                        ProbeRunnerError::ProbeAdapterFailed {
+                            alloc_id: alloc_id.clone(),
+                            probe_idx,
+                            source: err,
+                        }
+                    })?,
                 }
-                _ => http_prober.probe(&url, timeout).await.map_err(|source| {
-                    ProbeRunnerError::ProbeAdapterFailed {
-                        alloc_id: alloc_id.clone(),
-                        probe_idx,
-                        source,
-                    }
-                })?,
             }
+            ProbeMechanic::Http { path, port, host } => {
+                // Host defaults to loopback for single-node Phase 1 when
+                // omitted at parse time (carried as `None`). The bind-side
+                // wildcard `0.0.0.0` is translated to the reachable
+                // loopback address, mirroring the TCP-probe host contract.
+                let host = http_probe_host(host.as_deref());
+                let url = format!("http://{host}:{port}{path}");
+                match (guest_dial, guest_probe_target(host, *port)) {
+                    (Some(guest_dial), Some(target)) => {
+                        let request =
+                            http_prober::build_guest_probe_request(&url).map_err(|source| {
+                                ProbeRunnerError::ProbeAdapterFailed {
+                                    alloc_id: alloc_id.clone(),
+                                    probe_idx,
+                                    source,
+                                }
+                            })?;
+                        match tokio::time::timeout(timeout, async {
+                            let stream = guest_dial.dial(target, DialPurpose::Probe).await?;
+                            Ok::<_, GuestDialError>(
+                                http_prober::probe_guest_stream(stream, request).await,
+                            )
+                        })
+                        .await
+                        {
+                            Err(_) => {
+                                ProbeOutcome::Fail { reason: format!("timeout after {timeout:?}") }
+                            }
+                            Ok(Ok(outcome)) => outcome,
+                            Ok(Err(
+                                error @ (GuestDialError::Capacity | GuestDialError::Quiesced),
+                            )) => {
+                                no_sample_reason = Some(guest_dial_error_reason(&error));
+                                return Ok(None);
+                            }
+                            Ok(Err(error)) => {
+                                ProbeOutcome::Fail { reason: error.as_str().to_owned() }
+                            }
+                        }
+                    }
+                    _ => http_prober.probe(&url, timeout).await.map_err(|source| {
+                        ProbeRunnerError::ProbeAdapterFailed {
+                            alloc_id: alloc_id.clone(),
+                            probe_idx,
+                            source,
+                        }
+                    })?,
+                }
+            }
+        };
+        Ok(Some(outcome))
+    }
+    .await;
+
+    let outcome = match outcome_result {
+        Ok(Some(outcome)) => outcome,
+        Ok(None) => {
+            let reason = no_sample_reason
+                .unwrap_or_else(|| unreachable!("a no-sample result always records its reason"));
+            emit_not_sampled(alloc_id, descriptor, reason, None);
+            return Ok(None);
+        }
+        Err(error) => {
+            emit_not_sampled(alloc_id, descriptor, "adapter_error", Some(error.to_string()));
+            return Err(error);
         }
     };
     let status = match outcome {
@@ -601,6 +634,7 @@ async fn probe_tick(
         ProbeOutcome::Fail { reason } => ProbeStatus::Fail { last_fail_reason: reason },
     };
     let last_observed_at_unix_ms = unix_ms_from_clock(clock);
+    let same_status_runs = run_state.next_streak(&status);
     let row = ProbeResultRow {
         alloc_id: alloc_id.clone(),
         probe_idx,
@@ -608,27 +642,31 @@ async fn probe_tick(
         status,
         last_observed_at_unix_ms,
         inferred: descriptor.inferred,
-        // STEP 12-01 carries the minimum sequence required to distinguish
-        // successfully written guest-dial runs. Full producer streak handling
-        // remains with STEP 13-02.
         run_seq: run_state.next_run(),
-        // SCAFFOLD: true — PROBE-RUN-COUNT's same-status streak is DELIVER 13-02.
-        same_status_runs: SameStatusRuns::ONE,
+        same_status_runs,
     };
-    observation_store.write_probe_result(row.clone()).await.map_err(|err| {
-        ProbeRunnerError::ObservationWriteFailed {
+    if let Err(source) = observation_store.write_probe_result(row.clone()).await {
+        let error = ProbeRunnerError::ObservationWriteFailed {
             alloc_id: alloc_id.clone(),
             probe_idx,
-            source: err,
-        }
-    })?;
-    run_state.record_written(row.run_seq);
+            source,
+        };
+        emit_not_sampled(alloc_id, descriptor, "write_failed", Some(error.to_string()));
+        return Err(error);
+    }
+    run_state.record_written(row.run_seq, &row.status);
     Ok(Some(row))
 }
 
+#[allow(
+    clippy::struct_field_names,
+    reason = "the three fields retain the producer run-state vocabulary used by the PROBE-RUN-COUNT contract"
+)]
 #[derive(Default)]
 struct ProbeRunState {
     last_written: Option<ProbeRunSeq>,
+    last_status_was_fail: Option<bool>,
+    last_same_status_runs: Option<SameStatusRuns>,
 }
 
 impl ProbeRunState {
@@ -636,8 +674,69 @@ impl ProbeRunState {
         self.last_written.map_or(ProbeRunSeq::FIRST, ProbeRunSeq::succ)
     }
 
-    const fn record_written(&mut self, run_seq: ProbeRunSeq) {
+    fn next_streak(&self, status: &ProbeStatus) -> SameStatusRuns {
+        let status_was_fail = matches!(status, ProbeStatus::Fail { .. });
+        if self.last_status_was_fail == Some(status_was_fail) {
+            self.last_same_status_runs
+                .unwrap_or_else(|| unreachable!("a remembered status has a remembered streak"))
+                .succ()
+        } else {
+            SameStatusRuns::ONE
+        }
+    }
+
+    fn record_written(&mut self, run_seq: ProbeRunSeq, status: &ProbeStatus) {
+        let streak = self.next_streak(status);
         self.last_written = Some(run_seq);
+        self.last_status_was_fail = Some(matches!(status, ProbeStatus::Fail { .. }));
+        self.last_same_status_runs = Some(streak);
+    }
+}
+
+/// Emit the one operator-visible diagnostic for a probe run that wrote no
+/// row. The event is deliberately emitted at the point where the no-row
+/// outcome is known, so failed writes and adapter failures cannot be mistaken
+/// for ordinary probe failures.
+#[allow(
+    clippy::single_match_else,
+    reason = "both diagnostic arms use the same structured event with the optional detail field; the explicit match keeps the emitted field set auditable"
+)]
+fn emit_not_sampled(
+    alloc_id: &AllocationId,
+    descriptor: &ProbeDescriptor,
+    reason: &'static str,
+    detail: Option<String>,
+) {
+    match detail {
+        Some(detail) => tracing::warn!(
+            name: "probe.not_sampled",
+            alloc = %alloc_id,
+            role = descriptor.role.as_str(),
+            probe_idx = descriptor.idx.get(),
+            reason,
+            detail = %detail,
+            "probe run wrote no observation row",
+        ),
+        None => tracing::warn!(
+            name: "probe.not_sampled",
+            alloc = %alloc_id,
+            role = descriptor.role.as_str(),
+            probe_idx = descriptor.idx.get(),
+            reason,
+            "probe run wrote no observation row",
+        ),
+    }
+}
+
+#[allow(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "the helper is called at the borrowed dial-error match site and keeps the error taxonomy read-only"
+)]
+fn guest_dial_error_reason(error: &GuestDialError) -> &'static str {
+    match error {
+        GuestDialError::Capacity => "node_capacity",
+        GuestDialError::Quiesced => "quiesced",
+        _ => unreachable!("only Capacity and Quiesced are no-sample outcomes"),
     }
 }
 
@@ -653,12 +752,10 @@ fn guest_probe_target(host: &str, port: u16) -> Option<SocketAddrV4> {
 /// against `child_token.cancelled()` in a `select!`.
 ///
 /// On `clock.sleep` resolve the loop calls
-/// [`probe_tick`] and emits a `tracing::warn!` on every adapter or
-/// store error — no panic, no retry storm. The failure row itself
-/// IS the observable: the `ServiceLifecycleReconciler` consumes
-/// the LWW projection and decides the next action. The loop continues
-/// across per-tick errors so the supervisor's lifecycle stays tied to
-/// the cancellation token, not to the first error.
+/// [`probe_tick`]. No-row outcomes emit the structured
+/// `probe.not_sampled` event at the point of failure; the loop continues
+/// across per-tick errors so the supervisor's lifecycle stays tied to the
+/// cancellation token, not to the first error.
 #[allow(
     clippy::too_many_arguments,
     reason = "the spawned task owns cloned Arcs for each injected adapter (tcp + http) plus the clock, store, per-tick identity, and cancellation token; the explicit list keeps the spawn site's ownership transfer auditable"
@@ -681,7 +778,7 @@ async fn supervised_probe_loop(
             biased;
             () = child_token.cancelled() => return,
             () = clock.sleep(interval) => {
-                if let Err(err) = probe_tick(
+                if probe_tick(
                     tcp_prober.as_ref(),
                     http_prober.as_ref(),
                     Some(guest_dial.as_ref()),
@@ -691,15 +788,10 @@ async fn supervised_probe_loop(
                     probe_idx,
                     &descriptor,
                     &mut run_state,
-                ).await {
-                    tracing::warn!(
-                        name: "probe_tick.error",
-                        alloc_id = %alloc_id,
-                        probe_idx = probe_idx.0,
-                        role = ?descriptor.role,
-                        error = %err,
-                        "supervised probe tick failed; loop continues until cancelled",
-                    );
+                ).await.is_err() {
+                    // `probe_tick` emits the structured `probe.not_sampled`
+                    // event for every no-row outcome. The supervised task
+                    // continues across that failed run until cancelled.
                 }
             }
         }

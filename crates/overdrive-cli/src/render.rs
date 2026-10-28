@@ -369,24 +369,12 @@ fn probe_render_rows(response: &AllocStatusResponse) -> Vec<ProbeRenderRow> {
                 // `(inferred)` suffix correct in the pending case too.
                 inferred: descriptor.inferred,
                 // ---------------------------------------------------
-                // The `(consecutive_failures/threshold)` ratio suffix
-                // is DELIBERATELY suppressed, as a unit.
-                //
-                // `ProbeRenderRow`'s own docs say `consecutive_failures`
-                // is composed "from the observation-side
-                // `ProbeResultRow`" — but that durable row carries no
-                // such field, and nothing else on the wire does either.
-                // The only in-tree counter is
-                // `ServiceLifecycleView::liveness_consecutive_failures`,
-                // reconciler-private and liveness-only.
-                //
-                // Populating `failure_threshold` alone would make the
-                // renderer emit `(0/3)` for a probe that IS currently
-                // failing — a false statement about how close the
-                // workload is to a liveness restart. Emitting nothing
-                // asserts nothing. So both fields stay at their
-                // no-claim values until the counter has an honest
-                // source; `last=fail (<reason>)` still renders.
+                // The producer row now carries `same_status_runs`, but the
+                // operator-facing renderer deliberately keeps the existing
+                // output contract and does not add a ratio suffix here.
+                // `ProbeRenderRow` retains its prior no-claim values so a
+                // CLI read remains byte-for-byte unchanged while the
+                // reconciler applies the typed producer streak at read time.
                 // ---------------------------------------------------
                 consecutive_failures: 0,
                 failure_threshold: None,
@@ -1312,7 +1300,7 @@ pub fn format_service_stable_summary(
 // the caller from the spec-side `ProbeDescriptor` (mechanic, role,
 // inferred, failure_threshold) and the observation-side
 // `ProbeResultRow` (status, last_observed_at_unix_ms,
-// consecutive_failures). The render layer is pure over this input — it
+// same_status_runs). The render layer is pure over this input — it
 // performs no hydration of its own.
 
 /// Typed render-input for a single probe row in the Probes section.
@@ -1337,9 +1325,9 @@ pub struct ProbeRenderRow {
     /// `true` IFF the platform synthesised this probe per ADR-0058
     /// (renders an `(inferred)` suffix).
     pub inferred: bool,
-    /// Consecutive failures observed for this probe. Drives the
-    /// `(<consecutive_failures>/<threshold>)` ratio suffix when the
-    /// probe is currently failing under a declared threshold.
+    /// Retained renderer field for the existing output contract. The
+    /// producer's typed streak is consumed by lifecycle reconciliation; the
+    /// CLI does not render a new ratio.
     pub consecutive_failures: u32,
     /// Failure threshold for this probe (liveness `failure_threshold`,
     /// readiness `success_threshold`); `None` for startup probes (no

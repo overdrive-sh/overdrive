@@ -583,6 +583,7 @@ fn gap_1_at_07_reconciler_skips_when_started_at_none_on_failed_alloc() {
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
+        probe_rows: BTreeMap::new(),
     };
     let mut allocs = BTreeMap::new();
     allocs.insert(aid.clone(), fact);
@@ -676,6 +677,19 @@ fn gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at() {
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
+        probe_rows: BTreeMap::from([(
+            (ProbeRole::Startup, ProbeIdx::new(0)),
+            ProbeResultRow {
+                alloc_id: aid.clone(),
+                probe_idx: ProbeIdx::new(0),
+                role: ProbeRole::Startup,
+                status: ProbeStatus::Pass,
+                last_observed_at_unix_ms: 1,
+                inferred: false,
+                run_seq: ProbeRunSeq::FIRST,
+                same_status_runs: SameStatusRuns::ONE,
+            },
+        )]),
     };
     let mut allocs = BTreeMap::new();
     allocs.insert(aid.clone(), fact);

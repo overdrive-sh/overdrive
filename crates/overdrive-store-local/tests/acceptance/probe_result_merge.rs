@@ -112,7 +112,6 @@ fn drain(sub: &mut LagAwareSubscription) -> Vec<ObservationRow> {
 /// row and emit an event exactly for the accepted writes.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 9"]
 async fn probe_row_merges_by_run_sequence_identically_in_both_stores() {
     let temp = TempDir::new().expect("tempdir");
     let local = LocalObservationStore::open(temp.path().join("observation.redb"))
@@ -153,7 +152,6 @@ async fn probe_row_merges_by_run_sequence_identically_in_both_stores() {
 /// each keeps its own greatest-`run_seq` row in both stores.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 9"]
 async fn each_key_keeps_its_own_greatest_run_in_both_stores() {
     let temp = TempDir::new().expect("tempdir");
     let local = LocalObservationStore::open(temp.path().join("observation.redb"))

@@ -73,7 +73,6 @@ proptest! {
     /// its decimal form, and through serde as the bare `u64`.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 9"]
     fn probe_run_seq_round_trips_as_its_decimal_value(seq in 1..=u64::MAX) {
         let value = ProbeRunSeq::new(seq).expect("non-zero");
         prop_assert_eq!(value.get(), seq);
@@ -88,7 +87,6 @@ proptest! {
     /// decimal form, and through serde as the bare `u32`.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 9"]
     fn same_status_runs_round_trips_as_its_decimal_value(runs in 1..=u32::MAX) {
         let value = SameStatusRuns::new(runs).expect("non-zero");
         prop_assert_eq!(value.get(), runs);
@@ -103,7 +101,6 @@ proptest! {
     /// panics and never yields a value.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 9"]
     fn non_decimal_input_is_rejected_as_malformed(text in "[^0-9]{1,12}|[0-9]{0,4}[a-z][0-9]{0,4}|-[1-9][0-9]{0,5}") {
         prop_assert!(
             matches!(ProbeRunSeq::from_str(&text), Err(ProbeRunSeqParseError::Malformed(_))),
@@ -118,7 +115,6 @@ proptest! {
     /// The successor is one greater, up to the ceiling where it saturates.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 9"]
     fn successor_is_one_greater(seq in 1..u64::MAX, runs in 1..u32::MAX) {
         prop_assert_eq!(ProbeRunSeq::new(seq).expect("non-zero").succ().get(), seq + 1);
         prop_assert_eq!(SameStatusRuns::new(runs).expect("non-zero").succ().get(), runs + 1);
@@ -129,7 +125,6 @@ proptest! {
     /// allocation).
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER step 9"]
     fn v1_row_up_converts_with_first_run_and_streak_one(v1 in arb_v1()) {
         let expected = ProbeResultRowV2 {
             alloc_id: v1.alloc_id.clone(),
@@ -171,7 +166,6 @@ proptest! {
 /// 0 is not a run sequence or a streak, whichever surface constructs it.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 9"]
 fn zero_is_rejected_by_every_constructor() {
     assert_eq!(ProbeRunSeq::new(0), Err(ProbeRunSeqParseError::Zero));
     assert_eq!(ProbeRunSeq::try_from(0_u64), Err(ProbeRunSeqParseError::Zero));
@@ -187,7 +181,6 @@ fn zero_is_rejected_by_every_constructor() {
 /// successors saturate at the ceiling rather than wrapping.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 9"]
 fn first_values_are_one_and_successors_saturate() {
     assert_eq!(ProbeRunSeq::FIRST.get(), 1);
     assert_eq!(SameStatusRuns::ONE.get(), 1);

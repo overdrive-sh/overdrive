@@ -290,6 +290,10 @@ impl ProbeWorld {
         Self::compose_with(probes, true).await
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the shared probe-count composition must keep the production owner wiring and its preconditions in one fixture constructor"
+    )]
     async fn compose_with(probes: ProbeSet, with_workload_lifecycle: bool) -> Self {
         let tmp = TempDir::new().expect("tempdir");
         let mut runtime = ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path())
@@ -314,6 +318,22 @@ impl ProbeWorld {
         let driver = Arc::new(SimDriver::with_clock(DriverType::Vm, clock.clone()));
         let dial = Arc::new(SimGuestStreamDial::new());
         let allocator = crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
+        let mtls_worker = crate::shared_network_test_ports::mtls_worker();
+        mtls_worker
+            .start_shared_owner()
+            .await
+            .expect("the probe-count fixture's shared mTLS owner starts over sim adapters");
+        let guest_owner = crate::shared_network_test_ports::shared_guest_network_owner();
+        crate::guest_network::SharedGuestNetworkOwner::converge_shared(guest_owner.as_ref())
+            .await
+            .expect("the probe-count fixture's shared owner reports its bound flow ports");
+        let guest_network_wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(
+            Arc::clone(&clock) as Arc<dyn Clock>,
+        );
+        assert!(
+            guest_network_wiring.supervisor().open_after_boot(),
+            "the probe-count fixture opens EXEC after both shared owners converge",
+        );
         let state = AppState::new(
             store,
             store_path,
@@ -328,9 +348,9 @@ impl ProbeWorld {
             allocator,
             crate::test_empty_listener_facts(),
             Ipv4Addr::LOCALHOST,
-            crate::shared_network_test_ports::mtls_worker(),
-            crate::shared_network_test_ports::shared_guest_network_owner(),
-            crate::shared_network_test_ports::guest_network_exec_gate(),
+            mtls_worker,
+            guest_owner,
+            guest_network_wiring.gate(),
             crate::shared_network_test_ports::guest_pool(),
         );
 

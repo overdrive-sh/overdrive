@@ -150,17 +150,16 @@ impl std::str::FromStr for ProbeRunSeq {
     type Err = ProbeRunSeqParseError;
 
     /// Decimal, ≥ 1.
-    // SCAFFOLD: true — RED scaffold; implemented in DELIVER step 9.
-    fn from_str(_s: &str) -> Result<Self, Self::Err> {
-        panic!("Not yet implemented -- RED scaffold")
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let seq = s.parse::<u64>().map_err(|_| ProbeRunSeqParseError::Malformed(s.to_owned()))?;
+        Self::new(seq)
     }
 }
 
 impl std::fmt::Display for ProbeRunSeq {
     /// Decimal.
-    // SCAFFOLD: true — RED scaffold; implemented in DELIVER step 9.
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        panic!("Not yet implemented -- RED scaffold")
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
     }
 }
 
@@ -238,11 +237,9 @@ impl SameStatusRuns {
     }
 
     /// The streak of the next written row of the same status (saturating).
-    // SCAFFOLD: true — RED scaffold; implemented in DELIVER step 9.
     #[must_use]
     pub const fn succ(self) -> Self {
-        let _ = self;
-        panic!("Not yet implemented -- RED scaffold")
+        Self(self.0.saturating_add(1))
     }
 }
 
@@ -250,17 +247,17 @@ impl std::str::FromStr for SameStatusRuns {
     type Err = SameStatusRunsParseError;
 
     /// Decimal, ≥ 1.
-    // SCAFFOLD: true — RED scaffold; implemented in DELIVER step 9.
-    fn from_str(_s: &str) -> Result<Self, Self::Err> {
-        panic!("Not yet implemented -- RED scaffold")
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let runs =
+            s.parse::<u32>().map_err(|_| SameStatusRunsParseError::Malformed(s.to_owned()))?;
+        Self::new(runs)
     }
 }
 
 impl std::fmt::Display for SameStatusRuns {
     /// Decimal.
-    // SCAFFOLD: true — RED scaffold; implemented in DELIVER step 9.
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        panic!("Not yet implemented -- RED scaffold")
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
     }
 }
 
@@ -443,14 +440,18 @@ pub struct ProbeResultRowV2 {
 /// can only belong to an allocation of an earlier `serve` process, which
 /// boot reclamation reclaims before any probe runs, so it is never counted
 /// toward a live allocation (ADR-0191).
-#[allow(
-    clippy::fallible_impl_from,
-    reason = "RED scaffold body until DELIVER step 9; the implemented conversion copies every field"
-)]
 impl From<ProbeResultRowV1> for ProbeResultRowV2 {
-    // SCAFFOLD: true — RED scaffold; implemented in DELIVER step 9.
-    fn from(_v1: ProbeResultRowV1) -> Self {
-        panic!("Not yet implemented -- RED scaffold")
+    fn from(v1: ProbeResultRowV1) -> Self {
+        Self {
+            alloc_id: v1.alloc_id,
+            probe_idx: v1.probe_idx,
+            role: v1.role,
+            status: v1.status,
+            last_observed_at_unix_ms: v1.last_observed_at_unix_ms,
+            inferred: v1.inferred,
+            run_seq: ProbeRunSeq::FIRST,
+            same_status_runs: SameStatusRuns::ONE,
+        }
     }
 }
 

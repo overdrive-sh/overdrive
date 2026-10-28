@@ -43,7 +43,9 @@ use std::time::{Duration, Instant};
 use overdrive_core::aggregate::{Job, Node, Vm, WorkloadDriver, WorkloadKind};
 use overdrive_core::guest_network::GuestAttachmentOccupancy;
 use overdrive_core::id::{NodeId, Region, WorkloadId};
-use overdrive_core::observation::ProbeStatus;
+use overdrive_core::observation::{
+    ProbeIdx, ProbeResultRow, ProbeRole, ProbeRunSeq, ProbeStatus, SameStatusRuns,
+};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
 use overdrive_core::traits::GuestAttachmentObservation;
 use overdrive_core::traits::driver::Resources;
@@ -654,13 +656,18 @@ proptest! {
         prop_assert!(is_platform_reclaimed(&ground_truth));
         prop_assert_eq!(ground_truth.state, AllocState::Terminated);
 
-        let fact = ServiceAllocFact {
+        let latest_startup_probe = (attempts > 0).then(|| ProbeStatus::Fail {
+            last_fail_reason: "tcp_refused".to_string(),
+        });
+        let mut fact = ServiceAllocFact {
             alloc_id: alloc.clone(),
             state: AllocState::Terminated,
             started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
             exit_code: None,
-            latest_startup_probe: Some(ProbeStatus::Fail { last_fail_reason: "tcp_refused".to_string() }),
-            latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(Duration::from_millis(1))),
+            latest_startup_probe: latest_startup_probe.clone(),
+            latest_startup_probe_observed_at: latest_startup_probe
+                .as_ref()
+                .map(|_| UnixInstant::from_unix_duration(Duration::from_millis(1))),
             max_attempts: 30,
             startup_deadline: Duration::from_secs(60),
             mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
@@ -674,14 +681,32 @@ proptest! {
             latest_liveness_probe: None,
             has_liveness_probe: false,
             liveness_failure_threshold: 3,
+            probe_rows: BTreeMap::new(),
         };
-        let mut allocs = BTreeMap::new();
-        allocs.insert(alloc.clone(), fact);
-        let actual = ServiceLifecycleState { allocs, service_dataplane: BTreeMap::new(), observed_backend_rows: BTreeMap::new() };
+        if let Some(status) = latest_startup_probe {
+            let probe_idx = ProbeIdx::new(0);
+            fact.probe_rows.insert(
+                (ProbeRole::Startup, probe_idx),
+                ProbeResultRow {
+                    alloc_id: alloc.clone(),
+                    probe_idx,
+                    role: ProbeRole::Startup,
+                    status,
+                    last_observed_at_unix_ms: 1,
+                    inferred: false,
+                    run_seq: ProbeRunSeq::new(u64::from(attempts))
+                        .expect("positive attempts produce a row"),
+                    same_status_runs: SameStatusRuns::new(attempts)
+                        .expect("positive attempts produce a streak"),
+                },
+            );
+        }
+        let actual = ServiceLifecycleState {
+            allocs: BTreeMap::from([(alloc, fact)]),
+            ..ServiceLifecycleState::default()
+        };
 
-        let mut attempts_map = BTreeMap::new();
-        attempts_map.insert(alloc, attempts);
-        let view = ServiceLifecycleView { startup_attempts_per_alloc: attempts_map, ..Default::default() };
+        let view = ServiceLifecycleView::default();
         let tick = fresh_tick(UnixInstant::from_unix_duration(Duration::from_millis(elapsed_ms)));
 
         let r = ServiceLifecycleReconciler::new();

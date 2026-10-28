@@ -57,7 +57,6 @@ fn decode(bytes: &[u8]) -> ServiceLifecycleView {
 /// survives the upgrade to be miscounted against the producer's rows.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 9"]
 fn persisted_view_with_streak_fields_decodes_without_them() {
     let alloc = aid("svc-0");
     let key = (alloc.clone(), ProbeIdx::new(0));

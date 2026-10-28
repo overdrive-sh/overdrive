@@ -38,7 +38,9 @@ use overdrive_core::aggregate::{
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::{NodeId, ServiceId, ServiceVip};
-use overdrive_core::observation::{ProbeIdx, ProbeRole, ProbeStatus};
+use overdrive_core::observation::{
+    ProbeIdx, ProbeResultRow, ProbeRole, ProbeRunSeq, ProbeStatus, SameStatusRuns,
+};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
 use overdrive_core::traits::Clock;
 use overdrive_core::traits::driver::{
@@ -130,6 +132,35 @@ fn fact_for(
     readiness: ProbeStatus,
 ) -> ServiceAllocFact {
     let workload = WorkloadId::new("service-vm-terminal-25717").expect("static workload ID");
+    let probe_idx = ProbeIdx::new(0);
+    let probe_rows = BTreeMap::from([
+        (
+            (ProbeRole::Startup, probe_idx),
+            ProbeResultRow {
+                alloc_id: alloc_id.clone(),
+                probe_idx,
+                role: ProbeRole::Startup,
+                status: startup.clone(),
+                last_observed_at_unix_ms: 2_000,
+                inferred: false,
+                run_seq: ProbeRunSeq::FIRST,
+                same_status_runs: SameStatusRuns::ONE,
+            },
+        ),
+        (
+            (ProbeRole::Readiness, probe_idx),
+            ProbeResultRow {
+                alloc_id: alloc_id.clone(),
+                probe_idx,
+                role: ProbeRole::Readiness,
+                status: readiness.clone(),
+                last_observed_at_unix_ms: 2_000,
+                inferred: false,
+                run_seq: ProbeRunSeq::FIRST,
+                same_status_runs: SameStatusRuns::ONE,
+            },
+        ),
+    ]);
     ServiceAllocFact {
         alloc_id: alloc_id.clone(),
         state,
@@ -152,6 +183,7 @@ fn fact_for(
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
+        probe_rows,
     }
 }
 

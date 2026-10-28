@@ -7005,13 +7005,41 @@ with the key's latest row `(N, status, s)` (`N` its `run_seq`, `s` its
    entries (today they are never pruned:
    [#320](https://github.com/overdrive-sh/overdrive/issues/320)).
 
-Hydration carries each hydrated key's latest `run_seq` and
-`same_status_runs` (internal structure, the crafter's; the `ServiceAllocFact`
-field `latest_startup_probe_observed_at`, `:120`, has no consumer once
-startup attempts are read from the row). The rule applies to every workload
-kind, exec included. The restart authority is unchanged: a liveness
-terminate reaches `WorkloadLifecycle` as the `AllocStatusRow` terminal
-(ADR-0087).
+**Exact hydration carrier (PRCI-1, STEP 13-02 contract-shape
+reconciliation).** `ServiceAllocFact` gains exactly one public,
+documentation-hidden transient input field:
+
+```rust
+#[doc(hidden)]
+pub probe_rows: BTreeMap<(ProbeRole, ProbeIdx), ProbeResultRow>,
+```
+
+`ProbeResultRow` is the latest-payload alias for `ProbeResultRowV2`. The
+enclosing `ServiceLifecycleState::allocs` key and
+`ServiceAllocFact::alloc_id` supply the allocation identity. Each entry is
+the latest stored row for that allocation, role and index after the store's
+`run_seq` merge; its row identity must equal the enclosing fact and map key.
+An absent stored row is an absent entry, never a synthesized default. The
+three existing `latest_*_probe` statuses and
+`latest_startup_probe_observed_at` remain unchanged and are projections of
+the same hydrated rows, so one fact cannot mix snapshots.
+
+Every other `ServiceAllocFact` field and type remains unchanged.
+`ServiceLifecycleState` remains exactly its three accepted fields (`allocs`,
+`service_dataplane`, `observed_backend_rows`); it gains no parallel probe-row
+map. ADR-0101's existing private helper signatures remain unchanged,
+including `hydrate_service_alloc_facts`'s `BTreeMap<AllocationId,
+ServiceAllocFact>` return and `compute_backend_healthy`'s four arguments. No
+public accessor, wrapper type, tuple-return interface, action, port or
+observation API is added. Private local threading remains the crafter's.
+
+Hydration carries every returned row for the allocation; the current consumer
+still reads only probe index 0 for each role, and GH #319 remains the sole
+home of policy for other indices. The `latest_startup_probe_observed_at`
+field has no consumer once startup attempts are read from the raw row but is
+retained unchanged by ADR-0101. The rule applies to every workload kind, exec
+included. The restart authority is unchanged: a liveness terminate reaches
+`WorkloadLifecycle` as the `AllocStatusRow` terminal (ADR-0087).
 
 *Interaction with the probe-row consumers* (read-only check of the current
 code). `ServiceLifecycle` hydrates the latest row per role

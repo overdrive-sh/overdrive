@@ -151,8 +151,8 @@ const RECONCILE_CONFLICT_TABLE: TableDefinition<&[u8], &[u8]> =
 /// `alloc_id_bytes || 0x00 || role_byte || probe_idx LE u32` — the NUL
 /// separator guarantees unambiguous prefix-scan boundaries (no
 /// `AllocationId` byte sequence may contain NUL since it is parsed
-/// from non-empty `&str`). LWW resolution on
-/// `last_observed_at_unix_ms`.
+/// from non-empty `&str`). LWW resolution is by the producer's
+/// `run_seq`; `last_observed_at_unix_ms` is informational.
 ///
 /// `role_byte` ([`ProbeRole::as_key_byte`]) is load-bearing, not
 /// decorative: `probe_idx` is 0-indexed **within its own role array**,
@@ -1406,10 +1406,10 @@ fn apply_service_backends_lww(
 
 /// LWW-guarded insert for `ProbeResultRow`. Keyed on the composite
 /// `(alloc_id, role, probe_idx)` per ADR-0054 §5 as amended by
-/// ADR-0080 § D2. Strictly-dominate on `last_observed_at_unix_ms` —
-/// equal timestamps are no-ops (idempotent re-write). On envelope
-/// decode failure of the prior row, treats the incoming write as
-/// dominating per ADR-0048 § 3.
+/// ADR-0080 § D2. Strictly-dominate on the producer's `run_seq` — equal
+/// sequences are no-ops (idempotent re-write), and observation time is
+/// informational only. On envelope decode failure of the prior row, treats
+/// the incoming write as dominating per ADR-0048 § 3.
 fn apply_probe_result_lww(
     table: &mut Table<'_, &[u8], &[u8]>,
     incoming: &ProbeResultRow,
@@ -1417,7 +1417,7 @@ fn apply_probe_result_lww(
     let key = encode_probe_result_key(&incoming.alloc_id, incoming.role, incoming.probe_idx);
     let dominates = table.get(key.as_slice()).map_err(map_to_io)?.is_none_or(|prior| {
         match decode_envelope::<ProbeResultRowEnvelope>(prior.value()) {
-            Ok(prior_row) => incoming.last_observed_at_unix_ms > prior_row.last_observed_at_unix_ms,
+            Ok(prior_row) => incoming.run_seq > prior_row.run_seq,
             Err(_) => true,
         }
     });
@@ -1819,7 +1819,6 @@ mod probe_merge_tests {
     /// before the failure, and is accepted (PC-3, R5-PROBE-MERGE).
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 9"]
     async fn failed_probe_write_changes_nothing_and_the_same_run_is_accepted_after() {
         let temp = tempfile::TempDir::new().expect("temporary observation store");
         let store = open_store(&temp);

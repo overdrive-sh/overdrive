@@ -121,6 +121,7 @@ fn advertise_port_set(svc: &Service) -> BTreeSet<NonZeroU16> {
             latest_liveness_probe: None,
             has_liveness_probe: false,
             liveness_failure_threshold: 3,
+            probe_rows: BTreeMap::new(),
         },
     )]);
     let (actions, _) = ServiceLifecycleReconciler::new().reconcile(

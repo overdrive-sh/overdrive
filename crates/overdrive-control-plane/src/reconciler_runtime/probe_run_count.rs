@@ -30,9 +30,8 @@
 //! owners). Pairs with `specs/quint/probe-count` (`quint_probe_count.rs`)
 //! and discharges PC-1 to PC-4.
 //!
-//! Every body is pending DELIVER step 9, which lands the probe runner's VM
-//! dial dispatch and run numbering, the merge by `run_seq` and the
-//! read-time threshold rule.
+//! The activated bodies exercise the probe runner's VM dial dispatch and run
+//! numbering, the merge by `run_seq`, and the read-time threshold rule.
 
 #![allow(
     clippy::single_option_map,
@@ -91,7 +90,6 @@ fn is_not_sampled(
 /// Pairs with `HappyPathThreeFailsTerminateAtThreshold`.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 9"]
 async fn liveness_probe_failing_three_runs_stops_the_allocation_once() {
     let mut world = ProbeWorld::compose(ProbeSet::AllTcp).await;
 
@@ -123,7 +121,6 @@ async fn liveness_probe_failing_three_runs_stops_the_allocation_once() {
 /// `ReReadAfterFailedStopDoesNotReTerminate`.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 9"]
 async fn coalesced_runs_terminate_on_the_first_look_and_re_reads_change_nothing() {
     let mut world = ProbeWorld::compose(ProbeSet::ReadinessAndLiveness).await;
 
@@ -152,7 +149,6 @@ async fn coalesced_runs_terminate_on_the_first_look_and_re_reads_change_nothing(
 /// normally.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 9"]
 async fn http_probe_whose_path_is_not_a_request_target_records_no_sample() {
     let capture = EventCapture::default();
     let _guard = capture.install();
@@ -185,7 +181,6 @@ async fn http_probe_whose_path_is_not_a_request_target_records_no_sample() {
 /// `SimObservationStore`.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 9"]
 async fn failed_row_write_counts_nothing_and_the_next_row_reuses_its_number() {
     let capture = EventCapture::default();
     let _guard = capture.install();
@@ -231,7 +226,6 @@ async fn failed_row_write_counts_nothing_and_the_next_row_reuses_its_number() {
 /// `MissingSampleChangesNothing`.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 9"]
 async fn capacity_or_quiescence_refusal_records_no_sample() {
     let capture = EventCapture::default();
     let _guard = capture.install();
@@ -283,7 +277,6 @@ async fn capacity_or_quiescence_refusal_records_no_sample() {
 /// observation time is earlier. Pairs with `ClockStepBackDoesNotLoseRow`.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 9"]
 async fn backward_clock_step_loses_no_row() {
     let mut world = ProbeWorld::compose(ProbeSet::ReadinessAndLiveness).await;
 
@@ -311,7 +304,6 @@ async fn backward_clock_step_loses_no_row() {
 /// streak stops nothing of it. Discharges PC-1.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 9"]
 async fn resubmitted_workload_counts_its_probe_runs_afresh() {
     let mut world =
         ProbeWorld::compose_with_workload_lifecycle(ProbeSet::ReadinessAndLiveness).await;
@@ -364,7 +356,6 @@ async fn resubmitted_workload_counts_its_probe_runs_afresh() {
 /// 1. Pairs with `FlipBetweenLooksNoEarlyTerminate`.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 9"]
 async fn status_flip_between_looks_does_not_terminate_early() {
     let mut world = ProbeWorld::compose(ProbeSet::ReadinessAndLiveness).await;
 
@@ -386,7 +377,6 @@ async fn status_flip_between_looks_does_not_terminate_early() {
 /// `NewStreakAfterPassTerminatesAgain`; discharges PC-4.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 9"]
 async fn failed_stop_is_retried_once_per_new_crossed_row() {
     let mut world = ProbeWorld::compose(ProbeSet::ReadinessAndLiveness).await;
     let alloc = world.alloc.clone();
@@ -422,7 +412,6 @@ async fn failed_stop_is_retried_once_per_new_crossed_row() {
 /// allocation again. Pairs with `NewStreakAfterPassTerminatesAgain`.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 9"]
 async fn new_fail_streak_after_a_pass_stops_again() {
     let mut world = ProbeWorld::compose(ProbeSet::ReadinessAndLiveness).await;
     let alloc = world.alloc.clone();
@@ -451,7 +440,6 @@ async fn new_fail_streak_after_a_pass_stops_again() {
 /// eligibility. Pairs with `ReadinessReachesThreshold`.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 9"]
 async fn readiness_eligibility_follows_the_latest_rows_streak() {
     let mut world = ProbeWorld::compose(ProbeSet::ReadinessAndLiveness).await;
 
@@ -480,7 +468,6 @@ async fn readiness_eligibility_follows_the_latest_rows_streak() {
 /// `workload_addr` with `DialPurpose::Probe`.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 9"]
 async fn vm_probes_run_through_the_guest_stream_dial() {
     let mut world = ProbeWorld::compose(ProbeSet::HttpLiveness { path: "/healthz" }).await;
 

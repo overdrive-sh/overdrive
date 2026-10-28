@@ -2,6 +2,18 @@
 
 ## Status
 
+**Accepted — PROBE-RUN-COUNT input-carrier reconciliation; independent DESIGN
+review APPROVED**, 2026-10-28, in
+[`review-design-13-02-probe-input-shape.md`](../../feature/netns-density-295/deliver/review-design-13-02-probe-input-shape.md).
+ADR-0191's approved read-time threshold needs
+the latest probe row's `run_seq` and `same_status_runs` at the pure reconcile
+boundary. The exact additive carrier is pinned in the #295 feature delta and
+[`design-13-02-probe-input-shape.md`](../../feature/netns-density-295/deliver/design-13-02-probe-input-shape.md).
+It preserves this ADR's three-field `ServiceLifecycleState`, existing helper
+signatures, owners and outcomes; it adds only one transient raw-row collection
+to `ServiceAllocFact`. This approval authorizes no alternative carrier and
+does not approve STEP 13-02 implementation or DISTILL alignment.
+
 **Accepted — revision 4 amendment; independent DESIGN review APPROVED**, 2026-09-08,
 [review iteration 1](../../feature/service-kind-vm-workloads/design/review-amendment-be10-local-backend-withdrawal.md#iteration-history),
 with no findings.
@@ -130,7 +142,7 @@ surrounding interfaces must not gain parameters or variants.
 | --- | --- |
 | `ServiceLifecycleState` | Retain `pub allocs: BTreeMap<AllocationId, ServiceAllocFact>`; replace `service_dataplane` with `pub service_dataplane: BTreeMap<ServiceId, ServiceDataplaneIdentity>`; replace `prior_backend_row_at` with `pub observed_backend_rows: BTreeMap<ServiceId, ServiceBackendRow>`. These are its only three fields. |
 | `ServiceDataplaneIdentity` | Exactly `pub vip: ServiceVip`, `pub port: NonZeroU16`, `pub protocol: Proto`, `pub writer: NodeId`. Delete `service_id`: the enclosing map key supplies it. Preserve `Debug, Clone, PartialEq, Eq` derives. |
-| `ServiceAllocFact` | Replace `pub backend_addr: std::net::SocketAddr` with `pub backend_ip: std::net::Ipv4Addr`. Retain `backend_spiffe` and every other field/type unchanged. The new field is the materialized workload/host fallback IP, without a first-listener port. |
+| `ServiceAllocFact` | Replace `pub backend_addr: std::net::SocketAddr` with `pub backend_ip: std::net::Ipv4Addr`. Retain `backend_spiffe` and every other pre-existing field/type unchanged. PROBE-RUN-COUNT adds only `#[doc(hidden)] pub probe_rows: BTreeMap<(ProbeRole, ProbeIdx), ProbeResultRow>`: the latest raw stored row per role/index for this allocation, transient and derived in the same hydration snapshot as the retained status projections. The IP is the materialized workload/host fallback IP, without a first-listener port. |
 | `ServiceLifecycleView` | Delete `pub last_emitted_backend_fingerprint: BTreeMap<ServiceId, BackendSetFingerprint>` and its field attribute/documentation. Retain all other fields, derives, persistence ownership, canonical reconciler name and `has_alloc_mid_startup_window(&self) -> bool` unchanged. |
 
 `NonZeroU16` is `std::num::NonZeroU16`; `Proto` is
@@ -171,7 +183,8 @@ The plural identity helper reuses the bridge's all-listener computation,
 including the spec-digest lookup and exact ServiceId domain string, within
 ServiceLifecycle; no parallel listener cache or fact store.
 
-Actual hydration contains the allocation facts, all listener identities and
+Actual hydration contains the allocation facts, including each allocation's
+latest raw probe rows keyed by `(ProbeRole, ProbeIdx)`, all listener identities and
 the complete current backend row from the existing keyed
 `ObservationStore::service_backends_rows(&service_id)` read for every listener.
 A missing result omits that map entry. Propagate existing `HydrateError`

@@ -27,7 +27,9 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use overdrive_core::id::AllocationId;
-use overdrive_core::observation::ProbeStatus;
+use overdrive_core::observation::{
+    ProbeIdx, ProbeResultRow, ProbeRole, ProbeRunSeq, ProbeStatus, SameStatusRuns,
+};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
 use overdrive_core::traits::observation_store::AllocState;
 use overdrive_core::transition_reason::{ServiceFailureReason, TerminalCondition};
@@ -79,6 +81,7 @@ fn fact_running_with_pass(alloc_id: AllocationId, started_at_unix_ms: u64) -> Se
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
+        probe_rows: BTreeMap::new(),
     }
 }
 
@@ -112,19 +115,50 @@ fn fact_failed_within_deadline(
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
+        probe_rows: BTreeMap::new(),
     }
 }
 
 fn state_with(facts: Vec<ServiceAllocFact>) -> ServiceLifecycleState {
-    let mut allocs = BTreeMap::new();
+    let mut state = ServiceLifecycleState::default();
     for fact in facts {
-        allocs.insert(fact.alloc_id.clone(), fact);
+        let alloc_id = fact.alloc_id.clone();
+        let startup = fact.latest_startup_probe.clone();
+        state.allocs.insert(alloc_id.clone(), fact);
+        if let Some(status) = startup {
+            put_startup_row(&mut state, &alloc_id, status, 1, 1, 1);
+        }
     }
-    ServiceLifecycleState {
-        allocs,
-        service_dataplane: BTreeMap::new(),
-        observed_backend_rows: BTreeMap::new(),
-    }
+    state
+}
+
+fn put_startup_row(
+    state: &mut ServiceLifecycleState,
+    alloc_id: &AllocationId,
+    status: ProbeStatus,
+    run_seq: u64,
+    same_status_runs: u32,
+    last_observed_at_unix_ms: u64,
+) {
+    let probe_idx = ProbeIdx::new(0);
+    let fact = state.allocs.get_mut(alloc_id).expect("fixture allocation");
+    fact.latest_startup_probe = Some(status.clone());
+    fact.latest_startup_probe_observed_at =
+        Some(UnixInstant::from_unix_duration(Duration::from_millis(last_observed_at_unix_ms)));
+    fact.probe_rows.insert(
+        (ProbeRole::Startup, probe_idx),
+        ProbeResultRow {
+            alloc_id: alloc_id.clone(),
+            probe_idx,
+            role: ProbeRole::Startup,
+            status,
+            last_observed_at_unix_ms,
+            inferred: false,
+            run_seq: ProbeRunSeq::new(run_seq).expect("fixture run sequence is non-zero"),
+            same_status_runs: SameStatusRuns::new(same_status_runs)
+                .expect("fixture streak is non-zero"),
+        },
+    );
 }
 
 /// S-SHCP-RECON-01 (US-01 / K1 / DDD-7 AND-of-all) — Service alloc
@@ -286,15 +320,17 @@ fn given_startup_probe_exhausts_attempts_when_reconcile_then_emits_failed_startu
         Some(UnixInstant::from_unix_duration(Duration::from_millis(1200)));
     fact.max_attempts = 3;
     fact.startup_deadline = Duration::from_millis(100);
-    let actual = state_with(vec![fact]);
+    let mut actual = state_with(vec![fact]);
+    put_startup_row(
+        &mut actual,
+        &alloc_id,
+        ProbeStatus::Fail { last_fail_reason: "connection refused".to_string() },
+        3,
+        3,
+        1_200,
+    );
     let desired = actual.clone();
-    let mut view = ServiceLifecycleView::default();
-    // GAP-10: seed the PRIOR consecutive-fail count (2). This tick's
-    // observed Fail increments it to 3 == max_attempts BEFORE the gate
-    // reads it, so the reported `attempts` is the post-increment streak
-    // length (3) — the Nth consecutive fail per ADR-0057 §2.
-    view.startup_attempts_per_alloc.insert(alloc_id.clone(), 2);
-    view.startup_last_fail_seen_at.insert(alloc_id.clone(), 1100);
+    let view = ServiceLifecycleView::default();
     // 200ms after start — past 100ms deadline
     let tick = tick_at(1200);
 

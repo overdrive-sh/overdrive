@@ -170,6 +170,7 @@ fn fact_from_row_and_intent(
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
+        probe_rows: BTreeMap::from([((row.role, row.probe_idx), row.clone())]),
     }
 }
 

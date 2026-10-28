@@ -397,6 +397,7 @@ fn opt_out_fact(alloc_id: AllocationId, started_at_unix_ms: u64) -> ServiceAlloc
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
+        probe_rows: BTreeMap::new(),
     }
 }
 
@@ -426,6 +427,7 @@ fn fact_with_probes(alloc_id: AllocationId, started_at_unix_ms: u64) -> ServiceA
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
+        probe_rows: BTreeMap::new(),
     }
 }
 

@@ -125,7 +125,6 @@ fn decode_variant(fixture_hex: &str) -> ProbeResultRowEnvelope {
 /// up-converts to a V2 row with `run_seq` 1 and `same_status_runs` 1.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER step 9"]
 fn probe_result_row_v1_decodes_and_up_converts_with_first_run() {
     assert!(
         matches!(decode_variant(FIXTURE_V1), ProbeResultRowEnvelope::V1(ref v1) if *v1 == canonical_v1_payload()),

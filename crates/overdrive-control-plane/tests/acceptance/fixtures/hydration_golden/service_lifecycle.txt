@@ -54,6 +54,31 @@ ServiceLifecycle(
                 latest_liveness_probe: None,
                 has_liveness_probe: false,
                 liveness_failure_threshold: 3,
+                probe_rows: {
+                    (
+                        Startup,
+                        ProbeIdx(
+                            0,
+                        ),
+                    ): ProbeResultRowV2 {
+                        alloc_id: AllocationId(
+                            "svc-app-0",
+                        ),
+                        probe_idx: ProbeIdx(
+                            0,
+                        ),
+                        role: Startup,
+                        status: Pass,
+                        last_observed_at_unix_ms: 1700000000000,
+                        inferred: false,
+                        run_seq: ProbeRunSeq(
+                            1700000000000,
+                        ),
+                        same_status_runs: SameStatusRuns(
+                            1,
+                        ),
+                    },
+                },
             },
         },
         service_dataplane: {},
