@@ -1,0 +1,79 @@
+{
+  "boot": {
+    "guest_ready": true
+  },
+  "cleanup": {
+    "bpf_prog_count": [
+      20,
+      20
+    ],
+    "bpf_stats_enabled": [
+      "0",
+      "0"
+    ],
+    "ch_procs_after": "",
+    "links_unchanged": true,
+    "lo_tcx_unchanged": true,
+    "modules_caused": [],
+    "modules_diff": [],
+    "modules_restored": true,
+    "netns_unchanged": true,
+    "root_cgroup_bpf_unchanged": true,
+    "routes_unchanged": true,
+    "spike_cgroups_left": [],
+    "tcx_unchanged": true
+  },
+  "preflight": {
+    "blob_sha256": "4d13839f4ea412a183cb014a0079ed91c65f4529d7c3c8df615dbc692c35c042",
+    "cid": 37136,
+    "host_uname": "7.0.0-38-generic",
+    "host_uname_v": "#38-Ubuntu SMP PREEMPT_DYNAMIC Fri Sep  4 09:10:14 UTC 2026",
+    "vsock_modules_loaded_before": [
+      "vhost",
+      "vhost_iotlb",
+      "vhost_vsock",
+      "vmw_vsock_virtio_transport_common",
+      "vsock",
+      "vsock_diag",
+      "vsock_loopback"
+    ]
+  },
+  "probe": {
+    "guest_owner_stop": {
+      "output": "7.0.0-38-generic\n",
+      "rc": 0
+    },
+    "litmus_exit": 0,
+    "raw_litmus_output": "{\"ancestor\":\"/sys/fs/cgroup/overdrive.slice\",\"cgroup_listing\":\"ID       AttachType      AttachFlags     Name           \\n8        cgroup_inet4_connect multi           vip_connect4                   \\n\",\"controls\":{\"direct_peer_is_backend\":true,\"outside_subtree_refused\":true,\"tcp_vip_peer_is_backend\":true,\"udp_vip_peer_is_backend\":true,\"unmapped_vip_refused\":true},\"direct_getpeername\":\"127.0.0.1:37083\",\"kernel\":\"7.0.0-38-generic\",\"ok\":true,\"outside\":\"/sys/fs/cgroup/ancestor-connect4-outside-124\",\"outside_cgroup\":\"0::/ancestor-connect4-outside-124\",\"outside_mapped_vip_error\":\"Network is unreachable (os error 101)\",\"owner\":\"/sys/fs/cgroup/overdrive.slice/control-plane.slice\",\"owner_cgroup\":\"0::/overdrive.slice/control-plane.slice\",\"program\":{\"id\":8,\"name\":\"vip_connect4(overdrive.slice)\",\"tag\":\"d6ec622dab236cf1\",\"verified_insns\":38},\"tcp_backend\":\"127.0.0.1:37083\",\"tcp_getpeername\":\"127.0.0.1:37083\",\"udp_backend\":\"127.0.0.1:55521\",\"udp_getpeername\":\"127.0.0.1:55521\",\"unmapped_vip_error\":\"Network is unreachable (os error 101)\"}\n",
+    "result": {
+      "ancestor": "/sys/fs/cgroup/overdrive.slice",
+      "cgroup_listing": "ID       AttachType      AttachFlags     Name           \n8        cgroup_inet4_connect multi           vip_connect4                   \n",
+      "controls": {
+        "direct_peer_is_backend": true,
+        "outside_subtree_refused": true,
+        "tcp_vip_peer_is_backend": true,
+        "udp_vip_peer_is_backend": true,
+        "unmapped_vip_refused": true
+      },
+      "direct_getpeername": "127.0.0.1:37083",
+      "kernel": "7.0.0-38-generic",
+      "ok": true,
+      "outside": "/sys/fs/cgroup/ancestor-connect4-outside-124",
+      "outside_cgroup": "0::/ancestor-connect4-outside-124",
+      "outside_mapped_vip_error": "Network is unreachable (os error 101)",
+      "owner": "/sys/fs/cgroup/overdrive.slice/control-plane.slice",
+      "owner_cgroup": "0::/overdrive.slice/control-plane.slice",
+      "program": {
+        "id": 8,
+        "name": "vip_connect4(overdrive.slice)",
+        "tag": "d6ec622dab236cf1",
+        "verified_insns": 38
+      },
+      "tcp_backend": "127.0.0.1:37083",
+      "tcp_getpeername": "127.0.0.1:37083",
+      "udp_backend": "127.0.0.1:55521",
+      "udp_getpeername": "127.0.0.1:55521",
+      "unmapped_vip_error": "Network is unreachable (os error 101)"
+    }
+  }
+}

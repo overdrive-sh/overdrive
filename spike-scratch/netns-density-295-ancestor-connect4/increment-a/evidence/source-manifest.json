@@ -1,0 +1,24 @@
+{
+  "ch_commits_since_v53": "f252bb20b vmm: exit the VMM on guest reset\n41a619d19 vmm: Add backend=vhost-kernel to --vsock\n9b68dbb57 virtio-devices: vsock: Add vhost-kernel backed vsock device",
+  "ch_submodule_branch": "overdrive/vhost-kernel-vsock",
+  "ch_submodule_dirty": "",
+  "ch_submodule_head": "f252bb20b0d141d59e4c15a9ac09c5c2dd7c350d",
+  "command": "cargo xtask metal run -- python3 spike-scratch/netns-density-295-ancestor-connect4/increment-a/run.py ",
+  "spike_sources": {
+    "spike-scratch/netns-density-295-ancestor-connect4/.gitignore": "55e10cc7aab71b9402d5498f0c7b282cd93c7d9c1bfdee26e2bf8ced0c89fda8",
+    "spike-scratch/netns-density-295-ancestor-connect4/bpf/Cargo.lock": "1d62c6d8caba3aa706844f516569a09c420ee0e93dc9ece7e35aa2484b06719c",
+    "spike-scratch/netns-density-295-ancestor-connect4/bpf/Cargo.toml": "0aeadc7fff51d1039533287209aa75cee3c37008d526e38958edeb4a264ba8e8",
+    "spike-scratch/netns-density-295-ancestor-connect4/bpf/src/main.rs": "8fb5c3cba241811509bf5201641867fce043a65eb1d7a0d62e4c838feb88cf13",
+    "spike-scratch/netns-density-295-ancestor-connect4/guest/init.sh": "b8badb586b00a6476558c65e0bcafbe4590968249559f87edb5449147e91bcfc",
+    "spike-scratch/netns-density-295-ancestor-connect4/harness.py": "a96600137c548b5118011d629e523c7edfad7c7798648ce3bb88b1e145991003",
+    "spike-scratch/netns-density-295-ancestor-connect4/increment-a/run.py": "f5518fd2a508142def3695080c1135c9a1cb40b160b9ae48ebf9aa7de5a2a90e",
+    "spike-scratch/netns-density-295-ancestor-connect4/launch.py": "37ed6b293de9959ef6da05abc408284e448018a852a7b33e20302437566801de",
+    "spike-scratch/netns-density-295-ancestor-connect4/rsync-owned-filter.sh": "1d092370a1ef0f5cda7053f125b50817b482c1223196952566daa096dfb5038a",
+    "spike-scratch/netns-density-295-ancestor-connect4/vfwd/Cargo.lock": "aa516b72ba5a108e37eed901f50d0c476bc7e2eefdc76d4037367cbc4067ce50",
+    "spike-scratch/netns-density-295-ancestor-connect4/vfwd/Cargo.toml": "55158317b10e4fc186273a8d066a5d6edfb1582994a7c2c80a429b8087a54caf",
+    "spike-scratch/netns-density-295-ancestor-connect4/vfwd/src/main.rs": "88359bb076cf28aa9830a0fe6de70f2ca158535b12a310734c8a9dab86dc5bdd",
+    "spike-scratch/netns-density-295-ancestor-connect4/vfwd/src/owner.rs": "2e0d120e98c878e483ead5c6b2ac78127548b598b832b62d50231b501d2c6f52",
+    "spike-scratch/netns-density-295-ancestor-connect4/vfwd/src/sys.rs": "e76f1ebbc807764ef1f9c1b42622bdeb2bae8c297a55b5d47af9c161a9e99921"
+  },
+  "superproject_head": "08e96a0b28dfd6b553ea155583d57f9be6705482"
+}

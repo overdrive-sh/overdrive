@@ -1,0 +1,67 @@
+[03:17:57] === preflight
+[03:17:57] $ uname -a; systemd-detect-virt || true; grep -m1 'model name' /proc/cpuinfo; nproc; ls -l /dev/kvm  (rc=0)
+[03:17:57]     Linux em-determined-roentgen 7.0.0-38-generic #38-Ubuntu SMP PREEMPT_DYNAMIC Fri Sep  4 09:10:14 UTC 2026 x86_64 GNU/Linux
+[03:17:57]     none
+[03:17:57]     model name	: AMD EPYC 8024P 8-Core Processor
+[03:17:57]     16
+[03:17:57]     crw-rw---- 1 root kvm 10, 232 Oct 28 03:17 /dev/kvm
+[03:17:57] === build
+[03:17:57] $ cargo build --release --locked --manifest-path /home/ubuntu/overdrive/vendors/cloud-hypervisor/Cargo.toml --bin cloud-hypervisor  (rc=0)
+[03:17:57]         Finished `release` profile [optimized] target(s) in 0.12s
+[03:17:57] $ cargo +nightly-2026-08-05 build --release --target bpfel-unknown-none -Z build-std=core --manifest-path /home/ubuntu/overdrive/spike-scratch/netns-density-295-ancestor-connect4/bpf/Cargo.toml  (rc=0)
+[03:17:57]         Finished `release` profile [optimized] target(s) in 0.05s
+[03:17:57] $ cargo build --release --target x86_64-unknown-linux-gnu --manifest-path /home/ubuntu/overdrive/spike-scratch/netns-density-295-ancestor-connect4/vfwd/Cargo.toml  (rc=0)
+[03:17:57]     257 |     pub fn modify(&self, fd: RawFd, ev: u32) {
+[03:17:57]         |            ^^^^^^
+[03:17:57]     
+[03:17:57]     warning: `vfwd` (bin "vfwd") generated 3 warnings
+[03:17:57]         Finished `release` profile [optimized + debuginfo] target(s) in 0.02s
+[03:17:57] $ file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ancestor-connect4/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor /home/ubuntu/overdrive/spike-scratch/netns-density-295-ancestor-connect4/out/bpf-target/bpfel-unknown-none/release/vfwd-bpf; /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor --version; bpf-linker --version || true; cargo +nightly-2026-08-05 --version; rustc --version  (rc=0)
+[03:17:57]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-ancestor-connect4/out/vfwd-target/x86_64-unknown-linux-gnu/release/vfwd: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, for GNU/Linux 3.2.0, BuildID[sha1]=c0d1987409644e98401ca89177855326e13cbc4b, with debug_info, not stripped
+[03:17:57]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor:              ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=e9f789bf6e9656ed559aec670330c6628e4368c8, stripped
+[03:17:57]     /home/ubuntu/overdrive/spike-scratch/netns-density-295-ancestor-connect4/out/bpf-target/bpfel-unknown-none/release/vfwd-bpf:    ELF 64-bit LSB relocatable, eBPF, version 1 (SYSV), not stripped
+[03:17:57]     cloud-hypervisor v53.0.0
+[03:17:57]     Migration Protocol Versions: 0
+[03:17:57]     bpf-linker 0.12.0
+[03:17:57]     cargo 1.99.0-nightly (7c83d4cc0 2026-07-29)
+[03:17:57]     rustc 1.95.0 (59807616e 2026-04-14)
+[03:17:57] === guest image
+[03:17:59] $ cd /home/ubuntu/overdrive/spike-scratch/netns-density-295-ancestor-connect4/out/initramfs-root && find . | cpio -o -H newc --quiet | gzip -1 > /home/ubuntu/overdrive/spike-scratch/netns-density-295-ancestor-connect4/out/initramfs.cpio.gz  (rc=0)
+[03:17:59] launch VM: /home/ubuntu/overdrive/spike-scratch/netns-density-295-guest-vsock-capture/out/ch-target/release/cloud-hypervisor --kernel /srv/vm/overdrive-testing/kernel --initramfs /home/ubuntu/overdrive/spike-scratch/netns-density-295-ancestor-connect4/out/initramfs.cpio.gz --cmdline console=ttyS0 panic=-1 loglevel=4 vfwd_w=10.99.7.2 vfwd_owner= --cpus boot=2 --memory size=1024M --serial file=/home/ubuntu/overdrive/spike-scratch/netns-density-295-ancestor-connect4/out/vm-increment-f-1793157479/serial.log --console off --vsock cid=37136,backend=vhost-kernel --log-file /home/ubuntu/overdrive/spike-scratch/netns-density-295-ancestor-connect4/out/vm-increment-f-1793157479/ch.log -v
+[03:18:01] GUEST_BOOT uname_r=7.0.0-38-generic uptime=0.62
+net.ipv4.tcp_fwmark_accept = 1
+net.ipv4.fwmark_reflect = 1
+GUEST_NET_BEGIN
+[1;36mlo               [0mUNKNOWN        [1;33m00:00:00:00:00:00 [0m<LOOPBACK,UP,LOWER_UP> 
+[1;36mdummy0           [0mUNKNOWN        [1;33mfe:98:c7:9d:fe:87 [0m<BROADCAST,NOARP,UP,LOWER_UP> 
+1: [1;36mlo: [0m<LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    inet [1;35m127.0.0.1[0m/8 scope host lo
+       valid_lft forever preferred_lft forever
+2: [1;36mdummy0: [0m<BROADCAST,NOARP,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN group default qlen 1000
+    inet [1;35m10.99.7.2[0m/32 scope global dummy0
+       valid_lft forever preferred_lft forever
+0:	from all lookup local
+32765:	from all fwmark 0x295 lookup 295
+32766:	from all lookup main
+32767:	from all lookup default
+GUEST_NET_END
+dummy0  lo
+GUEST_OWNER_SKIPPED
+GUEST_READY
+
+[03:18:03] guest$ pid=$(cat /tmp/owner.pid); if [ "$pid" -gt 1 ]; then kill "$pid"; fi; sleep 1; cat /proc/sys/kernel/osrelease  (rc=0, 1.0s)
+[03:18:03]     7.0.0-38-generic
+[03:18:05] guest$ /vfwd ancestor-vip --obj /vfwd-bpf.o  (rc=0, 2.5s)
+[03:18:05]     {"ancestor":"/sys/fs/cgroup/overdrive.slice","cgroup_listing":"ID       AttachType      AttachFlags     Name           \n8        cgroup_inet4_connect multi           vip_connect4                   \n","controls":{"direct_peer_is_backend":true,"outside_subtree_refused":true,"tcp_vip_peer_is_backend":true,"udp_vip_peer_is_backend":true,"unmapped_vip_refused":true},"direct_getpeername":"127.0.0.1:37083","kernel":"7.0.0-38-generic","ok":true,"outside":"/sys/fs/cgroup/ancestor-connect4-outside-124","outside_cgroup":"0::/ancestor-connect4-outside-124","outside_mapped_vip_error":"Network is unreachable (os error 101)","owner":"/sys/fs/cgroup/overdrive.slice/control-plane.slice","owner_cgroup":"0::/overdrive.slice/control-plane.slice","program":{"id":8,"name":"vip_connect4(overdrive.slice)","tag":"d6ec622dab236cf1","verified_insns":38},"tcp_backend":"127.0.0.1:37083","tcp_getpeername":"127.0.0.1:37083","udp_backend":"127.0.0.1:55521","udp_getpeername":"127.0.0.1:55521","unmapped_vip_error":"Network is unreachable (os error 101)"}
+[03:18:05] guest$ cat /tmp/owner.out; tail -c 30000 /tmp/owner.log; cat /tmp/owner-stats.json; tail -60 /tmp/sshd.log; tail -20 /tmp/srv7100.log /tmp/srv7101.log  (rc=0, 0.0s)
+[03:18:05]     GUEST_OWNER_SKIPPED
+[03:18:05]     tail: can't open '/tmp/owner.log': No such file or directory
+[03:18:05]     tail: no files
+[03:18:05]     cat: can't open '/tmp/owner-stats.json': No such file or directory
+[03:18:05]     Server listening on 0.0.0.0 port 22.
+[03:18:05]     ==> /tmp/srv7100.log <==
+[03:18:05]     {"banner":false,"bind":"0.0.0.0:7100","ev":"tcp_server_ready","rst":false}
+[03:18:05]     
+[03:18:05]     ==> /tmp/srv7101.log <==
+[03:18:05]     {"banner":true,"bind":"0.0.0.0:7101","ev":"tcp_server_ready","rst":false}
+[03:18:05] === done

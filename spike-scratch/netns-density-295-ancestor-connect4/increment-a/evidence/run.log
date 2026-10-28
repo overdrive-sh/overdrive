@@ -1,0 +1,197 @@
+[19:26:05] $ uname -a; systemd-detect-virt || true; grep -m1 'model name' /proc/cpuinfo; nproc  (rc=0)
+[19:26:05]     Linux em-determined-roentgen 7.0.0-29-generic #29-Ubuntu SMP PREEMPT_DYNAMIC Fri Jul 17 20:52:35 UTC 2026 x86_64 GNU/Linux
+[19:26:05]     none
+[19:26:05]     model name	: AMD EPYC 8024P 8-Core Processor
+[19:26:05]     16
+[19:26:05] $ ip -d -br link; ip -br -4 addr; ip -4 route; ip rule  (rc=0)
+[19:26:05]     lo               UNKNOWN        00:00:00:00:00:00 <LOOPBACK,UP,LOWER_UP> 
+[19:26:05]     eno12399np0      UP             14:23:f2:f4:50:e0 <BROADCAST,MULTICAST,UP,LOWER_UP> 
+[19:26:05]     eno8303          DOWN           6c:3c:8c:8b:69:3e <BROADCAST,MULTICAST> 
+[19:26:05]     eno12409np1      DOWN           14:23:f2:f4:50:e1 <BROADCAST,MULTICAST> 
+[19:26:05]     ovd-veth-bk@ovd-veth-cli UP             36:2a:11:a3:1f:2c <BROADCAST,MULTICAST,UP,LOWER_UP> 
+[19:26:05]     ovd-veth-cli@ovd-veth-bk UP             16:9f:ad:a9:86:2e <BROADCAST,MULTICAST,UP,LOWER_UP> 
+[19:26:05]     ovd-gbr0         DOWN           02:01:00:00:00:01 <NO-CARRIER,BROADCAST,MULTICAST,UP> 
+[19:26:05]     lo               UNKNOWN        127.0.0.1/8 
+[19:26:05]     eno12399np0      UP             <metal-address>/24 metric 100 
+[19:26:05]     ovd-veth-bk@ovd-veth-cli UP             10.96.0.2/16 
+[19:26:05]     ovd-veth-cli@ovd-veth-bk UP             10.96.0.1/16 
+[19:26:05]     ovd-gbr0         DOWN           100.95.0.1/16 
+[19:26:05]     default via 151.115.99.1 dev eno12399np0 proto dhcp src <metal-address> metric 100 
+[19:26:05]     10.96.0.0/16 dev ovd-veth-cli proto kernel scope link src 10.96.0.1 
+[19:26:05]     10.96.0.0/16 dev ovd-veth-bk proto kernel scope link src 10.96.0.2 
+[19:26:05]     100.95.0.0/16 dev ovd-gbr0 proto kernel scope link src 100.95.0.1 linkdown 
+[19:26:05]     151.115.99.0/24 dev eno12399np0 proto kernel scope link src <metal-address> metric 100 
+[19:26:05]     151.115.99.1 dev eno12399np0 proto dhcp scope link src <metal-address> metric 100 
+[19:26:05]     151.115.125.3 via 151.115.99.1 dev eno12399np0 proto dhcp src <metal-address> metric 100 
+[19:26:05]     151.115.125.11 via 151.115.99.1 dev eno12399np0 proto dhcp src <metal-address> metric 100 
+[19:26:05]     0:	from all lookup local
+[19:26:05]     32765:	from all fwmark 0x1 lookup 100
+[19:26:05]     32766:	from all lookup main
+[19:26:05]     32767:	from all lookup default
+[19:26:05] $ ip -4 route get 1.1.1.1; ip -4 route get 10.250.95.2; ip -4 route get 10.251.0.10  (rc=0)
+[19:26:05]     1.1.1.1 via 151.115.99.1 dev eno12399np0 src <metal-address> uid 0 
+[19:26:05]         cache 
+[19:26:05]     10.250.95.2 via 151.115.99.1 dev eno12399np0 src <metal-address> uid 0 
+[19:26:05]         cache 
+[19:26:05]     10.251.0.10 via 151.115.99.1 dev eno12399np0 src <metal-address> uid 0 
+[19:26:05]         cache
+[19:26:05] $ ip -4 addr | grep -E '10\.25[01]\.' || echo none; ip -4 route | grep -E '10\.25[01]\.' || echo none; ip netns list  (rc=0)
+[19:26:05]     none
+[19:26:05]     none
+[19:26:06] $ bpftool btf dump file /sys/kernel/btf/vmlinux format raw 2>/dev/null | grep -E "FUNC '(inet_csk_listen_start|inet_csk_listen_stop|skb_send_sock|inet_sk_state_store|tcp_set_state)'" ; grep -E ' (inet_csk_listen_start|inet_csk_listen_stop)$' /proc/kallsyms | head; cat /sys/kernel/tracing/events/sock/inet_sock_set_state/format 2>/dev/null | head -30  (rc=0)
+[19:26:06]     [123819] FUNC 'inet_csk_listen_start' type_id=55014 linkage=static
+[19:26:06]     [123820] FUNC 'inet_csk_listen_stop' type_id=51392 linkage=static
+[19:26:06]     [123940] FUNC 'inet_sk_state_store' type_id=68336 linkage=static
+[19:26:06]     [152668] FUNC 'skb_send_sock' type_id=77605 linkage=static
+[19:26:06]     [156224] FUNC 'tcp_set_state' type_id=53348 linkage=static
+[19:26:06]     ffffffff97705030 T inet_csk_listen_stop
+[19:26:06]     ffffffff977073a0 T inet_csk_listen_start
+[19:26:06]     name: inet_sock_set_state
+[19:26:06]     ID: 1738
+[19:26:06]     format:
+[19:26:06]     	field:unsigned short common_type;	offset:0;	size:2;	signed:0;
+[19:26:06]     	field:unsigned char common_flags;	offset:2;	size:1;	signed:0;
+[19:26:06]     	field:unsigned char common_preempt_count;	offset:3;	size:1;	signed:0;
+[19:26:06]     	field:int common_pid;	offset:4;	size:4;	signed:1;
+[19:26:06]     
+[19:26:06]     	field:const void * skaddr;	offset:8;	size:8;	signed:0;
+[19:26:06]     	field:int oldstate;	offset:16;	size:4;	signed:1;
+[19:26:06]     	field:int newstate;	offset:20;	size:4;	signed:1;
+[19:26:06]     	field:__u16 sport;	offset:24;	size:2;	signed:0;
+[19:26:06]     	field:__u16 dport;	offset:26;	size:2;	signed:0;
+[19:26:06]     	field:__u16 family;	offset:28;	size:2;	signed:0;
+[19:26:06]     	field:__u16 protocol;	offset:30;	size:2;	signed:0;
+[19:26:06]     	field:__u8 saddr[4];	offset:32;	size:4;	signed:0;
+[19:26:06]     	field:__u8 daddr[4];	offset:36;	size:4;	signed:0;
+[19:26:06]     	field:__u8 saddr_v6[16];	offset:40;	size:16;	signed:0;
+[19:26:06]     	field:__u8 daddr_v6[16];	offset:56;	size:16;	signed:0;
+[19:26:06]     
+[19:26:06]     print fmt: "family=%s protocol=%s sport=%hu dport=%hu saddr=%pI4 daddr=%pI4 saddrv6=%pI6c daddrv6=%pI6c oldstate=%s newstate=%s", __print_symbolic(REC->family, { 2, "AF_INET" }, { 10, "AF_INET6" }), __print_symbolic(REC->protocol, { 6, "IPPROTO_TCP" }, { 132, "IPPROTO_SCTP" }, { 262, "IPPROTO_MPTCP" }), REC->sport, REC->dport, REC->saddr, REC->daddr, REC->saddr_v6, REC->daddr_v6, __print_symbolic(REC->oldstate, { 1, "TCP_ESTABLISHED" }, { 2, "TCP_SYN_SENT" }, { 3, "TCP_SYN_RECV" }, { 4, "TCP_FIN_WAIT1" }, { 5, "TCP_FIN_WAIT2" }, { 6, "TCP_TIME_WAIT" }, { 7, "TCP_CLOSE" }, { 8, "TCP_CLOSE_WAIT" }, { 9, "TCP_LAST_ACK" }, { 10, "TCP_LISTEN" }, { 11, "TCP_CLOSING" }, { 12, "TCP_NEW_SYN_RECV" }), __print_symbolic(REC->newstate, { 1, "TCP_ESTABLISHED" }, { 2, "TCP_SYN_SENT" }, { 3, "TCP_SYN_RECV" }, { 4, "TCP_FIN_WAIT1" }, { 5, "TCP_FIN_WAIT2" }, { 6, "TCP_TIME_WAIT" }, { 7, "TCP_CLOSE" }, { 8, "TCP_CLOSE_WAIT" }, { 9, "TCP_LAST_ACK" }, { 10, "TCP_LISTEN" }, { 11, "TCP_CLOSING" }, { 12, "TCP_NEW_SYN_RECV" })
+[19:26:06] $ which tcpdump bpftool strace ethtool nft ip; tcpdump --version 2>&1 | head -1; bpftool version  (rc=0)
+[19:26:06]     /usr/bin/tcpdump
+[19:26:06]     /usr/sbin/bpftool
+[19:26:06]     /usr/bin/strace
+[19:26:06]     /usr/sbin/ethtool
+[19:26:06]     /usr/sbin/nft
+[19:26:06]     /usr/sbin/ip
+[19:26:06]     tcpdump version 4.99.6
+[19:26:06]     bpftool v7.7.0
+[19:26:06]     using libbpf v1.7
+[19:26:06]     features:
+[19:26:06] $ sysctl kernel.bpf_stats_enabled net.ipv4.ip_forward net.ipv4.conf.all.rp_filter kernel.unprivileged_bpf_disabled  (rc=0)
+[19:26:06]     kernel.bpf_stats_enabled = 0
+[19:26:06]     net.ipv4.ip_forward = 1
+[19:26:06]     net.ipv4.conf.all.rp_filter = 0
+[19:26:06]     kernel.unprivileged_bpf_disabled = 2
+[19:26:06] $ ip -4 route get 1.1.1.1 | sed -n 's/.* dev \([^ ]*\).*/\1/p'  (rc=0)
+[19:26:06]     eno12399np0
+[19:26:06] $ ip -d link show eno12399np0; ethtool -k eno12399np0 2>/dev/null | grep -E 'segmentation|checksum|scatter|udp' ; bpftool net show dev eno12399np0; tc qdisc show dev eno12399np0  (rc=0)
+[19:26:06]     2: eno12399np0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP mode DEFAULT group default qlen 1000
+[19:26:06]         link/ether 14:23:f2:f4:50:e0 brd ff:ff:ff:ff:ff:ff promiscuity 0 allmulti 0 minmtu 60 maxmtu 9600 addrgenmode eui64 numtxqueues 592 numrxqueues 74 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536 portname p0 switchid e050f4fefff22314 parentbus pci parentdev 0000:01:00.0 
+[19:26:06]         altname enp1s0f0np0
+[19:26:06]         altname enx1423f2f450e0
+[19:26:06]     rx-checksumming: on
+[19:26:06]     tx-checksumming: on
+[19:26:06]     	tx-checksum-ipv4: on
+[19:26:06]     	tx-checksum-ip-generic: off [fixed]
+[19:26:06]     	tx-checksum-ipv6: on
+[19:26:06]     	tx-checksum-fcoe-crc: off [fixed]
+[19:26:06]     	tx-checksum-sctp: off [fixed]
+[19:26:06]     scatter-gather: on
+[19:26:06]     	tx-scatter-gather: on
+[19:26:06]     	tx-scatter-gather-fraglist: off [fixed]
+[19:26:06]     tcp-segmentation-offload: on
+[19:26:06]     	tx-tcp-segmentation: on
+[19:26:06]     	tx-tcp-ecn-segmentation: off [fixed]
+[19:26:06]     	tx-tcp-mangleid-segmentation: off
+[19:26:06]     	tx-tcp6-segmentation: on
+[19:26:06]     	tx-tcp-accecn-segmentation: off [fixed]
+[19:26:06]     generic-segmentation-offload: on
+[19:26:06]     tx-fcoe-segmentation: off [fixed]
+[19:26:06]     tx-gre-segmentation: on
+[19:26:06]     tx-gre-csum-segmentation: on
+[19:26:06]     tx-ipxip4-segmentation: on
+[19:26:06]     tx-ipxip6-segmentation: off [fixed]
+[19:26:06]     tx-udp_tnl-segmentation: on
+[19:26:06]     tx-udp_tnl-csum-segmentation: on
+[19:26:06]     tx-tunnel-remcsum-segmentation: off [fixed]
+[19:26:06]     tx-sctp-segmentation: off [fixed]
+[19:26:06]     tx-esp-segmentation: off [fixed]
+[19:26:06]     tx-udp-segmentation: off [fixed]
+[19:26:06]     rx-udp_tunnel-port-offload: on
+[19:26:06]     rx-udp-gro-forwarding: off
+[19:26:06]     xdp:
+[19:26:06]     
+[19:26:06]     tc:
+[19:26:06]     
+[19:26:06]     flow_dissector:
+[19:26:06]     
+[19:26:06]     netfilter:
+[19:26:06]     
+[19:26:06]     qdisc mq 0: root 
+[19:26:06]     qdisc fq_codel 0: parent :4 limit 10240p flows 1024 quantum 1514 target 5ms interval 100ms memory_limit 32Mb ecn drop_batch 64 
+[19:26:06]     qdisc fq_codel 0: parent :3 limit 10240p flows 1024 quantum 1514 target 5ms interval 100ms memory_limit 32Mb ecn drop_batch 64 
+[19:26:06]     qdisc fq_codel 0: parent :2 limit 10240p flows 1024 quantum 1514 target 5ms interval 100ms memory_limit 32Mb ecn drop_batch 64 
+[19:26:06]     qdisc fq_codel 0: parent :1 limit 10240p flows 1024 quantum 1514 target 5ms interval 100ms memory_limit 32Mb ecn drop_batch 64
+[19:26:06] $ bpftool net show 2>&1 | head -60  (rc=0)
+[19:26:06]     xdp:
+[19:26:06]     
+[19:26:06]     tc:
+[19:26:06]     
+[19:26:06]     flow_dissector:
+[19:26:06]     
+[19:26:06]     netfilter:
+[19:26:06] $ bpftool cgroup show /sys/fs/cgroup 2>&1; ls /sys/fs/cgroup | head -50  (rc=0)
+[19:26:06]     ID       AttachType      AttachFlags     Name           
+[19:26:06]     39298    cgroup_sysctl   multi           sysctl_monitor                 
+[19:26:06]     cgroup.controllers
+[19:26:06]     cgroup.max.depth
+[19:26:06]     cgroup.max.descendants
+[19:26:06]     cgroup.pressure
+[19:26:06]     cgroup.procs
+[19:26:06]     cgroup.stat
+[19:26:06]     cgroup.subtree_control
+[19:26:06]     cgroup.threads
+[19:26:06]     cpu.pressure
+[19:26:06]     cpu.stat
+[19:26:06]     cpu.stat.local
+[19:26:06]     cpuset.cpus.effective
+[19:26:06]     cpuset.cpus.isolated
+[19:26:06]     cpuset.mems.effective
+[19:26:06]     dev-hugepages.mount
+[19:26:06]     dev-mqueue.mount
+[19:26:06]     dmem.capacity
+[19:26:06]     dmem.current
+[19:26:06]     init.scope
+[19:26:06]     io.cost.model
+[19:26:06]     io.cost.qos
+[19:26:06]     io.pressure
+[19:26:06]     io.prio.class
+[19:26:06]     io.stat
+[19:26:06]     memory.numa_stat
+[19:26:06]     memory.pressure
+[19:26:06]     memory.reclaim
+[19:26:06]     memory.stat
+[19:26:06]     memory.zswap.writeback
+[19:26:06]     misc.capacity
+[19:26:06]     misc.current
+[19:26:06]     misc.peak
+[19:26:06]     overdrive.slice
+[19:26:06]     proc-sys-fs-binfmt_misc.mount
+[19:26:06]     sys-fs-fuse-connections.mount
+[19:26:06]     sys-kernel-config.mount
+[19:26:06]     sys-kernel-debug.mount
+[19:26:06]     sys-kernel-tracing.mount
+[19:26:06]     system.slice
+[19:26:06]     user.slice
+[19:26:06] $ pgrep -af 'cloud-hypervisor|vfwd' | grep -v pgrep || echo none; ls /tmp/*.lock 2>/dev/null  (rc=0)
+[19:26:06]     none
+[19:26:06]     /tmp/chvv-942719-0.sock.lock
+[19:26:06]     /tmp/chvv-943899-0.sock.lock
+[19:26:06]     /tmp/netns-density-295-ayavsproxy-nested-qemu.lock
+[19:26:06]     /tmp/netns-density-295-ch-vhost-vsock.lock
+[19:26:06]     /tmp/netns-density-295-guest-vsock-capture.lock
+[19:26:06]     /tmp/netns-density-295-kernel-vs-aya-nested-qemu.lock
+[19:26:06]     /tmp/netns-density-295-shmproxy-nested-qemu.lock
+[19:26:06]     /tmp/overdrive-mtls-kernel-state.lock
+[19:26:06] === done
