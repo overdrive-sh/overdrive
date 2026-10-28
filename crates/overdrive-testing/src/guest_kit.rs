@@ -60,7 +60,7 @@
 use std::fs;
 use std::io;
 use std::num::NonZeroU8;
-use std::os::unix::fs::MetadataExt as _;
+use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 use std::os::unix::process::ExitStatusExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
@@ -435,6 +435,16 @@ impl GuestKit {
     pub fn provision(staging_root: &Path) -> Result<Self, GuestKitError> {
         let fixture = VmFixture::provision(staging_root)?;
         let _lock = take_lock(&staging_root.join(".guest-kit-lock"))?;
+        // The production VMM drops to uid/gid 4200 before opening its
+        // per-allocation rootfs clone.  This fixture's shared staging root is
+        // commonly created by the Metal runner with mode 0750, which leaves
+        // that identity unable to traverse to a chowned per-launch child.
+        // Preserve the root-owned staging artifacts and grant traversal only
+        // to the VMM's existing confined group.
+        std::os::unix::fs::chown(staging_root, None, Some(OVERDRIVE_VMM_UID))
+            .map_err(staging(format!("giving {} VMM traversal", staging_root.display())))?;
+        fs::set_permissions(staging_root, fs::Permissions::from_mode(0o710))
+            .map_err(staging(format!("making {} traversable", staging_root.display())))?;
         let kernel_release = vm_fixture::host_kernel_release()?;
         let forwarder_module = prepared_forwarder_module(&kernel_release)?;
         let init_bin = vm_fixture::build_overdrive_init_static()?;
@@ -538,6 +548,14 @@ impl GuestKit {
     pub fn boot(&self, boot: &GuestBoot<'_>) -> Result<GuestKitVm, GuestKitError> {
         fs::create_dir_all(boot.run_dir)
             .map_err(staging(format!("creating {}", boot.run_dir.display())))?;
+        // The VMM chowns its rootfs clone to uid/gid 4200 before spawning
+        // Cloud Hypervisor.  Keep this platform-owned parent traversable so
+        // the confined process can open that clone without widening the
+        // clone's or the operator's artifact permissions.
+        std::os::unix::fs::chown(boot.run_dir, None, Some(OVERDRIVE_VMM_UID))
+            .map_err(staging(format!("giving {} VMM traversal", boot.run_dir.display())))?;
+        fs::set_permissions(boot.run_dir, fs::Permissions::from_mode(0o710))
+            .map_err(staging(format!("making {} traversable", boot.run_dir.display())))?;
         let launch = |detail: String| GuestKitError::Launch { source: io::Error::other(detail) };
         let alloc = AllocationId::new(&format!("kit-{}", boot.cid))
             .map_err(|e| launch(format!("allocation id: {e}")))?;
@@ -547,6 +565,17 @@ impl GuestKit {
         // rootfs clone and its index stay under the caller's reflink-capable
         // `boot.run_dir` below.
         let runtime = WorkDir::create(Path::new("/run"), "ovd-gk")?;
+        // `CloudHypervisorVmm::create` chowns the per-allocation child run
+        // directory to the confined VMM identity (uid/gid 4200).  The Metal
+        // runner's umask creates this runtime parent as `root:root 0750`,
+        // which leaves the uid-dropped VMM unable to traverse to its API
+        // socket even though the child itself is owned by that identity.
+        // Grant traversal only; the child directory and Landlock grant still
+        // delimit every runtime artifact the VMM can read or write.
+        std::os::unix::fs::chown(runtime.path(), None, Some(OVERDRIVE_VMM_UID))
+            .map_err(staging(format!("giving {} VMM traversal", runtime.path().display())))?;
+        fs::set_permissions(runtime.path(), fs::Permissions::from_mode(0o710))
+            .map_err(staging(format!("making {} traversable", runtime.path().display())))?;
         let header = vm_fixture::read_header(&self.kernel_path)
             .map_err(staging(format!("reading {}", self.kernel_path.display())))?;
         let kernel = KernelImage::validate(self.kernel_path.clone(), HostArch::X86_64, &header)
@@ -1171,6 +1200,10 @@ impl WorkDir {
             fs::remove_dir_all(&path).map_err(staging(format!("clearing {}", path.display())))?;
         }
         fs::create_dir_all(&path).map_err(staging(format!("creating {}", path.display())))?;
+        std::os::unix::fs::chown(&path, None, Some(OVERDRIVE_VMM_UID))
+            .map_err(staging(format!("giving {} VMM traversal", path.display())))?;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o710))
+            .map_err(staging(format!("making {} traversable", path.display())))?;
         Ok(Self { path })
     }
 

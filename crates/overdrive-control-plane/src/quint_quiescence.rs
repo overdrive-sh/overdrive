@@ -718,7 +718,6 @@ fn quiescence_crash_during_recovery_then_restart_recovers() -> impl Driver {
     test = "FailedBootTableWriteRefusesBootThenRetrySucceeds",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER step 12"]
 fn quiescence_failed_boot_table_write_refuses_boot_then_retry_succeeds() -> impl Driver {
     QuiescenceDriver::fresh()
 }

@@ -4085,6 +4085,30 @@ async fn boot_server(
         phase = "stale_sweep",
         transition = "completed",
     );
+
+    // The shared mTLS table is the fail-closed forwarding boundary. Publish
+    // its node owner only after stale state has been cleared and before the
+    // guest-flow owner opens any forwarding context or listeners. A failed
+    // table write therefore refuses boot before forwarding opens (ADR-0184).
+    if let Err(source) = state.mtls_worker.start_shared_owner().await {
+        tracing::error!(
+            name: "health.startup.refused",
+            target: "overdrive::health",
+            reason = "mtls.shared_owner",
+            cause = %source,
+            "shared mTLS listener owner failed to start"
+        );
+        shutdown_failed_boot_network_owners(
+            &mtls_worker,
+            &mtls_resolve_owner,
+            guest_flow_owner.as_ref(),
+        )
+        .await;
+        return Err(error::ControlPlaneError::MtlsBoot(error::MtlsBootError::SharedOwner {
+            source,
+        }));
+    }
+
     if let Err(cause) = shared_guest_network.converge_shared().await {
         tracing::error!(
             name: "health.startup.refused",
@@ -4111,74 +4135,7 @@ async fn boot_server(
         unreachable!("the boot sets the guest-flow ports once, after step 9");
     }
 
-    // Publish the one node-shared F/C listener owner only after the shared
-    // guest switch has converged. Allocation start_alloc requires this owner;
-    // refusing here preserves the accepted boot boundary instead of allowing
-    // a Running allocation to discover an absent listener owner later.
-    if let Err(source) = state.mtls_worker.start_shared_owner().await {
-        tracing::error!(
-            name: "health.startup.refused",
-            target: "overdrive::health",
-            reason = "mtls.shared_owner",
-            cause = %source,
-            "shared mTLS listener owner failed to start"
-        );
-        shutdown_failed_boot_network_owners(
-            &mtls_worker,
-            &mtls_resolve_owner,
-            guest_flow_owner.as_ref(),
-        )
-        .await;
-        return Err(error::ControlPlaneError::MtlsBoot(error::MtlsBootError::SharedOwner {
-            source,
-        }));
-    }
-
     let (mut dns_responder_owner, dns_factory, dns_responder_deps) = {
-        // Ordinary shared-switch stale cleanup follows the boot-epoch VM
-        // reclamation drive.
-        // Reclamation has already killed every unsupervised non-terminal VM and
-        // committed Platform Reclamation, so this pass does not reconstruct a live
-        // survivor. It adopts any still-valid supervised ownership and garbage-
-        // collects the dead VM's structural netns residue before ordinary
-        // reconciliation can assign that slot again. A correlation conflict still
-        // refuses boot via `health.startup.refused`, reason `netns.adopt`.
-        // After VM reclamation, sweep the original per-workload rules whose
-        // mark-first programs remained in the kernel while their serve-owner
-        // listeners disappeared. Reclamation has already made the old VM
-        // terminal, so removing those dead redirects cannot reopen a live
-        // cleartext workload. A later RestartAllocation carries the
-        // predecessor alloc_id separately from the fresh successor spec.alloc;
-        // the successor outcome completes first, then one exact-old driver →
-        // mTLS → structural-network cleanup attempt addresses only alloc_id.
-        // Pinned boot order: reclamation → adopt/GC → sweep → serve.
-        match overdrive_worker::mtls_intercept::sweep_per_workload_tproxy_rules() {
-            Ok(swept) => {
-                tracing::info!(
-                    name: "mtls.boot.swept_per_workload_rules",
-                    swept,
-                    "adopt-on-restart §5: swept {swept} surviving per-workload nft-TPROXY \
-                     rule(s) from the shared chain (shared infra left intact)"
-                );
-            }
-            Err(source) => {
-                tracing::warn!(
-                    name: "health.startup.refused",
-                    reason = "nft.sweep",
-                    error = %source,
-                    "adopt-on-restart §5 nft-rule sweep failed; refusing to boot \
-                     (surviving per-workload TPROXY rules could not be reaped)"
-                );
-                shutdown_failed_boot_network_owners(
-                    &mtls_worker,
-                    &mtls_resolve_owner,
-                    guest_flow_owner.as_ref(),
-                )
-                .await;
-                return Err(error::ControlPlaneError::NftRuleSweep(source));
-            }
-        }
-
         // Converge-on-boot frontend-address rebuild (dial-by-name-responder step
         // 01-05; ADR-0072 REV-3, GH #243). The `FrontendAddrAllocator` is
         // reconstructed EMPTY on every fresh boot (ephemeral, no cross-restart
@@ -4186,14 +4143,14 @@ async fn boot_server(
         // pass re-derives every `<workload> → F` binding from the declared-Service intent
         // SSOT (`.claude/rules/reconcilers.md` § "Bar 1"; the same `workloads/`
         // intent scan as `ListenerFactStore::rebuild_from_intent`). It runs AFTER
-        // the shared-switch sweep above (preserving the PINNED boot order
-        // adopt → GC → sweep → rebuild → serve) and BEFORE the convergence loop /
+        // the boot reclamation and shared mTLS owner (preserving the PINNED boot
+        // order reclaim → stale-clear → table → forwarder → rebuild → serve) and BEFORE the convergence loop /
         // responder serve spawn (so the `name_index` reader the responder reads —
         // once 02-01 injects the shared instance — never observes an
         // empty-but-trusted allocator).
         //
         // GATED on `state.mtls_worker.is_some()` — the SAME composition gate the
-        // shared-switch sweep above uses, and (the load-bearing reason) the SAME gate the
+        // shared-switch owner uses, and (the load-bearing reason) the SAME gate the
         // 02-01 responder + its `name_index` reader are themselves built behind
         // (feature-delta DDN-6; the responder is constructed inside this very
         // real-dataplane block). On a non-mTLS boot there is therefore NO

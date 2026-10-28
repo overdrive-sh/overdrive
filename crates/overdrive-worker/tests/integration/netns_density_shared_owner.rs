@@ -211,7 +211,6 @@ enum InterceptCall {
         leg_c: SocketAddrV4,
     },
     ObserveShared,
-    InstallOutbound(Ipv4Addr),
     InstallInbound(SocketAddrV4),
     ObserveSharedState,
     ConvergeAllocationElements(InterceptMembers),
@@ -468,8 +467,6 @@ struct SharedOwnerSurface {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum SharedElement {
-    ManagedGuest(Ipv4Addr),
-    OutboundSource(Ipv4Addr),
     InboundDestination(SocketAddrV4),
 }
 
@@ -516,12 +513,6 @@ fn intercept_members(elements: &BTreeSet<SharedElement>) -> InterceptMembers {
     let mut members = InterceptMembers::default();
     for element in elements {
         match *element {
-            SharedElement::ManagedGuest(ip) => {
-                members.managed_guest_ips.insert(ip);
-            }
-            SharedElement::OutboundSource(ip) => {
-                members.outbound_sources.insert(ip);
-            }
             SharedElement::InboundDestination(destination) => {
                 members.inbound_destinations.insert(destination);
             }
@@ -533,16 +524,9 @@ fn intercept_members(elements: &BTreeSet<SharedElement>) -> InterceptMembers {
 /// The element set one member set names.
 fn member_elements(members: &InterceptMembers) -> BTreeSet<SharedElement> {
     members
-        .managed_guest_ips
+        .inbound_destinations
         .iter()
-        .map(|ip| SharedElement::ManagedGuest(*ip))
-        .chain(members.outbound_sources.iter().map(|ip| SharedElement::OutboundSource(*ip)))
-        .chain(
-            members
-                .inbound_destinations
-                .iter()
-                .map(|destination| SharedElement::InboundDestination(*destination)),
-        )
+        .map(|destination| SharedElement::InboundDestination(*destination))
         .collect()
 }
 
@@ -557,15 +541,10 @@ const fn program_not_published() -> InterceptError {
 /// `{managed(source), outbound(source)} ∪ {inbound(d)}`. After the firewall
 /// single cut nothing installs the first two, so their removal is convergent.
 fn requested_elements(
-    source_addr: Ipv4Addr,
+    _source_addr: Ipv4Addr,
     destinations: &[SocketAddrV4],
 ) -> BTreeSet<SharedElement> {
-    [SharedElement::ManagedGuest(source_addr), SharedElement::OutboundSource(source_addr)]
-        .into_iter()
-        .chain(
-            destinations.iter().map(|destination| SharedElement::InboundDestination(*destination)),
-        )
-        .collect()
+    destinations.iter().map(|destination| SharedElement::InboundDestination(*destination)).collect()
 }
 
 /// Convergent removal of one allocation's members over a recorded element set:
@@ -727,30 +706,6 @@ impl MtlsIntercept for RecordingSharedIntercept {
         self.record(InterceptCall::ObserveShared);
         self.observe_calls.fetch_add(1, Ordering::SeqCst);
         Ok(self.shared_observation.lock().clone())
-    }
-
-    fn install_outbound(
-        &self,
-        source_addr: Ipv4Addr,
-        _leg_f_port: u16,
-    ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
-        self.record(InterceptCall::InstallOutbound(source_addr));
-        // The host admits a source only while a recorded owner exists.
-        if self.recorded_identity.lock().is_none() {
-            return Err(InterceptError::SharedProgramNotConverged);
-        }
-        let owned = BTreeSet::from([
-            SharedElement::ManagedGuest(source_addr),
-            SharedElement::OutboundSource(source_addr),
-        ]);
-        self.allocation_elements.lock().extend(owned.iter().copied());
-        self.lost_members.lock().retain(|element| !owned.contains(element));
-        Ok(Box::new(RecordingElementGuard {
-            active: Arc::clone(&self.allocation_elements),
-            retired: Arc::clone(&self.retired_elements),
-            owned,
-            drops: Arc::clone(&self.allocation_guard_drops),
-        }))
     }
 
     fn install_inbound(
@@ -985,15 +940,15 @@ async fn published_wrong_shared_target_is_observe_only_until_bounded_fail_stop()
         },
         "published semantic identity names the two concrete listener targets"
     );
-    let wrong_leg_f = SocketAddrV4::new(
-        *listener_addresses[0].ip(),
-        listener_addresses[0].port().checked_add(1).unwrap_or(1),
+    let wrong_leg_c = SocketAddrV4::new(
+        *listener_addresses[1].ip(),
+        listener_addresses[1].port().checked_add(1).unwrap_or(1),
     );
-    assert_ne!(wrong_leg_f, listener_addresses[0]);
+    assert_ne!(wrong_leg_c, listener_addresses[1]);
     let (wrong_tables, wrong_sets, wrong_prerouting, wrong_output) =
         SharedIpInterceptIdentity::for_listener_ports(
-            wrong_leg_f.port(),
-            listener_addresses[1].port(),
+            listener_addresses[0].port(),
+            wrong_leg_c.port(),
         )
         .expect("different non-zero leg-F target remains canonical")
         .normalized_parts();
@@ -1126,24 +1081,6 @@ impl MtlsIntercept for ActivationBarrierIntercept {
         &self,
     ) -> overdrive_worker::mtls_intercept::Result<Option<InterceptPostcondition>> {
         self.shared.observe_shared()
-    }
-
-    fn install_outbound(
-        &self,
-        source_addr: Ipv4Addr,
-        _leg_f_port: u16,
-    ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
-        let owned = BTreeSet::from([
-            SharedElement::ManagedGuest(source_addr),
-            SharedElement::OutboundSource(source_addr),
-        ]);
-        self.allocation_elements.lock().extend(owned.iter().copied());
-        Ok(Box::new(RecordingElementGuard {
-            active: Arc::clone(&self.allocation_elements),
-            retired: Arc::clone(&self.retired_elements),
-            owned,
-            drops: Arc::clone(&self.guard_drops),
-        }))
     }
 
     fn install_inbound(
@@ -1293,8 +1230,8 @@ async fn stop_and_owner_shutdown_during_pending_registration_return_registration
             .expect("one retirement owner drains every transferred effect");
         assert_eq!(
             intercept.guard_drops.load(Ordering::SeqCst),
-            3,
-            "one outbound group and two inbound tokens drop exactly once"
+            2,
+            "two inbound tokens drop exactly once"
         );
         assert!(
             intercept.allocation_elements.lock().is_empty(),
@@ -1412,14 +1349,6 @@ impl MtlsEnforcement for RecordingSharedEnforcement {
     }
 }
 
-async fn connect_shared_source(source: Ipv4Addr, target: SocketAddrV4) -> tokio::net::TcpStream {
-    let socket = tokio::net::TcpSocket::new_v4().expect("create shared-listener client socket");
-    socket
-        .bind(SocketAddrV4::new(source, 0).into())
-        .expect("bind the allocation's immutable source address");
-    socket.connect(target.into()).await.expect("connect through the shared leg-F listener")
-}
-
 async fn connect_registered_shared_source(
     worker: &MtlsInterceptWorker,
     spec: &AllocationSpec,
@@ -1460,7 +1389,6 @@ async fn wait_listener_closed(address: SocketAddrV4) {
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 12"]
 async fn stopping_one_shared_allocation_preserves_the_unrelated_handle_and_complete_listener_owner()
 {
     let intercept = Arc::new(RecordingSharedIntercept::new());
@@ -1476,8 +1404,11 @@ async fn stopping_one_shared_allocation_preserves_the_unrelated_handle_and_compl
     let second = allocation_spec_at("shared-isolated-second", Ipv4Addr::new(127, 0, 0, 3));
     worker.start_alloc(&first).await.expect("publish first capability");
     worker.start_alloc(&second).await.expect("publish second capability");
-    let _first_client = connect_shared_source(Ipv4Addr::new(127, 0, 0, 2), leg_f).await;
-    let _second_client = connect_shared_source(Ipv4Addr::new(127, 0, 0, 3), leg_f).await;
+    let (_first_registration, _first_client) =
+        connect_registered_shared_source(&worker, &first, Ipv4Addr::new(127, 0, 0, 2), leg_f).await;
+    let (_second_registration, _second_client) =
+        connect_registered_shared_source(&worker, &second, Ipv4Addr::new(127, 0, 0, 3), leg_f)
+            .await;
     enforcement.wait_for_active(2).await;
 
     let owner_before = intercept.surface();
@@ -1493,7 +1424,7 @@ async fn stopping_one_shared_allocation_preserves_the_unrelated_handle_and_compl
     let owner_after = intercept.surface();
     let enforcement_after = enforcement.surface();
     let mut expected_owner = owner_before.clone();
-    expected_owner.allocation_guard_drops += 3;
+    expected_owner.allocation_guard_drops += 2;
     expected_owner.allocation_elements = allocation_elements(&second);
     assert_eq!(owner_after, expected_owner, "only the first allocation elements change");
     assert_eq!(
@@ -1511,7 +1442,9 @@ async fn stopping_one_shared_allocation_preserves_the_unrelated_handle_and_compl
     assert_eq!(worker.leg_c_addr(&second.alloc), Some(addresses[1]));
     worker.audit_shared_owner().await.expect("both listener tasks and node guard remain live");
 
-    let _second_exchange = connect_shared_source(Ipv4Addr::new(127, 0, 0, 3), leg_f).await;
+    let (_second_exchange_registration, _second_exchange) =
+        connect_registered_shared_source(&worker, &second, Ipv4Addr::new(127, 0, 0, 3), leg_f)
+            .await;
     enforcement.wait_for_active(2).await;
     worker.stop_alloc(&second.alloc).await.expect("second capability drains independently");
     intercept.release_listener_clones();
@@ -1569,7 +1502,7 @@ async fn owner_shutdown_waits_the_active_claim_then_drains_every_shared_capabili
     let final_enforcement = enforcement.surface();
     assert!(final_enforcement.active.is_empty());
     assert_eq!(final_enforcement.torn_down.len(), 3);
-    assert_eq!(intercept.allocation_guard_drops(), 6);
+    assert_eq!(intercept.allocation_guard_drops(), 4);
     assert_eq!(intercept.shared_guard_drops(), 0, "node guard is privately relinquished");
     let owner_after = intercept.surface();
     assert_eq!(owner_after.call_counts, owner_before.call_counts);
@@ -1920,7 +1853,6 @@ fn member_convergences(calls: &[InterceptCall]) -> Vec<InterceptMembers> {
 /// S-ND295-61 — Lost members, policy route, or guard are detected within a second and repaired with live workloads.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 12"]
 async fn member_loss_is_an_ipsets_failure_and_repair_restores_exactly_the_member() {
     let intercept = Arc::new(RecordingSharedIntercept::new());
     let worker = worker(intercept.clone());
@@ -1990,7 +1922,6 @@ impl ProtectionLoss {
 /// S-ND295-61 — Lost members, policy route, or guard are detected within a second and repaired with live workloads.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 12"]
 #[allow(
     clippy::too_many_lines,
     reason = "one repair narrative keeps detection, the equal-identity re-converge, the guard handover, and the later admission together"
@@ -2100,7 +2031,6 @@ async fn policy_route_loss_is_repaired_with_live_members_and_the_prior_guard_is_
 /// S-ND295-61 — Lost members, policy route, or guard are detected within a second and repaired with live workloads.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 12"]
 #[allow(
     clippy::too_many_lines,
     reason = "the never-rewritten refusal and its absent-program control share one owner so the contrast is one population"
@@ -2117,10 +2047,10 @@ async fn a_differently_targeted_program_is_never_rewritten() {
     let members = live_members(&[&live]);
     worker.audit_shared_owner().await.expect("baseline: the owner audits clean");
 
-    let wrong_leg_f =
-        SocketAddrV4::new(*addresses[0].ip(), addresses[0].port().checked_add(1).unwrap_or(1));
-    assert_ne!(wrong_leg_f, addresses[0]);
-    let wrong = RecordingSharedIntercept::identity(wrong_leg_f, addresses[1]);
+    let wrong_leg_c =
+        SocketAddrV4::new(*addresses[1].ip(), addresses[1].port().checked_add(1).unwrap_or(1));
+    assert_ne!(wrong_leg_c, addresses[1]);
+    let wrong = RecordingSharedIntercept::identity(addresses[0], wrong_leg_c);
     intercept.replace_shared_observation(Some(wrong.clone()));
 
     let Err(detection) = worker.audit_shared_owner().await else {

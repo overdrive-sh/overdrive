@@ -270,10 +270,7 @@ fn kernel_members() -> (SharedIpInterceptIdentity, InterceptMembers) {
     let state = nft::observe_shared_ip_intercept_state()
         .expect("the typed shared-IP observation succeeds")
         .expect("the owned shared-IP program is present");
-    let members = InterceptMembers {
-        inbound_destinations: state.inbound_destinations().clone(),
-        ..InterceptMembers::default()
-    };
+    let members = InterceptMembers { inbound_destinations: state.inbound_destinations().clone() };
     (state.identity().clone(), members)
 }
 
@@ -495,10 +492,8 @@ fn convergent_removal_with_a_pre_absent_member_and_batch_rejection_preserves_sta
         )
         .expect("removal converges when a requested member is already absent");
     evidence.record(row, "removed", format_args!("{removed:?}"));
-    let surviving = InterceptMembers {
-        inbound_destinations: BTreeSet::from([REMOVAL_SURVIVING_DESTINATION]),
-        ..InterceptMembers::default()
-    };
+    let surviving =
+        InterceptMembers { inbound_destinations: BTreeSet::from([REMOVAL_SURVIVING_DESTINATION]) };
     assert_eq!(
         removed.members, surviving,
         "every requested member is absent and every other member is unchanged"
@@ -799,7 +794,6 @@ fn members_of(addresses: &[Ipv4Addr]) -> InterceptMembers {
             .iter()
             .map(|address| SocketAddrV4::new(*address, MEMBER_SERVICE_PORT))
             .collect(),
-        ..InterceptMembers::default()
     }
 }
 
@@ -944,7 +938,6 @@ async fn lose_and_repair(evidence: Evidence, loss: InterceptLoss) {
 /// repaired with live workloads.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "pending DELIVER step 12"]
 async fn each_deleted_intercept_object_is_restored_exactly_with_live_allocations() {
     assert!(is_root(), "S-ND295-61 Lima evidence requires root and CAP_NET_ADMIN");
     record_uname("S-ND295-61");

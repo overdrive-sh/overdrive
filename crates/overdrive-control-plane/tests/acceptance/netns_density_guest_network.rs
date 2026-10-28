@@ -367,9 +367,9 @@ const INJECTED_REMOVAL_OP: &str = "nd295-injected-member-delete";
 /// managed-guest member of `source` could not be deleted, `EBUSY`.
 fn injected_removal_failure(source: Ipv4Addr) -> InterceptError {
     InterceptError::NftElementUpdateFailed {
-        set: InterceptSet::ManagedGuestIps,
+        set: InterceptSet::InboundDestinations,
         operation: InterceptElementOperation::Delete,
-        key: InterceptElementKey::Address(source),
+        key: InterceptElementKey::Destination(SocketAddrV4::new(source, 8080)),
         source: NetlinkError::nft(
             INJECTED_REMOVAL_OP,
             std::io::Error::from_raw_os_error(libc::EBUSY),
@@ -383,11 +383,11 @@ fn is_injected_removal_failure(error: &InterceptError, source: Ipv4Addr) -> bool
     matches!(
         error,
         InterceptError::NftElementUpdateFailed {
-            set: InterceptSet::ManagedGuestIps,
+            set: InterceptSet::InboundDestinations,
             operation: InterceptElementOperation::Delete,
-            key: InterceptElementKey::Address(key),
+            key: InterceptElementKey::Destination(key),
             source: NetlinkError::Nft { op, source: io, .. },
-        } if *key == source
+        } if *key.ip() == source
             && *op == INJECTED_REMOVAL_OP
             && io.raw_os_error() == Some(libc::EBUSY)
     )
@@ -442,14 +442,6 @@ impl MtlsIntercept for RecordingIntercept {
         &self,
     ) -> overdrive_worker::mtls_intercept::Result<Option<InterceptPostcondition>> {
         self.inner.observe_shared()
-    }
-
-    fn install_outbound(
-        &self,
-        source_addr: Ipv4Addr,
-        agent_leg_f_port: u16,
-    ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
-        self.inner.install_outbound(source_addr, agent_leg_f_port)
     }
 
     fn install_inbound(
@@ -1313,11 +1305,9 @@ async fn a_reclaim_whose_parts_were_removed_out_of_band_releases_the_lease() {
     let destinations = destinations(address);
     let members_before = fixture.intercept.members();
     assert!(
-        members_before.managed_guest_ips.contains(&address)
-            && members_before.outbound_sources.contains(&address)
-            && destinations
-                .iter()
-                .all(|destination| members_before.inbound_destinations.contains(destination)),
+        destinations
+            .iter()
+            .all(|destination| members_before.inbound_destinations.contains(destination)),
         "precondition: the failed removal left the allocation's members in place: \
          {members_before:?}"
     );
@@ -1327,11 +1317,9 @@ async fn a_reclaim_whose_parts_were_removed_out_of_band_releases_the_lease() {
         .expect("the out-of-band removal reaches the intercept port");
     let members_after = fixture.intercept.members();
     assert!(
-        !members_after.managed_guest_ips.contains(&address)
-            && !members_after.outbound_sources.contains(&address)
-            && destinations
-                .iter()
-                .all(|destination| !members_after.inbound_destinations.contains(destination)),
+        destinations
+            .iter()
+            .all(|destination| !members_after.inbound_destinations.contains(destination)),
         "the out-of-band delete removed the allocation's members: {members_after:?}"
     );
 

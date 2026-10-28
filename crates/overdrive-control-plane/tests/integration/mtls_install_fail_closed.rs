@@ -530,16 +530,6 @@ impl MtlsIntercept for JournalIntercept {
         self.inner.observe_shared()
     }
 
-    fn install_outbound(
-        &self,
-        source_addr: Ipv4Addr,
-        leg_f_port: u16,
-    ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
-        let guard = self.inner.install_outbound(source_addr, leg_f_port)?;
-        record(&self.journal, Step::InterceptInstalled, None);
-        Ok(self.guard(guard))
-    }
-
     fn install_inbound(
         &self,
         virt: SocketAddrV4,

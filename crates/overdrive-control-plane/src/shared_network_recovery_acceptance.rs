@@ -371,7 +371,6 @@ async fn overlapping_recoveries_reopen_only_when_the_last_hold_is_restored() {
 /// succeeds, then the node runs with the table complete, forwarding open and
 /// no hold.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER step 12"]
 async fn a_failed_boot_table_write_refuses_boot_and_the_retry_converges() {
     let collector = RefusalCollector::default();
     let _guard =
@@ -411,7 +410,6 @@ async fn a_failed_boot_table_write_refuses_boot_and_the_retry_converges() {
 /// the following boot's write succeeds, then the node runs with forwarding
 /// open.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER step 12"]
 async fn the_shared_table_is_absent_or_complete_across_crash_and_failed_write() {
     let mut node = ComposedNode::fresh();
     node.boot().await.expect("the node boots");

@@ -51,6 +51,7 @@ use std::net::{Ipv4Addr, SocketAddrV4};
 use std::time::{Duration, Instant};
 
 use crate::error::{NEG_EEXIST, NetlinkError};
+use overdrive_core::guest_transport::{GUEST_NODE_GATEWAY, GUEST_NODE_PREFIX};
 
 // ---- NETLINK_NETFILTER / nfnetlink framing (pinned; spike increment-e) ------
 const NETLINK_NETFILTER: i32 = 12;
@@ -90,17 +91,20 @@ const NLA_F_NESTED: u16 = 0x8000;
 // families / versions.
 /// `NFPROTO_IPV4` — the `ip` family the shared `overdrive-mtls` table lives in.
 const NFPROTO_IPV4: u8 = 2;
+const NFPROTO_BRIDGE: u8 = 7;
 
 /// Closed private nft family discriminator shared by the one codec.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NftFamily {
     Ipv4,
+    Bridge,
 }
 
 impl NftFamily {
     const fn nfproto(self) -> u8 {
         match self {
             Self::Ipv4 => NFPROTO_IPV4,
+            Self::Bridge => NFPROTO_BRIDGE,
         }
     }
 }
@@ -574,12 +578,6 @@ fn e_lookup(set: &str, sreg: u32) -> Vec<u8> {
     expr("lookup", &data)
 }
 
-fn e_ipv4_lookup(set: &str, offset: u32) -> Vec<u8> {
-    let mut ex = e_payload(NFT_PAYLOAD_NETWORK_HEADER, offset, 4, NFT_REG_1);
-    ex.extend(e_lookup(set, NFT_REG_1));
-    ex
-}
-
 fn e_ipv4_tcp_destination_lookup(set: &str) -> Vec<u8> {
     let mut ex = e_meta_load(NFT_META_L4PROTO, NFT_REG_1);
     ex.extend(e_cmp_eq(NFT_REG_1, &[IPPROTO_TCP]));
@@ -589,21 +587,9 @@ fn e_ipv4_tcp_destination_lookup(set: &str) -> Vec<u8> {
     ex
 }
 
-fn e_mark_equals(mark: u32) -> Vec<u8> {
-    let mut ex = e_meta_load(NFT_META_MARK, NFT_REG_1);
-    ex.extend(e_cmp_eq(NFT_REG_1, &mark.to_ne_bytes()));
-    ex
-}
-
 fn e_mark_not_equals(mark: u32) -> Vec<u8> {
     let mut ex = e_meta_load(NFT_META_MARK, NFT_REG_1);
     ex.extend(e_cmp(NFT_REG_1, NFT_CMP_NEQ, &mark.to_ne_bytes()));
-    ex
-}
-
-fn e_tcp_protocol() -> Vec<u8> {
-    let mut ex = e_meta_load(NFT_META_L4PROTO, NFT_REG_1);
-    ex.extend(e_cmp_eq(NFT_REG_1, &[IPPROTO_TCP]));
     ex
 }
 
@@ -716,8 +702,6 @@ pub fn mark_accept_exemption_exprs(mark: u32) -> Vec<u8> {
 const SHARED_IP_TABLE: &str = "overdrive-mtls";
 const SHARED_IP_PREROUTING: &str = "prerouting";
 const SHARED_IP_OUTPUT: &str = "output";
-const SHARED_IP_MANAGED_GUESTS: &str = "managed_guest_ips";
-const SHARED_IP_OUTBOUND_SOURCES: &str = "outbound_sources";
 const SHARED_IP_INBOUND_DESTINATIONS: &str = "inbound_destinations";
 const SHARED_IP_FWMARK: u32 = 0x1;
 
@@ -729,40 +713,21 @@ fn shared_ip_set_userdata(name: &str) -> Vec<u8> {
     format!("ovd295-ip-set-{name}").into_bytes()
 }
 
-fn shared_ip_prerouting_rule_exprs(port_f: u16, port_c: u16, index: usize) -> Vec<u8> {
+fn shared_ip_prerouting_rule_exprs(_port_f: u16, port_c: u16, index: usize) -> Vec<u8> {
     let leg_s_mark = overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
     match index {
         // leg-S exemption.
         0 => mark_accept_exemption_exprs(leg_s_mark),
-        // TCX-intercepted outbound TCP from a registered source to leg F.
-        1 => {
-            let mut ex = e_mark_equals(0x295a);
-            ex.extend(e_ipv4_lookup(SHARED_IP_OUTBOUND_SOURCES, 12));
-            ex.extend(e_tcp_protocol());
-            ex.extend(tproxy_and_mark_and_accept(Ipv4Addr::LOCALHOST, port_f, SHARED_IP_FWMARK));
-            ex
-        }
-        // TCX-intercepted TCP without a registered source.
-        2 => {
-            let mut ex = e_mark_equals(0x295a);
-            ex.extend(e_tcp_protocol());
-            ex.extend(e_drop());
-            ex
-        }
         // Registered destination and declared TCP port to leg C.
-        3 => {
+        1 => {
             let mut ex = e_ipv4_tcp_destination_lookup(SHARED_IP_INBOUND_DESTINATIONS);
             ex.extend(tproxy_and_mark_and_accept(Ipv4Addr::LOCALHOST, port_c, SHARED_IP_FWMARK));
             ex
         }
-        // Any other TCP packet directed at a managed guest is dropped.
-        4 => {
-            let mut ex = e_ipv4_lookup(SHARED_IP_MANAGED_GUESTS, 16);
-            ex.extend(e_tcp_protocol());
-            ex.extend(e_drop());
-            ex
-        }
-        _ => unreachable!("shared prerouting rule index is bounded to five"),
+        // Any packet directed at a guest-prefix address other than the gateway
+        // is dropped when it was not diverted to leg C.
+        2 => e_guest_prefix_drop(),
+        _ => unreachable!("shared prerouting rule index is bounded to three"),
     }
 }
 
@@ -781,15 +746,38 @@ fn shared_ip_output_rule_exprs(leg_c_port: u16, index: usize) -> Vec<u8> {
             let _ = leg_c_port;
             ex
         }
-        // Any other TCP packet directed at a managed guest is dropped.
-        2 => {
-            let mut ex = e_ipv4_lookup(SHARED_IP_MANAGED_GUESTS, 16);
-            ex.extend(e_tcp_protocol());
-            ex.extend(e_drop());
-            ex
-        }
+        // Any packet directed at a guest-prefix address other than the gateway
+        // is rejected before it can reach another host route or socket.
+        2 => e_guest_prefix_reject(),
         _ => unreachable!("shared output rule index is bounded to three"),
     }
+}
+
+fn e_guest_prefix_match() -> Vec<u8> {
+    // GUEST_NODE_PREFIX is the constant 100.95.0.0/16. Comparing the first
+    // two destination octets is the wire-level equivalent of that /16 match.
+    let mut ex = e_payload(NFT_PAYLOAD_NETWORK_HEADER, 16, 2, NFT_REG_1);
+    ex.extend(e_cmp_eq(NFT_REG_1, &GUEST_NODE_PREFIX.network().octets()[..2]));
+    ex.extend(e_payload(NFT_PAYLOAD_NETWORK_HEADER, 16, 4, NFT_REG_1));
+    ex.extend(e_cmp(NFT_REG_1, NFT_CMP_NEQ, &GUEST_NODE_GATEWAY.octets()));
+    ex
+}
+
+fn e_guest_prefix_drop() -> Vec<u8> {
+    let mut ex = e_guest_prefix_match();
+    ex.extend(e_drop());
+    ex
+}
+
+fn e_guest_prefix_reject() -> Vec<u8> {
+    let mut ex = e_guest_prefix_match();
+    let mut data = Vec::new();
+    // Plain nft `reject`: ICMPX port-unreachable. This is the only reject
+    // form that yields ECONNREFUSED for TCP and EPERM on the first UDP send.
+    attr_be32(&mut data, 1, 0);
+    attr(&mut data, 2, &[3]);
+    ex.extend(expr("reject", &data));
+    ex
 }
 
 // =============================================================================
@@ -1160,7 +1148,7 @@ fn canonical_expression_data(name: &str, data: &[u8]) -> std::io::Result<Vec<u8>
     match name {
         "cmp" => canonical_attr_set(data, &[NFTA_CMP_DATA]),
         "immediate" => canonical_attr_set(data, &[NFTA_IMMEDIATE_DATA]),
-        "meta" | "payload" | "tproxy" => canonical_attr_set(data, &[]),
+        "meta" | "payload" | "tproxy" | "reject" => canonical_attr_set(data, &[]),
         // nftables materializes the implicit zero lookup flags in GETRULE
         // replies. The producer omits that default, so the private identity
         // projection removes only this one semantic default.
@@ -2689,8 +2677,6 @@ pub struct SharedIpInterceptIdentity {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SharedIpInterceptState {
     identity: SharedIpInterceptIdentity,
-    managed_guest_ips: BTreeSet<Ipv4Addr>,
-    outbound_sources: BTreeSet<Ipv4Addr>,
     inbound_destinations: BTreeSet<SocketAddrV4>,
 }
 
@@ -2699,16 +2685,6 @@ impl SharedIpInterceptState {
     #[doc(hidden)]
     pub fn identity(&self) -> &SharedIpInterceptIdentity {
         &self.identity
-    }
-
-    #[doc(hidden)]
-    pub fn managed_guest_ips(&self) -> &BTreeSet<Ipv4Addr> {
-        &self.managed_guest_ips
-    }
-
-    #[doc(hidden)]
-    pub fn outbound_sources(&self) -> &BTreeSet<Ipv4Addr> {
-        &self.outbound_sources
     }
 
     #[doc(hidden)]
@@ -2772,14 +2748,6 @@ pub fn observe_shared_ip_intercept_state() -> Result<Option<SharedIpInterceptSta
 }
 
 #[doc(hidden)]
-pub fn insert_shared_ip_intercept_outbound_elements_atomically(
-    expected_program: &SharedIpInterceptIdentity,
-    source_addr: Ipv4Addr,
-) -> Result<SharedIpInterceptState, NetlinkError> {
-    shared_ip::insert_outbound(expected_program, source_addr)
-}
-
-#[doc(hidden)]
 pub fn insert_shared_ip_intercept_inbound_element_atomically(
     expected_program: &SharedIpInterceptIdentity,
     destination: SocketAddrV4,
@@ -2790,10 +2758,9 @@ pub fn insert_shared_ip_intercept_inbound_element_atomically(
 #[doc(hidden)]
 pub fn delete_shared_ip_intercept_elements_atomically(
     expected_program: &SharedIpInterceptIdentity,
-    source_addr: Option<Ipv4Addr>,
     inbound_destinations: &[SocketAddrV4],
 ) -> Result<SharedIpInterceptState, NetlinkError> {
-    shared_ip::delete_elements(expected_program, source_addr, inbound_destinations)
+    shared_ip::delete_elements(expected_program, inbound_destinations)
 }
 
 /// The complete dynamic member set of the node-shared IPv4 intercept program:
@@ -2802,10 +2769,6 @@ pub fn delete_shared_ip_intercept_elements_atomically(
 #[doc(hidden)]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SharedIpInterceptMembers {
-    /// Managed guest source addresses.
-    pub managed_guest_ips: BTreeSet<Ipv4Addr>,
-    /// Outbound-intercepted guest source addresses.
-    pub outbound_sources: BTreeSet<Ipv4Addr>,
     /// Inbound-intercepted destinations.
     pub inbound_destinations: BTreeSet<SocketAddrV4>,
 }
@@ -2839,31 +2802,23 @@ mod shared_ip {
     // These are the nftables datatype identifiers, not the generic
     // NFT_DATA_* payload tags.  The concatenated key is aligned to four-byte
     // IPv4 plus four-byte inet_service storage by the kernel ABI.
-    const IPV4_ADDR_KEY_TYPE: u32 = 7;
     const IPV4_ADDR_INET_SERVICE_KEY_TYPE: u32 = 0x1cd;
-    const MANAGED_SET_KEY_LEN: u32 = 4;
     const DESTINATION_SET_KEY_LEN: u32 = 8;
-    const PREROUTING_RULE_COUNT: usize = 5;
+    const PREROUTING_RULE_COUNT: usize = 3;
     const OUTPUT_RULE_COUNT: usize = 3;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
     enum ElementSet {
-        ManagedGuestIps,
-        OutboundSources,
         InboundDestinations,
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
     enum ElementKey {
-        ManagedGuest(Ipv4Addr),
-        OutboundSource(Ipv4Addr),
         Destination(SocketAddrV4),
     }
 
     #[derive(Debug, Clone, Default, PartialEq, Eq)]
     struct ElementMembers {
-        managed_guest_ips: BTreeSet<Ipv4Addr>,
-        outbound_sources: BTreeSet<Ipv4Addr>,
         inbound_destinations: BTreeSet<SocketAddrV4>,
     }
 
@@ -3032,15 +2987,11 @@ mod shared_ip {
     }
 
     fn expected_sets() -> Vec<Vec<u8>> {
-        vec![
-            encode_set(SHARED_IP_MANAGED_GUESTS, IPV4_ADDR_KEY_TYPE, MANAGED_SET_KEY_LEN),
-            encode_set(SHARED_IP_OUTBOUND_SOURCES, IPV4_ADDR_KEY_TYPE, MANAGED_SET_KEY_LEN),
-            encode_set(
-                SHARED_IP_INBOUND_DESTINATIONS,
-                IPV4_ADDR_INET_SERVICE_KEY_TYPE,
-                DESTINATION_SET_KEY_LEN,
-            ),
-        ]
+        vec![encode_set(
+            SHARED_IP_INBOUND_DESTINATIONS,
+            IPV4_ADDR_INET_SERVICE_KEY_TYPE,
+            DESTINATION_SET_KEY_LEN,
+        )]
     }
 
     fn invalid_shared_ip(message: impl Into<String>) -> NetlinkError {
@@ -3132,7 +3083,7 @@ mod shared_ip {
             let name = name.ok_or_else(|| invalid_data("shared IP expression name is missing"))?;
             let data = data.ok_or_else(|| invalid_data("shared IP expression data is missing"))?;
             let mut data = canonical_expression_data(name, data)?;
-            if name == "immediate" && matches!((chain, index), (Chain::Prerouting, 1 | 3)) {
+            if name == "immediate" && matches!((chain, index), (Chain::Prerouting, 1)) {
                 let (rewritten, port) = canonicalize_dynamic_port(&data)?;
                 data = rewritten;
                 if let Some(port) = port
@@ -3159,7 +3110,7 @@ mod shared_ip {
         {
             return Err(invalid_shared_ip("shared IP identity has an incompatible shape"));
         }
-        let mut ports = [None, None];
+        let mut inbound_port = None;
         for (chain, components, count) in [
             (Chain::Prerouting, prerouting, PREROUTING_RULE_COUNT),
             (Chain::Output, output, OUTPUT_RULE_COUNT),
@@ -3173,8 +3124,8 @@ mod shared_ip {
                     .map_err(|source| NetlinkError::nft("shared-ip-observe", source))?;
                 let expected = if chain == Chain::Prerouting {
                     shared_ip_prerouting_rule_exprs(
+                        0,
                         dynamic_port.filter(|_| index == 1).unwrap_or_default(),
-                        dynamic_port.filter(|_| index == 3).unwrap_or_default(),
                         index,
                     )
                 } else {
@@ -3186,13 +3137,13 @@ mod shared_ip {
                 if canonical != expected {
                     return Err(invalid_shared_ip("shared IP rule expression is not canonical"));
                 }
-                if matches!((chain, index), (Chain::Prerouting, 1 | 3)) {
+                if matches!((chain, index), (Chain::Prerouting, 1)) {
                     let port = dynamic_port
                         .ok_or_else(|| invalid_shared_ip("shared IP listener target is missing"))?;
                     if port == 0 {
                         return Err(invalid_shared_ip("shared IP listener target is zero"));
                     }
-                    ports[usize::from(index == 3)] = Some(port);
+                    inbound_port = Some(port);
                 } else if dynamic_port.is_some() {
                     return Err(invalid_shared_ip("unexpected shared IP listener target"));
                 }
@@ -3201,7 +3152,7 @@ mod shared_ip {
                 }
             }
         }
-        if ports[0].is_none() || ports[1].is_none() {
+        if inbound_port.is_none() {
             return Err(invalid_shared_ip("shared IP listener targets are incomplete"));
         }
         Ok(())
@@ -3253,6 +3204,10 @@ mod shared_ip {
         if !tables.iter().any(|table| table == SHARED_IP_TABLE) {
             return Ok(None);
         }
+        if list_table_names_family(NftFamily::Bridge)?.iter().any(|table| table == SHARED_IP_TABLE)
+        {
+            return Err(invalid_shared_ip("shared IP table exists in a foreign family"));
+        }
 
         let chains = list_chain_info_family(NftFamily::Ipv4, SHARED_IP_TABLE)?;
         let names = [Chain::Prerouting.name(), Chain::Output.name()];
@@ -3282,15 +3237,11 @@ mod shared_ip {
         }
 
         let sets = list_set_info_family(NftFamily::Ipv4, SHARED_IP_TABLE)?;
-        let expected = [
-            (SHARED_IP_MANAGED_GUESTS, IPV4_ADDR_KEY_TYPE, MANAGED_SET_KEY_LEN),
-            (SHARED_IP_OUTBOUND_SOURCES, IPV4_ADDR_KEY_TYPE, MANAGED_SET_KEY_LEN),
-            (
-                SHARED_IP_INBOUND_DESTINATIONS,
-                IPV4_ADDR_INET_SERVICE_KEY_TYPE,
-                DESTINATION_SET_KEY_LEN,
-            ),
-        ];
+        let expected = [(
+            SHARED_IP_INBOUND_DESTINATIONS,
+            IPV4_ADDR_INET_SERVICE_KEY_TYPE,
+            DESTINATION_SET_KEY_LEN,
+        )];
         if sets.len() != expected.len()
             || expected.iter().any(|(name, key_type, key_len)| {
                 sets.iter().filter(|set| set.name == *name).count() != 1
@@ -3317,26 +3268,6 @@ mod shared_ip {
             for member in list_set_elements_family(NftFamily::Ipv4, SHARED_IP_TABLE, name, set.id)?
             {
                 let inserted = match name {
-                    SHARED_IP_MANAGED_GUESTS => {
-                        if member.len() != MANAGED_SET_KEY_LEN as usize {
-                            return Err(invalid_shared_ip(
-                                "shared IP address element length is invalid",
-                            ));
-                        }
-                        members
-                            .managed_guest_ips
-                            .insert(Ipv4Addr::new(member[0], member[1], member[2], member[3]))
-                    }
-                    SHARED_IP_OUTBOUND_SOURCES => {
-                        if member.len() != MANAGED_SET_KEY_LEN as usize {
-                            return Err(invalid_shared_ip(
-                                "shared IP address element length is invalid",
-                            ));
-                        }
-                        members
-                            .outbound_sources
-                            .insert(Ipv4Addr::new(member[0], member[1], member[2], member[3]))
-                    }
                     SHARED_IP_INBOUND_DESTINATIONS => {
                         if member.len() != DESTINATION_SET_KEY_LEN as usize
                             || member[6] != 0
@@ -3445,11 +3376,8 @@ mod shared_ip {
                 invalid_data("shared IP observation crossed a ruleset generation"),
             ));
         }
-        if observed.as_ref().is_some_and(|program| {
-            !program.members.managed_guest_ips.is_empty()
-                || !program.members.outbound_sources.is_empty()
-                || !program.members.inbound_destinations.is_empty()
-        }) {
+        if observed.as_ref().is_some_and(|program| !program.members.inbound_destinations.is_empty())
+        {
             return Err(invalid_shared_ip("shared IP dynamic set state is non-empty"));
         }
         Ok(observed)
@@ -3467,8 +3395,6 @@ mod shared_ip {
         }
         Ok(observed.map(|program| SharedIpInterceptState {
             identity: program.identity,
-            managed_guest_ips: program.members.managed_guest_ips,
-            outbound_sources: program.members.outbound_sources,
             inbound_destinations: program.members.inbound_destinations,
         }))
     }
@@ -3624,23 +3550,11 @@ mod shared_ip {
                 },
             },
         ]);
-        mutations.extend([
-            SharedMutation::NewSet {
-                name: SHARED_IP_MANAGED_GUESTS,
-                key_type: IPV4_ADDR_KEY_TYPE,
-                key_len: MANAGED_SET_KEY_LEN,
-            },
-            SharedMutation::NewSet {
-                name: SHARED_IP_OUTBOUND_SOURCES,
-                key_type: IPV4_ADDR_KEY_TYPE,
-                key_len: MANAGED_SET_KEY_LEN,
-            },
-            SharedMutation::NewSet {
-                name: SHARED_IP_INBOUND_DESTINATIONS,
-                key_type: IPV4_ADDR_INET_SERVICE_KEY_TYPE,
-                key_len: DESTINATION_SET_KEY_LEN,
-            },
-        ]);
+        mutations.extend([SharedMutation::NewSet {
+            name: SHARED_IP_INBOUND_DESTINATIONS,
+            key_type: IPV4_ADDR_INET_SERVICE_KEY_TYPE,
+            key_len: DESTINATION_SET_KEY_LEN,
+        }]);
         for (index, rule) in program.rules.iter().enumerate() {
             mutations.push(SharedMutation::NewRule {
                 chain: rule.chain.name(),
@@ -3667,8 +3581,6 @@ mod shared_ip {
         }
         mutations.extend([
             SharedMutation::DeleteSet { name: SHARED_IP_INBOUND_DESTINATIONS },
-            SharedMutation::DeleteSet { name: SHARED_IP_OUTBOUND_SOURCES },
-            SharedMutation::DeleteSet { name: SHARED_IP_MANAGED_GUESTS },
             SharedMutation::DeleteChain { name: SHARED_IP_OUTPUT },
             SharedMutation::DeleteChain { name: SHARED_IP_PREROUTING },
             SharedMutation::DeleteTable,
@@ -3779,20 +3691,12 @@ mod shared_ip {
 
     const fn element_set_name(set: ElementSet) -> &'static str {
         match set {
-            ElementSet::ManagedGuestIps => SHARED_IP_MANAGED_GUESTS,
-            ElementSet::OutboundSources => SHARED_IP_OUTBOUND_SOURCES,
             ElementSet::InboundDestinations => SHARED_IP_INBOUND_DESTINATIONS,
         }
     }
 
     fn element_key_bytes(key: ElementKey) -> Result<(ElementSet, Vec<u8>), NetlinkError> {
         match key {
-            ElementKey::ManagedGuest(address) => {
-                Ok((ElementSet::ManagedGuestIps, address.octets().to_vec()))
-            }
-            ElementKey::OutboundSource(address) => {
-                Ok((ElementSet::OutboundSources, address.octets().to_vec()))
-            }
             ElementKey::Destination(destination) => {
                 if destination.port() == 0 {
                     return Err(invalid_shared_ip("shared IP destination port is zero"));
@@ -3808,26 +3712,12 @@ mod shared_ip {
 
     fn set_ids() -> Result<BTreeMap<ElementSet, u32>, NetlinkError> {
         let observed = list_set_info_family(NftFamily::Ipv4, SHARED_IP_TABLE)?;
-        let expected = [
-            (
-                ElementSet::ManagedGuestIps,
-                SHARED_IP_MANAGED_GUESTS,
-                IPV4_ADDR_KEY_TYPE,
-                MANAGED_SET_KEY_LEN,
-            ),
-            (
-                ElementSet::OutboundSources,
-                SHARED_IP_OUTBOUND_SOURCES,
-                IPV4_ADDR_KEY_TYPE,
-                MANAGED_SET_KEY_LEN,
-            ),
-            (
-                ElementSet::InboundDestinations,
-                SHARED_IP_INBOUND_DESTINATIONS,
-                IPV4_ADDR_INET_SERVICE_KEY_TYPE,
-                DESTINATION_SET_KEY_LEN,
-            ),
-        ];
+        let expected = [(
+            ElementSet::InboundDestinations,
+            SHARED_IP_INBOUND_DESTINATIONS,
+            IPV4_ADDR_INET_SERVICE_KEY_TYPE,
+            DESTINATION_SET_KEY_LEN,
+        )];
         if observed.len() != expected.len() {
             return Err(NetlinkError::nft(
                 "shared-ip-element-schema",
@@ -4039,26 +3929,6 @@ mod shared_ip {
         Ok(mutations)
     }
 
-    pub(super) fn insert_outbound(
-        expected: &SharedIpInterceptIdentity,
-        source: Ipv4Addr,
-    ) -> Result<SharedIpInterceptState, NetlinkError> {
-        let before = state_for(expected)?;
-        if before.managed_guest_ips.contains(&source) || before.outbound_sources.contains(&source) {
-            return Err(invalid_shared_ip("shared IP outbound group is already partially present"));
-        }
-        let ids = set_ids()?;
-        let mutations = member_mutations(
-            &ids,
-            [ElementKey::ManagedGuest(source), ElementKey::OutboundSource(source)],
-            [],
-        )?;
-        let mut expected_after = before.clone();
-        expected_after.managed_guest_ips.insert(source);
-        expected_after.outbound_sources.insert(source);
-        mutate_and_readback(&NfSharedIpElementIo, expected, before, &mutations, &expected_after)
-    }
-
     pub(super) fn insert_inbound(
         expected: &SharedIpInterceptIdentity,
         destination: SocketAddrV4,
@@ -4079,10 +3949,9 @@ mod shared_ip {
 
     pub(super) fn delete_elements(
         expected: &SharedIpInterceptIdentity,
-        source: Option<Ipv4Addr>,
         inbound: &[SocketAddrV4],
     ) -> Result<SharedIpInterceptState, NetlinkError> {
-        if source.is_none() && inbound.is_empty() {
+        if inbound.is_empty() {
             return Err(invalid_shared_ip("shared IP delete request is empty"));
         }
         let mut seen = BTreeSet::new();
@@ -4097,16 +3966,6 @@ mod shared_ip {
         let ids = set_ids()?;
         let mut removals = Vec::new();
         let mut expected_after = before.clone();
-        if let Some(source) = source {
-            if before.managed_guest_ips.contains(&source) {
-                removals.push(ElementKey::ManagedGuest(source));
-                expected_after.managed_guest_ips.remove(&source);
-            }
-            if before.outbound_sources.contains(&source) {
-                removals.push(ElementKey::OutboundSource(source));
-                expected_after.outbound_sources.remove(&source);
-            }
-        }
         for destination in inbound {
             if before.inbound_destinations.contains(destination) {
                 removals.push(ElementKey::Destination(*destination));
@@ -4124,47 +3983,17 @@ mod shared_ip {
         let before = state_for(expected)?;
         let ids = set_ids()?;
         let additions = expected_members
-            .managed_guest_ips
-            .difference(&before.managed_guest_ips)
+            .inbound_destinations
+            .difference(&before.inbound_destinations)
             .copied()
-            .map(ElementKey::ManagedGuest)
-            .chain(
-                expected_members
-                    .outbound_sources
-                    .difference(&before.outbound_sources)
-                    .copied()
-                    .map(ElementKey::OutboundSource),
-            )
-            .chain(
-                expected_members
-                    .inbound_destinations
-                    .difference(&before.inbound_destinations)
-                    .copied()
-                    .map(ElementKey::Destination),
-            );
+            .map(ElementKey::Destination);
         let removals = before
-            .managed_guest_ips
-            .difference(&expected_members.managed_guest_ips)
+            .inbound_destinations
+            .difference(&expected_members.inbound_destinations)
             .copied()
-            .map(ElementKey::ManagedGuest)
-            .chain(
-                before
-                    .outbound_sources
-                    .difference(&expected_members.outbound_sources)
-                    .copied()
-                    .map(ElementKey::OutboundSource),
-            )
-            .chain(
-                before
-                    .inbound_destinations
-                    .difference(&expected_members.inbound_destinations)
-                    .copied()
-                    .map(ElementKey::Destination),
-            );
+            .map(ElementKey::Destination);
         let mutations = member_mutations(&ids, additions, removals)?;
         let mut expected_after = before.clone();
-        expected_after.managed_guest_ips.clone_from(&expected_members.managed_guest_ips);
-        expected_after.outbound_sources.clone_from(&expected_members.outbound_sources);
         expected_after.inbound_destinations.clone_from(&expected_members.inbound_destinations);
         mutate_and_readback(&NfSharedIpElementIo, expected, before, &mutations, &expected_after)
     }
@@ -4195,8 +4024,8 @@ mod shared_ip {
         use crate::NetlinkError;
         use crate::nft::{SharedIpInterceptIdentity, SharedIpInterceptState};
         use std::cell::RefCell;
-        use std::collections::{BTreeSet, VecDeque};
-        use std::net::Ipv4Addr;
+        use std::collections::VecDeque;
+        use std::net::{Ipv4Addr, SocketAddrV4};
 
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         enum SeamCall {
@@ -4262,18 +4091,25 @@ mod shared_ip {
         fn state(id: &SharedIpInterceptIdentity, managed: &[Ipv4Addr]) -> SharedIpInterceptState {
             SharedIpInterceptState {
                 identity: id.clone(),
-                managed_guest_ips: managed.iter().copied().collect(),
-                outbound_sources: BTreeSet::new(),
-                inbound_destinations: BTreeSet::new(),
+                inbound_destinations: managed
+                    .iter()
+                    .copied()
+                    .map(|address| SocketAddrV4::new(address, 8080))
+                    .collect(),
             }
         }
 
-        /// One non-empty removal batch: drop guest `10.0.0.2` from the managed set.
+        /// One non-empty removal batch: drop destination `10.0.0.2:8080`.
         fn removal() -> Vec<ElementMutation> {
             vec![ElementMutation {
-                set: ElementSet::ManagedGuestIps,
+                set: ElementSet::InboundDestinations,
                 set_id: 1,
-                key: Ipv4Addr::new(10, 0, 0, 2).octets().to_vec(),
+                key: [
+                    Ipv4Addr::new(10, 0, 0, 2).octets().as_slice(),
+                    &8080_u16.to_be_bytes(),
+                    &[0, 0],
+                ]
+                .concat(),
                 add: false,
             }]
         }

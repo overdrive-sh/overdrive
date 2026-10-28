@@ -236,6 +236,7 @@ pub(super) mod node {
     use std::thread::JoinHandle;
     use std::time::{Duration, Instant};
 
+    use overdrive_core::guest_transport::dial::GuestStreamDial;
     use overdrive_core::guest_transport::{
         GUEST_CID_BASE, GUEST_FLOW_CONTROL_PORT, GUEST_FLOW_STREAM_PORT, GUEST_NODE_GATEWAY,
         GUEST_NODE_PREFIX, GuestCid, GuestFlowPorts, GuestTransportAssignment, LaunchToken,
@@ -250,6 +251,7 @@ pub(super) mod node {
     use overdrive_dataplane::mtls::HostMtlsEnforcement;
     use overdrive_sim::adapters::SimMtlsResolve;
     use overdrive_sim::adapters::clock::SimClock;
+    use overdrive_sim::adapters::guest_stream_dial::{SimDialScript, SimGuestStreamDial};
     use overdrive_testing::cidr_lease::TestCidrLease;
     use overdrive_worker::mtls_intercept_port::HostMtlsIntercept;
     use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
@@ -332,6 +334,7 @@ pub(super) mod node {
     pub struct Node {
         worker: Arc<MtlsInterceptWorker>,
         enforcement: Arc<HostMtlsEnforcement>,
+        guest_dial: Arc<SimGuestStreamDial>,
         client: AllocationId,
         server: AllocationId,
         /// The test PKI.
@@ -358,11 +361,12 @@ pub(super) mod node {
             let client = AllocationId::new(&format!("{tag}-client")).expect("allocation id");
             let server = AllocationId::new(&format!("{tag}-server")).expect("allocation id");
             let pki = Pki::mint(&client, &server);
+            let guest_dial = Arc::new(SimGuestStreamDial::new());
             let enforcement = Arc::new(HostMtlsEnforcement::new(
                 Arc::clone(&pki.held) as Arc<dyn IdentityRead>,
                 MtlsLimits::default(),
                 GUEST_NODE_PREFIX,
-                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+                Arc::clone(&guest_dial) as Arc<dyn GuestStreamDial>,
             ));
             enforcement.probe().await.expect("the enforcement probe passes before any flow");
             let resolve: Arc<dyn MtlsResolve> =
@@ -377,6 +381,7 @@ pub(super) mod node {
             Self {
                 worker,
                 enforcement,
+                guest_dial,
                 client,
                 server,
                 pki,
@@ -399,10 +404,17 @@ pub(super) mod node {
 
         /// Make the VM allocation intercept-live with `addr` and one declared
         /// service port: production registers `(addr, port)` in
-        /// `inbound_destinations` and installs its divert to leg-C.
+        /// `inbound_destinations` and installs its divert to leg-C. The
+        /// test-side guest dial answers that exact serving tuple with an open
+        /// stream; every other tuple retains the port's default `NotServing`
+        /// refusal.
         pub async fn serve_vm(&self, label: &str, addr: Ipv4Addr, port: u16) -> ServedVm {
             let spec = vm_spec(&self.server, addr, port);
             self.worker.start_alloc(&spec).await.expect("start_alloc makes the VM intercept-live");
+            self.guest_dial.script(
+                SocketAddrV4::new(addr, port),
+                SimDialScript::AcceptOpen { reply: Vec::new() },
+            );
             self.record("serve_vm", format_args!("{label} {addr}:{port}"));
             ServedVm { _addr: SocketAddrV4::new(addr, port) }
         }

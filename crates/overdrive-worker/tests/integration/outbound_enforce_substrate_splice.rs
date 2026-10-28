@@ -557,16 +557,6 @@ impl MtlsIntercept for MetalSharedIntercept {
         self.inner.observe_shared()
     }
 
-    fn install_outbound(
-        &self,
-        source_addr: Ipv4Addr,
-        leg_f_port: u16,
-    ) -> InterceptResult<Box<dyn InterceptGuard>> {
-        self.inner
-            .install_outbound(source_addr, leg_f_port)
-            .map(|guard| Self::wrap(guard, &self.allocation_guard_drops))
-    }
-
     fn install_inbound(
         &self,
         virt: SocketAddrV4,
@@ -847,10 +837,6 @@ fn assert_shared_intercept_state(
     identity: &SharedIpInterceptIdentity,
     specs: &[&AllocationSpec],
 ) {
-    let managed = specs
-        .iter()
-        .map(|spec| spec.transport.as_ref().expect("shared allocation transport").workload_addr())
-        .collect::<BTreeSet<_>>();
     let inbound = specs
         .iter()
         .flat_map(|spec| {
@@ -864,15 +850,11 @@ fn assert_shared_intercept_state(
         identity,
         "allocation changes preserve the exact constant program"
     );
-    assert_eq!(state.managed_guest_ips(), &managed, "managed membership is exact");
-    assert_eq!(state.outbound_sources(), &managed, "outbound source membership is exact");
     assert_eq!(state.inbound_destinations(), &inbound, "destination membership is exact");
     assert_eq!(
-        state.managed_guest_ips().len()
-            + state.outbound_sources().len()
-            + state.inbound_destinations().len(),
-        specs.iter().map(|spec| 2 + spec.service_ports.len()).sum::<usize>(),
-        "the complete dynamic universe contains exactly 2 + P elements per allocation"
+        state.inbound_destinations().len(),
+        specs.iter().map(|spec| spec.service_ports.len()).sum::<usize>(),
+        "the complete dynamic universe contains exactly P elements per allocation"
     );
 }
 
@@ -972,14 +954,14 @@ async fn two_real_shared_capabilities_keep_the_unrelated_tls_handle_live_after_o
     assert_eq!(owner_after.converges, owner_before.converges);
     assert_eq!(owner_after.addresses, owner_before.addresses);
     assert_eq!(owner_after.node_guard_drops, 0);
-    assert_eq!(owner_after.allocation_guard_drops, 2);
+    assert_eq!(owner_after.allocation_guard_drops, 1);
 
     drop(first_client);
     drop(second_client);
     worker.stop_alloc(&second).await.expect("second real handle drains");
     assert_shared_intercept_state(&observe_shared_intercept_state(), &constant_identity, &[]);
     worker.shutdown_owner().await.expect("real shared owner joins");
-    assert_eq!(intercept.surface().allocation_guard_drops, 4);
+    assert_eq!(intercept.surface().allocation_guard_drops, 2);
     assert_eq!(intercept.surface().node_guard_drops, 0);
     assert_shared_intercept_state(&observe_shared_intercept_state(), &constant_identity, &[]);
     peer.finish();
@@ -1079,7 +1061,7 @@ async fn real_owner_shutdown_closes_admission_waits_one_claim_and_drains_every_s
     for address in addresses {
         drop(TcpListener::bind(address).expect("shutdown closes each exact shared socket"));
     }
-    assert_eq!(intercept.surface().allocation_guard_drops, 4);
+    assert_eq!(intercept.surface().allocation_guard_drops, 2);
     assert_eq!(intercept.surface().node_guard_drops, 0);
     assert_shared_intercept_state(&observe_shared_intercept_state(), &constant_identity, &[]);
     peer.finish();

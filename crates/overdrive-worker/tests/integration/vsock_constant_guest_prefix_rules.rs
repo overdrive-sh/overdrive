@@ -78,7 +78,6 @@ fn assert_no_accept(listener: &TcpListener, what: &str) {
 /// latency, the wildcard listener; expected: `ConnectionRefused` within the
 /// bound, no accept.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 12"]
 async fn a_host_local_connection_to_a_guest_prefix_address_is_rejected_at_once() {
     let node = Node::start("rules-host-tcp").await;
     let wildcard = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, PORT))
@@ -103,7 +102,6 @@ async fn a_host_local_connection_to_a_guest_prefix_address_is_rejected_at_once()
 /// CONTRACT_SHAPE: bounded-change. Universe: the send's result, a wildcard
 /// UDP socket on the port; expected: `PermissionDenied`, nothing received.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 12"]
 async fn a_host_local_datagram_to_a_guest_prefix_address_fails_eperm() {
     let node = Node::start("rules-host-udp").await;
     let wildcard = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, PORT))
@@ -134,7 +132,6 @@ async fn a_host_local_datagram_to_a_guest_prefix_address_fails_eperm() {
 /// CONTRACT_SHAPE: bounded-change. Universe: the remote's connect result,
 /// the wildcard listener; expected: `TimedOut`, no accept.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 12"]
 async fn a_remote_connection_to_an_unassigned_guest_prefix_address_is_dropped() {
     let node = Node::start("rules-remote-drop").await;
     let peer = PeerNetns::create("rules-remote-drop");
@@ -162,7 +159,6 @@ async fn a_remote_connection_to_an_unassigned_guest_prefix_address_is_dropped() 
 /// established sockets on the port; expected: a completed handshake against
 /// the node's trust root, one leg-C socket `VM_ADDR:PORT` ↔ remote.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER step 12"]
 async fn a_leg_c_diverted_remote_connection_reaches_leg_c_both_ways() {
     let node = Node::start("rules-leg-c-remote").await;
     let _vm = node.serve_vm("rules-vm", VM_ADDR, PORT).await;

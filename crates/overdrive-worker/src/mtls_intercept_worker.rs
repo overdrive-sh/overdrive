@@ -4,7 +4,7 @@
 //! per-allocation capability registrations that associate diverted
 //! connections with their allocation. `start_shared_owner` binds one leg-F
 //! and one leg-C listener and starts one cancelable accept task for each.
-//! `start_alloc` installs the allocation's source and destination elements
+//! `start_alloc` installs the allocation's destination elements
 //! under the converged shared program. `stop_alloc` retires that allocation's
 //! registration and drains its enforced connections; `shutdown_owner` stops
 //! both shared accept tasks and retires every remaining registration.
@@ -46,11 +46,11 @@ use crate::mtls_intercept_port::{
 /// A fail-closed allocation capability-registration failure.
 ///
 /// [`MtlsInterceptWorker::start_alloc`] returns this type when it cannot
-/// reserve and publish an allocation's source/destination elements under the
+/// reserve and publish an allocation's destination elements under the
 /// node's converged shared intercept program. The action shim surfaces the
 /// error to the allocation lifecycle rather than continuing without the
-/// intercept. The `OutboundTproxyInstall` and `Inbound` cases preserve the
-/// typed [`InterceptError`] from the shared element port. Node listener bind
+/// intercept. The `Inbound` case preserves the typed [`InterceptError`] from
+/// the shared element port. Node listener bind
 /// and address-audit failures belong to [`MtlsSharedOwnerError`], because the
 /// listeners are started once for the node by `start_shared_owner`.
 #[derive(Debug, thiserror::Error)]
@@ -85,16 +85,6 @@ pub enum MtlsInterceptInstallError {
         #[source]
         source: MtlsInterceptStopError,
     },
-
-    /// Shared outbound source-element installation failed. The source
-    /// [`InterceptError`] identifies the failed element operation.
-    ///
-    /// `#[source]` (not `#[from]`): the sibling `Inbound` variant already
-    /// owns the single `#[from] InterceptError` auto-conversion, so the
-    /// outbound site names this constructor explicitly to keep the two
-    /// `InterceptError` sources distinct in `Display`.
-    #[error("mTLS outbound TPROXY install failed: {0}")]
-    OutboundTproxyInstall(#[source] InterceptError),
 
     /// A leg-F transparent-listener bind error. Current node-shared listener
     /// startup reports this failure through [`MtlsSharedOwnerError::ListenerBind`].
@@ -830,19 +820,11 @@ mod shared_listener_task_owner_acceptance {
 }
 
 impl MtlsInterceptInstallError {
-    /// Associated constructor for the site-1 outbound nft-TPROXY install
-    /// failure. `#[source]` wrap (not `#[from]`, which the `Inbound` variant
-    /// owns), so the call site names this constructor explicitly.
-    #[must_use]
-    const fn outbound_tproxy_install(source: InterceptError) -> Self {
-        Self::OutboundTproxyInstall(source)
-    }
-
     /// The closed-vocabulary install-stage label for the
     /// [`TransitionReason::MtlsInterceptInstallFailed`] cause-class the shim
-    /// writes. Maps the 5-variant error (and, for [`Self::Inbound`], the
+    /// writes. Maps the install error (and, for [`Self::Inbound`], the
     /// inner [`InterceptError`] variant) to the four pinned stage strings:
-    /// `"outbound_tproxy_install"`, `"leg_f_bind"`,
+    /// `"leg_f_bind"`,
     /// `"leg_c_transparent_listener"`, `"inbound_tproxy"`. The leg-F/leg-C
     /// `local_addr` capture failures (D-MTLS-18 sites 2/3) reuse the EXISTING
     /// leg-F / leg-C stage strings — the bind and its bound-addr capture are the
@@ -860,7 +842,6 @@ impl MtlsInterceptInstallError {
             Self::SharedOwner { .. } => "shared_owner",
             Self::OwnerShutdown => "owner_shutdown",
             Self::PriorTeardown { .. } => "prior_teardown",
-            Self::OutboundTproxyInstall(_) => "outbound_tproxy_install",
             Self::LegFBind(_) | Self::LegFLocalAddr { .. } => "leg_f_bind",
             Self::LegCLocalAddr { .. }
             | Self::Inbound(InterceptError::TransparentListener { .. }) => {
@@ -905,7 +886,6 @@ enum CapabilityLifecycle {
 }
 
 struct CapabilityElements {
-    outbound: Option<Box<dyn InterceptGuard>>,
     inbound: Vec<Box<dyn InterceptGuard>>,
 }
 
@@ -1066,7 +1046,7 @@ impl CapabilityRegistry {
             CapabilityRecord {
                 capability,
                 lifecycle: CapabilityLifecycle::Pending,
-                elements: CapabilityElements { outbound: None, inbound: Vec::new() },
+                elements: CapabilityElements { inbound: Vec::new() },
                 has_acquired_elements: false,
                 handles: Vec::new(),
                 in_flight: 0,
@@ -1076,7 +1056,7 @@ impl CapabilityRegistry {
         Ok(PendingCapability {
             inner: Arc::clone(&self.inner),
             key,
-            elements: Some(CapabilityElements { outbound: None, inbound: Vec::new() }),
+            elements: Some(CapabilityElements { inbound: Vec::new() }),
             completed: false,
         })
     }
@@ -1208,8 +1188,6 @@ impl CapabilityRegistry {
         let mut expected = crate::mtls_intercept_port::InterceptMembers::default();
         for record in state.records.values().filter(|record| record.has_acquired_elements) {
             let source = record.capability.source_addr;
-            expected.managed_guest_ips.insert(source);
-            expected.outbound_sources.insert(source);
             expected.inbound_destinations.extend(
                 record
                     .capability
@@ -1242,15 +1220,6 @@ impl CapabilityRegistry {
 
 #[allow(clippy::significant_drop_tightening)]
 impl PendingCapability {
-    fn retain_outbound(&mut self, guard: Box<dyn InterceptGuard>) {
-        if let Some(elements) = self.elements.as_mut() {
-            elements.outbound = Some(guard);
-            if let Some(record) = self.inner.state.lock().records.get_mut(&self.key) {
-                record.has_acquired_elements = true;
-            }
-        }
-    }
-
     fn retain_inbound(&mut self, guard: Box<dyn InterceptGuard>) {
         if let Some(elements) = self.elements.as_mut() {
             elements.inbound.push(guard);
@@ -1261,10 +1230,7 @@ impl PendingCapability {
     }
 
     fn activate(mut self) -> ActivationDisposition {
-        let elements = self
-            .elements
-            .take()
-            .unwrap_or(CapabilityElements { outbound: None, inbound: Vec::new() });
+        let elements = self.elements.take().unwrap_or(CapabilityElements { inbound: Vec::new() });
         let mut disposition = ActivationDisposition::Retired;
         let inner = Arc::clone(&self.inner);
         {
@@ -1418,7 +1384,7 @@ impl CapabilityRetirement {
                         inner: Arc::clone(&self.inner),
                         key: self.key,
                         handles: Vec::new(),
-                        elements: CapabilityElements { outbound: None, inbound: Vec::new() },
+                        elements: CapabilityElements { inbound: Vec::new() },
                         removal: None,
                         completed: false,
                     };
@@ -1431,7 +1397,7 @@ impl CapabilityRetirement {
                         std::mem::take(&mut record.handles),
                         std::mem::replace(
                             &mut record.elements,
-                            CapabilityElements { outbound: None, inbound: Vec::new() },
+                            CapabilityElements { inbound: Vec::new() },
                         ),
                         (
                             record.capability.source_addr,
@@ -1471,10 +1437,7 @@ impl CapabilityDrain {
     }
 
     fn take_elements(&mut self) -> CapabilityElements {
-        std::mem::replace(
-            &mut self.elements,
-            CapabilityElements { outbound: None, inbound: Vec::new() },
-        )
+        std::mem::replace(&mut self.elements, CapabilityElements { inbound: Vec::new() })
     }
 
     fn complete(mut self) {
@@ -1639,7 +1602,6 @@ mod capability_registry_acceptance {
     struct RegistryRecordSnapshot {
         capability: Capability,
         lifecycle: CapabilityLifecycle,
-        outbound_element: bool,
         inbound_elements: usize,
         handles: Vec<EnforcedConnectionId>,
         in_flight: usize,
@@ -1678,7 +1640,6 @@ mod capability_registry_acceptance {
                         RegistryRecordSnapshot {
                             capability: record.capability.clone(),
                             lifecycle: record.lifecycle,
-                            outbound_element: record.elements.outbound.is_some(),
                             inbound_elements: record.elements.inbound.len(),
                             handles: record
                                 .handles
@@ -1841,7 +1802,6 @@ mod capability_registry_acceptance {
         let mut pending = registry
             .begin_registration(allocation.clone(), address, identity(allocation.as_str()), ports())
             .expect("reserve Pending");
-        pending.retain_outbound(Box::new(DropGuard(Arc::clone(&drops))));
         pending.retain_inbound(Box::new(DropGuard(Arc::clone(&drops))));
         let retirement = registry.begin_retire(&allocation).expect("retire Pending");
         let waiting = tokio::spawn(async move { retirement.wait_for_claims().await });
@@ -1854,7 +1814,7 @@ mod capability_registry_acceptance {
         let elements = drain.take_elements();
         assert_eq!(drops.load(AtomicOrdering::SeqCst), 0);
         drop(elements);
-        assert_eq!(drops.load(AtomicOrdering::SeqCst), 2);
+        assert_eq!(drops.load(AtomicOrdering::SeqCst), 1);
         drain.complete();
         assert!(
             registry
@@ -2000,7 +1960,7 @@ mod capability_registry_acceptance {
             let allocation = alloc(if retire_first { "cancel-retiring" } else { "cancel-pending" });
             let address = Ipv4Addr::new(100, 95, 0, u8::from(retire_first) + 6);
             let drops = Arc::new(AtomicUsize::new(0));
-            let mut pending = registry
+            let pending = registry
                 .begin_registration(
                     allocation.clone(),
                     address,
@@ -2008,11 +1968,10 @@ mod capability_registry_acceptance {
                     ports(),
                 )
                 .expect("reserve Pending");
-            pending.retain_outbound(Box::new(DropGuard(Arc::clone(&drops))));
             let retirement =
                 retire_first.then(|| registry.begin_retire(&allocation).expect("retire Pending"));
             drop(pending);
-            assert_eq!(drops.load(AtomicOrdering::SeqCst), 1);
+            assert_eq!(drops.load(AtomicOrdering::SeqCst), 0);
 
             if let Some(retirement) = retirement {
                 let mut drain = retirement.wait_for_claims().await;
@@ -2749,7 +2708,7 @@ impl MtlsInterceptWorker {
         self: &Arc<Self>,
         spec: &AllocationSpec,
     ) -> Result<(), MtlsInterceptInstallError> {
-        let (leg_f_addr, leg_c_addr) = {
+        let leg_c_addr = {
             let state = self.shared_owner.lock();
             let Some(owner) = state.owner.as_ref() else {
                 return Err(MtlsInterceptInstallError::SharedOwner {
@@ -2759,7 +2718,7 @@ impl MtlsInterceptWorker {
                     },
                 });
             };
-            (owner.leg_f_addr, owner.leg_c_addr)
+            owner.leg_c_addr
         };
         let allowed_ports = spec.service_ports.iter().copied().collect::<BTreeSet<_>>();
         let Some(transport) = spec.transport.as_ref() else {
@@ -2785,15 +2744,6 @@ impl MtlsInterceptWorker {
         };
         let element_effects = self.element_effects.lock().await;
         let effects = (|| {
-            // Shared allocations register source/destination set elements
-            // against the node-scoped constant program. Passing the TAP name
-            // here would re-enter the retired per-interface rule installer
-            // and create one nft rule per allocation.
-            let outbound = self
-                .intercept
-                .install_outbound(transport.workload_addr(), leg_f_addr.port())
-                .map_err(MtlsInterceptInstallError::outbound_tproxy_install)?;
-            pending.retain_outbound(outbound);
             for port in &spec.service_ports {
                 let inbound = self.intercept.install_inbound(
                     SocketAddrV4::new(transport.workload_addr(), port.get()),
@@ -3445,6 +3395,8 @@ async fn remove_allocation_elements_blocking(
     source_addr: Ipv4Addr,
     destinations: Vec<SocketAddrV4>,
 ) -> std::result::Result<crate::mtls_intercept_port::InterceptState, InterceptError> {
+    let error_destination =
+        destinations.first().copied().unwrap_or(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
     match tokio::task::spawn_blocking(move || {
         intercept.remove_allocation_elements(source_addr, &destinations)
     })
@@ -3452,9 +3404,9 @@ async fn remove_allocation_elements_blocking(
     {
         Ok(result) => result,
         Err(source) => Err(InterceptError::NftElementUpdateFailed {
-            set: crate::mtls_intercept::InterceptSet::ManagedGuestIps,
+            set: crate::mtls_intercept::InterceptSet::InboundDestinations,
             operation: crate::mtls_intercept::InterceptElementOperation::Delete,
-            key: crate::mtls_intercept::InterceptElementKey::Address(source_addr),
+            key: crate::mtls_intercept::InterceptElementKey::Destination(error_destination),
             source: crate::mtls_intercept::NetlinkError::nft(
                 "shared-element-remove",
                 std::io::Error::other(format!("blocking removal task failed: {source}")),
@@ -3660,8 +3612,6 @@ mod tests {
     /// One dynamic member of the owned program's three sets.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
     enum TestMember {
-        ManagedGuest(Ipv4Addr),
-        OutboundSource(Ipv4Addr),
         InboundDestination(SocketAddrV4),
     }
 
@@ -3680,12 +3630,6 @@ mod tests {
     impl TestMemberState {
         fn insert(&mut self, member: TestMember) {
             match member {
-                TestMember::ManagedGuest(address) => {
-                    self.members.managed_guest_ips.insert(address);
-                }
-                TestMember::OutboundSource(address) => {
-                    self.members.outbound_sources.insert(address);
-                }
                 TestMember::InboundDestination(destination) => {
                     self.members.inbound_destinations.insert(destination);
                 }
@@ -3694,12 +3638,6 @@ mod tests {
 
         fn remove(&mut self, member: TestMember) {
             match member {
-                TestMember::ManagedGuest(address) => {
-                    self.members.managed_guest_ips.remove(&address);
-                }
-                TestMember::OutboundSource(address) => {
-                    self.members.outbound_sources.remove(&address);
-                }
                 TestMember::InboundDestination(destination) => {
                     self.members.inbound_destinations.remove(&destination);
                 }
@@ -3988,18 +3926,6 @@ mod tests {
             Ok(self.observation.lock().clone())
         }
 
-        fn install_outbound(
-            &self,
-            source_addr: Ipv4Addr,
-            _agent_leg_f_port: u16,
-        ) -> crate::mtls_intercept::Result<Box<dyn InterceptGuard>> {
-            let keys = self.members.lock().acquire(&[
-                TestMember::ManagedGuest(source_addr),
-                TestMember::OutboundSource(source_addr),
-            ]);
-            Ok(Box::new(TestElementGuard { state: Arc::clone(&self.members), keys }))
-        }
-
         fn install_inbound(
             &self,
             virt: SocketAddrV4,
@@ -4030,7 +3956,7 @@ mod tests {
 
         fn remove_allocation_elements(
             &self,
-            source_addr: Ipv4Addr,
+            _source_addr: Ipv4Addr,
             destinations: &[SocketAddrV4],
         ) -> crate::mtls_intercept::Result<crate::mtls_intercept_port::InterceptState> {
             self.removal_calls.fetch_add(1, Ordering::SeqCst);
@@ -4059,13 +3985,7 @@ mod tests {
                 return Err(Self::program_not_published());
             }
             let requested =
-                [TestMember::ManagedGuest(source_addr), TestMember::OutboundSource(source_addr)]
-                    .into_iter()
-                    .chain(
-                        destinations
-                            .iter()
-                            .map(|destination| TestMember::InboundDestination(*destination)),
-                    );
+                destinations.iter().map(|destination| TestMember::InboundDestination(*destination));
             let mut state = self.members.lock();
             for member in requested {
                 // Convergent: an absent member is already its postcondition.
@@ -4867,7 +4787,6 @@ mod tests {
                 .iter()
                 .map(|port| SocketAddrV4::new(address, *port))
                 .collect(),
-            ..InterceptMembers::default()
         }
     }
 
@@ -4918,7 +4837,6 @@ mod tests {
     /// installed), and a retried stop runs exactly one new removal and releases
     /// the address (FD § "[REF] Driven port — intercept element release, member convergence, boot clear (D-295-R10, R12, R15, R18, R19) — ACCEPTED 2026-09-24 (R18, R19 conditional on native RED)" (the `remove_allocation_elements` contract, and why the typed sources are shared through `Arc`)).
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[ignore = "pending DELIVER step 12"]
     async fn element_removal_failure_keeps_the_retiring_record_until_a_retry_converges() {
         let intercept = Arc::new(TestSharedIntercept::new());
         let worker = shared_worker(&intercept);

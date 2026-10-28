@@ -127,8 +127,6 @@ const BOOT_CLEAR_REJECTION_OP: &str = "nd295-boot-member-clear";
 /// The dynamic members the killed prior process left behind.
 fn stale_members() -> InterceptMembers {
     InterceptMembers {
-        managed_guest_ips: [STALE_GUEST].into(),
-        outbound_sources: [STALE_GUEST].into(),
         inbound_destinations: [SocketAddrV4::new(STALE_GUEST, STALE_SERVICE_PORT)].into(),
     }
 }
@@ -137,9 +135,9 @@ fn stale_members() -> InterceptMembers {
 /// managed-guest member was refused with `EBUSY`, and nothing changed.
 fn boot_clear_rejection() -> InterceptError {
     InterceptError::NftElementUpdateFailed {
-        set: InterceptSet::ManagedGuestIps,
+        set: InterceptSet::InboundDestinations,
         operation: InterceptElementOperation::Delete,
-        key: InterceptElementKey::Address(STALE_GUEST),
+        key: InterceptElementKey::Destination(SocketAddrV4::new(STALE_GUEST, STALE_SERVICE_PORT)),
         source: NetlinkError::nft(
             BOOT_CLEAR_REJECTION_OP,
             std::io::Error::from_raw_os_error(libc::EBUSY),
@@ -153,11 +151,11 @@ fn is_boot_clear_rejection(error: &InterceptError) -> bool {
     matches!(
         error,
         InterceptError::NftElementUpdateFailed {
-            set: InterceptSet::ManagedGuestIps,
+            set: InterceptSet::InboundDestinations,
             operation: InterceptElementOperation::Delete,
-            key: InterceptElementKey::Address(key),
+            key: InterceptElementKey::Destination(key),
             source: NetlinkError::Nft { op, source: io, .. },
-        } if *key == STALE_GUEST
+        } if *key == SocketAddrV4::new(STALE_GUEST, STALE_SERVICE_PORT)
             && *op == BOOT_CLEAR_REJECTION_OP
             && io.raw_os_error() == Some(libc::EBUSY)
     )
@@ -184,7 +182,6 @@ enum InterceptCall {
     BindTransparent,
     ConvergeShared,
     ObserveShared,
-    InstallOutbound,
     InstallInbound,
     ObserveSharedState,
     /// `converge_allocation_elements` with the members it was asked for.
@@ -216,15 +213,12 @@ impl RecordingBootIntercept {
         let program = model
             .converge_shared(None, PRIOR_LEG_F, PRIOR_LEG_C)
             .expect("the prior process converged its program");
-        let outbound = model
-            .install_outbound(STALE_GUEST, PRIOR_LEG_F.port())
-            .expect("the prior process admitted its guest's outbound source");
         let inbound = model
             .install_inbound(SocketAddrV4::new(STALE_GUEST, STALE_SERVICE_PORT), PRIOR_LEG_C.port())
             .expect("the prior process registered its guest's inbound destination");
         let intercept = Self {
             model,
-            _prior_guards: vec![program, outbound, inbound],
+            _prior_guards: vec![program, inbound],
             script,
             journal: Mutex::new(Vec::new()),
             held_commit: Mutex::new(None),
@@ -292,15 +286,6 @@ impl MtlsIntercept for RecordingBootIntercept {
     ) -> overdrive_worker::mtls_intercept::Result<Option<InterceptPostcondition>> {
         self.record(InterceptCall::ObserveShared);
         self.model.observe_shared()
-    }
-
-    fn install_outbound(
-        &self,
-        source_addr: Ipv4Addr,
-        agent_leg_f_port: u16,
-    ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
-        self.record(InterceptCall::InstallOutbound);
-        self.model.install_outbound(source_addr, agent_leg_f_port)
     }
 
     fn install_inbound(

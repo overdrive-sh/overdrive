@@ -414,7 +414,6 @@ async fn an_rlimit_nofile_below_the_owner_budget_refuses_boot() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 12"]
 async fn a_failed_step8_table_write_refuses_boot_and_the_restart_converges() {
     let node = Node::new();
     node.intercept.fail_next_table_transaction(SimInterceptFault::NftRuleInstall {

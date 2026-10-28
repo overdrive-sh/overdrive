@@ -4216,14 +4216,6 @@ mod fail_closed_mtls_tests {
                 "registration_retired",
             ),
             (
-                "outbound nft-TPROXY install",
-                MtlsInterceptInstallError::OutboundTproxyInstall(nft_install_failed(
-                    "append-egress",
-                    libc::EPERM,
-                )),
-                "outbound_tproxy_install",
-            ),
-            (
                 "leg-F transparent bind",
                 MtlsInterceptInstallError::LegFBind(transparent_listener(libc::EPERM)),
                 "leg_f_bind",

@@ -140,14 +140,6 @@ impl MtlsIntercept for RemovalFaultIntercept {
         self.sim.observe_shared()
     }
 
-    fn install_outbound(
-        &self,
-        source_addr: Ipv4Addr,
-        agent_leg_f_port: u16,
-    ) -> InterceptResult<Box<dyn InterceptGuard>> {
-        self.sim.install_outbound(source_addr, agent_leg_f_port)
-    }
-
     fn install_inbound(
         &self,
         virt: SocketAddrV4,

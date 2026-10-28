@@ -87,8 +87,9 @@ pub struct InGuestLane {
 ///   so their loopback kTLS effects stay inside a disposable guest.
 /// - `overdrive-control-plane`'s `acceptance` and `integration` test binaries,
 ///   and `overdrive-worker`'s `integration` test binary: the unchanged 55
-///   real-cgroup cells, executed by the existing guest-suite runner inside
-///   fresh disposable guests with a private cgroup-v2 mount.
+///   real-cgroup cells plus the 18 already-authored STEP 13-04 native cells,
+///   executed by the existing guest-suite runner inside the same three fresh
+///   disposable guests with a private cgroup-v2 mount.
 pub const IN_GUEST_LANES: &[InGuestLane] = &[
     InGuestLane {
         package: "overdrive-init",

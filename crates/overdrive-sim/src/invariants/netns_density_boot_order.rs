@@ -72,9 +72,6 @@ mod tests {
         ObserveShared {
             observed: Result<Option<InterceptPostcondition>, String>,
         },
-        InstallOutbound {
-            source: Ipv4Addr,
-        },
         InstallInbound {
             virt: SocketAddrV4,
         },
@@ -98,7 +95,6 @@ mod tests {
                     write!(f, "converge_shared(prior={prior:?}, F={leg_f}, C={leg_c})")
                 }
                 Self::ObserveShared { observed } => write!(f, "observe_shared -> {observed:?}"),
-                Self::InstallOutbound { source } => write!(f, "install_outbound({source})"),
                 Self::InstallInbound { virt } => write!(f, "install_inbound({virt})"),
                 Self::ObserveSharedState { observed } => {
                     write!(f, "observe_shared_state -> {observed:?}")
@@ -150,7 +146,6 @@ mod tests {
                 40_000 + u16::from_be_bytes([bytes[0], bytes[1]]) % 5_000,
             );
             let prior_c = SocketAddrV4::new(Ipv4Addr::LOCALHOST, prior_f.port() + 1);
-            let guest = Ipv4Addr::new(100, 95, bytes[2], bytes[3].max(2));
             let virt = SocketAddrV4::new(
                 Ipv4Addr::new(10, 98, bytes[4], bytes[5]),
                 1_024 + u16::from(bytes[6]),
@@ -158,23 +153,18 @@ mod tests {
             let node_guard = inner
                 .converge_shared(None, prior_f, prior_c)
                 .expect("seed the prior process's shared program");
-            let outbound = inner
-                .install_outbound(guest, prior_f.port())
-                .expect("seed a stale outbound member");
             let inbound =
                 inner.install_inbound(virt, prior_c.port()).expect("seed a stale inbound member");
             // Dropped in vector order: the element guards before the node guard
             // (DISTILL gap B-8's guard-ordering rule).
-            let residue = vec![outbound, inbound, node_guard];
+            let residue = vec![inbound, node_guard];
             let seeded = inner
                 .observe_shared_state()
                 .expect("read back the seeded program")
                 .expect("the seeded program is present")
                 .members;
             assert!(
-                !seeded.managed_guest_ips.is_empty()
-                    && !seeded.outbound_sources.is_empty()
-                    && !seeded.inbound_destinations.is_empty(),
+                !seeded.inbound_destinations.is_empty(),
                 "seed={seed}: harness precondition failed: seeded members are empty: {seeded:?}"
             );
             Self {
@@ -242,20 +232,6 @@ mod tests {
             let observed = outcome.as_ref().cloned().map_err(ToString::to_string);
             self.record(InterceptCall::ObserveShared { observed }, owner_calls, boot_closed);
             outcome
-        }
-
-        fn install_outbound(
-            &self,
-            source_addr: Ipv4Addr,
-            agent_leg_f_port: u16,
-        ) -> InterceptResult<Box<dyn InterceptGuard>> {
-            let (owner_calls, boot_closed) = self.snapshot();
-            self.record(
-                InterceptCall::InstallOutbound { source: source_addr },
-                owner_calls,
-                boot_closed,
-            );
-            self.inner.install_outbound(source_addr, agent_leg_f_port)
         }
 
         fn install_inbound(
@@ -677,7 +653,6 @@ mod tests {
         /// (G-V1: rules before `converge_shared`) before admitting work.
         /// CONTRACT_SHAPE: bounded-change.
         #[test]
-        #[ignore = "pending DELIVER step 12"]
         fn reclamation_completes_before_stale_shared_network_sweep_for_every_seeded_prior_vm(
             seed in any::<u64>(),
         ) {

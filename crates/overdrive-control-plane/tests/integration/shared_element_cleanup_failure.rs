@@ -168,12 +168,9 @@ use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
 // Injected driven port: node-shared set membership with a lower cleanup fault.
 // ---------------------------------------------------------------------------
 
-/// One member of the three node-shared sets (`managed_guest_ips`,
-/// `outbound_sources`, `inbound_destinations`).
+/// One member of the node-shared inbound destination set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum SetMember {
-    ManagedGuest(Ipv4Addr),
-    OutboundSource(Ipv4Addr),
     InboundDestination(SocketAddrV4),
 }
 
@@ -372,17 +369,6 @@ impl MtlsIntercept for ElementFaultIntercept {
         self.program.observe_shared()
     }
 
-    fn install_outbound(
-        &self,
-        source_addr: Ipv4Addr,
-        _agent_leg_f_port: u16,
-    ) -> overdrive_worker::mtls_intercept::Result<Box<dyn InterceptGuard>> {
-        Ok(Box::new(self.model.install(BTreeSet::from([
-            SetMember::ManagedGuest(source_addr),
-            SetMember::OutboundSource(source_addr),
-        ]))))
-    }
-
     fn install_inbound(
         &self,
         virt: SocketAddrV4,
@@ -409,16 +395,9 @@ impl MtlsIntercept for ElementFaultIntercept {
             return Ok(None);
         }
         let expected_members = expected
-            .managed_guest_ips
+            .inbound_destinations
             .iter()
-            .map(|ip| SetMember::ManagedGuest(*ip))
-            .chain(expected.outbound_sources.iter().map(|ip| SetMember::OutboundSource(*ip)))
-            .chain(
-                expected
-                    .inbound_destinations
-                    .iter()
-                    .map(|destination| SetMember::InboundDestination(*destination)),
-            )
+            .map(|destination| SetMember::InboundDestination(*destination))
             .collect();
         *self.model.members.lock() = expected_members;
         self.state()
@@ -431,23 +410,23 @@ impl MtlsIntercept for ElementFaultIntercept {
     ) -> overdrive_worker::mtls_intercept::Result<
         overdrive_worker::mtls_intercept_port::InterceptState,
     > {
-        let requested: BTreeSet<SetMember> =
-            [SetMember::ManagedGuest(source_addr), SetMember::OutboundSource(source_addr)]
-                .into_iter()
-                .chain(
-                    destinations
-                        .iter()
-                        .map(|destination| SetMember::InboundDestination(*destination)),
-                )
-                .collect();
+        let requested: BTreeSet<SetMember> = destinations
+            .iter()
+            .map(|destination| SetMember::InboundDestination(*destination))
+            .collect();
         // The port's convergent removal routes through the model's single
         // lower removal effect (guard id 0 names the port call), so an armed
         // lower fault reaches it exactly as it reaches a guard release.
         self.model.remove(0, &requested).map_err(|cause| {
             overdrive_worker::mtls_intercept::InterceptError::NftElementUpdateFailed {
-                set: overdrive_worker::mtls_intercept::InterceptSet::ManagedGuestIps,
+                set: overdrive_worker::mtls_intercept::InterceptSet::InboundDestinations,
                 operation: overdrive_worker::mtls_intercept::InterceptElementOperation::Delete,
-                key: overdrive_worker::mtls_intercept::InterceptElementKey::Address(source_addr),
+                key: overdrive_worker::mtls_intercept::InterceptElementKey::Destination(
+                    destinations
+                        .first()
+                        .copied()
+                        .unwrap_or_else(|| SocketAddrV4::new(source_addr, 0)),
+                ),
                 source: overdrive_worker::mtls_intercept::NetlinkError::nft(
                     "shared-element-remove",
                     std::io::Error::other(cause),
@@ -477,12 +456,6 @@ impl ElementFaultIntercept {
         let mut members = overdrive_worker::mtls_intercept_port::InterceptMembers::default();
         for member in self.model.members() {
             match member {
-                SetMember::ManagedGuest(ip) => {
-                    members.managed_guest_ips.insert(ip);
-                }
-                SetMember::OutboundSource(ip) => {
-                    members.outbound_sources.insert(ip);
-                }
                 SetMember::InboundDestination(destination) => {
                     members.inbound_destinations.insert(destination);
                 }
@@ -781,14 +754,10 @@ fn start_action(name: &str) -> (AllocationId, Action) {
 }
 
 fn allocation_members(address: Ipv4Addr) -> BTreeSet<SetMember> {
-    let mut members =
-        BTreeSet::from([SetMember::ManagedGuest(address), SetMember::OutboundSource(address)]);
-    members.extend(
-        SERVICE_PORTS
-            .iter()
-            .map(|port| SetMember::InboundDestination(SocketAddrV4::new(address, *port))),
-    );
-    members
+    SERVICE_PORTS
+        .iter()
+        .map(|port| SetMember::InboundDestination(SocketAddrV4::new(address, *port)))
+        .collect()
 }
 
 /// The seam fixture (`test-scenarios.md` § *Seam fixture*): one owner
@@ -849,6 +818,10 @@ impl Harness {
             .register(overdrive_control_plane::noop_heartbeat())
             .await
             .expect("register heartbeat");
+        network
+            .converge_shared()
+            .await
+            .expect("the fixture's shared guest-network owner is converged before EXEC opens");
         let state = overdrive_control_plane::AppState::new(
             Arc::clone(&store),
             store_path,
@@ -971,14 +944,14 @@ fn is_injected_removal_cause(
     matches!(
         cause,
         InterceptError::NftElementUpdateFailed {
-            set: InterceptSet::ManagedGuestIps,
+            set: InterceptSet::InboundDestinations,
             operation: InterceptElementOperation::Delete,
-            key: InterceptElementKey::Address(key),
+            key: InterceptElementKey::Destination(key),
             source: overdrive_worker::mtls_intercept::NetlinkError::Nft {
                 op: "shared-element-remove",
                 source,
             },
-        } if *key == address && source.to_string() == expected_cause
+        } if *key.ip() == address && source.to_string() == expected_cause
     )
 }
 
@@ -1104,7 +1077,7 @@ async fn prove_fallible_element_cleanup(fault: LowerCleanupFault) {
     report.check(
         "&*source is exactly the InterceptError the element model injected",
         format!(
-            "NftElementUpdateFailed {{ ManagedGuestIps, Delete, Address({address}), \
+            "NftElementUpdateFailed {{ InboundDestinations, Delete, Destination({address}), \
              Nft {{ shared-element-remove, {:?} }} }}",
             fault.cause()
         ),
@@ -1249,7 +1222,6 @@ async fn prove_fallible_element_cleanup(fault: LowerCleanupFault) {
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
-#[ignore = "pending DELIVER step 12 (the firewall single cut retires the intercept mark guard)"]
 async fn shared_element_cleanup_failure_deletion_rejected_retains_retirement_and_address() {
     Box::pin(prove_fallible_element_cleanup(LowerCleanupFault::DeletionRejected)).await;
 }
@@ -1264,7 +1236,6 @@ async fn shared_element_cleanup_failure_deletion_rejected_retains_retirement_and
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[tokio::test]
-#[ignore = "pending DELIVER step 12 (the firewall single cut retires the intercept mark guard)"]
 async fn shared_element_cleanup_failure_readback_failed_retains_retirement_and_address() {
     Box::pin(prove_fallible_element_cleanup(LowerCleanupFault::ReadBackFailed)).await;
 }

@@ -49,7 +49,7 @@ trait SharedInterceptProgramIo: Send + Sync {
 ///
 /// # Observable invariants
 /// Dropping a guard releases EXACTLY what its originating
-/// [`MtlsIntercept::install_outbound`] / [`MtlsIntercept::install_inbound`]
+/// [`MtlsIntercept::install_inbound`]
 /// call acquired — no more, no less — and releases nothing another guard owns.
 /// Dropping never panics and never errors, including for a guard whose
 /// underlying state was already released out-of-band.
@@ -92,21 +92,12 @@ impl Drop for SharedInterceptGuard {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum SharedElementKey {
-    Address { set: SharedElementSet, address: Ipv4Addr },
     Destination(SocketAddrV4),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum SharedElementSet {
-    ManagedGuestIps,
-    OutboundSources,
 }
 
 #[derive(Default)]
 struct SharedElementState {
     counts: Mutex<BTreeMap<SharedElementKey, usize>>,
-    pending_sources: Mutex<BTreeSet<Ipv4Addr>>,
-    pending_destinations: Mutex<BTreeMap<Ipv4Addr, BTreeSet<SocketAddrV4>>>,
 }
 
 struct SharedElementGuard {
@@ -117,7 +108,6 @@ struct SharedElementGuard {
 
 impl InterceptGuard for SharedElementGuard {}
 
-#[allow(clippy::option_if_let_else, clippy::too_many_lines)]
 impl Drop for SharedElementGuard {
     fn drop(&mut self) {
         let mut counts = self.state.counts.lock();
@@ -144,81 +134,23 @@ impl Drop for SharedElementGuard {
             drop(counts);
             return;
         };
-        let source_addr = self.keys.iter().find_map(|key| match key {
-            SharedElementKey::Address { set: SharedElementSet::OutboundSources, address } => {
-                Some(*address)
-            }
-            SharedElementKey::Address { .. } | SharedElementKey::Destination(_) => None,
-        });
         let inbound = removals
             .iter()
-            .filter_map(|key| match key {
-                SharedElementKey::Destination(destination) => Some(*destination),
-                SharedElementKey::Address { .. } => None,
+            .map(|key| match key {
+                SharedElementKey::Destination(destination) => *destination,
             })
             .collect::<Vec<_>>();
-        let source_removed = source_addr.is_some()
-            && removals.iter().any(|key| {
-                matches!(
-                    key,
-                    SharedElementKey::Address { set: SharedElementSet::OutboundSources, .. }
-                )
-            });
-        let mut pending_sources = self.state.pending_sources.lock();
-        let mut pending_destinations = self.state.pending_destinations.lock();
-        let mut candidates = BTreeSet::new();
-        if let Some(source_addr) = source_addr.filter(|_| source_removed) {
-            pending_sources.insert(source_addr);
-            candidates.insert(source_addr);
-        }
-        for destination in &inbound {
-            if pending_sources.contains(destination.ip()) {
-                pending_destinations.entry(*destination.ip()).or_default().insert(*destination);
-                candidates.insert(*destination.ip());
-            }
-        }
-        let source_to_delete = candidates.into_iter().find(|source| {
-            !counts.keys().any(|key| {
-                matches!(key, SharedElementKey::Destination(destination)
-                        if destination.ip() == source)
-            })
-        });
-        let destination_only = inbound
-            .iter()
-            .copied()
-            .filter(|destination| !pending_sources.contains(destination.ip()))
-            .collect::<Vec<_>>();
-        let grouped_destinations = source_to_delete.map(|source| {
-            pending_destinations.remove(&source).unwrap_or_default().into_iter().collect::<Vec<_>>()
-        });
-        let result = if let Some(source_addr) = source_to_delete {
-            pending_sources.remove(&source_addr);
-            overdrive_netlink::nft::delete_shared_ip_intercept_elements_atomically(
-                &expected,
-                Some(source_addr),
-                grouped_destinations.as_deref().unwrap_or_default(),
-            )
-            .map(|_| ())
-        } else if !destination_only.is_empty() {
-            overdrive_netlink::nft::delete_shared_ip_intercept_elements_atomically(
-                &expected,
-                None,
-                &destination_only,
-            )
-            .map(|_| ())
-        } else {
+        let result = if inbound.is_empty() {
             Ok(())
+        } else {
+            overdrive_netlink::nft::delete_shared_ip_intercept_elements_atomically(
+                &expected, &inbound,
+            )
+            .map(|_| ())
         };
         if let Err(source) = result {
             for key in removals {
                 *counts.entry(key).or_insert(0) += 1;
-            }
-            if let Some(source_addr) = source_to_delete {
-                pending_sources.insert(source_addr);
-                pending_destinations
-                    .entry(source_addr)
-                    .or_default()
-                    .extend(grouped_destinations.unwrap_or_default());
             }
             tracing::error!(
                 name: "health.mtls.shared_element_cleanup_failed",
@@ -226,8 +158,6 @@ impl Drop for SharedElementGuard {
                 "shared mTLS element cleanup failed; retaining process-local ownership"
             );
         }
-        drop(pending_destinations);
-        drop(pending_sources);
         drop(counts);
     }
 }
@@ -327,52 +257,6 @@ pub trait MtlsIntercept: Send + Sync + 'static {
     /// Observe the complete normalized shared rule/set identity without repair.
     fn observe_shared(&self) -> Result<Option<InterceptPostcondition>>;
 
-    /// Install the per-allocation OUTBOUND source admission in the shared
-    /// intercept program. The node-owned constant rule diverts admitted TCP
-    /// to the shared leg-F listener without rewriting the destination.
-    ///
-    /// # Preconditions
-    /// - `source_addr` is the canonical guest source IPv4 address.
-    /// - `agent_leg_f_port` is the NON-ZERO bound port of a live leg-F
-    ///   listener obtained from [`bind_transparent`](Self::bind_transparent).
-    ///
-    /// # Postconditions on `Ok(guard)`
-    /// The outbound capture for `source_addr` is in effect **against this
-    /// adapter's OWN substrate**, and every prerequisite it depends on has
-    /// been converged idempotently. The returned guard OWNS exactly what this
-    /// call acquired: dropping it releases that and nothing else (see
-    /// [`InterceptGuard`]). What "in effect" MEANS is adapter-specific and is
-    /// not observable through this trait — see the substrate note below.
-    ///
-    /// # Edge cases
-    /// - Any install failure surfaces as one of the decomposed nft/ip install
-    ///   errors —
-    ///   [`InterceptError::NftRuleInstallFailed`](crate::mtls_intercept::InterceptError::NftRuleInstallFailed)
-    ///   (op-keyed, errno-carrying),
-    ///   [`InterceptError::NftHandleRecoveryFailed`](crate::mtls_intercept::InterceptError::NftHandleRecoveryFailed),
-    ///   or the shared-routing-infra
-    ///   [`InterceptError::IpRuleAddFailed`](crate::mtls_intercept::InterceptError::IpRuleAddFailed)
-    ///   /
-    ///   [`InterceptError::IpRouteLocalAddFailed`](crate::mtls_intercept::InterceptError::IpRouteLocalAddFailed).
-    /// - A re-install for an already-owned source adopts the process-local
-    ///   element token; it does not create a duplicate set element.
-    ///
-    /// # Observable invariants
-    /// One call acquires at most ONE capture. On `Err` NOTHING acquired by
-    /// this call outlives it — every partially-applied step is reverted or was
-    /// never applied, so a failed install leaks nothing.
-    ///
-    /// # Substrate note (NOT part of this contract)
-    /// [`HostMtlsIntercept`] realises the capture as one managed-guest element
-    /// plus one outbound-source element in the node-shared sets. Its guard
-    /// removes only those elements after exact read-back. A simulation adapter
-    /// realises it as nothing at all. Both honour the contract above.
-    fn install_outbound(
-        &self,
-        source_addr: Ipv4Addr,
-        agent_leg_f_port: u16,
-    ) -> Result<Box<dyn InterceptGuard>>;
-
     /// Install ONE per-Service-port INBOUND intercept: capture connections
     /// destined for `virt` (the canonical per-workload address paired with one
     /// DECLARED Service listener port) and divert them to the agent's leg-C
@@ -395,7 +279,7 @@ pub trait MtlsIntercept: Send + Sync + 'static {
     ///
     /// # Edge cases
     /// Identical failure surface to
-    /// [`install_outbound`](Self::install_outbound) — the decomposed nft/ip
+    /// [`install_inbound`](Self::install_inbound) — the decomposed nft/ip
     /// install errors
     /// ([`InterceptError::NftRuleInstallFailed`](crate::mtls_intercept::InterceptError::NftRuleInstallFailed)
     /// and siblings), each naming the failing operation.
@@ -423,7 +307,7 @@ pub trait MtlsIntercept: Send + Sync + 'static {
     /// # Postconditions on `Ok`
     /// `Ok(None)` exactly when the owned table is absent. Otherwise one
     /// generation-bracketed observation of the owned table, both chains, the
-    /// three sets, and the eight rules (including the D-295-R19 rule order),
+    /// one dynamic set, and the six rules,
     /// every dynamic member, the target-table foreign complement, the policy
     /// route (the `fwmark 0x1 lookup 100` rule and table 100's
     /// `local 0.0.0.0/0 dev lo` route).
@@ -436,7 +320,7 @@ pub trait MtlsIntercept: Send + Sync + 'static {
     /// Performs no kernel mutation.
     fn observe_shared_state(&self) -> Result<Option<InterceptState>>;
 
-    /// Converge all three dynamic member sets to exactly `expected` in one
+    /// Converge the dynamic inbound member set to exactly `expected` in one
     /// atomic batch: insert missing members and delete unexpected ones.
     ///
     /// # Preconditions
@@ -460,8 +344,7 @@ pub trait MtlsIntercept: Send + Sync + 'static {
         expected: &InterceptMembers,
     ) -> Result<Option<InterceptState>>;
 
-    /// Remove one allocation's dynamic members, convergently: the requested
-    /// set is `{managed(source_addr), outbound(source_addr)} ∪ {inbound(d)}`.
+    /// Remove one allocation's dynamic inbound members, convergently.
     ///
     /// # Preconditions
     /// Duplicate or zero-port `destinations` are rejected before any I/O. The
@@ -483,7 +366,7 @@ pub trait MtlsIntercept: Send + Sync + 'static {
     /// both causes. On `Err` the element tokens are untouched.
     fn remove_allocation_elements(
         &self,
-        source_addr: Ipv4Addr,
+        _source_addr: Ipv4Addr,
         destinations: &[SocketAddrV4],
     ) -> Result<InterceptState>;
 }
@@ -491,10 +374,6 @@ pub trait MtlsIntercept: Send + Sync + 'static {
 /// The three dynamic member sets of the owned intercept program.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InterceptMembers {
-    /// Managed guest source addresses.
-    pub managed_guest_ips: BTreeSet<Ipv4Addr>,
-    /// Admitted outbound guest sources.
-    pub outbound_sources: BTreeSet<Ipv4Addr>,
     /// Registered inbound destinations.
     pub inbound_destinations: BTreeSet<SocketAddrV4>,
 }
@@ -704,8 +583,6 @@ impl InterceptListener for HostInterceptListener {
 ///   orig-dst-addressed SYN is accepted, and `getsockname` recovers the
 ///   orig-dst) and `IP_FREEBIND` (so leg-C can bind a non-local address on the
 ///   OUTPUT path).
-/// - [`install_outbound`](MtlsIntercept::install_outbound) adds exactly one
-///   managed-guest element and one outbound-source element.
 /// - [`install_inbound`](MtlsIntercept::install_inbound) adds exactly one
 ///   destination/port element.
 #[allow(clippy::struct_field_names)]
@@ -768,50 +645,43 @@ impl HostMtlsIntercept {
         })
     }
 
-    fn shared_port(&self, leg: InterceptLeg, actual: u16) -> Result<u16> {
+    fn shared_port(&self, actual: u16) -> Result<u16> {
         if self.program.lock().is_none() {
             return Err(InterceptError::SharedProgramNotConverged);
         }
         let targets = *self.targets.lock();
-        let Some((leg_f, leg_c)) = targets else {
+        let Some((_leg_f, leg_c)) = targets else {
             return Err(InterceptError::SharedProgramNotConverged);
         };
-        let expected = match leg {
-            InterceptLeg::F => leg_f,
-            InterceptLeg::C => leg_c,
-        };
+        let expected = leg_c;
         if actual != expected {
-            return Err(InterceptError::SharedListenerPortMismatch { leg, expected, actual });
+            return Err(InterceptError::SharedListenerPortMismatch {
+                leg: InterceptLeg::C,
+                expected,
+                actual,
+            });
         }
         Ok(expected)
     }
 
-    #[allow(clippy::too_many_lines, clippy::option_if_let_else)]
+    #[allow(clippy::option_if_let_else)]
     fn acquire_elements(&self, keys: Vec<SharedElementKey>) -> Result<Box<dyn InterceptGuard>> {
         let mut counts = self.elements.counts.lock();
         let expected =
             self.program.lock().clone().ok_or(InterceptError::SharedProgramNotConverged)?;
-        let source_addr = keys.iter().find_map(|key| match key {
-            SharedElementKey::Address { set: SharedElementSet::OutboundSources, address } => {
-                Some(*address)
-            }
-            _ => None,
-        });
         let inbound = keys
             .iter()
-            .filter_map(|key| match key {
-                SharedElementKey::Destination(destination) => Some(*destination),
-                SharedElementKey::Address { .. } => None,
+            .map(|key| match key {
+                SharedElementKey::Destination(destination) => *destination,
             })
             .collect::<Vec<_>>();
         let present = keys.iter().filter(|key| counts.contains_key(*key)).count();
-        let expected_group_size = if source_addr.is_some() { 2 } else { 1 };
-        if present != 0 && present != expected_group_size {
+        if present != 0 && present != keys.len() {
             let error = InterceptError::NftElementUpdateFailed {
-                set: crate::mtls_intercept::InterceptSet::ManagedGuestIps,
+                set: crate::mtls_intercept::InterceptSet::InboundDestinations,
                 operation: crate::mtls_intercept::InterceptElementOperation::ReadBack,
-                key: crate::mtls_intercept::InterceptElementKey::Address(
-                    source_addr.unwrap_or(Ipv4Addr::UNSPECIFIED),
+                key: crate::mtls_intercept::InterceptElementKey::Destination(
+                    inbound.first().copied().unwrap_or(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)),
                 ),
                 source: NetlinkError::nft(
                     "shared-element-readback",
@@ -825,12 +695,7 @@ impl HostMtlsIntercept {
             return Err(error);
         }
         if present == 0 {
-            let result = if let Some(source_addr) = source_addr {
-                overdrive_netlink::nft::insert_shared_ip_intercept_outbound_elements_atomically(
-                    &expected,
-                    source_addr,
-                )
-            } else if let Some(destination) = inbound.first().copied() {
+            let result = if let Some(destination) = inbound.first().copied() {
                 overdrive_netlink::nft::insert_shared_ip_intercept_inbound_element_atomically(
                     &expected,
                     destination,
@@ -844,29 +709,18 @@ impl HostMtlsIntercept {
             if let Err(source) = result {
                 let error = InterceptError::NftElementUpdateFailed {
                     set: match keys.first() {
-                        Some(SharedElementKey::Address {
-                            set: SharedElementSet::ManagedGuestIps,
-                            ..
-                        })
-                        | None => crate::mtls_intercept::InterceptSet::ManagedGuestIps,
-                        Some(SharedElementKey::Address {
-                            set: SharedElementSet::OutboundSources,
-                            ..
-                        }) => crate::mtls_intercept::InterceptSet::OutboundSources,
                         Some(SharedElementKey::Destination(_)) => {
                             crate::mtls_intercept::InterceptSet::InboundDestinations
                         }
+                        None => crate::mtls_intercept::InterceptSet::InboundDestinations,
                     },
                     operation: crate::mtls_intercept::InterceptElementOperation::Insert,
                     key: match keys.first() {
-                        Some(SharedElementKey::Address { address, .. }) => {
-                            crate::mtls_intercept::InterceptElementKey::Address(*address)
-                        }
                         Some(SharedElementKey::Destination(destination)) => {
                             crate::mtls_intercept::InterceptElementKey::Destination(*destination)
                         }
-                        None => crate::mtls_intercept::InterceptElementKey::Address(
-                            Ipv4Addr::UNSPECIFIED,
+                        None => crate::mtls_intercept::InterceptElementKey::Destination(
+                            SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0),
                         ),
                     },
                     source,
@@ -886,24 +740,12 @@ impl HostMtlsIntercept {
         }))
     }
 
-    fn shared_outbound(
-        &self,
-        source: Ipv4Addr,
-        leg_f_port: u16,
-    ) -> Result<Box<dyn InterceptGuard>> {
-        self.shared_port(InterceptLeg::F, leg_f_port)?;
-        self.acquire_elements(vec![
-            SharedElementKey::Address { set: SharedElementSet::ManagedGuestIps, address: source },
-            SharedElementKey::Address { set: SharedElementSet::OutboundSources, address: source },
-        ])
-    }
-
     fn shared_inbound(
         &self,
         destination: SocketAddrV4,
         leg_c_port: u16,
     ) -> Result<Box<dyn InterceptGuard>> {
-        self.shared_port(InterceptLeg::C, leg_c_port)?;
+        self.shared_port(leg_c_port)?;
         self.acquire_elements(vec![SharedElementKey::Destination(destination)])
     }
 
@@ -1162,14 +1004,6 @@ impl MtlsIntercept for HostMtlsIntercept {
             .map_err(|source| InterceptError::NftRuleInstallFailed { op: "observe-shared", source })
     }
 
-    fn install_outbound(
-        &self,
-        source_addr: Ipv4Addr,
-        agent_leg_f_port: u16,
-    ) -> Result<Box<dyn InterceptGuard>> {
-        self.shared_outbound(source_addr, agent_leg_f_port)
-    }
-
     fn install_inbound(
         &self,
         virt: SocketAddrV4,
@@ -1191,8 +1025,6 @@ impl MtlsIntercept for HostMtlsIntercept {
             program: postcondition_from_shared_identity(state.identity()),
             policy_route,
             members: InterceptMembers {
-                managed_guest_ips: state.managed_guest_ips().clone(),
-                outbound_sources: state.outbound_sources().clone(),
                 inbound_destinations: state.inbound_destinations().clone(),
             },
         }))
@@ -1222,8 +1054,6 @@ impl MtlsIntercept for HostMtlsIntercept {
         }
 
         let netlink_expected = overdrive_netlink::nft::SharedIpInterceptMembers {
-            managed_guest_ips: expected.managed_guest_ips.clone(),
-            outbound_sources: expected.outbound_sources.clone(),
             inbound_destinations: expected.inbound_destinations.clone(),
         };
         let state = overdrive_netlink::nft::converge_shared_ip_intercept_members_atomically(
@@ -1239,8 +1069,6 @@ impl MtlsIntercept for HostMtlsIntercept {
             program: postcondition_from_shared_identity(state.identity()),
             policy_route,
             members: InterceptMembers {
-                managed_guest_ips: state.managed_guest_ips().clone(),
-                outbound_sources: state.outbound_sources().clone(),
                 inbound_destinations: state.inbound_destinations().clone(),
             },
         }))
@@ -1248,7 +1076,7 @@ impl MtlsIntercept for HostMtlsIntercept {
 
     fn remove_allocation_elements(
         &self,
-        source_addr: Ipv4Addr,
+        _source_addr: Ipv4Addr,
         destinations: &[SocketAddrV4],
     ) -> Result<InterceptState> {
         let mut seen = BTreeSet::new();
@@ -1276,9 +1104,14 @@ impl MtlsIntercept for HostMtlsIntercept {
         let observed =
             overdrive_netlink::nft::observe_shared_ip_intercept_state().map_err(|source| {
                 InterceptError::NftElementUpdateFailed {
-                    set: crate::mtls_intercept::InterceptSet::ManagedGuestIps,
+                    set: crate::mtls_intercept::InterceptSet::InboundDestinations,
                     operation: crate::mtls_intercept::InterceptElementOperation::ReadBack,
-                    key: crate::mtls_intercept::InterceptElementKey::Address(source_addr),
+                    key: crate::mtls_intercept::InterceptElementKey::Destination(
+                        destinations
+                            .first()
+                            .copied()
+                            .unwrap_or(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)),
+                    ),
                     source,
                 }
             })?;
@@ -1292,46 +1125,37 @@ impl MtlsIntercept for HostMtlsIntercept {
             });
         }
 
-        let state = overdrive_netlink::nft::delete_shared_ip_intercept_elements_atomically(
-            &expected,
-            Some(source_addr),
-            destinations,
-        )
+        let state = if destinations.is_empty() {
+            Ok(observed.unwrap_or_else(|| unreachable!("recorded program observation was absent")))
+        } else {
+            overdrive_netlink::nft::delete_shared_ip_intercept_elements_atomically(
+                &expected,
+                destinations,
+            )
+        }
         .map_err(|source| InterceptError::NftElementUpdateFailed {
-            set: crate::mtls_intercept::InterceptSet::ManagedGuestIps,
+            set: crate::mtls_intercept::InterceptSet::InboundDestinations,
             operation: crate::mtls_intercept::InterceptElementOperation::Delete,
-            key: crate::mtls_intercept::InterceptElementKey::Address(source_addr),
+            key: crate::mtls_intercept::InterceptElementKey::Destination(
+                destinations
+                    .first()
+                    .copied()
+                    .unwrap_or(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)),
+            ),
             source,
         })?;
         let policy_route = crate::mtls_intercept::observe_shared_policy_route()?;
-        let members = InterceptMembers {
-            managed_guest_ips: state.managed_guest_ips().clone(),
-            outbound_sources: state.outbound_sources().clone(),
-            inbound_destinations: state.inbound_destinations().clone(),
-        };
+        let members =
+            InterceptMembers { inbound_destinations: state.inbound_destinations().clone() };
         let result = InterceptState {
             program: postcondition_from_shared_identity(state.identity()),
             policy_route,
             members,
         };
 
-        for key in [
-            SharedElementKey::Address {
-                set: SharedElementSet::ManagedGuestIps,
-                address: source_addr,
-            },
-            SharedElementKey::Address {
-                set: SharedElementSet::OutboundSources,
-                address: source_addr,
-            },
-        ]
-        .into_iter()
-        .chain(destinations.iter().copied().map(SharedElementKey::Destination))
-        {
+        for key in destinations.iter().copied().map(SharedElementKey::Destination) {
             counts.remove(&key);
         }
-        self.elements.pending_sources.lock().remove(&source_addr);
-        self.elements.pending_destinations.lock().remove(&source_addr);
         drop(counts);
         Ok(result)
     }
@@ -1413,22 +1237,16 @@ mod shared_program_rollback_acceptance {
                 b"chain:prerouting".to_vec(),
                 b"chain:output".to_vec(),
             ],
-            sets: vec![
-                b"set:managed_guest_ips:ipv4_addr".to_vec(),
-                b"set:outbound_sources:ipv4_addr".to_vec(),
-                b"set:inbound_destinations:ipv4_addr.inet_service".to_vec(),
-            ],
+            sets: vec![b"set:inbound_destinations:ipv4_addr.inet_service".to_vec()],
             prerouting: vec![
                 b"rule:prerouting:0:leg-s-exemption".to_vec(),
-                format!("rule:prerouting:1:leg-f:{port}").into_bytes(),
-                b"rule:prerouting:2:unregistered-source-drop".to_vec(),
-                format!("rule:prerouting:3:leg-c:{}", port + 1).into_bytes(),
-                b"rule:prerouting:4:managed-guest-drop".to_vec(),
+                format!("rule:prerouting:1:leg-c:{}", port + 1).into_bytes(),
+                b"rule:prerouting:2:guest-prefix-drop".to_vec(),
             ],
             output: vec![
                 b"rule:output:0:leg-s-exemption".to_vec(),
                 b"rule:output:1:registered-destination-mark".to_vec(),
-                b"rule:output:2:managed-guest-drop".to_vec(),
+                b"rule:output:2:guest-prefix-reject".to_vec(),
             ],
         }
     }
