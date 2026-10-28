@@ -1,0 +1,58 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.35s
+     Running `target/debug/xtask metal collect 15c30cfa1bb75e34e45f9637`
+/usr/bin/ssh
+xtask: running metal collect (read-only durable run record)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+    Updating crates.io index
+     Locking 170 packages to latest Rust 1.95.0 compatible versions
+      Adding generic-array v0.14.7 (available: v0.14.9)
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive/crates/overdrive-host/src/beacon_io.rs:127:42
+    |
+127 |         let listener = Arc::new(AsyncFd::new(listener)?);
+    |                                          ^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive/crates/overdrive-host/src/beacon_io.rs:158:46
+    |
+158 | ...                   socket: AsyncFd::new(socket)?,
+    |                                        ^^^
+
+warning: `overdrive-host` (lib) generated 2 warnings
+    Checking netns-density-295-dns53-negative-old-probe v0.0.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-dataplane-offload/increment-f)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.12s
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive/crates/overdrive-host/src/beacon_io.rs:127:42
+    |
+127 |         let listener = Arc::new(AsyncFd::new(listener)?);
+    |                                          ^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive/crates/overdrive-host/src/beacon_io.rs:158:46
+    |
+158 | ...                   socket: AsyncFd::new(socket)?,
+    |                                        ^^^
+
+warning: `overdrive-host` (lib) generated 2 warnings
+   Compiling netns-density-295-dns53-negative-old-probe v0.0.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-dataplane-offload/increment-f)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.49s
+     Running `target/debug/netns-density-295-dns53-negative-old-probe`
+===== control-plane bounded exact replay =====
+
+running 1 test
+test integration::dns_responder_bind::probe_refuses_when_no_bindable_port ... dns_responder_bind: kernel 7.0.0-38-generic
+SKIP: could not bind stand-in gateway :53 at 100.95.0.1
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 214 filtered out; finished in 0.06s
+
+
+DNS53_NEGATIVE_OLD_SKIP_HOLE_CONFIRMED
+OVERDRIVE_METAL_RUN_COMPLETE run_id=15c30cfa1bb75e34e45f9637 exit_code=0 cause=command_returned

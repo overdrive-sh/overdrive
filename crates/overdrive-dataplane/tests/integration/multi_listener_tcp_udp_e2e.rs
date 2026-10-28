@@ -250,6 +250,51 @@ fn neigh_replace(ns: &str, ip: &str, mac: &str, dev: &str) {
     );
 }
 
+/// Retain the kernel-facing fixture state for the S-05-C native receipt before
+/// any assertion can unwind and reap its namespaces. Diagnostics do not alter
+/// the scenario or its pass/fail oracle.
+fn emit_s05c_diagnostic(label: &str, mut command: Command) {
+    match command.output() {
+        Ok(output) => eprintln!(
+            "[diag] S-05-C {label}: status={:?} stdout=[{}] stderr=[{}]",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout).trim(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ),
+        Err(source) => eprintln!("[diag] S-05-C {label}: spawn_error={source}"),
+    }
+}
+
+fn emit_s05c_fixture_diagnostics(fixture: &MultiListenerFixture) {
+    let topo = &fixture.topo;
+    eprintln!(
+        "[diag] S-05-C topology: client_ns={} client_iface={} lb_ns={} lb_ifaces={},{} backend_ns={} backend_iface={}",
+        topo.client_ns.name,
+        topo.client_veth,
+        topo.lb_ns.name,
+        topo.lb_veth_a,
+        topo.lb_veth_b,
+        topo.backend_ns.name,
+        topo.backend_veth
+    );
+    for (role, ns) in
+        [("client", &topo.client_ns), ("lb", &topo.lb_ns), ("backend", &topo.backend_ns)]
+    {
+        emit_s05c_diagnostic(
+            &format!("{role} links"),
+            ns.command("ip", ["-details", "link", "show"]),
+        );
+        emit_s05c_diagnostic(
+            &format!("{role} routes"),
+            ns.command("ip", ["-4", "route", "show", "table", "all"]),
+        );
+        emit_s05c_diagnostic(&format!("{role} neighbours"), ns.command("ip", ["neigh", "show"]));
+    }
+    emit_s05c_diagnostic("backend listeners", topo.backend_ns.command("ss", ["-H", "-lntup"]));
+    emit_s05c_diagnostic("lb BPF attachments", topo.lb_ns.command("bpftool", ["-j", "net"]));
+    emit_s05c_diagnostic("lb BPF programs", topo.lb_ns.command("bpftool", ["-j", "prog", "show"]));
+}
+
 /// `xdp_pass` stub attached to a peer-side veth iface. Required for
 /// XDP_TX/REDIRECT delivery into a veth peer (kernel patch v7 09/10).
 /// Holds the pre-pinned SERVICE_MAP HoM alive for the stub's lifetime.
@@ -765,6 +810,8 @@ fn adding_listener_on_resubmit_converges_without_breaking_existing() {
             ))
             .expect("update_service add udp/8082 listener");
     }
+
+    emit_s05c_fixture_diagnostics(&fixture);
 
     // (1) Observable proxy: all THREE per-listener REVERSE_NAT keys
     // present after the add (the new one installed, the existing two

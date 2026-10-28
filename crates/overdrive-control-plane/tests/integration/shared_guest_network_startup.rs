@@ -322,7 +322,6 @@ async fn serve_boots_through_the_pinned_order_with_the_guest_network_composed() 
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 13"]
 async fn a_vip_range_overlapping_the_guest_prefix_refuses_boot_before_any_effect() {
     let node = Node::new();
     let overlapping: ipnet::Ipv4Net = "100.95.128.0/17".parse().expect("CIDR");
@@ -364,7 +363,6 @@ async fn a_vip_range_overlapping_the_guest_prefix_refuses_boot_before_any_effect
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 13"]
 async fn a_node_address_inside_the_guest_prefix_refuses_boot_naming_the_interface() {
     let node = Node::new();
     let dummy = DummyInterface::with_address("nd295-pfx0", "100.95.200.1/24");

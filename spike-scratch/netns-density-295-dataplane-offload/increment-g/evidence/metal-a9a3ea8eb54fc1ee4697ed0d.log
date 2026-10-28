@@ -1,0 +1,89 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.22s
+     Running `target/debug/xtask metal collect a9a3ea8eb54fc1ee4697ed0d`
+/usr/bin/ssh
+xtask: running metal collect (read-only durable run record)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+   Compiling ring v0.17.14
+    Checking rcgen v0.14.8
+    Checking overdrive-host v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-host)
+    Checking overdrive-testing v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-testing)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.55s
+   Compiling ring v0.17.14
+   Compiling overdrive-dataplane v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-dataplane)
+   Compiling rustls v0.23.39
+    Checking rustls-webpki v0.103.13
+    Checking rcgen v0.14.8
+    Checking overdrive-host v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-host)
+    Checking overdrive-testing v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-testing)
+    Checking tokio-rustls v0.26.4
+    Checking axum-server v0.7.3
+    Checking hyper-rustls v0.27.9
+    Checking reqwest v0.12.28
+    Checking overdrive-worker v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-worker)
+    Checking overdrive-control-plane v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-control-plane)
+    Checking overdrive-sim v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-sim)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 19.12s
+    Updating crates.io index
+     Locking 170 packages to latest Rust 1.95.0 compatible versions
+      Adding generic-array v0.14.7 (available: v0.14.9)
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive/crates/overdrive-host/src/beacon_io.rs:127:42
+    |
+127 |         let listener = Arc::new(AsyncFd::new(listener)?);
+    |                                          ^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive/crates/overdrive-host/src/beacon_io.rs:158:46
+    |
+158 | ...                   socket: AsyncFd::new(socket)?,
+    |                                        ^^^
+
+warning: `overdrive-host` (lib) generated 2 warnings
+    Checking netns-density-295-dns53-negative-fixed-probe v0.0.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-dataplane-offload/increment-g)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.58s
+old-uppercase-SKIP-colon=new-detector-reject
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.15s
+     Running `target/debug/xtask guest-kit-prepare`
+guest-kit-prepare: overdrive-init overdrive-init -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-init--overdrive-init
+guest-kit-prepare: overdrive-fwd integration -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-fwd--integration
+guest-kit-prepare: overdrive-dataplane integration -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-dataplane--integration
+guest-kit-prepare: overdrive-dataplane overdrive_dataplane -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-dataplane--overdrive_dataplane
+guest-kit-prepare: overdrive-control-plane acceptance -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-control-plane--acceptance
+guest-kit-prepare: overdrive-control-plane integration -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-control-plane--integration
+guest-kit-prepare: overdrive-worker integration -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-worker--integration
+guest-kit-prepare: kernel 7.0.0-38-generic, target x86_64-unknown-linux-musl: the lane is prepared
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive/crates/overdrive-host/src/beacon_io.rs:127:42
+    |
+127 |         let listener = Arc::new(AsyncFd::new(listener)?);
+    |                                          ^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive/crates/overdrive-host/src/beacon_io.rs:158:46
+    |
+158 | ...                   socket: AsyncFd::new(socket)?,
+    |                                        ^^^
+
+warning: `overdrive-host` (lib) generated 2 warnings
+   Compiling netns-density-295-dns53-negative-fixed-probe v0.0.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-dataplane-offload/increment-g)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.42s
+     Running `target/debug/netns-density-295-dns53-negative-fixed-probe`
+===== control-plane bounded exact replay =====
+
+running 1 test
+test integration::dns_responder_bind::probe_refuses_when_no_bindable_port ... dns_responder_bind: kernel 7.0.0-38-generic
+[diag] DNS53 negative typed error: Bind { addr: 100.95.0.1:53, source: Os { code: 98, kind: AddrInUse, message: "Address already in use" } }
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 214 filtered out; finished in 0.10s
+
+
+DNS53_NEGATIVE_TYPED_ASSERTION_PASS
+OVERDRIVE_METAL_RUN_COMPLETE run_id=a9a3ea8eb54fc1ee4697ed0d exit_code=0 cause=command_returned

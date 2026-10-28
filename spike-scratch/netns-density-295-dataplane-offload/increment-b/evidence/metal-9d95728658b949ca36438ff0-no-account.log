@@ -1,0 +1,74 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.31s
+     Running `target/debug/xtask metal collect 9d95728658b949ca36438ff0`
+/usr/bin/ssh
+xtask: running metal collect (read-only durable run record)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+   Compiling rustix v1.1.6
+   Compiling overdrive-core v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-core)
+   Compiling linux-raw-sys v0.12.1
+   Compiling overdrive-fwd v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-fwd)
+   Compiling overdrive-host v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-host)
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive/crates/overdrive-host/src/beacon_io.rs:127:42
+    |
+127 |         let listener = Arc::new(AsyncFd::new(listener)?);
+    |                                          ^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive/crates/overdrive-host/src/beacon_io.rs:158:46
+    |
+158 | ...                   socket: AsyncFd::new(socket)?,
+    |                                        ^^^
+
+   Compiling overdrive-testing v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-testing)
+warning: `overdrive-host` (lib) generated 2 warnings
+   Compiling netns-density-295-tcpdump-account-probe v0.0.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-dataplane-offload/increment-b)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 8.71s
+     Running `target/debug/netns-density-295-tcpdump-account-probe`
+===== UDP capture account diagnostic =====
+UDP-CAPTURE-DIAGNOSTIC account-files begin
+/etc/passwd ABSENT
+/etc/group ABSENT
+UDP-CAPTURE-DIAGNOSTIC account-files end
+UDP-CAPTURE-DIAGNOSTIC argv=['/usr/bin/ip', 'netns', 'exec', 'ovd-capdiag', '/usr/bin/tcpdump', '-U', '-n', '-i', 'ovdcd-peer', '-w', '/tmp/ovd-capdiag.pcap', 'udp']
+[    1.389585] ovdcd-peer: entered promiscuous mode
+[    1.399549] ovdcd-peer: left promiscuous mode
+UDP-CAPTURE-DIAGNOSTIC state=exited-before-readiness-window returncode=1
+UDP-CAPTURE-DIAGNOSTIC stdout=''
+UDP-CAPTURE-DIAGNOSTIC stderr="tcpdump: Couldn't find user 'tcpdump'\n"
+
+===== UDP capture bounded exact replay =====
+
+running 1 test
+test integration::reverse_nat_udp_e2e::every_udp_reply_independently_source_rewritten ... THREEIFACE-TX-OFF ns=3i-clt-ub-108 iface=3iubc006c feature='tx-checksumming: off'
+THREEIFACE-TX-OFF ns=3i-lb-ub-108 iface=3iuba006c feature='tx-checksumming: off'
+THREEIFACE-TX-OFF ns=3i-lb-ub-108 iface=3iubb006c feature='tx-checksumming: off'
+THREEIFACE-TX-OFF ns=3i-bck-ub-108 iface=3iubd006c feature='tx-checksumming: off'
+[    2.542827] 3iubc006c: entered promiscuous mode
+[    2.548386] 3iubc006c: left promiscuous mode
+
+thread 'integration::reverse_nat_udp_e2e::every_udp_reply_independently_source_rewritten' (109) panicked at crates/overdrive-dataplane/tests/integration/reverse_nat_udp_e2e.rs:582:51:
+tcpdump did not report 'listening on' within 5s — the client-veth capture never became live (tcpdump missing, iface gone, or exec failed). The witness/silence below cannot be trusted; failing at the capture-setup precondition (debugging.md § 8).: Disconnected
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    integration::reverse_nat_udp_e2e::every_udp_reply_independently_source_rewritten
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 63 filtered out; finished in 1.10s
+
+
+
+thread 'main' (2441486) panicked at src/main.rs:276:5:
+assertion `left == right` failed: unchanged UDP capture case exits zero
+  left: 101
+ right: 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+OVERDRIVE_METAL_RUN_COMPLETE run_id=9d95728658b949ca36438ff0 exit_code=101 cause=command_returned

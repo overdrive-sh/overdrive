@@ -13,9 +13,9 @@
 //!   destination via `ipi_spec_dst` (the spike litmus: a missing source-pin is
 //!   what `getent` rejects). We assert the reply arrives FROM the queried dst
 //!   addr — the wire-level source-pin proof `getent` accepts.
-//! - **S-DBN-BIND-02** — a stand-in wildcard `0.0.0.0:53` holder forces the
-//!   wildcard path to `EADDRINUSE`; `probe` falls back to exactly one socket at
-//!   the configured shared gateway.
+//! - **S-DBN-BIND-02** — a stand-in for the appliance's specific loopback
+//!   resolver bind forces the wildcard path to `EADDRINUSE`; `probe` falls back
+//!   to exactly one socket at the configured shared gateway.
 //! - **S-DBN-BIND-03** — the Earned-Trust gate (DDN-6, wire → probe → use):
 //!   Scenario A (`:53` already held) → `probe` returns
 //!   `Err(DnsResponderError::Bind { .. })`; Scenario B
@@ -61,6 +61,7 @@
 
 use std::collections::BTreeSet;
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+use std::os::fd::AsRawFd;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -107,6 +108,110 @@ fn record_kernel() {
     }
 }
 
+fn udp53_owner_diagnostics(stage: &str, holder: Option<&UdpSocket>) {
+    let sockets =
+        kernel_udp_sockets().into_iter().filter(|(_, port, _)| *port == 53).collect::<Vec<_>>();
+    let inodes = sockets.iter().map(|(_, _, inode)| *inode).collect::<BTreeSet<_>>();
+    let mut owners = Vec::new();
+    for process in std::fs::read_dir("/proc").expect("read /proc for UDP/53 owner diagnostics") {
+        let process = process.expect("read /proc entry");
+        let Some(pid) = process.file_name().to_str().and_then(|name| name.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let Ok(fds) = std::fs::read_dir(process.path().join("fd")) else { continue };
+        for fd in fds.flatten() {
+            let Ok(target) = std::fs::read_link(fd.path()) else { continue };
+            let target = target.to_string_lossy();
+            let Some(inode) = target
+                .strip_prefix("socket:[")
+                .and_then(|value| value.strip_suffix(']'))
+                .and_then(|value| value.parse::<u64>().ok())
+            else {
+                continue;
+            };
+            if !inodes.contains(&inode) {
+                continue;
+            }
+            let command = std::fs::read(process.path().join("cmdline")).map_or_else(
+                |error| format!("<cmdline unreadable: {error}>"),
+                |bytes| String::from_utf8_lossy(&bytes).replace('\0', " ").trim().to_owned(),
+            );
+            let comm = std::fs::read_to_string(process.path().join("comm")).map_or_else(
+                |error| format!("<comm unreadable: {error}>"),
+                |value| value.trim().to_owned(),
+            );
+            let netns = std::fs::read_link(process.path().join("ns/net")).map_or_else(
+                |error| format!("<netns unreadable: {error}>"),
+                |path| path.to_string_lossy().into_owned(),
+            );
+            let fdinfo =
+                std::fs::read_to_string(process.path().join("fdinfo").join(fd.file_name()))
+                    .unwrap_or_else(|error| format!("<fdinfo unreadable: {error}>"));
+            owners.push(format!(
+                "pid={pid} fd={} inode={inode} comm={comm:?} netns={netns} command={command:?} fdinfo={fdinfo:?}",
+                fd.file_name().to_string_lossy()
+            ));
+        }
+    }
+    let holder_detail = holder.map_or_else(
+        || "none".to_owned(),
+        |socket| {
+            let fd = socket.as_raw_fd();
+            let mut reuse = 0_i32;
+            let mut reuse_port = 0_i32;
+            let mut len = libc::socklen_t::try_from(std::mem::size_of_val(&reuse))
+                .expect("SO_REUSEADDR c_int size fits socklen_t");
+            // SAFETY: fd is live; the output buffer and length describe one c_int.
+            let status = unsafe {
+                libc::getsockopt(
+                    fd,
+                    libc::SOL_SOCKET,
+                    libc::SO_REUSEADDR,
+                    (&raw mut reuse).cast(),
+                    &raw mut len,
+                )
+            };
+            let reuse_port_status = unsafe {
+                libc::getsockopt(
+                    fd,
+                    libc::SOL_SOCKET,
+                    libc::SO_REUSEPORT,
+                    (&raw mut reuse_port).cast(),
+                    &raw mut len,
+                )
+            };
+            let fd_flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+            format!(
+                "fd={fd} local={:?} reuseaddr_status={status} reuseaddr={reuse} reuseport_status={reuse_port_status} reuseport={reuse_port} fd_flags={fd_flags} cloexec={} link={:?}",
+                socket.local_addr(),
+                fd_flags & libc::FD_CLOEXEC != 0,
+                std::fs::read_link(format!("/proc/self/fd/{fd}"))
+            )
+        },
+    );
+    let command_output = |program: &str, args: &[&str]| {
+        Command::new(program).args(args).output().map(|output| {
+            format!(
+                "status={:?} stdout={:?} stderr={:?}",
+                output.status.code(),
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            )
+        })
+    };
+    eprintln!(
+        "[diag] DNS53 {stage}: process_pid={} process_netns={:?} process_command={:?} sockets={sockets:?} owners={owners:?} holder={holder_detail} ss53={:?} ipv4_addr={:?} gateway_local_route={:?}",
+        std::process::id(),
+        std::fs::read_link("/proc/self/ns/net"),
+        std::fs::read("/proc/self/cmdline")
+            .map(|bytes| String::from_utf8_lossy(&bytes).replace('\0', " ").trim().to_owned()),
+        command_output("ss", &["-H", "-u", "-a", "-n", "-e", "-p", "sport = :53"]),
+        command_output("ip", &["-4", "addr", "show"]),
+        command_output("ip", &["-4", "route", "show", "table", "local", "exact", "100.95.0.1/32"])
+    );
+}
+
 fn fresh_store() -> Arc<SimObservationStore> {
     Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("valid node id"), 0))
 }
@@ -150,6 +255,14 @@ fn responder(
 ) -> Arc<DnsResponder> {
     let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
     Arc::new(DnsResponder::new(store, clock, gateway, frontend))
+}
+
+/// Stand in for the appliance's specific loopback resolver bind. Its lack of
+/// `SO_REUSEADDR` makes the production wildcard bind return `EADDRINUSE`, while
+/// its specific 127/8 address does not also occupy the distinct shared-gateway
+/// fallback address.
+fn bind_specific_resolver_stand_in() -> std::io::Result<UdpSocket> {
+    UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 53), 53))
 }
 
 // ---------------------------------------------------------------------------
@@ -247,9 +360,9 @@ async fn wildcard_bind_answers_frontend_and_source_pins_reply() {
 // S-DBN-BIND-02 — shared-gateway fallback binds one exact socket
 // ---------------------------------------------------------------------------
 
-/// S-DBN-BIND-02 — a stand-in wildcard `0.0.0.0:53` holder forces the wildcard
+/// S-DBN-BIND-02 — a specific loopback resolver stand-in forces the wildcard
 /// path to `EADDRINUSE`; `probe` falls back to the exact configured shared
-/// gateway `:53` socket.
+/// gateway `:53` socket without the stand-in occupying that address too.
 #[tokio::test]
 async fn per_gateway_addr_fallback_binds_when_wildcard_is_held() {
     if !is_root() {
@@ -258,11 +371,12 @@ async fn per_gateway_addr_fallback_binds_when_wildcard_is_held() {
     }
     record_kernel();
 
-    // GIVEN a stand-in process holding a WILDCARD 0.0.0.0:53 bind (forces
-    // EADDRINUSE on the wildcard path) ...
-    let wildcard_holder = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 53));
-    let Ok(_wildcard_holder) = wildcard_holder else {
-        eprintln!("SKIP: could not bind stand-in wildcard :53 (port in use by another binder)");
+    // GIVEN a stand-in for the appliance's specific loopback resolver bind.
+    // It forces EADDRINUSE on the wildcard path without occupying the distinct
+    // shared-gateway fallback address.
+    let resolver_holder = bind_specific_resolver_stand_in();
+    let Ok(_resolver_holder) = resolver_holder else {
+        eprintln!("SKIP: could not bind stand-in resolver 127.0.0.53:53");
         return;
     };
 
@@ -316,12 +430,11 @@ async fn probe_refuses_when_no_bindable_port() {
         frontend,
     );
 
-    // The wildcard is held; also hold the exact shared-gateway fallback.
+    // The non-reuse wildcard holder already overlaps every IPv4 local address,
+    // so it blocks both the production wildcard attempt and the exact gateway
+    // fallback. A second exact holder is impossible under Linux's overlap
+    // predicate and would return before the typed negative assertion.
     let gateway = Ipv4Addr::new(100, 95, 0, 1);
-    let Ok(_gw_holder) = UdpSocket::bind(SocketAddrV4::new(gateway, 53)) else {
-        eprintln!("SKIP: could not bind stand-in gateway :53 at {gateway}");
-        return;
-    };
     let dns_collision = responder(
         Arc::clone(&store) as Arc<dyn ObservationStore>,
         gateway,
@@ -330,7 +443,8 @@ async fn probe_refuses_when_no_bindable_port() {
     let err = dns_collision
         .probe()
         .await
-        .expect_err("probe refuses when the wildcard AND every per-gateway :53 are held");
+        .expect_err("probe refuses when the non-reuse wildcard holder blocks every :53 bind");
+    eprintln!("[diag] DNS53 negative typed error: {err:?}");
     assert!(
         matches!(err, DnsResponderError::Bind { .. }),
         "no bindable :53 → DnsResponderError::Bind (reason dns.responder.bind), got {err:?}",
@@ -378,12 +492,15 @@ async fn empty_fallback_binds_zero_sockets_and_warns_it_is_deaf() {
         return;
     }
     record_kernel();
+    udp53_owner_diagnostics("before-holder", None);
 
-    // Hold the wildcard 0.0.0.0:53 so the exact shared-gateway fallback fires.
-    let Ok(_wildcard_holder) = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 53)) else {
-        eprintln!("SKIP: could not bind stand-in wildcard :53");
+    // Hold the appliance-shaped specific loopback resolver address so the
+    // wildcard bind fails without also occupying the shared-gateway fallback.
+    let Ok(resolver_holder) = bind_specific_resolver_stand_in() else {
+        eprintln!("SKIP: could not bind stand-in resolver 127.0.0.53:53");
         return;
     };
+    udp53_owner_diagnostics("after-holder", Some(&resolver_holder));
 
     let store = fresh_store();
     let dns = responder(
@@ -393,6 +510,7 @@ async fn empty_fallback_binds_zero_sockets_and_warns_it_is_deaf() {
     );
 
     dns.probe().await.expect("shared-gateway fallback binds one exact socket");
+    udp53_owner_diagnostics("after-probe", Some(&resolver_holder));
 }
 
 // ---------------------------------------------------------------------------

@@ -112,10 +112,9 @@ async fn redb_view_store_probe_succeeds_on_healthy_fs() {
 }
 
 /// AC#5 (read-only fs): `probe()` returns `ProbeError::WriteFailed` when
-/// the underlying directory is read-only. We construct the store on a
-/// writable dir, then make the directory itself read-only so the next
-/// write transaction fails. This matches the real failure shape — the
-/// redb file is open but cannot create new writes.
+/// the underlying storage is read-only. We construct the store on a writable
+/// dir, close it, then make both the existing database file and its directory
+/// read-only before reopening, so the next open or write transaction fails.
 ///
 /// **Skipped under root** because root bypasses DAC permission bits;
 /// `chmod 0o500` cannot model a read-only fs from root's perspective
@@ -147,9 +146,20 @@ async fn redb_view_store_probe_fails_on_readonly_fs() {
         let _store = RedbViewStore::open(tmp.path()).expect("open writable");
     }
 
-    // Make the directory read-only — new file creates and the redb
-    // commit's atomic-rename will fail. 0o500 = r-x------.
+    // Make both the existing database file and its directory read-only.
+    // Directory-only chmod is not a read-only-filesystem model: an existing
+    // writable file can still be reopened and updated. The probe contract is
+    // about a storage surface that refuses writes, so pin both permission
+    // checks before reopening. 0o400 = r--------; 0o500 = r-x------.
+    let db_path = RedbViewStore::resolve_path(tmp.path());
     let dir_meta = std::fs::metadata(tmp.path()).expect("stat tempdir");
+    let file_meta = std::fs::metadata(&db_path).expect("stat redb file");
+    let original_dir_permissions = dir_meta.permissions();
+    let original_file_permissions = file_meta.permissions();
+
+    let mut file_readonly = original_file_permissions.clone();
+    file_readonly.set_mode(0o400);
+    std::fs::set_permissions(&db_path, file_readonly).expect("chmod redb file ro");
     let mut readonly = dir_meta.permissions();
     readonly.set_mode(0o500);
     std::fs::set_permissions(tmp.path(), readonly).expect("chmod ro");
@@ -168,19 +178,19 @@ async fn redb_view_store_probe_fails_on_readonly_fs() {
     let probe_outcome = match result {
         Ok(fut) => fut.await,
         Err(_open_err) => {
-            // Restore writable perms so tempdir can clean up, then
+            // Restore the original permissions so tempdir can clean up, then
             // accept the open-side refusal as satisfying the AC.
-            let mut writable = std::fs::metadata(tmp.path()).expect("stat").permissions();
-            writable.set_mode(0o700);
-            let _ = std::fs::set_permissions(tmp.path(), writable);
+            let _ = std::fs::set_permissions(tmp.path(), original_dir_permissions.clone());
+            let _ = std::fs::set_permissions(&db_path, original_file_permissions.clone());
             return;
         }
     };
 
     // Restore permissions for tempdir cleanup regardless of outcome.
-    let mut writable = std::fs::metadata(tmp.path()).expect("stat").permissions();
-    writable.set_mode(0o700);
-    std::fs::set_permissions(tmp.path(), writable).expect("chmod restore");
+    std::fs::set_permissions(tmp.path(), original_dir_permissions)
+        .expect("restore tempdir permissions");
+    std::fs::set_permissions(&db_path, original_file_permissions)
+        .expect("restore redb permissions");
 
     assert!(
         matches!(probe_outcome, Err(ProbeError::WriteFailed { .. })),

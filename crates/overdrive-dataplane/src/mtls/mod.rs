@@ -49,7 +49,7 @@
 )]
 
 use std::io::Read;
-use std::net::{SocketAddrV4, TcpStream};
+use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -58,7 +58,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use ipnet::Ipv4Net;
 use overdrive_core::AllocationId;
-use overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
+use overdrive_core::dataplane::{MTLS_LEG_S_DIAL_MARK, MTLS_TPROXY_MARK};
 use overdrive_core::guest_transport::dial::GuestStreamDial;
 use overdrive_core::traits::IdentityRead;
 use overdrive_core::traits::ca::SvidMaterial;
@@ -725,11 +725,89 @@ fn now_unix_nanos() -> u64 {
 /// from the workload `cgroup_connect4` intercept by cgroup scoping (the program
 /// attaches to the WORKLOAD subtree, not the agent's — F5), so no SO_MARK is
 /// needed here; the agent process is not in the workload cgroup.
-fn dial_leg(peer: SocketAddrV4, deadline: Duration) -> Result<TcpStream> {
-    let stream =
-        TcpStream::connect_timeout(&peer.into(), deadline).map_err(MtlsEnforcementError::Io)?;
-    stream.set_nodelay(true).map_err(MtlsEnforcementError::Io)?;
-    Ok(stream)
+fn dial_leg(peer: SocketAddrV4, guest_prefix: Ipv4Net, deadline: Duration) -> Result<TcpStream> {
+    if !guest_prefix.contains(peer.ip()) {
+        let stream =
+            TcpStream::connect_timeout(&peer.into(), deadline).map_err(MtlsEnforcementError::Io)?;
+        stream.set_nodelay(true).map_err(MtlsEnforcementError::Io)?;
+        return Ok(stream);
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // A same-node VM peer is unroutable in the main table by contract. The
+        // fwmark selects table 100 (the existing local TPROXY table), while the
+        // loopback source keeps the dial from leaving the node. Both options must
+        // be present before connect(2); either one alone is fail-closed.
+        let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0) };
+        if fd < 0 {
+            return Err(MtlsEnforcementError::Io(std::io::Error::last_os_error()));
+        }
+
+        let mark = MTLS_TPROXY_MARK as libc::c_int;
+        let mark_rc = unsafe {
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_MARK,
+                std::ptr::from_ref(&mark).cast(),
+                std::mem::size_of_val(&mark) as libc::socklen_t,
+            )
+        };
+        if mark_rc != 0 {
+            let error = std::io::Error::last_os_error();
+            unsafe { libc::close(fd) };
+            return Err(MtlsEnforcementError::Io(error));
+        }
+
+        let no_port = 1_i32;
+        let no_port_rc = unsafe {
+            libc::setsockopt(
+                fd,
+                libc::SOL_IP,
+                libc::IP_BIND_ADDRESS_NO_PORT,
+                std::ptr::from_ref(&no_port).cast(),
+                std::mem::size_of_val(&no_port) as libc::socklen_t,
+            )
+        };
+        if no_port_rc != 0 {
+            let error = std::io::Error::last_os_error();
+            unsafe { libc::close(fd) };
+            return Err(MtlsEnforcementError::Io(error));
+        }
+
+        let mut local: libc::sockaddr_in = unsafe { std::mem::zeroed() };
+        local.sin_family = libc::AF_INET as libc::sa_family_t;
+        local.sin_addr.s_addr = u32::from_ne_bytes(Ipv4Addr::LOCALHOST.octets());
+        let bind_rc = unsafe {
+            libc::bind(
+                fd,
+                std::ptr::from_ref(&local).cast(),
+                std::mem::size_of_val(&local) as libc::socklen_t,
+            )
+        };
+        if bind_rc != 0 {
+            let error = std::io::Error::last_os_error();
+            unsafe { libc::close(fd) };
+            return Err(MtlsEnforcementError::Io(error));
+        }
+
+        // SAFETY: `fd` is the sole owner until this conversion, and the
+        // resulting TcpStream closes it on every subsequent error path.
+        let stream = unsafe { TcpStream::from_raw_fd(fd) };
+        stream.connect_timeout_marked(peer, deadline)?;
+        stream.set_nodelay(true).map_err(MtlsEnforcementError::Io)?;
+        Ok(stream)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = guest_prefix;
+        let stream =
+            TcpStream::connect_timeout(&peer.into(), deadline).map_err(MtlsEnforcementError::Io)?;
+        stream.set_nodelay(true).map_err(MtlsEnforcementError::Io)?;
+        Ok(stream)
+    }
 }
 
 /// Dial `peer` for the agent's INBOUND leg S (the server workload), stamping
@@ -903,11 +981,12 @@ impl HostMtlsEnforcement {
         let svid = self.svid_or_fail(&alloc)?;
         let bundle = self.identity.current_bundle().ok_or(MtlsEnforcementError::AbsentBundle)?;
         let limits = self.limits;
+        let guest_prefix = self.guest_prefix;
         let leg_f = conn.leg;
         let id = self.next_id(alloc.clone());
 
         let established = tokio::task::spawn_blocking(move || {
-            outbound::establish(leg_f, peer, &svid, &bundle, &alloc, limits)
+            outbound::establish(leg_f, peer, guest_prefix, &svid, &bundle, &alloc, limits)
         })
         .await
         .map_err(|e| {

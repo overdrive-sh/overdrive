@@ -44,6 +44,7 @@ use std::io::ErrorKind;
 use std::net::{SocketAddrV4, TcpStream};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 
+use ipnet::Ipv4Net;
 use overdrive_core::AllocationId;
 use overdrive_core::traits::ca::{SvidMaterial, TrustBundle};
 use overdrive_core::traits::mtls_enforcement::{
@@ -60,6 +61,7 @@ use super::{ConnState, ktls, tls_config};
 pub(super) fn establish(
     leg_f: OwnedFd,
     peer: SocketAddrV4,
+    guest_prefix: Ipv4Net,
     svid: &SvidMaterial,
     bundle: &TrustBundle,
     alloc: &AllocationId,
@@ -80,7 +82,7 @@ pub(super) fn establish(
 
     // 2. Dial leg B (the agent's own dial — cgroup-scoped exempt from the workload
     //    cgroup_connect4 intercept, F5).
-    let leg_b = super::dial_leg(peer, limits.handshake_deadline)?;
+    let leg_b = super::dial_leg(peer, guest_prefix, limits.handshake_deadline)?;
     let leg_b_fd = leg_b.as_raw_fd();
 
     // 3. rustls CLIENT handshake on leg B presenting the held SVID; verify the peer

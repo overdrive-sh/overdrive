@@ -746,10 +746,13 @@ fn shared_ip_output_rule_exprs(leg_c_port: u16, index: usize) -> Vec<u8> {
             let _ = leg_c_port;
             ex
         }
-        // Any packet directed at a guest-prefix address other than the gateway
-        // is rejected before it can reach another host route or socket.
-        2 => e_guest_prefix_reject(),
-        _ => unreachable!("shared output rule index is bounded to three"),
+        // A TCP packet directed at a guest-prefix address other than the
+        // gateway is reset before it can reach another host route or socket.
+        2 => e_guest_prefix_tcp_reset(),
+        // Non-TCP guest-prefix traffic gets the accepted ICMP port-unreachable
+        // reject, preserving EPERM at the first UDP send.
+        3 => e_guest_prefix_reject(),
+        _ => unreachable!("shared output rule index is bounded to four"),
     }
 }
 
@@ -766,6 +769,16 @@ fn e_guest_prefix_match() -> Vec<u8> {
 fn e_guest_prefix_drop() -> Vec<u8> {
     let mut ex = e_guest_prefix_match();
     ex.extend(e_drop());
+    ex
+}
+
+fn e_guest_prefix_tcp_reset() -> Vec<u8> {
+    let mut ex = e_guest_prefix_match();
+    ex.extend(e_meta_load(NFT_META_L4PROTO, NFT_REG_1));
+    ex.extend(e_cmp_eq(NFT_REG_1, &[IPPROTO_TCP]));
+    let mut data = Vec::new();
+    attr_be32(&mut data, 1, 1);
+    ex.extend(expr("reject", &data));
     ex
 }
 
@@ -2805,7 +2818,7 @@ mod shared_ip {
     const IPV4_ADDR_INET_SERVICE_KEY_TYPE: u32 = 0x1cd;
     const DESTINATION_SET_KEY_LEN: u32 = 8;
     const PREROUTING_RULE_COUNT: usize = 3;
-    const OUTPUT_RULE_COUNT: usize = 3;
+    const OUTPUT_RULE_COUNT: usize = 4;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
     enum ElementSet {

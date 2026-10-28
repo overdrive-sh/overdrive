@@ -1080,7 +1080,6 @@ async fn a_boot_opens_and_probes_the_forwarder_before_any_listener_or_route() {
 /// again, then the new process issues exactly one `GatewayRoute` effect,
 /// the table is complete and forwarding is open.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER step 13"]
 async fn the_gateway_route_is_converged_once_per_boot_and_never_at_runtime() {
     let routes = |kinds: &[SimEffectKind]| {
         kinds.iter().filter(|kind| **kind == SimEffectKind::GatewayRoute).count()

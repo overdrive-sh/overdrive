@@ -1246,7 +1246,8 @@ mod shared_program_rollback_acceptance {
             output: vec![
                 b"rule:output:0:leg-s-exemption".to_vec(),
                 b"rule:output:1:registered-destination-mark".to_vec(),
-                b"rule:output:2:guest-prefix-reject".to_vec(),
+                b"rule:output:2:guest-prefix-tcp-reset".to_vec(),
+                b"rule:output:3:guest-prefix-reject".to_vec(),
             ],
         }
     }

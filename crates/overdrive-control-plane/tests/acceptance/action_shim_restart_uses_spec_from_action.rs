@@ -27,7 +27,10 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 
-use overdrive_control_plane::action_shim::dispatch;
+use overdrive_control_plane::action_shim::{
+    WorkloadNetworkProvisioner, dispatch_with_network_provisioner,
+};
+use overdrive_control_plane::veth_provisioner::{VethProvisionError, WorkloadNetnsPlan};
 use overdrive_core::SpiffeId;
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
@@ -46,6 +49,21 @@ use overdrive_sim::adapters::observation_store::SimObservationStore;
 /// dispatched.
 struct RecordingDriver {
     spawned_specs: Arc<Mutex<Vec<AllocationSpec>>>,
+}
+
+/// This scenario observes only the spec handed to the driver. Structural
+/// workload networking is a driven port and must not mutate the host merely
+/// because the action happens to be VM-shaped.
+struct NoopNetworkProvisioner;
+
+impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
+    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
+
+    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
+        Ok(())
+    }
 }
 
 impl RecordingDriver {
@@ -199,7 +217,7 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
     let allocator = overdrive_control_plane::test_default_allocator(alloc_store);
     let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
     let mtls_worker_0501_0 = crate::acceptance::serve_ports::worker();
-    dispatch(
+    dispatch_with_network_provisioner(
         vec![action],
         drivers.as_ref(),
         &alloc_drivers,
@@ -220,6 +238,7 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         // transparent-mtls-enrollment step 04-01: a fresh per-host slot
         // allocator — this fixture exercises no netns provisioning.
         &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
+        &NoopNetworkProvisioner,
         &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
     )
     .await

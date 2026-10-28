@@ -220,7 +220,6 @@ fn overlaps(a: Ipv4Net, b: Ipv4Net) -> bool {
 /// ranges pass and change nothing.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER step 13"]
 async fn a_vip_range_overlapping_the_prefix_refuses_before_any_boot_effect() {
     for overlapping in ["100.95.255.0/24", "100.94.0.0/15"] {
         let serve = Serve::start(owner_ports(&[net(overlapping)], BTreeSet::new()));
@@ -256,7 +255,6 @@ async fn a_vip_range_overlapping_the_prefix_refuses_before_any_boot_effect() {
 /// range in operator order.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[test]
-#[ignore = "pending DELIVER step 13"]
 fn probe_startup_refuses_a_vip_range_iff_one_of_its_ranges_meets_the_guest_prefix() {
     proptest!(|(
         ranges in proptest::collection::vec(arb_vip_member(), 1..5),
@@ -313,7 +311,6 @@ fn probe_startup_refuses_a_vip_range_iff_one_of_its_ranges_meets_the_guest_prefi
 /// and the address.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER step 13"]
 async fn a_node_address_inside_the_prefix_refuses_before_any_boot_effect() {
     let eth0 = ifindex(2);
     let eth1 = ifindex(3);
@@ -342,7 +339,6 @@ async fn a_node_address_inside_the_prefix_refuses_before_any_boot_effect() {
 /// first).
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER step 13"]
 async fn a_node_that_overlaps_the_prefix_by_address_and_by_vip_range_names_the_vip_range() {
     let serve = Serve::start(owner_ports(&[net("100.95.128.0/17")], BTreeSet::new()))
         .with_interfaces(vec![(ifindex(2), vec!["100.95.7.1/24"])]);
@@ -363,7 +359,6 @@ async fn a_node_that_overlaps_the_prefix_by_address_and_by_vip_range_names_the_v
 /// the guest prefix pass and change nothing.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER step 13"]
 async fn node_addresses_outside_the_prefix_pass_probe_startup_without_effect() {
     for entry in [PhaseOne::BootSeam, PhaseOne::Owner] {
         let serve =
@@ -397,7 +392,6 @@ fn arb_node_address() -> impl Strategy<Value = Ipv4Net> {
 /// interface address lies inside the guest prefix.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[test]
-#[ignore = "pending DELIVER step 13"]
 fn probe_startup_refuses_a_node_address_iff_one_lies_inside_the_guest_prefix() {
     proptest!(|(inventory in proptest::collection::vec(proptest::collection::btree_set(arb_node_address(), 0..3), 1..4))| {
         let runtime = tokio::runtime::Builder::new_current_thread().build().expect("runtime");

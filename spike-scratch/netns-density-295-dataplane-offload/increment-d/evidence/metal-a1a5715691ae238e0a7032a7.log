@@ -1,0 +1,118 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.19s
+     Running `target/debug/xtask metal collect a1a5715691ae238e0a7032a7`
+/usr/bin/ssh
+xtask: running metal collect (read-only durable run record)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.25s
+    Updating crates.io index
+     Locking 170 packages to latest Rust 1.95.0 compatible versions
+      Adding generic-array v0.14.7 (available: v0.14.9)
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive/crates/overdrive-host/src/beacon_io.rs:127:42
+    |
+127 |         let listener = Arc::new(AsyncFd::new(listener)?);
+    |                                          ^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive/crates/overdrive-host/src/beacon_io.rs:158:46
+    |
+158 | ...                   socket: AsyncFd::new(socket)?,
+    |                                        ^^^
+
+warning: `overdrive-host` (lib) generated 2 warnings
+    Checking netns-density-295-dns53-sequence-probe v0.0.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-dataplane-offload/increment-d)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.03s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.15s
+     Running `target/debug/xtask guest-kit-prepare`
+guest-kit-prepare: overdrive-init overdrive-init -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-init--overdrive-init
+guest-kit-prepare: overdrive-fwd integration -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-fwd--integration
+guest-kit-prepare: overdrive-dataplane integration -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-dataplane--integration
+guest-kit-prepare: overdrive-dataplane overdrive_dataplane -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-dataplane--overdrive_dataplane
+guest-kit-prepare: overdrive-control-plane acceptance -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-control-plane--acceptance
+guest-kit-prepare: overdrive-control-plane integration -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-control-plane--integration
+guest-kit-prepare: overdrive-worker integration -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-worker--integration
+guest-kit-prepare: kernel 7.0.0-38-generic, target x86_64-unknown-linux-musl: the lane is prepared
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive/crates/overdrive-host/src/beacon_io.rs:127:42
+    |
+127 |         let listener = Arc::new(AsyncFd::new(listener)?);
+    |                                          ^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive/crates/overdrive-host/src/beacon_io.rs:158:46
+    |
+158 | ...                   socket: AsyncFd::new(socket)?,
+    |                                        ^^^
+
+warning: `overdrive-host` (lib) generated 2 warnings
+   Compiling netns-density-295-dns53-sequence-probe v0.0.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-dataplane-offload/increment-d)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.41s
+     Running `target/debug/netns-density-295-dns53-sequence-probe`
+===== fresh DNS-only case =====
+
+running 1 test
+test integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf ... dns_responder_bind: kernel 7.0.0-38-generic
+[diag] DNS53 before-holder: process_pid=94 process_netns=Ok("net:[4026531833]") process_command=Ok("/opt/overdrive-testing/in-guest-tests --test-threads=1 --nocapture --exact integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf") sockets=[] owners=[] holder=none ss53=Ok("status=Some(0) stdout=\"\" stderr=\"\"") ipv4_addr=Ok("status=Some(0) stdout=\"1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000\\n    inet 127.0.0.1/8 scope host lo\\n       valid_lft forever preferred_lft forever\\n\" stderr=\"\"") gateway_local_route=Ok("status=Some(0) stdout=\"\" stderr=\"\"")
+[diag] DNS53 after-holder: process_pid=94 process_netns=Ok("net:[4026531833]") process_command=Ok("/opt/overdrive-testing/in-guest-tests --test-threads=1 --nocapture --exact integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf") sockets=[(0.0.0.0, 53, 2103)] owners=["pid=94 fd=9 inode=2103 comm=\"in-guest-tests\" netns=net:[4026531833] command=\"/opt/overdrive-testing/in-guest-tests --test-threads=1 --nocapture --exact integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf\" fdinfo=\"pos:\\t0\\nflags:\\t02000002\\nmnt_id:\\t12\\nino:\\t2103\\n\""] holder=fd=9 local=Ok(0.0.0.0:53) reuseaddr_status=0 reuseaddr=0 reuseport_status=0 reuseport=0 fd_flags=1 cloexec=true link=Ok("socket:[2103]") ss53=Ok("status=Some(0) stdout=\"UNCONN 0      0      0.0.0.0:53 0.0.0.0:* users:((\\\"in-guest-tests\\\",pid=94,fd=9)) ino:2103 sk:1 cgroup:/ <->\\n\" stderr=\"\"") ipv4_addr=Ok("status=Some(0) stdout=\"1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000\\n    inet 127.0.0.1/8 scope host lo\\n       valid_lft forever preferred_lft forever\\n\" stderr=\"\"") gateway_local_route=Ok("status=Some(0) stdout=\"\" stderr=\"\"")
+
+thread 'integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf' (95) panicked at crates/overdrive-control-plane/tests/integration/dns_responder_bind.rs:502:23:
+shared-gateway fallback binds one exact socket: Bind { addr: 100.95.0.1:53, source: Os { code: 99, kind: AddrNotAvailable, message: "Cannot assign requested address" } }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 214 filtered out; finished in 0.17s
+
+
+===== prefix adopt survivor =====
+
+running 1 test
+test integration::adopt_on_restart::serve_restart_readopts_surviving_slot_and_gcs_orphan_netns ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 214 filtered out; finished in 0.47s
+
+
+===== prefix adopt nft sweep =====
+
+running 1 test
+test integration::adopt_on_restart::serve_restart_sweeps_surviving_per_workload_tproxy_rule ... Error: Could not process rule: No such file or directory
+delete table ip overdrive-mtls
+                ^^^^^^^^^^^^^^
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 214 filtered out; finished in 0.05s
+
+
+===== two-adopt then DNS case =====
+
+running 1 test
+test integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf ... dns_responder_bind: kernel 7.0.0-38-generic
+[diag] DNS53 before-holder: process_pid=160 process_netns=Ok("net:[4026531833]") process_command=Ok("/opt/overdrive-testing/in-guest-tests --test-threads=1 --nocapture --exact integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf") sockets=[] owners=[] holder=none ss53=Ok("status=Some(0) stdout=\"\" stderr=\"\"") ipv4_addr=Ok("status=Some(0) stdout=\"1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000\\n    inet 127.0.0.1/8 scope host lo\\n       valid_lft forever preferred_lft forever\\n\" stderr=\"\"") gateway_local_route=Ok("status=Some(0) stdout=\"\" stderr=\"\"")
+[diag] DNS53 after-holder: process_pid=160 process_netns=Ok("net:[4026531833]") process_command=Ok("/opt/overdrive-testing/in-guest-tests --test-threads=1 --nocapture --exact integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf") sockets=[(0.0.0.0, 53, 2158)] owners=["pid=160 fd=9 inode=2158 comm=\"in-guest-tests\" netns=net:[4026531833] command=\"/opt/overdrive-testing/in-guest-tests --test-threads=1 --nocapture --exact integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf\" fdinfo=\"pos:\\t0\\nflags:\\t02000002\\nmnt_id:\\t12\\nino:\\t2158\\n\""] holder=fd=9 local=Ok(0.0.0.0:53) reuseaddr_status=0 reuseaddr=0 reuseport_status=0 reuseport=0 fd_flags=1 cloexec=true link=Ok("socket:[2158]") ss53=Ok("status=Some(0) stdout=\"UNCONN 0      0      0.0.0.0:53 0.0.0.0:* users:((\\\"in-guest-tests\\\",pid=160,fd=9)) ino:2158 sk:1 cgroup:/ <->\\n\" stderr=\"\"") ipv4_addr=Ok("status=Some(0) stdout=\"1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000\\n    inet 127.0.0.1/8 scope host lo\\n       valid_lft forever preferred_lft forever\\n\" stderr=\"\"") gateway_local_route=Ok("status=Some(0) stdout=\"\" stderr=\"\"")
+
+thread 'integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf' (161) panicked at crates/overdrive-control-plane/tests/integration/dns_responder_bind.rs:502:23:
+shared-gateway fallback binds one exact socket: Bind { addr: 100.95.0.1:53, source: Os { code: 99, kind: AddrNotAvailable, message: "Cannot assign requested address" } }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 214 filtered out; finished in 0.13s
+
+
+DNS53_INTRINSIC_FIXTURE_CONTRADICTION_CONFIRMED
+OVERDRIVE_METAL_RUN_COMPLETE run_id=a1a5715691ae238e0a7032a7 exit_code=0 cause=command_returned

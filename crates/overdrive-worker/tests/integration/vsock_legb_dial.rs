@@ -106,7 +106,6 @@ fn outbound(leg: OwnedFd, client: &AllocationId, peer: SocketAddrV4) -> Intercep
 /// socket has local `VM_ADDR:SERVICE_PORT` and a `127.0.0.1` peer, leg-B's
 /// socket has `fwmark:0x1`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER step 13"]
 async fn a_same_node_mesh_dial_is_marked_source_bound_and_reaches_leg_c() {
     let node = Node::start("legb-same-node").await;
     let server = node.serve_vm("legb-server", VM_ADDR, SERVICE_PORT).await;
@@ -150,7 +149,6 @@ async fn a_same_node_mesh_dial_is_marked_source_bound_and_reaches_leg_c() {
 /// CONTRACT_SHAPE: bounded-change. Universe: the far peer's accepted
 /// connections; expected: exactly one, from the host's link address.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER step 13"]
 async fn a_dial_to_a_peer_outside_the_guest_prefix_is_neither_marked_nor_bound() {
     let node = Node::start("legb-outside").await;
     let peer = PeerNetns::create("legb-outside");
@@ -186,7 +184,6 @@ async fn a_dial_to_a_peer_outside_the_guest_prefix_is_neither_marked_nor_bound()
 /// latency, the wildcard listener's accepts; expected: `Io(ConnectionRefused)`
 /// within the bound, no accept.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER step 13"]
 async fn a_marked_dial_to_an_unregistered_tuple_is_refused_and_reaches_no_host_socket() {
     let node = Node::start("legb-unregistered").await;
     let _server = node.serve_vm("legb-server", VM_ADDR, SERVICE_PORT).await;

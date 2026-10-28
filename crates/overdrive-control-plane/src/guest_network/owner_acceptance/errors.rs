@@ -86,7 +86,6 @@ fn listener_or_route_effects(c: &Composition) -> usize {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER step 13"]
 async fn every_probe_startup_refusal_is_its_own_variant_and_changes_nothing() {
     let node_address = |c: &Composition| {
         c.io.update_host_facts(|facts| {
@@ -224,7 +223,6 @@ async fn a_listener_bind_failure_refuses_at_its_own_operation() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER step 13"]
 async fn boot_converges_the_gateway_route_last_and_a_failed_write_refuses() {
     let c = Composition::booted(12).await;
     assert_eq!(c.io.gateway_route(), Some(GUEST_NODE_GATEWAY));
@@ -258,7 +256,6 @@ async fn boot_converges_the_gateway_route_last_and_a_failed_write_refuses() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER step 13"]
 async fn boot_converges_over_a_route_left_behind_and_is_idempotent() {
     let c = Composition::non_mesh(15);
     c.io.set_gateway_route(Some(GUEST_NODE_GATEWAY));

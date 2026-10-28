@@ -149,9 +149,9 @@ impl NetNs {
     /// `ThreeIfaceTopology::create`.
     ///
     /// `ethtool -K … tx off` returns non-zero on virtual ifaces that do
-    /// not expose the feature; callers treat this as best-effort
-    /// (`let _ = …`), since on such ifaces packets already carry a FULL
-    /// checksum and no disable is needed.
+    /// not expose the feature. Callers that require a FULL checksum must
+    /// propagate that failure rather than silently running with an unknown
+    /// checksum state.
     pub fn ethtool_tx_off(&self, iface: &str) -> Result<(), NetNsError> {
         run_ip(["netns", "exec", &self.name, "ethtool", "-K", iface, "tx", "off"])?;
         Ok(())
@@ -366,13 +366,47 @@ impl ThreeIfaceTopology {
         // `backend_veth`→`lb_veth_b`). See
         // docs/research/dataplane/bpf-verifier-complexity-and-perf-optimization-research.md
         // § R-1 and xdp-checksum-partial-veth-research.md (Approach F).
-        let _ = client_ns.ethtool_tx_off(&client_veth);
-        let _ = lb_ns.ethtool_tx_off(&lb_veth_a);
-        let _ = lb_ns.ethtool_tx_off(&lb_veth_b);
-        let _ = backend_ns.ethtool_tx_off(&backend_veth);
+        ensure_tx_checksumming_off(&client_ns, &client_veth)?;
+        ensure_tx_checksumming_off(&lb_ns, &lb_veth_a)?;
+        ensure_tx_checksumming_off(&lb_ns, &lb_veth_b)?;
+        ensure_tx_checksumming_off(&backend_ns, &backend_veth)?;
 
         Ok(Self { client_ns, lb_ns, backend_ns, client_veth, lb_veth_a, lb_veth_b, backend_veth })
     }
+}
+
+/// Apply and read back the FULL-checksum precondition for one topology end.
+/// The aggregate `tx-checksumming` feature is the kernel-facing contract; a
+/// successful `ethtool -K` process without the `off` readback is a broken
+/// fixture, not permission to execute a packet oracle on CHECKSUM_PARTIAL.
+#[allow(clippy::print_stderr, reason = "the native receipt retains every topology-end readback")]
+fn ensure_tx_checksumming_off(ns: &NetNs, iface: &str) -> Result<(), NetNsError> {
+    ns.ethtool_tx_off(iface)?;
+    let args = ["netns", "exec", ns.name.as_str(), "ethtool", "-k", iface];
+    let output = run_ip(args)?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let feature_line =
+        stdout.lines().map(str::trim).find(|line| line.starts_with("tx-checksumming:"));
+    let state = feature_line
+        .and_then(|line| line.strip_prefix("tx-checksumming:"))
+        .and_then(|rest| rest.split_whitespace().next());
+    if state != Some("off") {
+        return Err(NetNsError::IpCommand {
+            args: args.join(" "),
+            stderr: format!(
+                "tx-checksumming must read back off for {}/{}; feature_line={feature_line:?}; stdout={stdout:?}",
+                ns.name, iface
+            ),
+            status: output.status.code(),
+        });
+    }
+    eprintln!(
+        "THREEIFACE-TX-OFF ns={} iface={} feature='{}'",
+        ns.name,
+        iface,
+        feature_line.unwrap_or("missing")
+    );
+    Ok(())
 }
 
 // `ThreeIfaceTopology` does not need an explicit Drop — `NetNs::drop`

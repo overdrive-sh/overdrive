@@ -1,0 +1,379 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.20s
+     Running `target/debug/xtask metal collect 6c6a56320ecafbfd509a3609`
+/usr/bin/ssh
+xtask: running metal collect (read-only durable run record)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+    Checking ring v0.17.14
+    Checking rcgen v0.14.8
+    Checking overdrive-host v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-host)
+    Checking overdrive-testing v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-testing)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.11s
+    Checking ring v0.17.14
+    Checking overdrive-core v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-core)
+   Compiling rustls v0.23.39
+   Compiling overdrive-dataplane v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-dataplane)
+    Checking rustls-webpki v0.103.13
+    Checking rcgen v0.14.8
+    Checking tokio-rustls v0.26.4
+    Checking ktls v6.0.2
+    Checking overdrive-fwd v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-fwd)
+    Checking overdrive-host v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-host)
+    Checking overdrive-store-local v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-store-local)
+    Checking overdrive-testing v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-testing)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 10.50s
+    Updating crates.io index
+     Locking 170 packages to latest Rust 1.95.0 compatible versions
+      Adding generic-array v0.14.7 (available: v0.14.9)
+ Downloading crates ...
+  Downloaded rustix v1.1.6
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling libc v0.2.191
+   Compiling serde_core v1.0.229
+    Checking cfg-if v1.0.5
+   Compiling serde v1.0.229
+   Compiling find-msvc-tools v0.1.15
+   Compiling shlex v2.0.1
+   Compiling zerocopy v0.8.63
+   Compiling version_check v0.9.5
+    Checking hashbrown v0.17.1
+    Checking equivalent v1.0.3
+   Compiling memchr v2.8.3
+    Checking pin-project-lite v0.2.17
+    Checking typenum v1.20.1
+    Checking futures-sink v0.3.34
+   Compiling zmij v1.0.23
+   Compiling num-conv v0.2.2
+   Compiling regex-syntax v0.8.11
+   Compiling cc v1.10.0
+    Checking futures-core v0.3.34
+   Compiling time-core v0.1.9
+   Compiling parking_lot_core v0.9.12
+    Checking futures-io v0.3.34
+    Checking futures-channel v0.3.34
+   Compiling getrandom v0.4.3
+   Compiling generic-array v0.14.7
+    Checking scopeguard v1.2.0
+   Compiling serde_json v1.0.154
+   Compiling autocfg v1.5.1
+   Compiling time-macros v0.2.32
+    Checking simdutf8 v0.1.5
+    Checking smallvec v1.16.4
+    Checking itoa v1.0.18
+   Compiling aho-corasick v1.1.5
+    Checking powerfmt v0.2.1
+    Checking futures-task v0.3.34
+    Checking slab v0.4.12
+    Checking lock_api v0.4.14
+    Checking unsafe-libyaml-norway v0.2.15
+    Checking toml_write v0.1.2
+   Compiling thiserror v2.0.21
+   Compiling memoffset v0.9.1
+    Checking once_cell v1.21.4
+    Checking winnow v0.7.15
+   Compiling cfg_aliases v0.2.2
+    Checking ryu v1.0.23
+    Checking ciborium-io v0.2.2
+    Checking bitflags v2.13.2
+    Checking tracing-core v0.1.36
+   Compiling nix v0.30.1
+    Checking constant_time_eq v0.4.2
+    Checking arrayvec v0.7.8
+    Checking cpufeatures v0.3.1
+   Compiling syn v3.0.9
+   Compiling syn v2.0.119
+    Checking cpufeatures v0.2.17
+    Checking bytes v1.12.1
+    Checking base64 v0.23.1
+    Checking untrusted v0.9.0
+   Compiling rustix v1.1.6
+    Checking zeroize v1.9.1
+    Checking hex v0.4.3
+    Checking linux-raw-sys v0.12.1
+    Checking rustls-pki-types v1.15.1
+    Checking crypto-common v0.1.7
+    Checking block-buffer v0.10.4
+    Checking pem v4.0.0
+    Checking digest v0.10.7
+   Compiling blake3 v1.8.7
+   Compiling ring v0.17.14
+    Checking sha2 v0.10.9
+   Compiling regex-automata v0.4.18
+    Checking getrandom v0.2.17
+    Checking errno v0.3.14
+    Checking socket2 v0.6.5
+    Checking signal-hook-registry v1.4.8
+    Checking mio v1.2.4
+    Checking rand_core v0.6.4
+    Checking parking_lot v0.12.5
+    Checking linux-keyutils v0.2.5
+    Checking indexmap v2.14.2
+    Checking deranged v0.5.9
+    Checking uuid v1.29.0
+    Checking time v0.3.55
+   Compiling regex v1.13.1
+   Compiling serde_derive v1.0.229
+   Compiling ptr_meta_derive v0.3.2
+   Compiling futures-macro v0.3.34
+   Compiling bytecheck_derive v0.8.3
+   Compiling tokio-macros v2.7.2
+   Compiling rkyv_derive v0.8.18
+   Compiling thiserror-impl v2.0.21
+   Compiling async-trait v0.1.92
+    Checking yasna v0.6.0
+    Checking ptr_meta v0.3.2
+    Checking rancor v0.1.3
+    Checking tokio v1.54.1
+    Checking bytecheck v0.8.3
+    Checking futures-util v0.3.34
+    Checking rend v0.5.4
+   Compiling zerocopy-derive v0.8.63
+   Compiling munge_macro v0.4.7
+   Compiling tracing-attributes v0.1.31
+   Compiling utoipa-gen v5.5.0
+    Checking munge v0.4.7
+    Checking rcgen v0.14.10
+    Checking tracing v0.1.44
+    Checking toml_datetime v0.6.11
+    Checking serde_spanned v0.6.9
+    Checking serde_norway v0.9.42
+    Checking ipnet v2.12.2
+    Checking toml_edit v0.22.27
+    Checking futures-executor v0.3.34
+    Checking futures v0.3.34
+    Checking rkyv v0.8.18
+    Checking toml v0.8.23
+    Checking utoipa v5.5.0
+    Checking half v2.7.1
+    Checking ppv-lite86 v0.2.21
+    Checking ciborium-ll v0.2.2
+    Checking rand_chacha v0.3.1
+    Checking ciborium v0.2.2
+    Checking rand v0.8.8
+    Checking overdrive-core v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-core)
+    Checking overdrive-fwd v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-fwd)
+    Checking overdrive-host v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-host)
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive/crates/overdrive-host/src/beacon_io.rs:127:42
+    |
+127 |         let listener = Arc::new(AsyncFd::new(listener)?);
+    |                                          ^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive/crates/overdrive-host/src/beacon_io.rs:158:46
+    |
+158 | ...                   socket: AsyncFd::new(socket)?,
+    |                                        ^^^
+
+warning: `overdrive-host` (lib) generated 2 warnings
+    Checking overdrive-testing v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-testing)
+    Checking netns-density-295-dataplane-offload-probe v0.0.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-dataplane-offload/increment-a)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 16.66s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.15s
+     Running `target/debug/xtask guest-kit-prepare`
+guest-kit-prepare: overdrive-init overdrive-init -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-init--overdrive-init
+guest-kit-prepare: overdrive-fwd integration -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-fwd--integration
+guest-kit-prepare: overdrive-dataplane integration -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-dataplane--integration
+guest-kit-prepare: overdrive-dataplane overdrive_dataplane -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-dataplane--overdrive_dataplane
+guest-kit-prepare: overdrive-control-plane acceptance -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-control-plane--acceptance
+guest-kit-prepare: overdrive-control-plane integration -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-control-plane--integration
+guest-kit-prepare: overdrive-worker integration -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-worker--integration
+guest-kit-prepare: kernel 7.0.0-38-generic, target x86_64-unknown-linux-musl: the lane is prepared
+   Compiling cfg-if v1.0.5
+   Compiling hashbrown v0.17.1
+   Compiling equivalent v1.0.3
+   Compiling pin-project-lite v0.2.17
+   Compiling typenum v1.20.1
+   Compiling memchr v2.8.3
+   Compiling futures-sink v0.3.34
+   Compiling num-conv v0.2.2
+   Compiling libc v0.2.191
+   Compiling serde_core v1.0.229
+   Compiling futures-core v0.3.34
+   Compiling time-core v0.1.9
+   Compiling zerocopy v0.8.63
+   Compiling ptr_meta v0.3.2
+   Compiling slab v0.4.12
+   Compiling futures-task v0.3.34
+   Compiling simdutf8 v0.1.5
+   Compiling scopeguard v1.2.0
+   Compiling powerfmt v0.2.1
+   Compiling smallvec v1.16.4
+   Compiling rancor v0.1.3
+   Compiling futures-channel v0.3.34
+   Compiling itoa v1.0.18
+   Compiling futures-io v0.3.34
+   Compiling lock_api v0.4.14
+   Compiling zmij v1.0.23
+   Compiling time-macros v0.2.32
+   Compiling ryu v1.0.23
+   Compiling ciborium-io v0.2.2
+   Compiling bytecheck v0.8.3
+   Compiling toml_write v0.1.2
+   Compiling bitflags v2.13.2
+   Compiling winnow v0.7.15
+   Compiling unsafe-libyaml-norway v0.2.15
+   Compiling once_cell v1.21.4
+   Compiling munge v0.4.7
+   Compiling bytes v1.12.1
+   Compiling rend v0.5.4
+   Compiling cpufeatures v0.3.1
+   Compiling cpufeatures v0.2.17
+   Compiling tracing-core v0.1.36
+   Compiling arrayvec v0.7.8
+   Compiling constant_time_eq v0.4.2
+   Compiling futures-util v0.3.34
+   Compiling thiserror v2.0.21
+   Compiling memoffset v0.9.1
+   Compiling zeroize v1.9.1
+   Compiling untrusted v0.9.0
+   Compiling blake3 v1.8.7
+   Compiling hex v0.4.3
+   Compiling base64 v0.23.1
+   Compiling linux-raw-sys v0.12.1
+   Compiling generic-array v0.14.7
+   Compiling rustls-pki-types v1.15.1
+   Compiling tracing v0.1.44
+   Compiling pem v4.0.0
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling digest v0.10.7
+   Compiling sha2 v0.10.9
+   Compiling getrandom v0.2.17
+   Compiling parking_lot_core v0.9.12
+   Compiling errno v0.3.14
+   Compiling mio v1.2.4
+   Compiling socket2 v0.6.5
+   Compiling getrandom v0.4.3
+   Compiling nix v0.30.1
+   Compiling linux-keyutils v0.2.5
+   Compiling signal-hook-registry v1.4.8
+   Compiling rand_core v0.6.4
+   Compiling ring v0.17.14
+   Compiling parking_lot v0.12.5
+   Compiling rustix v1.1.6
+   Compiling tokio v1.54.1
+   Compiling serde v1.0.229
+   Compiling indexmap v2.14.2
+   Compiling deranged v0.5.9
+   Compiling serde_json v1.0.154
+   Compiling uuid v1.29.0
+   Compiling serde_spanned v0.6.9
+   Compiling toml_datetime v0.6.11
+   Compiling ipnet v2.12.2
+   Compiling toml_edit v0.22.27
+   Compiling serde_norway v0.9.42
+   Compiling futures-executor v0.3.34
+   Compiling futures v0.3.34
+   Compiling time v0.3.55
+   Compiling utoipa v5.5.0
+   Compiling rkyv v0.8.18
+   Compiling half v2.7.1
+   Compiling ppv-lite86 v0.2.21
+   Compiling yasna v0.6.0
+   Compiling ciborium-ll v0.2.2
+   Compiling rand_chacha v0.3.1
+   Compiling ciborium v0.2.2
+   Compiling rand v0.8.8
+   Compiling rcgen v0.14.10
+   Compiling toml v0.8.23
+   Compiling overdrive-core v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-core)
+   Compiling overdrive-fwd v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-fwd)
+   Compiling overdrive-host v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-host)
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive/crates/overdrive-host/src/beacon_io.rs:127:42
+    |
+127 |         let listener = Arc::new(AsyncFd::new(listener)?);
+    |                                          ^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive/crates/overdrive-host/src/beacon_io.rs:158:46
+    |
+158 | ...                   socket: AsyncFd::new(socket)?,
+    |                                        ^^^
+
+   Compiling overdrive-testing v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-testing)
+warning: `overdrive-host` (lib) generated 2 warnings
+   Compiling netns-density-295-dataplane-offload-probe v0.0.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-dataplane-offload/increment-a)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 13.95s
+     Running `spike-scratch/netns-density-295-dataplane-offload/increment-a/target/debug/netns-density-295-dataplane-offload-probe`
+===== S05C bounded exact replay =====
+
+running 1 test
+test integration::multi_listener_tcp_udp_e2e::adding_listener_on_resubmit_converges_without_breaking_existing ... THREEIFACE-TX-OFF ns=3i-clt-c-94 iface=3icc005e feature='tx-checksumming: off'
+THREEIFACE-TX-OFF ns=3i-lb-c-94 iface=3ica005e feature='tx-checksumming: off'
+THREEIFACE-TX-OFF ns=3i-lb-c-94 iface=3icb005e feature='tx-checksumming: off'
+THREEIFACE-TX-OFF ns=3i-bck-c-94 iface=3icd005e feature='tx-checksumming: off'
+[diag] S-05-C topology: client_ns=3i-clt-c-94 client_iface=3icc005e lb_ns=3i-lb-c-94 lb_ifaces=3ica005e,3icb005e backend_ns=3i-bck-c-94 backend_iface=3icd005e
+[diag] S-05-C client links: status=Some(0) stdout=[1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00 promiscuity 0 allmulti 0 minmtu 0 maxmtu 0 netns-immutable addrgenmode eui64 numtxqueues 1 numrxqueues 1 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536 
+4: 3icc005e@if3: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 xdp qdisc noqueue state UP mode DEFAULT group default qlen 1000
+    link/ether d2:01:59:6c:58:94 brd ff:ff:ff:ff:ff:ff link-netns 3i-lb-c-94 promiscuity 0 allmulti 0 minmtu 68 maxmtu 3506 
+    veth addrgenmode eui64 numtxqueues 2 numrxqueues 2 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536 
+    prog/xdp id 9 name xdp_pass tag 542996fd00d20dd3 jited load_time 1172527640 created_by_uid 0] stderr=[]
+[diag] S-05-C client routes: status=Some(0) stdout=[default via 10.0.0.1 dev 3icc005e 
+10.0.0.0/24 dev 3icc005e proto kernel scope link src 10.0.0.10 
+local 10.0.0.10 dev 3icc005e table local proto kernel scope host src 10.0.0.10 
+broadcast 10.0.0.255 dev 3icc005e table local proto kernel scope link src 10.0.0.10 
+local 127.0.0.0/8 dev lo table local proto kernel scope host src 127.0.0.1 
+local 127.0.0.1 dev lo table local proto kernel scope host src 127.0.0.1 
+broadcast 127.255.255.255 dev lo table local proto kernel scope link src 127.0.0.1] stderr=[]
+[diag] S-05-C client neighbours: status=Some(0) stdout=[] stderr=[]
+[diag] S-05-C lb links: status=Some(0) stdout=[1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00 promiscuity 0 allmulti 0 minmtu 0 maxmtu 0 netns-immutable addrgenmode eui64 numtxqueues 1 numrxqueues 1 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536 
+3: 3ica005e@if4: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 xdp qdisc noqueue state UP mode DEFAULT group default qlen 1000
+    link/ether 12:fc:62:78:fd:7d brd ff:ff:ff:ff:ff:ff link-netns 3i-clt-c-94 promiscuity 0 allmulti 0 minmtu 68 maxmtu 3506 
+    veth addrgenmode eui64 numtxqueues 2 numrxqueues 2 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536 
+    prog/xdp id 10 name xdp_service_map tag 7a2296b8bc663d92 jited load_time 1624055510 created_by_uid 0 
+6: 3icb005e@if5: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 xdp qdisc noqueue state UP mode DEFAULT group default qlen 1000
+    link/ether b6:6c:11:77:9b:54 brd ff:ff:ff:ff:ff:ff link-netns 3i-bck-c-94 promiscuity 0 allmulti 0 minmtu 68 maxmtu 3506 
+    veth addrgenmode eui64 numtxqueues 2 numrxqueues 2 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536 
+    prog/xdp id 11 name xdp_reverse_nat tag 9fc13cc03cd9cc1d jited load_time 1633130682 created_by_uid 0] stderr=[]
+[diag] S-05-C lb routes: status=Some(0) stdout=[10.0.0.0/24 dev 3ica005e proto kernel scope link src 10.0.0.1 
+10.1.0.0/24 dev 3icb005e proto kernel scope link src 10.1.0.1 
+local 10.0.0.1 dev 3ica005e table local proto kernel scope host src 10.0.0.1 
+broadcast 10.0.0.255 dev 3ica005e table local proto kernel scope link src 10.0.0.1 
+local 10.1.0.1 dev 3icb005e table local proto kernel scope host src 10.1.0.1 
+broadcast 10.1.0.255 dev 3icb005e table local proto kernel scope link src 10.1.0.1 
+local 127.0.0.0/8 dev lo table local proto kernel scope host src 127.0.0.1 
+local 127.0.0.1 dev lo table local proto kernel scope host src 127.0.0.1 
+broadcast 127.255.255.255 dev lo table local proto kernel scope link src 127.0.0.1] stderr=[]
+[diag] S-05-C lb neighbours: status=Some(0) stdout=[10.0.0.10 dev 3ica005e lladdr d2:01:59:6c:58:94 PERMANENT 
+10.1.0.5 dev 3icb005e lladdr a2:fe:df:46:36:ec PERMANENT] stderr=[]
+[diag] S-05-C backend links: status=Some(0) stdout=[1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00 promiscuity 0 allmulti 0 minmtu 0 maxmtu 0 netns-immutable addrgenmode eui64 numtxqueues 1 numrxqueues 1 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536 
+5: 3icd005e@if6: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 xdp qdisc noqueue state UP mode DEFAULT group default qlen 1000
+    link/ether a2:fe:df:46:36:ec brd ff:ff:ff:ff:ff:ff link-netns 3i-lb-c-94 promiscuity 0 allmulti 0 minmtu 68 maxmtu 3506 
+    veth addrgenmode eui64 numtxqueues 2 numrxqueues 2 gso_max_size 65536 gso_max_segs 65535 tso_max_size 524280 tso_max_segs 65535 gro_max_size 65536 gso_ipv4_max_size 65536 gro_ipv4_max_size 65536 
+    prog/xdp id 8 name xdp_pass tag 542996fd00d20dd3 jited load_time 1067868333 created_by_uid 0] stderr=[]
+[diag] S-05-C backend routes: status=Some(0) stdout=[default via 10.1.0.1 dev 3icd005e 
+10.1.0.0/24 dev 3icd005e proto kernel scope link src 10.1.0.5 
+local 10.1.0.5 dev 3icd005e table local proto kernel scope host src 10.1.0.5 
+broadcast 10.1.0.255 dev 3icd005e table local proto kernel scope link src 10.1.0.5 
+local 127.0.0.0/8 dev lo table local proto kernel scope host src 127.0.0.1 
+local 127.0.0.1 dev lo table local proto kernel scope host src 127.0.0.1 
+broadcast 127.255.255.255 dev lo table local proto kernel scope link src 127.0.0.1] stderr=[]
+[diag] S-05-C backend neighbours: status=Some(0) stdout=[] stderr=[]
+[diag] S-05-C backend listeners: status=Some(0) stdout=[udp UNCONN 0      0      0.0.0.0:8081 0.0.0.0:* users:(("python3",pid=137,fd=3))
+udp UNCONN 0      0      0.0.0.0:8082 0.0.0.0:* users:(("python3",pid=140,fd=3))
+tcp LISTEN 0      1      0.0.0.0:8080 0.0.0.0:* users:(("nc",pid=136,fd=3))] stderr=[]
+[diag] S-05-C lb BPF attachments: status=Some(0) stdout=[[{"xdp":[{"devname":"3ica005e","ifindex":3,"mode":"driver","id":10},{"devname":"3icb005e","ifindex":6,"mode":"driver","id":11}],"tc":[],"flow_dissector":[],"netfilter":[]}]] stderr=[]
+[diag] S-05-C lb BPF programs: status=Some(0) stdout=[[{"id":8,"type":"xdp","name":"xdp_pass","tag":"542996fd00d20dd3","gpl_compatible":true,"loaded_at":1793216145,"uid":0,"orphaned":false,"bytes_xlated":216,"jited":true,"bytes_jited":133,"bytes_memlock":4096,"map_ids":[8]},{"id":9,"type":"xdp","name":"xdp_pass","tag":"542996fd00d20dd3","gpl_compatible":true,"loaded_at":1793216145,"uid":0,"orphaned":false,"bytes_xlated":216,"jited":true,"bytes_jited":133,"bytes_memlock":4096,"map_ids":[18]},{"id":10,"type":"xdp","name":"xdp_service_map","tag":"7a2296b8bc663d92","gpl_compatible":true,"loaded_at":1793216146,"uid":0,"orphaned":false,"bytes_xlated":4600,"jited":true,"bytes_jited":2618,"bytes_memlock":8192,"map_ids":[30,23,28]},{"id":11,"type":"xdp","name":"xdp_reverse_nat","tag":"9fc13cc03cd9cc1d","gpl_compatible":true,"loaded_at":1793216146,"uid":0,"orphaned":false,"bytes_xlated":3864,"jited":true,"bytes_jited":2176,"bytes_memlock":4096,"map_ids":[30,27]},{"id":12,"type":"cgroup_sock_addr","name":"cgroup_connect4","tag":"55691533e6d0fdea","gpl_compatible":true,"loaded_at":1793216146,"uid":0,"orphaned":false,"bytes_xlated":296,"jited":true,"bytes_jited":186,"bytes_memlock":4096,"map_ids":[26]},{"id":13,"type":"cgroup_sock_addr","name":"cgroup_sendmsg4","tag":"55691533e6d0fdea","gpl_compatible":true,"loaded_at":1793216146,"uid":0,"orphaned":false,"bytes_xlated":296,"jited":true,"bytes_jited":186,"bytes_memlock":4096,"map_ids":[26]},{"id":14,"type":"cgroup_sock_addr","name":"cgroup_recvmsg4","tag":"1ce2b5a972c9b8a3","gpl_compatible":true,"loaded_at":1793216146,"uid":0,"orphaned":false,"bytes_xlated":448,"jited":true,"bytes_jited":272,"bytes_memlock":4096,"map_ids":[25,29]}]] stderr=[]
+[diag] udp client (VIP:8082): stdout=[ovd-multi-c-udp2] stderr=[]
+[diag] udp client (VIP:8081): stdout=[ovd-multi-c-udp1] stderr=[]
+[diag] tcp client (VIP:8080): stdout=[ovd-multi-c-tcp] stderr=[]
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 63 filtered out; finished in 10.45s
+
+
+S05C_BOUNDED_REPLAY_PASS
+OVERDRIVE_METAL_RUN_COMPLETE run_id=6c6a56320ecafbfd509a3609 exit_code=0 cause=command_returned

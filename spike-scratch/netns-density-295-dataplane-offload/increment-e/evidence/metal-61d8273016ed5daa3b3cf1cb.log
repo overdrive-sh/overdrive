@@ -1,0 +1,109 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.20s
+     Running `target/debug/xtask metal collect 61d8273016ed5daa3b3cf1cb`
+/usr/bin/ssh
+xtask: running metal collect (read-only durable run record)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+    Updating crates.io index
+     Locking 170 packages to latest Rust 1.95.0 compatible versions
+      Adding generic-array v0.14.7 (available: v0.14.9)
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive/crates/overdrive-host/src/beacon_io.rs:127:42
+    |
+127 |         let listener = Arc::new(AsyncFd::new(listener)?);
+    |                                          ^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive/crates/overdrive-host/src/beacon_io.rs:158:46
+    |
+158 | ...                   socket: AsyncFd::new(socket)?,
+    |                                        ^^^
+
+warning: `overdrive-host` (lib) generated 2 warnings
+    Checking netns-density-295-dns53-qualified-probe v0.0.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-dataplane-offload/increment-e)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.18s
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive/crates/overdrive-host/src/beacon_io.rs:127:42
+    |
+127 |         let listener = Arc::new(AsyncFd::new(listener)?);
+    |                                          ^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive/crates/overdrive-host/src/beacon_io.rs:158:46
+    |
+158 | ...                   socket: AsyncFd::new(socket)?,
+    |                                        ^^^
+
+warning: `overdrive-host` (lib) generated 2 warnings
+   Compiling netns-density-295-dns53-qualified-probe v0.0.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-dataplane-offload/increment-e)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.47s
+     Running `target/debug/netns-density-295-dns53-qualified-probe`
+===== fresh DNS-only case =====
+
+running 1 test
+test integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf ... dns_responder_bind: kernel 7.0.0-38-generic
+[diag] DNS53 before-holder: process_pid=98 process_netns=Ok("net:[4026531833]") process_command=Ok("/opt/overdrive-testing/in-guest-tests --test-threads=1 --nocapture --exact integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf") sockets=[] owners=[] holder=none ss53=Ok("status=Some(0) stdout=\"\" stderr=\"\"") ipv4_addr=Ok("status=Some(0) stdout=\"1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000\\n    inet 127.0.0.1/8 scope host lo\\n       valid_lft forever preferred_lft forever\\n\" stderr=\"\"") gateway_local_route=Ok("status=Some(0) stdout=\"local 100.95.0.1 dev lo proto 247 scope host \\n\" stderr=\"\"")
+[diag] DNS53 after-holder: process_pid=98 process_netns=Ok("net:[4026531833]") process_command=Ok("/opt/overdrive-testing/in-guest-tests --test-threads=1 --nocapture --exact integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf") sockets=[(127.0.0.53, 53, 2141)] owners=["pid=98 fd=9 inode=2141 comm=\"in-guest-tests\" netns=net:[4026531833] command=\"/opt/overdrive-testing/in-guest-tests --test-threads=1 --nocapture --exact integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf\" fdinfo=\"pos:\\t0\\nflags:\\t02000002\\nmnt_id:\\t12\\nino:\\t2141\\n\""] holder=fd=9 local=Ok(127.0.0.53:53) reuseaddr_status=0 reuseaddr=0 reuseport_status=0 reuseport=0 fd_flags=1 cloexec=true link=Ok("socket:[2141]") ss53=Ok("status=Some(0) stdout=\"UNCONN 0      0      127.0.0.53:53 0.0.0.0:* users:((\\\"in-guest-tests\\\",pid=98,fd=9)) ino:2141 sk:1 cgroup:/ <->\\n\" stderr=\"\"") ipv4_addr=Ok("status=Some(0) stdout=\"1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000\\n    inet 127.0.0.1/8 scope host lo\\n       valid_lft forever preferred_lft forever\\n\" stderr=\"\"") gateway_local_route=Ok("status=Some(0) stdout=\"local 100.95.0.1 dev lo proto 247 scope host \\n\" stderr=\"\"")
+[diag] DNS53 after-probe: process_pid=98 process_netns=Ok("net:[4026531833]") process_command=Ok("/opt/overdrive-testing/in-guest-tests --test-threads=1 --nocapture --exact integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf") sockets=[(100.95.0.1, 53, 2153), (127.0.0.53, 53, 2141)] owners=["pid=98 fd=9 inode=2141 comm=\"in-guest-tests\" netns=net:[4026531833] command=\"/opt/overdrive-testing/in-guest-tests --test-threads=1 --nocapture --exact integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf\" fdinfo=\"pos:\\t0\\nflags:\\t02000002\\nmnt_id:\\t12\\nino:\\t2141\\n\"", "pid=98 fd=10 inode=2153 comm=\"in-guest-tests\" netns=net:[4026531833] command=\"/opt/overdrive-testing/in-guest-tests --test-threads=1 --nocapture --exact integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf\" fdinfo=\"pos:\\t0\\nflags:\\t02000002\\nmnt_id:\\t12\\nino:\\t2153\\n\""] holder=fd=9 local=Ok(127.0.0.53:53) reuseaddr_status=0 reuseaddr=0 reuseport_status=0 reuseport=0 fd_flags=1 cloexec=true link=Ok("socket:[2141]") ss53=Ok("status=Some(0) stdout=\"UNCONN 0      0      100.95.0.1:53 0.0.0.0:* users:((\\\"in-guest-tests\\\",pid=98,fd=10)) ino:2153 sk:2 cgroup:/ <->\\nUNCONN 0      0      127.0.0.53:53 0.0.0.0:* users:((\\\"in-guest-tests\\\",pid=98,fd=9))  ino:2141 sk:1 cgroup:/ <->\\n\" stderr=\"\"") ipv4_addr=Ok("status=Some(0) stdout=\"1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000\\n    inet 127.0.0.1/8 scope host lo\\n       valid_lft forever preferred_lft forever\\n\" stderr=\"\"") gateway_local_route=Ok("status=Some(0) stdout=\"local 100.95.0.1 dev lo proto 247 scope host \\n\" stderr=\"\"")
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 214 filtered out; finished in 0.20s
+
+
+===== fresh per-gateway fallback case =====
+
+running 1 test
+test integration::dns_responder_bind::per_gateway_addr_fallback_binds_when_wildcard_is_held ... dns_responder_bind: kernel 7.0.0-38-generic
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 214 filtered out; finished in 0.01s
+
+
+===== prefix adopt survivor =====
+
+running 1 test
+test integration::adopt_on_restart::serve_restart_readopts_surviving_slot_and_gcs_orphan_netns ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 214 filtered out; finished in 0.40s
+
+
+===== prefix adopt nft sweep =====
+
+running 1 test
+test integration::adopt_on_restart::serve_restart_sweeps_surviving_per_workload_tproxy_rule ... Error: Could not process rule: No such file or directory
+delete table ip overdrive-mtls
+                ^^^^^^^^^^^^^^
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 214 filtered out; finished in 0.05s
+
+
+===== two-adopt then DNS case =====
+
+running 1 test
+test integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf ... dns_responder_bind: kernel 7.0.0-38-generic
+[diag] DNS53 before-holder: process_pid=164 process_netns=Ok("net:[4026531833]") process_command=Ok("/opt/overdrive-testing/in-guest-tests --test-threads=1 --nocapture --exact integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf") sockets=[] owners=[] holder=none ss53=Ok("status=Some(0) stdout=\"\" stderr=\"\"") ipv4_addr=Ok("status=Some(0) stdout=\"1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000\\n    inet 127.0.0.1/8 scope host lo\\n       valid_lft forever preferred_lft forever\\n\" stderr=\"\"") gateway_local_route=Ok("status=Some(0) stdout=\"local 100.95.0.1 dev lo proto 247 scope host \\n\" stderr=\"\"")
+[diag] DNS53 after-holder: process_pid=164 process_netns=Ok("net:[4026531833]") process_command=Ok("/opt/overdrive-testing/in-guest-tests --test-threads=1 --nocapture --exact integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf") sockets=[(127.0.0.53, 53, 2088)] owners=["pid=164 fd=9 inode=2088 comm=\"in-guest-tests\" netns=net:[4026531833] command=\"/opt/overdrive-testing/in-guest-tests --test-threads=1 --nocapture --exact integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf\" fdinfo=\"pos:\\t0\\nflags:\\t02000002\\nmnt_id:\\t12\\nino:\\t2088\\n\""] holder=fd=9 local=Ok(127.0.0.53:53) reuseaddr_status=0 reuseaddr=0 reuseport_status=0 reuseport=0 fd_flags=1 cloexec=true link=Ok("socket:[2088]") ss53=Ok("status=Some(0) stdout=\"UNCONN 0      0      127.0.0.53:53 0.0.0.0:* users:((\\\"in-guest-tests\\\",pid=164,fd=9)) ino:2088 sk:1 cgroup:/ <->\\n\" stderr=\"\"") ipv4_addr=Ok("status=Some(0) stdout=\"1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000\\n    inet 127.0.0.1/8 scope host lo\\n       valid_lft forever preferred_lft forever\\n\" stderr=\"\"") gateway_local_route=Ok("status=Some(0) stdout=\"local 100.95.0.1 dev lo proto 247 scope host \\n\" stderr=\"\"")
+[diag] DNS53 after-probe: process_pid=164 process_netns=Ok("net:[4026531833]") process_command=Ok("/opt/overdrive-testing/in-guest-tests --test-threads=1 --nocapture --exact integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf") sockets=[(100.95.0.1, 53, 2100), (127.0.0.53, 53, 2088)] owners=["pid=164 fd=9 inode=2088 comm=\"in-guest-tests\" netns=net:[4026531833] command=\"/opt/overdrive-testing/in-guest-tests --test-threads=1 --nocapture --exact integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf\" fdinfo=\"pos:\\t0\\nflags:\\t02000002\\nmnt_id:\\t12\\nino:\\t2088\\n\"", "pid=164 fd=10 inode=2100 comm=\"in-guest-tests\" netns=net:[4026531833] command=\"/opt/overdrive-testing/in-guest-tests --test-threads=1 --nocapture --exact integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf\" fdinfo=\"pos:\\t0\\nflags:\\t02000002\\nmnt_id:\\t12\\nino:\\t2100\\n\""] holder=fd=9 local=Ok(127.0.0.53:53) reuseaddr_status=0 reuseaddr=0 reuseport_status=0 reuseport=0 fd_flags=1 cloexec=true link=Ok("socket:[2088]") ss53=Ok("status=Some(0) stdout=\"UNCONN 0      0      100.95.0.1:53 0.0.0.0:* users:((\\\"in-guest-tests\\\",pid=164,fd=10)) ino:2100 sk:2 cgroup:/ <->\\nUNCONN 0      0      127.0.0.53:53 0.0.0.0:* users:((\\\"in-guest-tests\\\",pid=164,fd=9))  ino:2088 sk:1 cgroup:/ <->\\n\" stderr=\"\"") ipv4_addr=Ok("status=Some(0) stdout=\"1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000\\n    inet 127.0.0.1/8 scope host lo\\n       valid_lft forever preferred_lft forever\\n\" stderr=\"\"") gateway_local_route=Ok("status=Some(0) stdout=\"local 100.95.0.1 dev lo proto 247 scope host \\n\" stderr=\"\"")
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 214 filtered out; finished in 0.14s
+
+
+===== prefix per-gateway fallback case =====
+
+running 1 test
+test integration::dns_responder_bind::per_gateway_addr_fallback_binds_when_wildcard_is_held ... dns_responder_bind: kernel 7.0.0-38-generic
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 214 filtered out; finished in 0.01s
+
+
+DNS53_QUALIFIED_FIXTURE_PASS
+OVERDRIVE_METAL_RUN_COMPLETE run_id=61d8273016ed5daa3b3cf1cb exit_code=0 cause=command_returned

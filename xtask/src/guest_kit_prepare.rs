@@ -43,6 +43,8 @@ pub const GUEST_PEER_BIN: &str = "overdrive-guest-peer";
 /// Which cargo target of a package an in-guest lane's libtest binary is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InGuestTarget {
+    /// A package library's unit-test binary (`cargo test --lib`).
+    Lib,
     /// A `bin` target's unit tests (`cargo test --bin <name>`).
     Bin,
     /// An integration-test target (`cargo test --test <name>`).
@@ -54,6 +56,7 @@ impl InGuestTarget {
     #[must_use]
     pub const fn flag(self) -> &'static str {
         match self {
+            Self::Lib => "--lib",
             Self::Bin => "--bin",
             Self::Test => "--test",
         }
@@ -82,12 +85,19 @@ pub struct InGuestLane {
 /// - `overdrive-fwd`'s `integration` test binary: V-EV-UNLOAD's ULP negative
 ///   control and unload stress (U-EV-UNLOAD, T-1), which unload the module
 ///   and so run only in a guest whose PID 1 holds nothing of it.
-/// - `overdrive-dataplane`'s `integration` test binary: the existing R5-54
-///   inbound guest-relay cells, executed by the existing guest-suite runner
-///   so their loopback kTLS effects stay inside a disposable guest.
+/// - `overdrive-dataplane`'s `integration` test binary: the existing seven
+///   R5-54 inbound guest-relay cells plus the 36 active real-kernel dataplane
+///   bodies independently routed out of the normal three-package selector,
+///   executed by the existing `mtls-relay` guest so their BPF, netns, nft,
+///   cgroup, XDP and kTLS effects stay inside one disposable guest.
+/// - `overdrive-dataplane`'s library test binary: the three existing real-BPF
+///   map bodies discovered by the normal package gate, staged beside the
+///   integration binary and executed in the same `mtls-relay` guest.
 /// - `overdrive-control-plane`'s `acceptance` and `integration` test binaries,
 ///   and `overdrive-worker`'s `integration` test binary: the unchanged 55
-///   real-cgroup cells plus the 18 already-authored STEP 13-04 native cells,
+///   real-cgroup cells plus the 18 already-authored STEP 13-04 and five
+///   already-authored STEP 13-05 native cells, followed by the 20 existing
+///   control-plane native bodies discovered by the normal package gate;
 ///   executed by the existing guest-suite runner inside the same three fresh
 ///   disposable guests with a private cgroup-v2 mount.
 pub const IN_GUEST_LANES: &[InGuestLane] = &[
@@ -107,6 +117,12 @@ pub const IN_GUEST_LANES: &[InGuestLane] = &[
         package: "overdrive-dataplane",
         bin: "integration",
         target: InGuestTarget::Test,
+        features: "integration-tests",
+    },
+    InGuestLane {
+        package: "overdrive-dataplane",
+        bin: "overdrive_dataplane",
+        target: InGuestTarget::Lib,
         features: "integration-tests",
     },
     InGuestLane {
@@ -263,11 +279,16 @@ fn require(path: &Path, artefact: &str) -> Result<()> {
 
 /// Builds `lane`'s libtest binary; returns the executable cargo reports.
 fn build_in_guest_tests(workspace_root: &Path, lane: &InGuestLane) -> Result<PathBuf> {
+    let mut command = Command::new("cargo");
+    command.args(["test", "--no-run", "--package", lane.package, lane.target.flag()]);
+    if lane.target != InGuestTarget::Lib {
+        command.arg(lane.bin);
+    }
+    command
+        .args(["--features", lane.features, "--message-format", "json"])
+        .current_dir(workspace_root);
     let output = run_step(
-        Command::new("cargo")
-            .args(["test", "--no-run", "--package", lane.package, lane.target.flag(), lane.bin])
-            .args(["--features", lane.features, "--message-format", "json"])
-            .current_dir(workspace_root),
+        &mut command,
         &format!("building the in-guest tests of {} {}", lane.package, lane.bin),
     )?;
     let stdout = String::from_utf8_lossy(&output.stdout);
