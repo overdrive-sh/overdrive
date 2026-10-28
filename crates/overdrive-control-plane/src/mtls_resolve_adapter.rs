@@ -87,9 +87,10 @@
 //!   classifies, returns — it does NOT read the store per call (the F2 race is
 //!   gone because `resolve` no longer touches the subscription).
 //!
-//! Headless v1 (D-TME-10): the addr DNS returns IS the backend addr, so the
-//! index is keyed by the backend addr DIRECTLY — there is NO VIP→backend
-//! translation in the resolve path (that is #167/#61, out of scope).
+//! D24a extends the headless reverse index with a service-VIP projection:
+//! TCP lookups use the `(VIP, listener.port)` key from each
+//! `service_backends` row, while UDP remains on the kernel-side ADR-0053
+//! `connect4` rewrite path.
 //!
 //! ## relist-on-`Lagged` — WIRED via `subscribe_all_events` (C4 / D-TME-11
 //! ## refinement, option 2; this step closes F4)
@@ -120,9 +121,10 @@
 //! via `relist_into`) is exercised at List-at-probe, on watch-close, AND now on
 //! `Lagged`.
 //!
-//! # Classification — the THREE-way re-key (02-00; ADR-0072 REV-2 Finding-1/3)
+//! # Classification — frontend, VIP, frontend-subnet and backend branches
+//! (02-00; ADR-0072 REV-2 Finding-1/3; D24a)
 //!
-//! [`BackendIndex::classify`] takes `(orig_dst, proto)` and is a THREE-way
+//! [`BackendIndex::classify`] takes `(orig_dst, proto)` and is a four-way
 //! branch. The contract (pinned per `.claude/rules/development.md` § "Trait
 //! definitions specify behavior"; the `mtls_resolve_rekey` equivalence test is
 //! the enforcement):
@@ -140,13 +142,17 @@
 //!    [`FrontendAddrAllocator`](crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator)
 //!    binds and the DNS `name_index` answers — there is NO second `<workload> → F`
 //!    source (DDN-2).
-//! 2. **`by_frontend` MISS, `orig_dst.ip() ∈ 10.98.0.0/16`** —
+//! 2. **service-VIP branch (`Proto::Tcp`)** — a known `(VIP, listener.port)`
+//!    maps to the same service selection as a frontend; an unmatched address
+//!    inside the configured VIP range is [`MeshUnreachable`]. UDP skips this
+//!    branch because its VIP rewrite is performed by `connect4`.
+//! 3. **`by_frontend` MISS, `orig_dst.ip() ∈ 10.98.0.0/16`** —
 //!    fail-closed-on-frontend-subnet-miss (Finding-3): a mesh dial that is early
 //!    (race) OR to a withdrawn `<workload>` → [`MeshUnreachable`] (refuse, NO
 //!    cleartext). The membership test is a `contains` against the ONE pinned
 //!    [`WORKLOAD_FRONTEND_BASE`] const — never a broader "any reserved subnet"
 //!    helper.
-//! 3. **`by_frontend` MISS, outside the subnet** — fall through to the
+//! 4. **`by_frontend` MISS, outside the subnet** — fall through to the
 //!    pre-REV-2 `by_addr` classification verbatim (the additive-EXTEND
 //!    backward-compat path, [`BackendIndex::classify_by_addr`]):
 //!    - `orig_dst` HITS a `running`-and-healthy mesh backend →
@@ -249,6 +255,22 @@ impl FrontendKey {
     }
 }
 
+/// The TCP service-VIP endpoint `(VIP, listener.port, tcp)` used by the D24a
+/// classification branch. This remains private because VIP lookup is an
+/// internal projection of the `service_backends` rows; `MtlsResolve` is the
+/// public classification surface.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct VipKey {
+    addr: SocketAddrV4,
+    proto: Proto,
+}
+
+impl VipKey {
+    fn new(addr: SocketAddrV4, proto: Proto) -> Self {
+        Self { addr, proto }
+    }
+}
+
 /// The in-RAM, OWNERSHIP-AWARE address-keyed reverse index of the `running`
 /// `service_backends` set — the C4 read-mechanism detail, EXTENDED by 02-00
 /// with the `by_frontend` re-key (ADR-0072 REV-2).
@@ -303,6 +325,10 @@ pub struct BackendIndex {
     /// (not `HashMap`) — observed under proptest/DST, deterministic iteration
     /// (§ "Ordered-collection choice").
     by_frontend: BTreeMap<FrontendKey, ServiceId>,
+    /// `(VIP, listener.port, tcp) → ServiceId` — the D24a service-VIP
+    /// projection. A row's backend port is its listener port in the
+    /// `service_backends` contract.
+    by_vip: BTreeMap<VipKey, ServiceId>,
 }
 
 impl BackendIndex {
@@ -337,6 +363,17 @@ impl BackendIndex {
         self.addrs_by_service.insert(service_id, contributed);
     }
 
+    /// Replace this service's service-VIP projection from its full row. The
+    /// projection is scoped to `service_id`, just like `by_frontend`, so a
+    /// row update cannot evict another service's contribution.
+    fn apply_vip_row(&mut self, row: &ServiceBackendRow) {
+        self.by_vip.retain(|_, &mut service_id| service_id != row.service_id);
+        for backend in &row.backends {
+            let key = VipKey::new(SocketAddrV4::new(row.vip, backend.addr.port()), Proto::Tcp);
+            self.by_vip.insert(key, row.service_id);
+        }
+    }
+
     /// Rebuild the `by_addr` projection from an authoritative `service_backends`
     /// liveness snapshot (the List leg of List-then-Watch + the relist recovery).
     /// Every prior `by_addr` / `addrs_by_service` entry is dropped and the
@@ -361,8 +398,10 @@ impl BackendIndex {
     fn replace_from_snapshot(&mut self, rows: &[ServiceBackendRow]) {
         self.by_addr.clear();
         self.addrs_by_service.clear();
+        self.by_vip.clear();
         for row in rows {
             self.apply_row(row.service_id, &row.backends);
+            self.apply_vip_row(row);
         }
     }
 
@@ -504,8 +543,9 @@ impl BackendIndex {
     }
 
     /// Point-lookup `orig_dst`/`proto` and CLASSIFY it into an
-    /// [`MtlsResolution`] arm — the THREE-way re-keyed classification the
-    /// mutation gate targets (C1/C4 + ADR-0072 REV-2 Finding-1/Finding-3):
+    /// [`MtlsResolution`] arm — the frontend, VIP, frontend-subnet and
+    /// backend classification the mutation gate targets (C1/C4 + ADR-0072
+    /// REV-2 Finding-1/Finding-3 + D24a):
     ///
     /// 1. **`by_frontend` HIT** — `(orig_dst, proto)` is a mesh frontend
     ///    endpoint. Translate to its `ServiceId`, select that service's
@@ -513,13 +553,17 @@ impl BackendIndex {
     ///    (a frontend HIT is ALWAYS mesh — NEVER `NonMesh`, NEVER an unhealthy
     ///    backend). With NO healthy backend right now → `MeshUnreachable`
     ///    (fail-closed: the service is KNOWN but has no live backend).
-    /// 2. **`by_frontend` MISS, but `orig_dst.ip() ∈ 10.98.0.0/16`** —
+    /// 2. **service-VIP branch (`Proto::Tcp`)** — a known `(VIP, port)` maps
+    ///    to the same service selection as a frontend; an unmatched address
+    ///    in the configured VIP range is `MeshUnreachable`. UDP skips this
+    ///    branch because datagrams use the kernel `connect4` rewrite.
+    /// 3. **`by_frontend` MISS, but `orig_dst.ip() ∈ 10.98.0.0/16`** —
     ///    fail-closed-on-frontend-subnet-miss (Finding-3): a mesh dial that is
     ///    early (race) OR to a withdrawn `<workload>`. → `MeshUnreachable` (refuse,
     ///    NO cleartext). The membership test is `WORKLOAD_FRONTEND_BASE.contains`
     ///    against the ONE pinned const — NEVER a broader "any reserved subnet"
     ///    helper.
-    /// 3. **`by_frontend` MISS, outside the subnet** — fall through to today's
+    /// 4. **`by_frontend` MISS, outside the subnet** — fall through to today's
     ///    `by_addr` lookup verbatim (the additive-EXTEND backward-compat path):
     ///    - any contributing service has a `running`-and-`healthy` backend at
     ///      the addr → `Mesh { addr, None }` (the F-A any-healthy-at-addr rule);
@@ -528,6 +572,19 @@ impl BackendIndex {
     ///      subnet) → `NonMesh` (cleartext pass-through, by design — the live
     ///      rustdoc requires a GENERAL miss stay `NonMesh`).
     pub fn classify(&self, orig_dst: SocketAddrV4, proto: Proto) -> MtlsResolution {
+        self.classify_with_vip_ranges(orig_dst, proto, None)
+    }
+
+    /// Classify with the configured service-VIP range available. The public
+    /// `BackendIndex::classify` surface retains its existing contract for
+    /// direct index callers; the production adapter uses this private form so
+    /// D24a's range branch cannot fall back to a built-in range.
+    fn classify_with_vip_ranges(
+        &self,
+        orig_dst: SocketAddrV4,
+        proto: Proto,
+        vip_ranges: Option<&VipRange>,
+    ) -> MtlsResolution {
         // Arm 1 — `by_frontend` HIT: translate the frontend endpoint to its
         // ServiceId, then select that service's FIRST-by-`Ord` running-AND-healthy
         // backend → Mesh (else MeshUnreachable on zero-healthy). A frontend HIT is
@@ -542,7 +599,23 @@ impl BackendIndex {
                     MtlsResolution::Mesh(ResolvedBackend { addr, expected_svid: None })
                 });
         }
-        // Arm 2 — `by_frontend` MISS but `orig_dst.ip() ∈ 10.98.0.0/16` →
+        // Arm 2 — service VIP branch (D24a). A known `(VIP, port, Tcp)` is
+        // classified exactly like its frontend; an address in the configured
+        // VIP range with no matching service fails closed. UDP deliberately
+        // skips this branch because datagrams use the kernel connect4 rewrite.
+        if proto == Proto::Tcp {
+            if let Some(&service_id) = self.by_vip.get(&VipKey::new(orig_dst, Proto::Tcp)) {
+                return self
+                    .first_healthy_backend_for(service_id)
+                    .map_or(MtlsResolution::MeshUnreachable, |addr| {
+                        MtlsResolution::Mesh(ResolvedBackend { addr, expected_svid: None })
+                    });
+            }
+            if vip_ranges.is_some_and(|ranges| ranges.contains(*orig_dst.ip())) {
+                return MtlsResolution::MeshUnreachable;
+            }
+        }
+        // Arm 3 — `by_frontend` MISS but `orig_dst.ip() ∈ 10.98.0.0/16` →
         // MeshUnreachable (fail-closed-on-frontend-subnet-miss, NO cleartext — a
         // mesh dial that is early (race) OR to a withdrawn <workload>). The membership
         // test is `WORKLOAD_FRONTEND_BASE.contains` against the ONE pinned const,
@@ -550,7 +623,7 @@ impl BackendIndex {
         if WORKLOAD_FRONTEND_BASE.contains(orig_dst.ip()) {
             return MtlsResolution::MeshUnreachable;
         }
-        // Arm 3 — outside the subnet: today's `by_addr` classification verbatim
+        // Arm 4 — outside the subnet: today's `by_addr` classification verbatim
         // (the additive-EXTEND backward-compat fall-through). A true non-mesh dst
         // outside the frontend subnet stays `NonMesh` (cleartext, by design).
         self.classify_by_addr(orig_dst)
@@ -789,6 +862,7 @@ impl ServiceBackendsResolve {
                         let frontend_snapshot = frontend.snapshot();
                         let mut index = index.write();
                         index.apply_row(row.service_id, &row.backends);
+                        index.apply_vip_row(&row);
                         index.project_row_by_frontend(&row, &frontend_snapshot);
                     }
                     // Non-`service_backends` rows are not part of the resolve
@@ -908,7 +982,7 @@ impl MtlsResolve for ServiceBackendsResolve {
         // (`mtls_intercept_worker.rs:792-794`); the future-UDP capture surfaces
         // the captured proto here — the index key already carries the axis, so
         // it is a capture/plumbing change, NOT an index-key change.
-        Ok(self.index.read().classify(orig_dst, Proto::Tcp))
+        Ok(self.index.read().classify_with_vip_ranges(orig_dst, Proto::Tcp, Some(&self.vip_ranges)))
     }
 }
 
@@ -1051,7 +1125,6 @@ mod tests {
     /// P5-S7 — a dial to a service's VIP and listener port is mesh, enforced
     /// to the service's first healthy backend by `Ord`.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 11"]
     async fn a_dial_to_a_service_vip_is_mesh_to_its_first_healthy_backend() {
         let store = fresh_store();
         let vip = Ipv4Addr::new(10, 96, 0, 10);
@@ -1079,7 +1152,6 @@ mod tests {
 
     /// P5-S7 — a VIP hit whose service has no healthy backend fails closed.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 11"]
     async fn a_dial_to_a_service_vip_with_no_healthy_backend_is_mesh_unreachable() {
         let store = fresh_store();
         let vip = Ipv4Addr::new(10, 96, 0, 11);
@@ -1100,7 +1172,6 @@ mod tests {
     /// service's `(vip, listener port)` — an unknown VIP, or a known VIP on a
     /// port no backend listens on — fails closed, never `NonMesh`.
     #[tokio::test]
-    #[ignore = "pending DELIVER step 11"]
     async fn an_unmatched_address_in_the_vip_ranges_is_mesh_unreachable_never_non_mesh() {
         let store = fresh_store();
         let vip = Ipv4Addr::new(10, 96, 0, 12);
@@ -1129,7 +1200,6 @@ mod tests {
     /// range's addresses, outside the configuration, keep the backend-address
     /// classification (`NonMesh` for an unclaimed address).
     #[tokio::test]
-    #[ignore = "pending DELIVER step 11"]
     async fn the_vip_branch_uses_the_configured_ranges() {
         let store = fresh_store();
         let configured = VipRange::new(
@@ -1162,7 +1232,6 @@ mod tests {
     /// address classifies by its own service (here: no healthy backend →
     /// `MeshUnreachable`), not as that backend (`Mesh` to itself).
     #[tokio::test]
-    #[ignore = "pending DELIVER step 11"]
     async fn the_vip_branch_precedes_the_backend_address_branch() {
         let store = fresh_store();
         let vip = Ipv4Addr::new(10, 96, 0, 13);

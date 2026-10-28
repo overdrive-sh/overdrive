@@ -441,7 +441,6 @@ fn probe_startup_refuses_a_node_address_iff_one_lies_inside_the_guest_prefix() {
 /// cgroup.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER step 11"]
 async fn an_owner_outside_the_connect4_attach_path_refuses_before_any_boot_effect() {
     for outside in ["/sys/fs/cgroup/system.slice", "/sys/fs/cgroup"] {
         let serve = Serve::start(owner_ports(&disjoint_vip(), BTreeSet::new()));

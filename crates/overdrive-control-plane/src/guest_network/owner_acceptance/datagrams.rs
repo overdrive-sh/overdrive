@@ -162,7 +162,6 @@ async fn dns_to_the_gateway_pairs_and_other_prefix_addresses_are_policy() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[ignore = "pending DELIVER step 11"]
 async fn a_vip_association_is_rewritten_by_connect4_and_checked_on_its_kernel_peer() {
     let c = Composition::booted(89).await;
     let (lease, _session) = c.active_lease("dgram-vip", &[]).await;
