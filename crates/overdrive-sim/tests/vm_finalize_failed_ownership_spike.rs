@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use overdrive_control_plane::guest_network::GuestAddressPool;
+use overdrive_control_plane::guest_network::{GuestAddressPool, SharedGuestNetworkOwner};
 use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::reconciler_runtime::{
     ReconcilerRuntime, run_convergence_tick_with_guest_network_provisioner_for_test,
@@ -228,15 +228,19 @@ async fn drive(seed: u64, finalize: bool) {
     for _ in 0..128 {
         http_prober.enqueue_outcome(ProbeOutcome::Fail { reason: "HTTP 302".to_owned() });
     }
+    let guest_dial =
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new());
+    guest_dial.script_default(overdrive_sim::adapters::guest_stream_dial::SimDialScript::Accept {
+        reply: b"HTTP/1.1 302 Found\r\nContent-Length: 0\r\n\r\n".to_vec(),
+    });
     let probes = Arc::new(ProbeRunner::new(
         Arc::new(SimTcpProber::new()),
         http_prober,
         clock.clone(),
         obs.clone(),
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        guest_dial,
     ));
     let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock.clone());
-    assert!(wiring.supervisor().open_after_boot());
     let beacon_io = Arc::new(SimBeaconIo::new(vmm.inner.clone()));
     let intake = BeaconIntake::bind(
         Arc::clone(&beacon_io) as Arc<dyn BeaconIo>,
@@ -266,11 +270,35 @@ async fn drive(seed: u64, finalize: bool) {
     let store = Arc::new(LocalIntentStore::open(temp.path().join("intent.redb")).unwrap());
     let allocator =
         overdrive_control_plane::test_default_allocator(store.clone() as Arc<dyn IntentStore>);
+    let mtls_worker = Arc::new(overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::new(
+        Arc::new(overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement::new(
+            Arc::new(overdrive_sim::adapters::SimIdentityRead::new(
+                std::collections::BTreeMap::new(),
+                None,
+            )),
+            overdrive_core::traits::mtls_enforcement::MtlsLimits::default(),
+            Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        )),
+        Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
+            std::collections::BTreeMap::new(),
+            overdrive_core::traits::mtls_resolve::MtlsResolution::NonMesh,
+        )),
+        Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
+        Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+    ));
+    mtls_worker
+        .start_shared_owner()
+        .await
+        .expect("the fixture starts the shared intercept owner before allocation dispatch");
     // The one guest-network owner of this process (the post-#295 guest lane):
     // `AppState` holds it and every convergence tick dispatches through it,
     // so the VM allocation's transport is the lease the pool assigns.
     let guest_owner =
         Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default());
+    guest_owner
+        .converge_shared()
+        .await
+        .expect("the fixture owner reports its bound ports before AppState construction");
     let mut state = AppState::new(
         store,
         temp.path().join("intent.redb"),
@@ -285,26 +313,15 @@ async fn drive(seed: u64, finalize: bool) {
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
-        Arc::new(overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::new(
-            Arc::new(overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement::new(
-                Arc::new(overdrive_sim::adapters::SimIdentityRead::new(
-                    std::collections::BTreeMap::new(),
-                    None,
-                )),
-                overdrive_core::traits::mtls_enforcement::MtlsLimits::default(),
-                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
-            )),
-            Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
-                std::collections::BTreeMap::new(),
-                overdrive_core::traits::mtls_resolve::MtlsResolution::NonMesh,
-            )),
-            Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
-            Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
-        )),
+        mtls_worker,
         Arc::clone(&guest_owner)
             as Arc<dyn overdrive_control_plane::guest_network::SharedGuestNetworkOwner>,
         wiring.gate(),
         Arc::clone(&pool),
+    );
+    assert!(
+        wiring.supervisor().open_after_boot(),
+        "the EXEC gate opens only after the fixture owner has converged"
     );
     state.vm_host_state = Arc::new(CoupledHost(vmm.clone()));
     overdrive_control_plane::worker::exit_observer::spawn(

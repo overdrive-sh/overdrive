@@ -3873,6 +3873,12 @@ mod tests {
 #[cfg(test)]
 mod guest_activation_acceptance;
 
+/// GH #284 replacement ordering through the post-#295 guest-network owner.
+/// Kept source-local so the fixtures can compose the existing private
+/// guest-aware dispatch core with their recording lifecycle port.
+#[cfg(all(test, feature = "integration-tests"))]
+mod replacement_acceptance;
+
 #[cfg(test)]
 mod guest_command_release_tests {
     #![allow(clippy::doc_markdown)]

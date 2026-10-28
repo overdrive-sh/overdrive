@@ -51,7 +51,6 @@ use overdrive_core::traits::observation_store::{
     AllocState, LagAwareSubscription, ObservationRow, ObservationStore, ObservationWrite,
     ServiceBackendRow, SubscriptionEvent,
 };
-use overdrive_core::traits::prober::ProbeOutcome;
 use overdrive_core::transition_reason::{ServiceFailureReason, TerminalCondition};
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_core::{AllocationId, SpiffeId, WorkloadId};
@@ -83,13 +82,11 @@ fn guest_owner() -> Arc<overdrive_sim::adapters::guest_network::SimSharedGuestNe
     }))
 }
 
-/// An EXEC wiring whose paired supervisor has opened the gate after boot.
-fn opened_exec_wiring() -> overdrive_core::guest_network::GuestNetworkExecWiring {
-    let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(
+/// One EXEC wiring, kept BootClosed until the fixture owner has converged.
+fn exec_wiring() -> overdrive_core::guest_network::GuestNetworkExecWiring {
+    overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(
         overdrive_sim::adapters::clock::SimClock::new(),
-    ));
-    assert!(wiring.supervisor().open_after_boot(), "the EXEC gate opens after boot");
-    wiring
+    ))
 }
 
 const SEED: u64 = 25_717;
@@ -425,7 +422,7 @@ async fn wait_for_probe_event(
         }
     })
     .await
-    .unwrap_or_else(|_| panic!("seed={seed}: accepted probe event did not arrive"));
+    .unwrap_or_else(|_| panic!("seed={seed}: accepted {expected:?} probe event did not arrive"));
     assert_eq!(row.status, expected, "seed={seed}: event must carry the durable probe outcome");
     row
 }
@@ -451,6 +448,7 @@ fn assert_no_probe_event(events: &mut LagAwareSubscription, seed: u64) {
 async fn run_owner_tick(
     state: &AppState,
     clock: &SimClock,
+    guest_network: &overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner,
     owner: &str,
     target: &overdrive_core::reconcilers::TargetResource,
     tick: u64,
@@ -464,7 +462,7 @@ async fn run_owner_tick(
         clock.now(),
         tick,
         clock.now() + Duration::from_secs(30),
-        guest_owner().as_ref(),
+        guest_network,
     )
     .await
     .unwrap_or_else(|error| panic!("seed={SEED}: {owner} convergence failed: {error:?}"));
@@ -473,6 +471,7 @@ async fn run_owner_tick(
 async fn converge_service_wakes(
     state: &AppState,
     clock: &SimClock,
+    guest_network: &overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner,
     target: &overdrive_core::reconcilers::TargetResource,
     next_tick: &mut u64,
 ) {
@@ -492,7 +491,8 @@ async fn converge_service_wakes(
                 continue;
             }
             *next_tick = next_tick.saturating_add(1);
-            run_owner_tick(state, clock, "service-lifecycle", target, *next_tick).await;
+            run_owner_tick(state, clock, guest_network, "service-lifecycle", target, *next_tick)
+                .await;
             ran = true;
             ran_this_round = true;
         }
@@ -532,13 +532,15 @@ async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
     let clock = Arc::new(SimClock::new());
     let sim_obs = Arc::new(SimObservationStore::single_peer(node.clone(), seed));
     let obs: Arc<dyn ObservationStore> = sim_obs.clone();
-    let tcp = Arc::new(SimTcpProber::new());
+    let guest_dial =
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new());
+    guest_dial.script_default(overdrive_sim::adapters::guest_stream_dial::SimDialScript::accept());
     let probes = Arc::new(ProbeRunner::new(
-        tcp.clone(),
+        Arc::new(SimTcpProber::new()),
         Arc::new(SimHttpProber::new()),
         clock.clone(),
         obs.clone(),
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        Arc::clone(&guest_dial) as Arc<dyn overdrive_core::guest_transport::dial::GuestStreamDial>,
     ));
     let driver: Arc<dyn Driver> = Arc::new(ProbedVmDriver {
         inner: SimDriver::with_clock(DriverType::Vm, clock.clone()),
@@ -554,7 +556,7 @@ async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
         Arc::new(LocalIntentStore::open(temp.path().join("intent.redb")).expect("intent store"));
     let allocator =
         overdrive_control_plane::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
-    let exec_wiring = opened_exec_wiring();
+    let exec_wiring = exec_wiring();
     let guest_network = guest_owner();
     guest_network
         .converge_shared()
@@ -580,9 +582,14 @@ async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
         overdrive_control_plane::test_empty_listener_facts(),
         Ipv4Addr::LOCALHOST,
         mtls_worker,
-        guest_network,
+        Arc::clone(&guest_network)
+            as Arc<dyn overdrive_control_plane::guest_network::SharedGuestNetworkOwner>,
         exec_wiring.gate(),
         crate::acceptance::serve_ports::pool(),
+    );
+    assert!(
+        exec_wiring.supervisor().open_after_boot(),
+        "the EXEC gate opens only after the fixture owner has converged"
     );
 
     let (startup, readiness) = vm_probe_descriptors();
@@ -653,38 +660,39 @@ async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
 
     // The allocation and Stable state are produced by the registered
     // WorkloadLifecycle/ServiceLifecycle composition, not seeded as rows.
-    run_owner_tick(&state, &clock, "workload-lifecycle", &target, 1).await;
+    run_owner_tick(&state, &clock, guest_network.as_ref(), "workload-lifecycle", &target, 1).await;
     let alloc_rows = obs.alloc_status_rows().await.expect("allocation snapshot");
     assert_eq!(alloc_rows.len(), 1, "seed={seed}: one VM allocation is placed");
     let alloc_id = alloc_rows[0].alloc_id.clone();
+    let probe_target = std::net::SocketAddrV4::new(
+        alloc_rows[0].workload_addr.expect("the VM row carries its guest address"),
+        18_081,
+    );
     assert_eq!(alloc_rows[0].state, AllocState::Running);
     assert_eq!(alloc_rows[0].restart_count, 0);
     assert_eq!(alloc_rows[0].kind, overdrive_core::aggregate::WorkloadKind::Service);
 
+    assert!(probes.is_role_live(&alloc_id, ProbeRole::Startup));
+    assert!(probes.is_role_live(&alloc_id, ProbeRole::Readiness));
+    for _ in 0..128 {
+        tokio::task::yield_now().await;
+    }
+    clock.tick(Duration::from_secs(60));
+    let first_pass = wait_for_probe_event(&mut audit, ProbeStatus::Pass, seed).await;
+    let second_pass = wait_for_probe_event(&mut audit, ProbeStatus::Pass, seed).await;
+    assert_eq!(first_pass.alloc_id, alloc_id);
+    assert_eq!(second_pass.alloc_id, alloc_id);
+    let initial_roles =
+        [first_pass.role, second_pass.role].into_iter().collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        initial_roles,
+        [ProbeRole::Startup, ProbeRole::Readiness]
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>(),
+        "seed={seed}: the supervised producer publishes startup and readiness Pass"
+    );
     let mut next_tick = 1;
-    tcp.enqueue_outcome(ProbeOutcome::Pass);
-    probes
-        .probe_once_and_record(&alloc_id, ProbeIdx::new(0), &startup, clock.as_ref(), obs.as_ref())
-        .await
-        .expect("startup Pass write");
-    let startup_event = wait_for_probe_event(&mut audit, ProbeStatus::Pass, seed).await;
-    assert_eq!(startup_event.alloc_id, alloc_id);
-    assert_eq!(startup_event.role, ProbeRole::Startup);
-
-    tcp.enqueue_outcome(ProbeOutcome::Pass);
-    probes
-        .probe_once_and_record(
-            &alloc_id,
-            ProbeIdx::new(0),
-            &readiness,
-            clock.as_ref(),
-            obs.as_ref(),
-        )
-        .await
-        .expect("baseline readiness Pass write");
-    let baseline_event = wait_for_probe_event(&mut audit, ProbeStatus::Pass, seed).await;
-    assert_eq!(baseline_event.alloc_id, alloc_id);
-    converge_service_wakes(&state, &clock, &target, &mut next_tick).await;
+    converge_service_wakes(&state, &clock, guest_network.as_ref(), &target, &mut next_tick).await;
     let baseline_row = obs
         .service_backends_rows(&service_id)
         .await
@@ -704,21 +712,18 @@ async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
 
     // A readiness Fail is accepted by the LWW store, produces exactly one
     // event after commit, and wakes the existing ServiceLifecycle owner.
-    clock.tick(Duration::from_secs(1));
-    tcp.enqueue_outcome(ProbeOutcome::Fail { reason: "guest readiness refused".to_owned() });
-    probes
-        .probe_once_and_record(
-            &alloc_id,
-            ProbeIdx::new(0),
-            &readiness,
-            clock.as_ref(),
-            obs.as_ref(),
-        )
-        .await
-        .expect("readiness Fail write");
+    guest_dial.script_default(overdrive_sim::adapters::guest_stream_dial::SimDialScript::Refuse(
+        overdrive_core::guest_transport::dial::GuestDialError::Refused {
+            errno: overdrive_core::guest_transport::wire::KernelErrno::ECONNREFUSED,
+        },
+    ));
+    for _ in 0..64 {
+        tokio::task::yield_now().await;
+    }
+    clock.tick(Duration::from_secs(60));
     let fail_event = wait_for_probe_event(
         &mut audit,
-        ProbeStatus::Fail { last_fail_reason: "guest readiness refused".to_owned() },
+        ProbeStatus::Fail { last_fail_reason: "refused".to_owned() },
         seed,
     )
     .await;
@@ -733,7 +738,7 @@ async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
     assert_eq!(durable_fail, fail_event, "event is the committed durable winner");
     let occurrences_before_fail =
         obs.alloc_lifecycle_occurrences(&alloc_id).await.expect("history");
-    converge_service_wakes(&state, &clock, &target, &mut next_tick).await;
+    converge_service_wakes(&state, &clock, guest_network.as_ref(), &target, &mut next_tick).await;
     let failed_backend = obs
         .service_backends_rows(&service_id)
         .await
@@ -768,21 +773,14 @@ async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
 
     // An accepted readiness Pass restores the complete backend row and keeps
     // the same Running/Stable allocation with no restart.
-    clock.tick(Duration::from_secs(1));
-    tcp.enqueue_outcome(ProbeOutcome::Pass);
-    probes
-        .probe_once_and_record(
-            &alloc_id,
-            ProbeIdx::new(0),
-            &readiness,
-            clock.as_ref(),
-            obs.as_ref(),
-        )
-        .await
-        .expect("readiness recovery Pass write");
+    guest_dial.script_default(overdrive_sim::adapters::guest_stream_dial::SimDialScript::accept());
+    for _ in 0..64 {
+        tokio::task::yield_now().await;
+    }
+    clock.tick(Duration::from_secs(60));
     let pass_event = wait_for_probe_event(&mut audit, ProbeStatus::Pass, seed).await;
     assert_eq!(pass_event.role, ProbeRole::Readiness);
-    converge_service_wakes(&state, &clock, &target, &mut next_tick).await;
+    converge_service_wakes(&state, &clock, guest_network.as_ref(), &target, &mut next_tick).await;
     let recovered_backend = obs
         .service_backends_rows(&service_id)
         .await
@@ -806,10 +804,35 @@ async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
     // End the allocation through the existing WorkloadLifecycle stop owner,
     // then send a late accepted Pass. The terminal row and empty backend are
     // produced by the existing owners; the late event cannot revive it.
+    guest_dial.script_default(overdrive_sim::adapters::guest_stream_dial::SimDialScript::Pending);
+    for _ in 0..64 {
+        tokio::task::yield_now().await;
+    }
+    clock.tick(Duration::from_secs(60));
+    for _ in 0..256 {
+        if guest_dial.pending_dials(probe_target) == 1 {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(
+        guest_dial.pending_dials(probe_target),
+        1,
+        "seed={seed}: one already-started readiness probe is pending at terminal"
+    );
+
     let stop_key = IntentKey::for_workload_stop(&workload_id);
     state.store.put(stop_key.as_bytes(), &[]).await.expect("persist stop intent");
-    run_owner_tick(&state, &clock, "workload-lifecycle", &target, next_tick + 1).await;
-    converge_service_wakes(&state, &clock, &target, &mut next_tick).await;
+    run_owner_tick(
+        &state,
+        &clock,
+        guest_network.as_ref(),
+        "workload-lifecycle",
+        &target,
+        next_tick + 1,
+    )
+    .await;
+    converge_service_wakes(&state, &clock, guest_network.as_ref(), &target, &mut next_tick).await;
     let terminal_alloc =
         obs.alloc_status_row(&alloc_id).await.expect("terminal alloc read").expect("alloc");
     assert_eq!(terminal_alloc.alloc_id, alloc_id);
@@ -826,21 +849,13 @@ async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
             .is_empty()
     );
 
-    clock.tick(Duration::from_secs(1));
-    tcp.enqueue_outcome(ProbeOutcome::Pass);
-    probes
-        .probe_once_and_record(
-            &alloc_id,
-            ProbeIdx::new(0),
-            &readiness,
-            clock.as_ref(),
-            obs.as_ref(),
-        )
-        .await
-        .expect("late readiness Pass write");
+    assert!(guest_dial.answer_pending(
+        probe_target,
+        overdrive_sim::adapters::guest_stream_dial::SimDialScript::accept(),
+    ));
     let late_event = wait_for_probe_event(&mut audit, ProbeStatus::Pass, seed).await;
     assert_eq!(late_event.role, ProbeRole::Readiness);
-    converge_service_wakes(&state, &clock, &target, &mut next_tick).await;
+    converge_service_wakes(&state, &clock, guest_network.as_ref(), &target, &mut next_tick).await;
     let late_backend = obs
         .service_backends_rows(&service_id)
         .await

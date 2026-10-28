@@ -1,11 +1,11 @@
 //! Bounded production-owner preservation control for GH #284. Registered
-//! WorkloadLifecycle, ServiceLifecycle, and VmReclamation drive the real
-//! VmDriver from an initial Running VM through startup failure and exact
+//! `WorkloadLifecycle`, `ServiceLifecycle`, and `VmReclamation` drive the real
+//! `VmDriver` from an initial Running VM through startup failure and exact
 //! terminal-unclaimed disposal with no intervening replacement. No observation
 //! row is seeded. The node beacon intake runs over `SimBeaconIo` (D17) and the
 //! guest's READY carries its lease's launch token (ATTR-TOKEN, read from the
 //! pool's `lease_observation`); completed driver cleanup is coupled to Sim host
-//! facts, and cgroup.kill is coupled to SimVmm death.
+//! facts, and cgroup.kill is coupled to `SimVmm` death.
 //!
 //! The rejected ADR-0104 VM-only restart scenario was removed during
 //! corrective re-DISTILL. Driver-neutral predecessor-to-fresh-successor
@@ -25,7 +25,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use overdrive_control_plane::guest_network::GuestAddressPool;
+use overdrive_control_plane::guest_network::{GuestAddressPool, SharedGuestNetworkOwner};
 use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::reconciler_runtime::{
     ReconcilerRuntime, run_convergence_tick_with_guest_network_provisioner_for_test,
@@ -48,7 +48,6 @@ use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
     AllocState, ObservationStore, ObservationStoreError,
 };
-use overdrive_core::traits::prober::ProbeOutcome;
 use overdrive_core::traits::vm_host_state::{
     VmHostObservation, VmHostState, VmHostStateProbeError,
 };
@@ -340,16 +339,19 @@ async fn drive(seed: u64, restart: bool) {
         artifact_discards: Mutex::new(vec![]),
     });
     let http = Arc::new(SimHttpProber::new());
-    http.enqueue_outcome(ProbeOutcome::Fail { reason: "HTTP 302".to_owned() });
+    let guest_dial =
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new());
+    guest_dial.script_default(overdrive_sim::adapters::guest_stream_dial::SimDialScript::Accept {
+        reply: b"HTTP/1.1 302 Found\r\nContent-Length: 0\r\n\r\n".to_vec(),
+    });
     let probes = Arc::new(ProbeRunner::new(
         Arc::new(SimTcpProber::new()),
         http,
         clock.clone(),
         obs.clone(),
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        Arc::clone(&guest_dial) as Arc<dyn overdrive_core::guest_transport::dial::GuestStreamDial>,
     ));
     let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock.clone());
-    assert!(wiring.supervisor().open_after_boot());
     let beacon_io = Arc::new(SimBeaconIo::new(vmm.inner.clone()));
     let intake = BeaconIntake::bind(
         Arc::clone(&beacon_io) as Arc<dyn BeaconIo>,
@@ -372,7 +374,7 @@ async fn drive(seed: u64, restart: bool) {
             seed,
         }),
         Arc::new(SimCgroupAccounting::new()),
-        probes,
+        Arc::clone(&probes),
         wiring.gate(),
         layout.clone(),
         intake,
@@ -384,11 +386,35 @@ async fn drive(seed: u64, restart: bool) {
     let store = Arc::new(LocalIntentStore::open(temp.path().join("intent.redb")).unwrap());
     let allocator =
         overdrive_control_plane::test_default_allocator(store.clone() as Arc<dyn IntentStore>);
+    let mtls_worker = Arc::new(overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::new(
+        Arc::new(overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement::new(
+            Arc::new(overdrive_sim::adapters::SimIdentityRead::new(
+                std::collections::BTreeMap::new(),
+                None,
+            )),
+            overdrive_core::traits::mtls_enforcement::MtlsLimits::default(),
+            Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        )),
+        Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
+            std::collections::BTreeMap::new(),
+            overdrive_core::traits::mtls_resolve::MtlsResolution::NonMesh,
+        )),
+        Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
+        Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+    ));
+    mtls_worker
+        .start_shared_owner()
+        .await
+        .expect("the fixture starts the shared intercept owner before allocation dispatch");
     // The one guest-network owner of this process (the post-#295 guest lane):
     // `AppState` holds it and every convergence tick dispatches through it,
     // so each VM allocation's transport is the lease the pool assigns.
     let guest_owner =
         Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default());
+    guest_owner
+        .converge_shared()
+        .await
+        .expect("the fixture owner reports its bound ports before AppState construction");
     let mut state = AppState::new(
         store,
         temp.path().join("intent.redb"),
@@ -403,26 +429,15 @@ async fn drive(seed: u64, restart: bool) {
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
-        Arc::new(overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::new(
-            Arc::new(overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement::new(
-                Arc::new(overdrive_sim::adapters::SimIdentityRead::new(
-                    std::collections::BTreeMap::new(),
-                    None,
-                )),
-                overdrive_core::traits::mtls_enforcement::MtlsLimits::default(),
-                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
-            )),
-            Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
-                std::collections::BTreeMap::new(),
-                overdrive_core::traits::mtls_resolve::MtlsResolution::NonMesh,
-            )),
-            Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
-            Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
-        )),
+        mtls_worker,
         Arc::clone(&guest_owner)
             as Arc<dyn overdrive_control_plane::guest_network::SharedGuestNetworkOwner>,
         wiring.gate(),
         Arc::clone(&pool),
+    );
+    assert!(
+        wiring.supervisor().open_after_boot(),
+        "the EXEC gate opens only after the fixture owner has converged"
     );
     state.vm_host_state = Arc::new(CoupledHost(vmm.clone()));
     overdrive_control_plane::worker::exit_observer::spawn(
@@ -483,6 +498,10 @@ async fn drive(seed: u64, restart: bool) {
     assert!(vmm.inner.is_live(control.pid), "seed={seed}: live VMM control");
     assert_eq!(obs.alloc_status_rows().await.unwrap()[0].state, AllocState::Running);
     assert!(driver.live_allocations().unwrap().contains(&alloc));
+    assert!(
+        probes.is_role_live(&alloc, ProbeRole::Startup),
+        "seed={seed}: the Running VM owns its production startup-probe task"
+    );
     let reclamation = ReconcilerName::new("vm-reclamation").unwrap();
     let node_target = TargetResource::new("node/local").unwrap();
     run_convergence_tick_with_guest_network_provisioner_for_test(
@@ -505,17 +524,33 @@ async fn drive(seed: u64, restart: bool) {
     for _ in 0..64 {
         tokio::task::yield_now().await;
     }
-    clock.tick(Duration::from_millis(2_000 + seed % 17));
-    for _ in 0..64 {
-        tokio::task::yield_now().await;
+    let mut probe_rows = Vec::new();
+    for advance in 0..4 {
+        let by = if advance == 0 {
+            Duration::from_millis(2_000 + seed % 17)
+        } else {
+            Duration::from_secs(1)
+        };
+        clock.tick(by);
+        for _ in 0..128 {
+            tokio::task::yield_now().await;
+            probe_rows = obs.list_probe_results_for_alloc(&alloc).await.unwrap();
+            if !probe_rows.is_empty() {
+                break;
+            }
+        }
+        if !probe_rows.is_empty() {
+            break;
+        }
     }
-    let probe_rows = obs.list_probe_results_for_alloc(&alloc).await.unwrap();
     assert!(
         probe_rows.iter().any(|row| matches!(
             &row.status,
-            ProbeStatus::Fail { last_fail_reason } if last_fail_reason == "HTTP 302"
+            ProbeStatus::Fail { last_fail_reason }
+                if last_fail_reason == "HTTP 302 (redirect not followed)"
         )),
-        "seed={seed}: production ProbeRunner must publish the simulated HTTP failure"
+        "seed={seed}: production ProbeRunner must publish the simulated HTTP failure; dials={:?}",
+        guest_dial.dials(),
     );
     run_convergence_tick_with_guest_network_provisioner_for_test(
         &state,
@@ -536,7 +571,7 @@ async fn drive(seed: u64, restart: bool) {
             &finalized.terminal,
             Some(TerminalCondition::ServiceFailed {
                 reason: ServiceFailureReason::StartupProbeFailed { last_fail, attempts: 1, .. }
-            }) if last_fail == "HTTP 302"
+            }) if last_fail == "HTTP 302 (redirect not followed)"
         ),
         "seed={seed}: ServiceLifecycle authors the startup-probe failure"
     );

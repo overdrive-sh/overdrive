@@ -1382,3 +1382,347 @@ raw receipt. STEP 13-04 is not native-complete until that run proves all 73
 bodies with zero failures.
 
 # APPROVED
+
+---
+
+# Review iteration 6 — complete bounded normal-union fixture package
+
+## Iteration metadata
+
+| Field | Value |
+| --- | --- |
+| Iteration | 6 |
+| Review date | 2026-10-28 |
+| Scope | Exact 23-failure normal-union partition: 19 guest-owner fixture callers, 3 replacement scenarios, and seed 25717 probe production |
+| Trigger | Durable union `673f34b829f67b06388dd5bc`: 1,715 selected, 1,692 passed, 23 failed, 148 skipped |
+| Additional audit | Committed journal-oracle alignment `254cb4a98aa77da156199c59643c05c21899703d` |
+| Prior disposition | Iterations 1–5 remain approved and source-identical within their bounded artifacts |
+| Verdict | **APPROVED** |
+| Open findings | 0 critical, 0 high, 0 medium, 0 low |
+
+Iteration 6 reviews the complete DISTILL-owned remediation of the actual
+four-package normal-union failures. It does not treat the 23 as one generic
+baseline failure: the raw run proves three distinct causes, and the source
+uses three bounded corrections. This review approves the source package and
+focused evidence only. The broad union and disposable-guest suite have not
+been rerun after the complete iteration 6 package and are not claimed green.
+
+Only this review artifact was modified by the reviewer. No production source,
+test source, DES event, roadmap, execution log or commit was changed.
+
+## Iteration 6 artifact identity
+
+| Artifact | SHA-256 at review |
+| --- | --- |
+| `deliver/distill-13-04-legc-fixture-alignment.md` | `9850c6b791fc8cb1d57ee6d8dbd7e3fb43c7c18e6b19a27164c5dd5d1da5abd9` |
+| Iteration 5 review before this append | `a1b1b06cf58316f8c367a4b4f0bf83d717b4d58dd463249d82ca4e37953228da` |
+| Raw 23-failure union receipt | `bc10d1fe18f8d9fdb8c6dca5259c4aee6090e4a1723c3411c7e630d2dad9c5cf` |
+| `action_shim/mod.rs` | `dff69a9676d652e6e75646983ddd26dd3c2d330bc49c5987d4684a1cc8e36cd0` |
+| `action_shim/replacement_acceptance.rs` | `db1126c2f0fd6cf5b478900c3f0f9bd12b3eab8af60b3e17828ebc5dfed85563` |
+| External replacement test after move | `5201e2db8286ff6dd6a93692922f2e770530403f48960486d5868fc0d8a8f947` |
+| E09 fixture | `8211f2534fd96a91315610954bae8acc18f123385b45248d63c69ac6e5a9355e` |
+| E10 fixture | `069706038ca9d70701564aa25a840a72a4dfa5d35bdd24ecfdb6d52274c26fa1` |
+| Node-admission fixture | `e8ff9ce8b4964863a1a50367c919c67c18a3fa1dfcc685282f4ea2b3fc083752` |
+| Reclaim fixture | `03f2d792222b45b6a2acb016c68e1f403d607706648736e437d3c5344b77f0dc` |
+| Service-backend fixture | `b28e9fb48660fbbb86ba62dd144636e1fd369e5a442fb2d8157945116037e4b3` |
+| VM-finalize fixture | `7c05beca43902373ac84730a8bdce211d759c13ca78770569ebc18799da78cd4` |
+| Seed-25717 fixture | `07d432deac7ccf7cd7a57efd1fa667743a5391fe49dc6ac5a7b1a4bdb39d427a` |
+| `tests/integration/mtls_install_fail_closed.rs` | `9a4e91491d640c37c2ca53117dd8c168593eea7385daaa8a02dcb4e33e6de92a` |
+| `deliver/roadmap.json` | `2a909f49f0edc671c989228def9daac8c3d7fb41763d55d7359ea7471c03875a` |
+| `feature-delta.md` | `66786bbbd36e5fbcf2e21258d5625b761513433793fa80ddcc4887be9ca85b09` |
+
+## Exact raw failure partition
+
+Independent inspection of the retained union summary finds exactly these 23
+failures:
+
+| Partition | Bodies | Count | Actual failure |
+| --- | --- | ---: | --- |
+| Direct guest-owner callers | E09 (2), E10 (1), node admission (1), reclaim (2), service-backend projection (11), VM-finalize (2) | 19 | `action_shim/mod.rs:1468`: `AppState` had no bound guest-flow ports because its exact owner had not converged; several fixtures also opened EXEC before boot preconditions and had not started their mTLS owner. |
+| D-UP-15 replacement | Three `driver_neutral_allocation_replacement` scenarios | 3 | Legacy `dispatch_with_network_provisioner` passed `guest_network: None`, intentionally selecting the test-only process-netns branch and recording forbidden VM `Provision` / `Teardown`. |
+| Probe producer | `service_kind_vm_terminal_invariant` seed 25717 | 1 | Accepted probe-event timeout caused by repeated fresh single-tick producers and equal `ProbeRunSeq::FIRST`, not absent flow ports. |
+
+The 23 names in the raw summary are all accounted for. No `#[ignore]`, skip,
+filter exclusion or deleted scenario was added. Scenario counts are unchanged
+in every direct fixture. The replacement pair retains five scenarios total:
+two unrelated scenarios remain external and exactly three moved source-local.
+
+## Nineteen direct owner-call migrations
+
+The six direct-caller fixture families now establish the accepted action-path
+preconditions before any `AppState` construction or action dispatch:
+
+1. start the fixture's existing shared mTLS owner;
+2. converge the exact guest-network owner later injected into `AppState`;
+3. construct `AppState`, which captures that owner's bound ports; and
+4. open the supervisor paired with the same EXEC wiring only afterwards.
+
+E09, E10, node admission, reclaim, service-backend projection and VM-finalize
+all preserve this load-bearing relative order. Their convergence ticks pass
+the same owner Arc held by `AppState`; no second owner, manual port write,
+fallback, alternate pool or detached EXEC gate was introduced.
+
+The direct fixtures retain 19 exact existing bodies and all prior assertion
+counts: E09 2, E10 1, node admission 1, reclaim 2, service-backend projection
+11 of its 12 bodies, and VM-finalize 2. Their seeds, schedulers, fault scripts,
+lifecycle actions, row identities and body names remain.
+
+The source now reflects the production invariant that ordinary dispatch always
+supplies `Some((shared_guest_network, guest_pool, bound_flow_ports))` and the
+EXEC gate through the private guest-aware core
+(`action_shim/mod.rs:1319-1354`). The legacy public test helper explicitly
+passes `None, None` (`:1072-1114`) and is not production evidence for VM
+replacement or allocation behavior.
+
+## Probe stimulus and threshold honesty
+
+Once the action path correctly assigns VM transport, `ProbeRunner` rewrites
+each VM probe target to that assignment's `workload_addr` before starting the
+supervised task (`probe_runner/mod.rs:307-360, 470-488`). The resulting address
+lies in `GUEST_NODE_PREFIX`, so `probe_tick` necessarily selects the existing
+`GuestStreamDial` branch. A queued host `SimTcpProber` or `SimHttpProber`
+outcome cannot satisfy that branch.
+
+The new guest-stream scripts preserve the original stimuli at the accepted
+port:
+
+| Existing stimulus | Guest-stream representation | Observable outcome |
+| --- | --- | --- |
+| TCP connection refusal | `GuestDialError::Refused { ECONNREFUSED }` | Probe Fail with typed label `refused` |
+| HTTP success | Open/accepted stream with exact HTTP 200 response bytes | Probe Pass |
+| HTTP outage | Accepted stream with exact HTTP 503 response bytes | HTTP failure |
+| E10 redirect | Accepted stream with exact HTTP 302 response bytes | Canonical `HTTP 302 (redirect not followed)` |
+
+These are existing `GuestStreamDial` operations, not a new adapter or test-only
+production seam. The retained host-prober queues in mixed fixtures cannot
+shadow the VM result because the production target projection structurally
+chooses the guest path. E10's focused evidence additionally observed a real
+guest dial before its canonical 302 assertion.
+
+No threshold was lowered. The service-backend readiness scenario still uses
+`success_threshold = 3`; it now advances the live producer once before each
+expected Pass instead of running the consumer three times over one row. Its
+Fail uses exact HTTP 503 and its recovery restores HTTP 200. The producer's
+monotonic rows, rather than consumer re-reads, now earn the original threshold.
+
+E10 retains the exact startup failure, terminal, reclamation and occurrence
+oracles. Only the obsolete host-prober reason string changed to the canonical
+reason actually returned by the production guest-stream HTTP parser.
+
+## Seed 25717 supervised-producer correction
+
+Seed 25717 was not a flow-port failure. The old body repeatedly called the
+single-tick helper, which creates a fresh `ProbeRunState` each time. Equal
+`ProbeRunSeq::FIRST` writes were correctly rejected by the LWW store, so the
+expected event could not appear.
+
+The corrected body uses the already-running supervised producer created by
+the VM driver's `on_alloc_running` hook:
+
+- startup and readiness roles must both be live;
+- the initial clock advance must yield one Pass from each role;
+- the existing guest dial changes to typed `Refused`, and the durable/event
+  winner must be the readiness Fail;
+- equal and older rows remain silent;
+- restoring the same dial to Pass restores backend eligibility without a
+  restart or lifecycle-history change; and
+- the late terminal Pass is an already-started `Pending` readiness dial. The
+  body proves exactly one pending dial before the owner terminates the
+  allocation, answers that same dial afterwards, and proves the terminal row,
+  empty backend, zero replacement and cancelled supervisor remain.
+
+No row is seeded to manufacture the missing event and no terminal supervisor
+is restarted. The authored Pass/Fail/Pass and terminal-late-result race is
+stronger and uses one monotonic producer state throughout. The exact refusal
+reason is the approved typed guest-dial label `refused`.
+
+The seed fixture also starts its existing mTLS owner and converges its same
+guest owner before `AppState` and before opening EXEC. It performs no
+allocation action before both preconditions hold.
+
+## Three replacement scenarios moved, not duplicated
+
+The three D-UP-15 failures could not be repaired honestly in the external
+`overdrive-sim` integration crate. Their legacy helper always passes
+`guest_network: None`, while their oracles require both the production guest
+path and a caller-supplied `MtlsInterceptLifecycle` capable of no-op and
+injected stop behavior. The existing public `AppState` helper hard-wires the
+concrete worker, and Rust privacy prevents external code from invoking the
+private guest-aware core with the custom lifecycle.
+
+The correction adds one private module declaration:
+
+```text
+#[cfg(all(test, feature = "integration-tests"))]
+mod replacement_acceptance;
+```
+
+The module is source-local beside the existing private core. It exports no
+function, type, constructor, parameter or cfg-test public API. Production
+builds contain neither the module nor its fixtures.
+
+Exactly these three bodies moved once:
+
+| Old ID | New ID |
+| --- | --- |
+| `overdrive-sim::driver_neutral_allocation_replacement successor_outcome_precedes_blocked_predecessor_cleanup_for_every_driver` | `overdrive-control-plane action_shim::replacement_acceptance::successor_outcome_precedes_blocked_predecessor_cleanup_for_every_driver` |
+| `... successor_and_cleanup_outcomes_follow_the_ratified_precedence_table` | `... action_shim::replacement_acceptance::successor_and_cleanup_outcomes_follow_the_ratified_precedence_table` |
+| `... rejected_successor_publication_fully_unwinds_without_immediate_second_proposal` | `... action_shim::replacement_acceptance::rejected_successor_publication_fully_unwinds_without_immediate_second_proposal` |
+
+Repository search finds each new function exactly once and none at the old
+location. The old external binary retains its two unrelated bodies. Contract
+Shape count remains five across old plus new, and the three moved bodies retain
+assertion counts exactly: 17, 25 and 12 respectively. The list receipt
+`a8fbd70d40605eb26fb4da62` reportedly collected the three new IDs exactly
+once; the focused run `109495dc838a5eb1d64e646d` reportedly passed all three.
+
+The source-local `dispatch_one` converges one existing `TestSharedOwner`, reads
+its existing bound ports, opens one existing `GuestNetworkExecWiring`, and
+calls `dispatch_with_network_provisioner_and_guest` with `Some(owner, pool,
+ports)` plus the existing custom lifecycle. `RecordingNetwork` remains wired
+to the legacy process-netns port solely as a zero-call oracle. The VM branch
+never calls it.
+
+The moved assertions still cover successor-before-predecessor ordering,
+blocked predecessor cleanup, no-op repeated stop, exact driver/mTLS IDs,
+successor failure precedence, secondary cleanup diagnostics, retained
+`TeardownPending` retry state, row/history/index preservation, one proposal,
+complete rejected-publication unwind and zero VM workload-netns calls. No
+failure stimulus or accepted outcome was dropped.
+
+## Independent audit of commit `254cb4a98`
+
+The committed change is limited to one test file, two insertions and five
+deletions, with the correct Marcus author, exact Codex co-author trailer and
+STEP 13-04 trailer. It removes `Step::InterceptInstalled` from four expected
+journal arrays and changes nothing else.
+
+That removal is source-honest:
+
+- the shared `build_spec` has `service_ports: Vec::new()` before and after the
+  commit;
+- STEP 13-04 removed the outbound address sets/install, so a destination-only
+  zero-port spec invokes no allocation element install;
+- `JournalIntercept::install_inbound` still records
+  `Step::InterceptInstalled` for every actual destination install;
+- the enum variant remains;
+- `steps_for` still includes allocation-neutral entries and only collapses
+  adjacent duplicate install/release entries; it does not filter the install
+  class or clear the journal; and
+- every exact expected array would therefore fail on an unexpected actual
+  inbound install.
+
+The four tests retain all activation-failure, driver-stop, lease-retire,
+element-release, teardown, lease-release, recovery-wait, cancellation, EXEC
+release and running-hook assertions. The focused run
+`2b8daeedbd89f5500bb292ed` reportedly passed those exact bodies. This is an
+oracle correction for an absent operation, not arbitrary event filtering.
+
+## Exact focused evidence and remaining gate
+
+The handoff reports the following focused receipts:
+
+| Receipt | Bounded result |
+| --- | --- |
+| `5fce29b32fbe103885c9869b` | Owner/EXEC migrations moved 14 of 19 direct cases past line 1468 and isolated five probe-specific outcomes. |
+| `a5ef2684206cb67c212f2b97` | Compile/Clippy plus two guest-stream consumer trajectories passed. |
+| `d1b6495bda8e82c726263634` | Readiness producer-streak correction passed; remaining E10 and seed failures stayed isolated. |
+| `109495dc838a5eb1d64e646d` | Three moved replacement scenarios passed unchanged. |
+| `c3576f41acf3b5318fe3bdc5` | E10 proved a real guest dial and isolated the redirect reason. |
+| `1b1b503a2262a402160fda2b` | E10 and seed 25717 passed after final producer alignment. |
+| `a8fbd70d40605eb26fb4da62` | Exactly three moved replacement IDs collected once. |
+| `faa335932e3ff7ff4cc87a54` | Final control-plane/sim test-target Clippy passed with `-D warnings`. |
+
+These focused results are reported in the author handoff; their raw receipts
+are not retained in this checkout and were not recollected by this reviewer.
+Source inspection confirms the mechanisms and retained oracles they describe.
+
+The four-package normal union has not been rerun after this combined package.
+The 73-body disposable-guest selection has likewise not been rerun after these
+source-local fixture changes. This review does not claim either broad gate
+passes. The original crafter must retain both exact command results and
+selected/pass/skip accounting after approval.
+
+## No exclusions, API or production mechanism
+
+All direct scenario and Contract Shape counts match `HEAD`; no active body is
+ignored. The replacement move preserves the old+new total. The only new cfg is
+the private source-local module declaration. No public API, error variant,
+owner, port, lane, scenario, feature flag, config, model action or production
+fallback was added.
+
+The current package does not modify the production guest-aware core. It moves
+tests beside that existing core to exercise the already-accepted HOW without
+inventing a new seam. The raw 23-failure union remains retained as failure
+evidence rather than being overwritten or relabelled green.
+
+## Previous approvals remain valid
+
+Iterations 1–5 concern the exact registered-tuple leg-C fixture, GuestKit
+confinement and staging, cleanup Harness boot order, guest-only route lifetime,
+and `/var/run` compatibility. Iteration 6 changes none of those bounded source
+artifacts or native oracles. Their approvals remain in force.
+
+## Acceptance-review gates
+
+| Gate | Result | Assessment |
+| --- | --- | --- |
+| Failure partition | PASS | Raw 23 failures classified as 19 direct owner cases, 3 legacy-helper cases and 1 producer-state case. |
+| Owner composition | PASS | Same mTLS and guest owners are ready before `AppState`/EXEC; ticks use the `AppState` owner. |
+| Probe truthfulness | PASS | VM probes structurally use guest dial; refusal/HTTP bytes preserve the original stimuli. |
+| Thresholds | PASS | No threshold lowered; readiness 3 requires three producer advances. |
+| Seed 25717 | PASS | One supervised monotonic producer and one already-started late pending dial; no seeded fix row or restarted supervisor. |
+| Replacement placement | PASS | Three bodies moved once to a private cfg-test module beside the existing core; no public seam. |
+| Replacement oracles | PASS | Exact lifecycle, precedence, retry, history/index and zero-netns assertions retained. |
+| Journal commit | PASS | Only absent zero-port install expectations removed; recorder and unexpected-entry failure remain. |
+| Scenario accounting | PASS | No body/Contract Shape loss or new exclusion. |
+| Prior native support | PASS | Iterations 1–5 unchanged. |
+| Broad verification | PENDING | Source-focused receipts pass; full union and post-package CH selection are not yet rerun. |
+
+No new C1-C7 partition is introduced. The package corrects fixture composition
+and producer honesty for existing scenarios. Delta completeness remains
+**15/15**.
+
+## Mechanical verification
+
+| Check | Result |
+| --- | --- |
+| Raw failure inventory | PASS — exact 23 summary entries independently inspected. |
+| Direct scenario counts | PASS — unchanged across all seven fixture files. |
+| Replacement identity | PASS — three old IDs absent, three new IDs unique; total Contract Shape count preserved. |
+| Replacement assertion counts | PASS — old/new 17, 25 and 12. |
+| New public/cfg-test API | PASS — none; one private `mod replacement_acceptance`. |
+| Ignore/skip/exclusion diff | PASS — none added. |
+| Journal commit scope | PASS — one file, 2 insertions/5 deletions; recorder and `steps_for` unchanged. |
+| `cargo fmt --all -- --check` | PASS — independently rerun. |
+| Scoped `git diff --check` | PASS — independently rerun. |
+| `jq empty deliver/roadmap.json` | PASS — independently rerun. |
+| Focused runtime evidence | PASS as reported by the handoff; source independently agrees. |
+| Final test-target Clippy | PASS as reported by `faa335932e3ff7ff4cc87a54`; not rerun here. |
+| Four-package normal union | **NOT RERUN** — required next. |
+| Post-package 73-body guest suite | **NOT RERUN** — required next if the orchestrator's gate calls for it. |
+| Mutation testing | NOT RUN — reserved for the final DELIVER-wave gate. |
+| Production / test / DES / commit edits by reviewer | NONE. |
+
+## Iteration 6 verdict
+
+**APPROVED.** The complete bounded DISTILL source package closes every one of
+the 23 observed normal-union failures through its actual boundary: 19 callers
+now compose their existing owners and gate before dispatch; three replacement
+scenarios moved once to the only location that can call the existing private
+guest-aware core with their custom lifecycle; and seed 25717 now uses the
+existing monotonic supervised probe producer and a real in-flight late result.
+
+No failure was hidden by an exclusion, alternate model, public seam, fallback
+or weakened threshold/oracle. The independent `254cb4a98` audit confirms its
+four journal edits remove only expectations for destination installs that a
+zero-port spec cannot perform while retaining detection of every unexpected
+actual install.
+
+There are no open DISTILL findings. This is source approval, not a claim that
+the final package is broadly green. The original STEP 13-04 crafter may rerun
+the exact four-package union and unchanged `cgroup-default` selection and must
+retain their raw receipts and accounting before implementation review can
+close.
+
+# APPROVED

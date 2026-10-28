@@ -479,6 +479,10 @@ impl Fixture {
             Arc::new(SimMtlsIntercept::new()),
         ));
         worker.start_shared_owner().await.expect("worker shared owner starts over sim ports");
+        owner
+            .converge_shared()
+            .await
+            .expect("the fixture owner reports its bound ports before AppState construction");
 
         let allocator =
             overdrive_control_plane::test_default_allocator(store.clone() as Arc<dyn IntentStore>);

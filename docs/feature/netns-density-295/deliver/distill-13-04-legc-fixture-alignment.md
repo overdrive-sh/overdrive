@@ -2,9 +2,8 @@
 
 ## Status
 
-**FIXTURE AND EXISTING-RUNNER SUPPORT SOURCE COMPLETE — ready for a fresh
-independent DISTILL review before the original STEP 13-04 crafter performs the
-final disposable-guest native replay.**
+**ALL 23 PACKAGE-UNION CALLER FIXTURES CORRECTED — ready for independent
+DISTILL review iteration 6 before the broad package-union replay.**
 
 The first correction changes only the existing test-local
 `vsock_legb_dial::node` fixture shared by
@@ -347,6 +346,142 @@ other tools are outside the exact 18-body manifest; no speculative staging was
 added for them. No authored namespace path, body, assertion, filter, group,
 guest, lane or count changed.
 
+## Four-package union caller-fixture audit
+
+The required four-package union then ran at durable Metal run
+`673f34b829f67b06388dd5bc` (`QUINT_SEED=0x94db98ed`): 1,715 selected,
+1,692 passed, 23 failed and 148 skipped, exit 100. The complete receipt is
+`.context/netns-density-295/13-04-metal-package-union-remediation-run.log`.
+The raw traces do not support one undifferentiated “baseline” or
+“missing-flow-port” label:
+
+| Exact failure partition | Count | Raw failure | Causal classification |
+| --- | ---: | --- | --- |
+| `e09_v2_failure_stream_overlap_spike` | 2 | `action_shim/mod.rs:1468`, absent bound flow ports | Owner existed but had never converged; mTLS owner also had not started and EXEC opened early. |
+| `e10_vm_early_exit_spike` | 1 | `action_shim/mod.rs:1468` | Same missing boot sequence in its one composed fixture. |
+| `netns_density_node_admission` | 1 | `action_shim/mod.rs:1468` | Exact `LeaseLedger` owner entered `AppState` before convergence and EXEC opened first. |
+| `netns_density_reclaim` | 2 | `action_shim/mod.rs:1468` | Exact `RecordingOwner` entered `AppState` before convergence. |
+| `service_backend_projection` | 11 | `action_shim/mod.rs:1468` | Each `World` used a fresh unconverged owner and an unstarted mTLS owner, with EXEC already open. |
+| `vm_finalize_failed_ownership_spike` | 2 | `action_shim/mod.rs:1468` | Same missing boot sequence in its one fixture. |
+| `driver_neutral_allocation_replacement` | 3 | Preserved D-UP-15 assertion sees `Provision` / `Teardown` workload-netns calls for VM specs | These tests call the legacy process-netns dispatcher, not the accepted guest-owner path. They never reached line 1468. |
+| `service_kind_vm_terminal_invariant` seed 25717 | 1 | accepted probe event timeout | Its exact owner was already converged before `AppState`; no line-1468 panic exists in the raw trace. |
+
+The 19 direct missing-port cases were migrated only through their existing
+fixtures. Each now starts its existing shared mTLS owner, converges the same
+guest-network owner later stored in `AppState`, constructs `AppState` so it
+captures that owner's ports, and only then opens the same EXEC wiring. No owner
+instance, pool, seed, scheduler, fault injection, lifecycle action, assertion
+or body count changed.
+
+Their probe fixtures also had to express the already-accepted VM transport:
+wildcard VM probes use the existing `GuestStreamDial` port once a transport is
+correctly assigned. Existing `SimGuestStreamDial` scripts now mirror each
+fixture's existing TCP refusal or HTTP status stimulus; no new port or adapter
+was added. The readiness-threshold fixture advances the existing producer once
+per expected Pass streak step, preserving the producer-row contract rather
+than re-reading one row as three passes.
+
+### Replacement-fixture placement
+
+The three replacement failures were a different, directly reproduced caller
+error. Their external `overdrive-sim` fixture called
+`dispatch_with_network_provisioner`, which supplies `guest_network: None` to
+the private dispatch core. Under `integration-tests`, that legacy branch
+allocates an exec/process netns and therefore records the exact
+`Provision`/`Teardown` calls the D-UP-15 oracle forbids for VMs. Production
+calls the same private core with the guest owner, pool, bound flow ports and
+EXEC gate present.
+
+The accepted private core also takes the existing custom
+`MtlsInterceptLifecycle`, which the three scenarios need to observe a no-op
+successor stop and injected predecessor-stop failures exactly. The public
+AppState test helper hard-wires the concrete worker and cannot preserve that
+oracle. Rust privacy also prevents the external integration-test crate from
+calling the private core. The bounded correction therefore moves exactly the
+three existing bodies and their private recording fixtures into
+`action_shim::replacement_acceptance`, beside the private core. It adds one
+source-local `cfg(test, integration-tests)` module declaration and no exported
+helper, public method, parameter or production mechanism.
+
+| Before | After | Count |
+| --- | --- | ---: |
+| `overdrive-sim::driver_neutral_allocation_replacement successor_outcome_precedes_blocked_predecessor_cleanup_for_every_driver` | `overdrive-control-plane action_shim::replacement_acceptance::successor_outcome_precedes_blocked_predecessor_cleanup_for_every_driver` | 1 |
+| `overdrive-sim::driver_neutral_allocation_replacement successor_and_cleanup_outcomes_follow_the_ratified_precedence_table` | `overdrive-control-plane action_shim::replacement_acceptance::successor_and_cleanup_outcomes_follow_the_ratified_precedence_table` | 1 |
+| `overdrive-sim::driver_neutral_allocation_replacement rejected_successor_publication_fully_unwinds_without_immediate_second_proposal` | `overdrive-control-plane action_shim::replacement_acceptance::rejected_successor_publication_fully_unwinds_without_immediate_second_proposal` | 1 |
+
+The old integration binary retains its two unrelated bodies. All lifecycle,
+no-op stop, exact-ID order, failure precedence, retained retry state,
+row/index, one-proposal and zero-workload-netns assertions moved unchanged.
+The source-local fixture converges its existing `TestSharedOwner`, captures
+its bound flow ports, then opens the existing EXEC wiring before calling the
+private guest-aware core. `RecordingNetwork` stays connected to the legacy
+port and its zero-call assertion remains live.
+
+### Probe-fixture alignment
+
+The two non-line-1468 failures were also fixture-specific and were not hidden
+under an owner-startup label:
+
+- E10 reached the guest-stream HTTP parser. Its accepted row carries the
+  canonical reason `HTTP 302 (redirect not followed)`, while the obsolete
+  host-side `SimHttpProber` script expected `HTTP 302`. The fixture now keeps
+  its exact 302 outcome and asserts the canonical production reason. Its
+  bounded logical-clock wait observes the already-live startup producer; the
+  terminal, reclamation and occurrence assertions are unchanged.
+- Seed 25717 called the single-tick helper repeatedly. Every call creates a
+  fresh producer state at `ProbeRunSeq::FIRST`; after the baseline readiness
+  Pass, the strict `run_seq` LWW store correctly rejected the equal-sequence
+  Fail and emitted no event. The existing supervised producer now drives the
+  same Pass/Fail/Pass trajectory through `SimGuestStreamDial`, retaining one
+  monotonic producer state. The late accepted Pass is an already-started
+  `Pending` guest dial completed after the terminal owner cancels the
+  supervisor, preserving the authored late-result race without seeding a row
+  or restarting a terminal supervisor. The refusal reason is the typed guest
+  dial label `refused`.
+
+### Focused evidence
+
+- `5fce29b32fbe103885c9869b`: after owner/EXEC migration, 14 of 19 selected
+  cases passed; five reached distinct probe-fixture outcomes rather than line
+  1468.
+- `a5ef2684206cb67c212f2b97`: Cargo check and Clippy passed; two consumer
+  trajectories passed after existing guest-stream stimulus alignment.
+- `d1b6495bda8e82c726263634`: readiness producer-streak correction passed;
+  seed-25717 and E10 still failed their original probe-row/event oracles.
+- `109495dc838a5eb1d64e646d`: the three source-local replacement scenarios
+  passed with every original oracle; the two separately diagnosed probe
+  fixtures still failed before their final alignment.
+- `c3576f41acf3b5318fe3bdc5`: E10 proved one real guest dial completed and
+  isolated the only mismatch to its obsolete redirect reason.
+- `1b1b503a2262a402160fda2b`: E10 and seed 25717 both passed after their
+  production-producer fixture alignment.
+
+These focused receipts close the exact 23-failure inventory without an
+exclusion, relaxed oracle, public seam or production fallback. The full
+four-package union remains reserved for the original crafter after independent
+DISTILL review iteration 6.
+
+## Committed journal-oracle audit (`254cb4a98`)
+
+The crafter removed `Step::InterceptInstalled` from four expected journals in
+`mtls_install_fail_closed.rs`. That alignment is honest and needs no source
+reversal:
+
+- the exact fixture allocation spec declares `service_ports: Vec::new()`;
+- STEP 13-04 deleted outbound set installation, so that spec now installs zero
+  allocation nft elements;
+- `JournalIntercept::install_inbound` still records
+  `Step::InterceptInstalled` for every actual destination install; and
+- `steps_for` still retains that step (collapsing only adjacent duplicates),
+  so any unexpected inbound installation remains an extra journal entry and
+  fails all four exact arrays.
+
+The change therefore removes only an expectation for an operation the
+destination-only, zero-port fixture no longer performs; it does not suppress
+or clear observed journal entries. Focused durable run
+`2b8daeedbd89f5500bb292ed` passed the four exact bodies. Their ordering,
+activation, recovery wait, cancellation and release assertions remain intact.
+
 ## Preserved coverage
 
 | Existing evidence | Preserved contract |
@@ -392,21 +527,29 @@ The following source checks passed after the correction:
   `-D warnings` passed for that integration binary;
 - Metal durable run `39c1f5e6464fa1d377862ea1`: final scoped Cargo check
   and Clippy with `-D warnings` passed for the existing guest-suite runner
-  after the route-lifetime correction.
+  after the route-lifetime correction;
+- Metal durable run `109495dc838a5eb1d64e646d`: all three moved
+  replacement scenarios passed with their unchanged assertions;
+- Metal durable run `1b1b503a2262a402160fda2b`: the E10 and seed-25717
+  probe scenarios passed through the accepted guest-stream producer; and
+- Metal durable list run `a8fbd70d40605eb26fb4da62`: collected exactly the
+  three mapped `action_shim::replacement_acceptance` bodies once; and
+- Metal durable run `faa335932e3ff7ff4cc87a54`: final Cargo Clippy with
+  `-D warnings` passed for all `overdrive-control-plane` and `overdrive-sim`
+  test targets under `integration-tests`.
 
-These are userspace compilation checks. No post-correction native test replay
-has run, by design. Final nft/netns/cgroup/kernel evidence must wait for this
-fresh DISTILL review and then run only inside the recovered existing
-disposable Cloud Hypervisor guest boundary. A Metal command prefix alone is
-not authorization to mutate the physical host kernel.
+The focused Sim tests and compilation checks are userspace work on Metal. No
+post-correction broad package-union or disposable-guest replay has run, by
+design. Final nft/netns/cgroup/kernel evidence must wait for this fresh
+DISTILL review and then run only inside the recovered existing disposable
+Cloud Hypervisor guest boundary. A Metal command prefix alone is not
+authorization to mutate the physical host kernel.
 
 ## Review and replay handoff
 
-The prior review artifact approved the exact-tuple fixture correction before
-the runner extension and CH73 fixture correction existed. It remains valid for
-that bounded source but does not approve the new execution support. The same
-independent reviewer should record iteration 5 against the combined package
-and verify:
+The prior review artifact approved the earlier bounded fixture corrections but
+does not approve the four-package caller migrations. The same independent
+reviewer should record iteration 6 against the combined package and verify:
 
 1. executable changes are confined to the test-local `vsock_legb_dial::node`
    fixture, GuestKit traversal support, and the existing guest-suite runner's
@@ -442,10 +585,28 @@ and verify:
 14. the immediately related tool/module/filesystem audit is bounded to the 18
     selected bodies and adds no speculative support for unselected cells; and
 15. no production fallback, API, owner, lane, scenario, model, or relaxed
-   oracle was added.
+    oracle was added;
+16. the exact 19 line-1468 callers converge the same owner captured by
+    `AppState`, start the same mTLS owner and open the same EXEC wiring only
+    after those boot preconditions;
+17. the three replacement bodies moved once from the external Sim binary to
+    the source-local action-shim module, with the old bodies absent and the new
+    IDs collected exactly once;
+18. the moved bodies call the existing private guest-aware dispatch core,
+    retain the custom lifecycle and `RecordingNetwork`, and preserve every
+    lifecycle/no-op-stop/order/failure/retry/D-UP15 assertion;
+19. seed 25717 uses its existing supervised producer for monotonic `run_seq`
+    and models the terminal-late Pass as an already-started pending guest
+    dial, without seeding a row or restarting a terminal supervisor;
+20. E10's redirect assertion is the canonical reason returned by the
+    production guest-stream HTTP parser; and
+21. commit `254cb4a98` removed only the four expectations for absent
+    zero-port installs while the observed journal still fails on any actual
+    unexpected `InterceptInstalled` operation.
 
-After approval, the original crafter should replay the unchanged STEP 13-04
-selection through `OVERDRIVE_FWD_GUEST_GROUP=cgroup-default` and retain the
-durable guest-boundary receipt proving exactly 55 baseline passes plus 18
-STEP 13-04 passes. This DISTILL task does not write DES phases or commit the
-source.
+After approval, the original crafter should replay the unchanged four-package
+union with the mapped three test IDs and the unchanged STEP 13-04
+`cgroup-default` selection. The receipts must retain the exact 55+18
+disposable-guest accounting and the four-package selected/pass/skip totals;
+no skip, exclusion or moved body may disappear from accounting. This DISTILL
+task does not write DES phases or commit the source.

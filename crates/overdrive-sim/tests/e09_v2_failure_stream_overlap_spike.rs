@@ -16,6 +16,7 @@
 use async_trait::async_trait;
 use futures::StreamExt;
 use overdrive_control_plane::api::IdempotencyOutcome;
+use overdrive_control_plane::guest_network::SharedGuestNetworkOwner;
 use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::reconciler_runtime::{
     ReconcilerRuntime, run_convergence_tick_with_guest_network_provisioner_for_test,
@@ -64,13 +65,11 @@ fn guest_owner() -> Arc<overdrive_sim::adapters::guest_network::SimSharedGuestNe
     }))
 }
 
-/// An EXEC wiring whose paired supervisor has opened the gate after boot.
-fn opened_exec_wiring() -> overdrive_core::guest_network::GuestNetworkExecWiring {
-    let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(
+/// One EXEC wiring, kept BootClosed until the fixture owner has converged.
+fn exec_wiring() -> overdrive_core::guest_network::GuestNetworkExecWiring {
+    overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(
         overdrive_sim::adapters::clock::SimClock::new(),
-    ));
-    assert!(wiring.supervisor().open_after_boot(), "the EXEC gate opens after boot");
-    wiring
+    ))
 }
 
 /// Existing driven-port composition: simulated process lifecycle plus the same
@@ -157,6 +156,13 @@ async fn drive(overlap: bool) {
     for _ in 0..100 {
         tcp.enqueue_outcome(ProbeOutcome::Fail { reason: "connection refused".into() });
     }
+    let guest_dial =
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new());
+    guest_dial.script_default(overdrive_sim::adapters::guest_stream_dial::SimDialScript::Refuse(
+        overdrive_core::guest_transport::dial::GuestDialError::Refused {
+            errno: overdrive_core::guest_transport::wire::KernelErrno::ECONNREFUSED,
+        },
+    ));
     let driver = Arc::new(ProbedDriver {
         inner: SimDriver::with_clock(DriverType::Vm, clock.clone()),
         clock: clock.clone(),
@@ -166,7 +172,7 @@ async fn drive(overlap: bool) {
             Arc::new(SimHttpProber::new()),
             clock.clone(),
             obs.clone(),
-            Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+            guest_dial,
         ),
     });
     let mut runtime = ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).unwrap();
@@ -176,7 +182,32 @@ async fn drive(overlap: bool) {
     let store = Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).unwrap());
     let allocator =
         overdrive_control_plane::test_default_allocator(store.clone() as Arc<dyn IntentStore>);
-    let exec_wiring = opened_exec_wiring();
+    let exec_wiring = exec_wiring();
+    let mtls_worker = Arc::new(overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::new(
+        Arc::new(overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement::new(
+            Arc::new(overdrive_sim::adapters::SimIdentityRead::new(
+                std::collections::BTreeMap::new(),
+                None,
+            )),
+            overdrive_core::traits::mtls_enforcement::MtlsLimits::default(),
+            Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        )),
+        Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
+            std::collections::BTreeMap::new(),
+            overdrive_core::traits::mtls_resolve::MtlsResolution::NonMesh,
+        )),
+        Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
+        Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+    ));
+    mtls_worker
+        .start_shared_owner()
+        .await
+        .expect("the fixture starts the shared intercept owner before allocation dispatch");
+    let guest_network = guest_owner();
+    guest_network
+        .converge_shared()
+        .await
+        .expect("the fixture owner reports its bound ports before AppState construction");
     let mut state = AppState::new(
         store,
         tmp.path().join("intent.redb"),
@@ -191,29 +222,18 @@ async fn drive(overlap: bool) {
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         Ipv4Addr::LOCALHOST,
-        Arc::new(overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::new(
-            Arc::new(overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement::new(
-                Arc::new(overdrive_sim::adapters::SimIdentityRead::new(
-                    std::collections::BTreeMap::new(),
-                    None,
-                )),
-                overdrive_core::traits::mtls_enforcement::MtlsLimits::default(),
-                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
-            )),
-            Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
-                std::collections::BTreeMap::new(),
-                overdrive_core::traits::mtls_resolve::MtlsResolution::NonMesh,
-            )),
-            Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
-            Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
-        )),
-        guest_owner(),
+        mtls_worker,
+        guest_network,
         exec_wiring.gate(),
         Arc::new(overdrive_control_plane::guest_network::GuestAddressPool::new(
             "100.95.0.0/16".parse().expect("static guest prefix"),
             std::net::Ipv4Addr::new(100, 95, 0, 1),
             std::sync::Arc::new(overdrive_sim::adapters::entropy::SimEntropy::new(0x295)),
         )),
+    );
+    assert!(
+        exec_wiring.supervisor().open_after_boot(),
+        "the EXEC gate opens only after the fixture owner has converged"
     );
     // This diagnostic serially advances the shared simulated clock through
     // nine independent stop-grace intervals. Keep the separately tested

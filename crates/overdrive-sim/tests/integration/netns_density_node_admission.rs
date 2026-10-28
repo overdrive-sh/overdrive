@@ -923,18 +923,22 @@ impl SimNode {
                  shared owner did not start: {error}"
             )
         });
+        owner
+            .converge_shared()
+            .await
+            .unwrap_or_else(|error| {
+                panic!(
+                    "seed={seed}: harness precondition failed (not a contract verdict): the shared guest-network owner did not converge: {error}"
+                )
+            });
 
         // One EXEC wiring over the fixture clock. Only its paired supervisor
-        // moves the gate; it is opened before the first dispatch
+        // moves the gate; it is opened after owner convergence and AppState
+        // composition, before the first dispatch
         // (FD § "Gate G-V3 — allocation forwarding activation (replaces G-295-3)" (gate state outside `run_server*`)).
         let exec = GuestNetworkExecWiring::new(clock.clone());
         let exec_gate = exec.gate();
         let exec_supervisor = exec.supervisor();
-        assert!(
-            exec_supervisor.open_after_boot(),
-            "seed={seed}: harness precondition failed (not a contract verdict): the fixture's \
-             EXEC gate did not open from BootClosed"
-        );
 
         // One pool per server, composed with today's constants (R6).
         let guest_pool = Arc::new(GuestAddressPool::new(
@@ -967,6 +971,11 @@ impl SimNode {
             Arc::clone(&owner) as Arc<dyn SharedGuestNetworkOwner>,
             Arc::clone(&exec_gate),
             Arc::clone(&guest_pool),
+        );
+        assert!(
+            exec_supervisor.open_after_boot(),
+            "seed={seed}: harness precondition failed (not a contract verdict): the fixture's \
+             EXEC gate did not open from BootClosed after owner convergence"
         );
         // The production exit observer authors a crashed allocation's
         // `Failed` row from the driver's exit event (production composes it

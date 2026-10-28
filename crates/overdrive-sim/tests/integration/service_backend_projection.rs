@@ -31,6 +31,7 @@ use async_trait::async_trait;
 use futures::{FutureExt, StreamExt};
 use overdrive_control_plane::action_shim::ShimError;
 use overdrive_control_plane::dns_responder::name_index::NameIndex;
+use overdrive_control_plane::guest_network::SharedGuestNetworkOwner;
 use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::listener_facts::ListenerFactStore;
 use overdrive_control_plane::mtls_resolve_adapter::ServiceBackendsResolve;
@@ -140,6 +141,7 @@ struct World {
     driver: Arc<ProbedDriver>,
     tcp: Arc<SimTcpProber>,
     http: Arc<SimHttpProber>,
+    guest_dial: Arc<overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial>,
     target: TargetResource,
     name: MeshServiceName,
     frontend: Ipv4Addr,
@@ -207,6 +209,13 @@ impl World {
         let obs = Arc::new(SimObservationStore::single_peer(node.clone(), seed));
         let tcp = Arc::new(SimTcpProber::new());
         let http = Arc::new(SimHttpProber::new());
+        let guest_dial =
+            Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new());
+        guest_dial.script_default(
+            overdrive_sim::adapters::guest_stream_dial::SimDialScript::Accept {
+                reply: b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_vec(),
+            },
+        );
         let driver = Arc::new(ProbedDriver {
             inner: SimDriver::with_clock(DriverType::Vm, clock.clone()),
             probes: ProbeRunner::new(
@@ -214,7 +223,8 @@ impl World {
                 http.clone(),
                 clock.clone(),
                 obs.clone(),
-                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+                Arc::clone(&guest_dial)
+                    as Arc<dyn overdrive_core::guest_transport::dial::GuestStreamDial>,
             ),
         });
         let views = Arc::new(RedbViewStore::open(directory.path()).unwrap());
@@ -226,9 +236,17 @@ impl World {
         // The guest lane: one owner instance, one EXEC wiring opened by its
         // paired supervisor, and the pool `AppState` holds. A VM allocation's
         // address is the transport the pool assigns (DG-2 rows 1-4).
+        let mtls_worker = crate::integration::serve_ports::worker();
+        mtls_worker
+            .start_shared_owner()
+            .await
+            .expect("the fixture starts the shared intercept owner before allocation dispatch");
         let owner = crate::integration::serve_ports::owner();
         let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock.clone());
-        assert!(wiring.supervisor().open_after_boot(), "the EXEC gate opens after boot");
+        owner
+            .converge_shared()
+            .await
+            .expect("the fixture owner reports its bound ports before AppState construction");
         let state = AppState::new(
             store,
             directory.path().join("intent.redb"),
@@ -243,10 +261,14 @@ impl World {
             allocator,
             overdrive_control_plane::test_empty_listener_facts(),
             HOST,
-            crate::integration::serve_ports::worker(),
+            mtls_worker,
             owner.clone(),
             wiring.gate(),
             crate::integration::serve_ports::pool(),
+        );
+        assert!(
+            wiring.supervisor().open_after_boot(),
+            "the EXEC gate opens only after the fixture owner has converged"
         );
         // Same validated driving ports as submit: allocate frontend/VIP, archive
         // canonical intent, and rebuild listener facts from that real intent.
@@ -300,6 +322,7 @@ impl World {
             driver,
             tcp,
             http,
+            guest_dial,
             target: TargetResource::new(&format!("workload/{WORKLOAD}")).unwrap(),
             name,
             frontend,
@@ -427,6 +450,32 @@ impl World {
         self.settle().await;
         self.clock.tick(Duration::from_millis(1000 + self.seed % 11));
         self.settle().await;
+    }
+
+    fn script_guest_probe_pass(&self) {
+        self.guest_dial.script_default(
+            overdrive_sim::adapters::guest_stream_dial::SimDialScript::Accept {
+                reply: b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n".to_vec(),
+            },
+        );
+    }
+
+    fn script_guest_tcp_refused(&self) {
+        self.guest_dial.script_default(
+            overdrive_sim::adapters::guest_stream_dial::SimDialScript::Refuse(
+                overdrive_core::guest_transport::dial::GuestDialError::Refused {
+                    errno: overdrive_core::guest_transport::wire::KernelErrno::ECONNREFUSED,
+                },
+            ),
+        );
+    }
+
+    fn script_guest_http_failure(&self) {
+        self.guest_dial.script_default(
+            overdrive_sim::adapters::guest_stream_dial::SimDialScript::Accept {
+                reply: b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n".to_vec(),
+            },
+        );
     }
 
     async fn settle(&self) {
@@ -611,6 +660,7 @@ async fn liveness_restart_budget_and_finalization_keep_projection_handoffs() {
     for _ in 0..32 {
         world.tcp.enqueue_outcome(ProbeOutcome::Fail { reason: "seeded liveness refusal".into() });
     }
+    world.script_guest_tcp_refused();
     world.run("workload-lifecycle").await;
     world.run("service-lifecycle").await;
     world.assert_shape(&world.rows().await, 1, true);
@@ -684,6 +734,7 @@ async fn deciding_tick_orders_complete_row_handoffs_before_failure() {
     for _ in 0..32 {
         world.tcp.enqueue_outcome(ProbeOutcome::Fail { reason: "seeded refusal".into() });
     }
+    world.script_guest_tcp_refused();
     world.run("workload-lifecycle").await;
     let initial = world.rows().await;
     assert!(initial.is_empty());
@@ -772,6 +823,7 @@ async fn failed_withdrawal_drains_terminal_and_repairs_after_view_reload() {
     for _ in 0..32 {
         world.tcp.enqueue_outcome(ProbeOutcome::Fail { reason: "seeded refusal".into() });
     }
+    world.script_guest_tcp_refused();
     world.run("workload-lifecycle").await;
     world.run("service-lifecycle").await;
     world.assert_shape(&world.rows().await, 1, true);
@@ -993,6 +1045,7 @@ async fn startup_failure_withdraws_then_fresh_successor_starts_unobserved() {
                 .tcp
                 .enqueue_outcome(ProbeOutcome::Fail { reason: "seeded connection refused".into() });
         }
+        world.script_guest_tcp_refused();
         world.run("workload-lifecycle").await;
         world.run("service-lifecycle").await;
         world.assert_shape(&world.rows().await, 1, true);
@@ -1049,17 +1102,19 @@ async fn readiness_threshold_is_listener_independent_and_recovers() {
         spec.readiness_probes = vec![readiness(3)];
         let mut world = World::new(257_217 + listener_count as u64, spec, true).await;
         world.run("workload-lifecycle").await;
-        world.advance_probes().await;
         for pass in 1..=3 {
+            world.advance_probes().await;
             world.run("service-lifecycle").await;
             world.assert_shape(&world.rows().await, 1, pass == 3);
         }
         world.http.enqueue_outcome(ProbeOutcome::Fail { reason: "seeded readiness outage".into() });
+        world.script_guest_http_failure();
         world.advance_probes().await;
+        world.script_guest_probe_pass();
         world.run("service-lifecycle").await;
         world.assert_shape(&world.rows().await, 1, false);
-        world.advance_probes().await;
         for pass in 1..=3 {
+            world.advance_probes().await;
             world.run("service-lifecycle").await;
             world.assert_shape(&world.rows().await, 1, pass == 3);
         }
@@ -1118,7 +1173,9 @@ async fn consumer_trajectory(include_hydrator: bool) {
         assert_eq!(world.dataplane.local_backend_for(vip, 18081, Proto::Tcp), None);
     }
     world.http.enqueue_outcome(ProbeOutcome::Fail { reason: "seeded readiness outage".into() });
+    world.script_guest_http_failure();
     world.advance_probes().await;
+    world.script_guest_probe_pass();
     world.run("service-lifecycle").await;
     world.assert_shape(&world.rows().await, 1, false);
     // Do not require synchronous observer state at publication's return.
