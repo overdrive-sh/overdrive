@@ -45,6 +45,12 @@ udp_getpeername=127.0.0.1:55521
 program=vip_connect4(overdrive.slice), verified_insns=38
 ```
 
+The complete litmus line captured by `guest-commands.jsonl` was:
+
+```json
+{"ancestor":"/sys/fs/cgroup/overdrive.slice","cgroup_listing":"ID       AttachType      AttachFlags     Name           \n8        cgroup_inet4_connect multi           vip_connect4                   \n","controls":{"direct_peer_is_backend":true,"outside_subtree_refused":true,"tcp_vip_peer_is_backend":true,"udp_vip_peer_is_backend":true,"unmapped_vip_refused":true},"direct_getpeername":"127.0.0.1:37083","kernel":"7.0.0-38-generic","ok":true,"outside":"/sys/fs/cgroup/ancestor-connect4-outside-124","outside_cgroup":"0::/ancestor-connect4-outside-124","outside_mapped_vip_error":"Network is unreachable (os error 101)","owner":"/sys/fs/cgroup/overdrive.slice/control-plane.slice","owner_cgroup":"0::/overdrive.slice/control-plane.slice","program":{"id":8,"name":"vip_connect4(overdrive.slice)","tag":"d6ec622dab236cf1","verified_insns":38},"tcp_backend":"127.0.0.1:37083","tcp_getpeername":"127.0.0.1:37083","udp_backend":"127.0.0.1:55521","udp_getpeername":"127.0.0.1:55521","unmapped_vip_error":"Network is unreachable (os error 101)"}
+```
+
 ## Controls and cleanup
 
 - Positive TCP: the child-cgroup socket connected to the mapped VIP and
