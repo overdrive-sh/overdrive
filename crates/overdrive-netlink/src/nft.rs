@@ -51,6 +51,7 @@ use std::net::{Ipv4Addr, SocketAddrV4};
 use std::time::{Duration, Instant};
 
 use crate::error::{NEG_EEXIST, NetlinkError};
+use overdrive_core::dataplane::OWNER_EGRESS_MARK;
 use overdrive_core::guest_transport::{GUEST_NODE_GATEWAY, GUEST_NODE_PREFIX};
 
 // ---- NETLINK_NETFILTER / nfnetlink framing (pinned; spike increment-e) ------
@@ -110,6 +111,7 @@ impl NftFamily {
 }
 const AF_UNSPEC: u8 = 0;
 const IPPROTO_TCP: u8 = 6;
+const IPPROTO_UDP: u8 = 17;
 
 // table attrs.
 const NFTA_TABLE_NAME: u16 = 1;
@@ -196,6 +198,21 @@ const NFTA_META_SREG: u16 = 3;
 const NFT_META_L4PROTO: u32 = 16;
 const NFT_META_MARK: u32 = 3;
 const NFT_META_IIFNAME: u32 = 6;
+// bitwise expression attributes (`nf_tables.h`, enum nft_bitwise_attributes).
+const NFTA_BITWISE_SREG: u16 = 1;
+const NFTA_BITWISE_DREG: u16 = 2;
+const NFTA_BITWISE_LEN: u16 = 3;
+const NFTA_BITWISE_MASK: u16 = 4;
+const NFTA_BITWISE_XOR: u16 = 5;
+const NFTA_BITWISE_OP: u16 = 6;
+const NFT_BITWISE_MASK_XOR: u32 = 0;
+// fib expression attributes/results/flags (`nf_tables.h`).
+const NFTA_FIB_DREG: u16 = 1;
+const NFTA_FIB_RESULT: u16 = 2;
+const NFTA_FIB_FLAGS: u16 = 3;
+const NFT_FIB_RESULT_ADDRTYPE: u32 = 3;
+const NFTA_FIB_F_DADDR: u32 = 1 << 1;
+const RTN_UNICAST: u32 = 1;
 // tproxy (`nf_tables.h`: FAMILY=1, REG_ADDR=2, REG_PORT=3).
 const NFTA_TPROXY_FAMILY: u16 = 1;
 const NFTA_TPROXY_REG_ADDR: u16 = 2;
@@ -517,6 +534,29 @@ fn e_meta_set(key: u32, sreg: u32) -> Vec<u8> {
     expr("meta", &d)
 }
 
+/// `bitwise` mask-and-xor operation, preserving only `mask` in `dreg`.
+fn e_bitwise_mask(sreg: u32, dreg: u32, mask: u32) -> Vec<u8> {
+    let zero = 0_u32.to_ne_bytes();
+    let mut d = Vec::with_capacity(6 * 8);
+    attr_be32(&mut d, NFTA_BITWISE_SREG, sreg);
+    attr_be32(&mut d, NFTA_BITWISE_DREG, dreg);
+    attr_be32(&mut d, NFTA_BITWISE_LEN, 4);
+    attr(&mut d, NFTA_BITWISE_MASK | NLA_F_NESTED, &data_value(&mask.to_ne_bytes()));
+    attr(&mut d, NFTA_BITWISE_XOR | NLA_F_NESTED, &data_value(&zero));
+    attr_be32(&mut d, NFTA_BITWISE_OP, NFT_BITWISE_MASK_XOR);
+    expr("bitwise", &d)
+}
+
+/// `fib daddr type` loaded into `dreg`, used to distinguish ordinary unicast
+/// from every route type delivered by the host itself.
+fn e_fib_daddr_type(dreg: u32) -> Vec<u8> {
+    let mut d = Vec::with_capacity(3 * 8);
+    attr_be32(&mut d, NFTA_FIB_DREG, dreg);
+    attr_be32(&mut d, NFTA_FIB_RESULT, NFT_FIB_RESULT_ADDRTYPE);
+    attr_be32(&mut d, NFTA_FIB_FLAGS, NFTA_FIB_F_DADDR);
+    expr("fib", &d)
+}
+
 fn e_immediate_value(dreg: u32, value: &[u8]) -> Vec<u8> {
     let val = data_value(value);
     // one 8-byte be32 attr + the nested NFTA_IMMEDIATE_DATA attr wrapping `val`.
@@ -590,6 +630,41 @@ fn e_ipv4_tcp_destination_lookup(set: &str) -> Vec<u8> {
 fn e_mark_not_equals(mark: u32) -> Vec<u8> {
     let mut ex = e_meta_load(NFT_META_MARK, NFT_REG_1);
     ex.extend(e_cmp(NFT_REG_1, NFT_CMP_NEQ, &mark.to_ne_bytes()));
+    ex
+}
+
+fn e_owner_mark() -> Vec<u8> {
+    let mut ex = e_meta_load(NFT_META_MARK, NFT_REG_1);
+    ex.extend(e_bitwise_mask(NFT_REG_1, NFT_REG_1, OWNER_EGRESS_MARK));
+    ex.extend(e_cmp_eq(NFT_REG_1, &OWNER_EGRESS_MARK.to_ne_bytes()));
+    ex
+}
+
+fn e_d26_gateway_accept(protocol: u8) -> Vec<u8> {
+    let mut ex = e_owner_mark();
+    ex.extend(e_payload(NFT_PAYLOAD_NETWORK_HEADER, 16, 4, NFT_REG_1));
+    ex.extend(e_cmp_eq(NFT_REG_1, &GUEST_NODE_GATEWAY.octets()));
+    ex.extend(e_meta_load(NFT_META_L4PROTO, NFT_REG_1));
+    ex.extend(e_cmp_eq(NFT_REG_1, &[protocol]));
+    ex.extend(e_payload(NFT_PAYLOAD_TRANSPORT_HEADER, 2, 2, NFT_REG_1));
+    ex.extend(e_cmp_eq(NFT_REG_1, &53_u16.to_be_bytes()));
+    ex.extend(e_immediate_verdict(NF_ACCEPT));
+    ex
+}
+
+fn e_d26_static_reject(prefix: &[u8]) -> Vec<u8> {
+    let mut ex = e_owner_mark();
+    ex.extend(e_payload(NFT_PAYLOAD_NETWORK_HEADER, 16, prefix.len() as u32, NFT_REG_1));
+    ex.extend(e_cmp_eq(NFT_REG_1, prefix));
+    ex.extend(e_plain_reject());
+    ex
+}
+
+fn e_d26_non_unicast_reject() -> Vec<u8> {
+    let mut ex = e_owner_mark();
+    ex.extend(e_fib_daddr_type(NFT_REG_1));
+    ex.extend(e_cmp(NFT_REG_1, NFT_CMP_NEQ, &RTN_UNICAST.to_ne_bytes()));
+    ex.extend(e_plain_reject());
     ex
 }
 
@@ -734,10 +809,17 @@ fn shared_ip_prerouting_rule_exprs(_port_f: u16, port_c: u16, index: usize) -> V
 fn shared_ip_output_rule_exprs(leg_c_port: u16, index: usize) -> Vec<u8> {
     let leg_s_mark = overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
     match index {
+        // D26 gateway:53 exceptions must precede every accept in this chain.
+        0 => e_d26_gateway_accept(IPPROTO_UDP),
+        1 => e_d26_gateway_accept(IPPROTO_TCP),
+        // D26 static host-internal ranges and the route-type backstop.
+        2 => e_d26_static_reject(&[127]),
+        3 => e_d26_static_reject(&[169, 254]),
+        4 => e_d26_non_unicast_reject(),
         // leg-S exemption.
-        0 => mark_accept_exemption_exprs(leg_s_mark),
+        5 => mark_accept_exemption_exprs(leg_s_mark),
         // Registered destination and declared TCP port through the local route.
-        1 => {
+        6 => {
             let mut ex = e_ipv4_tcp_destination_lookup(SHARED_IP_INBOUND_DESTINATIONS);
             ex.extend(e_mark_not_equals(leg_s_mark));
             ex.extend(e_immediate_value(NFT_REG_2, &SHARED_IP_FWMARK.to_ne_bytes()));
@@ -748,11 +830,11 @@ fn shared_ip_output_rule_exprs(leg_c_port: u16, index: usize) -> Vec<u8> {
         }
         // A TCP packet directed at a guest-prefix address other than the
         // gateway is reset before it can reach another host route or socket.
-        2 => e_guest_prefix_tcp_reset(),
+        7 => e_guest_prefix_tcp_reset(),
         // Non-TCP guest-prefix traffic gets the accepted ICMP port-unreachable
         // reject, preserving EPERM at the first UDP send.
-        3 => e_guest_prefix_reject(),
-        _ => unreachable!("shared output rule index is bounded to four"),
+        8 => e_guest_prefix_reject(),
+        _ => unreachable!("shared output rule index is bounded to nine"),
     }
 }
 
@@ -782,14 +864,18 @@ fn e_guest_prefix_tcp_reset() -> Vec<u8> {
     ex
 }
 
-fn e_guest_prefix_reject() -> Vec<u8> {
-    let mut ex = e_guest_prefix_match();
+fn e_plain_reject() -> Vec<u8> {
     let mut data = Vec::new();
     // Plain nft `reject`: ICMPX port-unreachable. This is the only reject
     // form that yields ECONNREFUSED for TCP and EPERM on the first UDP send.
     attr_be32(&mut data, 1, 0);
     attr(&mut data, 2, &[3]);
-    ex.extend(expr("reject", &data));
+    expr("reject", &data)
+}
+
+fn e_guest_prefix_reject() -> Vec<u8> {
+    let mut ex = e_guest_prefix_match();
+    ex.extend(e_plain_reject());
     ex
 }
 
@@ -1161,7 +1247,8 @@ fn canonical_expression_data(name: &str, data: &[u8]) -> std::io::Result<Vec<u8>
     match name {
         "cmp" => canonical_attr_set(data, &[NFTA_CMP_DATA]),
         "immediate" => canonical_attr_set(data, &[NFTA_IMMEDIATE_DATA]),
-        "meta" | "payload" | "tproxy" | "reject" => canonical_attr_set(data, &[]),
+        "meta" | "payload" | "tproxy" | "reject" | "fib" => canonical_attr_set(data, &[]),
+        "bitwise" => canonical_attr_set(data, &[NFTA_BITWISE_MASK, NFTA_BITWISE_XOR]),
         // nftables materializes the implicit zero lookup flags in GETRULE
         // replies. The producer omits that default, so the private identity
         // projection removes only this one semantic default.
@@ -2818,7 +2905,7 @@ mod shared_ip {
     const IPV4_ADDR_INET_SERVICE_KEY_TYPE: u32 = 0x1cd;
     const DESTINATION_SET_KEY_LEN: u32 = 8;
     const PREROUTING_RULE_COUNT: usize = 3;
-    const OUTPUT_RULE_COUNT: usize = 4;
+    const OUTPUT_RULE_COUNT: usize = 9;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
     enum ElementSet {

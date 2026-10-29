@@ -1244,10 +1244,15 @@ mod shared_program_rollback_acceptance {
                 b"rule:prerouting:2:guest-prefix-drop".to_vec(),
             ],
             output: vec![
-                b"rule:output:0:leg-s-exemption".to_vec(),
-                b"rule:output:1:registered-destination-mark".to_vec(),
-                b"rule:output:2:guest-prefix-tcp-reset".to_vec(),
-                b"rule:output:3:guest-prefix-reject".to_vec(),
+                b"rule:output:0:d26-gateway-udp-accept".to_vec(),
+                b"rule:output:1:d26-gateway-tcp-accept".to_vec(),
+                b"rule:output:2:d26-loopback-reject".to_vec(),
+                b"rule:output:3:d26-link-local-reject".to_vec(),
+                b"rule:output:4:d26-non-unicast-reject".to_vec(),
+                b"rule:output:5:leg-s-exemption".to_vec(),
+                b"rule:output:6:registered-destination-mark".to_vec(),
+                b"rule:output:7:guest-prefix-tcp-reset".to_vec(),
+                b"rule:output:8:guest-prefix-reject".to_vec(),
             ],
         }
     }

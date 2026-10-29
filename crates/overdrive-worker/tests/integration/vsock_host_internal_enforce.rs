@@ -625,7 +625,6 @@ fn assert_udp_rejected(cell: &str, result: &io::Result<OwnedFd>) {
 
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER step 14"]
 async fn a_marked_tcp_connect_to_a_loopback_service_is_refused_econnrefused_without_hang() {
     let evidence = Evidence::begin("F-3-tcp-loopback");
     let _sandbox = EnforceSandbox::provision(evidence);
@@ -649,7 +648,6 @@ async fn a_marked_tcp_connect_to_a_loopback_service_is_refused_econnrefused_with
 
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER step 14"]
 async fn a_marked_tcp_connect_to_a_host_interface_address_is_refused() {
     let evidence = Evidence::begin("local-host-address");
     let sandbox = EnforceSandbox::provision(evidence);
@@ -671,7 +669,6 @@ async fn a_marked_tcp_connect_to_a_host_interface_address_is_refused() {
 
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER step 14"]
 async fn a_marked_udp_first_transmit_to_a_local_service_fails_eperm() {
     let evidence = Evidence::begin("F-3-udp-local");
     let _sandbox = EnforceSandbox::provision(evidence);
@@ -699,7 +696,6 @@ async fn a_marked_udp_first_transmit_to_a_local_service_fails_eperm() {
 
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER step 14"]
 async fn a_marked_udp_socket_reusing_an_unmarked_flows_source_port_is_still_rejected() {
     let evidence = Evidence::begin("F-1-reuse");
     let _sandbox = EnforceSandbox::provision(evidence);
@@ -805,21 +801,18 @@ async fn non_unicast_reaches_no_service(
 
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER step 14"]
 async fn a_marked_udp_transmit_to_a_subnet_directed_broadcast_reaches_no_service() {
     non_unicast_reaches_no_service("F-5-subnet-broadcast", EnforceSandbox::subnet_broadcast).await;
 }
 
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER step 14"]
 async fn a_marked_udp_transmit_to_the_limited_broadcast_reaches_no_service() {
     non_unicast_reaches_no_service("F-5-limited-broadcast", |_| Ipv4Addr::BROADCAST).await;
 }
 
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER step 14"]
 async fn a_marked_udp_transmit_to_the_all_hosts_multicast_group_is_rejected_eperm() {
     let evidence = Evidence::begin("F-5-multicast");
     let _sandbox = EnforceSandbox::provision(evidence);
@@ -846,7 +839,6 @@ async fn a_marked_udp_transmit_to_the_all_hosts_multicast_group_is_rejected_eper
 
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER step 14"]
 async fn a_marked_tcp_connect_to_a_link_local_service_is_refused() {
     let evidence = Evidence::begin("link-local");
     let _sandbox = EnforceSandbox::provision(evidence);
@@ -879,7 +871,6 @@ async fn a_marked_tcp_connect_to_a_link_local_service_is_refused() {
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 14"]
 async fn a_marked_tcp_connect_to_a_neighbour_stays_reachable() {
     let evidence = Evidence::begin("F-5-neighbour");
     let sandbox = EnforceSandbox::provision(evidence);
@@ -909,7 +900,6 @@ async fn a_marked_tcp_connect_to_a_neighbour_stays_reachable() {
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 14"]
 async fn a_marked_udp_transmit_to_an_off_host_address_is_not_rejected() {
     let evidence = Evidence::begin("F-5-off-host");
     let _sandbox = EnforceSandbox::provision(evidence);
@@ -931,7 +921,6 @@ async fn a_marked_udp_transmit_to_an_off_host_address_is_not_rejected() {
 
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER step 14"]
 async fn a_packet_carrying_the_owner_bit_among_other_bits_is_refused() {
     let evidence = Evidence::begin("F-6-masked");
     let _sandbox = EnforceSandbox::provision(evidence);
@@ -953,7 +942,6 @@ async fn a_packet_carrying_the_owner_bit_among_other_bits_is_refused() {
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER step 14"]
 async fn a_packet_carrying_only_the_leg_s_or_tproxy_mark_reaches_a_local_service() {
     let evidence = Evidence::begin("F-6-other-marks");
     let _sandbox = EnforceSandbox::provision(evidence);
@@ -1019,7 +1007,6 @@ impl Storm {
 
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER step 14"]
 async fn a_marked_connect_storm_across_repeated_table_replacements_reaches_no_local_service() {
     const RESTARTS: usize = 12;
     let evidence = Evidence::begin("F-2-replacement");
