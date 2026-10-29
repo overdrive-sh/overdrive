@@ -1,6 +1,6 @@
 //! Runs the existing `overdrive-fwd` integration scenarios, the unchanged
 //! `overdrive-dataplane` native integration cells, and the already-authored
-//! STEP 13-04 and STEP 13-05 real-kernel cells inside disposable `GuestKit`
+//! STEP 13-04, STEP 13-05 and STEP 13-06 real-kernel cells inside disposable `GuestKit`
 //! Cloud Hypervisor guests. Test-support executable only; never shipped by a
 //! production crate.
 //!
@@ -88,6 +88,13 @@ const STEP13_04_NFT_MODULES: &[(&str, &str)] = &[
     ("net/netfilter/nft_reject", "/lib/overdrive-testing/modules/nft_reject.ko"),
     ("net/ipv4/netfilter/nft_reject_ipv4", "/lib/overdrive-testing/modules/nft_reject_ipv4.ko"),
     ("net/netfilter/nft_tproxy", "/lib/overdrive-testing/modules/nft_tproxy.ko"),
+];
+// D26's `fib daddr type` expression adds the IPv4 nft fib evaluator to the
+// existing shared-table closure. Keep it out of the unrelated `mtls-relay`
+// guest: only the cgroup worker manifest selects the STEP 13-06 bodies.
+const STEP13_06_NFT_MODULES: &[(&str, &str)] = &[
+    ("net/netfilter/nft_fib", "/lib/overdrive-testing/modules/nft_fib.ko"),
+    ("net/ipv4/netfilter/nft_fib_ipv4", "/lib/overdrive-testing/modules/nft_fib_ipv4.ko"),
 ];
 const DATAPLANE_NAT_MODULES: &[(&str, &str)] = &[
     ("net/netfilter/nf_conntrack", NF_CONNTRACK_MODULE_GUEST_PATH),
@@ -323,6 +330,42 @@ fi
 echo "STEP13-04 route cleanup readback: unroutable"
 "#;
 
+// STEP 13-06's off-host control names 192.0.2.1 as its destination, so the
+// STEP 13-04 dummy route (whose local source is 192.0.2.1) would turn that
+// destination into a host-local address. Give the same bounded no-NIC route
+// lifecycle a distinct TEST-NET-2 source and prove TEST-NET-1 stays unicast.
+const STEP13_06_ROUTE_SETUP: &str = r#"
+set -eu
+if /usr/bin/ip -4 route get 192.0.2.1 >/dev/null 2>&1; then
+  echo "STEP13-06 route precondition unexpectedly already resolves 192.0.2.1" >&2
+  exit 1
+fi
+test -z "$(/usr/bin/ip -4 route show table local exact 192.0.2.1/32)"
+/usr/bin/ip link add ovd-gk-d26 type dummy
+/usr/bin/ip addr add 198.51.100.1/32 dev ovd-gk-d26
+/usr/bin/ip link set ovd-gk-d26 up
+/usr/bin/ip route add default dev ovd-gk-d26 src 198.51.100.1 metric 42761
+route="$(/usr/bin/ip -4 route get 192.0.2.1)"
+case "$route" in
+  *"dev ovd-gk-d26"*"src 198.51.100.1"*) ;;
+  *) echo "STEP13-06 route precondition mismatch: $route" >&2; exit 1 ;;
+esac
+test -z "$(/usr/bin/ip -4 route show table local exact 192.0.2.1/32)"
+echo "STEP13-06 route precondition readback: $route destination_type=unicast"
+"#;
+
+const STEP13_06_ROUTE_CLEANUP: &str = r#"
+set -eu
+/usr/bin/ip route del default dev ovd-gk-d26 metric 42761
+/usr/bin/ip link del ovd-gk-d26
+if /usr/bin/ip -4 route get 192.0.2.1 >/dev/null 2>&1; then
+  echo "STEP13-06 test-owned route survived cleanup" >&2
+  exit 1
+fi
+test -z "$(/usr/bin/ip -4 route show table local exact 192.0.2.1/32)"
+echo "STEP13-06 route cleanup readback: unroutable destination_not_local=true"
+"#;
+
 // V-LEGB-MARK's appliance-faithful namespace has route_localnet disabled, the
 // gateway as its only unmarked route into the guest prefix, no node default
 // route and no uplink. The existing leg-B bodies install and observe the
@@ -389,7 +432,16 @@ echo "STEP13-05 qualified-node readback: route_localnet=0 gateway='$gateway' no_
 "#;
 
 type Cell = (&'static str, usize, bool);
-type CgroupManifests<'a> = (&'a [Cell], &'a [Cell], &'a [Cell], &'a [Cell], &'a [Cell], &'a [Cell]);
+type CgroupManifests<'a> = (
+    &'a [Cell],
+    &'a [Cell],
+    &'a [Cell],
+    &'a [Cell],
+    &'a [Cell],
+    &'a [Cell],
+    &'a [Cell],
+    &'a [Cell],
+);
 
 /// The 36 active real-kernel dataplane bodies in the approved three-package
 /// inventory. The seven existing inbound guest-relay bodies remain the
@@ -907,6 +959,84 @@ const STEP13_05_WORKER: &[Cell] = &[
     ),
 ];
 
+/// The ten STEP 13-06 D26 cells whose authored topology needs no fixture
+/// default route. Every body boots the production shared table and retains
+/// its original socket, nft-order, reachability and cleanup assertions.
+const STEP13_06_WORKER: &[Cell] = &[
+    (
+        "integration::vsock_host_internal_enforce::a_marked_tcp_connect_to_a_loopback_service_is_refused_econnrefused_without_hang",
+        1,
+        true,
+    ),
+    (
+        "integration::vsock_host_internal_enforce::a_marked_tcp_connect_to_a_host_interface_address_is_refused",
+        1,
+        true,
+    ),
+    (
+        "integration::vsock_host_internal_enforce::a_marked_udp_first_transmit_to_a_local_service_fails_eperm",
+        1,
+        true,
+    ),
+    (
+        "integration::vsock_host_internal_enforce::a_marked_udp_socket_reusing_an_unmarked_flows_source_port_is_still_rejected",
+        1,
+        true,
+    ),
+    (
+        "integration::vsock_host_internal_enforce::a_marked_udp_transmit_to_a_subnet_directed_broadcast_reaches_no_service",
+        1,
+        true,
+    ),
+    (
+        "integration::vsock_host_internal_enforce::a_marked_tcp_connect_to_a_link_local_service_is_refused",
+        1,
+        true,
+    ),
+    (
+        "integration::vsock_host_internal_enforce::a_marked_tcp_connect_to_a_neighbour_stays_reachable",
+        1,
+        true,
+    ),
+    (
+        "integration::vsock_host_internal_enforce::a_packet_carrying_the_owner_bit_among_other_bits_is_refused",
+        1,
+        true,
+    ),
+    (
+        "integration::vsock_host_internal_enforce::a_packet_carrying_only_the_leg_s_or_tproxy_mark_reaches_a_local_service",
+        1,
+        true,
+    ),
+    (
+        "integration::vsock_host_internal_enforce::a_marked_connect_storm_across_repeated_table_replacements_reaches_no_local_service",
+        1,
+        true,
+    ),
+];
+
+/// The authored limited-broadcast, multicast and off-host controls require a
+/// disposable main-table default so their first UDP transmit reaches the
+/// output hook. Reuse the existing bounded dummy-route lifecycle around these
+/// exact bodies only.
+const STEP13_06_ROUTED_WORKER: &[Cell] = &[
+    (
+        "integration::vsock_host_internal_enforce::a_marked_udp_transmit_to_the_limited_broadcast_reaches_no_service",
+        1,
+        true,
+    ),
+    (
+        "integration::vsock_host_internal_enforce::a_marked_udp_transmit_to_the_all_hosts_multicast_group_is_rejected_eperm",
+        1,
+        true,
+    ),
+    (
+        "integration::vsock_host_internal_enforce::a_marked_udp_transmit_to_an_off_host_address_is_not_rejected",
+        1,
+        true,
+    ),
+];
+
 /// Active control-plane integration bodies whose normal-run result was a
 /// root/CAP bailout or a real privileged substrate failure. They extend the
 /// existing control-plane guest after the retained 55+18+5 boundary.
@@ -996,11 +1126,14 @@ const CONTROL_PLANE_NORMAL_NATIVE: &[Cell] = &[
 const CGROUP_DEFAULT_BASELINE_BODIES: usize = 55;
 const STEP13_04_NATIVE_BODIES: usize = 18;
 const STEP13_05_NATIVE_BODIES: usize = 5;
+const STEP13_06_NATIVE_BODIES: usize = 13;
 const CGROUP_DEFAULT_TOTAL_BODIES: usize =
     CGROUP_DEFAULT_BASELINE_BODIES + STEP13_04_NATIVE_BODIES + STEP13_05_NATIVE_BODIES;
 const CONTROL_PLANE_NORMAL_NATIVE_BODIES: usize = 20;
-const CGROUP_DEFAULT_COMPLETE_BODIES: usize =
+const CGROUP_DEFAULT_RETAINED_BODIES: usize =
     CGROUP_DEFAULT_TOTAL_BODIES + CONTROL_PLANE_NORMAL_NATIVE_BODIES;
+const CGROUP_DEFAULT_COMPLETE_BODIES: usize =
+    CGROUP_DEFAULT_RETAINED_BODIES + STEP13_06_NATIVE_BODIES;
 
 struct GuestRun {
     guest: overdrive_testing::guest_kit::ScriptedGuest,
@@ -1706,7 +1839,7 @@ fn run_cgroup_binary(
     name: &str,
     slot: u32,
     support: CgroupRunSupport<'_>,
-) -> Result<(usize, usize, usize, usize), GuestKitError> {
+) -> Result<(usize, usize, usize, usize, usize), GuestKitError> {
     let CgroupRunSupport {
         manifests,
         stage_step13_04_nft,
@@ -1719,8 +1852,11 @@ fn run_cgroup_binary(
         routed_step13_04_cells,
         post_route_step13_04_cells,
         step13_05_cells,
+        step13_06_cells,
+        routed_step13_06_cells,
         normal_gate_native_cells,
     ) = manifests;
+    let stage_step13_06_nft = !step13_06_cells.is_empty() || !routed_step13_06_cells.is_empty();
     let tests = InGuestTests::prepared(package, target)?;
     let staging = default_staging_root();
     let modules = WorkDir::create(&staging, &format!("fwd-suite-{name}-kernel-modules"))?;
@@ -1772,6 +1908,12 @@ fn run_cgroup_binary(
             module_paths.push(guest_path.to_owned());
         }
         module_paths.push(DUMMY_MODULE_GUEST_PATH.to_owned());
+    }
+    if stage_step13_06_nft {
+        for &(relative, guest_path) in STEP13_06_NFT_MODULES {
+            extra.push(host_module_file(kit, modules.path(), relative, Path::new(guest_path))?);
+            module_paths.push(guest_path.to_owned());
+        }
     }
     let mut guest = GuestRun::boot(kit, &tests, name, slot, extra, module_paths)?;
     let guest_modules = guest.module_paths.clone();
@@ -1829,6 +1971,22 @@ fn run_cgroup_binary(
     } else {
         exec_cells(&mut guest, step13_05_cells)?
     };
+    let mut step13_06_passed = exec_required_cgroup_cells(&mut guest, step13_06_cells)?;
+    if !routed_step13_06_cells.is_empty() {
+        guest.command(&["/usr/bin/sh", "-c", STEP13_06_ROUTE_SETUP])?;
+        let routed = exec_required_cgroup_cells(&mut guest, routed_step13_06_cells);
+        let cleanup = guest.command(&["/usr/bin/sh", "-c", STEP13_06_ROUTE_CLEANUP]);
+        match routed {
+            Ok(passed) => {
+                cleanup?;
+                step13_06_passed += passed;
+            }
+            Err(error) => {
+                let _ = cleanup;
+                return Err(error);
+            }
+        }
+    }
     let normal_gate_native_passed = if stage_normal_gate_native {
         guest.command(&["/usr/bin/sh", "-c", CONTROL_PLANE_NORMAL_NATIVE_SETUP])?;
         let native = exec_required_cgroup_cells(&mut guest, normal_gate_native_cells);
@@ -1848,7 +2006,13 @@ fn run_cgroup_binary(
     };
     guest.finish(name)?;
     drop(modules);
-    Ok((baseline_passed, step13_04_passed, step13_05_passed, normal_gate_native_passed))
+    Ok((
+        baseline_passed,
+        step13_04_passed,
+        step13_05_passed,
+        step13_06_passed,
+        normal_gate_native_passed,
+    ))
 }
 
 #[allow(
@@ -1863,7 +2027,7 @@ fn run_cgroup_default(kit: &GuestKit, _fwd_tests: &InGuestTests) -> Result<(), G
         "cgroup-control-plane-acceptance",
         14,
         CgroupRunSupport {
-            manifests: (CGROUP_ACCEPTANCE, &[], &[], &[], &[], &[]),
+            manifests: (CGROUP_ACCEPTANCE, &[], &[], &[], &[], &[], &[], &[]),
             stage_step13_04_nft: false,
             stage_step13_05_legb: false,
             stage_normal_gate_native: false,
@@ -1882,6 +2046,8 @@ fn run_cgroup_default(kit: &GuestKit, _fwd_tests: &InGuestTests) -> Result<(), G
                 &[],
                 &[],
                 STEP13_05_CONTROL_PLANE,
+                &[],
+                &[],
                 CONTROL_PLANE_NORMAL_NATIVE,
             ),
             stage_step13_04_nft: true,
@@ -1902,6 +2068,8 @@ fn run_cgroup_default(kit: &GuestKit, _fwd_tests: &InGuestTests) -> Result<(), G
                 STEP13_04_HOST_LOCAL_FIREWALL,
                 STEP13_04_REMOTE_FIREWALL,
                 STEP13_05_WORKER,
+                STEP13_06_WORKER,
+                STEP13_06_ROUTED_WORKER,
                 &[],
             ),
             stage_step13_04_nft: true,
@@ -1945,7 +2113,7 @@ fn run_cgroup_default(kit: &GuestKit, _fwd_tests: &InGuestTests) -> Result<(), G
             source: std::io::Error::other("the combined cgroup-default manifest changed"),
         });
     }
-    let normal_gate_native_passed = acceptance.3 + control_plane.3 + worker.3;
+    let normal_gate_native_passed = acceptance.4 + control_plane.4 + worker.4;
     if normal_gate_native_passed != CONTROL_PLANE_NORMAL_NATIVE_BODIES {
         return Err(GuestKitError::Staging {
             detail: format!(
@@ -1954,11 +2122,29 @@ fn run_cgroup_default(kit: &GuestKit, _fwd_tests: &InGuestTests) -> Result<(), G
             source: std::io::Error::other("the control-plane normal-gate native manifest changed"),
         });
     }
-    let complete_passed = total_passed + normal_gate_native_passed;
+    let retained_passed = total_passed + normal_gate_native_passed;
+    if retained_passed != CGROUP_DEFAULT_RETAINED_BODIES {
+        return Err(GuestKitError::Staging {
+            detail: format!(
+                "cgroup-default retained {retained_passed} passing bodies through the normal-gate extension, expected exactly {CGROUP_DEFAULT_RETAINED_BODIES}"
+            ),
+            source: std::io::Error::other("the retained cgroup-default manifest changed"),
+        });
+    }
+    let step13_06_passed = acceptance.3 + control_plane.3 + worker.3;
+    if step13_06_passed != STEP13_06_NATIVE_BODIES {
+        return Err(GuestKitError::Staging {
+            detail: format!(
+                "cgroup-default STEP 13-06 extension selected {step13_06_passed} passing bodies, expected exactly {STEP13_06_NATIVE_BODIES}"
+            ),
+            source: std::io::Error::other("the STEP 13-06 native manifest changed"),
+        });
+    }
+    let complete_passed = retained_passed + step13_06_passed;
     if complete_passed != CGROUP_DEFAULT_COMPLETE_BODIES {
         return Err(GuestKitError::Staging {
             detail: format!(
-                "cgroup-default selected {complete_passed} passing bodies after the normal-gate extension, expected exactly {CGROUP_DEFAULT_COMPLETE_BODIES}"
+                "cgroup-default selected {complete_passed} passing bodies after the STEP 13-06 extension, expected exactly {CGROUP_DEFAULT_COMPLETE_BODIES}"
             ),
             source: std::io::Error::other("the complete cgroup-default manifest changed"),
         });
