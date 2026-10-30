@@ -94,12 +94,15 @@ pub struct InGuestLane {
 ///   map bodies discovered by the normal package gate, staged beside the
 ///   integration binary and executed in the same `mtls-relay` guest.
 /// - `overdrive-control-plane`'s `acceptance` and `integration` test binaries,
-///   and `overdrive-worker`'s `integration` test binary: the unchanged 55
+///   `overdrive-cli`'s `integration` test binary, and `overdrive-worker`'s
+///   `integration` test binary: the unchanged 55
 ///   real-cgroup cells plus the 18 already-authored STEP 13-04 and five
 ///   already-authored STEP 13-05 native cells, followed by the 20 existing
 ///   control-plane native bodies discovered by the normal package gate;
 ///   executed by the existing guest-suite runner inside the same three fresh
-///   disposable guests with a private cgroup-v2 mount.
+///   disposable guests with a private cgroup-v2 mount. The two kvm-gated
+///   integration binaries also stage STEP 14-01's already-authored production
+///   serve + deploy cells for nested execution inside that disposable boundary.
 pub const IN_GUEST_LANES: &[InGuestLane] = &[
     InGuestLane {
         package: "overdrive-init",
@@ -135,7 +138,13 @@ pub const IN_GUEST_LANES: &[InGuestLane] = &[
         package: "overdrive-control-plane",
         bin: "integration",
         target: InGuestTarget::Test,
-        features: "integration-tests",
+        features: "integration-tests,kvm-tests",
+    },
+    InGuestLane {
+        package: "overdrive-cli",
+        bin: "integration",
+        target: InGuestTarget::Test,
+        features: "integration-tests,kvm-tests",
     },
     InGuestLane {
         package: "overdrive-worker",

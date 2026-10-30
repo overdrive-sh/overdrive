@@ -167,6 +167,37 @@ impl Node {
         resp.json::<SubmitWorkloadResponse>().await.expect("submit response").workload_id
     }
 
+    /// Submits the long-running VM workload as a Service so production
+    /// replaces a launch that exits. The required TCP listener is admission
+    /// shape only; this fixture observes the guest's outbound `hold` flow and
+    /// therefore declares no probes.
+    async fn deploy_hold_service(&self, id: &str, args: &[String]) -> String {
+        let spec = ServiceSpecInput {
+            id: id.to_owned(),
+            replicas: 1,
+            resources: ResourcesInput { cpu_milli: 500, memory_bytes: LANE_VM_MEMORY_BYTES },
+            driver: DriverInput::Vm(VmInput {
+                command: GUEST_PEER_GUEST_PATH.to_owned(),
+                args: args.to_vec(),
+                kernel: self.kit.kernel_path.display().to_string(),
+                rootfs: self.image.rootfs.display().to_string(),
+            }),
+            listeners: vec![ListenerInput { port: SERVICE_PORT, protocol: "tcp".to_owned() }],
+            startup_probes: Vec::new(),
+            readiness_probes: Vec::new(),
+            liveness_probes: Vec::new(),
+        };
+        let resp = self
+            .client
+            .post(format!("{}/v1/workloads", self.base))
+            .json(&SubmitWorkloadRequest { spec: SubmitSpecInput::Service(spec) })
+            .send()
+            .await
+            .unwrap_or_else(|e| panic!("POST /v1/workloads {id}: {e}"));
+        assert!(resp.status().is_success(), "deploy service {id}: HTTP {}", resp.status());
+        resp.json::<SubmitWorkloadResponse>().await.expect("submit response").workload_id
+    }
+
     /// Submits a VM Service whose guest application is `listen` on
     /// [`SERVICE_PORT`], declaring that listener and a TCP readiness probe
     /// on it every [`PROBE_INTERVAL_SECONDS`], through `POST /v1/workloads`
@@ -400,7 +431,6 @@ fn inventory(obs: &GuestOwnerObservation) -> (u32, u32) {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 14-01"]
 async fn the_forwarder_inventory_counts_every_held_guest_flow_through_serve() {
     const N: u32 = 3;
     let peer = RemotePeer::start("d17-inv", 0).expect("precondition: the remote peer starts");
@@ -457,13 +487,12 @@ async fn the_forwarder_inventory_counts_every_held_guest_flow_through_serve() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 14-01"]
 async fn a_killed_launchs_attachment_leaves_the_owner_and_the_next_launch_is_accepted() {
     let peer = RemotePeer::start("d17-kill", 0).expect("precondition: the remote peer starts");
     let node = Node::boot("d17-kill").await;
     let tag = "d17-kill";
     let id = node
-        .deploy_job(
+        .deploy_hold_service(
             tag,
             &[subcommand::HOLD.to_owned(), peer.tcp_addr().to_string(), tag.to_owned()],
         )
@@ -622,7 +651,6 @@ fn served_connections(alloc: &AllocationId) -> (Vec<TerminalEvent>, Vec<Terminal
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 14-01"]
 async fn the_forwarder_inventory_counts_probe_and_relay_watches_through_serve() {
     let node = Node::boot("d17-dial").await;
     let service = node.deploy_listening_service("d17-dial-svc").await;
@@ -691,7 +719,6 @@ async fn the_forwarder_inventory_counts_probe_and_relay_watches_through_serve() 
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 14-01"]
 async fn a_dropped_probe_stream_is_an_abort_at_the_guest_through_serve() {
     let node = Node::boot("d17-probe").await;
     let service = node.deploy_listening_service("d17-probe-svc").await;
@@ -731,7 +758,6 @@ async fn a_dropped_probe_stream_is_an_abort_at_the_guest_through_serve() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER step 14-01"]
 async fn a_vmm_exit_under_a_held_relay_stream_resets_the_client_through_serve() {
     let node = Node::boot("d17-relay-kill").await;
     let service = node.deploy_listening_service("d17-relay-svc").await;

@@ -1,8 +1,8 @@
 //! Runs the existing `overdrive-fwd` integration scenarios, the unchanged
 //! `overdrive-dataplane` native integration cells, and the already-authored
-//! STEP 13-04, STEP 13-05 and STEP 13-06 real-kernel cells inside disposable `GuestKit`
-//! Cloud Hypervisor guests. Test-support executable only; never shipped by a
-//! production crate.
+//! STEP 13-04, STEP 13-05, STEP 13-06 and STEP 14-01 real-kernel cells inside
+//! disposable `GuestKit` Cloud Hypervisor guests. Test-support executable
+//! only; never shipped by a production crate.
 //!
 //! Prepare and run it on the qualified metal launcher without making the
 //! physical kernel the module under test:
@@ -96,6 +96,15 @@ const STEP13_06_NFT_MODULES: &[(&str, &str)] = &[
     ("net/netfilter/nft_fib", "/lib/overdrive-testing/modules/nft_fib.ko"),
     ("net/ipv4/netfilter/nft_fib_ipv4", "/lib/overdrive-testing/modules/nft_fib_ipv4.ko"),
 ];
+const NESTED_GUEST_KIT_MODULE_SOURCES: &[&str] = &[
+    "drivers/net/dummy",
+    "net/ipv4/inet_diag",
+    "net/ipv4/tcp_diag",
+    "net/ipv4/udp_diag",
+    "net/vmw_vsock/vsock",
+    "net/vmw_vsock/vmw_vsock_virtio_transport_common",
+    "net/vmw_vsock/vmw_vsock_virtio_transport",
+];
 const DATAPLANE_NAT_MODULES: &[(&str, &str)] = &[
     ("net/netfilter/nf_conntrack", NF_CONNTRACK_MODULE_GUEST_PATH),
     ("net/netfilter/nf_nat", NF_NAT_MODULE_GUEST_PATH),
@@ -105,6 +114,8 @@ const DATAPLANE_NAT_MODULES: &[(&str, &str)] = &[
 ];
 const NESTED_REFLINK_IMAGE: &str = "/var/lib/overdrive-testing/reflink.xfs";
 const NESTED_PREBUILT_INIT: &str = "/opt/overdrive-testing/prebuilt-overdrive-init";
+const XFS_MODULE_GUEST_PATH: &str = "/lib/overdrive-testing/modules/xfs.ko";
+const STEP14_01_CELL_BOUND: Duration = Duration::from_secs(600);
 const CGROUP_CONTROLLERS: &str = r#"
 set -eu
 printf '%s\n' '127.0.0.1 localhost' '::1 localhost' > /etc/hosts
@@ -1123,6 +1134,46 @@ const CONTROL_PLANE_NORMAL_NATIVE: &[Cell] = &[
     ),
 ];
 
+/// The five already-authored STEP 14-01 control-plane cells. Each starts the
+/// production `run_server` composition and launches real workload VMs. The
+/// outer test process therefore runs in the existing `cgroup-default`
+/// disposable guest while its workload VMs are nested Cloud Hypervisor guests.
+const STEP14_01_CONTROL_PLANE: &[Cell] = &[
+    (
+        "integration::guest_flow_through_serve::the_forwarder_inventory_counts_every_held_guest_flow_through_serve",
+        1,
+        true,
+    ),
+    (
+        "integration::guest_flow_through_serve::a_killed_launchs_attachment_leaves_the_owner_and_the_next_launch_is_accepted",
+        1,
+        true,
+    ),
+    (
+        "integration::guest_flow_through_serve::the_forwarder_inventory_counts_probe_and_relay_watches_through_serve",
+        1,
+        true,
+    ),
+    (
+        "integration::guest_flow_through_serve::a_dropped_probe_stream_is_an_abort_at_the_guest_through_serve",
+        1,
+        true,
+    ),
+    (
+        "integration::guest_flow_through_serve::a_vmm_exit_under_a_held_relay_stream_resets_the_client_through_serve",
+        1,
+        true,
+    ),
+];
+
+/// The already-authored STEP 14-01 CLI walking skeleton, through the public
+/// deploy handler and the production `serve` composition.
+const STEP14_01_CLI: &[Cell] = &[(
+    "integration::vsock_walking_skeleton::a_vm_workload_round_trips_tcp_and_udp_through_serve_and_deploy",
+    1,
+    true,
+)];
+
 const CGROUP_DEFAULT_BASELINE_BODIES: usize = 55;
 const STEP13_04_NATIVE_BODIES: usize = 18;
 const STEP13_05_NATIVE_BODIES: usize = 5;
@@ -1134,6 +1185,9 @@ const CGROUP_DEFAULT_RETAINED_BODIES: usize =
     CGROUP_DEFAULT_TOTAL_BODIES + CONTROL_PLANE_NORMAL_NATIVE_BODIES;
 const CGROUP_DEFAULT_COMPLETE_BODIES: usize =
     CGROUP_DEFAULT_RETAINED_BODIES + STEP13_06_NATIVE_BODIES;
+const STEP14_01_CONTROL_PLANE_BODIES: usize = 5;
+const STEP14_01_CLI_BODIES: usize = 1;
+const STEP14_01_NATIVE_BODIES: usize = STEP14_01_CONTROL_PLANE_BODIES + STEP14_01_CLI_BODIES;
 
 struct GuestRun {
     guest: overdrive_testing::guest_kit::ScriptedGuest,
@@ -1248,7 +1302,20 @@ impl GuestRun {
         command.extend(self.module_paths.iter().map(String::as_str));
         command.extend(["--", program]);
         command.extend_from_slice(test_args);
-        let code = self.guest.peer().exec(&command, bound)?;
+        let code = match self.guest.peer().exec(&command, bound) {
+            Ok(code) => code,
+            Err(source) => {
+                return Err(GuestKitError::Staging {
+                    detail: format!(
+                        "guest test argv {test_args:?} did not return within {bound:?}"
+                    ),
+                    source: std::io::Error::other(format!(
+                        "{source}; disposable guest console tail:\n{}",
+                        self.guest.vm.console_tail(16 * 1024)
+                    )),
+                });
+            }
+        };
         let console = self.guest.vm.console();
         let run_console = console.get(console_before..).unwrap_or(&console);
         if code != 0 {
@@ -1315,7 +1382,20 @@ impl GuestRun {
             IN_GUEST_TESTS_PATH,
         ]);
         command.extend_from_slice(test_args);
-        let code = self.guest.peer().exec(&command, bound)?;
+        let code = match self.guest.peer().exec(&command, bound) {
+            Ok(code) => code,
+            Err(source) => {
+                return Err(GuestKitError::Staging {
+                    detail: format!(
+                        "cgroup guest test argv {test_args:?} did not return within {bound:?}"
+                    ),
+                    source: std::io::Error::other(format!(
+                        "{source}; disposable guest console tail:\n{}",
+                        self.guest.vm.console_tail(16 * 1024)
+                    )),
+                });
+            }
+        };
         let console = self.guest.vm.console();
         let run_console = console.get(console_before..).unwrap_or(&console);
         if code != 0 {
@@ -1577,6 +1657,156 @@ fn make_reflink_volume(dir: &Path) -> Result<PathBuf, GuestKitError> {
     Ok(image)
 }
 
+fn nested_guest_kit_module_source(
+    kit: &GuestKit,
+    dir: &Path,
+    relative: &str,
+) -> Result<GuestFile, GuestKitError> {
+    let base = format!("/lib/modules/{}/kernel/{relative}.ko", kit.kernel_release);
+    let compressed = PathBuf::from(format!("{base}.zst"));
+    let guest = compressed.clone();
+    let host = if compressed.is_file() {
+        compressed
+    } else {
+        let plain = PathBuf::from(&base);
+        if !plain.is_file() {
+            return Err(GuestKitError::Staging {
+                detail: format!(
+                    "the qualified kernel ships no STEP 14-01 nested GuestKit module source {relative}"
+                ),
+                source: std::io::Error::from(std::io::ErrorKind::NotFound),
+            });
+        }
+        let staged = dir.join(format!("{}.ko.zst", relative.replace('/', "-")));
+        let output = Command::new("zstd")
+            .args(["-f", "-q"])
+            .arg(&plain)
+            .arg("-o")
+            .arg(&staged)
+            .output()
+            .map_err(|source| GuestKitError::Staging {
+                detail: format!("compressing nested GuestKit module source {relative}"),
+                source,
+            })?;
+        if !output.status.success() {
+            return Err(GuestKitError::Staging {
+                detail: format!(
+                    "compressing nested GuestKit module source {relative} exited {:?}",
+                    output.status.code()
+                ),
+                source: std::io::Error::other(String::from_utf8_lossy(&output.stderr).into_owned()),
+            });
+        }
+        staged
+    };
+    Ok(GuestFile { host, guest, with_shared_libraries: false })
+}
+
+/// Stage the exact outer-guest substrate the already-authored STEP 14-01
+/// binaries consume. This is the existing GuestKit-inside-GuestKit shape from
+/// `nested-boundary`, plus the production serve dependencies those binaries
+/// reach: the BPF object, netlink/nft modules, veth, kTLS and the ordinary
+/// host tools. It adds no test hook or alternate production composition.
+fn step14_01_nested_support(
+    kit: &GuestKit,
+    dir: &Path,
+) -> Result<(Vec<GuestFile>, Vec<String>), GuestKitError> {
+    let mut extra: Vec<_> = [
+        "cat",
+        "chmod",
+        "cp",
+        "ethtool",
+        "ip",
+        "ln",
+        "losetup",
+        "mkdir",
+        "mkfs.ext4",
+        "mknod",
+        "mount",
+        "nft",
+        "prlimit",
+        "setpriv",
+        "setsid",
+        "sh",
+        "ss",
+        "stat",
+        "sysctl",
+        "true",
+        "uname",
+        "zstd",
+    ]
+    .into_iter()
+    .map(tool)
+    .collect();
+    let sleep = tool("sleep");
+    extra.push(GuestFile { guest: PathBuf::from("/bin/sleep"), ..sleep });
+    extra.push(tool("systemd-detect-virt"));
+    extra.push(workspace_forwarder_module(kit));
+    extra.push(workspace_bpf_artifact());
+    for relative in NESTED_GUEST_KIT_MODULE_SOURCES {
+        extra.push(nested_guest_kit_module_source(kit, dir, relative)?);
+    }
+
+    let resolver = dir.join("empty-resolv.conf");
+    fs::write(&resolver, []).map_err(|source| GuestKitError::Staging {
+        detail: format!("creating STEP 14-01 guest resolver target at {}", resolver.display()),
+        source,
+    })?;
+    extra.push(GuestFile {
+        host: resolver,
+        guest: PathBuf::from("/etc/resolv.conf"),
+        with_shared_libraries: false,
+    });
+
+    let reflink = make_reflink_volume(dir)?;
+    extra.push(GuestFile {
+        host: reflink,
+        guest: PathBuf::from(NESTED_REFLINK_IMAGE),
+        with_shared_libraries: false,
+    });
+    extra.push(GuestFile {
+        host: kit.init_bin.clone(),
+        guest: PathBuf::from(NESTED_PREBUILT_INIT),
+        with_shared_libraries: false,
+    });
+    extra.push(GuestFile {
+        host: kit.kernel_path.clone(),
+        guest: PathBuf::from(format!("/boot/vmlinuz-{}", kit.kernel_release)),
+        with_shared_libraries: false,
+    });
+    extra.push(GuestFile {
+        host: kit.cloud_hypervisor_bin.clone(),
+        guest: PathBuf::from("/usr/bin/cloud-hypervisor"),
+        with_shared_libraries: true,
+    });
+
+    let mut module_paths = Vec::new();
+    let mut stage_module = |relative: &str, guest_path: &str| -> Result<(), GuestKitError> {
+        extra.push(host_module_file(kit, dir, relative, Path::new(guest_path))?);
+        module_paths.push(guest_path.to_owned());
+        Ok(())
+    };
+    stage_module("fs/xfs/xfs", XFS_MODULE_GUEST_PATH)?;
+    for &(relative, guest_path) in NESTED_DEVICE_MODULES {
+        stage_module(relative, guest_path)?;
+    }
+    for &(relative, guest_path) in &[
+        ("net/netfilter/nfnetlink", NFNETLINK_MODULE_GUEST_PATH),
+        ("net/netfilter/nf_tables", NF_TABLES_MODULE_GUEST_PATH),
+        ("drivers/net/veth", VETH_MODULE_GUEST_PATH),
+        ("net/tls/tls", TLS_MODULE_GUEST_PATH),
+    ] {
+        stage_module(relative, guest_path)?;
+    }
+    for &(relative, guest_path) in STEP13_04_NFT_MODULES {
+        stage_module(relative, guest_path)?;
+    }
+    for &(relative, guest_path) in STEP13_06_NFT_MODULES {
+        stage_module(relative, guest_path)?;
+    }
+    Ok((extra, module_paths))
+}
+
 const fn exact(name: &str) -> [&str; 4] {
     [TEST_THREADS, NO_CAPTURE, "--exact", name]
 }
@@ -1812,19 +2042,86 @@ fn exec_required_cgroup_cells(
     guest: &mut GuestRun,
     cells: &[Cell],
 ) -> Result<usize, GuestKitError> {
+    exec_required_cgroup_cells_with_bound(guest, cells, CELL_BOUND)
+}
+
+fn exec_required_cgroup_cells_with_bound(
+    guest: &mut GuestRun,
+    cells: &[Cell],
+    bound: Duration,
+) -> Result<usize, GuestKitError> {
     let mut passed = 0;
     for &(filter, expected, is_exact) in cells {
         if is_exact {
-            guest.exec_cgroup_required(&exact(filter), expected, CELL_BOUND)?;
+            guest.exec_cgroup_required(&exact(filter), expected, bound)?;
         } else {
-            guest.exec_cgroup_required(
-                &[TEST_THREADS, NO_CAPTURE, filter],
-                expected,
-                CELL_BOUND,
-            )?;
+            guest.exec_cgroup_required(&[TEST_THREADS, NO_CAPTURE, filter], expected, bound)?;
         }
         passed += expected;
     }
+    Ok(passed)
+}
+
+/// Run one STEP 14-01 test binary in a fresh member of the existing
+/// `cgroup-default` disposable-guest group. The production test body launches
+/// the inner workload VMs; this outer guest contains every kernel, cgroup,
+/// netns, nft, BPF and nested-KVM effect.
+fn run_step14_01_binary(
+    kit: &GuestKit,
+    package: &str,
+    target: &str,
+    name: &str,
+    slot: u32,
+    cells: &[Cell],
+) -> Result<usize, GuestKitError> {
+    let tests = InGuestTests::prepared(package, target)?;
+    let staging = default_staging_root();
+    let support = WorkDir::create(&staging, &format!("fwd-suite-{name}-support"))?;
+    let (extra, module_paths) = step14_01_nested_support(kit, support.path())?;
+    let mut guest = GuestRun::boot_with_vcpus(kit, &tests, name, slot, extra, module_paths, 8)?;
+
+    let modules = guest.module_paths.clone();
+    guest.command_with_modules(&modules, "/usr/bin/true", &[])?;
+    guest.command(&["/usr/bin/chmod", "0660", "/dev/kvm", "/dev/vhost-vsock"])?;
+    guest.command(&[
+        "/usr/bin/stat",
+        "-c",
+        "STEP14-01-NESTED-DEVICE %n uid=%u gid=%g mode=%a",
+        "/dev/kvm",
+        "/dev/vhost-vsock",
+    ])?;
+    guest.command(&["/usr/bin/systemd-detect-virt"])?;
+    guest.command(&[
+        "/usr/bin/mkdir",
+        "-p",
+        "/sys/fs/cgroup",
+        "/sys/fs/bpf",
+        "/sys/kernel/security",
+        "/srv/vm",
+    ])?;
+    guest.command(&["/usr/bin/mount", "-t", "cgroup2", "none", "/sys/fs/cgroup"])?;
+    guest.command(&["/usr/bin/mount", "-t", "bpf", "bpf", "/sys/fs/bpf"])?;
+    guest.command(&["/usr/bin/mount", "-t", "securityfs", "securityfs", "/sys/kernel/security"])?;
+    guest.command(&["/usr/bin/cat", "/sys/kernel/security/lsm"])?;
+    guest.command(&["/usr/bin/sh", "-c", CGROUP_CONTROLLERS])?;
+    guest.command(&[
+        "/usr/bin/sh",
+        "-c",
+        "set -eu; mkdir -p /var /run/netns; test ! -e /var/run; test ! -L /var/run; ln -s /run /var/run; test -L /var/run; test \"$(cd /var/run && pwd -P)\" = /run; test -d /var/run/netns",
+    ])?;
+    guest.command(&["/usr/bin/losetup", "/dev/loop0", NESTED_REFLINK_IMAGE])?;
+    guest.command(&["/usr/bin/mount", "-t", "xfs", "/dev/loop0", "/srv/vm"])?;
+    guest.command(&["/usr/bin/cp", GUEST_PEER_GUEST_PATH, "/srv/vm/reflink-probe"])?;
+    guest.command(&[
+        "/usr/bin/cp",
+        "--reflink=always",
+        "/srv/vm/reflink-probe",
+        "/srv/vm/reflink-probe.clone",
+    ])?;
+
+    let passed = exec_required_cgroup_cells_with_bound(&mut guest, cells, STEP14_01_CELL_BOUND)?;
+    guest.finish(name)?;
+    drop(support);
     Ok(passed)
 }
 
@@ -2147,6 +2444,51 @@ fn run_cgroup_default(kit: &GuestKit, _fwd_tests: &InGuestTests) -> Result<(), G
                 "cgroup-default selected {complete_passed} passing bodies after the STEP 13-06 extension, expected exactly {CGROUP_DEFAULT_COMPLETE_BODIES}"
             ),
             source: std::io::Error::other("the complete cgroup-default manifest changed"),
+        });
+    }
+
+    // Slots 14 and 15 belonged to the now-finished baseline guests above.
+    // Reusing them sequentially preserves the registered 16-CID band while
+    // giving each STEP 14-01 binary a fresh disposable outer guest.
+    let step14_01_cli = run_step14_01_binary(
+        kit,
+        "overdrive-cli",
+        "integration",
+        "step14-01-cli",
+        14,
+        STEP14_01_CLI,
+    )?;
+    if step14_01_cli != STEP14_01_CLI_BODIES {
+        return Err(GuestKitError::Staging {
+            detail: format!(
+                "cgroup-default STEP 14-01 CLI extension selected {step14_01_cli} passing bodies, expected exactly {STEP14_01_CLI_BODIES}"
+            ),
+            source: std::io::Error::other("the STEP 14-01 CLI manifest changed"),
+        });
+    }
+    let step14_01_control_plane = run_step14_01_binary(
+        kit,
+        "overdrive-control-plane",
+        "integration",
+        "step14-01-control-plane",
+        15,
+        STEP14_01_CONTROL_PLANE,
+    )?;
+    if step14_01_control_plane != STEP14_01_CONTROL_PLANE_BODIES {
+        return Err(GuestKitError::Staging {
+            detail: format!(
+                "cgroup-default STEP 14-01 control-plane extension selected {step14_01_control_plane} passing bodies, expected exactly {STEP14_01_CONTROL_PLANE_BODIES}"
+            ),
+            source: std::io::Error::other("the STEP 14-01 control-plane manifest changed"),
+        });
+    }
+    let step14_01_passed = step14_01_control_plane + step14_01_cli;
+    if step14_01_passed != STEP14_01_NATIVE_BODIES {
+        return Err(GuestKitError::Staging {
+            detail: format!(
+                "cgroup-default STEP 14-01 extension selected {step14_01_passed} passing bodies, expected exactly {STEP14_01_NATIVE_BODIES}"
+            ),
+            source: std::io::Error::other("the complete STEP 14-01 manifest changed"),
         });
     }
     Ok(())

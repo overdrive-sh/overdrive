@@ -7,6 +7,8 @@
 //!   `/proc`, `/sys` and `/dev`, brings loopback up, loads the vsock transport
 //!   modules and the guest kit's stock socket-diagnostic prerequisites plus
 //!   `ovd_fwd.ko` when the image carries it,
+//!   and execs the embedded production init when the workload image carries
+//!   one (an explicit `overdrive.testinit=` path still takes precedence),
 //!   dials the host on the port the kernel parameter `overdrive.testpeer=`
 //!   names, and executes one [`PeerCommand`] per line. It runs no Overdrive
 //!   owner. When the host closes the control connection it powers the guest
@@ -489,6 +491,7 @@ mod linux {
         use std::net::{TcpListener, TcpStream};
         use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
         use std::os::unix::process::CommandExt as _;
+        use std::path::Path;
         use std::process::Command;
         use std::sync::{Arc, Mutex};
         use std::thread::{self, JoinHandle};
@@ -506,7 +509,7 @@ mod linux {
         };
         use overdrive_testing::guest_kit::{
             DUMMY_MODULE_GUEST_PATH, LOOPBACK_MODULE_GUEST_PATH, NETEM_MODULE_GUEST_PATH,
-            PRIO_MODULE_GUEST_PATH, TEST_INIT_PARAM,
+            OVERDRIVE_INIT_GUEST_PATH, PRIO_MODULE_GUEST_PATH, TEST_INIT_PARAM,
         };
         use overdrive_testing::guest_peer::{
             CONTROL_PORT_PARAM, DrainEnd, PeerCommand, PeerEnd, PeerOutcome, PeerReply, PeerSide,
@@ -665,6 +668,14 @@ mod linux {
                 .find_map(|parameter| parameter.strip_prefix(TEST_INIT_PARAM).map(str::to_owned))
         }
 
+        fn production_init() -> Option<String> {
+            test_init().or_else(|| {
+                Path::new(OVERDRIVE_INIT_GUEST_PATH)
+                    .is_file()
+                    .then(|| OVERDRIVE_INIT_GUEST_PATH.to_owned())
+            })
+        }
+
         const SOCKET_DIAGNOSTIC_MODULES: [&str; 3] = [
             "/lib/overdrive-testing/modules/inet_diag.ko",
             "/lib/overdrive-testing/modules/tcp_diag.ko",
@@ -700,7 +711,7 @@ mod linux {
                     eprintln!("overdrive-guest-peer: loading {path}: {e}");
                 }
             }
-            if let Some(program) = test_init() {
+            if let Some(program) = production_init() {
                 if let Err(e) = super::raise_nofile() {
                     eprintln!(
                         "overdrive-guest-peer: raising production fixture RLIMIT_NOFILE: {e}"

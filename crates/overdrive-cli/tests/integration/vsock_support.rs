@@ -41,8 +41,12 @@
 #![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]
 #![allow(dead_code, reason = "shared by three kvm-gated lane modules")]
 
+use std::collections::BTreeMap;
 use std::net::{SocketAddr, SocketAddrV4};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use overdrive_cli::commands::deploy::{DeployArgs, StopArgs, deploy, stop};
@@ -63,6 +67,67 @@ use super::vm_walking_skeleton::{
 /// console log the VMM writes there).
 const VM_RUN_ROOT: &str = "/run/overdrive/vm";
 
+fn retained_consoles() -> &'static Mutex<BTreeMap<String, Vec<u8>>> {
+    static CONSOLES: OnceLock<Mutex<BTreeMap<String, Vec<u8>>>> = OnceLock::new();
+    CONSOLES.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+/// Test-local read observer for the production console file. The natural-exit
+/// watcher removes the run directory before it emits the `ExitEvent` that
+/// makes the terminal row observable, so a post-terminal path read is
+/// necessarily empty. Retain only bytes that the existing console file
+/// exposed before accepted cleanup; production still owns and removes the
+/// file on its original schedule.
+struct ConsoleCapture {
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl ConsoleCapture {
+    fn start() -> Self {
+        retained_consoles().lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = Arc::clone(&stop);
+        let thread = std::thread::Builder::new()
+            .name("vsock-console-capture".to_owned())
+            .spawn(move || {
+                while !thread_stop.load(Ordering::SeqCst) {
+                    if let Ok(entries) = std::fs::read_dir(VM_RUN_ROOT) {
+                        for entry in entries.flatten() {
+                            let alloc = entry.file_name().to_string_lossy().into_owned();
+                            let Ok(bytes) = std::fs::read(entry.path().join("console.log")) else {
+                                continue;
+                            };
+                            if bytes.is_empty() {
+                                continue;
+                            }
+                            let mut consoles = retained_consoles()
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
+                            let retained = consoles.entry(alloc).or_default();
+                            if bytes.len() >= retained.len() {
+                                *retained = bytes;
+                            }
+                            drop(consoles);
+                        }
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            })
+            .expect("spawn the test-local console capture");
+        Self { stop, thread: Some(thread) }
+    }
+}
+
+impl Drop for ConsoleCapture {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
 /// Guest RAM of every lane VM (the kit's stock kernel boots in it).
 pub(super) const LANE_VM_MEMORY_BYTES: u64 = 128 * 1024 * 1024;
 
@@ -72,6 +137,7 @@ pub(super) struct Lane {
     pub(super) image: GuestImage,
     handle: Option<ServeHandle>,
     pub(super) server_tmp: TempDir,
+    _console_capture: ConsoleCapture,
 }
 
 impl Lane {
@@ -86,7 +152,8 @@ impl Lane {
         let image = kit
             .image(server_tmp.path(), name, &GuestImageSpec::workload())
             .expect("the workload image");
-        Self { kit, image, handle: Some(handle), server_tmp }
+        let console_capture = ConsoleCapture::start();
+        Self { kit, image, handle: Some(handle), server_tmp, _console_capture: console_capture }
     }
 
     /// The operator config the deploy and describe handlers read.
@@ -251,7 +318,18 @@ pub(super) async fn wait_process_gone(pid: u32, bound: Duration) -> bool {
 /// The allocation's guest console so far.
 pub(super) fn console_of(alloc: &AllocationId) -> String {
     let path = VmRunDir::for_alloc(Path::new(VM_RUN_ROOT), alloc).console_log();
-    std::fs::read(path).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default()
+    let live = std::fs::read(path).unwrap_or_default();
+    let bytes = if live.is_empty() {
+        retained_consoles()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&alloc.to_string())
+            .cloned()
+            .unwrap_or_default()
+    } else {
+        live
+    };
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 /// Waits up to `bound` for the allocation's console to satisfy `done`.

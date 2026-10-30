@@ -40,7 +40,6 @@ use super::vsock_support::{Lane, alloc_of, arg, console_of, hypervisor_of};
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 14-01"]
 async fn a_vm_workload_round_trips_tcp_and_udp_through_serve_and_deploy() {
     let _bound = TeardownBound::arm();
     let peer = RemotePeer::start("vsock-ws", 0).expect("precondition: the remote peer starts");

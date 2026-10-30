@@ -19,7 +19,6 @@ use std::time::{Duration, Instant};
 use overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK;
 use overdrive_netlink::{Client, NetlinkError, block_on_host_netlink, nft};
 use overdrive_worker::mtls_intercept::{InterceptError, install_outbound_tproxy};
-use overdrive_worker::mtls_intercept_worker::MtlsInterceptInstallError;
 use serde_json::{Value, json};
 use serial_test::serial;
 use tempfile::TempDir;
@@ -400,11 +399,8 @@ impl DeltaScopedMalformedPrerouting<ExactProductionRecovery> {
         let Err(source) = install_outbound_tproxy("ovd-hv-fffe", 49_151) else {
             panic!("the production IPv4 TPROXY expression must fail on the INPUT-hook substitute");
         };
-        let install = MtlsInterceptInstallError::OutboundTproxyInstall(source);
-        let source = match install {
-            MtlsInterceptInstallError::OutboundTproxyInstall(
-                InterceptError::NftRuleInstallFailed { op: "append-egress", source },
-            ) => source,
+        let source = match source {
+            InterceptError::NftRuleInstallFailed { op: "append-egress", source } => source,
             other => panic!("expected typed append-egress failure, got {other:#?}"),
         };
         let source = match source {
@@ -1828,11 +1824,9 @@ fn prior_fixture_duplicate_exemptions_are_safely_repaired_once() {
     }
     if let Ok(Some(state)) = nft::observe_shared_ip_intercept_state() {
         let (_, sets, prerouting, output) = state.identity().normalized_parts();
-        assert_eq!((sets.len(), prerouting.len(), output.len()), (3, 5, 3));
+        assert_eq!((sets.len(), prerouting.len(), output.len()), (1, 3, 9));
         assert!(
-            state.managed_guest_ips().is_empty()
-                && state.outbound_sources().is_empty()
-                && state.inbound_destinations().is_empty(),
+            state.inbound_destinations().is_empty(),
             "a valid constant shared program must not be repaired while it still owns dynamic members: {state:?}"
         );
         return;

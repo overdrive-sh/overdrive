@@ -671,6 +671,15 @@ impl GuestFlowOwner {
         if let Some(flow) = self.pending_outbound.iter().find_map(|(flow, pending)| {
             (pending.child.id() == socket || pending.vsock.id() == socket).then_some(*flow)
         }) {
+            if self.pending_outbound.get(&flow).is_some_and(|pending| pending.child.id() == socket)
+                && hangup == GuestHangup::ReadHangup
+            {
+                // EVMOD-PAIR: the application may write and half-close I
+                // before V_g reaches Paired.  The intake child remains in
+                // CLOSE_WAIT so the attach-time run carries its queued bytes
+                // and FIN; only a reset/error ends a pending TcpConnect.
+                return Ok(());
+            }
             let Some(pending) = self.pending_outbound.remove(&flow) else {
                 return Err(owner_invariant("pending outbound flow disappeared"));
             };

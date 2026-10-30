@@ -11,8 +11,8 @@
 //!    on the stock `CONFIG_VSOCKETS=m` kernel the Tier-3 fixture
 //!    stages.
 //! 2. Dial the host over the beacon vsock connection
-//!    ([`beacon::VMADDR_CID_HOST`] / [`beacon::BEACON_VSOCK_PORT`]),
-//!    retrying with a bounded backoff — the virtio-vsock PCI probe
+//!    ([`beacon::VMADDR_CID_HOST`] / the token's `beacon=` port), retrying
+//!    with a bounded backoff — the virtio-vsock PCI probe
 //!    completes asynchronously after step 0's module load.
 //! 3. Require and parse the platform `overdrive.transport=` token
 //!    ([`transport::parse_transport_token`], DG-5).
@@ -464,16 +464,27 @@ where
     Setup: FnOnce(&GuestTransportToken) -> Result<Ops, GuestTransportSetupError>,
     Resolver: FnOnce(Ipv4Addr) -> Result<(), InitError>,
 {
+    let token = read_transport_token_with(read_cmdline)?;
+    let ops = setup(&token).map_err(InitError::GuestTransportSetup)?;
+    write_resolver(token.gateway)?;
+    Ok((token, ops))
+}
+
+fn read_transport_token() -> Result<GuestTransportToken, InitError> {
+    read_transport_token_with(|| fs::read("/proc/cmdline"))
+}
+
+fn read_transport_token_with<Read>(read_cmdline: Read) -> Result<GuestTransportToken, InitError>
+where
+    Read: FnOnce() -> std::io::Result<Vec<u8>>,
+{
     let cmdline = read_cmdline()
         .map_err(|source| InitError::GuestNetworkIo { operation: "read /proc/cmdline", source })?;
     let cmdline = std::str::from_utf8(&cmdline).map_err(|source| InitError::GuestNetworkIo {
         operation: "decode /proc/cmdline as UTF-8",
         source: std::io::Error::new(std::io::ErrorKind::InvalidData, source),
     })?;
-    let token = parse_transport_token(cmdline).map_err(InitError::GuestTransportSetup)?;
-    let ops = setup(&token).map_err(InitError::GuestTransportSetup)?;
-    write_resolver(token.gateway)?;
-    Ok((token, ops))
+    parse_transport_token(cmdline).map_err(InitError::GuestTransportSetup)
 }
 
 fn write_resolver(dns: Ipv4Addr) -> Result<(), InitError> {
@@ -561,13 +572,17 @@ const VSOCK_CONNECT_MAX_ATTEMPTS: u32 = 25;
 const VSOCK_CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 /// Opens the guest -> host beacon connection: `AF_VSOCK`, dialing
-/// [`beacon::VMADDR_CID_HOST`] on [`beacon::BEACON_VSOCK_PORT`]
-/// (ADR-0082 §§D2.2/D7), retrying up to [`VSOCK_CONNECT_MAX_ATTEMPTS`]
-/// times with a [`VSOCK_CONNECT_RETRY_DELAY`] pause between attempts
-/// (ADR-0082 §D4 amendment 2026-08-14) — see [`connect_beacon_once`]
-/// for the single-attempt body this loop retries.
+/// [`beacon::VMADDR_CID_HOST`] on the `beacon=` port from the parsed
+/// `overdrive.transport=` token (GUEST-PORTS, ADR-0217), retrying up to
+/// [`VSOCK_CONNECT_MAX_ATTEMPTS`] times with a [`VSOCK_CONNECT_RETRY_DELAY`]
+/// pause between attempts (ADR-0082 §D4 amendment 2026-08-14) — see
+/// [`connect_beacon_once`] for the single-attempt body this loop retries.
 fn connect_beacon() -> Result<File, InitError> {
-    connect_beacon_with(connect_beacon_once, || std::thread::sleep(VSOCK_CONNECT_RETRY_DELAY))
+    let token = read_transport_token()?;
+    connect_beacon_with(
+        || connect_beacon_once(token.ports.beacon),
+        || std::thread::sleep(VSOCK_CONNECT_RETRY_DELAY),
+    )
 }
 
 fn connect_beacon_with<Conn, Attempt, Pause>(
@@ -595,14 +610,14 @@ where
     Err(InitError::Connect(last_err))
 }
 
-/// One `AF_VSOCK` socket-then-connect attempt — the body
+/// One `AF_VSOCK` socket-then-connect attempt on `port` — the body
 /// [`connect_beacon`]'s retry loop repeats. Returns only
 /// [`InitError::Socket`] or [`InitError::Connect`] on failure.
-fn connect_beacon_once() -> Result<File, InitError> {
+fn connect_beacon_once(port: overdrive_core::vm::config::VsockPort) -> Result<File, InitError> {
     let sock = connect_beacon_once_with(
         || socket::socket(AddressFamily::Vsock, SockType::Stream, SockFlag::empty(), None),
         |sock| {
-            let addr = VsockAddr::new(beacon::VMADDR_CID_HOST, beacon::BEACON_VSOCK_PORT.as_u32());
+            let addr = VsockAddr::new(beacon::VMADDR_CID_HOST, port.as_u32());
             socket::connect(sock.as_raw_fd(), &addr)
         },
     )?;
