@@ -43,15 +43,15 @@ State 2: <lease_bugReclaimNeverCompletes_cid_lease_Assign line 1264, col 3 to li
   pendingGen |-> <<"", "">>,
   fin |-> {} ]
 /\ lease_bugReclaimNeverCompletes_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-/\ lease_bugReclaimNeverCompletes_cid_lease_al = << [ st |-> "wait",
-     off |-> -1,
+/\ lease_bugReclaimNeverCompletes_cid_lease_al = << [ st |-> "leased",
+     off |-> 0,
      retry |-> FALSE,
      ex |-> FALSE,
      chg |-> FALSE,
      pred |-> -1,
      pst |-> "none" ],
-   [ st |-> "leased",
-     off |-> 0,
+   [ st |-> "wait",
+     off |-> -1,
      retry |-> FALSE,
      ex |-> FALSE,
      chg |-> FALSE,
@@ -60,7 +60,7 @@ State 2: <lease_bugReclaimNeverCompletes_cid_lease_Assign line 1264, col 3 to li
 /\ lease_bugReclaimNeverCompletes_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugReclaimNeverCompletes_cid_lease_cursor = 1
 /\ lease_bugReclaimNeverCompletes_cid_lease_bootLeft = 1
-/\ lease_bugReclaimNeverCompletes_cid_lease_lease = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugReclaimNeverCompletes_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
 State 3: <lease_bugReclaimNeverCompletes_cid_lease_Launch line 1413, col 3 to line 1507, col 62 of module lease_bugReclaimNeverCompletes>
 /\ lease_bugReclaimNeverCompletes_cid_lease_att = <<0, 0>>
@@ -74,16 +74,16 @@ State 3: <lease_bugReclaimNeverCompletes_cid_lease_Launch line 1413, col 3 to li
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
   fin |-> {} ]
-/\ lease_bugReclaimNeverCompletes_cid_lease_dev = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
-/\ lease_bugReclaimNeverCompletes_cid_lease_al = << [ st |-> "wait",
-     off |-> -1,
+/\ lease_bugReclaimNeverCompletes_cid_lease_dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugReclaimNeverCompletes_cid_lease_al = << [ st |-> "running",
+     off |-> 0,
      retry |-> FALSE,
      ex |-> FALSE,
      chg |-> FALSE,
      pred |-> -1,
      pst |-> "none" ],
-   [ st |-> "running",
-     off |-> 0,
+   [ st |-> "wait",
+     off |-> -1,
      retry |-> FALSE,
      ex |-> FALSE,
      chg |-> FALSE,
@@ -92,9 +92,73 @@ State 3: <lease_bugReclaimNeverCompletes_cid_lease_Launch line 1413, col 3 to li
 /\ lease_bugReclaimNeverCompletes_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugReclaimNeverCompletes_cid_lease_cursor = 1
 /\ lease_bugReclaimNeverCompletes_cid_lease_bootLeft = 1
-/\ lease_bugReclaimNeverCompletes_cid_lease_lease = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugReclaimNeverCompletes_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
-State 4: <lease_bugReclaimNeverCompletes_cid_lease_Crash line 1717, col 3 to line 1789, col 62 of module lease_bugReclaimNeverCompletes>
+State 4: <lease_bugReclaimNeverCompletes_cid_lease_Assign line 1264, col 3 to line 1349, col 62 of module lease_bugReclaimNeverCompletes>
+/\ lease_bugReclaimNeverCompletes_cid_lease_att = <<0, 0>>
+/\ lease_bugReclaimNeverCompletes_cid_lease_reclaimed = TRUE
+/\ lease_bugReclaimNeverCompletes_cid_lease_up = TRUE
+/\ lease_bugReclaimNeverCompletes_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"none", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_bugReclaimNeverCompletes_cid_lease_dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugReclaimNeverCompletes_cid_lease_al = << [ st |-> "running",
+     off |-> 0,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "leased",
+     off |-> 1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugReclaimNeverCompletes_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugReclaimNeverCompletes_cid_lease_cursor = 2
+/\ lease_bugReclaimNeverCompletes_cid_lease_bootLeft = 1
+/\ lease_bugReclaimNeverCompletes_cid_lease_lease = (0 :> 1 @@ 1 :> 2 @@ 2 :> 0)
+
+State 5: <lease_bugReclaimNeverCompletes_cid_lease_Launch line 1413, col 3 to line 1507, col 62 of module lease_bugReclaimNeverCompletes>
+/\ lease_bugReclaimNeverCompletes_cid_lease_att = <<0, 0>>
+/\ lease_bugReclaimNeverCompletes_cid_lease_reclaimed = TRUE
+/\ lease_bugReclaimNeverCompletes_cid_lease_up = TRUE
+/\ lease_bugReclaimNeverCompletes_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"none", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {} ]
+/\ lease_bugReclaimNeverCompletes_cid_lease_dev = (0 :> 1 @@ 1 :> 2 @@ 2 :> 0)
+/\ lease_bugReclaimNeverCompletes_cid_lease_al = << [ st |-> "running",
+     off |-> 0,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "running",
+     off |-> 1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugReclaimNeverCompletes_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugReclaimNeverCompletes_cid_lease_cursor = 2
+/\ lease_bugReclaimNeverCompletes_cid_lease_bootLeft = 1
+/\ lease_bugReclaimNeverCompletes_cid_lease_lease = (0 :> 1 @@ 1 :> 2 @@ 2 :> 0)
+
+State 6: <lease_bugReclaimNeverCompletes_cid_lease_Crash line 1717, col 3 to line 1789, col 62 of module lease_bugReclaimNeverCompletes>
 /\ lease_bugReclaimNeverCompletes_cid_lease_att = <<0, 0>>
 /\ lease_bugReclaimNeverCompletes_cid_lease_reclaimed = FALSE
 /\ lease_bugReclaimNeverCompletes_cid_lease_up = FALSE
@@ -102,11 +166,11 @@ State 4: <lease_bugReclaimNeverCompletes_cid_lease_Crash line 1717, col 3 to lin
   rebooted |-> FALSE,
   reclaimed |-> FALSE,
   stopped |-> {},
-  lastEnd |-> <<"none", "reclaim">>,
+  lastEnd |-> <<"reclaim", "reclaim">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
   fin |-> {} ]
-/\ lease_bugReclaimNeverCompletes_cid_lease_dev = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugReclaimNeverCompletes_cid_lease_dev = (0 :> -2 @@ 1 :> -2 @@ 2 :> 0)
 /\ lease_bugReclaimNeverCompletes_cid_lease_al = << [ st |-> "wait",
      off |-> -1,
      retry |-> FALSE,
@@ -126,7 +190,7 @@ State 4: <lease_bugReclaimNeverCompletes_cid_lease_Crash line 1717, col 3 to lin
 /\ lease_bugReclaimNeverCompletes_cid_lease_bootLeft = 0
 /\ lease_bugReclaimNeverCompletes_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 5: <lease_bugReclaimNeverCompletes_cid_lease_Restart line 1154, col 3 to line 1175, col 62 of module lease_bugReclaimNeverCompletes>
+State 7: <lease_bugReclaimNeverCompletes_cid_lease_Restart line 1154, col 3 to line 1175, col 62 of module lease_bugReclaimNeverCompletes>
 /\ lease_bugReclaimNeverCompletes_cid_lease_att = <<0, 0>>
 /\ lease_bugReclaimNeverCompletes_cid_lease_reclaimed = FALSE
 /\ lease_bugReclaimNeverCompletes_cid_lease_up = TRUE
@@ -134,11 +198,11 @@ State 5: <lease_bugReclaimNeverCompletes_cid_lease_Restart line 1154, col 3 to l
   rebooted |-> FALSE,
   reclaimed |-> FALSE,
   stopped |-> {},
-  lastEnd |-> <<"none", "reclaim">>,
+  lastEnd |-> <<"reclaim", "reclaim">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
   fin |-> {} ]
-/\ lease_bugReclaimNeverCompletes_cid_lease_dev = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugReclaimNeverCompletes_cid_lease_dev = (0 :> -2 @@ 1 :> -2 @@ 2 :> 0)
 /\ lease_bugReclaimNeverCompletes_cid_lease_al = << [ st |-> "wait",
      off |-> -1,
      retry |-> FALSE,
@@ -158,7 +222,7 @@ State 5: <lease_bugReclaimNeverCompletes_cid_lease_Restart line 1154, col 3 to l
 /\ lease_bugReclaimNeverCompletes_cid_lease_bootLeft = 0
 /\ lease_bugReclaimNeverCompletes_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 6: <lease_bugReclaimNeverCompletes_cid_lease_Reclaim line 1181, col 3 to line 1219, col 53 of module lease_bugReclaimNeverCompletes>
+State 8: <lease_bugReclaimNeverCompletes_cid_lease_Reclaim line 1181, col 3 to line 1219, col 53 of module lease_bugReclaimNeverCompletes>
 /\ lease_bugReclaimNeverCompletes_cid_lease_att = <<0, 0>>
 /\ lease_bugReclaimNeverCompletes_cid_lease_reclaimed = FALSE
 /\ lease_bugReclaimNeverCompletes_cid_lease_up = TRUE
@@ -166,7 +230,7 @@ State 6: <lease_bugReclaimNeverCompletes_cid_lease_Reclaim line 1181, col 3 to l
   rebooted |-> FALSE,
   reclaimed |-> TRUE,
   stopped |-> {},
-  lastEnd |-> <<"none", "reclaim">>,
+  lastEnd |-> <<"reclaim", "reclaim">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
   fin |-> {} ]
@@ -190,4 +254,4 @@ State 6: <lease_bugReclaimNeverCompletes_cid_lease_Reclaim line 1181, col 3 to l
 /\ lease_bugReclaimNeverCompletes_cid_lease_bootLeft = 0
 /\ lease_bugReclaimNeverCompletes_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 7: Stuttering
+State 9: Stuttering

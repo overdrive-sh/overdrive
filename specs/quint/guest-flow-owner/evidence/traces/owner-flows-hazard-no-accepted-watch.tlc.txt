@@ -116,7 +116,7 @@ State 4: <flows_bugNoAcceptedWatch_owner_flows_step line 3854, col 9 to line 385
 /\ flows_bugNoAcceptedWatch_owner_flows_quiesced = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_abortDiscarded = {}
 /\ flows_bugNoAcceptedWatch_owner_flows_bHeldByOther = FALSE
-/\ flows_bugNoAcceptedWatch_owner_flows_gSess = 0
+/\ flows_bugNoAcceptedWatch_owner_flows_gSess = 2
 /\ flows_bugNoAcceptedWatch_owner_flows_crossMsg = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_heldByOther = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
@@ -131,7 +131,7 @@ State 4: <flows_bugNoAcceptedWatch_owner_flows_step line 3854, col 9 to line 385
   tout |-> {},
   earlyDl |-> FALSE,
   lateReply |-> FALSE ]
-/\ flows_bugNoAcceptedWatch_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugNoAcceptedWatch_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 1]>>
 /\ flows_bugNoAcceptedWatch_owner_flows_phantom = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_toHostRefused = {}
 /\ flows_bugNoAcceptedWatch_owner_flows_claim = 0
@@ -141,7 +141,7 @@ State 4: <flows_bugNoAcceptedWatch_owner_flows_step line 3854, col 9 to line 385
 /\ flows_bugNoAcceptedWatch_owner_flows_gen = 1
 /\ flows_bugNoAcceptedWatch_owner_flows_vmUp = TRUE
 /\ flows_bugNoAcceptedWatch_owner_flows_toHostPaired = {}
-/\ flows_bugNoAcceptedWatch_owner_flows_flows = <<[st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE]>>
+/\ flows_bugNoAcceptedWatch_owner_flows_flows = <<[st |-> "none", gen |-> 0, req |-> 0, inFlight |-> FALSE]>>
 /\ flows_bugNoAcceptedWatch_owner_flows_readyCross = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_drvLive = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_vmGen = 1
@@ -153,7 +153,7 @@ State 5: <flows_bugNoAcceptedWatch_owner_flows_step line 3854, col 9 to line 385
 /\ flows_bugNoAcceptedWatch_owner_flows_quiesced = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_abortDiscarded = {}
 /\ flows_bugNoAcceptedWatch_owner_flows_bHeldByOther = FALSE
-/\ flows_bugNoAcceptedWatch_owner_flows_gSess = 1
+/\ flows_bugNoAcceptedWatch_owner_flows_gSess = 2
 /\ flows_bugNoAcceptedWatch_owner_flows_crossMsg = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_heldByOther = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
@@ -168,7 +168,7 @@ State 5: <flows_bugNoAcceptedWatch_owner_flows_step line 3854, col 9 to line 385
   tout |-> {},
   earlyDl |-> FALSE,
   lateReply |-> FALSE ]
-/\ flows_bugNoAcceptedWatch_owner_flows_sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+/\ flows_bugNoAcceptedWatch_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 1]>>
 /\ flows_bugNoAcceptedWatch_owner_flows_phantom = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_toHostRefused = {}
 /\ flows_bugNoAcceptedWatch_owner_flows_claim = 0
@@ -190,7 +190,44 @@ State 6: <flows_bugNoAcceptedWatch_owner_flows_step line 3854, col 9 to line 385
 /\ flows_bugNoAcceptedWatch_owner_flows_quiesced = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_abortDiscarded = {}
 /\ flows_bugNoAcceptedWatch_owner_flows_bHeldByOther = FALSE
-/\ flows_bugNoAcceptedWatch_owner_flows_gSess = 1
+/\ flows_bugNoAcceptedWatch_owner_flows_gSess = 2
+/\ flows_bugNoAcceptedWatch_owner_flows_crossMsg = FALSE
+/\ flows_bugNoAcceptedWatch_owner_flows_heldByOther = FALSE
+/\ flows_bugNoAcceptedWatch_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugNoAcceptedWatch_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
+/\ flows_bugNoAcceptedWatch_owner_flows_bq = <<>>
+/\ flows_bugNoAcceptedWatch_owner_flows_resurrected = FALSE
+/\ flows_bugNoAcceptedWatch_owner_flows_badAct = FALSE
+/\ flows_bugNoAcceptedWatch_owner_flows_alloc = "Provisioned"
+/\ flows_bugNoAcceptedWatch_owner_flows_badPaired = FALSE
+/\ flows_bugNoAcceptedWatch_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
+/\ flows_bugNoAcceptedWatch_owner_flows_sess = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 1]>>
+/\ flows_bugNoAcceptedWatch_owner_flows_phantom = FALSE
+/\ flows_bugNoAcceptedWatch_owner_flows_toHostRefused = {}
+/\ flows_bugNoAcceptedWatch_owner_flows_claim = 0
+/\ flows_bugNoAcceptedWatch_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_bugNoAcceptedWatch_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_bugNoAcceptedWatch_owner_flows_bclaim = 0
+/\ flows_bugNoAcceptedWatch_owner_flows_gen = 1
+/\ flows_bugNoAcceptedWatch_owner_flows_vmUp = TRUE
+/\ flows_bugNoAcceptedWatch_owner_flows_toHostPaired = {}
+/\ flows_bugNoAcceptedWatch_owner_flows_flows = <<[st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE]>>
+/\ flows_bugNoAcceptedWatch_owner_flows_readyCross = FALSE
+/\ flows_bugNoAcceptedWatch_owner_flows_drvLive = FALSE
+/\ flows_bugNoAcceptedWatch_owner_flows_vmGen = 1
+
+State 7: <flows_bugNoAcceptedWatch_owner_flows_step line 3854, col 9 to line 3856, col 54 of module flows_bugNoAcceptedWatch>
+/\ flows_bugNoAcceptedWatch_owner_flows_act = "none"
+/\ flows_bugNoAcceptedWatch_owner_flows_toHostAbort = {}
+/\ flows_bugNoAcceptedWatch_owner_flows_toGuestAbort = {}
+/\ flows_bugNoAcceptedWatch_owner_flows_quiesced = FALSE
+/\ flows_bugNoAcceptedWatch_owner_flows_abortDiscarded = {}
+/\ flows_bugNoAcceptedWatch_owner_flows_bHeldByOther = FALSE
+/\ flows_bugNoAcceptedWatch_owner_flows_gSess = 2
 /\ flows_bugNoAcceptedWatch_owner_flows_crossMsg = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_heldByOther = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
@@ -215,44 +252,7 @@ State 6: <flows_bugNoAcceptedWatch_owner_flows_step line 3854, col 9 to line 385
 /\ flows_bugNoAcceptedWatch_owner_flows_gen = 1
 /\ flows_bugNoAcceptedWatch_owner_flows_vmUp = TRUE
 /\ flows_bugNoAcceptedWatch_owner_flows_toHostPaired = {}
-/\ flows_bugNoAcceptedWatch_owner_flows_flows = <<[st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE]>>
-/\ flows_bugNoAcceptedWatch_owner_flows_readyCross = FALSE
-/\ flows_bugNoAcceptedWatch_owner_flows_drvLive = FALSE
-/\ flows_bugNoAcceptedWatch_owner_flows_vmGen = 1
-
-State 7: <flows_bugNoAcceptedWatch_owner_flows_step line 3854, col 9 to line 3856, col 54 of module flows_bugNoAcceptedWatch>
-/\ flows_bugNoAcceptedWatch_owner_flows_act = "none"
-/\ flows_bugNoAcceptedWatch_owner_flows_toHostAbort = {}
-/\ flows_bugNoAcceptedWatch_owner_flows_toGuestAbort = {}
-/\ flows_bugNoAcceptedWatch_owner_flows_quiesced = FALSE
-/\ flows_bugNoAcceptedWatch_owner_flows_abortDiscarded = {}
-/\ flows_bugNoAcceptedWatch_owner_flows_bHeldByOther = FALSE
-/\ flows_bugNoAcceptedWatch_owner_flows_gSess = 1
-/\ flows_bugNoAcceptedWatch_owner_flows_crossMsg = FALSE
-/\ flows_bugNoAcceptedWatch_owner_flows_heldByOther = FALSE
-/\ flows_bugNoAcceptedWatch_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
-/\ flows_bugNoAcceptedWatch_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
-/\ flows_bugNoAcceptedWatch_owner_flows_bq = <<>>
-/\ flows_bugNoAcceptedWatch_owner_flows_resurrected = FALSE
-/\ flows_bugNoAcceptedWatch_owner_flows_badAct = FALSE
-/\ flows_bugNoAcceptedWatch_owner_flows_alloc = "Provisioned"
-/\ flows_bugNoAcceptedWatch_owner_flows_badPaired = FALSE
-/\ flows_bugNoAcceptedWatch_owner_flows_dl = [ res |-> <<"none">>,
-  adm |-> {},
-  tout |-> {},
-  earlyDl |-> FALSE,
-  lateReply |-> FALSE ]
-/\ flows_bugNoAcceptedWatch_owner_flows_sess = <<[st |-> "pending", gen |-> 1], [st |-> "reading", gen |-> 1]>>
-/\ flows_bugNoAcceptedWatch_owner_flows_phantom = FALSE
-/\ flows_bugNoAcceptedWatch_owner_flows_toHostRefused = {}
-/\ flows_bugNoAcceptedWatch_owner_flows_claim = 0
-/\ flows_bugNoAcceptedWatch_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
-/\ flows_bugNoAcceptedWatch_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
-/\ flows_bugNoAcceptedWatch_owner_flows_bclaim = 0
-/\ flows_bugNoAcceptedWatch_owner_flows_gen = 1
-/\ flows_bugNoAcceptedWatch_owner_flows_vmUp = TRUE
-/\ flows_bugNoAcceptedWatch_owner_flows_toHostPaired = {}
-/\ flows_bugNoAcceptedWatch_owner_flows_flows = <<[st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE]>>
+/\ flows_bugNoAcceptedWatch_owner_flows_flows = <<[st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE]>>
 /\ flows_bugNoAcceptedWatch_owner_flows_readyCross = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_drvLive = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_vmGen = 1
@@ -264,7 +264,7 @@ State 8: <flows_bugNoAcceptedWatch_owner_flows_step line 3854, col 9 to line 385
 /\ flows_bugNoAcceptedWatch_owner_flows_quiesced = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_abortDiscarded = {}
 /\ flows_bugNoAcceptedWatch_owner_flows_bHeldByOther = FALSE
-/\ flows_bugNoAcceptedWatch_owner_flows_gSess = 1
+/\ flows_bugNoAcceptedWatch_owner_flows_gSess = 2
 /\ flows_bugNoAcceptedWatch_owner_flows_crossMsg = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_heldByOther = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
@@ -279,29 +279,66 @@ State 8: <flows_bugNoAcceptedWatch_owner_flows_step line 3854, col 9 to line 385
   tout |-> {},
   earlyDl |-> FALSE,
   lateReply |-> FALSE ]
-/\ flows_bugNoAcceptedWatch_owner_flows_sess = <<[st |-> "pending", gen |-> 1], [st |-> "live", gen |-> 1]>>
+/\ flows_bugNoAcceptedWatch_owner_flows_sess = <<[st |-> "reading", gen |-> 1], [st |-> "pending", gen |-> 1]>>
 /\ flows_bugNoAcceptedWatch_owner_flows_phantom = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_toHostRefused = {}
-/\ flows_bugNoAcceptedWatch_owner_flows_claim = 2
+/\ flows_bugNoAcceptedWatch_owner_flows_claim = 0
 /\ flows_bugNoAcceptedWatch_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_bugNoAcceptedWatch_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugNoAcceptedWatch_owner_flows_bclaim = 0
 /\ flows_bugNoAcceptedWatch_owner_flows_gen = 1
 /\ flows_bugNoAcceptedWatch_owner_flows_vmUp = TRUE
 /\ flows_bugNoAcceptedWatch_owner_flows_toHostPaired = {}
-/\ flows_bugNoAcceptedWatch_owner_flows_flows = <<[st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE]>>
+/\ flows_bugNoAcceptedWatch_owner_flows_flows = <<[st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE]>>
 /\ flows_bugNoAcceptedWatch_owner_flows_readyCross = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_drvLive = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_vmGen = 1
 
-State 9: <flows_bugNoAcceptedWatch_owner_flows_Activate line 1860, col 3 to line 1891, col 49 of module flows_bugNoAcceptedWatch>
+State 9: <flows_bugNoAcceptedWatch_owner_flows_step line 3854, col 9 to line 3856, col 54 of module flows_bugNoAcceptedWatch>
+/\ flows_bugNoAcceptedWatch_owner_flows_act = "none"
+/\ flows_bugNoAcceptedWatch_owner_flows_toHostAbort = {}
+/\ flows_bugNoAcceptedWatch_owner_flows_toGuestAbort = {}
+/\ flows_bugNoAcceptedWatch_owner_flows_quiesced = FALSE
+/\ flows_bugNoAcceptedWatch_owner_flows_abortDiscarded = {}
+/\ flows_bugNoAcceptedWatch_owner_flows_bHeldByOther = FALSE
+/\ flows_bugNoAcceptedWatch_owner_flows_gSess = 2
+/\ flows_bugNoAcceptedWatch_owner_flows_crossMsg = FALSE
+/\ flows_bugNoAcceptedWatch_owner_flows_heldByOther = FALSE
+/\ flows_bugNoAcceptedWatch_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
+/\ flows_bugNoAcceptedWatch_owner_flows_conf_step = [InitWith |-> [o |-> "g"]]
+/\ flows_bugNoAcceptedWatch_owner_flows_bq = <<>>
+/\ flows_bugNoAcceptedWatch_owner_flows_resurrected = FALSE
+/\ flows_bugNoAcceptedWatch_owner_flows_badAct = FALSE
+/\ flows_bugNoAcceptedWatch_owner_flows_alloc = "Provisioned"
+/\ flows_bugNoAcceptedWatch_owner_flows_badPaired = FALSE
+/\ flows_bugNoAcceptedWatch_owner_flows_dl = [ res |-> <<"none">>,
+  adm |-> {},
+  tout |-> {},
+  earlyDl |-> FALSE,
+  lateReply |-> FALSE ]
+/\ flows_bugNoAcceptedWatch_owner_flows_sess = <<[st |-> "live", gen |-> 1], [st |-> "pending", gen |-> 1]>>
+/\ flows_bugNoAcceptedWatch_owner_flows_phantom = FALSE
+/\ flows_bugNoAcceptedWatch_owner_flows_toHostRefused = {}
+/\ flows_bugNoAcceptedWatch_owner_flows_claim = 1
+/\ flows_bugNoAcceptedWatch_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
+/\ flows_bugNoAcceptedWatch_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
+/\ flows_bugNoAcceptedWatch_owner_flows_bclaim = 0
+/\ flows_bugNoAcceptedWatch_owner_flows_gen = 1
+/\ flows_bugNoAcceptedWatch_owner_flows_vmUp = TRUE
+/\ flows_bugNoAcceptedWatch_owner_flows_toHostPaired = {}
+/\ flows_bugNoAcceptedWatch_owner_flows_flows = <<[st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE]>>
+/\ flows_bugNoAcceptedWatch_owner_flows_readyCross = FALSE
+/\ flows_bugNoAcceptedWatch_owner_flows_drvLive = FALSE
+/\ flows_bugNoAcceptedWatch_owner_flows_vmGen = 1
+
+State 10: <flows_bugNoAcceptedWatch_owner_flows_Activate line 1860, col 3 to line 1891, col 49 of module flows_bugNoAcceptedWatch>
 /\ flows_bugNoAcceptedWatch_owner_flows_act = "Activated"
 /\ flows_bugNoAcceptedWatch_owner_flows_toHostAbort = {}
 /\ flows_bugNoAcceptedWatch_owner_flows_toGuestAbort = {}
 /\ flows_bugNoAcceptedWatch_owner_flows_quiesced = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_abortDiscarded = {}
 /\ flows_bugNoAcceptedWatch_owner_flows_bHeldByOther = FALSE
-/\ flows_bugNoAcceptedWatch_owner_flows_gSess = 1
+/\ flows_bugNoAcceptedWatch_owner_flows_gSess = 2
 /\ flows_bugNoAcceptedWatch_owner_flows_crossMsg = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_heldByOther = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
@@ -316,29 +353,29 @@ State 9: <flows_bugNoAcceptedWatch_owner_flows_Activate line 1860, col 3 to line
   tout |-> {},
   earlyDl |-> FALSE,
   lateReply |-> FALSE ]
-/\ flows_bugNoAcceptedWatch_owner_flows_sess = <<[st |-> "pending", gen |-> 1], [st |-> "live", gen |-> 1]>>
+/\ flows_bugNoAcceptedWatch_owner_flows_sess = <<[st |-> "live", gen |-> 1], [st |-> "pending", gen |-> 1]>>
 /\ flows_bugNoAcceptedWatch_owner_flows_phantom = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_toHostRefused = {}
-/\ flows_bugNoAcceptedWatch_owner_flows_claim = 2
+/\ flows_bugNoAcceptedWatch_owner_flows_claim = 1
 /\ flows_bugNoAcceptedWatch_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_bugNoAcceptedWatch_owner_flows_hf = <<[st |-> "none", gen |-> 0]>>
 /\ flows_bugNoAcceptedWatch_owner_flows_bclaim = 0
 /\ flows_bugNoAcceptedWatch_owner_flows_gen = 1
 /\ flows_bugNoAcceptedWatch_owner_flows_vmUp = TRUE
 /\ flows_bugNoAcceptedWatch_owner_flows_toHostPaired = {}
-/\ flows_bugNoAcceptedWatch_owner_flows_flows = <<[st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE]>>
+/\ flows_bugNoAcceptedWatch_owner_flows_flows = <<[st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE]>>
 /\ flows_bugNoAcceptedWatch_owner_flows_readyCross = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_drvLive = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_vmGen = 1
 
-State 10: <flows_bugNoAcceptedWatch_owner_flows_step line 3854, col 9 to line 3856, col 54 of module flows_bugNoAcceptedWatch>
+State 11: <flows_bugNoAcceptedWatch_owner_flows_step line 3854, col 9 to line 3856, col 54 of module flows_bugNoAcceptedWatch>
 /\ flows_bugNoAcceptedWatch_owner_flows_act = "none"
 /\ flows_bugNoAcceptedWatch_owner_flows_toHostAbort = {}
 /\ flows_bugNoAcceptedWatch_owner_flows_toGuestAbort = {}
 /\ flows_bugNoAcceptedWatch_owner_flows_quiesced = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_abortDiscarded = {}
 /\ flows_bugNoAcceptedWatch_owner_flows_bHeldByOther = FALSE
-/\ flows_bugNoAcceptedWatch_owner_flows_gSess = 1
+/\ flows_bugNoAcceptedWatch_owner_flows_gSess = 2
 /\ flows_bugNoAcceptedWatch_owner_flows_crossMsg = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_heldByOther = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
@@ -353,29 +390,29 @@ State 10: <flows_bugNoAcceptedWatch_owner_flows_step line 3854, col 9 to line 38
   tout |-> {},
   earlyDl |-> FALSE,
   lateReply |-> FALSE ]
-/\ flows_bugNoAcceptedWatch_owner_flows_sess = <<[st |-> "pending", gen |-> 1], [st |-> "live", gen |-> 1]>>
+/\ flows_bugNoAcceptedWatch_owner_flows_sess = <<[st |-> "live", gen |-> 1], [st |-> "pending", gen |-> 1]>>
 /\ flows_bugNoAcceptedWatch_owner_flows_phantom = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_toHostRefused = {}
-/\ flows_bugNoAcceptedWatch_owner_flows_claim = 2
+/\ flows_bugNoAcceptedWatch_owner_flows_claim = 1
 /\ flows_bugNoAcceptedWatch_owner_flows_gf = <<[st |-> "none", gen |-> 0, c |-> 0]>>
 /\ flows_bugNoAcceptedWatch_owner_flows_hf = <<[st |-> "req", gen |-> 1]>>
 /\ flows_bugNoAcceptedWatch_owner_flows_bclaim = 0
 /\ flows_bugNoAcceptedWatch_owner_flows_gen = 1
 /\ flows_bugNoAcceptedWatch_owner_flows_vmUp = TRUE
 /\ flows_bugNoAcceptedWatch_owner_flows_toHostPaired = {}
-/\ flows_bugNoAcceptedWatch_owner_flows_flows = <<[st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE]>>
+/\ flows_bugNoAcceptedWatch_owner_flows_flows = <<[st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE]>>
 /\ flows_bugNoAcceptedWatch_owner_flows_readyCross = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_drvLive = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_vmGen = 1
 
-State 11: <flows_bugNoAcceptedWatch_owner_flows_step line 3854, col 9 to line 3856, col 54 of module flows_bugNoAcceptedWatch>
+State 12: <flows_bugNoAcceptedWatch_owner_flows_Teardown line 1294, col 3 to line 1352, col 49 of module flows_bugNoAcceptedWatch>
 /\ flows_bugNoAcceptedWatch_owner_flows_act = "none"
 /\ flows_bugNoAcceptedWatch_owner_flows_toHostAbort = {}
 /\ flows_bugNoAcceptedWatch_owner_flows_toGuestAbort = {}
 /\ flows_bugNoAcceptedWatch_owner_flows_quiesced = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_abortDiscarded = {}
 /\ flows_bugNoAcceptedWatch_owner_flows_bHeldByOther = FALSE
-/\ flows_bugNoAcceptedWatch_owner_flows_gSess = 1
+/\ flows_bugNoAcceptedWatch_owner_flows_gSess = 2
 /\ flows_bugNoAcceptedWatch_owner_flows_crossMsg = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_heldByOther = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
@@ -383,14 +420,14 @@ State 11: <flows_bugNoAcceptedWatch_owner_flows_step line 3854, col 9 to line 38
 /\ flows_bugNoAcceptedWatch_owner_flows_bq = <<>>
 /\ flows_bugNoAcceptedWatch_owner_flows_resurrected = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_badAct = FALSE
-/\ flows_bugNoAcceptedWatch_owner_flows_alloc = "Active"
+/\ flows_bugNoAcceptedWatch_owner_flows_alloc = "Retiring"
 /\ flows_bugNoAcceptedWatch_owner_flows_badPaired = FALSE
-/\ flows_bugNoAcceptedWatch_owner_flows_dl = [ res |-> <<"NoSession">>,
+/\ flows_bugNoAcceptedWatch_owner_flows_dl = [ res |-> <<"NotServing">>,
   adm |-> {},
   tout |-> {},
   earlyDl |-> FALSE,
   lateReply |-> FALSE ]
-/\ flows_bugNoAcceptedWatch_owner_flows_sess = <<[st |-> "pending", gen |-> 1], [st |-> "closed", gen |-> 1]>>
+/\ flows_bugNoAcceptedWatch_owner_flows_sess = <<[st |-> "closed", gen |-> 1], [st |-> "pending", gen |-> 1]>>
 /\ flows_bugNoAcceptedWatch_owner_flows_phantom = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_toHostRefused = {}
 /\ flows_bugNoAcceptedWatch_owner_flows_claim = 0
@@ -400,19 +437,19 @@ State 11: <flows_bugNoAcceptedWatch_owner_flows_step line 3854, col 9 to line 38
 /\ flows_bugNoAcceptedWatch_owner_flows_gen = 1
 /\ flows_bugNoAcceptedWatch_owner_flows_vmUp = TRUE
 /\ flows_bugNoAcceptedWatch_owner_flows_toHostPaired = {}
-/\ flows_bugNoAcceptedWatch_owner_flows_flows = <<[st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE]>>
+/\ flows_bugNoAcceptedWatch_owner_flows_flows = <<[st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE]>>
 /\ flows_bugNoAcceptedWatch_owner_flows_readyCross = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_drvLive = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_vmGen = 1
 
-State 12: <flows_bugNoAcceptedWatch_owner_flows_step line 3854, col 9 to line 3856, col 54 of module flows_bugNoAcceptedWatch>
+State 13: <flows_bugNoAcceptedWatch_owner_flows_step line 3854, col 9 to line 3856, col 54 of module flows_bugNoAcceptedWatch>
 /\ flows_bugNoAcceptedWatch_owner_flows_act = "none"
 /\ flows_bugNoAcceptedWatch_owner_flows_toHostAbort = {}
 /\ flows_bugNoAcceptedWatch_owner_flows_toGuestAbort = {}
 /\ flows_bugNoAcceptedWatch_owner_flows_quiesced = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_abortDiscarded = {}
 /\ flows_bugNoAcceptedWatch_owner_flows_bHeldByOther = FALSE
-/\ flows_bugNoAcceptedWatch_owner_flows_gSess = 1
+/\ flows_bugNoAcceptedWatch_owner_flows_gSess = 2
 /\ flows_bugNoAcceptedWatch_owner_flows_crossMsg = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_heldByOther = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_bcn = <<[st |-> "none", gen |-> 0], [st |-> "none", gen |-> 0]>>
@@ -420,14 +457,14 @@ State 12: <flows_bugNoAcceptedWatch_owner_flows_step line 3854, col 9 to line 38
 /\ flows_bugNoAcceptedWatch_owner_flows_bq = <<>>
 /\ flows_bugNoAcceptedWatch_owner_flows_resurrected = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_badAct = FALSE
-/\ flows_bugNoAcceptedWatch_owner_flows_alloc = "Active"
+/\ flows_bugNoAcceptedWatch_owner_flows_alloc = "Retiring"
 /\ flows_bugNoAcceptedWatch_owner_flows_badPaired = FALSE
-/\ flows_bugNoAcceptedWatch_owner_flows_dl = [ res |-> <<"NoSession">>,
+/\ flows_bugNoAcceptedWatch_owner_flows_dl = [ res |-> <<"NotServing">>,
   adm |-> {},
   tout |-> {},
   earlyDl |-> FALSE,
   lateReply |-> FALSE ]
-/\ flows_bugNoAcceptedWatch_owner_flows_sess = <<[st |-> "pending", gen |-> 1], [st |-> "closed", gen |-> 1]>>
+/\ flows_bugNoAcceptedWatch_owner_flows_sess = <<[st |-> "closed", gen |-> 1], [st |-> "pending", gen |-> 1]>>
 /\ flows_bugNoAcceptedWatch_owner_flows_phantom = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_toHostRefused = {}
 /\ flows_bugNoAcceptedWatch_owner_flows_claim = 0
@@ -437,9 +474,9 @@ State 12: <flows_bugNoAcceptedWatch_owner_flows_step line 3854, col 9 to line 38
 /\ flows_bugNoAcceptedWatch_owner_flows_gen = 1
 /\ flows_bugNoAcceptedWatch_owner_flows_vmUp = TRUE
 /\ flows_bugNoAcceptedWatch_owner_flows_toHostPaired = {}
-/\ flows_bugNoAcceptedWatch_owner_flows_flows = <<[st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE]>>
+/\ flows_bugNoAcceptedWatch_owner_flows_flows = <<[st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE]>>
 /\ flows_bugNoAcceptedWatch_owner_flows_readyCross = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_drvLive = FALSE
 /\ flows_bugNoAcceptedWatch_owner_flows_vmGen = 1
 
-State 13: Stuttering
+State 14: Stuttering

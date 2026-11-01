@@ -33,12 +33,13 @@
 //! | `GuestAuditIdle(idle)` | `SimGuestClock` to the owner's next audit tick (`GUEST_OWNER_AUDIT_PERIOD`, fixed rate from the first dispatch, DG-5-A); with a non-empty `idle`, tick by tick until those slots have been idle `GUEST_DATAGRAM_SLOT_IDLE`, the host keeping every other attached slot busy |
 //! | `AppPick`, `AppTake` | hazard-only — an error, never a no-op |
 //!
-//! Projection (`State::from_driver`): `slots(s).owned / .sock / .dest / .fid
-//! / .attached` ← O QPROJ-5 `guest_observation().slots` (`owner`,
-//! `association`, `attached.is_some()`); `slots(s).parked` ← S `parked` (the
-//! slot socket's receive queue, by origin); `releasePending` ← S
-//! `release_reports` (S = `SimGuestOwnerIo::guest_socket_observation`, the
-//! QPROJ-7 arbiter, Tier-3 pairs R5-14 and V-EV-DGRAM). `sockAlive`, `host`
+//! Projection (`State::from_driver`): `kernelSlots(s)` ← S's resident slot
+//! claim; `slots(s).owned / .sock / .dest / .fid / .attached` ← O QPROJ-5
+//! `guest_observation().slots` (`owner`, `association`,
+//! `attached.is_some()`); `slots(s).parked` ← S `parked` (the slot socket's
+//! receive queue, by origin); `releasePending` ← S `release_reports` (S =
+//! `SimGuestOwnerIo`, the QPROJ-7 arbiter, Tier-3 pairs R5-14 and
+//! V-EV-DGRAM). `sockAlive`, `host`
 //! → stimulus; `toHost*`, `toGuest*` → model-only; `nextFid`, `guestEnded`,
 //! `slots(s).holders`, `endedNoNew` → ghost / model-internal; `misdelivered`,
 //! `lateIgnored`, `staleReassoc` → ghost; `picks` → hazard-only; `conf_step` →
@@ -615,15 +616,30 @@ struct SlotView {
     parked: BTreeSet<(i64, i64)>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct KernelSlotView {
+    owned: bool,
+    sock: i64,
+    dest: i64,
+}
+
 /// The compared `udp_slots` variables, guest side.
 #[derive(Debug, PartialEq, Eq)]
 struct UdpSlotsState {
+    kernel_slots: BTreeMap<i64, KernelSlotView>,
     slots: BTreeMap<i64, SlotView>,
     release_pending: BTreeMap<i64, bool>,
 }
 
 impl UdpSlotsState {
     fn from_vars(vars: &Qualified) -> std::result::Result<Self, ItfError> {
+        let kernel_slots = quint_itf::int_map(vars.var("kernelSlots")?, |x| {
+            Ok(KernelSlotView {
+                owned: quint_itf::boolean(quint_itf::field(x, "owned")?)?,
+                sock: quint_itf::int(quint_itf::field(x, "sock")?)?,
+                dest: quint_itf::int(quint_itf::field(x, "dest")?)?,
+            })
+        })?;
         let slots = quint_itf::int_map(vars.var("slots")?, |x| {
             let parked = quint_itf::set_elems(quint_itf::field(x, "parked")?)?
                 .into_iter()
@@ -648,7 +664,7 @@ impl UdpSlotsState {
             })
         })?;
         let release_pending = quint_itf::int_map(vars.var("releasePending")?, quint_itf::boolean)?;
-        Ok(Self { slots, release_pending })
+        Ok(Self { kernel_slots, slots, release_pending })
     }
 }
 
@@ -680,7 +696,7 @@ impl State<UdpSlotsDriver> for UdpSlotsState {
             return Err(DriverError::NoGuest.into());
         }
         let observation = driver.owner.guest_observation();
-        // conformance-lint: sim-arbiter-ok QPROJ-7 guest-owner seam arbiter (slot socket queues by origin, release reports), Tier-3 R5-14 / V-EV-DGRAM
+        // conformance-lint: sim-arbiter-ok QPROJ-7 guest-owner seam arbiter (kernel claims, slot socket queues by origin, release reports), Tier-3 R5-14 / V-EV-DGRAM
         let sim = driver.io.guest_socket_observation();
         let pre_tag =
             |(c, d): (SocketCookie, SocketAddrV4)| -> std::result::Result<(i64, i64), DriverError> {
@@ -691,6 +707,7 @@ impl State<UdpSlotsDriver> for UdpSlotsState {
                         .ok_or_else(|| DriverError::NoPreImage(format!("destination {d}")))?,
                 ))
             };
+        let mut kernel_slots = BTreeMap::new();
         let mut slots = BTreeMap::new();
         for s in SLOTS {
             let o = observation
@@ -701,6 +718,20 @@ impl State<UdpSlotsDriver> for UdpSlotsState {
                 Some(tag) => pre_tag(tag)?,
                 None => (0, 0),
             };
+            // conformance-lint: sim-arbiter-ok QPROJ-7 resident kernel slot claim, Tier-3 R5-14
+            let kernel = driver.io.slot_state(slot(s));
+            let (kernel_sock, kernel_dest) = match kernel.owner {
+                Some(tag) => pre_tag(tag)?,
+                None => (0, 0),
+            };
+            kernel_slots.insert(
+                s,
+                KernelSlotView {
+                    owned: kernel.owner.is_some(),
+                    sock: kernel_sock,
+                    dest: kernel_dest,
+                },
+            );
             let fid = match o.association {
                 Some(flow) => driver
                     .fids
@@ -734,7 +765,7 @@ impl State<UdpSlotsDriver> for UdpSlotsState {
         }
         let release_pending =
             SOCKS.into_iter().map(|k| (k, sim.release_reports.contains(&cookie(k)))).collect();
-        Ok(Self { slots, release_pending })
+        Ok(Self { kernel_slots, slots, release_pending })
     }
 }
 

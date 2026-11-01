@@ -3,15 +3,19 @@
 //! faults injected into a real `overdrive serve` + `overdrive deploy`
 //! composition on native metal, each against a healthy baseline.
 //!
-//! Every case first establishes the healthy baseline — a VM Job whose guest
-//! application moves bytes both ways with a remote peer (`hold`), or writes
-//! as fast as the flow accepts (`flood`), or churns UDP sockets — then
-//! injects exactly one fault and observes the contract during and after it:
+//! Every case first establishes the healthy baseline — a VM workload whose
+//! guest application moves bytes both ways with a remote peer (`hold`), or
+//! writes as fast as the flow accepts (`flood`), or churns UDP sockets — then
+//! injects exactly one fault and observes the contract during and after it.
+//! The guest-reset case uses a Service because its accepted outcome includes a
+//! successor; RESTART-SSOT finalizes a naturally crashed Job and places no
+//! successor. The other cases remain Jobs where no crash successor is part of
+//! their oracle:
 //!
 //! | Fault (stimulus) | Contract (oracle) |
 //! |---|---|
 //! | `serve` dies (the killed mode of the serve lifetime port; every descriptor of the owner released, as at a `SIGKILL`) | the context's release aborts every host pair: the remote peer's first terminal event is a reset, never EOF; the guest application's is a reset too (0x3 with a direction open, R5-10); the VMM survives the death; the next boot ends it before its first placement and places the Job again on the reclaimed CID (NO-SURVIVE, R5-55 (d)) |
-//! | the guest kernel crashes (`/proc/sysrq-trigger`, `panic=1`) | the guest reset ends the VMM (RESET-EXIT); the device release resets the remote peer; the allocation fails `WorkloadCrashedImmediately` and the restart is charged (R5-56) |
+//! | the guest kernel crashes (`/proc/sysrq-trigger`, `panic=1`) | the guest reset ends the VMM (RESET-EXIT); the device release resets the remote peer; the Service allocation fails `WorkloadCrashedImmediately` and its successor proves the restart was charged (R5-56, RESTART-SSOT) |
 //! | the VMM is killed by the host (`SIGKILL`) | the device release resets the remote peer, never EOF; the allocation fails as a crash |
 //! | the far reader stops for 10 s | the sender blocks (its written count is observed to plateau within a bound, then stays flat for the 10 s stall), nothing is lost or reordered, and the flow resumes in order when the reader reads again (R5-62) |
 //! | 1,100 UDP sockets each send one datagram and close at once — before or after their association pairs | every send succeeds (a slot is released with its socket; leaked slots would refuse the 1,025th with `EPERM`), and a later datagram round trip succeeds (D25, EVMOD-DGRAM) |
@@ -38,7 +42,7 @@
 //!   "Loss") plus the in-guest session cells on the guest-kit lane.
 //!
 //! Bounds: one VM per case (two across a restart), each fault observed within
-//! its named bound; every case stops its Job and shuts `serve` down; the
+//! its named bound; every case stops its workload and shuts `serve` down; the
 //! `TeardownBound` kills what a failed case left. Lane:
 //! `integration-tests,kvm-tests`, `cargo xtask metal run --`; module in
 //! `host-kernel-shared`. Pending DELIVER step 14-02.
@@ -104,18 +108,28 @@ async fn flood_plateau(alloc: &AllocationId) -> u64 {
     }
 }
 
-/// Deploys a `hold` Job tagged `tag` (with `extra` arguments) and waits until
-/// its flow moves bytes both ways; returns its id and allocation.
+#[derive(Clone, Copy)]
+enum HoldWorkload {
+    Job,
+    RestartingService,
+}
+
+/// Deploys a `hold` workload tagged `tag` (with `extra` arguments) and waits
+/// until its flow moves bytes both ways; returns its id and allocation.
 async fn hold_flowing(
     lane: &Lane,
     peer: &RemotePeer,
     tag: &str,
     extra: &[&str],
+    workload: HoldWorkload,
 ) -> (String, AllocationId) {
     let tcp = arg(peer.tcp_addr());
     let mut args = vec![subcommand::HOLD, tcp.as_str(), tag];
     args.extend_from_slice(extra);
-    let id = lane.deploy_job(tag, &args).await;
+    let id = match workload {
+        HoldWorkload::Job => lane.deploy_job(tag, &args).await,
+        HoldWorkload::RestartingService => lane.deploy_hold_service(tag, &args).await,
+    };
     let alloc = lane.running_alloc(&id, RUNNING_BOUND).await;
     let key = tag.to_owned();
     peer.wait_for(Duration::from_secs(30), |log| {
@@ -153,14 +167,13 @@ const fn crashed(reason: Option<&TransitionReason>) -> bool {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 14-02"]
 async fn the_serve_owners_death_resets_every_far_end_and_the_next_boot_reclaims_the_vm() {
     let _bound = TeardownBound::arm();
     let peer =
         RemotePeer::start("vsock-fm-owner", 1).expect("precondition: the remote peer starts");
     let mut lane = Lane::boot("vsock-fm-owner").await;
     let tag = "fm-owner";
-    let (id, alloc) = hold_flowing(&lane, &peer, tag, &[]).await;
+    let (id, alloc) = hold_flowing(&lane, &peer, tag, &[], HoldWorkload::Job).await;
     let (vmm_pid, argv) = hypervisor_of(&alloc).expect("the VM's VMM runs");
     let cid = vsock_cid(&argv);
 
@@ -207,19 +220,21 @@ async fn the_serve_owners_death_resets_every_far_end_and_the_next_boot_reclaims_
 
 /// R5-10 (guest) and R5-56: the guest kernel crashes with the flow moving
 /// bytes. The guest reset ends the VMM; the device release resets the
-/// remote peer, never EOF; the allocation fails `WorkloadCrashedImmediately`
-/// and a restart follows.
+/// remote peer, never EOF; the Service allocation fails
+/// `WorkloadCrashedImmediately` and a successor follows. A Job is not the
+/// fixture for this restart outcome: RESTART-SSOT finalizes its natural crash.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 14-02"]
 async fn a_guest_reset_ends_the_vmm_and_resets_every_far_end() {
     let _bound = TeardownBound::arm();
     let peer =
         RemotePeer::start("vsock-fm-reset", 2).expect("precondition: the remote peer starts");
     let lane = Lane::boot("vsock-fm-reset").await;
     let tag = "fm-reset";
-    let (id, alloc) = hold_flowing(&lane, &peer, tag, &["crash-after=1048576"]).await;
+    let (id, alloc) =
+        hold_flowing(&lane, &peer, tag, &["crash-after=1048576"], HoldWorkload::RestartingService)
+            .await;
     let (vmm_pid, _) = hypervisor_of(&alloc).expect("the VM's VMM runs");
 
     assert!(
@@ -251,13 +266,12 @@ async fn a_guest_reset_ends_the_vmm_and_resets_every_far_end() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 14-02"]
 async fn a_killed_vmm_resets_the_far_end_of_its_flow() {
     let _bound = TeardownBound::arm();
     let peer = RemotePeer::start("vsock-fm-kill", 3).expect("precondition: the remote peer starts");
     let lane = Lane::boot("vsock-fm-kill").await;
     let tag = "fm-kill";
-    let (id, alloc) = hold_flowing(&lane, &peer, tag, &[]).await;
+    let (id, alloc) = hold_flowing(&lane, &peer, tag, &[], HoldWorkload::Job).await;
     let (vmm_pid, _) = hypervisor_of(&alloc).expect("the VM's VMM runs");
 
     let pid = i32::try_from(vmm_pid).expect("a pid");
@@ -293,7 +307,6 @@ async fn a_killed_vmm_resets_the_far_end_of_its_flow() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 14-02"]
 async fn a_far_reader_that_stops_blocks_the_sender_and_the_flow_resumes_in_order() {
     let _bound = TeardownBound::arm();
     let peer =
@@ -342,7 +355,6 @@ async fn a_far_reader_that_stops_blocks_the_sender_and_the_flow_resumes_in_order
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 14-02"]
 async fn closed_udp_sockets_release_their_slots_before_and_after_pairing() {
     let _bound = TeardownBound::arm();
     let peer =

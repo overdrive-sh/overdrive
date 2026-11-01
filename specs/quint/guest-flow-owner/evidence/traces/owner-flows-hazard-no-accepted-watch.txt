@@ -1,4 +1,4 @@
-# owner-flows-hazard-no-accepted-watch: counterexample, 12 state(s) (from the TLC trace)
+# owner-flows-hazard-no-accepted-watch: counterexample, 13 state(s) (from the TLC trace)
 
 State 1
   act = "none"
@@ -42,38 +42,42 @@ State 3 [VmStart]
   vmGen = 1
 
 State 4 [step]
-  flows = <<[st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE]>>
+  gSess = 2
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 1]>>
 
 State 5 [step]
-  gSess = 1
-  sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+  flows = <<[st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE]>>
 
 State 6 [step]
-  sess = <<[st |-> "pending", gen |-> 1], [st |-> "pending", gen |-> 1]>>
+  flows = <<[st |-> "closed", gen |-> 1, req |-> 0, inFlight |-> FALSE]>>
 
 State 7 [step]
-  sess = <<[st |-> "pending", gen |-> 1], [st |-> "reading", gen |-> 1]>>
+  sess = <<[st |-> "pending", gen |-> 1], [st |-> "pending", gen |-> 1]>>
 
 State 8 [step]
-  sess = <<[st |-> "pending", gen |-> 1], [st |-> "live", gen |-> 1]>>
-  claim = 2
+  sess = <<[st |-> "reading", gen |-> 1], [st |-> "pending", gen |-> 1]>>
 
-State 9 [Activate]
+State 9 [step]
+  sess = <<[st |-> "live", gen |-> 1], [st |-> "pending", gen |-> 1]>>
+  claim = 1
+
+State 10 [Activate]
   act = "Activated"
   alloc = "Active"
 
-State 10 [step]
+State 11 [step]
   act = "none"
   dl = [ res |-> <<"pending">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
   hf = <<[st |-> "req", gen |-> 1]>>
 
-State 11 [step]
-  dl = [ res |-> <<"NoSession">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
-  sess = <<[st |-> "pending", gen |-> 1], [st |-> "closed", gen |-> 1]>>
+State 12 [Teardown]
+  alloc = "Retiring"
+  dl = [ res |-> <<"NotServing">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
+  sess = <<[st |-> "closed", gen |-> 1], [st |-> "pending", gen |-> 1]>>
   claim = 0
   hf = <<[st |-> "closed", gen |-> 1]>>
 
-State 12 [step]
+State 13 [step]
   gf = <<[st |-> "acc", gen |-> 1, c |-> 0]>>
 
--> stutters forever in State 12
+-> stutters forever in State 13

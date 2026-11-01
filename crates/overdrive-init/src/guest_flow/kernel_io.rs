@@ -401,11 +401,55 @@ impl KernelGuestOwnerIo {
                 released.push(value);
             }
         }
+        let owner_reports = self.release_unpublished_slots(&released);
         for raw in released {
-            if let Ok(cookie) = SocketCookie::new(raw) {
+            if let Ok(cookie) = SocketCookie::new(raw)
+                && owner_reports.as_ref().is_none_or(|reports| reports.contains(&raw))
+            {
                 self.events.push_back(GuestIoEvent::SocketReleased { cookie });
             }
         }
+    }
+
+    /// Release exact-cookie resident claims that have not crossed the owner
+    /// registration boundary. Scan the resident slot map once for the whole
+    /// drained report batch. Published pending and paired associations are
+    /// returned to the owner for its close/abort/end-record path.
+    fn release_unpublished_slots(&mut self, released: &[u64]) -> Option<BTreeSet<u64>> {
+        let token = self.ops.token?;
+        let wanted = released.iter().copied().collect::<BTreeSet<_>>();
+        if wanted.is_empty() {
+            return Some(BTreeSet::new());
+        }
+        let matching_indices = {
+            let bpf = self.ops.bpf.as_mut()?;
+            let map = bpf.map_mut("SLOT_META")?;
+            let metadata = Array::<_, [u8; 16]>::try_from(map).ok()?;
+            let mut matching = BTreeMap::<u64, Vec<u32>>::new();
+            for index in 0..1_024_u32 {
+                let Ok(value) = metadata.get(&index, 0) else { continue };
+                let cookie = u64::from_ne_bytes(value[0..8].try_into().unwrap_or([0; 8]));
+                if wanted.contains(&cookie) {
+                    matching.entry(cookie).or_default().push(index);
+                }
+            }
+            matching
+        };
+        let mut owner_reports = BTreeSet::new();
+        for (cookie, indices) in matching_indices {
+            for index in indices {
+                let Ok(index) = u16::try_from(index) else { continue };
+                let Some(port) = GUEST_UDP_SLOT_BASE.checked_add(index) else { continue };
+                let slot = SocketAddrV4::new(token.workload_addr, port);
+                if self.connected_slots.contains(&slot) || self.slot_pairs.contains_key(&slot) {
+                    owner_reports.insert(cookie);
+                } else {
+                    self.end_association(slot);
+                    self.release_slot(slot);
+                }
+            }
+        }
+        Some(owner_reports)
     }
 
     fn build_poll_set(&self) -> (Vec<PollFd<'_>>, Vec<PollTag>) {

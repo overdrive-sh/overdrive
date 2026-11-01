@@ -43,7 +43,7 @@ State 6 [ForeignRestore]
   foreign = TRUE
 
 State 7 [Damage]
-  dmg = [C1 |-> TRUE, C2 |-> FALSE]
+  dmg = [C1 |-> FALSE, C2 |-> TRUE]
 
 State 8 [Damage]
   dmg = [C1 |-> TRUE, C2 |-> TRUE]

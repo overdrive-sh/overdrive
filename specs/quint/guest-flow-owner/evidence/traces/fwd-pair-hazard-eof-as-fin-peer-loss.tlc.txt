@@ -131,7 +131,7 @@ State 1: <Initial predicate>
 /\ pair_bugEofAsFin_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugEofAsFin_fwd_pair_attEnded = [g |-> 0, h |-> 0]
 
-State 2: <pair_bugEofAsFin_fwd_pair_CloseUnattached line 2679, col 3 to line 2690, col 46 of module pair_bugEofAsFin>
+State 2: <pair_bugEofAsFin_fwd_pair_CtxRelease line 2752, col 3 to line 2799, col 44 of module pair_bugEofAsFin>
 /\ pair_bugEofAsFin_fwd_pair_ep = [g |-> "reset", h |-> "alive"]
 /\ pair_bugEofAsFin_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugEofAsFin_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
@@ -261,7 +261,7 @@ State 2: <pair_bugEofAsFin_fwd_pair_CloseUnattached line 2679, col 3 to line 269
         rdrop |-> {},
         fdrop |-> {} ] ]
 /\ pair_bugEofAsFin_fwd_pair_ctl = [gh |-> <<{"S", "R"}>>, hg |-> <<>>]
-/\ pair_bugEofAsFin_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugEofAsFin_fwd_pair_ctx = [g |-> "released", h |-> "open"]
 /\ pair_bugEofAsFin_fwd_pair_attEnded = [g |-> 0, h |-> 0]
 
 State 3: <pair_bugEofAsFin_fwd_pair_Attach line 3587, col 3 to line 3594, col 69 of module pair_bugEofAsFin>
@@ -394,7 +394,7 @@ State 3: <pair_bugEofAsFin_fwd_pair_Attach line 3587, col 3 to line 3594, col 69
         rdrop |-> {},
         fdrop |-> {} ] ]
 /\ pair_bugEofAsFin_fwd_pair_ctl = [gh |-> <<{"S", "R"}>>, hg |-> <<>>]
-/\ pair_bugEofAsFin_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugEofAsFin_fwd_pair_ctx = [g |-> "released", h |-> "open"]
 /\ pair_bugEofAsFin_fwd_pair_attEnded = [g |-> 0, h |-> 0]
 
 State 4: <pair_bugEofAsFin_fwd_pair_VCtl line 3612, col 3 to line 3615, col 43 of module pair_bugEofAsFin>
@@ -527,7 +527,7 @@ State 4: <pair_bugEofAsFin_fwd_pair_VCtl line 3612, col 3 to line 3615, col 43 o
         rdrop |-> {},
         fdrop |-> {} ] ]
 /\ pair_bugEofAsFin_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
-/\ pair_bugEofAsFin_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugEofAsFin_fwd_pair_ctx = [g |-> "released", h |-> "open"]
 /\ pair_bugEofAsFin_fwd_pair_attEnded = [g |-> 0, h |-> 0]
 
 State 5: <pair_bugEofAsFin_fwd_pair_HopEnd1 line 3025, col 3 to line 3074, col 44 of module pair_bugEofAsFin>
@@ -660,7 +660,7 @@ State 5: <pair_bugEofAsFin_fwd_pair_HopEnd1 line 3025, col 3 to line 3074, col 4
         rdrop |-> {},
         fdrop |-> {} ] ]
 /\ pair_bugEofAsFin_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
-/\ pair_bugEofAsFin_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugEofAsFin_fwd_pair_ctx = [g |-> "released", h |-> "open"]
 /\ pair_bugEofAsFin_fwd_pair_attEnded = [g |-> 0, h |-> 0]
 
 State 6: <pair_bugEofAsFin_fwd_pair_ReadEof line 3191, col 3 to line 3236, col 44 of module pair_bugEofAsFin>
@@ -793,5 +793,5 @@ State 6: <pair_bugEofAsFin_fwd_pair_ReadEof line 3191, col 3 to line 3236, col 4
         rdrop |-> {},
         fdrop |-> {} ] ]
 /\ pair_bugEofAsFin_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
-/\ pair_bugEofAsFin_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugEofAsFin_fwd_pair_ctx = [g |-> "released", h |-> "open"]
 /\ pair_bugEofAsFin_fwd_pair_attEnded = [g |-> 0, h |-> 0]

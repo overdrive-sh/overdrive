@@ -156,7 +156,7 @@ State 7: <quiesce_live_bugForeignIgnored_quiescence_Damage line 345, col 3 to li
 /\ quiesce_live_bugForeignIgnored_quiescence_repLeft = -1
 /\ quiesce_live_bugForeignIgnored_quiescence_table = TRUE
 /\ quiesce_live_bugForeignIgnored_quiescence_latch = FALSE
-/\ quiesce_live_bugForeignIgnored_quiescence_dmg = [C1 |-> TRUE, C2 |-> FALSE]
+/\ quiesce_live_bugForeignIgnored_quiescence_dmg = [C1 |-> FALSE, C2 |-> TRUE]
 /\ quiesce_live_bugForeignIgnored_quiescence_att = [C1 |-> 0, C2 |-> 0]
 
 State 8: <quiesce_live_bugForeignIgnored_quiescence_Damage line 345, col 3 to line 384, col 63 of module quiesce_live_bugForeignIgnored>

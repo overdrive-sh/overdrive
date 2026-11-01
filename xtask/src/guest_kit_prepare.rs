@@ -101,8 +101,10 @@ pub struct InGuestLane {
 ///   control-plane native bodies discovered by the normal package gate;
 ///   executed by the existing guest-suite runner inside the same three fresh
 ///   disposable guests with a private cgroup-v2 mount. The two kvm-gated
-///   integration binaries also stage STEP 14-01's already-authored production
-///   serve + deploy cells for nested execution inside that disposable boundary.
+///   integration binaries also stage STEP 14-01's and STEP 14-02's
+///   already-authored production serve + deploy cells for nested execution
+///   inside that disposable boundary. The worker's standalone `leg_f_repair`
+///   binary stages STEP 14-02's host-kernel-shared cell in the outer guest.
 pub const IN_GUEST_LANES: &[InGuestLane] = &[
     InGuestLane {
         package: "overdrive-init",
@@ -149,6 +151,12 @@ pub const IN_GUEST_LANES: &[InGuestLane] = &[
     InGuestLane {
         package: "overdrive-worker",
         bin: "integration",
+        target: InGuestTarget::Test,
+        features: "integration-tests",
+    },
+    InGuestLane {
+        package: "overdrive-worker",
+        bin: "leg_f_repair",
         target: InGuestTarget::Test,
         features: "integration-tests",
     },

@@ -30,26 +30,25 @@ State 4 [RestartWith]
   up = TRUE
   stop = "none"
 
-State 5 [LeakHold]
-  cnt = 1
-  g = [ reopenEarly |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> TRUE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
-  leaked = 1
-  latch = TRUE
+State 5 [Damage]
+  dmg = [C1 |-> TRUE, C2 |-> FALSE]
 
-State 6 [Damage]
-  dmg = [C1 |-> FALSE, C2 |-> TRUE]
-
-State 7 [Damage]
-  dmg = [C1 |-> TRUE, C2 |-> TRUE]
-
-State 8 [recStep]
+State 6 [recStep]
   roundState = [C1 |-> "pending", C2 |-> "outside"]
   rec = [C1 |-> "held", C2 |-> "idle"]
+  cnt = 1
+  latch = TRUE
+
+State 7 [RecRepair]
+  rec = [C1 |-> "repaired", C2 |-> "idle"]
+  dmg = [C1 |-> FALSE, C2 |-> FALSE]
+
+State 8 [LeakHold]
   cnt = 2
   g = [ reopenEarly |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> FALSE, failStopped |-> TRUE, dropped |-> TRUE, refusedBoot |-> FALSE, foreignChanged |-> FALSE ]
+  leaked = 1
 
-State 9 [RecRepair]
-  rec = [C1 |-> "repaired", C2 |-> "idle"]
+State 9 [Damage]
   dmg = [C1 |-> FALSE, C2 |-> TRUE]
 
 State 10 [RecRestore]

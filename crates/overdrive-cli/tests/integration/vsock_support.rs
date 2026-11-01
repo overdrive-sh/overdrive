@@ -321,6 +321,26 @@ impl Lane {
             .workload_id
     }
 
+    /// Deploys the fault matrix's long-running `hold` workload as a Service.
+    /// RESTART-SSOT finalizes a naturally crashed Job, while a Service below
+    /// its restart ceiling places a successor. The declared listener is the
+    /// Service admission shape only; the fault oracle observes the guest's
+    /// outbound hold flow, so this fixture declares no health probes.
+    pub(super) async fn deploy_hold_service(&self, id: &str, args: &[&str]) -> String {
+        const ADMISSION_PORT: u16 = 8080;
+
+        let args_toml = args.iter().map(|a| format!("\"{a}\"")).collect::<Vec<_>>().join(", ");
+        let body = format!(
+            "[service]\nid = \"{id}\"\nreplicas = 1\n\n[vm]\ncommand = \"{GUEST_PEER_GUEST_PATH}\"\n\
+             args = [{args_toml}]\nkernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\n\
+             cpu_milli = 500\nmemory_bytes = {LANE_VM_MEMORY_BYTES}\n\n[[listener]]\n\
+             port = {ADMISSION_PORT}\nprotocol = \"tcp\"\n",
+            self.kit.kernel_path.display(),
+            self.image.rootfs.display(),
+        );
+        self.deploy_service_toml(id, &body).await
+    }
+
     pub(super) async fn deploy_v6_peer(&self, id: &str, population: u16) -> String {
         let mut listeners = format!(
             "[[listener]]\nport = {V6_APP_PORT}\nprotocol = \"tcp\"\n\n\

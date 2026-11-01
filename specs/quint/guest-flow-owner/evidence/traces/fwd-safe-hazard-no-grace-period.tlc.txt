@@ -274,17 +274,18 @@ safe_bugNoGracePeriod_fwd_safe_st = [ kind |-> "pair",
   unclassified |-> FALSE,
   delivered |-> 0 ]
 
-State 7: <safe_bugNoGracePeriod_fwd_safe_Dispatch line 1051, col 3 to line 1081, col 49 of module safe_bugNoGracePeriod>
+State 7: <safe_bugNoGracePeriod_fwd_safe_WStep line 1203, col 3 to line 1222, col 8 of module safe_bugNoGracePeriod>
 safe_bugNoGracePeriod_fwd_safe_st = [ kind |-> "pair",
   cb |-> [s |-> "orig", t |-> "ovr"],
-  ud |-> [s |-> "P", t |-> "P"],
+  ud |-> [s |-> "null", t |-> "P"],
   inv |->
-      [s |-> [ph |-> "none", ev |-> "none"], t |-> [ph |-> "ovr", ev |-> "rx"]],
+      [ s |-> [ph |-> "none", ev |-> "none"],
+        t |-> [ph |-> "called", ev |-> "rx"] ],
   lk |-> "none",
   pend |-> FALSE,
   dis |-> FALSE,
   wrun |-> "end",
-  wprog |-> <<"us", "wt", "rt", "ut", "idrec", "free">>,
+  wprog |-> <<"wt", "rt", "ut", "idrec", "free">>,
   oprog |-> <<>>,
   pst |-> "ending",
   cause |-> "Detached",
@@ -319,7 +320,7 @@ safe_bugNoGracePeriod_fwd_safe_st = [ kind |-> "pair",
   unclassified |-> FALSE,
   delivered |-> 0 ]
 
-State 8: <safe_bugNoGracePeriod_fwd_safe_WStep line 1203, col 3 to line 1222, col 8 of module safe_bugNoGracePeriod>
+State 8: <safe_bugNoGracePeriod_fwd_safe_Dispatch line 1051, col 3 to line 1081, col 49 of module safe_bugNoGracePeriod>
 safe_bugNoGracePeriod_fwd_safe_st = [ kind |-> "pair",
   cb |-> [s |-> "orig", t |-> "ovr"],
   ud |-> [s |-> "null", t |-> "P"],

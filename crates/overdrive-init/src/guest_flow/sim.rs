@@ -731,6 +731,52 @@ impl SimGuestOwnerIo {
         lock(&self.state)
     }
 
+    /// Resident kernel claims that have not reached the owner's slot table.
+    /// A held readiness event and no current V_g or pair distinguish this
+    /// adapter-owned boundary from published pending and paired slots.
+    fn prepublication_slots_for_cookie(&self, cookie: SocketCookie) -> Vec<SocketAddrV4> {
+        let st = self.st();
+        st.slots
+            .iter()
+            .filter_map(|(slot, rec)| {
+                (rec.owner.is_some_and(|(owner, _)| owner == cookie)
+                    && st.readiness.contains(slot)
+                    && rec.flow.is_none()
+                    && rec.vsock.is_none()
+                    && rec.attached.is_none())
+                .then_some(*slot)
+            })
+            .collect()
+    }
+
+    /// As [`Self::prepublication_slots_for_cookie`], for cookies no longer
+    /// present at the adapter's level-triggered release audit.
+    fn orphaned_prepublication_slots(&self) -> Vec<SocketAddrV4> {
+        let st = self.st();
+        st.slots
+            .iter()
+            .filter_map(|(slot, rec)| {
+                (rec.owner.is_some_and(|(owner, _)| !st.live_cookies.contains(&owner))
+                    && st.readiness.contains(slot)
+                    && rec.flow.is_none()
+                    && rec.vsock.is_none()
+                    && rec.attached.is_none())
+                .then_some(*slot)
+            })
+            .collect()
+    }
+
+    /// The adapter owns a claim until it publishes it to the owner. Reclaim
+    /// that unpublished, unpaired state through the same discard, disconnect,
+    /// and return effects used by the production adapter.
+    fn reclaim_prepublication_slots(&self, slots: Vec<SocketAddrV4>) {
+        let mut adapter = self.clone();
+        for slot in slots {
+            GuestOwnerIo::end_association(&mut adapter, slot);
+            GuestOwnerIo::release_slot(&mut adapter, slot);
+        }
+    }
+
     /// The clock this seam reads.
     pub(crate) fn clock(&self) -> Arc<SimGuestClock> {
         Arc::clone(&self.clock)
@@ -1443,9 +1489,13 @@ impl SimGuestOwnerIo {
 
     /// Releases `cookie`'s `sock_release` report (`SocketReleased`).
     pub(crate) fn release_socket_report(&self, cookie: SocketCookie) {
-        let mut st = self.st();
-        assert!(st.release_reports.remove(&cookie), "driver defect: no report queued for it");
-        st.deliverable.push_back(GuestIoEvent::SocketReleased { cookie });
+        let unpublished = self.prepublication_slots_for_cookie(cookie);
+        {
+            let mut st = self.st();
+            assert!(st.release_reports.remove(&cookie), "driver defect: no report queued for it");
+        }
+        self.reclaim_prepublication_slots(unpublished);
+        self.st().deliverable.push_back(GuestIoEvent::SocketReleased { cookie });
     }
 
     /// Test-support view of `slot`.
@@ -1917,6 +1967,8 @@ impl GuestOwnerIo for SimGuestOwnerIo {
         &mut self,
         cookies: &BTreeSet<SocketCookie>,
     ) -> io::Result<BTreeSet<SocketCookie>> {
+        let unpublished = self.orphaned_prepublication_slots();
+        self.reclaim_prepublication_slots(unpublished);
         let mut st = self.st();
         st.scripted(SimGuestOp::LiveCookies)?;
         st.effect(SimGuestEffect::LiveCookies);

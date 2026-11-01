@@ -1,8 +1,8 @@
 //! Runs the existing `overdrive-fwd` integration scenarios, the unchanged
 //! `overdrive-dataplane` native integration cells, and the already-authored
-//! STEP 13-04, STEP 13-05, STEP 13-06 and STEP 14-01 real-kernel cells inside
-//! disposable `GuestKit` Cloud Hypervisor guests. Test-support executable
-//! only; never shipped by a production crate.
+//! STEP 13-04, STEP 13-05, STEP 13-06, STEP 14-01 and STEP 14-02 real-kernel
+//! cells inside disposable `GuestKit` Cloud Hypervisor guests. Test-support
+//! executable only; never shipped by a production crate.
 //!
 //! Prepare and run it on the qualified metal launcher without making the
 //! physical kernel the module under test:
@@ -19,9 +19,10 @@
 //! isolation boundary gets a fresh guest boot.
 //!
 //! `OVERDRIVE_FWD_GUEST_EXACT` is the focused diagnostic selector for one
-//! already-authored STEP 14-01 identity inside `cgroup-default`. It uses the
-//! same disposable `GuestKit` path but reports only that exact body's result;
-//! it never contributes canonical 117-body credit.
+//! already-authored STEP 14-01 or STEP 14-02 identity inside
+//! `cgroup-default`. It uses the same disposable `GuestKit` path but reports
+//! only that exact body's result; it never contributes canonical 117-body
+//! credit.
 
 #![cfg(target_os = "linux")]
 #![allow(
@@ -121,7 +122,7 @@ const DATAPLANE_NAT_MODULES: &[(&str, &str)] = &[
 const NESTED_REFLINK_IMAGE: &str = "/var/lib/overdrive-testing/reflink.xfs";
 const NESTED_PREBUILT_INIT: &str = "/opt/overdrive-testing/prebuilt-overdrive-init";
 const XFS_MODULE_GUEST_PATH: &str = "/lib/overdrive-testing/modules/xfs.ko";
-const STEP14_01_CELL_BOUND: Duration = Duration::from_secs(600);
+const STEP14_NATIVE_CELL_BOUND: Duration = Duration::from_secs(600);
 const CGROUP_CONTROLLERS: &str = r#"
 set -eu
 printf '%s\n' '127.0.0.1 localhost' '::1 localhost' > /etc/hosts
@@ -1180,6 +1181,38 @@ const STEP14_01_CLI: &[Cell] = &[(
     true,
 )];
 
+/// The five already-authored STEP 14-02 production-composition fault cells.
+/// Each starts production `serve` and launches real workload VMs through
+/// nested Cloud Hypervisor inside its disposable outer guest.
+const STEP14_02_CLI: &[Cell] = &[
+    (
+        "integration::vsock_fault_matrix::the_serve_owners_death_resets_every_far_end_and_the_next_boot_reclaims_the_vm",
+        1,
+        true,
+    ),
+    (
+        "integration::vsock_fault_matrix::a_guest_reset_ends_the_vmm_and_resets_every_far_end",
+        1,
+        true,
+    ),
+    ("integration::vsock_fault_matrix::a_killed_vmm_resets_the_far_end_of_its_flow", 1, true),
+    (
+        "integration::vsock_fault_matrix::a_far_reader_that_stops_blocks_the_sender_and_the_flow_resumes_in_order",
+        1,
+        true,
+    ),
+    (
+        "integration::vsock_fault_matrix::closed_udp_sockets_release_their_slots_before_and_after_pairing",
+        1,
+        true,
+    ),
+];
+
+/// The already-authored STEP 14-02 leg-F repair cell. Its standalone binary
+/// isolates the process-wide `RLIMIT_NOFILE` stimulus; its real-kernel effects
+/// occur in the disposable outer guest and it launches no nested VMM.
+const STEP14_02_WORKER: &[Cell] = &[("leg_f_repair_rebinds_transparent_listener", 1, true)];
+
 const CGROUP_DEFAULT_BASELINE_BODIES: usize = 55;
 const STEP13_04_NATIVE_BODIES: usize = 18;
 const STEP13_05_NATIVE_BODIES: usize = 5;
@@ -1194,6 +1227,8 @@ const CGROUP_DEFAULT_COMPLETE_BODIES: usize =
 const STEP14_01_CONTROL_PLANE_BODIES: usize = 5;
 const STEP14_01_CLI_BODIES: usize = 1;
 const STEP14_01_NATIVE_BODIES: usize = STEP14_01_CONTROL_PLANE_BODIES + STEP14_01_CLI_BODIES;
+const STEP14_02_CLI_BODIES: usize = 5;
+const STEP14_02_WORKER_BODIES: usize = 1;
 
 struct GuestRun {
     guest: overdrive_testing::guest_kit::ScriptedGuest,
@@ -1678,7 +1713,7 @@ fn nested_guest_kit_module_source(
         if !plain.is_file() {
             return Err(GuestKitError::Staging {
                 detail: format!(
-                    "the qualified kernel ships no STEP 14-01 nested GuestKit module source {relative}"
+                    "the qualified kernel ships no STEP 14 nested GuestKit module source {relative}"
                 ),
                 source: std::io::Error::from(std::io::ErrorKind::NotFound),
             });
@@ -1756,7 +1791,7 @@ fn nested_vm_test_support(
 
     let resolver = dir.join("empty-resolv.conf");
     fs::write(&resolver, []).map_err(|source| GuestKitError::Staging {
-        detail: format!("creating STEP 14-01 guest resolver target at {}", resolver.display()),
+        detail: format!("creating STEP 14 guest resolver target at {}", resolver.display()),
         source,
     })?;
     extra.push(GuestFile {
@@ -2126,7 +2161,8 @@ fn run_nested_vm_test_binary(
         "/srv/vm/reflink-probe.clone",
     ])?;
 
-    let passed = exec_required_cgroup_cells_with_bound(&mut guest, cells, STEP14_01_CELL_BOUND)?;
+    let passed =
+        exec_required_cgroup_cells_with_bound(&mut guest, cells, STEP14_NATIVE_CELL_BOUND)?;
     guest.finish(name)?;
     drop(support);
     Ok(passed)
@@ -2138,31 +2174,111 @@ fn focused_exact_selector() -> Option<String> {
     })
 }
 
-fn run_focused_exact_nested_vm_body(kit: &GuestKit, selected: &str) -> Result<(), GuestKitError> {
-    let found = STEP14_01_CLI
+struct FocusedSelection {
+    package: &'static str,
+    target: &'static str,
+    name: &'static str,
+    slot: u32,
+    cell: Cell,
+    source: &'static str,
+    source_cells: &'static [Cell],
+    source_expected: usize,
+}
+
+fn focused_selection(selected: &str) -> Option<FocusedSelection> {
+    STEP14_01_CLI
         .iter()
         .copied()
         .find(|(identity, _, _)| *identity == selected)
-        .map(|cell| ("overdrive-cli", "step14-01-focused-cli", 14, cell))
+        .map(|cell| FocusedSelection {
+            package: "overdrive-cli",
+            target: "integration",
+            name: "step14-01-focused-cli",
+            slot: 14,
+            cell,
+            source: "step14-01-cli",
+            source_cells: STEP14_01_CLI,
+            source_expected: STEP14_01_CLI_BODIES,
+        })
         .or_else(|| {
             STEP14_01_CONTROL_PLANE
                 .iter()
                 .copied()
                 .find(|(identity, _, _)| *identity == selected)
-                .map(|cell| {
-                    ("overdrive-control-plane", "step14-01-focused-control-plane", 15, cell)
+                .map(|cell| FocusedSelection {
+                    package: "overdrive-control-plane",
+                    target: "integration",
+                    name: "step14-01-focused-control-plane",
+                    slot: 15,
+                    cell,
+                    source: "step14-01-control-plane",
+                    source_cells: STEP14_01_CONTROL_PLANE,
+                    source_expected: STEP14_01_CONTROL_PLANE_BODIES,
                 })
-        });
-    let Some((package, name, slot, cell)) = found else {
+        })
+        .or_else(|| {
+            STEP14_02_CLI.iter().copied().find(|(identity, _, _)| *identity == selected).map(
+                |cell| FocusedSelection {
+                    package: "overdrive-cli",
+                    target: "integration",
+                    name: "step14-02-focused-cli",
+                    slot: 14,
+                    cell,
+                    source: "step14-02-cli",
+                    source_cells: STEP14_02_CLI,
+                    source_expected: STEP14_02_CLI_BODIES,
+                },
+            )
+        })
+        .or_else(|| {
+            STEP14_02_WORKER.iter().copied().find(|(identity, _, _)| *identity == selected).map(
+                |cell| FocusedSelection {
+                    package: "overdrive-worker",
+                    target: "leg_f_repair",
+                    name: "step14-02-focused-leg-f-repair",
+                    slot: 15,
+                    cell,
+                    source: "step14-02-worker",
+                    source_cells: STEP14_02_WORKER,
+                    source_expected: STEP14_02_WORKER_BODIES,
+                },
+            )
+        })
+}
+
+fn run_focused_exact_nested_vm_body(kit: &GuestKit, selected: &str) -> Result<(), GuestKitError> {
+    let Some(FocusedSelection {
+        package,
+        target,
+        name,
+        slot,
+        cell,
+        source,
+        source_cells,
+        source_expected,
+    }) = focused_selection(selected)
+    else {
         return Err(GuestKitError::Staging {
-            detail: format!("{GUEST_EXACT_ENV}={selected:?} matched zero STEP 14-01 identities"),
+            detail: format!(
+                "{GUEST_EXACT_ENV}={selected:?} matched zero STEP 14-01/14-02 identities"
+            ),
             source: std::io::Error::other(
                 "the focused exact selector must match one existing body",
             ),
         });
     };
+    let source_manifest_bodies =
+        source_cells.iter().map(|(_, expected, _)| expected).sum::<usize>();
+    if source_manifest_bodies != source_expected {
+        return Err(GuestKitError::Staging {
+            detail: format!(
+                "focused source {source} declares {source_manifest_bodies} bodies, expected exactly {source_expected}"
+            ),
+            source: std::io::Error::other("the focused source manifest changed"),
+        });
+    }
     let expected = cell.1;
-    let passed = run_nested_vm_test_binary(kit, package, "integration", name, slot, &[cell])?;
+    let passed = run_nested_vm_test_binary(kit, package, target, name, slot, &[cell])?;
     if passed != expected {
         return Err(GuestKitError::Staging {
             detail: format!(
@@ -2171,7 +2287,15 @@ fn run_focused_exact_nested_vm_body(kit: &GuestKit, selected: &str) -> Result<()
             source: std::io::Error::other("the focused exact body count changed"),
         });
     }
-    println!("STEP14-01-FOCUSED-RESULT identity={selected} passed={passed} canonical_117_credit=0");
+    if source.starts_with("step14-01-") {
+        println!(
+            "STEP14-01-FOCUSED-RESULT identity={selected} passed={passed} canonical_117_credit=0"
+        );
+    } else {
+        println!(
+            "STEP14-02-FOCUSED-RESULT source={source} identity={selected} passed={passed} source_manifest_bodies={source_manifest_bodies} canonical_117_credit=0"
+        );
+    }
     Ok(())
 }
 

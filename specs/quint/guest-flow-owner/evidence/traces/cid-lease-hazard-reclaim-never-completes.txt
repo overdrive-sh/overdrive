@@ -1,4 +1,4 @@
-# cid-lease-hazard-reclaim-never-completes: counterexample, 6 state(s) (from the TLC trace)
+# cid-lease-hazard-reclaim-never-completes: counterexample, 8 state(s) (from the TLC trace)
 
 State 1
   att = <<0, 0>>
@@ -13,29 +13,38 @@ State 1
   lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
 State 2 [Assign]
-  al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "leased", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+  al = << [ st |-> "leased", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
   cursor = 1
-  lease = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
+  lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 
 State 3 [Launch]
-  dev = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
-  al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "running", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+  dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "running", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
 
-State 4 [Crash]
+State 4 [Assign]
+  al = << [ st |-> "running", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "leased", off |-> 1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+  cursor = 2
+  lease = (0 :> 1 @@ 1 :> 2 @@ 2 :> 0)
+
+State 5 [Launch]
+  dev = (0 :> 1 @@ 1 :> 2 @@ 2 :> 0)
+  al = << [ st |-> "running", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "running", off |-> 1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+
+State 6 [Crash]
   reclaimed = FALSE
   up = FALSE
-  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "reclaim">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
-  dev = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"reclaim", "reclaim">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
+  dev = (0 :> -2 @@ 1 :> -2 @@ 2 :> 0)
   al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
   cursor = 0
   bootLeft = 0
   lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 5 [Restart]
+State 7 [Restart]
   up = TRUE
 
-State 6 [Reclaim]
-  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> TRUE, stopped |-> {}, lastEnd |-> <<"none", "reclaim">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
+State 8 [Reclaim]
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> TRUE, stopped |-> {}, lastEnd |-> <<"reclaim", "reclaim">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
   dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
--> stutters forever in State 6
+-> stutters forever in State 8

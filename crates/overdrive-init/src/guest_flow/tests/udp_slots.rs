@@ -239,34 +239,77 @@ fn an_idle_slot_is_released_by_the_audit_tick_after_the_idle_period() {
     assert!(g.obs().slots[&busy].owner.is_some(), "a moving slot still stays");
 }
 
-/// R5-14 / EVMOD-DGRAM: a slot released with a burst queued in its slot socket
-/// (200 datagrams before `Paired`) has its queue discarded without reading
-/// payload, starts no further association, and its next owner — another
-/// socket to another destination — receives none of the old datagrams: its
-/// association's first frame carries the new owner's datagram only.
+/// R5-14 / EVMOD-DGRAM: a socket released after its slot has queued a burst but
+/// before the first `SlotReady` reaches the owner is reclaimed by its release
+/// report before that held readiness can be dispatched. Its 200 datagrams are
+/// discarded without reading payload, no association or pair starts for the
+/// released socket, and the slot's next owner — another socket to another
+/// destination — receives none of the old datagrams: its association's first
+/// frame carries only the new owner's datagram.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn a_released_burst_is_discarded_and_the_next_owner_gets_none_of_it() {
     let mut g = Guest::new();
     g.open_session();
     let s = g.io.app_send(cookie(1), dest(1)).unwrap();
-    g.associate(s);
     for _ in 0..199 {
         g.io.app_send(cookie(1), dest(1));
     }
+    let before_release = g.io.guest_socket_observation();
+    assert!(before_release.readiness.contains(&s), "the first SlotReady is held");
+    assert_eq!(
+        before_release.parked.get(&s),
+        Some(&std::iter::once((cookie(1), dest(1))).collect()),
+        "the claimed kernel slot holds only the released socket's burst"
+    );
+    assert_eq!(
+        (g.obs().slots[&s].owner, g.obs().slots[&s].association, g.obs().slots[&s].attached,),
+        (None, None, None),
+        "the held readiness has not published the kernel claim to the owner"
+    );
+
+    g.io.clear_effects();
     g.io.app_close_socket(cookie(1), true);
     g.io.release_socket_report(cookie(1));
     g.settle();
     let state = g.io.slot_state(s);
     assert_eq!(state.discarded, 200, "the whole queue discarded, unread");
     assert!(state.owner.is_none());
-    assert!(!g.io.guest_socket_observation().parked.contains_key(&s));
-    assert!(g.io.guest_socket_observation().readiness.is_empty(), "no further association");
+    assert_eq!(state.flow, None, "the released socket gets no association");
+    assert_eq!(state.attached, None, "the released socket gets no pair");
+    assert!(!state.connected, "the reclaimed slot is disconnected");
+    assert_eq!(
+        end_order(&g.io.effects(), s, None),
+        ["discard+disconnect", "release"],
+        "an unpaired claim follows the normal slot-reclamation order"
+    );
+    let after_release = g.io.guest_socket_observation();
+    assert!(!after_release.parked.contains_key(&s));
+    assert!(after_release.readiness.is_empty(), "no further association");
+    assert!(after_release.release_reports.is_empty(), "the release report was consumed");
+    assert_eq!(
+        (g.obs().slots[&s].owner, g.obs().slots[&s].association, g.obs().slots[&s].attached,),
+        (None, None, None),
+        "the released socket never becomes an owner, association, or pair"
+    );
+    assert!(g.io.requests().is_empty(), "the released socket writes no request");
+    assert_eq!(
+        g.connects(HostChannel::FlowStream),
+        0,
+        "the released socket opens no association channel"
+    );
+    let inventory = g.io.forwarder_inventory().expect("the guest forwarder context remains live");
+    assert_eq!((inventory.live_pairs, inventory.attached), (0, 0), "no pair was created");
 
     // the recycled slot's next owner
     let s2 = g.io.app_send(cookie(2), dest(2)).unwrap();
     assert_eq!(s2, s, "the slot is recycled");
     let a2 = g.associate(s2);
+    assert_eq!(
+        g.io.requests(),
+        vec![FlowRequest::DatagramStream { flow: a2, destination: dest(2), launch: launch() }],
+        "only the recycled slot's new owner writes a request"
+    );
     g.pair_slot(a2);
     g.io.run_forwarder();
     let state = g.io.forwarder_pair_state(g.obs().slots[&s2].attached.unwrap()).unwrap();

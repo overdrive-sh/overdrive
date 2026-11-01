@@ -52,6 +52,8 @@
  *     the model-checking instances it stays `init` (see `rec`).
  *   - MAXFID only disables minting a new association id (DG-5-B); see its definition.
  *   - Readiness: the capture program's atomic claim and queued datagram precede the owner's observation.
+ *     A release report or release audit for that socket reclaims an unpublished, unpaired kernel claim in the
+ *     adapter's discard / disconnect / return order and removes its held readiness before the owner can publish it.
  *     Association set-up (Datagram step 2, `GuestReady`) consumes that readiness, publishes the owner and
  *     starts the association in one dispatch. An attached slot socket is the forwarder's
  *     (its sk_data_ready is overridden), so the owner sees no readiness for it.
@@ -352,7 +354,7 @@ module udp_slots {
       not(REC) or SLOTS.filter(other => slots.get(other).fid != 0 and not(slots.get(other).attached)) == Set(s),
       // A release audit whose cookie is already gone has an earlier deadline
       // and releases the orphan before this 5 s pairing deadline.
-      not(SLOTS.exists(other => slots.get(other).owned and not(sockAlive.get(slots.get(other).sock)))),
+      not(SLOTS.exists(other => kernelSlots.get(other).owned and not(sockAlive.get(kernelSlots.get(other).sock)))),
       slots' = slots.set(s, { ...x, fid: 0, parked: parkedAfterEnd(x, false) }),
       toHostAbort' = toHostAbort.union(Set(x.fid)),
       guestEnded' = guestEnded.union(Set(x.fid)),
@@ -403,12 +405,13 @@ module udp_slots {
     toHostEnd' = toHostEnd.union(endOf(ss)),
     endedNoNew' = endedNoNew.exclude(ss),
   }
-  // overdrive-init handles the report: every slot of the released socket (slot-ownership table)
+  // overdrive-init handles the report: every kernel slot of the released socket, including an unpublished,
+  // unpaired claim whose first SlotReady is still held
   action GuestReleaseSock(k: int): bool = all {
     conf_step' = if (REC) variant("GuestReleaseSock", { k: k }) else conf_step,
     releasePending.get(k),
     releasePending' = releasePending.set(k, false),
-    val mine = SLOTS.filter(s => slots.get(s).owned and slots.get(s).sock == k)
+    val mine = SLOTS.filter(s => kernelSlots.get(s).owned and kernelSlots.get(s).sock == k)
     releaseSet(mine),
     sockAlive' = sockAlive, picks' = picks, nextFid' = nextFid, host' = host,
     toGuestPaired' = toGuestPaired, toGuestRefused' = toGuestRefused, toGuestAbort' = toGuestAbort,
@@ -429,7 +432,7 @@ module udp_slots {
   // deadline first)
   action GuestAuditIdle(idle: Set[int]): bool = all {
     conf_step' = if (REC) variant("GuestAuditIdle", { idle: idle }) else conf_step,
-    val orphans = SLOTS.filter(s => slots.get(s).owned and not(sockAlive.get(slots.get(s).sock)))
+    val orphans = SLOTS.filter(s => kernelSlots.get(s).owned and not(sockAlive.get(kernelSlots.get(s).sock)))
     all {
       // In the conformance instance, omit audit stutters while an association
       // has the earlier 5 s pairing deadline. They change no compared state;
@@ -497,7 +500,7 @@ module udp_slots {
     NoReassociationWithoutNewDatagram
 
   // ------------------------------------------------------------------ liveness (TLC)
-  def orphan(s: int): bool = slots.get(s).owned and not(sockAlive.get(slots.get(s).sock))
+  def orphan(s: int): bool = kernelSlots.get(s).owned and not(sockAlive.get(kernelSlots.get(s).sock))
   val anyOrphan: bool = SLOTS.exists(s => orphan(s))
   // A slot held by a released socket eventually returns to the pool (becomes claimable).
   temporal ReleasedSlotBecomesFree =
@@ -558,9 +561,11 @@ module udp_slots {
   // K-B2: the sock_release report is lost; the level-triggered audit finds the slot whose cookie no
   // longer exists and releases it
   run LostReleaseReportIsFoundByAudit = init
-    .then(AppClaim(1, 1, 0)).then(GuestReady(0)).then(SockCloseReportLost(1))
-    .expect(Safety and slots.get(0).owned and not(sockAlive.get(1)) and not(releasePending.get(1)))
-    .then(GuestAudit).expect(Safety and not(slots.get(0).owned) and slots.get(0).parked == Set())
+    .then(AppClaim(1, 1, 0)).then(SockCloseReportLost(1))
+    .expect(Safety and kernelSlots.get(0).owned and not(slots.get(0).owned)
+      and not(sockAlive.get(1)) and not(releasePending.get(1)) and readyFor(0))
+    .then(GuestAudit).expect(Safety and not(kernelSlots.get(0).owned)
+      and not(slots.get(0).owned) and slots.get(0).parked == Set() and not(readyFor(0)))
   // closing a socket releases every slot it owns
   run SocketCloseReleasesEverySlotItOwns = init
     .then(AppClaim(1, 1, 0)).then(GuestReady(0)).then(AppClaim(1, 2, 1)).then(GuestReady(1))
@@ -595,11 +600,12 @@ module udp_slots {
   // P-35: a slot recycled to a new owner never carries the previous owner's datagrams: its socket's queue is
   // discarded at release, and the new owner's association delivers only its own datagrams to its own destination
   run RecycledSlotNeverDeliversPreviousOwnersFrames = init
-    .then(AppClaim(1, 1, 0)).then(GuestReady(0)).then(SockClose(1)).then(GuestReleaseSock(1))
-    .expect(Safety and not(slots.get(0).owned) and slots.get(0).parked == Set() and not(readyFor(0)))
+    .then(AppClaim(1, 1, 0)).then(SockClose(1)).then(GuestReleaseSock(1))
+    .expect(Safety and not(kernelSlots.get(0).owned)
+      and not(slots.get(0).owned) and slots.get(0).parked == Set() and not(readyFor(0)))
     .then(AppClaim(2, 2, 0)).expect(Safety and slots.get(0).parked == Set((2, 2)) and readyFor(0))
-    .then(GuestReady(0)).then(HostPair(2)).then(GuestRecvPaired(2))
-    .expect(Safety and slots.get(0).attached and host.get(2).sock == 2 and host.get(2).dest == 2 and not(misdelivered))
+    .then(GuestReady(0)).then(HostPair(1)).then(GuestRecvPaired(1))
+    .expect(Safety and slots.get(0).attached and host.get(1).sock == 2 and host.get(1).dest == 2 and not(misdelivered))
 
 }
 
