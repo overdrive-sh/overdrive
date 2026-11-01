@@ -758,12 +758,35 @@ async fn run_beacon_writer(
     mut force_close: watch::Receiver<bool>,
 ) {
     loop {
-        if *stop.borrow() {
-            stop_beacon_writer(&mut state, &mut force_close).await;
-            return;
-        }
         tokio::select! {
             biased;
+            // Consume an already-ready guest line before observing the
+            // out-of-band stop request.  Natural VMM exit and the guest's
+            // EXIT write can become ready in the same scheduler turn; the
+            // report must reach the drain receiver before stop closes the
+            // accepted beacon socket.
+            line = async {
+                let socket = state.socket.as_ref().unwrap_or_else(|| {
+                    unreachable!("a live beacon writer owns its accepted socket")
+                });
+                state.io.read_line(socket).await
+            } => {
+                let terminal = match line {
+                    Ok(Some(line)) => state.lines.send(Ok(Some(line))).await.is_err(),
+                    Ok(None) => {
+                        let _ = state.lines.send(Ok(None)).await;
+                        true
+                    }
+                    Err(error) => {
+                        let _ = state.lines.send(Err(error)).await;
+                        true
+                    }
+                };
+                if terminal {
+                    state.close_socket().await;
+                    return;
+                }
+            }
             () = wait_for_signal(&mut stop) => {
                 stop_beacon_writer(&mut state, &mut force_close).await;
                 return;
@@ -804,28 +827,6 @@ async fn run_beacon_writer(
                 }
                 state.acknowledge_active(outcome);
                 if !keep_session {
-                    return;
-                }
-            }
-            line = async {
-                let socket = state.socket.as_ref().unwrap_or_else(|| {
-                    unreachable!("a live beacon writer owns its accepted socket")
-                });
-                state.io.read_line(socket).await
-            } => {
-                let terminal = match line {
-                    Ok(Some(line)) => state.lines.send(Ok(Some(line))).await.is_err(),
-                    Ok(None) => {
-                        let _ = state.lines.send(Ok(None)).await;
-                        true
-                    }
-                    Err(error) => {
-                        let _ = state.lines.send(Err(error)).await;
-                        true
-                    }
-                };
-                if terminal {
-                    state.close_socket().await;
                     return;
                 }
             }
@@ -2185,7 +2186,14 @@ async fn drain_guest_report(
             () = tokio::task::yield_now() => {}
         }
     }
-    (None, vmm_signal)
+
+    // VMM exit has closed the guest's vsock device.  Let the existing
+    // BeaconWriter consume the resulting line or EOF before its caller asks
+    // it to close; otherwise the writer's stop signal can win the same poll
+    // as a final EXIT already buffered by the guest transport.
+    let (guest_report, _) =
+        finish_guest_report_line(next_beacon_line(&mut lines).await, vmm_signal);
+    (guest_report, vmm_signal)
 }
 
 async fn next_beacon_line(

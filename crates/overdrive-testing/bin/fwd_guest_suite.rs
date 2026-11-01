@@ -20,10 +20,12 @@
 //! isolation boundary gets a fresh guest boot.
 //!
 //! `OVERDRIVE_FWD_GUEST_EXACT` is the focused diagnostic selector for one
-//! already-authored STEP 14-01 or STEP 14-02 identity inside
-//! `cgroup-default`. It uses the same disposable `GuestKit` path but reports
-//! only that exact body's result; it never contributes canonical 119-body
-//! credit.
+//! already-authored direct-selection identity inside `cgroup-default`. It
+//! uses the same disposable `GuestKit` path but reports only that exact body's
+//! result; it never contributes canonical 119-body credit. The 64-VM correctness
+//! identities receive an outer-guest memory envelope derived from their
+//! existing workload resource declarations and the production [`MemoryPlan`]
+//! reserve policy.
 
 #![cfg(target_os = "linux")]
 #![allow(
@@ -38,6 +40,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
+use overdrive_core::vm::config::MemoryPlan;
 use overdrive_testing::guest_app::{GUEST_PEER_GUEST_PATH, subcommand};
 use overdrive_testing::guest_kit::cid_bands::FWD_GUEST_BOUNDARY;
 use overdrive_testing::guest_kit::{
@@ -47,7 +50,7 @@ use overdrive_testing::guest_kit::{
 use overdrive_testing::guest_lane::{CELL_BOUND, IN_GUEST_TESTS_PATH, InGuestTests};
 use overdrive_testing::vm_fixture::default_staging_root;
 
-const GUEST_MIB: u32 = 4_096;
+const STANDARD_OUTER_GUEST_MIB: u32 = 4_096;
 const GUEST_EXACT_ENV: &str = "OVERDRIVE_FWD_GUEST_EXACT";
 const TEST_THREADS: &str = "--test-threads=1";
 const NO_CAPTURE: &str = "--nocapture";
@@ -124,6 +127,26 @@ const NESTED_REFLINK_IMAGE: &str = "/var/lib/overdrive-testing/reflink.xfs";
 const NESTED_PREBUILT_INIT: &str = "/opt/overdrive-testing/prebuilt-overdrive-init";
 const XFS_MODULE_GUEST_PATH: &str = "/lib/overdrive-testing/modules/xfs.ko";
 const STEP14_NATIVE_CELL_BOUND: Duration = Duration::from_secs(600);
+
+// The two existing correctness bodies declare exactly 64 workload VMs at
+// 128 MiB each. Account for every inner VMM at the production MemoryPlan
+// cgroup ceiling, then retain the established 4 GiB outer-guest envelope for
+// the node kernel, serve composition, test process and fixture tools. This is
+// static capacity configuration, not a density or memory measurement.
+const BYTES_PER_MIB: u64 = 1024 * 1024;
+const VM_COHORT_WORKLOADS: u64 = 64;
+const VM_COHORT_WORKLOAD_MEMORY_BYTES: u64 = 128 * BYTES_PER_MIB;
+const VM_COHORT_REQUIRED_OUTER_BYTES: u64 = MemoryPlan::derive(VM_COHORT_WORKLOAD_MEMORY_BYTES)
+    .cgroup_max_bytes()
+    .saturating_mul(VM_COHORT_WORKLOADS)
+    .saturating_add((STANDARD_OUTER_GUEST_MIB as u64) * BYTES_PER_MIB);
+const VM_COHORT_OUTER_GUEST_MIB: u32 = 12_821;
+const VM_COHORT_CELL_BOUND: Duration = Duration::from_secs(1_200);
+const _: () =
+    assert!((VM_COHORT_OUTER_GUEST_MIB as u64) * BYTES_PER_MIB >= VM_COHORT_REQUIRED_OUTER_BYTES);
+const _: () = assert!(
+    ((VM_COHORT_OUTER_GUEST_MIB - 1) as u64) * BYTES_PER_MIB < VM_COHORT_REQUIRED_OUTER_BYTES
+);
 const CGROUP_CONTROLLERS: &str = r#"
 set -eu
 printf '%s\n' '127.0.0.1 localhost' '::1 localhost' > /etc/hosts
@@ -1224,6 +1247,21 @@ const STEP14_02_CLI: &[Cell] = &[
 /// occur in the disposable outer guest and it launches no nested VMM.
 const STEP14_02_WORKER: &[Cell] = &[("leg_f_repair_rebinds_transparent_listener", 1, true)];
 
+/// The two existing 64-VM correctness bodies. They are available only
+/// through the focused selector and do not extend the canonical manifest.
+const VM_COHORT_CLI: &[Cell] = &[
+    (
+        "integration::vsock_density::every_vm_at_density_round_trips_through_its_own_attachment",
+        1,
+        true,
+    ),
+    (
+        "integration::vsock_density::serve_down_at_density_is_fail_closed_and_the_next_boot_reclaims_every_vm",
+        1,
+        true,
+    ),
+];
+
 const CGROUP_DEFAULT_BASELINE_BODIES: usize = 57;
 const STEP13_04_NATIVE_BODIES: usize = 18;
 const STEP13_05_NATIVE_BODIES: usize = 5;
@@ -1240,6 +1278,25 @@ const STEP14_01_CLI_BODIES: usize = 1;
 const STEP14_01_NATIVE_BODIES: usize = STEP14_01_CONTROL_PLANE_BODIES + STEP14_01_CLI_BODIES;
 const STEP14_02_CLI_BODIES: usize = 5;
 const STEP14_02_WORKER_BODIES: usize = 1;
+const VM_COHORT_CLI_BODIES: usize = 2;
+
+#[derive(Clone, Copy)]
+struct NestedVmGuestResources {
+    memory_mib: u32,
+    vcpus: u8,
+    cell_bound: Duration,
+}
+
+impl NestedVmGuestResources {
+    const STANDARD: Self = Self {
+        memory_mib: STANDARD_OUTER_GUEST_MIB,
+        vcpus: 8,
+        cell_bound: STEP14_NATIVE_CELL_BOUND,
+    };
+
+    const VM_COHORT: Self =
+        Self { memory_mib: VM_COHORT_OUTER_GUEST_MIB, vcpus: 8, cell_bound: VM_COHORT_CELL_BOUND };
+}
 
 struct GuestRun {
     guest: overdrive_testing::guest_kit::ScriptedGuest,
@@ -1275,8 +1332,34 @@ impl GuestRun {
         tests: &InGuestTests,
         name: &str,
         slot: u32,
+        extra: Vec<GuestFile>,
+        module_paths: Vec<String>,
+        vcpus: u8,
+    ) -> Result<Self, GuestKitError> {
+        Self::boot_with_resources(
+            kit,
+            tests,
+            name,
+            slot,
+            extra,
+            module_paths,
+            STANDARD_OUTER_GUEST_MIB,
+            vcpus,
+        )
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "private fixture boot keeps the selected image, CID slot and static resource envelope explicit"
+    )]
+    fn boot_with_resources(
+        kit: &GuestKit,
+        tests: &InGuestTests,
+        name: &str,
+        slot: u32,
         mut extra: Vec<GuestFile>,
         module_paths: Vec<String>,
+        memory_mib: u32,
         vcpus: u8,
     ) -> Result<Self, GuestKitError> {
         let staging = default_staging_root();
@@ -1305,7 +1388,7 @@ impl GuestRun {
             &work.path().join("run"),
             &ScriptedBootExtra {
                 cmdline: Vec::new(),
-                memory_mib: Some(GUEST_MIB),
+                memory_mib: Some(memory_mib),
                 vcpus: Some(vcpus),
             },
         )?;
@@ -2127,11 +2210,44 @@ fn run_nested_vm_test_binary(
     slot: u32,
     cells: &[Cell],
 ) -> Result<usize, GuestKitError> {
+    run_nested_vm_test_binary_with_resources(
+        kit,
+        package,
+        target,
+        name,
+        slot,
+        cells,
+        NestedVmGuestResources::STANDARD,
+    )
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "private fixture execution keeps the prepared binary, CID slot, exact cells and static resources explicit"
+)]
+fn run_nested_vm_test_binary_with_resources(
+    kit: &GuestKit,
+    package: &str,
+    target: &str,
+    name: &str,
+    slot: u32,
+    cells: &[Cell],
+    resources: NestedVmGuestResources,
+) -> Result<usize, GuestKitError> {
     let tests = InGuestTests::prepared(package, target)?;
     let staging = default_staging_root();
     let support = WorkDir::create(&staging, &format!("fwd-suite-{name}-support"))?;
     let (extra, module_paths) = nested_vm_test_support(kit, support.path())?;
-    let mut guest = GuestRun::boot_with_vcpus(kit, &tests, name, slot, extra, module_paths, 8)?;
+    let mut guest = GuestRun::boot_with_resources(
+        kit,
+        &tests,
+        name,
+        slot,
+        extra,
+        module_paths,
+        resources.memory_mib,
+        resources.vcpus,
+    )?;
 
     let modules = guest.module_paths.clone();
     guest.command_with_modules(&modules, "/usr/bin/true", &[])?;
@@ -2172,8 +2288,7 @@ fn run_nested_vm_test_binary(
         "/srv/vm/reflink-probe.clone",
     ])?;
 
-    let passed =
-        exec_required_cgroup_cells_with_bound(&mut guest, cells, STEP14_NATIVE_CELL_BOUND)?;
+    let passed = exec_required_cgroup_cells_with_bound(&mut guest, cells, resources.cell_bound)?;
     guest.finish(name)?;
     drop(support);
     Ok(passed)
@@ -2194,6 +2309,7 @@ struct FocusedSelection {
     source: &'static str,
     source_cells: &'static [Cell],
     source_expected: usize,
+    resources: NestedVmGuestResources,
 }
 
 fn focused_selection(selected: &str) -> Option<FocusedSelection> {
@@ -2210,6 +2326,7 @@ fn focused_selection(selected: &str) -> Option<FocusedSelection> {
             source: "step14-01-cli",
             source_cells: STEP14_01_CLI,
             source_expected: STEP14_01_CLI_BODIES,
+            resources: NestedVmGuestResources::STANDARD,
         })
         .or_else(|| {
             STEP14_01_CONTROL_PLANE
@@ -2225,6 +2342,7 @@ fn focused_selection(selected: &str) -> Option<FocusedSelection> {
                     source: "step14-01-control-plane",
                     source_cells: STEP14_01_CONTROL_PLANE,
                     source_expected: STEP14_01_CONTROL_PLANE_BODIES,
+                    resources: NestedVmGuestResources::STANDARD,
                 })
         })
         .or_else(|| {
@@ -2238,6 +2356,7 @@ fn focused_selection(selected: &str) -> Option<FocusedSelection> {
                     source: "step14-02-cli",
                     source_cells: STEP14_02_CLI,
                     source_expected: STEP14_02_CLI_BODIES,
+                    resources: NestedVmGuestResources::STANDARD,
                 },
             )
         })
@@ -2252,6 +2371,22 @@ fn focused_selection(selected: &str) -> Option<FocusedSelection> {
                     source: "step14-02-worker",
                     source_cells: STEP14_02_WORKER,
                     source_expected: STEP14_02_WORKER_BODIES,
+                    resources: NestedVmGuestResources::STANDARD,
+                },
+            )
+        })
+        .or_else(|| {
+            VM_COHORT_CLI.iter().copied().find(|(identity, _, _)| *identity == selected).map(
+                |cell| FocusedSelection {
+                    package: "overdrive-cli",
+                    target: "integration",
+                    name: "vm-cohort-focused-cli",
+                    slot: 14,
+                    cell,
+                    source: "vm-cohort-cli",
+                    source_cells: VM_COHORT_CLI,
+                    source_expected: VM_COHORT_CLI_BODIES,
+                    resources: NestedVmGuestResources::VM_COHORT,
                 },
             )
         })
@@ -2267,11 +2402,12 @@ fn run_focused_exact_nested_vm_body(kit: &GuestKit, selected: &str) -> Result<()
         source,
         source_cells,
         source_expected,
+        resources,
     }) = focused_selection(selected)
     else {
         return Err(GuestKitError::Staging {
             detail: format!(
-                "{GUEST_EXACT_ENV}={selected:?} matched zero STEP 14-01/14-02 identities"
+                "{GUEST_EXACT_ENV}={selected:?} matched zero declared direct-selection identities"
             ),
             source: std::io::Error::other(
                 "the focused exact selector must match one existing body",
@@ -2289,7 +2425,15 @@ fn run_focused_exact_nested_vm_body(kit: &GuestKit, selected: &str) -> Result<()
         });
     }
     let expected = cell.1;
-    let passed = run_nested_vm_test_binary(kit, package, target, name, slot, &[cell])?;
+    let passed = run_nested_vm_test_binary_with_resources(
+        kit,
+        package,
+        target,
+        name,
+        slot,
+        &[cell],
+        resources,
+    )?;
     if passed != expected {
         return Err(GuestKitError::Staging {
             detail: format!(
@@ -2298,7 +2442,12 @@ fn run_focused_exact_nested_vm_body(kit: &GuestKit, selected: &str) -> Result<()
             source: std::io::Error::other("the focused exact body count changed"),
         });
     }
-    if source.starts_with("step14-01-") {
+    if source == "vm-cohort-cli" {
+        println!(
+            "VM-COHORT-FOCUSED-RESULT source={source} identity={selected} passed={passed} source_manifest_bodies={source_manifest_bodies} outer_memory_mib={} outer_vcpus={} canonical_119_credit=0",
+            resources.memory_mib, resources.vcpus
+        );
+    } else if source.starts_with("step14-01-") {
         println!(
             "STEP14-01-FOCUSED-RESULT identity={selected} passed={passed} canonical_119_credit=0"
         );

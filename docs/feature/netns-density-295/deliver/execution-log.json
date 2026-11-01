@@ -1961,6 +1961,83 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-11-01T14:05:23Z"
+    },
+    {
+      "sid": "14-05",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: semantic RED cannot run until the two existing density bodies have an approved nested GuestKit execution path",
+      "t": "2026-11-01T16:34:55Z"
+    },
+    {
+      "sid": "14-05",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: existing GuestKit runner has no safe STEP 14-05 selector or manifest; DISTILL-owned support is required before semantic RED",
+      "t": "2026-11-01T16:34:55Z"
+    },
+    {
+      "sid": "14-05",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: no GREEN result or commit is authorized without safe GuestKit support and native evidence",
+      "t": "2026-11-01T16:34:55Z"
+    },
+    {
+      "sid": "14-05",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-11-01T17:11:06Z"
+    },
+    {
+      "sid": "14-05",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: native evidence exposes a design/test contract conflict; terminal rows intentionally drop workload_addr per ADR-0098 while the pre-authored body asserts terminal-row address uniqueness; route to DISTILL before any implementation change",
+      "t": "2026-11-01T17:25:08Z"
+    },
+    {
+      "sid": "14-05",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: no honest GREEN or commit is possible until DISTILL reconciles the existing body with ADR-0098 terminal-row address semantics",
+      "t": "2026-11-01T17:25:14Z"
+    },
+    {
+      "sid": "14-05",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-11-01T18:45:58Z"
+    },
+    {
+      "sid": "14-05",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: corrected 64-VM body reproduces WorkloadCrashedImmediately with guest console EXIT observed before cleanup but no host EXIT report; BeaconWriter/exit-drain receipt blocker remains unresolved",
+      "t": "2026-11-01T18:46:41Z"
+    },
+    {
+      "sid": "14-05",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: no honest GREEN or commit while the corrected body fails on the reproduced host EXIT-report receipt blocker",
+      "t": "2026-11-01T18:46:41Z"
+    },
+    {
+      "sid": "14-05",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-01T19:40:24Z"
+    },
+    {
+      "sid": "14-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-01T19:40:56Z"
     }
   ]
 }

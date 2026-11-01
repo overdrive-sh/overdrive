@@ -70,11 +70,12 @@ use std::time::{Duration, Instant};
 
 use nix::errno::Errno;
 use nix::kmod::{ModuleInitFlags, finit_module};
+use nix::libc;
 use nix::mount::{MsFlags, mount};
 use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 use nix::sys::reboot::{self, RebootMode};
 use nix::sys::signal::{Signal, killpg};
-use nix::sys::socket::{self, AddressFamily, SockFlag, SockType, VsockAddr};
+use nix::sys::socket::{self, AddressFamily, SockFlag, SockType, VsockAddr, setsockopt, sockopt};
 use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
 use nix::unistd::Pid;
 use overdrive_core::vm::beacon::{self, BeaconMessage};
@@ -185,6 +186,10 @@ where
     let argv = receive_exec(&conn)?;
     let status = execute(&mut conn, &argv)?;
     send_exit(&mut conn, status)?;
+    // The VSOCK write only queues EXIT in the guest.  Close this beacon
+    // socket before rebooting so Linux can apply the socket's linger policy
+    // and flush the queued report while the process is still alive.
+    drop(conn);
     power_off()
 }
 
@@ -649,6 +654,11 @@ where
 fn send(conn: &mut File, msg: &BeaconMessage) -> Result<(), InitError> {
     let line = format!("{msg}\n");
     conn.write_all(line.as_bytes()).map_err(InitError::Io)?;
+    if matches!(msg, BeaconMessage::Exit { .. }) {
+        let linger = libc::linger { l_onoff: 1, l_linger: 1 };
+        setsockopt(conn, sockopt::Linger, &linger)
+            .map_err(|error| InitError::Io(std::io::Error::from(error)))?;
+    }
     match msg {
         BeaconMessage::Ready { .. } => eprintln!("overdrive-init: beacon boundary tx READY"),
         BeaconMessage::Exit { .. } => eprintln!("overdrive-init: beacon boundary tx EXIT"),

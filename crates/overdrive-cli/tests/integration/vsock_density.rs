@@ -45,12 +45,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream};
+use std::path::PathBuf;
 use std::time::Duration;
 
+use overdrive_cli::commands::workload::{DescribeArgs, describe};
 use overdrive_control_plane::api::AllocStateWire;
 use overdrive_core::id::AllocationId;
 use overdrive_testing::guest_app::{RemotePeer, subcommand};
 use serial_test::serial;
+use tokio::task::JoinSet;
 
 use super::vm_walking_skeleton::TeardownBound;
 use super::vsock_support::{Lane, alloc_of, arg, hypervisor_of, process_alive, vsock_cid};
@@ -69,6 +72,47 @@ const DIAL_BOUND: Duration = Duration::from_secs(2);
 
 fn tag(n: usize) -> String {
     format!("density-{n:02}")
+}
+
+/// Observes one allocation's address only while its public row is live.
+/// Genuine terminal rows deliberately carry no address: a dead allocation is
+/// not a backend (ADR-0098), so reaching terminal first is an honest failure
+/// rather than permission to recover the address from terminal history.
+async fn observe_live_workload_address(
+    config_path: PathBuf,
+    id: String,
+    bound: Duration,
+) -> (String, Ipv4Addr) {
+    let deadline = tokio::time::Instant::now() + bound;
+    loop {
+        let rows = describe(DescribeArgs { id: id.clone(), config_path: config_path.clone() })
+            .await
+            .unwrap_or_else(|error| {
+                panic!("describe {id} while observing its live address: {error}")
+            })
+            .snapshot
+            .rows;
+        if let Some(row) = rows.iter().find(|row| row.state == AllocStateWire::Running) {
+            let address = row
+                .workload_addr
+                .unwrap_or_else(|| panic!("{id}: its Running row carries a workload address"));
+            return (id, address);
+        }
+        if let Some(row) = rows
+            .iter()
+            .find(|row| matches!(row.state, AllocStateWire::Terminated | AllocStateWire::Failed))
+        {
+            panic!(
+                "{id}: reached {:?} before its live workload address was observed; row {row:?}",
+                row.state
+            );
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "{id}: no Running row with a workload address within {bound:?}; rows {rows:#?}"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
 }
 
 /// Every Job's first allocation, once all of them satisfy `done`.
@@ -143,19 +187,43 @@ fn assert_dial_reaches_no_host_socket(
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 14-05"]
 async fn every_vm_at_density_round_trips_through_its_own_attachment() {
     let _bound = TeardownBound::arm();
     let peer = RemotePeer::start("vsock-density", 6).expect("precondition: the remote peer starts");
     let lane = Lane::boot("vsock-density").await;
     let (tcp, udp) = (arg(peer.tcp_addr()), arg(peer.udp_addr()));
     let mut ids = Vec::with_capacity(ATTACHMENTS);
+    let mut address_observers = JoinSet::new();
     for n in 0..ATTACHMENTS {
         let t = tag(n);
-        ids.push(lane.deploy_job(&t, &[subcommand::ROUND_TRIP, &tcp, &udp, &t]).await);
+        let id = lane.deploy_job(&t, &[subcommand::ROUND_TRIP, &tcp, &udp, &t]).await;
+        address_observers.spawn(observe_live_workload_address(
+            lane.cfg(),
+            id.clone(),
+            Duration::from_secs(600),
+        ));
+        ids.push(id);
     }
 
-    let ended = wait_all(&lane, &ids, Duration::from_secs(600), "a terminal allocation", |s| {
+    let mut live_addresses = BTreeMap::new();
+    while let Some(observed) = address_observers.join_next().await {
+        let (id, address) = observed.unwrap_or_else(|error| {
+            panic!("a live-workload-address observer must complete: {error}")
+        });
+        assert!(
+            live_addresses.insert(id.clone(), address).is_none(),
+            "{id}: its live workload address was observed exactly once"
+        );
+    }
+    assert_eq!(
+        live_addresses.len(),
+        ATTACHMENTS,
+        "every VM exposes its workload address while Running"
+    );
+    let addresses: BTreeSet<_> = live_addresses.values().copied().collect();
+    assert_eq!(addresses.len(), ATTACHMENTS, "every live VM holds its own workload address");
+
+    wait_all(&lane, &ids, Duration::from_secs(600), "a terminal allocation", |s| {
         matches!(s, AllocStateWire::Terminated | AllocStateWire::Failed)
     })
     .await;
@@ -168,8 +236,6 @@ async fn every_vm_at_density_round_trips_through_its_own_attachment() {
             rows.first()
         );
     }
-    let addresses: BTreeSet<_> = ended.values().filter_map(|(_, addr)| *addr).collect();
-    assert_eq!(addresses.len(), ATTACHMENTS, "every VM holds its own workload address");
 
     let log = peer.snapshot();
     let tcp_tags: BTreeSet<_> = log.requests.iter().map(|r| r.tag.clone()).collect();
@@ -197,7 +263,6 @@ async fn every_vm_at_density_round_trips_through_its_own_attachment() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 14-05"]
 async fn serve_down_at_density_is_fail_closed_and_the_next_boot_reclaims_every_vm() {
     let _bound = TeardownBound::arm();
     let mut lane = Lane::boot("vsock-density-down").await;

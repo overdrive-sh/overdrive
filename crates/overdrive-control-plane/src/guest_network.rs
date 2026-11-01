@@ -1336,17 +1336,27 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
                     source: GuestNetworkError::Forwarder { source },
                 }
             })?;
-            let inventory_matches_snapshot = inventory.live_pairs == expected_pairs
-                && inventory.live_watches == expected_watches;
+            // End records leave the live count when queued and remain in the
+            // owner's table until the consumer reads them.  Count that
+            // existing handoff state as occupied while auditing the owner;
+            // otherwise a normal end-record delivery window is reported as
+            // forwarder damage.
+            let inventory_places = inventory
+                .live_pairs
+                .saturating_add(inventory.live_watches)
+                .saturating_add(inventory.queued_ends);
+            let expected_places = expected_pairs.saturating_add(expected_watches);
+            let inventory_matches_snapshot = inventory_places == expected_places;
             let inventory_matches_current_owner = if inventory_matches_snapshot {
                 true
             } else {
                 let state = self.runtime.state.lock();
                 !state.repairs_in_flight.contains(&SharedGuestNetworkComponent::Forwarder)
                     && state.forwarder_generation == generation
-                    && inventory.live_pairs == u32::try_from(state.pairs.len()).unwrap_or(u32::MAX)
-                    && inventory.live_watches
-                        == u32::try_from(state.dial_watches.len()).unwrap_or(u32::MAX)
+                    && inventory_places
+                        == u32::try_from(state.pairs.len()).unwrap_or(u32::MAX).saturating_add(
+                            u32::try_from(state.dial_watches.len()).unwrap_or(u32::MAX),
+                        )
             };
             if !inventory_matches_current_owner {
                 mark_shared_repair_component(&self.runtime, SharedGuestNetworkComponent::Forwarder);
