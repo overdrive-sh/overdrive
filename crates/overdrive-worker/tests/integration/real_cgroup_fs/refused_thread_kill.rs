@@ -3,13 +3,11 @@
 //! aborts the process.
 //!
 //! Tier 3, real-io, Lima root. The retained VM-lifecycle allocation-scoped
-//! `CgroupManager::cgroup_kill` reaches `RealCgroupFs::write`, which uses
-//! `tokio::fs` today (`overdrive-host/src/cgroup_fs.rs`); under the release
-//! profile's `panic = "abort"` a `tokio::fs` write that needs a new
-//! blocking-pool thread would end the process if the OS refuses that thread
-//! while the pool is empty. DELIVER step 12-01 moves this retained
-//! allocation-scoped write off `tokio::fs` to a fallible thread primitive, so
-//! the refusal becomes the write's `io::Error`.
+//! `CgroupManager::cgroup_kill` reaches `RealCgroupFs::write`, whose private
+//! write helper uses a fallible joined OS thread (`overdrive-host/src/
+//! cgroup_fs.rs`); a refused thread becomes the write's `io::Error` instead
+//! of a Tokio blocking-pool panic under the release profile's
+//! `panic = "abort"`.
 //!
 //! RED-against-the-no-panic-baseline: before 12-01 the kill write on the empty
 //! blocking pool panics/aborts under the `pids.max` cap; the body never reaches
@@ -39,7 +37,6 @@ use super::super::cgroup_cleanup::AllocCleanup;
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER step 12-01 (E23)"]
 fn a_kill_write_under_thread_refusal_returns_an_io_error_and_never_aborts() {
     let cgroup_root = Path::new("/sys/fs/cgroup");
     let fs: Arc<dyn CgroupFs> = Arc::new(RealCgroupFs::new());
@@ -62,9 +59,9 @@ fn a_kill_write_under_thread_refusal_returns_an_io_error_and_never_aborts() {
     });
     drop(setup_rt);
 
-    // A fresh current-thread runtime has an empty blocking pool, so the kill
-    // write's `tokio::fs` `spawn_blocking` needs a NEW OS thread — which the
-    // `pids.max` cap refuses.
+    // A fresh current-thread runtime has no bearing on the private write
+    // helper's fallible OS-thread spawn; the `pids.max` cap refuses that new
+    // thread and the helper must return the resulting `io::Error`.
     let kill_rt =
         tokio::runtime::Builder::new_current_thread().enable_all().build().expect("kill runtime");
     let _refused = overdrive_testing::pids_max::refuse_thread_creation()

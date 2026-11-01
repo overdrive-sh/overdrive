@@ -30,11 +30,13 @@ use std::time::Duration;
 use overdrive_control_plane::api::{AllocStateWire, ProbeStatusJson};
 use overdrive_core::aggregate::probe_descriptor::ProbeMechanic;
 use overdrive_core::observation::ProbeRole;
+use overdrive_core::{SpiffeId, WorkloadId};
 use overdrive_testing::guest_app::{
     RemotePeer, V6_APP_PORT, V6_HTTP_PROBE_PORT, V6_POPULATION_MAX, V6_TCP_PROBE_PORT, subcommand,
 };
 use serial_test::serial;
 
+use super::guest_stack_mtls_egress::assert_exact_operator_stopped_service_lifecycle_delta;
 use super::vm_walking_skeleton::TeardownBound;
 use super::vsock_support::{
     EphemeralRangeGuard, Lane, PacketCapture, UplinkGuard, V6ClientSpec, alloc_of, arg,
@@ -108,7 +110,9 @@ async fn a_vm_workload_round_trips_tcp_and_udp_through_serve_and_deploy() {
         .await
         .unwrap_or_else(|console| panic!("peer Service did not become ready:\n{console}"));
     assert!(peer_console.contains("v6-peer: ready population=65"));
-    let peer_snapshot = lane.snapshot(&peer_service).await;
+    let peer_snapshot =
+        snapshot_with_exact_identity(&lane, &peer_service, &peer_alloc, Duration::from_secs(10))
+            .await;
     let peer_vip = peer_snapshot
         .vip
         .as_deref()
@@ -156,6 +160,19 @@ async fn a_vm_workload_round_trips_tcp_and_udp_through_serve_and_deploy() {
     assert!(paths_console.contains("nameserver=100.95.0.1"));
     assert!(paths_console.contains("v6-client: resolved v6-peer.svc.overdrive.local="));
     assert!(paths_console.contains("v6-client: vip-tcp ok"));
+    let client_snapshot = snapshot_with_exact_identity(
+        &lane,
+        &client_service,
+        &client_alloc,
+        Duration::from_secs(10),
+    )
+    .await;
+    let client_running = client_snapshot
+        .rows
+        .iter()
+        .find(|row| row.alloc_id == client_alloc.to_string())
+        .expect("the client Service has its Running allocation row")
+        .clone();
     let tls_evidence = loopback_capture.finish();
     tls_evidence.assert_tls13_no_cleartext(std::net::SocketAddrV4::new(peer_addr, V6_APP_PORT));
 
@@ -202,19 +219,71 @@ async fn a_vm_workload_round_trips_tcp_and_udp_through_serve_and_deploy() {
     lane.stop(&client_service).await;
     lane.stop(&peer_service).await;
     for (id, alloc) in [(&client_service, &client_alloc), (&peer_service, &peer_alloc)] {
-        lane.wait_rows(id, Duration::from_secs(30), "a terminal Service allocation", |rows| {
-            rows.iter().any(|row| {
-                row.alloc_id == alloc.to_string()
-                    && matches!(row.state, AllocStateWire::Terminated | AllocStateWire::Failed)
-            })
-        })
-        .await;
+        let terminal_rows = lane
+            .wait_rows(
+                id,
+                Duration::from_secs(30),
+                "a cleanly terminated Service allocation",
+                |rows| {
+                    rows.iter().any(|row| {
+                        row.alloc_id == alloc.to_string() && row.state == AllocStateWire::Terminated
+                    })
+                },
+            )
+            .await;
+        let terminal = terminal_rows
+            .iter()
+            .find(|row| row.alloc_id == alloc.to_string())
+            .expect("the stopped Service retains its allocation row");
+        if alloc == &client_alloc {
+            assert_exact_operator_stopped_service_lifecycle_delta(&client_running, terminal);
+        }
         assert!(hypervisor_of(alloc).is_none(), "no VMM remains for stopped Service {id}");
     }
 
     lane.shutdown().await;
     assert_population_absent(peer_addr, population.count);
     ephemeral.finish();
+}
+
+async fn snapshot_with_exact_identity(
+    lane: &Lane,
+    service: &str,
+    alloc: &overdrive_core::id::AllocationId,
+    bound: Duration,
+) -> overdrive_control_plane::api::AllocStatusResponse {
+    let deadline = tokio::time::Instant::now() + bound;
+    loop {
+        let snapshot = lane.snapshot(service).await;
+        let row = snapshot
+            .rows
+            .iter()
+            .find(|row| row.alloc_id == alloc.to_string())
+            .unwrap_or_else(|| panic!("Service {service} has no row for allocation {alloc}"));
+        assert_eq!(row.alloc_id, alloc.to_string(), "the snapshot row names the requested alloc");
+        let workload =
+            WorkloadId::new(&row.workload_id).expect("the public row carries a valid workload id");
+        let expected = SpiffeId::for_allocation(&workload, alloc);
+        let exact = snapshot
+            .issued_certificates
+            .iter()
+            .filter(|certificate| certificate.spiffe_id == expected)
+            .count();
+        if exact == 1 {
+            assert_eq!(
+                snapshot.issued_certificates.len(),
+                1,
+                "the one Running allocation has exactly its one current issued identity"
+            );
+            return snapshot;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "Service {service} allocation {alloc} did not publish its exact per-allocation identity {expected}; certificates={:#?}",
+            snapshot.issued_certificates
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 }
 
 async fn wait_probe_state(

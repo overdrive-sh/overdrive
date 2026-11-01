@@ -1,8 +1,9 @@
-//! Host [`CgroupFs`] binding — `tokio::fs::*` over real cgroupfs.
+//! Host [`CgroupFs`] binding over real cgroupfs.
 //!
 //! Production binding of the [`CgroupFs`] port trait per ADR-0054
-//! § Real adapter. Wraps `tokio::fs::{create_dir_all, write,
-//! remove_dir}` for the three I/O methods; implements `probe` per
+//! § Real adapter. Uses `tokio::fs` for directory creation/removal and a
+//! fallible joined OS thread for writes so a refused allocation-scoped
+//! cgroup-kill thread returns the existing `io::Error`; implements `probe` per
 //! ADR-0054 § Production probe (amended 2026-05-24 — round-trip on
 //! the kernel-managed `cgroup.subtree_control` pseudo-file:
 //! `create_dir → write empty → read → remove_dir`).
@@ -16,7 +17,8 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use overdrive_core::traits::{CgroupFs, ProbeError};
 
-/// Production [`CgroupFs`] binding backed by `tokio::fs::*`.
+/// Production [`CgroupFs`] binding backed by Tokio for directory operations
+/// and a fallible joined OS thread for writes.
 ///
 /// The sim counterpart is `overdrive_sim::adapters::SimCgroupFs`,
 /// an in-memory `BTreeMap<PathBuf, Vec<u8>>` store with injectable
@@ -96,7 +98,12 @@ impl CgroupFs for RealCgroupFs {
     }
 
     async fn write(&self, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-        tokio::fs::write(path, bytes).await
+        // `tokio::fs::write` submits to Tokio's blocking pool, whose thread
+        // creation panics when the kernel refuses the next task under the
+        // allocation-scoped pids cap. A directly fallible OS-thread spawn
+        // preserves the existing `io::Error` port contract and waits for the
+        // write to complete before this method returns.
+        write_on_fallible_thread(path, bytes)
     }
 
     async fn remove_dir(&self, path: &Path) -> std::io::Result<()> {
@@ -167,6 +174,18 @@ impl CgroupFs for RealCgroupFs {
     fn kind(&self) -> &'static str {
         "overdrive_host::RealCgroupFs"
     }
+}
+
+/// Execute one cgroupfs write on a fallible, joined OS thread. The helper is
+/// synchronous so the async adapter method cannot return while the kernel
+/// write is still in flight, and its `std::fs` use stays outside the async
+/// function's body. `Builder::spawn` reports a refused task as an
+/// `std::io::Error` instead of panicking like Tokio's blocking-pool path.
+fn write_on_fallible_thread(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let path = path.to_owned();
+    let bytes = bytes.to_owned();
+    let handle = std::thread::Builder::new().spawn(move || std::fs::write(path, bytes))?;
+    handle.join().map_err(|_| std::io::Error::other("cgroupfs write thread panicked"))?
 }
 
 /// Best-effort teardown of the probe scratch directory after a probe

@@ -53,7 +53,7 @@ use overdrive_core::traits::ObservationStore as _;
 use overdrive_core::traits::vmm::{
     Result as VmmResult, VmControl, VmProcess, VmTermination, Vmm, VmmProbeError,
 };
-use overdrive_core::transition_reason::TerminalCondition;
+use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
 use overdrive_core::vm::config::VmConfig;
 use overdrive_core::{SpiffeId, TransitionReason, aggregate::WorkloadKind};
 use overdrive_store_local::LocalObservationStore;
@@ -1340,7 +1340,42 @@ fn without_permitted_lifecycle_delta(row: &AllocStatusRowBody) -> AllocStatusRow
     complement
 }
 
-fn assert_exact_lifecycle_delta(running: &AllocStatusRowBody, terminal: &AllocStatusRowBody) {
+pub(super) fn assert_exact_lifecycle_delta(
+    running: &AllocStatusRowBody,
+    terminal: &AllocStatusRowBody,
+) {
+    assert_exact_lifecycle_complement(running, terminal);
+    assert_eq!(terminal.exit_code, Some(0), "a naturally completed VM Job exposes exit code zero");
+}
+
+pub(super) fn assert_exact_operator_stopped_service_lifecycle_delta(
+    running: &AllocStatusRowBody,
+    terminal: &AllocStatusRowBody,
+) {
+    assert_exact_lifecycle_complement(running, terminal);
+    let settled_reason = TransitionReason::Stopped { by: StoppedBy::Reconciler };
+    assert_eq!(
+        terminal.reason.as_ref(),
+        Some(&settled_reason),
+        "the settled operator-stopped Service row keeps its compatibility Reconciler reason"
+    );
+    assert_eq!(
+        terminal.last_transition.as_ref().map(|transition| &transition.reason),
+        Some(&settled_reason),
+        "the terminal transition copies the settled row's compatibility Reconciler reason"
+    );
+    assert_eq!(
+        terminal.terminal,
+        Some(TerminalCondition::Stopped { by: StoppedBy::Operator }),
+        "an operator-stopped Service publishes the approved Stopped terminal condition"
+    );
+    assert_eq!(
+        terminal.exit_code, None,
+        "stopping a Service does not misreport the reaped VMM status as an application exit"
+    );
+}
+
+fn assert_exact_lifecycle_complement(running: &AllocStatusRowBody, terminal: &AllocStatusRowBody) {
     // Exact permitted delta over the complete row:
     // state Running -> Terminated; terminal writers may either forward the
     // canonical guest address (the exit-observer path) or clear it (the
@@ -1362,7 +1397,6 @@ fn assert_exact_lifecycle_delta(running: &AllocStatusRowBody, terminal: &AllocSt
     assert!(terminal.started_at.is_some(), "terminal row is timestamped");
     assert_ne!(running.started_at, terminal.started_at, "the lifecycle observation is restamped");
     assert_eq!(running.exit_code, None, "a running allocation has no exit result");
-    assert_eq!(terminal.exit_code, Some(0), "a cleanly completed Job exposes exit code zero");
     assert_ne!(
         running.last_transition, terminal.last_transition,
         "the Running transition record is replaced by the terminal transition"
@@ -1370,7 +1404,7 @@ fn assert_exact_lifecycle_delta(running: &AllocStatusRowBody, terminal: &AllocSt
     assert_eq!(
         without_permitted_lifecycle_delta(terminal),
         without_permitted_lifecycle_delta(running),
-        "every observable row field outside the six permitted lifecycle deltas must be equal"
+        "every observable row field outside the seven permitted lifecycle deltas must be equal"
     );
 }
 

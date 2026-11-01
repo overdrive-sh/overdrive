@@ -1,8 +1,8 @@
 //! [`CgroupFs`] — the sole source of cgroupfs side effects for the
 //! worker subsystem.
 //!
-//! Production wires this to `overdrive_host::RealCgroupFs` (wrapping
-//! `tokio::fs::*`); tests wire it to `overdrive_sim::SimCgroupFs`
+//! Production wires this to `overdrive_host::RealCgroupFs` (Tokio-backed
+//! directory operations and a fallible joined write thread); tests wire it to `overdrive_sim::SimCgroupFs`
 //! (in-memory `BTreeMap` byte store with injectable per-method error
 //! schedule). The trait surface is the boundary at which the worker
 //! crate's cgroup manager performs every filesystem mutation against
@@ -18,8 +18,9 @@ use async_trait::async_trait;
 /// crate's cgroup manager performs every filesystem mutation on
 /// `/sys/fs/cgroup/overdrive.slice/...`.
 ///
-/// **Production binding**: `overdrive_host::RealCgroupFs`, wrapping
-/// `tokio::fs::{create_dir_all, write, remove_dir}`. **Test binding**:
+/// **Production binding**: `overdrive_host::RealCgroupFs`, using
+/// `tokio::fs::{create_dir_all, remove_dir}` and a fallible joined OS
+/// thread for `write`. **Test binding**:
 /// `overdrive_sim::adapters::cgroup_fs::SimCgroupFs`, an in-memory
 /// `BTreeMap<PathBuf, Vec<u8>>` store with an injectable per-method
 /// error schedule.

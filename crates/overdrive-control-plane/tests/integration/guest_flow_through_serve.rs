@@ -55,9 +55,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+use futures::FutureExt as _;
 use overdrive_control_plane::api::{
-    AllocStateWire, AllocStatusResponse, AllocStatusRowBody, SubmitWorkloadRequest,
-    SubmitWorkloadResponse,
+    AllocStateWire, AllocStatusResponse, AllocStatusRowBody, ProbeStatusJson,
+    SubmitWorkloadRequest, SubmitWorkloadResponse,
 };
 use overdrive_control_plane::guest_network::{
     DialPhase, ForwarderInventoryRead, GuestFlowPhase, GuestOwnerObservation,
@@ -454,6 +455,11 @@ impl Node {
 
     /// The workload's allocation rows (`GET /v1/allocs?job=<id>`).
     async fn rows(&self, id: &str) -> Vec<AllocStatusRowBody> {
+        self.snapshot(id).await.rows
+    }
+
+    /// The workload's typed public allocation/probe snapshot.
+    async fn snapshot(&self, id: &str) -> AllocStatusResponse {
         self.client
             .get(format!("{}/v1/allocs?job={id}", self.base))
             .send()
@@ -462,7 +468,6 @@ impl Node {
             .json::<AllocStatusResponse>()
             .await
             .expect("alloc status response")
-            .rows
     }
 
     /// Polls the rows until one allocation not in `except` is Running.
@@ -574,6 +579,198 @@ async fn wait_flowing(alloc: &AllocationId) {
         );
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
+}
+
+/// Waits for the one-shot relay client to flow, or returns its terminal
+/// observation so the owning body can stop every allocation and shut the
+/// server down before reporting the unchanged failure.
+async fn wait_flowing_or_terminal(alloc: &AllocationId) -> Result<(), String> {
+    let deadline = tokio::time::Instant::now() + BOOT_BOUND;
+    loop {
+        let console = console_of(alloc);
+        if console.contains(FLOWING_LINE) {
+            return Ok(());
+        }
+        if let Some(terminal) = terminal_event_in_console(&console) {
+            return Err(format!(
+                "allocation {alloc}: the guest application reached {terminal:?} before its flow \
+                 reported moving; client console:\n{console}\nall allocation consoles:\n{}",
+                all_console_diagnostics()
+            ));
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(format!(
+                "allocation {alloc}: the guest flow never reported moving within {BOOT_BOUND:?}; \
+                 client console:\n{console}\nall allocation consoles:\n{}",
+                all_console_diagnostics()
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+/// Requires the Service's one declared readiness probe to be currently
+/// passing on its exact Running allocation before the one-shot client exists.
+async fn wait_current_readiness_pass(
+    node: &Node,
+    service: &str,
+    alloc: &AllocationId,
+) -> Result<u64, String> {
+    let deadline = tokio::time::Instant::now() + SETTLE_BOUND;
+    loop {
+        let snapshot = node.snapshot(service).await;
+        assert_eq!(
+            snapshot.rows.iter().filter(|row| row.alloc_id == alloc.to_string()).count(),
+            1,
+            "the readiness precondition stays on the exact Service allocation"
+        );
+        let row = snapshot
+            .rows
+            .iter()
+            .find(|row| row.alloc_id == alloc.to_string())
+            .expect("the exact Service allocation row");
+        assert_eq!(row.state, AllocStateWire::Running, "the Service allocation remains Running");
+
+        let readiness: Vec<_> =
+            snapshot.probes.iter().filter(|probe| probe.role == ProbeRole::Readiness).collect();
+        assert_eq!(readiness.len(), 1, "the Service has its one declared readiness probe");
+        let probe = readiness[0];
+        assert_eq!(probe.idx, ProbeIdx::new(0), "the readiness probe keeps index zero");
+        assert!(
+            matches!(
+                &probe.mechanic,
+                ProbeMechanic::Tcp { host, port }
+                    if host == "0.0.0.0" && *port == SERVICE_PORT
+            ),
+            "the readiness precondition reads the declared Service TCP probe: {probe:?}"
+        );
+        assert_eq!(
+            probe.interval_seconds, PROBE_INTERVAL_SECONDS,
+            "the readiness cadence remains one second"
+        );
+        assert_eq!(
+            probe.success_threshold,
+            Some(1),
+            "one current readiness Pass is the accepted backend-healthy threshold"
+        );
+
+        let current: Vec<_> = snapshot
+            .probe_results
+            .iter()
+            .filter(|result| {
+                result.alloc_id == alloc.to_string()
+                    && result.role == ProbeRole::Readiness.as_str()
+                    && result.probe_idx == 0
+            })
+            .collect();
+        assert!(current.len() <= 1, "the public snapshot has one LWW readiness result");
+        if let [result] = current.as_slice()
+            && matches!(result.status, ProbeStatusJson::Pass)
+        {
+            return Ok(result.last_observed_at_unix_ms);
+        }
+        let last = current.first().map(|result| (*result).clone());
+        if tokio::time::Instant::now() >= deadline {
+            return Err(format!(
+                "Service {service} allocation {alloc} did not expose a current readiness Pass \
+                 within {SETTLE_BOUND:?}; probes={:#?}; last={last:#?}",
+                snapshot.probes
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+fn panic_evidence(payload: &(dyn std::any::Any + Send)) -> String {
+    payload.downcast_ref::<&str>().map_or_else(
+        || {
+            payload
+                .downcast_ref::<String>()
+                .cloned()
+                .unwrap_or_else(|| "non-string panic payload".to_owned())
+        },
+        |message| (*message).to_owned(),
+    )
+}
+
+/// Attempts every owner cleanup after a failed guest-flow precondition or
+/// relay observation, then reports the saved primary first and cleanup
+/// failures as secondary context.
+async fn fail_after_guest_flow_fixture_cleanup(
+    node: Node,
+    client: Option<&str>,
+    service: &str,
+    primary_failure: String,
+) {
+    let mut cleanup_failures = Vec::new();
+
+    if let Some(client) = client {
+        let client_stop =
+            std::panic::AssertUnwindSafe(node.stop(client)).catch_unwind().await.map_err(
+                |payload| format!("client operator-stop: {}", panic_evidence(payload.as_ref())),
+            );
+        if let Err(failure) = client_stop {
+            cleanup_failures.push(failure);
+        }
+    }
+
+    let service_stop = std::panic::AssertUnwindSafe(node.stop(service))
+        .catch_unwind()
+        .await
+        .map_err(|payload| format!("Service operator-stop: {}", panic_evidence(payload.as_ref())));
+    if let Err(failure) = service_stop {
+        cleanup_failures.push(failure);
+    }
+
+    let empty_cids = std::panic::AssertUnwindSafe(
+        node.wait_observation("failed guest-flow fixture teardown", |o| o.cids.is_empty()),
+    )
+    .catch_unwind()
+    .await
+    .map_err(|payload| format!("empty-CID observation: {}", panic_evidence(payload.as_ref())));
+    match empty_cids {
+        Ok(obs) => {
+            let zero_inventory = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                assert_eq!(
+                    inventory(&obs),
+                    (0, 0),
+                    "failed guest-flow fixture teardown leaves the inventory at zero"
+                );
+            }))
+            .map_err(|payload| {
+                format!("zero forwarder inventory: {}", panic_evidence(payload.as_ref()))
+            });
+            if let Err(failure) = zero_inventory {
+                cleanup_failures.push(failure);
+            }
+        }
+        Err(failure) => {
+            cleanup_failures.push(failure);
+            cleanup_failures.push(
+                "zero forwarder inventory: unavailable because the exact empty-CID observation \
+                 was not obtained"
+                    .to_owned(),
+            );
+        }
+    }
+
+    let shutdown =
+        std::panic::AssertUnwindSafe(node.shutdown()).catch_unwind().await.map_err(|payload| {
+            format!("graceful server shutdown: {}", panic_evidence(payload.as_ref()))
+        });
+    if let Err(failure) = shutdown {
+        cleanup_failures.push(failure);
+    }
+
+    let report = if cleanup_failures.is_empty() {
+        primary_failure
+    } else {
+        format!(
+            "{primary_failure}\ncleanup failures after the primary guest-flow failure:\n- {}",
+            cleanup_failures.join("\n- ")
+        )
+    };
+    panic!("{report}");
 }
 
 /// The pid of the live `cloud-hypervisor` serving `alloc` (matched by its
@@ -877,6 +1074,23 @@ async fn the_forwarder_inventory_counts_probe_and_relay_watches_through_serve() 
     );
     assert!(clients.is_empty(), "no client has connected yet: {clients:?}");
 
+    // The historical accepted-probe count above does not prove the latest
+    // readiness result still admits this backend. Read the existing public
+    // typed snapshot immediately before creating the one-shot client. With
+    // this Service's one readiness probe and success_threshold=1, its current
+    // Pass is the exact input that makes Backend.healthy true.
+    let readiness =
+        std::panic::AssertUnwindSafe(wait_current_readiness_pass(&node, &service, &svc_alloc))
+            .catch_unwind()
+            .await
+            .map_err(|payload| {
+                format!("readiness precondition panicked: {}", panic_evidence(payload.as_ref()))
+            })
+            .and_then(|result| result);
+    if let Err(primary_failure) = readiness {
+        return fail_after_guest_flow_fixture_cleanup(node, None, &service, primary_failure).await;
+    }
+
     // A relayed client connection beside the probes.
     let tag = "d17-dial-client";
     let client = node
@@ -886,7 +1100,20 @@ async fn the_forwarder_inventory_counts_probe_and_relay_watches_through_serve() 
         )
         .await;
     let client_alloc = node.running_alloc_except(&client, &[]).await;
-    wait_flowing(&client_alloc).await;
+    if let Err(primary_failure) = wait_flowing_or_terminal(&client_alloc).await {
+        // This one-shot client cannot recover after its application reaches a
+        // terminal observation. Preserve that primary failure, but first use
+        // the same public operator-stop and graceful server-shutdown path as
+        // the successful body. Dropping ServerHandle would leave the server's
+        // blocking owners live and turn the real failure into an EXEC timeout.
+        return fail_after_guest_flow_fixture_cleanup(
+            node,
+            Some(&client),
+            &service,
+            primary_failure,
+        )
+        .await;
+    }
     let obs = node
         .wait_observation("the relayed connection held", |o| {
             dials_of(o, &svc_alloc, DialPurpose::Relay).1 == 1

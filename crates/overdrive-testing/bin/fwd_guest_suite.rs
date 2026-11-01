@@ -1,8 +1,9 @@
 //! Runs the existing `overdrive-fwd` integration scenarios, the unchanged
 //! `overdrive-dataplane` native integration cells, and the already-authored
-//! STEP 13-04, STEP 13-05, STEP 13-06, STEP 14-01 and STEP 14-02 real-kernel
-//! cells inside disposable `GuestKit` Cloud Hypervisor guests. Test-support
-//! executable only; never shipped by a production crate.
+//! STEP 13-04, STEP 13-05, STEP 13-06, STEP 14-01, STEP 14-02, retained E23
+//! and the retained forwarded-outbound splice cell inside disposable `GuestKit`
+//! Cloud Hypervisor guests. Test-support executable only; never shipped by a
+//! production crate.
 //!
 //! Prepare and run it on the qualified metal launcher without making the
 //! physical kernel the module under test:
@@ -21,7 +22,7 @@
 //! `OVERDRIVE_FWD_GUEST_EXACT` is the focused diagnostic selector for one
 //! already-authored STEP 14-01 or STEP 14-02 identity inside
 //! `cgroup-default`. It uses the same disposable `GuestKit` path but reports
-//! only that exact body's result; it never contributes canonical 117-body
+//! only that exact body's result; it never contributes canonical 119-body
 //! credit.
 
 #![cfg(target_os = "linux")]
@@ -814,6 +815,16 @@ const CGROUP_WORKER: &[Cell] = &[
         true,
     ),
     (
+        "integration::real_cgroup_fs::refused_thread_kill::a_kill_write_under_thread_refusal_returns_an_io_error_and_never_aborts",
+        1,
+        true,
+    ),
+    (
+        "integration::vsock_mesh_egress_mtls::registered_mesh_flow_reaches_its_registered_backend_over_mtls_without_leg_f_resolving_again",
+        1,
+        true,
+    ),
+    (
         "integration::real_cgroup_fs::rmdir_auto_reap::empty_scope_rmdir_succeeds_kernel_reaps_pseudo_files",
         1,
         true,
@@ -1057,7 +1068,7 @@ const STEP13_06_ROUTED_WORKER: &[Cell] = &[
 
 /// Active control-plane integration bodies whose normal-run result was a
 /// root/CAP bailout or a real privileged substrate failure. They extend the
-/// existing control-plane guest after the retained 55+18+5 boundary.
+/// existing control-plane guest after the retained 57+18+5 boundary.
 const CONTROL_PLANE_NORMAL_NATIVE: &[Cell] = &[
     (
         "integration::adopt_on_restart::serve_restart_readopts_surviving_slot_and_gcs_orphan_netns",
@@ -1213,7 +1224,7 @@ const STEP14_02_CLI: &[Cell] = &[
 /// occur in the disposable outer guest and it launches no nested VMM.
 const STEP14_02_WORKER: &[Cell] = &[("leg_f_repair_rebinds_transparent_listener", 1, true)];
 
-const CGROUP_DEFAULT_BASELINE_BODIES: usize = 55;
+const CGROUP_DEFAULT_BASELINE_BODIES: usize = 57;
 const STEP13_04_NATIVE_BODIES: usize = 18;
 const STEP13_05_NATIVE_BODIES: usize = 5;
 const STEP13_06_NATIVE_BODIES: usize = 13;
@@ -1642,7 +1653,7 @@ fn cgroup_tools(
     let mut files: Vec<_> =
         ["cat", "chmod", "ip", "mkdir", "mount", "sh", "stat"].into_iter().map(tool).collect();
     if stage_step13_04_nft {
-        files.extend(["ln", "nft", "ss", "uname"].into_iter().map(tool));
+        files.extend(["ln", "nft", "ss", "strace", "uname"].into_iter().map(tool));
     }
     if stage_step13_05_legb {
         // The V-LEGB-MARK fixture pins and reads back route_localnet=0. The
@@ -2289,11 +2300,11 @@ fn run_focused_exact_nested_vm_body(kit: &GuestKit, selected: &str) -> Result<()
     }
     if source.starts_with("step14-01-") {
         println!(
-            "STEP14-01-FOCUSED-RESULT identity={selected} passed={passed} canonical_117_credit=0"
+            "STEP14-01-FOCUSED-RESULT identity={selected} passed={passed} canonical_119_credit=0"
         );
     } else {
         println!(
-            "STEP14-02-FOCUSED-RESULT source={source} identity={selected} passed={passed} source_manifest_bodies={source_manifest_bodies} canonical_117_credit=0"
+            "STEP14-02-FOCUSED-RESULT source={source} identity={selected} passed={passed} source_manifest_bodies={source_manifest_bodies} canonical_119_credit=0"
         );
     }
     Ok(())

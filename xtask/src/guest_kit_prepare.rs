@@ -95,8 +95,9 @@ pub struct InGuestLane {
 ///   integration binary and executed in the same `mtls-relay` guest.
 /// - `overdrive-control-plane`'s `acceptance` and `integration` test binaries,
 ///   `overdrive-cli`'s `integration` test binary, and `overdrive-worker`'s
-///   `integration` test binary: the unchanged 55
-///   real-cgroup cells plus the 18 already-authored STEP 13-04 and five
+///   `integration` test binary: the 57 retained real-cgroup cells (including
+///   E23's allocation-scoped refused-thread kill write and the existing
+///   forwarded-outbound mTLS cell) plus the 18 already-authored STEP 13-04 and five
 ///   already-authored STEP 13-05 native cells, followed by the 20 existing
 ///   control-plane native bodies discovered by the normal package gate;
 ///   executed by the existing guest-suite runner inside the same three fresh

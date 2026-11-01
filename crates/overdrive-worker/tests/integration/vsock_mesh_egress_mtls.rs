@@ -41,8 +41,12 @@
 //! its TCP socket before TLS processing, and those carry TLS 1.3
 //! `application_data` (`0x17`) records with zero cleartext. The remote peer
 //! holds a real SVID chain from the test CA and requires a client certificate
-//! chaining to the same CA. REQUEST and RESPONSE are byte-distinct so the
-//! round-trip proves the real server→client reply pipe.
+//! chaining to the same CA. The primary cell also correlates that exact live
+//! TLS 1.3 software-TX/RX socket's inode and sole process fd with positive
+//! `splice(2)` source and destination records from the production pumps.
+//! Both request/response pairs are byte-distinct. The second pair begins only
+//! after the first reply, beyond establishment's pre-arm buffer, so the exact
+//! live kTLS fd must occur as a positive splice destination and source.
 //!
 //! ## H-5 (remote-side linger)
 //! "An `overdrive serve` exit resets the remote peer instead of ending its
@@ -78,7 +82,7 @@
     reason = "Tier-3 adapter-integration test bodies: fixture preconditions panic with informative messages; evidence goes to stderr; leg F/C are the ADR-0069 contract vocabulary; the PEM fields share their encoding suffix; const-fn-ability of test helpers is not load-bearing; the install error's size is the production type's"
 )]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream};
@@ -125,6 +129,8 @@ use super::inbound_tproxy_harness::{KernelStateLock, clean_shared_infra, is_root
 /// read RESPONSE, so the oracle proves the real server→client reply pipe.
 const REQUEST: &[u8] = b"P5-S10-FORWARDED-OUTBOUND-REQUEST-guest-plaintext-to-mesh-peer";
 const RESPONSE: &[u8] = b"P5-S10-FORWARDED-OUTBOUND-RESPONSE-mesh-peer-reply-over-leg-f";
+const REQUEST2: &[u8] = b"P5-S10-FORWARDED-OUTBOUND-REQUEST2-steady-state-must-use-forward-splice";
+const RESPONSE2: &[u8] = b"P5-S10-FORWARDED-OUTBOUND-RESPONSE2-steady-state-must-use-return-splice";
 
 /// The DNS SAN the remote mesh peer presents — the fixed SNI the enforcement
 /// adapter's leg-B client handshake uses (`mtls::outbound`).
@@ -494,7 +500,7 @@ struct Rig {
 
 impl Rig {
     async fn start(tag: &str) -> Self {
-        Self::start_with(tag, PeerMode::FinishOnFin).await
+        Self::start_with(tag, PeerMode::Finish).await
     }
 
     async fn start_with(tag: &str, peer_mode: PeerMode) -> Self {
@@ -673,10 +679,14 @@ enum Termination {
 enum PeerMode {
     /// Finish its own direction (the peer half-closes on FIN), so a forwarder
     /// FIN ends both directions of the loopback leg.
-    FinishOnFin,
+    Finish,
+    /// Complete two byte-distinct exchanges before finishing on FIN. The
+    /// second exchange starts after the handshake and pre-arm buffer, so both
+    /// production steady-state splice directions must carry it.
+    TwoPhase,
     /// Keep its own direction open after the FIN, so the loopback leg stays
     /// half-ended (the forwarder's direction FIN'd, leg-F's toward it open).
-    HoldOpenOnFin,
+    HoldOpen,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -684,6 +694,7 @@ struct PeerSession {
     handshake_ok: bool,
     client_spiffe: Option<String>,
     request: Vec<u8>,
+    second_request: Vec<u8>,
     /// Every byte the peer read off its TCP socket before TLS processing —
     /// the inter-agent wire as delivered from leg-F.
     wire_in: Vec<u8>,
@@ -706,7 +717,7 @@ struct MeshPeer {
 
 impl MeshPeer {
     fn spawn(pki: &TestPki) -> Self {
-        Self::spawn_with(pki, PeerMode::FinishOnFin)
+        Self::spawn_with(pki, PeerMode::Finish)
     }
 
     fn spawn_with(pki: &TestPki, mode: PeerMode) -> Self {
@@ -872,18 +883,10 @@ fn run_peer_session(
         .and_then(|chain| chain.first())
         .and_then(|leaf| spiffe_uri_san(leaf.as_ref()));
 
-    let mut request = Vec::new();
-    let mut buf = vec![0_u8; 4096];
-    while request.len() < REQUEST.len() {
-        match rustls::Stream::new(&mut conn, &mut rec).read(&mut buf) {
-            Ok(0) | Err(_) => break,
-            Ok(n) => request.extend_from_slice(&buf[..n]),
-        }
-    }
+    let request = read_tls_record(&mut conn, &mut rec, REQUEST.len());
     let request_complete = request == REQUEST;
     {
         let wire = rec.wire_in.clone();
-        let request = request.clone();
         record(&|s| {
             s.handshake_ok = true;
             s.client_spiffe.clone_from(&client_spiffe);
@@ -904,12 +907,52 @@ fn run_peer_session(
         return;
     }
 
+    if mode == PeerMode::TwoPhase {
+        let second_request = read_tls_record(&mut conn, &mut rec, REQUEST2.len());
+        let second_complete = second_request == REQUEST2;
+        {
+            let wire = rec.wire_in.clone();
+            record(&|s| {
+                s.second_request.clone_from(&second_request);
+                s.wire_in.clone_from(&wire);
+            });
+        }
+        if !second_complete {
+            record(&|s| s.termination = Termination::Failed);
+            return;
+        }
+        let wrote = {
+            let mut tls = rustls::Stream::new(&mut conn, &mut rec);
+            tls.write_all(RESPONSE2).and_then(|()| tls.flush())
+        };
+        if wrote.is_err() {
+            record(&|s| s.termination = Termination::Failed);
+            return;
+        }
+    }
+
     let termination = watch_termination(&mut rec, stop, mode, &|| record(&|s| s.saw_fin = true));
     let wire = rec.wire_in.clone();
     record(&|s| {
         s.wire_in.clone_from(&wire);
         s.termination = termination;
     });
+}
+
+fn read_tls_record(
+    conn: &mut rustls::ServerConnection,
+    rec: &mut RecordingTcp,
+    expected_len: usize,
+) -> Vec<u8> {
+    let mut record = Vec::new();
+    let mut buf = vec![0_u8; 4096];
+    while record.len() < expected_len {
+        match rustls::Stream::new(conn, rec).read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => record.extend_from_slice(&buf[..n]),
+        }
+    }
+    record
 }
 
 /// Raw TCP reads after the exchange: a FIN (`Ok(0)`) or a reset ends the
@@ -934,12 +977,18 @@ fn watch_termination(
             Ok(0) => break,
             Ok(_) => {}
             Err(error) if is_timeout(&error) => {}
+            // The bounded syscall observer attaches to and detaches from every
+            // test-process thread. A ptrace stop may interrupt this fixture's
+            // blocking raw read without consuming bytes. POSIX defines EINTR
+            // as no-progress interruption, so retry within the existing
+            // stop/deadline loop; every transport error remains fail-closed.
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
             Err(error) if is_reset(&error) => return Termination::Reset,
             Err(error) => panic!("mesh peer raw read failed unexpectedly: {error}"),
         }
     }
     on_fin();
-    if mode == PeerMode::HoldOpenOnFin {
+    if mode == PeerMode::HoldOpen {
         return observe_fin_terminal(&rec.tcp, stop, give_up);
     }
     rec.tcp
@@ -1047,6 +1096,190 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|window| window == needle)
 }
 
+/// One live kTLS socket identified from the kernel's public socket inventory.
+#[derive(Debug)]
+struct KtlsSocketObservation {
+    fd: i32,
+    record: String,
+}
+
+fn poll_until_ktls_socket(backend: SocketAddrV4, bound: Duration) -> KtlsSocketObservation {
+    let deadline = Instant::now() + bound;
+    loop {
+        let output = Command::new("ss")
+            .args(["-H", "-4", "-t", "-n", "-e", "-i", "state", "established"])
+            .output()
+            .expect("read the live socket inventory with ss");
+        assert!(output.status.success(), "ss: {}", String::from_utf8_lossy(&output.stderr));
+        let mut records: Vec<(SocketAddrV4, SocketAddrV4, u64, String)> = Vec::new();
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            let fields = line.split_whitespace().collect::<Vec<_>>();
+            let header = fields
+                .get(2)
+                .and_then(|local| local.parse().ok())
+                .zip(fields.get(3).and_then(|peer| peer.parse().ok()))
+                .zip(
+                    fields
+                        .iter()
+                        .find_map(|field| field.strip_prefix("ino:").and_then(|v| v.parse().ok())),
+                );
+            if let Some(((local, peer), inode)) = header {
+                records.push((local, peer, inode, line.to_owned()));
+            } else if let Some((_, _, _, record)) = records.last_mut() {
+                record.push(' ');
+                record.push_str(line.trim());
+            }
+        }
+        let mut candidates = records
+            .into_iter()
+            .filter(|(_, peer, _, record)| {
+                *peer == backend
+                    && record.contains("tcp-ulp-tls")
+                    && (record.contains("version:1.3") || record.contains("version: 1.3"))
+                    && (record.contains("txconf:sw") || record.contains("txconf: sw"))
+                    && (record.contains("rxconf:sw") || record.contains("rxconf: sw"))
+            })
+            .collect::<Vec<_>>();
+        if candidates.len() == 1 {
+            let (_, _, inode, record) = candidates.pop().expect("one kTLS socket record");
+            let needle = format!("socket:[{inode}]");
+            let fds = std::fs::read_dir("/proc/self/fd")
+                .expect("read the test process fd table")
+                .flatten()
+                .filter_map(|entry| {
+                    let target = std::fs::read_link(entry.path()).ok()?;
+                    (target.to_string_lossy() == needle)
+                        .then(|| entry.file_name().to_string_lossy().parse::<i32>().ok())
+                        .flatten()
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(fds.len(), 1, "one process fd owns the live kTLS inode: {record}");
+            return KtlsSocketObservation { fd: fds[0], record };
+        }
+        assert!(
+            Instant::now() < deadline,
+            "one live TLS 1.3 software-TX/RX socket reaches backend {backend}; candidates={candidates:#?}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// A bounded external syscall observer for the existing production pumps.
+struct SpliceTrace {
+    child: Option<Child>,
+    output: std::path::PathBuf,
+}
+
+impl SpliceTrace {
+    fn attach() -> Self {
+        let pid = std::process::id();
+        let output = std::env::temp_dir().join(format!("vsock-mesh-splice-{pid}.log"));
+        let _ = std::fs::remove_file(&output);
+        let child = Command::new("strace")
+            .args(["-f", "-q", "-qq", "-e", "trace=splice", "-o"])
+            .arg(&output)
+            .args(["-p", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("attach strace to the test process");
+        std::thread::sleep(Duration::from_millis(400));
+        Self { child: Some(child), output }
+    }
+
+    fn detach_and_read(&mut self) -> SpliceEvidence {
+        std::thread::sleep(Duration::from_millis(300));
+        if let Some(mut child) = self.child.take() {
+            let pid = i32::try_from(child.id()).expect("strace pid fits i32");
+            // SAFETY: `pid` names the live child this fixture owns. SIGTERM makes
+            // strace detach and flush without affecting the traced test process.
+            let _ = unsafe { libc::kill(pid, libc::SIGTERM) };
+            let _ = child.wait();
+        }
+        std::thread::sleep(Duration::from_millis(150));
+        let raw = std::fs::read_to_string(&self.output).unwrap_or_default();
+        parse_positive_splices(&raw)
+    }
+}
+
+impl Drop for SpliceTrace {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        let _ = std::fs::remove_file(&self.output);
+    }
+}
+
+#[derive(Debug, Default)]
+struct SpliceEvidence {
+    source_fds: BTreeSet<i32>,
+    destination_fds: BTreeSet<i32>,
+}
+
+impl SpliceEvidence {
+    fn assert_same_socket_bidirectional(&self, socket: &KtlsSocketObservation) {
+        assert!(
+            self.source_fds.contains(&socket.fd) && self.destination_fds.contains(&socket.fd),
+            "the exact live kTLS socket is both a positive splice source and destination: fd={}, record={}, splice={self:?}",
+            socket.fd,
+            socket.record
+        );
+    }
+}
+
+fn parse_positive_splices(raw: &str) -> SpliceEvidence {
+    let mut pending = BTreeMap::new();
+    let mut evidence = SpliceEvidence::default();
+    for line in raw.lines() {
+        let (tid, body) = split_trace_tid(line);
+        if body.starts_with("splice(") {
+            let Some(pair) = splice_fd(body, 0).zip(splice_fd(body, 2)) else { continue };
+            if body.contains("<unfinished ...>") {
+                pending.insert(tid, pair);
+            } else if completed_positive_return(body) {
+                evidence.source_fds.insert(pair.0);
+                evidence.destination_fds.insert(pair.1);
+            }
+        } else if body.starts_with("<...")
+            && body.contains("splice resumed")
+            && completed_positive_return(body)
+            && let Some(pair) = pending.remove(&tid)
+        {
+            evidence.source_fds.insert(pair.0);
+            evidence.destination_fds.insert(pair.1);
+        }
+    }
+    evidence
+}
+
+fn split_trace_tid(line: &str) -> (Option<i32>, &str) {
+    let trimmed = line.trim_start();
+    let digits = trimmed.chars().take_while(char::is_ascii_digit).count();
+    if digits == 0 {
+        (None, trimmed)
+    } else {
+        let tid = trimmed[..digits].parse().ok();
+        (tid, trimmed[digits..].trim_start())
+    }
+}
+
+fn completed_positive_return(body: &str) -> bool {
+    body.rsplit_once(" = ").is_some_and(|(_, result)| {
+        result
+            .split_whitespace()
+            .next()
+            .and_then(|raw| raw.parse::<isize>().ok())
+            .is_some_and(|value| value > 0)
+    })
+}
+
+fn splice_fd(body: &str, index: usize) -> Option<i32> {
+    let args = body.strip_prefix("splice(")?;
+    args.split(',').nth(index)?.trim().parse().ok()
+}
+
 // ============================================================================
 // (a) the registered flow is enforced to the registered backend; leg-F does
 //     not resolve it again
@@ -1057,24 +1290,34 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn registered_mesh_flow_reaches_its_registered_backend_over_mtls_without_leg_f_resolving_again()
  {
-    let rig = Rig::start("happy").await;
+    let rig = Rig::start_with("happy", PeerMode::TwoPhase).await;
 
     // GIVEN the owner resolved the guest's destination once, to the mesh peer,
     // and registered the forwarded flow from its forwarder socket.
     let (socket, forwarder_local) = fresh_forwarder();
     let registration = rig.register(forwarder_local).expect("register the forwarded flow");
     let resolutions_before = rig.resolve.calls();
+    let mut splice_trace = SpliceTrace::attach();
 
     // WHEN the forwarder carries the guest's plaintext request to leg-F.
     let mut stream = connect_to_leg_f(socket, rig.leg_f()).await;
     let response = exchange(&mut stream).await;
+    stream.write_all(REQUEST2).await.expect("forwarder writes the steady-state request");
+    let mut response2 = vec![0_u8; RESPONSE2.len()];
+    tokio::time::timeout(ROUND_TRIP_DEADLINE, stream.read_exact(&mut response2))
+        .await
+        .expect("the steady-state response arrives within the round-trip deadline")
+        .expect("forwarder reads the steady-state response");
+    let ktls = poll_until_ktls_socket(rig.peer.addr(), CLOSURE_DEADLINE);
+    let splice = splice_trace.detach_and_read();
 
     // THEN the guest reads the mesh peer's reply byte-exact…
     assert_eq!(response, RESPONSE, "the plaintext round-trip completes through leg-F");
+    assert_eq!(response2, RESPONSE2, "the steady-state round-trip completes through leg-F");
     let sessions = rig
         .peer
         .wait_until(PEER_TERMINATION_DEADLINE, "one served session", |s| {
-            s.len() == 1 && s[0].request == REQUEST
+            s.len() == 1 && s[0].request == REQUEST && s[0].second_request == REQUEST2
         })
         .await;
     let session = &sessions[0];
@@ -1096,6 +1339,7 @@ async fn registered_mesh_flow_reaches_its_registered_backend_over_mtls_without_l
         !contains(&session.wire_in, REQUEST),
         "the guest's plaintext never appears on the inter-agent wire"
     );
+    splice.assert_same_socket_bidirectional(&ktls);
     // …and leg-F never resolved the registered flow again.
     assert_eq!(
         rig.resolve.calls(),
@@ -1396,7 +1640,7 @@ async fn dropping_a_claimed_registration_after_a_clean_close_keeps_the_remote_fi
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn dropping_a_claimed_registration_with_the_loopback_leg_half_ended_resets_the_remote_peer() {
-    let rig = Rig::start_with("drop-half-ended", PeerMode::HoldOpenOnFin).await;
+    let rig = Rig::start_with("drop-half-ended", PeerMode::HoldOpen).await;
 
     // GIVEN a claimed flow whose guest direction has ended with FIN while the
     // peer's direction is still open.
