@@ -98,6 +98,7 @@ proptest! {
 
     /// Every READY — arbitrary `pid` / `port` and launch token — round-trips
     /// bit-exact through `Display -> FromStr` and renders on one line (DG-7).
+    /// CONTRACT_SHAPE: pure-function.
     #[test]
     fn ready_roundtrips_through_display_and_from_str(msg in ready_strategy()) {
         let rendered = msg.to_string();
@@ -112,6 +113,7 @@ proptest! {
 /// `"READY pid=<pid> port=<port> launch=<token>"` (DG-7; `pid`/`port` from
 /// `spike/findings.md:230`) — pinned so a mutation reordering the fields or
 /// renaming a key is caught.
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 fn ready_message_renders_the_measured_wire_shape() {
     let msg = BeaconMessage::Ready { pid: 1, port: VsockPort::new(1234), launch: launch() };
@@ -143,6 +145,7 @@ fn from_str_tolerates_an_unstripped_trailing_newline() {
 }
 
 /// The same trailing-terminator tolerance holds for the three-field READY.
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 fn from_str_tolerates_an_unstripped_trailing_newline_after_ready() {
     let parsed: BeaconMessage =
@@ -174,6 +177,7 @@ fn from_str_rejects_an_unrecognised_kind() {
 
 /// READY keeps its key discipline for `pid` (DG-7 moves READY to three
 /// fields; the three-field refusals are in `vsock_wire_codec.rs`).
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 fn from_str_rejects_ready_with_missing_key_prefix() {
     let err = format!("READY 1 port=2 launch={LAUNCH_HEX}").parse::<BeaconMessage>().unwrap_err();
@@ -183,6 +187,7 @@ fn from_str_rejects_ready_with_missing_key_prefix() {
     );
 }
 
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 fn from_str_rejects_ready_with_non_integer_pid() {
     let err =
