@@ -18,7 +18,8 @@ required completion gates, not follow-up tasks.
   and record any pre-existing or environmental failures accurately.
 - Dispatch an independent reviewer agent for the documentation and blog post.
   The reviewer checks factual accuracy against the implemented behavior and
-  evidence, current limitations, writing quality, links, and validation results.
+  evidence, completeness of the decision narrative below, current limitations,
+  writing quality, links, and validation results.
   Resolve blocking findings and obtain reviewer approval before finalization.
 - Check in the documentation and post, and include their paths and validation
   results, reviewer verdict, and review artifact path in the finalization record.
@@ -27,3 +28,27 @@ Do not mark the feature finalized while either deliverable is missing or its
 required validation or reviewer approval remains unresolved. Deployment and
 publication are separate from this gate; completing the content does not
 authorize publishing the site.
+
+## Tell the feature's decision story
+
+Read the feature documents, accepted ADRs, spike findings, and verification
+evidence before writing the blog post. Do not reconstruct the journey from
+memory or describe only the final implementation.
+
+The post must explain:
+
+- The concrete problem that motivated the feature, including the observed
+  failure or measured constraint and why it blocked the intended outcome.
+- The serious alternatives investigated, what each experiment established,
+  and why each alternative was rejected, deferred, or left unselected.
+- Why the selected approach addresses the original constraint, its costs and
+  tradeoffs, and the discoveries that materially changed the design.
+- What the delivered implementation proves, what remains unmeasured, and its
+  current limitations.
+
+Keep evidence scoped precisely. A limit on one bridge is not a system-wide
+interface limit; an alternative that passed its experiment must not be called
+nonfunctional merely because it was not selected. Explain the actual selection
+criteria. Lead with the motivating problem and decision, then use implementation
+details to explain the journey. Select the consequential experiments rather than
+recounting every delivery task.
