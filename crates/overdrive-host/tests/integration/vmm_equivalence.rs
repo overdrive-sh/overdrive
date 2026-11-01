@@ -186,6 +186,7 @@ async fn vmm_equivalence_sim_vmm() {
     );
 }
 
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn vmm_equivalence_cloud_hypervisor_vmm() {
     let staging_root = default_staging_root();
@@ -313,9 +314,11 @@ async fn vm_fixture_provision_is_idempotent_and_reuses_staged_artifacts() {
 // Step 03-05 / DWD-24 — bounded VMM diagnostics equivalence.
 // ---------------------------------------------------------------------
 
-/// `@contract-shape:pure-function` — repeated live reads and the terminal
-/// `VmmExit` projection observe ONE bounded diagnostic stream: the live
-/// console tail and the final stderr tail are coherent for both adapters.
+/// CONTRACT_SHAPE: bounded-change.
+///
+/// Repeated live reads and the terminal `VmmExit` projection observe ONE
+/// bounded diagnostic stream: the live console tail and the final stderr tail
+/// are coherent for both adapters.
 ///
 /// This is what makes the boot-deadline arm trustworthy. If the live
 /// snapshot and the terminal projection were assembled separately, an
@@ -371,9 +374,11 @@ async fn vmm_live_console_tail_is_coherent_with_final_exit_stderr_tail_for_both_
     let _ = ch.terminate(&ch_process.control, Duration::ZERO).await;
 }
 
-/// `@contract-shape:bounded-change` — an early process exit retains its
-/// exact exit code, terminating signal, and final stderr tail through
-/// both the `SimVmm` and real Cloud Hypervisor adapters.
+/// CONTRACT_SHAPE: bounded-change.
+///
+/// An early process exit retains its exact exit code, terminating signal, and
+/// final stderr tail through both the `SimVmm` and real Cloud Hypervisor
+/// adapters.
 #[tokio::test]
 async fn vmm_early_exit_preserves_code_signal_and_stderr_tail_for_both_adapters() {
     let staging_root = default_staging_root();
