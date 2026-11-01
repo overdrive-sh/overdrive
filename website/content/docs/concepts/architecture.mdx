@@ -247,8 +247,7 @@ Process workloads have per-allocation network namespaces and host TPROXY
 capture. Linux microVMs have a different attachment: guest eBPF captures
 ordinary application sockets, and `ovd_fwd` transports their flows over vsock
 through shared node listeners. The host opens destination sockets and routes
-mesh TCP into the node agent's mTLS enforcement. Reusable TAP and bridge APIs
-remain in the host library, but VM attachment does not use them.
+mesh TCP into the node agent's mTLS enforcement.
 
 The forwarder moves bytes inside the kernel only after the target accepts
 them, preserving source-socket backpressure. It refuses kTLS sockets; TLS
