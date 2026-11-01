@@ -16,9 +16,14 @@ required completion gates, not follow-up tasks.
 - Validate the content with the applicable existing website checks, including
   links, navigation, and blog discovery. Resolve failures caused by the change
   and record any pre-existing or environmental failures accurately.
+- Dispatch an independent reviewer agent for the documentation and blog post.
+  The reviewer checks factual accuracy against the implemented behavior and
+  evidence, current limitations, writing quality, links, and validation results.
+  Resolve blocking findings and obtain reviewer approval before finalization.
 - Check in the documentation and post, and include their paths and validation
-  results in the finalization record.
+  results, reviewer verdict, and review artifact path in the finalization record.
 
 Do not mark the feature finalized while either deliverable is missing or its
-required validation remains unresolved. Deployment and publication are separate
-from this gate; completing the content does not authorize publishing the site.
+required validation or reviewer approval remains unresolved. Deployment and
+publication are separate from this gate; completing the content does not
+authorize publishing the site.
