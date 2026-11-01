@@ -1931,21 +1931,21 @@
       "sid": "14-04",
       "p": "RED",
       "s": "EXECUTED",
-      "d": "FAIL: current-source GuestKit run 0d22828511bb8062eb92e1e0 reached E23; RealCgroupFs tokio::fs write panicked under /ovd-e23-137 before typed io::Error",
+      "d": "FAIL",
       "t": "2026-11-01T10:54:50Z"
     },
     {
       "sid": "14-04",
       "p": "GREEN",
       "s": "EXECUTED",
-      "d": "FAIL: current cgroup-default GuestKit run 2572dafb29ff625bdddc3bbb advanced past corrected E23 but failed existing mesh body with Interrupted system call and splice assertion; exact 119 not achieved",
+      "d": "FAIL",
       "t": "2026-11-01T11:24:58Z"
     },
     {
       "sid": "14-04",
       "p": "GREEN",
       "s": "EXECUTED",
-      "d": "FAIL: current cgroup-default GuestKit run 5e5f472e4191780088cc1a96 reached V-6 and failed at guest_stack_mtls_egress.rs:1368 because terminated allocation exit_code was None instead of Some(0); exact 119 not achieved",
+      "d": "FAIL",
       "t": "2026-11-01T11:55:00Z"
     },
     {
