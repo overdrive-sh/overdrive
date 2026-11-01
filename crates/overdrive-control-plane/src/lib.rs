@@ -1197,6 +1197,33 @@ fn clone_guest_dns_deps(deps: &dns_responder::GuestDnsDeps) -> dns_responder::Gu
     }
 }
 
+fn log_shared_guest_network_audit_failure(failure: &guest_network::SharedGuestNetworkAuditError) {
+    match &failure.source {
+        guest_network::GuestNetworkError::PostconditionMismatch {
+            operation,
+            expected,
+            observed,
+        } => tracing::warn!(
+            name: "guest_network.shared_audit",
+            component = ?failure.component,
+            outcome = "postcondition_mismatch",
+            ?operation,
+            ?expected,
+            ?observed,
+            error = %failure,
+            "shared guest-network audit returned a typed postcondition mismatch"
+        ),
+        source => tracing::warn!(
+            name: "guest_network.shared_audit",
+            component = ?failure.component,
+            outcome = "error",
+            source = ?source,
+            error = %failure,
+            "shared guest-network audit returned a typed failure"
+        ),
+    }
+}
+
 async fn audit_shared_network_components(
     ports: &SharedNetworkSupervisorPorts,
     clock: &dyn Clock,
@@ -1246,14 +1273,26 @@ async fn audit_shared_network_components(
     )
     .await
     {
-        None => findings.push(SharedNetworkAuditFinding {
-            component: SharedGuestNetworkComponent::Forwarder,
-            listener_task_exit: None,
-        }),
-        Some(Err(failure)) => findings.push(SharedNetworkAuditFinding {
-            component: failure.component,
-            listener_task_exit: None,
-        }),
+        None => {
+            tracing::warn!(
+                name: "guest_network.shared_audit",
+                component = ?SharedGuestNetworkComponent::Forwarder,
+                outcome = "timeout",
+                bound = ?SHARED_NETWORK_AUDIT_CALL_BOUND,
+                "shared guest-network audit call reached its bound"
+            );
+            findings.push(SharedNetworkAuditFinding {
+                component: SharedGuestNetworkComponent::Forwarder,
+                listener_task_exit: None,
+            });
+        }
+        Some(Err(failure)) => {
+            log_shared_guest_network_audit_failure(&failure);
+            findings.push(SharedNetworkAuditFinding {
+                component: failure.component,
+                listener_task_exit: None,
+            });
+        }
         Some(Ok(_)) => {}
     }
 
@@ -2836,13 +2875,17 @@ impl ServerHandle {
     /// fix item 5 (exit observer drains LAST so any in-flight
     /// `ExitEvent` lands in obs).
     pub async fn shutdown(self, drain_deadline: Duration) -> Result<(), ServerShutdownError> {
+        tracing::debug!(name: "serve.shutdown.begin", stage = "server_handle", ?drain_deadline);
+
         // 1. Cancel the convergence loop and await its completion.
         //    The loop's `tokio::select!` resolves the cancellation
         //    branch on the next poll and `break`s; the join here
         //    waits for the active tick (if any) to finish through
         //    `action_shim::dispatch`.
+        tracing::debug!(name: "serve.shutdown.stage_begin", stage = "convergence");
         self.convergence_shutdown.cancel();
         let _ = self.convergence_task.await;
+        tracing::debug!(name: "serve.shutdown.stage_complete", stage = "convergence");
 
         // 1b. Cancel the workflow emit-drain loop and await its
         //     completion. It holds an `AppState` clone (and through it
@@ -2850,8 +2893,10 @@ impl ServerHandle {
         //     loop — it must stop dispatching emitted Actions before axum
         //     tears down `AppState`. The join waits for any in-flight
         //     dispatch of an emitted Action to finish through the shim.
+        tracing::debug!(name: "serve.shutdown.stage_begin", stage = "emit_drain");
         self.emit_drain_shutdown.cancel();
         let _ = self.emit_drain_task.await;
+        tracing::debug!(name: "serve.shutdown.stage_complete", stage = "emit_drain");
 
         // 1c. Cancel the interest-router loop and await its completion
         //     (ADR-0084 §5). It holds an `Arc<dyn ObservationStore>` and a
@@ -2860,19 +2905,25 @@ impl ServerHandle {
         //     `tokio::select!` resolves the cancellation branch even while
         //     parked on `subscription.next()`, so the join is bounded (a bare
         //     `abort()` on the parked recv would not interrupt it).
+        tracing::debug!(name: "serve.shutdown.stage_begin", stage = "interest_router");
         self.interest_router_shutdown.cancel();
         let _ = self.interest_router_task.await;
+        tracing::debug!(name: "serve.shutdown.stage_complete", stage = "interest_router");
 
         // 2. Trigger axum graceful shutdown. In-flight requests
         //    complete within `drain_deadline`; new connections are
         //    refused.
+        tracing::debug!(name: "serve.shutdown.stage_begin", stage = "axum_graceful");
         self.inner.graceful_shutdown(Some(drain_deadline));
+        tracing::debug!(name: "serve.shutdown.stage_complete", stage = "axum_graceful");
 
         // 3. Wait for the axum task to drain and exit. We ignore the
         //    inner result here — this is the shutdown path;
         //    test-level assertions on server outcome happen before
         //    shutdown is called.
+        tracing::debug!(name: "serve.shutdown.stage_begin", stage = "server_task");
         let _ = self.server_task.await;
+        tracing::debug!(name: "serve.shutdown.stage_complete", stage = "server_task");
 
         // 4. Cancel the observer's shutdown token, then await the
         //    observer task. The observer's `tokio::select!`
@@ -2884,22 +2935,47 @@ impl ServerHandle {
         //    held by the test fn until its scope ends — would keep
         //    `rx.recv()` blocked indefinitely, deadlocking shutdown.
         //    Per `fix-exec-driver-exit-watcher` Step 01-02 follow-up.
+        tracing::debug!(name: "serve.shutdown.stage_begin", stage = "exit_observer");
         self.exit_observer_shutdown.cancel();
-        for task in self.exit_observer_tasks {
+        for (task_index, task) in self.exit_observer_tasks.into_iter().enumerate() {
+            tracing::debug!(
+                name: "serve.shutdown.exit_observer_join_begin",
+                stage = "exit_observer",
+                task_index,
+            );
             let _ = task.await;
+            tracing::debug!(
+                name: "serve.shutdown.exit_observer_join_complete",
+                stage = "exit_observer",
+                task_index,
+            );
         }
+        tracing::debug!(name: "serve.shutdown.stage_complete", stage = "exit_observer");
 
         // 5. Stop the shared supervisor before its owners, then join every
         // userspace task that can still use the guest-flow owner or resolver.
         // This does not stop workloads or author lifecycle state. Active
         // allocation rule guards are relinquished without deletion.
+        tracing::debug!(name: "serve.shutdown.stage_begin", stage = "shared_network_supervisor");
         self.shared_network_supervisor.shutdown().await;
+        tracing::debug!(name: "serve.shutdown.stage_complete", stage = "shared_network_supervisor");
+        tracing::debug!(name: "serve.shutdown.stage_begin", stage = "mtls_worker_owner");
         let worker_failure =
             self.mtls_worker_owner.shutdown_owner().await.err().map(ServerShutdownError::new);
+        tracing::debug!(
+            name: "serve.shutdown.stage_complete",
+            stage = "mtls_worker_owner",
+            failed = worker_failure.is_some(),
+        );
         if let Some(owner) = &self.guest_flow_owner {
+            tracing::debug!(name: "serve.shutdown.stage_begin", stage = "guest_flow_owner");
             owner.shutdown_tasks().await;
+            tracing::debug!(name: "serve.shutdown.stage_complete", stage = "guest_flow_owner");
         }
+        tracing::debug!(name: "serve.shutdown.stage_begin", stage = "mtls_resolve_owner");
         self.mtls_resolve_owner.shutdown().await;
+        tracing::debug!(name: "serve.shutdown.stage_complete", stage = "mtls_resolve_owner");
+        tracing::debug!(name: "serve.shutdown.complete", stage = "server_handle");
         worker_failure.map_or(Ok(()), Err)
     }
 }

@@ -293,6 +293,10 @@ impl GuestFlowOwner {
                 Ok(())
             }
             GuestIoEvent::ForwardEnded { end } => {
+                eprintln!(
+                    "overdrive-init: guest-flow forward-end id={:?} outcome={:?}",
+                    end.id, end.outcome
+                );
                 self.handle_forward_end(end);
                 Ok(())
             }
@@ -608,6 +612,11 @@ impl GuestFlowOwner {
                 }
             }
             ControlMessage::Abort { flow } => {
+                eprintln!(
+                    "overdrive-init: guest-flow control-abort flow={:?} paired={}",
+                    flow,
+                    self.tcp_pairs.contains_key(&flow)
+                );
                 if let Some(pending) = self.pending_outbound.remove(&flow) {
                     self.observation.awaiting_paired.remove(&flow);
                     self.io.abort(pending.child.into());
@@ -710,6 +719,13 @@ impl GuestFlowOwner {
     }
 
     fn handle_forward_end(&mut self, end: ForwardEnd) {
+        eprintln!(
+            "overdrive-init: guest-flow handle-end id={:?} outcome={:?} tcp_pairs={} pending_end_closes={}",
+            end.id,
+            end.outcome,
+            self.tcp_pairs.len(),
+            self.pending_end_closes.len()
+        );
         if let Some(close) = self.pending_end_closes.remove(&end.id) {
             self.observe_forward_end(end);
             self.pending_guest_closes.push_back(close);
@@ -752,6 +768,10 @@ impl GuestFlowOwner {
     fn apply_deferred_guest_close(&mut self, close: DeferredGuestClose) {
         match close {
             DeferredGuestClose::Stream { pair, clear_linger } => {
+                eprintln!(
+                    "overdrive-init: guest-flow deferred-close stream id={:?} clear_linger={} outer={:?} vsock={:?}",
+                    pair.id, clear_linger, pair.outer, pair.vsock
+                );
                 if clear_linger {
                     let _ = self.io.clear_linger(&pair.outer);
                 }
@@ -1002,8 +1022,11 @@ impl GuestFlowOwner {
         self.observation.flows.remove(&flow);
         self.observation.accepted.remove(&flow);
         let id = pair.id;
+        eprintln!("overdrive-init: guest-flow abort-pair flow={flow:?} id={id:?}");
         self.hold_close_until_end(id, DeferredGuestClose::Stream { pair, clear_linger: false });
-        self.forwarder_abort(id)?;
+        let result = self.forwarder_abort(id);
+        eprintln!("overdrive-init: guest-flow abort-pair result={result:?}");
+        result?;
         Ok(())
     }
 

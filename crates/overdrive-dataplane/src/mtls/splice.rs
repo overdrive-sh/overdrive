@@ -40,7 +40,7 @@ use std::future::Future;
 use std::io::Write;
 use std::net::TcpStream;
 use std::os::fd::{FromRawFd, RawFd};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -53,6 +53,43 @@ use std::time::Duration;
 /// the calling pump thread never joins itself). The closure carries the connection's
 /// `EnforcedConnectionId` / alloc for the re-homed telemetry.
 pub(super) type SelfTeardown = Arc<dyn Fn() + Send + Sync>;
+
+/// Adapter-private role of a pump in a composed mTLS connection. The role is
+/// diagnostic context only; it does not participate in liveness or teardown.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum PumpRole {
+    Unknown = 0,
+    OutboundForward = 1,
+    OutboundReturn = 2,
+    InboundDeliver = 3,
+    InboundResponse = 4,
+    InboundRelay = 5,
+}
+
+impl PumpRole {
+    pub(super) const fn from_raw(raw: u8) -> Self {
+        match raw {
+            1 => Self::OutboundForward,
+            2 => Self::OutboundReturn,
+            3 => Self::InboundDeliver,
+            4 => Self::InboundResponse,
+            5 => Self::InboundRelay,
+            _ => Self::Unknown,
+        }
+    }
+
+    pub(super) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::OutboundForward => "outbound_forward_leg_f_to_b",
+            Self::OutboundReturn => "outbound_return_leg_b_to_f",
+            Self::InboundDeliver => "inbound_deliver_leg_c_to_s",
+            Self::InboundResponse => "inbound_response_leg_s_to_c",
+            Self::InboundRelay => "inbound_guest_relay_leg_c_to_s",
+        }
+    }
+}
 
 /// Shared observation surface for one connection's pump. `liveness` reads
 /// `bytes_spliced` + `running`; `teardown` sets `stop`.
@@ -81,6 +118,11 @@ pub(super) struct PumpState {
     /// `OnceLock` makes installation race-free and the read lock-free; the trigger's
     /// own idempotency guards a double-fire from both pumps.
     self_teardown: OnceLock<SelfTeardown>,
+    /// Adapter-private role used only to identify the terminal pump in a
+    /// behavior-neutral transport-death diagnostic.
+    role: AtomicU8,
+    /// Role captured immediately before the transport-death trigger fires.
+    terminal_role: AtomicU8,
 }
 
 impl PumpState {
@@ -92,6 +134,16 @@ impl PumpState {
         // `set` returns Err if already installed; the first install wins and a
         // duplicate is harmless (both carry the same connection's teardown).
         let _ = self.self_teardown.set(trigger);
+    }
+
+    /// Set the adapter-private diagnostic role for this pump.
+    pub(super) fn set_role(&self, role: PumpRole) {
+        self.role.store(role as u8, Ordering::SeqCst);
+    }
+
+    /// Return the role captured at the terminal transport-death boundary.
+    pub(super) fn terminal_role(&self) -> PumpRole {
+        PumpRole::from_raw(self.terminal_role.load(Ordering::SeqCst))
     }
 
     /// `true` iff the (B) self-teardown trigger has been installed on this pump's
@@ -368,6 +420,9 @@ fn forward_half_close_if_source_eof(dst_fd: RawFd, exit: PumpExit, state: &PumpS
 /// observes `Gone`. The self-teardown trigger runs the reclaim on a detached reaper
 /// (the pump thread never joins itself).
 fn mark_exited(state: &PumpState, exit: PumpExit) {
+    if exit == PumpExit::TransportDeath {
+        state.terminal_role.store(state.role.load(Ordering::SeqCst), Ordering::SeqCst);
+    }
     state.running.store(false, Ordering::SeqCst);
     if exit == PumpExit::TransportDeath {
         state.fire_self_teardown_if_unexpected();

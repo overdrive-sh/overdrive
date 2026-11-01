@@ -708,6 +708,57 @@ pub struct HostSharedGuestNetworkOwner {
     runtime: Arc<flow_owner::OwnerRuntime>,
 }
 
+#[cfg(test)]
+#[derive(Default)]
+struct SharedAuditCheckpoint {
+    armed: parking_lot::Mutex<Option<SharedAuditCheckpointWait>>,
+}
+
+#[cfg(test)]
+struct SharedAuditCheckpointWait {
+    reached: tokio::sync::oneshot::Sender<()>,
+    release: tokio::sync::oneshot::Receiver<()>,
+}
+
+#[cfg(test)]
+pub(crate) struct SharedAuditCheckpointControl {
+    reached: tokio::sync::oneshot::Receiver<()>,
+    release: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
+#[cfg(test)]
+impl SharedAuditCheckpoint {
+    fn arm(&self) -> SharedAuditCheckpointControl {
+        let (reached, wait_reached) = tokio::sync::oneshot::channel();
+        let (release, wait_release) = tokio::sync::oneshot::channel();
+        let mut armed = self.armed.lock();
+        assert!(armed.is_none(), "a shared-audit checkpoint is already armed");
+        *armed = Some(SharedAuditCheckpointWait { reached, release: wait_release });
+        drop(armed);
+        SharedAuditCheckpointControl { reached: wait_reached, release: Some(release) }
+    }
+
+    async fn pause_if_armed(&self) {
+        let checkpoint = { self.armed.lock().take() };
+        let Some(checkpoint) = checkpoint else { return };
+        let _reached_observed = checkpoint.reached.send(());
+        let _released_or_cancelled = checkpoint.release.await;
+    }
+}
+
+#[cfg(test)]
+impl SharedAuditCheckpointControl {
+    pub(crate) async fn reached(&mut self) {
+        (&mut self.reached)
+            .await
+            .expect("the armed shared audit reaches its post-snapshot checkpoint");
+    }
+
+    pub(crate) fn release(mut self) -> bool {
+        self.release.take().is_some_and(|release| release.send(()).is_ok())
+    }
+}
+
 impl std::fmt::Debug for HostSharedGuestNetworkOwner {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.debug_struct("HostSharedGuestNetworkOwner").finish_non_exhaustive()
@@ -727,6 +778,11 @@ impl HostSharedGuestNetworkOwner {
     /// tree before the serve owner releases the adapters those tasks hold.
     pub(crate) async fn shutdown_tasks(&self) {
         owner_runtime::shutdown(self).await;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn arm_shared_audit_post_snapshot_checkpoint(&self) -> SharedAuditCheckpointControl {
+        self.runtime.shared_audit_checkpoint.arm()
     }
 }
 
@@ -1270,6 +1326,8 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
             snapshot
         };
         let generation = self.runtime.state.lock().forwarder_generation;
+        #[cfg(test)]
+        self.runtime.shared_audit_checkpoint.pause_if_armed().await;
         if !repairs_in_flight.contains(&SharedGuestNetworkComponent::Forwarder) {
             let inventory = self.io.inventory().map_err(|source| {
                 mark_shared_repair_component(&self.runtime, SharedGuestNetworkComponent::Forwarder);
@@ -1278,8 +1336,19 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
                     source: GuestNetworkError::Forwarder { source },
                 }
             })?;
-            if inventory.live_pairs != expected_pairs || inventory.live_watches != expected_watches
-            {
+            let inventory_matches_snapshot = inventory.live_pairs == expected_pairs
+                && inventory.live_watches == expected_watches;
+            let inventory_matches_current_owner = if inventory_matches_snapshot {
+                true
+            } else {
+                let state = self.runtime.state.lock();
+                !state.repairs_in_flight.contains(&SharedGuestNetworkComponent::Forwarder)
+                    && state.forwarder_generation == generation
+                    && inventory.live_pairs == u32::try_from(state.pairs.len()).unwrap_or(u32::MAX)
+                    && inventory.live_watches
+                        == u32::try_from(state.dial_watches.len()).unwrap_or(u32::MAX)
+            };
+            if !inventory_matches_current_owner {
                 mark_shared_repair_component(&self.runtime, SharedGuestNetworkComponent::Forwarder);
                 return Err(SharedGuestNetworkAuditError {
                     component: SharedGuestNetworkComponent::Forwarder,

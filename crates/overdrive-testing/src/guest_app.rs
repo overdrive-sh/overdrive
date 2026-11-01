@@ -81,6 +81,15 @@ pub mod subcommand {
     /// [`super::LISTEN_CONN_TERMINAL_PREFIX`] line naming its read side's
     /// first terminal event. It never exits.
     pub const LISTEN: &str = "listen";
+    /// `v6-peer <population>`: the peer VM Service of the cumulative V-6
+    /// walking skeleton. It serves the fixed TCP/UDP application, probe,
+    /// state-control and population ports below until killed.
+    pub const V6_PEER: &str = "v6-peer";
+    /// `v6-client <peer-name> <peer-vip> <off-tcp> <off-udp> <population>
+    /// <tag>`: the client VM Service of V-6. It owns every DNS, VIP and
+    /// off-node dial, drives the peer's probe state, then holds the bounded
+    /// population until stopped.
+    pub const V6_CLIENT: &str = "v6-client";
     /// `run-with-modules <module.ko>... -- <program> <args>...`: loads each
     /// module with `finit_module` (already loaded is success), then execs
     /// the program. The in-guest test lane's launcher (`guest_lane`).
@@ -141,6 +150,32 @@ pub const LISTEN_CONN_TERMINAL_PREFIX: &str = "listen: conn=";
 pub const PEER_TCP_PORT: u16 = 7000;
 /// See [`PEER_TCP_PORT`].
 pub const PEER_UDP_PORT: u16 = 7001;
+
+/// V-6 peer Service TCP application port.
+pub const V6_APP_PORT: u16 = 18_080;
+/// V-6 peer Service TCP readiness-probe port.
+pub const V6_TCP_PROBE_PORT: u16 = 18_082;
+/// V-6 peer Service HTTP readiness-probe port.
+pub const V6_HTTP_PROBE_PORT: u16 = 18_083;
+/// V-6 client Service admission-only listener.
+pub const V6_CLIENT_ADMISSION_PORT: u16 = 18_085;
+/// First of the bounded distinct V-LEGB-SERVE population ports.
+pub const V6_POPULATION_BASE_PORT: u16 = 18_100;
+/// Maximum population admitted by the reviewed 64-port comparison.
+pub const V6_POPULATION_MAX: u16 = 65;
+
+/// Byte-distinct V-6 application protocol records.
+pub const V6_NAME_REQUEST: &[u8] = b"V6-NAME-REQUEST-client-service\n";
+/// Reply to [`V6_NAME_REQUEST`].
+pub const V6_NAME_RESPONSE: &[u8] = b"V6-NAME-RESPONSE-peer-service\n";
+/// VIP TCP request; also the confidentiality marker.
+pub const V6_VIP_REQUEST: &[u8] = b"V6-VIP-REQUEST-client-service\n";
+/// VIP TCP response; also the confidentiality marker.
+pub const V6_VIP_RESPONSE: &[u8] = b"V6-VIP-RESPONSE-peer-service\n";
+/// Remote inbound mTLS request.
+pub const V6_REMOTE_REQUEST: &[u8] = b"V6-REMOTE-REQUEST-route-disjoint-peer\n";
+/// Remote inbound mTLS response.
+pub const V6_REMOTE_RESPONSE: &[u8] = b"V6-REMOTE-RESPONSE-peer-service\n";
 
 /// A tag is what tells the records of one VM from another's: ASCII
 /// alphanumerics and `-`, 1..=48 bytes.
@@ -525,6 +560,8 @@ mod remote_peer {
         pub requests: Vec<ServedRequest>,
         /// Served datagram requests, in order.
         pub datagrams: Vec<ServedDatagram>,
+        /// Genuine zero-length datagrams, recorded by source address.
+        pub empty_datagrams: Vec<SocketAddrV4>,
         /// Churn datagrams received, per tag.
         pub churn: BTreeMap<String, u32>,
         /// `hold` flows, keyed by tag; a later connection with a tag already
@@ -656,7 +693,7 @@ mod remote_peer {
             &self,
             bound: Duration,
             done: impl Fn(&PeerLog) -> bool,
-        ) -> Result<PeerLog, PeerLog> {
+        ) -> Result<PeerLog, Box<PeerLog>> {
             let deadline = Instant::now() + bound;
             loop {
                 let log = self.snapshot();
@@ -664,7 +701,7 @@ mod remote_peer {
                     return Ok(log);
                 }
                 if Instant::now() >= deadline {
-                    return Err(log);
+                    return Err(Box::new(log));
                 }
                 thread::sleep(Duration::from_millis(50));
             }
@@ -938,6 +975,11 @@ mod remote_peer {
         while !shared.stop.load(Ordering::SeqCst) {
             match socket.recv_from(&mut buf) {
                 Ok((n, from)) => {
+                    if n == 0 {
+                        let _ = socket.send_to(&[], from);
+                        lock(&shared.log).empty_datagrams.push(v4(from));
+                        continue;
+                    }
                     let text = String::from_utf8_lossy(&buf[..n]).into_owned();
                     if let Some(tag) = text.strip_prefix("DGRAM-REQ:") {
                         let tag = tag.to_owned();

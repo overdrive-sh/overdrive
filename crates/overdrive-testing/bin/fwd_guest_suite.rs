@@ -17,6 +17,11 @@
 //! `probe`, `core`, `unload`, `ulp`, `mtls-relay`, `cgroup-default`, `stress`,
 //! and `nested-boundary`. Omitting it runs every group in that order; each
 //! isolation boundary gets a fresh guest boot.
+//!
+//! `OVERDRIVE_FWD_GUEST_EXACT` is the focused diagnostic selector for one
+//! already-authored STEP 14-01 identity inside `cgroup-default`. It uses the
+//! same disposable `GuestKit` path but reports only that exact body's result;
+//! it never contributes canonical 117-body credit.
 
 #![cfg(target_os = "linux")]
 #![allow(
@@ -41,6 +46,7 @@ use overdrive_testing::guest_lane::{CELL_BOUND, IN_GUEST_TESTS_PATH, InGuestTest
 use overdrive_testing::vm_fixture::default_staging_root;
 
 const GUEST_MIB: u32 = 4_096;
+const GUEST_EXACT_ENV: &str = "OVERDRIVE_FWD_GUEST_EXACT";
 const TEST_THREADS: &str = "--test-threads=1";
 const NO_CAPTURE: &str = "--nocapture";
 const ABSENT_LOOPBACK: &str = "integration::probe_gold::an_absent_vsock_loopback_transport_is_refused_naming_stream_round_trip";
@@ -1310,8 +1316,8 @@ impl GuestRun {
                         "guest test argv {test_args:?} did not return within {bound:?}"
                     ),
                     source: std::io::Error::other(format!(
-                        "{source}; disposable guest console tail:\n{}",
-                        self.guest.vm.console_tail(16 * 1024)
+                        "{source}; full disposable guest console:\n{}",
+                        self.guest.vm.console()
                     )),
                 });
             }
@@ -1390,8 +1396,8 @@ impl GuestRun {
                         "cgroup guest test argv {test_args:?} did not return within {bound:?}"
                     ),
                     source: std::io::Error::other(format!(
-                        "{source}; disposable guest console tail:\n{}",
-                        self.guest.vm.console_tail(16 * 1024)
+                        "{source}; full disposable guest console:\n{}",
+                        self.guest.vm.console()
                     )),
                 });
             }
@@ -1702,12 +1708,13 @@ fn nested_guest_kit_module_source(
     Ok(GuestFile { host, guest, with_shared_libraries: false })
 }
 
-/// Stage the exact outer-guest substrate the already-authored STEP 14-01
-/// binaries consume. This is the existing GuestKit-inside-GuestKit shape from
-/// `nested-boundary`, plus the production serve dependencies those binaries
-/// reach: the BPF object, netlink/nft modules, veth, kTLS and the ordinary
-/// host tools. It adds no test hook or alternate production composition.
-fn step14_01_nested_support(
+/// Stage the exact outer-guest substrate the nested production-serve
+/// integration binaries consume. This is the existing
+/// GuestKit-inside-GuestKit shape from `nested-boundary`, plus the production
+/// serve dependencies those binaries reach: the BPF object, netlink/nft
+/// modules, veth, kTLS and the ordinary host tools. It adds no test hook or
+/// alternate production composition.
+fn nested_vm_test_support(
     kit: &GuestKit,
     dir: &Path,
 ) -> Result<(Vec<GuestFile>, Vec<String>), GuestKitError> {
@@ -2062,11 +2069,11 @@ fn exec_required_cgroup_cells_with_bound(
     Ok(passed)
 }
 
-/// Run one STEP 14-01 test binary in a fresh member of the existing
-/// `cgroup-default` disposable-guest group. The production test body launches
-/// the inner workload VMs; this outer guest contains every kernel, cgroup,
-/// netns, nft, BPF and nested-KVM effect.
-fn run_step14_01_binary(
+/// Run one prepared integration binary in a fresh nested-VM-capable member of
+/// the existing `cgroup-default` disposable-guest group. The production test
+/// body launches the inner workload VMs; this outer guest contains every
+/// kernel, cgroup, netns, nft, BPF and nested-KVM effect.
+fn run_nested_vm_test_binary(
     kit: &GuestKit,
     package: &str,
     target: &str,
@@ -2077,7 +2084,7 @@ fn run_step14_01_binary(
     let tests = InGuestTests::prepared(package, target)?;
     let staging = default_staging_root();
     let support = WorkDir::create(&staging, &format!("fwd-suite-{name}-support"))?;
-    let (extra, module_paths) = step14_01_nested_support(kit, support.path())?;
+    let (extra, module_paths) = nested_vm_test_support(kit, support.path())?;
     let mut guest = GuestRun::boot_with_vcpus(kit, &tests, name, slot, extra, module_paths, 8)?;
 
     let modules = guest.module_paths.clone();
@@ -2123,6 +2130,49 @@ fn run_step14_01_binary(
     guest.finish(name)?;
     drop(support);
     Ok(passed)
+}
+
+fn focused_exact_selector() -> Option<String> {
+    std::env::var_os(GUEST_EXACT_ENV).map(|value| {
+        value.into_string().unwrap_or_else(|_| panic!("{GUEST_EXACT_ENV} must be valid UTF-8"))
+    })
+}
+
+fn run_focused_exact_nested_vm_body(kit: &GuestKit, selected: &str) -> Result<(), GuestKitError> {
+    let found = STEP14_01_CLI
+        .iter()
+        .copied()
+        .find(|(identity, _, _)| *identity == selected)
+        .map(|cell| ("overdrive-cli", "step14-01-focused-cli", 14, cell))
+        .or_else(|| {
+            STEP14_01_CONTROL_PLANE
+                .iter()
+                .copied()
+                .find(|(identity, _, _)| *identity == selected)
+                .map(|cell| {
+                    ("overdrive-control-plane", "step14-01-focused-control-plane", 15, cell)
+                })
+        });
+    let Some((package, name, slot, cell)) = found else {
+        return Err(GuestKitError::Staging {
+            detail: format!("{GUEST_EXACT_ENV}={selected:?} matched zero STEP 14-01 identities"),
+            source: std::io::Error::other(
+                "the focused exact selector must match one existing body",
+            ),
+        });
+    };
+    let expected = cell.1;
+    let passed = run_nested_vm_test_binary(kit, package, "integration", name, slot, &[cell])?;
+    if passed != expected {
+        return Err(GuestKitError::Staging {
+            detail: format!(
+                "focused exact identity {selected:?} selected {passed} passing bodies, expected {expected}"
+            ),
+            source: std::io::Error::other("the focused exact body count changed"),
+        });
+    }
+    println!("STEP14-01-FOCUSED-RESULT identity={selected} passed={passed} canonical_117_credit=0");
+    Ok(())
 }
 
 #[allow(
@@ -2317,6 +2367,10 @@ fn run_cgroup_binary(
     reason = "the existing group keeps each historical subcount and the new native-covered count independently fail-closed"
 )]
 fn run_cgroup_default(kit: &GuestKit, _fwd_tests: &InGuestTests) -> Result<(), GuestKitError> {
+    if let Some(selected) = focused_exact_selector() {
+        return run_focused_exact_nested_vm_body(kit, &selected);
+    }
+
     let acceptance = run_cgroup_binary(
         kit,
         "overdrive-control-plane",
@@ -2450,7 +2504,7 @@ fn run_cgroup_default(kit: &GuestKit, _fwd_tests: &InGuestTests) -> Result<(), G
     // Slots 14 and 15 belonged to the now-finished baseline guests above.
     // Reusing them sequentially preserves the registered 16-CID band while
     // giving each STEP 14-01 binary a fresh disposable outer guest.
-    let step14_01_cli = run_step14_01_binary(
+    let step14_01_cli = run_nested_vm_test_binary(
         kit,
         "overdrive-cli",
         "integration",
@@ -2466,7 +2520,7 @@ fn run_cgroup_default(kit: &GuestKit, _fwd_tests: &InGuestTests) -> Result<(), G
             source: std::io::Error::other("the STEP 14-01 CLI manifest changed"),
         });
     }
-    let step14_01_control_plane = run_step14_01_binary(
+    let step14_01_control_plane = run_nested_vm_test_binary(
         kit,
         "overdrive-control-plane",
         "integration",
@@ -2599,6 +2653,12 @@ fn main() {
     let tests = InGuestTests::prepared("overdrive-fwd", "integration")
         .expect("cargo xtask guest-kit-prepare staged the integration binary");
     let selected = std::env::var("OVERDRIVE_FWD_GUEST_GROUP").unwrap_or_else(|_| "all".to_owned());
+    if std::env::var_os(GUEST_EXACT_ENV).is_some() {
+        assert_eq!(
+            selected, "cgroup-default",
+            "{GUEST_EXACT_ENV} requires OVERDRIVE_FWD_GUEST_GROUP=cgroup-default"
+        );
+    }
     let runs = [
         ("probe", run_probe_isolation as fn(&GuestKit, &InGuestTests) -> _),
         ("core", run_core),

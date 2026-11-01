@@ -77,7 +77,7 @@ mod supervision;
 mod tls_config;
 
 use limits::InFlightLedger;
-use splice::{PumpHandle, SelfTeardown};
+use splice::{PumpHandle, PumpRole, SelfTeardown};
 
 /// Per-connection adapter-private tracking state, keyed by
 /// [`EnforcedConnectionId`]. Holds the owned legs (closed on teardown) + the
@@ -263,6 +263,7 @@ impl HostMtlsEnforcement {
         let conns = Arc::clone(&self.conns);
         Arc::new(move || {
             let alloc = id.alloc().clone();
+            trace_transport_death_diagnostics(&conns, &id, &alloc);
             tracing::warn!(
                 name: "mtls.pump.stalled",
                 connection = %id,
@@ -277,6 +278,26 @@ impl HostMtlsEnforcement {
             // threads, and the calling thread IS one of those pumps; it must not join
             // itself.
             std::thread::spawn(move || {
+                // The outbound mesh leg's transport death is already an abortive
+                // peer outcome. Preserve its SO_LINGER{1,0} close so the workload
+                // sees Reset; inbound relay teardown keeps its existing
+                // GuestStream-derived reset decision and graceful probe cleanup.
+                let outbound_transport_death = {
+                    let guard = conns.lock();
+                    guard.get(&id).is_some_and(|state| {
+                        state.pump.state.terminal_role() == PumpRole::OutboundForward
+                            || state.pump.state.terminal_role() == PumpRole::OutboundReturn
+                            || state.aux_pumps.iter().any(|pump| {
+                                matches!(
+                                    pump.state.terminal_role(),
+                                    PumpRole::OutboundForward | PumpRole::OutboundReturn
+                                )
+                            })
+                    })
+                };
+                if outbound_transport_death && let Some(state) = conns.lock().get(&id) {
+                    state.pump.state.reset_peer_on_reclaim.store(true, Ordering::SeqCst);
+                }
                 let torn = reclaim_connection(&conns, &id);
                 tracing::warn!(
                     name: "mtls.pump.teardown_on_stall",
@@ -366,6 +387,189 @@ fn set_abortive_linger(fd: RawFd) {
                 .unwrap_or(libc::socklen_t::MAX),
         )
     };
+}
+
+/// Capture adapter-private, read-only transport state before the detached
+/// reaper closes either leg. This deliberately uses only `getsockname`,
+/// `getpeername`, `TCP_INFO` and read-only socket-option queries; it does not
+/// call `SO_ERROR`, poll, read, write, shutdown or otherwise consume state.
+fn trace_transport_death_diagnostics(
+    conns: &ConnTable,
+    id: &EnforcedConnectionId,
+    alloc: &AllocationId,
+) {
+    let (primary_role, auxiliary_roles, primary_running, primary_record_pending, snapshots) = {
+        let guard = conns.lock();
+        let Some(state) = guard.get(id) else {
+            tracing::debug!(
+                name: "mtls.transport_death.snapshot_unavailable",
+                connection = %id,
+                alloc = %alloc,
+                reason = "connection_already_reclaimed",
+            );
+            return;
+        };
+        let primary_role = state.pump.state.terminal_role();
+        let auxiliary_roles = state
+            .aux_pumps
+            .iter()
+            .map(|pump| pump.state.terminal_role().as_str())
+            .collect::<Vec<_>>();
+        let snapshots = state
+            .legs
+            .iter()
+            .map(|leg| (leg.as_raw_fd(), socket_snapshot(leg.as_raw_fd())))
+            .collect::<Vec<_>>();
+        let primary_running = state.pump.state.running.load(Ordering::SeqCst);
+        let primary_record_pending = state.pump.state.record_pending.load(Ordering::SeqCst);
+        drop(guard);
+        (primary_role, auxiliary_roles, primary_running, primary_record_pending, snapshots)
+    };
+    let outbound = primary_role.as_str().starts_with("outbound_")
+        || auxiliary_roles.iter().any(|role| role.starts_with("outbound_"));
+    let inbound = primary_role.as_str().starts_with("inbound_")
+        || auxiliary_roles.iter().any(|role| role.starts_with("inbound_"));
+    let leg_labels = if outbound {
+        ["leg_f", "leg_b"]
+    } else if inbound {
+        ["leg_c", "leg_s"]
+    } else {
+        ["leg_0", "leg_1"]
+    };
+
+    tracing::warn!(
+        name: "mtls.transport_death.pump_snapshot",
+        connection = %id,
+        alloc = %alloc,
+        terminal_role = primary_role.as_str(),
+        auxiliary_roles = ?auxiliary_roles,
+        primary_running,
+        primary_record_pending,
+    );
+    for (index, (fd, snapshot)) in snapshots.into_iter().enumerate() {
+        tracing::warn!(
+            name: "mtls.transport_death.socket_snapshot",
+            connection = %id,
+            alloc = %alloc,
+            leg = leg_labels.get(index).copied().unwrap_or("leg_unknown"),
+            fd,
+            snapshot = %snapshot,
+        );
+    }
+}
+
+fn socket_snapshot(fd: RawFd) -> String {
+    format!(
+        "local={} peer={} options={} tcp_info={}",
+        socket_endpoint(fd, false),
+        socket_endpoint(fd, true),
+        transport_socket_options(fd),
+        tcp_info_snapshot(fd),
+    )
+}
+
+fn socket_endpoint(fd: RawFd, peer: bool) -> String {
+    let mut storage = unsafe { std::mem::zeroed::<libc::sockaddr_storage>() };
+    let mut length = match libc::socklen_t::try_from(std::mem::size_of_val(&storage)) {
+        Ok(length) => length,
+        Err(error) => return format!("invalid_length={error}"),
+    };
+    let result = unsafe {
+        if peer {
+            libc::getpeername(fd, (&raw mut storage).cast::<libc::sockaddr>(), &raw mut length)
+        } else {
+            libc::getsockname(fd, (&raw mut storage).cast::<libc::sockaddr>(), &raw mut length)
+        }
+    };
+    if result != 0 {
+        return format!("error={}", std::io::Error::last_os_error());
+    }
+    if storage.ss_family == libc::AF_INET as libc::sa_family_t {
+        let address = unsafe { *(&raw const storage).cast::<libc::sockaddr_in>() };
+        let ip = Ipv4Addr::from(u32::from_be(address.sin_addr.s_addr));
+        return format!("{ip}:{}", u16::from_be(address.sin_port));
+    }
+    format!("family={}", storage.ss_family)
+}
+
+#[cfg(target_os = "linux")]
+fn read_socket_option(fd: RawFd, level: libc::c_int, name: libc::c_int) -> String {
+    let mut value = 0 as libc::c_int;
+    let mut length = match libc::socklen_t::try_from(std::mem::size_of_val(&value)) {
+        Ok(length) => length,
+        Err(error) => return format!("invalid_length={error}"),
+    };
+    let result =
+        unsafe { libc::getsockopt(fd, level, name, (&raw mut value).cast(), &raw mut length) };
+    if result == 0 {
+        value.to_string()
+    } else {
+        format!("error={}", std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn read_socket_option(_fd: RawFd, _level: libc::c_int, _name: libc::c_int) -> String {
+    "unsupported_platform".to_owned()
+}
+
+fn transport_socket_options(fd: RawFd) -> String {
+    #[cfg(target_os = "linux")]
+    {
+        format!(
+            "user_timeout_ms={} keepalive={} keepidle_s={} keepintvl_s={} keepcnt={}",
+            read_socket_option(fd, libc::IPPROTO_TCP, libc::TCP_USER_TIMEOUT),
+            read_socket_option(fd, libc::SOL_SOCKET, libc::SO_KEEPALIVE),
+            read_socket_option(fd, libc::IPPROTO_TCP, libc::TCP_KEEPIDLE),
+            read_socket_option(fd, libc::IPPROTO_TCP, libc::TCP_KEEPINTVL),
+            read_socket_option(fd, libc::IPPROTO_TCP, libc::TCP_KEEPCNT),
+        )
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = fd;
+        "unsupported_platform".to_owned()
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn tcp_info_snapshot(fd: RawFd) -> String {
+    let mut info = unsafe { std::mem::zeroed::<libc::tcp_info>() };
+    let mut length = match libc::socklen_t::try_from(std::mem::size_of_val(&info)) {
+        Ok(length) => length,
+        Err(error) => return format!("invalid_length={error}"),
+    };
+    let result = unsafe {
+        libc::getsockopt(
+            fd,
+            libc::IPPROTO_TCP,
+            libc::TCP_INFO,
+            (&raw mut info).cast(),
+            &raw mut length,
+        )
+    };
+    if result != 0 {
+        return format!("error={}", std::io::Error::last_os_error());
+    }
+    format!(
+        "state={} retransmits={} probes={} backoff={} rto_us={} unacked={} last_data_sent_ms={} last_ack_sent_ms={} last_data_recv_ms={} last_ack_recv_ms={} total_retrans={}",
+        info.tcpi_state,
+        info.tcpi_retransmits,
+        info.tcpi_probes,
+        info.tcpi_backoff,
+        info.tcpi_rto,
+        info.tcpi_unacked,
+        info.tcpi_last_data_sent,
+        info.tcpi_last_ack_sent,
+        info.tcpi_last_data_recv,
+        info.tcpi_last_ack_recv,
+        info.tcpi_total_retrans,
+    )
+}
+
+#[cfg(not(target_os = "linux"))]
+fn tcp_info_snapshot(_fd: RawFd) -> String {
+    "unsupported_platform".to_owned()
 }
 
 #[async_trait]

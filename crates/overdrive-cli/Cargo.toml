@@ -179,6 +179,8 @@ serial_test.workspace        = true
 # AF_PACKET wire capture for S-GTI-03 uses the same libc socket boundary as the
 # existing dataplane/worker Tier-3 confidentiality oracles.
 libc.workspace               = true
+rustls-pemfile.workspace     = true
+x509-parser.workspace        = true
 # `proptest` drives the S-03-08 KPI K3 byte-equality property over
 # rendered Exit column vs persisted exit_code (1024 cases). Per
 # `.claude/rules/testing.md` § "Property-based testing (proptest)"

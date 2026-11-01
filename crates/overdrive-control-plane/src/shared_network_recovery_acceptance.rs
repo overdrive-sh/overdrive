@@ -60,6 +60,8 @@ use overdrive_core::guest_network::{
 };
 use overdrive_core::guest_transport::dial::{DialPurpose, GuestDialError, GuestStreamDial};
 use overdrive_core::guest_transport::forwarder::{ForwarderError, ForwarderGeneration};
+use overdrive_core::guest_transport::wire::ControlMessage;
+use overdrive_core::vm::config::VsockPort;
 use overdrive_sim::adapters::{SimInterceptFault, SimSharedTable};
 use parking_lot::Mutex;
 use tracing::field::{Field, Visit};
@@ -69,8 +71,9 @@ use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
 use crate::error::{ControlPlaneError, MtlsBootError};
 use crate::guest_network::flow_io::sim::{SimEffectKind, SimFailure, SimForwarderFailure};
 use crate::guest_network::{
-    CidPhase, ForwardingActivation, GuestAdmission, GuestNetworkError, GuestNetworkProvisioner,
-    GuestOwnerObservation, QuiescenceRestoreError, SharedGuestNetworkOwner as _,
+    CidPhase, DialPhase, ForwardingActivation, GuestAdmission, GuestConnKey, GuestNetworkError,
+    GuestNetworkProvisioner, GuestOwnerObservation, QuiescenceRestoreError,
+    SharedGuestNetworkOwner as _,
 };
 use crate::shared_network_test_ports::TestSharedOwner;
 use crate::shared_network_test_ports::composed::{
@@ -774,6 +777,112 @@ fn seeds() -> Vec<u64> {
         || (1..=8).map(|n: u64| n.wrapping_mul(0x9E37_79B9_7F4A_7C15)).collect(),
         |seed| vec![seed],
     )
+}
+
+/// A healthy successful host Probe whose watch is created while the periodic
+/// shared audit is between its owner snapshot and forwarder inventory read
+/// causes no recovery or quiescence. The held stream is represented exactly
+/// once in both universes, and its normal drop returns both counts to zero.
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+#[allow(clippy::print_stderr, reason = "the seed and action trace reproduce a failure")]
+async fn a_healthy_probe_watch_overlapping_shared_audit_does_not_start_recovery() {
+    for seed in seeds() {
+        let mut rng = Seeded(seed | 1);
+        let offset = Duration::from_millis(
+            rng.below(u64::try_from(SHARED_NETWORK_AUDIT_PERIOD.as_millis()).expect("period fits")),
+        );
+        let mut sequence = vec![format!("advance within audit period by {offset:?}")];
+        eprintln!("R5-58 HealthyProbeWatchOverlapsSharedAudit seed={seed} sequence={sequence:?}");
+
+        let mut node = ComposedNode::fresh();
+        node.boot().await.expect("the node boots");
+        node.ensure_active_cid().await;
+        let (cid, _launch) = node.active_cid().expect("one Active allocation");
+        let target = SocketAddrV4::new(
+            node.active_plan().expect("one Active allocation").assignment().workload_addr(),
+            LISTEN_PORT,
+        );
+        let session = GuestConnKey {
+            listener: node.flow_ports().control(),
+            peer_cid: cid,
+            peer_port: VsockPort::new(49_000),
+        };
+
+        node.advance(offset).await;
+        let mut checkpoint = node.process().owner.arm_shared_audit_post_snapshot_checkpoint();
+        sequence.push("arm post-snapshot/pre-inventory checkpoint".to_owned());
+        node.advance(SHARED_NETWORK_AUDIT_PERIOD - offset).await;
+        node.release_audits().await;
+        checkpoint.reached().await;
+        sequence.push("periodic audit captured expected counts and paused".to_owned());
+
+        let dial = Arc::clone(&node.process().dial);
+        let dial_task = tokio::spawn(async move { dial.dial(target, DialPurpose::Probe).await });
+        node.settle().await;
+        let flow = node
+            .process()
+            .io
+            .dials()
+            .last()
+            .and_then(|dial| dial.request)
+            .map(|request| request.flow())
+            .expect("the normal Probe dial wrote its TcpAccept request");
+        node.process().io.send_on_connection(session, &ControlMessage::Paired { flow }.encode());
+        node.settle().await;
+        let stream = dial_task
+            .await
+            .expect("the Probe dial task does not panic")
+            .expect("the guest pairs the normal Probe dial");
+        sequence.push(format!("Probe {flow:?} paired and its stream remains held"));
+
+        assert!(checkpoint.release(), "seed={seed} sequence={sequence:?}: release live audit");
+        node.settle().await;
+        sequence.push("release periodic audit".to_owned());
+
+        let held = node.owner_observation().await;
+        let held_inventory = node.process().io.forwarder_inventory();
+        let held_probe_watches = held
+            .cids
+            .values()
+            .flat_map(|observed| observed.dials.values())
+            .filter(|dial| {
+                dial.purpose == DialPurpose::Probe && matches!(dial.phase, DialPhase::Paired { .. })
+            })
+            .count();
+        let recovery =
+            node.recovery_observation().get(&SharedGuestNetworkComponent::Forwarder).copied();
+        assert_eq!(
+            (
+                recovery,
+                held.quiescence_holds,
+                held.admission,
+                held_probe_watches,
+                held_inventory.live_watches,
+            ),
+            (None, 0, GuestAdmission::Open, 1, 1),
+            "seed={seed} sequence={sequence:?}: a healthy Probe overlap keeps forwarding open and is counted exactly once"
+        );
+
+        drop(stream);
+        node.settle().await;
+        sequence.push("drop Probe stream normally".to_owned());
+        let dropped = node.owner_observation().await;
+        let dropped_inventory = node.process().io.forwarder_inventory();
+        let remaining_dials = dropped.cids.values().map(|observed| observed.dials.len()).sum();
+        assert_eq!(
+            (
+                node.recovery_observation().get(&SharedGuestNetworkComponent::Forwarder).copied(),
+                dropped.quiescence_holds,
+                dropped.admission,
+                remaining_dials,
+                dropped_inventory.live_watches,
+            ),
+            (None, 0, GuestAdmission::Open, 0, 0),
+            "seed={seed} sequence={sequence:?}: normal Probe drop returns both watch counts to zero without recovery"
+        );
+        node.crash().await;
+    }
 }
 
 /// The components a run damages (at most 3, R5-58's bound).

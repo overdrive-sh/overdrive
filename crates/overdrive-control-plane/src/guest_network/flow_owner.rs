@@ -51,6 +51,8 @@ pub(super) struct OwnerRuntime {
     pub(super) clock: Arc<dyn Clock>,
     pub(super) vip_range: VipRange,
     pub(super) next_dial: AtomicU32,
+    #[cfg(test)]
+    pub(super) shared_audit_checkpoint: super::SharedAuditCheckpoint,
 }
 
 impl OwnerRuntime {
@@ -62,6 +64,8 @@ impl OwnerRuntime {
             clock,
             vip_range,
             next_dial: AtomicU32::new(1),
+            #[cfg(test)]
+            shared_audit_checkpoint: super::SharedAuditCheckpoint::default(),
         }
     }
 }
@@ -428,13 +432,30 @@ impl HostSharedGuestNetworkOwner {
         reason = "the accepted guest-owner observation signature is async; its current snapshot is synchronous"
     )]
     pub async fn flow_observation(&self) -> GuestOwnerObservation {
+        tracing::debug!(
+            name: "guest_flow.observation.owner_state_lock_begin",
+            stage = "owner_state_lock",
+        );
         let state = self.runtime.state.lock();
+        tracing::debug!(
+            name: "guest_flow.observation.owner_state_lock_acquired",
+            stage = "owner_state_lock",
+        );
         let inventory = match state.forwarder_inventory {
             ForwarderInventoryRead::NoContext => ForwarderInventoryRead::NoContext,
-            ForwarderInventoryRead::Read(_) | ForwarderInventoryRead::Unreadable => self
-                .io
-                .inventory()
-                .map_or(ForwarderInventoryRead::Unreadable, ForwarderInventoryRead::Read),
+            ForwarderInventoryRead::Read(_) | ForwarderInventoryRead::Unreadable => {
+                tracing::debug!(
+                    name: "guest_flow.observation.inventory_begin",
+                    stage = "owner_snapshot",
+                );
+                let result = self.io.inventory();
+                tracing::debug!(
+                    name: "guest_flow.observation.inventory_complete",
+                    stage = "owner_snapshot",
+                    result = ?result,
+                );
+                result.map_or(ForwarderInventoryRead::Unreadable, ForwarderInventoryRead::Read)
+            }
         };
         let mut observation = state.observation(self.ledger.leaked());
         observation.forwarder_inventory = inventory;

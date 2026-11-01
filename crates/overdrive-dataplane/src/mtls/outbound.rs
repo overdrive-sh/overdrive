@@ -53,7 +53,7 @@ use overdrive_core::traits::mtls_enforcement::{
 use rustls::pki_types::ServerName;
 use rustls::{ClientConnection, ExtractedSecrets};
 
-use super::splice::PumpHandle;
+use super::splice::{PumpHandle, PumpRole};
 use super::{ConnState, ktls, tls_config};
 
 /// Establish OUTBOUND steady-state. Consumes `leg_f` (owned); dials leg B; returns
@@ -136,6 +136,7 @@ pub(super) fn establish(
     //    was NON-blocking MSG_DONTWAIT delivery). Agent does no crypto. This is the
     //    primary pump `liveness` observes (the request-carrying direction).
     let forward = PumpHandle::spawn_encrypt(leg_f_fd, leg_b_fd, prelude, super::now_unix_nanos());
+    forward.state.set_role(PumpRole::OutboundForward);
 
     // 7. Spawn the RETURN decrypt pump splice(legB → pipe → legF): leg B is
     //    kTLS-RX-armed, so the kernel tls_sw_splice_read decrypts each record on
@@ -144,6 +145,7 @@ pub(super) fn establish(
     //    0.5-RTT reply in order with no loss. Auxiliary (torn down with the
     //    connection; not the `liveness`-observed pump).
     let ret = PumpHandle::spawn_decrypt(leg_b_fd, leg_f_fd, early_return, super::now_unix_nanos());
+    ret.state.set_role(PumpRole::OutboundReturn);
 
     // Detach leg-B ownership into the ConnState. `client_handshake` already
     // suppressed the leg-B `TcpStream`'s Drop (`forget`), so reconstructing an

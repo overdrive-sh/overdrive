@@ -840,7 +840,33 @@ impl GuestFlowIo for HostGuestFlowIo {
         &self,
     ) -> Result<overdrive_core::guest_transport::forwarder::ForwarderInventory, ForwarderError>
     {
-        self.forwarder().context.inventory()
+        tracing::debug!(
+            name: "guest_flow.observation.host_inventory_begin",
+            stage = "host_forwarder_state_lock",
+            seam = self.inner.seam,
+        );
+        let forwarder = self.forwarder();
+        tracing::debug!(
+            name: "guest_flow.observation.host_forwarder_acquired",
+            stage = "host_forwarder_state_lock",
+            seam = self.inner.seam,
+            generation = ?forwarder.generation,
+        );
+        tracing::debug!(
+            name: "guest_flow.observation.host_inventory_ioctl_begin",
+            stage = "kernel_flow_forwarder_inventory",
+            seam = self.inner.seam,
+            generation = ?forwarder.generation,
+        );
+        let result = forwarder.context.inventory();
+        tracing::debug!(
+            name: "guest_flow.observation.host_inventory_complete",
+            stage = "kernel_flow_forwarder_inventory",
+            seam = self.inner.seam,
+            generation = ?forwarder.generation,
+            result = ?result,
+        );
+        result
     }
 
     async fn clear_linger(&self, socket: &PairSocket) -> Result<(), FlowIoError> {

@@ -32,6 +32,7 @@ overdrive-core.workspace = true
 # `ioctl` for the control ABI, `fs` for `open`/`fcntl`, `poll` for the
 # readiness descriptor (EVMOD-REC).
 nix       = { workspace = true, features = ["fs", "poll"] }
+tracing.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

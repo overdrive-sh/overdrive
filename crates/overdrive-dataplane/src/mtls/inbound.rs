@@ -30,7 +30,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream as AsyncTcpStream;
 use tokio::sync::oneshot;
 
-use super::splice::{PumpExit, PumpHandle, PumpState, record_progress};
+use super::splice::{PumpExit, PumpHandle, PumpRole, PumpState, record_progress};
 use super::{ConnState, ktls, tls_config};
 
 /// Establish the temporary LEGS-DIAL path for a VM backend. The handshake and
@@ -86,6 +86,7 @@ pub(super) async fn establish_guest(
     let pump = PumpHandle::spawn_async(runtime, super::now_unix_nanos(), move |state, stop| {
         relay_guest_stream(relay_leg, guest, early_deliver, state, stop)
     });
+    pump.state.set_role(PumpRole::InboundRelay);
     Ok(super::new_conn_state_bidi(vec![leg_c], pump, Vec::new()))
 }
 
@@ -454,6 +455,7 @@ pub(super) fn establish_tcp(
     //    `liveness` reports Running.
     let deliver =
         PumpHandle::spawn_decrypt(leg_c_fd, leg_s_fd, early_deliver, super::now_unix_nanos());
+    deliver.state.set_role(PumpRole::InboundDeliver);
 
     // 5. Start the response encrypt pump — a blocking splice(legS → pipe → legC) —
     //    the S→C response leg (GAP 2 inbound half). leg S is plaintext; the blocking
@@ -463,6 +465,7 @@ pub(super) fn establish_tcp(
     //    connection; not the `liveness`-observed pump).
     let response =
         PumpHandle::spawn_encrypt(leg_s_fd, leg_c_fd, Vec::new(), super::now_unix_nanos());
+    response.state.set_role(PumpRole::InboundResponse);
 
     // Detach leg ownership into the ConnState (both legs closed on teardown).
     let leg_s_owned = unsafe { OwnedFd::from_raw_fd(leg_s_fd) };

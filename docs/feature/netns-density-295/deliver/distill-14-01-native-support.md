@@ -1,5 +1,106 @@
 # STEP 14-01 — existing GuestKit native-support handoff
 
+## Current disposition — F-05 population oracle closed in source
+
+Independent DISTILL review iteration 9 approved the bounded F-05 correction.
+The existing private unset-control helper now uses the external
+`/proc/net/tcp` table to require that exhausted connection `N` creates no live
+connection row and that no row for any exact control destination remains
+after the clients, accepted sockets and listeners close. The observer remains
+fail-closed for established, SYN and live closing states; it excludes only
+TIME_WAIT, CLOSED and the control listeners' own LISTEN state.
+
+The existing production-population helper now receives the peer allocation's
+leased address and retained narrowed range. It constructs the exact expected
+backend set `(peer_addr, V6_POPULATION_BASE_PORT + i)`, selects rows by the
+complete tuple, requires every local source port inside the same narrowed
+range, and preserves the existing exact-N, one-fd-owner, option-value-one and
+fewer-than-N-source-port assertions. After public Service stop, VMM
+disappearance and graceful `serve` shutdown, the body requires no live row
+for any exact production backend before restoring and reading back the
+original ephemeral range.
+
+No actor, stimulus, result, body identity, runner count, lane, product API,
+hook, option toggle or production mechanism changed. The Service-VIP UDP
+semantic RED remains unchanged as evidence for #310, and no later native
+assertion receives credit from that failed run. The user's subsequent scoped
+deferral means this action is no longer a #295 acceptance requirement; the
+F-05 correction and all retained V-6/V-LEGB-SERVE oracles remain independent.
+Iteration 9 records no new finding and closes F-05 in source.
+
+Metal source run `615498436b6a58d31a576a79` exited 1 only with the exact
+rustfmt wrapping subsequently applied. Run `f73ed9057b4f5426240e1111` then
+passed `cargo fmt --check` and the complete kvm-gated CLI integration
+`cargo check`; Clippy reached a separate broader V-6 support warning at
+`guest_app.rs:704` (`result_large_err` after `PeerLog` gained the empty-UDP
+observation), so this handoff makes no clean full source-gate claim. Root then
+paused affected execution for independent DESIGN reconciliation of the
+native Service-VIP UDP contradiction. No competing native run was launched.
+The source-gate durable records are retained under
+`.context/netns-density-295/14-01/raw/{615498436b6a58d31a576a79,f73ed9057b4f5426240e1111}/`.
+
+## Current disposition — failed Service-VIP UDP action deferred to #310
+
+The iteration-7-approved completion implemented the then-required
+Service-VIP UDP action in the existing P6-S13 body and private test support.
+The unchanged production composition does not deliver that action to the peer
+VM Service. This is reproduced production evidence for the #310 deferral, not
+a fixture, KVM, compiler or Metal failure and no longer a #295 product blocker
+after the user's explicit option-D approval.
+
+Durable Metal run `012109f99448d662b35c1760`, source digest
+`62f6c1832d836a9536a84d89d821f14bd43357fbb5f8a2125f5f8efb16ca3728`,
+ran the unchanged existing `cgroup-default` GuestKit command and exited 101.
+Before P6-S13 it retained 101 successful libtest summaries. The P6-S13
+production path then proved the original Job TCP/non-empty UDP/empty-UDP
+round trips and cleanup, deployed the peer VM Service through the public
+operator path, observed its public TCP and HTTP probe rows, and completed the
+route-disjoint same-CA remote mTLS request/reply. The distinct client VM
+Service then read `nameserver=100.95.0.1`, completed its retained off-node
+TCP/non-empty UDP/empty-UDP actions, resolved
+`v6-peer.svc.overdrive.local` to the issued `10.98.0.1` Service VIP and
+completed byte-exact TCP to that VIP.
+
+The next then-required, now-deferred action, UDP to the same issued Service
+VIP and the peer's declared UDP listener, timed out through production
+`connect4`:
+
+- client allocations `alloc-v6-client-0` and `alloc-v6-client-1` both became
+  `Failed` with `WorkloadCrashedImmediately { exit_code: Some(21) }`;
+  test protocol exit 21 is exactly `UDP_TIMEOUT`;
+- successor `alloc-v6-client-2` remained `Running` with console evidence
+  through `v6-client: vip-tcp ok`, but produced neither
+  `v6-client: vip-udp ok` nor `paths-ready` inside the 120-second bound; and
+- the prior exact-source run `a5eb43472f5dc625d0c29e86` showed the peer VM
+  Service receiving the remote, mesh-name and VIP TCP requests while logging
+  no `v6-peer: udp request` before the client failed.
+
+The client uses a real `UdpSocket`, sends `V6_UDP_REQUEST` to the public
+issued VIP on the separately declared `V6_UDP_PORT`, requires the peer's
+byte-distinct reply, and fails closed after the bounded retry. The peer binds
+that UDP port inside its real workload VM and is registered by the public
+Service spec. No test adapter, expected-value injection or production option
+toggle lies on this path. Retrying across production Service successors
+removed first-allocation timing as an explanation and reproduced the same
+UDP-only failure after DNS and VIP TCP succeeded.
+
+In that run the deferred action gated the remaining approved probe transition,
+mTLS capture, population, no-uplink and cleanup assertions because the client
+workload correctly refused to publish `paths-ready` after the UDP timeout.
+Those retained assertions remain mandatory and must no longer depend on the
+deferred action. After the fresh DESIGN review, DISTILL must remove only that
+action and its gating dependency from the existing body. The STEP 14-01
+crafter must not implement or patch a UDP-to-VM path; #310 owns that future
+DESIGN.
+
+Full metadata, output and terminal records are retained at
+`.context/netns-density-295/14-01/raw/012109f99448d662b35c1760/` and for the
+preceding diagnostic runs. Read-only physical-host cleanup after the terminal
+failure found no Cloud Hypervisor process, physical-host nft table,
+`alloc-v6-*` scope or `/run/overdrive/vm/alloc-v6-*` directory. No Metal job
+is active. No DES event, commit, mutation run, new identity, selector, lane,
+scenario, production API or product mechanism was created.
+
 ## Current disposition — R5-41 workload-kind fixture correction
 
 Iteration-4 finding F-02 is closed by one private DISTILL fixture correction.

@@ -37,7 +37,7 @@ use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use http_body_util::Empty;
+use http_body_util::{BodyExt, Empty};
 use hyper::body::Bytes;
 use hyper::{Request, Uri};
 use hyper_util::client::legacy::Client;
@@ -251,7 +251,15 @@ pub(super) async fn probe_guest_stream(
         Client::builder(TokioExecutor::new()).build(GuestStreamConnector::new(stream));
 
     match client.request(request).await {
-        Ok(response) => classify_http_status(response.status().as_u16()),
+        Ok(response) => {
+            let status = response.status().as_u16();
+            // Drain the response before returning so the guest flow's
+            // `GuestStream` is closed by the legacy client immediately. The
+            // probe contract is status based; body bytes are deliberately
+            // ignored after the response has been fully observed.
+            let _ = response.into_body().collect().await;
+            classify_http_status(status)
+        }
         Err(err) => ProbeOutcome::Fail { reason: client_error_to_reason(&err) },
     }
 }
@@ -282,19 +290,42 @@ impl Service<Uri> for GuestStreamConnector {
             let stream = stream.ok_or_else(|| {
                 io::Error::new(io::ErrorKind::NotConnected, "guest probe stream already consumed")
             })?;
-            Ok(TokioIo::new(GuestStreamIo { stream, request_written: false, pending_read: None }))
+            Ok(TokioIo::new(GuestStreamIo::new(stream)))
         })
     }
 }
 
 /// Tokio's poll-based byte-stream interface over the cancellation-safe
 /// `GuestStream` operations. Hyper polls each operation with exclusive access;
-/// pending futures are recreated on the next poll, which is safe under the
-/// accepted GuestStream cancellation contract.
+/// the adapter retains each in-flight operation until it completes so the
+/// underlying stream future is not cancelled between polls.
+type GuestStreamWriteFuture =
+    Pin<Box<dyn Future<Output = (GuestStream, io::Result<usize>)> + Send>>;
+type GuestStreamReadFuture =
+    Pin<Box<dyn Future<Output = (GuestStream, Vec<u8>, io::Result<usize>)> + Send>>;
+type GuestStreamShutdownFuture =
+    Pin<Box<dyn Future<Output = (GuestStream, io::Result<()>)> + Send>>;
+
 struct GuestStreamIo {
-    stream: GuestStream,
+    stream: Option<GuestStream>,
     request_written: bool,
     pending_read: Option<Waker>,
+    write_future: Option<GuestStreamWriteFuture>,
+    read_future: Option<GuestStreamReadFuture>,
+    shutdown_future: Option<GuestStreamShutdownFuture>,
+}
+
+impl GuestStreamIo {
+    fn new(stream: GuestStream) -> Self {
+        Self {
+            stream: Some(stream),
+            request_written: false,
+            pending_read: None,
+            write_future: None,
+            read_future: None,
+            shutdown_future: None,
+        }
+    }
 }
 
 impl hyper_util::client::legacy::connect::Connection for GuestStreamIo {
@@ -314,17 +345,43 @@ impl AsyncRead for GuestStreamIo {
             this.pending_read = Some(context.waker().clone());
             return Poll::Pending;
         }
+        if buffer.remaining() == 0 {
+            return Poll::Ready(Ok(()));
+        }
+        if this.read_future.is_none() {
+            let Some(stream) = this.stream.take() else {
+                return Poll::Ready(Err(io::Error::new(
+                    io::ErrorKind::NotConnected,
+                    "guest probe stream has another operation in progress",
+                )));
+            };
+            let capacity = buffer.remaining();
+            this.read_future = Some(Box::pin(async move {
+                let mut stream = stream;
+                let mut bytes = vec![0_u8; capacity];
+                let result = stream.read(&mut bytes).await;
+                (stream, bytes, result)
+            }));
+        }
         let result = {
-            let read = this.stream.read(buffer.initialize_unfilled());
-            tokio::pin!(read);
+            let Some(read) = this.read_future.as_mut() else {
+                unreachable!("guest probe read future was installed before polling")
+            };
             read.as_mut().poll(context)
         };
         match result {
-            Poll::Ready(Ok(read)) => {
-                buffer.advance(read);
-                Poll::Ready(Ok(()))
+            Poll::Ready((stream, bytes, result)) => {
+                this.stream = Some(stream);
+                this.read_future = None;
+                match result {
+                    Ok(read) => {
+                        debug_assert!(read <= bytes.len(), "guest stream read exceeded its buffer");
+                        buffer.put_slice(&bytes[..read.min(bytes.len())]);
+                        Poll::Ready(Ok(()))
+                    }
+                    Err(error) => Poll::Ready(Err(error)),
+                }
             }
-            Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
             Poll::Pending => Poll::Pending,
         }
     }
@@ -337,18 +394,43 @@ impl AsyncWrite for GuestStreamIo {
         buffer: &[u8],
     ) -> Poll<io::Result<usize>> {
         let this = self.get_mut();
+        if buffer.is_empty() {
+            return Poll::Ready(Ok(0));
+        }
+        if this.write_future.is_none() {
+            let Some(stream) = this.stream.take() else {
+                return Poll::Ready(Err(io::Error::new(
+                    io::ErrorKind::NotConnected,
+                    "guest probe stream has another operation in progress",
+                )));
+            };
+            let bytes = buffer.to_vec();
+            this.write_future = Some(Box::pin(async move {
+                let mut stream = stream;
+                let result = stream.write(&bytes).await;
+                (stream, result)
+            }));
+        }
         let result = {
-            let write = this.stream.write(buffer);
-            tokio::pin!(write);
+            let Some(write) = this.write_future.as_mut() else {
+                unreachable!("guest probe write future was installed before polling")
+            };
             write.as_mut().poll(context)
         };
-        if matches!(&result, Poll::Ready(Ok(written)) if *written > 0) && !this.request_written {
-            this.request_written = true;
-            if let Some(pending_read) = this.pending_read.take() {
-                pending_read.wake();
+        match result {
+            Poll::Ready((stream, result)) => {
+                this.stream = Some(stream);
+                this.write_future = None;
+                if matches!(&result, Ok(written) if *written > 0) && !this.request_written {
+                    this.request_written = true;
+                    if let Some(pending_read) = this.pending_read.take() {
+                        pending_read.wake();
+                    }
+                }
+                Poll::Ready(result)
             }
+            Poll::Pending => Poll::Pending,
         }
-        result
     }
 
     fn poll_flush(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<io::Result<()>> {
@@ -357,9 +439,33 @@ impl AsyncWrite for GuestStreamIo {
 
     fn poll_shutdown(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<io::Result<()>> {
         let this = self.get_mut();
-        let shutdown = this.stream.shutdown_write();
-        tokio::pin!(shutdown);
-        shutdown.as_mut().poll(context)
+        if this.shutdown_future.is_none() {
+            let Some(stream) = this.stream.take() else {
+                return Poll::Ready(Err(io::Error::new(
+                    io::ErrorKind::NotConnected,
+                    "guest probe stream has another operation in progress",
+                )));
+            };
+            this.shutdown_future = Some(Box::pin(async move {
+                let mut stream = stream;
+                let result = stream.shutdown_write().await;
+                (stream, result)
+            }));
+        }
+        let result = {
+            let Some(shutdown) = this.shutdown_future.as_mut() else {
+                unreachable!("guest probe shutdown future was installed before polling")
+            };
+            shutdown.as_mut().poll(context)
+        };
+        match result {
+            Poll::Ready((stream, result)) => {
+                this.stream = Some(stream);
+                this.shutdown_future = None;
+                Poll::Ready(result)
+            }
+            Poll::Pending => Poll::Pending,
+        }
     }
 }
 

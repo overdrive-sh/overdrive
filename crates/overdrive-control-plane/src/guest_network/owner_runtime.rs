@@ -115,21 +115,48 @@ pub(super) fn restart_listener(owner: &HostSharedGuestNetworkOwner, listener: Fl
 }
 
 pub(super) async fn shutdown(owner: &HostSharedGuestNetworkOwner) {
+    tracing::debug!(name: "guest_flow.shutdown.begin", stage = "owner_tasks");
     let root_tasks = {
+        tracing::debug!(
+            name: "guest_flow.shutdown.owner_tasks_lock_begin",
+            stage = "owner_tasks_lock",
+        );
         let mut tasks_guard = owner.runtime.tasks.lock();
-        let Some(tasks) = tasks_guard.as_mut() else { return };
+        tracing::debug!(
+            name: "guest_flow.shutdown.owner_tasks_lock_acquired",
+            stage = "owner_tasks_lock",
+        );
+        let Some(tasks) = tasks_guard.as_mut() else {
+            tracing::debug!(name: "guest_flow.shutdown.no_owner_tasks", stage = "owner_tasks");
+            return;
+        };
         tasks.shutdown.cancel();
-        let root_tasks =
-            [tasks.stream_accept.take(), tasks.control_accept.take(), tasks.consume_ends.take()];
+        let root_tasks = [
+            ("stream_accept", tasks.stream_accept.take()),
+            ("control_accept", tasks.control_accept.take()),
+            ("consume_ends", tasks.consume_ends.take()),
+        ];
         drop(tasks_guard);
         root_tasks
     };
-    for task in root_tasks.into_iter().flatten() {
-        let _ = task.await;
+    for (stage, task) in
+        root_tasks.into_iter().filter_map(|(stage, task)| task.map(|task| (stage, task)))
+    {
+        tracing::debug!(name: "guest_flow.shutdown.root_task_join_begin", stage);
+        let joined = task.await.is_ok();
+        tracing::debug!(name: "guest_flow.shutdown.root_task_join_complete", stage, joined);
     }
 
     let (child_tasks, refusal_reader_cancels, refusal_reader_keys) = {
+        tracing::debug!(
+            name: "guest_flow.shutdown.owner_state_lock_begin",
+            stage = "owner_state_lock",
+        );
         let mut state = owner.runtime.state.lock();
+        tracing::debug!(
+            name: "guest_flow.shutdown.owner_state_lock_acquired",
+            stage = "owner_state_lock",
+        );
         let mut child_tasks = Vec::new();
         let mut refusal_reader_cancels = Vec::new();
         let mut refusal_reader_keys = Vec::new();
@@ -159,13 +186,36 @@ pub(super) async fn shutdown(owner: &HostSharedGuestNetworkOwner) {
         (child_tasks, refusal_reader_cancels, refusal_reader_keys)
     };
 
+    tracing::debug!(
+        name: "guest_flow.shutdown.child_tasks_collected",
+        stage = "child_tasks",
+        child_tasks = child_tasks.len(),
+        refusal_readers = refusal_reader_cancels.len(),
+    );
     for cancel in refusal_reader_cancels {
         cancel.cancel();
     }
-    for task in child_tasks {
-        let _ = task.await;
+    for (task_index, task) in child_tasks.into_iter().enumerate() {
+        tracing::debug!(
+            name: "guest_flow.shutdown.child_task_join_begin",
+            stage = "child_tasks",
+            task_index,
+        );
+        let joined = task.await.is_ok();
+        tracing::debug!(
+            name: "guest_flow.shutdown.child_task_join_complete",
+            stage = "child_tasks",
+            task_index,
+            joined,
+        );
     }
+    tracing::debug!(
+        name: "guest_flow.shutdown.refusal_readers_begin",
+        stage = "refusal_readers",
+        refusal_readers = refusal_reader_keys.len(),
+    );
     super::wait_for_drained_refusal_readers(&owner.runtime, &refusal_reader_keys).await;
+    tracing::debug!(name: "guest_flow.shutdown.complete", stage = "owner_tasks");
 }
 
 fn accept_task(
@@ -1059,7 +1109,17 @@ async fn tcp_connect(
         };
         let (peer_destination, spec, forwarded) = match resolution {
             MtlsResolution::Mesh(backend) => {
-                let destination = mtls.leg_f_addr().ok_or(FlowRefusal::IntakeUnavailable)?;
+                let Some(destination) = mtls.leg_f_addr() else {
+                    trace_intake_unavailable(
+                        alloc,
+                        key.peer_cid,
+                        flow,
+                        destination,
+                        "leg_f_addr",
+                        "not_published",
+                    );
+                    return Err(FlowOutcome::Refused(FlowRefusal::IntakeUnavailable));
+                };
                 let spec = PeerSocketSpec {
                     protocol: PeerProtocol::Tcp,
                     owner_egress_mark: false,
@@ -1069,12 +1129,35 @@ async fn tcp_connect(
                 let peer = tokio::select! {
                     biased;
                     () = cancel.cancelled() => return Err(FlowOutcome::Refused(FlowRefusal::IntakeUnavailable)),
-                    peer = io.open_peer(spec) => peer.map_err(|_| FlowRefusal::IntakeUnavailable)?,
+                    peer = io.open_peer(spec) => match peer {
+                        Ok(peer) => peer,
+                        Err(error) => {
+                            trace_intake_unavailable(alloc, key.peer_cid, flow, destination, "open_peer", &error);
+                            return Err(FlowOutcome::Refused(FlowRefusal::IntakeUnavailable));
+                        }
+                    },
                 };
-                let local = io.local_addr(&peer).map_err(|_| FlowRefusal::IntakeUnavailable)?;
-                let forwarded = mtls
-                    .register_forwarded_outbound(alloc, local, destination, backend)
-                    .map_err(|_| FlowRefusal::IntakeUnavailable)?;
+                let local = match io.local_addr(&peer) {
+                    Ok(local) => local,
+                    Err(error) => {
+                        trace_intake_unavailable(alloc, key.peer_cid, flow, destination, "local_addr", &error);
+                        return Err(FlowOutcome::Refused(FlowRefusal::IntakeUnavailable));
+                    }
+                };
+                let forwarded = match mtls.register_forwarded_outbound(alloc, local, destination, backend) {
+                    Ok(forwarded) => forwarded,
+                    Err(error) => {
+                        trace_intake_unavailable(
+                            alloc,
+                            key.peer_cid,
+                            flow,
+                            destination,
+                            "register_forwarded_outbound",
+                            &error,
+                        );
+                        return Err(FlowOutcome::Refused(FlowRefusal::IntakeUnavailable));
+                    }
+                };
                 if let Some(entry) = runtime.state.lock().cids.get_mut(&key.peer_cid) {
                     entry.guest_flows.insert(key, GuestFlowPhase::Connecting);
                 }
@@ -1083,7 +1166,8 @@ async fn tcp_connect(
                     () = cancel.cancelled() => { io.abort(peer.into()).await; return Err(FlowOutcome::Refused(FlowRefusal::IntakeUnavailable)); },
                     result = io.connect_peer(&peer, destination) => result,
                 };
-                if connected.is_err() {
+                if let Err(error) = connected {
+                    trace_intake_unavailable(alloc, key.peer_cid, flow, destination, "connect_peer", &error);
                     io.abort(peer.into()).await;
                     return Err(FlowOutcome::Refused(FlowRefusal::IntakeUnavailable));
                 }
@@ -1102,7 +1186,16 @@ async fn tcp_connect(
                             io.abort(refused.vsock.into()).await;
                             io.abort(refused.peer.into()).await;
                         } else {
-                            tracing::error!(name: "guest_flow.attach_refused", cid = %key.peer_cid, flow = flow.get(), error = ?refused.error);
+                            tracing::error!(
+                                name: "guest_flow.attach_refused",
+                                alloc = %alloc,
+                                cid = %key.peer_cid,
+                                flow = flow.get(),
+                                destination = %destination,
+                                stage = "attach",
+                                refusal = FlowRefusal::IntakeUnavailable.as_str(),
+                                error = ?refused.error,
+                            );
                             io.close(refused.vsock.into()).await;
                             io.close(refused.peer.into()).await;
                         }
@@ -1184,6 +1277,26 @@ async fn tcp_connect(
     }
     let _ = (key, flow);
     result
+}
+
+fn trace_intake_unavailable<T: std::fmt::Debug + ?Sized>(
+    alloc: &AllocationId,
+    cid: GuestCid,
+    flow: FlowId,
+    destination: SocketAddrV4,
+    stage: &'static str,
+    error: &T,
+) {
+    tracing::info!(
+        name: "guest_flow.intake_unavailable",
+        alloc = %alloc,
+        cid = %cid,
+        flow = flow.get(),
+        destination = %destination,
+        stage,
+        refusal = FlowRefusal::IntakeUnavailable.as_str(),
+        error = ?error,
+    );
 }
 
 #[allow(

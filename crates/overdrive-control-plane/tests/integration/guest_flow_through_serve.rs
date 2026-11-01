@@ -44,9 +44,15 @@
 
 #![allow(clippy::doc_markdown)]
 
+use std::collections::BTreeMap;
+use std::fmt::Write as _;
+use std::fs::File;
+use std::io::Read as _;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use overdrive_control_plane::api::{
@@ -74,6 +80,7 @@ use overdrive_testing::guest_app::{
 use overdrive_testing::guest_kit::{GuestImage, GuestImageSpec, GuestKit};
 use overdrive_testing::vm_fixture::default_staging_root;
 use tempfile::TempDir;
+use tracing_subscriber::EnvFilter;
 
 /// Where the VM driver keeps each allocation's run directory.
 const VM_RUN_ROOT: &str = "/run/overdrive/vm";
@@ -88,6 +95,183 @@ const SERVICE_PORT: u16 = 8080;
 /// The Service VM's readiness probe period: one probe dial a second.
 const PROBE_INTERVAL_SECONDS: u32 = 1;
 
+fn retained_consoles() -> &'static Mutex<BTreeMap<String, Vec<u8>>> {
+    static CONSOLES: OnceLock<Mutex<BTreeMap<String, Vec<u8>>>> = OnceLock::new();
+    CONSOLES.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn all_console_diagnostics() -> String {
+    let consoles = retained_consoles().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut output = String::new();
+    for (alloc, bytes) in consoles.iter() {
+        writeln!(&mut output, "--- allocation={alloc} ---").expect("write console heading");
+        output.push_str(&String::from_utf8_lossy(bytes));
+        if !output.ends_with('\n') {
+            output.push('\n');
+        }
+    }
+    drop(consoles);
+    output
+}
+
+fn is_control_end_console_line(line: &str) -> bool {
+    ["overdrive-init: guest-flow", "observer guest-app:", "listen:", "hold:"]
+        .iter()
+        .any(|fragment| line.contains(fragment))
+}
+
+fn panic_console_diagnostics() -> String {
+    const TAIL_BYTES: usize = 2 * 1024;
+
+    let consoles = retained_consoles().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut output = String::new();
+    for (alloc, bytes) in consoles.iter() {
+        writeln!(
+            &mut output,
+            "--- retained allocation={alloc} bytes={} control/end lines ---",
+            bytes.len()
+        )
+        .expect("write retained console heading");
+        let complete_at = bytes.iter().rposition(|byte| *byte == b'\n').map_or(0, |at| at + 1);
+        for line in String::from_utf8_lossy(&bytes[..complete_at])
+            .lines()
+            .filter(|line| is_control_end_console_line(line))
+        {
+            writeln!(&mut output, "allocation={alloc} {line}")
+                .expect("write retained control/end line");
+        }
+        let tail_at = bytes.len().saturating_sub(TAIL_BYTES);
+        writeln!(&mut output, "--- retained allocation={alloc} final-byte-tail ---")
+            .expect("write retained console-tail heading");
+        output.push_str(&String::from_utf8_lossy(&bytes[tail_at..]));
+        if !output.ends_with('\n') {
+            output.push('\n');
+        }
+    }
+    drop(consoles);
+    output
+}
+
+fn discover_console_files(files: &mut BTreeMap<String, File>) {
+    let Ok(entries) = std::fs::read_dir(VM_RUN_ROOT) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let alloc = entry.file_name().to_string_lossy().into_owned();
+        if let std::collections::btree_map::Entry::Vacant(slot) = files.entry(alloc)
+            && let Ok(file) = File::open(entry.path().join("console.log"))
+        {
+            slot.insert(file);
+        }
+    }
+}
+
+fn emit_complete_console_lines(alloc: &str, pending: &mut Vec<u8>, appended: &[u8]) {
+    pending.extend_from_slice(appended);
+    let Some(complete) = pending.iter().rposition(|byte| *byte == b'\n').map(|at| at + 1) else {
+        return;
+    };
+    let lines = pending.drain(..complete).collect::<Vec<_>>();
+    for line in
+        String::from_utf8_lossy(&lines).lines().filter(|line| is_control_end_console_line(line))
+    {
+        eprintln!("STEP14-01-GUEST-CONSOLE allocation={alloc} {line}");
+    }
+}
+
+fn capture_console_output(
+    files: &mut BTreeMap<String, File>,
+    pending: &mut BTreeMap<String, Vec<u8>>,
+) {
+    discover_console_files(files);
+    for (alloc, file) in files.iter_mut() {
+        let mut appended = Vec::new();
+        if file.read_to_end(&mut appended).is_err() || appended.is_empty() {
+            continue;
+        }
+        retained_consoles()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(alloc.clone())
+            .or_default()
+            .extend_from_slice(&appended);
+        emit_complete_console_lines(alloc, pending.entry(alloc.clone()).or_default(), &appended);
+    }
+}
+
+fn trace_relay_kill_phase(
+    service_alloc: &AllocationId,
+    client_alloc: &AllocationId,
+    stage: &'static str,
+    transition: &'static str,
+) {
+    tracing::info!(
+        name: "step14_01.cp_phase",
+        step = "a_vmm_exit_under_a_held_relay_stream_resets_the_client_through_serve",
+        service_alloc = %service_alloc,
+        client_alloc = %client_alloc,
+        stage,
+        transition,
+    );
+}
+
+fn init_owner_trace_output() {
+    static INIT: OnceLock<()> = OnceLock::new();
+    INIT.get_or_init(|| {
+        let filter = EnvFilter::new(
+            "info,overdrive_control_plane=debug,overdrive_worker=debug,overdrive_dataplane=debug",
+        );
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_ansi(false)
+            .with_target(true)
+            .compact()
+            .try_init();
+    });
+}
+
+struct ConsoleCapture {
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl ConsoleCapture {
+    fn start() -> Self {
+        retained_consoles().lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = Arc::clone(&stop);
+        let thread = std::thread::Builder::new()
+            .name("guest-flow-through-serve-console-capture".to_owned())
+            .spawn(move || {
+                let mut files = BTreeMap::new();
+                let mut pending = BTreeMap::new();
+                while !thread_stop.load(Ordering::SeqCst) {
+                    capture_console_output(&mut files, &mut pending);
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                capture_console_output(&mut files, &mut pending);
+            })
+            .expect("spawn guest-flow console capture");
+        Self { stop, thread: Some(thread) }
+    }
+}
+
+impl Drop for ConsoleCapture {
+    fn drop(&mut self) {
+        let panicking = std::thread::panicking();
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+        if panicking {
+            eprintln!(
+                "STEP14-01-RETAINED-GUEST-CONSOLES panic=true\n{}",
+                panic_console_diagnostics()
+            );
+        }
+    }
+}
+
 /// One running node: the `ServerHandle`, its directories and an API client.
 struct Node {
     handle: ServerHandle,
@@ -96,6 +280,7 @@ struct Node {
     base: String,
     kit: GuestKit,
     image: GuestImage,
+    _console_capture: ConsoleCapture,
 }
 
 impl Node {
@@ -103,6 +288,7 @@ impl Node {
     /// builds the workload image beside its data directory (the VM driver
     /// reflinks the rootfs master, so both live on the staging root).
     async fn boot(name: &str) -> Self {
+        init_owner_trace_output();
         let kit = GuestKit::provision(&default_staging_root())
             .expect("precondition: the guest kit provisions (run `cargo xtask guest-kit-prepare`)");
         let tmp = tempfile::Builder::new()
@@ -132,6 +318,7 @@ impl Node {
         let client = client_trusting(&read_ca(&operator_config_dir));
         let image =
             kit.image(tmp.path(), name, &GuestImageSpec::workload()).expect("the workload image");
+        let console_capture = ConsoleCapture::start();
         Self {
             handle,
             tmp,
@@ -139,6 +326,7 @@ impl Node {
             base: format!("https://localhost:{}", bound.port()),
             kit,
             image,
+            _console_capture: console_capture,
         }
     }
 
@@ -358,7 +546,18 @@ fn read_ca(operator_config_dir: &Path) -> String {
 /// The allocation's guest console so far.
 fn console_of(alloc: &AllocationId) -> String {
     let path = VmRunDir::for_alloc(Path::new(VM_RUN_ROOT), alloc).console_log();
-    std::fs::read(path).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default()
+    let live = std::fs::read(path).unwrap_or_default();
+    let bytes = if live.is_empty() {
+        retained_consoles()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&alloc.to_string())
+            .cloned()
+            .unwrap_or_default()
+    } else {
+        live
+    };
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 /// Waits until the allocation's guest application reports its flow moving
@@ -368,8 +567,10 @@ async fn wait_flowing(alloc: &AllocationId) {
     while !console_of(alloc).contains(FLOWING_LINE) {
         assert!(
             tokio::time::Instant::now() < deadline,
-            "allocation {alloc}: the guest flow never reported flowing; console:\n{}",
-            console_of(alloc)
+            "allocation {alloc}: the guest flow never reported flowing; client console:\n{}\n\
+             all allocation consoles:\n{}",
+            console_of(alloc),
+            all_console_diagnostics()
         );
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
@@ -618,7 +819,16 @@ async fn sample_agreement(node: &Node, alloc: &AllocationId, window: Duration) -
     let end = tokio::time::Instant::now() + window;
     let mut most = 0;
     while tokio::time::Instant::now() < end {
-        let obs = node.observe().await;
+        let obs = node
+            .wait_observation("probe pair/watch agreement after the operation completed", |o| {
+                matches!(
+                    o.forwarder_inventory,
+                    ForwarderInventoryRead::Read(inv)
+                        if inv.live_pairs == paired_guest_flows(o)
+                            && inv.live_watches == paired_dials(o)
+                )
+            })
+            .await;
         assert_inventory_agrees(&obs);
         let (in_flight, paired) = dials_of(&obs, alloc, DialPurpose::Probe);
         most = most.max(in_flight + paired);
@@ -771,22 +981,45 @@ async fn a_vmm_exit_under_a_held_relay_stream_resets_the_client_through_serve() 
         )
         .await;
     let client_alloc = node.running_alloc_except(&client, &[]).await;
+    trace_relay_kill_phase(&svc_alloc, &client_alloc, "client_flowing", "start");
     wait_flowing(&client_alloc).await;
+    trace_relay_kill_phase(&svc_alloc, &client_alloc, "client_flowing", "complete");
+    trace_relay_kill_phase(&svc_alloc, &client_alloc, "observe_relay_held", "start");
     node.wait_observation("the relayed connection held", |o| {
         dials_of(o, &svc_alloc, DialPurpose::Relay).1 == 1
     })
     .await;
+    trace_relay_kill_phase(&svc_alloc, &client_alloc, "observe_relay_held", "complete");
     assert!(
         terminal_event_in_console(&console_of(&client_alloc)).is_none(),
         "the client's connection is still open before the kill"
     );
 
     let pid = hypervisor_pid(&svc_alloc);
+    tracing::info!(
+        name: "step14_01.cp_phase",
+        step = "a_vmm_exit_under_a_held_relay_stream_resets_the_client_through_serve",
+        service_alloc = %svc_alloc,
+        client_alloc = %client_alloc,
+        stage = "vmm_kill",
+        transition = "request",
+        vmm_pid = pid,
+    );
     // SAFETY: SIGKILL to a pid read from /proc this instant; the test owns
     // the VM it deployed.
     let rc = unsafe { libc::kill(i32::try_from(pid).expect("pid fits i32"), libc::SIGKILL) };
     assert_eq!(rc, 0, "kill the Service VM's VMM: {}", std::io::Error::last_os_error());
+    tracing::info!(
+        name: "step14_01.cp_phase",
+        step = "a_vmm_exit_under_a_held_relay_stream_resets_the_client_through_serve",
+        service_alloc = %svc_alloc,
+        client_alloc = %client_alloc,
+        stage = "vmm_kill",
+        transition = "complete",
+        vmm_pid = pid,
+    );
 
+    trace_relay_kill_phase(&svc_alloc, &client_alloc, "client_terminal", "start");
     let deadline = tokio::time::Instant::now() + SETTLE_BOUND;
     let terminal = loop {
         if let Some(t) = terminal_event_in_console(&console_of(&client_alloc)) {
@@ -800,17 +1033,22 @@ async fn a_vmm_exit_under_a_held_relay_stream_resets_the_client_through_serve() 
         );
         tokio::time::sleep(Duration::from_millis(200)).await;
     };
+    trace_relay_kill_phase(&svc_alloc, &client_alloc, "client_terminal", "complete");
     assert_eq!(terminal, TerminalEvent::Reset, "the mesh client sees a reset, never EOF");
+    trace_relay_kill_phase(&svc_alloc, &client_alloc, "observe_dead_launch", "start");
     let obs = node
         .wait_observation("the dead launch and its relay dial gone", |o| {
             o.cids.values().all(|c| c.alloc != svc_alloc)
         })
         .await;
+    trace_relay_kill_phase(&svc_alloc, &client_alloc, "observe_dead_launch", "complete");
     assert_inventory_agrees(&obs);
 
     node.stop(&client).await;
     node.stop(&service).await;
     let obs = node.wait_observation("teardown", |o| o.cids.is_empty()).await;
     assert_eq!(inventory(&obs), (0, 0), "cleanup by teardown leaves the inventory at zero");
+    trace_relay_kill_phase(&svc_alloc, &client_alloc, "shutdown", "start");
     node.shutdown().await;
+    trace_relay_kill_phase(&svc_alloc, &client_alloc, "shutdown", "complete");
 }

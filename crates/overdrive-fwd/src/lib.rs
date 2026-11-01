@@ -287,8 +287,17 @@ impl FlowForwarder<dyn AsFd> for KernelFlowForwarder {
 
     fn inventory(&self) -> Result<ForwarderInventory, ForwarderError> {
         let mut inventory = OvdFwdInventory::default();
-        if let Err(error) = unsafe { inventory_ioctl(self.context.as_raw_fd(), &raw mut inventory) }
-        {
+        tracing::debug!(
+            name: "guest_flow.observation.kernel_inventory_ioctl_begin",
+            stage = "inventory_ioctl",
+        );
+        let ioctl_result = unsafe { inventory_ioctl(self.context.as_raw_fd(), &raw mut inventory) };
+        tracing::debug!(
+            name: "guest_flow.observation.kernel_inventory_ioctl_complete",
+            stage = "inventory_ioctl",
+            result = ?ioctl_result,
+        );
+        if let Err(error) = ioctl_result {
             return Err(io_failure(ForwarderOp::Inventory, error));
         }
         if inventory.reserved != 0 {

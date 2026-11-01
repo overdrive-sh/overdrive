@@ -84,20 +84,26 @@ mod linux {
 
     pub(crate) mod app {
         use std::io::{self, Read, Write};
-        use std::net::{Shutdown, SocketAddrV4, TcpListener, TcpStream, UdpSocket};
+        use std::net::{
+            Ipv4Addr, Shutdown, SocketAddrV4, TcpListener, TcpStream, ToSocketAddrs, UdpSocket,
+        };
+        use std::os::fd::{AsRawFd as _, FromRawFd as _};
         use std::os::unix::process::CommandExt as _;
         use std::process::Command;
-        use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        use std::sync::{Arc, Mutex};
         use std::thread;
         use std::time::Duration;
 
         use overdrive_testing::guest_app::{
             Direction, FLOOD_REPORT_PERIOD_MS, FLOOD_WRITTEN_PREFIX, FLOWING_LINE,
             HOLD_FLOWING_BYTES, LISTENING_PREFIX, ListenConnEnd, STREAM_CHUNK, StreamCheck,
-            StreamGen, TERMINAL_LINE_PREFIX, TerminalEvent, UDP_REPLY_TIMEOUT_MS, churn_datagram,
-            datagram_request, datagram_response, exit, flood_hello, hold_hello, subcommand,
-            tag_is_valid, tcp_request, tcp_response,
+            StreamGen, TERMINAL_LINE_PREFIX, TerminalEvent, UDP_REPLY_TIMEOUT_MS, V6_APP_PORT,
+            V6_CLIENT_ADMISSION_PORT, V6_HTTP_PROBE_PORT, V6_NAME_REQUEST, V6_NAME_RESPONSE,
+            V6_POPULATION_BASE_PORT, V6_POPULATION_MAX, V6_REMOTE_REQUEST, V6_REMOTE_RESPONSE,
+            V6_TCP_PROBE_PORT, V6_VIP_REQUEST, V6_VIP_RESPONSE, churn_datagram, datagram_request,
+            datagram_response, exit, flood_hello, hold_hello, subcommand, tag_is_valid,
+            tcp_request, tcp_response,
         };
 
         fn usage(detail: &str) -> i32 {
@@ -152,6 +158,35 @@ mod linux {
                     match (port.parse::<u16>(), tag_is_valid(tag)) {
                         (Ok(port), true) if port != 0 => listen(port),
                         _ => usage("listen <port> <tag>"),
+                    }
+                }
+                [cmd, population] if *cmd == subcommand::V6_PEER => {
+                    match population.parse::<u16>() {
+                        Ok(population) if (1..=V6_POPULATION_MAX).contains(&population) => {
+                            v6_peer(population)
+                        }
+                        _ => usage("v6-peer <population 1..=65>"),
+                    }
+                }
+                [cmd, peer_name, peer_vip, off_tcp, off_udp, population, tag]
+                    if *cmd == subcommand::V6_CLIENT =>
+                {
+                    match (
+                        peer_vip.parse(),
+                        parse_addr(off_tcp),
+                        parse_addr(off_udp),
+                        population.parse::<u16>(),
+                        tag_is_valid(tag),
+                    ) {
+                        (Ok(peer_vip), Some(off_tcp), Some(off_udp), Ok(population), true)
+                            if (1..=V6_POPULATION_MAX).contains(&population) =>
+                        {
+                            v6_client(peer_name, peer_vip, off_tcp, off_udp, population, tag)
+                        }
+                        _ => usage(
+                            "v6-client <peer-name> <peer-vip> <off-tcp> <off-udp> \
+                             <population 1..=65> <tag>",
+                        ),
                     }
                 }
                 [cmd, rest @ ..] if *cmd == subcommand::RUN_WITH_MODULES => run_with_modules(rest),
@@ -211,6 +246,22 @@ mod linux {
             socket
                 .set_read_timeout(Some(Duration::from_millis(UDP_REPLY_TIMEOUT_MS)))
                 .map_err(|_| exit::UDP_IO)?;
+            socket.send(&[]).map_err(|e| {
+                eprintln!("udp: send empty to {udp}: {e}");
+                exit::UDP_IO
+            })?;
+            let mut empty = [0u8; 1];
+            match socket.recv(&mut empty) {
+                Ok(0) => println!("round-trip: udp-empty ok"),
+                Ok(n) => {
+                    eprintln!("udp: empty reply carried {n} bytes");
+                    return Err(exit::UDP_MISMATCH);
+                }
+                Err(e) => {
+                    eprintln!("udp: empty reply: {e}");
+                    return Err(exit::UDP_TIMEOUT);
+                }
+            }
             socket.send(&datagram_request(tag)).map_err(|e| {
                 eprintln!("udp: send to {udp}: {e}");
                 exit::UDP_IO
@@ -233,6 +284,552 @@ mod linux {
                     Err(exit::UDP_IO)
                 }
             }
+        }
+
+        fn v6_peer(population: u16) -> i32 {
+            let healthy = Arc::new(AtomicBool::new(true));
+            let app = bind_v6_tcp(V6_APP_PORT);
+            let http = bind_v6_tcp(V6_HTTP_PROBE_PORT);
+            let mut population_listeners = Vec::with_capacity(usize::from(population));
+            for index in 0..population {
+                let port = V6_POPULATION_BASE_PORT + index;
+                population_listeners.push((index, bind_v6_tcp(port)));
+            }
+
+            {
+                let healthy = Arc::clone(&healthy);
+                thread::spawn(move || v6_app_accept(&app, &healthy));
+            }
+            {
+                let healthy = Arc::clone(&healthy);
+                thread::spawn(move || v6_http_accept(&http, &healthy));
+            }
+            {
+                let healthy = Arc::clone(&healthy);
+                thread::spawn(move || v6_tcp_probe_accept(&healthy));
+            }
+            for (index, listener) in population_listeners {
+                thread::spawn(move || v6_population_accept(index, &listener));
+            }
+            println!("v6-peer: ready population={population}");
+            idle()
+        }
+
+        fn bind_v6_tcp(port: u16) -> TcpListener {
+            TcpListener::bind((Ipv4Addr::UNSPECIFIED, port))
+                .unwrap_or_else(|e| panic!("v6-peer: bind TCP {port}: {e}"))
+        }
+
+        fn v6_app_accept(listener: &TcpListener, healthy: &Arc<AtomicBool>) {
+            for stream in listener.incoming() {
+                match stream {
+                    Ok(stream) => {
+                        let healthy = Arc::clone(healthy);
+                        thread::spawn(move || v6_app_connection(stream, &healthy));
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                    Err(e) => eprintln!("v6-peer: app accept: {e}"),
+                }
+            }
+        }
+
+        fn v6_app_connection(mut stream: TcpStream, healthy: &AtomicBool) {
+            let _ = stream.set_nodelay(true);
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+            let request = match read_line_bytes(&mut stream, 256) {
+                Ok(request) => request,
+                Err(e) => {
+                    eprintln!("v6-peer: app read: {e}");
+                    return;
+                }
+            };
+            let response = if request == V6_NAME_REQUEST {
+                V6_NAME_RESPONSE
+            } else if request == V6_VIP_REQUEST {
+                V6_VIP_RESPONSE
+            } else if request == V6_REMOTE_REQUEST {
+                V6_REMOTE_RESPONSE
+            } else {
+                eprintln!("v6-peer: unexpected app request {request:?}");
+                return;
+            };
+            if let Err(e) = stream.write_all(response) {
+                eprintln!("v6-peer: app reply: {e}");
+                return;
+            }
+            println!("v6-peer: app request={}", String::from_utf8_lossy(&request).trim());
+            if request == V6_VIP_REQUEST {
+                let _ = stream.set_read_timeout(None);
+                v6_state_control(&mut stream, healthy);
+                return;
+            }
+            loop {
+                thread::sleep(Duration::from_secs(3600));
+            }
+        }
+
+        fn v6_state_control(stream: &mut TcpStream, healthy: &AtomicBool) {
+            let command = match read_line_bytes(stream, 64) {
+                Ok(command) => command,
+                Err(e) => {
+                    eprintln!("v6-peer: state control read: {e}");
+                    return;
+                }
+            };
+            let command = std::str::from_utf8(&command).unwrap_or("").trim();
+            if command != "V6-STATE:unhealthy" {
+                eprintln!("v6-peer: bad state command {command:?}");
+                return;
+            }
+            healthy.store(false, Ordering::SeqCst);
+            let _ = stream.write_all(b"V6-STATE-ACK\n");
+            println!("v6-peer: state=unhealthy");
+            thread::sleep(Duration::from_secs(12));
+            healthy.store(true, Ordering::SeqCst);
+            println!("v6-peer: state=healthy");
+        }
+
+        fn v6_http_accept(listener: &TcpListener, healthy: &Arc<AtomicBool>) {
+            for stream in listener.incoming() {
+                match stream {
+                    Ok(mut stream) => {
+                        let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+                        if let Err(e) = consume_http_request_head(&mut stream) {
+                            eprintln!("v6-peer: HTTP request read: {e}");
+                            continue;
+                        }
+                        let pass = healthy.load(Ordering::SeqCst);
+                        let response = if pass {
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK"
+                                .as_slice()
+                        } else {
+                            b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 4\r\nConnection: close\r\n\r\nFAIL"
+                                .as_slice()
+                        };
+                        let _ = stream.write_all(response);
+                        let _ = stream.shutdown(Shutdown::Write);
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                    Err(e) => eprintln!("v6-peer: http accept: {e}"),
+                }
+            }
+        }
+
+        fn consume_http_request_head(stream: &mut TcpStream) -> io::Result<()> {
+            const MAX_HEAD_BYTES: usize = 8 * 1024;
+            let mut request = Vec::with_capacity(512);
+            let mut chunk = [0u8; 512];
+            while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                if request.len() == MAX_HEAD_BYTES {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "HTTP request head exceeds 8192 bytes",
+                    ));
+                }
+                let remaining = MAX_HEAD_BYTES - request.len();
+                let read_len = remaining.min(chunk.len());
+                let received = stream.read(&mut chunk[..read_len])?;
+                if received == 0 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "HTTP request ended before its header terminator",
+                    ));
+                }
+                request.extend_from_slice(&chunk[..received]);
+            }
+            Ok(())
+        }
+
+        fn v6_tcp_probe_accept(healthy: &Arc<AtomicBool>) {
+            let mut listener: Option<TcpListener> = None;
+            loop {
+                if healthy.load(Ordering::SeqCst) {
+                    if listener.is_none() {
+                        match bind_reusable_tcp(V6_TCP_PROBE_PORT) {
+                            Ok(bound) => {
+                                if let Err(e) = bound.set_nonblocking(true) {
+                                    eprintln!("v6-peer: TCP probe nonblocking: {e}");
+                                }
+                                listener = Some(bound);
+                            }
+                            Err(e) => eprintln!("v6-peer: TCP probe rebind: {e}"),
+                        }
+                    }
+                    if let Some(bound) = &listener {
+                        match bound.accept() {
+                            Ok((_stream, _)) => {}
+                            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
+                            Err(e) => eprintln!("v6-peer: TCP probe accept: {e}"),
+                        }
+                    }
+                } else {
+                    listener = None;
+                }
+                thread::sleep(Duration::from_millis(20));
+            }
+        }
+
+        fn bind_reusable_tcp(port: u16) -> io::Result<TcpListener> {
+            let fd =
+                unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0) };
+            if fd < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            let listener = unsafe { TcpListener::from_raw_fd(fd) };
+            let one: libc::c_int = 1;
+            let option_len = libc::socklen_t::try_from(std::mem::size_of_val(&one))
+                .map_err(|_| io::Error::other("socket option size exceeds socklen_t"))?;
+            if unsafe {
+                libc::setsockopt(
+                    listener.as_raw_fd(),
+                    libc::SOL_SOCKET,
+                    libc::SO_REUSEADDR,
+                    std::ptr::from_ref(&one).cast(),
+                    option_len,
+                )
+            } != 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+            let family = u16::try_from(libc::AF_INET)
+                .map_err(|_| io::Error::other("AF_INET exceeds sa_family_t"))?;
+            let address = libc::sockaddr_in {
+                sin_family: family,
+                sin_port: port.to_be(),
+                sin_addr: libc::in_addr { s_addr: u32::from_ne_bytes([0, 0, 0, 0]) },
+                sin_zero: [0; 8],
+            };
+            let address_len = libc::socklen_t::try_from(std::mem::size_of_val(&address))
+                .map_err(|_| io::Error::other("socket address size exceeds socklen_t"))?;
+            if unsafe {
+                libc::bind(listener.as_raw_fd(), std::ptr::from_ref(&address).cast(), address_len)
+            } != 0
+                || unsafe { libc::listen(listener.as_raw_fd(), 128) } != 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(listener)
+        }
+
+        fn v6_population_accept(index: u16, listener: &TcpListener) {
+            for stream in listener.incoming() {
+                match stream {
+                    Ok(stream) => {
+                        let local = socket_context(stream.local_addr());
+                        let peer = socket_context(stream.peer_addr());
+                        println!(
+                            "v6-peer: population index={index} port={} local={local} peer={peer} \
+                             stage=ACCEPT",
+                            V6_POPULATION_BASE_PORT + index
+                        );
+                        thread::spawn(move || {
+                            v6_population_connection(index, stream, &local, &peer);
+                        });
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                    Err(e) => eprintln!("v6-peer: population {index} accept: {e}"),
+                }
+            }
+        }
+
+        fn v6_population_connection(index: u16, mut stream: TcpStream, local: &str, peer: &str) {
+            let port = V6_POPULATION_BASE_PORT + index;
+            let expected = format!("V6-POP:{index}\n");
+            let mut got = vec![0u8; expected.len()];
+            if let Err(error) = stream.read_exact(&mut got) {
+                eprintln!(
+                    "v6-peer: population index={index} port={port} local={local} peer={peer} \
+                     stage=READ errno={} error={error}",
+                    errno_of(&error)
+                );
+                println!(
+                    "v6-peer: population index={index} port={port} local={local} peer={peer} \
+                     stage=CLOSE cause=request-read-error"
+                );
+                return;
+            }
+            if got != expected.as_bytes() {
+                eprintln!(
+                    "v6-peer: population index={index} port={port} local={local} peer={peer} \
+                     stage=REQUEST errno=none expected={:?} got={got:?}",
+                    expected.as_bytes()
+                );
+                println!(
+                    "v6-peer: population index={index} port={port} local={local} peer={peer} \
+                     stage=CLOSE cause=request-mismatch"
+                );
+                return;
+            }
+            println!(
+                "v6-peer: population index={index} port={port} local={local} peer={peer} \
+                 stage=REQUEST bytes={} result=ok",
+                got.len()
+            );
+            let ack = format!("V6-POP-ACK:{index}\n");
+            if let Err(error) = stream.write_all(ack.as_bytes()) {
+                eprintln!(
+                    "v6-peer: population index={index} port={port} local={local} peer={peer} \
+                     stage=ACK errno={} error={error}",
+                    errno_of(&error)
+                );
+                println!(
+                    "v6-peer: population index={index} port={port} local={local} peer={peer} \
+                     stage=CLOSE cause=ack-write-error"
+                );
+                return;
+            }
+            println!(
+                "v6-peer: population index={index} port={port} local={local} peer={peer} \
+                 stage=ACK bytes={} result=ok",
+                ack.len()
+            );
+            let mut closure = [0u8; 1];
+            match stream.read(&mut closure) {
+                Ok(0) => println!(
+                    "v6-peer: population index={index} port={port} local={local} peer={peer} \
+                     stage=CLOSE cause=eof errno=none"
+                ),
+                Ok(n) => eprintln!(
+                    "v6-peer: population index={index} port={port} local={local} peer={peer} \
+                     stage=CLOSE cause=unexpected-data errno=none bytes={n} data={:?}",
+                    &closure[..n]
+                ),
+                Err(error) => eprintln!(
+                    "v6-peer: population index={index} port={port} local={local} peer={peer} \
+                     stage=CLOSE cause=read-error errno={} error={error}",
+                    errno_of(&error)
+                ),
+            }
+        }
+
+        fn socket_context(address: io::Result<std::net::SocketAddr>) -> String {
+            address
+                .map_or_else(|error| format!("unavailable({error})"), |address| address.to_string())
+        }
+
+        fn errno_of(error: &io::Error) -> String {
+            error.raw_os_error().map_or_else(|| "none".to_owned(), |errno| errno.to_string())
+        }
+
+        fn v6_client(
+            peer_name: &str,
+            peer_vip: Ipv4Addr,
+            off_tcp: SocketAddrV4,
+            off_udp: SocketAddrV4,
+            population: u16,
+            tag: &str,
+        ) -> i32 {
+            let admission = TcpListener::bind((Ipv4Addr::UNSPECIFIED, V6_CLIENT_ADMISSION_PORT))
+                .unwrap_or_else(|e| panic!("v6-client: bind admission listener: {e}"));
+            thread::spawn(move || {
+                for stream in admission.incoming() {
+                    drop(stream);
+                }
+            });
+
+            let resolv = std::fs::read_to_string("/etc/resolv.conf").unwrap_or_default();
+            let nameserver =
+                resolv.lines().find_map(|line| line.strip_prefix("nameserver ")).unwrap_or("");
+            println!("v6-client: nameserver={nameserver}");
+            // The Service's workload SVID is converged independently of VM
+            // process start. Let the production identity lifecycle publish it
+            // before the first mesh handshake; subsequent retries remain the
+            // fail-closed bound for real transport failures.
+            thread::sleep(Duration::from_secs(10));
+
+            if tcp_exchange(off_tcp, &tcp_request(tag), &tcp_response(tag)).is_err() {
+                return exit::TCP_IO;
+            }
+            if datagram_exchange(off_udp, tag).is_err() {
+                return exit::UDP_IO;
+            }
+            println!("v6-client: off-node ok");
+
+            let name_addr = match retry_for(Duration::from_secs(30), || {
+                (peer_name, V6_APP_PORT)
+                    .to_socket_addrs()?
+                    .find_map(|addr| match addr {
+                        std::net::SocketAddr::V4(addr) => Some(addr),
+                        std::net::SocketAddr::V6(_) => None,
+                    })
+                    .ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::AddrNotAvailable, "no IPv4 answer")
+                    })
+            }) {
+                Ok(addr) => addr,
+                Err(error) => {
+                    eprintln!("v6-client: resolve {peer_name}: {error}");
+                    return exit::TCP_CONNECT;
+                }
+            };
+            println!("v6-client: resolved {peer_name}={}", name_addr.ip());
+            if let Err(error) = retry_for(Duration::from_secs(30), || {
+                tcp_exchange(name_addr, V6_NAME_REQUEST, V6_NAME_RESPONSE)
+            }) {
+                eprintln!("v6-client: mesh-name TCP did not become ready: {error}");
+                return exit::TCP_IO;
+            }
+
+            let mut vip_stream =
+                match retry_for(Duration::from_secs(30), || open_vip_stream(peer_vip)) {
+                    Ok(stream) => stream,
+                    Err(e) => {
+                        eprintln!("v6-client: VIP TCP did not become ready: {e}");
+                        return exit::TCP_CONNECT;
+                    }
+                };
+            println!("v6-client: vip-tcp ok");
+
+            println!("v6-client: paths-ready");
+            thread::sleep(Duration::from_secs(5));
+            if send_state(&mut vip_stream).is_err() {
+                return exit::TCP_IO;
+            }
+            println!("v6-client: state=unhealthy");
+            drop(vip_stream);
+            thread::sleep(Duration::from_secs(12));
+            let vip_stream = match retry_for(Duration::from_secs(30), || open_vip_stream(peer_vip))
+            {
+                Ok(stream) => stream,
+                Err(e) => {
+                    eprintln!("v6-client: restored VIP TCP did not become ready: {e}");
+                    return exit::TCP_CONNECT;
+                }
+            };
+            println!("v6-client: state=healthy");
+            thread::sleep(Duration::from_secs(5));
+
+            let population_streams = match hold_population(peer_vip, population) {
+                Ok(streams) => streams,
+                Err(e) => {
+                    eprintln!("v6-client: population: {e}");
+                    return exit::TCP_IO;
+                }
+            };
+            println!("v6-client: population-held={population}");
+            let _held = (vip_stream, population_streams);
+            idle()
+        }
+
+        fn open_vip_stream(peer_vip: Ipv4Addr) -> io::Result<TcpStream> {
+            let mut stream = TcpStream::connect((peer_vip, V6_APP_PORT))?;
+            stream.set_nodelay(true)?;
+            stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+            stream.write_all(V6_VIP_REQUEST)?;
+            read_exact_record(&mut stream, V6_VIP_RESPONSE)?;
+            Ok(stream)
+        }
+
+        fn hold_population(
+            peer_vip: Ipv4Addr,
+            population: u16,
+        ) -> io::Result<Arc<Mutex<Vec<TcpStream>>>> {
+            let streams = Arc::new(Mutex::new(Vec::with_capacity(usize::from(population))));
+            let population_deadline = std::time::Instant::now() + Duration::from_secs(30);
+            for index in 0..population {
+                let request = format!("V6-POP:{index}\n");
+                let response = format!("V6-POP-ACK:{index}\n");
+                let target = SocketAddrV4::new(peer_vip, V6_POPULATION_BASE_PORT + index);
+                let stream = retry_until(population_deadline, || {
+                    let mut stream = TcpStream::connect(target)
+                        .map_err(|error| population_error(index, target, "CONNECT", &error))?;
+                    stream
+                        .write_all(request.as_bytes())
+                        .map_err(|error| population_error(index, target, "WRITE", &error))?;
+                    let mut got = vec![0u8; response.len()];
+                    stream
+                        .read_exact(&mut got)
+                        .map_err(|error| population_error(index, target, "READ", &error))?;
+                    if got != response.as_bytes() {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!(
+                                "population index={index} target={target} stage=ACK errno=none \
+                                 expected={:?} got={got:?}",
+                                response.as_bytes()
+                            ),
+                        ));
+                    }
+                    Ok(stream)
+                })?;
+                streams.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(stream);
+            }
+            Ok(streams)
+        }
+
+        fn population_error(
+            index: u16,
+            target: SocketAddrV4,
+            stage: &'static str,
+            error: &io::Error,
+        ) -> io::Error {
+            let kind = error.kind();
+            let errno = errno_of(error);
+            io::Error::new(
+                kind,
+                format!(
+                    "population index={index} target={target} stage={stage} errno={errno} \
+                     error={error}"
+                ),
+            )
+        }
+
+        fn retry_for<T>(
+            bound: Duration,
+            operation: impl FnMut() -> io::Result<T>,
+        ) -> io::Result<T> {
+            retry_until(std::time::Instant::now() + bound, operation)
+        }
+
+        fn retry_until<T>(
+            deadline: std::time::Instant,
+            mut operation: impl FnMut() -> io::Result<T>,
+        ) -> io::Result<T> {
+            loop {
+                match operation() {
+                    Ok(value) => return Ok(value),
+                    Err(_error) if std::time::Instant::now() < deadline => {
+                        thread::sleep(Duration::from_millis(200));
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+        }
+
+        fn tcp_exchange(addr: SocketAddrV4, request: &[u8], response: &[u8]) -> io::Result<()> {
+            let mut stream = TcpStream::connect(addr)?;
+            stream.set_nodelay(true)?;
+            stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+            stream.write_all(request)?;
+            read_exact_record(&mut stream, response)
+        }
+
+        fn read_exact_record(stream: &mut TcpStream, expected: &[u8]) -> io::Result<()> {
+            let mut got = vec![0u8; expected.len()];
+            stream.read_exact(&mut got)?;
+            if got == expected {
+                Ok(())
+            } else {
+                Err(io::Error::new(io::ErrorKind::InvalidData, "byte-distinct reply mismatch"))
+            }
+        }
+
+        fn read_line_bytes(stream: &mut TcpStream, cap: usize) -> io::Result<Vec<u8>> {
+            let mut line = Vec::new();
+            while line.len() < cap {
+                let mut byte = [0u8; 1];
+                stream.read_exact(&mut byte)?;
+                line.push(byte[0]);
+                if byte[0] == b'\n' {
+                    return Ok(line);
+                }
+            }
+            Err(io::Error::new(io::ErrorKind::InvalidData, "line exceeds fixture bound"))
+        }
+
+        fn send_state(stream: &mut TcpStream) -> io::Result<()> {
+            stream.write_all(b"V6-STATE:unhealthy\n")?;
+            read_exact_record(stream, b"V6-STATE-ACK\n")
         }
 
         /// `listen <port> <tag>` (U-D17-DIAL): accepts until killed; one

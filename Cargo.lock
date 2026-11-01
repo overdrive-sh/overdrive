@@ -2307,6 +2307,7 @@ dependencies = [
  "reqwest",
  "rkyv",
  "rustls",
+ "rustls-pemfile",
  "serde",
  "serde_json",
  "serial_test",
@@ -2317,6 +2318,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "x509-parser",
 ]
 
 [[package]]
@@ -2457,6 +2459,7 @@ dependencies = [
  "overdrive-sim",
  "overdrive-testing",
  "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]

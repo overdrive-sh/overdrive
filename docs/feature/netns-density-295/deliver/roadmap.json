@@ -1491,7 +1491,7 @@
         {
           "id": "14-01",
           "name": "[10-01] Walking skeleton on metal (V-6)",
-          "description": "P6-S13: a VM Job through a real in-process overdrive serve and the public deploy handler round-trips TCP and UDP to a remote peer that sees the node's own address; the VMM is gone afterwards; mesh, VIP, inbound and probe paths per V-6.",
+          "description": "P6-S13: a VM Job through a real in-process overdrive serve and the public deploy handler round-trips TCP and UDP to a remote peer that sees the node's own address; the VMM is gone afterwards; mesh-name, TCP/mTLS VIP, inbound TCP and probe paths per V-6.",
           "agent": "nw-software-crafter",
           "deps": [
             "13-02",
@@ -1503,7 +1503,7 @@
           "criteria": [
             "vsock_walking_skeleton.rs:43 is GREEN on native metal after cargo xtask guest-kit-prepare: TCP and UDP (an empty datagram included) round-trip off the node, the peer sees the node address, the VMM is gone after the Job ends.",
             "guest_flow_through_serve.rs (403,460,625,694,734; U-D17-DIAL, R5-57, R5-63 d/e, R5-41 through-serve halves): the owner observed via ServerHandle::guest_flow_observation shows the expected pair, end and watch behaviour for Probe and Relay dials.",
-            "V-6 through production: a VM service resolves and dials a mesh peer by name (guest DNS travels the gateway:53 datagram association, D10 / ADR-0154), reaches a mesh VIP over TCP (mTLS) and a service VIP over UDP, is reached inbound via leg-C -> leg-S -> dial, and its TCP and HTTP probes follow the application's state; V-LEGB-SERVE confirms no packet on the uplink.",
+            "V-6 through production: a VM service resolves and dials a mesh peer by name (guest DNS travels the gateway:53 datagram association, D10 / ADR-0154), reaches a mesh VIP over TCP (mTLS), is reached inbound via leg-C -> leg-S -> dial, and its TCP and HTTP probes follow the application's state; V-LEGB-SERVE confirms no packet on the uplink. Service-VIP UDP delivery to a VM backend is excluded from STEP 14-01 and remains deferred to #310 under D12.",
             "No test installs, binds or programs anything production does not; the walking skeleton drives serve + deploy with no override seam."
           ],
           "test_file": "crates/overdrive-cli/tests/integration/vsock_walking_skeleton.rs",
@@ -1524,7 +1524,7 @@
             "cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests",
             "cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings"
           ],
-          "implementation_notes": "DISTILL already authored the tests for this step: remove only the `#[ignore = \"pending DELIVER ...\"]` markers named in the criteria, record a semantic RED, make them GREEN, commit; do not edit test bodies; do not invent API surface beyond the feature delta (blocker if underspecified). Mutation testing is the final gate, not per step. A defect found here belongs to the owning earlier step; fix it there in a follow-on commit, do not patch around it. EXEMPT FROM PARADIGM: single-shot native-metal end-to-end flow. SPIKE REFERENCES (user 2026-10-22): the walking skeleton's mesh/probe/VIP/UDP paths were previously probed in docs/feature/netns-density-295/spike/findings-v28-legs-vsock.md, docs/feature/netns-density-295/spike/v11-vip-v14-findings.md and docs/feature/netns-density-295/spike/findings-v33-legb-mark.md (probe sources spike-scratch/netns-density-295-v28-legs-vsock, spike-scratch/netns-density-295-v11-vip-v14, spike-scratch/netns-density-295-v33-legb-mark); read them for the working configuration if a path misbehaves. Working versions/configuration: host and guest `uname -r` 7.0.0-29-generic on native metal, CH fork 41a619d19 with `--vsock cid=N,backend=vhost-kernel`, aya =0.13.1 / aya-ebpf =0.1.1 / libc 0.2; guest `tcp_fwmark_accept=1`, `fwmark_reflect=1`, `ip rule fwmark 1 lookup 100` + `local 0.0.0.0/0 dev lo table 100`; a real CH microVM answered through a leg-C stand-in over vsock (v33 S8-equivalent); off-host UDP sizes 0-59,000 B and real Internet DNS worked in v11 (destination a netns behind veth plus the physical NIC, no second machine).  The probe is reference only - never copy it into crates/ wholesale and never build against spike-scratch; production follows the delta's contracts where they differ from the probe (these were stand-ins; this step is the first real serve + deploy run)."
+          "implementation_notes": "DISTILL already authored the tests for this step: remove only the `#[ignore = \"pending DELIVER ...\"]` markers named in the criteria, record a semantic RED, make them GREEN, commit; do not edit test bodies except for the independently reviewed DISTILL alignment that removes the deferred Service-VIP UDP-to-VM action; do not invent API surface beyond the feature delta (blocker if underspecified). Mutation testing is the final gate, not per step. A defect found here belongs to the owning earlier step; fix it there in a follow-on commit, do not patch around it. EXEMPT FROM PARADIGM: single-shot native-metal end-to-end flow. SPIKE REFERENCES (user 2026-10-22): the walking skeleton's mesh/probe/TCP-VIP/off-node-UDP paths were previously probed in docs/feature/netns-density-295/spike/findings-v28-legs-vsock.md, docs/feature/netns-density-295/spike/v11-vip-v14-findings.md and docs/feature/netns-density-295/spike/findings-v33-legb-mark.md (probe sources spike-scratch/netns-density-295-v28-legs-vsock, spike-scratch/netns-density-295-v11-vip-v14, spike-scratch/netns-density-295-v33-legb-mark); read them for the working configuration if a path misbehaves. Working versions/configuration: host and guest `uname -r` 7.0.0-29-generic on native metal, CH fork 41a619d19 with `--vsock cid=N,backend=vhost-kernel`, aya =0.13.1 / aya-ebpf =0.1.1 / libc 0.2; guest `tcp_fwmark_accept=1`, `fwmark_reflect=1`, `ip rule fwmark 1 lookup 100` + `local 0.0.0.0/0 dev lo table 100`; a real CH microVM answered through a leg-C stand-in over vsock (v33 S8-equivalent); off-host UDP sizes 0-59,000 B and real Internet DNS worked in v11 (destination a netns behind veth plus the physical NIC, no second machine). The probe is reference only - never copy it into crates/ wholesale and never build against spike-scratch; production follows the delta's contracts where they differ from the probe (these were stand-ins; this step is the first real serve + deploy run)."
         },
         {
           "id": "14-02",
@@ -1701,13 +1701,19 @@
   },
   "validation": {
     "status": "approved",
-    "reviewer": "STEP 13-02 PROBE-RUN-COUNT exact hydration carrier PRCI-1 was APPROVED by fresh independent DESIGN contract review iteration 1 on 2026-10-28; see `deliver/review-design-13-02-probe-input-shape.md`. The only approved carrier is `#[doc(hidden)] pub ServiceAllocFact::probe_rows: BTreeMap<(ProbeRole, ProbeIdx), ProbeResultRow>`; ADR-0101's exact three-field `ServiceLifecycleState`, existing field types and private helper signatures remain unchanged. This restores execution authority only for exact implementation and DISTILL alignment against PRCI-1; their separate review gates remain required. The prior PFRO-1 and completed STEP 12-01 approvals are preserved without alteration.",
-    "approved_at": "2026-10-28T00:20:29Z",
+    "reviewer": "Exact user approval on 2026-10-30 — ‘yeah, let's not do that now. add all the relevant info to the github issue, and then we keep it deferred to #310 and correct the contradictory acceptance checklist.’ The bounded option-D correction was independently APPROVED in `deliver/review-design-14-01-udp-deferral.md`; the exact executable acceptance alignment was independently APPROVED with no open finding in `deliver/review-distill-14-01-udp-deferral-alignment.md`. The aligned exact-source native runner remains an honest semantic RED at the retained initial TCP/HTTP readiness outcome: this approval releases the original STEP 14-01 crafter to resume RED/GREEN remediation only and does not claim implementation GREEN, a 117-pass native receipt, or completed DELIVER review. Service-VIP UDP delivery to a VM backend remains deferred to #310; D12, D24/D24a, guest-prefix refusal, every other STEP 14-01 outcome, the same six identities/117 inventory, and every earlier approval remain intact.",
+    "approved_at": "2026-10-31T03:02:08Z",
     "prior_approval": {
       "status": "approved",
-      "approved_at": "2026-10-27T22:04:01Z",
-      "scope": "PFRO-1 scoped validation through the independently reviewed STEP 13-01 post-FIN reset observation and DISTILL alignment; preserved without alteration",
-      "review_artifact": "deliver/review-design-13-01-postfin-reset-observation.md"
+      "approved_at": "2026-10-28T00:20:29Z",
+      "scope": "STEP 13-02 PROBE-RUN-COUNT exact hydration carrier PRCI-1, approved by fresh independent DESIGN contract review iteration 1; the only approved carrier is `#[doc(hidden)] pub ServiceAllocFact::probe_rows: BTreeMap<(ProbeRole, ProbeIdx), ProbeResultRow>` and the prior PFRO-1 / completed STEP 12-01 approvals remain unchanged",
+      "review_artifact": "deliver/review-design-13-02-probe-input-shape.md",
+      "prior_approval": {
+        "status": "approved",
+        "approved_at": "2026-10-27T22:04:01Z",
+        "scope": "PFRO-1 scoped validation through the independently reviewed STEP 13-01 post-FIN reset observation and DISTILL alignment; preserved without alteration",
+        "review_artifact": "deliver/review-design-13-01-postfin-reset-observation.md"
+      }
     },
     "pending_scope": []
   }
