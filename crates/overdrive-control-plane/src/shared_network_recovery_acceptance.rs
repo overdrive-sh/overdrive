@@ -34,6 +34,7 @@
 //! | R5-32 (foreign) / D-UP-4 | a restore of another ledger's hold returns `ForeignHold` and changes nothing at the owner; the hold, dropped unredeemed, counts leaked at its issuing ledger (+1) and nowhere else | a second `QuiescenceLedger`'s hold restored at the owner | the `restore` result; the second ledger's `leaked()`; O3 counts and admission | seeded sim (the model-only D-UP-4 claim's discharge) |
 //! | FHOLD-CHECK | the supervisor maps `restore` → `Err(ForeignHold)` to the fail-stop `ForeignQuiescenceHold` at once | a test-local owner at the owner port answering `ForeignHold` | the shutdown request's cause | sim unit cell (+ Quint `quiescence-foreign-hold-ends-in-fail-stop`) |
 //! | R5-58 | `AuditDetectsComponentExitWithinOneTick`, `RepairErrIsOneFailedAttempt`, `EpisodeEndsByRestoreOrFailStop` (≤ 3 components, ≤ 10 s of sim time; seed printed, triggering sequence retained) | random-instant task exits; repairs scripted `Err` k times; a failed post-repair audit | O6 episodes, O3 holds and leaked count, the shutdown request | seeded sim |
+//! | R5-58 queued-end handoff | a pair end queued after the audit's owner snapshot and before its inventory read remains one occupied place, starts no recovery, and converges to zero when the owner consumes the record | the existing audit checkpoint, delayed end delivery and destination reset | O6 recovery, O3 hold/admission/flows and the external forwarder inventory, with the seed and action order printed | seeded sim |
 //! | R5-61 (seeded half) | the `Forwarder` recovery aborts every flow, closes the old context and only then opens and probes a new one; `forwarder_generation` advances by one | the forwarder context fails `Io` | the seam's issued order (`AbortAll` → `CloseForwarder` → `OpenForwarder`), O3 held flows at the reopen, O3 `forwarder_generation` | seeded sim (+ Tier-3 far-end resets, + Quint `ForwarderRecoveryAbortsThenReopens`) |
 //! | G-V1 (boot step 1) | the forwarder context is opened and probed at `probe_startup`, before any listener bind or the gateway route; a failed open or probe refuses boot with its typed cause and `health.startup.refused` reason `guest_network.probe`, before any boot effect | the boot's `open_forwarder` scripted `AbiMismatch` / `DeviceAbsent` | the typed `GuestNetworkBoot(Forwarder)` refusal and reason; the seam's issued order; O3 `forwarder_generation` = 1 after a good boot | seeded sim (+ Tier-3 R5-61 module probe) |
 //! | R5-11 (seeded half) | every boot — fresh and after a crash — converges the gateway route once in `converge_shared` and serves; no runtime recovery writes it | the process is dropped, then rebooted; a listener recovery | the seam's `GatewayRoute` effects per boot and per recovery | seeded sim (+ Tier-3 R5-11 keep / replace / add) |
@@ -69,7 +70,9 @@ use tracing::{Event, Subscriber};
 use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
 
 use crate::error::{ControlPlaneError, MtlsBootError};
-use crate::guest_network::flow_io::sim::{SimEffectKind, SimFailure, SimForwarderFailure};
+use crate::guest_network::flow_io::sim::{
+    SimEffectKind, SimFailure, SimForwarderFailure, SimPairKind,
+};
 use crate::guest_network::{
     CidPhase, DialPhase, ForwardingActivation, GuestAdmission, GuestConnKey, GuestNetworkError,
     GuestNetworkProvisioner, GuestOwnerObservation, QuiescenceRestoreError,
@@ -882,6 +885,135 @@ async fn a_healthy_probe_watch_overlapping_shared_audit_does_not_start_recovery(
             "seed={seed} sequence={sequence:?}: normal Probe drop returns both watch counts to zero without recovery"
         );
         node.crash().await;
+    }
+}
+
+/// A pair end queued while the periodic shared audit is between its owner
+/// snapshot and forwarder inventory read remains one occupied place. The
+/// audit starts no recovery; after the real owner consumes the end record,
+/// both owner and inventory converge to zero.
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+#[allow(clippy::print_stderr, reason = "the seed and action trace reproduce a failure")]
+async fn a_queued_pair_end_overlapping_shared_audit_does_not_start_recovery() {
+    for seed in seeds() {
+        eprintln!("R5-58 HealthyQueuedEndOverlapsSharedAudit seed={seed}");
+        let mut rng = Seeded(seed | 1);
+        let offset = Duration::from_millis(
+            rng.below(u64::try_from(SHARED_NETWORK_AUDIT_PERIOD.as_millis()).expect("period fits")),
+        );
+        let mut sequence = vec![format!("advance within audit period by {offset:?}")];
+
+        let mut node = ComposedNode::fresh();
+        node.boot()
+            .await
+            .unwrap_or_else(|error| panic!("seed={seed} sequence={sequence:?}: boot: {error}"));
+        node.process().io.set_auto_ends(false);
+        let _key = node.open_guest_flow().await;
+        sequence.push("boot one Active allocation and pair one guest-opened TCP flow".to_owned());
+
+        let pairs = node.process().io.pairs();
+        let flows: Vec<_> = pairs
+            .values()
+            .filter(|pair| pair.kind == SimPairKind::Tcp)
+            .filter_map(|pair| pair.flow)
+            .collect();
+        assert_eq!(
+            flows.len(),
+            1,
+            "seed={seed} sequence={sequence:?}: exactly one current-generation TCP pair"
+        );
+        let flow = flows[0];
+        let before_owner = node.owner_observation().await;
+        let before_inventory = node.process().io.forwarder_inventory();
+        assert_eq!(
+            (
+                node.recovery_observation().get(&SharedGuestNetworkComponent::Forwarder).copied(),
+                before_owner.quiescence_holds,
+                before_owner.admission,
+                flows_of(&before_owner),
+                before_inventory.live_pairs,
+                before_inventory.live_watches,
+                before_inventory.queued_ends,
+            ),
+            (None, 0, GuestAdmission::Open, 1, 1, 0, 0),
+            "seed={seed} sequence={sequence:?}: precondition is one owner-held live pair"
+        );
+
+        node.advance(offset).await;
+        let mut checkpoint = node.process().owner.arm_shared_audit_post_snapshot_checkpoint();
+        sequence.push("arm post-snapshot/pre-inventory checkpoint".to_owned());
+        node.advance(SHARED_NETWORK_AUDIT_PERIOD - offset).await;
+        node.release_audits().await;
+        checkpoint.reached().await;
+        sequence.push("periodic audit captured one owner pair and paused".to_owned());
+
+        node.process().io.destination_resets(flow);
+        node.settle().await;
+        sequence.push(format!("destination reset {flow:?}; its end remains queued"));
+        let queued_owner = node.owner_observation().await;
+        let queued_inventory = node.process().io.forwarder_inventory();
+        assert_eq!(
+            (
+                flows_of(&queued_owner),
+                queued_inventory.live_pairs,
+                queued_inventory.live_watches,
+                queued_inventory.queued_ends,
+            ),
+            (1, 0, 0, 1),
+            "seed={seed} sequence={sequence:?}: the unread end is the owner's one occupied place"
+        );
+
+        assert!(
+            checkpoint.release(),
+            "seed={seed} sequence={sequence:?}: release the queued-end audit"
+        );
+        node.settle().await;
+        sequence.push("release periodic audit and settle supervisor".to_owned());
+        let after_audit_owner = node.owner_observation().await;
+        let after_audit_inventory = node.process().io.forwarder_inventory();
+        let after_audit = (
+            node.recovery_observation().get(&SharedGuestNetworkComponent::Forwarder).copied(),
+            after_audit_owner.quiescence_holds,
+            after_audit_owner.admission,
+            flows_of(&after_audit_owner),
+            after_audit_inventory.live_pairs,
+            after_audit_inventory.live_watches,
+            after_audit_inventory.queued_ends,
+            node.fail_stop_requested(),
+        );
+
+        node.process().io.release_end();
+        node.settle().await;
+        sequence.push("release queued end to the production owner consumer".to_owned());
+        let after_release_owner = node.owner_observation().await;
+        let after_release_inventory = node.process().io.forwarder_inventory();
+        let after_release = (
+            node.recovery_observation().get(&SharedGuestNetworkComponent::Forwarder).copied(),
+            after_release_owner.quiescence_holds,
+            after_release_owner.admission,
+            flows_of(&after_release_owner),
+            after_release_inventory.live_pairs,
+            after_release_inventory.live_watches,
+            after_release_inventory.queued_ends,
+            node.fail_stop_requested(),
+        );
+
+        sequence.push("await composed process cleanup".to_owned());
+        node.crash().await;
+        sequence.push("composed owner and supervisor cleanup completed".to_owned());
+        eprintln!("R5-58 HealthyQueuedEndOverlapsSharedAudit seed={seed} sequence={sequence:?}");
+
+        assert_eq!(
+            after_audit,
+            (None, 0, GuestAdmission::Open, 1, 0, 0, 1, None),
+            "seed={seed} sequence={sequence:?}: a queued end is counted exactly once without recovery"
+        );
+        assert_eq!(
+            after_release,
+            (None, 0, GuestAdmission::Open, 0, 0, 0, 0, None),
+            "seed={seed} sequence={sequence:?}: consuming the end converges owner and inventory to zero"
+        );
     }
 }
 
