@@ -1,4 +1,4 @@
 {
 	"title": "Concepts",
-	"pages": ["architecture", "microvms", "guest-networking", "intent-observation", "reconcilers", "workflows", "reconcilers-and-workflows", "identity", "workload-identity-lifecycle", "transparent-mtls", "dial-by-name", "deterministic-simulation-testing"]
+	"pages": ["architecture", "microvms", "guest-networking", "intent-observation", "reconcilers", "workflows", "reconcilers-and-workflows", "identity", "workload-identity-lifecycle", "transparent-mtls", "dial-by-name", "deterministic-simulation-testing", "quint-modeling"]
 }

@@ -1,0 +1,133 @@
+---
+title: Quint modeling
+description: How Overdrive specifies concurrent protocols in Quint, checks finite and bounded model instances, and connects model traces to Rust conformance and native kernel evidence.
+---
+
+Overdrive uses Quint to specify protocols whose correctness depends on ordering,
+ownership, concurrency, or crash recovery. A specification records the relevant
+state, permitted transitions, invariants, progress conditions, and environmental
+assumptions. Model checking searches those transitions for a counterexample.
+
+This complements [deterministic simulation testing](/docs/concepts/deterministic-simulation-testing).
+DST executes the Rust composition with controlled dependencies. A Quint model
+is a separate executable contract. Agreement between the two requires an
+explicit conformance driver, and kernel assumptions require native evidence.
+
+## Choose the question and its abstraction
+
+A state variable represents a fact the contract needs, such as a lease owner,
+flow phase, outstanding quota place, or latest probe row. An action defines when
+a transition is enabled and what changes together. A primed variable denotes its
+next-state value. A named `run` specifies a consequential sequence with
+intermediate or final assertions. See the
+[official Quint protocol lesson](https://quint.sh/docs/lessons/anatomy) for the
+language structure.
+
+An abstraction removes details that do not decide the property. The TCP capture
+pending-place model uses two places and four abstract children to exercise
+admission, overflow, release, and reuse. This does not measure 4,096 live kernel
+objects or prove capture-hook behavior. Likewise, an abstract data unit in the
+flow model is not a benchmark byte count.
+
+A **safety property** rejects a bad state or transition. A **liveness property**
+requires eventual progress under its declared assumptions. Fairness assumptions
+must reflect the environment. The flow model permits an application to stop
+reading, so delivery obligations include stall and cutoff conditions.
+
+## The runner distinguishes three kinds of check
+
+The repository pins Quint `0.32.0` through its provisioned toolchain. Each
+subsystem's `checks.toml` selects the backend and expected outcome per check.
+
+| Backend | Repository use | Result boundary |
+| --- | --- | --- |
+| `tlc` | Exhaustive reachable-state checking on finite instances, including temporal properties | The configured instance and its assumptions |
+| `apalache` | Symbolic checking up to a configured `max_steps` | Executions within that bound |
+| `evaluator` | Execute a named Quint `run` through `quint test` | That scenario and its assertions |
+
+TLC is the TLA+ model checker used by Quint's `verify --backend tlc` path.
+The repository wrapper selects it from the manifest rather than requiring a
+separate hand-written TLA+ specification.
+
+Randomized Quint traces and Rust simulation add sampled executions. They are not
+exhaustive state exploration. The distinction between checking engines is
+explained in the [official model-checker guide](https://quint.sh/docs/model-checkers).
+
+## Hazards and witnesses check that a rule has teeth
+
+A normal instance enables the designed rules and expects its property to hold.
+A hazard instance disables or weakens a particular rule and expects a violation.
+The runner succeeds when the actual outcome matches the declared expectation.
+An unexpected crash or timeout is not an expected counterexample.
+
+For example, the probe-count reconstruction hazard lets the consumer infer a
+streak from skipped run numbers. The named sequence `Fail`, consumer look,
+`Pass`, `Fail`, consumer look exposes the wrong inference. The accepted rule
+keeps streak counting at the producer and carries the count in the stored row.
+
+A witness establishes that a relevant state can be reached. A named run that
+already reaches that state can supply the witness. This helps reject vacuous
+checks without adding redundant scenarios.
+
+## The models cover distinct owners
+
+The sources live under
+[specs/quint](https://github.com/overdrive-sh/overdrive/tree/main/specs/quint).
+
+| Subsystem | Contract |
+| --- | --- |
+| `guest-flow-owner` | Control sessions, flow attribution and pairing, completion, quotas, CID leases, quiescence, UDP slots, and selected forwarder lock/RCU behavior |
+| `probe-count` | Producer-counted streaks, row ordering, missing samples, threshold decisions, and stop retries |
+| `tcp-capture-pending` | Shared pending-place admission and release around guest TCP capture |
+
+Each model documents its assumptions and excluded behavior. Small finite
+instances, bounded faults, model-only history, and conditional progress claims
+must remain visible when interpreting a result.
+
+## Conformance compares an implementation observation with the model
+
+Rust `quint-connect` drivers replay named runs through `#[quint_test]` and
+sample randomized traces through `#[quint_run]`. They drive production owners
+through their real interfaces and compare projected observations after actions.
+A failure seed makes a sampled trace reproducible.
+
+The projection reads owner accessors or observation rows. It must not use the
+driver's own expected-state bookkeeping as implementation evidence. A Sim
+adapter can represent a fact owned by the kernel only where that role is
+explicit and paired with real-adapter evidence.
+
+The models record action names and parameters in `conf_step` for replay. This
+field changes only on recording conformance instances and influences no guard
+or property. Checking instances keep it constant.
+
+Coverage is explicit rather than automatic. The forwarder's internal
+`fwd_safe` model is not a Rust conformance target. The TCP capture pending-place
+model has no added `quint-connect` driver and instead pairs with the existing
+native guest capture test. Neither exception establishes automatic refinement
+of implementation from specification.
+
+## Evidence identifies exactly what was checked
+
+A full `--record` run writes a subsystem's `evidence/summary.json` and Markdown
+summary, with tool versions, repository identity, input hashes, checks, outcomes,
+and counterexample references. `verify-evidence` checks input freshness,
+expected outcomes, and required counterexample traces. It does not rerun the
+model checker or inspect the Rust binary.
+
+The retained records contain 279 guest-flow-owner checks, 31 probe-count checks,
+and eight TCP capture pending-place checks. The guest-flow-owner total includes
+209 holds and 70 expected violations. These are different check kinds at their
+recorded bounds, not a count of universal system proofs.
+
+Known exclusions still matter. CID generation replacement has a crash window
+tracked in [issue 325](https://github.com/overdrive-sh/overdrive/issues/325).
+The ordinary lease conformance configuration guards that window rather than
+claiming the implementation handles it.
+
+A real-kernel counterexample invalidates any model premise it contradicts.
+Native tests must establish credit, socket, BPF, module, and cleanup behavior
+that the model abstracts. The guest-network audit's queued-end regression is
+separate seeded Rust evidence, not a model check of the audit inventory.
+
+For commands and evidence handling, follow
+[Check Quint models](/docs/how-to/check-quint-models).

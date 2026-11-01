@@ -24,7 +24,7 @@ controls.
 | `Entropy` | OS randomness | seeded RNG |
 | `Driver` | real workload driver | scripted driver |
 
-Production wires the host implementations; tests wire the sim implementations.
+Production wires the host implementations. Tests wire the sim implementations.
 The core never picks a side — it is written against the trait surface only.
 
 <Callout type="warn" title="Core logic must never reach for the real world">
@@ -38,7 +38,7 @@ The core never picks a side — it is written against the trait surface only.
 
 Every DST run takes a seed. The simulated clock, network, and RNG are all
 derived from it, so the same seed produces the same trajectory every time. When
-a run fails, the harness prints the seed; re-running with that seed reproduces
+a run fails, the harness prints the seed. Re-running with that seed reproduces
 the failure exactly, which is what makes these bugs debuggable at all.
 
 A flaky simulation run is therefore treated as a bug in the simulation layer —
@@ -53,8 +53,9 @@ families:
 <Accordions type="single">
 	<Accordion title="Safety — nothing bad ever happens">
 		For example: at most one leader at any time, and intent never crosses into
-		the observation layer. A safety invariant that holds in every explored
-		state gives confidence the bad thing genuinely cannot occur.
+		the observation layer. A passing invariant establishes the property for the
+		explored trajectories. It does not exhaust every possible implementation
+		schedule.
 	</Accordion>
 	<Accordion title="Liveness — good things eventually happen">
 		For example: a submitted job eventually receives an allocation. Liveness
@@ -81,3 +82,21 @@ need through the relevant trait — not to suppress the gate.
 DST is the first of Overdrive's four testing tiers, and it runs in-process with
 the sim traits. To run the harness on a clean checkout, follow
 [Run the DST harness](/docs/how-to/run-the-dst-harness).
+
+## Model checking and native tests answer different questions
+
+[Quint modeling](/docs/concepts/quint-modeling) specifies selected ownership and
+lifecycle protocols separately from Rust. Finite-state or bounded model checks
+search those models for counterexamples. `quint-connect` drivers replay named
+and randomized model traces against production owners and compare observable
+state. A conformance failure can reveal an implementation defect, a bad
+projection, or a wrong model assumption.
+
+DST covers the Rust composition, including dispatch, integration, and schedules
+the model abstracts. Native tests establish real kernel and adapter effects.
+For example, the guest-network queued-end audit regression is seeded Rust
+evidence about ownership handoff, not a Quint proof of inventory accounting.
+None of these layers automatically establishes the others.
+
+Use [Check Quint models](/docs/how-to/check-quint-models) for the model runner
+and recorded-evidence workflow. Use the DST harness above for Rust simulation.

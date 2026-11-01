@@ -1,0 +1,145 @@
+---
+title: Check Quint models
+description: Typecheck the repository's Quint specifications, select recorded checks, inspect counterexamples, and refresh or verify a subsystem's evidence.
+---
+
+Use the repository's `cargo xtask quint` runner to check the specifications in
+`specs/quint/`. It reads each subsystem's `checks.toml` and compares every result
+with its declared expectation. Read [Quint modeling](/docs/concepts/quint-modeling)
+first for the distinction between model checking, conformance, and simulation.
+
+## Use the provisioned runner
+
+Run these commands from the repository root through `cargo xtask lima run --`.
+The Lima environment provisions the pinned Quint, Node, JVM, Apalache, and
+evaluator toolchain. Do not replace the pin with an arbitrary global Quint
+installation when producing repository evidence.
+
+These commands check abstract models. They do not boot a workload VM, load a
+kernel module, or validate host networking. Native guest tests have their own
+qualified execution and disposable-guest requirements. This guide does not
+provide a command to run them directly on a shared host.
+
+## Edit the protocol and its check entry together
+
+Keep the protocol in its subsystem's `.qnt` files. Name state variables by the
+facts they represent, define the enabled actions, and state the invariants and
+assumptions. Preserve a named `run` for each consequential scenario. Add a
+hazard instance when a rule needs a negative check, with the removed rule and
+expected violation made explicit.
+
+Register the check in the same subsystem's `checks.toml`. For example, this
+existing probe-count entry checks the normal finite instance:
+
+```toml
+[[check]]
+name = "probe-count-no-early-terminate"
+spec = "probe_count.qnt"
+main = "probe_streak"
+invariant = "NoEarlyTerminate"
+backend = "tlc"
+expect = "holds"
+ci = true
+```
+
+A named scenario uses `run` and `backend = "evaluator"`. An Apalache check uses
+`backend = "apalache"` and its configured `max_steps`. Use the declared
+observations and abstraction boundary when connecting a model action to a Rust
+conformance driver. The driver must call the production owner and compare its
+observations, not recreate expected state in a second implementation.
+
+## Typecheck before selecting checks
+
+```bash
+cargo xtask lima run -- cargo xtask quint typecheck
+```
+
+This checks the `.qnt` files and validates named-run coverage. Stateful modules
+must declare named runs, and those runs must be listed in their subsystem's
+manifest. A missing scenario declaration is an error, not a skipped check.
+
+## Run a focused check or subsystem
+
+To check the probe-count safety conjunction:
+
+```bash
+cargo xtask lima run -- cargo xtask quint check \
+  --subsystem probe-count --name probe-count-safety
+```
+
+To check the full guest-flow-owner subsystem with an upper bound of three
+concurrent checks:
+
+```bash
+cargo xtask lima run -- cargo xtask quint check \
+  --subsystem guest-flow-owner --jobs 3
+```
+
+The runner admits checks only when their CPU and memory reservations fit.
+`--jobs` sets a concurrency ceiling, not a guarantee that every slot stays busy.
+Full runs can be expensive. Use a named check while iterating on a rule, then
+run the full affected subsystem before replacing its recorded evidence.
+
+The same command accepts `--subsystem tcp-capture-pending`. To select only
+manifest entries marked `ci = true`, use:
+
+```bash
+cargo xtask lima run -- cargo xtask quint check --ci
+```
+
+That selection is not a full evidence record.
+
+## Read a failure against its expectation
+
+Each `[[check]]` names its spec, main instance, property or named run, backend,
+and `expect`. A TLC or Apalache check names an invariant or temporal property.
+An evaluator check names a declared run. The repository runner requires the TLC
+backend for temporal checks.
+
+`expect = "violation"` means a hazard should produce a counterexample or its
+named run should fail an assertion. It does not authorize an arbitrary tool
+failure. A hazard that unexpectedly holds can mean the weakened rule is
+unreachable or the property no longer distinguishes the intended behavior.
+
+Per-run summaries and attempt logs live under
+`target/quint/<subsystem>/<run-id>/`. Inspect the trace, its main instance, bounds,
+and assumptions before deciding whether the specification, driver, or production
+contract needs correction. Do not treat a simulated kernel effect as proof that
+the real kernel does it.
+
+## Record a complete subsystem
+
+After a full check is warranted, record it with:
+
+```bash
+cargo xtask lima run -- cargo xtask quint check \
+  --subsystem guest-flow-owner --jobs 3 --record
+```
+
+`--record` requires one `--subsystem` and refuses `--name` or `--ci`. It replaces
+that subsystem's `evidence/` using a staged swap so the directory does not mix
+runs. Recording preserves results even when they miss expectations. It does not
+turn a failed run into acceptance evidence.
+
+The directory contains `summary.json`, `summary.md`, counterexample traces, and
+logs for failed checks. Full logs for passing checks remain under `target/`.
+TLC counterexamples use its text representation. Apalache counterexamples use
+ITF, with condensed traces supplied by the runner. Earlier recorded evidence
+remains in Git history.
+
+## Verify freshness without rerunning the checkers
+
+```bash
+cargo xtask lima run -- cargo xtask quint verify-evidence \
+  --subsystem guest-flow-owner
+```
+
+Verification recomputes model and manifest input hashes and checks that recorded
+outcomes match expectations and required counterexample traces exist. A stale
+record fails. This command checks the retained record rather than searching the
+state space again. Omit `--subsystem` to verify every discovered subsystem.
+
+Keep the evidence boundary explicit in reviews. Record the selected model
+instance and bounds, expected negative results, known exclusions, and the
+separate Rust conformance or native tests that establish implementation behavior.
+For Rust simulation itself, see [Run the DST harness](/docs/how-to/run-the-dst-harness).

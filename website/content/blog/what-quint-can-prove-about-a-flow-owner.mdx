@@ -1,0 +1,203 @@
+---
+title: What Quint can prove about a flow owner
+description: Modeling ownership and lifecycle protocols exposes bad interleavings before they become code, but the model, Rust implementation, and Linux kernel still need separate evidence.
+date: 2026-11-01
+author: The Overdrive team
+summary: A missed probe result can change a restart decision. A live watch can exist before its caller owns a stream. Overdrive uses Quint to make these contracts executable, then checks their connection to Rust and the real kernel.
+---
+
+A probe task can write three results while its reconciler reads only the first
+and last. That makes a small optimization in observation storage a correctness
+problem for service health.
+
+Suppose the producer writes `Fail`, then `Pass`, then `Fail`. The reconciler
+reads after the first failure and again after the last. It sees failure both
+times. If it reconstructs a failure streak from the difference between run
+numbers, it can count three consecutive failures where the actual trailing
+streak is one. A service can be stopped before it reaches its failure threshold.
+
+Overdrive's probe-count model makes that schedule executable. More importantly,
+it lets the checker explore other schedules that a hand-written example would
+leave out. The model states who owns the streak, which row wins a merge, when a
+stop can be retried, and what a missing sample changes. The answer to that last
+question is nothing.
+
+This is the job of Quint in Overdrive: make an ordering-sensitive contract
+precise enough to search for a counterexample. It does not prove that Linux
+behaves as the contract assumes, or that Rust follows it. Those are separate
+questions with separate tests.
+
+## Describe the protocol before choosing its schedule
+
+Quint describes a system through state, actions, and properties. State records
+what matters to the contract. An action defines a permitted transition. A
+property states what must remain true or eventually happen. The checker chooses
+among enabled actions instead of following one test script. The
+[official protocol lesson](https://quint.sh/docs/lessons/anatomy) explains this
+state-machine structure.
+
+The probe model keeps one producer, one consumer, and one latest stored row for
+a probe key. The producer owns `run_seq` and `same_status_runs`. The consumer
+reads that row and applies the health threshold. It remembers the sequence of
+the row on which it last requested a stop, so rereading a row cannot request
+another stop. A newer row can retry a failed stop while the allocation remains
+running.
+
+The model also keeps a history of written outcomes for checking. Production
+does not need that history. In the model, it supplies an independent answer to
+“what is the actual trailing streak?” The following declaration is an excerpt
+from `probe_count.qnt`:
+
+```text
+val StreakExact: bool = rseq > 0 implies rsame == trail(hist, rst)
+```
+
+Here `rseq`, `rst`, and `rsame` describe the stored row. `hist` holds the written
+outcomes, and `trail` counts the suffix with the row's status. If a row exists,
+its recorded streak must equal that suffix. This is a safety property. A single
+reachable state can disprove it.
+
+The abstraction is deliberate. The model bounds producer runs at seven, uses a
+failure threshold of three, and permits consumer looks between producer runs.
+It does not model an HTTP server or the bytes in a health-check response. Those
+details do not decide whether coalescing loses a streak boundary.
+
+## Make the wrong rule fail on purpose
+
+A property that always passes might be useful. It might also be checking a
+state the model can never reach.
+
+Overdrive keeps hazard instances that disable a particular design rule and
+require a counterexample. For probe counting, one hazard restores the consumer's
+attempt to reconstruct the streak. The retained named run is:
+
+```text
+run FlipBetweenLooksNoEarlyTerminate = init
+  .then(ProbeRun("Fail", "")).then(ConsumerLook(true))
+  .then(ProbeRun("Pass", "")).then(ProbeRun("Fail", ""))
+  .then(ConsumerLook(true)).expect(terms == 0 and rsame == 1 and Safety)
+```
+
+The final assertion requires zero stop requests and a trailing failure streak
+of one. It passes under producer-owned counting and fails under the
+reconstruction hazard. The recorded failure is expected. It shows that the
+check distinguishes the selected rule from the rejected rule.
+
+This is a concrete design comparison, not a claim that every failed model
+trace is a production bug. The
+[accepted probe-count decision](https://github.com/overdrive-sh/overdrive/blob/main/docs/product/architecture/adr-0191-the-probe-runner-records-each-runs-streak-and-servicelifecycle-applies-thresholds-at-read.md)
+records why the producer owns the streak. Other hazards challenge
+once-ever stopping, repeated action on one row, and treating an unavailable
+sample as a failure. Each represents a specific rule being removed.
+
+Witnesses answer a related question: can the model reach the state the property
+is meant to constrain? A named run that reaches a stop or readiness threshold
+already supplies that evidence. An additional witness is useful when no named
+run reaches the relevant state.
+
+## Safety and progress ask different questions
+
+A flow that never delivers or releases anything can avoid corrupting data.
+That does not make it a useful forwarder.
+
+Safety checks reject a bad state or transition, such as assigning one place to
+two owners. Liveness checks ask whether progress eventually occurs under stated
+assumptions. In the guest-flow model, delivery obligations account for a flow
+being cut off or stalled. A reader is allowed to stop reading forever. The
+model cannot promise delivery by assuming that reader eventually cooperates.
+
+The repository uses different engines for different questions. TLC explores the
+reachable states of finite model instances and checks temporal properties.
+Apalache checks configured bounded executions. Quint's evaluator executes named
+runs. A randomized simulation samples traces rather than exhausting all
+schedules. These distinctions follow the
+[Quint model-checker documentation](https://quint.sh/docs/model-checkers).
+
+The bounds are part of the result. The flow-pair model has instances with one
+fault per trace and small abstract amounts of data. Separate instances and
+named runs cover selected multi-unit and multi-fault cases. “The invariant
+holds” must name the model instance and the search that completed.
+
+## Connect the specification to the Rust owner
+
+A model can be internally correct while the implementation does something else.
+Overdrive connects them with `quint-connect` drivers.
+
+A driver takes a model action, calls the production owner's driving interface,
+then projects observable implementation state back into the model's vocabulary.
+Named runs replay consequential scenarios. Randomized runs sample additional
+traces and print the seed on failure. These are conformance tests, not
+exhaustive proofs of the Rust program.
+
+The projection matters as much as the action handler. If the driver compares
+the model with a bookkeeping map it updated itself, it has tested its own
+simulation. The comparison must read the owner's observation surface. Where a
+simulated adapter represents a kernel-owned fact, that adapter needs a matching
+real-kernel test.
+
+Conformance can also expose a wrong model boundary. A seeded flow-pair replay
+reached an abort while a watch existed but before the pending dial had handed a
+stream to its caller. The implementation followed pending-dial cleanup, while
+the model assumed that a live watch meant the caller held the stream. The
+correction recorded stream handoff separately. Adding that distinction aligned
+the model with the existing ownership contract instead of changing production
+to satisfy a false premise.
+
+The model records each conformance action and its parameters in `conf_step`.
+That field is write-only protocol instrumentation. It changes on conformance
+instances and stays constant on checking instances, so action-recording history
+does not inflate the state space searched for protocol properties.
+
+Not every model has a Rust conformance driver. The TCP capture pending-place
+model checks a small admission protocol and pairs with an existing native guest
+test. The forwarder's internal lock and RCU model has a different boundary
+again. [The modeling documentation](/docs/concepts/quint-modeling) identifies
+these limits rather than treating every model as an automatic refinement proof.
+
+## Let native facts invalidate a model's premises
+
+Quint cannot establish where the kernel returns vsock credit. The initial
+sockmap forwarding approach looked consistent at the protocol level, but a
+native stalled-reader experiment found that the redirect queue could keep
+growing after credit returned. The design needed a different forwarding
+mechanism. More exploration of the old model would not have bounded that queue.
+
+TCP Fast Open exposed another kernel premise. A correlation experiment that
+allowed the client to close too early appeared to validate the final-ACK path.
+Keeping the client open without post-handshake payload disproved it. The
+replacement uses a handshake-only fentry capture program followed by the
+post-validation SockOps callback. A pending-place model can check admission
+accounting around that capture. It cannot prove the hook runs at the required
+point in the real TCP stack.
+
+The layers also catch different races. The host audit once omitted queued,
+unread completion records from occupied forwarder capacity. An exact seeded
+Rust regression triggered false recovery with the old arithmetic and passed
+with the correction. That is evidence from the production owner and supervisor
+under simulation. It is not a Quint proof of the audit counters.
+
+These kernel-sensitive checks run inside disposable guest boundaries when
+their effects require isolation. A remote physical host alone supplies no such
+boundary. The [networking journey](/blog/networking-without-a-host-interface-per-vm)
+explains those experiments and their operating costs.
+
+## Read the evidence as a contract with limits
+
+The retained guest-flow-owner record contains 279 expected outcomes: 209 holds
+and 70 expected violations. The separate probe-count record contains 31 checks,
+and TCP capture pending-place accounting has eight. Their recorded input hashes
+match the current model files and check manifests.
+
+Those counts combine finite-state checking, bounded checking, and named runs.
+They are not 279 universal proofs. An expected hazard violation is not an
+unresolved production failure. Conversely, a green expected-outcome summary
+does not erase a known gap. The CID lease conformance configuration excludes a
+specific generation-replacement crash window, which remains tracked in
+[the recovery issue](https://github.com/overdrive-sh/overdrive/issues/325).
+
+Model checking contributes an explicit protocol and reproducible evidence about
+its schedules. Conformance asks whether the owner follows that protocol. Native
+tests ask whether the real adapters and kernel satisfy its premises. The useful
+result comes from keeping those questions separate and making their answers
+agree. Start with [the modeling concept](/docs/concepts/quint-modeling), then
+[run the repository's checks](/docs/how-to/check-quint-models).

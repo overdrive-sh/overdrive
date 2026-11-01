@@ -47,8 +47,8 @@ The harness is exposed through a workspace cargo alias.
 	</Step>
 </Steps>
 
-The alias above expands to a direct binary invocation; if you prefer to call it
-without the alias, the equivalent is:
+The alias above expands to a direct binary invocation. The equivalent command
+without the alias is:
 
 ```bash
 cargo run -p overdrive-sim --bin dst -- --seed 1234
@@ -76,3 +76,9 @@ risks around the
 [intent / observation boundary](/docs/concepts/intent-observation). The other
 tiers cover concerns DST cannot, such as real-kernel behaviour, and are run
 through their own dedicated tooling.
+
+For a separate protocol specification, follow
+[Check Quint models](/docs/how-to/check-quint-models). That runner searches
+Quint state machines and verifies their recorded evidence. `cargo dst` executes
+the Rust simulation harness. A successful run of either command does not supply
+the other's evidence.
