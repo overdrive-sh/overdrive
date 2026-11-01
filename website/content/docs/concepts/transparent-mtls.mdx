@@ -1,217 +1,117 @@
 ---
 title: Transparent mTLS
-description: How Overdrive encrypts traffic between workloads with each workload's own SPIFFE identity. Each workload runs in its own network namespace and opens an ordinary socket; a node-agent-owned L4 proxy captures the connection in both directions, resolves which mesh backend it targets, runs the TLS 1.3 handshake with the workload's SVID, and hands steady-state crypto to the kernel. Both directions run in overdrive serve and are provable with a wire capture.
+description: The node agent holds workload SPIFFE identities, captures mesh TCP connections from process workloads and Linux microVMs, and authenticates and encrypts them with TLS 1.3.
 ---
 
-This is the layer that finally puts identity on the wire. The
-[built-in CA](/docs/concepts/identity) mints a SPIFFE SVID for every workload;
-the [lifecycle reconciler](/docs/concepts/workload-identity-lifecycle) holds it
-in-process and drops it on stop. Neither one encrypts a packet. This subsystem
-does: it terminates and originates TLS 1.3 on the workload's behalf, presenting
-the workload's SVID, so two workloads that opened plain sockets end up talking
-ciphertext authenticated to the platform's trust bundle. Both directions run in
-`overdrive serve`, and a packet capture proves it — TLS 1.3 records on the wire,
-zero plaintext.
+Overdrive authenticates and encrypts mesh TCP traffic on the workload's behalf.
+A workload opens an ordinary socket. The node agent holds its SPIFFE SVID and
+private key, runs the mutual-TLS handshake, and installs the negotiated session
+keys into kTLS. The workload runs no TLS library and holds no certificate.
 
-<Callout title="v1 scope">
-	Transparent mTLS encrypts mesh traffic in both directions for process workloads
-	on a single node, and a wire capture proves it. Each workload is reachable at its
-	own canonical mesh address; a client that dials that address on a service port is
-	captured, handshaked, and delivered to the server over TLS 1.3. Authentication is
-	chain-to-bundle — a presented SVID is verified against the trust bundle, and
-	pinning a specific expected peer identity is not part of this cut. Workloads dial
-	concrete canonical addresses; resolving a service name to one is a separate
-	node-local responder. See [Where it stands](#where-it-stands).
-</Callout>
+The [built-in CA](/docs/concepts/identity) issues the identity. The
+[identity lifecycle reconciler](/docs/concepts/workload-identity-lifecycle)
+holds and rotates it while the allocation runs. Transparent mTLS presents that
+identity on the wire.
 
-## The workload holds nothing
+## Capture depends on where the application runs
 
-A workload under transparent mTLS holds no certificate and no private key, and it
-runs no TLS code. It opens an ordinary TCP socket to an ordinary address. There is
-no sidecar to intercept the call and no library to link. This is the same
-sidecarless stance the rest of the platform takes (see the
-[architecture overview](/docs/concepts/architecture)): the credential's only
-holder is the node agent, never the workload.
+A process workload runs inside its own network namespace. Host nftables TPROXY
+rules redirect its outbound TCP connections to an `IP_TRANSPARENT` listener
+owned by the node agent. TPROXY preserves the original destination; the agent
+reads it with `getsockname` on the accepted socket.
 
-The node agent owns the identity and does the cryptography. The workload runs
-inside its own network namespace, and an nftables TPROXY rule on its link
-redirects each outbound connection to a proxy leg the agent owns. The agent runs
-the mutual-TLS handshake there, presenting the workload's SVID, and the
-kernel encrypts the steady-state byte stream. The workload sees a normal socket
-the whole time. A compromised workload cannot turn this off, downgrade it, or
-read the key, because it never had the key and the enforcement lives outside its
-network namespace and its address space.
+A Linux microVM uses [guest networking](/docs/concepts/guest-networking).
+Guest capture preserves the application's destination and transports the flow
+over vsock. The host owner sends mesh traffic into the host mTLS path. The VM
+has no per-VM host namespace, veth, TAP, or bridge. The host receives a vsock
+stream, not the guest's original TCP packets.
 
-## One proxy, both directions
+Both paths keep mesh credentials and host enforcement outside the application.
+Guest capture adapts the guest's sockets; it does not move the workload's private
+key or the platform's TLS policy into the guest.
 
-The enforcement mechanism is a single **agent-light L4 proxy**, the same shape
-for the outbound (client) and inbound (server) halves. An earlier design split
-this into two mechanisms — an in-band kernel path for process workloads and a
-separate tap proxy for sealed VMs. Real-kernel spikes settled the question
-empirically: one universal proxy is lossless, needs no kernel patch, and has no
-engagement race, so the two-mechanism framing was collapsed into one.
+## Resolve each connection against live backends
 
-<Mermaid chart={`
-flowchart LR
-  wl["Workload<br/>own netns · plain TCP"]
-  tp["Egress nft-TPROXY<br/>redirect to agent"]
-  leg["Agent leg<br/>getsockname · resolve · rustls TLS 1.3"]
-  k["kTLS<br/>in-kernel crypto"]
-  peer["Peer agent →<br/>peer workload"]
-  wl --> tp --> leg --> k --> peer
-`} />
+The node agent resolves a captured destination against its live index of running
+mesh backends. The index lists backends at startup and watches changes,
+re-listing after falling behind. Resolution has three outcomes:
 
-"Agent-light" is a precise claim, and it is easy to overstate. It means two
-things: the agent runs no TLS cryptography in userspace — the kernel's kTLS
-engine encrypts and decrypts every record — and it moves the byte stream by
-`splice`, so no payload byte passes through a userspace buffer. It does **not**
-mean the bytes are free: the kernel still reads every byte to run the cipher.
-The two directions differ in where that crypto happens:
+- **A reachable mesh backend:** enforce mTLS and connect to that backend.
+- **An unrelated non-mesh destination:** pass the connection through without
+  mesh encryption. Transparent mTLS is not a general firewall.
+- **A mesh destination with no reachable backend:** refuse the connection.
+  Traffic that requires mesh encryption never falls back to plaintext.
 
-- **Decrypt (the receive side)** splices out of a plain kTLS-RX leg. The kernel
-  decrypts each record on the splice, and the agent issues only the splice call
-  — no per-byte copy, no crypto in userspace.
-- **Encrypt (the send side)** splices plaintext into a kTLS-TX leg through a
-  **blocking** `splice`, and the kernel encrypts each chunk inside the call.
+[Dial by name](/docs/concepts/dial-by-name) supplies a stable service address.
+The encryption layer selects a running backend when the connection arrives;
+the application does not need a service-discovery client.
 
-The encrypt splice is blocking for a concrete reason: non-blocking delivery into
-a kTLS-TX leg reports success while silently dropping records under send-buffer
-pressure. The blocking call instead waits for buffer space inside the kernel and
-delivers every record — proven byte-exact under deliberate send-buffer
-exhaustion on a real kernel.
+## Authenticate, then hand record processing to the kernel
 
-## Outbound: capture, resolve, encrypt
+For outbound mesh traffic, the agent runs a rustls TLS 1.3 client handshake and
+presents the source workload's SVID. For inbound traffic, the server-side agent
+requires a client certificate and verifies its chain against the trust bundle.
+A client without a valid chain cannot reach the workload through that path.
+Authentication is chain-to-bundle; pinning a particular expected peer SPIFFE
+identity is outside this implementation.
 
-The outbound path turns a workload's plain `connect()` into an authenticated,
-encrypted stream — or leaves it alone, or refuses it — by deciding each connection
-as it happens. It never consults a pre-programmed table of destinations.
+The agent installs the negotiated keys into kTLS for steady-state TLS record
+processing. On the process path, `splice` moves payload between sockets without
+copying every byte through a userspace buffer. Encrypt-side splice is blocking:
+it waits for send-buffer space rather than acknowledging bytes the tested
+nonblocking kTLS-TX path could drop under pressure.
 
-1. **Capture.** Each workload runs in its own network namespace. An nftables
-   TPROXY rule on the host side of its veth pair redirects the workload's outbound
-   connection to an `IP_TRANSPARENT` listener the agent owns. The `connect()`
-   returns as if it reached the peer directly.
-2. **Recover and resolve.** TPROXY preserves the address the workload dialed; the
-   agent reads it back with `getsockname` on the accepted connection — the
-   original destination, not the proxy leg's own address — then resolves it
-   against a live index of running mesh backends. The resolve returns one of three
-   verdicts:
-   - **A mesh backend** — enforce mTLS, and continue to the handshake.
-   - **Not a recognized mesh peer** — pass the connection through as cleartext.
-     Transparent mTLS encrypts mesh traffic; it is not a firewall, and a call to a
-     non-mesh address is left alone.
-   - **A mesh peer with no reachable backend** — drop the connection. The agent
-     never falls back to cleartext for traffic that should be encrypted.
-3. **Handshake.** On a mesh verdict, the agent runs a rustls **TLS 1.3 client**
-   handshake to the backend's agent, presenting the workload's SVID as the
-   client certificate.
-4. **Encrypt.** The negotiated session keys install into kTLS on the peer-facing
-   leg. Forward traffic — the workload's plaintext — is spliced into the kTLS-TX
-   leg and encrypted in the kernel. Return traffic is spliced out of the kTLS-RX
-   leg back to the workload, decrypted in the kernel the same way.
+The VM path has a separate boundary. The `ovd_fwd` socket forwarder refuses
+sockets with an installed upper-layer protocol, including kTLS. TLS remains on
+the agent's TLS endpoints. A temporary userspace relay connects the TLS path to
+a guest stream for VM delivery. In-kernel forwarding and kTLS do not mean that
+this entire VM path avoids userspace payload copies.
 
-The workload's identity rides the handshake. The peer verifies the presented SVID
-against the shared trust bundle, so the connection is authenticated to a platform
-identity, not merely encrypted.
+## Deliver to the workload without giving it the keys
 
-Deciding per connection from a live index — rather than programming a
-per-destination map ahead of time — is what makes the address the workload dials
-the only input the agent needs. The agent lists the cluster's running backends
-when it starts and watches the change stream after, re-listing if it ever falls
-behind. A backend becomes resolvable the moment it is running and stops resolving
-when it goes away.
+For a process backend, inbound capture matches its canonical mesh address and
+declared service port. The agent terminates the peer's authenticated TLS
+connection and delivers plaintext to the application's ordinary socket.
 
-## Inbound: intercept, verify, deliver
+For a VM backend, host enforcement dials through the allocation's guest-network
+owner. The resulting guest stream reaches the guest application through the
+vsock protocol. The owner binds that dial to the live allocation and its
+transport assignment; a stale or unavailable allocation cannot become an
+unencrypted substitute.
 
-The inbound half mirrors the outbound one, with the agent acting as the TLS
-server. A TPROXY rule and an `IP_TRANSPARENT` listener intercept traffic aimed at
-the server workload; the agent recovers the original destination with
-`getsockname`, runs a server-side mutual-TLS handshake that **requires and
-verifies** a client certificate against the trust bundle, arms kTLS-RX, and
-splices byte-exact plaintext to the identity-unaware server. A client that cannot
-present a valid chain never reaches the workload.
+## Refuse incomplete enforcement
 
-The match key is the workload's **canonical mesh address**. Each allocation gets
-its own address on the mesh — its routable identity — and the agent advertises that
-address as the workload's backend. When the allocation starts, the agent installs
-one capture rule per declared service port, each keyed on the canonical address and
-that port. A client that dials `canonical-address:service-port` lands on the rule,
-the agent's server leg terminates the handshake, and the byte stream splices through
-to the workload. The client dials the concrete address directly; resolving a service
-name to it is a separate node-local responder.
+At node startup, `overdrive serve` probes enforcement and resolution after the
+identity manager is live. Shared guest-network startup also checks its
+forwarder, listeners, resource budget, and address-prefix constraints. A failed
+check emits `health.startup.refused` and refuses node startup.
 
-## Fail closed, never cleartext
+Process allocation setup provisions its namespace and TPROXY capture before
+running the workload. VM setup provisions the transport assignment and guest
+capture, then installs allocation mTLS ownership before activating guest
+traffic. Failure does not authorize a running allocation with missing mesh
+enforcement.
 
-Encryption that silently degrades to plaintext is worse than none, because it
-reads as protection while providing none. Overdrive refuses that trade at three
-points.
+Restart recovery accounts for surviving resources and removes resources whose
+allocations have ended. Guest-network teardown waits for its owned resources to
+end before releasing the allocation's address lease. These checks operate at
+the node and allocation lifecycle boundaries; they are not per-VM launch
+benchmarks.
 
-At boot, `overdrive serve` constructs the mTLS dataplane and probes it — both the
-enforcement path and the resolve index — **after** the identity manager is live. A
-failed probe emits a `health.startup.refused` event and the node refuses to start.
-It does not boot into a degraded, cleartext mode.
+## Evidence and limits
 
-Per allocation, the agent provisions the workload's network namespace and TPROXY
-capture before the workload starts. If any of that fails — the namespace and veth
-pair, the egress rule, or the proxy listeners — the allocation is driven to a
-terminal `Failed` state rather than left `Running` with unencrypted traffic.
+Real-kernel tests check TLS 1.3 records on the peer-facing wire and the absence of
+the workload's plaintext there. They also exercise handshake rejection, startup
+refusal, original-destination recovery, and guest delivery through the
+production composition. Simulation checks control-plane ownership and recovery;
+it does not substitute for kTLS, nftables, or vsock behavior on the real kernel.
 
-After a restart, the agent rebuilds its picture of which namespaces and capture
-rules belong to which allocations, re-adopting the ones that survived and sweeping
-the ones whose workloads are gone. A namespace or rule it cannot account for fails
-the boot rather than leaving stale capture in place. The boot path refuses the
-node; the per-allocation path refuses the workload; the restart path refuses to
-run on a picture it cannot trust. None falls back to cleartext.
+The implemented boundary is TCP mesh encryption for process workloads and Linux
+microVMs on a single node. UDP transport does not acquire TLS merely because TCP
+uses this path. Guest-to-Service-VIP UDP delivery to a VM backend is
+[deferred](https://github.com/overdrive-sh/overdrive/issues/310), while guest DNS
+and remote UDP are supported. Multi-node mesh, non-Linux guest adaptation, and
+an operator command to switch encryption off are not implemented.
 
-## How we know
-
-The honest proof is a kernel side-effect, not a log line. A raw `AF_PACKET`
-capture on the peer-facing wire during an outbound deploy shows TLS 1.3
-application-data records — `0x17` content type — in both directions, and a scan of
-the same capture finds zero plaintext bytes from the workload's payload. The
-egress capture rule is visible in `nft list ruleset`, the workload's network
-namespace in `ip netns identify`, and the kernel's TLS upper-layer protocol state
-in `ss -tie`. The agent's recovery of the dialed address is checked against the
-address the workload actually used. The inbound path is proven the same way: a
-deploy of two mesh workloads runs a real client handshake to the server's canonical
-address, and it completes only because the server-side capture rule routes the
-connection to the agent's leg — remove the rule and the handshake fails. The
-handshake-rejection and boot-refusal cases
-are proven by their negatives: a client without a valid chain is refused, and a
-node with an injected probe fault refuses to boot.
-
-These run as real-kernel integration tests under the project's Lima harness — the
-canonical path for anything that touches kTLS, network namespaces, or nftables
-capture.
-
-## Where it stands
-
-Transparent mTLS encrypts mesh traffic in both directions, wired into `serve`:
-
-- **Both directions in a deploy.** A process workload's outbound connection is
-  captured on egress, resolved per connection to its mesh backend, handshaked with
-  the workload's SVID, and encrypted with TLS 1.3 over kTLS. A connection inbound to
-  a workload's canonical mesh address is captured by a per-port rule the agent
-  installs when the allocation starts, handshaked server-side, and spliced to the
-  workload. Each workload runs in its own network namespace. Boot-time,
-  per-allocation, and restart-recovery enforcement all fail closed.
-- **Authentication is chain-to-bundle.** A presented SVID is verified against the
-  trust bundle. The caller does not pin which specific peer identity it expects.
-- **Workloads dial concrete addresses.** The resolve returns a running backend's
-  canonical address, not a virtual service IP, and a client dials that address
-  directly. Resolving a service name to it is a separate node-local responder.
-- **Process workloads, single node.** Sealed-VM and unikernel workloads, and the
-  multi-node mesh, are outside this scope.
-- **No operator verb.** Encryption is automatic. There is no command to enable or
-  disable it; `overdrive deploy <SPEC>` is the only workload verb, and a deployed
-  mesh workload is encrypted without further configuration.
-
-## Where to go next
-
-- The CA that mints the identity this layer presents:
-  [the built-in CA](/docs/concepts/identity).
-- How each identity is held in-process for the proxy to read, and dropped on stop:
-  [the workload identity lifecycle](/docs/concepts/workload-identity-lifecycle).
-- Where the dataplane sits in the running system:
-  [the architecture overview](/docs/concepts/architecture).
-- Why the kernel-side crypto and network capture replay deterministically under
-  test: [deterministic simulation testing](/docs/concepts/deterministic-simulation-testing).
+See [guest networking](/docs/concepts/guest-networking) for guest-kit
+requirements, transport ownership, capacity bounds, and recovery limits.

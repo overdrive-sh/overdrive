@@ -1,15 +1,14 @@
 ---
 title: Architecture overview
-description: How the parts of Overdrive fit together as it ships today — one binary, a reconciling control plane over redb, an eBPF dataplane, and process workloads under cgroups, all on a single node.
+description: One node runs a reconciling Rust control plane over redb, process and Linux microVM workloads, eBPF service steering, shared guest flow transport, and host mTLS enforcement.
 ---
 
-This page describes Overdrive as it runs today, not as the roadmap imagines
-it finished. The shipped system is smaller and sharper than the full design: one
-binary, one node, a control plane that reconciles declared intent into running
-processes, a real eBPF dataplane in the packet path, and mutual TLS between the
-operator and the server. Where a subsystem from the design is not yet wired, this
-page says so plainly rather than describing it as present — see
-[What is not here yet](#what-is-not-here-yet) for the boundary.
+Overdrive runs a control plane and worker in one process on one node. The
+control plane reconciles declared intent into process and Linux microVM
+allocations. eBPF steers supported service traffic; host mTLS enforcement
+protects mesh TCP; shared vsock transport connects Linux guests without a host
+interface per VM. The [remaining boundaries](#what-is-not-here-yet) distinguish
+implemented behavior from design targets.
 
 The mental model to hold: **you declare what should run; a loop makes it so.**
 Everything below is in service of that loop.
@@ -29,12 +28,14 @@ flowchart TB
     obs[("ObservationStore<br/>redb")]
     subgraph worker["Worker"]
       exec["ExecDriver<br/>process in cgroup"]
+      vm["MicroVM driver<br/>Cloud Hypervisor + vsock"]
       probes["Probe runner<br/>TCP · HTTP · Exec"]
     end
     dp["eBPF dataplane<br/>XDP + cgroup hooks"]
   end
 
   wl["Workload process"]
+  guest["Linux microVM<br/>guest capture + kernel forwarder"]
 
   cli -- "deploy / inspect · mTLS" --> api
   api -- "write intent" --> intent
@@ -44,6 +45,9 @@ flowchart TB
   loop -- "StartAllocation" --> exec
   loop -- "program maps" --> dp
   exec -- "runs" --> wl
+  loop -- "StartAllocation" --> vm
+  vm -- "boots / observes guest" --> guest
+  vm -- "alloc status" --> obs
   exec -- "alloc status" --> obs
   probes -- "probe" --> wl
   probes -- "probe results" --> obs
@@ -62,15 +66,21 @@ identifies itself as `local` and serves only itself. A production multi-node,
 role-at-bootstrap topology is the design target; the shipped path is the
 single-node one, and the rest of this page describes that path.
 
-When the process starts, it does three things before it will accept work, and it
-refuses to boot if any of them fails:
+Before accepting work, startup validates the required host capabilities and
+refuses to boot if a required check fails:
 
 - **Probes the cgroup filesystem.** The worker runs Linux processes inside
   cgroups; if it cannot reach a usable cgroup v2 hierarchy, boot stops with a
   structured `health.startup.refused` event rather than limping along.
 - **Loads and probes the eBPF dataplane.** The XDP and cgroup programs are
   attached and verified up front, not lazily on first packet.
-- **Mints its TLS identity** and binds the listener.
+- **Checks shared guest networking and mesh enforcement.** The host image must
+  have loaded `ovd_fwd`. Startup probes its control context, claims shared
+  listeners, checks descriptor capacity and address-prefix conflicts, and
+  validates the mesh enforcement and resolve paths. These are node startup
+  checks, not per-VM launch probes.
+- **Mints its operator TLS identity** and binds the listener. The workload CA
+  separately adopts its persistent encrypted root before issuing SVIDs.
 
 This is "earned trust": the server proves it can do its job at boot instead of
 discovering it cannot at the first deploy.
@@ -87,8 +97,9 @@ see how the pieces connect.
    holds. The deploy is now durable; nothing is running yet.
 3. The **convergence loop** notices the new intent, computes the gap between what
    should run and what is running, and emits actions to close it.
-4. An action like `StartAllocation` reaches the **worker**, which launches the
-   process under a cgroup and watches it.
+4. An action like `StartAllocation` reaches the **worker**, which selects a
+   workload driver and places its process under a cgroup. `ExecDriver` runs a process; the microVM
+   driver boots Cloud Hypervisor and watches guest readiness and exit reports.
 5. The worker writes the allocation's status into the **ObservationStore**. The
    next turn of the loop reads that status as the new "actual," and the gap is
    closed.
@@ -178,13 +189,14 @@ The same shape makes the loop self-heal. A reconciler recomputes the gap between
 desired and actual every time it runs, so it never assumes a past action took
 effect — it checks. A half-finished operation is just a gap the next pass
 closes: an allocation that crashed partway through starting is started again, a
-veth pair left half-provisioned by an interrupted boot is completed rather than
-adopted as-is. The control plane converges toward the declared state or keeps
-trying; it does not strand half-applied state for someone to fix by hand.
+process network sandbox left half-provisioned by an interrupted boot is
+reconciled rather than adopted as-is. VM attachment has a separate shared
+guest-network owner; it does not provision a veth pair per VM. The control plane
+converges toward the declared state or keeps trying; it does not strand half-applied state for someone to fix by hand.
 
-## The worker runs processes under cgroups
+## The worker runs processes and Linux microVMs
 
-The shipped workload driver is `ExecDriver`: it runs a Linux process with
+`ExecDriver` runs a Linux process with
 `std::process::Command`, places it in a cgroup under
 `overdrive.slice/workloads.slice`, and watches its exit. A spec's `[exec]` block
 — `command` plus `args` — describes the process to run; the `[resources]` block
@@ -192,9 +204,17 @@ The shipped workload driver is `ExecDriver`: it runs a Linux process with
 section names the workload's *kind* — `[service]`, `[job]`, or `[schedule]` —
 which is orthogonal to the driver that runs it.
 
-The driver trait names other drivers — microVM, VM, unikernel, WASM — but those
-variants are scaffolding with no implementation behind them. Today, `exec` is the
-only driver that runs.
+A `[vm]` block selects the Cloud Hypervisor driver for a job or service. The
+VMM process runs non-root under seccomp, Landlock, and the allocation's cgroup.
+It shares the host network namespace. Guest capture and a kernel forwarder
+transport application flows over vsock; the VM attachment creates no per-VM
+host namespace, TAP, or bridge. The driver publishes readiness and the
+workload's exit status from the guest report, not from a successful VMM exit.
+
+See [microVMs](/docs/concepts/microvms) for the matching guest-kit and rootfs
+requirements, and [guest networking](/docs/concepts/guest-networking) for
+transport capacity, lifecycle, and traffic limits. Unikernel and WASM drivers
+remain design targets.
 
 ## Health checks close a second loop
 
@@ -215,46 +235,43 @@ discipline applies — probing is observation, the verdict is a reconciler actin
 on it — which is why the health-check logic is a pure reconcilable function and
 not ad-hoc timers scattered through the worker.
 
-## The dataplane is in the kernel
+## Networking uses separate mechanisms for separate boundaries
 
-This is the part of the shipped system that most exceeds a "phase one"
-expectation: the dataplane is real eBPF, attached at boot. `EbpfDataplane` loads
-XDP programs onto the client and backend interfaces and attaches a cgroup
-`connect4` program to the workloads cgroup. There is no userspace proxy in the
-packet path — the control plane keeps the BPF maps in sync with live
-allocations, and the kernel does the forwarding.
+`EbpfDataplane` loads XDP and cgroup programs at node startup. The control plane
+keeps their maps aligned with service backends. Supported IPv4 service traffic
+uses a stable VIP and kernel-side steering; local socket hooks and packet-path
+XDP programs handle different entry points. These address-rewrite programs do
+not implement TLS or replace the workload lifecycle.
 
-What the kernel does with a service's traffic turns on **where the backend
-runs**. Today that answer is always "on this node."
+Process workloads have per-allocation network namespaces and host TPROXY
+capture. Linux microVMs have a different attachment: guest eBPF captures
+ordinary application sockets, and `ovd_fwd` transports their flows over vsock
+through shared node listeners. The host opens destination sockets and routes
+mesh TCP into the node agent's mTLS enforcement. Reusable TAP and bridge APIs
+remain in the host library, but VM attachment does not use them.
 
-### Local backends — the path that runs today
+The forwarder moves bytes inside the kernel only after the target accepts
+them, preserving source-socket backpressure. It refuses kTLS sockets; TLS
+termination belongs to the host mTLS path, with a temporary userspace relay for
+guest delivery. A kernel forwarder is therefore not a claim that the whole
+mesh path avoids userspace payload handling.
 
-A backend is *local* when it runs on the same node as the dataplane, which on a
-single node is every backend. The `connect4` program rewrites the connection's
-destination from the service VIP to the backend's real address at `connect()`
-time — before a packet leaves the socket — and records the pick in
-`LOCAL_BACKEND_MAP`. The client then talks to the local process directly. The
-return path needs no rewrite: the socket was opened to the backend's own
-address, so its replies already carry the address the client expects. Both TCP
-and UDP listeners steer through this path.
+The host owns each allocation's address lease and flows through teardown.
+An ended pair queues a completion record, and capacity remains occupied until
+the owner consumes it. Shutdown waits for the allocation's guest-network
+resources to end before releasing its address lease.
 
-### Remote backends — built, dormant until multi-node
-
-A backend is *remote* when it runs on a different node, and it takes a different
-mechanism. XDP matches the VIP in `SERVICE_MAP` and redirects the packet to the
-backend's node; then, because that backend replies from its own address, a
-reverse-NAT program rewrites the reply's source back to the VIP through
-`REVERSE_NAT_MAP`, so the client never sees the backend IP. These programs and
-maps are loaded and tested, but no deploy reaches them yet: the node is always
-`local`, so every backend resolves to this host and classifies as local. Remote
-backends become reachable only when multi-node lands — the first point at which
-a backend can live somewhere else. Until then `SERVICE_MAP` and `REVERSE_NAT_MAP`
-stay empty by design, not by defect.
+Guest DNS and remote TCP/UDP are supported, including empty UDP datagrams.
+Guest-to-Service-VIP UDP delivery to a VM backend is
+[unbuilt](https://github.com/overdrive-sh/overdrive/issues/310). The implemented
+mesh is single-node; loaded XDP support does not imply a deployed multi-node
+control plane. See [guest networking](/docs/concepts/guest-networking) and
+[transparent mTLS](/docs/concepts/transparent-mtls) for the exact boundaries.
 
 ## Identity is mutual TLS, minted at boot
 
-The control plane has no persistent certificate authority and no key files on
-disk. At boot it mints an ephemeral CA, issues itself a server leaf and the
+Operator API authentication uses an ephemeral CA. At boot the control plane
+mints that CA, issues itself a server leaf and the
 operator a client leaf, and binds a rustls listener. It writes the endpoint, the
 CA pin, and the operator certificate to `~/.overdrive/config` as one unit — the
 "trust triple" every CLI command reads. The connection is mutually
@@ -287,8 +304,8 @@ not describe them as present until there is:
   replication. `cluster upgrade --mode ha` parses but is not wired.
 - **Gossip-replicated observation.** Observation is local redb; the CR-SQLite /
   Corrosion gossip layer is the multi-node design target.
-- **Other workload drivers.** microVM (Cloud Hypervisor), unikernel, and WASM
-  drivers are named in the trait but unimplemented.
+- **Other guest runtimes.** Non-Linux guest networking, unikernel, and WASM
+  drivers are unbuilt. Linux microVMs run through Cloud Hypervisor.
 - **The ingress gateway, the policy engine, native telemetry, and the LLM
   self-healing agent.** Each is part of the design; none is wired into `serve`.
 - **Presenting workload identity on every path.** The built-in certificate
@@ -299,10 +316,9 @@ not describe them as present until there is:
   are the ingress gateway and the telemetry sink that would also read a held SVID.
   See the [identity model](/docs/concepts/identity) and the
   [workload identity lifecycle](/docs/concepts/workload-identity-lifecycle).
-- **Cross-host load balancing.** Service traffic reaches same-host backends
-  through the cgroup `connect4` path. The XDP `SERVICE_MAP` / `REVERSE_NAT_MAP`
-  path that forwards to a backend on another node is built and tested but
-  unreachable, because every backend on a single node is local.
+- **A deployed multi-node mesh.** The single-node control plane cannot place a
+  backend on another node. Kernel service-steering support does not supply
+  membership, replicated state, or multi-node workload ownership.
 - **Multi-region federation.** The node is always `local`.
 
 ## Where to go next

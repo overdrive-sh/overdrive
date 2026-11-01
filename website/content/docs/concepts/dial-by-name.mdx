@@ -18,8 +18,9 @@ This works the moment you deploy. There is nothing to switch on.
 	connecting to `payments.svc.overdrive.local` — and the platform connects it to a
 	running copy and encrypts the link, with no configuration. If nothing is running
 	under that name, the lookup fails instead of handing back a dead address. This
-	covers process workloads on a single node. IPv6 lookups, sealed-VM workloads, and
-	a separate virtual-IP load balancer are not part of it. See
+	covers process workloads and Linux microVMs on a single node for mesh TCP.
+	Guest DNS and remote UDP are supported; Service-VIP UDP delivery to a VM
+	backend is unbuilt. IPv6 mesh answers are not implemented. See
 	[Where it stands](#where-it-stands).
 </Callout>
 
@@ -120,9 +121,10 @@ when a copy returns.
 
 ### One responder answers every workload
 
-Each workload runs in its own isolated network sandbox, and each sandbox sends its
-name lookups to its own gateway address. A single responder on the node answers
-all of them. It replies to each lookup from the exact address that workload asked —
+Process workloads send name lookups from their isolated network namespaces to
+their gateway addresses. Linux guests send lookups through the guest-network
+datagram transport to their assigned gateway. A single responder on the node
+answers both paths. It replies to each lookup from the exact address that workload asked —
 the system resolver rejects a DNS answer that arrives from any other address, so
 this detail is what makes ordinary hostname resolution work rather than silently
 time out.
@@ -163,8 +165,11 @@ connections it sets up:
 - **No virtual-IP load balancer.** The name resolves to a stable address that the
   encryption layer steers to a running copy per connection. The separate
   virtual-IP path with kernel-side load balancing is not built.
-- **Process workloads, single node.** Sealed-VM and unikernel workloads, and the
-  multi-node mesh, are outside this scope.
+- **Processes and Linux guests, single node.** VM DNS uses
+  [guest networking](/docs/concepts/guest-networking), and mesh TCP reaches VM
+  backends through host mTLS enforcement. Guest-to-Service-VIP UDP delivery to a
+  VM backend is [unbuilt](https://github.com/overdrive-sh/overdrive/issues/310).
+  Non-Linux guest adaptation and the multi-node mesh remain outside this scope.
 
 ## Where to go next
 

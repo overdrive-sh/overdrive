@@ -1,0 +1,158 @@
+---
+title: Guest networking
+description: How Linux microVMs use ordinary TCP and UDP sockets over guest-neutral vsock flow transport, with shared node resources, host mTLS enforcement, and explicit flow ownership.
+---
+
+A Linux microVM uses ordinary application TCP and UDP sockets. Guest capture
+translates those sockets into flows carried over vsock to the host. The host
+opens destination sockets and applies mesh resolution and mTLS enforcement.
+The VM attachment creates no per-VM host network namespace, veth, TAP, or bridge.
+
+Process workloads use their own network namespaces and the host's TPROXY
+capture path. The VM path shares node listeners, forwarding capacity, and host
+policy resources while keeping each allocation's address, launch identity,
+flows, and cleanup separately owned.
+
+<Mermaid chart={`
+flowchart LR
+  subgraph guest["Linux microVM"]
+    app["Application TCP / UDP socket"]
+    cap["eBPF capture + init flow owner"]
+    gmod["Guest kernel forwarder"]
+    app --> cap --> gmod
+  end
+  subgraph node["Host node"]
+    owner["Shared listeners + host flow owner"]
+    fwd["Host kernel forwarder"]
+    dest["Destination socket / mTLS enforcement"]
+    owner --> fwd --> dest
+  end
+  gmod -- "vsock flow protocol" --> owner
+`} />
+
+## Application sockets and transport sockets have different jobs
+
+A transported flow uses its own vsock stream. A request carries the flow's
+identity and destination. A TCP application's bytes travel as a stream; a UDP
+association uses length-prefixed datagram frames in both directions, including
+zero-length datagrams. Replies preserve the destination identity the guest
+application expects.
+
+The host receives vsock, not guest TCP packets. It opens host-side TCP or UDP
+sockets for the requested destination. Guest TCP behavior and host transport
+behavior must therefore be considered separately.
+
+The host protocol specifies flow requests, datagram frames, and clean or aborted
+ends without a guest-kind field. The host owner and forwarder do not branch on
+the guest kernel. Linux guests supply the implemented adapter; a
+[non-Linux adapter](https://github.com/overdrive-sh/overdrive/issues/321) is
+unbuilt.
+
+## The guest captures connections before admitting flows
+
+`overdrive-init` owns guest transport setup and runs as PID 1. Guest eBPF
+programs capture application connects and UDP sends, preserve peer-address
+behavior, and track socket release. TCP correlation binds the original
+application socket and destination to the exact intake child before that child
+can open a host flow.
+
+The guest attaches seven programs before READY. Root-cgroup SockOps handles TCP
+correlation; a C/CO-RE `fentry/tcp_check_req` program records a Fast Open
+handshake candidate; the remaining cgroup programs capture connects and sends,
+restore address observations, and handle socket release. The fentry hook runs
+on handshake processing, not established data.
+
+Aya `0.13.1` loads the Rust and C objects. Setup uses temporary pins to prepare
+active socket storage and share the child correlation map between objects, then
+removes the pins and staging
+directory before program load and attachment. READY requires successful setup
+and no remaining staging pins. Runtime maps and links remain process-owned.
+Missing or incompatible kernel BTF, the target function, or required program
+support refuses guest startup.
+
+## The forwarder preserves socket backpressure
+
+The `ovd_fwd` kernel module joins socket pairs on both sides of the VM boundary.
+Socket callbacks queue a work item. That item peeks at source data, sends what
+the target accepts, and consumes exactly that amount from the source. A stalled
+target therefore leaves bytes in the source receive queue, where TCP windows
+and vsock credit limit the sender.
+
+A clean half-close propagates after the final accepted byte. An error aborts
+the pair. The module uses per-CPU workqueues rather than a thread per pair.
+Userspace owners control these pairs; they do not copy their forwarded payload.
+
+The forwarder refuses TCP sockets with an installed upper-layer protocol,
+including kTLS. [Transparent mTLS](/docs/concepts/transparent-mtls) owns TLS on
+separate sockets. The VM mesh path includes a temporary userspace relay between
+the host TLS endpoint and guest delivery; the whole mesh path is not a
+userspace-free payload path.
+
+## Every flow keeps its capacity until its owner releases it
+
+The host admits guest flows against a node capacity of 65,536 pairs and a
+per-allocation quota of 4,096 flows. These are admission bounds, not measured
+node capacity or a fairness guarantee. Probe dials use node capacity and a
+separate bounded probe allowance rather than the allocation's ordinary quota.
+Exhaustion refuses the new flow.
+
+Pending and half-closed flows retain their places. For a forwarded flow, the
+kernel queues exactly one preallocated end record when the pair ends. The host
+owner releases the places when it reads that record. A queued unread record
+still counts as occupied during ownership audits. For a dialed stream, dropping
+the stream or the owner's abort releases its places.
+
+Pairs and watches belong to their control context. Releasing the context ends
+its pairs and watches. Allocation teardown retires the lease, stops the VM and
+its mTLS ownership, waits for guest-network teardown, and releases the address
+lease only after the owner reports no remaining resources for that allocation.
+
+## The node and guest must supply matching kernel support
+
+The host image loads `ovd_fwd` before `overdrive serve`. The server never loads
+a module or acquires module-loading privilege. Node startup checks the
+forwarder, required listeners, descriptor budget, guest address prefix, and
+mesh enforcement before accepting work. A guest prefix that overlaps a node
+address or configured service VIP range refuses startup.
+
+A guest kit binds a supported Linux kernel, its `ovd_fwd` module, and
+`overdrive-init`. Init compares the module's release with the running kernel
+before loading it, opens and probes the forwarder, and completes capture setup
+before READY. An arbitrary kernel/rootfs pair is unsupported. See
+[microVMs](/docs/concepts/microvms) for the artifact and confinement contract.
+
+Cloud Hypervisor uses the kernel vhost-vsock backend, rendered as
+`backend=vhost-kernel` with the allocation's leased CID. The required VMM source
+includes the RESET-EXIT change; do not assume an upstream binary has that
+behavior. This source integration does not provide a published fork release or
+prebuilt download.
+
+Node listeners support fixed or kernel-assigned ports through `ServerConfig`.
+[TOML loading for those ports](https://github.com/overdrive-sh/overdrive/issues/327)
+is unbuilt; there is no documented operator TOML key for them.
+
+## Supported traffic and current limits
+
+- **TCP and mesh identity.** Guest flows reach host resolution and mTLS
+  enforcement; incoming mesh streams can be delivered to guest applications.
+  VM services use the same declared listeners and health lifecycle as process
+  services.
+- **DNS and remote UDP.** Guest DNS and connected or unconnected remote UDP
+  preserve datagram boundaries, including empty datagrams.
+- **Service-VIP UDP to a VM backend is unbuilt.** This is
+  [tracked separately](https://github.com/overdrive-sh/overdrive/issues/310).
+  Remote UDP support does not imply that service path works.
+- **Linux guests, single node.** The host protocol is guest-neutral, but that
+  does not supply an adapter for another guest OS or a multi-node mesh.
+- **CID generation recovery has an open crash window.** Replacement generation
+  state can be lost across a `serve` crash; see
+  [the recovery issue](https://github.com/overdrive-sh/overdrive/issues/325).
+- **No measured density or startup promise.** Native 64-VM tests establish
+  correctness, address uniqueness, traffic outcomes, refusal, and cleanup.
+  [Performance measurements](https://github.com/overdrive-sh/overdrive/issues/326)
+  remain separate work.
+
+Reusable bridge and TAP library APIs remain in the repository. Their existence
+does not make them part of VM attachment. Hardware offload through
+[vDPA or SR-IOV](https://github.com/overdrive-sh/overdrive/issues/329) is a
+feasibility question, not an enabled networking mode.

@@ -45,6 +45,14 @@ The recorded endpoint names the *resolved* port, not the requested one — so a
 `--bind 127.0.0.1:0` server writes the concrete port it actually got, and the
 next command connects to it without you reading the port off the logs.
 
+Node startup also validates shared guest networking: the host must have its
+matching `ovd_fwd` module loaded, and required listeners, capacity, and
+address-prefix checks must pass. See
+[guest networking](/docs/concepts/guest-networking#the-node-and-guest-must-supply-matching-kernel-support).
+Node vsock listener ports are configured through `ServerConfig`;
+[TOML loading](https://github.com/overdrive-sh/overdrive/issues/327) is unbuilt.
+The `--bind` flag above controls the operator API, not guest flow listeners.
+
 ## `overdrive deploy`
 
 Deploy a workload from a TOML spec file. See

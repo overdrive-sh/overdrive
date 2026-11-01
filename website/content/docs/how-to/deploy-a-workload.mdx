@@ -10,10 +10,13 @@ a single node — Phase 1 is single-node by design, so there is no cluster to jo
 and no membership to configure first.
 
 <Callout title="Prerequisites">
-	A build of the `overdrive` binary and a writable home directory. The control
-	plane stores its state on the local disk and binds a TLS listener on
-	loopback; it needs no external network, database, or kernel features to run
-	this flow.
+	A supported Linux node, a build of `overdrive`, and a writable home directory.
+	The node needs cgroup v2, the required eBPF, nftables and kTLS support, and the
+	matching `ovd_fwd` module loaded before `serve`. Startup checks these
+	capabilities and refuses incomplete setup. See
+	[guest networking](/docs/concepts/guest-networking#the-node-and-guest-must-supply-matching-kernel-support)
+	for the shared transport prerequisites. The control plane stores state locally;
+	there is no external database to configure.
 </Callout>
 
 ## Start the control plane
@@ -52,8 +55,8 @@ file every other command reads to find and authenticate to the server.
 
 A workload is a TOML file. Its top-level section names the workload's **kind**:
 `[service]` for a long-running workload that serves traffic, `[job]` for one that
-runs to completion. Every spec also carries an `[exec]` block — the process to
-run — and a `[resources]` block. A service additionally declares one or more
+runs to completion. Each spec carries one driver block — `[exec]` for a process
+or `[vm]` for a microVM — and a `[resources]` block. A service additionally declares one or more
 `[[listener]]` ports and, under them, its health-check probes:
 
 ```toml title="payments.toml"
@@ -112,8 +115,9 @@ answers "did it succeed?".
 
 A `[vm]` block runs the workload as a Cloud Hypervisor microVM — its own kernel,
 hardware-virtualised — in place of `[exec]`. A spec carries exactly one driver
-table, so `[vm]` and `[exec]` are alternatives, not a pair. A microVM runs under
-`[job]`; a `[vm]` spec under `[service]` is rejected at deploy time.
+table, so choose `[vm]` or `[exec]`. A microVM can run under `[job]` or
+`[service]`; a VM service declares listeners and health checks using the same
+sections as a process service.
 
 ```toml title="nightly-report.toml"
 [job]
@@ -132,8 +136,9 @@ memory_bytes = 134217728   # sizes the guest's memory (128 MiB)
 
 All four `[vm]` fields are required. `command` and `args` name the program to run
 inside the guest; `kernel` and `rootfs` are host paths to a bootable kernel and an
-ext4 root filesystem you supply. `[resources]` sizes the VM the way it caps a
-process — `cpu_milli` derives the vCPU count, `memory_bytes` sets the guest's
+ext4 root filesystem from a matching guest kit. The rootfs must contain the
+kit's `overdrive-init` and `ovd_fwd` module; an arbitrary kernel is unsupported.
+`[resources]` sizes the VM the way it caps a process — `cpu_milli` derives the vCPU count, `memory_bytes` sets the guest's
 memory.
 
 Deploy, inspect, and stop a microVM job with the same verbs as any other workload
@@ -142,9 +147,13 @@ has booted, and its terminal state carries the guest's own exit code, not the
 hypervisor's.
 
 <Callout title="What the node needs">
-	A microVM boots through KVM, so the node runs `cloud-hypervisor` on a host with
-	`/dev/kvm`. The kernel and rootfs are yours to supply — Overdrive builds
-	neither. For what a microVM is and how it stays isolated, see
+	A microVM boots through KVM, so the node needs `/dev/kvm` and the required
+	Cloud Hypervisor source integration, including RESET-EXIT and the kernel
+	vhost-vsock backend. There is no published fork binary to download from these
+	docs. The host must load its matching forwarder module before `serve`. Supply
+	a supported guest kit and a rootfs on a reflink-capable filesystem. The VM
+	uses vsock flow transport; it does not need a per-VM host TAP or bridge. For
+	the confinement and artifact contract, see
 	[microVMs](/docs/concepts/microvms).
 </Callout>
 

@@ -1,0 +1,208 @@
+---
+title: Networking without a host interface per VM
+description: Moving microVM networking to shared node resources exposed a harder problem than forwarding bytes — proving who owns a flow until it ends.
+date: 2026-11-01
+author: The Overdrive team
+summary: Overdrive moved VM attachment from per-VM namespaces, TAPs, and bridges to vsock flow transport. The engineering work was in backpressure, exact socket correlation, and the handoff between kernel completion and control-plane ownership.
+---
+
+A VM needs network access. It does not necessarily need a network interface on
+its host.
+
+Overdrive's VM networking journey started with that distinction. Attaching a
+namespace, TAP, and bridge path to each VM makes host network objects grow with
+the VM population. Every attachment also needs provisioning, inspection, and
+cleanup. For a platform aiming to pack more small workloads onto one node,
+that is a lifecycle cost worth removing.
+
+The resulting VM attachment uses shared node resources and **vsock flow
+transport**. The guest application still opens ordinary TCP and UDP sockets.
+The host receives framed flow requests over vsock and opens the corresponding
+host-side sockets. It enforces mesh identity and encryption outside the guest.
+There is no per-VM host network namespace, TAP, or bridge in this attachment
+path.
+
+That describes an architectural change, not a benchmark result. Linux has no
+single interface-count ceiling that explains every deployment, and removing
+interfaces does not establish a throughput or startup improvement. The harder
+question was whether the new path could preserve bytes, backpressure, identity,
+and honest workload outcomes under failure.
+
+## Move flows across the boundary, not packets through a virtual NIC
+
+Vsock connects a guest to its host without an IP link between them. Overdrive
+uses a separate vsock stream for each transported flow. A request identifies the
+flow; datagram associations carry length-prefixed messages so an empty UDP
+datagram stays a datagram rather than disappearing into stream semantics.
+
+<Mermaid chart={`
+flowchart LR
+  subgraph guest["Linux guest"]
+    app["Application TCP / UDP"]
+    capture["Guest capture + flow owner"]
+    gf["Kernel forwarder"]
+    app --> capture --> gf
+  end
+  subgraph host["Shared node resources"]
+    hf["Kernel forwarder + host flow owner"]
+    target["Destination socket or host mTLS path"]
+    hf --> target
+  end
+  gf -- "vsock stream per flow" --> hf
+`} />
+
+The distinction between application protocol and transport matters. A guest TCP
+connection does not arrive at the host as a guest TCP packet. It arrives as a
+vsock stream. TCP capture inside the guest and TCP sockets opened by the host
+are separate parts of the path; a guest TCP feature is not automatically a
+feature of the host's vsock transport.
+
+The host protocol names requests, datagrams, and end conditions. It does not
+name a guest kernel. Linux implements its side with `overdrive-init`, eBPF
+capture, and the `ovd_fwd` kernel module. A non-Linux guest would need its own
+adapter for the same protocol; that adapter is
+[future work](https://github.com/overdrive-sh/overdrive/issues/321).
+
+Sharing the attachment removes one kind of per-VM resource. It does not remove
+resource limits. Each flow occupies node capacity, and each allocation has a
+flow quota. A half-closed flow still holds its place while it can hold memory.
+Exhausting a bound refuses the new flow.
+
+## Backpressure has to survive the forwarding mechanism
+
+A forwarding path can deliver every byte in a short test and still fail when
+the receiver stops reading. The decisive test is where those bytes wait.
+
+The initial sockmap redirect approach failed that test on the tested Linux
+kernel. Vsock returned credit before the redirect verdict ran, while the target
+redirect queue continued to grow. The sender's apparent progress no longer
+meant the receiver had room. A formal model of flow ownership could not repair
+that kernel behavior.
+
+The selected forwarder joins two sockets inside the kernel. Socket callbacks
+queue work; the work item peeks at the source, attempts a nonblocking send to
+the target, then consumes exactly the bytes the target accepted. When the
+target stops accepting bytes, the source keeps them. Its TCP receive window or
+vsock credit supplies backpressure.
+
+This is the central invariant: **a byte leaves its source only after its target
+accepts it.** A clean half-close follows the final accepted byte. An error
+aborts the pair. Work runs on a per-CPU workqueue, with one work item per pair,
+rather than a thread per connection.
+
+The cost of that choice is a kernel module built for each supported kernel
+release. The host image loads it before `overdrive serve`; the server probes it
+at node startup and refuses to run without it. A Linux guest carries its kernel,
+module, and init as a matching guest kit. Guest init checks the module's kernel
+release before loading it and before announcing readiness.
+
+TLS has a separate owner. The forwarder refuses TCP sockets with an installed
+upper-layer protocol, including kTLS. The host mTLS path owns its TLS endpoints;
+the forwarder does not parse TLS records. A temporary userspace relay connects
+the host's TLS path to guest delivery, so “in-kernel forwarding” does not mean
+every byte on every VM mesh path avoids userspace.
+
+## A handshake must identify the exact accepted socket
+
+Guest capture needs more than the destination address. It must associate the
+application's socket and original destination with the exact child socket
+accepted by the guest intake listener. Guessing from timing or a reusable tuple
+would let one connection inherit another connection's metadata.
+
+TCP Fast Open exposed a wrong premise in that correlation design. Its final ACK
+passes through a different validation order from the ordinary handshake. An
+experiment that let the client close too early could mistake later traffic for
+successful handshake correlation. Keeping the client open, with no
+post-handshake payload before correlation completed, disproved that result.
+
+The production correction adds a seventh guest program: a handshake-only
+`fentry/tcp_check_req` program written in C with CO-RE relocations. It records a
+Fast Open correlation candidate before ACK validation. The existing Rust/Aya
+SockOps callback commits the result after validation. Established data does not
+invoke the fentry program.
+
+This is a narrow C addition, not an Aya replacement. Aya remains pinned at
+`0.13.1` and loads both objects. An earlier Rust dynptr prototype failed because
+its handwritten extern did not express the required kfunc relocation; that
+failure did not prove that Aya could not load the selected program. The C
+object uses standard helpers and CO-RE field access and was loaded through the
+same Aya version.
+
+The two objects must share the exact correlation map. Setup temporarily pins
+maps to join the loaders, then removes both pins and their directory before
+program load and attachment. Readiness requires that cleanup as well as
+successful attachment. Objects and links remain process-owned; there are no
+permanent runtime staging pins to discover or adopt after a crash.
+
+## Kernel completion and owner completion are different events
+
+A forwarded pair ends in the kernel before the host owner necessarily reads its
+end record. That interval is ordinary scheduling, not corruption.
+
+Each pair preallocates one completion record. When the pair ends, the kernel
+drops its socket references and queues that record. The owner releases the
+flow's capacity when it consumes the record. An audit that counts only live
+pairs sees zero kernel pairs while the owner still correctly holds one place.
+It can mistake a healthy handoff for drift and trigger recovery.
+
+The accounting must include **live pairs, live watches, and queued unread end
+records**. A queued record still represents ownership that has not crossed back
+to the control plane.
+
+A seeded simulation reproduced that exact interval through the production
+owner and supervisor. The same seed and action trace triggered false recovery
+with the old arithmetic and converged without recovery with the correction.
+Cleanup completed in both runs. That is narrower evidence than “simulation
+passed,” and more useful: it identifies the handoff the fix preserves.
+
+VM exit had a similar boundary. A successful hypervisor exit does not prove a
+successful workload exit. Guest PID 1 must send the workload's `EXIT` report,
+close the beacon channel, and only then power off. The beacon uses a one-second
+linger bound during shutdown. On the host, the worker prioritizes the report and
+drains the reader before finalizing the VMM exit. Otherwise a clean poweroff
+can overtake the message that says the workload failed.
+
+That second is shutdown handling. It says nothing about VM boot latency.
+
+## Test the kernel inside a boundary that can be thrown away
+
+Formal models establish properties of the modeled transitions. Native tests
+establish what the selected kernel and transport actually do. This work needed
+both, and native counterexamples had to invalidate the designs built on the
+wrong premise.
+
+The guest-flow-owner formal record contains 279 expected outcomes: 209 checks
+that hold and 70 intentional violations. Those are checks against their stated
+models, not 279 universal proofs of the running system.
+
+Kernel experiments also need a failure boundary. Running a command on a remote
+physical host does not isolate its kernel. Production `CloudHypervisorVmm` and
+GuestKit fixtures put BPF, module, socket, and fault effects inside disposable
+VMs; nested Cloud Hypervisor fixtures isolate cases that need to exercise VM
+launch from within that boundary. The test can destroy its guest without
+turning the shared development host into the experiment.
+
+Two final correctness tests exercised 64 VMs each. They checked unique live
+addresses, one TCP and one UDP exchange per VM with the node as the observed
+source, refusal and fail-closed behavior, and cleanup across the next boot and
+CID reuse. They did not measure density, cold starts, throughput, memory, or
+latency. Those measurements remain
+[separate work](https://github.com/overdrive-sh/overdrive/issues/326).
+
+## The next claim needs measurements
+
+The attachment path no longer provisions a host interface and namespace for
+each VM. Flows have explicit capacity, kernel forwarding preserves
+backpressure, and completion stays owned until its report is consumed. Those
+are concrete properties to build on.
+
+There are still sharp limits. Guest DNS and remote UDP support empty and
+nonempty datagrams, but guest-to-Service-VIP UDP delivery to a VM backend
+[remains deferred](https://github.com/overdrive-sh/overdrive/issues/310).
+The host-side protocol is guest-neutral; the delivered guest adapter is Linux.
+A crash window in CID generation replacement
+[remains open](https://github.com/overdrive-sh/overdrive/issues/325).
+
+Higher density is the motivation. Measuring it is the next job. The
+[current networking documentation](/docs/concepts/guest-networking) describes
+the implemented boundary and its operating requirements.
