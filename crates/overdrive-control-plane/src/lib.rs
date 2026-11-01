@@ -1674,6 +1674,7 @@ impl SharedNetworkSupervisorHandle {
                     tracing::error!(
                         name: "guest_network.shared_owner_fail_stop",
                         cause = ?overdrive_core::guest_network::SharedGuestNetworkFailStopCause::LeakedQuiescenceHold,
+                        cleanup = "abandoned_to_shutdown",
                         leaked,
                         "shared guest-network owner observed a leaked quiescence hold"
                     );
@@ -1699,6 +1700,7 @@ impl SharedNetworkSupervisorHandle {
                 tracing::error!(
                     name: "guest_network.shared_owner_fail_stop",
                     cause = ?overdrive_core::guest_network::SharedGuestNetworkFailStopCause::RecoveryDeadlineExceeded,
+                    cleanup = "abandoned_to_shutdown",
                     "shared guest-network recovery reached its per-component bound"
                 );
                 if issue_shared_network_fail_stop(
@@ -1787,16 +1789,17 @@ impl SharedNetworkSupervisorHandle {
                     }
                     match audited {
                         Some(Ok(Some(finding))) => {
-                            tracing::warn!(
-                                name: "guest_network.shared_owner_unhealthy",
-                                component = ?finding.component,
-                                "shared guest-network owner entered bounded recovery"
-                            );
                             if let Some(recovery) = recoveries.get_mut(&finding.component) {
                                 if recovery.listener_task_exit.is_none() {
                                     recovery.listener_task_exit = finding.listener_task_exit;
                                 }
                             } else {
+                                tracing::warn!(
+                                    name: "guest_network.shared_owner_unhealthy",
+                                    component = ?finding.component,
+                                    cause = "audit_mismatch",
+                                    "shared guest-network owner entered bounded recovery"
+                                );
                                 match acquire_shared_network_recovery_hold(
                                     finding,
                                     &ports,
@@ -1923,6 +1926,7 @@ impl SharedNetworkSupervisorHandle {
                                                 name: "guest_network.shared_owner_fail_stop",
                                                 component = ?component,
                                                 error = error.as_str(),
+                                                cleanup = "abandoned_to_shutdown",
                                                 "shared guest-network recovery restored a foreign quiescence hold"
                                             );
                                             let _ = issue_shared_network_fail_stop(
@@ -1960,6 +1964,14 @@ impl SharedNetworkSupervisorHandle {
                                             });
                                     }
                                 }
+                                for entry in &progress {
+                                    tracing::warn!(
+                                        name: "guest_network.shared_owner_retry",
+                                        component = ?entry.component,
+                                        attempt = entry.attempts,
+                                        "shared guest-network component recovery attempt failed"
+                                    );
+                                }
                                 let exhausted = progress.iter().find(|entry| {
                                     entry.attempts >= SHARED_NETWORK_RECOVERY_ATTEMPTS
                                         || entry.elapsed >= SHARED_NETWORK_RECOVERY_DEADLINE
@@ -1972,6 +1984,7 @@ impl SharedNetworkSupervisorHandle {
                                         component = ?progress.component,
                                         attempts = progress.attempts,
                                         elapsed = ?progress.elapsed,
+                                        cleanup = "abandoned_to_shutdown",
                                         "shared guest-network component recovery reached its bound"
                                     );
                                     if issue_shared_network_fail_stop(
