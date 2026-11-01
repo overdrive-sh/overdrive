@@ -25,6 +25,24 @@ required by code, data, or an exact quotation.
 
 ## Core principles
 
+### Explain the subject before using it
+
+When introducing an unfamiliar tool or concept, briefly explain what it is
+and what it does before using it in an example. Then connect it to the reader's
+problem. An example should clarify an introduced idea, not force the reader to
+infer the subject from an unexplained case.
+
+Match the explanation to the intended audience. One or two concrete sentences
+usually suffice. Define necessary terms before relying on them, without adding
+dictionary definitions for concepts the audience already knows.
+
+**Do this:** Quint is a language and toolset for executable models of systems.
+You describe states, actions, and properties, then explore behaviors that could
+violate those properties. Overdrive uses it to check service-health decisions.
+
+**Not this:** Open a post about Quint with a probe-counting failure and explain
+what Quint is only after the reader has worked through the example.
+
 ### 1. Concrete nouns and active verbs do the work
 
 The verb carries the sentence. Qualifiers, adjectives, and noun phrases should support the verb, not substitute for it.
@@ -203,6 +221,7 @@ Most technical writing benefits from a revision pass focused specifically on the
 
 Before submitting any technical prose, run through this list:
 
+- [ ] Are unfamiliar tools and concepts briefly explained before examples rely on them?
 - [ ] Does each paragraph have a real claim, not just an existence-of-topic statement?
 - [ ] Are nouns specific where specifics were available — named systems, real numbers, dated incidents — rather than smoothed into generic quantifiers?
 - [ ] Are hedges concentrated in the genuinely uncertain sections rather than scattered uniformly?

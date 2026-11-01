@@ -6,6 +6,12 @@ author: The Overdrive team
 summary: A missed probe result can change a restart decision. A live watch can exist before its caller owns a stream. Overdrive uses Quint to make these contracts executable, then checks their connection to Rust and the real kernel.
 ---
 
+Quint is a language and toolset for building small, executable models of systems.
+You describe the state a system can hold, the actions that change it, and the
+rules it must satisfy. Its tools explore the model's possible behaviors and
+report a counterexample when a rule fails.
+
+Overdrive uses Quint to check decisions such as when a service should restart.
 A probe task can write three results while its reconciler reads only the first
 and last. That makes a small optimization in observation storage a correctness
 problem for service health.

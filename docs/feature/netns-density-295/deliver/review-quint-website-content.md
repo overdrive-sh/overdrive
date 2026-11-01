@@ -98,3 +98,27 @@ No material finding requires remediation. The blog supplies an evidenced design 
 ## Final verdict
 
 **APPROVED — Quint modeling blog and documentation.** This is approval of the authored website content and its bounded validation. It is not a new model proof, implementation conformance result, native-kernel receipt, feature finalization, or publication authorization.
+
+## Review iteration 2 — define Quint before the example
+
+### Scope and assessment
+
+Reviewed the actual opening-only blog diff and the editorial ledger's correction entry. The user requires a brief definition first. The earlier placement of the definition after the probe example did not meet that reading order, and the prior review did not catch the missing introduction for an unfamiliar reader.
+
+The first body paragraph now identifies Quint as a language and toolset for executable system models. It immediately explains state, actions, rules, exploration, and counterexamples in plain language. The next sentence states why Overdrive uses it, with service restart decisions as the concrete connection. The existing probe-count example follows naturally. The reader can understand what Quint does before encountering that example.
+
+The definition agrees with the official protocol and model-checker sources verified in iteration 1. It confines exploration and counterexamples to the model and does not claim exhaustive exploration by every tool, automatic Rust conformance, native-kernel correctness, or a whole-system proof. The unchanged article supplies the detailed backend and evidence distinctions. No new semantic claim requires a model run or a fresh toolchain investigation.
+
+### Validation and disposition
+
+Independent comparison against HEAD confirms that removing the six added opening lines reproduces the prior article exactly. Metadata, links, examples, and the remainder are unchanged. The complete revised article contains zero semicolons. `git diff --check` passes. The writer records passing MDX generation and targeted opening/link checks, with no claim of a repeated full website suite. No model, Rust, native, or website server run was needed for this bounded addition.
+
+| Finding | Disposition |
+|---|---|
+| Quint must be briefly defined before the probe-count example | **CLOSED.** The definition is the first body paragraph, followed by Overdrive's purpose and then the example. |
+
+Only this review artifact was edited by the reviewer. The user's dirty `AGENTS.md` and the writer's blog revision remain preserved. Earlier evidence and runtime-validation limitations remain unchanged.
+
+### Iteration 2 final verdict
+
+**APPROVED — opening clarification.** The revision directly satisfies the requested reading order, accurately defines Quint, and preserves the previously reviewed model, conformance, and native-evidence boundaries.
