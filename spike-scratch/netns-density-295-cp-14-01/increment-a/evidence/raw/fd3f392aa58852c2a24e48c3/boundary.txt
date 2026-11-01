@@ -1,0 +1,7 @@
+metal_run=fd3f392aa58852c2a24e48c3
+execution_mode=login
+kernel_and_realvm_effects=none; ordinary source compile only
+mutation_testing=not_used
+lima=not_used
+command=cargo check -p overdrive-dataplane --features integration-tests
+cargo_target_dir=/home/ubuntu/overdrive/target-codex-14-01

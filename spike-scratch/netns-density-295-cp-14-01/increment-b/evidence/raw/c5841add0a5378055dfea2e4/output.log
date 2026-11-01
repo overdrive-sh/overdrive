@@ -1,0 +1,10 @@
+STEP14-01-PREFIX-DIAGNOSTIC-PHYSICAL-HOST-AUDIT
+live_cloud_hypervisor=0
+netns_begin
+ovd-ns-0000 (id: 0)
+netns_end
+nft_begin
+nft_end
+workdirs_begin
+workdirs_end
+STEP14-01-PREFIX-DIAGNOSTIC-PHYSICAL-HOST-AUDIT-COMPLETE

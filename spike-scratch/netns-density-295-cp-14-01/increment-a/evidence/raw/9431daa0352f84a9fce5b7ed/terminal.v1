@@ -1,0 +1,6 @@
+format=overdrive-metal-terminal-v1
+run_id=9431daa0352f84a9fce5b7ed
+kind=command
+exit_code=101
+cause=command_returned
+finished_at=2026-10-31T15:09:15Z

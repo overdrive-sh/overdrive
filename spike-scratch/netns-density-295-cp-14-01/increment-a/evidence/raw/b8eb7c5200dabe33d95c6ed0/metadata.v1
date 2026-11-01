@@ -1,0 +1,12 @@
+format=overdrive-metal-run-v1
+run_id=b8eb7c5200dabe33d95c6ed0
+token=b8eb7c5200dabe33d95c6ed0
+unit=overdrive-metal-run-b8eb7c5200dabe33d95c6ed0.service
+created_at=2026-10-31T15:21:56Z
+scenario_b64=dW5zcGVjaWZpZWQ=
+workspace_b64=L1VzZXJzL21hcmN1cy9jb25kdWN0b3Ivd29ya3NwYWNlcy9oZWxpb3Mvd2VsbGluZ3Rvbi12Mg==
+commit=c9f2f6d6975b236fa4a049093550d3ea8dcf4242
+source_digest=c99cd0716da3f822f8fa291fe32e8a355f4f67ff036dfb42fc12a8bf46060376
+remote_dir_b64=L2hvbWUvdWJ1bnR1L292ZXJkcml2ZQ==
+target_user_b64=dWJ1bnR1
+execution_mode=privileged

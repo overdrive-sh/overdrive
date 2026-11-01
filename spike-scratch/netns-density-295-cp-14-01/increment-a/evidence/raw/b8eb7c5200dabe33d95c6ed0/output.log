@@ -1,0 +1,13 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running `target/debug/xtask guest-kit-prepare`
+xtask failed: 
+   0: [91mbuilding the in-guest tests of overdrive-init overdrive-init failed (exit Some(101)):    Compiling overdrive-dataplane v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-dataplane)
+         Compiling overdrive-init v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-init)
+      error: could not compile `overdrive-dataplane` (lib) due to 1 previous error
+      [0m
+
+Location:
+   [35mxtask/src/guest_kit_prepare.rs[0m:[35m272[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

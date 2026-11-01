@@ -1,0 +1,10 @@
+[workspace]
+
+[package]
+name = "netns-density-295-cp-14-01-prefix-diagnostic"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+overdrive-testing = { path = "../../../crates/overdrive-testing", features = ["integration-tests"] }

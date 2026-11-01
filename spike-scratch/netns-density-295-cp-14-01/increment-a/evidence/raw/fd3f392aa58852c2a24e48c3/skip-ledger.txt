@@ -1,0 +1,5 @@
+runtime_skip_count=0
+ignored_count=0
+native_effects=none
+kernel_vm_effects=none
+kind=ordinary-source-check

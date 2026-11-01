@@ -1,0 +1,148 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running `target/debug/xtask guest-kit-prepare`
+guest-kit-prepare: overdrive-init overdrive-init -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-init--overdrive-init
+guest-kit-prepare: overdrive-fwd integration -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-fwd--integration
+guest-kit-prepare: overdrive-dataplane integration -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-dataplane--integration
+guest-kit-prepare: overdrive-dataplane overdrive_dataplane -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-dataplane--overdrive_dataplane
+guest-kit-prepare: overdrive-control-plane acceptance -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-control-plane--acceptance
+guest-kit-prepare: overdrive-control-plane integration -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-control-plane--integration
+guest-kit-prepare: overdrive-cli integration -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-cli--integration
+guest-kit-prepare: overdrive-worker integration -> /home/ubuntu/overdrive/target/guest-kit/in-guest/overdrive-worker--integration
+guest-kit-prepare: kernel 7.0.0-38-generic, target x86_64-unknown-linux-musl: the lane is prepared
+   Compiling proc-macro2 v1.0.106
+   Compiling quote v1.0.45
+   Compiling unicode-ident v1.0.24
+   Compiling libc v0.2.190
+   Compiling serde_core v1.0.228
+   Compiling cfg-if v1.0.4
+   Compiling serde v1.0.228
+   Compiling zerocopy v0.8.48
+   Compiling find-msvc-tools v0.1.9
+   Compiling shlex v1.3.0
+   Compiling version_check v0.9.5
+   Compiling memchr v2.8.0
+   Compiling typenum v1.20.0
+   Compiling equivalent v1.0.2
+   Compiling pin-project-lite v0.2.17
+   Compiling hashbrown v0.17.0
+   Compiling regex-syntax v0.8.10
+   Compiling zmij v1.0.21
+   Compiling time-core v0.1.7
+   Compiling cc v1.2.60
+   Compiling num-conv v0.1.0
+   Compiling futures-sink v0.3.32
+   Compiling powerfmt v0.2.0
+   Compiling parking_lot_core v0.9.12
+   Compiling futures-core v0.3.32
+   Compiling generic-array v0.14.7
+   Compiling time-macros v0.2.25
+   Compiling futures-io v0.3.32
+   Compiling futures-channel v0.3.32
+   Compiling slab v0.4.12
+   Compiling serde_json v1.0.149
+   Compiling futures-task v0.3.32
+   Compiling getrandom v0.4.2
+   Compiling simdutf8 v0.1.5
+   Compiling aho-corasick v1.1.4
+   Compiling itoa v1.0.18
+   Compiling smallvec v1.15.1
+   Compiling scopeguard v1.2.0
+   Compiling autocfg v1.5.0
+   Compiling lock_api v0.4.14
+   Compiling winnow v0.7.15
+   Compiling bitflags v2.11.1
+   Compiling unsafe-libyaml-norway v0.2.15
+   Compiling once_cell v1.21.4
+   Compiling toml_write v0.1.2
+   Compiling cfg_aliases v0.2.1
+   Compiling ciborium-io v0.2.2
+   Compiling thiserror v2.0.18
+   Compiling ryu v1.0.23
+   Compiling tracing-core v0.1.36
+   Compiling nix v0.30.1
+   Compiling arrayref v0.3.9
+   Compiling memoffset v0.9.1
+   Compiling cpufeatures v0.3.0
+   Compiling syn v2.0.117
+   Compiling cpufeatures v0.2.17
+   Compiling constant_time_eq v0.4.2
+   Compiling bytes v1.11.1
+   Compiling arrayvec v0.7.6
+   Compiling hashbrown v0.16.1
+   Compiling hex v0.4.3
+   Compiling untrusted v0.9.0
+   Compiling zeroize v1.8.2
+   Compiling rustix v1.1.4
+   Compiling base64 v0.22.1
+   Compiling crypto-common v0.1.7
+   Compiling block-buffer v0.10.4
+   Compiling rustls-pki-types v1.14.0
+   Compiling linux-raw-sys v0.12.1
+   Compiling digest v0.10.7
+   Compiling pem v3.0.6
+   Compiling netns-density-295-cp-14-01-diagnostic v0.0.0 (/home/ubuntu/overdrive/spike-scratch/netns-density-295-cp-14-01/increment-a)
+   Compiling sha2 v0.10.9
+   Compiling blake3 v1.8.5
+   Compiling ring v0.17.14
+   Compiling regex-automata v0.4.14
+   Compiling getrandom v0.2.17
+   Compiling errno v0.3.14
+   Compiling socket2 v0.6.3
+   Compiling mio v1.2.0
+   Compiling signal-hook-registry v1.4.8
+   Compiling rand_core v0.6.4
+   Compiling linux-keyutils v0.2.5
+   Compiling parking_lot v0.12.5
+   Compiling indexmap v2.14.0
+   Compiling deranged v0.5.8
+   Compiling uuid v1.23.1
+   Compiling time v0.3.45
+   Compiling regex v1.12.3
+   Compiling yasna v0.6.0
+   Compiling serde_derive v1.0.228
+   Compiling zerocopy-derive v0.8.48
+   Compiling ptr_meta_derive v0.3.1
+   Compiling futures-macro v0.3.32
+   Compiling bytecheck_derive v0.8.2
+   Compiling munge_macro v0.4.7
+   Compiling tracing-attributes v0.1.31
+   Compiling rkyv_derive v0.8.15
+   Compiling utoipa-gen v5.4.0
+   Compiling tokio-macros v2.7.0
+   Compiling thiserror-impl v2.0.18
+   Compiling async-trait v0.1.89
+   Compiling ptr_meta v0.3.1
+   Compiling rancor v0.1.1
+   Compiling munge v0.4.7
+   Compiling bytecheck v0.8.2
+   Compiling tokio v1.52.1
+   Compiling futures-util v0.3.32
+   Compiling rend v0.5.3
+   Compiling tracing v0.1.44
+   Compiling rcgen v0.14.8
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling serde_norway v0.9.42
+   Compiling ipnet v2.12.0
+   Compiling toml_edit v0.22.27
+   Compiling futures-executor v0.3.32
+   Compiling futures v0.3.32
+   Compiling rkyv v0.8.15
+   Compiling utoipa v5.4.0
+   Compiling half v2.7.1
+   Compiling ppv-lite86 v0.2.21
+   Compiling toml v0.8.23
+   Compiling ciborium-ll v0.2.2
+   Compiling rand_chacha v0.3.1
+   Compiling ciborium v0.2.2
+   Compiling rand v0.8.6
+   Compiling overdrive-core v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-core)
+   Compiling overdrive-host v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-host)
+   Compiling overdrive-fwd v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-fwd)
+   Compiling overdrive-testing v0.0.0 (/home/ubuntu/overdrive/crates/overdrive-testing)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 17.73s
+     Running `spike-scratch/netns-density-295-cp-14-01/increment-a/target/debug/netns-density-295-cp-14-01-diagnostic`
+
+thread 'main' (1225321) panicked at /home/ubuntu/overdrive/spike-scratch/netns-density-295-cp-14-01/increment-a/target/debug/build/netns-density-295-cp-14-01-diagnostic-44771bb7010be017/out/fwd_guest_suite_diagnostic.rs:2609:6:
+the exact existing fifth control-plane cell executes in GuestKit: Staging { detail: "copying /home/ubuntu/overdrive/spike-scratch/target/bpf/overdrive_bpf.o to /home/ubuntu/overdrive/spike-scratch/target/bpf/overdrive_bpf.o", source: Os { code: 2, kind: NotFound, message: "No such file or directory" } }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
