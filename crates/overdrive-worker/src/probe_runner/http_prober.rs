@@ -37,7 +37,7 @@ use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use http_body_util::{BodyExt, Empty};
+use http_body_util::Empty;
 use hyper::body::Bytes;
 use hyper::{Request, Uri};
 use hyper_util::client::legacy::Client;
@@ -253,11 +253,11 @@ pub(super) async fn probe_guest_stream(
     match client.request(request).await {
         Ok(response) => {
             let status = response.status().as_u16();
-            // Drain the response before returning so the guest flow's
-            // `GuestStream` is closed by the legacy client immediately. The
-            // probe contract is status based; body bytes are deliberately
-            // ignored after the response has been fully observed.
-            let _ = response.into_body().collect().await;
+            // The probe contract is status based. Drop the response body
+            // immediately so a guest that advertises an unbounded or
+            // incomplete body cannot hold the probe task past its status
+            // decision.
+            drop(response);
             classify_http_status(status)
         }
         Err(err) => ProbeOutcome::Fail { reason: client_error_to_reason(&err) },
