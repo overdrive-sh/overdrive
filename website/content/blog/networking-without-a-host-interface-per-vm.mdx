@@ -1,38 +1,112 @@
 ---
 title: Networking without a host interface per VM
-description: Moving microVM networking to shared node resources exposed a harder problem than forwarding bytes — proving who owns a flow until it ends.
+description: A native bridge-port failure blocked a 16,384-attachment target. Multi-bridge and Open vSwitch probes clarified why Overdrive chose vsock — and which costs that choice moved into flow ownership.
 date: 2026-11-01
 author: The Overdrive team
-summary: Overdrive moved VM attachment from per-VM namespaces, TAPs, and bridges to vsock flow transport. The engineering work was in backpressure, exact socket correlation, and the handoff between kernel completion and control-plane ownership.
+summary: One Linux bridge could not hold the target attachment population. Open vSwitch could, but retained a TAP and queue descriptor per endpoint. Overdrive chose vsock to remove that resource class, then had to prove backpressure, exact capture, and lifecycle ownership.
 ---
 
-A VM needs network access. It does not necessarily need a network interface on
-its host.
+Overdrive's first shared-network design could not reach its 16,384-attachment
+measurement target. The native provisioning run failed while attaching a TAP
+to its Linux bridge: netlink returned `EXFULL`.
 
-Overdrive's VM networking journey started with that distinction. Attaching a
-namespace, TAP, and bridge path to each VM makes host network objects grow with
-the VM population. Every attachment also needs provisioning, inspection, and
-cleanup. For a platform aiming to pack more small workloads onto one node,
-that is a lifecycle cost worth removing.
+The bridge was empty before the attempt. The Linux 7.0 upstream allocator
+explains the constraint: a bridge has 1,024 port-number slots, with port zero
+reserved, leaving **1,023 usable ports on one bridge**. The retained run records
+the refusal, but not the failing attachment index or an at-failure port count.
+The exact 1,023-port interpretation comes from that allocator and the
+synchronized serial attachment path. The native record itself supplies no
+counted failure ordinal.
 
-The resulting VM attachment uses shared node resources and **vsock flow
-transport**. The guest application still opens ordinary TCP and UDP sockets.
-The host receives framed flow requests over vsock and opens the corresponding
-host-side sockets. It enforces mesh identity and encryption outside the guest.
-There is no per-VM host network namespace, TAP, or bridge in this attachment
-path.
+That is a topology limit, not a Linux-wide interface limit. It is also distinct
+from Overdrive's earlier project-defined 4,096 `NetSlot` admission bound. Moving
+VMs out of individual host network namespaces had removed one constraint, but
+putting their TAPs on a single shared bridge introduced another below the
+measurement target.
 
-That describes an architectural change, not a benchmark result. Linux has no
-single interface-count ceiling that explains every deployment, and removing
-interfaces does not establish a throughput or startup improvement. The harder
-question was whether the new path could preserve bytes, backpressure, identity,
-and honest workload outcomes under failure.
+The next decision was therefore about the attachment itself: distribute the
+TAPs, replace the switch, or stop allocating a host network device per VM.
+The alternatives did not all fail. Open vSwitch reached the target attachment
+count. Understanding why it remained unselected explains the architecture that
+followed.
+
+## More bridges worked and Open vSwitch reached the attachment target
+
+A tree of Linux bridges crossed the single-bridge limit. Five leaf bridges and
+one root retained **4,097 actual TAPs and queue descriptors**. Each leaf stayed
+within its own port limit, including its uplink. A separate run booted two
+real guests on different leaves among 1,024 TAPs. Both completed peer TCP,
+gateway TCP, off-subnet TCP, and gateway DNS exchanges.
+
+The next obstacle was neighbor state. In a separate 1,100-TAP burst with untuned
+ARP thresholds, replies stopped at the 342nd distinct source after 341
+successful sources. The two leaves and root each held 341 neighbors, and the
+kernel's table-full counter rose. That result rejects the tested configuration,
+not every multi-bridge design or a universal 341-VM capacity. The topology
+removed the port bottleneck but retained a TAP per endpoint, replicated
+neighbor state, and needed further work on neighbor admission and production
+security ownership.
+
+**The stock Open vSwitch kernel datapath worked at 16,384 attachments.** Its
+probe held 16,384 distinct TAP netdevices, live queue descriptors, and NETDEV
+vports simultaneously. Every TAP completed gateway ARP and ICMP exchanges.
+At full population, all endpoints also exchanged byte-identical synthetic TCP
+Ethernet frames in 8,192 bidirectional pairs through kernel OUTPUT actions.
+Preinstalled flows handled those packets without an OVS userspace packet daemon
+or an application forwarding relay.
+
+Those were real attachment objects and bounded synthetic traffic. The probe
+booted zero VMs, established no workload TCP sessions, and measured no physical
+wire speed. OVS removed the exact Linux bridge-port obstacle. Running 16,384
+microVMs and meeting the production identity and lifecycle contract remained
+unproved by that experiment.
+
+OVS remained unselected because it kept the resource population the replacement
+was intended to remove: one host TAP, queue descriptor, and switch vport per
+VM. The accepted choice was to remove per-VM host netdevices rather than
+replace their switch. Cleanup made that cost visible: the final OVS probe took
+2.699 seconds to delete its datapath and 99.548 seconds to close the 16,384 TAP
+descriptors. Those are observations from that run, not a general OVS teardown
+guarantee or a performance comparison with the delivered vsock path.
+
+Hardware networking offered another way to avoid TAPs. A read-only vDPA/SR-IOV
+inventory found no usable hardware endpoints in the tested machine's current
+NIC and firmware configuration. The available software interfaces did not
+supply a hardware device to attach. That blocked an experiment on that machine,
+not vDPA or SR-IOV as technologies. Their feasibility remains
+[separate work](https://github.com/overdrive-sh/overdrive/issues/329).
+
+## Vsock removes a resource class, not resource limits
+
+The selected attachment gives the VM no virtual NIC and creates no host TAP,
+bridge port, or per-VM host netdevice. Application flows cross the guest's
+virtio-vsock device through the kernel vhost-vsock backend. The host opens
+destination sockets and enforces mesh identity and encryption outside the
+guest.
+
+Transport experiments established narrower prerequisites before this became a
+production path. One held 16,384 activated stock Cloud Hypervisor vsock devices
+and Unix muxers, with tagged traffic through every device. A separate kernel
+vhost experiment held 16,384 transport adapters and exchanged datagrams through
+every owner. Neither count represented 16,384 booted guest operating systems
+or supplied the complete production lifecycle or mTLS proof. The stock
+Unix-muxer result also did not establish the kernel backend. Production uses
+the Cloud Hypervisor source integration for kernel vhost-vsock and guest
+RESET-EXIT behavior. Maintaining that VMM integration is another cost of the
+selected path.
+
+The resource class changes. It does not disappear. A VM still needs a
+vhost-vsock device, a CID, sockets, and transport tasks. Each flow occupies node
+capacity and an allocation quota. The guest also needs socket capture and
+adaptation that a virtual NIC would have delegated to its ordinary network
+stack. Removing TAPs earns its complexity only if that replacement preserves
+application behavior, backpressure, identity, and cleanup.
 
 ## Move flows across the boundary, not packets through a virtual NIC
 
 Vsock connects a guest to its host without an IP link between them. Overdrive
 uses a separate vsock stream for each transported flow. A request identifies the
-flow; datagram associations carry length-prefixed messages so an empty UDP
+flow. Datagram associations carry length-prefixed messages so an empty UDP
 datagram stays a datagram rather than disappearing into stream semantics.
 
 <Mermaid chart={`
@@ -54,33 +128,35 @@ flowchart LR
 The distinction between application protocol and transport matters. A guest TCP
 connection does not arrive at the host as a guest TCP packet. It arrives as a
 vsock stream. TCP capture inside the guest and TCP sockets opened by the host
-are separate parts of the path; a guest TCP feature is not automatically a
-feature of the host's vsock transport.
+are separate parts of the path. A guest TCP feature does not automatically
+apply to the host's vsock transport.
 
 The host protocol names requests, datagrams, and end conditions. It does not
 name a guest kernel. Linux implements its side with `overdrive-init`, eBPF
 capture, and the `ovd_fwd` kernel module. A non-Linux guest would need its own
-adapter for the same protocol; that adapter is
+adapter for the same protocol. That adapter is
 [future work](https://github.com/overdrive-sh/overdrive/issues/321).
 
-Sharing the attachment removes one kind of per-VM resource. It does not remove
-resource limits. Each flow occupies node capacity, and each allocation has a
-flow quota. A half-closed flow still holds its place while it can hold memory.
-Exhausting a bound refuses the new flow.
+A half-closed flow retains its capacity while it can still hold memory.
+Exhausting a node or allocation bound refuses the new flow. Removing the
+bridge-port ceiling leaves finite flow capacity.
 
 ## Backpressure has to survive the forwarding mechanism
 
 A forwarding path can deliver every byte in a short test and still fail when
 the receiver stops reading. The decisive test is where those bytes wait.
 
-The initial sockmap redirect approach failed that test on the tested Linux
-kernel. Vsock returned credit before the redirect verdict ran, while the target
-redirect queue continued to grow. The sender's apparent progress no longer
+A scratch shared-memory/vsock kernel proxy had already shown that kernel
+forwarding could work, but it allocated worker threads per peer. That cost left
+it unselected for the target population. The first selected sockmap redirect
+avoided that threading shape, then failed the stalled-reader test on the
+tested Linux kernel. Vsock returned credit before the redirect verdict ran,
+while the target redirect queue continued to grow. The sender's apparent progress no longer
 meant the receiver had room. A formal model of flow ownership could not repair
 that kernel behavior.
 
 The selected forwarder joins two sockets inside the kernel. Socket callbacks
-queue work; the work item peeks at the source, attempts a nonblocking send to
+queue work. The work item peeks at the source, attempts a nonblocking send to
 the target, then consumes exactly the bytes the target accepted. When the
 target stops accepting bytes, the source keeps them. Its TCP receive window or
 vsock credit supplies backpressure.
@@ -91,14 +167,14 @@ aborts the pair. Work runs on a per-CPU workqueue, with one work item per pair,
 rather than a thread per connection.
 
 The cost of that choice is a kernel module built for each supported kernel
-release. The host image loads it before `overdrive serve`; the server probes it
-at node startup and refuses to run without it. A Linux guest carries its kernel,
+release. The host image loads it before `overdrive serve`. The server probes
+it at node startup and refuses to run without it. A Linux guest carries its kernel,
 module, and init as a matching guest kit. Guest init checks the module's kernel
 release before loading it and before announcing readiness.
 
 TLS has a separate owner. The forwarder refuses TCP sockets with an installed
-upper-layer protocol, including kTLS. The host mTLS path owns its TLS endpoints;
-the forwarder does not parse TLS records. A temporary userspace relay connects
+upper-layer protocol, including kTLS. The host mTLS path owns its TLS endpoints.
+The forwarder does not parse TLS records. A temporary userspace relay connects
 the host's TLS path to guest delivery, so “in-kernel forwarding” does not mean
 every byte on every VM mesh path avoids userspace.
 
@@ -123,7 +199,7 @@ invoke the fentry program.
 
 This is a narrow C addition, not an Aya replacement. Aya remains pinned at
 `0.13.1` and loads both objects. An earlier Rust dynptr prototype failed because
-its handwritten extern did not express the required kfunc relocation; that
+its handwritten extern did not express the required kfunc relocation. That
 failure did not prove that Aya could not load the selected program. The C
 object uses standard helpers and CO-RE field access and was loaded through the
 same Aya version.
@@ -131,7 +207,7 @@ same Aya version.
 The two objects must share the exact correlation map. Setup temporarily pins
 maps to join the loaders, then removes both pins and their directory before
 program load and attachment. Readiness requires that cleanup as well as
-successful attachment. Objects and links remain process-owned; there are no
+successful attachment. Objects and links remain process-owned, with no
 permanent runtime staging pins to discover or adopt after a crash.
 
 ## Kernel completion and owner completion are different events
@@ -178,7 +254,7 @@ models, not 279 universal proofs of the running system.
 Kernel experiments also need a failure boundary. Running a command on a remote
 physical host does not isolate its kernel. Production `CloudHypervisorVmm` and
 GuestKit fixtures put BPF, module, socket, and fault effects inside disposable
-VMs; nested Cloud Hypervisor fixtures isolate cases that need to exercise VM
+VMs. Nested Cloud Hypervisor fixtures isolate cases that need to exercise VM
 launch from within that boundary. The test can destroy its guest without
 turning the shared development host into the experiment.
 
@@ -199,10 +275,13 @@ are concrete properties to build on.
 There are still sharp limits. Guest DNS and remote UDP support empty and
 nonempty datagrams, but guest-to-Service-VIP UDP delivery to a VM backend
 [remains deferred](https://github.com/overdrive-sh/overdrive/issues/310).
-The host-side protocol is guest-neutral; the delivered guest adapter is Linux.
+The host-side protocol is guest-neutral. The delivered guest adapter is Linux.
 A crash window in CID generation replacement
 [remains open](https://github.com/overdrive-sh/overdrive/issues/325).
 
-Higher density is the motivation. Measuring it is the next job. The
+OVS proved that the bridge ceiling could be removed while keeping TAPs. Vsock
+removes the per-VM netdevice as well, at the cost of guest adaptation and an
+explicit flow protocol. Whether that trade delivers the intended density and
+startup benefits still needs measurement. The
 [current networking documentation](/docs/concepts/guest-networking) describes
 the implemented boundary and its operating requirements.

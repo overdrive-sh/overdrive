@@ -73,3 +73,65 @@ No material content finding requires remediation. The pre-existing search-rankin
 ## Final verdict
 
 **APPROVED — website guest-networking documentation and engineering journey.** The current content is supported by the reviewed implementation and bounded evidence, preserves operator limitations, and passes the targeted navigation, links, export, and discovery checks. Publication and the feature's global archive/integrity gate remain separate decisions.
+
+## Review iteration 2 — motivating constraint and alternatives
+
+### Scope and prior review omission
+
+The user identified a material omission in the initially approved post: it did not explain the native bridge failure that motivated replacement or the successful Open vSwitch alternative. I missed that omission. My first review checked the implementation explanation and evidence qualifications but did not establish that the engineering journey explained the actual decision. Its broad narrative approval was insufficient. The earlier review remains above as history, and this iteration supplies the missing decision-completeness assessment.
+
+This iteration reviews the revised blog and editorial ledger, the new decision-story requirement in `.claude/rules/finalize.md`, and the punctuation requirement in `.claude/skills/technical-writer/SKILL.md`. Product docs are unchanged and retain their prior bounded approval. Only this review artifact was edited by the reviewer. The user-owned `AGENTS.md`, writer's blog revision, and root-owned policy/skill changes were preserved.
+
+Reviewed blog SHA-256: `ffb234eb13860c9b4b372892d40b786b52bf1ee50ad4d572dc0f019233c55d4f`.
+
+### Independent decision and evidence assessment
+
+The revised post was read in full against the feature delta opening, accepted ADR-0145, the native bridge falsification record and its approved documentary review, the multi-bridge findings, OVS findings and independent review, current-hardware vDPA/SR-IOV findings, and the two distinct vsock transport-probe records. The prior website approval was not treated as factual authority for these additions.
+
+| Revised claim and location | Source evidence and assessment |
+|---|---|
+| Opening: the native attempt could not provision the 16,384-attachment measurement target and returned `EXFULL` while attaching a TAP to its bridge. | `native-e18-bridge-capacity-falsification.md`, completed native evidence, records the exact `TapAttachBridge` / `set-master` netlink `-54` refusal, failed measurement, successful cleanup, and initially empty bridge. The feature delta opening and ADR-0145 identify this as the motivating topology failure. The post correctly calls 16,384 a measurement target rather than an achieved VM population. |
+| Opening: 1,024 bridge port-number slots with zero reserved means 1,023 usable ports on one bridge, while the native failure ordinal was not recorded. | The falsification record's kernel interpretation and its independent review distinguish upstream Linux 7.0 allocator facts, synchronized serial source-path inference, absent at-failure inventory, and unavailable benchmark executable attestation. The post retains the decisive source-versus-observation distinction. It does not claim a directly counted 1,024th failure or a universal Linux interface ceiling. |
+| Opening: the older project-defined 4,096 `NetSlot` bound is a different constraint. | ADR-0145 context and the hardware feasibility findings explicitly separate the earlier allocation bound from the subsequent single-bridge port limit. The post does not merge them into one kernel capacity result. |
+| Alternatives section: five leaves and one root retained 4,097 TAPs and queue descriptors, and two real guests among 1,024 TAPs passed the stated TCP/DNS journeys. | `spike/multi-bridge-findings.md`, verdict, fanout, and traffic sections establish those separate experiments. The post does not convert the 4,097 attachment objects into 4,097 booted guests or full production security composition. |
+| Alternatives section: the untuned 1,100-TAP ARP burst first missed source 342 after 341 successes, with 341 neighbors on each of two leaves and the root. | The multi-bridge neighbor-pressure record contains those counts and increasing `table_fulls`. The post confines the result to that tested configuration, avoids a universal 341-VM limit, and names the remaining neighbor/security ownership work. |
+| Alternatives section: stock kernel OVS held 16,384 TAP devices, queue descriptors, and NETDEV vports, with all-port ARP/ICMP and 8,192 pairs of byte-identical synthetic TCP frames. | `spike/ovs-kernel-findings.md` and `spike/review-ovs-kernel.md` approve exactly this attachment and frame-preservation boundary. Retained increment-d independent-audit events also show 16,384 distinct ifindices, owner FD identities, and kernel NETDEV vports, with OUTPUT-only flows and zero packet EXECUTE requests. The post correctly credits a successful OVS experiment and excludes booted VMs, workload TCP sessions, physical wire speed, and complete production identity/lifecycle proof. |
+| Alternatives section: OVS remained unselected because it retained TAP-based per-endpoint host objects, not because its experiment failed. | ADR-0145's alternatives explicitly reject multi-bridge for keeping the per-VM netdevice cost and OVS by the TAP-based constraint. Its selected decision removes per-allocation host netdevices. This is a recorded selection criterion, not a rationale invented from the final implementation. |
+| Alternatives section: 2.699 seconds of OVS datapath deletion and 99.548 seconds of TAP descriptor closure expose a measured cleanup cost. | The final OVS findings' resources/cleanup section records those two durations. The independent review accepts the bounded comparison and retained cleanup evidence. The post labels them observations from that run and expressly declines a delivered-vsock comparison or general teardown guarantee. It does not claim these timings were the sole historical selection criterion. |
+| Hardware paragraph: the tested current NIC/firmware configuration supplied no usable hardware vDPA/SR-IOV endpoint. | `spike/findings-vdpa-sriov-metal.md` distinguishes available software support from absent usable hardware endpoints and records the read-only inventory boundary. The post preserves that machine/configuration scope, leaves feasibility deferred to the existing issue, and does not condemn either technology or propose hardware reconfiguration. |
+| Vsock section: the stock CH Unix-muxer device result and separate kernel vhost adapter result each reached 16,384 at their own transport boundary. | `spike/shared-memory-vsock-scale-findings.md` counts activated stock device/muxer owners with tagged traffic and zero guest boots. `spike/shm-vsock-kernel-proxy-findings.md` separately counts kernel vhost transports/adapters with tagged datagrams, without a resident guest cohort or completed production lifecycle. The post keeps the two results separate and does not use the stock muxer result to prove the selected kernel backend. |
+| Vsock/backpressure sections: removing per-VM host netdevices retains device/CID/socket/task capacity and adds guest adaptation, protocol, VMM integration, and kernel module obligations. The threaded proxy was left unselected for per-peer worker cost. | ADR-0145's decision, alternatives, and consequences support these tradeoffs. The kernel-proxy findings explicitly count per-peer module workers in addition to stock vhost tasks. ADR-0197 remains the accepted event-driven replacement for the falsified sockmap approach. The post does not claim zero resource growth or a measured density/startup benefit. |
+
+The earlier reviewed implementation discoveries remain present: stalled-reader backpressure, exact Fast Open accepted-socket correlation, queued-end ownership, honest guest EXIT reporting, and disposable native testing. The delivered two-body 64-VM correctness evidence stays separate from the 16,384 attachment/transport experiments and from future performance measurements.
+
+This supplies the consequential decision story required by the updated policy: observed constraint, alternatives that worked or remained limited, the actual no-per-VM-netdevice selection criterion, costs shifted to transport and flow ownership, discoveries that changed the mechanism, and bounded delivered evidence. It neither recounts every delivery task nor claims that every rejected alternative was nonfunctional.
+
+### Policy, punctuation, and validation
+
+The updated finalization policy is consistent with the requested bounded gate. It requires the feature blog to read its evidence and explain the concrete problem, serious alternatives, actual selection criteria, costs, and proof limits. Its instruction to select consequential experiments avoids a requirement to reproduce every historical task. It preserves independent review and the separation between content completion and publication. No policy change or expansion into a whole-site rewrite is required by this review.
+
+The technical-writer punctuation requirement explicitly applies to authored prose, headings, summaries, descriptions, examples, and revisions, while preserving punctuation required by code, data, or exact quotations. Independent scans found zero semicolons in both the complete revised blog, including metadata and diagram, and the updated skill itself. The revised post complies without relying on an exception. Existing unrelated website prose and the immutable earlier review were not rewritten.
+
+Independent checks in this iteration:
+
+- `git diff --check`: PASS.
+- Existing one-index verifier against the current retained build: PASS, with 25 published pages, five blogs, and one excluded draft.
+- Retained production blog HTML contains the revised `EXFULL`, Open vSwitch, and scoped cleanup text. Concept navigation remains present.
+- Full revised blog and skill punctuation scans: PASS, zero semicolons.
+- The blog retains its concept link and established issue links, adding only the already documented hardware-feasibility issue. No navigation or route change was introduced.
+
+The updated editorial ledger records passing typecheck, production Next build through `assert:one-index`, revised blog HTML/Markdown smoke, blog listing and `Open vSwitch` search discovery, links, punctuation, and domain-name checks. Those builds and HTTP checks were not redundantly rerun here. The retained HTML was inspected directly. The old native failed-attempt raw directory is not available at its linked local `target/` path in this checkout, so this review relies on its preserved factual record and independent documentary review rather than claiming a fresh raw-data attestation or a native rerun.
+
+The pre-existing runtime search-ranking failure remains qualified exactly as in iteration 1. It was not rerun. Analytics assertions beyond that failure remain unexecuted and no full runtime-suite pass is claimed. No new test scenario, search fix, native run, Rust check, VM, Cloudflare operation, commit, push, deployment, or publication occurred.
+
+### Finding and remediation disposition
+
+| Finding | Prior state | Current disposition |
+|---|---|---|
+| Missing motivating bridge failure and consequential alternatives, especially successful OVS | Material omission in the originally approved engineering journey, identified by the user and missed by this reviewer | **CLOSED.** The revised opening and alternatives explain the proved constraint, distinguish source-derived limits from observed counts, credit successful alternatives, and ground the no-TAP selection in ADR-0145. |
+
+No new blocking content or policy finding was identified. No production or architecture remediation is prescribed.
+
+### Iteration 2 final verdict
+
+**APPROVED — revised guest-networking engineering journey and unchanged product documentation.** The revision closes the material narrative omission with source-grounded decision criteria and honest experimental boundaries. This is the current content verdict. It does not erase the prior review miss, finalize the feature's global archive, or authorize publication.
