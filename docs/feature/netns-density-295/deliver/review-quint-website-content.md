@@ -122,3 +122,66 @@ Only this review artifact was edited by the reviewer. The user's dirty `AGENTS.m
 ### Iteration 2 final verdict
 
 **APPROVED — opening clarification.** The revision directly satisfies the requested reading order, accurately defines Quint, and preserves the previously reviewed model, conformance, and native-evidence boundaries.
+
+## Review iteration 3 — context throughout the article
+
+### Prior review gap and current scope
+
+The user identified another material context defect: the native-kernel section referred to a sockmap approach without first explaining the networking system or what that approach did. The first review missed this, and the second review checked only the requested opening correction. Neither established that later examples were understandable to a fresh reader. Accurate claims and source links did not resolve that missing context.
+
+This iteration reads the entire revised blog as a continuous argument, including every retained example and newly introduced mechanism. It also reviews the actual context-guidance move from finalization policy into the technical-writer skill. The reviewer edits only this artifact. Root-owned policy/skill changes, user-owned `AGENTS.md`, and the writer's blog remain preserved.
+
+Reviewed blog SHA-256: `02d1d2477d1bafb890084b1c41d81cc95d1d0575c53d852db2e00495ba50bf83`.
+
+### Fresh-reader comprehension assessment
+
+| Passage | Context supplied before the example or conclusion |
+|---|---|
+| Opening and probe-count problem | Quint is defined first through executable models, state, actions, rules, and counterexamples. Overdrive's service-restart purpose leads directly into the health-check result sequence and missed intermediate result. |
+| Protocol state and first excerpt | The health-check task and service reconciler are identified as producer and consumer. The text names the sequence and streak fields, explains model-only history, then explains the excerpt's row variables and trailing-suffix function. No private ADR knowledge is needed to understand the asserted rule. |
+| Hazard run and witnesses | A hazard is introduced as disabling a design rule. The rejected reconstruction rule has already been explained. The text defines `.then`, `.expect`, and the meaning of `ConsumerLook(true)` before the run, then interprets `terms`, `rsame`, and `Safety`. Witnesses are explained as reachable-state evidence with a concrete threshold example. |
+| Flow safety and liveness | The text first identifies application connections between a microVM and host, then distinguishes the forwarder's byte movement from the flow owner's setup, capacity, and cleanup. Capacity-reservation safety and delivery progress therefore have identifiable subjects and purposes. The reader-stall condition is explicit. |
+| Engines and conformance | TLC, Apalache, evaluator runs, and randomized traces are distinguished by their exploration boundaries. `quint-connect` drivers are introduced as Rust test adapters before their action/projection behavior is used. The bookkeeping comparison explains why observation must come from the owner. |
+| Watch before stream handoff | Before describing the failure, the article explains the host owner's connection into a VM, the completion watch registered during setup, and the later transfer of a usable stream to the caller. The reader can understand why a live watch is insufficient evidence of completed handoff. |
+| Recording and models without drivers | `conf_step` is introduced through its action-recording purpose and checking/conformance separation. The pending-place model is explained as accounting for accepted connections until forwarding attachment or discard. The lock/memory model uses plain deferred-memory-reclamation language rather than an unexplained RCU acronym. |
+| Native sockmap experiment | The passage identifies Overdrive microVM traffic, defines vsock as guest-to-host socket transport, and explains the eBPF sockmap redirect between TCP and vsock sockets before discussing the failed buffering assumption. Backpressure is explained as slowing the sender when the receiver stops reading. Credit is defined before its premature return and queue growth are described. The replacement's consume-after-accept rule explains why the experiment changes the mechanism. |
+| Queued completion and audit | The text first explains completion reports and capacity retained until the owner reads them. It then explains why an unread record is occupied capacity and why omitting it can trigger false recovery. The seeded Rust result and supervisor role follow that setup. The networking link supplies further detail rather than a missing premise. |
+| Evidence and CID exclusion | Expected outcome counts retain their model boundaries. CID is expanded and tied to the VM transport before the replacement-generation crash window is described. The earlier terminal state supplies the practical consequence, and the ordinary conformance exclusion remains explicit. |
+
+The revised argument remains about what modeling, conformance, and native evidence can establish. It adds the minimum networking context needed for the native counterexample rather than expanding into a networking tutorial. Removing the detailed Fast Open/fentry/SockOps example avoids a second kernel mechanism that would require a separate explanation. The remaining example already establishes the model-premise lesson, so that removal does not weaken the article's evidence claim.
+
+### Factual checks and proof boundaries
+
+The rewritten sockmap passage agrees with ADR-0197 and the retained `spike/findings-v3-guest-slot.md`: vsock credit returned before the redirected target accepted bytes, and a stalled target's redirect queue grew on the tested kernel. The selected consume-after-accept explanation agrees with ADR-0197 and `spike/findings-evmod.md`, which distinguish peek from the dequeue that returns credit. The prose makes no claim that Quint established either kernel fact or that the result applies to every kernel.
+
+The completion passage preserves the reviewed distinction between the host owner's retained capacity and the kernel's queued unread end record. Its reproduction remains an exact seeded Rust owner/supervisor regression, not a Quint inventory proof. The watch-before-handoff explanation preserves the existing `strmHeld` model correction and ownership contract reviewed in iteration 1.
+
+The CID wording matches `specs/quint/guest-flow-owner/cid_lease.qnt`'s documented lost-generation hazard and ordinary recording-main `Crash` guard. It does not claim the crash window is repaired. The model excerpts, expected negative outcomes, counts, and model/Rust/native distinctions remain unchanged. No universal proof, new runtime capability, performance claim, or benchmark result was added.
+
+### Guidance move and validation
+
+The context-guidance section has been removed from `.claude/rules/finalize.md` and merged into `.claude/skills/technical-writer/SKILL.md`. The merged principle covers the opening and later mechanisms, preserves the intended-audience qualification, and states that links cannot replace the minimum explanation. The final checklist now asks about context throughout the article and self-contained examples. Finalization policy retains its completion/review gates and references skill compliance throughout the content. There is no duplicate context-writing section in that policy. This matches the user's requested ownership move without introducing a new approval gate or unrelated writing requirement.
+
+Independent static checks passed:
+
+- Opening and metadata are byte-identical to HEAD through the first section boundary.
+- Section headings, both fenced model excerpts, and all link destinations are unchanged.
+- Both excerpts still match contiguous actual model source after removing common source indentation.
+- All four site-local blog links resolve, and the complete article contains zero semicolons.
+- `git diff --check` passes.
+
+The ledger honestly preserves the initial missing-dependency failure and the later successful restoration. It records frozen installation of existing dependencies, unchanged package/lock hashes, Fumadocs generation, and current typecheck passing. No full build or runtime-suite pass is inferred from those checks. Expensive website builds, models, native tests, Rust tests, and the known search-ranking baseline were not rerun for this prose correction. The preceding runtime/analytics qualifications remain unchanged.
+
+### Findings and disposition
+
+| Finding | Disposition |
+|---|---|
+| Sockmap failure depended on unexplained networking context | **CLOSED.** The system, transport, redirect behavior, required backpressure, and credit meaning are introduced before the failure and replacement. |
+| Earlier review did not assess context throughout later examples | **CLOSED for the current article.** The full fresh-reader pass above checks each mechanism and example rather than relying on the opening definition or another post. The historical review miss remains recorded. |
+| Context guidance belongs in the technical-writer skill | **SATISFIED.** The section is moved and merged, the skill checklist covers the whole article, and finalization retains its reference and completion gates. |
+
+No blocking finding remains. No source, architecture, test, or additional policy remediation is requested.
+
+### Iteration 3 final verdict
+
+**APPROVED — article-wide context correction and guidance move.** The revised blog explains the subject, purpose, and relevant behavior of its mechanisms before relying on them. Quint remains the central argument, and model, implementation, and kernel evidence retain their distinct limits. This verdict authorizes no commit, publication, deployment, or feature finalization.

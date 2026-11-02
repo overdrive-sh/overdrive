@@ -42,11 +42,12 @@ among enabled actions instead of following one test script. The
 [official protocol lesson](https://quint.sh/docs/lessons/anatomy) explains this
 state-machine structure.
 
-The probe model keeps one producer, one consumer, and one latest stored row for
-a probe key. The producer owns `run_seq` and `same_status_runs`. The consumer
-reads that row and applies the health threshold. It remembers the sequence of
-the row on which it last requested a stop, so rereading a row cannot request
-another stop. A newer row can retry a failed stop while the allocation remains
+The probe model keeps one health-check task as producer, one service reconciler
+as consumer, and one latest stored row for that check on an allocation. The
+producer records a sequence number, `run_seq`, and the current streak length,
+`same_status_runs`. The consumer reads that row and applies the health threshold.
+It remembers the sequence of the row on which it last requested a stop, so
+rereading a row cannot request another stop. A newer row can retry a failed stop while the allocation remains
 running.
 
 The model also keeps a history of written outcomes for checking. Production
@@ -58,15 +59,17 @@ from `probe_count.qnt`:
 val StreakExact: bool = rseq > 0 implies rsame == trail(hist, rst)
 ```
 
-Here `rseq`, `rst`, and `rsame` describe the stored row. `hist` holds the written
-outcomes, and `trail` counts the suffix with the row's status. If a row exists,
+Here `rseq` is the stored row's sequence number, `rst` its status, and `rsame`
+its streak length. `hist` holds the written outcomes, and `trail` counts the
+suffix with the row's status. If a row exists,
 its recorded streak must equal that suffix. This is a safety property. A single
 reachable state can disprove it.
 
 The abstraction is deliberate. The model bounds producer runs at seven, uses a
 failure threshold of three, and permits consumer looks between producer runs.
 It does not model an HTTP server or the bytes in a health-check response. Those
-details do not decide whether coalescing loses a streak boundary.
+details do not decide whether keeping only the latest row loses a streak
+boundary.
 
 ## Make the wrong rule fail on purpose
 
@@ -75,7 +78,9 @@ state the model can never reach.
 
 Overdrive keeps hazard instances that disable a particular design rule and
 require a counterexample. For probe counting, one hazard restores the consumer's
-attempt to reconstruct the streak. The retained named run is:
+attempt to reconstruct the streak. In the following named run, `.then` takes
+the next action and `.expect` checks the resulting state. `ConsumerLook(true)`
+models a consumer look where a requested stop would succeed. The retained run is:
 
 ```text
 run FlipBetweenLooksNoEarlyTerminate = init
@@ -84,9 +89,10 @@ run FlipBetweenLooksNoEarlyTerminate = init
   .then(ConsumerLook(true)).expect(terms == 0 and rsame == 1 and Safety)
 ```
 
-The final assertion requires zero stop requests and a trailing failure streak
-of one. It passes under producer-owned counting and fails under the
-reconstruction hazard. The recorded failure is expected. It shows that the
+The final assertion requires zero stop requests (`terms == 0`), a trailing
+failure streak of one (`rsame == 1`), and the model's combined `Safety` checks.
+It passes under producer-owned counting and fails under the reconstruction
+hazard. The recorded failure is expected. It shows that the
 check distinguishes the selected rule from the rejected rule.
 
 This is a concrete design comparison, not a claim that every failed model
@@ -103,13 +109,15 @@ run reaches the relevant state.
 
 ## Safety and progress ask different questions
 
-A flow that never delivers or releases anything can avoid corrupting data.
-That does not make it a useful forwarder.
+Overdrive also models connections carrying application traffic between a
+microVM and its host. A forwarder moves a connection's bytes, while a flow owner
+coordinates its setup, capacity reservations, and cleanup. Avoiding corruption
+is not enough if the connection can never deliver data or release resources.
 
-Safety checks reject a bad state or transition, such as assigning one place to
-two owners. Liveness checks ask whether progress eventually occurs under stated
-assumptions. In the guest-flow model, delivery obligations account for a flow
-being cut off or stalled. A reader is allowed to stop reading forever. The
+Safety checks reject a bad state or transition, such as assigning one capacity
+reservation to two owners. Liveness checks ask whether progress eventually
+occurs under stated assumptions. In the guest-flow model, delivery obligations
+account for a flow being cut off or stalled. A reader is allowed to stop reading forever. The
 model cannot promise delivery by assuming that reader eventually cooperates.
 
 The repository uses different engines for different questions. TLC explores the
@@ -127,7 +135,7 @@ holds” must name the model instance and the search that completed.
 ## Connect the specification to the Rust owner
 
 A model can be internally correct while the implementation does something else.
-Overdrive connects them with `quint-connect` drivers.
+Overdrive connects them with Rust test adapters called `quint-connect` drivers.
 
 A driver takes a model action, calls the production owner's driving interface,
 then projects observable implementation state back into the model's vocabulary.
@@ -141,11 +149,16 @@ simulation. The comparison must read the owner's observation surface. Where a
 simulated adapter represents a kernel-owned fact, that adapter needs a matching
 real-kernel test.
 
-Conformance can also expose a wrong model boundary. A seeded flow-pair replay
-reached an abort while a watch existed but before the pending dial had handed a
-stream to its caller. The implementation followed pending-dial cleanup, while
-the model assumed that a live watch meant the caller held the stream. The
-correction recorded stream handoff separately. Adding that distinction aligned
+The host flow owner can also open a connection into a VM for a platform client.
+During setup, it registers a watch that will report how the connection ends.
+The caller receives its stream only after setup finishes, so the watch can exist
+while the connection request is still pending.
+
+Conformance exposed a model that missed this distinction. A seeded flow-pair
+replay reached an abort after the watch existed but before the pending request
+had handed a stream to its caller. The implementation cleaned up the unfinished
+request, while the model assumed that a live watch meant the caller held the
+stream. The correction recorded stream handoff separately. Adding that distinction aligned
 the model with the existing ownership contract instead of changing production
 to satisfy a false premise.
 
@@ -155,32 +168,39 @@ instances and stays constant on checking instances, so action-recording history
 does not inflate the state space searched for protocol properties.
 
 Not every model has a Rust conformance driver. The TCP capture pending-place
-model checks a small admission protocol and pairs with an existing native guest
-test. The forwarder's internal lock and RCU model has a different boundary
-again. [The modeling documentation](/docs/concepts/quint-modeling) identifies
-these limits rather than treating every model as an automatic refinement proof.
+model bounds guest connections accepted for capture until they are attached to
+the forwarder or discarded. It checks this admission accounting and pairs with
+an existing native guest test. The model of the forwarder's locking and deferred
+memory reclamation has a different boundary again.
+[The modeling documentation](/docs/concepts/quint-modeling) identifies these
+limits rather than treating every model as an automatic refinement proof.
 
 ## Let native facts invalidate a model's premises
 
-Quint cannot establish where the kernel returns vsock credit. The initial
-sockmap forwarding approach looked consistent at the protocol level, but a
-native stalled-reader experiment found that the redirect queue could keep
-growing after credit returned. The design needed a different forwarding
-mechanism. More exploration of the old model would not have bounded that queue.
+Overdrive's microVM networking carries application traffic over vsock, a socket
+transport between a guest and its host. An early version of this networking
+design used eBPF sockmap redirects to move bytes between TCP and vsock sockets
+inside the Linux kernel. It needed backpressure: when a receiver stopped
+reading, the sender had to stop too, rather than keep growing a kernel queue.
 
-TCP Fast Open exposed another kernel premise. A correlation experiment that
-allowed the client to close too early appeared to validate the final-ACK path.
-Keeping the client open without post-handshake payload disproved it. The
-replacement uses a handshake-only fentry capture program followed by the
-post-validation SockOps callback. A pending-place model can check admission
-accounting around that capture. It cannot prove the hook runs at the required
-point in the real TCP stack.
+A native stalled-reader experiment disproved that buffering assumption on the
+tested Linux kernel. Vsock credit tells the peer how much more it can send.
+The kernel returned credit before the redirected bytes reached their target,
+so the sender continued while the target queue grew. The selected event-driven
+kernel forwarder instead consumes bytes from the source only after the target
+accepts them. This leaves source-socket buffering in charge of slowing the
+sender. A model can check the intended forwarding protocol, but it cannot
+establish the kernel buffering behavior on which that protocol depends.
 
-The layers also catch different races. The host audit once omitted queued,
-unread completion records from occupied forwarder capacity. An exact seeded
-Rust regression triggered false recovery with the old arithmetic and passed
-with the correction. That is evidence from the production owner and supervisor
-under simulation. It is not a Quint proof of the audit counters.
+The forwarder also reports when a connection ends. The host flow owner reserves
+capacity for that connection until it reads the completion record, so a queued,
+unread record still represents occupied capacity. A host audit omitted those
+queued records and could mistake a healthy completion handoff for lost state,
+triggering recovery. An exact seeded Rust regression triggered that false
+recovery with the old arithmetic and passed with the correction. That is
+evidence from the production host flow owner and its supervisor, which checks
+the shared networking state, under simulation. It is not a Quint proof of the
+audit counters.
 
 These kernel-sensitive checks run inside disposable guest boundaries when
 their effects require isolation. A remote physical host alone supplies no such
@@ -197,8 +217,11 @@ match the current model files and check manifests.
 Those counts combine finite-state checking, bounded checking, and named runs.
 They are not 279 universal proofs. An expected hazard violation is not an
 unresolved production failure. Conversely, a green expected-outcome summary
-does not erase a known gap. The CID lease conformance configuration excludes a
-specific generation-replacement crash window, which remains tracked in
+does not erase a known gap. Each VM uses a leased context identifier, or CID,
+for its vsock transport. A replacement allocation generation leased when
+`overdrive serve` crashes can be lost, leaving the workload in its earlier
+terminal state. The ordinary CID lease conformance configuration excludes that
+crash window, which remains tracked in
 [the recovery issue](https://github.com/overdrive-sh/overdrive/issues/325).
 
 Model checking contributes an explicit protocol and reproducible evidence about
