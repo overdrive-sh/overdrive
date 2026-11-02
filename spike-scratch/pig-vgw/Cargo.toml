@@ -1,0 +1,17 @@
+[package]
+name = "vgw"
+version = "0.0.0"
+edition = "2021"
+[workspace]
+[dependencies]
+aya = "=0.13.1"
+libc = "0.2"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+[[bin]]
+name = "vgw"
+path = "src/main.rs"
+[[bin]]
+name = "vgwdial"
+path = "src/dial.rs"
+[profile.release]
+debug = 1

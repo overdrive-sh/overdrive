@@ -11251,6 +11251,109 @@ DELIVER, and no feature flag keeps the bridge path alive.
 
 ---
 
+## Public ingress gateway extension (GH #54; ADR-0220–0243)
+
+**Status: Proposed** — reconstructed on main 549d78fa6, pending independent
+review (2026-11-01). The original decisions were ratified by the user on
+2026-09-13; the reconstruction decisions D1–D5 were approved by the user on
+2026-11-01 (feature delta § *Reconstruction: user decisions and proposals*).
+Open proposals P-1…P-7 in that section are not part of the design until the
+user adds them. Exact contracts live only in the
+[feature delta](../../feature/public-ingress-gateway/feature-delta.md); C4 only
+in [c4-diagrams.md](c4-diagrams.md#public-ingress-gateway-canonical-c4).
+
+**System decision.** `overdrive serve` owns one in-process gateway that binds
+IPv4 TCP/443 (TLS 1.3, HTTP/1.1) after its own gates pass. It is not an
+Allocation, daemon or proxy. Its driven adapters enter through the two
+composition-root carriers of ADR-0219 (`BootAdapters.gateway`,
+`ComposedDataplane.gateway_connect`); `ServerConfig.gateway` alone enables it.
+`ManualCertifiedKeySource` feeds `PublicCertifiedKeyCustody` (sealed with the
+node KEK, preserve-old replacement); `GatewayApplicationOwner` publishes one
+Route/frontend/key admission generation; `GatewayControl` serves the redacted
+operator-mTLS `GET /v1/gateway/status`.
+
+**Backend path on main.** VM backends are programmed into
+`SERVICE_MAP`/`BACKEND_MAP`/`REVERSE_NAT_MAP` by the ordinary
+`ServiceLifecycle` → `ServiceMapHydrator` → `EbpfDataplane::update_service`
+path; the gateway adds no programming mechanism and no demand channel (D1,
+verified on native metal kernel 7.0 by
+[spike/findings-vm-service-map-programming.md](../../feature/public-ingress-gateway/spike/findings-vm-service-map-programming.md)).
+The dataplane adapter prepares each gateway upstream socket in the `serve`
+task (mark `0x1`, `127.0.0.1` bind per ADR-0190, cookie registered as a
+`(cookie, ServiceKey)` intent). The registered arm of
+`cgroup/connect4` selection (placement beside or inside `cgroup_connect4_service`
+pending the user decision P-10) selects through the Maglev inner map, rewrites the
+destination and records `Selected(BackendId)` or `NoBackend`. The dial leaves
+via table 100, is TPROXY-diverted to leg-C, which terminates mTLS, arms kTLS
+and relays to the guest over the owner-opened vsock flow
+(ADR-0145/0173/0186/0190). The gateway-client mTLS requires the peer's single
+SPIFFE SAN to equal the identity the dataplane resolved from the receipt's
+`BackendId`. Unavailability is a typed outcome at the gateway's consuming port
+(503 `NoBackend` for no outer entry or no usable backend, with the readiness
+`healthy == 0` window pending the user decision P-9; 502 for connect, identity
+and mTLS failures), with no wait (ADR-0242). XDP wire ingress is unchanged; there is no userspace backend
+selection.
+
+**Lifecycle.** Boot refuses on invalid gateway configuration; the listener
+gates (custody, held Gateway SVID, sentinel connect probe, actual-frontend
+probe, application promotion) are not boot-fatal and never touch workload or
+Service state (ADR-0230). Shutdown runs a gateway stage first, before the
+leg-C worker stage, clearing the volatile Gateway SVID slot in-process, within
+the existing single drain bound (feature delta, D5 section (c)). Gateway Application and BPF hydration generations stay
+independent (ADR-0229).
+
+<a id="public-ingress-gateway-route-domain-model"></a>
+
+### Route/domain model
+
+Public Ingress and Public Certified-Key Custody are new bounded contexts;
+Service Dataplane (selection receipt, applied `BackendId` identity) and
+Workload Identity (dedicated Gateway Identity Slot/lifecycle) are extended.
+State-based aggregates: the singleton Public Route Set, the Public Certified
+Key and the in-process Gateway Identity Slot; no event sourcing, CQRS or new
+store (rejected alternatives recorded in ADR-0221). A Route holds a canonical hostname, a raw exact-or-segment-
+prefix path, a stable `(WorkloadId, port, tcp)` Service Listener reference and
+a Public Certified-Key reference; it persists no VIP, backend, allocation or
+SPIFFE identity. Detailed aggregates, universes and command deltas are in the
+feature delta § *Aggregate contracts*; the context map is in
+[c4-diagrams.md](c4-diagrams.md#public-ingress-gateway-route-domain-context).
+
+### Decision records
+
+| ADR | One decision |
+|---|---|
+| [0220](adr-0220-embed-single-node-public-ingress-in-overdrive-serve.md) | Embed the gateway in `overdrive serve` |
+| [0221](adr-0221-singleton-public-route-set-aggregate.md) | Singleton Public Route Set |
+| [0222](adr-0222-public-ingress-route-and-gateway-application-owner.md) | One owner for coherent Gateway Application admission |
+| [0223](adr-0223-producer-neutral-public-certified-key-custody.md) | Producer-neutral Public Certified-Key Custody (domain boundary and acquisition/consumption split) |
+| [0224](adr-0224-existing-cgroup-bpf-gateway-backend-selection.md) | Backend selection and packet entry in the existing cgroup-BPF Dataplane (registered arm) |
+| [0225](adr-0225-dedicated-gateway-svid-identity-lifecycle.md) | Dedicated Gateway SVID identity slot and lifecycle |
+| [0226](adr-0226-public-listener-tls13-only.md) | TLS 1.3 only |
+| [0227](adr-0227-redacted-operator-gateway-status.md) | Redacted operator status projection |
+| [0228](adr-0228-dataplane-selection-receipt-ownership.md) | Selection receipt owned by Service Dataplane |
+| [0229](adr-0229-keep-gateway-and-service-dataplane-generations-independent.md) | Independent Gateway and Dataplane generations |
+| [0230](adr-0230-gate-public-listener-without-redefining-workload-service-readiness.md) | Listener gates do not redefine workload readiness |
+| [0231](adr-0231-preserve-last-usable-public-certified-key-replacement.md) | Preserve-old key replacement |
+| [0232](adr-0232-gateway-connect-selected-backend-receipt.md) | Per-connect selected-BackendId receipt |
+| [0233](adr-0233-commit-gated-backend-identity-publication.md) | Commit-gated identity publication |
+| [0234](adr-0234-exact-peer-gateway-client-mtls.md) | Exact-peer gateway-client mTLS (public TLS and gateway-SVID mTLS are separate trust domains) |
+| [0235](adr-0235-public-http11-only.md) | HTTP/1.1 only |
+| [0236](adr-0236-canonical-public-route-match-key.md) | Canonical Route match key |
+| [0237](adr-0237-public-proxy-header-policy.md) | Proxy-header policy |
+| [0238](adr-0238-fixed-finite-public-runtime-limits.md) | Fixed finite runtime limits |
+| [0239](adr-0239-stream-public-proxy-bodies-with-backpressure.md) | Streamed bodies with backpressure |
+| [0240](adr-0240-single-upstream-attempt-per-public-request.md) | One upstream attempt per request |
+| [0241](adr-0241-dataplane-applied-backend-identity-association.md) | Applied BackendId identity association |
+| [0242](adr-0242-backend-unavailability-is-a-typed-outcome-at-the-gateway-consuming-port.md) | Backend unavailability is a typed outcome at the consuming port |
+| [0243](adr-0243-gateway-upstream-sockets-are-prepared-by-the-dataplane-adapter.md) | Dataplane adapter prepares upstream sockets |
+
+Recurring acceptance is the Tier-3 `AT-PIG-E2E-1` on native metal through real
+`overdrive serve` and `overdrive deploy`; the point-in-time operator journey is
+expectation E15. Typed outcomes are registered in
+`docs/product/outcomes/registry.yaml`.
+
+---
+
 ## Historical VM-only recreation identity record (GH #284, ADR-0104)
 
 ADR-0104 was accepted on 2026-09-12 and implemented by PR #292, but the user
@@ -11269,6 +11372,7 @@ for current proposed contracts.
 
 | Date | Change |
 |---|---|
+| 2026-11-01 | **public-ingress-gateway: reconstructed on main 549d78fa6 (GH #54; ADR-0220–0243, Proposed).** Branch ADR-0114…0143 are renumbered into ADR-0220…0241, with merged and retired records folded into their surviving decisions (the branch demand-gated TEACH and frontend-demand decisions are retired by D1/D2, never implemented); ADR-0242 and ADR-0243 are new. The gateway reaches VM backends through ordinary Service-map programming and the existing leg-C/vsock path. Pending independent review and user confirmation of the new public surface. — Morgan. |
 | 2026-10-20 | **netns-density-295: MODULE-REFCOUNT (user ruling).** The flow forwarder `ovd_fwd` is no longer permanent: it holds a module reference for every open control context and every hooked socket, and unloads only at zero (ADR-0198 restated in present tense; ADR-0204 gains rule 5 — callbacks are removed under the socket lock, `sk_write_space` is never overridden (the write-space trigger is a socket wait-queue entry, since `sock_wfree` calls `sk_write_space` on vsock and UDP sockets from preemptible process context with no lock), and a ULP present at removal on a TCP half keeps that socket's reference). ADR-0068 § 7 keeps the image kernel without module unloading, for a restated reason. ADR-0203's module identity is the whole-tree digest of `kmod/ovd_fwd/` as `MODULE_VERSION` (it tells apart builds from different Conductor workspaces sharing one Lima VM; SIMPLIFY-1 follow-up (a), user 2026-10-21). ADR-0205 and ADR-0203 replace the reboot remedy with `kmod-load`'s reload of an idle module. ADR-0200's two permanence references are restated. — Morgan. |
 | 2026-10-18 | **netns-density-295: dispositions recorded apart from approvals.** ADR-0164 and ADR-0191 take file names that no longer misdescribe their decisions; every link resolves. In the feature delta § *Approval record*, RECORD-COST moves out of the user-approval table into "Architect dispositions" (outcome-neutral, confirmed by adversarial review, not a user approval); ADR-SLUG records the file-name rule (a slug must not misdescribe its decision; a faithful shortened prefix of the title suffices). — Morgan. |
 | 2026-10-18 | **netns-density-295: review close-out.** ADR-0200, ADR-0202 and ADR-0214 take file names that match their titles; their links are updated. RECORD-COST is confirmed by adversarial review (feature delta § *Approval record*); no design item is open before DISTILL. — Morgan. |

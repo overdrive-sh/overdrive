@@ -1797,3 +1797,249 @@ no exit report.
 On a `serve` restart, boot reclamation ends every VM the new process does not
 supervise before any lease is assigned; VMs do not survive a restart
 ([GH #312](https://github.com/overdrive-sh/overdrive/issues/312)).
+
+<a id="public-ingress-gateway-route-domain-context"></a>
+
+## Public ingress gateway Route/domain context map (GH #54; Route ADR-0221; Domain ADR-0223, 0225, 0228, 0241)
+
+Proposed — reconstructed on main 549d78fa6, pending independent review
+(2026-11-01). This map records domain ownership and Published Language only.
+Exact contracts remain in the
+[public-ingress feature delta](../../feature/public-ingress-gateway/feature-delta.md).
+
+```mermaid
+flowchart LR
+    OP["Operator<br/>Route + manual Public Certified Key"]
+
+    subgraph Core["Core subdomains"]
+        PI["Public Ingress<br/>Public Route Set · GatewayApplicationOwner<br/>Public Listener"]
+        SL["Workload Orchestration / Service Lifecycle<br/>Service Listener · Backend Eligibility"]
+        SD["Service Dataplane<br/>ordinary Service-map programming · cgroup-BPF receipt<br/>XDP wire path unchanged"]
+    end
+
+    subgraph Supporting["Supporting subdomains"]
+        CK["Public Certified-Key Custody<br/>Public Certificate · Origin Private Key<br/>Certified Key Generation"]
+        WI["Workload Identity<br/>Gateway Identity Slot/Lifecycle<br/>gateway-client exact-peer mTLS"]
+    end
+
+    OP -->|"Published Language — Route deployment"| PI
+    OP -->|"Published Language — Install/Replace Certified Key"| CK
+    PI -->|"Service Listener Reference → exact frontend; prepared upstream socket + ServiceKey"| SD
+    SL -->|"Published Language — ServiceBackendRow; gateway is not a consumer"| SD
+    SD -->|"BPF Selection Receipt + exact applied Backend.alloc identity"| PI
+    PI -->|"connected socket + receipt-selected identity"| WI
+    CK -->|"opaque usable resolver snapshot"| PI
+    WI -->|"gateway-SVID exact-peer authenticated upstream stream"| PI
+```
+
+Public Ingress and Public Certified-Key Custody are new. Service Dataplane and
+Workload Identity are extended at their existing selection and trust boundaries.
+The gateway connector owns the connect call; the dataplane adapter prepares the
+socket and owns receipt and identity state; Workload Identity owns the SVID and
+peer authentication. Receipt ownership is
+[ADR-0228](adr-0228-dataplane-selection-receipt-ownership.md); Applied Backend
+Identity Association ownership is
+[ADR-0241](adr-0241-dataplane-applied-backend-identity-association.md).
+
+---
+
+<a id="public-ingress-gateway-canonical-c4"></a>
+
+## Public ingress gateway canonical System and Application C4 (GH #54; System ADR-0220, 0223, 0224, 0229, 0230, 0234; Application ADR-0222, 0226, 0227, 0231–0240, 0242, 0243)
+
+Proposed — reconstructed on main 549d78fa6, pending independent review
+(2026-11-01). Decision sources: placement
+[ADR-0220](adr-0220-embed-single-node-public-ingress-in-overdrive-serve.md),
+admission [ADR-0222](adr-0222-public-ingress-route-and-gateway-application-owner.md),
+status [ADR-0227](adr-0227-redacted-operator-gateway-status.md), custody
+[ADR-0223](adr-0223-producer-neutral-public-certified-key-custody.md) and
+[ADR-0231](adr-0231-preserve-last-usable-public-certified-key-replacement.md),
+selection and packet entry [ADR-0224](adr-0224-existing-cgroup-bpf-gateway-backend-selection.md),
+socket preparation [ADR-0243](adr-0243-gateway-upstream-sockets-are-prepared-by-the-dataplane-adapter.md),
+receipt [ADR-0232](adr-0232-gateway-connect-selected-backend-receipt.md),
+identity publication [ADR-0233](adr-0233-commit-gated-backend-identity-publication.md),
+availability [ADR-0242](adr-0242-backend-unavailability-is-a-typed-outcome-at-the-gateway-consuming-port.md),
+Gateway SVID [ADR-0225](adr-0225-dedicated-gateway-svid-identity-lifecycle.md) and
+exact-peer mTLS [ADR-0234](adr-0234-exact-peer-gateway-client-mtls.md), public
+protocol [ADR-0226](adr-0226-public-listener-tls13-only.md),
+[0235](adr-0235-public-http11-only.md)–[0240](adr-0240-single-upstream-attempt-per-public-request.md).
+Shutdown order is in the feature delta, D5 section (c).
+
+The upstream path is: gateway socket (prepared by the dataplane adapter in the
+`serve` task) → registered `cgroup/connect4` selection → marked, loopback-bound
+dial through table 100 → TPROXY to leg-C → rustls server handshake and kTLS →
+`GuestStreamDial` over vsock → guest. There is no veth, TAP or per-workload
+network namespace. XDP wire ingress is unchanged and backend enumeration and
+selection remain outside the gateway. The boot sentinel proves the
+registered-connect, hook and receipt edge by consuming a canonical `NoBackend`
+before any gateway identity use. The actual Service Frontend probe treats
+`NoBackend` as successful 503 capability; only `Selected` continues, after
+Gateway Identity Current, through exact-peer mTLS.
+
+### C4 Level 1 — System Context
+
+```mermaid
+C4Context
+  title Public ingress gateway — system context
+
+  Person(user, "External application user", "Trusts public Web PKI; holds no SPIFFE identity")
+  Person(operator, "Overdrive operator", "Starts the node and deploys Service + Route intent")
+
+  System(overdrive, "Overdrive node", "One overdrive process: operator control plane, public gateway and existing allocation identity/Service dataplane owners")
+  System_Ext(dns, "Public DNS/network", "Delivers the exact hostname to this node on TCP/443")
+  System_Ext(files, "Operator-managed certified-key files", "Public chain + matching PKCS#8 origin key")
+  System_Ext(workload, "Service workload", "Identity-unaware application in a microVM behind the existing Service dataplane and leg-C mTLS termination")
+
+  Rel(operator, overdrive, "Runs serve and deploys Service/Route through", "operator mTLS API")
+  Rel(operator, files, "Atomically supplies/rotates")
+  Rel(overdrive, files, "Reads, validates, protects and consumes")
+  Rel(user, dns, "Resolves hostname through", "DNS")
+  Rel(user, overdrive, "Sends public request to", "TLS 1.3 + HTTP/1.1 TCP/443")
+  Rel(overdrive, workload, "Routes through cgroup-BPF selection, leg-C and vsock with gateway-SVID exact-peer mTLS to")
+```
+
+### C4 Level 2 — Container
+
+```mermaid
+C4Container
+  title Public ingress gateway — logical containers in one overdrive process
+
+  Person(user, "External application user")
+  Person(operator, "Overdrive operator")
+  System_Ext(files, "Manual certified-key files")
+  System_Ext(workload, "Service workload (guest)")
+
+  Container_Boundary(process, "overdrive serve — one process") {
+    Container(cliapi, "Operator control plane", "overdrive-cli + overdrive-control-plane / axum", "Route deploy, gateway config/status, sole process lifecycle owner")
+    Container(gateway, "Public gateway library", "overdrive-gateway", "Route/key owner, current/draining application, dynamic public TLS/HTTP and connector")
+    Container(hostcrypto, "Host adapters", "overdrive-host", "Distinct PublicCertifiedKeyAeadCodec over the node KEK")
+    Container(service, "Service convergence", "ServiceLifecycle + ServiceMapHydrator", "Publishes eligibility and programs Service maps on the ordinary path")
+    Container(dataplane, "Service dataplane", "EbpfDataplane + cgroup-BPF", "Prepares gateway upstream sockets; owns selection receipt and immutable selected identity; XDP unchanged")
+    Container(mtls, "Gateway-client mTLS and leg-C", "overdrive-dataplane mtls", "Exact-peer client over the prepared socket; node-shared leg-C terminates mTLS, arms kTLS and relays")
+    Container(flowowner, "Guest-flow owner", "overdrive-control-plane guest_network", "Opens the vsock flow to the guest (GuestStreamDial)")
+  }
+
+  ContainerDb(intent, "IntentStore", "redb + rkyv", "Public Route Set, protected certified key, workload/VIP inputs")
+  ContainerDb(obs, "ObservationStore", "redb + rkyv", "Certified-key/application status, existing hydration and issuance audit")
+
+  Rel(operator, cliapi, "Configures serve and deploys Service/Route through", "operator mTLS")
+  Rel(cliapi, intent, "Commits typed Route/workload intent into")
+  Rel(cliapi, gateway, "Composes, queries and drains")
+  Rel(files, gateway, "Supplies manual chain/key to")
+  Rel(gateway, intent, "Persists protected key and reads Route/target inputs from")
+  Rel(gateway, hostcrypto, "Seals/opens the protected origin key through")
+  Rel(gateway, obs, "Publishes custody/application status to")
+  Rel(user, gateway, "Sends HTTPS request to", "TLS 1.3 HTTP/1.1")
+  Rel(service, obs, "Publishes/reads Service backend and hydration rows through")
+  Rel(service, dataplane, "Applies current eligible backend projection to")
+  Rel(gateway, dataplane, "Obtains a prepared registered socket and the receipt-selected identity from")
+  Rel(gateway, mtls, "Requests exact-peer mTLS over the connected socket from")
+  Rel(mtls, flowowner, "After leg-C termination, relays plaintext through")
+  Rel(flowowner, workload, "Delivers the stream over vsock to")
+```
+
+### C4 Level 3 — `overdrive-gateway` and adjacent owners
+
+```mermaid
+C4Component
+  title Public ingress gateway — active application and BPF-owned selection
+
+  Person(user, "External application user")
+  Person(operator, "Overdrive operator")
+  System_Ext(files, "Manual certified-key files")
+  System_Ext(workload, "Service workload (guest)")
+
+  Container_Boundary(cp, "overdrive-control-plane") {
+    Component(routeapi, "Route API + deploy dispatch", "axum + typed wire", "POST/DELETE Route and GET gateway status")
+    Component(serve, "serve composition + ServerHandle", "Tokio owner", "Constructs the gateway from BootAdapters.gateway; runs the gateway stage first in shutdown")
+    Component(appstate, "AppState.gateway: GatewayAppStateComposition", "Clone-safe Arc/handle bundle", "Identity reads/actions and optional GatewayControl; no backend input")
+    Component(dispatch, "Dataplane action dispatch", "action_shim", "Executes DataplaneUpdateService (unchanged) and Gateway SVID actions")
+    Component(svidexec, "Gateway SVID actions", "action shim", "Issue/audit/epoch-checked hold and drain-ordered epoch drop")
+  }
+
+  Container_Boundary(host, "overdrive-host") {
+    Component(keycodec, "PublicCertifiedKeyAeadCodec", "host crypto adapter", "Distinct HKDF/AES-GCM public-origin-key domain over the existing Kek")
+  }
+
+  Container_Boundary(gw, "overdrive-gateway") {
+    Component(builder, "UnboundGatewayBuilder → GatewayBuilder", "typestate composition", "Validates config, opens Route and custody, then starts the gateway tasks")
+    Component(handle, "GatewayHandle task tree + shutdown", "cancellation + JoinHandle/JoinSet", "Owns every gateway task; drains, sweeps intents and retires identity")
+    Component(control, "GatewayControl", "cloneable command/read capability", "Route handle and ID-scoped application/certified-key status reads; owns no task")
+    Component(routeset, "PublicRouteSetOwner", "bounded single-owner task", "Serializes singleton apply/withdraw and persists before reply")
+    Component(source, "ManualCertifiedKeySource", "read-only host adapter", "Reads bounded protected files and produces a validated candidate")
+    Component(custody, "PublicCertifiedKeyCustody", "bounded single-owner task", "Validates/builds usable candidate, seals/persists, publishes opaque Current, then writes status")
+    Component(frontend, "IntentServiceFrontendResolver", "ServiceFrontendResolve adapter", "Joins exact WorkloadIntent listener with allocator-issued VIP")
+    Component(app, "GatewayApplicationOwner", "ArcSwapOption + generation leases", "Promotes Current; counts connections/requests; owns dynamic listener/status")
+    Component(connector, "GatewayUpstreamConnector", "prepared socket + cleanup guard", "Connects the prepared socket, consumes the receipt, never selects a backend")
+    Component(runtime, "Public Gateway Runtime", "tokio-rustls + hyper HTTP/1.1", "Snapshots Current before TLS and streams bounded HTTP")
+  }
+
+  Container_Boundary(recon, "overdrive-reconcilers") {
+    Component(hydrator, "ServiceMapHydrator", "existing Reconciler", "Programs SERVICE_MAP/BACKEND_MAP/REVERSE_NAT_MAP for VM backends; unchanged")
+    Component(svid, "GatewaySvidLifecycle", "pure sibling Reconciler", "Carries checked desired epoch through Issue/Drop Gateway SVID")
+  }
+
+  Container_Boundary(dp, "dataplane / mTLS owners") {
+    Component(prep, "Upstream socket preparation", "EbpfDataplane", "Creates the socket in the serve task, marks it, binds 127.0.0.1, reads SO_COOKIE and registers (cookie, ServiceKey)")
+    Component(registry, "Gateway Connect Registry + cgroup_connect4_service", "EbpfDataplane + BPF", "Registered arm selects via Maglev and records Selected BackendId or NoBackend")
+    Component(assoc, "Service-map commit guard + Applied Backend Identity", "EbpfDataplane", "Outer-map commit publishes selection before the immutable BackendId-to-applied-Backend.alloc becomes readable")
+    Component(slot, "Gateway Identity Slot + ClientIdentityAccess", "dedicated holder/capability", "Owns desired epoch + audited SVID; only crate-private clock-checked client use may borrow material")
+    Component(gmtls, "HostGatewayClientMtls", "rustls client", "Presents leaf+intermediate, roots at the bundle anchor and pins the exact selected SPIFFE peer")
+    Component(legc, "leg-C enforcement", "overdrive-dataplane mtls inbound", "TPROXY-accepted; rustls server handshake, kTLS, relay through GuestStreamDial")
+    Component(xdp, "XDP wire programs", "existing owner", "Unchanged")
+  }
+
+  ContainerDb(intent, "IntentStore", "redb/rkyv", "Route set, protected key, workload/VIP inputs")
+  ContainerDb(obs, "ObservationStore", "redb/rkyv", "Independent custody/application/hydration/audit rows")
+
+  Rel(operator, routeapi, "Deploys/withdraws Route and reads status through")
+  Rel(serve, builder, "Composes and starts")
+  Rel(builder, handle, "Transfers every started gateway task into")
+  Rel(serve, handle, "Runs the first shutdown stage through")
+  Rel(builder, appstate, "Installs one gateway composition in")
+  Rel(builder, control, "Returns the non-owning control capability with")
+  Rel(routeapi, control, "Submits Route commands and reads redacted gateway status through")
+  Rel(control, routeset, "Obtains the typed Route command handle from")
+  Rel(control, obs, "Point-reads ID-scoped application/certified-key status from")
+  Rel(routeapi, obs, "Reads relevant Service hydration rows from")
+  Rel(routeset, intent, "Persists complete Public Route Set into")
+  Rel(handle, routeset, "Cancels and joins after connection drain")
+  Rel(files, source, "Supplies chain/key to")
+  Rel(source, custody, "Submits a bounded candidate through the producer-neutral install command")
+  Rel(handle, source, "Cancels and joins after connection drain")
+  Rel(handle, custody, "Cancels and joins after source")
+  Rel(custody, keycodec, "Seals/opens protected origin key through")
+  Rel(custody, intent, "Persists the already validated protected generation into")
+  Rel(custody, app, "After persistence, publishes the prebuilt opaque usable generation to")
+  Rel(intent, app, "Wakes authoritative Route/target resolution in")
+  Rel(app, frontend, "Resolves exact stable Service Listener Reference through")
+  Rel(handle, app, "Cancels and joins after every generation retires")
+  Rel(app, runtime, "Publishes Current connection-admission object to")
+  Rel(handle, runtime, "Stops listener then drains/force-joins every connection in")
+  Rel(user, runtime, "Sends public requests over TLS 1.3 HTTP/1.1 TCP/443 to")
+  Rel(custody, obs, "After opaque publication, writes/repairs redacted custody status to")
+  Rel(app, obs, "Writes active lifecycle status to")
+  Rel(hydrator, dispatch, "Emits DataplaneUpdateService to")
+  Rel(dispatch, assoc, "Serializes BACKEND/inner/reverse staging, outer swap and Applied publication through")
+  Rel(runtime, connector, "Requests upstream for retained frontend")
+  Rel(connector, prep, "Obtains a prepared registered socket from")
+  Rel(prep, registry, "Registers cookie/ServiceKey in")
+  Rel(connector, registry, "Connects through and consumes the receipt from")
+  Rel(registry, assoc, "After receipt, resolves selected BackendId through the same read guard in")
+  Rel(connector, gmtls, "Passes connected fd + exact selected SpiffeId to")
+  Rel(svid, svidexec, "Emits Issue/Drop Gateway SVID")
+  Rel(svidexec, slot, "Holds/replaces/drops audited material under the exact desired epoch in")
+  Rel(gmtls, slot, "Uses the closed clock-checked identity capability; receives no raw getter from")
+  Rel(gmtls, legc, "Handshakes with the allocation SVID presented by")
+  Rel(legc, workload, "Relays plaintext over vsock to")
+  Rel(gmtls, runtime, "Returns the opaque sealed authenticated upstream stream to")
+```
+
+Architecture enforcement keeps
+`control-plane -> {gateway,dataplane,reconcilers} -> core`,
+`dataplane -> gateway` only for connect and mTLS port contracts, and
+`gateway -> host -> core` acyclic. `dst-lint` rejects gateway
+`ServiceBackendRow`/raw map imports and allocation IdentityRead/
+InterceptedConnection in gateway-client modules, and confines the upstream
+socket preparation operation to the gateway connector. BPF POD tests pin receipt
+layout; XDP wire programs remain unchanged.

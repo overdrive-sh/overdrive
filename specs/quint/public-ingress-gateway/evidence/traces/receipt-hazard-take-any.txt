@@ -1,0 +1,46 @@
+# receipt-hazard-take-any: counterexample, 6 state(s) (from the TLC trace)
+
+State 1
+  resv = << >>
+  ckey = << >>
+  upd = 0
+  infl = [on |-> FALSE, key |-> 0, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
+  idres = << >>
+  outer = << >>
+  memo = << >>
+  guard = FALSE
+  ident = << >>
+  g = [committed |-> {}, bound |-> << >>, rbBad |-> FALSE, badSel |-> FALSE]
+  intents = << >>
+  taken = << >>
+  debt = 0
+  receipts = << >>
+  conf_step = [init |-> [tag |-> "UNIT"]]
+  next_bid = 1
+  conn = << >>
+  next_cookie = 1
+
+State 2 [open]
+  ckey = <<1>>
+  intents = <<1>>
+  conn = <<"opened">>
+  next_cookie = 2
+
+State 3 [open]
+  ckey = <<1, 1>>
+  intents = <<1, 1>>
+  conn = <<"opened", "opened">>
+  next_cookie = 3
+
+State 4 [kernel_connect]
+  receipts = <<[key |-> 1, sel |-> 0]>>
+  conn = <<"connected", "opened">>
+
+State 5 [kernel_connect]
+  receipts = <<[key |-> 1, sel |-> 0], [key |-> 1, sel |-> 0]>>
+  conn = <<"connected", "connected">>
+
+State 6 [take]
+  taken = <<[key |-> 1, sel |-> 0, rc |-> 2]>>
+  receipts = <<[key |-> 1, sel |-> 0]>>
+  conn = <<"taken", "connected">>

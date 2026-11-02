@@ -1,0 +1,59 @@
+State 1: <Initial predicate>
+/\ identity_bugNoEpochCheck_gateway_identity_drops = {}
+/\ identity_bugNoEpochCheck_gateway_identity_desired_enabled = TRUE
+/\ identity_bugNoEpochCheck_gateway_identity_issues = {}
+/\ identity_bugNoEpochCheck_gateway_identity_g = [staleHold |-> FALSE]
+/\ identity_bugNoEpochCheck_gateway_identity_audited = {}
+/\ identity_bugNoEpochCheck_gateway_identity_next_serial = 1
+/\ identity_bugNoEpochCheck_gateway_identity_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ identity_bugNoEpochCheck_gateway_identity_held = {}
+/\ identity_bugNoEpochCheck_gateway_identity_audit_armed = FALSE
+/\ identity_bugNoEpochCheck_gateway_identity_now = 0
+/\ identity_bugNoEpochCheck_gateway_identity_dis_res = ""
+/\ identity_bugNoEpochCheck_gateway_identity_desired_epoch = 1
+/\ identity_bugNoEpochCheck_gateway_identity_dis_deadline = 0
+
+State 2: <identity_bugNoEpochCheck_gateway_identity_submit_evaluation line 164, col 3 to line 197, col 63 of module identity_bugNoEpochCheck>
+/\ identity_bugNoEpochCheck_gateway_identity_drops = {}
+/\ identity_bugNoEpochCheck_gateway_identity_desired_enabled = TRUE
+/\ identity_bugNoEpochCheck_gateway_identity_issues = {1}
+/\ identity_bugNoEpochCheck_gateway_identity_g = [staleHold |-> FALSE]
+/\ identity_bugNoEpochCheck_gateway_identity_audited = {}
+/\ identity_bugNoEpochCheck_gateway_identity_next_serial = 1
+/\ identity_bugNoEpochCheck_gateway_identity_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ identity_bugNoEpochCheck_gateway_identity_held = {}
+/\ identity_bugNoEpochCheck_gateway_identity_audit_armed = FALSE
+/\ identity_bugNoEpochCheck_gateway_identity_now = 0
+/\ identity_bugNoEpochCheck_gateway_identity_dis_res = ""
+/\ identity_bugNoEpochCheck_gateway_identity_desired_epoch = 1
+/\ identity_bugNoEpochCheck_gateway_identity_dis_deadline = 0
+
+State 3: <identity_bugNoEpochCheck_gateway_identity_disable line 209, col 3 to line 236, col 63 of module identity_bugNoEpochCheck>
+/\ identity_bugNoEpochCheck_gateway_identity_drops = {}
+/\ identity_bugNoEpochCheck_gateway_identity_desired_enabled = FALSE
+/\ identity_bugNoEpochCheck_gateway_identity_issues = {1}
+/\ identity_bugNoEpochCheck_gateway_identity_g = [staleHold |-> FALSE]
+/\ identity_bugNoEpochCheck_gateway_identity_audited = {}
+/\ identity_bugNoEpochCheck_gateway_identity_next_serial = 1
+/\ identity_bugNoEpochCheck_gateway_identity_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ identity_bugNoEpochCheck_gateway_identity_held = {}
+/\ identity_bugNoEpochCheck_gateway_identity_audit_armed = FALSE
+/\ identity_bugNoEpochCheck_gateway_identity_now = 0
+/\ identity_bugNoEpochCheck_gateway_identity_dis_res = "pending"
+/\ identity_bugNoEpochCheck_gateway_identity_desired_epoch = 2
+/\ identity_bugNoEpochCheck_gateway_identity_dis_deadline = 2
+
+State 4: <identity_bugNoEpochCheck_gateway_identity_issue_complete line 494, col 3 to line 533, col 63 of module identity_bugNoEpochCheck>
+/\ identity_bugNoEpochCheck_gateway_identity_drops = {}
+/\ identity_bugNoEpochCheck_gateway_identity_desired_enabled = FALSE
+/\ identity_bugNoEpochCheck_gateway_identity_issues = {}
+/\ identity_bugNoEpochCheck_gateway_identity_g = [staleHold |-> TRUE]
+/\ identity_bugNoEpochCheck_gateway_identity_audited = {1}
+/\ identity_bugNoEpochCheck_gateway_identity_next_serial = 2
+/\ identity_bugNoEpochCheck_gateway_identity_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ identity_bugNoEpochCheck_gateway_identity_held = {[epoch |-> 1, serial |-> 1, na |-> 4]}
+/\ identity_bugNoEpochCheck_gateway_identity_audit_armed = FALSE
+/\ identity_bugNoEpochCheck_gateway_identity_now = 0
+/\ identity_bugNoEpochCheck_gateway_identity_dis_res = "pending"
+/\ identity_bugNoEpochCheck_gateway_identity_desired_epoch = 2
+/\ identity_bugNoEpochCheck_gateway_identity_dis_deadline = 2

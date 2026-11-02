@@ -1,0 +1,202 @@
+# Checks the `cargo xtask quint` runner executes for specs/quint/public-ingress-gateway/.
+# `expect = "violation"` on a hazard instance means the decision's rule is load-bearing; every other check must hold.
+# Modules: gateway_identity (ADR-0225), gateway_application (ADR-0222), selection_receipt (ADR-0228, -0232, -0233,
+# -0241, -0243). Validation budget: 21 checks (3 TLC safety, 5 TLC hazards, 13 named runs); only receipt-safety-tlc is slow (about 900 s, non-CI).
+
+# ==== gateway_identity.qnt
+
+[[check]]
+name = "identity-safety-tlc"
+spec = "gateway_identity.qnt"
+main = "identity_ok"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "identity-run-issue-hold"
+spec = "gateway_identity.qnt"
+main = "identity_conf"
+run = "issue_hold"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "identity-run-reissue-near-expiry"
+spec = "gateway_identity.qnt"
+main = "identity_conf"
+run = "reissue_near_expiry"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "identity-run-disable-races-inflight-issue"
+spec = "gateway_identity.qnt"
+main = "identity_conf"
+run = "disable_races_inflight_issue"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "identity-run-audit-failure-no-hold"
+spec = "gateway_identity.qnt"
+main = "identity_conf"
+run = "audit_failure_no_hold"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "identity-run-restart-reissue"
+spec = "gateway_identity.qnt"
+main = "identity_conf"
+run = "restart_reissue"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+# ADR-0225: the one hazard of the decision
+[[check]]
+name = "identity-hazard-no-epoch-check"
+spec = "hazard/gateway_identity_hazards.qnt"
+main = "identity_bugNoEpochCheck"
+invariant = "StaleEpochNeverHolds"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# ==== gateway_application.qnt
+
+[[check]]
+name = "application-safety-tlc"
+spec = "gateway_application.qnt"
+main = "app_ok"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "application-run-replace-valid"
+spec = "gateway_application.qnt"
+main = "app_conf"
+run = "replace_valid"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "application-run-route-withdraw-drain"
+spec = "gateway_application.qnt"
+main = "app_conf"
+run = "route_withdraw_drain"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "application-run-late-probe-after-supersession"
+spec = "gateway_application.qnt"
+main = "app_conf"
+run = "late_probe_after_supersession"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+# ADR-0222: the one hazard of the decision
+[[check]]
+name = "application-hazard-retire-while-leased"
+spec = "hazard/gateway_application_hazards.qnt"
+main = "app_bugRetireWhileLeased"
+invariant = "DrainRetainsUntilLeasesZero"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# ==== selection_receipt.qnt
+
+[[check]]
+name = "receipt-safety-tlc"
+spec = "selection_receipt.qnt"
+main = "receipt_ok"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = false
+timeout_secs = 2400
+
+[[check]]
+name = "receipt-run-commit-then-select"
+spec = "selection_receipt.qnt"
+main = "receipt_conf"
+run = "commit_then_select"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "receipt-run-abandoned-reservation-rolled-back"
+spec = "selection_receipt.qnt"
+main = "receipt_conf"
+run = "abandoned_reservation_rolled_back"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "receipt-run-conflicting-alloc-rejected"
+spec = "selection_receipt.qnt"
+main = "receipt_conf"
+run = "conflicting_alloc_rejected"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "receipt-run-receipt-waits-for-publish-guard"
+spec = "selection_receipt.qnt"
+main = "receipt_conf"
+run = "receipt_waits_for_publish_guard"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "receipt-run-restart-destroys-receipts"
+spec = "selection_receipt.qnt"
+main = "receipt_conf"
+run = "restart_destroys_receipts"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "receipt-hazard-publish-early"
+spec = "hazard/selection_receipt_hazards.qnt"
+main = "receipt_bugPublishEarly"
+invariant = "IdentityReadableOnlyAfterCommit"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "receipt-hazard-rebind"
+spec = "hazard/selection_receipt_hazards.qnt"
+main = "receipt_bugRebind"
+invariant = "IdentityImmutablePerBackendId"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "receipt-hazard-take-any"
+spec = "hazard/selection_receipt_hazards.qnt"
+main = "receipt_bugTakeAny"
+invariant = "ReceiptMatchesIntent"
+backend = "tlc"
+expect = "violation"
+ci = true
