@@ -141,7 +141,7 @@ ci = true
 [[check]]
 name = "receipt-run-abandoned-reservation-rolled-back"
 spec = "selection_receipt.qnt"
-main = "receipt_conf"
+main = "receipt_fine"
 run = "abandoned_reservation_rolled_back"
 backend = "evaluator"
 expect = "holds"
@@ -159,7 +159,7 @@ ci = true
 [[check]]
 name = "receipt-run-receipt-waits-for-publish-guard"
 spec = "selection_receipt.qnt"
-main = "receipt_conf"
+main = "receipt_fine"
 run = "receipt_waits_for_publish_guard"
 backend = "evaluator"
 expect = "holds"

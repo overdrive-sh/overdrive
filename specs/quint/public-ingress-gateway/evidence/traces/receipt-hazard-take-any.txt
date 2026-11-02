@@ -20,27 +20,27 @@ State 1
   conn = << >>
   next_cookie = 1
 
-State 2 [open]
+State 2 [step]
   ckey = <<1>>
   intents = <<1>>
   conn = <<"opened">>
   next_cookie = 2
 
-State 3 [open]
+State 3 [step]
   ckey = <<1, 1>>
   intents = <<1, 1>>
   conn = <<"opened", "opened">>
   next_cookie = 3
 
-State 4 [kernel_connect]
+State 4 [step]
   receipts = <<[key |-> 1, sel |-> 0]>>
   conn = <<"connected", "opened">>
 
-State 5 [kernel_connect]
+State 5 [step]
   receipts = <<[key |-> 1, sel |-> 0], [key |-> 1, sel |-> 0]>>
   conn = <<"connected", "connected">>
 
-State 6 [take]
+State 6 [step]
   taken = <<[key |-> 1, sel |-> 0, rc |-> 2]>>
   receipts = <<[key |-> 1, sel |-> 0]>>
   conn = <<"taken", "connected">>

@@ -1,4 +1,4 @@
-# receipt-hazard-rebind: counterexample, 5 state(s) (from the TLC trace)
+# receipt-hazard-rebind: counterexample, 6 state(s) (from the TLC trace)
 
 State 1
   taken = << >>
@@ -20,7 +20,13 @@ State 1
   guard = FALSE
   ident = << >>
 
-State 2 [update_begin]
+State 2 [step]
+  next_cookie = 2
+  conn = <<"opened">>
+  intents = <<1>>
+  ckey = <<1>>
+
+State 3 [step]
   g = [committed |-> {}, bound |-> <<{1}>>, rbBad |-> FALSE, badSel |-> FALSE]
   infl = [on |-> TRUE, key |-> 1, ents |-> <<1>>, assoc |-> <<1>>, fresh_addrs |-> {1}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
   upd = 1
@@ -29,19 +35,19 @@ State 2 [update_begin]
   resv = <<1>>
   guard = TRUE
 
-State 3 [commit]
+State 4 [step]
   g = [committed |-> {1}, bound |-> <<{1}>>, rbBad |-> FALSE, badSel |-> FALSE]
   infl = [on |-> TRUE, key |-> 1, ents |-> <<1>>, assoc |-> <<1>>, fresh_addrs |-> {1}, prior |-> << >>, identBefore |-> << >>, committed |-> TRUE]
   debt = 1
   outer = <<<<1>>>>
 
-State 4 [publish]
+State 5 [step]
   infl = [on |-> FALSE, key |-> 0, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
   resv = << >>
   guard = FALSE
   ident = <<1>>
 
-State 5 [update_begin]
+State 6 [step]
   g = [committed |-> {1}, bound |-> <<{1, 2}>>, rbBad |-> FALSE, badSel |-> FALSE]
   infl = [on |-> TRUE, key |-> 1, ents |-> <<1>>, assoc |-> <<2>>, fresh_addrs |-> {}, prior |-> <<1>>, identBefore |-> <<1>>, committed |-> FALSE]
   upd = 2

@@ -18,10 +18,30 @@ State 1: <Initial predicate>
 /\ receipt_bugRebind_selection_receipt_guard = FALSE
 /\ receipt_bugRebind_selection_receipt_ident = << >>
 
-State 2: <receipt_bugRebind_selection_receipt_update_begin line 1204, col 3 to line 1317, col 57 of module receipt_bugRebind>
+State 2: <receipt_bugRebind_selection_receipt_step line 1812, col 3 to line 1852, col 59 of module receipt_bugRebind>
+/\ receipt_bugRebind_selection_receipt_taken = << >>
+/\ receipt_bugRebind_selection_receipt_g = [committed |-> {}, bound |-> << >>, rbBad |-> FALSE, badSel |-> FALSE]
+/\ receipt_bugRebind_selection_receipt_next_cookie = 2
+/\ receipt_bugRebind_selection_receipt_infl = [on |-> FALSE, key |-> 0, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
+/\ receipt_bugRebind_selection_receipt_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ receipt_bugRebind_selection_receipt_receipts = << >>
+/\ receipt_bugRebind_selection_receipt_upd = 0
+/\ receipt_bugRebind_selection_receipt_memo = << >>
+/\ receipt_bugRebind_selection_receipt_next_bid = 1
+/\ receipt_bugRebind_selection_receipt_debt = 0
+/\ receipt_bugRebind_selection_receipt_conn = <<"opened">>
+/\ receipt_bugRebind_selection_receipt_resv = << >>
+/\ receipt_bugRebind_selection_receipt_intents = <<1>>
+/\ receipt_bugRebind_selection_receipt_idres = << >>
+/\ receipt_bugRebind_selection_receipt_outer = << >>
+/\ receipt_bugRebind_selection_receipt_ckey = <<1>>
+/\ receipt_bugRebind_selection_receipt_guard = FALSE
+/\ receipt_bugRebind_selection_receipt_ident = << >>
+
+State 3: <receipt_bugRebind_selection_receipt_step line 1812, col 3 to line 1852, col 59 of module receipt_bugRebind>
 /\ receipt_bugRebind_selection_receipt_taken = << >>
 /\ receipt_bugRebind_selection_receipt_g = [committed |-> {}, bound |-> <<{1}>>, rbBad |-> FALSE, badSel |-> FALSE]
-/\ receipt_bugRebind_selection_receipt_next_cookie = 1
+/\ receipt_bugRebind_selection_receipt_next_cookie = 2
 /\ receipt_bugRebind_selection_receipt_infl = [on |-> TRUE, key |-> 1, ents |-> <<1>>, assoc |-> <<1>>, fresh_addrs |-> {1}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
 /\ receipt_bugRebind_selection_receipt_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ receipt_bugRebind_selection_receipt_receipts = << >>
@@ -29,19 +49,19 @@ State 2: <receipt_bugRebind_selection_receipt_update_begin line 1204, col 3 to l
 /\ receipt_bugRebind_selection_receipt_memo = <<1>>
 /\ receipt_bugRebind_selection_receipt_next_bid = 2
 /\ receipt_bugRebind_selection_receipt_debt = 0
-/\ receipt_bugRebind_selection_receipt_conn = << >>
+/\ receipt_bugRebind_selection_receipt_conn = <<"opened">>
 /\ receipt_bugRebind_selection_receipt_resv = <<1>>
-/\ receipt_bugRebind_selection_receipt_intents = << >>
+/\ receipt_bugRebind_selection_receipt_intents = <<1>>
 /\ receipt_bugRebind_selection_receipt_idres = << >>
 /\ receipt_bugRebind_selection_receipt_outer = << >>
-/\ receipt_bugRebind_selection_receipt_ckey = << >>
+/\ receipt_bugRebind_selection_receipt_ckey = <<1>>
 /\ receipt_bugRebind_selection_receipt_guard = TRUE
 /\ receipt_bugRebind_selection_receipt_ident = << >>
 
-State 3: <receipt_bugRebind_selection_receipt_commit line 316, col 3 to line 384, col 57 of module receipt_bugRebind>
+State 4: <receipt_bugRebind_selection_receipt_step line 1812, col 3 to line 1852, col 59 of module receipt_bugRebind>
 /\ receipt_bugRebind_selection_receipt_taken = << >>
 /\ receipt_bugRebind_selection_receipt_g = [committed |-> {1}, bound |-> <<{1}>>, rbBad |-> FALSE, badSel |-> FALSE]
-/\ receipt_bugRebind_selection_receipt_next_cookie = 1
+/\ receipt_bugRebind_selection_receipt_next_cookie = 2
 /\ receipt_bugRebind_selection_receipt_infl = [on |-> TRUE, key |-> 1, ents |-> <<1>>, assoc |-> <<1>>, fresh_addrs |-> {1}, prior |-> << >>, identBefore |-> << >>, committed |-> TRUE]
 /\ receipt_bugRebind_selection_receipt_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ receipt_bugRebind_selection_receipt_receipts = << >>
@@ -49,19 +69,19 @@ State 3: <receipt_bugRebind_selection_receipt_commit line 316, col 3 to line 384
 /\ receipt_bugRebind_selection_receipt_memo = <<1>>
 /\ receipt_bugRebind_selection_receipt_next_bid = 2
 /\ receipt_bugRebind_selection_receipt_debt = 1
-/\ receipt_bugRebind_selection_receipt_conn = << >>
+/\ receipt_bugRebind_selection_receipt_conn = <<"opened">>
 /\ receipt_bugRebind_selection_receipt_resv = <<1>>
-/\ receipt_bugRebind_selection_receipt_intents = << >>
+/\ receipt_bugRebind_selection_receipt_intents = <<1>>
 /\ receipt_bugRebind_selection_receipt_idres = << >>
 /\ receipt_bugRebind_selection_receipt_outer = <<<<1>>>>
-/\ receipt_bugRebind_selection_receipt_ckey = << >>
+/\ receipt_bugRebind_selection_receipt_ckey = <<1>>
 /\ receipt_bugRebind_selection_receipt_guard = TRUE
 /\ receipt_bugRebind_selection_receipt_ident = << >>
 
-State 4: <receipt_bugRebind_selection_receipt_publish line 390, col 3 to line 463, col 57 of module receipt_bugRebind>
+State 5: <receipt_bugRebind_selection_receipt_step line 1812, col 3 to line 1852, col 59 of module receipt_bugRebind>
 /\ receipt_bugRebind_selection_receipt_taken = << >>
 /\ receipt_bugRebind_selection_receipt_g = [committed |-> {1}, bound |-> <<{1}>>, rbBad |-> FALSE, badSel |-> FALSE]
-/\ receipt_bugRebind_selection_receipt_next_cookie = 1
+/\ receipt_bugRebind_selection_receipt_next_cookie = 2
 /\ receipt_bugRebind_selection_receipt_infl = [on |-> FALSE, key |-> 0, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
 /\ receipt_bugRebind_selection_receipt_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ receipt_bugRebind_selection_receipt_receipts = << >>
@@ -69,19 +89,19 @@ State 4: <receipt_bugRebind_selection_receipt_publish line 390, col 3 to line 46
 /\ receipt_bugRebind_selection_receipt_memo = <<1>>
 /\ receipt_bugRebind_selection_receipt_next_bid = 2
 /\ receipt_bugRebind_selection_receipt_debt = 1
-/\ receipt_bugRebind_selection_receipt_conn = << >>
+/\ receipt_bugRebind_selection_receipt_conn = <<"opened">>
 /\ receipt_bugRebind_selection_receipt_resv = << >>
-/\ receipt_bugRebind_selection_receipt_intents = << >>
+/\ receipt_bugRebind_selection_receipt_intents = <<1>>
 /\ receipt_bugRebind_selection_receipt_idres = << >>
 /\ receipt_bugRebind_selection_receipt_outer = <<<<1>>>>
-/\ receipt_bugRebind_selection_receipt_ckey = << >>
+/\ receipt_bugRebind_selection_receipt_ckey = <<1>>
 /\ receipt_bugRebind_selection_receipt_guard = FALSE
 /\ receipt_bugRebind_selection_receipt_ident = <<1>>
 
-State 5: <receipt_bugRebind_selection_receipt_update_begin line 1204, col 3 to line 1317, col 57 of module receipt_bugRebind>
+State 6: <receipt_bugRebind_selection_receipt_step line 1812, col 3 to line 1852, col 59 of module receipt_bugRebind>
 /\ receipt_bugRebind_selection_receipt_taken = << >>
 /\ receipt_bugRebind_selection_receipt_g = [committed |-> {1}, bound |-> <<{1, 2}>>, rbBad |-> FALSE, badSel |-> FALSE]
-/\ receipt_bugRebind_selection_receipt_next_cookie = 1
+/\ receipt_bugRebind_selection_receipt_next_cookie = 2
 /\ receipt_bugRebind_selection_receipt_infl = [on |-> TRUE, key |-> 1, ents |-> <<1>>, assoc |-> <<2>>, fresh_addrs |-> {}, prior |-> <<1>>, identBefore |-> <<1>>, committed |-> FALSE]
 /\ receipt_bugRebind_selection_receipt_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ receipt_bugRebind_selection_receipt_receipts = << >>
@@ -89,11 +109,11 @@ State 5: <receipt_bugRebind_selection_receipt_update_begin line 1204, col 3 to l
 /\ receipt_bugRebind_selection_receipt_memo = <<1>>
 /\ receipt_bugRebind_selection_receipt_next_bid = 2
 /\ receipt_bugRebind_selection_receipt_debt = 0
-/\ receipt_bugRebind_selection_receipt_conn = << >>
+/\ receipt_bugRebind_selection_receipt_conn = <<"opened">>
 /\ receipt_bugRebind_selection_receipt_resv = <<2>>
-/\ receipt_bugRebind_selection_receipt_intents = << >>
+/\ receipt_bugRebind_selection_receipt_intents = <<1>>
 /\ receipt_bugRebind_selection_receipt_idres = << >>
 /\ receipt_bugRebind_selection_receipt_outer = <<<<1>>>>
-/\ receipt_bugRebind_selection_receipt_ckey = << >>
+/\ receipt_bugRebind_selection_receipt_ckey = <<1>>
 /\ receipt_bugRebind_selection_receipt_guard = TRUE
 /\ receipt_bugRebind_selection_receipt_ident = <<1>>

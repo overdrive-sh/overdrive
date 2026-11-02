@@ -18,7 +18,7 @@ State 1: <Initial predicate>
 /\ receipt_bugTakeAny_selection_receipt_conn = << >>
 /\ receipt_bugTakeAny_selection_receipt_next_cookie = 1
 
-State 2: <receipt_bugTakeAny_selection_receipt_open line 543, col 3 to line 622, col 58 of module receipt_bugTakeAny>
+State 2: <receipt_bugTakeAny_selection_receipt_step line 1827, col 3 to line 1867, col 60 of module receipt_bugTakeAny>
 /\ receipt_bugTakeAny_selection_receipt_resv = << >>
 /\ receipt_bugTakeAny_selection_receipt_ckey = <<1>>
 /\ receipt_bugTakeAny_selection_receipt_upd = 0
@@ -38,7 +38,7 @@ State 2: <receipt_bugTakeAny_selection_receipt_open line 543, col 3 to line 622,
 /\ receipt_bugTakeAny_selection_receipt_conn = <<"opened">>
 /\ receipt_bugTakeAny_selection_receipt_next_cookie = 2
 
-State 3: <receipt_bugTakeAny_selection_receipt_open line 543, col 3 to line 622, col 58 of module receipt_bugTakeAny>
+State 3: <receipt_bugTakeAny_selection_receipt_step line 1827, col 3 to line 1867, col 60 of module receipt_bugTakeAny>
 /\ receipt_bugTakeAny_selection_receipt_resv = << >>
 /\ receipt_bugTakeAny_selection_receipt_ckey = <<1, 1>>
 /\ receipt_bugTakeAny_selection_receipt_upd = 0
@@ -58,7 +58,7 @@ State 3: <receipt_bugTakeAny_selection_receipt_open line 543, col 3 to line 622,
 /\ receipt_bugTakeAny_selection_receipt_conn = <<"opened", "opened">>
 /\ receipt_bugTakeAny_selection_receipt_next_cookie = 3
 
-State 4: <receipt_bugTakeAny_selection_receipt_kernel_connect line 653, col 3 to line 736, col 58 of module receipt_bugTakeAny>
+State 4: <receipt_bugTakeAny_selection_receipt_step line 1827, col 3 to line 1867, col 60 of module receipt_bugTakeAny>
 /\ receipt_bugTakeAny_selection_receipt_resv = << >>
 /\ receipt_bugTakeAny_selection_receipt_ckey = <<1, 1>>
 /\ receipt_bugTakeAny_selection_receipt_upd = 0
@@ -78,7 +78,7 @@ State 4: <receipt_bugTakeAny_selection_receipt_kernel_connect line 653, col 3 to
 /\ receipt_bugTakeAny_selection_receipt_conn = <<"connected", "opened">>
 /\ receipt_bugTakeAny_selection_receipt_next_cookie = 3
 
-State 5: <receipt_bugTakeAny_selection_receipt_kernel_connect line 653, col 3 to line 736, col 58 of module receipt_bugTakeAny>
+State 5: <receipt_bugTakeAny_selection_receipt_step line 1827, col 3 to line 1867, col 60 of module receipt_bugTakeAny>
 /\ receipt_bugTakeAny_selection_receipt_resv = << >>
 /\ receipt_bugTakeAny_selection_receipt_ckey = <<1, 1>>
 /\ receipt_bugTakeAny_selection_receipt_upd = 0
@@ -98,7 +98,7 @@ State 5: <receipt_bugTakeAny_selection_receipt_kernel_connect line 653, col 3 to
 /\ receipt_bugTakeAny_selection_receipt_conn = <<"connected", "connected">>
 /\ receipt_bugTakeAny_selection_receipt_next_cookie = 3
 
-State 6: <receipt_bugTakeAny_selection_receipt_take line 1338, col 3 to line 1433, col 58 of module receipt_bugTakeAny>
+State 6: <receipt_bugTakeAny_selection_receipt_step line 1827, col 3 to line 1867, col 60 of module receipt_bugTakeAny>
 /\ receipt_bugTakeAny_selection_receipt_resv = << >>
 /\ receipt_bugTakeAny_selection_receipt_ckey = <<1, 1>>
 /\ receipt_bugTakeAny_selection_receipt_upd = 0

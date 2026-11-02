@@ -24,7 +24,7 @@ public-ingress-gateway` fails when it no longer matches the specs).
 |---|---|---|---|
 | `gateway_identity.qnt` | ADR-0225 | `HoldImpliesAudit`, `StaleEpochNeverHolds`, `AtMostOneHeld`, `DisableClearsOrTimesOut` | `issue_hold` (happy path), `reissue_near_expiry`, `disable_races_inflight_issue`, `audit_failure_no_hold`, `restart_reissue` |
 | `gateway_application.qnt` (drain and supersession only) | ADR-0222 | `DrainRetainsUntilLeasesZero`, `SupersededResultNeverRestores` | `replace_valid` (supersede, drain, retire), `route_withdraw_drain`, `late_probe_after_supersession` (a superseded staged probe result is discarded) |
-| `selection_receipt.qnt` | ADR-0228, ADR-0232, ADR-0233, ADR-0241, ADR-0243 (outcome table ADR-0242) | `IdentityReadableOnlyAfterCommit`, `IdentityImmutablePerBackendId`, `ReceiptMatchesIntent`, `NoResidueAfterCleanup`, `RollbackPreservesPriorGeneration`, `EmptyIsNoBackend` | `commit_then_select`, `abandoned_reservation_rolled_back`, `conflicting_alloc_rejected`, `receipt_waits_for_publish_guard`, `restart_destroys_receipts` |
+| `selection_receipt.qnt` | ADR-0228, ADR-0232, ADR-0233, ADR-0241, ADR-0243 (outcome table ADR-0242) | `IdentityReadableOnlyAfterCommit`, `IdentityImmutablePerBackendId`, `ReceiptMatchesIntent`, `NoResidueAfterCleanup`, `RollbackPreservesPriorGeneration`, `EmptyIsNoBackend` | `commit_then_select`, `conflicting_alloc_rejected`, `restart_destroys_receipts` (conformance-bound, `receipt_conf`); `abandoned_reservation_rolled_back`, `receipt_waits_for_publish_guard` (model-level, `receipt_fine`) |
 
 If the user adopts P-9 (honour BACKEND_MAP.healthy), add the healthy rule, its invariant and a named run then.
 
@@ -75,3 +75,13 @@ approval.
 | SR-2 | `restart` empties the Service maps, memo, receipts and applied associations with the dataplane instance. | Source: `EbpfDataplane::new_with_pin_dir` (`crates/overdrive-dataplane/src/lib.rs:430-454`), allocator memo (`allocators/backend_id.rs:9-18`); DISTILL `restart_destroys_receipts` replay plus Tier-3 503-until-rehydrated check |
 
 GA-2 (a lease is released exactly once) is dropped as an obligation: the lease is an RAII guard.
+
+## Selection receipt conformance (D-PASS7-2)
+
+The conformance owner is the real `EbpfDataplane` on native metal. `receipt_conf` therefore models only what that owner
+can be driven through: the fused `update_apply` (update_begin; commit(true); publish), `update_rejected`, `open`,
+`kernel_connect_det` (no `pick`; empty and singleton healthy backend sets only), `take` with r == c, `read_identity`,
+`cleanup`, `restart`, `idle`. The results of `take` and `read_identity` are checked from the port returns, not projected;
+the projected state is `identity[id]` and the intent/receipt counts. The fine-grained phases and rollback live in
+`receipt_ok` (exhaustive safety) and `receipt_fine` (MAXUPD = 3, hosts the two non-replayable runs, because the rollback
+run needs three accepted updates and `receipt_ok` is bounded at two); they are not conformance-replayable.

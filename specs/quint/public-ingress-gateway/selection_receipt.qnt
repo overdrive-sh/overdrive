@@ -32,6 +32,8 @@
  *   rebind        update_begin accepts an address whose BackendId denotes another alloc and re-associates it (ADR-0241)
  *   takeAny       take_receipt returns any live receipt, not the one bound to its cookie and ServiceKey (ADR-0232)
  *
+ * Conformance owner (D-PASS7-2): the real EbpfDataplane; receipt_conf uses update_apply (begin+commit+publish fused),
+ * kernel_connect_det and empty/singleton sets. take/read_identity results are checked from port returns, not projected.
  * Model-only (the driver does not project them): `outer` (the kernel map generation, assumption A-K1), `resv`,
  * `infl`, `guard`, `debt`, `g`, `ckey`, `taken`, `conf_step`. Conformance projection: identity[id] <-
  * selected_backend_identity(BackendId); intents, receipts <- live_intent_count(), live_receipt_count(); the receipt
@@ -45,6 +47,7 @@
 module selection_receipt_conf {
   type ConfStep =
     | init
+    | update_apply({ key: int, sidx: int })
     | update_begin({ key: int, sidx: int })
     | update_rejected({ key: int, sidx: int })
     | commit({ cleanup_ok: bool })
@@ -52,6 +55,7 @@ module selection_receipt_conf {
     | rollback
     | open({ key: int })
     | kernel_connect({ c: int, pick: int })
+    | kernel_connect_det({ c: int })
     | take({ c: int, r: int })
     | read_identity({ c: int })
     | cleanup({ c: int })
@@ -172,6 +176,35 @@ module selection_receipt {
     }
   }
 
+  // Conformance-observable form of Dataplane::update_service (D-PASS7-2): update_begin; commit(true); publish fused,
+  // because the real EbpfDataplane cannot be paused between the phases without a test seam. Approved rules only.
+  action update_apply(key: int, sidx: int): bool = {
+    val bs = CATALOG.get(sidx)
+    def allocOf(id) = if (ident.keys().contains(id)) ident.get(id) else resv.get(id)
+    val conflict = bs.filter(b => memo.keys().contains(b.addr)).exists(b => allocOf(memo.get(b.addr)) != b.alloc)
+    val freshB = bs.filter(b => not(memo.keys().contains(b.addr)))
+    def idOf(b) = if (memo.keys().contains(b.addr)) memo.get(b.addr)
+                          else next_bid + freshB.filter(x => x.addr < b.addr).size()
+    val ents = bs.fold(Map(), (m, b) => m.put(idOf(b), b.h))
+    val assoc = freshB.fold(Map(), (m, b) => m.put(idOf(b), b.alloc))
+    val newMemo = freshB.fold(memo, (m, b) => m.put(b.addr, idOf(b)))
+    val gb = assoc.keys().fold(g.bound, (m, id) =>
+      m.put(id, (if (m.keys().contains(id)) m.get(id) else Set()).union(Set(assoc.get(id)))))
+    all {
+      not(guard), not(infl.on), upd < MAXUPD, not(conflict),
+      outer' = if (ents.keys().size() == 0) rm(outer, key) else outer.put(key, ents),
+      ident' = assoc.keys().fold(ident, (m, id) => m.put(id, assoc.get(id))),
+      memo' = newMemo,
+      next_bid' = next_bid + freshB.size(),
+      upd' = upd + 1,
+      debt' = 0,
+      g' = { ...g, bound: gb, committed: g.committed.union(ents.keys()) },
+      resv' = resv, guard' = guard, infl' = infl, intents' = intents, receipts' = receipts, conn' = conn,
+      ckey' = ckey, taken' = taken, idres' = idres, next_cookie' = next_cookie,
+      conf_step' = if (REC) variant("update_apply", { key: key, sidx: sidx }) else conf_step,
+    }
+  }
+
   // the atomic outer SERVICE_MAP pointer swap: the selection commit point. An empty set deletes the key.
   action commit(cleanup_ok: bool): bool = all {
     infl.on, not(infl.committed),
@@ -240,6 +273,24 @@ module selection_receipt {
     }
   }
 
+  // conformance form of the hook (D-PASS7-2): the Maglev choice is not controllable, so the conformance catalogue
+  // holds only empty and singleton sets and the selection is the only entry (or NoBackend)
+  action kernel_connect_det(c: int): bool = {
+    val key = intents.get(c)
+    val e = entsOf(outer, key)
+    val sel = e.keys().fold(0, (a, k) => k)
+    all {
+      conn.keys().contains(c), conn.get(c) == "opened", intents.keys().contains(c),
+      receipts' = receipts.put(c, { key: key, sel: sel }),
+      conn' = conn.put(c, "connected"),
+      g' = { ...g, badSel: g.badSel or (sel != 0 and not(e.keys().contains(sel))) },
+      outer' = outer, ident' = ident, resv' = resv, memo' = memo, next_bid' = next_bid, guard' = guard, infl' = infl,
+      debt' = debt, upd' = upd, intents' = intents, ckey' = ckey, taken' = taken, idres' = idres,
+      next_cookie' = next_cookie,
+      conf_step' = if (REC) variant("kernel_connect_det", { c: c }) else conf_step,
+    }
+  }
+
   // take_receipt(&intent): the receipt bound to this cookie and ServiceKey, consumed. r = the receipt looked up
   action take(c: int, r: int): bool = all {
     conn.keys().contains(c), conn.get(c) == "connected",
@@ -294,15 +345,27 @@ module selection_receipt {
   }
 
   action step = {
-    nondet k = 1.to(2).oneOf()
-    nondet s = 0.to(5).oneOf()
-    nondet c = 1.to(MAXC).oneOf()
-    nondet r = 1.to(MAXC).oneOf()
-    nondet pick = 0.to(4).oneOf()
-    nondet cok = Set(true, false).oneOf()
-    any {
-      update_begin(k, s), update_rejected(k, s), commit(cok), publish, rollback, open(k), kernel_connect(c, pick), take(c, r),
-      read_identity(c), cleanup(c), restart, idle,
+    if (REC) {
+      // conformance step relation (receipt_conf): the actions the real EbpfDataplane can be driven through;
+      // catalogue: empty and singleton healthy sets only
+      nondet k = 1.to(2).oneOf()
+      nondet cs = Set(0, 1, 4, 5).oneOf()
+      nondet c = 1.to(MAXC).oneOf()
+      any {
+        update_apply(k, cs), update_rejected(k, cs), open(k), kernel_connect_det(c), take(c, c), read_identity(c),
+        cleanup(c), restart, idle,
+      }
+    } else {
+      nondet k = 1.to(2).oneOf()
+      nondet s = 0.to(5).oneOf()
+      nondet c = 1.to(MAXC).oneOf()
+      nondet r = 1.to(MAXC).oneOf()
+      nondet pick = 0.to(4).oneOf()
+      nondet cok = Set(true, false).oneOf()
+      any {
+        update_begin(k, s), update_rejected(k, s), commit(cok), publish, rollback, open(k), kernel_connect(c, pick), take(c, r),
+        read_identity(c), cleanup(c), restart, idle,
+      }
     }
   }
 
@@ -334,17 +397,38 @@ module selection_receipt {
   }
 
   // ------------------------------------------------------------------ named runs
+  // Conformance-bound runs (main receipt_conf: fused update_apply, deterministic hook, empty/singleton sets).
   // commit a generation, select through a registered socket, read the committed identity, clean up
   run commit_then_select = init
-    .then(update_begin(1, 1)).expect(guard and ident.keys().size() == 0 and resv == Map(1 -> 1) and Safety)
-    .then(commit(true)).expect(outer.get(1) == Map(1 -> 1) and guard and Safety)
-    .then(publish).expect(not(guard) and ident == Map(1 -> 1) and resv.keys().size() == 0 and Safety)
+    .then(update_apply(1, 1))
+    .expect(not(guard) and outer.get(1) == Map(1 -> 1) and ident == Map(1 -> 1) and resv.keys().size() == 0 and Safety)
     .then(open(1)).expect(intents == Map(1 -> 1))
-    .then(kernel_connect(1, 1)).expect(receipts == Map(1 -> { key: 1, sel: 1 }))
+    .then(kernel_connect_det(1)).expect(receipts == Map(1 -> { key: 1, sel: 1 }))
     .then(take(1, 1)).expect(receipts.keys().size() == 0 and taken.get(1).sel == 1 and Safety)
     .then(read_identity(1)).expect(idres.get(1) == 1)
     .then(cleanup(1)).expect(intents.keys().size() == 0 and receipts.keys().size() == 0 and Safety)
 
+  // an address re-leased to another alloc is rejected before the swap; the applied generation is byte-equal
+  run conflicting_alloc_rejected = init
+    .then(update_apply(1, 1))
+    .then(update_rejected(1, 4)).expect(not(guard) and ident == Map(1 -> 1) and outer.get(1) == Map(1 -> 1) and upd == 1)
+    .then(open(1)).then(kernel_connect_det(1)).then(take(1, 1)).then(read_identity(1))
+    .expect(idres.get(1) == 1 and g.bound.get(1) == Set(1) and Safety)
+
+  // restart: the intent and receipt maps are not pinned; the new instance holds nothing
+  run restart_destroys_receipts = init
+    .then(update_apply(1, 1))
+    .then(open(1)).then(kernel_connect_det(1))
+    .expect(intents.keys().size() == 1 and receipts.keys().size() == 1)
+    .then(restart)
+    .expect(intents.keys().size() == 0 and receipts.keys().size() == 0 and ident.keys().size() == 0
+            and outer.keys().size() == 0 and conn.get(1) == "lost" and next_bid == 1 and Safety)
+    .then(update_apply(1, 1))
+    .then(open(1)).then(kernel_connect_det(2)).then(take(2, 2)).then(read_identity(2))
+    .expect(idres.get(2) == 1 and Safety)
+
+  // Fine-grained runs (main receipt_fine, MAXUPD = 3): the phases of update_service are not separately drivable on
+  // the real owner, so these are model-level scenarios, not conformance-replayable.
   // a failed update: the reservation is removed, the prior generation is kept, the id is not recycled
   run abandoned_reservation_rolled_back = init
     .then(update_begin(1, 1)).then(commit(true)).then(publish)
@@ -356,13 +440,6 @@ module selection_receipt {
     .then(commit(false)).then(publish)
     .expect(ident == Map(1 -> 1, 3 -> 2) and debt == 1 and outer.get(1) == Map(3 -> 1) and Safety)
 
-  // an address re-leased to another alloc is rejected before the swap; the applied generation is byte-equal
-  run conflicting_alloc_rejected = init
-    .then(update_begin(1, 1)).then(commit(true)).then(publish)
-    .then(update_rejected(1, 4)).expect(not(guard) and ident == Map(1 -> 1) and outer.get(1) == Map(1 -> 1) and upd == 1)
-    .then(open(1)).then(kernel_connect(1, 1)).then(take(1, 1)).then(read_identity(1))
-    .expect(idres.get(1) == 1 and g.bound.get(1) == Set(1) and Safety)
-
   // a receipt can arrive right after the outer swap; its identity read waits for the publish and the guard release
   run receipt_waits_for_publish_guard = init
     .then(update_begin(1, 1)).then(commit(true))
@@ -372,21 +449,11 @@ module selection_receipt {
     .then(publish)
     .then(read_identity(1))
     .expect(idres.get(1) == 1 and not(guard) and Safety)
-
-  // restart: the intent and receipt maps are not pinned; the new instance holds nothing
-  run restart_destroys_receipts = init
-    .then(update_begin(1, 1)).then(commit(true)).then(publish)
-    .then(open(1)).then(kernel_connect(1, 1))
-    .expect(intents.keys().size() == 1 and receipts.keys().size() == 1)
-    .then(restart)
-    .expect(intents.keys().size() == 0 and receipts.keys().size() == 0 and ident.keys().size() == 0
-            and outer.keys().size() == 0 and conn.get(1) == "lost" and next_bid == 1 and Safety)
-    .then(update_begin(1, 1)).then(commit(true)).then(publish)
-    .then(open(1)).then(kernel_connect(2, 1)).then(take(2, 2)).then(read_identity(2))
-    .expect(idres.get(2) == 1 and Safety)
 }
 
 // Main instance: the approved rules. TLC checks Safety exhaustively.
 module receipt_ok { import selection_receipt(OFF = Set(), REC = false, MAXUPD = 2).* from "./selection_receipt" }
-// Conformance main: records `conf_step`; only the named runs are checked on it.
+// Conformance main (D-PASS7-2): real-owner-drivable actions only; records `conf_step`; only the named runs are checked.
 module receipt_conf { import selection_receipt(OFF = Set(), REC = true, MAXUPD = 3).* from "./selection_receipt" }
+// Fine-grained main for the two runs that need update_begin/commit/publish/rollback (three accepted updates).
+module receipt_fine { import selection_receipt(OFF = Set(), REC = false, MAXUPD = 3).* from "./selection_receipt" }

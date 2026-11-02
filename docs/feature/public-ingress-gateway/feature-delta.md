@@ -915,6 +915,7 @@ Permitted callers of `open_upstream`: `GatewayUpstreamConnector::{probe, connect
 | Hook, map or receipt inconsistency | missing or malformed | `Receipt` | 502 |
 | Exact-peer mTLS failure | `Selected` | `Mtls(..)` | 502 |
 
+- **Sim arm contract (D-PASS7-4).** `SimGatewayConnectDataplane` implements the same observable contract as the real hook, over the `SimDataplane` state it shares, and decides nothing the table above leaves open: for a prepared socket's `ServiceKey`, **no outer entry for the key, or an empty/absent slot in the chained lookup → receipt `NoBackend`**; otherwise → `Selected` carrying the actual `BackendId` the shared `SimDataplane` state holds for the key's slot (deterministic choice, the lowest `BackendId` of the key's current generation; the real Maglev choice is proven only at Tier 3). **Oracle strength:** because the real hook selects by Maglev over the cookie hash (item 3 above), Tier-1 / Sim-backed oracles assert only *membership* in the committed generation when it has N>1 backends; exact-`BackendId` assertions are limited to singleton generations. **Tier-3-only row:** the real outcome table also yields `NoBackend` for a missing `BACKEND_MAP` entry (outer and slot present, backend id absent); the Sim cannot produce that from the `update_service` input, so that row is observed only at Tier 3, and `selected_backend_identity` resolves it only for ids whose `update_service` has completed (Applied), mirroring the commit-guarded read. The Sim does not evaluate `Backend.healthy` (it is present in the `update_service` input but the Sim decides nothing on it): until P-9 is ruled the Sim returns `Selected` for any backend of the generation and the healthy window is neither modelled nor tested at Tier 1 (it is a Tier-3/Native observation, obligation 2). If P-9 rules "honour", the Sim adopts the real rule through the `Backend.healthy` value already in the `update_service` input, not through a scripting API. Cookies are deterministic nonzero values; `open_upstream` registers like the real adapter; `cleanup`/`take_receipt` follow the port contract (a receipt exists exactly between the Sim connect and `take_receipt`/`cleanup`). A scenario obtains `NoBackend` by never calling `update_service` for the key (or calling it with an empty set) and `Selected` by calling it with a non-empty set; no scripted receipt exists. **Fault surface the tests may use (existing ports only):** typed `GatewayConnectDataplaneError` results returned from the existing port operations (`probe`, `open_upstream`, `take_receipt`, `cleanup`, `selected_backend_identity`, `live_*`) via the Sim's existing typed-fault configuration at those operations, and the pinned `HoldConnectProbe`/`ReleaseConnectProbe` (see Application verification). Nothing else is scripted; a probe failure at boot is the typed `probe` error.
 - **Boot.** An actual-frontend `NoBackend` probe result is bind-valid (unchanged gate G-1); backend absence never blocks TCP/443.
 - **Late readiness.** The first request after the readiness `pass` reaches the hydrator-written `healthy = 1` and is `Selected`. The window before it returns 503 if P-9 honours `healthy`, otherwise a dial that fails (502); clients retry either way. The design adds no wake to shorten it. The decided core is independent of P-9: no outer entry or no usable backend → `NoBackend` → 503; a selected backend whose dial fails → 502; never a wrong-peer success.
 - **Replacement obligation for DISTILL (restates acceptance gap C4a).** The unavailable-outcome path applied twice has an empty second observable delta: two consecutive public requests while no healthy backend exists both return 503 with identical bodies, `live_intent_count() == live_receipt_count() == 0` after each, no change in `GatewayApplicationStatusRowV1`, and no change in the Gateway Applied Generation. Custody replay and identity-hold repeat keep their existing coverage. DISTILL also proves: `healthy` 0 → 1 flips the next request with no gateway action (if P-9 is ruled "honour": 503 → backend response; if "ignore": 502 → backend response), matching obligation 2; a stopped backend yields 502 (not a wrong-peer success); late `Selected` after a superseded application generation is not delivered.
@@ -1075,6 +1076,7 @@ Protocols judged not to need Quint: the Public Route Set single-slot claim ([ADR
 - **Invariants.** `HoldImpliesAudit`, `StaleEpochNeverHolds`, `AtMostOneHeld`, `DisableClearsOrTimesOut` (`NoAllocationIdentity` is type-level, below).
 - **Named runs.** `issue_hold`, `reissue_near_expiry`, `disable_races_inflight_issue`, `audit_failure_no_hold`, `restart_reissue`.
 - **Hazard (one per decision).** ADR-0225 (merged slot and lifecycle) carries one hazard: `noEpochCheck` (a stale Issue completion holds after disable) → `StaleEpochNeverHolds`. It is the interleaving defect that only exhaustive exploration finds. The former second hazards are dropped: `holdBeforeAudit` defends a straight-line ordering inside one task (audit persisted before hold), which the named run `audit_failure_no_hold` and the production-path test GI-1 already cover (the `HoldImpliesAudit` invariant stays as a cheap check); `twoGenerations` is redundant because "at most one held generation" is the shape of the slot's type (one optional facts value) and is implied by the epoch check (`AtMostOneHeld` stays as a cheap invariant).
+- **Conformance placement (D-PASS7-1).** The driver is in the owning crate `overdrive-control-plane`: `crates/overdrive-control-plane/src/gateway_identity_lifecycle/quint_gateway_identity.rs`, declared from `gateway_identity_lifecycle.rs` as `#[cfg(all(test, feature = "integration-tests"))] mod quint_gateway_identity;`. `dispatch_issue`/`dispatch_drop` stay `pub(crate)` (reachable in-crate from the `#[cfg(test)]` child module; no visibility change, no new public API; on main the analogous `issue_svid` dispatchers are `pub` in a `pub` module, `crates/overdrive-control-plane/src/action_shim/issue_svid.rs:80,145` and `action_shim/mod.rs:232`, so the narrower visibility here needs no widening). The driver's read of `ObservationStore::issued_certificate_rows` (QC-1 `audited`) reads the owner's own output surface through the port trait (the owner wrote those rows), not a `Sim*` arbiter, so no arbiter marker or Tier-3 pairing applies and the dataplane `GatewayIdentitySlot` is reached through the existing `GatewayIdentityActionTarget`/`GatewayIdentityLifecycleTarget` ports. It is not a `tests/conformance` driver: it does not run through the exported server handler. The driver struct holds the production `ControlPlaneGatewayIdentityLifecycle` over a real `GatewayIdentitySlot` and `EvaluationBroker`, the production `GatewaySvidLifecycle` reconciler (its `hydrate_*`/`reconcile` produce the `Action` passed to `dispatch_issue`/`dispatch_drop`; the driver never constructs an action), a Sim CA, `SimObservationStore` and `SimClock` at their driven ports. `audit_fail` is a typed write fault on `SimObservationStore`, an existing driven port.
 - **`NoAllocationIdentity`** is not modelled and not projected: no slot or lifecycle action takes or produces an `AllocationId`, so the property is a type-level fact of the interface (`GatewayIdentitySlot` is keyed by node, ADR-0225). DISTILL carries it as a compile-time obligation only if the contract does not already forbid it: the slot's public API has no `AllocationId` parameter, so no trybuild fixture is added (a fixture would test the absence of a parameter the type never had). Dropped as an obligation.
 
 ### Module `gateway_application` — decision ADR-0222 (drain and supersession only)
@@ -1091,10 +1093,15 @@ Protocols judged not to need Quint: the Public Route Set single-slot claim ([ADR
 
 - **Variables and pinned accessors.** `identity[id]` ← `GatewayConnectDataplane::selected_backend_identity(BackendId) -> Result<SpiffeId, ..>`. `intents`, `receipts` ← `live_intent_count()`, `live_receipt_count()`. The receipt value ← `take_receipt(&intent)`. `outer_committed` and `reserved` are model-only ghosts (the kernel map generation is assumption A-K1; the driver does not project them).
 - **Actions → driving ports.** `update_begin`, `commit`, `rollback` → `Dataplane::update_service` (success, injected pre-commit failure, injected post-commit cleanup failure); `open` → `GatewayConnectDataplane::open_upstream`; `kernel_connect` → `GatewayUpstreamConnector::connect` (the hook selection is the Sim adapter's modelled arm; the real hook is proven at Tier 3 against the same module's runs); `take`, `cleanup` → the port methods; `restart` → drop and re-create the dataplane instance.
-- **Invariants.** `IdentityReadableOnlyAfterCommit`, `IdentityImmutablePerBackendId`, `ReceiptMatchesIntent`, `NoResidueAfterCleanup`, `RollbackPreservesPriorGeneration`, and `EmptyIsNoBackend` (no outer entry or no usable backend in the chained lookup yields `NoBackend`). **Pending P-9:** the healthy-dependent part of the former `UnhealthyOrEmptyIsNoBackend` and the run `unhealthy_is_no_backend` hold only if the user chooses to honour `BACKEND_MAP.healthy`; the modeler isolates them (clearly marked in the spec and `checks.toml`) so they can be kept or deleted without touching the rest.
-- **Named runs.** `commit_then_select`, `abandoned_reservation_rolled_back`, `conflicting_alloc_rejected`, `receipt_waits_for_publish_guard`, `restart_destroys_receipts`; plus `unhealthy_is_no_backend` (pending P-9).
+- **Invariants.** `IdentityReadableOnlyAfterCommit`, `IdentityImmutablePerBackendId`, `ReceiptMatchesIntent`, `NoResidueAfterCleanup`, `RollbackPreservesPriorGeneration`, and `EmptyIsNoBackend` (no outer entry or no usable backend in the chained lookup yields `NoBackend`). **Pending P-9:** the healthy-dependent part of the former `UnhealthyOrEmptyIsNoBackend` is not in the current spec or `checks.toml`. A healthy-dependent invariant and an `unhealthy_is_no_backend` run are added by the modeler only if the user chooses "honour `BACKEND_MAP.healthy`".
+- **Named runs.** `commit_then_select`, `abandoned_reservation_rolled_back`, `conflicting_alloc_rejected`, `receipt_waits_for_publish_guard`, `restart_destroys_receipts` (13 runs in total across the three modules).
 - **Hazards.** ADR-0233: publish `Applied` before the outer swap. ADR-0241: rebind a live id to another allocation. ADR-0232: take a receipt that is not bound to its registered cookie and `ServiceKey`.
-- **Conformance note.** The owner under conformance is the `Dataplane` plus `GatewayConnectDataplane` contract through the Sim pair; the existing host/Sim equivalence test and the Tier-3 runs pair the real `EbpfDataplane` with it. No `Sim*` adapter is a projection arbiter for these variables.
+- **Conformance owner (D-PASS7-2).** The conformance owner is the real `EbpfDataplane` (it implements both `Dataplane` and `GatewayConnectDataplane`), on native metal, with the real `cgroup/connect4` selection arm loaded. No `Sim*` adapter is the owner or a projection source: a Sim-only owner would compare the model with the Sim's own modelled arm. Driver: `crates/overdrive-dataplane/src/quint_selection_receipt.rs`, `#[cfg(all(test, feature = "integration-tests"))]`, run through `cargo xtask metal run --` (root, bpffs, cgroup v2). It is `#[ignore = "pending DELIVER quint-conformance-selection_receipt"]` until the selection arm (P-10) and the owner are GREEN.
+  - **Conformance main (modeler change).** A new main `receipt_conf` records `conf_step` over a *coarsened* step relation, because only observable owner transitions can be replayed: (1) `update_apply(key, sidx)` fuses `update_begin; commit(true); publish` (the write guard is held across a single non-yielding synchronous section, so the intermediate states are not observable and cannot be paused without a test seam); (2) `update_rejected` stays; (3) `open`, `kernel_connect(c)`, `take(c)`, `read_identity(c)`, `cleanup(c)`, `restart`, `idle` stay; (4) `rollback` and `commit(false)` are removed from this main; (5) `take(c, r)` is restricted to `r == c` (a mismatched receipt cannot be requested through `take_receipt(&intent)`); (6) the conformance catalog contains only empty and singleton backend sets, so the Maglev `pick` is determined by the state and is not an input the driver cannot control. The fine-grained `receipt_ok` main and all hazards are unchanged.
+  - **Action to driving-port map.** `update_apply`, `update_rejected` → `Dataplane::update_service` (rejection is the real `DataplaneError::BackendIdentityConflict` from a conflicting backend set); `open` → `GatewayConnectDataplane::open_upstream`; `kernel_connect` → the driver issues the `connect(2)` on the socket returned by `PreparedUpstream::into_parts` toward the Service frontend (the same single syscall `GatewayUpstreamConnector::connect` issues; the connect result is not asserted for success, the hook has already written the receipt). The driver's `connect(2)` is deadline-bounded: a non-blocking connect with a bounded wait; an absent listener yields a refused/timeout outcome mapped to the model's failed dial, so a missing listener cannot stall the driver; `take` → `take_receipt`; `read_identity` → `selected_backend_identity`; `cleanup` → `cleanup`; `restart` → drop and re-create `EbpfDataplane` on the same pin directory (SR-2); `idle` → no call.
+  - **State projection (owner accessors only).** `identity[id]` ← `selected_backend_identity(BackendId)` (`Ok` → bound, `BackendIdentityMissing` → absent); `intents`, `receipts` ← the *counts* `live_intent_count()` / `live_receipt_count()` (the spec projection for these two is the map size); the receipt value (`taken`) and `idres` are not projected State: they are checked from the port returns (`take_receipt(&intent)` at the `take` step, `selected_backend_identity` at `read_identity`) against the model's expected result for that step, consistent with the spec README. Cookie-indexed bookkeeping (`c` → held `GatewayConnectIntent`) is driver input state and is never projected. `outer_committed` and `reserved` stay model-only ghosts.
+  - **Not conformance-replayable, and how they are covered.** `abandoned_reservation_rolled_back` and the `rollback`/`commit(false)` actions: the pre-commit and post-commit failures need a fault the owner cannot be handed through an existing driven port. They are covered by a Tier-3 test in `overdrive-dataplane/tests/integration/` that uses a real, production-reachable pre-commit failure produced through the existing `Dataplane::update_service` input (the only production-reachable pre-commit failure input is `BACKEND_MAP` capacity, `crates/overdrive-bpf/src/maps/backend_map.rs:46` `MAX_ENTRIES = 65_536`, so the update fails at `ServiceApplyStage::BackendMap`; filling it on native metal costs an unmeasured runtime, to be measured by DISTILL before the user decides. **This Tier-3 fill is an accepted-exposure candidate requiring the user's acknowledgement:** if not run, `RollbackPreservesPriorGeneration` has model + equivalence/unit coverage only. No seam is added) and asserts through the same accessors: prior generation preserved, no Applied identity for the abandoned ids, later fresh ids not recycled, zero residue. Post-commit cleanup debt does not affect any projected variable and is not conformance-checked (`service_cleanup_debt` is covered by the equivalence/unit lane). `receipt_waits_for_publish_guard`: the guard window cannot be held open without a test seam, so it is covered by a Tier-3 concurrency test (updates racing `selected_backend_identity` for a just-selected id; the read never returns a missing identity for a `Selected` id) plus the `publishEarly` hazard. The `takeAny` hazard has no driver path by design. Both remain model-checked runs/hazards: `abandoned_reservation_rolled_back` and `receipt_waits_for_publish_guard` run on a new `receipt_fine` main (REC=false, MAXUPD=3), not `receipt_ok` (which is bounded at 2 for the exhaustive check).
+  - **Bound runs.** `#[quint_test]` for `commit_then_select`, `conflicting_alloc_rejected`, `restart_destroys_receipts` (re-stated against `receipt_conf` in the modeler change above); `#[quint_run]` randomized traces on `receipt_conf`. The host/Sim `GatewayConnectDataplane` equivalence test remains the Sim pairing; it is not a conformance test.
 
 ### Model-check results (run on native metal; recorded evidence)
 
@@ -1117,7 +1124,6 @@ Reduced-scope critical scenarios and their named runs:
 | Conflicting allocation rejected | `conflicting_alloc_rejected` |
 | Receipt waits for the publish guard | `receipt_waits_for_publish_guard` |
 | Restart destroys receipts | `restart_destroys_receipts` |
-| Unhealthy is `NoBackend` (pending P-9) | `unhealthy_is_no_backend` |
 
 | Decision | Hazard (violates) | Invariant that fails |
 |---|---|---|
@@ -1127,7 +1133,7 @@ Reduced-scope critical scenarios and their named runs:
 | ADR-0241 | `rebind` | `IdentityImmutablePerBackendId` |
 | ADR-0232 | `takeAny` | `ReceiptMatchesIntent` |
 
-Validation budget (design.md cost budgets): 3 modules; 21 checks = 3 exhaustive TLC safety checks (identity, application, receipt) + 5 hazards + 13 named runs (down from 30). Only `receipt-safety-tlc` is slow (about 900 s, recorded 901 s; non-CI; timeout 2400 s; bounded at 2 accepted `update_service` calls); the other 20 checks are CI and each completes in seconds; the full recorded run is about 15 min wall at 16 jobs. The P-9 variant run and the dead identity hazard switches are removed from the spec; a P-9 variant check is added only if the user chooses "honour". Growth beyond this budget needs user approval. Open points and their resolution: SR-2 (answered from source in the assumptions table); GA-1 and SR-2 discharging items (DISTILL obligations in the table; GA-2 dropped, RAII); `NoAllocationIdentity` (type-level, dropped). The shutdown projection and shutdown actions are removed from the model.
+Validation budget (design.md cost budgets): 3 modules; 21 checks = 3 exhaustive TLC safety checks (identity, application, receipt) + 5 hazards + 13 named runs (down from 30). Only `receipt-safety-tlc` is slow (about 970 s; non-CI; timeout 2400 s; bounded at 2 accepted `update_service` calls on `receipt_ok`; the two runs above execute on the `receipt_fine` main, REC=false, MAXUPD=3); the other 20 checks are CI and each completes in seconds; the full recorded run is about 15 min wall at 16 jobs. The P-9 variant run and the dead identity hazard switches are removed from the spec; a P-9 variant check is added only if the user chooses "honour". Growth beyond this budget needs user approval. Open points and their resolution: SR-2 (answered from source in the assumptions table); GA-1 and SR-2 discharging items (DISTILL obligations in the table; GA-2 dropped, RAII); `NoAllocationIdentity` (type-level, dropped). The shutdown projection and shutdown actions are removed from the model.
 
 ### Assumptions and their discharging items
 
@@ -5221,7 +5227,7 @@ replacement state machine.
 | Pure/PBT | `PathMatch::matches_raw_path`, `runtime::routing::normalize_route_authority` and both `runtime::proxy_headers::rewrite_*_headers` functions own the Route-path/authority/header properties; Route/hash laws, receipt matching/cleanup, immutable BackendId identity, gateway SVID lifecycle and finite limit ordering remain in their owning source modules. Every live property carries `/// CONTRACT_SHAPE: pure-function.` |
 | DST | `GatewayApplicationGenerationLifecycleIsSafe` owns staged/current/draining, stale completion, withdrawal and restart safety; `GatewayApplicationShutdownConverges` owns joined shutdown convergence. DISTILL scaffolds their typed ignored direct paths but excludes both from `Invariant::ALL`; `DELIVER-PIG-GATEWAY-APPLICATION-INVARIANTS` activates them only after real owners are GREEN and direct bodies pass. Registered/unregistered isolation, the typed NoBackend/unavailable outcome (ADR-0242), connector cleanup and key/identity fail-closed complements remain registered with their owning component evidence. |
 | In-process integration | Real stores/Route/custody/application/status; Sim connect/identity/mTLS equivalence (the host/Sim `GatewayConnectDataplane` equivalence test); typed boot/shutdown and concurrent retained generations; production `ServerHandle` ordering. Rust tests do not spawn the product binary. |
-| `AT-PIG-E2E-1` recurring production-composition test (native metal) | An in-process Rust test that boots the production composition (`run_server` with the real `NodeAdapters::host` and `GatewayAdapters::host`, no `*_override`) on the native x86_64 KVM host via `cargo xtask metal run --` (features `integration-tests,kvm-tests`), deploys a VM `Service` and the Route through the exported server handler and its public API, and makes the external TLS1.3/HTTP1.1 request over a real socket. It does not spawn the `overdrive` binary (`.claude/rules/testing.md` § "Classify external execution"). Placement is `tests/conformance` because it crosses the gateway, control-plane, dataplane and worker owners and is observed through the exported server handler; the subtree `CLAUDE.md` defines composition. Per completed request it reads the `gateway.upstream.receipt.validated` occurrence from an in-process tracing capture layer: Selected proves the exact socket cookie, ServiceKey components, BackendId and resolved expected-peer SpiffeId before the exact-peer mTLS/streamed-response evidence; NoBackend proves the same cookie/ServiceKey with structurally absent selected-only fields before the 503. It is not an expectation. |
+| `AT-PIG-E2E-1` recurring production-composition test (native metal) | An in-process Rust test that boots the production composition (`run_server` with the real `NodeAdapters::host` and `GatewayAdapters::host`, no `*_override`) on the native x86_64 KVM host via `cargo xtask metal run --` (the `tests/conformance` crate declares only the `integration-tests` feature; the test is named `native_metal_kvm_public_ingress_gateway_*`, carries a reasoned `#[ignore]`, and is activated only by `tests/conformance/run-native-metal.sh`, which runs `--features integration-tests --run-ignored ignored-only -E 'test(/^native_metal_kvm_/)'`; no `kvm-tests` feature exists in that crate), deploys a VM `Service` and the Route through the exported server handler and its public API, and makes the external TLS1.3/HTTP1.1 request over a real socket. It does not spawn the `overdrive` binary (`.claude/rules/testing.md` § "Classify external execution"). Placement is `tests/conformance` because it crosses the gateway, control-plane, dataplane and worker owners and is observed through the exported server handler; the subtree `CLAUDE.md` defines composition. Per completed request it reads the `gateway.upstream.receipt.validated` occurrence from an in-process tracing capture layer: Selected proves the exact socket cookie, ServiceKey components, BackendId and resolved expected-peer SpiffeId before the exact-peer mTLS/streamed-response evidence; NoBackend proves the same cookie/ServiceKey with structurally absent selected-only fields before the 503. It is not an expectation. |
 | Tier 3 (native metal) | The production connector occurrence replaces timing-based receipt-map polling and strace as the transient receipt/identity oracle. Real-kernel complements: registered-socket selection through the attached `cgroup/connect4` (V-GW-1..5), unregistered socket nonmutation (`LOCAL_BACKEND_MAP` behaviour, XDP), the packet entry (`SO_MARK` + `127.0.0.1` source → table 100 → TPROXY → leg-C) with the captured leg-B/leg-C protected segment showing TLS 1.3 records (not a workload veth), kTLS (`ss -K`), wrong-valid-peer and final cleanup. Stable map/attachment cleanup checks may continue but cannot claim a consumed receipt's values. |
 | Point-in-time EDD `E15-PIG-OPERATOR-JOURNEY` | `verification/expectations/E15-public-ingress-operator-journey/runner.sh` requires a clean harness-captured HEAD, runs the exact `cargo xtask bpf-build` path, hashes that BPF object, builds and hashes that checkout's default-feature binary on the native metal host (uid 0), and proves the binary embeds that exact object before independently driving the checked-in example with the operator hostname/public chain/key and normal system trust. It records build provenance plus stakeholder-visible status/TLS/response evidence only and neither calls nor replaces `AT-PIG-E2E-1`. The outer invocation is `cargo xtask metal run -- verification/harness/run-expectation.sh E15`. |
 
@@ -5454,9 +5460,12 @@ native-metal real VM Service through leg-C and vsock. No obligation spawns the
     immutable and readable only after the outer swap commits. Tier 1 plus Tier 3.
 12. Quint conformance (`.claude/rules/testing.md` § "Quint conformance"): specification directory `specs/quint/public-ingress-gateway/`
     (modules `gateway_identity`, `gateway_application`, `selection_receipt`); one quint-connect driver per module in the owning
-    crate's `src/` behind `#[cfg(all(test, feature = "integration-tests"))]` (gateway_identity: `overdrive-dataplane` slot with
-    `overdrive-control-plane` dispatch is multi-owner and therefore a `tests/conformance` driver; gateway_application:
-    `overdrive-gateway`; selection_receipt: `overdrive-dataplane`); every driver has `#[quint_test]` for each named
+    crate's `src/` behind `#[cfg(all(test, feature = "integration-tests"))]` (gateway_identity: `overdrive-control-plane`, `src/gateway_identity_lifecycle/quint_gateway_identity.rs`, reaching the
+    `pub(crate)` dispatch functions in-crate; gateway_application: `overdrive-gateway`; selection_receipt:
+    `overdrive-dataplane`, `src/quint_selection_receipt.rs`, owner = the real `EbpfDataplane` on native metal, bound runs
+    `commit_then_select`, `conflicting_alloc_rejected`, `restart_destroys_receipts` over the coarsened `receipt_conf` main,
+    see Formal protocol model; the remaining `selection_receipt` runs and hazards are model-checked and covered at Tier 3 as stated
+    there); every driver has `#[quint_test]` for each named
     run in the Formal protocol model section and `#[quint_run]` randomized traces; every action handler calls the pinned
     driving port; `State` projects only the pinned accessors. Tier 1 conformance (no `quint` CLI/REPL).
     The `gateway_application` module covers only drain/supersession; Route+key coherence, bind gating and
@@ -5476,11 +5485,12 @@ oracle and tier, per `.claude/rules/testing.md` § "DISTILL — prove composed s
 
 Class-5 blockers for DISTILL scaffolding: none new. The only missing primitives
 are the D5 "New public surface" items, which are pinned here and await
-confirmation. A driver spanning several owners (`gateway_identity`) lives in
-`tests/conformance`; the others live in their owning crate's `src/`. Quint
-conformance runs under `integration-tests` via `cargo xtask lima run --` (the
-Lima template provisions the pinned Quint toolchain); real-kernel and VM
-evidence runs via `cargo xtask metal run --`.
+confirmation. Every quint-connect driver lives in its owning crate's `src/`
+(none spans owners through the exported server handler); only `AT-PIG-E2E-1`
+is in `tests/conformance`. Quint conformance runs under `integration-tests` via
+the repository's quint runner (`cargo xtask lima run --` where a Lima VM exists,
+otherwise `cargo xtask metal run --`); real-kernel and VM evidence runs via
+`cargo xtask metal run --`.
 
 ## Wave: DESIGN / [REF] Application outcomes
 
@@ -5499,333 +5509,212 @@ unresolved outcome collision is carried into DISTILL.
 
 ## Wave: DISTILL / [REF] Reconciliation and warnings
 
-DISTILL sections below predate the 2026-11-01 reconstruction and are reconciled by DISTILL.
+**DISTILL status: in progress — code reconciliation pending (phase 2).** This block specifies the acceptance suite for the reconstructed DESIGN (final ADR set 0220–0243, this document's DESIGN part). No test, scaffold, example or expectation file has been written yet; every "Scaffolds" and "RED classification" statement below is a plan, not an execution result. The full working plan with per-scenario main-API pins, batch file lists and cross-batch compile order is `.context/pig-reconstruct/04-distill-plan.md` (not a delivery artifact).
 
-Reconciliation found 0 contradictions among the available approved DESIGN
-sections. DESIGN approval is recorded in the header. The DISCUSS user stories,
-story map and wave decisions are absent, so these draft scenarios derive from
-the approved DESIGN contract and have no story-ID traceability. SPIKE findings and a
-promotion decision are absent; DISTILL neither invented nor ran a spike.
-DEVOPS wave decisions are absent, so the project ATDD infrastructure policy and
-the clean / stale-config / interrupted-operation defaults govern environment
-coverage.
+Reconciliation: DISCUSS, DEVOPS and separate DESIGN `wave-decisions.md` files do not exist (this feature uses one narrative `feature-delta.md`); 0 contradictions among the DESIGN sections. Warnings, not blockers: no story-ID traceability; the project ATDD policy (`docs/architecture/atdd-infrastructure-policy.md`) has no gateway rows yet (appended in phase 2); there is no Lima instance in the authoring environment, so Linux-side compilation and runs use `cargo xtask metal run --`.
 
-Language mode is Rust. Deliverable type is application. Density is lean with
-Tier-1 reference sections only. Repository rules override generic nWave
-examples: this DISTILL creates no feature files or Python step definitions;
-scenario specification and executable Rust test bodies remain distinct
-artifacts.
+**The DESIGN is not an approved handoff** (Full-stack handoff status above). DISTILL therefore treats every reconstructed contract as "proposed, user confirmation pending" and stays neutral on the three BLOCKING proposals: **P-2** (BackendId memo key or order), **P-9** (whether the registered hook honours `BACKEND_MAP.healthy`) and **P-10** (placement of the selection arm). No scenario's oracle depends on an unruled option; the affected behaviours are listed as blockers in the Completeness audit and are not authored.
 
-The approved DESIGN pins draft testability boundaries for the four serve
-arguments and `ServeArgs` fields, the `PathMatch`/authority/header pure
-functions, the exact Gateway Application invariant activation boundary, the
-operator-controlled E14 hostname/build provenance, and the structured
-`gateway.upstream.receipt.validated` occurrence all have exact names, owners
-and signatures. The one-decision ADR split through ADR-0241 changes no
-behavior or API shape; DISTILL re-read those records and retained this feature
-delta as the approved implementation-contract SSOT. DISTILL-to-DELIVER
-handoff remains blocked only by the documented C4a acceptance gap; DESIGN
-approval is recorded above and is not a remaining gate.
+Language mode Rust; deliverable type application; density lean, Tier-1 `[REF]` sections only. Repository rules override generic nWave examples: no `.feature` files, no Python steps; Gherkin-style text below is specification only (`.claude/rules/testing.md`). Acceptance bodies are complete and executable; future scenarios carry `#[ignore = "pending DELIVER <step>"]` naming a domain-named activation step; no placeholder panics.
+
+Retired premises (explicit, not carried): the branch DISTILL's gateway-frontend-demand scenarios and apply-twice gap (D2, ADR-0242), the demand-gated Service-map TEACH (D1), the shell Tier-3 runner under `tests/tier3/public-ingress-gateway/` that spawned the built binary (tests never spawn the `overdrive` binary), the Lima GitHub workflow lane, the `[exec]` workload example, and the branch E14 expectation id (E14 on main is `E14-vm-service-post-greenfield-cut`; this feature's expectation is E15).
 
 ## Wave: DISTILL / [REF] Scenario list and tags
 
-| ID | Scenario contract | Tags | Executable owner |
-|---|---|---|---|
-| S-PIG-01 | An external user receives the api workload streamed response through the public Route | @walking_skeleton @driving_port @real-io @contract-shape:bounded-change | tests/tier3/public-ingress-gateway/runner.sh |
-| S-PIG-02 | A sound listener with no selectable backend returns public 503 and no fallback | @error @security @real-io @contract-shape:bounded-change | tests/tier3/public-ingress-gateway/runner.sh |
-| S-PIG-03 | Exact raw paths match only byte-equal request paths | @property @in-memory @contract-shape:pure-function | overdrive-core public_ingress source-local properties |
-| S-PIG-04 | Segment prefixes match a segment but never an adjacent prefix | @property @edge @in-memory @contract-shape:pure-function | overdrive-core public_ingress source-local properties |
-| S-PIG-05 | Wildcard, IP, terminal-dot, empty-label and malformed paths are rejected distinctly | @error @property @in-memory @contract-shape:pure-function | overdrive-core public_ingress source-local properties |
-| S-PIG-06 | Public hostname label boundaries accept 62/63 octets and reject 64 | @boundary @in-memory @contract-shape:pure-function | overdrive-core public_ingress source-local properties |
-| S-PIG-07 | Every Route input channel rejects one malformed value before intent | @error @in-memory @contract-shape:pure-function | overdrive-core public_ingress source-local properties |
-| S-PIG-08 | Route generation is deterministic and changes with any Route field | @property @in-memory @contract-shape:pure-function | overdrive-core public_ingress source-local properties |
-| S-PIG-09 | Certified-key generation is sensitive to certificate-chain order | @property @security @in-memory @contract-shape:pure-function | overdrive-core public_ingress source-local properties |
-| S-PIG-10 | Gateway Application generation changes when its exact frontend changes | @property @in-memory @contract-shape:pure-function | overdrive-core public_ingress source-local properties |
-| S-PIG-11 | Demand revisions are nonzero, monotone and refuse wrap | @error @boundary @in-memory @contract-shape:pure-function | overdrive-core public_ingress source-local properties |
-| S-PIG-12 | Canonical Host accepts ASCII case and optional port 443 while preserving typed SNI | @property @in-memory @contract-shape:pure-function | gateway runtime routing source-local properties |
-| S-PIG-13 | Missing, duplicate, malformed, wrong-port and SNI-mismatched authority remain distinct | @error @security @in-memory @contract-shape:pure-function | gateway runtime routing source-local properties |
-| S-PIG-14 | Request rewriting preserves every un-nominated end-to-end header and replaces forwarding claims | @property @security @in-memory @contract-shape:pure-function | gateway proxy_headers source-local properties |
-| S-PIG-15 | Response rewriting preserves prior Via order and appends Overdrive last | @property @in-memory @contract-shape:pure-function | gateway proxy_headers source-local properties |
-| S-PIG-16 | Fixed and Connection-nominated hop-by-hop headers are removed in both directions | @error @security @in-memory @contract-shape:pure-function | gateway proxy_headers source-local properties |
-| S-PIG-17 | The first-slice limit set is exact, finite and internally ordered | @boundary @in-memory @contract-shape:pure-function | gateway limits source-local property |
-| S-PIG-18 | The operator can provide the exact four public-gateway values on serve | @driving_adapter @in-memory @contract-shape:pure-function | overdrive-cli acceptance |
-| S-PIG-19 | A repeated scalar gateway argument is rejected as an argument conflict | @error @driving_adapter @in-memory @contract-shape:pure-function | overdrive-cli acceptance |
-| S-PIG-20 | All fourteen partial enablement combinations name exactly their missing fields | @error @property @config-disabled @contract-shape:pure-function | overdrive-cli acceptance |
-| S-PIG-21 | Declare, exact replay, same-ID replacement and withdrawal form one atomic Route lifecycle | @real-io @adapter-integration @contract-shape:bounded-change | overdrive-gateway integration |
-| S-PIG-22 | A competing Route ID cannot replace the current singleton Route | @error @real-io @contract-shape:bounded-change | overdrive-gateway integration |
-| S-PIG-23 | Withdrawal by another Route ID has an empty Route-state delta | @error @real-io @contract-shape:bounded-change | overdrive-gateway integration |
-| S-PIG-24 | Two concurrent Route claims yield one declaration and one conflict | @error @concurrency @real-io @contract-shape:bounded-change | overdrive-gateway integration |
-| S-PIG-25 | Operator gateway status contains no manual path, key, ciphertext, nonce or salt | @security @adapter-integration @contract-shape:unbounded-preservation | overdrive-gateway integration plus example status capture |
-| S-PIG-26 | Clean shutdown leaves gateway identity empty and no connect residue | @lifecycle @real-io @contract-shape:bounded-change | overdrive-gateway integration and Tier-3 runner |
-| S-PIG-27 | Unreadable manual certified-key files refuse boot without Route mutation | @error @degraded-resource @real-io @contract-shape:unbounded-preservation | overdrive-gateway integration |
-| S-PIG-28 | A missing BPF selection receipt fails closed and cleans the registered intent | @error @security @adapter-integration @contract-shape:bounded-change | gateway connector source-local integration |
-| S-PIG-29 | A receipt for another ServiceKey fails before internal mTLS | @error @security @adapter-integration @contract-shape:bounded-change | gateway connector source-local integration |
-| S-PIG-30 | A wrong-but-valid selected workload peer fails closed without alternate-backend retry | @error @security @adapter-integration @contract-shape:bounded-change | gateway connector source-local integration |
-| S-PIG-31 | Stale completion, replacement, withdrawal, retained demand and restart preserve generation safety | @property @seeded-sim @lifecycle @contract-shape:bounded-change | overdrive-sim typed direct invariant, pending activation |
-| S-PIG-32 | Shutdown joins admitted users before demand and gateway identity retire | @property @seeded-sim @interruption @contract-shape:bounded-change | overdrive-sim typed direct invariant, pending activation |
-| S-PIG-33 | Withdrawing from Empty is Unchanged and the persisted empty Route Set survives reopen | @edge @crud @real-io @contract-shape:bounded-change | overdrive-gateway real-redb integration |
-| S-PIG-34 | Route deploy is one-shot for both detach modes and never enters workload NDJSON | @mode @orthogonality @driving-adapter @contract-shape:bounded-change | overdrive-cli in-process production-server integration |
-| S-PIG-35 | Real Route POST/DELETE handlers map declaration, replay, replacement, validation and singleton conflict | @driving-port @error @real-io @contract-shape:bounded-change | overdrive-cli ApiClient + production run_server integration |
-| S-PIG-36 | Disabled production composition rejects malformed Route JSON with 409 before parse and leaves existing serve/status live | @config-disabled @error @security @contract-shape:bounded-change | overdrive-cli production run_server integration |
-| S-PIG-37 | Cleanup ledger accepts 0/1/128 reservations and refuses 129 before BPF registration | @boundary @degraded-resource @contract-shape:bounded-change | gateway application source-local acceptance |
-| S-PIG-38 | Real HostGatewayClientMtls rejects valid workload certificate B when receipt-selected identity is A before body bytes | @security @error @real-io @contract-shape:bounded-change | overdrive-dataplane real-rustls integration |
-| S-PIG-39 | External TLS request outside a narrow replacement Route returns 404 | @error @real-io @public-https @contract-shape:bounded-change | recurring Tier-3 runner using the materialized checked-in `route-narrow.toml.template` |
-| S-PIG-40 | One selected upstream that closes before response maps to 502 exactly once without retry/replay | @error @real-io @single-attempt @contract-shape:bounded-change | recurring Tier-3 runner and workload request-count marker |
-| S-PIG-41 | An unregistered cgroup socket retains non-service behavior while LOCAL_BACKEND_MAP and XDP attachments remain unchanged | @security @real-kernel @contract-shape:unbounded-preservation | recurring Tier-3 runner |
-| S-PIG-42 | A gateway-status ObservationStore point-read failure returns 500 without credential detail | @error @degraded-resource @operator-mtls @contract-shape:unbounded-preservation | overdrive-cli production run_server with typed SimObservationStore read fault |
-| S-PIG-43 | A valid selected peer observes the dedicated non-allocation gateway SVID as the client identity | @security @real-io @identity @contract-shape:bounded-change | overdrive-dataplane HostGatewayClientMtls real-rustls integration |
-| S-PIG-44 | Every gateway numeric/digest newtype round-trips Display, FromStr, TryFrom, string-serde and required rkyv while rejecting each noncanonical partition | @property @error @codec @contract-shape:pure-function | overdrive-core source-local PBT |
-| S-PIG-45 | Public certificate chains at cardinalities zero, one, many (leaf plus issuer) and over-limit nine have exact rejected/accepted/accepted/rejected outcomes inside one explicit validity interval | @boundary @error @security @contract-shape:bounded-change | overdrive-gateway certified-key source-local acceptance |
-| S-PIG-46 | Certified-key install replay, valid replacement, invalid replacement and expiry preserve the exact protected/current state deltas | @lifecycle @error @real-io @contract-shape:bounded-change | overdrive-gateway real GatewayBuilder/custody owner with real-redb intent and redacted status integration |
-| S-PIG-47 | Ciphertext/tag/AAD tamper and CSPRNG failure expose no plaintext or protected record | @security @error @degraded-resource @contract-shape:bounded-change | overdrive-host production-codec tamper acceptance plus CSPRNG fault through real GatewayBuilder custody boot with intent/status snapshots |
-| S-PIG-48 | A lagged IntentStore subscription preserves the exact missed count and resumes with the next committed Changed event | @interruption @error @real-io @contract-shape:bounded-change | already-delivered active prerequisite in overdrive-store-local real-redb integration; not pending DELIVER activation |
-| S-PIG-49 | Frontend resolution triggers every closed error and rejects real persisted Job/Schedule targets without mutating intent | @error @adapter-integration @contract-shape:unbounded-preservation | overdrive-gateway frontend source-local adapter acceptance |
-| S-PIG-50 | Every GatewayConnectDataplane failure is emitted by its exact probe/register/receipt/cleanup/identity/count port operation | @error @adapter-contract @contract-shape:bounded-change | `every_gateway_connect_dataplane_error_crosses_its_real_owner_boundary` injects each declared error through its originating driven operation; `every_gateway_connect_dataplane_error_collapses_to_redacted_public_status` drives the same cases through status and asserts `GatewayApplicationUnavailableCause::ConnectPathUnavailable` with no internal detail |
-| S-PIG-51 | Gateway identity desired/actual hydration, reconciliation, audit-before-hold, stale epoch, replay and every lifecycle-control failure remain cause-distinct | @error @lifecycle @security @contract-shape:bounded-change | `every_gateway_identity_lifecycle_error_crosses_its_real_owner_boundary` injects each declared lifecycle error through `ensure_current` or `disable_after_drain`; `every_gateway_identity_lifecycle_error_collapses_to_redacted_public_status` asserts `GatewayIdentityUnusable` and no internal detail |
-| S-PIG-52 | HostGatewayClientMtls rejects absent/expired/malformed held identity, non-peer fds, elapsed handshakes, malformed URI-SAN shape and wrong-valid peers without plaintext fallback | @error @security @real-io @contract-shape:bounded-change | overdrive-dataplane real-rustls integration plus overdrive-gateway production-connector mapping/cleanup matrix |
-| S-PIG-53 | A failed connector cleanup is retained and retried without a second registration, connection or mTLS attempt | @error @degraded-resource @lifecycle @contract-shape:bounded-change | overdrive-gateway connector source-local integration |
-| S-PIG-54 | Repeating the same custody, demand and identity application has an empty second observable delta | @idempotency @contract-shape:bounded-change | documented AT gap: custody replay uses the real owner/store and identity hold is source-local; demand apply-twice has no real-owner snapshot body after removal of the scripted acknowledgment echo |
-| S-PIG-55 | Route parsers require exactly `target.service`; legacy `target.workload` has no JSON/TOML alias | @error @security @parser @contract-shape:pure-function | already-delivered active prerequisite in overdrive-core source-local acceptance; not pending DELIVER activation |
+Counts against the 55 pre-reconstruction scenarios: **22 KEEP, 32 ADAPT, 1 DROP** (S-PIG-11, demand revision type removed) **plus 15 NEW** (S-PIG-56..70) = 69 live scenarios, three quint-connect conformance drivers (QC-1..3) and one EDD expectation (E15). Scenario ids are stable identifiers. Every scenario carries one `@contract-shape:` tag; error/edge/boundary/security/degraded/lifecycle/concurrency share is above 80% (gate 40%). Lane: **U** unit/proptest, **I** `integration-tests` in-process, **S** seeded `overdrive-sim`, **T3** real kernel on native metal, **N** native metal with a real VM Service, **QC** quint-connect.
 
-Error/edge/boundary/security/degraded-resource/lifecycle/interruption/concurrency
-scenarios are 45 of 55 (81.8%), above the 40% gate. Tier A is S-PIG-01
-through the built production surface. Rust's Tier-B equivalent is the two
-typed seeded state-machine invariants S-PIG-31/32. DISTILL compiles their real
-`GatewayBuilder`/`GatewayControl`/`GatewayHandle` direct acceptance paths and
-mandatory stimulus/fault case constructors, but DESIGN deliberately excludes
-them from `Invariant::ALL` while their completed evaluator bodies remain
-ignored and reach RED production owner scaffolds when activated. The single
-`DELIVER-PIG-GATEWAY-APPLICATION-INVARIANTS` activation removes the ignores,
-drives the real owners through approved Sim ports, proves public
-status/demand/identity/shutdown traces including twin-seed and deletion
-controls, and only then adds both variants to the default catalogue. DISTILL
-does not fabricate a passing trace or parallel replacement owner.
+| ID | Scenario contract | Disp. | Lane | Tags | Owning crate / target on main | Activating step |
+|---|---|---|---|---|---|---|
+| S-PIG-01 | An external user receives the api workload's streamed response through the public Route (`AT-PIG-E2E-1`) | ADAPT | N | @walking_skeleton @driving_port @real-io @contract-shape:bounded-change | `tests/conformance/tests/public_ingress_gateway_end_to_end.rs` | public-request-end-to-end |
+| S-PIG-02 | A sound listener with no selectable backend returns 503 and no fallback; unavailable path is typed, never a wait | ADAPT | I+N | @error @security @contract-shape:bounded-change | control-plane integration `public_ingress_gateway_boot_shutdown.rs` + conformance file | consuming-port-unavailable-outcome |
+| S-PIG-03–10 | Route path/host/input/generation laws (exact and segment match, rejected partitions, label 62/63/64, input channels, Route/key/application generation) | KEEP | U | @property/@boundary/@error @contract-shape:pure-function | `overdrive-core/src/public_ingress.rs` | route-value-types |
+| S-PIG-11 | Demand revisions nonzero, monotone, refuse wrap | DROP | — | retired (D2) | — | — |
+| S-PIG-12–17 | Canonical Host/SNI, authority errors, header rewrite both directions, hop-by-hop removal, fixed finite limits | KEEP | U | @property/@security/@boundary @contract-shape:pure-function | `overdrive-gateway/src/runtime/{routing,proxy_headers,limits}.rs` | gateway-application-owner |
+| S-PIG-18–20 | Four serve flags; repeated scalar rejected; all-or-none enablement masks name exactly the missing fields | KEEP | U | @driving_adapter @error @contract-shape:pure-function | `overdrive-cli/tests/acceptance/public_ingress_gateway.rs` | route-operator-surface |
+| S-PIG-21–24 | Route declare/replay/replace/withdraw lifecycle; competing id; wrong-id withdrawal; two concurrent claims | ADAPT | I | @real-io @error @concurrency @contract-shape:bounded-change | `overdrive-gateway/tests/integration/public_ingress_gateway.rs` | gateway-application-owner |
+| S-PIG-25 | Gateway status contains no path, key, ciphertext, nonce or salt | ADAPT | I | @security @contract-shape:unbounded-preservation | same | gateway-application-owner |
+| S-PIG-26 | Clean shutdown leaves identity empty and no connect residue | ADAPT | I | @lifecycle @contract-shape:bounded-change | same | gateway-boot-and-shutdown |
+| S-PIG-27 | Unreadable manual key files refuse boot without Route mutation | ADAPT | I | @error @degraded-resource @contract-shape:unbounded-preservation | same | certified-key-custody |
+| S-PIG-28–30 | Missing receipt / other-ServiceKey receipt / wrong-valid selected peer fail closed, clean up, never retry another backend | ADAPT | U/I | @error @security @contract-shape:bounded-change | `overdrive-gateway/src/connector.rs` | upstream-socket-preparation, selection-receipt-and-applied-identity |
+| S-PIG-31 | Stale probe completion, replacement, withdrawal, retained connection and restart preserve generation safety (invariant `GatewayApplicationGenerationLifecycleIsSafe`) | ADAPT | S | @property @seeded-sim @contract-shape:bounded-change | `overdrive-sim/tests/acceptance/gateway_application_lifecycle.rs` | gateway-application-invariants |
+| S-PIG-32 | Shutdown joins admitted users before the identity slot clears (`GatewayApplicationShutdownConverges`) | ADAPT | S | @property @seeded-sim @interruption @contract-shape:bounded-change | same | gateway-application-invariants |
+| S-PIG-33 | Withdrawing from Empty is Unchanged; the empty set survives reopen | ADAPT | I | @edge @real-io @contract-shape:bounded-change | gateway integration | gateway-application-owner |
+| S-PIG-34–36 | Route deploy one-shot for both detach modes; real POST/DELETE handlers via ApiClient; disabled composition rejects before parse | ADAPT | I | @driving-adapter @error @contract-shape:bounded-change | `overdrive-cli/tests/integration/public_ingress_gateway.rs` (boots through `SimDataplaneComposer`) | route-operator-surface |
+| S-PIG-37 | Cleanup ledger 0/1/128, refuses 129 before registration | ADAPT | U | @boundary @contract-shape:bounded-change | `overdrive-gateway/src/application.rs` | upstream-socket-preparation |
+| S-PIG-38, 43, 52 | Real rustls: valid peer B rejected when selected is A before any body byte; peer observes the dedicated gateway SVID; absent/expired/malformed identity, non-peer fd, elapsed handshake, URI-SAN shape | ADAPT | I | @security @error @real-io @contract-shape:bounded-change | `overdrive-dataplane/tests/integration/public_ingress_gateway_mtls.rs` | exact-peer-client-mtls |
+| S-PIG-39 | Request outside a narrow replacement Route returns 404 | ADAPT | N | @error @public-https @contract-shape:bounded-change | conformance file | public-request-end-to-end |
+| S-PIG-40 | A selected upstream closing before response maps to 502 exactly once, no retry | ADAPT | N | @error @single-attempt @contract-shape:bounded-change | conformance file | public-request-end-to-end |
+| S-PIG-41 | An unregistered cgroup socket keeps non-service behaviour; `LOCAL_BACKEND_MAP` and XDP attachments unchanged | ADAPT | T3 | @security @real-kernel @contract-shape:unbounded-preservation | `overdrive-dataplane/tests/integration/public_ingress_gateway_hook.rs` | gateway-selection-hook |
+| S-PIG-42 | Status point-read failure returns 500 without credential detail | ADAPT | I | @error @degraded-resource @contract-shape:unbounded-preservation | CLI integration | route-operator-surface |
+| S-PIG-44 | Gateway newtypes round-trip Display/FromStr/TryFrom/serde/rkyv and reject each noncanonical partition | KEEP | U | @property @codec @contract-shape:pure-function | `overdrive-core` | route-value-types, gateway-identity-epoch |
+| S-PIG-45 | Certificate chains 0/1/many/9 inside one validity interval | KEEP | U | @boundary @security @contract-shape:bounded-change | `overdrive-gateway/src/certified_key.rs` | certified-key-custody |
+| S-PIG-46 | Key install replay, replacement, invalid replacement, expiry deltas | ADAPT | I | @lifecycle @error @contract-shape:bounded-change | gateway integration | certified-key-custody |
+| S-PIG-47 | Tamper, AAD mismatch and CSPRNG failure expose no plaintext or protected record | KEEP | U | @security @error @contract-shape:bounded-change | `overdrive-host/src/ca/public_certified_key.rs` | certified-key-custody |
+| S-PIG-48 | A lagged IntentStore subscription preserves the missed count and resumes with the next `Changed` | KEEP | I | @interruption @error @real-io @contract-shape:bounded-change | `overdrive-store-local` acceptance/edges | lag-aware-intent-subscription (**active prerequisite**; gated on item-12 reconfirmation) |
+| S-PIG-49 | Frontend resolution closed errors; real persisted Job/Schedule rejected; intent universe preserved (uses `IntentKey::workload_prefix`) | ADAPT | U/I | @error @contract-shape:unbounded-preservation | `overdrive-gateway/src/frontend.rs` | gateway-application-owner |
+| S-PIG-50 | Every `GatewayConnectDataplaneError` crosses its real owner op and collapses to the redacted `ConnectPathUnavailable` | ADAPT | I | @error @adapter-contract @contract-shape:bounded-change | gateway integration | upstream-socket-preparation |
+| S-PIG-51 | Gateway identity lifecycle errors cause-distinct at the owner, collapsed to `GatewayIdentityUnusable` in status | ADAPT | I | @error @lifecycle @security @contract-shape:bounded-change | gateway integration | gateway-svid-lifecycle |
+| S-PIG-53 | A failed cleanup is retained and retried without re-registering, reconnecting or re-authenticating | ADAPT | U | @error @degraded-resource @contract-shape:bounded-change | connector | upstream-socket-preparation |
+| S-PIG-54 | **C4a restated (D2).** The unavailable-outcome path applied twice has an empty second delta (see below); custody replay and identity hold repeat keep coverage | ADAPT | I | @idempotency @contract-shape:bounded-change | gateway + control-plane integration | consuming-port-unavailable-outcome |
+| S-PIG-55 | Route parsers accept exactly `target.service`; no `target.workload` alias | KEEP | U | @error @security @parser @contract-shape:pure-function | `overdrive-core` | route-value-types (pending) |
+| S-PIG-56 | A stale Service-map entry after `job stop` yields 502, never a wrong-peer success (obl 3) | NEW | T3+N | @error @security @contract-shape:bounded-change | hook file + conformance file | consuming-port-unavailable-outcome |
+| S-PIG-57 | Sentinel probe failure keeps TCP/443 unbound; serve and workloads unaffected; status cause and `health.startup.refused` reason `gateway.connect_probe` (obl 4, G-1) | NEW | I+T3 | @error @degraded-resource @contract-shape:bounded-change | control-plane integration boot/shutdown file + hook file | gateway-boot-and-shutdown |
+| S-PIG-58 | Actual-frontend `NoBackend` is bind-valid; the listener binds and serves 503 (G-1) | NEW | I | @edge @contract-shape:bounded-change | boot/shutdown file | gateway-boot-and-shutdown |
+| S-PIG-59 | Gateway disabled (`ServerConfig.gateway == None`): boot unchanged, no socket prepared, no sentinel, unregistered hook behaviour unchanged (boundary 6) | NEW | I | @config-disabled @contract-shape:unbounded-preservation | boot/shutdown file | gateway-boot-and-shutdown |
+| S-PIG-60 | Enabled boot orders G0–G4; shutdown stage `gateway` runs before `mtls_worker_owner`, inside one 5 s drain, one budget (G-6) | NEW | I (+N graceful run) | @lifecycle @contract-shape:bounded-change | boot/shutdown file | gateway-boot-and-shutdown |
+| S-PIG-61 | A gateway task failure or gated gateway never requests serve shutdown; the 10 s fail-stop bound is unchanged | NEW | I | @interruption @error @contract-shape:bounded-change | boot/shutdown file | gateway-boot-and-shutdown |
+| S-PIG-62 | Allocation `Running`, Service `Stable`, hydration and the operator listener advance identically with the gateway enabled, disabled or gated (boundary 3) | NEW | I | @orthogonality @contract-shape:unbounded-preservation | boot/shutdown file | gateway-boot-and-shutdown |
+| S-PIG-63 | A registered socket is selected by the hook; the rewritten dial enters leg-C via table 100 and TPROXY with `SO_MARK` and `127.0.0.1` source (obl 6) | NEW | T3 | @real-kernel @contract-shape:bounded-change | hook file | gateway-selection-hook, upstream-socket-preparation |
+| S-PIG-64 | Exact-peer mTLS wire evidence on the leg-B/leg-C segment: TLS 1.3 records, zero cleartext, kTLS armed; matching, wrong-valid, expired, absent identity (obl 7, G-5) | NEW | T3 | @security @real-kernel @contract-shape:bounded-change | hook file | exact-peer-client-mtls |
+| S-PIG-65 | Gateway SVID lifecycle: issue, audit-before-hold, near-expiry reissue, stale-epoch no-op, drop after drain, restart reissue (obl 9) | NEW | U+I | @lifecycle @security @contract-shape:bounded-change | reconcilers + control-plane action shim | gateway-svid-lifecycle |
+| S-PIG-66 | Route/custody/application watch recovery: subscribe before list, relist on `Lagged`, admission closed meanwhile (obl 10) | NEW | I | @interruption @contract-shape:bounded-change | gateway integration | lag-aware-intent-subscription (gated on item 12; restated as relist-period if P-8 is adopted) |
+| S-PIG-67 | BackendId identity readable only after the outer swap commits; immutable per id; rollback preserves the prior generation; no residue; restart destroys receipts (obl 11) | NEW | I+T3 | @lifecycle @contract-shape:bounded-change | dataplane host/Sim equivalence + source-local | selection-receipt-and-applied-identity |
+| S-PIG-68 | A late `Selected` or probe result after a superseded generation is never delivered and never restores the old admission object (boundary 4) | NEW | I | @interruption @contract-shape:bounded-change | gateway integration | gateway-application-owner |
+| S-PIG-69 | Guest-flow owner restart or fail-stop mid-request ends the request with 502 and leaves no intent or receipt (boundary 5) | NEW | I+N | @interruption @error @contract-shape:bounded-change | gateway integration + conformance file | public-request-end-to-end |
+| S-PIG-70 | Public status mappings 400, 404, 421, 502, 503 end to end (obl 8) | NEW | N | @error @public-https @contract-shape:bounded-change | conformance file | public-request-end-to-end |
 
-The walking-skeleton specification is:
+Conformance (QC): QC-1 `gateway_identity` (5 runs), QC-2 `gateway_application` (3 runs), QC-3 `selection_receipt` (5 runs); see Scaffolds. EDD: E15 operator journey; point-in-time, never a test.
 
-    Given overdrive serve has a complete manual Public Certified Key
-      and the operator has deployed the checked-in api Service and public-api Route
+**Restated C4a — proof of the D2 replacement without fabricated demand.** There is no demand, revision, acknowledgment or wake to apply twice. The obligation is the consuming-port form (obligation 1): with no healthy backend, two consecutive public requests both return 503 with identical bodies; after each request `live_intent_count() == live_receipt_count() == 0`; `GatewayApplicationStatusRowV1` and the Gateway Applied Generation are unchanged; the outcome is a typed `NoBackend` bounded by the request deadline and never a wait. Proof: (i) Tier 1 (I): production `GatewayBuilder` over real redb Route and custody, `SimGatewayConnectDataplane` sharing the `SimDataplane` state with no `update_service` ever issued, so the receipt is the ordinary "no outer entry" `NoBackend`; a real public TLS client issues the request twice; the oracle reads only public bytes/status, the two live counts, `GatewayControl::application_status()` (before equals after), the unchanged injected `SimClock` (no sleep or poll) and the `gateway.upstream.receipt.validated` occurrence with `operation=request`; (ii) Tier 3/N: the same oracle against the real hook with a Service whose VM never reaches Running, so the real `ServiceMapHydrator` never programs a backend. No receipt is scripted and no row is seeded. The honest limit: the Sim arm is the modelled hook; only T3/N prove the real hook.
+
+Walking-skeleton specification (S-PIG-01, `AT-PIG-E2E-1`):
+
+    Given overdrive serve (the production composition) has a complete manual Public Certified Key
+      and the operator has deployed the checked-in api VM Service and the public-api Route
     When an external user requests https://api.example.com/stream over TLS 1.3
-      using the Route hostname as SNI and Host
+      using the Route hostname as SNI and Host (client-local address override only)
     Then the user receives status 200, X-Workload api, and the streamed body
-      and the peer-facing upstream capture contains TLS records with no body cleartext
-      and Route, Service, gateway intent, receipt, network and identity cleanup converge
+      and the receipt occurrence shows a Selected backend whose applied identity is the api allocation
+      and the leg-B/leg-C segment carries TLS 1.3 records with no body cleartext
+      and Route, Service, gateway intent, receipt and identity state converge on cleanup
 
 ## Wave: DISTILL / [REF] Strategy and project-policy mapping
 
-The Architecture-of-Reference treatment is inherited without a per-feature
-A/B/C/D strategy. Driving surfaces use their real protocols. Driven internal
-state uses LocalIntentStore, SimObservationStore for deterministic focused
-composition, and the real EbpfDataplane/kernel path for Tier 3. Clock and
-scriptable external outcomes use existing Sim ports in Tier 1/2. Layer 3 and
-above remain example-based; generative coverage is confined to pure,
-source-local or in-memory properties.
+Architecture-of-Reference treatment is inherited; no per-feature strategy. Driving surfaces use their real protocols (public TLS/HTTP, operator HTTPS API through the exported handler, clap parse). Driven-internal state uses `LocalIntentStore` over real redb, `SimObservationStore` for deterministic focused composition, and the real `EbpfDataplane` and kernel on native metal for Tier 3. External/non-deterministic ports (`Clock`, CA entropy/KEK, guest dial) use the existing Sim ports. Layers 3 and above are example-based; generative coverage is confined to pure and in-memory properties (S-PIG-03–10, 12–17, 44).
 
-No acceptance test hand-installs a map, rule, identity, application snapshot,
-certificate, or protected record that production should install. The only
-test-supplied credential is an operator input accepted by the production serve
-flags. The walking skeleton is initially active as the external Tier-3 runner.
-Future Rust bodies carry reasoned pending-DELIVER ignore markers; S-PIG-48 and
-S-PIG-55 are explicitly active, already-delivered prerequisite checks and are
-not part of the future-pending inventory.
+No scenario hand-installs a map, rule, identity, application snapshot, certificate or protected record that production installs. The only test-supplied credential is an operator input accepted by the production serve flags or `ServerConfig.gateway`. Faults enter only through existing driven ports (Sim dataplane/identity/mTLS typed faults, `HoldConnectProbe`/`ReleaseConnectProbe`, `SimObservationStore` faults, `SimClock`). `AT-PIG-E2E-1` and the hook tests run only on the native x86_64 KVM host via `cargo xtask metal run --`. Policy rows to append in phase 2: Driving: public HTTPS listener (conformance harness public client), `Route` operator surface; Driven internal: `GatewayConnectDataplane` (Sim pair in Tier 1/2, `EbpfDataplane` in Tier 3), custody over real redb; Driven external: `GatewayClientMtlsFactory` (Sim/Host).
 
 ## Wave: DISTILL / [REF] Adapter coverage
 
-| Driven adapter/effect | Real-I/O or contract scenario | Coverage boundary |
+| Driven adapter / effect | Real-I/O or contract scenario | Coverage boundary |
 |---|---|---|
-| LocalIntentStore / Public Route Set | S-PIG-21–24/27/33/35/48 | Real redb before/after state deltas, persisted empty set, same-file reopen, singleton lifecycle, HTTP mapping, concurrency and exact lag preservation |
-| ManualCertifiedKeySource | S-PIG-27 and S-PIG-01 | Real files, full source path, unreadable failure, test-CA or operator-supplied material |
-| PublicCertifiedKeyAeadCodec / KEK / protected redb record | S-PIG-01/25/45–47/54 | Production codec/custody composition; 0/1/N chain, replay/replacement/expiry, tamper/AAD/CSPRNG faults, and secret-free status/artifacts |
-| ObservationStore / gateway status | S-PIG-25/35/36/42 | Populated real JSON, exact active fields, typed point reads, disabled response and 500 fault mapping |
-| ServiceFrontendResolve | S-PIG-01/49 | Existing Service intent plus platform VIP resolves one exact frontend; all closed failures and real persisted Job/Schedule rejection preserve the intent universe |
-| Gateway Frontend Demand / ServiceMapHydrator | S-PIG-01/02/31/50/54 | Staged/current/draining demand, empty eligible set and stale completion are driven by the real application owner. S-PIG-54's demand apply-twice remains the documented C4a gap and is not credited to a scripted port; S-PIG-50 drives its Dataplane faults through the same owner before the redacted status projection. |
-| EbpfDataplane / cgroup connect maps | S-PIG-01/02/28/29/37/41/50/53 | Tier-3 uses the production connector's operation-bracketed structured receipt occurrences—not transient map polling—to prove cookie/ServiceKey, Selected BackendId/applied SPIFFE identity and NoBackend before stable cleanup. S-PIG-50's two named owner/status tests add the exhaustive typed Dataplane matrix and collapsed projection without exposing a new cause API. |
-| SocketCookieReader | S-PIG-01/28–30/44 | The structured validated-receipt occurrence carries the nonzero SO_COOKIE-derived intent cookie after BPF receipt equality validation; the production syscall trace is a reachability complement, not the receipt oracle |
-| Gateway identity issuance/audit/slot | S-PIG-01/25/26/32/43/51/52/54 | Dedicated non-allocation gateway subject, issue/audit-before-hold, epoch idempotency/staleness, real peer-observed client identity, absent/expired fail-closed, redacted status and drain-ordered empty; S-PIG-51's two named owner/status tests cover every lifecycle error and prove the intentional `GatewayIdentityUnusable` collapse. |
-| HostGatewayClientMtls / rustls | S-PIG-01/30/38/43/52 | Exact selected peer plus real happy client-identity observation, same-CA A/B mismatch, absent/expired identity, peer-address/deadline and zero/multiple URI-SAN errors; failure precedes body with no plaintext, retry or alternate peer |
-| Hyper public HTTP runtime | S-PIG-01/02/12–17/39/40 | TLS1.3/HTTP1.1 200/404/502/503, authority/path/header/limit policy and single-attempt failure |
-| ServerHandle / GatewayHandle lifecycle | S-PIG-26/32 and S-PIG-01 | Stop accepts, join, sweep, retire demand, empty identity, preserve typed residue |
+| `LocalIntentStore` / Public Route Set | S-PIG-21–24, 27, 33, 48, 66 | Real redb deltas, persisted empty set, reopen, singleton claim, concurrency, exact lag count and recovery |
+| `ManualCertifiedKeySource` and files | S-PIG-27, 46, 01 | Unreadable and malformed material; test-CA or operator-supplied chain |
+| `PublicCertifiedKeyAeadCodec` / KEK / protected redb record | S-PIG-45–47 | Production codec and custody; 0/1/N chains, replace/expire, tamper/AAD/CSPRNG faults, secret-free status |
+| `ObservationStore` gateway status and issuance audit | S-PIG-25, 35, 36, 42, 65 | Typed point reads, redacted JSON, 500 fault mapping, audit-before-hold |
+| `ServiceFrontendResolve` | S-PIG-49, 01 | Service intent plus platform VIP resolves one frontend; closed failures preserve the intent universe |
+| `GatewayConnectDataplane` / `EbpfDataplane` / cgroup hook and maps | S-PIG-02, 28–30, 37, 41, 50, 53, 56, 57, 63, 67 | Tier 1 uses `SimGatewayConnectDataplane`; Tier 3 uses the real hook, `open_upstream` preparation (mark, loopback bind, cookie, registration), receipts and cleanup. The transient receipt oracle is the connector's `gateway.upstream.receipt.validated` occurrence, not map polling |
+| Ordinary `ServiceMapHydrator` -> `update_service` (D1) | S-PIG-01, 56, 67 | Real hydrator programs the VM backend; the gateway adds no mechanism |
+| `HostGatewayClientMtls` / rustls / leg-C / kTLS / vsock | S-PIG-38, 43, 52, 64, 01 | Exact selected peer, dedicated gateway SVID, wrong-valid and absent/expired identity fail before body; wire evidence on the leg-B/leg-C segment |
+| Gateway identity slot, issue-and-audit, reconciler | S-PIG-51, 65, 26 | Dedicated non-allocation subject, epoch idempotency, stale no-op, drain-ordered empty |
+| Public HTTP runtime (hyper) | S-PIG-12–17, 39, 40, 70 | 200/400/404/421/502/503, authority/header/limit policy, single attempt |
+| `ServerHandle` / `GatewayHandle` boot and shutdown (D5) | S-PIG-26, 57–62, 69 | G0–G4 order, stage `gateway`, one budget, fail-stop interaction, disabled path |
 
-Public DNS is not an Overdrive adapter. Production requires an
-operator-managed IPv4 A record from the Route's public hostname to the
-configured gateway address. The hermetic S-PIG-01 run uses
-`curl --resolve "api.example.com:443:${gateway_address}" --cacert <test-ca>`.
-E14 uses the same client-local address override with its operator-controlled
-public hostname but the normal system trust store and no `--cacert`. Neither
-depends on ambient DNS or edits `/etc/hosts`; the configured hostname remains
-the SNI, HTTP Host and certificate identity.
+Public DNS is not an Overdrive adapter. Production reachability needs an operator-managed IPv4 A record for the Route's Public Hostname. Hermetic runs and E15 use only `curl --resolve <hostname>:443:<gateway-ipv4>` (client-local address selection; the hostname remains SNI, Host and certificate identity); no step edits `/etc/hosts` or uses ambient DNS.
 
 ## Wave: DISTILL / [REF] Scaffolds
 
-| RED-ready scaffold | Marker / activation |
-|---|---|
-| crates/overdrive-core/src/public_ingress.rs plus tests/schema_evolution/public_* and gateway_application_status_row | SCAFFOLD marker; exact VersionedEnvelope/store-codec signatures, four generated V1 golden fixtures, and Route/value/generation/path properties ignored by named DELIVER steps |
-| crates/overdrive-core/src/gateway_identity.rs | SCAFFOLD marker; exact epoch Display/FromStr/TryFrom/string-serde/rkyv/checked-next contracts and rejection PBT ignored |
-| crates/overdrive-gateway/ | New exact adapter-host crate; owner/port/runtime/connector/limit plus demand-handle and IntentServiceFrontendResolver methods are RED scaffolds |
-| crates/overdrive-host/src/socket_cookie.rs | SCAFFOLD marker; safe SO_COOKIE probe/read bodies remain RED |
-| crates/overdrive-host/src/ca/public_certified_key.rs | Exact new/seal/open/test-random-fill codec surface over core protection context/record |
-| crates/overdrive-dataplane/src/{gateway_connect.rs,mtls/gateway_identity.rs} and overdrive-bpf gateway map module | Exact Dataplane port, POD ABI, slot/access handles and HostGatewayClientMtls scaffolds; real-rustls A/B body compiled |
-| crates/overdrive-reconcilers/src/gateway_svid_lifecycle.rs plus every Any* dispatch | Canonical reconciler/state/view and persistence dispatch scaffolds; HydrationContext carries the three mandatory ports |
-| crates/overdrive-control-plane gateway composition/handlers/action shim/ServerHandle | Mandatory Disabled/Enabled demand+identity composition, real HTTP/OpenAPI routes, gateway action dispatch and typed combined shutdown surface |
-| api/openapi.yaml | Regenerated live schema for Route POST/DELETE and gateway-status GET plus every exact request/response DTO |
-| crates/overdrive-cli/src/{cli.rs,commands/serve.rs,commands/deploy.rs,http_client.rs} | Exact clap fields, first-operation RED gateway_config, typed Route deploy/client surfaces and production-composition bodies |
-| crates/overdrive-sim/src/{adapters/gateway.rs,invariants/gateway_application.rs} | Exact Sim gateway identity-lifecycle/client-mTLS adapters plus typed pending invariant variants and mandatory case constructors. DISTILL-authored evaluators drive real GatewayBuilder/GatewayControl/GatewayHandle owners and assert only public status/demand/identity/shutdown traces; direct tests stay ignored and variants stay outside every default catalogue until the DESIGN-pinned DELIVER activation. |
-| examples/public-ingress-gateway/ | Exact DESIGN-pinned operator journey and client-local hostname override |
-| tests/tier3/public-ingress-gateway/ | Active AT-PIG-E2E-1 plus host-safe cleartext-guard regression; black-box built binary only |
-| .github/workflows/public-ingress-gateway-tier3.yml | Twice-weekly/manual real-kernel lane; builds the default-feature binary once and serializes TCP/443/BPF state |
-| verification/expectations/E14-public-ingress-operator-journey/ | Pending point-in-time public-system-trust expectation; Linux/root fail-closed and distinct from recurring test |
+Only shapes the DESIGN pins are scaffolded; bodies of production scaffolds fail with SCAFFOLD text under file-level lint allowances. Every test body is complete and executable. Activation: remove only the reasoned `#[ignore]`, observe a semantic RED, implement, GREEN, commit (testing.md "RED acceptance scaffolds and activation").
 
-Each present Rust test body compiles. Pending bodies are executable assertions
-through the named production contract; none is a panic-only test placeholder.
-The C4a audit row explicitly retains the demand apply-twice gap after the
-scripted acknowledgment echo was removed. The C6b/C6c audit rows now carry
-both owner-boundary and redacted-projection evidence; they are not represented
-as passing scaffolds. Production scaffold panics carry SCAFFOLD text so
-activation is semantic RED, not import/setup BROKEN.
+| Scaffold (crate / file) | DESIGN anchor | Notes |
+|---|---|---|
+| `overdrive-core`: `public_ingress.rs`, `gateway_identity.rs`, `SpiffeId::for_gateway`, two `ObservationRow` variants and point reads, `Action::{IssueGatewaySvid,DropGatewaySvid}`, `HydrationContext.gateway_identity` | Persistence, custody and redaction; Gateway identity; D5 items 9–10 | Demand types, `gateway_demand`, `gateway_frontend_demand` are not carried |
+| `overdrive-core` + `overdrive-store-local` + implementer fallout: **lag-aware `IntentStore::watch`** | Exact lag-aware intent subscription; D5 item 12 | **Active prerequisite** (decision below), only after the user reconfirms item 12 and does not adopt P-8 |
+| `overdrive-host`: `ca/public_certified_key.rs`, `socket_cookie.rs` | Persistence; component decomposition | |
+| `overdrive-gateway` (new crate): ports (`GatewayConnectDataplane` with `open_upstream`/`PreparedUpstream`, `GatewayClientMtlsFactory`), application, connector, certified key, route set, frontend, runtime, `UnboundGatewayBuilder`/`GatewayBuilder`/`GatewayControl`/`GatewayHandle` | D5 (a)(b)(d), Application sections | Needs D5 confirmation |
+| `overdrive-bpf`: `maps/gateway_connect.rs` (two 8-byte POD maps, capacity 128, unpinned) | Backend programming and selection (D3) | **No selection-arm program is scaffolded** — placement is P-10 |
+| `overdrive-dataplane`: `gateway_connect.rs`, `mtls/gateway_identity.rs` (slot), `mtls/gateway_client.rs`, commit-guard types, `DataplaneError` variants | Commit-guarded transaction; identity integration; obligation 15 | Allocator internals beyond `existing_id` untouched (P-2) |
+| `overdrive-reconcilers`: `gateway_svid_lifecycle.rs` + `Any*` arms | Closed-dispatch contract; D5 item 9 | Host-backed wakeup (empty `interests()`, `resync_schedule()`) |
+| `overdrive-control-plane`: `BootAdapters.gateway`, `ComposedDataplane.gateway_connect`, composition, action shim, boot G0–G4, `ServerHandle` stage `gateway`, handlers, regenerated `api/openapi.yaml` | D5 | Dispatcher fallout across the control-plane tests |
+| `overdrive-cli`: four `ServeArgs.gateway_*` fields, Route deploy dispatch, `ApiClient` calls | D5 item 11 | Constructor fallout across the CLI tests |
+| `overdrive-sim`: `adapters/gateway.rs`, `invariants/gateway_application.rs`, two `Invariant` variants outside `Invariant::ALL` | Exact seeded invariant registration | Activation key `DELIVER-PIG-GATEWAY-APPLICATION-INVARIANTS` |
+| `tests/conformance`: end-to-end file and harness helpers; QC-1..3 drivers | Evidence-lane table; Formal protocol model | See drivers below |
+| `examples/public-ingress-gateway/` and `verification/expectations/E15-public-ingress-operator-journey/` | Artifact-boundary handoff | See below |
 
-The example and Tier-3 runner retain append-only, per-run numbered observation
-directories. Every retry of a request, status read, workload read and cleanup
-poll carries sanitized command, status, start and end timestamps; live
-convenience files are copies, never the only evidence. The Tier-3
-runner brackets each request by an append-only `serve.log` byte offset and
-parses only the completed request's structured
-`gateway.upstream.receipt.validated` suffix. Transient intent/receipt maps are
-never polled as an occurrence oracle; stable post-request/final emptiness and
-every external `bpftool`/`ip`/`nft`/`ss` probe retain stdout, stderr, status and
-timestamps.
+**Lag-aware watch decision.** DISTILL ports it as an active prerequisite, conditional on the user's reconfirmation of D5 item 12. Reasons: it is a one-cut `IntentStore::watch` signature change, so no body for S-PIG-48 or S-PIG-66 can compile against `IntentSubscriptionEvent` without it and a RED `#[ignore]` body cannot exist; it was approved in the 2026-09-13 DESIGN (preserved at `backup/research-ingress-gateway-pre-reconstruct`); main's trait and `LocalIntentStore` are unchanged since the merge base; the pre-reconstruction branch shipped it green with a real-redb lag test. If the user adopts the P-8 simplification instead, S-PIG-48 is dropped, S-PIG-66 is restated as a relist-period test and nothing is ported.
+
+**quint-connect drivers** (spec referenced in place at `specs/quint/public-ingress-gateway/`; each driver module is `#[cfg(all(test, feature = "integration-tests"))]` in the owner's crate; `#[quint_test(max_samples = 1)]` per named run and one `#[quint_run]`; every action handler calls the pinned driving port; `State` projects only the pinned accessors; all carry `#[ignore = "pending DELIVER quint-conformance-<module>"]` until the owner is GREEN):
+
+| Driver | Module / conformance main | Placement | Runs bound to `#[quint_test]` | Projection (pinned accessors) |
+|---|---|---|---|---|
+| QC-1 | `gateway_identity` / `identity_conf` | `overdrive-control-plane/src` (the dispatch functions are `pub(crate)`; **placement ruling requested, DESIGN gap U1**) | `issue_hold`, `reissue_near_expiry`, `disable_races_inflight_issue`, `audit_failure_no_hold`, `restart_reissue` | `GatewayIdentitySlot::{desired,current}`, `ObservationStore::issued_certificate_rows` filtered to the gateway SPIFFE id |
+| QC-2 | `gateway_application` / `app_conf` | `overdrive-gateway/src` | `replace_valid`, `route_withdraw_drain`, `late_probe_after_supersession` | `GatewayControl::application_status()` |
+| QC-3 | `selection_receipt` / `receipt_conf` | `overdrive-dataplane/src` (**owner ruling requested, DESIGN gap U2**) | `commit_then_select`, `abandoned_reservation_rolled_back`, `conflicting_alloc_rejected`, `receipt_waits_for_publish_guard`, `restart_destroys_receipts` | `selected_backend_identity`, `live_intent_count`, `live_receipt_count`, `take_receipt` |
+
+`unhealthy_is_no_backend` is not bound (P-9). `cargo xtask conformance-lint` must pass.
+
+**Examples.** `examples/public-ingress-gateway/` is a VM Service journey in the style of `examples/service-kind-vm-workloads/`: `service.toml` (`[vm]`, never `[exec]`), `prepare.sh`, an example-local guest HTTP/1.1 server (`/stream`, `X-Workload: api`, request-count marker), `prepare-test-ca.sh`, `route.toml.template`, `route-narrow.toml.template`, `README.md`, and `run-example.sh` with the exact argv contract in "Artifact-boundary handoff" (hermetic mode curls with `--cacert`; production-trust mode with system trust; both only via `curl --resolve`). The pre-reconstruction shell runner, regression scripts, `receipt-oracle.py`, `workload.py` and the GitHub workflow are not carried.
+
+**E15.** `verification/expectations/E15-public-ingress-operator-journey/{README.md,runner.sh}` plus the INDEX row (status `pending`) and the harness `EXPECTATION_SOURCE_SHA`/`EXPECTATION_SOURCE_DIRTY` capture pinned in the Artifact-boundary handoff. Point-in-time capture against the built default-feature binary on native metal with a clean harness-captured HEAD, exact-object BPF embedding proof, `curl --resolve` and normal system trust; reviewed by a different agent; not a test.
 
 ## Wave: DISTILL / [REF] Test placement
 
-Pure Route/value properties are source-local in overdrive-core because their
-public signatures are the driving ports. Authority/header/limit and connector
-properties are source-local in overdrive-gateway because DESIGN keeps those
-functions crate-private. CLI parsing/config tests use the existing
-overdrive-cli acceptance entrypoint. Real redb/application composition uses
-the integration-tests-gated overdrive-gateway integration binary. Ordering,
-late completion, restart and shutdown use the existing overdrive-sim
-catalogue. The built product is driven only by the repository-root example,
-Tier-3 runner and distinct E14 expectation.
+Pure Route and value properties are source-local in `overdrive-core` (public signatures are the driving ports). Authority, header, limit and connector properties are source-local in `overdrive-gateway` (DESIGN keeps them crate-private). CLI parsing uses the existing `overdrive-cli` acceptance entrypoint. Real redb and application composition use the `integration-tests`-gated `overdrive-gateway` integration binary. Boot, shutdown and operator-surface composition use `overdrive-control-plane` and `overdrive-cli` integration binaries through `SimDataplaneComposer` (`NodeAdapters` swap; no `*_override`). Real-kernel hook, packet-entry and exact-peer wire tests use the `overdrive-dataplane` integration binary on native metal. The cross-owner production walking skeleton and its native cases use `tests/conformance` (`native_metal_kvm_public_ingress_gateway_*`, selected by `tests/conformance/run-native-metal.sh`). Ordering, late completion, restart and shutdown use the `overdrive-sim` catalogue. Quint drivers sit in their owners' `src/`. No test spawns the `overdrive` binary; only E15 drives the built CLI.
 
 ## Wave: DISTILL / [REF] Driving-adapter coverage
 
 | Driving surface | Scenario / mechanism |
 |---|---|
-| overdrive serve with exact four gateway flags | S-PIG-01, S-PIG-18–20; external example plus in-process clap/config |
-| overdrive deploy SERVICE_SPEC | S-PIG-01/35; checked-in `service.toml` and production API deployment precede Route application; handler acceptance and bounded frontend convergence are observed separately |
-| overdrive deploy ROUTE_SPEC | S-PIG-01/21–24/34/35/55; ApiClient/production handler plus materialized checked-in `route.toml.template`/`route-narrow.toml.template`, each using exactly `target.service` |
-| DELETE /v1/routes/{id} | S-PIG-21/23/33/35/36; real operator-mTLS handler, persisted empty set and disabled pre-parse branch |
-| GET /v1/gateway/status | S-PIG-25/35/36/42; populated/redacted production JSON plus typed read-error 500 |
-| Public TLS 1.3 / HTTP/1.1 | S-PIG-01/02/38–40/43/52; `curl --resolve` preserves the configured hostname as SNI/Host/certificate identity and proves 200/404/502/503; real-rustls bodies prove dedicated gateway client identity and wrong-valid/absent/expired/malformed-peer failure before body bytes |
-| Serve shutdown | S-PIG-26/32 and Tier-3 cleanup complement |
-| E14 point-in-time public trust | E14 accepts the operator-controlled public hostname, produces and hashes the BPF object with `cargo xtask bpf-build` from clean harness-captured HEAD, builds default features, proves the binary embeds that exact object, records source/toolchain/BPF/binary provenance, and uses `curl --resolve "${public_hostname}:443:${gateway_address}"` for address selection only. It preserves that hostname as SNI/Host/certificate identity and requires the normal system trust store (`--cacert` and external-binary inputs are forbidden). |
+| `overdrive serve` four gateway flags | S-PIG-18–20 (clap and config, in-process); S-PIG-59/60 through `ServerConfig.gateway` (the field `serve` fills); E15 through the built binary |
+| `overdrive deploy <SERVICE_SPEC>` (VM Service) | S-PIG-01 via the exported handler's public API; E15 via the example |
+| `overdrive deploy <ROUTE_SPEC>` | S-PIG-34/35 (`deploy_resource` and `ApiClient` against the production handler); materialized checked-in templates in S-PIG-01/39 |
+| `DELETE /v1/routes/{id}`, `GET /v1/gateway/status` | S-PIG-21, 23, 25, 33, 35, 36, 42 |
+| Public TLS 1.3 / HTTP/1.1 listener | S-PIG-01, 02, 39, 40, 56, 69, 70; E15 |
+| Serve shutdown and fail-stop | S-PIG-26, 60, 61, 32 |
 
 ## Wave: DISTILL / [REF] Prerequisites
 
-- The recurring lane builds the default-feature overdrive binary exactly once
-  and passes its absolute path to AT-PIG-E2E-1. E14 accepts no binary input: it
-  requires a harness-captured clean HEAD, runs the exact BPF build, hashes its
-  object, builds that default-feature binary inside the verified substrate,
-  proves exact-object embedding, hashes the product, and executes that exact
-  artifact.
-- Linux root/cgroup-v2/BPF/netns/nft/rustls substrate through Lima or the
-  repository Tier-3 kernel harness; pinned appliance kernel remains the merge
-  authority.
-- openssl, python3, curl, tcpdump, bpftool, ip, nft, ss, strace, systemd-run,
-  timeout, cmp and diff available to the external
-  runner.
-- Operator supplies a complete leaf-first publicly trusted chain and matching
-  mode-0600 PKCS#8 key for E14, or the root example creates its bounded
-  hermetic test CA and uses `--cacert` only in that hermetic mode.
-- Production public reachability uses an operator-managed IPv4 A record.
-  Hermetic execution substitutes only client-local name resolution with
-  curl --resolve; Overdrive owns no DNS provider/API and mutates no host file.
-- The existing workload-identity CA, Service deploy, Path-A network/TPROXY and
-  Service-map production owners are composed by serve; tests do not substitute
-  their effects.
+- Native x86_64 bare-metal KVM host provisioned per `infra/metal`, uid 0, fail-closed on the substrate probes (`.claude/rules/testing.md`). No Lima instance and no CI metal lane (P-6 is PROPOSED). Real-kernel and VM scenarios run through `cargo xtask metal run --`; the default and `integration-tests` lanes compile and run the in-process scenarios.
+- BPF object produced by `cargo xtask bpf-build` before anything that compiles `overdrive-dataplane`; the selection arm does not exist until P-10 is ruled and DELIVER lands it, so hook scenarios are RED for the right reason.
+- Existing production owners compose the rest: workload-identity CA, Service deploy, ordinary `ServiceMapHydrator`, leg-C -> kTLS -> `GuestStreamDial`, the node-shared nft owner. Tests do not substitute their effects.
+- Operator inputs: a complete leaf-first chain and matching PKCS#8 key (E15), or the example's bounded test CA (hermetic mode). Tools for independent oracles: `bpftool`, `ss`, `nft`, `curl`, `openssl`.
+- User confirmations: D5 "New public surface" items 1–11 (gate batches 2–5), item 12 (gates the watch files), P-2/P-9/P-10 (design approval).
 
 ## Wave: DISTILL / [REF] Outcome registration
 
-No new outcome row is introduced. All 55 scenarios refine the existing eleven
-gateway/reused typed contracts:
-OUT-PIG-CERTIFIED-KEY-CUSTODY, OUT-PIG-GATEWAY-APPLICATION,
-OUT-PIG-BPF-SELECTION-IDENTITY, OUT-PIG-GATEWAY-EXACT-PEER,
-OUT-PIG-PUBLIC-REQUEST, OUT-CA-SVID, OUT-WIM-SVID-LIFECYCLE,
-OUT-MTLS-HANDSHAKE-FAIL-CLOSED, OUT-MTLS-COMPOSED-PROXY-SKELETON,
-OUT-MTLS-INBOUND-SERVER-MTLS and OUT-MTLS-WIRE-TLS13.
-The nonzero collision gate remains the registry verification mechanism.
+No new outcome row is introduced. The scenarios refine the registered contracts `OUT-PIG-CERTIFIED-KEY-CUSTODY`, `OUT-PIG-GATEWAY-APPLICATION`, `OUT-PIG-BPF-SELECTION-IDENTITY`, `OUT-PIG-GATEWAY-EXACT-PEER`, `OUT-PIG-PUBLIC-REQUEST`, `OUT-CA-SVID`, `OUT-WIM-SVID-LIFECYCLE`, `OUT-MTLS-HANDSHAKE-FAIL-CLOSED`, `OUT-MTLS-COMPOSED-PROXY-SKELETON`, `OUT-MTLS-INBOUND-SERVER-MTLS` and `OUT-MTLS-WIRE-TLS13`. Phase 2 restates the registry's demand/revision/acknowledgment text under D2 and re-runs `nwave-ai outcomes check-delta` (nonzero set, 0 collisions required).
 
 ## Wave: DISTILL / [REF] Completeness audit
 
-| Check | Result | Evidence / documented gap |
+Provisional and specification-level: authored bodies do not exist yet, so no check is credited as PASS until phase 2 writes and compiles them. Nothing below is waived.
+
+| Check | Status | Evidence or gap |
 |---|---|---|
-| C1a empty/zero/minimum | PASS | Disabled all-absent config, empty withdrawal, empty headers/demand/backend set, zero-chain rejection and one-chain acceptance |
-| C1b partition boundaries | PASS | Host labels 62/63/64, zero/nonzero/max revisions and epochs, chain empty/valid/over-limit, cleanup ledger 0/1/128/129 and fixed runtime limits |
-| C2a state machine documented | PASS | Module narratives and DESIGN gates cover Route Empty/Occupied, key Absent/Usable/Unusable, application Staged/Current/Draining and identity Empty/Held/disable states |
-| C2b illegal event from each state | PASS | Empty inverse, competing apply/wrong-ID withdrawal, unusable replacement preservation, stale demand/identity completion, restart and shutdown inputs are complete executable bodies; pending real-owner invariant paths remain ignored until their one activation step |
-| C3 zero/one/many collections | PASS | S-PIG-45 covers chain 0/1/N; header PBT covers 0..N; Route covers 0/1/N refusal; ledger covers 0/1/limit/+1; demand covers staged/current/draining union |
-| C4a apply twice | FAIL — documented AT gap | Route/withdrawal, custody candidate and identity hold have repeat coverage, but demand apply-twice lacks a real-owner snapshot body; the former preconstructed acknowledgment echo was removed rather than counted |
-| C4b inverse without prerequisite | PASS | Already-empty withdrawal returns Unchanged |
-| C5a material mode combinations | PASS | All sixteen gateway enablement masks, exact/prefix Route modes, hermetic-test-CA versus E14 system-trust modes, and every material detach behavior |
-| C5b orthogonality | PASS | S-PIG-34 drives both Route detach decisions through deploy_resource and proves both return Route rather than NDJSON/workload output |
-| C6a malformed input parameters | PASS | Every Route field, `target.service`/legacy alias, authority, path, hostname, canonical newtype, repeated argv, missing key file and malformed/tampered certificate input is driven through its SUT parser/adapter |
-| C6b every declared error | PASS | The two S-PIG-50/51 owner-boundary tests inject every declared `GatewayConnectDataplaneError` and `GatewayIdentityLifecycleError` variant through the real Gateway Application owner at the existing driven-port operation. Exact typed variants are matched at the narrow adapter/shutdown boundary; paired status tests drive the same faults through the status consumer and match only the approved redacted public causes. No public cause accessor/result/status API is added. |
-| C6c closed error set | PASS | Each error set has one SSOT case table plus an exhaustive Rust match classifier. A new enum variant fails compilation before the matrix can pass; the public projection match is also exhaustive and requires the new variant to be assigned to the approved collapsed cause. The tests reject internal variant names, nested source text, key material, paths, BackendId, socket cookie and peer identity in status. |
-| C7a degraded resource | PASS | Unreadable key source, CSPRNG and observation-store faults, NoBackend, missing receipt/identity, cleanup failure and full cleanup ledger |
-| C7b interruption | PASS | Exact lag count/resubscription, held demand completion, withdrawal/restart, handshake deadline, retained connection and in-flight joined shutdown schedules |
-| C7c concurrent actors | PASS | Two concurrent singleton Route claims |
+| C1a empty/zero/minimum | Specified | All-absent config, empty withdrawal, zero-chain, empty set, no-outer-entry `NoBackend` |
+| C1b partition boundaries | Specified | Labels 62/63/64, epochs, chain 0/1/N/9, ledger 0/1/128/129, limits |
+| C2a state machine documented | Specified | Gate G-1..G-6 and Quint modules |
+| C2b illegal event per state | Specified | Stale epoch, competing claim, wrong-id withdrawal, late probe, restart |
+| C3 zero/one/many | Specified | S-PIG-45, header PBT, ledger, Route 0/1/N |
+| C4a apply twice | **Open until the S-PIG-54 body is authored** | Restated as the consuming-port form above; replaces the retired demand gap; not waived |
+| C4b inverse without prerequisite | Specified | S-PIG-33 |
+| C5a mode combinations | Specified | 16 enablement masks, hermetic vs production-trust, exact vs prefix Route |
+| C5b orthogonality | Specified | S-PIG-34 (both detach modes), S-PIG-62 |
+| C6a malformed parameters | Specified | Route fields, `target.service`, authority, path, hostname, argv, key files |
+| C6b every declared error | Specified, **needs re-pin** | S-PIG-50/51 matrices must follow the new `GatewayConnectDataplaneError` variants and `ensure_current`/`disable_after_drain` |
+| C6c closed error set | Specified | Exhaustive classifier per set; status projection exhaustive |
+| C7a degraded resource | Specified | Unreadable key, CSPRNG, observation fault, NoBackend, cleanup failure, full ledger |
+| C7b interruption | Specified | Lag, hold/release probe, withdrawal, restart, mid-request flow-owner restart |
+| C7c concurrent actors | Specified | S-PIG-24 |
 
-Verdict: **COMPLETE by the mechanical threshold — 14/15 passing**. C4a
-retains its documented demand apply-twice gap; C6b/C6c are closed by the
-two-layer typed owner/projection matrices without an invented cause-bearing
-API. Taxonomy telemetry: public-ingress-gateway C1=0/LOW, C2=0/LOW,
-C3=0/LOW, C4=1/HIGH, C5=0/LOW, C6=0/LOW, C7=0/LOW.
+Documented gaps and blockers (no silent waivers):
+1. **BLK-P9** — obligation 2: the in-window result (503 vs 502) and the `unhealthy_is_no_backend` run are not authored; the post-`healthy` 0 -> 1 leg is covered by S-PIG-02/56/01 once P-9 is ruled.
+2. **BLK-P2** — the BackendId memo re-lease wedge exposure is not authored; `conflicting_alloc_rejected` (rebind rejected) is covered for every option.
+3. **BLK-P10** — verifier-regression, `perf-baseline` and attach-mode gates are not authored; S-PIG-41/63 are placement-neutral.
+4. **Item 12** — lag-aware watch reconfirmation gates S-PIG-48/66 and the watch fallout files.
+5. **D5 confirmation** — items 1–11 gate every scaffold batch.
+5a. **Accepted-exposure candidate (user acknowledgement required)** — the pre-commit rollback real-owner Tier-3 check: the only production-reachable pre-commit failure input is `BACKEND_MAP` capacity (`crates/overdrive-bpf/src/maps/backend_map.rs:46`, `MAX_ENTRIES = 65_536`); the fill's native-metal runtime is unmeasured. If not run, `RollbackPreservesPriorGeneration` has model + equivalence/unit coverage only. No seam is added.
+6. **DESIGN gaps routed back (no invention):** U1 `gateway_identity` driver placement (`tests/conformance` vs the owner's `src/`, because `dispatch_issue`/`dispatch_drop` are `pub(crate)`); U2 `selection_receipt` conformance owner is a Sim pair (fails the per-driver checklist items 2 and 5 unless a real-`EbpfDataplane` run or an explicit pairing ruling is added; no fault-injection seam on `EbpfDataplane` is pinned for the pre-commit and post-commit failures); U4 the Sim hook's decision rule and receipt production are not pinned; U7 stale `unhealthy_is_no_backend` mentions and a Lima remark in the Obligations list; U8 `kvm-tests` named for `tests/conformance`, which has no such feature (DISTILL follows the crate's `native_metal_kvm_` selector).
+7. **Real-guest evidence** (S-PIG-01, 39, 40, 56, 69, 70, 60 graceful run, A-K3's serve-created connect) exists only on native metal; no recurring CI lane is added (P-6).
 
-Mandate evidence: every present executable scenario has a Contract Shape declaration;
-every live source-local pure property uses the exact required rustdoc line.
-PBT is confined to pure/in-memory layers and Tier 3 is example-based. State
-delta assertions name public Route/status/demand/receipt/cleanup surfaces, not
-private owner fields. Rust domain nouns reuse the exact DESIGN types and test
-helpers delegate to production builders/ports. Adapted Mandate-12
-step-reuse-ratio is informational: 55 scenario contracts / 16 unique driving
-families = 3.44x, the natural ceiling for this cross-layer security journey;
-no ratio-driven vocabulary collapse was applied.
-
-Because C4a retains its documented gap, this audit does not authorize a
-DISTILL-to-DELIVER handoff; the handoff is blocked only by C4a. The C6b/C6c
-closure does not alter the accepted public redaction boundary:
-internal causes remain observable only at their narrow owner/adapter test
-boundary, while the Gateway Application/status consumer exposes the fixed
-redacted causes. DESIGN approval is recorded above and is not a remaining gate.
+Mandate evidence plan: every executable scenario carries a Contract Shape; state-delta assertions name public Route/status/receipt/cleanup surfaces, not private owner fields; PBT is confined to pure/in-memory layers; Tier 3 is example-based; Rust domain nouns reuse the exact DESIGN types. Adapted step-reuse ratio is informational and is measured after phase 2.
 
 ## Wave: DISTILL / [REF] Pre-DELIVER RED classification
 
-Classification: **RED / MISSING_FUNCTIONALITY**.
+**Not executed.** Phase 1 wrote no code. The classification below states what phase 2 must demonstrate before handoff, per scenario family; it is not a result.
 
-This is a draft execution signal only. DESIGN is approved; the signal does not
-override the C4a blocker or the C6b/C6c closure; the pending DELIVER ignores
-remain the normal one-at-a-time activation markers for the already-authored
-bodies.
-
-- Lima cargo check over the workspace, all targets and integration-tests
-  feature compiled every inactive Rust body successfully; workspace Clippy
-  passed with warnings denied. Targeted nextest ran the live
-  `target.service` parser and exact IntentStore lag-preservation tests: 2/2
-  passed.
-- Default `cargo dst --seed 54104` passed all 43 active invariants. Neither
-  pending Gateway Application invariant was default-reachable, exactly as the
-  DESIGN activation boundary requires. `cargo xtask bpf-build`, `dst-lint`,
-  OpenAPI drift check, shellcheck, actionlint, the large-output/tool-failure
-  cleartext-guard regression, certificate verification and the nonzero outcome
-  collision check all passed.
-- A default-feature overdrive binary was built, then AT-PIG-E2E-1 was invoked
-  inside Lima as root with an absent scratch path.
-- The checked-in test CA was created successfully and the built product reached
-  its real typed serve argv boundary. Clap accepted all four exact gateway
-  flags, then `PublicCertifiedKeyId::from_str` reached the production
-  `PublicCertifiedKeyId::new` RED scaffold and failed with `SCAFFOLD:
-  public-ingress label constructor`. The runner exited 1.
-- The failure is not import, fixture, certificate-generation, privilege or
-  environment setup failure. It is the intended first missing production
-  behavior. Every later Rust scenario remains inactive behind a reasoned
-  pending-DELIVER ignore marker except the explicitly active, already-delivered
-  prerequisite checks S-PIG-48 and S-PIG-55.
+- Pure and in-memory scenarios (KEEP/ADAPT in `overdrive-core`, `overdrive-gateway`, `overdrive-cli`): compile green with the reasoned ignore; once un-ignored, RED must be `MISSING_FUNCTIONALITY` at a production scaffold call (SCAFFOLD text), never an import, fixture or setup failure.
+- S-PIG-41, 56, 57 (T3), 63, 64: RED because the selection arm program does not exist (P-10 unruled) — the first assertion is the missing `NoBackend`/`Selected` receipt on a registered socket, not a harness error. If P-10 is not ruled the family stays blocked and unclassified.
+- `AT-PIG-E2E-1` and N cases: RED at the first missing production behaviour on native metal (`open_upstream` scaffold), classified only after a metal run.
+- Quint drivers: compile green under `integration-tests`; ignored with `pending DELIVER quint-conformance-<module>`; `conformance-lint` clean.
+- S-PIG-48 (active prerequisite after item-12 reconfirmation): GREEN on delivery of the lag-aware watch; it is the only active body.
+- Phase 2 records one classification line per failing scenario in this section (no separate file); any `IMPORT_ERROR`, `FIXTURE_BROKEN` or `OBSERVABLE_NOT_AT_PORT` blocks handoff.
