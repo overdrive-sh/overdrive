@@ -8,6 +8,18 @@
 #
 # Idempotent: re-run freely. Subsequent syncs are incremental.
 #
+# Locking model (two lock levels, always taken global -> tree):
+#   * GLOBAL lease (/run/lock/overdrive-metal-shared.lock): one holder per box.
+#     --run, --shell and bootstrap (provisioning) take it, because they mutate
+#     node-global kernel state (nft tables, routes, cgroups, netns, KVM).
+#   * TREE lock (/run/lock/overdrive-metal-tree-<tree>.lock): one holder per
+#     branch tree. --sync-only takes ONLY this lock, since it writes only into
+#     the branch's private tree, so it never waits behind another workspace's
+#     run. --run also takes it (after the global lease) around its own rsync,
+#     and the durable run command re-takes it for the whole command, so a
+#     concurrent sync of the same tree is excluded even after the controller
+#     disconnects. See the run-mode comments below.
+#
 # Usage:
 #   infra/metal/bootstrap.sh root@1.2.3.4
 #   infra/metal/bootstrap.sh root@1.2.3.4 --data-disk /dev/sdb
@@ -21,7 +33,27 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # Ubuntu images log in as `ubuntu`, not `root` (root's authorized_keys carries
 # the stock "please login as ubuntu" forced command), so anything hardcoded
 # under /root fails on the first mkdir. The login user IS the build user.
-REMOTE_SUBDIR="overdrive"
+#
+# Each branch syncs into its own tree, so parallel workspaces on the shared
+# box never rsync over (or --delete inside) another session's tree. The
+# directory is the current branch name with every character outside
+# [A-Za-z0-9._-] (notably `/`) replaced by `-`; a detached HEAD falls back to
+# the local workspace directory name. OVERDRIVE_METAL_REMOTE_SUBDIR overrides
+# the whole subdirectory (relative to the remote HOME). Each tree keeps its own
+# cargo target dir, so a branch's first run on the box builds cold.
+if [ -n "${OVERDRIVE_METAL_REMOTE_SUBDIR:-}" ]; then
+  REMOTE_SUBDIR="${OVERDRIVE_METAL_REMOTE_SUBDIR}"
+else
+  BRANCH="$(git -C "${REPO}" symbolic-ref --quiet --short HEAD 2>/dev/null || basename "${REPO}")"
+  REMOTE_SUBDIR="overdrive-branches/$(printf '%s' "${BRANCH}" | tr -c 'A-Za-z0-9._-' '-')"
+fi
+case "${REMOTE_SUBDIR}" in
+  ""|/*|*..*) echo "FATAL: invalid remote subdirectory '${REMOTE_SUBDIR}'" >&2; exit 64 ;;
+esac
+[[ "${REMOTE_SUBDIR}" =~ ^[A-Za-z0-9._/-]+$ ]] || {
+  echo "FATAL: remote subdirectory '${REMOTE_SUBDIR}' has characters outside [A-Za-z0-9._/-]" >&2
+  exit 64
+}
 SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30)
 
 [ $# -ge 1 ] || { echo "usage: $0 <user@host> [--data-disk DEV] [--sync-only]" >&2; exit 1; }
@@ -79,15 +111,33 @@ fi
 METAL_LOCK_PATH="${OVERDRIVE_METAL_LOCK_PATH:-/run/lock/overdrive-metal-shared.lock}"
 METAL_OWNER_PATH="${OVERDRIVE_METAL_OWNER_PATH:-/run/lock/overdrive-metal-shared.owner}"
 METAL_LEASE_TIMEOUT_SECONDS="${OVERDRIVE_METAL_LEASE_TIMEOUT_SECONDS:-120}"
+# Per-tree lock: named after the remote tree (REMOTE_SUBDIR with `/` -> `-`).
+# Both paths are overridable, mirroring the global pair, for test fixtures.
+TREE_NAME="${REMOTE_SUBDIR//\//-}"
+METAL_TREE_LOCK_PATH="${OVERDRIVE_METAL_TREE_LOCK_PATH:-/run/lock/overdrive-metal-tree-${TREE_NAME}.lock}"
+METAL_TREE_OWNER_PATH="${OVERDRIVE_METAL_TREE_OWNER_PATH:-/run/lock/overdrive-metal-tree-${TREE_NAME}.owner}"
 METAL_RUNS_ROOT="/var/lib/overdrive-metal/runs"
 LEASE_TOKEN="${RUN_ID:-$(printf '%s-%s-%s' "$$" "$(date +%s)" "${RANDOM}" | shasum -a 256 | cut -c1-24)}"
 LEASE_TMP=""
 LEASE_PID=""
 RUN_CONTROL_OPEN=0
 START_SENT=0
+# Second (per-tree) holder, used by --run only; its release stream is fd 6.
+TREE_PID=""
+
+# Release the per-tree holder: closing its release stream (fd 6) ends the
+# remote holder, which drops the flock and its owner metadata.
+release_tree_lease() {
+  exec 6>&- 2>/dev/null || true
+  if [ -n "${TREE_PID}" ]; then
+    wait "${TREE_PID}" 2>/dev/null || true
+    TREE_PID=""
+  fi
+}
 
 cleanup_lease() {
   if [ -n "${LEASE_TMP}" ]; then
+    release_tree_lease
     if [ "${RUN_MODE}" -eq 1 ] && [ "${START_SENT}" -eq 0 ] && [ "${RUN_CONTROL_OPEN}" -eq 1 ]; then
       printf 'ABORT\n' >&9 2>/dev/null || true
     fi
@@ -199,7 +249,20 @@ if [ "${COLLECT_MODE}" -eq 1 ]; then
 fi
 
 # ---------------------------------------------------------------------------
-log "acquire canonical metal lease (${METAL_LOCK_PATH})"
+# --sync-only writes only into this branch's private tree, so it takes the
+# per-tree lock INSTEAD of the global lease; every other action takes the
+# global lease (run additionally takes the tree lock, below).
+if [ "${SYNC_ONLY}" -eq 1 ]; then
+  HOLDER_LOCK_PATH="${METAL_TREE_LOCK_PATH}"
+  HOLDER_OWNER_PATH="${METAL_TREE_OWNER_PATH}"
+  HOLDER_UMASK="umask 022; "
+  log "acquire metal tree lock (${HOLDER_LOCK_PATH})"
+else
+  HOLDER_LOCK_PATH="${METAL_LOCK_PATH}"
+  HOLDER_OWNER_PATH="${METAL_OWNER_PATH}"
+  HOLDER_UMASK=""
+  log "acquire canonical metal lease (${HOLDER_LOCK_PATH})"
+fi
 # ---------------------------------------------------------------------------
 ACTION="bootstrap"
 [ "${SYNC_ONLY}" -eq 1 ] && ACTION="sync"
@@ -216,6 +279,9 @@ SOURCE_DIGEST="$({
         shasum -a 256 "${REPO}/${path}"
       done
 } | shasum -a 256 | awk '{print $1}')"
+EXPECTED_MARKER="commit=${COMMIT}
+workspace=${WORKSPACE}
+source_digest=${SOURCE_DIGEST}"
 
 LEASE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/overdrive-metal-lease.XXXXXX")"
 mkfifo "${LEASE_TMP}/release"
@@ -232,14 +298,28 @@ if [ "${RUN_MODE}" -eq 1 ]; then
     printf -v QUOTED '%q' "${arg}"
     JOINED+="${QUOTED} "
   done
+  # The durable command re-takes the per-tree lock for its whole lifetime and,
+  # under that lock, re-verifies the synced source marker before running the
+  # user command. The controller releases its own tree lock just before START,
+  # and the run outlives the controller's ssh session, so this guard is what
+  # keeps a later sync of the same tree out for the run's full duration; a
+  # sync that slips into the release->reacquire window changes the marker and
+  # the run fails closed. fd 7 is opened read-only (no O_CREAT: the file was
+  # created by the controller's tree holder) and stays open in this login
+  # shell, so the command must not be exec'd: it runs, then its status is
+  # returned.
+  printf -v TREE_GUARD \
+    'exec 7<%q && flock -w %q 7 || { echo "FATAL: could not acquire metal tree lock %s" >&2; exit 75; }; [ "$(cat %q/.overdrive-metal-source 2>/dev/null)" = %q ] || { echo "FATAL: metal source marker changed before the run started; refusing to run against a different tree" >&2; exit 1; }; ' \
+    "${METAL_TREE_LOCK_PATH}" "${METAL_LEASE_TIMEOUT_SECONDS}" "${METAL_TREE_LOCK_PATH}" \
+    "${REMOTE_DIR}" "${EXPECTED_MARKER}"
   if [ "${NO_SUDO}" -eq 1 ]; then
-    INNER="cd ${REMOTE_DIR} && ${JOINED}"
+    INNER="${TREE_GUARD}cd ${REMOTE_DIR} && ${JOINED}; rc=\$?; exit \"\$rc\""
     EXECUTION_MODE="login"
   else
     printf -v METAL_RUN_ENV \
       'OVERDRIVE_METAL_KERNEL=%q OVERDRIVE_METAL_ROOTFS=%q' \
       "${OVERDRIVE_METAL_KERNEL:-}" "${OVERDRIVE_METAL_ROOTFS:-}"
-    INNER="cd ${REMOTE_DIR} && sudo -n env \"HOME=\$HOME\" \"PATH=\$PATH\" ${METAL_RUN_ENV} ${JOINED}"
+    INNER="${TREE_GUARD}cd ${REMOTE_DIR} && sudo -n env \"HOME=\$HOME\" \"PATH=\$PATH\" ${METAL_RUN_ENV} ${JOINED}; rc=\$?; exit \"\$rc\""
     EXECUTION_MODE="privileged"
   fi
   # Decode the helper into bash -c's argument. Every durable argument is
@@ -254,11 +334,13 @@ if [ "${RUN_MODE}" -eq 1 ]; then
     "${REMOTE_DIR}" "${REMOTE_USER}" "${EXECUTION_MODE}" "${REMOTE_HOME}" \
     "${REMOTE_PATH}" "${INNER}" "${METAL_RUNS_ROOT}"
 else
-  # Existing sync/shell lease holder: its stdin remains the release stream,
-  # with no remote helper file written before the canonical lock exists.
+  # Existing sync/shell/bootstrap lease holder: its stdin remains the release
+  # stream, with no remote helper file written before the lock exists. For
+  # --sync-only the lock is the per-tree one (created 0644 so the durable run
+  # command's login user can open it read-only).
   printf -v REMOTE_LEASE_CMD \
-    'lease_script=$(printf %%s %q | base64 -d); exec %s bash -c "$lease_script" overdrive-metal-lease %q %q %q %q %q %q %q %q' \
-    "${LEASE_HELPER_B64}" "${SUDO}" "${METAL_LOCK_PATH}" "${METAL_OWNER_PATH}" \
+    'lease_script=$(printf %%s %q | base64 -d); %sexec %s bash -c "$lease_script" overdrive-metal-lease %q %q %q %q %q %q %q %q' \
+    "${LEASE_HELPER_B64}" "${HOLDER_UMASK}" "${SUDO}" "${HOLDER_LOCK_PATH}" "${HOLDER_OWNER_PATH}" \
     "${METAL_LEASE_TIMEOUT_SECONDS}" "${LEASE_TOKEN}" "${ACTION}" "${SCENARIO}" \
     "${WORKSPACE}" "${COMMIT}"
 fi
@@ -310,6 +392,41 @@ if [ "${RUN_MODE}" -eq 1 ]; then
     exit "${status}"
   fi
   cat "${LEASE_TMP}/status"
+
+  # Per-tree lock, taken AFTER the global lease (lock order is always
+  # global -> tree; --sync-only takes only the tree lock, so no cycle). It
+  # excludes a concurrent sync of this tree while this controller rsyncs and
+  # writes the source marker. Nothing mutates before it is held. The holder
+  # ssh is started with fd 9 closed so it cannot keep the global release
+  # stream open.
+  TREE_TOKEN="${LEASE_TOKEN}-tree"
+  mkfifo "${LEASE_TMP}/tree-release"
+  printf -v TREE_LEASE_CMD \
+    'lease_script=$(printf %%s %q | base64 -d); umask 022; exec %s bash -c "$lease_script" overdrive-metal-lease %q %q %q %q %q %q %q %q' \
+    "${LEASE_HELPER_B64}" "${SUDO}" "${METAL_TREE_LOCK_PATH}" "${METAL_TREE_OWNER_PATH}" \
+    "${METAL_LEASE_TIMEOUT_SECONDS}" "${TREE_TOKEN}" "${ACTION}" "${SCENARIO}" \
+    "${WORKSPACE}" "${COMMIT}"
+  log "acquire metal tree lock (${METAL_TREE_LOCK_PATH})"
+  ssh "${SSH_OPTS[@]}" "${TARGET}" "${TREE_LEASE_CMD}" \
+    <"${LEASE_TMP}/tree-release" >"${LEASE_TMP}/tree-status" 2>&1 9>&- &
+  TREE_PID=$!
+  exec 6>"${LEASE_TMP}/tree-release"
+  for _attempt in $(seq 1 "${LEASE_POLL_ATTEMPTS}"); do
+    if grep -q "OVERDRIVE_METAL_LEASE_ACQUIRED token=${TREE_TOKEN}" "${LEASE_TMP}/tree-status"; then
+      break
+    fi
+    if ! kill -0 "${TREE_PID}" 2>/dev/null; then
+      cat "${LEASE_TMP}/tree-status" >&2
+      exit 75
+    fi
+    sleep 0.1
+  done
+  if ! grep -q "OVERDRIVE_METAL_LEASE_ACQUIRED token=${TREE_TOKEN}" "${LEASE_TMP}/tree-status"; then
+    echo "FATAL: tree lock holder did not acknowledge acquisition" >&2
+    cat "${LEASE_TMP}/tree-status" >&2
+    exit 75
+  fi
+  cat "${LEASE_TMP}/tree-status"
 else
   for _attempt in $(seq 1 "${LEASE_POLL_ATTEMPTS}"); do
     if grep -q "OVERDRIVE_METAL_LEASE_ACQUIRED token=${LEASE_TOKEN}" "${LEASE_TMP}/status"; then
@@ -408,16 +525,10 @@ if [ "${WITH_GIT}" -eq 1 ]; then
      git -C ${REMOTE_DIR} status --short --branch | head -5"
 fi
 
-SOURCE_MARKER="commit=${COMMIT}
-workspace=${WORKSPACE}
-source_digest=${SOURCE_DIGEST}"
-printf '%s\n' "${SOURCE_MARKER}" | ssh "${SSH_OPTS[@]}" "${TARGET}" \
+printf '%s\n' "${EXPECTED_MARKER}" | ssh "${SSH_OPTS[@]}" "${TARGET}" \
   "cat > ${REMOTE_DIR}/.overdrive-metal-source"
 else
   log "no-sync source identity check"
-  EXPECTED_MARKER="commit=${COMMIT}
-workspace=${WORKSPACE}
-source_digest=${SOURCE_DIGEST}"
   ACTUAL_MARKER="$(ssh "${SSH_OPTS[@]}" "${TARGET}" \
     "cat ${REMOTE_DIR}/.overdrive-metal-source 2>/dev/null" || true)"
   if [ "${ACTUAL_MARKER}" != "${EXPECTED_MARKER}" ]; then
@@ -447,6 +558,9 @@ if [ "${RUN_MODE}" -eq 1 ]; then
   # START is the one controller word.  Closing the pipe immediately after it
   # lets the service detach all three inherited descriptors and makes an SSH
   # disconnect harmless; it never retries or submits the command again.
+  # The tree lock is released only now, after the preflight; the durable
+  # command re-takes it and re-verifies the marker (see TREE_GUARD).
+  release_tree_lease
   START_SENT=1
   printf 'START\n' >&9 2>/dev/null || true
   exec 9>&- || true
