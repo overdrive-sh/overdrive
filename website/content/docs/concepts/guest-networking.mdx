@@ -8,10 +8,10 @@ translates those sockets into flows carried over vsock to the host. The host
 opens destination sockets and applies mesh resolution and mTLS enforcement.
 The VM attachment creates no per-VM host network namespace, veth, TAP, or bridge.
 
-Process workloads use their own network namespaces and the host's TPROXY
-capture path. The VM path shares node listeners, forwarding capacity, and host
-policy resources while keeping each allocation's address, launch identity,
-flows, and cleanup separately owned.
+All supported workloads run as Linux microVMs. Shared node listeners, forwarding
+capacity, and host policy resources serve their traffic while each allocation
+keeps its own address, launch identity, flows, and cleanup ownership. The host
+agent and VMM are host processes, not another workload execution mode.
 
 <Mermaid chart={`
 flowchart LR
@@ -135,8 +135,7 @@ is unbuilt; there is no documented operator TOML key for them.
 
 - **TCP and mesh identity.** Guest flows reach host resolution and mTLS
   enforcement; incoming mesh streams can be delivered to guest applications.
-  VM services use the same declared listeners and health lifecycle as process
-  services.
+  VM services declare listeners and use the service health lifecycle.
 - **DNS and remote UDP.** Guest DNS and connected or unconnected remote UDP
   preserve datagram boundaries, including empty datagrams.
 - **Service-VIP UDP to a VM backend is unbuilt.** This is

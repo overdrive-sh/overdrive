@@ -224,7 +224,7 @@ inputs.
 
 `reconcile` returns `Vec<Action>` — typed descriptions of what should happen, not
 the happening itself. A separate **action shim** executes them: `StartAllocation`
-launches a process, `DataplaneUpdateService` programs an eBPF map,
+boots a microVM, `DataplaneUpdateService` programs an eBPF map,
 `WriteServiceBackendRow` records observation, `StartWorkflow` launches a durable
 sequence. This boundary is load-bearing. It keeps `reconcile` pure and puts every
 side effect behind one gate the runtime drives, which is what lets the loop be

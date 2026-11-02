@@ -5,16 +5,12 @@ import { HoverImpeller } from "@/components/brand";
 export const metadata = {
 	title: "Overdrive — Everything you run, on one platform",
 	description:
-		"Deploy web services, background jobs, microVMs, unikernels, WebAssembly functions, and sandboxes on one platform — encrypted, load-balanced, and self-healing from the first deploy, on your own hardware.",
+		"Deploy services and jobs in Linux microVMs on one platform — encrypted, load-balanced, and self-healing from the first deploy, on your own hardware.",
 };
 
 const workloadKinds = [
 	"Services",
 	"Jobs",
-	"microVMs",
-	"Unikernels",
-	"WASM",
-	"Sandboxes",
 ] as const;
 
 const workloadIconPaths = {
@@ -36,7 +32,7 @@ const platformActions = [
 ] as const;
 
 const stats = [
-	{ value: "6", label: "workload kinds, one control plane" },
+	{ value: "VM", label: "isolation for every workload" },
 	{ value: "1", label: "file to describe an app" },
 	{ value: "0", label: "sidecars to inject" },
 	{ value: "mTLS", label: "on by default, no certs to rotate by hand" },
@@ -45,8 +41,8 @@ const stats = [
 const capabilities = [
 	{
 		tag: "RUN",
-		title: "Run anything",
-		body: "Long-running services, batch jobs, microVMs, unikernels, WebAssembly functions, and sandboxes run side by side under one control plane — not a separate stack for the workloads that don't fit in a container.",
+		title: "Run services and jobs in microVMs",
+		body: "Long-running services and batch jobs run in Linux microVMs under one control plane. Each workload has its own guest kernel. Additional guest runtimes remain future work.",
 	},
 	{
 		tag: "SECURITY",
@@ -154,7 +150,7 @@ const faqs = [
 	},
 	{
 		q: "What can I run on it?",
-		a: "Long-running services, batch jobs, microVMs, unikernels, WebAssembly functions, and sandboxes — six workload kinds under one control plane, described in one spec format.",
+		a: "Services and jobs in Linux microVMs, described with a [vm] block. You supply a supported guest kernel and matching root filesystem. Unikernel and WebAssembly runtimes are future work.",
 	},
 	{
 		q: "How does it compare to Kubernetes, Nomad, or Fly.io?",
@@ -166,8 +162,15 @@ const deploymentSpec = `[service]
 id       = "payments"
 replicas = 1
 
-[exec]
+[vm]
 command = "/opt/payments/bin/server"
+args = ["--port", "8080"]
+kernel = "/srv/vm/kernel"
+rootfs = "/srv/vm/payments.ext4"
+
+[resources]
+cpu_milli = 500
+memory_bytes = 134217728
 
 [[listener]]
 port = 8080

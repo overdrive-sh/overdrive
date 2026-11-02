@@ -5,14 +5,14 @@ description: Linux microVM workloads run under Cloud Hypervisor with hardware is
 
 A `[vm]` workload runs as a Cloud Hypervisor microVM: its own Linux kernel, its
 own memory, isolated from the host by the same hardware virtualization a cloud
-instance uses. A process workload shares the host kernel; a microVM does not. You
+instance uses. This is Overdrive's only supported workload execution mode. You
 deploy it with the same `overdrive deploy`, describe it with the same
 `overdrive workload describe`, and stop it with the same `overdrive job stop` —
 the driver underneath differs, the verbs do not.
 
 <Callout title="The short version">
 	A `[vm]` block boots a Cloud Hypervisor microVM from a kernel and rootfs you
-	supply, in place of a process. The allocation reaches `Running` only after the
+	supply. The allocation reaches `Running` only after the
 	guest has booted, and its terminal state carries the guest's real exit code —
 	not the hypervisor's. The hypervisor process runs non-root, seccomp-filtered,
 	and Landlock-confined. A microVM runs as a `[job]` or `[service]` on a single
@@ -20,23 +20,17 @@ the driver underneath differs, the verbs do not.
 	[Where it stands](#where-it-stands).
 </Callout>
 
-## Why a VM instead of a process
+## The guest kernel is the workload boundary
 
-A process workload shares the host kernel. That is cheap and fast, and for most
-workloads it is enough. It is also the boundary an attacker crosses with a single
-kernel bug: every process on the node sits behind the same kernel.
+Every workload runs behind hardware virtualization with its own guest kernel.
+The node agent and Cloud Hypervisor remain host processes, but application
+commands execute inside the guest. A guest kernel exploit must also cross the
+virtualization and VMM boundary to reach the host.
 
-A microVM moves the boundary down to the hardware. The guest runs its own kernel
-on virtual CPUs. A guest kernel exploit crosses a different boundary from an
-exploit in a process workload: it must also escape hardware virtualization and
-the VMM to reach the host. The guest kernel can differ from the host kernel,
-but it must still come from a supported guest kit.
-
-The cost is real and worth naming. A microVM boots a kernel and mounts a
-filesystem before the workload runs, so it starts slower than a process that just
-`exec`s a binary. It needs a kernel image and a root filesystem, where a process
-needs only a binary on the host. Reach for a VM when the isolation or the guest
-kernel earns that cost; reach for `[exec]` when it does not.
+The guest kernel can differ from the host kernel, but it must come from a
+supported guest kit. Each launch needs a kernel image and root filesystem,
+then boots the guest before releasing the application command. These artifact
+and lifecycle requirements apply to every supported workload.
 
 ## An honest exit code
 
@@ -56,8 +50,7 @@ before powering off. The host drains the report before finalizing the VMM exit;
 a zero VMM exit is not evidence of a zero workload exit.
 
 This is what makes a microVM a first-class workload rather than a black box the
-platform launches and hopes for. The restart-and-backoff behavior a process
-workload gets applies unchanged, because it runs off the same honest exit signal.
+platform launches and hopes for. Restart and backoff decisions use that guest-reported exit signal.
 
 ## How it stays confined
 
@@ -123,7 +116,7 @@ A `[vm]` workload boots, runs, and reports honestly through `overdrive serve` an
 
 ## Where to go next
 
-- Deploy one: the [`[vm]` section of the deploy guide](/docs/how-to/deploy-a-workload#run-a-microvm-instead-of-a-process).
+- Deploy one: the [`[vm]` section of the deploy guide](/docs/how-to/deploy-a-workload#supply-the-guest-artifacts).
 - Where the driver sits in the running node: [the architecture overview](/docs/concepts/architecture).
 - The encryption and identity layers used by mesh traffic:
   [transparent mTLS](/docs/concepts/transparent-mtls) and

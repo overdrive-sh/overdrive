@@ -1,10 +1,10 @@
 ---
 title: Architecture overview
-description: One node runs a reconciling Rust control plane over redb, process and Linux microVM workloads, eBPF service steering, shared guest flow transport, and host mTLS enforcement.
+description: One node runs a reconciling Rust control plane over redb, Linux microVM workloads, eBPF service steering, shared guest flow transport, and host mTLS enforcement.
 ---
 
 Overdrive runs a control plane and worker in one process on one node. The
-control plane reconciles declared intent into process and Linux microVM
+control plane reconciles declared intent into Linux microVM
 allocations. eBPF steers supported service traffic; host mTLS enforcement
 protects mesh TCP; shared vsock transport connects Linux guests without a host
 interface per VM. The [remaining boundaries](#what-is-not-here-yet) distinguish
@@ -27,14 +27,13 @@ flowchart TB
     intent[("IntentStore<br/>redb")]
     obs[("ObservationStore<br/>redb")]
     subgraph worker["Worker"]
-      exec["ExecDriver<br/>process in cgroup"]
       vm["MicroVM driver<br/>Cloud Hypervisor + vsock"]
-      probes["Probe runner<br/>TCP · HTTP · Exec"]
+      probes["Probe runner<br/>TCP · HTTP"]
     end
     dp["eBPF dataplane<br/>XDP + cgroup hooks"]
+    gn["Guest-flow owner<br/>vsock + host mTLS"]
   end
 
-  wl["Workload process"]
   guest["Linux microVM<br/>guest capture + kernel forwarder"]
 
   cli -- "deploy / inspect · mTLS" --> api
@@ -42,16 +41,14 @@ flowchart TB
   loop -- "desired" --> intent
   loop -- "actual" --> obs
   loop -- "persist memory" --> views
-  loop -- "StartAllocation" --> exec
   loop -- "program maps" --> dp
-  exec -- "runs" --> wl
   loop -- "StartAllocation" --> vm
   vm -- "boots / observes guest" --> guest
   vm -- "alloc status" --> obs
-  exec -- "alloc status" --> obs
-  probes -- "probe" --> wl
+  probes -- "probe over guest stream" --> guest
   probes -- "probe results" --> obs
-  dp -- "forwards traffic (kernel)" --> wl
+  dp -- "steers host service traffic" --> gn
+  gn -- "flow transport" --> guest
 `} />
 
 The boxes below walk through this diagram — the single binary, the two stores,
@@ -69,7 +66,7 @@ single-node one, and the rest of this page describes that path.
 Before accepting work, startup validates the required host capabilities and
 refuses to boot if a required check fails:
 
-- **Probes the cgroup filesystem.** The worker runs Linux processes inside
+- **Probes the cgroup filesystem.** The worker places VMM processes inside
   cgroups; if it cannot reach a usable cgroup v2 hierarchy, boot stops with a
   structured `health.startup.refused` event rather than limping along.
 - **Loads and probes the eBPF dataplane.** The XDP and cgroup programs are
@@ -98,8 +95,8 @@ see how the pieces connect.
 3. The **convergence loop** notices the new intent, computes the gap between what
    should run and what is running, and emits actions to close it.
 4. An action like `StartAllocation` reaches the **worker**, which selects a
-   workload driver and places its process under a cgroup. `ExecDriver` runs a process; the microVM
-   driver boots Cloud Hypervisor and watches guest readiness and exit reports.
+   VM driver, places the VMM process under a cgroup, boots Cloud Hypervisor,
+   and watches guest readiness and exit reports.
 5. The worker writes the allocation's status into the **ObservationStore**. The
    next turn of the loop reads that status as the new "actual," and the gap is
    closed.
@@ -186,44 +183,44 @@ reconciler contract itself — the pure function, its typed memory, and how to w
 one — see [reconcilers](/docs/concepts/reconcilers).
 
 The same shape makes the loop self-heal. A reconciler recomputes the gap between
-desired and actual every time it runs, so it never assumes a past action took
-effect — it checks. A half-finished operation is just a gap the next pass
-closes: an allocation that crashed partway through starting is started again, a
-process network sandbox left half-provisioned by an interrupted boot is
-reconciled rather than adopted as-is. VM attachment has a separate shared
-guest-network owner; it does not provision a veth pair per VM. The control plane
-converges toward the declared state or keeps trying; it does not strand half-applied state for someone to fix by hand.
+desired and actual rather than assuming a past action succeeded. The driver
+registry, allocation-to-driver index, and exit observers retain separate
+ownership even though the only supported workload adapter is `VmDriver`.
 
-## The worker runs processes and Linux microVMs
+## The worker runs Linux microVMs
 
-`ExecDriver` runs a Linux process with
-`std::process::Command`, places it in a cgroup under
-`overdrive.slice/workloads.slice`, and watches its exit. A spec's `[exec]` block
-— `command` plus `args` — describes the process to run; the `[resources]` block
-(`cpu_milli`, `memory_bytes`) rides along to placement. The spec's top-level
-section names the workload's *kind* — `[service]`, `[job]`, or `[schedule]` —
-which is orthogonal to the driver that runs it.
+Every supported workload uses a `[vm]` block. `command` and `args` name the
+program inside the guest, while `kernel` and `rootfs` name operator-supplied
+host artifacts from a matching guest kit. `[resources]` sizes the guest's CPU
+and memory. Job and service are lifecycle kinds, not alternative host-process
+execution modes.
 
-A `[vm]` block selects the Cloud Hypervisor driver for a job or service. The
-VMM process runs non-root under seccomp, Landlock, and the allocation's cgroup.
-It shares the host network namespace. Guest capture and a kernel forwarder
-transport application flows over vsock; the VM attachment creates no per-VM
-host namespace, TAP, or bridge. The driver publishes readiness and the
-workload's exit status from the guest report, not from a successful VMM exit.
+The Cloud Hypervisor process runs non-root under seccomp, Landlock, and the
+allocation's cgroup. It shares the host network namespace. Guest capture and
+a kernel forwarder transport application flows over vsock without a per-VM
+host network namespace, veth, TAP, or bridge. The driver reports guest readiness
+and the workload's guest-reported exit status, not a successful VMM exit.
 
-See [microVMs](/docs/concepts/microvms) for the matching guest-kit and rootfs
-requirements, and [guest networking](/docs/concepts/guest-networking) for
-transport capacity, lifecycle, and traffic limits. Unikernel and WASM drivers
-remain design targets.
+The host agent, VMM, and helpers are processes. They do not provide a supported
+host-process workload driver. VMM absence can leave the registry empty while
+the control plane starts, and a later VM launch reports the missing capability.
+The composition root declares whether VM capability is optional or required.
+A required capability failure refuses startup, while an optional unavailable
+capability leaves no VM adapter to execute work.
+
+See [microVMs](/docs/concepts/microvms) and
+[guest networking](/docs/concepts/guest-networking) for artifact requirements,
+capacity, lifecycle, and traffic limits. Additional guest runtimes remain
+future work.
 
 ## Health checks close a second loop
 
 A service declares health-check probes — startup, readiness, and liveness — and
 the worker runs them. When an allocation reaches running, the worker spawns one
 task per declared probe; each ticks on its own interval and executes the probe
-through a port trait. All three mechanics ship: `TcpProber` connects a socket,
-`HttpProber` issues a plain-HTTP GET, and `ExecProber` runs a command inside the
-workload's cgroup. The result of every tick is written to the ObservationStore as
+through a port trait. TCP and HTTP probes dial through the guest-network owner. An HTTP probe
+issues a plain-HTTP GET over the guest stream. Command-execution probes are
+unbuilt. The result of every tick is written to the ObservationStore as
 a probe-result row.
 
 That write is what closes the loop. The probe runner does not decide anything —
@@ -243,9 +240,7 @@ uses a stable VIP and kernel-side steering; local socket hooks and packet-path
 XDP programs handle different entry points. These address-rewrite programs do
 not implement TLS or replace the workload lifecycle.
 
-Process workloads have per-allocation network namespaces and host TPROXY
-capture. Linux microVMs have a different attachment: guest eBPF captures
-ordinary application sockets, and `ovd_fwd` transports their flows over vsock
+Guest eBPF captures ordinary application sockets, and `ovd_fwd` transports their flows over vsock
 through shared node listeners. The host opens destination sockets and routes
 mesh TCP into the node agent's mTLS enforcement.
 
@@ -284,7 +279,7 @@ between workloads; see [transparent mTLS](/docs/concepts/transparent-mtls).)
 Every source of nondeterminism — the clock, the network, randomness, the
 dataplane, the workload driver, the stores — sits behind a port trait in
 `overdrive-core`. Production wires the real adapters (`SystemClock`,
-`EbpfDataplane`, `ExecDriver`, the redb stores); the test harness wires
+`EbpfDataplane`, `VmDriver`, the redb stores). The test harness wires
 in-process simulated ones. The core logic never names a concrete implementation,
 so the same control plane that runs your workloads can be driven by a simulated
 world and replayed bit-for-bit from a seed. A lint gate keeps direct calls to the

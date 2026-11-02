@@ -57,7 +57,9 @@ The `--bind` flag above controls the operator API, not guest flow listeners.
 
 Deploy a workload from a TOML spec file. See
 [Deploy a workload](/docs/how-to/deploy-a-workload) for the spec shape and a
-worked run.
+worked run. Every supported workload uses a `[vm]` driver table. The command
+and arguments execute inside the guest. HTTP and TCP are the supported health
+probe mechanics.
 
 ```bash
 overdrive deploy <SPEC> [--detach]

@@ -19,6 +19,13 @@ Overdrive still runs in ordinary user space, where it discovers services,
 builds routing tables, manages workload lifecycle, and handles failures. eBPF
 makes a few frequent, bounded decisions at the Linux network edge.
 
+<Callout title="Current workload boundary">
+Overdrive runs supported workloads in Linux microVMs. The host socket hooks
+explained below describe kernel mechanisms, not an additional host-process
+workload driver. Guest application traffic reaches the host through
+[vsock flow transport](/docs/concepts/guest-networking).
+</Callout>
+
 ## A small rule at a guarded junction
 
 Think of Linux networking as a road network with guarded junctions. At a few

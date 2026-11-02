@@ -20,6 +20,35 @@ do not rewrite prior sections without a corresponding ADR marked
 
 ---
 
+## Current workload execution boundary
+
+All supported workloads run as Linux microVMs through `VmDriver` and Cloud
+Hypervisor. `[vm]` is the only live operator driver table. Its `command` and
+`args` execute inside the guest, and its `kernel` and `rootfs` identify
+operator-supplied artifacts from a matching guest kit. HTTP and TCP are the
+supported health-probe mechanics. Host command probes are removed, and a future
+in-guest command probe belongs to GH #280.
+
+ADR-0110 through ADR-0113 supersede the host-process workload and probe clauses
+in earlier sections. The `Driver` port, VM-only tagged unions, `DriverRegistry`,
+`AllocDriverIndex`, and per-composed-driver exit observers remain the execution
+boundary. There is no host-process fallback when VM capability is unavailable.
+ADR-0219 gives the composition root the optional/required capability choice.
+
+VM application traffic uses guest capture and vsock through the shared node
+owner and in-kernel forwarder. The VM attachment creates no per-allocation host
+netns, veth, TAP, or bridge. Host TPROXY, transparent listeners, cgroups, and VMM
+processes retain their host-adapter roles. They do not provide another workload
+execution mode.
+
+The current detailed contracts are [microVM-only execution](#microvm-only-workload-execution-after-exec-removal-gh-293-adr-0110011101120113)
+and the vsock microVM attachment section. Dated source audits, reuse comparisons,
+and the changelog retain original names as historical evidence. An old Exec
+symbol in those records does not declare live API or supported execution.
+Accepted ADR records remain unchanged.
+
+---
+
 ## Status
 
 | Section | Owner | Status |
@@ -87,6 +116,11 @@ See ADR-0061 (Accepted 2026-06-02) and
 `docs/feature/single-node-dataplane-wiring/feature-delta.md`.
 
 ### Cloud Hypervisor VM driver — host-process failure domain, per-allocation host state, and the VM substrate probe (2026-08-10, GH #42)
+
+**Dated implementation audit.** Comparisons with `ExecDriver` below explain the
+original VM driver decision. That adapter and its restart-survival exception
+are removed by ADR-0110. Current VM lifecycle ownership remains as specified,
+but no comparison here reintroduces a live host-process workload.
 
 **Scope of this entry.** A VM-class workload boots through `overdrive serve` +
 `overdrive deploy` on a single node. Five decisions are recorded here because
@@ -1143,8 +1177,7 @@ threshold when it reads the row, keeping no streak of its own; it emits a
 liveness stop once per crossed row, retrying a failed stop on the next row
 still past the threshold (D-1). Each run therefore counts once, and a run
 that writes no row changes nothing and emits a not-sampled event
-(ADR-0192). Exec and process workloads keep plaintext TCP to
-`workload_addr:port`. The guest application sees host-opened connections from
+(ADR-0192). The guest application sees host-opened connections from
 the guest gateway (ADR-0174).
 
 **Outbound.** Guest TCP is resolved once at pairing: mesh destinations
@@ -1819,7 +1852,7 @@ correction rather than a decision.
 | Term | Pinned meaning | What it is NOT | Why it needed pinning |
 |---|---|---|---|
 | **Workload Kind** (`WorkloadKind ∈ {Job, Service, Schedule}`, ADR-0047) | The *shape of the lifecycle* — does it terminate, converge, or recur? Lives on the observation row (`AllocStatusRow.kind`). | **Not the driver.** | SD-1's reclamation reconciler must answer *"is this a VM allocation"* — under the Bar-2 ruling **on every tick, not only at boot**, which raises the cost of getting it wrong from once-per-restart to continuous. `kind` cannot answer it. The question is **intent-side**: resolve `workload_id` against the `Job` aggregate and match `WorkloadDriver::Vm`. Assuming a row field that does not exist is how the reap rule would have become quietly unimplementable. |
-| **Workload Driver** (`WorkloadDriver ∈ {Exec, Vm}`, intent-side, rkyv-persisted in `Job`) | The *execution substrate*. | Not the lifecycle shape; not `DriverType` (which is the wire/dispatch tag and is **not** persisted on any row — intake I-5). | Two orthogonal axes both colloquially called "kind"/"type" in prose. Every `Job × Driver` combination is meaningful, which is what makes them axes rather than one enum. |
+| **Workload Driver** (`WorkloadDriver ∈ {Vm}`, intent-side, rkyv-persisted in `Job`) | The *execution substrate*. | Not the lifecycle shape or `DriverType` (which is the wire/dispatch tag and is **not** persisted on any row — intake I-5). | Two orthogonal axes both colloquially called "kind"/"type" in prose. The supported execution family is microVM-only while lifecycle kind remains independent of the driver tag. |
 | **Restart Budget** vs **Restart Count** | Budget = remaining patience, reconciler-private, gates the action. Count = observed recurrences, durable, operator-visible. | Not synonyms; not the same number. | DD-2. The whole reclamation rule turns on exempting one and preserving the other, and one English word covers both. |
 | **Platform Reclamation** | The platform destroyed one runtime instance while the workload's intent still stands, and owes a replacement. | Not a stop, not a crash, not garbage collection (`SystemGc` = the intent is *gone*). "Reap" is one implementation of it. | DD-1. |
 | **Artifact Disposal** | Destroying per-allocation host state — cgroup scope, run directory, rootfs clone — that backs **no live runtime instance of a non-terminal allocation**. Authors no ending, writes no row, moves neither counter. | **Not** Platform Reclamation: that ends a live instance, and this one has no live instance to end. Not `SystemGc` either — `SystemGc` is a *disposition carried by an ending*; this is the absence of one. | DD-1(b). SD-1's steady-state tick does this and only this; its boot-epoch drive does both. One English verb — "reclaim" — covers them, and the whole difference is whether a terminal row is authored. |
@@ -2215,7 +2248,7 @@ The whitepaper §21 nondeterminism-trait table *is* the ports layer:
 | `Transport` | network | `TcpTransport` | `SimTransport` |
 | `Entropy` | RNG | `OsEntropy` | `SeededEntropy` |
 | `Dataplane` | kernel/eBPF | `EbpfDataplane` (Phase 2+) | `SimDataplane` |
-| `Driver` | workload exec | `CloudHypervisorDriver` etc. (Phase 2+) | `SimDriver` |
+| `Driver` | microVM execution | `VmDriver` over the `Vmm` port | `SimDriver` |
 | `IntentStore` | linearizable state | `LocalStore` (Phase 1) / `RaftStore` (Phase 2+) | `LocalStore` reused |
 | `ObservationStore` | eventually-consistent state | `LocalObservationStore` (Phase 1, redb) / `CorrosionStore` (Phase 2+) | `SimObservationStore` |
 | `Llm` | inference | `RigLlm` (Phase 3+) | `SimLlm` |
@@ -2271,7 +2304,7 @@ workspace/
 │   ├── overdrive-host/          # production adapters: SystemClock, OsEntropy,
 │   │                            # TcpTransport (host-OS primitives — ADR-0016)
 │   │                            # (class: adapter-host)
-│   ├── overdrive-worker/        # ExecDriver + workload-cgroup management
+│   ├── overdrive-worker/        # VmDriver + VMM cgroup management
 │   │                            # + node_health writer (ADR-0029 — first-workload)
 │   │                            # (class: adapter-host)
 │   ├── overdrive-netlink/       # netlink adapter: rtnetlink client + hand-rolled
@@ -2397,19 +2430,12 @@ graph TD
   consumed by the `JobLifecycle` reconciler. Depends only on
   `overdrive-core`. `dst-lint` mechanically enforces the BTreeMap-only
   iteration discipline + banned-API contract.
-- **`crates/overdrive-worker/`** — NEW, class = `adapter-host`
-  (ADR-0029, amended 2026-04-28 — `ProcessDriver` renamed to
-  `ExecDriver`; `DriverType::Process` renamed to `DriverType::Exec`;
-  `AllocationSpec.image` renamed to `AllocationSpec.command` and
-  `args: Vec<String>` field added). Hosts `ExecDriver` (ADR-0026,
-  formerly slated for `overdrive-host`), workload-cgroup management
-  (`overdrive.slice/workloads.slice/<alloc_id>.scope` create / limit
-  writes / teardown), and the boot-time `node_health` row writer
-  (relocated from control-plane bootstrap per ADR-0025 amendment).
-  The crate exposes a worker subsystem entrypoint the binary calls
-  during startup; `overdrive-control-plane` does NOT depend on this
-  crate — the action shim calls `Driver::*` against an injected
-  `&dyn Driver` whose impl the binary plugs in.
+- **`crates/overdrive-worker/`** — class = `adapter-host`. Hosts `VmDriver`,
+  the VMM cgroup manager, TCP/HTTP probe runner, mTLS interception worker, and
+  boot-time node-health writer. The VM driver is composed over the `Vmm` port
+  and reports readiness and exit through the guest beacon. `ExecDriver` is
+  removed under ADR-0110. The driver registry and allocation routing stay
+  extensible without retaining a host-process adapter.
 - **`crates/overdrive-host/`** — UNCHANGED at the application-architecture
   level. Per ADR-0029, `overdrive-host` retains its ADR-0016 intent
   (host-OS primitive bindings: `SystemClock`, `OsEntropy`,
@@ -2438,7 +2464,7 @@ New crate-class assignments:
 |---|---|---|
 | `overdrive-control-plane` | `adapter-host` | Uses rustls, hyper, axum; not DST-pure. Reconciler bodies inside this crate that want DST coverage must be in separate `core`-class sub-crates when they appear in Phase 2+. |
 | `overdrive-scheduler` | `core` | NEW (ADR-0024). Pure synchronous placement function; `dst-lint`-scanned; depends only on `overdrive-core`. |
-| `overdrive-worker` | `adapter-host` | NEW (ADR-0029; amended 2026-04-28 — type renamed `ProcessDriver` → `ExecDriver`, `AllocationSpec.image` → `AllocationSpec.command`, `args` field added). ExecDriver + workload-cgroup management + node_health writer. Composed alongside `overdrive-control-plane` by the binary; control-plane crate does NOT depend on it. |
+| `overdrive-worker` | `adapter-host` | `VmDriver`, VMM cgroup management, TCP/HTTP probes, mTLS interception, and node-health writer. |
 
 **Crate classes** (`package.metadata.overdrive.crate_class`):
 
@@ -3014,23 +3040,19 @@ match-dispatched on `AnyReconciler`. The reconciler's existing
 memory read). Per-tick I/O cost is proportional to the running
 reconciler, not the registered set.
 
-### 25. `AppState::driver: Arc<dyn Driver>` extension
+### 25. Driver registry and allocation routing
 
-Per ADR-0022 (amended 2026-04-27 by ADR-0029). `AppState` gains a
-`driver: Arc<dyn Driver>` field; production wiring threads an
-`Arc<ExecDriver>` from the worker subsystem (`overdrive-worker`,
-per ADR-0029, type renamed from `ProcessDriver` 2026-04-28); test
-fixtures thread `SimDriver`. The renamed entry
-point `run_server_with_obs_and_driver(config, obs, driver)` is the
-test-fixture seam; the binary's `serve` subcommand instantiates the
-worker subsystem and threads its `Arc<dyn Driver>` into the
-control-plane's `AppState`.
+The application holds `Arc<DriverRegistry>` and its allocation-to-driver index.
+The only supported live driver tag is `Vm`. The composition root supplies the
+VMM and related driven adapters, and the boot composes `VmDriver`, probes its
+capability, and inserts it when available. Exit observation remains per composed
+driver. Tests supply the same ports through simulation adapters.
 
-`AppState: Clone` is preserved (every field is `Arc<…>`). Phase 2+
-multi-driver dispatch (Process / MicroVm / Wasm) replaces
-`Arc<dyn Driver>` with `Arc<DriverRegistry>` at one field declaration
-plus the action shim's call site — no handler or test signature
-churn outside the field's immediate consumers.
+An unavailable optional VM capability may leave an empty registry and later
+execution returns the existing missing-capability outcome. Required capability
+failure refuses startup. There is no scalar-driver fallback or host-process
+workload adapter. ADR-0110 and ADR-0219 govern this composition.
+
 
 ### 26. Action shim placement and tick cadence
 
@@ -3114,8 +3136,8 @@ subsystem that owns the node's runtime presence:
 4. Worker subsystem startup                       (ADR-0029):
      a. Resolve NodeId, Region, Capacity from config   (ADR-0025)
      b. Write node_health row to ObservationStore      (ADR-0025 amended)
-     c. Construct ExecDriver                           (ADR-0026 amended 2026-04-28; formerly ProcessDriver)
-5. Construct ReconcilerRuntime; thread Arc<dyn Driver> (ADR-0022)
+     c. Compose VM capability over the root-supplied VMM and probe ports
+5. Construct ReconcilerRuntime and the VM-only DriverRegistry
 6. Build AppState, Router                         (existing)
 7. Bind TCP listener                              (existing)
 8. Write trust triple                             (ADR-0010)
@@ -3126,53 +3148,17 @@ The `[node]` config block is operator-owned; servers READ it and
 NEVER write it. The trust triple stays server-managed at
 `[ca]` / `[client]` blocks per ADR-0010.
 
-### 29. cgroup v2 direct writes; resource enforcement
+### 29. cgroup v2 resource enforcement for VMM processes
 
-Per ADR-0026 (amended 2026-04-27 by ADR-0029; amended 2026-04-28 —
-`ProcessDriver` renamed to `ExecDriver`, `DriverType::Process` to
-`DriverType::Exec`, `AllocationSpec.image` to `AllocationSpec.command`,
-`args: Vec<String>` field added; magic image-name dispatch in
-`build_command` removed in favour of
-`Command::new(&spec.command).args(&spec.args)`). `ExecDriver`
-(hosted in `overdrive-worker`) writes cgroup files directly via
-`std::fs::write` / `std::fs::create_dir_all` — no `cgroups-rs` dep.
-Five filesystem operations per workload lifecycle:
+`CgroupManager` in `overdrive-worker` writes the allocation's cgroup through
+`CgroupFs`. `VmDriver` creates the scope and places the Cloud Hypervisor PID in
+it. Guest vCPU and RAM settings are rendered through `VmConfig`, while the host
+cgroup accounts for the VMM and its guest memory under the approved VM resource
+contract. The host agent runs in its separate control-plane slice.
 
-```
-mkdir overdrive.slice/workloads.slice/<alloc_id>.scope    (create)
-echo <pid> > .../cgroup.procs                             (place)
-echo <weight> > .../cpu.weight                            (limit)
-echo <bytes>  > .../memory.max                            (limit)
-rmdir overdrive.slice/workloads.slice/<alloc_id>.scope    (remove)
-```
-
-`cpu.weight` derivation: `clamp(cpu_milli / 10, 1, 10000)`.
-`memory.max` derivation: direct byte count. Limits are written
-*before* the PID is placed in the scope — the moment the PID lands
-in the scope it is already under the declared bounds.
-
-Failure dispositions:
-
-- Scope creation / `cgroup.procs` write fails → fatal,
-  `DriverError::SpawnFailed`, alloc row written `state: Failed`.
-- Limit write fails → warn-and-continue, alloc row written
-  `state: Running`. Phase 1 prioritises isolation (the scope) over
-  bounding (the limits); the limit failure is recoverable in
-  operator-actionable ways and the workload itself is correctly
-  placed.
-
-cgroup v1 is NOT supported (operator confirmed). The pre-flight
-check refuses to start on v1 hosts.
-
-**Cgroup hierarchy ownership** (ADR-0029 amendment to ADR-0026):
-the worker subsystem (`overdrive-worker`) owns
-`overdrive.slice/workloads.slice/<alloc_id>.scope` create / limit
-write / teardown — the *workload* half. The control plane subsystem
-(`overdrive-control-plane`) owns `overdrive.slice/control-plane.slice/`
-create + own-PID enrolment + ADR-0028 pre-flight check — the
-*control-plane* half. Each subsystem manages its own slice; the
-two never cross. The boundary mirrors whitepaper §4 *Workload
-Isolation on Co-located Nodes* exactly.
+A VMM is a host process, but its application command runs inside the guest.
+This resource mechanism does not expose a host command as a workload driver.
+See ADR-0082 and the microVM-only execution contract for the current ownership.
 
 ### 30. `POST /v1/jobs/{id}:stop` HTTP shape; separate stop intent key
 
@@ -3287,80 +3273,49 @@ worth contract-testing.
 
 ---
 
-### 34. Job spec — exec block wiring
+### 34. Workload spec — VM driver block
 
-The Phase 1 operator-facing TOML now nests `[resources]` and `[exec]`
-tables; driver dispatch is implicit by table name. Top-level scalars
-(`id`, `replicas`) carry identity and scale; `[resources]` carries the
-resource envelope; `[exec]` carries the driver invocation. Future
-drivers (`[microvm]`, `[wasm]`) slot in additively as new sibling
-tables — exactly one driver table per spec is enforced by serde
-(`deny_unknown_fields` + tagged-enum dispatch with `#[serde(flatten)]`)
-at parse time.
+The supported operator grammar selects a lifecycle kind with `[job]`,
+`[service]`, or `[schedule]` and supplies the `[vm]` driver table. The parser and
+wire `DriverInput` unions, persisted `WorkloadDriver`, runtime payload, and
+`DriverType` have only their live VM arm. No retired-driver parser branch,
+compatibility reader, or host-process fallback is part of the contract.
 
 ```toml
-id = "payments"
-replicas = 1
+[job]
+id = "report"
+
+[vm]
+command = "/usr/bin/report"
+args = []
+kernel = "/srv/vm/kernel"
+rootfs = "/srv/vm/report.ext4"
 
 [resources]
-cpu_milli    = 500
+cpu_milli = 500
 memory_bytes = 134217728
-
-[exec]
-command = "/opt/payments/bin/payments-server"
-args    = ["--port", "8080"]
 ```
 
-The validated `Job` aggregate carries a tagged-enum `driver:
-WorkloadDriver` field (mirroring the wire-shape `JobSpecInput.driver:
-DriverInput`). Today the enum has one variant — `WorkloadDriver::Exec(Exec
-{ command, args })` — that holds the operator's exec-driver invocation.
-Future drivers add variants (`WorkloadDriver::MicroVm(MicroVm)`,
-`WorkloadDriver::Wasm(Wasm)`) additively; the compiler enforces match
-exhaustiveness at every reconciler/shim site, making driver-class
-exclusivity structurally enforced at the intent layer (`make invalid
-states unrepresentable` per development.md). `Job::from_spec` remains
-THE single validating constructor (per ADR-0011) on both CLI and server
-lanes, and projects `DriverInput → WorkloadDriver` as part of the
-construction; the new `exec.command` non-empty rule slots in alongside
-the existing replicas/memory rules and surfaces as
-`AggregateError::Validation { field: "exec.command", message: "command
-must be non-empty" }`. The validation field name is the operator-facing
-path through the spec (matches the TOML the operator typed), not the
-internal Rust nesting. Argv carries no per-element validation — it is
-opaque to the driver, and the kernel's `execve(2)` enforces NUL-byte
-and `PATH_MAX` posture at exec time.
+The command is inside the guest. Kernel and rootfs paths are operator-supplied
+host artifacts, not bundled assets. The rootfs carries matching init and
+forwarder support. Services add listeners and HTTP/TCP health checks. Lifecycle
+kind is independent of the driver tag and every replacement receives a distinct
+physical allocation identity.
 
-The `Action::RestartAllocation` variant grows `spec: AllocationSpec`,
-mirroring `StartAllocation { spec }`. `AllocationSpec` itself stays
-flat per ADR-0030 §6 — at the driver-trait input boundary the
-implementing driver knows its own class (`impl Driver for ExecDriver`
-IS the discriminator), and ADR-0030's predicted Phase 2+ shape is
-**per-driver-class spec types** (a future `Spec` enum with
-`Spec::Exec(ExecSpec) | Spec::MicroVm(MicroVmSpec) | Spec::Wasm(WasmSpec)`),
-NOT a discriminator on a shared `AllocationSpec`. The reconciler
-projects `&job.driver` (today an irrefutable destructure of
-`WorkloadDriver::Exec(Exec { command, args })`; tomorrow a `match`)
-into the flat `AllocationSpec` at action-emit time. The shim's
-`build_phase1_restart_spec`, `build_identity`, and
-`default_restart_resources` placeholders delete in the same PR — the
-Restart arm reads `spec` straight off the action.
-
-See [ADR-0031](./adr-0031-job-spec-exec-block.md) for the full decision
-record (TOML wire shape, Rust types, `Action` enum revision, action-shim
-deletions, single-cut migration scope, C4 component diagram, and
-Alternatives A-E). ADR-0031 was amended 2026-04-30 (Amendment 1) to
-introduce the `WorkloadDriver` tagged-enum on `Job` for type-shape
-consistency across the wire (`JobSpecInput.driver`) and intent
-(`Job.driver`) layers; AllocationSpec was deliberately preserved flat
-per ADR-0030 §6. [ADR-0030](./adr-0030-exec-driver-and-allocation-spec-args.md)
-is the upstream type-shape decision that ratified `AllocationSpec
-{ command, args }` on the internal driver surface; ADR-0030 is
-unaffected by Amendment 1.
+ADR-0110 through ADR-0113 replace the former Exec-shaped grammar, envelopes,
+and probe surface. Their forward-only reset does not preserve old payloads.
 
 ---
 
 ## Phase 2 transparent-mTLS-enrollment extension (Path A, ADR-0071)
+
+**Historical mechanism record.** The process-workload netns/veth enrollment and
+first-workload diagrams below describe the retired adapter. They are not live
+workload configuration or the VM attachment. ADR-0110 removes that adapter, and
+ADR-0145 replaces VM attachment with guest capture and vsock. The current host
+mTLS path still owns transparent listeners, resolution, identity and TLS. Its
+VM delivery dials through `GuestStreamDial`. The vsock attachment section above
+is the current ownership and fail-closed contract.
 
 ### 35. East-west transparent mTLS — enrollment via per-workload netns+veth + nft-TPROXY both directions
 
@@ -3526,39 +3481,13 @@ C4Context
 #### C4 Level 2 — Container diagram (Path A interception + enforce)
 
 ```mermaid
-C4Container
-  title Container Diagram — Path A transparent-mTLS enforcement + name-layer integration (Q5a, headless v1)
-
-  Person(none, "(no operator surface)", "Feature has no CLI/HTTP verb; telemetry only")
-
-  System_Boundary(node, "Overdrive node") {
-    Container_Boundary(wlns, "Workload netns + veth (per allocation)") {
-      Container(workload, "Exec workload", "Process in its own netns", "Opens plain TCP; getaddrinfo(<job>.svc.overdrive.local); born into netns via ExecDriver setns hook")
-      Container(resolvconf, "netns resolv.conf", "per-netns mount (Fly.io fdaa::3 model)", "Holds the injected node-local DNS responder address; the workload's libc getaddrinfo reaches the responder with zero app config")
-    }
-    Container(provisioner, "netns+veth provisioner", "Rust (overdrive-control-plane, Q2 extend)", "Creates+converges per-alloc netns/veth; tx off; routes; injects resolv.conf (converge-on-boot)")
-    Container(dns, "Node-local DNS responder", "(#243 in-agent sibling reader — built per ADR-0072; REV-2: answers a STABLE per-<job> frontend addr, see §36)", "Answers <job>.svc.overdrive.local by reading service_backends. REV-1 (retained): returned the backend addr B directly (headless). REV-2 (current, §36): returns the STABLE per-<job> frontend addr F in 10.98.0.0/16; MtlsResolve translates F -> live backend")
-    Container(nft, "nft-TPROXY shared routing infra", "nft + ip rule/route", "PREROUTING capture (both directions); shared chain + fwmark + F5 exemption (#234)")
-    Container(worker, "MtlsInterceptWorker", "Rust (overdrive-worker)", "Per-alloc install/teardown; leg-F + leg-C IP_TRANSPARENT listeners; accept→enforce loops; getsockname orig-dst")
-    Container(enforce, "HostMtlsEnforcement", "Rust (overdrive-dataplane)", "4-method MtlsEnforcement: rustls handshake → kTLS arm → agent-light pumps (UNCHANGED, ADR-0069/0070)")
-    Container(resolveadapter, "ServiceBackendsResolve", "Rust (adapter-host)", "MtlsResolve v1: orig_dst → MtlsResolution{Mesh|NonMesh|MeshUnreachable}; ResolvedBackend{addr, expected_svid=None}; reads service_backends filtered to running; probe refuses boot on unreadable store; #178 owns the expected-SVID join")
-    ContainerDb(obs, "ObservationStore (service_backends)", "Corrosion / LocalObservationStore", "Backend set + health (#69/#174) — single source: DNS and MtlsResolve are sibling readers over the SAME rows (DNS via its OWN by_name index per ADR-0072 DDN-1, NOT the addr-keyed intercept struct)")
-  }
-  System_Ext(peeragent, "Peer workload's node-agent", "Presents the peer workload's SVID; terminates the other half")
-
-  Rel(provisioner, workload, "Provisions netns+veth for")
-  Rel(provisioner, resolvconf, "Injects node-local DNS responder address into")
-  Rel(workload, resolvconf, "Resolves <job>.svc.overdrive.local via")
-  Rel(resolvconf, dns, "Points libc getaddrinfo at")
-  Rel(dns, obs, "Returns a running-AND-healthy backend addr B from")
-  Rel(dns, workload, "Answers getaddrinfo with addr B (headless)")
-  Rel(workload, nft, "connect(B) egress ingresses host-side veth, captured by")
-  Rel(nft, worker, "Redirects to agent leg-F / leg-C listeners")
-  Rel(worker, worker, "Recovers orig_dst = B via getsockname (both legs)")
-  Rel(worker, resolveadapter, "Resolves orig_dst = B per connection via (→ MtlsResolution: Mesh=enforce / NonMesh=pass-through / MeshUnreachable=fail-closed)")
-  Rel(resolveadapter, obs, "Reads the same service_backends rows DNS reads; healthy classification (Mesh/MeshUnreachable) is ServiceBackendsResolve's")
-  Rel(worker, enforce, "Hands InterceptedConnection (Routed::Outbound{peer:B}) to")
-  Rel(enforce, peeragent, "mTLS 1.3 (kTLS) to")
+flowchart LR
+  app["Guest application · ordinary TCP"] --> capture["Guest capture + vsock"]
+  capture --> owner["Host flow owner · allocation attribution"]
+  owner --> tls["Host mTLS · rustls + kTLS"]
+  identity["IdentityMgr · workload SVID"] --> tls
+  resolve["Live backend resolve"] --> owner
+  tls --> peer["Peer agent / guest delivery"]
 ```
 
 > **Node-local DNS responder — built in-agent per ADR-0072 (#243).** The
@@ -3646,82 +3575,21 @@ C4Context
 
 ### C4 Level 2 — Container diagram (Phase 1 first-workload)
 
-This diagram extends the prior phase's container view with four new
-containers: the dedicated `overdrive-scheduler` crate (ADR-0024
-override), the dedicated `overdrive-worker` crate (ADR-0029) hosting
-`ExecDriver` (renamed from `ProcessDriver` 2026-04-28 per ADR-0029
-amendment) and workload-cgroup management and the
-`node_health` writer, the binary-composition pattern in
-`overdrive-cli` (which hard-depends on both `overdrive-control-plane`
-and `overdrive-worker`), and the on-host kernel cgroup hierarchy that
-both subsystems manage at boot (each owning its own slice per
-ADR-0028 + ADR-0029).
+The current workload container boundary is the VM-only driver registry,
+`VmDriver`, the host VMM process and its cgroup, and the guest application.
+The control-plane and workload slices retain separate host resource ownership.
+The earlier process-driver container model is superseded by ADR-0110.
 
 ```mermaid
-C4Container
-  title Container Diagram — Overdrive (Phase 1 first-workload)
-
-  Person(engineer, "Platform Engineer (Ana)")
-
-  Container_Boundary(workspace, "Overdrive workspace") {
-    Container(core, "overdrive-core", "Rust crate (class: core)", "Ports + newtypes + aggregates (Job/Node/Allocation) + Reconciler trait + AnyState/View enums + Action enum + IntentKey (incl. for_job_stop)")
-    Container(scheduler, "overdrive-scheduler", "Rust crate (class: core, NEW per ADR-0024)", "Pure-fn first-fit `schedule(nodes, job, allocs)` over BTreeMap inputs; dst-lint-scanned; depends only on overdrive-core")
-    Container(store_local, "overdrive-store-local", "Rust crate (class: adapter-host)", "LocalStore (redb-backed IntentStore with put_if_absent semantics per ADR-0020) + LocalObservationStore (redb-backed single-writer ObservationStore)")
-    Container(host, "overdrive-host", "Rust crate (class: adapter-host)", "Host-OS primitive bindings: SystemClock, OsEntropy, TcpTransport (ADR-0016 intent preserved per ADR-0029)")
-    Container(worker, "overdrive-worker", "Rust crate (class: adapter-host, NEW per ADR-0029; amended 2026-04-28)", "ExecDriver (Linux-only; renamed from ProcessDriver) + workload-cgroup management (overdrive.slice/workloads.slice/<alloc>.scope per ADR-0026) + boot-time node_health row writer (per ADR-0025 amendment)")
-    Container(sim, "overdrive-sim", "Rust crate (class: adapter-sim)", "Sim* adapters + turmoil harness + invariant catalogue; SimDriver / SimObservationStore are used by DST only — not runtime deps of the control plane or worker")
-    Container(ctrl, "overdrive-control-plane", "Rust crate (class: adapter-host)", "Axum router + rustls TLS + ReconcilerRuntime + EvaluationBroker + ActionShim + JobLifecycle reconciler + control-plane cgroup management + pre-flight (ADR-0028)")
-    Container(xtask, "xtask", "Rust binary (class: binary)", "cargo dst / dst-lint / openapi-gen / openapi-check")
-    Container(cli, "overdrive-cli", "Rust binary (class: binary)", "overdrive CLI — reqwest HTTP client against /v1 REST API; gains `job stop` subcommand (ADR-0027). `serve` subcommand is the binary-composition root: hard-depends on both overdrive-control-plane and overdrive-worker; runtime [node] role config selects which subsystems boot (ADR-0029)")
-  }
-
-  ContainerDb(redb_file, "redb file", "On-disk ACID KV", "Backs LocalStore + LocalObservationStore; one file per store instance")
-  ContainerDb(libsql_files, "libSQL files", "On-disk SQLite", "One per reconciler; <data_dir>/reconcilers/<name>/memory.db")
-  ContainerDb(config_file, "~/.overdrive/config", "TOML file", "Operator endpoint + trust triple (ADR-0010) + optional [node] block (ADR-0025)")
-  ContainerDb(openapi_yaml, "api/openapi.yaml", "YAML file", "Checked-in OpenAPI 3.1 schema; derived from Rust types via utoipa (ADR-0009)")
-  System_Ext(kernel, "Linux kernel cgroup v2", "Unified hierarchy at /sys/fs/cgroup/", "overdrive.slice/{control-plane.slice (ctrl-owned), workloads.slice/<alloc>.scope (worker-owned)}")
-  System_Ext(workload, "Workload process", "tokio::process child", "fork/exec child placed in cgroup scope by ExecDriver")
-  System_Ext(ci, "CI pipeline")
-
-  Rel(engineer, xtask, "Runs `cargo xtask ...`")
-  Rel(engineer, cli, "Runs `overdrive job submit/stop/...`")
-  Rel(ci, xtask, "Invokes on every PR (dst / dst-lint / openapi-check)")
-
-  Rel(cli, config_file, "Reads endpoint + trust triple from")
-  Rel(cli, ctrl, "Composition root: instantiates control-plane subsystem when [node] role includes control-plane (ADR-0029)")
-  Rel(cli, worker, "Composition root: instantiates worker subsystem when [node] role includes worker; threads Arc<dyn Driver> from worker into control-plane AppState (ADR-0029)")
-  Rel(cli, ctrl, "POSTs / GETs JSON over rustls HTTP/2 on /v1/...")
-  Rel(cli, core, "Imports aggregate types, newtypes, IntentKey from")
-
-  Rel(ctrl, core, "Implements handlers against ports in; uses aggregates and AnyState/AnyReconciler enums from")
-  Rel(ctrl, scheduler, "Calls `schedule(...)` from inside JobLifecycle::reconcile (pure helper from pure reconciler, ADR-0024)")
-  Rel(ctrl, store_local, "Writes intent via IntentStore::put + reads via IntentStore::get; writes observation via ObservationStore::write + reads alloc_status_rows / node_health_rows")
-  Rel(ctrl, libsql_files, "Provisions one libSQL DB per registered reconciler")
-  Rel(ctrl, kernel, "Pre-flight reads /proc/filesystems, /sys/fs/cgroup/.../subtree_control; mkdirs control-plane.slice; writes own PID into cgroup.procs (ADR-0028)")
-  Rel(ctrl, config_file, "Reads optional [node] block; writes trust triple after bind")
-
-  Rel(worker, core, "Implements Driver port against; reads NodeId / Region / Resources newtypes; writes AllocStatusRow + NodeHealthRow shapes from")
-  Rel(worker, store_local, "Writes node_health row at startup via ObservationStore::write (per ADR-0025 amended)")
-  Rel(worker, kernel, "ExecDriver mkdirs workload scope; writes cpu.weight + memory.max + cgroup.procs; rmdirs scope on stop (ADR-0026 + ADR-0029)")
-  Rel(worker, workload, "tokio::process spawns child; SIGTERM/SIGKILL on stop")
-  Rel(worker, config_file, "Reads optional [node] block at worker startup")
-
-  Rel(ctrl, worker, "Action shim calls Driver::start/stop/status against &dyn Driver; impl crate is overdrive-worker but ctrl does NOT depend on it directly — Arc<dyn Driver> is plugged in by the binary at AppState construction (ADR-0029)", "via &dyn Driver")
-
-  Rel(scheduler, core, "Imports Resources, NodeId, Node, Job, AllocStatusRow from")
-
-  Rel(host, core, "Implements Clock, Entropy, Transport ports against")
-
-  Rel(store_local, redb_file, "ACID transactions to")
-
-  Rel(xtask, sim, "Runs DST harness via `cargo test --features dst`")
-  Rel(xtask, core, "Scans source for banned APIs (dst-lint)")
-  Rel(xtask, scheduler, "Scans source for banned APIs (dst-lint) — NEW core-class crate")
-  Rel(xtask, ctrl, "openapi-gen regenerates schema from; openapi-check diffs against")
-  Rel(xtask, openapi_yaml, "Writes (openapi-gen) / reads (openapi-check)")
-
-  Rel(sim, core, "Implements Sim* adapters against ports in")
-  Rel(sim, store_local, "Composes real LocalStore with Sim* adapters in turmoil harness")
+flowchart LR
+  intent["Workload intent · Vm only"] --> runtime["Convergence loop + action shim"]
+  runtime --> registry["DriverRegistry + allocation routing"]
+  registry --> vm["VmDriver · guest readiness and exit"]
+  vm --> vmm["Cloud Hypervisor host process · allocation cgroup"]
+  vmm --> guest["Linux guest · application command"]
+  guest --> capture["Guest capture + vsock flow transport"]
+  capture --> owner["Shared host flow owner + mTLS enforcement"]
+  vm --> observation["Allocation observation"]
 ```
 
 ### C4 Level 3 — `overdrive-control-plane` component diagram (Phase 1)
@@ -3775,73 +3643,54 @@ C4Component
 
 ### C4 Level 3 — Convergence-loop closure (Phase 1 first-workload)
 
-The convergence loop is the central architectural feature of the
-first-workload feature: it is the path from `overdrive job submit`
-through the JobLifecycle reconciler + scheduler + action shim +
-ExecDriver and back into ObservationStore, where the next tick
-sees the new state. The diagram below shows the components and
-their async / sync boundaries explicitly.
+The workload convergence path starts with intent submitted through `overdrive
+deploy` or a stop request. The runtime hydrates desired and observed state,
+reads the current view, calls the pure workload reconciler, persists its next
+view, and only then dispatches the returned actions. The VM route retains the
+driver registry and allocation routing rather than introducing a host-process
+workload path.
 
 ```mermaid
-C4Component
-  title Component Diagram — Convergence-loop closure (Phase 1 first-workload)
+flowchart TB
+  submit["Deploy / stop handlers"] -->|"commit intent"| intent["IntentStore · VM workloads"]
+  submit -->|"enqueue evaluation"| broker["EvaluationBroker"]
+  broker -->|"drain evaluation"| runtime["ReconcilerRuntime · async tick orchestration"]
+  runtime -->|"await"| hydrate["hydrate_desired / hydrate_actual · async"]
+  intent -->|"desired state"| hydrate
+  obs["ObservationStore"] -->|"observed state on next evaluation"| hydrate
+  views["Runtime view cache + ViewStore"] -->|"get_view · sync cache read"| reconcile
+  hydrate -->|"desired + actual"| reconcile
 
-  Container_Boundary(ctrl, "overdrive-control-plane") {
-    Component(handler_submit, "submit_job handler", "axum::Handler", "POST /v1/jobs — validates spec, archives via rkyv, commits to IntentStore (ADR-0008)")
-    Component(handler_stop, "job_stop handler", "axum::Handler (NEW — ADR-0027)", "POST /v1/jobs/{id}:stop — writes IntentKey::for_job_stop to IntentStore")
-    Component(broker, "EvaluationBroker", "Rust struct", "Keyed on (ReconcilerName, TargetResource); cancelable-eval-set; queued/cancelled/dispatched counters")
-    Component(runtime, "ReconcilerRuntime tick loop", "tokio::task", "Drains broker every 100 ms (ADR-0023); orchestrates hydrate-then-reconcile-then-dispatch pipeline")
-    Component(hydrate, "AnyReconciler::hydrate_desired/_actual", "async fn (NEW — ADR-0021)", "Match-dispatches on AnyReconciler variant; reads IntentStore + ObservationStore; emits AnyState variant")
-    Component(reconciler, "JobLifecycle::reconcile", "sync pure fn (NEW — US-03)", "Reads desired Job, current allocations, view (libSQL); calls scheduler; emits Vec<Action>")
-    Component(shim, "action_shim::dispatch", "async fn (NEW — ADR-0023)", "Match on Action variant; calls Driver::start/stop; writes AllocStatusRow to ObservationStore")
-  }
+  subgraph pure["Pure decision boundary"]
+    reconcile["WorkloadLifecycle::reconcile · sync"] -->|"sync call"| scheduler["schedule · sync pure helper"]
+    scheduler -->|"placement result"| reconcile
+  end
 
-  Container_Boundary(scheduler_crate, "overdrive-scheduler (class: core, NEW per ADR-0024)") {
-    Component(schedule_fn, "schedule(nodes, job, allocs)", "pure sync fn", "First-fit placement over BTreeMap<NodeId, Node>; returns Result<NodeId, PlacementError>")
-  }
-
-  Container_Boundary(worker_crate, "overdrive-worker (class: adapter-host, NEW per ADR-0029)") {
-    Component(process_driver, "ExecDriver", "Driver impl (NEW — ADR-0026 hosted here per ADR-0029; renamed from ProcessDriver 2026-04-28)", "tokio::process spawn (binary + args directly from AllocationSpec) + cgroup v2 direct cgroupfs writes; cpu.weight + memory.max from AllocationSpec::resources")
-    Component(node_health_writer, "node_health writer", "worker-startup helper (NEW — ADR-0025 amended by ADR-0029)", "Resolves NodeId/Region/Capacity from config; writes one node_health row at worker startup before listener bind")
-  }
-
-  Container(intent, "IntentStore (LocalIntentStore)", "redb-backed; for_job + for_job_stop keys")
-  Container(obs, "ObservationStore (LocalObservationStore)", "redb-backed; alloc_status_rows + node_health_rows")
-  Container(libsql_db, "JobLifecycleView libSQL DB", "<data_dir>/reconcilers/job-lifecycle/memory.db; restart_counts + next_attempt_at")
-  System_Ext(kernel, "Linux kernel cgroup v2 + process API")
-
-  Rel(handler_submit, intent, "IntentStore::put_if_absent (sync) — for_job key")
-  Rel(handler_submit, broker, "Enqueues Evaluation((JobLifecycle, jobs/<id>))")
-  Rel(handler_stop, intent, "IntentStore::put — for_job_stop key (ADR-0027)")
-  Rel(handler_stop, broker, "Enqueues Evaluation((JobLifecycle, jobs/<id>))")
-
-  Rel(runtime, broker, "drain() every tick (100 ms cadence; SimClock under DST)")
-  Rel(runtime, hydrate, "Awaits hydrate_desired + hydrate_actual + reconciler.hydrate")
-  Rel(hydrate, intent, "Reads for_job + for_job_stop keys (async)")
-  Rel(hydrate, obs, "Reads alloc_status_rows + node_health_rows (async)")
-  Rel(hydrate, libsql_db, "Reads JobLifecycleView (async)")
-
-  Rel(runtime, reconciler, "Calls reconcile(&desired, &actual, &view, &tick) — SYNC, no .await")
-  Rel(reconciler, schedule_fn, "Calls schedule(nodes, job, allocs) — SYNC, pure helper from pure reconciler (Anvil pattern)")
-  Rel(reconciler, runtime, "Returns (Vec<Action>, NextView)")
-
-  Rel(runtime, libsql_db, "Persists diff(view, NextView) (async)")
-  Rel(runtime, shim, "Awaits dispatch(actions, &driver, &obs, &tick)")
-  Rel(shim, process_driver, "Driver::start(&AllocationSpec { command, args, .. }) / Driver::stop(&AllocationHandle) (async)")
-  Rel(shim, obs, "Writes AllocStatusRow {Running | Failed | Terminated} (async)")
-  Rel(process_driver, kernel, "mkdir scope; cpu.weight; memory.max; cgroup.procs; SIGTERM/SIGKILL on stop")
-  Rel(node_health_writer, obs, "Writes node_health row at worker startup, before listener bind (ADR-0025 amended by ADR-0029)")
-
-  Rel(obs, hydrate, "Next tick reads back the row the shim just wrote — convergence-loop closes")
+  reconcile -->|"actions + NextView"| persist["persist_view · async write-through then cache update"]
+  persist -->|"await durable write"| views
+  persist -->|"only after successful persistence"| shim["Action shim · async dispatch"]
+  shim -->|"select driver / resolve allocation route"| registry["DriverRegistry + AllocDriverIndex · VM only"]
+  registry -->|"start / stop through Driver port"| vm["VmDriver · async lifecycle effects"]
+  vm -->|"guest readiness / stop completion or typed failure"| shim
+  vm -->|"Vmm port"| vmm["Cloud Hypervisor host process + Linux guest"]
+  shim -->|"await allocation status write"| obs
+  vm -->|"ExitEvent"| observer["Per-driver exit observer · async"]
+  observer -->|"await exit status write"| obs
 ```
 
-The diagram makes one architectural property visually explicit: the
-**only async boundary inside the convergence loop is the action
-shim**. `JobLifecycle::reconcile` is sync; `schedule(…)` is sync;
-`hydrate_desired` / `hydrate_actual` / `reconciler.hydrate` /
-`shim::dispatch` are async. The reconciler's purity contract —
-ADR-0013, `ReconcilerIsPure` invariant in ADR-0017 — is preserved
-by construction.
+The synchronous decision boundary contains the reconciler and scheduler. Its
+inputs include the hydrated state and the runtime's cached view, and its output
+is an action list plus `NextView`. Hydration, durable view persistence, driver
+effects, and observation writes are async operations outside that pure boundary.
+The runtime awaits `persist_view` before dispatching the actions under ADR-0035.
+A failed persistence cannot authorize dispatch.
+
+The action shim awaits the selected VM lifecycle operation before writing its
+resulting allocation state. Guest exit reporting follows the separate per-driver
+observer path. Those observation rows become actual state for the next
+evaluation, closing the feedback loop. The diagram shows this workload path,
+not every reconciler action or guest-networking operation. ADR-0013 and the
+`ReconcilerIsPure` invariant retain the pure-decision contract.
 
 ### C4 Level 3 — `overdrive-sim` component diagram
 
@@ -3945,7 +3794,7 @@ Rules to enforce:
 | 0027 | Job-stop HTTP shape: `POST /v1/jobs/{id}:stop`; separate `IntentKey::for_job_stop` | Accepted |
 | 0028 | cgroup v2 delegation pre-flight: hard refusal (escape-hatch portion superseded by ADR-0034) | Superseded in part by 0034 |
 | 0034 | Remove `--allow-no-cgroups` escape hatch; canonical dev path is `cargo xtask lima run --` | Accepted |
-| 0029 | Dedicated `overdrive-worker` crate (class `adapter-host`); ExecDriver (formerly ProcessDriver, renamed 2026-04-28) + workload-cgroup management + node_health writer extracted from `overdrive-host` | Accepted (amended 2026-04-28) |
+| 0029 | **Worker adapter crate** — `overdrive-worker` owns `VmDriver`, VMM cgroup management and the node-health writer. The original Exec adapter is removed under ADR-0110. | Accepted |
 | 0032 | NDJSON streaming submit: `overdrive job submit` streams convergence as NDJSON when `Accept: application/x-ndjson` is sent; back-compat single-JSON ack otherwise. CLI exits non-zero on convergence failure. 60 s server-side cap. | Accepted |
 | 0033 | `alloc status` snapshot enrichment: `AllocStatusResponse` extended in place with state, last-transition reason, restart budget, exit code, started_at; `TransitionReason` shared with ADR-0032 streaming events. | Accepted |
 | 0035 | Reconciler memory: collapse trait to one method, typed-View blob auto-persisted, redb backend, in-memory hot copy as steady-state read SSOT (supersedes 0013) | Accepted |
@@ -3968,14 +3817,14 @@ Rules to enforce:
 | 0063 | **Workflow primitive** — workflow `await`-point journal is a **second redb table layout** on the shared runtime-owned substrate (`<data_dir>/reconcilers/memory.redb`), distinct `JournalStore` port + `RedbJournalStore`/`SimJournalStore` adapters; one append-only table `__wf_journal__` keyed `(WorkflowId, u32 step)`, value = CBOR `JournalEntry` (`ciborium`, ADR-0035 §3 discipline, NOT the ADR-0048 rkyv envelope — mutable runtime memory, additive entry-variants per slice via `#[serde(default)]`); fsync-then-suspend ordering + Earned-Trust `probe()` reused from 0035; `SleepArmed` records the deadline (input, not "remaining"). Resolves DIVERGE D4/open-Q3 in favour of redb (R2); supersedes pre-DIVERGE "per-primitive libSQL" phrasing. Extends 0035. Single-node scope; cross-node resume (#205) not precluded | Accepted |
 | 0064 | **Workflow primitive** — `Workflow` trait + `WorkflowCtx` type + `WorkflowResult` + concrete `WorkflowStart` in NEW `overdrive-core::workflow` (no tokio in core; injected ports + `async_trait`); durable-async `WorkflowEngine` in NEW `overdrive-control-plane::workflow_runtime` driven **off the action-shim**. Engine↔reconciler boundary: the workflow-lifecycle reconciler stays a **pure-sync ADR-0035 reconciler** emitting `Action::StartWorkflow` + observing terminal rows; the engine runs the async body off the shim exactly as `StartAllocation`→`Driver::start`. Check-then-record journal replay ⇒ bit-identical replay (K4); `ctx` surface additive per slice (`call`/`sleep`/`wait_for_signal`/`emit_action`); `WorkflowResult` distinct from `TerminalCondition` (inherits the SemVer convention, not the type); `ctx.emit_action` → Action channel → Raft (no IntentStore bypass). Companion to 0063 | Accepted (§2/§3/§5/§6 amended by 0065) |
 | 0065 | **Workflow result/error model** — body returns `Result<Output, TerminalError>` (typed success output + terminal-error failure channel, the Restate/Temporal/DBOS/Step-Functions shape), retryable errors absorbed/re-driven by the engine, never reaching the return type. Object safety via author-edge typing + a CBOR-erasing `ErasedWorkflowAdapter<W>` → object-safe `ErasedWorkflow` the engine drives (same typed-edge/erased-interior split as `ctx.run<T>`). `WorkflowResult` DELETED (greenfield single-cut); the status enum survives only as engine-owned control-plane projection `WorkflowStatus { Completed{output} \| Failed{terminal} \| Cancelled \| TimedOut }` (carried by journal `Terminal` + `ObservationRow::WorkflowTerminal`, distinct from the body return AND `TerminalCondition`). `TerminalError { kind, detail }` concrete core type (closes the `reason: String` replay-determinism hazard). Retry budget in the engine/journal (journal-`RetryAttempted`-derived attempts + engine-constant policy), NOT the body, NOT a reconciler `View` (contrast `RetryMemory` — a workflow has an engine). Typed `WorkflowStart { name, input }` crosses Raft via rkyv `WorkflowStartEnvelope` (V1) + co-located typed codec (ADR-0048 `Job` precedent); `input_digest` off `spec.input` — resolves #217, unblocks the first external/root rotation workflow consumer. *(Historical: "unblocks #40"; SUPERSEDED — #40 is the now-closed internal SVID reissue `Action::IssueSvid`, not a workflow; the future workflow consumer is external-ACME / public-trust or root-CA rotation, TBD.)* Amends ADR-0064 §2/§3/§5/§6 | Proposed |
-| 0069 | **Transparent mTLS via a universal agent-light L4 proxy** — folds #222 into #26; ONE enforcement mechanism for ALL workload kinds (process/exec, WASM, microVM, unikernel). Workload's outbound TCP transparently intercepted (`cgroup_connect4`-rewrite default / TPROXY alt) to an agent-owned plaintext leg F; the agent drains plaintext losslessly + rustls TLS 1.3 handshake on a peer-facing leg B presenting the held SVID (read via `IdentityRead`, never minted/cached) + arms kTLS on leg B (reusing `ktls::KtlsStream` for control records). Steady state (all four pumps agent-light zero-copy `splice`; NO sockmap/psock on any leg): **forward F→B = BLOCKING `splice` into leg B's kTLS-TX (`tls_sw_sendmsg`/`MSG_SPLICE_PAGES` encrypts in-kernel)**; **return B→F = non-blocking `splice(2)` via `tls_sw_splice_read` on a plain kTLS-RX leg (~1 splice/record)**; the in-memory pre-arm `prelude` keeps a `write_all`. *(Forward-mechanism history: an agent-idle sockmap EGRESS-redirect (`bpf_sk_redirect_map`, flags=0) RETIRED 2026-06-13 — its `MSG_DONTWAIT`-backlog stalled ~10–15% of records — for a `read → write_all` copy; that copy RETIRED 2026-08-26 for the blocking splice, proven lossless 15/15 under send-buffer exhaustion (increment-M). `splice` into kTLS-TX does NOT lose records — the loss class was non-blocking `MSG_DONTWAIT` delivery, not `splice(2)`. ADR-0069 amended 2026-06-13 + 2026-08-26.)* New driven port `MtlsEnforcement` in `overdrive-core` (does NOT fit `Dataplane` — per-connection socket ops, not map writes) + host adapter (`adapter-host`, over kTLS/splice/cgroup_connect4/nft-TPROXY, consumes `IdentityRead`; the sockops/sk_msg/sockmap surface retired with the forward redirect) + `SimMtlsEnforcement` for DST. Earned-Trust `probe()` (wire→probe→use; sentinel handshake + kTLS-arm + forward-encrypt blocking-splice round-trip + splice-read, refuse-to-start on failure). Decided on 6 Tier-3 spikes + 3 research docs (kernel 7.0, `353cdc52`): in-band lossless foreclosed 3 ways; proxy proven agent-light both directions. **Amends whitepaper §7/§8** (two mechanisms → one); **supersedes** in-band kTLS-on-own-socket as v1 — retained as a post-v1 optimization tracked in **#231** (restart-survival + 1-socket density). J-SEC-003 / GH #26 (folds #222) | Accepted |
+| 0069 | **Host-owned transparent mTLS** — the node agent holds workload SVIDs, runs TLS 1.3 handshakes, and owns kernel TLS record processing. Live workload execution is microVM-only under ADR-0110. Guest capture and vsock reach host enforcement, and owner-opened guest streams deliver to VM backends. ADR-0145/0186/0197 specify the current forwarding and relay boundaries. Startup refusal and fail-closed mesh enforcement remain required. | Accepted |
 | 0070 | **Transparent-mTLS connection liveness — kernel TCP timeouts + per-connection self-supervision** — refines ADR-0069 § ATAM "Pump supervision policy (F6)" / the SD-4 supervision shape. v1 supervises connection liveness with **(C) `TCP_USER_TIMEOUT` + keepalive on the spliced legs** (kernel reaps transport-death; Linkerd/ztunnel precedent) **+ (B) per-connection self-supervision** in each SD-2 port-owned enforce task (self-tear-down fail-closed on EOF/error). **Rejects (A) a central tick enumerator** over the live-connection set (no surveyed production dataplane uses it for liveness; `reconcilers.md` disqualifies it — a stalled connection is not desired-vs-actual config drift). The central `MtlsSupervisor` (step 04-01) + its tests are **deleted** (delete, not refactor). The 4-method `MtlsEnforcement` contract is UNCHANGED — `liveness`/`PumpLiveness`/`pump_stall_deadline` are RETAINED (the `Gone` post-teardown no-leak observable the equivalence + F4 tests assert, plus the (B) verdict + the reserved hook for the deferred watchdog). Two NAMED deferrals (no issue created): the kernel-invisible progress-stall watchdog (Tier-3 spike; the kTLS-spliced progress predicate is undocumented upstream) and the Phase-5 policy-plane force-close (revocation/authz drain — a central registry IS correct THERE, not for v1 liveness). Decided on `transparent-mtls-connection-supervision-research.md` (22 sources). Refines ADR-0069 (locked core UNCHANGED: D-MTLS-1/fold/OQ-2/SD-1(a)/SD-2/SD-3/4-method contract/F3/F4-7/F5/authn-only). GH #26 | Accepted |
 | 0072 | **Dial-by-name responder — node-local in-agent DNS over the ObservationStore (the THIRD reader)** *(REV-2, supersedes headless v1 — see ADR-0072 § Changed Assumptions)* — answers `<job>.svc.overdrive.local` for an unmodified workload's `getaddrinfo`, closing the dial-by-name leg (#236 deferral). NEW `DnsResponder` host adapter (`overdrive-control-plane`, `adapter-host`) with its OWN name-keyed `name_index` (`<job>` → the **stable per-`<job>` frontend addr `F` in `10.98.0.0/16`**, NOT → backend addrs) over `service_backends ∩ running-AND-healthy` via the SAME List-then-Watch + relist-on-`Lagged` + single-owner-drain + `probe()` pattern as `ServiceBackendsResolve` — a **sibling reader** (DDN-1, ratified A1). The **ClusterIP split**: DNS answers a STABLE address; the already-live dataplane (nft-TPROXY Path-A + a re-keyed per-connection `MtlsResolve`) translates `(F, listener.port[, proto])` → a current running-AND-healthy backend and enforces SPIFFE mTLS, so the answer never goes stale on a backend cycle (the SQ1 fix). The byte-consistency anchor moved from the backend addr to `F` (the answered `F` is byte-identical to the addr `MtlsResolve` recognizes; the translation always lands a `Mesh` backend). `MtlsResolve` is **re-keyed** (1b-A) — `BackendIndex` gains `by_frontend: BTreeMap<FrontendKey, ServiceId>` where `FrontendKey = (SocketAddrV4, Proto)` (2nd-round Finding-1: the proto axis is carried so `tcp/53`/`udp/53` never collide; v1 captures TCP at the worker layer) + a three-way `classify` arm (frontend hit → translate; frontend-subnet miss → `MeshUnreachable` fail-closed; general miss → today's `by_addr`); this EDITS the security-critical resolve index, superseding REV-1's "intercept struct untouched" — pinned in the trait docstring + a DST equivalence test. NEW per-`<job>` `FrontendAddrAllocator` (1a-A, sibling to `NetSlotAllocator`, `WORKLOAD_FRONTEND_BASE = 10.98.0.0/16`, collision-checked disjoint from VIP `10.96.0.0/16` + workload `10.99.0.0/16`); `F` is per-LOGICAL-workload — WITHHELD at the `name_index` on transient zero-healthy (→ NXDOMAIN), RELEASED only on logical-workload deletion (Finding-2). `<job>` ← `Backend.alloc: SpiffeId` job segment = `WorkloadId` = deploy `[service].id` (verified mapping). Wire codec = **`hickory-proto`** (Apache-2.0/MIT, OSS-first); `hickory-server` REJECTED (no per-packet reply-source control on a multi-homed wildcard socket) → our OWN `IP_PKTINFO` recv/sendmsg loop with `ipi_spec_dst` source-pinning (spike-mandatory; `getaddrinfo` rejects wrong-source replies). DST seam = pure `answer_for(name, qtype, &index) -> NameAnswer` + a separately-proptested encoder (NO port trait / NO Sim adapter — the socket is irreducibly Tier-3, no Tier-2 backstop). Bind `0.0.0.0:53` wildcard first (`SO_REUSEADDR`), fall back to N per-gateway-addr sockets on `EADDRINUSE` — gateway set PINNED (DDN-5) to `NetSlotAllocator` + `responder_addr_for_slot`, re-derived on the converge tick. `run_server` owns it (construct after `resolve.probe()`, `responder.probe()`, spawn, hold `JoinHandle`; same `mtls_worker.is_some()` gate; `health.startup.refused` on bind/List failure — wire→probe→use). NEW `MeshServiceName` newtype (`overdrive-core::id`, `SUFFIX = svc.overdrive.local`, single `<job>` label v1, full newtype completeness + proptest). DNS contract: A+running-and-healthy → NOERROR+A (the stable `F`); AAAA+live → NODATA(+SOA); 0 running-and-healthy (declared-not-running OR unhealthy OR unknown, indistinguishable v1) → NXDOMAIN(+1s-MINIMUM SOA); never a stale/unhealthy addr. v1 IPv4-only; a stable IPv4 frontend is **VIP-shaped** but delivered via nft-TPROXY (NOT #61 XDP/`SERVICE_MAP`/#167). BLOCKER-1 (frontend-subnet capture) RESOLVED → WORKS on a real kernel; BLOCKER-2 (multi-replica selection) pinned deterministic first-by-`Ord`. Spike PROMOTE (dev-Lima 7.0; re-confirm on the pinned 7.0 appliance kernel, ADR-0068, in DELIVER Tier-3). Builds on ADR-0071 (Q5a name-layer). GH #243 / J-MESH-001 | Accepted |
 | 0073 | **Backend instance replacement — `overdrive workload restart <id>` + a minimal desired-run generation precursor** — closes the `[D1]` DISCUSS gate (#249). NEW top-level `overdrive workload restart <id>` verb (new `workload` CLI namespace, #220-aligned; NOT under `job`); single verb, rollout-restart breadth (running → stop-then-start; operator-stopped → start; non-existent → 404). Mechanism = a minimal desired-run `generation: u64` at a NEW standalone sibling key `workloads/<id>/generation` (8-byte big-endian — NOT an rkyv aggregate field, so NO ADR-0048 envelope bump / golden fixture); the `WorkloadLifecycle` reconciler gains `State.generation` (hydrated input) + `View.observed_generation` (persisted input, `#[serde(default)]`) and gates the stale line-520 operator-stop observation-veto on restart-pending **AND scoped to the current instance** — `!restart_pending && current_alloc(&allocs_vec).is_some_and(is_operator_stopped)`, where the new minimal pure helper `current_alloc` selects the latest-placed alloc by the numeric `mint_alloc_id` suffix so a superseded prior-generation `Terminated{Operator}` row can never veto a fresh instance's later crash-restart (the iteration-3 fix; iteration-2's transient generation-gating-only override was rejected for re-arming stale prior-generation rows after placement). The reconciler edit is required since clearing the `workloads/<id>/stop` sentinel alone is necessary-but-NOT-sufficient (the observed Operator-stop row persists). Bug-3 preserved: ONLY `restart` bumps the generation; `overdrive deploy` stays pure-declare and never bumps it, so a same-spec re-deploy cannot resurrect an operator-stopped workload. TOCTOU-safe + monotonic: the generation bump + sentinel delete commit in ONE `IntentStore::txn` via the NEW `TxnOp::IncrementU64` variant (read-modify-write inside the redb write txn; redb serializes writers ⇒ atomic, two concurrent restarts advance `generation` by 2, never wedge) + `TxnOp::Delete` — **NO `Conflict` retry** (the `Put`-then-retry-on-`Conflict` shape was the iteration-1-rejected design; `LocalIntentStore::txn` returns `Committed` unconditionally so that conflict is unproduceable). HTTP = `POST /v1/jobs/:id/restart` (mirrors `stop_workload`; the `jobs/` HTTP prefix vs `workloads/` IntentKey prefix vs `workload` CLI verb split is the already-shipped `job stop` shape); `RestartWorkloadResponse { workload_id, outcome ∈ {restarted, resumed} }`; 404 `NotFound { resource: workloads/<id> }`. `restart` is **level-triggered / coalescing** (iteration-2 contract): generation advances monotonically per call (audited), the reconciler converges to ONE fresh instance for the latest generation; sequential restarts each cycle the workload, concurrent / pre-placement restarts coalesce into one cycle. Per ADR-0104's accepted VM-only amendment, Exec fresh placement keeps the row-count attempt, while VM placement chooses above retained rows plus fsynced View reservation keys and reserves the ID before dispatch so rejected publication cannot reuse it. Seam is THIN per ADR-0050 OQ-1 — only `generation`/`observed_generation`, NO revision rows / `RevisionId` / retention (deferred to #180, where `generation` folds into the `workloads/<id>/current` pointer); reused verbatim by #64 (rolling deploy), #253 (zero-downtime), #254 (multi-replica). Reuse: 6 EXTEND (`stop_workload` shape, reconciler, `IntentKey`, http-client, api response enum, `hydrate_desired`), 5 minimal CREATE-NEW (`workload` namespace, restart handler+route, generation key+codec, the `TxnOp::IncrementU64` store primitive, the pure `current_alloc` reconciler helper). Wholly internal — no external integration, no new crate, no new dep. Alternatives rejected: lean narrow-veto edit (no forward seam), re-stamp observed row to SystemGc (corrupts observation honesty), full #180 pull-forward (over-build). GH #249 / J-OPS-003 (extended) | Accepted |
 | 0088 | **Guest-stack netns topology — routed two-/30 tap wire + silent pre-READY guest addressing** — VM-kind allocs get a persistent tap in the per-workload netns addressed from a second slot-derived /30 (upper half of `WORKLOAD_SUBNET_BASE` `10.99.0.0/16`: `base + 0x8000 + slot*4`; disjoint from transit under `NET_SLOT_MAX = 4095`), netns `ip_forward=1`, and a host return route — the increment-n spike topology (WORKS, no rp_filter/tx-offload toggle). **`workload_addr` = guest addr** for VM allocs through the existing `AllocStatusRowV2` field. ONE platform cmdline parameter carries guest /30, gateway, and dns. Before READY, `overdrive-init` verifies NIC-down, disables/reads back per-interface IPv6, writes/reads back `arp_notify=0`, then applies IPv4/route/resolver; any init/token/suppression/apply failure logs to guest serial and powers off before READY without guest `EXIT` or operator exec. After READY, `EXIT` is operator-only; Beacon PL is unchanged. `VmDriver` selects bounded guest-console diagnostics and the exact Job classifier finalizes `VmGuestExitUnreported` as Failed without restart. **2026-08-29 mutation-aware amendment:** the alloc egress rule gains one anonymous counter and a strict read-only exact-rule oracle. **2026-08-31 recovery amendment:** outbound and inbound prerouting rules order the existing mark before TPROXY, so listener-loss `NFT_BREAK` leaves traffic on the existing local policy route rather than restoring cleartext reachability; no second rule, quarantine, listener adoption, or guard API is added. **Amended (2026-09-24):** the zero-frame contract is unchanged. Its post-#295 shared-bridge realization, where CH inherits a TAP queue fd and the TAP stays down until the post-event activation, is decided by ADR-0127, ADR-0128 and ADR-0131 (accepted 2026-09-24; superseded for #295 by the vsock microVM attachment, ADR-0145, under which a VM has no TAP); the listener-loss ordering claim is corrected by ADR-0140 (see ADR-0088's accepted amendment). Both earlier 2026-09-23 variants are withdrawn: attaching a down TAP by name, and the closed control-frame set. Reset, wrap, replacement/delete/reinsert, notification loss, partial/interrupted dumps, or ambiguity fails; same-tag adoption, by-handle teardown, boot sweep, and siblings remain unchanged. No external API, Beacon, persistence, describe, or observation schema changes arise. Extends ADR-0071; realises ADR-0069's staged #222 adapter. GH #222 | Accepted, amended 2026-09-23 |
 | 0089 | **Tap-in-netns provisioning boundary + CH net attach** — the C3 seam (`provision_and_inject_netns`) gains a `DriverPayload`-matched VM branch: pure `VmTapPlan` + four Bar-1 converge steps (tap create+persist/address, netns `ip_forward`, host return route; structural teardown); `overdrive-netlink` performs ioctl/netlink tap creation/move; `Vmm` uses the existing `ip netns exec <ns>` wrapper plus `--net tap=,mac=`; both `DriverType::Exec` install gates extend to VM-kind (fresh start `:1584`, restart `:1880`; D-MTLS-18 inherited; teardown remains ungated). **2026-08-29 mutation-aware amendment:** `install_outbound_tproxy` is EXTEND, not REUSE-AS-IS: the sole owner installs one anonymous counter after unchanged interface/TCP matches, with strict mutation-aware internal observation. **2026-08-31 recovery amendment:** both prerouting encoders use `selection → [outbound counter] → mark → TPROXY → accept`; a missing listener breaks after the mark, so the existing fwmark/local route fails closed. No second rule, quarantine, listener adoption, or public surface is added. The read-only metal decorator never installs/replaces/resets/deletes; exact tag, same-tag adoption, by-handle teardown, boot sweep, sibling nonmutation, public schemas, and 8/10/1 stay unchanged. Inbound topology is settled and BUILD deferred to #257. Rejected: driver-created tap, fd-passing, worker `pre_exec` setns, dedicated Bar-2 reconciler now, `start_alloc`-owned return route. Bar-2 rides #197/#234. **Proposed 2026-09-11, pending review:** the selected TAP attachment adds only its exact sysfs leaf `access=r` to `VmConfig`'s explicit Landlock sequence before the existing run-dir `access=rw`; public API, TAP lifecycle and every gate remain unchanged. GH #222 | Accepted; Landlock amendment proposed |
 | 0090 | **VM Service network-probe target projection** — resolve HTTP/TCP effective destinations once at `ProbeRunner` allocation registration: explicit hosts (including explicit loopback) unchanged; a VM HTTP omission or exact `0.0.0.0` HTTP/TCP target uses the provisioned guest `workload_addr`; an allocation-network Exec/process omission or exact wildcard uses its provisioned transit `workload_addr`; and unnetworked Exec/process defaults stay loopback. `ServiceLifecycle` counts each stored Startup/index-0 LWW failure once with its existing timestamp map, normalizing a legacy unpaired counter to one current observation. Share the trusted runner with `VmDriver` through existing lifecycle hooks. `Vm + None` has no production producer and receives no speculative behavior. Moves no lifecycle gate. GH #257; amended by proposed ADR-0097 | Accepted |
-| 0091 | **Service parser driver union + VM Exec exclusion** — `ServiceSpecEnvelope::V3` replaces parser `exec` with the existing `DriverInput` union; frozen V1/V2 migrate as Exec. Reuse existing wire/intent/allocation/describe unions. Reject VM Exec probes locally and in authoritative admission before intent commit, naming GH #280. GH #257 | Accepted |
+| 0091 | **Original Service driver union** — historical combined parser and VM command-probe rejection. Live parser/envelopes are VM-only under ADR-0111, and ADR-0113 removes the host command probe and its VM-specific rejection shim. | Superseded for live driver and probe surfaces |
 | 0104 | **Historical VM-only replacement boundary** — established the valid #284 physical-identity problem and fresh VM execution evidence, but made `WorkloadLifecycle` choose identity semantics from `WorkloadDriver::Vm(_)` while preserving same-ID Exec. The user rejected that application boundary on 2026-09-13. ADRs 0105, 0106, 0108 and 0109 replace its bundled identity/cleanup/consumption/handoff choices only after final user disposition. | Accepted historical decision; rejected as PR #292 merge authority; corrective supersession unresolved after final review |
 | 0105 | **Driver-neutral physical allocation identity** — `WorkloadId` remains stable and one `AllocationId` names one physical execution for every driver, including legacy Exec until GH #293 removal. Exact action/allocator/persistence contracts live in the feature delta. GH #284 | User-ratified; iteration-2 technical check passed; complete DESIGN final verdict `CHANGES_REQUESTED` |
 | 0106 | **Successor creation does not wait for predecessor cleanup** — exact-old cleanup completion/failure cannot block or roll back the fresh successor. Exact handoff and cleanup-failure contracts live in the feature delta. GH #284 | User-ratified; iteration-2 decision check passed; F-06 wording corrected after final review |
@@ -4201,37 +4050,13 @@ C4Context
 #### C4 Level 2 — Container diagram (REV-2 stable-frontend / ClusterIP split)
 
 ```mermaid
-C4Container
-  title Container Diagram — node-local DNS responder (REV-2 stable-frontend / ClusterIP split)
-
-  Person(none, "(no operator verb)", "Feature has no CLI/HTTP surface; the observable is the workload's getaddrinfo result + the ping-pong demo")
-
-  System_Boundary(node, "Overdrive node-agent (one process)") {
-    Container_Boundary(wlns, "Workload netns + veth (per allocation)") {
-      Container(workload, "Exec workload", "Process in its own netns", "Unmodified; getaddrinfo(<peer>.svc.overdrive.local) → connect to F")
-      Container(resolvconf, "netns resolv.conf", "per-netns mount (D-TME-9, SHIPPED)", "nameserver = per-netns gateway (plan.host_addr)")
-    }
-    Container(responder, "DnsResponder", "Rust (overdrive-control-plane, adapter-host) — NEW", "0.0.0.0:53 wildcard (SO_REUSEADDR + IP_PKTINFO); recv → answer_for → encode → sendmsg with ipi_spec_dst = queried gateway; per-addr fallback on EADDRINUSE re-derives gateways from NetSlotAllocator on the converge tick")
-    Container(nameindex, "name_index", "Rust — NEW", "Maps <job> -> STABLE per-<job> frontend addr F (REV-2: NOT -> backend addrs); List-then-Watch + relist-on-Lagged + single-owner drain over the SAME service_backends rows; gates Backend.healthy == true, WITHHOLDS on zero-healthy")
-    Container(falloc, "FrontendAddrAllocator", "Rust — NEW (1a-A)", "Binds <job> -> F in 10.98.0.0/16; stable across alloc cycles; release only on logical-workload deletion (the Overdrive ClusterIP analogue)")
-    Container(answer, "answer_for (pure) + wire (hickory-proto)", "Rust — NEW", "Pure classification → NameAnswer (Records(vec![F])); hickory-proto encode/decode (A / SOA / NODATA / NXDOMAIN)")
-    Container(tproxy, "nft-TPROXY interceptor", "ADR-0071 Path-A (reused verbatim)", "Captures the connect to (F, listener.port); recovers orig_dst verbatim")
-    Container(resolveadapter, "MtlsResolve (re-keyed, 1b-A)", "Rust (adapter-host) — EXTENDED (REV-2)", "by_frontend: BTreeMap<FrontendKey,ServiceId> (FrontendKey=(SocketAddrV4,Proto)); translates (F, listener.port, proto) -> current running-AND-healthy backend B; three-way classify (hit -> Mesh; frontend-subnet miss -> MeshUnreachable fail-closed; else by_addr)")
-    ContainerDb(obs, "ObservationStore (service_backends)", "Corrosion / LocalObservationStore", "Single source — three readers fold the SAME rows")
-  }
-  Container(backend, "Server workload", "a running mesh backend at B in its own netns", "")
-
-  Rel(workload, resolvconf, "Resolves <peer>.svc.overdrive.local via")
-  Rel(resolvconf, responder, "Points getaddrinfo at the per-netns gateway, where the wildcard responder receives it")
-  Rel(responder, nameindex, "Looks up MeshServiceName -> stable frontend F in")
-  Rel(nameindex, falloc, "Reads the <job> -> F binding from")
-  Rel(responder, answer, "Classifies + encodes (A = F) via")
-  Rel(nameindex, obs, "List-at-probe + watch + relist; ordered drain updates by_frontend BEFORE exposing F (Finding-3)")
-  Rel(resolveadapter, obs, "Reads the SAME service_backends rows (sibling reader, byte-consistent on the <job>->F binding)")
-  Rel(responder, workload, "A = STABLE frontend addr F (byte-identical to what MtlsResolve is re-keyed to recognize; translation lands a Mesh backend) / NXDOMAIN")
-  Rel(workload, tproxy, "connect((F, listener.port)) captured by")
-  Rel(tproxy, resolveadapter, "hands orig_dst = (F, listener.port) to")
-  Rel(resolveadapter, backend, "mTLS-originates to current backend B")
+flowchart LR
+  guest["Linux guest resolver"] --> transport["Guest DNS datagram transport"]
+  transport --> dns["Node-local DNS responder"]
+  dns --> backends["Live service backends"]
+  dns --> vip["Stable service frontend answer"]
+  vip --> guest
+  guest --> mesh["Captured mesh TCP to running VM backend"]
 ```
 
 ---
@@ -4934,7 +4759,7 @@ asserts byte-equality across the two surfaces.
 
 Per ADR-0047 §1 + ADR-0031 Amendment 2, Service-kind specs gain a
 top-level `[[listener]]` array-of-tables (sibling to `[service]` /
-`[exec]` / `[resources]`). Each listener carries `port: NonZeroU16`,
+`[vm]` / `[resources]`). Each listener carries `port: NonZeroU16`,
 `protocol: Proto` (case-insensitive `tcp`/`udp` reusing the existing
 `overdrive-core::Proto` newtype from §44; no second copy), and
 `vip: Option<ServiceVip>` (existing newtype from §44 — no second
@@ -6029,9 +5854,8 @@ semantics to the Service kind.
 
 ### 75. ProbeRunner subsystem — `overdrive-worker` adapter-host
 
-Per ADR-0054. A new module tree
-`crates/overdrive-worker/src/probe_runner/` lands as a sibling of
-`ExecDriver` (ADR-0030) and `CgroupManager` (ADR-0026). The runner
+`crates/overdrive-worker/src/probe_runner/` is a sibling of `VmDriver` and
+`CgroupManager`. ADR-0113 removes host command probing. The runner
 holds an `Arc` shared across every Service-kind alloc on the node;
 when an alloc reaches `Running`, the runner spawns a per-alloc
 supervisor task that in turn spawns one per-probe-instance tokio
@@ -6059,20 +5883,18 @@ probes behind slow ones; (c) introduces cross-alloc cascading
 failure surface. The chosen shape gives independent failure
 isolation per probe at a cost of ~1 KB per supervisor.
 
-Three new port traits land in `overdrive-core::traits::prober`
-(NEW module):
+Two probe port traits remain in `overdrive-core::traits::prober`:
 
 - `TcpProber` — `async fn probe(SocketAddrV4, Duration) -> ProbeOutcome`
 - `HttpProber` — `async fn probe(HttpProbeRequest, Duration) -> ProbeOutcome`
-- `ExecProber` — `async fn probe(ExecProbeSpec, Duration, &CgroupPath) -> ProbeOutcome`
 
 Each trait carries rustdoc pinning preconditions, postconditions,
 edge cases, and observable invariants per
 `.claude/rules/development.md` § "Trait definitions specify
 behavior, not just signature". Production bindings
-(`TokioTcpProber`, `HyperHttpProber`, `CgroupExecProber`) live in
-`overdrive-worker`; sim bindings (`SimTcpProber`, `SimHttpProber`,
-`SimExecProber`) live in `crates/overdrive-sim/src/adapters/probers.rs`
+(`TokioTcpProber`, `HyperHttpProber`) live in
+`overdrive-worker`. Sim bindings (`SimTcpProber`, `SimHttpProber`) live in
+`crates/overdrive-sim/src/adapters/probers.rs`
 (new) and honour the same trait surface (per `.claude/rules/development.md`
 § "Production code is not shaped by simulation").
 
@@ -6315,7 +6137,7 @@ accepts three new array-of-tables sections under the `[service]`
 discriminator only:
 
 - `[[health_check.startup]]` — required: `type`, `port` (TCP) or
-  `path`+`port` (HTTP) or `command` (Exec); optional:
+  `path`+`port` (HTTP). Optional fields are:
   `timeout_seconds` (default 5), `interval_seconds` (default 2),
   `max_attempts` (default 30 → `startup_deadline = 60s`).
 - `[[health_check.readiness]]` — same body + `success_threshold`
@@ -6369,27 +6191,12 @@ platform must do better by default. The inference rule is a
 SemVer contract; future changes require an operator-configurable
 knob.
 
-### 83. Exec-probe cgroup placement — `cgroup.procs` write (Phase 1)
+### 83. Health-probe execution boundary
 
-Per ADR-0059. The `CgroupExecProber` uses mechanism (b) —
-`tokio::process::Command::spawn` + post-spawn write of the child's
-PID to `<alloc_cgroup>/cgroup.procs`. Reuses
-`cgroup_manager::place_pid_in_scope` from `ExecDriver` per
-ADR-0026; reuses `cgroup_manager::cgroup_kill` for timeout
-cleanup (mass-kill via cgroup.kill, prevents orphaned
-descendants).
-
-Mechanism (a) — `clone3 + CLONE_INTO_CGROUP` — is structurally
-cleaner (atomic, no transient parent-cgroup membership) but
-deferred: `nix` 0.27 does not wrap the flag; the production
-sim adapter shape would diverge; code reuse with `ExecDriver` is
-lost. Phase 2+ may migrate to (a) once `nix-rust/nix#2120` ships;
-non-breaking trait-internal swap.
-
-The probe runs INSIDE the workload's cgroup; CPU + memory
-consumption attribute to the workload's limits (per ADR-0026
-`cpu.weight` + `memory.max`). Matches K8s semantic (probes inside
-the container's cgroup).
+HTTP and TCP probes dial the guest application's port through the allocation's
+`GuestStreamDial` owner. There is no host command-probe mechanic or probe
+process to place in a workload cgroup. ADR-0113 removes that surface. GH #280
+owns any future in-guest command execution probe.
 
 ### 84. CLI render — Probes section for Service kind
 
@@ -6421,7 +6228,7 @@ probe rendered with `(inferred)` marker. JSON-mode shape per ADR-0056
 | ASR-SHCP-05 | Functional correctness — kind rejection (K5) | TOML with `[job]` + `[[health_check.startup]]` | 100% rejected at parse time with `ParseError::ProbesNotAllowedOnKind` |
 | ASR-SHCP-06 | Performance — runner CPU guardrail | 1 Service alloc with 3 probes ticking at 2s/2s/10s | CPU consumption per alloc-with-3-probes ≤ 0.5% sustained |
 | ASR-SHCP-07 | Reliability — fault isolation per probe | Two probes on one alloc; one probe hangs 5s timeout, the other completes 100ms | Fast probe completes within 100ms ± scheduling jitter; slow probe times out at 5s; no cross-probe head-of-line |
-| ASR-SHCP-08 | Maintainability — trait equivalence | DST equivalence harness drives `TcpProber` / `HttpProber` / `ExecProber` impl pairs through same sequence | Sim and production adapters produce same `ProbeOutcome` for every step |
+| ASR-SHCP-08 | Maintainability — trait equivalence | DST equivalence harness drives `TcpProber` / `HttpProber` impl pairs through same sequence | Sim and production adapters produce same `ProbeOutcome` for every step |
 
 ### 86. C4 — see `c4-diagrams.md` § Phase 1 Service Health-Check Probes
 
@@ -6437,38 +6244,12 @@ The feature ships:
   topology. Embedded below.
 
 ```mermaid
-C4Component
-  title Component Diagram — ProbeRunner subsystem (Phase 1 Service health-check probes)
-
-  Container_Boundary(worker, "overdrive-worker (adapter-host)") {
-    Component(runner, "ProbeRunner", "Rust struct (Arc-shared per node)", "start_alloc / stop_alloc / probe() Earned Trust gate; holds CancellationTokens per alloc")
-    Component(supervisor, "Per-alloc supervisor", "root + per-role CancellationTokens (no JoinSet)", "Spawns N detached per-probe tasks; cancels root on alloc terminal, one role token on Stable (ADR-0080 D4)")
-    Component(probe_task, "Per-probe-instance task", "tokio::task", "Loops: select(cancel, sleep(interval)) → probe.probe() → write ProbeResultRow → repeat")
-    Component(tcp_prober, "TokioTcpProber", "production binding of TcpProber", "tokio::net::TcpStream::connect + tokio::time::timeout")
-    Component(http_prober, "HyperHttpProber", "production binding of HttpProber", "hyper::client + connection pool + per-request timeout")
-    Component(exec_prober, "CgroupExecProber", "production binding of ExecProber", "Command::spawn + place_pid_in_scope + cgroup.kill on timeout")
-    Component(cgmgr, "cgroup_manager (existing)", "module from ADR-0026", "place_pid_in_scope, cgroup_kill; reused by ExecProber")
-  }
-
-  Container(core_traits, "overdrive-core::traits::prober", "Three port traits — TcpProber / HttpProber / ExecProber — declared with rustdoc preconditions, postconditions, edge cases, invariants per development.md")
-  Container(core_obs, "overdrive-core::observation::probe_result_row", "ProbeResultRow + ProbeResultRowEnvelope::V1 per ADR-0048")
-  Container(obs_store, "LocalObservationStore", "redb-backed; write_probe_result + list_probe_results_for_alloc")
-  Container(reconciler_runtime, "ReconcilerRuntime", "Reads probe_results on hydrate_actual; projects them into actual.allocs as ServiceAllocFact.latest_startup/readiness/liveness_probe")
-  Container(service_reconciler, "ServiceLifecycleReconciler", "Pure sync reconcile; consumes ProbeResultRow via actual; emits Stable/Failed/WriteServiceBackendRow/RestartAllocation Actions")
-  Container(exec_driver, "ExecDriver (existing per ADR-0030)", "Per-alloc supervisor signals ProbeRunner on alloc Running and terminal")
-
-  Rel(exec_driver, runner, "on_alloc_running(alloc_id, probe_descriptors) / on_alloc_terminal(alloc_id)")
-  Rel(runner, supervisor, "spawn per-alloc supervisor task; pass CancellationToken")
-  Rel(supervisor, probe_task, "spawn N detached per-probe tasks, each under a child of its role token")
-  Rel(probe_task, tcp_prober, "TcpProber::probe (TCP mechanic)")
-  Rel(probe_task, http_prober, "HttpProber::probe (HTTP mechanic)")
-  Rel(probe_task, exec_prober, "ExecProber::probe (Exec mechanic)")
-  Rel(exec_prober, cgmgr, "place_pid_in_scope + cgroup_kill")
-  Rel(probe_task, obs_store, "ObservationStore::write_probe_result(ProbeResultRow) — LWW per (alloc_id, role, probe_idx)")
-  Rel(reconciler_runtime, obs_store, "list_probe_results_for_alloc on hydrate_actual")
-  Rel(reconciler_runtime, service_reconciler, "reconcile(desired, actual, view, tick) → (Vec<Action>, View)")
-  Rel(core_traits, runner, "Trait surface (Arc<dyn TcpProber/HttpProber/ExecProber>)")
-  Rel(core_obs, obs_store, "Row shape; rkyv envelope V1")
+flowchart LR
+  service["VM Service · HTTP/TCP descriptors"] --> runner["ProbeRunner"]
+  runner --> dial["GuestStreamDial · live allocation owner"]
+  dial --> guest["Guest application port"]
+  runner --> rows["ProbeResultRow · sequence and streak"]
+  rows --> lifecycle["ServiceLifecycle · threshold decisions"]
 ```
 
 ### 87. Updated handoff annotations — service-health-check-probes
@@ -7157,7 +6938,7 @@ decomposed Phase-05 (D-MTLS-17). Evolution record:
 | Central `MtlsSupervisor` + its tests (ADR-0070 / D-MTLS-16) | `crates/overdrive-worker/src/mtls_supervisor.rs`, `tests/acceptance/mtls_supervisor_teardown_on_stall.rs` | DELETE (single-cut) |
 | `SimMtlsEnforcement` double + `mtls_enforcement_equivalence` DST harness | `crates/overdrive-sim/src/adapters/`, `crates/overdrive-sim/tests/acceptance/mtls_enforcement_equivalence.rs` | NEW |
 
-> **v1 boundary (DESIGN NOTE for DEVOPS / future phases):** v1 is process/exec
+> **Superseded workload boundary:** the original process/exec restriction is replaced by ADR-0110 and the vsock attachment. The following dated evidence describes the earlier scope, not a supported execution mode. The original v1 was process/exec
 > only, single-node, **chain-to-bundle authn only** — a valid-but-unintended
 > peer SVID is NOT prevented and nothing is called "protected" until intended-peer
 > pinning lands ([#178](https://github.com/overdrive-sh/overdrive/issues/178);
@@ -8900,6 +8681,11 @@ platform-architect handoff.
 
 ## Cloud Hypervisor VM driver extension (2026-08-11, GH #42, ADR-0082 + ADR-0083)
 
+**Dated source and reuse audit.** Source locations, prior Exec comparisons, and
+old composition examples in this section record the original implementation
+review. ADR-0110 through ADR-0113 and ADR-0219 govern the live VM-only types,
+probe set, and composition. No retired Exec symbol below is a current API.
+
 **Scope**: the application-architecture third of the DESIGN wave for
 `microvm-driver-cloud-hypervisor` — the `Vmm` port surface, the `VmConfig`
 value, driver dispatch, the spec-parse surface, the reason vocabulary, and the
@@ -10330,7 +10116,7 @@ flowchart TB
         VHS["<b>VmHostState</b> port trait (NEW)<br/>probe · <b>observe</b> · kill_scope · discard_artifacts<br/><i>observe() IS the hydration seam (#197 lifts it)</i>"]
         VALS["VmConfig · VmRunDir · MemoryPlan<br/>KernelImage · DiskAttachment · RootfsPlan<br/><i>the ACL: one rendering site per lie, lint-enforced</i>"]
         REG["<b>DriverRegistry</b><br/>BTreeMap&lt;DriverType, Arc&lt;dyn Driver&gt;&gt;<br/><i>absence of a key IS the capability gate</i>"]
-        PAY["DriverPayload<br/>Exec(..) | Vm(..)"]
+        PAY["DriverPayload<br/>Vm(..)"]
         VOCAB["StoppedBy::PlatformReclaimed<br/>12 × TransitionReason::Vm*<br/>is_platform_reclaimed()"]
         RECON["<b>VmReclamation : Reconciler</b> (SD-1, Bar 2)<br/>State: allocations | host | supervision<br/>View: FIELD-LESS (ADR-0079)<br/><b>plan_reclamation — PURE, takes no port</b>"]
         ACTS["Action::ReclaimAllocation { alloc_id }<br/>Action::DiscardStrandedArtifacts { alloc_id }<br/><i>two variants, never one with a flag (DD-5)</i>"]
@@ -10347,7 +10133,6 @@ flowchart TB
     end
     subgraph WORKER["overdrive-worker — adapter-host"]
         VD["<b>VmDriver</b> : Driver<br/>cgroup · netns · beacon · 3-way race · [D3]<br/><b>holds the authorship claim: Held → EndingInFlight</b><br/><b>live_allocations() → Some(set) — BOTH phases</b>"]
-        ED["ExecDriver : Driver<br/><i>unchanged; live_allocations() defaults to None</i>"]
     end
     subgraph CP["overdrive-control-plane"]
         COMP["compose_production_driver<br/>discover → probe → insert"]
@@ -10367,9 +10152,8 @@ flowchart TB
     SVHS -.->|implements| VHS
     VD  -->|"Arc&lt;dyn Vmm&gt; — required ctor param"| VMMT
     VD  -->|builds| VALS
-    COMP -->|"inserts Exec always,<br/>Vm iff discovered + probed"| REG
+    COMP -->|"inserts Vm when capability probes pass"| REG
     COMP --> VD
-    COMP --> ED
     COMP -->|"composes UNCONDITIONALLY<br/>(not Vmm-gated)"| VHS
     SHIM -->|"get(driver_type)"| REG
     RECON -->|"actual, read FIRST: observe()"| VHS
@@ -11002,61 +10786,27 @@ specific Service kind or health subsystem. The existing Service driver union,
 
 ### Target ownership
 
-`ProbeRunner` resolves the effective HTTP/TCP destination once at its existing
-per-allocation registration boundary. A non-wildcard explicit host, including
-explicit loopback, is retained. An omitted HTTP host or exact `0.0.0.0` targets
-a VM allocation's provisioned guest `workload_addr`; the same default/wildcard
-on an Exec/process allocation with `Some(workload_addr)` targets its provisioned
-transit `workload_addr`; an unnetworked Exec/process default retains loopback.
-Declared descriptors remain intent and are never rewritten with runtime
-addresses. The existing marked HTTP/TCP adapters retain their non-loopback
-connect behavior. See ADR-0090 as amended by proposed ADR-0097.
+`ProbeRunner` resolves HTTP/TCP destinations for a VM allocation at registration.
+It preserves explicit destinations and derives the guest target from the live
+transport assignment for the default case. Probes dial through the guest owner,
+not a process-workload namespace. Descriptors remain declared intent rather
+than being rewritten with runtime addresses.
 
-`ServiceLifecycle` remains the sole startup-attempt and terminal owner. It
-counts a failing Startup/index-0 `ProbeResultRow` once from its existing LWW
-timestamp: an unchanged row does not increment, a strictly later stored row
-does, and Pass clears both existing maps. A persisted legacy counter without a
-timestamp is normalized to the current row's one observation rather than
-incremented; no new persistence, store operation, lifecycle state, or owner is
-introduced. #295 replaces this de-duplication: under PROBE-RUN-COUNT
-(ADR-0191, approved 2026-10-13, not yet implemented; amends ADR-0097 D2)
-`ServiceLifecycle` keeps no startup-attempt counter: the startup attempts are
-spent when the latest startup row is a `Fail` whose producer-recorded
-`same_status_runs` reaches `max_attempts`, read at each reconcile, and both
-view maps (`startup_attempts_per_alloc`, `startup_last_fail_seen_at`) are
-removed (#295 feature delta § *[REF] VM probe runner*).
-
-The production action shim always provisions VM networking and injects
-`Some(tap.guest_addr)` before VM start. `on_alloc_running` is invoked only after
-successful VM start and the Running observation write. VM address presence is
-therefore a registration precondition, not a workload-health branch. There is
-no fallback, failure-row policy, lifecycle transition, public state, or test
-for `Vm + None`; no production `serve` + `deploy` path produces it.
-
-The one `ProbeRunner` already probed at server boot is passed as a mandatory
-dependency to the optional `VmDriver`. The VM driver implements the existing
-Running/Stable/terminal hooks exactly as `ExecDriver` does. No `Driver` trait
-method, runner, lookup registry, or observation schema is added.
+The boot composes one probe runner and passes it to `VmDriver`. Running,
+Stable and terminal hooks retain their established lifecycle owners. The probe
+producer records sequence and streak, and `ServiceLifecycle` applies thresholds
+from the latest row under ADR-0191.
 
 ### Service ingress and round-trip
 
-The parser-side Service payload advances from `ServiceSpecV2` to
-`ServiceSpecV3`, replacing `exec: ExecInput` with the existing parser
-`DriverInput::{Exec, Vm}`. Frozen V1/V2 payloads up-convert as Exec and retain
-their golden bytes. The two Service deploy lanes forward the selected variant
-through the existing wire union. `ServiceV2::from_submit`, the persisted
-`WorkloadDriverV2`, allocation projection, and `ServiceSpecOutput.driver`
-already have both variants; admission and describe now stop treating VM as
-unreachable. See ADR-0091.
+Service parser, wire, intent, and runtime driver unions contain only `Vm`.
+ADR-0111 resets the affected envelopes to incompatible VM-only V1 rather than
+preserving old Exec payloads. Describe renders the guest command, arguments,
+kernel and rootfs through the same VM-shaped contract.
 
-A VM Service containing an Exec probe is rejected twice before persistence:
-locally by the TOML parser and authoritatively by `ServiceV2::from_submit` for
-direct API clients. Both select Startup before Readiness before Liveness, then
-the lowest vector position. Parser localization uses the selected
-`[[health_check.<role>]]` section and `entry [position]`; admission localization
-uses `<role>_probes` and `[position]`. Both retain the same HTTP/TCP + GH #280
-guidance through existing error variants. Exec-backed Service Exec probes are
-unchanged.
+HTTP and TCP are the supported probe mechanics. ADR-0113 removes the host Exec
+probe and the VM-specific rejection shim. A future guest command probe is
+separate work under GH #280.
 
 ### Lifecycle Gate Ownership
 
@@ -11297,9 +11047,10 @@ ports-and-adapters driver boundary, tagged driver intent/payload unions,
 composed driver. Their live set contains only the current VM adapter until a
 later, independently designed microVM-family adapter exists. No scalar
 `VmDriver` field, concrete-driver match in the control plane, new action, or
-new lifecycle owner is introduced. ADR-0083's capability-absence result also
-remains: ordinary VMM absence may leave the registry empty while `overdrive
-serve` boots; a present-but-lying VMM retains its existing startup refusal.
+new lifecycle owner is introduced. The current ADR-0219 capability policy is
+root-supplied: an optional VM capability probe failure may leave the registry
+empty while `overdrive serve` boots, while a required capability probe failure
+refuses startup. Neither outcome composes a fallback workload adapter.
 
 [ADR-0110](adr-0110-microvm-only-live-driver-contract.md) records the
 live execution choice. Operator/parser/wire/live-intent/runtime-payload Exec
@@ -11333,24 +11084,21 @@ envelopes affected; unrelated observation, CA, and workflow envelopes remain
 unchanged.
 
 [ADR-0113](adr-0113-remove-host-exec-health-probe-surface.md) records
-the recommended disposition of the now-unreachable host Exec health-probe
-surface: delete `ProbeMechanic::Exec`, `ExecProber`, the host/sim adapters,
+the implemented removal of the host Exec health-probe
+surface: `ProbeMechanic::Exec`, `ExecProber`, the host/sim adapters,
 runner/parser/error arms, and the VM rejection shim. HTTP/TCP probes remain
 unchanged. GH #280 keeps sole ownership of any future in-guest command probe;
 no guest-control mechanism is pulled forward or preserved as a placeholder.
 
-The current VM netns/veth/two-`/30`/TAP/`host_veth` path remains temporarily
-because production VM start and transparent mTLS currently use it. This is not
-a permanent compatibility decision. Everything under GH #293's “Required
-handoff to #295” is a constraint on the state #293 leaves, not #293
-implementation: replacing the current network mechanism remains exclusively
-GH #295. GH #295's design is the vsock microVM attachment (§ *vsock microVM
-attachment (GH #295)*): it has no shared switching, per-tap classification
-or shared-bridge DNS; it re-homes transparent mTLS onto vsock flows and
-deletes the current network mechanism.
+VM networking uses the guest-neutral vsock attachment. The host owner assigns
+address and transport identity, and the Linux guest captures application sockets
+before traffic is activated. No per-VM host netns, veth, TAP or bridge belongs
+to the live attachment. Host enforcement remains outside the guest and delivers
+to VM backends through the owner-opened stream. The vsock attachment section
+and ADR-0145/0197 govern that path.
 
-The existing lifecycle order is preserved precisely: current VM network
-provision/injection and guest-ready `Driver::start` precede acceptance of the
+The existing lifecycle order is preserved precisely: transport-assignment
+provisioning and guest-ready `Driver::start` precede acceptance of the
 initial `Running` row; transparent-mTLS intercept installation follows that
 accepted row. Intercept success therefore does **not** gate `Running`. It gates
 only the later VM beacon `EXEC` command/exit-event release. An install failure

@@ -1,10 +1,11 @@
 ---
 title: Introduction
-description: A single-binary workload orchestration platform written in Rust
+description: A Rust control plane for Linux microVM workloads with built-in networking and identity
 ---
 
 Overdrive is a workload orchestration platform with a Rust control plane and
-Linux networking components, including eBPF programs and a C kernel forwarder. Its
+Linux networking components, including eBPF programs and a C kernel forwarder.
+All supported workloads run as Linux microVMs. Its
 design goal is to collapse the
 Kubernetes / etcd / CNI / Envoy / SPIRE / Prometheus stack into one binary,
 built on 2026 primitives — stable eBPF, kTLS, WASM, and SPIFFE — rather than

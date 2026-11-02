@@ -29,7 +29,7 @@ maturity claim.
 | | Overdrive | Kubernetes | Nomad | Fly.io |
 | --- | --- | --- | --- | --- |
 | Orchestration | Reconcilers + workflows | Controllers + CRDs | Bin-packing scheduler | flyd + Machines API |
-| Workload types | exec · Linux microVM | Containers (VMs via add-ons) | docker · exec · QEMU · Java | Firecracker microVMs |
+| Workload types | Linux microVM | Containers (VMs via add-ons) | docker · exec · QEMU · Java | Firecracker microVMs |
 | Load balancing | eBPF XDP, in-kernel | CNI; eBPF via Cilium | basic; LB via Consul | fly-proxy (userspace, Rust) |
 | Service mesh | Sidecarless, in the binary | Add-on: sidecar or sidecarless | Consul Connect (add-on) | Not a per-workload mesh |
 | Workload-to-workload mTLS | Kernel kTLS, per-workload SPIFFE | Mesh add-on | Consul Connect (add-on) | WireGuard (machine-level) |
@@ -88,9 +88,8 @@ proved and changes three things underneath it.
   networking from a CNI plugin, mTLS from a mesh add-on or SPIRE, and certificates
   from cert-manager. Overdrive builds the load balancer, the mesh, and the
   certificate authority into the same binary that runs the control plane.
-- **Processes and Linux microVMs share the control plane.** Kubernetes VM
-  integration uses add-ons such as KubeVirt. Overdrive runs exec processes and
-  Cloud Hypervisor microVMs through its workload lifecycle, identity model, and
+- **Linux microVMs use the built-in control plane.** Kubernetes VM
+  integration uses add-ons such as KubeVirt. Overdrive runs Cloud Hypervisor microVMs through its workload lifecycle, identity model, and
   networking. Unikernel and WASM drivers are design targets, not implemented
   alternatives. See [microVMs](/docs/concepts/microvms) for current limits.
 
@@ -107,8 +106,8 @@ Kubernetes wins, and will for a long time.
 	your cloud, a large hiring pool, or one of the thousands of existing operators.
 	Choose **Overdrive** when operational simplicity matters more than ecosystem
 	maturity — one binary instead of etcd, a CNI plugin, a mesh, and cert-manager —
-	and you want built-in mTLS and mixed workload types (containers *and* microVMs
-	*and* WASM under one model). The cost is pre-production software.
+	and you want built-in mTLS and microVM isolation for services and jobs.
+	The cost is pre-production software.
 </Callout>
 
 ## Versus Nomad
@@ -209,7 +208,7 @@ maturity, the competitors win:
 
 Overdrive's bet is that the 2026 primitives make a structurally simpler, more
 secure, more verifiable platform possible — one binary instead of a stack, mTLS
-by default instead of by add-on, every workload type under one model, and
+by default instead of by add-on, microVM services and jobs under one model, and
 correctness checked by simulation from day one. That bet is not yet proven in
 production. If maturity is the deciding factor, choose one of the platforms
 above. If the architecture is what you are evaluating, that is what this page is

@@ -1,6 +1,6 @@
 ---
 title: Transparent mTLS
-description: The node agent holds workload SPIFFE identities, captures mesh TCP connections from process workloads and Linux microVMs, and authenticates and encrypts them with TLS 1.3.
+description: The node agent holds workload SPIFFE identities, captures mesh TCP connections from Linux microVM workloads, and authenticates and encrypts them with TLS 1.3.
 ---
 
 Overdrive authenticates and encrypts mesh TCP traffic on the workload's behalf.
@@ -13,22 +13,18 @@ The [built-in CA](/docs/concepts/identity) issues the identity. The
 holds and rotates it while the allocation runs. Transparent mTLS presents that
 identity on the wire.
 
-## Capture depends on where the application runs
+## Guest capture carries the destination to the host
 
-A process workload runs inside its own network namespace. Host nftables TPROXY
-rules redirect its outbound TCP connections to an `IP_TRANSPARENT` listener
-owned by the node agent. TPROXY preserves the original destination; the agent
-reads it with `getsockname` on the accepted socket.
+All supported workloads run in Linux microVMs. [Guest networking](/docs/concepts/guest-networking)
+captures the application's ordinary sockets, preserves the destination, and
+transports each flow over vsock. The host owner sends mesh traffic into the
+node agent's mTLS path. The VM attachment creates no per-VM host namespace,
+veth, TAP, or bridge.
 
-A Linux microVM uses [guest networking](/docs/concepts/guest-networking).
-Guest capture preserves the application's destination and transports the flow
-over vsock. The host owner sends mesh traffic into the host mTLS path. The VM
-has no per-VM host namespace, veth, TAP, or bridge. The host receives a vsock
-stream, not the guest's original TCP packets.
-
-Both paths keep mesh credentials and host enforcement outside the application.
-Guest capture adapts the guest's sockets; it does not move the workload's private
-key or the platform's TLS policy into the guest.
+The host receives a vsock stream rather than the guest's TCP packets. Host
+transparent listeners and TPROXY rules remain implementation mechanisms for
+host-side enforcement. Their presence does not imply a host-process workload
+path. Mesh credentials and TLS policy stay outside the application and guest.
 
 ## Resolve each connection against live backends
 
@@ -52,31 +48,22 @@ For outbound mesh traffic, the agent runs a rustls TLS 1.3 client handshake and
 presents the source workload's SVID. For inbound traffic, the server-side agent
 requires a client certificate and verifies its chain against the trust bundle.
 A client without a valid chain cannot reach the workload through that path.
-Authentication is chain-to-bundle; pinning a particular expected peer SPIFFE
+Authentication is chain-to-bundle. Pinning a particular expected peer SPIFFE
 identity is outside this implementation.
 
 The agent installs the negotiated keys into kTLS for steady-state TLS record
-processing. On the process path, `splice` moves payload between sockets without
-copying every byte through a userspace buffer. Encrypt-side splice is blocking:
-it waits for send-buffer space rather than acknowledging bytes the tested
-nonblocking kTLS-TX path could drop under pressure.
-
-The VM path has a separate boundary. The `ovd_fwd` socket forwarder refuses
-sockets with an installed upper-layer protocol, including kTLS. TLS remains on
-the agent's TLS endpoints. A temporary userspace relay connects the TLS path to
-a guest stream for VM delivery. In-kernel forwarding and kTLS do not mean that
-this entire VM path avoids userspace payload copies.
+processing. The `ovd_fwd` socket forwarder refuses sockets with an installed
+upper-layer protocol, including kTLS. TLS therefore remains on the agent's TLS
+endpoints. A temporary userspace relay connects that TLS path to the guest
+stream for VM delivery. In-kernel forwarding and kTLS do not mean this entire
+path avoids userspace payload copies.
 
 ## Deliver to the workload without giving it the keys
-
-For a process backend, inbound capture matches its canonical mesh address and
-declared service port. The agent terminates the peer's authenticated TLS
-connection and delivers plaintext to the application's ordinary socket.
 
 For a VM backend, host enforcement dials through the allocation's guest-network
 owner. The resulting guest stream reaches the guest application through the
 vsock protocol. The owner binds that dial to the live allocation and its
-transport assignment; a stale or unavailable allocation cannot become an
+transport assignment. A stale or unavailable allocation cannot become an
 unencrypted substitute.
 
 ## Refuse incomplete enforcement
@@ -86,8 +73,7 @@ identity manager is live. Shared guest-network startup also checks its
 forwarder, listeners, resource budget, and address-prefix constraints. A failed
 check emits `health.startup.refused` and refuses node startup.
 
-Process allocation setup provisions its namespace and TPROXY capture before
-running the workload. VM setup provisions the transport assignment and guest
+VM setup provisions the transport assignment and guest
 capture, then installs allocation mTLS ownership before activating guest
 traffic. Failure does not authorize a running allocation with missing mesh
 enforcement.
@@ -95,7 +81,7 @@ enforcement.
 Restart recovery accounts for surviving resources and removes resources whose
 allocations have ended. Guest-network teardown waits for its owned resources to
 end before releasing the allocation's address lease. These checks operate at
-the node and allocation lifecycle boundaries; they are not per-VM launch
+the node and allocation lifecycle boundaries. They are not per-VM launch
 benchmarks.
 
 ## Evidence and limits
@@ -103,11 +89,10 @@ benchmarks.
 Real-kernel tests check TLS 1.3 records on the peer-facing wire and the absence of
 the workload's plaintext there. They also exercise handshake rejection, startup
 refusal, original-destination recovery, and guest delivery through the
-production composition. Simulation checks control-plane ownership and recovery;
-it does not substitute for kTLS, nftables, or vsock behavior on the real kernel.
+production composition. Simulation checks control-plane ownership and recovery.
+It does not substitute for kTLS, nftables, or vsock behavior on the real kernel.
 
-The implemented boundary is TCP mesh encryption for process workloads and Linux
-microVMs on a single node. UDP transport does not acquire TLS merely because TCP
+The implemented boundary is TCP mesh encryption for Linux microVM workloads on a single node. UDP transport does not acquire TLS merely because TCP
 uses this path. Guest-to-Service-VIP UDP delivery to a VM backend is
 [deferred](https://github.com/overdrive-sh/overdrive/issues/310), while guest DNS
 and remote UDP are supported. Multi-node mesh, non-Linux guest adaptation, and

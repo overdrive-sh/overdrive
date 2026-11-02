@@ -1,11 +1,13 @@
 ---
 title: Deploy a workload
-description: Start a single-node Overdrive control plane, write a workload spec with health checks, and deploy it with the overdrive CLI — the end-to-end path for a process or a Cloud Hypervisor microVM.
+description: Start a single-node Overdrive control plane, write a workload spec with health checks, and deploy it with the overdrive CLI — the end-to-end path for a Linux microVM.
 ---
 
 This guide takes you from an empty machine to a deployed workload using the
 commands Overdrive ships today. You start a control plane, write a TOML spec,
-deploy it, and confirm the control plane accepted it. Every command here runs on
+deploy it, and confirm the control plane accepted it. The service and job
+examples below require artifacts you supply. These paths are placeholders,
+not downloads or images bundled with the CLI. Every command here runs on
 a single node — Phase 1 is single-node by design, so there is no cluster to join
 and no membership to configure first.
 
@@ -55,8 +57,8 @@ file every other command reads to find and authenticate to the server.
 
 A workload is a TOML file. Its top-level section names the workload's **kind**:
 `[service]` for a long-running workload that serves traffic, `[job]` for one that
-runs to completion. Each spec carries one driver block — `[exec]` for a process
-or `[vm]` for a microVM — and a `[resources]` block. A service additionally declares one or more
+runs to completion. Every supported workload carries a `[vm]` driver block and
+a `[resources]` block. A service additionally declares one or more
 `[[listener]]` ports and, under them, its health-check probes:
 
 ```toml title="payments.toml"
@@ -64,13 +66,15 @@ or `[vm]` for a microVM — and a `[resources]` block. A service additionally de
 id       = "payments"   # name across the cluster — stop / inspect / re-deploy by it
 replicas = 1
 
-[exec]
-command = "/opt/payments/bin/payments-server"
+[vm]
+command = "/opt/payments/bin/payments-server" # path INSIDE the guest
 args    = ["--port", "8080"]
+kernel  = "/srv/vm/kernel"       # operator-supplied supported guest-kit kernel
+rootfs  = "/srv/vm/payments.ext4" # operator-supplied guest root filesystem
 
 [resources]
-cpu_milli    = 500         # CPU in thousandths of a core (500 = half a core)
-memory_bytes = 134217728   # hard memory cap in bytes (134217728 = 128 MiB)
+cpu_milli    = 500         # sizes the guest vCPUs
+memory_bytes = 134217728   # guest RAM in bytes (128 MiB)
 
 [[listener]]
 port     = 8080   # a port the service holds open
@@ -98,10 +102,9 @@ answers "did it succeed?".
 
 - **Three roles.** `startup` gates "has it come up?", `readiness` gates "send it
   traffic", and `liveness` gates "restart it if this fails".
-- **Three mechanics.** `type = "tcp"` connects to a `port`; `type = "http"`
-  issues a GET to a `path` (plain HTTP; the path must start with `/`) on a
-  `port`; `type = "exec"` runs a `command` inside the workload and treats exit
-  `0` as a pass.
+- **Two mechanics.** `type = "tcp"` connects to a `port`. `type = "http"`
+  issues a plain-HTTP GET to a `path` starting with `/` on a `port`. Both dial
+  through the guest-network owner. In-guest command probes are unbuilt.
 - **A startup probe is inferred by default.** Declare none and the platform
   synthesises a single TCP probe against your first listener, so a service is
   never reported "up" before something is actually listening. Write
@@ -111,13 +114,12 @@ answers "did it succeed?".
   startup deadline), plus `failure_threshold` for liveness (default 3) and
   `success_threshold` for readiness (default 1).
 
-## Run a microVM instead of a process
+## Supply the guest artifacts
 
-A `[vm]` block runs the workload as a Cloud Hypervisor microVM — its own kernel,
-hardware-virtualised — in place of `[exec]`. A spec carries exactly one driver
-table, so choose `[vm]` or `[exec]`. A microVM can run under `[job]` or
-`[service]`; a VM service declares listeners and health checks using the same
-sections as a process service.
+The `[vm]` table is the only supported workload driver table. Its command runs
+inside a Cloud Hypervisor guest with its own Linux kernel. Use `[service]` for
+a long-running VM with listeners and health checks, or `[job]` for a VM that
+runs to completion. This job example uses the same guest artifact contract:
 
 ```toml title="nightly-report.toml"
 [job]
@@ -138,8 +140,7 @@ All four `[vm]` fields are required. `command` and `args` name the program to ru
 inside the guest; `kernel` and `rootfs` are host paths to a bootable kernel and an
 ext4 root filesystem from a matching guest kit. The rootfs must contain the
 kit's `overdrive-init` and `ovd_fwd` module; an arbitrary kernel is unsupported.
-`[resources]` sizes the VM the way it caps a process — `cpu_milli` derives the vCPU count, `memory_bytes` sets the guest's
-memory.
+`cpu_milli` derives the guest vCPU count, and `memory_bytes` sets guest memory.
 
 Deploy, inspect, and stop a microVM job with the same verbs as any other workload
 — the steps below are identical. The allocation reaches `Running` once the guest
