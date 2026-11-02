@@ -1845,10 +1845,9 @@ Identity Association ownership is
 
 <a id="public-ingress-gateway-canonical-c4"></a>
 
-## Public ingress gateway canonical System and Application C4 (GH #54; System ADR-0220, 0223, 0224, 0229, 0230, 0234; Application ADR-0222, 0226, 0227, 0231–0240, 0242, 0243; data path ADR-0244–0246)
+## Public ingress gateway canonical System and Application C4 (GH #54; System ADR-0220, 0223, 0224, 0229, 0230, 0234; Application ADR-0222, 0226, 0227, 0231–0240, 0242, 0243; data path ADR-0244–0247)
 
-Proposed — reconstructed on main 549d78fa6, pending independent review
-(2026-11-01). Decision sources: placement
+Proposed — pending independent review (2026-11-02). Decision sources: placement
 [ADR-0220](adr-0220-embed-single-node-public-ingress-in-overdrive-serve.md),
 admission [ADR-0222](adr-0222-public-ingress-route-and-gateway-application-owner.md),
 status [ADR-0227](adr-0227-redacted-operator-gateway-status.md), custody
@@ -1867,7 +1866,9 @@ data path: kernel TLS after a userspace handshake
 [ADR-0244](adr-0244-gateway-legs-use-kernel-tls-after-a-userspace-rustls-handshake.md),
 gateway-owned head parsing and framing
 [ADR-0245](adr-0245-gateway-parses-http11-heads-and-owns-message-framing.md), pipe
-invariant [ADR-0246](adr-0246-relay-splices-into-an-empty-private-pipe-of-at-least-64-kib.md).
+invariant [ADR-0246](adr-0246-relay-splices-into-an-empty-private-pipe-of-at-least-64-kib.md),
+full-duplex exchange and lingering close
+[ADR-0247](adr-0247-gateway-exchange-is-full-duplex-and-ends-an-early-response-with-a-lingering-close.md).
 Shutdown order is in the feature delta, D5 section (c).
 
 The upstream path is: gateway socket (prepared by the dataplane adapter in the
@@ -1959,7 +1960,7 @@ C4Component
     Component(serve, "serve composition + ServerHandle", "Tokio owner", "Constructs the gateway from BootAdapters.gateway; runs the gateway stage first in shutdown")
     Component(appstate, "AppState.gateway: GatewayAppStateComposition", "Clone-safe Arc/handle bundle", "Identity reads/actions and optional GatewayControl; no backend input")
     Component(dispatch, "Dataplane action dispatch", "action_shim", "Executes DataplaneUpdateService (unchanged) and Gateway SVID actions")
-    Component(svidexec, "Gateway SVID actions", "action shim", "Issue/audit/epoch-checked hold and drain-ordered epoch drop")
+    Component(svidexec, "Gateway SVID actions", "action shim", "Issue/audit/epoch-checked hold; no drop action (disable clears the slot synchronously)")
   }
 
   Container_Boundary(host, "overdrive-host") {
@@ -1981,12 +1982,12 @@ C4Component
 
   Container_Boundary(recon, "overdrive-reconcilers") {
     Component(hydrator, "ServiceMapHydrator", "existing Reconciler", "Programs SERVICE_MAP/BACKEND_MAP/REVERSE_NAT_MAP for VM backends; unchanged")
-    Component(svid, "GatewaySvidLifecycle", "pure sibling Reconciler", "Carries checked desired epoch through Issue/Drop Gateway SVID")
+    Component(svid, "GatewaySvidLifecycle", "pure sibling Reconciler", "Carries checked desired epoch through the Issue Gateway SVID action; disable is a synchronous slot clear")
   }
 
   Container_Boundary(dp, "dataplane / mTLS owners") {
     Component(prep, "Upstream socket preparation", "EbpfDataplane", "Creates the socket in the serve task, marks it, binds 127.0.0.1, reads SO_COOKIE and registers (cookie, ServiceKey)")
-    Component(registry, "Gateway Connect Registry + cgroup_connect4_service", "EbpfDataplane + BPF", "Registered arm selects via Maglev and records Selected BackendId or NoBackend")
+    Component(registry, "Gateway Connect Registry + gateway selection cgroup/connect4 program", "EbpfDataplane + BPF (separate program beside cgroup_connect4_service)", "Registered sockets select via Maglev (BACKEND_MAP.healthy is not read) and record Selected BackendId or NoBackend")
     Component(assoc, "Service-map commit guard + Applied Backend Identity", "EbpfDataplane", "Outer-map commit publishes selection before the immutable BackendId-to-applied-Backend.alloc becomes readable")
     Component(slot, "Gateway Identity Slot + ClientIdentityAccess", "dedicated holder/capability", "Owns desired epoch + audited SVID; only crate-private clock-checked client use may borrow material")
     Component(gmtls, "HostGatewayClientMtls", "rustls client", "Presents leaf+intermediate, roots at the bundle anchor, pins the exact selected SPIFFE peer, then arms kernel TLS through the relay")
@@ -2033,8 +2034,8 @@ C4Component
   Rel(connector, registry, "Connects through and consumes the receipt from")
   Rel(registry, assoc, "After receipt, resolves selected BackendId through the same read guard in")
   Rel(connector, gmtls, "Passes connected fd + exact selected SpiffeId to")
-  Rel(svid, svidexec, "Emits Issue/Drop Gateway SVID")
-  Rel(svidexec, slot, "Holds/replaces/drops audited material under the exact desired epoch in")
+  Rel(svid, svidexec, "Emits Issue Gateway SVID")
+  Rel(svidexec, slot, "Holds/replaces audited material under the exact desired epoch in")
   Rel(gmtls, slot, "Uses the closed clock-checked identity capability; receives no raw getter from")
   Rel(gmtls, legc, "Handshakes with the allocation SVID presented by")
   Rel(legc, workload, "Relays plaintext over vsock to")

@@ -3,6 +3,9 @@
 ## Status
 
 Proposed — set by user ruling G1 (2026-11-02); pending independent review.
+User rulings 2026-11-02: the invariant stays until the kernel 7.3 upgrade
+[GH #339](https://github.com/overdrive-sh/overdrive/issues/339) lands (Q-1, R-17);
+holding the pipe until connection close is not adopted (P-16, R-16).
 
 ## Context
 
@@ -47,14 +50,18 @@ larger than the pipe's capacity and no larger than the octets the message still
 needs. The relay splices out of the pipe until it is empty before the next
 splice into it. A pipe that cannot be set to 64 KiB, or a call that would violate
 any other clause, fails the relay with a typed error before the splice; no octet
-is moved. This holds until the appliance kernel carries the v7.3 fix.
+is moved. This holds until the appliance kernel carries the v7.3 fix, which
+arrives with the kernel 7.3 upgrade tracked in
+[GH #339](https://github.com/overdrive-sh/overdrive/issues/339); the invariant is
+kept until that issue lands.
 
 ## Alternatives considered
 
 | Alternative | Why it lost |
 |---|---|
 | Rely on the kernel's default pipe and a short-count check after each splice | The loss is silent: `splice` reports success, so there is nothing to check afterwards. |
-| Require an appliance kernel with the `copied` fix | The pinned kernel line is 7.0 (ADR-0068); advancing it is an image decision for the user, not a gateway decision. The invariant costs one pipe per receive half and stays correct after the kernel is advanced. Whether to also carry the fix is a question for the user (recorded in the handoff). |
+| Require an appliance kernel with the `copied` fix | The pinned kernel line is 7.0 (ADR-0068); advancing it is an image decision tracked by [GH #339](https://github.com/overdrive-sh/overdrive/issues/339), not a gateway decision. The invariant costs one pipe per receive half and stays correct after the kernel is advanced. |
+| Hold each read half's pipe until the connection closes | Saves pipe create/close churn per request, at 256 descriptors and 8 MiB per 128 idle connections that each relayed a body. Rejected by ruling P-16. |
 | Copy through userspace (`recv`/`send`) | Same CPU, but every body octet passes through gateway memory; G1 moved the body path into the kernel. |
 
 ## Consequences
@@ -62,8 +69,8 @@ is moved. This holds until the appliance kernel carries the v7.3 fix.
 - One pipe (two descriptors, 64 KiB of kernel buffer) per receive half that
   relays at least one body; created lazily by the half's first relay call and
   released when the half starts reading its next message head or is dropped, so
-  a connection waiting for its next request holds no pipe (feature delta P-16
-  asks for holding it until the connection closes).
+  a connection waiting for its next request holds no pipe. No explicit
+  per-exchange release operation exists.
 - The invariant rests on the source reading above and one kernel build, not a proof.
 - Backpressure comes from the destination socket: the splice into the destination
   returns a short count or `EAGAIN` when its send buffer is full

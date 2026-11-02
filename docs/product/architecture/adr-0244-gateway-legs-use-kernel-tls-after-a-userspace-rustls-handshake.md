@@ -3,6 +3,9 @@
 ## Status
 
 Proposed — set by user ruling G1 (2026-11-02); pending independent review.
+User rulings 2026-11-02: both legs offer only AES-128-GCM and AES-256-GCM
+(P-12, R-8); the gateway never originates a KeyUpdate (P-17, R-13); the
+transmit-lock exclusion has no Quint model (R-19).
 
 ## Context
 
@@ -41,6 +44,14 @@ both directions re-keyed on that leg alone; NewSessionTicket is discarded;
 close_notify ends that direction; any other record type is fatal and closes both
 legs. A transmit re-key is serialised with every writer of that socket.
 
+Both legs offer exactly the AES-128-GCM and AES-256-GCM TLS 1.3 suites, the set
+the spike exercised; ChaCha20-Poly1305 is not offered, so a client that offers no
+AES-GCM suite is refused before arming. The gateway never originates a KeyUpdate:
+RFC 8446 §5.5 bounds a key at about 2^24.5 full-size records, and the ADR-0238
+ceilings (100 responses of at most 16 MiB per public connection; one request per
+upstream leg) stay about two orders of magnitude below that; only a
+peer-initiated KeyUpdate is handled.
+
 A connection that cannot be armed is closed. A node whose kernel cannot arm the
 leg and relay as this decision requires does not bind the public listener (the
 relay probe, feature delta Gate G-1).
@@ -53,9 +64,10 @@ handling, locking) is in the feature delta "Contract of the legs".
 | Alternative | Why it lost |
 |---|---|
 | Arm kTLS from `dangerous_extract_secrets` (main's transparent-mTLS pattern) | It has no rekey path (spike (b)); a conformant peer's KeyUpdate would stall or kill a long-lived connection. |
-| Keep the record layer in rustls for the connection's life (the previous userspace stream) | Every body octet is decrypted, held and re-encrypted in gateway memory; user ruling G1 moved the record layer into the kernel. |
+| Keep the record layer in rustls for the connection's life (a userspace TLS stream) | Every body octet is decrypted, held and re-encrypted in gateway memory; user ruling G1 moved the record layer into the kernel. |
 | Refuse the peer's KeyUpdate with an alert | RFC 8446 §4.6.3 obliges the recipient to update its receiving keys; refusing breaks conformant peers. |
-| Adopt a third-party kTLS wrapper crate | Not evaluated in this DESIGN. The lifecycle above (control-record dispatch into relay state, serialised rekey, close_notify mapping) is the gateway's contract; a crate qualifies only if it exposes that lifecycle. |
+| Offer rustls's default TLS 1.3 suites | Adds ChaCha20-Poly1305, whose kTLS arming and rekey behaviour the spike never exercised. Rejected by ruling P-12. |
+| Originate a KeyUpdate on each transmit direction before 2^23 records | Needs a record counter, a lock-taking path and an untested leg-C behaviour on a received KeyUpdate, to defend only a workload that streams very many tiny events on one public connection (the relay passes no `SPLICE_F_MORE`, so each small source piece is one TX record). Rejected by ruling P-17. |
 
 ## Consequences
 
@@ -65,8 +77,13 @@ handling, locking) is in the feature delta "Contract of the legs".
 - The kTLS plus sockmap combination is never used: the kernel rejects it from
   v7.3 and accepts only one order at v7.0 (findings item (e)).
 - No CPU advantage is claimed (findings item (c)).
-- The gateway does not originate KeyUpdate (feature delta P-17).
-- The cipher-suite offer is the spiked set (feature delta P-12).
+- The gateway does not originate KeyUpdate; a workload streaming one-octet
+  events on one connection could in principle exceed the key's record bound and
+  is not defended (R-13).
+- TLS 1.3 clients offering no AES-GCM suite cannot connect (none known).
+- The transmit-lock exclusion is covered by the assumption that the kernel does
+  not serialise a multi-call logical write against a re-arm and by the Tier-3
+  KeyUpdate-during-splice check, not by a model (R-19).
 
 ## Links
 

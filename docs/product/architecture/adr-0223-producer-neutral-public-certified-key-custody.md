@@ -3,9 +3,7 @@
 ## Status
 
 Proposed — reconstructed on main 549d78fa6, pending independent review (2026-11-01).
-Original decision ratified by the user 2026-09-13. Remediation r1 (2026-11-02)
-merged the former custody domain-boundary record and the acquisition-versus-
-consumption record into this ADR; documentation structure only, the decision is unchanged.
+Ratified by the user 2026-09-13.
 
 ## Context
 

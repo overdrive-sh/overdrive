@@ -2,10 +2,9 @@
 
 ## Status
 
-Proposed — reconstructed on main 549d78fa6, pending independent review (2026-11-01).
-Original decision ratified by the user 2026-09-13. Remediation r1 (2026-11-02)
-merged the former identity-slot record into this ADR and resolved the
-reconciler wakeup declaration by rule; the decision is unchanged.
+Proposed — pending independent review (2026-11-02). Ratified by the user
+2026-09-13. User ruling 2026-11-02 (R-4): disable is a synchronous clear and
+there is no drop Action.
 
 ## Context
 
@@ -13,8 +12,8 @@ The public client never uses SPIFFE, but the gateway needs an internal client
 identity `spiffe://overdrive.local/gateway/<node-id>` for its workload hop.
 Existing SVID holders and lifecycle targets are Allocation-shaped, while the
 gateway is a node-owned, non-allocation application role. It needs one current
-ephemeral SVID, auditable issue/reissue, renewal, restart recovery, drop
-semantics and exactly one authorized gateway-client consumer without changing
+ephemeral SVID, auditable issue/reissue, renewal, restart recovery, clearing
+on disable and exactly one authorized gateway-client consumer without changing
 Allocation identity meaning. Main's workload-identity CA is persistent and
 KEK-sealed ([ADR-0063](adr-0063-built-in-ca-port-trait-and-root-key-protection.md));
 the gateway identity is issued from it and is distinct from the ephemeral
@@ -31,8 +30,11 @@ policy, without fabricating an AllocationId. A dedicated single-slot holder and
 lifecycle exist because existing holders/actions are AllocationId-keyed.
 
 - Enabled and empty issues; near-expiry reissues; restart reissues from the
-  empty volatile slot. Disable or shutdown drops only after admission stops
-  and users drain.
+  empty volatile slot. Disable or shutdown clears the slot synchronously, only
+  after admission stops and users drain: the call that disables bumps the
+  epoch and empties the slot together, with no reconciler round-trip, no wait
+  and no drop Action. The design has no drop Action because no production
+  caller needs one: the only disabling caller is the gateway shutdown stage.
 - Audit must persist before hold. A checked desired epoch prevents a stale
   issue completion from re-holding identity after disable.
 - Only gateway-client mTLS may consume an opaque use capability; generic
@@ -51,7 +53,7 @@ lifecycle exist because existing holders/actions are AllocationId-keyed.
 It gates initial public bind and new gateway-client handshakes; absence,
 expiry or terminal issue failure stops new admission/handshakes while reissue
 policy runs. Disable/shutdown stops admission and drains authorized users
-before drop. Allocation SVIDs, public-key usability, Service/Allocation states,
+before the slot is cleared. Allocation SVIDs, public-key usability, Service/Allocation states,
 Backend Eligibility and BPF Hydrated are unaffected.
 
 ## Alternatives considered
@@ -62,11 +64,12 @@ Backend Eligibility and BPF Hydrated are unaffected.
 | Broaden `IdentityMgr`/`SvidLifecycle` to `{Allocation, Gateway}` keys | Viable with one lock/reconciler family, but expands every holder/read/action path and mixes one node-infrastructure slot with per-Running-allocation desired state. |
 | Reuse the public Web-PKI origin key | It crosses public and internal trust domains. |
 | Run the gateway without an internal identity | The workload hop could not authenticate the gateway through the existing SPIFFE trust domain. |
+| A waiting disable: bump the epoch, let the reconciler emit a clearing Action, and wait for the slot to empty | It adds an Action, a settle step and a timeout outcome for a caller (gateway shutdown) that needs the slot empty at once and has no live reconciler to rely on; the issuance audit row is already durable. Rejected by ruling R-4. |
 
 ## Consequences
 
 - Allocation SVID ownership, identity APIs and transparent workload mTLS remain
-  unchanged. Gateway issue/hold/use/reissue/drop has one exact owner and no
+  unchanged. Gateway issue/hold/use/reissue/clear has one exact owner and no
   persisted private key.
 - Gateway Identity Current is distinct from audit presence and gates new public
   admission and upstream handshakes without redefining workload states.
@@ -81,7 +84,9 @@ Backend Eligibility and BPF Hydrated are unaffected.
   domains.
 - Shutdown clears the volatile slot synchronously inside the gateway shutdown
   stage (feature delta, D5 section (c)); there is no reconciler round-trip at
-  shutdown because the audit row is already durable.
+  shutdown because the audit row is already durable. An Issue completion that
+  arrives after the clear carries a stale epoch and is a no-op. Disable
+  cannot time out and has no timeout outcome.
 
 ## Links
 

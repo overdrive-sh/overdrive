@@ -35,7 +35,6 @@ module gateway_application_conf {
     | retire({ gid: int })
     | open_connection
     | close_connection({ gid: int })
-    | idle
 }
 
 module gateway_application {
@@ -141,7 +140,10 @@ module gateway_application {
     go({ ...st, leases: st.leases.set(gid, st.leases.get(gid) - 1) }, variant("close_connection", { gid: gid })),
   }
 
-  action idle: bool = go(st, variant("idle", ()))
+  // stutter (QC-2, ruling 7): exhaustive main only; the conformance main (REC = true) never takes it. `stage` and
+  // `retire` stay explicit steps: they are owner-autonomous (the owner performs them itself; the driver yields until the
+  // owner is idle and asserts the step's postcondition through `application_status()`).
+  action idle: bool = all { not(REC), st' = st, conf_step' = conf_step }
 
   action step = {
     nondet t = 1.to(MAXG).oneOf()

@@ -2,13 +2,11 @@
 
 ## Status
 
-Proposed — reconstructed on main 549d78fa6, pending independent review (2026-11-01).
-Original decisions ratified by the user 2026-09-13. Reconstruction decisions
-D1–D5 approved by the user 2026-11-01 (D3 is the basis of this decision; see
+Proposed — pending independent review (2026-11-02). Ratified by the user
+2026-09-13; decisions D1–D5 approved 2026-11-01 (D3 is the basis of this
+decision; see
 [feature-delta § Reconstruction: user decisions](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-reconstruction-user-decisions-and-proposals)).
-Remediation r1 (2026-11-02) merged the former packet-entry record into this
-ADR; the demand-gated TEACH half of the original packet-entry decision is
-retired by D1 and was never implemented.
+User ruling 2026-11-02: P-10 (R-1, the arm is a separate program).
 
 ## Context
 
@@ -36,9 +34,11 @@ namespace packet entry and reverse-path lifecycle.
 
 ## Decision
 
-Backend selection for gateway upstream sockets happens in a `cgroup/connect4`
-program, in the one BPF object `EbpfDataplane` already loads, attached to the
-node's existing attach cgroup. For a socket the dataplane adapter has
+Backend selection for gateway upstream sockets happens in a dedicated
+`cgroup/connect4` program, separate from and attached beside
+`cgroup_connect4_service`, in the one BPF object `EbpfDataplane` already loads,
+attached to the node's existing attach cgroup (multi-attach, stated
+explicitly). For a socket the dataplane adapter has
 registered as a gateway upstream socket, the program selects the backend from
 `SERVICE_MAP`, its Maglev inner map and `BACKEND_MAP`, rewrites the
 destination to it, and records the outcome (selected `BackendId` or
@@ -49,11 +49,8 @@ destination to it, and records the outcome (selected `BackendId` or
   a typed `NoBackend` (public 503), never a fall-through to the unchanged VIP.
   A selected backend whose dial then fails is a connect failure (public 502).
   The gateway never reports a wrong-peer success.
-- Whether the arm also treats `BACKEND_MAP.healthy == 0` as `NoBackend`, or
-  ignores the byte, is **pending the user decision
-  [P-9](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-reconstruction-user-decisions-and-proposals)**
-  (options: honour `healthy` so the readiness window is 503; ignore it so that
-  window is 502). This ADR holds under either option.
+- Whether the program reads `BACKEND_MAP.healthy` is decided in
+  [ADR-0242](adr-0242-backend-unavailability-is-a-typed-outcome-at-the-gateway-consuming-port.md).
 - A socket that is not registered keeps today's behaviour byte for byte. The
   gateway supplies the exact Service Frontend and never implements userspace
   backend selection, never reads `ServiceBackendRow`, enumerates candidates or
@@ -62,13 +59,19 @@ destination to it, and records the outcome (selected `BackendId` or
   ADR-0190 requires, so the rewritten dial enters the existing leg-C path
   ([ADR-0243](adr-0243-gateway-upstream-sockets-are-prepared-by-the-dataplane-adapter.md)).
   No new network namespace, veth, route or nft rule is added.
-- Whether the registered arm is a second program attached beside
-  `cgroup_connect4_service` or an added arm of that program is **not decided
-  here**: it is the user decision
-  [P-10](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-reconstruction-user-decisions-and-proposals)
-  (V-GW-4 measured 246 verified instructions for the arm against 28 for the
-  existing program, so folding it in needs a Tier-4 re-baseline). Both options
-  satisfy this decision.
+- The selection arm is a second program attached beside
+  `cgroup_connect4_service` (user ruling P-10, 2026-11-02), not an added arm
+  of that program. V-GW-4 measured 246 verified instructions for the arm
+  against 28 for the existing program; folding it in would have grown a
+  program every workload connect runs by about 8.8x and needed a Tier-4
+  re-baseline. The existing program, its `LOCAL_BACKEND_MAP` behaviour and its
+  verifier baseline stay byte-identical. The kernel runs every attached
+  program in array order over the same context and any deny yields `-EPERM`
+  (`kernel/bpf/cgroup.c:79-89 @ v7.0`): an unregistered socket passes the new
+  program unchanged (it finds no cookie entry and allows), a registered socket
+  is rewritten by it, and the outcome does not depend on attach order because
+  `LOCAL_BACKEND_MAP` holds no VM backend (D4), so the existing program misses
+  and allows both the VIP and the rewritten guest address.
 
 ## Alternatives considered
 
@@ -76,7 +79,8 @@ destination to it, and records the outcome (selected `BackendId` or
 |---|---|
 | Watch backend rows and round-robin in the gateway | It creates a second selector that can disagree with BPF and can authenticate a different backend from the one carrying the request. |
 | Gateway-only netns/veth into XDP, or a gateway-specific cgroup/netns/interface solely to hook the socket | The `serve` process already lies inside the attach cgroup subtree. The cgroup a socket belongs to is fixed at socket allocation from the creating task's cgroup (`cgroup_sk_alloc`, `kernel/cgroup/cgroup.c:7408-7434` called from `net/core/sock.c:2330 @ v7.0`) and `connect4` programs run against that socket cgroup (`kernel/bpf/cgroup.c:1694 @ v7.0`), so a socket created by a `serve` thread (V-GW-2: all 19 `serve` threads in `/overdrive.slice/control-plane.slice`, under the attach path `/overdrive.slice`) is covered without added network lifecycle. |
-| Split selection into a tail-called program | V-GW-4 shows the arm verifies (246 instructions, far below the 1M ceiling), so a tail call buys nothing; the budget question is the baseline policy, handled by P-10. |
+| Fold the arm into `cgroup_connect4_service` and re-baseline | It grows the hot-path program about 8.8x against the ">5% over baseline fails" rule for a concern unrelated to ordinary workload connects; it saves one program slot and one cookie lookup. Rejected by ruling P-10. |
+| Split selection into a tail-called program | V-GW-4 shows the arm verifies (246 instructions, far below the 1M ceiling), so a tail call buys nothing. |
 | Run an external proxy/load balancer | It adds another deployment and secret boundary while duplicating the existing Dataplane owner. |
 
 ## Consequences
@@ -86,9 +90,14 @@ destination to it, and records the outcome (selected `BackendId` or
   ServiceMapHydrator/Dataplane remain the only backend-application owners.
 - Unregistered cgroup traffic and XDP wire forwarding keep their current
   behaviour byte for byte.
-- The verifier-regression and budget gates apply to the registered arm
-  (measured 246 verified instructions on 7.0.0-38-generic); placement and any
-  baseline change follow P-10.
+- The verifier-regression and budget gates apply to the new program
+  (measured 246 verified instructions on 7.0.0-38-generic) as a new baseline
+  entry; no existing baseline changes.
+- Every workload `connect4` on the node now also runs the separate program.
+  For an unregistered socket the added per-connect cost is one program run, one
+  socket-cookie read, one map lookup that misses, and an early allow. Tier-4
+  `verifier-regress` covers the program's instruction count; no further budget
+  is introduced here.
 - The marked, loopback-bound dial is correct only while every Service backend
   address lies in the guest prefix (assumption A-3, inherited from ADR-0190).
 - The extended-hook comment at `crates/overdrive-dataplane/src/mtls/mod.rs:928-931`

@@ -7,6 +7,7 @@
 #![no_main]
 #![allow(dead_code)]
 
+#[path = "../../../../crates/overdrive-bpf/src/maps/hash_of_maps.rs"]
 mod hash_of_maps;
 
 use aya_ebpf::{

@@ -3,8 +3,7 @@
 ## Status
 
 Proposed — reconstructed on main 549d78fa6, pending independent review (2026-11-01).
-Original decision ratified by the user 2026-09-13; re-pinned to the leg-C path by D3 (user-approved 2026-11-01, see [feature-delta § Reconstruction: user decisions](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-reconstruction-user-decisions-and-proposals)). Remediation r1 (2026-11-02) merged the former ADR-0234 (separate public TLS from workload mTLS) into this ADR as the trust-domain consequence; the decision is unchanged.
-
+Original decision ratified by the user 2026-09-13; re-pinned to the leg-C path by D3 (user-approved 2026-11-01, see [feature-delta § Reconstruction: user decisions](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-reconstruction-user-decisions-and-proposals)).
 ## Context
 
 External users authenticate a public Web-PKI origin and present no SPIFFE

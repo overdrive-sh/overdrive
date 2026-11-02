@@ -2,9 +2,9 @@
 
 ## Status
 
-Proposed — reconstructed on main 549d78fa6, pending independent review (2026-11-01).
-Original decision ratified by the user 2026-09-13.
-Reconstruction decisions D1–D5 approved by the user 2026-11-01 (see [feature-delta § Reconstruction: user decisions](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-reconstruction-user-decisions-and-proposals)).
+Proposed — pending independent review (2026-11-02). Ratified by the user
+2026-09-13; decisions D1–D5 approved 2026-11-01 (see [feature-delta § Reconstruction: user decisions](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-reconstruction-user-decisions-and-proposals)).
+User ruling 2026-11-02: P-2 (R-3), the backend-ID allocator is unchanged.
 
 ## Context
 
@@ -46,6 +46,7 @@ Allocation Running, Service Stable, future requests or the receipt owner.
 | Reconstruct identity in the gateway from `ServiceBackendRow` | The row can differ from the selected generation and creates a second backend-data consumer. |
 | Resolve by connected address through `BackendIndex` | Address reuse and asynchronous index updates cannot prove the identity selected for this receipt. |
 | Carry full `SpiffeId` directly in the BPF receipt | Viable, but couples transient selection correlation to identity representation and duplicates the Dataplane's applied Backend value. |
+| Change the allocator: key the memo by the owning `Backend.alloc`, or release the memo of backends leaving a Service before allocating the new set | Either removes the re-lease wedge. The first is an allocator signature change; the second reorders `update_service` and needs the prior per-id allocation to know which memos to drop early. Neither is justified while no production path re-leases a guest address with a live memo. Rejected by ruling P-2 (R-3). |
 
 ## Consequences
 
@@ -55,11 +56,13 @@ Allocation Running, Service Stable, future requests or the receipt owner.
   backend selector or racy observer reread.
 - Receipt correlation can evolve independently under ADR-0228.
 - A re-leased guest address held by the id memo is rejected rather than
-  re-associated. The wedge exposure this leaves (a Service whose backend
-  address was re-leased cannot hydrate until the memo is released) exists only
-  if the user adopts neither option of the blocking proposal P-2 in the feature
-  delta (allocator key includes the owning allocation, or release-before-allocate
-  reorder inside one `update_service`); this decision holds under any outcome.
+  re-associated. `BackendIdAllocator` is unchanged (user ruling P-2 / R-3,
+  2026-11-02): its memo stays keyed by `(ip, port, proto)`, and neither an
+  allocation-aware key nor a release-before-allocate reorder is adopted. The
+  exposure this leaves is recorded, not defended: a Service whose backend
+  address was re-leased to another allocation while the old memo entry is live
+  cannot hydrate until the id is released. No production path that re-leases a
+  guest address while its memo is live has been shown.
 
 ## Links
 

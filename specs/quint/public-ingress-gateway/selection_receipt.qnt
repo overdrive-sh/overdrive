@@ -60,7 +60,6 @@ module selection_receipt_conf {
     | read_identity({ c: int })
     | cleanup({ c: int })
     | restart
-    | idle
 }
 
 module selection_receipt {
@@ -337,11 +336,13 @@ module selection_receipt {
     conf_step' = if (REC) variant("restart", ()) else conf_step,
   }
 
+  // stutter (QC-3, ruling 7): taken only by the non-conformance step relation; `receipt_conf` never takes it
   action idle = all {
+    not(REC),
     outer' = outer, ident' = ident, resv' = resv, memo' = memo, next_bid' = next_bid, guard' = guard, infl' = infl,
     debt' = debt, upd' = upd, intents' = intents, receipts' = receipts, conn' = conn, ckey' = ckey, taken' = taken,
     idres' = idres, next_cookie' = next_cookie, g' = g,
-    conf_step' = if (REC) variant("idle", ()) else conf_step,
+    conf_step' = conf_step,
   }
 
   action step = {
@@ -353,7 +354,7 @@ module selection_receipt {
       nondet c = 1.to(MAXC).oneOf()
       any {
         update_apply(k, cs), update_rejected(k, cs), open(k), kernel_connect_det(c), take(c, c), read_identity(c),
-        cleanup(c), restart, idle,
+        cleanup(c), restart,
       }
     } else {
       nondet k = 1.to(2).oneOf()

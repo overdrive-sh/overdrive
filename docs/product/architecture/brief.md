@@ -11251,14 +11251,17 @@ DELIVER, and no feature flag keeps the bridge path alive.
 
 ---
 
-## Public ingress gateway extension (GH #54; ADR-0220–0246)
+## Public ingress gateway extension (GH #54; ADR-0220–0247)
 
-**Status: Proposed** — reconstructed on main 549d78fa6, pending independent
-review (2026-11-01). The original decisions were ratified by the user on
-2026-09-13; the reconstruction decisions D1–D5 were approved by the user on
-2026-11-01 and the data-path rulings G1–G4 on 2026-11-02 (feature delta §
-*Reconstruction: user decisions and proposals*). Open proposals (P-1…P-18) in
-that section are not part of the design until the user adds them. Exact contracts live only in the
+**Status: Proposed** — pending independent review (2026-11-02). The decisions
+were ratified by the user on
+2026-09-13; the decisions D1–D5 were approved by the user on
+2026-11-01 and the data-path rulings G1–G4 and R-1…R-19 (P-2, P-9, P-10, B-1,
+DG-11, DG-12, QC-1…QC-3, P-12, P-13a–d, P-16, P-17, P-18, Q-1, the D5 list and
+`relay_ktls` removal) on 2026-11-02 (feature delta § *Reconstruction: user
+decisions and proposals*). The remaining optional proposals (P-1, P-3, P-4, P-6,
+P-8 simplification) in that section are not part of the design until the user
+adds them. Exact contracts live only in the
 [feature delta](../../feature/public-ingress-gateway/feature-delta.md); C4 only
 in [c4-diagrams.md](c4-diagrams.md#public-ingress-gateway-canonical-c4).
 
@@ -11280,18 +11283,18 @@ verified on native metal kernel 7.0 by
 [spike/findings-vm-service-map-programming.md](../../feature/public-ingress-gateway/spike/findings-vm-service-map-programming.md)).
 The dataplane adapter prepares each gateway upstream socket in the `serve`
 task (mark `0x1`, `127.0.0.1` bind per ADR-0190, cookie registered as a
-`(cookie, ServiceKey)` intent). The registered arm of
-`cgroup/connect4` selection (placement beside or inside `cgroup_connect4_service`
-pending the user decision P-10) selects through the Maglev inner map, rewrites the
+`(cookie, ServiceKey)` intent). A separate `cgroup/connect4` selection program
+(attached beside the unchanged `cgroup_connect4_service`, ruling P-10 / R-1) selects
+through the Maglev inner map, rewrites the
 destination and records `Selected(BackendId)` or `NoBackend`. The dial leaves
 via table 100, is TPROXY-diverted to leg-C, which terminates mTLS, arms kTLS
 and relays to the guest over the owner-opened vsock flow
 (ADR-0145/0173/0186/0190). The gateway-client mTLS requires the peer's single
 SPIFFE SAN to equal the identity the dataplane resolved from the receipt's
 `BackendId`. Unavailability is a typed outcome at the gateway's consuming port
-(503 `NoBackend` for no outer entry or no usable backend, with the readiness
-`healthy == 0` window pending the user decision P-9; 502 for connect, identity
-and mTLS failures), with no wait (ADR-0242). XDP wire ingress is unchanged; there is no userspace backend
+(503 `NoBackend` for no outer entry or no usable backend; the arm ignores
+`BACKEND_MAP.healthy` (ruling P-9 / R-2), so the roughly one-second readiness window is 502, as
+are connect, identity and mTLS failures), with no wait (ADR-0242). XDP wire ingress is unchanged; there is no userspace backend
 selection.
 
 **Data path (G1).** Both gateway legs complete their TLS 1.3 handshake in
@@ -11301,7 +11304,7 @@ SVID and the exact-peer SPIFFE equality), then run their record layer in the ker
 close_notify handled per leg in userspace, ADR-0244). The gateway parses only
 message heads and framing lines and owns message framing (ADR-0245); request and
 response bodies move between the two kTLS sockets by `splice(2)` through a private
-pipe of at least 64 KiB that is empty at each splice-in (ADR-0239, ADR-0246). The
+pipe of at least 64 KiB that is empty at each splice-in (ADR-0239, ADR-0246); the exchange is full-duplex (ADR-0247). The
 claim is bounded memory and no userspace payload copy; no CPU gain is claimed. A relay
 probe on the real kernel gates the listener bind.
 
@@ -11337,7 +11340,7 @@ feature delta § *Aggregate contracts*; the context map is in
 | [0221](adr-0221-singleton-public-route-set-aggregate.md) | Singleton Public Route Set |
 | [0222](adr-0222-public-ingress-route-and-gateway-application-owner.md) | One owner for coherent Gateway Application admission |
 | [0223](adr-0223-producer-neutral-public-certified-key-custody.md) | Producer-neutral Public Certified-Key Custody (domain boundary and acquisition/consumption split) |
-| [0224](adr-0224-existing-cgroup-bpf-gateway-backend-selection.md) | Backend selection and packet entry in the existing cgroup-BPF Dataplane (registered arm) |
+| [0224](adr-0224-existing-cgroup-bpf-gateway-backend-selection.md) | Backend selection and packet entry by a separate cgroup/connect4 program in the existing cgroup-BPF Dataplane |
 | [0225](adr-0225-dedicated-gateway-svid-identity-lifecycle.md) | Dedicated Gateway SVID identity slot and lifecycle |
 | [0226](adr-0226-public-listener-tls13-only.md) | TLS 1.3 only |
 | [0227](adr-0227-redacted-operator-gateway-status.md) | Redacted operator status projection |
@@ -11353,13 +11356,14 @@ feature delta § *Aggregate contracts*; the context map is in
 | [0237](adr-0237-public-proxy-header-policy.md) | Proxy-header policy |
 | [0238](adr-0238-fixed-finite-public-runtime-limits.md) | Fixed finite runtime limits |
 | [0239](adr-0239-stream-public-proxy-bodies-with-backpressure.md) | Bodies move kernel-side between the two kTLS sockets, with backpressure |
-| [0240](adr-0240-single-upstream-attempt-per-public-request.md) | One upstream attempt per request |
+| [0240](adr-0240-single-upstream-attempt-per-public-request.md) | One upstream attempt per request; one request per upstream connection |
 | [0241](adr-0241-dataplane-applied-backend-identity-association.md) | Applied BackendId identity association |
 | [0242](adr-0242-backend-unavailability-is-a-typed-outcome-at-the-gateway-consuming-port.md) | Backend unavailability is a typed outcome at the consuming port |
 | [0243](adr-0243-gateway-upstream-sockets-are-prepared-by-the-dataplane-adapter.md) | Dataplane adapter prepares upstream sockets |
 | [0244](adr-0244-gateway-legs-use-kernel-tls-after-a-userspace-rustls-handshake.md) | Gateway legs: userspace rustls handshake, then kernel TLS record layer |
 | [0245](adr-0245-gateway-parses-http11-heads-and-owns-message-framing.md) | Gateway parses HTTP/1.1 heads and owns message framing |
 | [0246](adr-0246-relay-splices-into-an-empty-private-pipe-of-at-least-64-kib.md) | Splice out of kTLS only into an empty private pipe of at least 64 KiB |
+| [0247](adr-0247-gateway-exchange-is-full-duplex-and-ends-an-early-response-with-a-lingering-close.md) | The exchange is full-duplex and ends an early response with a lingering close |
 
 Recurring acceptance is the Tier-3 `AT-PIG-E2E-1` on native metal through real
 `overdrive serve` and `overdrive deploy`; the point-in-time operator journey is
@@ -11386,6 +11390,7 @@ for current proposed contracts.
 
 | Date | Change |
 |---|---|
+| 2026-11-02 | **public-ingress-gateway: user rulings R-1…R-19 recorded (ADR-0224, 0225, 0239, 0240, 0241–0247; feature delta).** ADR-0247 (full-duplex exchange and lingering close) is split from ADR-0239. The selection arm is a separate `cgroup/connect4` program and ignores `BACKEND_MAP.healthy` (readiness window is 502); the BackendId allocator is unchanged; gateway identity disable is a synchronous clear and `Action::DropGatewaySvid` is removed; the connector reserves its cleanup-ledger slot before `open_upstream`; each gateway test composition binds a distinct `127/8` address; both legs offer only AES-128-GCM/AES-256-GCM, strict framing rejection, full-duplex exchange, interim `100`/`Expect` forwarded, close-delimited responses supported, no gateway-originated KeyUpdate, lingering close with bounded discard, one request per upstream connection; no per-exchange pipe-release change; the ≥64 KiB pipe invariant stays until GH #339; the `relay_ktls` model is dropped. Still Proposed pending independent review. — Morgan. |
 | 2026-11-01 | **public-ingress-gateway: reconstructed on main 549d78fa6 (GH #54; ADR-0220–0243, Proposed).** Branch ADR-0114…0143 are renumbered into ADR-0220…0241, with merged and retired records folded into their surviving decisions (the branch demand-gated TEACH and frontend-demand decisions are retired by D1/D2, never implemented); ADR-0242 and ADR-0243 are new. The gateway reaches VM backends through ordinary Service-map programming and the existing leg-C/vsock path. Pending independent review and user confirmation of the new public surface. — Morgan. |
 | 2026-10-20 | **netns-density-295: MODULE-REFCOUNT (user ruling).** The flow forwarder `ovd_fwd` is no longer permanent: it holds a module reference for every open control context and every hooked socket, and unloads only at zero (ADR-0198 restated in present tense; ADR-0204 gains rule 5 — callbacks are removed under the socket lock, `sk_write_space` is never overridden (the write-space trigger is a socket wait-queue entry, since `sock_wfree` calls `sk_write_space` on vsock and UDP sockets from preemptible process context with no lock), and a ULP present at removal on a TCP half keeps that socket's reference). ADR-0068 § 7 keeps the image kernel without module unloading, for a restated reason. ADR-0203's module identity is the whole-tree digest of `kmod/ovd_fwd/` as `MODULE_VERSION` (it tells apart builds from different Conductor workspaces sharing one Lima VM; SIMPLIFY-1 follow-up (a), user 2026-10-21). ADR-0205 and ADR-0203 replace the reboot remedy with `kmod-load`'s reload of an idle module. ADR-0200's two permanence references are restated. — Morgan. |
 | 2026-10-18 | **netns-density-295: dispositions recorded apart from approvals.** ADR-0164 and ADR-0191 take file names that no longer misdescribe their decisions; every link resolves. In the feature delta § *Approval record*, RECORD-COST moves out of the user-approval table into "Architect dispositions" (outcome-neutral, confirmed by adversarial review, not a user approval); ADR-SLUG records the file-name rule (a slug must not misdescribe its decision; a faithful shortened prefix of the title suffices). — Morgan. |

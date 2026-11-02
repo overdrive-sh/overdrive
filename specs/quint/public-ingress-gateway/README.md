@@ -5,7 +5,7 @@ DESIGN pins (`.claude/rules/design.md` § "Concurrent protocols carry a model-ch
 DISTILL's `quint-connect` drivers replay (`.claude/rules/testing.md` § "Quint conformance"). Design text:
 `docs/feature/public-ingress-gateway/feature-delta.md` § "Wave: DESIGN / [REF] Formal protocol model".
 
-Scope (remediation r1): only the interleavings a prose review cannot enumerate. Route+key coherence, bind gating,
+Scope: only the interleavings a prose review cannot enumerate. Route+key coherence, bind gating,
 last-usable key preservation, identity-loss unbind, cold-boot order and shutdown ordering are single-task sequential
 rules and are DISTILL seeded-sim or unit obligations, not modelled.
 
@@ -23,13 +23,14 @@ public-ingress-gateway` fails when it no longer matches the specs).
 
 | Module | Decision | Safety invariants (`Safety`, TLC exhaustive on `*_ok`) | Named runs (main `*_conf`) |
 |---|---|---|---|
-| `gateway_identity.qnt` | ADR-0225 | `HoldImpliesAudit`, `StaleEpochNeverHolds`, `AtMostOneHeld`, `DisableClearsOrTimesOut` | `issue_hold` (happy path), `reissue_near_expiry`, `disable_races_inflight_issue`, `audit_failure_no_hold`, `restart_reissue` |
+| `gateway_identity.qnt` | ADR-0225 | `HoldImpliesAudit`, `StaleEpochNeverHolds`, `DisabledSlotIsEmpty` | `issue_hold` (happy path), `reissue_near_expiry`, `disable_races_inflight_issue`, `audit_failure_no_hold`, `restart_reissue` |
 | `gateway_application.qnt` (drain and supersession only) | ADR-0222 | `DrainRetainsUntilLeasesZero`, `SupersededResultNeverRestores` | `replace_valid` (supersede, drain, retire), `route_withdraw_drain`, `late_probe_after_supersession` (a superseded staged probe result is discarded) |
-| `selection_receipt.qnt` | ADR-0228, ADR-0232, ADR-0233, ADR-0241, ADR-0243 (outcome table ADR-0242) | `IdentityReadableOnlyAfterCommit`, `IdentityImmutablePerBackendId`, `ReceiptMatchesIntent`, `NoResidueAfterCleanup`, `RollbackPreservesPriorGeneration`, `EmptyIsNoBackend` | `commit_then_select`, `conflicting_alloc_rejected`, `restart_destroys_receipts` (conformance-bound, `receipt_conf`); `abandoned_reservation_rolled_back`, `receipt_waits_for_publish_guard` (model-level, `receipt_fine`) |
-| `relay_exchange.qnt` (conformance target) | ADR-0239 (context ADR-0245, ADR-0246) | `NoBytePastMessageBoundary`, `MidBodyCloseNeverReused` | `exchange_cl_keepalive`, `early_response_closes`, `drain_with_inflight_body`, `half_close_after_request_read`, `upstream_close_mid_body_aborts`, `close_delimited_clean_end`, `public_close_mid_request_aborts` (main `relay_conf`) |
-| `relay_ktls.qnt` (model-only) | ADR-0244 | `TxRekeyExcludesWriters` | `keyupdate_waits_for_writer` (main `ktls_ok`) |
+| `selection_receipt.qnt` | ADR-0232, ADR-0233, ADR-0241 (context ADR-0228, ADR-0242, ADR-0243; see below) | `IdentityReadableOnlyAfterCommit`, `IdentityImmutablePerBackendId`, `ReceiptMatchesIntent`, `NoResidueAfterCleanup`, `RollbackPreservesPriorGeneration`, `EmptyIsNoBackend` | `commit_then_select`, `conflicting_alloc_rejected`, `restart_destroys_receipts` (conformance-bound, `receipt_conf`); `abandoned_reservation_rolled_back`, `receipt_waits_for_publish_guard` (model-level, `receipt_fine`) |
+| `relay_exchange.qnt` (conformance target) | ADR-0239 (context ADR-0245, ADR-0246) | `NoBytePastMessageBoundary` | `exchange_cl_keepalive`, `early_response_closes`, `drain_with_inflight_body`, `half_close_after_request_read`, `upstream_close_mid_body_aborts`, `close_delimited_clean_end`, `public_close_mid_request_aborts` (main `relay_conf`) |
 
-If the user adopts P-9 (honour BACKEND_MAP.healthy), add the healthy rule, its invariant and a named run then.
+ADR-0228 is a single-owner rule (one dataplane owner), so it has no concurrent protocol and no hazard. ADR-0243 (ledger order) is a
+single-task sequential connector rule covered by the seeded invariants S-PIG-37 and S-PIG-53; it is not modelled. ADR-0242's outcome
+table is context for the receipt module, not a separate decision with a hazard.
 
 ## Hazards (one per decision)
 
@@ -41,7 +42,6 @@ If the user adopts P-9 (honour BACKEND_MAP.healthy), add the healthy rule, its i
 | ADR-0241 | `rebind` -> `receipt_bugRebind` | `IdentityImmutablePerBackendId` |
 | ADR-0232 | `takeAny` -> `receipt_bugTakeAny` | `ReceiptMatchesIntent` |
 | ADR-0239 | `relayPastBoundary` -> `relay_bugRelayPastBoundary` | `NoBytePastMessageBoundary` |
-| ADR-0244 | `rekeyDuringWrite` -> `ktls_bugRekeyDuringWrite` (`hazard/relay_ktls_hazards.qnt`) | `TxRekeyExcludesWriters` |
 
 ## Validation budget
 
@@ -50,8 +50,8 @@ See the header of `checks.toml` (single home).
 ## Abstraction
 
 - Time is the injected SimClock (`now`, bounded); TTL/RENEW abstract the reused workload SVID half-life policy.
-- `gateway_identity`: one slot, epoch-checked Issue/Drop Actions, audit row written before the hold, volatile slot,
-  durable audit rows. Environment actions: `audit_fail`, `advance_time`, `restart`.
+- `gateway_identity`: one slot, epoch-checked Issue Actions, a synchronous clear at disable (`disable_after_drain` =
+  `begin_disable`, no waiting disable, no Drop Action), audit row written before the hold, volatile slot, durable audit rows. Environment actions: `audit_fail`, `advance_time`, `restart`.
 - `gateway_application`: an admission object is `{gid, rg}` (generation id, Route generation); connector probe result per
   staged token; leases are per-generation connection counts. A result for a superseded or discarded token changes
   nothing.
@@ -61,7 +61,7 @@ See the header of `checks.toml` (single home).
   not counted. The bound was reduced, not the property.
 - Model-only variables (the driver does not project them): see each file's header (`staged`, `inflight`, `leases`;
   identity `now`, ghosts; receipt `outer`, `resv`, `infl`, `guard`, `debt`, `ckey`, `taken`, `g`; `conf_step`).
-- `NoAllocationIdentity` is not modelled: it is a type-level fact (the slot is keyed by node, ADR-0225).
+- `NoAllocationIdentity` and `AtMostOneHeld` are not modelled: both are type-level facts (the slot is keyed by node and is an `Option`, ADR-0225).
 
 ## Assumptions and discharging items
 
@@ -84,40 +84,35 @@ GA-2 (a lease is released exactly once) is dropped as an obligation: the lease i
 The conformance owner is the real `EbpfDataplane` on native metal. `receipt_conf` therefore models only what that owner
 can be driven through: the fused `update_apply` (update_begin; commit(true); publish), `update_rejected`, `open`,
 `kernel_connect_det` (no `pick`; empty and singleton healthy backend sets only), `take` with r == c, `read_identity`,
-`cleanup`, `restart`, `idle`. The results of `take` and `read_identity` are checked from the port returns, not projected;
+`cleanup`, `restart` (the `idle` stutter is excluded from `receipt_conf`). The results of `take` and `read_identity` are checked from the port returns, not projected;
 the projected state is `identity[id]` and the intent/receipt counts. The fine-grained phases and rollback live in
 `receipt_ok` (exhaustive safety) and `receipt_fine` (MAXUPD = 3, hosts the two non-replayable runs, because the rollback
 run needs three accepted updates and `receipt_ok` is bounded at two); they are not conformance-replayable.
 
-## Relay (`relay_exchange.qnt` conformance target, `relay_ktls.qnt` model-only)
-
-The relay is split by what a conformance driver can replay.
+## Relay (`relay_exchange.qnt`, conformance target)
 
 `relay_exchange.qnt` is the CONFORMANCE TARGET: the pure `ExchangeMachine` over one connection (Public leg P keep-alive,
-per-exchange Upstream leg U). Phases: Idle -> Relay -> Idle (reuse) or Closed; there is no Done phase, `conclude`
-(`finish()`) goes straight to Idle when `reusableOf` holds and otherwise to Closed. Atomic body units, keep-alive
-reuse rule, close_notify and drain are modelled; chunk framing is not (pure-parser property-test concern). Every named
-run is `#[quint_test]`-replayable. Bounds: 2 units, 2 exchanges per connection.
+per-exchange Upstream leg U, one request per upstream connection). Phases: Idle -> Relay -> Idle (reuse) or Closed; there
+is no Done phase, `conclude` (`finish()`) goes straight to Idle when `reusableOf` holds and otherwise to Closed. Atomic
+body units, full-duplex exchange (the response may start before the request body ends), close-delimited responses,
+the keep-alive reuse rule, close_notify and drain are modelled. Chunk framing and kTLS record framing/KeyUpdate are NOT
+modelled: chunk framing is covered by property tests only (ruling 19), and the gateway never originates a KeyUpdate (P-17).
+Every named run is `#[quint_test]`-replayable. Bounds: 2 units, 2 exchanges per connection.
 
 The action -> `ExchangeMachine` call table and the variable -> owner accessor table live ONLY in feature-delta
 "Pinned observable projection for Quint conformance"; they are not repeated here. Model-only, not projected: `exch`,
 `overread` (ghost for `NoBytePastMessageBoundary`), `ud_units`, `conf_step`. Upstream close before the head and
 `force_abort` have no named run; they stay seeded-sim obligations.
 
-`MidBodyCloseNeverReused` (formerly `MidBodyCloseNeverDone`) says a reused Idle always follows a complete message
-(`req_left = resp_left = 0`, `resp_state = RDone`, Length-delimited). It is derived from the `conclude` guard
-(`reusableOf`), so it has no hazard; this is acceptable under one-hazard-per-decision because the decision's hazard is
-`relayPastBoundary` (ADR-0239).
+The keep-alive reuse rule (a reused Idle always follows a complete, Length-delimited message) is the `conclude` guard
+`reusableOf`; the named runs pin it through `expect` on `reusableOf`, so it carries no separate invariant. The decision's
+hazard is `relayPastBoundary` (ADR-0239).
 
-P-13d-dependent elements (close-delimited responses): `len_delim`, `ud_units`, MAXU as the UntilClose bound,
-`resp_head` with `ld = false`, and the run `close_delimited_clean_end`. If the user declines P-13d they are removed in
-one cut.
+## Stutter and owner-autonomous steps (ruling 7)
 
-`relay_ktls.qnt` is MODEL-ONLY (no `conf_step`, no quint-connect driver) and models the PUBLIC leg only: the kTLS
-transmit-lock / rekey exclusion of ADR-0244 (lock holders free/writer/rekeyer as `wr`/`rk`, reply owed `owe`; no key
-epochs). The upstream leg terminates at leg-C, which never originates a KeyUpdate (main's transparent-mTLS arm installs
-kTLS from extracted secrets and has no rekey path), so nothing there contends with a writer. Its run
-`keyupdate_waits_for_writer` is not conformance-replayable. The user may instead rule that the lock is covered by A-K5
-plus the Tier-3 check and drop this module.
+The `idle` stutter exists only in the exhaustive/fine mains (`identity_ok`, `app_ok`, `receipt_ok`, `receipt_fine`,
+`relay_ok`); each conformance main (`*_conf`) guards it with `not(REC)`, so no conformance step maps to "no call". In
+`gateway_application.qnt`, `stage` and `retire` remain explicit steps; they are owner-autonomous (the owner performs
+them itself and the driver yields until idle and asserts the postcondition via `application_status()`).
 
 Assumptions A-K4, A-K5 and A-K6 and their discharging items: feature-delta "Assumptions and their discharging items".

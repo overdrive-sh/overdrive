@@ -2,10 +2,9 @@
 
 ## Status
 
-Proposed — streamed bodies with backpressure ratified by the user 2026-09-13; the
-body mechanism is set by user ruling G1 (2026-11-02); pending independent review.
-Whether close-delimited responses are supported (feature delta P-13d) is awaiting the
-user's ruling.
+Proposed — pending independent review (2026-11-02). Streamed bodies with
+backpressure ratified by the user 2026-09-13; the body mechanism is set by user
+ruling G1 (2026-11-02).
 
 ## Context
 
@@ -38,6 +37,8 @@ exposed outside the exchange owner. Backpressure is the destination socket's
 send buffer. Preserve the response status and the raw body octets.
 
 The pipe contract is [ADR-0246](adr-0246-relay-splices-into-an-empty-private-pipe-of-at-least-64-kib.md).
+How the two halves of an exchange run together and end is
+[ADR-0247](adr-0247-gateway-exchange-is-full-duplex-and-ends-an-early-response-with-a-lingering-close.md).
 
 ## Alternatives considered
 
@@ -64,4 +65,4 @@ The pipe contract is [ADR-0246](adr-0246-relay-splices-into-an-empty-private-pip
 ## Links
 
 - [Kernel relay contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-kernel-relay-data-path-and-driven-ports-g1)
-- [ADR-0238](adr-0238-fixed-finite-public-runtime-limits.md), [ADR-0240](adr-0240-single-upstream-attempt-per-public-request.md), [ADR-0244](adr-0244-gateway-legs-use-kernel-tls-after-a-userspace-rustls-handshake.md), [ADR-0245](adr-0245-gateway-parses-http11-heads-and-owns-message-framing.md), [ADR-0246](adr-0246-relay-splices-into-an-empty-private-pipe-of-at-least-64-kib.md)
+- [ADR-0238](adr-0238-fixed-finite-public-runtime-limits.md), [ADR-0240](adr-0240-single-upstream-attempt-per-public-request.md), [ADR-0244](adr-0244-gateway-legs-use-kernel-tls-after-a-userspace-rustls-handshake.md), [ADR-0245](adr-0245-gateway-parses-http11-heads-and-owns-message-framing.md), [ADR-0246](adr-0246-relay-splices-into-an-empty-private-pipe-of-at-least-64-kib.md), [ADR-0247](adr-0247-gateway-exchange-is-full-duplex-and-ends-an-early-response-with-a-lingering-close.md)

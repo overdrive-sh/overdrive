@@ -2,8 +2,8 @@
 /**
  * Gateway relay exchange protocol (public-ingress-gateway DESIGN): ADR-0239 (body relay boundaries and
  * backpressure), ADR-0245 (the gateway parses HTTP/1.1 heads and owns message framing), ADR-0246 (splice relay).
- * This module is the CONFORMANCE TARGET: a pure state machine over the `ExchangeMachine` owner. The kTLS KeyUpdate /
- * transmit-lock protocol (ADR-0244) lives in the model-only `relay_ktls.qnt`.
+ * This module is the CONFORMANCE TARGET: a pure state machine over the `ExchangeMachine` owner. kTLS record framing and
+ * KeyUpdate are not modelled (the gateway never originates a KeyUpdate, P-17).
  *
  * One connection: Public leg P (keep-alive) and a per-exchange Upstream leg U. One exchange at a time (no
  * pipelining). Body relay is modelled in atomic units (one splice-out never crosses a record boundary, A-K6); chunk
@@ -24,9 +24,12 @@
  *
  * Bounds: MAXU = 2 units, MAXEX = 2 exchanges per connection.
  *
- * P-13d: everything that exists only for close-delimited (UntilClose) responses is marked `P-13d` below (`len_delim`,
- * `ud_units`, MAXU as the UntilClose bound, resp_head with ld=false, run close_delimited_clean_end). If the user
- * declines P-13d they are all removed in one cut.
+ * Approved rulings encoded here: full-duplex exchange (P-13b: the response half may start before the request body is
+ * finished); close-delimited responses (P-13d: `len_delim`, `ud_units`, MAXU as the UntilClose bound, resp_head with
+ * ld=false, run close_delimited_clean_end); upstream leg is one request per connection (a fresh U per exchange,
+ * `Connection: close`). Abstracted, not separate states: interim `100` / `Expect` forwarding (P-13c: an interim head
+ * precedes the final response head and changes no phase) and the lingering close with bounded `discard_remaining`
+ * after an early or gateway-authored response (P-18: a property of the close that follows `Closed`).
  *
  * OFF names the rules switched off (hazard in hazard/):
  *   relayPastBoundary  the relay moves octets of the request or response although the current message is complete
@@ -184,11 +187,8 @@ module relay_exchange {
   // ------------------------------------------------------------------ invariants
   // ADR-0239: the relay moves exactly the octets of the current message
   val NoBytePastMessageBoundary: bool = st.overread == 0
-  // guard-derived (no hazard): a mid-body close or an early response never reaches a reused Idle
-  val MidBodyCloseNeverReused: bool =
-    (st.phase == "Idle" and st.exch > 0) implies
-      (st.req_left == 0 and st.resp_left == 0 and st.resp_state == "RDone" and st.len_delim)
-  val Safety: bool = and { NoBytePastMessageBoundary, MidBodyCloseNeverReused }
+  // (the keep-alive reuse rule is the `conclude` guard `reusableOf`; the named runs pin it through `expect`)
+  val Safety: bool = and { NoBytePastMessageBoundary }
 
   // ------------------------------------------------------------------ named runs (all #[quint_test]-replayable)
   // two Length-delimited exchanges reuse P; in the first the response starts before the request body is finished

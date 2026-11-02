@@ -2,8 +2,8 @@
 
 ## Status
 
-Proposed — reconstructed on main 549d78fa6, pending independent review (2026-11-01).
-Original decision ratified by the user 2026-09-13.
+Proposed — pending independent review (2026-11-02). Ratified by the user
+2026-09-13. User ruling 2026-11-02 (R-15): one request per upstream connection.
 
 ## Context
 
@@ -19,6 +19,10 @@ attempt. This includes backend unavailability: a `NoBackend` outcome is
 returned to the client as 503 without a wait or second selection
 ([ADR-0242](adr-0242-backend-unavailability-is-a-typed-outcome-at-the-gateway-consuming-port.md)).
 
+The upstream leg carries one request per connection: the request head carries
+`Connection: close` and the leg is dropped when the exchange ends. The
+downstream public connection keeps alive per RFC 9112.
+
 ## Alternatives considered
 
 | Alternative | Why it lost |
@@ -26,6 +30,7 @@ returned to the client as 503 without a wait or second selection
 | Retry all failed requests | Non-idempotent requests can execute more than once. |
 | Retry only methods normally considered idempotent | It still creates a second BPF selection and needs a separate retry/deadline policy absent from this slice. |
 | Hedge requests to multiple backends | It duplicates effects and introduces userspace multi-backend coordination. |
+| Reuse the upstream leg for several requests | One exact-peer mTLS handshake and one cookie registration per request is the price of one registered intent per socket and one attempt per request ([ADR-0232](adr-0232-gateway-connect-selected-backend-receipt.md)); reuse would need a new intent-and-receipt lifecycle. Rejected by ruling R-15. |
 
 ## Consequences
 
@@ -34,6 +39,7 @@ returned to the client as 503 without a wait or second selection
 - The 503/502 and pre-header/post-header projections live in the feature
   contract rather than becoming retry decisions here.
 - A future retry policy would require its own explicit decision and contract.
+- Every request pays one exact-peer mTLS handshake and one cookie registration.
 
 ## Links
 
