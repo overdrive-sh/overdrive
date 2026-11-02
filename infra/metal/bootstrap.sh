@@ -62,7 +62,6 @@ TARGET="$1"; shift
 DATA_DISK=""
 BREAK_RAID_DISK=""
 SYNC_ONLY=0
-WITH_GIT=0
 RUN_MODE=0
 SHELL_MODE=0
 COLLECT_MODE=0
@@ -75,7 +74,6 @@ while [ $# -gt 0 ]; do
     --data-disk) DATA_DISK="$2"; shift 2 ;;
     --break-raid-disk) BREAK_RAID_DISK="$2"; shift 2 ;;
     --sync-only) SYNC_ONLY=1; shift ;;
-    --with-git)  WITH_GIT=1; shift ;;
     --run) RUN_MODE=1; shift ;;
     --shell) SHELL_MODE=1; shift ;;
     --collect)
@@ -483,47 +481,43 @@ ssh "${SSH_OPTS[@]}" "${TARGET}" "mkdir -p ${REMOTE_DIR}"
 #     gitdir: /Users/marcus/Git/helios/.git/worktrees/hanoi
 # Syncing it verbatim lands a pointer to a path that does not exist on the
 # remote, and every git command there fails with an obscure error. So `.git`
-# is excluded above, unconditionally.
+# is excluded from the main rsync above; the block below replaces it.
 #
-# By default the box simply has no git, which is correct for how it is used:
-# edit on the laptop, sync up, run there, commit locally. Nothing in the build
-# shells out to git.
-#
-# `--with-git` materialises a real, standalone repo instead, by reassembling
+# Every sync materialises a real, standalone repo on the box by reassembling
 # the two halves a worktree keeps apart:
 #   - the COMMON dir (objects, refs, config)  -> becomes the remote .git
 #   - this worktree's HEAD/index              -> overlaid on top
+# so the remote HEAD and index track this worktree on each sync. Recording
+# evidence on the box (e.g. `cargo xtask quint check --record`) needs git there.
 # Cost: the common dir is shared by every worktree of this repo (334 MB here),
 # so the first sync moves all of it. Incremental afterwards.
 # ---------------------------------------------------------------------------
-if [ "${WITH_GIT}" -eq 1 ]; then
-  GIT_COMMON="$(cd "${REPO}" && git rev-parse --git-common-dir)"
-  GIT_WT="$(cd "${REPO}" && git rev-parse --git-dir)"
-  # `--git-common-dir` can come back relative; normalise both.
-  GIT_COMMON="$(cd "${REPO}" && cd "${GIT_COMMON}" && pwd)"
-  GIT_WT="$(cd "${REPO}" && cd "${GIT_WT}" && pwd)"
+GIT_COMMON="$(cd "${REPO}" && git rev-parse --git-common-dir)"
+GIT_WT="$(cd "${REPO}" && git rev-parse --git-dir)"
+# `--git-common-dir` can come back relative; normalise both.
+GIT_COMMON="$(cd "${REPO}" && cd "${GIT_COMMON}" && pwd)"
+GIT_WT="$(cd "${REPO}" && cd "${GIT_WT}" && pwd)"
 
-  log "materialising standalone .git (common dir $(du -sh "${GIT_COMMON}" | cut -f1))"
-  # Exclude worktrees/ — it describes OTHER checkouts on the laptop and is
-  # meaningless (and misleading) on the remote.
-  "${RSYNC_BIN}" -az --delete "${STATS_FLAG[@]}" \
-    --exclude='/worktrees/' \
-    -e "ssh ${SSH_OPTS[*]}" \
-    "${GIT_COMMON}/" "${TARGET}:${REMOTE_DIR}/.git/"
+log "materialising standalone .git (common dir $(du -sh "${GIT_COMMON}" | cut -f1))"
+# Exclude worktrees/ — it describes OTHER checkouts on the laptop and is
+# meaningless (and misleading) on the remote.
+"${RSYNC_BIN}" -az --delete "${STATS_FLAG[@]}" \
+  --exclude='/worktrees/' \
+  -e "ssh ${SSH_OPTS[*]}" \
+  "${GIT_COMMON}/" "${TARGET}:${REMOTE_DIR}/.git/"
 
-  # The common dir's HEAD points at the MAIN worktree's branch, not ours.
-  # Overlay this worktree's HEAD and index so the remote lands on our commit.
-  "${RSYNC_BIN}" -az \
-    -e "ssh ${SSH_OPTS[*]}" \
-    "${GIT_WT}/HEAD" "${GIT_WT}/index" \
-    "${TARGET}:${REMOTE_DIR}/.git/"
+# The common dir's HEAD points at the MAIN worktree's branch, not ours.
+# Overlay this worktree's HEAD and index so the remote lands on our commit.
+"${RSYNC_BIN}" -az \
+  -e "ssh ${SSH_OPTS[*]}" \
+  "${GIT_WT}/HEAD" "${GIT_WT}/index" \
+  "${TARGET}:${REMOTE_DIR}/.git/"
 
-  # shellcheck disable=SC2029
-  ssh "${SSH_OPTS[@]}" "${TARGET}" \
-    "git -C ${REMOTE_DIR} config core.bare false && \
-     git -C ${REMOTE_DIR} config --unset core.worktree 2>/dev/null; \
-     git -C ${REMOTE_DIR} status --short --branch | head -5"
-fi
+# shellcheck disable=SC2029
+ssh "${SSH_OPTS[@]}" "${TARGET}" \
+  "git -C ${REMOTE_DIR} config core.bare false && \
+   git -C ${REMOTE_DIR} config --unset core.worktree 2>/dev/null; \
+   git -C ${REMOTE_DIR} status --short --branch | head -5" || true
 
 printf '%s\n' "${EXPECTED_MARKER}" | ssh "${SSH_OPTS[@]}" "${TARGET}" \
   "cat > ${REMOTE_DIR}/.overdrive-metal-source"

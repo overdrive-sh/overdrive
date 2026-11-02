@@ -160,8 +160,9 @@ enum Task {
     /// surface runs on a qualified bare-metal box reached over ssh. The target host
     /// (`user@host`) comes from `OVERDRIVE_METAL_TARGET` in the process
     /// environment or `.env` at the workspace root (see `.env.example`).
-    /// This is the metal sibling of `Lima` — `run` rsyncs the tree up
-    /// (via `infra/metal/bootstrap.sh --sync-only`) and then ssh-executes
+    /// This is the metal sibling of `Lima` — `run` rsyncs the tree up,
+    /// including a standalone `.git` (via `infra/metal/bootstrap.sh
+    /// --sync-only`), and then ssh-executes
     /// under a `bash -lc` login shell (so rustup/cargo are on PATH),
     /// wrapping in `sudo … env "HOME=$HOME" "PATH=$PATH" …` by default so
     /// the KVM / cgroup tests get the root permission surface they need.
@@ -411,7 +412,8 @@ enum LimaAction {
 
 #[derive(Debug, Subcommand)]
 enum MetalAction {
-    /// rsync the working tree up to the metal box (bootstrap.sh --sync-only).
+    /// rsync the working tree, including a standalone `.git`, up to the metal
+    /// box (bootstrap.sh --sync-only).
     ///
     /// Writes only into this branch's private tree, so it takes the per-tree
     /// lock rather than the box-wide lease and does not wait behind another
@@ -922,9 +924,9 @@ fn metal_guest_artifacts() -> Result<(String, String)> {
     Ok((kernel, rootfs))
 }
 
-/// rsync the working tree to the metal box via the existing bootstrap
-/// script's `--sync-only` mode, so metal and its excludes have exactly
-/// one definition.
+/// rsync the working tree, plus a standalone `.git`, to the metal box via
+/// the existing bootstrap script's `--sync-only` mode, so metal and its
+/// excludes have exactly one definition.
 fn metal_sync(target: &str) -> Result<()> {
     sh(
         "metal sync (bootstrap.sh --sync-only)",

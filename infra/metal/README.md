@@ -36,6 +36,9 @@ Bare metal removes the nesting. That is the whole reason this exists.
    ```bash
    infra/metal/bootstrap.sh ubuntu@<ip> --sync-only
    ```
+   Every sync also lands a standalone `.git` on the box (the repo's common
+   dir plus this worktree's HEAD and index). The first sync moves the whole
+   common dir; later syncs are incremental.
 
 ## Durable runs and collection
 
