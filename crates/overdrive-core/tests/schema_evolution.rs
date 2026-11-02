@@ -22,9 +22,13 @@
 mod schema_evolution {
     mod alloc_lifecycle_occurrence_row;
     mod alloc_status_row;
+    mod gateway_application_status_row;
     mod harness;
     mod node_health_row;
     mod probe_result_row;
+    mod public_certified_key;
+    mod public_certified_key_status_row;
+    mod public_route_set;
     mod reconcile_conflict_row;
     mod service_backend_row;
     mod service_hydration_result_row;

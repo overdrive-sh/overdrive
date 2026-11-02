@@ -78,8 +78,11 @@ use futures::Stream;
 use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
 use overdrive_core::codec::{VersionedEnvelope, decode_envelope_bytes};
 use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
-use overdrive_core::id::{AllocationId, IssuanceOrdinal, ServiceId};
+use overdrive_core::id::{AllocationId, IssuanceOrdinal, NodeId, ServiceId};
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeResultRowEnvelope, ProbeRole};
+use overdrive_core::public_ingress::{
+    GatewayApplicationStatusRowV1, PublicCertifiedKeyId, PublicCertifiedKeyStatusRowV1,
+};
 use overdrive_core::traits::observation_store::{
     ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC, AllocLifecycleOccurrenceRow,
     AllocLifecycleOccurrenceRowEnvelope, AllocLifecyclePredecessor, AllocLifecycleUnreadable,
@@ -617,6 +620,24 @@ fn write_alloc_lifecycle_transaction(
 
 #[async_trait]
 impl ObservationStore for LocalObservationStore {
+    // SCAFFOLD: true — the redb tables, LWW merge and point reads for the two
+    // public-ingress status rows are DELIVER's.
+    #[allow(clippy::todo, reason = "public-ingress DISTILL scaffold; body is DELIVER's")]
+    async fn public_certified_key_status_row(
+        &self,
+        _id: &PublicCertifiedKeyId,
+    ) -> Result<Option<PublicCertifiedKeyStatusRowV1>, ObservationStoreError> {
+        todo!("SCAFFOLD: LocalObservationStore::public_certified_key_status_row")
+    }
+
+    #[allow(clippy::todo, reason = "public-ingress DISTILL scaffold; body is DELIVER's")]
+    async fn gateway_application_status_row(
+        &self,
+        _node_id: &NodeId,
+    ) -> Result<Option<GatewayApplicationStatusRowV1>, ObservationStoreError> {
+        todo!("SCAFFOLD: LocalObservationStore::gateway_application_status_row")
+    }
+
     async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError> {
         let row: ObservationRow = row.into();
         let inner = Arc::clone(&self.inner);
@@ -680,6 +701,14 @@ impl ObservationStore for LocalObservationStore {
                 }
                 ObservationRow::ProbeResult(_) => {
                     unreachable!("probe-result rows use write_probe_result")
+                }
+                #[allow(
+                    clippy::todo,
+                    reason = "public-ingress DISTILL scaffold; body is DELIVER's"
+                )]
+                ObservationRow::PublicCertifiedKeyStatus(_)
+                | ObservationRow::GatewayApplicationStatus(_) => {
+                    todo!("SCAFFOLD: persist the public-ingress LWW status rows")
                 }
             };
             // Commit unconditionally — a rejected write performed only

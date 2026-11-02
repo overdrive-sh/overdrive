@@ -50,7 +50,8 @@ use bytes::Bytes;
 use futures::Stream;
 use overdrive_core::aggregate::IntentKey;
 use overdrive_core::traits::intent_store::{
-    IntentStore, IntentStoreError, PutOutcome, StateSnapshot, TxnOp, TxnOutcome,
+    IntentStore, IntentStoreError, IntentSubscriptionEvent, PutOutcome, StateSnapshot, TxnOp,
+    TxnOutcome,
 };
 use redb::{Database, ReadableTable, TableDefinition};
 use tokio::sync::broadcast;
@@ -75,9 +76,10 @@ const WATCH_CHANNEL_CAPACITY: usize = 1024;
 #[derive(Debug, Clone)]
 struct WatchEvent {
     key: Bytes,
-    /// Empty for deletes, non-empty for puts — matching the
+    /// `None` for a committed delete, `Some(bytes)` for a committed put
+    /// (empty bytes are a legitimate value) — matching the
     /// `IntentStore::watch` trait docstring.
-    value: Bytes,
+    value: Option<Bytes>,
 }
 
 /// Redb-backed `IntentStore`. Cheap to clone via `Arc`; safe to share
@@ -168,7 +170,7 @@ impl LocalIntentStore {
         Ok(Self { inner: Arc::new(Inner { db, path: path.to_path_buf(), watch_tx }) })
     }
 
-    fn emit(&self, key: Bytes, value: Bytes) {
+    fn emit(&self, key: Bytes, value: Option<Bytes>) {
         // `send` returns `Err` only when there are no active
         // subscribers — that's not a failure for us.
         let _ = self.inner.watch_tx.send(WatchEvent { key, value });
@@ -215,7 +217,7 @@ impl IntentStore for LocalIntentStore {
         .await
         .map_err(map_join_error)??;
 
-        self.emit(Bytes::from(emit_key), Bytes::from(emit_value));
+        self.emit(Bytes::from(emit_key), Some(Bytes::from(emit_value)));
         Ok(())
     }
 
@@ -268,7 +270,7 @@ impl IntentStore for LocalIntentStore {
         // Watch events only fire on the insert branch — a `KeyExists`
         // return is a no-op commit, semantically.
         if let Some((emit_key, emit_value)) = emit {
-            self.emit(Bytes::from(emit_key), Bytes::from(emit_value));
+            self.emit(Bytes::from(emit_key), Some(Bytes::from(emit_value)));
         }
         Ok(outcome)
     }
@@ -299,7 +301,7 @@ impl IntentStore for LocalIntentStore {
         // Emit only when the row actually existed pre-delete — a
         // phantom event for an absent key is the bug this gate closes.
         if let Some(key) = emit_key {
-            self.emit(Bytes::from(key), Bytes::new());
+            self.emit(Bytes::from(key), None);
         }
         Ok(())
     }
@@ -325,7 +327,7 @@ impl IntentStore for LocalIntentStore {
         // no second match over `TxnOp`.
         let emits = tokio::task::spawn_blocking(move || {
             let write = inner.db.begin_write().map_err(map_transaction_error)?;
-            let mut emits: Vec<Option<(Bytes, Bytes)>> = Vec::with_capacity(ops.len());
+            let mut emits: Vec<Option<(Bytes, Option<Bytes>)>> = Vec::with_capacity(ops.len());
             {
                 let mut table = write.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
                 for op in &ops {
@@ -334,12 +336,12 @@ impl IntentStore for LocalIntentStore {
                             table
                                 .insert(key.as_ref(), value.as_ref())
                                 .map_err(map_storage_error)?;
-                            emits.push(Some((key.clone(), value.clone())));
+                            emits.push(Some((key.clone(), Some(value.clone()))));
                         }
                         TxnOp::Delete { key } => {
                             let removed =
                                 table.remove(key.as_ref()).map_err(map_storage_error)?.is_some();
-                            emits.push(removed.then(|| (key.clone(), Bytes::new())));
+                            emits.push(removed.then(|| (key.clone(), None)));
                         }
                         TxnOp::IncrementU64 { key } => {
                             // Read-modify-write of the big-endian u64 at
@@ -371,7 +373,7 @@ impl IntentStore for LocalIntentStore {
                                 .map_err(map_storage_error)?;
                             emits.push(Some((
                                 key.clone(),
-                                Bytes::copy_from_slice(next_bytes.as_slice()),
+                                Some(Bytes::copy_from_slice(next_bytes.as_slice())),
                             )));
                         }
                     }
@@ -396,19 +398,19 @@ impl IntentStore for LocalIntentStore {
     async fn watch(
         &self,
         prefix: &[u8],
-    ) -> Result<Box<dyn Stream<Item = (Bytes, Bytes)> + Send + Unpin>, IntentStoreError> {
+    ) -> Result<Box<dyn Stream<Item = IntentSubscriptionEvent> + Send + Unpin>, IntentStoreError>
+    {
         let prefix = Bytes::copy_from_slice(prefix);
         let rx = self.inner.watch_tx.subscribe();
 
-        // Drop `Lagged` / drain errors silently by filtering them out —
-        // returning `None` from `filter_map` skips the lagged notification
-        // and keeps the stream alive; subsequent events still arrive.
-        // Phase 2 log-driven notification is the recovery path for the
-        // lost events.
+        // Every broadcast event is a committed change, reported as
+        // `Changed`. Lag detection is not implemented here: a lagged
+        // receiver's notification is still filtered out, so the stream stays
+        // alive and subsequent events still arrive.
         let stream = BroadcastStream::new(rx).filter_map(move |evt| match evt {
             Ok(event) => {
                 if event.key.starts_with(&prefix) {
-                    Some((event.key, event.value))
+                    Some(IntentSubscriptionEvent::Changed { key: event.key, value: event.value })
                 } else {
                     None
                 }
@@ -584,11 +586,11 @@ impl IntentStore for LocalIntentStore {
 /// Unpin>` — `futures::stream::FilterMap` isn't `Unpin` on its own
 /// because it holds a user-supplied `FnMut`.
 struct PrefixWatchStream {
-    inner: Pin<Box<dyn Stream<Item = (Bytes, Bytes)> + Send>>,
+    inner: Pin<Box<dyn Stream<Item = IntentSubscriptionEvent> + Send>>,
 }
 
 impl Stream for PrefixWatchStream {
-    type Item = (Bytes, Bytes);
+    type Item = IntentSubscriptionEvent;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.inner.as_mut().poll_next(cx)

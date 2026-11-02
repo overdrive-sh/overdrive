@@ -16,7 +16,9 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures::StreamExt;
-use overdrive_core::traits::intent_store::{IntentStore, TxnOp, TxnOutcome};
+use overdrive_core::traits::intent_store::{
+    IntentStore, IntentSubscriptionEvent, TxnOp, TxnOutcome,
+};
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 use tokio::time::timeout;
@@ -72,8 +74,13 @@ async fn watch_fires_once_per_prefix_matching_write_and_ignores_non_matching() {
         .expect("watch event arrives")
         .expect("stream yields a value");
 
-    assert_eq!(first.0, Bytes::copy_from_slice(b"jobs/payments"));
-    assert_eq!(first.1, Bytes::copy_from_slice(b"spec-v1"));
+    assert_eq!(
+        first,
+        IntentSubscriptionEvent::Changed {
+            key: Bytes::copy_from_slice(b"jobs/payments"),
+            value: Some(Bytes::copy_from_slice(b"spec-v1")),
+        },
+    );
 
     // And no further events are delivered for the non-matching write.
     // (We use a short timeout — if a non-matching event leaks through,

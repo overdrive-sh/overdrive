@@ -2492,10 +2492,12 @@ dependencies = [
  "rustix 1.1.4",
  "serial_test",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "uuid",
  "x509-parser",
+ "zeroize",
 ]
 
 [[package]]

@@ -77,6 +77,9 @@ pub mod eval_broker;
 // wave-decisions.md` DWD-4. Bodies panic until DELIVER fills them.
 pub mod dataplane;
 pub mod error;
+/// Dedicated non-allocation public-ingress gateway identity values and the
+/// one hydration read-port.
+pub mod gateway_identity;
 /// Paired shared guest-network EXEC admission capabilities (GH #295).
 pub mod guest_network;
 /// Guest transport vocabulary and wire codec (vsock attachment
@@ -105,6 +108,8 @@ pub mod net;
 /// crosses the `HeldSvidView` core read-port signature).
 pub mod identity;
 pub mod observation;
+/// Public-ingress Route, certified-key, generation and status contracts.
+pub mod public_ingress;
 /// `RaceOnceCell<T>` — write-once cell that surfaces the lost-race verdict
 /// instead of discarding it. Reusable concurrency helper; peer of
 /// [`claim_set`]. See `.claude/rules/development.md` § "Check-and-act must

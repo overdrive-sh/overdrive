@@ -740,6 +740,9 @@ impl FailingListStore {
     }
 }
 
+use overdrive_core::public_ingress::{
+    GatewayApplicationStatusRowV1, PublicCertifiedKeyId, PublicCertifiedKeyStatusRowV1,
+};
 use overdrive_core::traits::observation_store::{
     LagAwareSubscription, NodeHealthRow, ObservationStoreError, ReconcileConflictRow,
     ServiceHydrationResultRow,
@@ -747,6 +750,20 @@ use overdrive_core::traits::observation_store::{
 
 #[async_trait::async_trait]
 impl ObservationStore for FailingListStore {
+    async fn public_certified_key_status_row(
+        &self,
+        id: &PublicCertifiedKeyId,
+    ) -> Result<Option<PublicCertifiedKeyStatusRowV1>, ObservationStoreError> {
+        self.inner.public_certified_key_status_row(id).await
+    }
+
+    async fn gateway_application_status_row(
+        &self,
+        node_id: &NodeId,
+    ) -> Result<Option<GatewayApplicationStatusRowV1>, ObservationStoreError> {
+        self.inner.gateway_application_status_row(node_id).await
+    }
+
     async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError> {
         self.inner.write(row).await
     }

@@ -3669,7 +3669,8 @@ mod tests {
     use overdrive_core::aggregate::IntentKey;
     use overdrive_core::id::{ContentHash, CorrelationKey};
     use overdrive_core::traits::intent_store::{
-        IntentStore, IntentStoreError, PutOutcome, StateSnapshot, TxnOp, TxnOutcome,
+        IntentStore, IntentStoreError, IntentSubscriptionEvent, PutOutcome, StateSnapshot, TxnOp,
+        TxnOutcome,
     };
     use overdrive_core::workflow::{WorkflowName, WorkflowStart};
 
@@ -3759,7 +3760,7 @@ mod tests {
         async fn watch(
             &self,
             _prefix: &[u8],
-        ) -> Result<Box<dyn Stream<Item = (Bytes, Bytes)> + Send + Unpin>, IntentStoreError>
+        ) -> Result<Box<dyn Stream<Item = IntentSubscriptionEvent> + Send + Unpin>, IntentStoreError>
         {
             Ok(Box::new(futures::stream::empty()))
         }

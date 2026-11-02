@@ -25,6 +25,9 @@ use overdrive_control_plane::dns_responder::name_index::NameIndex;
 use overdrive_control_plane::mtls_resolve_adapter::{BackendIndex, FrontendKey};
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::{MeshServiceName, NameAnswer, NodeId, ServiceId, SpiffeId};
+use overdrive_core::public_ingress::{
+    GatewayApplicationStatusRowV1, PublicCertifiedKeyId, PublicCertifiedKeyStatusRowV1,
+};
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::mtls_resolve::MtlsResolution;
 use overdrive_core::traits::observation_store::{
@@ -324,6 +327,20 @@ struct RelistRecoversStore {
 
 #[async_trait]
 impl ObservationStore for RelistRecoversStore {
+    async fn public_certified_key_status_row(
+        &self,
+        id: &PublicCertifiedKeyId,
+    ) -> Result<Option<PublicCertifiedKeyStatusRowV1>, ObservationStoreError> {
+        self.inner.public_certified_key_status_row(id).await
+    }
+
+    async fn gateway_application_status_row(
+        &self,
+        node_id: &NodeId,
+    ) -> Result<Option<GatewayApplicationStatusRowV1>, ObservationStoreError> {
+        self.inner.gateway_application_status_row(node_id).await
+    }
+
     async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError> {
         self.inner.write(row).await
     }
@@ -529,6 +546,20 @@ struct RelistFailsStore {
 
 #[async_trait]
 impl ObservationStore for RelistFailsStore {
+    async fn public_certified_key_status_row(
+        &self,
+        id: &PublicCertifiedKeyId,
+    ) -> Result<Option<PublicCertifiedKeyStatusRowV1>, ObservationStoreError> {
+        self.inner.public_certified_key_status_row(id).await
+    }
+
+    async fn gateway_application_status_row(
+        &self,
+        node_id: &NodeId,
+    ) -> Result<Option<GatewayApplicationStatusRowV1>, ObservationStoreError> {
+        self.inner.gateway_application_status_row(node_id).await
+    }
+
     async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError> {
         self.inner.write(row).await
     }
@@ -828,6 +859,20 @@ struct EndingStore {
 
 #[async_trait]
 impl ObservationStore for EndingStore {
+    async fn public_certified_key_status_row(
+        &self,
+        id: &PublicCertifiedKeyId,
+    ) -> Result<Option<PublicCertifiedKeyStatusRowV1>, ObservationStoreError> {
+        self.inner.public_certified_key_status_row(id).await
+    }
+
+    async fn gateway_application_status_row(
+        &self,
+        node_id: &NodeId,
+    ) -> Result<Option<GatewayApplicationStatusRowV1>, ObservationStoreError> {
+        self.inner.gateway_application_status_row(node_id).await
+    }
+
     async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError> {
         self.inner.write(row).await
     }

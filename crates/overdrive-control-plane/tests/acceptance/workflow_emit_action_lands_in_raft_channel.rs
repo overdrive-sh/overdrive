@@ -40,7 +40,8 @@ use overdrive_control_plane::workflow_runtime::{WorkflowEngine, WorkflowRegistry
 use overdrive_core::id::{ContentHash, CorrelationKey, NodeId};
 use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::intent_store::{
-    IntentStore, IntentStoreError, PutOutcome, StateSnapshot, TxnOp, TxnOutcome,
+    IntentStore, IntentStoreError, IntentSubscriptionEvent, PutOutcome, StateSnapshot, TxnOp,
+    TxnOutcome,
 };
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::{Clock, Entropy, Transport};
@@ -161,7 +162,8 @@ impl IntentStore for CountingIntentStore {
     async fn watch(
         &self,
         _prefix: &[u8],
-    ) -> Result<Box<dyn Stream<Item = (Bytes, Bytes)> + Send + Unpin>, IntentStoreError> {
+    ) -> Result<Box<dyn Stream<Item = IntentSubscriptionEvent> + Send + Unpin>, IntentStoreError>
+    {
         Ok(Box::new(futures::stream::empty()))
     }
 

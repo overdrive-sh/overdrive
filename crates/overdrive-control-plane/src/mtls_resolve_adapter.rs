@@ -1887,6 +1887,9 @@ mod tests {
     use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
     use overdrive_core::id::{AllocationId, CorrelationKey, IssuanceOrdinal};
     use overdrive_core::observation::ProbeResultRow;
+    use overdrive_core::public_ingress::{
+        GatewayApplicationStatusRowV1, PublicCertifiedKeyId, PublicCertifiedKeyStatusRowV1,
+    };
     use overdrive_core::traits::observation_store::{
         LagAwareSubscription, NodeHealthRow, ObservationStoreError, ReconcileConflictRow,
         ServiceHydrationResultRow, SubscriptionEvent,
@@ -2003,6 +2006,20 @@ mod tests {
 
     #[async_trait]
     impl ObservationStore for ScriptableStore {
+        async fn public_certified_key_status_row(
+            &self,
+            id: &PublicCertifiedKeyId,
+        ) -> Result<Option<PublicCertifiedKeyStatusRowV1>, ObservationStoreError> {
+            self.inner.public_certified_key_status_row(id).await
+        }
+
+        async fn gateway_application_status_row(
+            &self,
+            node_id: &NodeId,
+        ) -> Result<Option<GatewayApplicationStatusRowV1>, ObservationStoreError> {
+            self.inner.gateway_application_status_row(node_id).await
+        }
+
         async fn all_service_backends_rows(
             &self,
         ) -> std::result::Result<Vec<ServiceBackendRow>, ObservationStoreError> {

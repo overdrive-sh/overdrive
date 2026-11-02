@@ -229,6 +229,15 @@ define_label_newtype!(
     /// Geographical region, e.g. `eu-west-1`.
     Region, "Region"
 );
+define_label_newtype!(
+    /// Stable identity of the singleton public-ingress Route entity.
+    RouteId, "RouteId"
+);
+define_label_newtype!(
+    /// Stable identity of a protected public certified key; the only Route
+    /// credential reference.
+    PublicCertifiedKeyId, "PublicCertifiedKeyId"
+);
 
 // -----------------------------------------------------------------------------
 // SpiffeId
@@ -332,6 +341,16 @@ impl SpiffeId {
                  non-empty path"
             )
         })
+    }
+
+    /// Derive the dedicated non-allocation public-ingress gateway identity:
+    /// `spiffe://overdrive.local/gateway/<node-id>`.
+    ///
+    /// SCAFFOLD: true — the body is DELIVER's.
+    #[must_use]
+    #[allow(clippy::todo, reason = "public-ingress DISTILL scaffold; body is DELIVER's")]
+    pub fn for_gateway(_node: &NodeId) -> Self {
+        todo!("SCAFFOLD: SpiffeId::for_gateway")
     }
 }
 
@@ -719,7 +738,20 @@ impl From<IssuanceOrdinal> for String {
 /// reconcile iteration finds the prior call's response by looking up the
 /// same key in the `ObservationStore` — decoupling cause from transient
 /// request IDs.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[serde(try_from = "String", into = "String")]
 pub struct CorrelationKey(String);
 

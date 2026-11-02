@@ -41,6 +41,9 @@ use overdrive_core::id::{
     AllocationId, CorrelationKey, IssuanceOrdinal, NodeId, ServiceId, WorkloadId,
 };
 use overdrive_core::observation::ProbeResultRow;
+use overdrive_core::public_ingress::{
+    GatewayApplicationStatusRowV1, PublicCertifiedKeyId, PublicCertifiedKeyStatusRowV1,
+};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverPayload,
@@ -793,6 +796,20 @@ struct RejectFreshPublication {
 
 #[async_trait]
 impl ObservationStore for RejectFreshPublication {
+    async fn public_certified_key_status_row(
+        &self,
+        id: &PublicCertifiedKeyId,
+    ) -> Result<Option<PublicCertifiedKeyStatusRowV1>, ObservationStoreError> {
+        self.inner.public_certified_key_status_row(id).await
+    }
+
+    async fn gateway_application_status_row(
+        &self,
+        node_id: &NodeId,
+    ) -> Result<Option<GatewayApplicationStatusRowV1>, ObservationStoreError> {
+        self.inner.gateway_application_status_row(node_id).await
+    }
+
     async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError> {
         self.inner.write(row).await
     }

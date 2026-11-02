@@ -82,6 +82,34 @@ where
     );
 }
 
+/// Decode `fixture_hex` (the pinned archived bytes of a historical payload
+/// variant) through the envelope `E` and project to `E::Latest`, without
+/// comparing against a constructed payload.
+///
+/// For envelopes whose payloads cannot be built from outside the defining
+/// crate (private fields, validating constructors), the per-envelope fixture
+/// asserts the decoded fields through the public accessors instead of through
+/// [`assert_envelope_v_roundtrip`]'s whole-value equality.
+///
+/// # Panics
+///
+/// Panics with a fixture-identifying message if the hex does not decode, the
+/// bytes do not deserialise as `E`, or `E::into_latest()` reports an error.
+pub fn decode_envelope_v_latest<E>(fixture_hex: &str) -> E::Latest
+where
+    E: VersionedEnvelope + rkyv::Archive,
+    for<'a> <E as rkyv::Archive>::Archived: rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>
+        + rkyv::Deserialize<E, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>,
+{
+    let bytes = hex::decode(fixture_hex.trim())
+        .expect("schema_evolution fixture hex string must decode cleanly");
+    let mut aligned = rkyv::util::AlignedVec::<16>::new();
+    aligned.extend_from_slice(&bytes);
+    let envelope: E = rkyv::from_bytes::<E, rkyv::rancor::Error>(&aligned)
+        .expect("schema_evolution fixture bytes must deserialise as the envelope");
+    envelope.into_latest().expect("schema_evolution fixture must project to Latest without error")
+}
+
 /// Triangulate the `discriminant_offset_from_end()` value against an
 /// independent hard-coded golden constant.
 ///

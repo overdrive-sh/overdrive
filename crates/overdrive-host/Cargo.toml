@@ -44,6 +44,7 @@ kvm-tests = []
 
 [dependencies]
 overdrive-core.workspace = true
+thiserror.workspace      = true
 async-trait.workspace    = true
 bytes.workspace          = true
 rand.workspace           = true
@@ -94,6 +95,9 @@ tokio.workspace          = true
 # `ca.kek.dev_fallback_used`) so the dev `OVERDRIVE_CA_KEK` path is never
 # silent (ADR-0063 D3 / Earned Trust). Structured-event names only.
 tracing.workspace        = true
+# `zeroize` — `Zeroizing<Vec<u8>>` owns the plaintext PKCS#8 key the public
+# certified-key codec seals and opens (`ca/public_certified_key.rs`).
+zeroize.workspace        = true
 # `uuid` v4 — used by `RealCgroupFs::probe` to mint a per-call probe
 # directory under `<probe_root>/.overdrive-probe-<uuid>/`. Parallel
 # probes (under test or in production composition root races) MUST

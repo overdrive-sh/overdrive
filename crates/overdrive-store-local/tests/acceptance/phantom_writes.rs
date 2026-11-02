@@ -23,7 +23,9 @@
 use std::time::Duration;
 
 use bytes::Bytes;
-use overdrive_core::traits::intent_store::{IntentStore, TxnOp, TxnOutcome};
+use overdrive_core::traits::intent_store::{
+    IntentStore, IntentSubscriptionEvent, TxnOp, TxnOutcome,
+};
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 use tokio::time::timeout;
@@ -108,12 +110,14 @@ async fn txn_with_absent_delete_and_real_put_emits_only_the_put_event() {
         .await
         .expect("first event arrives within window")
         .expect("watch stream open");
-    assert_eq!(first.0, Bytes::from_static(b"jobs/payments"));
     assert_eq!(
-        first.1,
-        Bytes::from_static(b"spec"),
+        first,
+        IntentSubscriptionEvent::Changed {
+            key: Bytes::from_static(b"jobs/payments"),
+            value: Some(Bytes::from_static(b"spec")),
+        },
         "first emitted event must be the put — a phantom delete event \
-         for jobs/never-existed would arrive here as (key, empty)",
+         for jobs/never-existed would arrive here as `Changed {{ value: None }}`",
     );
 
     // No further events — specifically no phantom delete.

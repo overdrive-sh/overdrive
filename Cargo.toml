@@ -85,6 +85,9 @@ clap            = { version = "4", features = ["derive", "env"] }
 sha2            = "0.10"
 blake3          = "1"
 ring            = "0.17"
+# `zeroize` — `Zeroizing<Vec<u8>>` plaintext-key ownership for the public
+# certified-key protection codec (`overdrive-host::ca::public_certified_key`).
+zeroize         = "1"
 aws-lc-rs       = "1"
 # `linux-keyutils` — pure-Rust (no libkeyutils C dependency) safe wrapper
 # over the Linux kernel key-management facility (`add_key`/`keyctl`).

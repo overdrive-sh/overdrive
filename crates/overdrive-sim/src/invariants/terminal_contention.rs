@@ -74,6 +74,9 @@ use crate::adapters::entropy::SimEntropy;
 use crate::adapters::observation_store::SimObservationStore;
 use crate::adapters::vm_host_state::SimVmHostState;
 use crate::harness::{InvariantResult, InvariantStatus};
+use overdrive_core::public_ingress::{
+    GatewayApplicationStatusRowV1, PublicCertifiedKeyId, PublicCertifiedKeyStatusRowV1,
+};
 
 const NAME: &str = "terminal-contention-converges";
 const HOST: &str = "host-0";
@@ -153,6 +156,20 @@ impl ContentionStore {
 
 #[async_trait]
 impl ObservationStore for ContentionStore {
+    async fn public_certified_key_status_row(
+        &self,
+        id: &PublicCertifiedKeyId,
+    ) -> Result<Option<PublicCertifiedKeyStatusRowV1>, ObservationStoreError> {
+        self.inner.public_certified_key_status_row(id).await
+    }
+
+    async fn gateway_application_status_row(
+        &self,
+        node_id: &NodeId,
+    ) -> Result<Option<GatewayApplicationStatusRowV1>, ObservationStoreError> {
+        self.inner.gateway_application_status_row(node_id).await
+    }
+
     async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError> {
         self.inner.write(row).await
     }

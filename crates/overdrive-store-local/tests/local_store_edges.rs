@@ -4,28 +4,34 @@
 //! surface:
 //!
 //! * watch must also fire on a prefix-matching delete (trait docstring:
-//!   "deletes are reported as empty value");
+//!   a committed delete is reported as `Changed { value: None }`);
 //! * overwriting a key must return the latest value;
 //! * an empty transaction must commit as a no-op;
 //! * opening two `LocalIntentStore`s on the same path must not corrupt
 //!   existing state (second open reads first writes).
 //!
-//! Per `.claude/rules/testing.md` Tier 3, all four use real redb backed
+//! * a subscriber that falls behind is told how many events it missed
+//!   and then resumes with the next committed change (S-PIG-48).
+//!
+//! Per `.claude/rules/testing.md` Tier 3, all of them use real redb backed
 //! by `tempfile::TempDir`.
 
 #![allow(clippy::expect_used)]
+#![allow(clippy::doc_markdown, reason = "per-test CONTRACT_SHAPE declarations")]
 
 use std::time::Duration;
 
 use bytes::Bytes;
 use futures::StreamExt;
-use overdrive_core::traits::intent_store::{IntentStore, TxnOutcome};
+use overdrive_core::traits::intent_store::{
+    IntentStore, IntentSubscriptionEvent, TxnOp, TxnOutcome,
+};
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 use tokio::time::timeout;
 
 #[tokio::test]
-async fn watch_fires_on_delete_with_empty_value() {
+async fn watch_fires_on_delete_with_no_value() {
     let tmp = TempDir::new().expect("temp dir");
     let store = LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open");
 
@@ -41,10 +47,15 @@ async fn watch_fires_on_delete_with_empty_value() {
         .expect("delete event arrives")
         .expect("stream yields");
 
-    // Key matches; value is empty to signal a delete per the trait
+    // Key matches; `value: None` signals a committed delete per the trait
     // docstring.
-    assert_eq!(event.0, Bytes::copy_from_slice(b"kv/payments"));
-    assert!(event.1.is_empty(), "delete event carries an empty value");
+    assert_eq!(
+        event,
+        IntentSubscriptionEvent::Changed {
+            key: Bytes::copy_from_slice(b"kv/payments"),
+            value: None,
+        },
+    );
 }
 
 #[tokio::test]
@@ -151,4 +162,89 @@ async fn open_creates_missing_parent_directory() {
     store.put(b"kv/payments", b"v1").await.expect("put after open");
     let read = store.get(b"kv/payments").await.expect("get after open");
     assert_eq!(read, Some(Bytes::copy_from_slice(b"v1")));
+}
+
+/// S-PIG-48: a subscriber that falls behind the store's change notifications
+/// is told exactly how many events it missed, and then resumes with the next
+/// committed change; no event is silently dropped.
+///
+/// The accounting is stated at the port only: every committed write is
+/// either delivered as `Changed` or counted in a `Lagged.skipped`, the
+/// delivered keys are the contiguous suffix after the gap, and the stream
+/// keeps delivering afterwards.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+#[ignore = "pending DELIVER lag-aware-intent-subscription"]
+async fn lagged_subscription_reports_the_exact_missed_count_and_resumes_with_the_next_change() {
+    // Far more matching writes than any in-process notification buffer holds.
+    const WRITES: usize = 4_096;
+
+    let tmp = TempDir::new().expect("temp dir");
+    let store = LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open");
+    let mut watch = store.watch(b"jobs/").await.expect("watch");
+
+    // Given the subscriber has read nothing while one batch of WRITES
+    // matching puts commits.
+    let ops = (0..WRITES)
+        .map(|i| TxnOp::Put {
+            key: Bytes::from(format!("jobs/{i:05}")),
+            value: Bytes::from(format!("spec-{i}")),
+        })
+        .collect();
+    let outcome = store.txn(ops).await.expect("batch commits");
+    assert!(matches!(outcome, TxnOutcome::Committed));
+
+    // When the subscriber finally reads until the stream goes quiet.
+    let mut events = Vec::new();
+    while let Ok(Some(event)) = timeout(Duration::from_millis(300), watch.next()).await {
+        events.push(event);
+    }
+
+    // Then the gap is announced before any delivered change.
+    assert!(
+        matches!(events.first(), Some(IntentSubscriptionEvent::Lagged { .. })),
+        "the first item must announce the gap, got {:?}",
+        events.first(),
+    );
+    let skipped_total: u64 = events
+        .iter()
+        .filter_map(|event| match event {
+            IntentSubscriptionEvent::Lagged { skipped } => Some(skipped.get()),
+            IntentSubscriptionEvent::Changed { .. } => None,
+        })
+        .sum();
+    let delivered: Vec<&Bytes> = events
+        .iter()
+        .filter_map(|event| match event {
+            IntentSubscriptionEvent::Changed { key, .. } => Some(key),
+            IntentSubscriptionEvent::Lagged { .. } => None,
+        })
+        .collect();
+
+    // And every committed write is either delivered or counted as missed.
+    assert_eq!(
+        skipped_total + delivered.len() as u64,
+        WRITES as u64,
+        "missed count plus delivered changes must equal the committed writes",
+    );
+    // And the delivered changes resume exactly after the missed ones.
+    let first_expected = Bytes::from(format!("jobs/{skipped_total:05}"));
+    assert_eq!(delivered.first().copied(), Some(&first_expected));
+    let last_expected = Bytes::from(format!("jobs/{:05}", WRITES - 1));
+    assert_eq!(delivered.last().copied(), Some(&last_expected));
+
+    // And the next committed change still arrives as a normal `Changed`.
+    store.put(b"jobs/after-the-gap", b"spec-after").await.expect("put after the gap");
+    let next = timeout(Duration::from_secs(2), watch.next())
+        .await
+        .expect("the stream stays alive after a gap")
+        .expect("stream yields");
+    assert_eq!(
+        next,
+        IntentSubscriptionEvent::Changed {
+            key: Bytes::from_static(b"jobs/after-the-gap"),
+            value: Some(Bytes::from_static(b"spec-after")),
+        },
+    );
 }

@@ -63,6 +63,9 @@ use overdrive_core::id::{
     AllocationId, CertSerial, CorrelationKey, IssuanceOrdinal, NodeId, ServiceId,
 };
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole};
+use overdrive_core::public_ingress::{
+    GatewayApplicationStatusRowV1, PublicCertifiedKeyId, PublicCertifiedKeyStatusRowV1,
+};
 use overdrive_core::traits::observation_store::{
     ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC, AllocLifecycleOccurrenceRow, AllocLifecyclePredecessor,
     AllocStatusRow, LagAwareSubscription, LogicalTimestamp, NodeHealthRow, ObservationRow,
@@ -187,6 +190,7 @@ struct AllocationLifecycleState {
 }
 
 #[derive(Clone)]
+#[allow(clippy::large_enum_variant, reason = "exact DESIGN-pinned unboxed status-row variants")]
 enum ObservationDelivery {
     Generic(ObservationWrite),
     AllocLifecycle { current: Box<AllocStatusRow>, source: TransitionSource },
@@ -296,6 +300,11 @@ impl PeerState {
             }
             ObservationRow::ProbeResult(_) => {
                 unreachable!("probe-result rows use write_probe_result")
+            }
+            #[allow(clippy::todo, reason = "public-ingress DISTILL scaffold; body is DELIVER's")]
+            ObservationRow::PublicCertifiedKeyStatus(_)
+            | ObservationRow::GatewayApplicationStatus(_) => {
+                todo!("SCAFFOLD: SimObservationStore public-ingress LWW status rows")
             }
         };
 
@@ -680,6 +689,24 @@ impl SimObservationStore {
 
 #[async_trait]
 impl ObservationStore for SimObservationStore {
+    // SCAFFOLD: true — the in-memory LWW merge and point reads for the two
+    // public-ingress status rows are DELIVER's.
+    #[allow(clippy::todo, reason = "public-ingress DISTILL scaffold; body is DELIVER's")]
+    async fn public_certified_key_status_row(
+        &self,
+        _id: &PublicCertifiedKeyId,
+    ) -> Result<Option<PublicCertifiedKeyStatusRowV1>, ObservationStoreError> {
+        todo!("SCAFFOLD: SimObservationStore::public_certified_key_status_row")
+    }
+
+    #[allow(clippy::todo, reason = "public-ingress DISTILL scaffold; body is DELIVER's")]
+    async fn gateway_application_status_row(
+        &self,
+        _node_id: &NodeId,
+    ) -> Result<Option<GatewayApplicationStatusRowV1>, ObservationStoreError> {
+        todo!("SCAFFOLD: SimObservationStore::gateway_application_status_row")
+    }
+
     async fn write(&self, write: ObservationWrite) -> Result<(), ObservationStoreError> {
         // Test-only injection: if a failure has been queued via
         // `inject_write_failure`, consume the front entry and return
