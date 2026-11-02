@@ -30,7 +30,8 @@ product token after hop-by-hop removal. Consume rather than forward trailers.
 
 ## Consequences
 
-- Hyper regenerates legal framing after transformation.
+- The gateway regenerates legal framing after transformation
+  ([ADR-0245](adr-0245-gateway-parses-http11-heads-and-owns-message-framing.md)).
 - The gateway is the sole authority for first-slice forwarding provenance.
 - Body streaming and resource policy remain separate decisions.
 

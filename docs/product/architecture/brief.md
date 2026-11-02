@@ -11251,14 +11251,14 @@ DELIVER, and no feature flag keeps the bridge path alive.
 
 ---
 
-## Public ingress gateway extension (GH #54; ADR-0220–0243)
+## Public ingress gateway extension (GH #54; ADR-0220–0246)
 
 **Status: Proposed** — reconstructed on main 549d78fa6, pending independent
 review (2026-11-01). The original decisions were ratified by the user on
 2026-09-13; the reconstruction decisions D1–D5 were approved by the user on
-2026-11-01 (feature delta § *Reconstruction: user decisions and proposals*).
-Open proposals P-1…P-7 in that section are not part of the design until the
-user adds them. Exact contracts live only in the
+2026-11-01 and the data-path rulings G1–G4 on 2026-11-02 (feature delta §
+*Reconstruction: user decisions and proposals*). Open proposals (P-1…P-18) in
+that section are not part of the design until the user adds them. Exact contracts live only in the
 [feature delta](../../feature/public-ingress-gateway/feature-delta.md); C4 only
 in [c4-diagrams.md](c4-diagrams.md#public-ingress-gateway-canonical-c4).
 
@@ -11294,8 +11294,19 @@ SPIFFE SAN to equal the identity the dataplane resolved from the receipt's
 and mTLS failures), with no wait (ADR-0242). XDP wire ingress is unchanged; there is no userspace backend
 selection.
 
+**Data path (G1).** Both gateway legs complete their TLS 1.3 handshake in
+userspace with rustls (public leg: Web-PKI key and exact SNI; upstream leg: Gateway
+SVID and the exact-peer SPIFFE equality), then run their record layer in the kernel
+(kTLS TX+RX armed from rustls `KernelConnection`; KeyUpdate, NewSessionTicket and
+close_notify handled per leg in userspace, ADR-0244). The gateway parses only
+message heads and framing lines and owns message framing (ADR-0245); request and
+response bodies move between the two kTLS sockets by `splice(2)` through a private
+pipe of at least 64 KiB that is empty at each splice-in (ADR-0239, ADR-0246). The
+claim is bounded memory and no userspace payload copy; no CPU gain is claimed. A relay
+probe on the real kernel gates the listener bind.
+
 **Lifecycle.** Boot refuses on invalid gateway configuration; the listener
-gates (custody, held Gateway SVID, sentinel connect probe, actual-frontend
+gates (custody, relay probe, held Gateway SVID, sentinel connect probe, actual-frontend
 probe, application promotion) are not boot-fatal and never touch workload or
 Service state (ADR-0230). Shutdown runs a gateway stage first, before the
 leg-C worker stage, clearing the volatile Gateway SVID slot in-process, within
@@ -11341,11 +11352,14 @@ feature delta § *Aggregate contracts*; the context map is in
 | [0236](adr-0236-canonical-public-route-match-key.md) | Canonical Route match key |
 | [0237](adr-0237-public-proxy-header-policy.md) | Proxy-header policy |
 | [0238](adr-0238-fixed-finite-public-runtime-limits.md) | Fixed finite runtime limits |
-| [0239](adr-0239-stream-public-proxy-bodies-with-backpressure.md) | Streamed bodies with backpressure |
+| [0239](adr-0239-stream-public-proxy-bodies-with-backpressure.md) | Bodies move kernel-side between the two kTLS sockets, with backpressure |
 | [0240](adr-0240-single-upstream-attempt-per-public-request.md) | One upstream attempt per request |
 | [0241](adr-0241-dataplane-applied-backend-identity-association.md) | Applied BackendId identity association |
 | [0242](adr-0242-backend-unavailability-is-a-typed-outcome-at-the-gateway-consuming-port.md) | Backend unavailability is a typed outcome at the consuming port |
 | [0243](adr-0243-gateway-upstream-sockets-are-prepared-by-the-dataplane-adapter.md) | Dataplane adapter prepares upstream sockets |
+| [0244](adr-0244-gateway-legs-use-kernel-tls-after-a-userspace-rustls-handshake.md) | Gateway legs: userspace rustls handshake, then kernel TLS record layer |
+| [0245](adr-0245-gateway-parses-http11-heads-and-owns-message-framing.md) | Gateway parses HTTP/1.1 heads and owns message framing |
+| [0246](adr-0246-relay-splices-into-an-empty-private-pipe-of-at-least-64-kib.md) | Splice out of kTLS only into an empty private pipe of at least 64 KiB |
 
 Recurring acceptance is the Tier-3 `AT-PIG-E2E-1` on native metal through real
 `overdrive serve` and `overdrive deploy`; the point-in-time operator journey is

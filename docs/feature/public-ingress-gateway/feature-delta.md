@@ -1,12 +1,15 @@
 # Feature Delta — `public-ingress-gateway`
 
-> **DESIGN status (reconstruction on `main` 549d78fa6, 2026-11-02):
-> review round 1 remediated; not approved.** Three items BLOCK design approval
-> until the user rules (P-2, P-9, P-10 in the PROPOSED table). Contract-shaping
-> validation V-GW-1..5 and the Quint model have
+> **DESIGN status (reconstruction on `main` 549d78fa6, revised 2026-11-02 for user rulings G1-G4):
+> not approved.** The public data path is redesigned by G1: userspace rustls handshakes, kernel TLS
+> record layer, gateway-parsed heads, bodies spliced between the two kTLS sockets
+> ([Kernel relay data path](#wave-design--ref-kernel-relay-data-path-and-driven-ports-g1); ADR-0244, 0245, 0239, 0246).
+> Items that BLOCK design approval until the user rules: P-2, P-9, P-10 (reopened by G4) and the
+> D5 confirmation list (revised, in the handoff section). New PROPOSED items P-12, P-13a-d, P-16, P-17 and P-18 await the user; P-12, P-13a-d, P-17 and P-18 BLOCK DISTILL (the design body assumes the recommended option of each).
+> Contract-shaping validation V-GW-1..5 and the G1 spike (a-e) have
 > run (see [Contract-shaping validation items](#wave-design--ref-contract-shaping-validation-items)
 > and [Formal protocol model](#wave-design--ref-formal-protocol-model)); the
-> optional proposals (P-1, P-3, P-4, P-6, P-8 simplification) await the user. This document reconstructs the previously
+> optional proposals (P-1, P-3, P-4, P-6, P-8 simplification, P-16) await the user. This document reconstructs the previously
 > user-ratified (2026-09-13) `public-ingress-gateway` DESIGN on current `main`.
 > Unchanged decisions keep their 2026-09-13 ratification provenance; the
 > decisions changed by the user rulings D1–D5 of 2026-11-01 (table in
@@ -101,7 +104,7 @@ prose:
 
 | Classification | Established fact |
 |---|---|
-| **Current feature intent** | Issue #54 plus user direction: node-agent-embedded `hyper` + `rustls`, in-process BPF map access, public north-south ingress, operator-supplied production Web-PKI certified key, gateway SVID on the internal hop, and no second userspace backend load balancer. |
+| **Current feature intent** | Issue #54 plus user direction: node-agent-embedded gateway (issue text: `hyper` + `rustls`; the `hyper` data path is replaced by user ruling G1, 2026-11-02, with rustls handshakes, kernel TLS and spliced bodies), in-process BPF map access, public north-south ingress, operator-supplied production Web-PKI certified key, gateway SVID on the internal hop, and no second userspace backend load balancer. |
 | **Accepted design** | `overdrive serve` is the single-node composition owner; Service listener intent and platform-issued VIPs are distinct from public listener intent; ServiceLifecycle solely publishes the complete `ServiceBackendRow`; ServiceMapHydrator consumes that row and atomically programs the existing Dataplane/BPF Service frontend; the persistent workload-identity CA is separate from the ephemeral operator HTTPS CA; the universal agent-light transparent-mTLS path is the east-west enforcement mechanism; workflow execution is durable and journaled. |
 | **Implemented fact** | The gateway surfaces are absent, but accepted foundations exist: `ServiceMapHydrator` programs a guest-prefix VM backend into `SERVICE_MAP`/`BACKEND_MAP`/`REVERSE_NAT_MAP` (D4, metal 7.0.0-38); `cgroup_connect4_service` is attached over `overdrive.slice` and today selects only from `LOCAL_BACKEND_MAP`; shared Service maps, leg-C kTLS/vsock delivery and rustls chain/single-SPIFFE-SAN verification exist; the reserved `expected_peer`/mismatch contract is not exercised because current production supplies `None`; allocation-keyed identity cannot represent the gateway unchanged. |
 | **Whitepaper** | Historical illustration only. It establishes no binding API, owner, ordering or traffic-path contract. |
@@ -291,6 +294,16 @@ acquisition-neutral custody boundary.
   current, and BPF Hydrated does not mean a Gateway Application is applied.
 - **D-SYS-9 — HTTP scope:** strict bounded HTTP/1.1 streams through the
   BPF-rewritten upstream socket; no gateway retry/replay/backend cursor.
+- **D-SYS-12 — Data path (G1):** both legs run TLS 1.3 handshakes in userspace
+  (rustls, unbuffered API) and hand the record layer to the kernel (kTLS TX+RX,
+  [ADR-0244](../../product/architecture/adr-0244-gateway-legs-use-kernel-tls-after-a-userspace-rustls-handshake.md));
+  the gateway parses only message heads and framing lines
+  ([ADR-0245](../../product/architecture/adr-0245-gateway-parses-http11-heads-and-owns-message-framing.md)) and bodies
+  move between the two kTLS sockets by `splice(2)`
+  ([ADR-0239](../../product/architecture/adr-0239-stream-public-proxy-bodies-with-backpressure.md),
+  [ADR-0246](../../product/architecture/adr-0246-relay-splices-into-an-empty-private-pipe-of-at-least-64-kib.md)).
+  The claim is bounded memory and no userspace payload copy; no CPU gain is claimed. Backend selection (D-SYS-6) is unchanged
+  and still happens at `connect(2)`, before either handshake.
 - **D-SYS-10 — Availability/status:** Route miss is 404; BPF selection receipt
   `NoBackend`—an empty eligible set or no selectable BPF backend (a selected
   backend with `healthy == 0` joins it only if P-9 is adopted)—is the only 503 path and the typed
@@ -410,14 +423,17 @@ path or userspace backend selector.
 - **Owner:** the gateway gate task owned by `GatewayApplicationOwner`
   (constructed by the `serve` composition root).
 - **Promise:** Public Certified Key usable, Route/frontend application
-  candidate valid, `gateway_connect.probe` (residue sweep plus the sentinel
+  candidate valid, `GatewayRelay::probe` proved at this boot that the node's kernel
+  image can arm kTLS, hold a pipe of at least 64 KiB and splice exactly (no SVID or
+  network peer involved; it does not re-run per staged generation), `gateway_connect.probe` (residue sweep plus the sentinel
   canonical `NoBackend` receipt) proved the registered-connect/hook/receipt
   capability, and Gateway Identity is Current. The actual Service Frontend
   probe then returned either bind-valid `ReadyNoBackend` or, for `Selected`,
   `SelectedPeerAuthenticated`; TCP/443 may now bind. Backend presence is not a
   listener prerequisite and the gate waits for none.
 - **Affected state:** public listener bound/admission eligibility only.
-- **Failure projection:** missing/malformed sentinel or actual-frontend receipt,
+- **Failure projection:** a failed `GatewayRelay::probe` (typed `RelayProbeError`,
+  event reason `gateway.relay_probe`, status `ConnectPathUnavailable`); missing/malformed sentinel or actual-frontend receipt,
   probe timeout, connect-path failure, or a `Selected` result that cannot
   resolve identity or complete exact-peer mTLS keeps TCP/443 unbound and is
   cause-distinct on operator-mTLS gateway status, with a structured
@@ -428,6 +444,8 @@ path or userspace backend selector.
 - **Explicitly unaffected:** allocation `Running`, Service `Stable`, backend
   eligibility, BPF hydration, and operator HTTPS meaning.
 - **Ordering:** custody → coherent Route/frontend application candidate →
+  `GatewayRelay::probe` (permitted before gateway identity; it uses an in-process
+  ephemeral certificate, never the Gateway SVID or the public key) →
   `gateway_connect.probe` (permitted before gateway identity) → gateway SVID
   Current → actual Service Frontend probe. That probe either stops
   successfully at `ReadyNoBackend`, or its `Selected` branch resolves the
@@ -439,6 +457,7 @@ path or userspace backend selector.
   neither owns nor needs.
 - **Evidence lane:** pure prerequisite/branch ordering; Tier-3 sentinel receipt,
   actual-frontend `NoBackend`, selected-peer mTLS and startup/refusal evidence;
+  the relay probe's gold test (Sim lies, Tier 1) and one real-kernel run (Tier 3, once per boot);
   and `AT-PIG-E2E-1`.
 
 ### Gate G-2 — Public Certified Key generation usable in custody
@@ -568,11 +587,13 @@ path or userspace backend selector.
 - **Owner:** gateway identity holder supplies client material; Dataplane receipt
   owner supplies expected peer; gateway internal transport owns handshake.
 - **Promise:** gateway SVID is used as client material and the peer SPIFFE
-  URI SAN equals the workload identity actually selected by BPF before any
-  application body is delivered.
+  URI SAN equals the workload identity actually selected by BPF, and only then is
+  kernel TLS armed on that socket, before any application octet is written or read
+  on it. (The public leg's equivalent: handshake, SNI and ALPN accepted, then armed,
+  before any head is read.)
 - **Affected state:** current internal request result only.
 - **Failure projection:** missing gateway material/receipt identity,
-  wrong-valid-peer, timeout, disconnect and cancellation fail closed with no
+  wrong-valid-peer, a kernel refusal to arm (`GatewayClientMtlsError::Arm`), timeout, disconnect and cancellation fail closed with no
   plaintext/retry; application DESIGN pins exact error types.
 - **Explicitly unaffected:** allocation `Running`, Service `Stable`, backend
   health, public TLS certificate status, and future request selection.
@@ -596,7 +617,8 @@ path or userspace backend selector.
 - **Owner:** `ServerHandle::shutdown`, stage `gateway`, calling
   `GatewayHandle::shutdown`.
 - **Promise:** when the stage returns, no public accept is possible, every
-  admitted connection has ended or been force-joined, the intent and receipt maps
+  admitted connection has ended or been force-joined (an in-flight exchange's two halves, both sockets and
+  both pipes are closed with it; an idle keep-alive connection is closed at once), the intent and receipt maps
   hold nothing, the closed application is retired, and the volatile Gateway
   Identity slot is cleared (synchronously; no reconciler round-trip) or the
   exact typed failure is in the report.
@@ -639,8 +661,19 @@ of every gate:
 5. **Disconnect/reconnect:** a guest-flow owner restart or fail-stop during an
    in-flight upstream request ends it with 502 and leaves no intent or receipt.
 6. **Feature disabled:** `ServerConfig.gateway == None` binds nothing, prepares
-   no socket, runs no sentinel and leaves the cgroup hook's unregistered
+   no socket, runs no sentinel, runs no relay probe and leaves the cgroup hook's unregistered
    behaviour byte-for-byte unchanged.
+7. **Relay gate (G1):** `GatewayRelay::probe` available: the gate proceeds; a probe refused by
+   each substrate lie (ULP absent, cipher refused, splice losing octets, pipe clamped below 64 KiB) keeps
+   TCP/443 unbound with `gateway.relay_probe`; an unrelated allocation, Service and the operator
+   listener advance identically. The probe runs once per boot, before the gate's first candidate; it is
+   not re-run for later staged generations, so a staged-generation probe result is the connector probe's
+   only (boundary 4 covers its late result).
+8. **Exchange boundary (G1):** a keep-alive reuse happens only after the response completed and the
+   request body was fully relayed; an early response, a close-delimited response, a close_notify mid-body
+   and a drain each close both legs and never reuse; a peer KeyUpdate inside a head, inside a chunk-size
+   line and inside a body leaves the relayed octets byte-exact and is never forwarded (Tier 3; the
+   kTLS lock protocol is model-checked in `relay_ktls` and not conformance-replayed).
 
 Ordering-dependent behavior requires seeded
 `overdrive-sim` invariants; socket, public Web PKI, TPROXY, kTLS, vsock and wire
@@ -663,7 +696,7 @@ These are responsibilities, not approved Rust types or module names.
 |---|---|---|---|
 | Public listener | `GatewayApplicationOwner` / `GatewayHandle` under `boot_server` / `ServerHandle` (D5) | EXTEND | Dynamic TCP/443 bind only after all gateway/dataplane/identity prerequisites; owned accept-stop/drain/unbind |
 | `PublicCertifiedKeyCustody` | `overdrive-gateway::certified_key` + `overdrive-host::ca::PublicCertifiedKeyAeadCodec` | CREATE NEW stable custody owner over existing KEK/AEAD mechanism | `ManualCertifiedKeySource` installs; custody validates/builds+seals, persists `PublicCertifiedKeyV1`, publishes Current/Usable, then writes `PublicCertifiedKeyStatusRowV1`; paths/raw PEM/secrets stop before Route/listener/status |
-| Public TLS + HTTP/1.1 runtime | Existing rustls/hyper libraries | CREATE NEW in-process runtime | Active after prerequisite gate; bounded streaming/drain |
+| Public TLS handshake + HTTP/1.1 head/framing runtime | `overdrive-gateway::runtime` (pure `http1`, exchange driver) over `GatewayRelay` (`HostGatewayRelay` in `overdrive-dataplane`); rustls handshake only, httparse for heads (G1) | CREATE NEW in-process runtime | Active after prerequisite gate; bodies move kernel-side; bounded drain ([Kernel relay data path](#wave-design--ref-kernel-relay-data-path-and-driven-ports-g1)) |
 | `GatewayApplicationOwner` | `PublicRouteSetV1` + `IntentServiceFrontendResolver` + custody | CREATE ACTIVE OWNER | Atomic admission object retained per connection; sole writer of `GatewayApplicationStatusRowV1` |
 | Eligible backend publication | ServiceLifecycle → `ServiceBackendRow` | REUSE UNCHANGED AS INDIRECT AUTHORITY | Gateway is not a consumer; ServiceMapHydrator remains the downstream consumer |
 | BPF backend application | ServiceMapHydrator → Dataplane/EbpfDataplane | REUSE UNCHANGED (D1) | VM backends already enter `SERVICE_MAP` Maglev inner + `BACKEND_MAP` + `REVERSE_NAT_MAP`; the applied BackendId→`Backend.alloc` association is added inside Dataplane ownership |
@@ -693,7 +726,7 @@ These are responsibilities, not approved Rust types or module names.
 | Gateway Application publication/status | `GatewayApplicationOwner` Current `ArcSwapOption` + `ObservationStore` `GatewayApplicationStatusRowV1` | Atomic admission pointer retained per connection; owner writes active listener/staged/current/draining/redacted failure status |
 | Service frontend resolution | Existing Service listener intent + platform VIP assignment/identity derivation | Resolve exact `(VIP, port, protocol)` only; do not join backend rows in the gateway |
 | Gateway BPF connect/receipt | Extended existing cgroup/connect4 + Dataplane-owned cookie intent/outcome and applied-id association (`open_upstream`) | Prepare the marked loopback-bound socket and register exact ServiceKey, select/rewrite from existing maps, consume actual selected identity; no raw handler map access |
-| Public TLS/HTTP | rustls/hyper | TLS 1.3 + bounded HTTP/1.1 |
+| Public and upstream kernel-TLS legs, head/body relay | `GatewayRelay` (`HostGatewayRelay` over rustls `KernelConnection`, kTLS, splice; `SimGatewayRelay`) | TLS 1.3 + bounded HTTP/1.1; bodies spliced between kTLS sockets; probe before bind (ADR-0244, ADR-0246) |
 | Gateway SVID lifecycle/hold/use | `GatewaySvidLifecycle` + action executor + `GatewayIdentitySlot` | `ensure_current` before bind, restart/near-expiry reissue, and `disable_after_drain`; no public/private-material getter |
 | Selected-peer mTLS | `HostGatewayClientMtls` implementing `GatewayClientMtls` | Present `GatewayIdentitySlot` SVID and require exact receipt-selected workload SAN; transparent kTLS/`MtlsEnforcement` is not this L7 client's API |
 | Clock/entropy | Existing injected `Clock` plus `PublicCertifiedKeyAeadCodec` ring `SystemRandom` | ADR-0223/0231, ADR-0225/0234 and ADR-0226/0235–0240 own the custody, SVID/mTLS and public-runtime choices; exact clock/entropy contracts are in [Application persistence/custody](#wave-design--ref-persistence-custody-and-redaction), [Gateway Application/status/HTTP](#wave-design--ref-gateway-application-status-and-http-contract), and [gateway identity/lifecycle](#wave-design--ref-gateway-identity-and-lifecycle-integration) |
@@ -704,8 +737,9 @@ These are responsibilities, not approved Rust types or module names.
 |---|---|---|
 | Rust | Workspace Rust 2024 | Existing single-process architecture and type/port discipline |
 | Tokio | Workspace runtime | Existing lifecycle/cancellation owner |
-| `hyper` / `hyper-util` | Workspace `1` / `0.1` | Embedded bounded HTTP/1.1 runtime |
-| `rustls` | Workspace `0.23`, provider `ring` | Public TLS + internal gateway mTLS; no FIPS claim |
+| `httparse` / `http` | Workspace lock `1.10.1` / existing; direct dependencies of `overdrive-gateway` (already in the lock through `hyper`; the choice of `httparse` as the head tokenizer is this row's, not an ADR's) | MIT/Apache-2.0; head tokenizing and `HeaderMap`/`Authority` types. `hyper`, `hyper-util` and `tokio-rustls` are not used by the public data path (the operator listener keeps `hyper`) |
+| `rustls` | Workspace `0.23.39`, provider `ring`, unbuffered handshake API and `kernel::KernelConnection` | Public TLS + internal gateway mTLS handshakes and kTLS rekey; no FIPS claim |
+| Linux kTLS, `splice(2)` | Pinned appliance kernel 7.0 (ADR-0068) | Record layer and body relay; GPL kernel facility, no library |
 | Existing workload-identity CA | ADR-0063/0067 | Issuer foundation reused by dedicated gateway holder; never public Web PKI |
 
 No cache, queue, load balancer, sharding, replication, CDN, DNS provider, or
@@ -715,8 +749,11 @@ that justifies them.
 ### Architecture enforcement
 
 - Preserve the repository's single-process hexagonal boundary: core policy and
-  snapshot compilation depend on ports; `hyper`, `rustls`, sockets, storage
-  and kernel effects stay in host/wiring adapters.
+  snapshot compilation depend on ports; `rustls`, sockets, kTLS, `splice`, storage
+  and kernel effects stay in host/wiring adapters (the `unsafe` kernel-TLS calls only in
+  `overdrive-dataplane::gateway_relay`). The Rust structural enforcement for the relay is module privacy (the connector alone holds
+  the dataplane handle; the relay's opaque halves are constructible only by their backend) plus the pure-module no-I/O scan for
+  `runtime::{http1,routing,proxy_headers}`.
 - `cargo xtask dst-lint` remains the Rust structural enforcement tool; the
   [Application component decomposition](#wave-design--ref-application-component-decomposition)
   and [Updated Reuse Analysis](#wave-design--ref-updated-reuse-analysis) pin its
@@ -744,7 +781,8 @@ that justifies them.
 | `ServiceMapHydrator` | ADR-0042/0101, `service_map_hydrator.rs:349-414` | Sole backend application owner | **REUSE UNCHANGED** | VM backends already reach `SERVICE_MAP`/`BACKEND_MAP` (D1; D4 evidence). The gateway adds no input, no field and no action variant; `Action::DataplaneUpdateService` is not extended. Contract shape: unbounded-preservation of the hydrator's state-delta universe. |
 | `ListenerFactStore` | ADR-0062 | ServiceId-to-listener projection and workload cleanup index | **DO NOT EXTEND** | [ADR-0222](../../product/architecture/adr-0222-public-ingress-route-and-gateway-application-owner.md) owns Route/application resolution; the [exact driven-port contract](#wave-design--ref-exact-driving-and-driven-ports) pins `IntentServiceFrontendResolver` over `WorkloadIntent` + `ServiceVipView`, because ListenerFactStore has the wrong derived key/absence semantics. |
 | mTLS `client_config`/SPIFFE verifier + reserved `expected_peer` contract | ADR-0069/0071, `mtls/tls_config.rs:68-222`, `mtls_enforcement.rs` | rustls chain validation, one-SPIFFE-URI parsing, required intended-peer shape | **REUSE VERIFIER BUILDING BLOCKS; CREATE EXACT-PEER VERIFIER AND GATEWAY-CLIENT ENTRY UNDER THE SAME OWNER** | Current production is authn-only (`SpiffeServerVerifier` ignores the destination, `tls_config.rs:116-129`; `expected_peer=None`) and the public `MtlsEnforcement` port requires an intercepted leg + `AllocationId`. The L7 gateway must not fabricate either or route through the transparent kTLS pump; its client entry in `mtls/gateway_identity.rs` consumes gateway-held material + receipt-selected identity and adds SAN equality over the reused `root_store`/`present_chain`/`validate_single_spiffe_uri`. Contract shape: bounded-change (declared mutation set: none; pure verification decision), assertion by a wrong-valid-peer negative. |
-| `rustls` + `hyper` server experience | `tls_bootstrap`, control-plane listener | TLS config/server serving/drain mechanics | **REUSE LIBRARIES/PATTERN** | Public cert trust/authority and HTTP proxy behavior are new; the operator CA/router are not reusable identities or handlers. |
+| `rustls` config experience; `hyper` server (operator listener) | `tls_bootstrap`, control-plane listener | TLS config mechanics | **REUSE rustls CONFIG PATTERN; DO NOT REUSE `hyper` FOR THE PUBLIC PATH** | Public cert trust/authority and HTTP proxy behavior are new; the operator CA/router are not reusable identities or handlers; the public data path is `GatewayRelay` + gateway-owned framing (G1). Contract shape: bounded-change (the operator listener is the preserved complement). |
+| `mtls/ktls.rs` (kTLS arm) and `mtls/splice.rs` (splice pumps) | `overdrive-dataplane::mtls`, ADR-0070 | kTLS TX/RX arming from rustls secrets; splice across a kTLS boundary | **EXTEND `ktls.rs` PATTERN IN A NEW `gateway_relay` MODULE; DO NOT REUSE `splice.rs`** | `ktls.rs` arms AES-256-GCM from `dangerous_extract_secrets` and has no rekey, control-record or AES-128 path; `splice.rs` pumps plaintext to or from a non-TLS leg on blocking threads and is single-writer-per-leg with no body framing. The gateway needs `KernelConnection`, both AES-GCM suites, rekey, record-boundary-exact reads and per-message framing. Contract shape: unbounded-preservation of the transparent-mTLS arm and pumps (no edit), asserted by their unchanged tests. |
 | `cgroup_connect4_service` + shared Service maps | ADR-0053/0040, `cgroup_connect4_service.rs:49-102` | Host connect-time destination rewrite; the attach path is `overdrive.slice` | **EXTEND: REGISTERED ARM + RECEIPT** | Cookie-scoped intent selects the new Service-map arm; unregistered sockets preserve current `LOCAL_BACKEND_MAP` behavior (contract shape: unbounded-preservation of the unregistered universe, asserted by a byte-equal unregistered-connect complement); no child cgroup/netns/XDP entry is needed unless V-GW-2 falsifies that `serve` is inside the attach subtree. |
 
 Every CREATE NEW row in component decomposition exists because no current owner
@@ -765,6 +803,7 @@ IntentStore/ObservationStore.
 | D-SYS-7 | ServiceLifecycle publishes eligibility; ServiceMapHydrator programs VM backends on its ordinary path (D1); under the Dataplane guard identity is Reserved before BPF work, the outer swap commits selection, then identity becomes Applied; gateway has no backend watch/cursor and no demand channel | [ADR-0224](../../product/architecture/adr-0224-existing-cgroup-bpf-gateway-backend-selection.md), [ADR-0233](../../product/architecture/adr-0233-commit-gated-backend-identity-publication.md), [ADR-0242](../../product/architecture/adr-0242-backend-unavailability-is-a-typed-outcome-at-the-gateway-consuming-port.md) |
 | D-SYS-8 | Gateway Applied and BPF applied generations remain independent; the transient receipt pins actual BackendId and its identity read blocks on the commit guard until the process-lifetime association is Applied | [ADR-0229](../../product/architecture/adr-0229-keep-gateway-and-service-dataplane-generations-independent.md) |
 | D-SYS-9 | Strict HTTP/1.1; one BPF-owned frontend handoff; no retry/replay/userspace LB | HTTP [ADR-0235](../../product/architecture/adr-0235-public-http11-only.md); single attempt [ADR-0240](../../product/architecture/adr-0240-single-upstream-attempt-per-public-request.md); packet entry [ADR-0224](../../product/architecture/adr-0224-existing-cgroup-bpf-gateway-backend-selection.md) |
+| D-SYS-12 | Userspace rustls handshakes, kernel TLS record layer, gateway-parsed heads, spliced bodies; bounded memory, no CPU claim | [ADR-0244](../../product/architecture/adr-0244-gateway-legs-use-kernel-tls-after-a-userspace-rustls-handshake.md), [ADR-0245](../../product/architecture/adr-0245-gateway-parses-http11-heads-and-owns-message-framing.md), [ADR-0239](../../product/architecture/adr-0239-stream-public-proxy-bodies-with-backpressure.md), [ADR-0246](../../product/architecture/adr-0246-relay-splices-into-an-empty-private-pipe-of-at-least-64-kib.md) |
 | D-SYS-10 | Public 404 Route miss; only `NoBackend`, including an empty eligible set/no selectable BPF backend, is 503; selected-receipt identity missing/mismatch and connect/receipt/mTLS/upstream failures are 502; separate operator-mTLS `GatewayControl` status reads active application/custody/hydration observations as `GatewayStatusResponse` 200/500 | Route [ADR-0236](../../product/architecture/adr-0236-canonical-public-route-match-key.md); attempt/error [ADR-0240](../../product/architecture/adr-0240-single-upstream-attempt-per-public-request.md); status [ADR-0227](../../product/architecture/adr-0227-redacted-operator-gateway-status.md); receipt [ADR-0228](../../product/architecture/adr-0228-dataplane-selection-receipt-ownership.md); applied identity [ADR-0241](../../product/architecture/adr-0241-dataplane-applied-backend-identity-association.md) |
 | D-SYS-11 | Boot sentinel `NoBackend` may prove connect/receipt capability before Gateway Identity Current; actual-frontend `NoBackend` is bind-valid/503-capable, while `Selected` waits for Gateway Identity Current and exact-peer mTLS; graceful drain runs as the first `ServerHandle::shutdown` stage (before the leg-C worker stage), joins connector/listener, clears receipts and clears the volatile identity slot synchronously (D5 section (c)) | [ADR-0230](../../product/architecture/adr-0230-gate-public-listener-without-redefining-workload-service-readiness.md) |
 
@@ -772,7 +811,7 @@ IntentStore/ObservationStore.
 
 | System obligation | Current authority/evidence | Status |
 |---|---|---|
-| Node-agent-embedded `hyper` + `rustls`, in-process BPF access | GH #54 (no comments) + [ADR-0220](../../product/architecture/adr-0220-embed-single-node-public-ingress-in-overdrive-serve.md) | Feature intent plus approved single-node/process placement; gateway absent in current production |
+| Node-agent-embedded gateway, in-process BPF access (issue text names `hyper` + `rustls`; G1 replaces the `hyper` path) | GH #54 (no comments) + [ADR-0220](../../product/architecture/adr-0220-embed-single-node-public-ingress-in-overdrive-serve.md) + G1 | Feature intent plus approved single-node/process placement; gateway absent in current production |
 | Production public trust from manual Public Certified Key producer | Explicit user ruling + [ADR-0223](../../product/architecture/adr-0223-producer-neutral-public-certified-key-custody.md) + [ADR-0231](../../product/architecture/adr-0231-preserve-last-usable-public-certified-key-replacement.md) | `ManualCertifiedKeySource` → `PublicCertifiedKeyCustodyHandle::install` → validate/build+seal → persisted `PublicCertifiedKeyV1` → Current/Usable opaque resolver publication → redacted status |
 | Gateway observability | [ADR-0227](../../product/architecture/adr-0227-redacted-operator-gateway-status.md) | `GatewayControl` uses the [exact Application status contract](#wave-design--ref-gateway-application-status-and-http-contract) for ObservationStore point reads of `GatewayApplicationStatusRowV1`/`PublicCertifiedKeyStatusRowV1` and relevant hydration; 200/500, secrets/raw dataplane failure strings omitted |
 | ACME acquisition/renewal | Existing GH #57 | Excluded from first slice; additive producer only |
@@ -796,7 +835,11 @@ IntentStore/ObservationStore.
 | D2 | Backend unavailability is a bounded wait or a typed unavailable outcome at the gateway's own consuming port (the selection-receipt path); no demand, revision, acknowledgment or wake channel exists. [ADR-0242](../../product/architecture/adr-0242-backend-unavailability-is-a-typed-outcome-at-the-gateway-consuming-port.md). | Approved by user 2026-11-01 | D4 edge observations (healthy bit lags readiness about 1 s; map entries outlive `job stop`) |
 | D3 | The registered gateway selection hook (a `cgroup/connect4` arm that reads `SERVICE_MAP`/Maglev/`BACKEND_MAP` for gateway-registered sockets), the selection receipt, the applied-identity join and exact-peer gateway-client mTLS are kept, pinned to the current leg-C → kTLS → `GuestStreamDial` vsock path and ADR-0190's `SO_MARK` + `127.0.0.1` source requirement. | Approved by user 2026-11-01 | `M:crates/overdrive-bpf/src/programs/cgroup_connect4_service.rs:78` reads only `LOCAL_BACKEND_MAP`; `M:crates/overdrive-dataplane/src/mtls/tls_config.rs:116-129` authn-only |
 | D4 | Contract-shaping validation of D1 on native metal before design approval. | Held 2026-11-01 | findings above |
-| D5 | The architect defines and pins the gateway adapter slot, boot construction/probe/bind point, shutdown order and the upstream-socket-preparation contract (below). | Approved by user 2026-11-01 | [Composition-root gateway slot, boot and shutdown](#wave-design--ref-composition-root-gateway-slot-boot-and-shutdown-d5) |
+| D5 | The architect defines and pins the gateway adapter slot, boot construction/probe/bind point, shutdown order and the upstream-socket-preparation contract (below). The standing approval is for this scope; the exact shapes were not confirmed by the user and are re-listed, revised for G1, in the handoff section. | Approved by user 2026-11-01 (scope); shapes pending confirmation | [Composition-root gateway slot, boot and shutdown](#wave-design--ref-composition-root-gateway-slot-boot-and-shutdown-d5) |
+| G1 | Replace the userspace `hyper` data path with: userspace rustls performs the public TLS 1.3 handshake and the upstream exact-peer mTLS handshake, then installs kTLS TX+RX on each socket; backend selection stays in the kernel (cgroup/connect4, ADR-0224/0232); userspace parses only each request head and response head; bodies move kernel-side by `splice(2)` between the two kTLS sockets, by exact `Content-Length` or per chunk; userspace tracks message boundaries for keep-alive, body limits, deadlines and drain. | Approved by user 2026-11-02 | [Kernel relay data path](#wave-design--ref-kernel-relay-data-path-and-driven-ports-g1); ADR-0244, 0245, 0239, 0246 |
+| G2 | The accepted L7 feature set is unchanged: routing ADR-0236, header policy 0237, limits 0238, streaming 0239, single attempt 0240, typed 404/502/503 0242, drain, exact-peer mTLS 0234, TLS 1.3 only 0226, HTTP/1.1 only 0235, keep-alive per RFC 9112. | Approved by user 2026-11-02 | Message-framing contract; status mapping delta |
+| G3 | Run the contract-shaping spikes on native metal (items a-e) and take their results as design inputs, including the pipe rule, `KernelConnection`-only rekey with the KeyUpdate procedure, no CPU claim, and no kTLS-plus-sockmap dependency. | Approved by user 2026-11-02 | [findings-ktls-splice-relay.md](spike/findings-ktls-splice-relay.md); G1 contract-shaping items |
+| G4 | Reopen P-2, P-9 and P-10, restated against the new design below; they remain PROPOSED until the user rules. | Approved by user 2026-11-02 | PROPOSED table |
 
 ### Resolved without user ruling (rule-forced corrections or removals, review round 1)
 
@@ -810,7 +853,7 @@ IntentStore/ObservationStore.
 
 ### PROPOSED — awaiting user
 
-No item below is part of the design until the user adds it. **P-2, P-9 and P-10 BLOCK design approval** (each changes a contract or constrains DISTILL; the design body is neutral on them). P-1, P-3, P-4, P-6 and the P-8 simplification are optional and non-blocking.
+No item below is part of the design until the user adds it. **P-2, P-9 and P-10 BLOCK design approval** (each changes a contract or constrains DISTILL; the design body is neutral on them). **P-12, P-13a, P-13b, P-13c, P-13d, P-17 and P-18 BLOCK DISTILL**: the design body assumes the recommended option of each and states the alternative's consequences, but each changes a contract DISTILL pins (cipher set, rejection set, exchange duplexity, interim/Expect handling, close-delimited support, KeyUpdate origination, lingering close and the `discard_remaining` port operation). P-1, P-3, P-4, P-6, the P-8 simplification and P-16 are optional and non-blocking.
 
 | Id | Proposal | Reachable production failure it prevents | Cost | Cheaper alternative |
 |---|---|---|---|---|
@@ -822,6 +865,30 @@ No item below is part of the design until the user adds it. **P-2, P-9 and P-10 
 | P-8 (optional, non-blocking) | **Simplification of the previously approved D-APP-10.** The approved contract (2026-09-13, carried unchanged) changes main's `IntentStore::watch` (`M:crates/overdrive-core/src/traits/intent_store.rs:318-332`, a `Stream<(Bytes,Bytes)>` where an empty value means delete) to a lag-aware `IntentSubscriptionEvent` (`Changed`/`Lagged`) and migrates every watcher (`LocalStore`, Sim, the action-shim test fake, existing consumers). Alternative: keep main's `watch` and relist the Route/custody keys on a fixed period (bounded staleness instead of fail-closed on lag); main's watch broadcast has a 1024 capacity and drops silently on lag (`M:crates/overdrive-store-local/src/redb_backend.rs:73, 403-417`). | A withdrawn Route stays served after a missed watch event (what the approved contract closes). | The approved contract costs one cross-crate trait change and a bounded watcher migration; the alternative removes both. | **The design keeps the approved contract unless you adopt the simplification.** Trade-off: the alternative accepts a bounded window (one relist period) of serving a withdrawn Route or key after a missed event, in place of a fail-closed admission clear. |
 | P-9 (**BLOCKING design approval**) | Should the registered hook arm honour `BACKEND_MAP.healthy`? **Honour:** `healthy == 0` records `NoBackend` (503) in the ~1 s readiness window (V-GW-3: `NoBackend` → `Selected` about 1.05 s after startup `Stable`). **Ignore:** the byte is not read; a request in that window dials a not-yet-ready guest and surfaces as 502 (the nft output rule resets it). No BPF program reads `healthy` today (`M:crates/overdrive-dataplane/src/maps/mod.rs:135`); V-GW-3 also saw `healthy` flap 1 → 0 in 2 of 3 runs (cause not established), so honouring it exposes gateway 503s to that flap. | **Honour:** a request in the readiness window is a typed 503 instead of 502. **Ignore:** none; the window is 502. | **Honour:** one byte read on the connect-time path, an extra Quint run and invariant, and exposure to the unexplained flap. **Ignore:** nothing added. | **Ignore `healthy`** (the subtractive review's alternative): fewer moving parts, no dependence on the flap; the cost is 502 instead of 503 for about 1 s after startup. The design body is neutral: it states the decided core (no outer entry or no usable backend → `NoBackend` → 503; selected backend whose dial fails → 502; never a wrong-peer success) and marks the `healthy` handling "pending P-9". |
 | P-10 (**BLOCKING design approval**) | **Placement of the registered gateway selection arm** (V-GW-4 measured 246 verified instructions for the arm vs 28 for the existing `cgroup_connect4`, 7.0.0-38-generic). **(a)** A separate `cgroup/connect4` program (registered-gateway selection only) attached beside `cgroup_connect4_service`; multi-attach coexistence was observed (`bpftool cgroup tree`: production plus two probes, all `multi`). The kernel runs every attached program in array order over the same context and any deny yields `-EPERM` (`kernel/bpf/cgroup.c:79-89 @ v7.0`), so the order contract is: an unregistered socket passes the new program unchanged (it looks up an empty cookie slot and returns allow), a registered socket is rewritten by it. The outcome does not depend on attach order, because `LOCAL_BACKEND_MAP` holds no VM backend (D4: empty), so the existing program misses and allows both the VIP and the rewritten guest address. Attach mode is stated explicitly as multi. The existing hook's verifier baseline is untouched. **(b)** Fold the arm into `cgroup_connect4_service` and re-baseline `perf-baseline/main/verifier-budget/` (append, never edit; `.claude/rules/bpf.md`); this requires your authorisation because the existing program would grow about 8.8x against the ">5% over baseline fails" rule (`.claude/rules/testing.md` Tier 4) and the growth is architectural, not a reduction. | Same production failure as D3 (a host-originated gateway `connect(2)` to a Service VIP is not selected). The choice affects only cost and blast radius. | (a) One more attached program and one verifier-baseline file; every ordinary same-host connect additionally pays one cookie-map lookup in program (a)'s run, while (b) pays it inside the existing program. (b) re-baselines a hot-path program every workload connect runs. | **Recommendation: (a).** The gateway arm is a distinct concern (registered-socket selection) with its own maps and receipt; keeping it out of the program every workload connect runs leaves that program's verifier cost and `LOCAL_BACKEND_MAP` behaviour byte-identical and needs no baseline authorisation (design.md "correct, and no more than correct"; the observed multi-attach makes it mechanically free). (b) saves one program slot and one cookie lookup but spends a 5% rule exception on a program unrelated to the gateway. Both are BPF-first and both satisfy ADR-0224. |
+
+#### P-2, P-9, P-10 restated against G1 (reopened by G4; all remain PROPOSED until the user rules)
+
+| Id | What G1 changes | Recommendation |
+|---|---|---|
+| P-2 (allocator re-lease wedge) | **Nothing.** The allocator memo, `update_service` and the applied-identity rule (ADR-0241) are upstream of the data path; G1 moves only what happens after `connect(2)`. The exposure is unchanged: a Service whose backend address is re-leased to another allocation while the old memo entry is live wedges hydration for that Service until the id is released. | Unchanged: **(b)** (release leaving backends' memos before allocating the new set, no signature change) if the user judges the re-lease reachable; otherwise neither, with the exposure recorded. The architect still has not shown a production path that re-leases a guest address while its memo is live. |
+| P-9 (honour `BACKEND_MAP.healthy`) | **One new fact, no new dependency.** The receipt is still read before either handshake, so honouring `healthy` still produces the typed 503 before any socket octet. Under G1 the gateway also parses response heads, so a workload's own `503` is passed through unchanged and is distinguishable from the gateway's `NoBackend` 503 only by being the origin's response (same status, no gateway-authored marker); the readiness window's alternative remains a dial to a not-yet-ready guest, which fails at connect (502). V-GW-3's unexplained `healthy` 1 to 0 flap is unchanged. | Unchanged: **ignore `healthy`** (fewer moving parts; the window is 502 for about 1 s). Honour only if the user wants 503 there; then add the Quint run `unhealthy_is_no_backend` and the Sim rule. |
+| P-10 (placement of the selection arm) | **Nothing.** Selection happens at `connect(2)` before the handshake (V-G1-d: the rewrite composes with the later handshake and arming on the same fd). The relay adds no BPF program. | Unchanged: **(a)**, a separate `cgroup/connect4` program beside `cgroup_connect4_service`. |
+
+#### New PROPOSED items from G1 (none is part of the design until the user adds it)
+
+| Id | Proposal | Reachable production failure it prevents | Cost | Cheaper alternative |
+|---|---|---|---|---|
+| P-12 (**BLOCKS DISTILL**) | Restrict both legs to exactly the AES-128-GCM and AES-256-GCM TLS 1.3 suites (the spiked set). The design body states the neutral contract: offer only suites the kernel's kTLS arming accepts and the spike exercised. | A cipher the spike never exercised (ChaCha20-Poly1305) arming kTLS with untested rekey behaviour on the public edge. | TLS 1.3 clients offering no AES-GCM suite cannot connect (none known). | Offer rustls's default TLS 1.3 suites (adds ChaCha20, unvalidated). Recommendation: restrict. |
+| P-13a (**BLOCKS DISTILL**) | The strict ambiguous-framing rejection set of the Message-framing contract (replacing hyper's): both `Content-Length` and `Transfer-Encoding`; repeated or non-decimal or overflowing `Content-Length`; repeated `Transfer-Encoding`, `chunked, chunked`, non-`chunked` coding; obsolete line fold; bare CR, bare LF, NUL on every line the gateway reads; chunk-size overflow; HTTP/1.0 request (505); framing derived from the original headers; and the response-side equivalents (502). | Request smuggling and desynchronisation on a public edge (RFC 9112 §6.3, §11.2). | Parser complexity the previous design bought from `hyper`. | Forward ambiguous framing (rejected: it is the smuggling defect). Recommendation: reject. |
+| P-13b (**BLOCKS DISTILL**) | **Full-duplex exchange**: the response half may start and finish before the request body ends (early 401/413, `100-continue`, streaming echo). Half-duplex alternative (request fully relayed, then response): the model's two halves collapse to one sequence (`relay_exchange` loses the overlapping steps and the `early_response_closes` run), `ExchangeMachine` loses the independent response accessors, and the per-exchange descriptor budget could share one pipe (2 fewer descriptors). Consequence: an origin that answers before reading the body (401, 413, `Expect: 100-continue`) deadlocks or is read only after the request body is fully sent, and bidirectional streaming (echo) cannot work. | Deadlock of simultaneous large bodies and late early-error responses on a half-duplex relay. | The concurrent-halves driver (the lingering close is P-18 and applies under either choice). | Half-duplex, as described. Recommendation: full-duplex. |
+| P-13c (**BLOCKS DISTILL**) | **Interim `1xx` and `Expect`**: an interim `100` from the origin is forwarded; every other interim `1xx` (not `101`) is dropped; `Expect` is forwarded unchanged. | `100-continue` clients stall until their own timeout if `100` is dropped. | Interim-head handling inside the response-head loop. | Reject all interim `1xx` (502) and strip nothing from `Expect`. Recommendation: forward `100`. |
+| P-13d (**BLOCKS DISTILL**) | **Close-delimited responses and HTTP/1.0 responses with an explicit length**: forwarded with `Connection: close`, body spliced to end of stream under `max_response_body_bytes`. Cost: `relay_to_end` on the port, `Remaining::UntilClose`, `RelayError::LimitExceeded` use, the Sim path, the equivalence case, the `close_delimited_clean_end` run, `len_delim`, the bounded close-delimited units of the model and `Remaining::UntilClose` (removed in one cut). | A legitimate HTTP/1.1 origin that closes to delimit its body would otherwise get 502. | The items listed as cost. | Reject close-delimited responses and HTTP/1.0 responses (502); removes all of the cost. Recommendation: keep (G2 keeps the accepted feature set; the user may remove it). |
+| P-16 | Hold a read half's pipe (2 descriptors, 64 KiB) until the connection closes, instead of the design body's release when the half starts its next head read (Pipe and splice, item 7). Per connection: 128 idle connections that each relayed a body would hold 256 descriptors and 8 MiB. | Pipe create/close churn per request. | The idle-connection descriptor and memory cost above. | **Release at the start of the next head read (the design body)**; no ruling needed unless the user prefers holding. |
+| P-17 (**BLOCKS DISTILL**) | The relay originates a KeyUpdate (not requesting one) on each transmit direction before 2^23 records. Recomputed: RFC 8446 §5.5 bounds a key at about 2^24.5 **full-size** records (about 2^38.5 bytes, 3.8e11). ADR-0238 caps a public connection at 100 responses of at most 16 MiB (about 1.6 GiB, about two orders of magnitude below that), and an upstream leg is new per request (one body of at most 16 MiB plus framing, about four orders below). The relay passes no `SPLICE_F_MORE` (Pipe and splice, item 7), so a source that delivers small pieces yields one TX record per piece, and the bound counts records, not octets. A 100-octet-event stream at the 16 MiB ceiling is about 1.7e5 records per response, 1.7e7 over 100 responses, the same order as 2.4e7; one-octet pieces exceed it. | None with full-size records under the ADR-0238 ceilings; reachable only by a workload that streams many tiny events on one public connection. | A record counter, a lock-taking path and an untested leg-C behaviour on a received KeyUpdate. | **DROP** (the design body: the gateway never originates a KeyUpdate; only peer-initiated KeyUpdate is handled, spike (b)). Adopt if the user judges tiny-event streaming in scope (the origin is the operator's own workload). |
+| P-18 (**BLOCKS DISTILL**) | **Lingering close** (the design body assumes it): after the gateway has delivered a complete final response while request octets remain unread (early origin response including 401/413; gateway-authored 400, 404, 413, 421, 431, 502, 503, 505; not 408), it sends `close_write` (close_notify, FIN) and then discards the remaining request octets with the new relay-port operation `discard_remaining` until the peer's close_notify, until `max_request_body_bytes` octets, or until the deadline (Early response and lingering close, below). | Closing a socket with unread received data makes the kernel send RST, which can destroy the client's unread 413/401/early final response (the accepted outcome of ADR-0238 and ADR-0242). | Per rejected or early-answered connection: up to `max_request_body_bytes` (16 MiB) of client data read and dropped at kernel speed, and the connection slot and two descriptors held until the peer closes or `body_no_progress_deadline` (30 s) or `whole_request_deadline` (120 s), whichever first; no new limit. A client can already hold a slot for the same time with a slow body, so the exposure is not larger than an ordinary slow upload. Port surface: one operation, one Sim behaviour, one equivalence case. | (a) A short fixed discard bound (a new constant, for example 64 KiB or 1 s): lower cost, but the main case (a rejected large upload) is still reset once the client has sent more than the bound. (b) `close_write` only and accept the reset exposure: no port operation, no discard cost; the client may see a reset instead of the 413/401. Recommendation: the design body (existing limits, no new constant). |
+
+Q-1 (whether the appliance kernel should also carry the v7.3 `tls_sw_splice_read` fix) is an ADR-0068 image question, not a P-row: it is
+recorded as an alternative in ADR-0246 and as one line in the handoff "Questions for the user".
 
 Items the design deliberately does not carry: a userspace backend load balancer, a named Gateway resource, ACME, WireGuard, in-guest mTLS, DNS mutation, any new persistence subsystem.
 
@@ -887,6 +954,9 @@ pub trait GatewayConnectDataplane: Send + Sync {
 /// A socket prepared by the dataplane adapter. Not Clone.
 pub struct PreparedUpstream { /* private: tokio::net::TcpSocket + GatewayConnectIntent */ }
 impl PreparedUpstream {
+    /// Backends only (cross-crate construction contract below). `socket` is the unconnected, marked, loopback-bound
+    /// socket; `intent` is the intent the backend has ALREADY registered for it. Validates nothing.
+    pub fn new(socket: tokio::net::TcpSocket, intent: GatewayConnectIntent) -> PreparedUpstream;
     pub fn intent(&self) -> &GatewayConnectIntent;
     /// Hands the socket to the caller for `connect(2)`; the intent stays registered
     /// until `cleanup(&intent)`.
@@ -894,9 +964,629 @@ impl PreparedUpstream {
 }
 ```
 
+**Cross-crate construction of `PreparedUpstream` (DG-8).** `PreparedUpstream` is defined in `overdrive-gateway::ports`; its
+only producers are `open_upstream` implementations in other crates: `EbpfDataplane` (`overdrive-dataplane`),
+`SimGatewayConnectDataplane` (`overdrive-sim`) and driver-local doubles (the QC-2 connect double). The value is a pairing of two
+things the adapter has already made, so the constructor is plain: `PreparedUpstream::new(socket, intent)`, public, in the block
+above. Invariants:
+1. **The constructor registers nothing.** Marking, loopback bind, cookie read and `GATEWAY_CONNECT_INTENT_MAP` registration (steps
+   1-3) are the producing `open_upstream`'s work and its postcondition ("the only constructor of a registered intent"). `new` does no
+   syscall, validates nothing, cannot fail.
+2. **The value carries no cleanup guard.** Dropping a `PreparedUpstream`, or the socket from `into_parts`, cleans nothing. Cleanup is
+   the connector's one RAII guard calling `cleanup(&intent)` (Gateway upstream path, connector paragraph), never the value.
+3. **`intent()` is the only identity.** The connector never reads the cookie off the socket; the intent returned by `intent()` is
+   what `take_receipt` and `cleanup` are keyed by. Host: the intent's cookie is the socket's `SO_COOKIE`. A double: whatever
+   cookie it minted for the intent it registered.
+4. **Only `open_upstream` implementations call `new`.** A review convention, as for the opaque legs (no scan is added).
+5. **The socket is always a real unconnected `TcpSocket`, for every backend.** A non-Host backend (Sim, double) creates one with
+   `tokio::net::TcpSocket::new_v4()` and need not mark or bind it; the connector's `connect(2)` is a real kernel connect for
+   every backend, so what that connect observes is decided by the destination the test gives the Service Frontend, not by the
+   backend (consequence for parking: next paragraph).
+Alternative rejected for the value: a backend-defined state object behind `Box<dyn Any + Send>` as for `KtlsLeg` (DG-1). The legs
+have no concrete contents the gateway may name; `PreparedUpstream`'s contents (a socket and an intent) are exactly what the
+connector consumes, so hiding them would only add a downcast. A carried cleanup guard or closure is rejected by invariant 2:
+`cleanup` is fallible and its failure must reach the connector's ledger reservation, which a `Drop` cannot do.
+
+**Where a double may park a probe (DG-9).** The connector's sequence for `probe` is: connect permit, `open_upstream` (sync),
+`into_parts`, `connect(2)` on that socket to the Service Frontend (real, raced against the injected clock), `take_receipt` (sync),
+and then, only for a `Selected` receipt, `selected_backend_identity` (sync) and `GatewayClientMtls::authenticate` (async).
+The sync port methods cannot park a caller, and the `connect(2)` is a kernel call on a real socket that no backend sees, so
+neither can hold a probe without a production seam. The one awaited operation owned by a driven-port implementation is
+`GatewayClientMtls::authenticate`, so that is the park point of every double and of the Sim. Consequences, all within the pinned
+shapes (no production change, no new item):
+1. A probe can be held only if its receipt is `Selected`. A `NoBackend` probe returns `ReadyNoBackend` after `take_receipt` with
+   no further await; it cannot be held. A held-probe scenario therefore programs a backend (Sim: a non-empty `update_service`;
+   double: it answers `Selected`).
+2. Each held entry is identified by the identity it was given, not by arrival order: the double mints a distinct `BackendId` per
+   `open_upstream`, returns it in that entry's `Selected` receipt, answers `selected_backend_identity` with a distinct `SpiffeId`
+   for it, and `authenticate` finds the entry by its `expected_peer`. Arrival order of connects is therefore irrelevant.
+3. Release is the double returning from `authenticate`: usable = `Ok(GatewayUpstream)` (the double seals an in-memory
+   `KtlsLeg::from_armed` through the `GatewayUpstreamSeal` from `into_builder`; the connector reports `SelectedPeerAuthenticated`);
+   unusable = `Err(GatewayClientMtlsError::Handshake)` (the connector reports `Mtls(..)`).
+4. The real `connect(2)` must reach a peer that completes it, or fail quickly (the connector still takes the receipt, as the
+   outcome table rows 1 and 3 require). A test fixture gives the Service Frontend a loopback address with a listening socket:
+   `ServiceVip::new` accepts any `IpAddr` (`crates/overdrive-core/src/id.rs:1067`). That fixture is test support (DISTILL's).
+5. Each parked probe holds one connect permit (`max_inflight_connects`) until `authenticate` returns; the number of simultaneously
+   held entries stays below that limit.
+6. The DESIGN does not say whether the owner keeps awaiting, or drops, the probe of a superseded candidate. Either is
+   compatible: release of an entry whose waiter is gone is a no-op for the double, and the QC-2 postcondition is on
+   `application_status()` either way.
+The Sim hold (`HoldConnectProbe`/`ReleaseConnectProbe`) is realised at the same point. That `SimGatewayConnectDataplane` and
+`SimGatewayClientMtls` share the hold state is Sim test support (capabilities, not signatures; DISTILL shapes it, as it does
+`set_peer`).
+
 Added error variants: `GatewayConnectDataplaneError::{SocketCreate, SocketOption, SocketBind, CookieRead}` (each carrying the originating `io::ErrorKind`) alongside the branch variants; `IntentRegistryFull`, `IntentAlreadyRegistered`, `IntentMissing`, `ReceiptMissing`, `ReceiptMismatch`, `BackendIdentityMissing`, `Kernel`, `Cleanup`, `Unavailable`, `ProbeTimeout` are unchanged. `SocketCookieReader` becomes a dataplane-internal helper; it is not a boot-adapter field and `UnboundGatewayBuilder::new` no longer takes it.
 
-Permitted callers of `open_upstream`: `GatewayUpstreamConnector::{probe, connect}` only (crate-private). Enforcement is the existing `dst-lint` structural scan pinned in [Application component decomposition](#wave-design--ref-application-component-decomposition), extended to forbid `open_upstream`/`into_parts` outside `overdrive-gateway::connector`. The sentinel probe's own connect is made inside the dataplane adapter on its own prepared socket.
+Permitted callers of `open_upstream`: `GatewayUpstreamConnector::{probe, connect}` only. The `Arc<dyn GatewayConnectDataplane>` is a private field of the connector module (`pub(super)`/crate-private visibility); no other module is handed it, so the restriction is module privacy and needs no scan. The sentinel probe's own connect is made inside the dataplane adapter on its own prepared socket.
+
+## Wave: DESIGN / [REF] Kernel relay data path and driven ports (G1)
+
+User ruling G1 (2026-11-02) replaces the userspace `hyper` data path. Decisions:
+[ADR-0244](../../product/architecture/adr-0244-gateway-legs-use-kernel-tls-after-a-userspace-rustls-handshake.md)
+(kernel TLS after a userspace handshake),
+[ADR-0245](../../product/architecture/adr-0245-gateway-parses-http11-heads-and-owns-message-framing.md)
+(head parsing and framing),
+[ADR-0239](../../product/architecture/adr-0239-stream-public-proxy-bodies-with-backpressure.md)
+(bodies move kernel-side) and
+[ADR-0246](../../product/architecture/adr-0246-relay-splices-into-an-empty-private-pipe-of-at-least-64-kib.md)
+(the pipe invariant). Every contract below is the SSOT; the ADRs carry no signatures.
+Spike evidence: [findings-ktls-splice-relay.md](spike/findings-ktls-splice-relay.md) (items a-e). Backend selection is
+unchanged: the cgroup/connect4 arm still selects before the TLS handshake (item d: a pre-connect rewrite composes with the
+later handshake and kTLS install on the same fd).
+
+### What runs where
+
+| Step | Where | Owner |
+|---|---|---|
+| Public TLS 1.3 handshake, SNI/ALPN, key custody use | userspace, rustls unbuffered API | `GatewayRelay::accept_public` (host: `overdrive-dataplane`) with config from the custody snapshot |
+| Upstream mTLS handshake, exact-peer SAN equality | userspace, rustls unbuffered API | `HostGatewayClientMtls` (unchanged owner, ADR-0234) |
+| TLS record layer of both legs | kernel (kTLS TX+RX) | armed by the same host relay from `rustls::kernel::KernelConnection` |
+| Request/response heads, chunk-size lines, trailer lines | userspace, read through the terminator only | `GatewayRelay::{read_through, write_all}` driven by the gateway exchange |
+| Framing decision, Route match, header policy, limits, 4xx/5xx mapping | userspace, pure functions | `overdrive-gateway::runtime::http1` (crate-private) |
+| Body octets | kernel, `splice(2)` through a private pipe | `GatewayRelay::{relay_exact, relay_to_end}` |
+| KeyUpdate, NewSessionTicket, close_notify, alerts | userspace, per leg, never forwarded | the host relay's leg backend (ADR-0244) |
+| Backend selection | kernel BPF (unchanged) | ADR-0224 |
+
+### Component ownership and crate class (ADR-0003)
+
+| Component | Home / class | Contract shape and universe | Assertion mechanism |
+|---|---|---|---|
+| `http1` head validator, request/response parser, `BodyFraming` decision, chunk-line parser, `rewrite_*_headers`, `normalize_route_authority` | `overdrive-gateway::runtime::{http1,routing,proxy_headers}` / `adapter-host` crate, pure modules (no I/O, no clock) | **pure-function**: bytes and limits to typed value or typed error | per-function PBT in source-local `#[cfg(test)]` modules; mutation-test target |
+| `ExchangeMachine` | `overdrive-gateway::runtime::http1::exchange` / pure | **pure-function** state machine: (state, event) to (state, disposition) | Quint conformance (below) + PBT |
+| Exchange driver (two concurrent halves per request) | `overdrive-gateway::runtime::exchange` | **bounded-change**: the exchange's two sockets, its leases, its deadlines; no other state | seeded `overdrive-sim` against `SimGatewayRelay`; Tier-3 wire tests |
+| `GatewayRelay` port, `KtlsLeg`/`KtlsReadHalf`/`KtlsWriteHalf`, error taxonomy | `overdrive-gateway::ports` | trait and opaque values only | host/Sim equivalence test (`gateway_relay_equivalence.rs`, over faults the Host can also produce) |
+| `HostGatewayRelay`: kTLS arming, control-record dispatch, rekey, private pipe, splice, probe | `overdrive-dataplane::gateway_relay` / `adapter-host` (extends `mtls/ktls.rs`; owns the `unsafe` `setsockopt`/`recvmsg` calls; `overdrive-gateway` stays free of them) | **bounded-change**: per leg, its socket, its pipe, its key epochs | Tier-3 on native metal: wire bytes at a real rustls peer, `/proc/net/tls_stat` deltas, negative controls |
+| `SimGatewayRelay` | `overdrive-sim::adapters` / `adapter-sim` | same observable contract, userspace copy between in-memory record queues | equivalence test; fault surface listed below |
+| `HostGatewayClientMtls` | `overdrive-dataplane::mtls::gateway_client` (unchanged owner) | arms the authenticated socket through the same `HostGatewayRelay` | wrong-valid-peer matrix (unchanged) |
+
+dst-lint scans only `core` crates; the relay is host I/O and is not scanned. `overdrive-gateway` gains `httparse` and `http`
+as direct dependencies and drops `hyper`, `hyper-util` and `tokio-rustls` (the operator HTTPS listener and probes keep
+`hyper`); `overdrive-dataplane` already depends on `rustls` and `libc`.
+
+### Driven port `GatewayRelay` (cross-crate contract)
+
+```rust
+// overdrive-gateway::ports
+/// Opaque, non-Clone kernel-TLS leg: a TCP socket on which TLS 1.3 TX and RX are armed.
+pub struct KtlsLeg { /* private */ }
+impl KtlsLeg { pub fn into_halves(self) -> (KtlsReadHalf, KtlsWriteHalf); }
+/// Receive half. Owns at most one private pipe (ADR-0246): created on the half's first `relay_*` call, released when the
+/// half starts its next `read_through(HeaderBlockEnd, ..)` or is dropped (Contract of the legs, item 7).
+pub struct KtlsReadHalf { /* private */ }
+/// Transmit half. Shares the leg's transmit lock with the read half (the read half answers a peer KeyUpdate).
+pub struct KtlsWriteHalf { /* private */ }
+pub struct AcceptedPublicLeg { pub leg: KtlsLeg, pub sni: PublicHostname }
+
+pub enum HeadTerminator { HeaderBlockEnd, LineEnd }
+pub struct ThroughBytes(Vec<u8>);          // as_slice() only; includes the terminator
+pub struct RelayDeadlines { pub absolute: Instant, pub no_progress: Duration }
+/// `first_octet`: the absolute deadline for the first octet of the item;
+/// `complete_within`: how long the item may take once its first octet has arrived (`None`: no such budget);
+/// `complete_by`: an absolute ceiling on the whole item, first-octet wait included (`None`: no ceiling).
+/// The port applies the earliest of the three and clamps nothing else: the caller (the relay driver) passes every
+/// value already reduced to `min(phase budget, request_deadline)`, so an item can never outlive its request.
+pub struct ReadDeadlines { pub first_octet: Instant, pub complete_within: Option<Duration>,
+    pub complete_by: Option<Instant> }
+
+#[async_trait::async_trait]
+pub trait GatewayRelay: Send + Sync {
+    /// Earned-Trust probe (see below). Called once per boot, in gate G-1, before the listener binds.
+    async fn probe(&self, deadline: Instant) -> Result<(), RelayProbeError>;
+    /// Completes the TLS 1.3 server handshake on `accepted` with `tls`, then arms kTLS TX+RX. `tls` is
+    /// `PublicCertifiedKeySnapshot::server_config()`, the custody snapshot's single builder (ADR-0226:
+    /// TLS 1.3 only, ALPN `http/1.1`, no tickets, no 0-RTT, secret extraction enabled, the cipher-suite set
+    /// of the Contract of the legs); there is no wrapper type.
+    async fn accept_public(&self, accepted: OwnedFd, tls: Arc<rustls::ServerConfig>, deadline: Instant)
+        -> Result<AcceptedPublicLeg, PublicHandshakeError>;
+    /// Consumes application octets through and including the first terminator, and no octet beyond it.
+    /// Fails `Deadline` if no octet arrives by `first_octet`, if the terminator has not arrived `complete_within` (if `Some`) after that
+    /// first octet, or if it has not arrived by `complete_by` (if `Some`).
+    /// A call that starts a `HeaderBlockEnd` read also releases the half's pipe, if any (item 7). A close_notify
+    /// pending before the first octet is `CleanEof`. Control records met on the way are handled (never
+    /// returned); a partial head is retained by the half, not lost. Fails `LimitExceeded` when `limit`
+    /// octets contain no terminator.
+    async fn read_through(&self, from: &mut KtlsReadHalf, terminator: HeadTerminator,
+        limit: NonZeroUsize, deadlines: ReadDeadlines) -> Result<ThroughBytes, LegReadError>;
+    /// Writes every octet or fails; one writer at a time per half (`&mut`).
+    async fn write_all(&self, to: &mut KtlsWriteHalf, bytes: &[u8], deadline: Instant)
+        -> Result<(), LegWriteError>;
+    /// Moves exactly `len` application octets from `from` to `to` by splice. Reads nothing beyond `len`.
+    async fn relay_exact(&self, from: &mut KtlsReadHalf, to: &mut KtlsWriteHalf, len: NonZeroU64,
+        deadlines: RelayDeadlines) -> Result<(), RelayError>;
+    /// Moves octets until the source's close_notify, failing `LimitExceeded` after more than `max`. Returns the count.
+    /// Present only if P-13d keeps close-delimited responses.
+    async fn relay_to_end(&self, from: &mut KtlsReadHalf, to: &mut KtlsWriteHalf, max: NonZeroU64,
+        deadlines: RelayDeadlines) -> Result<u64, RelayError>;
+    /// Sends close_notify, then shuts down the transmit direction.
+    async fn close_write(&self, to: &mut KtlsWriteHalf, deadline: Instant) -> Result<(), LegWriteError>;
+    /// PROPOSED (P-18). Reads and drops application octets from `from` until the peer's close_notify (`Ok`), `max`
+    /// octets (`Ok`), or `deadlines` (`Deadline`). Returns the octets dropped. Control records are handled as in
+    /// `read_through`. Used only by the lingering close; the caller closes the socket on every outcome and ignores the
+    /// count: the `u64` result exists only so the Sim/host equivalence test can compare the two adapters.
+    async fn discard_remaining(&self, from: &mut KtlsReadHalf, max: NonZeroU64, deadlines: RelayDeadlines)
+        -> Result<u64, LegReadError>;
+}
+
+pub enum RelayProbeError { Arm(KtlsArmError), Pipe(RelayPipeError),
+    SpliceExactness { moved: u64, expected: u64 }, Timeout, Io { kind: std::io::ErrorKind } }
+pub enum PublicHandshakeError { Timeout, Tls { alert: Option<u8> }, AlpnMismatch, ServerNameMissing, Arm(KtlsArmError), Io { kind: std::io::ErrorKind } }
+pub enum KtlsArmError { UlpInstall { errno: i32 }, CryptoInfo { errno: i32 }, CipherNotSupported, KernelConnection }
+/// A peer-initiated KeyUpdate that the relay failed to answer (the gateway never originates one).
+pub enum KeyUpdateError { RustlsRefused, RearmRx { errno: i32 }, RearmTx { errno: i32 },
+    Io { kind: std::io::ErrorKind } }
+pub enum LegReadError { CleanEof, Truncated, Alert { description: u8 }, UnexpectedRecord { content_type: u8 },
+    KeyUpdate(KeyUpdateError), LimitExceeded { limit: usize }, Deadline, Io { kind: std::io::ErrorKind } }
+pub enum LegWriteError { PeerClosed, Alert { description: u8 }, KeyUpdate(KeyUpdateError), Deadline,
+    Io { kind: std::io::ErrorKind } }
+pub enum RelayError { Read(LegReadError), Write(LegWriteError), SourceEndedMidBody { remaining: u64 },
+    LimitExceeded { max: u64 }, NoProgress, Deadline, Pipe(RelayPipeError) }
+/// The pipe floor is a typestate fact (ADR-0246); the only runtime outcomes are a failed creation or a
+/// capacity that reads back below the floor.
+pub enum RelayPipeError { Create { kind: std::io::ErrorKind }, CapacityBelowFloor { got: usize } }
+```
+
+A half is only ever built by the backend that owns the leg, so there is no wrong-backend half to report: composition builds the
+relay and the mTLS client from one backend (`GatewayAdapters::host`, `SimGatewayAdapters`); a half handed to a different
+backend is a wiring defect the implementation treats as `unreachable!()` (`.claude/rules/rust.md`). The "empty before splice-in"
+and "len at most capacity" laws are typestate on the pipe value, not runtime errors.
+
+`GatewayUpstream` (the proof that the peer was authenticated and the leg armed) is re-pinned:
+
+```rust
+// overdrive-gateway::ports (replaces GatewayByteStream and the Pin<Box<dyn ..>> forms)
+pub struct GatewayUpstreamSeal { _private: () }
+pub struct GatewayUpstream { leg: KtlsLeg }
+impl GatewayUpstreamSeal { pub fn seal_authenticated(&self, leg: KtlsLeg) -> GatewayUpstream; }
+impl GatewayUpstream { pub fn into_halves(self) -> (KtlsReadHalf, KtlsWriteHalf); }
+// GatewayClientMtls::authenticate is unchanged in shape; GatewayClientMtlsError gains Arm(KtlsArmError).
+```
+
+#### Cross-crate construction of the opaque leg values
+
+`KtlsLeg`, `KtlsReadHalf`, `KtlsWriteHalf` and `ThroughBytes` are defined in `overdrive-gateway::ports` but their only
+producers are backends in other crates: `HostGatewayRelay` (`overdrive-dataplane`, `adapter-host`) and `SimGatewayRelay`
+(`overdrive-sim`, `adapter-sim`). `overdrive-gateway` is `adapter-host` (ADR-0003) and both backend crates depend on it for the
+port, never the reverse. The port is used as `Arc<dyn GatewayRelay>`, so it cannot carry associated types or generics. The
+contract is therefore: **each opaque value owns a backend-defined state object behind a trait object; a backend builds a leg
+from its own state and recovers that state by downcast inside its own port methods.** The gateway crate never inspects the state.
+
+```rust
+// overdrive-gateway::ports
+impl KtlsLeg {
+    /// The one constructor. `read` and `write` are the backend states of the two halves (host: socket, key epochs, pipe;
+    /// sim: in-memory record queue); the two share the leg's transmit lock (Contract of the legs, item 5) inside the
+    /// backend. The caller guarantees TLS 1.3 TX and RX are armed; the type has no other way to exist, so "a leg is
+    /// never usable unarmed" (item 1) holds by construction. `into_halves` hands the two states back, wrapped.
+    pub fn from_armed(read: Box<dyn Any + Send>, write: Box<dyn Any + Send>) -> KtlsLeg;
+}
+// KtlsReadHalf and KtlsWriteHalf have no public constructor: only `KtlsLeg::into_halves` makes them.
+impl KtlsReadHalf  { pub fn backend_mut<T: Any>(&mut self) -> &mut T; }   // unreachable!() on a T the backend did not store
+impl KtlsWriteHalf { pub fn backend_mut<T: Any>(&mut self) -> &mut T; }   // likewise
+impl ThroughBytes  { pub fn new(bytes: Vec<u8>) -> ThroughBytes; pub fn as_slice(&self) -> &[u8]; }
+```
+
+Invariants:
+1. **Single backend per composition.** `GatewayAdapters::host` (and `SimGatewayAdapters`) builds one relay and builds the mTLS client
+   factory from that same instance, so every leg and half the gateway holds came from the relay it calls. `backend_mut::<T>` with
+   a `T` other than the producing backend's state type is a wiring defect and is `unreachable!()` (`.claude/rules/rust.md`); no
+   `Result` and no wrong-backend error variant exists.
+2. **Only the two backends construct, and the QC-2 driver's client double.** `KtlsLeg::from_armed` is called only from
+   `overdrive-dataplane::gateway_relay` (after a successful arm), `overdrive-sim::adapters::gateway`, and the QC-2 driver's
+   test-local `GatewayClientMtls` double (DG-9: it seals an inert leg to release a held probe as usable; no half is ever used);
+   `ThroughBytes::new` likewise, minus the driver. This is a review convention; an automated scan for it would be new tooling and
+   is not added here.
+3. **A half carries no capability beyond its backend state.** The gateway crate can move a half and pass it by `&mut` to the
+   port; it cannot read, clone or fabricate one. `GatewayUpstream`/`AcceptedPublicLeg` hold a `KtlsLeg` and gain nothing.
+4. `ThroughBytes` includes the terminator (port doc); `new` does not validate that, the backend upholds it and the host/Sim
+   equivalence test compares it.
+
+### Contract of the legs
+
+1. **Arming order.** Public: handshake complete, SNI and ALPN accepted, then arm. Upstream: handshake complete, exactly one
+   URI SAN equals the receipt-selected `SpiffeId`, then arm (a failed equality arms nothing and sends no octet). The unbuffered
+   handshake reads one TLS record at a time so no application octet is consumed before arming. A leg is never usable unarmed.
+   The arm installs `TLS_TX`/`TLS_RX` from the connection's `KernelConnection` (`dangerous_extract_secrets` is not used).
+   **Cipher suites.** Both legs offer only the TLS 1.3 suites the kernel's kTLS arming accepts and the spike exercised: the
+   spiked set is AES-128-GCM and AES-256-GCM; restricting the offer to exactly that set, or widening it, is P-12.
+2. **No sockmap.** No leg is ever a sockmap/sockhash member (`net/tls/tls_main.c:636-645 @ v7.3`; accepted in one order only at
+   v7.0, findings (e)).
+3. **Receive.** Application octets are read with `recvmsg` (heads and framing lines: `MSG_PEEK` to find the terminator, then a
+   `recv` of exactly that many octets; `MSG_PEEK` returns octets of one record type only and stops at a non-DATA record,
+   `net/tls/tls_sw.c:1849-1862, 2208-2211 @ v7.0`) or by splice. Because a peek cannot pass a control record
+   (`tls_sw.c:2089-2090 @ v7.0`), a partial head is consumed into the half's accumulator before the control record is handled.
+4. **Control records** (from `recvmsg` with a control buffer of at least `CMSG_SPACE(1)`, else `-EIO`,
+   `net/tls/tls_sw.c:1854-1858 @ v7.0`; or after `splice` returns `-EINVAL`, `tls_sw.c:2310-2314 @ v7.0`, which leaves the record
+   readable and is sticky):
+   - handshake/KeyUpdate: feed the record to the `KernelConnection`; re-arm RX with `setsockopt(TLS_RX)` (until then reads fail
+     `-EKEYEXPIRED` and `poll` reports no read event, `tls_sw.c:1369-1371`, `net/tls/tls_main.c:423-427` (`tls_sk_poll` clears
+     `EPOLLIN` while `key_update_pending`), `Documentation/networking/tls.rst:217-220`, all @ v7.0);
+     when the peer requested an update, send `18 00 00 01 00` as record type 22 with `TLS_SET_RECORD_TYPE` under the old key
+     (`tls_main.c:228-268 @ v7.0` flushes any open record first), then re-arm TX. Never forwarded; each leg rekeys alone.
+   - handshake/NewSessionTicket: discarded.
+   - alert close_notify: end of that direction (`CleanEof`); the relay half-closes the other leg after the message in flight is handled.
+   - any other alert: `Alert`. Any other record type or a malformed handshake record: `UnexpectedRecord`; both legs close.
+5. **Transmit rekey is serialised** with every writer of that socket. Each kernel call takes the socket lock, so one call is
+   atomic; the kernel does not serialise a multi-call logical write (a `write_all` or a splice-out step spanning several calls)
+   against a `setsockopt(TLS_TX)` re-arm (`net/tls/tls_main.c:635-783 @ v7.0`). One lock per leg is shared by the write half
+   and the read half; a write holds it for the whole `write_all`/splice-out step, a rekey holds it for reply plus re-arm.
+   Modelled in `relay_ktls` (model-only, public leg only).
+6. **The gateway never originates a KeyUpdate** (P-17 asks whether it should). Only a peer-initiated KeyUpdate is handled
+   (item 4). The upstream leg terminates at leg-C, which never originates one (assumption A-K7): leg-C's rustls `ServerConnection` is
+   consumed by `dangerous_extract_secrets` (`crates/overdrive-dataplane/src/mtls/inbound.rs:503-524`), the kernel is armed once
+   by `arm_ktls_tx_rx` (`mtls/ktls.rs:39-48`, `TLS_TX`/`TLS_RX` set once, no re-arm path), and no code in `mtls/` calls
+   `refresh_traffic_keys` or re-arms a socket. After arming, no TLS state machine remains on leg-C that could originate a
+   KeyUpdate. The gateway does not rely on this for correctness: the upstream read half uses the same item-4 handling as the
+   public read half, so a KeyUpdate that did arrive would be answered. Only the lock-exclusion model (`relay_ktls`) is cut to
+   the public leg, because a peer KeyUpdate there is the case the Tier-3 suite can drive.
+7. **Pipe and splice** (ADR-0246): a read half's pipe is private, set to at least 64 KiB and read back; a splice into it happens
+   only when it is empty, with `len = min(remaining, capacity)`; it is drained to the destination before the next splice-in.
+   The destination socket is `O_NONBLOCK`; a short count or `EAGAIN` on the splice out is backpressure and the relay waits for
+   writability (`fs/splice.c:874-888 @ v7.0`, nonblocking only via the socket's own flag).
+   **Pipe lifetime (one rule).** A read half's pipe is created lazily on the half's first `relay_*` call and released when that
+   half starts its next `read_through(HeaderBlockEnd, ..)` (the next message's head) or is dropped. No operation is added to the
+   port. The upstream half is per exchange, so its pipe closes with the exchange; the public half holds its pipe from its first
+   body relay until its next head read begins, so a keep-alive connection waiting
+   for its next request holds no pipe. Chunk-size and trailer lines are `LineEnd` reads and do not release it. P-16 asks for
+   holding the pipe until connection close.
+   **No `SPLICE_F_MORE`.** The relay never passes it. The kernel sets `MSG_MORE` itself within one splice-out call only when
+   that call's batch of at most 16 pipe buffers leaves octets of the same call in the pipe (`fs/splice.c:799, 877-878 @ v7.0`),
+   so the last `sendmsg` of every call carries no `MSG_MORE`, and kTLS then closes the record
+   (`eor = !(msg->msg_flags & MSG_MORE)`, `net/tls/tls_sw.c:1046 @ v7.0`). No record stays open between calls, so no idle
+   connection holds received octets unsent. Wire cost, stated and not measured: a body that
+   trickles in small pieces is sent as small TLS records (one record per splice-out call at least); no CPU claim is made. This configuration is not the one the spike ran: findings (c) used `SPLICE_F_MORE` while `remaining > 0`, so
+   Tier-3 obligation 16(j) runs the exact-length, chunked, trickle and keep-alive cases in the no-flag configuration. A pipe that
+   cannot be created or that reads back below the floor fails the relay with `RelayPipeError` before any octet moves.
+8. **Progress and deadlines.** `no_progress` restarts whenever octets move; `absolute` never restarts. Both are evaluated on the
+   injected `Clock`.
+
+### Message-framing contract (ADR-0245; replaces hyper)
+
+**Deadline composition (stated once).** Every `read_through` the relay driver issues carries `ReadDeadlines` whose values are
+`min(phase budget, request_deadline)`, where `request_deadline` is the request's first octet plus `whole_request_deadline`
+(ADR-0238); the port does no clamping of its own. Phase budgets:
+- *Request head, first request of a connection:* `first_octet = complete_by = now + request_head_deadline` (so the whole head,
+  first-octet wait included, takes at most `request_head_deadline`; there is no 2x), `complete_within = None`.
+- *Request head, later request (keep-alive):* `first_octet = now + keep_alive_idle_deadline`, `complete_within =
+  Some(request_head_deadline)`, `complete_by = None` (the first octet starts the request, and `request_head_deadline` is
+  below `whole_request_deadline`). Idle expiry before the first octet closes the connection silently; it is not a 408.
+- *Chunk-size, chunk-terminator and trailer lines:* `first_octet = now + body_no_progress_deadline`, `complete_within =
+  Some(body_no_progress_deadline)`, `complete_by = Some(request_deadline)`.
+- *Response head (interim heads included):* `first_octet = complete_by = t0 + response_head_deadline`, `complete_within =
+  None`, where `t0` is the instant the upstream request-head write completes. The whole head, including the wait for its first
+  octet, therefore takes at most the remainder of `response_head_deadline` after `t0`.
+
+**Head reading.** `read_through(HeaderBlockEnd, max_request_head_bytes, ReadDeadlines)` with the request-head values above.
+The one validator is applied to
+every line the gateway reads (head, chunk-size line, trailer line): it rejects bare CR, bare LF (no bare-LF tolerance), NUL, and
+field values containing octets outside RFC 9110 §5.5 before the parser runs; the parser receives a header array of `max_*_headers`
+entries; an obsolete line fold is rejected. Framing is derived from the ORIGINAL headers, before any
+`Connection`-nominated field is removed by the header policy (a `Connection: Content-Length` nomination must not delete the
+framing header). The framing rows below are P-13a unless marked otherwise; ADR-0245 holds the decision and this table is the SSOT.
+
+**Request rules (all rejections are before any upstream octet):**
+
+| Condition | Result |
+|---|---|
+| Not HTTP/1.1, or `HTTP/1.0` | 505 |
+| Method `CONNECT`, or non-origin-form target | 400 |
+| Host missing / duplicate / invalid / userinfo / port other than 443 | 400; Host differs from SNI: 421 (ADR-0236 unchanged) |
+| `Transfer-Encoding` and `Content-Length` both present | 400 |
+| More than one `Content-Length` line, or a value that is not decimal digits, or a value that overflows `u64` | 400 |
+| More than one `Transfer-Encoding` line, `chunked, chunked`, a `Transfer-Encoding` whose final coding is not `chunked`, or any other coding | 400 |
+| Chunk-size hex that overflows `u64`, or a malformed chunk-size line | 400 before the response head, else both legs close |
+| Declared length above `max_request_body_bytes` | 413 |
+| `Expect` (any value; P-13c) | forwarded to the origin unchanged; the gateway decides nothing; the origin's interim `100` is forwarded to the client (below), and any other answer, including 417, is the origin's response |
+| Head above `max_request_head_bytes` / more than `max_request_headers` fields | 431 |
+| No complete head within `request_head_deadline` before any response (first request: from handshake completion; later request: from its first octet) | 408 |
+
+**Request body.** None (no CL, no TE): nothing relayed. `Content-Length: n`: head forwarded with `Content-Length: n`, then
+`relay_exact(n)` (n=0 relays nothing). Chunked: per chunk, `read_through(LineEnd, max_request_head_bytes)` (the head ceiling bounds every framing line; no separate limit exists; every framing-line read uses the framing-line values of the deadline composition above) parses the size
+(hex, extensions discarded), the gateway writes `<size>\r\n`, `relay_exact(size)`, then `read_through(LineEnd)` must return
+`\r\n`, which the gateway writes; the last chunk's trailer lines are read (cumulative at most `max_request_head_bytes`) and
+dropped, then the gateway writes `0\r\n\r\n`. The running total above `max_request_body_bytes` is 413 if no public response
+octet was sent, else both legs close. Upstream request heads carry `Connection: close` and the gateway-authored framing header.
+
+**Response rules.** `read_through(HeaderBlockEnd, max_response_head_bytes, ReadDeadlines)` with the response-head values of the
+deadline composition above: the response head, interim heads included, has one budget measured from `t0`. An interim `100` head (P-13c) is forwarded to the client as a rewritten head with no body;
+every other interim `1xx` other than `101` is read and dropped. Interim heads count against the same cumulative head limit and
+deadline. `101`, a status line that is not `HTTP/1.1` (or `HTTP/1.0` with an explicit length, P-13d), the framing
+rejections above applied to the response (both CL and TE, repeated CL, repeated or unsupported coding, overflow), a declared
+length above `max_response_body_bytes`, head overflow, and any failure or deadline before the public response head are 502 (503
+only for `NoBackend`). Body length of the final response: `HEAD` request, `204`, `205`, `304`: none; `Transfer-Encoding: chunked`:
+chunked; `Content-Length: n`: n; otherwise close-delimited (P-13d). Chunked responses are forwarded as chunked; close-delimited
+responses are forwarded with `Connection: close` and `relay_to_end(max_response_body_bytes)`. The public response head is the
+rewritten head ([ADR-0237](../../product/architecture/adr-0237-public-proxy-header-policy.md)); the gateway alone emits framing
+headers.
+
+**Upstream leg per request.** The upstream request head carries `Connection: close` and one request is sent per upstream leg.
+This follows [ADR-0240](../../product/architecture/adr-0240-single-upstream-attempt-per-public-request.md) (one attempt per
+accepted public request) and [ADR-0232](../../product/architecture/adr-0232-gateway-connect-selected-backend-receipt.md) (one
+registered intent per socket); the downstream public connection still keeps alive. Cost: one exact-peer mTLS handshake and one
+cookie registration per request.
+
+**After the public response head is sent**, any failure, deadline, overflow or mid-body end closes both legs without a further
+response (`SourceEndedMidBody` and a close_notify before the declared end are failures, never a clean end).
+
+### Exchange state machine, keep-alive, drain (ADR-0222, 0238, 0240, 0242)
+
+One request is in flight per public connection. An exchange runs two concurrent halves: the request half (`public.read` to
+`upstream.write`) and the response half (`upstream.read` to `public.write`); the response half starts after the upstream request
+head is written and may finish before the request body does, so bidirectional streaming cannot deadlock on full buffers (the
+half-duplex alternative and its consequences are P-13b). Each half owns its pipe; the leg's transmit lock serialises the
+response half's writes with the request half's KeyUpdate replies.
+
+| Event | Rule |
+|---|---|
+| Both halves complete (`finish()` returns `Reuse`: response not close-delimited, request fully relayed including a chunked body's last chunk, connection not draining, public peer not half-closed) | The machine is `Idle`; the upstream leg gets `close_write` and is dropped; the public connection waits for the next head |
+| Response complete while the request body is unfinished (early response, including an early 401/413; a `ChunkedOpen` request body is unfinished) | `finish()` returns `Close`; the driver performs the **lingering close** (below) |
+| Close-delimited response complete (P-13d) | `Close` |
+| close_notify from the public peer while idle | `Close` |
+| close_notify from the public peer after the request is fully read | the response is delivered, then `Close` |
+| close_notify or reset from the public peer mid-request-body | abort both legs |
+| Upstream close_notify before the response head | 502; after the head, mid-body: abort both legs; a close-delimited body ends cleanly (P-13d) |
+| Drain begins (`close_for_shutdown`/supersession) | idle connections close at once; an in-flight exchange runs to completion within the one drain deadline, then is force-aborted; `try_request` fails, so the hundredth rule and drain share one `Connection: close` path and no later request is parsed |
+
+**Early response and lingering close (P-18; the design body assumes the recommended option).** Closing a socket that holds
+unread received data makes the kernel send a reset, which can destroy the response the client has not yet read. After the
+gateway has delivered a complete final response to the public leg while request octets remain unread, the driver calls
+`close_write` (close_notify, FIN) and then `discard_remaining` on the public read half, and closes the socket on every outcome.
+- **Scope.** Every such case, whether or not the request reached `ExchangeMachine`: an early origin response (including 401/413),
+  and the gateway-authored 400, 404, 413 (declared length), 421, 431, 502, 503 and 505 that are sent before or without a
+  request body being read. Not 408 (the peer stalled; nothing is in flight to destroy) and not a leg that already reported
+  EOF, alert or reset.
+- **Bounds (no new limit).** `max` is `max_request_body_bytes`; `no_progress` is `body_no_progress_deadline`; `absolute` is the
+  earlier of `whole_request_deadline` from the request's first octet and, once drain has begun, the one drain deadline. The
+  discard ends earlier at the peer's close_notify, which a well-behaved client sends after reading the response.
+- **Drain.** A discard in progress or begun after drain starts is not extended: it ends at the drain deadline at the latest and
+  the socket is then closed. It is part of the in-flight exchange for the drain accounting, not an idle connection.
+- **Outcomes.** `discard_remaining` returns once and the socket is closed whatever it returned; a discard failure changes
+  nothing the client has been told.
+
+**Documented exposure (not defended by a new limit).** A peer that sends a body in one-octet chunks costs about eight syscalls
+per octet at the 16 MiB ceiling; it is bounded by the absolute exchange deadline and the body ceiling.
+
+`ExchangeMachine` (crate-private, pure) is the only owner of this table.
+
+```rust
+// overdrive-gateway::runtime::http1::exchange (crate-private; pinned for Quint conformance)
+// Connection-level phase. The two concurrent halves are NOT phases: each half is read through its own accessor.
+pub(crate) enum ExchangePhase { Idle, Relay, Closed }
+pub(crate) enum ResponseState { Pending, Body, Complete }
+pub(crate) enum Remaining { None, Exactly(u64), ChunkedOpen, UntilClose }
+pub(crate) enum Disposition { Reuse, Close }
+pub(crate) enum Side { Public, Upstream }
+/// The body delimitation the pure framing decision derived from a head (ADR-0245). It is the machine's only framing input.
+pub(crate) enum BodyFraming {
+    /// No body: a request without Content-Length or Transfer-Encoding; a response to HEAD, or 204, 205, 304.
+    NoBody,
+    /// `Content-Length: n`. `Length(0)` is equivalent to `NoBody`.
+    Length(u64),
+    /// `Transfer-Encoding: chunked` (ends at `request_chunked_end` / `response_chunked_end`).
+    Chunked,
+    /// Close-delimited response body (P-13d). Illegal as a request framing.
+    UntilClose,
+}
+/// A call that contradicts the machine's state. Peer framing faults (ambiguous, overflowing, repeated or unsupported
+/// framing) are rejected by the pure head parser before the machine is called (Message-framing contract), so every
+/// violation is an internal-consistency failure of the exchange driver's own call sequence, never a client or origin fault.
+pub(crate) enum FramingViolation {
+    /// The call is not legal in the current phase (e.g. `begin_request` outside `Idle`, any other call in `Idle`/`Closed`).
+    WrongPhase { phase: ExchangePhase },
+    /// `response_head` when `response_state()` is not `Pending`.
+    ResponseHeadRepeated,
+    /// `UntilClose` passed to `begin_request`.
+    UntilCloseRequest,
+    /// `*_octets_moved(n)` with `n > 0` above the side's `Remaining::Exactly(k)`, or with `n > 0` when that side's remaining
+    /// is `None` (including a response before its head). `ChunkedOpen` and `UntilClose` accept any `n`: the chunk-line
+    /// parser bounds chunk data, the driver bounds the running total.
+    OctetsBeyondFraming { side: Side, n: u64 },
+    /// `request_chunked_end` / `response_chunked_end` when that side's remaining is not `ChunkedOpen`.
+    ChunkedEndNotOpen { side: Side },
+    /// `finish()` while `response_state()` is not `Complete`.
+    ResponseNotComplete,
+}
+impl ExchangeMachine {
+    /// Fresh machine: `Idle`, `ResponseState::Pending`, both remainings `Remaining::None`, not draining, public peer not
+    /// half-closed. One machine per public connection; it is reused across keep-alive exchanges, never shared.
+    pub(crate) fn new() -> ExchangeMachine;
+    /// Idle -> Relay (the upstream leg is connected by the exchange driver before this call; a connect failure is a
+    /// 502 before any exchange begins and never reaches the machine).
+    pub(crate) fn begin_request(&mut self, method_is_head: bool, framing: BodyFraming) -> Result<(), FramingViolation>;
+    pub(crate) fn request_octets_moved(&mut self, n: u64) -> Result<(), FramingViolation>;   // n beyond Remaining is an error
+    pub(crate) fn response_head(&mut self, framing: BodyFraming) -> Result<(), FramingViolation>;
+    pub(crate) fn response_octets_moved(&mut self, n: u64) -> Result<(), FramingViolation>;
+    /// Ends a `ChunkedOpen` body (last chunk and trailers consumed). Chunk framing is a pure-parser concern and is
+    /// not modelled in Quint; these two are exercised by PBT only.
+    pub(crate) fn request_chunked_end(&mut self) -> Result<(), FramingViolation>;
+    pub(crate) fn response_chunked_end(&mut self) -> Result<(), FramingViolation>;
+    pub(crate) fn peer_closed(&mut self, side: Side, clean: bool);
+    pub(crate) fn drain_begin(&mut self);
+    pub(crate) fn force_abort(&mut self);
+    /// Fails `FramingViolation` unless `response_state() == Complete`. Relay -> Idle and `Reuse` when `reusable()`, else
+    /// Relay -> Closed and `Close`.
+    pub(crate) fn finish(&mut self) -> Result<Disposition, FramingViolation>;
+    // observable projection (accessors the Quint driver reads)
+    pub(crate) fn phase(&self) -> ExchangePhase;
+    pub(crate) fn request_remaining(&self) -> Remaining;
+    pub(crate) fn response_state(&self) -> ResponseState;
+    pub(crate) fn response_remaining(&self) -> Remaining;
+    pub(crate) fn public_half_closed(&self) -> bool;
+    pub(crate) fn is_draining(&self) -> bool;
+    /// Derived (not a projected variable): `finish()` returns `Reuse` exactly when this holds.
+    pub(crate) fn reusable(&self) -> bool;
+}
+```
+
+**Framing-to-remaining mapping (the machine's one rule).** `NoBody` and `Length(0)` give `Remaining::None`; `Length(n>0)` gives
+`Exactly(n)`; `Chunked` gives `ChunkedOpen`; `UntilClose` gives `UntilClose`. For a `HEAD` request (`method_is_head`), the
+response remaining is `None` whatever framing `response_head` is given (the framing a `HEAD` response carries describes a body
+that is not sent). `request_octets_moved(n)`/`response_octets_moved(n)` reduce `Exactly(k)` to `Exactly(k-n)` (`None` at zero);
+they leave `ChunkedOpen` and `UntilClose` unchanged (the driver counts the running total against `max_*_body_bytes`).
+`response_head` also sets `response_state()`: `Complete` when the resulting remaining is `None` (so `Length(0)` and `NoBody`
+complete at once, as the spec's `resp_head(true, 0)` does), else `Body`. `response_octets_moved` reducing `Exactly` to zero, `response_chunked_end`,
+and `peer_closed(Upstream, true)` during an `UntilClose` body set `Complete`; `peer_closed(Upstream, _)` before the head, or
+during a `Length` or `ChunkedOpen` body, moves the machine to `Closed` (abort), as the Exchange table states.
+
+**Status mapping rule for `FramingViolation`.** Every variant means the driver's call sequence contradicted the machine; none is
+caused by a peer. The driver therefore closes both legs, answers 502 if no public response octet has been written (never a 4xx:
+the client is not at fault), writes nothing further otherwise, and emits one error-level structured event naming the variant.
+The pre-head and post-head projections of the Status mapping delta are unchanged by it.
+
+`reusable()` holds when the request and response remainings are `None` (a `ChunkedOpen` body is unfinished, so it is
+false and the early-response rule applies), the response is `Complete` and not `UntilClose`-delimited, the machine is not
+draining and the public peer has not half-closed. A chunked response's delimitation is by length (`Remaining::ChunkedOpen`,
+not `UntilClose`); only `Remaining::UntilClose` is close-delimited (P-13d). The driver uses `reusable()` as the `conclude`
+handler's precondition and run expectation, and checks the returned `Disposition` against it.
+
+### Status mapping delta (extends the table in the Application HTTP contract)
+
+400 malformed head, framing ambiguity, non-origin-form, Host; 408 head/body no-progress before any response octet; 413 request
+body; 421 SNI/Host; 431 request head; 502 every upstream, receipt-
+identity, mTLS, arming, response-head, response-framing or response-overflow-before-head failure; 503 `NoBackend` only; 505 not
+HTTP/1.1. 404 Route miss unchanged. A pipe that cannot be created or reads back below the floor (`RelayPipeError`) is 502 before the
+response head and closes the connection after it. There is no 504, retry or replay.
+
+### Earned-Trust probe for the relay (ADR-0244, ADR-0246)
+
+`GatewayRelay::probe` runs once per boot in gate G-1 after custody is ready and before identity and the connect probe. It does
+not re-run per staged generation. Its scope is what catches image-configuration drift: over a loopback socket pair with an
+in-process ephemeral certificate it (1) completes a rustls handshake on both ends and arms kTLS TX+RX with the spiked cipher; (2)
+creates a private pipe, sets it to 64 KiB and reads the size back (`F_SETPIPE_SZ` read-back); (3) relays 64 KiB plus one octet
+through that pipe pattern-exactly. **Substrate lies it must catch:** the `tls` ULP absent or refused (`Arm(UlpInstall)`), a cipher
+the kernel refuses (`Arm(CipherNotSupported)`), a kernel that loses octets on splice (`SpliceExactness`), a pipe-size clamp
+(`Pipe(CapacityBelowFloor)`; the one pipe fact has the one variant `RelayPipeError`). KeyUpdate re-arm and control-record handling are not probed: the Tier-3 relay suite proves them on the kernel.
+Real-kernel stimulus for "ULP absent": obligation 16(f) (module unload under a restoring guard plus a probe run without
+`CAP_NET_ADMIN` in the initial user namespace); no test seam is added to the production probe.
+Failure keeps TCP/443 unbound, emits `health.startup.refused` reason `gateway.relay_probe` and sets
+`connect_path: Unavailable` with cause `ConnectPathUnavailable`.
+Enforcement in two layers: (a) subtype: `probe` is a required method of `GatewayRelay` with no default body and
+`GatewayRuntimeDependencies::new` takes `Arc<dyn GatewayRelay>`; (b) behavioural: a gold test drives `SimGatewayRelay` through
+each substrate lie above and requires the probe to refuse, plus one Tier-3 run on the real kernel. The requirement on the Sim is
+abstract: it can present each substrate lie to the probe; its configuration surface, fault names and scripted peer events are test
+support that DISTILL shapes.
+
+### Pinned observable projection for Quint conformance
+
+**Conformance target: module `relay_exchange` only** (specs/quint/public-ingress-gateway/relay_exchange.qnt). Owner `ExchangeMachine`
+(pure; no `Sim*`). This section is the ONLY home of the action-to-method and variable-to-accessor tables (the spec header and the
+README point here). Every action calls exactly one owner method. `idle` is not an action of the conformance main (`relay_conf`):
+the spec keeps a stutter only in the exhaustive main `relay_ok`, so no conformance step maps to "no call" and no lint exemption
+is needed.
+
+| Spec action | `ExchangeMachine` call |
+|---|---|
+| `read_head(n)` | `begin_request(false, BodyFraming::Length(n))` |
+| `req_unit` | `request_octets_moved(1)` |
+| `resp_head(ld, n)` | `response_head(Length(n))` when `ld`, else `response_head(UntilClose)` (P-13d) |
+| `resp_unit` | `response_octets_moved(1)` |
+| `up_close` | `peer_closed(Side::Upstream, true)` |
+| `conclude` | `finish()`; the handler checks the `Disposition` against `reusable()` evaluated before the call |
+| `p_close` | `peer_closed(Side::Public, true)` |
+| `drain_begin` | `drain_begin()` |
+| `force_abort` | `force_abort()` |
+
+The abstraction: one model "unit" is one octet (`request_octets_moved(1)`), and a model unit count `k` is `Remaining::Exactly(k)`
+(`Length(0)` yields `Remaining::None`). Chunk framing (`ChunkedOpen`, `request_chunked_end`, `response_chunked_end`) is not
+modelled: it is a pure-parser property covered by PBT only. Variable projection (each state variable has one accessor):
+
+| Model variable | Accessor | Mapping |
+|---|---|---|
+| `phase` | `phase()` | `Idle`/`Relay`/`Closed` one to one |
+| `req_left` | `request_remaining()` | `Exactly(k)` is `k`; `None` is 0 |
+| `resp_state` (`RNone`/`RBody`/`RDone`) | `response_state()` | `Pending`/`Body`/`Complete` |
+| `resp_left` | `response_remaining()` | `Exactly(k)` is `k`; `None` and `UntilClose` are 0 |
+| `len_delim` (P-13d) | `response_remaining()` | true unless the value is `UntilClose` |
+| `draining` | `is_draining()` | boolean |
+| `p_eof` | `public_half_closed()` | boolean |
+
+Seven model variables, six accessors; `reusable()` is a derived accessor (the spec's `reusableOf`) used for handler preconditions
+and run expectations, not a projected State field. The spec's `init` is the fresh `ExchangeMachine` (`Idle`, `Pending`, both remainings `None`, not draining, not half-closed). Values the driver must see (spec `closedS` and the reuse branch of `conclude`): in `Closed`,
+`request_remaining()` and `response_remaining()` are `None`, `response_state()` is `Pending`, `len_delim` is true, and
+`is_draining()` and `public_half_closed()` keep their values; `drain_begin` from `Idle` yields `Closed` with `is_draining()`
+true; `peer_closed(Public, true)` from `Idle` yields `Closed` with `public_half_closed()` false; `finish()` returning `Reuse`
+leaves `Idle` with `response_state() == Complete` and both remainings `None` until the next `begin_request`.
+
+**P-13d dependency.** `len_delim`, the model bound on close-delimited units (`ud_units`, MAXU), `Remaining::UntilClose`,
+`relay_to_end` and the run `close_delimited_clean_end` exist only if P-13d keeps close-delimited responses; they are removed in
+one cut (spec, README, this section, port) if it is declined.
+
+The two concurrent halves are read through two independent accessors (`request_remaining()`, and `response_state()` with
+`response_remaining()`); `phase()` is connection-level only, which is what resolves the single-phase ambiguity. Model-only (not
+projected): `exch` and `ud_units` (exploration bounds) and `overread` (the hazard's detector). Every named run of `relay_exchange`
+is `#[quint_test]`-replayable (seven); `#[quint_run]` randomized traces are added. `MidBodyCloseNeverReused` is guard-derived
+(reuse is reachable only through `finish()`'s `reusable()` guard) and has no hazard.
+
+**Model-only module `relay_ktls`** (specs/quint/public-ingress-gateway/relay_ktls.qnt): the public leg's transmit-lock / peer-KeyUpdate
+exclusion of ADR-0244. It models the public leg only (item 6 of the Contract of the legs: the upstream leg never receives a KeyUpdate).
+It has no conformance driver, because pausing a kernel writer needs a test seam this design does not add.
+Its run `keyupdate_waits_for_writer` is model-checked only. Its Tier-3 oracle is the bytes a real rustls peer receives plus
+`/proc/net/tls_stat` deltas (`TlsRxRekeyOk`, `TlsTxRekeyOk`, `TlsDecryptError == 0`). A KeyUpdate inside a head or chunk-size line
+(the read half's accumulator across a control record) is a Tier-3 obligation, not modelled.
+
+### Budgets
+
+- **Hot path (per request, plus one connection setup).** Syscalls: heads 2 `recvmsg` pairs (peek, recv) and 2 `sendmsg`; body
+  per MiB about 67 splice calls at 16 KiB peer records and up to 4098 at 256 octets (findings (c)); chunked adds about 4 syscalls
+  per chunk. Without `SPLICE_F_MORE` a trickling body is sent as small TLS records (wire overhead, not measured); the spike
+  figures above were taken with the flag and are not re-measured for the no-flag configuration. No per-octet allocation; head accumulators are bounded by the head limits. **No CPU or throughput gain is claimed**
+  (findings (c)); the gain is bounded memory and no userspace payload copy.
+- **Memory and descriptors, accounted per connection.** An active exchange holds two 32 KiB head accumulators plus up to two
+  64 KiB kernel pipe buffers (about 192 KiB, 24 MiB at 128 exchanges); descriptors are 2 sockets plus up to 4 pipe descriptors,
+  up to 768 at 128 exchanges (the previous envelope was 256). Pipe lifetime is the one rule of Contract item 7 (created on the
+  half's first `relay_*` call, released when the half starts its next head read), so a keep-alive connection waiting for its next
+  request holds sockets only; P-16 holds the pipe until connection close. The process `RLIMIT_NOFILE` must admit 768
+  plus the node's other descriptors; this is a DISTILL Tier-3 check at 128 concurrent exchanges, not a new limit.
+- **Validation budget.** The Quint check counts (relay: 12, whole subsystem: 33) and timings are stated once, in the
+  `specs/quint/public-ingress-gateway/checks.toml` header. Tier 3: the relay suite on native metal (KeyUpdate, control records,
+  chunked, backpressure, pipe floor, no-flag cases, lingering close, 128-exchange descriptor check). Growth beyond this needs
+  user approval.
+
+### Lifecycle Gate Ownership review (G1)
+
+Gates G-2, G-3 and G-4 are unchanged. G-1 gains one input (`GatewayRelay::probe`), G-5 arms after equality, G-6's promise text
+covers in-flight pipes; the gate sections above carry the edits. No gate is added: per-leg "armed" is a precondition of the
+leg value existing (`KtlsLeg` is only constructed armed), so it has no lifecycle owner or state meaning of its own.
+
+### Kernel claims
+
+| Claim | Source |
+|---|---|
+| One splice returns at most one record's octets; a non-DATA record gives `-EINVAL` and stays readable | `net/tls/tls_sw.c:2285-2327, 2310-2314 @ v7.0` |
+| Splice-in loses octets when the pipe cannot map the whole span, and why 64 KiB empty suffices | [ADR-0246](../../product/architecture/adr-0246-relay-splices-into-an-empty-private-pipe-of-at-least-64-kib.md) Context (the cites live there) |
+| Splice-out `MSG_MORE`: `SPLICE_F_MORE` sets it (`fs/splice.c:875-876`), the kernel sets it when the same call leaves octets in the pipe (`:877-878`), at most 16 pipe buffers per `sendmsg` (`:799`); kTLS closes the record when `MSG_MORE` is absent, and `tls_sw_sendmsg` accepts `MSG_MORE` (`tls_sw.c:1046, 1283-1286`) | `fs/splice.c:799, 874-888 @ v7.0`; `net/tls/tls_sw.c:1046, 1283-1286 @ v7.0` |
+| Record type via `TLS_GET_RECORD_TYPE`; no control buffer gives `-EIO` | `tls_sw.c:1844-1865 @ v7.0` |
+| KeyUpdate pauses RX with `-EKEYEXPIRED` until `TLS_RX` is re-armed; poll reports nothing | `tls_sw.c:1369-1371, 1802-1806, 2779-2786`; `net/tls/tls_main.c:423-427`; `Documentation/networking/tls.rst:214-220`, all @ v7.0 |
+| Re-arm is `setsockopt(TLS_TX/TLS_RX)` on an armed socket; version and cipher must match; each call takes the socket lock, but no serialisation of a multi-call logical write against a re-arm | `net/tls/tls_main.c:661-687, 635-783 @ v7.0` |
+| Sending a control record flushes an open record first | `tls_main.c:228-268 @ v7.0` |
+| The ULP needs an established connection | `tls_main.c:1059-1066 @ v7.0` |
+| Splice to a socket honours only the socket's `O_NONBLOCK`; partial counts are returned | `fs/splice.c:874-888, 916 @ v7.0`; `tls_sw.c:1273-1275 @ v7.0` |
+| kTLS plus sockmap: rejected one way at v7.0 and both at v7.3 | `net/core/skmsg.c:756 @ v7.0`; `net/tls/tls_main.c:636-645 @ v7.3` |
+| The kernel does not originate KeyUpdate | no such code in `net/tls/tls_sw.c`, `tls_main.c @ v7.0` |
+| Default pipe is 16 pages (`PIPE_DEF_BUFFERS`), but an unprivileged user over the soft limit gets `PIPE_MIN_DEF_BUFFERS` (2); irrelevant because the relay sets and reads back the size; resize above the limit needs privilege | `include/linux/pipe_fs_i.h:5`; `fs/pipe.c:809-811, 1385-1394 @ v7.0` |
+
+v7.3 citations anywhere in this document are informational provenance, not the design basis. All contract-shaping items for G1 are
+settled by the spike (findings a-e). One empirical limit remains and is named, not hidden: the pipe invariant is validated on one
+kernel build (7.0.0-38) and by the source reading above, not proven.
 
 ## Wave: DESIGN / [REF] Consuming-port availability contract (D2)
 
@@ -926,14 +1616,14 @@ Permitted callers of `open_upstream`: `GatewayUpstreamConnector::{probe, connect
 
 Every item is new public or cross-crate surface. The user confirms or rejects each.
 
-1. `BootAdapters.gateway: GatewayAdapters` (new required field) and `GatewayAdapters` (`certified_key_codec`, `client_mtls`).
+1. `BootAdapters.gateway: GatewayAdapters` (new required field) and `GatewayAdapters` (`certified_key_codec`, `client_mtls`, `relay`); `GatewayAdapters::host(kek, clock)` (the clock is the injected one the relay's deadlines use).
 2. `GatewayClientMtlsFactory` and `GatewayClientMtlsDeps` (`overdrive-gateway::ports`).
 3. `ComposedDataplane.gateway_connect: Arc<dyn GatewayConnectDataplane>` (new required field).
 4. `GatewayConnectDataplane::open_upstream` and `PreparedUpstream` (replace `register`), the four added error variants.
 5. `UnboundGatewayBuilder::into_builder` (replaces `bind_demand_wake`), and the removal of the `cookie_reader` parameter from `UnboundGatewayBuilder::new`.
 6. `GatewayAppStateComposition` without demand; `AppState.gateway`.
 7. `GatewayShutdownReport.elapsed` and the ServerHandle gateway stage (`stage = "gateway"`).
-8. `HostGatewayClientMtlsFactory` (dataplane crate) and `SimGatewayClientMtlsFactory`, `SimGatewayConnectDataplane` (sim crate).
+8. `HostGatewayClientMtlsFactory` (dataplane crate; now constructed from `Arc<HostGatewayRelay>`) and `SimGatewayClientMtlsFactory`, `SimGatewayConnectDataplane`, `SimGatewayRelay` (sim crate); `HostGatewayRelay` (`overdrive-dataplane::gateway_relay`).
 9. `Action::IssueGatewaySvid`/`Action::DropGatewaySvid`, the `GatewaySvidLifecycle` reconciler and its `AnyReconciler`/`AnyState`/`AnyReconcilerView`/`AnyViewMap` variants (wakeup declaration: host-backed, empty `interests()` plus `resync_schedule()`, resolved by `.claude/rules/reconcilers.md`).
 10. One NEW hydration read-port in `overdrive-core` — `GatewayIdentityView` (non-secret gateway-identity desired epoch/subject and current facts; contract in `overdrive-core::gateway_identity`) — and the one new mandatory `HydrationContext` field that carries it (`gateway_identity`, after `guest_attachments`). The port has one `Sim*` implementation (`SimGatewayIdentityActionTarget`) so `GatewaySvidLifecycle::hydrate_*` stays DST-injectable and reads no concrete `AppState` field (`.claude/rules/reconcilers.md` § "The hydration boundary").
 11. `ServeArgs.gateway_*` clap fields, `ServerConfig.gateway: Option<GatewayConfig>` and `deploy_resource` (branch contract, unchanged shape, re-pinned below to `run_with_adapters` and `commands::deploy`).
@@ -941,6 +1631,35 @@ Every item is new public or cross-crate surface. The user confirms or rejects ea
 #### Previously approved (2026-09-13), carried unchanged — reconfirm on main
 
 12. `IntentStore::watch` changes in one cut to `IntentSubscriptionEvent` = `Changed | Lagged` (D-APP-10; modifies a main trait that is unchanged since the merge base). Provenance: the pre-reconstruction branch is preserved at git ref `backup/research-ingress-gateway-pre-reconstruct` (commit f3999011500f; tag `backup-public-ingress-pre-reconstruct-2026-11-01`). Its `docs/feature/public-ingress-gateway/feature-delta.md` lines 3-7 record "APPROVED — user ratification APPROVED, 2026-09-13 … The user explicitly approved the complete public-ingress-gateway DESIGN", and its line 1198 is "**D-APP-10** | `IntentStore::watch` changes in one cut to `Changed|Lagged`; …". Listed here for transparency so the user can reconfirm it on main.
+
+#### New with G1
+
+13. **G1 data-path surface.** Exactly the types, port methods, error enums and `ExchangeMachine` accessors pinned in
+    [Kernel relay data path and driven ports](#wave-design--ref-kernel-relay-data-path-and-driven-ports-g1) (driven port `GatewayRelay`,
+    the opaque `KtlsLeg` family, `ReadDeadlines`, the error enums, the re-pinned sealed `GatewayUpstream`, `GatewayClientMtlsError::Arm`,
+    `GatewayRuntimeDependencies::new(.., relay)`); that section is the SSOT and this item only lists that it is new public surface.
+    The `GatewayByteStream` forms are removed.
+    **DG-7 (QC-2 driver placement) adds no public item.** The resolution is test-local doubles inside the QC-2 driver module (Formal
+    protocol model, `gateway_application`, "Conformance placement and test-local doubles (DG-7)"); it is a placement ruling that
+    stays on the pending-user-confirmation list below until the user confirms it. No `PROPOSED` public surface arises from it.
+    **Pending user confirmation (added to close DISTILL gaps DG-1..DG-3; part of item 13, not yet approved).** Public items not
+    in the previously listed G1 surface: `KtlsLeg::from_armed`, `KtlsReadHalf::backend_mut`, `KtlsWriteHalf::backend_mut`,
+    `ThroughBytes::new` (cross-crate construction contract); `HostGatewayRelay::new`, `SimGatewayRelay::new`,
+    `SimGatewayClientMtlsFactory::new`, `SimGatewayAdapters` with `new`/`relay`/`client_mtls`/`sim_relay`. Crate-private,
+    pinned for the Quint driver and PBT: `ExchangeMachine::new`, `BodyFraming` (`NoBody`, `Length(u64)`, `Chunked`,
+    `UntilClose`) and `FramingViolation` (six variants). Alternative considered and rejected for the leg values: a generic or
+    associated-type port (`GatewayRelay` is used as `Arc<dyn GatewayRelay>`, so it cannot be generic); a sealed constructor trait
+    (the backends live in other crates, so a seal in `overdrive-gateway` would exclude both).
+    **Pending user confirmation (added to close DISTILL gaps DG-8..DG-10; part of item 13, not yet approved).** Public:
+    `PreparedUpstream::new(socket: tokio::net::TcpSocket, intent: GatewayConnectIntent)` (Gateway upstream path, "Cross-crate
+    construction of `PreparedUpstream`"; alternative rejected: a `Box<dyn Any>` backend state as for the legs, and a carried
+    cleanup guard). Crate-private, pinned for the QC-2 driver and used by `GatewayBuilder::start`: `GatewayAdmission::new`,
+    `GatewayAdmission::budget`, `GatewayBuilder::start_with` (Formal protocol model, `gateway_application`, "Admission access
+    (DG-10)"; alternatives rejected: a `pub(crate)` admission accessor on a running composition, whose only caller would be the
+    driver, and hand-assembling the owner in the driver, which cannot produce `GatewayControl`). DG-9 adds no item: the park
+    point is the existing async `GatewayClientMtls::authenticate`; it corrects the DG-7 text, which had the held probe completed
+    by the connect double with a `NoBackend` receipt (Gateway upstream path, "Where a double may park a probe (DG-9)"), so the DG-7
+    confirmation above is for the corrected text.
 
 **Previously approved public surface carried unchanged (not D5; listed for completeness).** Items the user approved in the 2026-09-13 DESIGN and that main still supports unchanged (classification: class 1, salvaged unchanged): the lag-aware `IntentStore::watch` change (`IntentSubscriptionEvent` = `Changed | Lagged`, D-APP-10; main's trait `M:crates/overdrive-core/src/traits/intent_store.rs:318-332` and `LocalStore` are unchanged since the merge base, so the same one-cut change and bounded watcher migration apply). It is not a new decision of this reconstruction; the optional simplification is P-8.
 
@@ -962,10 +1681,56 @@ pub struct GatewayAdapters {
     /// Builds the exact-peer client over the identity access the boot creates
     /// after the CA exists (ADR-0234). `HostGatewayClientMtlsFactory` in production.
     pub client_mtls: Arc<dyn GatewayClientMtlsFactory>,
+    /// The kernel-TLS relay backend (G1): probes, arms, reads heads, relays bodies. One backend
+    /// serves both legs; `HostGatewayRelay` in production.
+    pub relay: Arc<dyn GatewayRelay>,
 }
 impl GatewayAdapters {
-    pub fn host(kek: Arc<dyn Kek>) -> Self;
+    pub fn host(kek: Arc<dyn Kek>, clock: Arc<dyn Clock>) -> Self;
 }
+
+// overdrive-dataplane::gateway_relay
+pub struct HostGatewayRelay { /* injected Clock; no descriptor, no kernel state */ }
+impl HostGatewayRelay {
+    /// Infallible and kernel-silent: it opens no socket and touches no ULP, so construction claims no capability.
+    /// Every kernel fact is proven by `GatewayRelay::probe` (Earned Trust), never assumed at construction. The clock
+    /// is the injected one all `ReadDeadlines`/`RelayDeadlines` are evaluated on. The TLS 1.3 suite set is a constant of
+    /// the contract (Contract of the legs, item 1), not an input.
+    pub fn new(clock: Arc<dyn Clock>) -> Self;
+}
+// The arming of an authenticated upstream socket (after the peer equality) is a same-crate call from
+// `HostGatewayClientMtls` into `HostGatewayRelay`; its shape is internal to `overdrive-dataplane` (crafter's), its
+// observable contract is the Contract of the legs item 1 and `GatewayClientMtlsError::Arm`.
+
+// overdrive-sim::adapters::gateway
+pub struct SimGatewayRelay { /* in-memory leg state, injected SimClock */ }
+impl SimGatewayRelay { pub fn new(clock: Arc<dyn Clock>) -> Self; }
+pub struct SimGatewayClientMtlsFactory { /* Arc<SimGatewayRelay>, Clock */ }
+impl SimGatewayClientMtlsFactory { pub fn new(relay: Arc<SimGatewayRelay>, clock: Arc<dyn Clock>) -> Self; }
+// implements GatewayClientMtlsFactory by `SimGatewayClientMtls::new(deps.seal, relay.clone(), clock.clone())`.
+/// The Sim counterpart of `GatewayAdapters::host`'s relay and client pair: one backend, so no mixing (Invariant 1 of
+/// "Cross-crate construction of the opaque leg values"). Tests assemble `GatewayAdapters { certified_key_codec, client_mtls,
+/// relay }` from its two accessors; the Sim crate does not name the control-plane type.
+pub struct SimGatewayAdapters { /* Arc<SimGatewayRelay>, Arc<SimGatewayClientMtlsFactory> */ }
+impl SimGatewayAdapters {
+    pub fn new(clock: Arc<dyn Clock>) -> Self;
+    pub fn relay(&self) -> Arc<dyn GatewayRelay>;
+    pub fn client_mtls(&self) -> Arc<dyn GatewayClientMtlsFactory>;
+    /// The concrete Sim relay, for the test-support surface DISTILL shapes (scripting, transcripts).
+    pub fn sim_relay(&self) -> &Arc<SimGatewayRelay>;
+}
+```
+
+`HostGatewayRelay::new` has no error type because it has no fallible step; the only failure surfaces are `probe` (boot gate
+G-1, `RelayProbeError`), `accept_public` (`PublicHandshakeError`) and the client arm (`GatewayClientMtlsError::Arm`). `GatewayAdapters::host` builds exactly one
+`Arc<HostGatewayRelay>` (`HostGatewayRelay::new(clock.clone())`) and passes it to both `HostGatewayClientMtlsFactory::new` and
+the `relay` field. The scripting and observation surface of `SimGatewayRelay` / `SimGatewayClientMtls` (peer scripts, substrate
+lies, transcripts) remains test support that DISTILL shapes. The new public items in this block (`HostGatewayRelay::new`,
+`SimGatewayRelay::new`, `SimGatewayClientMtlsFactory::new`, `SimGatewayAdapters` and its four methods) are listed in the D5 note
+on item 13.
+
+```rust
+// (continues the D5 listing)
 
 // overdrive-gateway::ports  (the trait lives with `GatewayClientMtls`, so the
 // dataplane crate implements it without depending on the control plane)
@@ -977,6 +1742,10 @@ pub struct GatewayClientMtlsDeps {
     pub seal: GatewayUpstreamSeal,
     pub limits: GatewayLimits,
 }
+// The client arms the authenticated socket through the same relay backend as `GatewayAdapters.relay`:
+// `HostGatewayClientMtlsFactory::new(Arc<HostGatewayRelay>)` (was a unit struct) and
+// `SimGatewayClientMtls::new(.., Arc<SimGatewayRelay>, ..)` hold it; `GatewayAdapters::host` builds one
+// `Arc<HostGatewayRelay>` and coerces it to `Arc<dyn GatewayRelay>` for the `relay` field.
 
 pub struct ComposedDataplane {
     pub dataplane: Arc<dyn Dataplane>,
@@ -1000,8 +1769,8 @@ Order in `boot_server` (`M:crates/overdrive-control-plane/src/lib.rs:3625`), eac
 | G0 | after `runtime.register(service_lifecycle())` (`:3807`), before `Arc::new(runtime)` (`:3808`) | `if config.gateway.is_some() { runtime.register(gateway_svid_lifecycle()).await? }` | boot refuses (existing registration error) |
 | G1 | after `ca.trust_bundle()` (`:3912`), before `AppState::new_with_workflow_engine` (`:4085`) | `GatewayAppStateComposition::from_config(..)`: Disabled when `config.gateway` is `None`; otherwise creates the one `GatewayIdentitySlot`, its Action and Lifecycle handles and `GatewayControl` | boot refuses |
 | G2 | after the DNS-responder block (`:4350`), before the exit-observer spawn (`:4369`) | `UnboundGatewayBuilder::new(..).await` (validates `GatewayConfig`; opens Route and custody over the IntentStore; reads and installs the initial manual key; spawns no task), then `into_builder()` and `client_mtls.client_mtls(deps)` | boot refuses with `GatewayBootError` (`health.startup.refused`, reason `gateway.boot`) after the existing `shutdown_failed_boot_network_owners(..)` and `dns_responder_owner.shutdown(..)` cleanup |
-| G3 | inside the gateway gate task (G4) | `gateway_connect.probe(deadline, clock)`: sweeps residue left by the previous process, then runs the sentinel connect | not fatal: TCP/443 stays unbound, the operator surface and workloads are unaffected, status carries the cause, and the structured event `health.startup.refused` with reason `gateway.connect_probe` is emitted (Earned Trust: the adapter proves it can honour its contract before the listener binds) |
-| G4 | after `server_task` is spawned (`:4616`), before `Ok(ServerHandle { .. })` (`:4618`) | `GatewayBuilder::start(deps).await`, then `into_parts()`: spawns the Route, custody, application, connection and gate tasks; the gate runs custody ready → identity `ensure_current` → G3 → actual-frontend probe → Gateway Application promotion → TCP/443 bind | not fatal (see G3); no later refusal path exists, so `FailedBootTasks` (`:3008`) is unchanged |
+| G3 | inside the gateway gate task (G4) | `relay.probe(deadline)` first (kernel-TLS relay capability, reason `gateway.relay_probe`), then `gateway_connect.probe(deadline, clock)`: sweeps residue left by the previous process, then runs the sentinel connect | not fatal: TCP/443 stays unbound, the operator surface and workloads are unaffected, status carries the cause, and the structured event `health.startup.refused` with reason `gateway.connect_probe` is emitted (Earned Trust: the adapter proves it can honour its contract before the listener binds) |
+| G4 | after `server_task` is spawned (`:4616`), before `Ok(ServerHandle { .. })` (`:4618`) | `GatewayBuilder::start(deps).await`, then `into_parts()`: spawns the Route, custody, application, connection and gate tasks; the gate runs custody ready → relay probe and sentinel connect probe (G3) → identity `ensure_current` → actual-frontend probe → Gateway Application promotion → TCP/443 bind | not fatal (see G3); no later refusal path exists, so `FailedBootTasks` (`:3008`) is unchanged |
 
 The convergence loop (`:4399`), interest router (`:4447`), emit-drain (`:4474`) and shared-network supervisor (`:4505`) are all running before G4, so the first identity evaluation and the first hydration see the final ports. `ServerHandle` gains `gateway: Option<GatewayHandle>`.
 
@@ -1063,7 +1832,52 @@ pub gateway_identity: &'a dyn GatewayIdentityView,
 
 ## Wave: DESIGN / [REF] Formal protocol model
 
-Target subsystem directory: `specs/quint/public-ingress-gateway/` (permanent; `checks.toml`, `hazard/`, `evidence/`, `README.md`). Three stateful modules; every conformance target declares a `step` relation and named runs. The model abstracts the kernel (maps, hook, routing) as assumptions A-K1..A-K3 below; real-kernel behaviour is proven at Tier 3.
+Target subsystem directory: `specs/quint/public-ingress-gateway/` (permanent; `checks.toml`, `hazard/`, `evidence/`, `README.md`). Five stateful modules (`relay_exchange` and `relay_ktls` are new with G1; the check counts are stated once in the `checks.toml` header); every conformance target declares a `step` relation and named runs; `relay_ktls` is model-only.
+
+### Modules `relay_exchange` (conformance target) and `relay_ktls` (model-only) — decisions ADR-0239 and ADR-0244 (G1)
+
+- **`relay_exchange` protocol.** One public connection's exchange: two concurrent halves (request and response), the message
+  boundary (`overread` ghost, the relayPastBoundary hazard's detector), keep-alive reuse, early response, upstream and public
+  close_notify, close-delimited end (P-13d), drain with an in-flight body. Phases `Idle`, `Relay`, `Closed` (`finish()` moves
+  `Relay` to `Idle` or `Closed`; there is no intermediate phase). Invariants: `NoBytePastMessageBoundary`,
+  `MidBodyCloseNeverReused` (guard-derived, no hazard); `Safety` is their conjunction. The former counter invariants (control
+  record never forwarded, reuse only at boundary, no reuse after drain, no read while RX blocked) held by their own guards and
+  were removed.
+- **`relay_ktls` protocol.** The public leg's transmit lock (free, writer, rekeyer), a peer KeyUpdate that owes a reply, the reply
+  under the old key, re-arm. No key epochs and no upstream leg (Contract of the legs, item 6). Invariant:
+  `TxRekeyExcludesWriters`. Model-only; the gateway never originates a KeyUpdate.
+- **Named runs (scenario to run).**
+
+| Critical scenario | Run (module) | Replay |
+|---|---|---|
+| Two keep-alive exchanges on one public connection, response overlapping the request body | `exchange_cl_keepalive` (`relay_exchange`) | `#[quint_test]` |
+| Early response closes, never reuses | `early_response_closes` | `#[quint_test]` |
+| Drain with an in-flight body: completes, not reused | `drain_with_inflight_body` | `#[quint_test]` |
+| Public close_notify after the request is read: response delivered, then close | `half_close_after_request_read` | `#[quint_test]` |
+| Upstream close_notify mid-body aborts | `upstream_close_mid_body_aborts` | `#[quint_test]` |
+| Close-delimited response ends cleanly on up_close, then not reusable | `close_delimited_clean_end` | `#[quint_test]` |
+| Public close_notify mid-request-body aborts | `public_close_mid_request_aborts` | `#[quint_test]` |
+| A peer KeyUpdate waits for the writer's lock; reply and re-arm after the write | `keyupdate_waits_for_writer` (`relay_ktls`) | model-only |
+
+  No run is added for upstream close before the response head, `force_abort` at the drain deadline, or a KeyUpdate inside a head or
+  chunk-size line: these are seeded `overdrive-sim` obligations (the first two) and a Tier-3 obligation (the last), to keep the
+  relay check count at 12.
+- **Hazards (one per decision).** ADR-0239: `relayPastBoundary` violates `NoBytePastMessageBoundary` (on `relay_exchange`). ADR-0244:
+  `rekeyDuringWrite` violates `TxRekeyExcludesWriters` (on `relay_ktls`). ADR-0246 (pipe floor) and ADR-0245 (pure framing) are typestate
+  and pure-function properties and carry no model hazard; the probe's pipe-floor step (`Pipe(CapacityBelowFloor)`) and framing PBT cover them.
+- **Projection and conformance.** Pinned only in the Kernel relay section ("Pinned observable projection"): the action-to-method
+  table and the accessor per variable. Driver placement: `crates/overdrive-gateway/src/runtime/http1/quint_exchange.rs` behind
+  `#[cfg(all(test, feature = "integration-tests"))]`, owner = the real `ExchangeMachine` (pure; no `Sim*`).
+- **Interpretations the modeler made, pinned as design rules** (already in the Message-framing and Exchange tables): a close-delimited
+  response ends cleanly only on close_notify after the headers; a close_notify before the response head, or mid a length-delimited
+  body, aborts; a public close_notify before the request is fully read aborts and after it lets the response finish and then blocks
+  reuse; an early response closes (the lingering close that follows is a driver step outside the machine, P-18).
+- **Not conformance-replayable** (no seam is added): the kTLS lock interleavings (`relay_ktls`). Covered by the model, the Tier-3
+  KeyUpdate suite on native metal and the Sim's scripted peer events. The model abstracts the kernel as assumptions A-K1..A-K6
+  below; real-kernel behaviour is proven at Tier 3.
+- **User may drop `relay_ktls`.** The lock is covered by A-K5 plus the Tier-3 check (obligation 16(b), a KeyUpdate request while a
+  large splice-out is in flight). The module and its two checks (safety, hazard) plus one run exist only to show by exhaustion
+  that the lock has teeth; the user may rule that unneeded and the module is removed in one cut.
 
 Protocols judged not to need Quint: the Public Route Set single-slot claim ([ADR-0221](../../product/architecture/adr-0221-singleton-public-route-set-aggregate.md)) is one `IntentStore` compare-and-set covered by the store's own property tests; TLS/HTTP policy, routing and header rules are pure functions.
 
@@ -1083,7 +1897,30 @@ Protocols judged not to need Quint: the Public Route Set single-slot claim ([ADR
 
 - **Protocol modelled.** The concurrent part of `GatewayApplicationOwner`: a new generation is staged, probed, promoted and the prior generation moves to Draining; connections hold leases on their generation; a draining generation is retired only when its lease count is zero; a probe result that arrives after its staged generation was superseded is discarded.
 - **Variables and pinned accessors.** `current_generation`, `draining_generations` ← `GatewayControl::application_status() -> Result<Option<GatewayApplicationStatusRowV1>, GatewayStatusReadError>`. Model-only ghosts, not projected by the driver: `staged` (probe result per staged token), `leases` (per-generation connection counts).
-- **Actions → driving ports.** `route_declare`/`route_withdraw` → `PublicRouteSetHandle` via `GatewayControl::routes()` (these trigger staging and supersession); `probe_result` → `GatewayUpstreamConnector::probe` over the Sim dataplane; `open_connection`/`close_connection` → `GatewayAdmission::acquire_connection` / lease drop.
+- **Actions → driving ports.** `route_declare`/`route_withdraw` → `PublicRouteSetHandle` via `GatewayControl::routes()` (these trigger staging and supersession); `probe_result` → `GatewayUpstreamConnector::probe` over the driver's test-local `GatewayConnectDataplane` double (not `SimGatewayConnectDataplane`; see "Conformance placement and test-local doubles (DG-7)" below); `open_connection`/`close_connection` → `GatewayAdmission::acquire_connection` / lease drop.
+- **Conformance placement and test-local doubles (DG-7).**
+  - **Facts.** `overdrive-gateway` owns its port traits (`overdrive-gateway::ports`), and `overdrive-sim` implements them (`SimGatewayConnectDataplane`, `SimGatewayRelay`, `SimGatewayClientMtls`, the Sim identity lifecycle control), so `overdrive-sim` depends on `overdrive-gateway`. A driver compiled inside the library's own unit-test build (`cfg(test)`, the placement `.claude/rules/testing.md` § "Quint conformance" requires) sees two distinct `overdrive_gateway` crates when `overdrive-sim` is a dev-dependency: the test build of the crate under test, and the copy `overdrive-sim` links. A Sim type implements the second copy's traits, so it does not satisfy `crate::ports::*`. Sims of `overdrive-core` traits (`SimClock`, `SimObservationStore`, `SimEntropy`, the Sim CA) are unaffected: `overdrive-core` is one copy. The repository already meets this in `overdrive-control-plane`: `src/guest_network/quint_cid_lease.rs` takes every core-trait adapter from `overdrive-sim` and defines a driver-local `HeldProvisioner` for the crate-local `GuestNetworkProvisioner` (`overdrive-sim` depends on `overdrive-control-plane`); the `overdrive-sim` imports of the other in-crate drivers (`quint_flows_beacon.rs`, `quint_quiescence.rs`, `quint_owner_flows.rs`, `quint_fwd_pair.rs`) were checked by name only: they are Sims of `overdrive-core` traits (`SimBeaconIo`, `SimMtlsResolve`, `SimClock`, ...) or of a trait owned by a different crate (`SimMtlsIntercept` implements an `overdrive-worker` trait and is used from `overdrive-control-plane`). The integration binaries of `overdrive-gateway` (`tests/integration/*.rs`) are separate crates linking one `overdrive_gateway` copy, so they use the `overdrive-sim` gateway adapters without a problem.
+  - **Resolution.** The QC-2 driver defines its own private doubles of the gateway-crate driven ports it composes the real owner over (`GatewayConnectDataplane`, `GatewayRelay`, `GatewayClientMtls`, `GatewayIdentityLifecycleControl`), inside the driver module. They are driven-port fault injection, not a second implementation of the protocol: staging, supersession, leases, drain and retire are the production `GatewayApplicationOwner`'s. The held-probe capability of the DISTILL shaping (hold each probe as its own entry; release one entry with a usable or unusable outcome; observe the held count) is realised by the connect double and the client double together, parked in `GatewayClientMtls::authenticate` with entries identified by minted backend identity (Gateway upstream path, "Where a double may park a probe (DG-9)"): the connect double answers every `open_upstream` with a `PreparedUpstream::new(TcpSocket::new_v4()?, intent)` (DG-8) and every `take_receipt` with a `Selected` receipt carrying that entry's minted `BackendId`; a held probe cannot be a `NoBackend` probe. The identity double answers `ensure_current` immediately with current facts and `subscribe` with them; the relay double's `probe` succeeds. Methods the QC-2 path does not exercise return the port's typed unavailable error. Real mTLS, relay and receipt paths are not QC-2's: they are covered by the seeded invariants, the host/Sim equivalence tests and Tier 3. `SimClock`, `SimObservationStore` and the real redb Route store come from their usual crates.
+  - **What this adds.** No public production item; three crate-private production items (`GatewayAdmission::new`, `GatewayAdmission::budget`, `GatewayBuilder::start_with`, the DG-10 bullet below, each with a production caller in `start`); no `overdrive-sim` change, no new feature, no `Cargo.toml` change beyond the dev-dependencies the crate already needs. Accessor shapes are unchanged: `GatewayControl::application_status()` (QC-2 `State` projection) stays as pinned. The Sim connect-probe hold/release surface stays in `overdrive-sim` for the seeded invariants and the `overdrive-gateway` integration binary (S-PIG-68); the QC-2 driver does not use it. The duplication is the accepted cost: the doubles are checked by nothing but their use, so they must stay as small as the path above.
+  - **Rule for the driver module.** It imports nothing from `overdrive_sim` that implements a gateway-crate trait; only core-trait Sims. A reviewer or the crafter checks this with a grep for `overdrive_sim::` in the module; `from_driver` reads only `application_status()`, never a double.
+  - **Driver path.** `crates/overdrive-gateway/src/application/quint_gateway_application.rs`, declared from `application` as `#[cfg(all(test, feature = "integration-tests"))] mod quint_gateway_application;`. It is a child of the module that owns `GatewayApplicationOwner` and its admission state, as QC-1 and QC-4 are children of their owners, so crate-private `GatewayAdmission::acquire_connection` and `GatewayConnectionLease` are reached in-crate with no visibility change. This replaces the earlier crate-root path.
+  - **Rejected.** (a) `overdrive-sim` gateway adapters behind a gateway test-support feature: puts Sim code in a production crate and breaks the sim/host split. (b) Driver in `overdrive-control-plane`: `acquire_connection`, the lease and the admission are crate-private to `overdrive-gateway`, so it needs new public surface used only by tests, and the control plane is not the owner of this protocol. (c) Widening those items to `pub` for the Sim or another crate: a test seam in production API. (d) Moving the gateway ports into `overdrive-core` or a new ports crate: restructures the ADR-0222 crate boundary, and `ports` carries `rustls`, `OwnedFd` and `tokio` types that `overdrive-core` forbids.
+  - **Admission access (DG-10; crate-private, pinned because production uses it).** Facts: the driver must hold the `Arc<GatewayAdmission>` that the owner publishes into and the listener acquires from. `GatewayAdmission` has private fields and no pinned constructor; `StartedGateway::into_parts` yields only `GatewayHandle` and `GatewayControl`; the owner is moved into its task by `GatewayBuilder::start`; and `GatewayControl` (the pinned `State` projection and `routes()`) has no constructor other than `start`. So the driver can neither read the admission off a running composition nor rebuild the composition around its own owner. The answer is to inject, not to expose: the admission is created before the composition and handed to it, which `start` must do anyway because the owner and the listener share one `Arc<GatewayAdmission>`. Pinned (crate-private; every item has a production caller):
+    ```rust
+    // overdrive-gateway, crate-private
+    impl GatewayAdmission {
+        /// `current` empty. The one constructor.
+        pub(crate) fn new(budget: Arc<GatewayAdmissionBudget>) -> Arc<Self>;
+        /// The budget this admission was built over: the one shared with the connector and every generation snapshot.
+        pub(crate) fn budget(&self) -> &Arc<GatewayAdmissionBudget>;
+    }
+    impl GatewayBuilder {
+        /// `start` is exactly: build the one budget from `dependencies`' limits, `GatewayAdmission::new(budget)`, `start_with`.
+        pub(crate) async fn start_with(self, dependencies: GatewayRuntimeDependencies,
+            admission: Arc<GatewayAdmission>) -> StartedGateway;
+    }
+    ```
+    Production callers: `start` calls `new` and `start_with`; `start_with` calls `budget()` to hand the one budget to the connector, the cleanup path and the generation snapshots. Invariants: `start_with` creates no second admission or budget; the `admission` it receives is the one given to the owner and to `GatewayListenerControl::bind`; the admission's budget was built from the same `GatewayLimits` value as `dependencies`' (the caller's obligation, as for `start`). The driver builds one `GatewayLimits`, `GatewayAdmissionBudget::new(Arc::new(limits.clone()))`, `GatewayAdmission::new(..)`, keeps the `Arc`, obtains the builder through the public `UnboundGatewayBuilder::new(..).await` and `into_builder()` (core-trait Sims for the observation store and clock; a real redb Route store), calls `start_with`, and takes `GatewayControl` from `into_parts()`. `open_connection` is then `admission.acquire_connection(now)` on the retained `Arc`. No accessor exists whose only caller is the driver. Consequence for the driver, not a contract: the composition is the production one, so promotion binds the configured address on TCP/443 through the real `GatewayListenerControl`; DISTILL decides how the driver isolates that real bind.
 - **Invariants.** `DrainRetainsUntilLeasesZero`, `SupersededResultNeverRestores` (both defend ADR-0222's single decision: the owner moves the prior generation to Draining, retires it after its users reach zero, and never restores a superseded generation).
 - **Named runs.** `replace_valid` (supersede, drain, retire) and `route_withdraw_drain` (withdraw, drain, retire); one of the two, or a new `late_probe_after_supersession` if neither exhibits it, must show a probe result for a superseded staged token being discarded.
 - **Hazard (one per decision).** ADR-0222: `retireWhileLeased` (retire a draining generation while its lease count is non-zero) → `DrainRetainsUntilLeasesZero`.
@@ -1098,14 +1935,92 @@ Protocols judged not to need Quint: the Public Route Set single-slot claim ([ADR
 - **Hazards.** ADR-0233: publish `Applied` before the outer swap. ADR-0241: rebind a live id to another allocation. ADR-0232: take a receipt that is not bound to its registered cookie and `ServiceKey`.
 - **Conformance owner (D-PASS7-2).** The conformance owner is the real `EbpfDataplane` (it implements both `Dataplane` and `GatewayConnectDataplane`), on native metal, with the real `cgroup/connect4` selection arm loaded. No `Sim*` adapter is the owner or a projection source: a Sim-only owner would compare the model with the Sim's own modelled arm. Driver: `crates/overdrive-dataplane/src/quint_selection_receipt.rs`, `#[cfg(all(test, feature = "integration-tests"))]`, run through `cargo xtask metal run --` (root, bpffs, cgroup v2). It is `#[ignore = "pending DELIVER quint-conformance-selection_receipt"]` until the selection arm (P-10) and the owner are GREEN.
   - **Conformance main (modeler change).** A new main `receipt_conf` records `conf_step` over a *coarsened* step relation, because only observable owner transitions can be replayed: (1) `update_apply(key, sidx)` fuses `update_begin; commit(true); publish` (the write guard is held across a single non-yielding synchronous section, so the intermediate states are not observable and cannot be paused without a test seam); (2) `update_rejected` stays; (3) `open`, `kernel_connect(c)`, `take(c)`, `read_identity(c)`, `cleanup(c)`, `restart`, `idle` stay; (4) `rollback` and `commit(false)` are removed from this main; (5) `take(c, r)` is restricted to `r == c` (a mismatched receipt cannot be requested through `take_receipt(&intent)`); (6) the conformance catalog contains only empty and singleton backend sets, so the Maglev `pick` is determined by the state and is not an input the driver cannot control. The fine-grained `receipt_ok` main and all hazards are unchanged.
-  - **Action to driving-port map.** `update_apply`, `update_rejected` → `Dataplane::update_service` (rejection is the real `DataplaneError::BackendIdentityConflict` from a conflicting backend set); `open` → `GatewayConnectDataplane::open_upstream`; `kernel_connect` → the driver issues the `connect(2)` on the socket returned by `PreparedUpstream::into_parts` toward the Service frontend (the same single syscall `GatewayUpstreamConnector::connect` issues; the connect result is not asserted for success, the hook has already written the receipt). The driver's `connect(2)` is deadline-bounded: a non-blocking connect with a bounded wait; an absent listener yields a refused/timeout outcome mapped to the model's failed dial, so a missing listener cannot stall the driver; `take` → `take_receipt`; `read_identity` → `selected_backend_identity`; `cleanup` → `cleanup`; `restart` → drop and re-create `EbpfDataplane` on the same pin directory (SR-2); `idle` → no call.
+  - **Action to driving-port map.** `update_apply`, `update_rejected` → `Dataplane::update_service` (rejection is the real `DataplaneError::BackendIdentityConflict` from a conflicting backend set); `open` → `GatewayConnectDataplane::open_upstream`; `kernel_connect` → the driver issues the `connect(2)` on the socket returned by `PreparedUpstream::into_parts` toward the Service frontend (the same single syscall `GatewayUpstreamConnector::connect` issues; the connect result is not asserted for success, the hook has already written the receipt). The driver's `connect(2)` is deadline-bounded: a non-blocking connect with a bounded wait; an absent listener yields a refused/timeout outcome mapped to the model's failed dial, so a missing listener cannot stall the driver; `take` → `take_receipt`; `read_identity` → `selected_backend_identity`; `cleanup` → `cleanup`; `restart` → drop and re-create `EbpfDataplane` on the same pin directory (SR-2); `idle` → the stutter handling of "Conformance action maps for the three older mains" (an owner read, never "no call").
   - **State projection (owner accessors only).** `identity[id]` ← `selected_backend_identity(BackendId)` (`Ok` → bound, `BackendIdentityMissing` → absent); `intents`, `receipts` ← the *counts* `live_intent_count()` / `live_receipt_count()` (the spec projection for these two is the map size); the receipt value (`taken`) and `idres` are not projected State: they are checked from the port returns (`take_receipt(&intent)` at the `take` step, `selected_backend_identity` at `read_identity`) against the model's expected result for that step, consistent with the spec README. Cookie-indexed bookkeeping (`c` → held `GatewayConnectIntent`) is driver input state and is never projected. `outer_committed` and `reserved` stay model-only ghosts.
   - **Not conformance-replayable, and how they are covered.** `abandoned_reservation_rolled_back` and the `rollback`/`commit(false)` actions: the pre-commit and post-commit failures need a fault the owner cannot be handed through an existing driven port. They are covered by a Tier-3 test in `overdrive-dataplane/tests/integration/` that uses a real, production-reachable pre-commit failure produced through the existing `Dataplane::update_service` input (the only production-reachable pre-commit failure input is `BACKEND_MAP` capacity, `crates/overdrive-bpf/src/maps/backend_map.rs:46` `MAX_ENTRIES = 65_536`, so the update fails at `ServiceApplyStage::BackendMap`; filling it on native metal costs an unmeasured runtime, to be measured by DISTILL before the user decides. **This Tier-3 fill is an accepted-exposure candidate requiring the user's acknowledgement:** if not run, `RollbackPreservesPriorGeneration` has model + equivalence/unit coverage only. No seam is added) and asserts through the same accessors: prior generation preserved, no Applied identity for the abandoned ids, later fresh ids not recycled, zero residue. Post-commit cleanup debt does not affect any projected variable and is not conformance-checked (`service_cleanup_debt` is covered by the equivalence/unit lane). `receipt_waits_for_publish_guard`: the guard window cannot be held open without a test seam, so it is covered by a Tier-3 concurrency test (updates racing `selected_backend_identity` for a just-selected id; the read never returns a missing identity for a `Selected` id) plus the `publishEarly` hazard. The `takeAny` hazard has no driver path by design. Both remain model-checked runs/hazards: `abandoned_reservation_rolled_back` and `receipt_waits_for_publish_guard` run on a new `receipt_fine` main (REC=false, MAXUPD=3), not `receipt_ok` (which is bounded at 2 for the exhaustive check).
   - **Bound runs.** `#[quint_test]` for `commit_then_select`, `conflicting_alloc_rejected`, `restart_destroys_receipts` (re-stated against `receipt_conf` in the modeler change above); `#[quint_run]` randomized traces on `receipt_conf`. The host/Sim `GatewayConnectDataplane` equivalence test remains the Sim pairing; it is not a conformance test.
 
+### Conformance action maps for the three older mains (closes per-driver checklist item 3)
+
+This section is the exhaustive action map for `identity_conf`, `app_conf` and `receipt_conf`; it supersedes the shorter
+"Actions → driving ports" bullets above where they differ. Each row names the owner call; the State comparison after every step
+reads only the accessors pinned above. Two kinds of step are not stimuli and are pinned here once.
+
+**Stutter step (`idle`, present in all three conformance step relations).** The handler performs one owner read: the module's
+projection accessors (QC-1 `GatewayIdentitySlot::{desired,current}`; QC-2 `GatewayControl::application_status()`; QC-3
+`live_intent_count()` and `live_receipt_count()`), and the per-step comparison then asserts the owner is unchanged. It is a real
+call on the production owner and a real assertion (the owner must not drift when nothing is applied), but it applies no stimulus.
+A critic who judges that insufficient has a cheaper alternative than an owner hook: the spec edit in "Open spec edits" below.
+
+**Owner-autonomous step (QC-2 `stage` and `retire`).** These transitions are not commands any port accepts: the owner stages a
+candidate by itself after a Route change and retires a Draining generation by itself when its leases reach zero (Application
+section, "owner alone waits and then retires"). The driver runs the owner's task on a paused single-thread runtime, so the owner
+acts only when the driver yields. The handler yields until the owner is idle and then asserts the step's own postcondition through
+the pinned accessor; it is not a bookkeeping update.
+
+**`identity_conf` (owner: `ControlPlaneGatewayIdentityLifecycle` over a real `GatewayIdentitySlot`, `EvaluationBroker`, the production `GatewaySvidLifecycle`).**
+
+| Spec action | Owner call |
+|---|---|
+| `submit_evaluation` | `GatewayIdentityLifecycleControl::ensure_current(deadline)`, polled once so the retained `Evaluation` is submitted and not awaited to completion; the driver then drains the broker and runs the production reconciler's `hydrate_*` and `reconcile` at the `SimClock` tick and queues the `Action`s it emits (an `IssueGatewaySvid` or `DropGatewaySvid`; the driver never constructs one) |
+| `issue_complete(e)` | `action_shim::gateway_svid::dispatch_issue` with the queued `IssueGatewaySvid` of epoch `e` (the spec guard `issues.contains(e)` is "such an action is queued") |
+| `drop_complete(e)` | `dispatch_drop` with the queued `DropGatewaySvid` of epoch `e` |
+| `disable` | `GatewayIdentityLifecycleControl::disable_after_drain(deadline)` |
+| `advance_time` | `SimClock::advance` (the owner reads time at its next call) |
+| `audit_fail` | arm a failing write on `SimObservationStore` for the next `IssuedCertificate` row (driven-port fault) |
+| `restart` | drop the owner composition and rebuild it: `GatewayIdentitySlot::new` (epoch 1, enabled, empty), a new `EvaluationBroker` and `ControlPlaneGatewayIdentityLifecycle::new`, over the same `SimObservationStore` (audit rows are durable) and the same CA serial counter; queued `Action`s and a pending `ensure_current` future are discarded with the process |
+| `idle` | stutter step |
+| `settle_ok`, `settle_timeout` | **no honest mapping: blocked on open spec edit B-1** |
+
+**Blocker B-1 (spec and design disagree on `disable_after_drain`).** The design pins `disable_after_drain` = `begin_disable`,
+which clears the volatile slot and bumps the epoch in the same call, with no evaluation and no wait; `Timeout { DisableAfterDrain }`
+is unreachable (Identity section; D5 section (c) step 5; [ADR-0225](../../product/architecture/adr-0225-dedicated-gateway-svid-identity-lifecycle.md)
+Consequences). `gateway_identity.qnt` models the opposite: `disable` bumps the epoch but leaves `held`, a reconciler `DropGatewaySvid`
+clears it later (`drop_complete`), and the control result arrives in a separate `settle_ok` or `settle_timeout` step. The run
+`restart_reissue` therefore expects `held` to remain after `disable` (and a queued `Drop`), which the production owner cannot produce.
+No pinned call can drive `settle_ok`/`settle_timeout`, and the `disable` step's State comparison would fail on `held`. The
+resolution is a user decision between two designs: (a) the design as written (synchronous clear, shutdown-only caller): the spec
+is edited so `disable` sets `held' = Set()` and `dis_res' = "ok"` at once, and `settle_ok`, `settle_timeout`, `dis_deadline`,
+`DISDL` are deleted; `drop_complete`, `drops` and the `restart_reissue`/`disable_races_inflight_issue` steps that use them are
+reduced to match. This leaves `Action::DropGatewaySvid`, `drop_after_drain` and the reconciler's "disabled and held gives Drop"
+arm with no production path that reaches them, which is a proposal to remove them under "Correct, and no more than correct"
+(NOT adopted by this design; it needs the user). (b) restore a waiting disable (`begin_disable` flips the epoch and the call waits for
+the reconciler's Drop): the D5 section (c) shutdown text, ADR-0225 Consequences and the Identity section change instead, and the
+spec stands. Until the user rules, QC-1 cannot be completed: it blocks authoring `settle_ok`/`settle_timeout`, and the runs
+`restart_reissue` and (for its `settle_ok` step) `disable_races_inflight_issue`. The other three runs
+(`issue_hold`, `reissue_near_expiry`, `audit_failure_no_hold`) do not use `disable` and are unaffected.
+
+**`app_conf` (owner: the real `GatewayBuilder`/`GatewayApplicationOwner` composition over a real redb Route store, the driver's test-local gateway-port doubles (DG-7, "Conformance placement and test-local doubles" above; `SimGatewayConnectDataplane` cannot be used in the in-crate test build), `SimClock`).**
+
+| Spec action | Owner call |
+|---|---|
+| `route_declare` | `PublicRouteSetHandle` apply of a Route (declare or replace) via `GatewayControl::routes()`; the owner has not yet run |
+| `route_withdraw` | `PublicRouteSetHandle` withdraw via `GatewayControl::routes()`; then the owner runs to idle (withdrawal moves Current to Draining and discards staged) |
+| `stage` | owner-autonomous step: yield until idle; postcondition `application_status().staged` is `Some` for the live Route generation |
+| `probe_result(tok, ok)` | complete the held probe of the staged candidate `tok` with outcome `ok` through the hold/release capability of the driver's test-local `GatewayConnectDataplane` double (DG-7; not the `overdrive-sim` adapter), so `GatewayUpstreamConnector::probe` returns it to the owner; then the owner runs to idle. For a superseded `tok` the owner must discard the result and leave Current, staged and Draining unchanged ("a late gate result cannot restore a superseded generation", Application section); that is the modelled discard and the State comparison checks it. The park point is `GatewayClientMtls::authenticate` and a held entry is addressed by the `BackendId`/`SpiffeId` the double minted for it, not by arrival position (Gateway upstream path, "Where a double may park a probe (DG-9)"); a held probe therefore requires a `Selected` receipt. The mapping from `tok` to the minted identity and the scripting surface are test support DISTILL shapes inside the driver module |
+| `retire(gid)` | owner-autonomous step: yield until idle; postcondition `application_status().draining` no longer lists `gid` |
+| `open_connection` | `GatewayAdmission::acquire_connection(now)`; the driver keeps the returned `GatewayConnectionLease` |
+| `close_connection(gid)` | drop the kept `GatewayConnectionLease` of generation `gid`; the owner has not yet run |
+| `idle` | stutter step |
+
+State comparison: `current_generation` and `draining_generations` from `GatewayControl::application_status()` (`current`, `draining`),
+after the step's owner run. `staged` and `leases` stay model-only; `stage` additionally asserts `status.staged` as its own postcondition.
+
+**`receipt_conf` (owner: the real `EbpfDataplane`, native metal).** Action map unchanged from the bullets above (`update_apply`,
+`update_rejected`, `open`, `kernel_connect_det`, `take(c,c)`, `read_identity`, `cleanup`, `restart`); `idle` is the stutter step.
+
+**Open spec edits.** None blocks QC-2, QC-3 or the identity runs that avoid `disable`; B-1 is the one blocker. Optional and
+non-blocking, offered because it removes the stutter judgement: in the three conformance step relations guard `idle` with
+`not(REC)` as `relay_exchange.qnt:173` does (`gateway_identity.qnt:195-200, 205-206`, `gateway_application.qnt:144, 151`,
+`selection_receipt.qnt:340-345, 356`); then the `idle` rows above are deleted. Also optional: coarsen `app_conf` as `receipt_conf`
+coarsened `update_begin/commit/publish`, fusing `stage` into `route_declare` and `retire` into `close_connection`, which would
+delete the two owner-autonomous rows. Neither edit is made here (no spec file is touched while a recording run is in progress).
+
 ### Model-check results (run on native metal; recorded evidence)
 
-Spec, checks and evidence: [`specs/quint/public-ingress-gateway/`](../../../specs/quint/public-ingress-gateway/README.md), `checks.toml`, `evidence/`. The evidence was re-recorded for the reduced scope after the P-9 variant check and the dead identity hazard switches were removed: 21 checks, all as expected, and `verify-evidence` passes (`evidence/summary.md`; see the validation budget below).
+Spec, checks and evidence: [`specs/quint/public-ingress-gateway/`](../../../specs/quint/public-ingress-gateway/README.md), `checks.toml`, `evidence/`. **Status after G1 and review round 1 (2026-11-02): 33 checks are listed (21 earlier + 12 relay). Run status, stated exactly: the round-1 run of the 12 relay checks on native metal produced the expected verdicts (`relay-safety-tlc` and `relay-ktls-safety-tlc` hold, 2 hazards violate as expected, 8 runs hold). Round-2 edits then changed the spec; the orchestrator reports a `quint-modeler` run on the round-2 spec with 33 checks listed and 33 as expected, without `--record`. This document's author did not observe that run, and the round-3 re-run was attempted and NOT executed (the native-metal lease was held by another workspace; exit 75, no Quint command started). No spec file changed in round 3. Treat the current-spec verdicts as the orchestrator-reported round-2 result until `--record`; the 21 earlier checks are likewise covered only by that report. The recorded `evidence/` in this worktree is STALE until that record: it is the earlier 21-check record.** `cargo xtask quint verify-evidence` is UNRUN and will fail until the orchestrator re-records the evidence for the new specs. The next paragraph describes the earlier 21-check record.
+
+Earlier record: the evidence was re-recorded for the reduced scope after the P-9 variant check and the dead identity hazard switches were removed: 21 checks, all as expected, and `verify-evidence` passed at that time (`evidence/summary.md`; see the validation budget below).
 
 Reduced-scope critical scenarios and their named runs:
 
@@ -1133,7 +2048,7 @@ Reduced-scope critical scenarios and their named runs:
 | ADR-0241 | `rebind` | `IdentityImmutablePerBackendId` |
 | ADR-0232 | `takeAny` | `ReceiptMatchesIntent` |
 
-Validation budget (design.md cost budgets): 3 modules; 21 checks = 3 exhaustive TLC safety checks (identity, application, receipt) + 5 hazards + 13 named runs (down from 30). Only `receipt-safety-tlc` is slow (about 970 s; non-CI; timeout 2400 s; bounded at 2 accepted `update_service` calls on `receipt_ok`; the two runs above execute on the `receipt_fine` main, REC=false, MAXUPD=3); the other 20 checks are CI and each completes in seconds; the full recorded run is about 15 min wall at 16 jobs. The P-9 variant run and the dead identity hazard switches are removed from the spec; a P-9 variant check is added only if the user chooses "honour". Growth beyond this budget needs user approval. Open points and their resolution: SR-2 (answered from source in the assumptions table); GA-1 and SR-2 discharging items (DISTILL obligations in the table; GA-2 dropped, RAII); `NoAllocationIdentity` (type-level, dropped). The shutdown projection and shutdown actions are removed from the model.
+Validation budget (design.md cost budgets): the check counts and timings of the whole subsystem are stated once, in the `checks.toml` header. Only `receipt-safety-tlc` is slow (non-CI; bounded at 2 accepted `update_service` calls on `receipt_ok`; the two runs above execute on the `receipt_fine` main, REC=false, MAXUPD=3); every other check is CI. The P-9 variant run and the dead identity hazard switches are removed from the spec; a P-9 variant check is added only if the user chooses "honour". Growth beyond this budget needs user approval. Open points and their resolution: SR-2 (answered from source in the assumptions table); GA-1 and SR-2 discharging items (DISTILL obligations in the table; GA-2 dropped, RAII); `NoAllocationIdentity` (type-level, dropped). The shutdown projection and shutdown actions are removed from the model.
 
 ### Assumptions and their discharging items
 
@@ -1142,6 +2057,10 @@ Validation budget (design.md cost budgets): 3 modules; 21 checks = 3 exhaustive 
 | A-K1 | The outer `SERVICE_MAP` slot replacement is atomic for the hook's lookup; a hook that sees a new inner map sees fully populated slots. | V-GW-1, existing atomic-swap Tier-3 (`.claude/rules/testing.md`) |
 | A-K2 | The pre-connect `SO_COOKIE` equals the cookie the hook reads for the same socket. | V-GW-5 HELD (10/10 plain, 10/10 prepared, 7.0.0-38; source: `net/core/sock.c:2109-2113`, `net/core/filter.c:5151-5154 @ v7.0`) |
 | A-K3 | A socket created by a `serve` task belongs to the attach cgroup subtree. | Source-settled: the socket's cgroup is fixed at allocation from the creating task (`cgroup_sk_alloc` takes `task_css_set(current)->dfl_cgrp`, `kernel/cgroup/cgroup.c:7420-7431`, called from `sk_prot_alloc` in `net/core/sock.c:2330 @ v7.0`) and `connect4` runs against that socket cgroup (`kernel/bpf/cgroup.c:1694 @ v7.0`); with all 19 `serve` threads observed in `/overdrive.slice/control-plane.slice` (V-GW-2) the attached hook fires. The end-to-end serve-created connect is exercised by AT-PIG-E2E-1 (DISTILL native obligation). |
+| A-K4 | After a received KeyUpdate the kernel fails RX reads with `-EKEYEXPIRED` and `poll` reports no read event until `TLS_RX` is re-armed (`net/tls/tls_sw.c:1369-1371`, `net/tls/tls_main.c:423-427`, `Documentation/networking/tls.rst:217-220` @ v7.0). Not modelled. | Tier-3 relay suite: a peer KeyUpdate inside a body, with a negative control that omits the re-arm and observes `EKEYEXPIRED` (spike findings (b)) |
+| A-K5 | The kernel serialises each `sendmsg`/`setsockopt` call but not a multi-call logical write against a `TLS_TX` re-arm (`net/tls/tls_main.c:635-783 @ v7.0`); the gateway's per-leg lock is therefore load-bearing. Relied on by `relay_ktls`. | Tier-3 relay suite: KeyUpdate request while a large splice-out is in flight, `TlsDecryptError == 0` at the real peer; `relay_ktls` hazard `rekeyDuringWrite` shows the lock has teeth |
+| A-K6 | A splice out of a kTLS socket never returns octets of two records and never crosses a record boundary (`net/tls/tls_sw.c:2285-2327 @ v7.0`). Relied on by the one-unit abstraction of `relay_exchange`. | Tier-3 relay suite (spike (a) shape: byte-exactness over records of mixed size) |
+| A-K7 | Leg-C (the upstream leg's peer) never originates a KeyUpdate: after the handshake its rustls `ServerConnection` is consumed by `dangerous_extract_secrets` (`crates/overdrive-dataplane/src/mtls/inbound.rs:503-524`), the kernel is armed once by `arm_ktls_tx_rx` (`mtls/ktls.rs:39-48`), and the kernel's TLS ULP never emits handshake records itself. Not modelled; `relay_ktls` covers the public leg only. | Tier-3 relay suite: inject a KeyUpdate at the upstream leg (a test peer standing in for leg-C) and observe that the relay answers it by the item-4 path with `TlsDecryptError == 0`; and observe that a production leg-C never sends one across a response of at least 16 MiB. Not source-settled for rustls internals (rustls originates a KeyUpdate only when the application calls `refresh_traffic_keys` or at a confidentiality limit, neither reachable once the connection is consumed); the Tier-3 observation is the discharge. |
 | A-3 | Every Service backend address lies in the guest prefix. | ADR-0190 consequence; revisited by GH #317 |
 | GI-1 | `issue_and_audit` is the existing CA issue-and-audit path; an audit failure leaves no held material. | `audit_failure_no_hold` run replayed against the production path with a failing Sim `ObservationStore` write (DISTILL obligation `S-PIG-51` / the `ca_issuance` tests) |
 | GI-2 | The injected clock is monotonic. | `SimClock` contract (unit) |
@@ -1173,6 +2092,24 @@ Evidence: [findings-gateway-connect-path.md](spike/findings-gateway-connect-path
 | V-GW-3 | **HELD** | `NoBackend/no-outer-entry` → `NoBackend/healthy==0` → `Selected` about 1.05 s after the startup `Stable`; after `job stop` the entries persisted (about 12 s in run4, about 5 min in run2) and the result was `Selected` then `ECONNREFUSED`, never a wrong peer. `healthy` flapped 1 → 0 in 2 of 3 runs, cause not established. | ADR-0242 outcome table holds for the empty/no-outer-entry (503) and selected-then-dial-failure (502) rows; the `healthy == 0` row is pending P-9. The flap is an **observed exposure**: the gateway treats `healthy` as possibly flapping and never reads `Selected` as liveness. Recommend a separate investigation issue; it is not gateway scope (needs user approval before creation, as for P-4). Run4's V-GW-1 dials used a forced `healthy=1`. |
 | V-GW-4 | **HELD** (verification) | The `SERVICE_MAP` → inner → `BACKEND_MAP` chain verifies; `vgw_select` 246 verified instructions vs 28 for the existing `cgroup_connect4`; production plus two probe programs coexisted under one cgroup (`multi`). | Placement is the user decision P-10. |
 | V-GW-5 | **HELD** | Pre-connect `SO_COOKIE` equals the hook's `bpf_get_socket_cookie`, 10/10 plain and 10/10 prepared sockets. | ADR-0232 intent key sound on 7.0. |
+
+### G1 contract-shaping items (run 2026-11-02, native metal, kernel 7.0.0-38-generic)
+
+Evidence: [findings-ktls-splice-relay.md](spike/findings-ktls-splice-relay.md). Probes: `spike-scratch/gw-splice-a/`, `spike-scratch/gw-ktls-bpf/`. All are settled; none is carried to DISTILL as Open.
+
+| Id | Item | Verdict | Contract effect |
+|---|---|---|---|
+| V-G1-a | Splice kTLS-RX to kTLS-TX; record boundary; non-DATA record | **HELD under a pipe rule; kernel defect found at v7.0** (silent loss of 5 octets per record when the pipe cannot map the record; fixed at v7.3) | ADR-0246: empty private pipe of at least 64 KiB, `len <= capacity`; probe pipe-floor and exactness steps |
+| V-G1-b | TLS 1.3 kTLS incl. KeyUpdate mid-relay | **HELD** with `rustls::kernel::KernelConnection` (not `dangerous_extract_secrets`); EKEYEXPIRED until re-armed | ADR-0244; control-record contract; transmit lock |
+| V-G1-c | Exact-length and per-chunk splice, backpressure, keep-alive | **HELD**: bounded memory, no over-read; **no CPU advantage**. Ran with `SPLICE_F_MORE` while `remaining > 0`; the no-flag configuration of the design is not spike-validated (falsification changes only the splice-out flag, not a contract; Tier-3 obligation 16(j)) | ADR-0239 consequence: no CPU claim; budgets |
+| V-G1-d | connect4 rewrite then TLS handshake then kTLS on one fd | **HELD** (20/20) | Selection unchanged; arming after the rewritten connect |
+| V-G1-e | kTLS plus sockmap | accepted one order at 7.0.0-38, rejected both at v7.3 | No sockmap on any leg (ADR-0244) |
+
+Source reading added by this DESIGN (`vendors/linux` v7.0): the splice-to-socket flag handling (only the socket's own `O_NONBLOCK`
+yields `EAGAIN`; `fs/splice.c:874-888`), the control-record send path that flushes an open record (`net/tls/tls_main.c:228-268`), the
+absence of any transmit-rekey serialisation or record counting in the kernel, and `MSG_PEEK` semantics on kTLS (one record type per
+call; `net/tls/tls_sw.c:1849-1862, 2089-2090, 2208-2211`). Residual empirical limits, named: the pipe invariant is validated on one
+kernel build; ChaCha20, TLS 1.2, IPv6 and a real NIC were not exercised (the design excludes the first two and the slice has no IPv6).
 
 **V-GW-1 remainder — does leg-C accept the gateway's dedicated SPIFFE identity? Settled by source.** Leg-C's server config is `tls_config::server_config`, which builds `WebPkiClientVerifier::builder(roots).build()` over a root store containing the trust bundle's root anchor only (`M:crates/overdrive-dataplane/src/mtls/tls_config.rs:249-269`, `root_store` `:68-86`), and `inbound::server_handshake` adds only a non-empty-peer-certificates guard (`M:crates/overdrive-dataplane/src/mtls/inbound.rs:508-516`). Neither compares the client certificate's SPIFFE URI SAN or any allowlist; the verifier is authentication-only (the `expected_peer` equality is #242 and the module comment says so, `:116-129`, `:224-228`). The gateway SVID is minted by the workload-identity CA through the Issue path pinned in ADR-0225, so it chains `leaf → node intermediate → root`, and the gateway client presents `[leaf, intermediate]` (the same `present_chain` shape, `:99-114`). Leg-C therefore accepts any bundle-chained, valid-signature client leaf, including the gateway's dedicated identity. One constraint the source adds: the workload SVID carries no extended-key-usage restriction today (no EKU is set in non-test CA issuance code; `rustls` `WebPkiClientVerifier` rejects a leaf whose EKU is present and lacks `clientAuth`), so the gateway SVID MUST NOT introduce an EKU that omits `clientAuth`; ADR-0225 states this. This settles the contract shape: the exact-peer equality lives on the gateway side (ADR-0234, `HostGatewayClientMtls`), not at leg-C. The remaining behaviour, kTLS arm and vsock relay to the guest, is main's existing proven mesh path ([ADR-0145](../../product/architecture/adr-0145-vsock-kernel-forwarded-guest-transport-replaces-shared-bridge.md) lineage, same code path the observed server flight already ran). **Client-side presentation is also source-settled.** Main already presents allocation SVIDs minted by the same workload CA as TLS client certificates on the egress leg-B → peer leg-C hop in production: `outbound::client_handshake` builds `tls_config::client_config(svid, bundle)` (`M:crates/overdrive-dataplane/src/mtls/outbound.rs:166-174`), which calls `with_client_auth_cert(certs, key)` over `present_chain` (`M:crates/overdrive-dataplane/src/mtls/tls_config.rs:229-244`) and then completes the handshake against the peer's leg-C `server_config`. The gateway client uses the same shape (`[gateway leaf, node intermediate]`), and the gateway SVID is issued through the same `ca_issuance::issue_and_audit` → `Ca::issue_svid` path (`M:crates/overdrive-control-plane/src/ca_issuance.rs:183`; `M:crates/overdrive-host/src/ca/rcgen_ca.rs:391`), in which no extended-key-usage is set (no EKU construct appears in `rcgen_ca.rs`). Leg-C acceptance of a bundle-chained client leaf is therefore source-settled by an existing production path. The residual is only the end-to-end composition (SVID-bearing gateway client to leg-C to bytes at the guest), which is a **DISTILL Tier-3/native obligation** (AT-PIG-E2E-1), not an open contract-shaping item; no user decision is needed because the contract (client presents chain; server verifier authentication-only) is unchanged by any outcome of that test.
 
@@ -1670,7 +2607,7 @@ pins active production contracts without a spike or placeholder seam.
 | **D-APP-11** | [ADR-0225] adds the dedicated non-allocation Gateway Identity Slot + `GatewaySvidLifecycle`, Issue/Drop actions and exact-current control. The slot atomically owns a checked desired epoch so a stale Issue cannot re-hold after disable; [ADR-0234] gives gateway-client mTLS alone the private access token and exact receipt-selected peer check. No fake AllocationId. |
 | **D-APP-12** | [ADR-0242] makes backend unavailability a typed outcome at the connector (`NoBackend` 503 / connect failure 502) with no wait, demand, revision, acknowledgment or wake; ServiceMapHydrator is unchanged and BPF Hydrated remains independent. The gateway shutdown stage runs before the leg-C worker stage (D5 section (c)). |
 | **D-APP-13** | [ADR-0224] keeps BPF as the gateway backend selector; [ADR-0232] adds registered `(SocketCookie, ServiceKey)` intent plus `Selected(BackendId)|NoBackend` receipt and cleanup; [ADR-0243] places socket preparation (mark, loopback bind, cookie, registration) in the dataplane adapter; [ADR-0233] commit-gates immutable BackendId→applied `Backend.alloc` identity publication. |
-| **D-APP-14** | [ADR-0226], [ADR-0235], [ADR-0236], [ADR-0237], [ADR-0238], [ADR-0239] and [ADR-0240] activate strict rustls TLS1.3, Hyper HTTP/1.1, exact authority/raw-path routing, proxy-header policy, finite limits, streaming/backpressure and one upstream attempt; [ADR-0234] requires exact-peer mTLS. Existing 404 Route miss, 503 NoBackend and 502 internal/upstream mappings remain exact. |
+| **D-APP-14** | [ADR-0226], [ADR-0235], [ADR-0236], [ADR-0237], [ADR-0238], [ADR-0239] and [ADR-0240] activate strict rustls TLS1.3, gateway-parsed HTTP/1.1 heads with gateway-owned framing ([ADR-0245](../../product/architecture/adr-0245-gateway-parses-http11-heads-and-owns-message-framing.md)), exact authority/raw-path routing, proxy-header policy, finite limits, kernel-side body relay with backpressure ([ADR-0239]) over kernel-TLS legs ([ADR-0244](../../product/architecture/adr-0244-gateway-legs-use-kernel-tls-after-a-userspace-rustls-handshake.md), pipe invariant [ADR-0246](../../product/architecture/adr-0246-relay-splices-into-an-empty-private-pipe-of-at-least-64-kib.md)) and one upstream attempt; [ADR-0234] requires exact-peer mTLS. Existing 404 Route miss, 503 NoBackend and 502 internal/upstream mappings remain exact. |
 | **D-APP-15** | Full composition is `AT-PIG-E2E-1`, a recurring built-binary Tier-3 walking skeleton, not an expectation or spike; it hand-installs no map, rule, identity, snapshot or credential outside production inputs. |
 | **D-APP-16** | [ADR-0227] keeps operator-mTLS `GET /v1/gateway/status` as a separate redacted projection of application/custody and relevant independent hydration rows; public request status, receipts, secrets and a unified generation never enter it. |
 
@@ -2270,10 +3207,10 @@ rules in D-APP-4; neither offers an unchecked public constructor.
 | `ServiceFrontendResolve` | `probe` + `resolve(&ServiceListenerReference) -> ServiceFrontend`; gateway adapter reads WorkloadIntent + `ServiceVipView`, and control-plane privately adapts the existing `Arc<Mutex<PersistentServiceVipAllocator>>`; Sim adapter returns scripted typed outcomes. |
 | Gateway Connect Dataplane | Prepare+register `(SocketCookie,ServiceKey)` (`open_upstream`), take/cleanup, lifecycle-only `cleanup_all_gateway_intents` + live counts, Selected/NoBackend receipt and immutable BackendId identity lookup; EbpfDataplane/Sim. Drop failures enter the runtime cleanup ledger. |
 | Gateway identity | Dedicated slot facts + desired/current hydration, `GatewaySvidLifecycle`, Issue/Drop actions and lifecycle control; no allocation holder/read. |
-| Gateway-client mTLS | Connected fd + exact receipt-selected SpiffeId -> authenticated `GatewayUpstream`; Host/Sim implementations; no InterceptedConnection/kTLS pump. |
+| Gateway-client mTLS | Connected fd + exact receipt-selected SpiffeId -> authenticated, kTLS-armed `GatewayUpstream` (sealed `KtlsLeg`); Host/Sim implementations; arms through the same `GatewayRelay` backend; no InterceptedConnection and no transparent-mTLS pump. |
 | `Kek` | Existing mandatory provider; `overdrive-host::ca::PublicCertifiedKeyAeadCodec` uses fixed `overdrive-public-certified-key` KEK and a distinct gateway HKDF/AAD domain over the existing private AEAD engine. |
 | `ObservationStore` | Exact `public_certified_key_status_row(id)` and `gateway_application_status_row(node)` point reads plus two typed LWW writes; tables/keys/codecs are pinned in the Application persistence/status `[REF]` sections below. Issuance audit and Service hydration rows remain unchanged. |
-| Public TLS/HTTP | Active `tokio-rustls` 0.26.4 + rustls 0.23.39 + hyper 1.9.0 + hyper-util 0.1.20; fixed finite GatewayLimits policy with no operator input. |
+| Kernel-TLS relay (public and upstream legs) | `GatewayRelay` ([Kernel relay data path](#wave-design--ref-kernel-relay-data-path-and-driven-ports-g1)): rustls 0.23.39 unbuffered handshake and `KernelConnection`, kTLS, `splice(2)`, `httparse` heads; `HostGatewayRelay` / `SimGatewayRelay`; fixed finite GatewayLimits policy with no operator input. |
 
 ### Exact Service-frontend and Dataplane ports
 
@@ -2349,6 +3286,7 @@ pub struct GatewayConnectCleanupSweep {
 /// A socket prepared by the dataplane adapter. Not Clone.
 pub struct PreparedUpstream { /* private: tokio::net::TcpSocket + intent */ }
 impl PreparedUpstream {
+    pub fn new(socket: tokio::net::TcpSocket, intent: GatewayConnectIntent) -> PreparedUpstream; // see "Cross-crate construction of PreparedUpstream"
     pub fn intent(&self) -> &GatewayConnectIntent;
     pub fn into_parts(self) -> (tokio::net::TcpSocket, GatewayConnectIntent);
 }
@@ -2989,7 +3927,7 @@ state remains wholly outside these first-slice records.
 `CertifiedKeyCandidate::from_pkcs8`. Custody alone calls every snapshot
 metadata method, `is_usable_at`, and the codec's `seal`/`open`; the public TLS
 runtime alone calls crate-private `server_config`.
-`GatewayAdapters::host(kek)` constructs one codec over the boot-probed
+`GatewayAdapters::host(kek, clock)` constructs one codec over the boot-probed
 `Kek`; `boot_server` G2 passes it to `UnboundGatewayBuilder::new`. No adapter receives a generic
 AAD string or an untyped key identifier.
 
@@ -3104,6 +4042,7 @@ impl GatewayRuntimeDependencies {
         dataplane: Arc<dyn GatewayConnectDataplane>,
         client_mtls: Arc<dyn GatewayClientMtls>,
         identity_lifecycle: Arc<dyn GatewayIdentityLifecycleControl>,
+        relay: Arc<dyn GatewayRelay>,
     ) -> Self;
 }
 pub struct GatewayBuilder { /* sealed typestate */ }
@@ -3445,6 +4384,8 @@ pub(crate) struct GatewayAdmission {
     budget: Arc<GatewayAdmissionBudget>,
 }
 impl GatewayAdmission {
+    pub(crate) fn new(budget: Arc<GatewayAdmissionBudget>) -> Arc<Self>; // DG-10, Application conformance bullet
+    pub(crate) fn budget(&self) -> &Arc<GatewayAdmissionBudget>;
     pub(crate) fn acquire_connection(
         &self,
         now: UnixInstant,
@@ -3993,8 +4934,9 @@ remain typed `UnixInstant` using its existing quoted seconds+nanos JSON form.
 serde form and declares `#[schema(value_type = String)]`; every DTO
 `UnixInstant` field carries the same String schema override.
 
-Public TLS is TLS1.3/exact SNI/ALPN `http/1.1`, no default cert/0-RTT/tickets.
-Hyper solely parses framing. Only origin-form request targets are accepted;
+Public TLS is TLS1.3/exact SNI/ALPN `http/1.1`, the spiked cipher-suite set (Contract of the legs; P-12), no default cert/0-RTT/tickets
+(handshake in userspace, record layer in the kernel: [Kernel relay data path](#wave-design--ref-kernel-relay-data-path-and-driven-ports-g1)).
+The gateway's own head parser alone derives framing (ADR-0245). Only origin-form request targets are accepted;
 CONNECT plus authority-, absolute- and asterisk-form are 400, so the gateway
 cannot become a tunnel or forward proxy. Exactly one syntactically valid Host
 is required. An explicit port is accepted only when it is 443 and is removed
@@ -4007,7 +4949,7 @@ query is preserved upstream but does not participate in Route match. Miss is
 On both request and response, the runtime removes `Connection` and every header
 named by its comma-token list plus `Keep-Alive`, `Proxy-Authenticate`,
 `Proxy-Authorization`, `TE`, `Trailer`, `Transfer-Encoding` and `Upgrade`;
-Hyper regenerates legal framing. Trailers are consumed and not forwarded. The
+the gateway regenerates legal framing. Trailers are consumed and not forwarded. The
 upstream `Host` remains the validated public hostname. The request path strips
 all received `Forwarded` and `X-Forwarded-*`, emits no `X-Forwarded-*`, appends
 `Via: 1.1 overdrive`, and adds exactly
@@ -4080,7 +5022,7 @@ Neither operand is percent-decoded, Unicode-normalized or slash-normalized.
 
 `normalize_route_authority` reads `HOST` with `HeaderMap::get_all` and requires
 exactly one value. It rejects non-visible-ASCII bytes, parses the value with
-`hyper::http::uri::Authority`, rejects userinfo (`@`), permits no port or
+`http::uri::Authority`, rejects userinfo (`@`), permits no port or
 explicit port 443 only,
 lowercases the host with ASCII case-folding, then calls
 `PublicHostname::new`. The resulting canonical hostname must equal the typed
@@ -4102,7 +5044,7 @@ the one approved `Forwarded` value. The response function appends the same Via
 value after hop-by-hop removal. Existing Via values are preserved in order
 unless `Connection` explicitly nominated `Via`; the Overdrive value is always
 last. All nonremoved field names and each field's value sequence are preserved.
-Hyper alone regenerates framing after these functions return.
+The gateway alone regenerates framing after these functions return (`HeaderMap` is `http::HeaderMap`).
 
 `overdrive-gateway::runtime::limits::GatewayLimits::first_slice()` is the sole
 host-side limit SSOT and returns exactly:
@@ -4156,11 +5098,11 @@ impl GatewayLimits {
 
 | Ceiling | Exact first-slice value | Basis and sensitivity |
 |---|---:|---|
-| Public connections | 128 | Reuses the accepted pre-authentication concurrency class. At two socket legs this caps the normal gateway tree at 256 fds, below the existing 384-fd envelope for 128 three-leg mTLS intercepts. Lower rejects ordinary bursts sooner; higher increases unauthenticated TLS CPU/fds. |
+| Public connections | 128 | Reuses the accepted pre-authentication concurrency class. An active exchange holds 2 sockets plus up to 4 pipe descriptors (ADR-0246), so the gateway tree reaches 768 descriptors at 128 exchanges, above the existing 384-fd envelope for 128 three-leg mTLS intercepts; the Tier-3 descriptor check at 128 concurrent exchanges validates the process limit. Lower rejects ordinary bursts sooner; higher increases unauthenticated TLS CPU/fds. |
 | In-flight connects / requests | 128 / 128 | Connect capacity equals both BPF transient-map capacities; HTTP/1.1 has at most one active request per connection. Lower wastes admitted sockets; higher cannot be represented by the maps. |
 | Cleanup-ledger entries | 128 | One slot is reserved per admitted upstream connect before BPF registration, matching connect/map capacity. Lower can refuse a connect while map capacity remains; higher cannot represent additional simultaneously dirty cookies and retains more failed cleanup state. |
-| Request/response head bytes | 32 KiB / 32 KiB | Four times Hyper 1.9's documented 8 KiB minimum; across 128 active connections, the conservative two-head upper envelope is 8 MiB. Lower breaks moderately large cookies/metadata; higher expands slowloris/parser memory. |
-| Request/response header count | 100 / 100 | Uses Hyper 1.9's existing default rather than inventing a divergent parser policy. Lower rejects interoperable clients; higher increases per-field allocation/work. |
+| Request/response head bytes | 32 KiB / 32 KiB | Sized for large cookies and metadata at 32 KiB, enforced by the gateway's own head reader. Across 128 active connections, the conservative two-head upper envelope is 8 MiB. Lower breaks moderately large cookies/metadata; higher expands slowloris/parser memory. |
+| Request/response header count | 100 / 100 | 100 fields sizes the parser's header array. Lower rejects interoperable clients; higher increases per-field allocation/work. |
 | Requests per keep-alive connection | 100 | Bounds how long one retained Gateway Application generation can be extended. Lower increases reconnect/TLS cost; higher delays Route replacement or key-expiry drain. |
 | Request/response body bytes | 16 MiB / 16 MiB | Deliberate first-slice product ceiling, not a measured KPI; streaming makes it bandwidth/abuse containment rather than a whole-body allocation. Lower excludes larger legitimate streams; higher increases per-request occupancy and abuse duration. |
 | Application gate | 30 s | Reuses the accepted no-progress recovery window to bound gateway identity Current and the pre-bind sentinel/actual-frontend connect probe as one absolute attempt. Lower false-times normal convergence/issuance; higher retains a stale staged generation longer. |
@@ -4180,8 +5122,9 @@ consumes `max_inflight_connects`. There is no public field, builder, mutation
 method or deserialization path, so exposing the fixed policy across the
 gateway→dataplane adapter boundary does not create an operator setting.
 
-Both Hyper server and client builders receive their respective
-`max_buf_size`/`max_headers`. Excess public connection closes before TLS;
+The head reader receives `max_request_head_bytes`/`max_response_head_bytes` as the `read_through` limit and
+`httparse` receives a header array of `max_*_headers` entries (the framing contract in the Kernel relay section).
+Excess public connection closes before TLS;
 public TLS timeout closes without HTTP; request-head overflow is 431;
 request-body overflow is 413; public request-head/body no-progress timeout
 before response headers is 408. Global request/connect permit refusal and
@@ -4261,24 +5204,11 @@ pub trait GatewayIdentityLifecycleTarget: Send + Sync {
     fn begin_disable(&self) -> Result<GatewayIdentityEpoch, GatewayIdentityEpochError>;
 }
 
-pub trait GatewayByteStream:
-    AsyncRead + AsyncWrite + Unpin + Send + 'static
-{}
-impl<T> GatewayByteStream for T where
-    T: AsyncRead + AsyncWrite + Unpin + Send + 'static
-{}
-pub struct GatewayUpstreamSeal { _private: () }
-pub struct GatewayUpstream {
-    io: Pin<Box<dyn GatewayByteStream>>,
-}
-impl GatewayUpstreamSeal {
-    pub fn seal_authenticated(
-        &self,
-        io: Pin<Box<dyn GatewayByteStream>>,
-    ) -> GatewayUpstream;
-}
-// GatewayUpstream implements AsyncRead + AsyncWrite by delegating to `io`;
-// it has no public constructor, inner-stream accessor, Clone or conversion.
+// GatewayUpstreamSeal, GatewayUpstream and KtlsLeg are pinned in
+// [Kernel relay data path](#wave-design--ref-kernel-relay-data-path-and-driven-ports-g1):
+// `seal_authenticated(&self, leg: KtlsLeg) -> GatewayUpstream`; `GatewayUpstream` has no public
+// constructor, no AsyncRead/AsyncWrite, no Clone and no conversion; its one consumer is
+// `GatewayUpstream::into_halves`, called by the exchange driver.
 
 #[async_trait::async_trait]
 pub trait GatewayClientMtls: Send + Sync {
@@ -4298,12 +5228,14 @@ pub enum GatewayClientMtlsError {
     PeerCertificateMissing,
     PeerSpiffeShape,
     PeerSpiffeMismatch { expected: SpiffeId, actual: SpiffeId },
+    /// Raised after the peer equality held: the kernel refused to arm TLS on the authenticated socket.
+    Arm(KtlsArmError),
 }
 
 // overdrive-sim
-pub struct SimGatewayClientMtls { /* scripted peer + one seal */ }
+pub struct SimGatewayClientMtls { /* scripted peer + one seal + the Sim relay backend */ }
 impl SimGatewayClientMtls {
-    pub fn new(seal: GatewayUpstreamSeal, clock: Arc<dyn Clock>) -> Self;
+    pub fn new(seal: GatewayUpstreamSeal, relay: Arc<SimGatewayRelay>, clock: Arc<dyn Clock>) -> Self;
     pub fn set_peer(&self, peer: SpiffeId);
 }
 // Its GatewayClientMtls implementation returns GatewayUpstream only after the
@@ -4581,9 +5513,11 @@ impl HostGatewayClientMtls {
         identity: GatewayClientIdentityAccess,
         seal: GatewayUpstreamSeal,
         limits: GatewayLimits,
+        relay: Arc<HostGatewayRelay>,
     ) -> Self;
 }
-pub struct HostGatewayClientMtlsFactory; // implements GatewayClientMtlsFactory by calling `new`
+pub struct HostGatewayClientMtlsFactory { /* Arc<HostGatewayRelay> */ } // implements GatewayClientMtlsFactory by calling `new`
+impl HostGatewayClientMtlsFactory { pub fn new(relay: Arc<HostGatewayRelay>) -> Self; }
 ```
 
 File ownership (reconciles the two earlier names): `mtls/gateway_identity.rs`
@@ -4809,10 +5743,11 @@ SpiffeId, presents `[gateway leaf, node intermediate]` (never root), anchors
 verification at only the root, derives rustls's IP `ServerName` from
 `getpeername` on the actual BPF-rewritten fd, validates exactly one URI SAN and
 enforces equality before returning authenticated `GatewayUpstream`.
-Only after that equality succeeds does Host call
-`GatewayUpstreamSeal::seal_authenticated`. The Sim adapter calls it only after
+Only after that equality succeeds does Host arm kernel TLS on the socket through
+`HostGatewayRelay` (ADR-0244; a failed arm is `GatewayClientMtlsError::Arm` and no octet was
+written) and call `GatewayUpstreamSeal::seal_authenticated(KtlsLeg)`. The Sim adapter calls it only after
 its scripted peer equality succeeds. Those are the only two production/test
-call sites; arbitrary byte streams cannot construct, convert into, clone or
+call sites; arbitrary sockets or legs cannot construct, convert into, clone or
 unwrap `GatewayUpstream`.
 It never fabricates AllocationId or uses transparent `InterceptedConnection`/
 kTLS pump. Expiry/loss stops new admission/upstreams; reissue preserves old
@@ -4921,11 +5856,11 @@ unchanged allocation/Service/BPF meanings.
 | ServiceMapHydrator / Dataplane / XDP | backend application/selection | **REUSE HYDRATOR AND `Action::DataplaneUpdateService` UNCHANGED (D1); EXTEND DATAPLANE AND `cgroup_connect4_service`; XDP UNCHANGED** | Ordinary Service-map programming covers VM backends (D4 held); registered cgroup arm + dataplane-prepared upstream socket + receipt (D3, ADR-0243); no selector/raw handler access |
 | `BackendIdAllocator` | endpoint-to-id memo | **EXTEND ONE CRATE-PRIVATE READ; REUSE MONOTONIC NONREUSE** | `existing_id` permits identity-conflict preflight before mutation; allocation/release semantics stay owned by Dataplane |
 | KEK/HKDF/AES-GCM mechanism | key protection | **REUSE MECHANISM, DISTINCT PUBLIC-KEY RECORD/DOMAIN** | Avoid CA/public-key type confusion and subkey reuse |
-| rustls/hyper | TLS/HTTP mechanics | **REUSE LIBRARIES; CREATE PUBLIC RUNTIME** | Operator CA/router are a different trust boundary |
+| rustls | TLS handshake mechanics and `KernelConnection` | **REUSE LIBRARY; CREATE PUBLIC RUNTIME** | Operator CA/router are a different trust boundary; `hyper` is not on the public data path (G1) |
 | `Ca` / `ca_issuance` / IdentityMgr | SVID issue/audit/hold foundations | **REUSE ISSUE/AUDIT; CREATE DEDICATED SLOT** | Allocation holder stays unchanged; no fake AllocationId |
 | `SvidLifecycle` | allocation identity convergence policy | **REUSE POLICY; CREATE GATEWAY SIBLING** | One node slot has different desired/actual/actions |
 | ObservationStore | convergent non-secret status | **EXTEND TWO ROW FAMILIES** | Existing store/LWW mechanism; no new store/event sourcing |
-| `arc-swap`, `tokio-rustls`, `async-trait`, `rustix`, `zeroize`, `x509-parser` | atomic pointer/TLS/object-safe async/safe SO_COOKIE/secret/X.509 mechanics | **PROMOTE LOCKED OSS DEPENDENCIES** | Narrow necessary mechanics; MIT/Apache/ISC-compatible, no proprietary dependency |
+| `arc-swap`, `async-trait`, `rustix`, `zeroize`, `x509-parser` (`tokio-rustls` is no longer promoted: G1 removes it from the public path) | atomic pointer/object-safe async/safe SO_COOKIE/secret/X.509 mechanics | **PROMOTE LOCKED OSS DEPENDENCIES** | Narrow necessary mechanics; MIT/Apache/ISC-compatible, no proprietary dependency |
 
 Contract-shape extension of the Reuse Analysis (the declared universe is the
 only mutation set; everything else is complement-equal):
@@ -4940,11 +5875,11 @@ only mutation set; everything else is complement-equal):
 | ServiceMapHydrator / Dataplane / XDP | **bounded-change**: registered-socket arm of `cgroup_connect4_service`, the two intent/receipt maps, BackendId-to-identity association and upstream-socket preparation; hydrator, `Action::DataplaneUpdateService`, SERVICE/BACKEND/REVERSE_NAT contents, LOCAL_BACKEND_MAP behaviour for unregistered sockets and XDP preserved | state-delta DST, BPF POD tests, real-kernel complement probe (unregistered socket byte-for-byte unchanged) |
 | BackendIdAllocator | **bounded-change**: read-only `existing_id`; allocator state unchanged by preflight | allocator snapshot PBT + conflict no-mutation integration |
 | KEK/AEAD mechanism | **bounded-change**: distinct public-key HKDF/AAD/record; CA records preserved | tamper/fault integration + domain-separation golden |
-| rustls/hyper | **bounded-change** per public/upstream connection and its finite budget | protocol matrix, wrong-peer integration and wire AT |
+| rustls + `GatewayRelay` | **bounded-change** per public/upstream connection and its finite budget (two sockets, up to four pipe descriptors) | protocol matrix, wrong-peer integration, relay Tier-3 suite and wire AT |
 | tracing + CLI compact `EnvFilter` subscriber | **unbounded-preservation** of runtime state with one connector-owned DEBUG occurrence after validated receipt/identity resolution | append-only existing Tier-3 process log; no status/store/ring-buffer state |
 | CA issue/audit + IdentityMgr | **bounded-change**: one gateway-subject audit output; allocation holder untouched | audit-before-hold integration + allocation-held-set complement |
 | SvidLifecycle | **pure-function** sibling inputs -> gateway Actions/View only | paired lifecycle PBT + existing workload reconciler byte equality |
-| arc-swap/tokio-rustls/async-trait/rustix/zeroize/x509-parser | **bounded-change** inside the owning snapshot/connection/syscall/secret values | API/trybuild guards, parser/syscall fault matrix and drain tests |
+| arc-swap/async-trait/rustix/zeroize/x509-parser | **bounded-change** inside the owning snapshot/connection/syscall/secret values | API/trybuild guards, parser/syscall fault matrix and drain tests |
 
 The mandatory CREATE NEW challenge is satisfied: no new component duplicates an
 existing owner, and the new crate adds no deployment unit. `cargo xtask
@@ -4980,7 +5915,7 @@ the table is the final dormant-surface gate:
 | `IntentSubscriptionEvent` and revised `IntentStore::watch` | LocalStore and Sim | every existing watcher plus Route/custody/application subscribe-before-list loops |
 | `SocketCookie`, `GatewayIdentityEpoch`, `CertifiedKeyGeneration`, `CertificateFingerprint` constructors/accessors | dataplane-internal socket reader, gateway slot, certified-key candidate/record decode | BPF adapter (`open_upstream`, receipt), lifecycle/action dispatch, custody/application/status respectively |
 | `CertifiedKeyCandidate`, install command/outcome/errors and `PublicCertifiedKeyCustodyHandle::{id,install,record_install_failure,snapshot,subscribe}` | manual source/custody owner | manual source calls both mutations; Route resolution calls `id`; application owner calls snapshot/subscribe. There is no custody `withdraw`. |
-| `PublicCertifiedKeyAeadCodec::{new,seal,open}` and protection context/record/envelopes | `GatewayAdapters::host(kek)` (same `Kek` as `NodeAdapters::host`, boot-probed) | custody only; feature-gated `with_random_fill_for_test` is called only by cross-crate codec integration; future #57 reuses custody `install`, never codec directly |
+| `PublicCertifiedKeyAeadCodec::{new,seal,open}` and protection context/record/envelopes | `GatewayAdapters::host(kek, clock)` (same `Kek` as `NodeAdapters::host`, boot-probed) | custody only; feature-gated `with_random_fill_for_test` is called only by cross-crate codec integration; future #57 reuses custody `install`, never codec directly |
 | `PublicCertifiedKeySnapshot` non-secret accessors plus crate-private TLS capability | custody only | application generation/status use metadata; public TLS runtime alone uses `server_config` |
 | `GatewayApplicationGenerationId`, private-constructor `GatewayAppliedGeneration`, retention and non-Clone leases | application owner after all gate inputs | private admission, connection/request runtime and application status only |
 | `UnboundGatewayBuilder` (`new`, `into_builder`), `GatewayBuilder`, `GatewayRuntimeDependencies`, `StartedGateway`, `GatewayUpstreamSeal` | `boot_server` (G2-G4) | same composition call chain; the seal is passed only to Host/Sim mTLS; no alternate factory/partial start |
@@ -4988,7 +5923,9 @@ the table is the final dormant-surface gate:
 | `GatewayControl::{routes,application_status,certified_key_status}` | `StartedGateway::into_parts` | Route POST/DELETE and operator-mTLS Gateway GET only; no task/admission/key access |
 | Status rows/envelopes/write variants/kinds/point reads and wire bodies | custody/application writers plus LocalStore/Sim adapters | `GatewayControl` and Gateway GET projection only |
 | `GatewayLimits::first_slice` and read-only accessors | one call in `boot_server` | builder/runtime, `HostGatewayClientMtls` and BPF capacity assertion; no deserializer/builder/mutator |
-| `normalize_route_authority`, `rewrite_request_headers` and `rewrite_response_headers` | public HTTP connection/request path | Route selection and upstream/downstream Hyper framing; all three are crate-private and their source-local PBT calls the same production functions |
+| `normalize_route_authority`, `rewrite_request_headers` and `rewrite_response_headers` | public HTTP connection/request path | Route selection and the gateway's head serialiser/framing (ADR-0245); all three are crate-private and their source-local PBT calls the same production functions |
+| `GatewayRelay`, `KtlsLeg`/`KtlsReadHalf`/`KtlsWriteHalf`, `AcceptedPublicLeg`, relay error taxonomy | `HostGatewayRelay` (`overdrive-dataplane::gateway_relay`) and `SimGatewayRelay`, built once in `GatewayAdapters::host` / `SimGatewayAdapters` | `GatewayUpstreamConnector` (via the client mTLS adapter), the listener (`accept_public`, taking `Arc<rustls::ServerConfig>`), the exchange driver (head/body methods), the gate task (`probe`) |
+| `ExchangeMachine` and its seven accessors | exchange driver | the exchange driver and the Quint conformance driver (all transitions and accessors) |
 | `GatewayIdentityView` | `GatewayIdentitySlot` | lifecycle hydration and status only; `GatewayIdentityView` has no `subscribe` |
 | `GatewayIdentityLifecycleControl::{ensure_current,current,subscribe,disable_after_drain}` | control-plane adapter over slot/broker plus named Sim adapter over Sim target/real broker/Sim Clock | active application owner in production and seeded application composition in Sim |
 | `GatewayIdentityActionComposition`/target and Sim target | Enabled/Disabled AppState composition | every exact action-shim dispatcher and only the Issue/Drop arms; no private-material getter |
@@ -4996,7 +5933,7 @@ the table is the final dormant-surface gate:
 | `GatewaySvidLifecycle::canonical`, factory, Any* variants and Issue/Drop actions | control-plane canonical registration | existing reconciler runtime/broker/exhaustive dispatch and action shim only |
 | `GatewayClientMtls::authenticate`, opaque `GatewayUpstream`, Host/Sim mTLS constructors | `GatewayClientMtlsFactory` (Host: `HostGatewayClientMtlsFactory` in `GatewayAdapters::host`; Sim: `SimGatewayClientMtlsFactory`) called by `boot_server` G2 | private connector readiness probe and request path; only successful exact-peer adapters hold the unforgeable seal needed to construct the authenticated stream |
 | `gateway.upstream.receipt.validated` tracing occurrence | real `GatewayUpstreamConnector` only, after exact receipt validation and selected-identity resolution when applicable | existing tracing subscriber plus append-only `AT-PIG-E2E-1` process-log capture; no production reader, state/status projection or duplicate adapter emitter |
-| `Invariant::{GatewayApplicationGenerationLifecycleIsSafe,GatewayApplicationShutdownConverges}` and evaluator functions | DISTILL scaffolds enum/canonical/evaluator/exhaustive-dispatch shapes plus ignored direct bodies; pending variants are absent from `Invariant::ALL` | typed ignored bodies alone call `Harness::only(variant)` until DELIVER activation; after real owners are GREEN, activation key `DELIVER-PIG-GATEWAY-APPLICATION-INVARIANTS` makes direct tests GREEN before adding both variants to the default catalogue |
+| `Invariant::{GatewayApplicationGenerationLifecycleIsSafe,GatewayApplicationShutdownConverges}` and evaluator functions | DISTILL scaffolds enum/canonical/evaluator/exhaustive-dispatch shapes plus ignored direct bodies; pending variants are absent from `Invariant::ALL` | typed ignored bodies alone call `Harness::only(variant)` until DELIVER activation; after real owners are GREEN, activation key `gateway-application-invariants` makes direct tests GREEN before adding both variants to the default catalogue |
 
 The same audit removes the two previously dormant proposals:
 `PublicCertifiedKeyCustodyHandle::withdraw` does not exist, and
@@ -5022,8 +5959,9 @@ source.
 | Rust | workspace edition 2024, MSRV 1.88 | Existing implementation language |
 | Tokio | workspace 1 | Existing runtime, cancellation and bounded task ownership |
 | async-trait | workspace 0.1 | Apache-2.0/MIT; object-safe async driven ports used as `Arc<dyn ...>` |
-| hyper / hyper-util | lock 1.9.0 / 0.1.20 | MIT; strict HTTP/1.1 parser/client and Tokio IO adapter |
-| rustls / tokio-rustls | lock 0.23.39 / 0.26.4 | Apache-2.0/MIT; public TLS 1.3, exact-SNI config per connection |
+| httparse / http | lock 1.10.1 / existing (direct dependencies of `overdrive-gateway`) | MIT/Apache-2.0; message-head tokenizing (the parser `hyper` itself uses) and `HeaderMap`/`Authority` types; hyper, hyper-util and tokio-rustls are not used on the public data path |
+| rustls | lock 0.23.39 | Apache-2.0/MIT/ISC; unbuffered handshake API, `kernel::KernelConnection` (rekey), public TLS 1.3 exact-SNI config per connection, AES-GCM suites only |
+| libc (`overdrive-dataplane` only) | workspace 0.2 | MIT/Apache-2.0; `setsockopt(TCP_ULP/TLS_TX/TLS_RX)`, `recvmsg` control messages, `splice`, `pipe2`/`F_SETPIPE_SZ` in the one `unsafe` module `gateway_relay::sys` (rustix has no TLS cmsg surface) |
 | tracing / tracing-subscriber | existing workspace pins and CLI compact `EnvFilter` subscriber | Existing structured occurrence path; one DEBUG connector event, no new logging backend/sidecar |
 | ring | workspace 0.17 | ISC/OpenSSL; honest current provider for key match/AEAD; no FIPS claim |
 | rustix | workspace 1; add safe `net` beside existing `std,fs` | Apache-2.0/MIT; `rustix::net::sockopt::socket_cookie`, preserving `overdrive-host`'s `#![forbid(unsafe_code)]` |
@@ -5071,9 +6009,11 @@ pub(crate) enum GatewayApplicationSimInput {
 }
 
 pub(crate) enum GatewayApplicationSimFault {
-    /// Holds the Sim dataplane's `probe`/`connect` completion for one frontend
-    /// (a driven-port fault on `SimGatewayConnectDataplane`; D2 replaces demand
-    /// completion with the connect-probe gate).
+    /// Holds the connect probe's completion for one frontend, parked in
+    /// `GatewayClientMtls::authenticate` (a driven-port fault on the Sim client,
+    /// fed by `SimGatewayConnectDataplane`'s `Selected` receipt; a `NoBackend` probe
+    /// cannot be held; Gateway upstream path, DG-9). D2 replaces demand completion
+    /// with the connect-probe gate.
     HoldConnectProbe(ServiceFrontend),
     ReleaseConnectProbe(ServiceFrontend),
 }
@@ -5124,7 +6064,8 @@ Pending registration is exact:
   may name the variants directly and call
   `Harness::new().only(Invariant::<variant>).run(seed)`. Its four complete
   acceptance bodies use exactly
-  `#[ignore = "pending DELIVER activation DELIVER-PIG-GATEWAY-APPLICATION-INVARIANTS"]`.
+  `#[ignore = "pending DELIVER gateway-application-invariants"]` (the descriptive activation key, per
+  `.claude/rules/domain-naming.md`; it is not a roadmap step id).
   Removing that marker while any production owner is still a scaffold produces
   a real RED through `GatewayBuilder`, `GatewayControl`, or `GatewayHandle`.
 - DISTILL authors both evaluator bodies completely. They apply and withdraw
@@ -5145,8 +6086,8 @@ The four direct body names are
 and `twin_shutdown_runs_at_one_seed_have_identical_ordered_observation_traces`;
 no second activation test file is introduced.
 
-The exact DELIVER activation step is
-`DELIVER-PIG-GATEWAY-APPLICATION-INVARIANTS` (“Activate real Gateway
+The DELIVER activation step is identified by the descriptive key
+`gateway-application-invariants` (“Activate real Gateway
 Application lifecycle invariants”). It starts only after the real
 `GatewayApplicationOwner`, current/draining retention owner, listener/
 connection owner and `GatewayHandle` shutdown composition are GREEN through
@@ -5182,9 +6123,9 @@ every seed still contains all mandatory inputs/faults. `ApplyRoute` and
 `WithdrawRoute` drive `GatewayControl::routes`, restart re-composes the same
 durable stores through `GatewayBuilder::start`, and `BeginShutdown` consumes
 the real `GatewayHandle`. Retain/release drives a public TLS connection through
-the active listener. Connect-probe hold/release is implemented only by
-`SimGatewayConnectDataplane` (a driven-port fault carrying the real
-`ServiceFrontend`); it neither invokes a private owner method nor
+the active listener. Connect-probe hold/release is implemented only by the Sim adapters
+(a driven-port fault carrying the real `ServiceFrontend`, parked in the Sim
+`GatewayClientMtls::authenticate`; Gateway upstream path, DG-9); it neither invokes a private owner method nor
 adds a production hook. `SimClock` and the existing Sim identity/dataplane/mTLS
 adapters supply time and effect completion. The seed and generated schedule
 are included in the failure cause, and twin runs at one seed must produce the
@@ -5225,7 +6166,7 @@ replacement state machine.
 | Evidence lane | Required contract |
 |---|---|
 | Pure/PBT | `PathMatch::matches_raw_path`, `runtime::routing::normalize_route_authority` and both `runtime::proxy_headers::rewrite_*_headers` functions own the Route-path/authority/header properties; Route/hash laws, receipt matching/cleanup, immutable BackendId identity, gateway SVID lifecycle and finite limit ordering remain in their owning source modules. Every live property carries `/// CONTRACT_SHAPE: pure-function.` |
-| DST | `GatewayApplicationGenerationLifecycleIsSafe` owns staged/current/draining, stale completion, withdrawal and restart safety; `GatewayApplicationShutdownConverges` owns joined shutdown convergence. DISTILL scaffolds their typed ignored direct paths but excludes both from `Invariant::ALL`; `DELIVER-PIG-GATEWAY-APPLICATION-INVARIANTS` activates them only after real owners are GREEN and direct bodies pass. Registered/unregistered isolation, the typed NoBackend/unavailable outcome (ADR-0242), connector cleanup and key/identity fail-closed complements remain registered with their owning component evidence. |
+| DST | `GatewayApplicationGenerationLifecycleIsSafe` owns staged/current/draining, stale completion, withdrawal and restart safety; `GatewayApplicationShutdownConverges` owns joined shutdown convergence. DISTILL scaffolds their typed ignored direct paths but excludes both from `Invariant::ALL`; `gateway-application-invariants` activates them only after real owners are GREEN and direct bodies pass. Registered/unregistered isolation, the typed NoBackend/unavailable outcome (ADR-0242), connector cleanup and key/identity fail-closed complements remain registered with their owning component evidence. |
 | In-process integration | Real stores/Route/custody/application/status; Sim connect/identity/mTLS equivalence (the host/Sim `GatewayConnectDataplane` equivalence test); typed boot/shutdown and concurrent retained generations; production `ServerHandle` ordering. Rust tests do not spawn the product binary. |
 | `AT-PIG-E2E-1` recurring production-composition test (native metal) | An in-process Rust test that boots the production composition (`run_server` with the real `NodeAdapters::host` and `GatewayAdapters::host`, no `*_override`) on the native x86_64 KVM host via `cargo xtask metal run --` (the `tests/conformance` crate declares only the `integration-tests` feature; the test is named `native_metal_kvm_public_ingress_gateway_*`, carries a reasoned `#[ignore]`, and is activated only by `tests/conformance/run-native-metal.sh`, which runs `--features integration-tests --run-ignored ignored-only -E 'test(/^native_metal_kvm_/)'`; no `kvm-tests` feature exists in that crate), deploys a VM `Service` and the Route through the exported server handler and its public API, and makes the external TLS1.3/HTTP1.1 request over a real socket. It does not spawn the `overdrive` binary (`.claude/rules/testing.md` § "Classify external execution"). Placement is `tests/conformance` because it crosses the gateway, control-plane, dataplane and worker owners and is observed through the exported server handler; the subtree `CLAUDE.md` defines composition. Per completed request it reads the `gateway.upstream.receipt.validated` occurrence from an in-process tracing capture layer: Selected proves the exact socket cookie, ServiceKey components, BackendId and resolved expected-peer SpiffeId before the exact-peer mTLS/streamed-response evidence; NoBackend proves the same cookie/ServiceKey with structurally absent selected-only fields before the 503. It is not an expectation. |
 | Tier 3 (native metal) | The production connector occurrence replaces timing-based receipt-map polling and strace as the transient receipt/identity oracle. Real-kernel complements: registered-socket selection through the attached `cgroup/connect4` (V-GW-1..5), unregistered socket nonmutation (`LOCAL_BACKEND_MAP` behaviour, XDP), the packet entry (`SO_MARK` + `127.0.0.1` source → table 100 → TPROXY → leg-C) with the captured leg-B/leg-C protected segment showing TLS 1.3 records (not a workload veth), kTLS (`ss -K`), wrong-valid-peer and final cleanup. Stable map/attachment cleanup checks may continue but cannot claim a consumed receipt's values. |
@@ -5397,11 +6338,10 @@ boundary, production composition and non-substitution rule.
 
 ### Full-stack handoff status
 
-The reconstructed DESIGN is the final ADR set 0220-0243 (system, Route, Domain
-and Application decisions; numbering per [`adr-renumbering.md`](adr-renumbering.md)) plus this document. It is PROPOSED against main
+The reconstructed DESIGN is the final ADR set 0220-0246 (system, Route, Domain
+and Application decisions, plus the G1 data-path decisions 0244-0246; numbering per [`adr-renumbering.md`](adr-renumbering.md)) plus this document. It is PROPOSED against main
 549d78fa6 and is not an approved handoff until the user confirms the D5 "New
-public surface" list and rules on the BLOCKING proposals P-2, P-9 and P-10 (the optional P-1, P-3, P-4, P-6 and
-the P-8 simplification may be ruled later). The contract-shaping items V-GW-1..5 have run on native metal; the
+public surface" list (items 1-11 and 13; item 12 reconfirmation) and rules on the BLOCKING proposals P-2, P-9 and P-10 (the optional P-1, P-3, P-4, P-6, the P-8 simplification and P-16 may be ruled later; P-12, P-13a-d, P-17 and P-18 BLOCK DISTILL: the design body assumes their recommended options and none takes effect until the user rules). The contract-shaping items V-GW-1..5 have run on native metal; the
 residuals are source-settled or DISTILL native obligations (see Contract-shaping validation items). The 2026-09-13 approval (preserved at git ref `backup/research-ingress-gateway-pre-reconstruct`) covers the decisions carried unchanged (class 1, including item 12 of the D5 list, reconfirmed on main); the reconstructed and changed parts need this review plus the user's D1-D5 rulings and the blocking P-items. The cgroup-BPF hook—not XDP—
 selects the host-originated gateway socket; XDP wire ingress remains unchanged.
 The Gateway Application never programs, waits for or observes backend state;
@@ -5409,6 +6349,16 @@ ordinary `ServiceMapHydrator` programming covers VM backends (D1). Public 404,
 NoBackend 503 and internal 502 are active exact
 mappings. Manual Public Certified Key is the only producer; #57 ACME remains
 later and additive.
+
+**Questions for the user (outside the P-table).**
+1. Q-1: should the appliance kernel image (ADR-0068) also carry the v7.3 `tls_sw_splice_read` fix, in addition to the ADR-0246
+   pipe invariant? The design does not need it; it is an image decision.
+2. Abstraction in the Quint model: chunk framing (`ChunkedOpen`, `request_chunked_end`, `response_chunked_end`) is not modelled
+   and is covered by property tests only. Say if a chunked scenario must be in the model.
+3. `relay_ktls` (public-leg lock exclusion; 3 of the 12 relay checks): the user may rule that the lock is covered by A-K5 plus the
+   Tier-3 check (obligation 16(b)) and drop the module in one cut.
+4. The relay passes no `SPLICE_F_MORE`, a configuration the spike did not run; Tier-3 obligation 16(j) validates it after
+   approval. Tiny-event streaming on one connection is the P-17 corner case.
 
 `AT-PIG-E2E-1` is the first recurring production-composition acceptance
 boundary, not an expectation or spike. No isolated scratch
@@ -5459,13 +6409,15 @@ native-metal real VM Service through leg-C and vsock. No obligation spawns the
 11. Receipt/intent correlation: no residue after cleanup; restart destroys receipts; BackendId identity
     immutable and readable only after the outer swap commits. Tier 1 plus Tier 3.
 12. Quint conformance (`.claude/rules/testing.md` § "Quint conformance"): specification directory `specs/quint/public-ingress-gateway/`
-    (modules `gateway_identity`, `gateway_application`, `selection_receipt`); one quint-connect driver per module in the owning
+    (conformance modules `gateway_identity`, `gateway_application`, `selection_receipt` and `relay_exchange`; `relay_ktls` is
+    model-only and has no driver); one quint-connect driver per conformance module in the owning
     crate's `src/` behind `#[cfg(all(test, feature = "integration-tests"))]` (gateway_identity: `overdrive-control-plane`, `src/gateway_identity_lifecycle/quint_gateway_identity.rs`, reaching the
-    `pub(crate)` dispatch functions in-crate; gateway_application: `overdrive-gateway`; selection_receipt:
+    `pub(crate)` dispatch functions in-crate; gateway_application: `overdrive-gateway`, `src/application/quint_gateway_application.rs`, with test-local doubles of the gateway-crate driven ports because `overdrive-sim` cannot satisfy crate-local traits in the unit-test build (DG-7); selection_receipt:
     `overdrive-dataplane`, `src/quint_selection_receipt.rs`, owner = the real `EbpfDataplane` on native metal, bound runs
     `commit_then_select`, `conflicting_alloc_rejected`, `restart_destroys_receipts` over the coarsened `receipt_conf` main,
     see Formal protocol model; the remaining `selection_receipt` runs and hazards are model-checked and covered at Tier 3 as stated
-    there); every driver has `#[quint_test]` for each named
+    there; relay_exchange: `overdrive-gateway`, `src/runtime/http1/quint_exchange.rs`, owner = the pure `ExchangeMachine`, seven
+    bound runs, see obligation 17); every driver has `#[quint_test]` for each named
     run in the Formal protocol model section and `#[quint_run]` randomized traces; every action handler calls the pinned
     driving port; `State` projects only the pinned accessors. Tier 1 conformance (no `quint` CLI/REPL).
     The `gateway_application` module covers only drain/supersession; Route+key coherence, bind gating and
@@ -5479,7 +6431,52 @@ native-metal real VM Service through leg-C and vsock. No obligation spawns the
     The DISTILL scaffold table below names only `gateway_identity.rs` for both and must be corrected; the
     outcome registry artifact `gateway_client.rs` is unchanged.
 
-Fault stimuli are injected through driven ports only (Sim dataplane/identity/mTLS, probe hold/release); the
+16. **G1 relay (Tier 3 on native metal unless stated; oracles are bytes at a real rustls peer, `/proc/net/tls_stat` deltas
+    and the typed outcomes).** (a) A spliced body through an `Content-Length` and a chunked exchange arrives byte-exact, with
+    the next request head untouched (keep-alive over two exchanges). (b) A peer KeyUpdate (requesting and not requesting) inside
+    a head, inside a chunk-size line, at a message boundary and inside a body: octets exact, `TlsRxRekeyOk`/`TlsTxRekeyOk` advance,
+    `TlsDecryptError == 0`, nothing forwarded; a negative control without the re-arm stays `EKEYEXPIRED`; a KeyUpdate request while a
+    large splice-out is in flight (the lock, A-K5). (c) A NewSessionTicket
+    before the first upstream response and a `close_notify` mid-body, mid-head and after the response (clean end only when the
+    framing says so). (d) Backpressure: a stalled public reader freezes the upstream sender within the socket buffers and
+    resident memory stays flat; a stalled body hits `body_no_progress_deadline`; a trickling `Content-Length` response is delivered
+    to the client without waiting for the next octets (each splice-out call ends its TLS record; no `SPLICE_F_MORE`). (e) 128 concurrent exchanges: descriptor count,
+    memory, no leaked pipe or socket after drain. (f) The relay probe is refused by each substrate lie (Sim: Tier 1; real: the honest pass, and
+    ULP absent when the metal image builds `tls` as a module). **Real-kernel ULP-absent stimulus (no production seam):** the
+    test (i) requires `/sys/module/tls` to exist with refcount 0 (else it asserts only the honest pass and records that the lie
+    is covered at Tier 1), (ii) runs `rmmod tls` under a drop guard whose cleanup is `modprobe tls` followed by a verified read of
+    `/sys/module/tls` and `/proc/net/tls_stat`, (iii) re-executes its own test binary (never the `overdrive` binary) as a child
+    that calls `unshare(CLONE_NEWUSER)` before it starts a runtime and then calls `HostGatewayRelay::probe`. The child lacks
+    `CAP_NET_ADMIN` in the initial user namespace, so `__tcp_ulp_find_autoload` does not `request_module` and `tcp_set_ulp`
+    returns `-ENOENT` (`net/ipv4/tcp_ulp.c:41-48, 163-165 @ v7.0`; the autoload is attempted only `capable(CAP_NET_ADMIN)`). Expected result:
+    `RelayProbeError::Arm(KtlsArmError::UlpInstall { errno: ENOENT })`. Without the capability drop the root test would
+    autoload the module and pass, which would test the autoload, not the lie. Safety: the run holds the exclusive metal host
+    lease and the dataplane integration binary is in the `host-kernel-shared` group, so no other kTLS user runs in between;
+    `rmmod` fails (and the test skips to the honest pass) if any kTLS socket exists. (g) The pipe floor: `PipeCapacity` and the typestate laws (unit). (h) Early response with a
+    lingering close (P-18): the client receives the 413 or 401, not a reset, for an early origin response and for each
+    pre-exchange rejection (413 on declared length, 400, 404, 421, 431, 505), with a body sent after the rejection; the discard
+    ends at the peer's close_notify, at `max_request_body_bytes`, and at the deadline; a drain during a discard ends it at the drain
+    deadline. Also: close-delimited response (P-13d), interim `100`, `Expect`,
+    oversize head, framing rejections, request-body overflow with and without a sent response head, upstream closes before the head and
+    mid-body, pipe-creation failure, and the typed 502/503/413/431/408/400/421/505 mapping, each with its pre-/post-head projection.
+    (i) Pipe lifetime: a keep-alive connection waiting for its next request holds no pipe (descriptor count), across a chunked body
+    and a `Content-Length` body. (j) The relay runs without `SPLICE_F_MORE`, a configuration the spike did not run (findings (c)
+    used the flag while `remaining > 0`): the exact-length, chunked, trickling-body and keep-alive cases of (a) and (d) are
+    re-run in that configuration with byte-exact octets and the next head untouched, and the record sizes at the peer are
+    recorded; the kernel cites of Contract item 7 are re-derived with `git show v7.0:<path>` against `vendors/linux`.
+17. **G1 pure and seeded.** Tier 1: framing decision, head validator, chunk-line parser, `rewrite_*` and `normalize_route_authority`
+    are pure PBT; `ExchangeMachine` transitions are PBT-driven. Quint conformance: the `relay_exchange` driver in
+    `overdrive-gateway` replays the seven `relay_exchange` named runs with `#[quint_test]` and randomized traces with `#[quint_run]`,
+    over the single action-to-method table and the accessor table of "Pinned observable projection"; `relay_ktls` has no driver
+    (model-only; its Tier-3 oracle is obligation 16(b)). Seeded `overdrive-sim` runs drive the exchange driver over `SimGatewayRelay`
+    with scripted peer events (KeyUpdate, NewSessionTicket, close_notify, alert, reset), upstream close
+    before the response head, and drain/force-abort at the drain deadline, asserting no octet past a message boundary, no reuse
+    after drain, and zero residue (leases, pipes, legs) after every outcome.
+18. **Host/Sim equivalence** for `GatewayRelay` (`gateway_relay_equivalence.rs`) over the faults the Host can also produce (peer
+    events, deadlines, short counts, backpressure). Presenting a lying substrate (ULP, cipher, splice exactness, pipe floor) belongs
+    only to the probe gold test; the shape of that test support is DISTILL's.
+
+Fault stimuli are injected through driven ports only (Sim dataplane/identity/mTLS/relay, probe hold/release); the
 production path authors the resulting observations. Each scenario records contract, owner path, stimulus,
 oracle and tier, per `.claude/rules/testing.md` § "DISTILL — prove composed system behavior".
 
@@ -5491,6 +6488,27 @@ is in `tests/conformance`. Quint conformance runs under `integration-tests` via
 the repository's quint runner (`cargo xtask lima run --` where a Lima VM exists,
 otherwise `cargo xtask metal run --`); real-kernel and VM evidence runs via
 `cargo xtask metal run --`.
+
+### DISTILL content made stale by G1 (for the acceptance designer to reconcile; not edited here)
+
+- Sections "DISTILL / Reconciliation and warnings", "Scenario list and tags", "Cross-boundary scenario obligations", "Adapter
+  coverage", "Scaffolds", "Test placement", "Driving-adapter coverage", "Completeness audit", "Pre-DELIVER RED classification":
+  every scenario or scaffold that names the hyper-based public runtime, `GatewayByteStream`, the `Pin<Box<dyn ..>>` form of
+  `GatewayUpstream`, the old `SimGatewayClientMtls::new(seal, clock)` or `HostGatewayClientMtlsFactory` unit struct, and the
+  "Public HTTP runtime (hyper)" adapter-coverage row (S-PIG-12..17, 39, 40, 70).
+- Scenarios S-PIG-12..17 (HTTP matrix), the limits scenarios and the drain scenarios need the framing, exchange-boundary,
+  control-record and pipe/backpressure cases of obligations 16 and 17; scenario counts and the owning-crate column change
+  (`overdrive-gateway` runtime, `overdrive-dataplane::gateway_relay`, `overdrive-sim` relay).
+- Scaffold file ownership (obligation 15) gains `overdrive-dataplane/src/gateway_relay/`, `overdrive-gateway/src/runtime/http1/`
+  and the Sim relay; the Quint driver table gains `relay_exchange` (QC-4) in `overdrive-gateway` (`relay_ktls` has no driver).
+- The "drive a public TLS connection through the active listener" step of the seeded Gateway Application invariants (obligation
+  13) runs over `SimGatewayRelay` in Tier 1; the real kTLS path is Tier 3.
+- `distill/code-reconciliation-plan.md`: every batch that touches the public runtime, the gateway-client mTLS adapter, the
+  `GatewayAdapters`/`GatewayClientMtlsDeps`/`GatewayRuntimeDependencies` signatures, `GatewayLimits` documentation, the
+  Cargo dependency list (`hyper`, `hyper-util`, `tokio-rustls` out; `httparse`, `http` in) and the
+  fixture list; the hyper-specific main-API pins.
+- E15 and `AT-PIG-E2E-1` keep their composition and oracles; their evidence additionally needs a kTLS-armed leg per request
+  (`ss -K` / `tls_stat`) and the relay probe event.
 
 ## Wave: DESIGN / [REF] Application outcomes
 
@@ -5509,24 +6527,68 @@ unresolved outcome collision is carried into DISTILL.
 
 ## Wave: DISTILL / [REF] Reconciliation and warnings
 
-**DISTILL status: in progress — code reconciliation pending (phase 2).** This block specifies the acceptance suite for the reconstructed DESIGN (final ADR set 0220–0243, this document's DESIGN part). No test, scaffold, example or expectation file has been written yet; every "Scaffolds" and "RED classification" statement below is a plan, not an execution result. The full working plan with per-scenario main-API pins, batch file lists and cross-batch compile order is [`distill/code-reconciliation-plan.md`](distill/code-reconciliation-plan.md) (not a delivery artifact). **All phase-2 code batches (B1–B5) wait for DESIGN approval**: the user's rulings on the D5 shape confirmation (items 1–11 and item 12) and on the three blocking proposals P-2, P-9 and P-10. Until then DISTILL is document and plan only.
+**DISTILL status: specification reconciled with the revised G1 DESIGN (2026-11-02: kernel relay data path, ADR-0244/0245/0246, rewritten ADR-0235/0239, `specs/quint/public-ingress-gateway/relay_exchange.qnt` and `relay_ktls.qnt`); code reconciliation pending (phase 2).** This block specifies the acceptance suite for the reconstructed DESIGN (final ADR set 0220–0246 and this document's DESIGN part, including "Kernel relay data path and driven ports (G1)"). No Rust test, scaffold or shell runner body has been written; every "Scaffolds" and "RED classification" statement below is a plan, not an execution result. The one artifact authored outside this document is the E15 expectation claim (`verification/expectations/E15-public-ingress-operator-journey/README.md` plus its `execution-substrate` file and the INDEX row, status `pending`, no evidence, no runner). The full working plan with per-scenario main-API pins, batch file lists and cross-batch compile order is [`distill/code-reconciliation-plan.md`](distill/code-reconciliation-plan.md) (rewritten for G1; not a delivery artifact). **All phase-2 code batches wait for DESIGN approval**: the user's rulings on the D5 shape confirmation (items 1–11, item 12 and the G1 surface item 13) and on the three blocking proposals P-2, P-9 and P-10, and the G1 proposals that block DISTILL (below). Item 13 now also carries the architect's **pending-user-confirmation list** that closes DG-1..DG-5 and DG-8..DG-10 (`KtlsLeg::from_armed`, `backend_mut`, `ThroughBytes::new`, `HostGatewayRelay::new`, `SimGatewayRelay::new`, `SimGatewayClientMtlsFactory::new`, `SimGatewayAdapters`, `ExchangeMachine::new`, `BodyFraming`, `FramingViolation`, `PreparedUpstream::new`, `GatewayAdmission::new`, `GatewayAdmission::budget`, `GatewayBuilder::start_with`); DISTILL scaffolds those shapes at specification level and they gate phase 2 with the rest of item 13. Item 13 also lists the **DG-7 placement ruling** (the QC-2 driver lives in `overdrive-gateway` with driver-local doubles of the four gateway-crate ports; closed by the architect, pending user confirmation). **DESIGN gaps DG-8, DG-9 and DG-10 are closed by the architect** (`PreparedUpstream::new(socket, intent)`; the probe park point is `GatewayClientMtls::authenticate` with entries identified by minted `BackendId`/`SpiffeId`; the admission is injected through crate-private `GatewayAdmission::new`, `budget()` and `GatewayBuilder::start_with`); DG-8 and DG-10 add item 13 entries that await the user's confirmation, DG-9 adds none. **DESIGN gap DG-11 is open** (the cleanup-ledger reservation point conflicts with ADR-0243's atomic `open_upstream`; returned to the architect and the user, Completeness audit item 7; the ledger scenarios S-PIG-37 and S-PIG-53 are authored for the current DESIGN text and tagged `@pending:DG-11`). **DESIGN gap DG-12 is open** (the DESIGN has no listener-port seam and no Sim listener, so every gateway composition that reaches promotion binds the real TCP/443; paragraph below, Test placement). **Blocker B-1** (pre-G1; needs a USER ruling; not resolved here): `gateway_identity.qnt` models a waiting `disable` (`settle_ok`/`settle_timeout`) while D5 (c) and ADR-0225 pin a synchronous clear (`disable_after_drain` = `begin_disable`, no wait). Until the user picks (a) fix the spec to a synchronous clear or (b) restore a waiting disable, the QC-1 runs `restart_reissue` and `disable_races_inflight_issue` cannot be replayed; their bodies are authored only as far as the pinned calls allow and both carry the descriptive reason `pending DELIVER quint-conformance-gateway_identity-disable-settlement` plus a "blocked on B-1" note (Scaffolds). QC-1 is never claimed complete.
 
-Reconciliation: DISCUSS, DEVOPS and separate DESIGN `wave-decisions.md` files do not exist (this feature uses one narrative `feature-delta.md`); 0 contradictions among the DESIGN sections. Observation-surface provenance (batch B1 check): the two exact `ObservationStore` point reads (`public_certified_key_status_row`, `gateway_application_status_row`) and the new `ObservationWrite`/`ObservationRow`/`ObservationRowKind` variants `PublicCertifiedKeyStatus` and `GatewayApplicationStatus` were part of the DESIGN the user approved on 2026-09-13 (`git show backup/research-ingress-gateway-pre-reconstruct:docs/feature/public-ingress-gateway/feature-delta.md`: status banner lines 3–12 and the closed-observation-surface block at lines 3618–3640; identical signatures in this document at lines 3844–3858). They are carried as previously approved and are not on the confirmation list; only item 12 gates B1's watch files. Warnings, not blockers: no story-ID traceability; the project ATDD policy (`docs/architecture/atdd-infrastructure-policy.md`) has no gateway rows yet (appended in phase 2); there is no Lima instance in the authoring environment, so Linux-side compilation and runs use `cargo xtask metal run --`.
+Reconciliation (hard gate, re-run for G1): DISCUSS, DEVOPS and separate DESIGN `wave-decisions.md` files do not exist (this feature uses one narrative `feature-delta.md`); the only wave-decisions file is `spike/wave-decisions.md` (G1 spike promotions (a)–(e)), which agrees with the DESIGN sections. **Reconciliation passed — 0 contradictions** among the DESIGN sections (the G1 section, the Formal protocol model tables, the ADRs 0244/0245/0246/0239 and the specs name the same ports, accessors and runs). Observation-surface provenance (batch B1 check): the two exact `ObservationStore` point reads (`public_certified_key_status_row`, `gateway_application_status_row`) and the new `ObservationWrite`/`ObservationRow`/`ObservationRowKind` variants `PublicCertifiedKeyStatus` and `GatewayApplicationStatus` were part of the DESIGN the user approved on 2026-09-13 (`git show backup/research-ingress-gateway-pre-reconstruct:docs/feature/public-ingress-gateway/feature-delta.md`: status banner lines 3–12 and the closed-observation-surface block at lines 3618–3640; identical signatures in this document at lines 3844–3858). They are carried as previously approved and are not on the confirmation list; only item 12 gates B1's watch files. Warnings, not blockers: no story-ID traceability; the project ATDD policy (`docs/architecture/atdd-infrastructure-policy.md`) has no gateway rows yet (appended in phase 2); there is no Lima instance in the authoring environment, so Linux-side compilation and runs use `cargo xtask metal run --`.
 
-**The DESIGN is not an approved handoff** (Full-stack handoff status above). DISTILL therefore treats every reconstructed contract as "proposed, user confirmation pending" and stays neutral on the three BLOCKING proposals: **P-2** (BackendId memo key or order), **P-9** (whether the registered hook honours `BACKEND_MAP.healthy`) and **P-10** (placement of the selection arm). No scenario's oracle depends on an unruled option; the affected behaviours are listed as blockers in the Completeness audit and are not authored.
+**The DESIGN is not an approved handoff** (Full-stack handoff status above). DISTILL therefore treats every reconstructed contract as "proposed, user confirmation pending". It stays neutral on the three BLOCKING proposals **P-2** (BackendId memo key or order), **P-9** (whether the registered hook honours `BACKEND_MAP.healthy`) and **P-10** (placement of the selection arm): no scenario's oracle depends on an unruled option; the affected behaviours are listed as blockers in the Completeness audit and are not authored.
 
-Language mode Rust; deliverable type application; density lean, Tier-1 `[REF]` sections only. Repository rules override generic nWave examples: no `.feature` files, no Python steps; Gherkin-style text below is specification only (`.claude/rules/testing.md`). Acceptance bodies are complete and executable; future scenarios carry `#[ignore = "pending DELIVER <step>"]` naming a domain-named activation step; no placeholder panics.
+**G1 proposals that BLOCK DISTILL (P-12, P-13a–d, P-17, P-18) and two optional, non-blocking items (P-16 and the `relay_ktls` module).** The design body assumes a recommended option for each. DISTILL writes the affected scenarios for that option and tags them `@pending:P-xx` so the user's ruling is applied in one cut (the "if ruled otherwise" column is the cut). The two optional items need no ruling: P-16 is optional and non-blocking in DESIGN ("release at the start of the next head read (the design body); no ruling needed unless the user prefers holding"), and `relay_ktls` stays model-only unless the user drops it:
 
-Retired premises (explicit, not carried): the branch DISTILL's gateway-frontend-demand scenarios and apply-twice gap (D2, ADR-0242), the demand-gated Service-map TEACH (D1), the shell Tier-3 runner under `tests/tier3/public-ingress-gateway/` that spawned the built binary (tests never spawn the `overdrive` binary), the Lima GitHub workflow lane, the `[exec]` workload example, and the branch E14 expectation id (E14 on main is `E14-vm-service-post-greenfield-cut`; this feature's expectation is E15).
+| Pending item | Option authored (design body) | Scenarios and drivers carrying the tag | If the user rules otherwise |
+|---|---|---|---|
+| P-12 | Both legs offer only AES-128-GCM and AES-256-GCM | 118 (suite matrix and the server-config suite list); the suite parameter of 105 and 106 (both carry the tag) | ChaCha20 offered: the ChaCha-only case of 118 inverts to arm-and-relay and 106 gains a ChaCha20 rekey case; nothing else changes |
+| P-13a | Strict ambiguous-framing rejection set (request 400/505, response 502) | 77, 78, 79, 80, 81 | Narrower set: delete the corresponding rows of 77/78/79/80/81; widening has no authored alternative (forwarding ambiguity is the rejected smuggling defect) |
+| P-13b | Full-duplex exchange (response may finish before the request body) | 87 (overlap step), 93; QC-4 runs `exchange_cl_keepalive`, `early_response_closes` | Half-duplex: 87 loses the overlap step, 93 reduces to "request fully relayed, then response", the two QC-4 runs change in DESIGN's spec first |
+| P-13c | Interim `100` forwarded, other interim `1xx` dropped, `Expect` forwarded unchanged | 83, 119 (interim heads count against the cumulative head limit), 120 (the two dropped `103` heads) | Reject all interim `1xx`: 83 inverts to 502; 119 loses its interim-head clause; 120 loses its two `103` cases (the silent-origin, 118 s and final-head cases stay) |
+| P-13d | Close-delimited and HTTP/1.0 explicit-length responses supported | 76 (close-delimited arm), 78 (HTTP/1.0 response row), 84 (`UntilClose` arm), 91, 104 (`relay_to_end` case), 117; QC-4 run `close_delimited_clean_end` | Declined: rows 91 and 117 and the marked clauses are deleted, 78 gains "close-delimited response is a 502", and `relay_to_end` leaves the scaffold |
+| P-16 (optional, non-blocking) | A read half's pipe is released when the half starts its next head read (the design body; no ruling needed) | 110 | Hold until close: 110 inverts (descriptors persist across the idle wait) |
+| P-17 | The gateway never originates a KeyUpdate | the "no gateway-originated KeyUpdate" clause of 106 and 109 | Origination before 2^23 records: add a record-counter scenario (one new row) |
+| P-18 | Lingering close with `discard_remaining` | 93, 101 (discard during drain), 115, 121 (its early-answer clause: no 408 once a response octet was written, the lingering close governs), the discard case of 104; `discard_remaining` on the port scaffold | (a) bounded discard or (b) `close_write` only: 93/115 invert to reset-tolerant and 121's early-answer clause is restated to match; the discard case of 104 and the port method are removed |
+| `relay_ktls` (model-only, optional) | Module kept, no driver | none (107 stays under A-K5 either way) | Dropped: no DISTILL change |
+
+**DG-11 (open DESIGN gap; owner: the architect, then the user).** The DESIGN's cleanup-ledger paragraph (Gateway Application, "`GatewayBuilder::start` creates exactly one `Arc<GatewayAdmissionBudget>`") says the connector `reserve(intent)`s one ledger slot after socket-cookie acquisition and before BPF registration, and that a full ledger returns `GatewayCleanupLedgerFull` so the connector closes without registering. ADR-0243 makes `open_upstream` perform cookie acquisition and `GATEWAY_CONNECT_INTENT_MAP` registration atomically (the port method returns a registered intent), so the connector has no point between the two at which to reserve, and a full ledger cannot refuse registration. Candidate fix, for the architect and the user and not adopted here: reserve a ledger slot before `open_upstream` and bind the intent to it afterwards. DISTILL writes the ledger scenarios for the current text and tags them `@pending:DG-11`: S-PIG-37 (ledger 0/1/128, the 129th refused before registration) and S-PIG-53 (a failed cleanup is retained in the ledger and retried). Cross-boundary rows that assert only `cleanup` call counts (28-30, 63, 98) do not depend on where the slot is reserved and are not tagged. If the DESIGN adopts the candidate fix: S-PIG-37 asserts the refusal before `open_upstream` (no socket prepared, no registration) instead of "before registration", and S-PIG-53's retained record is created at the pre-reservation instead of after the cookie; no id is renumbered.
+
+**DG-12 (open DESIGN gap; owner: the architect, then the user): no listener-port seam, so every gateway composition that reaches promotion binds the real TCP/443.** Question: do the Sim-relay tests (gateway integration binary S-PIG-21–24, 54, 68, 83, 87–101, 119–122, among others; seeded `overdrive-sim` files S-PIG-31, 32, 102, 103) bind a real listener? The DESIGN read says yes and offers no way not to. Cites (this document): `GatewayConfig::new` "fixes the public bind port to 443" and `GatewayConfig::bind()` is "always port 443" (Exact Route, deploy, configuration and owner surfaces, lines 3116 and 3156); D-APP-6 and D-APP-9 make the bind a dynamic TCP/443 bind owned by `GatewayApplicationOwner` (lines 2602, 2605); `GatewayListenerControl::bind(address: SocketAddrV4, admission)` is the one listener path (line 4226) and the gate task's last step is "Gateway Application promotion → TCP/443 bind" (G4, line 1773); `GatewayBuilder::start` is exactly "build the one budget, `GatewayAdmission::new`, `start_with`" (line 1918), so a composition built by `start` and one built by `start_with` promote through the same bind; `SimGatewayRelay` substitutes the TLS, kTLS and splice adapter and not the listener, because `GatewayRelay::accept_public` takes an `OwnedFd` that the listener already accepted (line 1099). There is no Sim listener, no unbound composition and no port parameter, and `SimGatewayAdapters` and `SimDataplaneComposer` swap adapters, not the bind. Consequence: a test that lets the gate reach promotion binds a real IPv4 address on port 443 and therefore (1) needs root (a privileged port; `cargo xtask lima run --` and `cargo xtask metal run --` run as root, and the Sim-only binaries need no KVM), and (2) collides with any other process holding that address, which nextest creates per test (separate processes), so the binary must be serialized. Binaries affected and not yet in `host-kernel-shared`: `overdrive-gateway` library tests (QC-2, source-local tests), `overdrive-gateway` integration tests, and the `overdrive-sim` acceptance binary (seeded S-PIG-31, 32, 102, 103; 41 entries under `tests/acceptance` today, all serialized by a whole-binary assignment). Already whole-binary members: the control-plane integration and lib binaries and the CLI integration binary (S-PIG-02 I arm, 34–36, 57–62, 74, 100, QC-1). Recorded, not decided: DISTILL's minimum, which needs no design change, is the whole-binary assignments and the root requirement in Test placement. Options for the architect and the user (none is adopted or invented here): (a) accept serial execution (nothing to design); (b) pin a listener-port seam (an operator-visible `GatewayConfig` port, or a test-only seam, which `.claude/rules/design.md` "No unrequested scope" counts as surface only the user adds); (c) tests choose distinct 127.0.0.0/8 bind addresses (`GatewayConfig::new` takes the address) behind a cross-process address registry in the style of `net_slots.rs`: still root, and a new registry the user would add.
+
+Language mode Rust; deliverable type application; density lean, Tier-1 `[REF]` sections only. Repository rules override generic nWave examples: no `.feature` files, no Python steps; Gherkin-style text below is specification only (`.claude/rules/testing.md`). Acceptance bodies are complete and executable; future scenarios carry `#[ignore = "pending DELIVER <descriptive-name>"]` naming a domain-named piece of DELIVER work (never a roadmap step id); no placeholder panics. The two expected-GREEN preservation rows (S-PIG-41, S-PIG-59) carry **no** `#[ignore]`: they are un-ignored from authoring (an ignored test cannot be expected-GREEN); S-PIG-41 is compiled under `integration-tests` and executes only on the native metal host.
+
+Retired premises (explicit, not carried): the branch DISTILL's gateway-frontend-demand scenarios and apply-twice gap (D2, ADR-0242), the demand-gated Service-map TEACH (D1), the shell Tier-3 runner under `tests/tier3/public-ingress-gateway/` that spawned the built binary (tests never spawn the `overdrive` binary), the Lima GitHub workflow lane, the `[exec]` workload example, the branch E14 expectation id (E14 on main is `E14-vm-service-post-greenfield-cut`; this feature's expectation is E15), and (G1) every artifact that assumed a userspace `hyper` stream: the "Public HTTP runtime (hyper)" coverage row, `GatewayByteStream`, the `Pin<Box<dyn ..>>` form of `GatewayUpstream`, the `SimGatewayClientMtls::new(seal, clock)` form and the unit-struct `HostGatewayClientMtlsFactory`.
+
+## Wave: DISTILL / [REF] G1 reconciliation
+
+Resolution of every item the DESIGN listed in "DISTILL content made stale by G1". Scenario ids persist (stable identifiers); nothing is renumbered; S-PIG-11 stays the only retired id. New ids are S-PIG-76..123 (S-PIG-119..123 were appended by the review remediation: response-side limits, the response-head deadline, the request-body stall, the public half-close and the public handshake refusals).
+
+| Stale item | Resolution |
+|---|---|
+| "Reconciliation and warnings": ADR range 0220–0243, no G1 proposals | Rewritten: ADR set 0220–0246, hard gate re-run (0 contradictions), pending-P-item table (blocking P-12, P-13a–d, P-17, P-18; optional P-16 and `relay_ktls`) |
+| Scenario list, S-PIG-12..17 "HTTP matrix" | The six rows stay pure (`routing`, `proxy_headers`, `limits` do not depend on any HTTP engine) and keep their ids and bodies. What G1 adds is new rows, not edits: framing, line validation, chunk lines, request-head boundaries, interim heads, exchange laws, deadline composition and the pipe floor (S-PIG-76..86), then the exchange behaviour over the Sim relay (S-PIG-87..101), seeded (S-PIG-102..103) and over the real kernel (S-PIG-104..118) |
+| Scenario list, limits scenarios | S-PIG-17 unchanged (values are `GatewayLimits::first_slice`); the head, header-count and body-ceiling boundary cases at the new sites are S-PIG-82 and 94, the deadline boundaries S-PIG-85 and 96 |
+| Scenario list, drain scenarios | S-PIG-26/60 unchanged; the exchange-level drain, discard-during-drain and force-abort are S-PIG-101 and S-PIG-103 |
+| S-PIG-39, 40, 70 (public status/404/502 over the old runtime) | Contract unchanged. Oracle gains "public leg and upstream leg are kernel-TLS armed" (`ss -K`, `tls_stat`); S-PIG-40's one-attempt oracle is the request-count marker plus the one-upstream-leg-per-request rule (S-PIG-97). The typed 400/408/413/431/502/503/505 projections with pre-/post-head behaviour are S-PIG-82, 92..96 (Sim) and S-PIG-115 (real kernel); S-PIG-70 gains the 408, 413, 431 and 505 cases on the real path |
+| "drive a public TLS connection through the active listener" in the seeded invariants (obligation 13; S-PIG-31/32, C4a proof (i)) | In Tier 1 the connection is a client socket through `SimGatewayRelay` (the Sim terminates the modelled handshake); real TLS is only T3/N. Row text of S-PIG-02, 31, 32, 54 and the C4a paragraph updated |
+| S-PIG-38, 43, 52 (real rustls peer, built through `HostGatewayClientMtlsFactory`) | The factory is `HostGatewayClientMtlsFactory::new(Arc<HostGatewayRelay>)`; the negative matrix stays an in-process real-rustls test and additionally asserts a failed equality arms nothing; the positive arm (peer observes the gateway SVID, leg armed) is S-PIG-64; the arm refusal after equality is S-PIG-98 |
+| S-PIG-57, 60, 74 | Gate G-1 gains `GatewayRelay::probe` (reason `gateway.relay_probe`); the relay probe gold test is S-PIG-99 and the relay gate (boundary 7, G3 order) is S-PIG-100; the "no relay probe runs when the gateway is disabled" assertion (boundary 6) lives in S-PIG-100's disabled case, not in S-PIG-59: it needs a relay instance to count calls on, which is a scaffold that fails with SCAFFOLD text, so it cannot sit in the expected-GREEN row |
+| "Public HTTP runtime (hyper)" adapter-coverage row | Replaced by rows for `HostGatewayRelay`, `SimGatewayRelay`, the exchange driver and the head/framing pure modules (Adapter coverage) |
+| Scaffolds naming `GatewayByteStream` / `Pin<Box<dyn ..>>` `GatewayUpstream` | Removed; scaffolds use `GatewayUpstream { leg: KtlsLeg }`, `GatewayUpstreamSeal::seal_authenticated(&self, leg: KtlsLeg)` and the `GatewayRelay` port family exactly as pinned |
+| Scaffolds naming `SimGatewayClientMtls::new(seal, clock)` / unit-struct `HostGatewayClientMtlsFactory` | `SimGatewayClientMtls::new(seal, Arc<SimGatewayRelay>, clock)`, `HostGatewayClientMtls::new(identity, seal, limits, Arc<HostGatewayRelay>)`, `HostGatewayClientMtlsFactory::new(Arc<HostGatewayRelay>)`, `GatewayAdapters { certified_key_codec, client_mtls, relay }` |
+| Scaffold file ownership (obligation 15) | `overdrive-dataplane/src/mtls/gateway_identity.rs` (slot, handles, `GatewayClientIdentityAccess`) and `mtls/gateway_client.rs` were already separated; added: `overdrive-dataplane/src/gateway_relay/` (host relay, one `unsafe` module), `overdrive-gateway/src/runtime/http1/` and `runtime/exchange.rs`, `overdrive-sim` relay adapter |
+| Quint driver table | QC-4 `relay_exchange` specified in full (spec, runs, invariants, owner, action→call, State→accessor, placement, ignore reason); `relay_ktls` is model-only and gets no driver; per-driver checklist filled for QC-1..4 (Scaffolds). Second pass (DESIGN "Conformance action maps for the three older mains"): every action of QC-2 and QC-3 has a pinned map, but item 3 is **not credited "yes"** for the steps that make no driving-port call (QC-1 `idle`, QC-2 `stage`/`retire`/`idle`, QC-3 `idle`): those are conditional on the user's acceptance of the stutter and owner-autonomous handling (listed in the pending-for-user items); QC-1 is additionally blocked by B-1 for `settle_ok`/`settle_timeout` and the two runs that use them |
+| DESIGN gaps DG-1..DG-12 (second pass and DG-7..DG-12) | DG-1 closed ("Cross-crate construction of the opaque leg values": `KtlsLeg::from_armed`, `backend_mut`, `ThroughBytes::new`); DG-2 closed (`HostGatewayRelay::new(clock)`, `SimGatewayRelay::new(clock)`, `SimGatewayClientMtlsFactory::new(relay, clock)`, `SimGatewayAdapters`); DG-3 closed (`ExchangeMachine::new()`, `BodyFraming` four variants, `FramingViolation` six variants with the 502 status rule); DG-4 closed (obligation 16(f) stimulus; S-PIG-114 uses it); DG-5 closed (the DESIGN now pins `pending DELIVER gateway-application-invariants`); DG-6 closed for QC-2 and QC-3 and for the QC-1 actions `restart`/`idle`; QC-1 `settle_ok`/`settle_timeout` remain blocked by B-1 (user ruling); **DG-7 closed** (placement ruling: the QC-2 driver is `overdrive-gateway/src/application/quint_gateway_application.rs` with driver-local private doubles of the four gateway-crate ports, because `overdrive-sim`'s impls of crate-local traits cannot satisfy them in the library's `cfg(test)` build; it adds no public item and awaits user confirmation on the item 13 list); **DG-8 closed** (`PreparedUpstream::new(socket: tokio::net::TcpSocket, intent: GatewayConnectIntent)`, public, registers nothing, no cleanup guard); **DG-9 closed** (a probe can park only at `GatewayClientMtls::authenticate`, only with a `Selected` receipt, entries identified by a minted `BackendId`/`SpiffeId`, not by arrival order; the earlier DISTILL connect-parking design is withdrawn); **DG-10 closed** (crate-private `GatewayAdmission::new(budget)`, `budget()`, `GatewayBuilder::start_with(deps, admission)`; the driver goes through `UnboundGatewayBuilder::new`/`into_builder`/`start_with` and takes `GatewayControl` from `into_parts()`); **DG-11 open** (cleanup-ledger reservation point vs ADR-0243; paragraph below); **DG-12 open** (no listener-port seam; paragraph below). The scaffolds that were described, not scaffolded, are now specified (Scaffolds) |
+| Test placement | New rows for the pure http1 modules, the Sim-driven relay integration file, the seeded relay file, the host relay Tier-3 files and the equivalence file (Test placement) |
+| Completeness audit; Pre-DELIVER RED classification | Rewritten for the G1 scenario set |
+| `distill/code-reconciliation-plan.md` | Rewritten: relay port family, host and Sim relay, http1 pure modules, `ExchangeMachine`, exchange driver, kTLS arming, probe; dependency list (`httparse`, `http` in; `hyper`, `hyper-util`, `tokio-rustls` never added to `overdrive-gateway`); fixture list; main-API pins |
+| E15 and `AT-PIG-E2E-1` | Composition and oracles kept; evidence additionally needs a kTLS-armed leg per request (`ss -K` / `tls_stat`) and the relay probe event; E15 README authored |
+| Counts | 75 ids / 74 live → 123 ids / 122 live (Scenario list; 118 / 117 before the review remediation appended S-PIG-119..123) |
 
 ## Wave: DISTILL / [REF] Scenario list and tags
 
-Counts against the 55 pre-reconstruction scenarios: **22 KEEP, 32 ADAPT, 1 DROP** (S-PIG-11, demand revision type removed) **plus 20 NEW** (S-PIG-56..75) = 74 live scenarios (22+32+20; S-PIG-75 is conditional on a user acknowledgement) and 75 scenario ids including the DROP row. Count reconciliation: the earlier document figure of 69 counted live scenarios (22+32+15) and the plan's 70 counted ids including the DROP row; both are now stated in these two units. Three quint-connect conformance drivers (QC-1..3, 11 bound `#[quint_test]` plus 3 `#[quint_run]`) and one EDD expectation (E15). Scenario ids are stable identifiers. Every scenario carries one `@contract-shape:` tag; error/edge/boundary/security/degraded/lifecycle/concurrency share is above 80% (gate 40%). Lane: **U** unit/proptest, **I** `integration-tests` in-process, **S** seeded `overdrive-sim`, **T3** real kernel on native metal, **N** native metal with a real VM Service, **QC** quint-connect.
+Counts against the 55 pre-reconstruction scenarios: **22 KEEP, 32 ADAPT, 1 DROP** (S-PIG-11, demand revision type removed) **plus 68 NEW** (S-PIG-56..75 from the reconstruction and S-PIG-76..123 from G1 and its review remediation) = **122 live scenarios** (22+32+68; S-PIG-75 is conditional on a user acknowledgement) and **123 scenario ids** including the DROP row. G1 adds 48 scenarios by lane: **U 11** (76–86), **I 19** (87–101 and 119–122), **S 2** (102–103), **T3 15** (104–112, 114–118 and 123; 105 and 115 add a native-metal production-path case, 118 a unit assertion) and **N 1** (113); 11+19+2+15+1 = 48. The earlier figures (69 live / 70 ids; 74 / 75; 117 / 118) are superseded by these two units. Four quint-connect conformance drivers (QC-1..4, 18 bound `#[quint_test]` plus 4 `#[quint_run]`; QC-4 `relay_exchange` is specified in Scaffolds) and one EDD expectation (E15, claim authored, `pending`). Scenario ids are stable identifiers, none is renumbered, and `@pending:P-xx` tags mark scenarios authored for the design body's recommended option of an unruled proposal (see Reconciliation and warnings). Every scenario carries one `@contract-shape:` tag; error/edge/boundary/security/degraded/lifecycle/concurrency share is above 80% (gate 40%; the happy-path rows are 1, 87, 88, 105 and the pure derivation 76; the five rows 119–123 are all error, boundary or interruption cases). Lane: **U** unit/proptest, **I** `integration-tests` in-process, **S** seeded `overdrive-sim`, **T3** real kernel on native metal, **N** native metal with a real VM Service, **QC** quint-connect.
 
 | ID | Scenario contract | Disp. | Lane | Tags | Owning crate / target on main | Activating step |
 |---|---|---|---|---|---|---|
-| S-PIG-01 | An external user receives the api workload's streamed response through the public Route (`AT-PIG-E2E-1`) | ADAPT | N | @walking_skeleton @driving_port @real-io @contract-shape:bounded-change | `tests/conformance/tests/public_ingress_gateway_end_to_end.rs` | public-request-end-to-end |
-| S-PIG-02 | A sound listener with no selectable backend returns 503 and no fallback; unavailable path is typed, never a wait | ADAPT | I+N | @error @security @contract-shape:bounded-change | control-plane integration `public_ingress_gateway_boot_shutdown.rs` + conformance file | consuming-port-unavailable-outcome |
+| S-PIG-01 | An external user receives the api workload's streamed response through the public Route (`AT-PIG-E2E-1`); the public leg and the upstream leg are kernel-TLS armed for the request (`ss -K`, `tls_stat`) and the relay probe preceded the bind | ADAPT | N | @walking_skeleton @driving_port @real-io @contract-shape:bounded-change | `tests/conformance/tests/public_ingress_gateway_end_to_end.rs` | public-request-end-to-end |
+| S-PIG-02 | A sound listener with no selectable backend returns 503 and no fallback; unavailable path is typed, never a wait (I arm: a client socket through `SimGatewayRelay`; N arm: real TLS) | ADAPT | I+N | @error @security @contract-shape:bounded-change | control-plane integration `public_ingress_gateway_boot_shutdown.rs` + conformance file | consuming-port-unavailable-outcome |
 | S-PIG-03–10 | Route path/host/input/generation laws (exact and segment match, rejected partitions, label 62/63/64, input channels, Route/key/application generation) | KEEP | U | @property/@boundary/@error @contract-shape:pure-function | `overdrive-core/src/public_ingress.rs` | route-value-types |
 | S-PIG-11 | Demand revisions nonzero, monotone, refuse wrap | DROP | — | retired (D2) | — | — |
 | S-PIG-12–17 | Canonical Host/SNI, authority errors, header rewrite both directions, hop-by-hop removal, fixed finite limits | KEEP | U | @property/@security/@boundary @contract-shape:pure-function | `overdrive-gateway/src/runtime/{routing,proxy_headers,limits}.rs` | gateway-application-owner |
@@ -5536,15 +6598,15 @@ Counts against the 55 pre-reconstruction scenarios: **22 KEEP, 32 ADAPT, 1 DROP*
 | S-PIG-26 | Clean shutdown leaves identity empty and no connect residue | ADAPT | I | @lifecycle @contract-shape:bounded-change | same | gateway-boot-and-shutdown |
 | S-PIG-27 | Unreadable manual key files refuse boot without Route mutation | ADAPT | I | @error @degraded-resource @contract-shape:unbounded-preservation | same | certified-key-custody |
 | S-PIG-28–30 | Missing receipt / other-ServiceKey receipt / wrong-valid selected peer fail closed, clean up, never retry another backend | ADAPT | U/I | @error @security @contract-shape:bounded-change | `overdrive-gateway/src/connector.rs` | upstream-socket-preparation, selection-receipt-and-applied-identity |
-| S-PIG-31 | Stale probe completion, replacement, withdrawal, retained connection and restart preserve generation safety (invariant `GatewayApplicationGenerationLifecycleIsSafe`) | ADAPT | S | @property @seeded-sim @contract-shape:bounded-change | `overdrive-sim/tests/acceptance/gateway_application_lifecycle.rs` | gateway-application-invariants |
+| S-PIG-31 | Stale probe completion, replacement, withdrawal, retained connection (a client socket held through `SimGatewayRelay`) and restart preserve generation safety (invariant `GatewayApplicationGenerationLifecycleIsSafe`) | ADAPT | S | @property @seeded-sim @contract-shape:bounded-change | `overdrive-sim/tests/acceptance/gateway_application_lifecycle.rs` | gateway-application-invariants |
 | S-PIG-32 | Shutdown joins admitted users before the identity slot clears (`GatewayApplicationShutdownConverges`) | ADAPT | S | @property @seeded-sim @interruption @contract-shape:bounded-change | same | gateway-application-invariants |
 | S-PIG-33 | Withdrawing from Empty is Unchanged; the empty set survives reopen | ADAPT | I | @edge @real-io @contract-shape:bounded-change | gateway integration | gateway-application-owner |
 | S-PIG-34–36 | Route deploy one-shot for both detach modes; real POST/DELETE handlers via ApiClient; disabled composition rejects before parse | ADAPT | I | @driving-adapter @error @contract-shape:bounded-change | `overdrive-cli/tests/integration/public_ingress_gateway.rs` (boots through `SimDataplaneComposer`) | route-operator-surface |
-| S-PIG-37 | Cleanup ledger 0/1/128, refuses 129 before registration | ADAPT | U | @boundary @contract-shape:bounded-change | `overdrive-gateway/src/application.rs` | upstream-socket-preparation |
-| S-PIG-38, 43, 52 | Real rustls: valid peer B rejected when selected is A before any body byte; peer observes the dedicated gateway SVID; absent/expired/malformed identity, non-peer fd, elapsed handshake, URI-SAN shape | ADAPT | I | @security @error @real-io @contract-shape:bounded-change | `overdrive-dataplane/tests/integration/public_ingress_gateway_mtls.rs` | exact-peer-client-mtls |
-| S-PIG-39 | Request outside a narrow replacement Route returns 404 | ADAPT | N | @error @public-https @contract-shape:bounded-change | conformance file | public-request-end-to-end |
+| S-PIG-37 | Cleanup ledger 0/1/128, refuses 129 before registration (authored for the current DESIGN text) | ADAPT | U | @boundary @pending:DG-11 @contract-shape:bounded-change | `overdrive-gateway/src/application.rs` | upstream-socket-preparation |
+| S-PIG-38, 43, 52 | Real rustls (client built by `HostGatewayClientMtlsFactory::new(Arc<HostGatewayRelay>)`): valid peer B rejected when selected is A before any body byte and nothing is armed; absent/expired/malformed identity, non-peer fd, elapsed handshake, URI-SAN shape (the positive arm, where the peer observes the dedicated gateway SVID and the leg is armed, is S-PIG-64) | ADAPT | I | @security @error @real-io @contract-shape:bounded-change | `overdrive-dataplane/tests/integration/public_ingress_gateway_mtls.rs` | exact-peer-client-mtls |
+| S-PIG-39 | Request outside a narrow replacement Route returns 404 (no upstream dial; head-only parse by the gateway) | ADAPT | N | @error @public-https @contract-shape:bounded-change | conformance file | public-request-end-to-end |
 | S-PIG-40 | A selected upstream closing before response maps to 502 exactly once, no retry | ADAPT | N | @error @single-attempt @contract-shape:bounded-change | conformance file | public-request-end-to-end |
-| S-PIG-41 | An unregistered cgroup socket keeps non-service behaviour; `LOCAL_BACKEND_MAP` and XDP attachments unchanged (**expected-GREEN preservation row**) | ADAPT | T3 | @security @real-kernel @contract-shape:unbounded-preservation | `overdrive-dataplane/tests/integration/public_ingress_gateway_hook.rs` | gateway-selection-hook |
+| S-PIG-41 | An unregistered cgroup socket keeps non-service behaviour; `LOCAL_BACKEND_MAP` and XDP attachments unchanged (**expected-GREEN preservation row; un-ignored from authoring, no `#[ignore]`**) | ADAPT | T3 | @security @real-kernel @contract-shape:unbounded-preservation | `overdrive-dataplane/tests/integration/public_ingress_gateway_hook.rs` | gateway-selection-hook |
 | S-PIG-42 | Status point-read failure returns 500 without credential detail | ADAPT | I | @error @degraded-resource @contract-shape:unbounded-preservation | CLI integration | route-operator-surface |
 | S-PIG-44 | Gateway newtypes round-trip Display/FromStr/TryFrom/serde/rkyv and reject each noncanonical partition | KEEP | U | @property @codec @contract-shape:pure-function | `overdrive-core` | route-value-types, gateway-identity-epoch |
 | S-PIG-45 | Certificate chains 0/1/many/9 inside one validity interval | KEEP | U | @boundary @security @contract-shape:bounded-change | `overdrive-gateway/src/certified_key.rs` | certified-key-custody |
@@ -5554,33 +6616,81 @@ Counts against the 55 pre-reconstruction scenarios: **22 KEEP, 32 ADAPT, 1 DROP*
 | S-PIG-49 | Frontend resolution closed errors; real persisted Job/Schedule rejected; intent universe preserved (uses `IntentKey::workload_prefix`) | ADAPT | U/I | @error @contract-shape:unbounded-preservation | `overdrive-gateway/src/frontend.rs` | gateway-application-owner |
 | S-PIG-50 | Every `GatewayConnectDataplaneError` crosses its real owner op and collapses to the redacted `ConnectPathUnavailable` | ADAPT | I | @error @adapter-contract @contract-shape:bounded-change | gateway integration | upstream-socket-preparation |
 | S-PIG-51 | Gateway identity lifecycle errors cause-distinct at the owner, collapsed to `GatewayIdentityUnusable` in status | ADAPT | I | @error @lifecycle @security @contract-shape:bounded-change | gateway integration | gateway-svid-lifecycle |
-| S-PIG-53 | A failed cleanup is retained and retried without re-registering, reconnecting or re-authenticating | ADAPT | U | @error @degraded-resource @contract-shape:bounded-change | connector | upstream-socket-preparation |
+| S-PIG-53 | A failed cleanup is retained and retried without re-registering, reconnecting or re-authenticating (authored for the current DESIGN text) | ADAPT | U | @error @degraded-resource @pending:DG-11 @contract-shape:bounded-change | connector | upstream-socket-preparation |
 | S-PIG-54 | **C4a restated (D2).** The unavailable-outcome path applied twice has an empty second delta (see below); custody replay and identity hold repeat keep coverage | ADAPT | I | @idempotency @contract-shape:bounded-change | gateway + control-plane integration | consuming-port-unavailable-outcome |
 | S-PIG-55 | Route parsers accept exactly `target.service`; no `target.workload` alias | KEEP | U | @error @security @parser @contract-shape:pure-function | `overdrive-core` | route-value-types |
 | S-PIG-56 | A stale Service-map entry after `job stop` never yields a wrong-peer success: the dial fails (P-9-independent invariant); exactly 502 is asserted only where `BACKEND_MAP.healthy == 1` is observed for the stale entry, otherwise the exact status is BLK-P9 (obl 3) | NEW | T3+N | @error @security @contract-shape:bounded-change | hook file + conformance file | consuming-port-unavailable-outcome |
-| S-PIG-57 | Sentinel probe failure keeps TCP/443 unbound; serve and workloads unaffected; status cause and `health.startup.refused` reason `gateway.connect_probe` (obl 4, G-1) | NEW | I+T3 | @error @degraded-resource @contract-shape:bounded-change | control-plane integration boot/shutdown file + hook file | gateway-boot-and-shutdown |
+| S-PIG-57 | Sentinel probe failure keeps TCP/443 unbound; serve and workloads unaffected; status cause and `health.startup.refused` reason `gateway.connect_probe` (obl 4, G-1; the relay probe's own refusal is S-PIG-100) | NEW | I+T3 | @error @degraded-resource @contract-shape:bounded-change | control-plane integration boot/shutdown file + hook file | gateway-boot-and-shutdown |
 | S-PIG-58 | Actual-frontend `NoBackend` is bind-valid; the listener binds and serves 503 (G-1) | NEW | I | @edge @contract-shape:bounded-change | boot/shutdown file | gateway-boot-and-shutdown |
-| S-PIG-59 | Gateway disabled (`ServerConfig.gateway == None`): boot unchanged, no socket prepared, no sentinel, unregistered hook behaviour unchanged (boundary 6); **expected-GREEN preservation row** | NEW | I | @config-disabled @contract-shape:unbounded-preservation | boot/shutdown file | gateway-boot-and-shutdown |
-| S-PIG-60 | Enabled boot orders G0–G4; shutdown stage `gateway` runs before `mtls_worker_owner`, inside one 5 s drain, one budget (G-6) | NEW | I (+N graceful run) | @lifecycle @contract-shape:bounded-change | boot/shutdown file | gateway-boot-and-shutdown |
+| S-PIG-59 | Gateway disabled (`ServerConfig.gateway == None`): boot unchanged, no socket prepared, no sentinel, unregistered hook behaviour unchanged (boundary 6); **expected-GREEN preservation row; un-ignored from authoring, no `#[ignore]`; it presupposes the disabled composition constructs no gateway scaffold, as the DESIGN's Disabled composition creates none; the relay-probe-count assertion for the disabled case is S-PIG-100's** | NEW | I | @config-disabled @contract-shape:unbounded-preservation | boot/shutdown file | gateway-boot-and-shutdown |
+| S-PIG-60 | Enabled boot orders G0–G4 (the relay probe, then the connect probe, run inside the gate task); shutdown stage `gateway` runs before `mtls_worker_owner`, inside one 5 s drain, one budget; in-flight pipes end with the exchange (G-6) | NEW | I (+N graceful run) | @lifecycle @contract-shape:bounded-change | boot/shutdown file | gateway-boot-and-shutdown |
 | S-PIG-61 | A gateway task failure or gated gateway never requests serve shutdown; the 10 s fail-stop bound is unchanged | NEW | I | @interruption @error @contract-shape:bounded-change | boot/shutdown file | gateway-boot-and-shutdown |
 | S-PIG-62 | Allocation `Running`, Service `Stable`, hydration and the operator listener advance identically with the gateway enabled, disabled or gated (boundary 3) | NEW | I | @orthogonality @contract-shape:unbounded-preservation | boot/shutdown file | gateway-boot-and-shutdown |
 | S-PIG-63 | A registered socket is selected by the hook; the rewritten dial enters leg-C via table 100 and TPROXY with `SO_MARK` and `127.0.0.1` source (obl 6) | NEW | T3 | @real-kernel @contract-shape:bounded-change | hook file | gateway-selection-hook, upstream-socket-preparation |
-| S-PIG-64 | Exact-peer mTLS wire evidence on the leg-B/leg-C segment: TLS 1.3 records, zero cleartext, kTLS armed; matching, wrong-valid, expired, absent identity (obl 7, G-5) | NEW | T3 | @security @real-kernel @contract-shape:bounded-change | hook file | exact-peer-client-mtls |
+| S-PIG-64 | Exact-peer mTLS wire evidence on the leg-B/leg-C segment: TLS 1.3 records, zero cleartext, kTLS armed by `HostGatewayRelay` after the equality; matching, wrong-valid, expired, absent identity (obl 7, G-5) | NEW | T3 | @security @real-kernel @contract-shape:bounded-change | hook file | exact-peer-client-mtls |
 | S-PIG-65 | Gateway SVID lifecycle: issue, audit-before-hold, near-expiry reissue, stale-epoch no-op, drop after drain, restart reissue (obl 9) | NEW | U+I | @lifecycle @security @contract-shape:bounded-change | reconcilers + control-plane action shim | gateway-svid-lifecycle |
 | S-PIG-66 | Route/custody/application watch recovery: subscribe before list, relist on `Lagged`, admission closed meanwhile (obl 10) | NEW | I | @interruption @contract-shape:bounded-change | gateway integration | lag-aware-intent-subscription (complete body, reasoned ignore; type port gated on item 12; restated as relist-period if P-8 is adopted) |
 | S-PIG-67 | BackendId identity readable only after the outer swap commits; immutable per id; rollback preserves the prior generation; no residue; restart destroys receipts (obl 11) | NEW | I+T3 | @lifecycle @contract-shape:bounded-change | dataplane host/Sim equivalence + source-local | selection-receipt-and-applied-identity |
-| S-PIG-68 | A late `Selected` or probe result after a superseded generation is never delivered and never restores the old admission object (boundary 4) | NEW | I | @interruption @contract-shape:bounded-change | gateway integration | gateway-application-owner |
+| S-PIG-68 | A late `Selected` or probe result after a superseded generation is never delivered and never restores the old admission object (boundary 4; the held probe has a programmed backend so its receipt is `Selected`, and it parks at `GatewayClientMtls::authenticate`, DG-9) | NEW | I | @interruption @contract-shape:bounded-change | gateway integration | gateway-application-owner |
 | S-PIG-69 | Guest-flow owner restart or fail-stop mid-request ends the request with 502 and leaves no intent or receipt (boundary 5) | NEW | I+N | @interruption @error @contract-shape:bounded-change | gateway integration + conformance file | public-request-end-to-end |
-| S-PIG-70 | Public status mappings 400, 404, 421, 502, 503 end to end (obl 8) | NEW | N | @error @public-https @contract-shape:bounded-change | conformance file | public-request-end-to-end |
+| S-PIG-70 | Public status mappings 400, 404, 421, 502, 503 end to end (obl 8), and 408 (a stalled head and a stalled request body), 413, 431, 505 through the real listener (the gateway parses only heads) | NEW | N | @error @public-https @contract-shape:bounded-change | conformance file | public-request-end-to-end |
 | S-PIG-71 | After a serve restart (dataplane instance recreated on the same pin directory) the gateway returns 503 until the ordinary hydrator re-programs the Service, then the backend response; old identity and receipts are gone (SR-2, obl 11) | NEW | T3+N | @lifecycle @interruption @contract-shape:bounded-change | hook file (instance half) + conformance file (serve restart) | selection-receipt-and-applied-identity, public-request-end-to-end |
 | S-PIG-72 | Updates racing `selected_backend_identity` for a just-selected id never return a missing identity for a `Selected` id (run `receipt_waits_for_publish_guard`, hazard `publishEarly`; existing ports only) | NEW | T3 | @concurrency @contract-shape:bounded-change | hook file | selection-receipt-and-applied-identity |
 | S-PIG-73 | A connector probe result completed twice for one staged token is ignored the second time; status row and application generation unchanged (GA-1) | NEW | U | @idempotency @error @contract-shape:bounded-change | `overdrive-gateway/src/application.rs` | gateway-application-owner |
 | S-PIG-74 | Gate-unavailable boundary (boundary 2), four sub-cases: (a) absent sentinel receipt, (b) hook not firing, (c) identity never Current, (d) probe timeout each leave TCP/443 unbound with a cause-distinct status and `health.startup.refused` | NEW | I | @error @degraded-resource @contract-shape:bounded-change | boot/shutdown file | gateway-boot-and-shutdown |
 | S-PIG-75 | **Conditional (accepted-exposure candidate 5a).** Pre-commit rollback through the real owner: a `BACKEND_MAP` capacity failure leaves the prior generation selectable, no Applied identity for abandoned ids, no recycled ids, zero residue (`RollbackPreservesPriorGeneration`) | NEW | T3 | @error @lifecycle @contract-shape:bounded-change | hook file | selection-receipt-and-applied-identity (body authored only after the user acknowledges 5a and the fill runtime is measured) |
+| S-PIG-76 | Message length is derived once, from the original headers, by RFC 9112 §6.3: none for `HEAD`, `1xx`, `204`, `205`, `304` responses and for requests with neither length nor coding; exactly `Content-Length` octets; chunked; close-delimited only where permitted (pending P-13d) | NEW | U | @property @boundary @contract-shape:pure-function @pending:P-13d | `overdrive-gateway/src/runtime/http1` (framing decision; source-local) | http1-head-validation-and-framing |
+| S-PIG-77 | Ambiguous request framing is refused before any upstream octet: both `Content-Length` and `Transfer-Encoding`; repeated, non-decimal or `u64`-overflowing `Content-Length`; repeated `Transfer-Encoding`, `chunked, chunked`, a final coding other than `chunked`, any other coding: 400; an `HTTP/1.0` request: 505 | NEW | U | @error @security @boundary @contract-shape:pure-function @pending:P-13a | same | http1-head-validation-and-framing |
+| S-PIG-78 | The same ambiguity on an origin response (both lengths, repeated or overflowing length, repeated or unsupported coding, a status line that is not `HTTP/1.1`, `101`) is a 502 before the public response head; an `HTTP/1.0` response with an explicit length is accepted only with P-13d | NEW | U | @error @security @contract-shape:pure-function @pending:P-13a @pending:P-13d | same | http1-head-validation-and-framing |
+| S-PIG-79 | Every line the gateway reads (head, chunk-size line, trailer line) holding a bare CR, a bare LF, a NUL, an octet outside RFC 9110 §5.5 or an obsolete line fold is refused before the parser runs | NEW | U | @property @security @contract-shape:pure-function @pending:P-13a | same | http1-head-validation-and-framing |
+| S-PIG-80 | Chunk framing lines: hexadecimal size parsed with extensions discarded; a size overflowing `u64` or a malformed size line is refused (400 before the response head, else both legs close); trailer lines are consumed and dropped within the head ceiling | NEW | U | @property @boundary @contract-shape:pure-function @pending:P-13a | same | http1-head-validation-and-framing |
+| S-PIG-81 | Framing is read from the original headers: a `Connection` field nominating `Content-Length` or `Transfer-Encoding` removes nothing before the framing decision, and the forwarded head carries only the framing headers the gateway itself writes | NEW | U | @security @property @contract-shape:pure-function @pending:P-13a | same + `proxy_headers.rs` | http1-head-validation-and-framing |
+| S-PIG-82 | Request head policy at its boundaries: non-origin-form target or `CONNECT` 400; Host missing, duplicated, invalid, with userinfo or a port other than 443 400; Host different from SNI 421; declared length above the ceiling 413 and at the ceiling accepted; head one octet over the ceiling or 101 fields 431 and at the ceiling or 100 fields accepted; `Upgrade` removed as hop-by-hop | NEW | U | @error @boundary @contract-shape:pure-function | same | http1-head-validation-and-framing |
+| S-PIG-83 | Interim heads: an origin `100` reaches the client as a body-less rewritten head; every other interim `1xx` except `101` is read and dropped within the same head limit and deadline; `Expect` is forwarded unchanged and the gateway decides nothing | NEW | U+I | @edge @error @contract-shape:pure-function @pending:P-13c | `runtime/http1` + the Sim-driven file | http1-head-validation-and-framing |
+| S-PIG-84 | Exchange state laws: reuse only after the response completed, the request body was fully relayed, the response is length-delimited, the connection is not draining and the public peer has not half-closed; an early response, a close-delimited response, a mid-body close and a drain never reuse; an open chunked body is unfinished; octets beyond the declared remainder, `finish` before the response completes and every event after `Closed` are refused or ignored as pinned | NEW | U | @property @error @contract-shape:pure-function @pending:P-13d | `overdrive-gateway/src/runtime/http1/exchange.rs` (source-local PBT) | exchange-state-machine |
+| S-PIG-85 | Deadline composition: every head or framing-line read receives `min(phase budget, request deadline)` for the first-request, keep-alive, framing-line and response-head budgets; an item can never outlive its request; no 2x on the first head | NEW | U | @property @boundary @contract-shape:pure-function | `runtime/http1` or `runtime/exchange.rs` (source-local) | exchange-state-machine |
+| S-PIG-86 | Relay pipe floor (unit law): the floor constant is 65 536 octets; the splice-in length is `min(octets owed, capacity)` and never exceeds either; a pipe is drained before the next splice-in; creation failure and a read-back below the floor are the only runtime outcomes (`RelayPipeError`); the typestate that makes the other states unrepresentable is the crafter's and gets no compile-fail fixture | NEW | U | @boundary @contract-shape:pure-function | `overdrive-dataplane/src/gateway_relay` (source-local) | kernel-relay-host-adapter |
+| S-PIG-87 | Two keep-alive exchanges on one public connection with `Content-Length` bodies, including a zero-length body: each body arrives octet-exact, nothing past the declared length is read, the next request head is untouched and (full-duplex, pending P-13b) the response may start before the request body ends | NEW | I | @driving_port @contract-shape:bounded-change @pending:P-13b | `overdrive-gateway/tests/integration/public_ingress_gateway_relay.rs` (production `GatewayBuilder`, `SimGatewayRelay`, `SimGatewayConnectDataplane`) | kernel-relay-exchange-driver |
+| S-PIG-88 | Chunked bodies relay chunk by chunk in both directions: the gateway writes the size line, one exact chunk is spliced, the terminator is checked, extensions and trailers are not forwarded, and the gateway writes the last chunk; an open chunked request body is unfinished at an early response | NEW | I | @boundary @contract-shape:bounded-change | same | kernel-relay-exchange-driver |
+| S-PIG-89 | Responses without a body (`HEAD`, `204`, `205`, `304`) relay nothing and leave the connection reusable; an interim `1xx` followed by one of them keeps the same rules | NEW | I | @edge @contract-shape:bounded-change | same | kernel-relay-exchange-driver |
+| S-PIG-90 | Control events never reach the other leg: a peer KeyUpdate (requesting or not), a NewSessionTicket and a close_notify met inside a head, inside a chunk-size line, at a message boundary and inside a body leave the relayed octets exact; close_notify ends that direction after the message in flight; an alert or an unexpected record closes both legs; a KeyUpdate whose re-arm is refused (`KeyUpdateError::RustlsRefused`, `RearmRx`, `RearmTx`, `Io`) on either leg closes both legs and relays nothing past the failure: on the upstream leg before the public response head it is exactly one 502, after the head a close with no further response | NEW | I | @error @interruption @contract-shape:bounded-change | same (scripted peer events on the Sim relay) | kernel-relay-sim-adapter |
+| S-PIG-91 | A close-delimited response is forwarded with `Connection: close`, ends cleanly on the origin's close_notify, is not reused, and closes both legs when it exceeds `max_response_body_bytes` (pending P-13d) | NEW | I | @edge @error @contract-shape:bounded-change @pending:P-13d | same | kernel-relay-exchange-driver |
+| S-PIG-92 | Upstream failure projection: a close before the response head is a 502 exactly once; a close or reset mid-body, a close_notify before the declared end, and any failure after the public head close both legs without a further response and never end cleanly | NEW | I | @error @interruption @contract-shape:bounded-change | same | kernel-relay-exchange-driver |
+| S-PIG-93 | Early answer and lingering close (pending P-18, P-13b): an origin answering before the request body is read (including 401 and 413) and each gateway rejection sent before a body is read (413 on declared length, 400, 404, 421, 431, 502, 503, 505) deliver the final response, half-close and discard the remaining request octets until the peer's close_notify, `max_request_body_bytes` octets or the deadline, then close; 408 and a leg that already reported EOF, alert or reset are not lingered | NEW | I | @error @security @boundary @contract-shape:bounded-change @pending:P-18 @pending:P-13b | same | relay-lingering-close |
+| S-PIG-94 | Body ceilings: a declared request length above the ceiling is 413 before any upstream octet; a chunked total above it is 413 if no public response octet was sent and otherwise both legs close; a response body above its ceiling closes both legs after the head; one octet under each ceiling passes | NEW | I | @error @boundary @contract-shape:bounded-change | same | kernel-relay-exchange-driver |
+| S-PIG-95 | Relay pipe failure: a pipe that cannot be created or that reads back below the floor is a 502 before the response head and closes both legs after it; no octet moves | NEW | I | @error @degraded-resource @contract-shape:bounded-change | same | kernel-relay-sim-adapter |
+| S-PIG-96 | Keep-alive and deadlines on the injected clock: idle expiry before the first octet closes silently (not a 408); no complete head in time is a 408 (first request counted from handshake completion, later request from its first octet); the hundredth response carries `Connection: close` and a 101st request is never parsed | NEW | I | @boundary @interruption @contract-shape:bounded-change | same | kernel-relay-exchange-driver |
+| S-PIG-97 | Single upstream attempt: on every failure of S-PIG-92 and S-PIG-95 there is no retry, no second backend and no replay; exactly one upstream leg and one cookie registration per request; the upstream request head carries `Connection: close` | NEW | I | @error @single-attempt @contract-shape:bounded-change | same | kernel-relay-exchange-driver |
+| S-PIG-98 | Arming refused after the exact-peer equality held, for each kind (`KtlsArmError::UlpInstall`, `CryptoInfo`, `CipherNotSupported`, `KernelConnection`): the result is `Arm(kind)` carried unchanged, no octet reaches the peer, cleanup runs once and the public request is a 502; the same four kinds refused at the public `accept_public` arm close the public socket without reading any HTTP octet and open no upstream leg | NEW | I | @error @security @contract-shape:bounded-change | same (`SimGatewayClientMtls` with a Sim arm refusal) | exact-peer-client-mtls |
+| S-PIG-99 | Relay probe gold test: the honest Sim substrate passes; each substrate lie (`tls` ULP absent, cipher refused, splice losing octets, pipe clamped below 64 KiB) is refused with its typed `RelayProbeError` variant, and a probe timeout and an I/O error likewise; no lie is accepted | NEW | I | @error @adapter-contract @contract-shape:bounded-change | `overdrive-gateway/tests/integration/public_ingress_gateway_relay.rs` | relay-earned-trust-probe |
+| S-PIG-100 | Relay gate (boundary 7): a refused probe keeps TCP/443 unbound with `health.startup.refused` reason `gateway.relay_probe` and status `ConnectPathUnavailable`; the probe runs once per boot, after custody and before the connect probe, never again for a later staged generation; allocation `Running`, Service `Stable`, hydration and the operator listener advance identically; with the gateway disabled no relay probe runs | NEW | I | @error @orthogonality @lifecycle @contract-shape:bounded-change | `overdrive-control-plane/tests/integration/public_ingress_gateway_boot_shutdown.rs` | gateway-boot-and-shutdown |
+| S-PIG-101 | Drain: an idle keep-alive connection closes at once; an in-flight exchange runs to completion within the one drain deadline and is then force-aborted; no later request is parsed and the hundredth-response path is the same `Connection: close` path; a discard in progress ends at the drain deadline (pending P-18) | NEW | I | @lifecycle @interruption @contract-shape:bounded-change @pending:P-18 | `public_ingress_gateway_relay.rs` | kernel-relay-exchange-driver |
+| S-PIG-102 | Seeded exchange invariant: under scripted peer events (KeyUpdate, NewSessionTicket, close_notify, alert, reset), upstream close before the response head and partial deliveries, no octet moves past a message boundary, no connection is reused after drain begins, and zero residue (leases, pipes, legs) remains after every outcome; the seed is printed | NEW | S | @property @seeded-sim @contract-shape:bounded-change | `overdrive-sim/tests/acceptance/gateway_relay_exchange.rs` | kernel-relay-exchange-driver |
+| S-PIG-103 | Seeded drain and force-abort ordering: drain beginning at a seeded point of an exchange (head, request body, response body, discard) completes the exchange or force-aborts it at the drain deadline, never reuses, never leaves residue; twin runs at one seed produce the same ordered trace | NEW | S | @property @seeded-sim @interruption @contract-shape:bounded-change | same | kernel-relay-exchange-driver |
+| S-PIG-104 | Host and Sim `GatewayRelay` agree: the same byte scripts and the same producible faults (peer KeyUpdate/NewSessionTicket/close_notify/alert, deadlines, short counts, backpressure, discard under P-18, `relay_to_end` under P-13d) give the same returned octets, error variants and close behaviour; substrate lies are not part of the comparison | NEW | T3 | @adapter-contract @contract-shape:bounded-change @pending:P-18 @pending:P-13d | `overdrive-dataplane/tests/integration/gateway_relay_equivalence.rs` | kernel-relay-host-adapter |
+| S-PIG-105 | Byte-exact bodies over real kernel TLS: a `Content-Length` body and a chunked body arrive octet-exact at real rustls peers on both legs, and the next request head is untouched across two keep-alive exchanges (suites per P-12) | NEW | T3+N | @real-kernel @driving_port @contract-shape:bounded-change @pending:P-12 | `overdrive-dataplane/tests/integration/gateway_relay.rs` (port level) + conformance file (production path) | kernel-relay-host-adapter |
+| S-PIG-106 | A peer KeyUpdate (requesting and not requesting) inside a head, inside a chunk-size line, at a message boundary and inside a body leaves the octets exact, advances `TlsRxRekeyOk` and `TlsTxRekeyOk`, leaves `TlsDecryptError` unchanged, forwards nothing and the gateway originates none (P-17); without the re-arm the read stays `EKEYEXPIRED` (negative control); both AES suites of P-12 | NEW | T3 | @real-kernel @interruption @contract-shape:bounded-change @pending:P-17 @pending:P-12 | `gateway_relay.rs` | kernel-relay-host-adapter |
+| S-PIG-107 | A KeyUpdate request that arrives while a large splice-out is in flight never tears the record stream: the peer decrypts every octet and `TlsDecryptError` is unchanged (the transmit lock, assumption A-K5) | NEW | T3 | @real-kernel @concurrency @contract-shape:bounded-change | `gateway_relay.rs` | kernel-relay-host-adapter |
+| S-PIG-108 | A NewSessionTicket before the first upstream response is discarded; a close_notify in the middle of a head, in the middle of a body and after the response ends the exchange cleanly only when the framing says the message is complete | NEW | T3 | @real-kernel @interruption @error @contract-shape:bounded-change | `gateway_relay.rs` | kernel-relay-host-adapter |
+| S-PIG-109 | The upstream leg answers a peer-injected KeyUpdate by the same path and a production leg-C sends none across a response of exactly 16 MiB, the response ceiling (assumption A-K7): a non-zero `TlsRxRekeyReceived` delta from leg-C is a deterministic hard failure that falsifies A-K7 and is returned to DESIGN as a contract-shaping falsification, never recorded as inconclusive; the gateway originates none (P-17) | NEW | T3 | @real-kernel @contract-shape:bounded-change @pending:P-17 | `gateway_relay.rs` + conformance file | kernel-relay-host-adapter |
+| S-PIG-110 | Pipe lifetime (pending P-16): a keep-alive connection waiting for its next request holds no pipe descriptor, after a `Content-Length` body and after a chunked body | NEW | T3 | @real-kernel @lifecycle @contract-shape:bounded-change @pending:P-16 | `gateway_relay.rs` | kernel-relay-host-adapter |
+| S-PIG-111 | Backpressure: a stalled public reader freezes the upstream sender within the socket buffers and resident memory stays flat; a stalled body ends at `body_no_progress_deadline`; a trickling `Content-Length` response is delivered to the client without waiting for further octets (no `SPLICE_F_MORE`) | NEW | T3 | @real-kernel @degraded-resource @interruption @contract-shape:bounded-change | `gateway_relay.rs` | kernel-relay-host-adapter |
+| S-PIG-112 | Record boundaries: one splice-in never returns octets of two records or crosses a record boundary; bodies built from records of mixed sizes (1 octet to 16 KiB, straddling heads and chunk-size lines) arrive exact and the relay pipe is empty at every splice-in (assumption A-K6) | NEW | T3 | @real-kernel @property-pinned @boundary @contract-shape:bounded-change | `gateway_relay.rs` | kernel-relay-host-adapter |
+| S-PIG-113 | 128 concurrent exchanges through the production composition: the process descriptor count stays within the accounted 768 above its baseline, resident-set growth plus the capacity of the process's pipe descriptors (read with `F_GETPIPE_SZ`) stays within 24 MiB (the DESIGN's accounted 192 KiB per exchange, 2 x 32 KiB head accumulators plus 2 x 64 KiB pipe buffers, times 128; no separate allowance for connection state, so a larger figure falsifies the budget and is returned to DESIGN), a 129th concurrent connection (`max_public_connections` is 128) is closed before any TLS octet, and every pipe and socket is released after drain | NEW | N | @real-kernel @concurrency @degraded-resource @contract-shape:unbounded-preservation | conformance file | kernel-relay-exchange-driver |
+| S-PIG-114 | Real-kernel relay probe: the honest kernel passes; with the `tls` module unloaded under a restoring guard and the probe run by a child that dropped `CAP_NET_ADMIN` in the initial user namespace, the probe is refused with `Arm(KtlsArmError::UlpInstall { errno: ENOENT })`; where `/sys/module/tls` is absent or its refcount is nonzero only the honest pass is asserted and the lie stays covered by S-PIG-99; the loopback pair and pipe are released either way | NEW | T3 | @real-kernel @error @adapter-contract @contract-shape:bounded-change | `gateway_relay.rs` | relay-earned-trust-probe |
+| S-PIG-115 | Lingering close on a real kernel (pending P-18): a client that keeps sending a body after a 413 or an early 401 reads the response and then close_notify, not a reset; the discard ends at the peer's close_notify, at `max_request_body_bytes`, at the deadline; a drain during a discard ends it at the drain deadline; the pre-exchange rejections 400, 404, 421, 431, 505 behave the same; the 408, 413, 431 and 505 typed responses reach a real client | NEW | T3+N | @real-kernel @error @security @contract-shape:bounded-change @pending:P-18 | `gateway_relay.rs` + conformance file | relay-lingering-close |
+| S-PIG-116 | No-`SPLICE_F_MORE` configuration: the exact-length, chunked, trickling-body and keep-alive cases of S-PIG-105 and S-PIG-111 are re-run and are octet-exact with the next head untouched; peer-side record sizes are recorded; the kernel cites of Contract item 7 are re-derived with `git show v7.0:<path>` against `vendors/linux` and recorded | NEW | T3 | @real-kernel @evidence @contract-shape:bounded-change | `gateway_relay.rs` | kernel-relay-host-adapter |
+| S-PIG-117 | Close-delimited response over real kernel TLS (pending P-13d): forwarded with `Connection: close`, ends cleanly on the origin's close_notify, bounded by `max_response_body_bytes`, not reused | NEW | T3 | @real-kernel @edge @contract-shape:bounded-change @pending:P-13d | `gateway_relay.rs` | kernel-relay-host-adapter |
+| S-PIG-118 | Cipher set (pending P-12): clients offering AES-128-GCM and AES-256-GCM complete both legs and relay octet-exact; a client offering only ChaCha20-Poly1305 is refused before arming; the custody snapshot's server configuration lists exactly the two suites | NEW | U+T3 | @real-kernel @security @boundary @contract-shape:bounded-change @pending:P-12 | `gateway_relay.rs` + `overdrive-gateway/src/certified_key.rs` | kernel-relay-host-adapter |
+| S-PIG-119 | Response-side size limits at their boundaries, with the pre-/post-public-head projection: a declared response `Content-Length` of `max_response_body_bytes` plus one (16 MiB + 1) is a 502 before any public response octet and the ceiling itself passes; a response head of `max_response_head_bytes` plus one octet (32 KiB + 1) or with 101 fields (`max_response_headers` is 100) is a 502 before the public head, at the ceiling or at 100 fields it is relayed; interim heads count against the same cumulative head limit; after the public head a body that outgrows its ceiling closes both legs (S-PIG-94) | NEW | I | @error @boundary @contract-shape:bounded-change @pending:P-13c | `public_ingress_gateway_relay.rs` | kernel-relay-exchange-driver |
+| S-PIG-120 | Response-head deadline on the injected clock: with the origin silent after the upstream request-head write completes (instant t0), the exchange waits until exactly t0 + `response_head_deadline` (5 s), then answers one 502 and closes the upstream leg (one tick earlier it is still waiting); dropped interim heads (a `103` at t0 + 2 s and a second `103` at t0 + 4 s) share that one budget and never restart it, so a final head that is absent or incomplete at t0 + 5 s, including a partly received one, is the same single 502, while a final head completing at t0 + 4.9 s is relayed; the budget is `min(response_head_deadline, remaining whole_request_deadline)` (a request that has used 118 of its 120 s waits 2 s); no retry; the deadline does not apply once the public head is sent | NEW | I | @error @boundary @interruption @contract-shape:bounded-change @pending:P-13c | same | kernel-relay-exchange-driver |
+| S-PIG-121 | Request-body no-progress at exchange level (a scripted body stall on the injected clock): after a complete head, a public client that moves no body octet for `body_no_progress_deadline` (30 s) gets exactly one 408 before any response octet, both legs close and the connection is not reused, for a `Content-Length` body, a stalled chunk-size line and a stalled chunk; no lingering discard follows a 408; a body that moves within every 30 s window is not cut by this rule (a request still unfinished at `whole_request_deadline`, 120 s, with no response octet sent is a 502); once any response octet has been written (an early origin answer) no 408 is written and the lingering close of S-PIG-93 governs | NEW | I | @error @interruption @boundary @contract-shape:bounded-change @pending:P-18 | same | kernel-relay-exchange-driver |
+| S-PIG-122 | Public half-close after the request was fully read (QC-4 runs `half_close_after_request_read` and `public_close_mid_request_aborts`): a public peer that sends close_notify once the request is complete (a `Content-Length` body fully relayed, and a bodyless request) still receives the whole response, `Content-Length` or chunked, and then both legs close: the connection is not reused, no further head is parsed and the upstream leg is closed exactly once; close_notify while idle closes silently and opens no upstream leg; close_notify or reset mid-request-body aborts both legs with no response | NEW | I | @edge @interruption @contract-shape:bounded-change | same | kernel-relay-exchange-driver |
+| S-PIG-123 | Public handshake refusals on a real kernel (real rustls client peers on loopback, port level): a client offering only ALPN `h2` (`PublicHandshakeError::AlpnMismatch`), a client sending no SNI (`ServerNameMissing`), a client silent until the passed handshake deadline (`Timeout`) and a client that resets mid-handshake (`Io`) are each refused with the matching typed variant: no HTTP octet is read, no upstream leg is opened, nothing is armed on the refused socket (the `tls_stat` install counters are unchanged) and the descriptor count returns to its start value; a cipher-set refusal is S-PIG-118 and an arming failure is S-PIG-98. The stimulus-to-variant mapping is pinned at DELIVER, not here: a mid-handshake reset may surface as `Io` or `Tls`, and the ALPN and SNI refusals may surface as `Tls { alert }` rather than `AlpnMismatch` or `ServerNameMissing`; DELIVER fixes the exact variant per stimulus by observing the production adapter and asserts that exact variant (never "any error"), while every other assertion holds for any variant | NEW | T3 | @real-kernel @error @security @contract-shape:bounded-change | `overdrive-dataplane/tests/integration/gateway_relay.rs` | kernel-relay-host-adapter |
 
-Conformance (QC): QC-1 `gateway_identity` (5 bound runs), QC-2 `gateway_application` (3), QC-3 `selection_receipt` (3 bound over `receipt_conf`) = 11 `#[quint_test]` plus one `#[quint_run]` per driver; see Scaffolds. EDD: E15 operator journey; point-in-time, never a test.
+Conformance (QC): QC-1 `gateway_identity` (5 bound runs), QC-2 `gateway_application` (3), QC-3 `selection_receipt` (3 bound over `receipt_conf`), QC-4 `relay_exchange` (7 over `relay_conf`) = 18 `#[quint_test]` plus one `#[quint_run]` per driver (4); `relay_ktls` is model-only; see Scaffolds. EDD: E15 operator journey; point-in-time, never a test.
 
-**Restated C4a — proof of the D2 replacement without fabricated demand.** There is no demand, revision, acknowledgment or wake to apply twice. The obligation is the consuming-port form (obligation 1): with no healthy backend, two consecutive public requests both return 503 with identical bodies; after each request `live_intent_count() == live_receipt_count() == 0`; `GatewayApplicationStatusRowV1` and the Gateway Applied Generation are unchanged; the outcome is a typed `NoBackend` bounded by the request deadline and never a wait. Proof: (i) Tier 1 (I): production `GatewayBuilder` over real redb Route and custody, `SimGatewayConnectDataplane` sharing the `SimDataplane` state with no `update_service` ever issued, so the receipt is the ordinary "no outer entry" `NoBackend`; a real public TLS client issues the request twice; the oracle reads only public bytes/status, the two live counts, `GatewayControl::application_status()` (before equals after), the unchanged injected `SimClock` (no sleep or poll) and the `gateway.upstream.receipt.validated` occurrence with `operation=request`; (ii) Tier 3/N: the same oracle against the real hook with a Service whose VM never reaches Running, so the real `ServiceMapHydrator` never programs a backend. No receipt is scripted and no row is seeded. The honest limit: the Sim arm is the modelled hook; only T3/N prove the real hook.
+**Restated C4a — proof of the D2 replacement without fabricated demand.** There is no demand, revision, acknowledgment or wake to apply twice. The obligation is the consuming-port form (obligation 1): with no healthy backend, two consecutive public requests both return 503 with identical bodies; after each request `live_intent_count() == live_receipt_count() == 0`; `GatewayApplicationStatusRowV1` and the Gateway Applied Generation are unchanged; the outcome is a typed `NoBackend` bounded by the request deadline and never a wait. Proof: (i) Tier 1 (I): production `GatewayBuilder` over real redb Route and custody, `SimGatewayConnectDataplane` sharing the `SimDataplane` state with no `update_service` ever issued, so the receipt is the ordinary "no outer entry" `NoBackend`; a client socket through `SimGatewayRelay` (the Sim terminates the modelled public handshake; real TLS is only the T3/N arm) issues the request twice; the oracle reads only public bytes/status, the two live counts, `GatewayControl::application_status()` (before equals after), the unchanged injected `SimClock` (no sleep or poll) and the `gateway.upstream.receipt.validated` occurrence with `operation=request`; (ii) Tier 3/N: the same oracle against the real hook with a Service whose VM never reaches Running, so the real `ServiceMapHydrator` never programs a backend. No receipt is scripted and no row is seeded. The honest limit: the Sim arm is the modelled hook; only T3/N prove the real hook.
 
 Walking-skeleton specification (S-PIG-01, `AT-PIG-E2E-1`):
 
@@ -5591,11 +6701,12 @@ Walking-skeleton specification (S-PIG-01, `AT-PIG-E2E-1`):
     Then the user receives status 200, X-Workload api, and the streamed body
       and the receipt occurrence shows a Selected backend whose applied identity is the api allocation
       and the leg-B/leg-C segment carries TLS 1.3 records with no body cleartext
+      and both gateway legs are kernel-TLS armed while the body streams
       and Route, Service, gateway intent, receipt and identity state converge on cleanup
 
 ## Wave: DISTILL / [REF] Cross-boundary scenario obligations
 
-Per `.claude/rules/testing.md` ("DISTILL — prove composed system behavior under deliberate failure") each cross-boundary scenario records the production owner path, the driving stimulus, the fault (existing driven ports only; none for healthy controls), the oracle and the evidence lane. Single-owner scenarios are pure, source-local or single-owner and are not repeated here; their lane and contract are in the scenario list: S-PIG-03–10, 12–20 (pure or clap-only), 25 (one status projection read), 33 (one store key, reopen), 37 (pure ledger), 44, 45, 47 (pure codec), 49 and 53, 55, 73 (source-local or single owner).
+Per `.claude/rules/testing.md` ("DISTILL — prove composed system behavior under deliberate failure") each cross-boundary scenario records the production owner path, the driving stimulus, the fault (existing driven ports only; none for healthy controls), the oracle and the evidence lane. Single-owner scenarios are pure, source-local or single-owner and are not repeated here; their lane and contract are in the scenario list: S-PIG-03–10, 12–20 (pure or clap-only), 25 (one status projection read), 33 (one store key, reopen), 37 (pure ledger), 44, 45, 47 (pure codec), 49 and 53, 55, 73 (source-local or single owner), and the G1 pure rows 76–82, 84–86 (pure functions or the one-owner `ExchangeMachine`).
 
 **Oracle rules (apply to every row).**
 1. *Membership-only on Sim.* A Sim-backed oracle on a generation with N>1 backends asserts only that the selected `BackendId` (and its applied identity) belongs to the committed generation; an exact `BackendId` is asserted only for singleton generations. The real Maglev choice is proven only at Tier 3.
@@ -5605,10 +6716,10 @@ Per `.claude/rules/testing.md` ("DISTILL — prove composed system behavior unde
 
 | ID | Production owner path | Stimulus | Fault | Oracle | Lane |
 |---|---|---|---|---|---|
-| 01 | `run_server` (Host adapters) -> `ServiceMapHydrator` -> `EbpfDataplane::update_service` -> gateway runtime -> `open_upstream` -> hook -> leg-C -> kTLS -> `GuestStreamDial` -> vsock -> VM Service | External TLS 1.3 client requests `https://api.example.com/stream` after `deploy` of the Service and Route | none (healthy control) | 200, `X-Workload: api`, streamed body; receipt occurrence `Selected` with applied identity = api allocation; leg-B/leg-C segment carries TLS 1.3 records, zero body cleartext; after cleanup Route/Service/intent/receipt/identity state converged (live counts 0) | N |
+| 01 | `run_server` (Host adapters) -> `ServiceMapHydrator` -> `EbpfDataplane::update_service` -> gateway runtime -> `open_upstream` -> hook -> leg-C -> kTLS -> `GuestStreamDial` -> vsock -> VM Service | External TLS 1.3 client requests `https://api.example.com/stream` after `deploy` of the Service and Route | none (healthy control) | 200, `X-Workload: api`, streamed body; receipt occurrence `Selected` with applied identity = api allocation; leg-B/leg-C segment carries TLS 1.3 records, zero body cleartext; the public leg and the upstream leg are kernel-TLS armed during the stream (`ss -tni` ULP, `tls_stat` install deltas); the relay probe occurrence precedes the bind; after cleanup Route/Service/intent/receipt/identity state converged (live counts 0) | N |
 | 02 | Public listener -> connector -> `open_upstream` -> hook/Sim arm -> receipt | Public request for a Route whose Service has no programmed backend | I: `update_service` never issued; N: Service VM never reaches Running | 503, no fallback body; I: `SimClock` unchanged (no sleep or poll); N: elapsed < `upstream_connect_deadline`; live counts 0; `NoBackend` occurrence with selected-only fields absent | I+N |
 | 21-23 | `overdrive-gateway` Route Set owner -> `LocalIntentStore` (real redb) -> `GET /v1/gateway/status` projection | Declare, exact replay, replace (same Route ID, new generation), withdraw; declare a different Route ID while occupied (22); withdraw with a different Route ID (23) | none (healthy control and deterministic conflicts) | Outcomes `Declared`/`Unchanged`/`Replaced`/`Withdrawn` exactly; the persisted singleton slot holds the one Route (empty slot persisted, not deleted); conflicts return the cause-distinct typed slot-conflict error with no `RouteAccepted` fact and the whole universe (Route Set, Service, key, identity, BPF) equal; typed error kept apart from the redacted status projection | I |
-| 24 | Two concurrent Declare commands for different Route IDs through the exported handler's Route Set owner over one real redb singleton key | Two simultaneous declares with distinct Route IDs, bounded rounds with the seed printed | none (race is the stimulus; no seam) | exactly one `Declared`, the other the typed slot conflict; the store holds exactly the winner's Route; exactly one `RouteDeclared`/`RouteAccepted` pair; no interleaved partial Route | I |
+| 24 | Two concurrent Declare commands for different Route IDs through the exported handler's Route Set owner over one real redb singleton key | Two simultaneous declares with distinct Route IDs released together; 256 rounds, each on a fresh store, seed printed | none (race is the stimulus; no seam) | exactly one `Declared`, the other the typed slot conflict; the store holds exactly the winner's Route; exactly one `RouteDeclared`/`RouteAccepted` pair; no interleaved partial Route | I |
 | 26 | `ServerHandle` shutdown stage `gateway` -> join users -> sweep -> slot clear | Graceful shutdown with one admitted connection | none | identity slot empty only after the user joined; live counts 0; stage events ordered | I |
 | 27 | Boot `ManualCertifiedKeySource::probe` -> custody (`PublicCertifiedKeyAeadCodec`, protected redb record) -> `ServerHandle` boot | Boot with gateway flags naming unreadable (permission) and malformed (not PEM / mismatched key) material files | unreadable file and malformed content on the real filesystem (production-reachable inputs) | boot refused with `health.startup.refused` and a cause-distinct reason per case; the Route Set, custody record, identity and BPF state equal to pre-boot (no Route mutation); error text and status carry no path contents or key bytes | I |
 | 28-30 | Connector -> `open_upstream` / `take_receipt` / `cleanup` at the dataplane port | Public request | Typed port results at those operations: receipt missing; receipt for another `ServiceKey`; `Selected` peer valid but not the selected one | 502; `cleanup` invoked once; one attempt only (no second backend); no body byte sent upstream | U/I |
@@ -5618,7 +6729,7 @@ Per `.claude/rules/testing.md` ("DISTILL — prove composed system behavior unde
 | 31 | Gateway application owner under seeded `overdrive-sim` | Route replace/withdraw interleaved with connection open/close and restart | `HoldConnectProbe` / `ReleaseConnectProbe`; restart | invariant `GatewayApplicationGenerationLifecycleIsSafe` holds; seed printed on failure | S |
 | 32 | Same, shutdown | Shutdown with admitted users | `HoldConnectProbe` | invariant `GatewayApplicationShutdownConverges`; users joined before slot clear | S |
 | 42 | `GET /v1/gateway/status` handler -> `ObservationStore` typed point reads (`public_certified_key_status_row`, `gateway_application_status_row`) -> `ApiClient`/CLI | Status request | point-read failure injected through `SimObservationStore` | HTTP 500 with a fixed redacted body; no key, path, ciphertext or error source text; CLI output carries the same redacted cause; subsequent healthy read returns the normal projection | I |
-| 38, 43, 52 | `HostGatewayClientMtlsFactory` handshake against a real rustls peer | Gateway client dial to peer A | Selected A but peer B presents a valid SVID; absent/expired/malformed identity; non-peer fd; elapsed handshake; wrong URI-SAN shape | handshake error before any body byte reaches the peer; on success the peer observes the dedicated gateway SVID | I |
+| 38, 43, 52 | `HostGatewayClientMtlsFactory` handshake against a real rustls peer | Gateway client dial to peer A | Selected A but peer B presents a valid SVID; absent/expired/malformed identity; non-peer fd; elapsed handshake; wrong URI-SAN shape | handshake error before any body byte reaches the peer and nothing is armed on the socket; on success (S-PIG-64) the peer observes the dedicated gateway SVID | I |
 | 39, 40 | Public listener -> full production path | Request outside a narrow Route; request to a backend that closes before response | none; guest closes | 404 without upstream dial; 502 exactly once with the request-count marker = 1 | N |
 | 41 | Real cgroup hook, unregistered socket | `connect(2)` from an unregistered socket | none | behaviour identical to main; `LOCAL_BACKEND_MAP` and XDP attachments unchanged (expected GREEN) | T3 |
 | 46 | Boot custody ingestion (`ManualCertifiedKeySource` files -> `PublicCertifiedKeyAeadCodec` -> protected redb record) -> `GET /v1/gateway/status` | Install a key; replay the identical files; replace with a valid new generation; present an invalid replacement and an expired replacement; reopen | invalid/expired/stale-generation material on the real filesystem | `Installed`/`Unchanged`/`Replaced` exactly; invalid or expired replacement leaves the current generation and record intact and surfaces only a cause-distinct redacted install status; expiry derived from persisted inputs plus `SimClock`; reopen yields the same current generation | I |
@@ -5627,10 +6738,10 @@ Per `.claude/rules/testing.md` ("DISTILL — prove composed system behavior unde
 | 51 | `GatewayIdentityView` / `ensure_current` / `disable_after_drain` -> status | Boot and drain | each identity lifecycle error | cause-distinct at the owner, `GatewayIdentityUnusable` in status | I |
 | 54 | Public request path, twice (C4a) | Two consecutive public requests, no backend | none (no `update_service`) | both 503 with identical bodies; counts 0 after each; status row and Applied Generation unchanged; `SimClock` unchanged | I (+T3/N) |
 | 56 | Real hook + nft output rule, stale map entry | Public request after `job stop` while the map entry lingers | none (production leaves the entry, P-4) | never a wrong-peer success, the dial fails; exact 502 only where `healthy == 1` is observed for the entry, else BLK-P9 | T3+N |
-| 57 | Boot G0-G4 -> sentinel probe | Boot with enabled gateway | sentinel probe fault (T3: real hook absent before the arm lands is RED, not a seam) | TCP/443 unbound; serve and workloads unaffected; status cause; `health.startup.refused` reason `gateway.connect_probe` | I+T3 |
+| 57 | Boot G0-G4 -> sentinel probe | Boot with enabled gateway | sentinel probe fault (T3: real hook absent before the arm lands is RED, not a seam) | TCP/443 unbound; serve and workloads unaffected; status cause; `health.startup.refused` reason `gateway.connect_probe` (the relay probe refusal is row 100) | I+T3 |
 | 58 | Boot -> actual-frontend probe | Boot with Service present, no backend | none | listener binds; public request returns 503 | I |
 | 59 | `run_server` with `ServerConfig.gateway == None` | Boot | none | bound sockets, reconcilers, intent/receipt counts and stage events equal the pre-feature set; unregistered hook behaviour unchanged (expected GREEN) | I |
-| 60 | `ServerHandle` boot and shutdown | Enabled boot, graceful shutdown | none | order G0-G4; stage `gateway` before `mtls_worker_owner`; one 5 s drain; one budget | I (+N) |
+| 60 | `ServerHandle` boot and shutdown | Enabled boot, graceful shutdown | none | order G0-G4 with the relay probe before the connect probe inside the gate task; stage `gateway` before `mtls_worker_owner`; one 5 s drain; one budget; in-flight pipes closed with their exchange | I (+N) |
 | 61 | Gateway task failure -> serve lifetime | Fail the gateway task; gate the gateway | gateway task failure | serve shutdown not requested; 10 s fail-stop bound unchanged | I |
 | 62 | Allocation, Service, hydration and operator listener | Boot enabled, disabled, gated | gated gateway | Running, Stable, hydration and operator listener advance identically in all three | I |
 | 63 | Real hook -> table 100 -> TPROXY -> leg-C | Dial from a registered prepared socket | none | receipt `Selected`; rewritten dial enters leg-C with `SO_MARK` and `127.0.0.1` source | T3 |
@@ -5638,21 +6749,106 @@ Per `.claude/rules/testing.md` ("DISTILL — prove composed system behavior unde
 | 65 | `GatewaySvidLifecycle` -> action shim -> CA -> audit -> slot | Reconcile ticks over issue, near expiry, stale epoch, drop after drain, restart | stale-epoch completion; audit write fault | hold only after audit; stale epoch is a no-op; reissue on near expiry and restart; no allocation identity | U+I |
 | 66 | Route/custody/application watchers over the intent store | Declare/withdraw while the watch lags | lag event | subscribe before list; relist on `Lagged`; admission closed meanwhile (ignored until DELIVER) | I |
 | 67 | `EbpfDataplane` vs `SimDataplane` same call sequence | `update_service` sequences with success and rejection | conflicting backend set (real `BackendIdentityConflict`) | identity readable only after the outer swap; immutable per id; no residue; membership-only on N>1 | I+T3 |
-| 68 | Gateway application owner | Supersede a generation while a probe/`Selected` is in flight | `HoldConnectProbe` then `ReleaseConnectProbe` | late result never delivered; old admission object never restored | I |
+| 68 | Gateway application owner | Supersede a generation while a probe/`Selected` is in flight | a backend programmed on the shared `SimDataplane` state (a held probe needs a `Selected` receipt), then `HoldConnectProbe` (parks at `authenticate`, DG-9) then `ReleaseConnectProbe` | late result never delivered; old admission object never restored | I |
 | 69 | Public request -> guest-flow owner | Request in flight | guest-flow owner restart or fail-stop | 502; no intent or receipt left (counts 0) | I+N |
-| 70 | Public listener status mapping | 400 malformed, 404, 421 SNI/authority mismatch, 502, 503 requests | the corresponding upstream or input condition | exact status per case | N |
-| 71 | `EbpfDataplane` re-creation on the same pin dir; `run_server` restart; ordinary hydrator | Serve restart, then public requests | process/instance restart (production path, no seam) | T3 deterministic: `selected_backend_identity(old id)` missing and receipt count 0 before any `update_service`; N: any response observed while the Service map shows no outer entry is 503 (safety), then the backend response within the bounded recovery (liveness) | T3+N |
-| 72 | `Dataplane::update_service` racing `selected_backend_identity` on the real owner | Bounded rounds of concurrent updates and identity reads for a just-selected id | none (no pause seam) | for every id from a `Selected` receipt the read never returns missing; rounds and seed printed | T3 |
+| 70 | Public listener status mapping | 400 malformed, 404, 421 SNI/authority mismatch, 502, 503 requests; 408 stalled head, 408 stalled request body (head sent, then no body octet for `body_no_progress_deadline`), 413 oversize declared length, 431 oversize head, 505 `HTTP/1.0` | the corresponding upstream or input condition | exact status per case, with the lingering close (P-18) letting the client read 413, 431 and 505 | N |
+| 71 | `EbpfDataplane` re-creation on the same pin dir; `run_server` restart; ordinary hydrator | Serve restart, then public requests | process/instance restart (production path, no seam) | T3 deterministic: `selected_backend_identity(old id)` missing and receipt count 0 before any `update_service`; N: any response observed while the Service map shows no outer entry is 503 (safety), then the backend response within the 60 s recovery window (liveness) | T3+N |
+| 72 | `Dataplane::update_service` racing `selected_backend_identity` on the real owner | 2,000 rounds of concurrent updates and identity reads for a just-selected id | none (no pause seam) | for every id from a `Selected` receipt the read never returns missing; rounds and seed printed | T3 |
 | 74 | Boot G0-G4 via `SimDataplaneComposer` | Boot with enabled gateway | (a) sentinel connect completes but `take_receipt` has no receipt; (b) hook not firing: registered probe yields no capability result; (c) `SimGatewayIdentityLifecycleControl` never reaches Current; (d) `HoldConnectProbe` with `SimClock` advanced past the probe deadline. Typed results at existing operations only | per case: TCP/443 refused (unbound); `GET /v1/gateway/status` shows the cause-distinct redacted cause; `health.startup.refused` with the reason; operator listener and allocation `Running` unaffected | I |
-| 75 | Real `EbpfDataplane::update_service` to `BACKEND_MAP` capacity (65 536) | Fill via repeated production updates, then one more update | capacity exhaustion (production-reachable input) | typed rollback error; prior generation still selectable (singleton exact, else membership); no Applied identity for abandoned ids; fresh ids not recycled; counts 0 | T3 (conditional) |
+| 75 | Real `EbpfDataplane::update_service` to `BACKEND_MAP` capacity (65 536) | Fill via repeated production updates, then one more update (fill hard stop 900 s) | capacity exhaustion (production-reachable input) | typed rollback error; prior generation still selectable (singleton exact, else membership); no Applied identity for abandoned ids; fresh ids not recycled; counts 0 | T3 (conditional) |
+
+**G1 cross-boundary rows (kernel relay).** Same rules and the same oracle rules above. Contract and invariant are the DESIGN names (Contract of the legs, Message-framing contract, Exchange state machine, Quint modules `relay_exchange`/`relay_ktls`). Faults enter only through the existing driven ports: for Tier 1 the `SimGatewayRelay` peer events and substrate presentation described in Scaffolds (test support shaped by DISTILL; no production surface), for Tier 3 a real rustls peer pair on loopback driven by the test. Lane codes as above; rows 104–112, 114–118 and 123 run only on the native metal host; rows 119–122 run in the default `integration-tests` lane on the Sim relay.
+
+| ID | Contract / invariant | Production owner path | Stimulus | Fault | Oracle | Lane |
+|---|---|---|---|---|---|---|
+| 83 | Interim heads: `100` forwarded, other `1xx` dropped, `101` is 502 (pending P-13c) | public listener -> exchange driver -> `read_through` on the upstream half | origin script sends `103`, `100`, then the final head | none | client receives exactly the rewritten `100` head then the final response; `103` absent; same stimulus with `101` is a 502 | U+I |
+| 87 | `NoBytePastMessageBoundary`; keep-alive reuse only at a clean boundary (relay_exchange `exchange_cl_keepalive`) | listener -> exchange driver -> `relay_exact` -> `close_write` per exchange | two requests on one public connection, `Content-Length` 0, 1, 65 535, 65 536, 65 537 (the pipe capacity is 65 536) and PBT over sizes at layer 2 | none (healthy control) | each body octet-exact at the origin script and the client; second request head intact; one upstream leg per exchange, none reused; `finish()` disposition `Reuse` observed through the second head being read | I |
+| 88 | chunk-per-chunk relay | same | chunked request and chunked response with extensions, trailers, and a split size line | none | sizes written by the gateway, octets exact, extensions and trailers absent upstream and downstream, last chunk written by the gateway | I |
+| 89 | bodyless message rules (S-PIG-76) | same | `HEAD`, `204`, `205`, `304` responses (some carrying `Content-Length`/`Transfer-Encoding`) | none | no `relay_*` call for a body; connection reusable | I |
+| 90 | control records never forwarded; each leg rekeys alone; close_notify ends one direction | same, Sim relay peer events | KeyUpdate (requested and not), NewSessionTicket, close_notify, alert, unexpected record at seeded offsets: inside a head, a chunk-size line, a boundary, a body | scripted peer events; a KeyUpdate whose answer fails (`KeyUpdateError::RustlsRefused`, `RearmRx`, `RearmTx`, `Io`) on either leg | relayed octets exact; no control event visible on the other leg; alert or unexpected record closes both legs; `read_through` partial head retained across the event; a failed KeyUpdate answer: before the public response head exactly one 502, after it both legs close with no further response, nothing is relayed past the failure and the end is never clean | I |
+| 91 | close-delimited end (relay_exchange `close_delimited_clean_end`, pending P-13d) | same | origin response without length that ends in close_notify | peer close_notify at end; over-ceiling variant | forwarded with `Connection: close`; clean end only on close_notify after the head; not reused; over `max_response_body_bytes` closes both legs | I |
+| 92 | upstream close before head / mid-body (relay_exchange `upstream_close_mid_body_aborts`) | same | origin closes before the head; mid length body; close_notify before declared end | scripted | pre-head: exactly one 502; post-head: both legs closed, no further response, never a clean end | I |
+| 93 | early response then lingering close (relay_exchange `early_response_closes`; pending P-18, P-13b) | same | origin answers 413/401 while a large request body is unfinished; each gateway rejection listed in S-PIG-93 with a body sent after | origin early answer; client keeps sending | complete response delivered; port-call order `close_write` then `discard_remaining` then close; the SimClock-bounded discard never extends past its bound; 408 and EOF/alert/reset legs make no `discard_remaining` call | I |
+| 94 | body ceilings | same | declared and chunked requests at, 1 above the ceiling; response above its ceiling | none | 413 before any upstream octet; chunked overflow 413 iff no public response octet sent else both legs close; response overflow closes after head | I |
+| 95 | pipe floor (typed `RelayPipeError`) | same | any body relay | `SimGatewayRelay` pipe creation failure / read-back below floor | 502 before head; both legs close after head; no octet moved | I |
+| 96 | deadline composition and keep-alive idle (obl 17) | same on `SimClock` | idle past `keep_alive_idle_deadline`; stalled first head; stalled later head; hundred requests | `SimClock` advance | silent close vs 408 as specified; the hundredth response `Connection: close`; 101st never parsed | I |
+| 97 | single attempt (ADR-0240, 0232) | listener -> connector -> `open_upstream` -> client mTLS | each failure of rows 92, 95, 98 | typed faults | request-count marker 1; one `open_upstream`; no second dial; upstream head has `Connection: close` | I |
+| 98 | arming only after equality; failed equality arms nothing | connector -> `GatewayClientMtls::authenticate`; public side: `accept_public` | selected peer A; a public client handshake | Sim arm failure of each `KtlsArmError` kind (`UlpInstall`, `CryptoInfo`, `CipherNotSupported`, `KernelConnection`) after a matching peer, and at `accept_public`; separate mismatch case | `Arm(kind)` surfaces unchanged; no octet at the peer; cleanup once; public 502; at `accept_public` the public socket closes without any HTTP octet read and no upstream leg opens | I |
+| 99 | Earned Trust of the relay (ADR-0244/0246) | boot gate task -> `GatewayRelay::probe` | boot with `SimGatewayRelay` presenting each substrate lie | `ulp_absent`, `cipher_refused`, `splice_inexact`, `pipe_clamped`, `probe_timeout`, `probe_io` | `probe` returns the matching `RelayProbeError`; the honest substrate returns `Ok`; no variant maps to two lies | I |
+| 100 | G-1 relay input; boundary 7 | `boot_server` G3/G4 -> gate task | boot enabled with an honest and with a lying Sim relay; replace the Route after boot | substrate lie | TCP/443 unbound; `health.startup.refused` reason `gateway.relay_probe`; status `ConnectPathUnavailable`; probe call count 1 across the replacement; operator listener, allocation, Service and hydration advance identically; disabled gateway: zero relay-probe calls | I |
+| 101 | G-6 drain; relay_exchange `drain_with_inflight_body` | `ServerHandle` -> `GatewayHandle::shutdown` -> exchange driver | drain with idle connections and one in-flight exchange at each phase | drain deadline on `SimClock` | idle closed at once; in-flight completes or is force-aborted at the one deadline; no request parsed after drain; zero residue; discard (P-18) ends at the drain deadline | I |
+| 102 | seeded exchange invariant | exchange driver over `SimGatewayRelay` | seeded schedules of scripted events | KeyUpdate, NewSessionTicket, close_notify, alert, reset, upstream close before head | no octet past a boundary; no reuse after drain; zero leases, pipes and legs after every outcome; seed printed | S |
+| 103 | seeded drain/force-abort | same | drain at a seeded point | deadline expiry | exchange completes or aborts, never reused, no residue; twin runs equal | S |
+| 104 | host/Sim equivalence of `GatewayRelay` | `HostGatewayRelay` vs `SimGatewayRelay` through the port | the same byte and event scripts | producible faults only (peer events, deadlines, short counts, backpressure, discard under P-18, `relay_to_end` under P-13d) | identical returned octets, error variants and close behaviour; substrate lies excluded | T3 |
+| 105 | ADR-0239/0244/0246 byte-exact relay; keep-alive | `HostGatewayRelay` between two kernel-TLS legs; N: full production path | `Content-Length` and chunked bodies over two exchanges; around the 64 KiB capacity (cap-1, cap, cap+1, 2cap, 2cap+1) | records of mixed sizes straddling heads and chunk-size lines | octet-exact at both rustls peers; next head intact; no loss at any capacity-boundary length | T3 (+N) |
+| 106 | control-record contract (A-K4); no gateway-originated KeyUpdate (P-17) | `read_through`/`relay_exact` on the read half | KeyUpdate (requested and not) in head, chunk-size line, boundary and body | peer KeyUpdate; negative control: a test-local raw kTLS receiver that does not re-arm | exact octets; `TlsRxRekeyReceived`, `TlsRxRekeyOk` advance by the number sent, `TlsTxRekeyOk` by the number requested; `TlsDecryptError` unchanged; nothing forwarded to the other peer; the control receiver reads `EKEYEXPIRED` | T3 |
+| 107 | transmit lock (A-K5; model `relay_ktls`) | `relay_exact` splice-out vs the read half's reply | KeyUpdate request arrives while a large splice-out is in flight | timing from a stalled receiver | peer decrypts every octet, `TlsDecryptError` unchanged, reply after the in-flight write | T3 |
+| 108 | NewSessionTicket / close_notify handling | `read_through`, `relay_exact` | tickets before the first upstream response; close_notify mid-head, mid-body, after response | peer close_notify | ticket absent downstream; `Truncated`/`SourceEndedMidBody` mid-message; `CleanEof` only at a boundary | T3 |
+| 109 | A-K7 | upstream read half; N: production leg-C | injected KeyUpdate at the upstream leg; a 16 MiB response through production leg-C | injected peer KeyUpdate | answered with `TlsDecryptError` unchanged; production run: `TlsRxRekeyReceived` delta 0 across the response (a non-zero delta is a deterministic hard failure that falsifies A-K7 and is returned to DESIGN; it is neither a pass nor inconclusive) | T3 (+N) |
+| 110 | one pipe rule (ADR-0246, P-16) | public read half | body relayed, then the half waits | none | descriptor count returns to the pre-body value once the next head read starts, for `Content-Length` and chunked | T3 |
+| 111 | backpressure bounded memory; progress deadlines | `relay_exact` | 256 MiB stream to a stalled reader; stalled body; trickled `Content-Length` response (single-octet pieces) | stalled reader, stalled sender | in-flight octets <= socket buffers + 2x pipe capacity (read at run time); RSS growth <= 4 MiB; stall ends `NoProgress` at the passed `no_progress`; each trickled piece reaches the client within one `no_progress` without a following piece | T3 |
+| 112 | A-K6 record boundary | `relay_exact` | records of 1 to 16 384 octets, heads and chunk-size lines straddling records | mixed sizes | octet-exact; splice-in only into an empty pipe (the private pipe is not observable from outside; emptiness at every splice-in is asserted through exactness over repeated bodies) | T3 |
+| 113 | descriptor/memory budget (Budgets) | production composition (`run_server`) | 128 concurrent streaming requests | process `RLIMIT_NOFILE` (reported, not raised) | peak `/proc/self/fd` count <= baseline + 768; resident-set growth plus the capacity (`F_GETPIPE_SZ`) of the process's pipe descriptors <= 24 MiB (128 x 192 KiB, the DESIGN accounting: 2 x 32 KiB head accumulators and 2 x 64 KiB pipes per exchange; no allowance for connection state, a larger figure falsifies the budget and is returned to DESIGN); the 129th concurrent connection is closed before any TLS octet is read or written (`max_public_connections` = 128); after drain the count returns to baseline | N |
+| 114 | Earned Trust of the real kernel | `HostGatewayRelay::probe` | probe on the honest kernel; then the ULP-absent case: the test re-executes its own test binary (never the `overdrive` binary) as a child that calls `unshare(CLONE_NEWUSER)` before starting a runtime and then `HostGatewayRelay::probe`; the child lacks `CAP_NET_ADMIN` in the initial user namespace, so the kernel does not autoload the module and the ULP lookup returns `ENOENT` (`net/ipv4/tcp_ulp.c:41-48, 163-165 @ v7.0`) | `rmmod tls` under a drop guard (requires `/sys/module/tls` with refcount 0; `rmmod` fails, and the test falls back to the honest pass, if any kernel-TLS socket exists); without the capability drop the root test would autoload the module and pass | `Ok` on the honest kernel; `RelayProbeError::Arm(KtlsArmError::UlpInstall { errno: ENOENT })` in the child | T3 |
+| 115 | lingering close (pending P-18) | `close_write`, `discard_remaining` on a real leg; N: full path | client sends a body after a 413 and after an early 401; the pre-exchange rejection list | peer keeps sending; peer never closes | client reads the whole response then close_notify, no reset (`ECONNRESET` absent); discard ends at close_notify, at max, at the deadline | T3 (+N) |
+| 116 | no-flag configuration (obl 16(j)) | same as 105 and 111 | the same scripts | none | same oracles; peer record sizes recorded; cites re-derived and saved | T3 |
+| 117 | close-delimited over real TLS (pending P-13d) | `relay_to_end` | response without length | origin close_notify | octets exact, clean end only on close_notify, bounded | T3 |
+| 118 | cipher set (pending P-12) | `accept_public`, upstream arm, snapshot config | clients offering AES-128-GCM, AES-256-GCM, ChaCha20-Poly1305 only | n/a | both AES suites relay exact; ChaCha-only is refused before arming (`PublicHandshakeError::Tls`); snapshot lists exactly the two suites | U+T3 |
+| 119 | response limits (ADR-0238, Message-framing contract response rules); status mapping with pre-/post-head projection | listener -> exchange driver -> `read_through` on the upstream half | origin script sends: a declared `Content-Length` of 16 777 217 then 16 777 216; a head of 32 769 then 32 768 octets; 101 then 100 header fields; interim heads whose cumulative size crosses the head limit; after the public head, a body that outgrows its ceiling | scripted origin | over-limit before the public head: exactly one 502, no public octet, upstream closed, one cookie registration; at the limit: relayed octet-exact; post-head overflow: both legs closed, no further response | I |
+| 120 | `response_head_deadline` and the deadline composition (one budget from t0, interim heads included) | same, on `SimClock` | origin silent after the upstream request-head write; `103` at t0 + 2 s and a second `103` at t0 + 4 s with the final head withheld, and the same with the final head completing at t0 + 4.9 s; a request that has used 118 s | `SimClock` advance in 1 s steps and one 1 ms step across the boundary | still waiting at t0 + 5 s minus 1 ms; exactly one 502 at t0 + 5 s when the final head is withheld, the head relayed when it completes at t0 + 4.9 s; no `103` reaches the client; a 2 s wait for the 118 s request; upstream closed once, no retry (one `open_upstream`) | I |
+| 121 | `body_no_progress_deadline`; 408 before any response octet (Status mapping delta) | same | head with `Content-Length: 1024` then no body octet; a chunked head then a stalled size line; a stall mid-chunk; a trickle of one octet every 29 s; a stall after an early origin response was written | scripted public-client stall on `SimClock` | one 408 exactly 30 s after the last octet moved and no earlier; the 29 s trickle is not cut until `whole_request_deadline` (120 s), then one 502; no `discard_remaining` call after a 408; legs closed, no reuse; with an early response already written no 408 and the S-PIG-93 lingering close governs | I |
+| 122 | relay_exchange `half_close_after_request_read`, `public_close_mid_request_aborts` (the same contract the QC-4 runs replay) | same | a request fully read (a relayed `Content-Length` body, and a bodyless request) then public close_notify; close_notify while idle; close_notify and reset mid-request-body | scripted public-peer close_notify and reset | the whole response (`Content-Length` and chunked) delivered, then both legs closed, no reuse, no further head parsed, upstream closed once; idle: silent close, no upstream leg opened; mid-body: both legs aborted, no response | I |
+| 123 | `accept_public` refusal taxonomy (`PublicHandshakeError`; ADR-0226 server configuration) | `HostGatewayRelay::accept_public` against real rustls client peers | ALPN `h2` only; no SNI; a peer silent until the passed deadline; a reset mid-handshake | peer behaviour (production-reachable inputs; no seam) | the matching typed `PublicHandshakeError` per stimulus (expected `AlpnMismatch`, `ServerNameMissing`, `Timeout`, `Io` respectively; the exact stimulus-to-variant mapping is pinned at DELIVER, since a reset may surface as `Io` or `Tls` and the ALPN and SNI refusals as `Tls { alert }`); no HTTP octet read; `tls_stat` install counters unchanged; no upstream leg opened; descriptor count returns to start | T3 |
+
+**Native-metal (Tier 3) obligations: oracle, stimulus, bounds, cleanup.** All run only through `cargo xtask metal run --` (native x86_64 KVM host, uid 0, fail closed on the substrate probes; Lima, a virtualized host and nested KVM are non-signal for these). Common rules: the `overdrive-dataplane` integration binary is already wholly in nextest group `host-kernel-shared` (`.config/nextest.toml`), which serialises the `/proc/net/tls_stat` deltas (they are per network namespace and node-global); the conformance binary rows (113, N parts of 105, 109, 115) run under the existing native-metal selector and, once the whole-binary assignment named in Test placement is made, in the same group; counters are read before and after each test and compared exactly (no other kernel-TLS traffic can run in the window), names as the spike recorded them (`TlsDecryptError`, `TlsRxRekeyReceived`, `TlsRxRekeyOk`, `TlsTxRekeyOk`); every peer is a test-owned rustls endpoint on loopback; every test closes its sockets and pipes through RAII guards and asserts the descriptor count returned to its start value; a failed test must leave no process, socket, pipe or sysctl change behind (the metal lease is exclusive).
+
+| ID | Oracle (independent of the code under test) | Stimulus and fault | Bounds | Cleanup and restoration |
+|---|---|---|---|---|
+| 104 | returned octets and error variants compared across Host and Sim | identical scripts; producible faults only | <= 30 s per script | sockets closed by guards |
+| 105 | bytes at the real rustls peers; sha-256 of body; peer-side TLS record sizes logged | CL and chunked, two exchanges, capacity-boundary lengths | body <= 16 MiB; <= 30 s | guards; fd count equal |
+| 106 | bytes at the peer; `tls_stat` deltas; a raw-socket control reading `EKEYEXPIRED` | KeyUpdate (requested and not) at 4 positions x 2 suites | <= 20 KeyUpdates per run; <= 30 s | guards |
+| 107 | peer decrypt success; `TlsDecryptError` delta 0 | KeyUpdate request during a 64 MiB splice-out to a throttled reader | <= 30 s; the reader's throttle totals between 5 s and 20 s across the 64 MiB (long enough that the request lands mid-write, short enough to fit the bound) | guards |
+| 108 | bytes at the peer; typed returns | tickets, close_notify at head/body/after response | <= 10 s | guards |
+| 109 | peer-injected KeyUpdate answered; `TlsRxRekeyReceived` delta across the 16 MiB production response, asserted equal to 0: any other value fails the test deterministically, falsifies A-K7 and is returned to DESIGN (never inconclusive) | injected KeyUpdate (<= 4 per run); production leg-C response of exactly 16 MiB | <= 60 s | guards; VM Service stopped by the harness owner |
+| 110 | `/proc/self/fd` count | body then idle wait | <= 10 s | guards |
+| 111 | octets in flight read from `SO_SNDBUF`/`SO_RCVBUF` and pipe capacity; `/proc/self/statm` RSS; wall clock vs passed deadlines | stalled reader (3 s), stalled sender (3 s over a 2 s `no_progress`), trickled response | stream <= 256 MiB; <= 60 s | guards |
+| 112 | octet-exactness over repeated bodies | mixed record sizes | <= 64 MiB total; <= 60 s | guards |
+| 113 | `/proc/self/fd` peak (<= baseline + 768), resident-set growth plus `F_GETPIPE_SZ` capacity of the process's pipes (<= 24 MiB), `getrlimit` reported; the 129th connection's first read returns close with zero TLS octets | 128 concurrent streaming requests via the production composition held open, then one more connection | <= 120 s; guest streams <= 1 MiB each; the 129th connection attempted once, observed for <= 5 s | drain (one 5 s drain), then count equals baseline; VM Service stopped |
+| 114 | typed return (the child reports it to the parent over its exit status or stdout); `/sys/module/tls` and `/proc/net/tls_stat` | probe on the honest kernel; then `rmmod tls` and the probe in a `CLONE_NEWUSER` child of the test binary, only when `/sys/module/tls` exists with refcount 0 | <= 10 s; the run holds the exclusive metal host lease and the binary is in `host-kernel-shared`, so no other kernel-TLS user runs in between | the drop guard runs `modprobe tls` and then verifies `/sys/module/tls` and `/proc/net/tls_stat` are readable again before the test returns, also on panic |
+| 115 | client-side read results (full response, then close_notify, never `ECONNRESET`); `ss -tni` shows the leg closed | post-rejection body streams up to `max_request_body_bytes`; silent peer | <= 120 s (deadline cases use short passed deadlines at port level) | guards |
+| 116 | octets as 105/111; peer record sizes logged; saved `git show v7.0:<path>` hunks against `vendors/linux` | same scripts | as 105/111 | guards |
+| 117 | octets; close behaviour | response without length | <= 16 MiB; <= 30 s | guards |
+| 118 | handshake outcomes; octets | three client suite offers | <= 10 s | guards |
+| 123 | typed `PublicHandshakeError` returns (variant per stimulus pinned at DELIVER); `/proc/net/tls_stat` install counters unchanged across each refusal; no HTTP octet read from the refused socket; `/proc/self/fd` count | four real rustls client peers on loopback: ALPN `h2` only, no SNI, silent until the passed deadline (a 2 s deadline passed at port level; the production 5 s `tls_handshake_deadline` is not waited), reset mid-handshake | <= 4 cases x 10 s | guards; descriptor count equals its start value |
+
+**Bounds and cleanup for the fault rows 01–75 that run bounded rounds, windows or native-metal state.** Numbers are DISTILL test bounds consistent with `GatewayLimits::first_slice` (public TLS, request head, upstream connect and response head 5 s each; body no-progress and keep-alive idle 30 s; whole request 120 s; application gate 30 s; one 5 s drain; the 10 s fail-stop outer bound; `BACKEND_MAP` capacity 65 536) and are tuned only by a recorded measured run, never to make a test pass. The Sim rows run on `SimClock` (no wall-clock wait); every native-metal row ends with the leaked-state detection one-liners of `.claude/rules/testing.md` and `debugging.md` (cgroup scopes, XDP, netns, nft tables), run through `cargo xtask metal run --`.
+
+| ID | Bounds (events, rounds, requests, windows) | Recovery or observation window | Cleanup and restoration |
+|---|---|---|---|
+| 01 | One deploy, one request, body <= 16 MiB, request <= 120 s (`whole_request_deadline`); kernel-TLS samples (`ss -tni`, `tls_stat`) taken before, three times while streaming (1 s apart) and after | From `overdrive deploy` returning to the first 200: poll the public URL once per second, at most 120 attempts, each <= 5 s (`upstream_connect_deadline`); a 503 is expected until the hydrator programs the Service | `DELETE` the Route, stop the Service, graceful `ServerHandle::shutdown` within the one 5 s drain; live intent and receipt counts 0; the harness owner stops the VM; leaked-state sweeps |
+| 24 | 256 rounds of two simultaneous declares with distinct Route IDs, each round on a fresh store, <= 5 s per round; seed printed | None (the race resolves inside the call) | Per-round temporary store directory dropped; no kernel state |
+| 39 | One request, <= 5 s; the request-count marker must stay 0 | Readiness as row 01 (<= 120 polls, 1 s apart) | Narrow Route withdrawn, Service stopped, row 01 cleanup |
+| 40 | One request; the guest closes before any response octet; the 502 arrives <= 5 s (`response_head_deadline`); request-count marker exactly 1 | Readiness as row 01 | Row 01 cleanup |
+| 56 | N: after `job stop` returns, 40 requests 250 ms apart (a 10 s window), stopping early once the outer entry is gone, then 5 more expecting 503; T3: one dial, <= 5 s | Window ends at the earlier of 10 s or the hydrator removing the entry (read by the independent `bpftool` oracle) | Route withdrawn, Service stopped; the test installs no map, rule or route (production leaves the entry, P-4); `nft list ruleset` and `ip rule`/`ip route show table 100` equal before and after |
+| 63 | One dial from one registered socket, <= 5 s; one `cleanup(&intent)` | None | Socket closed, `cleanup` once, live counts 0; ruleset and table 100 snapshots equal before and after (the test installs none of them) |
+| 64 | Four identity cases (matching, wrong-valid, expired, absent), one dial each <= 5 s; wire capture <= 10 s per case | After a negative case the matching SVID is restored by the production reconciler within 30 s (`application_gate_deadline`), or each case runs in a fresh composition | Capture process started before and terminated after each case by a guard, capture file removed; identity restored to the matching SVID |
+| 69 | I: one request held at the response-head phase, one guest-flow owner restart or fail-stop, `SimClock` advance <= 5 s; N: one restart, request <= 120 s | The owner is back or fail-stopped within the 10 s outer bound | Restart restores the owner; Service stopped; live counts 0 |
+| 70 | N: one request per status case, each <= 5 s, except 408 stalled head (silent client for 5 s plus a 2 s grace) and 408 stalled body (10 body octets then silence for 30 s plus a 2 s grace, <= 40 s) | None | Row 01 cleanup |
+| 71 | T3: one instance recreate, zero requests; N: one serve restart, then one request every 500 ms for at most 120 requests (a 60 s recovery window) | Safety: any response seen while the Service map shows no outer entry is 503; liveness: the backend response within 60 s, else the test fails | Serve stopped gracefully; the test-owned pin directory removed and its bpffs pins unlinked; leaked-state sweeps |
+| 72 | 2,000 rounds, <= 60 s, seed printed; each round races one `update_service` against 4 concurrent reads of the just-selected id | None | Every service emptied through `update_service` until both live counts are 0 and `BACKEND_MAP` is empty; pin directory removed |
+| 75 | Fill to 65 536 entries in batches within the per-service backend limit, then exactly one more update; hard stop at 900 s with the measured fill runtime recorded (the measurement the user needs before acknowledging 5a); emptying (or recreating the dataplane on a fresh pin directory) hard stop 300 s | The rollback is observed within the failing call (no wait) | Every filled service emptied until the `bpftool map dump` count is 0, or the dataplane recreated on a fresh pin directory and the old pins removed |
+
+**Isolation of hand-built real-netns fixtures (S-PIG-56, 63, 64).** The N halves of S-PIG-56 and 64, S-PIG-01 and the other conformance rows use only production-allocated netns, veth and slots (`run_server`'s own provisioner) and need no lease. The T3 halves in the `overdrive-dataplane` hook file may hand-build a veth/netns pair for the leg-C peer or the backend (the dataplane crate has no production provisioner): every such fixture takes its host gateway, workload address and prefix from `overdrive_testing::cidr_lease::TestCidrLease::acquire(owner)` with one stable owner name per topology module (the shared `10.250.0.0/16` pool, disjoint from `WORKLOAD_SUBNET_BASE` `10.99.0.0/16`), keeps any host-loopback backend address and route disjoint from production addresses, records the pool and lease name in the fixture's module documentation and names its netns uniquely; it never embeds a CIDR literal and never reuses production slot-0 addresses. Any test that instead reaches the production per-alloc provisioner draws its net slot from the per-file band registry (`crates/overdrive-control-plane/tests/common/net_slots.rs`; a band constant is added for the file), never `NetSlotAllocator::new()` and never a raw slot literal. Slot partitioning does not remove the node-global axes (the `overdrive-mtls` nft table, the root cgroup attach, `:53`): those stay serialized by `host-kernel-shared` (Test placement). Before diagnosing a connection assertion, read `ip route`, `ip rule` and `ip netns list`.
 
 If the Sim cannot distinguish sub-cases (a) and (b) of S-PIG-74 with the existing typed results at `probe` and `take_receipt`, that is a DESIGN gap to report, not a reason to add a scripting API.
 
+Held-probe rule for the Sim (DG-9). `HoldConnectProbe`/`ReleaseConnectProbe` park the probe at `GatewayClientMtls::authenticate`, so a held probe requires a `Selected` receipt: S-PIG-31, 32 and 68 program a backend (a non-empty `update_service` on the shared `SimDataplane` state) before the hold; a `NoBackend` probe cannot be held. That `SimGatewayConnectDataplane` and `SimGatewayClientMtls` share the hold state is Sim test support. Conditional (same class as the (a)/(b) note): S-PIG-74 (d) holds the boot sentinel probe, which is the dataplane's own `probe` and not the connector's; the DESIGN states the park point for the connector probe only. If the existing hold cannot yield `ProbeTimeout` at the sentinel under an advanced `SimClock`, report it to DESIGN; no scripting API is added.
+
 ## Wave: DISTILL / [REF] Strategy and project-policy mapping
 
-Architecture-of-Reference treatment is inherited; no per-feature strategy. Driving surfaces use their real protocols (public TLS/HTTP, operator HTTPS API through the exported handler, clap parse). Driven-internal state uses `LocalIntentStore` over real redb, `SimObservationStore` for deterministic focused composition, and the real `EbpfDataplane` and kernel on native metal for Tier 3. External/non-deterministic ports (`Clock`, CA entropy/KEK, guest dial) use the existing Sim ports. Layers 3 and above are example-based; generative coverage is confined to pure and in-memory properties (S-PIG-03–10, 12–17, 44).
+Architecture-of-Reference treatment is inherited; no per-feature strategy. Driving surfaces use their real protocols (public TLS/HTTP, operator HTTPS API through the exported handler, clap parse). Driven-internal state uses `LocalIntentStore` over real redb, `SimObservationStore` for deterministic focused composition, and the real `EbpfDataplane` and kernel on native metal for Tier 3. External/non-deterministic ports (`Clock`, CA entropy/KEK, guest dial) use the existing Sim ports. The `GatewayRelay` port (G1) is a driven port whose real adapter is the kernel itself: Tier 1/2 use `SimGatewayRelay` (userspace copy between in-memory record queues, same observable contract), Tier 3 uses `HostGatewayRelay` against real rustls peers on loopback, and the two are compared by the equivalence test over the faults both can produce. Layers 3 and above are example-based; generative coverage is confined to pure and in-memory properties (S-PIG-03–10, 12–17, 44, 76–86, 89, 102, 103 at layers 1–2).
 
-No scenario hand-installs a map, rule, identity, application snapshot, certificate or protected record that production installs. The only test-supplied credential is an operator input accepted by the production serve flags or `ServerConfig.gateway`. Faults enter only through existing driven ports (Sim dataplane/identity/mTLS typed faults, `HoldConnectProbe`/`ReleaseConnectProbe`, `SimObservationStore` faults, `SimClock`). `AT-PIG-E2E-1` and the hook tests run only on the native x86_64 KVM host via `cargo xtask metal run --`. Policy rows to append in phase 2: Driving: public HTTPS listener (conformance harness public client), `Route` operator surface; Driven internal: `GatewayConnectDataplane` (Sim pair in Tier 1/2, `EbpfDataplane` in Tier 3), custody over real redb; Driven external: `GatewayClientMtlsFactory` (Sim/Host).
+No scenario hand-installs a map, rule, identity, application snapshot, certificate, protected record or kernel-TLS state that production installs. The only test-supplied credential is an operator input accepted by the production serve flags or `ServerConfig.gateway`. Faults enter only through existing driven ports (Sim dataplane/identity/mTLS typed faults, `HoldConnectProbe`/`ReleaseConnectProbe`, `SimObservationStore` faults, `SimClock`, the `SimGatewayRelay` capabilities listed in Scaffolds) or are production-reachable inputs to a real adapter (a peer that sends a KeyUpdate, closes, resets or stalls; a client that keeps sending a body; descriptor pressure). `AT-PIG-E2E-1` and the hook and relay tests run only on the native x86_64 KVM host via `cargo xtask metal run --`. Policy rows to append in phase 2: Driving: public HTTPS listener (conformance harness public client), `Route` operator surface; Driven internal: `GatewayConnectDataplane` (Sim pair in Tier 1/2, `EbpfDataplane` in Tier 3), `GatewayRelay` (`SimGatewayRelay` in Tier 1/2, `HostGatewayRelay` in Tier 3), custody over real redb; Driven external: `GatewayClientMtlsFactory` (Sim/Host).
 
 ## Wave: DISTILL / [REF] Adapter coverage
 
@@ -5665,31 +6861,61 @@ No scenario hand-installs a map, rule, identity, application snapshot, certifica
 | `ServiceFrontendResolve` | S-PIG-49, 01 | Service intent plus platform VIP resolves one frontend; closed failures preserve the intent universe |
 | `GatewayConnectDataplane` / `EbpfDataplane` / cgroup hook and maps | S-PIG-02, 28–30, 37, 41, 50, 53, 56, 57, 63, 67, 71, 72, 75 | Tier 1 uses `SimGatewayConnectDataplane`; Tier 3 uses the real hook, `open_upstream` preparation (mark, loopback bind, cookie, registration), receipts and cleanup. The transient receipt oracle is the connector's `gateway.upstream.receipt.validated` occurrence, not map polling |
 | Ordinary `ServiceMapHydrator` -> `update_service` (D1) | S-PIG-01, 56, 67 | Real hydrator programs the VM backend; the gateway adds no mechanism |
-| `HostGatewayClientMtls` / rustls / leg-C / kTLS / vsock | S-PIG-38, 43, 52, 64, 01 | Exact selected peer, dedicated gateway SVID, wrong-valid and absent/expired identity fail before body; wire evidence on the leg-B/leg-C segment |
+| `HostGatewayClientMtls` / rustls / leg-C / vsock | S-PIG-38, 43, 52, 64, 01 | Exact selected peer, dedicated gateway SVID, wrong-valid and absent/expired identity fail before body and arm nothing; wire evidence on the leg-B/leg-C segment |
+| **`HostGatewayRelay`: kernel-TLS arming from `KernelConnection`, control-record dispatch, rekey, private pipe and `splice`, probe** (`@real-io @adapter-integration`) | S-PIG-104–112, 114–118, 123, 64, 01, 113 | Byte-exact CL/chunked relay, KeyUpdate in head/chunk line/boundary/body with `tls_stat` oracles, transmit lock, ticket/close_notify/alert handling, backpressure and stalls, pipe lifetime, record boundaries, lingering close, close-delimited, cipher set, real-kernel probe, 128-exchange budget |
+| **`SimGatewayRelay`** (`@in-memory`) | S-PIG-83, 87–103, 119–122, 98 | Exchange behaviour, rejection projections, deadlines, drain and the lying-substrate probe gold test; the Sim cannot model kernel record layout, so no Sim result stands in for a Tier-3 oracle (S-PIG-104 compares them) |
+| **Public handshake and custody server configuration** (`accept_public`, `PublicCertifiedKeySnapshot::server_config`) | S-PIG-118, 123, 105, 01 | TLS 1.3 only, ALPN `http/1.1`, exact SNI, no tickets or 0-RTT, secret extraction, cipher set; typed `PublicHandshakeError` (a refused client sends no HTTP) |
+| **Exchange driver and head/framing pure modules** (`runtime::http1`, `runtime::exchange`) | S-PIG-76–86 (pure), 87–103 and 119–122 (through the production listener on the Sim relay), 105 (real) | Framing decision, line validation, chunk lines, interim heads, status mapping with pre-/post-head projection, single attempt, keep-alive, drain; replaces the retired "Public HTTP runtime (hyper)" row |
 | Gateway identity slot, issue-and-audit, reconciler | S-PIG-51, 65, 26 | Dedicated non-allocation subject, epoch idempotency, stale no-op, drain-ordered empty |
-| Public HTTP runtime (hyper) | S-PIG-12–17, 39, 40, 70 | 200/400/404/421/502/503, authority/header/limit policy, single attempt |
-| `ServerHandle` / `GatewayHandle` boot and shutdown (D5) | S-PIG-26, 57–62, 69, 74 | G0–G4 order, stage `gateway`, one budget, fail-stop interaction, disabled path |
+| `ServerHandle` / `GatewayHandle` boot and shutdown (D5) | S-PIG-26, 57–62, 69, 74, 99–101 | G0–G4 order, relay probe then connect probe, stage `gateway`, one budget, fail-stop interaction, disabled path |
 
 Public DNS is not an Overdrive adapter. Production reachability needs an operator-managed IPv4 A record for the Route's Public Hostname. Hermetic runs and E15 use only `curl --resolve <hostname>:443:<gateway-ipv4>` (client-local address selection; the hostname remains SNI, Host and certificate identity); no step edits `/etc/hosts` or uses ambient DNS.
 
 ## Wave: DISTILL / [REF] Scaffolds
 
-Only shapes the DESIGN pins are scaffolded; bodies of production scaffolds fail with SCAFFOLD text under file-level lint allowances. Every test body is complete and executable, including every KEEP unit body (S-PIG-03–10, 12–20, 44, 45, 47, 55 alike), each carrying a reasoned `#[ignore = "pending DELIVER <step>"]`. Activation: remove only the reasoned `#[ignore]`, observe a semantic RED, implement, GREEN, commit (testing.md "RED acceptance scaffolds and activation").
+Only shapes the DESIGN pins are scaffolded; bodies of production scaffolds fail with SCAFFOLD text under file-level lint allowances. Every test body is complete and executable, including every KEEP unit body (S-PIG-03–10, 12–20, 44, 45, 47, 55 alike), each carrying a reasoned `#[ignore = "pending DELIVER <descriptive-name>"]`, except the two expected-GREEN preservation rows S-PIG-41 and S-PIG-59, which are authored without `#[ignore]` (a test carrying a pending marker cannot be expected-GREEN; each must pass on its first run once its scaffold compiles). Activation: remove only the reasoned `#[ignore]`, observe a semantic RED, implement, GREEN, commit (testing.md "RED acceptance scaffolds and activation"). A scaffold never introduces a method, type, variant, trait or parameter the design does not name: a missing signature is a DESIGN gap listed in the Completeness audit, not scaffold.
 
 | Scaffold (crate / file) | DESIGN anchor | Notes |
 |---|---|---|
 | `overdrive-core`: `public_ingress.rs`, `gateway_identity.rs`, `SpiffeId::for_gateway`, two `ObservationRow` variants and point reads (previously approved 2026-09-13), `Action::{IssueGatewaySvid,DropGatewaySvid}`, `HydrationContext.gateway_identity` | Persistence, custody and redaction; Gateway identity; D5 items 9–10 | Demand types, `gateway_demand`, `gateway_frontend_demand` are not carried |
 | `overdrive-core` + `overdrive-store-local` + implementer fallout: **`IntentSubscriptionEvent` type and the `IntentStore::watch` return-type change only** | D5 item 12 | Compile prerequisite only: `LocalIntentStore` maps every broadcast event to `Changed` and detects no lag (main's silent drop on lag is unchanged); lag behaviour is DELIVER's. Gated on the user's reconfirmation of item 12 and on P-8 not being adopted |
 | `overdrive-host`: `ca/public_certified_key.rs`, `socket_cookie.rs` | Persistence; component decomposition | |
-| `overdrive-gateway` (new crate): ports (`GatewayConnectDataplane` with `open_upstream`/`PreparedUpstream`, `GatewayClientMtlsFactory`), application, connector, certified key, route set, frontend, runtime, `UnboundGatewayBuilder`/`GatewayBuilder`/`GatewayControl`/`GatewayHandle` | D5 (a)(b)(d), Application sections | Needs D5 confirmation |
+| `overdrive-gateway` (new crate): the relay port family in `ports` (below), `GatewayConnectDataplane` with `open_upstream`/`PreparedUpstream`, `GatewayClientMtls`/`GatewayClientMtlsFactory`/`GatewayClientMtlsDeps`/`GatewayClientMtlsError` (with `Arm(KtlsArmError)`), `GatewayUpstreamSeal`/`GatewayUpstream { leg: KtlsLeg }`, application, connector, certified key, route set, frontend, `runtime::{limits,proxy_headers,routing}`, `runtime::http1` (pure head validator, parsers, framing decision, chunk-line parser, `exchange` with `ExchangeMachine`), `runtime::exchange` (the exchange driver), `GatewayRuntimeDependencies::new(limits, dataplane, client_mtls, identity_lifecycle, relay)`, `UnboundGatewayBuilder`/`GatewayBuilder`/`GatewayControl`/`GatewayHandle` | D5 (a)(b)(d), Kernel relay data path (G1), Application sections | Needs D5 confirmation. No hyper-based runtime exists to remove: the crate is new and never depends on `hyper`, `hyper-util` or `tokio-rustls` |
 | `overdrive-bpf`: `maps/gateway_connect.rs` (two 8-byte POD maps, capacity 128, unpinned) | Backend programming and selection (D3) | **No selection-arm program is scaffolded** — placement is P-10 |
-| `overdrive-dataplane`: `gateway_connect.rs`, `mtls/gateway_identity.rs` (slot), `mtls/gateway_client.rs`, commit-guard types, `DataplaneError` variants | Commit-guarded transaction; identity integration; obligation 15 | Allocator internals beyond `existing_id` untouched (P-2) |
+| `overdrive-dataplane`: `gateway_connect.rs`, **`gateway_relay/` (`HostGatewayRelay`; kTLS arming, control-record dispatch, rekey, private pipe and splice, probe; the one `unsafe` module `gateway_relay::sys`)**, `mtls/gateway_identity.rs` (slot, handles, `GatewayClientIdentityAccess`), `mtls/gateway_client.rs` (`HostGatewayClientMtls::new(identity, seal, limits, relay: Arc<HostGatewayRelay>)`, `HostGatewayClientMtlsFactory::new(Arc<HostGatewayRelay>)`), commit-guard types, `DataplaneError` variants | Commit-guarded transaction; identity integration; obligation 15; Kernel relay data path (G1) | Allocator internals beyond `existing_id` untouched (P-2). `HostGatewayRelay::new(clock: Arc<dyn Clock>)` is pinned (infallible, kernel-silent: it opens no socket and claims no capability; `probe` proves every kernel fact) |
 | `overdrive-reconcilers`: `gateway_svid_lifecycle.rs` + `Any*` arms | Closed-dispatch contract; D5 item 9 | Host-backed wakeup (empty `interests()`, `resync_schedule()`) |
-| `overdrive-control-plane`: `BootAdapters.gateway`, `ComposedDataplane.gateway_connect`, composition, action shim, boot G0–G4, `ServerHandle` stage `gateway`, handlers, regenerated `api/openapi.yaml` | D5 | Dispatcher fallout across the control-plane tests |
+| `overdrive-control-plane`: `BootAdapters.gateway`, `GatewayAdapters { certified_key_codec, client_mtls, relay }` and `GatewayAdapters::host(kek, clock)` (one `Arc<HostGatewayRelay>` coerced to `Arc<dyn GatewayRelay>` and handed to the mTLS factory), `ComposedDataplane.gateway_connect`, composition, action shim, boot G0–G4 (relay probe then connect probe inside the gate task), `ServerHandle` stage `gateway`, handlers, regenerated `api/openapi.yaml` | D5 | Dispatcher fallout across the control-plane tests |
 | `overdrive-cli`: four `ServeArgs.gateway_*` fields, Route deploy dispatch, `ApiClient` calls | D5 item 11 | Constructor fallout across the CLI tests |
-| `overdrive-sim`: `adapters/gateway.rs`, `invariants/gateway_application.rs`, two `Invariant` variants outside `Invariant::ALL` | Exact seeded invariant registration | Activation key `DELIVER-PIG-GATEWAY-APPLICATION-INVARIANTS` |
-| `tests/conformance`: end-to-end file and harness helpers; QC-1..3 drivers | Evidence-lane table; Formal protocol model | See drivers below |
-| `examples/public-ingress-gateway/` and `verification/expectations/E15-public-ingress-operator-journey/` | Artifact-boundary handoff | See below |
+| `overdrive-sim`: `adapters/gateway.rs` with `SimGatewayClientMtlsFactory::new(Arc<SimGatewayRelay>, clock)`, `SimGatewayClientMtls::new(seal, Arc<SimGatewayRelay>, clock)`, `SimGatewayAdapters` (`new(clock)`, `relay()`, `client_mtls()`, `sim_relay()`), `SimGatewayConnectDataplane`, identity targets, and **`SimGatewayRelay::new(clock)` with its test-support surface (below)**; `invariants/gateway_application.rs`, two `Invariant` variants outside `Invariant::ALL` | Exact seeded invariant registration; Kernel relay data path (G1) | Activation key `gateway-application-invariants`, as the DESIGN now pins it (`#[ignore = "pending DELIVER gateway-application-invariants"]`). No `Invariant` variant is added for the relay seeded runs (S-PIG-102/103 are seeded acceptance tests; a catalogue variant would be new scope the user adds) |
+| `tests/conformance`: end-to-end file and harness helpers (the QC drivers live in their owning crates) | Evidence-lane table; Formal protocol model | See drivers below |
+| `examples/public-ingress-gateway/` and `verification/expectations/E15-public-ingress-operator-journey/` | Artifact-boundary handoff | See below. The E15 README, `execution-substrate` file and INDEX row exist (status `pending`); `runner.sh` is not authored |
+
+**Relay port family scaffold (exact shapes, all from "Driven port `GatewayRelay`", "Cross-crate construction of the opaque leg values" and "Exchange state machine").** In `overdrive-gateway::ports`: `KtlsLeg` (`from_armed(read: Box<dyn Any + Send>, write: Box<dyn Any + Send>) -> KtlsLeg`, the one constructor; `into_halves(self) -> (KtlsReadHalf, KtlsWriteHalf)`), `KtlsReadHalf` and `KtlsWriteHalf` (no public constructor; `backend_mut<T: Any>(&mut self) -> &mut T`, `unreachable!()` on a type the backend did not store), `AcceptedPublicLeg { leg, sni }`, `HeadTerminator`, `ThroughBytes` (`new(bytes: Vec<u8>)`, `as_slice()`), `RelayDeadlines { absolute, no_progress }`, `ReadDeadlines { first_octet, complete_within, complete_by }`, the trait `GatewayRelay` with `probe`, `accept_public`, `read_through`, `write_all`, `relay_exact`, `close_write` and the two PROPOSED methods `relay_to_end` (only with P-13d) and `discard_remaining` (only with P-18), and the error enums `RelayProbeError`, `PublicHandshakeError`, `KtlsArmError`, `KeyUpdateError`, `LegReadError`, `LegWriteError`, `RelayError`, `RelayPipeError`. Pure crate-private: `ExchangePhase`, `ResponseState`, `Remaining` (`UntilClose` only with P-13d), `Disposition`, `Side`, `BodyFraming` (`NoBody`, `Length(u64)`, `Chunked`, `UntilClose`; `UntilClose` is the P-13d variant and is illegal as a request framing), `FramingViolation` (`WrongPhase { phase }`, `ResponseHeadRepeated`, `UntilCloseRequest`, `OctetsBeyondFraming { side, n }`, `ChunkedEndNotOpen { side }`, `ResponseNotComplete`), `ExchangeMachine` with `new()`, exactly the pinned methods (each fallible one returning `Result<_, FramingViolation>`) and the seven accessors. Backends: `HostGatewayRelay::new(clock: Arc<dyn Clock>)`, `SimGatewayRelay::new(clock: Arc<dyn Clock>)`, `SimGatewayClientMtlsFactory::new(relay: Arc<SimGatewayRelay>, clock: Arc<dyn Clock>)`, `SimGatewayAdapters::new(clock)` with `relay() -> Arc<dyn GatewayRelay>`, `client_mtls() -> Arc<dyn GatewayClientMtlsFactory>` and `sim_relay() -> &Arc<SimGatewayRelay>`; tests assemble `GatewayAdapters { certified_key_codec, client_mtls, relay }` from the Sim accessors (the Sim crate does not name the control-plane type). Every scaffolded body above, including these constructors, `backend_mut` and `ExchangeMachine::new`, fails with SCAFFOLD text, so each test is RED at its first production call and never at an import. A `FramingViolation` result is the exchange driver's own call-sequence defect, never a peer fault: the driver closes both legs, answers 502 if no public octet was written (never a 4xx) and emits one error-level event naming the variant; the Sim exchange tests therefore treat a `FramingViolation` from a model-legal call as a failure of the run. All of this shape is part of the item 13 pending-user-confirmation list; nothing beyond it is scaffolded, and no scaffold introduces a method, type, variant or parameter the DESIGN does not name.
+
+**Cargo dependency list (from the "Technology choices" and "Application technology choices" rows).** `overdrive-gateway`: adds `httparse` (lock 1.10.1) and `http` as direct dependencies, `async-trait`, `rustls` (workspace 0.23.39), `arc-swap`, `zeroize`, `x509-parser`, `ring`, `rkyv`, `redb`, `tracing`; never `hyper`, `hyper-util` or `tokio-rustls` (the operator listener in `overdrive-control-plane` keeps `hyper`). `httparse`, `http`, `arc-swap` and `zeroize` are not yet `[workspace.dependencies]` entries on main, so they are added there first (`.claude/rules/rust.md`: workspace dependencies always); `Cargo.lock` is regenerated, never edited. `overdrive-dataplane`: `libc` and `rustls` already present (the unsafe `setsockopt`/`recvmsg`/`splice`/`pipe2`/`F_SETPIPE_SZ` calls stay in `gateway_relay::sys`). `overdrive-host`: `rustix` gains the safe `net` feature (already in the workspace feature list). `overdrive-sim`: no new external crate. Each crate declares `integration-tests = []`.
+
+**`SimGatewayRelay` test-support surface (shaped by DISTILL because the DESIGN leaves it to DISTILL; capabilities, not signatures; lives only in `overdrive-sim`, never on a production type).** It implements the pinned `GatewayRelay` contract over in-memory leg state and nothing else is scripted:
+
+| Capability | Used by |
+|---|---|
+| Present a substrate lie to `probe`: `tls` ULP absent, cipher refused, splice losing octets (`moved`, `expected`), pipe read-back below the floor, timeout, I/O error; or present none | S-PIG-99, 100 |
+| Script each leg's inbound application octets together with control events placed at octet offsets: peer KeyUpdate (requesting or not), NewSessionTicket, close_notify, alert (description), reset, an unexpected record | S-PIG-83, 87–95, 102, 103 |
+| Script an upstream peer's behaviour at the leg: respond with a head and body, close before the head, close mid-body, close with close_notify at the end (close-delimited) | S-PIG-91, 92 |
+| Fail the pipe at its first `relay_*` call: creation error or read-back below the floor | S-PIG-95 |
+| Enforce `ReadDeadlines` and `RelayDeadlines` against the injected `SimClock` (no sleeping; a scripted stall plus a clock advance yields `Deadline` or `NoProgress`) | S-PIG-85, 93, 96, 101 |
+| Bound a per-leg send window so a short count or backpressure can be scripted | S-PIG-111's Sim twin (104) |
+| Observe, per leg, the transcript of application octets written, close_write/close_notify issued, and the live leg and pipe counts (residue) | every Sim row |
+| Script a failed answer to a peer KeyUpdate: `KeyUpdateError` kind `RustlsRefused`, `RearmRx`, `RearmTx` or `Io`, on either leg and in either direction | S-PIG-90 |
+| Script an arm failure of a chosen `KtlsArmError` kind (`UlpInstall`, `CryptoInfo`, `CipherNotSupported`, `KernelConnection`) at the upstream arm after a matching peer, and at `accept_public` | S-PIG-98 |
+| Hand out a `SimGatewayClientMtls` bound to the same backend (used with the arm-failure capability above) | S-PIG-98 |
+
+The Sim path never produces a fault the Host cannot produce except the substrate lies, which belong only to the probe tests, and the two scripted failure kinds above (a failed KeyUpdate answer and an arm failure), which a healthy kernel does not produce: they are exercised only on the Sim (S-PIG-90, 98) and are excluded from the equivalence comparison. The equivalence test (S-PIG-104) compares the two adapters over the faults both can produce. These two capabilities are DISTILL test support in `overdrive-sim` only; nothing beyond the listed capabilities is added.
+
+**Held-probe capability for QC-2 `probe_result(tok, ok)` (DISTILL test-support shaping inside the DESIGN facts "Where a double may park a probe (DG-9)"; since DG-7 it lives in the QC-2 driver's private connect and client doubles inside `overdrive-gateway`, not in `overdrive-sim`; capabilities, not signatures; never on a production type).** The DESIGN pins `HoldConnectProbe(ServiceFrontend)` and `ReleaseConnectProbe(ServiceFrontend)` for the seeded invariants, and DG-7 rules that the QC-2 driver cannot use `overdrive-sim`'s gateway adapters (they implement the other copy of the crate-local traits in the library's `cfg(test)` build). The spec action `probe_result(tok, ok)` completes the probe of one staged candidate, including a candidate that has since been superseded. The two doubles together provide: (1) hold: each probe attempt parks as its own entry at `GatewayClientMtls::authenticate`; (2) release exactly one entry, addressed by the identity the double minted for it and never by arrival position: `open_upstream` mints a distinct `BackendId` per call, that entry's `take_receipt` returns a `Selected` receipt carrying it, `selected_backend_identity` answers a distinct `SpiffeId` for it, and `authenticate` finds the entry by its `expected_peer`; (3) a typed outcome: usable = `Ok(GatewayUpstream)` (an in-memory `KtlsLeg::from_armed` sealed through the `GatewayUpstreamSeal` from `into_builder`; the connector reports `SelectedPeerAuthenticated`) or unusable = `Err(GatewayClientMtlsError::Handshake)` (the connector reports `Mtls(..)`); no half of the sealed leg is ever used; (4) observe the number of entries held. The driver learns which minted identity belongs to candidate `tok` by observing the one entry that parks while `application_status().staged` is `Some` for `tok`, records that identity, and releases by it. The owner's behaviour on the probe of a superseded candidate (keep awaiting or drop it) is unspecified by the DESIGN and both are compatible: releasing an entry whose waiter is gone is a no-op for the double, and the driver asserts only what the model requires, the `application_status()` State comparison (a superseded `tok` leaves current, staged and draining unchanged). `overdrive-sim` keeps its frontend-wide `HoldConnectProbe`/`ReleaseConnectProbe` for S-PIG-31/32 (seeded) and S-PIG-68 (the `overdrive-gateway` integration binary); the crate-private `GatewayApplicationSimFault` enum is not extended, and no scenario needs per-entry release in `overdrive-sim`.
+
+**Hook point (settled by the DESIGN, DG-9; replaces DISTILL's earlier connect-parking design, which is withdrawn).** The port's own `probe` is the boot sentinel probe, run once (ADR-0230); the per-candidate probe the owner awaits is `GatewayUpstreamConnector::probe`: connect permit, `open_upstream` (sync), `into_parts`, `connect(2)` on that socket to the Service Frontend (a real kernel call on a real socket that no backend sees), `take_receipt` (sync), and for a `Selected` receipt `selected_backend_identity` (sync) then `GatewayClientMtls::authenticate` (async). The sync port methods cannot park a caller and the connect cannot be parked by a double, so the park point of every double and of the Sim is `authenticate`. Facts that bind the double and every held-probe scenario: (a) a probe can be held only if its receipt is `Selected`; a `NoBackend` probe returns `ReadyNoBackend` after `take_receipt` with no further await and cannot be held, so a held-probe scenario programs a backend (QC-2 double: it answers `Selected` for every entry; Sim: a non-empty `update_service` on the shared `SimDataplane` state before the hold); (b) `open_upstream` returns `PreparedUpstream::new(tokio::net::TcpSocket::new_v4()?, intent)` (DG-8: plain constructor, registers nothing, carries no cleanup guard; the double records the cookie it minted for `intent`); (c) the real `connect(2)` must reach a peer that completes it: the fixture gives the Service Frontend a loopback address with a listening socket (`ServiceVip::new` accepts any `IpAddr`), which is DISTILL test support; (d) each parked probe holds one connect permit until `authenticate` returns, so the driver keeps held entries below `max_inflight_connects` (128). The identity double answers `ensure_current` and `subscribe` immediately with current facts; the relay double's `probe` succeeds; methods the QC-2 path does not exercise return the port's typed unavailable error.
+
+**QC-2 composition and isolation (DG-10 pinned by the DESIGN; the isolation decision is DISTILL's).** The admission is injected, not exposed: the driver builds one `GatewayLimits`, `GatewayAdmissionBudget::new(Arc::new(limits.clone()))` and `GatewayAdmission::new(budget)`, keeps the `Arc`, obtains the builder through the public `UnboundGatewayBuilder::new(..).await` and `into_builder()` (core-trait Sims for the observation store and clock; a real redb Route store), calls the crate-private `GatewayBuilder::start_with(deps, admission)` and takes `GatewayControl` from `into_parts()`. `open_connection` is `admission.acquire_connection(now)` on the retained `Arc`, the lease kept for `close_connection`. `GatewayAdmission::new`, `budget()` and `start_with` are crate-private items with production callers in `start`; no accessor exists whose only caller is the driver. Promotion goes through the real `GatewayListenerControl::bind`, which binds the configured address on TCP/443 (`GatewayConfig::bind` is "always port 443"); the DESIGN pins no non-443 listener seam and none is invented here. The driver therefore: supplies a loopback address as the configured bind address where the composition takes one (the DESIGN pins `GatewayConfig::new(bind_address)` with the port fixed at 443; no per-test port exists); runs as root (privileged port) through `cargo xtask lima run --` or `cargo xtask metal run --` (no KVM is needed); and is recorded as running in the `host-kernel-shared` nextest group (`max-threads = 1`) for the whole `overdrive-gateway` library-test binary under `integration-tests` (`.claude/rules/testing.md` "Node-global kernel state requires a catch-all nextest group": a module filter goes stale). The same holds for every other binary whose tests let a Sim-relay composition reach promotion (DG-12, Reconciliation and warnings; the binaries are listed in Test placement). `.config/nextest.toml` has no `overdrive-gateway` or `overdrive-sim` acceptance assignment today. **Proposal for the user (not added):** assign those three binaries (gateway lib, gateway integration, `overdrive-sim` acceptance) to `host-kernel-shared` as whole binaries. Reachable failure it prevents: a second process or run holding the same address on TCP/443 turns the promotion bind into `EADDRINUSE` and fails a run for a reason unrelated to the protocol. Cost: every test in those binaries under `integration-tests` runs serially (the `overdrive-sim` acceptance binary has 41 entries today, all serialized). Cheaper alternatives: a module-level filter (goes stale, rejected by the rule) and a non-443 listener seam (DG-12, a DESIGN item, not DISTILL's).
 
 **Lag-aware watch decision.** DISTILL ports only what no body can compile without: the `IntentSubscriptionEvent` (`Changed | Lagged`) type, the `IntentStore::watch` return-type change and its implementer fallout (`LocalIntentStore`, `FaultInjectingIntentStore`, `CountingIntentStore`, Sim). `LocalIntentStore` maps every broadcast event to `Changed` and implements no lag detection, so main's silent-drop-on-lag behaviour is unchanged. S-PIG-48 and S-PIG-66 stay complete executable bodies under `#[ignore = "pending DELIVER lag-aware-intent-subscription"]`; reporting `Lagged` with the exact missed count, relist on `Lagged` and admission closed meanwhile are DELIVER's. This remains gated on the user's reconfirmation of D5 item 12 (D-APP-10 of the DESIGN approved 2026-09-13; `IntentStore` unchanged on main since the merge base). If the user adopts the P-8 simplification, S-PIG-48 is dropped, S-PIG-66 is restated as a relist-period test and nothing is ported.
 
@@ -5697,87 +6923,193 @@ Only shapes the DESIGN pins are scaffolded; bodies of production scaffolds fail 
 
 | Driver | Module / conformance main | Owner and placement | Runs bound to `#[quint_test]` | Projection (pinned accessors) | Ignore reason |
 |---|---|---|---|---|---|
-| QC-1 | `gateway_identity` / `identity_conf` | `overdrive-control-plane/src/gateway_identity_lifecycle/quint_gateway_identity.rs` (D-PASS7-1: in-crate child module; `dispatch_issue`/`dispatch_drop` stay `pub(crate)`) | `issue_hold`, `reissue_near_expiry`, `disable_races_inflight_issue`, `audit_failure_no_hold`, `restart_reissue` (5) | `GatewayIdentitySlot::{desired,current}`, `ObservationStore::issued_certificate_rows` filtered to the gateway SPIFFE id | `pending DELIVER quint-conformance-gateway_identity` |
-| QC-2 | `gateway_application` / `app_conf` | `overdrive-gateway/src` | `replace_valid`, `route_withdraw_drain`, `late_probe_after_supersession` (3) | `GatewayControl::application_status()` | `pending DELIVER quint-conformance-gateway_application` |
+| QC-1 | `gateway_identity` / `identity_conf` | `overdrive-control-plane/src/gateway_identity_lifecycle/quint_gateway_identity.rs` (D-PASS7-1: in-crate child module; `dispatch_issue`/`dispatch_drop` stay `pub(crate)`) | `issue_hold`, `reissue_near_expiry`, `disable_races_inflight_issue`, `audit_failure_no_hold`, `restart_reissue` (5) | `GatewayIdentitySlot::{desired,current}`, `ObservationStore::issued_certificate_rows` filtered to the gateway SPIFFE id | `pending DELIVER quint-conformance-gateway_identity` on `issue_hold`, `reissue_near_expiry`, `audit_failure_no_hold`; `pending DELIVER quint-conformance-gateway_identity-disable-settlement` on `disable_races_inflight_issue` and `restart_reissue` (blocked on B-1: the user's ruling decides which spec or design edit is made before these two can be replayed; the marker names the DELIVER work that follows that ruling and is not an activation key until then) |
+| QC-2 | `gateway_application` / `app_conf` | `overdrive-gateway/src/application/quint_gateway_application.rs` (DG-7; declared from `application`, a child of the module that owns the owner and its admission state); owner = the real `GatewayBuilder`/`GatewayApplicationOwner` over a real redb Route store with **driver-local private doubles** of the four gateway-crate ports (`GatewayConnectDataplane`, `GatewayRelay`, `GatewayClientMtls`, `GatewayIdentityLifecycleControl`); only core-trait Sims (`SimClock`, `SimObservationStore`) come from `overdrive-sim`; the connect and client doubles hold probes at `authenticate` by minted identity (DG-9) | `replace_valid`, `route_withdraw_drain`, `late_probe_after_supersession` (3) | `GatewayControl::application_status()` | `pending DELIVER quint-conformance-gateway_application`; DG-8, DG-9 and DG-10 are closed by the DESIGN (pending user confirmation with item 13); composed through `UnboundGatewayBuilder`/`GatewayBuilder::start_with`; binds the real TCP/443, so it runs as root in `host-kernel-shared` (DG-12; isolation proposal pending, Scaffolds) |
 | QC-3 | `selection_receipt` / `receipt_conf` | `overdrive-dataplane/src/quint_selection_receipt.rs`; owner = the real `EbpfDataplane` on native metal with the real `cgroup/connect4` selection arm (D-PASS7-2); no `Sim*` owner or projection source; run through `cargo xtask metal run --` | `commit_then_select`, `conflicting_alloc_rejected`, `restart_destroys_receipts` (3, over `receipt_conf`) | `selected_backend_identity`, `live_intent_count`, `live_receipt_count`, `take_receipt` return | `pending DELIVER quint-conformance-selection_receipt` until the P-10 arm and the owner are GREEN |
+| QC-4 | `relay_exchange` / `relay_conf` | `overdrive-gateway/src/runtime/http1/quint_exchange.rs` (declared from the `http1` module); owner = the pure `ExchangeMachine` (no `Sim*`) | `exchange_cl_keepalive`, `early_response_closes`, `drain_with_inflight_body`, `half_close_after_request_read`, `upstream_close_mid_body_aborts`, `close_delimited_clean_end` (P-13d), `public_close_mid_request_aborts` (7) | `phase`, `request_remaining`, `response_state`, `response_remaining`, `public_half_closed`, `is_draining` (Pinned observable projection) | `pending DELIVER quint-conformance-relay_exchange` (the owner is a scaffold until DELIVER) |
 
-Total `#[quint_test]` = 5 + 3 + 3 = 11, plus one `#[quint_run]` per driver (3). Model-only runs not bound: `abandoned_reservation_rolled_back` and `receipt_waits_for_publish_guard` run on `receipt_fine` and are covered by Tier-3 tests through existing ports (S-PIG-75 conditional, S-PIG-72). The host/Sim equivalence test (S-PIG-67) is the Sim pairing, not conformance.
+Total `#[quint_test]` = 5 + 3 + 3 + 7 = 18, plus one `#[quint_run]` per driver (4); of the 18, two (QC-1 `disable_races_inflight_issue`, `restart_reissue`) are blocked by B-1 and carry the `identity-disable-settlement` reason, so 16 are completable against the pinned shapes (the three QC-2 runs no longer wait on DG-8/DG-10; their activation still follows item 13 and the stutter and owner-autonomous acceptance). QC-1's `switch!` maps every action the pinned calls cover (`idle` is the stutter, conditional on the user's acceptance, below) and bails with the action name on `settle_ok` and `settle_timeout` (no `_` arm, no empty handler); its `#[quint_run]` is likewise not claimed complete while those two actions are unmapped. `relay_ktls` (`keyupdate_waits_for_writer`, hazard `rekeyDuringWrite`) is model-only: no driver, because pausing a kernel writer needs a test seam the design does not add; its Tier-3 oracle is S-PIG-106/107. Model-only runs not bound: `abandoned_reservation_rolled_back` and `receipt_waits_for_publish_guard` run on `receipt_fine` and are covered by Tier-3 tests through existing ports (S-PIG-75 conditional, S-PIG-72). The host/Sim equivalence tests (S-PIG-67, S-PIG-104) are Sim pairings, not conformance. `unhealthy_is_no_backend` is not bound (P-9). `cargo xtask conformance-lint` must pass.
 
-`unhealthy_is_no_backend` is not bound (P-9). `cargo xtask conformance-lint` must pass.
+**QC-4 driver specification (`relay_exchange`).** Spec `specs/quint/public-ingress-gateway/relay_exchange.qnt`, conformance main `relay_conf` (`relay_exchange(OFF = Set(), REC = true)`; the stutter `idle` exists only in `relay_ok`, so no step maps to "no call"). Driver struct: one field, the production `ExchangeMachine`, rebuilt at `init` with `ExchangeMachine::new()` (pinned: `Idle`, `ResponseState::Pending`, both remainings `None`, not draining, public peer not half-closed); no `Sim*`, no driver-maintained map, counter or literal. Every handler calls one owner method and, for the Result-returning methods only (`begin_request`, `request_octets_moved`, `response_head`, `response_octets_moved`, `finish`), checks the call returned `Ok` (a `FramingViolation` on a model-legal step fails the run: the six pinned variants are the driver's own call-sequence defects, never a model event); `peer_closed`, `drain_begin` and `force_abort` return `()`, have no result to check, and are verified by the per-step State comparison; a call is never made on a step the model forbids. `switch!` has no `_` arm; an unmapped action bails with its name.
 
-**Examples.** `examples/public-ingress-gateway/` is a VM Service journey in the style of `examples/service-kind-vm-workloads/`: `service.toml` (`[vm]`, never `[exec]`), `prepare.sh`, an example-local guest HTTP/1.1 server (`/stream`, `X-Workload: api`, request-count marker), `prepare-test-ca.sh`, `route.toml.template`, `route-narrow.toml.template`, `README.md`, and `run-example.sh` with the exact argv contract in "Artifact-boundary handoff" (hermetic mode curls with `--cacert`; production-trust mode with system trust; both only via `curl --resolve`). The pre-reconstruction shell runner, regression scripts, `receipt-oracle.py`, `workload.py` and the GitHub workflow are not carried.
+| Spec action | `ExchangeMachine` call (the single pinned table) | Handler detail |
+|---|---|---|
+| `read_head(n)` | `begin_request(false, BodyFraming::Length(n))` | `n = 0` leaves `request_remaining() == None` |
+| `req_unit` | `request_octets_moved(1)` | one model unit is one octet |
+| `resp_head(ld, n)` | `response_head(Length(n))` when `ld`, else `response_head(UntilClose)` | the `ld == false` arm exists only with P-13d |
+| `resp_unit` | `response_octets_moved(1)` | |
+| `up_close` | `peer_closed(Side::Upstream, true)` | |
+| `conclude` | `finish()` | evaluates `reusable()` before the call and asserts the returned `Disposition` is `Reuse` exactly when it held |
+| `p_close` | `peer_closed(Side::Public, true)` | |
+| `drain_begin` | `drain_begin()` | |
+| `force_abort` | `force_abort()` | |
 
-**E15.** `verification/expectations/E15-public-ingress-operator-journey/{README.md,runner.sh}` plus the INDEX row (status `pending`) and the harness `EXPECTATION_SOURCE_SHA`/`EXPECTATION_SOURCE_DIRTY` capture pinned in the Artifact-boundary handoff. Point-in-time capture against the built default-feature binary on native metal with a clean harness-captured HEAD, exact-object BPF embedding proof, `curl --resolve` and normal system trust; reviewed by a different agent; not a test.
+| Model variable | Accessor | Mapping |
+|---|---|---|
+| `phase` | `phase()` | `Idle`/`Relay`/`Closed` one to one |
+| `req_left` | `request_remaining()` | `Exactly(k)` is `k`, `None` is 0 |
+| `resp_state` | `response_state()` | `Pending`/`Body`/`Complete` ↔ `RNone`/`RBody`/`RDone` |
+| `resp_left` | `response_remaining()` | `Exactly(k)` is `k`; `None` and `UntilClose` are 0 |
+| `len_delim` (P-13d) | `response_remaining()` | true unless `UntilClose` |
+| `draining` | `is_draining()` | boolean |
+| `p_eof` | `public_half_closed()` | boolean |
+
+Seven model variables, six accessors; `reusable()` is a derived accessor used for the `conclude` precondition and run expectations, not a State field; `exch`, `overread`, `ud_units`, `conf_step` are model-only and never projected. Values the driver must see (spec `closedS` and the reuse branch of `conclude`): in `Closed`, `request_remaining()` and `response_remaining()` are `None`, `response_state()` is `Pending`, `len_delim` is true, `is_draining()` and `public_half_closed()` keep their values; `drain_begin` from `Idle` gives `Closed` with `is_draining()` true; `peer_closed(Public, true)` from `Idle` gives `Closed` with `public_half_closed()` false; `finish()` returning `Reuse` leaves `Idle` with `response_state() == Complete` and both remainings `None` until the next `begin_request`. The seven runs are `relay_exchange.qnt:195` (`exchange_cl_keepalive`), `:211` (`early_response_closes`), `:220` (`drain_with_inflight_body`), `:232` (`half_close_after_request_read`), `:244` (`upstream_close_mid_body_aborts`), `:253` (`close_delimited_clean_end`, P-13d) and `:266` (`public_close_mid_request_aborts`); the invariants checked at every step by the State comparison and in the run expectations are `NoBytePastMessageBoundary` (`:186`) and `MidBodyCloseNeverReused` (`:188`), with the hazard `relayPastBoundary` model-only. `#[quint_run]` randomized traces print their seed. Chunk framing is not modelled and is covered by S-PIG-80/84 PBT.
+
+**QC-1..QC-3 action and projection record (as pinned by the DESIGN "Conformance action maps for the three older mains"; the only unmapped actions are QC-1 `settle_ok` and `settle_timeout`, blocked by B-1).** Two kinds of step are pinned there once: the **stutter step** `idle` (the handler performs one owner read of the module's projection accessors and the per-step comparison asserts the owner did not drift; it applies no stimulus) and, for QC-2, the **owner-autonomous steps** `stage` and `retire` (the owner stages and retires by itself; the driver runs the owner on a paused single-thread runtime, yields until the owner is idle and asserts the step's own postcondition through `application_status()`).
+
+| Driver | Invariants checked (spec) | Owner field | Action -> pinned call | State field -> accessor |
+|---|---|---|---|---|
+| QC-1 `identity_conf` | `HoldImpliesAudit`, `StaleEpochNeverHolds`, `AtMostOneHeld`, `DisableClearsOrTimesOut` (`Safety`) | production `ControlPlaneGatewayIdentityLifecycle` over a real `GatewayIdentitySlot`, `EvaluationBroker` and `GatewaySvidLifecycle`; Sim CA, `SimObservationStore`, `SimClock` at their driven ports | `submit_evaluation` -> `GatewayIdentityLifecycleControl::ensure_current`; `issue_complete(e)` -> `action_shim::gateway_svid::dispatch_issue`; `drop_complete(e)` -> `dispatch_drop`; `disable` -> `disable_after_drain`; `advance_time` -> `SimClock::advance`; `audit_fail` -> failing `SimObservationStore` write for the next `IssuedCertificate` row; `restart` -> drop the owner composition and rebuild it (`GatewayIdentitySlot::new`, new `EvaluationBroker`, `ControlPlaneGatewayIdentityLifecycle::new`) over the same `SimObservationStore` and CA serial counter, discarding queued actions and the pending `ensure_current` future; `idle` -> stutter (`GatewayIdentitySlot::{desired,current}`). `submit_evaluation` polls `ensure_current` once and then drains the broker through the production `GatewaySvidLifecycle` (the driver never constructs an `Action`). **Blocked by B-1, no honest mapping:** `settle_ok`, `settle_timeout` | `desired_epoch`, `desired_enabled` <- `GatewayIdentitySlot::desired()`; `held` <- `GatewayIdentitySlot::current()`; `audited` <- `ObservationStore::issued_certificate_rows` filtered to the gateway SPIFFE id; `now` model-only |
+| QC-2 `app_conf` | `DrainRetainsUntilLeasesZero`, `SupersededResultNeverRestores` | real `GatewayBuilder`/`GatewayApplicationOwner` composition over a real redb Route store, `SimClock`, and the driver's **private doubles** of the four gateway-crate ports (DG-7; the connect and client doubles carry the held-probe capability, Scaffolds) | `route_declare`/`route_withdraw` -> `PublicRouteSetHandle` via `GatewayControl::routes()`; `probe_result(tok, ok)` -> `GatewayUpstreamConnector::probe` completed by releasing the entry held at `GatewayClientMtls::authenticate`, addressed by its minted `BackendId`/`SpiffeId` (DG-9); `open_connection`/`close_connection(gid)` -> `GatewayAdmission::acquire_connection` / drop of the kept `GatewayConnectionLease` (the `Arc<GatewayAdmission>` is injected through `GatewayAdmission::new` and `start_with`, DG-10); `stage`, `retire(gid)` -> owner-autonomous, **no driving-port call** (yield until idle; postconditions `application_status().staged` is `Some` / `draining` no longer lists `gid`); `idle` -> stutter, **no driving-port call** beyond one `application_status()` read. A superseded `tok` must leave current, staged and draining unchanged (the modelled discard) | `current_generation`, `draining_generations` <- `GatewayControl::application_status()`; `staged`, `leases` model-only |
+| QC-3 `receipt_conf` | `IdentityReadableOnlyAfterCommit`, `IdentityImmutablePerBackendId`, `ReceiptMatchesIntent`, `NoResidueAfterCleanup`, `RollbackPreservesPriorGeneration`, `EmptyIsNoBackend` (checked at the State comparison; the fine-grained rollback is `receipt_fine`) | the real `EbpfDataplane` (both `Dataplane` and `GatewayConnectDataplane`) with the real selection arm, native metal | `update_apply`, `update_rejected` -> `Dataplane::update_service` (rejection is the real `DataplaneError::BackendIdentityConflict`); `open` -> `open_upstream`; `kernel_connect_det` -> the driver's deadline-bounded `connect(2)` on the socket from `PreparedUpstream::into_parts`; `take(c, c)` -> `take_receipt`; `read_identity` -> `selected_backend_identity`; `cleanup` -> `cleanup`; `restart` -> drop and re-create `EbpfDataplane` on the same pin directory; `idle` -> stutter (`live_intent_count()` and `live_receipt_count()` read, owner asserted unchanged) | `identity[id]` <- `selected_backend_identity(BackendId)`; `intents`, `receipts` <- `live_intent_count()`, `live_receipt_count()`; receipt value and `idres` are checked from the port returns, not projected |
+
+**Conformance completeness-critic checklist (per driver; `.claude/rules/testing.md`).** Specification-level answers with their citations; each is re-verified against the written driver body at DELIVER activation, and the `cargo xtask conformance-lint` rules (items 1, 3, 5, 6, 7) run over every file.
+
+| # | Item | QC-1 | QC-2 | QC-3 | QC-4 |
+|---|---|---|---|---|---|
+| 1 | In the owner crate's `src/` behind `#[cfg(all(test, feature = "integration-tests"))]`, no always-false cfg, reasoned ignore | yes: Formal protocol model § `gateway_identity` "Conformance placement (D-PASS7-1)" | yes: Scaffolds table row QC-2 (`overdrive-gateway/src/application/quint_gateway_application.rs`, a child of `application`; Formal protocol model § `gateway_application` "Conformance placement and test-local doubles (DG-7)"; reasoned ignore `pending DELIVER quint-conformance-gateway_application`); DG-8..DG-10 are closed by the DESIGN (pending user confirmation); the driver binds the real TCP/443 and runs as root in `host-kernel-shared` (DG-12; isolation proposal pending, Scaffolds) | yes: § `selection_receipt` "Conformance owner (D-PASS7-2)" | yes: § "Pinned observable projection" and this table |
+| 2 | Driver struct holds the production owner | `ControlPlaneGatewayIdentityLifecycle` over a real `GatewayIdentitySlot`, `EvaluationBroker`, `GatewaySvidLifecycle` (D-PASS7-1) | real `GatewayBuilder`/`GatewayApplicationOwner` composition and redb Route store, with driver-local private doubles of the four gateway-crate ports (DG-7); the module imports no `overdrive_sim` item that implements a gateway-crate trait (a grep for `overdrive_sim::` checks it); the `Arc<GatewayAdmission>` is injected (`GatewayAdmission::new`, `start_with`, DG-10), so the driver holds it with no accessor added | the real `EbpfDataplane` (D-PASS7-2) | `ExchangeMachine` (QC-4 specification above) |
+| 3 | Every action of the spec `step` relation maps to an owner driving-port call, no empty handler, no `_` arm | **NO, blocked by B-1** — `settle_ok` and `settle_timeout` (`gateway_identity.qnt:148,158`) have no honest mapping (the owner clears synchronously; `disable_after_drain` has no separate settle step). `restart` is mapped; the other five actions call a pinned port. **`idle` makes no driving-port call (stutter read of `desired`/`current`): conditional on the user's acceptance of the stutter handling** | **conditional, not yes** — `route_declare`, `route_withdraw`, `probe_result`, `open_connection`, `close_connection` call pinned ports (DG-8..DG-10 are closed); **`stage`, `retire` (owner-autonomous) and `idle` (stutter) make no driving-port call**: conditional on the user's acceptance of the owner-autonomous and stutter handling (DESIGN "`app_conf`" table; `gateway_application.qnt:92,127,144`) | **conditional, not yes** — the eight actions of the unchanged map call `Dataplane`/`GatewayConnectDataplane` ports; **`idle` makes no driving-port call (stutter read of `live_intent_count()`/`live_receipt_count()`): conditional on the user's acceptance of the stutter handling** (DESIGN "`receipt_conf`"; `selection_receipt.qnt:340`) | yes — nine actions, nine calls; `idle` absent from `relay_conf` |
+| 4 | Each `State` field has a pinned accessor, named | `GatewayIdentitySlot::{desired,current}`, `ObservationStore::issued_certificate_rows` | `GatewayControl::application_status()` | `selected_backend_identity`, `live_intent_count`, `live_receipt_count` | `phase`, `request_remaining`, `response_state`, `response_remaining`, `public_half_closed`, `is_draining` |
+| 5 | `from_driver` reads no `Sim*` adapter (except a marked arbiter read with a paired Tier-3 test), no driver map, counter or literal | yes: the observation read goes through a field typed `Arc<dyn ObservationStore>` (the core port trait; `SimObservationStore` is only what it is constructed with and is never named in `from_driver`), the slot read through `GatewayIdentitySlot` | yes: `from_driver` reads only `application_status()`, never a double | yes: no `Sim*` anywhere (D-PASS7-2) | yes: no `Sim*` exists in the module |
+| 6 | Spec referenced in place; a `#[quint_test]` per critical named run; `#[quint_run]` present | 5 runs + 1 | 3 runs + 1 | 3 runs + 1 (the two `receipt_fine` runs are model-only by design) | 7 runs + 1 |
+| 7 | Target module has a `step` relation; the spec is not evaluated by the `quint` CLI | yes (`:202`) | yes (`:146`) | yes (`:347`) | yes (`:175`) |
+
+Item 3 is not credited "yes" for any step that makes no driving-port call. QC-1 `idle`, QC-2 `stage`/`retire`/`idle` and QC-3 `idle` are real owner reads and real assertions (the DESIGN says so), but they are not stimuli, and the testing rule asks for a driving-port call per handler: they are **conditional on the user's acceptance of the stutter and owner-autonomous handling**, listed with the pending-for-user items (Prerequisites, Completeness audit item 7). The DESIGN's alternatives are spec edits that need the architect and the user, and none is made here: guard `idle` with `not(REC)` as `relay_exchange.qnt:173` does (`gateway_identity.qnt:195-200, 205-206`, `gateway_application.qnt:144, 151`, `selection_receipt.qnt:340-345, 356`), which deletes the `idle` rows in all three; and optionally coarsen `app_conf` (fusing `stage` into `route_declare` and `retire` into `close_connection`), which deletes the owner-autonomous rows. QC-4 has no stutter and no autonomous step, so its item 3 is yes. Item 3 for QC-1 stays NO until the user rules on B-1 (design (a): the spec is edited so `disable` clears synchronously and `settle_ok`, `settle_timeout`, `dis_deadline`, `DISDL` are deleted; design (b): D5 (c), ADR-0225 Consequences and the Identity section change and the spec stands). Under (a) the DESIGN notes `Action::DropGatewaySvid`, `drop_after_drain` and the reconciler's disabled-and-held arm lose their production path, which is a removal proposal for the user, not adopted. Owner: user (ruling), then the architect (spec or design edit).
+
+**Examples.** `examples/public-ingress-gateway/` is a VM Service journey in the style of `examples/service-kind-vm-workloads/`: `service.toml` (`[vm]`, never `[exec]`), `prepare.sh`, an example-local guest HTTP/1.1 server (`/stream` chunked with `X-Workload: api`, `/exact` with `Content-Length`, a request-count marker), `prepare-test-ca.sh`, `route.toml.template`, `route-narrow.toml.template`, `README.md`, and `run-example.sh` with the exact argv contract in "Artifact-boundary handoff" (hermetic mode curls with `--cacert`; production-trust mode with system trust; both only via `curl --resolve`). The pre-reconstruction shell runner, regression scripts, `receipt-oracle.py`, `workload.py` and the GitHub workflow are not carried.
+
+**E15.** `verification/expectations/E15-public-ingress-operator-journey/` holds the authored claim (`README.md`: expectation, four `- Anchor:` lines, exact public boundary, observable refutation conditions, runner contract), the `execution-substrate` file (`native-metal`) and the INDEX row (status `pending`). `runner.sh` and the harness `EXPECTATION_SOURCE_SHA`/`EXPECTATION_SOURCE_DIRTY` capture pinned in the Artifact-boundary handoff are phase-2 work; no evidence exists and nothing is marked satisfied. It is a point-in-time capture against the built default-feature binary on native metal with a clean harness-captured HEAD, exact-object BPF embedding proof, `curl --resolve` and normal system trust, plus independent `ss -tni` and `/proc/net/tls_stat` samples that show kernel TLS on both legs while the response streams; reviewed by a different agent; not a test, never rerun as a gate.
 
 ## Wave: DISTILL / [REF] Test placement
 
-Pure Route and value properties are source-local in `overdrive-core` (public signatures are the driving ports). Authority, header, limit and connector properties are source-local in `overdrive-gateway` (DESIGN keeps them crate-private). CLI parsing uses the existing `overdrive-cli` acceptance entrypoint. Real redb and application composition use the `integration-tests`-gated `overdrive-gateway` integration binary. Boot, shutdown and operator-surface composition use `overdrive-control-plane` and `overdrive-cli` integration binaries through `SimDataplaneComposer` (`NodeAdapters` swap; no `*_override`). Real-kernel hook, packet-entry and exact-peer wire tests use the `overdrive-dataplane` integration binary on native metal. The cross-owner production walking skeleton and its native cases use `tests/conformance` (`native_metal_kvm_public_ingress_gateway_*`, selected by `tests/conformance/run-native-metal.sh`). Ordering, late completion, restart and shutdown use the `overdrive-sim` catalogue. Quint drivers sit in their owners' `src/`. No test spawns the `overdrive` binary; only E15 drives the built CLI.
+Pure Route and value properties are source-local in `overdrive-core` (public signatures are the driving ports). Authority, header, limit, connector, **head-validation, framing, chunk-line, interim-head, deadline-composition and `ExchangeMachine`** properties are source-local in `overdrive-gateway` (`runtime::{routing,proxy_headers,limits}` and `runtime::http1`; DESIGN keeps them crate-private, so only source-local tests reach them). The pipe-floor law (S-PIG-86) is source-local in `overdrive-dataplane::gateway_relay`. CLI parsing uses the existing `overdrive-cli` acceptance entrypoint. Real redb and application composition use the `integration-tests`-gated `overdrive-gateway` integration binary, which also hosts the Sim-relay exchange file `tests/integration/public_ingress_gateway_relay.rs` (S-PIG-83, 87–101: the production `GatewayBuilder` and listener, `SimGatewayRelay`, `SimGatewayConnectDataplane`, `SimClock`). Boot, shutdown and operator-surface composition use `overdrive-control-plane` and `overdrive-cli` integration binaries through `SimDataplaneComposer` (`NodeAdapters` swap; no `*_override`), including the relay gate (S-PIG-100). Real-kernel hook, packet-entry and exact-peer wire tests use the `overdrive-dataplane` integration binary on native metal; **the host relay Tier-3 suite (`tests/integration/gateway_relay.rs`, S-PIG-105–112, 114–118, 123) and the equivalence file `tests/integration/gateway_relay_equivalence.rs` (S-PIG-104) live in that same binary, which `.config/nextest.toml` already assigns wholly to the `host-kernel-shared` group** (filter `package(overdrive-dataplane) & binary(integration)`; the whole-binary assignments still missing are listed in the next paragraph). The cross-owner production walking skeleton and its native cases use `tests/conformance` (`native_metal_kvm_public_ingress_gateway_*`, selected by `tests/conformance/run-native-metal.sh`), including the production-path arms of S-PIG-105, 109, 113 and 115. The Sim-relay exchange rows 119–122 live in the gateway integration file with S-PIG-87–101. Ordering, late completion, restart, shutdown and the **seeded relay exchange runs (S-PIG-102, 103, `overdrive-sim/tests/acceptance/gateway_relay_exchange.rs`, no new `Invariant` variant)** use the `overdrive-sim` crate. Quint drivers sit in their owners' `src/`: QC-1 at `overdrive-control-plane/src/gateway_identity_lifecycle/quint_gateway_identity.rs`, QC-2 at `overdrive-gateway/src/application/quint_gateway_application.rs` (driver-local doubles of the four gateway-crate ports, DG-7), QC-3 at `overdrive-dataplane/src/quint_selection_receipt.rs`, QC-4 at `overdrive-gateway/src/runtime/http1/quint_exchange.rs`. No test spawns the `overdrive` binary; only E15 drives the built CLI.
+
+**Nextest edit (a phase-2 edit of `.config/nextest.toml`; DISTILL specifies it and does not edit the file).** Two parts: (A) whole-binary `host-kernel-shared` assignments and (B) `slow-timeout` overrides.
+
+**(A) Whole-binary `host-kernel-shared` assignments.** `.config/nextest.toml` already puts whole binaries in the `host-kernel-shared` group (`max-threads = 1`) with catch-all filters, never module or test names (`.claude/rules/testing.md` "Node-global kernel state requires a catch-all nextest group"): `package(overdrive-dataplane) & binary(integration)`, `package(overdrive-control-plane) & binary(integration)`, `package(overdrive-control-plane) & kind(lib)` (the precedent for a library test binary that hosts a kernel-touching conformance driver) and, for the conformance crate, only `package(overdrive-system-conformance) & binary(shared_guest_network_fail_stop_recovery)`. Five whole-binary assignments are missing for this feature:
+1. `filter = 'package(overdrive-system-conformance) & binary(public_ingress_gateway_end_to_end)'`, `test-group = 'host-kernel-shared'`: the new end-to-end binary boots `run_server` with real adapters and a real VM, so it mutates the node-global nft, cgroup and bpffs state that the other binaries mutate; the existing conformance filter names a different binary.
+2. `filter = 'package(overdrive-dataplane) & kind(lib)'`, `test-group = 'host-kernel-shared'`: the `overdrive-dataplane` library test binary hosts QC-3 (`quint_selection_receipt`: the real `EbpfDataplane`, bpffs pins, the root cgroup attach and `/proc/net/tls_stat`); every existing dataplane entry matches `binary(integration)` or a `test(...)` module list under it, so the lib binary is unassigned today.
+3. `filter = 'package(overdrive-gateway) & kind(lib)'`, `test-group = 'host-kernel-shared'`: the library test binary hosts QC-2 and the source-local tests (S-PIG-37, 53, 73, the pure rows); QC-2 composes the real `GatewayBuilder` and binds the real TCP/443 (DG-12).
+4. `filter = 'package(overdrive-gateway) & binary(integration)'`, `test-group = 'host-kernel-shared'`: the integration binary starts the production `GatewayBuilder` with `SimGatewayRelay` in S-PIG-21–24, 54, 68, 83, 87–101 and 119–122 among others, and each of those compositions that reaches promotion binds the real TCP/443 (DG-12).
+5. `filter = 'package(overdrive-sim) & binary(acceptance)'`, `test-group = 'host-kernel-shared'`: the seeded S-PIG-31, 32, 102 and 103 start the production `GatewayBuilder` over `SimGatewayRelay` and bind the real TCP/443 (DG-12). The assignment also serializes the 41 entries under `tests/acceptance` that do not touch the gateway; that cost is the price of a whole-binary rule and is listed in the Scaffolds proposal.
+
+Why gateway and `overdrive-sim` binaries are in the list: the DESIGN has one listener path and it is real (DG-12, Reconciliation and warnings, with the cites): `SimGatewayRelay` replaces the TLS, kTLS and splice adapter, not the listener, and `GatewayConfig::bind` is always port 443 for compositions built by `start` and by `start_with`. These binaries therefore also need root (a privileged port); `cargo xtask lima run --` and `cargo xtask metal run --` run as root and the Sim-only binaries need no KVM. If the architect and the user pin a non-443 listener seam (DG-12 option b), assignments 3 to 5 can be dropped; DISTILL invents none. Not needed: the control-plane `binary(integration)` and `kind(lib)` entries and the CLI `binary(integration)` entry (QC-1, S-PIG-02 I arm, 34–36, 57–62, 74 and 100 are already covered as whole binaries), and any relay-specific group (the dataplane integration binary is already whole-binary).
+
+**(B) `slow-timeout` overrides.** The default profile kills a test after `slow-timeout = { period = "60s", terminate-after = 2 }`, i.e. 120 s (`.config/nextest.toml:44`). The file widens it per test with an override that names the package, binary and test and carries a comment giving the bound (for example the `overdrive-sim` entries at `:229-230` and `:239-240` and the `overdrive-cli` regex entry at `:568-569`); the group assignment is a separate override, so both can apply to one test. The first matching override wins per setting, so the per-test entries precede one binary-level fallback. The new tests whose stated bounds exceed 120 s are below; `terminate-after` is the smallest integer strictly greater than the worst-case sum divided by 60 s (the kill fires at `period x terminate-after`, so equality would kill a test at its own bound), the sum being the stated bounds of the row (Bounds tables). N tests that deploy a VM Service include the row 01 readiness window of 120 attempts of up to 5 s each, 600 s in the worst case (the one-second spacing is start-to-start, so the worst case is attempt-bound), plus one 5 s drain. The figures are derived from the stated bounds, not measured; the first recorded metal run replaces each with its measured runtime and the override comment names that measurement, as the cited entries do. Filters take the form `package(<crate>) & binary(<binary>) & test(<name>)` with the final test names (`native_metal_kvm_public_ingress_gateway_*` in the conformance binary), fixed in phase 2.
+
+| Test (scenario) | Binary | Worst-case sum of the stated bounds | `terminate-after` |
+|---|---|---|---|
+| S-PIG-01 | `public_ingress_gateway_end_to_end` | 600 s readiness + 120 s request + 5 s drain = 725 s | 13 |
+| S-PIG-69 N arm | same | 600 s + 120 s request + 10 s owner recovery + 5 s drain = 735 s | 13 |
+| S-PIG-71 N arm | same | 600 s + 60 s recovery window + 2 x 5 s drain (serve stops, restarts) = 670 s | 12 |
+| S-PIG-109 N arm | same | 600 s + 60 s + 5 s drain = 665 s | 12 |
+| S-PIG-113 | same | 600 s + 120 s + 5 s (129th connection) + 5 s drain = 730 s | 13 |
+| S-PIG-115 N arm | same | 600 s + 120 s + 5 s drain = 725 s | 13 |
+| S-PIG-39, 40, 56 N, 60 N, 70 (each status case is a separate test; the stalled request body is the longest at 40 s), 105 N | same | at most 600 s + 40 s + 5 s = 645 s | 11 (the binary-level fallback entry, filter `package(overdrive-system-conformance) & binary(public_ingress_gateway_end_to_end)`, placed after the per-test entries) |
+| S-PIG-75 | `overdrive-dataplane` `integration` | 900 s fill hard stop + 300 s emptying hard stop = 1 200 s (replaced by the measured fill runtime before the 5a acknowledgement) | 21 |
+| S-PIG-64 | same | 4 cases x (5 s dial + 10 s capture + 30 s identity restore) = 180 s | 4 |
+| S-PIG-115 T3 arm | same | 120 s (the stated bound equals the default kill, so it needs at least one more period) | 3 |
+| S-PIG-24 | `overdrive-gateway` `integration` | 256 rounds x 5 s per-round cap = 1 280 s (a cap; the expected wall-clock is milliseconds per round) | 22 |
+
+The native-metal rows not listed (104, 105 T3, 106 to 108, 110 to 112, 114, 116 to 118, 123, 72) have stated bounds of at most 60 s each (row 104 runs scripts of at most 30 s each, one script at a time, so each script is its own test; S-PIG-109 T3 is at most 60 s) and keep the default.
+
+Verification after the edit (there is no Lima instance in the authoring environment; the metal host is the verification substrate): `cargo xtask metal run -- cargo nextest show-config test-groups --profile default` and `cargo xtask metal run -- cargo nextest show-config test-groups --profile ci` (the `ci` and `mutants` profiles inherit the default overrides; also run `--profile mutants`). Each output must list the `public_ingress_gateway_end_to_end` tests, the `overdrive-dataplane` library tests, the `overdrive-gateway` library and integration tests and the `overdrive-sim` acceptance tests under `host-kernel-shared`; the slow-timeout figures are confirmed by the first metal run's slow-test markers; the output is kept in the phase-2 record. A green isolated test does not discharge the rule: run once the smallest multi-binary lane that shares the kernel state (the dataplane integration binary with the new conformance binary), and once the gateway integration binary beside the `overdrive-sim` acceptance binary (both bind the same address on TCP/443).
 
 ## Wave: DISTILL / [REF] Driving-adapter coverage
 
 | Driving surface | Scenario / mechanism |
 |---|---|
-| `overdrive serve` four gateway flags | S-PIG-18–20 (clap and config, in-process); S-PIG-59/60 through `ServerConfig.gateway` (the field `serve` fills); E15 through the built binary |
+| `overdrive serve` four gateway flags | S-PIG-18–20 (clap and config, in-process); S-PIG-59/60/100 through `ServerConfig.gateway` (the field `serve` fills); E15 through the built binary |
 | `overdrive deploy <SERVICE_SPEC>` (VM Service) | S-PIG-01 via the exported handler's public API; E15 via the example |
 | `overdrive deploy <ROUTE_SPEC>` | S-PIG-34/35 (`deploy_resource` and `ApiClient` against the production handler); materialized checked-in templates in S-PIG-01/39 |
 | `DELETE /v1/routes/{id}`, `GET /v1/gateway/status` | S-PIG-21, 23, 25, 33, 35, 36, 42 |
-| Public TLS 1.3 / HTTP/1.1 listener | S-PIG-01, 02, 39, 40, 56, 69, 70; E15 |
-| Serve shutdown and fail-stop | S-PIG-26, 60, 61, 32 |
+| Public TLS 1.3 / HTTP/1.1 listener | S-PIG-01, 02, 39, 40, 56, 69, 70, 113, 115 (real TLS); S-PIG-87–101, 119–122, 102, 103 (client socket through the Sim relay); S-PIG-123 (real handshake refusals); E15 |
+| Serve shutdown and fail-stop | S-PIG-26, 60, 61, 32, 101 |
+
+## Wave: DISTILL / [REF] Production-entry-point obligations
+
+The vertical slice is driven through `overdrive serve` + `overdrive deploy` in process, never by spawning the binary: `AT-PIG-E2E-1` boots `run_server` with `NodeAdapters::host` and `GatewayAdapters::host` (no `*_override`) and deploys a VM Service and the Route through the exported handler's public API; every request enters through the production listener, whose `accept_public` arms kernel TLS, whose connector prepares and dials through the registered-socket hook, and whose upstream arm is `HostGatewayClientMtls` through the same `HostGatewayRelay`. The relay probe and the connect probe run in the production gate task; no test calls either against a hand-built owner as the stand-in for the slice. S-PIG-104–112, 114–118 and 123 are adapter-contract tests of `HostGatewayRelay` through its port (Mandate 6); each relay mechanism has a production-path exercise through S-PIG-01, 105, 109, 113 and 115 in the conformance file (105, 109, 113, 115 and S-PIG-01, 39, 40, 70) so no relay mechanism is proven only in isolation. No integration test installs a rule, binds a socket, programs a map, arms a socket or supplies an address that production does not install, bind, program, arm or supply itself. The only black-box, binary-driving artifact is E15 (`curl --resolve api.example.com:443:<ip> https://api.example.com/` against a real deployed VM Service in the hermetic example; the production-hostname form in E15), a point-in-time capture per `.claude/rules/verification.md`, never a test.
 
 ## Wave: DISTILL / [REF] Prerequisites
 
-- Native x86_64 bare-metal KVM host provisioned per `infra/metal`, uid 0, fail-closed on the substrate probes (`.claude/rules/testing.md`). No Lima instance and no CI metal lane (P-6 is PROPOSED). Real-kernel and VM scenarios run through `cargo xtask metal run --`; the default and `integration-tests` lanes compile and run the in-process scenarios.
+- Native x86_64 bare-metal KVM host provisioned per `infra/metal`, uid 0, fail-closed on the substrate probes (`.claude/rules/testing.md`), kernel 7.0.0-38 (the line the G1 spikes ran on; ADR-0068 pins 7.0). No Lima instance and no CI metal lane (P-6 is PROPOSED). Real-kernel and VM scenarios run through `cargo xtask metal run --`; the default and `integration-tests` lanes compile and run the in-process scenarios. The metal image must provide the `tls` ULP, `splice` and `F_SETPIPE_SZ` as the relay probe requires; a node that does not is the case S-PIG-99/114 refuse. The in-process scenarios that let the gateway reach promotion (the `overdrive-gateway` library and integration binaries, the `overdrive-sim` acceptance binary, and the control-plane and CLI integration binaries) bind the real TCP/443, so they run as root, in Lima or on the metal host, serialized in `host-kernel-shared` (DG-12).
 - BPF object produced by `cargo xtask bpf-build` before anything that compiles `overdrive-dataplane`; the selection arm does not exist until P-10 is ruled and DELIVER lands it, so hook scenarios are RED for the right reason.
 - Existing production owners compose the rest: workload-identity CA, Service deploy, ordinary `ServiceMapHydrator`, leg-C -> kTLS -> `GuestStreamDial`, the node-shared nft owner. Tests do not substitute their effects.
-- Operator inputs: a complete leaf-first chain and matching PKCS#8 key (E15), or the example's bounded test CA (hermetic mode). Tools for independent oracles: `bpftool`, `ss`, `nft`, `curl`, `openssl`.
-- User confirmations (**all phase-2 code batches B1–B5 wait for them**): D5 "New public surface" items 1–11 (gate batches 2–5), item 12 (gates the watch type/signature port and its fallout), and the blocking P-2, P-9 and P-10 (design approval). The observation point reads and row variants are previously approved (2026-09-13) and not on this list.
+- Operator inputs: a complete leaf-first chain and matching PKCS#8 key (E15), or the example's bounded test CA (hermetic mode). Tools for independent oracles: `bpftool`, `ss`, `nft`, `curl`, `openssl`, `/proc/net/tls_stat`.
+- User confirmations (**all phase-2 code batches B1–B5 wait for them**): D5 "New public surface" items 1–11 (gate batches 2–5), item 12 (gates the watch type/signature port and its fallout), item 13 (the G1 data-path surface), and the blocking P-2, P-9 and P-10 (design approval). The blocking G1 proposals P-12, P-13a–d, P-17 and P-18 are authored for the design body's option and applied in one cut when ruled; P-16 and the `relay_ktls` question are optional and non-blocking (no ruling needed unless the user prefers otherwise). The observation point reads and row variants are previously approved (2026-09-13) and not on this list. **Pending for the user (DISTILL-owned acknowledgements, beyond the DESIGN rulings above):** (a) B-1, the identity disable settlement ruling (design (a) or (b)); (b) acceptance, or rejection in favour of the DESIGN's spec edits, of the **stutter and owner-autonomous handling** (QC-1 `idle`, QC-2 `stage`/`retire`/`idle`, QC-3 `idle` make no driving-port call; checklist item 3 is conditional on it); (c) confirmation of the **DG-7 placement ruling** (QC-2 driver-local doubles); (d) the 5a acknowledgement for S-PIG-75; (e) whether the seeded invariant inputs gain per-entry probe release (proposal, not adopted). (f) confirmation of the DG-8 and DG-10 entries on the item 13 list (`PreparedUpstream::new`; crate-private `GatewayAdmission::new`, `budget()`, `GatewayBuilder::start_with`); DG-9 adds no item; (g) the listener-isolation proposal (DG-12): assign the `overdrive-gateway` library and integration binaries and the `overdrive-sim` acceptance binary to the `host-kernel-shared` nextest group as whole binaries and run them as root, because promotion binds the real TCP/443 and the DESIGN pins no non-443 seam or Sim listener (Reconciliation and warnings; Scaffolds, "QC-2 composition and isolation"; Test placement); the `slow-timeout` overrides of Test placement part (B) belong to the same `.config/nextest.toml` edit; (h) **DG-11**, a DESIGN item for the architect and the user: the cleanup-ledger paragraph says the connector reserves a ledger slot after cookie acquisition and before BPF registration, but ADR-0243 makes `open_upstream` do both atomically, so a full ledger cannot refuse registration; candidate fix: reserve a ledger slot before `open_upstream` and bind the intent afterwards. S-PIG-37 and S-PIG-53 are authored for the current text and tagged `@pending:DG-11`; (i) **DG-12**, a DESIGN item for the architect and the user: the DESIGN has no listener-port seam or Sim listener, so every gateway composition that reaches promotion binds the real TCP/443 (options in Reconciliation and warnings). **Pending for the architect:** DG-11 and DG-12.
 
 ## Wave: DISTILL / [REF] Outcome registration
 
-No new outcome row is introduced. The scenarios refine the registered contracts `OUT-PIG-CERTIFIED-KEY-CUSTODY`, `OUT-PIG-GATEWAY-APPLICATION`, `OUT-PIG-BPF-SELECTION-IDENTITY`, `OUT-PIG-GATEWAY-EXACT-PEER`, `OUT-PIG-PUBLIC-REQUEST`, `OUT-CA-SVID`, `OUT-WIM-SVID-LIFECYCLE`, `OUT-MTLS-HANDSHAKE-FAIL-CLOSED`, `OUT-MTLS-COMPOSED-PROXY-SKELETON`, `OUT-MTLS-INBOUND-SERVER-MTLS` and `OUT-MTLS-WIRE-TLS13`. Phase 2 restates the registry's demand/revision/acknowledgment text under D2 and re-runs `nwave-ai outcomes check-delta` (nonzero set, 0 collisions required).
+No new outcome row is introduced. The scenarios refine the registered contracts `OUT-PIG-CERTIFIED-KEY-CUSTODY`, `OUT-PIG-GATEWAY-APPLICATION`, `OUT-PIG-BPF-SELECTION-IDENTITY`, `OUT-PIG-GATEWAY-EXACT-PEER`, `OUT-PIG-PUBLIC-REQUEST`, `OUT-CA-SVID`, `OUT-WIM-SVID-LIFECYCLE`, `OUT-MTLS-HANDSHAKE-FAIL-CLOSED`, `OUT-MTLS-COMPOSED-PROXY-SKELETON`, `OUT-MTLS-INBOUND-SERVER-MTLS` and `OUT-MTLS-WIRE-TLS13`; the G1 relay scenarios refine `OUT-PIG-PUBLIC-REQUEST` (streamed response, typed status mapping) and `OUT-PIG-GATEWAY-EXACT-PEER` (arming only after equality). Phase 2 restates the registry's demand/revision/acknowledgment text under D2 and re-runs `nwave-ai outcomes check-delta` (nonzero set, 0 collisions required).
 
 ## Wave: DISTILL / [REF] Completeness audit
 
-Provisional and specification-level: authored bodies do not exist yet, so no check is credited as PASS until phase 2 writes and compiles them. Nothing below is waived.
+Provisional and specification-level: authored bodies do not exist yet, so no check is credited as PASS until phase 2 writes and compiles them. Nothing below is waived. Items are the 15 of the AT-completeness checklist.
 
 | Check | Status | Evidence or gap |
 |---|---|---|
-| C1a empty/zero/minimum | Specified | All-absent config, empty withdrawal, zero-chain, empty set, no-outer-entry `NoBackend` |
-| C1b partition boundaries | Specified | Labels 62/63/64, epochs, chain 0/1/N/9, ledger 0/1/128/129, limits |
-| C2a state machine documented | Specified | Gate G-1..G-6 and Quint modules |
-| C2b illegal event per state | Specified | Stale epoch, competing claim, wrong-id withdrawal, late probe, duplicate probe completion (S-PIG-73), restart |
-| C3 zero/one/many | Specified | S-PIG-45, header PBT, ledger, Route 0/1/N |
-| C4a apply twice | **Open until the S-PIG-54 body is authored** | Restated as the consuming-port form above; replaces the retired demand gap; not waived |
-| C4b inverse without prerequisite | Specified | S-PIG-33 |
-| C5a mode combinations | Specified | 16 enablement masks, hermetic vs production-trust, exact vs prefix Route |
-| C5b orthogonality | Specified | S-PIG-34 (both detach modes), S-PIG-62 |
-| C6a malformed parameters | Specified | Route fields, `target.service`, authority, path, hostname, argv, key files |
-| C6b every declared error | Specified, **needs re-pin** | S-PIG-50/51 matrices must follow the new `GatewayConnectDataplaneError` variants and `ensure_current`/`disable_after_drain` |
-| C6c closed error set | Specified | Exhaustive classifier per set; status projection exhaustive |
-| C7a degraded resource | Specified | Unreadable key, CSPRNG, observation fault, NoBackend, cleanup failure, full ledger, boundary-2 causes (S-PIG-74) |
-| C7b interruption | Specified | Lag, hold/release probe, withdrawal, restart, mid-request flow-owner restart, serve restart (S-PIG-71) |
-| C7c concurrent actors | Specified | S-PIG-24 |
+| C1a empty/zero/minimum | Specified | All-absent config, empty withdrawal, zero-chain, empty set, no-outer-entry `NoBackend`; zero-length `Content-Length` body (S-PIG-87), no-body statuses (S-PIG-76, 89), empty chunk list, zero headers |
+| C1b partition boundaries | Specified | Labels 62/63/64, epochs, chain 0/1/N/9, ledger 0/1/128/129 (S-PIG-37, pending DG-11), limits; head 32 KiB at/over, 100/101 fields, body ceiling at/over (S-PIG-82, 94), pipe capacity cap-1/cap/cap+1/2cap/2cap+1 (S-PIG-105), `u64` hex and length overflow (S-PIG-77, 80), probe 64 KiB plus one octet (S-PIG-99); response head 32 KiB at/over, 100/101 response fields, declared response length 16 MiB at/over (S-PIG-119); `response_head_deadline` one tick either side of 5 s (S-PIG-120); body stall 29 s versus 30 s (S-PIG-121); 128th/129th public connection (S-PIG-113) |
+| C2a state machine documented | Specified, **one open conflict (B-1)** | Gate G-1..G-6, Quint modules (five), `ExchangeMachine` phases/halves table (Exchange state machine). Identity disable settlement: `gateway_identity.qnt` (waiting `disable`) and D5 (c)/ADR-0225 (synchronous clear) disagree; not credited until the user rules |
+| C2b illegal event per state | Specified | Stale epoch, competing claim, wrong-id withdrawal, late probe, duplicate probe completion (S-PIG-73), restart; octets beyond the remainder, `finish` before complete, events after `Closed`, `drain_begin` twice (S-PIG-84); close_notify/reset/alert in each exchange phase (S-PIG-90, 92); public half-close after the request was fully read versus idle versus mid-body (S-PIG-122) |
+| C3 zero/one/many | Specified | S-PIG-45, header PBT, ledger, Route 0/1/N; chunks 0/1/many, requests per connection 1/2/100 (S-PIG-87, 96), concurrent exchanges 1/128 (S-PIG-113) |
+| C4a apply twice | **Open until the S-PIG-54 body is authored** | Restated as the consuming-port form; also two consecutive KeyUpdates and two identical keep-alive requests (S-PIG-106, 87); not waived |
+| C4b inverse without prerequisite | Specified | S-PIG-33; `finish` before the response completes and `close_write` after close (S-PIG-84, 92); a read after close_notify is `CleanEof` (S-PIG-108) |
+| C5a mode combinations | Specified | 16 enablement masks, hermetic vs production-trust, exact vs prefix Route; framing matrix {CL, chunked, none, close-delimited} x {request, response} x {HEAD, 204, 205, 304, 1xx}; KeyUpdate {requesting, not} x {head, chunk line, boundary, body} x {AES-128, AES-256} (S-PIG-106); P-item option toggles |
+| C5b orthogonality | Specified | S-PIG-34 (both detach modes), S-PIG-62, S-PIG-100 (relay probe leaves unrelated state alone); `Connection: close` does not alter framing (S-PIG-81) |
+| C6a malformed parameters | Specified | Route fields, `target.service`, authority, path, hostname, argv, key files; bare CR/LF/NUL, obs-fold, hex overflow, repeated headers (S-PIG-77–81) |
+| C6b every declared error | Specified (credited with named residuals) | S-PIG-50/51 matrices follow the new `GatewayConnectDataplaneError` variants and `ensure_current`/`disable_after_drain`; the relay taxonomy is triggered per variant: `KeyUpdateError::{RustlsRefused, RearmRx, RearmTx, Io}` by the scripted failed KeyUpdate answer (S-PIG-90, Sim only), every `KtlsArmError` kind by the scripted arm failure at the upstream arm and at `accept_public` (S-PIG-98, Sim only; `UlpInstall` also by S-PIG-114 on a real kernel), every `PublicHandshakeError` variant by S-PIG-98 (`Arm`), 118 (`Tls`) and 123 (`AlpnMismatch`, `ServerNameMissing`, `Timeout`, `Io`; the variant per stimulus is pinned at DELIVER), `RelayProbeError` by S-PIG-99/114, `RelayPipeError` by S-PIG-95, `LegReadError`/`RelayError` by S-PIG-90–94, 108, 111, 119–121. Named residual: `LegWriteError::{PeerClosed, Io}` and `LegReadError::Io` have no dedicated stimulus; the seeded resets of S-PIG-102/103 hit them and the exhaustive close classification maps them |
+| C6c closed error set | Specified | Exhaustive classifier per set; status projection exhaustive; the 400/408/413/421/431/502/503/505 mapping is an exhaustive match asserted in S-PIG-82, 92–96 |
+| C7a degraded resource | Specified | Unreadable key, CSPRNG, observation fault, NoBackend, cleanup failure, full ledger, boundary-2 causes (S-PIG-74); pipe creation failure (S-PIG-95), stalled reader memory (S-PIG-111), 128-exchange descriptors (S-PIG-113) |
+| C7b interruption | Specified | Lag, hold/release probe, withdrawal, restart, mid-request flow-owner restart, serve restart (S-PIG-71); peer close_notify/reset mid-head/body, drain and force-abort (S-PIG-90, 92, 101, 103), stall deadlines (S-PIG-96, 111, 120, 121), lingering-close interruption (S-PIG-115) |
+| C7c concurrent actors | Specified | S-PIG-24; KeyUpdate against a writer (S-PIG-107, with the model `relay_ktls`); 128 concurrent exchanges (S-PIG-113); seeded schedules (S-PIG-102, 103) |
+
+Verdict at specification level (mechanical count, the reviewer recomputes it): **13 of 15 items credited** (C1a, C1b, C2b, C3, C4b, C5a, C5b, C6a, C6b, C6c, C7a, C7b, C7c); **2 not credited**: C2a (B-1, a conflict between two DESIGN artifacts that needs a user ruling) and C4a (open until the S-PIG-54 body is authored). C6b is credited only because of the remediation additions (the two Sim capabilities of S-PIG-90 and S-PIG-98 and the new S-PIG-123); without S-PIG-123 the count would be 12. The count reaches the numeric COMPLETE threshold (>= 13) but **the audit does not call the specification COMPLETE while B-1 and C4a are open**; the stated verdict is ACCEPTABLE_WITH_DOCUMENTED_GAPS, to be re-evaluated when B-1 is ruled and the C4a body exists. All credits are specification-level and become real only when the bodies compile. Gap classification (nw-at-completeness-check): DG-1..DG-10 are `SPECIFICATION_AMBIGUITY` findings routed to DESIGN and closed (DG-7 as a placement ruling; DG-8..DG-10 by the architect, pending user confirmation with item 13); **DG-11 is open** (`SPECIFICATION_AMBIGUITY`, routed to the architect and the user; S-PIG-37 and S-PIG-53 are authored for the current text and tagged `@pending:DG-11`); B-1 is open (user ruling); no `AT_GAP_IN_DELIVERY_SCOPE` finding is open. Telemetry rows `(public-ingress-gateway, C2/C4/C5/C6/C7, findings, severity)`: C2 1 (B-1 HIGH), C4 1 (C4a open, MEDIUM), C5 0, C6 1 (DG-11, MEDIUM, routed), C7 1 (DG-12, LOW, routed).
+
+**DISTILL completeness gate for cross-boundary criteria** (`.claude/rules/testing.md` "DISTILL — prove composed system behavior under deliberate failure"). Every cross-boundary scenario records its contract or invariant, production owner path, fault stimulus, outcome oracle and evidence tier: rows 01–75 in "Cross-boundary scenario obligations" (owner path, stimulus, fault, oracle, lane; the contract is the scenario-list column), and the G1 rows 83, 87–123 in the same section add an explicit contract/invariant column. Single-owner scenarios are pure (S-PIG-76–86 are pure functions or one-owner state machines) and carry only their lane. Fault bounds and restoration for the real-kernel faults are in "Native-metal (Tier 3) obligations". The Quint runs bound per invariant: `relay_exchange` (`NoBytePastMessageBoundary`, `MidBodyCloseNeverReused`) by QC-4; `relay_ktls` (`TxRekeyExcludesWriters`) by S-PIG-106/107; the older modules as in the driver table. No cross-boundary criterion is covered only by an isolated test or a happy path: the kernel behaviours of the relay (record boundaries, rekey, lock, backpressure, lingering close, pipe lifetime) each have a Tier-3 row with a deliberate-fault stimulus and an independent oracle.
 
 Documented gaps and blockers (no silent waivers):
 1. **BLK-P9** — obligation 2: the in-window result (503 vs 502) and the `unhealthy_is_no_backend` run are not authored; the post-`healthy` 0 -> 1 leg is covered by S-PIG-02/56/01 once P-9 is ruled.
 2. **BLK-P2** — the BackendId memo re-lease wedge exposure is not authored; `conflicting_alloc_rejected` (rebind rejected) is covered for every option.
 3. **BLK-P10** — verifier-regression, `perf-baseline` and attach-mode gates are not authored; S-PIG-41/63 are placement-neutral.
 4. **Item 12** — lag-aware watch reconfirmation gates the `IntentSubscriptionEvent` type and `watch` signature port (and its implementer fallout); S-PIG-48/66 are complete reasoned-ignored bodies and the lag behaviour is DELIVER's.
-5. **DESIGN approval gates every code batch** — D5 items 1–11, item 12, and the blocking P-2/P-9/P-10 gate all phase-2 batches B1–B5.
+5. **DESIGN approval gates every code batch** — D5 items 1–11, item 12, item 13 (including its pending-user-confirmation list) and the blocking P-2/P-9/P-10 gate all phase-2 batches B1–B5.
 5a. **Accepted-exposure candidate (user acknowledgement required)** — the pre-commit rollback real-owner Tier-3 check (S-PIG-75; specified, body authored only after acknowledgement and a measured fill runtime): the only production-reachable pre-commit failure input is `BACKEND_MAP` capacity (`crates/overdrive-bpf/src/maps/backend_map.rs:46`, `MAX_ENTRIES = 65_536`); the fill's native-metal runtime is unmeasured. If not run, `RollbackPreservesPriorGeneration` has model + equivalence/unit coverage only. No seam is added.
-6. **DESIGN gaps:** none open that block authoring. The former U1 (QC-1 placement), U2 (QC-3 owner) and U4 (Sim arm contract) are resolved by D-PASS7-1, D-PASS7-2 and D-PASS7-4 and are not gaps. Notes only: U7 stale `unhealthy_is_no_backend` mentions and a Lima remark in the Obligations list (documentation drift, no effect on scenarios); U8 `kvm-tests` named for `tests/conformance`, which has no such feature (DISTILL follows the crate's `native_metal_kvm_` selector). Conditional: if the Sim cannot distinguish S-PIG-74 sub-cases (a) and (b) with the existing typed results, report it to DESIGN.
-7. **Real-guest evidence** (S-PIG-01, 39, 40, 56, 69, 70, 71, 60 graceful run, A-K3's serve-created connect) exists only on native metal; no recurring CI lane is added (P-6).
+6. **G1 proposals authored for the design body's option, tagged `@pending:P-xx`** (see Reconciliation and warnings): the blocking P-12, P-13a, P-13b, P-13c, P-13d, P-17 and P-18 block DISTILL sign-off per the DESIGN, not authoring; P-16 and the `relay_ktls` retention are optional and non-blocking in the DESIGN.
+7. **DESIGN gaps DG-1..DG-12 and blocker B-1.** DG-1..DG-5, DG-7..DG-10 and the QC-2/QC-3 part of DG-6 were closed by the architect in the DESIGN sections; DISTILL scaffolds the pinned shapes at specification level (Scaffolds). They remain on the item 13 pending-user-confirmation list (DG-9 adds no item) until the user confirms them. **Open: DG-11, DG-12 and B-1.** DG-11 and DG-12 go to the architect and the user.
+   - **DG-1 closed** — "Cross-crate construction of the opaque leg values": `KtlsLeg::from_armed`, `KtlsReadHalf::backend_mut`, `KtlsWriteHalf::backend_mut`, `ThroughBytes::new`; one backend per composition; a wrong-backend `T` is `unreachable!()`.
+   - **DG-2 closed** — D5: `HostGatewayRelay::new(clock)`, `SimGatewayRelay::new(clock)`, `SimGatewayClientMtlsFactory::new(relay, clock)`, `SimGatewayAdapters::{new, relay, client_mtls, sim_relay}`.
+   - **DG-3 closed** — "Exchange state machine": `ExchangeMachine::new()`, `BodyFraming` (`NoBody`, `Length`, `Chunked`, `UntilClose`), `FramingViolation` (six variants) and the 502 status rule. Chunked PBT (`request_chunked_end`/`response_chunked_end`) and the QC-4 `init` are now writable.
+   - **DG-4 closed** — obligation 16(f): the `rmmod tls` under a drop guard plus `unshare(CLONE_NEWUSER)` child stimulus; S-PIG-114 and the Cross-boundary and Native-metal rows use it.
+   - **DG-5 closed** — the DESIGN pins `#[ignore = "pending DELIVER gateway-application-invariants"]`, the descriptive activation key DISTILL already used.
+   - **DG-6 closed for QC-2 and QC-3** — "Conformance action maps for the three older mains" (stutter `idle`, owner-autonomous `stage`/`retire`). For QC-1 `restart` and `idle` are closed.
+   - **DG-7 closed (placement ruling, no public item)** — the QC-2 driver is `overdrive-gateway/src/application/quint_gateway_application.rs` over driver-local private doubles of `GatewayConnectDataplane`, `GatewayRelay`, `GatewayClientMtls` and `GatewayIdentityLifecycleControl`, because `overdrive-sim`'s impls of crate-local traits cannot satisfy them in the library's `cfg(test)` build; the held-probe capability lives in the driver's connect double; `overdrive-sim` keeps its version for the seeded invariants and S-PIG-68; the `State` projection is unchanged. It is on the D5 item 13 pending list.
+   - **DG-8 closed** — "Cross-crate construction of `PreparedUpstream`": `PreparedUpstream::new(socket: tokio::net::TcpSocket, intent: GatewayConnectIntent)`, public; registers nothing, no cleanup guard, `intent()` is the only identity, the socket is a real unconnected `TcpSocket` for every backend. `EbpfDataplane`, `SimGatewayConnectDataplane` and the QC-2 connect double scaffold against it.
+   - **DG-9 closed** — "Where a double may park a probe": the park point is `GatewayClientMtls::authenticate`, not `connect`; a held probe needs a `Selected` receipt; entries are identified by a minted `BackendId`/`SpiffeId` per `open_upstream`, not by arrival order; the real `connect(2)` needs a loopback listener at the Service Frontend (test support); each parked probe holds one connect permit, so held entries stay below `max_inflight_connects`; the owner's behaviour on a superseded probe is unspecified and both behaviours are compatible. DISTILL withdrew its earlier connect-parking, arrival-position design and updated the held-probe capability, the hook point, the QC-2 doubles and the Sim held-probe rule (S-PIG-31, 32, 68) accordingly. No item.
+   - **DG-10 closed** — "Admission access": crate-private `GatewayAdmission::new(budget)`, `GatewayAdmission::budget()` and `GatewayBuilder::start_with(deps, admission)`, each with a production caller in `start`; the driver goes through `UnboundGatewayBuilder::new`/`into_builder`/`start_with` and takes `GatewayControl` from `into_parts()`. Consequence recorded by DISTILL: promotion binds the real TCP/443 through `GatewayListenerControl`; the DESIGN pins no non-443 seam, so the QC-2 driver is recorded as running as root in the `host-kernel-shared` whole-binary group (a proposal for the user; Scaffolds, "QC-2 composition and isolation"); DG-12 below widens the same finding to every gateway composition.
+   - **DG-11 OPEN, owner: the architect, then the user** — the cleanup-ledger reservation point (after cookie acquisition, before BPF registration) cannot exist when ADR-0243's `open_upstream` acquires the cookie and registers atomically; a full ledger cannot refuse registration. Candidate fix: reserve a ledger slot before `open_upstream` and bind the intent afterwards. Affected: S-PIG-37 and S-PIG-53 (authored for the current text, tagged `@pending:DG-11`); the ledger rows of the C1b, C3 and C7a audit lines. Unaffected: cross-boundary rows that assert only `cleanup` call counts. Nothing is invented.
+   - **DG-12 OPEN, owner: the architect, then the user** — the DESIGN has no listener-port seam and no Sim listener: `GatewayConfig::bind` is always port 443 and `start` and `start_with` both promote through `GatewayListenerControl::bind` (cites in Reconciliation and warnings), so the Sim-relay tests bind the real TCP/443. Affected: the gateway library and integration binaries and the `overdrive-sim` acceptance binary (S-PIG-21–24, 31, 32, 54, 68, 87–103, 119–122, QC-2); recorded consequence: root and whole-binary `host-kernel-shared` assignments (Test placement). Nothing is invented; the options (accept serialization, pin a seam, distinct loopback addresses behind a registry) are the architect's and the user's.
+   - **Pending for the user (DISTILL-raised):** acceptance of the stutter and owner-autonomous handling (QC-1 `idle`, QC-2 `stage`/`retire`/`idle`, QC-3 `idle`; checklist item 3 conditional; alternatives are spec edits by the architect: guard `idle` with `not(REC)`, coarsen `app_conf`); confirmation of DG-7 and of the DG-8/DG-10 item 13 entries; the listener-isolation proposal (three whole binaries in `host-kernel-shared` plus root, DG-12); and S-PIG-123, which DISTILL added to close C6b's public-handshake residual and which is separable (delete the row and its three cross-boundary and bounds entries if the user declines; C6b then drops to not credited and the count to 12 of 15).
+   - **B-1 OPEN, owner: the user (ruling), then the architect** — `settle_ok`/`settle_timeout` and the `disable` State comparison of QC-1 cannot be mapped to the synchronous `disable_after_drain` the design pins. Affected: QC-1 runs `restart_reissue` and `disable_races_inflight_issue` (ignore reason `pending DELIVER quint-conformance-gateway_identity-disable-settlement`, blocked on B-1), the `DisableClearsOrTimesOut` invariant's only conformance paths, and the QC-1 `#[quint_run]`. Unaffected: `issue_hold`, `reissue_near_expiry`, `audit_failure_no_hold`. No S-PIG id is renumbered by either outcome; under design (b) the scenario rows whose oracle assumes the synchronous clear (identity lifecycle and shutdown ordering) are re-read against the ruling.
+   - **DISTILL test-support shaping recorded (not a gap):** the held-probe capability of the QC-2 driver's connect and client doubles and the two `SimGatewayRelay` failure capabilities (Scaffolds).
+   Notes only (not gaps): the pinned `Instant` type of the port deadlines is not named (consistent with the rest of the document); `PipeCapacity` is named by obligation 16(g) but is module-private typestate (the crafter's); the seeded relay runs have no catalogue `Invariant` variant (adding one is new scope for the user); U7 stale `unhealthy_is_no_backend` mentions and a Lima remark in the Obligations list (documentation drift); U8 `kvm-tests` named for `tests/conformance`, which has no such feature (DISTILL follows the crate's `native_metal_kvm_` selector). Conditional: if the Sim cannot distinguish S-PIG-74 sub-cases (a) and (b) with the existing typed results, report it to DESIGN.
+8. **Real-guest evidence** (S-PIG-01, 39, 40, 56, 69, 70, 71, 60 graceful run, 105, 109, 113, 115 production arms, A-K3's serve-created connect) exists only on native metal; no recurring CI lane is added (P-6). The no-flag configuration (S-PIG-116) and the pipe invariant rest on one kernel build (7.0.0-38).
 
-Mandate evidence plan: every executable scenario carries a Contract Shape; state-delta assertions name public Route/status/receipt/cleanup surfaces, not private owner fields; PBT is confined to pure/in-memory layers; Tier 3 is example-based; Rust domain nouns reuse the exact DESIGN types. Adapted step-reuse ratio is informational and is measured after phase 2.
+Mandate evidence plan: every executable scenario carries a Contract Shape; state-delta assertions name public Route/status/receipt/cleanup surfaces and, for the relay, the port-exposed names (returned octets, typed variants, transcript, live leg and pipe counts, `tls_stat` deltas, descriptor counts), not private owner fields; PBT is confined to layers 1–2 (S-PIG-76–86, 89 PBT; the Sim exchange rows use PBT only over sizes and event offsets at layer 2, never at layers 3+); Tier 3 is example-based, sad paths named (Mandate 11); Rust domain nouns reuse the exact DESIGN types. Adapted step-reuse ratio is informational and is measured after phase 2.
 
 ## Wave: DISTILL / [REF] Pre-DELIVER RED classification
 
 **Not executed.** Phase 1 wrote no code. The classification below states what phase 2 must demonstrate before handoff, per scenario family; it is not a result.
 
 - Pure and in-memory scenarios (KEEP/ADAPT in `overdrive-core`, `overdrive-gateway`, `overdrive-cli`): compile green with the reasoned ignore; once un-ignored, RED must be `MISSING_FUNCTIONALITY` at a production scaffold call (SCAFFOLD text), never an import, fixture or setup failure.
-- **Expected-GREEN preservation rows:** S-PIG-41 (unregistered socket on the current hook) and S-PIG-59 (gateway disabled). They are not MISSING_FUNCTIONALITY candidates: they must pass on first run once their scaffolds compile (41 on native metal only); a RED here is a scaffold-wiring regression and blocks handoff.
+- **G1 pure rows (S-PIG-76–86):** RED is `MISSING_FUNCTIONALITY` at the first call into the scaffolded pure function (framing decision, validator, chunk-line parser, `ExchangeMachine`, deadline composition, pipe-floor law). S-PIG-84's PBT must fail at the first generated case, not at the generator.
+- **G1 Sim rows (S-PIG-83, 87–101, 119–122, 102, 103):** compile green once `SimGatewayRelay` and the exchange driver exist as scaffolds; RED is the missing behaviour at the exchange driver or the Sim relay call (SCAFFOLD text), never a harness error. S-PIG-99 and S-PIG-100 are RED at the unimplemented `probe`/gate call. The seeded rows print their seed in the failure.
+- **Expected-GREEN preservation rows:** S-PIG-41 (unregistered socket on the current hook) and S-PIG-59 (gateway disabled; the relay-probe-count assertion for the disabled case is S-PIG-100's, because it needs a Sim relay instance, which is a scaffold). Both are authored **without `#[ignore]`**: an ignored test cannot be expected-GREEN. They are not MISSING_FUNCTIONALITY candidates: they must pass on first run once their scaffolds compile (41 on native metal only; 59 presupposes the disabled composition constructs no gateway scaffold); a RED here is a scaffold-wiring regression and blocks handoff.
 - S-PIG-56, 57 (T3), 63, 64, 71, 72, 75: RED because the selection arm program does not exist (P-10 unruled) or `open_upstream` is a scaffold; the first assertion is the missing `NoBackend`/`Selected` receipt on a registered socket, not a harness error. If P-10 is not ruled the family stays blocked and unclassified.
+- **G1 Tier-3 rows (S-PIG-104–118 and 123):** RED because `HostGatewayRelay` is a scaffold; the first assertion is the missing arm/relay result at a real rustls peer (for example no `tls_stat` install delta, or the typed `Arm` error), reached only after the loopback peers, certificates and counters are set up successfully. A failing counter-baseline read (noisy host) or a failed peer handshake before the code under test is `FIXTURE_BROKEN` and blocks handoff.
 - `AT-PIG-E2E-1` and N cases: RED at the first missing production behaviour on native metal (`open_upstream` scaffold), classified only after a metal run.
-- Quint drivers: compile green under `integration-tests`; ignored with `pending DELIVER quint-conformance-<module>` (`selection_receipt` until the P-10 arm and the real-`EbpfDataplane` owner are GREEN); `conformance-lint` clean.
+- Quint drivers: compile green under `integration-tests`; ignored with `pending DELIVER quint-conformance-<module>` (`selection_receipt` until the P-10 arm and the real-`EbpfDataplane` owner are GREEN; `relay_exchange` until `ExchangeMachine` leaves scaffold); `conformance-lint` clean. QC-3 and QC-4 bodies are completable against the pinned maps and constructors. QC-2's body is completable against the DG-8/DG-9/DG-10 pins (it is ignored until DELIVER and, once activated, runs only as root in `host-kernel-shared`; the same holds for every Sim-relay row that lets the gateway promote, DG-12). S-PIG-37 and S-PIG-53 are ignored with their pending DELIVER keys and are not classified until DG-11 is ruled. The steps that make no driving-port call (QC-1 `idle`, QC-2 `stage`/`retire`/`idle`, QC-3 `idle`) are conditional on the user's acceptance of the stutter and owner-autonomous handling. QC-1's `restart_reissue` and `disable_races_inflight_issue` are ignored with `pending DELIVER quint-conformance-gateway_identity-disable-settlement` (blocked on B-1) and are not classified until B-1 is ruled; QC-1 is not claimed complete. Where the ignore is lifted, RED for the Quint drivers must be a State-comparison or owner-call mismatch at the scaffolded owner (`MISSING_FUNCTIONALITY`), never a bail on an unmapped action.
 - S-PIG-48 and S-PIG-66: complete bodies under `#[ignore = "pending DELIVER lag-aware-intent-subscription"]`; no body is active. Once un-ignored, RED must be the missing `Lagged` event and missed count (MISSING_FUNCTIONALITY), because the ported `LocalIntentStore` reports every event as `Changed`.
 - Phase 2 records one classification line per failing scenario in this section (no separate file); any `IMPORT_ERROR`, `FIXTURE_BROKEN` or `OBSERVABLE_NOT_AT_PORT` blocks handoff.

@@ -1,39 +1,67 @@
-# ADR-0239 — Stream public proxy bodies with backpressure
+# ADR-0239 — Move public proxy bodies kernel-side between the two kernel-TLS sockets
 
 ## Status
 
-Proposed — reconstructed on main 549d78fa6, pending independent review (2026-11-01).
-Original decision ratified by the user 2026-09-13.
+Proposed — streamed bodies with backpressure ratified by the user 2026-09-13; the
+body mechanism is set by user ruling G1 (2026-11-02); pending independent review.
+Whether close-delimited responses are supported (feature delta P-13d) is awaiting the
+user's ruling.
 
 ## Context
 
-Request and response bodies may approach the finite body ceilings. Buffering a
-whole body before forwarding multiplies per-request memory and delays the first
-upstream/downstream bytes.
+Request and response bodies may approach the finite body ceilings
+([ADR-0238](adr-0238-fixed-finite-public-runtime-limits.md)). Buffering a whole
+body multiplies per-request memory and delays the first forwarded octet. The
+accepted L7 feature set needs bodies streamed with backpressure, preserved
+status and raw body octets. The user ruling G1 (2026-11-02) keeps body octets out
+of gateway userspace: both legs are kernel-TLS sockets
+([ADR-0244](adr-0244-gateway-legs-use-kernel-tls-after-a-userspace-rustls-handshake.md))
+and the gateway parses only heads and framing lines
+([ADR-0245](adr-0245-gateway-parses-http11-heads-and-owns-message-framing.md)).
+
+The spike
+([findings (c)](../../feature/public-ingress-gateway/spike/findings-ktls-splice-relay.md))
+found exact-length and per-chunk splicing, keep-alive and backpressure lossless with
+bounded memory and no read past the body's end, and splicing not cheaper than a
+userspace copy.
 
 ## Decision
 
-Stream request and response body octets between Hyper legs with bounded
-backpressure. Do not buffer whole bodies, spool them to disk or expose body
-chunks outside the connection/request owner. Preserve response status and raw
-body octets.
+Move request and response body octets between the two kernel-TLS sockets with
+`splice(2)` through a private pipe, never into gateway userspace memory.
+Splice exactly the octets the framing decision names: the declared length for a
+`Content-Length` body, one chunk's declared size per chunk for a chunked body, and
+to end of stream for a close-delimited response. The gateway writes every other
+octet itself: heads, chunk-size lines, the line terminators and the final chunk.
+A body is bounded by its ceiling; no body is buffered whole, spooled to disk or
+exposed outside the exchange owner. Backpressure is the destination socket's
+send buffer. Preserve the response status and the raw body octets.
+
+The pipe contract is [ADR-0246](adr-0246-relay-splices-into-an-empty-private-pipe-of-at-least-64-kib.md).
 
 ## Alternatives considered
 
 | Alternative | Why it lost |
 |---|---|
-| Buffer each complete body in memory | Memory grows with concurrent body ceilings and forwarding starts late. |
-| Spool bodies to disk | It adds filesystem ownership, cleanup and secret-at-rest concerns. |
-| Aggregate into large application chunks | It weakens backpressure and creates another buffering policy. |
+| Userspace `hyper` body streaming | Every body octet passes through gateway memory; G1 moved it into the kernel. |
+| Userspace read and write loop over the kernel-TLS sockets | No CPU gain over splice and the same bounded memory, but body octets pass through gateway memory. |
+| Buffer each complete body | Memory grows with concurrent body ceilings and forwarding starts late. |
+| Spool bodies to disk | Adds filesystem ownership, cleanup and secret-at-rest concerns. |
 
 ## Consequences
 
-- Slow clients and workloads naturally constrain their opposite proxy leg.
-- Finite no-progress and whole-request deadlines still bound stalled streams.
-- Retry/replay remains independently governed by ADR-0240.
+- The claim is bounded memory and no userspace payload copy. No CPU or throughput
+  gain is claimed; splice calls per MiB scale with the peer's record size.
+- The relay never passes `SPLICE_F_MORE`, so each splice-out ends its TLS record
+  and no record is held open waiting for octets that are not coming; a body that
+  trickles is sent as small records (feature delta, "Pipe and splice").
+- Slow clients and workloads constrain the opposite leg; finite no-progress and
+  whole-request deadlines bound stalled streams.
+- Retry and replay remain governed by ADR-0240: a request body is never replayed.
+- A control record inside a body (KeyUpdate, NewSessionTicket, close_notify) is
+  handled by the leg and never forwarded.
 
 ## Links
 
-- [Streaming contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-gateway-application-status-and-http-contract)
-- [Canonical C4 HTTP stream](c4-diagrams.md#public-ingress-gateway-canonical-c4)
-- [ADR-0238](adr-0238-fixed-finite-public-runtime-limits.md), [ADR-0240](adr-0240-single-upstream-attempt-per-public-request.md)
+- [Kernel relay contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-kernel-relay-data-path-and-driven-ports-g1)
+- [ADR-0238](adr-0238-fixed-finite-public-runtime-limits.md), [ADR-0240](adr-0240-single-upstream-attempt-per-public-request.md), [ADR-0244](adr-0244-gateway-legs-use-kernel-tls-after-a-userspace-rustls-handshake.md), [ADR-0245](adr-0245-gateway-parses-http11-heads-and-owns-message-framing.md), [ADR-0246](adr-0246-relay-splices-into-an-empty-private-pipe-of-at-least-64-kib.md)

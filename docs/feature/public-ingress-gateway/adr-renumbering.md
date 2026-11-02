@@ -37,3 +37,8 @@ Final surviving gateway ADRs: 0220–0243 (24 files in docs/product/architecture
 | (new) D2 typed unavailability | 0248 | 0242 |
 | (new) D5-d socket preparation | 0249 | 0243 |
 | (new) shutdown order | 0250 | deleted (content in feature-delta D5 (c)) |
+| (new, G1 2026-11-02) gateway legs use kernel TLS after a userspace rustls handshake | — | 0244 |
+| (new, G1 2026-11-02) gateway parses HTTP/1.1 heads and owns message framing | — | 0245 |
+| (new, G1 2026-11-02) splice out of kTLS only into an empty private pipe >= 64 KiB | — | 0246 |
+
+Main's own ADRs end at 0219 (`origin/main`, 2026-11-02); 0244-0246 are the next free numbers. ADR-0235, 0237 and 0239 keep their numbers (decision text current; 0239's filename keeps its original slug); 0226, 0234 and 0238 keep their decisions.

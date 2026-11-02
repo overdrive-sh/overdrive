@@ -1,0 +1,11 @@
+State 1: <Initial predicate>
+/\ relay_bugRelayPastBoundary_relay_exchange_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ relay_bugRelayPastBoundary_relay_exchange_st = [phase |-> "Idle", exch |-> 0, req_left |-> 0, resp_state |-> "RNone", resp_left |-> 0, len_delim |-> TRUE, ud_units |-> 0, draining |-> FALSE, p_eof |-> FALSE, overread |-> 0]
+
+State 2: <relay_bugRelayPastBoundary_relay_exchange_read_head line 140, col 3 to line 171, col 58 of module relay_bugRelayPastBoundary>
+/\ relay_bugRelayPastBoundary_relay_exchange_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ relay_bugRelayPastBoundary_relay_exchange_st = [phase |-> "Relay", exch |-> 1, req_left |-> 0, resp_state |-> "RNone", resp_left |-> 0, len_delim |-> TRUE, ud_units |-> 0, draining |-> FALSE, p_eof |-> FALSE, overread |-> 0]
+
+State 3: <relay_bugRelayPastBoundary_relay_exchange_req_unit line 177, col 3 to line 193, col 45 of module relay_bugRelayPastBoundary>
+/\ relay_bugRelayPastBoundary_relay_exchange_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ relay_bugRelayPastBoundary_relay_exchange_st = [phase |-> "Relay", exch |-> 1, req_left |-> 0, resp_state |-> "RNone", resp_left |-> 0, len_delim |-> TRUE, ud_units |-> 0, draining |-> FALSE, p_eof |-> FALSE, overread |-> 1]

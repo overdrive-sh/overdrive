@@ -1,0 +1,11 @@
+# relay-hazard-relay-past-boundary: counterexample, 3 state(s) (from the TLC trace)
+
+State 1
+  conf_step = [init |-> [tag |-> "UNIT"]]
+  st = [phase |-> "Idle", exch |-> 0, req_left |-> 0, resp_state |-> "RNone", resp_left |-> 0, len_delim |-> TRUE, ud_units |-> 0, draining |-> FALSE, p_eof |-> FALSE, overread |-> 0]
+
+State 2 [read_head]
+  st = [phase |-> "Relay", exch |-> 1, req_left |-> 0, resp_state |-> "RNone", resp_left |-> 0, len_delim |-> TRUE, ud_units |-> 0, draining |-> FALSE, p_eof |-> FALSE, overread |-> 0]
+
+State 3 [req_unit]
+  st = [phase |-> "Relay", exch |-> 1, req_left |-> 0, resp_state |-> "RNone", resp_left |-> 0, len_delim |-> TRUE, ud_units |-> 0, draining |-> FALSE, p_eof |-> FALSE, overread |-> 1]

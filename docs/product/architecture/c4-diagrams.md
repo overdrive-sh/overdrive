@@ -1845,7 +1845,7 @@ Identity Association ownership is
 
 <a id="public-ingress-gateway-canonical-c4"></a>
 
-## Public ingress gateway canonical System and Application C4 (GH #54; System ADR-0220, 0223, 0224, 0229, 0230, 0234; Application ADR-0222, 0226, 0227, 0231–0240, 0242, 0243)
+## Public ingress gateway canonical System and Application C4 (GH #54; System ADR-0220, 0223, 0224, 0229, 0230, 0234; Application ADR-0222, 0226, 0227, 0231–0240, 0242, 0243; data path ADR-0244–0246)
 
 Proposed — reconstructed on main 549d78fa6, pending independent review
 (2026-11-01). Decision sources: placement
@@ -1862,7 +1862,12 @@ availability [ADR-0242](adr-0242-backend-unavailability-is-a-typed-outcome-at-th
 Gateway SVID [ADR-0225](adr-0225-dedicated-gateway-svid-identity-lifecycle.md) and
 exact-peer mTLS [ADR-0234](adr-0234-exact-peer-gateway-client-mtls.md), public
 protocol [ADR-0226](adr-0226-public-listener-tls13-only.md),
-[0235](adr-0235-public-http11-only.md)–[0240](adr-0240-single-upstream-attempt-per-public-request.md).
+[0235](adr-0235-public-http11-only.md)–[0240](adr-0240-single-upstream-attempt-per-public-request.md);
+data path: kernel TLS after a userspace handshake
+[ADR-0244](adr-0244-gateway-legs-use-kernel-tls-after-a-userspace-rustls-handshake.md),
+gateway-owned head parsing and framing
+[ADR-0245](adr-0245-gateway-parses-http11-heads-and-owns-message-framing.md), pipe
+invariant [ADR-0246](adr-0246-relay-splices-into-an-empty-private-pipe-of-at-least-64-kib.md).
 Shutdown order is in the feature delta, D5 section (c).
 
 The upstream path is: gateway socket (prepared by the dataplane adapter in the
@@ -1915,7 +1920,7 @@ C4Container
     Container(hostcrypto, "Host adapters", "overdrive-host", "Distinct PublicCertifiedKeyAeadCodec over the node KEK")
     Container(service, "Service convergence", "ServiceLifecycle + ServiceMapHydrator", "Publishes eligibility and programs Service maps on the ordinary path")
     Container(dataplane, "Service dataplane", "EbpfDataplane + cgroup-BPF", "Prepares gateway upstream sockets; owns selection receipt and immutable selected identity; XDP unchanged")
-    Container(mtls, "Gateway-client mTLS and leg-C", "overdrive-dataplane mtls", "Exact-peer client over the prepared socket; node-shared leg-C terminates mTLS, arms kTLS and relays")
+    Container(mtls, "Gateway-client mTLS, kernel-TLS relay and leg-C", "overdrive-dataplane mtls + gateway_relay", "Exact-peer client over the prepared socket; kernel-TLS relay for both gateway legs (userspace rustls handshake, kTLS record layer, spliced bodies); node-shared leg-C terminates mTLS, arms kTLS and relays")
     Container(flowowner, "Guest-flow owner", "overdrive-control-plane guest_network", "Opens the vsock flow to the guest (GuestStreamDial)")
   }
 
@@ -1971,7 +1976,7 @@ C4Component
     Component(frontend, "IntentServiceFrontendResolver", "ServiceFrontendResolve adapter", "Joins exact WorkloadIntent listener with allocator-issued VIP")
     Component(app, "GatewayApplicationOwner", "ArcSwapOption + generation leases", "Promotes Current; counts connections/requests; owns dynamic listener/status")
     Component(connector, "GatewayUpstreamConnector", "prepared socket + cleanup guard", "Connects the prepared socket, consumes the receipt, never selects a backend")
-    Component(runtime, "Public Gateway Runtime", "tokio-rustls + hyper HTTP/1.1", "Snapshots Current before TLS and streams bounded HTTP")
+    Component(runtime, "Public Gateway Runtime", "gateway-owned HTTP/1.1 head parser + exchange driver", "Snapshots Current before TLS; parses only message heads and framing lines; drives two concurrent halves per request over the relay port")
   }
 
   Container_Boundary(recon, "overdrive-reconcilers") {
@@ -1984,7 +1989,8 @@ C4Component
     Component(registry, "Gateway Connect Registry + cgroup_connect4_service", "EbpfDataplane + BPF", "Registered arm selects via Maglev and records Selected BackendId or NoBackend")
     Component(assoc, "Service-map commit guard + Applied Backend Identity", "EbpfDataplane", "Outer-map commit publishes selection before the immutable BackendId-to-applied-Backend.alloc becomes readable")
     Component(slot, "Gateway Identity Slot + ClientIdentityAccess", "dedicated holder/capability", "Owns desired epoch + audited SVID; only crate-private clock-checked client use may borrow material")
-    Component(gmtls, "HostGatewayClientMtls", "rustls client", "Presents leaf+intermediate, roots at the bundle anchor and pins the exact selected SPIFFE peer")
+    Component(gmtls, "HostGatewayClientMtls", "rustls client", "Presents leaf+intermediate, roots at the bundle anchor, pins the exact selected SPIFFE peer, then arms kernel TLS through the relay")
+    Component(relay, "HostGatewayRelay", "overdrive-dataplane gateway_relay; rustls KernelConnection + kTLS + splice", "Completes the public TLS 1.3 handshake and arms kTLS; reads heads through their terminator; handles KeyUpdate, NewSessionTicket and close_notify per leg; splices body octets between the two kTLS sockets through a private 64 KiB pipe; Earned-Trust probe before bind")
     Component(legc, "leg-C enforcement", "overdrive-dataplane mtls inbound", "TPROXY-accepted; rustls server handshake, kTLS, relay through GuestStreamDial")
     Component(xdp, "XDP wire programs", "existing owner", "Unchanged")
   }
@@ -2032,7 +2038,11 @@ C4Component
   Rel(gmtls, slot, "Uses the closed clock-checked identity capability; receives no raw getter from")
   Rel(gmtls, legc, "Handshakes with the allocation SVID presented by")
   Rel(legc, workload, "Relays plaintext over vsock to")
-  Rel(gmtls, runtime, "Returns the opaque sealed authenticated upstream stream to")
+  Rel(gmtls, relay, "Arms the authenticated socket as kernel TLS through")
+  Rel(gmtls, runtime, "Returns the opaque sealed authenticated kernel-TLS upstream leg to")
+  Rel(runtime, relay, "Reads heads, writes heads and framing, and relays body octets through")
+  Rel(user, relay, "Completes the public TLS 1.3 handshake with, then sends kernel-TLS records to")
+  Rel(relay, legc, "Relays request body octets by splice to the kernel-TLS upstream socket of")
 ```
 
 Architecture enforcement keeps

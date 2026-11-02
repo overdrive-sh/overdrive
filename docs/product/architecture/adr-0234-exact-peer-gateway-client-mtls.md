@@ -31,7 +31,10 @@ the prepared, marked and loopback-bound upstream socket
 [ADR-0243](adr-0243-gateway-upstream-sockets-are-prepared-by-the-dataplane-adapter.md)),
 present the current Gateway SVID and complete only when the peer certificate
 chains to the trust bundle and its sole SPIFFE URI SAN equals the exact
-workload identity resolved from the receipt-selected BackendId. Any absence,
+workload identity resolved from the receipt-selected BackendId; only then is the
+connection armed as kernel TLS
+([ADR-0244](adr-0244-gateway-legs-use-kernel-tls-after-a-userspace-rustls-handshake.md)).
+Any absence,
 expiry, malformed peer identity or mismatch fails closed with no plaintext or
 alternate-backend fallback. The peer is the node-shared leg-C enforcement point
 presenting the selected allocation's SVID; the equality check is what binds the

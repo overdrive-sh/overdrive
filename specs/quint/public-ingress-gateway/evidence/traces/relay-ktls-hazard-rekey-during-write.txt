@@ -1,0 +1,15 @@
+# relay-ktls-hazard-rekey-during-write: counterexample, 4 state(s) (from the TLC trace)
+
+State 1
+  owe = FALSE
+  rk = FALSE
+  wr = FALSE
+
+State 2 [write_begin]
+  wr = TRUE
+
+State 3 [peer_key_update]
+  owe = TRUE
+
+State 4 [send_reply]
+  rk = TRUE
