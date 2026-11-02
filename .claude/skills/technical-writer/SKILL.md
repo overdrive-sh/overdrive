@@ -25,12 +25,28 @@ required by code, data, or an exact quotation.
 
 ## Core principles
 
-### Explain the subject before using it
+### Introduce context before relying on it
 
-When introducing an unfamiliar tool or concept, briefly explain what it is
-and what it does before using it in an example. Then connect it to the reader's
-problem. An example should clarify an introduced idea, not force the reader to
-infer the subject from an unexplained case.
+Write for a reader who has not followed the feature's development or read its
+other posts, ADRs, or internal discussions. Define the main subject briefly at
+the opening, then introduce any additional unfamiliar mechanism before using
+it in an example or argument. An introductory definition does not supply the
+context for every later section.
+
+Before discussing an experiment, failure, or replacement, establish which
+system and component are involved, what the mechanism does, and what behavior
+it was intended to provide. Name the design or approach before referring to
+"the design," "the initial approach," or "the replacement." Explain terms
+needed to understand the failure when they first appear.
+
+Links provide supporting detail. They do not replace the minimum explanation
+needed to understand the passage without reading another article. Keep that
+explanation brief and concrete rather than inserting an unrelated tutorial.
+
+The reviewer must check this throughout the post, not only at the opening.
+For each new example or mechanism, verify that the preceding text identifies
+its subject, purpose, and relevant behavior. Unexplained references block
+approval even when the technical claims are accurate and their sources exist.
 
 Match the explanation to the intended audience. One or two concrete sentences
 usually suffice. Define necessary terms before relying on them, without adding
@@ -221,7 +237,8 @@ Most technical writing benefits from a revision pass focused specifically on the
 
 Before submitting any technical prose, run through this list:
 
-- [ ] Are unfamiliar tools and concepts briefly explained before examples rely on them?
+- [ ] Are unfamiliar tools and concepts briefly explained before examples rely on them, throughout the article rather than only at its opening?
+- [ ] Can each example be understood without reading another article or knowing internal project history?
 - [ ] Does each paragraph have a real claim, not just an existence-of-topic statement?
 - [ ] Are nouns specific where specifics were available — named systems, real numbers, dated incidents — rather than smoothed into generic quantifiers?
 - [ ] Are hedges concentrated in the genuinely uncertain sections rather than scattered uniformly?
