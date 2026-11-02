@@ -1,0 +1,31 @@
+# PROBE gw-splice-a — kTLS RX -> pipe -> kTLS TX splice relay (public-ingress-gateway G1).
+# Throwaway. Self-contained workspace root; no overdrive-* deps; never moved into crates/.
+[workspace]
+
+[package]
+name = "gw-splice-a"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "gwk"
+path = "src/lib.rs"
+
+[dependencies]
+libc = "0.2"
+rustls = { version = "=0.23.39", default-features = false, features = ["ring", "std", "tls12"] }
+rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
+
+[[bin]]
+name = "a"
+path = "src/bin/a.rs"
+[[bin]]
+name = "b"
+path = "src/bin/b.rs"
+[[bin]]
+name = "c"
+path = "src/bin/c.rs"
+
+[profile.release]
+debug = 1

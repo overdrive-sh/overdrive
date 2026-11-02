@@ -1,0 +1,20 @@
+# PROBE gw-ktls-bpf — (d) connect4 rewrite composes with TLS handshake + kTLS install; (e) kTLS vs sockmap probe.
+[workspace]
+[package]
+name = "gw-ktls-bpf"
+version = "0.0.0"
+edition = "2021"
+publish = false
+[dependencies]
+aya = "=0.13.1"
+libc = "0.2"
+rustls = { version = "=0.23.39", default-features = false, features = ["ring", "std", "tls12"] }
+gwk = { path = "../gw-splice-a", package = "gw-splice-a" }
+[[bin]]
+name = "d"
+path = "src/d.rs"
+[[bin]]
+name = "e"
+path = "src/e.rs"
+[profile.release]
+debug = 1
