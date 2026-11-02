@@ -95,8 +95,8 @@ if (cmd && isNoRunNextest(cmd)) {
       '"linux")]` arm — passes a `--no-run` “gate” undetected. This ' +
       "masked a real cold-boot CA regression once already.\n\n" +
       "Use the right tool:\n" +
-      "  • compile-check  →  cargo xtask lima run -- cargo check --all-targets --features integration-tests\n" +
-      "  • RUN the tests  →  cargo xtask lima run -- cargo nextest run [ARGS]\n\n" +
+      "  • compile-check  →  cargo xtask metal run -- cargo check --all-targets --features integration-tests\n" +
+      "  • RUN the tests  →  cargo xtask metal run -- cargo nextest run [ARGS]\n\n" +
       "A step that wires into run_server / a composition root / a boot path " +
       "MUST run the fixtures, not `--no-run` them.\n" +
       'See .claude/rules/testing.md § "Running tests — Lima VM".',
@@ -109,11 +109,11 @@ if (cmd && isNoRunNextest(cmd)) {
       "Running nextest directly on the host gives a degraded signal — " +
       "Linux-gated tests may be silently skipped and the toolchain may " +
       "differ from the canonical VM environment.\n\n" +
-      "Route through Lima instead:\n" +
+      "Route through the metal box instead:\n" +
       "  cargo nextest run [ARGS]\n" +
-      "  →  cargo xtask lima run -- cargo nextest run [ARGS]\n\n" +
+      "  →  cargo xtask metal run -- cargo nextest run [ARGS]\n\n" +
       "To compile-check without running, use `cargo check --all-targets` " +
-      "(also Lima-routed on macOS) — `cargo nextest run --no-run` is itself " +
+      "(also routed through `cargo xtask metal run --` on macOS) — `cargo nextest run --no-run` is itself " +
       "blocked, because it compiles but runs nothing.\n\n" +
       'See .claude/rules/testing.md § "Running tests — Lima VM".',
   );

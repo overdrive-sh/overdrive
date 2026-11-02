@@ -4,7 +4,7 @@
 // the canonical compile environment, so the hook is a no-op.
 //
 // Block policy (macOS only):
-//   cargo check ...                use `cargo xtask lima run -- cargo check ...`
+//   cargo check ...                use `cargo xtask metal run -- cargo check ...`
 //   cargo xtask lima run -- ...    allowed (already routed through Lima)
 //   cargo xtask metal run -- ...   allowed (routed to the bare-metal x86_64 box)
 //
@@ -72,9 +72,9 @@ if (cmd && isBlockedCargoCheck(cmd)) {
       "conditional dependencies, and skips build.rs steps gated on " +
       "Linux. A green `cargo check` on macOS without Lima is not the " +
       "same signal as a green check inside Lima.\n\n" +
-      "Route through Lima instead:\n" +
+      "Route through the metal box instead:\n" +
       "  cargo check [ARGS]\n" +
-      "  →  cargo xtask lima run -- cargo check [ARGS]\n\n" +
+      "  →  cargo xtask metal run -- cargo check [ARGS]\n\n" +
       "Allowed exceptions:\n" +
       "  cargo xtask lima run -- ...   already routed through Lima\n" +
       "  cargo xtask metal run -- ...  routed to the bare-metal x86_64 KVM box\n\n" +

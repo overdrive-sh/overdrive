@@ -1687,7 +1687,7 @@ a reconciler.
 >
 > `cargo check` is **blocked** on macOS by a pre-tool hook
 > (`.claude/hooks/block-bare-cargo-check.ts`) unless it is already
-> wrapped in `cargo xtask lima run --`. On Linux the hook is a no-op
+> wrapped in `cargo xtask lima run --` or `cargo xtask metal run --`. On Linux the hook is a no-op
 > — the host IS the canonical compile environment.
 >
 > **Rewrite your command before submitting it (macOS):**

@@ -543,8 +543,8 @@ runs follows the runner's existing policy.
 > | `cargo nextest run --workspace` | `cargo xtask lima run -- cargo nextest run --workspace` |
 > | `cargo nextest run ... --no-run` (compile-check) | `cargo xtask lima run -- cargo check --all-targets --features integration-tests` |
 >
-> **Only allowed nextest form:** `cargo xtask lima run -- cargo
-> nextest run ...` — routed through Lima and actually executing. To
+> **Only allowed nextest forms:** `cargo xtask lima run -- cargo
+> nextest run ...` or `cargo xtask metal run -- cargo nextest run ...` — routed and actually executing. To
 > *compile-check* the test surface without running, use `cargo check
 > --all-targets` (Lima-routed on macOS), NOT `--no-run`: a `--no-run`
 > "gate" is green even when every fixture refuses at boot (the
@@ -1640,15 +1640,16 @@ canonical inner-loop path for all platforms (macOS and Linux).
 
 A pre-tool hook (`.claude/hooks/block-bare-nextest.ts`) enforces this
 mechanically: bare `cargo nextest run` is blocked at the tool-call
-boundary on all platforms. The hook allows only `cargo xtask lima run
--- cargo nextest run ...` (routed and actually executing); the
+boundary on all platforms. The hook allows only `cargo xtask lima run`
+or `cargo xtask metal run`
+(`-- cargo nextest run ...`, routed and actually executing); the
 `--no-run` form is **also blocked** (it compiles but runs nothing — use
 `cargo check --all-targets` to compile-check).
 
 The same Lima discipline extends to compile-only commands on macOS:
 `cargo check` is blocked by `.claude/hooks/block-bare-cargo-check.ts`
 and `cargo clippy` by `.claude/hooks/block-bare-clippy.ts` unless
-routed through `cargo xtask lima run --`. The cargo-check hook is a
+routed through `cargo xtask lima run --` or `cargo xtask metal run --`. The cargo-check hook is a
 no-op on Linux — the host already matches the canonical compile
 environment — but macOS host rustc resolves
 `#[cfg(target_os = "linux")]` items differently and skips Linux-gated
