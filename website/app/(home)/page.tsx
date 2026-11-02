@@ -11,6 +11,10 @@ export const metadata = {
 const workloadKinds = [
 	"Services",
 	"Jobs",
+	"microVMs",
+	"Unikernels",
+	"WASM",
+	"Sandboxes",
 ] as const;
 
 const workloadIconPaths = {
