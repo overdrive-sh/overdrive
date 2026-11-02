@@ -4,7 +4,7 @@ Verdict summary: **V-GW-2 HELD (membership + proxy only), V-GW-3 HELD, V-GW-4 HE
 V-GW-5 HELD, V-GW-1 PARTLY HELD.** No item was falsified. One design rationale (V-GW-1 control) is wrong and must change.
 
 - Date: 2026-11-01. Tree synced: `549d78fa65ebe5a9259fd9adcf6c0d7b694cf7f8` (taken from the progress log
-  `.context/pig-reconstruct/01-progress.md`, section "V-GW-1..5 contract-shaping spikes"; the SHA is not printed in the
+  of the authoring session, not retained in the repository; the SHA is not printed in the
   per-run logs; `git rev-parse HEAD` in the worktree also reads `549d78fa6...`). No file under `crates/` was touched.
 - Substrate: native metal `ubuntu@151.115.99.251`; every log line prints `uname=7.0.0-38-generic` (the stock Ubuntu 7.0
   kernel, x86_64, `systemd-detect-virt` = `none` per the D4 findings file on the same host).
