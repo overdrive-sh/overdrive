@@ -18,54 +18,14 @@ State 1: <Initial predicate>
 /\ receipt_bugPublishEarly_selection_receipt_outer = << >>
 /\ receipt_bugPublishEarly_selection_receipt_receipts = << >>
 
-State 2: <receipt_bugPublishEarly_selection_receipt_step line 1853, col 3 to line 1893, col 65 of module receipt_bugPublishEarly>
-/\ receipt_bugPublishEarly_selection_receipt_intents = << >>
-/\ receipt_bugPublishEarly_selection_receipt_guard = TRUE
-/\ receipt_bugPublishEarly_selection_receipt_ident = << >>
-/\ receipt_bugPublishEarly_selection_receipt_ckey = << >>
-/\ receipt_bugPublishEarly_selection_receipt_next_bid = 1
-/\ receipt_bugPublishEarly_selection_receipt_taken = << >>
-/\ receipt_bugPublishEarly_selection_receipt_upd = 1
-/\ receipt_bugPublishEarly_selection_receipt_conf_step = [init |-> [tag |-> "UNIT"]]
-/\ receipt_bugPublishEarly_selection_receipt_infl = [on |-> TRUE, key |-> 1, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
-/\ receipt_bugPublishEarly_selection_receipt_memo = << >>
-/\ receipt_bugPublishEarly_selection_receipt_debt = 0
-/\ receipt_bugPublishEarly_selection_receipt_g = [committed |-> {}, bound |-> << >>, rbBad |-> FALSE, badSel |-> FALSE]
-/\ receipt_bugPublishEarly_selection_receipt_conn = << >>
-/\ receipt_bugPublishEarly_selection_receipt_next_cookie = 1
-/\ receipt_bugPublishEarly_selection_receipt_resv = << >>
-/\ receipt_bugPublishEarly_selection_receipt_idres = << >>
-/\ receipt_bugPublishEarly_selection_receipt_outer = << >>
-/\ receipt_bugPublishEarly_selection_receipt_receipts = << >>
-
-State 3: <receipt_bugPublishEarly_selection_receipt_step line 1853, col 3 to line 1893, col 65 of module receipt_bugPublishEarly>
-/\ receipt_bugPublishEarly_selection_receipt_intents = << >>
-/\ receipt_bugPublishEarly_selection_receipt_guard = FALSE
-/\ receipt_bugPublishEarly_selection_receipt_ident = << >>
-/\ receipt_bugPublishEarly_selection_receipt_ckey = << >>
-/\ receipt_bugPublishEarly_selection_receipt_next_bid = 1
-/\ receipt_bugPublishEarly_selection_receipt_taken = << >>
-/\ receipt_bugPublishEarly_selection_receipt_upd = 1
-/\ receipt_bugPublishEarly_selection_receipt_conf_step = [init |-> [tag |-> "UNIT"]]
-/\ receipt_bugPublishEarly_selection_receipt_infl = [on |-> FALSE, key |-> 0, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
-/\ receipt_bugPublishEarly_selection_receipt_memo = << >>
-/\ receipt_bugPublishEarly_selection_receipt_debt = 0
-/\ receipt_bugPublishEarly_selection_receipt_g = [committed |-> {}, bound |-> << >>, rbBad |-> FALSE, badSel |-> FALSE]
-/\ receipt_bugPublishEarly_selection_receipt_conn = << >>
-/\ receipt_bugPublishEarly_selection_receipt_next_cookie = 1
-/\ receipt_bugPublishEarly_selection_receipt_resv = << >>
-/\ receipt_bugPublishEarly_selection_receipt_idres = << >>
-/\ receipt_bugPublishEarly_selection_receipt_outer = << >>
-/\ receipt_bugPublishEarly_selection_receipt_receipts = << >>
-
-State 4: <receipt_bugPublishEarly_selection_receipt_step line 1853, col 3 to line 1893, col 65 of module receipt_bugPublishEarly>
+State 2: <receipt_bugPublishEarly_selection_receipt_step line 1852, col 3 to line 1891, col 65 of module receipt_bugPublishEarly>
 /\ receipt_bugPublishEarly_selection_receipt_intents = << >>
 /\ receipt_bugPublishEarly_selection_receipt_guard = TRUE
 /\ receipt_bugPublishEarly_selection_receipt_ident = <<1>>
 /\ receipt_bugPublishEarly_selection_receipt_ckey = << >>
 /\ receipt_bugPublishEarly_selection_receipt_next_bid = 2
 /\ receipt_bugPublishEarly_selection_receipt_taken = << >>
-/\ receipt_bugPublishEarly_selection_receipt_upd = 2
+/\ receipt_bugPublishEarly_selection_receipt_upd = 1
 /\ receipt_bugPublishEarly_selection_receipt_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ receipt_bugPublishEarly_selection_receipt_infl = [on |-> TRUE, key |-> 1, ents |-> <<1>>, assoc |-> <<1>>, fresh_addrs |-> {1}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
 /\ receipt_bugPublishEarly_selection_receipt_memo = <<1>>

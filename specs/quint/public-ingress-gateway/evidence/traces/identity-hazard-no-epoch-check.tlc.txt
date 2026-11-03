@@ -1,5 +1,4 @@
 State 1: <Initial predicate>
-/\ identity_bugNoEpochCheck_gateway_identity_drops = {}
 /\ identity_bugNoEpochCheck_gateway_identity_desired_enabled = TRUE
 /\ identity_bugNoEpochCheck_gateway_identity_issues = {}
 /\ identity_bugNoEpochCheck_gateway_identity_g = [staleHold |-> FALSE]
@@ -9,12 +8,9 @@ State 1: <Initial predicate>
 /\ identity_bugNoEpochCheck_gateway_identity_held = {}
 /\ identity_bugNoEpochCheck_gateway_identity_audit_armed = FALSE
 /\ identity_bugNoEpochCheck_gateway_identity_now = 0
-/\ identity_bugNoEpochCheck_gateway_identity_dis_res = ""
 /\ identity_bugNoEpochCheck_gateway_identity_desired_epoch = 1
-/\ identity_bugNoEpochCheck_gateway_identity_dis_deadline = 0
 
-State 2: <identity_bugNoEpochCheck_gateway_identity_submit_evaluation line 164, col 3 to line 197, col 63 of module identity_bugNoEpochCheck>
-/\ identity_bugNoEpochCheck_gateway_identity_drops = {}
+State 2: <identity_bugNoEpochCheck_gateway_identity_submit_evaluation line 131, col 3 to line 155, col 63 of module identity_bugNoEpochCheck>
 /\ identity_bugNoEpochCheck_gateway_identity_desired_enabled = TRUE
 /\ identity_bugNoEpochCheck_gateway_identity_issues = {1}
 /\ identity_bugNoEpochCheck_gateway_identity_g = [staleHold |-> FALSE]
@@ -24,12 +20,9 @@ State 2: <identity_bugNoEpochCheck_gateway_identity_submit_evaluation line 164, 
 /\ identity_bugNoEpochCheck_gateway_identity_held = {}
 /\ identity_bugNoEpochCheck_gateway_identity_audit_armed = FALSE
 /\ identity_bugNoEpochCheck_gateway_identity_now = 0
-/\ identity_bugNoEpochCheck_gateway_identity_dis_res = ""
 /\ identity_bugNoEpochCheck_gateway_identity_desired_epoch = 1
-/\ identity_bugNoEpochCheck_gateway_identity_dis_deadline = 0
 
-State 3: <identity_bugNoEpochCheck_gateway_identity_disable line 209, col 3 to line 236, col 63 of module identity_bugNoEpochCheck>
-/\ identity_bugNoEpochCheck_gateway_identity_drops = {}
+State 3: <identity_bugNoEpochCheck_gateway_identity_disable line 167, col 3 to line 187, col 63 of module identity_bugNoEpochCheck>
 /\ identity_bugNoEpochCheck_gateway_identity_desired_enabled = FALSE
 /\ identity_bugNoEpochCheck_gateway_identity_issues = {1}
 /\ identity_bugNoEpochCheck_gateway_identity_g = [staleHold |-> FALSE]
@@ -39,12 +32,9 @@ State 3: <identity_bugNoEpochCheck_gateway_identity_disable line 209, col 3 to l
 /\ identity_bugNoEpochCheck_gateway_identity_held = {}
 /\ identity_bugNoEpochCheck_gateway_identity_audit_armed = FALSE
 /\ identity_bugNoEpochCheck_gateway_identity_now = 0
-/\ identity_bugNoEpochCheck_gateway_identity_dis_res = "pending"
 /\ identity_bugNoEpochCheck_gateway_identity_desired_epoch = 2
-/\ identity_bugNoEpochCheck_gateway_identity_dis_deadline = 2
 
-State 4: <identity_bugNoEpochCheck_gateway_identity_issue_complete line 494, col 3 to line 533, col 63 of module identity_bugNoEpochCheck>
-/\ identity_bugNoEpochCheck_gateway_identity_drops = {}
+State 4: <identity_bugNoEpochCheck_gateway_identity_issue_complete line 350, col 3 to line 383, col 63 of module identity_bugNoEpochCheck>
 /\ identity_bugNoEpochCheck_gateway_identity_desired_enabled = FALSE
 /\ identity_bugNoEpochCheck_gateway_identity_issues = {}
 /\ identity_bugNoEpochCheck_gateway_identity_g = [staleHold |-> TRUE]
@@ -54,6 +44,4 @@ State 4: <identity_bugNoEpochCheck_gateway_identity_issue_complete line 494, col
 /\ identity_bugNoEpochCheck_gateway_identity_held = {[epoch |-> 1, serial |-> 1, na |-> 4]}
 /\ identity_bugNoEpochCheck_gateway_identity_audit_armed = FALSE
 /\ identity_bugNoEpochCheck_gateway_identity_now = 0
-/\ identity_bugNoEpochCheck_gateway_identity_dis_res = "pending"
 /\ identity_bugNoEpochCheck_gateway_identity_desired_epoch = 2
-/\ identity_bugNoEpochCheck_gateway_identity_dis_deadline = 2

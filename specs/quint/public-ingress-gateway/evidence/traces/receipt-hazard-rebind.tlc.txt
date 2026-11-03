@@ -18,7 +18,7 @@ State 1: <Initial predicate>
 /\ receipt_bugRebind_selection_receipt_guard = FALSE
 /\ receipt_bugRebind_selection_receipt_ident = << >>
 
-State 2: <receipt_bugRebind_selection_receipt_step line 1812, col 3 to line 1852, col 59 of module receipt_bugRebind>
+State 2: <receipt_bugRebind_selection_receipt_step line 1811, col 3 to line 1850, col 59 of module receipt_bugRebind>
 /\ receipt_bugRebind_selection_receipt_taken = << >>
 /\ receipt_bugRebind_selection_receipt_g = [committed |-> {}, bound |-> <<{1}>>, rbBad |-> FALSE, badSel |-> FALSE]
 /\ receipt_bugRebind_selection_receipt_next_cookie = 1
@@ -38,7 +38,7 @@ State 2: <receipt_bugRebind_selection_receipt_step line 1812, col 3 to line 1852
 /\ receipt_bugRebind_selection_receipt_guard = TRUE
 /\ receipt_bugRebind_selection_receipt_ident = << >>
 
-State 3: <receipt_bugRebind_selection_receipt_step line 1812, col 3 to line 1852, col 59 of module receipt_bugRebind>
+State 3: <receipt_bugRebind_selection_receipt_step line 1811, col 3 to line 1850, col 59 of module receipt_bugRebind>
 /\ receipt_bugRebind_selection_receipt_taken = << >>
 /\ receipt_bugRebind_selection_receipt_g = [committed |-> {1}, bound |-> <<{1}>>, rbBad |-> FALSE, badSel |-> FALSE]
 /\ receipt_bugRebind_selection_receipt_next_cookie = 1
@@ -58,7 +58,7 @@ State 3: <receipt_bugRebind_selection_receipt_step line 1812, col 3 to line 1852
 /\ receipt_bugRebind_selection_receipt_guard = TRUE
 /\ receipt_bugRebind_selection_receipt_ident = << >>
 
-State 4: <receipt_bugRebind_selection_receipt_step line 1812, col 3 to line 1852, col 59 of module receipt_bugRebind>
+State 4: <receipt_bugRebind_selection_receipt_step line 1811, col 3 to line 1850, col 59 of module receipt_bugRebind>
 /\ receipt_bugRebind_selection_receipt_taken = << >>
 /\ receipt_bugRebind_selection_receipt_g = [committed |-> {1}, bound |-> <<{1}>>, rbBad |-> FALSE, badSel |-> FALSE]
 /\ receipt_bugRebind_selection_receipt_next_cookie = 1
@@ -78,7 +78,7 @@ State 4: <receipt_bugRebind_selection_receipt_step line 1812, col 3 to line 1852
 /\ receipt_bugRebind_selection_receipt_guard = FALSE
 /\ receipt_bugRebind_selection_receipt_ident = <<1>>
 
-State 5: <receipt_bugRebind_selection_receipt_step line 1812, col 3 to line 1852, col 59 of module receipt_bugRebind>
+State 5: <receipt_bugRebind_selection_receipt_step line 1811, col 3 to line 1850, col 59 of module receipt_bugRebind>
 /\ receipt_bugRebind_selection_receipt_taken = << >>
 /\ receipt_bugRebind_selection_receipt_g = [committed |-> {1}, bound |-> <<{1, 2}>>, rbBad |-> FALSE, badSel |-> FALSE]
 /\ receipt_bugRebind_selection_receipt_next_cookie = 1

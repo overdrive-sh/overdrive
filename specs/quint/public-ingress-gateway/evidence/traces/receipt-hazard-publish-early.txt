@@ -1,4 +1,4 @@
-# receipt-hazard-publish-early: counterexample, 4 state(s) (from the TLC trace)
+# receipt-hazard-publish-early: counterexample, 2 state(s) (from the TLC trace)
 
 State 1
   intents = << >>
@@ -22,18 +22,9 @@ State 1
 
 State 2 [step]
   guard = TRUE
-  upd = 1
-  infl = [on |-> TRUE, key |-> 1, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
-
-State 3 [step]
-  guard = FALSE
-  infl = [on |-> FALSE, key |-> 0, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
-
-State 4 [step]
-  guard = TRUE
   ident = <<1>>
   next_bid = 2
-  upd = 2
+  upd = 1
   infl = [on |-> TRUE, key |-> 1, ents |-> <<1>>, assoc |-> <<1>>, fresh_addrs |-> {1}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
   memo = <<1>>
   g = [committed |-> {}, bound |-> <<{1}>>, rbBad |-> FALSE, badSel |-> FALSE]

@@ -1,7 +1,6 @@
 # identity-hazard-no-epoch-check: counterexample, 4 state(s) (from the TLC trace)
 
 State 1
-  drops = {}
   desired_enabled = TRUE
   issues = {}
   g = [staleHold |-> FALSE]
@@ -11,18 +10,14 @@ State 1
   held = {}
   audit_armed = FALSE
   now = 0
-  dis_res = ""
   desired_epoch = 1
-  dis_deadline = 0
 
 State 2 [submit_evaluation]
   issues = {1}
 
 State 3 [disable]
   desired_enabled = FALSE
-  dis_res = "pending"
   desired_epoch = 2
-  dis_deadline = 2
 
 State 4 [issue_complete]
   issues = {}
