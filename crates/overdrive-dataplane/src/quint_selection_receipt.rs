@@ -26,23 +26,35 @@
 //! Projection (`State::from_driver`), per the pinned table:
 //! `ident[id]` <- `selected_backend_identity(BackendId)` for each `BackendId`
 //! the allocator can have minted (`Ok` -> bound, `BackendIdentityMissing` ->
-//! absent); `intents` <- `live_intent_count()`; `receipts` <- the length of
-//! `GatewayConnectCleanup::live_receipts()`. The model variables `outer`, `resv`, `infl`,
-//! `guard`, `debt`, `g`, `ckey`, `upd`, `next_cookie`, `conn`, `memo`,
-//! `next_bid` are model-only and are not projected (no owner accessor is
-//! pinned for them).
+//! absent); `intents` <- `live_intent_count()`; `receipts`, per cookie, <-
+//! `GatewayConnectCleanup::live_receipts()` (R-33): the snapshot's entry for the
+//! `socket_cookie` of the intent the driver holds for model cookie `c` maps to
+//! the spec's `{ key, sel }` (`sel` is the `BackendId` of a `Selected` receipt,
+//! 0 for `NoBackend`). The model variables `outer`, `resv`, `infl`, `guard`,
+//! `g`, `ckey`, `upd`, `next_cookie`, `conn`, `memo`, `next_bid`, `taken` and
+//! `conf_step` are model-only and are not projected (R-27, R-33: no owner
+//! accessor is pinned for them).
 //!
-//! The spec's `taken` (the receipt a connector consumed) is a port-return
-//! check, not owner state, and is NOT part of the compared State (a
-//! driver-maintained record of it would compare the driver with the model). It
-//! is asserted at the `take` handler, as a direct assertion that fails the
-//! step: the consumed receipt must be bound to the registered intent's
-//! `ServiceKey` and cookie (`ReceiptMatchesIntent`). The spec has no `idres`
-//! variable (R-33): `read_identity` is a step whose handler only calls
-//! `selected_backend_identity` for the cookie's Selected backend and asserts
-//! that the first read is present and that a second read agrees. The
-//! identities are compared through the projected `ident` map (every probed
-//! `BackendId`).
+//! The model `BackendId` n is `BackendId::new(n)` and the model allocation `a`
+//! is the `SpiffeId` this driver supplied for it (`alloc_identity`). The
+//! allocator memo and counter are model-only; their observable consequence is
+//! the `ident` map and the `BackendId` each live receipt carries, so an
+//! allocator that recycles an id after a restart or an orphan release shows as
+//! a different `BackendId` for the same backend. The run
+//! `conflicting_alloc_rejected` therefore traces through its tail: after the
+//! rejected update an empty update releases the memo (the owner's orphan
+//! release), `ident` keeps its history, and a fresh backend is bound to the id
+//! the counter held before the rejection (`ident` == `{1 -> 1, 2 -> 2}`).
+//!
+//! The spec's `taken` (the receipt a connector consumed) is a function of
+//! projected state and is NOT part of the compared State. It is asserted by the
+//! `take` handler (R-33): the receipt `take_receipt(&intent)` returns must
+//! equal the cookie's `live_receipts()` entry read immediately before the call
+//! (`ReceiptMatchesIntent`), and be bound to the registered `ServiceKey`. The
+//! spec has no `idres` variable: `read_identity` is a step whose handler only
+//! calls `selected_backend_identity` for the cookie's Selected backend and
+//! asserts nothing about the return; what the State comparison checks after the
+//! step is the projected `ident` and the per-cookie `receipts`.
 //!
 //! Step decoding (D-UP-1): `Config::nondet =
 //! &["receipt_conf::selection_receipt::conf_step"]`; the state projection
@@ -189,6 +201,16 @@ fn frontend(key: i64) -> ServiceFrontend {
         .expect("IPv4 frontend")
 }
 
+/// The model Service key (1 or 2) of a real `ServiceKey`.
+fn model_key_of(service_key: &ServiceKey) -> Result<i64> {
+    [1, 2]
+        .into_iter()
+        .find(|key| ServiceKey::from_frontend(frontend(*key)) == *service_key)
+        .ok_or_else(|| {
+            anyhow!("the receipt is bound to {service_key:?}, a Service no model key names")
+        })
+}
+
 /// The model allocation `alloc` (1 or 2) as a real workload identity.
 fn alloc_identity(alloc: i64) -> SpiffeId {
     SpiffeId::new(&format!("spiffe://overdrive.local/workload/conf/alloc/a{alloc}"))
@@ -324,10 +346,22 @@ impl ReceiptConfDriver {
 
     fn take(&mut self, cookie: i64) -> Result {
         let held = self.held.get_mut(&cookie).ok_or_else(|| anyhow!("cookie {cookie} not open"))?;
+        // The receipt the hook recorded for this intent, read before it is consumed.
+        let recorded = self
+            .dataplane
+            .live_receipts()
+            .map_err(|error| anyhow!("live_receipts failed: {error}"))?
+            .remove(&held.intent.socket_cookie)
+            .ok_or_else(|| anyhow!("cookie {cookie}: live_receipts holds no receipt to consume"))?;
         let receipt = self
             .dataplane
             .take_receipt(&held.intent)
             .map_err(|error| anyhow!("take_receipt failed: {error}"))?;
+        if receipt != recorded {
+            bail!(
+                "cookie {cookie}: take_receipt consumed {receipt:?}, not the recorded {recorded:?}"
+            );
+        }
         let expected_key = ServiceKey::from_frontend(frontend(held.key));
         match receipt {
             GatewaySelectionReceipt::Selected { backend_id, service_key, .. } => {
@@ -355,16 +389,11 @@ impl ReceiptConfDriver {
             .get(&cookie)
             .and_then(|held| held.selected)
             .ok_or_else(|| anyhow!("cookie {cookie} has no Selected receipt to resolve"))?;
-        let first = self.identity_of(backend)?;
-        if first.is_none() {
-            bail!(
-                "selected_backend_identity({backend}) answered no identity for a Selected receipt"
-            );
-        }
-        let second = self.identity_of(backend)?;
-        if first != second {
-            bail!("selected_backend_identity({backend}) answered {first:?} then {second:?}");
-        }
+        // R-33: asserts nothing about the return. A Selected id read before the
+        // publish guard is released would wait there (Tier 3 covers that window);
+        // the compared values are the projected `ident` and `receipts`.
+        let identity = self.dataplane.selected_backend_identity(backend);
+        drop(identity);
         Ok(())
     }
 
@@ -426,7 +455,8 @@ impl Driver for ReceiptConfDriver {
 struct ReceiptState {
     ident: BTreeMap<i64, i64>,
     intents: usize,
-    receipts: usize,
+    /// Model cookie -> (model Service key, `sel`).
+    receipts: BTreeMap<i64, (i64, i64)>,
 }
 
 impl State<ReceiptConfDriver> for ReceiptState {
@@ -446,11 +476,28 @@ impl State<ReceiptConfDriver> for ReceiptState {
             .dataplane
             .live_intent_count()
             .map_err(|error| anyhow!("live_intent_count failed: {error}"))?;
-        let receipts = driver
+        let snapshot = driver
             .dataplane
             .live_receipts()
             .map_err(|error| anyhow!("live_receipts failed: {error}"))?;
-        Ok(Self { ident, intents: intents as usize, receipts: receipts.len() })
+        let mut receipts = BTreeMap::new();
+        for (cookie, receipt) in snapshot {
+            let model_cookie = driver
+                .held
+                .iter()
+                .find_map(|(model, held)| (held.intent.socket_cookie == cookie).then_some(*model))
+                .ok_or_else(|| {
+                    anyhow!("live_receipts holds a receipt for {cookie:?}, which no open model cookie owns")
+                })?;
+            let (service_key, sel) = match receipt {
+                GatewaySelectionReceipt::Selected { service_key, backend_id, .. } => {
+                    (service_key, i64::from(backend_id.get()))
+                }
+                GatewaySelectionReceipt::NoBackend { service_key, .. } => (service_key, 0),
+            };
+            receipts.insert(model_cookie, (model_key_of(&service_key)?, sel));
+        }
+        Ok(Self { ident, intents: intents as usize, receipts })
     }
 }
 
@@ -459,6 +506,8 @@ impl State<ReceiptConfDriver> for ReceiptState {
 enum ItfError {
     #[error("the trace has no `{0}` variable")]
     MissingVar(String),
+    #[error("the trace's record has no `{0}` field")]
+    MissingField(String),
     #[error("expected {expected} in the trace, found {found:?}")]
     Shape { expected: &'static str, found: Value },
 }
@@ -470,6 +519,24 @@ fn int(value: &Value) -> std::result::Result<i64, ItfError> {
             .map_err(|_| ItfError::Shape { expected: "a 64-bit int", found: value.clone() }),
         other => Err(ItfError::Shape { expected: "an int", found: other.clone() }),
     }
+}
+
+fn receipt_entries(value: &Value) -> std::result::Result<BTreeMap<i64, (i64, i64)>, ItfError> {
+    entries(value)?
+        .into_iter()
+        .map(|(cookie, receipt)| {
+            let Value::Record(receipt) = receipt else {
+                return Err(ItfError::Shape {
+                    expected: "a receipt record",
+                    found: receipt.clone(),
+                });
+            };
+            let field = |name: &str| {
+                receipt.get(name).ok_or_else(|| ItfError::MissingField(name.to_owned()))
+            };
+            Ok((cookie, (int(field("key")?)?, int(field("sel")?)?)))
+        })
+        .collect()
 }
 
 fn entries(value: &Value) -> std::result::Result<Vec<(i64, &Value)>, ItfError> {
@@ -499,7 +566,7 @@ impl ReceiptState {
         Ok(Self {
             ident,
             intents: entries(var("intents")?)?.len(),
-            receipts: entries(var("receipts")?)?.len(),
+            receipts: receipt_entries(var("receipts")?)?,
         })
     }
 }

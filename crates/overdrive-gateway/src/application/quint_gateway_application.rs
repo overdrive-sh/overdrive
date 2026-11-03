@@ -37,7 +37,10 @@
 //! Projection (`State::from_driver`), per the pinned table:
 //! `current_generation` / `draining_generations` <-
 //! `GatewayStatusReads::application_status()` (`current`, `draining`). The model
-//! ghosts `staged`, `inflight`, `leases` are not projected. Reading the
+//! variables `staged`, `inflight`, `leases`, `next_gid`, `route_on`, `route_gen`
+//! and `conf_step` are model-only and are not projected (`route_on` and
+//! `route_gen` are driver input state: the driver applies and withdraws the
+//! Route itself). Reading the
 //! status runs no owner step: a Sim observation read completes without
 //! yielding.
 //!

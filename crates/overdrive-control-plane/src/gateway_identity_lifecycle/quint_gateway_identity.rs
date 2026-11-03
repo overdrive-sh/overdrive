@@ -22,9 +22,9 @@
 //! | Action | Driver |
 //! |---|---|
 //! | `init` | rebuild the world: a new slot, broker and lifecycle control, an empty observation store |
-//! | `submit_evaluation` | `GatewayIdentityLifecycleControl::ensure_current`, polled once so the retained `Evaluation` is submitted; the driver then drains the broker, runs the production reconciler's `hydrate_*` and `reconcile` at the `SimClock` tick and queues the `IssueGatewaySvid` it emits |
-//! | `issue_complete(epoch)` | `action_shim::gateway_svid::dispatch_issue` with the queued action of that epoch |
-//! | `disable` | `GatewayIdentityLifecycleControl::disable_after_drain` (a synchronous clear) |
+//! | `submit_evaluation` | `GatewayIdentityLifecycleControl::ensure_current`, polled once so the retained `Evaluation` is submitted; the driver then drains the broker, runs the production reconciler's `hydrate_*` and `reconcile` at the `SimClock` tick and queues the `IssueGatewaySvid` it emits and asserts that no pending epoch is beyond the slot's desired epoch (the model's `issues` is model-only and a `Step` carries no model state, so equality with it cannot be asserted in a handler) |
+//! | `issue_complete(epoch)` | `action_shim::gateway_svid::dispatch_issue` with the queued action of that epoch, which is then dropped; the step fails when no Issue of that epoch is pending (R-31) |
+//! | `disable` | `GatewayIdentityLifecycleControl::disable_after_drain` (infallible, a synchronous clear) |
 //! | `advance_time` | `SimClock::tick` by one model time unit |
 //! | `audit_fail` | a failing `SimObservationStore` write for the next issued-certificate row (queued in the store at this step) |
 //! | `restart` | drop the owner composition and rebuild it (`GatewayIdentitySlot::new`, a new `EvaluationBroker`, a new lifecycle control) over the same `SimObservationStore` and CA, discarding queued actions and the pending `ensure_current` future |
@@ -219,6 +219,27 @@ impl IdentityConfDriver {
             self.owners.broker.lock().drain_pending(8, &BTreeSet::new(), Instant::now(), now_unix);
         for (evaluation, _queued_for) in admitted {
             self.reconcile(&evaluation, now_unix)?;
+        }
+        self.assert_pending_issues_follow_the_slot()
+    }
+
+    /// The model's `issues` is the set of epochs of in-flight, not-yet-completed
+    /// `IssueGatewaySvid` actions (R-31: model-only, no accessor). The distinct
+    /// epochs the driver holds are the production reconciler's output, so the
+    /// handler asserts what the model derives for a reconcile from the slot's
+    /// own `desired()`: an Issue is only ever emitted while the slot is
+    /// enabled, and it carries the slot's desired epoch (or an earlier epoch
+    /// that is still pending, which the model keeps in `issues` until its
+    /// `issue_complete`).
+    fn assert_pending_issues_follow_the_slot(&self) -> Result {
+        let desired = self.owners.slot.desired();
+        let desired_epoch = i64::try_from(desired.epoch.get().get())?;
+        if let Some(newest) = self.queued.keys().next_back()
+            && *newest > desired_epoch
+        {
+            bail!(
+                "a pending Issue carries epoch {newest}, beyond the slot's desired epoch {desired_epoch}"
+            );
         }
         Ok(())
     }
