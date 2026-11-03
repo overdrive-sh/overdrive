@@ -13,6 +13,9 @@
 
 pub mod backend_map;
 pub mod drop_counter;
+// public-ingress-gateway (ADR-0232/0243) — gateway connect-intent and
+// selection-receipt maps (maps only; the selection arm program is DELIVER's).
+pub mod gateway_connect;
 pub mod hash_of_maps;
 pub mod local_backend_map;
 pub mod maglev_map;

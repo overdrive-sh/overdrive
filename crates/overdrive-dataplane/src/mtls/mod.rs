@@ -68,6 +68,10 @@ use overdrive_core::traits::mtls_enforcement::{
 };
 use parking_lot::Mutex;
 
+// public-ingress-gateway (ADR-0225, ADR-0234) — the dedicated gateway SVID slot
+// and the exact-peer gateway-client mTLS adapter.
+pub mod gateway_client;
+pub mod gateway_identity;
 mod inbound;
 mod ktls;
 mod limits;

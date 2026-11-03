@@ -69,6 +69,16 @@ impl BackendIdAllocator {
         id
     }
 
+    /// Read-only memo lookup (identity-conflict preflight, ADR-0241): the
+    /// `BackendId` already assigned to this endpoint, if any. Allocation and
+    /// release semantics are unchanged.
+    ///
+    /// SCAFFOLD: the body is DELIVER's.
+    #[allow(dead_code, clippy::todo, unused_variables, clippy::missing_const_for_fn)]
+    pub(crate) fn existing_id(&self, ip_host: u32, port_host: u16, proto: u8) -> Option<BackendId> {
+        todo!("SCAFFOLD: BackendIdAllocator::existing_id")
+    }
+
     /// Remove the memo entry whose value matches `id`. Called by
     /// orphan GC when a `BackendId` leaves the live set.
     ///

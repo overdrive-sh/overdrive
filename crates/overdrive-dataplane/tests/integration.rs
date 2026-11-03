@@ -32,6 +32,11 @@ mod integration {
     /// public-ingress-gateway (S-PIG-104) — `HostGatewayRelay` and `SimGatewayRelay`
     /// agree through the `GatewayRelay` port over the faults both can produce.
     mod gateway_relay_equivalence;
+    /// public-ingress-gateway (S-PIG-67) — `GatewayConnectDataplane` Host and Sim
+    /// agree through the port over the same `update_service` and socket call
+    /// sequences (identity readable only after commit, immutable per id, no
+    /// residue, a rejected conflicting backend set).
+    mod gateway_connect_dataplane_equivalence;
     /// Shared fixtures (RAII veth-pair, capability gating). Declared at
     /// module scope so siblings reach it via `super::helpers::…`.
     mod helpers;
@@ -81,6 +86,11 @@ mod integration {
     /// udp-service-support US-05 / S-05-A..C (ADR-0060 Tier 3; K4) —
     /// multi-listener (TCP + UDP) forward+reverse e2e. RED scaffolds.
     mod multi_listener_tcp_udp_e2e;
+    /// public-ingress-gateway (S-PIG-41, 56 T3, 57 T3, 63, 71 instance half, 72) — the
+    /// gateway selection hook and `GatewayConnectDataplane` on a real kernel: the
+    /// unregistered-socket preservation row, receipt and applied identity, the
+    /// prepared socket, instance restart, and updates racing identity reads.
+    mod public_ingress_gateway_hook;
     /// phase-2-xdp-service-map Slice 09 step 09-03 (S-2.2-33;
     /// ADR-0045 § Operational) — loader attach topology under
     /// `bpf_redirect`-on-XDP datapath. Verifies dual-XDP attach

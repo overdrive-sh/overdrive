@@ -5,6 +5,10 @@
 //! shared helpers must hang off the inline `mod integration { … }`
 //! block in `tests/integration.rs`.
 
+// public-ingress-gateway (S-PIG-41, 56, 57, 63, 67, 71, 72) — the real
+// `EbpfDataplane` rig, model frontends/backends and bounded dial for the gateway
+// connect-dataplane Tier-3 tests.
+pub mod gateway_connect_rig;
 // transparent-mtls-host-socket (ADR-0069, GH #26) — the composed
 // walking-skeleton netns/veth + cgroup-isolated-workload topology fixture
 // (single-consumer; step 01-01). Promote to `overdrive-testing` only if a

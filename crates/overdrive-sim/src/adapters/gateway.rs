@@ -1,11 +1,17 @@
 //! Sim adapters of the public-ingress gateway driven ports.
 //!
-//! SCAFFOLD: true. This file currently holds the kernel-relay share (G1):
+//! SCAFFOLD: true. This file holds the kernel-relay share (G1):
 //! [`SimGatewayRelay`] — the `GatewayRelay` port backed by in-memory record
-//! queues on the injected clock — and its test-support surface. The connect
-//! dataplane, exact-peer client mTLS and identity doubles land beside it in
-//! the same file. Port bodies fail with SCAFFOLD text until DELIVER; the
-//! scripting data types are plain data and are real.
+//! queues on the injected clock — and its test-support surface; and the
+//! dataplane-side share: [`SimGatewayConnectDataplane`] (over the shared
+//! `SimDataplane` state), [`SimGatewayClientMtls`] (the scripted exact-peer
+//! client, arming through the Sim relay), [`SimConnectHold`] (the probe hold
+//! they share), and the gateway identity doubles
+//! ([`SimGatewayIdentityActionTarget`], [`SimGatewayIdentityLifecycleControl`]).
+//! Port bodies fail with SCAFFOLD text until DELIVER; the scripting data types
+//! are plain data and are real. `SimGatewayClientMtlsFactory` and
+//! `SimGatewayAdapters` are not scaffolded: the `GatewayClientMtlsFactory` /
+//! `GatewayClientMtlsDeps` pin is the open proposal P-20 (a crate cycle).
 //!
 //! # Test-support surface (shaped by DISTILL; capabilities, not production API)
 //!
@@ -62,14 +68,29 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use overdrive_core::id::SpiffeId;
-use overdrive_core::public_ingress::PublicHostname;
+use overdrive_core::dataplane::ServiceFrontend;
+use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
+use overdrive_core::gateway_identity::{
+    GatewayIdentityDesired, GatewayIdentityEpoch, GatewayIdentityEpochError, GatewayIdentityFacts,
+    GatewayIdentityView,
+};
+use overdrive_core::id::{BackendId, SpiffeId};
+use overdrive_core::public_ingress::{PublicHostname, ServiceKey};
+use overdrive_core::traits::ca::SvidMaterial;
 use overdrive_core::traits::clock::Clock;
 use overdrive_gateway::ports::{
-    AcceptedPublicLeg, GatewayRelay, HeadTerminator, KeyUpdateError, KtlsArmError, KtlsLeg,
-    KtlsReadHalf, KtlsWriteHalf, LegReadError, LegWriteError, PublicHandshakeError, ReadDeadlines,
-    RelayDeadlines, RelayError, RelayPipeError, RelayProbeError, ThroughBytes,
+    AcceptedPublicLeg, GatewayClientMtls, GatewayClientMtlsError, GatewayConnectCleanupSweep,
+    GatewayConnectDataplane, GatewayConnectDataplaneError, GatewayConnectIntent,
+    GatewayIdentityActionTarget, GatewayIdentityLifecycleControl, GatewayIdentityLifecycleError,
+    GatewayIdentityLifecycleTarget, GatewayIdentityMutationOutcome, GatewayRelay,
+    GatewaySelectionReceipt, GatewayUpstream, GatewayUpstreamSeal, HeadTerminator, KeyUpdateError,
+    KtlsArmError, KtlsLeg, KtlsReadHalf, KtlsWriteHalf, LegReadError, LegWriteError,
+    PreparedUpstream, PublicHandshakeError, ReadDeadlines, RelayDeadlines, RelayError,
+    RelayPipeError, RelayProbeError, ThroughBytes,
 };
+use tokio::sync::watch;
+
+use super::dataplane::SimDataplane;
 
 // ---------------------------------------------------------------------------
 // Test-support data (real)
@@ -99,14 +120,21 @@ pub enum LegEvent {
     Octets(Vec<u8>),
     /// A peer KeyUpdate. `answer_fails`: the relay's answer to it (a requested
     /// update) or its re-arm fails with this error.
-    KeyUpdate { requested: bool, answer_fails: Option<KeyUpdateError> },
+    KeyUpdate {
+        requested: bool,
+        answer_fails: Option<KeyUpdateError>,
+    },
     NewSessionTicket,
     /// The peer's close_notify.
     CloseNotify,
     /// A fatal alert with this description.
-    Alert { description: u8 },
+    Alert {
+        description: u8,
+    },
     /// A record of an unexpected content type.
-    UnexpectedRecord { content_type: u8 },
+    UnexpectedRecord {
+        content_type: u8,
+    },
     /// The peer resets the connection.
     Reset,
     /// The next event is deliverable only this long after the previous one
@@ -376,5 +404,286 @@ impl GatewayRelay for SimGatewayRelay {
         deadlines: RelayDeadlines,
     ) -> Result<u64, LegReadError> {
         todo!("SCAFFOLD: SimGatewayRelay::discard_remaining")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SimGatewayConnectDataplane (the dataplane-side share)
+// ---------------------------------------------------------------------------
+
+/// A `GatewayConnectDataplane` operation a fault can be armed on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ConnectOperation {
+    Probe,
+    OpenUpstream,
+    TakeReceipt,
+    Cleanup,
+    CleanupAllGatewayIntents,
+    SelectedBackendIdentity,
+    LiveIntentCount,
+    LiveReceiptCount,
+}
+
+/// The connect-probe hold shared by the Sim connect dataplane and client.
+///
+/// A probe whose receipt is `Selected` parks at
+/// `GatewayClientMtls::authenticate` until released (DG-9). Cloning shares the
+/// state.
+#[derive(Clone, Default)]
+pub struct SimConnectHold {
+    _private: (),
+}
+
+impl SimConnectHold {
+    /// Park the next probe(s) for `frontend` at `authenticate`.
+    pub fn hold(&self, frontend: ServiceFrontend) {
+        todo!("SCAFFOLD: SimConnectHold::hold")
+    }
+
+    /// Release every probe held for `frontend`: usable = `Ok(GatewayUpstream)`.
+    pub fn release(&self, frontend: ServiceFrontend) {
+        todo!("SCAFFOLD: SimConnectHold::release")
+    }
+
+    /// Number of probes currently parked.
+    pub fn held_entries(&self) -> usize {
+        todo!("SCAFFOLD: SimConnectHold::held_entries")
+    }
+}
+
+/// The Sim `GatewayConnectDataplane`.
+///
+/// The same observable contract as the real hook, over the `SimDataplane` state
+/// it shares (D-PASS7-4). No outer entry for the key or an empty slot ->
+/// `NoBackend`; otherwise `Selected` with the lowest `BackendId` of the key's
+/// current generation. Cookies are deterministic nonzero values. The Sim does
+/// not evaluate `Backend.healthy`.
+pub struct SimGatewayConnectDataplane {
+    dataplane: Arc<SimDataplane>,
+}
+
+impl SimGatewayConnectDataplane {
+    /// Share `dataplane`'s Service state.
+    pub fn new(dataplane: Arc<SimDataplane>) -> Self {
+        todo!("SCAFFOLD: SimGatewayConnectDataplane::new")
+    }
+
+    /// The next call of `operation` returns `error` (FIFO; typed-fault
+    /// configuration at the existing port operations).
+    pub fn fail_next(&self, operation: ConnectOperation, error: GatewayConnectDataplaneError) {
+        todo!("SCAFFOLD: SimGatewayConnectDataplane::fail_next")
+    }
+
+    /// The probe hold this adapter shares with a [`SimGatewayClientMtls`].
+    pub fn connect_hold(&self) -> SimConnectHold {
+        todo!("SCAFFOLD: SimGatewayConnectDataplane::connect_hold")
+    }
+}
+
+#[async_trait]
+impl GatewayConnectDataplane for SimGatewayConnectDataplane {
+    async fn probe(
+        &self,
+        deadline: Instant,
+        clock: &dyn Clock,
+    ) -> Result<(), GatewayConnectDataplaneError> {
+        todo!("SCAFFOLD: SimGatewayConnectDataplane::probe")
+    }
+
+    fn open_upstream(
+        &self,
+        key: ServiceKey,
+    ) -> Result<PreparedUpstream, GatewayConnectDataplaneError> {
+        todo!("SCAFFOLD: SimGatewayConnectDataplane::open_upstream")
+    }
+
+    fn take_receipt(
+        &self,
+        intent: &GatewayConnectIntent,
+    ) -> Result<GatewaySelectionReceipt, GatewayConnectDataplaneError> {
+        todo!("SCAFFOLD: SimGatewayConnectDataplane::take_receipt")
+    }
+
+    fn cleanup(&self, intent: &GatewayConnectIntent) -> Result<(), GatewayConnectDataplaneError> {
+        todo!("SCAFFOLD: SimGatewayConnectDataplane::cleanup")
+    }
+
+    fn cleanup_all_gateway_intents(
+        &self,
+    ) -> Result<GatewayConnectCleanupSweep, GatewayConnectDataplaneError> {
+        todo!("SCAFFOLD: SimGatewayConnectDataplane::cleanup_all_gateway_intents")
+    }
+
+    fn selected_backend_identity(
+        &self,
+        backend_id: BackendId,
+    ) -> Result<SpiffeId, GatewayConnectDataplaneError> {
+        todo!("SCAFFOLD: SimGatewayConnectDataplane::selected_backend_identity")
+    }
+
+    fn live_intent_count(&self) -> Result<u32, GatewayConnectDataplaneError> {
+        todo!("SCAFFOLD: SimGatewayConnectDataplane::live_intent_count")
+    }
+
+    fn live_receipt_count(&self) -> Result<u32, GatewayConnectDataplaneError> {
+        todo!("SCAFFOLD: SimGatewayConnectDataplane::live_receipt_count")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SimGatewayClientMtls
+// ---------------------------------------------------------------------------
+
+/// The Sim exact-peer client: a scripted peer, one seal, the Sim relay backend.
+///
+/// `authenticate` returns a `GatewayUpstream` only after the scripted peer
+/// equals `expected_peer`; otherwise the exact mismatch error.
+pub struct SimGatewayClientMtls {
+    relay: Arc<SimGatewayRelay>,
+}
+
+impl SimGatewayClientMtls {
+    pub fn new(
+        seal: GatewayUpstreamSeal,
+        relay: Arc<SimGatewayRelay>,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
+        todo!("SCAFFOLD: SimGatewayClientMtls::new")
+    }
+
+    /// The identity the scripted peer presents.
+    pub fn set_peer(&self, peer: SpiffeId) {
+        todo!("SCAFFOLD: SimGatewayClientMtls::set_peer")
+    }
+
+    /// Share the connect-probe hold with a [`SimGatewayConnectDataplane`]
+    /// (test support, DG-9).
+    #[must_use]
+    pub fn with_hold(self, hold: SimConnectHold) -> Self {
+        todo!("SCAFFOLD: SimGatewayClientMtls::with_hold")
+    }
+}
+
+#[async_trait]
+impl GatewayClientMtls for SimGatewayClientMtls {
+    async fn authenticate(
+        &self,
+        connected: OwnedFd,
+        expected_peer: SpiffeId,
+        deadline: Instant,
+    ) -> Result<GatewayUpstream, GatewayClientMtlsError> {
+        todo!("SCAFFOLD: SimGatewayClientMtls::authenticate")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Gateway identity doubles
+// ---------------------------------------------------------------------------
+
+/// The Sim gateway identity target: epoch and current facts only, under one
+/// mutex-held deterministic state. Its current projection never contains key
+/// material.
+pub struct SimGatewayIdentityActionTarget {
+    _private: (),
+}
+
+impl SimGatewayIdentityActionTarget {
+    pub fn new(desired: GatewayIdentityDesired) -> Self {
+        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::new")
+    }
+
+    pub fn current(&self) -> Option<GatewayIdentityFacts> {
+        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::current")
+    }
+
+    pub fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>> {
+        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::subscribe")
+    }
+
+    pub fn begin_disable(&self) -> Result<GatewayIdentityEpoch, GatewayIdentityEpochError> {
+        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::begin_disable")
+    }
+}
+
+impl GatewayIdentityActionTarget for SimGatewayIdentityActionTarget {
+    fn hold_audited(
+        &self,
+        epoch: GatewayIdentityEpoch,
+        material: SvidMaterial,
+    ) -> GatewayIdentityMutationOutcome {
+        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::hold_audited")
+    }
+}
+
+impl GatewayIdentityLifecycleTarget for SimGatewayIdentityActionTarget {
+    fn current(&self) -> Option<GatewayIdentityFacts> {
+        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::current (lifecycle)")
+    }
+
+    fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>> {
+        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::subscribe (lifecycle)")
+    }
+
+    fn begin_disable(&self) -> Result<GatewayIdentityEpoch, GatewayIdentityEpochError> {
+        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::begin_disable (lifecycle)")
+    }
+}
+
+impl GatewayIdentityView for SimGatewayIdentityActionTarget {
+    fn desired(&self) -> GatewayIdentityDesired {
+        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::desired")
+    }
+
+    fn current(&self) -> Option<GatewayIdentityFacts> {
+        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::current (view)")
+    }
+}
+
+/// The Sim identity lifecycle control.
+///
+/// Submits its retained evaluation to the same real `EvaluationBroker` and uses
+/// the injected Sim clock plus the target watch for the same ensure
+/// absolute-deadline race as production; it never sets Current directly.
+/// Disable is the synchronous `begin_disable` clear.
+pub struct SimGatewayIdentityLifecycleControl {
+    target: Arc<SimGatewayIdentityActionTarget>,
+    broker: Arc<parking_lot::Mutex<EvaluationBroker>>,
+    evaluation: Evaluation,
+    clock: Arc<dyn Clock>,
+}
+
+impl SimGatewayIdentityLifecycleControl {
+    pub fn new(
+        target: Arc<SimGatewayIdentityActionTarget>,
+        broker: Arc<parking_lot::Mutex<EvaluationBroker>>,
+        evaluation: Evaluation,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
+        todo!("SCAFFOLD: SimGatewayIdentityLifecycleControl::new")
+    }
+}
+
+#[async_trait]
+impl GatewayIdentityLifecycleControl for SimGatewayIdentityLifecycleControl {
+    async fn ensure_current(
+        &self,
+        deadline: Instant,
+    ) -> Result<GatewayIdentityFacts, GatewayIdentityLifecycleError> {
+        todo!("SCAFFOLD: SimGatewayIdentityLifecycleControl::ensure_current")
+    }
+
+    fn current(&self) -> Option<GatewayIdentityFacts> {
+        todo!("SCAFFOLD: SimGatewayIdentityLifecycleControl::current")
+    }
+
+    fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>> {
+        todo!("SCAFFOLD: SimGatewayIdentityLifecycleControl::subscribe")
+    }
+
+    async fn disable_after_drain(
+        &self,
+        deadline: Instant,
+    ) -> Result<(), GatewayIdentityLifecycleError> {
+        todo!("SCAFFOLD: SimGatewayIdentityLifecycleControl::disable_after_drain")
     }
 }

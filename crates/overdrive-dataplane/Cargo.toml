@@ -177,5 +177,15 @@ hex.workspace                   = true
 # the same production `rcgen` dep — no separate dev-dep entry needed.
 ktls = { workspace = true, default-features = false, features = ["ring"] }
 
+# QC-3 (public-ingress-gateway): the quint-connect conformance driver for
+# `selection_receipt` lives in `src/quint_selection_receipt.rs` behind
+# `#[cfg(all(test, feature = "integration-tests"))]`. `itf` decodes the trace
+# state, `anyhow` is the error type `quint_connect::switch!` expands to,
+# `serde` carries the `State` deserialisation bound.
+quint-connect.workspace = true
+itf.workspace           = true
+anyhow.workspace        = true
+serde.workspace         = true
+
 [lints]
 workspace = true

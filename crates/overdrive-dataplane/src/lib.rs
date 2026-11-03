@@ -55,6 +55,17 @@ pub mod mtls;
 // `unsafe`.
 pub mod gateway_relay;
 
+// public-ingress-gateway (ADR-0228/0232/0233/0243) — `GatewayConnectDataplane`
+// for `EbpfDataplane`: upstream-socket preparation, the connect-intent and
+// selection-receipt map ABI, applied backend identity.
+pub mod gateway_connect;
+
+// QC-3: the quint-connect conformance driver for `selection_receipt`
+// (`specs/quint/public-ingress-gateway/selection_receipt.qnt`, main
+// `receipt_conf`) against the real `EbpfDataplane`.
+#[cfg(all(test, feature = "integration-tests"))]
+mod quint_selection_receipt;
+
 use std::net::Ipv4Addr;
 
 use async_trait::async_trait;
