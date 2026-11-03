@@ -748,6 +748,10 @@ impl SharedAuditCheckpoint {
 
 #[cfg(test)]
 impl SharedAuditCheckpointControl {
+    #[allow(
+        clippy::expect_used,
+        reason = "test-only checkpoint: a dropped arm is a harness failure"
+    )]
     pub(crate) async fn reached(&mut self) {
         (&mut self.reached)
             .await

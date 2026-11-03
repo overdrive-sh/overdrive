@@ -815,7 +815,7 @@ async fn a_healthy_probe_watch_overlapping_shared_audit_does_not_start_recovery(
         node.advance(offset).await;
         let mut checkpoint = node.process().owner.arm_shared_audit_post_snapshot_checkpoint();
         sequence.push("arm post-snapshot/pre-inventory checkpoint".to_owned());
-        node.advance(SHARED_NETWORK_AUDIT_PERIOD - offset).await;
+        node.advance(SHARED_NETWORK_AUDIT_PERIOD.saturating_sub(offset)).await;
         node.release_audits().await;
         checkpoint.reached().await;
         sequence.push("periodic audit captured expected counts and paused".to_owned());
@@ -895,6 +895,7 @@ async fn a_healthy_probe_watch_overlapping_shared_audit_does_not_start_recovery(
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 #[allow(clippy::print_stderr, reason = "the seed and action trace reproduce a failure")]
+#[allow(clippy::too_many_lines, reason = "one scripted episode reads top to bottom")]
 async fn a_queued_pair_end_overlapping_shared_audit_does_not_start_recovery() {
     for seed in seeds() {
         eprintln!("R5-58 HealthyQueuedEndOverlapsSharedAudit seed={seed}");
@@ -943,7 +944,7 @@ async fn a_queued_pair_end_overlapping_shared_audit_does_not_start_recovery() {
         node.advance(offset).await;
         let mut checkpoint = node.process().owner.arm_shared_audit_post_snapshot_checkpoint();
         sequence.push("arm post-snapshot/pre-inventory checkpoint".to_owned());
-        node.advance(SHARED_NETWORK_AUDIT_PERIOD - offset).await;
+        node.advance(SHARED_NETWORK_AUDIT_PERIOD.saturating_sub(offset)).await;
         node.release_audits().await;
         checkpoint.reached().await;
         sequence.push("periodic audit captured one owner pair and paused".to_owned());

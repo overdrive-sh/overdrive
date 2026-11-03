@@ -36,6 +36,7 @@
 //! guest->host only").
 
 #![allow(clippy::unwrap_used)]
+#![allow(clippy::doc_markdown, reason = "the exact CONTRACT_SHAPE marker is repository-mandated")]
 
 use overdrive_core::guest_transport::LaunchToken;
 use overdrive_core::vm::beacon::{BeaconMessage, BeaconParseError};
