@@ -186,7 +186,14 @@ async fn run(cli: Cli) -> Result<()> {
             print!("{}", overdrive_cli::render::node_list(&out));
             Ok(())
         }
-        Command::Serve { bind, data_dir } => {
+        Command::Serve {
+            bind,
+            data_dir,
+            gateway_address,
+            gateway_certified_key_id,
+            gateway_certificate_chain,
+            gateway_private_key,
+        } => {
             let bind_addr = bind
                 .parse()
                 .map_err(|e| color_eyre::eyre::eyre!("invalid --bind address `{bind}`: {e}"))?;
@@ -201,6 +208,10 @@ async fn run(cli: Cli) -> Result<()> {
                 data_dir,
                 config_dir,
                 vsock_ports: overdrive_core::guest_transport::NodeVsockPortConfig::default(),
+                gateway_address,
+                gateway_certified_key_id,
+                gateway_certificate_chain,
+                gateway_private_key,
             };
             let handle = overdrive_cli::commands::serve::run(args).await?;
             tracing::info!(endpoint = %handle.endpoint(), "control plane listening");

@@ -846,6 +846,63 @@ test-group = 'host-kernel-shared'
 filter = 'package(overdrive-system-conformance) & binary(shared_guest_network_fail_stop_recovery)'
 test-group = 'host-kernel-shared'
 
+# public-ingress-gateway (AT-PIG-E2E-1 and the native arms of S-PIG-02, 39, 40,
+# 56, 60, 69, 70, 71, 105, 109, 113, 115) - the end-to-end binary boots
+# `run_server` with the real adapters and a real VM Service, so it mutates the
+# node-global nft, cgroup and bpffs state the other kernel-touching binaries
+# mutate and reads the node-global `/proc/net/tls_stat` counters; the
+# `shared_guest_network_fail_stop_recovery` filter above names a different
+# binary. The WHOLE binary joins the single-writer group (a module or test
+# filter goes stale when another test lands beside it). Each composition binds
+# its own `127/8` address (R-6); the group is for node-global kernel state only.
+[[profile.default.overrides]]
+filter = 'package(overdrive-system-conformance) & binary(public_ingress_gateway_end_to_end)'
+test-group = 'host-kernel-shared'
+
+# public-ingress-gateway end-to-end timeouts: the smallest integer strictly
+# greater than the worst-case sum of the stated bounds divided by 60 s
+# (feature-delta DISTILL "Test placement", part (B)); derived, not measured, and
+# replaced by the first recorded metal run's runtime. The default kill is
+# 60 s x 2. Per-test entries come BEFORE the binary-level fallback (the first
+# matching override wins per setting).
+#   13: walking skeleton 725 s; guest-flow end 735 s; 128 concurrent exchanges
+#       730 s; lingering close 725 s.
+[[profile.default.overrides]]
+filter = '''
+    package(overdrive-system-conformance) & binary(public_ingress_gateway_end_to_end) & (
+        test(streams_a_workload_response_over_kernel_tls_legs)
+        | test(answers_502_when_the_guest_flow_ends_mid_request)
+        | test(holds_128_concurrent_exchanges_within_the_descriptor_and_memory_budget)
+        | test(lets_the_client_read_the_response_before_a_clean_close)
+    )
+'''
+slow-timeout = { period = "60s", terminate-after = 13 }
+
+#   12: serve restart 670 s; 16 MiB response 665 s.
+[[profile.default.overrides]]
+filter = '''
+    package(overdrive-system-conformance) & binary(public_ingress_gateway_end_to_end) & (
+        test(answers_503_until_the_hydrator_reprograms_after_a_serve_restart)
+        | test(sends_no_key_update_across_a_sixteen_mebibyte_response)
+    )
+'''
+slow-timeout = { period = "60s", terminate-after = 12 }
+
+#   11: every other test of the binary (404, 502-once, stale entry, stage
+#       order, status mappings with the 40 s stalled body, byte-exact bodies):
+#       at most 600 s + 40 s + 5 s = 645 s.
+[[profile.default.overrides]]
+filter = 'package(overdrive-system-conformance) & binary(public_ingress_gateway_end_to_end)'
+slow-timeout = { period = "60s", terminate-after = 11 }
+
+# public-ingress-gateway (S-PIG-24) - 256 rounds x a 5 s per-round cap = 1 280 s
+# (a cap; the expected wall-clock is milliseconds per round). Derived from the
+# stated bound, not measured. This binary needs no `host-kernel-shared`
+# assignment: it mutates no node-global kernel state (R-6).
+[[profile.default.overrides]]
+filter = 'package(overdrive-gateway) & binary(integration) & test(two_simultaneous_route_claims_have_exactly_one_winner_in_every_round)'
+slow-timeout = { period = "60s", terminate-after = 22 }
+
 
 # The xtask metal-qualification binary drives the production
 # `infra/metal/bootstrap.sh` lease protocol through several nested shell

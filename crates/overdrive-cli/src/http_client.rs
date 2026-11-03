@@ -22,10 +22,12 @@ use std::time::Duration;
 
 use overdrive_control_plane::api::{
     AllocStatusResponse, ClusterStatus, ErrorBody, NodeList, RestartWorkloadResponse,
-    StopWorkloadResponse, SubmitWorkloadRequest, SubmitWorkloadResponse, WorkloadDescription,
+    StopWorkloadResponse, SubmitRouteResponse, SubmitWorkloadRequest, SubmitWorkloadResponse,
+    WorkloadDescription,
 };
 use overdrive_control_plane::tls_bootstrap::{TrustTriple, load_trust_triple};
 use overdrive_core::guest_network::ServeShutdownRequest;
+use overdrive_core::public_ingress::PublicRouteInput;
 use reqwest::StatusCode;
 use thiserror::Error;
 use url::Url;
@@ -141,6 +143,14 @@ pub enum CliError {
     /// [`crate::render::cli_error_to_exit_code`].
     #[error("{0}")]
     ParseError(#[from] overdrive_core::aggregate::ParseError),
+
+    /// The four `--gateway-*` serve arguments were a partial set. Raised by
+    /// `ServeArgs::gateway_config` before any startup effect.
+    #[error("invalid public ingress gateway configuration: {source}")]
+    GatewayConfiguration {
+        #[source]
+        source: overdrive_gateway::GatewayConfigError,
+    },
 }
 
 /// Hand-rolled typed REST client for the Phase 1 control-plane. One
@@ -189,6 +199,28 @@ impl ApiClient {
     #[must_use]
     pub const fn base_url(&self) -> &Url {
         &self.base
+    }
+
+    /// `POST /v1/routes` — declare, replace or re-apply the one public Route.
+    /// The production caller is `deploy_resource` for a Route document.
+    ///
+    /// # Errors
+    ///
+    /// See [`CliError`] variants; a gateway-disabled control plane answers
+    /// [`CliError::HttpStatus`] 409 with `error = "gateway_disabled"`.
+    #[allow(
+        clippy::todo,
+        clippy::unused_async,
+        clippy::needless_pass_by_value,
+        clippy::unused_self,
+        reason = "public-ingress DISTILL scaffold: the Route POST body is DELIVER's"
+    )]
+    pub async fn submit_route(
+        &self,
+        input: PublicRouteInput,
+    ) -> Result<SubmitRouteResponse, CliError> {
+        let _ = (&self.inner, &self.base, &input);
+        todo!("SCAFFOLD: ApiClient::submit_route")
     }
 
     /// `POST /v1/workloads` with `Accept: application/json` — submit a

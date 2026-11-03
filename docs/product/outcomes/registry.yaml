@@ -924,7 +924,7 @@ outcomes:
   - external-https-to-workload
   - cookie-receipt-leg-c-vsock
   - gateway-svid-selected-peer
-  artifact: tests/tier3/public-ingress-gateway/runner.sh
+  artifact: tests/conformance/tests/public_ingress_gateway_end_to_end.rs
   related:
   - OUT-PIG-CERTIFIED-KEY-CUSTODY
   - OUT-PIG-GATEWAY-APPLICATION

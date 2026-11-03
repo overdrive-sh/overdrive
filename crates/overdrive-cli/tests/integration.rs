@@ -73,6 +73,11 @@ mod integration {
     // `CliError::ProbeRefused`. Per ADR-0054 § Composition root wiring.
     mod serve_probe_refusal;
 
+    // public-ingress-gateway — the operator CLI against the production
+    // handlers on a gateway-disabled composition (S-PIG-36, S-PIG-20 pre-effect
+    // half). S-PIG-34/35/42 are blocked on the client-mTLS factory placement.
+    mod public_ingress_gateway;
+
     // service-health-check-probes step 01-03e3-fix — CLI submit-side
     // dispatch routing. Closes the gap 01-03e3 missed: a Service-kind
     // TOML through `deploy_streaming` must route to the new

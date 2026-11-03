@@ -94,6 +94,10 @@ async fn spawn_server() -> (ServeHandle, TempDir) {
             data_dir,
             config_dir,
             vsock_ports: NodeVsockPortConfig::kernel_assigned(),
+            gateway_address: None,
+            gateway_certified_key_id: None,
+            gateway_certificate_chain: None,
+            gateway_private_key: None,
         },
         Arc::new(RealCgroupFs::new()),
         |config, fs| {

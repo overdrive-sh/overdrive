@@ -201,4 +201,12 @@ mod acceptance {
     // netns-density-295 EVMOD-PORT — the SimFlowForwarder arbiter of the
     // forwarder facts (pending DELIVER step 4; Tier-3 pair: overdrive-fwd).
     mod sim_flow_forwarder;
+    // public-ingress-gateway S-PIG-31/32 — the two Gateway Application lifecycle
+    // invariants through the DST harness (pending DELIVER
+    // gateway-application-invariants).
+    mod gateway_application_lifecycle;
+    // public-ingress-gateway S-PIG-102/103 — seeded kernel-relay exchange and
+    // drain/force-abort runs over `SimGatewayRelay` (pending DELIVER
+    // kernel-relay-exchange-driver).
+    mod gateway_relay_exchange;
 }

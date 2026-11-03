@@ -16,14 +16,31 @@ integration-tests = []
 
 [dependencies]
 base64.workspace = true
-nix = { workspace = true, features = ["user"] }
+# `fs` (F_GETPIPE_SZ) and `resource` (RLIMIT_NOFILE) serve the gateway
+# descriptor/memory observations, `signal` delivers the host-side VMM kill;
+# `user` is the root check.
+nix = { workspace = true, features = ["user", "fs", "resource", "signal"] }
 overdrive-control-plane = { path = "../../crates/overdrive-control-plane", features = ["integration-tests"] }
 overdrive-core = { path = "../../crates/overdrive-core" }
+# The public-ingress gateway composition: `GatewayConfig` /
+# `ManualCertifiedKeyConfig` are the operator inputs of `ServerConfig.gateway`.
+overdrive-gateway = { path = "../../crates/overdrive-gateway" }
+# Production host bindings the CLI's `serve` composes (real cgroupfs).
+overdrive-host = { path = "../../crates/overdrive-host" }
 overdrive-sim = { path = "../../crates/overdrive-sim", features = ["integration-tests"] }
 # The server composition's required `vm_cgroups: CgroupManager` argument
 # (GH #295, D-295-R14) names the worker's cgroup manager.
 overdrive-worker = { path = "../../crates/overdrive-worker" }
+# The shared native-metal VM fixture (kernel, rootfs, forwarder-module lane
+# prerequisite) the in-process `serve` VM tests of this repository use. This
+# crate is test-only, so the fixture crate is a regular dependency here.
+overdrive-testing.workspace = true
+# The test trust anchor and the Public Certified Key minted per composition.
+rcgen.workspace = true
 reqwest.workspace = true
+# The external public TLS client: TLS 1.3 over a real socket, system trust is
+# never used.
+rustls = { workspace = true, features = ["std"] }
 serde_json.workspace = true
 tempfile.workspace = true
 tokio.workspace = true

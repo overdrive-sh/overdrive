@@ -72,4 +72,7 @@ mod acceptance {
     // service-kind-vm-workloads (GH #257) — both existing Service deploy
     // lanes must project the parser-selected driver arm identically.
     mod service_kind_vm_workloads;
+
+    // public-ingress-gateway — the `serve` gateway flag set (S-PIG-18..20).
+    mod public_ingress_gateway;
 }

@@ -226,6 +226,14 @@ pub mod svid_running_set;
 // `crate::invariants::vm_reclamation`.
 pub mod vm_reclamation;
 
+// public-ingress-gateway (ADR-0222) — the two Gateway Application lifecycle
+// invariants. They drive the real `GatewayApplicationOwner` through
+// `GatewayControl`, `GatewayBuilder::start` and `GatewayHandle::shutdown`;
+// the evaluator bodies live in `crate::invariants::gateway_application`.
+// Neither variant is in `Invariant::ALL` until the pending activation key
+// `gateway-application-invariants` lands.
+pub mod gateway_application;
+
 /// Catalogue of invariants the DST harness evaluates.
 ///
 /// Each variant name IS the canonical name printed in both green
@@ -686,6 +694,23 @@ pub enum Invariant {
     /// this invariant exists to catch would live. The evaluator body
     /// lives in `crate::invariants::vm_reclamation`. Closes S-VM-89.
     EndingInFlightIsNeverReclaimed,
+
+    /// public-ingress-gateway (ADR-0222) — always invariant (safety). Staged
+    /// precedes promotion, the displaced Current drains while a retained
+    /// connection is open, a stale connect-probe completion never promotes or
+    /// retires its successor, withdrawal converges, and restart relists durable
+    /// Route intent without resurrecting a withdrawn or superseded generation.
+    /// NOT in `ALL` (pending activation key `gateway-application-invariants`).
+    /// The evaluator body lives in `crate::invariants::gateway_application`.
+    GatewayApplicationGenerationLifecycleIsSafe,
+
+    /// public-ingress-gateway (ADR-0222) — convergence. After shutdown the
+    /// listener is unbound, no Staged or Current application remains, retained
+    /// leases are joined, the identity slot and ledger are empty and the
+    /// dataplane holds no intent or receipt. NOT in `ALL` (pending activation
+    /// key `gateway-application-invariants`). The evaluator body lives in
+    /// `crate::invariants::gateway_application`.
+    GatewayApplicationShutdownConverges,
 }
 
 impl Invariant {
@@ -901,6 +926,11 @@ impl Invariant {
             Self::VmReclamationIdempotentSteadyState => "vm-reclamation-idempotent-steady-state",
             Self::VmReclamationConverges => "vm-reclamation-converges",
             Self::EndingInFlightIsNeverReclaimed => "ending-in-flight-is-never-reclaimed",
+            // public-ingress-gateway (ADR-0222); pending, outside `ALL`.
+            Self::GatewayApplicationGenerationLifecycleIsSafe => {
+                "gateway-application-generation-lifecycle-is-safe"
+            }
+            Self::GatewayApplicationShutdownConverges => "gateway-application-shutdown-converges",
         }
     }
 }

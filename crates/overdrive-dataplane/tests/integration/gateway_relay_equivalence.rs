@@ -349,7 +349,9 @@ async fn run_acts(
                         complete_within: None,
                         complete_by: None,
                     };
-                    let r = relay.read_through(src, HeadTerminator::HeaderBlockEnd, nzu(*limit), deadlines).await;
+                    let r = relay
+                        .read_through(src, HeadTerminator::HeaderBlockEnd, nzu(*limit), deadlines)
+                        .await;
                     format!("{:?}", r.map(|t| String::from_utf8_lossy(t.as_slice()).into_owned()))
                 }
                 Act::RelayExact { len, no_progress } => {
@@ -374,7 +376,10 @@ async fn run_acts(
                     format!("{:?}", relay.discard_remaining(src, nz64(*max), deadlines).await)
                 }
                 Act::WriteAll(bytes) => {
-                    format!("{:?}", relay.write_all(dst, bytes, now() + Duration::from_secs(10)).await)
+                    format!(
+                        "{:?}",
+                        relay.write_all(dst, bytes, now() + Duration::from_secs(10)).await
+                    )
                 }
                 Act::CloseWrite => {
                     format!("{:?}", relay.close_write(dst, now() + Duration::from_secs(10)).await)
@@ -425,8 +430,7 @@ async fn run_host(case: &Case) -> Outcome {
     let mut rig = Rig::new(Offer::Aes128).await;
     let source_peer = rig.public.peer.clone();
     let player = play_peer(source_peer, case.peer.clone());
-    let dest_reader =
-        (case.dest == Dest::Reading).then(|| Drain::start(&rig.upstream.peer, true));
+    let dest_reader = (case.dest == Dest::Reading).then(|| Drain::start(&rig.upstream.peer, true));
 
     let Rig { relay, public, upstream } = &mut rig;
     let results = run_acts(
@@ -495,7 +499,10 @@ async fn run_sim(case: &Case) -> Outcome {
     let clock = Arc::new(SimClock::new());
     let relay = Arc::new(SimGatewayRelay::new(Arc::clone(&clock) as Arc<dyn Clock>));
     let sni: PublicHostname = "api.example.com".parse().expect("SNI");
-    relay.script_public_connection(PublicLegScript { sni: sni.clone(), inbound: to_script(&case.peer, false) });
+    relay.script_public_connection(PublicLegScript {
+        sni: sni.clone(),
+        inbound: to_script(&case.peer, false),
+    });
     relay.script_public_connection(PublicLegScript {
         sni,
         inbound: to_script(&[], case.dest == Dest::Stalled),
@@ -503,8 +510,10 @@ async fn run_sim(case: &Case) -> Outcome {
     let (src_fd, _src_client) = socket_pair_fd();
     let (dst_fd, _dst_client) = socket_pair_fd();
     let deadline = clock.now() + Duration::from_secs(10);
-    let src_leg = relay.accept_public(src_fd, server_config(), deadline).await.expect("Sim source leg");
-    let dst_leg = relay.accept_public(dst_fd, server_config(), deadline).await.expect("Sim destination leg");
+    let src_leg =
+        relay.accept_public(src_fd, server_config(), deadline).await.expect("Sim source leg");
+    let dst_leg =
+        relay.accept_public(dst_fd, server_config(), deadline).await.expect("Sim destination leg");
     let (mut src_read, _src_write) = src_leg.leg.into_halves();
     let (_dst_read, mut dst_write) = dst_leg.leg.into_halves();
 
@@ -540,8 +549,14 @@ async fn assert_equivalent(name: &str) {
     };
     let host = run_host(&case).await;
     let sim = run_sim(&case).await;
-    assert_eq!(host.results, expected.results, "{name}: HostGatewayRelay results against the literal oracle");
-    assert_eq!(sim.results, expected.results, "{name}: SimGatewayRelay results against the literal oracle");
+    assert_eq!(
+        host.results, expected.results,
+        "{name}: HostGatewayRelay results against the literal oracle"
+    );
+    assert_eq!(
+        sim.results, expected.results,
+        "{name}: SimGatewayRelay results against the literal oracle"
+    );
     assert_eq!(host.results, sim.results, "{name}: Host and Sim return the same results");
     if case.delivered.is_some() {
         assert_eq!(host.delivered, expected.delivered, "{name}: Host destination octets");

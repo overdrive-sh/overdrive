@@ -1069,3 +1069,51 @@ fn aggregate_to_cli_error(err: AggregateError) -> CliError {
         }
     }
 }
+
+/// Typed output of [`deploy_resource`]: the workload outputs unchanged, or the
+/// one-shot Route outcome.
+#[derive(Debug, Clone)]
+pub enum DeployResourceOutput {
+    /// A workload document submitted on the `--detach` lane.
+    WorkloadDetached(DeployOutput),
+    /// A workload document submitted on the streaming lane.
+    WorkloadStreaming(DeployStreamingOutput),
+    /// A Route document: one-shot `POST /v1/routes`, no stream.
+    Route(RouteDeployOutput),
+}
+
+/// Typed output of a successful Route deploy.
+#[derive(Debug, Clone)]
+pub struct RouteDeployOutput {
+    /// Route ID echoed by the server.
+    pub route_id: String,
+    /// Canonical generation of the applied Route.
+    pub route_generation: String,
+    /// `Declared`, `Replaced` or `Unchanged`.
+    pub outcome: overdrive_core::public_ingress::RouteApplyOutcome,
+    /// Endpoint the POST was issued to.
+    pub endpoint: Url,
+}
+
+/// Deploy one document, workload or Route.
+///
+/// Parses once, then dispatches a workload document to [`deploy`] /
+/// [`deploy_streaming`] unchanged, or a `[route]` document to the one-shot
+/// Route POST (`--detach` has no further effect on a Route).
+///
+/// # Errors
+///
+/// See [`CliError`] variants.
+#[allow(
+    clippy::todo,
+    clippy::unused_async,
+    clippy::needless_pass_by_value,
+    reason = "public-ingress DISTILL scaffold: the document discrimination is DELIVER's"
+)]
+pub async fn deploy_resource(
+    args: DeployArgs,
+    stream_workloads: bool,
+) -> Result<DeployResourceOutput, CliError> {
+    let _ = (&args, stream_workloads);
+    todo!("SCAFFOLD: deploy_resource")
+}

@@ -1,0 +1,11 @@
+[route]
+id = "public-api"
+hostname = "__PUBLIC_HOSTNAME__"
+path = "/"
+path_match = "segment_prefix"
+certified_key = "api-origin"
+
+[route.target]
+service = "api"
+port = 8080
+protocol = "tcp"

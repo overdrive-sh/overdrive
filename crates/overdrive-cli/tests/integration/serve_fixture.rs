@@ -84,7 +84,16 @@ pub struct VmPorts {
 /// `ServeArgs` for an in-process test `serve`: the requested bind, the two
 /// directories, and kernel-assigned vsock listener ports (PORTS-CONFIG).
 pub const fn serve_args(bind: SocketAddr, data_dir: PathBuf, config_dir: PathBuf) -> ServeArgs {
-    ServeArgs { bind, data_dir, config_dir, vsock_ports: NodeVsockPortConfig::kernel_assigned() }
+    ServeArgs {
+        bind,
+        data_dir,
+        config_dir,
+        vsock_ports: NodeVsockPortConfig::kernel_assigned(),
+        gateway_address: None,
+        gateway_certified_key_id: None,
+        gateway_certificate_chain: None,
+        gateway_private_key: None,
+    }
 }
 
 /// Boots `serve` with `dataplane` and the host VM ports (`Optional`

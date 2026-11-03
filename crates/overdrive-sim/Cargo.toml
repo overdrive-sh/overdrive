@@ -79,6 +79,11 @@ overdrive-worker.path = "../overdrive-worker"
 # `overdrive-core` and `overdrive-host`; its own dev-dependency on this crate is
 # the same dev-cycle shape `overdrive-core` carries.
 overdrive-gateway.path = "../overdrive-gateway"
+# The Gateway Application lifecycle evaluators compose the pinned
+# `UnboundGatewayBuilder::new`, whose `key_codec` parameter names
+# `overdrive_host::ca::PublicCertifiedKeyAeadCodec` (a host type with no Sim
+# twin in the DESIGN); the evaluators supply it over a `SimKek`.
+overdrive-host.path = "../overdrive-host"
 rustls.workspace = true
 ciborium.workspace       = true
 serde.workspace          = true

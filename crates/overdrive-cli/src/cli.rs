@@ -88,6 +88,23 @@ pub enum Command {
         /// `dirs::data_dir()/overdrive` per ADR-0013 §5.
         #[arg(long)]
         data_dir: Option<std::path::PathBuf>,
+        /// Public-ingress gateway: the host IPv4 address the fixed TCP/443
+        /// listener binds. All four `--gateway-*` arguments are absent or all
+        /// present.
+        #[arg(long = "gateway-address", value_name = "IPV4")]
+        gateway_address: Option<std::net::Ipv4Addr>,
+        /// Public-ingress gateway: the certified-key identity the manual
+        /// source installs.
+        #[arg(long = "gateway-certified-key-id", value_name = "ID")]
+        gateway_certified_key_id: Option<overdrive_core::id::PublicCertifiedKeyId>,
+        /// Public-ingress gateway: the host-local leaf-first PEM certificate
+        /// chain file.
+        #[arg(long = "gateway-certificate-chain", value_name = "PATH")]
+        gateway_certificate_chain: Option<std::path::PathBuf>,
+        /// Public-ingress gateway: the host-local file holding exactly one
+        /// PKCS#8 private key.
+        #[arg(long = "gateway-private-key", value_name = "PATH")]
+        gateway_private_key: Option<std::path::PathBuf>,
     },
 }
 

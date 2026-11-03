@@ -57,7 +57,7 @@ are stale configuration and are rejected):
 Outer invocation: `cargo xtask metal run -- verification/harness/run-expectation.sh E15`
 (native x86_64 KVM host, uid 0, fail closed on the substrate probes).
 
-The runner (to be authored with the example; see "Runner contract") must, in order:
+The checked-in `runner.sh` (see "Runner contract") does, in order:
 
 1. Require the harness-captured clean HEAD (`EXPECTATION_SOURCE_SHA`, `EXPECTATION_SOURCE_DIRTY=false`), run exactly
    `cargo xtask bpf-build`, record the object path and SHA-256, then build
@@ -84,10 +84,12 @@ The expectation is **refuted** (not merely incomplete) by any of:
 
 A capture that is narrated rather than executed, or whose runner was not the checked-in one, cannot support `satisfied`.
 
-## Runner contract (to be authored in the delivery of the example)
+## Runner contract
 
-`runner.sh` does not exist yet and no evidence exists; the harness reports `pending` until it does. It must not
-import or link any `overdrive-*` crate, must not hand-program a map, rule, Route, snapshot or identity, and must
+`runner.sh` is checked in; it has never been run and no evidence exists, so the status stays `pending`. Exit 75
+(inputs unset) is reported by the harness as pending. The runner samples `ss -tni` and `/proc/net/tls_stat` by
+polling for the life of the example (the example takes no pause hook), so the samples are observations of a polled
+system, not a complete history. It must not import or link any `overdrive-*` crate, must not hand-program a map, rule, Route, snapshot or identity, and must
 append (never overwrite) every observation. Exit 75 means "pending" per the harness; any other nonzero exit is data.
 The capture is a single point-in-time event pinned to its SHA by the harness; a different reviewer decides
 `satisfied` after reading the saved output. Per `.claude/rules/verification.md` this is not a regression test; the

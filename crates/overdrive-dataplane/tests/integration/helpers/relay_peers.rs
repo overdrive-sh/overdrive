@@ -113,7 +113,8 @@ pub struct Lcg(pub u64);
 
 impl Lcg {
     pub fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        self.0 =
+            self.0.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
         self.0 >> 33
     }
     /// Uniform-ish in `lo..=hi`.
@@ -213,7 +214,10 @@ fn cert() -> (CertificateDer<'static>, PrivateKeyDer<'static>) {
             .expect("server certificate");
         (cert.der().to_vec(), key.serialize_der())
     });
-    (CertificateDer::from(cert.clone()), PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key.clone())))
+    (
+        CertificateDer::from(cert.clone()),
+        PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key.clone())),
+    )
 }
 
 fn provider(offer: Offer) -> Arc<rustls::crypto::CryptoProvider> {
@@ -403,13 +407,19 @@ fn handshake_client(
 
 fn ulp_tls(fd: RawFd) -> io::Result<()> {
     // SAFETY: setsockopt with a 3-byte "tls" string on a connected TCP socket.
-    let rc = unsafe { libc::setsockopt(fd, libc::SOL_TCP, libc::TCP_ULP, c"tls".as_ptr().cast(), 3) };
+    let rc =
+        unsafe { libc::setsockopt(fd, libc::SOL_TCP, libc::TCP_ULP, c"tls".as_ptr().cast(), 3) };
     if rc == 0 { Ok(()) } else { Err(io::Error::last_os_error()) }
 }
 
 /// `setsockopt(SOL_TLS, dir)` with the `tls12_crypto_info_aes_gcm_{128,256}` layout.
 /// Used to arm and to re-arm (rekey).
-fn set_crypto(fd: RawFd, dir: libc::c_int, seq: u64, traffic: &ConnectionTrafficSecrets) -> io::Result<()> {
+fn set_crypto(
+    fd: RawFd,
+    dir: libc::c_int,
+    seq: u64,
+    traffic: &ConnectionTrafficSecrets,
+) -> io::Result<()> {
     let (cipher, key, iv): (u16, &[u8], &[u8]) = match traffic {
         ConnectionTrafficSecrets::Aes128Gcm { key, iv } => (51, key.as_ref(), iv.as_ref()),
         ConnectionTrafficSecrets::Aes256Gcm { key, iv } => (52, key.as_ref(), iv.as_ref()),
@@ -424,7 +434,13 @@ fn set_crypto(fd: RawFd, dir: libc::c_int, seq: u64, traffic: &ConnectionTraffic
     info.extend_from_slice(&seq.to_be_bytes());
     // SAFETY: `info` holds a complete crypto_info of the stated length.
     let rc = unsafe {
-        libc::setsockopt(fd, libc::SOL_TLS, dir, info.as_ptr().cast(), info.len() as libc::socklen_t)
+        libc::setsockopt(
+            fd,
+            libc::SOL_TLS,
+            dir,
+            info.as_ptr().cast(),
+            info.len() as libc::socklen_t,
+        )
     };
     if rc == 0 { Ok(()) } else { Err(io::Error::last_os_error()) }
 }
@@ -453,7 +469,10 @@ pub fn recv_record(fd: RawFd, buf: &mut [u8], flags: i32) -> io::Result<(u8, usi
         // SAFETY: CMSG_* walk the control buffer the kernel just filled.
         unsafe {
             let c = libc::CMSG_FIRSTHDR(&raw const msg);
-            if !c.is_null() && (*c).cmsg_level == libc::SOL_TLS && (*c).cmsg_type == TLS_GET_RECORD_TYPE {
+            if !c.is_null()
+                && (*c).cmsg_level == libc::SOL_TLS
+                && (*c).cmsg_type == TLS_GET_RECORD_TYPE
+            {
                 record = *libc::CMSG_DATA(c);
             }
         }
@@ -529,7 +548,11 @@ pub struct KtlsPeer {
 impl KtlsPeer {
     /// Connects to `addr`, completes a real rustls handshake offering `config`,
     /// and arms kernel TLS on the peer's socket.
-    pub fn connect(addr: SocketAddr, config: Arc<ClientConfig>, name: ServerName<'static>) -> io::Result<Self> {
+    pub fn connect(
+        addr: SocketAddr,
+        config: Arc<ClientConfig>,
+        name: ServerName<'static>,
+    ) -> io::Result<Self> {
         let mut tcp = TcpStream::connect(addr)?;
         tcp.set_nodelay(true)?;
         let (secrets, kc) = handshake_client(&mut tcp, config, name)?;
@@ -760,7 +783,9 @@ impl KtlsPeer {
                 }
                 Received::Handled => {}
                 Received::CloseNotify => return Ok(out),
-                other => return Err(io::Error::other(format!("ended without close_notify: {other:?}"))),
+                other => {
+                    return Err(io::Error::other(format!("ended without close_notify: {other:?}")));
+                }
             }
         }
     }
@@ -775,7 +800,9 @@ impl KtlsPeer {
             match self.recv(&mut buf[..want])? {
                 Received::Data(n) => {
                     if let Some(at) = first_pattern_mismatch(offset + done, &buf[..n]) {
-                        return Err(io::Error::other(format!("pattern mismatch at stream offset {at}")));
+                        return Err(io::Error::other(format!(
+                            "pattern mismatch at stream offset {at}"
+                        )));
                     }
                     done += n;
                 }
@@ -793,7 +820,9 @@ fn sockopt_usize(fd: RawFd, name: libc::c_int) -> usize {
     let mut value: libc::c_int = 0;
     let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
     // SAFETY: getsockopt into a live c_int of the stated length.
-    let rc = unsafe { libc::getsockopt(fd, libc::SOL_SOCKET, name, (&raw mut value).cast(), &raw mut len) };
+    let rc = unsafe {
+        libc::getsockopt(fd, libc::SOL_SOCKET, name, (&raw mut value).cast(), &raw mut len)
+    };
     assert_eq!(rc, 0, "getsockopt: {}", io::Error::last_os_error());
     value as usize
 }
@@ -888,7 +917,11 @@ impl Drain {
 
 /// Feeds `data` to `peer` from its own thread; the join handle yields the send result.
 #[must_use]
-pub fn send_in_background(peer: &KtlsPeer, data: Vec<u8>, sizes: Vec<usize>) -> std::thread::JoinHandle<io::Result<()>> {
+pub fn send_in_background(
+    peer: &KtlsPeer,
+    data: Vec<u8>,
+    sizes: Vec<usize>,
+) -> std::thread::JoinHandle<io::Result<()>> {
     let peer = peer.clone();
     std::thread::spawn(move || peer.send_in_records(&data, &sizes))
 }
@@ -940,7 +973,11 @@ pub fn in_secs(secs: u64) -> Instant {
 /// `ReadDeadlines` for a read that must start and finish within `secs`.
 #[must_use]
 pub fn read_within(secs: u64) -> ReadDeadlines {
-    ReadDeadlines { first_octet: in_secs(secs), complete_within: None, complete_by: Some(in_secs(secs)) }
+    ReadDeadlines {
+        first_octet: in_secs(secs),
+        complete_within: None,
+        complete_by: Some(in_secs(secs)),
+    }
 }
 
 /// `RelayDeadlines` with the given absolute bound and no-progress window.
@@ -989,7 +1026,8 @@ pub async fn accept_leg_with(
 ) -> Result<Leg, PublicHandshakeError> {
     let (fd, peer) = accept_with(move |addr| KtlsPeer::connect(addr, config, name));
     let accepted = relay.accept_public(fd, server_config(), in_secs(10)).await;
-    let peer = tokio::task::spawn_blocking(move || peer.join().expect("peer thread")).await.expect("join");
+    let peer =
+        tokio::task::spawn_blocking(move || peer.join().expect("peer thread")).await.expect("join");
     let accepted = accepted?;
     let peer = peer.expect("peer completed the handshake the relay accepted");
     let (read, write) = accepted.leg.into_halves();
@@ -1005,7 +1043,8 @@ pub async fn accept_raw<T: Send + 'static>(
 ) -> (Result<overdrive_gateway::ports::AcceptedPublicLeg, PublicHandshakeError>, T) {
     let (fd, peer) = accept_with(connect);
     let accepted = relay.accept_public(fd, server_config(), deadline).await;
-    let peer = tokio::task::spawn_blocking(move || peer.join().expect("peer thread")).await.expect("join");
+    let peer =
+        tokio::task::spawn_blocking(move || peer.join().expect("peer thread")).await.expect("join");
     (accepted, peer)
 }
 

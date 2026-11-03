@@ -736,6 +736,16 @@ impl Harness {
             Invariant::EndingInFlightIsNeverReclaimed => {
                 crate::invariants::vm_reclamation::evaluate_ending_in_flight_is_never_reclaimed()
             }
+            // public-ingress-gateway (ADR-0222): reachable only through
+            // `Harness::only(..)`; neither variant is in `Invariant::ALL` until the
+            // pending activation key `gateway-application-invariants`.
+            Invariant::GatewayApplicationGenerationLifecycleIsSafe => {
+                crate::invariants::gateway_application::evaluate_generation_lifecycle_is_safe(seed)
+                    .await
+            }
+            Invariant::GatewayApplicationShutdownConverges => {
+                crate::invariants::gateway_application::evaluate_shutdown_converges(seed).await
+            }
         }
     }
 }

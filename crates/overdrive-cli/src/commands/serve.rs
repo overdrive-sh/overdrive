@@ -11,7 +11,7 @@
 //! status — is owned by [`crate::commands::serve_lifetime`], which `main.rs`
 //! runs over the returned [`ServeHandle`].
 
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,7 +21,9 @@ use overdrive_control_plane::node_adapters::NodeAdapters;
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::guest_network::ServeShutdownRequest;
 use overdrive_core::guest_transport::NodeVsockPortConfig;
+use overdrive_core::id::PublicCertifiedKeyId;
 use overdrive_core::traits::cgroup_fs::CgroupFs;
+use overdrive_gateway::{GatewayConfig, GatewayConfigError};
 use overdrive_host::RealCgroupFs;
 use url::Url;
 
@@ -56,6 +58,38 @@ pub struct ServeArgs {
     /// `NodeVsockPortConfig::kernel_assigned()` and reads the bound ports
     /// back from the server.
     pub vsock_ports: NodeVsockPortConfig,
+    /// Public-ingress gateway bind address (`--gateway-address`). The four
+    /// gateway fields are all `None` (gateway disabled) or all `Some`.
+    pub gateway_address: Option<Ipv4Addr>,
+    /// Public-ingress gateway certified-key identity
+    /// (`--gateway-certified-key-id`).
+    pub gateway_certified_key_id: Option<PublicCertifiedKeyId>,
+    /// Host-local leaf-first PEM certificate chain
+    /// (`--gateway-certificate-chain`).
+    pub gateway_certificate_chain: Option<PathBuf>,
+    /// Host-local PKCS#8 private-key file (`--gateway-private-key`).
+    pub gateway_private_key: Option<PathBuf>,
+}
+
+impl ServeArgs {
+    /// Project the four gateway arguments onto the all-or-none gateway
+    /// enablement: `Ok(None)` when all four are absent, `Ok(Some(..))` when
+    /// all four are present, and `Err(PartialEnablement { missing })` for every
+    /// other combination, `missing` listed in `Address, CertifiedKeyId,
+    /// CertificateChainPath, PrivateKeyPath` order.
+    ///
+    /// # Errors
+    ///
+    /// [`GatewayConfigError::PartialEnablement`] for a partial set.
+    #[allow(
+        clippy::todo,
+        clippy::unused_self,
+        clippy::missing_const_for_fn,
+        reason = "public-ingress DISTILL scaffold: the enablement truth table is DELIVER's"
+    )]
+    pub fn gateway_config(&self) -> Result<Option<GatewayConfig>, GatewayConfigError> {
+        todo!("SCAFFOLD: ServeArgs::gateway_config")
+    }
 }
 
 /// Handle to a running control-plane server, owned by the CLI layer.

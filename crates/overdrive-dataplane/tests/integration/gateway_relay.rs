@@ -262,7 +262,8 @@ async fn exchange(rig: &mut Rig, request: Vec<u8>, response: Vec<u8>) {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "pending DELIVER kernel-relay-host-adapter"]
-async fn body_octets_are_exact_at_both_peers_across_keep_alive_exchanges_around_the_pipe_capacity() {
+async fn body_octets_are_exact_at_both_peers_across_keep_alive_exchanges_around_the_pipe_capacity()
+{
     let lengths = [
         PIPE_CAPACITY - 1,
         PIPE_CAPACITY,
@@ -286,7 +287,8 @@ async fn body_octets_are_exact_at_both_peers_across_keep_alive_exchanges_around_
             both_requests.extend_from_slice(&request_2);
             let mut both_responses = response_1.clone();
             both_responses.extend_from_slice(&response_2);
-            let sender = send_in_background(&rig.public.peer, both_requests, STRADDLING_RECORDS.to_vec());
+            let sender =
+                send_in_background(&rig.public.peer, both_requests, STRADDLING_RECORDS.to_vec());
             let receiver = expect_exact(&rig.public.peer, both_responses);
 
             exchange(&mut rig, request_1, response_1).await;
@@ -301,7 +303,11 @@ async fn body_octets_are_exact_at_both_peers_across_keep_alive_exchanges_around_
                 rig.upstream.peer.recv_sizes().iter().take(8).collect::<Vec<_>>()
             );
             drop(rig);
-            assert_eq!(settle_fds(fds_start).await, fds_start, "every socket and pipe was released (len {len})");
+            assert_eq!(
+                settle_fds(fds_start).await,
+                fds_start,
+                "every socket and pipe was released (len {len})"
+            );
         }
     }
 }
@@ -412,7 +418,9 @@ async fn peer_key_update_leaves_octets_exact_and_is_never_forwarded_or_originate
                     for segment in segments {
                         match segment {
                             Segment::Bytes(b) => client.send(&b)?,
-                            Segment::KeyUpdate { requested } => client.send_key_update(requested)?,
+                            Segment::KeyUpdate { requested } => {
+                                client.send_key_update(requested)?
+                            }
                         }
                     }
                     Ok(())
@@ -433,10 +441,26 @@ async fn peer_key_update_leaves_octets_exact_and_is_never_forwarded_or_originate
                 }
                 let after = TlsStat::read();
                 let r = i64::from(requested);
-                assert_eq!(after.delta(&before, "TlsDecryptError"), 0, "{position:?} requested={requested}");
-                assert_eq!(after.delta(&before, "TlsRxRekeyReceived"), 1 + r, "{position:?} requested={requested}");
-                assert_eq!(after.delta(&before, "TlsRxRekeyOk"), 1 + r, "{position:?} requested={requested}");
-                assert_eq!(after.delta(&before, "TlsTxRekeyOk"), 1 + r, "{position:?} requested={requested}");
+                assert_eq!(
+                    after.delta(&before, "TlsDecryptError"),
+                    0,
+                    "{position:?} requested={requested}"
+                );
+                assert_eq!(
+                    after.delta(&before, "TlsRxRekeyReceived"),
+                    1 + r,
+                    "{position:?} requested={requested}"
+                );
+                assert_eq!(
+                    after.delta(&before, "TlsRxRekeyOk"),
+                    1 + r,
+                    "{position:?} requested={requested}"
+                );
+                assert_eq!(
+                    after.delta(&before, "TlsTxRekeyOk"),
+                    1 + r,
+                    "{position:?} requested={requested}"
+                );
                 assert_eq!(
                     rig.upstream.peer.key_updates_received(),
                     0,
@@ -535,7 +559,9 @@ async fn key_update_request_during_a_large_splice_out_never_tears_the_record_str
                     std::thread::sleep(Duration::from_millis(10));
                 }
                 Received::Handled => {}
-                other => return Err(io::Error::other(format!("unexpected end {other:?} at {got}"))),
+                other => {
+                    return Err(io::Error::other(format!("unexpected end {other:?} at {got}")));
+                }
             }
         }
         Ok((begin.elapsed(), got as u64))
@@ -543,14 +569,30 @@ async fn key_update_request_during_a_large_splice_out_never_tears_the_record_str
 
     let Rig { relay, public, upstream } = &mut rig;
     let (moved, head) = tokio::join!(
-        relay.relay_exact(&mut upstream.read, &mut public.write, nz64(TOTAL as u64), relay_within(120, Duration::from_secs(30))),
-        relay.read_through(&mut public.read, HeadTerminator::HeaderBlockEnd, nzu(HEAD_LIMIT), read_within(120)),
+        relay.relay_exact(
+            &mut upstream.read,
+            &mut public.write,
+            nz64(TOTAL as u64),
+            relay_within(120, Duration::from_secs(30))
+        ),
+        relay.read_through(
+            &mut public.read,
+            HeadTerminator::HeaderBlockEnd,
+            nzu(HEAD_LIMIT),
+            read_within(120)
+        ),
     );
     moved.expect("the 64 MiB splice-out completed");
     let head = head.expect("the request head after the KeyUpdate arrived");
-    assert_eq!(head.as_slice(), next_head.as_slice(), "the request head sent after the KeyUpdate is exact");
+    assert_eq!(
+        head.as_slice(),
+        next_head.as_slice(),
+        "the request head sent after the KeyUpdate is exact"
+    );
 
-    let (client_elapsed, client_got) = blocking(move || client_task.join().expect("client thread")).await.expect("client decrypted every octet");
+    let (client_elapsed, client_got) = blocking(move || client_task.join().expect("client thread"))
+        .await
+        .expect("client decrypted every octet");
     joined(origin_task, "origin streamed 64 MiB").await;
     assert_eq!(client_got, TOTAL as u64);
     assert!(
@@ -585,7 +627,12 @@ async fn close_notify_is_typed_by_where_it_falls_in_the_message() {
     });
     let Rig { relay, public, .. } = &mut rig;
     let result = relay
-        .read_through(&mut public.read, HeadTerminator::HeaderBlockEnd, nzu(HEAD_LIMIT), read_within(10))
+        .read_through(
+            &mut public.read,
+            HeadTerminator::HeaderBlockEnd,
+            nzu(HEAD_LIMIT),
+            read_within(10),
+        )
         .await;
     joined(sender, "mid-head sender").await;
     assert_eq!(result.err(), Some(LegReadError::Truncated), "close_notify inside a head");
@@ -599,7 +646,12 @@ async fn close_notify_is_typed_by_where_it_falls_in_the_message() {
     });
     let Rig { relay, public, upstream } = &mut rig;
     let result = relay
-        .relay_exact(&mut upstream.read, &mut public.write, nz64(1_000), relay_within(10, Duration::from_secs(5)))
+        .relay_exact(
+            &mut upstream.read,
+            &mut public.write,
+            nz64(1_000),
+            relay_within(10, Duration::from_secs(5)),
+        )
         .await;
     joined(sender, "mid-body sender").await;
     assert_eq!(
@@ -622,7 +674,12 @@ async fn close_notify_is_typed_by_where_it_falls_in_the_message() {
     let Rig { relay, public, upstream } = &mut rig;
     relay_message(relay, &mut public.read, &mut upstream.write).await;
     let result = relay
-        .read_through(&mut public.read, HeadTerminator::HeaderBlockEnd, nzu(HEAD_LIMIT), read_within(10))
+        .read_through(
+            &mut public.read,
+            HeadTerminator::HeaderBlockEnd,
+            nzu(HEAD_LIMIT),
+            read_within(10),
+        )
         .await;
     joined(sender, "boundary sender").await;
     joined(origin_task, "origin received the whole message").await;
@@ -687,7 +744,11 @@ async fn upstream_half_answers_injected_key_updates_and_originates_none() {
 
     let after = TlsStat::read();
     assert_eq!(after.delta(&before, "TlsDecryptError"), 0);
-    assert_eq!(rig.upstream.peer.key_updates_received(), 3, "one answer per requesting update, none originated");
+    assert_eq!(
+        rig.upstream.peer.key_updates_received(),
+        3,
+        "one answer per requesting update, none originated"
+    );
     assert_eq!(rig.public.peer.key_updates_received(), 0, "no KeyUpdate reaches the client");
     drop(origin_reader);
 }
@@ -729,7 +790,11 @@ async fn a_connection_waiting_for_its_next_request_holds_no_pipe_descriptor() {
         relay_message(relay, &mut public.read, &mut upstream.write).await;
         joined(origin_task, "origin received the first message").await;
         let holding = open_fds();
-        assert_eq!(holding, baseline + 2, "the receive half's pipe is two descriptors (chunked={chunked})");
+        assert_eq!(
+            holding,
+            baseline + 2,
+            "the receive half's pipe is two descriptors (chunked={chunked})"
+        );
 
         // The next head read begins; the pipe is released before any octet of it arrives.
         let released = async {
@@ -741,9 +806,13 @@ async fn a_connection_waiting_for_its_next_request_holds_no_pipe_descriptor() {
             gate_tx.send(()).expect("release the client");
             now
         };
-        let (second, fds_while_waiting) = tokio::join!(read_head(relay, &mut public.read), released);
+        let (second, fds_while_waiting) =
+            tokio::join!(read_head(relay, &mut public.read), released);
         assert_eq!(second.as_slice(), next.as_slice());
-        assert_eq!(fds_while_waiting, baseline, "waiting for the next head holds no pipe (chunked={chunked})");
+        assert_eq!(
+            fds_while_waiting, baseline,
+            "waiting for the next head holds no pipe (chunked={chunked})"
+        );
         joined(client_task, "client").await;
     }
 }
@@ -784,7 +853,12 @@ async fn a_stalled_reader_freezes_the_sender_within_the_socket_buffers_and_memor
 
     let Rig { relay, public, upstream } = &mut rig;
     relay
-        .relay_exact(&mut upstream.read, &mut public.write, nz64(TOTAL as u64), relay_within(120, Duration::from_secs(10)))
+        .relay_exact(
+            &mut upstream.read,
+            &mut public.write,
+            nz64(TOTAL as u64),
+            relay_within(120, Duration::from_secs(10)),
+        )
         .await
         .expect("the stream completes once the reader resumes");
     let (at_1s, at_3s, rss_growth_kib) = sample_rx.recv().expect("stall samples");
@@ -793,9 +867,13 @@ async fn a_stalled_reader_freezes_the_sender_within_the_socket_buffers_and_memor
 
     // Two hops, each bounded by the sender's wmem ceiling plus the receiver's rmem
     // ceiling, plus the two relay pipes.
-    let bound = 2 * (tcp_buffer_ceiling("tcp_wmem") + tcp_buffer_ceiling("tcp_rmem")) + 2 * PIPE_CAPACITY as u64;
+    let bound = 2 * (tcp_buffer_ceiling("tcp_wmem") + tcp_buffer_ceiling("tcp_rmem"))
+        + 2 * PIPE_CAPACITY as u64;
     assert_eq!(at_1s, at_3s, "the sender is frozen while the reader is stalled");
-    assert!(at_3s <= 1024 * 1024 + bound, "in-flight octets {at_3s} stay within the buffers ({bound})");
+    assert!(
+        at_3s <= 1024 * 1024 + bound,
+        "in-flight octets {at_3s} stay within the buffers ({bound})"
+    );
     assert!(rss_growth_kib <= 4 * 1024, "resident set grew {rss_growth_kib} KiB while stalled");
 }
 
@@ -817,7 +895,12 @@ async fn a_stalled_body_ends_at_the_no_progress_window() {
     let Rig { relay, public, upstream } = &mut rig;
     let begin = Instant::now();
     let result = relay
-        .relay_exact(&mut upstream.read, &mut public.write, nz64(4 * 1024 * 1024), relay_within(30, Duration::from_secs(2)))
+        .relay_exact(
+            &mut upstream.read,
+            &mut public.write,
+            nz64(4 * 1024 * 1024),
+            relay_within(30, Duration::from_secs(2)),
+        )
         .await;
     let elapsed = begin.elapsed();
     joined(sender, "stalling origin").await;
@@ -866,7 +949,12 @@ async fn a_trickled_response_reaches_the_client_piece_by_piece() {
     });
     let Rig { relay, public, upstream } = &mut rig;
     relay
-        .relay_exact(&mut upstream.read, &mut public.write, nz64(PIECES as u64), relay_within(60, Duration::from_secs(2)))
+        .relay_exact(
+            &mut upstream.read,
+            &mut public.write,
+            nz64(PIECES as u64),
+            relay_within(60, Duration::from_secs(2)),
+        )
         .await
         .expect("trickled body relayed within the no-progress window");
     joined(sender, "trickling origin").await;
@@ -957,10 +1045,8 @@ extern "C" fn probe_child_entry() {
         report(&format!("PROBE_RESULT unshare failed: {}", io::Error::last_os_error()));
         std::process::exit(3);
     }
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("child runtime");
+    let runtime =
+        tokio::runtime::Builder::new_current_thread().enable_all().build().expect("child runtime");
     let result = runtime.block_on(async {
         let relay = HostGatewayRelay::new(Arc::new(WallClock));
         relay.probe(in_secs(10)).await
@@ -1006,9 +1092,12 @@ async fn honest_kernel_probe_passes_and_an_absent_tls_ulp_is_refused_with_enoent
         "the probe's loopback pair and pipe are released"
     );
 
-    let refcount = std::fs::read_to_string("/sys/module/tls/refcnt").ok().map(|s| s.trim().to_owned());
+    let refcount =
+        std::fs::read_to_string("/sys/module/tls/refcnt").ok().map(|s| s.trim().to_owned());
     if refcount.as_deref() != Some("0") {
-        eprintln!("S-PIG-114: /sys/module/tls refcnt {refcount:?}: only the honest pass is asserted; the lie stays covered by S-PIG-99");
+        eprintln!(
+            "S-PIG-114: /sys/module/tls refcnt {refcount:?}: only the honest pass is asserted; the lie stays covered by S-PIG-99"
+        );
         return;
     }
     let before = open_fds();
@@ -1021,13 +1110,19 @@ async fn honest_kernel_probe_passes_and_an_absent_tls_ulp_is_refused_with_enoent
     }
     let exe = std::env::current_exe().expect("this test binary");
     let output = blocking(move || {
-        std::process::Command::new(exe).env(PROBE_CHILD_ENV, "1").output().expect("re-execute the test binary")
+        std::process::Command::new(exe)
+            .env(PROBE_CHILD_ENV, "1")
+            .output()
+            .expect("re-execute the test binary")
     })
     .await;
     drop(guard);
     let stdout = String::from_utf8_lossy(&output.stdout);
     let line = stdout.lines().find_map(|l| l.strip_prefix("PROBE_RESULT ")).unwrap_or_else(|| {
-        panic!("the child reported no probe result: stdout {stdout:?} stderr {:?}", String::from_utf8_lossy(&output.stderr))
+        panic!(
+            "the child reported no probe result: stdout {stdout:?} stderr {:?}",
+            String::from_utf8_lossy(&output.stderr)
+        )
     });
     let expected = format!(
         "{:?}",
@@ -1101,9 +1196,16 @@ async fn lingering_close_lets_the_client_read_the_response_then_close_notify_not
         relay.write_all(&mut public.write, &response, in_secs(10)).await.expect("response written");
         relay.close_write(&mut public.write, in_secs(10)).await.expect("close_notify sent");
         let dropped = relay
-            .discard_remaining(&mut public.read, nz64(16 * 1024 * 1024), relay_within(30, Duration::from_secs(5)))
+            .discard_remaining(
+                &mut public.read,
+                nz64(16 * 1024 * 1024),
+                relay_within(30, Duration::from_secs(5)),
+            )
             .await;
-        assert!(dropped.is_ok(), "{status} ({why}): the discard ends at the peer's close_notify: {dropped:?}");
+        assert!(
+            dropped.is_ok(),
+            "{status} ({why}): the discard ends at the peer's close_notify: {dropped:?}"
+        );
         joined(reader, &format!("{status}: client read the response then close_notify")).await;
     }
 }
@@ -1128,7 +1230,11 @@ async fn the_discard_ends_at_max_octets_at_the_deadline_and_at_the_no_progress_w
     let Rig { relay, public, .. } = &mut rig;
     relay.close_write(&mut public.write, in_secs(10)).await.expect("close_notify");
     let dropped = relay
-        .discard_remaining(&mut public.read, nz64(1024 * 1024), relay_within(30, Duration::from_secs(5)))
+        .discard_remaining(
+            &mut public.read,
+            nz64(1024 * 1024),
+            relay_within(30, Duration::from_secs(5)),
+        )
         .await
         .expect("the discard ends at max");
     assert!(dropped >= 1024 * 1024, "dropped {dropped} octets up to the cap");
@@ -1139,10 +1245,16 @@ async fn the_discard_ends_at_max_octets_at_the_deadline_and_at_the_no_progress_w
     let Rig { relay, public, .. } = &mut rig;
     let begin = Instant::now();
     let result = relay
-        .discard_remaining(&mut public.read, nz64(1024 * 1024), relay_within(1, Duration::from_secs(30)))
+        .discard_remaining(
+            &mut public.read,
+            nz64(1024 * 1024),
+            relay_within(1, Duration::from_secs(30)),
+        )
         .await;
     assert_eq!(result.err(), Some(LegReadError::Deadline), "ends at the absolute deadline");
-    assert!(begin.elapsed() >= Duration::from_secs(1) && begin.elapsed() < Duration::from_millis(2_500));
+    assert!(
+        begin.elapsed() >= Duration::from_secs(1) && begin.elapsed() < Duration::from_millis(2_500)
+    );
 
     // no-progress: a peer that sent some octets then went quiet.
     let mut rig = Rig::new(Offer::Aes128).await;
@@ -1151,10 +1263,21 @@ async fn the_discard_ends_at_max_octets_at_the_deadline_and_at_the_no_progress_w
     let Rig { relay, public, .. } = &mut rig;
     let begin = Instant::now();
     let result = relay
-        .discard_remaining(&mut public.read, nz64(1024 * 1024), relay_within(30, Duration::from_secs(1)))
+        .discard_remaining(
+            &mut public.read,
+            nz64(1024 * 1024),
+            relay_within(30, Duration::from_secs(1)),
+        )
         .await;
-    assert_eq!(result.err(), Some(LegReadError::Deadline), "a stalled discard ends at the no-progress window");
-    assert!(begin.elapsed() < Duration::from_secs(5), "ended within the no-progress window, not at 30 s");
+    assert_eq!(
+        result.err(),
+        Some(LegReadError::Deadline),
+        "a stalled discard ends at the no-progress window"
+    );
+    assert!(
+        begin.elapsed() < Duration::from_secs(5),
+        "ended within the no-progress window, not at 30 s"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1177,7 +1300,8 @@ async fn the_no_flag_configuration_is_octet_exact_and_never_holds_a_record_open(
     let mut stream = cl.clone();
     stream.extend_from_slice(&chunked);
     stream.extend_from_slice(&next);
-    let client_task = send_in_background(&rig.public.peer, stream.clone(), STRADDLING_RECORDS.to_vec());
+    let client_task =
+        send_in_background(&rig.public.peer, stream.clone(), STRADDLING_RECORDS.to_vec());
     let mut expected_at_origin = cl;
     expected_at_origin.extend_from_slice(&chunked);
     let origin_task = expect_exact(&rig.upstream.peer, expected_at_origin);
@@ -1185,7 +1309,11 @@ async fn the_no_flag_configuration_is_octet_exact_and_never_holds_a_record_open(
     relay_message(relay, &mut public.read, &mut upstream.write).await;
     relay_message(relay, &mut public.read, &mut upstream.write).await;
     let last = read_head(relay, &mut public.read).await;
-    assert_eq!(last.as_slice(), next.as_slice(), "the next head is untouched after the chunked body");
+    assert_eq!(
+        last.as_slice(),
+        next.as_slice(),
+        "the next head is untouched after the chunked body"
+    );
     joined(client_task, "client").await;
     joined(origin_task, "origin").await;
     eprintln!("S-PIG-116 origin receive sizes {:?}", rig.upstream.peer.recv_sizes());
@@ -1202,10 +1330,16 @@ async fn the_no_flag_configuration_is_octet_exact_and_never_holds_a_record_open(
     });
     let client = rig.public.peer.clone();
     client.set_read_timeout(Some(Duration::from_secs(5)));
-    let receiver = std::thread::spawn(move || -> io::Result<()> { client.read_exact_data(10).map(|_| ()) });
+    let receiver =
+        std::thread::spawn(move || -> io::Result<()> { client.read_exact_data(10).map(|_| ()) });
     let Rig { relay, public, upstream } = &mut rig;
     relay
-        .relay_exact(&mut upstream.read, &mut public.write, nz64(10), relay_within(30, Duration::from_secs(2)))
+        .relay_exact(
+            &mut upstream.read,
+            &mut public.write,
+            nz64(10),
+            relay_within(30, Duration::from_secs(2)),
+        )
         .await
         .expect("trickle relayed");
     joined(sender, "trickling origin").await;
@@ -1226,10 +1360,18 @@ async fn the_no_flag_configuration_is_octet_exact_and_never_holds_a_record_open(
 fn the_no_flag_kernel_cites_are_rederived_from_the_pinned_source() {
     // (path, a token that must appear, and the contract item that cites it)
     let cites: [(&str, &str, &str); 4] = [
-        ("net/tls/tls_sw.c", "eor = !(msg->msg_flags & MSG_MORE)", "kTLS closes the record when MSG_MORE is absent"),
+        (
+            "net/tls/tls_sw.c",
+            "eor = !(msg->msg_flags & MSG_MORE)",
+            "kTLS closes the record when MSG_MORE is absent",
+        ),
         ("fs/splice.c", "MSG_MORE", "splice-out sets MSG_MORE only within one call"),
         ("net/tls/tls_sw.c", "tls_sw_splice_read", "one splice-in returns at most one record"),
-        ("net/tls/tls_main.c", "tls_sk_poll", "poll reports no read event while a key update is pending"),
+        (
+            "net/tls/tls_main.c",
+            "tls_sk_poll",
+            "poll reports no read event while a key update is pending",
+        ),
     ];
     let linux = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../vendors/linux");
     assert!(
@@ -1245,7 +1387,11 @@ fn the_no_flag_kernel_cites_are_rederived_from_the_pinned_source() {
             .arg(format!("v7.0:{path}"))
             .output()
             .expect("git runs");
-        assert!(out.status.success(), "git show v7.0:{path}: {}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "git show v7.0:{path}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         let text = String::from_utf8_lossy(&out.stdout);
         let line = text
             .lines()
@@ -1280,7 +1426,12 @@ async fn a_close_delimited_response_ends_cleanly_on_close_notify_and_is_bounded(
     let client_task = expect_exact(&rig.public.peer, pattern(0, BODY));
     let Rig { relay, public, upstream } = &mut rig;
     let moved = relay
-        .relay_to_end(&mut upstream.read, &mut public.write, nz64(16 * 1024 * 1024), relay_within(60, Duration::from_secs(10)))
+        .relay_to_end(
+            &mut upstream.read,
+            &mut public.write,
+            nz64(16 * 1024 * 1024),
+            relay_within(60, Duration::from_secs(10)),
+        )
         .await
         .expect("the close-delimited body ends cleanly");
     joined(sender, "origin").await;
@@ -1297,7 +1448,12 @@ async fn a_close_delimited_response_ends_cleanly_on_close_notify_and_is_bounded(
     let drain = Drain::start(&rig.public.peer, false);
     let Rig { relay, public, upstream } = &mut rig;
     let result = relay
-        .relay_to_end(&mut upstream.read, &mut public.write, nz64(100_000), relay_within(60, Duration::from_secs(10)))
+        .relay_to_end(
+            &mut upstream.read,
+            &mut public.write,
+            nz64(100_000),
+            relay_within(60, Duration::from_secs(10)),
+        )
         .await;
     let _ = sender.join();
     assert_eq!(result.err(), Some(RelayError::LimitExceeded { max: 100_000 }));
@@ -1331,14 +1487,23 @@ async fn both_aes_suites_relay_exact_and_a_chacha_only_client_is_refused_before_
 
     let relay = host_relay();
     let before = TlsStat::read();
-    let refused = accept_leg_with(relay.as_ref(), client_config(Offer::ChaChaOnly, &[b"http/1.1"]), sni_name()).await;
+    let refused = accept_leg_with(
+        relay.as_ref(),
+        client_config(Offer::ChaChaOnly, &[b"http/1.1"]),
+        sni_name(),
+    )
+    .await;
     assert!(
         matches!(refused.err(), Some(PublicHandshakeError::Tls { .. })),
         "a ChaCha-only client is refused with a TLS error"
     );
     let after = TlsStat::read();
     for counter in ["TlsCurrTxSw", "TlsCurrRxSw", "TlsTxSw", "TlsRxSw"] {
-        assert_eq!(after.delta(&before, counter), 0, "{counter}: nothing was armed for the refused client");
+        assert_eq!(
+            after.delta(&before, counter),
+            0,
+            "{counter}: nothing was armed for the refused client"
+        );
     }
 }
 
@@ -1401,7 +1566,9 @@ async fn public_handshake_refusals_are_typed_and_leave_nothing_armed() {
     })
     .await;
     assert_eq!(accepted.err(), Some(PublicHandshakeError::Timeout), "silent client");
-    assert!(started.elapsed() >= Duration::from_secs(2) && started.elapsed() < Duration::from_secs(4));
+    assert!(
+        started.elapsed() >= Duration::from_secs(2) && started.elapsed() < Duration::from_secs(4)
+    );
     drop(silent);
 
     // Reset mid-handshake: a record header promising 512 octets, then RST.
@@ -1431,7 +1598,15 @@ async fn public_handshake_refusals_are_typed_and_leave_nothing_armed() {
 
     let after = TlsStat::read();
     for counter in ["TlsCurrTxSw", "TlsCurrRxSw", "TlsTxSw", "TlsRxSw"] {
-        assert_eq!(after.delta(&before, counter), 0, "{counter}: nothing was armed on a refused socket");
+        assert_eq!(
+            after.delta(&before, counter),
+            0,
+            "{counter}: nothing was armed on a refused socket"
+        );
     }
-    assert_eq!(settle_fds(fds_start).await, fds_start, "descriptor count returned to its start value");
+    assert_eq!(
+        settle_fds(fds_start).await,
+        fds_start,
+        "descriptor count returned to its start value"
+    );
 }

@@ -101,6 +101,18 @@ if [[ -n "$(git -C "$REPO_ROOT" status --porcelain)" ]]; then
     >"$EVIDENCE_DIR/dirty-diff.patch"
 fi
 
+# Source provenance for expectations that require a clean checkout (E15). The
+# status excludes only harness-owned evidence outputs, which are written after
+# this capture. Exported beside REPO_ROOT and EVIDENCE_DIR; an expectation that
+# needs a clean tree checks EXPECTATION_SOURCE_DIRTY itself.
+EXPECTATION_SOURCE_SHA="$SHA"
+EXPECTATION_SOURCE_DIRTY="false"
+if [[ -n "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=all -- \
+      . ':(exclude)verification/expectations/**/evidence/**')" ]]; then
+  EXPECTATION_SOURCE_DIRTY="true"
+fi
+export EXPECTATION_SOURCE_SHA EXPECTATION_SOURCE_DIRTY
+
 echo "=== expectation $ID ==="
 echo "  dir:     $EXPECTATION_DIR"
 echo "  sha:     $SHA (dirty=$DIRTY)"
@@ -129,6 +141,8 @@ if [[ -x "$RUNNER" ]]; then
   ( cd "$REPO_ROOT" && SEED="$SEED" \
       EVIDENCE_DIR="$EVIDENCE_DIR" EXPECTATION_DIR="$EXPECTATION_DIR" \
       REPO_ROOT="$REPO_ROOT" \
+      EXPECTATION_SOURCE_SHA="$EXPECTATION_SOURCE_SHA" \
+      EXPECTATION_SOURCE_DIRTY="$EXPECTATION_SOURCE_DIRTY" \
       bash "$RUNNER" ) 2>&1 | tee "$EVIDENCE_DIR/run.log"
   RUNNER_RC="${PIPESTATUS[0]}"
   echo "  --- runner.sh exit: $RUNNER_RC ---"

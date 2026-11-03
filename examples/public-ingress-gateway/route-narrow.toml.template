@@ -1,0 +1,11 @@
+[route]
+id = "public-api"
+hostname = "__PUBLIC_HOSTNAME__"
+path = "/stream"
+path_match = "exact"
+certified_key = "api-origin"
+
+[route.target]
+service = "api"
+port = 8080
+protocol = "tcp"

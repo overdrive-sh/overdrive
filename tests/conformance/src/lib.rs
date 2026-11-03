@@ -25,9 +25,12 @@
 #![allow(
     clippy::expect_used,
     clippy::panic,
+    clippy::print_stderr,
     clippy::unused_async,
     reason = "the conformance harness uses fail-fast diagnostic assertions like an integration test"
 )]
+
+pub mod gateway;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
@@ -305,12 +308,14 @@ pub fn assert_native_metal() {
     assert!(nix::unistd::geteuid().is_root(), "native-metal conformance requires root");
     let kvm = std::fs::metadata("/dev/kvm").expect("stat /dev/kvm");
     assert!(kvm.file_type().is_char_device(), "/dev/kvm must be a character device");
+    // `systemd-detect-virt` prints `none` and exits 1 on bare metal; it
+    // completing with the verdict `none` is the probe, not its exit status.
     let virtualization = command_output("systemd-detect-virt", &[]);
+    let verdict = String::from_utf8_lossy(&virtualization.stdout).trim().to_owned();
     assert!(
-        virtualization.status.success()
-            && String::from_utf8_lossy(&virtualization.stdout).trim() == "none",
-        "virtualized substrate refused: {}",
-        String::from_utf8_lossy(&virtualization.stdout)
+        verdict == "none" && matches!(virtualization.status.code(), Some(0 | 1)),
+        "virtualized substrate refused: systemd-detect-virt reported {verdict:?} ({:?})",
+        virtualization.status
     );
 }
 
@@ -478,6 +483,10 @@ impl PublicApi {
 
     pub async fn get(&self, path: &str) -> reqwest::Result<reqwest::Response> {
         self.client.get(self.url(path)).send().await
+    }
+
+    pub async fn delete(&self, path: &str) -> reqwest::Result<reqwest::Response> {
+        self.client.delete(self.url(path)).send().await
     }
 
     pub async fn post_json(

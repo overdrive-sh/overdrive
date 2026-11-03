@@ -112,13 +112,13 @@ impl Veth {
         let ordinal = NEXT_ORDINAL.fetch_add(1, Ordering::Relaxed);
         let host = format!("qh{}x{ordinal}", std::process::id() % 100_000);
         let peer = format!("qp{}x{ordinal}", std::process::id() % 100_000);
-        let _ = Command::new("ip").args(["link", "del", &host]).output();
+        let _ = Command::new("ip").args(["link", "del", &host]).output(); // subprocess-ok: test-owned veth fixture, Tier-3 only
         for args in [
             vec!["link", "add", host.as_str(), "type", "veth", "peer", "name", peer.as_str()],
             vec!["link", "set", host.as_str(), "up"],
             vec!["link", "set", peer.as_str(), "up"],
         ] {
-            let status = Command::new("ip").args(&args).status().expect("spawn ip(8)");
+            let status = Command::new("ip").args(&args).status().expect("spawn ip(8)"); // subprocess-ok: test-owned veth fixture, Tier-3 only
             assert!(status.success(), "ip {args:?} failed: needs CAP_NET_ADMIN (run as root)");
         }
         Self { host, peer }
@@ -127,7 +127,7 @@ impl Veth {
 
 impl Drop for Veth {
     fn drop(&mut self) {
-        let _ = Command::new("ip").args(["link", "del", &self.host]).output();
+        let _ = Command::new("ip").args(["link", "del", &self.host]).output(); // subprocess-ok: test-owned veth fixture, Tier-3 only
     }
 }
 
