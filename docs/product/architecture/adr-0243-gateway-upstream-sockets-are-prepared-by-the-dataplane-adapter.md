@@ -63,8 +63,8 @@ ledger slot for its cleanup.
   reverse for implementations.
 - The new public surface is the confirmed D5 list in the feature delta (R-18).
 - The ledger order is a rule of one sequential connector task. It is covered by
-  the seeded invariants S-PIG-37 and S-PIG-53, not by a Quint hazard (no
-  concurrent protocol is modelled for it).
+  the seeded `overdrive-sim` invariants (listed in the feature delta), not by a
+  Quint hazard (no concurrent protocol is modelled for it).
 
 ## Links
 

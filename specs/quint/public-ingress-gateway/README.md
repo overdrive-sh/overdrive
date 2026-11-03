@@ -61,6 +61,8 @@ See the header of `checks.toml` (single home).
   not counted. The bound was reduced, not the property.
 - Model-only variables (the driver does not project them): see each file's header (`staged`, `inflight`, `leases`;
   identity `now`, ghosts; receipt `outer`, `resv`, `infl`, `guard`, `debt`, `ckey`, `taken`, `g`; `conf_step`).
+  The single classification of every variable (projected accessor, port-return check, or model-only, with the value
+  mappings) is in feature-delta "Formal protocol model", modules `gateway_application` and `selection_receipt`.
 - `NoAllocationIdentity` and `AtMostOneHeld` are not modelled: both are type-level facts (the slot is keyed by node and is an `Option`, ADR-0225).
 
 ## Assumptions and discharging items
