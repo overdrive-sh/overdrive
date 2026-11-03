@@ -90,14 +90,15 @@ use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::intent_store::{IntentStore, IntentSubscriptionEvent, TxnOp};
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_gateway::application::{
-    GatewayBootError, GatewayCleanupFailure, GatewayConnectSweepFailure, GatewayControl,
-    GatewayHandle, GatewayRuntimeDependencies, GatewayShutdownReport, UnboundGatewayBuilder,
+    GatewayBootError, GatewayCleanupFailure, GatewayConnectSweepFailure, GatewayHandle,
+    GatewayRouteCommands, GatewayRuntimeDependencies, GatewayShutdownReport, GatewayStatusReads,
+    UnboundGatewayBuilder,
 };
 use overdrive_gateway::certified_key::PublicCertifiedKeyError;
 use overdrive_gateway::ports::{
-    AcceptedPublicLeg, GatewayClientMtls, GatewayClientMtlsError, GatewayConnectCleanupSweep,
-    GatewayConnectDataplane, GatewayConnectDataplaneError, GatewayConnectIntent,
-    GatewayIdentityLifecycleControl, GatewayIdentityLifecycleError, GatewayIdentityWaitPhase,
+    AcceptedPublicLeg, GatewayClientMtls, GatewayClientMtlsError, GatewayConnectCleanup,
+    GatewayConnectCleanupSweep, GatewayConnectDataplane, GatewayConnectDataplaneError,
+    GatewayConnectIntent, GatewayIdentityLifecycleControl, GatewayIdentityLifecycleError,
     GatewayRelay, GatewaySelectionReceipt, GatewayUpstream, GatewayUpstreamSeal, HeadTerminator,
     KtlsLeg, KtlsReadHalf, KtlsWriteHalf, LegReadError, LegWriteError, PreparedUpstream,
     PublicHandshakeError, ReadDeadlines, RelayDeadlines, RelayError, RelayProbeError, ThroughBytes,
@@ -152,7 +153,6 @@ const WRONG_ID_WITHDRAW: Slot = Slot(43);
 const CONCURRENT_CLAIMS: Slot = Slot(44);
 const STATUS_REDACTION: Slot = Slot(45);
 const SHUTDOWN_JOIN: Slot = Slot(46);
-const SHUTDOWN_IDENTITY_ERROR: Slot = Slot(47);
 const KEY_REFUSALS: Slot = Slot(48);
 const WITHDRAW_FROM_EMPTY: Slot = Slot(49);
 const CARDINALITY: Slot = Slot(50);
@@ -178,7 +178,6 @@ enum Event {
     AcceptParked,
     AcceptReleased,
     IdentityCleared,
-    IdentityClearFailed,
 }
 
 #[derive(Default)]
@@ -211,7 +210,7 @@ enum DataplaneOp {
     Cleanup,
     CleanupAll,
     LiveIntentCount,
-    LiveReceiptCount,
+    LiveReceipts,
 }
 
 /// Whether the shared Service state holds a programmed backend: a programmed
@@ -286,6 +285,70 @@ impl ScriptedDataplane {
     }
 }
 
+impl GatewayConnectCleanup for ScriptedDataplane {
+    fn cleanup(&self, intent: &GatewayConnectIntent) -> Result<(), GatewayConnectDataplaneError> {
+        let mut state = self.state.lock().expect("dataplane state");
+        if let Some(error) = self.fault_at(&mut state, DataplaneOp::Cleanup) {
+            return Err(error);
+        }
+        state.registered.remove(&intent.socket_cookie);
+        state.pending_receipts.remove(&intent.socket_cookie);
+        Ok(())
+    }
+
+    fn cleanup_all_gateway_intents(
+        &self,
+    ) -> Result<GatewayConnectCleanupSweep, GatewayConnectDataplaneError> {
+        let mut state = self.state.lock().expect("dataplane state");
+        if let Some(error) = self.fault_at(&mut state, DataplaneOp::CleanupAll) {
+            return Err(error);
+        }
+        let removed_intents = u32::try_from(state.registered.len()).expect("intent count");
+        let removed_receipts = u32::try_from(state.pending_receipts.len()).expect("receipt count");
+        state.registered.clear();
+        state.pending_receipts.clear();
+        Ok(GatewayConnectCleanupSweep { removed_intents, removed_receipts })
+    }
+
+    fn live_intent_count(&self) -> Result<u32, GatewayConnectDataplaneError> {
+        let mut state = self.state.lock().expect("dataplane state");
+        if let Some(error) = self.fault_at(&mut state, DataplaneOp::LiveIntentCount) {
+            return Err(error);
+        }
+        Ok(u32::try_from(state.registered.len()).expect("intent count"))
+    }
+
+    fn live_receipts(
+        &self,
+    ) -> Result<BTreeMap<SocketCookie, GatewaySelectionReceipt>, GatewayConnectDataplaneError> {
+        let mut state = self.state.lock().expect("dataplane state");
+        if let Some(error) = self.fault_at(&mut state, DataplaneOp::LiveReceipts) {
+            return Err(error);
+        }
+        Ok(state
+            .pending_receipts
+            .iter()
+            .filter_map(|cookie| {
+                let (intent, backend) = state.registered.get(cookie)?;
+                Some((
+                    *cookie,
+                    match self.backends {
+                        Backends::Programmed => GatewaySelectionReceipt::Selected {
+                            socket_cookie: intent.socket_cookie,
+                            service_key: intent.service_key,
+                            backend_id: *backend,
+                        },
+                        Backends::NoneProgrammed => GatewaySelectionReceipt::NoBackend {
+                            socket_cookie: intent.socket_cookie,
+                            service_key: intent.service_key,
+                        },
+                    },
+                ))
+            })
+            .collect())
+    }
+}
+
 #[async_trait]
 impl GatewayConnectDataplane for ScriptedDataplane {
     async fn probe(
@@ -346,30 +409,6 @@ impl GatewayConnectDataplane for ScriptedDataplane {
         })
     }
 
-    fn cleanup(&self, intent: &GatewayConnectIntent) -> Result<(), GatewayConnectDataplaneError> {
-        let mut state = self.state.lock().expect("dataplane state");
-        if let Some(error) = self.fault_at(&mut state, DataplaneOp::Cleanup) {
-            return Err(error);
-        }
-        state.registered.remove(&intent.socket_cookie);
-        state.pending_receipts.remove(&intent.socket_cookie);
-        Ok(())
-    }
-
-    fn cleanup_all_gateway_intents(
-        &self,
-    ) -> Result<GatewayConnectCleanupSweep, GatewayConnectDataplaneError> {
-        let mut state = self.state.lock().expect("dataplane state");
-        if let Some(error) = self.fault_at(&mut state, DataplaneOp::CleanupAll) {
-            return Err(error);
-        }
-        let removed_intents = u32::try_from(state.registered.len()).expect("intent count");
-        let removed_receipts = u32::try_from(state.pending_receipts.len()).expect("receipt count");
-        state.registered.clear();
-        state.pending_receipts.clear();
-        Ok(GatewayConnectCleanupSweep { removed_intents, removed_receipts })
-    }
-
     fn selected_backend_identity(
         &self,
         backend_id: BackendId,
@@ -379,22 +418,6 @@ impl GatewayConnectDataplane for ScriptedDataplane {
             return Err(error);
         }
         Ok(backend_identity(backend_id))
-    }
-
-    fn live_intent_count(&self) -> Result<u32, GatewayConnectDataplaneError> {
-        let mut state = self.state.lock().expect("dataplane state");
-        if let Some(error) = self.fault_at(&mut state, DataplaneOp::LiveIntentCount) {
-            return Err(error);
-        }
-        Ok(u32::try_from(state.registered.len()).expect("intent count"))
-    }
-
-    fn live_receipt_count(&self) -> Result<u32, GatewayConnectDataplaneError> {
-        let mut state = self.state.lock().expect("dataplane state");
-        if let Some(error) = self.fault_at(&mut state, DataplaneOp::LiveReceiptCount) {
-            return Err(error);
-        }
-        Ok(u32::try_from(state.pending_receipts.len()).expect("receipt count"))
     }
 }
 
@@ -417,7 +440,6 @@ fn gateway_identity_facts() -> GatewayIdentityFacts {
 #[derive(Default)]
 struct IdentityState {
     ensure_calls: u32,
-    disable_calls: u32,
     observed: Vec<GatewayIdentityLifecycleError>,
 }
 
@@ -425,7 +447,6 @@ struct ScriptedIdentity {
     facts: GatewayIdentityFacts,
     sender: watch::Sender<Option<GatewayIdentityFacts>>,
     ensure_error: Option<GatewayIdentityLifecycleError>,
-    disable_error: Option<GatewayIdentityLifecycleError>,
     state: Mutex<IdentityState>,
     events: Arc<EventLog>,
 }
@@ -433,7 +454,6 @@ struct ScriptedIdentity {
 impl ScriptedIdentity {
     fn new(
         ensure_error: Option<GatewayIdentityLifecycleError>,
-        disable_error: Option<GatewayIdentityLifecycleError>,
         events: Arc<EventLog>,
     ) -> Arc<Self> {
         let facts = gateway_identity_facts();
@@ -443,7 +463,6 @@ impl ScriptedIdentity {
             facts,
             sender,
             ensure_error,
-            disable_error,
             state: Mutex::new(IdentityState::default()),
             events,
         })
@@ -481,20 +500,9 @@ impl GatewayIdentityLifecycleControl for ScriptedIdentity {
         self.sender.subscribe()
     }
 
-    async fn disable_after_drain(
-        &self,
-        _deadline: Instant,
-    ) -> Result<(), GatewayIdentityLifecycleError> {
-        let mut state = self.state.lock().expect("identity state");
-        state.disable_calls += 1;
-        if let Some(error) = &self.disable_error {
-            state.observed.push(error.clone());
-            self.events.record(Event::IdentityClearFailed);
-            return Err(error.clone());
-        }
+    fn disable_after_drain(&self) {
         self.sender.send_replace(None);
         self.events.record(Event::IdentityCleared);
-        Ok(())
     }
 }
 
@@ -682,7 +690,7 @@ impl GatewayRelay for ScriptedRelay {
         _from: &mut KtlsReadHalf,
         _max: NonZeroU64,
         _deadlines: RelayDeadlines,
-    ) -> Result<u64, LegReadError> {
+    ) -> Result<(), LegReadError> {
         Err(LegReadError::Io { kind: unsupported() })
     }
 }
@@ -696,7 +704,6 @@ struct FixtureSpec {
     programmed: bool,
     dataplane_fault: Option<(DataplaneOp, GatewayConnectDataplaneError)>,
     ensure_error: Option<GatewayIdentityLifecycleError>,
-    disable_error: Option<GatewayIdentityLifecycleError>,
     park_accept: bool,
     hold_authenticate_calls: u32,
 }
@@ -717,11 +724,7 @@ impl Fixtures {
                 if spec.programmed { Backends::Programmed } else { Backends::NoneProgrammed },
                 spec.dataplane_fault,
             ),
-            identity: ScriptedIdentity::new(
-                spec.ensure_error,
-                spec.disable_error,
-                Arc::clone(&events),
-            ),
+            identity: ScriptedIdentity::new(spec.ensure_error, Arc::clone(&events)),
             holds: HoldRegistry::new(spec.hold_authenticate_calls),
             relay: ScriptedRelay::new(Arc::clone(&events), spec.park_accept),
             events,
@@ -970,7 +973,8 @@ async fn unbound(
 struct World {
     intent: Arc<LocalIntentStore>,
     clock: Arc<SimClock>,
-    control: GatewayControl,
+    routes: GatewayRouteCommands,
+    status: GatewayStatusReads,
     handle: Option<GatewayHandle>,
     fx: Fixtures,
     bind: SocketAddrV4,
@@ -1010,11 +1014,12 @@ impl World {
             fx.identity.clone(),
             fx.relay.clone(),
         );
-        let (handle, control) = builder.start(dependencies).await.into_parts();
+        let (handle, routes, status) = builder.start(dependencies).await.into_parts();
         Ok(Self {
             intent,
             clock,
-            control,
+            routes,
+            status,
             handle: Some(handle),
             fx,
             bind: SocketAddrV4::new(plan.slot.bind(plan.ordinal), 443),
@@ -1023,7 +1028,7 @@ impl World {
     }
 
     async fn declare(&self, route: Route) -> Result<RouteApplyOutcome, PublicRouteSetError> {
-        self.control.routes().apply(route).await
+        self.routes.routes().apply(route).await
     }
 
     /// Graceful shutdown; consumes the world so the redb file is released.
@@ -1037,14 +1042,14 @@ impl World {
 // ---------------------------------------------------------------------------
 
 async fn wait_status(
-    control: &GatewayControl,
+    status: &GatewayStatusReads,
     what: &str,
     predicate: impl Fn(&GatewayApplicationStatusRowV1) -> bool,
 ) -> GatewayApplicationStatusRowV1 {
     let deadline = Instant::now() + WAIT;
     let mut last = None;
     loop {
-        let row = control.application_status().await.expect("application status read");
+        let row = status.application_status().await.expect("application status read");
         if let Some(row) = row {
             if predicate(&row) {
                 return row;
@@ -1056,8 +1061,8 @@ async fn wait_status(
     }
 }
 
-async fn wait_promoted(control: &GatewayControl) -> GatewayApplicationStatusRowV1 {
-    wait_status(control, "a promoted Current generation", |row| {
+async fn wait_promoted(status: &GatewayStatusReads) -> GatewayApplicationStatusRowV1 {
+    wait_status(status, "a promoted Current generation", |row| {
         row.current.is_some()
             && row.unavailable.is_none()
             && matches!(row.listener, GatewayListenerStatus::Bound { .. })
@@ -1066,14 +1071,14 @@ async fn wait_promoted(control: &GatewayControl) -> GatewayApplicationStatusRowV
 }
 
 async fn wait_key_status(
-    control: &GatewayControl,
+    status: &GatewayStatusReads,
     what: &str,
     predicate: impl Fn(&PublicCertifiedKeyStatusRowV1) -> bool,
 ) -> PublicCertifiedKeyStatusRowV1 {
     let deadline = Instant::now() + WAIT;
     let mut last = None;
     loop {
-        let row = control.certified_key_status().await.expect("custody status read");
+        let row = status.certified_key_status().await.expect("custody status read");
         if let Some(row) = row {
             if predicate(&row) {
                 return row;
@@ -1095,8 +1100,7 @@ async fn advance_until_key_status(
 ) -> PublicCertifiedKeyStatusRowV1 {
     let mut last = None;
     for _ in 0..MAINTENANCE_STEPS {
-        if let Some(row) = world.control.certified_key_status().await.expect("custody status read")
-        {
+        if let Some(row) = world.status.certified_key_status().await.expect("custody status read") {
             if predicate(&row) {
                 return row;
             }
@@ -1210,7 +1214,7 @@ async fn route_declare_replay_replace_and_withdraw_return_exact_outcomes_over_re
     assert_eq!(persisted_route(&world.intent, &site.intent_path).await, Some(v2));
 
     assert_eq!(
-        world.control.routes().withdraw(route_id("public-api")).await.expect("withdraw"),
+        world.routes.routes().withdraw(route_id("public-api")).await.expect("withdraw"),
         RouteWithdrawOutcome::Withdrawn,
     );
     let after_withdrawal = world
@@ -1269,7 +1273,7 @@ async fn a_different_route_id_is_rejected_with_the_typed_conflict_and_an_unchang
     );
     assert_eq!(world.fx.identity.ensure_calls(), identity_calls, "no identity effect");
     assert_eq!(world.fx.dataplane.residue(), (0, 0), "no connect-path effect");
-    let status = world.control.application_status().await.expect("status read");
+    let status = world.status.application_status().await.expect("status read");
     assert!(
         !format!("{status:?}").contains(&message),
         "the typed conflict stays apart from the redacted status projection",
@@ -1298,7 +1302,7 @@ async fn withdrawal_by_a_different_route_id_has_an_empty_delta() {
     let before = intent_universe(&world.intent).await;
 
     let error = world
-        .control
+        .routes
         .routes()
         .withdraw(route_id("other-api"))
         .await
@@ -1344,7 +1348,7 @@ async fn claim_round(round: u16, seed: u64, rng: &mut SplitMix64) {
     let spin_b = rng.next() % 8;
     let swap = rng.next().is_multiple_of(2);
     let claim = |id: &'static str, path: &'static str, spin: u64| {
-        let routes = world.control.routes().clone();
+        let routes = world.routes.routes().clone();
         let barrier = Arc::clone(&barrier);
         tokio::spawn(async move {
             barrier.wait().await;
@@ -1447,24 +1451,24 @@ async fn operator_status_carries_no_manual_path_or_credential_material() {
         .expect("gateway starts");
     let before = format!(
         "{:?}{:?}",
-        world.control.application_status().await.expect("application status"),
-        world.control.certified_key_status().await.expect("key status"),
+        world.status.application_status().await.expect("application status"),
+        world.status.certified_key_status().await.expect("key status"),
     );
     site.assert_no_secret_material(&before, "status before a Route");
 
     world.declare(route("public-api", "/")).await.expect("declare");
-    wait_promoted(&world.control).await;
+    wait_promoted(&world.status).await;
     let after = format!(
         "{:?}{:?}",
-        world.control.application_status().await.expect("application status"),
-        world.control.certified_key_status().await.expect("key status"),
+        world.status.application_status().await.expect("application status"),
+        world.status.certified_key_status().await.expect("key status"),
     );
     site.assert_no_secret_material(&after, "status after promotion");
     for forbidden in ["ciphertext", "nonce", "salt", "kek"] {
         assert!(!after.to_lowercase().contains(forbidden), "status leaked {forbidden}: {after}");
     }
     let key_row = world
-        .control
+        .status
         .certified_key_status()
         .await
         .expect("key status")
@@ -1490,7 +1494,7 @@ async fn identity_slot_clears_only_after_the_admitted_connection_user_joined() {
     let mut world =
         World::start(&site, Plan::with_service(SHUTDOWN_JOIN), fx).await.expect("gateway starts");
     world.declare(route("public-api", "/")).await.expect("declare");
-    wait_promoted(&world.control).await;
+    wait_promoted(&world.status).await;
 
     let _client = tokio::net::TcpStream::connect(world.bind)
         .await
@@ -1524,42 +1528,6 @@ async fn identity_slot_clears_only_after_the_admitted_connection_user_joined() {
     assert_eq!(world.fx.dataplane.residue(), (0, 0), "live intent and receipt counts are 0");
     assert_eq!(report.forced_connections, 0, "the user joined, it was not forced");
     assert_eq!(report.elapsed, Duration::from_secs(3), "elapsed is measured on the injected clock");
-}
-
-/// S-PIG-26: an identity clear that fails is retained in the report with its
-/// exact cause; the slot is not empty, the report is not clean, the connect path
-/// shows no residue and custody status is untouched.
-///
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test]
-#[ignore = "pending DELIVER gateway-boot-and-shutdown"]
-async fn identity_clear_failure_is_retained_in_the_shutdown_report() {
-    let site = Site::new();
-    let fx = Fixtures::new(FixtureSpec {
-        disable_error: Some(GatewayIdentityLifecycleError::EpochExhausted),
-        ..FixtureSpec::default()
-    });
-    let world = World::start(&site, Plan::route_only(SHUTDOWN_IDENTITY_ERROR), fx)
-        .await
-        .expect("gateway starts before the injected shutdown fault");
-    let control = world.control.clone();
-    let identity = Arc::clone(&world.fx.identity);
-    let events = Arc::clone(&world.fx.events);
-    let key_status_before = control.certified_key_status().await.expect("custody status");
-
-    let report = world.stop().await;
-    assert_eq!(report.identity_error, Some(GatewayIdentityLifecycleError::EpochExhausted));
-    assert!(!report.identity_empty, "the slot was not emptied");
-    assert!(identity.current().is_some());
-    assert!(!report.is_clean());
-    assert!(report.residual_connect.is_none(), "no connect residue: {report:?}");
-    assert!(report.cleanup_failures.is_empty() && report.task_failures.is_empty());
-    assert_eq!(events.snapshot(), vec![Event::IdentityClearFailed]);
-    assert_eq!(
-        control.certified_key_status().await.expect("custody status after the identity fault"),
-        key_status_before,
-        "identity shutdown failure cannot rewrite Public Certified-Key custody status",
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1706,7 +1674,7 @@ async fn withdraw_from_empty_is_unchanged_and_the_empty_set_survives_reopen() {
     let universe = intent_universe(&world.intent).await;
 
     assert_eq!(
-        world.control.routes().withdraw(route_id("public-api")).await.expect("inverse from Empty"),
+        world.routes.routes().withdraw(route_id("public-api")).await.expect("inverse from Empty"),
         RouteWithdrawOutcome::Unchanged,
     );
     assert_eq!(intent_universe(&world.intent).await, universe, "empty delta");
@@ -1735,7 +1703,7 @@ async fn route_set_cardinality_zero_one_and_many_is_closed_at_one() {
         .await
         .expect("gateway starts");
     assert_eq!(
-        world.control.routes().withdraw(route_id("public-api")).await.expect("zero"),
+        world.routes.routes().withdraw(route_id("public-api")).await.expect("zero"),
         RouteWithdrawOutcome::Unchanged,
     );
     assert_eq!(
@@ -1777,7 +1745,7 @@ async fn certified_key_install_replay_and_valid_replacement_move_the_generation_
     let site = Site::new();
     let plan = Plan::route_only(KEY_INSTALL_REPLAY_REPLACE);
     let world = World::start(&site, plan, Fixtures::healthy()).await.expect("gateway starts");
-    let installed = wait_key_status(&world.control, "the installed key", is_usable).await;
+    let installed = wait_key_status(&world.status, "the installed key", is_usable).await;
     assert!(installed.last_install_failure.is_none());
     let first_generation = certified_key_generation(&installed);
     let record_after_install = custody_records(&world.intent).await;
@@ -1789,7 +1757,7 @@ async fn certified_key_install_replay_and_valid_replacement_move_the_generation_
         record_after_install,
         "the identical files replayed have an empty durable delta (Unchanged)",
     );
-    let replayed = world.control.certified_key_status().await.expect("status").expect("row");
+    let replayed = world.status.certified_key_status().await.expect("status").expect("row");
     assert_eq!(certified_key_generation(&replayed), first_generation);
 
     let replacement = mint_material("api.example.com", 2020, 2101);
@@ -1810,7 +1778,7 @@ async fn certified_key_install_replay_and_valid_replacement_move_the_generation_
     let reopened = World::start_on(&site, plan, clock, Fixtures::healthy())
         .await
         .expect("reopened gateway starts");
-    let adopted = wait_key_status(&reopened.control, "the adopted key", is_usable).await;
+    let adopted = wait_key_status(&reopened.status, "the adopted key", is_usable).await;
     assert_eq!(
         certified_key_generation(&adopted),
         second_generation,
@@ -1835,7 +1803,7 @@ async fn a_mismatched_replacement_key_preserves_the_current_generation_and_recor
     let world = World::start(&site, Plan::route_only(KEY_MISMATCH), Fixtures::healthy())
         .await
         .expect("gateway starts");
-    let installed = wait_key_status(&world.control, "the installed key", is_usable).await;
+    let installed = wait_key_status(&world.status, "the installed key", is_usable).await;
     let generation = certified_key_generation(&installed);
     let record = custody_records(&world.intent).await;
 
@@ -1865,7 +1833,7 @@ async fn an_expired_replacement_preserves_the_current_generation_and_records_a_d
     let world = World::start(&site, Plan::route_only(KEY_EXPIRED_REPLACEMENT), Fixtures::healthy())
         .await
         .expect("gateway starts");
-    let installed = wait_key_status(&world.control, "the installed key", is_usable).await;
+    let installed = wait_key_status(&world.status, "the installed key", is_usable).await;
     let generation = certified_key_generation(&installed);
     let record = custody_records(&world.intent).await;
 
@@ -1901,7 +1869,7 @@ async fn expiry_publishes_unusable_retains_the_record_and_survives_reopen() {
     let site = Site::new();
     let plan = Plan::route_only(KEY_EXPIRY_REOPEN);
     let world = World::start(&site, plan, Fixtures::healthy()).await.expect("gateway starts");
-    let installed = wait_key_status(&world.control, "the installed key", is_usable).await;
+    let installed = wait_key_status(&world.status, "the installed key", is_usable).await;
     let generation = certified_key_generation(&installed);
     let record = custody_records(&world.intent).await;
 
@@ -1990,7 +1958,7 @@ fn dataplane_cases() -> Vec<(DataplaneOp, GatewayConnectDataplaneError)> {
     // The same variants also surface from the sweep and count operations.
     cases.push((DataplaneOp::CleanupAll, Error::Cleanup));
     cases.push((DataplaneOp::LiveIntentCount, Error::Kernel));
-    cases.push((DataplaneOp::LiveReceiptCount, Error::Kernel));
+    cases.push((DataplaneOp::LiveReceipts, Error::Kernel));
     cases
 }
 
@@ -2031,7 +1999,7 @@ async fn settle_gate(world: &World, op: DataplaneOp) {
         wait_for("the owner to drive cleanup", || dataplane.calls().contains(&op).then_some(()))
             .await;
     } else {
-        wait_status(&world.control, "the gate to settle", |row| {
+        wait_status(&world.status, "the gate to settle", |row| {
             row.current.is_some() || row.unavailable.is_some()
         })
         .await;
@@ -2079,14 +2047,11 @@ async fn every_dataplane_error_crosses_its_real_owner_operation() {
                 );
                 assert_eq!(residual.live_intents, None, "the unreadable count is not a zero");
             }
-            DataplaneOp::LiveReceiptCount => {
-                let residual = report.residual_connect.as_ref().expect("typed count residual");
-                assert!(
-                    matches!(residual.sweep_failures.as_slice(),
-                        [GatewayConnectSweepFailure::ReceiptCount(found)] if *found == error),
-                    "{error:?}: {report:?}",
-                );
-                assert_eq!(residual.live_receipts, None, "the unreadable count is not a zero");
+            DataplaneOp::LiveReceipts => {
+                let residual = report.residual_connect.as_ref().expect("typed receipt residual");
+                assert_eq!(residual.live_receipts, None, "the unreadable snapshot is not a zero");
+                assert!(residual.sweep_failures.is_empty(), "{error:?}: {report:?}");
+                assert!(!report.is_clean(), "{error:?}: an unreadable snapshot is not clean");
             }
             DataplaneOp::Cleanup => {
                 assert!(
@@ -2116,11 +2081,11 @@ async fn every_dataplane_error_collapses_to_the_redacted_connect_path_cause() {
     for (index, (op, error)) in dataplane_cases().into_iter().enumerate() {
         let (site, world) = start_dataplane_fault(DATAPLANE_COLLAPSES, index, op, &error).await;
         settle_gate(&world, op).await;
-        let control = world.control.clone();
+        let status = world.status.clone();
         let dataplane = Arc::clone(&world.fx.dataplane);
 
         if is_gate_operation(op) {
-            let row = control
+            let row = status
                 .application_status()
                 .await
                 .expect("status read")
@@ -2136,7 +2101,7 @@ async fn every_dataplane_error_collapses_to_the_redacted_connect_path_cause() {
         }
         world.stop().await;
 
-        let row = control.application_status().await.expect("status read");
+        let row = status.application_status().await.expect("status read");
         let rendered = format!("{row:?}");
         assert!(!rendered.contains(&error.to_string()), "{error:?}: status leaked the error text");
         if !matches!(
@@ -2177,17 +2142,14 @@ async fn every_dataplane_error_collapses_to_the_redacted_connect_path_cause() {
 // ---------------------------------------------------------------------------
 
 /// Exhaustive compile guard of the closed lifecycle error set: every variant is
-/// returned by `ensure_current` at the gate, and `disable_after_drain` can return
-/// any variant of the port's error type (the second half of the crossing test
-/// drives each). A new variant fails this match until both are updated.
+/// returned by `ensure_current` at the gate (the only fallible operation of the
+/// port: `disable_after_drain` is infallible, R-30). A new variant fails this
+/// match until it is updated.
 const fn originates_at_ensure_current(error: &GatewayIdentityLifecycleError) -> bool {
     match error {
         GatewayIdentityLifecycleError::ReconcilerUnavailable
-        | GatewayIdentityLifecycleError::EpochExhausted
         | GatewayIdentityLifecycleError::IssueFailed
-        | GatewayIdentityLifecycleError::Timeout {
-            phase: GatewayIdentityWaitPhase::EnsureCurrent,
-        }
+        | GatewayIdentityLifecycleError::Timeout
         | GatewayIdentityLifecycleError::Closed => true,
     }
 }
@@ -2195,17 +2157,15 @@ const fn originates_at_ensure_current(error: &GatewayIdentityLifecycleError) -> 
 fn identity_errors() -> Vec<GatewayIdentityLifecycleError> {
     vec![
         GatewayIdentityLifecycleError::ReconcilerUnavailable,
-        GatewayIdentityLifecycleError::EpochExhausted,
         GatewayIdentityLifecycleError::IssueFailed,
-        GatewayIdentityLifecycleError::Timeout { phase: GatewayIdentityWaitPhase::EnsureCurrent },
+        GatewayIdentityLifecycleError::Timeout,
         GatewayIdentityLifecycleError::Closed,
     ]
 }
 
 /// S-PIG-51: at the gate each lifecycle error reaches the owner exactly as the
 /// port returned it (cause-distinct), nothing is promoted, and the listener
-/// stays unbound; at shutdown each error returned by the synchronous clear is
-/// retained in the report unchanged, with the slot still populated.
+/// stays unbound.
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
@@ -2224,7 +2184,7 @@ async fn every_identity_lifecycle_error_reaches_the_owner_cause_distinct() {
         let world = World::start(&site, plan, fx).await.expect("composition starts");
         world.declare(route("public-api", "/")).await.expect("Route command");
         let row =
-            wait_status(&world.control, "the identity failure", |row| row.unavailable.is_some())
+            wait_status(&world.status, "the identity failure", |row| row.unavailable.is_some())
                 .await;
         assert!(row.current.is_none(), "{error:?}: nothing is admitted");
         assert_eq!(row.listener, GatewayListenerStatus::Unbound);
@@ -2235,25 +2195,11 @@ async fn every_identity_lifecycle_error_reaches_the_owner_cause_distinct() {
             world.fx.identity.observed(),
         );
         world.stop().await;
-
-        let site = Site::new();
-        let fx = Fixtures::new(FixtureSpec {
-            disable_error: Some(error.clone()),
-            ..FixtureSpec::default()
-        });
-        let plan =
-            Plan::route_only(IDENTITY_CROSSES).ordinal(100 + u16::try_from(index).expect("index"));
-        let world = World::start(&site, plan, fx).await.expect("composition starts");
-        let identity = Arc::clone(&world.fx.identity);
-        let report = world.stop().await;
-        assert_eq!(report.identity_error, Some(error.clone()), "the clear error is not flattened");
-        assert!(!report.identity_empty && identity.current().is_some());
-        assert!(!report.is_clean());
     }
 }
 
 /// S-PIG-51: every lifecycle error collapses to `GatewayIdentityUnusable` in
-/// the operator status, with no variant name, error text, wait phase, SPIFFE ID
+/// the operator status, with no variant name, error text, SPIFFE ID
 /// or path in the rendered row.
 ///
 /// CONTRACT_SHAPE: bounded-change.
@@ -2271,8 +2217,7 @@ async fn every_identity_lifecycle_error_collapses_to_gateway_identity_unusable()
         let world = World::start(&site, plan, fx).await.expect("composition starts");
         world.declare(route("public-api", "/")).await.expect("Route command");
         let row =
-            wait_status(&world.control, "the identity cause", |row| row.unavailable.is_some())
-                .await;
+            wait_status(&world.status, "the identity cause", |row| row.unavailable.is_some()).await;
         assert_eq!(
             row.unavailable,
             Some(GatewayApplicationUnavailableCause::GatewayIdentityUnusable),
@@ -2282,7 +2227,6 @@ async fn every_identity_lifecycle_error_collapses_to_gateway_identity_unusable()
         for forbidden in [
             error.to_string(),
             format!("{error:?}"),
-            "EnsureCurrent".to_owned(),
             "gateway identity".to_owned(),
             "gateway SVID".to_owned(),
             "spiffe://".to_owned(),
@@ -2317,8 +2261,8 @@ async fn custody_replay_across_a_restart_keeps_the_generation_and_the_applicatio
     let plan = Plan::with_service(CUSTODY_REPLAY);
     let first = World::start(&site, plan, Fixtures::healthy()).await.expect("gateway starts");
     first.declare(route("public-api", "/")).await.expect("declare");
-    let promoted = wait_promoted(&first.control).await;
-    let key_before = first.control.certified_key_status().await.expect("status").expect("row");
+    let promoted = wait_promoted(&first.status).await;
+    let key_before = first.status.certified_key_status().await.expect("status").expect("row");
     let custody_before = custody_records(&first.intent).await;
     let route_before = persisted_route(&first.intent, &site.intent_path).await;
     let clock = Arc::clone(&first.clock);
@@ -2328,8 +2272,8 @@ async fn custody_replay_across_a_restart_keeps_the_generation_and_the_applicatio
     let second = World::start_on(&site, plan, clock, Fixtures::healthy())
         .await
         .expect("restarted gateway starts");
-    let repromoted = wait_promoted(&second.control).await;
-    let key_after = second.control.certified_key_status().await.expect("status").expect("row");
+    let repromoted = wait_promoted(&second.status).await;
+    let key_after = second.status.certified_key_status().await.expect("status").expect("row");
     assert_eq!(
         certified_key_generation(&key_after),
         certified_key_generation(&key_before),
@@ -2360,7 +2304,7 @@ async fn applying_the_identical_route_twice_has_an_empty_second_delta() {
         .expect("gateway starts");
     let route = route("public-api", "/");
     world.declare(route.clone()).await.expect("declare");
-    let promoted = wait_promoted(&world.control).await;
+    let promoted = wait_promoted(&world.status).await;
     let now = world.clock.now();
     let identity_calls = world.fx.identity.ensure_calls();
     let dataplane_calls = world.fx.dataplane.calls();
@@ -2369,7 +2313,7 @@ async fn applying_the_identical_route_twice_has_an_empty_second_delta() {
     assert_eq!(world.declare(route).await.expect("second apply"), RouteApplyOutcome::Unchanged);
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    assert_eq!(world.control.application_status().await.expect("status"), Some(promoted));
+    assert_eq!(world.status.application_status().await.expect("status"), Some(promoted));
     assert_eq!(world.fx.identity.ensure_calls(), identity_calls, "no further identity ensure");
     assert_eq!(world.fx.dataplane.calls(), dataplane_calls, "no further connect-path call");
     assert_eq!(world.fx.dataplane.residue(), (0, 0));
@@ -2406,19 +2350,19 @@ async fn a_watch_lag_is_reported_and_the_gateway_relists_instead_of_reading_an_e
         .await
         .expect("gateway starts");
     world.declare(route("public-api", "/")).await.expect("declare");
-    wait_promoted(&world.control).await;
-    let key_before = world.control.certified_key_status().await.expect("status").expect("row");
+    wait_promoted(&world.status).await;
+    let key_before = world.status.certified_key_status().await.expect("status").expect("row");
 
     let mut witness = world.intent.watch(b"noise/").await.expect("subscribe the witness");
 
     let sampling = Arc::new(AtomicBool::new(true));
     let sampler = {
-        let control = world.control.clone();
+        let status = world.status.clone();
         let sampling = Arc::clone(&sampling);
         tokio::spawn(async move {
             let mut rows = Vec::new();
             while sampling.load(Ordering::SeqCst) {
-                if let Some(row) = control.application_status().await.expect("status read") {
+                if let Some(row) = status.application_status().await.expect("status read") {
                     rows.push(row);
                 }
                 tokio::task::yield_now().await;
@@ -2461,7 +2405,7 @@ async fn a_watch_lag_is_reported_and_the_gateway_relists_instead_of_reading_an_e
         world.declare(replacement.clone()).await.expect("replace"),
         RouteApplyOutcome::Replaced
     );
-    let recovered = wait_status(&world.control, "the replacement to be promoted", |row| {
+    let recovered = wait_status(&world.status, "the replacement to be promoted", |row| {
         row.current
             .as_ref()
             .is_some_and(|current| current.route_generation == replacement.route_generation())
@@ -2496,7 +2440,7 @@ async fn a_watch_lag_is_reported_and_the_gateway_relists_instead_of_reading_an_e
             "a lag must close admission with WatchGap, never read as an empty store: {row:?}",
         );
     }
-    let key_after = world.control.certified_key_status().await.expect("status").expect("row");
+    let key_after = world.status.certified_key_status().await.expect("status").expect("row");
     assert_eq!(
         certified_key_generation(&key_after),
         certified_key_generation(&key_before),
@@ -2544,8 +2488,7 @@ async fn a_late_probe_result_after_supersession_is_never_delivered() {
     })
     .await;
     let staged =
-        wait_status(&world.control, "the first generation staged", |row| row.staged.is_some())
-            .await;
+        wait_status(&world.status, "the first generation staged", |row| row.staged.is_some()).await;
     let superseded = staged.staged.as_ref().expect("staged generation").application_generation;
     assert!(staged.current.is_none(), "a parked probe promotes nothing");
     assert_eq!(staged.listener, GatewayListenerStatus::Unbound);
@@ -2555,7 +2498,7 @@ async fn a_late_probe_result_after_supersession_is_never_delivered() {
         world.declare(second.clone()).await.expect("supersede"),
         RouteApplyOutcome::Replaced
     );
-    let promoted = wait_status(&world.control, "the second generation to be promoted", |row| {
+    let promoted = wait_status(&world.status, "the second generation to be promoted", |row| {
         row.current
             .as_ref()
             .is_some_and(|current| current.route_generation == second.route_generation())
@@ -2569,7 +2512,7 @@ async fn a_late_probe_result_after_supersession_is_never_delivered() {
     assert!(holds.call_count() >= 2, "the second generation authenticated its own probe");
 
     let now = world.clock.now();
-    let before = world.control.application_status().await.expect("status read");
+    let before = world.status.application_status().await.expect("status read");
     let returned_before = holds.returned_count();
     holds.release(&parked);
     wait_for("the held probe to return", || {
@@ -2578,7 +2521,7 @@ async fn a_late_probe_result_after_supersession_is_never_delivered() {
     .await;
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    let after = world.control.application_status().await.expect("status read");
+    let after = world.status.application_status().await.expect("status read");
     assert_eq!(after, before, "the late result produced no status write");
     let row = after.expect("status row");
     assert_eq!(row.current.as_ref().map(|c| c.application_generation), Some(current));

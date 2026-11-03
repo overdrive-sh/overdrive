@@ -34,7 +34,7 @@ use std::time::Duration;
 
 use overdrive_core::dataplane::ServiceFrontend;
 use overdrive_core::id::SpiffeId;
-use overdrive_core::traits::dataplane::{Backend, Dataplane};
+use overdrive_core::traits::dataplane::{Backend, Dataplane, DataplaneError};
 use overdrive_gateway::ports::{
     GatewayConnectDataplane, GatewayConnectDataplaneError, GatewaySelectionReceipt,
 };
@@ -59,7 +59,11 @@ enum Observed {
 /// One owner under test: the `Dataplane` and `GatewayConnectDataplane` ports of
 /// the same instance.
 trait Owner {
-    fn update(&self, frontend: ServiceFrontend, backends: Vec<Backend>) -> Result<(), String>;
+    fn update(
+        &self,
+        frontend: ServiceFrontend,
+        backends: Vec<Backend>,
+    ) -> Result<(), DataplaneError>;
     fn gateway(&self) -> &dyn GatewayConnectDataplane;
     /// Re-create the instance (a serve restart): nothing survives.
     fn restart(&mut self);
@@ -84,10 +88,12 @@ impl Host {
 }
 
 impl Owner for Host {
-    fn update(&self, frontend: ServiceFrontend, backends: Vec<Backend>) -> Result<(), String> {
-        self.rt
-            .block_on(self.rig().dataplane.update_service(frontend, backends))
-            .map_err(|error| error.to_string())
+    fn update(
+        &self,
+        frontend: ServiceFrontend,
+        backends: Vec<Backend>,
+    ) -> Result<(), DataplaneError> {
+        self.rt.block_on(self.rig().dataplane.update_service(frontend, backends))
     }
     fn gateway(&self) -> &dyn GatewayConnectDataplane {
         &self.rig().dataplane
@@ -122,10 +128,12 @@ impl Sim {
 }
 
 impl Owner for Sim {
-    fn update(&self, frontend: ServiceFrontend, backends: Vec<Backend>) -> Result<(), String> {
-        self.rt
-            .block_on(self.dataplane.update_service(frontend, backends))
-            .map_err(|error| error.to_string())
+    fn update(
+        &self,
+        frontend: ServiceFrontend,
+        backends: Vec<Backend>,
+    ) -> Result<(), DataplaneError> {
+        self.rt.block_on(self.dataplane.update_service(frontend, backends))
     }
     fn gateway(&self) -> &dyn GatewayConnectDataplane {
         &self.gateway
@@ -175,7 +183,8 @@ fn counts(owner: &dyn Owner) -> (u32, u32) {
     let gateway = owner.gateway();
     (
         gateway.live_intent_count().expect("live intent count"),
-        gateway.live_receipt_count().expect("live receipt count"),
+        u32::try_from(gateway.live_receipts().expect("live receipts").len())
+            .expect("receipt count fits u32"),
     )
 }
 
@@ -200,7 +209,10 @@ fn script(owner: &mut dyn Owner, rt: &tokio::runtime::Runtime) -> Vec<String> {
     //    allocation) is rejected before any mutation: the prior generation and
     //    its identity are untouched.
     let rejected = owner.update(frontend(1), vec![backend(1, 2, true)]);
-    assert!(rejected.is_err(), "a re-leased address must be rejected");
+    assert!(
+        matches!(rejected, Err(DataplaneError::BackendIdentityConflict { .. })),
+        "a re-leased address must be rejected with BackendIdentityConflict: {rejected:?}"
+    );
     let (observed, id_after) = select_once(rt, owner, 1);
     assert_eq!(
         observed,

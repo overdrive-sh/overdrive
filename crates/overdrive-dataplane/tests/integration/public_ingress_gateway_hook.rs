@@ -19,11 +19,9 @@
 //! dataplane owns: the receipt, the applied identity, the prepared socket, the
 //! rewritten destination and the absence of residue.
 //!
-//! The exact-peer wire evidence (S-PIG-64) and the four mTLS negatives
-//! (S-PIG-38, 43, 52) are not here: they need `HostGatewayClientMtls`, whose
-//! factory placement is the open proposal P-20 (gaps file). S-PIG-75 is the
-//! conditional capacity-fill row and is not authored until the user acknowledges
-//! it.
+//! The exact-peer wire evidence (S-PIG-64) and the mTLS negatives (S-PIG-38,
+//! 43, 52) are not in this file: they need `HostGatewayClientMtls` through
+//! `HostGatewayClientMtlsFactory`. S-PIG-75 is dropped (R-21).
 
 #![cfg(target_os = "linux")]
 #![allow(
@@ -48,7 +46,8 @@ use std::time::{Duration, Instant};
 use overdrive_core::dataplane::{MTLS_TPROXY_MARK, Proto};
 use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_gateway::ports::{
-    GatewayConnectDataplane, GatewayConnectDataplaneError, GatewaySelectionReceipt,
+    GatewayConnectCleanup, GatewayConnectDataplane, GatewayConnectDataplaneError,
+    GatewaySelectionReceipt,
 };
 
 use super::helpers::gateway_connect_rig::{
@@ -173,7 +172,7 @@ fn registered_socket_is_selected_and_its_dial_reaches_the_backend_from_the_loopb
     let counts = |rig: &HostRig| {
         (
             rig.dataplane.live_intent_count().expect("live intent count"),
-            rig.dataplane.live_receipt_count().expect("live receipt count"),
+            rig.dataplane.live_receipts().expect("live receipt count").len(),
         )
     };
 
@@ -248,7 +247,7 @@ fn a_stale_service_entry_with_a_dead_backend_selects_it_and_the_dial_fails() {
     assert_eq!(
         (
             rig.dataplane.live_intent_count().expect("intents"),
-            rig.dataplane.live_receipt_count().expect("receipts"),
+            rig.dataplane.live_receipts().expect("receipts").len(),
         ),
         (0, 0),
     );
@@ -270,7 +269,7 @@ fn the_sentinel_probe_passes_on_the_real_hook_and_an_elapsed_deadline_times_out(
     let counts = |rig: &HostRig| {
         (
             rig.dataplane.live_intent_count().expect("intents"),
-            rig.dataplane.live_receipt_count().expect("receipts"),
+            rig.dataplane.live_receipts().expect("receipts").len(),
         )
     };
 
@@ -319,7 +318,7 @@ fn after_an_instance_restart_old_identities_and_receipts_are_gone_until_reprogra
     let (pending_socket, pending) =
         rig.dataplane.open_upstream(service_key(1)).expect("open_upstream").into_parts();
     drop(rt.block_on(dial(pending_socket, frontend_target(1), Duration::from_secs(5))));
-    assert_eq!(rig.dataplane.live_receipt_count(), Ok(1));
+    assert_eq!(rig.dataplane.live_receipts().map(|receipts| receipts.len()), Ok(1));
     drop(listener);
 
     let rig = rig.recreate();
@@ -330,7 +329,11 @@ fn after_an_instance_restart_old_identities_and_receipts_are_gone_until_reprogra
         "no applied identity survives the restart",
     );
     assert_eq!(rig.dataplane.live_intent_count(), Ok(0), "no intent survives the restart");
-    assert_eq!(rig.dataplane.live_receipt_count(), Ok(0), "no receipt survives the restart");
+    assert_eq!(
+        rig.dataplane.live_receipts().map(|receipts| receipts.len()),
+        Ok(0),
+        "no receipt survives the restart"
+    );
     assert!(
         rig.dataplane.take_receipt(&pending).is_err(),
         "the receipt pending at the restart is gone",
@@ -456,5 +459,5 @@ fn updates_racing_identity_reads_never_return_a_missing_identity_for_a_selected_
 
     runtime().block_on(rig.dataplane.update_service(frontend(1), Vec::new())).expect("emptied");
     assert_eq!(rig.dataplane.live_intent_count(), Ok(0));
-    assert_eq!(rig.dataplane.live_receipt_count(), Ok(0));
+    assert_eq!(rig.dataplane.live_receipts().map(|receipts| receipts.len()), Ok(0));
 }

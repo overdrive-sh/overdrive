@@ -12,10 +12,8 @@
 //! | `a_disabled_gateway_never_probes_the_relay` | S-PIG-100, disabled arm | ignored until `SimGatewayRelay` lands |
 //!
 //! The enabled arms of S-PIG-02 (I), 57, 58, 60, 61, 62, 74 and 100 boot the
-//! gateway (steps G1-G4). They cannot be authored: the enabled composition
-//! needs `GatewayAdapters.client_mtls` and boot step G2, whose port
-//! (`GatewayClientMtlsFactory`) has no pinned crate placement (feature-delta
-//! PROPOSED P-20, recorded in the batch gaps file).
+//! gateway (steps G1-G4) through `GatewayAdapters.client_mtls`; they are not in
+//! this file.
 //!
 //! # Bind-address table (R-6)
 //!

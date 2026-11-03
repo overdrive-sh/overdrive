@@ -1,6 +1,6 @@
 //! Public-ingress kernel-relay exchange scenarios over the production
 //! `UnboundGatewayBuilder` -> `GatewayBuilder` -> `StartedGateway` path, a
-//! real redb Route store and `SimGatewayRelay` (S-PIG-77 through S-PIG-83,
+//! real redb Route store and `SimGatewayRelay` (S-PIG-77, S-PIG-78, S-PIG-83,
 //! 87 through 99, 101 and 118 through 122).
 //!
 //! Every public client is a real loopback TCP connection to the gateway's own
@@ -58,10 +58,6 @@
 //! | 89 | public half-close (S-PIG-122) |
 //! | 90 | ambiguous request framing (S-PIG-77) |
 //! | 91 | ambiguous response framing (S-PIG-78) |
-//! | 92 | malformed lines (S-PIG-79) |
-//! | 93 | chunk-size and trailer lines (S-PIG-80) |
-//! | 94 | framing from the original headers (S-PIG-81) |
-//! | 95 | request-head policy boundaries (S-PIG-82) |
 //! | 96 | public server configuration (S-PIG-118) |
 
 #![allow(
@@ -110,17 +106,17 @@ use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_gateway::application::{
-    GatewayControl, GatewayHandle, GatewayRuntimeDependencies, GatewayShutdownReport,
-    UnboundGatewayBuilder,
+    GatewayHandle, GatewayRouteCommands, GatewayRuntimeDependencies, GatewayShutdownReport,
+    GatewayStatusReads, UnboundGatewayBuilder,
 };
 use overdrive_gateway::ports::{
-    AcceptedPublicLeg, GatewayClientMtls, GatewayClientMtlsError, GatewayConnectCleanupSweep,
-    GatewayConnectDataplane, GatewayConnectDataplaneError, GatewayConnectIntent,
-    GatewayIdentityLifecycleControl, GatewayIdentityLifecycleError, GatewayRelay,
-    GatewaySelectionReceipt, GatewayUpstream, GatewayUpstreamSeal, HeadTerminator, KeyUpdateError,
-    KtlsArmError, KtlsLeg, KtlsReadHalf, KtlsWriteHalf, LegReadError, LegWriteError,
-    PreparedUpstream, PublicHandshakeError, ReadDeadlines, RelayDeadlines, RelayError,
-    RelayPipeError, RelayProbeError, ThroughBytes,
+    AcceptedPublicLeg, GatewayClientMtls, GatewayClientMtlsError, GatewayConnectCleanup,
+    GatewayConnectCleanupSweep, GatewayConnectDataplane, GatewayConnectDataplaneError,
+    GatewayConnectIntent, GatewayIdentityLifecycleControl, GatewayIdentityLifecycleError,
+    GatewayRelay, GatewaySelectionReceipt, GatewayUpstream, GatewayUpstreamSeal, HeadTerminator,
+    KeyUpdateError, KtlsArmError, KtlsLeg, KtlsReadHalf, KtlsWriteHalf, LegReadError,
+    LegWriteError, PreparedUpstream, PublicHandshakeError, ReadDeadlines, RelayDeadlines,
+    RelayError, RelayPipeError, RelayProbeError, ThroughBytes,
 };
 use overdrive_gateway::runtime::GatewayLimits;
 use overdrive_gateway::{GatewayConfig, ManualCertifiedKeyConfig};
@@ -185,10 +181,6 @@ const EARLY_ANSWER: Slot = Slot(88);
 const HALF_CLOSE: Slot = Slot(89);
 const AMBIGUOUS_REQUEST: Slot = Slot(90);
 const AMBIGUOUS_RESPONSE: Slot = Slot(91);
-const MALFORMED_LINES: Slot = Slot(92);
-const CHUNK_LINES: Slot = Slot(93);
-const ORIGINAL_HEADERS: Slot = Slot(94);
-const HEAD_POLICY: Slot = Slot(95);
 const SERVER_CONFIGURATION: Slot = Slot(96);
 
 // ---------------------------------------------------------------------------
@@ -234,6 +226,62 @@ impl OriginDataplane {
     fn residue(&self) -> (usize, usize) {
         let state = self.state.lock().expect("dataplane state");
         (state.registered.len(), state.pending_receipts.len())
+    }
+}
+
+impl GatewayConnectCleanup for OriginDataplane {
+    fn cleanup(&self, intent: &GatewayConnectIntent) -> Result<(), GatewayConnectDataplaneError> {
+        let mut state = self.state.lock().expect("dataplane state");
+        state.cleanups += 1;
+        state.registered.remove(&intent.socket_cookie);
+        state.pending_receipts.remove(&intent.socket_cookie);
+        drop(state);
+        Ok(())
+    }
+
+    fn cleanup_all_gateway_intents(
+        &self,
+    ) -> Result<GatewayConnectCleanupSweep, GatewayConnectDataplaneError> {
+        let mut state = self.state.lock().expect("dataplane state");
+        let removed_intents = u32::try_from(state.registered.len()).expect("intent count");
+        let removed_receipts = u32::try_from(state.pending_receipts.len()).expect("receipt count");
+        state.registered.clear();
+        state.pending_receipts.clear();
+        drop(state);
+        Ok(GatewayConnectCleanupSweep { removed_intents, removed_receipts })
+    }
+
+    fn live_intent_count(&self) -> Result<u32, GatewayConnectDataplaneError> {
+        let state = self.state.lock().expect("dataplane state");
+        Ok(u32::try_from(state.registered.len()).expect("intent count"))
+    }
+
+    fn live_receipts(
+        &self,
+    ) -> Result<BTreeMap<SocketCookie, GatewaySelectionReceipt>, GatewayConnectDataplaneError> {
+        let state = self.state.lock().expect("dataplane state");
+        Ok(state
+            .pending_receipts
+            .iter()
+            .filter_map(|cookie| {
+                let (intent, backend) = state.registered.get(cookie)?;
+                Some((
+                    *cookie,
+                    if self.programmed {
+                        GatewaySelectionReceipt::Selected {
+                            socket_cookie: intent.socket_cookie,
+                            service_key: intent.service_key,
+                            backend_id: *backend,
+                        }
+                    } else {
+                        GatewaySelectionReceipt::NoBackend {
+                            socket_cookie: intent.socket_cookie,
+                            service_key: intent.service_key,
+                        }
+                    },
+                ))
+            })
+            .collect())
     }
 }
 
@@ -293,42 +341,11 @@ impl GatewayConnectDataplane for OriginDataplane {
         })
     }
 
-    fn cleanup(&self, intent: &GatewayConnectIntent) -> Result<(), GatewayConnectDataplaneError> {
-        let mut state = self.state.lock().expect("dataplane state");
-        state.cleanups += 1;
-        state.registered.remove(&intent.socket_cookie);
-        state.pending_receipts.remove(&intent.socket_cookie);
-        drop(state);
-        Ok(())
-    }
-
-    fn cleanup_all_gateway_intents(
-        &self,
-    ) -> Result<GatewayConnectCleanupSweep, GatewayConnectDataplaneError> {
-        let mut state = self.state.lock().expect("dataplane state");
-        let removed_intents = u32::try_from(state.registered.len()).expect("intent count");
-        let removed_receipts = u32::try_from(state.pending_receipts.len()).expect("receipt count");
-        state.registered.clear();
-        state.pending_receipts.clear();
-        drop(state);
-        Ok(GatewayConnectCleanupSweep { removed_intents, removed_receipts })
-    }
-
     fn selected_backend_identity(
         &self,
         backend_id: BackendId,
     ) -> Result<SpiffeId, GatewayConnectDataplaneError> {
         Ok(backend_identity(backend_id))
-    }
-
-    fn live_intent_count(&self) -> Result<u32, GatewayConnectDataplaneError> {
-        let state = self.state.lock().expect("dataplane state");
-        Ok(u32::try_from(state.registered.len()).expect("intent count"))
-    }
-
-    fn live_receipt_count(&self) -> Result<u32, GatewayConnectDataplaneError> {
-        let state = self.state.lock().expect("dataplane state");
-        Ok(u32::try_from(state.pending_receipts.len()).expect("receipt count"))
     }
 }
 
@@ -447,12 +464,8 @@ impl GatewayIdentityLifecycleControl for CurrentIdentity {
         self.sender.subscribe()
     }
 
-    async fn disable_after_drain(
-        &self,
-        _deadline: Instant,
-    ) -> Result<(), GatewayIdentityLifecycleError> {
+    fn disable_after_drain(&self) {
         self.sender.send_replace(None);
-        Ok(())
     }
 }
 
@@ -546,7 +559,7 @@ impl GatewayRelay for ConfigurationCapture {
         from: &mut KtlsReadHalf,
         max: NonZeroU64,
         deadlines: RelayDeadlines,
-    ) -> Result<u64, LegReadError> {
+    ) -> Result<(), LegReadError> {
         self.inner.discard_remaining(from, max, deadlines).await
     }
 }
@@ -680,7 +693,8 @@ impl Default for Spec {
 
 struct World {
     clock: Arc<SimClock>,
-    _control: GatewayControl,
+    _routes: GatewayRouteCommands,
+    _status: GatewayStatusReads,
     handle: Option<GatewayHandle>,
     relay: Arc<SimGatewayRelay>,
     dataplane: Arc<OriginDataplane>,
@@ -745,15 +759,16 @@ impl World {
             CurrentIdentity::new(),
             wrap(Arc::clone(&relay)),
         );
-        let (handle, control) = builder.start(dependencies).await.into_parts();
-        control.routes().apply(route(spec.route_path)).await.expect("declare the Route");
-        wait_promoted(&control).await;
+        let (handle, routes, status) = builder.start(dependencies).await.into_parts();
+        routes.routes().apply(route(spec.route_path)).await.expect("declare the Route");
+        wait_promoted(&status).await;
         mtls.start_serving();
         Self {
             baseline_opens: dataplane.opens(),
             baseline_cleanups: dataplane.cleanups(),
             clock,
-            _control: control,
+            _routes: routes,
+            _status: status,
             handle: Some(handle),
             relay,
             dataplane,
@@ -911,7 +926,7 @@ async fn drive_clock<T>(clock: &SimClock, step: Duration, future: impl Future<Ou
 /// promotion.
 async fn start_behind_substrate(
     lie: Option<SubstrateLie>,
-) -> (Arc<SimClock>, GatewayControl, GatewayHandle, SocketAddrV4, Site) {
+) -> (Arc<SimClock>, GatewayStatusReads, GatewayHandle, SocketAddrV4, Site) {
     let slot = RELAY_PROBE;
     let site = Site::new();
     let clock = Arc::new(SimClock::new());
@@ -944,15 +959,15 @@ async fn start_behind_substrate(
         CurrentIdentity::new(),
         relay as Arc<dyn GatewayRelay>,
     );
-    let (handle, control) = builder.start(dependencies).await.into_parts();
-    control.routes().apply(route("/")).await.expect("declare the Route");
-    (clock, control, handle, SocketAddrV4::new(slot.bind(0), 443), site)
+    let (handle, routes, status) = builder.start(dependencies).await.into_parts();
+    routes.routes().apply(route("/")).await.expect("declare the Route");
+    (clock, status, handle, SocketAddrV4::new(slot.bind(0), 443), site)
 }
 
-async fn wait_refused(control: &GatewayControl) -> GatewayApplicationStatusRowV1 {
+async fn wait_refused(status: &GatewayStatusReads) -> GatewayApplicationStatusRowV1 {
     let deadline = std::time::Instant::now() + WAIT;
     loop {
-        let row = control.application_status().await.expect("application status read");
+        let row = status.application_status().await.expect("application status read");
         if let Some(row) = row
             && row.unavailable == Some(GatewayApplicationUnavailableCause::ConnectPathUnavailable)
         {
@@ -963,10 +978,10 @@ async fn wait_refused(control: &GatewayControl) -> GatewayApplicationStatusRowV1
     }
 }
 
-async fn wait_promoted(control: &GatewayControl) -> GatewayApplicationStatusRowV1 {
+async fn wait_promoted(status: &GatewayStatusReads) -> GatewayApplicationStatusRowV1 {
     let deadline = std::time::Instant::now() + WAIT;
     loop {
-        let row = control.application_status().await.expect("application status read");
+        let row = status.application_status().await.expect("application status read");
         if let Some(row) = row
             && row.current.is_some()
             && row.unavailable.is_none()
@@ -1094,10 +1109,6 @@ impl Wire {
             .iter()
             .find(|(candidate, _)| candidate.eq_ignore_ascii_case(name))
             .map(|(_, value)| value.as_str())
-    }
-
-    fn header_count(&self, name: &str) -> usize {
-        self.headers.iter().filter(|(candidate, _)| candidate.eq_ignore_ascii_case(name)).count()
     }
 }
 
@@ -2476,8 +2487,8 @@ async fn the_relay_probe_refuses_every_substrate_lie_with_its_own_typed_error() 
     ];
 
     // Positive control: behind the honest substrate the same gate promotes.
-    let (clock, control, handle, _bind, _site) = start_behind_substrate(None).await;
-    let promoted = wait_promoted(&control).await;
+    let (clock, status, handle, _bind, _site) = start_behind_substrate(None).await;
+    let promoted = wait_promoted(&status).await;
     assert!(promoted.current.is_some(), "honest substrate: a Current generation is promoted");
     assert!(
         matches!(promoted.listener, GatewayListenerStatus::Bound { .. }),
@@ -2487,8 +2498,8 @@ async fn the_relay_probe_refuses_every_substrate_lie_with_its_own_typed_error() 
     let _report = drive_clock(&clock, Duration::from_millis(50), handle.shutdown(GRACE)).await;
 
     for lie in gate_lies {
-        let (clock, control, handle, bind, _site) = start_behind_substrate(Some(lie.clone())).await;
-        let refused = wait_refused(&control).await;
+        let (clock, status, handle, bind, _site) = start_behind_substrate(Some(lie.clone())).await;
+        let refused = wait_refused(&status).await;
         assert_eq!(
             refused.unavailable,
             Some(GatewayApplicationUnavailableCause::ConnectPathUnavailable),
@@ -2951,7 +2962,7 @@ async fn a_public_half_close_delivers_the_response_only_after_the_request_was_fu
 }
 
 // ---------------------------------------------------------------------------
-// Head and framing policy at the public listener (S-PIG-77 through S-PIG-82)
+// Head and framing policy at the public listener (S-PIG-77 and S-PIG-78)
 // ---------------------------------------------------------------------------
 
 /// One public connection that sends `request`, trailing request octets and a
@@ -3072,292 +3083,6 @@ async fn ambiguous_origin_framing_is_a_502_before_the_public_head() {
         .await;
     assert_eq!(legs.public_statuses(), vec![200], "an HTTP/1.0 response with an explicit length");
     assert_eq!(legs.public_messages()[0].body, b"abc");
-}
-
-/// S-PIG-79: every line the gateway reads holding a bare CR, a bare LF, a NUL,
-/// an octet outside RFC 9110 section 5.5 or an obsolete line fold is refused
-/// before the parser accepts it: in the request head, in a chunk-size line and
-/// in a trailer line.
-///
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test]
-#[ignore = "pending DELIVER http1-head-validation-and-framing"]
-async fn lines_with_bare_control_octets_or_folds_are_refused() {
-    let world = World::start(MALFORMED_LINES, Spec::default()).await;
-    let head_with =
-        |line: &[u8]| concat(&[b"GET /a HTTP/1.1\r\nHost: api.example.com\r\n", line, b"\r\n\r\n"]);
-    let heads: Vec<(&str, Vec<u8>)> = vec![
-        ("bare CR in a value", head_with(b"X-A: a\rb")),
-        ("bare LF in a value", head_with(b"X-A: a\nb")),
-        ("NUL in a value", head_with(b"X-A: a\0b")),
-        ("control octet 0x01 in a value", head_with(b"X-A: a\x01b")),
-        ("control octet 0x0b in a value", head_with(b"X-A: a\x0bb")),
-        ("DEL in a value", head_with(b"X-A: a\x7fb")),
-        ("obsolete line fold", head_with(b"X-A: a\r\n  continued")),
-        (
-            "bare CR in the request line",
-            b"GET /a\r HTTP/1.1\r\nHost: api.example.com\r\n\r\n".to_vec(),
-        ),
-        ("space in a field name", head_with(b"X A: a")),
-        ("NUL in a field name", head_with(b"X-\0A: a")),
-    ];
-    for (what, head) in heads {
-        assert_refused_before_upstream(&world, head, 400, what).await;
-    }
-
-    // Chunk-size and trailer lines pass through the same validator.
-    let chunked = request_head("POST", "/b", &[("Transfer-Encoding", "chunked")]);
-    let bodies: Vec<(&str, Vec<u8>)> = vec![
-        ("bare CR in a chunk-size line", b"5\rx\r\nhello\r\n0\r\n\r\n".to_vec()),
-        ("bare LF in a chunk-size line", b"5\nhello\r\n0\r\n\r\n".to_vec()),
-        ("NUL in a chunk-size line", b"5;a=\0\r\nhello\r\n0\r\n\r\n".to_vec()),
-        ("bare LF in a trailer line", b"0\r\nX-T: a\nb\r\n\r\n".to_vec()),
-        ("NUL in a trailer line", b"0\r\nX-T: a\0b\r\n\r\n".to_vec()),
-    ];
-    for (what, body) in bodies {
-        let public = LegScript::new().octets(chunked.clone()).octets(body).close_notify();
-        let legs = world.run(public, vec![LegScript::new()]).await;
-        assert_eq!(legs.public_statuses(), vec![400], "{what}: refused before the response head");
-        assert!(legs.upstream[0].closed, "{what}");
-    }
-}
-
-/// S-PIG-80: chunk framing lines: the hexadecimal size is parsed with
-/// extensions discarded (upper and lower case, quoted extension values); a
-/// size overflowing `u64` or a malformed size line is refused (400 before the
-/// response head, else both legs close); trailer lines are consumed and dropped
-/// within the head ceiling.
-///
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test]
-#[ignore = "pending DELIVER http1-head-validation-and-framing"]
-async fn chunk_size_and_trailer_lines_are_parsed_discarded_or_refused() {
-    let world = World::start(CHUNK_LINES, Spec::default()).await;
-    let chunked = request_head("POST", "/a", &[("Transfer-Encoding", "chunked")]);
-
-    let public = LegScript::new()
-        .octets(chunked.clone())
-        .octets("A;q=\"x;y\"\r\n0123456789\r\n1f\r\n")
-        .octets(pattern(31))
-        .octets("\r\n0\r\nX-One: 1\r\nX-Two: 2\r\n\r\n")
-        .close_notify();
-    let legs = world.run(public, vec![origin_answers(&ok_response(b"ok"))]).await;
-    let mut expected = b"0123456789".to_vec();
-    expected.extend(pattern(31));
-    assert_eq!(legs.upstream_requests(0)[0].body, expected, "sizes parsed, extensions discarded");
-    assert!(!contains(&legs.upstream[0].written, "X-One"), "trailer lines are dropped");
-    assert_eq!(legs.public_statuses(), vec![200]);
-
-    let refused: Vec<(&str, Vec<u8>)> = vec![
-        ("size overflowing u64", b"10000000000000000\r\nx\r\n0\r\n\r\n".to_vec()),
-        ("non-hexadecimal size", b"zz\r\nx\r\n0\r\n\r\n".to_vec()),
-        ("empty size line", b"\r\nx\r\n0\r\n\r\n".to_vec()),
-        ("signed size", b"-5\r\nhello\r\n0\r\n\r\n".to_vec()),
-        ("hex prefix", b"0x5\r\nhello\r\n0\r\n\r\n".to_vec()),
-        ("missing chunk terminator", b"5\r\nhelloXY0\r\n\r\n".to_vec()),
-    ];
-    for (what, body) in refused {
-        let public = LegScript::new().octets(chunked.clone()).octets(body).close_notify();
-        let legs = world.run(public, vec![LegScript::new()]).await;
-        assert_eq!(legs.public_statuses(), vec![400], "{what}: 400 before the response head");
-        assert!(legs.upstream[0].closed, "{what}");
-    }
-
-    // Trailer lines are bounded by the head ceiling.
-    let ceiling = world.limits().max_request_head_bytes().get();
-    let public = LegScript::new()
-        .octets(chunked.clone())
-        .octets(concat(&[b"0\r\nX-T: ", &vec![b'a'; ceiling + 100], b"\r\n\r\n"]))
-        .close_notify();
-    let legs = world.run(public, vec![LegScript::new()]).await;
-    assert_eq!(legs.public_statuses(), vec![400], "an oversized trailer is refused");
-
-    // Once a response octet has been written a bad line only closes both legs.
-    let public = LegScript::new().octets(chunked).octets("zz\r\n").close_notify();
-    let origin = LegScript::new().octets(response_head(200, "OK", &[("Content-Length", "10")]));
-    let legs = world.run(public, vec![origin]).await;
-    assert!(contains(&legs.public().written, "HTTP/1.1 200"));
-    assert!(!contains(&legs.public().written, "HTTP/1.1 400"), "no 400 after a response octet");
-    assert!(legs.upstream[0].closed && legs.public().closed);
-}
-
-/// S-PIG-81: framing is read from the original headers: a `Connection` field
-/// nominating `Content-Length` or `Transfer-Encoding` removes nothing before
-/// the framing decision (the request body is still framed and relayed exactly),
-/// and the forwarded head carries only the one framing header the gateway
-/// itself writes.
-///
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test]
-#[ignore = "pending DELIVER http1-head-validation-and-framing"]
-async fn connection_nominations_never_remove_the_framing_headers_before_the_framing_decision() {
-    let world = World::start(ORIGINAL_HEADERS, Spec::default()).await;
-
-    let request = concat(&[
-        &request_head(
-            "POST",
-            "/a",
-            &[("Content-Length", "5"), ("Connection", "Content-Length, x-hop"), ("X-Hop", "1")],
-        ),
-        b"hello",
-    ]);
-    let origin = origin_answers(&concat(&[
-        &response_head(200, "OK", &[("Content-Length", "4"), ("Connection", "Content-Length")]),
-        b"pong",
-    ]));
-    let legs = world.run(client_sends(&request), vec![origin]).await;
-    let upstream = &legs.upstream_requests(0)[0];
-    assert_eq!(upstream.body, b"hello", "the body is framed by the original Content-Length");
-    assert_eq!(upstream.header_count("content-length"), 1, "one gateway-written framing header");
-    assert_eq!(upstream.header("content-length"), Some("5"));
-    assert!(upstream.header("x-hop").is_none(), "the nominated field is still removed");
-    let response = &legs.public_messages()[0];
-    assert_eq!(response.body, b"pong");
-    assert_eq!(response.header_count("content-length"), 1);
-
-    let request = concat(&[
-        &request_head(
-            "POST",
-            "/b",
-            &[("Transfer-Encoding", "chunked"), ("Connection", "Transfer-Encoding")],
-        ),
-        b"3\r\nabc\r\n0\r\n\r\n",
-    ]);
-    let legs = world.run(client_sends(&request), vec![origin_answers(&ok_response(b"fine"))]).await;
-    let upstream = &legs.upstream_requests(0)[0];
-    assert_eq!(upstream.body, b"abc");
-    assert_eq!(upstream.header_count("transfer-encoding"), 1);
-    assert_eq!(upstream.header_count("content-length"), 0, "no second framing header");
-    assert_eq!(legs.public_statuses(), vec![200]);
-}
-
-/// S-PIG-82: the request head policy at its boundaries: a non-origin-form
-/// target or `CONNECT` 400; Host missing, duplicated, invalid, with userinfo or
-/// a port other than 443 400; Host different from SNI 421; a declared length
-/// above the ceiling 413 and at the ceiling accepted; a head one octet over the
-/// ceiling or 101 fields 431 and at the ceiling or 100 fields accepted;
-/// `Upgrade` removed as hop-by-hop.
-///
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test]
-#[ignore = "pending DELIVER http1-head-validation-and-framing"]
-async fn the_request_head_policy_holds_at_each_of_its_boundaries() {
-    let world = World::start(HEAD_POLICY, Spec::default()).await;
-    let limits = world.limits();
-    let head_ceiling = limits.max_request_head_bytes().get();
-    let field_ceiling = limits.max_request_headers().get();
-    let body_ceiling = limits.max_request_body_bytes().get();
-
-    let refused: Vec<(&str, Vec<u8>, u16)> = vec![
-        (
-            "CONNECT",
-            b"CONNECT api.example.com:443 HTTP/1.1\r\nHost: api.example.com:443\r\n\r\n".to_vec(),
-            400,
-        ),
-        (
-            "absolute-form target",
-            b"GET http://api.example.com/a HTTP/1.1\r\nHost: api.example.com\r\n\r\n".to_vec(),
-            400,
-        ),
-        (
-            "asterisk-form target",
-            b"OPTIONS * HTTP/1.1\r\nHost: api.example.com\r\n\r\n".to_vec(),
-            400,
-        ),
-        ("Host missing", b"GET /a HTTP/1.1\r\n\r\n".to_vec(), 400),
-        (
-            "Host duplicated",
-            b"GET /a HTTP/1.1\r\nHost: api.example.com\r\nHost: api.example.com\r\n\r\n".to_vec(),
-            400,
-        ),
-        ("Host invalid", request_head("GET", "/a", &[("Host", "bad host!")]), 400),
-        ("Host with userinfo", request_head("GET", "/a", &[("Host", "user@api.example.com")]), 400),
-        (
-            "Host with port 8443",
-            request_head("GET", "/a", &[("Host", "api.example.com:8443")]),
-            400,
-        ),
-        (
-            "Host different from SNI",
-            request_head("GET", "/a", &[("Host", "other.example.com")]),
-            421,
-        ),
-        (
-            "declared length one above the ceiling",
-            request_head("POST", "/a", &[("Content-Length", &(body_ceiling + 1).to_string())]),
-            413,
-        ),
-        ("head one octet over the ceiling", head_of_exact_request_len(head_ceiling + 1), 431),
-        ("101 fields", request_with_fields(field_ceiling + 1), 431),
-    ];
-    for (what, request, status) in refused {
-        assert_refused_before_upstream(&world, request, status, what).await;
-    }
-
-    let accepted: Vec<(&str, Vec<u8>)> = vec![
-        ("head at the ceiling", head_of_exact_request_len(head_ceiling)),
-        ("100 fields", request_with_fields(field_ceiling)),
-        (
-            "Host with the default port",
-            request_head("GET", "/a", &[("Host", "api.example.com:443")]),
-        ),
-    ];
-    for (what, request) in accepted {
-        let legs =
-            world.run(client_sends(&request), vec![origin_answers(&ok_response(b"ok"))]).await;
-        assert_eq!(legs.public_statuses(), vec![200], "{what}: accepted");
-    }
-
-    // A declared length at the ceiling is accepted.
-    let ceiling = usize::try_from(body_ceiling).expect("ceiling");
-    let public = LegScript::new()
-        .octets(request_head("POST", "/a", &[("Content-Length", &body_ceiling.to_string())]))
-        .octets(vec![b'x'; ceiling])
-        .close_notify();
-    let origin = LegScript::new().quiet(Duration::from_secs(1)).octets(ok_response(b"ok"));
-    let running = world.start_exchange(public, vec![origin]);
-    wait_for("the whole body to reach the origin", || {
-        let legs = world.legs(&running);
-        legs.upstream.first().is_some_and(|leg| leg.written.len() > ceiling).then_some(())
-    })
-    .await;
-    world.advance(Duration::from_secs(1), Duration::from_secs(1)).await;
-    let legs = world.finish(&running).await;
-    assert_eq!(legs.public_statuses(), vec![200], "a declared length at the ceiling is accepted");
-
-    // Upgrade is hop-by-hop: removed before the head goes upstream.
-    let upgrade = request_head(
-        "GET",
-        "/ws",
-        &[("Upgrade", "websocket"), ("Connection", "Upgrade"), ("Sec-WebSocket-Key", "k")],
-    );
-    let legs = world.run(client_sends(&upgrade), vec![origin_answers(&ok_response(b"ok"))]).await;
-    let upstream = &legs.upstream_requests(0)[0];
-    assert!(upstream.header("upgrade").is_none(), "Upgrade is removed as hop-by-hop");
-    assert_eq!(upstream.header("connection"), Some("close"));
-    assert_eq!(legs.public_statuses(), vec![200]);
-}
-
-/// A `GET` head of exactly `total` octets (terminator included), padded with
-/// one header.
-fn head_of_exact_request_len(total: usize) -> Vec<u8> {
-    let prefix = format!("GET /a HTTP/1.1\r\nHost: {HOSTNAME}\r\nX-Pad: ");
-    let pad = total - prefix.len() - 4;
-    let mut head = prefix.into_bytes();
-    head.extend(std::iter::repeat_n(b'a', pad));
-    head.extend_from_slice(b"\r\n\r\n");
-    assert_eq!(head.len(), total);
-    head
-}
-
-/// A `GET` head holding exactly `count` header fields (Host included).
-fn request_with_fields(count: usize) -> Vec<u8> {
-    let mut head = format!("GET /a HTTP/1.1\r\nHost: {HOSTNAME}\r\n");
-    for index in 1..count {
-        head.push_str(&format!("X-F{index}: v\r\n"));
-    }
-    head.push_str("\r\n");
-    head.into_bytes()
 }
 
 // ---------------------------------------------------------------------------

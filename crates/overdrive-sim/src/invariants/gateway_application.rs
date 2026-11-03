@@ -3,7 +3,7 @@
 //! `GatewayApplicationShutdownConverges`).
 //!
 //! Both evaluators drive the production owners only: Route commands through
-//! `GatewayControl::routes`, restart through `UnboundGatewayBuilder` ->
+//! `GatewayRouteCommands::routes`, restart through `UnboundGatewayBuilder` ->
 //! `GatewayBuilder::start` over the unchanged durable stores, retain/release
 //! through a real loopback connection to the bound public listener served by
 //! `SimGatewayRelay`, and shutdown through `GatewayHandle::shutdown`. The only
@@ -71,10 +71,12 @@ use overdrive_core::traits::dataplane::{Backend, Dataplane};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_gateway::application::{
-    GatewayControl, GatewayHandle, GatewayRuntimeDependencies, GatewayShutdownReport,
-    UnboundGatewayBuilder,
+    GatewayHandle, GatewayRouteCommands, GatewayRuntimeDependencies, GatewayShutdownReport,
+    GatewayStatusReads, UnboundGatewayBuilder,
 };
-use overdrive_gateway::ports::{GatewayConnectDataplane, GatewayIdentityActionTarget};
+use overdrive_gateway::ports::{
+    GatewayConnectCleanup, GatewayConnectDataplane, GatewayIdentityActionTarget,
+};
 use overdrive_gateway::runtime::GatewayLimits;
 use overdrive_gateway::{GatewayConfig, ManualCertifiedKeyConfig};
 use overdrive_host::ca::PublicCertifiedKeyAeadCodec;
@@ -329,7 +331,8 @@ struct Rig {
     _dir: TempDir,
     ports: Ports,
     _frontend_listener: std::net::TcpListener,
-    control: GatewayControl,
+    routes: GatewayRouteCommands,
+    status: GatewayStatusReads,
     handle: Option<GatewayHandle>,
     retained: Option<TcpStream>,
     shutdown: Option<tokio::task::JoinHandle<GatewayShutdownReport>>,
@@ -416,12 +419,13 @@ impl Rig {
             identity,
             backend_identity,
         };
-        let (handle, control) = compose(&ports).await?;
+        let (handle, routes, status) = compose(&ports).await?;
         Ok(Self {
             _dir: dir,
             ports,
             _frontend_listener: listener,
-            control,
+            routes,
+            status,
             handle: Some(handle),
             retained: None,
             shutdown: None,
@@ -429,7 +433,7 @@ impl Rig {
     }
 
     async fn status(&self) -> Result<Option<GatewayApplicationStatusRowV1>, String> {
-        self.control
+        self.status
             .application_status()
             .await
             .map_err(|error| format!("application status read: {error}"))
@@ -454,7 +458,14 @@ impl Rig {
     }
 
     fn live_counts(&self) -> (Option<u32>, Option<u32>) {
-        (self.ports.connect.live_intent_count().ok(), self.ports.connect.live_receipt_count().ok())
+        (
+            self.ports.connect.live_intent_count().ok(),
+            self.ports
+                .connect
+                .live_receipts()
+                .ok()
+                .and_then(|receipts| u32::try_from(receipts.len()).ok()),
+        )
     }
 
     /// Open one real client connection to the public listener, scripted as a
@@ -532,15 +543,18 @@ impl Rig {
         if !report.is_clean() {
             return Err(format!("restart's shutdown was not clean: {report:?}"));
         }
-        let (handle, control) = compose(&self.ports).await?;
-        self.control = control;
+        let (handle, routes, status) = compose(&self.ports).await?;
+        self.routes = routes;
+        self.status = status;
         self.handle = Some(handle);
         Ok(())
     }
 }
 
 /// Compose the production owner over the durable stores and Sim ports.
-async fn compose(ports: &Ports) -> Result<(GatewayHandle, GatewayControl), String> {
+async fn compose(
+    ports: &Ports,
+) -> Result<(GatewayHandle, GatewayRouteCommands, GatewayStatusReads), String> {
     let config = GatewayConfig::new(
         ports.addresses.bind,
         ManualCertifiedKeyConfig::new(
@@ -841,7 +855,7 @@ async fn run_case(
         match input {
             GatewayApplicationSimInput::ApplyRoute(route) => {
                 applies += 1;
-                rig.control
+                rig.routes
                     .routes()
                     .apply(route.clone())
                     .await
@@ -892,7 +906,7 @@ async fn run_case(
                 observer.observe(&rig, "connection retained").await?;
             }
             GatewayApplicationSimInput::WithdrawRoute(id) => {
-                rig.control
+                rig.routes
                     .routes()
                     .withdraw(id.clone())
                     .await

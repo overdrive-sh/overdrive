@@ -464,7 +464,8 @@ pub struct AppState {
     /// The public-ingress gateway composition: the identity read the
     /// hydration boundary lends to `GatewaySvidLifecycle`, the identity action
     /// composition every action dispatcher consumes, and the optional
-    /// `GatewayControl` the Route and status handlers use. Enabled when
+    /// `GatewayRouteCommands` and `GatewayStatusReads` the Route and status
+    /// handlers use. Enabled when
     /// `ServerConfig.gateway` is set, otherwise the canonical disabled
     /// composition. `AppState::new` always stores the disabled composition.
     pub gateway: GatewayAppStateComposition,
@@ -4040,10 +4041,8 @@ async fn boot_server(
 
     // Public-ingress gateway, boot step G1: Disabled when `config.gateway` is
     // `None`; otherwise the one `GatewayIdentitySlot`, its action and lifecycle
-    // handles and `GatewayControl`. The enabled composition (steps G1-G4) is
-    // DELIVER's and waits for two design rulings: the placement of
-    // `GatewayClientMtlsFactory` (P-20), and how `AppState` obtains the
-    // `GatewayControl` that `StartedGateway::into_parts` yields only at G4.
+    // handles, `GatewayRouteCommands` and `GatewayStatusReads`. The enabled
+    // composition (steps G1-G4) is DELIVER's.
     #[allow(
         clippy::todo,
         reason = "public-ingress DISTILL scaffold: the enabled gateway composition is DELIVER's"

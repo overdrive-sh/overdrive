@@ -9,10 +9,8 @@
 //! through the same `HostGatewayRelay` and the leg sealed as a
 //! `GatewayUpstream`; any earlier failure arms nothing and writes no body byte.
 //!
-//! SCAFFOLD: true. `HostGatewayClientMtls::new` and the port implementation are
-//! the pinned shapes. `HostGatewayClientMtlsFactory` is NOT scaffolded: the
-//! `GatewayClientMtlsFactory` / `GatewayClientMtlsDeps` pin cannot be
-//! implemented as written (proposal P-20, a crate cycle).
+//! SCAFFOLD: true. `HostGatewayClientMtls::new`, the port implementation and
+//! `HostGatewayClientMtlsFactory` (R-20) are the pinned shapes.
 
 #![allow(
     clippy::todo,
@@ -33,11 +31,11 @@ use std::time::Instant;
 use async_trait::async_trait;
 use overdrive_core::id::SpiffeId;
 use overdrive_gateway::ports::{
-    GatewayClientMtls, GatewayClientMtlsError, GatewayUpstream, GatewayUpstreamSeal,
+    GatewayClientIdentityAccess, GatewayClientMtls, GatewayClientMtlsDeps, GatewayClientMtlsError,
+    GatewayClientMtlsFactory, GatewayUpstream, GatewayUpstreamSeal,
 };
 use overdrive_gateway::runtime::limits::GatewayLimits;
 
-use super::gateway_identity::GatewayClientIdentityAccess;
 use crate::gateway_relay::HostGatewayRelay;
 
 /// The Host exact-peer client. Called once by `serve` composition; supplied
@@ -66,5 +64,23 @@ impl GatewayClientMtls for HostGatewayClientMtls {
         deadline: Instant,
     ) -> Result<GatewayUpstream, GatewayClientMtlsError> {
         todo!("SCAFFOLD: HostGatewayClientMtls::authenticate")
+    }
+}
+
+/// Builds [`HostGatewayClientMtls`] over the one [`HostGatewayRelay`] the
+/// composition shares with `GatewayAdapters.relay`.
+pub struct HostGatewayClientMtlsFactory {
+    relay: Arc<HostGatewayRelay>,
+}
+
+impl HostGatewayClientMtlsFactory {
+    pub fn new(relay: Arc<HostGatewayRelay>) -> Self {
+        Self { relay }
+    }
+}
+
+impl GatewayClientMtlsFactory for HostGatewayClientMtlsFactory {
+    fn client_mtls(&self, deps: GatewayClientMtlsDeps) -> Arc<dyn GatewayClientMtls> {
+        todo!("SCAFFOLD: HostGatewayClientMtlsFactory::client_mtls")
     }
 }

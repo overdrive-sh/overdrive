@@ -5,7 +5,7 @@
 //! same surface `cargo dst --only <name>` drives once the pending activation key
 //! `gateway-application-invariants` lands. The evaluators compose the real
 //! `GatewayApplicationOwner` through `UnboundGatewayBuilder` -> `GatewayBuilder`
-//! -> `GatewayControl` / `GatewayHandle` over a real redb Route store and the Sim
+//! -> `GatewayRouteCommands` / `GatewayStatusReads` / `GatewayHandle` over a real redb Route store and the Sim
 //! relay, connect dataplane, client mTLS and identity ports; the only fault is the
 //! Sim connect-probe hold/release. Neither invariant is in `Invariant::ALL`
 //! during DISTILL, so the default catalogue and its expected-name arrays are

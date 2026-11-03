@@ -3,18 +3,18 @@
 //! `GatewayIdentitySlot` holds exactly one non-allocation SVID generation for
 //! the node's gateway subject, under the existing dataplane mTLS owner. It
 //! never enters `IdentityMgr` or the generic `IdentityRead`. Its lock also owns
-//! a checked process-local desired epoch: the constructor's epoch one means
-//! enabled; `begin_disable` increments the epoch and empties the slot in the
-//! same call (R-4: disable is a synchronous clear); `hold_audited` rejects an
+//! a process-local desired epoch: the constructor's epoch one means
+//! enabled; `begin_disable` increments the epoch (a private checked add whose
+//! overflow is `unreachable!()`, R-30) and empties the slot in the same call
+//! (R-4: disable is a synchronous clear); `hold_audited` rejects an
 //! action carrying a stale epoch, so an in-flight issue cannot re-hold after a
 //! disable.
 //!
 //! SCAFFOLD: true. Only the shapes the DESIGN pins ("Exact identity,
-//! connector and authenticated-stream ports") are present, with
-//! `GatewayClientIdentityAccess` where the DESIGN currently pins it (this
-//! module). Its placement relative to `GatewayClientMtlsDeps` is the open
-//! proposal P-20 (a crate cycle); the factory and deps types are not
-//! scaffolded anywhere.
+//! connector and authenticated-stream ports") are present.
+//! `GatewayClientIdentityAccess` and its source trait are defined in
+//! `overdrive-gateway::ports` (R-20); this module owns the private source the
+//! slot and the injected clock form behind `client_access`.
 
 #![allow(
     clippy::todo,
@@ -30,15 +30,14 @@
 use std::sync::Arc;
 
 use overdrive_core::gateway_identity::{
-    GatewayIdentityDesired, GatewayIdentityEpoch, GatewayIdentityEpochError, GatewayIdentityFacts,
-    GatewayIdentityView,
+    GatewayIdentityDesired, GatewayIdentityEpoch, GatewayIdentityFacts, GatewayIdentityView,
 };
 use overdrive_core::id::NodeId;
 use overdrive_core::traits::ca::{SvidMaterial, TrustBundle};
 use overdrive_core::traits::clock::Clock;
 use overdrive_gateway::ports::{
-    GatewayClientMtlsError, GatewayIdentityActionTarget, GatewayIdentityLifecycleTarget,
-    GatewayIdentityMutationOutcome,
+    GatewayClientIdentityAccess, GatewayClientIdentitySource, GatewayClientMtlsError,
+    GatewayIdentityActionTarget, GatewayIdentityLifecycleTarget, GatewayIdentityMutationOutcome,
 };
 use tokio::sync::watch;
 
@@ -83,8 +82,10 @@ impl GatewayIdentitySlot {
         todo!("SCAFFOLD: GatewayIdentitySlot::lifecycle_target")
     }
 
-    /// Bump the epoch and empty the slot in the same call.
-    pub(crate) fn begin_disable(&self) -> Result<GatewayIdentityEpoch, GatewayIdentityEpochError> {
+    /// Bump the epoch and empty the slot in the same call. Infallible (R-30):
+    /// the epoch is a u64; the private checked add overflowing is
+    /// `unreachable!()`.
+    pub(crate) fn begin_disable(&self) -> GatewayIdentityEpoch {
         todo!("SCAFFOLD: GatewayIdentitySlot::begin_disable")
     }
 
@@ -138,27 +139,30 @@ impl GatewayIdentityLifecycleTarget for GatewayIdentityLifecycleHandle {
         todo!("SCAFFOLD: GatewayIdentityLifecycleHandle::subscribe")
     }
 
-    fn begin_disable(&self) -> Result<GatewayIdentityEpoch, GatewayIdentityEpochError> {
+    fn begin_disable(&self) -> GatewayIdentityEpoch {
         todo!("SCAFFOLD: GatewayIdentityLifecycleHandle::begin_disable")
     }
 }
 
-/// Borrowing capability for the exact-peer client.
+/// The dataplane-private source `client_access` wraps: the slot and the
+/// injected clock.
 ///
-/// Runs a non-async closure while the slot keeps the held SVID borrowed. It
-/// reads the injected clock, rejects absent or expired material, and cannot
-/// return or clone the SVID, key or trust bundle.
-pub struct GatewayClientIdentityAccess {
+/// Runs the closure while the slot keeps the held SVID borrowed. It reads the
+/// injected clock, rejects absent or expired material, and cannot return or
+/// clone the SVID, key or trust bundle.
+struct SlotIdentitySource {
     slot: Arc<GatewayIdentitySlot>,
     clock: Arc<dyn Clock>,
 }
 
-impl GatewayClientIdentityAccess {
-    /// `IdentityAbsent` / `IdentityExpired` when no time-usable material is held.
-    pub(crate) fn with_current<R>(
+impl GatewayClientIdentitySource for SlotIdentitySource {
+    fn with_current(
         &self,
-        use_material: impl FnOnce(&SvidMaterial, &TrustBundle) -> Result<R, GatewayClientMtlsError>,
-    ) -> Result<R, GatewayClientMtlsError> {
-        todo!("SCAFFOLD: GatewayClientIdentityAccess::with_current")
+        use_material: &mut dyn FnMut(
+            &SvidMaterial,
+            &TrustBundle,
+        ) -> Result<(), GatewayClientMtlsError>,
+    ) -> Result<(), GatewayClientMtlsError> {
+        todo!("SCAFFOLD: SlotIdentitySource::with_current")
     }
 }

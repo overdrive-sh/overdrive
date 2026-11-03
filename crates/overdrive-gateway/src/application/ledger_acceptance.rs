@@ -6,6 +6,7 @@
 //! `GatewayConnectDataplane` double used by `retry_all`.
 #![allow(clippy::doc_markdown, reason = "CONTRACT_SHAPE is required metadata")]
 
+use std::collections::BTreeMap;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -39,6 +40,32 @@ impl RecordingDataplane {
     }
 }
 
+impl GatewayConnectCleanup for RecordingDataplane {
+    fn cleanup(&self, intent: &GatewayConnectIntent) -> Result<(), GatewayConnectDataplaneError> {
+        self.cleaned.lock().expect("cleanup log").push(intent.clone());
+        if self.cleanup_failing.load(Ordering::SeqCst) {
+            return Err(GatewayConnectDataplaneError::Cleanup);
+        }
+        Ok(())
+    }
+
+    fn cleanup_all_gateway_intents(
+        &self,
+    ) -> Result<GatewayConnectCleanupSweep, GatewayConnectDataplaneError> {
+        Ok(GatewayConnectCleanupSweep { removed_intents: 0, removed_receipts: 0 })
+    }
+
+    fn live_intent_count(&self) -> Result<u32, GatewayConnectDataplaneError> {
+        Ok(0)
+    }
+
+    fn live_receipts(
+        &self,
+    ) -> Result<BTreeMap<SocketCookie, GatewaySelectionReceipt>, GatewayConnectDataplaneError> {
+        Ok(BTreeMap::new())
+    }
+}
+
 #[async_trait]
 impl GatewayConnectDataplane for RecordingDataplane {
     async fn probe(
@@ -48,41 +75,26 @@ impl GatewayConnectDataplane for RecordingDataplane {
     ) -> Result<(), GatewayConnectDataplaneError> {
         Ok(())
     }
+
     fn open_upstream(
         &self,
         _key: ServiceKey,
     ) -> Result<PreparedUpstream, GatewayConnectDataplaneError> {
         Err(GatewayConnectDataplaneError::Unavailable)
     }
+
     fn take_receipt(
         &self,
         _intent: &GatewayConnectIntent,
     ) -> Result<GatewaySelectionReceipt, GatewayConnectDataplaneError> {
         Err(GatewayConnectDataplaneError::ReceiptMissing)
     }
-    fn cleanup(&self, intent: &GatewayConnectIntent) -> Result<(), GatewayConnectDataplaneError> {
-        self.cleaned.lock().expect("cleanup log").push(intent.clone());
-        if self.cleanup_failing.load(Ordering::SeqCst) {
-            return Err(GatewayConnectDataplaneError::Cleanup);
-        }
-        Ok(())
-    }
-    fn cleanup_all_gateway_intents(
-        &self,
-    ) -> Result<GatewayConnectCleanupSweep, GatewayConnectDataplaneError> {
-        Ok(GatewayConnectCleanupSweep { removed_intents: 0, removed_receipts: 0 })
-    }
+
     fn selected_backend_identity(
         &self,
         backend_id: BackendId,
     ) -> Result<SpiffeId, GatewayConnectDataplaneError> {
         Err(GatewayConnectDataplaneError::BackendIdentityMissing { backend_id })
-    }
-    fn live_intent_count(&self) -> Result<u32, GatewayConnectDataplaneError> {
-        Ok(0)
-    }
-    fn live_receipt_count(&self) -> Result<u32, GatewayConnectDataplaneError> {
-        Ok(0)
     }
 }
 

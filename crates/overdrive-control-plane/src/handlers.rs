@@ -1439,9 +1439,9 @@ pub async fn node_list(
 //
 // SCAFFOLD: true. The three paths, their request/response shapes and their
 // `AppState` accessors are the DESIGN-pinned surface. Behaviour is DELIVER's:
-// POST and DELETE check `state.gateway.control()` first and answer the typed
+// POST and DELETE check `state.gateway.routes()` first and answer the typed
 // `ControlPlaneError::GatewayDisabled` before any parse, owner or store access;
-// `GET /v1/gateway/status` reads only through the two redacted `GatewayControl`
+// `GET /v1/gateway/status` reads only through the two redacted `GatewayStatusReads`
 // point reads. Every body fails with SCAFFOLD text until then.
 // ---------------------------------------------------------------------------
 

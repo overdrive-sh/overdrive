@@ -2,10 +2,11 @@
 //!
 //! One `Clone`-safe composition owns the identity read the hydration boundary
 //! lends to `GatewaySvidLifecycle`, the identity action target every action
-//! dispatcher consumes, and the optional `GatewayControl` the Route and status
-//! handlers use. A disabled `serve` holds the canonical disabled composition: an
-//! empty identity read (epoch one, no subject, no current facts), a disabled
-//! action composition and no control handle. Every existing non-gateway caller
+//! dispatcher consumes, and the optional `GatewayRouteCommands` and
+//! `GatewayStatusReads` the Route and status handlers use. A disabled `serve`
+//! holds the canonical disabled composition: an empty identity read (epoch one,
+//! no subject, no current facts), a disabled action composition and no route or
+//! status handle. Every existing non-gateway caller
 //! receives it; only the boot composition constructs the enabled form.
 //!
 //! The shapes here are the DESIGN-pinned total composition surface (D5 items 6
@@ -17,7 +18,7 @@ use std::sync::Arc;
 use overdrive_core::gateway_identity::{
     GatewayIdentityDesired, GatewayIdentityEpoch, GatewayIdentityFacts, GatewayIdentityView,
 };
-use overdrive_gateway::application::GatewayControl;
+use overdrive_gateway::application::{GatewayRouteCommands, GatewayStatusReads};
 use overdrive_gateway::ports::GatewayIdentityActionTarget;
 
 /// The identity action target the action shim's `IssueGatewaySvid` arm uses:
@@ -64,23 +65,25 @@ impl GatewayIdentityActionComposition {
 pub struct GatewayIdentityDisabled;
 
 /// What `AppState` carries for the gateway: identity read, identity actions and
-/// the optional control handle.
+/// the optional route-command and status-read handles.
 #[derive(Clone)]
 pub struct GatewayAppStateComposition {
     identity_view: Arc<dyn GatewayIdentityView>,
     identity_actions: GatewayIdentityActionComposition,
-    control: Option<GatewayControl>,
+    routes: Option<GatewayRouteCommands>,
+    status: Option<GatewayStatusReads>,
 }
 
 impl GatewayAppStateComposition {
     /// The canonical disabled composition: one `DisabledGatewayIdentityRead`,
-    /// the disabled action composition and no control handle.
+    /// the disabled action composition and no route or status handle.
     #[must_use]
     pub fn disabled() -> Self {
         Self {
             identity_view: DisabledGatewayIdentityRead::canonical(),
             identity_actions: GatewayIdentityActionComposition::disabled(),
-            control: None,
+            routes: None,
+            status: None,
         }
     }
 
@@ -89,9 +92,10 @@ impl GatewayAppStateComposition {
     pub(crate) fn enabled(
         identity_view: Arc<dyn GatewayIdentityView>,
         identity_actions: GatewayIdentityActionComposition,
-        control: GatewayControl,
+        routes: GatewayRouteCommands,
+        status: GatewayStatusReads,
     ) -> Self {
-        Self { identity_view, identity_actions, control: Some(control) }
+        Self { identity_view, identity_actions, routes: Some(routes), status: Some(status) }
     }
 
     /// The gateway-identity read port the hydration boundary lends out.
@@ -106,10 +110,16 @@ impl GatewayAppStateComposition {
         &self.identity_actions
     }
 
-    /// The control handle; `None` when the gateway is disabled.
+    /// The Route command port; `None` when the gateway is disabled.
     #[must_use]
-    pub const fn control(&self) -> Option<&GatewayControl> {
-        self.control.as_ref()
+    pub const fn routes(&self) -> Option<&GatewayRouteCommands> {
+        self.routes.as_ref()
+    }
+
+    /// The redacted status read port; `None` when the gateway is disabled.
+    #[must_use]
+    pub const fn status(&self) -> Option<&GatewayStatusReads> {
+        self.status.as_ref()
     }
 }
 

@@ -316,11 +316,8 @@ impl IdentityConfDriver {
         Ok(())
     }
 
-    fn disable(&self) -> Result {
-        let deadline = Instant::now() + Duration::from_secs(1);
-        self.runtime
-            .block_on(self.owners.lifecycle.disable_after_drain(deadline))
-            .map_err(|error| anyhow!("disable_after_drain failed: {error}"))
+    fn disable(&self) {
+        self.owners.lifecycle.disable_after_drain();
     }
 
     fn advance_time(&self) {
@@ -400,7 +397,7 @@ impl Driver for IdentityConfDriver {
             init => self.init(),
             submit_evaluation => self.submit_evaluation()?,
             issue_complete(epoch: i64) => self.issue_complete(epoch)?,
-            disable => self.disable()?,
+            disable => self.disable(),
             advance_time => self.advance_time(),
             audit_fail => self.audit_fail(),
             restart => self.restart()?,

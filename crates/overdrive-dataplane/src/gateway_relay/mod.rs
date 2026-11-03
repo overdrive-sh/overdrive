@@ -33,9 +33,33 @@ use async_trait::async_trait;
 use overdrive_core::traits::clock::Clock;
 use overdrive_gateway::ports::{
     AcceptedPublicLeg, GatewayRelay, HeadTerminator, KtlsReadHalf, KtlsWriteHalf, LegReadError,
-    LegWriteError, PublicHandshakeError, ReadDeadlines, RelayDeadlines, RelayError,
+    LegWriteError, PublicHandshakeError, ReadDeadlines, RelayDeadlines, RelayError, RelayPipeError,
     RelayProbeError, ThroughBytes,
 };
+
+/// The relay pipe's capacity floor (ADR-0246): the only runtime outcomes of the
+/// pipe typestate are a failed creation or a capacity that reads back below it.
+pub(crate) const PIPE_FLOOR: usize = 65_536;
+
+/// A capacity read back from `F_GETPIPE_SZ`; it cannot be below [`PIPE_FLOOR`].
+pub(crate) struct PipeCapacity(usize);
+
+impl PipeCapacity {
+    /// `Err(CapacityBelowFloor { got })` below the floor.
+    pub(crate) fn new(read_back: usize) -> Result<Self, RelayPipeError> {
+        todo!("SCAFFOLD: PipeCapacity::new")
+    }
+
+    pub(crate) fn get(&self) -> usize {
+        todo!("SCAFFOLD: PipeCapacity::get")
+    }
+}
+
+/// `min(octets owed, capacity)`: the length of the next splice into an empty
+/// pipe (never above either).
+pub(crate) fn splice_in_len(owed: NonZeroU64, capacity: PipeCapacity) -> NonZeroU64 {
+    todo!("SCAFFOLD: splice_in_len")
+}
 
 /// Host kernel-TLS relay. One instance serves both gateway legs: the public
 /// legs it accepts and the authenticated upstream legs the gateway-client mTLS
@@ -121,7 +145,7 @@ impl GatewayRelay for HostGatewayRelay {
         from: &mut KtlsReadHalf,
         max: NonZeroU64,
         deadlines: RelayDeadlines,
-    ) -> Result<u64, LegReadError> {
+    ) -> Result<(), LegReadError> {
         todo!("SCAFFOLD: HostGatewayRelay::discard_remaining")
     }
 }

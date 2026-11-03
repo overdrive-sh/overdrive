@@ -228,7 +228,8 @@ pub mod vm_reclamation;
 
 // public-ingress-gateway (ADR-0222) — the two Gateway Application lifecycle
 // invariants. They drive the real `GatewayApplicationOwner` through
-// `GatewayControl`, `GatewayBuilder::start` and `GatewayHandle::shutdown`;
+// `GatewayRouteCommands`, `GatewayStatusReads`, `GatewayBuilder::start` and
+// `GatewayHandle::shutdown`;
 // the evaluator bodies live in `crate::invariants::gateway_application`.
 // Neither variant is in `Invariant::ALL` until the pending activation key
 // `gateway-application-invariants` lands.

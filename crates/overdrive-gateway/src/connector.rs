@@ -101,7 +101,7 @@ mod acceptance {
         reason = "CONTRACT_SHAPE metadata and exhaustive closed-error matrices"
     )]
 
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::os::fd::OwnedFd;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -118,8 +118,8 @@ mod acceptance {
     use super::*;
     use crate::application::{GatewayCleanupFailure, GatewayCleanupReservation};
     use crate::ports::{
-        GatewayConnectCleanupSweep, GatewayConnectIntent, GatewaySelectionReceipt, KtlsArmError,
-        PreparedUpstream,
+        GatewayConnectCleanup, GatewayConnectCleanupSweep, GatewayConnectIntent,
+        GatewaySelectionReceipt, KtlsArmError, PreparedUpstream,
     };
 
     const SELECTED_PEER: &str = "spiffe://overdrive.local/workload/api/alloc/api-0";
@@ -150,6 +150,84 @@ mod acceptance {
         receipts_taken: AtomicU32,
         identity_lookups: Mutex<Vec<BackendId>>,
         cleanup_intents: Mutex<Vec<GatewayConnectIntent>>,
+    }
+
+    impl ConnectDataplane {
+        /// The receipt the hook records for `intent` under this double's mode.
+        fn receipt_for(&self, intent: &GatewayConnectIntent) -> GatewaySelectionReceipt {
+            let backend_id = BackendId::new(7).expect("BackendId");
+            match self.receipt_mode {
+                ReceiptMode::Missing => unreachable!("a missing receipt is never made live"),
+                ReceiptMode::OtherServiceKey => {
+                    let other = ServiceFrontend::new(
+                        ServiceVip::new("10.96.0.2".parse().expect("IP")).expect("VIP"),
+                        std::num::NonZeroU16::new(8081).expect("port"),
+                        Proto::Tcp,
+                    )
+                    .expect("frontend");
+                    GatewaySelectionReceipt::Selected {
+                        socket_cookie: intent.socket_cookie,
+                        service_key: ServiceKey::from_frontend(other),
+                        backend_id,
+                    }
+                }
+                ReceiptMode::Selected => GatewaySelectionReceipt::Selected {
+                    socket_cookie: intent.socket_cookie,
+                    service_key: intent.service_key,
+                    backend_id,
+                },
+                ReceiptMode::NoBackend => GatewaySelectionReceipt::NoBackend {
+                    socket_cookie: intent.socket_cookie,
+                    service_key: intent.service_key,
+                },
+            }
+        }
+    }
+
+    impl GatewayConnectCleanup for ConnectDataplane {
+        fn cleanup(
+            &self,
+            intent: &GatewayConnectIntent,
+        ) -> Result<(), GatewayConnectDataplaneError> {
+            self.cleanup_intents.lock().expect("cleanup log").push(intent.clone());
+            if self.cleanup_failing.load(Ordering::SeqCst) {
+                return Err(GatewayConnectDataplaneError::Cleanup);
+            }
+            self.registered.lock().expect("registry").remove(intent);
+            self.receipt_live.lock().expect("receipts").remove(&intent.socket_cookie);
+            Ok(())
+        }
+
+        fn cleanup_all_gateway_intents(
+            &self,
+        ) -> Result<GatewayConnectCleanupSweep, GatewayConnectDataplaneError> {
+            let removed_intents = u32::try_from(
+                std::mem::take(&mut *self.registered.lock().expect("registry")).len(),
+            )
+            .expect("small count");
+            let removed_receipts = u32::try_from(
+                std::mem::take(&mut *self.receipt_live.lock().expect("receipts")).len(),
+            )
+            .expect("small count");
+            Ok(GatewayConnectCleanupSweep { removed_intents, removed_receipts })
+        }
+
+        fn live_intent_count(&self) -> Result<u32, GatewayConnectDataplaneError> {
+            Ok(u32::try_from(self.registered.lock().expect("registry").len()).expect("count"))
+        }
+
+        fn live_receipts(
+            &self,
+        ) -> Result<BTreeMap<SocketCookie, GatewaySelectionReceipt>, GatewayConnectDataplaneError>
+        {
+            let live = self.receipt_live.lock().expect("receipts");
+            let registered = self.registered.lock().expect("registry");
+            Ok(registered
+                .iter()
+                .filter(|intent| live.contains(&intent.socket_cookie))
+                .map(|intent| (intent.socket_cookie, self.receipt_for(intent)))
+                .collect())
+        }
     }
 
     #[async_trait]
@@ -192,59 +270,7 @@ mod acceptance {
             if !self.receipt_live.lock().expect("receipts").remove(&intent.socket_cookie) {
                 return Err(GatewayConnectDataplaneError::ReceiptMissing);
             }
-            let backend_id = BackendId::new(7).expect("BackendId");
-            Ok(match self.receipt_mode {
-                ReceiptMode::Missing => unreachable!("a missing receipt is never made live"),
-                ReceiptMode::OtherServiceKey => {
-                    let other = ServiceFrontend::new(
-                        ServiceVip::new("10.96.0.2".parse().expect("IP")).expect("VIP"),
-                        std::num::NonZeroU16::new(8081).expect("port"),
-                        Proto::Tcp,
-                    )
-                    .expect("frontend");
-                    GatewaySelectionReceipt::Selected {
-                        socket_cookie: intent.socket_cookie,
-                        service_key: ServiceKey::from_frontend(other),
-                        backend_id,
-                    }
-                }
-                ReceiptMode::Selected => GatewaySelectionReceipt::Selected {
-                    socket_cookie: intent.socket_cookie,
-                    service_key: intent.service_key,
-                    backend_id,
-                },
-                ReceiptMode::NoBackend => GatewaySelectionReceipt::NoBackend {
-                    socket_cookie: intent.socket_cookie,
-                    service_key: intent.service_key,
-                },
-            })
-        }
-
-        fn cleanup(
-            &self,
-            intent: &GatewayConnectIntent,
-        ) -> Result<(), GatewayConnectDataplaneError> {
-            self.cleanup_intents.lock().expect("cleanup log").push(intent.clone());
-            if self.cleanup_failing.load(Ordering::SeqCst) {
-                return Err(GatewayConnectDataplaneError::Cleanup);
-            }
-            self.registered.lock().expect("registry").remove(intent);
-            self.receipt_live.lock().expect("receipts").remove(&intent.socket_cookie);
-            Ok(())
-        }
-
-        fn cleanup_all_gateway_intents(
-            &self,
-        ) -> Result<GatewayConnectCleanupSweep, GatewayConnectDataplaneError> {
-            let removed_intents = u32::try_from(
-                std::mem::take(&mut *self.registered.lock().expect("registry")).len(),
-            )
-            .expect("small count");
-            let removed_receipts = u32::try_from(
-                std::mem::take(&mut *self.receipt_live.lock().expect("receipts")).len(),
-            )
-            .expect("small count");
-            Ok(GatewayConnectCleanupSweep { removed_intents, removed_receipts })
+            Ok(self.receipt_for(intent))
         }
 
         fn selected_backend_identity(
@@ -256,14 +282,6 @@ mod acceptance {
                 return Err(GatewayConnectDataplaneError::BackendIdentityMissing { backend_id });
             }
             Ok(SpiffeId::new(SELECTED_PEER).expect("selected peer"))
-        }
-
-        fn live_intent_count(&self) -> Result<u32, GatewayConnectDataplaneError> {
-            Ok(u32::try_from(self.registered.lock().expect("registry").len()).expect("count"))
-        }
-
-        fn live_receipt_count(&self) -> Result<u32, GatewayConnectDataplaneError> {
-            Ok(u32::try_from(self.receipt_live.lock().expect("receipts").len()).expect("count"))
         }
     }
 
@@ -428,7 +446,7 @@ mod acceptance {
     /// cleanup of the exact intent that was registered.
     fn assert_fail_closed_residue_is_empty(fx: &Fixture) {
         assert_eq!(fx.dataplane.live_intent_count().expect("intent count"), 0);
-        assert_eq!(fx.dataplane.live_receipt_count().expect("receipt count"), 0);
+        assert_eq!(fx.dataplane.live_receipts().expect("receipt count").len(), 0);
         assert_eq!(fx.ledger.len(), 0);
         assert_eq!(count(&fx.dataplane.opens), 1, "exactly one upstream was prepared");
         assert_eq!(
@@ -595,7 +613,7 @@ mod acceptance {
         ));
         assert_eq!(count(&fx.dataplane.opens), 0, "open_upstream is never called");
         assert_eq!(fx.dataplane.live_intent_count().expect("intent count"), 0);
-        assert_eq!(fx.dataplane.live_receipt_count().expect("receipt count"), 0);
+        assert_eq!(fx.dataplane.live_receipts().expect("receipt count").len(), 0);
         assert_eq!(count(&fx.mtls.attempts), 0);
         assert!(fx.dataplane.cleanup_intents.lock().expect("cleanup log").is_empty());
         assert_eq!(fx.ledger.len(), 128, "the refusal consumed no slot");
@@ -688,7 +706,7 @@ mod acceptance {
         assert_eq!(cleaned.len(), 2, "one failed attempt and one retry");
         assert_eq!(cleaned[0], cleaned[1], "the retry cleans the exact retained intent");
         assert_eq!(fx.dataplane.live_intent_count().expect("intent count"), 0);
-        assert_eq!(fx.dataplane.live_receipt_count().expect("receipt count"), 0);
+        assert_eq!(fx.dataplane.live_receipts().expect("receipt count").len(), 0);
         assert_eq!(fx.accept.await.expect("accept task"), 0, "no byte sent upstream");
     }
 

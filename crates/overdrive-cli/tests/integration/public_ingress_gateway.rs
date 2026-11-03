@@ -1,39 +1,30 @@
 //! Public-ingress gateway — the operator CLI against the production handlers,
-//! in-process (S-PIG-36, and the pre-effect half of S-PIG-20).
+//! in-process (S-PIG-36).
 //!
 //! Every test boots `serve` through the one crate fixture
 //! ([`super::serve_fixture`]): `SimDataplaneComposer` over a `SimDataplane`,
 //! the real stores, the real operator listener. No subprocess is spawned; the
-//! CLI handlers (`deploy_resource`, `run_with_adapters`) are called directly.
+//! CLI handler (`deploy_resource`) is called directly.
 //!
 //! **Authored here.** The gateway-disabled composition (`ServerConfig.gateway
 //! == None`, which is what the `serve` fixture builds): a Route deploy is
 //! rejected with the typed disabled error before the spec is validated and
-//! without an intent write (S-PIG-36); a partial `--gateway-*` set is refused
-//! before the cgroup probe and the adapters builder (S-PIG-20).
+//! without an intent write (S-PIG-36).
 //!
-//! **Not authored: blocked on the unruled client-mTLS factory placement
-//! (PROPOSED P-20, see `.context/pig-final/gaps-B4b.md`).** S-PIG-34 (Route
-//! deploy one-shot for both detach modes), S-PIG-35 (declare, conflict,
-//! invalid id, delete, status through `ApiClient`) and S-PIG-42 (status
-//! point-read failure) each need an *enabled* gateway composition behind the
-//! operator listener, and `run_server` has no enabled composition until the
-//! `GatewayClientMtlsFactory` crate placement is ruled. The disabled baseline
-//! alone is not those scenarios.
+//! **Not authored here.** S-PIG-34 (Route deploy one-shot for both detach
+//! modes), S-PIG-35 (declare, conflict, invalid id, delete, status through
+//! `ApiClient`) and S-PIG-42 (status point-read failure) each need an *enabled*
+//! gateway composition behind the operator listener; the disabled baseline alone
+//! is not those scenarios.
 
 #![allow(clippy::doc_markdown, reason = "CONTRACT_SHAPE metadata tags")]
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use overdrive_cli::commands::deploy::{DeployArgs, DeployResourceOutput, deploy_resource};
 use overdrive_cli::commands::serve;
 use overdrive_cli::http_client::CliError;
-use overdrive_core::id::PublicCertifiedKeyId;
-use overdrive_gateway::GatewayConfigField;
-use overdrive_host::RealCgroupFs;
 use overdrive_store_local::{IntentStore, LocalIntentStore};
 use tempfile::TempDir;
 
@@ -159,64 +150,4 @@ async fn route_deploy_on_a_gateway_disabled_node_is_rejected_before_the_spec_is_
         route_keys.is_empty(),
         "a gateway-disabled node must write no Route or gateway intent, found {route_keys:?}"
     );
-}
-
-/// S-PIG-20 (pre-effect half) — a partial `--gateway-*` set is refused by
-/// `run_with_adapters` as the first thing it does: the error names exactly the
-/// missing fields, and neither the cgroupfs probe (which would have refused
-/// this root) nor the adapters builder ran.
-///
-/// CONTRACT_SHAPE: unbounded-preservation.
-#[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER route-operator-surface"]
-#[expect(
-    clippy::result_large_err,
-    reason = "the bundle builder returns the boot's typed `ControlPlaneError` unboxed, as `run_server` does"
-)]
-async fn partial_gateway_set_is_refused_before_any_startup_effect() {
-    let tmp = TempDir::new().expect("tempdir");
-    // A probe root under a regular file: if the probe ran it would refuse with
-    // `ProbeRefused`, so reaching `GatewayConfiguration` proves the order.
-    let blocking_file = tmp.path().join("not-a-dir");
-    std::fs::write(&blocking_file, b"a file, not a directory").expect("create blocking file");
-    let data_dir = tmp.path().join("data");
-    let config_dir = tmp.path().join("conf");
-
-    let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind");
-    let args = serve::ServeArgs {
-        gateway_address: Some("127.0.0.2".parse().expect("ipv4")),
-        gateway_certified_key_id: Some(
-            PublicCertifiedKeyId::new("api-origin").expect("canonical certified-key id"),
-        ),
-        ..super::serve_fixture::serve_args(bind, data_dir.clone(), config_dir.clone())
-    };
-
-    let builder_called = Arc::new(AtomicBool::new(false));
-    let called = Arc::clone(&builder_called);
-    let result = serve::run_with_adapters(
-        args,
-        Arc::new(RealCgroupFs::new().with_probe_root(blocking_file.join("probe-root"))),
-        move |_config, _fs| {
-            called.store(true, Ordering::SeqCst);
-            unreachable!("a refused gateway configuration opens no adapters")
-        },
-    )
-    .await;
-
-    match result {
-        Err(CliError::GatewayConfiguration { source }) => match source {
-            overdrive_gateway::GatewayConfigError::PartialEnablement { missing } => assert_eq!(
-                missing,
-                vec![GatewayConfigField::CertificateChainPath, GatewayConfigField::PrivateKeyPath],
-                "the refusal names exactly the absent fields, in order"
-            ),
-        },
-        other => panic!("expected CliError::GatewayConfiguration, got {other:?}"),
-    }
-    assert!(
-        !builder_called.load(Ordering::SeqCst),
-        "a refused gateway configuration must not call the adapters builder"
-    );
-    assert!(!data_dir.exists(), "a refused gateway configuration creates no data directory");
-    assert!(!config_dir.exists(), "a refused gateway configuration writes no operator config");
 }

@@ -85,10 +85,7 @@ impl GatewayIdentityLifecycleControl for ControlPlaneGatewayIdentityLifecycle {
         todo!("SCAFFOLD: ControlPlaneGatewayIdentityLifecycle::subscribe")
     }
 
-    async fn disable_after_drain(
-        &self,
-        _deadline: Instant,
-    ) -> Result<(), GatewayIdentityLifecycleError> {
+    fn disable_after_drain(&self) {
         todo!("SCAFFOLD: ControlPlaneGatewayIdentityLifecycle::disable_after_drain")
     }
 }

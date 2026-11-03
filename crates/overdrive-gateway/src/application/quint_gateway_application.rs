@@ -13,7 +13,7 @@
 //! and the driver-local doubles of the four gateway-crate driven ports
 //! (DG-7: the `overdrive-sim` gateway adapters implement the other copy of the
 //! crate-local traits, so this module imports no gateway-trait Sim). The
-//! injected `Arc<GatewayAdmission>` (DG-10) and `GatewayControl` are fields of
+//! injected `Arc<GatewayAdmission>` (DG-10), `GatewayRouteCommands` and `GatewayStatusReads` are fields of
 //! the driver. The runtime is a paused single-thread tokio runtime; the owner
 //! tasks run only while the driver yields (`block_on`).
 //!
@@ -23,7 +23,7 @@
 //! | Action | Driver |
 //! |---|---|
 //! | `init` | compose a fresh world (the previous one is shut down) on its own `127.<octet>.x.y:443` |
-//! | `route_declare` | `GatewayControl::routes()` -> `PublicRouteSetHandle::apply` of a Route of a new generation; the owner has not yet run to idle |
+//! | `route_declare` | `GatewayRouteCommands::routes()` -> `PublicRouteSetHandle::apply` of a Route of a new generation; the owner has not yet run to idle |
 //! | `route_withdraw` | `PublicRouteSetHandle::withdraw`, then yield until the owner is idle; its postcondition: nothing staged, nothing Current |
 //! | `stage` | owner-autonomous, no driving-port call: yield until the owner has staged the live Route generation and its probe is held; assert that through `application_status().staged` and learn the minted identity of the held probe |
 //! | `probe_result(tok, ok)` | release the entry held at `GatewayClientMtls::authenticate` for candidate `tok` by its minted identity (`ok`: usable `Ok(GatewayUpstream)`; otherwise `Err(Handshake)`), then yield until idle; releasing a discarded candidate's entry is a no-op |
@@ -36,7 +36,7 @@
 //!
 //! Projection (`State::from_driver`), per the pinned table:
 //! `current_generation` / `draining_generations` <-
-//! `GatewayControl::application_status()` (`current`, `draining`). The model
+//! `GatewayStatusReads::application_status()` (`current`, `draining`). The model
 //! ghosts `staged`, `inflight`, `leases` are not projected. Reading the
 //! status runs no owner step: a Sim observation read completes without
 //! yielding.
@@ -83,7 +83,7 @@ use tokio::runtime::Runtime;
 use super::held_probe_doubles::{
     Composition, ProbeOutcome, ROUTE_ID, next_ordinal, route, settle, wait_until,
 };
-use super::{GatewayAdmission, GatewayConnectionLease, GatewayControl};
+use super::{GatewayAdmission, GatewayConnectionLease, GatewayRouteCommands, GatewayStatusReads};
 
 /// The conformance main this driver replays.
 const MAIN: &str = "app_conf";
@@ -131,8 +131,10 @@ impl GenerationNames {
 struct AppConfDriver {
     /// Second octet of every bind address this driver instance uses.
     octet: u8,
-    /// The production owner's command and status surface of the current world.
-    control: GatewayControl,
+    /// The production owner's Route command surface of the current world.
+    routes: GatewayRouteCommands,
+    /// The production owner's redacted status reads of the current world.
+    status: GatewayStatusReads,
     /// The admission injected into the owner and the listener (DG-10).
     admission: Arc<GatewayAdmission>,
     /// Admitted connections kept by `open_connection` until `close_connection`.
@@ -163,7 +165,8 @@ impl AppConfDriver {
         let world = runtime.block_on(Composition::start(octet, next_ordinal(&NEXT_ORDINAL)));
         Self {
             octet,
-            control: world.control.clone(),
+            routes: world.routes.clone(),
+            status: world.status.clone(),
             admission: Arc::clone(&world.admission),
             leases: Vec::new(),
             world: Some(world),
@@ -189,7 +192,8 @@ impl AppConfDriver {
         }
         let world =
             self.runtime.block_on(Composition::start(self.octet, next_ordinal(&NEXT_ORDINAL)));
-        self.control = world.control.clone();
+        self.routes = world.routes.clone();
+        self.status = world.status.clone();
         self.admission = Arc::clone(&world.admission);
         self.world = Some(world);
         self.ids = GenerationNames::default();
@@ -203,7 +207,7 @@ impl AppConfDriver {
         self.declared += 1;
         let route = route(&format!("/v{}", self.declared));
         self.runtime
-            .block_on(self.control.routes().apply(route.clone()))
+            .block_on(self.routes.routes().apply(route.clone()))
             .map_err(|error| anyhow!("Route apply refused: {error}"))?;
         self.live_route = Some(route);
         Ok(())
@@ -212,11 +216,10 @@ impl AppConfDriver {
     fn route_withdraw(&mut self) -> Result {
         let route_id = RouteId::new(ROUTE_ID).map_err(|error| anyhow!("Route ID: {error}"))?;
         self.runtime
-            .block_on(self.control.routes().withdraw(route_id))
+            .block_on(self.routes.routes().withdraw(route_id))
             .map_err(|error| anyhow!("Route withdraw refused: {error}"))?;
         self.live_route = None;
-        let status =
-            self.runtime.block_on(settle(&self.control)).map_err(|error| anyhow!(error))?;
+        let status = self.runtime.block_on(settle(&self.status)).map_err(|error| anyhow!(error))?;
         if let Some(row) = status.filter(|row| row.staged.is_some() || row.current.is_some()) {
             bail!("withdrawal left staged or Current in place: {row:?}");
         }
@@ -237,7 +240,7 @@ impl AppConfDriver {
         let status = self
             .runtime
             .block_on(wait_until(
-                &self.control,
+                &self.status,
                 probes,
                 "the live Route generation staged with its probe held",
                 |status, held| {
@@ -268,7 +271,7 @@ impl AppConfDriver {
         let outcome = if ok { ProbeOutcome::Usable } else { ProbeOutcome::Unusable };
         // A discarded candidate's entry may be gone: releasing it is a no-op.
         self.world()?.probes.release(&peer, outcome);
-        self.runtime.block_on(settle(&self.control)).map_err(|error| anyhow!(error))?;
+        self.runtime.block_on(settle(&self.status)).map_err(|error| anyhow!(error))?;
         Ok(())
     }
 
@@ -279,7 +282,7 @@ impl AppConfDriver {
         let probes = &self.world()?.probes;
         self.runtime
             .block_on(wait_until(
-                &self.control,
+                &self.status,
                 probes,
                 "the Draining generation retired",
                 |status, _| {
@@ -363,7 +366,7 @@ impl State<AppConfDriver> for ApplicationState {
     fn from_driver(driver: &AppConfDriver) -> Result<Self> {
         let status = driver
             .runtime
-            .block_on(driver.control.application_status())
+            .block_on(driver.status.application_status())
             .map_err(|error| anyhow!("application_status failed: {error}"))?;
         let Some(row) = status else {
             return Ok(Self { current_generation: None, draining_generations: BTreeSet::new() });

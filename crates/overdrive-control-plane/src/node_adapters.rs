@@ -27,7 +27,7 @@ use overdrive_core::traits::vm_host_state::VmHostState;
 use overdrive_core::traits::vmm::Vmm;
 use overdrive_core::vm::beacon::BeaconIo;
 use overdrive_dataplane::allocators::VipRange;
-use overdrive_gateway::ports::{GatewayConnectDataplane, GatewayRelay};
+use overdrive_gateway::ports::{GatewayClientMtlsFactory, GatewayConnectDataplane, GatewayRelay};
 use overdrive_host::ca::{PublicCertifiedKeyAeadCodec, RootKeyAeadCodec};
 use overdrive_store_local::LocalIntentStore;
 use overdrive_worker::mtls_intercept_port::MtlsIntercept;
@@ -105,18 +105,16 @@ pub struct BootAdapters {
 
 /// The public-ingress gateway's driven adapters (D5 item 1).
 ///
-/// Pinned shape: `{ certified_key_codec, client_mtls, relay }`. The
-/// `client_mtls` field (`Arc<dyn GatewayClientMtlsFactory>`) is not present:
-/// it names a port whose placement is the open proposal P-20 (a crate cycle
-/// between `overdrive-gateway::ports` and `overdrive-dataplane`), so the field
-/// is added with the P-20 ruling. Construct this struct through
-/// [`GatewayAdapters::host`] and replace fields by name with struct-update
-/// syntax; a literal listing every field would not survive that addition.
+/// Pinned shape: `{ certified_key_codec, client_mtls, relay }`.
 pub struct GatewayAdapters {
     /// Seals and opens the protected public origin key (ADR-0223).
     /// [`GatewayAdapters::host`] builds it over the same `Kek` as
     /// [`NodeAdapters::host`].
     pub certified_key_codec: Arc<PublicCertifiedKeyAeadCodec>,
+    /// Builds the exact-peer client over the identity access the boot creates
+    /// after the CA exists (ADR-0234). `HostGatewayClientMtlsFactory` in
+    /// production.
+    pub client_mtls: Arc<dyn GatewayClientMtlsFactory>,
     /// The kernel-TLS relay backend (G1): probes, arms, reads heads and relays
     /// bodies. One backend serves both legs; `HostGatewayRelay` in production.
     pub relay: Arc<dyn GatewayRelay>,
@@ -125,12 +123,21 @@ pub struct GatewayAdapters {
 impl GatewayAdapters {
     /// The production adapters: the key codec over `kek`, and one
     /// `HostGatewayRelay` over `clock`, the injected clock the relay's
-    /// deadlines are evaluated on. Infallible and kernel-silent.
+    /// deadlines are evaluated on, shared by the relay field and the
+    /// `HostGatewayClientMtlsFactory`. Infallible and kernel-silent.
     #[must_use]
     pub fn host(kek: Arc<dyn Kek>, clock: Arc<dyn Clock>) -> Self {
         let relay: Arc<overdrive_dataplane::gateway_relay::HostGatewayRelay> =
             Arc::new(overdrive_dataplane::gateway_relay::HostGatewayRelay::new(clock));
-        Self { certified_key_codec: Arc::new(PublicCertifiedKeyAeadCodec::new(kek)), relay }
+        let client_mtls: Arc<dyn GatewayClientMtlsFactory> =
+            Arc::new(overdrive_dataplane::mtls::gateway_client::HostGatewayClientMtlsFactory::new(
+                Arc::clone(&relay),
+            ));
+        Self {
+            certified_key_codec: Arc::new(PublicCertifiedKeyAeadCodec::new(kek)),
+            client_mtls,
+            relay,
+        }
     }
 }
 

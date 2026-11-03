@@ -2,7 +2,7 @@
 //! ignored the second time (assumption GA-1).
 //!
 //! The real Application owner is composed over the held-probe doubles of
-//! [`super::held_probe_doubles`]; the oracle is `GatewayControl::application_status()`
+//! [`super::held_probe_doubles`]; the oracle is `GatewayStatusReads::application_status()`
 //! alone. The runtime is paused and single-threaded, and the owner reads time
 //! from the injected `SimClock`, so no wall-clock sleep takes part. The
 //! composition binds `127.64.0.1:443` (R-6, table in `held_probe_doubles`).
@@ -27,10 +27,10 @@ const PROBE_COMPLETION_OCTET: u8 = 64;
 #[ignore = "pending DELIVER gateway-application-owner"]
 async fn a_probe_result_completed_twice_is_ignored_the_second_time() {
     let world = Composition::start(PROBE_COMPLETION_OCTET, 0).await;
-    world.control.routes().apply(route("/")).await.expect("declare the Route");
+    world.routes.routes().apply(route("/")).await.expect("declare the Route");
 
     // Exactly one probe is held, for the one staged candidate.
-    let staged = wait_until(&world.control, &world.probes, "the candidate staged and held", {
+    let staged = wait_until(&world.status, &world.probes, "the candidate staged and held", {
         |status, probes| status.is_some_and(|row| row.staged.is_some()) && probes.held_count() == 1
     })
     .await
@@ -43,7 +43,7 @@ async fn a_probe_result_completed_twice_is_ignored_the_second_time() {
 
     // First completion: usable. The generation is promoted.
     assert_eq!(world.probes.release(&peer, ProbeOutcome::Usable), ReleaseOutcome::Released);
-    let promoted = wait_until(&world.control, &world.probes, "the candidate promoted", {
+    let promoted = wait_until(&world.status, &world.probes, "the candidate promoted", {
         |status, _| status.is_some_and(|row| row.current.is_some() && row.staged.is_none())
     })
     .await
@@ -58,7 +58,7 @@ async fn a_probe_result_completed_twice_is_ignored_the_second_time() {
     assert_eq!(world.probes.held_count(), 0, "the released entry is no longer held");
 
     // The owner is idle: the status row it published is the "before" snapshot.
-    let before = settle(&world.control).await.expect("owner idle after promotion");
+    let before = settle(&world.status).await.expect("owner idle after promotion");
 
     // Second completion for the same identity, usable and unusable: a no-op.
     assert_eq!(
@@ -71,7 +71,7 @@ async fn a_probe_result_completed_twice_is_ignored_the_second_time() {
         ReleaseOutcome::Absent,
         "a second unusable completion finds no entry",
     );
-    let after = settle(&world.control).await.expect("owner idle after the second completions");
+    let after = settle(&world.status).await.expect("owner idle after the second completions");
 
     assert_eq!(after, before, "the status row is unchanged by the second completions");
     let row = after.expect("status row");

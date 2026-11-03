@@ -29,15 +29,16 @@
     reason = "public-ingress DISTILL scaffold: bodies are DELIVER's"
 )]
 
+use std::collections::BTreeMap;
 use std::time::Instant;
 
 use async_trait::async_trait;
 use overdrive_core::id::{BackendId, SpiffeId};
-use overdrive_core::public_ingress::ServiceKey;
+use overdrive_core::public_ingress::{ServiceKey, SocketCookie};
 use overdrive_core::traits::clock::Clock;
 use overdrive_gateway::ports::{
-    GatewayConnectCleanupSweep, GatewayConnectDataplane, GatewayConnectDataplaneError,
-    GatewayConnectIntent, GatewaySelectionReceipt, PreparedUpstream,
+    GatewayConnectCleanup, GatewayConnectCleanupSweep, GatewayConnectDataplane,
+    GatewayConnectDataplaneError, GatewayConnectIntent, GatewaySelectionReceipt, PreparedUpstream,
 };
 
 use crate::EbpfDataplane;
@@ -80,6 +81,28 @@ const _: () = assert!(core::mem::align_of::<GatewayConnectIntentPod>() == 4);
 const _: () = assert!(core::mem::size_of::<GatewaySelectionReceiptPod>() == 8);
 const _: () = assert!(core::mem::align_of::<GatewaySelectionReceiptPod>() == 4);
 
+impl GatewayConnectCleanup for EbpfDataplane {
+    fn cleanup(&self, intent: &GatewayConnectIntent) -> Result<(), GatewayConnectDataplaneError> {
+        todo!("SCAFFOLD: EbpfDataplane::cleanup")
+    }
+
+    fn cleanup_all_gateway_intents(
+        &self,
+    ) -> Result<GatewayConnectCleanupSweep, GatewayConnectDataplaneError> {
+        todo!("SCAFFOLD: EbpfDataplane::cleanup_all_gateway_intents")
+    }
+
+    fn live_intent_count(&self) -> Result<u32, GatewayConnectDataplaneError> {
+        todo!("SCAFFOLD: EbpfDataplane::live_intent_count")
+    }
+
+    fn live_receipts(
+        &self,
+    ) -> Result<BTreeMap<SocketCookie, GatewaySelectionReceipt>, GatewayConnectDataplaneError> {
+        todo!("SCAFFOLD: EbpfDataplane::live_receipts")
+    }
+}
+
 #[async_trait]
 impl GatewayConnectDataplane for EbpfDataplane {
     async fn probe(
@@ -104,28 +127,10 @@ impl GatewayConnectDataplane for EbpfDataplane {
         todo!("SCAFFOLD: EbpfDataplane::take_receipt")
     }
 
-    fn cleanup(&self, intent: &GatewayConnectIntent) -> Result<(), GatewayConnectDataplaneError> {
-        todo!("SCAFFOLD: EbpfDataplane::cleanup")
-    }
-
-    fn cleanup_all_gateway_intents(
-        &self,
-    ) -> Result<GatewayConnectCleanupSweep, GatewayConnectDataplaneError> {
-        todo!("SCAFFOLD: EbpfDataplane::cleanup_all_gateway_intents")
-    }
-
     fn selected_backend_identity(
         &self,
         backend_id: BackendId,
     ) -> Result<SpiffeId, GatewayConnectDataplaneError> {
         todo!("SCAFFOLD: EbpfDataplane::selected_backend_identity")
-    }
-
-    fn live_intent_count(&self) -> Result<u32, GatewayConnectDataplaneError> {
-        todo!("SCAFFOLD: EbpfDataplane::live_intent_count")
-    }
-
-    fn live_receipt_count(&self) -> Result<u32, GatewayConnectDataplaneError> {
-        todo!("SCAFFOLD: EbpfDataplane::live_receipt_count")
     }
 }

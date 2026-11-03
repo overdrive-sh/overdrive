@@ -385,6 +385,7 @@ fn successor_spec(
     }
 }
 
+#[cfg(test)]
 fn predecessor_row(
     predecessor: &AllocationId,
     workload: &WorkloadId,

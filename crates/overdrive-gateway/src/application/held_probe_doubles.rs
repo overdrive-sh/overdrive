@@ -90,15 +90,15 @@ use tempfile::TempDir;
 use tokio::sync::{oneshot, watch};
 
 use super::{
-    GatewayAdmission, GatewayAdmissionBudget, GatewayControl, GatewayHandle,
-    GatewayRuntimeDependencies, GatewayShutdownReport, UnboundGatewayBuilder,
+    GatewayAdmission, GatewayAdmissionBudget, GatewayHandle, GatewayRouteCommands,
+    GatewayRuntimeDependencies, GatewayShutdownReport, GatewayStatusReads, UnboundGatewayBuilder,
 };
 use crate::ports::{
-    AcceptedPublicLeg, GatewayClientMtls, GatewayClientMtlsError, GatewayConnectCleanupSweep,
-    GatewayConnectDataplane, GatewayConnectDataplaneError, GatewayConnectIntent,
-    GatewayIdentityLifecycleControl, GatewayIdentityLifecycleError, GatewayRelay,
-    GatewaySelectionReceipt, GatewayUpstream, GatewayUpstreamSeal, HeadTerminator, KtlsLeg,
-    KtlsReadHalf, KtlsWriteHalf, LegReadError, LegWriteError, PreparedUpstream,
+    AcceptedPublicLeg, GatewayClientMtls, GatewayClientMtlsError, GatewayConnectCleanup,
+    GatewayConnectCleanupSweep, GatewayConnectDataplane, GatewayConnectDataplaneError,
+    GatewayConnectIntent, GatewayIdentityLifecycleControl, GatewayIdentityLifecycleError,
+    GatewayRelay, GatewaySelectionReceipt, GatewayUpstream, GatewayUpstreamSeal, HeadTerminator,
+    KtlsLeg, KtlsReadHalf, KtlsWriteHalf, LegReadError, LegWriteError, PreparedUpstream,
     PublicHandshakeError, ReadDeadlines, RelayDeadlines, RelayError, RelayProbeError, ThroughBytes,
 };
 use crate::runtime::GatewayLimits;
@@ -279,6 +279,54 @@ impl HeldConnectDouble {
     }
 }
 
+impl GatewayConnectCleanup for HeldConnectDouble {
+    fn cleanup(&self, intent: &GatewayConnectIntent) -> Result<(), GatewayConnectDataplaneError> {
+        let mut state = self.state.lock().expect("connect state");
+        state.registered.remove(&intent.socket_cookie);
+        state.pending_receipts.remove(&intent.socket_cookie);
+        drop(state);
+        Ok(())
+    }
+
+    fn cleanup_all_gateway_intents(
+        &self,
+    ) -> Result<GatewayConnectCleanupSweep, GatewayConnectDataplaneError> {
+        let mut state = self.state.lock().expect("connect state");
+        let removed_intents = u32::try_from(state.registered.len()).expect("intent count");
+        let removed_receipts = u32::try_from(state.pending_receipts.len()).expect("receipt count");
+        state.registered.clear();
+        state.pending_receipts.clear();
+        drop(state);
+        Ok(GatewayConnectCleanupSweep { removed_intents, removed_receipts })
+    }
+
+    fn live_intent_count(&self) -> Result<u32, GatewayConnectDataplaneError> {
+        let state = self.state.lock().expect("connect state");
+        Ok(u32::try_from(state.registered.len()).expect("intent count"))
+    }
+
+    fn live_receipts(
+        &self,
+    ) -> Result<BTreeMap<SocketCookie, GatewaySelectionReceipt>, GatewayConnectDataplaneError> {
+        let state = self.state.lock().expect("connect state");
+        Ok(state
+            .pending_receipts
+            .iter()
+            .filter_map(|(cookie, backend_id)| {
+                let (intent, _) = state.registered.get(cookie)?;
+                Some((
+                    *cookie,
+                    GatewaySelectionReceipt::Selected {
+                        socket_cookie: intent.socket_cookie,
+                        service_key: intent.service_key,
+                        backend_id: *backend_id,
+                    },
+                ))
+            })
+            .collect())
+    }
+}
+
 #[async_trait]
 impl GatewayConnectDataplane for HeldConnectDouble {
     async fn probe(
@@ -326,41 +374,11 @@ impl GatewayConnectDataplane for HeldConnectDouble {
         })
     }
 
-    fn cleanup(&self, intent: &GatewayConnectIntent) -> Result<(), GatewayConnectDataplaneError> {
-        let mut state = self.state.lock().expect("connect state");
-        state.registered.remove(&intent.socket_cookie);
-        state.pending_receipts.remove(&intent.socket_cookie);
-        drop(state);
-        Ok(())
-    }
-
-    fn cleanup_all_gateway_intents(
-        &self,
-    ) -> Result<GatewayConnectCleanupSweep, GatewayConnectDataplaneError> {
-        let mut state = self.state.lock().expect("connect state");
-        let removed_intents = u32::try_from(state.registered.len()).expect("intent count");
-        let removed_receipts = u32::try_from(state.pending_receipts.len()).expect("receipt count");
-        state.registered.clear();
-        state.pending_receipts.clear();
-        drop(state);
-        Ok(GatewayConnectCleanupSweep { removed_intents, removed_receipts })
-    }
-
     fn selected_backend_identity(
         &self,
         backend_id: BackendId,
     ) -> Result<SpiffeId, GatewayConnectDataplaneError> {
         Ok(backend_identity(backend_id))
-    }
-
-    fn live_intent_count(&self) -> Result<u32, GatewayConnectDataplaneError> {
-        let state = self.state.lock().expect("connect state");
-        Ok(u32::try_from(state.registered.len()).expect("intent count"))
-    }
-
-    fn live_receipt_count(&self) -> Result<u32, GatewayConnectDataplaneError> {
-        let state = self.state.lock().expect("connect state");
-        Ok(u32::try_from(state.pending_receipts.len()).expect("receipt count"))
     }
 }
 
@@ -412,12 +430,8 @@ impl GatewayIdentityLifecycleControl for CurrentIdentity {
         self.sender.subscribe()
     }
 
-    async fn disable_after_drain(
-        &self,
-        _deadline: Instant,
-    ) -> Result<(), GatewayIdentityLifecycleError> {
+    fn disable_after_drain(&self) {
         self.sender.send_replace(None);
-        Ok(())
     }
 }
 
@@ -500,7 +514,7 @@ impl GatewayRelay for UnavailableRelay {
         _from: &mut KtlsReadHalf,
         _max: NonZeroU64,
         _deadlines: RelayDeadlines,
-    ) -> Result<u64, LegReadError> {
+    ) -> Result<(), LegReadError> {
         Err(LegReadError::Io { kind: std::io::ErrorKind::Unsupported })
     }
 }
@@ -638,7 +652,8 @@ pub(super) const fn frontend_address(octet: u8, ordinal: u16) -> Ipv4Addr {
 /// redb Route store, `SimClock` and `SimObservationStore`, with the four
 /// driver-local port doubles and the injected `Arc<GatewayAdmission>`.
 pub(super) struct Composition {
-    pub(super) control: GatewayControl,
+    pub(super) routes: GatewayRouteCommands,
+    pub(super) status: GatewayStatusReads,
     pub(super) handle: GatewayHandle,
     pub(super) admission: Arc<GatewayAdmission>,
     pub(super) probes: Arc<HeldProbes>,
@@ -690,10 +705,11 @@ impl Composition {
             CurrentIdentity::new(),
             Arc::new(UnavailableRelay),
         );
-        let (handle, control) =
+        let (handle, routes, status) =
             builder.start_with(dependencies, Arc::clone(&admission)).await.into_parts();
         Self {
-            control,
+            routes,
+            status,
             handle,
             admission,
             probes,
@@ -737,20 +753,20 @@ async fn pause() {
     tokio::time::sleep(Duration::from_millis(1)).await;
 }
 
-async fn read_status(control: &GatewayControl) -> Option<GatewayApplicationStatusRowV1> {
-    control.application_status().await.expect("Application status read")
+async fn read_status(status: &GatewayStatusReads) -> Option<GatewayApplicationStatusRowV1> {
+    status.application_status().await.expect("Application status read")
 }
 
 /// Yield until `application_status()` has not changed for `QUIET_POLLS`
 /// consecutive reads, and return it.
 pub(super) async fn settle(
-    control: &GatewayControl,
+    status: &GatewayStatusReads,
 ) -> Result<Option<GatewayApplicationStatusRowV1>, String> {
-    let mut last = read_status(control).await;
+    let mut last = read_status(status).await;
     let mut quiet = 0;
     for _ in 0..POLL_CAP {
         pause().await;
-        let now = read_status(control).await;
+        let now = read_status(status).await;
         if now == last {
             quiet += 1;
             if quiet >= QUIET_POLLS {
@@ -767,18 +783,18 @@ pub(super) async fn settle(
 /// Yield until `predicate` holds for the status read and `probes`, and return
 /// that status.
 pub(super) async fn wait_until(
-    control: &GatewayControl,
+    status: &GatewayStatusReads,
     probes: &HeldProbes,
     what: &str,
     predicate: impl Fn(Option<&GatewayApplicationStatusRowV1>, &HeldProbes) -> bool,
 ) -> Result<Option<GatewayApplicationStatusRowV1>, String> {
     let mut last = None;
     for _ in 0..POLL_CAP {
-        let status = read_status(control).await;
-        if predicate(status.as_ref(), probes) {
-            return Ok(status);
+        let observed = read_status(status).await;
+        if predicate(observed.as_ref(), probes) {
+            return Ok(observed);
         }
-        last = status;
+        last = observed;
         pause().await;
     }
     Err(format!("timed out waiting for {what}; last status {last:?}"))

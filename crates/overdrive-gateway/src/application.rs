@@ -1,7 +1,7 @@
 //! Gateway Application owner, composition surface and admission state.
 //!
 //! SCAFFOLD: true. The DESIGN-pinned public surface (builder, handle,
-//! control, shutdown report) and the crate-private admission / ledger shapes
+//! route-command and status-read ports, shutdown report) and the crate-private admission / ledger shapes
 //! the acceptance bodies reach compile today; every owner behaviour body is
 //! DELIVER's. Source-local acceptance bodies implement S-PIG-37 and S-PIG-73;
 //! the QC-2 conformance driver is the child module below.
@@ -28,9 +28,9 @@ use tokio::sync::Notify;
 use crate::certified_key::{PublicCertifiedKeyError, PublicCertifiedKeySnapshot};
 use crate::connector::GatewayUpstreamConnectError;
 use crate::ports::{
-    GatewayClientMtls, GatewayConnectDataplane, GatewayConnectDataplaneError, GatewayConnectIntent,
-    GatewayIdentityLifecycleControl, GatewayIdentityLifecycleError, GatewayRelay,
-    GatewayUpstreamSeal, ServiceFrontendResolveError,
+    GatewayClientMtls, GatewayConnectCleanup, GatewayConnectDataplane,
+    GatewayConnectDataplaneError, GatewayConnectIntent, GatewayIdentityLifecycleControl,
+    GatewayIdentityLifecycleError, GatewayRelay, GatewayUpstreamSeal, ServiceFrontendResolveError,
 };
 use crate::route_set::{PublicRouteSetError, PublicRouteSetHandle};
 use crate::runtime::GatewayLimits;
@@ -68,7 +68,7 @@ impl GatewayAppliedGeneration {
 }
 
 // ---------------------------------------------------------------------------
-// Public builder, handle and control
+// Public builder, handle, route-command and status-read ports
 // ---------------------------------------------------------------------------
 
 pub struct UnboundGatewayBuilder {
@@ -135,30 +135,41 @@ pub struct StartedGateway {
 }
 
 impl StartedGateway {
-    pub fn into_parts(self) -> (GatewayHandle, GatewayControl) {
+    pub fn into_parts(self) -> (GatewayHandle, GatewayRouteCommands, GatewayStatusReads) {
         todo!("SCAFFOLD: StartedGateway::into_parts")
     }
 }
 
-/// Route command and redacted status reads only.
+/// Route command port (R-25): the write handle of the Public Route Set; it
+/// exposes no status read.
 #[derive(Clone)]
-pub struct GatewayControl {
+pub struct GatewayRouteCommands {
     _private: (),
 }
 
-impl GatewayControl {
+impl GatewayRouteCommands {
     pub fn routes(&self) -> &PublicRouteSetHandle {
-        todo!("SCAFFOLD: GatewayControl::routes")
+        todo!("SCAFFOLD: GatewayRouteCommands::routes")
     }
+}
+
+/// Read-only status port (R-25): redacted ObservationStore point reads; no
+/// Route write capability is reachable from it.
+#[derive(Clone)]
+pub struct GatewayStatusReads {
+    _private: (),
+}
+
+impl GatewayStatusReads {
     pub async fn application_status(
         &self,
     ) -> Result<Option<GatewayApplicationStatusRowV1>, GatewayStatusReadError> {
-        todo!("SCAFFOLD: GatewayControl::application_status")
+        todo!("SCAFFOLD: GatewayStatusReads::application_status")
     }
     pub async fn certified_key_status(
         &self,
     ) -> Result<Option<PublicCertifiedKeyStatusRowV1>, GatewayStatusReadError> {
-        todo!("SCAFFOLD: GatewayControl::certified_key_status")
+        todo!("SCAFFOLD: GatewayStatusReads::certified_key_status")
     }
 }
 
@@ -188,7 +199,6 @@ pub struct GatewayShutdownReport {
     pub task_failures: Vec<GatewayTaskFailure>,
     pub cleanup_failures: Vec<GatewayCleanupFailure>,
     pub application_errors: Vec<GatewayApplicationCommandError>,
-    pub identity_error: Option<GatewayIdentityLifecycleError>,
     pub identity_empty: bool,
     pub residual_connect: Option<GatewayResidualConnectState>,
 }
@@ -199,7 +209,6 @@ impl GatewayShutdownReport {
             && self.task_failures.is_empty()
             && self.cleanup_failures.is_empty()
             && self.application_errors.is_empty()
-            && self.identity_error.is_none()
             && self.identity_empty
             && self.residual_connect.is_none()
     }
@@ -217,7 +226,9 @@ pub struct GatewayResidualConnectState {
 pub enum GatewayConnectSweepFailure {
     CleanupAll(GatewayConnectDataplaneError),
     IntentCount(GatewayConnectDataplaneError),
-    ReceiptCount(GatewayConnectDataplaneError),
+    // No receipt-count variant: the residual receipt count is `live_receipts()?.len()` (R-33); a
+    // failed `live_receipts()` read leaves `GatewayResidualConnectState::live_receipts` as `None`,
+    // so the report is not clean.
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -537,7 +548,7 @@ impl GatewayCleanupLedger {
     }
     pub(crate) fn retry_all(
         &self,
-        dataplane: &dyn GatewayConnectDataplane,
+        cleanup: &dyn GatewayConnectCleanup,
     ) -> Vec<GatewayCleanupFailure> {
         todo!("SCAFFOLD: GatewayCleanupLedger::retry_all")
     }

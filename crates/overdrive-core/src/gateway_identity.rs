@@ -24,7 +24,8 @@ use crate::id::{CertSerial, SpiffeId};
 use crate::wall_clock::UnixInstant;
 
 /// Process-local desired-identity epoch. Constructor epoch one means enabled;
-/// disable increments it. `checked_next` never wraps.
+/// disable increments it (the slot's private checked add; the type pins no
+/// increment operation).
 #[derive(
     Debug,
     Clone,
@@ -49,11 +50,6 @@ impl GatewayIdentityEpoch {
     /// The initial enabled epoch, exactly 1.
     pub const fn first() -> Self {
         Self(NonZeroU64::MIN)
-    }
-
-    /// Advance without wrapping.
-    pub fn checked_next(self) -> Result<Self, GatewayIdentityEpochError> {
-        todo!("SCAFFOLD: GatewayIdentityEpoch::checked_next")
     }
 
     /// The nonzero value.
@@ -108,7 +104,7 @@ impl<'de> Deserialize<'de> for GatewayIdentityEpoch {
     }
 }
 
-/// Closed epoch parse/arithmetic failures.
+/// Closed epoch parse failures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum GatewayIdentityEpochError {
     #[error("gateway identity epoch is empty")]
@@ -117,8 +113,6 @@ pub enum GatewayIdentityEpochError {
     InvalidDecimal,
     #[error("gateway identity epoch must be nonzero")]
     Zero,
-    #[error("gateway identity epoch exhausted")]
-    Exhausted,
 }
 
 /// Non-secret facts about the currently held gateway SVID.
@@ -158,27 +152,20 @@ mod properties {
 
     use super::*;
 
-    /// S-PIG-44 (epoch half): the epoch is nonzero, monotone and refuses to
-    /// wrap.
+    /// S-PIG-44 (epoch half): the epoch is nonzero, starts at one and accepts
+    /// every nonzero value, including the maximum.
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
     #[ignore = "pending DELIVER gateway-identity-epoch"]
-    fn epoch_is_nonzero_monotone_and_refuses_wrap() {
+    fn epoch_is_nonzero_and_starts_at_one() {
         assert_eq!(GatewayIdentityEpoch::first().get().get(), 1);
+        assert_eq!(GatewayIdentityEpoch::new(2).expect("two is valid").get().get(), 2);
         assert_eq!(
-            GatewayIdentityEpoch::new(1)
-                .expect("one is valid")
-                .checked_next()
-                .expect("two is representable")
-                .get()
-                .get(),
-            2,
+            GatewayIdentityEpoch::new(u64::MAX).expect("maximum is nonzero").get().get(),
+            u64::MAX,
         );
-        assert_eq!(
-            GatewayIdentityEpoch::new(u64::MAX).expect("maximum is nonzero").checked_next(),
-            Err(GatewayIdentityEpochError::Exhausted),
-        );
+        assert_eq!(GatewayIdentityEpoch::new(0), Err(GatewayIdentityEpochError::Zero));
     }
 
     proptest! {

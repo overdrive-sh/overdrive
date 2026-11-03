@@ -6,6 +6,7 @@
 //! that this crate owns fail with SCAFFOLD text until DELIVER.
 
 use std::any::Any;
+use std::collections::BTreeMap;
 use std::num::{NonZeroU16, NonZeroU64, NonZeroUsize};
 use std::os::fd::OwnedFd;
 use std::sync::Arc;
@@ -13,18 +14,18 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use overdrive_core::dataplane::{Proto, ServiceFrontend};
-use overdrive_core::gateway_identity::{
-    GatewayIdentityEpoch, GatewayIdentityEpochError, GatewayIdentityFacts,
-};
+use overdrive_core::gateway_identity::{GatewayIdentityEpoch, GatewayIdentityFacts};
 use overdrive_core::id::{BackendId, IdParseError, SpiffeId, WorkloadId};
 use overdrive_core::public_ingress::{
     PublicHostname, ServiceKey, ServiceListenerReference, SocketCookie,
 };
-use overdrive_core::traits::ca::SvidMaterial;
+use overdrive_core::traits::ca::{SvidMaterial, TrustBundle};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::intent_store::IntentStoreError;
 use thiserror::Error;
 use tokio::sync::watch;
+
+use crate::runtime::GatewayLimits;
 
 // ---------------------------------------------------------------------------
 // Service frontend resolution
@@ -61,8 +62,28 @@ pub enum ServiceFrontendResolveError {
 // Gateway connect dataplane (ADR-0243)
 // ---------------------------------------------------------------------------
 
+/// Cleanup-only capability (R-29): the sweep, the cleanup of one intent and the
+/// live counts. Shutdown holds only this narrow port, so it holds no handle that
+/// can prepare an upstream socket.
+pub trait GatewayConnectCleanup: Send + Sync {
+    fn cleanup(&self, intent: &GatewayConnectIntent) -> Result<(), GatewayConnectDataplaneError>;
+    fn cleanup_all_gateway_intents(
+        &self,
+    ) -> Result<GatewayConnectCleanupSweep, GatewayConnectDataplaneError>;
+    fn live_intent_count(&self) -> Result<u32, GatewayConnectDataplaneError>;
+    /// Read-only snapshot of the receipts the hook has recorded and
+    /// `take_receipt` has not yet consumed, by the cookie of the intent each is
+    /// bound to (R-33). It mutates nothing and consumes nothing. The one receipt
+    /// accessor: the residual receipt count is `live_receipts()?.len()`. It is
+    /// the observation accessor of the QC-3 `receipts` projection; the
+    /// connector never calls it.
+    fn live_receipts(
+        &self,
+    ) -> Result<BTreeMap<SocketCookie, GatewaySelectionReceipt>, GatewayConnectDataplaneError>;
+}
+
 #[async_trait]
-pub trait GatewayConnectDataplane: Send + Sync {
+pub trait GatewayConnectDataplane: GatewayConnectCleanup + Send + Sync {
     /// First step of the boot gate: sweep residue, then run the sentinel
     /// `192.0.2.1:9/tcp` connect.
     async fn probe(
@@ -80,16 +101,10 @@ pub trait GatewayConnectDataplane: Send + Sync {
         &self,
         intent: &GatewayConnectIntent,
     ) -> Result<GatewaySelectionReceipt, GatewayConnectDataplaneError>;
-    fn cleanup(&self, intent: &GatewayConnectIntent) -> Result<(), GatewayConnectDataplaneError>;
-    fn cleanup_all_gateway_intents(
-        &self,
-    ) -> Result<GatewayConnectCleanupSweep, GatewayConnectDataplaneError>;
     fn selected_backend_identity(
         &self,
         backend_id: BackendId,
     ) -> Result<SpiffeId, GatewayConnectDataplaneError>;
-    fn live_intent_count(&self) -> Result<u32, GatewayConnectDataplaneError>;
-    fn live_receipt_count(&self) -> Result<u32, GatewayConnectDataplaneError>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -178,29 +193,23 @@ pub trait GatewayIdentityLifecycleControl: Send + Sync {
     ) -> Result<GatewayIdentityFacts, GatewayIdentityLifecycleError>;
     fn current(&self) -> Option<GatewayIdentityFacts>;
     fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>>;
-    /// Synchronous clear: bumps the epoch and empties the slot in the same
-    /// call. `deadline` is not read by the clear.
-    async fn disable_after_drain(
-        &self,
-        deadline: Instant,
-    ) -> Result<(), GatewayIdentityLifecycleError>;
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GatewayIdentityWaitPhase {
-    EnsureCurrent,
+    /// Synchronous clear (R-4, R-30): bumps the epoch and empties the slot in
+    /// the same call; it waits for nothing, so it takes no deadline, is not
+    /// async and is infallible: the u64 epoch cannot be exhausted (the slot's
+    /// private checked add overflowing is `unreachable!()`).
+    fn disable_after_drain(&self);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum GatewayIdentityLifecycleError {
     #[error("gateway identity reconciler unavailable")]
     ReconcilerUnavailable,
-    #[error("gateway identity epoch exhausted")]
-    EpochExhausted,
     #[error("gateway SVID issuance failed")]
     IssueFailed,
-    #[error("gateway identity wait timed out during {phase:?}")]
-    Timeout { phase: GatewayIdentityWaitPhase },
+    /// `ensure_current` did not reach Current by its deadline (the only
+    /// operation that waits).
+    #[error("gateway identity wait timed out")]
+    Timeout,
     #[error("gateway identity owner closed")]
     Closed,
 }
@@ -208,7 +217,9 @@ pub enum GatewayIdentityLifecycleError {
 pub trait GatewayIdentityLifecycleTarget: Send + Sync {
     fn current(&self) -> Option<GatewayIdentityFacts>;
     fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>>;
-    fn begin_disable(&self) -> Result<GatewayIdentityEpoch, GatewayIdentityEpochError>;
+    /// Infallible (R-30): the epoch is a u64; the slot's private checked add
+    /// overflowing is `unreachable!()`.
+    fn begin_disable(&self) -> GatewayIdentityEpoch;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -251,6 +262,48 @@ impl GatewayUpstream {
     }
 }
 
+/// The source of the held gateway SVID (R-20).
+///
+/// The exact-peer client borrows it through [`GatewayClientIdentityAccess`]. The
+/// dataplane implements it over the gateway identity slot and the injected
+/// clock; this crate names no dataplane type.
+pub trait GatewayClientIdentitySource: Send + Sync {
+    /// Runs `use_material` while the source keeps the held material borrowed.
+    /// Absent material is `Err(GatewayClientMtlsError::IdentityAbsent)` and
+    /// expired material `Err(GatewayClientMtlsError::IdentityExpired)`; the
+    /// closure is not async and the material is never returned or cloned. The
+    /// clock read lives in the implementation.
+    fn with_current(
+        &self,
+        use_material: &mut dyn FnMut(
+            &SvidMaterial,
+            &TrustBundle,
+        ) -> Result<(), GatewayClientMtlsError>,
+    ) -> Result<(), GatewayClientMtlsError>;
+}
+
+/// Borrowing capability for the exact-peer client: the closure-only shape keeps
+/// the SVID, key and trust bundle from leaving the call.
+pub struct GatewayClientIdentityAccess {
+    source: Arc<dyn GatewayClientIdentitySource>,
+}
+
+impl GatewayClientIdentityAccess {
+    pub fn new(source: Arc<dyn GatewayClientIdentitySource>) -> Self {
+        Self { source }
+    }
+
+    /// `IdentityAbsent` / `IdentityExpired` when no time-usable material is
+    /// held. Its only production caller is `overdrive-dataplane`'s
+    /// `mtls::gateway_client` (a review and grep rule).
+    pub fn with_current<R>(
+        &self,
+        use_material: impl FnOnce(&SvidMaterial, &TrustBundle) -> Result<R, GatewayClientMtlsError>,
+    ) -> Result<R, GatewayClientMtlsError> {
+        todo!("SCAFFOLD: GatewayClientIdentityAccess::with_current")
+    }
+}
+
 #[async_trait]
 pub trait GatewayClientMtls: Send + Sync {
     async fn authenticate(
@@ -282,6 +335,21 @@ pub enum GatewayClientMtlsError {
     /// Raised after the peer equality held: the kernel refused to arm TLS.
     #[error("kernel TLS arming failed: {0:?}")]
     Arm(KtlsArmError),
+}
+
+/// Builds the exact-peer client (ADR-0234).
+///
+/// It builds over the identity access the boot creates after the CA exists. The
+/// trait lives with [`GatewayClientMtls`], so the dataplane implements it without
+/// depending on the control plane.
+pub trait GatewayClientMtlsFactory: Send + Sync {
+    fn client_mtls(&self, deps: GatewayClientMtlsDeps) -> Arc<dyn GatewayClientMtls>;
+}
+
+pub struct GatewayClientMtlsDeps {
+    pub identity: GatewayClientIdentityAccess,
+    pub seal: GatewayUpstreamSeal,
+    pub limits: GatewayLimits,
 }
 
 // ---------------------------------------------------------------------------
@@ -420,13 +488,13 @@ pub trait GatewayRelay: Send + Sync {
         deadline: Instant,
     ) -> Result<(), LegWriteError>;
     /// Reads and drops application octets until the peer's close_notify,
-    /// `max` octets or `deadlines` (R-14). Returns the octets dropped.
+    /// `max` octets or `deadlines` (R-14, R-22). Returns no count.
     async fn discard_remaining(
         &self,
         from: &mut KtlsReadHalf,
         max: NonZeroU64,
         deadlines: RelayDeadlines,
-    ) -> Result<u64, LegReadError>;
+    ) -> Result<(), LegReadError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

@@ -15,7 +15,7 @@
 //! |---|---|
 //! | `init` | rebuild the owner on a fresh instance (nothing survives) |
 //! | `update_apply(key, sidx)` | `Dataplane::update_service(frontend(key), backends(sidx))`, which must be accepted |
-//! | `update_rejected(key, sidx)` | `Dataplane::update_service` of a backend set that re-leases a live `BackendId`'s address to another allocation; it must return `Err` |
+//! | `update_rejected(key, sidx)` | `Dataplane::update_service` of a backend set that re-leases a live `BackendId`'s address to another allocation; it must return `DataplaneError::BackendIdentityConflict` |
 //! | `open(key)` | `GatewayConnectDataplane::open_upstream(ServiceKey)` |
 //! | `kernel_connect_det(c)` | `connect(2)` on the socket from `PreparedUpstream::into_parts` toward the Service frontend, with a bounded wait (the connect result is not asserted: the hook has already written the receipt) |
 //! | `take(c, c)` | `GatewayConnectDataplane::take_receipt(&intent)` |
@@ -26,26 +26,23 @@
 //! Projection (`State::from_driver`), per the pinned table:
 //! `ident[id]` <- `selected_backend_identity(BackendId)` for each `BackendId`
 //! the allocator can have minted (`Ok` -> bound, `BackendIdentityMissing` ->
-//! absent); `intents`, `receipts` <- `live_intent_count()` /
-//! `live_receipt_count()`. The model variables `outer`, `resv`, `infl`,
+//! absent); `intents` <- `live_intent_count()`; `receipts` <- the length of
+//! `GatewayConnectCleanup::live_receipts()`. The model variables `outer`, `resv`, `infl`,
 //! `guard`, `debt`, `g`, `ckey`, `upd`, `next_cookie`, `conn`, `memo`,
 //! `next_bid` are model-only and are not projected (no owner accessor is
 //! pinned for them).
 //!
-//! The spec's `taken` (the receipt a connector consumed) and `idres` (the
-//! identity read) are port-return checks, not owner state, and are NOT part of
-//! the compared State (the spec marks them model-only; a driver-maintained
-//! record of them would compare the driver with the model). They are asserted
-//! at the handler, as direct assertions that fail the step: `take` requires
-//! the consumed receipt to be bound to the registered intent's `ServiceKey`
-//! and cookie (`ReceiptMatchesIntent`). `idres` is `ident[sel]` or -1 by the
-//! spec. Neither the receipt's selected-backend value (`sel`) nor the per-cookie
-//! `idres` is compared with the model: quint-connect gives a handler no
-//! model-side expectation and no owner accessor is pinned for them. The
-//! identities are compared only through the projected `ident` map (every
-//! probed `BackendId`). `read_identity` asserts only that the first read of
-//! the Selected backend's identity is present (the spec says a Selected id
-//! always has an identity) and that a second read agrees.
+//! The spec's `taken` (the receipt a connector consumed) is a port-return
+//! check, not owner state, and is NOT part of the compared State (a
+//! driver-maintained record of it would compare the driver with the model). It
+//! is asserted at the `take` handler, as a direct assertion that fails the
+//! step: the consumed receipt must be bound to the registered intent's
+//! `ServiceKey` and cookie (`ReceiptMatchesIntent`). The spec has no `idres`
+//! variable (R-33): `read_identity` is a step whose handler only calls
+//! `selected_backend_identity` for the cookie's Selected backend and asserts
+//! that the first read is present and that a second read agrees. The
+//! identities are compared through the projected `ident` map (every probed
+//! `BackendId`).
 //!
 //! Step decoding (D-UP-1): `Config::nondet =
 //! &["receipt_conf::selection_receipt::conf_step"]`; the state projection
@@ -82,10 +79,10 @@ use itf::Value;
 use overdrive_core::dataplane::{Proto, ServiceFrontend};
 use overdrive_core::id::{BackendId, ServiceVip, SpiffeId};
 use overdrive_core::public_ingress::ServiceKey;
-use overdrive_core::traits::dataplane::{Backend, Dataplane};
+use overdrive_core::traits::dataplane::{Backend, Dataplane, DataplaneError};
 use overdrive_gateway::ports::{
-    GatewayConnectDataplane, GatewayConnectDataplaneError, GatewayConnectIntent,
-    GatewaySelectionReceipt,
+    GatewayConnectCleanup, GatewayConnectDataplane, GatewayConnectDataplaneError,
+    GatewayConnectIntent, GatewaySelectionReceipt,
 };
 use quint_connect::{Config, Driver, Result, State, Step, quint_run, quint_test, switch};
 use serde::Deserialize;
@@ -289,7 +286,10 @@ impl ReceiptConfDriver {
     fn update_rejected(&self, key: i64, sidx: i64) -> Result {
         match self.runtime.block_on(self.dataplane.update_service(frontend(key), backends(sidx)?)) {
             Ok(()) => bail!("update_service of a re-leased address must be rejected, it succeeded"),
-            Err(_) => Ok(()),
+            Err(DataplaneError::BackendIdentityConflict { .. }) => Ok(()),
+            Err(other) => bail!(
+                "update_service of a re-leased address must fail with BackendIdentityConflict, got {other}"
+            ),
         }
     }
 
@@ -448,9 +448,9 @@ impl State<ReceiptConfDriver> for ReceiptState {
             .map_err(|error| anyhow!("live_intent_count failed: {error}"))?;
         let receipts = driver
             .dataplane
-            .live_receipt_count()
-            .map_err(|error| anyhow!("live_receipt_count failed: {error}"))?;
-        Ok(Self { ident, intents: intents as usize, receipts: receipts as usize })
+            .live_receipts()
+            .map_err(|error| anyhow!("live_receipts failed: {error}"))?;
+        Ok(Self { ident, intents: intents as usize, receipts: receipts.len() })
     }
 }
 

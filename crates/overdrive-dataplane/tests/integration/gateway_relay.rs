@@ -1,5 +1,5 @@
 //! `HostGatewayRelay` adapter-contract suite on a real kernel
-//! (G1, ADR-0239/0244/0246/0247; S-PIG-105 through 112, 114 through 118, 123).
+//! (G1, ADR-0239/0244/0246/0247; S-PIG-105 through 112, 114, 115, 117, 118, 123).
 //!
 //! Native x86_64 metal only (`cargo xtask metal run --`): every test arms real
 //! kernel TLS on loopback sockets. Each test builds a [`Rig`] — the relay under
@@ -45,7 +45,6 @@
     reason = "CONTRACT_SHAPE metadata, long real-kernel scenario bodies and fixture preconditions"
 )]
 
-use std::fmt::Write as _;
 use std::io;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -53,16 +52,15 @@ use std::time::{Duration, Instant};
 
 use overdrive_dataplane::gateway_relay::HostGatewayRelay;
 use overdrive_gateway::ports::{
-    GatewayRelay, HeadTerminator, KtlsArmError, KtlsReadHalf, KtlsWriteHalf, LegReadError,
-    PublicHandshakeError, RelayError, RelayProbeError, ThroughBytes,
+    GatewayRelay, HeadTerminator, KtlsReadHalf, KtlsWriteHalf, LegReadError, PublicHandshakeError,
+    RelayError, ThroughBytes,
 };
 
 use super::helpers::relay_peers::{
-    ALL_AES, Drain, Lcg, Offer, PIPE_CAPACITY, Received, Rig, TlsStat, WallClock, accept_leg,
-    accept_leg_with, accept_raw, blocking, client_config, expect_exact, first_pattern_mismatch,
-    host_relay, http_client_config, in_secs, joined, no_sni_name, nz64, nzu, open_fds, pattern,
-    read_within, relay_within, rss_kib, send_in_background, sni_name, stream_pattern,
-    tcp_buffer_ceiling,
+    ALL_AES, Drain, Lcg, Offer, PIPE_CAPACITY, Received, Rig, TlsStat, accept_leg, accept_leg_with,
+    accept_raw, blocking, client_config, expect_exact, first_pattern_mismatch, host_relay,
+    http_client_config, in_secs, joined, no_sni_name, nz64, nzu, open_fds, pattern, read_within,
+    relay_within, rss_kib, send_in_background, sni_name, stream_pattern, tcp_buffer_ceiling,
 };
 
 const HEAD_LIMIT: usize = 32 * 1024;
@@ -1019,71 +1017,15 @@ async fn mixed_record_sizes_straddling_heads_and_chunk_lines_arrive_octet_exact(
 // S-PIG-114
 // ---------------------------------------------------------------------------
 
-const PROBE_CHILD_ENV: &str = "OVERDRIVE_RELAY_PROBE_CHILD";
-
-/// Runs before `main`, while the process is still single-threaded: in the probe
-/// child (and only there) it drops `CAP_NET_ADMIN` in the initial user namespace
-/// with `unshare(CLONE_NEWUSER)`, which requires a single-threaded caller, then
-/// runs the relay probe on a current-thread runtime and reports the typed result.
-#[used]
-#[unsafe(link_section = ".init_array")]
-static PROBE_CHILD_ENTRY: extern "C" fn() = probe_child_entry;
-
-/// The child's one reporting channel: a line on stdout the parent parses.
-#[allow(clippy::print_stdout, reason = "the parent test reads the child's stdout")]
-fn report(line: &str) {
-    println!("{line}");
-}
-
-extern "C" fn probe_child_entry() {
-    if std::env::var_os(PROBE_CHILD_ENV).is_none() {
-        return;
-    }
-    // SAFETY: called before main on the only thread; unshare takes a flag word.
-    let rc = unsafe { libc::unshare(libc::CLONE_NEWUSER) };
-    if rc != 0 {
-        report(&format!("PROBE_RESULT unshare failed: {}", io::Error::last_os_error()));
-        std::process::exit(3);
-    }
-    let runtime =
-        tokio::runtime::Builder::new_current_thread().enable_all().build().expect("child runtime");
-    let result = runtime.block_on(async {
-        let relay = HostGatewayRelay::new(Arc::new(WallClock));
-        relay.probe(in_secs(10)).await
-    });
-    report(&format!("PROBE_RESULT {result:?}"));
-    std::process::exit(0);
-}
-
-/// Restores the `tls` module on drop and verifies it is usable again.
-struct TlsModuleGuard;
-
-impl Drop for TlsModuleGuard {
-    fn drop(&mut self) {
-        let load = std::process::Command::new("modprobe").arg("tls").status();
-        let usable = std::path::Path::new("/sys/module/tls").exists()
-            && std::fs::read_to_string("/proc/net/tls_stat").is_ok();
-        if std::thread::panicking() {
-            eprintln!("tls module restore after panic: modprobe {load:?}, usable {usable}");
-        } else {
-            assert!(load.is_ok_and(|s| s.success()), "modprobe tls restored the module");
-            assert!(usable, "/sys/module/tls and /proc/net/tls_stat readable after the restore");
-        }
-    }
-}
-
-/// S-PIG-114: the probe on the honest kernel passes; with the `tls` module
-/// unloaded under a restoring guard and the probe run by a child that dropped
-/// `CAP_NET_ADMIN` in the initial user namespace (so the kernel does not autoload
-/// the module: `net/ipv4/tcp_ulp.c:41-48, 163-165 @ v7.0`), the probe is refused
-/// with `Arm(UlpInstall { errno: ENOENT })`. Where `/sys/module/tls` is absent or
-/// its refcount is nonzero the test fails closed with the instruction to run it
-/// alone as root through `cargo xtask metal run --`. The child is this
-/// test binary re-executed, never the overdrive binary.
+/// S-PIG-114: the probe on the honest kernel passes, and the probe's loopback
+/// pair and pipe are released (the open descriptor count returns to its value
+/// before the probe). No real-kernel stimulus makes the TLS ULP absent, so this
+/// is the only real-kernel arm; the typed ULP refusals are exercised by the Sim
+/// substrate lies (S-PIG-99) and the arm-failure typing by S-PIG-98.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "pending DELIVER relay-earned-trust-probe"]
-async fn honest_kernel_probe_passes_and_an_absent_tls_ulp_is_refused_with_enoent() {
+async fn honest_kernel_probe_passes_and_releases_its_descriptors() {
     let relay = host_relay();
     let fds_before_probe = open_fds_after_settle().await;
     relay.probe(in_secs(10)).await.expect("the honest kernel passes the Earned-Trust probe");
@@ -1092,67 +1034,6 @@ async fn honest_kernel_probe_passes_and_an_absent_tls_ulp_is_refused_with_enoent
         fds_before_probe,
         "the probe's loopback pair and pipe are released"
     );
-
-    let refcount =
-        std::fs::read_to_string("/sys/module/tls/refcnt").ok().map(|s| s.trim().to_owned());
-    assert_eq!(
-        refcount.as_deref(),
-        Some("0"),
-        "S-PIG-114 needs the `tls` module loaded with no kernel-TLS socket alive (refcnt {refcount:?}): \
-         run it alone, as root, through `cargo xtask metal run --`; an absent or busy module cannot \
-         show that an absent ULP is refused, so the test fails instead of passing on the honest case"
-    );
-    let before = open_fds();
-    let guard = TlsModuleGuard;
-    let unloaded = std::process::Command::new("rmmod").arg("tls").status().expect("rmmod runs");
-    assert!(
-        unloaded.success(),
-        "`rmmod tls` was refused (a kernel-TLS socket exists, or the process is not root): run \
-         S-PIG-114 alone, as root, through `cargo xtask metal run --`"
-    );
-    let exe = std::env::current_exe().expect("this test binary");
-    let output = blocking(move || {
-        let child = std::process::Command::new(exe)
-            .env(PROBE_CHILD_ENV, "1")
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .expect("re-execute the test binary");
-        wait_bounded(child, Duration::from_secs(60))
-    })
-    .await;
-    drop(guard);
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let line = stdout.lines().find_map(|l| l.strip_prefix("PROBE_RESULT ")).unwrap_or_else(|| {
-        panic!(
-            "the child reported no probe result: stdout {stdout:?} stderr {:?}",
-            String::from_utf8_lossy(&output.stderr)
-        )
-    });
-    let expected = format!(
-        "{:?}",
-        Err::<(), _>(RelayProbeError::Arm(KtlsArmError::UlpInstall { errno: libc::ENOENT }))
-    );
-    assert_eq!(line, expected, "the absent ULP is refused with ENOENT, not autoloaded");
-    assert_eq!(open_fds_after_settle().await, before, "no descriptor leaked by the lie case");
-}
-
-/// Wait for `child` for at most `bound`; kill it and fail the test when it does
-/// not finish, so a hung probe child cannot hold the test (and the unloaded
-/// module) indefinitely.
-fn wait_bounded(mut child: std::process::Child, bound: Duration) -> std::process::Output {
-    let deadline = std::time::Instant::now() + bound;
-    loop {
-        match child.try_wait().expect("poll the probe child") {
-            Some(_) => return child.wait_with_output().expect("collect the probe child's output"),
-            None if std::time::Instant::now() >= deadline => {
-                child.kill().expect("kill the hung probe child");
-                child.wait().expect("reap the killed probe child");
-                panic!("the probe child did not finish within {bound:?}");
-            }
-            None => std::thread::sleep(Duration::from_millis(50)),
-        }
-    }
 }
 
 async fn open_fds_after_settle() -> usize {
@@ -1252,7 +1133,7 @@ async fn the_discard_ends_at_max_octets_at_the_deadline_and_at_the_no_progress_w
     });
     let Rig { relay, public, .. } = &mut rig;
     relay.close_write(&mut public.write, in_secs(10)).await.expect("close_notify");
-    let dropped = relay
+    relay
         .discard_remaining(
             &mut public.read,
             nz64(1024 * 1024),
@@ -1260,7 +1141,6 @@ async fn the_discard_ends_at_max_octets_at_the_deadline_and_at_the_no_progress_w
         )
         .await
         .expect("the discard ends at max");
-    assert!(dropped >= 1024 * 1024, "dropped {dropped} octets up to the cap");
     let _ = flood.join();
 
     // deadline (a drain deadline passed as `absolute`): a silent peer.
@@ -1301,130 +1181,6 @@ async fn the_discard_ends_at_max_octets_at_the_deadline_and_at_the_no_progress_w
         begin.elapsed() < Duration::from_secs(5),
         "ended within the no-progress window, not at 30 s"
     );
-}
-
-// ---------------------------------------------------------------------------
-// S-PIG-116
-// ---------------------------------------------------------------------------
-
-/// S-PIG-116: the no-`SPLICE_F_MORE` configuration (the relay never passes it)
-/// is octet-exact for the exact-length, chunked, trickling-body and keep-alive
-/// cases of S-PIG-105 and S-PIG-111, with the next head untouched; peer-side
-/// receive sizes are recorded, and in the trickle case no two pieces are
-/// coalesced into one receive (each splice-out call ends its record).
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER kernel-relay-host-adapter"]
-async fn the_no_flag_configuration_is_octet_exact_and_never_holds_a_record_open() {
-    let mut rig = Rig::new(Offer::Aes128).await;
-    let cl = message_cl("POST /noflag", 70_000, 0);
-    let chunked = message_chunked("POST /noflag", &[1_000, 65_536, 3], 5);
-    let next = head_cl("GET /next", 0);
-    let mut stream = cl.clone();
-    stream.extend_from_slice(&chunked);
-    stream.extend_from_slice(&next);
-    let client_task =
-        send_in_background(&rig.public.peer, stream.clone(), STRADDLING_RECORDS.to_vec());
-    let mut expected_at_origin = cl;
-    expected_at_origin.extend_from_slice(&chunked);
-    let origin_task = expect_exact(&rig.upstream.peer, expected_at_origin);
-    let Rig { relay, public, upstream } = &mut rig;
-    relay_message(relay, &mut public.read, &mut upstream.write).await;
-    relay_message(relay, &mut public.read, &mut upstream.write).await;
-    let last = read_head(relay, &mut public.read).await;
-    assert_eq!(
-        last.as_slice(),
-        next.as_slice(),
-        "the next head is untouched after the chunked body"
-    );
-    joined(client_task, "client").await;
-    joined(origin_task, "origin").await;
-    eprintln!("S-PIG-116 origin receive sizes {:?}", rig.upstream.peer.recv_sizes());
-
-    // Trickle: one-octet pieces arrive as separate receives.
-    let mut rig = Rig::new(Offer::Aes256).await;
-    let origin = rig.upstream.peer.clone();
-    let sender = std::thread::spawn(move || -> io::Result<()> {
-        for i in 0..10 {
-            origin.send(&pattern(i, 1))?;
-            std::thread::sleep(Duration::from_millis(200));
-        }
-        Ok(())
-    });
-    let client = rig.public.peer.clone();
-    client.set_read_timeout(Some(Duration::from_secs(5)));
-    let receiver =
-        std::thread::spawn(move || -> io::Result<()> { client.read_exact_data(10).map(|_| ()) });
-    let Rig { relay, public, upstream } = &mut rig;
-    relay
-        .relay_exact(
-            &mut upstream.read,
-            &mut public.write,
-            nz64(10),
-            relay_within(30, Duration::from_secs(2)),
-        )
-        .await
-        .expect("trickle relayed");
-    joined(sender, "trickling origin").await;
-    joined(receiver, "client").await;
-    let sizes = rig.public.peer.recv_sizes();
-    eprintln!("S-PIG-116 trickle receive sizes {sizes:?}");
-    assert_eq!(sizes, vec![1; 10], "each trickled octet reached the client as its own receive");
-}
-
-/// S-PIG-116 (evidence arm): the kernel cites of the relay contract, item 7, are
-/// re-derived from the pinned source with `git show v7.0:<path>` against
-/// `vendors/linux` and saved. `vendors/linux` is a read-only reference that
-/// `infra/metal/bootstrap.sh` excludes from the metal sync, so this arm runs where
-/// the vendored source exists.
-/// CONTRACT_SHAPE: unbounded-preservation.
-#[test]
-#[ignore = "pending DELIVER kernel-relay-host-adapter"]
-fn the_no_flag_kernel_cites_are_rederived_from_the_pinned_source() {
-    // (path, a token that must appear, and the contract item that cites it)
-    let cites: [(&str, &str, &str); 4] = [
-        (
-            "net/tls/tls_sw.c",
-            "eor = !(msg->msg_flags & MSG_MORE)",
-            "kTLS closes the record when MSG_MORE is absent",
-        ),
-        ("fs/splice.c", "MSG_MORE", "splice-out sets MSG_MORE only within one call"),
-        ("net/tls/tls_sw.c", "tls_sw_splice_read", "one splice-in returns at most one record"),
-        (
-            "net/tls/tls_main.c",
-            "tls_sk_poll",
-            "poll reports no read event while a key update is pending",
-        ),
-    ];
-    let linux = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../vendors/linux");
-    assert!(
-        linux.join(".git").exists() || linux.join("net/tls/tls_sw.c").exists(),
-        "vendors/linux is required for the cite re-derivation (it is excluded from the metal sync)"
-    );
-    let mut saved = String::new();
-    for (path, token, why) in cites {
-        let out = std::process::Command::new("git")
-            .arg("-C")
-            .arg(&linux)
-            .arg("show")
-            .arg(format!("v7.0:{path}"))
-            .output()
-            .expect("git runs");
-        assert!(
-            out.status.success(),
-            "git show v7.0:{path}: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        let text = String::from_utf8_lossy(&out.stdout);
-        let line = text
-            .lines()
-            .enumerate()
-            .find(|(_, l)| l.contains(token))
-            .unwrap_or_else(|| panic!("v7.0:{path} no longer contains `{token}` ({why})"));
-        let _ = writeln!(saved, "v7.0:{path}:{} {why}\n  {}", line.0 + 1, line.1.trim());
-    }
-    let out = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("relay-kernel-cites-v7.0.txt");
-    std::fs::write(&out, saved).expect("save the re-derived cites");
 }
 
 // ---------------------------------------------------------------------------

@@ -15,6 +15,7 @@ use thiserror::Error;
 use crate::SpiffeId;
 use crate::dataplane::ServiceFrontend;
 use crate::dataplane::backend_key::Proto;
+use crate::id::BackendId;
 
 #[derive(Debug, Error)]
 pub enum DataplaneError {
@@ -141,6 +142,37 @@ pub enum DataplaneError {
          debugging.md § \"Leftover XDP attachments across runs\")"
     )]
     IfaceXdpSlotBusy { iface: String },
+    /// `update_service` found one `BackendId` already bound to a different
+    /// backend identity (the memo hit names another `Backend.alloc`). Returned
+    /// before any map is mutated; no identity is reserved and no id is minted.
+    #[error("backend id {backend_id} is bound to {current}, refusing {attempted}")]
+    BackendIdentityConflict { backend_id: BackendId, current: SpiffeId, attempted: SpiffeId },
+    /// A pre-commit `update_service` failure at `stage` whose restore also
+    /// failed for one or more keys (`rollback`); when the restore fully
+    /// succeeds the original stage error is returned instead.
+    #[error("service apply failed at {stage:?} and {} restore delete(s) failed", rollback.len())]
+    ServiceApplyRollback { stage: ServiceApplyStage, rollback: Vec<ServiceApplyRollbackFailure> },
+}
+
+/// The pre-commit stage of `update_service` that failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServiceApplyStage {
+    BackendMap,
+    InnerMap,
+    ReverseNat,
+    OuterCommit,
+}
+
+/// One restore delete that failed during the rollback of a pre-commit failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServiceApplyRollbackFailure {
+    BackendDelete(BackendId),
+    /// The reverse-NAT key that could not be deleted, as the backend endpoint it
+    /// keys; the dataplane-private `BackendKeyPod` is converted at the adapter.
+    ReverseNatDelete {
+        backend: SocketAddrV4,
+        proto: Proto,
+    },
 }
 
 /// Policy decision compiled into the BPF `POLICY_MAP`.

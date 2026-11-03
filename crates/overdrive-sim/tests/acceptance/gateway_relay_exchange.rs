@@ -59,10 +59,12 @@ use overdrive_core::traits::dataplane::{Backend, Dataplane};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_gateway::application::{
-    GatewayControl, GatewayHandle, GatewayRuntimeDependencies, GatewayShutdownReport,
-    UnboundGatewayBuilder,
+    GatewayHandle, GatewayRouteCommands, GatewayRuntimeDependencies, GatewayShutdownReport,
+    GatewayStatusReads, UnboundGatewayBuilder,
 };
-use overdrive_gateway::ports::{GatewayConnectDataplane, GatewayIdentityActionTarget};
+use overdrive_gateway::ports::{
+    GatewayConnectCleanup, GatewayConnectDataplane, GatewayIdentityActionTarget,
+};
 use overdrive_gateway::runtime::GatewayLimits;
 use overdrive_gateway::{GatewayConfig, ManualCertifiedKeyConfig};
 use overdrive_host::ca::PublicCertifiedKeyAeadCodec;
@@ -98,7 +100,8 @@ struct Rig {
     clock: Arc<SimClock>,
     relay: Arc<SimGatewayRelay>,
     connect: Arc<SimGatewayConnectDataplane>,
-    _control: GatewayControl,
+    _routes: GatewayRouteCommands,
+    _status: GatewayStatusReads,
     handle: Option<GatewayHandle>,
     bind: SocketAddrV4,
     _frontend_listener: std::net::TcpListener,
@@ -218,10 +221,10 @@ impl Rig {
             Arc::new(lifecycle),
             relay.clone(),
         );
-        let (handle, control) = builder.start(dependencies).await.into_parts();
-        control.routes().apply(route()).await.expect("declare the Route");
+        let (handle, routes, status) = builder.start(dependencies).await.into_parts();
+        routes.routes().apply(route()).await.expect("declare the Route");
         loop {
-            let row = control.application_status().await.expect("status read");
+            let row = status.application_status().await.expect("status read");
             if let Some(row) = row
                 && row.current.is_some()
                 && row.unavailable.is_none()
@@ -236,7 +239,8 @@ impl Rig {
             clock,
             relay,
             connect,
-            _control: control,
+            _routes: routes,
+            _status: status,
             handle: Some(handle),
             bind: SocketAddrV4::new(bind, 443),
             _frontend_listener: listener,
@@ -292,7 +296,11 @@ impl Rig {
         assert_eq!(self.relay.live_leg_count(), 0, "{what}: live legs remain");
         assert_eq!(self.relay.live_pipe_count(), 0, "{what}: live pipes remain");
         assert_eq!(self.connect.live_intent_count().ok(), Some(0), "{what}: live intents remain");
-        assert_eq!(self.connect.live_receipt_count().ok(), Some(0), "{what}: live receipts remain");
+        assert_eq!(
+            self.connect.live_receipts().ok().map(|receipts| receipts.len()),
+            Some(0),
+            "{what}: live receipts remain"
+        );
     }
 }
 

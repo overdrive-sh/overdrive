@@ -181,7 +181,8 @@ fn disabled_composition_supplies_the_canonical_empty_identity_read() {
         "a disabled gateway desires epoch one with no subject"
     );
     assert_eq!(view.current(), None, "a disabled gateway never holds an identity");
-    assert!(disabled.control().is_none(), "a disabled gateway has no control handle");
+    assert!(disabled.routes().is_none(), "a disabled gateway has no Route command port");
+    assert!(disabled.status().is_none(), "a disabled gateway has no status read port");
 }
 
 /// S-PIG-65: hydration reads the desired epoch and subject from the identity
@@ -316,7 +317,7 @@ async fn a_target_other_than_the_configured_node_is_refused_by_both_hydration_en
 #[ignore = "pending DELIVER gateway-svid-lifecycle-hydration"]
 async fn a_disabled_desired_identity_hydrates_the_epoch_with_no_subject() {
     let world = World::new();
-    let epoch = GatewayIdentityEpoch::first().checked_next().expect("epoch two follows epoch one");
+    let epoch = GatewayIdentityEpoch::new(2).expect("epoch two is nonzero");
     let view = FixedIdentityView {
         desired: GatewayIdentityDesired { epoch, spiffe_id: None },
         current: None,
