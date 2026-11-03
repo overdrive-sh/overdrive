@@ -7,7 +7,10 @@
 //! the same bytes and close. Only faults both adapters can produce are compared:
 //! peer KeyUpdate (requested and not), close_notify, alerts, an unexpected record,
 //! deadlines, source ends mid-body, a stalled destination (backpressure), the
-//! close-delimited read and the lingering discard. Substrate lies (probe only),
+//! close-delimited read and the lingering discard (R-22: `discard_remaining`
+//! returns `Result<(), LegReadError>`, so the comparison is the result class
+//! plus what the source peer can observe of its leg: the relay answers nothing
+//! and ends nothing on a leg it only discards from, never a count). Substrate lies (probe only),
 //! scripted failed KeyUpdate answers and scripted arm refusals exist only on the
 //! Sim and are excluded. A NewSessionTicket needs a client-role leg and is left
 //! to the exact-peer mTLS suite.
@@ -94,11 +97,36 @@ struct Case {
     dest_close_notify: bool,
 }
 
+/// What the source peer observes of its own leg while the relay discards from
+/// it: the application octets the relay sent it and whether the relay ended the
+/// leg toward it (close_notify, alert or end of stream).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SourceLeg {
+    received: Vec<u8>,
+    ended: bool,
+}
+
+impl SourceLeg {
+    /// A leg the relay only reads from: nothing sent, nothing ended.
+    fn untouched() -> Self {
+        Self { received: Vec::new(), ended: false }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 struct Outcome {
     results: Vec<String>,
     delivered: Option<Vec<u8>>,
     dest_close_notify: bool,
+    /// Observed only for scripts that discard (None otherwise).
+    source_leg: Option<SourceLeg>,
+}
+
+impl Case {
+    /// The script discards from the source leg (the lingering close's read).
+    fn discards(&self) -> bool {
+        self.acts.iter().any(|act| matches!(act, Act::Discard { .. }))
+    }
 }
 
 const HEAD: &[u8] = b"POST /x HTTP/1.1\r\nHost: api.example.com\r\nContent-Length: 100\r\n\r\n";
@@ -291,7 +319,7 @@ fn cases() -> Vec<Case> {
             peer: vec![Peer::Send(pattern(0, 300)), Peer::CloseNotify],
             acts: vec![Act::Discard { max: 1_000, absolute: Duration::from_secs(5) }],
             dest: Dest::Reading,
-            expected: vec!["Ok(300)"],
+            expected: vec!["Ok(())"],
             delivered: Some(vec![]),
             dest_close_notify: false,
         },
@@ -300,7 +328,7 @@ fn cases() -> Vec<Case> {
             peer: vec![Peer::Send(pattern(0, 100))],
             acts: vec![Act::Discard { max: 100, absolute: Duration::from_secs(5) }],
             dest: Dest::Reading,
-            expected: vec!["Ok(100)"],
+            expected: vec!["Ok(())"],
             delivered: Some(vec![]),
             dest_close_notify: false,
         },
@@ -431,6 +459,8 @@ async fn run_host(case: &Case) -> Outcome {
     let source_peer = rig.public.peer.clone();
     let player = play_peer(source_peer, case.peer.clone());
     let dest_reader = (case.dest == Dest::Reading).then(|| Drain::start(&rig.upstream.peer, true));
+    // The source peer also reads: whatever the relay sends it is observable.
+    let source_reader = case.discards().then(|| Drain::start(&rig.public.peer, true));
 
     let Rig { relay, public, upstream } = &mut rig;
     let results = run_acts(
@@ -453,6 +483,10 @@ async fn run_host(case: &Case) -> Outcome {
         }
         None => (None, false),
     };
+    let source_leg = source_reader.map(|reader| SourceLeg {
+        received: reader.octets(),
+        ended: reader.ended.lock().unwrap().is_some(),
+    });
     drop(rig);
     blocking(move || {
         let _ = player.join();
@@ -462,6 +496,7 @@ async fn run_host(case: &Case) -> Outcome {
         results,
         delivered: case.delivered.as_ref().map(|_| delivered.clone().unwrap_or_default()),
         dest_close_notify,
+        source_leg,
     }
 }
 
@@ -528,11 +563,16 @@ async fn run_sim(case: &Case) -> Outcome {
     .await;
 
     let transcripts = relay.leg_transcripts();
+    let source = &transcripts[0];
     let destination = &transcripts[1];
     Outcome {
         results,
         delivered: case.delivered.as_ref().map(|_| destination.written.clone()),
         dest_close_notify: destination.close_notify_sent,
+        source_leg: case.discards().then(|| SourceLeg {
+            received: source.written.clone(),
+            ended: source.close_notify_sent || source.closed,
+        }),
     }
 }
 
@@ -546,6 +586,7 @@ async fn assert_equivalent(name: &str) {
         results: case.expected.iter().map(|s| (*s).to_owned()).collect(),
         delivered: case.delivered.clone(),
         dest_close_notify: case.dest_close_notify,
+        source_leg: case.discards().then(SourceLeg::untouched),
     };
     let host = run_host(&case).await;
     let sim = run_sim(&case).await;
@@ -564,6 +605,12 @@ async fn assert_equivalent(name: &str) {
     }
     assert_eq!(host.dest_close_notify, expected.dest_close_notify, "{name}: Host close behaviour");
     assert_eq!(sim.dest_close_notify, expected.dest_close_notify, "{name}: Sim close behaviour");
+    // A discard changes nothing the source peer can see: the relay sends it no
+    // octet and does not end its leg (the lingering close, not the discard,
+    // closes the socket), on either adapter, whichever way the discard ended.
+    assert_eq!(host.source_leg, expected.source_leg, "{name}: Host source-peer leg state");
+    assert_eq!(sim.source_leg, expected.source_leg, "{name}: Sim source-peer leg state");
+    assert_eq!(host.source_leg, sim.source_leg, "{name}: Host and Sim leave the same leg state");
 }
 
 macro_rules! equivalence_cases {

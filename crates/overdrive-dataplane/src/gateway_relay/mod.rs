@@ -149,3 +149,91 @@ impl GatewayRelay for HostGatewayRelay {
         todo!("SCAFFOLD: HostGatewayRelay::discard_remaining")
     }
 }
+
+#[cfg(test)]
+mod pipe_floor_laws {
+    #![allow(
+        clippy::doc_markdown,
+        clippy::expect_used,
+        reason = "CONTRACT_SHAPE is required metadata; expect names the precondition of a fixture"
+    )]
+
+    use proptest::prelude::*;
+
+    use super::*;
+
+    /// S-PIG-86 (the constant): the pipe floor is 65 536 octets, the capacity
+    /// the relay's record-boundary and backpressure rules are sized for
+    /// (ADR-0246). The DESIGN pins the value, so this row is expected-GREEN on
+    /// the scaffold.
+    ///
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn the_pipe_floor_is_sixty_five_thousand_five_hundred_and_thirty_six_octets() {
+        assert_eq!(PIPE_FLOOR, 65_536);
+    }
+
+    /// S-PIG-86 (the read-back): a capacity read back at the floor or above is a
+    /// `PipeCapacity` holding exactly that value; one octet below the floor, and
+    /// every smaller value, is `CapacityBelowFloor` carrying what was read.
+    ///
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    #[ignore = "pending DELIVER kernel-relay-host-adapter"]
+    fn a_read_back_below_the_floor_is_refused_with_what_was_read() {
+        for at_or_above in [PIPE_FLOOR, PIPE_FLOOR + 1, 2 * PIPE_FLOOR, 1 << 20] {
+            let capacity =
+                PipeCapacity::new(at_or_above).expect("a capacity at or above the floor");
+            assert_eq!(capacity.get(), at_or_above);
+        }
+        for below in [0, 1, 4096, PIPE_FLOOR - 1] {
+            assert_eq!(
+                PipeCapacity::new(below).err(),
+                Some(RelayPipeError::CapacityBelowFloor { got: below }),
+                "{below} is below the floor",
+            );
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        /// S-PIG-86 (the splice-in length): for every octet count owed and every
+        /// capacity at or above the floor, the next splice into an empty pipe is
+        /// exactly `min(owed, capacity)`, never above either and never zero.
+        ///
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        #[ignore = "pending DELIVER kernel-relay-host-adapter"]
+        fn the_splice_in_length_is_the_smaller_of_what_is_owed_and_the_capacity(
+            owed in 1u64..=u64::MAX,
+            capacity in PIPE_FLOOR..=(64usize << 20),
+        ) {
+            let owed = NonZeroU64::new(owed).expect("owed is nonzero");
+            let capacity = PipeCapacity::new(capacity).expect("a capacity at or above the floor");
+            let held = capacity.get() as u64;
+            let length = splice_in_len(owed, capacity).get();
+            prop_assert_eq!(length, owed.get().min(held));
+            prop_assert!(length <= owed.get());
+            prop_assert!(length <= held);
+        }
+
+        /// S-PIG-86 (the boundary around the floor): a body one octet below, at
+        /// and one octet above the pipe capacity splices in whole, whole, and
+        /// capacity octets respectively (the remainder is the next splice).
+        ///
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        #[ignore = "pending DELIVER kernel-relay-host-adapter"]
+        fn bodies_around_the_capacity_splice_in_whole_or_capacity_octets(
+            capacity in PIPE_FLOOR..=(1usize << 20),
+        ) {
+            let held = capacity as u64;
+            for (owed, expected) in [(held - 1, held - 1), (held, held), (held + 1, held)] {
+                let owed = NonZeroU64::new(owed).expect("owed is nonzero");
+                let pipe = PipeCapacity::new(capacity).expect("a capacity at or above the floor");
+                prop_assert_eq!(splice_in_len(owed, pipe).get(), expected);
+            }
+        }
+    }
+}

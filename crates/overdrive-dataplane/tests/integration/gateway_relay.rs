@@ -295,11 +295,28 @@ async fn body_octets_are_exact_at_both_peers_across_keep_alive_exchanges_around_
             joined(sender, "the client sent both requests").await;
             joined(receiver, "the client received both responses octet-exact").await;
 
-            eprintln!(
-                "S-PIG-105 suite {offer:?} len {len}: client receive sizes {:?}, origin receive sizes {:?}",
-                rig.public.peer.recv_sizes().iter().take(8).collect::<Vec<_>>(),
-                rig.upstream.peer.recv_sizes().iter().take(8).collect::<Vec<_>>()
-            );
+            // Tier-3 obligation 16(j): the relay passes no SPLICE_F_MORE, a
+            // configuration the spike did not run, so the record sizes the real
+            // peers received are recorded (and bounded by the TLS record limit).
+            for (peer_name, peer) in [("client", &rig.public.peer), ("origin", &rig.upstream.peer)]
+            {
+                let sizes = peer.recv_sizes();
+                assert!(!sizes.is_empty(), "the {peer_name} received application records");
+                assert!(
+                    sizes.iter().all(|size| (1..=16_384).contains(size)),
+                    "{peer_name}: every application record holds 1..=16384 octets, got {:?}",
+                    sizes.iter().filter(|size| !(1..=16_384).contains(*size)).collect::<Vec<_>>(),
+                );
+                eprintln!(
+                    "S-PIG-105 suite {offer:?} len {len}: {peer_name} received {} records, \
+                     min {} max {} total {} octets, first {:?}",
+                    sizes.len(),
+                    sizes.iter().min().copied().unwrap_or(0),
+                    sizes.iter().max().copied().unwrap_or(0),
+                    sizes.iter().sum::<usize>(),
+                    sizes.iter().take(8).collect::<Vec<_>>(),
+                );
+            }
             drop(rig);
             assert_eq!(
                 settle_fds(fds_start).await,
@@ -1116,35 +1133,70 @@ async fn lingering_close_lets_the_client_read_the_response_then_close_notify_not
 
 /// S-PIG-115 (T3 half, bounds arm): the discard ends at `max` octets, at the
 /// passed absolute deadline (which is the drain deadline when a drain begins during
-/// a discard) and at the no-progress window.
+/// a discard) and at the no-progress window. `discard_remaining` returns no count
+/// (R-22), so each end is judged by its result class and by what the peer can
+/// observe of its leg: after the `max` end the peer has pushed at least `max`
+/// octets through and then freezes within the socket buffers (the relay reads
+/// nothing more) without a reset; after the deadline and no-progress ends the
+/// leg is still open to the peer (the lingering close, not the discard, closes
+/// the socket).
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "pending DELIVER relay-lingering-close"]
 async fn the_discard_ends_at_max_octets_at_the_deadline_and_at_the_no_progress_window() {
+    const PIECE: usize = 64 * 1024;
+    const MAX: u64 = 1024 * 1024;
+
     // max: a peer that never closes and keeps sending.
     let mut rig = Rig::new(Offer::Aes256).await;
     let client = rig.public.peer.clone();
-    let flood = std::thread::spawn(move || {
-        for i in 0..4096 {
-            if client.send(&pattern(i * 1024, 1024)).is_err() {
-                return;
+    let accepted = Arc::new(AtomicU64::new(0));
+    let flood = {
+        let client = client.clone();
+        let accepted = Arc::clone(&accepted);
+        std::thread::spawn(move || -> io::Result<()> {
+            // 256 MiB: far above `max` plus every socket buffer, so the sender
+            // can only stall because the relay stopped reading.
+            for i in 0..4096 {
+                client.send(&pattern(i * PIECE, PIECE))?;
+                accepted.fetch_add(PIECE as u64, Ordering::SeqCst);
             }
-        }
-    });
+            Ok(())
+        })
+    };
     let Rig { relay, public, .. } = &mut rig;
     relay.close_write(&mut public.write, in_secs(10)).await.expect("close_notify");
-    relay
-        .discard_remaining(
-            &mut public.read,
-            nz64(1024 * 1024),
-            relay_within(30, Duration::from_secs(5)),
-        )
-        .await
-        .expect("the discard ends at max");
-    let _ = flood.join();
+    let ended = relay
+        .discard_remaining(&mut public.read, nz64(MAX), relay_within(30, Duration::from_secs(5)))
+        .await;
+    assert_eq!(ended, Ok(()), "the discard ends at max with the Ok class");
+    let at_return = accepted.load(Ordering::SeqCst);
+    assert!(
+        at_return + PIECE as u64 >= MAX,
+        "the peer pushed at least max octets through before the discard ended ({at_return})"
+    );
+    // The relay reads nothing more: the sender freezes within the buffers.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let frozen_at = accepted.load(Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(
+        accepted.load(Ordering::SeqCst),
+        frozen_at,
+        "no further octet is accepted once the discard stopped reading"
+    );
+    let bound =
+        MAX + tcp_buffer_ceiling("tcp_wmem") + tcp_buffer_ceiling("tcp_rmem") + 2 * PIECE as u64;
+    assert!(
+        frozen_at <= bound,
+        "the peer got {frozen_at} octets in, within max + buffers ({bound})"
+    );
+    assert!(!flood.is_finished(), "the sender is blocked, not failed: the leg was not reset");
+    drop(rig);
+    let _ = blocking(move || flood.join()).await;
 
     // deadline (a drain deadline passed as `absolute`): a silent peer.
     let mut rig = Rig::new(Offer::Aes128).await;
+    let client = rig.public.peer.clone();
     let Rig { relay, public, .. } = &mut rig;
     let begin = Instant::now();
     let result = relay
@@ -1158,6 +1210,7 @@ async fn the_discard_ends_at_max_octets_at_the_deadline_and_at_the_no_progress_w
     assert!(
         begin.elapsed() >= Duration::from_secs(1) && begin.elapsed() < Duration::from_millis(2_500)
     );
+    client.send(&pattern(0, 10)).expect("the leg is still open to the peer after the deadline");
 
     // no-progress: a peer that sent some octets then went quiet.
     let mut rig = Rig::new(Offer::Aes128).await;
@@ -1181,6 +1234,7 @@ async fn the_discard_ends_at_max_octets_at_the_deadline_and_at_the_no_progress_w
         begin.elapsed() < Duration::from_secs(5),
         "ended within the no-progress window, not at 30 s"
     );
+    client.send(&pattern(100, 10)).expect("the leg is still open to the peer after the stall");
 }
 
 // ---------------------------------------------------------------------------

@@ -30,7 +30,8 @@
 //! `127.T.(200 + hi).lo` (the Service frontend, with a listening socket on
 //! port 8080 so the connector's real `connect(2)` completes). This file owns
 //! second octets 68..=96; the sibling integration file owns 41..=62 and the
-//! in-crate drivers 63..=67; no other test may reuse them.
+//! in-crate drivers 63..=67; no other test may reuse them. The request-budget
+//! scenarios of R-37 own 130..=132 (rows below).
 //!
 //! | `T` | test |
 //! |---|---|
@@ -59,6 +60,9 @@
 //! | 90 | ambiguous request framing (S-PIG-77) |
 //! | 91 | ambiguous response framing (S-PIG-78) |
 //! | 96 | public server configuration (S-PIG-118) |
+//! | 130 | response head after a slow upload (S-PIG-120, 118 s arm) |
+//! | 131 | stalled request body (S-PIG-121, 408 arms) |
+//! | 132 | trickled request body (S-PIG-121, 120 s arm) |
 
 #![allow(
     clippy::doc_markdown,
@@ -182,6 +186,9 @@ const HALF_CLOSE: Slot = Slot(89);
 const AMBIGUOUS_REQUEST: Slot = Slot(90);
 const AMBIGUOUS_RESPONSE: Slot = Slot(91);
 const SERVER_CONFIGURATION: Slot = Slot(96);
+const UPLOAD_COMPLETES_LATE: Slot = Slot(130);
+const STALLED_REQUEST_BODY: Slot = Slot(131);
+const TRICKLED_REQUEST_BODY: Slot = Slot(132);
 
 // ---------------------------------------------------------------------------
 // GatewayConnectDataplane double: counts opens and cleanups
@@ -2874,6 +2881,219 @@ async fn a_stalled_client_after_an_early_answer_gets_no_408_only_the_lingering_c
     let legs = world.finish(&running).await;
     assert_eq!(legs.public_statuses(), vec![401], "no 408 follows the early answer");
     assert_lingering_close(&legs, "stalled client after an early answer");
+}
+
+// ---------------------------------------------------------------------------
+// S-PIG-120 (118 s arm) and S-PIG-121 (408 and 120 s arms): the request budget
+// ---------------------------------------------------------------------------
+
+/// The octets of `needle` that the origin has been sent (head and body written
+/// to the first upstream leg), true once `legs` holds them at the end.
+fn upstream_ends_with(legs: &Legs, needle: &[u8]) -> bool {
+    legs.upstream.first().is_some_and(|leg| leg.written.ends_with(needle))
+}
+
+/// S-PIG-120 (118 s arm, R-37): a request whose body upload completes at 118 of
+/// its 120 s (every piece moves inside the 30 s no-progress window, so the
+/// upload is never cut) has its response-head budget start at that instant
+/// `t0` and end at the earlier of `t0 + response_head_deadline` (5 s) and the
+/// whole-request deadline: the silent origin is waited for exactly 2 s, then
+/// answered with one 502, and never for the 5 s the head budget alone would
+/// allow; one open, no retry.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+#[ignore = "pending DELIVER kernel-relay-exchange-driver"]
+async fn a_response_head_after_a_slow_upload_waits_only_the_remaining_request_time() {
+    let world = World::start(UPLOAD_COMPLETES_LATE, Spec::default()).await;
+    let limits = world.limits();
+    let whole = limits.whole_request_deadline();
+    assert_eq!(whole, Duration::from_secs(120), "the budget the scenario states");
+    let piece_every = Duration::from_millis(29_500);
+    assert!(piece_every < limits.body_no_progress_deadline(), "every piece is inside a window");
+    let tick = Duration::from_millis(1);
+    let half_second = Duration::from_millis(500);
+
+    let mut public =
+        LegScript::new().octets(request_head("POST", "/a", &[("Content-Length", "4")]));
+    for piece in [b"a", b"b", b"c", b"d"] {
+        public = public.quiet(piece_every).octets(piece.to_vec());
+    }
+    let running = world.start_exchange(public, vec![LegScript::new()]);
+    world.accepted(&running).await;
+
+    // The upload completes at 4 x 29.5 s = 118 s; that is t0.
+    world.advance(piece_every * 4, half_second).await;
+    wait_for("the whole upload to reach the origin", || {
+        upstream_ends_with(&world.legs(&running), b"abcd").then_some(())
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert!(
+        world.legs(&running).public().written.is_empty(),
+        "no response octet at t0: the origin is still being waited for",
+    );
+
+    // 2 s remain of the whole-request budget: one millisecond short of it the
+    // exchange still waits (the 5 s head budget alone would allow 3 s more).
+    world.advance(whole - piece_every * 4 - tick, half_second).await;
+    let now = world.legs(&running);
+    assert!(now.public().written.is_empty(), "still waiting one millisecond before the deadline");
+    assert!(!now.upstream[0].closed, "the origin leg is still open");
+
+    world.advance(tick, tick).await;
+    let legs = world.finish(&running).await;
+    assert_eq!(legs.public_statuses(), vec![502], "exactly one 502 at the whole-request deadline");
+    assert!(legs.upstream[0].closed, "the origin leg is closed once");
+    assert_eq!(world.opens(), 1, "no retry");
+}
+
+/// One stalled-request-body case: the public script and the point, observed at
+/// the origin, from which the gateway is waiting on the stalled octet (the
+/// injected clock does not move meanwhile, so the wait started at this
+/// instant).
+struct StalledBody {
+    name: &'static str,
+    public: LegScript,
+    waiting: fn(&Legs) -> bool,
+}
+
+fn head_reached_the_origin(legs: &Legs) -> bool {
+    legs.upstream.first().is_some_and(|leg| !leg.written.is_empty())
+}
+
+/// S-PIG-121 (408 arms, R-37): after a complete head a public client that moves
+/// no body octet for `body_no_progress_deadline` (30 s) gets exactly one 408
+/// before any response octet, and not a millisecond earlier; both legs close,
+/// the connection is not reused and no lingering discard follows the 408. The
+/// silent origin is never the cause: the stall is bounded by the no-progress
+/// window, not by `response_head_deadline`. Arms: a `Content-Length` body, a
+/// stalled chunk-size line and a stall in the middle of a chunk.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+#[ignore = "pending DELIVER kernel-relay-exchange-driver"]
+async fn a_request_body_that_stops_moving_gets_one_408_at_the_no_progress_window() {
+    let mut world = World::start(STALLED_REQUEST_BODY, Spec::default()).await;
+    let no_progress = world.limits().body_no_progress_deadline();
+    assert_eq!(no_progress, Duration::from_secs(30), "the window the scenario states");
+    let tick = Duration::from_millis(1);
+    let second = Duration::from_secs(1);
+    let forever = Duration::from_secs(3600);
+    let chunked_head = request_head("POST", "/a", &[("Transfer-Encoding", "chunked")]);
+
+    let cases = vec![
+        StalledBody {
+            name: "Content-Length body, no octet",
+            public: LegScript::new()
+                .octets(request_head("POST", "/a", &[("Content-Length", "1024")]))
+                .quiet(forever),
+            waiting: head_reached_the_origin,
+        },
+        StalledBody {
+            name: "chunked body, stalled chunk-size line",
+            public: LegScript::new().octets(chunked_head.clone()).quiet(forever),
+            waiting: head_reached_the_origin,
+        },
+        StalledBody {
+            name: "chunked body, stalled in the middle of a chunk",
+            public: LegScript::new()
+                .octets(chunked_head)
+                .octets("a\r\n")
+                .octets("abc")
+                .quiet(forever),
+            waiting: |legs| upstream_ends_with(legs, b"abc"),
+        },
+    ];
+
+    let mut expected_opens = 0;
+    for case in cases {
+        let mut running = world.start_exchange(case.public, vec![LegScript::new()]);
+        expected_opens += 1;
+        wait_for("the gateway to wait on the stalled body", || {
+            (case.waiting)(&world.legs(&running)).then_some(())
+        })
+        .await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        world.advance(no_progress - tick, second).await;
+        let before = world.legs(&running);
+        assert!(
+            before.public().written.is_empty(),
+            "{}: no 408 before the window has elapsed",
+            case.name,
+        );
+        assert!(!before.public().closed, "{}: the connection is still open", case.name);
+
+        world.advance(tick, tick).await;
+        let legs = world.finish(&running).await;
+        assert_eq!(legs.public_statuses(), vec![408], "{}: exactly one 408", case.name);
+        assert_eq!(
+            calls_of(legs.public(), RelayCall::DiscardRemaining),
+            0,
+            "{}: no lingering discard follows a 408",
+            case.name,
+        );
+        assert!(legs.public().closed, "{}: the public leg is closed", case.name);
+        assert!(legs.upstream[0].closed, "{}: the origin leg is closed", case.name);
+        assert!(
+            is_closed_by_gateway(&mut running.client),
+            "{}: the client socket is closed, the connection is not reused",
+            case.name,
+        );
+        assert_eq!(world.opens(), expected_opens, "{}: no retry", case.name);
+    }
+    world.shutdown_with_clock(second).await;
+}
+
+/// S-PIG-121 (120 s arm, R-37): a body that moves inside every 30 s window (one
+/// octet every 29 s) is never cut by the no-progress rule: no 408 is written
+/// and the origin sees every octet; a request still unfinished at
+/// `whole_request_deadline` (120 s) with no response octet sent is one 502, at
+/// exactly that deadline, with no lingering discard.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+#[ignore = "pending DELIVER kernel-relay-exchange-driver"]
+async fn a_trickled_request_body_is_cut_only_at_the_whole_request_deadline_with_a_502() {
+    let world = World::start(TRICKLED_REQUEST_BODY, Spec::default()).await;
+    let limits = world.limits();
+    let whole = limits.whole_request_deadline();
+    assert_eq!(whole, Duration::from_secs(120), "the budget the scenario states");
+    let every = Duration::from_secs(29);
+    assert!(every < limits.body_no_progress_deadline(), "each octet is inside a window");
+    let tick = Duration::from_millis(1);
+    let second = Duration::from_secs(1);
+
+    let mut public =
+        LegScript::new().octets(request_head("POST", "/a", &[("Content-Length", "1000")]));
+    for _ in 0..4 {
+        public = public.quiet(every).octets(vec![b'x']);
+    }
+    let public = public.quiet(Duration::from_secs(3600));
+    let running = world.start_exchange(public, vec![LegScript::new()]);
+    wait_for("the request head to reach the origin", || {
+        head_reached_the_origin(&world.legs(&running)).then_some(())
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    // The last octet moves at 4 x 29 s = 116 s; nothing is written before 120 s.
+    world.advance(whole - tick, second).await;
+    let before = world.legs(&running);
+    assert!(
+        before.public().written.is_empty(),
+        "no 408 and no 502 while the body keeps moving and the request has time left",
+    );
+    assert!(upstream_ends_with(&before, b"xxxx"), "the origin saw every trickled octet");
+    assert!(!before.upstream[0].closed);
+
+    world.advance(tick, tick).await;
+    let legs = world.finish(&running).await;
+    assert_eq!(legs.public_statuses(), vec![502], "one 502 at the whole-request deadline");
+    assert_eq!(calls_of(legs.public(), RelayCall::DiscardRemaining), 0, "no discard after it");
+    assert!(legs.upstream[0].closed, "the origin leg is closed");
+    assert_eq!(world.opens(), 1, "no retry");
 }
 
 // ---------------------------------------------------------------------------
