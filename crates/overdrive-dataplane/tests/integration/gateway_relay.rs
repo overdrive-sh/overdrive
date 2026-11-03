@@ -419,7 +419,7 @@ async fn peer_key_update_leaves_octets_exact_and_is_never_forwarded_or_originate
                         match segment {
                             Segment::Bytes(b) => client.send(&b)?,
                             Segment::KeyUpdate { requested } => {
-                                client.send_key_update(requested)?
+                                client.send_key_update(requested)?;
                             }
                         }
                     }
