@@ -21,7 +21,10 @@ assert_lefthook_installed: true
 # `cargo clean` to take longer. Bypass with `git commit --no-verify`.
 # ────────────────────────────────────────────────────────────────────────────
 pre-commit:
-  parallel: true
+  # Sequential: on metal the clippy, doctest and nextest-affected steps each
+  # take the host's global lease (infra/hooks/linux-run.sh), which a second
+  # concurrent run would wait on until its lease timeout.
+  parallel: false
   skip:
     - merge
     - rebase
@@ -79,11 +82,12 @@ pre-commit:
           done
         done | sort -u)
         for p in $pkgs; do
-          cargo xtask lima run -- cargo clippy -p "$p" --all-targets --all-features --tests -- -D warnings
+          infra/hooks/linux-run.sh cargo clippy -p "$p" --all-targets --all-features --tests -- -D warnings
         done
       fail_text: |
         Clippy warnings. Fix or `#[allow]` with justification.
-        If Lima is not running: `cargo xtask lima up`
+        Runs on metal when `.env` sets OVERDRIVE_METAL_TARGET, else in Lima
+        (`cargo xtask lima up`). See infra/hooks/linux-run.sh.
     doctest:
       tags: [rust]
       glob: "*.rs"
@@ -122,11 +126,12 @@ pre-commit:
           done
         done | sort -u)
         for p in $pkgs; do
-          cargo xtask lima run -- cargo test --doc -p "$p"
+          infra/hooks/linux-run.sh cargo test --doc -p "$p"
         done
       fail_text: |
         Doctest failed. Rustdoc examples are executable per development.md.
-        If Lima is not running: `cargo xtask lima up`
+        Runs on metal when `.env` sets OVERDRIVE_METAL_TARGET, else in Lima
+        (`cargo xtask lima up`). See infra/hooks/linux-run.sh.
     nextest-affected:
       tags: [rust]
       glob: "*.rs"
@@ -172,16 +177,17 @@ pre-commit:
           echo "nextest-affected: no owning crate resolved for staged files; skipping"
           exit 0
         fi
-        cargo xtask lima run -- cargo xtask kmod-build
-        cargo xtask lima run -- cargo xtask kmod-load --busy-ok
+        infra/hooks/linux-run.sh cargo xtask kmod-build
+        infra/hooks/linux-run.sh cargo xtask kmod-load --busy-ok
         # Join crate names into `rdeps(c1) | rdeps(c2) | ...`.
         filter=$(echo "$pkgs" | awk 'BEGIN{sep=""} {printf "%srdeps(%s)", sep, $0; sep=" | "}')
         echo "nextest-affected: filter = $filter"
-        cargo xtask lima run -- cargo nextest run --no-fail-fast -E "$filter"
+        infra/hooks/linux-run.sh cargo nextest run --no-fail-fast -E "$filter"
       fail_text: |
         Affected tests failed. Pre-push runs the full suite — this
         smoke check caught it earlier.
-        If Lima is not running: `cargo xtask lima up`
+        Runs on metal when `.env` sets OVERDRIVE_METAL_TARGET, else in Lima
+        (`cargo xtask lima up`). See infra/hooks/linux-run.sh.
     bpf-clippy:
       tags: [rust, bpf]
       glob: "crates/overdrive-bpf/**/*"
@@ -238,8 +244,8 @@ pre-push:
   commands:
     kmod-prepare:
       run: |
-        cargo xtask lima run -- cargo xtask kmod-build
-        cargo xtask lima run -- cargo xtask kmod-load --busy-ok
+        infra/hooks/linux-run.sh cargo xtask kmod-build
+        infra/hooks/linux-run.sh cargo xtask kmod-load --busy-ok
     # Unit + integration + proptest via nextest. `cargo-nextest` must be
     # installed locally — run `cargo xtask dev-setup` once per clone, or
     # install manually via `cargo install cargo-nextest --locked` /
@@ -250,7 +256,7 @@ pre-push:
     # pre-commit hook above, which catches broken rustdoc examples at
     # commit time.
     # Hollow Quint-conformance-driver gate — the same check CI runs in the
-    # dst-lint job. Purely syntactic (no Lima needed); runs before the
+    # dst-lint job. Purely syntactic (no Linux host needed); runs before the
     # suite so a hollow driver fails fast. Scans every quint-connect driver in
     # crates/*/src/**/*.rs and tests/conformance/tests/*.rs. See
     # `xtask/src/conformance_lint.rs`.
@@ -261,10 +267,11 @@ pre-push:
         handler, or a State projection off Sim*/driver bookkeeping). See
         .claude/rules/testing.md § "Quint conformance".
     nextest:
-      run: cargo xtask lima run -- cargo nextest run --workspace --features integration-tests
+      run: infra/hooks/linux-run.sh cargo nextest run --workspace --features integration-tests
       fail_text: |
         Tests failed. Fix or push with --no-verify for a WIP branch.
-        If Lima is not running: `cargo xtask lima up`
+        Runs on metal when `.env` sets OVERDRIVE_METAL_TARGET, else in Lima
+        (`cargo xtask lima up`). See infra/hooks/linux-run.sh.
 
 # ────────────────────────────────────────────────────────────────────────────
 # commit-msg — placeholder. Enable when we pick a convention
