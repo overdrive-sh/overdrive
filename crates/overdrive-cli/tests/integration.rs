@@ -20,6 +20,12 @@ mod integration {
     // composition every in-process `serve` fixture boots through.
     mod serve_fixture;
 
+    // public-ingress-gateway (S-PIG-42): the delegating observation store whose
+    // gateway status point reads fail while armed — the control-plane suite's own
+    // helper, `#[path]`-included unchanged.
+    #[path = "../../../overdrive-control-plane/tests/common/status_fault_store.rs"]
+    mod status_fault_store;
+
     mod cluster_and_node_commands;
     mod cluster_init_removed;
     mod endpoint_from_config;

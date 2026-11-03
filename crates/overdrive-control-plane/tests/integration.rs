@@ -101,6 +101,11 @@ mod integration {
     #[path = "../common/node_adapters.rs"]
     pub mod node_adapters;
 
+    // public-ingress-gateway — S-PIG-42, 61: a delegating observation store
+    // whose two gateway status point reads fail while armed.
+    #[path = "../common/status_fault_store.rs"]
+    pub mod status_fault_store;
+
     // Cross-file net-slot partitioning registry (SSOT). Every real-netns test
     // file draws its per-test `NetSlot` from a named, disjoint band here via
     // `super::net_slots::<FILE>.nth(offset)`, so no two tests derive the same
@@ -396,10 +401,19 @@ mod integration {
     /// `overdrive-control-plane` cannot depend on `overdrive-cli` (that is the
     /// only illegal dependency direction). The original DISTILL placement was a
     /// defect, relocated single-cut in step 03-02.
-    /// public-ingress-gateway — S-PIG-59 and the disabled arm of S-PIG-100: the
-    /// boot and graceful shutdown with the gateway disabled. The enabled arms
-    /// wait on the open `GatewayClientMtlsFactory` placement (batch gaps file).
+    /// public-ingress-gateway — S-PIG-59, S-PIG-100 and the enabled-boot arms
+    /// (S-PIG-02 I, 57 I, 58, 60 I, 61, 62, 74): boot and graceful shutdown
+    /// through `run_server` with the gateway disabled, enabled and gated.
     mod public_ingress_gateway_boot_shutdown;
+
+    // public-ingress-gateway — S-PIG-38, 43, 52 and 64: the exact-peer client
+    // mTLS against a real rustls peer. The seal a `HostGatewayClientMtls` needs
+    // is minted only by `UnboundGatewayBuilder::into_builder`, whose host codec
+    // edge exists in this crate and not in `overdrive-dataplane`. The test PKI
+    // is the dataplane suite's own helper, `#[path]`-included unchanged.
+    #[path = "../../../overdrive-dataplane/tests/integration/helpers/mtls_pki.rs"]
+    pub mod mtls_pki;
+    mod public_ingress_gateway_mtls;
 
     mod built_in_ca_operator_composition {
         /// Feature-delta § D1-AMEND — the `alloc_status` server projection
