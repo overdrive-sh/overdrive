@@ -73,6 +73,13 @@ overdrive-control-plane = { path = "../overdrive-control-plane", features = ["in
 # edge class: `overdrive-sim` already reaches `overdrive-worker` transitively
 # through `overdrive-control-plane`.
 overdrive-worker.path = "../overdrive-worker"
+# public-ingress-gateway (G1): `SimGatewayRelay` implements the `GatewayRelay`
+# driven port defined by `overdrive-gateway::ports` (and names its
+# `rustls::ServerConfig` parameter). `overdrive-gateway` depends only on
+# `overdrive-core` and `overdrive-host`; its own dev-dependency on this crate is
+# the same dev-cycle shape `overdrive-core` carries.
+overdrive-gateway.path = "../overdrive-gateway"
+rustls.workspace = true
 ciborium.workspace       = true
 serde.workspace          = true
 serde_json.workspace     = true

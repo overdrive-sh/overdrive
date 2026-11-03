@@ -1,0 +1,65 @@
+# `overdrive-gateway` — the embedded public-ingress gateway: Route set owner,
+# Public Certified-Key custody, Gateway Application owner, upstream connector,
+# the driven-port contracts (`ports`) and the pure routing / header / framing
+# modules. Class `adapter-host` per ADR-0003 (ADR-0222). The kernel-TLS relay
+# backends live in `overdrive-dataplane` (host) and `overdrive-sim` (Sim); this
+# crate never depends on `hyper`, `hyper-util` or `tokio-rustls` (ADR-0245).
+
+[package]
+name         = "overdrive-gateway"
+version      = "0.0.0"
+description  = "Embedded public-ingress gateway application and driven-port contracts."
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+publish                = false
+
+[package.metadata.overdrive]
+crate_class = "adapter-host"
+
+[features]
+# Workspace-wide convention (`.claude/rules/testing.md` § Workspace convention):
+# gates the real-redb Route / custody / application integration binary and the
+# source-local quint-connect driver.
+integration-tests = []
+
+[dependencies]
+overdrive-core.workspace = true
+overdrive-host.path      = "../overdrive-host"
+async-trait.workspace    = true
+thiserror.workspace      = true
+tokio.workspace          = true
+tokio-util.workspace     = true
+tracing.workspace        = true
+rustls.workspace         = true
+zeroize.workspace        = true
+httparse.workspace       = true
+http.workspace           = true
+arc-swap.workspace       = true
+x509-parser.workspace    = true
+ring.workspace           = true
+rkyv.workspace           = true
+redb.workspace           = true
+
+[dev-dependencies]
+overdrive-store-local.workspace = true
+# Sims of `overdrive-core` traits (`SimClock`, `SimObservationStore`,
+# `SimServiceVipView`) and, for the integration binary only, the gateway Sim
+# adapters. The in-crate quint driver imports core-trait Sims only (DG-7).
+overdrive-sim = { path = "../overdrive-sim" }
+tokio    = { workspace = true, features = ["test-util"] }
+proptest.workspace  = true
+tempfile.workspace  = true
+rcgen.workspace     = true
+bytes.workspace     = true
+futures.workspace   = true
+# quint-connect conformance driver (QC-2).
+quint-connect.workspace = true
+itf.workspace           = true
+anyhow.workspace        = true
+serde.workspace         = true
+
+[lints]
+workspace = true

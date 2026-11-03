@@ -741,6 +741,27 @@ test-group = 'host-kernel-shared'
 filter = 'package(overdrive-dataplane) & binary(integration)'
 test-group = 'host-kernel-shared'
 
+# public-ingress-gateway (G1) - the `overdrive-dataplane` LIBRARY test binary
+# hosts the selection_receipt conformance driver (`src/quint_selection_receipt.rs`):
+# the real `EbpfDataplane`, bpffs pins, the root cgroup attach and
+# `/proc/net/tls_stat`. Every existing dataplane entry matches
+# `binary(integration)` or a module list under it, so the lib binary was
+# unassigned. The WHOLE binary joins the single-writer group (module filters go
+# stale when a kernel-touching test lands beside them); same precedent as
+# `package(overdrive-control-plane) & kind(lib)`.
+[[profile.default.overrides]]
+filter = 'package(overdrive-dataplane) & kind(lib)'
+test-group = 'host-kernel-shared'
+
+# public-ingress-gateway (S-PIG-115, T3 arm) - the lingering-close tests on a real
+# kernel are bounded at 120 s each (feature-delta Tier 3 obligations, row 115),
+# which equals the default kill (60 s x 2); one more period keeps the harness
+# from ending a test at its own stated bound. Derived from the stated bound, not
+# measured. The binary is already in `host-kernel-shared`.
+[[profile.default.overrides]]
+filter = 'package(overdrive-dataplane) & binary(integration) & (test(lingering_close_lets_the_client_read_the_response_then_close_notify_not_a_reset) | test(the_discard_ends_at_max_octets_at_the_deadline_and_at_the_no_progress_window))'
+slow-timeout = { period = "60s", terminate-after = 3 }
+
 [[profile.default.overrides]]
 filter = 'package(overdrive-netlink) & binary(integration)'
 test-group = 'host-kernel-shared'

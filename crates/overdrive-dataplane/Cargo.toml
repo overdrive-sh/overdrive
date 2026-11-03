@@ -50,6 +50,10 @@ integration-tests = []
 
 [dependencies]
 overdrive-core.workspace = true
+# public-ingress-gateway (G1): `HostGatewayRelay` implements the `GatewayRelay`
+# driven port defined by `overdrive-gateway::ports`. `overdrive-gateway` depends
+# only on `overdrive-core` and `overdrive-host`, so this edge adds no cycle.
+overdrive-gateway.path   = "../overdrive-gateway"
 async-trait.workspace    = true
 thiserror.workspace      = true
 tokio                    = { workspace = true, features = ["macros", "rt"] }
@@ -140,6 +144,13 @@ serial_test.workspace        = true
 tracing-subscriber.workspace = true
 
 serde_json.workspace = true
+
+# public-ingress-gateway (G1): the host/Sim `GatewayRelay` equivalence test
+# (`tests/integration/gateway_relay_equivalence.rs`) drives `SimGatewayRelay`
+# beside `HostGatewayRelay` through the one port. Dev-only; the dev-dependency
+# cycle through `overdrive-sim` -> `overdrive-control-plane` -> this crate is
+# the same shape `overdrive-core` and `overdrive-host` already carry.
+overdrive-sim.path = "../overdrive-sim"
 
 # Acceptance tests for `PersistentServiceVipAllocator` (step 01-03)
 # drive a real `LocalIntentStore` over a `tempfile::TempDir` — the

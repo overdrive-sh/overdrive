@@ -25,6 +25,13 @@ mod integration {
     /// a retry after a partial failure (forward removed, reverse survived)
     /// purges the stale reverse entry. Caller-supplied backend.
     mod deregister_retry_safety;
+    /// public-ingress-gateway (G1, ADR-0239/0244/0246/0247; S-PIG-105..118, 123) —
+    /// the `HostGatewayRelay` adapter contract on a real kernel: real rustls/kTLS
+    /// peers, `/proc/net/tls_stat` and descriptor oracles. Native metal only.
+    mod gateway_relay;
+    /// public-ingress-gateway (S-PIG-104) — `HostGatewayRelay` and `SimGatewayRelay`
+    /// agree through the `GatewayRelay` port over the faults both can produce.
+    mod gateway_relay_equivalence;
     /// Shared fixtures (RAII veth-pair, capability gating). Declared at
     /// module scope so siblings reach it via `super::helpers::…`.
     mod helpers;

@@ -48,6 +48,10 @@ pub mod entropy;
 // of the core `FlowForwarder` port and the named arbiter of the forwarder's
 // kernel facts (DELIVER step 4 implements it, decision B-4).
 pub mod flow_forwarder;
+// public-ingress-gateway (G1) — `SimGatewayRelay`, the Sim backend of the
+// `overdrive_gateway::ports::GatewayRelay` driven port, and its test-support
+// surface (scripted legs, substrate lies, transcripts).
+pub mod gateway;
 // GH #295 D-295-R16 — `SimGuestDnsFactory` / `SimGuestDns`, the socket-free
 // doubles of the control-plane shared-gateway DNS owner port.
 pub mod guest_dns;

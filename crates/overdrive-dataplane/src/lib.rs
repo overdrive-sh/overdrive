@@ -48,6 +48,13 @@ pub mod sys;
 // workload's socket.
 pub mod mtls;
 
+// public-ingress-gateway (G1, ADR-0244/0246) — `HostGatewayRelay`, the host backend of
+// the `overdrive_gateway::ports::GatewayRelay` driven port: kernel-TLS arming
+// after a userspace rustls handshake, control-record dispatch, private-pipe
+// `splice`, and the Earned-Trust probe. Its `sys` module is the only one with
+// `unsafe`.
+pub mod gateway_relay;
+
 use std::net::Ipv4Addr;
 
 use async_trait::async_trait;

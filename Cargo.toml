@@ -7,6 +7,7 @@ members = [
     "crates/overdrive-control-plane",
     "crates/overdrive-dataplane",
     "crates/overdrive-fwd",
+    "crates/overdrive-gateway",
     "crates/overdrive-host",
     "crates/overdrive-init",
     "crates/overdrive-netlink",
@@ -31,6 +32,7 @@ default-members = [
     "crates/overdrive-control-plane",
     "crates/overdrive-dataplane",
     "crates/overdrive-fwd",
+    "crates/overdrive-gateway",
     "crates/overdrive-host",
     "crates/overdrive-init",
     "crates/overdrive-netlink",
@@ -238,6 +240,17 @@ itf             = "0.4"
 # scope. Dev-dependency of the driver crates only; library error types stay
 # thiserror (`.claude/rules/rust.md` § Errors).
 anyhow          = "1"
+
+# --- HTTP/1.1 head parsing (overdrive-gateway) -----------------------------
+# `httparse` parses request/response heads only; the gateway reads heads
+# through the terminator and derives message framing itself (ADR-0245).
+httparse        = "1"
+# `http` supplies `HeaderMap`, `Uri::Authority` and status/method types for the
+# pure routing and header-rewrite modules (no HTTP engine is used).
+http            = "1"
+# `arc-swap` publishes the Current Gateway Application generation in one
+# atomic pointer swap (`GatewayAdmission.current`).
+arc-swap        = "1"
 
 # --- Async streams --------------------------------------------------------
 tokio-stream    = { version = "0.1", features = ["sync"] }

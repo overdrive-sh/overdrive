@@ -22,5 +22,9 @@ pub mod mtls_netns_topology;
 pub mod mtls_pki;
 pub mod mtls_roles;
 pub mod packets;
+// public-ingress-gateway (G1; S-PIG-104..118, 123) — real rustls/kTLS peers, kernel
+// oracles (`/proc/net/tls_stat`, `/proc/self/fd`) and relay-accepted legs for the
+// host kernel-relay Tier-3 suite.
+pub mod relay_peers;
 pub mod traffic;
 pub mod veth;
