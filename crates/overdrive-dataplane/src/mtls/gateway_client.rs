@@ -1,6 +1,6 @@
 //! `HostGatewayClientMtls` — the exact-peer gateway-client mTLS adapter
 //! (public-ingress-gateway, ADR-0234; the registry artifact of
-//! `OUT-PIG-GATEWAY-CLIENT-EXACT-PEER`).
+//! `OUT-PIG-GATEWAY-EXACT-PEER`).
 //!
 //! On a connected fd it presents `[gateway leaf, node intermediate]` from the
 //! dedicated gateway SVID slot, anchors at the trust-bundle root, requires

@@ -643,7 +643,14 @@ async fn native_metal_kvm_public_ingress_gateway_answers_502_when_the_guest_flow
         let (_, trailing) = connection.read_to_end(Duration::from_secs(3));
         (outcome, trailing, started.elapsed())
     });
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    // The request is in flight when the guest has counted it (the marker moves on
+    // arrival, `/delay` answers 4 s later) and the user has no response head yet.
+    let in_flight_deadline = Instant::now() + Duration::from_secs(3);
+    while world.workload_request_count().await < 1 {
+        assert!(Instant::now() < in_flight_deadline, "the guest never counted the held request");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(!request.is_finished(), "no response head has reached the user before the kill");
     blocking(kill_vmm).await;
 
     let (outcome, trailing, elapsed) = request.await.expect("the request task completes");

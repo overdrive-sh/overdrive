@@ -94,7 +94,8 @@ where
 /// # Panics
 ///
 /// Panics with a fixture-identifying message if the hex does not decode, the
-/// bytes do not deserialise as `E`, or `E::into_latest()` reports an error.
+/// archived variant is not `V1` (discriminant 0), the bytes do not deserialise
+/// as `E`, or `E::into_latest()` reports an error.
 pub fn decode_envelope_v_latest<E>(fixture_hex: &str) -> E::Latest
 where
     E: VersionedEnvelope + rkyv::Archive,
@@ -103,6 +104,20 @@ where
 {
     let bytes = hex::decode(fixture_hex.trim())
         .expect("schema_evolution fixture hex string must decode cleanly");
+    // The archived root sits at the end of the buffer and an archived
+    // `#[repr(u8)]` enum starts with its tag, so the root's first byte is the
+    // variant discriminant; `0` is `V1`, the variant every fixture read through
+    // this helper pins. A fixture whose bytes decode as another variant (for
+    // example after being regenerated through `latest()`) is refused here.
+    let root = bytes
+        .len()
+        .checked_sub(core::mem::size_of::<<E as rkyv::Archive>::Archived>())
+        .expect("schema_evolution fixture is shorter than the archived envelope root");
+    assert_eq!(
+        bytes.get(root).copied(),
+        Some(0),
+        "schema_evolution fixture must be the frozen V1 variant (discriminant 0)",
+    );
     let mut aligned = rkyv::util::AlignedVec::<16>::new();
     aligned.extend_from_slice(&bytes);
     let envelope: E = rkyv::from_bytes::<E, rkyv::rancor::Error>(&aligned)

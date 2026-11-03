@@ -17,9 +17,14 @@
 //!
 //! Every composition binds its own `127.0.0.0/8` address: the second octet is
 //! the kind (`120` generation lifecycle, `121` shutdown); the low octets derive
-//! from the seed (`127.K.(seed / 250 % 200).(seed % 250 + 1)`), so tests that
-//! run in parallel nextest processes use distinct seeds. The Service frontend
-//! is `127.K.254.(seed % 250 + 1)`.
+//! from the seed (`127.K.((seed / 250 + pid) % 200).(seed % 250 + 1)`), the
+//! third octet also folding in the process id so parallel nextest processes
+//! running the same seed do not share a public bind address (the bind address
+//! appears nowhere in the trace). The Service frontend is
+//! `127.K.254.(seed % 250 + 1)`, a pure function of the seed because the seeded
+//! fault schedule names it; two processes running the same seed and kind at
+//! once would still share that frontend, so concurrent same-seed runs are not
+//! supported.
 //!
 //! # The trace
 //!
@@ -288,7 +293,18 @@ impl Addresses {
     fn derive(kind: u8, seed: u64) -> Self {
         let low = u8::try_from(seed % 250).unwrap_or(0) + 1;
         let mid = u8::try_from(seed / 250 % 200).unwrap_or(0);
-        Self { bind: Ipv4Addr::new(127, kind, mid, low), vip: Ipv4Addr::new(127, kind, 254, low) }
+        // The public bind address is process-private state: nothing in the
+        // trace renders it (the status shows only `bound`), so folding the
+        // process id in keeps two processes that run the same seed apart
+        // without touching the seed-determined trace. The Service frontend is
+        // part of the seeded case (the fault schedule names it), so it stays
+        // a pure function of the seed.
+        let process = u8::try_from(std::process::id() % 200).unwrap_or(0);
+        let bind_mid = (mid + process) % 200;
+        Self {
+            bind: Ipv4Addr::new(127, kind, bind_mid, low),
+            vip: Ipv4Addr::new(127, kind, 254, low),
+        }
     }
 }
 

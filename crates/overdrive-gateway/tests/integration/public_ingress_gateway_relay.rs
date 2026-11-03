@@ -50,7 +50,7 @@
 //! | 81 | single upstream attempt (S-PIG-97) |
 //! | 82 | upstream arming refused (S-PIG-98) |
 //! | 83 | public arming refused (S-PIG-98) |
-//! | 84 | relay probe gold test (S-PIG-99; no composition, octet unused) |
+//! | 84 | relay probe refused at the gateway gate (S-PIG-99); six sequential compositions, ordinal 0 |
 //! | 85 | drain (S-PIG-101); four compositions, ordinals 0..=3 |
 //! | 86 | response-side limits (S-PIG-119) |
 //! | 87 | response-head deadline (S-PIG-120) |
@@ -102,8 +102,9 @@ use overdrive_core::ca::root_key_envelope::KekId;
 use overdrive_core::gateway_identity::{GatewayIdentityEpoch, GatewayIdentityFacts};
 use overdrive_core::id::{BackendId, CertSerial, ContentHash, NodeId, ServiceVip, SpiffeId};
 use overdrive_core::public_ingress::{
-    GatewayApplicationStatusRowV1, GatewayListenerStatus, PublicCertifiedKeyId, PublicHostname,
-    PublicRouteInput, Route, ServiceKey, ServiceListenerReferenceInput, SocketCookie,
+    GatewayApplicationStatusRowV1, GatewayApplicationUnavailableCause, GatewayConnectPathStatus,
+    GatewayListenerStatus, PublicCertifiedKeyId, PublicHostname, PublicRouteInput, Route,
+    ServiceKey, ServiceListenerReferenceInput, SocketCookie,
 };
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::intent_store::IntentStore;
@@ -176,6 +177,7 @@ const DEADLINES: Slot = Slot(80);
 const SINGLE_ATTEMPT: Slot = Slot(81);
 const UPSTREAM_ARM: Slot = Slot(82);
 const PUBLIC_ARM: Slot = Slot(83);
+const RELAY_PROBE: Slot = Slot(84);
 const DRAIN: Slot = Slot(85);
 const RESPONSE_LIMITS: Slot = Slot(86);
 const RESPONSE_HEAD_DEADLINE: Slot = Slot(87);
@@ -903,6 +905,62 @@ async fn drive_clock<T>(clock: &SimClock, step: Duration, future: impl Future<Ou
     }
 }
 
+/// Start a gateway whose relay shows `lie` to the gate's probe. Nothing is ever
+/// promoted, so there is no `wait_promoted`: the caller waits for the refusal.
+async fn start_behind_lying_substrate(
+    lie: SubstrateLie,
+) -> (Arc<SimClock>, GatewayControl, GatewayHandle, SocketAddrV4, Site) {
+    let slot = RELAY_PROBE;
+    let site = Site::new();
+    let clock = Arc::new(SimClock::new());
+    let intent = Arc::new(LocalIntentStore::open(&site.intent_path).expect("real intent store"));
+    let observations = Arc::new(SimObservationStore::single_peer(
+        NodeId::new("gateway-node").expect("node ID"),
+        54,
+    ));
+    let vip_view = persist_api_service(&intent, slot.vip(0)).await;
+    let intent_port: Arc<dyn IntentStore> = intent;
+    let observation_port: Arc<dyn ObservationStore> = observations;
+    let clock_port: Arc<dyn Clock> = clock.clone();
+    let builder = UnboundGatewayBuilder::new(
+        site.config(slot.bind(0)),
+        intent_port,
+        observation_port,
+        vip_view,
+        Arc::new(PublicCertifiedKeyAeadCodec::new(custody_kek())),
+        clock_port.clone(),
+    )
+    .await
+    .expect("gateway builder");
+    let (builder, seal) = builder.into_builder();
+    let relay = Arc::new(SimGatewayRelay::new(clock_port));
+    relay.present_substrate(Some(lie));
+    let dependencies = GatewayRuntimeDependencies::new(
+        GatewayLimits::first_slice(),
+        OriginDataplane::new(true),
+        ArmingMtls::new(seal, Arc::clone(&relay)),
+        CurrentIdentity::new(),
+        relay as Arc<dyn GatewayRelay>,
+    );
+    let (handle, control) = builder.start(dependencies).await.into_parts();
+    control.routes().apply(route("/")).await.expect("declare the Route");
+    (clock, control, handle, SocketAddrV4::new(slot.bind(0), 443), site)
+}
+
+async fn wait_refused(control: &GatewayControl) -> GatewayApplicationStatusRowV1 {
+    let deadline = std::time::Instant::now() + WAIT;
+    loop {
+        let row = control.application_status().await.expect("application status read");
+        if let Some(row) = row
+            && row.unavailable.is_some()
+        {
+            return row;
+        }
+        assert!(std::time::Instant::now() < deadline, "timed out waiting for the gate to refuse");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 async fn wait_promoted(control: &GatewayControl) -> GatewayApplicationStatusRowV1 {
     let deadline = std::time::Instant::now() + WAIT;
     loop {
@@ -1515,12 +1573,20 @@ async fn control_records_met_anywhere_in_a_message_leave_the_relayed_octets_exac
     assert_eq!(legs.public_messages()[0].body, b"xyz");
     assert_eq!(legs.public_statuses(), vec![200]);
 
-    // A control record is never written to the other leg: every octet written
-    // is application data (the transcripts hold nothing else).
+    // A control record is never written to the other leg: every octet a leg was
+    // given is a whole application message and nothing stray follows (the Sim
+    // transcript records application octets only, so a relayed control record
+    // would show as octets that do not parse as a message).
     for leg in world.relay.leg_transcripts() {
-        assert!(
-            !contains(&leg.written, "KeyUpdate") && !contains(&leg.written, "close_notify"),
-            "no control event is visible on leg {:?}",
+        let kind = match leg.role {
+            LegRole::Public => Kind::Response,
+            LegRole::Upstream => Kind::Request,
+        };
+        let (_, consumed) = parse_wire(&leg.written, kind);
+        assert_eq!(
+            consumed,
+            leg.written.len(),
+            "leg {:?}: only application messages were written",
             leg.id
         );
     }
@@ -2344,9 +2410,11 @@ async fn a_public_arm_refusal_closes_the_socket_without_reading_any_http_octet()
 
 /// S-PIG-99: the honest Sim substrate passes the Earned-Trust probe; each
 /// substrate lie (`tls` ULP absent, cipher refused, splice losing octets, pipe
-/// clamped below 64 KiB) is refused with its typed `RelayProbeError` variant,
-/// and a probe timeout and an I/O error likewise; no variant maps to two lies
-/// and the honest substrate passes again once the lie is withdrawn.
+/// clamped below 64 KiB, a probe timeout, an I/O error) is refused with its
+/// own typed `RelayProbeError` variant (the Sim gold test), and a gateway
+/// booted behind each lie runs its production gate, refuses it, leaves the
+/// public listener unbound and reports the closed `ConnectPathUnavailable`
+/// cause with nothing promoted; the honest substrate is promoted.
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
@@ -2392,6 +2460,30 @@ async fn the_relay_probe_refuses_every_substrate_lie_with_its_own_typed_error() 
     relay.present_substrate(None);
     assert_eq!(relay.probe(deadline()).await, Ok(()), "the honest substrate passes again");
     assert_eq!(relay.probe_calls(), 8, "one probe call per probe");
+
+    // The production gate refuses each lie before it binds anything.
+    let gate_lies = [
+        SubstrateLie::UlpAbsent,
+        SubstrateLie::CipherRefused,
+        SubstrateLie::SpliceInexact { moved: 65_536, expected: 65_537 },
+        SubstrateLie::PipeClamped { got: 4096 },
+        SubstrateLie::ProbeTimeout,
+        SubstrateLie::ProbeIo { kind: std::io::ErrorKind::PermissionDenied },
+    ];
+    for lie in gate_lies {
+        let (clock, control, handle, bind, _site) = start_behind_lying_substrate(lie.clone()).await;
+        let refused = wait_refused(&control).await;
+        assert_eq!(
+            refused.unavailable,
+            Some(GatewayApplicationUnavailableCause::ConnectPathUnavailable),
+            "{lie:?}: the closed cause",
+        );
+        assert_eq!(refused.connect_path, GatewayConnectPathStatus::Unavailable, "{lie:?}");
+        assert!(refused.current.is_none(), "{lie:?}: nothing is promoted");
+        assert_eq!(refused.listener, GatewayListenerStatus::Unbound, "{lie:?}");
+        assert!(TcpStream::connect(bind).is_err(), "{lie:?}: TCP/443 stays unbound");
+        let _report = drive_clock(&clock, Duration::from_millis(50), handle.shutdown(GRACE)).await;
+    }
 }
 
 // ---------------------------------------------------------------------------

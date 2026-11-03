@@ -419,6 +419,10 @@ struct Rig {
 
 impl Rig {
     async fn new(dial: Arc<ScriptedDial>, limits: MtlsLimits) -> Self {
+        // The dev-dependency on `overdrive-sim` (relay equivalence tests) unifies the
+        // `aws-lc-rs` rustls feature into this binary, so rustls cannot pick a
+        // process default on its own. A second install returns `Err`; ignore it.
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let pki = Arc::new(TestPki::mint());
         let identity: Arc<dyn IdentityRead> = Arc::new(HeldIdentities {
             server: (pki.server_alloc.clone(), pki.server_svid_material()),

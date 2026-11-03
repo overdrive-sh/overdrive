@@ -71,11 +71,11 @@ struct Host {
 }
 
 impl Host {
-    fn new() -> Option<Self> {
-        Some(Self {
-            rig: Some(HostRig::new("h67")?),
+    fn new() -> Self {
+        Self {
+            rig: Some(HostRig::new("h67")),
             rt: tokio::runtime::Builder::new_current_thread().enable_all().build().expect("rt"),
-        })
+        }
     }
 
     fn rig(&self) -> &HostRig {
@@ -250,7 +250,7 @@ fn script(owner: &mut dyn Owner, rt: &tokio::runtime::Runtime) -> Vec<String> {
 #[test]
 #[ignore = "pending DELIVER selection-receipt-and-applied-identity"]
 fn host_and_sim_agree_on_selection_identity_rejection_residue_and_restart() {
-    let Some(mut host) = Host::new() else { return };
+    let mut host = Host::new();
     let mut sim = Sim::new();
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("rt");
 

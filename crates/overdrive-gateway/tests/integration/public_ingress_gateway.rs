@@ -2389,6 +2389,13 @@ async fn applying_the_identical_route_twice_has_an_empty_second_delta() {
 /// (never `RouteAbsent`/`RouteUnreadable` while a Route is declared), the custody
 /// generation is unchanged, and a Route replaced after the burst is promoted.
 ///
+/// The burst is aimed at the gateway by construction: the intent store has one
+/// change channel that every watcher receives from before it filters by prefix,
+/// so a burst under any prefix lags the gateway's own subscriptions. The test
+/// therefore requires at least one sampled status row reporting `WatchGap`;
+/// the status is sampled by polling, so a design that clears the gap faster
+/// than the poll would be a testability boundary to raise, not to weaken here.
+///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "pending DELIVER lag-aware-intent-subscription"]
@@ -2467,7 +2474,17 @@ async fn a_watch_lag_is_reported_and_the_gateway_relists_instead_of_reading_an_e
     );
 
     sampling.store(false, Ordering::SeqCst);
-    for row in sampler.await.expect("join sampler") {
+    let status_rows = sampler.await.expect("join sampler");
+    assert!(
+        status_rows
+            .iter()
+            .any(|row| row.unavailable == Some(GatewayApplicationUnavailableCause::WatchGap)),
+        "the burst overflowed the store's single change channel, which every watcher receives \
+         from regardless of prefix, so the gateway must have lagged and reported WatchGap in at \
+         least one sampled status row; sampled {} rows",
+        status_rows.len(),
+    );
+    for row in status_rows {
         assert!(
             !matches!(
                 row.unavailable,

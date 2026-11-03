@@ -76,11 +76,17 @@ The checked-in `runner.sh` (see "Runner contract") does, in order:
 The expectation is **refuted** (not merely incomplete) by any of:
 
 - the request fails system-trust verification, negotiates a version other than TLS 1.3, or any step needed `--cacert`, `--insecure`, DNS or an `/etc/hosts` edit;
-- status other than 200, a missing `X-Workload: api`, a body that differs from the guest's published stream, or a response that is buffered whole (the first body bytes arrive only after the guest has finished);
+- status other than 200, a missing `X-Workload: api`, a body that differs from the guest's published stream;
 - no TCP/443 socket with the TLS ULP at version 1.3 and no 127.0.0.1 upstream socket with the TLS ULP during the stream (the data path was not kernel TLS), or `TlsDecryptError` greater than its pre-run value;
 - a `health.startup.refused` event naming `gateway.relay_probe` or `gateway.connect_probe`, or TCP/443 unbound before the request;
 - residue after cleanup (a listener on TCP/443, a gateway upstream socket, or a nonzero owned-resource delta);
 - provenance failure: dirty or mismatched HEAD, missing or duplicate exact-object BPF embedding, or a digest recomputed before the example differing from the recorded digest.
+
+Whether the response was relayed as it streamed, rather than buffered whole, is not decided by `time_starttransfer`
+(curl's first byte after the request is sent says nothing about when the guest wrote its last byte); this expectation does
+not claim it. The streaming property is decided by the per-run kernel-TLS samples if the reviewer can show, from their
+timestamps, a `tcp-ulp-tls` socket carrying application data before the guest's last chunk is written; otherwise it is
+recorded as not decided by this capture.
 
 A capture that is narrated rather than executed, or whose runner was not the checked-in one, cannot support `satisfied`.
 
@@ -90,7 +96,8 @@ A capture that is narrated rather than executed, or whose runner was not the che
 (inputs unset) is reported by the harness as pending. The runner samples `ss -tni` and `/proc/net/tls_stat` by
 polling for the life of the example (the example takes no pause hook), so the samples are observations of a polled
 system, not a complete history. It must not import or link any `overdrive-*` crate, must not hand-program a map, rule, Route, snapshot or identity, and must
-append (never overwrite) every observation. Exit 75 means "pending" per the harness; any other nonzero exit is data.
+append (never overwrite) every observation: each run writes only under its own `evidence/runs/<run id>/` directory
+(never reused; a `run-record` file carries the run id and start/end timestamps). Exit 75 means "pending" per the harness; any other nonzero exit is data.
 The capture is a single point-in-time event pinned to its SHA by the harness; a different reviewer decides
 `satisfied` after reading the saved output. Per `.claude/rules/verification.md` this is not a regression test; the
 recurring half of the same claim is `AT-PIG-E2E-1` in `tests/conformance`.

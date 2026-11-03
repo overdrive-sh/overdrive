@@ -40,10 +40,11 @@
 //! The CA draws serials from seeded entropy, so a certificate serial has no
 //! ordinal of its own. The model numbers serials by issuance attempt (a failed
 //! audit consumes a serial that never reaches the audit rows). The driver
-//! labels each serial the owners produced with the attempt's ordinal when the
-//! `issue_complete` handler observes it; the label is a name for an owner-produced
-//! serial, never a value the comparison takes from the driver. Flagged in the
-//! batch gaps file.
+//! derives that number from the owner's own output: the audit row's
+//! `issuance_ordinal` (allocated per attempt by
+//! `ObservationStore::next_issuance_ordinal` before the audit write, so a
+//! failed attempt consumes one) plus one, since the store counts from zero and
+//! the model from one. No driver counter participates in the comparison.
 //!
 //! The retry `View` is not threaded between evaluations: the model has no
 //! backoff, so each evaluation reconciles over `GatewaySvidLifecycleView::default()`.
@@ -80,8 +81,11 @@ use overdrive_core::reconcilers::{Action, HydrationContext, TickContext};
 use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::DriverRegistry;
-use overdrive_core::traits::observation_store::{ObservationStore, ObservationStoreError};
+use overdrive_core::traits::observation_store::{
+    ObservationStore, ObservationStoreError, ObservationWrite,
+};
 use overdrive_core::wall_clock::UnixInstant;
+use overdrive_core::workflow::{SignalKey, SignalValue};
 use overdrive_dataplane::mtls::gateway_identity::GatewayIdentitySlot;
 use overdrive_gateway::ports::GatewayIdentityLifecycleControl;
 use overdrive_reconcilers::{
@@ -146,10 +150,6 @@ struct IdentityConfDriver {
     intent: LocalIntentStore,
     intent_path: std::path::PathBuf,
     _intent_dir: TempDir,
-    /// Names the serials the owners produced with their attempt ordinal.
-    ordinals: BTreeMap<CertSerial, i64>,
-    /// The next attempt ordinal (the model's `next_serial`).
-    next_ordinal: i64,
     /// Whether the next issuance's audit write was made to fail.
     audit_armed: bool,
     runtime: Runtime,
@@ -179,8 +179,6 @@ impl IdentityConfDriver {
             intent,
             intent_path,
             _intent_dir: intent_dir,
-            ordinals: BTreeMap::new(),
-            next_ordinal: 1,
             audit_armed: false,
             runtime,
         }
@@ -282,8 +280,6 @@ impl IdentityConfDriver {
             .queued
             .remove(&epoch)
             .ok_or_else(|| anyhow!("no IssueGatewaySvid of epoch {epoch} is queued"))?;
-        let ordinal = self.next_ordinal;
-        self.next_ordinal += 1;
         let before = self.gateway_serials()?;
         let target = self.owners.slot.action_target();
         let outcome = self.runtime.block_on(dispatch_issue(
@@ -306,13 +302,12 @@ impl IdentityConfDriver {
             }
             (false, Ok(_)) => {
                 let fresh: Vec<&CertSerial> = after.difference(&before).collect();
-                let [serial] = fresh.as_slice() else {
+                let [_] = fresh.as_slice() else {
                     bail!(
                         "a successful issue leaves exactly one new audit row, saw {}",
                         fresh.len()
                     );
                 };
-                self.ordinals.insert((*serial).clone(), ordinal);
             }
             (false, Err(error)) => {
                 bail!("dispatch_issue failed without an injected fault: {error}")
@@ -334,9 +329,8 @@ impl IdentityConfDriver {
 
     /// The next issuance's audit write fails: the failure is queued in the
     /// Sim store, a driven port. The store offers no way to withdraw a queued
-    /// failure, so a `restart` between this step and the next `issue_complete`
-    /// leaves the fault in place although the model's `restart` clears
-    /// `audit_armed` (flagged in the batch gaps file).
+    /// failure, so `restart` consumes it by performing the write that pops it
+    /// (the model's `restart` clears `audit_armed`).
     fn audit_fail(&mut self) {
         self.faults.inject_write_failure(ObservationStoreError::Io(std::io::Error::other(
             "injected gateway audit failure",
@@ -346,10 +340,27 @@ impl IdentityConfDriver {
 
     /// The volatile owners die with the process; the CA and the observation
     /// store are durable.
-    fn restart(&mut self) {
+    fn restart(&mut self) -> Result {
         self.owners = Self::build_owners(&self.ca, &self.clock);
         self.queued.clear();
-        self.audit_armed = false;
+        if std::mem::take(&mut self.audit_armed) {
+            self.consume_queued_audit_failure()?;
+        }
+        Ok(())
+    }
+
+    /// Pop the queued write failure through the store's own write port, with a
+    /// row that is not a gateway audit row, so the next issuance is not failed
+    /// by a fault the model has already cleared.
+    fn consume_queued_audit_failure(&self) -> Result {
+        let write = ObservationWrite::Signal {
+            key: SignalKey::new("conf-drain")?,
+            value: SignalValue::new("drain"),
+        };
+        match self.runtime.block_on(self.observation.write(write)) {
+            Err(_) => Ok(()),
+            Ok(()) => bail!("the queued audit failure was not consumed by the draining write"),
+        }
     }
 
     /// The serials of the audit rows that name the gateway subject.
@@ -362,11 +373,18 @@ impl IdentityConfDriver {
         Ok(rows.into_iter().filter(|row| row.spiffe_id == gateway).map(|row| row.serial).collect())
     }
 
+    /// The model's attempt ordinal of an audited serial, from its audit row.
     fn ordinal_of(&self, serial: &CertSerial) -> Result<i64> {
-        self.ordinals
-            .get(serial)
-            .copied()
-            .ok_or_else(|| anyhow!("the owners produced serial {serial} no handler observed"))
+        let gateway = SpiffeId::for_gateway(&node());
+        let rows = self
+            .runtime
+            .block_on(self.observation.issued_certificate_rows())
+            .map_err(|error| anyhow!("issued_certificate_rows failed: {error}"))?;
+        let row = rows
+            .into_iter()
+            .find(|row| row.spiffe_id == gateway && &row.serial == serial)
+            .ok_or_else(|| anyhow!("serial {serial} has no gateway audit row"))?;
+        Ok(i64::try_from(row.issuance_ordinal.as_u64())? + 1)
     }
 }
 
@@ -385,7 +403,7 @@ impl Driver for IdentityConfDriver {
             disable => self.disable()?,
             advance_time => self.advance_time(),
             audit_fail => self.audit_fail(),
-            restart => self.restart(),
+            restart => self.restart()?,
         })
     }
 }

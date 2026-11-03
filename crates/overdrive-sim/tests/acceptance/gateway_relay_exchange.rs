@@ -618,34 +618,30 @@ async fn seeded_peer_events_never_move_an_octet_past_a_message_boundary_and_leav
                 assert_eq!(body, response_body, "seed={seed}: octet-exact response body");
             }
             Ending::OriginClosesBeforeHead(_) => {
-                let (head, body) = split_message(&public_leg.written).expect("a 502 head");
+                let (head, _) = split_message(&public_leg.written).expect("a 502 head");
                 assert_eq!(status_of(head), Some(502), "seed={seed}: exactly one 502");
-                let length_header = std::str::from_utf8(head).expect("utf8 head");
                 assert!(
-                    !length_header.contains("200"),
-                    "seed={seed}: no success head after an origin failure"
+                    head.starts_with(b"HTTP/1.1 502"),
+                    "seed={seed}: the response is exactly a 502 status line, not a success head"
                 );
-                let _ = body;
             }
             Ending::OriginFailsMidBody(_) => {
-                if let Some((head, body)) = split_message(&public_leg.written) {
-                    assert_eq!(status_of(head), Some(200), "seed={seed}: head already sent");
-                    assert!(
-                        response_body.starts_with(body) && body.len() < response_body.len(),
-                        "seed={seed}: only a strict prefix of the response body is relayed"
-                    );
-                    assert!(
-                        !public_leg.close_notify_sent,
-                        "seed={seed}: an unclean end sends no close_notify after the head"
-                    );
-                }
+                let (head, body) = split_message(&public_leg.written)
+                    .expect("the response head was already relayed before the origin failed");
+                assert_eq!(status_of(head), Some(200), "seed={seed}: head already sent");
+                assert!(
+                    response_body.starts_with(body) && body.len() < response_body.len(),
+                    "seed={seed}: only a strict prefix of the response body is relayed"
+                );
+                assert!(
+                    !public_leg.close_notify_sent,
+                    "seed={seed}: an unclean end sends no close_notify after the head"
+                );
             }
             Ending::ClientFailsMidBody(_) => {
                 assert!(
-                    public_leg.written.is_empty()
-                        || split_message(&public_leg.written)
-                            .is_some_and(|(head, _)| status_of(head).is_some_and(|s| s >= 400)),
-                    "seed={seed}: a failed request yields no success response"
+                    public_leg.written.is_empty(),
+                    "seed={seed}: a request that fails mid-body gets no response on the failed leg"
                 );
             }
         }

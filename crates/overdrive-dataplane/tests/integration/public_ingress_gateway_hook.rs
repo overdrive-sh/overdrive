@@ -93,7 +93,7 @@ fn socket_mark(fd: RawFd) -> u32 {
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[test]
 fn unregistered_cgroup_socket_keeps_non_service_behaviour() {
-    let Some(rig) = HostRig::new("h41") else { return };
+    let rig = HostRig::new("h41");
     let rt = runtime();
 
     let xdp = |iface: &str| snapshot("ip", &["-d", "link", "show", "dev", iface]);
@@ -167,7 +167,7 @@ fn unregistered_cgroup_socket_keeps_non_service_behaviour() {
 #[test]
 #[ignore = "pending DELIVER gateway-selection-hook"]
 fn registered_socket_is_selected_and_its_dial_reaches_the_backend_from_the_loopback_source() {
-    let Some(rig) = HostRig::new("h63") else { return };
+    let rig = HostRig::new("h63");
     let rt = runtime();
     let routing_before = routing_snapshot();
     let counts = |rig: &HostRig| {
@@ -227,7 +227,7 @@ fn registered_socket_is_selected_and_its_dial_reaches_the_backend_from_the_loopb
 #[test]
 #[ignore = "pending DELIVER consuming-port-unavailable-outcome"]
 fn a_stale_service_entry_with_a_dead_backend_selects_it_and_the_dial_fails() {
-    let Some(rig) = HostRig::new("h56") else { return };
+    let rig = HostRig::new("h56");
     let rt = runtime();
     let routing_before = routing_snapshot();
 
@@ -264,7 +264,7 @@ fn a_stale_service_entry_with_a_dead_backend_selects_it_and_the_dial_fails() {
 #[test]
 #[ignore = "pending DELIVER gateway-boot-and-shutdown"]
 fn the_sentinel_probe_passes_on_the_real_hook_and_an_elapsed_deadline_times_out() {
-    let Some(rig) = HostRig::new("h57") else { return };
+    let rig = HostRig::new("h57");
     let rt = runtime();
     let clock = WallClock;
     let counts = |rig: &HostRig| {
@@ -299,7 +299,7 @@ fn the_sentinel_probe_passes_on_the_real_hook_and_an_elapsed_deadline_times_out(
 #[test]
 #[ignore = "pending DELIVER selection-receipt-and-applied-identity"]
 fn after_an_instance_restart_old_identities_and_receipts_are_gone_until_reprogrammed() {
-    let Some(rig) = HostRig::new("h71") else { return };
+    let rig = HostRig::new("h71");
     let rt = runtime();
 
     let listener = TcpListener::bind(backend_target(71)).expect("bind the backend address");
@@ -383,7 +383,7 @@ fn updates_racing_identity_reads_never_return_a_missing_identity_for_a_selected_
     const SEED: u64 = 0x9e37_79b9_7f4a_7c15;
     const BOUND: Duration = Duration::from_secs(60);
 
-    let Some(rig) = HostRig::new("h72") else { return };
+    let rig = HostRig::new("h72");
     let started = Instant::now();
     let selected_seen = AtomicU32::new(0);
     let violations = AtomicU32::new(0);

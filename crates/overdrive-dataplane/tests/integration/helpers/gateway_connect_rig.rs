@@ -57,16 +57,17 @@ pub struct HostRig {
 
 impl HostRig {
     /// Build the rig for `tag` (short, unique per test: it names the veth pair
-    /// and the pin directory). `None` when the process lacks `CAP_NET_ADMIN`
-    /// (run through `cargo xtask metal run --`).
-    pub fn new(tag: &str) -> Option<Self> {
+    /// and the pin directory). Fails closed when the process lacks
+    /// `CAP_NET_ADMIN`: a Tier-3 test that cannot build its rig has proven
+    /// nothing, so it must not pass (run through `cargo xtask metal run --`).
+    pub fn new(tag: &str) -> Self {
         let veth = match VethPair::create(&format!("pg{tag}h"), &format!("pg{tag}p")) {
             Ok(veth) => veth,
             Err(VethError::CapNetAdminRequired) => {
-                eprintln!(
-                    "skip: needs CAP_NET_ADMIN for veth setup: run via `cargo xtask metal run --`"
+                panic!(
+                    "this test needs CAP_NET_ADMIN for veth setup and bpffs; it cannot run as an \
+                     unprivileged user: run it via `cargo xtask metal run --` (root on the metal host)"
                 );
-                return None;
             }
             Err(error) => panic!("veth setup failed: {error}"),
         };
@@ -74,10 +75,14 @@ impl HostRig {
             "/sys/fs/bpf/overdrive-test-pg{tag}-{}",
             std::process::id()
         )));
-        let _ = std::fs::remove_dir_all(&pins.0);
+        match std::fs::remove_dir_all(&pins.0) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!("remove the stale pin directory {}: {error}", pins.0.display()),
+        }
         std::fs::create_dir_all(&pins.0).expect("create the bpffs pin directory");
         let dataplane = Self::build(&veth, &pins);
-        Some(Self { dataplane, veth, pins, tag: tag.to_owned() })
+        Self { dataplane, veth, pins, tag: tag.to_owned() }
     }
 
     fn build(veth: &VethPair, pins: &PinGuard) -> EbpfDataplane {

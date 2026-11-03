@@ -33,11 +33,15 @@
 //! pinned for them).
 //!
 //! The spec's `taken` (the receipt a connector consumed) and `idres` (the
-//! identity read) are port-return checks, not owner state. quint-connect gives
-//! a handler no model-side expectation, so those two checks ride the State
-//! comparison: the handler that made the call records the owner's return value,
-//! and `from_driver` reports the record. The record is the owner's returned
-//! value, never a model copy. This is flagged in the batch gaps file.
+//! identity read) are port-return checks, not owner state, and are NOT part of
+//! the compared State (the spec marks them model-only; a driver-maintained
+//! record of them would compare the driver with the model). They are asserted
+//! at the handler, as direct assertions that fail the step: `take` requires
+//! the consumed receipt to be bound to the registered intent's `ServiceKey`
+//! and cookie (`ReceiptMatchesIntent`). `idres` is `ident[sel]` or -1 by the
+//! spec; `ident` is projected for every probed `BackendId`, so the identity a
+//! connector reads is compared through `ident`, and `read_identity` asserts
+//! the port return agrees with the owner's own re-read of the same id.
 //!
 //! Step decoding (D-UP-1): `Config::nondet =
 //! &["receipt_conf::selection_receipt::conf_step"]`; the state projection
@@ -61,6 +65,7 @@
 )]
 
 use std::collections::BTreeMap;
+use std::io::Write as _;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::num::NonZeroU16;
 use std::path::PathBuf;
@@ -112,7 +117,9 @@ impl Veth {
         let ordinal = NEXT_ORDINAL.fetch_add(1, Ordering::Relaxed);
         let host = format!("qh{}x{ordinal}", std::process::id() % 100_000);
         let peer = format!("qp{}x{ordinal}", std::process::id() % 100_000);
-        let _ = Command::new("ip").args(["link", "del", &host]).output(); // subprocess-ok: test-owned veth fixture, Tier-3 only
+        // A stale pair of the same name is removed first; "no such device" is the
+        // expected answer, so only a failure to run `ip(8)` at all is a precondition failure.
+        delete_link(&host).expect("spawn ip(8) to remove a stale veth pair");
         for args in [
             vec!["link", "add", host.as_str(), "type", "veth", "peer", "name", peer.as_str()],
             vec!["link", "set", host.as_str(), "up"],
@@ -125,9 +132,21 @@ impl Veth {
     }
 }
 
+/// Delete a link by name; "no such device" is a successful output, only a
+/// failure to run `ip(8)` is an error.
+fn delete_link(name: &str) -> std::io::Result<std::process::Output> {
+    Command::new("ip").args(["link", "del", name]).output() // subprocess-ok: test-owned veth fixture, Tier-3 only
+}
+
 impl Drop for Veth {
     fn drop(&mut self) {
-        let _ = Command::new("ip").args(["link", "del", &self.host]).output(); // subprocess-ok: test-owned veth fixture, Tier-3 only
+        if let Err(error) = delete_link(&self.host) {
+            let _reported = writeln!(
+                std::io::stderr(),
+                "could not run ip(8) to remove veth {}: {error}",
+                self.host
+            );
+        }
     }
 }
 
@@ -137,7 +156,13 @@ struct PinDir(PathBuf);
 impl PinDir {
     fn create() -> Self {
         let path = PathBuf::from(format!("/sys/fs/bpf/overdrive-test-qc3-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&path);
+        match std::fs::remove_dir_all(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                panic!("remove the stale bpffs pin directory {}: {error}", path.display())
+            }
+        }
         std::fs::create_dir_all(&path).expect("create the bpffs pin directory");
         Self(path)
     }
@@ -145,7 +170,13 @@ impl PinDir {
 
 impl Drop for PinDir {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        if let Err(error) = std::fs::remove_dir_all(&self.0) {
+            let _reported = writeln!(
+                std::io::stderr(),
+                "could not remove the bpffs pin directory {}: {error}",
+                self.0.display()
+            );
+        }
     }
 }
 
@@ -204,10 +235,6 @@ struct ReceiptConfDriver {
     /// Model cookies are minted in `open` order: 1, 2, ...
     held: BTreeMap<i64, HeldSocket>,
     opened: i64,
-    /// The owner's `take_receipt` returns, per model cookie: `(key, sel)`.
-    taken: BTreeMap<i64, (i64, i64)>,
-    /// The owner's `selected_backend_identity` returns, per model cookie.
-    idres: BTreeMap<i64, i64>,
     runtime: Runtime,
 }
 
@@ -220,16 +247,7 @@ impl ReceiptConfDriver {
         let pins = PinDir::create();
         let veth = Veth::create();
         let dataplane = Self::build_owner(&veth, &pins);
-        Self {
-            dataplane,
-            veth,
-            pins,
-            held: BTreeMap::new(),
-            opened: 0,
-            taken: BTreeMap::new(),
-            idres: BTreeMap::new(),
-            runtime,
-        }
+        Self { dataplane, veth, pins, held: BTreeMap::new(), opened: 0, runtime }
     }
 
     fn build_owner(veth: &Veth, pins: &PinDir) -> EbpfDataplane {
@@ -256,8 +274,6 @@ impl ReceiptConfDriver {
     fn init(&mut self) {
         self.recreate_owner();
         self.opened = 0;
-        self.taken.clear();
-        self.idres.clear();
     }
 
     fn update_apply(&self, key: i64, sidx: i64) -> Result {
@@ -308,25 +324,38 @@ impl ReceiptConfDriver {
             .dataplane
             .take_receipt(&held.intent)
             .map_err(|error| anyhow!("take_receipt failed: {error}"))?;
-        let sel = match receipt {
-            GatewaySelectionReceipt::Selected { backend_id, .. } => {
+        let expected_key = ServiceKey::from_frontend(frontend(held.key));
+        match receipt {
+            GatewaySelectionReceipt::Selected { backend_id, service_key, .. } => {
+                if service_key != expected_key {
+                    bail!(
+                        "cookie {cookie}: the consumed receipt is bound to {service_key:?}, not the registered {expected_key:?}"
+                    );
+                }
                 held.selected = Some(backend_id);
-                i64::from(backend_id.get())
             }
-            GatewaySelectionReceipt::NoBackend { .. } => 0,
-        };
-        self.taken.insert(cookie, (held.key, sel));
+            GatewaySelectionReceipt::NoBackend { service_key, .. } => {
+                if service_key != expected_key {
+                    bail!(
+                        "cookie {cookie}: the consumed receipt is bound to {service_key:?}, not the registered {expected_key:?}"
+                    );
+                }
+            }
+        }
         Ok(())
     }
 
-    fn read_identity(&mut self, cookie: i64) -> Result {
+    fn read_identity(&self, cookie: i64) -> Result {
         let backend = self
             .held
             .get(&cookie)
             .and_then(|held| held.selected)
             .ok_or_else(|| anyhow!("cookie {cookie} has no Selected receipt to resolve"))?;
-        let alloc = self.identity_of(backend)?;
-        self.idres.insert(cookie, alloc.unwrap_or(-1));
+        let first = self.identity_of(backend)?;
+        let second = self.identity_of(backend)?;
+        if first != second {
+            bail!("selected_backend_identity({backend}) answered {first:?} then {second:?}");
+        }
         Ok(())
     }
 
@@ -383,15 +412,12 @@ impl Driver for ReceiptConfDriver {
     }
 }
 
-/// The compared variables: the model's `ident`, `intents`, `receipts`, plus the
-/// two port-return checks `taken` and `idres`.
+/// The compared variables: the model's `ident`, `intents`, `receipts`.
 #[derive(Debug, PartialEq, Eq)]
 struct ReceiptState {
     ident: BTreeMap<i64, i64>,
     intents: usize,
     receipts: usize,
-    taken: BTreeMap<i64, (i64, i64)>,
-    idres: BTreeMap<i64, i64>,
 }
 
 impl State<ReceiptConfDriver> for ReceiptState {
@@ -415,13 +441,7 @@ impl State<ReceiptConfDriver> for ReceiptState {
             .dataplane
             .live_receipt_count()
             .map_err(|error| anyhow!("live_receipt_count failed: {error}"))?;
-        Ok(Self {
-            ident,
-            intents: intents as usize,
-            receipts: receipts as usize,
-            taken: driver.taken.clone(),
-            idres: driver.idres.clone(),
-        })
+        Ok(Self { ident, intents: intents as usize, receipts: receipts as usize })
     }
 }
 
@@ -430,8 +450,6 @@ impl State<ReceiptConfDriver> for ReceiptState {
 enum ItfError {
     #[error("the trace has no `{0}` variable")]
     MissingVar(String),
-    #[error("the trace's record has no `{0}` field")]
-    MissingField(String),
     #[error("expected {expected} in the trace, found {found:?}")]
     Shape { expected: &'static str, found: Value },
 }
@@ -452,13 +470,6 @@ fn entries(value: &Value) -> std::result::Result<Vec<(i64, &Value)>, ItfError> {
     map.iter().map(|(key, value)| Ok((int(key)?, value))).collect()
 }
 
-fn field<'a>(record: &'a Value, name: &str) -> std::result::Result<&'a Value, ItfError> {
-    let Value::Record(record) = record else {
-        return Err(ItfError::Shape { expected: "a record", found: record.clone() });
-    };
-    record.get(name).ok_or_else(|| ItfError::MissingField(name.to_owned()))
-}
-
 impl ReceiptState {
     /// The spec side: the `receipt_conf::selection_receipt::*` variables.
     fn from_value(state: &Value) -> std::result::Result<Self, ItfError> {
@@ -476,22 +487,10 @@ impl ReceiptState {
             .into_iter()
             .map(|(id, alloc)| Ok((id, int(alloc)?)))
             .collect::<std::result::Result<BTreeMap<_, _>, ItfError>>()?;
-        let taken = entries(var("taken")?)?
-            .into_iter()
-            .map(|(cookie, receipt)| {
-                Ok((cookie, (int(field(receipt, "key")?)?, int(field(receipt, "sel")?)?)))
-            })
-            .collect::<std::result::Result<BTreeMap<_, _>, ItfError>>()?;
-        let idres = entries(var("idres")?)?
-            .into_iter()
-            .map(|(cookie, alloc)| Ok((cookie, int(alloc)?)))
-            .collect::<std::result::Result<BTreeMap<_, _>, ItfError>>()?;
         Ok(Self {
             ident,
             intents: entries(var("intents")?)?.len(),
             receipts: entries(var("receipts")?)?.len(),
-            taken,
-            idres,
         })
     }
 }

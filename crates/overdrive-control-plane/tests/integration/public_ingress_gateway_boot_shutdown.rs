@@ -30,7 +30,6 @@
 #![allow(clippy::doc_markdown, clippy::expect_used, clippy::panic)]
 
 use std::collections::BTreeMap;
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -49,7 +48,6 @@ use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
 
 /// The address a disabled node would have bound had the gateway been enabled
 /// (R-6, octet 97): nothing may listen on it.
-const UNUSED_PUBLIC_ADDRESS: Ipv4Addr = Ipv4Addr::new(127, 97, 0, 1);
 
 // ---------------------------------------------------------------------------
 // Event capture
@@ -174,16 +172,36 @@ impl Node {
     }
 }
 
-/// Whether anything accepts a connection on `address` within a second.
-async fn something_listens(address: SocketAddrV4) -> bool {
-    matches!(
-        tokio::time::timeout(
-            Duration::from_secs(1),
-            tokio::net::TcpStream::connect(SocketAddr::V4(address)),
-        )
-        .await,
-        Ok(Ok(_))
-    )
+/// The addresses this process is listening on at TCP port 443: the listening
+/// sockets in the network namespace (`/proc/net/tcp`, state `0A`) whose inode is
+/// one of this process's own descriptors, so a concurrent test process in the
+/// same namespace is never counted.
+fn own_listeners_on_443() -> std::collections::BTreeSet<String> {
+    let own_inodes: std::collections::BTreeSet<String> = std::fs::read_dir("/proc/self/fd")
+        .expect("list this process's descriptors")
+        .filter_map(Result::ok)
+        .filter_map(|entry| std::fs::read_link(entry.path()).ok())
+        .filter_map(|target| {
+            target
+                .to_str()
+                .and_then(|text| text.strip_prefix("socket:["))
+                .and_then(|text| text.strip_suffix(']'))
+                .map(str::to_owned)
+        })
+        .collect();
+    let table = std::fs::read_to_string("/proc/net/tcp").expect("read the TCP socket table");
+    table
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            let local = *fields.get(1)?;
+            let state = *fields.get(3)?;
+            let inode = *fields.get(9)?;
+            (state == "0A" && local.ends_with(":01BB") && own_inodes.contains(inode))
+                .then(|| local.to_owned())
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -210,6 +228,7 @@ async fn a_disabled_gateway_boots_and_shuts_down_exactly_as_before() {
     let _guard =
         tracing::subscriber::set_default(tracing_subscriber::registry().with(collector.clone()));
 
+    let listeners_before = own_listeners_on_443();
     let adapters = super::node_adapters::node_adapters(&config);
     let handle = overdrive_control_plane::run_server(config, adapters)
         .await
@@ -232,9 +251,10 @@ async fn a_disabled_gateway_boots_and_shuts_down_exactly_as_before() {
         status.reconcilers
     );
     assert!(collector.refusal_reasons().is_empty(), "a disabled gateway emits no refusal");
-    assert!(
-        !something_listens(SocketAddrV4::new(UNUSED_PUBLIC_ADDRESS, 443)).await,
-        "no public socket is bound with the gateway disabled"
+    assert_eq!(
+        own_listeners_on_443(),
+        listeners_before,
+        "no public TCP/443 socket is bound with the gateway disabled"
     );
 
     handle.shutdown(Duration::from_secs(1)).await.expect("graceful shutdown");

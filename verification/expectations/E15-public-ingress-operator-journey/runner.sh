@@ -27,6 +27,24 @@ readonly key="${PIG_E15_PRIVATE_KEY:-}"
   exit 2
 }
 
+# Every observation of this run goes under its own never-reused directory; a
+# second run (a retry, a rerun) can neither overwrite nor nest inside it.
+RUN_ID="$(date -u +%Y%m%dT%H%M%S.%NZ)-$$"
+readonly RUN_ID
+readonly RUN_DIR="$EVIDENCE_DIR/runs/$RUN_ID"
+install -d -m 0700 "$EVIDENCE_DIR/runs"
+mkdir -m 0700 -- "$RUN_DIR" || {
+  echo "E15: evidence directory for run $RUN_ID already exists; refusing to reuse it" >&2
+  exit 2
+}
+printf 'run_id=%s phase=start timestamp=%s\n' "$RUN_ID" "$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)" \
+  >>"$RUN_DIR/run-record"
+record_end() {
+  printf 'run_id=%s phase=end exit=%s timestamp=%s\n' "$RUN_ID" "$1" \
+    "$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)" >>"$RUN_DIR/run-record"
+}
+trap 'record_end $?' EXIT
+
 for named_path in "certificate-chain:$chain" "private-key:$key"; do
   path="${named_path#*:}"
   [[ "$path" = /* && -r "$path" && -f "$path" ]] || {
@@ -91,7 +109,7 @@ awk '$3 == "bpf" {found=1} END {exit found ? 0 : 1}' /proc/mounts || {
   exit 2
 }
 
-install -d -m 0700 "$EVIDENCE_DIR/observations/0001-platform"
+install -d -m 0700 "$RUN_DIR/observations/0001-platform"
 {
   printf 'os=%s\n' "$(uname -s)"
   printf 'arch=%s\n' "$(uname -m)"
@@ -101,7 +119,7 @@ install -d -m 0700 "$EVIDENCE_DIR/observations/0001-platform"
   printf 'systemd_detect_virt=%s\n' "$virt_result"
   printf 'cgroup_v2=true\n'
   printf 'bpffs=true\n'
-} >>"$EVIDENCE_DIR/observations/0001-platform/substrate"
+} >>"$RUN_DIR/observations/0001-platform/substrate"
 
 # --- harness-captured clean source -------------------------------------------
 [[ "${EXPECTATION_SOURCE_DIRTY:-}" == "false" \
@@ -129,8 +147,8 @@ chmod 0711 "$run_root"
 readonly build_root="$run_root/build"
 readonly binary="$build_root/target/debug/overdrive"
 readonly bpf_object="$REPO_ROOT/target/bpf/overdrive_bpf.o"
-readonly provenance="$EVIDENCE_DIR/build-provenance"
-readonly samples="$EVIDENCE_DIR/kernel-tls-samples"
+readonly provenance="$RUN_DIR/build-provenance"
+readonly samples="$RUN_DIR/kernel-tls-samples"
 sampler_pid=""
 example_pid=""
 cleanup() {
@@ -141,6 +159,7 @@ cleanup() {
     wait "$example_pid" 2>/dev/null || true
   fi
   rm -rf -- "$run_root"
+  record_end "$status"
   return "$status"
 }
 trap cleanup EXIT HUP INT TERM
@@ -244,7 +263,7 @@ example_exit=0
   --public-hostname "$public_hostname" \
   --certificate-chain "$chain" \
   --private-key "$key" \
-  >>"$EVIDENCE_DIR/product-run.out" 2>>"$EVIDENCE_DIR/product-run.err" &
+  >>"$RUN_DIR/product-run.out" 2>>"$RUN_DIR/product-run.err" &
 example_pid=$!
 wait "$example_pid" || example_exit=$?
 example_pid=""
@@ -252,20 +271,21 @@ kill "$sampler_pid" 2>/dev/null || true
 wait "$sampler_pid" 2>/dev/null || true
 sampler_pid=""
 sample_once >>"$samples/post-run.txt"
-printf 'example_exit=%s\n' "$example_exit" >>"$EVIDENCE_DIR/product-run.exit"
+printf 'example_exit=%s\n' "$example_exit" >>"$RUN_DIR/product-run.exit"
 
 # --- retain the example's own records verbatim --------------------------------------
 if [[ -d "$run_root/product" ]]; then
-  install -d -m 0700 "$EVIDENCE_DIR/product"
+  install -d -m 0700 "$RUN_DIR/product"
   for item in serve.log cleanup-deltas example-exit gateway-status.json route-deploy.out \
     service-deploy.out stream-headers.out stream-body.out stream-timing.out \
     stream-verbose.err exact-headers.out exact-body.out count-body.out; do
     if [[ -e "$run_root/product/$item" ]]; then
-      cp -- "$run_root/product/$item" "$EVIDENCE_DIR/product/$item"
+      cp -n -- "$run_root/product/$item" "$RUN_DIR/product/$item"
     fi
   done
   if [[ -d "$run_root/product/observations" ]]; then
-    cp -R -- "$run_root/product/observations" "$EVIDENCE_DIR/product/observations"
+    install -d -m 0700 "$RUN_DIR/product/observations"
+    cp -R -n -- "$run_root/product/observations/." "$RUN_DIR/product/observations/"
   fi
 fi
 
@@ -276,11 +296,11 @@ fi
 
 # --- mechanical pre-checks (the verdict is a different reviewer's) --------------------
 if grep -Eq 'health\.startup\.refused.*gateway\.(relay|connect)_probe|gateway\.(relay|connect)_probe.*health\.startup\.refused' \
-  "$EVIDENCE_DIR/product/serve.log"; then
+  "$RUN_DIR/product/serve.log"; then
   echo "E15: serve refused startup on a gateway probe" >&2
   exit 1
 fi
-grep -Fq 'http_code=200 ssl_verify_result=0' "$EVIDENCE_DIR/product/stream-timing.out" || {
+grep -Fq 'http_code=200 ssl_verify_result=0' "$RUN_DIR/product/stream-timing.out" || {
   echo "E15: /stream did not return 200 with a verified system-trust certificate" >&2
   exit 1
 }
@@ -289,7 +309,7 @@ grep -Fq 'tcp-ulp-tls version: 1.3' "$samples/during-run.txt" || {
   exit 1
 }
 grep -Eq 'public-ingress teardown deltas: vm=0 network=0 cgroup=0 run-directory=0 mount=0 loop=0 public-443-sockets=0 ktls-sockets=0' \
-  "$EVIDENCE_DIR/product/cleanup-deltas" || {
+  "$RUN_DIR/product/cleanup-deltas" || {
   echo "E15: owned-resource deltas after cleanup are not all zero" >&2
   exit 1
 }

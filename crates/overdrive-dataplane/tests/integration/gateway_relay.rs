@@ -1077,7 +1077,8 @@ impl Drop for TlsModuleGuard {
 /// `CAP_NET_ADMIN` in the initial user namespace (so the kernel does not autoload
 /// the module: `net/ipv4/tcp_ulp.c:41-48, 163-165 @ v7.0`), the probe is refused
 /// with `Arm(UlpInstall { errno: ENOENT })`. Where `/sys/module/tls` is absent or
-/// its refcount is nonzero only the honest pass is asserted. The child is this
+/// its refcount is nonzero the test fails closed with the instruction to run it
+/// alone as root through `cargo xtask metal run --`. The child is this
 /// test binary re-executed, never the overdrive binary.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1094,26 +1095,30 @@ async fn honest_kernel_probe_passes_and_an_absent_tls_ulp_is_refused_with_enoent
 
     let refcount =
         std::fs::read_to_string("/sys/module/tls/refcnt").ok().map(|s| s.trim().to_owned());
-    if refcount.as_deref() != Some("0") {
-        eprintln!(
-            "S-PIG-114: /sys/module/tls refcnt {refcount:?}: only the honest pass is asserted; the lie stays covered by S-PIG-99"
-        );
-        return;
-    }
+    assert_eq!(
+        refcount.as_deref(),
+        Some("0"),
+        "S-PIG-114 needs the `tls` module loaded with no kernel-TLS socket alive (refcnt {refcount:?}): \
+         run it alone, as root, through `cargo xtask metal run --`; an absent or busy module cannot \
+         show that an absent ULP is refused, so the test fails instead of passing on the honest case"
+    );
     let before = open_fds();
     let guard = TlsModuleGuard;
     let unloaded = std::process::Command::new("rmmod").arg("tls").status().expect("rmmod runs");
-    if !unloaded.success() {
-        eprintln!("S-PIG-114: rmmod tls refused (a kernel-TLS socket exists): honest pass only");
-        drop(guard);
-        return;
-    }
+    assert!(
+        unloaded.success(),
+        "`rmmod tls` was refused (a kernel-TLS socket exists, or the process is not root): run \
+         S-PIG-114 alone, as root, through `cargo xtask metal run --`"
+    );
     let exe = std::env::current_exe().expect("this test binary");
     let output = blocking(move || {
-        std::process::Command::new(exe)
+        let child = std::process::Command::new(exe)
             .env(PROBE_CHILD_ENV, "1")
-            .output()
-            .expect("re-execute the test binary")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("re-execute the test binary");
+        wait_bounded(child, Duration::from_secs(60))
     })
     .await;
     drop(guard);
@@ -1130,6 +1135,24 @@ async fn honest_kernel_probe_passes_and_an_absent_tls_ulp_is_refused_with_enoent
     );
     assert_eq!(line, expected, "the absent ULP is refused with ENOENT, not autoloaded");
     assert_eq!(open_fds_after_settle().await, before, "no descriptor leaked by the lie case");
+}
+
+/// Wait for `child` for at most `bound`; kill it and fail the test when it does
+/// not finish, so a hung probe child cannot hold the test (and the unloaded
+/// module) indefinitely.
+fn wait_bounded(mut child: std::process::Child, bound: Duration) -> std::process::Output {
+    let deadline = std::time::Instant::now() + bound;
+    loop {
+        match child.try_wait().expect("poll the probe child") {
+            Some(_) => return child.wait_with_output().expect("collect the probe child's output"),
+            None if std::time::Instant::now() >= deadline => {
+                child.kill().expect("kill the hung probe child");
+                child.wait().expect("reap the killed probe child");
+                panic!("the probe child did not finish within {bound:?}");
+            }
+            None => std::thread::sleep(Duration::from_millis(50)),
+        }
+    }
 }
 
 async fn open_fds_after_settle() -> usize {

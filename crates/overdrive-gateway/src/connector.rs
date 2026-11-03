@@ -383,6 +383,20 @@ mod acceptance {
         Fixture { connector, frontend, accept, dataplane, mtls, ledger, clock }
     }
 
+    /// The connector call has completed, so a dial would already sit in the
+    /// listener's backlog (the kernel completes the handshake) and the accept
+    /// task would finish at once: it must still be waiting after a grace period
+    /// that is long compared with a loopback accept.
+    async fn assert_nothing_was_dialed(accept: &mut tokio::task::JoinHandle<usize>) {
+        let finished = tokio::time::timeout(Duration::from_millis(250), &mut *accept).await;
+        assert!(finished.is_err(), "nothing was dialed, but a connection reached the frontend");
+        accept.abort();
+        assert!(
+            accept.await.expect_err("the accept task never completed").is_cancelled(),
+            "the accept task ended only because it was cancelled"
+        );
+    }
+
     async fn fixture(receipt_mode: ReceiptMode) -> Fixture {
         fixture_with(receipt_mode, Some(wrong_valid_peer_mismatch()), false).await
     }
@@ -569,7 +583,7 @@ mod acceptance {
     #[tokio::test]
     #[ignore = "pending DELIVER upstream-socket-preparation"]
     async fn full_cleanup_ledger_refuses_before_any_socket_is_prepared() {
-        let fx = fixture(ReceiptMode::Selected).await;
+        let mut fx = fixture(ReceiptMode::Selected).await;
         let held: Vec<GatewayCleanupReservation> =
             (0..128).map(|_| reserve_one(&fx.ledger)).collect();
         assert_eq!(fx.ledger.len(), 128);
@@ -591,11 +605,7 @@ mod acceptance {
             "the refusal is counted as one saturation, with no retained cleanup",
         );
 
-        fx.accept.abort();
-        assert!(
-            fx.accept.await.expect_err("no connection reached the frontend").is_cancelled(),
-            "nothing was dialed",
-        );
+        assert_nothing_was_dialed(&mut fx.accept).await;
         drop(held);
         assert_eq!(fx.ledger.len(), 0, "dropping unbound reservations releases every slot");
     }
@@ -607,7 +617,7 @@ mod acceptance {
     #[tokio::test]
     #[ignore = "pending DELIVER upstream-socket-preparation"]
     async fn failing_open_upstream_releases_its_reserved_ledger_slot() {
-        let fx = fixture(ReceiptMode::Selected).await;
+        let mut fx = fixture(ReceiptMode::Selected).await;
         let held: Vec<GatewayCleanupReservation> =
             (0..3).map(|_| reserve_one(&fx.ledger)).collect();
         *fx.dataplane.open_failure.lock().expect("open failure") =
@@ -635,8 +645,7 @@ mod acceptance {
             "no saturation, no retention"
         );
 
-        fx.accept.abort();
-        assert!(fx.accept.await.expect_err("no connection reached the frontend").is_cancelled());
+        assert_nothing_was_dialed(&mut fx.accept).await;
         drop(held);
         assert_eq!(fx.ledger.len(), 0);
     }
