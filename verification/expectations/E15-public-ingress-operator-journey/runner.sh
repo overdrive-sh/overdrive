@@ -151,11 +151,24 @@ readonly provenance="$RUN_DIR/build-provenance"
 readonly samples="$RUN_DIR/kernel-tls-samples"
 sampler_pid=""
 example_pid=""
+cleanup_done=false
 cleanup() {
   local status=$?
+  # A signal followed by EXIT runs this twice: act once.
+  [[ "$cleanup_done" == "false" ]] || return "$status"
+  cleanup_done=true
   [[ -z "$sampler_pid" ]] || kill "$sampler_pid" 2>/dev/null || true
   if [[ -n "$example_pid" ]] && kill -0 "$example_pid" 2>/dev/null; then
     kill -TERM "$example_pid" 2>/dev/null || true
+    # Bounded wait for the example to stop before its scratch is removed.
+    local waited=0
+    while kill -0 "$example_pid" 2>/dev/null && [[ "$waited" -lt 100 ]]; do
+      sleep 0.1
+      waited=$((waited + 1))
+    done
+    if kill -0 "$example_pid" 2>/dev/null; then
+      kill -KILL "$example_pid" 2>/dev/null || true
+    fi
     wait "$example_pid" 2>/dev/null || true
   fi
   rm -rf -- "$run_root"

@@ -618,8 +618,29 @@ async fn seeded_peer_events_never_move_an_octet_past_a_message_boundary_and_leav
                 assert_eq!(body, response_body, "seed={seed}: octet-exact response body");
             }
             Ending::OriginClosesBeforeHead(_) => {
-                let (head, _) = split_message(&public_leg.written).expect("a 502 head");
+                let (head, rest) = split_message(&public_leg.written).expect("a 502 head");
                 assert_eq!(status_of(head), Some(502), "seed={seed}: exactly one 502");
+                // The whole public-leg stream is that one response: no second
+                // status line anywhere, and no stray octets after its body.
+                let status_lines = public_leg
+                    .written
+                    .windows(b"HTTP/1.".len())
+                    .filter(|window| *window == b"HTTP/1.")
+                    .count();
+                assert_eq!(status_lines, 1, "seed={seed}: exactly one response on the public leg");
+                let declared_length = std::str::from_utf8(head).ok().and_then(|text| {
+                    text.lines().find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())
+                            .flatten()
+                    })
+                });
+                assert_eq!(
+                    rest.len(),
+                    declared_length.unwrap_or(0),
+                    "seed={seed}: no octets after the 502 beyond its declared body"
+                );
                 assert!(
                     head.starts_with(b"HTTP/1.1 502"),
                     "seed={seed}: the response is exactly a 502 status line, not a success head"

@@ -39,9 +39,13 @@
 //! at the handler, as direct assertions that fail the step: `take` requires
 //! the consumed receipt to be bound to the registered intent's `ServiceKey`
 //! and cookie (`ReceiptMatchesIntent`). `idres` is `ident[sel]` or -1 by the
-//! spec; `ident` is projected for every probed `BackendId`, so the identity a
-//! connector reads is compared through `ident`, and `read_identity` asserts
-//! the port return agrees with the owner's own re-read of the same id.
+//! spec. Neither the receipt's selected-backend value (`sel`) nor the per-cookie
+//! `idres` is compared with the model: quint-connect gives a handler no
+//! model-side expectation and no owner accessor is pinned for them. The
+//! identities are compared only through the projected `ident` map (every
+//! probed `BackendId`). `read_identity` asserts only that the first read of
+//! the Selected backend's identity is present (the spec says a Selected id
+//! always has an identity) and that a second read agrees.
 //!
 //! Step decoding (D-UP-1): `Config::nondet =
 //! &["receipt_conf::selection_receipt::conf_step"]`; the state projection
@@ -352,6 +356,11 @@ impl ReceiptConfDriver {
             .and_then(|held| held.selected)
             .ok_or_else(|| anyhow!("cookie {cookie} has no Selected receipt to resolve"))?;
         let first = self.identity_of(backend)?;
+        if first.is_none() {
+            bail!(
+                "selected_backend_identity({backend}) answered no identity for a Selected receipt"
+            );
+        }
         let second = self.identity_of(backend)?;
         if first != second {
             bail!("selected_backend_identity({backend}) answered {first:?} then {second:?}");

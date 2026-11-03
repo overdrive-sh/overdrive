@@ -905,10 +905,12 @@ async fn drive_clock<T>(clock: &SimClock, step: Duration, future: impl Future<Ou
     }
 }
 
-/// Start a gateway whose relay shows `lie` to the gate's probe. Nothing is ever
-/// promoted, so there is no `wait_promoted`: the caller waits for the refusal.
-async fn start_behind_lying_substrate(
-    lie: SubstrateLie,
+/// Start a gateway whose relay shows `lie` (or, for `None`, the honest
+/// substrate) to the gate's probe. Behind a lie nothing is ever promoted: the
+/// caller waits for the refusal; behind the honest substrate it waits for the
+/// promotion.
+async fn start_behind_substrate(
+    lie: Option<SubstrateLie>,
 ) -> (Arc<SimClock>, GatewayControl, GatewayHandle, SocketAddrV4, Site) {
     let slot = RELAY_PROBE;
     let site = Site::new();
@@ -934,7 +936,7 @@ async fn start_behind_lying_substrate(
     .expect("gateway builder");
     let (builder, seal) = builder.into_builder();
     let relay = Arc::new(SimGatewayRelay::new(clock_port));
-    relay.present_substrate(Some(lie));
+    relay.present_substrate(lie);
     let dependencies = GatewayRuntimeDependencies::new(
         GatewayLimits::first_slice(),
         OriginDataplane::new(true),
@@ -952,7 +954,7 @@ async fn wait_refused(control: &GatewayControl) -> GatewayApplicationStatusRowV1
     loop {
         let row = control.application_status().await.expect("application status read");
         if let Some(row) = row
-            && row.unavailable.is_some()
+            && row.unavailable == Some(GatewayApplicationUnavailableCause::ConnectPathUnavailable)
         {
             return row;
         }
@@ -1573,10 +1575,12 @@ async fn control_records_met_anywhere_in_a_message_leave_the_relayed_octets_exac
     assert_eq!(legs.public_messages()[0].body, b"xyz");
     assert_eq!(legs.public_statuses(), vec![200]);
 
-    // A control record is never written to the other leg: every octet a leg was
-    // given is a whole application message and nothing stray follows (the Sim
-    // transcript records application octets only, so a relayed control record
-    // would show as octets that do not parse as a message).
+    // A control record is not application octets, so this check only catches
+    // control payload leaked onto the other leg as application data: every
+    // octet a leg was given must be a whole application message with nothing
+    // stray after it. That no control event reaches the other leg needs a
+    // control-event field on the Sim leg transcript, which is not pinned yet
+    // (awaiting user, recorded in the review-fix gaps file).
     for leg in world.relay.leg_transcripts() {
         let kind = match leg.role {
             LegRole::Public => Kind::Response,
@@ -2470,8 +2474,20 @@ async fn the_relay_probe_refuses_every_substrate_lie_with_its_own_typed_error() 
         SubstrateLie::ProbeTimeout,
         SubstrateLie::ProbeIo { kind: std::io::ErrorKind::PermissionDenied },
     ];
+
+    // Positive control: behind the honest substrate the same gate promotes.
+    let (clock, control, handle, _bind, _site) = start_behind_substrate(None).await;
+    let promoted = wait_promoted(&control).await;
+    assert!(promoted.current.is_some(), "honest substrate: a Current generation is promoted");
+    assert!(
+        matches!(promoted.listener, GatewayListenerStatus::Bound { .. }),
+        "honest substrate: the public listener is bound"
+    );
+    assert!(promoted.unavailable.is_none(), "honest substrate: nothing is unavailable");
+    let _report = drive_clock(&clock, Duration::from_millis(50), handle.shutdown(GRACE)).await;
+
     for lie in gate_lies {
-        let (clock, control, handle, bind, _site) = start_behind_lying_substrate(lie.clone()).await;
+        let (clock, control, handle, bind, _site) = start_behind_substrate(Some(lie.clone())).await;
         let refused = wait_refused(&control).await;
         assert_eq!(
             refused.unavailable,
