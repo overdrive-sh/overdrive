@@ -27,7 +27,8 @@ use overdrive_core::traits::vm_host_state::VmHostState;
 use overdrive_core::traits::vmm::Vmm;
 use overdrive_core::vm::beacon::BeaconIo;
 use overdrive_dataplane::allocators::VipRange;
-use overdrive_host::ca::RootKeyAeadCodec;
+use overdrive_gateway::ports::{GatewayConnectDataplane, GatewayRelay};
+use overdrive_host::ca::{PublicCertifiedKeyAeadCodec, RootKeyAeadCodec};
 use overdrive_store_local::LocalIntentStore;
 use overdrive_worker::mtls_intercept_port::MtlsIntercept;
 
@@ -95,6 +96,42 @@ pub struct BootAdapters {
     pub mtls: MtlsAdapters,
     /// ADR-0138. `HostGuestDnsFactory` in production.
     pub guest_dns: Arc<dyn GuestDnsFactory>,
+    /// The public-ingress gateway's driven adapters. Required; no `Default`,
+    /// no builder. Enablement is `ServerConfig.gateway`, not this field: a
+    /// node with the gateway disabled still carries its adapters and never
+    /// calls them.
+    pub gateway: GatewayAdapters,
+}
+
+/// The public-ingress gateway's driven adapters (D5 item 1).
+///
+/// Pinned shape: `{ certified_key_codec, client_mtls, relay }`. The
+/// `client_mtls` field (`Arc<dyn GatewayClientMtlsFactory>`) is not present:
+/// it names a port whose placement is the open proposal P-20 (a crate cycle
+/// between `overdrive-gateway::ports` and `overdrive-dataplane`), so the field
+/// is added with the P-20 ruling. Construct this struct through
+/// [`GatewayAdapters::host`] and replace fields by name with struct-update
+/// syntax; a literal listing every field would not survive that addition.
+pub struct GatewayAdapters {
+    /// Seals and opens the protected public origin key (ADR-0223).
+    /// [`GatewayAdapters::host`] builds it over the same `Kek` as
+    /// [`NodeAdapters::host`].
+    pub certified_key_codec: Arc<PublicCertifiedKeyAeadCodec>,
+    /// The kernel-TLS relay backend (G1): probes, arms, reads heads and relays
+    /// bodies. One backend serves both legs; `HostGatewayRelay` in production.
+    pub relay: Arc<dyn GatewayRelay>,
+}
+
+impl GatewayAdapters {
+    /// The production adapters: the key codec over `kek`, and one
+    /// `HostGatewayRelay` over `clock`, the injected clock the relay's
+    /// deadlines are evaluated on. Infallible and kernel-silent.
+    #[must_use]
+    pub fn host(kek: Arc<dyn Kek>, clock: Arc<dyn Clock>) -> Self {
+        let relay: Arc<overdrive_dataplane::gateway_relay::HostGatewayRelay> =
+            Arc::new(overdrive_dataplane::gateway_relay::HostGatewayRelay::new(clock));
+        Self { certified_key_codec: Arc::new(PublicCertifiedKeyAeadCodec::new(kek)), relay }
+    }
 }
 
 /// The transparent-mTLS adapters (ADR-0138, ADR-0219).
@@ -354,6 +391,7 @@ impl NodeAdapters {
         let observation: Arc<dyn ObservationStore> =
             Arc::from(observation_wiring::wire_single_node_observation(&config.data_dir)?);
         let ca = CaAdapters::host();
+        let gateway = GatewayAdapters::host(Arc::clone(&kek), Arc::clone(&clock));
         Ok(Self {
             boot: BootAdapters {
                 clock,
@@ -367,6 +405,7 @@ impl NodeAdapters {
                 dataplane,
                 mtls,
                 guest_dns,
+                gateway,
             },
             cgroup_fs,
             probers,
@@ -420,6 +459,13 @@ pub struct ComposedDataplane {
     pub dataplane: Arc<dyn Dataplane>,
     /// The node's address on the client interface.
     pub host_ipv4: Ipv4Addr,
+    /// The dataplane-side gateway selection capability of the SAME instance:
+    /// `HostDataplaneComposer::compose` builds one `Arc<EbpfDataplane>` and
+    /// coerces it to both trait objects; the simulation composer returns
+    /// `SimGatewayConnectDataplane` sharing the `SimDataplane` state. Present
+    /// whether or not the gateway is enabled; with the gateway disabled nothing
+    /// calls it.
+    pub gateway_connect: Arc<dyn GatewayConnectDataplane>,
 }
 
 /// Production: provisions the veth pair when the configured interfaces are
@@ -545,6 +591,11 @@ impl DataplaneComposer for HostDataplaneComposer {
                     source,
                 }
             })?;
-        Ok(ComposedDataplane { dataplane: Arc::new(ebpf_dataplane), host_ipv4 })
+        let ebpf_dataplane = Arc::new(ebpf_dataplane);
+        Ok(ComposedDataplane {
+            dataplane: Arc::clone(&ebpf_dataplane) as Arc<dyn Dataplane>,
+            host_ipv4,
+            gateway_connect: ebpf_dataplane,
+        })
     }
 }

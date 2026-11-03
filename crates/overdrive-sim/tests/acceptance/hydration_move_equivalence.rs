@@ -110,6 +110,7 @@ fn variant_name(s: &AnyState) -> &'static str {
         AnyState::ServiceMapHydrator(_) => "ServiceMapHydrator",
         AnyState::ServiceLifecycle(_) => "ServiceLifecycle",
         AnyState::SvidLifecycle(_) => "SvidLifecycle",
+        AnyState::GatewaySvidLifecycle(_) => "GatewaySvidLifecycle",
         AnyState::VmReclamation(_) => "VmReclamation",
     }
 }

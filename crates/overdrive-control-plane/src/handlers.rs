@@ -1433,3 +1433,96 @@ pub async fn node_list(
         .collect();
     Ok(Json(api::NodeList { rows }))
 }
+
+// ---------------------------------------------------------------------------
+// Public-ingress gateway handlers
+//
+// SCAFFOLD: true. The three paths, their request/response shapes and their
+// `AppState` accessors are the DESIGN-pinned surface. Behaviour is DELIVER's:
+// POST and DELETE check `state.gateway.control()` first and answer the typed
+// `ControlPlaneError::GatewayDisabled` before any parse, owner or store access;
+// `GET /v1/gateway/status` reads only through the two redacted `GatewayControl`
+// point reads. Every body fails with SCAFFOLD text until then.
+// ---------------------------------------------------------------------------
+
+/// `POST /v1/routes` — declare, replace or re-apply the one public Route.
+///
+/// Takes the raw body so a disabled gateway answers 409 before any
+/// deserialization.
+#[utoipa::path(
+    post,
+    path = "/v1/routes",
+    request_body = overdrive_core::public_ingress::PublicRouteInput,
+    responses(
+        (status = 201, description = "Route declared", body = api::SubmitRouteResponse),
+        (status = 200, description = "Route replaced or unchanged", body = api::SubmitRouteResponse),
+        (status = 400, description = "Validation error", body = api::ErrorBody),
+        (status = 409, description = "Gateway disabled, or the singleton is occupied by another Route", body = api::ErrorBody),
+        (status = 500, description = "Internal error", body = api::ErrorBody),
+    ),
+    tag = "gateway",
+)]
+#[allow(
+    clippy::todo,
+    clippy::unused_async,
+    clippy::needless_pass_by_value,
+    reason = "public-ingress DISTILL scaffold: the handler body is DELIVER's"
+)]
+pub async fn submit_route(
+    State(_state): State<AppState>,
+    _body: Bytes,
+) -> Result<(axum::http::StatusCode, Json<api::SubmitRouteResponse>), ControlPlaneError> {
+    todo!("SCAFFOLD: POST /v1/routes")
+}
+
+/// `DELETE /v1/routes/{id}` — withdraw the same-ID Route; an already-empty set
+/// is `Unchanged`.
+#[utoipa::path(
+    delete,
+    path = "/v1/routes/{id}",
+    params(
+        ("id" = String, Path, description = "Canonical RouteId"),
+    ),
+    responses(
+        (status = 200, description = "Route withdrawn, or already empty", body = api::WithdrawRouteResponse),
+        (status = 400, description = "Validation error", body = api::ErrorBody),
+        (status = 409, description = "Gateway disabled, or a different Route is live", body = api::ErrorBody),
+        (status = 500, description = "Internal error", body = api::ErrorBody),
+    ),
+    tag = "gateway",
+)]
+#[allow(
+    clippy::todo,
+    clippy::unused_async,
+    clippy::needless_pass_by_value,
+    reason = "public-ingress DISTILL scaffold: the handler body is DELIVER's"
+)]
+pub async fn withdraw_route(
+    State(_state): State<AppState>,
+    Path(_route_id): Path<String>,
+) -> Result<Json<api::WithdrawRouteResponse>, ControlPlaneError> {
+    todo!("SCAFFOLD: DELETE /v1/routes/{{id}}")
+}
+
+/// `GET /v1/gateway/status` — enabled flag, configured bind, listener state and
+/// the redacted application and custody projections.
+#[utoipa::path(
+    get,
+    path = "/v1/gateway/status",
+    responses(
+        (status = 200, description = "Gateway status", body = api::GatewayStatusResponse),
+        (status = 500, description = "Status read failed", body = api::ErrorBody),
+    ),
+    tag = "gateway",
+)]
+#[allow(
+    clippy::todo,
+    clippy::unused_async,
+    clippy::needless_pass_by_value,
+    reason = "public-ingress DISTILL scaffold: the handler body is DELIVER's"
+)]
+pub async fn gateway_status(
+    State(_state): State<AppState>,
+) -> Result<Json<api::GatewayStatusResponse>, ControlPlaneError> {
+    todo!("SCAFFOLD: GET /v1/gateway/status")
+}

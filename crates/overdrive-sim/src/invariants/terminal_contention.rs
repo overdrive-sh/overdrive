@@ -487,6 +487,8 @@ async fn drive(seed: u64) -> Result<Evidence, String> {
     let mtls_worker = crate::invariants::serve_ports::worker();
 
     {
+        let gateway_identity =
+            overdrive_control_plane::GatewayIdentityActionComposition::disabled();
         let dispatch = dispatch(
             vec![Action::StopAllocation {
                 alloc_id: alloc.clone(),
@@ -499,6 +501,7 @@ async fn drive(seed: u64) -> Result<Evidence, String> {
             &ca,
             clock.as_ref(),
             &identity,
+            &gateway_identity,
             &events_tx,
             &tick,
             &writer_node,

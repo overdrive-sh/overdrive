@@ -124,6 +124,7 @@ async fn terminal_cleanup_recovers_only_exact_unheld_slot_from_prior_running_add
         &SimCa::new(Arc::new(SimEntropy::new(0))),
         &SimClock::new(),
         &IdentityMgr::new(None),
+        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
         &lifecycle_tx,
         &tick,
         &NodeId::new("adr-0098-writer").expect("valid node"),

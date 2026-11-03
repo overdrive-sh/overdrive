@@ -326,6 +326,7 @@ async fn drive_post_assignment_provision_failure(
         )),
         &overdrive_sim::adapters::clock::SimClock::new(),
         &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
+        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
         &lifecycle_tx,
         &tick,
         &NodeId::new("writer-1").expect("writer node"),
@@ -464,6 +465,7 @@ async fn drive_rejected_start(
                 )),
                 &overdrive_sim::adapters::clock::SimClock::new(),
                 &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
+                &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
                 &lifecycle_tx,
                 &tick,
                 &NodeId::new("writer-1").expect("writer node"),
@@ -660,6 +662,7 @@ async fn dispatch_with_driver(
         )),
         &overdrive_sim::adapters::clock::SimClock::new(),
         &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
+        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
         &lifecycle_tx,
         &tick,
         &writer_node,
@@ -1124,6 +1127,7 @@ async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: Termin
         deadline: now + Duration::from_secs(2),
     };
 
+    let gateway_identity = overdrive_control_plane::GatewayIdentityActionComposition::disabled();
     let mtls_worker_0501_3 = crate::acceptance::serve_ports::worker();
     let dispatch = dispatch(
         vec![arm.action(alloc.clone())],
@@ -1134,6 +1138,7 @@ async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: Termin
         &ca,
         &clock,
         &identity,
+        &gateway_identity,
         &lifecycle_tx,
         &tick,
         &writer_node,
@@ -1378,6 +1383,7 @@ async fn stop_allocation_rebases_terminal_write_on_exit_observer_winner() {
         by: overdrive_core::transition_reason::StoppedBy::Operator,
     });
 
+    let gateway_identity = overdrive_control_plane::GatewayIdentityActionComposition::disabled();
     let mtls_worker_0501_4 = crate::acceptance::serve_ports::worker();
     let dispatch = dispatch(
         vec![Action::StopAllocation { alloc_id: alloc.clone(), terminal: terminal.clone() }],
@@ -1388,6 +1394,7 @@ async fn stop_allocation_rebases_terminal_write_on_exit_observer_winner() {
         &ca,
         &clock,
         &identity,
+        &gateway_identity,
         &lifecycle_tx,
         &tick,
         &writer_node,
@@ -1635,6 +1642,7 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
             )),
             &overdrive_sim::adapters::clock::SimClock::new(),
             &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
+            &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
             &lifecycle_tx,
             &tick,
             &NodeId::new("writer-1").expect("writer node"),

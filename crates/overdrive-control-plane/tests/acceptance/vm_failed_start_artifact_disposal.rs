@@ -194,6 +194,7 @@ async fn dispatch(
         &SimCa::new(Arc::new(SimEntropy::new(0))),
         clock,
         &IdentityMgr::new(None),
+        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
         &events,
         &TickContext {
             now,

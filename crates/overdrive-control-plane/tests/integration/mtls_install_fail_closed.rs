@@ -976,6 +976,7 @@ async fn dispatch_over_network_provisioner(
         &ca,
         &clock,
         identity,
+        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
         &lifecycle_tx,
         &tick_now(),
         &NodeId::new("writer-1").expect("node id"),

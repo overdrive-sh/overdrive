@@ -654,8 +654,14 @@ impl crate::DataplaneComposer for TestDataplaneComposer {
         if let Some(refusal) = scripted {
             return Err(refusal);
         }
+        let dataplane = Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
         Ok(crate::ComposedDataplane {
-            dataplane: Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+            gateway_connect: Arc::new(
+                overdrive_sim::adapters::gateway::SimGatewayConnectDataplane::new(Arc::clone(
+                    &dataplane,
+                )),
+            ),
+            dataplane,
             host_ipv4: self.host_ipv4,
         })
     }
@@ -1108,6 +1114,10 @@ pub mod composed {
                     enforcement: Arc::new(SimMtlsEnforcementFactory::new()),
                 },
                 guest_dns: dns,
+                gateway: crate::GatewayAdapters::host(
+                    Arc::new(SimKek::for_boot()),
+                    self.clock.clone(),
+                ),
             })
         }
 

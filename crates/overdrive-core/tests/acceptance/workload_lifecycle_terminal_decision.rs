@@ -659,6 +659,7 @@ fn action_terminal(action: &Action) -> Option<TerminalCondition> {
         // SvidLifecycle reconciler converges the held set, never the
         // alloc terminal.
         | Action::IssueSvid { .. }
+        | Action::IssueGatewaySvid { .. }
         | Action::DropSvid { .. }
         // microvm-driver-cloud-hypervisor step 02-01 (ADR-0083 §D7 /
         // DD-5, brief.md §105a.4): ReclaimAllocation /

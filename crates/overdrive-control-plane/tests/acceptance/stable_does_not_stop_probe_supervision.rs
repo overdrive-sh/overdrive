@@ -288,6 +288,7 @@ async fn dispatch_one(h: &Harness, action: Action) {
         )),
         &overdrive_sim::adapters::clock::SimClock::new(),
         &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
+        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
         &lifecycle_tx,
         &tick,
         &writer_node,

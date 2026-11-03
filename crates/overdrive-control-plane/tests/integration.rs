@@ -396,6 +396,11 @@ mod integration {
     /// `overdrive-control-plane` cannot depend on `overdrive-cli` (that is the
     /// only illegal dependency direction). The original DISTILL placement was a
     /// defect, relocated single-cut in step 03-02.
+    /// public-ingress-gateway — S-PIG-59 and the disabled arm of S-PIG-100: the
+    /// boot and graceful shutdown with the gateway disabled. The enabled arms
+    /// wait on the open `GatewayClientMtlsFactory` placement (batch gaps file).
+    mod public_ingress_gateway_boot_shutdown;
+
     mod built_in_ca_operator_composition {
         /// Feature-delta § D1-AMEND — the `alloc_status` server projection
         /// selects the CURRENT issued cert by monotonic `IssuanceOrdinal`,

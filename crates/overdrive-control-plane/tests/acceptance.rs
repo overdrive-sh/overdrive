@@ -450,6 +450,11 @@ mod acceptance {
     // row via ServiceFrontend::new (NOT a late opaque DataplaneError).
     mod service_frontend_ipv6_rejected;
 
+    // public-ingress-gateway — S-PIG-65 hydration half: the gateway-SVID
+    // reconciler's hydration reads the one identity view and the audit rows of
+    // the gateway subject; the disabled composition's canonical empty read.
+    mod public_ingress_gateway_hydration;
+
     // reconciler-listener-fact-view step 01-03 — edge-half of invariant
     // B (ADR-0062 § Decision (2)). After a sequence of real submissions
     // through the `submit_workload` driving port, the edge-maintained

@@ -341,6 +341,7 @@ proptest! {
                 &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(overdrive_sim::adapters::entropy::SimEntropy::new(0))),
                 &overdrive_sim::adapters::clock::SimClock::new(),
                 &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
+&overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
                 &tx, &tick, &writer_node, allocator, &test_broker, None,&mtls_worker_0501_0,
         // transparent-mtls-enrollment step 04-01: a fresh per-host slot
         // allocator — this fixture exercises no netns provisioning.
@@ -430,6 +431,7 @@ async fn run_classifier_scenario(
         )),
         &overdrive_sim::adapters::clock::SimClock::new(),
         &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
+        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
         &tx,
         &tick,
         &writer_node,
@@ -522,6 +524,7 @@ async fn dispatch_cleanup_composition_action(
         )),
         &overdrive_sim::adapters::clock::SimClock::new(),
         &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
+        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
         tx,
         &make_tick(tick),
         &NodeId::new("writer-1").expect("writer node"),
@@ -719,6 +722,7 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
         )),
         &overdrive_sim::adapters::clock::SimClock::new(),
         &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
+        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
         &tx,
         &tick,
         &writer_node,

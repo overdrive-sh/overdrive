@@ -81,6 +81,11 @@ overdrive-host.path                = "../overdrive-host"
 # `crate_class = "adapter-host"` so the dependency does not cross any
 # DST-lint boundary.
 overdrive-dataplane.path           = "../overdrive-dataplane"
+# public-ingress gateway (ADR-0222): the composition root names the
+# gateway's driven-port contracts (`ports`), its builder and handles
+# (`application`) and the Route set handle. `overdrive-gateway` depends only on
+# `overdrive-core` and `overdrive-host`, so no cycle with this crate.
+overdrive-gateway.path             = "../overdrive-gateway"
 # `overdrive-netlink` — the shared, auditable home for the subprocess-free
 # netlink client + hand-rolled ethtool `FEATURES_SET` encoder (ADR-0085 D2).
 # `veth_provisioner` drives it for the host-netns veth swap (slice 01-01) in

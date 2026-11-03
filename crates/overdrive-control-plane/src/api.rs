@@ -490,6 +490,175 @@ pub struct ErrorBody {
     pub field: Option<String>,
 }
 
+// ---------------------------------------------------------------------------
+// Public-ingress gateway wire surface (`POST /v1/routes`,
+// `DELETE /v1/routes/{id}`, `GET /v1/gateway/status`).
+//
+// The `*Body` enums are exhaustive projections of the domain status enums with
+// snake-case tagged wire labels; the domain enums are never serialized
+// directly, and no body carries a path, key, ciphertext, nonce or salt.
+// ---------------------------------------------------------------------------
+
+/// `POST /v1/routes` response: the Route's ID, its generation and whether the
+/// apply declared, replaced or left it unchanged.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SubmitRouteResponse {
+    pub route_id: String,
+    pub route_generation: String,
+    pub outcome: overdrive_core::public_ingress::RouteApplyOutcome,
+}
+
+/// `DELETE /v1/routes/{id}` response.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct WithdrawRouteResponse {
+    pub route_id: String,
+    pub outcome: overdrive_core::public_ingress::RouteWithdrawOutcome,
+}
+
+/// `GET /v1/gateway/status` response: enabled flag, configured bind, listener
+/// state and the redacted application and custody projections.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GatewayStatusResponse {
+    pub enabled: bool,
+    #[schema(value_type = String)]
+    pub configured_address: Option<std::net::SocketAddrV4>,
+    pub listener_bound: bool,
+    pub application: Option<GatewayApplicationStatusBody>,
+    pub certified_key: Option<PublicCertifiedKeyStatusBody>,
+}
+
+/// The Gateway Application row as the operator sees it.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GatewayApplicationStatusBody {
+    pub listener: GatewayListenerStatusBody,
+    pub staged: Option<GatewayApplicationGenerationStatusBody>,
+    pub current: Option<GatewayApplicationGenerationStatusBody>,
+    pub draining: Vec<GatewayApplicationGenerationStatusBody>,
+    pub unavailable: Option<GatewayApplicationUnavailableCauseBody>,
+    pub gateway_identity: GatewayIdentityStatusBody,
+    pub connect_path: GatewayConnectPathStatusBody,
+}
+
+/// The public certified-key custody row as the operator sees it.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PublicCertifiedKeyStatusBody {
+    pub id: String,
+    pub state: PublicCertifiedKeyStateBody,
+    pub last_install_failure: Option<CertifiedKeyFailureBody>,
+}
+
+/// One Gateway Application generation.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GatewayApplicationGenerationStatusBody {
+    pub application_generation: String,
+    pub route_id: String,
+    pub route_generation: String,
+    pub service_vip: String,
+    pub service_port: u16,
+    pub service_protocol: String,
+}
+
+/// Public listener state.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum GatewayListenerStatusBody {
+    Unbound,
+    Bound { address: String },
+}
+
+/// Why no application generation is available.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GatewayApplicationUnavailableCauseBody {
+    RouteAbsent,
+    RouteUnreadable,
+    CertifiedKeyAbsent,
+    CertifiedKeyUnusable,
+    FrontendUnresolved,
+    GatewayIdentityUnusable,
+    ConnectPathUnavailable,
+    ListenerBindFailed,
+    WatchGap,
+}
+
+/// Non-secret Gateway Identity state.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum GatewayIdentityStatusBody {
+    Absent,
+    Current {
+        epoch: u64,
+        spiffe_id: String,
+        serial: String,
+        #[schema(value_type = String)]
+        not_after: UnixInstant,
+    },
+    Unusable,
+}
+
+/// Connect-path trust.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GatewayConnectPathStatusBody {
+    Unavailable,
+    Ready,
+}
+
+/// Public certified-key custody state.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum PublicCertifiedKeyStateBody {
+    Absent,
+    Usable {
+        generation: String,
+        certificate_fingerprint: String,
+        hostname: String,
+        #[schema(value_type = String)]
+        not_before: UnixInstant,
+        #[schema(value_type = String)]
+        not_after: UnixInstant,
+        provenance: CertifiedKeyProvenanceBody,
+    },
+    Unusable {
+        generation: String,
+        cause: CertifiedKeyUsabilityFailureBody,
+    },
+}
+
+/// Who produced the certified key.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "producer", rename_all = "snake_case")]
+pub enum CertifiedKeyProvenanceBody {
+    Manual,
+    Workflow { correlation: String },
+}
+
+/// Why a held certified key is unusable.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CertifiedKeyUsabilityFailureBody {
+    NotYetValid,
+    Expired,
+}
+
+/// The closed categories of a failed certified-key install.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CertifiedKeyFailureBody {
+    SourceOpen,
+    SourceMetadata,
+    SourceOwnership,
+    SourcePermissions,
+    SourceBounds,
+    PemShape,
+    CertificateProfile,
+    HostnameMismatch,
+    KeyMismatch,
+    Protection,
+    Persistence,
+    RustlsConfiguration,
+}
+
 /// Root `OpenAPI` document per ADR-0009.
 ///
 /// Every ADR-0008 handler path is listed in `paths(...)` and every
@@ -517,6 +686,9 @@ pub struct ErrorBody {
         crate::handlers::cluster_status,
         crate::handlers::alloc_status,
         crate::handlers::node_list,
+        crate::handlers::submit_route,
+        crate::handlers::withdraw_route,
+        crate::handlers::gateway_status,
     ),
     components(schemas(
         SubmitWorkloadRequest,
@@ -595,11 +767,32 @@ pub struct ErrorBody {
         overdrive_core::observation::probe_result_row::ProbeRole,
         ProbeResultRowJson,
         ProbeStatusJson,
+        // public-ingress gateway — the Route wire input, the two Route
+        // responses and the redacted gateway status projection.
+        overdrive_core::public_ingress::PublicRouteInput,
+        overdrive_core::public_ingress::ServiceListenerReferenceInput,
+        overdrive_core::public_ingress::RouteApplyOutcome,
+        overdrive_core::public_ingress::RouteWithdrawOutcome,
+        SubmitRouteResponse,
+        WithdrawRouteResponse,
+        GatewayStatusResponse,
+        GatewayApplicationStatusBody,
+        PublicCertifiedKeyStatusBody,
+        GatewayApplicationGenerationStatusBody,
+        GatewayListenerStatusBody,
+        GatewayApplicationUnavailableCauseBody,
+        GatewayIdentityStatusBody,
+        GatewayConnectPathStatusBody,
+        PublicCertifiedKeyStateBody,
+        CertifiedKeyProvenanceBody,
+        CertifiedKeyUsabilityFailureBody,
+        CertifiedKeyFailureBody,
     )),
     tags(
         (name = "workloads", description = "Workload lifecycle endpoints"),
         (name = "cluster", description = "Cluster status endpoints"),
         (name = "observation", description = "Observation-store read endpoints"),
+        (name = "gateway", description = "Public ingress gateway Route and status endpoints"),
     ),
 )]
 pub struct OverdriveApi;

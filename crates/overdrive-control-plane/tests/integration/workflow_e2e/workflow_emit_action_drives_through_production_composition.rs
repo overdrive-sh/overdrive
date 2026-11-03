@@ -291,6 +291,7 @@ async fn emitting_workflow_ctx_emit_action_flows_through_production_composition_
         crate::integration::serve_ports::owner(),
         crate::integration::serve_ports::exec_gate(),
         crate::integration::serve_ports::pool(),
+        overdrive_control_plane::GatewayAppStateComposition::disabled(),
     );
 
     // === Spawn the PRODUCTION emit-drain task — the genuine mechanism

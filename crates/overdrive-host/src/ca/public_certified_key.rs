@@ -37,8 +37,8 @@ pub struct PublicCertifiedKeyAeadCodec {
 impl PublicCertifiedKeyAeadCodec {
     /// Bind the mandatory KEK provider; salt and nonce come from the
     /// crypto-backend CSPRNG.
-    pub fn new(_kek: Arc<dyn Kek>) -> Self {
-        todo!("SCAFFOLD: PublicCertifiedKeyAeadCodec::new")
+    pub fn new(kek: Arc<dyn Kek>) -> Self {
+        Self { _kek: kek }
     }
 
     /// Bind the KEK provider and a deterministic random-fill closure so salt

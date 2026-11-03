@@ -41,6 +41,7 @@ use overdrive_dataplane::allocators::{PersistentAllocatorError, PersistentServic
 use tokio::sync::broadcast;
 
 use crate::api::{AllocStateWire, TransitionSource};
+use crate::gateway_composition::GatewayIdentityActionComposition;
 use crate::guest_network::GuestNetworkProvisioner;
 use crate::identity_mgr::IdentityMgr;
 use crate::journal::WorkflowId;
@@ -230,6 +231,9 @@ pub mod deregister_local_backend;
 /// `DropSvid` removes the held entry (O2/K2). See the module docstring
 /// on [`issue_svid::dispatch_issue`] for the audit-before-hold contract.
 pub mod issue_svid;
+
+/// Executor for `Action::IssueGatewaySvid` (ADR-0225).
+pub(crate) mod gateway_svid;
 
 /// `VmReclamation` executor(s) (ADR-0083 §D7, brief.md §105a.5, GH #42).
 /// See the module docstring on [`reclamation::execute_discard_stranded_artifacts`]
@@ -1021,6 +1025,7 @@ pub async fn dispatch(
     ca: &dyn Ca,
     clock: &dyn Clock,
     identity: &IdentityMgr,
+    gateway_identity: &GatewayIdentityActionComposition,
     bus: &broadcast::Sender<LifecycleEvent>,
     tick: &TickContext,
     writer_node: &NodeId,
@@ -1040,6 +1045,7 @@ pub async fn dispatch(
         ca,
         clock,
         identity,
+        gateway_identity,
         bus,
         tick,
         writer_node,
@@ -1078,6 +1084,7 @@ pub async fn dispatch_with_network_provisioner(
     ca: &dyn Ca,
     clock: &dyn Clock,
     identity: &IdentityMgr,
+    gateway_identity: &GatewayIdentityActionComposition,
     bus: &broadcast::Sender<LifecycleEvent>,
     tick: &TickContext,
     writer_node: &NodeId,
@@ -1098,6 +1105,7 @@ pub async fn dispatch_with_network_provisioner(
         ca,
         clock,
         identity,
+        gateway_identity,
         bus,
         tick,
         writer_node,
@@ -1124,6 +1132,7 @@ async fn dispatch_with_network_provisioner_and_guest(
     ca: &dyn Ca,
     clock: &dyn Clock,
     identity: &IdentityMgr,
+    gateway_identity: &GatewayIdentityActionComposition,
     bus: &broadcast::Sender<LifecycleEvent>,
     tick: &TickContext,
     writer_node: &NodeId,
@@ -1151,6 +1160,7 @@ async fn dispatch_with_network_provisioner_and_guest(
             ca,
             clock,
             identity,
+            gateway_identity,
             bus,
             tick,
             writer_node,
@@ -1334,6 +1344,7 @@ async fn dispatch_with_network_owner(
         state.ca.as_ref(),
         state.clock.as_ref(),
         state.identity.as_ref(),
+        state.gateway.identity_actions(),
         state.lifecycle_events.as_ref(),
         tick,
         &state.node_id,
@@ -1382,6 +1393,7 @@ pub async fn dispatch_with_workflow_intent_and_network_provisioner_for_test(
         state.ca.as_ref(),
         state.clock.as_ref(),
         state.identity.as_ref(),
+        state.gateway.identity_actions(),
         state.lifecycle_events.as_ref(),
         tick,
         &state.node_id,
@@ -1425,6 +1437,7 @@ pub async fn dispatch_with_guest_network_provisioner_for_test(
         state.ca.as_ref(),
         state.clock.as_ref(),
         state.identity.as_ref(),
+        state.gateway.identity_actions(),
         state.lifecycle_events.as_ref(),
         tick,
         &state.node_id,
@@ -1858,6 +1871,7 @@ async fn dispatch_single(
     ca: &dyn Ca,
     clock: &dyn Clock,
     identity: &IdentityMgr,
+    gateway_identity: &GatewayIdentityActionComposition,
     bus: &broadcast::Sender<LifecycleEvent>,
     tick: &TickContext,
     writer_node: &NodeId,
@@ -3483,6 +3497,15 @@ async fn dispatch_single(
             issue_svid::dispatch_drop(&action, identity);
             Ok(())
         }
+        // public-ingress gateway (ADR-0225): `IssueGatewaySvid` mints the leaf
+        // through `issue_and_audit` and holds it in the dedicated gateway slot
+        // only if the action's epoch is still the desired epoch. A stale epoch
+        // is a successful no-op; a disabled composition is a typed refusal.
+        action @ Action::IssueGatewaySvid { .. } => {
+            let target = gateway_identity.target()?;
+            gateway_svid::dispatch_issue(&action, ca, obs, clock, target).await?;
+            Ok(())
+        }
         // microvm-driver-cloud-hypervisor step 02-03 (ADR-0083 §D7,
         // brief.md §105a.5/§105a.6, GH #42). `ReclaimAllocation` authors a
         // Platform Reclamation ending (execution-time supervision lease ->
@@ -3593,6 +3616,15 @@ pub enum ShimError {
     /// (K4 fail-closed — no unaudited SVID held).
     #[error("issue_svid dispatch failed")]
     IssueSvid(#[from] issue_svid::IssueSvidDispatchError),
+    /// `IssueGatewaySvid` issuance or its audit write failed (ADR-0225). The
+    /// slot is left untouched: no unaudited gateway SVID is held. The typed
+    /// source is retained for matching; no SVID or key bytes render.
+    #[error("gateway SVID issuance or audit failed")]
+    GatewaySvidIssue(#[source] crate::ca_issuance::CaIssuanceError),
+    /// An `IssueGatewaySvid` action was dispatched while the gateway is
+    /// disabled.
+    #[error(transparent)]
+    GatewayIdentityDisabled(#[from] crate::gateway_composition::GatewayIdentityDisabled),
     /// The `WorkflowEngine::start` dispatch failed (ADR-0064 §5) — the
     /// engine could not resolve the workflow kind or load its journal.
     /// The shim surfaces this as a typed `ShimError` rather than swallow

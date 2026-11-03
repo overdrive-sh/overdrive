@@ -50,7 +50,7 @@ impl HostGatewayRelay {
     /// construction claims no capability. Every kernel fact is proven by
     /// [`GatewayRelay::probe`] (Earned Trust), never assumed at construction.
     pub fn new(clock: Arc<dyn Clock>) -> Self {
-        todo!("SCAFFOLD: HostGatewayRelay::new")
+        Self { clock }
     }
 }
 

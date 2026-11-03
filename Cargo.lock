@@ -2349,6 +2349,7 @@ dependencies = [
  "overdrive-core",
  "overdrive-dataplane",
  "overdrive-fwd",
+ "overdrive-gateway",
  "overdrive-host",
  "overdrive-netlink",
  "overdrive-reconcilers",

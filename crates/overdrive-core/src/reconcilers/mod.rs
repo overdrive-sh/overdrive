@@ -163,6 +163,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::aggregate::WorkloadKind;
+use crate::gateway_identity::GatewayIdentityEpoch;
 use crate::id::{AllocationId, ContentHash, CorrelationKey, NodeId, SpiffeId, WorkloadId};
 use crate::traits::driver::AllocationSpec;
 use crate::traits::observation_store::{ObservationRowKind, ServiceBackendRow};
@@ -615,6 +616,25 @@ pub enum Action {
         /// `"issue-svid"` on the `running ∧ ¬held` branch, `"rotate-svid"` on
         /// the `running ∧ held` near-expiry rotation branch. NOT a per-attempt
         /// request id (ADR-0035 reconciler-I/O correlation discipline).
+        correlation: CorrelationKey,
+    },
+
+    /// Issue or reissue the one gateway SVID for the desired identity epoch
+    /// (ADR-0225). Emitted by the pure `GatewaySvidLifecycle` reconciler;
+    /// dispatched by the action-shim `gateway_svid` executor, which mints the
+    /// leaf through `ca_issuance::issue_and_audit` and then holds it in the
+    /// dedicated gateway identity slot only if `epoch` is still the desired
+    /// epoch. There is no gateway drop action: disabling the gateway clears the
+    /// volatile slot synchronously in the process (R-4).
+    IssueGatewaySvid {
+        /// The desired identity epoch the action was emitted for; a stale
+        /// epoch is a no-op at the slot.
+        epoch: GatewayIdentityEpoch,
+        /// The gateway identity, `SpiffeId::for_gateway(node)`.
+        spiffe_id: SpiffeId,
+        /// The node the SVID is issued on (the audit row's `node_id`).
+        node_id: NodeId,
+        /// Cause-to-response linkage; not a per-attempt request id.
         correlation: CorrelationKey,
     },
 

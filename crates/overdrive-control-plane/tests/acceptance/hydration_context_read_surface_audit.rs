@@ -60,6 +60,7 @@
 use std::net::Ipv4Addr;
 use std::path::Path;
 
+use overdrive_core::gateway_identity::GatewayIdentityView;
 use overdrive_core::id::NodeId;
 use overdrive_core::reconcilers::HydrationContext;
 use overdrive_core::traits::driver::DriverRegistry;
@@ -80,6 +81,7 @@ fn audit_every_read_surface_is_represented(ctx: &HydrationContext<'_>) {
     let _vip: &dyn ServiceVipView = ctx.service_vip_view;
     let _workflow: &dyn WorkflowLiveSet = ctx.workflow_live_set;
     let _held: &dyn HeldSvidView = ctx.held_svid_view;
+    let _gateway: &dyn GatewayIdentityView = ctx.gateway_identity;
     let _node: &NodeId = ctx.node_id;
     let _host_ipv4: Ipv4Addr = ctx.host_ipv4;
     let _redb: &Path = ctx.intent_redb_path;
@@ -100,6 +102,7 @@ fn audit_field_set_is_exactly_the_read_surfaces(ctx: HydrationContext<'_>) {
         workflow_live_set: _,
         held_svid_view: _,
         guest_attachments: _,
+        gateway_identity: _,
         node_id: _,
         host_ipv4: _,
         intent_redb_path: _,

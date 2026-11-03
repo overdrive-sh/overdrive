@@ -183,6 +183,7 @@ fn build_ctx<'a>(
         workflow_live_set,
         held_svid_view,
         guest_attachments: &GUEST_ATTACHMENTS,
+        gateway_identity: state.gateway.identity_view(),
         node_id: &state.node_id,
         host_ipv4: state.host_ipv4,
         intent_redb_path: &state.intent_redb_path,

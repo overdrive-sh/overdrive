@@ -200,6 +200,7 @@ async fn fixture_reconciler_emit_start_workflow_drives_provision_record_to_termi
         crate::integration::serve_ports::owner(),
         crate::integration::serve_ports::exec_gate(),
         crate::integration::serve_ports::pool(),
+        overdrive_control_plane::GatewayAppStateComposition::disabled(),
     );
 
     // --- The fixture trigger reconciler emits StartWorkflow. The

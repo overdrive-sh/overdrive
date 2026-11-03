@@ -335,7 +335,8 @@ async fn graceful_shutdown_propagates_worker_failure_without_a_retry_capability(
 
     // THEN graceful shutdown returns exactly the worker's typed failure.
     let failure = result.expect_err("typed worker teardown failure reaches the server caller");
-    let failures = &failure.teardown_failure().failures;
+    let failures =
+        &failure.teardown_failure().expect("fixture induces mTLS teardown failure").failures;
     assert_eq!(failures.len(), 1, "exactly one allocation-scoped failure: {failures:?}");
     let MtlsInterceptStopError::ElementRemoval { alloc_id, source } = &failures[0] else {
         panic!("expected ElementRemoval, got {:?}", failures[0]);

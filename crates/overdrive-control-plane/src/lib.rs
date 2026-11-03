@@ -72,6 +72,8 @@ pub mod dataplane_config;
 // `answer.rs` / `name_index.rs` / `responder.rs` are later slices.
 pub mod dns_responder;
 pub mod error;
+pub mod gateway_composition;
+mod gateway_identity_lifecycle;
 pub mod handlers;
 // workload-identity-manager step 01-03 (ADR-0067 D4) — `IdentityMgr`, the
 // in-process held-SVID store + boot trust bundle. Ephemeral runtime state
@@ -147,8 +149,11 @@ pub mod worker;
 // executor that core's trait declaration delegates to.
 pub mod workflow_runtime;
 
+pub use gateway_composition::{
+    GatewayAppStateComposition, GatewayIdentityActionComposition, GatewayIdentityDisabled,
+};
 pub use node_adapters::{
-    BootAdapters, CaAdapters, ComposedDataplane, DataplaneComposer, DataplanePlan,
+    BootAdapters, CaAdapters, ComposedDataplane, DataplaneComposer, DataplanePlan, GatewayAdapters,
     GuestFlowAdapter, HostDataplaneComposer, IntentStoreAdapter, MtlsAdapters, NodeAdapters,
     ProbeAdapters, StoreAdapters, VmAdapters, VmCapability,
 };
@@ -178,7 +183,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use axum::Router;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum_server::Handle as AxumHandle;
 use axum_server::tls_rustls::RustlsConfig;
 use futures::stream::{FuturesUnordered, StreamExt};
@@ -456,6 +461,13 @@ pub struct AppState {
     /// from the declared-Service intent SSOT.
     pub frontend_addr_allocator:
         crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator,
+    /// The public-ingress gateway composition: the identity read the
+    /// hydration boundary lends to `GatewaySvidLifecycle`, the identity action
+    /// composition every action dispatcher consumes, and the optional
+    /// `GatewayControl` the Route and status handlers use. Enabled when
+    /// `ServerConfig.gateway` is set, otherwise the canonical disabled
+    /// composition. `AppState::new` always stores the disabled composition.
+    pub gateway: GatewayAppStateComposition,
 }
 
 /// Test-only helper: build the default `PersistentServiceVipAllocator`
@@ -696,6 +708,7 @@ impl AppState {
             shared_guest_network,
             guest_network_exec,
             guest_pool,
+            GatewayAppStateComposition::disabled(),
         );
         // The single-driver fixture convenience path can be built over an
         // owner its fixture has already converged. Carry those existing
@@ -751,6 +764,10 @@ impl AppState {
         shared_guest_network: Arc<dyn guest_network::SharedGuestNetworkOwner>,
         guest_network_exec: Arc<overdrive_core::guest_network::GuestNetworkExecGate>,
         guest_pool: Arc<guest_network::GuestAddressPool>,
+        // The public-ingress gateway composition: enabled when
+        // `ServerConfig.gateway` is set, otherwise
+        // `GatewayAppStateComposition::disabled()`.
+        gateway: GatewayAppStateComposition,
     ) -> Self {
         let (tx, _rx) = tokio::sync::broadcast::channel(DEFAULT_LIFECYCLE_BROADCAST_CAPACITY);
         let tx = Arc::new(tx);
@@ -807,6 +824,7 @@ impl AppState {
             // (ripple-free). It self-shares on clone, so a `.clone()` shares the
             // same held map.
             frontend_addr_allocator,
+            gateway,
         }
     }
 }
@@ -920,6 +938,13 @@ pub struct ServerConfig {
     /// `NodeVsockPortConfig::kernel_assigned()` and read the bound ports back
     /// ([`ServerHandle::vsock_ports`]).
     pub vsock_ports: overdrive_core::guest_transport::NodeVsockPortConfig,
+    /// The public-ingress gateway's validated enablement: the supplied bind
+    /// address on the fixed TCP/443 and the manual certified-key inputs.
+    /// `None` (the `ServerConfig::new()` default) leaves the gateway disabled:
+    /// no gateway reconciler is registered, no socket is prepared and the boot
+    /// is the pre-feature boot. Configuration only (ADR-0219): the gateway's
+    /// driven adapters come from [`GatewayAdapters`] in the composition root.
+    pub gateway: Option<overdrive_gateway::GatewayConfig>,
 }
 
 impl ServerConfig {
@@ -958,6 +983,8 @@ impl ServerConfig {
             // (`/sys/fs/cgroup/overdrive.slice`).
             dataplane_cgroup_attach_path: None,
             vsock_ports: overdrive_core::guest_transport::NodeVsockPortConfig::default(),
+            // The gateway is disabled unless the composition root enables it.
+            gateway: None,
         }
     }
 }
@@ -1064,6 +1091,11 @@ pub struct ServerHandle {
     /// read-only observation surface. The supplied-owner entry point does
     /// not expose an observation it cannot obtain through the owner trait.
     guest_flow_owner: Option<Arc<guest_network::HostSharedGuestNetworkOwner>>,
+    /// The running public-ingress gateway's owner handle; `None` when the
+    /// gateway is disabled. `shutdown` runs its stage first, before every
+    /// other stage, because admitted connections ride leg-C and must end
+    /// before the worker that terminates leg-C stops.
+    gateway: Option<overdrive_gateway::application::GatewayHandle>,
 }
 
 /// The node-global host vsock listener ports a running server bound
@@ -2592,23 +2624,43 @@ mod shared_network_task_owner_acceptance {
     }
 }
 
-/// Typed failure returned when the server's userspace mTLS owner cannot
-/// converge teardown. The worker is sealed and every userspace child has ended;
-/// this error retains diagnostics only and exposes no retry capability.
+/// Typed failure returned when graceful server shutdown could not converge
+/// teardown. Every owner is attempted before this is returned; it retains
+/// diagnostics only and exposes no retry capability.
 #[derive(Debug)]
-pub struct ServerShutdownError {
-    source: overdrive_worker::mtls_intercept_worker::MtlsInterceptOwnerShutdownError,
+pub enum ServerShutdownError {
+    /// The userspace mTLS owner could not converge teardown: the worker is
+    /// sealed and every userspace child has ended.
+    Mtls(overdrive_worker::mtls_intercept_worker::MtlsInterceptOwnerShutdownError),
+    /// The gateway stage did not shut down cleanly.
+    Gateway(overdrive_gateway::application::GatewayShutdownReport),
+    /// Both failed.
+    Combined {
+        /// The mTLS owner's failure.
+        mtls: overdrive_worker::mtls_intercept_worker::MtlsInterceptOwnerShutdownError,
+        /// The gateway stage's non-clean report.
+        gateway: overdrive_gateway::application::GatewayShutdownReport,
+    },
 }
 
 impl std::fmt::Display for ServerShutdownError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "server shutdown mTLS teardown failed: {}", self.source)
+        match self {
+            Self::Mtls(mtls) => write!(formatter, "server shutdown mTLS teardown failed: {mtls}"),
+            Self::Gateway(_) => formatter.write_str("server shutdown gateway teardown failed"),
+            Self::Combined { mtls, .. } => {
+                write!(formatter, "server shutdown mTLS and gateway teardown failed: {mtls}")
+            }
+        }
     }
 }
 
 impl std::error::Error for ServerShutdownError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.source)
+        match self {
+            Self::Mtls(mtls) | Self::Combined { mtls, .. } => Some(mtls),
+            Self::Gateway(_) => None,
+        }
     }
 }
 
@@ -2616,28 +2668,62 @@ impl ServerShutdownError {
     const fn new(
         source: overdrive_worker::mtls_intercept_worker::MtlsInterceptOwnerShutdownError,
     ) -> Self {
-        Self { source }
+        Self::Mtls(source)
     }
 
-    /// The typed allocation-scoped teardown failures from the last attempt.
+    /// The typed allocation-scoped mTLS teardown failures from the last
+    /// attempt; `None` when only the gateway stage failed.
     #[must_use]
     pub const fn teardown_failure(
         &self,
-    ) -> &overdrive_worker::mtls_intercept_worker::MtlsInterceptOwnerShutdownError {
-        &self.source
+    ) -> Option<&overdrive_worker::mtls_intercept_worker::MtlsInterceptOwnerShutdownError> {
+        match self {
+            Self::Mtls(mtls) | Self::Combined { mtls, .. } => Some(mtls),
+            Self::Gateway(_) => None,
+        }
+    }
+
+    /// The gateway stage's non-clean report; `None` when only the mTLS owner
+    /// failed.
+    #[must_use]
+    pub const fn gateway_report(
+        &self,
+    ) -> Option<&overdrive_gateway::application::GatewayShutdownReport> {
+        match self {
+            Self::Gateway(gateway) | Self::Combined { gateway, .. } => Some(gateway),
+            Self::Mtls(_) => None,
+        }
+    }
+
+    /// Join the stages' outcomes after every owner was attempted.
+    fn from_stages(
+        mtls: Option<overdrive_worker::mtls_intercept_worker::MtlsInterceptOwnerShutdownError>,
+        gateway: Option<overdrive_gateway::application::GatewayShutdownReport>,
+    ) -> Option<Self> {
+        match (mtls, gateway) {
+            (None, None) => None,
+            (Some(mtls), None) => Some(Self::new(mtls)),
+            (None, Some(gateway)) => Some(Self::Gateway(gateway)),
+            (Some(mtls), Some(gateway)) => Some(Self::Combined { mtls, gateway }),
+        }
     }
 }
 
-/// Zero-sized witness returned once [`ServerHandle::kill_for_test`] has
-/// abandoned the server owner.
+/// Witness returned once [`ServerHandle::kill_for_test`] has abandoned the
+/// server owner.
 ///
 /// The workload and the kernel state the owner held deliberately survive;
 /// every control-plane-owned task, socket, store handle, and listener has been
-/// released before this value is returned.
+/// released before this value is returned. `gateway` is the typed report of the
+/// gateway stage's shutdown with a zero grace (`None` when the gateway is
+/// disabled); it is never discarded.
 #[doc(hidden)]
 #[cfg(any(test, feature = "integration-tests"))]
 #[derive(Debug)]
-pub struct AbruptServerResidue;
+pub struct AbruptServerResidue {
+    /// The gateway stage's report, `None` with the gateway disabled.
+    pub gateway: Option<overdrive_gateway::application::GatewayShutdownReport>,
+}
 
 /// Killed mode's final step: drop the mTLS worker as its LAST owner on a
 /// dedicated thread that has relinquished every Linux capability, so the
@@ -2823,6 +2909,7 @@ impl ServerHandle {
             flow_ports: _,
             beacon_port: _,
             guest_flow_owner,
+            gateway,
         } = self;
 
         // The axum server owns one `AppState` clone and each accepted
@@ -2832,6 +2919,13 @@ impl ServerHandle {
         // then fails redb's single-open lock.  Signal the non-graceful
         // shutdown first so every watcher drops its service, then retain the
         // existing abort/join fence for the server task itself.
+        // The gateway owner stops first, with a zero grace: it holds admitted
+        // connections that ride leg-C, so its typed report is part of the
+        // residue.
+        let gateway_report = match gateway {
+            Some(handle) => Some(handle.shutdown(Duration::ZERO).await),
+            None => None,
+        };
         inner.shutdown();
         server_task.abort();
         convergence_task.abort();
@@ -2855,7 +2949,7 @@ impl ServerHandle {
         }
         mtls_resolve_owner.shutdown().await;
         release_killed_worker_without_host_authority(mtls_worker_owner).await;
-        AbruptServerResidue
+        AbruptServerResidue { gateway: gateway_report }
     }
 
     /// Whether the interest-router task (ADR-0084 §5, Piece B) is live — the
@@ -2889,6 +2983,30 @@ impl ServerHandle {
     /// `ExitEvent` lands in obs).
     pub async fn shutdown(self, drain_deadline: Duration) -> Result<(), ServerShutdownError> {
         tracing::debug!(name: "serve.shutdown.begin", stage = "server_handle", ?drain_deadline);
+
+        // 0. The gateway stage runs first, before every existing stage and in
+        //    particular before `mtls_worker_owner`: admitted gateway
+        //    connections ride leg-C, so they must end before the worker that
+        //    terminates leg-C is shut down. One drain budget, not two: the
+        //    stage's elapsed time on the gateway's own clock is subtracted
+        //    from what axum receives. With the gateway disabled the stage does
+        //    not run and axum receives `drain_deadline` exactly as before.
+        let (drain_deadline, gateway_failure) = match self.gateway {
+            Some(gateway) => {
+                tracing::debug!(name: "serve.shutdown.stage_begin", stage = "gateway");
+                let report = gateway.shutdown(drain_deadline).await;
+                tracing::debug!(
+                    name: "serve.shutdown.stage_complete",
+                    stage = "gateway",
+                    clean = report.is_clean(),
+                );
+                (
+                    drain_deadline.saturating_sub(report.elapsed),
+                    (!report.is_clean()).then_some(report),
+                )
+            }
+            None => (drain_deadline, None),
+        };
 
         // 1. Cancel the convergence loop and await its completion.
         //    The loop's `tokio::select!` resolves the cancellation
@@ -2973,8 +3091,7 @@ impl ServerHandle {
         self.shared_network_supervisor.shutdown().await;
         tracing::debug!(name: "serve.shutdown.stage_complete", stage = "shared_network_supervisor");
         tracing::debug!(name: "serve.shutdown.stage_begin", stage = "mtls_worker_owner");
-        let worker_failure =
-            self.mtls_worker_owner.shutdown_owner().await.err().map(ServerShutdownError::new);
+        let worker_failure = self.mtls_worker_owner.shutdown_owner().await.err();
         tracing::debug!(
             name: "serve.shutdown.stage_complete",
             stage = "mtls_worker_owner",
@@ -2989,7 +3106,7 @@ impl ServerHandle {
         self.mtls_resolve_owner.shutdown().await;
         tracing::debug!(name: "serve.shutdown.stage_complete", stage = "mtls_resolve_owner");
         tracing::debug!(name: "serve.shutdown.complete", stage = "server_handle");
-        worker_failure.map_or(Ok(()), Err)
+        ServerShutdownError::from_stages(worker_failure, gateway_failure).map_or(Ok(()), Err)
     }
 }
 
@@ -3643,6 +3760,7 @@ async fn boot_server(
         dataplane: dataplane_composer,
         mtls: mtls_adapters,
         guest_dns,
+        gateway: _gateway_adapters,
     } = boot;
     // Boot step 1 for a supplied owner (D-8, "Entry points and the supplied
     // owner"). A composed owner's step 1 is phase 1, which its caller ran over
@@ -3771,14 +3889,15 @@ async fn boot_server(
     let cgroup_attach_path = config.dataplane_cgroup_attach_path.clone().unwrap_or_else(|| {
         std::path::PathBuf::from(overdrive_dataplane::DEFAULT_CGROUP_ATTACH_PATH)
     });
-    let ComposedDataplane { dataplane, host_ipv4 } = dataplane_composer
-        .compose(DataplanePlan {
-            config: dataplane_cfg,
-            vip_range: &config.vip_range,
-            pin_dir: &pin_dir,
-            cgroup_attach_path: &cgroup_attach_path,
-        })
-        .await?;
+    let ComposedDataplane { dataplane, host_ipv4, gateway_connect: _gateway_connect } =
+        dataplane_composer
+            .compose(DataplanePlan {
+                config: dataplane_cfg,
+                vip_range: &config.vip_range,
+                pin_dir: &pin_dir,
+                cgroup_attach_path: &cgroup_attach_path,
+            })
+            .await?;
     // Phase 2.2: production single-mode uses a placeholder node id;
     // Phase 2 introduces real node-bootstrap identity that will replace
     // this. The shim writes this into `LogicalTimestamp.writer` on
@@ -3805,6 +3924,13 @@ async fn boot_server(
     // step 01-03 (commit 2fabf259); the readiness / liveness
     // arms land in slices 04 / 05.
     runtime.register(service_lifecycle()).await?;
+    // Public-ingress gateway, boot step G0: the dedicated gateway-SVID
+    // reconciler is registered only when the gateway is enabled.
+    if config.gateway.is_some() {
+        let (gateway_reconciler, _gateway_evaluation) =
+            gateway_identity_lifecycle::gateway_svid_lifecycle_registration(&node_id);
+        runtime.register(gateway_reconciler).await?;
+    }
     let runtime = Arc::new(runtime);
 
     let allocator = bulk_load_service_vip_allocator(&config.vip_range, &store).await?;
@@ -3911,6 +4037,21 @@ async fn boot_server(
     // verification from boot.
     let bundle = ca.trust_bundle()?;
     let identity: Arc<IdentityMgr> = Arc::new(IdentityMgr::new(Some(bundle)));
+
+    // Public-ingress gateway, boot step G1: Disabled when `config.gateway` is
+    // `None`; otherwise the one `GatewayIdentitySlot`, its action and lifecycle
+    // handles and `GatewayControl`. The enabled composition (steps G1-G4) is
+    // DELIVER's and waits for two design rulings: the placement of
+    // `GatewayClientMtlsFactory` (P-20), and how `AppState` obtains the
+    // `GatewayControl` that `StartedGateway::into_parts` yields only at G4.
+    #[allow(
+        clippy::todo,
+        reason = "public-ingress DISTILL scaffold: the enabled gateway composition is DELIVER's"
+    )]
+    let gateway_composition = match &config.gateway {
+        None => GatewayAppStateComposition::disabled(),
+        Some(_) => todo!("SCAFFOLD: enabled gateway composition (boot steps G1-G4)"),
+    };
 
     // R16 composes the required mTLS worker on every serve boot, after
     // `IdentityMgr` exists and before `AppState` is constructed.
@@ -4112,6 +4253,7 @@ async fn boot_server(
         Arc::clone(&shared_guest_network),
         guest_network_exec.gate(),
         Arc::clone(&guest_pool),
+        gateway_composition,
     );
 
     // microvm-driver-cloud-hypervisor step 02-02 (ADR-0083 §D7, brief.md
@@ -4568,6 +4710,9 @@ async fn boot_server(
         .route("/v1/allocs", get(handlers::alloc_status))
         .route("/v1/nodes", get(handlers::node_list))
         .route("/v1/cluster/info", get(handlers::cluster_status))
+        .route("/v1/routes", post(handlers::submit_route))
+        .route("/v1/routes/:id", delete(handlers::withdraw_route))
+        .route("/v1/gateway/status", get(handlers::gateway_status))
         .with_state(state);
 
     // Bind the listener synchronously so we can surface bind errors
@@ -4632,6 +4777,7 @@ async fn boot_server(
         flow_ports: Some(flow_ports),
         beacon_port: None,
         guest_flow_owner,
+        gateway: None,
     })
 }
 

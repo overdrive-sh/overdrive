@@ -465,7 +465,7 @@ pub struct SimGatewayConnectDataplane {
 impl SimGatewayConnectDataplane {
     /// Share `dataplane`'s Service state.
     pub fn new(dataplane: Arc<SimDataplane>) -> Self {
-        todo!("SCAFFOLD: SimGatewayConnectDataplane::new")
+        Self { dataplane }
     }
 
     /// The next call of `operation` returns `error` (FIFO; typed-fault

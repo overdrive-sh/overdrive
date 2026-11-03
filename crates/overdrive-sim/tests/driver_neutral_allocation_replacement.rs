@@ -645,6 +645,7 @@ async fn dispatch_one(
         &SimCa::new(Arc::new(SimEntropy::new(SEED))),
         &SimClock::new(),
         &IdentityMgr::new(None),
+        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
         &bus,
         &tick(),
         &nid("writer"),

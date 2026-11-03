@@ -21,6 +21,7 @@
 use std::net::Ipv4Addr;
 use std::path::Path;
 
+use crate::gateway_identity::GatewayIdentityView;
 use crate::id::NodeId;
 use crate::traits::driver::DriverRegistry;
 use crate::traits::intent_store::IntentStore;
@@ -74,6 +75,11 @@ pub struct HydrationContext<'a> {
     /// Node guest-attachment occupancy read port (D-295-R8, ADR-0134).
     // RED scaffold (D-295-R8): consumed in DELIVER step 07-03.
     pub guest_attachments: &'a dyn GuestAttachmentView,
+    /// The one gateway-identity read port (non-secret desired epoch and
+    /// current facts). Only `GatewaySvidLifecycle` reads it; a disabled
+    /// serve supplies the canonical empty view (epoch one, no subject, no
+    /// current facts).
+    pub gateway_identity: &'a dyn GatewayIdentityView,
     /// The local node id (plain data).
     pub node_id: &'a NodeId,
     /// The local host IPv4 (plain data).

@@ -150,6 +150,7 @@ async fn dispatch_one_at_tick(
         )),
         &overdrive_sim::adapters::clock::SimClock::new(),
         &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
+        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
         &lifecycle_tx,
         &tick_at(tick),
         &ids().2,

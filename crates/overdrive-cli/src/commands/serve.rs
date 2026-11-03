@@ -98,7 +98,7 @@ impl ServeHandle {
         self.inner
             .shutdown(DEFAULT_DRAIN_DEADLINE)
             .await
-            .map_err(|source| CliError::ServerShutdown { source })
+            .map_err(|source| CliError::ServerShutdown { source: Box::new(source) })
     }
 
     /// Killed mode of the serve lifetime port
@@ -110,7 +110,7 @@ impl ServeHandle {
     /// which in-process cleanup still runs.
     #[cfg(feature = "integration-tests")]
     pub(crate) async fn kill_for_test(self) {
-        let overdrive_control_plane::AbruptServerResidue = self.inner.kill_for_test().await;
+        let overdrive_control_plane::AbruptServerResidue { .. } = self.inner.kill_for_test().await;
     }
 }
 

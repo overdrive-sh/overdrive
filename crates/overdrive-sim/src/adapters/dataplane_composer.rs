@@ -23,6 +23,7 @@ use overdrive_control_plane::{ComposedDataplane, DataplaneComposer, DataplanePla
 use parking_lot::Mutex;
 
 use super::dataplane::SimDataplane;
+use super::gateway::SimGatewayConnectDataplane;
 
 /// In-memory [`DataplaneComposer`] double.
 pub struct SimDataplaneComposer {
@@ -59,6 +60,9 @@ impl DataplaneComposer for SimDataplaneComposer {
         Ok(ComposedDataplane {
             dataplane: Arc::clone(&self.dataplane) as _,
             host_ipv4: self.host_ipv4,
+            // The Sim gateway selection capability shares the `SimDataplane`
+            // state the dataplane above serves.
+            gateway_connect: Arc::new(SimGatewayConnectDataplane::new(Arc::clone(&self.dataplane))),
         })
     }
 }

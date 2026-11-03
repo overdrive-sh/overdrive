@@ -47,7 +47,7 @@ pub enum CliError {
     #[error("server shutdown failed: {source}")]
     ServerShutdown {
         #[source]
-        source: overdrive_control_plane::ServerShutdownError,
+        source: Box<overdrive_control_plane::ServerShutdownError>,
     },
     /// Loading / parsing the `~/.overdrive/config` trust triple failed.
     /// The `path` field names the file so the operator can repair it.

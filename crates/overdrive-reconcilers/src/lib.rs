@@ -55,6 +55,7 @@ use overdrive_core::reconcilers::{
 use overdrive_core::traits::observation_store::ObservationRowKind;
 use overdrive_core::wall_clock::UnixInstant;
 
+pub mod gateway_svid_lifecycle;
 pub mod noop_heartbeat;
 pub mod service_lifecycle;
 pub mod service_map_hydrator;
@@ -66,6 +67,9 @@ pub mod workload_lifecycle;
 // Flat re-exports so importers spell `overdrive_reconcilers::<Symbol>` for the
 // moved impls / State / View / helpers (mirrors the ergonomic top-level access
 // the impls had inside `overdrive_core::reconcilers` before the move).
+pub use gateway_svid_lifecycle::{
+    GatewaySvidLifecycle, GatewaySvidLifecycleState, GatewaySvidLifecycleView,
+};
 pub use noop_heartbeat::NoopHeartbeat;
 pub use service_map_hydrator::{
     BackendAddressRejection, RetryMemory, ServiceDesired, ServiceMapHydrator,
@@ -132,6 +136,10 @@ pub enum AnyState {
     /// [`SvidLifecycleState`] (ADR-0067 D1: `desired = running allocs`,
     /// `actual = the IdentityMgr held set`).
     SvidLifecycle(SvidLifecycleState),
+    /// `GatewaySvidLifecycle` reconciler's typed projection — see
+    /// [`GatewaySvidLifecycleState`] (`desired` = the checked gateway-identity
+    /// epoch and subject, `actual` = the held non-secret facts).
+    GatewaySvidLifecycle(GatewaySvidLifecycleState),
     /// `VmReclamation` reconciler's typed projection — see
     /// [`vm_reclamation::VmReclamationState`] (SD-1's Bar-2 reconciler,
     /// ADR-0083 §D7 / `brief.md` §105a).
@@ -160,6 +168,10 @@ pub enum AnyReconciler {
     /// Converges `desired = running allocs` against `actual = held set`,
     /// emitting `IssueSvid` / `DropSvid`. See [`SvidLifecycle`].
     SvidLifecycle(SvidLifecycle),
+    /// The dedicated gateway-SVID reconciler — `gateway-svid-lifecycle`
+    /// (host-backed). Emits `IssueGatewaySvid` only. See
+    /// [`GatewaySvidLifecycle`].
+    GatewaySvidLifecycle(GatewaySvidLifecycle),
     /// SD-1's Bar-2 reconciler — `vm-reclamation` per ADR-0083 §D7 /
     /// `brief.md` §105a. Converges `desired = VM allocations` against
     /// `actual = observed host state + supervision`, emitting
@@ -179,6 +191,7 @@ impl AnyReconciler {
             Self::ServiceMapHydrator(r) => r.name(),
             Self::ServiceLifecycle(r) => r.name(),
             Self::SvidLifecycle(r) => r.name(),
+            Self::GatewaySvidLifecycle(r) => r.name(),
             Self::VmReclamation(r) => r.name(),
         }
     }
@@ -194,6 +207,7 @@ impl AnyReconciler {
             Self::ServiceMapHydrator(_) => <ServiceMapHydrator as Reconciler>::NAME,
             Self::ServiceLifecycle(_) => <ServiceLifecycleReconciler as Reconciler>::NAME,
             Self::SvidLifecycle(_) => <SvidLifecycle as Reconciler>::NAME,
+            Self::GatewaySvidLifecycle(_) => <GatewaySvidLifecycle as Reconciler>::NAME,
             Self::VmReclamation(_) => <vm_reclamation::VmReclamation as Reconciler>::NAME,
         }
     }
@@ -211,6 +225,7 @@ impl AnyReconciler {
             Self::ServiceMapHydrator(r) => r.resync_schedule(),
             Self::ServiceLifecycle(r) => r.resync_schedule(),
             Self::SvidLifecycle(r) => r.resync_schedule(),
+            Self::GatewaySvidLifecycle(r) => r.resync_schedule(),
             Self::VmReclamation(r) => r.resync_schedule(),
         }
     }
@@ -229,6 +244,7 @@ impl AnyReconciler {
             Self::ServiceMapHydrator(r) => r.interests(),
             Self::ServiceLifecycle(r) => r.interests(),
             Self::SvidLifecycle(r) => r.interests(),
+            Self::GatewaySvidLifecycle(r) => r.interests(),
             Self::VmReclamation(r) => r.interests(),
         }
     }
@@ -292,6 +308,15 @@ impl AnyReconciler {
             ) => {
                 let (actions, next_view) = r.reconcile(desired, actual, view, tick);
                 (actions, AnyReconcilerView::SvidLifecycle(next_view))
+            }
+            (
+                Self::GatewaySvidLifecycle(r),
+                AnyState::GatewaySvidLifecycle(desired),
+                AnyState::GatewaySvidLifecycle(actual),
+                AnyReconcilerView::GatewaySvidLifecycle(view),
+            ) => {
+                let (actions, next_view) = r.reconcile(desired, actual, view, tick);
+                (actions, AnyReconcilerView::GatewaySvidLifecycle(next_view))
             }
             (
                 Self::VmReclamation(r),
@@ -358,6 +383,12 @@ impl AnyReconciler {
                 AnyReconcilerView::SvidLifecycle(view),
             ) => r.next_evaluation_at(desired, actual, view, tick),
             (
+                Self::GatewaySvidLifecycle(r),
+                AnyState::GatewaySvidLifecycle(desired),
+                AnyState::GatewaySvidLifecycle(actual),
+                AnyReconcilerView::GatewaySvidLifecycle(view),
+            ) => r.next_evaluation_at(desired, actual, view, tick),
+            (
                 Self::VmReclamation(r),
                 AnyState::VmReclamation(desired),
                 AnyState::VmReclamation(actual),
@@ -405,6 +436,9 @@ impl AnyReconciler {
             Self::SvidLifecycle(r) => {
                 Ok(AnyState::SvidLifecycle(r.hydrate_desired(ctx, target).await?))
             }
+            Self::GatewaySvidLifecycle(r) => {
+                Ok(AnyState::GatewaySvidLifecycle(r.hydrate_desired(ctx, target).await?))
+            }
             Self::VmReclamation(r) => {
                 Ok(AnyState::VmReclamation(r.hydrate_desired(ctx, target).await?))
             }
@@ -439,6 +473,9 @@ impl AnyReconciler {
             }
             Self::SvidLifecycle(r) => {
                 Ok(AnyState::SvidLifecycle(r.hydrate_actual(ctx, target).await?))
+            }
+            Self::GatewaySvidLifecycle(r) => {
+                Ok(AnyState::GatewaySvidLifecycle(r.hydrate_actual(ctx, target).await?))
             }
             Self::VmReclamation(r) => {
                 Ok(AnyState::VmReclamation(r.hydrate_actual(ctx, target).await?))
@@ -495,6 +532,9 @@ pub enum AnyReconcilerView {
     /// decision is pure over `desired`/`actual`; retry memory lands in
     /// 03-01). ADR-0067 D8.
     SvidLifecycle(SvidLifecycleView),
+    /// `GatewaySvidLifecycle` reconciler's view — the retry inputs of the
+    /// shared backoff schedule, no derived deadline.
+    GatewaySvidLifecycle(GatewaySvidLifecycleView),
     /// `VmReclamation` reconciler's view — FIELD-LESS per the ADR-0079
     /// precedent (`brief.md` §105a.1): nothing this reconciler emitted is
     /// ever consulted, so retry falls out of the runtime's `has_work`

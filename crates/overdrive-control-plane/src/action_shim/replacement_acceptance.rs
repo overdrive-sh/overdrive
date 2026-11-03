@@ -465,6 +465,7 @@ async fn dispatch_one(
         &SimCa::new(Arc::new(SimEntropy::new(SEED))),
         &SimClock::new(),
         &IdentityMgr::new(None),
+        &crate::gateway_composition::GatewayIdentityActionComposition::disabled(),
         &bus,
         &tick(),
         &nid("writer"),

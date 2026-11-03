@@ -107,6 +107,7 @@ async fn vm_reclamation_hydrate_actual_projects_host_observation_and_supervision
     let workflow_live_set = SimWorkflowLiveSet::new(BTreeSet::new());
     let held_svid_view = SimHeldSvidView::new(BTreeMap::new());
     let node = node_id("local");
+    let gateway = overdrive_control_plane::GatewayAppStateComposition::disabled();
 
     let ctx = HydrationContext {
         intent_store: &intent,
@@ -121,6 +122,7 @@ async fn vm_reclamation_hydrate_actual_projects_host_observation_and_supervision
             overdrive_core::guest_network::GuestAttachmentOccupancy { held: 0, retiring: 0 },
             BTreeMap::new(),
         ),
+        gateway_identity: gateway.identity_view(),
         node_id: &node,
         host_ipv4: std::net::Ipv4Addr::LOCALHOST,
         intent_redb_path: &intent_path,
