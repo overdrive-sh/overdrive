@@ -1,6 +1,6 @@
 //! Crate-private HTTP/1.1 message-framing modules of the kernel relay.
 //!
-//! Data path of ADR-0245, ADR-0239 and ADR-0247.
+//! Data path of ADR-0245, ADR-0239, ADR-0247 and ADR-0254.
 //!
 //! SCAFFOLD: true. Only the shapes the DESIGN pins are present: the
 //! [`exchange`] module (`ExchangeMachine` and its closed vocabulary, the

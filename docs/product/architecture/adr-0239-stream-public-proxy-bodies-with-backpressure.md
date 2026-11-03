@@ -37,8 +37,10 @@ exposed outside the exchange owner. Backpressure is the destination socket's
 send buffer. Preserve the response status and the raw body octets.
 
 The pipe contract is [ADR-0246](adr-0246-relay-splices-into-an-empty-private-pipe-of-at-least-64-kib.md).
-How the two halves of an exchange run together and end is
-[ADR-0247](adr-0247-gateway-exchange-is-full-duplex-and-ends-an-early-response-with-a-lingering-close.md).
+How the two halves of an exchange run together is
+[ADR-0247](adr-0247-gateway-exchange-is-full-duplex.md);
+how an early response ends is
+[ADR-0254](adr-0254-gateway-ends-an-early-response-with-a-lingering-close.md).
 
 ## Alternatives considered
 
@@ -65,4 +67,4 @@ How the two halves of an exchange run together and end is
 ## Links
 
 - [Kernel relay contract](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-kernel-relay-data-path-and-driven-ports-g1)
-- [ADR-0238](adr-0238-fixed-finite-public-runtime-limits.md), [ADR-0240](adr-0240-single-upstream-attempt-per-public-request.md), [ADR-0244](adr-0244-gateway-legs-use-kernel-tls-after-a-userspace-rustls-handshake.md), [ADR-0245](adr-0245-gateway-parses-http11-heads-and-owns-message-framing.md), [ADR-0246](adr-0246-relay-splices-into-an-empty-private-pipe-of-at-least-64-kib.md), [ADR-0247](adr-0247-gateway-exchange-is-full-duplex-and-ends-an-early-response-with-a-lingering-close.md)
+- [ADR-0238](adr-0238-fixed-finite-public-runtime-limits.md), [ADR-0240](adr-0240-single-upstream-attempt-per-public-request.md), [ADR-0244](adr-0244-gateway-legs-use-kernel-tls-after-a-userspace-rustls-handshake.md), [ADR-0245](adr-0245-gateway-parses-http11-heads-and-owns-message-framing.md), [ADR-0246](adr-0246-relay-splices-into-an-empty-private-pipe-of-at-least-64-kib.md), [ADR-0247](adr-0247-gateway-exchange-is-full-duplex.md)

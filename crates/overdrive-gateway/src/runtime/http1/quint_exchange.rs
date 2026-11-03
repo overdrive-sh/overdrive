@@ -1,5 +1,5 @@
 //! Quint conformance driver QC-4 — `relay_exchange` (public-ingress-gateway,
-//! ADR-0239, ADR-0245, ADR-0246, ADR-0247).
+//! ADR-0239, ADR-0245, ADR-0246, ADR-0247, ADR-0253, ADR-0254).
 //!
 //! Replays `specs/quint/public-ingress-gateway/relay_exchange.qnt`,
 //! conformance main `relay_conf` (the configuration of `relay_exchange` with

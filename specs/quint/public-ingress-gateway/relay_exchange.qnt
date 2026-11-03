@@ -1,9 +1,10 @@
 // -*- mode: Bluespec; -*-
 /**
  * Gateway relay exchange protocol (public-ingress-gateway DESIGN): ADR-0239 (body relay boundaries and
- * backpressure), ADR-0245 (the gateway parses HTTP/1.1 heads and owns message framing), ADR-0246 (splice relay).
+ * backpressure), ADR-0245 (the gateway parses HTTP/1.1 heads and owns message framing), ADR-0246 (splice relay); context ADR-0247,
+ * ADR-0253, ADR-0254. The connector ledger order is ADR-0248 (not modelled).
  * This module is the CONFORMANCE TARGET: a pure state machine over the `ExchangeMachine` owner. kTLS record framing and
- * KeyUpdate are not modelled (the gateway never originates a KeyUpdate, P-17).
+ * KeyUpdate are not modelled (the gateway never originates a KeyUpdate, ADR-0250).
  *
  * One connection: Public leg P (keep-alive) and a per-exchange Upstream leg U. One exchange at a time (no
  * pipelining). Body relay is modelled in atomic units (one splice-out never crosses a record boundary, A-K6); chunk

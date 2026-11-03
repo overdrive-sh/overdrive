@@ -10,11 +10,9 @@ State 1
   upd = 0
   memo = << >>
   next_bid = 1
-  debt = 0
   conn = << >>
   resv = << >>
   intents = << >>
-  idres = << >>
   outer = << >>
   ckey = << >>
   guard = FALSE
@@ -32,7 +30,6 @@ State 2 [step]
 State 3 [step]
   g = [committed |-> {1}, bound |-> <<{1}>>, rbBad |-> FALSE, badSel |-> FALSE]
   infl = [on |-> TRUE, key |-> 1, ents |-> <<1>>, assoc |-> <<1>>, fresh_addrs |-> {1}, prior |-> << >>, identBefore |-> << >>, committed |-> TRUE]
-  debt = 1
   outer = <<<<1>>>>
 
 State 4 [step]
@@ -45,6 +42,5 @@ State 5 [step]
   g = [committed |-> {1}, bound |-> <<{1, 2}>>, rbBad |-> FALSE, badSel |-> FALSE]
   infl = [on |-> TRUE, key |-> 1, ents |-> <<1>>, assoc |-> <<2>>, fresh_addrs |-> {}, prior |-> <<1>>, identBefore |-> <<1>>, committed |-> FALSE]
   upd = 2
-  debt = 0
   resv = <<2>>
   guard = TRUE

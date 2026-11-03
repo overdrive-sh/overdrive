@@ -2,9 +2,10 @@
 
 ## Status
 
-Proposed — pending independent review (2026-11-02). Decision D5 approved by the
-user 2026-11-01 (see [feature-delta § Reconstruction: user decisions](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-reconstruction-user-decisions-and-proposals)).
-User ruling DG-11 (R-5, 2026-11-02): ledger slot reserved before the preparation operation.
+Proposed — pending independent review. Decision D5 approved by the user 2026-11-01
+(see [feature-delta § Reconstruction: user decisions](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-reconstruction-user-decisions-and-proposals)).
+The connector's ledger order is a separate decision,
+[ADR-0248](adr-0248-connector-reserves-its-cleanup-ledger-slot-before-preparation.md).
 
 ## Context
 
@@ -39,12 +40,7 @@ its sentinel connect on a socket it prepares itself.
 
 Preparation is one atomic operation: socket creation, mark, bind, cookie read and
 intent registration complete or fail together, so the connector cannot interpose
-between the cookie read and the registration. The connector's bounded cleanup
-ledger therefore reserves one slot before it asks for a prepared socket and binds
-the returned registered intent to that slot afterwards. A full ledger refuses
-before any socket exists or any intent is registered; a slot reserved for a
-preparation that fails is released; and no registered intent is ever without a
-ledger slot for its cleanup.
+between the cookie read and the registration.
 
 ## Alternatives considered
 
@@ -53,7 +49,6 @@ ledger slot for its cleanup.
 | The gateway creates and marks the socket and calls a separate register operation | Lets an unmarked, unbound or unregistered socket exist; spreads the mark and bind contract into the gateway crate. |
 | Use a gateway-specific cgroup, netns or interface for the socket | The `serve` process already lies in the attach subtree (validated by V-GW-2), so it adds lifecycle for no gain. |
 | A shared helper function the gateway calls | Same unrepresentable-state gap as the first row, enforced only by convention. |
-| Split preparation so the connector reserves its ledger slot between the cookie read and the registration | Reintroduces a socket that exists with a cookie but no registration, and makes the port two operations again. Rejected by ruling DG-11 (R-5). |
 
 ## Consequences
 
@@ -62,12 +57,9 @@ ledger slot for its cleanup.
 - The dataplane crate depends on the gateway crate's port definitions, not the
   reverse for implementations.
 - The new public surface is the confirmed D5 list in the feature delta (R-18).
-- The ledger order is a rule of one sequential connector task. It is covered by
-  the seeded `overdrive-sim` invariants (listed in the feature delta), not by a
-  Quint hazard (no concurrent protocol is modelled for it).
 
 ## Links
 
 - [Gateway upstream path into leg-C](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-gateway-upstream-path-into-leg-c-d3-d5-d)
 - [New public surface (D5)](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-composition-root-gateway-slot-boot-and-shutdown-d5)
-- [ADR-0190](adr-0190-leg-b-marks-and-loopback-binds-same-node-vm-dials.md), [ADR-0219](adr-0219-run-server-receives-its-driven-adapters-from-the-composition-root.md), [ADR-0224](adr-0224-existing-cgroup-bpf-gateway-backend-selection.md), [ADR-0232](adr-0232-gateway-connect-selected-backend-receipt.md)
+- [ADR-0190](adr-0190-leg-b-marks-and-loopback-binds-same-node-vm-dials.md), [ADR-0219](adr-0219-run-server-receives-its-driven-adapters-from-the-composition-root.md), [ADR-0224](adr-0224-existing-cgroup-bpf-gateway-backend-selection.md), [ADR-0232](adr-0232-gateway-connect-selected-backend-receipt.md), [ADR-0248](adr-0248-connector-reserves-its-cleanup-ledger-slot-before-preparation.md)

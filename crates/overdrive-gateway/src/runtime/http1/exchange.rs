@@ -1,5 +1,5 @@
 //! The exchange state machine of one public connection (ADR-0222, ADR-0238,
-//! ADR-0240, ADR-0242, ADR-0247).
+//! ADR-0240, ADR-0242, ADR-0247, ADR-0254).
 //!
 //! SCAFFOLD: true. The DESIGN-pinned vocabulary (`ExchangePhase`,
 //! `ResponseState`, `Remaining`, `Disposition`, `Side`, `BodyFraming`,

@@ -25,7 +25,8 @@
  * OFF names the rules switched off (hazards in hazard/):
  *   noEpochCheck     hold_audited ignores the epoch (ADR-0225): the one hazard of the decision
  *
- * Model-only: `now`, `next_serial`, `audit_armed`, `issues`, ghost `g`, `conf_step`.
+ * Model-only: `now`, `next_serial`, `audit_armed`, `issues` (R-31: the `issue_complete` handler fails the step when no
+ * Issue of that epoch is pending), ghost `g`, `conf_step`.
  * Conformance projection (accessors pinned by the feature-delta): desired_epoch, desired_enabled <-
  * GatewayIdentitySlot::desired(); held <- GatewayIdentitySlot::current(); audited <- issued_certificate_rows.
  *

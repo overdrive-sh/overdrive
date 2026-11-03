@@ -19,8 +19,9 @@
  * OFF names the rules switched off (hazards in hazard/):
  *   retireWhileLeased  a Draining generation is retired while its lease count is non-zero (ADR-0222)
  *
- * Model-only (the driver does not project them): `staged`, `inflight`, `leases`, `conf_step`. Conformance projection:
- * current_generation, draining_generations <- GatewayControl::application_status().
+ * Model-only (the driver does not project them): `staged`, `inflight`, `leases`, `next_gid`, `route_on`, `route_gen`,
+ * `conf_step`. Conformance projection:
+ * current_generation, draining_generations <- GatewayStatusReads::application_status().
  *
  * ASSUMPTION GA-1: the connector probe result is delivered at most once per staged token (discharged by the probe
  * owner's unit-level test). A lease is an RAII guard (released exactly once by construction).

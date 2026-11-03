@@ -1845,9 +1845,9 @@ Identity Association ownership is
 
 <a id="public-ingress-gateway-canonical-c4"></a>
 
-## Public ingress gateway canonical System and Application C4 (GH #54; System ADR-0220, 0223, 0224, 0229, 0230, 0234; Application ADR-0222, 0226, 0227, 0231–0240, 0242, 0243; data path ADR-0244–0247)
+## Public ingress gateway canonical System and Application C4 (GH #54; System ADR-0220, 0223, 0224, 0229, 0230, 0234; Application ADR-0222, 0226, 0227, 0231–0240, 0242, 0243, 0248; data path ADR-0244–0247, 0249–0254)
 
-Proposed — pending independent review (2026-11-02). Decision sources: placement
+Proposed — pending independent review. Decision sources: placement
 [ADR-0220](adr-0220-embed-single-node-public-ingress-in-overdrive-serve.md),
 admission [ADR-0222](adr-0222-public-ingress-route-and-gateway-application-owner.md),
 status [ADR-0227](adr-0227-redacted-operator-gateway-status.md), custody
@@ -1867,8 +1867,16 @@ data path: kernel TLS after a userspace handshake
 gateway-owned head parsing and framing
 [ADR-0245](adr-0245-gateway-parses-http11-heads-and-owns-message-framing.md), pipe
 invariant [ADR-0246](adr-0246-relay-splices-into-an-empty-private-pipe-of-at-least-64-kib.md),
-full-duplex exchange and lingering close
-[ADR-0247](adr-0247-gateway-exchange-is-full-duplex-and-ends-an-early-response-with-a-lingering-close.md).
+full-duplex exchange
+[ADR-0247](adr-0247-gateway-exchange-is-full-duplex.md)
+and lingering close [ADR-0254](adr-0254-gateway-ends-an-early-response-with-a-lingering-close.md);
+ledger order [ADR-0248](adr-0248-connector-reserves-its-cleanup-ledger-slot-before-preparation.md);
+cipher set [ADR-0249](adr-0249-gateway-legs-offer-only-aes-gcm-tls13-suites.md); no KeyUpdate
+origination [ADR-0250](adr-0250-gateway-never-originates-a-tls-keyupdate.md); framing rejection,
+interim responses and close-delimited responses
+[ADR-0251](adr-0251-gateway-rejects-ambiguous-http-framing.md),
+[0252](adr-0252-gateway-forwards-interim-100-and-expect.md),
+[0253](adr-0253-gateway-supports-close-delimited-and-http10-length-responses.md).
 Shutdown order is in the feature delta, D5 section (c).
 
 The upstream path is: gateway socket (prepared by the dataplane adapter in the
@@ -1958,7 +1966,7 @@ C4Component
   Container_Boundary(cp, "overdrive-control-plane") {
     Component(routeapi, "Route API + deploy dispatch", "axum + typed wire", "POST/DELETE Route and GET gateway status")
     Component(serve, "serve composition + ServerHandle", "Tokio owner", "Constructs the gateway from BootAdapters.gateway; runs the gateway stage first in shutdown")
-    Component(appstate, "AppState.gateway: GatewayAppStateComposition", "Clone-safe Arc/handle bundle", "Identity reads/actions and optional GatewayControl; no backend input")
+    Component(appstate, "AppState.gateway: GatewayAppStateComposition", "Clone-safe Arc/handle bundle", "Identity reads/actions and optional GatewayRouteCommands and GatewayStatusReads; no backend input")
     Component(dispatch, "Dataplane action dispatch", "action_shim", "Executes DataplaneUpdateService (unchanged) and Gateway SVID actions")
     Component(svidexec, "Gateway SVID actions", "action shim", "Issue/audit/epoch-checked hold; no drop action (disable clears the slot synchronously)")
   }
@@ -1970,7 +1978,7 @@ C4Component
   Container_Boundary(gw, "overdrive-gateway") {
     Component(builder, "UnboundGatewayBuilder → GatewayBuilder", "typestate composition", "Validates config, opens Route and custody, then starts the gateway tasks")
     Component(handle, "GatewayHandle task tree + shutdown", "cancellation + JoinHandle/JoinSet", "Owns every gateway task; drains, sweeps intents and retires identity")
-    Component(control, "GatewayControl", "cloneable command/read capability", "Route handle and ID-scoped application/certified-key status reads; owns no task")
+    Component(control, "GatewayRouteCommands + GatewayStatusReads", "two cloneable capabilities (R-25)", "The Route write handle, and the ID-scoped application/certified-key status reads; a status-only caller cannot reach the write handle; owns no task")
     Component(routeset, "PublicRouteSetOwner", "bounded single-owner task", "Serializes singleton apply/withdraw and persists before reply")
     Component(source, "ManualCertifiedKeySource", "read-only host adapter", "Reads bounded protected files and produces a validated candidate")
     Component(custody, "PublicCertifiedKeyCustody", "bounded single-owner task", "Validates/builds usable candidate, seals/persists, publishes opaque Current, then writes status")
@@ -2049,8 +2057,9 @@ C4Component
 Architecture enforcement keeps
 `control-plane -> {gateway,dataplane,reconcilers} -> core`,
 `dataplane -> gateway` only for connect and mTLS port contracts, and
-`gateway -> host -> core` acyclic. `dst-lint` rejects gateway
-`ServiceBackendRow`/raw map imports and allocation IdentityRead/
-InterceptedConnection in gateway-client modules, and confines the upstream
-socket preparation operation to the gateway connector. BPF POD tests pin receipt
+`gateway -> host -> core` acyclic. `dst-lint` applies only its existing
+crate-class rules; by review rule (no lint clause) gateway code does not import
+`ServiceBackendRow`/raw map symbols or allocation IdentityRead/
+InterceptedConnection in gateway-client modules, and the upstream
+socket preparation operation is called only by the gateway connector. BPF POD tests pin receipt
 layout; XDP wire programs remain unchanged.

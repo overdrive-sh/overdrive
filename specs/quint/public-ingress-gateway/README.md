@@ -25,10 +25,10 @@ public-ingress-gateway` fails when it no longer matches the specs).
 |---|---|---|---|
 | `gateway_identity.qnt` | ADR-0225 | `HoldImpliesAudit`, `StaleEpochNeverHolds`, `DisabledSlotIsEmpty` | `issue_hold` (happy path), `reissue_near_expiry`, `disable_races_inflight_issue`, `audit_failure_no_hold`, `restart_reissue` |
 | `gateway_application.qnt` (drain and supersession only) | ADR-0222 | `DrainRetainsUntilLeasesZero`, `SupersededResultNeverRestores` | `replace_valid` (supersede, drain, retire), `route_withdraw_drain`, `late_probe_after_supersession` (a superseded staged probe result is discarded) |
-| `selection_receipt.qnt` | ADR-0232, ADR-0233, ADR-0241 (context ADR-0228, ADR-0242, ADR-0243; see below) | `IdentityReadableOnlyAfterCommit`, `IdentityImmutablePerBackendId`, `ReceiptMatchesIntent`, `NoResidueAfterCleanup`, `RollbackPreservesPriorGeneration`, `EmptyIsNoBackend` | `commit_then_select`, `conflicting_alloc_rejected`, `restart_destroys_receipts` (conformance-bound, `receipt_conf`); `abandoned_reservation_rolled_back`, `receipt_waits_for_publish_guard` (model-level, `receipt_fine`) |
-| `relay_exchange.qnt` (conformance target) | ADR-0239 (context ADR-0245, ADR-0246) | `NoBytePastMessageBoundary` | `exchange_cl_keepalive`, `early_response_closes`, `drain_with_inflight_body`, `half_close_after_request_read`, `upstream_close_mid_body_aborts`, `close_delimited_clean_end`, `public_close_mid_request_aborts` (main `relay_conf`) |
+| `selection_receipt.qnt` | ADR-0232, ADR-0233, ADR-0241 (context ADR-0228, ADR-0242, ADR-0248; see below) | `IdentityReadableOnlyAfterCommit`, `IdentityImmutablePerBackendId`, `ReceiptMatchesIntent`, `NoResidueAfterCleanup`, `RollbackPreservesPriorGeneration`, `EmptyIsNoBackend` | `commit_then_select`, `conflicting_alloc_rejected`, `restart_destroys_receipts` (conformance-bound, `receipt_conf`); `abandoned_reservation_rolled_back`, `receipt_waits_for_publish_guard` (evaluator-only on `receipt_ok`, not replayed) |
+| `relay_exchange.qnt` (conformance target) | ADR-0239 (context ADR-0245, ADR-0246, ADR-0247, ADR-0253, ADR-0254) | `NoBytePastMessageBoundary` | `exchange_cl_keepalive`, `early_response_closes`, `drain_with_inflight_body`, `half_close_after_request_read`, `upstream_close_mid_body_aborts`, `close_delimited_clean_end`, `public_close_mid_request_aborts` (main `relay_conf`) |
 
-ADR-0228 is a single-owner rule (one dataplane owner), so it has no concurrent protocol and no hazard. ADR-0243 (ledger order) is a
+ADR-0228 is a single-owner rule (one dataplane owner), so it has no concurrent protocol and no hazard. ADR-0248 (ledger order) is a
 single-task sequential connector rule covered by the seeded invariants S-PIG-37 and S-PIG-53; it is not modelled. ADR-0242's outcome
 table is context for the receipt module, not a separate decision with a hazard.
 
@@ -56,11 +56,11 @@ See the header of `checks.toml` (single home).
   staged token; leases are per-generation connection counts. A result for a superseded or discarded token changes
   nothing.
 - `selection_receipt`: two Service keys, two guest addresses, two allocations, <= 2 gateway sockets, backend sets drawn
-  from a six-entry catalogue. The exhaustive main bounds accepted `update_service` calls at 2 (`MAXUPD`), the
-  conformance mains at 3 (`abandoned_reservation_rolled_back` needs three); a rejected update changes nothing and is
-  not counted. The bound was reduced, not the property.
-- Model-only variables (the driver does not project them): see each file's header (`staged`, `inflight`, `leases`;
-  identity `now`, ghosts; receipt `outer`, `resv`, `infl`, `guard`, `debt`, `ckey`, `taken`, `g`; `conf_step`).
+  from a six-entry catalogue. `receipt_ok` (exhaustive) bounds accepted `update_service` calls at 2 (`MAXUPD`), which also hosts the
+  two evaluator-only runs (`abandoned_reservation_rolled_back` needs two accepted updates); `receipt_conf` bounds them at
+  3 (`conflicting_alloc_rejected` needs three: the apply, the empty update, the fresh apply); a rejected update changes
+  nothing and is not counted. Post-commit orphan-cleanup debt and its retry are not modelled: no invariant depends on it.- Model-only variables (the driver does not project them): see each file's header (`staged`, `inflight`, `leases`;
+  identity `now`, ghosts; application `next_gid`, `route_on`, `route_gen`; receipt `outer`, `resv`, `infl`, `guard`, `ckey`, `memo`, `next_bid`, `taken`, `g`; `conf_step`).
   The single classification of every variable (projected accessor, port-return check, or model-only, with the value
   mappings) is in feature-delta "Formal protocol model", modules `gateway_application` and `selection_receipt`.
 - `NoAllocationIdentity` and `AtMostOneHeld` are not modelled: both are type-level facts (the slot is keyed by node and is an `Option`, ADR-0225).
@@ -87,9 +87,9 @@ The conformance owner is the real `EbpfDataplane` on native metal. `receipt_conf
 can be driven through: the fused `update_apply` (update_begin; commit(true); publish), `update_rejected`, `open`,
 `kernel_connect_det` (no `pick`; empty and singleton healthy backend sets only), `take` with r == c, `read_identity`,
 `cleanup`, `restart` (the `idle` stutter is excluded from `receipt_conf`). The results of `take` and `read_identity` are checked from the port returns, not projected;
-the projected state is `identity[id]` and the intent/receipt counts. The fine-grained phases and rollback live in
-`receipt_ok` (exhaustive safety) and `receipt_fine` (MAXUPD = 3, hosts the two non-replayable runs, because the rollback
-run needs three accepted updates and `receipt_ok` is bounded at two); they are not conformance-replayable.
+the projected state is `identity[id]`, the intent count and the receipts per cookie (`live_receipts()`, R-33). The allocator releases a memo entry at orphan GC after every commit (including an empty-set commit) and never recycles a number; `conflicting_alloc_rejected` pins that a rejected update consumes no id and that the next fresh backend gets the id the counter held (R-36, R-38). The fine-grained phases and rollback live in
+`receipt_ok` (exhaustive safety, and the two evaluator-only runs `abandoned_reservation_rolled_back` and
+`receipt_waits_for_publish_guard`); they need a pause/fault seam the real owner lacks and are not conformance-replayed (R-36, P-32).
 
 ## Relay (`relay_exchange.qnt`, conformance target)
 
@@ -98,7 +98,7 @@ per-exchange Upstream leg U, one request per upstream connection). Phases: Idle 
 is no Done phase, `conclude` (`finish()`) goes straight to Idle when `reusableOf` holds and otherwise to Closed. Atomic
 body units, full-duplex exchange (the response may start before the request body ends), close-delimited responses,
 the keep-alive reuse rule, close_notify and drain are modelled. Chunk framing and kTLS record framing/KeyUpdate are NOT
-modelled: chunk framing is covered by property tests only (ruling 19), and the gateway never originates a KeyUpdate (P-17).
+modelled: chunk framing is covered by property tests only (ruling 19), and the gateway never originates a KeyUpdate (ADR-0250).
 Every named run is `#[quint_test]`-replayable. Bounds: 2 units, 2 exchanges per connection.
 
 The action -> `ExchangeMachine` call table and the variable -> owner accessor table live ONLY in feature-delta
@@ -112,7 +112,7 @@ hazard is `relayPastBoundary` (ADR-0239).
 
 ## Stutter and owner-autonomous steps (ruling 7)
 
-The `idle` stutter exists only in the exhaustive/fine mains (`identity_ok`, `app_ok`, `receipt_ok`, `receipt_fine`,
+The `idle` stutter exists only in the exhaustive mains (`identity_ok`, `app_ok`, `receipt_ok`,
 `relay_ok`); each conformance main (`*_conf`) guards it with `not(REC)`, so no conformance step maps to "no call". In
 `gateway_application.qnt`, `stage` and `retire` remain explicit steps; they are owner-autonomous (the owner performs
 them itself and the driver yields until idle and asserts the postcondition via `application_status()`).

@@ -5,7 +5,6 @@ State 1
   ckey = << >>
   upd = 0
   infl = [on |-> FALSE, key |-> 0, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
-  idres = << >>
   outer = << >>
   memo = << >>
   guard = FALSE
@@ -13,7 +12,6 @@ State 1
   g = [committed |-> {}, bound |-> << >>, rbBad |-> FALSE, badSel |-> FALSE]
   intents = << >>
   taken = << >>
-  debt = 0
   receipts = << >>
   conf_step = [init |-> [tag |-> "UNIT"]]
   next_bid = 1

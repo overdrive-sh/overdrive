@@ -11272,8 +11272,8 @@ composition-root carriers of ADR-0219 (`BootAdapters.gateway`,
 `ComposedDataplane.gateway_connect`); `ServerConfig.gateway` alone enables it.
 `ManualCertifiedKeySource` feeds `PublicCertifiedKeyCustody` (sealed with the
 node KEK, preserve-old replacement); `GatewayApplicationOwner` publishes one
-Route/frontend/key admission generation; `GatewayControl` serves the redacted
-operator-mTLS `GET /v1/gateway/status`.
+Route/frontend/key admission generation; `GatewayStatusReads` serves the redacted
+operator-mTLS `GET /v1/gateway/status` and `GatewayRouteCommands` is the Route write handle.
 
 **Backend path on main.** VM backends are programmed into
 `SERVICE_MAP`/`BACKEND_MAP`/`REVERSE_NAT_MAP` by the ordinary
@@ -11304,7 +11304,7 @@ SVID and the exact-peer SPIFFE equality), then run their record layer in the ker
 close_notify handled per leg in userspace, ADR-0244). The gateway parses only
 message heads and framing lines and owns message framing (ADR-0245); request and
 response bodies move between the two kTLS sockets by `splice(2)` through a private
-pipe of at least 64 KiB that is empty at each splice-in (ADR-0239, ADR-0246); the exchange is full-duplex (ADR-0247). The
+pipe of at least 64 KiB that is empty at each splice-in (ADR-0239, ADR-0246); the exchange is full-duplex (ADR-0247) and an early response ends with a lingering close (ADR-0254). The
 claim is bounded memory and no userspace payload copy; no CPU gain is claimed. A relay
 probe on the real kernel gates the listener bind.
 
@@ -11363,7 +11363,14 @@ feature delta § *Aggregate contracts*; the context map is in
 | [0244](adr-0244-gateway-legs-use-kernel-tls-after-a-userspace-rustls-handshake.md) | Gateway legs: userspace rustls handshake, then kernel TLS record layer |
 | [0245](adr-0245-gateway-parses-http11-heads-and-owns-message-framing.md) | Gateway parses HTTP/1.1 heads and owns message framing |
 | [0246](adr-0246-relay-splices-into-an-empty-private-pipe-of-at-least-64-kib.md) | Splice out of kTLS only into an empty private pipe of at least 64 KiB |
-| [0247](adr-0247-gateway-exchange-is-full-duplex-and-ends-an-early-response-with-a-lingering-close.md) | The exchange is full-duplex and ends an early response with a lingering close |
+| [0247](adr-0247-gateway-exchange-is-full-duplex.md) | The exchange is full-duplex |
+| [0248](adr-0248-connector-reserves-its-cleanup-ledger-slot-before-preparation.md) | The connector reserves its cleanup-ledger slot before it asks for a prepared socket |
+| [0249](adr-0249-gateway-legs-offer-only-aes-gcm-tls13-suites.md) | Both legs offer only AES-128-GCM and AES-256-GCM |
+| [0250](adr-0250-gateway-never-originates-a-tls-keyupdate.md) | The gateway never originates a KeyUpdate |
+| [0251](adr-0251-gateway-rejects-ambiguous-http-framing.md) | Ambiguous HTTP framing is rejected |
+| [0252](adr-0252-gateway-forwards-interim-100-and-expect.md) | Interim `100` and `Expect` are forwarded; other interim `1xx` dropped |
+| [0253](adr-0253-gateway-supports-close-delimited-and-http10-length-responses.md) | Close-delimited and HTTP/1.0-with-length responses are supported |
+| [0254](adr-0254-gateway-ends-an-early-response-with-a-lingering-close.md) | An early or gateway-authored response ends with a lingering close |
 
 Recurring acceptance is the Tier-3 `AT-PIG-E2E-1` on native metal through real
 `overdrive serve` and `overdrive deploy`; the point-in-time operator journey is
@@ -11390,6 +11397,7 @@ for current proposed contracts.
 
 | Date | Change |
 |---|---|
+| 2026-11-03 | **public-ingress-gateway: user rulings R-20…R-44 recorded (ADR-0243–0254; feature delta).** The bundled ADRs are split at the ruling boundaries so one ADR records one decision: ADR-0248 (connector ledger order, from 0243), ADR-0249 (cipher set) and ADR-0250 (no KeyUpdate origination) from 0244, ADR-0251 (ambiguous-framing rejection), ADR-0252 (interim `1xx` and `Expect`) and ADR-0253 (close-delimited and HTTP/1.0-with-length) from 0245, ADR-0254 (lingering close) from 0247. Still Proposed pending independent review. — Morgan. |
 | 2026-11-02 | **public-ingress-gateway: user rulings R-1…R-19 recorded (ADR-0224, 0225, 0239, 0240, 0241–0247; feature delta).** ADR-0247 (full-duplex exchange and lingering close) is split from ADR-0239. The selection arm is a separate `cgroup/connect4` program and ignores `BACKEND_MAP.healthy` (readiness window is 502); the BackendId allocator is unchanged; gateway identity disable is a synchronous clear and `Action::DropGatewaySvid` is removed; the connector reserves its cleanup-ledger slot before `open_upstream`; each gateway test composition binds a distinct `127/8` address; both legs offer only AES-128-GCM/AES-256-GCM, strict framing rejection, full-duplex exchange, interim `100`/`Expect` forwarded, close-delimited responses supported, no gateway-originated KeyUpdate, lingering close with bounded discard, one request per upstream connection; no per-exchange pipe-release change; the ≥64 KiB pipe invariant stays until GH #339; the `relay_ktls` model is dropped. Still Proposed pending independent review. — Morgan. |
 | 2026-11-01 | **public-ingress-gateway: reconstructed on main 549d78fa6 (GH #54; ADR-0220–0243, Proposed).** Branch ADR-0114…0143 are renumbered into ADR-0220…0241, with merged and retired records folded into their surviving decisions (the branch demand-gated TEACH and frontend-demand decisions are retired by D1/D2, never implemented); ADR-0242 and ADR-0243 are new. The gateway reaches VM backends through ordinary Service-map programming and the existing leg-C/vsock path. Pending independent review and user confirmation of the new public surface. — Morgan. |
 | 2026-10-20 | **netns-density-295: MODULE-REFCOUNT (user ruling).** The flow forwarder `ovd_fwd` is no longer permanent: it holds a module reference for every open control context and every hooked socket, and unloads only at zero (ADR-0198 restated in present tense; ADR-0204 gains rule 5 — callbacks are removed under the socket lock, `sk_write_space` is never overridden (the write-space trigger is a socket wait-queue entry, since `sock_wfree` calls `sk_write_space` on vsock and UDP sockets from preemptible process context with no lock), and a ULP present at removal on a TCP half keeps that socket's reference). ADR-0068 § 7 keeps the image kernel without module unloading, for a restated reason. ADR-0203's module identity is the whole-tree digest of `kmod/ovd_fwd/` as `MODULE_VERSION` (it tells apart builds from different Conductor workspaces sharing one Lima VM; SIMPLIFY-1 follow-up (a), user 2026-10-21). ADR-0205 and ADR-0203 replace the reboot remedy with `kmod-load`'s reload of an idle module. ADR-0200's two permanence references are restated. — Morgan. |

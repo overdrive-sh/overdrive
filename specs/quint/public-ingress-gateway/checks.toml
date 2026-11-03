@@ -1,8 +1,9 @@
 # Checks the `cargo xtask quint` runner executes for specs/quint/public-ingress-gateway/.
 # `expect = "violation"` on a hazard instance means the decision's rule is load-bearing; every other check must hold.
 # Modules: gateway_identity (ADR-0225), gateway_application (ADR-0222), selection_receipt (ADR-0232, -0233,
-# -0241; context -0228, -0242, -0243) and relay_exchange (ADR-0239; context ADR-0245, -0246). The kTLS rekey exclusion (ADR-0244) is not
-# modelled (ruling 19): the gateway never originates a KeyUpdate (P-17), chunk framing is covered by property tests.
+# -0241; context -0228, -0242; the connector ledger order is ADR-0248, not modelled) and relay_exchange (ADR-0239; context ADR-0245,
+# -0246, -0247, -0253, -0254). The kTLS rekey exclusion (ADR-0244, -0249, -0250) is not modelled (ruling 19): the gateway
+# never originates a KeyUpdate (ADR-0250), chunk framing is covered by property tests.
 # VALIDATION BUDGET (single home): 30 checks = 4 TLC safety + 6 TLC hazards + 20 named runs. The relay module
 # contributes 9. Only receipt-safety-tlc is slow (about 900 s, non-CI); every other check is under two minutes and
 # `ci = true`. receipt-safety-tlc is the MANUAL pre-merge gate (not run in CI; run it by hand before merging a
@@ -146,7 +147,7 @@ ci = true
 [[check]]
 name = "receipt-run-abandoned-reservation-rolled-back"
 spec = "selection_receipt.qnt"
-main = "receipt_fine"
+main = "receipt_ok"
 run = "abandoned_reservation_rolled_back"
 backend = "evaluator"
 expect = "holds"
@@ -164,7 +165,7 @@ ci = true
 [[check]]
 name = "receipt-run-receipt-waits-for-publish-guard"
 spec = "selection_receipt.qnt"
-main = "receipt_fine"
+main = "receipt_ok"
 run = "receipt_waits_for_publish_guard"
 backend = "evaluator"
 expect = "holds"
@@ -206,7 +207,7 @@ backend = "tlc"
 expect = "violation"
 ci = true
 
-# ==== relay_exchange.qnt (conformance target; ADR-0239, ADR-0245, ADR-0246)
+# ==== relay_exchange.qnt (conformance target; ADR-0239, ADR-0245, ADR-0246, ADR-0253, ADR-0254)
 
 [[check]]
 name = "relay-safety-tlc"
