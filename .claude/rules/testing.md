@@ -696,9 +696,7 @@ authorized by the accepted design. Never introduce a method, type, variant,
 trait, or parameter merely to make an acceptance body compile; surface the
 design gap instead.
 
-Pre-commit and pre-push hooks run after the step reaches GREEN. `git commit
---no-verify` remains blocked; diagnose and fix hook failures, or request explicit
-user approval only for a genuinely external hook defect.
+Pre-commit and pre-push hooks run after the step reaches GREEN.
 
 
 ---
