@@ -40,13 +40,15 @@
   `guest_report` (`guest_report_host`) is the conformance target. **R1** accepted 2026-11-04:
   the projection gains a `VmmExit` action (`SimVmm::exit_process` plus the driver's exit-gate
   release, as the `quint_flows_beacon` driver's `vm_stop` does) and `exitrep` becomes
-  three-valued (`none`, `guest-reported`, `no-report`), projected from the `ExitEvent` on the
-  `take_exit_receiver` receiver. **R2** accepted 2026-11-04: three full-module `guest_report`
+  three-valued (`none`, `guest-reported`, `no-report`), projected from the exit observer's
+  `AllocStatusRow` through `ObservationStore::alloc_status_row` (**R1-a**; the observer, not the
+  harness, takes the exit receiver). **R2** accepted 2026-11-04: three full-module `guest_report`
   runs are dropped (their host behaviour lives in the `guest_report_host` runs), `gl` is pinned
   `false` in the exhaustive `ra_ok` instance and its hazard instances, and
   `guest_listener_fail_fail_reemits_stop_per_row` is folded into
   `first_fail_at_deadline_with_no_earlier_row_stops`; `ListenBeforeExit` is kept. ADR-0058 stays
-  operative until ADR-0270 is accepted. No ADR text changes: R1 and R2 are model-level.
+  operative until ADR-0270 is accepted. No ADR text changes: R1 and R2 change the conformance
+  projection and the model's runs, not an ADR decision.
 
 ## Decisions
 
@@ -124,15 +126,14 @@ superseded (ADR-0267).
 ## Handoff to DISTILL (after the independent re-review of this revision)
 
 - Formal protocol model: `specs/quint/service-allocation-readiness-and-ending/` (D1, D3, D5 to D11, D13, D14).
-  The named runs, hazards and invariants are that directory's `README.md`. Outstanding for the
-  modeler: R1, R2 and the README and `checks.toml` header fixes (feature delta § Modeler change list). D12, D17, R2-1
+  The named runs, hazards and invariants are that directory's `README.md`. D12, D17, R2-1
   and R2-2 add no model state (D17 is justified without a model: § Formal protocol model).
 - Scenarios S-1 to S-48 are in the feature delta with oracles and tiers. D6 and D7 rewrite the
   early-exit and startup-failure tests listed in their sections. D13 to D16 obligations are
   G-10's boundary scenarios.
 - No open contract-shaping validation items for D1 to D12 and D17. V34 to V38 and V41 are held and
   V39 is partial (not contract-shaping); V42, the last contract-shaping item (PR-2), is held.
-  Gates before DISTILL: the modeler change list and the independent DESIGN review.
+  The one gate before DISTILL is the independent DESIGN review (approval).
 
 ## Surfaced to the user
 

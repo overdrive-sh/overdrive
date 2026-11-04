@@ -1870,32 +1870,6 @@ Growth beyond either budget needs the user's approval.
 - DISTILL: the S-numbers in § Executable obligations are the scenario set; D13 to D16 add the
   obligations in G-10's boundary scenarios once accepted.
 
-## Wave: DESIGN / [REF] Modeler change list
-
-The architect does not edit the `.qnt` files, `checks.toml`, `README.md` or `evidence/`. The
-`quint-modeler` runs through `cargo xtask metal run --` (never Lima). The list is for the
-`exitrep` projection ruling R1-a (§ Approval record); pins are in § Formal protocol model — D13
-to D16.
-
-1. `guest_report_host`: the projection comment and the README rows for `exitrep` state that it
-   is read from the exit observer's resulting `AllocStatusRow` through
-   `ObservationStore::alloc_status_row` (`none` / `guest-reported` / `no-report`), not from the
-   `ExitEvent` on the `take_exit_receiver` receiver.
-2. `guest_report_host`: the `VmmExit` mapping row (README § Modules and § "guest_report:
-   coverage split" action table) names `SimVmm::exit_process` plus
-   `Driver::release_for_exit_emission`, the production exit observer writing the row, and the
-   preconditions: a started VM with an accepted READY/EXEC session (a pending exit release), no
-   `Driver::stop`, the `Running` row committed first; and states the abstraction that the
-   `wait == ended` guard is the driver's ordering (`HostRead` before `VmmExit`).
-3. `guest_report` (the full module): remove `exitrep` (variable, its `HostRead` effect, its
-   initial value) and from its file header comment, and the README rows that mention it.
-   `exitrep` backs no invariant of the full module; `guest_report_host` keeps it.
-4. README note on the removed `R2` full-module runs (`garbage_line_is_dropped`,
-   `all_declared_reported`, `beacon_closes_with_partial_set`): rewrite to the current state
-   only (the full module has `ring_drop_leaves_set_partial` and `listen_then_exit_drains_first`;
-   the host-visible scenarios are `guest_report_host` runs), with no removal narration.
-5. Record with `--record` after the changes; `verify-evidence` must pass.
-
 ## Wave: DESIGN / [REF] D17 — a broker submit wakes the convergence loop at once (Accepted 2026-11-03; shape choices S1 to S6 accepted as proposed)
 
 Decision record: [ADR-0273](../../product/architecture/adr-0273-a-broker-submit-wakes-the-convergence-loop-at-once.md).
@@ -2202,12 +2176,19 @@ Rejected alternatives (`fentry`, `sock_diag` polling, workload-signalled readine
    `::ffff:127.0.0.0/104`; a bind to any other address is a report. The v4-mapped range is
    decidable from the same four words of the IPv6 local address both hooks already read
    (`src_ip6` for post-bind6, `local_ip6` for sockops): words 0 and 1 zero, word 2
-   `htonl(0x0000ffff)` (the constant as the `__be32` word the hooks read, bytes `00 00 ff ff`;
-   the host-order value `0x0000ffff` compared against a `__be32` word would never match on a
-   little-endian guest), and the first byte of word 3 in memory order (the first address octet)
-   equal to 127. Word 3 is a `__be32` read on a little-endian guest, so that byte is the low
-   byte of the loaded `u32`: the test is the explicit mask `word3 & 0xff == 127`, not a
-   host-order shift or compare. An `AF_INET6` socket bound to
+   `htonl(0x0000ffff)` (the constant as the network-order word the hooks read, bytes `00 00 ff ff`;
+   the host-order value `0x0000ffff` compared against a network-order word would never match on
+   a little-endian guest), and the first byte of word 3 in memory order (the first address
+   octet) equal to 127. Word 3 is a network-order word read on a little-endian guest, so that
+   byte is the low byte of the loaded `u32`: the test is the explicit mask `word3 & 0xff ==
+   127`, not a host-order shift or compare. Kernel grounding (`vendors/linux @ v7.0`): the UAPI
+   declares both fields `__u32 [4]`, not `__be32` (`struct bpf_sock_ops`, `local_ip6[4]`
+   "Stored in network byte order", `include/uapi/linux/bpf.h:6909`; `struct bpf_sock`,
+   `src_ip6[4]`, `bpf.h:6450`, no byte-order comment), so the network order is a documented
+   convention, not a type the compiler checks; the context conversion loads the words from
+   `skc_v6_rcv_saddr.s6_addr32[]` (`net/core/filter.c:10761-10775` for sockops,
+   `:10223-10226` for `bpf_sock`), and `s6_addr32` is `__be32 u6_addr32[4]`
+   (`include/uapi/linux/in6.h:38,44`). An `AF_INET6` socket bound to
    `::ffff:127.0.0.1` is reachable only on loopback, so reporting it would satisfy a declared
    listener the workload cannot serve. The spikes exercised `127.0.0.1` and `::1` only; the
    v4-mapped case is a Tier-3 scenario in G-10.
@@ -2690,7 +2671,7 @@ conformance target). The guest-signal spike measured the hazard: 185 of 300 boot
   |---|---|
   | `none` | no row, or `state` not terminal (`AllocState::is_terminal`) |
   | `guest-reported` | `state == Terminated` with `reason == Stopped { by: Process }` (guest status 0), or `state == Failed` with `reason == WorkloadCrashedImmediately { exit_code: Some(_), .. }` (guest status n) |
-  | `no-report` | `state == Failed` with `reason == WorkloadCrashedImmediately { exit_code: None, .. }` or `reason == VmOutOfMemory { .. }` (the cgroup OOM diagnosis runs only when `guest_report.is_none()`, `vm_driver.rs:2263-2275`) |
+  | `no-report` | `state == Failed` with `reason == WorkloadCrashedImmediately { exit_code: None, .. }`; or `reason == VmOutOfMemory { .. }` (classification only: the cgroup OOM diagnosis runs only when `guest_report.is_none()`, `vm_driver.rs:2263-2275`, so the full mapping classes it `no-report`, but no projection action reaches it: `VmmExit` calls `SimVmm::exit_process(pid, Some(0), None)`, which leaves no OOM facts in `SimCgroupAccounting`) |
 
   The two reported and unreported classes are disjoint: a no-report exit never produces
   `Terminated` and never carries an `exit_code`, and a guest-reported exit always does. Any
@@ -2719,9 +2700,62 @@ conformance target). The guest-signal spike measured the hazard: 185 of 300 boot
   | `VmmExit` (**R1**, **R1-a**) | `SimVmm::exit_process` (the VMM process exits) and `Driver::release_for_exit_emission` (the exit-gate release), so `run_exit_watcher` classifies the guest report (or its absence) and sends the `ExitEvent` (`vm_driver.rs:2237-2330`) to the **production exit observer**, which writes the row; the handler then awaits that row (composition and preconditions below). Precedent for the VMM-side step: the `quint_flows_beacon` driver's `vm_stop` (`crates/overdrive-worker/src/vm_driver/quint_flows_beacon.rs:446-465`): `self.vmm.exit_process(pid, Some(0), None)`, then `observe_vm_exits`; that driver does not compose the exit observer, so the composition below is new to this driver |
   | `WorkloadListen`, `WorkloadExit`, `Idle`, and the `ring`, `wl`, `produced` state | **model-only**: guest and kernel internals with no host-visible effect |
 
-  **`VmmExit` composition and preconditions (R1-a).** No new API: every piece is an existing
-  production entry or port.
+  **Driver home (decided here).** The `guest_report_host` driver lives in
+  `overdrive-control-plane`, as `crates/overdrive-control-plane/src/worker/quint_guest_report_host.rs`,
+  declared in `src/worker/mod.rs` as `#[cfg(all(test, feature = "integration-tests"))] mod
+  quint_guest_report_host;` (testing.md § "Quint conformance": a driver sits in the owning
+  crate's `src/` behind that gate; placement mirrors `src/guest_network.rs:56-57`, which
+  declares `quint_cid_lease`). It is not in `overdrive-worker` and not in `tests/conformance`.
+  Reasons, from the manifests and source:
+  - **Dependency direction.** `overdrive-control-plane` depends on `overdrive-worker`
+    (`crates/overdrive-control-plane/Cargo.toml:69`, `[dependencies]`); `overdrive-worker` has
+    no `overdrive-control-plane` entry in `[dependencies]` or `[dev-dependencies]`
+    (`crates/overdrive-worker/Cargo.toml:37-127`). The exit observer
+    (`exit_observer::spawn_with_runtime`, `exit_observer.rs:161`) and the action shim live in
+    the control plane, so a driver in `overdrive-worker` could not compose them without a
+    dev-dependency on the crate that depends on it (a second compiled copy of the worker's
+    types, the hazard `lib.rs:163-164` already records). A driver in the control plane needs
+    nothing the worker keeps private.
+  - **The multi-owner rule does not apply.** The projection reads two owners (the worker's
+    board and the control plane's observer row), but it is observed through the owners' own
+    ports, not through the exported server handler, so `tests/conformance` is not the home.
+  - **Precedent for the composition.** `quint_cid_lease.rs` (same crate, same gate) composes
+    the production `VmDriver` over `SimVmm` and a stepped `SimBeaconIo`, the production exit
+    observer, an `AppState`, and the action shim over a substituted guest-network
+    provisioner (`quint_cid_lease.rs:20-37`, `compose` `:516-616`, `boot_serve` `:620-648`).
 
+  **`VmmExit` composition and preconditions (R1-a).** Every piece is an existing production
+  entry or port reachable from `overdrive-control-plane`'s `src/` (the cited seams exist
+  today); the board and the extra constructor parameters are PR-1, already accepted.
+
+  - **Seams, each reachable from the driver's crate.** `VmDriver::new`, `VmHostLayout`,
+    `BeaconIntake::bind` and `ProbeRunner::new` are `pub` in `overdrive-worker` and imported
+    by `quint_cid_lease.rs:184,536-562` (`BeaconIntake` is `pub`, `overdrive-worker/src/lib.rs:22`,
+    `beacon_intake.rs:43`; the worker's own driver uses the same type through a crate path, not
+    a private one). `SimVmm`, `SimBeaconIo::stepped`, `SimClock`, `SimObservationStore` come
+    from `overdrive-sim`, a `[dev-dependencies]` entry of the control plane
+    (`Cargo.toml:212`). `exit_observer::spawn` (`exit_observer.rs:116-123`, the four-argument form
+    of `spawn_with_runtime`) is `pub`, as `quint_cid_lease.rs:627` calls it.
+    `AppState::new`, `test_default_allocator` (`lib.rs:483`) and `test_empty_listener_facts`
+    (`lib.rs:505`) are `pub`. `shared_network_test_ports::{mtls_worker, shared_guest_network_owner}`
+    (`lib.rs:165-166` `#[cfg(test)]`; `shared_network_test_ports.rs:674,699`) are crate-private
+    and reachable from `src/`. The `GuestListenerBoard` is PR-1's: the driver builds one,
+    passes it to `VmDriver::new`, and reads `GuestListenerReports::reported` on it.
+  - **The `Running` write and the mTLS precondition.** The driver dispatches one start action
+    through `action_shim::dispatch_with_guest_network_provisioner_for_test`
+    (`action_shim/mod.rs:1422-1456`, `#[cfg(any(test, feature = "integration-tests"))]`, the
+    entry `guest_activation_acceptance.rs:295-302` uses), with the provisioner
+    `TestSharedOwner` (`shared_network_test_ports.rs:297`: `provision` and `activate` succeed
+    unscripted, `teardown` too). That arm calls `Driver::start`, then
+    `MtlsInterceptWorker::start_alloc`, then writes the `Running` row, then calls
+    `release_for_exit_emission` only after `start_alloc` succeeds (`vm_driver.rs:1957-1964`;
+    shim call sites `action_shim/mod.rs:2679,3201`). The precondition is met with existing Sim
+    adapters: `mtls_worker()` is an `MtlsInterceptWorker` over `SimMtlsIntercept` (unfaulted,
+    so `start_alloc` succeeds), started with `start_shared_owner()` as `quint_cid_lease.rs:588-591`
+    does, and passed to `AppState::new`. The guest's READY (carrying the lease's launch token)
+    is delivered through `SimBeaconIo` as in `quint_cid_lease.rs` `launch` (`:1171`) and
+    `launch_vmm` (`:857`). The exact `Action` fields and the READY-delivery order are DISTILL's
+    to write from those two precedents; no new surface.
   - **Composition.** The driver holds the production `VmDriver` and spawns the production
     exit observer on it, `exit_observer::spawn_with_runtime(obs, driver, events, clock,
     None, token)` (`exit_observer.rs:161-168`), with `obs` the `SimObservationStore` shared
@@ -2866,9 +2900,9 @@ Process items:
    detail), D11 is ADR-0263; ADR-0255 keeps D1, D2 and D4 as one decision. B1 is ADR-0265,
    B2 is ADR-0266, D12 is ADR-0267 (amends the operative ADR-0096 with a dated note), D17 is
    ADR-0273; B3 is text in ADR-0258. D13 to D16 are ADR-0268 to ADR-0272.
-2. **Gate:** the independent DESIGN re-review. The `quint-modeler` work for the `exitrep`
-   projection is § Modeler change list. On approval each of ADR-0268 to ADR-0272 moves to
-   Accepted (ADR-0058 stays operative until ADR-0270 is accepted).
+2. **Gate:** the independent DESIGN re-review (approval); no modeler work is outstanding. On
+   approval each of ADR-0268 to ADR-0272 moves to Accepted (ADR-0058 stays operative until
+   ADR-0270 is accepted).
 3. At landing, `.claude/rules/development.md` § "Reconciler I/O" ("Steady-state tick") and
    the `spawn_convergence_loop` doc comment gain the D17 wake; the user's rules docs are not
    edited by the architect.
