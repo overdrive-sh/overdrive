@@ -1,0 +1,49 @@
+State 1: <Initial predicate>
+/\ lg_bugStampAtEmission_liveness_gate_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lg_bugStampAtEmission_liveness_gate_lv = [ rw |-> FALSE,
+  started |-> FALSE,
+  sup |-> FALSE,
+  ret |-> FALSE,
+  role |-> "absent",
+  committed |-> FALSE,
+  swr |-> "none",
+  hook |-> FALSE,
+  ended |-> FALSE,
+  streak |-> 0,
+  since |-> 0,
+  rows |-> 0,
+  stopBeforeStable |-> FALSE ]
+
+State 2: <lg_bugStampAtEmission_liveness_gate_OnRunning line 195, col 3 to line 219, col 57 of module lg_bugStampAtEmission>
+/\ lg_bugStampAtEmission_liveness_gate_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lg_bugStampAtEmission_liveness_gate_lv = [ rw |-> TRUE,
+  started |-> TRUE,
+  sup |-> TRUE,
+  ret |-> TRUE,
+  role |-> "absent",
+  committed |-> FALSE,
+  swr |-> "none",
+  hook |-> FALSE,
+  ended |-> FALSE,
+  streak |-> 0,
+  since |-> 0,
+  rows |-> 0,
+  stopBeforeStable |-> FALSE ]
+
+State 3: <lg_bugStampAtEmission_liveness_gate_StableCommit line 251, col 3 to line 266, col 57 of module lg_bugStampAtEmission>
+/\ lg_bugStampAtEmission_liveness_gate_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lg_bugStampAtEmission_liveness_gate_lv = [ rw |-> TRUE,
+  started |-> TRUE,
+  sup |-> TRUE,
+  ret |-> TRUE,
+  role |-> "absent",
+  committed |-> FALSE,
+  swr |-> "failed",
+  hook |-> FALSE,
+  ended |-> FALSE,
+  streak |-> 0,
+  since |-> 0,
+  rows |-> 0,
+  stopBeforeStable |-> FALSE ]
+
+State 4: Stuttering

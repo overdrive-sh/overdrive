@@ -1,0 +1,46 @@
+# ra-hazard-stamp-at-emission: counterexample, 10 state(s) (from the TLC trace)
+
+State 1
+  deployed = FALSE
+  gl = FALSE
+  done = FALSE
+  decl = FALSE
+  g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
+  conf_step = [init |-> [tag |-> "UNIT"]]
+  at = ( 0 :> [ row |-> "none", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "none", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] )
+  used = 0
+  cur = 0
+
+State 2 [Deploy]
+  deployed = TRUE
+  decl = TRUE
+  at = ( 0 :> [ row |-> "pending", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "none", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] )
+
+State 3 [StartRejected]
+  at = ( 0 :> [ row |-> "failed_other", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "none", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] )
+
+State 4 [WLRestart]
+  at = ( 0 :> [ row |-> "failed_other", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "pending", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] )
+  used = 1
+  cur = 1
+
+State 5 [StartOk]
+  at = ( 0 :> [ row |-> "failed_other", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "running", sup |-> TRUE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> TRUE, claim |-> "", author |-> "", crashed |-> FALSE ] )
+
+State 6 [StartupRow]
+  at = ( 0 :> [ row |-> "failed_other", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "running", sup |-> TRUE, srow |-> "fail", sseq |-> 1, sstreak |-> 1, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> TRUE, claim |-> "", author |-> "", crashed |-> FALSE ] )
+
+State 7 [StartupRow]
+  at = ( 0 :> [ row |-> "failed_other", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "running", sup |-> TRUE, srow |-> "fail", sseq |-> 2, sstreak |-> 2, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> TRUE, claim |-> "", author |-> "", crashed |-> FALSE ] )
+
+State 8 [Deadline]
+  at = ( 0 :> [ row |-> "failed_other", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "running", sup |-> TRUE, srow |-> "fail", sseq |-> 2, sstreak |-> 2, dl |-> TRUE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> TRUE, claim |-> "", author |-> "", crashed |-> FALSE ] )
+
+State 9 [SLStartupStop]
+  g = [startupOverTerm |-> FALSE, emitCount |-> 1, stableOverAnn |-> FALSE]
+  at = ( 0 :> [ row |-> "failed_other", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "running", sup |-> TRUE, srow |-> "fail", sseq |-> 2, sstreak |-> 2, dl |-> TRUE, stable |-> FALSE, ann |-> TRUE, acted |-> 2, stopped |-> "failed", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] )
+
+State 10 [StartupRow]
+  at = ( 0 :> [ row |-> "failed_other", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "running", sup |-> TRUE, srow |-> "fail", sseq |-> 3, sstreak |-> 2, dl |-> TRUE, stable |-> FALSE, ann |-> TRUE, acted |-> 2, stopped |-> "failed", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] )
+
+-> stutters forever in State 10

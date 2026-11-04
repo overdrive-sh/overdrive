@@ -1,0 +1,199 @@
+State 1: <Initial predicate>
+/\ ra_bugSlFinalisesCrash_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
+/\ ra_bugSlFinalisesCrash_restart_authority_cur = 0
+/\ ra_bugSlFinalisesCrash_restart_authority_gl = FALSE
+/\ ra_bugSlFinalisesCrash_restart_authority_used = 0
+/\ ra_bugSlFinalisesCrash_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ ra_bugSlFinalisesCrash_restart_authority_done = FALSE
+/\ ra_bugSlFinalisesCrash_restart_authority_decl = FALSE
+/\ ra_bugSlFinalisesCrash_restart_authority_deployed = FALSE
+/\ ra_bugSlFinalisesCrash_restart_authority_at = ( 0 :>
+      [ row |-> "none",
+        sup |-> FALSE,
+        srow |-> "absent",
+        sseq |-> 0,
+        sstreak |-> 0,
+        dl |-> FALSE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> FALSE,
+        claim |-> "",
+        author |-> "",
+        crashed |-> FALSE ] @@
+  1 :>
+      [ row |-> "none",
+        sup |-> FALSE,
+        srow |-> "absent",
+        sseq |-> 0,
+        sstreak |-> 0,
+        dl |-> FALSE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> FALSE,
+        claim |-> "",
+        author |-> "",
+        crashed |-> FALSE ] )
+
+State 2: <ra_bugSlFinalisesCrash_restart_authority_Deploy line 153, col 3 to line 185, col 62 of module ra_bugSlFinalisesCrash>
+/\ ra_bugSlFinalisesCrash_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
+/\ ra_bugSlFinalisesCrash_restart_authority_cur = 0
+/\ ra_bugSlFinalisesCrash_restart_authority_gl = FALSE
+/\ ra_bugSlFinalisesCrash_restart_authority_used = 0
+/\ ra_bugSlFinalisesCrash_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ ra_bugSlFinalisesCrash_restart_authority_done = FALSE
+/\ ra_bugSlFinalisesCrash_restart_authority_decl = TRUE
+/\ ra_bugSlFinalisesCrash_restart_authority_deployed = TRUE
+/\ ra_bugSlFinalisesCrash_restart_authority_at = ( 0 :>
+      [ row |-> "pending",
+        sup |-> FALSE,
+        srow |-> "absent",
+        sseq |-> 0,
+        sstreak |-> 0,
+        dl |-> FALSE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> FALSE,
+        claim |-> "",
+        author |-> "",
+        crashed |-> FALSE ] @@
+  1 :>
+      [ row |-> "none",
+        sup |-> FALSE,
+        srow |-> "absent",
+        sseq |-> 0,
+        sstreak |-> 0,
+        dl |-> FALSE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> FALSE,
+        claim |-> "",
+        author |-> "",
+        crashed |-> FALSE ] )
+
+State 3: <ra_bugSlFinalisesCrash_restart_authority_StartOk line 191, col 3 to line 232, col 62 of module ra_bugSlFinalisesCrash>
+/\ ra_bugSlFinalisesCrash_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
+/\ ra_bugSlFinalisesCrash_restart_authority_cur = 0
+/\ ra_bugSlFinalisesCrash_restart_authority_gl = FALSE
+/\ ra_bugSlFinalisesCrash_restart_authority_used = 0
+/\ ra_bugSlFinalisesCrash_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ ra_bugSlFinalisesCrash_restart_authority_done = FALSE
+/\ ra_bugSlFinalisesCrash_restart_authority_decl = TRUE
+/\ ra_bugSlFinalisesCrash_restart_authority_deployed = TRUE
+/\ ra_bugSlFinalisesCrash_restart_authority_at = ( 0 :>
+      [ row |-> "running",
+        sup |-> TRUE,
+        srow |-> "absent",
+        sseq |-> 0,
+        sstreak |-> 0,
+        dl |-> FALSE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> TRUE,
+        claim |-> "",
+        author |-> "",
+        crashed |-> FALSE ] @@
+  1 :>
+      [ row |-> "none",
+        sup |-> FALSE,
+        srow |-> "absent",
+        sseq |-> 0,
+        sstreak |-> 0,
+        dl |-> FALSE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> FALSE,
+        claim |-> "",
+        author |-> "",
+        crashed |-> FALSE ] )
+
+State 4: <ra_bugSlFinalisesCrash_restart_authority_Crash line 279, col 3 to line 328, col 62 of module ra_bugSlFinalisesCrash>
+/\ ra_bugSlFinalisesCrash_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
+/\ ra_bugSlFinalisesCrash_restart_authority_cur = 0
+/\ ra_bugSlFinalisesCrash_restart_authority_gl = FALSE
+/\ ra_bugSlFinalisesCrash_restart_authority_used = 0
+/\ ra_bugSlFinalisesCrash_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ ra_bugSlFinalisesCrash_restart_authority_done = FALSE
+/\ ra_bugSlFinalisesCrash_restart_authority_decl = TRUE
+/\ ra_bugSlFinalisesCrash_restart_authority_deployed = TRUE
+/\ ra_bugSlFinalisesCrash_restart_authority_at = ( 0 :>
+      [ row |-> "failed_crash",
+        sup |-> FALSE,
+        srow |-> "absent",
+        sseq |-> 0,
+        sstreak |-> 0,
+        dl |-> FALSE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> FALSE,
+        claim |-> "",
+        author |-> "",
+        crashed |-> TRUE ] @@
+  1 :>
+      [ row |-> "none",
+        sup |-> FALSE,
+        srow |-> "absent",
+        sseq |-> 0,
+        sstreak |-> 0,
+        dl |-> FALSE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> FALSE,
+        claim |-> "",
+        author |-> "",
+        crashed |-> FALSE ] )
+
+State 5: <ra_bugSlFinalisesCrash_restart_authority_SLFinalizeCrash line 814, col 3 to line 850, col 62 of module ra_bugSlFinalisesCrash>
+/\ ra_bugSlFinalisesCrash_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
+/\ ra_bugSlFinalisesCrash_restart_authority_cur = 0
+/\ ra_bugSlFinalisesCrash_restart_authority_gl = FALSE
+/\ ra_bugSlFinalisesCrash_restart_authority_used = 0
+/\ ra_bugSlFinalisesCrash_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ ra_bugSlFinalisesCrash_restart_authority_done = FALSE
+/\ ra_bugSlFinalisesCrash_restart_authority_decl = TRUE
+/\ ra_bugSlFinalisesCrash_restart_authority_deployed = TRUE
+/\ ra_bugSlFinalisesCrash_restart_authority_at = ( 0 :>
+      [ row |-> "failed_crash",
+        sup |-> FALSE,
+        srow |-> "absent",
+        sseq |-> 0,
+        sstreak |-> 0,
+        dl |-> FALSE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> FALSE,
+        claim |-> "early_exit",
+        author |-> "service_lifecycle",
+        crashed |-> TRUE ] @@
+  1 :>
+      [ row |-> "none",
+        sup |-> FALSE,
+        srow |-> "absent",
+        sseq |-> 0,
+        sstreak |-> 0,
+        dl |-> FALSE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> FALSE,
+        claim |-> "",
+        author |-> "",
+        crashed |-> FALSE ] )
