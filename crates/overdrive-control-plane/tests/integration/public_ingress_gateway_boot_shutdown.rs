@@ -1,7 +1,7 @@
 //! Public-ingress gateway — boot and shutdown through the ordinary production
 //! composition: S-PIG-59 and the disabled arm of S-PIG-100 (over the host
 //! bundle, `run_server`), and the enabled-boot arms of S-PIG-02 (I), 54, 57
-//! (I), 58, 60 (I), 61, 62, 74 (a)-(d) and 100 (over the supplied-owner
+//! (I), 58, 60 (I), 61, 62, 74 (a), (c), (d) and 100 (over the supplied-owner
 //! `run_server_with_obs_and_driver`, gateway enabled through
 //! `ServerConfig.gateway`).
 //!
@@ -9,7 +9,7 @@
 //! operator HTTPS surface, the tracing stage events and the Sim relay and
 //! connect-dataplane transcripts. Faults enter only through existing driven
 //! ports: the Sim relay's substrate lie, the Sim connect dataplane's typed
-//! `fail_next`, a delegating observation store, and a delegating CA that
+//! `fail_next`, a refusing Sim driver, and a delegating CA that
 //! refuses SVID issuance. Nothing is installed that production does not
 //! install: the Service and the Route enter through `POST /v1/workloads` and
 //! `POST /v1/routes`, and the public client is a real loopback TCP connection
@@ -26,7 +26,6 @@
 //! | `a_gated_gateway_never_requests_serve_shutdown` | S-PIG-61 | ignored |
 //! | `the_workload_surface_advances_identically_disabled_enabled_and_gated` | S-PIG-62 | ignored |
 //! | `an_absent_sentinel_receipt_keeps_the_public_port_unbound` | S-PIG-74 (a) | ignored |
-//! | `a_hook_that_does_not_fire_keeps_the_public_port_unbound` | S-PIG-74 (b) | ignored |
 //! | `a_gateway_identity_that_never_becomes_current_keeps_the_public_port_unbound` | S-PIG-74 (c) | ignored |
 //! | `a_probe_that_times_out_keeps_the_public_port_unbound` | S-PIG-74 (d) | ignored |
 //! | `a_refused_relay_probe_keeps_the_public_port_unbound_and_the_connect_probe_unrun` | S-PIG-100 | ignored |
@@ -49,7 +48,7 @@
 //! | 155 | S-PIG-60 |
 //! | 156 | S-PIG-61 (gated) |
 //! | 158, 159, 160 | S-PIG-62 (disabled, enabled, gated) |
-//! | 161, 162, 163, 164 | S-PIG-74 (a), (b), (c), (d) |
+//! | 161, 163, 164 | S-PIG-74 (a), (c), (d); (b), a hook that does not fire, is the S-PIG-57 (I) stimulus |
 //! | 165, 166 | S-PIG-100 (refused relay probe; once per boot) |
 
 #![allow(
@@ -515,6 +514,10 @@ impl CaFactory for RefusingSvidCaFactory {
 
 /// What a world is built with. Every field is a choice at an existing driven
 /// port or in `ServerConfig`; the defaults are the healthy enabled node.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent fixture switches, one per existing driven port"
+)]
 struct Spec {
     octet: u8,
     enabled: bool,
@@ -522,6 +525,10 @@ struct Spec {
     probe_fault: Option<GatewayConnectDataplaneError>,
     refuse_svid: bool,
     spy: bool,
+    /// The Sim driver refuses to start any allocation, so the Service never
+    /// reaches Running and no backend is ever programmed, however far the
+    /// injected clock advances.
+    driver_refuses_start: bool,
 }
 
 impl Spec {
@@ -533,6 +540,7 @@ impl Spec {
             probe_fault: None,
             refuse_svid: false,
             spy: false,
+            driver_refuses_start: false,
         }
     }
 }
@@ -614,8 +622,12 @@ impl World {
         if spec.refuse_svid {
             boot.ca.factory = Arc::new(RefusingSvidCaFactory);
         }
-        let driver: Arc<dyn Driver> =
-            Arc::new(SimDriver::with_clock(DriverType::Vm, Arc::clone(&clock_port)));
+        let sim_driver = SimDriver::with_clock(DriverType::Vm, Arc::clone(&clock_port));
+        let driver: Arc<dyn Driver> = Arc::new(if spec.driver_refuses_start {
+            sim_driver.fail_on_start_with("the Service has no startable allocation".to_owned())
+        } else {
+            sim_driver
+        });
         let handle = run_server_with_obs_and_driver(
             config,
             boot,
@@ -811,6 +823,16 @@ impl World {
         }
     }
 
+    /// The premise of a no-backend case, observed: no allocation is Running
+    /// and no backend is programmed into the dataplane.
+    async fn assert_no_backend_programmed(&self) {
+        let observed = self.progress().await;
+        assert!(
+            !observed.allocation_running && observed.backends_hydrated == 0,
+            "the Service has no programmed backend: {observed:?}"
+        );
+    }
+
     /// Graceful shutdown on the injected clock.
     async fn shutdown(&mut self) {
         let handle = self.handle.take().expect("the server handle");
@@ -890,17 +912,20 @@ async fn assert_unbound_and_serve_unaffected(world: &World) {
 /// time has an empty delta: identical bytes, no live intent or receipt left,
 /// the status row byte-equal, and the injected clock unmoved.
 ///
-/// The Service is admitted but the clock is not advanced, so no allocation
-/// starts and `update_service` is never issued: the consuming-port outcome is
-/// `NoBackend`.
+/// The Sim driver refuses to start the Service's allocation, so it never
+/// reaches Running however far the clock advances and `update_service` is
+/// never issued: the consuming-port outcome is `NoBackend`. The premise is
+/// observed before each request through the allocation listing and the Sim
+/// dataplane.
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 #[ignore = "pending DELIVER consuming-port-unavailable-outcome"]
 async fn a_service_with_no_backend_is_answered_503_twice_with_an_empty_second_delta() {
-    let mut world = World::boot(Spec::enabled(152)).await;
+    let mut world = World::boot(Spec { driver_refuses_start: true, ..Spec::enabled(152) }).await;
     world.promoted().await;
+    world.assert_no_backend_programmed().await;
 
     let first = world.public_response().await;
     assert!(
@@ -987,7 +1012,8 @@ async fn a_failing_sentinel_probe_keeps_the_public_port_unbound_and_serve_unaffe
 // S-PIG-58
 // ---------------------------------------------------------------------------
 
-/// S-PIG-58 — an actual frontend with no backend is bind-valid: the gate
+/// S-PIG-58 — an actual frontend with no backend (the Sim driver refuses to
+/// start the allocation, observed before the request) is bind-valid: the gate
 /// waits for no backend, the listener binds, the connect path is Ready, no
 /// unavailable cause is reported, and the bound listener serves 503.
 ///
@@ -996,9 +1022,10 @@ async fn a_failing_sentinel_probe_keeps_the_public_port_unbound_and_serve_unaffe
 #[serial(cgroup)]
 #[ignore = "pending DELIVER gateway-boot-and-shutdown"]
 async fn a_frontend_with_no_backend_is_bind_valid_and_the_listener_serves_503() {
-    let mut world = World::boot(Spec::enabled(154)).await;
+    let mut world = World::boot(Spec { driver_refuses_start: true, ..Spec::enabled(154) }).await;
 
     let status = world.promoted().await;
+    world.assert_no_backend_programmed().await;
 
     let row = status.application.as_ref().expect("an application row");
     assert!(row.unavailable.is_none(), "no unavailable cause once promoted: {status:?}");
@@ -1153,7 +1180,7 @@ async fn the_workload_surface_advances_identically_disabled_enabled_and_gated() 
 }
 
 // ---------------------------------------------------------------------------
-// S-PIG-74 (a)-(d)
+// S-PIG-74 (a), (c), (d)
 // ---------------------------------------------------------------------------
 
 /// The shared body of a boundary-2 case: the node boots, the Route is
@@ -1182,25 +1209,6 @@ async fn assert_gate_unavailable(
 async fn an_absent_sentinel_receipt_keeps_the_public_port_unbound() {
     let mut spec = Spec::enabled(161);
     spec.probe_fault = Some(GatewayConnectDataplaneError::ReceiptMissing);
-    let world = World::boot(spec).await;
-    assert_gate_unavailable(world, connect_path_unavailable, TICK).await;
-    assert!(
-        events().refusal_reasons().iter().any(|reason| reason == "gateway.connect_probe"),
-        "health.startup.refused names gateway.connect_probe: {:?}",
-        events().refusal_reasons()
-    );
-}
-
-/// S-PIG-74 (b) — the hook does not fire: the registered probe yields no
-/// capability result (`Unavailable` at the probe operation).
-///
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[serial(cgroup)]
-#[ignore = "pending DELIVER gateway-boot-and-shutdown"]
-async fn a_hook_that_does_not_fire_keeps_the_public_port_unbound() {
-    let mut spec = Spec::enabled(162);
-    spec.probe_fault = Some(GatewayConnectDataplaneError::Unavailable);
     let world = World::boot(spec).await;
     assert_gate_unavailable(world, connect_path_unavailable, TICK).await;
     assert!(

@@ -16,7 +16,6 @@ The bundle:
 | `guest_server.rs` | dependency-free guest HTTP/1.1 server: `/stream` (chunked, `X-Workload: api`, body streamed over about three seconds), `/exact` (`Content-Length`), `/count` (request-count marker), `/ready` |
 | `prepare.sh` | marker-owned materialization of the kernel, private rootfs and static guest binary under `/srv/vm/overdrive-testing/pig-example`; `check-source`, `prepare`, `check`, `cleanup` |
 | `route.toml.template` | the public Route; one `__PUBLIC_HOSTNAME__` token, `target.service = "api"` |
-| `route-narrow.toml.template` | the same Route narrowed to `/stream` exact; carried for operators, not driven by `run-example.sh` |
 | `prepare-test-ca.sh` | hermetic mode only: a bounded test CA, leaf certificate and key for the hostname |
 | `run-example.sh` | the journey |
 

@@ -21,8 +21,8 @@ mod integration {
     mod serve_fixture;
 
     // public-ingress-gateway (S-PIG-42): the delegating observation store whose
-    // gateway status point reads fail while armed — the control-plane suite's own
-    // helper, `#[path]`-included unchanged.
+    // gateway status point reads fail while armed, `#[path]`-included from the
+    // control-plane test tree.
     #[path = "../../../overdrive-control-plane/tests/common/status_fault_store.rs"]
     mod status_fault_store;
 

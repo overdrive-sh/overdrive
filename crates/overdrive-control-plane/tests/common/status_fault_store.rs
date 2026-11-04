@@ -4,10 +4,8 @@
 //!
 //! The fault enters through the existing driven port (the observation store the
 //! node was composed over), not through a production seam. `#[path]`-included
-//! by the control-plane integration binary and by the CLI integration binary
-//! (the status-read failure of S-PIG-42 is observed on both surfaces).
-
-#![allow(dead_code, reason = "each test binary uses the subset it needs")]
+//! by the CLI integration binary, where the status-read failure of S-PIG-42 is
+//! observed.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

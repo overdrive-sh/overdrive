@@ -5,7 +5,7 @@
 //! request per connection (`Connection: close`), as the gateway's upstream leg
 //! sends one. It is the superset of the checked-in example guest
 //! (`examples/public-ingress-gateway/guest_server.rs`) that the exact-length,
-//! chunked, early-answer, silent-close, slow-head and held-stream cases need.
+//! chunked, early-answer, slow-head and held-stream cases need.
 //! The checked-in example guest itself serves the walking skeleton.
 //!
 //! Every response body is a deterministic pattern the client verifies

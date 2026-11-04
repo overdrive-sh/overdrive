@@ -63,7 +63,7 @@ check_source() {
   validate_paths
   local item
   for item in README.md guest_server.rs prepare.sh prepare-test-ca.sh \
-    run-example.sh service.toml route.toml.template route-narrow.toml.template; do
+    run-example.sh service.toml route.toml.template; do
     [[ -f "$EXAMPLE_DIR/$item" ]] \
       || die "missing checked-in source: $EXAMPLE_DIR/$item"
   done
@@ -82,13 +82,10 @@ check_source() {
     || die "kernel path differs from preparation contract"
   grep -Fq "rootfs = \"$ROOTFS\"" "$spec" \
     || die "rootfs path differs from preparation contract"
-  local template
-  for template in route.toml.template route-narrow.toml.template; do
-    [[ "$(grep -Fo '__PUBLIC_HOSTNAME__' "$EXAMPLE_DIR/$template" | wc -l | tr -d ' ')" -eq 1 ]] \
-      || die "Route template must contain exactly one __PUBLIC_HOSTNAME__: $template"
-    grep -Fxq 'service = "api"' "$EXAMPLE_DIR/$template" \
-      || die "Route template target.service must be api: $template"
-  done
+  [[ "$(grep -Fo '__PUBLIC_HOSTNAME__' "$EXAMPLE_DIR/route.toml.template" | wc -l | tr -d ' ')" -eq 1 ]] \
+    || die "Route template must contain exactly one __PUBLIC_HOSTNAME__"
+  grep -Fxq 'service = "api"' "$EXAMPLE_DIR/route.toml.template" \
+    || die "Route template target.service must be api"
   grep -Fq 'X-Workload: api' "$EXAMPLE_DIR/guest_server.rs" \
     || die "guest server X-Workload marker is absent"
   grep -Fq 'PIG-STREAM-CHUNK-' "$EXAMPLE_DIR/guest_server.rs" \

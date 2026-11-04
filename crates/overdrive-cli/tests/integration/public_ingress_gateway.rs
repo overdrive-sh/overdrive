@@ -19,7 +19,7 @@
 //! The enabled bodies enter through the same production `run_with_adapters`
 //! and call `deploy_resource` and `ApiClient::submit_route`. The operator
 //! client has no `DELETE /v1/routes/{id}` or `GET /v1/gateway/status` method
-//! (see the batch gaps file), so those two requests are issued with a plain
+//! (the route methods are proposed, not adopted), so those two requests are issued with a plain
 //! HTTPS client built from the trust triple the server wrote.
 //!
 //! # Bind-address table (R-6)
@@ -432,7 +432,8 @@ async fn route_deploy_is_one_shot_with_the_same_outcome_in_both_stream_modes() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[ignore = "pending DELIVER route-operator-surface"]
-async fn the_operator_client_declares_conflicts_rejects_withdraws_and_reads_status() {
+async fn the_operator_client_declares_conflicts_and_rejects_and_plain_https_withdraws_and_reads_status()
+ {
     let node = spawn_gateway_enabled_server(172).await;
     let api = ApiClient::from_config(&config_path(node.tmp.path())).expect("operator client");
 

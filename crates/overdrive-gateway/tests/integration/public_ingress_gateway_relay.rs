@@ -1597,8 +1597,7 @@ async fn control_records_met_anywhere_in_a_message_leave_the_relayed_octets_exac
     // control payload leaked onto the other leg as application data: every
     // octet a leg was given must be a whole application message with nothing
     // stray after it. That no control event reaches the other leg needs a
-    // control-event field on the Sim leg transcript, which is not pinned yet
-    // (awaiting user, recorded in the review-fix gaps file).
+    // control-event field on the Sim leg transcript, which is not pinned yet.
     for leg in world.relay.leg_transcripts() {
         let kind = match leg.role {
             LegRole::Public => Kind::Response,

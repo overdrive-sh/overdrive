@@ -1,6 +1,6 @@
 //! Public-ingress gateway: the production composition end to end on native
-//! metal (`AT-PIG-E2E-1` and the native arms of S-PIG-56, 60, 69, 70, 71, 105,
-//! 109, 113 and 115).
+//! metal (`AT-PIG-E2E-1` and the native arms of S-PIG-56, 60, 69, 70 (408), 71,
+//! 105, 109, 113 and 115).
 //!
 //! Every test starts the exported production server handler in-process
 //! (`run_server(config, NodeAdapters::host(..))` over the real cgroupfs, the
@@ -19,7 +19,8 @@
 //!
 //! A composition that reaches promotion binds its own `127.<octet>.0.1:443`.
 //! This file owns second octets 100..=119 (the gateway integration files own
-//! 41..=62 and 68..=96, the in-crate drivers 63..=67, the boot/shutdown file 97).
+//! 41..=62, 68..=96 and 130..=132, the in-crate drivers 63..=67, the
+//! boot/shutdown file 97 and 152..=166, the CLI file 170..=179).
 //!
 //! | octet | test | scenario |
 //! |---|---|---|
@@ -27,7 +28,6 @@
 //! | 104 | `..._never_succeeds_through_a_stopped_workloads_stale_service_entry` | S-PIG-56 (N) |
 //! | 105 | `..._runs_its_stages_in_order_and_shuts_down_within_one_drain` | S-PIG-60 (N) |
 //! | 106 | `..._answers_502_when_the_guest_flow_ends_mid_request` | S-PIG-69 (N) |
-//! | 107 | `..._rejects_unacceptable_requests_with_their_exact_statuses` | S-PIG-70 |
 //! | 108 | `..._answers_408_for_a_stalled_request_head` | S-PIG-70 |
 //! | 109 | `..._answers_408_for_a_stalled_request_body` | S-PIG-70 |
 //! | 110 | `..._answers_503_until_the_hydrator_reprograms_after_a_serve_restart` | S-PIG-71 (serve restart) |
@@ -38,17 +38,18 @@
 //!
 //! # S-PIG-70 coverage
 //!
-//! The 404, 502 and 503 mappings of S-PIG-70 are asserted at the listener by
-//! the gateway relay and control-plane boot files; the tests numbered
-//! 107..=109 carry the statuses with no other owner: 400, 421, 505, 413, 431
-//! and the two 408 cases.
+//! The 400, 404, 421, 502, 503, 505 and 431 mappings of S-PIG-70 are asserted
+//! at the listener by the gateway relay and control-plane boot files and, on
+//! native metal, by the S-PIG-115 test (octet 114, which sends the 413, 400,
+//! 421, 431 and 505 heads); the tests numbered 108 and 109 carry the two 408
+//! cases, which have no other owner.
 //!
 //! # Fixtures
 //!
 //! S-PIG-01 serves the checked-in example guest (materialised by
 //! `examples/public-ingress-gateway/prepare.sh`); every other test serves the
 //! conformance guest (`tests/conformance/guest/pig_guest.rs`), the example
-//! guest's superset with the silent-close, exact-length, chunked, early-answer,
+//! guest's superset with the exact-length, chunked, early-answer,
 //! delayed and held-stream routes the cases need.
 //!
 //! # Activation
@@ -460,77 +461,6 @@ async fn native_metal_kvm_public_ingress_gateway_answers_502_when_the_guest_flow
 // ---------------------------------------------------------------------------
 // S-PIG-70
 // ---------------------------------------------------------------------------
-
-/// S-PIG-70 -- The gateway answers requests it cannot accept with the exact
-/// status for each cause, before any upstream octet: 400 (a non-origin-form
-/// target; repeated `Content-Length`), 421 (Host different from SNI), 505
-/// (`HTTP/1.0`), 413 (declared length above the ceiling) and 431 (a head above
-/// the ceiling). The 404/502/503 mappings are S-PIG-39, 40 and 02.
-///
-/// Given a serving workload whose request-count marker is 0
-/// When the user sends each unacceptable request on its own connection
-/// Then each answer carries its exact status and the marker is still 0.
-///
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER public-request-end-to-end"]
-async fn native_metal_kvm_public_ingress_gateway_rejects_unacceptable_requests_with_their_exact_statuses()
- {
-    let trace = TraceHistory::install_global();
-    let world = GatewayWorld::serving(&trace, 107, GuestKind::Conformance).await;
-
-    let oversize_head = format!(
-        "GET / HTTP/1.1\r\nHost: api.example.com\r\nX-Pad: {}\r\n\r\n",
-        "a".repeat(HEAD_CEILING_OCTETS + 1)
-    );
-    let cases: Vec<(&str, Vec<u8>, u16)> = vec![
-        (
-            "a non-origin-form target",
-            b"CONNECT api.example.com:443 HTTP/1.1\r\nHost: api.example.com\r\n\r\n".to_vec(),
-            400,
-        ),
-        (
-            "a repeated Content-Length",
-            b"POST /echo HTTP/1.1\r\nHost: api.example.com\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\nx"
-                .to_vec(),
-            400,
-        ),
-        (
-            "a Host different from the SNI",
-            b"GET /exact HTTP/1.1\r\nHost: other.example.com\r\n\r\n".to_vec(),
-            421,
-        ),
-        ("an HTTP/1.0 request", b"GET /exact HTTP/1.0\r\nHost: api.example.com\r\n\r\n".to_vec(), 505),
-        (
-            "a declared length above the ceiling",
-            Request::post("/echo", RequestBody::Declared(BODY_CEILING_OCTETS + 1)).head_bytes(),
-            413,
-        ),
-        ("a head above the ceiling", oversize_head.into_bytes(), 431),
-    ];
-    for (label, bytes, expected) in cases {
-        let client = world.client();
-        let (status, end) = blocking(move || {
-            let mut connection = client.connect().expect("TLS 1.3 handshake");
-            connection.send(&bytes).expect("send the unacceptable request");
-            let status = connection.read_head().map(|head| head.status);
-            connection.set_read_timeout(Some(Duration::from_secs(2)));
-            let _ = connection.send_close_notify();
-            let (end, _) = connection.read_to_end(Duration::from_secs(5));
-            (status, end)
-        })
-        .await;
-        assert_eq!(status.ok(), Some(expected), "{label}: the exact status reaches the client");
-        assert_ne!(end, StreamEnd::Reset, "{label}: the answer is not lost to a reset");
-    }
-    assert_eq!(
-        world.workload_request_count().await,
-        0,
-        "no unacceptable request reached the workload"
-    );
-
-    world.tear_down().await;
-}
 
 /// S-PIG-70 (408, stalled head) -- A client that sends no complete head gets
 /// exactly one 408 when the head deadline passes, counted from the end of the

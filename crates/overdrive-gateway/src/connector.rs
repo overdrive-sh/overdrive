@@ -717,7 +717,7 @@ mod acceptance {
     ///
     /// The public 502 projection of this error is the exhaustive connector
     /// status mapping asserted by the relay rows; the public-listener arm
-    /// needs `SimGatewayRelay` (recorded in the batch gaps file).
+    /// needs `SimGatewayRelay`.
     ///
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
