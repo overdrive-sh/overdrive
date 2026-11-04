@@ -1,6 +1,6 @@
 //! Public-ingress gateway: the production composition end to end on native
-//! metal (`AT-PIG-E2E-1` and the native arms of S-PIG-02, 39, 40, 56, 60, 69,
-//! 70, 71, 105, 109, 113 and 115).
+//! metal (`AT-PIG-E2E-1` and the native arms of S-PIG-56, 60, 69, 70, 71, 105,
+//! 109, 113 and 115).
 //!
 //! Every test starts the exported production server handler in-process
 //! (`run_server(config, NodeAdapters::host(..))` over the real cgroupfs, the
@@ -24,9 +24,6 @@
 //! | octet | test | scenario |
 //! |---|---|---|
 //! | 100 | `..._streams_a_workload_response_over_kernel_tls_legs` | S-PIG-01 |
-//! | 101 | `..._returns_503_without_waiting_when_the_service_never_runs` | S-PIG-02 (N) |
-//! | 102 | `..._answers_404_outside_a_narrow_route_without_reaching_the_workload` | S-PIG-39 |
-//! | 103 | `..._answers_502_exactly_once_when_the_workload_closes_before_responding` | S-PIG-40 |
 //! | 104 | `..._never_succeeds_through_a_stopped_workloads_stale_service_entry` | S-PIG-56 (N) |
 //! | 105 | `..._runs_its_stages_in_order_and_shuts_down_within_one_drain` | S-PIG-60 (N) |
 //! | 106 | `..._answers_502_when_the_guest_flow_ends_mid_request` | S-PIG-69 (N) |
@@ -41,10 +38,10 @@
 //!
 //! # S-PIG-70 coverage
 //!
-//! The 404, 502 and 503 mappings of S-PIG-70 are asserted by the S-PIG-39,
-//! S-PIG-40 and S-PIG-02 tests above (the same statuses through the same
-//! listener); the tests numbered 107..=109 carry the statuses with no other
-//! owner: 400, 421, 505, 413, 431 and the two 408 cases.
+//! The 404, 502 and 503 mappings of S-PIG-70 are asserted at the listener by
+//! the gateway relay and control-plane boot files; the tests numbered
+//! 107..=109 carry the statuses with no other owner: 400, 421, 505, 413, 431
+//! and the two 408 cases.
 //!
 //! # Fixtures
 //!
@@ -77,11 +74,11 @@ use overdrive_system_conformance::TraceHistory;
 use overdrive_system_conformance::gateway::{
     BODY_CEILING_OCTETS, BODY_NO_PROGRESS_DEADLINE, DRAIN_DEADLINE, FIVE_SECOND_DEADLINE,
     GatewayWorld, GuestKind, HEAD_CEILING_OCTETS, KernelSample, LoadChild, MAX_PUBLIC_CONNECTIONS,
-    PIPE_CAPACITY_OCTETS, Request, RequestBody, RouteExtent, ServiceShape, StreamEnd, Suite,
-    TlsStat, WireCapture, blocking, first_pattern_mismatch, fnv1a, kernel_sample, kill_vmm,
-    live_gateway_counts, nofile_limit, open_fds, pattern_bytes, pipe_capacity_octets,
-    receipt_occurrences, rss_kib, run_load_child_if_requested, service_map_entries,
-    shutdown_stage_events, startup_refusal_reasons, tls_record_types,
+    PIPE_CAPACITY_OCTETS, Request, RequestBody, StreamEnd, Suite, TlsStat, WireCapture, blocking,
+    first_pattern_mismatch, fnv1a, kernel_sample, kill_vmm, live_gateway_counts, nofile_limit,
+    open_fds, pattern_bytes, pipe_capacity_octets, receipt_occurrences, rss_kib,
+    run_load_child_if_requested, service_map_entries, shutdown_stage_events,
+    startup_refusal_reasons, tls_record_types,
 };
 use rustls::CipherSuite;
 
@@ -115,7 +112,7 @@ fn stream_body() -> Vec<u8> {
 async fn native_metal_kvm_public_ingress_gateway_streams_a_workload_response_over_kernel_tls_legs()
 {
     let trace = TraceHistory::install_global();
-    let world = GatewayWorld::serving(&trace, 100, GuestKind::Example, ServiceShape::Serving).await;
+    let world = GatewayWorld::serving(&trace, 100, GuestKind::Example).await;
     let address = world.gateway_address();
 
     // The relay probe and the connect probe ran before the bind: when the
@@ -236,206 +233,6 @@ async fn native_metal_kvm_public_ingress_gateway_streams_a_workload_response_ove
 }
 
 // ---------------------------------------------------------------------------
-// S-PIG-02 (N arm)
-// ---------------------------------------------------------------------------
-
-/// S-PIG-02 (N arm) -- A sound listener whose Service never reaches Running
-/// returns 503 with no fallback, bounded by the upstream connect deadline, and
-/// leaves no intent or receipt; asked twice it answers identically.
-///
-/// Given the production composition with the Route declared and a Service whose
-///   VM never reaches Running (its command does not exist)
-/// When an external user requests `/stream` twice
-/// Then each answer is 503 inside the upstream connect deadline with no workload
-///      content, the two bodies are identical, the receipt occurrence is
-///      NoBackend with the selected-only fields absent, and the live counts are 0.
-///
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER public-request-end-to-end"]
-async fn native_metal_kvm_public_ingress_gateway_returns_503_without_waiting_when_the_service_never_runs()
- {
-    let trace = TraceHistory::install_global();
-    let world =
-        GatewayWorld::serving(&trace, 101, GuestKind::Conformance, ServiceShape::NeverRuns).await;
-    world.wait_listener_bound(Duration::from_secs(30)).await;
-
-    let mut bodies = Vec::new();
-    for round in 0..2 {
-        let mark = trace.mark();
-        let client = world.client();
-        let (response, elapsed) = blocking(move || {
-            let started = Instant::now();
-            let response = client
-                .connect()
-                .expect("TLS 1.3 handshake")
-                .exchange(&Request::get("/stream"))
-                .expect("a 503 response");
-            (response, started.elapsed())
-        })
-        .await;
-        assert_eq!(response.status(), 503, "round {round}: no selectable backend is a 503");
-        assert!(
-            elapsed < FIVE_SECOND_DEADLINE,
-            "round {round}: the refusal is typed, never a wait: {elapsed:?}"
-        );
-        assert!(
-            !String::from_utf8_lossy(&response.body).contains("PIG-"),
-            "round {round}: no fallback content"
-        );
-        let events = trace.since(mark);
-        let occurrences = receipt_occurrences(&events, "request");
-        assert_eq!(occurrences.len(), 1, "round {round}: one receipt occurrence");
-        assert_eq!(
-            occurrences[0].fields.get("receipt_outcome").map(String::as_str),
-            Some("no_backend")
-        );
-        assert!(
-            !occurrences[0].fields.contains_key("backend_id")
-                && !occurrences[0].fields.contains_key("expected_peer_spiffe_id"),
-            "round {round}: selected-only fields are structurally absent"
-        );
-        assert_eq!(blocking(live_gateway_counts).await, (0, 0), "round {round}: no residue");
-        bodies.push(response.body);
-    }
-    assert_eq!(bodies[0], bodies[1], "the two unavailable answers are identical");
-
-    world.tear_down().await;
-}
-
-// ---------------------------------------------------------------------------
-// S-PIG-39
-// ---------------------------------------------------------------------------
-
-/// S-PIG-39 -- A request outside a narrow replacement Route is a 404 and never
-/// reaches the workload.
-///
-/// Given a serving workload whose request-count marker is 0
-///  And the Route replaced by one that matches `/stream` exactly
-/// When an external user requests `/exact`
-/// Then the answer is 404 inside the deadline and the marker is still 0.
-///
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER public-request-end-to-end"]
-async fn native_metal_kvm_public_ingress_gateway_answers_404_outside_a_narrow_route_without_reaching_the_workload()
- {
-    let trace = TraceHistory::install_global();
-    let world =
-        GatewayWorld::serving(&trace, 102, GuestKind::Conformance, ServiceShape::Serving).await;
-    assert_eq!(world.workload_request_count().await, 0, "no counted request has reached the guest");
-
-    world.declare_route(RouteExtent::StreamOnly).await;
-    // The replacement is current once a path outside it stops being served.
-    // `/ready` is not counted by the guest, so the wait cannot move the marker.
-    let client = world.client();
-    let waiting = client.clone();
-    blocking(move || {
-        overdrive_system_conformance::wait_until(
-            Duration::from_secs(30),
-            "the narrow Route becomes the current application",
-            || {
-                waiting
-                    .connect()
-                    .and_then(|mut c| {
-                        c.exchange(&Request::get("/ready"))
-                            .map_err(|e| std::io::Error::other(format!("{e:?}")))
-                    })
-                    .is_ok_and(|response| response.status() == 404)
-            },
-        );
-    })
-    .await;
-
-    let (response, elapsed) = blocking(move || {
-        let started = Instant::now();
-        let response = client
-            .connect()
-            .expect("TLS 1.3 handshake")
-            .exchange(&Request::get("/exact"))
-            .expect("a 404 response");
-        (response, started.elapsed())
-    })
-    .await;
-    assert_eq!(response.status(), 404);
-    assert!(elapsed < FIVE_SECOND_DEADLINE, "the 404 is immediate: {elapsed:?}");
-
-    world.declare_route(RouteExtent::WholeHost).await;
-    blocking({
-        let client = world.client();
-        move || {
-            overdrive_system_conformance::wait_until(
-                Duration::from_secs(30),
-                "the whole-host Route is current again",
-                || {
-                    client
-                        .connect()
-                        .and_then(|mut c| {
-                            c.exchange(&Request::get("/ready"))
-                                .map_err(|e| std::io::Error::other(format!("{e:?}")))
-                        })
-                        .is_ok_and(|response| response.status() == 204)
-                },
-            );
-        }
-    })
-    .await;
-    assert_eq!(
-        world.workload_request_count().await,
-        0,
-        "the request outside the Route never reached the workload"
-    );
-
-    world.tear_down().await;
-}
-
-// ---------------------------------------------------------------------------
-// S-PIG-40
-// ---------------------------------------------------------------------------
-
-/// S-PIG-40 -- A selected upstream that closes before any response octet maps
-/// to a 502 exactly once, with a single upstream attempt.
-///
-/// Given a serving workload whose request-count marker is 0
-/// When an external user requests `/close` (the guest closes without answering)
-/// Then the user receives exactly one 502 inside the response-head deadline, the
-///      connection delivers nothing further, and the marker is exactly 1.
-///
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER public-request-end-to-end"]
-async fn native_metal_kvm_public_ingress_gateway_answers_502_exactly_once_when_the_workload_closes_before_responding()
- {
-    let trace = TraceHistory::install_global();
-    let world =
-        GatewayWorld::serving(&trace, 103, GuestKind::Conformance, ServiceShape::Serving).await;
-    assert_eq!(world.workload_request_count().await, 0);
-
-    let client = world.client();
-    let (response, trailing, elapsed) = blocking(move || {
-        let started = Instant::now();
-        let mut connection = client.connect().expect("TLS 1.3 handshake");
-        let response = connection.exchange(&Request::get("/close")).expect("a 502 response");
-        let elapsed = started.elapsed();
-        connection.set_read_timeout(Some(Duration::from_secs(2)));
-        let (_, trailing) = connection.read_to_end(Duration::from_secs(5));
-        (response, trailing, elapsed)
-    })
-    .await;
-    assert_eq!(response.status(), 502, "an upstream that closes before responding is a 502");
-    assert!(elapsed <= FIVE_SECOND_DEADLINE, "the 502 arrives inside the response-head deadline");
-    assert_eq!(trailing, 0, "exactly one response: nothing follows the 502");
-    assert_eq!(
-        world.workload_request_count().await,
-        1,
-        "the workload saw the request exactly once: no retry, no second attempt"
-    );
-    assert_eq!(blocking(live_gateway_counts).await, (0, 0), "no intent or receipt remains");
-
-    world.tear_down().await;
-}
-
-// ---------------------------------------------------------------------------
 // S-PIG-56 (N arm)
 // ---------------------------------------------------------------------------
 
@@ -457,8 +254,7 @@ async fn native_metal_kvm_public_ingress_gateway_answers_502_exactly_once_when_t
 async fn native_metal_kvm_public_ingress_gateway_never_succeeds_through_a_stopped_workloads_stale_service_entry()
  {
     let trace = TraceHistory::install_global();
-    let world =
-        GatewayWorld::serving(&trace, 104, GuestKind::Conformance, ServiceShape::Serving).await;
+    let world = GatewayWorld::serving(&trace, 104, GuestKind::Conformance).await;
     assert!(blocking(service_map_entries).await >= 1, "the Service is programmed while serving");
 
     world.stop_service().await;
@@ -539,8 +335,7 @@ async fn native_metal_kvm_public_ingress_gateway_never_succeeds_through_a_stoppe
 async fn native_metal_kvm_public_ingress_gateway_runs_its_stages_in_order_and_shuts_down_within_one_drain()
  {
     let trace = TraceHistory::install_global();
-    let world =
-        GatewayWorld::serving(&trace, 105, GuestKind::Conformance, ServiceShape::Serving).await;
+    let world = GatewayWorld::serving(&trace, 105, GuestKind::Conformance).await;
     world.wait_listener_bound(Duration::from_secs(30)).await;
 
     // Boot: the gateway gates ran in order. G0 registered the reconciler, the
@@ -631,8 +426,7 @@ async fn native_metal_kvm_public_ingress_gateway_runs_its_stages_in_order_and_sh
 async fn native_metal_kvm_public_ingress_gateway_answers_502_when_the_guest_flow_ends_mid_request()
 {
     let trace = TraceHistory::install_global();
-    let world =
-        GatewayWorld::serving(&trace, 106, GuestKind::Conformance, ServiceShape::Serving).await;
+    let world = GatewayWorld::serving(&trace, 106, GuestKind::Conformance).await;
 
     let client = world.client();
     let request = tokio::task::spawn_blocking(move || {
@@ -683,8 +477,7 @@ async fn native_metal_kvm_public_ingress_gateway_answers_502_when_the_guest_flow
 async fn native_metal_kvm_public_ingress_gateway_rejects_unacceptable_requests_with_their_exact_statuses()
  {
     let trace = TraceHistory::install_global();
-    let world =
-        GatewayWorld::serving(&trace, 107, GuestKind::Conformance, ServiceShape::Serving).await;
+    let world = GatewayWorld::serving(&trace, 107, GuestKind::Conformance).await;
 
     let oversize_head = format!(
         "GET / HTTP/1.1\r\nHost: api.example.com\r\nX-Pad: {}\r\n\r\n",
@@ -753,8 +546,7 @@ async fn native_metal_kvm_public_ingress_gateway_rejects_unacceptable_requests_w
 #[ignore = "pending DELIVER public-request-end-to-end"]
 async fn native_metal_kvm_public_ingress_gateway_answers_408_for_a_stalled_request_head() {
     let trace = TraceHistory::install_global();
-    let world =
-        GatewayWorld::serving(&trace, 108, GuestKind::Conformance, ServiceShape::Serving).await;
+    let world = GatewayWorld::serving(&trace, 108, GuestKind::Conformance).await;
 
     let client = world.client();
     let (status, waited) = blocking(move || {
@@ -791,8 +583,7 @@ async fn native_metal_kvm_public_ingress_gateway_answers_408_for_a_stalled_reque
 #[ignore = "pending DELIVER public-request-end-to-end"]
 async fn native_metal_kvm_public_ingress_gateway_answers_408_for_a_stalled_request_body() {
     let trace = TraceHistory::install_global();
-    let world =
-        GatewayWorld::serving(&trace, 109, GuestKind::Conformance, ServiceShape::Serving).await;
+    let world = GatewayWorld::serving(&trace, 109, GuestKind::Conformance).await;
 
     let client = world.client();
     let (status, waited) = blocking(move || {
@@ -844,8 +635,7 @@ async fn native_metal_kvm_public_ingress_gateway_answers_408_for_a_stalled_reque
 async fn native_metal_kvm_public_ingress_gateway_answers_503_until_the_hydrator_reprograms_after_a_serve_restart()
  {
     let trace = TraceHistory::install_global();
-    let mut world =
-        GatewayWorld::serving(&trace, 110, GuestKind::Conformance, ServiceShape::Serving).await;
+    let mut world = GatewayWorld::serving(&trace, 110, GuestKind::Conformance).await;
 
     world.restart().await;
     assert_eq!(
@@ -922,8 +712,7 @@ async fn native_metal_kvm_public_ingress_gateway_holds_128_concurrent_exchanges_
     }
 
     let trace = TraceHistory::install_global();
-    let world =
-        GatewayWorld::serving(&trace, 111, GuestKind::Conformance, ServiceShape::Serving).await;
+    let world = GatewayWorld::serving(&trace, 111, GuestKind::Conformance).await;
     let address = world.gateway_address();
     let ca = world.write_ca_der();
 
@@ -1019,8 +808,7 @@ async fn native_metal_kvm_public_ingress_gateway_holds_128_concurrent_exchanges_
 async fn native_metal_kvm_public_ingress_gateway_relays_exact_length_and_chunked_bodies_octet_exact_over_keep_alive()
  {
     let trace = TraceHistory::install_global();
-    let world =
-        GatewayWorld::serving(&trace, 112, GuestKind::Conformance, ServiceShape::Serving).await;
+    let world = GatewayWorld::serving(&trace, 112, GuestKind::Conformance).await;
     let cap = PIPE_CAPACITY_OCTETS as usize;
     let lengths = [0, 1, cap - 1, cap, cap + 1, 2 * cap, 2 * cap + 1];
 
@@ -1128,8 +916,7 @@ async fn native_metal_kvm_public_ingress_gateway_relays_exact_length_and_chunked
 async fn native_metal_kvm_public_ingress_gateway_sends_no_key_update_across_a_sixteen_mebibyte_response()
  {
     let trace = TraceHistory::install_global();
-    let world =
-        GatewayWorld::serving(&trace, 113, GuestKind::Conformance, ServiceShape::Serving).await;
+    let world = GatewayWorld::serving(&trace, 113, GuestKind::Conformance).await;
 
     let before = blocking(TlsStat::read).await;
     let client = world.client();
@@ -1182,8 +969,7 @@ async fn native_metal_kvm_public_ingress_gateway_sends_no_key_update_across_a_si
 async fn native_metal_kvm_public_ingress_gateway_lets_the_client_read_the_response_before_a_clean_close()
  {
     let trace = TraceHistory::install_global();
-    let world =
-        GatewayWorld::serving(&trace, 114, GuestKind::Conformance, ServiceShape::Serving).await;
+    let world = GatewayWorld::serving(&trace, 114, GuestKind::Conformance).await;
     let oversize_head = format!(
         "GET / HTTP/1.1\r\nHost: api.example.com\r\nX-Pad: {}\r\n\r\n",
         "a".repeat(HEAD_CEILING_OCTETS + 1)

@@ -83,6 +83,10 @@ use super::mtls_pki::{Leaf, TestPki};
 /// The recognisable request-body octets written through the authenticated leg.
 const BODY_MARKER: &[u8] =
     b"PIG-CLEARTEXT-MARKER:the-request-body-must-never-be-visible-on-the-wire:";
+/// TLS record content types (RFC 8446 section 5.1 and appendix D.4).
+const RECORD_HANDSHAKE: u8 = 0x16;
+const RECORD_CHANGE_CIPHER_SPEC: u8 = 0x14;
+const RECORD_APPLICATION_DATA: u8 = 0x17;
 const HANDSHAKE_BUDGET: Duration = Duration::from_secs(5);
 const PEER_IDLE: Duration = Duration::from_secs(3);
 
@@ -659,18 +663,28 @@ async fn a_peer_that_never_answers_the_handshake_times_out_before_the_deadline_p
 // S-PIG-52
 // ---------------------------------------------------------------------------
 
-/// A second, self-contained trust domain whose peer certificate carries a URI
-/// SAN that is not a SPIFFE identity: the one shape the shared test PKI cannot
-/// mint.
-struct ShapePki {
+/// The node the gateway identity under test belongs to; the identity is the
+/// dedicated non-allocation gateway SPIFFE ID of this node.
+const GATEWAY_NODE: &str = "gateway-node";
+
+/// The peer a gateway dial selects in the single-leaf trust domains below: a
+/// workload allocation identity.
+const SELECTED_PEER_SPIFFE: &str = "spiffe://overdrive.local/workload/api/alloc/api-0";
+
+/// A second, self-contained trust domain whose gateway leaf carries the
+/// dedicated gateway SPIFFE identity (`spiffe://overdrive.local/gateway/<node>`)
+/// and whose peer leaf carries whatever URI SAN a case needs: a workload SPIFFE
+/// identity (S-PIG-64) or the one shape the shared test PKI cannot mint, a URI
+/// SAN that is not a SPIFFE identity (S-PIG-52).
+struct GatewayPki {
     root_pem: String,
     gateway: Leaf,
     peer_chain: Vec<CertificateDer<'static>>,
     peer_key: PrivateKeyDer<'static>,
 }
 
-impl ShapePki {
-    fn mint() -> Self {
+impl GatewayPki {
+    fn mint(peer_uri: &str) -> Self {
         use rcgen::{
             BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, Issuer,
             KeyPair, SanType, string::Ia5String,
@@ -678,7 +692,7 @@ impl ShapePki {
         let root_key = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("root key");
         let mut root_params = CertificateParams::new(Vec::<String>::new()).expect("root params");
         root_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-        root_params.distinguished_name.push(DnType::CommonName, "shape-root");
+        root_params.distinguished_name.push(DnType::CommonName, "gateway-pki-root");
         let root = root_params.self_signed(&root_key).expect("root certificate");
         let issuer = Issuer::from_params(&root_params, &root_key);
 
@@ -686,6 +700,11 @@ impl ShapePki {
             let mut params = CertificateParams::new(Vec::<String>::new()).expect("leaf params");
             params.subject_alt_names =
                 vec![SanType::URI(Ia5String::try_from(uri.to_owned()).expect("IA5 URI"))];
+            if !client {
+                params.subject_alt_names.push(SanType::DnsName(
+                    Ia5String::try_from(TestPki::PEER_SNI.to_owned()).expect("IA5 DNS name"),
+                ));
+            }
             params.distinguished_name.push(DnType::CommonName, uri);
             params.extended_key_usages = vec![if client {
                 ExtendedKeyUsagePurpose::ClientAuth
@@ -696,9 +715,10 @@ impl ShapePki {
             let cert = params.signed_by(&key, &issuer).expect("leaf certificate");
             (cert, key)
         };
-        let gateway_uri = "spiffe://overdrive.local/gateway/shape-node";
-        let (gateway_cert, gateway_key) = leaf(gateway_uri, true);
-        let (peer_cert, peer_key) = leaf("https://peer.example.test/not-a-spiffe-id", false);
+        let gateway_node = NodeId::new(GATEWAY_NODE).expect("gateway node ID");
+        let gateway_spiffe = SpiffeId::for_gateway(&gateway_node);
+        let (gateway_cert, gateway_key) = leaf(&gateway_spiffe.to_string(), true);
+        let (peer_cert, peer_key) = leaf(peer_uri, false);
         Self {
             root_pem: root.pem(),
             gateway: Leaf {
@@ -706,11 +726,20 @@ impl ShapePki {
                 key_pem: gateway_key.serialize_pem(),
                 cert_der: CertificateDer::from(gateway_cert.der().to_vec()),
                 key_der: PrivateKeyDer::from(PrivatePkcs8KeyDer::from(gateway_key.serialize_der())),
-                spiffe: gateway_uri.parse().expect("gateway SPIFFE ID"),
+                spiffe: gateway_spiffe,
                 serial: CertSerial::new("0a0b0c0d").expect("serial"),
             },
             peer_chain: vec![CertificateDer::from(peer_cert.der().to_vec())],
             peer_key: PrivateKeyDer::from(PrivatePkcs8KeyDer::from(peer_key.serialize_der())),
+        }
+    }
+
+    fn peer_spec(&self) -> PeerSpec {
+        PeerSpec {
+            chain: self.peer_chain.clone(),
+            key: self.peer_key.clone_key(),
+            client_roots_pem: self.root_pem.clone(),
+            silent: false,
         }
     }
 }
@@ -723,7 +752,7 @@ impl ShapePki {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "pending DELIVER exact-peer-client-mtls"]
 async fn a_peer_certificate_without_a_spiffe_uri_san_is_rejected_by_shape() {
-    let shape = Arc::new(ShapePki::mint());
+    let shape = Arc::new(GatewayPki::mint("https://peer.example.test/not-a-spiffe-id"));
     let site = Site::new();
     let held = Arc::clone(&shape);
     let (client, _relay) = production_client(
@@ -736,16 +765,9 @@ async fn a_peer_certificate_without_a_spiffe_uri_san_is_rejected_by_shape() {
         }),
     )
     .await;
-    let peer = Peer::start(PeerSpec {
-        chain: shape.peer_chain.clone(),
-        key: shape.peer_key.clone_key(),
-        client_roots_pem: shape.root_pem.clone(),
-        silent: false,
-    });
+    let peer = Peer::start(shape.peer_spec());
     let (connected, observer) = dial(peer.addr);
-    let selected: SpiffeId = "spiffe://overdrive.local/workload/api/alloc/api-0"
-        .parse()
-        .expect("selected peer SPIFFE ID");
+    let selected: SpiffeId = SELECTED_PEER_SPIFFE.parse().expect("selected peer SPIFFE ID");
 
     let result = client.authenticate(connected, selected, deadline_in(HANDSHAKE_BUDGET)).await;
 
@@ -777,20 +799,26 @@ async fn a_peer_certificate_without_a_spiffe_uri_san_is_rejected_by_shape() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "pending DELIVER exact-peer-client-mtls"]
 async fn the_matching_peer_is_dialed_over_tls_13_records_with_no_cleartext_and_the_leg_is_armed() {
-    let pki = Arc::new(TestPki::mint());
+    let pki = Arc::new(GatewayPki::mint(SELECTED_PEER_SPIFFE));
     let site = Site::new();
     let held = Arc::clone(&pki);
     let (client, relay) = production_client(
         &site,
-        source(move || Ok((held.client_svid_material(), held.trust_bundle()))),
+        source(move || {
+            Ok((
+                svid_from_leaf(&held.gateway, far_future()),
+                TrustBundle::new(CaCertPem::new(held.root_pem.clone()), None),
+            ))
+        }),
     )
     .await;
-    let peer = Peer::start(peer_spec_from(&pki, &pki.peer_leaf));
+    let selected: SpiffeId = SELECTED_PEER_SPIFFE.parse().expect("selected peer SPIFFE ID");
+    let peer = Peer::start(pki.peer_spec());
     let proxy = Proxy::start(peer.addr);
     let (connected, observer) = dial(proxy.addr);
 
     let upstream = client
-        .authenticate(connected, pki.peer_leaf.spiffe.clone(), deadline_in(HANDSHAKE_BUDGET))
+        .authenticate(connected, selected, deadline_in(HANDSHAKE_BUDGET))
         .await
         .unwrap_or_else(|error| panic!("the matching peer authenticates: {error:?}"));
     assert!(tls_ulp_installed(&observer), "the kernel TLS ULP is installed on the dialed socket");
@@ -812,7 +840,7 @@ async fn the_matching_peer_is_dialed_over_tls_13_records_with_no_cleartext_and_t
     assert!(seen.handshake_completed, "the peer completed the mutual handshake");
     assert_eq!(
         seen.client_spiffe.as_deref(),
-        Some(pki.client_leaf.spiffe.as_str()),
+        Some(pki.gateway.spiffe.to_string().as_str()),
         "the peer observes the dedicated gateway SVID"
     );
     assert_eq!(seen.application_octets, BODY_MARKER, "the body arrives intact");
@@ -827,16 +855,20 @@ async fn the_matching_peer_is_dialed_over_tls_13_records_with_no_cleartext_and_t
         let types = record_types(bytes);
         assert_eq!(
             types.first(),
-            Some(&0x16),
+            Some(&RECORD_HANDSHAKE),
             "{direction}: the flight opens with a handshake record"
         );
         assert!(
-            types[1..].iter().all(|kind| matches!(kind, 0x14 | 0x17)),
+            types[1..]
+                .iter()
+                .all(|kind| matches!(*kind, RECORD_CHANGE_CIPHER_SPEC | RECORD_APPLICATION_DATA)),
             "{direction}: after the hello every record is TLS 1.3 application data (or a compatibility CCS): {types:?}"
         );
     }
-    let encrypted_records =
-        record_types(&wire.client_to_peer).into_iter().filter(|kind| *kind == 0x17).count();
+    let encrypted_records = record_types(&wire.client_to_peer)
+        .into_iter()
+        .filter(|kind| *kind == RECORD_APPLICATION_DATA)
+        .count();
     assert!(
         encrypted_records >= 2,
         "the gateway sent encrypted records after the hello (finished and the body)"

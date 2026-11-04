@@ -23,7 +23,6 @@
 //! * `GET /chunked/<n>`: chunked pattern body of `n` octets in varying chunks.
 //! * `POST /echo`: reads a `Content-Length` or chunked request body and
 //!   answers its length and FNV-1a digest.
-//! * `GET /close`: reads the head, then closes with no response.
 //! * `POST /early`: answers `401` before reading the body, then drains.
 //! * `GET /delay`: waits 4 s (inside the gateway's 5 s response-head budget)
 //!   before answering.
@@ -288,9 +287,6 @@ fn handle(mut stream: TcpStream, requests: Arc<AtomicU64>) {
             write_fixed(&mut stream, "200 OK", b"late\n");
         }
         ("GET", "/hold") => write_hold(&mut stream),
-        ("GET", "/close") => {
-            let _ = stream.shutdown(Shutdown::Both);
-        }
         ("POST", "/early") => {
             let _ = stream.write_all(
                 b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",

@@ -24,7 +24,6 @@
 //! | `a_frontend_with_no_backend_is_bind_valid_and_the_listener_serves_503` | S-PIG-58 | ignored |
 //! | `enabled_boot_probes_the_relay_before_the_connect_path_and_the_gateway_stage_runs_first` | S-PIG-60 (I) | ignored |
 //! | `a_gated_gateway_never_requests_serve_shutdown` | S-PIG-61 | ignored |
-//! | `a_gateway_task_failure_never_requests_serve_shutdown` | S-PIG-61 | ignored |
 //! | `the_workload_surface_advances_identically_disabled_enabled_and_gated` | S-PIG-62 | ignored |
 //! | `an_absent_sentinel_receipt_keeps_the_public_port_unbound` | S-PIG-74 (a) | ignored |
 //! | `a_hook_that_does_not_fire_keeps_the_public_port_unbound` | S-PIG-74 (b) | ignored |
@@ -48,7 +47,7 @@
 //! | 153 | S-PIG-57 |
 //! | 154 | S-PIG-58 |
 //! | 155 | S-PIG-60 |
-//! | 156, 157 | S-PIG-61 (gated, task failure) |
+//! | 156 | S-PIG-61 (gated) |
 //! | 158, 159, 160 | S-PIG-62 (disabled, enabled, gated) |
 //! | 161, 162, 163, 164 | S-PIG-74 (a), (b), (c), (d) |
 //! | 165, 166 | S-PIG-100 (refused relay probe; once per boot) |
@@ -63,7 +62,6 @@
 
 use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -117,9 +115,6 @@ use tempfile::TempDir;
 use tracing::field::{Field, Visit};
 use tracing::{Event, Subscriber};
 use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
-
-/// The address a disabled node would have bound had the gateway been enabled
-/// (R-6, octet 97): nothing may listen on it.
 
 // ---------------------------------------------------------------------------
 // Event capture
@@ -379,7 +374,7 @@ const CERTIFIED_KEY_ID: &str = "api-origin";
 const TICK: Duration = Duration::from_millis(100);
 /// Real-time ceiling for any wait on a spawned task.
 const WAIT: Duration = Duration::from_secs(30);
-/// Ignore key of the boot arms.
+/// The public request the scripted client sends.
 const REQUEST: &[u8] = b"GET / HTTP/1.1\r\nHost: api.example.com\r\n\r\n";
 
 /// The process-wide event collector. Each nextest test is its own process, so
@@ -550,7 +545,6 @@ struct World {
     dataplane: Arc<SimDataplane>,
     connect: Arc<SimGatewayConnectDataplane>,
     sim: SimGatewayAdapters,
-    status_fault: Arc<AtomicBool>,
     relay_probes_seen_by_connect_probe: Arc<Mutex<Vec<u32>>>,
     handle: Option<ServerHandle>,
     client: reqwest::Client,
@@ -559,8 +553,8 @@ struct World {
 
 impl World {
     async fn boot(spec: Spec) -> Self {
-        let events = events();
-        let _ = events;
+        // Install the process-wide collector before the boot emits its first event.
+        events();
         let tmp = TempDir::new().expect("tempdir");
         let data_dir = tmp.path().join("data");
         let operator_config_dir = tmp.path().join("conf");
@@ -620,11 +614,6 @@ impl World {
         if spec.refuse_svid {
             boot.ca.factory = Arc::new(RefusingSvidCaFactory);
         }
-        let status_fault = Arc::new(AtomicBool::new(false));
-        boot.observation = Arc::new(super::status_fault_store::StatusReadFaultStore {
-            inner: Arc::clone(&boot.observation),
-            armed: Arc::clone(&status_fault),
-        });
         let driver: Arc<dyn Driver> =
             Arc::new(SimDriver::with_clock(DriverType::Vm, Arc::clone(&clock_port)));
         let handle = run_server_with_obs_and_driver(
@@ -645,7 +634,6 @@ impl World {
             dataplane,
             connect,
             sim,
-            status_fault,
             relay_probes_seen_by_connect_probe: probe_log,
             handle: Some(handle),
             client,
@@ -1118,33 +1106,6 @@ async fn a_gated_gateway_never_requests_serve_shutdown() {
         started.elapsed() < Duration::from_secs(10),
         "shutdown completes inside the unchanged 10 s fail-stop bound"
     );
-}
-
-/// S-PIG-61 (task failure) — `GAP-C4-1`: the DESIGN pins no driven-port fault
-/// that fails the gateway task itself (a failed gate is not a failed task), so
-/// this body exercises the closest pinned stimulus: the status-read fault on
-/// the observation store the gateway writes its status row through, armed
-/// after promotion. Serve shutdown is still never requested.
-///
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[serial(cgroup)]
-#[ignore = "pending DELIVER gateway-boot-and-shutdown"]
-async fn a_gateway_task_failure_never_requests_serve_shutdown() {
-    let mut world = World::boot(Spec::enabled(157)).await;
-    world.promoted().await;
-    world.status_fault.store(true, Ordering::SeqCst);
-    for _ in 0..20 {
-        world.settle(TICK).await;
-    }
-
-    let mut handle = world.handle.take().expect("the server handle");
-    let outcome =
-        tokio::time::timeout(Duration::from_millis(500), handle.shutdown_requested()).await;
-    assert!(outcome.is_err(), "no serve shutdown is requested: {outcome:?}");
-    world.handle = Some(handle);
-    world.status_fault.store(false, Ordering::SeqCst);
-    world.shutdown().await;
 }
 
 // ---------------------------------------------------------------------------

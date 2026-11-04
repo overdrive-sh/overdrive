@@ -1203,24 +1203,6 @@ pub enum GuestKind {
     Conformance,
 }
 
-/// How the Service behaves.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ServiceShape {
-    /// The guest server runs.
-    Serving,
-    /// The guest's command does not exist, so the VM never reaches Running.
-    NeverRuns,
-}
-
-/// The extent of the one Route.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RouteExtent {
-    /// `/` as a segment prefix (`route.toml.template`).
-    WholeHost,
-    /// `/stream` exactly (`route-narrow.toml.template`).
-    StreamOnly,
-}
-
 struct StagedGuest {
     kernel: PathBuf,
     rootfs: PathBuf,
@@ -1376,21 +1358,14 @@ impl GatewayWorld {
         }
     }
 
-    /// Boot, deploy the Service as `shape`, declare the whole-host Route and,
-    /// for a serving Service, wait until the public URL answers (the
-    /// readiness window already bounds the allocation reaching Running).
-    pub async fn serving(
-        trace: &TraceHistory,
-        second_octet: u8,
-        guest: GuestKind,
-        shape: ServiceShape,
-    ) -> Self {
+    /// Boot, deploy the Service, declare the whole-host Route and wait until
+    /// the public URL answers (the readiness window already bounds the
+    /// allocation reaching Running).
+    pub async fn serving(trace: &TraceHistory, second_octet: u8, guest: GuestKind) -> Self {
         let world = Self::boot(trace, second_octet, guest).await;
-        world.deploy_service(shape).await;
-        world.declare_route(RouteExtent::WholeHost).await;
-        if shape == ServiceShape::Serving {
-            world.wait_until_serving().await;
-        }
+        world.deploy_service().await;
+        world.declare_route().await;
+        world.wait_until_serving().await;
         world
     }
 
@@ -1523,11 +1498,8 @@ impl GatewayWorld {
     }
 
     /// Submit the VM Service through the public API.
-    pub async fn deploy_service(&self, shape: ServiceShape) {
-        let command = match shape {
-            ServiceShape::Serving => self.staged.command.to_owned(),
-            ServiceShape::NeverRuns => "/opt/overdrive/conformance/does-not-exist".to_owned(),
-        };
+    pub async fn deploy_service(&self) {
+        let command = self.staged.command.to_owned();
         let body = serde_json::json!({
             "spec": {
                 "kind": "service",
@@ -1549,17 +1521,14 @@ impl GatewayWorld {
         self.api.submit_workload(SERVICE_ID, &body).await;
     }
 
-    /// Declare (or replace) the one Route through the public API.
-    pub async fn declare_route(&self, extent: RouteExtent) {
-        let (path, path_match) = match extent {
-            RouteExtent::WholeHost => ("/", "segment_prefix"),
-            RouteExtent::StreamOnly => ("/stream", "exact"),
-        };
+    /// Declare the whole-host Route (`/` as a segment prefix) through the
+    /// public API.
+    pub async fn declare_route(&self) {
         let body = serde_json::json!({
             "id": ROUTE_ID,
             "hostname": PUBLIC_HOSTNAME,
-            "path": path,
-            "path_match": path_match,
+            "path": "/",
+            "path_match": "segment_prefix",
             "certified_key": CERTIFIED_KEY_ID,
             "target": { "service": SERVICE_ID, "port": SERVICE_PORT, "protocol": "tcp" }
         });

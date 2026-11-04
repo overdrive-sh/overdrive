@@ -101,11 +101,6 @@ mod integration {
     #[path = "../common/node_adapters.rs"]
     pub mod node_adapters;
 
-    // public-ingress-gateway — S-PIG-42, 61: a delegating observation store
-    // whose two gateway status point reads fail while armed.
-    #[path = "../common/status_fault_store.rs"]
-    pub mod status_fault_store;
-
     // Cross-file net-slot partitioning registry (SSOT). Every real-netns test
     // file draws its per-test `NetSlot` from a named, disjoint band here via
     // `super::net_slots::<FILE>.nth(offset)`, so no two tests derive the same
