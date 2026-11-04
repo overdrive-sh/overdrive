@@ -1,0 +1,659 @@
+{
+  "roadmap": {
+    "project_id": "public-ingress-gateway",
+    "created_at": "2026-11-04T18:25:05Z",
+    "total_steps": 26
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Core vocabulary: Route values, identity epoch, issue-failure record, exchange machine",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Route value types, canonical match key and generations",
+          "description": "Land the pure Route vocabulary in overdrive-core: hostname, path (exact and segment-prefix), PublicCertifiedKeyId, Route, PublicRouteSet, application and key generations, the Route input channels and the target.service parser. These are the types every later gateway step consumes (ADR-0221, ADR-0236).",
+          "criteria": [
+            "Activates key `route-value-types` (S-PIG-03..10, 44 route half, 55): every `#[ignore = \"pending DELIVER route-value-types\"]` in crates/overdrive-core/src/public_ingress.rs is un-ignored with a recorded semantic RED, then GREEN",
+            "Exact and segment-prefix path matching, rejected partitions, host label 62/63/64 and generation determinism hold as the pre-authored proptests state them",
+            "The Route parsers accept exactly `target.service` and no `target.workload` alias (S-PIG-55)",
+            "Newtype Display/FromStr/serde/rkyv round-trips hold for every new gateway numeric and digest type",
+            "No `pending DELIVER route-value-types` marker remains anywhere in the workspace",
+            "Every remaining scaffold body in crates/overdrive-core/src/public_ingress.rs is real, including the four envelope codec pairs, `SocketCookie`, `ServiceKey::from_frontend`, `GatewayApplicationGenerationId` and `CertificateFingerprint`: `rg 'todo!\\(\"SCAFFOLD' crates/overdrive-core/src/public_ingress.rs` returns nothing"
+          ],
+          "test_file": "crates/overdrive-core/src/public_ingress.rs",
+          "scenario_name": "exact_path_matches_only_byte_equal_paths",
+          "dependencies": [],
+          "estimated_hours": 6,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-core/src/public_ingress.rs"],
+            "test_files": ["crates/overdrive-core/src/public_ingress.rs", "crates/overdrive-core/tests/schema_evolution/public_route_set.rs"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. Scaffolded types already exist in public_ingress.rs; fill bodies only. Contract shape: pure-function. The four golden-bytes schema_evolution fixtures are active and must stay GREEN (never touch FIXTURE_V1). Gap to route to DISTILL: none."
+        },
+        {
+          "id": "01-02",
+          "name": "Gateway identity epoch and gateway SPIFFE subject",
+          "description": "Implement GatewayIdentityEpoch (nonzero, canonical decimal) and SpiffeId::for_gateway so the gateway identity reconciler, executor and view have their core vocabulary (ADR-0225).",
+          "criteria": [
+            "Activates key `gateway-identity-epoch` (S-PIG-44 identity half): the three ignored tests in crates/overdrive-core/src/gateway_identity.rs go RED then GREEN",
+            "The epoch is nonzero, starts at one, round-trips canonical decimal and rejects each non-canonical partition with its exact error",
+            "`SpiffeId::for_gateway` returns the dedicated gateway subject for a node (scaffold in crates/overdrive-core/src/id.rs becomes a body)",
+            "Activates key `gateway-spiffe-subject` (S-PIG-128): `for_gateway_matches_the_pinned_uri_on_a_representative_node` and the proptest `spiffe_for_gateway_derives_canonical_uri_for_any_valid_node_id` in crates/overdrive-core/tests/acceptance/spiffe_region_validation.rs go RED then GREEN",
+            "No `pending DELIVER gateway-identity-epoch` or `gateway-spiffe-subject` marker remains"
+          ],
+          "test_file": "crates/overdrive-core/src/gateway_identity.rs",
+          "scenario_name": "epoch_rejects_each_noncanonical_partition_exactly",
+          "dependencies": [],
+          "estimated_hours": 3,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-core/src/gateway_identity.rs", "crates/overdrive-core/src/id.rs"],
+            "test_files": ["crates/overdrive-core/src/gateway_identity.rs", "crates/overdrive-core/tests/acceptance/spiffe_region_validation.rs"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. Contract shape: pure-function. Gap to route to DISTILL: none."
+        },
+        {
+          "id": "01-03",
+          "name": "Observation-store half: workload SVID issue-failure record and gateway status rows",
+          "description": "Implement the observation-store half of the feature: the recorded-occurrence write for workload SVID issuance failures (the shared issue_failure value types, the atomic monotone record operation on the observation store (local and sim), its row codec and the status-row decode-skip behaviour, ADR-0275), and the persistence, LWW merge and point reads of the two public-ingress status rows (PublicCertifiedKeyStatus, GatewayApplicationStatus) in the local and sim stores.",
+          "criteria": [
+            "Local and Sim observation stores persist and LWW-merge `PublicCertifiedKeyStatus` and `GatewayApplicationStatus` rows and serve `public_certified_key_status_row` / `gateway_application_status_row` point reads (the scaffolds in crates/overdrive-store-local/src/observation_backend.rs and crates/overdrive-sim/src/adapters/observation_store.rs become bodies). The row codec pairs (`archive_for_store` / `from_store_bytes`) they persist through are completed by 01-01. No test is pre-authored against these rows alone; their behavioural evidence is the first consumers: 02-06 (the owner World runs on SimObservationStore and projects both rows) and 05-02 (an undecodable prior row reads as absent, the status handler). The executor in 02-03 writes no row (ADR-0274). Evidence at this step: `rg 'todo!\\(\"SCAFFOLD' crates/overdrive-store-local/src/observation_backend.rs crates/overdrive-sim/src/adapters/observation_store.rs` shows no remaining scaffold for the two gateway-row persist and point-read functions (recorded in the step log) and the existing observation-store tests of both crates stay GREEN; a Local-versus-Sim row-persistence test would be a new test and is a proposal for the user, not part of this step. The point reads return the stored row or absence, never a default; both gateway-row point reads decode through `from_store_bytes`, and an undecodable stored row reads as absent with one `observation.row.skipped` warning naming the table, the same as `workload_svid_issue_status_row` (the first consumer test is activated in 05-02)",
+            "`WorkloadSvidIssueStatusRowV1::{archive_for_store, from_store_bytes}` in crates/overdrive-core/src/traits/observation_store.rs are real and the golden-bytes fixture test crates/overdrive-core/tests/schema_evolution/workload_svid_issue_status_row.rs stays GREEN without touching FIXTURE_V1",
+            "Activates key `workload-svid-issue-failure-record` (O-SIF-W rows): the two tests in crates/overdrive-store-local/tests/acceptance/workload_svid_issue_status.rs and `an_undecodable_workload_issue_status_row_reads_as_absent_and_the_record_restarts_at_one` in tests/integration/envelope_observation_skip.rs go RED then GREEN",
+            "The failure record is the same operation in the local and sim stores",
+            "32 concurrent recordings on one allocation never lose a count",
+            "An undecodable stored row reads as absent, logs one skipped warning, and the next record restarts at one",
+            "No `pending DELIVER workload-svid-issue-failure-record` marker remains"
+          ],
+          "test_file": "crates/overdrive-store-local/tests/acceptance/workload_svid_issue_status.rs",
+          "scenario_name": "the_failure_record_is_the_same_operation_in_the_local_and_sim_stores",
+          "dependencies": ["01-01"],
+          "estimated_hours": 6,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-core/src/ca/issue_failure.rs", "crates/overdrive-core/src/traits/observation_store.rs", "crates/overdrive-store-local/src/observation_backend.rs", "crates/overdrive-sim/src/adapters/observation_store.rs"],
+            "test_files": ["crates/overdrive-store-local/tests/acceptance/workload_svid_issue_status.rs", "crates/overdrive-store-local/tests/integration/envelope_observation_skip.rs", "crates/overdrive-core/tests/schema_evolution/workload_svid_issue_status_row.rs"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. Follow feature-delta 'SVID issuance failure occurrence' (Workload half, Persisted format). Check-and-act must be atomic (.claude/rules/rust.md): the record is one store operation, never read-then-write. Contract shape: bounded-change. The rkyv envelope rules in development.md apply to the new row. Gap to route to DISTILL: the Sim store has no byte layer, so the undecodable-row half is only reachable on the local store."
+        },
+        {
+          "id": "01-04",
+          "name": "HTTP/1.1 exchange state machine and deadline composition",
+          "description": "Implement the crate-private ExchangeMachine (phases, halves, body framing, framing violations, 502 status rule) and the request/response deadline composition (request_deadline, compose_read_deadlines) in overdrive-gateway (ADR-0222, ADR-0238, ADR-0240, ADR-0247).",
+          "criteria": [
+            "Activates key `exchange-state-machine` (S-PIG-84, 85): every ignored test in crates/overdrive-gateway/src/runtime/http1/exchange.rs and deadlines.rs goes RED then GREEN",
+            "Octets beyond the remainder, finish before complete, events after Closed and a repeated drain_begin are refused as the PBT laws state",
+            "UntilClose, chunked and length framings end as the machine laws require",
+            "Response-head deadline composes with request_complete_at None and Some(t0) exactly as R-37 pins",
+            "No `pending DELIVER exchange-state-machine` marker remains"
+          ],
+          "test_file": "crates/overdrive-gateway/src/runtime/http1/exchange.rs",
+          "scenario_name": "exchange state machine laws (all exchange-state-machine tests in exchange.rs and deadlines.rs)",
+          "dependencies": [],
+          "estimated_hours": 8,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-gateway/src/runtime/http1/exchange.rs", "crates/overdrive-gateway/src/runtime/http1/deadlines.rs", "crates/overdrive-gateway/src/runtime/http1/mod.rs"],
+            "test_files": ["crates/overdrive-gateway/src/runtime/http1/exchange.rs", "crates/overdrive-gateway/src/runtime/http1/deadlines.rs"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. Pure and crate-private (R-32): no I/O, no clock reads, no tokio. Contract shape: pure-function. The derive_framing/parse_*_head functions are NOT in this step; they belong to the step that owns http1-head-validation-and-framing (04-01). Gap to route to DISTILL: none."
+        },
+        {
+          "id": "01-05",
+          "name": "Quint conformance: relay_exchange driver",
+          "description": "Make the QC-4 quint-connect driver for the relay_exchange model pass by driving the production ExchangeMachine through the pinned accessors (specs/quint/public-ingress-gateway/).",
+          "criteria": [
+            "Activates key `quint-conformance-relay_exchange`: the 7 `#[quint_test]` runs and the `#[quint_run]` in crates/overdrive-gateway/src/runtime/http1/quint_exchange.rs go RED (state comparison mismatch at the scaffolded owner) then GREEN",
+            "Every spec action reaches an ExchangeMachine call; no handler is empty and State is projected only through the pinned accessors",
+            "`NoBytePastMessageBoundary` holds along every replayed trace and the seed is printed on failure",
+            "`cargo xtask conformance-lint` stays clean",
+            "No `pending DELIVER quint-conformance-relay_exchange` marker remains"
+          ],
+          "test_file": "crates/overdrive-gateway/src/runtime/http1/quint_exchange.rs",
+          "scenario_name": "quint_test runs of relay_exchange (half_close_after_request_read, public_close_mid_request_aborts and the other pinned runs) plus the randomized quint_run",
+          "dependencies": ["01-04"],
+          "estimated_hours": 4,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-gateway/src/runtime/http1/exchange.rs"],
+            "test_files": ["crates/overdrive-gateway/src/runtime/http1/quint_exchange.rs", "specs/quint/public-ingress-gateway/"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. testing.md 'Quint conformance': the spec is the oracle and is referenced in place, never copied; a missing accessor is a DESIGN gap to surface, not to invent. Run the driver on metal (`cargo xtask metal run --`), it spawns quint. Gap to route to DISTILL: none."
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Identity, control plane and the Gateway Application owner",
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "GatewaySvidLifecycle reconciler transitions",
+          "description": "Implement the pure reconcile of the host-backed GatewaySvidLifecycle reconciler: issue when no usable identity of the desired epoch is held, near-expiry reissue, stale epoch, disabled, restart reissue, and retry memory with the deadline recomputed from persisted inputs (ADR-0225).",
+          "criteria": [
+            "Activates key `gateway-svid-lifecycle-transitions` (S-PIG-65 reconciler half): the five ignored tests in crates/overdrive-reconcilers/src/gateway_svid_lifecycle.rs go RED then GREEN",
+            "Absent, current, expiring, stale and disabled each emit exactly the pinned actions",
+            "A restart with an audited subject reissues immediately and clears the retry entry",
+            "Retry memory suppresses an early issue and re-emits at the exact deadline; the View persists inputs, never the deadline",
+            "The issue correlation is stable for the same desired identity; an Issue is emitted iff no usable identity of the desired epoch is held (proptest)",
+            "No `pending DELIVER gateway-svid-lifecycle-transitions` marker remains"
+          ],
+          "test_file": "crates/overdrive-reconcilers/src/gateway_svid_lifecycle.rs",
+          "scenario_name": "absent_current_expiring_stale_and_disabled_cover_every_identity_transition",
+          "dependencies": ["01-02"],
+          "estimated_hours": 6,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-reconcilers/src/gateway_svid_lifecycle.rs"],
+            "test_files": ["crates/overdrive-reconcilers/src/gateway_svid_lifecycle.rs"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. reconcile stays pure-sync (reconcilers.md); host-backed wakeup model: empty interests() and a resync_schedule(), never both. Follow feature-delta 'Exact GatewaySvidLifecycle closed-dispatch contract'. Contract shape: pure-function. Reconcile bodies are a mandatory mutation target (>=80%). Gap to route to DISTILL: none."
+        },
+        {
+          "id": "02-02",
+          "name": "Gateway SVID issue-and-audit executor and identity slot",
+          "description": "Implement Action::IssueGatewaySvid execution in the action shim: CA issue, audit row before hold, stale-epoch audit-without-hold, and the GatewayIdentitySlot that holds the material in memory (ADR-0225; the workload-identity CA, not the operator CA).",
+          "criteria": [
+            "Activates key `gateway-svid-issue-and-audit-executor` (S-PIG-65 executor half): the three ignored tests in crates/overdrive-control-plane/src/action_shim/gateway_svid.rs go RED then GREEN",
+            "A successful issue audits the material the slot then holds",
+            "An audit failure refuses the hold and leaves no audit row",
+            "A stale-epoch issue is audited and never held",
+            "`GatewayIdentitySlot::new` and the slot handles are real, and the slot holds the only copy of the leaf key (the audit row carries facts only)",
+            "No `pending DELIVER gateway-svid-issue-and-audit-executor` marker remains"
+          ],
+          "test_file": "crates/overdrive-control-plane/src/action_shim/gateway_svid.rs",
+          "scenario_name": "successful_issue_audits_the_material_the_slot_then_holds",
+          "dependencies": ["01-02", "02-01"],
+          "estimated_hours": 8,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-control-plane/src/action_shim/gateway_svid.rs", "crates/overdrive-control-plane/src/action_shim/mod.rs", "crates/overdrive-dataplane/src/mtls/gateway_identity.rs"],
+            "test_files": ["crates/overdrive-control-plane/src/action_shim/gateway_svid.rs"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. Do not conflate the two CAs (CLAUDE.md): this is the workload-identity CA path. Async effects stay async; no detached spawn. Contract shape: bounded-change. Gap to route to DISTILL: examples only, no property test over executor outcomes; the audit-before-hold ordering is covered by QC-1 in 02-04."
+        },
+        {
+          "id": "02-03",
+          "name": "Gateway SVID issue-failure recording in the executor",
+          "description": "Tell the gateway identity slot's action target of each confirmed gateway SVID issuance failure (`record_issue_failure`, CA cause or audit cause, instant from the injected Clock) from `dispatch_issue`, and tell it nothing for success or stale-epoch issues. The executor writes no row: the slot carries the monotone count and latest cause and the Gateway Application owner is the sole writer of the status row (ADR-0274, feature-delta 'Gateway half', R-45, R-50, R-52).",
+          "criteria": [
+            "Activates key `gateway-svid-issue-failure-recording` (O-SIF-G rows): the three ignored tests in crates/overdrive-control-plane/src/action_shim/gateway_svid.rs go RED then GREEN",
+            "A CA signing failure tells the target of exactly one confirmed CA-cause failure at the injected clock's instant and holds nothing",
+            "An audit write failure tells the target of exactly one audit-cause failure",
+            "A successful or stale issue tells the target nothing",
+            "`dispatch_issue` still returns the typed `ShimError::GatewaySvidIssue(e)` unchanged (no flattening to Internal); no ObservationStore write occurs in the executor",
+            "`GatewayIdentityActionHandle::record_issue_failure` in crates/overdrive-dataplane/src/mtls/gateway_identity.rs is a real body: the slot adds one to the count, replaces the latest cause and notifies subscribers without changing the held identity, `desired()` or `current()`",
+            "No `pending DELIVER gateway-svid-issue-failure-recording` marker remains"
+          ],
+          "test_file": "crates/overdrive-control-plane/src/action_shim/gateway_svid.rs",
+          "scenario_name": "a_ca_signing_failure_is_recorded_once_as_a_ca_cause_and_holds_nothing",
+          "dependencies": ["01-03", "02-02"],
+          "estimated_hours": 5,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-control-plane/src/action_shim/gateway_svid.rs", "crates/overdrive-core/src/ca/issue_failure.rs", "crates/overdrive-dataplane/src/mtls/gateway_identity.rs"],
+            "test_files": ["crates/overdrive-control-plane/src/action_shim/gateway_svid.rs"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. Follow feature-delta 'SVID issuance failure occurrence' (Gateway half, R-45, R-47..R-49, R-52): the recorded count is monotone and the occurrence is its own durable surface, never inferred from the convergent row (development.md 'A convergent record cannot answer did it happen'). Contract shape: bounded-change. The gateway owner's undecodable-prior-row half is S-PIG-129, activated in 05-02. Gap to route to DISTILL: none."
+        },
+        {
+          "id": "02-04",
+          "name": "Gateway identity hydration and Quint conformance (gateway_identity)",
+          "description": "Implement hydrate_desired/hydrate_actual for GatewaySvidLifecycle through HydrationContext.gateway_identity, then make the QC-1 quint-connect driver replay the gateway_identity model against the real slot, reconciler and executor.",
+          "criteria": [
+            "Activates key `gateway-svid-lifecycle-hydration` (S-PIG-65 hydration half): the five ignored tests in crates/overdrive-control-plane/tests/acceptance/public_ingress_gateway_hydration.rs go RED then GREEN",
+            "Hydration projects the desired epoch and held facts, an empty slot projects no held facts, ever_issued derives only from audit rows of the gateway subject, a foreign target is refused by both entries, and a disabled desired identity hydrates the epoch with no subject",
+            "Activates key `quint-conformance-gateway_identity` (6 tests in quint_gateway_identity.rs): restart_reissue and disable_races_inflight_issue expect `held` empty right after disable",
+            "Every QC-1 action handler calls the production owner; State is projected from the pinned accessors only. The identity lifecycle-handle bodies are real in this step because the QC-1 driver is their first caller: `GatewayIdentityLifecycleHandle::{current, issue_record, subscribe, begin_disable}` and `GatewayIdentitySlot::begin_disable` in crates/overdrive-dataplane/src/mtls/gateway_identity.rs (`disable_after_drain` reaches `begin_disable`), and `ControlPlaneGatewayIdentityLifecycle::{issue_record, subscribe}` in crates/overdrive-control-plane/src/gateway_identity_lifecycle.rs",
+            "`cargo xtask conformance-lint` stays clean for quint_gateway_identity.rs (testing.md per-driver checklist items 1, 3, 5, 6, 7)",
+            "No `pending DELIVER gateway-svid-lifecycle-hydration` or `quint-conformance-gateway_identity` marker remains"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/public_ingress_gateway_hydration.rs",
+          "scenario_name": "hydration_projects_the_desired_epoch_and_the_held_facts_of_the_identity_view",
+          "dependencies": ["02-01", "02-02", "02-03"],
+          "estimated_hours": 9,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-reconcilers/src/gateway_svid_lifecycle.rs", "crates/overdrive-control-plane/src/gateway_identity_lifecycle.rs", "crates/overdrive-core/src/gateway_identity.rs", "crates/overdrive-dataplane/src/mtls/gateway_identity.rs"],
+            "test_files": ["crates/overdrive-control-plane/tests/acceptance/public_ingress_gateway_hydration.rs", "crates/overdrive-control-plane/src/gateway_identity_lifecycle/quint_gateway_identity.rs", "specs/quint/public-ingress-gateway/"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. Hydrate only through the injected HydrationContext read-ports (reconcilers.md 'hydration boundary'); no concrete AppState field. QC-1 (testing.md 'Quint conformance'): the driver drives the production owner, never a copy. Run on metal. Gap to route to DISTILL: none."
+        },
+        {
+          "id": "02-05",
+          "name": "Workload SVID issue-failure occurrence on the allocation surface",
+          "description": "Record workload SVID issuance failures from the existing IssueSvid executor, stamp the allocations surface with the monotone count and latest cause, and render it in `overdrive workload describe` (ADR-0275).",
+          "criteria": [
+            "Activates key `workload-svid-issue-failure-occurrence` (O-SIF-W rows): the three tests in crates/overdrive-control-plane/tests/acceptance/svid_issue_failure_occurrence.rs and `a_row_with_failed_issuances_renders_the_count_and_the_latest_cause` in crates/overdrive-cli/tests/acceptance/render_workload_describe.rs go RED then GREEN",
+            "Repeated failed issuances give a monotone count and the latest cause on the allocations surface",
+            "A failing record write is surfaced, not counted, and the next failure records (the unrecorded arm's error chain carries the injected fault, the recorded arm's does not)",
+            "The operator-facing describe output renders the count and latest cause",
+            "No `pending DELIVER workload-svid-issue-failure-occurrence` marker remains"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/svid_issue_failure_occurrence.rs",
+          "scenario_name": "repeated_failed_issuances_give_a_monotone_count_and_the_latest_cause_on_the_allocations_surface",
+          "dependencies": ["01-03"],
+          "estimated_hours": 8,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-control-plane/src/action_shim/issue_svid.rs", "crates/overdrive-control-plane/src/handlers.rs", "crates/overdrive-control-plane/src/api.rs", "crates/overdrive-cli/src/render.rs", "api/openapi.yaml"],
+            "test_files": ["crates/overdrive-control-plane/tests/acceptance/svid_issue_failure_occurrence.rs", "crates/overdrive-cli/tests/acceptance/render_workload_describe.rs"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. Regenerate api/openapi.yaml with the `openapi-gen` alias if DTOs change; the openapi-check gate must pass. Do not flatten the record error into Internal (rust.md). Wire the operator change through the live renderer `render::workload_describe`. Contract shape: bounded-change. Gap to route to DISTILL: none."
+        },
+        {
+          "id": "02-06",
+          "name": "Gateway Application owner with certified-key custody",
+          "description": "Implement the gateway-crate application owner: GatewayBuilder/UnboundGatewayBuilder start path, Route Set owner (declare, replace, withdraw, single-slot conflict), frontend resolution, redacted status, generation and probe-completion rules, pure routing/proxy-header/limit modules, and producer-neutral Public Certified Key custody (AEAD codec, install, replace, expiry, manual-key refusal), plus the identity-error projection through ensure_current (ADR-0221..0223, 0231, 0236..0238).",
+          "criteria": [
+            "Activates key `gateway-application-owner` (S-PIG-12..17, 21..25, 33, 49, 68, 73): every marker in routing.rs, proxy_headers.rs, limits.rs, frontend.rs, application/probe_completion_acceptance.rs and the eight integration tests of crates/overdrive-gateway/tests/integration/public_ingress_gateway.rs go RED then GREEN; also the five ledger-lifecycle tests `ledger_accepts_zero_one_and_128_reservations_and_refuses_the_129th`, `released_slot_is_reusable_at_capacity`, `bound_reservation_holds_its_slot_until_complete_removes_the_record`, `saturation_stays_reported_after_the_ledger_drains` (crates/overdrive-gateway/src/application/ledger_acceptance.rs) and `failing_open_upstream_releases_its_reserved_ledger_slot` (crates/overdrive-gateway/src/connector.rs); 27 tests carry this key in all (14 unit + 8 integration + 5 ledger-lifecycle). Real RED when un-ignored: reserve, bind, complete, retry_all and the Prepare-error mapping are still todo! at that point, so each fails semantically before this step implements them, then goes GREEN",
+            "Activates key `certified-key-custody` (S-PIG-27, 45, 46, 47): the two codec tests in crates/overdrive-host/src/ca/public_certified_key.rs, the chain test in crates/overdrive-gateway/src/certified_key.rs, the five custody integration tests and the cipher-set test in public_ingress_gateway_relay.rs:3325",
+            "Activates key `gateway-identity-error-collapse` (S-PIG-51): identity lifecycle errors reach the owner cause-distinct and collapse to GatewayIdentityUnusable in the operator status",
+            "Two simultaneous Route claims have exactly one winner in every round; a different Route id returns the typed conflict with an unchanged universe; a late probe after supersession is never delivered",
+            "Unreadable and malformed manual keys refuse boot with distinct causes and no mutation; a mismatched or expired replacement preserves the current generation and records a distinct redacted cause; expiry publishes Unusable and retains the record",
+            "Status never carries a path, key byte, ciphertext, nonce or salt",
+            "The start path is real end to end, so this step implements exactly the bodies that the start, generation-probe, promotion, shutdown and custody paths and this step's tests call, and no more. In application.rs: the constructors of `GatewayAdmissionBudget`, `GatewayAdmission`, `GatewayGenerationRetention` and `GatewayApplicationCandidate`, `StartedGateway`, `GatewayHandle::shutdown` (with the retention `close`/`wait_zero` it calls) and `GatewayCleanupLedger::{new, reserve, len}` including `reserve`'s capacity `Err` arm, its saturation counter and the unbound-reservation release on `Drop`, with `GatewayCleanupReservation::{bind, complete}`, and `GatewayCleanupLedger::retry_all` complete (snapshot under the mutex, cleanup of each exact intent through the narrow `GatewayConnectCleanup`, removal of successful records, closed-category `ConnectIntent`/`Receipt` counts, `LedgerSaturated` whenever the saturation counter is nonzero). The shutdown cleanup sweep inside `GatewayHandle::shutdown` is real here too (`cleanup_all_gateway_intents`, `live_intent_count`, `live_receipts`, `residual_connect`, `cleanup_failures`), because the owner integration tests assert `GatewayShutdownReport::is_clean()` and three ledger-lifecycle tests call `retry_all`. In connector.rs: `GatewayUpstreamConnector::{new, probe}`, the successful `connect` path that the generation probe runs, and the `open_upstream` error to `GatewayUpstreamConnectError::Prepare` mapping with slot release (the body `failing_open_upstream_releases_its_reserved_ledger_slot` drives). In ports.rs: `GatewayUpstreamSeal::seal_authenticated` and `KtlsLeg::from_armed` (the owner tests' authenticate doubles in public_ingress_gateway.rs and held_probe_doubles.rs seal a leg with them, and every World start runs the connect probe); `KtlsLeg::into_halves`, `KtlsReadHalf::backend_mut`, `KtlsWriteHalf::backend_mut` and `ThroughBytes::new` stay with 04-01 (first reached by the exchange driver). Not pre-empted here and left ignored/unimplemented for the step whose first pending test reaches them: admission refusal arms, `GatewayAdmission::acquire_connection` and `GatewayGenerationRetention::{try_connection, try_request, counts}` (04-07 QC-2 driver; relay-file connection and request-limit tests in 04-01 and S-PIG-26 in 05-01), the selection-receipt failure arms (03-02: missing, mismatched, wrong-valid peer, missing identity, mTLS-fault mapping), and `GatewayCleanupReservation::{record_intent_failure, record_receipt_failure}`, failure-bit retention, the capacity refusal surfaced as `CleanupLedgerFull` before `open_upstream` and `GatewayConnectDataplaneError` status mapping (03-04). The TCP/443 bind and accept loop are not required by any test of this step; see the listener hand-off note. If a 03-02 or 03-04 test cannot show a semantic RED because this step had to implement its behaviour, record that in the step log and route it, do not weaken the test",
+            "The test-local dataplane and mTLS doubles of the gateway integration World are the only dataplane/mTLS implementations this step needs: no Sim* gateway adapter body is required (those land in 04-01, 04-06 and 05-01)",
+            "Frontend scans use IntentKey::workload_prefix()/scan_workload_intents, not a raw b\"workloads/\" literal",
+            "No marker for `gateway-application-owner`, `certified-key-custody` or `gateway-identity-error-collapse` remains"
+          ],
+          "test_file": "crates/overdrive-gateway/tests/integration/public_ingress_gateway.rs",
+          "scenario_name": "route_declare_replay_replace_and_withdraw_return_exact_outcomes_over_real_redb",
+          "dependencies": ["01-01", "01-02", "01-03"],
+          "estimated_hours": 24,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-gateway/src/application.rs", "crates/overdrive-gateway/src/connector.rs", "crates/overdrive-gateway/src/route_set.rs", "crates/overdrive-gateway/src/certified_key.rs", "crates/overdrive-gateway/src/frontend.rs", "crates/overdrive-gateway/src/runtime/routing.rs", "crates/overdrive-gateway/src/runtime/proxy_headers.rs", "crates/overdrive-gateway/src/runtime/limits.rs", "crates/overdrive-gateway/src/ports.rs", "crates/overdrive-gateway/src/lib.rs", "crates/overdrive-host/src/ca/public_certified_key.rs"],
+            "test_files": ["crates/overdrive-gateway/tests/integration/public_ingress_gateway.rs", "crates/overdrive-gateway/tests/integration/public_ingress_gateway_relay.rs", "crates/overdrive-gateway/src/application/probe_completion_acceptance.rs"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. This step carries three keys because the gateway integration World always starts the production GatewayBuilder with an installed manual key and the real AEAD codec, so custody and identity-error tests cannot go GREEN before the owner start path exists. Land the owner path first, then custody behaviours, then the identity projection, as separate RED/GREEN cycles inside the step. Items keyed to later steps (lag-aware, upstream-socket-preparation, consuming-port, boot) stay ignored. Check-and-act atomicity (rust.md) for the claim: use the atomic return. Contract shape: bounded-change (owner), unbounded-preservation (status redaction, manual-key refusal). Gap to route to DISTILL: S-PIG-27/46 and S-PIG-51 are keyed to single-concern names but run through the whole owner, which is why this step carries all three keys. The relay-file test at :3325 (cipher set) needs only the server configuration, no relay driver. Listener hand-off (no scaffold names it; it is internal to GatewayBuilder::start, delta G4): this step starts the generation, gate and custody tasks the owner tests observe and keeps admission closed until promotion; the accept loop (accept from the injected listener, call `accept_public`, take admission) and its per-connection hand-off to the exchange driver are 04-01's, because its listener-level tests (public_ingress_gateway_relay.rs:3213 and :3260) are the first to reach them, and the real TCP/443 bind in the enabled arm is 05-01's (G4). If a 02-06 test is found to reach the accept loop, implement it only up to `accept_public` and admission and route the exchange-driver call to 04-01."
+        },
+        {
+          "id": "02-07",
+          "name": "Lag-aware intent subscription and gateway watch recovery",
+          "description": "Implement lag detection in LocalIntentStore::watch (IntentSubscriptionEvent::Lagged with the exact missed count) and make the gateway owner's Route/custody/application watchers relist on Lagged with admission closed, reporting WatchGap in the redacted status.",
+          "criteria": [
+            "Activates key `lag-aware-intent-subscription` (S-PIG-48, 66): `lagged_subscription_reports_the_exact_missed_count_and_resumes_with_the_next_change` in crates/overdrive-store-local/tests/local_store_edges.rs and `a_watch_lag_is_reported_and_the_gateway_relists_instead_of_reading_an_empty_store` in the gateway integration file go RED then GREEN",
+            "A lagged subscription reports the exact missed count and resumes with the next Changed event",
+            "The gateway subscribes before listing, relists on Lagged, keeps admission closed meanwhile and never serves an empty-store read",
+            "Every IntentStore::watch implementer (LocalIntentStore, FaultInjectingIntentStore, CountingIntentStore, Sim) honours the pinned IntentSubscriptionEvent contract",
+            "No `pending DELIVER lag-aware-intent-subscription` marker remains"
+          ],
+          "test_file": "crates/overdrive-store-local/tests/local_store_edges.rs",
+          "scenario_name": "lagged_subscription_reports_the_exact_missed_count_and_resumes_with_the_next_change",
+          "dependencies": ["02-06"],
+          "estimated_hours": 8,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-store-local/src/redb_backend.rs", "crates/overdrive-gateway/src/application.rs", "crates/overdrive-gateway/src/route_set.rs", "crates/overdrive-gateway/src/frontend.rs", "crates/overdrive-control-plane/src/action_shim/mod.rs"],
+            "test_files": ["crates/overdrive-store-local/tests/local_store_edges.rs", "crates/overdrive-gateway/tests/integration/public_ingress_gateway.rs", "crates/overdrive-control-plane/tests/acceptance/workflow_emit_action_lands_in_raft_channel.rs"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. The IntentSubscriptionEvent type and the watch signature already landed (scaffold S1); this step is the lag behaviour. The gateway test reads status by polling, so a fast-clearing gap is a testability boundary to raise, not to weaken. Contract shape: bounded-change. Gap to route to DISTILL: none."
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Dataplane connect path: selection hook, receipts, upstream preparation",
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "Gateway selection cgroup/connect4 hook and registered-socket connect",
+          "description": "Add the separate gateway-selection cgroup/connect4 BPF program (R-1) over the two 8-byte POD gateway maps, and implement EbpfDataplane::open_upstream so a registered upstream socket is selected and its dial enters leg-C with the loopback source (ADR-0224, ADR-0243).",
+          "criteria": [
+            "Activates key `gateway-selection-hook` (S-PIG-63): `registered_socket_is_selected_and_its_dial_reaches_the_backend_from_the_loopback_source` in crates/overdrive-dataplane/tests/integration/public_ingress_gateway_hook.rs goes RED then GREEN on the native metal host",
+            "A registered socket is selected by the hook and the dial reaches leg-C via table 100 and TPROXY with SO_MARK and the 127.0.0.1 source",
+            "S-PIG-41 (expected GREEN, no ignore) stays GREEN: an unregistered cgroup socket keeps today's behaviour; LOCAL_BACKEND_MAP and XDP are unchanged",
+            "Activates key `gateway-selection-hook-rewrite` (S-PIG-124): `a_registered_connect_lands_on_the_programmed_backend_with_the_port_in_network_order` goes RED then GREEN on native metal (`getpeername` equals the programmed backend; `SO_COOKIE` equality)",
+            "Activates key `gateway-selection-hook-unselected-sockets` (S-PIG-125): `a_socket_whose_intent_was_cleaned_up_is_not_selected_and_leaves_no_receipt` and `a_plain_socket_dialing_the_frontend_is_not_rewritten_while_an_intent_is_outstanding` go RED then GREEN",
+            "Verifier gate (S-PIG-127, key `gateway-selection-hook-verifier-budget`): the step adds `perf-baseline/main/verifier-budget/veristat-cgroup-connect4-gateway.txt` for program `cgroup_connect4_gateway` with the first measurement on the pinned 7.0 kernel, and `cargo xtask metal run -- cargo verifier-regress` passes; the attach-mode gate is rig construction plus S-PIG-124's registered connect; the BPF object is rebuilt after the new map file",
+            "No `pending DELIVER gateway-selection-hook`, `gateway-selection-hook-rewrite` or `gateway-selection-hook-unselected-sockets` marker remains"
+          ],
+          "test_file": "crates/overdrive-dataplane/tests/integration/public_ingress_gateway_hook.rs",
+          "scenario_name": "registered_socket_is_selected_and_its_dial_reaches_the_backend_from_the_loopback_source",
+          "dependencies": ["02-06"],
+          "estimated_hours": 14,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-bpf/src/programs/cgroup_connect4_gateway.rs", "crates/overdrive-bpf/src/programs/mod.rs", "crates/overdrive-bpf/src/maps/gateway_connect.rs", "crates/overdrive-bpf/src/main.rs", "crates/overdrive-dataplane/src/gateway_connect.rs", "crates/overdrive-dataplane/src/lib.rs", "crates/overdrive-host/src/socket_cookie.rs", "perf-baseline/main/verifier-budget/veristat-cgroup-connect4-gateway.txt"],
+            "test_files": ["crates/overdrive-dataplane/tests/integration/public_ingress_gateway_hook.rs"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. aya-rs Rust only, no C (spike.md, development.md 'aya-rs XDP / TC kernel-side patterns'); user_port is low-16-NBO in a u32. cgroup_sock_addr has no Tier-2 BPF_PROG_TEST_RUN backstop, so the only honest signal is the Tier-3 test on a 7.0 kernel via `cargo xtask metal run --`. The program file and program name are pinned by the delta ('Pinned: selection program, baselines and gates'): `cgroup_connect4_gateway`. S-PIG-63 also reads the Selected receipt: land only the minimal take_receipt read this assertion needs; the commit-guarded applied-identity transaction is 03-02. Contract shape: bounded-change. No Tier-2 test is possible. The baseline file is authored by this step, not by DISTILL (a baseline naming an absent program fails the gate for the whole repo). Gap to route to DISTILL: none."
+        },
+        {
+          "id": "03-02",
+          "name": "Selection receipt and commit-guarded applied backend identity",
+          "description": "Implement the commit-guarded Service-map and applied-identity transaction: BackendId identity readable only after the outer swap, immutable per id, rollback preserving the prior generation, receipts destroyed on restart, take_receipt/selected_backend_identity, and the typed DataplaneError variants (ADR-0228, 0232, 0233, 0241).",
+          "criteria": [
+            "Activates key `selection-receipt-and-applied-identity` (S-PIG-28..30 connector arms, 67, 71 instance half, 72): the two hook-file tests, `gateway_connect_dataplane_equivalence.rs` and the six connector.rs tests go RED then GREEN",
+            "BackendId identity is readable only after the outer swap, immutable per id, and rollback preserves the prior generation with no intent or receipt residue",
+            "A missing receipt, an other-ServiceKey receipt and a wrong-valid peer fail closed with cleanup and no alternate backend",
+            "After an instance restart old identities and receipts are gone until reprogrammed; updates racing identity reads never return a missing identity for a selected id",
+            "Host and Sim dataplanes agree on the same call sequence (equivalence test); the Sim side is `SimGatewayConnectDataplane` in crates/overdrive-sim/src/adapters/gateway.rs, whose ten scaffold bodies are real in this step (its later consumers are 04-06's evaluators and 05-01's `SimGatewayAdapters`)",
+            "No `pending DELIVER selection-receipt-and-applied-identity` marker remains"
+          ],
+          "test_file": "crates/overdrive-dataplane/tests/integration/gateway_connect_dataplane_equivalence.rs",
+          "scenario_name": "updates_racing_identity_reads_never_return_a_missing_identity_for_a_selected_id (hook file) and the S-PIG-67 equivalence case",
+          "dependencies": ["03-01"],
+          "estimated_hours": 14,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-dataplane/src/gateway_connect.rs", "crates/overdrive-dataplane/src/allocators/backend_id.rs", "crates/overdrive-dataplane/src/swap.rs", "crates/overdrive-gateway/src/connector.rs", "crates/overdrive-sim/src/adapters/gateway.rs", "crates/overdrive-core/src/traits/dataplane.rs"],
+            "test_files": ["crates/overdrive-dataplane/tests/integration/public_ingress_gateway_hook.rs", "crates/overdrive-dataplane/tests/integration/gateway_connect_dataplane_equivalence.rs", "crates/overdrive-gateway/src/connector.rs"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. The BackendIdAllocator is unchanged (R-3); existing_id is a read-only body (R-24); DataplaneError variants are in overdrive-core (R-35). The connector.rs tests exercise the connector's receipt checks against test-local port doubles; the connector's constructor, probe and successful connect path and the ledger happy path already landed in 02-06 (the owner start path needs them); this step lands the receipt-failure arms (missing receipt, other ServiceKey, wrong-valid peer, missing applied identity, mTLS-fault mapping), and the capacity-refusal mapping, retry and retained-cleanup behaviours stay for 03-04. Check-and-act atomicity applies to the commit guard. Contract shape: bounded-change. Gap to route to DISTILL: the receipt keys are split across this step and 03-04 by connector function; if the crafter finds a connector.rs test here needs the 03-04 ledger, route a re-key request."
+        },
+        {
+          "id": "03-03",
+          "name": "Quint conformance: selection_receipt driver",
+          "description": "Make the QC-3 quint-connect driver replay the selection_receipt model against the real EbpfDataplane, bpffs pins and the root cgroup attach.",
+          "criteria": [
+            "Activates key `quint-conformance-selection_receipt`: the three `#[quint_test]` runs (commit_then_select, conflicting_alloc_rejected, restart_destroys_receipts) and the randomized `#[quint_run]` in crates/overdrive-dataplane/src/quint_selection_receipt.rs go RED then GREEN",
+            "The `receipts` variable is projected through live_receipts(); the take handler asserts as R-33 states; rejected-set oracles assert DataplaneError::BackendIdentityConflict",
+            "BackendId reuse across an empty update follows the production allocator (R-38)",
+            "`cargo xtask conformance-lint` stays clean for quint_selection_receipt.rs (testing.md per-driver checklist items 1, 3, 5, 6, 7)",
+            "No `pending DELIVER quint-conformance-selection_receipt` marker remains"
+          ],
+          "test_file": "crates/overdrive-dataplane/src/quint_selection_receipt.rs",
+          "scenario_name": "selection_receipt_conflicting_alloc_rejected",
+          "dependencies": ["03-02"],
+          "estimated_hours": 4,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-dataplane/src/gateway_connect.rs"],
+            "test_files": ["crates/overdrive-dataplane/src/quint_selection_receipt.rs", "specs/quint/public-ingress-gateway/"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. Runs under `package(overdrive-dataplane) & kind(lib)` in the host-kernel-shared nextest group; run on metal. Mostly verification: 03-02 should already satisfy the model, so a RED here is a model mismatch to analyse, not to paper over. dst-lint reports infra-CLI literals in this driver file (pre-existing finding recorded by DISTILL): surface it, do not edit the driver. Gap to route to DISTILL: that dst-lint finding."
+        },
+        {
+          "id": "03-04",
+          "name": "Upstream socket preparation and cleanup ledger in the connector",
+          "description": "Complete the connector's prepare-then-dial sequence on top of the reserve/bind/complete lifecycle that 02-06 landed: surface a ledger capacity refusal as CleanupLedgerFull before open_upstream, record intent and receipt cleanup failures, retain failed cleanup (failure-bit retention) so that the `retry_all` and shutdown sweep that 02-06 landed retry it without re-register or re-auth, and map every GatewayConnectDataplaneError at its owner operation (ADR-0243, ADR-0248).",
+          "criteria": [
+            "Activates key `upstream-socket-preparation` (S-PIG-37, 50, 53): the two connector.rs tests, the one ledger_acceptance.rs test and the two public_ingress_gateway.rs tests (five in all) are un-ignored. Every one of the five has a real RED: `retry_all_cleans_exact_intents_and_keeps_records_whose_cleanup_fails` (RED via `record_intent_failure`, since `retry_all` is real from 02-06), `full_cleanup_ledger_refuses_before_any_socket_is_prepared` (the `CleanupLedgerFull` surfacing before `open_upstream`), `failed_cleanup_is_retained_and_retried_without_reconnecting_or_reauthenticating` (failure-bit retention) and both S-PIG-50 tests in public_ingress_gateway.rs (`every_dataplane_error_crosses_its_real_owner_operation`, `every_dataplane_error_collapses_to_the_redacted_connect_path_cause`: error-to-status mapping), then GREEN. None is expected GREEN on activation. The five reserve/bind/complete/retry_all/Prepare-mapping tests (`ledger_accepts_zero_one_and_128_reservations_and_refuses_the_129th`, `released_slot_is_reusable_at_capacity`, `bound_reservation_holds_its_slot_until_complete_removes_the_record`, `saturation_stays_reported_after_the_ledger_drains`, `failing_open_upstream_releases_its_reserved_ledger_slot`) carry `pending DELIVER gateway-application-owner` and are activated by 02-06, not here",
+            "The ledger accepts 0, 1 and 128 entries and a 129th reservation is refused as CleanupLedgerFull before any socket or registration exists (open_upstream call count 0)",
+            "A failed cleanup is retained and retried without re-register, reconnect or re-auth",
+            "Every GatewayConnectDataplaneError crosses its real owner operation and collapses to ConnectPathUnavailable in status",
+            "The real GatewayUpstreamConnector emits exactly one `gateway.upstream.receipt.validated` tracing occurrence per `request` operation and per `probe` operation, with the fields feature-delta pins (5608-5650), only after exact receipt validation and selected-identity resolution when applicable, and with no production reader or status projection (delta line 6500). The emitter lands here so the end-to-end file (`receipt_occurrences(.., \"probe\"|\"request\")`) does not discover a missing emitter in 05-03; the only pre-authored evidence is that file in 05-03 (a source-local connector assertion would be a new test and is a proposal for the user, not part of this step)",
+            "No `pending DELIVER upstream-socket-preparation` marker remains"
+          ],
+          "test_file": "crates/overdrive-gateway/src/application/ledger_acceptance.rs",
+          "scenario_name": "cleanup ledger 0/1/128 accepted and 129 refused before open_upstream (ledger_acceptance tests)",
+          "dependencies": ["02-06", "03-01", "03-02"],
+          "estimated_hours": 10,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-gateway/src/connector.rs", "crates/overdrive-gateway/src/application.rs", "crates/overdrive-gateway/src/ports.rs", "crates/overdrive-dataplane/src/gateway_connect.rs"],
+            "test_files": ["crates/overdrive-gateway/src/application/ledger_acceptance.rs", "crates/overdrive-gateway/src/connector.rs", "crates/overdrive-gateway/tests/integration/public_ingress_gateway.rs"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. PreparedUpstream::new is public and registers nothing (DG-8). One upstream attempt per request, no retry (ADR-0240). The connector arm of S-PIG-69 (connector.rs:724) is keyed public-request-end-to-end and stays ignored until 05-03. Contract shape: bounded-change. Gap to route to DISTILL: none; unit-level ledger logic has example tests only, no property test over ledger occupancy sequences."
+        }
+      ]
+    },
+    {
+      "id": "04",
+      "name": "Kernel relay and exchange runtime",
+      "steps": [
+        {
+          "id": "04-01",
+          "name": "Sim relay adapter, HTTP/1.1 head and framing, and the exchange driver",
+          "description": "Implement SimGatewayRelay (scripted peer events, pipe failure, substrate lies), the pure HTTP/1.1 head validators, parsers, framing and chunk-line functions, and the full-duplex kernel-relay exchange driver in the gateway runtime, which together serve the public listener over the Sim relay (ADR-0245, 0247, 0251..0253, 0239, 0240).",
+          "criteria": [
+            "Activates key `http1-head-validation-and-framing` (S-PIG-76..83): every marker in crates/overdrive-gateway/src/runtime/http1/head.rs plus the two listener arms in public_ingress_gateway_relay.rs:3213 and :3260",
+            "Activates key `kernel-relay-sim-adapter` (S-PIG-90, 95, 100 disabled arm): the four relay-file tests and `a_disabled_gateway_never_probes_the_relay` in crates/overdrive-control-plane/tests/integration/public_ingress_gateway_boot_shutdown.rs",
+            "Activates key `kernel-relay-exchange-driver` (S-PIG-40, 87..89, 91, 92, 94, 96, 97, 101, 102, 103, 119..122; S-PIG-40 is carried by `an_upstream_failure_is_one_502_before_the_head_and_an_unclean_close_after_it` and the connector's one-attempt tests, its native-metal N arm was removed): the sixteen relay-file tests and the two seeded tests in crates/overdrive-sim/tests/acceptance/gateway_relay_exchange.rs",
+            "The Sim adapter bodies the Sim exchange tests use in crates/overdrive-sim/src/adapters/gateway.rs are real: `SimGatewayRelay`, `SimGatewayClientMtls::{new, authenticate, set_peer, with_hold}`, `SimGatewayIdentityActionTarget` and `SimGatewayIdentityLifecycleControl` (`SimGatewayConnectDataplane` is 03-02; `SimConnectHold` is 04-06; `SimGatewayAdapters` and `SimGatewayClientMtlsFactory` are 05-01)",
+            "The public listener accept loop (accept from the injected listener, `accept_public`, admission) and its hand-off to the exchange driver inside `GatewayBuilder::start` are real in this step, because the listener-level arms at public_ingress_gateway_relay.rs:3213 and :3260 are the first tests to reach them; the connection and request limit refusal arms they exercise (`GatewayAdmission::acquire_connection`, `GatewayGenerationRetention::{try_connection, try_request}`, the budget `try_*` arms) are real here only if a 04-01 test reaches them, otherwise they stay for the first later step whose test does (04-07, 05-01), and `KtlsLeg::into_halves`, `KtlsReadHalf::backend_mut`, `KtlsWriteHalf::backend_mut` and `ThroughBytes::new` in ports.rs are real here (first reached by the exchange driver)",
+            "Ambiguous request framing is 400 (HTTP/1.0 request 505), ambiguous origin framing is 502 before the public head, a nomination removes nothing before the framing decision, exactly one 502 on upstream close before response and no retry",
+            "No octet moves past a message boundary and no residue (intent, receipt, pipe) remains after any seeded peer event; twin runs at one seed agree",
+            "Markers for the three keys above are gone; S-PIG-59 stays GREEN"
+          ],
+          "test_file": "crates/overdrive-gateway/tests/integration/public_ingress_gateway_relay.rs",
+          "scenario_name": "seeded_peer_events_never_move_an_octet_past_a_message_boundary_and_leave_no_residue (sim acceptance) and ambiguous_request_framing_is_a_400_and_an_http10_request_is_a_505 (head.rs)",
+          "dependencies": ["01-04", "02-06", "03-04"],
+          "estimated_hours": 28,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-gateway/src/runtime/http1/head.rs", "crates/overdrive-gateway/src/runtime/http1/mod.rs", "crates/overdrive-gateway/src/runtime/exchange.rs", "crates/overdrive-gateway/src/runtime/mod.rs", "crates/overdrive-gateway/src/ports.rs", "crates/overdrive-sim/src/adapters/gateway.rs"],
+            "test_files": ["crates/overdrive-gateway/src/runtime/http1/head.rs", "crates/overdrive-gateway/tests/integration/public_ingress_gateway_relay.rs", "crates/overdrive-sim/tests/acceptance/gateway_relay_exchange.rs", "crates/overdrive-control-plane/tests/integration/public_ingress_gateway_boot_shutdown.rs"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. Three keys in one step because the listener-level tests of each need the other two (the sim adapter's and head's listener arms run through the driver, which needs the head functions and SimGatewayRelay); run RED/GREEN as three internal cycles in this order: head functions (source-local tests), SimGatewayRelay, then the driver. No hyper, hyper-util or tokio-rustls dependency (ADR-0245). Exchange driver is async I/O orchestration with an injected Clock; no tokio::time. The Sim relay is the contract's other adapter: do not shape production code for it (development.md 'Production code is not shaped by simulation'). Do not add an Invariant variant for the seeded relay runs (new scope needs the user). The four listener-level tests deleted by R-42 must stay deleted. Contract shape: bounded-change (driver), pure-function (head). Gap to route to DISTILL: the key `kernel-relay-sim-adapter` is attached to a control-plane test for the disabled arm that has no dependency on the sim relay beyond its constructor; consider re-keying. S-PIG-90 octet check is R-44."
+        },
+        {
+          "id": "04-02",
+          "name": "Host kernel relay adapter (rustls handshake, kTLS, splice)",
+          "description": "Implement HostGatewayRelay: userspace rustls handshake then kTLS arming, AES-GCM-only TLS 1.3, empty private pipe of at least 64 KiB, splice with backpressure, KeyUpdate refusal, close-delimited bodies, and the pipe-floor law (ADR-0244, 0246, 0249, 0250, 0253).",
+          "criteria": [
+            "Activates key `kernel-relay-host-adapter` (S-PIG-86, 104..112, 117, 118, 123): the three gateway_relay/mod.rs unit tests, `gateway_relay_equivalence.rs` (Host vs Sim) and the twelve tests of crates/overdrive-dataplane/tests/integration/gateway_relay.rs go RED then GREEN on native metal",
+            "PIPE_FLOOR is 65 536 and PipeCapacity::new/splice_in_len satisfy the pipe-floor law at cap-1, cap, cap+1, 2cap, 2cap+1",
+            "The gateway never originates a TLS KeyUpdate, and a peer KeyUpdate is handled as the delta pins; no SPLICE_F_MORE is used",
+            "Public handshake refusals (ALPN mismatch, no SNI, timeout, reset) are refused with no HTTP read, no upstream and nothing armed, with descriptors restored",
+            "Close-delimited responses relay over real TLS; only the two AES-GCM suites are offered",
+            "No `pending DELIVER kernel-relay-host-adapter` marker remains"
+          ],
+          "test_file": "crates/overdrive-dataplane/tests/integration/gateway_relay.rs",
+          "scenario_name": "port-level adapter contract tests of HostGatewayRelay (S-PIG-105..112, 117, 118, 123) and gateway_relay_equivalence cases",
+          "dependencies": ["04-01"],
+          "estimated_hours": 28,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-dataplane/src/gateway_relay/mod.rs", "crates/overdrive-dataplane/src/gateway_relay/sys.rs", "crates/overdrive-dataplane/src/mtls/ktls.rs", "crates/overdrive-dataplane/src/mtls/tls_config.rs"],
+            "test_files": ["crates/overdrive-dataplane/tests/integration/gateway_relay.rs", "crates/overdrive-dataplane/tests/integration/gateway_relay_equivalence.rs", "crates/overdrive-dataplane/src/gateway_relay/mod.rs"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. Kernel claims are read and cited in vendors/linux at v7.0 (design.md); the dataplane integration binary is already whole-binary host-kernel-shared. Run via `cargo xtask metal run --` on a 7.0 kernel only (the relay needs the tls ULP, splice and F_SETPIPE_SZ). Blocking std::fs/syscalls in async fn must go through spawn_blocking or tokio equivalents (rust.md). The dataplane has no overdrive-host edge and R-40 forbids adding one. Contract shape: bounded-change. Gap to route to DISTILL: the T3 tests carry stimulus-per-variant mapping for PublicHandshakeError only as observable outcomes (R-39); the variant mapping itself has no test."
+        },
+        {
+          "id": "04-03",
+          "name": "Lingering close for early and gateway-authored responses",
+          "description": "Implement the lingering close (ADR-0254): after an early upstream response or a gateway-authored rejection, half-close, discard the remaining request octets within max-octets, deadline and no-progress bounds, then close_notify rather than reset.",
+          "criteria": [
+            "Activates key `relay-lingering-close` (S-PIG-39, 93, 115): the two tests in crates/overdrive-dataplane/tests/integration/gateway_relay.rs and the two in public_ingress_gateway_relay.rs go RED then GREEN",
+            "A client reads the typed response (404, 408, 413, 431, 505) and then a close_notify, not a reset",
+            "The discard ends at max octets, at the deadline and at the no-progress window",
+            "Route-miss answers 404 without parsing beyond the head and with no upstream dial",
+            "No `pending DELIVER relay-lingering-close` marker remains"
+          ],
+          "test_file": "crates/overdrive-dataplane/tests/integration/gateway_relay.rs",
+          "scenario_name": "lingering_close_lets_the_client_read_the_response_then_close_notify_not_a_reset",
+          "dependencies": ["04-01", "04-02"],
+          "estimated_hours": 8,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-dataplane/src/gateway_relay/mod.rs", "crates/overdrive-gateway/src/runtime/exchange.rs"],
+            "test_files": ["crates/overdrive-dataplane/tests/integration/gateway_relay.rs", "crates/overdrive-gateway/tests/integration/public_ingress_gateway_relay.rs"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. discard_remaining returns Result<(), LegReadError> (R-22); equivalence compares the result class and peer-observable leg state, not a count. The S-PIG-115 T3 test has a widened slow-timeout entry already in .config/nextest.toml. Contract shape: bounded-change. Gap to route to DISTILL: the N-arm drain-during-discard clause of S-PIG-115 is not authored."
+        },
+        {
+          "id": "04-04",
+          "name": "Relay Earned-Trust probe",
+          "description": "Implement the relay probe that proves the node can honour the relay contract (tls ULP, splice, F_SETPIPE_SZ, pipe lifetime) and the Tier-1 refusal of each catalogued substrate lie (ADR-0244, ADR-0246).",
+          "criteria": [
+            "Activates key `relay-earned-trust-probe` (S-PIG-99, 114): `honest_kernel_probe_passes_and_releases_its_descriptors` in the dataplane gateway_relay.rs (native metal) and the probe gold test in public_ingress_gateway_relay.rs:2448 go RED then GREEN",
+            "The honest probe passes on a real 7.0 kernel and releases its descriptors",
+            "Each substrate lie scripted on the Sim relay is refused with its typed RelayProbeError",
+            "The probe verifies its own pipe-floor and 64 KiB-plus-one-octet boundary",
+            "No `pending DELIVER relay-earned-trust-probe` marker remains"
+          ],
+          "test_file": "crates/overdrive-gateway/tests/integration/public_ingress_gateway_relay.rs",
+          "scenario_name": "probe gold test over the Sim substrate lies (S-PIG-99) and honest_kernel_probe_passes_and_releases_its_descriptors (S-PIG-114)",
+          "dependencies": ["04-01", "04-02"],
+          "estimated_hours": 6,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-dataplane/src/gateway_relay/mod.rs", "crates/overdrive-dataplane/src/gateway_relay/sys.rs", "crates/overdrive-sim/src/adapters/gateway.rs"],
+            "test_files": ["crates/overdrive-dataplane/tests/integration/gateway_relay.rs", "crates/overdrive-gateway/tests/integration/public_ingress_gateway_relay.rs"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. Earned Trust: wire, then probe, then use; the probe must exercise the specific lie (R-23 removes the real-kernel ULP-absent stimulus: no rmmod, no CLONE_NEWUSER). Contract shape: bounded-change. Gap to route to DISTILL: the probe's own probe (the three-layer enforcement that adapters actually implement probe()) has no test beyond these two."
+        },
+        {
+          "id": "04-05",
+          "name": "Exact-peer gateway client mTLS",
+          "description": "Implement HostGatewayClientMtls and its factory over the shared HostGatewayRelay: the gateway dials the selected backend with its dedicated SVID, verifies the exact peer SPIFFE identity (URI-SAN shape, equality) before any body, and arms kTLS only after equality (ADR-0234).",
+          "criteria": [
+            "Activates key `exact-peer-client-mtls` (S-PIG-38, 43, 52, 64, 98): the six tests in crates/overdrive-control-plane/tests/integration/public_ingress_gateway_mtls.rs and the two in public_ingress_gateway_relay.rs go RED then GREEN",
+            "A valid peer that is not the selected peer is rejected before any body and nothing is armed",
+            "An absent, expired or malformed gateway identity fails the dial before any body; a non-socket descriptor has no peer address; an unanswered handshake times out before the deadline; a certificate without a SPIFFE URI-SAN is rejected by shape",
+            "The matching peer is dialed over TLS 1.3 records with zero cleartext on the leg and the leg is kTLS-armed",
+            "No `pending DELIVER exact-peer-client-mtls` marker remains"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/public_ingress_gateway_mtls.rs",
+          "scenario_name": "a_valid_peer_that_is_not_the_selected_peer_is_rejected_before_any_body_and_nothing_is_armed",
+          "dependencies": ["02-02", "03-04", "04-02"],
+          "estimated_hours": 12,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-dataplane/src/mtls/gateway_client.rs", "crates/overdrive-dataplane/src/mtls/gateway_identity.rs", "crates/overdrive-dataplane/src/mtls/tls_config.rs", "crates/overdrive-gateway/src/ports.rs", "crates/overdrive-sim/src/adapters/gateway.rs"],
+            "test_files": ["crates/overdrive-control-plane/tests/integration/public_ingress_gateway_mtls.rs", "crates/overdrive-gateway/tests/integration/public_ingress_gateway_relay.rs"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. The egress dialer in tests speaks PLAINTEXT only on the workload-facing path; this is the gateway's own client leg and is real rustls (CLAUDE.md east-west note does not apply). GatewayClientIdentityAccess/Source live in overdrive-gateway::ports (R-20); HostGatewayClientMtlsFactory::new takes Arc<HostGatewayRelay>. The tests live in the control-plane crate because the seal needs overdrive-host and R-40 forbids adding that edge to the dataplane. This step is the first consumer of `GatewayClientIdentityAccess::with_current` (body in crates/overdrive-gateway/src/ports.rs); `GatewayUpstreamSeal::seal_authenticated` and `KtlsLeg::from_armed` already landed in 02-06. Wire evidence oracles use overdrive-netlink/nix; external tools only as independent oracles. Contract shape: bounded-change. Gap to route to DISTILL: none."
+        },
+        {
+          "id": "04-06",
+          "name": "Seeded Gateway Application invariants",
+          "description": "Register GatewayApplicationGenerationLifecycleIsSafe and GatewayApplicationShutdownConverges in the overdrive-sim catalogue with the pinned evaluate arms so the DST harness exercises the real owner under seeded holds, withdrawals, restarts and shutdown (ADR-0222).",
+          "criteria": [
+            "Activates key `gateway-application-invariants` (S-PIG-31, 32): the four tests in crates/overdrive-sim/tests/acceptance/gateway_application_lifecycle.rs go RED then GREEN",
+            "Stale completion, replacement, withdrawal, retained connection and restart are safe at every seed",
+            "Shutdown joins admitted users before the identity slot clears and converges",
+            "Twin runs at one seed give identical ordered observation traces",
+            "The new variants carry canonical names and exhaustive Harness::evaluate arms (already scaffolded). In the delta's fixed order, after the four direct bodies are GREEN, both variants are appended exactly once to `Invariant::ALL` (crates/overdrive-sim/src/invariants/mod.rs) and to the two default-catalogue expected-name arrays in crates/overdrive-sim/tests/integration/dst_harness_smoke.rs and dst_clean_clone_green.rs, then the default `Harness::run` catalogue is GREEN and `cargo dst --seed <N> --only gateway-application-generation-lifecycle-is-safe` and `--only gateway-application-shutdown-converges` are accepted (feature-delta 'Exact seeded Gateway Application invariant registration', steps 4-5)",
+            "`SimConnectHold` and any other Sim adapter body the evaluators use in crates/overdrive-sim/src/adapters/gateway.rs are real",
+            "No `pending DELIVER gateway-application-invariants` marker remains"
+          ],
+          "test_file": "crates/overdrive-sim/tests/acceptance/gateway_application_lifecycle.rs",
+          "scenario_name": "stale_completion_withdrawal_restart_and_retained_generation_are_safe",
+          "dependencies": ["02-06", "04-01"],
+          "estimated_hours": 8,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-sim/src/invariants/gateway_application.rs", "crates/overdrive-sim/src/invariants/mod.rs", "crates/overdrive-sim/src/adapters/gateway.rs"],
+            "test_files": ["crates/overdrive-sim/tests/acceptance/gateway_application_lifecycle.rs", "crates/overdrive-sim/tests/integration/dst_harness_smoke.rs", "crates/overdrive-sim/tests/integration/dst_clean_clone_green.rs"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. Follow feature-delta 'Exact seeded Gateway Application invariant registration'. Seed printed on failure, cargo dst reproduces bit-for-bit. The held-probe capability parks at GatewayClientMtls::authenticate (DG-9). overdrive-sim keeps its edge on overdrive-host (R-40). Contract shape: bounded-change. Gap to route to DISTILL: none."
+        },
+        {
+          "id": "04-07",
+          "name": "Quint conformance: gateway_application driver",
+          "description": "Make the QC-2 quint-connect driver replay the gateway_application model (drain and supersession) against the real owner through its driver-local doubles.",
+          "criteria": [
+            "Activates key `quint-conformance-gateway_application`: the three `#[quint_test]` runs and the `#[quint_run]` in crates/overdrive-gateway/src/application/quint_gateway_application.rs go RED then GREEN",
+            "The explicit owner-autonomous stage and retire steps map to owner calls; no handler is empty",
+            "State is projected through the pinned GatewayStatusReads accessors only; the driver-local doubles are not read in from_driver",
+            "`cargo xtask conformance-lint` stays clean for quint_gateway_application.rs (testing.md per-driver checklist items 1, 3, 5, 6, 7)",
+            "Admission and retention bodies not already made real by an earlier step (02-06, 04-01) are real here, where the QC-2 driver first reaches `acquire_connection` and the retention counts: `GatewayAdmission::acquire_connection`, `GatewayGenerationRetention::{try_connection, try_request, counts}` (02-06 implements only the bodies its start/probe/shutdown path calls)",
+            "No `pending DELIVER quint-conformance-gateway_application` marker remains"
+          ],
+          "test_file": "crates/overdrive-gateway/src/application/quint_gateway_application.rs",
+          "scenario_name": "quint_test runs of gateway_application plus the randomized quint_run",
+          "dependencies": ["02-06"],
+          "estimated_hours": 4,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-gateway/src/application.rs"],
+            "test_files": ["crates/overdrive-gateway/src/application/quint_gateway_application.rs", "crates/overdrive-gateway/src/application/held_probe_doubles.rs", "specs/quint/public-ingress-gateway/"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. DG-7: the driver uses driver-local private doubles because overdrive-sim impls of crate-local traits cannot satisfy them in the library cfg(test) build. Mostly verification of 02-06; a RED is a model mismatch. Run on metal. Gap to route to DISTILL: none."
+        }
+      ]
+    },
+    {
+      "id": "05",
+      "name": "Composition: boot, operator surface and the production end-to-end loop",
+      "steps": [
+        {
+          "id": "05-01",
+          "name": "Enabled gateway boot, shutdown stage and the consuming-port 503 outcome",
+          "description": "Wire the gateway into run_server: BootAdapters.gateway/GatewayAdapters::host, boot steps G0-G4 (relay probe, connect probe, identity wait, route/custody gate, bind of TCP/443), the ServerHandle `gateway` shutdown stage before the mtls_worker stage inside the one 5 s drain, and the typed NoBackend-to-503 consuming-port outcome (ADR-0220, 0230, 0242).",
+          "criteria": [
+            "Activates key `gateway-boot-and-shutdown` (S-PIG-26, 57, 58, 59, 60, 61, 62, 74, 100): the ten enabled-boot tests in crates/overdrive-control-plane/tests/integration/public_ingress_gateway_boot_shutdown.rs, `identity_slot_clears_only_after_the_admitted_connection_user_joined` in the gateway integration file and the sentinel-probe test in public_ingress_gateway_hook.rs go RED then GREEN",
+            "Activates key `consuming-port-unavailable-outcome` (S-PIG-02 I arm, 54, 56): `a_service_with_no_backend_is_answered_503_twice_with_an_empty_second_delta`, the two gateway integration tests and the stale-service-entry hook test go RED then GREEN",
+            "A failing sentinel probe, an absent receipt, an identity that never becomes Current, a probe timeout or a refused relay probe each keep TCP/443 unbound with a cause-distinct status and `health.startup.refused`, while serve and workloads are unaffected",
+            "A Service with no backend is answered 503 twice with an empty second delta and never waits; a stale Service entry after job stop never yields a wrong-peer success",
+            "The relay probe runs once per boot across a Route replacement; a gated gateway never requests serve shutdown",
+            "Disabled composition stays byte-identical (S-PIG-59 stays GREEN)",
+            "`SimGatewayAdapters::{new, relay, client_mtls}` and `SimGatewayClientMtlsFactory` in crates/overdrive-sim/src/adapters/gateway.rs are real: the boot tests of this step are their first consumers",
+            "Production call sites wired: run_server enabled-gateway arm in crates/overdrive-control-plane/src/lib.rs, GatewayAdapters::host in node_adapters.rs, gateway_composition.rs, the ServerHandle stage `gateway`, and the GatewayIdentityLifecycle reconciler registration",
+            "No marker for the two keys above remains"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/public_ingress_gateway_boot_shutdown.rs",
+          "scenario_name": "enabled_boot_probes_the_relay_before_the_connect_path_and_the_gateway_stage_runs_first",
+          "dependencies": ["02-04", "02-07", "03-04", "04-02", "04-03", "04-04", "04-05", "04-06"],
+          "estimated_hours": 24,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-control-plane/src/lib.rs", "crates/overdrive-control-plane/src/node_adapters.rs", "crates/overdrive-control-plane/src/gateway_composition.rs", "crates/overdrive-control-plane/src/gateway_identity_lifecycle.rs", "crates/overdrive-gateway/src/application.rs", "crates/overdrive-cli/src/commands/serve_lifetime.rs", "crates/overdrive-sim/src/adapters/gateway.rs"],
+            "test_files": ["crates/overdrive-control-plane/tests/integration/public_ingress_gateway_boot_shutdown.rs", "crates/overdrive-dataplane/tests/integration/public_ingress_gateway_hook.rs", "crates/overdrive-gateway/tests/integration/public_ingress_gateway.rs"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. Replace the documented `todo!(\"SCAFFOLD: enabled gateway composition (boot steps G1-G4)\")` arm; wire then probe then use; typed bootstrap errors keep a dedicated #[from] variant on ControlPlaneError (never flattened to Internal). Preserve the meaning of the Running/Stable/Ready states: the gate owns only the public listener (design.md 'Lifecycle Gate Ownership'). Two keys in one step because the boot file and hook file each mix them and a 503 outcome needs a booted gateway. A node-global kernel state test needs the host-kernel-shared group (already assigned); run via `cargo xtask metal run --` with a distinct 127/8 address per composition (R-6). Contract shape: bounded-change, unbounded-preservation for the disabled and unrelated-state rows. Gap to route to DISTILL: S-PIG-60's graceful-shutdown N run is carried by 05-03, not here."
+        },
+        {
+          "id": "05-02",
+          "name": "Route operator surface, gateway status and issuance-failure occurrence",
+          "description": "Add the operator surface: the four `overdrive serve` gateway flags resolving to ServeArgs::gateway_config, `overdrive deploy <ROUTE_SPEC>` dispatch, ApiClient route calls, the Route POST/DELETE and gateway status handlers behind the enabled composition (disabled composition rejects before parsing), and the redacted gateway status carrying the issuance-failure count and latest cause (ADR-0227, 0274).",
+          "criteria": [
+            "Activates key `route-operator-surface` (S-PIG-18, 20, 34, 35, 36, 42): the three CLI acceptance tests and the five CLI integration tests (including S-PIG-36's second test `route_withdraw_on_a_gateway_disabled_node_is_rejected_before_the_id_is_parsed`, through `ApiClient::withdraw_route`) go RED then GREEN",
+            "`ApiClient::withdraw_route(&self, id: &str) -> Result<WithdrawRouteResponse, CliError>` (DELETE v1/routes/{id}) and `ApiClient::gateway_status(&self) -> Result<GatewayStatusResponse, CliError>` (GET v1/gateway/status) are implemented as the delta pins them (scaffolds in crates/overdrive-cli/src/http_client.rs become bodies)",
+            "A complete gateway flag set enables the gateway on the supplied address, none leaves it disabled, and every partial set names exactly the missing fields",
+            "Route deploy is one-shot with the same outcome in both stream modes; a disabled node rejects before the spec is parsed",
+            "A gateway-status point-read failure is a redacted 500 and the next read recovers",
+            "Activates key `gateway-svid-issue-failure-occurrence` (O-SIF-G rows): the eight gateway integration tests (including S-PIG-129 `a_restarted_gateway_over_an_undecodable_prior_status_row_counts_from_zero`) and the two CLI integration tests go RED then GREEN. `an_undecodable_gateway_status_row_reads_as_absent_with_one_skipped_warning` (crates/overdrive-store-local/tests/integration/envelope_observation_skip.rs) is un-ignored here but is expected GREEN on activation, as a fact and not a RED claim: it drives `LocalObservationStore::gateway_application_status_row`, whose decode-skip body 01-03 implements; record this in the step log and do not weaken the test. No 05-02 source file implements anything for it",
+            "A gateway whose issuance keeps failing reports the count and cause on the status body; a disabled node answers the fixed body without reading a stale row",
+            "api/openapi.yaml is regenerated and openapi-check passes",
+            "No marker for the two keys above remains"
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/public_ingress_gateway.rs",
+          "scenario_name": "route_deploy_is_one_shot_with_the_same_outcome_in_both_stream_modes",
+          "dependencies": ["01-03", "02-03", "02-05", "05-01"],
+          "estimated_hours": 16,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-cli/src/commands/serve.rs", "crates/overdrive-cli/src/commands/deploy.rs", "crates/overdrive-cli/src/cli.rs", "crates/overdrive-cli/src/http_client.rs", "crates/overdrive-cli/src/render.rs", "crates/overdrive-control-plane/src/handlers.rs", "crates/overdrive-control-plane/src/api.rs", "crates/overdrive-gateway/src/application.rs", "api/openapi.yaml"],
+            "test_files": ["crates/overdrive-cli/tests/acceptance/public_ingress_gateway.rs", "crates/overdrive-cli/tests/integration/public_ingress_gateway.rs", "crates/overdrive-gateway/tests/integration/public_ingress_gateway.rs", "crates/overdrive-store-local/tests/integration/envelope_observation_skip.rs"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. The operator verb is `overdrive deploy <SPEC>`, never `job submit` (CLAUDE.md). The owner half of gateway-svid-issue-failure-occurrence needs the gateway status handler and enabled boot, which is why this key lands after 05-01. The CLI never-issues row polls real time up to 60 s (recorded exposure). Wire operator output through the live renderer `render::workload_describe`. Contract shape: bounded-change (surface), unbounded-preservation (redaction). Gap to route to DISTILL: none."
+        },
+        {
+          "id": "05-03",
+          "name": "Public request end-to-end through serve and deploy",
+          "description": "Close the production loop: a real `overdrive serve` composition with `NodeAdapters::host` and `GatewayAdapters::host`, a deployed VM Service and a deployed Route, and a public TLS 1.3 HTTP/1.1 request that is accepted by the production listener, selected by the registered-socket hook, dialed to leg-C with exact-peer mTLS and relayed over kTLS legs and spliced bodies to the workload (ADR-0220).",
+          "criteria": [
+            "Activates key `public-request-end-to-end` (S-PIG-01, 56 N, 60 N, 69, 70, 71 N, 105, 109, 113, 115 N): the eleven `native_metal_kvm_public_ingress_gateway_*` tests in tests/conformance/tests/public_ingress_gateway_end_to_end.rs and the connector arm at crates/overdrive-gateway/src/connector.rs:724 go RED then GREEN on native metal",
+            "An external TLS 1.3 client receives a streamed 200 from the VM Service over kernel TLS legs, with the ULP, tls_stat deltas and the relay probe occurrence observed",
+            "No stale Service entry yields a wrong-peer success; the guest flow ending mid-request is a 502 with no intent or receipt left; stalled head and stalled body each answer 408",
+            "After a serve restart the gateway answers 503 until the hydrator reprograms, then the backend response",
+            "128 concurrent exchanges stay within the descriptor and memory budget; exact-length and chunked bodies relay octet-exact over keep-alive; no KeyUpdate is sent across a 16 MiB response; the client reads the response before a clean close",
+            "Production call sites exercised with no test-only wiring: run_server (enabled gateway arm), GatewayAdapters::host/HostGatewayRelay, the gateway selection cgroup/connect4 hook registration in EbpfDataplane::open_upstream, ServiceMapHydrator programming, the leg-C accept path to GuestStreamDial, and `deploy_resource` for the Route; no test installs a rule, binds a socket, programs a map or supplies an address production does not",
+            "Zero `pending DELIVER` markers for this feature remain: `grep -rE 'pending DELIVER (route-value-types|gateway-|certified-key|lag-aware|consuming-port|upstream-socket|selection-|exact-peer|http1-|exchange-state|kernel-relay|relay-|quint-conformance|public-request|route-operator|workload-svid)' crates tests` returns nothing",
+            "No scaffold body of this feature remains: `rg 'todo!\\(\"SCAFFOLD' crates/overdrive-core/src crates/overdrive-gateway/src crates/overdrive-dataplane/src crates/overdrive-host/src crates/overdrive-reconcilers/src crates/overdrive-control-plane/src crates/overdrive-store-local/src crates/overdrive-sim/src crates/overdrive-cli/src` returns nothing. Every scaffold in these crates belongs to this feature (including the codec scaffolds in crates/overdrive-core/src/traits/observation_store.rs and the Sim adapters), so none may be dismissed as pre-existing; the only permitted exception is a hit that provably predates the feature's first commit, which is named, attributed by git history and recorded in the step log. Scaffold bodies with no pending-ignored test must not survive",
+            "Named post-step gate, not a roadmap step: E15 (verification/expectations/E15-public-ingress-operator-journey, runner exists, exercises examples/public-ingress-gateway/*) is captured after this step by a reviewer other than the crafter (verification.md); the orchestrator must not finalize before that capture and its different-fox review exist"
+          ],
+          "test_file": "tests/conformance/tests/public_ingress_gateway_end_to_end.rs",
+          "scenario_name": "native_metal_kvm_public_ingress_gateway_streams_a_workload_response_over_kernel_tls_legs",
+          "dependencies": ["05-01", "05-02"],
+          "estimated_hours": 20,
+          "implementation_scope": {
+            "source_files": ["crates/overdrive-control-plane/src/lib.rs", "crates/overdrive-control-plane/src/gateway_composition.rs", "crates/overdrive-gateway/src/connector.rs", "crates/overdrive-dataplane/src/gateway_connect.rs", "crates/overdrive-dataplane/src/gateway_relay/mod.rs"],
+            "test_files": ["tests/conformance/tests/public_ingress_gateway_end_to_end.rs", "tests/conformance/guest/pig_guest.rs", "crates/overdrive-gateway/src/connector.rs"]
+          },
+          "implementation_notes": "TEST PARADIGM: acceptance and property tests are pre-authored by DISTILL (proptest for properties, per .claude/rules/testing.md). The crafter activates the step's pending-DELIVER tests and implements to GREEN; it never authors, replaces or weakens acceptance bodies. A missing test, fixture or oracle is routed back to the acceptance designer. Implement only the API surface the feature-delta pins; a needed unpinned interface is a blocker, not an invention. This is the vertical-slice closure (CLAUDE.md 'Build vertical slices through production entry points'): by here the code should already exist; the step finds and fixes whatever composition seam the native-metal run exposes, within the pinned contracts. Tests drive run_server in process and never spawn the overdrive binary; the egress dial in these tests is the external TLS client (inbound public leg), unlike the east-west plaintext-dialer rule. Native metal only (`cargo xtask metal run --`, kernel 7.0.0-38+, KVM, root); per-test slow-timeout entries already exist in .config/nextest.toml. E15 (point-in-time expectation, verification.md) is captured after this step by a different reviewer, not by the crafter. The per-feature mutation gate (testing.md, kill rate >= 80%) runs after all steps; mandatory surfaces: GatewaySvidLifecycle reconcile (02-01), newtype FromStr/validators (01-01, 01-02), ExchangeMachine and the exchange driver (01-04, 04-01), and the Route Set owner claim/replace logic (02-06). The finalize gate (rules/finalize.md) adds website docs and a blog post after review. Contract shape: bounded-change; S-PIG-113 unbounded-preservation. Gap to route to DISTILL: no recurring CI lane exists for native-metal real-guest evidence (P-6 proposed, not adopted); the relay-probe success occurrence of S-PIG-01 is asserted indirectly via the connect-probe occurrence."
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-core/src/",
+      "crates/overdrive-gateway/src/",
+      "crates/overdrive-dataplane/src/",
+      "crates/overdrive-bpf/src/",
+      "crates/overdrive-host/src/",
+      "crates/overdrive-reconcilers/src/",
+      "crates/overdrive-control-plane/src/",
+      "crates/overdrive-store-local/src/",
+      "crates/overdrive-sim/src/",
+      "crates/overdrive-cli/src/",
+      "api/",
+      "perf-baseline/main/verifier-budget/"
+    ],
+    "test_directories": [
+      "crates/overdrive-core/tests/",
+      "crates/overdrive-gateway/tests/",
+      "crates/overdrive-dataplane/tests/",
+      "crates/overdrive-control-plane/tests/",
+      "crates/overdrive-store-local/tests/",
+      "crates/overdrive-sim/tests/",
+      "crates/overdrive-cli/tests/",
+      "tests/conformance/",
+      "specs/quint/public-ingress-gateway/"
+    ],
+    "excluded_patterns": [
+      "target/**",
+      "vendors/**",
+      "spike-scratch/**",
+      "**/proptest-regressions/**"
+    ]
+  },
+  "validation": {
+    "status": "pending",
+    "reviewer": "pending: independent DELIVER roadmap review not yet dispatched",
+    "approved_at": "pending"
+  }
+}
