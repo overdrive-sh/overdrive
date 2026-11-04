@@ -1,8 +1,0 @@
-# lg-hazard-spawn-at-running: counterexample, 2 state(s) (from the TLC trace)
-
-State 1
-  lv = [ rw |-> FALSE, started |-> FALSE, sup |-> FALSE, ret |-> FALSE, role |-> "absent", committed |-> FALSE, swr |-> "none", hook |-> FALSE, ended |-> FALSE, streak |-> 0, since |-> 0, rows |-> 0, stopBeforeStable |-> FALSE ]
-  conf_step = [init |-> [tag |-> "UNIT"]]
-
-State 2 [OnRunning]
-  lv = [ rw |-> TRUE, started |-> TRUE, sup |-> TRUE, ret |-> TRUE, role |-> "live", committed |-> FALSE, swr |-> "none", hook |-> FALSE, ended |-> FALSE, streak |-> 0, since |-> 0, rows |-> 0, stopBeforeStable |-> FALSE ]
