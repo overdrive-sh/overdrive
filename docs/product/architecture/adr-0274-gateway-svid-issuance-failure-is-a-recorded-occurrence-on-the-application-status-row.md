@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — pending independent review. User decision 2026-11-04 (R-45); provenance of the related rulings is in the feature delta.
+Proposed — pending independent review. User decision 2026-11-04 (R-45; the count surviving a restart, R-52, user-confirmed 2026-11-04); provenance of the related rulings is in the feature delta.
 
 ## Context
 
