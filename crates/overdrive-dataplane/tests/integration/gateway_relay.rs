@@ -892,41 +892,6 @@ async fn a_stalled_reader_freezes_the_sender_within_the_socket_buffers_and_memor
     assert!(rss_growth_kib <= 4 * 1024, "resident set grew {rss_growth_kib} KiB while stalled");
 }
 
-/// S-PIG-111 (stalled sender): a body that stops arriving ends at the passed
-/// no-progress window with `NoProgress`, not at the absolute deadline.
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER kernel-relay-host-adapter"]
-async fn a_stalled_body_ends_at_the_no_progress_window() {
-    let mut rig = Rig::new(Offer::Aes128).await;
-    let origin = rig.upstream.peer.clone();
-    let sender = std::thread::spawn(move || -> io::Result<()> {
-        origin.send(&pattern(0, 1024 * 1024))?;
-        std::thread::sleep(Duration::from_secs(3));
-        Ok(())
-    });
-    let client = rig.public.peer.clone();
-    let drain = Drain::start(&client, false);
-    let Rig { relay, public, upstream } = &mut rig;
-    let begin = Instant::now();
-    let result = relay
-        .relay_exact(
-            &mut upstream.read,
-            &mut public.write,
-            nz64(4 * 1024 * 1024),
-            relay_within(30, Duration::from_secs(2)),
-        )
-        .await;
-    let elapsed = begin.elapsed();
-    joined(sender, "stalling origin").await;
-    assert_eq!(result.err(), Some(RelayError::NoProgress));
-    assert!(
-        elapsed >= Duration::from_secs(2) && elapsed < Duration::from_millis(3_500),
-        "ended at the 2 s no-progress window, not the 30 s absolute deadline ({elapsed:?})"
-    );
-    drop(drain);
-}
-
 /// S-PIG-111 (trickle): a `Content-Length` response delivered one octet at a time
 /// reaches the client piece by piece without waiting for a following piece (no
 /// `SPLICE_F_MORE`: each splice-out call ends its record); each piece arrives

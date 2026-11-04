@@ -846,8 +846,8 @@ test-group = 'host-kernel-shared'
 filter = 'package(overdrive-system-conformance) & binary(shared_guest_network_fail_stop_recovery)'
 test-group = 'host-kernel-shared'
 
-# public-ingress-gateway (AT-PIG-E2E-1 and the native arms of S-PIG-02, 39, 40,
-# 56, 60, 69, 70, 71, 105, 109, 113, 115) - the end-to-end binary boots
+# public-ingress-gateway (AT-PIG-E2E-1 and the native arms of S-PIG-56, 60, 69,
+# 70 (408), 71, 105, 109, 113, 115) - the end-to-end binary boots
 # `run_server` with the real adapters and a real VM Service, so it mutates the
 # node-global nft, cgroup and bpffs state the other kernel-touching binaries
 # mutate and reads the node-global `/proc/net/tls_stat` counters; the
@@ -888,9 +888,9 @@ filter = '''
 '''
 slow-timeout = { period = "60s", terminate-after = 12 }
 
-#   11: every other test of the binary (404, 502-once, stale entry, stage
-#       order, status mappings with the 40 s stalled body, byte-exact bodies):
-#       at most 600 s + 40 s + 5 s = 645 s.
+#   11: every other test of the binary (stale entry, stage order and graceful
+#       shutdown, the 408 cases with the 40 s stalled body, byte-exact
+#       bodies): at most 600 s + 40 s + 5 s = 645 s.
 [[profile.default.overrides]]
 filter = 'package(overdrive-system-conformance) & binary(public_ingress_gateway_end_to_end)'
 slow-timeout = { period = "60s", terminate-after = 11 }

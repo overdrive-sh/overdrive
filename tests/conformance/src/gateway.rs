@@ -1483,12 +1483,6 @@ impl GatewayWorld {
         PublicClient::new(self.address, &self.pki)
     }
 
-    /// The directory holding the CA (for a client child process).
-    #[must_use]
-    pub fn scratch_dir(&self) -> &Path {
-        self.root.path()
-    }
-
     /// The test CA in DER form, written for a child process.
     #[must_use]
     pub fn write_ca_der(&self) -> PathBuf {
