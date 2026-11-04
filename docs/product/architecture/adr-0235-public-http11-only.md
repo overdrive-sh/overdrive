@@ -32,6 +32,9 @@ gateway's own ([ADR-0245](adr-0245-gateway-parses-http11-heads-and-owns-message-
 - The gateway is the sole framing authority on both legs.
 - Route selection, headers, limits, streaming and upstream-attempt policy are
   independently decided in ADR-0236–ADR-0240.
+- HTTP/2 and gRPC on the public listener are deferred to
+  [#341](https://github.com/overdrive-sh/overdrive/issues/341); until then a
+  client that offers only `h2` is refused at the handshake.
 
 ## Links
 
@@ -39,3 +42,4 @@ gateway's own ([ADR-0245](adr-0245-gateway-parses-http11-heads-and-owns-message-
 - [Canonical C4 public runtime](c4-diagrams.md#public-ingress-gateway-canonical-c4)
 - [ADR-0226](adr-0226-public-listener-tls13-only.md), [ADR-0236](adr-0236-canonical-public-route-match-key.md), [ADR-0245](adr-0245-gateway-parses-http11-heads-and-owns-message-framing.md)
 - [GitHub #54](https://github.com/overdrive-sh/overdrive/issues/54)
+- [GitHub #341](https://github.com/overdrive-sh/overdrive/issues/341)

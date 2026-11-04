@@ -304,6 +304,8 @@ acquisition-neutral custody boundary.
   current, and BPF Hydrated does not mean a Gateway Application is applied.
 - **D-SYS-9 — HTTP scope:** strict bounded HTTP/1.1 streams through the
   BPF-rewritten upstream socket; no gateway retry/replay/backend cursor.
+  HTTP/2 (and gRPC) on the public listener is the tracked follow-up
+  [#341](https://github.com/overdrive-sh/overdrive/issues/341).
 - **D-SYS-12 — Data path (G1):** both legs run TLS 1.3 handshakes in userspace
   (rustls, unbuffered API) and hand the record layer to the kernel (kTLS TX+RX,
   [ADR-0244](../../product/architecture/adr-0244-gateway-legs-use-kernel-tls-after-a-userspace-rustls-handshake.md));
