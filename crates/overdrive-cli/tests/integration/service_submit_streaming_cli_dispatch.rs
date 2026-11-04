@@ -183,5 +183,5 @@ async fn cli_submit_streaming_service_routes_to_service_submit_event_consumer() 
         }
     }
 
-    drop(handle);
+    handle.shutdown().await.expect("clean shutdown");
 }
