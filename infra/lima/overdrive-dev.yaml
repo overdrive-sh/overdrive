@@ -261,6 +261,28 @@ provision:
       sysctl --system >/dev/null
 
   # -------------------------------------------------------------------------
+  # RLIMIT_NOFILE. The control plane sizes its file-descriptor budget
+  # (~376832) against RLIMIT_NOFILE and refuses to boot above it, so with
+  # Ubuntu's soft default of 1024 every test that boots `serve` fails at
+  # startup. pam_limits applies this to `limactl shell` and sudo, which is
+  # how `cargo xtask lima run` reaches the VM. Root needs its own lines: `*`
+  # does not match root. Mirrors infra/provision/common-system.sh.
+  # -------------------------------------------------------------------------
+  - mode: system
+    script: |
+      #!/usr/bin/env bash
+      set -euxo pipefail
+      cat > /etc/security/limits.d/90-overdrive-nofile.conf <<'EOF'
+      # Managed by Overdrive provisioning. The control plane under test sizes
+      # its file-descriptor budget against RLIMIT_NOFILE; the distro soft
+      # default of 1024 makes every serve-booting test refuse at startup.
+      *    soft nofile 1048576
+      *    hard nofile 1048576
+      root soft nofile 1048576
+      root hard nofile 1048576
+      EOF
+
+  # -------------------------------------------------------------------------
   # Wasmtime — the WASM driver runtime (§6, §16).
   # -------------------------------------------------------------------------
   - mode: system

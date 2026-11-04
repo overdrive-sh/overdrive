@@ -81,4 +81,23 @@ log "virtiofsd"
 [ -x "${VIRTIOFSD_BIN}" ] || { echo "FATAL: ${VIRTIOFSD_BIN} missing" >&2; exit 1; }
 "${VIRTIOFSD_BIN}" --version
 
+# ---------------------------------------------------------------------------
+# RLIMIT_NOFILE. The control plane sizes its file-descriptor budget (~376832)
+# against RLIMIT_NOFILE and refuses to boot above it, so with Ubuntu's soft
+# default of 1024 every test that boots `serve` fails at startup. pam_limits
+# applies this to ssh logins and sudo, which is how `cargo xtask metal run`
+# reaches the box. Root needs its own lines: `*` does not match root.
+# Mirrored in infra/lima/overdrive-dev.yaml.
+# ---------------------------------------------------------------------------
+log "RLIMIT_NOFILE"
+cat > /etc/security/limits.d/90-overdrive-nofile.conf <<'EOF'
+# Managed by Overdrive provisioning. The control plane under test sizes its
+# file-descriptor budget against RLIMIT_NOFILE; the distro soft default of
+# 1024 makes every serve-booting test refuse at startup.
+*    soft nofile 1048576
+*    hard nofile 1048576
+root soft nofile 1048576
+root hard nofile 1048576
+EOF
+
 log "done"
