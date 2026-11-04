@@ -11462,7 +11462,11 @@ listen hooks attach to a workload cgroup that init creates, with the TCP arm a s
 sockops program in the same object (PR-2), accepted in contract shape (direction approved
 2026-11-04; spike V42 held 2026-11-04 on kernel `7.0.0-38-generic`: +0.88 ms p50, programs in the
 object init already loads, root programs stay `BPF_F_ALLOW_MULTI` link attachments, workload
-created directly in the cgroup). Remaining gates: the `quint-modeler` run and design review round 4. The
+created directly in the cgroup). Three round-4 items were accepted on 2026-11-04: the startup
+stop gate's attempts threshold comes from the Service's startup descriptor (1 for the
+guest-listener mechanic, `max_attempts` for `Tcp`/`Http`; rows carry honest streaks; P1); the
+guest-listener board's entry is removed at close (A1); and the conformance target of the
+`guest_report` model is a host-input projection module (A3). Remaining gates: the `quint-modeler` run and design review round 4. The
 `guest_report` model is checked against production for the host half only; the guest half is
 covered by Tier-3 boots (no writer seam in `overdrive-init`). See the feature delta. Dual-stack (an `AF_INET6` wildcard report satisfies an IPv4-declared
 listener, and the `V6ONLY` exposure) is recorded against GH #308. A
@@ -11489,6 +11493,7 @@ Contract: [feature delta](../../feature/service-allocation-readiness-and-ending/
 
 | Date | Change |
 |---|---|
+| 2026-11-04 | **service-allocation-readiness-and-ending: round-4 rulings P1, A1, A3 accepted ("proceed with recommendations").** P1: the startup stop gate's attempts threshold comes from the startup descriptor (`max_attempts` for `Tcp`/`Http`, 1 for `GuestListeners`); `ServiceAllocFact.max_attempts` becomes `startup_attempts_required`; guest-listener rows carry honest streaks; explicit probes unchanged (ADR-0269). A1: the board entry is removed at close; "frozen at the end of the wait" is the host reader's rule (ADR-0268). A3: a host-input projection module of `guest_report` is the conformance target. Remaining: `quint-modeler` run (M-3, M-6), review round 4. — Morgan. |
 | 2026-11-04 | **service-allocation-readiness-and-ending: spike V42 held; PR-2 accepted in contract shape.** Kernel `7.0.0-38-generic`: 1000/1000 exact workload reports, 0 from init, root programs effective in the child, +0.88 ms p50 (p90 +1.66), second `Ebpf::load` +20.4 ms. D13 pins: listen programs in the existing guest object, root programs stay `BPF_F_ALLOW_MULTI` link attachments, workload created directly in the cgroup, reports cover only the workload cgroup (fails closed). The `BPF_F_ALLOW_MULTI` link-attach citation is `kernel/bpf/cgroup.c:1506-1507 @ v7.0` (re-read; `:1502-1505` in two spike findings was wrong and is corrected). Remaining: `quint-modeler` run (M-6, M-3), review round 4. — Morgan. |
 | 2026-11-04 | **service-allocation-readiness-and-ending: user rulings of 2026-11-04.** PR-1, PR-3 and PR-4 accepted; PR-2 accepted in direction, pending spike V42 (the TCP listen arm becomes a separate small sockops program attached to an init-created workload cgroup); `guest_report` host-half conformance plus Tier-3 boot coverage for the guest half. — Morgan. |
 | 2026-11-03 | **service-allocation-readiness-and-ending: user rulings of 2026-11-03.** D13 to D16 (guest-reported listener readiness; ADR-0268 to ADR-0272; `inferred` removed, option R) are user-approved (spikes V34 to V38 and V41 held, V39 partial) and not yet Accepted; the D13 contract shape is accepted; four proposals (PR-1 to PR-4) await the user; dual-stack is recorded against GH #308. D17 (ADR-0273): a broker submit wakes the convergence loop at once, the cadence tick stays as the backstop (Accepted 2026-11-03; shape choices S1 to S6 accepted as proposed). ADR-0096's per-allocation backend veto and veto-before-stop ordering are removed as redundant under ADR-0267. The `stable_announced` view marker is removed (ADR-0265). — Morgan. |

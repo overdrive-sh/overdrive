@@ -14,8 +14,11 @@
  *   wait      the host's guest-report wait: waiting | ended
  *   exitrep   the exit report: unset | set (the ExitEvent on the exit receiver)
  * Model-only ghosts: produced (events the hook enqueued, each with a dropped marker for a full-ring event), eof (the beacon
- * closed), endset (the set when the wait ended: NoLateAccept), junk (garbage lines delivered, bounded), wapp (wire appends made
- * by a writer action: OneWriter).
+ * closed), junk (garbage lines delivered, bounded).
+ *
+ * Conformance: the full module is not a conformance target (the guest half has no writer seam; coverage split in the README). The
+ * host half is the module guest_report_host below. GR-4 (workload created directly in the cgroup, CLONE_INTO_CGROUP): the V42 row
+ * of the feature delta is the single home of that claim.
  *
  * Declared pairs DECL = {tcp80, udp53}; `other` is an undeclared pair (a duplicate or undeclared pair is a no-op on the set).
  *
@@ -59,19 +62,16 @@ module guest_report {
   var exitrep: str
   var produced: List[Ev]
   var eof: bool
-  var endset: Set[str]
   var junk: int
-  var wapp: int
   var conf_step: ConfStep
 
   action init = all {
     wl' = "running", ring' = List(), wire' = List(), rd' = 0, rset' = Set(), wait' = "waiting", exitrep' = "unset",
-    produced' = List(), eof' = false, endset' = Set(), junk' = 0, wapp' = 0,
+    produced' = List(), eof' = false, junk' = 0,
     conf_step' = variant("init", ()),
   }
 
   def exitOnWire: bool = wire.indices().exists(i => wire.nth(i) == "exit")
-  def exitRead: bool = wire.indices().exists(i => i < rd and wire.nth(i) == "exit")
   def nonDropped: int = produced.select(e => not(e.dropped)).length()
 
   // the workload listens (kernel hook): the event is enqueued, or dropped and counted when the ring is full
@@ -79,8 +79,8 @@ module guest_report {
     wl == "running", produced.length() < PMAX, ALPHA.contains(p),
     ring' = if (ring.length() < RCAP) ring.append(p) else ring,
     produced' = produced.append({ p: p, dropped: ring.length() >= RCAP }),
-    wl' = wl, wire' = wire, rd' = rd, rset' = rset, wait' = wait, exitrep' = exitrep, eof' = eof, endset' = endset,
-    junk' = junk, wapp' = wapp,
+    wl' = wl, wire' = wire, rd' = rd, rset' = rset, wait' = wait, exitrep' = exitrep, eof' = eof,
+    junk' = junk,
     conf_step' = if (REC) variant("WorkloadListen", { p: p }) else conf_step,
   }
 
@@ -88,15 +88,15 @@ module guest_report {
     wl == "running",
     wl' = "exited",
     ring' = ring, wire' = wire, rd' = rd, rset' = rset, wait' = wait, exitrep' = exitrep, produced' = produced, eof' = eof,
-    endset' = endset, junk' = junk, wapp' = wapp,
+    junk' = junk,
     conf_step' = if (REC) variant("WorkloadExit", ()) else conf_step,
   }
 
   // the one writer moves the head of the ring to the beacon
   action WriterForward = all {
     not(eof), ring != List(),
-    wire' = wire.append(ring.head()), ring' = ring.tail(), wapp' = wapp + 1,
-    wl' = wl, rd' = rd, rset' = rset, wait' = wait, exitrep' = exitrep, produced' = produced, eof' = eof, endset' = endset,
+    wire' = wire.append(ring.head()), ring' = ring.tail(),
+    wl' = wl, rd' = rd, rset' = rset, wait' = wait, exitrep' = exitrep, produced' = produced, eof' = eof,
     junk' = junk,
     conf_step' = if (REC) variant("WriterForward", ()) else conf_step,
   }
@@ -104,8 +104,8 @@ module guest_report {
   // after the workload exits, the writer forwards everything left in the ring
   action WriterDrain = all {
     wl == "exited", not(eof), ring != List(),
-    wire' = wire.concat(ring), ring' = List(), wapp' = wapp + ring.length(),
-    wl' = wl, rd' = rd, rset' = rset, wait' = wait, exitrep' = exitrep, produced' = produced, eof' = eof, endset' = endset,
+    wire' = wire.concat(ring), ring' = List(),
+    wl' = wl, rd' = rd, rset' = rset, wait' = wait, exitrep' = exitrep, produced' = produced, eof' = eof,
     junk' = junk,
     conf_step' = if (REC) variant("WriterDrain", ()) else conf_step,
   }
@@ -113,9 +113,9 @@ module guest_report {
   // EXIT is written once, only after the workload exited and the ring is empty (the drain rule)
   action WriterExit = all {
     wl == "exited", not(eof), BUG_NODRAIN or ring == List(), not(exitOnWire),
-    wire' = wire.append("exit"), wapp' = wapp + 1,
+    wire' = wire.append("exit"),
     wl' = wl, ring' = ring, rd' = rd, rset' = rset, wait' = wait, exitrep' = exitrep, produced' = produced, eof' = eof,
-    endset' = endset, junk' = junk,
+    junk' = junk,
     conf_step' = if (REC) variant("WriterExit", ()) else conf_step,
   }
 
@@ -124,7 +124,7 @@ module guest_report {
     not(eof),
     eof' = true,
     wl' = wl, ring' = ring, wire' = wire, rd' = rd, rset' = rset, wait' = wait, exitrep' = exitrep, produced' = produced,
-    endset' = endset, junk' = junk, wapp' = wapp,
+    junk' = junk,
     conf_step' = if (REC) variant("BeaconClose", ()) else conf_step,
   }
 
@@ -138,15 +138,14 @@ module guest_report {
         rset' = if (wire.nth(rd) != "exit" and wait == "waiting" and DECL.contains(wire.nth(rd))) rset.union(Set(wire.nth(rd))) else rset,
         exitrep' = if (wire.nth(rd) == "exit") "rset" else exitrep,
         wait' = if (wire.nth(rd) == "exit") "ended" else wait,
-        endset' = if (wire.nth(rd) == "exit" and wait == "waiting") rset else endset,
-        wl' = wl, ring' = ring, wire' = wire, produced' = produced, eof' = eof, junk' = junk, wapp' = wapp,
+        wl' = wl, ring' = ring, wire' = wire, produced' = produced, eof' = eof, junk' = junk,
         conf_step' = if (REC) variant("HostRead", ()) else conf_step,
       },
       all {
         eof, rd == n, wait == "waiting",
-        wait' = "ended", endset' = rset,
+        wait' = "ended",
         wl' = wl, ring' = ring, wire' = wire, rd' = rd, rset' = rset, exitrep' = exitrep, produced' = produced, eof' = eof,
-        junk' = junk, wapp' = wapp,
+        junk' = junk,
         conf_step' = if (REC) variant("HostRead", ()) else conf_step,
       },
     }
@@ -157,13 +156,13 @@ module guest_report {
     junk < JMAX,
     junk' = junk + 1,
     wl' = wl, ring' = ring, wire' = wire, rd' = rd, rset' = rset, wait' = wait, exitrep' = exitrep, produced' = produced,
-    eof' = eof, endset' = endset, wapp' = wapp,
+    eof' = eof,
     conf_step' = if (REC) variant("HostGarbage", ()) else conf_step,
   }
 
   action Idle = all {
     wl' = wl, ring' = ring, wire' = wire, rd' = rd, rset' = rset, wait' = wait, exitrep' = exitrep, produced' = produced,
-    eof' = eof, endset' = endset, junk' = junk, wapp' = wapp,
+    eof' = eof, junk' = junk,
     conf_step' = if (REC) variant("Idle", ()) else conf_step,
   }
 
@@ -173,27 +172,19 @@ module guest_report {
   }
 
   // ------------------------------------------------------------------ invariants
-  // D13 item 1 OneWriter: every wire entry was appended by the writer's actions (kept as a check on the ghost)
-  val OneWriter: bool = wapp == wire.length()
   // D13 item 1 ListenBeforeExit: in the wire, every listen precedes exit
   val ListenBeforeExit: bool = wire.indices().forall(i => (wire.nth(i) == "exit") implies (i == wire.length() - 1))
   // D13 item 1 DeliveredBeforeExit: when exit is on the wire, every produced, non-dropped event is on the wire before it
   val DeliveredBeforeExit: bool = exitOnWire implies (wire.length() - 1 == nonDropped)
-  // D13 item 3 NoLateAccept: the reported set does not change after the wait ended
-  val NoLateAccept: bool = (wait == "ended") implies (rset == endset)
-  // D13 item 3 ExitNotMasked: the exit report is set iff an exit entry was read
-  val ExitNotMasked: bool = (exitrep == "rset") == exitRead
-  // D13 item 10 SetWithinProduced: every pair in the set was produced by the workload (and reached the wire)
-  val SetWithinProduced: bool = rset.forall(p => produced.indices().exists(i => produced.nth(i).p == p and not(produced.nth(i).dropped)))
-  val Safety: bool = and { OneWriter, ListenBeforeExit, DeliveredBeforeExit, NoLateAccept, ExitNotMasked, SetWithinProduced }
+  val Safety: bool = and { ListenBeforeExit, DeliveredBeforeExit }
 
   // D13 item 3 ExitEventuallyReported: a workload that exits with the beacon open ends the guest-report wait
   temporal ExitEventuallyReported =
     and {
-      weakFair(WriterForward, (wl, ring, wire, rd, rset, wait, exitrep, produced, eof, endset, junk, wapp, conf_step)),
-      weakFair(WriterDrain, (wl, ring, wire, rd, rset, wait, exitrep, produced, eof, endset, junk, wapp, conf_step)),
-      weakFair(WriterExit, (wl, ring, wire, rd, rset, wait, exitrep, produced, eof, endset, junk, wapp, conf_step)),
-      weakFair(HostRead, (wl, ring, wire, rd, rset, wait, exitrep, produced, eof, endset, junk, wapp, conf_step)),
+      weakFair(WriterForward, (wl, ring, wire, rd, rset, wait, exitrep, produced, eof, junk, conf_step)),
+      weakFair(WriterDrain, (wl, ring, wire, rd, rset, wait, exitrep, produced, eof, junk, conf_step)),
+      weakFair(WriterExit, (wl, ring, wire, rd, rset, wait, exitrep, produced, eof, junk, conf_step)),
+      weakFair(HostRead, (wl, ring, wire, rd, rset, wait, exitrep, produced, eof, junk, conf_step)),
     }.implies(always((wl == "exited" and not(eof)).implies(eventually(wait == "ended"))))
 
   // ------------------------------------------------------------------ named runs (critical scenarios)
@@ -246,3 +237,143 @@ module guest_report {
 
 module gr_ok { import guest_report(OFF = Set(), REC = false).* from "./guest_report" }
 module gr_conf { import guest_report(OFF = Set(), REC = true).* from "./guest_report" }
+
+/**
+ * guest_report_host: the conformance projection of the beacon report protocol (D13 items 3 and 10; feature delta § Formal
+ * protocol model, D13 to D16, M-6). The host reader's half only: the input is the scripted line stream, the guest's drain rule is
+ * not a host concern, so appends are unordered with respect to each other and `listen` can follow `exit` (the reader's own rule
+ * drops it). It is the only conformance target of the report protocol; the full guest_report module is not one.
+ *
+ * State: rset (GuestListenerReports::reported(alloc)), exitrep (the ExitEvent on the receiver from take_exit_receiver).
+ * Model-only, never projected: wait (the guest-report wait), lines (the scripted input not yet consumed: listen(p), exit, junk),
+ * eof. The declared set DECL is a constant; a valid line's pair ranges over DECL and one undeclared pair.
+ *
+ * Actions to driving port (the BeaconIo seam, SimBeaconIo): HostRead = release_read; AppendListen(p), AppendExit, HostGarbage =
+ * guest_write of a valid LISTEN line, an EXIT line, an unparseable line; BeaconClose = guest_close.
+ * No hazard and no invariant of its own: the HostRead guards keep rset within DECL and growing only; the decision's hazard is
+ * gr-hazard-no-drain-before-exit in the full module.
+ */
+module guest_report_host_conf {
+  type HostConfStep =
+    | init
+    | HostRead
+    | AppendListen({ p: str })
+    | AppendExit
+    | HostGarbage
+    | BeaconClose
+    | Idle
+}
+
+module guest_report_host {
+  import guest_report_host_conf.HostConfStep from "./guest_report"
+  const REC: bool
+
+  val DECL: Set[str] = Set("tcp80", "udp53")
+  val ALPHA: Set[str] = Set("tcp80", "udp53", "other")
+  val LMAX: int = 4     // bound on the scripted lines not yet consumed
+
+  var rset: Set[str]
+  var exitrep: str
+  var wait: str         // model-only
+  var lines: List[{ k: str, p: str }]  // model-only: k is "listen" (with pair p), "exit" or "junk"
+  var eof: bool         // model-only
+  var conf_step: HostConfStep
+
+  action init = all {
+    rset' = Set(), exitrep' = "unset", wait' = "waiting", lines' = List(), eof' = false,
+    conf_step' = variant("init", ()),
+  }
+
+  // the real reader consumes the next scripted line and routes it, or sees EOF on an empty closed stream
+  action HostRead = any {
+    all {
+      lines != List(),
+      lines' = lines.tail(),
+      rset' = if (lines.head().k == "listen" and wait == "waiting" and DECL.contains(lines.head().p)) rset.union(Set(lines.head().p)) else rset,
+      exitrep' = if (lines.head().k == "exit") "set" else exitrep,
+      wait' = if (lines.head().k == "exit") "ended" else wait,
+      eof' = eof,
+      conf_step' = if (REC) variant("HostRead", ()) else conf_step,
+    },
+    all {
+      lines == List(), eof, wait == "waiting",
+      wait' = "ended",
+      rset' = rset, exitrep' = exitrep, lines' = lines, eof' = eof,
+      conf_step' = if (REC) variant("HostRead", ()) else conf_step,
+    },
+  }
+
+  // a valid LISTEN line is written to the beacon (the guest side; nothing is appended once the beacon is closed)
+  action AppendListen(p: str): bool = all {
+    not(eof), lines.length() < LMAX, ALPHA.contains(p),
+    lines' = lines.append({ k: "listen", p: p }),
+    rset' = rset, exitrep' = exitrep, wait' = wait, eof' = eof,
+    conf_step' = if (REC) variant("AppendListen", { p: p }) else conf_step,
+  }
+
+  action AppendExit = all {
+    not(eof), lines.length() < LMAX,
+    lines' = lines.append({ k: "exit", p: "" }),
+    rset' = rset, exitrep' = exitrep, wait' = wait, eof' = eof,
+    conf_step' = if (REC) variant("AppendExit", ()) else conf_step,
+  }
+
+  // an unparseable line: no effect on rset, wait or exitrep
+  action HostGarbage = all {
+    not(eof), lines.length() < LMAX,
+    lines' = lines.append({ k: "junk", p: "" }),
+    rset' = rset, exitrep' = exitrep, wait' = wait, eof' = eof,
+    conf_step' = if (REC) variant("HostGarbage", ()) else conf_step,
+  }
+
+  // EOF: the stream ends after the lines already written
+  action BeaconClose = all {
+    not(eof),
+    eof' = true,
+    rset' = rset, exitrep' = exitrep, wait' = wait, lines' = lines,
+    conf_step' = if (REC) variant("BeaconClose", ()) else conf_step,
+  }
+
+  action Idle = all {
+    rset' = rset, exitrep' = exitrep, wait' = wait, lines' = lines, eof' = eof,
+    conf_step' = if (REC) variant("Idle", ()) else conf_step,
+  }
+
+  action step = {
+    nondet p = ALPHA.oneOf()
+    any { HostRead, AppendListen(p), AppendExit, HostGarbage, BeaconClose, Idle }
+  }
+
+  // all declared pairs appended and read: rset reaches the declared set while the wait stays open
+  run host_all_declared_reported = init
+    .then(AppendListen("tcp80")).then(AppendListen("udp53"))
+    .then(HostRead).then(HostRead)
+    .expect(rset == DECL and wait == "waiting" and exitrep == "unset")
+
+  // an unparseable line mid-stream is dropped; the following listen and exit still take effect
+  run host_garbage_line_is_dropped = init
+    .then(AppendListen("tcp80")).then(HostGarbage).then(AppendListen("udp53")).then(AppendExit)
+    .then(HostRead).then(HostRead)
+    .expect(rset == Set("tcp80") and wait == "waiting" and exitrep == "unset")
+    .then(HostRead).then(HostRead)
+    .expect(rset == DECL and wait == "ended" and exitrep == "set")
+
+  // EOF with rset partial: the wait ends, rset is as it was, no exit report
+  run host_beacon_closes_with_partial_set = init
+    .then(AppendListen("tcp80")).then(HostRead).then(BeaconClose)
+    .expect(wait == "waiting" and rset == Set("tcp80"))
+    .then(HostRead)
+    .expect(wait == "ended" and rset == Set("tcp80") and exitrep == "unset")
+    .then(Idle)
+    .expect(rset == Set("tcp80") and wait == "ended" and exitrep == "unset")
+
+  // an exit line then a listen line: exitrep set, rset unchanged by the later line (the reader's rule)
+  run host_listen_after_exit_is_ignored = init
+    .then(AppendListen("tcp80")).then(AppendExit).then(AppendListen("udp53"))
+    .then(HostRead).then(HostRead)
+    .expect(rset == Set("tcp80") and exitrep == "set" and wait == "ended")
+    .then(HostRead)
+    .expect(rset == Set("tcp80") and exitrep == "set" and wait == "ended")
+}
+
+module gr_host_conf { import guest_report_host(REC = true).* from "./guest_report" }

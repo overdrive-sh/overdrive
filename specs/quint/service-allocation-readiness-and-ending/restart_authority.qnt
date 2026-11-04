@@ -32,6 +32,8 @@
  *   claim    the failure claim on the row's terminal: "" | early_exit | startup_probe_failed | liveness_probe_failed |
  *            backoff_exhausted;  author: the reconciler that authored the claim
  *   crashed  ghost: the row was once failed_crash
+ * Workload flag gl (set at Deploy, only with decl): the Service's startup descriptor is GuestListeners (D14 item 3). It carries two
+ * rules: no Fail row before the deadline (the producer), and the stop gate threshold sstreak >= 1 instead of MAXA.
  * Workload: cur (current attempt), used (restart budget consumed), done (given up).
  *
  * Actors. Environment: Deploy, StartOk, StartRejected, Crash, CleanExit, OperatorStop, StartupRow, Deadline.
@@ -80,7 +82,7 @@
 module restart_authority_conf {
   type ConfStep =
     | init
-    | Deploy({ decl: bool })
+    | Deploy({ decl: bool, gl: bool })
     | StartOk({ i: int })
     | StartRejected({ i: int })
     | Crash({ i: int })
@@ -125,6 +127,7 @@ module restart_authority {
 
   var at: int -> Att
   var decl: bool
+  var gl: bool           // the workload's startup descriptor is GuestListeners (D14 item 3): set at Deploy, only with decl
   var cur: int
   var used: int
   var done: bool
@@ -138,7 +141,7 @@ module restart_authority {
   }
 
   action init = all {
-    at' = IDS.mapBy(i => blank), decl' = false, cur' = 0, used' = 0, done' = false, deployed' = false,
+    at' = IDS.mapBy(i => blank), decl' = false, gl' = false, cur' = 0, used' = 0, done' = false, deployed' = false,
     g' = { startupOverTerm: false, emitCount: 0, stableOverAnn: false },
     conf_step' = variant("init", ()),
   }
@@ -155,19 +158,19 @@ module restart_authority {
     else "backoff_exhausted"
 
   // ---------------------------------------------------------------- environment
-  action Deploy(d: bool): bool = all {
-    not(deployed),
-    deployed' = true, decl' = d,
+  action Deploy(d: bool, gd: bool): bool = all {
+    not(deployed), gd implies d,
+    deployed' = true, decl' = d, gl' = gd,
     at' = at.set(0, { ...at.get(0), row: "pending" }),
     cur' = cur, used' = used, done' = done, g' = g,
-    conf_step' = if (REC) variant("Deploy", { decl: d }) else conf_step,
+    conf_step' = if (REC) variant("Deploy", { decl: d, gl: gd }) else conf_step,
   }
 
   // the shim started the allocation: Running row, supervisor registered, VM live
   action StartOk(i: int): bool = all {
     at.get(i).row == "pending",
     at' = at.set(i, { ...at.get(i), row: "running", sup: true, vm: true }),
-    decl' = decl, cur' = cur, used' = used, done' = done, deployed' = deployed, g' = g,
+    decl' = decl, gl' = gl, cur' = cur, used' = used, done' = done, deployed' = deployed, g' = g,
     conf_step' = if (REC) variant("StartOk", { i: i }) else conf_step,
   }
 
@@ -175,7 +178,7 @@ module restart_authority {
   action StartRejected(i: int): bool = all {
     at.get(i).row == "pending",
     at' = at.set(i, { ...at.get(i), row: "failed_other" }),
-    decl' = decl, cur' = cur, used' = used, done' = done, deployed' = deployed, g' = g,
+    decl' = decl, gl' = gl, cur' = cur, used' = used, done' = done, deployed' = deployed, g' = g,
     conf_step' = if (REC) variant("StartRejected", { i: i }) else conf_step,
   }
 
@@ -183,7 +186,7 @@ module restart_authority {
   action Crash(i: int): bool = all {
     at.get(i).row == "running", at.get(i).vm,
     at' = at.set(i, { ...at.get(i), row: "failed_crash", sup: false, vm: false, crashed: true }),
-    decl' = decl, cur' = cur, used' = used, done' = done, deployed' = deployed, g' = g,
+    decl' = decl, gl' = gl, cur' = cur, used' = used, done' = done, deployed' = deployed, g' = g,
     conf_step' = if (REC) variant("Crash", { i: i }) else conf_step,
   }
 
@@ -191,7 +194,7 @@ module restart_authority {
   action CleanExit(i: int): bool = all {
     at.get(i).row == "running", at.get(i).vm,
     at' = at.set(i, { ...at.get(i), row: "t_clean", sup: false, vm: false }),
-    decl' = decl, cur' = cur, used' = used, done' = done, deployed' = deployed, g' = g,
+    decl' = decl, gl' = gl, cur' = cur, used' = used, done' = done, deployed' = deployed, g' = g,
     conf_step' = if (REC) variant("CleanExit", { i: i }) else conf_step,
   }
 
@@ -199,7 +202,7 @@ module restart_authority {
   action OperatorStop(i: int): bool = all {
     at.get(i).row == "running",
     at' = at.set(i, { ...at.get(i), row: "t_operator", sup: false, vm: false }),
-    decl' = decl, cur' = cur, used' = used, done' = done, deployed' = deployed, g' = g,
+    decl' = decl, gl' = gl, cur' = cur, used' = used, done' = done, deployed' = deployed, g' = g,
     conf_step' = if (REC) variant("OperatorStop", { i: i }) else conf_step,
   }
 
@@ -208,13 +211,11 @@ module restart_authority {
   action StartupRow(i: int, res: str): bool = {
     val a = at.get(i)
     all {
-      decl, a.row == "running", a.sup, not(a.stable), a.sseq < SMAX,
-      res == "fail" or a.vm,    // RA-4: a dead guest cannot produce a Pass
+      startupRowEnabled(i, res),
       at' = at.set(i, { ...a, sseq: a.sseq + 1, srow: res,
-                        // PR-3 (D14 item 3): the first Fail is written at the deadline carrying attempt = max_attempts, so a
-                        // Fail written once the deadline passed carries the maximum; before the deadline the streak counts up
-                        sstreak: if (res == "fail") (if (a.dl) MAXA else if (a.sstreak < MAXA) a.sstreak + 1 else MAXA) else 0 }),
-      deployed' = deployed, decl' = decl, cur' = cur, used' = used, done' = done, g' = g,
+                        // the producer-counted streak, honest for both kinds; MAXA is the model's cap
+                        sstreak: if (res == "fail") (if (a.sstreak < MAXA) a.sstreak + 1 else MAXA) else 0 }),
+      deployed' = deployed, decl' = decl, gl' = gl, cur' = cur, used' = used, done' = done, g' = g,
       conf_step' = if (REC) variant("StartupRow", { i: i, res: res }) else conf_step,
     }
   }
@@ -225,7 +226,7 @@ module restart_authority {
     all {
       Set("running", "failed_crash").contains(a.row), not(a.dl),
       at' = at.set(i, { ...a, dl: true }),
-      deployed' = deployed, decl' = decl, cur' = cur, used' = used, done' = done, g' = g,
+      deployed' = deployed, decl' = decl, gl' = gl, cur' = cur, used' = used, done' = done, g' = g,
       conf_step' = if (REC) variant("Deadline", { i: i }) else conf_step,
     }
   }
@@ -241,16 +242,21 @@ module restart_authority {
       (a.ann implies (a.srow == "pass")),
       at' = at.set(i, { ...a, stable: true, ann: false }),
       g' = { ...g, stableOverAnn: g.stableOverAnn or (a.ann and a.srow != "pass") },
-      deployed' = deployed, decl' = decl, cur' = cur, used' = used, done' = done,
+      deployed' = deployed, decl' = decl, gl' = gl, cur' = cur, used' = used, done' = done,
       conf_step' = if (REC) variant("SLStable", { i: i }) else conf_step,
     }
   }
 
   // The three gates (attempts at the maximum, deadline passed, no pass) and the D5 guard
   def startupGates(a: Att): bool =
-    decl and a.srow == "fail" and a.sstreak >= MAXA and a.dl and not(a.stable)
+    decl and a.srow == "fail" and a.sstreak >= (if (gl) 1 else MAXA) and a.dl and not(a.stable)
   def startupGuard(a: Att): bool =
     if (BUG_GUARD) (a.row == "running" or a.row == "failed_crash") else a.row == "running"
+  // whether the startup row action is enabled for an attempt (the producer rule for gl, PR-3)
+  def startupRowEnabled(i: int, res: str): bool = {
+    val a = at.get(i)
+    decl and a.row == "running" and a.sup and not(a.stable) and a.sseq < SMAX and (res == "pass" or not(gl) or a.dl) and (res == "fail" or a.vm)   // PR-3: a gl workload writes no Fail before the deadline; RA-4: a dead guest cannot produce a Pass
+  }
   def startupStopEnabled(a: Att): bool =
     startupGates(a) and startupGuard(a) and
     (if (BUG_STAMP) not(a.ann) else a.sseq > a.acted) and not(BUG_SLSTART)
@@ -273,7 +279,7 @@ module restart_authority {
                         stopped: if (stage == "landed") "landed" else "failed" }),
       g' = { ...g, startupOverTerm: g.startupOverTerm or a.row != "running",
              emitCount: g.emitCount + 1 },
-      deployed' = deployed, decl' = decl, cur' = cur, used' = used, done' = done,
+      deployed' = deployed, decl' = decl, gl' = gl, cur' = cur, used' = used, done' = done,
       conf_step' = if (REC) variant("SLStartupStop", { i: i, stage: stage }) else conf_step,
     }
   }
@@ -286,7 +292,7 @@ module restart_authority {
     all {
       a.row == "running", a.stable,
       at' = at.set(i, afterStop(a, stage, "t_liveness", BUG_HOOKFIRST)),
-      deployed' = deployed, decl' = decl, cur' = cur, used' = used, done' = done, g' = g,
+      deployed' = deployed, decl' = decl, gl' = gl, cur' = cur, used' = used, done' = done, g' = g,
       conf_step' = if (REC) variant("SLLivenessStop", { i: i, stage: stage }) else conf_step,
     }
   }
@@ -297,7 +303,7 @@ module restart_authority {
     all {
       BUG_SLCRASH, decl, a.row == "failed_crash", a.srow != "pass", not(a.dl), a.claim == "",
       at' = at.set(i, { ...a, claim: "early_exit", author: "service_lifecycle" }),
-      deployed' = deployed, decl' = decl, cur' = cur, used' = used, done' = done, g' = g,
+      deployed' = deployed, decl' = decl, gl' = gl, cur' = cur, used' = used, done' = done, g' = g,
       conf_step' = if (REC) variant("SLFinalizeCrash", { i: i }) else conf_step,
     }
   }
@@ -309,7 +315,7 @@ module restart_authority {
       BUG_SLSTART, startupGates(a), a.row == "running", not(a.ann),
       at' = at.set(i, { ...a, row: "failed_other", sup: false, ann: true,
                         claim: "startup_probe_failed", author: "service_lifecycle" }),
-      deployed' = deployed, decl' = decl, cur' = cur, used' = used, done' = done, g' = g,
+      deployed' = deployed, decl' = decl, gl' = gl, cur' = cur, used' = used, done' = done, g' = g,
       conf_step' = if (REC) variant("SLFinalizeStartup", { i: i }) else conf_step,
     }
   }
@@ -326,7 +332,7 @@ module restart_authority {
     restartEnabled,
     cur' = cur + 1, used' = used + 1,
     at' = at.set(cur + 1, { ...at.get(cur + 1), row: "pending" }),
-    done' = done, deployed' = deployed, decl' = decl, g' = g,
+    done' = done, deployed' = deployed, decl' = decl, gl' = gl, g' = g,
     conf_step' = if (REC) variant("WLRestart", ()) else conf_step,
   }
 
@@ -335,22 +341,23 @@ module restart_authority {
     giveUpEnabled,
     at' = at.set(cur, { ...at.get(cur), claim: classify(at.get(cur)), author: "workload_lifecycle" }),
     done' = true,
-    cur' = cur, used' = used, deployed' = deployed, decl' = decl, g' = g,
+    cur' = cur, used' = used, deployed' = deployed, decl' = decl, gl' = gl, g' = g,
     conf_step' = if (REC) variant("WLGiveUp", ()) else conf_step,
   }
 
   action Idle = all {
-    at' = at, decl' = decl, cur' = cur, used' = used, done' = done, deployed' = deployed, g' = g,
+    at' = at, decl' = decl, gl' = gl, cur' = cur, used' = used, done' = done, deployed' = deployed, g' = g,
     conf_step' = if (REC) variant("Idle", ()) else conf_step,
   }
 
   action step = {
     nondet i = IDS.oneOf()
     nondet d = Set(true, false).oneOf()
+    nondet gd = Set(true, false).oneOf()
     nondet res = Set("fail", "pass").oneOf()
     nondet stage = Set("landed", "pre_hook", "row_write").oneOf()
     any {
-      Deploy(d), StartOk(i), StartRejected(i), Crash(i), CleanExit(i), OperatorStop(i), StartupRow(i, res), Deadline(i),
+      Deploy(d, gd), StartOk(i), StartRejected(i), Crash(i), CleanExit(i), OperatorStop(i), StartupRow(i, res), Deadline(i),
       SLStable(i), SLStartupStop(i, stage), SLLivenessStop(i, stage), SLFinalizeCrash(i), SLFinalizeStartup(i),
       WLRestart, WLGiveUp, Idle,
     }
@@ -415,7 +422,7 @@ module restart_authority {
   // D5: the streak reached the maximum, the allocation crashed, then the deadline passed: no startup verdict;
   // WorkloadLifecycle restarts
   run crash_after_attempts_exhausted_then_deadline_passes = init
-    .then(Deploy(true)).then(StartOk(0))
+    .then(Deploy(true, false)).then(StartOk(0))
     .then(StartupRow(0, "fail")).then(StartupRow(0, "fail"))
     .expect(at.get(0).sstreak == MAXA and at.get(0).sup)
     .then(Crash(0)).then(Deadline(0))
@@ -425,7 +432,7 @@ module restart_authority {
 
   // D5: the live path still produces the startup verdict (now the stop, D7)
   run running_alloc_with_exhausted_probes_past_deadline_is_stopped = init
-    .then(Deploy(true)).then(StartOk(0))
+    .then(Deploy(true, false)).then(StartOk(0))
     .then(StartupRow(0, "fail")).then(StartupRow(0, "fail")).then(Deadline(0))
     .expect(startupStopEnabled(at.get(0)))
     .then(SLStartupStop(0, "landed"))
@@ -434,7 +441,7 @@ module restart_authority {
   // D6: a declared probe, no pass, every attempt crashes: restarts to the ceiling, then give-up early_exit; no
   // ServiceLifecycle claim on any Failed row
   run pre_startup_crash_loop_gives_up_early_exit = init
-    .then(Deploy(true)).then(StartOk(0)).then(Crash(0)).then(WLRestart)
+    .then(Deploy(true, false)).then(StartOk(0)).then(Crash(0)).then(WLRestart)
     .then(StartOk(1)).then(Crash(1)).then(WLRestart)
     .then(StartOk(2)).then(Crash(2))
     .expect(cur == 2 and used == 2 and not(done) and giveUpEnabled and not(restartEnabled) and Safety)
@@ -445,35 +452,35 @@ module restart_authority {
   // D6: the first attempt crashes before a pass, the successor passes and is Stable; the predecessor row stays Failed with
   // its crash and no terminal is written
   run pre_startup_crash_then_successor_passes = init
-    .then(Deploy(true)).then(StartOk(0)).then(Crash(0)).then(WLRestart)
+    .then(Deploy(true, false)).then(StartOk(0)).then(Crash(0)).then(WLRestart)
     .then(StartOk(1)).then(StartupRow(1, "pass")).then(SLStable(1))
     .expect(at.get(1).stable and at.get(0).row == "failed_crash" and at.get(0).crashed and at.get(0).claim == ""
             and at.get(1).claim == "" and not(done) and Safety)
 
   // D6: a crash after a startup pass gives up backoff_exhausted
   run crash_after_startup_pass_gives_up_backoff_exhausted = init
-    .then(Deploy(true)).then(StartOk(0)).then(StartupRow(0, "pass")).then(Crash(0)).then(WLRestart)
+    .then(Deploy(true, false)).then(StartOk(0)).then(StartupRow(0, "pass")).then(Crash(0)).then(WLRestart)
     .then(StartOk(1)).then(StartupRow(1, "pass")).then(Crash(1)).then(WLRestart)
     .then(StartOk(2)).then(StartupRow(2, "pass")).then(Crash(2)).then(WLGiveUp)
     .expect(at.get(2).claim == "backoff_exhausted" and Safety)
 
   // D6: an opt-out Service (no startup probe) crash loop gives up backoff_exhausted
   run opt_out_service_crash_loop_gives_up_backoff_exhausted = init
-    .then(Deploy(false)).then(StartOk(0)).then(SLStable(0)).then(Crash(0)).then(WLRestart)
+    .then(Deploy(false, false)).then(StartOk(0)).then(SLStable(0)).then(Crash(0)).then(WLRestart)
     .then(StartOk(1)).then(Crash(1)).then(WLRestart)
     .then(StartOk(2)).then(Crash(2)).then(WLGiveUp)
     .expect(at.get(2).claim == "backoff_exhausted" and at.get(0).stable and Safety)
 
   // D6: a Failed row from a start rejection or fail-closed supersession is never classified
   run non_crash_failed_row_gives_up_backoff_exhausted = init
-    .then(Deploy(true)).then(StartOk(0)).then(Crash(0)).then(WLRestart)
+    .then(Deploy(true, false)).then(StartOk(0)).then(Crash(0)).then(WLRestart)
     .then(StartOk(1)).then(Crash(1)).then(WLRestart)
     .then(StartRejected(2)).then(WLGiveUp)
     .expect(at.get(2).row == "failed_other" and at.get(2).claim == "backoff_exhausted" and Safety)
 
   // D6: a liveness-kill loop gives up liveness_probe_failed (precedence unchanged)
   run liveness_kill_loop_gives_up_liveness_probe_failed = init
-    .then(Deploy(true)).then(StartOk(0)).then(StartupRow(0, "pass")).then(SLStable(0)).then(SLLivenessStop(0, "landed")).then(WLRestart)
+    .then(Deploy(true, false)).then(StartOk(0)).then(StartupRow(0, "pass")).then(SLStable(0)).then(SLLivenessStop(0, "landed")).then(WLRestart)
     .then(StartOk(1)).then(StartupRow(1, "pass")).then(SLStable(1)).then(SLLivenessStop(1, "landed")).then(WLRestart)
     .then(StartOk(2)).then(StartupRow(2, "pass")).then(SLStable(2)).then(SLLivenessStop(2, "landed")).then(WLGiveUp)
     .expect(at.get(2).claim == "liveness_probe_failed" and Safety)
@@ -481,7 +488,7 @@ module restart_authority {
   // D7: the instance stays alive and never passes: a startup stop on every attempt, restarts to the ceiling, then give-up
   // startup_probe_failed; no failure claim on any row before it
   run startup_never_passes_loop_gives_up_startup_probe_failed = init
-    .then(Deploy(true)).then(StartOk(0))
+    .then(Deploy(true, false)).then(StartOk(0))
     .then(StartupRow(0, "fail")).then(StartupRow(0, "fail")).then(Deadline(0)).then(SLStartupStop(0, "landed"))
     .expect(at.get(0).claim == "" and at.get(0).row == "t_startup" and Safety)
     .then(WLRestart).then(StartOk(1))
@@ -496,7 +503,7 @@ module restart_authority {
   // R-2: the gate reads the LATEST startup row: pass, fail, fail, then the deadline enables the stop although a Pass was
   // recorded earlier
   run pass_then_fails_before_stable_is_stopped = init
-    .then(Deploy(true)).then(StartOk(0))
+    .then(Deploy(true, false)).then(StartOk(0))
     .then(StartupRow(0, "pass")).then(StartupRow(0, "fail")).then(StartupRow(0, "fail")).then(Deadline(0))
     .then(SLStartupStop(0, "landed"))
     .expect(at.get(0).row == "t_startup" and not(at.get(0).stable) and Safety)
@@ -504,7 +511,7 @@ module restart_authority {
   // D7: the first attempt is startup-stopped, the successor passes and is Stable; no startup_probe_failed claim is ever
   // written
   run startup_stop_then_successor_passes_is_stable = init
-    .then(Deploy(true)).then(StartOk(0))
+    .then(Deploy(true, false)).then(StartOk(0))
     .then(StartupRow(0, "fail")).then(StartupRow(0, "fail")).then(Deadline(0)).then(SLStartupStop(0, "landed")).then(WLRestart)
     .then(StartOk(1)).then(StartupRow(1, "pass")).then(SLStable(1))
     .expect(at.get(1).stable and at.get(0).row == "t_startup" and at.get(0).claim == "" and at.get(1).claim == ""
@@ -513,13 +520,13 @@ module restart_authority {
   // D7: last cause wins at the ceiling: attempt one startup-stopped then a final pre-startup crash gives early_exit; the
   // reverse order gives startup_probe_failed
   run startup_stop_then_crash_names_last_cause = init
-    .then(Deploy(true)).then(StartOk(0))
+    .then(Deploy(true, false)).then(StartOk(0))
     .then(StartupRow(0, "fail")).then(StartupRow(0, "fail")).then(Deadline(0)).then(SLStartupStop(0, "landed")).then(WLRestart)
     .then(StartOk(1)).then(Crash(1)).then(WLRestart)
     .then(StartOk(2)).then(Crash(2)).then(WLGiveUp)
     .expect(at.get(2).claim == "early_exit" and Safety)
   run crash_then_startup_stop_names_last_cause = init
-    .then(Deploy(true)).then(StartOk(0)).then(Crash(0)).then(WLRestart)
+    .then(Deploy(true, false)).then(StartOk(0)).then(Crash(0)).then(WLRestart)
     .then(StartOk(1)).then(Crash(1)).then(WLRestart)
     .then(StartOk(2))
     .then(StartupRow(2, "fail")).then(StartupRow(2, "fail")).then(Deadline(2)).then(SLStartupStop(2, "landed")).then(WLGiveUp)
@@ -527,30 +534,55 @@ module restart_authority {
 
   // D7: a startup-stopped row is restarted; an operator-stopped row beside it is not
   run startup_stop_is_not_intentional_stop = init
-    .then(Deploy(true)).then(StartOk(0))
+    .then(Deploy(true, false)).then(StartOk(0))
     .then(StartupRow(0, "fail")).then(StartupRow(0, "fail")).then(Deadline(0)).then(SLStartupStop(0, "landed"))
     .expect(restartEnabled and Safety)
     .then(WLRestart).expect(cur == 1 and used == 1)
     .then(StartOk(1)).then(OperatorStop(1))
     .expect(at.get(1).row == "t_operator" and not(restartEnabled) and not(giveUpEnabled) and Safety)
 
-  // D14 item 3 (PR-3): the guest-listener producer writes no Fail before the deadline: the first Fail row is written at the
-  // deadline with no earlier row and carries the maximum attempt, so it alone enables the stop; the successor's Pass is the
-  // first row of its attempt (no earlier Fail)
+  // D14 item 3 (PR-3): the guest-listener producer (gl) writes no Fail before the deadline: its first Fail row is written at
+  // the deadline with no earlier row, is the first row of the attempt (sstreak 1), and alone enables the stop (the gate
+  // threshold is 1 for gl); the successor's Pass is the first row of its attempt (no earlier Fail)
   run first_fail_at_deadline_with_no_earlier_row_stops = init
-    .then(Deploy(true)).then(StartOk(0)).then(Deadline(0))
-    .expect(at.get(0).srow == "absent" and at.get(0).sseq == 0 and not(startupStopEnabled(at.get(0))))
+    .then(Deploy(true, true)).then(StartOk(0))
+    .expect(not(startupRowEnabled(0, "fail")))
+    .then(Deadline(0))
+    .expect(at.get(0).srow == "absent" and at.get(0).sseq == 0 and not(startupStopEnabled(at.get(0))) and startupRowEnabled(0, "fail"))
     .then(StartupRow(0, "fail"))
-    .expect(at.get(0).sseq == 1 and at.get(0).sstreak == MAXA and startupStopEnabled(at.get(0)) and Safety)
+    .expect(at.get(0).sseq == 1 and at.get(0).sstreak == 1 and startupStopEnabled(at.get(0)) and Safety)
     .then(SLStartupStop(0, "landed")).then(WLRestart)
     .then(StartOk(1)).then(StartupRow(1, "pass"))
     .expect(at.get(1).sseq == 1 and at.get(1).srow == "pass" and Safety)
     .then(SLStable(1))
     .expect(at.get(1).stable and at.get(0).claim == "" and not(done) and Safety)
 
+  // D14 item 3 / D15 / G-10 (6): an explicit [[health_check.startup]] dial probe (gl unset) keeps the counted streak: the
+  // deadline passes with no earlier row, the first Fail carries sstreak 1 and does not enable the stop, the second carries
+  // MAXA and does
+  run explicit_probe_fail_after_deadline_keeps_counted_streak = init
+    .then(Deploy(true, false)).then(StartOk(0)).then(Deadline(0))
+    .then(StartupRow(0, "fail"))
+    .expect(at.get(0).sseq == 1 and at.get(0).sstreak == 1 and not(startupStopEnabled(at.get(0))) and Safety)
+    .then(StartupRow(0, "fail"))
+    .expect(at.get(0).sseq == 2 and at.get(0).sstreak == MAXA and startupStopEnabled(at.get(0)) and Safety)
+
+  // D8 for gl: Fail, Fail after the deadline. The first Fail enables the stop; the stop fails before the hook; the second Fail
+  // (sstreak 2, sseq 2) is a newer row and re-emits the stop, which lands
+  run guest_listener_fail_fail_reemits_stop_per_row = init
+    .then(Deploy(true, true)).then(StartOk(0)).then(Deadline(0))
+    .then(StartupRow(0, "fail"))
+    .expect(at.get(0).sseq == 1 and at.get(0).sstreak == 1 and startupStopEnabled(at.get(0)))
+    .then(SLStartupStop(0, "pre_hook"))
+    .expect(at.get(0).row == "running" and at.get(0).acted == 1 and not(startupStopEnabled(at.get(0))))
+    .then(StartupRow(0, "fail"))
+    .expect(at.get(0).sseq == 2 and at.get(0).sstreak == 2 and startupStopEnabled(at.get(0)) and retryDue(0))
+    .then(SLStartupStop(0, "landed"))
+    .expect(at.get(0).row == "t_startup" and at.get(0).acted == 2 and g.emitCount == 2 and Safety)
+
   // D8: the stop fails, a new startup row arrives, the second stop is emitted and lands
   run failed_startup_stop_is_retried_on_next_row = init
-    .then(Deploy(true)).then(StartOk(0))
+    .then(Deploy(true, false)).then(StartOk(0))
     .then(StartupRow(0, "fail")).then(StartupRow(0, "fail")).then(Deadline(0))
     .then(SLStartupStop(0, "pre_hook"))
     .expect(at.get(0).row == "running" and at.get(0).acted == 2 and at.get(0).stopped == "failed" and at.get(0).ann
@@ -562,7 +594,7 @@ module restart_authority {
 
   // D8: the stop fails, a Pass row arrives: no further stop; the id reaches Stable and leaves terminal_announced
   run late_pass_after_failed_stop_reaches_stable = init
-    .then(Deploy(true)).then(StartOk(0))
+    .then(Deploy(true, false)).then(StartOk(0))
     .then(StartupRow(0, "fail")).then(StartupRow(0, "fail")).then(Deadline(0))
     .then(SLStartupStop(0, "pre_hook"))
     .then(StartupRow(0, "pass"))
@@ -574,7 +606,7 @@ module restart_authority {
   // stays registered (the hook has not run), the next startup row re-emits the stop and the retry lands. The same for a
   // liveness stop.
   run stop_row_write_failure_is_retried = init
-    .then(Deploy(true)).then(StartOk(0))
+    .then(Deploy(true, false)).then(StartOk(0))
     .then(StartupRow(0, "fail")).then(StartupRow(0, "fail")).then(Deadline(0))
     .then(SLStartupStop(0, "row_write"))
     .expect(at.get(0).row == "running" and not(at.get(0).vm) and at.get(0).sup and at.get(0).stopped == "failed"
@@ -593,7 +625,7 @@ module restart_authority {
   // same row is not re-stopped. The model's `acted` is the View field and is not reset by Idle (a reload is a no-op on
   // persisted state); the run pins that nothing but a newer row re-enables the stop.
   run control_plane_restart_keeps_acted_run = init
-    .then(Deploy(true)).then(StartOk(0))
+    .then(Deploy(true, false)).then(StartOk(0))
     .then(StartupRow(0, "fail")).then(StartupRow(0, "fail")).then(Deadline(0))
     .then(SLStartupStop(0, "pre_hook"))
     .then(Idle)

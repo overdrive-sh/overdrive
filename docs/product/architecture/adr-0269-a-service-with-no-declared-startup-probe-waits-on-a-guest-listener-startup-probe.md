@@ -2,10 +2,10 @@
 
 ## Status
 
-User-approved, 2026-11-03; `declared_listeners` field (PR-4) and `Fail` cadence (PR-3)
-accepted 2026-11-04; the D13 hook scope it depends on (PR-2) is accepted in contract shape
-(V42 held 2026-11-04, [findings](../../feature/service-allocation-readiness-and-ending/spike/findings-workload-cgroup.md));
-not yet Accepted (remaining gates: model check, design review round 4). Not implemented. GH #318, GH #334. Contract
+User-approved, 2026-11-03; rulings PR-3 and PR-4 are in the feature delta's approval record;
+the gate-threshold decision (P1, option (a)) is Accepted by the user, 2026-11-04 ("proceed
+with recommendations"); the ADR as a whole is not yet Accepted (remaining gates: model check,
+design review). Not implemented. GH #318, GH #334. Contract
 and status: [feature delta](../../feature/service-allocation-readiness-and-ending/feature-delta.md) (D14).
 Related:
 [ADR-0268](adr-0268-the-guest-reports-each-workload-listener-it-opens-over-the-beacon-channel.md)
@@ -23,8 +23,11 @@ the probe runner polling the guest. Replacing that producer with a guest report 
 fork those gates. Two properties of the existing gate matter:
 
 - `Stable` needs a `Pass` row. A `Fail` row stops the instance only when the producer's
-  attempt count has reached the descriptor's `max_attempts` and the elapsed time has
-  reached the derived deadline (`service_lifecycle.rs:1168-1210`).
+  observed streak on it (`same_status_runs`, the count of consecutive written rows of that
+  status) has reached the gate's attempts threshold and the elapsed time has reached the
+  derived deadline (`service_lifecycle.rs:1168-1210`). Today the threshold is the descriptor's
+  `max_attempts`, because a dial probe writes one counted row per interval from its first
+  tick.
 - D8 retries a stop that did not land once per new startup row, so the producer must keep
   writing rows while the allocation is `Running` and has not passed.
 
@@ -37,17 +40,28 @@ the `Fail`.
 startup gate is the guest-listener gate has a platform-supplied startup descriptor with a
 new mechanic whose producer is the guest's listener reports rather than a dial.**
 
+- **Rows are ordinary and honest.** The task writes through the dial task's run state, so
+  `run_seq` and `same_status_runs` obey the existing run-count contract: a row's
+  `same_status_runs` is the count of consecutive written rows of its status. No row field is
+  added, and no row carries a counter the producer did not observe.
 - **Pass is an event.** When the host has seen every declared listener reported open
   (ADR-0270), the probe task writes one `Pass` row immediately.
 - **Fail starts at the deadline.** If no `Pass` has been written when the platform startup
   deadline (60 s, the descriptor's `interval x max_attempts`) is reached, the task writes the
-  first `Fail`, naming the declared listeners not yet reported, with the attempt count
-  exhausted; it then writes one `Fail` per `interval` while no `Pass` has been written. The
-  first `Fail` satisfies the existing stop condition, and each later `Fail` is the new row D8
-  needs to retry a stop that did not land. No `Fail` precedes the deadline.
-- **Everything downstream is the existing gate**: `Stable` (D9/B1), backend eligibility
+  first `Fail` (`same_status_runs` 1), naming the declared listeners not yet reported; it
+  then writes one `Fail` per `interval` while no `Pass` has been written (2, 3, …). Each
+  later `Fail` is the new row D8 needs to retry a stop that did not land. No `Fail` precedes
+  the deadline.
+- **The stop gate takes its attempts threshold from the descriptor's mechanic** (P1,
+  accepted 2026-11-04). The reconciler already reads the Service's startup descriptor when it
+  derives the deadline; it puts the threshold on the fact: the descriptor's `max_attempts` for
+  `Tcp` and `Http`, and 1 for `GuestListeners`, whose only clock is the deadline. A first
+  `Fail` at the deadline then satisfies the gate, and an explicit startup probe's rule is
+  unchanged.
+- **Everything else downstream is the existing gate**: `Stable` (D9/B1), backend eligibility
   (D12), the startup stop and retry (D7/D8), the give-up `StartupProbeFailed` (D7), the
-  progress deadline (D10), and the deploy stream. No reconciler logic changes.
+  progress deadline (D10), and the deploy stream. The one reconciler change is the gate's
+  threshold input above.
 
 ## Alternatives considered
 
@@ -61,8 +75,15 @@ new mechanic whose producer is the guest's listener reports rather than a dial.*
 - **A single `Fail` at the deadline.** D8's retry needs a new row per attempt; one row
   strands a stop that did not land. Rejected.
 - **A `Fail` every interval from the start.** It gives the operator progress ("missing
-  tcp:8080") before the deadline, at about 29 extra observation writes, router wakes and
-  evaluations per never-ready attempt, for rows only that display reads. Rejected.
+  tcp:8080") before the deadline and needs no gate change, at about 29 extra observation
+  writes, router wakes and evaluations per never-ready attempt, for rows only that display
+  reads. Rejected (the user's PR-3 trade-off).
+- **A first `Fail` that carries `max_attempts` as its streak.** It would let the gate stay
+  unchanged, but the streak is the producer's observed count of consecutive written rows
+  (`ProbeRunState::next_streak`), pinned by the run-count tests; a forged value breaks the
+  invariant every reader of the field relies on. Rejected.
+- **A counter field on the row.** A new row version for a number the reconciler can derive
+  from the descriptor it already reads. Rejected.
 - **Make the mechanic a poll with a short interval that reads the set.** Reintroduces the
   floor the ruling removes.
 
@@ -72,8 +93,8 @@ new mechanic whose producer is the guest's listener reports rather than a dial.*
   mechanic-specific producer in the probe runner; no new action, row family or reconciler
   branch.
 - Until `Pass` or the deadline, an attempt has no startup row, so `describe` shows no startup
-  result for the first 60 s; the first `Fail`'s attempt count is `max_attempts` by definition
-  rather than a count of failed attempts.
-- The `Pass` row carries an `attempt` of 0, which the streak arithmetic already accepts.
+  result for the first 60 s.
+- One in-memory State field of the reconciler changes (`ServiceAllocFact.max_attempts` is
+  replaced by `startup_attempts_required`, the gate's attempts threshold); no row, wire, archived or CBOR change.
 - A lost `Pass` write holds `Stable` until the next row; the task retries a failed `Pass`
   write until it lands (a seeded-simulation scenario with a failing observation write).

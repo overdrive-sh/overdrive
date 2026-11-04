@@ -2,10 +2,12 @@
 
 ## Status
 
-User-approved, 2026-11-03; read seam (PR-1) accepted 2026-11-04, hook scope (PR-2)
-accepted in contract shape 2026-11-04 (V42 held, kernel `7.0.0-38-generic`,
-[findings](../../feature/service-allocation-readiness-and-ending/spike/findings-workload-cgroup.md));
-not yet Accepted (remaining gates: model check, design review round 4). Not implemented. GH #318, GH #334. Contract
+User-approved, 2026-11-03; the rulings PR-1 (read seam) and PR-2 (hook scope; V42 held,
+[findings](../../feature/service-allocation-readiness-and-ending/spike/findings-workload-cgroup.md))
+are recorded in the feature delta's approval record, as are A1 (the board's entry lives from
+`open` to `close`; the frozen-at-end-of-wait rule is the host reader's) and A3 (a host-input
+conformance projection of the report model), both accepted 2026-11-04; not yet Accepted (remaining gates:
+model check, design review). Not implemented. GH #318, GH #334. Contract
 and status: [feature delta](../../feature/service-allocation-readiness-and-ending/feature-delta.md) (D13).
 Related: [ADR-0272](adr-0272-the-guest-observes-workload-listeners-with-kernel-hooks-not-a-poll.md)
 (what produces the report), [ADR-0269](adr-0269-a-service-with-no-declared-startup-probe-waits-on-a-guest-listener-startup-probe.md)

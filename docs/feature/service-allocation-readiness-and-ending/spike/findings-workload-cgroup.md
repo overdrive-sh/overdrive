@@ -1,6 +1,6 @@
 # Spike findings — workload cgroup for the listen hooks (V42)
 
-Increment: `spike-scratch/workload-cgroup/`. Real Cloud Hypervisor guest boots on the metal host, kernel `7.0.0-38-generic`, `systemd-detect-virt: none`, Cloud Hypervisor v53.0.0. Raw output is in `spike-scratch/workload-cgroup/evidence/` (`raw-{a,b,c,c2,d,d-run1}.log`, `summary-*.txt`, `sample-boots.txt`, `cleanup-confirmation.txt`).
+Increment: `spike-scratch/workload-cgroup/`. Real Cloud Hypervisor guest boots on the metal host, kernel `7.0.0-38-generic`, `systemd-detect-virt: none`, Cloud Hypervisor v53.0.0. Raw output is in `spike-scratch/workload-cgroup/evidence/` (`raw-{a,b,c,c2,d,d-run1}.log`, where `raw-d-run1.log` and `summary-d-run1.txt` are the first of the two cost runs (arm D) and `raw-d.log` is the second; they agree within 0.2 ms. `summary-*.txt`, `sample-boots.txt`, `cleanup-confirmation.txt`).
 
 **Gate: PROMOTE PR-2**, with two constraints pinned in D13: the listen programs live in the guest object `overdrive-init` already loads (never a second `Ebpf::load`), and the root programs stay link attachments (`BPF_F_ALLOW_MULTI`).
 

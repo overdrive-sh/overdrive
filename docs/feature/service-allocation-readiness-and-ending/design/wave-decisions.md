@@ -24,13 +24,20 @@
   (`kernel/bpf/cgroup.c:1506-1507`, `:459`); the workload is created directly in the cgroup
   with no placement window; reports cover only sockets of tasks in the cgroup (a workload
   that leaves it fails closed). **PR-3** accepted: `Pass` on the
-  event; first `Fail` at the derived deadline with `attempt = max_attempts`, then one per
-  interval until the stop lands; no pre-deadline `Fail`; `describe` loses pre-deadline
+  event; first `Fail` at the derived deadline, then one per
+  interval until the stop lands (**P1, accepted 2026-11-04, option (a):** rows carry honest
+  `same_status_runs` 1, 2, 3, …, and the stop gate's attempts threshold comes from the
+  Service's startup descriptor: 1 for `GuestListeners`, `max_attempts` for `Tcp`/`Http`;
+  `ServiceAllocFact.max_attempts` becomes `startup_attempts_required`; explicit probes
+  unchanged); no pre-deadline `Fail`; `describe` loses pre-deadline
   progress (D14 item 3). **PR-4** accepted: `declared_listeners` replaces `service_ports`,
   with `tcp_service_ports()` for the TPROXY consumers (D14 item 2). `guest_report` model:
   host-half conformance plus Tier-3 boot coverage for the guest half; no writer seam in
   `overdrive-init`; the gap is recorded in the feature delta (§ Formal protocol model).
-  ADR-0058 stays operative until ADR-0270 is accepted.
+  **A1** accepted 2026-11-04: the board entry is removed at `close`, so `reported` on an id
+  with no entry is empty; "frozen at the end of the wait" is the host reader's rule; ids are
+  never reused (ADR-0105). **A3** accepted 2026-11-04: a host-input projection module of
+  `guest_report` is the conformance target (modeler item M-6). ADR-0058 stays operative until ADR-0270 is accepted.
 
 ## Decisions
 
@@ -109,7 +116,7 @@ superseded (ADR-0267).
 
 - Formal protocol model: `specs/quint/service-allocation-readiness-and-ending/` (D1, D3, D5 to D11).
   The named runs, hazards and invariants are that directory's `README.md`. Outstanding for the
-  modeler: M-3 and the new `guest_report` module (M-6), both in the feature delta. D12, D17, R2-1
+  modeler: M-3 and the new `guest_report` module with its host-input projection (M-6), both in the feature delta. D12, D17, R2-1
   and R2-2 add no model state (D17 is justified without a model: § Formal protocol model).
 - Scenarios S-1 to S-48 are in the feature delta with oracles and tiers. D6 and D7 rewrite the
   early-exit and startup-failure tests listed in their sections. D13 to D16 obligations are
@@ -133,7 +140,10 @@ superseded (ADR-0267).
    progress deadline can fire before the give-up (E-3) and before a boot at its deadline (E-4).
 4. **PR-1 to PR-4 (ruled 2026-11-04; PR-2 direction pending V42, V42 held):** see Status above and the feature
    delta's D13 items 1, 7 and 10 and D14 items 2 and 3. PR-3 (accepted) trades the pre-deadline `describe` progress
-   ("missing tcp:8080") for about 29 fewer observation writes per never-ready attempt; the first
-   `Fail`'s attempt count is synthetic.
+   ("missing tcp:8080") for about 29 fewer observation writes per never-ready attempt. Round 4
+   (P1, accepted 2026-11-04): that trade-off is kept, and the first `Fail`'s counter is honest (1)
+   because the gate's threshold for this mechanic comes from the descriptor. A1 (accepted
+   2026-11-04): the board's entry lives from `open` to `close` (no frozen read after close). A3
+   (accepted 2026-11-04): the conformance target is a host-input projection of `guest_report`.
 5. **A rules-doc touch at landing:** `.claude/rules/development.md` § "Reconciler I/O" describes the
    steady-state tick as the drain period; D17 adds the wake. Not edited by the architect.

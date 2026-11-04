@@ -26,11 +26,12 @@ produced each state, for conformance: `quint test` emits no `mbt::actionTaken`, 
 | File | Decisions | Abstraction |
 |---|---|---|
 | `hook_ownership.qnt` | D1, D3 (D2, D4 by runs) | per allocation id (two ids: an attempt and its fresh-id successor): VM started, `on_alloc_running` (supervisor registered), `release_for_exit_emission` (gate), guest died, `ExitEvent` none/queued/consumed, shim stop (effects, terminal row write, then hook: B2) / finalize hooks, supervisor present, terminal row. Actors: shim start, watcher, observer, shim stop, shim finalize |
-| `restart_authority.qnt` | D5, D6, D7, D8 | one Service, attempts 0..CEIL with fresh ids; per attempt row state (`running`, `failed_crash`, `failed_other`, `t_startup`, `t_liveness`, `t_operator`, `t_clean`), startup probe row (`absent/fail/pass`, sequence, producer-counted streak), deadline, Stable, `terminal_announced`, `startup_last_acted_run`, stop outcome and stop failure stage (`landed`, `pre_hook`, `row_write`: B2), VM slot, the failure claim and its author. Actors: `ServiceLifecycle` (`stable`, `startup_stop`, `liveness_stop`), `WorkloadLifecycle` (`restart`, `give_up`), environment (crash, clean exit, operator stop, probe rows, deadline) |
+| `restart_authority.qnt` | D5, D6, D7, D8 (D14 item 3 by `gl`) | one Service, attempts 0..CEIL with fresh ids; per attempt row state (`running`, `failed_crash`, `failed_other`, `t_startup`, `t_liveness`, `t_operator`, `t_clean`), startup probe row (`absent/fail/pass`, sequence, producer-counted streak), workload flag `gl` (the startup descriptor is `GuestListeners`: no `Fail` before the deadline; stop gate threshold 1 instead of `MAXA`), deadline, Stable, `terminal_announced`, `startup_last_acted_run`, stop outcome and stop failure stage (`landed`, `pre_hook`, `row_write`: B2), VM slot, the failure claim and its author. Actors: `ServiceLifecycle` (`stable`, `startup_stop`, `liveness_stop`), `WorkloadLifecycle` (`restart`, `give_up`), environment (crash, clean exit, operator stop, probe rows, deadline) |
 | `liveness_gate.qnt` | D9 | one allocation: supervisor, retained liveness descriptors, liveness role absent/live, `committed` (the row carries Stable), the Stable write outcome (`landed`/`failed`: B1), `on_alloc_stable` hook, liveness streak and rows since Stable |
 | `progress_deadline.qnt` | D10 | the Service stream's timer racing the lifecycle terminals; time in 10 s ticks (FLOOR 9 = 90 s, MARGIN 3 = 30 s, startup deadline 1 or 12 ticks); stream slots: one in the checked instance, two in the conformance instance (a redeploy opens a new stream with a new clock) |
 | `stream_snapshot.qnt` | D11 | the stream's subscribe, recorded-verdict read, relist; the shim's commit and publish per attempt; `lag`, `read_fault`, fresh-id restart; `service_event_from_terminal` modelled by `proj` (restartable stops project to none) |
-| `guest_report.qnt` | D13 items 1, 3, 10 (PR-1) | the beacon report channel: workload `wl`, the kernel `ring` (capacity 1), the single writer's `wire` (pair names and `exit`), the host reader's `rd`, the board's reported set (`rset`), the guest-report `wait`, `exitrep`; ghosts `produced` (with a dropped marker), `eof`, `endset`, `junk`, `wapp`; alphabet `tcp80`, `udp53` (declared), `other` (undeclared) |
+| `guest_report.qnt` | D13 items 1, 3, 10 (PR-1) | the beacon report channel: workload `wl`, the kernel `ring` (capacity 1), the single writer's `wire` (pair names and `exit`), the host reader's `rd`, the board's reported set (`rset`), the guest-report `wait`, `exitrep`; ghosts `produced` (with a dropped marker), `eof`, `junk`; alphabet `tcp80`, `udp53` (declared), `other` (undeclared) |
+| `guest_report.qnt` (module `guest_report_host`) | D13 items 3, 10 (A3) | the conformance projection of the host reader's half, the only conformance target of the report protocol: `rset`, `exitrep`; model-only `wait`, `lines` (scripted input: `listen(p)`, `exit`, `junk`), `eof`; the pair of a valid line ranges over the declared pairs and one undeclared pair; actions `HostRead`, `AppendListen(p)`, `AppendExit`, `HostGarbage`, `BeaconClose`; no hazard, no invariant of its own |
 
 D10 and D11 are two modules of one stream (the design lists them as one abstraction): D11's `armed` flag stands for D10's
 deadline being armed after the read, and D10's `Open` arms at stream open. A combined module was built first and checked;
@@ -68,12 +69,8 @@ in the step that emits it.
 | | `RestartableStopNeverEndsStream` | D7, D11 | no closure from a startup or liveness stop, on the live path or the read path |
 | | `FailedReadNeverWaits` | D11 | a failed read closes the stream as `error` |
 | | `StreamEndsOnceHonestly` | D11 | the stream yields at most one verdict line, never `stable` unless a Stable was committed |
-| guest_report | `OneWriter` | D13 item 1 | every wire entry was appended by a writer action (a check on the ghost `wapp`; the structure of the action set is the rule) |
 | | `ListenBeforeExit` | D13 item 1 | in the wire, every listen precedes `exit` |
 | | `DeliveredBeforeExit` | D13 item 1 | when `exit` is on the wire, every produced, non-dropped event is on the wire before it |
-| | `NoLateAccept` | D13 item 3 | the reported set does not change after the wait ended |
-| | `ExitNotMasked` | D13 item 3 | the exit report is set iff an `exit` entry was read |
-| | `SetWithinProduced` | D13 item 10 | every pair in the reported set was produced by the workload and reached the wire |
 | | `ExitEventuallyReported` (temporal, weak fairness) | D13 item 3 | a workload that exits with the beacon open ends the guest-report wait |
 
 Invariants that hold by construction were dropped from the checks, each after a guard-deletion trial (the action guard that
@@ -192,7 +189,7 @@ exhaustive.
 | GR-1 | the kernel enqueues a listen event for every `listen()` of the workload before the workload can observe the socket serving | V34, V35, V36 |
 | GR-2 | the ring drops and counts on full; a dropped event is never delivered | V37 |
 | GR-3 | vsock preserves the order of one stream; the host reader treats lines in the order read | V38 |
-| GR-4 | the model starts with the workload running and the hooks attached (the workload cgroup is created and the programs attached before `exec`, D13 item 1 P-a to P-d) | V36, V42 |
+| GR-4 | the model starts with the workload running and the hooks attached (the workload is created directly in the workload cgroup with the programs attached; the `CLONE_INTO_CGROUP` claim is the V42 row of the feature delta, not restated here) | V36, V42 |
 
 ## Findings (underspecified points and exposures)
 
@@ -214,10 +211,25 @@ SS-6 ordering) are recorded in the feature delta's § Pinned readings.
 ## guest_report: coverage split and modelling notes
 
 User ruling 2026-11-04: `overdrive-init` has no writer seam, so the guest-half invariants (`ListenBeforeExit`,
-`DeliveredBeforeExit`, the drain rule, `OneWriter`) are covered by Tier-3 real boots only (V36, scenario G-10 (9)); the
-conformance driver covers the host half (`HostRead`, `HostGarbage`, `rset`, `exitrep`). Pinned accessors: `rset` is
-`GuestListenerReports::reported(alloc)`; `exitrep` is the `ExitEvent` on the receiver returned by `take_exit_receiver`; `wait`
-is checked through `rset` not changing and `exitrep`; `ring`, `wire`, `produced`, `eof`, `endset`, `junk`, `wapp` are model-only.
+`DeliveredBeforeExit`, the drain rule) are covered by Tier-3 real boots only (V36, scenario G-10 (9)). The full `guest_report`
+module is not a conformance target; its five runs, the two invariants, `ExitEventuallyReported` and the one hazard are the
+design's model check. The conformance target is `guest_report_host` (A3).
+
+`guest_report_host` actions to driving port (every handler calls the owner through the `BeaconIo` seam, `SimBeaconIo`):
+
+| Action | Driving-port call |
+|---|---|
+| `HostRead` | `SimBeaconIo::release_read` (the real reader consumes the next scripted line and routes it, D13 item 3) |
+| `AppendListen(p)` | `SimBeaconIo::guest_write` of a valid `LISTEN <proto> <port>` line |
+| `AppendExit` | `SimBeaconIo::guest_write` of an `EXIT` line |
+| `HostGarbage` | `SimBeaconIo::guest_write` of an unparseable line |
+| `BeaconClose` | `SimBeaconIo::guest_close` |
+
+Pinned accessors: `rset` is `GuestListenerReports::reported(alloc)` (read while the entry is open: it is removed only by
+`close`, a lifecycle call that is not an action of the projection, D13 item 10); `exitrep` is the `ExitEvent` on the receiver
+returned by `take_exit_receiver`. `wait`, `lines` and `eof` are model-only and never projected. Named runs:
+`host_all_declared_reported`, `host_garbage_line_is_dropped`, `host_beacon_closes_with_partial_set`,
+`host_listen_after_exit_is_ignored` (the reader's rule: a `listen` read after the wait ended does not change `rset`).
 
 8. The design's variable `set` is named `rset` in the spec (`set` is a Quint built-in name). `Idle` is the house stutter step.
 9. Not stated by the design, modelled minimally: `ready` is not on the wire (no action writes it and no host rule reads it);
@@ -227,9 +239,19 @@ is checked through `rset` not changing and `exitrep`; `ring`, `wire`, `produced`
 
 ## restart_authority and the guest-listener producer (M-3)
 
-The model admits both producer shapes of D14 item 3 without any new state. (a) A startup `Pass` with no earlier `Fail`:
-`pre_startup_crash_then_successor_passes` and the new run `first_fail_at_deadline_with_no_earlier_row_stops`. (b) A first `Fail`
-with no earlier row, written at the deadline: reached by the new run only. One change was needed: `StartupRow` counted the
-producer streak up by one per `Fail`, so a single `Fail` at the deadline never reached `max_attempts`; PR-3 says that `Fail` carries
-`attempt = max_attempts`, so a `Fail` written once the deadline has passed now carries the maximum. Pre-deadline `Fail` rows are
-still admitted (a superset of PR-3), and every existing run writes its `Fail` rows before `Deadline`, so none changed.
+The workload-level flag `gl` (set at `Deploy` beside `decl`, only with `decl`) marks a Service whose startup descriptor is
+`GuestListeners` (D14 item 3). It carries exactly two rules: a `Fail` row is written only once the deadline has passed (the
+producer rule, PR-3; a `Pass` is unconstrained), and the stop gate threshold is `sstreak >= 1` instead of `MAXA`. The counter
+is honest for both kinds: `sstreak` is the producer-counted consecutive `Fail` rows (capped at `MAXA`, the model's bound) and 0
+on a `Pass`, so an explicit `[[health_check.startup]]` dial probe (`gl` unset) keeps the counted rule that D15 and G-10 (6) say
+is unchanged. Runs: `first_fail_at_deadline_with_no_earlier_row_stops` (`gl` set; the first `Fail` at the deadline carries
+`sstreak == 1` and enables the stop; the successor's `Pass` is the first row of its attempt),
+`explicit_probe_fail_after_deadline_keeps_counted_streak` (`gl` unset; the first `Fail` after the deadline does not enable the
+stop, the second does), `guest_listener_fail_fail_reemits_stop_per_row` (`gl` set; `Fail`, `Fail` after the deadline: D8
+re-emits the stop per row, `sstreak` 1 then 2, `sseq` 1 then 2). A startup `Pass` with no earlier `Fail` is reached by
+`pre_startup_crash_then_successor_passes` and `startup_stop_then_successor_passes_is_stable`.
+
+No hazard for the gate threshold: under "the gate uses `MAXA` for `gl`" every restart_authority invariant and temporal property
+still holds (checked by a scratch trial), because every property is stated relative to the gate itself; only the named run
+`first_fail_at_deadline_with_no_earlier_row_stops` fails. The run is the evidence; a property that a `gl` workload whose first
+`Fail` at the deadline is eventually stopped would be new scope and is not added.
