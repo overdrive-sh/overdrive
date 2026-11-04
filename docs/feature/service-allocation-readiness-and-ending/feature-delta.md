@@ -14,10 +14,10 @@
 > (2026-11-04, "proceed with recommendations"): **P1** the startup stop gate's attempts
 > threshold comes from the startup descriptor, **A1** the board entry's lifetime, **A3** the
 > host-input conformance projection of the report model; **R1** (`VmmExit` and the
-> three-valued `exitrep`) and **R2** (model trims) are also accepted.
-> Nothing here authorises DISTILL or DELIVER until the § Modeler change list is done and the
-> independent DESIGN re-review approves the revision
-> (`.claude/rules/design.md` § "Surface material design decisions").
+> three-valued `exitrep`), **R1-a** (`exitrep` is read from the exit observer's row) and
+> **R2** (model trims) are also accepted.
+> Nothing here authorises DISTILL or DELIVER until the independent DESIGN re-review approves
+> the revision (`.claude/rules/design.md` § "Surface material design decisions").
 > The research that supports D7 to D10 is
 > `docs/research/orchestration/probe-failure-restart-authority-and-give-up-reporting-research.md`
 > (Kubernetes @7b4bd5d3, Nomad @64cdf9f9, source-cited); it is cited in each
@@ -88,9 +88,9 @@ User rulings of 2026-11-02, recorded verbatim in outcome:
 | B2 | **Accepted as proposed, 2026-11-03.** The `StopAllocation` arm fires `on_alloc_terminal` after the terminal row write succeeds; amends D4's and D7 item 4's "the shim is unchanged" for this one statement. | ADR-0266 (Accepted) |
 | B3 | **Accepted as proposed, 2026-11-03.** D6's pre-startup-crash predicate accepts `WorkloadCrashedImmediately` and `VmOutOfMemory` (`exit_code` is `None` for the latter); fail-closed supersession reasons stay out. | ADR-0258 (text amended) |
 | B4 | **Decided by the user, 2026-11-03: the orchestrator's recommendation, not parity.** Kubernetes semantics: any allocation whose Service declares a startup probe is not backend-eligible until its own startup has passed, first allocation or restart successor. Recorded as **D12**; amends the operative ADR-0096. | ADR-0267 (Accepted), ADR-0096 (amendment note) |
-| B5 | **Rejected, 2026-11-03.** `PROGRESS_DEADLINE_MARGIN` stays the literal 30 s as written in D10; DL-6, E-4 and V30 stand. No derived margin. | § Rulings of 2026-11-03 |
-| R2-1 | **Approved, 2026-11-03.** The redundant ADR-0096 per-allocation backend veto and the veto-before-stop ordering are removed. | ADR-0267, ADR-0096 (supersession note), § Rulings |
-| R2-2 | **Approved, 2026-11-03 ("remove it if no reader remains").** No reader remains after B1, so the `stable_announced` view field is removed. | ADR-0265, § Rulings |
+| B5 | **Rejected, 2026-11-03.** `PROGRESS_DEADLINE_MARGIN` stays the literal 30 s as written in D10; DL-6, E-4 and V30 stand. No derived margin. | D10 |
+| R2-1 | **Approved, 2026-11-03.** The redundant ADR-0096 per-allocation backend veto and the veto-before-stop ordering are removed. | ADR-0267, ADR-0096 (supersession note), § Interface contract changes |
+| R2-2 | **Approved, 2026-11-03 ("remove it if no reader remains").** No reader remains after B1, so the `stable_announced` view field is removed. | ADR-0265, § Interface contract changes |
 | D13, D14, D15 | **User-approved in direction, 2026-11-03 ("add it. and proceed with recommendations").** Gate on every declared listener, TCP and UDP; the opt-out `startup = []` is kept; no minimum-healthy window; ADR-0058 is superseded on acceptance of ADR-0270. | ADR-0268, 0269, 0270, 0272 |
 | D16 | **Option R approved in direction, 2026-11-03** (remove `inferred` with the envelope procedure). | ADR-0271 |
 | D17 | **Accepted, 2026-11-03** ("add it"; shape choices S1 to S6 accepted as proposed): S1 `Notify::notify_one`; S2 signal after the lock is released; S3 one submit path including the loop's own resync; S4 `BrokerDrain` without `submit`, `broker_mutex` removed; S5 `submit_evaluation` and `BrokerDrain` `pub`, `submitted` `pub(crate)`; S6 no Quint model. | ADR-0273 |
@@ -106,8 +106,9 @@ User rulings of 2026-11-02, recorded verbatim in outcome:
 | A3 | **Accepted, 2026-11-04.** The `guest_report` conformance target is a host-input projection module (same file, its own `step` and named runs); the host reader is driven through the existing `BeaconIo` / `SimBeaconIo` seam. The guest-side actions stay in the non-conformance module. The action-to-driving-port mapping, the State projection and the named runs are in § Formal protocol model — D13 to D16. | § Formal protocol model, ADR-0268 |
 | PR-4 | **Accepted, 2026-11-04.** `AllocationSpec.service_ports` is replaced by `declared_listeners`; `AllocationSpec::tcp_service_ports()` is the accessor the TPROXY consumers read. | D14 item 2 |
 | `guest_report` model | **Accepted, 2026-11-04.** The `guest_report` Quint module gets host-half conformance (`quint-connect` driver on the host reader, board and probe task) and Tier-3 real-boot coverage for the guest half. There is no writer seam in `overdrive-init`. The gap: the guest-side writer ordering (one ordered writer, `LISTEN` drained before `EXIT`) is not replayed against the model; it is covered by the Tier-3 boot scenarios (V36, V38 shapes) and by the host reader's treatment of any line order. | § Formal protocol model |
-| R1 | **Accepted, 2026-11-04 ("proceed with recommendations").** The conformance projection `guest_report_host` gains a `VmmExit` action, mapped to `SimVmm::exit_process` plus the driver's exit-gate release (precedent: the `quint_flows_beacon` driver's `vm_stop`, `crates/overdrive-worker/src/vm_driver/quint_flows_beacon.rs:446-465`). `exitrep` becomes three-valued: `none` (no `ExitEvent` yet), `guest-reported` (an `ExitEvent` of kind `CleanExit` or `Crashed { exit_code: Some(_) }`), `no-report` (`Crashed { exit_code: None }`, e.g. EOF without `EXIT`), projected from the receiver returned by `take_exit_receiver` (`run_exit_watcher`, `vm_driver.rs:2237-2330`). | § Formal protocol model — D13 to D16, ADR-0268 |
-| R2 | **Accepted, 2026-11-04.** Model trims: the full-module runs `garbage_line_is_dropped`, `all_declared_reported` and `beacon_closes_with_partial_set` are dropped (the host-half behaviour lives in the `guest_report_host` runs; `ring_drop_leaves_set_partial`, `listen_then_exit_drains_first` and `ListenBeforeExit` are kept); `gl = false` is pinned in the exhaustive `ra_ok` instance and its hazard instances (free only in `ra_conf`); `guest_listener_fail_fail_reemits_stop_per_row` is folded into `first_fail_at_deadline_with_no_earlier_row_stops`. | § Modeler change list |
+| R1 | **Accepted, 2026-11-04 ("proceed with recommendations").** The conformance projection `guest_report_host` gains a `VmmExit` action, mapped to `SimVmm::exit_process` plus the driver's exit-gate release (precedent: the `quint_flows_beacon` driver's `vm_stop`, `crates/overdrive-worker/src/vm_driver/quint_flows_beacon.rs:446-465`). `exitrep` becomes three-valued: `none` (no terminal exit row yet), `guest-reported` (the guest's `EXIT <status>` was read), `no-report` (no `EXIT`, e.g. EOF first); its source is R1-a. | § Formal protocol model — D13 to D16, ADR-0268 |
+| R1-a | **Ruled by the user, 2026-11-04, option (a).** The `guest_report_host` conformance projection reads `exitrep` from the exit observer's resulting `AllocStatusRow` through `ObservationStore::alloc_status_row` (re-readable owner observation), not from the `ExitEvent` the consuming `take_exit_receiver` hands out. The row distinguishes the three values (`Terminated` with `Stopped { by: Process }`, or `Failed` with `WorkloadCrashedImmediately { exit_code: Some(_) }`, is guest-reported; `Failed` with `exit_code: None` or `VmOutOfMemory` is no-report; no terminal row is `none`); the `VmmExit` handler composes the production exit observer on the driver's `VmDriver` and `SimObservationStore` and awaits the row. | § Formal protocol model — D13 to D16 |
+| R2 | **Accepted, 2026-11-04.** Model trims: the full-module runs `garbage_line_is_dropped`, `all_declared_reported` and `beacon_closes_with_partial_set` are dropped (the host-half behaviour lives in the `guest_report_host` runs; `ring_drop_leaves_set_partial`, `listen_then_exit_drains_first` and `ListenBeforeExit` are kept); `gl = false` is pinned in the exhaustive `ra_ok` instance and its hazard instances (free only in `ra_conf`); `guest_listener_fail_fail_reemits_stop_per_row` is folded into `first_fail_at_deadline_with_no_earlier_row_stops`. | § Formal protocol model — D13 to D16 |
 
 ## Wave: DESIGN / [REF] Decisions
 
@@ -1469,7 +1470,7 @@ deadline, redeploy opens a new clock), D11 (redeploy of a Stable service, commit
 and read, restartable stop, superseded attempt, lag then relist), D13 (a listen produced before
 exit is on the wire before `exit`; a dropped declared event leaves the set partial; and, on the
 host-input projection, all declared reported, a garbage line dropped, EOF with a partial set, a
-`listen` after `exit` ignored, with the `ExitEvent` observed after `VmmExit`), D14 (the first
+`listen` after `exit` ignored, with the exit report read from the row after `VmmExit`), D14 (the first
 `Fail` at the deadline stops the instance and a second re-emits the stop; an explicit probe's
 `Fail` after the deadline keeps its counted streak).
 
@@ -1504,7 +1505,7 @@ host-input projection, all declared reported, a garbage line dropped, EOF with a
   | `claim` and `author` | `claim`: the `terminal` of the `FinalizeFailed` in a returned `Vec<Action>`. `author`: which reconciler's `reconcile` returned it (the driver calls the two separately), not a driver record |
   | `deployed`, ghost record `g`, `conf_step` (`restart_authority`) | model-only: `deployed` is "the intent exists" (an input written through the intent store), `g` states invariants only, `conf_step` is the conformance recorder; none is projected |
   | liveness role live, streak (`liveness_gate` `lv`) | role live: `ProbeRunner::is_role_live`. The retained-descriptors flag is model-only; the streak is an input (`same_status_runs` of the probe rows the recording prober writes), its effect read as the liveness `StopAllocation` |
-  | `rset`, `exitrep` (`guest_report_host`, D13) | `GuestListenerReports::reported(alloc)`; the `ExitEvent` `kind` and `exit_code` taken from `VmDriver::take_exit_receiver`, three-valued. Exact pins, the action mapping including `VmmExit`, and the runs: § Formal protocol model — D13 to D16 |
+  | `rset`, `exitrep` (`guest_report_host`, D13) | `rset`: `GuestListenerReports::reported(alloc)`; `exitrep`: three-valued, `state` and `reason` of `ObservationStore::alloc_status_row(alloc)` (the exit observer's row, R1-a). Exact pins, the action mapping including `VmmExit`, and the runs: § Formal protocol model — D13 to D16 |
 
   Actions map to: `Driver::on_alloc_running`, `Driver::on_alloc_terminal`,
   `Driver::release_for_exit_emission` through the shim `dispatch` driving port;
@@ -1869,89 +1870,31 @@ Growth beyond either budget needs the user's approval.
 - DISTILL: the S-numbers in § Executable obligations are the scenario set; D13 to D16 add the
   obligations in G-10's boundary scenarios once accepted.
 
-## Wave: DESIGN / [REF] Rulings of 2026-11-03
-
-The ruling table is the § Approval record; the contracts are in the decisions, the interface
-tables and the ADRs.
-
-### R2-2 — `stable_announced` is removed
-
-`ServiceLifecycleView.stable_announced` (`service_lifecycle.rs:284`) has no remaining reader
-after B1: the top-of-loop dedup and `next_evaluation_at` key on `fact.stable_committed`, and
-`has_alloc_mid_startup_window` is deleted. The CBOR `View` loses one key; an older blob decodes
-(S-38).
-
-### R2-1 — the per-allocation backend veto is removed
-
-A stop-eligible allocation never has a committed `Stable` (B1), so D12 step 1 already marks it
-not `healthy`; `startup_failed_this_tick`, the `terminal_startup_veto` computation, the veto
-branch of `compute_backend_healthy` and the backend-row splice ahead of the startup action are
-deleted. The `terminal_announced` bookkeeping stays.
-
-## Wave: DESIGN / [REF] Modeler change list (consolidated)
+## Wave: DESIGN / [REF] Modeler change list
 
 The architect does not edit the `.qnt` files, `checks.toml`, `README.md` or `evidence/`. The
-`quint-modeler` runs through `cargo xtask metal run --` (never Lima). The earlier work orders
-(`gl` flag and counter for P1; the `guest_report` and `guest_report_host` modules) are done and
-recorded in the spec directory; only the changes below are outstanding. User rulings R1 and R2
-(2026-11-04, "proceed with recommendations") are in § Approval record.
+`quint-modeler` runs through `cargo xtask metal run --` (never Lima). The list is for the
+`exitrep` projection ruling R1-a (§ Approval record); pins are in § Formal protocol model — D13
+to D16.
 
-**R1. `guest_report_host` gains `VmmExit` and a three-valued `exitrep`.** Pins are in
-§ Formal protocol model — D13 to D16 (pinned accessors, action mapping, named runs):
-1. `exitrep` takes `none`, `guest-reported`, `no-report`. The module also holds a model-only
-   guest status once the reader has read `exit`.
-2. New action `VmmExit`, enabled once the guest-report wait has ended; the only action that
-   moves `exitrep` off `none`; it yields `guest-reported` when the reader holds a guest status
-   and `no-report` otherwise. Every other action leaves `exitrep` as it is (the old `HostRead`
-   on `exit` no longer sets it).
-3. Runs: `host_listen_after_exit_is_ignored` expects `exitrep == none` until `VmmExit`, then
-   `guest-reported`, with `rset` unchanged by the later `listen`;
-   `host_beacon_closes_with_partial_set` expects `no-report` after `VmmExit`;
-   `host_garbage_line_is_dropped` ends with `VmmExit` and `guest-reported`;
-   `host_all_declared_reported` keeps `exitrep == none`. Each stays in `checks.toml`.
-
-**R2. Trims.**
-1. Delete from `guest_report.qnt`, `checks.toml`, the `evidence/` traces and the README the three
-   full-module runs `garbage_line_is_dropped`, `all_declared_reported` and
-   `beacon_closes_with_partial_set`. Keep `ring_drop_leaves_set_partial` and
-   `listen_then_exit_drains_first`.
-2. In `restart_authority.qnt` pin `gl = false` in the exhaustive instance `ra_ok` and in every
-   hazard instance that imports `restart_authority`; `gl` stays free only in `ra_conf`.
-3. Delete the named run `guest_listener_fail_fail_reemits_stop_per_row` (its `checks.toml`
-   entry and README row). Fold its D8 re-emission expectation into
-   `first_fail_at_deadline_with_no_earlier_row_stops` (a `Fail` at the deadline stops the
-   instance; a second `Fail` with the first stop not landed re-emits the stop, `sstreak` 1 then
-   2, `sseq` 1 then 2), so one `gl` run carries it.
-4. Keep the invariant `ListenBeforeExit` (it is not folded into `DeliveredBeforeExit`).
-
-**README and `checks.toml` header fixes.**
-1. `checks.toml` header comment and README opening paragraph: the decisions list includes D13
-   and D14 (with D15 and D16 as consumers of the same model); the module count is seven
-   modules in six spec files (`hook_ownership`, `restart_authority`, `liveness_gate`,
-   `progress_deadline`, `stream_snapshot`, `guest_report`, `guest_report_host`); say that `guest_report` is the model check and `guest_report_host` the
-   conformance target.
-2. The `checks.toml` comment at the `guest_report` block ("evaluator-scale", "M-6") is
-   replaced by a one-line description naming both modules; `guest_report` is not described as
-   evaluator-scale (its invariants and temporal property are TLC checks; only its runs are
-   evaluator runs). Remove the "M-3" and "M-6" tags everywhere in the spec directory.
-3. README § Hazards, row D13 item 1: replace "(one check each on the one hazard instance)" with
-   "the single check `gr-hazard-no-drain-before-exit`, which expects a violation of
-   `DeliveredBeforeExit`".
-4. README § Invariants: the `guest_report` rows (`ListenBeforeExit`, `DeliveredBeforeExit`,
-   `ExitEventuallyReported`) appear under the `stream_snapshot` module cell. Give them their own
-   module cell, `guest_report`.
-5. README § Findings: renumber the list from 1 (it starts at 5 today, after the pointer to the
-   feature delta's R-1 to R-4, and continues as items 8 and 9 under the `guest_report` heading).
-   Use one continuous numbering across the section.
-6. README § `restart_authority` and the guest-listener producer: drop the "(M-3)" tag and the
-   run `guest_listener_fail_fail_reemits_stop_per_row` (R2).
-7. README § Modules (`guest_report_host` row), § "guest_report: coverage split" action table and
-   pinned-accessors paragraph, and the file header comment of `guest_report.qnt`: add `VmmExit`
-   (`SimVmm::exit_process` plus the exit-gate release) and the three-valued `exitrep`
-   (`none` / `guest-reported` / `no-report`, projected from the `ExitEvent` kind and
-   `exit_code` on the `take_exit_receiver` receiver); drop the three removed full-module runs
-   from the Named runs table.
-8. Record with `--record` after the changes; `verify-evidence` must pass.
+1. `guest_report_host`: the projection comment and the README rows for `exitrep` state that it
+   is read from the exit observer's resulting `AllocStatusRow` through
+   `ObservationStore::alloc_status_row` (`none` / `guest-reported` / `no-report`), not from the
+   `ExitEvent` on the `take_exit_receiver` receiver.
+2. `guest_report_host`: the `VmmExit` mapping row (README § Modules and § "guest_report:
+   coverage split" action table) names `SimVmm::exit_process` plus
+   `Driver::release_for_exit_emission`, the production exit observer writing the row, and the
+   preconditions: a started VM with an accepted READY/EXEC session (a pending exit release), no
+   `Driver::stop`, the `Running` row committed first; and states the abstraction that the
+   `wait == ended` guard is the driver's ordering (`HostRead` before `VmmExit`).
+3. `guest_report` (the full module): remove `exitrep` (variable, its `HostRead` effect, its
+   initial value) and from its file header comment, and the README rows that mention it.
+   `exitrep` backs no invariant of the full module; `guest_report_host` keeps it.
+4. README note on the removed `R2` full-module runs (`garbage_line_is_dropped`,
+   `all_declared_reported`, `beacon_closes_with_partial_set`): rewrite to the current state
+   only (the full module has `ring_drop_leaves_set_partial` and `listen_then_exit_drains_first`;
+   the host-visible scenarios are `guest_report_host` runs), with no removal narration.
+5. Record with `--record` after the changes; `verify-evidence` must pass.
 
 ## Wave: DESIGN / [REF] D17 — a broker submit wakes the convergence loop at once (Accepted 2026-11-03; shape choices S1 to S6 accepted as proposed)
 
@@ -2260,8 +2203,8 @@ Rejected alternatives (`fentry`, `sock_diag` polling, workload-signalled readine
    decidable from the same four words of the IPv6 local address both hooks already read
    (`src_ip6` for post-bind6, `local_ip6` for sockops): words 0 and 1 zero, word 2
    `htonl(0x0000ffff)` (the constant as the `__be32` word the hooks read, bytes `00 00 ff ff`;
-   the host-order value `0x0000ffff` compared against a `__be32` word is the byte-order trap
-   of `.claude/rules/bpf.md` Rule 3), and the first byte of word 3 in memory order (the first address octet)
+   the host-order value `0x0000ffff` compared against a `__be32` word would never match on a
+   little-endian guest), and the first byte of word 3 in memory order (the first address octet)
    equal to 127. Word 3 is a `__be32` read on a little-endian guest, so that byte is the low
    byte of the loaded `u32`: the test is the explicit mask `word3 & 0xff == 127`, not a
    host-order shift or compare. An `AF_INET6` socket bound to
@@ -2693,25 +2636,24 @@ conformance target). The guest-signal spike measured the hazard: 185 of 300 boot
   events not yet taken by the writer, a sequence over a small alphabet such as `tcp80`,
   `udp53`, `other`); `wire` (what init has written to the beacon, in order: `ready`,
   `listen(p)`, `exit`); `rd` (how much of `wire` the host reader has consumed); `set` (the
-  board's reported set); `wait` (the host's guest-report wait: waiting, ended); `exitrep`
-  (the exit report: unset, set); model-only ghosts `produced` (events the hook enqueued,
+  board's reported set); `wait` (the host's guest-report wait: waiting, ended); model-only ghosts `produced` (events the hook enqueued,
   with a `dropped` marker for a full-ring event) and `eof` (the beacon closed).
 - **Actions.** `WorkloadListen(p)` (only while `wl` is running; enqueues to `ring` or marks
   the event dropped); `WorkloadExit`; `WriterForward` (moves the head of `ring` to `wire`);
   `WriterDrain` (forwards everything left in `ring`, enabled only after `WorkloadExit`);
   `WriterExit` (appends `exit`; guard: `wl` exited and `ring` empty); `BeaconClose` (EOF:
   guest or VMM gone); `HostRead` (consumes one `wire` entry: `listen(p)` inserts into `set`
-  only while `wait` is waiting and `p` is declared; `exit` sets `exitrep` and ends the wait;
-  EOF ends the wait); `HostGarbage` (an unparseable line: no effect on `set`, `wait` or
-  `exitrep`). There is one writer: every `wire` append is a writer action, never two.
+  only while `wait` is waiting and `p` is declared; `exit` ends the wait; EOF ends the wait);
+  `HostGarbage` (an unparseable line: no effect on `set` or `wait`). The full module has no
+  exit-report variable: the exit report is a conformance concern of `guest_report_host`
+  alone. There is one writer: every `wire` append is a writer action, never two.
 - **Invariants** (only those a hazard or a measured race gives teeth). `ListenBeforeExit`
   (in `wire`, every `listen` precedes `exit`); `DeliveredBeforeExit` (when `exit` is on
   `wire`, every produced, non-dropped event is on `wire` before it). Progress:
   `ExitEventuallyReported` (a workload that exits with the beacon open ends the wait).
   **Not invariants, on purpose:** one writer (true of the action set by construction, so a
-  check on a ghost counter proves nothing); the exit report being set iff an `exit` entry was
-  read, and `set` within the produced pairs (true by the `HostRead` action's own definition,
-  no hazard removes them); `set` not changing after the wait ended (the reader's rule of
+  check on a ghost counter proves nothing); `set` within the produced pairs (true by the
+  `HostRead` action's own definition, no hazard removes it); `set` not changing after the wait ended (the reader's rule of
   item 3 is a guard in `HostRead`; the late-`Listen` clause is exercised by the host-input
   projection's run `host_listen_after_exit_is_ignored`, S-51).
 - **Named runs of the full module** (the guest-side scenarios only; each listed in `checks.toml`
@@ -2732,20 +2674,34 @@ conformance target). The guest-signal spike measured the hazard: 185 of 300 boot
 - **Pinned accessors for the conformance driver (module `guest_report_host`).** `set`
   (`rset` in the spec) ↔ `GuestListenerReports::reported(alloc)` (D13 item 10; **the only
   conformance read of the board**, read while the entry is open: `close` is lifecycle and not an
-  action of the projection). `exitrep` is **three-valued** and projects the `ExitEvent` taken
-  from the receiver returned by `VmDriver::take_exit_receiver` (`vm_driver.rs:1953`):
-  `none` = no `ExitEvent` is queued; `guest-reported` = an `ExitEvent` whose `kind` is
-  `CleanExit` or `Crashed { exit_code: Some(_), .. }` (the guest's `EXIT <status>` was read:
-  `classify_vm_exit` arms `Some(0)` and `Some(status)`, `vm_driver.rs:2150-2156`);
-  `no-report` = an `ExitEvent` whose `kind` is `Crashed { exit_code: None, .. }` (the guest
-  never sent `EXIT`, e.g. EOF first; `classify_vm_exit` arm `None`). An `ExitEvent` is emitted
-  only after the VMM has exited and the exit gate is released (`run_exit_watcher`,
-  `vm_driver.rs:2237-2330`: `drain_guest_report`, then the gate wait at `:2295`, then the
-  send at `:2329`), which is why `exitrep` stays `none` until the projection's `VmmExit`
-  action. `wait`, `lines`, `eof` and the status the reader holds for the pending event are
-  **model-only**: no accessor, never projected; their observable effects are covered by `set`
-  and `exitrep`. In the full module `ring`, `wire`, `wl`, `produced`, `eof` and `junk` are
-  model-only.
+  action of the projection). `exitrep` is **three-valued** and is read from the exit
+  observer's resulting row, through `ObservationStore::alloc_status_row(alloc)` (re-readable
+  owner observation; ruling R1-a, 2026-11-04), never from the consumed `ExitEvent`. The
+  chain that makes the row carry the distinction: `run_exit_watcher` joins the guest report
+  with `classify_vm_exit` (`vm_driver.rs:2150-2156`: `Some(0)` is `CleanExit`, `Some(n)` is
+  `Crashed { exit_code: Some(n), signal: None }`, `None` is `Crashed { exit_code: None, .. }`)
+  and sends the `ExitEvent` with `intentional_stop: false` (`:2315-2329`, always false for a
+  VM, so the operator-stop arm of `classify` never applies); `exit_observer::classify`
+  (`exit_observer.rs:579-621`) maps it to the row `state` and `reason`
+  (`AllocStatusRow.state`, `AllocStatusRow.reason`, `observation_store.rs:1041,1043`), and
+  `handle_exit_event` writes that row (`exit_observer.rs:463-555`). The projection:
+
+  | `exitrep` | `alloc_status_row(alloc)` |
+  |---|---|
+  | `none` | no row, or `state` not terminal (`AllocState::is_terminal`) |
+  | `guest-reported` | `state == Terminated` with `reason == Stopped { by: Process }` (guest status 0), or `state == Failed` with `reason == WorkloadCrashedImmediately { exit_code: Some(_), .. }` (guest status n) |
+  | `no-report` | `state == Failed` with `reason == WorkloadCrashedImmediately { exit_code: None, .. }` or `reason == VmOutOfMemory { .. }` (the cgroup OOM diagnosis runs only when `guest_report.is_none()`, `vm_driver.rs:2263-2275`) |
+
+  The two reported and unreported classes are disjoint: a no-report exit never produces
+  `Terminated` and never carries an `exit_code`, and a guest-reported exit always does. Any
+  terminal row outside these three rows (for example `Stopped { by: Operator }`) is not
+  reachable from the projection's actions and fails the step. The exit event is emitted only
+  after the VMM has exited and the exit gate is released (`run_exit_watcher`: `drain_guest_report`,
+  then the gate wait at `vm_driver.rs:2295`, then the send at `:2329`), which is why `exitrep`
+  stays `none` until the projection's `VmmExit`. `wait`, `lines`, `eof` and the status the
+  reader holds for the pending exit are **model-only**: no accessor, never projected; their
+  observable effects are covered by `set` and `exitrep`. In the full module `ring`, `wire`,
+  `wl`, `produced`, `eof` and `junk` are model-only.
 - **Action to driving-port mapping (host-half conformance).** The driving seam is the
   existing scripted beacon source of the real host reader, not a new one: the reader consumes
   lines through the `BeaconIo` port (`overdrive-core/src/vm/beacon.rs:431-450`), and
@@ -2760,8 +2716,41 @@ conformance target). The guest-signal spike measured the hazard: 185 of 300 boot
   | `HostGarbage` | `SimBeaconIo::guest_write` of an unparseable line |
   | the line-appending writer actions (`WriterForward`, `WriterDrain`, `WriterExit`) | `SimBeaconIo::guest_write` of the `LISTEN`/`EXIT` line they append: the guest's effect on the host is only the line (**not** a writer seam: nothing in `overdrive-init` is observed) |
   | `BeaconClose` | `SimBeaconIo::guest_close`: EOF to the real reader |
-  | `VmmExit` (**R1**) | `SimVmm::exit_process` (the VMM process exits) followed by the driver's exit-gate release (`Driver::release_for_exit_emission`), so `run_exit_watcher` classifies the guest report (or its absence) and sends the `ExitEvent` (`vm_driver.rs:2237-2330`). The precedent is the `quint_flows_beacon` driver's `VmStop`, `vm_stop` (`crates/overdrive-worker/src/vm_driver/quint_flows_beacon.rs:446-465`): `self.vmm.exit_process(pid, Some(0), None)`, then `observe_vm_exits`, then the beacon seam's read release |
+  | `VmmExit` (**R1**, **R1-a**) | `SimVmm::exit_process` (the VMM process exits) and `Driver::release_for_exit_emission` (the exit-gate release), so `run_exit_watcher` classifies the guest report (or its absence) and sends the `ExitEvent` (`vm_driver.rs:2237-2330`) to the **production exit observer**, which writes the row; the handler then awaits that row (composition and preconditions below). Precedent for the VMM-side step: the `quint_flows_beacon` driver's `vm_stop` (`crates/overdrive-worker/src/vm_driver/quint_flows_beacon.rs:446-465`): `self.vmm.exit_process(pid, Some(0), None)`, then `observe_vm_exits`; that driver does not compose the exit observer, so the composition below is new to this driver |
   | `WorkloadListen`, `WorkloadExit`, `Idle`, and the `ring`, `wl`, `produced` state | **model-only**: guest and kernel internals with no host-visible effect |
+
+  **`VmmExit` composition and preconditions (R1-a).** No new API: every piece is an existing
+  production entry or port.
+
+  - **Composition.** The driver holds the production `VmDriver` and spawns the production
+    exit observer on it, `exit_observer::spawn_with_runtime(obs, driver, events, clock,
+    None, token)` (`exit_observer.rs:161-168`), with `obs` the `SimObservationStore` shared
+    with the driver (the driven port; `SimClock` as `clock`). The observer, not the driver,
+    takes the receiver (`take_exit_receiver`, `exit_observer.rs:170`) and writes the row, so
+    the harness never calls `take_exit_receiver` and reads no `ExitEvent`. The observer needs
+    a prior `Running` row for the alloc (`find_prior_row`, `exit_observer.rs:468-471`; no row
+    is a `NoWrite`); that row is written by the production action-shim start path (its
+    `Pending` to `Running` write, which then fires `release_for_exit_emission`), not
+    hand-installed by the driver.
+  - **Preconditions of `VmmExit`.** (1) A started VM whose guest-initiated READY/EXEC beacon
+    session was accepted, so `guest_network_exec.claim_release()` yields a claim and
+    `live_vm.pending_exec` and `gate_sender` are present (`vm_driver.rs:1641`, `:1965-1991`).
+    Without that session `release_for_exit_emission` returns at `:1966-1968` and the exit
+    watcher parks on the gate until it is dropped. If the shim's start path already fired the
+    release, the handler's own call is the idempotent no-op (`Option::take` on both pending
+    values, `:1957-1964`); either way exactly one release has fired and the `Running` row was
+    committed before it. (2) No `Driver::stop` of the alloc in the run, so the row is the
+    exit observer's and not the stop path's.
+  - **Await.** After `exit_process` and the release, the handler awaits the alloc's row
+    reaching a terminal `state`, polling `alloc_status_row(alloc)` with yields under a bound
+    DISTILL states (a missed bound fails the step, never maps to `none`). It then projects
+    `exitrep` per the table above.
+  - **Abstraction stated.** The model's `VmmExit` guard `wait == ended` is the driver's
+    ordering: every `HostRead` (and `BeaconClose`) the run needs is released through
+    `SimBeaconIo` and observed before `VmmExit` is issued. In production the watcher's
+    `drain_guest_report` races the VMM exit against the `EXIT` line with a bounded yield
+    drain (`vm_driver.rs:2165-2197`); the model does not cover that race, only the join
+    result after the wait has ended.
 
   **Constraint on the spec (A3, accepted by the user 2026-11-04):** testing.md forbids
   an empty or unmapped handler in a conformance driver, so the model-only actions cannot sit
@@ -2770,7 +2759,7 @@ conformance target). The guest-signal spike measured the hazard: 185 of 300 boot
   or witness of its own (the decision's hazard is `gr-hazard-no-drain-before-exit` in the full
   module; the reader's rule is a guard of `HostRead`):
   - **State.** `rset` (the reported set of declared pairs); `exitrep` (`none`,
-    `guest-reported`, `no-report`, as pinned above); model-only `wait` (waiting or ended),
+    `guest-reported`, `no-report`, projected from the exit observer's row as pinned above); model-only `wait` (waiting or ended),
     `lines` (the scripted input not yet consumed: `listen(p)`, `exit`, `junk`), `eof`, and the
     guest status the reader holds once it has read `exit`. The declared set is a module
     constant; the pair of a valid line ranges over the declared pairs and one undeclared pair.
@@ -2877,8 +2866,8 @@ Process items:
    detail), D11 is ADR-0263; ADR-0255 keeps D1, D2 and D4 as one decision. B1 is ADR-0265,
    B2 is ADR-0266, D12 is ADR-0267 (amends the operative ADR-0096 with a dated note), D17 is
    ADR-0273; B3 is text in ADR-0258. D13 to D16 are ADR-0268 to ADR-0272.
-2. **Gate:** the independent DESIGN re-review. The `quint-modeler` change list (R1, R2 and the
-   header fixes) is § Modeler change list. On approval each of ADR-0268 to ADR-0272 moves to
+2. **Gate:** the independent DESIGN re-review. The `quint-modeler` work for the `exitrep`
+   projection is § Modeler change list. On approval each of ADR-0268 to ADR-0272 moves to
    Accepted (ADR-0058 stays operative until ADR-0270 is accepted).
 3. At landing, `.claude/rules/development.md` § "Reconciler I/O" ("Steady-state tick") and
    the `spawn_convergence_loop` doc comment gain the D17 wake; the user's rules docs are not

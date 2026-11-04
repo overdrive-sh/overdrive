@@ -12,7 +12,6 @@
  *   rd        how many wire entries the host reader has consumed
  *   rset      the board's reported set (GuestListenerReports::reported); the design's `set` (a Quint built-in name)
  *   wait      the host's guest-report wait: waiting | ended
- *   exitrep   the exit report: unset | set (the ExitEvent on the exit receiver)
  * Model-only ghosts: produced (events the hook enqueued, each with a dropped marker for a full-ring event), eof (the beacon
  * closed), junk (garbage lines delivered, bounded).
  *
@@ -59,14 +58,13 @@ module guest_report {
   var rd: int
   var rset: Set[str]
   var wait: str
-  var exitrep: str
   var produced: List[Ev]
   var eof: bool
   var junk: int
   var conf_step: ConfStep
 
   action init = all {
-    wl' = "running", ring' = List(), wire' = List(), rd' = 0, rset' = Set(), wait' = "waiting", exitrep' = "unset",
+    wl' = "running", ring' = List(), wire' = List(), rd' = 0, rset' = Set(), wait' = "waiting",
     produced' = List(), eof' = false, junk' = 0,
     conf_step' = variant("init", ()),
   }
@@ -79,7 +77,7 @@ module guest_report {
     wl == "running", produced.length() < PMAX, ALPHA.contains(p),
     ring' = if (ring.length() < RCAP) ring.append(p) else ring,
     produced' = produced.append({ p: p, dropped: ring.length() >= RCAP }),
-    wl' = wl, wire' = wire, rd' = rd, rset' = rset, wait' = wait, exitrep' = exitrep, eof' = eof,
+    wl' = wl, wire' = wire, rd' = rd, rset' = rset, wait' = wait, eof' = eof,
     junk' = junk,
     conf_step' = if (REC) variant("WorkloadListen", { p: p }) else conf_step,
   }
@@ -87,7 +85,7 @@ module guest_report {
   action WorkloadExit = all {
     wl == "running",
     wl' = "exited",
-    ring' = ring, wire' = wire, rd' = rd, rset' = rset, wait' = wait, exitrep' = exitrep, produced' = produced, eof' = eof,
+    ring' = ring, wire' = wire, rd' = rd, rset' = rset, wait' = wait, produced' = produced, eof' = eof,
     junk' = junk,
     conf_step' = if (REC) variant("WorkloadExit", ()) else conf_step,
   }
@@ -96,7 +94,7 @@ module guest_report {
   action WriterForward = all {
     not(eof), ring != List(),
     wire' = wire.append(ring.head()), ring' = ring.tail(),
-    wl' = wl, rd' = rd, rset' = rset, wait' = wait, exitrep' = exitrep, produced' = produced, eof' = eof,
+    wl' = wl, rd' = rd, rset' = rset, wait' = wait, produced' = produced, eof' = eof,
     junk' = junk,
     conf_step' = if (REC) variant("WriterForward", ()) else conf_step,
   }
@@ -105,7 +103,7 @@ module guest_report {
   action WriterDrain = all {
     wl == "exited", not(eof), ring != List(),
     wire' = wire.concat(ring), ring' = List(),
-    wl' = wl, rd' = rd, rset' = rset, wait' = wait, exitrep' = exitrep, produced' = produced, eof' = eof,
+    wl' = wl, rd' = rd, rset' = rset, wait' = wait, produced' = produced, eof' = eof,
     junk' = junk,
     conf_step' = if (REC) variant("WriterDrain", ()) else conf_step,
   }
@@ -114,7 +112,7 @@ module guest_report {
   action WriterExit = all {
     wl == "exited", not(eof), BUG_NODRAIN or ring == List(), not(exitOnWire),
     wire' = wire.append("exit"),
-    wl' = wl, ring' = ring, rd' = rd, rset' = rset, wait' = wait, exitrep' = exitrep, produced' = produced, eof' = eof,
+    wl' = wl, ring' = ring, rd' = rd, rset' = rset, wait' = wait, produced' = produced, eof' = eof,
     junk' = junk,
     conf_step' = if (REC) variant("WriterExit", ()) else conf_step,
   }
@@ -123,7 +121,7 @@ module guest_report {
   action BeaconClose = all {
     not(eof),
     eof' = true,
-    wl' = wl, ring' = ring, wire' = wire, rd' = rd, rset' = rset, wait' = wait, exitrep' = exitrep, produced' = produced,
+    wl' = wl, ring' = ring, wire' = wire, rd' = rd, rset' = rset, wait' = wait, produced' = produced,
     junk' = junk,
     conf_step' = if (REC) variant("BeaconClose", ()) else conf_step,
   }
@@ -136,7 +134,6 @@ module guest_report {
         rd < n,
         rd' = rd + 1,
         rset' = if (wire.nth(rd) != "exit" and wait == "waiting" and DECL.contains(wire.nth(rd))) rset.union(Set(wire.nth(rd))) else rset,
-        exitrep' = if (wire.nth(rd) == "exit") "rset" else exitrep,
         wait' = if (wire.nth(rd) == "exit") "ended" else wait,
         wl' = wl, ring' = ring, wire' = wire, produced' = produced, eof' = eof, junk' = junk,
         conf_step' = if (REC) variant("HostRead", ()) else conf_step,
@@ -144,24 +141,24 @@ module guest_report {
       all {
         eof, rd == n, wait == "waiting",
         wait' = "ended",
-        wl' = wl, ring' = ring, wire' = wire, rd' = rd, rset' = rset, exitrep' = exitrep, produced' = produced, eof' = eof,
+        wl' = wl, ring' = ring, wire' = wire, rd' = rd, rset' = rset, produced' = produced, eof' = eof,
         junk' = junk,
         conf_step' = if (REC) variant("HostRead", ()) else conf_step,
       },
     }
   }
 
-  // an unparseable line reaches the reader (the scripted line source): no effect on set, wait or exitrep
+  // an unparseable line reaches the reader (the scripted line source): no effect on set or wait
   action HostGarbage = all {
     junk < JMAX,
     junk' = junk + 1,
-    wl' = wl, ring' = ring, wire' = wire, rd' = rd, rset' = rset, wait' = wait, exitrep' = exitrep, produced' = produced,
+    wl' = wl, ring' = ring, wire' = wire, rd' = rd, rset' = rset, wait' = wait, produced' = produced,
     eof' = eof,
     conf_step' = if (REC) variant("HostGarbage", ()) else conf_step,
   }
 
   action Idle = all {
-    wl' = wl, ring' = ring, wire' = wire, rd' = rd, rset' = rset, wait' = wait, exitrep' = exitrep, produced' = produced,
+    wl' = wl, ring' = ring, wire' = wire, rd' = rd, rset' = rset, wait' = wait, produced' = produced,
     eof' = eof, junk' = junk,
     conf_step' = if (REC) variant("Idle", ()) else conf_step,
   }
@@ -181,10 +178,10 @@ module guest_report {
   // D13 item 3 ExitEventuallyReported: a workload that exits with the beacon open ends the guest-report wait
   temporal ExitEventuallyReported =
     and {
-      weakFair(WriterForward, (wl, ring, wire, rd, rset, wait, exitrep, produced, eof, junk, conf_step)),
-      weakFair(WriterDrain, (wl, ring, wire, rd, rset, wait, exitrep, produced, eof, junk, conf_step)),
-      weakFair(WriterExit, (wl, ring, wire, rd, rset, wait, exitrep, produced, eof, junk, conf_step)),
-      weakFair(HostRead, (wl, ring, wire, rd, rset, wait, exitrep, produced, eof, junk, conf_step)),
+      weakFair(WriterForward, (wl, ring, wire, rd, rset, wait, produced, eof, junk, conf_step)),
+      weakFair(WriterDrain, (wl, ring, wire, rd, rset, wait, produced, eof, junk, conf_step)),
+      weakFair(WriterExit, (wl, ring, wire, rd, rset, wait, produced, eof, junk, conf_step)),
+      weakFair(HostRead, (wl, ring, wire, rd, rset, wait, produced, eof, junk, conf_step)),
     }.implies(always((wl == "exited" and not(eof)).implies(eventually(wait == "ended"))))
 
   // ------------------------------------------------------------------ named runs (critical scenarios)
@@ -195,7 +192,7 @@ module guest_report {
     .then(WriterDrain).then(WriterExit)
     .expect(wire == List("tcp80", "exit") and Safety)
     .then(HostRead).then(HostRead)
-    .expect(rset == Set("tcp80") and exitrep == "rset" and wait == "ended" and Safety)
+    .expect(rset == Set("tcp80") and wait == "ended" and Safety)
 
   // a declared event dropped on a full ring: the set stays partial, the wait still ends on exit
   run ring_drop_leaves_set_partial = init
@@ -204,7 +201,7 @@ module guest_report {
     .expect(produced.length() == 3 and nonDropped == 2 and ring == List("other"))
     .then(WorkloadExit).then(WriterDrain).then(WriterExit)
     .then(HostRead).then(HostRead).then(HostRead)
-    .expect(rset == Set("tcp80") and wait == "ended" and exitrep == "rset" and Safety)
+    .expect(rset == Set("tcp80") and wait == "ended" and Safety)
 }
 
 module gr_ok { import guest_report(OFF = Set(), REC = false).* from "./guest_report" }
@@ -216,14 +213,18 @@ module gr_conf { import guest_report(OFF = Set(), REC = true).* from "./guest_re
  * not a host concern, so appends are unordered with respect to each other and `listen` can follow `exit` (the reader's own rule
  * drops it). It is the only conformance target of the report protocol; the full guest_report module is not one.
  *
- * State: rset (GuestListenerReports::reported(alloc)), exitrep (the ExitEvent on the receiver from take_exit_receiver): none |
- * guest-reported | no-report, moved off none only by VmmExit; the ExitEvent kind and exit_code give the value.
+ * State: rset (GuestListenerReports::reported(alloc)), exitrep (the exit observer's AllocStatusRow read through
+ * ObservationStore::alloc_status_row): none (no row, or a non-terminal row) | guest-reported (Terminated/Stopped{Process}, or
+ * Failed/WorkloadCrashedImmediately{exit_code: Some}) | no-report (Failed/WorkloadCrashedImmediately{exit_code: None}, or
+ * Failed/VmOutOfMemory); moved off none only by VmmExit.
  * Model-only, never projected: gstat (the reader holds a guest status, set when it reads `exit`), wait (the guest-report wait), lines (the scripted input not yet consumed: listen(p), exit, junk),
  * eof. The declared set DECL is a constant; a valid line's pair ranges over DECL and one undeclared pair.
  *
  * Actions to driving port (the BeaconIo seam, SimBeaconIo): HostRead = release_read; AppendListen(p), AppendExit, HostGarbage =
  * guest_write of a valid LISTEN line, an EXIT line, an unparseable line; BeaconClose = guest_close;
- * VmmExit = SimVmm::exit_process plus the exit-gate release.
+ * VmmExit = SimVmm::exit_process plus Driver::release_for_exit_emission, the production exit observer then writes the row
+ * (preconditions: a started VM with an accepted READY/EXEC session, no Driver::stop, the Running row committed first; the
+ * `wait == ended` guard abstracts the driver's ordering, HostRead before VmmExit).
  * No hazard and no invariant of its own: the HostRead guards keep rset within DECL and growing only; the decision's hazard is
  * gr-hazard-no-drain-before-exit in the full module.
  */
