@@ -1,0 +1,21 @@
+# pd-hazard-fixed-cap: counterexample, 6 state(s) (from the TLC trace)
+
+State 1
+  conf_step = [init |-> [tag |-> "UNIT"]]
+  w = [ sd |-> 0, now |-> 0, stableAt |-> -1, gaveUp |-> FALSE, opStopped |-> FALSE, authors |-> {}, deployed |-> FALSE ]
+  sm = << [ st |-> "unopened", kind |-> "", armed |-> 0, dl |-> 0, last |-> "none", closes |-> 0, verdict |-> FALSE ] >>
+
+State 2 [Deploy]
+  w = [ sd |-> 12, now |-> 0, stableAt |-> -1, gaveUp |-> FALSE, opStopped |-> FALSE, authors |-> {}, deployed |-> TRUE ]
+
+State 3 [Open]
+  sm = << [ st |-> "open", kind |-> "", armed |-> 0, dl |-> 9, last |-> "none", closes |-> 0, verdict |-> FALSE ] >>
+
+State 4 [Advance]
+  w = [ sd |-> 12, now |-> 9, stableAt |-> -1, gaveUp |-> FALSE, opStopped |-> FALSE, authors |-> {}, deployed |-> TRUE ]
+
+State 5 [Fire]
+  sm = << [ st |-> "closed", kind |-> "timeout", armed |-> 0, dl |-> 9, last |-> "none", closes |-> 1, verdict |-> FALSE ] >>
+
+State 6 [StableHappens]
+  w = [ sd |-> 12, now |-> 9, stableAt |-> 9, gaveUp |-> FALSE, opStopped |-> FALSE, authors |-> {}, deployed |-> TRUE ]

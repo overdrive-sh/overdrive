@@ -1,0 +1,25 @@
+# ra-hazard-hook-before-row-write: counterexample, 5 state(s) (from the TLC trace)
+
+State 1
+  at = ( 0 :> [ row |-> "none", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "none", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] )
+  deployed = FALSE
+  cur = 0
+  done = FALSE
+  g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
+  decl = FALSE
+  conf_step = [init |-> [tag |-> "UNIT"]]
+  gl = FALSE
+  used = 0
+
+State 2 [Deploy]
+  at = ( 0 :> [ row |-> "pending", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "none", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] )
+  deployed = TRUE
+
+State 3 [StartOk]
+  at = ( 0 :> [ row |-> "running", sup |-> TRUE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> TRUE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "none", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] )
+
+State 4 [SLStable]
+  at = ( 0 :> [ row |-> "running", sup |-> TRUE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> TRUE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> TRUE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "none", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] )
+
+State 5 [SLLivenessStop]
+  at = ( 0 :> [ row |-> "running", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> TRUE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "none", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] )
