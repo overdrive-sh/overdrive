@@ -1,0 +1,31 @@
+State 1: <Initial predicate>
+/\ lg_bugSpawnAtRunning_liveness_gate_lv = [ rw |-> FALSE,
+  started |-> FALSE,
+  sup |-> FALSE,
+  ret |-> FALSE,
+  role |-> "absent",
+  committed |-> FALSE,
+  swr |-> "none",
+  hook |-> FALSE,
+  ended |-> FALSE,
+  streak |-> 0,
+  since |-> 0,
+  rows |-> 0,
+  stopBeforeStable |-> FALSE ]
+/\ lg_bugSpawnAtRunning_liveness_gate_conf_step = [init |-> [tag |-> "UNIT"]]
+
+State 2: <lg_bugSpawnAtRunning_liveness_gate_OnRunning line 194, col 3 to line 218, col 56 of module lg_bugSpawnAtRunning>
+/\ lg_bugSpawnAtRunning_liveness_gate_lv = [ rw |-> TRUE,
+  started |-> TRUE,
+  sup |-> TRUE,
+  ret |-> TRUE,
+  role |-> "live",
+  committed |-> FALSE,
+  swr |-> "none",
+  hook |-> FALSE,
+  ended |-> FALSE,
+  streak |-> 0,
+  since |-> 0,
+  rows |-> 0,
+  stopBeforeStable |-> FALSE ]
+/\ lg_bugSpawnAtRunning_liveness_gate_conf_step = [init |-> [tag |-> "UNIT"]]

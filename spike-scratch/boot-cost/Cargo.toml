@@ -1,0 +1,15 @@
+# boot-cost spike workspace (self-contained; NOT a member of the repo workspace).
+[workspace]
+members = ["driver"]
+exclude = ["bpf"]
+resolver = "2"
+
+# Same release profile as the repo workspace root (Cargo.toml [profile.release]) so the spike
+# copy of overdrive-init is compiled like the real one (the first run used the cargo default
+# profile and its guest code was ~28 ms slower than the real init's; see findings).
+[profile.release]
+lto             = "thin"
+codegen-units   = 1
+debug           = "line-tables-only"
+panic           = "abort"
+strip           = "symbols"

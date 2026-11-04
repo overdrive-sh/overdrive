@@ -1,0 +1,228 @@
+samples per variant (measured, warmup excluded): R=40, A=40, A2=40, B=40
+
+### variant R: p50 / p90 / max / min / mean (ms)
+host_vmm_start_to_READY                                     1297.604  1304.550  1317.858  1283.089  1298.309
+host_vmm_start_to_beacon_connect                            1170.768  1199.841  1200.662  1156.029  1175.735
+
+### variant A: p50 / p90 / max / min / mean (ms)
+host_vmm_start_to_READY                                     1296.517  1304.919  1313.675  1283.061  1296.900
+host_vmm_start_to_beacon_connect                            1169.155  1198.476  1200.657  1155.439  1172.247
+prep:total                                                    44.368    44.639    45.437    44.152    44.437
+prep:Ebpf::load(guest obj)                                    21.533    21.725    21.979    21.371    21.560
+prep:Ebpf::load(candidate obj)                                21.922    22.067    22.979    21.790    21.973
+prep:other(mount,staging,maps)                                 0.892     0.967     0.991     0.846     0.905
+verifier+load:tcp_correlation                                  1.092     1.103     1.150     1.075     1.094
+verifier+load:tcp_correlation_candidate                       24.511    24.809    27.366    24.305    24.626
+verifier+load:connect4                                         0.400     0.422     0.451     0.386     0.404
+verifier+load:sendmsg4                                         0.235     0.249     0.258     0.231     0.238
+verifier+load:getpeername4                                     0.188     0.203     0.209     0.184     0.192
+verifier+load:recvmsg4                                         0.109     0.123     0.130     0.106     0.113
+verifier+load:sock_release                                    38.956    39.076    39.893    38.816    39.002
+attach:tcp_correlation                                         0.134     0.148     0.315     0.130     0.142
+attach:tcp_correlation_candidate                               6.669     6.693     6.767     6.640     6.672
+attach:connect4                                                0.035     0.036     0.043     0.033     0.035
+attach:sendmsg4                                                0.018     0.020     0.030     0.018     0.019
+attach:getpeername4                                            0.015     0.017     0.024     0.014     0.016
+attach:recvmsg4                                                0.015     0.015     0.017     0.014     0.015
+attach:sock_release                                            0.042     0.053     0.059     0.028     0.041
+SUM program loads (verifier)                                  65.506    66.069    69.112    65.216    65.670
+SUM program attaches                                           6.936     6.965     7.098     6.901     6.939
+load:sub:btf_from_sys_fs (inside candidate load)              15.298    15.472    18.147    15.191    15.408
+attach:sub:cgroup_file (first attach mounts cgroup2)           0.065     0.078     0.184     0.062     0.070
+PRE-READY BPF TOTAL (prep+loads+attaches)                    116.831   117.864   120.535   116.364   117.046
+transport_total (configure_guest_transport)                  126.734   127.816   130.536   125.966   126.860
+phase:network_total                                          127.099   128.218   130.925   126.269   127.245
+phase:modules                                                  1.923     1.937     1.945     1.899     1.924
+phase:root                                                     0.046     0.053     0.062     0.042     0.048
+phase:connect_beacon                                           0.107     0.144     0.173     0.080     0.116
+phase:owner                                                    0.057     0.067     0.073     0.054     0.059
+phase:ready_send                                               1.680     1.779     1.934     1.587     1.694
+init_start_to_ready_sent                                     130.993   132.032   134.769   130.023   131.123
+guest_kernel_boot_to_init_start (CLOCK_MONOTONIC)            615.177   617.588   619.970   601.279   614.344
+
+### variant A2: p50 / p90 / max / min / mean (ms)
+host_vmm_start_to_READY                                     1295.234  1299.956  1311.238  1279.375  1295.152
+host_vmm_start_to_beacon_connect                            1171.193  1196.644  1199.339  1155.742  1173.311
+prep:total                                                    44.325    44.581    45.882    44.061    44.406
+prep:Ebpf::load(guest obj)                                    21.530    21.636    23.016    21.340    21.575
+prep:Ebpf::load(candidate obj)                                21.896    22.060    23.358    21.695    21.933
+prep:other(mount,staging,maps)                                 0.885     0.964     0.986     0.845     0.897
+verifier+load:tcp_correlation                                  1.099     1.116     1.132     1.085     1.102
+verifier+load:tcp_correlation_candidate                       24.493    24.625    25.553    24.307    24.506
+verifier+load:connect4                                         0.393     0.410     0.413     0.378     0.395
+verifier+load:sendmsg4                                         0.241     0.251     0.258     0.233     0.243
+verifier+load:getpeername4                                     0.186     0.199     0.216     0.182     0.190
+verifier+load:recvmsg4                                         0.105     0.116     0.123     0.103     0.107
+verifier+load:sock_release                                    36.061    36.388    37.031    35.867    36.137
+attach:tcp_correlation                                         0.133     0.152     0.179     0.129     0.138
+attach:tcp_correlation_candidate                               6.675     6.695     6.778     6.657     6.679
+attach:connect4                                                0.034     0.038     0.056     0.034     0.036
+attach:sendmsg4                                                0.019     0.019     0.029     0.017     0.019
+attach:getpeername4                                            0.015     0.017     0.027     0.015     0.016
+attach:recvmsg4                                                0.014     0.015     0.025     0.014     0.015
+attach:sock_release                                            0.038     0.048     0.055     0.030     0.039
+SUM program loads (verifier)                                  62.617    63.040    63.574    62.286    62.679
+SUM program attaches                                           6.939     6.962     7.032     6.913     6.941
+load:sub:btf_from_sys_fs (inside candidate load)              15.299    15.385    16.244    15.205    15.327
+attach:sub:cgroup_file (first attach mounts cgroup2)           0.064     0.074     0.104     0.060     0.067
+PRE-READY BPF TOTAL (prep+loads+attaches)                    113.905   114.748   115.375   113.373   114.026
+transport_total (configure_guest_transport)                  123.846   124.666   125.399   122.750   123.856
+phase:network_total                                          124.205   125.023   125.804   123.085   124.231
+phase:modules                                                  1.920     1.940     1.957     1.897     1.923
+phase:root                                                     0.045     0.053     0.059     0.042     0.047
+phase:connect_beacon                                           0.126     0.149     0.188     0.084     0.124
+phase:owner                                                    0.056     0.058     1.414     0.052     0.090
+phase:ready_send                                               1.674     1.795     1.849     0.784     1.668
+init_start_to_ready_sent                                     128.075   128.853   129.752   126.938   128.122
+guest_kernel_boot_to_init_start (CLOCK_MONOTONIC)            616.153   617.993   621.204   603.598   615.203
+
+### variant B: p50 / p90 / max / min / mean (ms)
+host_vmm_start_to_READY                                     1295.883  1302.629  1318.530  1277.913  1294.731
+host_vmm_start_to_beacon_connect                            1170.787  1199.712  1200.870  1152.695  1172.684
+prep:total                                                    44.353    44.754    45.526    43.890    44.436
+prep:Ebpf::load(guest obj)                                    21.598    21.734    22.322    21.368    21.612
+prep:Ebpf::load(candidate obj)                                21.858    22.059    23.064    21.580    21.927
+prep:other(mount,staging,maps)                                 0.887     0.970     1.004     0.849     0.897
+verifier+load:tcp_correlation                                  1.263     1.283     1.309     1.241     1.266
+verifier+load:tcp_correlation_candidate                       24.369    24.538    25.377    24.194    24.404
+verifier+load:connect4                                         0.398     0.417     0.428     0.383     0.400
+verifier+load:sendmsg4                                         0.241     0.250     0.264     0.233     0.243
+verifier+load:getpeername4                                     0.184     0.201     0.220     0.180     0.189
+verifier+load:recvmsg4                                         0.105     0.118     0.122     0.103     0.108
+verifier+load:sock_release                                    36.072    36.169    36.308    35.414    36.045
+attach:tcp_correlation                                         0.134     0.152     0.162     0.130     0.137
+attach:tcp_correlation_candidate                               6.670     6.693     6.791     6.643     6.674
+attach:connect4                                                0.035     0.040     0.053     0.033     0.036
+attach:sendmsg4                                                0.019     0.021     0.029     0.018     0.020
+attach:getpeername4                                            0.015     0.017     0.028     0.014     0.016
+attach:recvmsg4                                                0.019     0.020     0.030     0.018     0.019
+attach:sock_release                                            0.035     0.040     0.050     0.025     0.034
+SUM program loads (verifier)                                  62.971    63.200    64.179    62.116    63.010
+SUM program attaches                                           6.966     6.995     7.064     6.935     6.970
+load:sub:btf_from_sys_fs (inside candidate load)              15.235    15.363    15.590    15.123    15.250
+attach:sub:cgroup_file (first attach mounts cgroup2)           0.065     0.068     0.077     0.061     0.065
+PRE-READY BPF TOTAL (prep+loads+attaches)                    114.323   114.792   116.002   113.436   114.417
+transport_total (configure_guest_transport)                  124.192   124.681   125.522   122.978   124.233
+phase:network_total                                          124.562   125.059   125.903   123.319   124.598
+phase:modules                                                  1.926     1.935     1.949     1.915     1.927
+phase:root                                                     0.046     0.054     0.058     0.042     0.048
+phase:connect_beacon                                           0.108     0.143     0.154     0.081     0.113
+phase:owner                                                    0.059     0.068     0.078     0.053     0.060
+phase:ready_send                                               1.674     1.792     1.853     1.579     1.692
+init_start_to_ready_sent                                     128.438   128.971   129.824   127.173   128.468
+guest_kernel_boot_to_init_start (CLOCK_MONOTONIC)            615.142   617.112   618.432   601.583   613.643
+verifier+load:post_bind4                                       0.245     0.254     0.266     0.234     0.246
+verifier+load:post_bind6                                       0.104     0.117     0.172     0.101     0.108
+attach:post_bind4                                              0.017     0.019     0.028     0.015     0.017
+attach:post_bind6                                              0.016     0.020     0.029     0.015     0.017
+
+### delta B - A  (p50 of per-metric distributions, and paired by round: median / p90 / max of per-round difference) (ms)
+host_vmm_start_to_READY                                    p50Δ=  -0.634 p90Δ=  -2.290  paired: med=  -0.407 p90=   6.508 max=  18.513
+host_vmm_start_to_beacon_connect                           p50Δ=   1.632 p90Δ=   1.236  paired: med=   1.883 p90=  25.994 max=  42.568
+prep:total                                                 p50Δ=  -0.015 p90Δ=   0.115  paired: med=  -0.040 p90=   0.449 max=   1.059
+prep:Ebpf::load(guest obj)                                 p50Δ=   0.064 p90Δ=   0.009  paired: med=   0.051 p90=   0.263 max=   0.862
+prep:Ebpf::load(candidate obj)                             p50Δ=  -0.064 p90Δ=  -0.008  paired: med=  -0.079 p90=   0.172 max=   1.135
+prep:other(mount,staging,maps)                             p50Δ=  -0.005 p90Δ=   0.004  paired: med=  -0.008 p90=   0.060 max=   0.113
+verifier+load:tcp_correlation                              p50Δ=   0.171 p90Δ=   0.179  paired: med=   0.171 p90=   0.190 max=   0.227
+verifier+load:tcp_correlation_candidate                    p50Δ=  -0.141 p90Δ=  -0.271  paired: med=  -0.169 p90=   0.056 max=   0.862
+verifier+load:connect4                                     p50Δ=  -0.002 p90Δ=  -0.005  paired: med=  -0.003 p90=   0.020 max=   0.034
+verifier+load:sendmsg4                                     p50Δ=   0.006 p90Δ=   0.001  paired: med=   0.003 p90=   0.016 max=   0.029
+verifier+load:getpeername4                                 p50Δ=  -0.003 p90Δ=  -0.002  paired: med=  -0.003 p90=   0.011 max=   0.032
+verifier+load:recvmsg4                                     p50Δ=  -0.003 p90Δ=  -0.005  paired: med=  -0.004 p90=   0.010 max=   0.015
+verifier+load:sock_release                                 p50Δ=  -2.885 p90Δ=  -2.906  paired: med=  -2.901 p90=  -2.780 max=  -2.621
+attach:tcp_correlation                                     p50Δ=  -0.000 p90Δ=   0.004  paired: med=  -0.000 p90=   0.017 max=   0.024
+attach:tcp_correlation_candidate                           p50Δ=   0.001 p90Δ=   0.001  paired: med=  -0.002 p90=   0.037 max=   0.094
+attach:connect4                                            p50Δ=   0.000 p90Δ=   0.004  paired: med=   0.000 p90=   0.005 max=   0.019
+attach:sendmsg4                                            p50Δ=   0.001 p90Δ=   0.001  paired: med=   0.000 p90=   0.003 max=   0.011
+attach:getpeername4                                        p50Δ=  -0.000 p90Δ=  -0.000  paired: med=  -0.000 p90=   0.001 max=   0.013
+attach:recvmsg4                                            p50Δ=   0.004 p90Δ=   0.005  paired: med=   0.004 p90=   0.006 max=   0.015
+attach:sock_release                                        p50Δ=  -0.007 p90Δ=  -0.013  paired: med=  -0.007 p90=   0.002 max=   0.022
+SUM program loads (verifier)                               p50Δ=  -2.534 p90Δ=  -2.869  paired: med=  -2.541 p90=  -2.271 max=  -1.337
+SUM program attaches                                       p50Δ=   0.031 p90Δ=   0.030  paired: med=   0.029 p90=   0.074 max=   0.112
+load:sub:btf_from_sys_fs (inside candidate load)           p50Δ=  -0.063 p90Δ=  -0.109  paired: med=  -0.079 p90=   0.044 max=   0.290
+attach:sub:cgroup_file (first attach mounts cgroup2)       p50Δ=  -0.000 p90Δ=  -0.010  paired: med=  -0.000 p90=   0.004 max=   0.014
+PRE-READY BPF TOTAL (prep+loads+attaches)                  p50Δ=  -2.508 p90Δ=  -3.072  paired: med=  -2.581 p90=  -2.070 max=  -0.809
+transport_total (configure_guest_transport)                p50Δ=  -2.542 p90Δ=  -3.136  paired: med=  -2.527 p90=  -2.064 max=  -1.267
+phase:network_total                                        p50Δ=  -2.537 p90Δ=  -3.159  paired: med=  -2.524 p90=  -2.114 max=  -1.226
+phase:modules                                              p50Δ=   0.003 p90Δ=  -0.002  paired: med=   0.003 p90=   0.019 max=   0.028
+phase:root                                                 p50Δ=   0.000 p90Δ=   0.001  paired: med=  -0.001 p90=   0.010 max=   0.016
+phase:connect_beacon                                       p50Δ=   0.001 p90Δ=  -0.001  paired: med=   0.002 p90=   0.030 max=   0.066
+phase:owner                                                p50Δ=   0.003 p90Δ=   0.002  paired: med=  -0.000 p90=   0.010 max=   0.021
+phase:ready_send                                           p50Δ=  -0.006 p90Δ=   0.013  paired: med=  -0.010 p90=   0.118 max=   0.138
+init_start_to_ready_sent                                   p50Δ=  -2.555 p90Δ=  -3.061  paired: med=  -2.591 p90=  -2.015 max=  -1.164
+guest_kernel_boot_to_init_start (CLOCK_MONOTONIC)          p50Δ=  -0.035 p90Δ=  -0.476  paired: med=  -0.794 p90=   5.350 max=  11.932
+
+### delta B - A2  (p50 of per-metric distributions, and paired by round: median / p90 / max of per-round difference) (ms)
+host_vmm_start_to_READY                                    p50Δ=   0.649 p90Δ=   2.673  paired: med=   1.667 p90=  10.608 max=  23.336
+host_vmm_start_to_beacon_connect                           p50Δ=  -0.405 p90Δ=   3.067  paired: med=   0.689 p90=  29.259 max=  33.838
+prep:total                                                 p50Δ=   0.028 p90Δ=   0.173  paired: med=   0.052 p90=   0.403 max=   1.399
+prep:Ebpf::load(guest obj)                                 p50Δ=   0.067 p90Δ=   0.098  paired: med=   0.082 p90=   0.246 max=   0.858
+prep:Ebpf::load(candidate obj)                             p50Δ=  -0.038 p90Δ=  -0.001  paired: med=  -0.046 p90=   0.200 max=   1.308
+prep:other(mount,staging,maps)                             p50Δ=   0.002 p90Δ=   0.007  paired: med=   0.002 p90=   0.061 max=   0.154
+verifier+load:tcp_correlation                              p50Δ=   0.164 p90Δ=   0.167  paired: med=   0.165 p90=   0.180 max=   0.223
+verifier+load:tcp_correlation_candidate                    p50Δ=  -0.124 p90Δ=  -0.087  paired: med=  -0.092 p90=   0.117 max=   0.885
+verifier+load:connect4                                     p50Δ=   0.006 p90Δ=   0.007  paired: med=   0.005 p90=   0.019 max=   0.044
+verifier+load:sendmsg4                                     p50Δ=  -0.000 p90Δ=  -0.001  paired: med=  -0.001 p90=   0.014 max=   0.025
+verifier+load:getpeername4                                 p50Δ=  -0.001 p90Δ=   0.001  paired: med=  -0.002 p90=   0.016 max=   0.038
+verifier+load:recvmsg4                                     p50Δ=   0.000 p90Δ=   0.002  paired: med=   0.001 p90=   0.013 max=   0.019
+verifier+load:sock_release                                 p50Δ=   0.011 p90Δ=  -0.219  paired: med=  -0.057 p90=   0.169 max=   0.371
+attach:tcp_correlation                                     p50Δ=   0.000 p90Δ=  -0.000  paired: med=   0.000 p90=   0.013 max=   0.029
+attach:tcp_correlation_candidate                           p50Δ=  -0.005 p90Δ=  -0.002  paired: med=  -0.010 p90=   0.014 max=   0.079
+attach:connect4                                            p50Δ=   0.000 p90Δ=   0.002  paired: med=   0.000 p90=   0.005 max=   0.019
+attach:sendmsg4                                            p50Δ=   0.000 p90Δ=   0.002  paired: med=   0.000 p90=   0.003 max=   0.011
+attach:getpeername4                                        p50Δ=  -0.000 p90Δ=  -0.000  paired: med=  -0.000 p90=   0.001 max=   0.011
+attach:recvmsg4                                            p50Δ=   0.005 p90Δ=   0.005  paired: med=   0.004 p90=   0.006 max=   0.015
+attach:sock_release                                        p50Δ=  -0.003 p90Δ=  -0.008  paired: med=  -0.004 p90=   0.003 max=   0.016
+SUM program loads (verifier)                               p50Δ=   0.355 p90Δ=   0.160  paired: med=   0.338 p90=   0.756 max=   1.744
+SUM program attaches                                       p50Δ=   0.027 p90Δ=   0.033  paired: med=   0.028 p90=   0.059 max=   0.115
+load:sub:btf_from_sys_fs (inside candidate load)           p50Δ=  -0.064 p90Δ=  -0.022  paired: med=  -0.071 p90=   0.086 max=   0.291
+attach:sub:cgroup_file (first attach mounts cgroup2)       p50Δ=   0.001 p90Δ=  -0.006  paired: med=   0.000 p90=   0.005 max=   0.013
+PRE-READY BPF TOTAL (prep+loads+attaches)                  p50Δ=   0.419 p90Δ=   0.045  paired: med=   0.343 p90=   1.048 max=   2.314
+transport_total (configure_guest_transport)                p50Δ=   0.346 p90Δ=   0.015  paired: med=   0.289 p90=   1.257 max=   2.038
+phase:network_total                                        p50Δ=   0.357 p90Δ=   0.036  paired: med=   0.273 p90=   1.279 max=   2.017
+phase:modules                                              p50Δ=   0.006 p90Δ=  -0.005  paired: med=   0.007 p90=   0.021 max=   0.037
+phase:root                                                 p50Δ=   0.001 p90Δ=   0.001  paired: med=   0.001 p90=   0.008 max=   0.016
+phase:connect_beacon                                       p50Δ=  -0.018 p90Δ=  -0.006  paired: med=  -0.006 p90=   0.022 max=   0.033
+phase:owner                                                p50Δ=   0.004 p90Δ=   0.010  paired: med=   0.003 p90=   0.012 max=   0.024
+phase:ready_send                                           p50Δ=  -0.001 p90Δ=  -0.003  paired: med=  -0.009 p90=   0.161 max=   0.824
+init_start_to_ready_sent                                   p50Δ=   0.362 p90Δ=   0.118  paired: med=   0.241 p90=   1.294 max=   2.102
+guest_kernel_boot_to_init_start (CLOCK_MONOTONIC)          p50Δ=  -1.011 p90Δ=  -0.881  paired: med=  -1.253 p90=   3.454 max=  13.095
+
+### delta A2 - A  (p50 of per-metric distributions, and paired by round: median / p90 / max of per-round difference) (ms)
+host_vmm_start_to_READY                                    p50Δ=  -1.284 p90Δ=  -4.962  paired: med=  -1.015 p90=   7.259 max=  17.472
+host_vmm_start_to_beacon_connect                           p50Δ=   2.037 p90Δ=  -1.832  paired: med=   2.335 p90=  19.685 max=  35.764
+prep:total                                                 p50Δ=  -0.043 p90Δ=  -0.057  paired: med=  -0.063 p90=   0.248 max=   1.569
+prep:Ebpf::load(guest obj)                                 p50Δ=  -0.003 p90Δ=  -0.089  paired: med=  -0.021 p90=   0.150 max=   1.483
+prep:Ebpf::load(candidate obj)                             p50Δ=  -0.026 p90Δ=  -0.007  paired: med=  -0.023 p90=   0.094 max=   1.490
+prep:other(mount,staging,maps)                             p50Δ=  -0.007 p90Δ=  -0.003  paired: med=  -0.008 p90=   0.074 max=   0.098
+verifier+load:tcp_correlation                              p50Δ=   0.007 p90Δ=   0.012  paired: med=   0.008 p90=   0.024 max=   0.039
+verifier+load:tcp_correlation_candidate                    p50Δ=  -0.017 p90Δ=  -0.184  paired: med=  -0.081 p90=   0.180 max=   1.078
+verifier+load:connect4                                     p50Δ=  -0.007 p90Δ=  -0.012  paired: med=  -0.009 p90=   0.008 max=   0.016
+verifier+load:sendmsg4                                     p50Δ=   0.006 p90Δ=   0.003  paired: med=   0.004 p90=   0.016 max=   0.017
+verifier+load:getpeername4                                 p50Δ=  -0.002 p90Δ=  -0.004  paired: med=  -0.002 p90=   0.009 max=   0.028
+verifier+load:recvmsg4                                     p50Δ=  -0.003 p90Δ=  -0.007  paired: med=  -0.003 p90=   0.000 max=   0.011
+verifier+load:sock_release                                 p50Δ=  -2.896 p90Δ=  -2.688  paired: med=  -2.894 p90=  -2.553 max=  -1.862
+attach:tcp_correlation                                     p50Δ=  -0.001 p90Δ=   0.004  paired: med=   0.000 p90=   0.012 max=   0.041
+attach:tcp_correlation_candidate                           p50Δ=   0.005 p90Δ=   0.003  paired: med=   0.006 p90=   0.035 max=   0.115
+attach:connect4                                            p50Δ=  -0.000 p90Δ=   0.002  paired: med=  -0.000 p90=   0.003 max=   0.021
+attach:sendmsg4                                            p50Δ=   0.001 p90Δ=  -0.001  paired: med=   0.000 p90=   0.002 max=   0.010
+attach:getpeername4                                        p50Δ=   0.000 p90Δ=  -0.000  paired: med=   0.000 p90=   0.002 max=   0.011
+attach:recvmsg4                                            p50Δ=  -0.000 p90Δ=  -0.000  paired: med=  -0.000 p90=   0.001 max=   0.011
+attach:sock_release                                        p50Δ=  -0.004 p90Δ=  -0.005  paired: med=  -0.002 p90=   0.007 max=   0.016
+SUM program loads (verifier)                               p50Δ=  -2.889 p90Δ=  -3.029  paired: med=  -2.926 p90=  -2.470 max=  -1.996
+SUM program attaches                                       p50Δ=   0.004 p90Δ=  -0.004  paired: med=   0.004 p90=   0.041 max=   0.092
+load:sub:btf_from_sys_fs (inside candidate load)           p50Δ=   0.001 p90Δ=  -0.087  paired: med=  -0.021 p90=   0.148 max=   0.990
+attach:sub:cgroup_file (first attach mounts cgroup2)       p50Δ=  -0.001 p90Δ=  -0.004  paired: med=   0.000 p90=   0.010 max=   0.034
+PRE-READY BPF TOTAL (prep+loads+attaches)                  p50Δ=  -2.926 p90Δ=  -3.117  paired: med=  -2.937 p90=  -2.157 max=  -1.356
+transport_total (configure_guest_transport)                p50Δ=  -2.888 p90Δ=  -3.151  paired: med=  -2.849 p90=  -1.967 max=  -1.201
+phase:network_total                                        p50Δ=  -2.894 p90Δ=  -3.195  paired: med=  -2.846 p90=  -1.993 max=  -1.284
+phase:modules                                              p50Δ=  -0.002 p90Δ=   0.003  paired: med=  -0.004 p90=   0.023 max=   0.037
+phase:root                                                 p50Δ=  -0.001 p90Δ=   0.000  paired: med=  -0.001 p90=   0.008 max=   0.014
+phase:connect_beacon                                       p50Δ=   0.019 p90Δ=   0.005  paired: med=   0.008 p90=   0.053 max=   0.083
+phase:owner                                                p50Δ=  -0.001 p90Δ=  -0.009  paired: med=  -0.001 p90=   0.002 max=   1.357
+phase:ready_send                                           p50Δ=  -0.006 p90Δ=   0.015  paired: med=  -0.007 p90=   0.109 max=   0.198
+init_start_to_ready_sent                                   p50Δ=  -2.917 p90Δ=  -3.178  paired: med=  -2.884 p90=  -2.097 max=  -1.232
+guest_kernel_boot_to_init_start (CLOCK_MONOTONIC)          p50Δ=   0.976 p90Δ=   0.405  paired: med=   0.165 p90=   6.892 max=  14.870
+
+### instrumentation control: host VMM-start->READY, real unmodified init R vs instrumented A
+R p50=1297.604 p90=1304.550 max=1317.858;  A p50=1296.517 p90=1304.919 max=1313.675;  A-R p50Δ=-1.087

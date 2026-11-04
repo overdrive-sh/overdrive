@@ -5,6 +5,22 @@
 Accepted. 2026-05-24. Decision-makers: Morgan (proposing); DESIGN-wave
 output of `docs/feature/service-health-check-probes/`.
 
+**Supersession user-approved in direction, 2026-11-03; effective only when ADR-0263 is
+Accepted (pending spikes V34 to V39).** This decision is operative (implemented;
+evidence E13). On the user's ruling of 2026-11-03 ("Drop inference and take readiness
+from the guest itself"; "add it. and proceed with recommendations"),
+[ADR-0263](adr-0263-a-probe-less-service-is-stable-when-the-guest-reports-every-declared-listener-open.md)
+supersedes it on acceptance: a Service that declares no startup probe is `Stable` when the
+guest reports every declared listener open, instead of when a 2 s TCP poll of
+`listeners[0]` passes. The opt-out (`[[health_check.startup]] = []`) of §1 is kept
+unchanged. ADR-0263 depends on the guest report
+([ADR-0261](adr-0261-the-guest-reports-each-workload-listener-it-opens-over-the-beacon-channel.md))
+and the host producer
+([ADR-0262](adr-0262-a-service-with-no-declared-startup-probe-waits-on-a-guest-listener-startup-probe.md)),
+whose contract-shaping spikes have not run. Until the user accepts ADR-0263 this record
+governs; on acceptance it is marked Superseded and §§1, 2, 3, 5 and 6 no longer describe
+the code.
+
 Tags: phase-1, service-kind, operator-config, default-policy,
 rca-a-closure.
 

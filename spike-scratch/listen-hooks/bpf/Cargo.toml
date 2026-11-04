@@ -1,0 +1,26 @@
+[package]
+name = "listen-hooks-bpf"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+aya-ebpf = "0.1.1"
+
+[features]
+# `listen` adds the TCP_LISTEN_CB arm, the post_bind programs and the
+# listen_only sockops program. Without it the object is the unmodified
+# copy of the guest's sockops + cgroup programs (the V35 baseline).
+listen = []
+
+[[bin]]
+name = "listen-hooks-bpf"
+path = "src/main.rs"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+debug = "line-tables-only"
+
+[workspace]

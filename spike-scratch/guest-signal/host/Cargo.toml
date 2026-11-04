@@ -1,0 +1,12 @@
+[package]
+name = "gshost"
+version = "0.0.0"
+edition = "2021"
+[dependencies]
+overdrive-core = { path = "../../../crates/overdrive-core" }
+overdrive-host = { path = "../../../crates/overdrive-host" }
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+[[bin]]
+name = "gshost"
+path = "src/main.rs"

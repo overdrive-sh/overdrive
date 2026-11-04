@@ -1,0 +1,993 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
+     Running `target/debug/xtask metal run -- bash spike-scratch/boot-cost/run.sh run 2 1`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=94daa1cb5a5583d5c6110402
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=94daa1cb5a5583d5c6110402
+OVERDRIVE_METAL_LEASE_ACQUIRED token=94daa1cb5a5583d5c6110402 pid=764128
+
+########## [bootstrap] acquire metal tree lock (/run/lock/overdrive-metal-tree-overdrive-branches-marcus-sa-nw-bugfix-crash-restart-tasks.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=94daa1cb5a5583d5c6110402-tree pid=764637
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/ouagadougou -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks
+
+sent 1,891,208 bytes  received 10,584 bytes  760,716.80 bytes/sec
+total size is 1,829,019,335  speedup is 961.73
+
+########## [bootstrap] materialising standalone .git (common dir 7.5G)
+
+sent 673,177 bytes  received 18,592 bytes  461,179.33 bytes/sec
+total size is 910,209,634  speedup is 1,315.77
+## marcus-sa/nw-bugfix-crash-restart-tasks
+ M docs/product/architecture/adr-0058-default-tcp-startup-probe-inference.md
+ M docs/product/architecture/adr-0096-startup-failure-withdraws-backend-eligibility.md
+ M docs/product/architecture/brief.md
+ D vendors/linux
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+SUBSTRATE uname_r=7.0.0-38-generic machine=x86_64 virt=none date=2026-11-03T20:58:02Z
+CH cloud-hypervisor v53.0.0
+Migration Protocol Versions: 0 sha256=6d54fbd2611e692fda00e476fc0723e9502bfd8acd53c8bc46edd96e84f3e842
+OBJ sha256:
+d64aa16879c51705135d7d8e42d63432de202d72d1f339d03868a44d1cfd3c16  /tmp/boot-cost-target/objs/prod.o
+040d9c4247369f9185df02fd9a94dbd5b9fed234bc7165cd81b6650a0c79d6b9  /tmp/boot-cost-target/objs/spike_base.o
+d40e8513de6f17245d4ce7e590fa2e0b2c96f88e7b3a032841cd666258c0f496  /tmp/boot-cost-target/objs/spike_listen.o
+d9d0a84216946d7c7fba4381dfa007881e340122557ca61b897b3d706f342cea  /home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/target/bpf/overdrive_guest_tcp_correlation_candidate_bpf.o
+-rw-r----- 1 root root 10848 Nov  3 20:56 /tmp/boot-cost-target/objs/prod.o
+-rw-r----- 1 root root 10696 Nov  3 20:56 /tmp/boot-cost-target/objs/spike_base.o
+-rw-r----- 1 root root 12928 Nov  3 20:56 /tmp/boot-cost-target/objs/spike_listen.o
+-rwxr-x--- 2 root root 2405272 Nov  3 20:57 /home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/target/x86_64-unknown-linux-musl/release/overdrive-init
+-rwxr-x--- 1 root root 3188960 Nov  3 20:56 /tmp/boot-cost-target/objs/init-A
+-rwxr-x--- 1 root root 3188960 Nov  3 20:56 /tmp/boot-cost-target/objs/init-A2
+-rwxr-x--- 1 root root 3192880 Nov  3 20:56 /tmp/boot-cost-target/objs/init-B
+BCENV {"kernel_release":"7.0.0-38-generic","kernel":"/srv/vm/overdrive-testing/kernel","ch":"/usr/local/bin/cloud-hypervisor","real_init":"/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/target/x86_64-unknown-linux-musl/release/overdrive-init"}
+BCFAIL R 0 no READY in 60s; console:
+c7e793b7eb7e899970a2eef0b5dc8c'
+[    0.626734] Loaded X.509 cert 'Canonical Ltd. Live Patch Signing: 14df34d1a87cf37625abec039ef2bf521249b969'
+[    0.629674] Loaded X.509 cert 'Canonical Ltd. Kernel Module Signing 2025 Kmod: 4627603d2357a2a3f81006370894c221175893e9'
+[    0.632891] Loaded X.509 cert 'Canonical Ltd. Kernel Module Signing: 88f752e560a1e0737e31163a466ad7b70a850c19'
+[    0.632897] blacklist: Loading compiled-in revocation X.509 certificates
+[    0.632915] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing: 61482aa2830d0ab2ad5af10b7250da9033ddcef0'
+[    0.632929] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2017): 242ade75ac4a15e50d50c84b0d45ff3eae707a03'
+[    0.632942] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (ESM 2018): 365188c1d374d6b07c3c8f240f8ef722433d6a8b'
+[    0.632954] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2019): c0746fd6c5da3ae827864651ad66ae47fe24b3e8'
+[    0.647748] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v1): a8d54bbb3825cfb94fa13c9f8a594a195c107b8d'
+[    0.647774] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v2): 4cf046892d6fd3c9a5b03f98d845f90851dc6a8c'
+[    0.647790] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v3): 100437bb6de6e469b581e61cd66bce3ef4ed53af'
+[    0.647807] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (Ubuntu Core 2019): c1d57b8f6b743f23ee41f4f7ee292f06eecadfb9'
+[    0.667124] Demotion targets for Node 0: null
+[    0.668385] Key type .fscrypt registered
+[    0.668390] Key type fscrypt-provisioning registered
+[    0.668485] Key type big_key registered
+[    0.672282] Key type encrypted registered
+[    0.672289] AppArmor: AppArmor sha256 policy hashing enabled
+[    0.672293] ima: No TPM chip found, activating TPM-bypass!
+[    0.672297] Loading compiled-in module X.509 certificates
+[    0.672756] Loaded X.509 cert 'Build time autogenerated kernel key: 6b2b0d62fc3a1216c49fda2b061b13d4dbf474bd'
+[    0.672759] ima: Allocated hash algorithm: sha256
+[    0.672771] ima: No architecture policies found
+[    0.672794] evm: Initialising EVM extended attributes:
+[    0.672796] evm: security.selinux
+[    0.672798] evm: security.SMACK64
+[    0.672800] evm: security.SMACK64EXEC
+[    0.672802] evm: security.SMACK64TRANSMUTE
+[    0.672803] evm: security.SMACK64MMAP
+[    0.672805] evm: security.apparmor
+[    0.672806] evm: security.ima
+[    0.672808] evm: security.capability
+[    0.672809] evm: HMAC attrs: 0x1
+[    0.692947] PM:   Magic number: 2:820:1002
+[    0.694267] RAS: Correctable Errors collector initialized.
+[    0.694561] clk: Disabling unused clocks
+[    0.694564] PM: genpd: Disabling unused power domains
+[    0.699083] md: Waiting for all devices to be available before autodetect
+[    0.699088] md: If you don't use raid, use raid=noautodetect
+[    0.699091] md: Autodetecting RAID arrays.
+[    0.699093] md: autorun ...
+[    0.699094] md: ... autorun DONE.
+[    0.706235] EXT4-fs (vda): mounted filesystem 7c00d284-1011-46f4-b38f-b81d73c00bfb r/w with ordered data mode. Quota mode: none.
+[    0.706252] VFS: Mounted root (ext4 filesystem) on device 253:0.
+[    0.709011] devtmpfs: mounted
+[    0.709515] VFS: Pivoted into new rootfs
+[    0.711350] Freeing unused decrypted memory: 2028K
+[    0.711951] Freeing unused kernel image (initmem) memory: 5304K
+[    0.713620] Write protecting the kernel read-only data: 43008k
+[    0.714928] Freeing unused kernel image (text/rodata gap) memory: 736K
+[    0.716230] Freeing unused kernel image (rodata/data gap) memory: 1656K
+[    0.780230] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.780244] Run /sbin/init as init process
+[    0.785954] NET: Registered PF_VSOCK protocol family
+[    0.927822] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.927833] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+overdrive-init: beacon boundary tx READY
+
+BCFAIL A 0 no READY in 60s; console:
+untu Core 2019): c1d57b8f6b743f23ee41f4f7ee292f06eecadfb9'
+[    0.666142] Demotion targets for Node 0: null
+[    0.667403] Key type .fscrypt registered
+[    0.667407] Key type fscrypt-provisioning registered
+[    0.667511] Key type big_key registered
+[    0.671290] Key type encrypted registered
+[    0.671296] AppArmor: AppArmor sha256 policy hashing enabled
+[    0.671301] ima: No TPM chip found, activating TPM-bypass!
+[    0.671305] Loading compiled-in module X.509 certificates
+[    0.671752] Loaded X.509 cert 'Build time autogenerated kernel key: 6b2b0d62fc3a1216c49fda2b061b13d4dbf474bd'
+[    0.671755] ima: Allocated hash algorithm: sha256
+[    0.671766] ima: No architecture policies found
+[    0.671788] evm: Initialising EVM extended attributes:
+[    0.671790] evm: security.selinux
+[    0.671792] evm: security.SMACK64
+[    0.671793] evm: security.SMACK64EXEC
+[    0.671795] evm: security.SMACK64TRANSMUTE
+[    0.671796] evm: security.SMACK64MMAP
+[    0.671798] evm: security.apparmor
+[    0.671800] evm: security.ima
+[    0.671801] evm: security.capability
+[    0.671803] evm: HMAC attrs: 0x1
+[    0.691822] PM:   Magic number: 2:820:1002
+[    0.693142] RAS: Correctable Errors collector initialized.
+[    0.694892] clk: Disabling unused clocks
+[    0.694897] PM: genpd: Disabling unused power domains
+[    0.697995] md: Waiting for all devices to be available before autodetect
+[    0.698001] md: If you don't use raid, use raid=noautodetect
+[    0.698003] md: Autodetecting RAID arrays.
+[    0.698005] md: autorun ...
+[    0.698007] md: ... autorun DONE.
+[    0.705180] EXT4-fs (vda): mounted filesystem 0ead45ca-0738-4793-982a-0affa4a36831 r/w with ordered data mode. Quota mode: none.
+[    0.705197] VFS: Mounted root (ext4 filesystem) on device 253:0.
+[    0.707874] devtmpfs: mounted
+[    0.708396] VFS: Pivoted into new rootfs
+[    0.710202] Freeing unused decrypted memory: 2028K
+[    0.710795] Freeing unused kernel image (initmem) memory: 5304K
+[    0.710810] Write protecting the kernel read-only data: 43008k
+[    0.711222] Freeing unused kernel image (text/rodata gap) memory: 736K
+[    0.711515] Freeing unused kernel image (rodata/data gap) memory: 1656K
+[    0.779026] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.779038] Run /sbin/init as init process
+[    0.784975] NET: Registered PF_VSOCK protocol family
+[    0.955056] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.955068] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+overdrive-init: beacon boundary tx READY
+BC init_start 614659051 0
+BC phase:root 614701845 47061
+BC phase:modules 614749096 1904426
+BC phase:connect_beacon 616654003 140020
+BC prep:begin 620914884 0
+BC prep:ebpf_load_guest_obj 621142556 31400820
+BC prep:ebpf_load_candidate_obj 652544198 31877475
+BC prep:total 620914654 64369112
+BC load:tcp_correlation 685285939 1085989
+BC attach:sub:cgroup_file 686374091 66600
+BC attach:tcp_correlation 686373881 138248
+BC load:sub:btf_from_sys_fs 686513360 25085428
+BC load:tcp_correlation_candidate 686512940 34263053
+BC attach:tcp_correlation_candidate 720779338 6680551
+BC load:connect4 727461221 405448
+BC attach:sub:cgroup_file 727867631 1472
+BC attach:connect4 727867420 37577
+BC load:sendmsg4 727919509 251847
+BC attach:sub:cgroup_file 728172097 1222
+BC attach:sendmsg4 728172037 23395
+BC load:getpeername4 728195933 190266
+BC attach:sub:cgroup_file 728386659 842
+BC attach:getpeername4 728386599 15624
+BC load:recvmsg4 728402613 108273
+BC attach:sub:cgroup_file 728511386 711
+BC attach:recvmsg4 728511336 14562
+BC load:sock_release 728526279 39016523
+BC attach:sub:cgroup_file 767545537 1812
+BC attach:sock_release 767545196 42904
+BC bpf_done 767588551 0
+BC transport_total 616838860 156104884
+BC phase:network_total 616794484 156486395
+BC phase:owner 773281470 57657
+BC phase:ready_send 773346258 1727060
+BC ready_sent 775073829 0
+BC_END
+
+BCFAIL A2 0 no READY in 60s; console:
+Ubuntu Core 2019): c1d57b8f6b743f23ee41f4f7ee292f06eecadfb9'
+[    0.666175] Demotion targets for Node 0: null
+[    0.667444] Key type .fscrypt registered
+[    0.667448] Key type fscrypt-provisioning registered
+[    0.667548] Key type big_key registered
+[    0.671335] Key type encrypted registered
+[    0.671342] AppArmor: AppArmor sha256 policy hashing enabled
+[    0.671346] ima: No TPM chip found, activating TPM-bypass!
+[    0.671351] Loading compiled-in module X.509 certificates
+[    0.677188] Loaded X.509 cert 'Build time autogenerated kernel key: 6b2b0d62fc3a1216c49fda2b061b13d4dbf474bd'
+[    0.677196] ima: Allocated hash algorithm: sha256
+[    0.677209] ima: No architecture policies found
+[    0.677234] evm: Initialising EVM extended attributes:
+[    0.677236] evm: security.selinux
+[    0.677238] evm: security.SMACK64
+[    0.677239] evm: security.SMACK64EXEC
+[    0.677241] evm: security.SMACK64TRANSMUTE
+[    0.677243] evm: security.SMACK64MMAP
+[    0.677244] evm: security.apparmor
+[    0.677246] evm: security.ima
+[    0.677247] evm: security.capability
+[    0.677249] evm: HMAC attrs: 0x1
+[    0.691996] PM:   Magic number: 2:446:44
+[    0.693267] RAS: Correctable Errors collector initialized.
+[    0.693566] clk: Disabling unused clocks
+[    0.693569] PM: genpd: Disabling unused power domains
+[    0.698127] md: Waiting for all devices to be available before autodetect
+[    0.698133] md: If you don't use raid, use raid=noautodetect
+[    0.698136] md: Autodetecting RAID arrays.
+[    0.698137] md: autorun ...
+[    0.698139] md: ... autorun DONE.
+[    0.705088] EXT4-fs (vda): mounted filesystem 101aad1e-6d47-4ea7-ada0-d03e41863da8 r/w with ordered data mode. Quota mode: none.
+[    0.705104] VFS: Mounted root (ext4 filesystem) on device 253:0.
+[    0.707783] devtmpfs: mounted
+[    0.708294] VFS: Pivoted into new rootfs
+[    0.710123] Freeing unused decrypted memory: 2028K
+[    0.710729] Freeing unused kernel image (initmem) memory: 5304K
+[    0.710744] Write protecting the kernel read-only data: 43008k
+[    0.713698] Freeing unused kernel image (text/rodata gap) memory: 736K
+[    0.715007] Freeing unused kernel image (rodata/data gap) memory: 1656K
+[    0.779118] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.779132] Run /sbin/init as init process
+[    0.784522] NET: Registered PF_VSOCK protocol family
+[    0.951647] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.951659] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+overdrive-init: beacon boundary tx READY
+BC init_start 613457847 0
+BC phase:root 613492028 47742
+BC phase:modules 613539960 1913410
+BC phase:connect_beacon 615453771 121572
+BC prep:begin 619938448 0
+BC prep:ebpf_load_guest_obj 620099179 31498457
+BC prep:ebpf_load_candidate_obj 651598327 32169613
+BC prep:total 619938307 64697805
+BC load:tcp_correlation 684638586 1097356
+BC attach:sub:cgroup_file 685738065 64277
+BC attach:tcp_correlation 685737875 135323
+BC load:sub:btf_from_sys_fs 685874400 24865818
+BC load:tcp_correlation_candidate 685874039 33919779
+BC attach:tcp_correlation_candidate 719797043 6698127
+BC load:connect4 726496722 396585
+BC attach:sub:cgroup_file 726894279 1802
+BC attach:connect4 726894088 36665
+BC load:sendmsg4 726945445 259189
+BC attach:sub:cgroup_file 727206016 1002
+BC attach:sendmsg4 727205926 20671
+BC load:getpeername4 727226968 186680
+BC attach:sub:cgroup_file 727414118 762
+BC attach:getpeername4 727414058 15053
+BC load:recvmsg4 727429471 104427
+BC attach:sub:cgroup_file 727534349 701
+BC attach:recvmsg4 727534299 14281
+BC load:sock_release 727548911 36137765
+BC attach:sub:cgroup_file 763688659 1483
+BC attach:sock_release 763688409 41803
+BC bpf_done 763730672 0
+BC transport_total 615608833 153387408
+BC phase:network_total 615575634 153745223
+BC phase:owner 769321458 55764
+BC phase:ready_send 769384843 1632749
+BC ready_sent 771017923 0
+BC_END
+
+BCFAIL B 0 no READY in 60s; console:
+y type big_key registered
+[    0.670852] Key type encrypted registered
+[    0.670858] AppArmor: AppArmor sha256 policy hashing enabled
+[    0.670862] ima: No TPM chip found, activating TPM-bypass!
+[    0.670867] Loading compiled-in module X.509 certificates
+[    0.676690] Loaded X.509 cert 'Build time autogenerated kernel key: 6b2b0d62fc3a1216c49fda2b061b13d4dbf474bd'
+[    0.676697] ima: Allocated hash algorithm: sha256
+[    0.676719] ima: No architecture policies found
+[    0.676743] evm: Initialising EVM extended attributes:
+[    0.676744] evm: security.selinux
+[    0.676746] evm: security.SMACK64
+[    0.676748] evm: security.SMACK64EXEC
+[    0.676750] evm: security.SMACK64TRANSMUTE
+[    0.676751] evm: security.SMACK64MMAP
+[    0.676753] evm: security.apparmor
+[    0.676754] evm: security.ima
+[    0.676756] evm: security.capability
+[    0.676757] evm: HMAC attrs: 0x1
+[    0.691465] PM:   Magic number: 2:446:44
+[    0.692741] RAS: Correctable Errors collector initialized.
+[    0.693041] clk: Disabling unused clocks
+[    0.693044] PM: genpd: Disabling unused power domains
+[    0.697584] md: Waiting for all devices to be available before autodetect
+[    0.697590] md: If you don't use raid, use raid=noautodetect
+[    0.697592] md: Autodetecting RAID arrays.
+[    0.697594] md: autorun ...
+[    0.697596] md: ... autorun DONE.
+[    0.706360] EXT4-fs (vda): mounted filesystem fd3b63d5-6589-40bc-b657-156b61ec1e58 r/w with ordered data mode. Quota mode: none.
+[    0.706378] VFS: Mounted root (ext4 filesystem) on device 253:0.
+[    0.709070] devtmpfs: mounted
+[    0.709586] VFS: Pivoted into new rootfs
+[    0.711408] Freeing unused decrypted memory: 2028K
+[    0.712009] Freeing unused kernel image (initmem) memory: 5304K
+[    0.712023] Write protecting the kernel read-only data: 43008k
+[    0.714978] Freeing unused kernel image (text/rodata gap) memory: 736K
+[    0.716278] Freeing unused kernel image (rodata/data gap) memory: 1656K
+[    0.780443] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.780461] Run /sbin/init as init process
+[    0.786497] NET: Registered PF_VSOCK protocol family
+[    0.957026] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.957038] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+overdrive-init: beacon boundary tx READY
+BC init_start 618159630 0
+BC phase:root 618194613 45678
+BC phase:modules 618240602 1942123
+BC phase:connect_beacon 620183176 101422
+BC prep:begin 624451198 0
+BC prep:ebpf_load_guest_obj 624590487 31587991
+BC prep:ebpf_load_candidate_obj 656179309 32149734
+BC prep:total 624450937 64742552
+BC load:tcp_correlation 689196194 1259248
+BC attach:sub:cgroup_file 690457706 64236
+BC attach:tcp_correlation 690457345 134562
+BC load:sub:btf_from_sys_fs 690593069 24904646
+BC load:tcp_correlation_candidate 690592608 34258607
+BC attach:tcp_correlation_candidate 724854370 6725298
+BC load:connect4 731581270 398297
+BC attach:sub:cgroup_file 731980749 1332
+BC attach:connect4 731980529 46530
+BC load:sendmsg4 732038566 240240
+BC attach:sub:cgroup_file 732279387 962
+BC attach:sendmsg4 732279327 18538
+BC load:getpeername4 732298245 183676
+BC attach:sub:cgroup_file 732482562 831
+BC attach:getpeername4 732482502 15193
+BC load:recvmsg4 732498045 104938
+BC attach:sub:cgroup_file 732603433 731
+BC attach:recvmsg4 732603393 29685
+BC load:sock_release 732633418 36135693
+BC attach:sub:cgroup_file 768771565 1692
+BC attach:sock_release 768771504 31758
+BC load:post_bind4 768803853 246920
+BC attach:sub:cgroup_file 769051414 842
+BC attach:post_bind4 769051364 17056
+BC load:post_bind6 769068810 105519
+BC attach:sub:cgroup_file 769187328 751
+BC attach:post_bind6 769187278 16285
+BC bpf_done 769203883 0
+BC transport_total 620318959 154782310
+BC phase:network_total 620284908 155152866
+BC phase:owner 775438385 56885
+BC phase:ready_send 775495600 1753841
+BC ready_sent 777249892 0
+BC_END
+
+BCFAIL R 1 no READY in 60s; console:
+1dc7e793b7eb7e899970a2eef0b5dc8c'
+[    0.625819] Loaded X.509 cert 'Canonical Ltd. Live Patch Signing: 14df34d1a87cf37625abec039ef2bf521249b969'
+[    0.628758] Loaded X.509 cert 'Canonical Ltd. Kernel Module Signing 2025 Kmod: 4627603d2357a2a3f81006370894c221175893e9'
+[    0.631981] Loaded X.509 cert 'Canonical Ltd. Kernel Module Signing: 88f752e560a1e0737e31163a466ad7b70a850c19'
+[    0.631987] blacklist: Loading compiled-in revocation X.509 certificates
+[    0.632011] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing: 61482aa2830d0ab2ad5af10b7250da9033ddcef0'
+[    0.632025] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2017): 242ade75ac4a15e50d50c84b0d45ff3eae707a03'
+[    0.632038] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (ESM 2018): 365188c1d374d6b07c3c8f240f8ef722433d6a8b'
+[    0.632053] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2019): c0746fd6c5da3ae827864651ad66ae47fe24b3e8'
+[    0.632065] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v1): a8d54bbb3825cfb94fa13c9f8a594a195c107b8d'
+[    0.632077] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v2): 4cf046892d6fd3c9a5b03f98d845f90851dc6a8c'
+[    0.632090] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v3): 100437bb6de6e469b581e61cd66bce3ef4ed53af'
+[    0.655008] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (Ubuntu Core 2019): c1d57b8f6b743f23ee41f4f7ee292f06eecadfb9'
+[    0.666207] Demotion targets for Node 0: null
+[    0.667533] Key type .fscrypt registered
+[    0.667537] Key type fscrypt-provisioning registered
+[    0.667634] Key type big_key registered
+[    0.671421] Key type encrypted registered
+[    0.671428] AppArmor: AppArmor sha256 policy hashing enabled
+[    0.671432] ima: No TPM chip found, activating TPM-bypass!
+[    0.671436] Loading compiled-in module X.509 certificates
+[    0.671888] Loaded X.509 cert 'Build time autogenerated kernel key: 6b2b0d62fc3a1216c49fda2b061b13d4dbf474bd'
+[    0.671891] ima: Allocated hash algorithm: sha256
+[    0.671902] ima: No architecture policies found
+[    0.671924] evm: Initialising EVM extended attributes:
+[    0.671926] evm: security.selinux
+[    0.671927] evm: security.SMACK64
+[    0.671929] evm: security.SMACK64EXEC
+[    0.671931] evm: security.SMACK64TRANSMUTE
+[    0.671932] evm: security.SMACK64MMAP
+[    0.671934] evm: security.apparmor
+[    0.671935] evm: security.ima
+[    0.671937] evm: security.capability
+[    0.671938] evm: HMAC attrs: 0x1
+[    0.691995] PM:   Magic number: 2:446:44
+[    0.693276] RAS: Correctable Errors collector initialized.
+[    0.693571] clk: Disabling unused clocks
+[    0.693573] PM: genpd: Disabling unused power domains
+[    0.698088] md: Waiting for all devices to be available before autodetect
+[    0.698094] md: If you don't use raid, use raid=noautodetect
+[    0.698097] md: Autodetecting RAID arrays.
+[    0.698098] md: autorun ...
+[    0.701095] md: ... autorun DONE.
+[    0.706348] EXT4-fs (vda): mounted filesystem 7c00d284-1011-46f4-b38f-b81d73c00bfb r/w with ordered data mode. Quota mode: none.
+[    0.706364] VFS: Mounted root (ext4 filesystem) on device 253:0.
+[    0.709038] devtmpfs: mounted
+[    0.709559] VFS: Pivoted into new rootfs
+[    0.711369] Freeing unused decrypted memory: 2028K
+[    0.711966] Freeing unused kernel image (initmem) memory: 5304K
+[    0.711981] Write protecting the kernel read-only data: 43008k
+[    0.714932] Freeing unused kernel image (text/rodata gap) memory: 736K
+[    0.716242] Freeing unused kernel image (rodata/data gap) memory: 1656K
+[    0.780289] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.780304] Run /sbin/init as init process
+[    0.785920] NET: Registered PF_VSOCK protocol family
+[    0.926859] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.926870] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+overdrive-init: beacon boundary tx READY
+
+BCFAIL A 1 no READY in 60s; console:
+(Ubuntu Core 2019): c1d57b8f6b743f23ee41f4f7ee292f06eecadfb9'
+[    0.656027] Demotion targets for Node 0: null
+[    0.657291] Key type .fscrypt registered
+[    0.657295] Key type fscrypt-provisioning registered
+[    0.657395] Key type big_key registered
+[    0.661197] Key type encrypted registered
+[    0.661203] AppArmor: AppArmor sha256 policy hashing enabled
+[    0.661207] ima: No TPM chip found, activating TPM-bypass!
+[    0.661213] Loading compiled-in module X.509 certificates
+[    0.661664] Loaded X.509 cert 'Build time autogenerated kernel key: 6b2b0d62fc3a1216c49fda2b061b13d4dbf474bd'
+[    0.661667] ima: Allocated hash algorithm: sha256
+[    0.661679] ima: No architecture policies found
+[    0.661701] evm: Initialising EVM extended attributes:
+[    0.661703] evm: security.selinux
+[    0.661705] evm: security.SMACK64
+[    0.661706] evm: security.SMACK64EXEC
+[    0.661708] evm: security.SMACK64TRANSMUTE
+[    0.661710] evm: security.SMACK64MMAP
+[    0.661711] evm: security.apparmor
+[    0.661713] evm: security.ima
+[    0.661714] evm: security.capability
+[    0.661716] evm: HMAC attrs: 0x1
+[    0.681819] PM:   Magic number: 2:996:94
+[    0.683092] RAS: Correctable Errors collector initialized.
+[    0.684845] clk: Disabling unused clocks
+[    0.684850] PM: genpd: Disabling unused power domains
+[    0.687964] md: Waiting for all devices to be available before autodetect
+[    0.687970] md: If you don't use raid, use raid=noautodetect
+[    0.687972] md: Autodetecting RAID arrays.
+[    0.687974] md: autorun ...
+[    0.687976] md: ... autorun DONE.
+[    0.696496] EXT4-fs (vda): mounted filesystem 0ead45ca-0738-4793-982a-0affa4a36831 r/w with ordered data mode. Quota mode: none.
+[    0.696513] VFS: Mounted root (ext4 filesystem) on device 253:0.
+[    0.699210] devtmpfs: mounted
+[    0.699711] VFS: Pivoted into new rootfs
+[    0.701531] Freeing unused decrypted memory: 2028K
+[    0.702928] Freeing unused kernel image (initmem) memory: 5304K
+[    0.702945] Write protecting the kernel read-only data: 43008k
+[    0.705181] Freeing unused kernel image (text/rodata gap) memory: 736K
+[    0.705465] Freeing unused kernel image (rodata/data gap) memory: 1656K
+[    0.770473] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.770486] Run /sbin/init as init process
+[    0.776366] NET: Registered PF_VSOCK protocol family
+[    0.950689] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.950701] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+overdrive-init: beacon boundary tx READY
+BC init_start 607540862 0
+BC phase:root 607575574 51257
+BC phase:modules 607626991 1918648
+BC phase:connect_beacon 609546190 109084
+BC prep:begin 613867152 0
+BC prep:ebpf_load_guest_obj 614029886 32741761
+BC prep:ebpf_load_candidate_obj 646772188 33494591
+BC prep:total 613866901 67260599
+BC load:tcp_correlation 681129573 1084167
+BC attach:sub:cgroup_file 682215873 63064
+BC attach:tcp_correlation 682215663 133360
+BC load:sub:btf_from_sys_fs 682350254 24975934
+BC load:tcp_correlation_candidate 682349934 33924005
+BC attach:tcp_correlation_candidate 716277274 6655924
+BC load:connect4 722934510 408212
+BC attach:sub:cgroup_file 723343774 1362
+BC attach:connect4 723343553 37026
+BC load:sendmsg4 723394119 233701
+BC attach:sub:cgroup_file 723628341 801
+BC attach:sendmsg4 723628280 17957
+BC load:getpeername4 723646728 187441
+BC attach:sub:cgroup_file 723834640 751
+BC attach:getpeername4 723834560 15313
+BC load:recvmsg4 723850253 107432
+BC attach:sub:cgroup_file 723958135 861
+BC attach:recvmsg4 723958075 25318
+BC load:sock_release 723983744 39032007
+BC attach:sub:cgroup_file 763017894 1482
+BC attach:sock_release 763017784 41081
+BC bpf_done 763059206 0
+BC transport_total 609688974 158985745
+BC phase:network_total 609655704 159387327
+BC phase:owner 769043742 63636
+BC phase:ready_send 769115460 1671758
+BC ready_sent 770787618 0
+BC_END
+
+BCFAIL A2 1 no READY in 60s; console:
+Ubuntu Core 2019): c1d57b8f6b743f23ee41f4f7ee292f06eecadfb9'
+[    0.666839] Demotion targets for Node 0: null
+[    0.668115] Key type .fscrypt registered
+[    0.668120] Key type fscrypt-provisioning registered
+[    0.668213] Key type big_key registered
+[    0.671979] Key type encrypted registered
+[    0.671985] AppArmor: AppArmor sha256 policy hashing enabled
+[    0.671989] ima: No TPM chip found, activating TPM-bypass!
+[    0.671993] Loading compiled-in module X.509 certificates
+[    0.677810] Loaded X.509 cert 'Build time autogenerated kernel key: 6b2b0d62fc3a1216c49fda2b061b13d4dbf474bd'
+[    0.677817] ima: Allocated hash algorithm: sha256
+[    0.677829] ima: No architecture policies found
+[    0.677853] evm: Initialising EVM extended attributes:
+[    0.677855] evm: security.selinux
+[    0.677857] evm: security.SMACK64
+[    0.677859] evm: security.SMACK64EXEC
+[    0.677860] evm: security.SMACK64TRANSMUTE
+[    0.677862] evm: security.SMACK64MMAP
+[    0.677863] evm: security.apparmor
+[    0.677865] evm: security.ima
+[    0.677866] evm: security.capability
+[    0.677868] evm: HMAC attrs: 0x1
+[    0.692222] PM:   Magic number: 2:996:94
+[    0.693468] RAS: Correctable Errors collector initialized.
+[    0.693759] clk: Disabling unused clocks
+[    0.693762] PM: genpd: Disabling unused power domains
+[    0.698074] md: Waiting for all devices to be available before autodetect
+[    0.698080] md: If you don't use raid, use raid=noautodetect
+[    0.698082] md: Autodetecting RAID arrays.
+[    0.698084] md: autorun ...
+[    0.698085] md: ... autorun DONE.
+[    0.706191] EXT4-fs (vda): mounted filesystem 101aad1e-6d47-4ea7-ada0-d03e41863da8 r/w with ordered data mode. Quota mode: none.
+[    0.706210] VFS: Mounted root (ext4 filesystem) on device 253:0.
+[    0.708828] devtmpfs: mounted
+[    0.709324] VFS: Pivoted into new rootfs
+[    0.711107] Freeing unused decrypted memory: 2028K
+[    0.712462] Freeing unused kernel image (initmem) memory: 5304K
+[    0.712480] Write protecting the kernel read-only data: 43008k
+[    0.712887] Freeing unused kernel image (text/rodata gap) memory: 736K
+[    0.713170] Freeing unused kernel image (rodata/data gap) memory: 1656K
+[    0.779794] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.779808] Run /sbin/init as init process
+[    0.785791] NET: Registered PF_VSOCK protocol family
+[    0.954489] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.954500] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+overdrive-init: beacon boundary tx READY
+BC init_start 615696897 0
+BC phase:root 615732801 52008
+BC phase:modules 615785010 1916464
+BC phase:connect_beacon 617701935 98868
+BC prep:begin 621970798 0
+BC prep:ebpf_load_guest_obj 622132871 31436905
+BC prep:ebpf_load_candidate_obj 653570757 32032829
+BC prep:total 621970448 64497094
+BC load:tcp_correlation 686469735 1100160
+BC attach:sub:cgroup_file 687571638 65228
+BC attach:tcp_correlation 687571417 136004
+BC load:sub:btf_from_sys_fs 687708733 24888643
+BC load:tcp_correlation_candidate 687708303 33878697
+BC attach:tcp_correlation_candidate 721590395 6681492
+BC load:connect4 728272899 391166
+BC attach:sub:cgroup_file 728664897 1281
+BC attach:connect4 728664686 35774
+BC load:sendmsg4 728714170 236726
+BC attach:sub:cgroup_file 728951416 1062
+BC attach:sendmsg4 728951366 21943
+BC load:getpeername4 728973650 220490
+BC attach:sub:cgroup_file 729194851 1042
+BC attach:getpeername4 729194791 17807
+BC load:recvmsg4 729212979 108492
+BC attach:sub:cgroup_file 729321892 871
+BC attach:recvmsg4 729321852 14592
+BC load:sock_release 729336744 36154631
+BC attach:sub:cgroup_file 765494139 1633
+BC attach:sock_release 765493939 39570
+BC bpf_done 765533959 0
+BC transport_total 617834674 153470672
+BC phase:network_total 617801164 153835970
+BC phase:owner 771637825 56875
+BC phase:ready_send 771702442 1689574
+BC ready_sent 773392417 0
+BC_END
+
+BCFAIL B 1 no READY in 60s; console:
+ey type big_key registered
+[    0.669590] Key type encrypted registered
+[    0.669597] AppArmor: AppArmor sha256 policy hashing enabled
+[    0.669601] ima: No TPM chip found, activating TPM-bypass!
+[    0.669606] Loading compiled-in module X.509 certificates
+[    0.670066] Loaded X.509 cert 'Build time autogenerated kernel key: 6b2b0d62fc3a1216c49fda2b061b13d4dbf474bd'
+[    0.670069] ima: Allocated hash algorithm: sha256
+[    0.670081] ima: No architecture policies found
+[    0.670103] evm: Initialising EVM extended attributes:
+[    0.670105] evm: security.selinux
+[    0.670107] evm: security.SMACK64
+[    0.670109] evm: security.SMACK64EXEC
+[    0.670111] evm: security.SMACK64TRANSMUTE
+[    0.670112] evm: security.SMACK64MMAP
+[    0.670114] evm: security.apparmor
+[    0.670115] evm: security.ima
+[    0.670117] evm: security.capability
+[    0.670118] evm: HMAC attrs: 0x1
+[    0.690113] PM:   Magic number: 2:996:94
+[    0.691378] RAS: Correctable Errors collector initialized.
+[    0.691670] clk: Disabling unused clocks
+[    0.691673] PM: genpd: Disabling unused power domains
+[    0.696346] md: Waiting for all devices to be available before autodetect
+[    0.696352] md: If you don't use raid, use raid=noautodetect
+[    0.696355] md: Autodetecting RAID arrays.
+[    0.696356] md: autorun ...
+[    0.696358] md: ... autorun DONE.
+[    0.703390] EXT4-fs (vda): mounted filesystem fd3b63d5-6589-40bc-b657-156b61ec1e58 r/w with ordered data mode. Quota mode: none.
+[    0.703412] VFS: Mounted root (ext4 filesystem) on device 253:0.
+[    0.706089] devtmpfs: mounted
+[    0.706602] VFS: Pivoted into new rootfs
+[    0.708460] Freeing unused decrypted memory: 2028K
+[    0.709071] Freeing unused kernel image (initmem) memory: 5304K
+[    0.709086] Write protecting the kernel read-only data: 43008k
+[    0.712031] Freeing unused kernel image (text/rodata gap) memory: 736K
+[    0.713333] Freeing unused kernel image (rodata/data gap) memory: 1656K
+[    0.777325] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.777338] Run /sbin/init as init process
+[    0.782574] NET: Registered PF_VSOCK protocol family
+[    0.955371] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.955382] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+overdrive-init: beacon boundary tx READY
+BC init_start 613051348 0
+BC phase:root 613087443 54321
+BC phase:modules 613142105 1923515
+BC phase:connect_beacon 615066040 87121
+BC prep:begin 619344378 0
+BC prep:ebpf_load_guest_obj 619485099 33543364
+BC prep:ebpf_load_candidate_obj 653029244 34184937
+BC prep:total 619344127 68735181
+BC load:tcp_correlation 688081402 1264817
+BC attach:sub:cgroup_file 689348803 66139
+BC attach:tcp_correlation 689348572 136064
+BC load:sub:btf_from_sys_fs 689485858 24923545
+BC load:tcp_correlation_candidate 689485558 34350845
+BC attach:tcp_correlation_candidate 723839938 6682134
+BC load:connect4 730523113 400140
+BC attach:sub:cgroup_file 730924215 1342
+BC attach:connect4 730924044 36135
+BC load:sendmsg4 730971666 250536
+BC attach:sub:cgroup_file 731222813 971
+BC attach:sendmsg4 731222743 19519
+BC load:getpeername4 731242652 183616
+BC attach:sub:cgroup_file 731426889 851
+BC attach:getpeername4 731426799 15413
+BC load:recvmsg4 731442552 105348
+BC attach:sub:cgroup_file 731548341 741
+BC attach:recvmsg4 731548261 19199
+BC load:sock_release 731567830 35993189
+BC attach:sub:cgroup_file 767562191 1983
+BC attach:sock_release 767562010 38909
+BC load:post_bind4 767601490 249494
+BC attach:sub:cgroup_file 767851575 801
+BC attach:post_bind4 767851495 16895
+BC load:post_bind6 767868751 104516
+BC attach:sub:cgroup_file 767987078 831
+BC attach:post_bind6 767987018 26580
+BC bpf_done 768013928 0
+BC transport_total 615187132 158179005
+BC phase:network_total 615153562 158492304
+BC phase:owner 773646557 62153
+BC phase:ready_send 773709001 1724777
+BC ready_sent 775434349 0
+BC_END
+
+BCFAIL R 2 no READY in 60s; console:
+05] Loaded X.509 cert 'Canonical Ltd. Live Patch Signing: 14df34d1a87cf37625abec039ef2bf521249b969'
+[    0.628049] Loaded X.509 cert 'Canonical Ltd. Kernel Module Signing 2025 Kmod: 4627603d2357a2a3f81006370894c221175893e9'
+[    0.628493] Loaded X.509 cert 'Canonical Ltd. Kernel Module Signing: 88f752e560a1e0737e31163a466ad7b70a850c19'
+[    0.628496] blacklist: Loading compiled-in revocation X.509 certificates
+[    0.638067] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing: 61482aa2830d0ab2ad5af10b7250da9033ddcef0'
+[    0.638097] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2017): 242ade75ac4a15e50d50c84b0d45ff3eae707a03'
+[    0.638111] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (ESM 2018): 365188c1d374d6b07c3c8f240f8ef722433d6a8b'
+[    0.638207] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2019): c0746fd6c5da3ae827864651ad66ae47fe24b3e8'
+[    0.638222] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v1): a8d54bbb3825cfb94fa13c9f8a594a195c107b8d'
+[    0.638235] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v2): 4cf046892d6fd3c9a5b03f98d845f90851dc6a8c'
+[    0.638251] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v3): 100437bb6de6e469b581e61cd66bce3ef4ed53af'
+[    0.638264] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (Ubuntu Core 2019): c1d57b8f6b743f23ee41f4f7ee292f06eecadfb9'
+[    0.668157] Demotion targets for Node 0: null
+[    0.669426] Key type .fscrypt registered
+[    0.669431] Key type fscrypt-provisioning registered
+[    0.671855] Key type big_key registered
+[    0.673309] Key type encrypted registered
+[    0.673316] AppArmor: AppArmor sha256 policy hashing enabled
+[    0.673320] ima: No TPM chip found, activating TPM-bypass!
+[    0.673324] Loading compiled-in module X.509 certificates
+[    0.673789] Loaded X.509 cert 'Build time autogenerated kernel key: 6b2b0d62fc3a1216c49fda2b061b13d4dbf474bd'
+[    0.673792] ima: Allocated hash algorithm: sha256
+[    0.673807] ima: No architecture policies found
+[    0.673829] evm: Initialising EVM extended attributes:
+[    0.673831] evm: security.selinux
+[    0.673833] evm: security.SMACK64
+[    0.673835] evm: security.SMACK64EXEC
+[    0.673836] evm: security.SMACK64TRANSMUTE
+[    0.673838] evm: security.SMACK64MMAP
+[    0.673840] evm: security.apparmor
+[    0.673841] evm: security.ima
+[    0.673843] evm: security.capability
+[    0.673844] evm: HMAC attrs: 0x1
+[    0.695526] PM:   Magic number: 2:549:145
+[    0.695565] acpi device:16: hash matches
+[    0.697853] RAS: Correctable Errors collector initialized.
+[    0.698162] clk: Disabling unused clocks
+[    0.698165] PM: genpd: Disabling unused power domains
+[    0.702711] md: Waiting for all devices to be available before autodetect
+[    0.702717] md: If you don't use raid, use raid=noautodetect
+[    0.702719] md: Autodetecting RAID arrays.
+[    0.702721] md: autorun ...
+[    0.702722] md: ... autorun DONE.
+[    0.711523] EXT4-fs (vda): mounted filesystem 7c00d284-1011-46f4-b38f-b81d73c00bfb r/w with ordered data mode. Quota mode: none.
+[    0.711540] VFS: Mounted root (ext4 filesystem) on device 253:0.
+[    0.714236] devtmpfs: mounted
+[    0.714751] VFS: Pivoted into new rootfs
+[    0.716567] Freeing unused decrypted memory: 2028K
+[    0.717174] Freeing unused kernel image (initmem) memory: 5304K
+[    0.717189] Write protecting the kernel read-only data: 43008k
+[    0.720151] Freeing unused kernel image (text/rodata gap) memory: 736K
+[    0.720463] Freeing unused kernel image (rodata/data gap) memory: 1656K
+[    0.785489] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.786514] Run /sbin/init as init process
+[    0.791257] NET: Registered PF_VSOCK protocol family
+[    0.932228] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.932240] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+overdrive-init: beacon boundary tx READY
+
+BCFAIL A 2 no READY in 60s; console:
+292f06eecadfb9'
+[    0.658257] Demotion targets for Node 0: null
+[    0.659528] Key type .fscrypt registered
+[    0.659533] Key type fscrypt-provisioning registered
+[    0.659627] Key type big_key registered
+[    0.663415] Key type encrypted registered
+[    0.663422] AppArmor: AppArmor sha256 policy hashing enabled
+[    0.663426] ima: No TPM chip found, activating TPM-bypass!
+[    0.663431] Loading compiled-in module X.509 certificates
+[    0.663889] Loaded X.509 cert 'Build time autogenerated kernel key: 6b2b0d62fc3a1216c49fda2b061b13d4dbf474bd'
+[    0.663893] ima: Allocated hash algorithm: sha256
+[    0.663904] ima: No architecture policies found
+[    0.663926] evm: Initialising EVM extended attributes:
+[    0.663928] evm: security.selinux
+[    0.663929] evm: security.SMACK64
+[    0.663931] evm: security.SMACK64EXEC
+[    0.663933] evm: security.SMACK64TRANSMUTE
+[    0.663934] evm: security.SMACK64MMAP
+[    0.663936] evm: security.apparmor
+[    0.663937] evm: security.ima
+[    0.663939] evm: security.capability
+[    0.663940] evm: HMAC attrs: 0x1
+[    0.684069] PM:   Magic number: 2:549:145
+[    0.684108] acpi device:16: hash matches
+[    0.686430] RAS: Correctable Errors collector initialized.
+[    0.686724] clk: Disabling unused clocks
+[    0.686727] PM: genpd: Disabling unused power domains
+[    0.691234] md: Waiting for all devices to be available before autodetect
+[    0.691240] md: If you don't use raid, use raid=noautodetect
+[    0.691242] md: Autodetecting RAID arrays.
+[    0.691244] md: autorun ...
+[    0.691246] md: ... autorun DONE.
+[    0.697992] EXT4-fs (vda): mounted filesystem 0ead45ca-0738-4793-982a-0affa4a36831 r/w with ordered data mode. Quota mode: none.
+[    0.698009] VFS: Mounted root (ext4 filesystem) on device 253:0.
+[    0.700698] devtmpfs: mounted
+[    0.701200] VFS: Pivoted into new rootfs
+[    0.702997] Freeing unused decrypted memory: 2028K
+[    0.704357] Freeing unused kernel image (initmem) memory: 5304K
+[    0.704376] Write protecting the kernel read-only data: 43008k
+[    0.706599] Freeing unused kernel image (text/rodata gap) memory: 736K
+[    0.706888] Freeing unused kernel image (rodata/data gap) memory: 1656K
+[    0.772111] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.772124] Run /sbin/init as init process
+[    0.777569] NET: Registered PF_VSOCK protocol family
+[    0.947947] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.947959] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+overdrive-init: beacon boundary tx READY
+BC init_start 606742845 0
+BC phase:root 606775454 47902
+BC phase:modules 606823536 1933490
+BC phase:connect_beacon 608757437 106429
+BC prep:begin 613112910 0
+BC prep:ebpf_load_guest_obj 613257607 31520981
+BC prep:ebpf_load_candidate_obj 644779389 32398577
+BC prep:total 613112770 64928060
+BC load:tcp_correlation 678043284 1093049
+BC attach:sub:cgroup_file 679138517 64526
+BC attach:tcp_correlation 679138316 134843
+BC load:sub:btf_from_sys_fs 679274370 25138177
+BC load:tcp_correlation_candidate 679273990 34119769
+BC attach:tcp_correlation_candidate 713397514 6681833
+BC load:connect4 720080619 389053
+BC attach:sub:cgroup_file 720470433 1422
+BC attach:connect4 720470233 35543
+BC load:sendmsg4 720518556 231637
+BC attach:sub:cgroup_file 720750704 921
+BC attach:sendmsg4 720750654 18217
+BC load:getpeername4 720769292 201462
+BC attach:sub:cgroup_file 720971335 961
+BC attach:getpeername4 720971275 17286
+BC load:recvmsg4 720988991 129094
+BC attach:sub:cgroup_file 721118676 771
+BC attach:recvmsg4 721118626 15823
+BC load:sock_release 721134860 39282403
+BC attach:sub:cgroup_file 760419206 2583
+BC attach:sock_release 760418815 48052
+BC bpf_done 760467338 0
+BC transport_total 608896045 156782339
+BC phase:network_total 608864267 157144623
+BC phase:owner 766009571 60150
+BC phase:ready_send 766077262 1673981
+BC ready_sent 767751574 0
+BC_END
+
+BCFAIL A2 2 no READY in 60s; console:
+292f06eecadfb9'
+[    0.662007] Demotion targets for Node 0: null
+[    0.663289] Key type .fscrypt registered
+[    0.663294] Key type fscrypt-provisioning registered
+[    0.663391] Key type big_key registered
+[    0.667160] Key type encrypted registered
+[    0.667167] AppArmor: AppArmor sha256 policy hashing enabled
+[    0.667171] ima: No TPM chip found, activating TPM-bypass!
+[    0.667175] Loading compiled-in module X.509 certificates
+[    0.672998] Loaded X.509 cert 'Build time autogenerated kernel key: 6b2b0d62fc3a1216c49fda2b061b13d4dbf474bd'
+[    0.673007] ima: Allocated hash algorithm: sha256
+[    0.673024] ima: No architecture policies found
+[    0.673048] evm: Initialising EVM extended attributes:
+[    0.673050] evm: security.selinux
+[    0.673052] evm: security.SMACK64
+[    0.673054] evm: security.SMACK64EXEC
+[    0.673056] evm: security.SMACK64TRANSMUTE
+[    0.673057] evm: security.SMACK64MMAP
+[    0.673059] evm: security.apparmor
+[    0.673060] evm: security.ima
+[    0.673062] evm: security.capability
+[    0.673063] evm: HMAC attrs: 0x1
+[    0.687789] PM:   Magic number: 2:549:145
+[    0.687828] acpi device:16: hash matches
+[    0.690163] RAS: Correctable Errors collector initialized.
+[    0.691908] clk: Disabling unused clocks
+[    0.691914] PM: genpd: Disabling unused power domains
+[    0.695122] md: Waiting for all devices to be available before autodetect
+[    0.695128] md: If you don't use raid, use raid=noautodetect
+[    0.695131] md: Autodetecting RAID arrays.
+[    0.695133] md: autorun ...
+[    0.695134] md: ... autorun DONE.
+[    0.702057] EXT4-fs (vda): mounted filesystem 101aad1e-6d47-4ea7-ada0-d03e41863da8 r/w with ordered data mode. Quota mode: none.
+[    0.702074] VFS: Mounted root (ext4 filesystem) on device 253:0.
+[    0.704765] devtmpfs: mounted
+[    0.705290] VFS: Pivoted into new rootfs
+[    0.707074] Freeing unused decrypted memory: 2028K
+[    0.708458] Freeing unused kernel image (initmem) memory: 5304K
+[    0.708476] Write protecting the kernel read-only data: 43008k
+[    0.708890] Freeing unused kernel image (text/rodata gap) memory: 736K
+[    0.709198] Freeing unused kernel image (rodata/data gap) memory: 1656K
+[    0.776015] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.776028] Run /sbin/init as init process
+[    0.781461] NET: Registered PF_VSOCK protocol family
+[    0.950076] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.950087] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+overdrive-init: beacon boundary tx READY
+BC init_start 614294864 0
+BC phase:root 614328985 48302
+BC phase:modules 614377458 1912308
+BC phase:connect_beacon 616290257 113039
+BC prep:begin 620581894 0
+BC prep:ebpf_load_guest_obj 620725259 31771266
+BC prep:ebpf_load_candidate_obj 652497417 32351947
+BC prep:total 620581644 65128271
+BC load:tcp_correlation 685712048 1091637
+BC attach:sub:cgroup_file 686806049 63886
+BC attach:tcp_correlation 686805858 133931
+BC load:sub:btf_from_sys_fs 686940981 25224366
+BC load:tcp_correlation_candidate 686940701 34112578
+BC attach:tcp_correlation_candidate 721056774 6661172
+BC load:connect4 727720109 410205
+BC attach:sub:cgroup_file 728131366 1692
+BC attach:connect4 728131135 36725
+BC load:sendmsg4 728181321 238938
+BC attach:sub:cgroup_file 728420760 931
+BC attach:sendmsg4 728420700 17806
+BC load:getpeername4 728438857 183545
+BC attach:sub:cgroup_file 728622853 861
+BC attach:getpeername4 728622803 15122
+BC load:recvmsg4 728638246 103876
+BC attach:sub:cgroup_file 728742512 721
+BC attach:recvmsg4 728742462 14292
+BC load:sock_release 728757124 36179879
+BC attach:sub:cgroup_file 764938766 2053
+BC attach:sock_release 764938555 40461
+BC bpf_done 764979367 0
+BC transport_total 616458589 155293226
+BC phase:network_total 616403797 155695439
+BC phase:owner 772099807 56896
+BC phase:ready_send 772165135 1782384
+BC ready_sent 773948009 0
+BC_END
+
+BCFAIL B 2 no READY in 60s; console:
+ type big_key registered
+[    0.660250] Key type encrypted registered
+[    0.660257] AppArmor: AppArmor sha256 policy hashing enabled
+[    0.660262] ima: No TPM chip found, activating TPM-bypass!
+[    0.660272] Loading compiled-in module X.509 certificates
+[    0.666092] Loaded X.509 cert 'Build time autogenerated kernel key: 6b2b0d62fc3a1216c49fda2b061b13d4dbf474bd'
+[    0.666100] ima: Allocated hash algorithm: sha256
+[    0.666112] ima: No architecture policies found
+[    0.666138] evm: Initialising EVM extended attributes:
+[    0.666139] evm: security.selinux
+[    0.666141] evm: security.SMACK64
+[    0.666143] evm: security.SMACK64EXEC
+[    0.666145] evm: security.SMACK64TRANSMUTE
+[    0.666146] evm: security.SMACK64MMAP
+[    0.666148] evm: security.apparmor
+[    0.666149] evm: security.ima
+[    0.666151] evm: security.capability
+[    0.666152] evm: HMAC attrs: 0x1
+[    0.680883] PM:   Magic number: 2:102:196
+[    0.682180] RAS: Correctable Errors collector initialized.
+[    0.682485] clk: Disabling unused clocks
+[    0.682488] PM: genpd: Disabling unused power domains
+[    0.687038] md: Waiting for all devices to be available before autodetect
+[    0.687044] md: If you don't use raid, use raid=noautodetect
+[    0.687046] md: Autodetecting RAID arrays.
+[    0.687048] md: autorun ...
+[    0.687050] md: ... autorun DONE.
+[    0.695352] EXT4-fs (vda): mounted filesystem fd3b63d5-6589-40bc-b657-156b61ec1e58 r/w with ordered data mode. Quota mode: none.
+[    0.695368] VFS: Mounted root (ext4 filesystem) on device 253:0.
+[    0.698052] devtmpfs: mounted
+[    0.698565] VFS: Pivoted into new rootfs
+[    0.700358] Freeing unused decrypted memory: 2028K
+[    0.701712] Freeing unused kernel image (initmem) memory: 5304K
+[    0.701730] Write protecting the kernel read-only data: 43008k
+[    0.702133] Freeing unused kernel image (text/rodata gap) memory: 736K
+[    0.702436] Freeing unused kernel image (rodata/data gap) memory: 1656K
+[    0.769344] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.769358] Run /sbin/init as init process
+[    0.775268] NET: Registered PF_VSOCK protocol family
+[    0.946602] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.946612] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+overdrive-init: beacon boundary tx READY
+BC init_start 607541824 0
+BC phase:root 607575935 55464
+BC phase:modules 607631749 1918878
+BC phase:connect_beacon 609551068 107451
+BC prep:begin 613843086 0
+BC prep:ebpf_load_guest_obj 613977367 31788012
+BC prep:ebpf_load_candidate_obj 645766480 33459418
+BC prep:total 613842826 66250183
+BC load:tcp_correlation 680095743 1264807
+BC attach:sub:cgroup_file 681363425 64196
+BC attach:tcp_correlation 681363104 133871
+BC load:sub:btf_from_sys_fs 681498017 25210224
+BC load:tcp_correlation_candidate 681497646 34632478
+BC attach:tcp_correlation_candidate 716133349 6665878
+BC load:connect4 722800279 397286
+BC attach:sub:cgroup_file 723198396 1502
+BC attach:connect4 723198236 36254
+BC load:sendmsg4 723247890 236335
+BC attach:sub:cgroup_file 723484706 881
+BC attach:sendmsg4 723484655 18278
+BC load:getpeername4 723503364 194111
+BC attach:sub:cgroup_file 723698106 891
+BC attach:getpeername4 723698066 16584
+BC load:recvmsg4 723715021 105118
+BC attach:sub:cgroup_file 723820559 822
+BC attach:recvmsg4 723820509 18558
+BC load:sock_release 723839418 36205627
+BC attach:sub:cgroup_file 760047629 2103
+BC attach:sock_release 760047369 39950
+BC load:post_bind4 760088030 244036
+BC attach:sub:cgroup_file 760332596 892
+BC attach:post_bind4 760332536 16145
+BC load:post_bind6 760349071 103696
+BC attach:sub:cgroup_file 760467339 871
+BC attach:post_bind6 760467288 16325
+BC bpf_done 760483923 0
+BC transport_total 609697488 156460516
+BC phase:network_total 609658790 156802449
+BC phase:owner 766462000 56395
+BC phase:ready_send 766518695 1727992
+BC ready_sent 768247078 0
+BC_END
+

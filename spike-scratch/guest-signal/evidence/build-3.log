@@ -1,0 +1,44 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/guest-signal/run.py build`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+
+
+
+
+
+
+
+## marcus-sa/nw-bugfix-crash-restart-tasks
+ M docs/product/architecture/adr-0058-default-tcp-startup-probe-inference.md
+ M docs/product/architecture/adr-0096-startup-failure-withdraws-backend-eligibility.md
+ M docs/product/architecture/brief.md
+ D vendors/linux
+
+SUBSTRATE {"uname_r": "7.0.0-38-generic", "machine": "x86_64", "systemd_detect_virt": "none", "kernel_file": "/srv/vm/overdrive-testing/kernel", "ch": "/usr/local/bin/cloud-hypervisor", "ch_sha256": "6d54fbd2611e692fda00e476fc0723e9502bfd8acd53c8bc46edd96e84f3e842", "ch_version": "cloud-hypervisor v53.0.0\nMigration Protocol Versions: 0"}
++ cd /home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/guest-signal/bpf && rustup run nightly-2026-08-05 cargo build --release --target bpfel-unknown-none -Z build-std=core --target-dir /home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/guest-signal/out/bpf-target
+    Updating crates.io index
+     Locking 27 packages to latest compatible versions
+      Adding aya-ebpf v0.1.1 (available: v0.3.0)
+    Finished `release` profile [optimized] target(s) in 11.81s
++ cd /home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/guest-signal && RUSTFLAGS='-C target-feature=+crt-static' cargo build --release --target x86_64-unknown-linux-gnu -p gsguest -p gs-work
+    Finished `release` profile [optimized] target(s) in 1.10s
++ cd /home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/guest-signal && cargo build --release -p gshost
+warning: function `listen_line` is never used
+ --> host/src/../../common.rs:5:8
+  |
+5 | pub fn listen_line(idx: u64) -> String {
+  |        ^^^^^^^^^^^
+  |
+  = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `gshost` (bin "gshost") generated 1 warning
+    Finished `release` profile [optimized] target(s) in 20.63s
++ cd /home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/guest-signal && sha256sum out/bpf-target/bpfel-unknown-none/release/gs-bpf target/x86_64-unknown-linux-gnu/release/gsguest target/x86_64-unknown-linux-gnu/release/gswork target/release/gshost
+fd0f4638e0bf65aa2957cd62643f87a3315a722e9d5ee7ebd5348058a733984b  out/bpf-target/bpfel-unknown-none/release/gs-bpf
+988e1e682ef6fa3ab9216404519a63df3ca0090e1054c6422506142ac69ea846  target/x86_64-unknown-linux-gnu/release/gsguest
+aca71ca6d5115fc1b9130f2221f5a5255f32376b1430885f5060ea0f4d36761d  target/x86_64-unknown-linux-gnu/release/gswork
+862c8441d6bd35cdd32f59708119f5aa842ded941d98864aa51f419170239e3d  target/release/gshost
++ cd /home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/guest-signal/out/initramfs-root && find . | cpio -o -H newc --quiet | gzip -1 > /home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/guest-signal/out/initramfs.cpio.gz
+IMAGE built; modules: ['vsock.ko', 'vmw_vsock_virtio_transport_common.ko', 'vmw_vsock_virtio_transport.ko']

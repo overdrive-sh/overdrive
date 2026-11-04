@@ -1,0 +1,272 @@
+State 1: <Initial predicate>
+/\ ra_bugSlFinalisesStartup_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ ra_bugSlFinalisesStartup_restart_authority_cur = 0
+/\ ra_bugSlFinalisesStartup_restart_authority_done = FALSE
+/\ ra_bugSlFinalisesStartup_restart_authority_decl = FALSE
+/\ ra_bugSlFinalisesStartup_restart_authority_at = ( 0 :>
+      [ row |-> "none",
+        sup |-> FALSE,
+        srow |-> "absent",
+        sseq |-> 0,
+        sstreak |-> 0,
+        dl |-> FALSE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> FALSE,
+        claim |-> "",
+        author |-> "",
+        crashed |-> FALSE ] @@
+  1 :>
+      [ row |-> "none",
+        sup |-> FALSE,
+        srow |-> "absent",
+        sseq |-> 0,
+        sstreak |-> 0,
+        dl |-> FALSE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> FALSE,
+        claim |-> "",
+        author |-> "",
+        crashed |-> FALSE ] )
+/\ ra_bugSlFinalisesStartup_restart_authority_deployed = FALSE
+/\ ra_bugSlFinalisesStartup_restart_authority_used = 0
+/\ ra_bugSlFinalisesStartup_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
+
+State 2: <ra_bugSlFinalisesStartup_restart_authority_Deploy line 142, col 3 to line 167, col 64 of module ra_bugSlFinalisesStartup>
+/\ ra_bugSlFinalisesStartup_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ ra_bugSlFinalisesStartup_restart_authority_cur = 0
+/\ ra_bugSlFinalisesStartup_restart_authority_done = FALSE
+/\ ra_bugSlFinalisesStartup_restart_authority_decl = TRUE
+/\ ra_bugSlFinalisesStartup_restart_authority_at = ( 0 :>
+      [ row |-> "pending",
+        sup |-> FALSE,
+        srow |-> "absent",
+        sseq |-> 0,
+        sstreak |-> 0,
+        dl |-> FALSE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> FALSE,
+        claim |-> "",
+        author |-> "",
+        crashed |-> FALSE ] @@
+  1 :>
+      [ row |-> "none",
+        sup |-> FALSE,
+        srow |-> "absent",
+        sseq |-> 0,
+        sstreak |-> 0,
+        dl |-> FALSE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> FALSE,
+        claim |-> "",
+        author |-> "",
+        crashed |-> FALSE ] )
+/\ ra_bugSlFinalisesStartup_restart_authority_deployed = TRUE
+/\ ra_bugSlFinalisesStartup_restart_authority_used = 0
+/\ ra_bugSlFinalisesStartup_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
+
+State 3: <ra_bugSlFinalisesStartup_restart_authority_StartOk line 173, col 3 to line 212, col 64 of module ra_bugSlFinalisesStartup>
+/\ ra_bugSlFinalisesStartup_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ ra_bugSlFinalisesStartup_restart_authority_cur = 0
+/\ ra_bugSlFinalisesStartup_restart_authority_done = FALSE
+/\ ra_bugSlFinalisesStartup_restart_authority_decl = TRUE
+/\ ra_bugSlFinalisesStartup_restart_authority_at = ( 0 :>
+      [ row |-> "running",
+        sup |-> TRUE,
+        srow |-> "absent",
+        sseq |-> 0,
+        sstreak |-> 0,
+        dl |-> FALSE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> TRUE,
+        claim |-> "",
+        author |-> "",
+        crashed |-> FALSE ] @@
+  1 :>
+      [ row |-> "none",
+        sup |-> FALSE,
+        srow |-> "absent",
+        sseq |-> 0,
+        sstreak |-> 0,
+        dl |-> FALSE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> FALSE,
+        claim |-> "",
+        author |-> "",
+        crashed |-> FALSE ] )
+/\ ra_bugSlFinalisesStartup_restart_authority_deployed = TRUE
+/\ ra_bugSlFinalisesStartup_restart_authority_used = 0
+/\ ra_bugSlFinalisesStartup_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
+
+State 4: <ra_bugSlFinalisesStartup_restart_authority_StartupRow line 414, col 3 to line 464, col 64 of module ra_bugSlFinalisesStartup>
+/\ ra_bugSlFinalisesStartup_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ ra_bugSlFinalisesStartup_restart_authority_cur = 0
+/\ ra_bugSlFinalisesStartup_restart_authority_done = FALSE
+/\ ra_bugSlFinalisesStartup_restart_authority_decl = TRUE
+/\ ra_bugSlFinalisesStartup_restart_authority_at = ( 0 :>
+      [ row |-> "running",
+        sup |-> TRUE,
+        srow |-> "fail",
+        sseq |-> 1,
+        sstreak |-> 1,
+        dl |-> FALSE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> TRUE,
+        claim |-> "",
+        author |-> "",
+        crashed |-> FALSE ] @@
+  1 :>
+      [ row |-> "none",
+        sup |-> FALSE,
+        srow |-> "absent",
+        sseq |-> 0,
+        sstreak |-> 0,
+        dl |-> FALSE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> FALSE,
+        claim |-> "",
+        author |-> "",
+        crashed |-> FALSE ] )
+/\ ra_bugSlFinalisesStartup_restart_authority_deployed = TRUE
+/\ ra_bugSlFinalisesStartup_restart_authority_used = 0
+/\ ra_bugSlFinalisesStartup_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
+
+State 5: <ra_bugSlFinalisesStartup_restart_authority_StartupRow line 414, col 3 to line 464, col 64 of module ra_bugSlFinalisesStartup>
+/\ ra_bugSlFinalisesStartup_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ ra_bugSlFinalisesStartup_restart_authority_cur = 0
+/\ ra_bugSlFinalisesStartup_restart_authority_done = FALSE
+/\ ra_bugSlFinalisesStartup_restart_authority_decl = TRUE
+/\ ra_bugSlFinalisesStartup_restart_authority_at = ( 0 :>
+      [ row |-> "running",
+        sup |-> TRUE,
+        srow |-> "fail",
+        sseq |-> 2,
+        sstreak |-> 2,
+        dl |-> FALSE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> TRUE,
+        claim |-> "",
+        author |-> "",
+        crashed |-> FALSE ] @@
+  1 :>
+      [ row |-> "none",
+        sup |-> FALSE,
+        srow |-> "absent",
+        sseq |-> 0,
+        sstreak |-> 0,
+        dl |-> FALSE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> FALSE,
+        claim |-> "",
+        author |-> "",
+        crashed |-> FALSE ] )
+/\ ra_bugSlFinalisesStartup_restart_authority_deployed = TRUE
+/\ ra_bugSlFinalisesStartup_restart_authority_used = 0
+/\ ra_bugSlFinalisesStartup_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
+
+State 6: <ra_bugSlFinalisesStartup_restart_authority_Deadline line 478, col 3 to line 506, col 64 of module ra_bugSlFinalisesStartup>
+/\ ra_bugSlFinalisesStartup_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ ra_bugSlFinalisesStartup_restart_authority_cur = 0
+/\ ra_bugSlFinalisesStartup_restart_authority_done = FALSE
+/\ ra_bugSlFinalisesStartup_restart_authority_decl = TRUE
+/\ ra_bugSlFinalisesStartup_restart_authority_at = ( 0 :>
+      [ row |-> "running",
+        sup |-> TRUE,
+        srow |-> "fail",
+        sseq |-> 2,
+        sstreak |-> 2,
+        dl |-> TRUE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> TRUE,
+        claim |-> "",
+        author |-> "",
+        crashed |-> FALSE ] @@
+  1 :>
+      [ row |-> "none",
+        sup |-> FALSE,
+        srow |-> "absent",
+        sseq |-> 0,
+        sstreak |-> 0,
+        dl |-> FALSE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> FALSE,
+        claim |-> "",
+        author |-> "",
+        crashed |-> FALSE ] )
+/\ ra_bugSlFinalisesStartup_restart_authority_deployed = TRUE
+/\ ra_bugSlFinalisesStartup_restart_authority_used = 0
+/\ ra_bugSlFinalisesStartup_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
+
+State 7: <ra_bugSlFinalisesStartup_restart_authority_SLFinalizeStartup line 804, col 3 to line 845, col 64 of module ra_bugSlFinalisesStartup>
+/\ ra_bugSlFinalisesStartup_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ ra_bugSlFinalisesStartup_restart_authority_cur = 0
+/\ ra_bugSlFinalisesStartup_restart_authority_done = FALSE
+/\ ra_bugSlFinalisesStartup_restart_authority_decl = TRUE
+/\ ra_bugSlFinalisesStartup_restart_authority_at = ( 0 :>
+      [ row |-> "failed_other",
+        sup |-> FALSE,
+        srow |-> "fail",
+        sseq |-> 2,
+        sstreak |-> 2,
+        dl |-> TRUE,
+        stable |-> FALSE,
+        ann |-> TRUE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> TRUE,
+        claim |-> "startup_probe_failed",
+        author |-> "service_lifecycle",
+        crashed |-> FALSE ] @@
+  1 :>
+      [ row |-> "none",
+        sup |-> FALSE,
+        srow |-> "absent",
+        sseq |-> 0,
+        sstreak |-> 0,
+        dl |-> FALSE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> FALSE,
+        claim |-> "",
+        author |-> "",
+        crashed |-> FALSE ] )
+/\ ra_bugSlFinalisesStartup_restart_authority_deployed = TRUE
+/\ ra_bugSlFinalisesStartup_restart_authority_used = 0
+/\ ra_bugSlFinalisesStartup_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]

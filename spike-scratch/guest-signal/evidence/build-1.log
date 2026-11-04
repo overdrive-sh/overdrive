@@ -1,0 +1,104 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/guest-signal/run.py build`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+
+
+
+
+
+
+
+## marcus-sa/nw-bugfix-crash-restart-tasks
+ M docs/product/architecture/adr-0058-default-tcp-startup-probe-inference.md
+ M docs/product/architecture/adr-0096-startup-failure-withdraws-backend-eligibility.md
+ M docs/product/architecture/brief.md
+ D vendors/linux
+
+SUBSTRATE {"uname_r": "7.0.0-38-generic", "machine": "x86_64", "systemd_detect_virt": "none", "kernel_file": "/srv/vm/overdrive-testing/kernel", "ch": "/usr/local/bin/cloud-hypervisor", "ch_sha256": "6d54fbd2611e692fda00e476fc0723e9502bfd8acd53c8bc46edd96e84f3e842", "ch_version": "cloud-hypervisor v53.0.0\nMigration Protocol Versions: 0"}
++ cd /home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/guest-signal/bpf && rustup run nightly-2026-08-05 cargo build --release --target bpfel-unknown-none -Z build-std=core
+    Updating crates.io index
+     Locking 27 packages to latest compatible versions
+      Adding aya-ebpf v0.1.1 (available: v0.3.0)
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling serde_core v1.0.229
+   Compiling zmij v1.0.23
+   Compiling serde v1.0.229
+   Compiling serde_json v1.0.154
+   Compiling thiserror v2.0.21
+   Compiling camino v1.2.6
+   Compiling anyhow v1.0.104
+   Compiling itoa v1.0.18
+   Compiling memchr v2.8.3
+   Compiling compiler_builtins v0.1.160 (/home/ubuntu/.rustup/toolchains/nightly-2026-08-05-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/compiler-builtins/compiler-builtins)
+   Compiling version_check v0.9.5
+   Compiling rustversion v1.0.23
+   Compiling core v0.0.0 (/home/ubuntu/.rustup/toolchains/nightly-2026-08-05-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core)
+   Compiling proc-macro2-diagnostics v0.10.1
+   Compiling aya-ebpf v0.1.1
+   Compiling syn v3.0.9
+   Compiling syn v2.0.119
+   Compiling semver v1.0.28
+   Compiling cargo-platform v0.3.3
+   Compiling thiserror-impl v2.0.21
+   Compiling serde_derive v1.0.229
+   Compiling aya-ebpf-macros v0.1.2
+   Compiling cargo_metadata v0.23.1
+   Compiling aya-build v0.1.3
+   Compiling aya-ebpf-cty v0.2.3
+   Compiling aya-ebpf-bindings v0.1.2
+   Compiling gs-bpf v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/guest-signal/bpf)
+    Finished `release` profile [optimized] target(s) in 11.91s
++ cd /home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/guest-signal && RUSTFLAGS='-C target-feature=+crt-static' cargo build --release --target x86_64-unknown-linux-gnu -p gsguest -p gs-work
+   Compiling proc-macro2 v1.0.106
+   Compiling quote v1.0.45
+   Compiling unicode-ident v1.0.24
+   Compiling crc32fast v1.5.0
+   Compiling version_check v0.9.5
+   Compiling equivalent v1.0.2
+   Compiling object v0.36.7
+   Compiling foldhash v0.1.5
+   Compiling thiserror v1.0.69
+   Compiling libc v0.2.190
+   Compiling allocator-api2 v0.2.21
+   Compiling hashbrown v0.17.0
+   Compiling cfg-if v1.0.4
+   Compiling memchr v2.8.0
+   Compiling log v0.4.29
+   Compiling bytes v1.11.1
+   Compiling once_cell v1.21.4
+   Compiling assert_matches v1.5.0
+   Compiling bitflags v2.11.1
+   Compiling core-error v0.0.0
+   Compiling hashbrown v0.15.5
+   Compiling indexmap v2.14.0
+   Compiling syn v2.0.117
+   Compiling gs-work v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/guest-signal/work)
+   Compiling thiserror-impl v1.0.69
+   Compiling aya-obj v0.2.1
+   Compiling aya v0.13.1
+   Compiling gsguest v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/guest-signal/guest)
+error[E0382]: use of moved value: `fwd`
+   --> guest/src/main.rs:220:17
+    |
+192 |             let fwd = std::thread::spawn(move || {
+    |                 --- move occurs because `fwd` has type `JoinHandle<()>`, which does not implement the `Copy` trait
+...
+209 |                 fwd.join().unwrap();
+    |                     ------ `fwd` moved due to this method call
+...
+220 |                 fwd.join().unwrap();
+    |                 ^^^ value used here after move
+    |
+note: `JoinHandle::<T>::join` takes ownership of the receiver `self`, which moves `fwd`
+   --> /home/ubuntu/.rustup/toolchains/1.95.0-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/thread/join_handle.rs:149:17
+    |
+149 |     pub fn join(self) -> Result<T> {
+    |                 ^^^^
+
+For more information about this error, try `rustc --explain E0382`.
+error: could not compile `gsguest` (bin "gsguest") due to 1 previous error
+FAILED rc=101: cd /home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/guest-signal && RUSTFLAGS='-C target-feature=+crt-static' cargo build --release --target x86_64-unknown-linux-gnu -p gsguest -p gs-work

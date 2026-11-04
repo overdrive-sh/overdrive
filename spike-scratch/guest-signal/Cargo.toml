@@ -1,0 +1,6 @@
+# guest-signal spike (service-allocation-readiness-and-ending V34/V36). Self-contained; NOT a member of the repo workspace.
+[workspace]
+members = ["host", "guest", "work"]
+resolver = "2"
+[profile.release]
+debug = 0

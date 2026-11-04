@@ -1,0 +1,638 @@
+# Checks the `cargo xtask quint` runner executes for specs/quint/service-allocation-readiness-and-ending/ (feature service-allocation-readiness-and-ending,
+# decisions D1, D3, D5, D6, D7, D8, D9, D10, D11, with the B1 and B2 rulings of 2026-11-03; D2 and D4 are contract / non-change decisions covered by named runs).
+#
+# Modules: hook_ownership (D1, D3; D2, D4 runs), restart_authority (D5, D6, D7, D8), liveness_gate (D9), progress_deadline
+# (D10), stream_snapshot (D11). Each `main` is an instance: `*_ok` (the design, checked), `*_conf` (records conf_step; only
+# its named runs are checked), `*_bug*` in hazard/ (one design decision's rule switched off, expect = "violation").
+# One hazard per decision; no witness (every reachable state is reached by a named run); no bounded copy of an exhaustive check.
+# ci: every check finishes in under two minutes in the recorded run.
+
+[[check]]
+name = "hooks-no-register-after-end"
+spec = "hook_ownership.qnt"
+main = "hooks_ok"
+invariant = "NoRegisterAfterEnd"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "hooks-ended-implies-eventually-unsupervised"
+spec = "hook_ownership.qnt"
+main = "hooks_ok"
+temporal = "EndedImpliesEventuallyUnsupervised"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "hooks-hazard-hook-gated-on-row-write"
+spec = "hazard/hook_ownership_hazards.qnt"
+main = "hooks_bugHookGatedOnRowWrite"
+temporal = "EndedImpliesEventuallyUnsupervised"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "hooks-hazard-gate-before-registration"
+spec = "hazard/hook_ownership_hazards.qnt"
+main = "hooks_bugGateBeforeRegistration"
+invariant = "NoRegisterAfterEnd"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "hooks-run-crash-without-restart"
+spec = "hook_ownership.qnt"
+main = "hooks_conf"
+run = "crash_without_restart"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "hooks-run-crash-then-fresh-id-restart"
+spec = "hook_ownership.qnt"
+main = "hooks_conf"
+run = "crash_then_fresh_id_restart"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "hooks-run-write-exhaustion-still-stops-probes"
+spec = "hook_ownership.qnt"
+main = "hooks_conf"
+run = "write_exhaustion_still_stops_probes"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "hooks-run-operator-or-liveness-stop-emits-no-exit-event"
+spec = "hook_ownership.qnt"
+main = "hooks_conf"
+run = "operator_or_liveness_stop_emits_no_exit_event"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "hooks-run-finalize-on-live-vm-stops-probes"
+spec = "hook_ownership.qnt"
+main = "hooks_conf"
+run = "finalize_on_live_vm_stops_probes"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "hooks-run-double-fire-is-idempotent"
+spec = "hook_ownership.qnt"
+main = "hooks_conf"
+run = "double_fire_is_idempotent"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-no-startup-verdict-over-crash"
+spec = "restart_authority.qnt"
+main = "ra_ok"
+invariant = "NoStartupVerdictOverCrash"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-one-author-per-ending"
+spec = "restart_authority.qnt"
+main = "ra_ok"
+invariant = "OneAuthorPerEnding"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-startup-failure-named-only-at-give-up"
+spec = "restart_authority.qnt"
+main = "ra_ok"
+invariant = "StartupFailureNamedOnlyAtGiveUp"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-no-stable-over-pending-stop"
+spec = "restart_authority.qnt"
+main = "ra_ok"
+invariant = "NoStableOverPendingStop"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-crashed-alloc-eventually-decided-by-restart-authority"
+spec = "restart_authority.qnt"
+main = "ra_ok"
+temporal = "CrashedAllocEventuallyDecidedByRestartAuthority"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-failed-startup-stop-is-retried"
+spec = "restart_authority.qnt"
+main = "ra_ok"
+temporal = "FailedStartupStopIsRetried"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-late-pass-unstrands-the-instance"
+spec = "restart_authority.qnt"
+main = "ra_ok"
+temporal = "LatePassUnstrandsTheInstance"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-hazard-guard-accepts-failed"
+spec = "hazard/restart_authority_hazards.qnt"
+main = "ra_bugGuardAcceptsFailed"
+invariant = "NoStartupVerdictOverCrash"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "ra-hazard-sl-finalises-crash"
+spec = "hazard/restart_authority_hazards.qnt"
+main = "ra_bugSlFinalisesCrash"
+invariant = "OneAuthorPerEnding"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "ra-hazard-sl-finalises-startup"
+spec = "hazard/restart_authority_hazards.qnt"
+main = "ra_bugSlFinalisesStartup"
+invariant = "StartupFailureNamedOnlyAtGiveUp"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "ra-hazard-stamp-at-emission"
+spec = "hazard/restart_authority_hazards.qnt"
+main = "ra_bugStampAtEmission"
+temporal = "FailedStartupStopIsRetried"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "ra-run-crash-after-attempts-exhausted-then-deadline-passes"
+spec = "restart_authority.qnt"
+main = "ra_conf"
+run = "crash_after_attempts_exhausted_then_deadline_passes"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-run-running-alloc-with-exhausted-probes-past-deadline-is-stopped"
+spec = "restart_authority.qnt"
+main = "ra_conf"
+run = "running_alloc_with_exhausted_probes_past_deadline_is_stopped"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-run-pre-startup-crash-loop-gives-up-early-exit"
+spec = "restart_authority.qnt"
+main = "ra_conf"
+run = "pre_startup_crash_loop_gives_up_early_exit"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-run-pre-startup-crash-then-successor-passes"
+spec = "restart_authority.qnt"
+main = "ra_conf"
+run = "pre_startup_crash_then_successor_passes"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-run-crash-after-startup-pass-gives-up-backoff-exhausted"
+spec = "restart_authority.qnt"
+main = "ra_conf"
+run = "crash_after_startup_pass_gives_up_backoff_exhausted"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-run-opt-out-service-crash-loop-gives-up-backoff-exhausted"
+spec = "restart_authority.qnt"
+main = "ra_conf"
+run = "opt_out_service_crash_loop_gives_up_backoff_exhausted"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-run-non-crash-failed-row-gives-up-backoff-exhausted"
+spec = "restart_authority.qnt"
+main = "ra_conf"
+run = "non_crash_failed_row_gives_up_backoff_exhausted"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-run-liveness-kill-loop-gives-up-liveness-probe-failed"
+spec = "restart_authority.qnt"
+main = "ra_conf"
+run = "liveness_kill_loop_gives_up_liveness_probe_failed"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-run-startup-never-passes-loop-gives-up-startup-probe-failed"
+spec = "restart_authority.qnt"
+main = "ra_conf"
+run = "startup_never_passes_loop_gives_up_startup_probe_failed"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-run-startup-stop-then-successor-passes-is-stable"
+spec = "restart_authority.qnt"
+main = "ra_conf"
+run = "startup_stop_then_successor_passes_is_stable"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-run-startup-stop-then-crash-names-last-cause"
+spec = "restart_authority.qnt"
+main = "ra_conf"
+run = "startup_stop_then_crash_names_last_cause"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-run-crash-then-startup-stop-names-last-cause"
+spec = "restart_authority.qnt"
+main = "ra_conf"
+run = "crash_then_startup_stop_names_last_cause"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-run-startup-stop-is-not-intentional-stop"
+spec = "restart_authority.qnt"
+main = "ra_conf"
+run = "startup_stop_is_not_intentional_stop"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-run-failed-startup-stop-is-retried-on-next-row"
+spec = "restart_authority.qnt"
+main = "ra_conf"
+run = "failed_startup_stop_is_retried_on_next_row"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-run-late-pass-after-failed-stop-reaches-stable"
+spec = "restart_authority.qnt"
+main = "ra_conf"
+run = "late_pass_after_failed_stop_reaches_stable"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-run-control-plane-restart-keeps-acted-run"
+spec = "restart_authority.qnt"
+main = "ra_conf"
+run = "control_plane_restart_keeps_acted_run"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "lg-liveness-only-after-stable"
+spec = "liveness_gate.qnt"
+main = "lg_ok"
+invariant = "LivenessOnlyAfterStable"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "lg-no-liveness-stop-before-stable"
+spec = "liveness_gate.qnt"
+main = "lg_ok"
+invariant = "NoLivenessStopBeforeStable"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "lg-no-liveness-for-ended-id"
+spec = "liveness_gate.qnt"
+main = "lg_ok"
+invariant = "NoLivenessForEndedId"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "lg-liveness-streak-starts-at-stable"
+spec = "liveness_gate.qnt"
+main = "lg_ok"
+invariant = "LivenessStreakStartsAtStable"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "lg-hazard-spawn-at-running"
+spec = "hazard/liveness_gate_hazards.qnt"
+main = "lg_bugSpawnAtRunning"
+invariant = "LivenessOnlyAfterStable"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "lg-run-liveness-failing-during-startup-is-not-stopped"
+spec = "liveness_gate.qnt"
+main = "lg_conf"
+run = "liveness_failing_during_startup_is_not_stopped"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "lg-run-liveness-starts-at-stable-and-stops-on-failure"
+spec = "liveness_gate.qnt"
+main = "lg_conf"
+run = "liveness_starts_at_stable_and_stops_on_failure"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "lg-run-stable-after-end-starts-no-liveness"
+spec = "liveness_gate.qnt"
+main = "lg_conf"
+run = "stable_after_end_starts_no_liveness"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "lg-run-opt-out-service-starts-liveness-at-first-running-stable"
+spec = "liveness_gate.qnt"
+main = "lg_conf"
+run = "opt_out_service_starts_liveness_at_first_running_stable"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "pd-healthy-slow-start-never-times-out"
+spec = "progress_deadline.qnt"
+main = "pd_ok"
+invariant = "HealthySlowStartNeverTimesOut"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "pd-hazard-fixed-cap"
+spec = "hazard/progress_deadline_hazards.qnt"
+main = "pd_bugFixedCap"
+invariant = "HealthySlowStartNeverTimesOut"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "pd-run-slow-start-within-startup-deadline-reaches-stable-not-timeout"
+spec = "progress_deadline.qnt"
+main = "pd_conf"
+run = "slow_start_within_startup_deadline_reaches_stable_not_timeout"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "pd-run-never-ready-times-out-with-last-attempt-cause"
+spec = "progress_deadline.qnt"
+main = "pd_conf"
+run = "never_ready_times_out_with_last_attempt_cause"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "pd-run-giveup-inside-deadline-wins-over-timeout"
+spec = "progress_deadline.qnt"
+main = "pd_conf"
+run = "giveup_inside_deadline_wins_over_timeout"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "pd-run-redeploy-unchanged-opens-new-clock"
+spec = "progress_deadline.qnt"
+main = "pd_conf"
+run = "redeploy_unchanged_opens_new_clock"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ss-stream-ends-once-honestly"
+spec = "stream_snapshot.qnt"
+main = "ss_ok"
+invariant = "StreamEndsOnceHonestly"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ss-restartable-stop-never-ends-stream"
+spec = "stream_snapshot.qnt"
+main = "ss_ok"
+invariant = "RestartableStopNeverEndsStream"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ss-failed-read-never-waits"
+spec = "stream_snapshot.qnt"
+main = "ss_ok"
+invariant = "FailedReadNeverWaits"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ss-no-missed-terminal"
+spec = "stream_snapshot.qnt"
+main = "ss_ok"
+temporal = "NoMissedTerminal"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ss-hazard-read-before-subscribe"
+spec = "hazard/stream_snapshot_hazards.qnt"
+main = "ss_bugReadBeforeSubscribe"
+temporal = "NoMissedTerminal"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "ss-run-redeploy-unchanged-of-stable-ends-stable"
+spec = "stream_snapshot.qnt"
+main = "ss_conf"
+run = "redeploy_unchanged_of_stable_ends_stable"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ss-run-terminal-between-subscribe-and-read-is-not-lost"
+spec = "stream_snapshot.qnt"
+main = "ss_conf"
+run = "terminal_between_subscribe_and_read_is_not_lost"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ss-run-restartable-stop-recorded-is-not-a-verdict"
+spec = "stream_snapshot.qnt"
+main = "ss_conf"
+run = "restartable_stop_recorded_is_not_a_verdict"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ss-run-superseded-attempt-terminal-is-not-reported"
+spec = "stream_snapshot.qnt"
+main = "ss_conf"
+run = "superseded_attempt_terminal_is_not_reported"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ss-run-lagged-relist-recovers-terminal"
+spec = "stream_snapshot.qnt"
+main = "ss_conf"
+run = "lagged_relist_recovers_terminal"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ss-run-failed-read-ends-with-error"
+spec = "stream_snapshot.qnt"
+main = "ss_conf"
+run = "failed_read_ends_with_error"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-run-pass-then-fails-before-stable-is-stopped"
+spec = "restart_authority.qnt"
+main = "ra_conf"
+run = "pass_then_fails_before_stable_is_stopped"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "lg-stable-eventually-committed"
+spec = "liveness_gate.qnt"
+main = "lg_ok"
+temporal = "StableEventuallyCommitted"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "lg-hazard-stamp-at-emission"
+spec = "hazard/liveness_gate_hazards.qnt"
+main = "lg_bugStampAtEmission"
+temporal = "StableEventuallyCommitted"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "lg-run-lost-stable-write-is-reannounced"
+spec = "liveness_gate.qnt"
+main = "lg_conf"
+run = "lost_stable_write_is_reannounced"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-no-stranded-stop"
+spec = "restart_authority.qnt"
+main = "ra_ok"
+invariant = "NoStrandedStop"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-hazard-hook-before-row-write"
+spec = "hazard/restart_authority_hazards.qnt"
+main = "ra_bugHookBeforeRowWrite"
+invariant = "NoStrandedStop"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "ra-run-stop-row-write-failure-is-retried"
+spec = "restart_authority.qnt"
+main = "ra_conf"
+run = "stop_row_write_failure_is_retried"
+backend = "evaluator"
+expect = "holds"
+ci = true

@@ -14,6 +14,28 @@ same-ID premise correction below is factual. Proposed revision 3 of
 pins the user-selected sole backend projection and asynchronous consumer
 convergence. Its exact design remains pending independent review.
 
+**Amendment (2026-11-03), by [ADR-0260](adr-0260-a-startup-probed-allocation-is-a-backend-only-after-its-startup-has-passed.md).**
+The statements below that "a non-terminal no-readiness allocation stays healthy" and
+that the no-readiness default is "not permission to route to an allocation whose
+startup contract has already terminally failed" hold only for a Service that
+declares no startup probe (the explicit opt-out). An allocation of a Service that
+declares a startup probe is `healthy` only after its own startup has passed (its
+committed `Stable` claim), whether it is a first allocation or a restart successor.
+This puts the startup-passed step ahead of the readiness rule and replaces the
+view-wide successor hold that the implementation carries (`terminal_announced`
+non-empty and no startup `Pass`).
+
+**Supersession (2026-11-03, user ruling, by ADR-0260).** **D1 step 1 (the
+per-allocation terminal veto) and D2 (the backend-row withdrawal constructed before
+the terminal action) are superseded.** Under ADR-0252 a startup failure is a stop,
+not a finalisation, and a startup-failed allocation never has a committed `Stable`,
+so the new step already makes it unhealthy; the veto and the ordering defend nothing.
+`startup_failed_this_tick`, the veto branch in `compute_backend_healthy` and the
+backend-row splice ahead of the startup action are deleted. D3 (owners) and D4
+(scope) are unchanged except that D4's test obligations 1 and 2 are replaced by the
+ADR-0260 obligations. The `terminal_announced` set stays as the startup-stop
+bookkeeping (ADR-0253) and is no longer read for eligibility.
+
 ## Context
 
 Native-metal E09 reaches a real contradiction in the current production path.

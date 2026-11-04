@@ -1,0 +1,477 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask metal run -- bash spike-scratch/listen-hooks/run.sh all`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=7f3171b7e8b2056f1c889576
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=7f3171b7e8b2056f1c889576
+OVERDRIVE_METAL_LEASE_ACQUIRED token=7f3171b7e8b2056f1c889576 pid=663448
+
+########## [bootstrap] acquire metal tree lock (/run/lock/overdrive-metal-tree-overdrive-branches-marcus-sa-nw-bugfix-crash-restart-tasks.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=7f3171b7e8b2056f1c889576-tree pid=663546
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/ouagadougou -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks
+
+sent 1,887,935 bytes  received 9,931 bytes  1,265,244.00 bytes/sec
+total size is 1,828,188,724  speedup is 963.29
+
+########## [bootstrap] materialising standalone .git (common dir 7.5G)
+
+sent 664,712 bytes  received 18,588 bytes  455,533.33 bytes/sec
+total size is 908,935,101  speedup is 1,330.21
+## marcus-sa/nw-bugfix-crash-restart-tasks
+ M docs/product/architecture/adr-0058-default-tcp-startup-probe-inference.md
+ M docs/product/architecture/adr-0096-startup-failure-withdraws-backend-eligibility.md
+ M docs/product/architecture/brief.md
+ D vendors/linux
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+    Finished `release` profile [optimized + debuginfo] target(s) in 0.05s
+    Finished `release` profile [optimized + debuginfo] target(s) in 0.05s
+warning: unnecessary parentheses around function argument
+  --> src/bin/wl.rs:52:39
+   |
+52 |     ck(unsafe { libc::getsockname(fd, (&mut ss as *mut _ as *mut libc::sockaddr), &mut len) }, "getsockname");
+   |                                       ^                                        ^
+   |
+   = note: `#[warn(unused_parens)]` (part of `#[warn(unused)]`) on by default
+help: remove these parentheses
+   |
+52 -     ck(unsafe { libc::getsockname(fd, (&mut ss as *mut _ as *mut libc::sockaddr), &mut len) }, "getsockname");
+52 +     ck(unsafe { libc::getsockname(fd, &mut ss as *mut _ as *mut libc::sockaddr, &mut len) }, "getsockname");
+   |
+
+   Compiling listen-hooks-probe v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/listen-hooks/probe)
+warning: `listen-hooks-probe` (bin "wl") generated 1 warning (run `cargo fix --bin "wl" -p listen-hooks-probe` to apply 1 suggestion)
+    Finished `release` profile [optimized + debuginfo] target(s) in 1.26s
+-rw-r----- 2 root root    10696 Nov  3 19:03 /tmp/listen-hooks-target/bpf-base/bpfel-unknown-none/release/listen-hooks-bpf
+-rw-r----- 2 root root    13096 Nov  3 19:05 /tmp/listen-hooks-target/bpf-listen/bpfel-unknown-none/release/listen-hooks-bpf
+-rwxr-x--- 2 root root 13065888 Nov  3 19:06 /tmp/listen-hooks-target/host/release/probe
+-rwxr-x--- 2 root root  4616200 Nov  3 19:03 /tmp/listen-hooks-target/host/release/wl
+================ V37 kernel config ================
+uname -r: 7.0.0-38-generic   uname -m: x86_64   systemd-detect-virt: none
+--- host kernel config (/boot/config-7.0.0-38-generic)
+CONFIG_BPF=y
+CONFIG_BPF_SYSCALL=y
+CONFIG_BPF_JIT=y
+CONFIG_CGROUPS=y
+CONFIG_CGROUP_BPF=y
+CONFIG_NET_HANDSHAKE=y
+CONFIG_INET=y
+CONFIG_IPV6=y
+CONFIG_DEBUG_INFO_BTF=y
+--- bpftool feature probe kernel (filtered)
+CONFIG_BPF_SYSCALL is set to y
+CONFIG_CGROUP_BPF is set to y
+eBPF program_type cgroup_sock is available
+eBPF program_type sock_ops is available
+eBPF program_type cgroup_sock_addr is available
+eBPF program_type cgroup_sockopt is available
+eBPF map_type percpu_array is available
+eBPF map_type ringbuf is available
+	- bpf_get_current_pid_tgid
+	- bpf_get_socket_cookie
+	- bpf_get_current_pid_tgid
+	- bpf_get_current_pid_tgid
+	- bpf_get_socket_cookie
+	- bpf_get_current_pid_tgid
+	- bpf_get_socket_cookie
+	- bpf_get_current_pid_tgid
+	- bpf_get_current_pid_tgid
+	- bpf_get_current_pid_tgid
+	- bpf_get_current_pid_tgid
+	- bpf_get_socket_cookie
+	- bpf_get_current_pid_tgid
+	- bpf_get_socket_cookie
+	- bpf_getsockopt
+	- bpf_get_current_pid_tgid
+	- bpf_get_current_pid_tgid
+	- bpf_get_current_pid_tgid
+	- bpf_get_current_pid_tgid
+	- bpf_get_socket_cookie
+	- bpf_getsockopt
+	- bpf_get_current_pid_tgid
+	- bpf_get_socket_cookie
+	- bpf_get_current_pid_tgid
+	- bpf_get_current_pid_tgid
+	- bpf_get_current_pid_tgid
+	- bpf_get_current_pid_tgid
+	- bpf_get_socket_cookie
+	- bpf_getsockopt
+	- bpf_get_current_pid_tgid
+	- bpf_get_current_pid_tgid
+	- bpf_get_socket_cookie
+	- bpf_get_current_pid_tgid
+	- bpf_get_current_pid_tgid
+	- bpf_get_current_pid_tgid
+	- bpf_get_current_pid_tgid
+	- bpf_get_current_pid_tgid
+	- bpf_get_current_pid_tgid
+	- bpf_get_socket_cookie
+	- bpf_get_current_pid_tgid
+--- attach-type availability is proven by the real loads/attaches in the V32/V33/V35 output
+--- fixture guest kernel (OVERDRIVE_METAL_KERNEL)
+-rw------- 1 root root 17320328 Oct 19 07:10 /srv/vm/overdrive-testing/kernel
+resolved: /srv/vm/overdrive-testing/kernel
+/srv/vm/overdrive-testing/kernel: Linux kernel x86 boot executable, bzImage, version 7.0.0-38-generic (buildd@lcy02-amd64-070) #38-Ubuntu SMP PREEMPT_DYNAMIC Fri Sep  4 09:10:14 UTC 2026, RO-rootFS, Normal VGA, setup size 512*39, syssize 0x107f20, jump 0x26c 0x8cd88ec0fc8cd239 instruction, protocol 2.15, from protected-mode code at offset 0x2cc 0x10456ea bytes ZST compressed, relocatable, handover offset 0x1072530, legacy 64-bit entry point, can be above 4G, 32-bit EFI handoff entry point, 64-bit EFI handoff entry point, EFI kexec boot support, xloadflags bit 5, max cmdline size 2047, init_size 0x44c1000
+total 36000
+drwxr-xr-x 4 root root       95 Sep 22 22:36 gti-failure-serve-BxF37V
+drwxr-xr-x 4 root root       95 Sep 22 22:31 gti-failure-serve-iGHl3d
+drwxr-xr-x 3 root root      125 Aug 29 17:42 gti-mesh-rNMmre
+drwxr-xr-x 3 root root       33 Aug 28 20:30 gti-net-apply-failure-K9y6OS
+drwxr-xr-x 3 root root       20 Aug 30 01:17 gti-resolver-refusal-7IqZMm
+drwxr-xr-x 4 root root       35 Sep 22 22:29 gti-resolver-refusal-WArgHG
+drwxr-xr-x 4 root root       35 Sep 22 22:35 gti-resolver-refusal-eoGBYv
+drwxr-xr-x 5 root root      188 Sep 23 04:58 gti-restart-reinstall-failure-6jWnm8
+drwxr-xr-x 5 root root      188 Sep 23 07:50 gti-restart-reinstall-failure-AGn9Kh
+drwxr-xr-x 5 root root      188 Sep 23 09:28 gti-restart-reinstall-failure-ETUiZe
+drwxr-xr-x 5 root root      188 Sep 23 04:56 gti-restart-reinstall-failure-FNVX9Y
+drwxr-xr-x 5 root root      188 Sep 23 08:09 gti-restart-reinstall-failure-I28LOf
+drwxr-xr-x 5 root root      188 Sep 23 08:34 gti-restart-reinstall-failure-Jt2vQ3
+drwxr-xr-x 5 root root      188 Sep 23 10:12 gti-restart-reinstall-failure-SFvkqx
+drwxr-xr-x 5 root root      188 Sep 23 10:25 gti-restart-reinstall-failure-XxAf04
+drwxr-xr-x 5 root root      188 Sep 23 09:50 gti-restart-reinstall-failure-bVIFK1
+drwxr-xr-x 5 root root      188 Sep 23 07:58 gti-restart-reinstall-failure-bbKgDh
+drwxr-xr-x 5 root root      188 Sep 23 01:27 gti-restart-reinstall-failure-klheQB
+drwxr-xr-x 5 root root      188 Sep 23 07:55 gti-restart-reinstall-failure-y6fCW8
+drwxr-xr-x 4 root root       81 Aug 29 17:42 gti-serve-GRWpTA
+-rw------- 1 root root 17320328 Oct 19 07:10 kernel
+drwxr-xr-x 2 root root        6 Oct 24 19:03 probe-image-dir
+drwxr-xr-x 2 root root        6 Oct 24 19:03 probe-run-dir-root
+drwxr-xr-x 4 root root       94 Oct 24 09:02 review-11-06-udp-1519761-0
+drwxr-x--- 8 root root       90 Nov  3 05:28 rootfs-stage
+-rw-r----- 1 root root 67108864 Nov  3 05:28 rootfs.ext4
+drwxr-xr-x 4 root root       82 Oct 24 19:03 run-ch
+drwxr-xr-x 3 root root       75 Oct 24 19:03 run-ch-early
+drwxr-xr-x 3 root root       73 Oct 24 19:03 run-ch-tail
+drwxr-xr-x 4 root root       79 Oct 24 19:03 run-sim
+drwxr-xr-x 3 root root       77 Oct 24 19:03 run-sim-early
+drwxr-xr-x 3 root root       75 Oct 24 19:03 run-sim-tail
+drwxr-xr-x 4 root root      150 Oct 24 19:03 run-vsock-device-cid-free
+drwxr-xr-x 4 root root      107 Oct 24 19:03 run-vsock-device-forced-reboot
+drwxr-xr-x 4 root root      150 Oct 24 19:03 run-vsock-device-held-cid
+drwxr-xr-x 3 root root       73 Oct 24 19:03 run-vsock-device-own-device
+drwxr-xr-x 4 root root      154 Oct 24 19:03 run-vsock-device-pid1-crash
+drwxr-xr-x 3 root root       79 Oct 24 19:03 run-vsock-device-triple-fault
+-rw-r--r-- 1 root root        2 Sep 12 12:26 s11-native-20260912-attempt5.exit
+-rw-r--r-- 1 root root  9715410 Sep 12 12:23 s11-native-20260912-attempt5.json
+-rw-r--r-- 1 root root     4356 Sep 12 12:26 s11-native-20260912-attempt5.log
+-rw-r--r-- 1 root root        2 Sep 11 23:55 s11-no-admission-slo-20260912-attempt4.exit
+-rw-r--r-- 1 root root      434 Sep 11 23:55 s11-no-admission-slo-20260912-attempt4.log
+-rw-r--r-- 1 root root      329 Sep 11 19:42 s11-stop-bound-120s-20260911-attempt2.log
+-rw-r--r-- 1 root root        4 Sep 11 22:25 s11-stop-bound-120s-20260911-attempt3.exit
+-rw-r--r-- 1 root root    81016 Sep 11 22:25 s11-stop-bound-120s-20260911-attempt3.log
+-rw-r--r-- 1 root root      110 Sep 11 19:41 s11-stop-bound-120s-20260911.log
+drwxr-xr-x 3 root root      117 Sep 11 15:50 vll-s11-profiles-32GWjy
+drwxr-xr-x 3 root root      117 Sep 11 14:03 vll-s11-profiles-3pkFPs
+drwxr-xr-x 3 root root      117 Sep 11 20:21 vll-s11-profiles-LnFj6w
+drwxr-xr-x 3 root root      117 Sep 15 12:44 vll-s11-profiles-YzYNA9
+drwxr-xr-x 3 root root      117 Sep 11 14:00 vll-s11-profiles-aO4owC
+drwxr-xr-x 3 root root      117 Sep 11 19:42 vll-s11-profiles-qDcNMV
+drwxr-xr-x 3 root root      117 Sep 15 00:22 vll-s11-profiles-t0JlRY
+drwxr-xr-x 3 root root       90 Sep 12 13:44 vm-clean-rootfs-7QL2wJ
+drwxr-xr-x 3 root root       90 Sep 12 13:58 vm-clean-rootfs-7Qv3f3
+drwxr-xr-x 3 root root       90 Sep 11 13:07 vm-clean-rootfs-9O0ERV
+drwxr-xr-x 3 root root       90 Sep 11 13:12 vm-clean-rootfs-Iq7Cfn
+drwxr-xr-x 3 root root       90 Sep 12 14:02 vm-clean-rootfs-VYemVI
+drwxr-xr-x 3 root root       90 Sep 12 13:29 vm-clean-rootfs-X10R9h
+drwxr-xr-x 3 root root       90 Sep 12 13:49 vm-clean-rootfs-ZWyLIu
+drwxr-xr-x 3 root root       90 Sep 12 13:54 vm-clean-rootfs-cNEBXH
+drwxr-xr-x 3 root root       90 Sep 11 13:28 vm-clean-rootfs-kGayTa
+drwxr-xr-x 3 root root       90 Sep 12 13:38 vm-clean-rootfs-kV0uPA
+drwxr-xr-x 3 root root       90 Sep 11 13:10 vm-clean-rootfs-olFgiQ
+drwxr-xr-x 3 root root       90 Sep 12 14:09 vm-clean-rootfs-pKPhy6
+drwxr-xr-x 3 root root       25 Oct 22 15:25 vm-host-state-eq-run-root
+drwxr-xr-x 3 root root       89 Sep 15 11:21 vm-reclaim-s21-pri9D0
+drwxr-xr-x 3 root root       90 Sep 15 13:19 vm-reclaim-s25b-CcwhBV
+drwxr-xr-x 4 root root       58 Sep 11 13:07 vm-serve-87RTe3
+drwxr-xr-x 4 root root       58 Sep 11 13:12 vm-serve-AUd1mY
+drwxr-xr-x 4 root root       58 Sep 11 13:28 vm-serve-BOmp7S
+drwxr-xr-x 4 root root       58 Sep 11 13:10 vm-serve-C5lFmR
+drwxr-xr-x 4 root root       58 Sep 12 14:02 vm-serve-GRoGAa
+drwxr-xr-x 4 root root     4096 Sep 11 14:02 vm-serve-HYqxKN
+drwxr-xr-x 4 root root     8192 Sep 15 12:52 vm-serve-JvANw3
+drwxr-xr-x 4 root root    40960 Sep 11 16:48 vm-serve-K4bZFb
+drwxr-xr-x 4 root root       58 Sep 12 13:38 vm-serve-RNvaMM
+drwxr-xr-x 4 root root       30 Sep 15 13:19 vm-serve-SPtWZK
+drwxr-xr-x 4 root root       58 Sep 12 14:09 vm-serve-TMJv1I
+drwxr-xr-x 4 root root       58 Sep 12 13:29 vm-serve-WsehFO
+drwxr-xr-x 4 root root       58 Sep 12 13:58 vm-serve-cdIX5S
+drwxr-xr-x 4 root root       58 Sep 12 13:49 vm-serve-fhgqEf
+drwxr-xr-x 4 root root    12288 Sep 11 14:13 vm-serve-h5sGRJ
+drwxr-xr-x 4 root root       30 Sep 15 11:21 vm-serve-hMeQkr
+drwxr-xr-x 4 root root       58 Sep 12 13:54 vm-serve-k8bOen
+drwxr-xr-x 4 root root     4096 Sep 15 00:25 vm-serve-lHcXnt
+drwxr-xr-x 4 root root       58 Sep 12 13:44 vm-serve-mr7jcL
+fixture kernel == /boot/vmlinuz-7.0.0-38-generic (byte-identical)
+size 17320328
+no IKCFG config found in /srv/vm/overdrive-testing/kernel
+uname -r: 7.0.0-38-generic
+primary ip: 151.115.99.251
+attached in child cgroup /sys/fs/cgroup/lh-664287-1-main (not the host root); bpftool cgroup show:
+ID       AttachType      AttachFlags     Name           
+4110     cgroup_inet_sock_release multi           sock_release                   
+4111     cgroup_inet4_post_bind multi           post_bind4                     
+4112     cgroup_inet6_post_bind multi           post_bind6                     
+4106     cgroup_inet4_connect multi           connect4                       
+4108     cgroup_inet4_getpeername multi           getpeername4                   
+4107     cgroup_udp4_sendmsg multi           sendmsg4                       
+4109     cgroup_udp4_recvmsg multi           recvmsg4                       
+4105     cgroup_sock_ops multi           tcp_correlation                
+
+
+================ V32 TCP listen ================
+(post_bind4/6 are attached too, so a TCP bind() also yields an OTHER_POST_BIND event; only TCP_LISTEN_CB lines are listener reports)
+--- T1 v4 wildcard listen   [wl tcp4_wild]
+PREDICT: 1 TCP_LISTEN_CB AF_INET 0.0.0.0:<assigned port printed by wl>
+  wl> wl tcp4_wild: listening 0.0.0.0:56087
+ACTUAL: wl exit=0; 2 event(s)
+  ev> OTHER_POST_BIND  AF_INET  local=0.0.0.0:56087 pid=664292 proto=6 type=1
+  ev> TCP_LISTEN_CB    AF_INET  local=0.0.0.0:56087 pid=664292 proto=6 type=1
+--- T2 v4 loopback listen   [wl tcp4_loop]
+PREDICT: 1 TCP_LISTEN_CB local=127.0.0.1:<port> (address readable, so a loopback exclusion is implementable)
+  wl> wl tcp4_loop: listening 127.0.0.1:57159
+ACTUAL: wl exit=0; 2 event(s)
+  ev> OTHER_POST_BIND  AF_INET  local=127.0.0.1:57159 pid=664293 proto=6 type=1
+  ev> TCP_LISTEN_CB    AF_INET  local=127.0.0.1:57159 pid=664293 proto=6 type=1
+--- T3 v4 specific-address listen   [wl tcp4_specific 151.115.99.251]
+PREDICT: 1 TCP_LISTEN_CB local=<primary ip>:<port>
+  wl> wl tcp4_specific: listening [151, 115, 99, 251]:46105
+ACTUAL: wl exit=0; 2 event(s)
+  ev> OTHER_POST_BIND  AF_INET  local=151.115.99.251:46105 pid=664294 proto=6 type=1
+  ev> TCP_LISTEN_CB    AF_INET  local=151.115.99.251:46105 pid=664294 proto=6 type=1
+--- T4 v6 [::1] listen   [wl tcp6_loop]
+PREDICT: 1 TCP_LISTEN_CB AF_INET6 local=[::1]:<port>
+  wl> wl tcp6_loop: listening [::1]:34079
+ACTUAL: wl exit=0; 2 event(s)
+  ev> OTHER_POST_BIND  AF_INET6 local=[::1]:34079 pid=664295 proto=6 type=1
+  ev> TCP_LISTEN_CB    AF_INET6 local=[::1]:34079 pid=664295 proto=6 type=1 getsockopt(V6ONLY)_rc=-22
+--- T5 v6 wildcard V6ONLY=1   [wl tcp6_wild_v6only1]
+PREDICT: 1 TCP_LISTEN_CB AF_INET6 [::]:<port>; V6ONLY not readable (getsockopt rc = -EINVAL = -22, filter.c:5562-5573)
+  wl> wl tcp6_wild_v6only1: listening [::]:56155 v6only=true
+ACTUAL: wl exit=0; 2 event(s)
+  ev> OTHER_POST_BIND  AF_INET6 local=[::]:56155 pid=664296 proto=6 type=1
+  ev> TCP_LISTEN_CB    AF_INET6 local=[::]:56155 pid=664296 proto=6 type=1 getsockopt(V6ONLY)_rc=-22
+--- T6 v6 wildcard V6ONLY=0 (dual-stack)   [wl tcp6_wild_v6only0]
+PREDICT: 1 TCP_LISTEN_CB AF_INET6 [::]:<port>, indistinguishable from T5
+  wl> wl tcp6_wild_v6only0: listening [::]:35551 v6only=false
+ACTUAL: wl exit=0; 2 event(s)
+  ev> OTHER_POST_BIND  AF_INET6 local=[::]:35551 pid=664297 proto=6 type=1
+  ev> TCP_LISTEN_CB    AF_INET6 local=[::]:35551 pid=664297 proto=6 type=1 getsockopt(V6ONLY)_rc=-22
+--- T7 listen() x3 on the same socket   [wl tcp_relisten]
+PREDICT: exactly 1 TCP_LISTEN_CB (backlog-only calls, af_inet.c:211)
+  wl> wl tcp_relisten: listen x3 on port 34109
+ACTUAL: wl exit=0; 2 event(s)
+  ev> OTHER_POST_BIND  AF_INET  local=0.0.0.0:34109 pid=664298 proto=6 type=1
+  ev> TCP_LISTEN_CB    AF_INET  local=0.0.0.0:34109 pid=664298 proto=6 type=1
+--- T8 listen, shutdown(SHUT_RD), listen again   [wl tcp_shutdown_relisten 0.0.0.0 47050]
+PREDICT: 2 TCP_LISTEN_CB if the second listen succeeds (state returns to CLOSE then LISTEN), else 1
+  wl> wl tcp_shutdown_relisten: shutdown(SHUT_RD) rc=0 errno=Success (os error 0)
+  wl> wl tcp_shutdown_relisten: second listen rc=0 port=47050
+ACTUAL: wl exit=0; 3 event(s)
+  ev> OTHER_POST_BIND  AF_INET  local=0.0.0.0:47050 pid=664299 proto=6 type=1
+  ev> TCP_LISTEN_CB    AF_INET  local=0.0.0.0:47050 pid=664299 proto=6 type=1
+  ev> TCP_LISTEN_CB    AF_INET  local=0.0.0.0:47050 pid=664299 proto=6 type=1
+--- T9 forked child creates+listens   [wl tcp_fork_child]
+PREDICT: 1 TCP_LISTEN_CB with the CHILD pid (cgroup inherited across fork)
+  wl> wl tcp_fork_child: child pid=664301 listening 0.0.0.0:58565
+  wl> wl tcp_fork_child: parent pid=664300 child pid=664301 done
+ACTUAL: wl exit=0; 2 event(s)
+  ev> OTHER_POST_BIND  AF_INET  local=0.0.0.0:58565 pid=664301 proto=6 type=1
+  ev> TCP_LISTEN_CB    AF_INET  local=0.0.0.0:58565 pid=664301 proto=6 type=1
+--- T10 SO_REUSEPORT x2 same port   [wl tcp_reuseport2]
+PREDICT: 2 TCP_LISTEN_CB, same port, one per socket
+  wl> wl tcp_reuseport2: two REUSEPORT listeners on 49039
+ACTUAL: wl exit=0; 4 event(s)
+  ev> OTHER_POST_BIND  AF_INET  local=0.0.0.0:49039 pid=664302 proto=6 type=1
+  ev> OTHER_POST_BIND  AF_INET  local=0.0.0.0:49039 pid=664302 proto=6 type=1
+  ev> TCP_LISTEN_CB    AF_INET  local=0.0.0.0:49039 pid=664302 proto=6 type=1
+  ev> TCP_LISTEN_CB    AF_INET  local=0.0.0.0:49039 pid=664302 proto=6 type=1
+--- T11 listener + client connect + accept   [wl tcp_accept_children]
+PREDICT: 1 TCP_LISTEN_CB only (accepted child is not a listen transition)
+  wl> wl tcp_accept_children: listener 51599; client connected; accepted fd 5
+ACTUAL: wl exit=0; 2 event(s)
+  ev> OTHER_POST_BIND  AF_INET  local=127.0.0.1:51599 pid=664303 proto=6 type=1
+  ev> TCP_LISTEN_CB    AF_INET  local=127.0.0.1:51599 pid=664303 proto=6 type=1
+--- T12 bind without listen   [wl tcp4_bind_only]
+PREDICT: 0 TCP_LISTEN_CB (1 OTHER_POST_BIND)
+  wl> wl tcp4_bind_only: bound (no listen) 0.0.0.0:50471
+ACTUAL: wl exit=0; 1 event(s)
+  ev> OTHER_POST_BIND  AF_INET  local=0.0.0.0:50471 pid=664304 proto=6 type=1
+--- T13 listen() with no prior bind (autobind)   [wl tcp4_listen_unbound]
+PREDICT: 1 TCP_LISTEN_CB with the autobound port (nonzero)
+  wl> wl tcp4_listen_unbound: listen without bind: port 40341
+ACTUAL: wl exit=0; 1 event(s)
+  ev> TCP_LISTEN_CB    AF_INET  local=0.0.0.0:40341 pid=664305 proto=6 type=1
+
+================ V33 UDP post_bind ================
+--- U1 v4 wildcard explicit bind   [wl udp4_wild 0.0.0.0 47101]
+PREDICT: 1 UDP_POST_BIND 0.0.0.0:47101
+  wl> wl udp4_wild: bound 0.0.0.0:47101
+ACTUAL: wl exit=0; 1 event(s)
+  ev> UDP_POST_BIND    AF_INET  local=0.0.0.0:47101 pid=664306 proto=17 type=2
+--- U2 v4 specific-address bind   [wl udp4_specific 151.115.99.251 47102]
+PREDICT: 1 UDP_POST_BIND <primary ip>:47102
+  wl> wl udp4_specific: bound [151, 115, 99, 251]:47102
+ACTUAL: wl exit=0; 1 event(s)
+  ev> UDP_POST_BIND    AF_INET  local=151.115.99.251:47102 pid=664307 proto=17 type=2
+--- U3 v4 loopback bind   [wl udp4_loop 127.0.0.1 47103]
+PREDICT: 1 UDP_POST_BIND 127.0.0.1:47103 (address readable)
+  wl> wl udp4_loop: bound 127.0.0.1:47103
+ACTUAL: wl exit=0; 1 event(s)
+  ev> UDP_POST_BIND    AF_INET  local=127.0.0.1:47103 pid=664308 proto=17 type=2
+--- U4 v4 bind(port 0)   [wl udp4_port0]
+PREDICT: 1 UDP_POST_BIND with the kernel-assigned (nonzero) port equal to wl's getsockname
+  wl> wl udp4_port0: bind(port 0) -> assigned 42698
+ACTUAL: wl exit=0; 1 event(s)
+  ev> UDP_POST_BIND    AF_INET  local=0.0.0.0:42698 pid=664309 proto=17 type=2
+--- U5 v4 autobind via sendto (no bind)   [wl udp4_autobind_sendto]
+PREDICT: 0 events
+  wl> wl udp4_autobind_sendto: sendto without bind rc=1; kernel-assigned local port 34698
+ACTUAL: wl exit=0; 0 event(s)
+--- U6 connected UDP client, no bind   [wl udp4_connected_client]
+PREDICT: 0 events
+  wl> wl udp4_connected_client: connected UDP, no bind; local port 42708
+ACTUAL: wl exit=0; 0 event(s)
+--- U7 IP_BIND_ADDRESS_NO_PORT + bind(0)   [wl udp4_bind_no_port]
+PREDICT: 0 events (get_port and post_bind share one branch: af_inet.c:541-551)
+  wl> wl udp4_bind_no_port: IP_BIND_ADDRESS_NO_PORT bind(0): port now 0
+ACTUAL: wl exit=0; 0 event(s)
+--- U8 SO_REUSEPORT x2 same port   [wl udp4_reuseport2 0.0.0.0 47108]
+PREDICT: 2 UDP_POST_BIND, port 47108
+  wl> wl udp4_reuseport2: two REUSEPORT UDP binds on 47108
+ACTUAL: wl exit=0; 2 event(s)
+  ev> UDP_POST_BIND    AF_INET  local=0.0.0.0:47108 pid=664313 proto=17 type=2
+  ev> UDP_POST_BIND    AF_INET  local=0.0.0.0:47108 pid=664313 proto=17 type=2
+--- U9 second bind to a taken port (EADDRINUSE)   [wl udp4_bind_conflict 0.0.0.0 47109]
+PREDICT: 1 UDP_POST_BIND (first bind) only; the failing bind is not reported
+  wl> wl udp4_bind_conflict: second bind rc=-1 errno=Address already in use (os error 98)
+ACTUAL: wl exit=0; 1 event(s)
+  ev> UDP_POST_BIND    AF_INET  local=0.0.0.0:47109 pid=664314 proto=17 type=2
+--- U10 v6 wildcard V6ONLY=1   [wl udp6_wild_v6only1 0.0.0.0 47110]
+PREDICT: 1 UDP_POST_BIND AF_INET6 [::]:47110
+  wl> wl udp6_wild_v6only1: bound [::]:47110 v6only=true
+ACTUAL: wl exit=0; 1 event(s)
+  ev> UDP_POST_BIND    AF_INET6 local=[::]:47110 pid=664315 proto=17 type=2
+--- U11 v6 wildcard V6ONLY=0   [wl udp6_wild_v6only0 0.0.0.0 47111]
+PREDICT: 1 UDP_POST_BIND AF_INET6 [::]:47111, identical shape to U10 (V6ONLY not visible)
+  wl> wl udp6_wild_v6only0: bound [::]:47111 v6only=false
+ACTUAL: wl exit=0; 1 event(s)
+  ev> UDP_POST_BIND    AF_INET6 local=[::]:47111 pid=664316 proto=17 type=2
+--- U12 v6 loopback bind   [wl udp6_loop 0.0.0.0 47112]
+PREDICT: 1 UDP_POST_BIND [::1]:47112
+  wl> wl udp6_loop: bound [::1]:47112
+ACTUAL: wl exit=0; 1 event(s)
+  ev> UDP_POST_BIND    AF_INET6 local=[::1]:47112 pid=664317 proto=17 type=2
+--- U13 v6 bind(port 0)   [wl udp6_port0]
+PREDICT: 1 UDP_POST_BIND AF_INET6 with assigned port
+  wl> wl udp6_port0: bind(port 0) -> assigned 39974
+ACTUAL: wl exit=0; 1 event(s)
+  ev> UDP_POST_BIND    AF_INET6 local=[::]:39974 pid=664318 proto=17 type=2
+
+================ V35 coexistence / verifier / multi-attach ================
+verified_insns baseline: connect4=225 getpeername4=133 recvmsg4=65 sendmsg4=157 sock_release=41323 tcp_correlation=638
+verified_insns listen  : connect4=225 getpeername4=133 listen_only=? post_bind4=149 post_bind6=74 recvmsg4=65 sendmsg4=157 sock_release=41323 tcp_correlation=750
+
+bpftool cgroup show (listen rig):
+ID       AttachType      AttachFlags     Name           
+4124     cgroup_inet_sock_release multi           sock_release                   
+4125     cgroup_inet4_post_bind multi           post_bind4                     
+4126     cgroup_inet6_post_bind multi           post_bind6                     
+4120     cgroup_inet4_connect multi           connect4                       
+4122     cgroup_inet4_getpeername multi           getpeername4                   
+4121     cgroup_udp4_sendmsg multi           sendmsg4                       
+4123     cgroup_udp4_recvmsg multi           recvmsg4                       
+4119     cgroup_sock_ops multi           tcp_correlation                
+
+--- correlation regression (same scenario on both objects)
+PREDICT: identical CHILD_CORRELATION shape on both: 1 entry, state=3 (REJECTED) for the accepted child
+  [baseline] CHILD_CORRELATION while the connection is alive: 1 entr(ies), states=[3] (3 = REJECTED: no TCP option on a plain connect)
+  [listen] CHILD_CORRELATION while the connection is alive: 1 entr(ies), states=[3] (3 = REJECTED: no TCP option on a plain connect)
+  listen rig events during the regression scenario: 2
+  ev> OTHER_POST_BIND  AF_INET  local=127.0.0.1:47900 pid=664321 proto=6 type=1
+  ev> TCP_LISTEN_CB    AF_INET  local=127.0.0.1:47900 pid=664321 proto=6 type=1
+
+--- multi-attach semantics (sockops at one cgroup)
+M1 Single then Single
+PREDICT: raw BPF_PROG_ATTACH would replace (cgroup.c:630-634); but aya attaches via bpf_link_create which forces BPF_F_ALLOW_MULTI (cgroup.c:1505) => both coexist
+  first attach result: Ok(())
+  second attach result: Ok(())
+ID       AttachType      AttachFlags     Name           
+4127     cgroup_sock_ops multi           tcp_correlation                
+4128     cgroup_sock_ops multi           listen_only                    
+
+  wl> wl tcp4_wild: listening 0.0.0.0:36721
+  ACTUAL: tcp_correlation-arm events delivered=1 (counter seen+1 drops+0); listen_only invocations+1
+M2 Multi then Multi
+PREDICT: EINVAL as for M3
+  first attach result: Err("`bpf_link_create` failed")
+M3 Single then Multi
+PREDICT: link_create rejects a caller-supplied BPF_F_ALLOW_MULTI (not in BPF_F_LINK_ATTACH_MASK, cgroup.c:1484) => EINVAL on first attach
+  first attach result: Ok(())
+  second attach result: Err("`bpf_link_create` failed")
+ID       AttachType      AttachFlags     Name           
+4130     cgroup_sock_ops multi           tcp_correlation                
+
+  wl> wl tcp4_wild: listening 0.0.0.0:48957
+  ACTUAL: tcp_correlation-arm events delivered=1 (counter seen+1 drops+0); listen_only invocations+0
+
+================ V35 flood + latency ================
+config: ctl = cgroup with no BPF; base = copied guest programs, no listen arm; big = +listen arm, 4 MiB ring; small = +listen arm, 4096 B ring, not drained during the run
+
+### UDP bind x 20000 distinct sockets held open
+  [ctl  ] rep0 wl flood_udp: sockets=20000 distinct_ports=20000  bind mean/p99/max ns=(1078, 2173, 60611)  ring: seen+0 drops+0 delivered=0
+  [base ] rep0 wl flood_udp: sockets=20000 distinct_ports=20000  bind mean/p99/max ns=(1048, 2063, 39419)  ring: seen+0 drops+0 delivered=0
+  [big  ] rep0 wl flood_udp: sockets=20000 distinct_ports=20000  bind mean/p99/max ns=(1185, 2173, 18959)  ring: seen+20000 drops+0 delivered=20000
+          accounting: seen=20000 == delivered+drops=20000  expected_seen=20000 -> OK
+  [small] rep0 wl flood_udp: sockets=20000 distinct_ports=20000  bind mean/p99/max ns=(1222, 2324, 203267)  ring: seen+20000 drops+19927 delivered=73
+          accounting: seen=20000 == delivered+drops=20000  expected_seen=20000 -> OK
+  [ctl  ] rep1 wl flood_udp: sockets=20000 distinct_ports=20000  bind mean/p99/max ns=(1049, 2013, 10296)  ring: seen+0 drops+0 delivered=0
+  [base ] rep1 wl flood_udp: sockets=20000 distinct_ports=20000  bind mean/p99/max ns=(1062, 2103, 185119)  ring: seen+0 drops+0 delivered=0
+  [big  ] rep1 wl flood_udp: sockets=20000 distinct_ports=20000  bind mean/p99/max ns=(1211, 2294, 196616)  ring: seen+20000 drops+0 delivered=20000
+          accounting: seen=20000 == delivered+drops=20000  expected_seen=20000 -> OK
+  [small] rep1 wl flood_udp: sockets=20000 distinct_ports=20000  bind mean/p99/max ns=(1187, 2373, 48232)  ring: seen+20000 drops+19927 delivered=73
+          accounting: seen=20000 == delivered+drops=20000  expected_seen=20000 -> OK
+  [ctl  ] rep2 wl flood_udp: sockets=20000 distinct_ports=20000  bind mean/p99/max ns=(1076, 2213, 11297)  ring: seen+0 drops+0 delivered=0
+  [base ] rep2 wl flood_udp: sockets=20000 distinct_ports=20000  bind mean/p99/max ns=(1050, 2033, 10515)  ring: seen+0 drops+0 delivered=0
+  [big  ] rep2 wl flood_udp: sockets=20000 distinct_ports=20000  bind mean/p99/max ns=(1186, 2213, 11447)  ring: seen+20000 drops+0 delivered=20000
+          accounting: seen=20000 == delivered+drops=20000  expected_seen=20000 -> OK
+  [small] rep2 wl flood_udp: sockets=20000 distinct_ports=20000  bind mean/p99/max ns=(1165, 2133, 11197)  ring: seen+20000 drops+19927 delivered=73
+          accounting: seen=20000 == delivered+drops=20000  expected_seen=20000 -> OK
+  mean-of-3 summary: config  bind(mean_ns p99_ns max_ns)  [listen(mean_ns p99_ns max_ns)]
+    ctl    bind      1067     2133      27401
+    base   bind      1053     2066      78351
+    big    bind      1194     2226      75674
+    small  bind      1191     2276      87565
+
+### TCP bind+listen x 20000 distinct sockets held open
+  [ctl  ] rep0 wl flood_tcp: sockets=20000 distinct_ports=20000  bind mean/p99/max ns=(477396, 1637656, 2961138)  listen=(951, 1642, 29464)  ring: seen+0 drops+0 delivered=0
+  [base ] rep0 wl flood_tcp: sockets=20000 distinct_ports=20000  bind mean/p99/max ns=(474567, 1636865, 2266713)  listen=(996, 1743, 10817)  ring: seen+0 drops+0 delivered=0
+  [big  ] rep0 wl flood_tcp: sockets=20000 distinct_ports=20000  bind mean/p99/max ns=(470586, 1629003, 1848864)  listen=(1072, 1853, 10166)  ring: seen+40000 drops+0 delivered=40000
+          accounting: seen=40000 == delivered+drops=40000  expected_seen=40000 -> OK
+  [small] rep0 wl flood_tcp: sockets=20000 distinct_ports=20000  bind mean/p99/max ns=(476433, 1635693, 2993166)  listen=(1053, 1823, 8102)  ring: seen+40000 drops+39927 delivered=73
+          accounting: seen=40000 == delivered+drops=40000  expected_seen=40000 -> OK
+  [ctl  ] rep1 wl flood_tcp: sockets=20000 distinct_ports=20000  bind mean/p99/max ns=(473973, 1628952, 1752909)  listen=(949, 1652, 30806)  ring: seen+0 drops+0 delivered=0
+  [base ] rep1 wl flood_tcp: sockets=20000 distinct_ports=20000  bind mean/p99/max ns=(472797, 1629393, 4044449)  listen=(994, 1723, 8503)  ring: seen+0 drops+0 delivered=0
+  [big  ] rep1 wl flood_tcp: sockets=20000 distinct_ports=20000  bind mean/p99/max ns=(471898, 1627882, 1758597)  listen=(1081, 1913, 10766)  ring: seen+40000 drops+0 delivered=40000
+          accounting: seen=40000 == delivered+drops=40000  expected_seen=40000 -> OK
+  [small] rep1 wl flood_tcp: sockets=20000 distinct_ports=20000  bind mean/p99/max ns=(473004, 1626128, 2647356)  listen=(1073, 1823, 10415)  ring: seen+40000 drops+39927 delivered=73
+          accounting: seen=40000 == delivered+drops=40000  expected_seen=40000 -> OK
+  [ctl  ] rep2 wl flood_tcp: sockets=20000 distinct_ports=20000  bind mean/p99/max ns=(474950, 1636875, 2930913)  listen=(948, 1682, 10506)  ring: seen+0 drops+0 delivered=0
+  [base ] rep2 wl flood_tcp: sockets=20000 distinct_ports=20000  bind mean/p99/max ns=(472482, 1626629, 3730677)  listen=(987, 1763, 13220)  ring: seen+0 drops+0 delivered=0
+  [big  ] rep2 wl flood_tcp: sockets=20000 distinct_ports=20000  bind mean/p99/max ns=(472577, 1632958, 3966112)  listen=(1083, 1873, 53150)  ring: seen+40000 drops+0 delivered=40000
+          accounting: seen=40000 == delivered+drops=40000  expected_seen=40000 -> OK
+  [small] rep2 wl flood_tcp: sockets=20000 distinct_ports=20000  bind mean/p99/max ns=(477717, 1641702, 3143343)  listen=(1067, 1812, 8803)  ring: seen+40000 drops+39927 delivered=73
+          accounting: seen=40000 == delivered+drops=40000  expected_seen=40000 -> OK
+  mean-of-3 summary: config  bind(mean_ns p99_ns max_ns)  [listen(mean_ns p99_ns max_ns)]
+    ctl    bind    475439  1634494    2548320   | listen      949     1658      23592
+    base   bind    473282  1630962    3347279   | listen      992     1743      10846
+    big    bind    471687  1629947    2524524   | listen     1078     1879      24694
+    small  bind    475718  1634507    2927955   | listen     1064     1819       9106
+
+DONE

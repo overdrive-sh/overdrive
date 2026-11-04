@@ -1,0 +1,13 @@
+# lg-hazard-stamp-at-emission: counterexample, 3 state(s) (from the TLC trace)
+
+State 1
+  conf_step = [init |-> [tag |-> "UNIT"]]
+  lv = [ rw |-> FALSE, started |-> FALSE, sup |-> FALSE, ret |-> FALSE, role |-> "absent", committed |-> FALSE, swr |-> "none", hook |-> FALSE, ended |-> FALSE, streak |-> 0, since |-> 0, rows |-> 0, stopBeforeStable |-> FALSE ]
+
+State 2 [OnRunning]
+  lv = [ rw |-> TRUE, started |-> TRUE, sup |-> TRUE, ret |-> TRUE, role |-> "absent", committed |-> FALSE, swr |-> "none", hook |-> FALSE, ended |-> FALSE, streak |-> 0, since |-> 0, rows |-> 0, stopBeforeStable |-> FALSE ]
+
+State 3 [StableCommit]
+  lv = [ rw |-> TRUE, started |-> TRUE, sup |-> TRUE, ret |-> TRUE, role |-> "absent", committed |-> FALSE, swr |-> "failed", hook |-> FALSE, ended |-> FALSE, streak |-> 0, since |-> 0, rows |-> 0, stopBeforeStable |-> FALSE ]
+
+-> stutters forever in State 3
