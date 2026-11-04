@@ -1,0 +1,17 @@
+[package]
+name = "gs-bpf"
+version = "0.0.0"
+edition = "2021"
+publish = false
+[workspace]
+[dependencies]
+aya-ebpf = "0.1.1"
+[[bin]]
+name = "gs-bpf"
+path = "src/main.rs"
+[profile.release]
+opt-level = 3
+debug = 0
+panic = "abort"
+lto = true
+codegen-units = 1

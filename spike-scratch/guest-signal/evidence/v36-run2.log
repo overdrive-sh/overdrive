@@ -1,0 +1,55 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
+     Running `target/debug/xtask metal run -- bash -c 'python3 spike-scratch/guest-signal/run.py build >/dev/null 2>&1; python3 spike-scratch/guest-signal/run.py v36 2>&1'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+
+
+
+
+
+
+
+## marcus-sa/nw-bugfix-crash-restart-tasks
+ M docs/product/architecture/adr-0058-default-tcp-startup-probe-inference.md
+ M docs/product/architecture/adr-0096-startup-failure-withdraws-backend-eligibility.md
+ M docs/product/architecture/brief.md
+ D vendors/linux
+
+SUBSTRATE {"uname_r": "7.0.0-38-generic", "machine": "x86_64", "systemd_detect_virt": "none", "kernel_file": "/srv/vm/overdrive-testing/kernel", "ch": "/usr/local/bin/cloud-hypervisor", "ch_sha256": "6d54fbd2611e692fda00e476fc0723e9502bfd8acd53c8bc46edd96e84f3e842", "ch_version": "cloud-hypervisor v53.0.0\nMigration Protocol Versions: 0"}
+lat phase wall=7.3s ch_serial_tail:
+lat", "1000", "88000", "968"]
+GS_READ_END n=0 err=Bad file descriptor (os error 9)
+GS_EXEC_RX mono_ns=5436204642 argv=["lat", "1000", "89000", "729"]
+GS_READ_END n=0 err=Bad file descriptor (os error 9)
+GS_EXEC_RX mono_ns=5490639042 argv=["lat", "1000", "90000", "490"]
+GS_READ_END n=0 err=Bad file descriptor (os error 9)
+GS_EXEC_RX mono_ns=5545322005 argv=["lat", "1000", "91000", "251"]
+GS_READ_END n=0 err=Bad file descriptor (os error 9)
+GS_EXEC_RX mono_ns=5600443395 argv=["lat", "1000", "92000", "12"]
+GS_READ_END n=0 err=Bad file descriptor (os error 9)
+GS_EXEC_RX mono_ns=5656462833 argv=["lat", "1000", "93000", "773"]
+GS_READ_END n=0 err=Bad file descriptor (os error 9)
+GS_EXEC_RX mono_ns=5711136282 argv=["lat", "1000", "94000", "534"]
+GS_READ_END n=0 err=Bad file descriptor (os error 9)
+GS_EXEC_RX mono_ns=5766896351 argv=["lat", "1000", "95000", "295"]
+GS_READ_END n=0 err=Bad file descriptor (os error 9)
+GS_EXEC_RX mono_ns=5823763730 argv=["lat", "1000", "96000", "56"]
+GS_READ_END n=0 err=Bad file descriptor (os error 9)
+GS_EXEC_RX mono_ns=5879360204 argv=["lat", "1000", "97000", "817"]
+GS_READ_END n=0 err=Bad file descriptor (os error 9)
+GS_EXEC_RX mono_ns=5934354083 argv=["lat", "1000", "98000", "578"]
+GS_READ_END n=0 err=Bad file descriptor (os error 9)
+GS_EXEC_RX mono_ns=5991932860 argv=["lat", "1000", "99000", "339"]
+GS_READ_END n=0 err=Bad file descriptor (os error 9)
+GS_EXEC_RX mono_ns=6047172177 argv=["quit"]
+GS_DONE sessions=100
+[    6.352693] reboot: Power down
+
+V36_LAT_SUMMARY {"sessions": 100, "lines_total": 100600, "listen_ok_in_order": 100000, "listen_out_of_order": 0, "malformed": 0, "malformed_samples": [], "exits_total": 100, "sessions_with_exactly_one_exit": 100, "listen_after_exit_total": 51049, "sessions_with_listen_after_exit": 100, "exit_position_in_stream_min_max": [1, 987], "today_codec_unknown_kind": 100000, "rtt_n": 100000, "rtt_us": {"min": 35.3, "p50": 45.6, "p90": 50.9, "p99": 138.8, "p999": 283.3, "max": 2175.3}}
+V36_LAT_PER_SESSION_P99_US [138.3, 137.0, 134.6, 134.8, 106.5, 138.2, 104.7, 105.2, 102.4, 138.9, 107.1, 108.2, 101.6, 139.2, 136.6, 138.7, 139.6, 138.8, 139.7, 139.3, 104.6, 138.6, 138.2, 349.5, 102.6, 145.1, 137.4, 113.3, 139.0, 106.9, 139.2, 138.2, 102.9, 109.0, 139.7, 138.0, 139.3, 138.7, 138.3, 139.7, 102.9, 104.8, 139.1, 137.9, 111.8, 136.8, 137.6, 141.0, 137.3, 141.4, 104.1, 138.8, 115.9, 107.6, 140.4, 140.0, 142.0, 100.3, 141.5, 137.5, 141.8, 142.6, 141.8, 141.1, 142.0, 105.3, 142.8, 142.0, 250.1, 138.7, 107.6, 103.2, 138.5, 136.9, 105.4, 102.2, 136.7, 137.1, 103.5, 139.2, 141.7, 117.0, 102.7, 138.2, 138.6, 116.0, 138.7, 136.6, 136.7, 138.0, 137.3, 103.5, 138.3, 137.7, 146.1, 102.4, 137.6, 137.2, 115.4, 103.5]
+sat-free phase wall=3.0s
+V36_SAT_FREE {"cid": 16777218, "exit_out_of_order": 6, "exit_positions": 99994, "exits": 99994, "lines": 200001, "listen_after_exit": 0, "listen_ok": 19971, "listen_out_of_order": 80025, "malformed": ["\"LISTEN udp 1EXIT 2493\": unrecognised beacon message kind \"LISTEN\" in line \"LISTEN udp 1EXIT 2493\"", "\"9972\": unrecognised beacon message kind \"9972\" in line \"9972\"", "\"LISTEN udp 3EXIT 24197\": unrecognised beacon message kind \"LISTEN\" in line \"LISTEN udp 3EXIT 24197\""], "ready": 1, "rtt_n": 0, "rtt_ns": {"max": 0, "min": 0, "p50": 0, "p90": 0, "p99": 0, "p999": 0}, "scenario": "sat", "seq": 0, "stats": ["STATS {\"sat_done\":100000,\"partial_writes\":0}"], "today_codec_other_err": 0, "today_codec_unknown_kind": 99996, "malformed_n": 10}
+sat-lock phase wall=2.9s
+V36_SAT_LOCK {"cid": 16777219, "exit_out_of_order": 0, "exit_positions": 100000, "exits": 100000, "lines": 200001, "listen_after_exit": 0, "listen_ok": 100000, "listen_out_of_order": 0, "malformed": [], "ready": 1, "rtt_n": 0, "rtt_ns": {"max": 0, "min": 0, "p50": 0, "p90": 0, "p99": 0, "p999": 0}, "scenario": "sat", "seq": 0, "stats": ["STATS {\"sat_done\":100000,\"partial_writes\":0}"], "today_codec_other_err": 0, "today_codec_unknown_kind": 100000, "malformed_n": 0}
+EVDIR /home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/guest-signal/out/evidence-metal/v36-20261103T185325Z

@@ -1,0 +1,14 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/guest-signal/run.py build`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+
+
+
+
+rsync: [generator] opendir "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/guest-signal/bpf/target" failed: Permission denied (13)
+cannot delete non-empty directory: spike-scratch/guest-signal/bpf/target
+IO error encountered -- skipping file deletion
+
+rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1356) [sender=3.4.4]

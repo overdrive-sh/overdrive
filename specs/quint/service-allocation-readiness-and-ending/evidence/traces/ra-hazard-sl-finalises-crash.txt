@@ -1,0 +1,25 @@
+# ra-hazard-sl-finalises-crash: counterexample, 5 state(s) (from the TLC trace)
+
+State 1
+  g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
+  cur = 0
+  used = 0
+  conf_step = [init |-> [tag |-> "UNIT"]]
+  done = FALSE
+  decl = FALSE
+  deployed = FALSE
+  at = ( 0 :> [ row |-> "none", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "none", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] )
+
+State 2 [Deploy]
+  decl = TRUE
+  deployed = TRUE
+  at = ( 0 :> [ row |-> "pending", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "none", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] )
+
+State 3 [StartOk]
+  at = ( 0 :> [ row |-> "running", sup |-> TRUE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> TRUE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "none", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] )
+
+State 4 [Crash]
+  at = ( 0 :> [ row |-> "failed_crash", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> TRUE ] @@ 1 :> [ row |-> "none", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] )
+
+State 5 [SLFinalizeCrash]
+  at = ( 0 :> [ row |-> "failed_crash", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "early_exit", author |-> "service_lifecycle", crashed |-> TRUE ] @@ 1 :> [ row |-> "none", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] )

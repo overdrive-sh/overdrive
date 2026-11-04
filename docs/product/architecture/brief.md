@@ -11393,10 +11393,99 @@ withdrawn. See
 historical decision and
 [the corrective feature delta](../../feature/vm-recreation-allocation-id-reuse/feature-delta.md)
 for current proposed contracts.
+
+---
+
+## Terminal allocation hook ownership (GH #318, GH #334)
+
+The exit observer fires `Driver::on_alloc_terminal` for natural exits so a
+crashed allocation's probe supervision ends at the crash. ADR-0255 to ADR-0262 and
+ADR-0264 are accepted (2026-11-02); ADR-0263, ADR-0265, ADR-0266 and ADR-0267
+are accepted (2026-11-03). ADR-0273 is accepted (2026-11-03; shape choices S1 to S6 as
+proposed). ADR-0267 amends the operative ADR-0096. Not implemented:
+
+- [ADR-0255](adr-0255-the-component-that-observes-an-allocations-end-fires-the-terminal-hook.md):
+  who fires the hook (accepted).
+- [ADR-0256](adr-0256-the-shim-registers-probe-supervision-before-it-releases-the-exit-event-gate.md):
+  the shim registers probe supervision before it releases the exit-event gate
+  (accepted).
+- [ADR-0257](adr-0257-service-lifecycle-announces-a-startup-failure-only-for-a-live-allocation.md):
+  `ServiceLifecycle` announces a startup failure only for a non-terminal
+  allocation (accepted).
+- [ADR-0258](adr-0258-the-restart-authority-names-a-pre-startup-crash-loop-at-give-up.md):
+  `WorkloadLifecycle` is the only author of a crashed allocation's ending and
+  names a pre-startup crash loop `EarlyExit` at give-up; `ServiceLifecycle` has no
+  early-exit branch (accepted 2026-11-02, with the K1 restatement for
+  `EarlyExit`).
+- [ADR-0259](adr-0259-a-startup-probe-failure-stops-the-allocation-and-the-restart-authority-decides.md):
+  a startup-probe failure on a live Service allocation stops it with a new
+  stopped-by disposition; `WorkloadLifecycle` alone restarts it and names the
+  startup-probe failure at give-up (accepted 2026-11-02, with the restated K1 for
+  a Service that boots but never passes its startup probe).
+- [ADR-0260](adr-0260-a-failed-startup-stop-is-retried-once-per-new-startup-probe-row.md):
+  a startup stop that does not land is retried once per new startup probe row, as
+  the liveness stop is (accepted).
+- [ADR-0261](adr-0261-liveness-probing-begins-when-the-service-is-stable.md):
+  liveness probe tasks start at `Stable`, owned by the probe runner (accepted).
+- [ADR-0262](adr-0262-the-service-deploy-stream-is-bounded-by-a-progress-deadline-derived-from-the-startup-deadline.md):
+  the Service deploy stream is bounded by a progress deadline derived from the
+  startup deadline (accepted 2026-11-02).
+- [ADR-0264](adr-0264-the-progress-deadline-timeout-carries-the-latest-attempt-as-labelled-detail.md):
+  the progress-deadline timeout carries the latest attempt as labelled detail
+  (accepted 2026-11-02; split out of ADR-0262).
+- [ADR-0263](adr-0263-a-service-deploy-stream-first-reports-the-verdict-the-workload-already-has.md):
+  after subscribing, the Service deploy stream reports the verdict the workload's
+  current attempt already carries, so an unchanged redeploy of a settled Service
+  ends at once instead of timing out (accepted 2026-11-03).
+- [ADR-0265](adr-0265-servicelifecycle-announces-stable-from-the-committed-row.md):
+  `ServiceLifecycle` announces `Stable` from the committed row, so a lost `Stable`
+  is re-announced (accepted 2026-11-03).
+- [ADR-0266](adr-0266-the-shim-releases-a-stops-probe-supervision-after-its-terminal-row-is-durable.md):
+  the shim releases a stop's probe supervision after its terminal row is durable
+  (accepted 2026-11-03).
+- [ADR-0267](adr-0267-a-startup-probed-allocation-is-a-backend-only-after-its-startup-has-passed.md):
+  a startup-probed allocation is a backend only after its own startup has passed
+  (its committed `Stable`), first allocation or restart successor; amends
+  [ADR-0096](adr-0096-startup-failure-withdraws-backend-eligibility.md): its D1 step 1
+  (the per-allocation veto) and D2 (veto-before-stop ordering) are superseded as
+  redundant (accepted 2026-11-03).
+- [ADR-0273](adr-0273-a-broker-submit-wakes-the-convergence-loop-at-once.md):
+  a broker submit wakes the convergence loop at once; the cadence tick stays as the
+  backstop (Accepted 2026-11-03; shape choices S1 to S6 accepted as proposed).
+
+**User-approved 2026-11-03 ("add it. and proceed with recommendations"); spikes V34 to V38
+held, V39 partial. The spike-corrected D13 contract shape is ACCEPTED (2026-11-03: sockops
+listen arm merged into the existing program; `post_bind4` and `post_bind6` `CgroupSock`
+programs; loopback-only exclusion; one ordered beacon writer; drain `LISTEN` before `EXIT`;
+host reader ends only on `EXIT` or EOF). D13 to D16 remain user-approved, pending the V41
+boot-cost measurement (cold start is the platform goal; a material delta returns D13 to
+DESIGN) and the independent re-review. Dual-stack (an `AF_INET6` wildcard report satisfies an
+IPv4-declared listener, and the `V6ONLY` exposure) is recorded against GH #308; a level map for
+a full ring (P-10) is rejected.** A
+Service with no declared startup probe is `Stable` when the guest reports every declared
+listener open (no minimum-healthy window; the opt-out is kept), instead of when a 2 s TCP
+poll of `listeners[0]` passes. On acceptance it supersedes the operative
+[ADR-0058](adr-0058-default-tcp-startup-probe-inference.md):
+
+- [ADR-0272](adr-0272-the-guest-observes-workload-listeners-with-kernel-hooks-not-a-poll.md):
+  the guest observes listeners with kernel hooks (sockops listen arm, post-bind).
+- [ADR-0268](adr-0268-the-guest-reports-each-workload-listener-it-opens-over-the-beacon-channel.md):
+  the guest reports each listener over the beacon channel.
+- [ADR-0269](adr-0269-a-service-with-no-declared-startup-probe-waits-on-a-guest-listener-startup-probe.md):
+  the reports feed the startup probe row, so the startup gates (D5 to D12) are unchanged code.
+- [ADR-0270](adr-0270-a-probe-less-service-is-stable-when-the-guest-reports-every-declared-listener-open.md):
+  the default gate is every declared listener; the opt-out stays.
+- [ADR-0271](adr-0271-the-probe-descriptor-no-longer-records-whether-it-was-inferred.md):
+  `inferred` is removed from the descriptor and its carriers (option R, user-approved in
+  direction).
+
+Contract: [feature delta](../../feature/service-allocation-readiness-and-ending/feature-delta.md).
+
 ## Changelog
 
 | Date | Change |
 |---|---|
+| 2026-11-03 | **service-allocation-readiness-and-ending: user rulings of 2026-11-03.** D13 to D16 (guest-reported listener readiness; ADR-0268 to ADR-0272; `inferred` removed, option R) are user-approved (spikes V34 to V38 held, V39 partial); the corrected D13 contract shape is accepted and they stay pending the V41 boot-cost measurement and the independent re-review, not yet Accepted; dual-stack is recorded against GH #308, and P-10 is rejected. D17 (ADR-0273): a broker submit wakes the convergence loop at once, the cadence tick stays as the backstop (Accepted 2026-11-03; shape choices S1 to S6 accepted as proposed). ADR-0096's per-allocation backend veto and veto-before-stop ordering are removed as redundant under ADR-0267. The `stable_announced` view marker is removed (ADR-0265). — Morgan. |
 | 2026-11-03 | **public-ingress-gateway: user rulings R-20…R-44 recorded (ADR-0243–0254; feature delta).** The bundled ADRs are split at the ruling boundaries so one ADR records one decision: ADR-0248 (connector ledger order, from 0243), ADR-0249 (cipher set) and ADR-0250 (no KeyUpdate origination) from 0244, ADR-0251 (ambiguous-framing rejection), ADR-0252 (interim `1xx` and `Expect`) and ADR-0253 (close-delimited and HTTP/1.0-with-length) from 0245, ADR-0254 (lingering close) from 0247. Still Proposed pending independent review. — Morgan. |
 | 2026-11-02 | **public-ingress-gateway: user rulings R-1…R-19 recorded (ADR-0224, 0225, 0239, 0240, 0241–0247; feature delta).** ADR-0247 (full-duplex exchange and lingering close) is split from ADR-0239. The selection arm is a separate `cgroup/connect4` program and ignores `BACKEND_MAP.healthy` (readiness window is 502); the BackendId allocator is unchanged; gateway identity disable is a synchronous clear and `Action::DropGatewaySvid` is removed; the connector reserves its cleanup-ledger slot before `open_upstream`; each gateway test composition binds a distinct `127/8` address; both legs offer only AES-128-GCM/AES-256-GCM, strict framing rejection, full-duplex exchange, interim `100`/`Expect` forwarded, close-delimited responses supported, no gateway-originated KeyUpdate, lingering close with bounded discard, one request per upstream connection; no per-exchange pipe-release change; the ≥64 KiB pipe invariant stays until GH #339; the `relay_ktls` model is dropped. Still Proposed pending independent review. — Morgan. |
 | 2026-11-01 | **public-ingress-gateway: reconstructed on main 549d78fa6 (GH #54; ADR-0220–0243, Proposed).** Branch ADR-0114…0143 are renumbered into ADR-0220…0241, with merged and retired records folded into their surviving decisions (the branch demand-gated TEACH and frontend-demand decisions are retired by D1/D2, never implemented); ADR-0242 and ADR-0243 are new. The gateway reaches VM backends through ordinary Service-map programming and the existing leg-C/vsock path. Pending independent review and user confirmation of the new public surface. — Morgan. |

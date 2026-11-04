@@ -1,0 +1,10 @@
+[package]
+name = "gsguest"
+version = "0.0.0"
+edition = "2021"
+[dependencies]
+libc = "0.2"
+aya = "0.13"
+[[bin]]
+name = "gsguest"
+path = "src/main.rs"

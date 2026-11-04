@@ -1,0 +1,21 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.25s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/guest-signal/run.py v34 4 2 1`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+
+
+
+
+
+
+
+
+## marcus-sa/nw-bugfix-crash-restart-tasks
+ M docs/product/architecture/adr-0058-default-tcp-startup-probe-inference.md
+ M docs/product/architecture/adr-0096-startup-failure-withdraws-backend-eligibility.md
+ M docs/product/architecture/brief.md
+ D vendors/linux
+
+SUBSTRATE {"uname_r": "7.0.0-38-generic", "machine": "x86_64", "systemd_detect_virt": "none", "kernel_file": "/srv/vm/overdrive-testing/kernel", "ch": "/usr/local/bin/cloud-hypervisor", "ch_sha256": "6d54fbd2611e692fda00e476fc0723e9502bfd8acd53c8bc46edd96e84f3e842", "ch_version": "cloud-hypervisor v53.0.0\nMigration Protocol Versions: 0"}
+V34_SUMMARY {"drain_before_exit": 1, "boots": 4, "parallel": 2, "wall_s": 3.2, "records": 0, "no_record_n": 4, "no_record_samples": [{"i": 0, "cid": 6000, "error": "no record", "wall": 1.1520884037017822, "serial_tail": "GS_BOOT uname_r=7.0.0-38-generic\nGS_HOOKS_ATTACHED ms=78.79\nGS_DONE sessions=0\n[    0.704368] reboot: Power down\n"}, {"i": 1, "cid": 6001, "error": "no record", "wall": 1.1517455577850342, "serial_tail": "GS_BOOT uname_r=7.0.0-38-generic\nGS_HOOKS_ATTACHED ms=75.17\nGS_DONE sessions=0\n[    0.710894] reboot: Power down\n"}, {"i": 2, "cid": 6002, "error": "no record", "wall": 0.9520199298858643, "serial_tail": "GS_BOOT uname_r=7.0.0-38-generic\nGS_HOOKS_ATTACHED ms=61.50\nGS_DONE sessions=0\n[    0.654641] reboot: Power down\n"}], "tcp_reported": 0, "udp_reported": 0, "missed_tcp_cids": [], "missed_udp_cids": [], "any_listen_before_exec_write": 0, "listens_total": 0, "listens_per_boot_distribution": {}, "listen_after_exit_total": 0, "boots_with_listen_after_exit": 0, "both_reported_before_exit": 0, "exit_status_counts": {}, "malformed_total": 0, "today_codec_unknown_kind_total": 0, "natural_poweroff": 0, "boot_wall_s": {"p50": 1.0, "p99": 1.15, "max": 1.15}, "exec_write_to_first_listen_us": null}
+EVDIR /home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/guest-signal/evidence-metal/v34-drain1-20261103T182830Z

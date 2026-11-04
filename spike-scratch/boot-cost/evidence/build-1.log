@@ -1,0 +1,324 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.15s
+     Running `target/debug/xtask metal run -- bash spike-scratch/boot-cost/run.sh build`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=0dd3262f701ec41f2a0b7f24
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=0dd3262f701ec41f2a0b7f24
+OVERDRIVE_METAL_LEASE_ACQUIRED token=0dd3262f701ec41f2a0b7f24 pid=750639
+
+########## [bootstrap] acquire metal tree lock (/run/lock/overdrive-metal-tree-overdrive-branches-marcus-sa-nw-bugfix-crash-restart-tasks.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=0dd3262f701ec41f2a0b7f24-tree pid=750737
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/ouagadougou -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks
+
+sent 2,035,220 bytes  received 16,710 bytes  586,265.71 bytes/sec
+total size is 1,828,980,962  speedup is 891.35
+
+########## [bootstrap] materialising standalone .git (common dir 7.5G)
+
+sent 674,440 bytes  received 54,457 bytes  291,558.80 bytes/sec
+total size is 910,209,634  speedup is 1,248.75
+## marcus-sa/nw-bugfix-crash-restart-tasks
+ M docs/product/architecture/adr-0058-default-tcp-startup-probe-inference.md
+ M docs/product/architecture/adr-0096-startup-failure-withdraws-backend-eligibility.md
+ M docs/product/architecture/brief.md
+ D vendors/linux
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.27
+   Compiling quote v1.0.47
+   Compiling serde_core v1.0.229
+   Compiling zmij v1.0.23
+   Compiling serde_json v1.0.154
+   Compiling serde v1.0.229
+   Compiling camino v1.2.6
+   Compiling thiserror v2.0.21
+   Compiling itoa v1.0.18
+   Compiling memchr v2.8.3
+   Compiling anyhow v1.0.104
+   Compiling compiler_builtins v0.1.160 (/home/ubuntu/.rustup/toolchains/nightly-2026-08-05-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/compiler-builtins/compiler-builtins)
+   Compiling version_check v0.9.5
+   Compiling rustversion v1.0.23
+   Compiling core v0.0.0 (/home/ubuntu/.rustup/toolchains/nightly-2026-08-05-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core)
+   Compiling proc-macro2-diagnostics v0.10.1
+   Compiling aya-ebpf v0.1.1
+   Compiling syn v3.0.9
+   Compiling syn v2.0.119
+   Compiling cargo-platform v0.3.3
+   Compiling semver v1.0.28
+   Compiling thiserror-impl v2.0.21
+   Compiling serde_derive v1.0.229
+   Compiling aya-ebpf-macros v0.1.2
+   Compiling cargo_metadata v0.23.1
+   Compiling aya-build v0.1.3
+   Compiling aya-ebpf-cty v0.2.3
+   Compiling aya-ebpf-bindings v0.1.2
+   Compiling boot-cost-bpf v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/boot-cost/bpf)
+    Finished `release` profile [optimized + debuginfo] target(s) in 9.75s
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling serde_core v1.0.229
+   Compiling zmij v1.0.23
+   Compiling serde v1.0.229
+   Compiling serde_json v1.0.154
+   Compiling camino v1.2.6
+   Compiling thiserror v2.0.21
+   Compiling itoa v1.0.18
+   Compiling memchr v2.8.3
+   Compiling anyhow v1.0.104
+   Compiling compiler_builtins v0.1.160 (/home/ubuntu/.rustup/toolchains/nightly-2026-08-05-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/compiler-builtins/compiler-builtins)
+   Compiling rustversion v1.0.23
+   Compiling version_check v0.9.5
+   Compiling core v0.0.0 (/home/ubuntu/.rustup/toolchains/nightly-2026-08-05-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core)
+   Compiling proc-macro2-diagnostics v0.10.1
+   Compiling aya-ebpf v0.1.1
+   Compiling syn v3.0.9
+   Compiling syn v2.0.119
+   Compiling semver v1.0.28
+   Compiling cargo-platform v0.3.3
+   Compiling thiserror-impl v2.0.21
+   Compiling serde_derive v1.0.229
+   Compiling aya-ebpf-macros v0.1.2
+   Compiling cargo_metadata v0.23.1
+   Compiling aya-build v0.1.3
+   Compiling aya-ebpf-cty v0.2.3
+   Compiling aya-ebpf-bindings v0.1.2
+   Compiling boot-cost-bpf v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/boot-cost/bpf)
+warning: constant `C_LISTEN_ONLY` is never used
+  --> src/listen.rs:15:7
+   |
+15 | const C_LISTEN_ONLY: u32 = 2;
+   |       ^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `boot-cost-bpf` (bin "boot-cost-bpf") generated 1 warning
+    Finished `release` profile [optimized + debuginfo] target(s) in 9.65s
+   Compiling proc-macro2 v1.0.106
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.45
+   Compiling serde_core v1.0.228
+   Compiling cfg-if v1.0.4
+   Compiling libc v0.2.190
+   Compiling version_check v0.9.5
+   Compiling serde v1.0.228
+   Compiling equivalent v1.0.2
+   Compiling memchr v2.8.0
+   Compiling hashbrown v0.17.0
+   Compiling typenum v1.20.0
+   Compiling zerocopy v0.8.48
+   Compiling pin-project-lite v0.2.17
+   Compiling zmij v1.0.21
+   Compiling shlex v1.3.0
+   Compiling parking_lot_core v0.9.12
+   Compiling futures-sink v0.3.32
+   Compiling futures-core v0.3.32
+   Compiling find-msvc-tools v0.1.9
+   Compiling regex-syntax v0.8.10
+   Compiling futures-channel v0.3.32
+   Compiling serde_json v1.0.149
+   Compiling simdutf8 v0.1.5
+   Compiling crc32fast v1.5.0
+   Compiling itoa v1.0.18
+   Compiling generic-array v0.14.7
+   Compiling cc v1.2.60
+   Compiling autocfg v1.5.0
+   Compiling scopeguard v1.2.0
+   Compiling futures-io v0.3.32
+   Compiling bytes v1.11.1
+   Compiling getrandom v0.4.2
+   Compiling once_cell v1.21.4
+   Compiling futures-task v0.3.32
+   Compiling slab v0.4.12
+   Compiling aho-corasick v1.1.4
+   Compiling smallvec v1.15.1
+   Compiling lock_api v0.4.14
+   Compiling core-error v0.0.0
+   Compiling allocator-api2 v0.2.21
+   Compiling memoffset v0.9.1
+   Compiling winnow v0.7.15
+   Compiling powerfmt v0.2.0
+   Compiling ciborium-io v0.2.2
+   Compiling toml_write v0.1.2
+   Compiling unsafe-libyaml-norway v0.2.15
+   Compiling syn v2.0.117
+   Compiling ryu v1.0.23
+   Compiling foldhash v0.1.5
+   Compiling cfg_aliases v0.2.1
+   Compiling num-conv v0.1.0
+   Compiling thiserror v2.0.18
+   Compiling thiserror v1.0.69
+   Compiling object v0.36.7
+   Compiling time-core v0.1.7
+   Compiling hashbrown v0.15.5
+   Compiling nix v0.30.1
+   Compiling time-macros v0.2.25
+   Compiling tracing-core v0.1.36
+   Compiling hashbrown v0.16.1
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling arrayvec v0.7.6
+   Compiling digest v0.10.7
+   Compiling arrayref v0.3.9
+   Compiling constant_time_eq v0.4.2
+   Compiling cpufeatures v0.3.0
+   Compiling bitflags v2.11.1
+   Compiling cpufeatures v0.2.17
+   Compiling blake3 v1.8.5
+   Compiling sha2 v0.10.9
+   Compiling hex v0.4.3
+   Compiling log v0.4.29
+   Compiling assert_matches v1.5.0
+   Compiling overdrive-init v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/boot-cost/init)
+   Compiling regex-automata v0.4.14
+   Compiling errno v0.3.14
+   Compiling socket2 v0.6.3
+   Compiling mio v1.2.0
+   Compiling signal-hook-registry v1.4.8
+   Compiling parking_lot v0.12.5
+   Compiling indexmap v2.14.0
+   Compiling deranged v0.5.8
+   Compiling uuid v1.23.1
+   Compiling regex v1.12.3
+   Compiling time v0.3.45
+   Compiling serde_derive v1.0.228
+   Compiling ptr_meta_derive v0.3.1
+   Compiling zerocopy-derive v0.8.48
+   Compiling futures-macro v0.3.32
+   Compiling bytecheck_derive v0.8.2
+   Compiling munge_macro v0.4.7
+   Compiling tokio-macros v2.7.0
+   Compiling rkyv_derive v0.8.15
+   Compiling thiserror-impl v2.0.18
+   Compiling tracing-attributes v0.1.31
+   Compiling thiserror-impl v1.0.69
+   Compiling utoipa-gen v5.4.0
+   Compiling async-trait v0.1.89
+   Compiling ptr_meta v0.3.1
+   Compiling rancor v0.1.1
+   Compiling munge v0.4.7
+   Compiling tokio v1.52.1
+   Compiling bytecheck v0.8.2
+   Compiling futures-util v0.3.32
+   Compiling rend v0.5.3
+   Compiling tracing v0.1.44
+   Compiling serde_spanned v0.6.9
+   Compiling toml_datetime v0.6.11
+   Compiling serde_norway v0.9.42
+   Compiling ipnet v2.12.0
+   Compiling toml_edit v0.22.27
+   Compiling aya-obj v0.2.1
+   Compiling futures-executor v0.3.32
+   Compiling futures v0.3.32
+   Compiling utoipa v5.4.0
+   Compiling rkyv v0.8.15
+   Compiling aya v0.13.1
+   Compiling half v2.7.1
+   Compiling toml v0.8.23
+   Compiling ciborium-ll v0.2.2
+   Compiling ciborium v0.2.2
+   Compiling overdrive-core v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-core)
+   Compiling overdrive-fwd v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-fwd)
+warning: unexpected `cfg` condition value: `integration-tests`
+  --> init/src/guest_flow/mod.rs:30:17
+   |
+30 | #[cfg(all(test, feature = "integration-tests"))]
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: expected values for `feature` are: `listen`
+   = help: consider adding `integration-tests` as a feature in `Cargo.toml`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+   = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: unexpected `cfg` condition value: `integration-tests`
+  --> init/src/guest_flow/mod.rs:32:17
+   |
+32 | #[cfg(all(test, feature = "integration-tests"))]
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: expected values for `feature` are: `listen`
+   = help: consider adding `integration-tests` as a feature in `Cargo.toml`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition value: `integration-tests`
+  --> init/src/guest_flow/mod.rs:34:17
+   |
+34 | #[cfg(all(test, feature = "integration-tests"))]
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: expected values for `feature` are: `listen`
+   = help: consider adding `integration-tests` as a feature in `Cargo.toml`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition value: `integration-tests`
+  --> init/src/guest_flow/mod.rs:36:17
+   |
+36 | #[cfg(all(test, feature = "integration-tests"))]
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: expected values for `feature` are: `listen`
+   = help: consider adding `integration-tests` as a feature in `Cargo.toml`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition value: `integration-tests`
+  --> init/src/guest_flow/mod.rs:39:17
+   |
+39 | #[cfg(all(test, feature = "integration-tests", feature = "kvm-tests"))]
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: expected values for `feature` are: `listen`
+   = help: consider adding `integration-tests` as a feature in `Cargo.toml`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition value: `kvm-tests`
+  --> init/src/guest_flow/mod.rs:39:48
+   |
+39 | #[cfg(all(test, feature = "integration-tests", feature = "kvm-tests"))]
+   |                                                ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: expected values for `feature` are: `listen`
+   = help: consider adding `kvm-tests` as a feature in `Cargo.toml`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition value: `integration-tests`
+  --> init/src/transport/mod.rs:29:17
+   |
+29 | #[cfg(all(test, feature = "integration-tests", feature = "kvm-tests"))]
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: expected values for `feature` are: `listen`
+   = help: consider adding `integration-tests` as a feature in `Cargo.toml`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition value: `kvm-tests`
+  --> init/src/transport/mod.rs:29:48
+   |
+29 | #[cfg(all(test, feature = "integration-tests", feature = "kvm-tests"))]
+   |                                                ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: expected values for `feature` are: `listen`
+   = help: consider adding `kvm-tests` as a feature in `Cargo.toml`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+error: usage of an `unsafe` block
+  --> init/src/bc.rs:10:5
+   |
+10 |     unsafe { nix::libc::clock_gettime(nix::libc::CLOCK_MONOTONIC, &raw mut ts) };
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: the lint level is defined here
+  --> init/src/main.rs:59:9
+   |
+59 | #![deny(unsafe_code)]
+   |         ^^^^^^^^^^^
+
+warning: `overdrive-init` (bin "overdrive-init") generated 8 warnings
+error: could not compile `overdrive-init` (bin "overdrive-init") due to 1 previous error; 8 warnings emitted
