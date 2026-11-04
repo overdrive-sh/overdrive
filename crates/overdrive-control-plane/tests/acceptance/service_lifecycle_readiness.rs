@@ -86,6 +86,7 @@ fn fact_with_readiness(
     success_threshold: u32,
 ) -> ServiceAllocFact {
     ServiceAllocFact {
+        stable_committed: false,
         alloc_id: alloc(&format!("svc-{index}")),
         state: AllocState::Running,
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
@@ -116,6 +117,7 @@ fn fact_with_readiness(
 /// default — `healthy = true` post-Stable).
 fn fact_without_readiness(index: usize) -> ServiceAllocFact {
     ServiceAllocFact {
+        stable_committed: false,
         alloc_id: alloc(&format!("svc-{index}")),
         state: AllocState::Running,
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),

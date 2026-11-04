@@ -50,6 +50,7 @@ fn liveness_fact(
     failure_threshold: u32,
 ) -> ServiceAllocFact {
     ServiceAllocFact {
+        stable_committed: false,
         alloc_id: aid(alloc_id),
         state: AllocState::Running,
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),

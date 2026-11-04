@@ -1257,6 +1257,33 @@ components:
         Carries `utoipa::ToSchema` so the generated `OpenAPI` document
         (ADR-0009, `cargo openapi-gen`) renders the spec shape
         consistently across the server and CLI lanes.
+    LastAttemptWire:
+      type: object
+      description: |-
+        The latest attempt-ending observation a Service deploy stream saw, carried as
+        labelled detail on the synthesised progress-deadline timeout (D10 item 4,
+        ADR-0264). It is never the verdict: the restart authority's give-up stays the
+        only authoritative `Failed { cause }`.
+      required:
+      - alloc_id
+      - reason
+      properties:
+        alloc_id:
+          type: string
+          description: The attempt's allocation id.
+        detail:
+          type:
+          - string
+          - 'null'
+          description: Verbatim driver detail of the ending, if any.
+        reason:
+          $ref: '#/components/schemas/TransitionReason'
+          description: The structured cause-class of the attempt's ending.
+        terminal:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/TerminalCondition'
+            description: The terminal condition the ending carried, if any.
     LastTerminatedBody:
       type: object
       description: |-
@@ -1533,6 +1560,21 @@ components:
             type: string
             enum:
             - http
+      - type: object
+        description: |-
+          The platform's default startup gate for a Service: every declared
+          listener has been reported open by the guest (D14 item 1, ADR-0269).
+          Fieldless; valid only as the sole startup descriptor of a Service;
+          cannot be written in TOML.
+
+          SCAFFOLD: true — pinned shape (`feature-delta.md` § D14 item 1).
+        required:
+        - type
+        properties:
+          type:
+            type: string
+            enum:
+            - guest_listeners
       description: |-
         Concrete mechanic for a probe attempt.
 
@@ -2487,6 +2529,10 @@ components:
                 type:
                 - string
                 - 'null'
+              last_attempt:
+                oneOf:
+                - type: 'null'
+                - $ref: '#/components/schemas/LastAttemptWire'
               reason:
                 $ref: '#/components/schemas/ServiceFailureReason'
               stderr_tail:
@@ -2598,6 +2644,7 @@ components:
       - system_gc
       - platform_reclaimed
       - liveness_probe
+      - startup_probe
     SubmitRouteResponse:
       type: object
       description: |-

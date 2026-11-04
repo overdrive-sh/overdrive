@@ -144,7 +144,7 @@ pub(super) enum RunOutcome {
 }
 
 impl RunOutcome {
-    fn script(&self, role: ProbeRole, probes: ProbeSet) -> SimDialScript {
+    pub(super) fn script(&self, role: ProbeRole, probes: ProbeSet) -> SimDialScript {
         let http = matches!(probes, ProbeSet::HttpLiveness { .. }) && role == ProbeRole::Liveness;
         match self {
             Self::Pass | Self::WriteFail if http => SimDialScript::Accept {
@@ -183,7 +183,7 @@ pub(super) struct ProbeWorld {
     _tmp: TempDir,
 }
 
-fn tcp(role: ProbeRole, port: u16) -> ProbeDescriptor {
+pub(super) fn tcp(role: ProbeRole, port: u16) -> ProbeDescriptor {
     ProbeDescriptor {
         idx: ProbeIdx::new(0),
         role,
@@ -197,7 +197,7 @@ fn tcp(role: ProbeRole, port: u16) -> ProbeDescriptor {
     }
 }
 
-fn service_intent(probes: ProbeSet) -> WorkloadIntent {
+pub(super) fn service_intent(probes: ProbeSet) -> WorkloadIntent {
     let startup = match probes {
         ProbeSet::ReadinessAndLiveness => vec![],
         ProbeSet::AllTcp | ProbeSet::HttpLiveness { .. } => {
@@ -243,7 +243,7 @@ pub(super) fn vm_spec(
     alloc: &AllocationId,
     intent: &WorkloadIntent,
 ) -> AllocationSpec {
-    AllocationSpec {
+    AllocationSpec { declared_listeners: Vec::new(),
         alloc: alloc.clone(),
         identity: SpiffeId::for_allocation(workload, alloc),
         driver: DriverPayload::Vm(VmPayload {
@@ -374,7 +374,7 @@ impl ProbeWorld {
             Arc::new(SimHttpProber::new()),
             Arc::clone(&clock) as Arc<dyn Clock>,
             Arc::clone(&obs) as Arc<dyn ObservationStore>,
-            Arc::clone(&dial) as Arc<dyn overdrive_core::guest_transport::dial::GuestStreamDial>,
+            Arc::clone(&dial) as Arc<dyn overdrive_core::guest_transport::dial::GuestStreamDial>, Arc::new(overdrive_worker::GuestListenerBoard::new()),
         );
 
         let alloc = AllocationId::new(&format!("{WORKLOAD}-0")).expect("alloc id");
@@ -641,7 +641,7 @@ impl ProbeWorld {
     }
 }
 
-async fn persist_intent(store: &LocalIntentStore, workload: &WorkloadId, intent: &WorkloadIntent) {
+pub(super) async fn persist_intent(store: &LocalIntentStore, workload: &WorkloadId, intent: &WorkloadIntent) {
     let archived = intent.archive_for_store().expect("rkyv archive");
     store
         .put(IntentKey::for_workload(workload).as_bytes(), archived.as_ref())

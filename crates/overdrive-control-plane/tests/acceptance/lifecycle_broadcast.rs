@@ -224,7 +224,7 @@ fn build_spec(alloc_id: &AllocationId, workload_id: &WorkloadId) -> AllocationSp
         alloc_id.as_str(),
     ))
     .expect("spiffe id");
-    AllocationSpec {
+    AllocationSpec { declared_listeners: Vec::new(),
         alloc: alloc_id.clone(),
         identity,
         driver: overdrive_core::traits::driver::DriverPayload::Vm(

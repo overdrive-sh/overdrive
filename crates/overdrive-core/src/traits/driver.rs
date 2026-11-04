@@ -342,6 +342,27 @@ pub struct AllocationSpec {
     /// `probe_descriptors`. Same pure-in-memory derive discipline as the
     /// fields above (no serde / rkyv).
     pub service_ports: Vec<NonZeroU16>,
+
+    /// The full declared listener set of the Service, in declaration order
+    /// (PR-4, D14 item 2): in-memory only, projected in `hydrate_desired`.
+    /// PR-4 replaces `service_ports` by this field; DELIVER removes
+    /// `service_ports` and routes the TPROXY consumers through
+    /// [`AllocationSpec::tcp_service_ports`].
+    ///
+    /// SCAFFOLD: true — pinned shape (`feature-delta.md` § D14 item 2).
+    pub declared_listeners: Vec<crate::aggregate::Listener>,
+}
+
+impl AllocationSpec {
+    /// The TCP view of [`Self::declared_listeners`]: the TCP-protocol
+    /// listeners' ports in declaration order (PR-4).
+    ///
+    /// SCAFFOLD: true — pinned shape (`feature-delta.md` § D14 item 2).
+    #[must_use]
+    #[allow(clippy::unused_self)] // SCAFFOLD: true — the body lands with PR-4
+    pub fn tcp_service_ports(&self) -> Vec<NonZeroU16> {
+        panic!("RED scaffold: PR-4 AllocationSpec::tcp_service_ports")
+    }
 }
 
 /// Tagged per-driver invocation payload (ADR-0083 §D3). The routing key

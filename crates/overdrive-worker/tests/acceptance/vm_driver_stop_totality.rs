@@ -73,7 +73,7 @@ fn probe_runner() -> std::sync::Arc<ProbeRunner> {
             NodeId::new("vm-stop-totality").expect("valid node ID"),
             0,
         )) as std::sync::Arc<dyn ObservationStore>,
-        std::sync::Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        std::sync::Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), std::sync::Arc::new(overdrive_worker::GuestListenerBoard::new()),
     ))
 }
 
@@ -139,7 +139,7 @@ fn build_layout(tmp: &TempDir) -> VmHostLayout {
 }
 
 fn build_spec(alloc: &AllocationId, tmp: &TempDir) -> AllocationSpec {
-    AllocationSpec {
+    AllocationSpec { declared_listeners: Vec::new(),
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/vm-driver-test/alloc/x")
             .expect("valid spiffe id"),
@@ -188,7 +188,7 @@ async fn build_driver(
         probe_runner(),
         wiring.gate(),
         layout,
-        beacon.intake().await,
+        beacon.intake().await, std::sync::Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
     (driver, clock, beacon)
 }
@@ -225,7 +225,7 @@ async fn build_driver_with_cgroup_fs(
         probe_runner(),
         wiring.gate(),
         layout,
-        beacon.intake().await,
+        beacon.intake().await, std::sync::Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
     (driver, clock, cgroup_fs, beacon)
 }
@@ -1765,7 +1765,7 @@ async fn exit_event_is_gated_until_running_confirmed_release() {
         probe_runner(),
         wiring.gate(),
         layout,
-        beacon.intake().await,
+        beacon.intake().await, std::sync::Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
 
     // Drain the driver's `ExitEvent` channel — the exit observer's role.

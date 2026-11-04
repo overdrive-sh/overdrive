@@ -37,6 +37,7 @@ pub mod guest_attachment_view;
 pub mod held_svid_view;
 pub mod identity_read;
 pub mod intent_store;
+pub mod guest_listener_reports;
 pub mod listener_facts;
 pub mod llm;
 pub mod service_vip_view;
@@ -85,6 +86,7 @@ pub use entropy::Entropy;
 pub use guest_attachment_view::{
     GuestAttachmentLease, GuestAttachmentObservation, GuestAttachmentView,
 };
+pub use guest_listener_reports::{GuestListenerReports, ReportedListeners};
 pub use held_svid_view::HeldSvidView;
 pub use identity_read::IdentityRead;
 pub use intent_store::IntentStore;

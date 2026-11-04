@@ -622,7 +622,7 @@ mod release_for_exit_emission_tests {
     use std::str::FromStr;
 
     fn sample_spec(name: &str) -> AllocationSpec {
-        AllocationSpec {
+        AllocationSpec { declared_listeners: Vec::new(),
             alloc: AllocationId::from_str(name).expect("valid AllocationId"),
             identity: SpiffeId::from_str("spiffe://overdrive.local/test/wl")
                 .expect("valid SpiffeId"),

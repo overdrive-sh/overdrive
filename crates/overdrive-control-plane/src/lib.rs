@@ -165,6 +165,10 @@ pub use node_adapters::{
 #[cfg(test)]
 mod shared_network_test_ports;
 
+// D17 (ADR-0273): the production convergence loop's wake, over a `SimClock`.
+#[cfg(test)]
+mod convergence_loop_wake;
+
 // GH #295 QHOLD (ADR-0169, ADR-0184, ADR-0124): the source-local Quint
 // conformance driver of `specs/quint/guest-flow-owner/quiescence.qnt`
 // (QPROJ-1: the owner with the runtime shared-network supervisor) and the
@@ -173,6 +177,13 @@ mod shared_network_test_ports;
 // in the `integration-tests` lane.
 #[cfg(all(test, feature = "integration-tests"))]
 mod quint_quiescence;
+
+// service-allocation-readiness-and-ending D10 / D11: the source-local Quint
+// conformance drivers of `specs/quint/service-allocation-readiness-and-ending/
+// {progress_deadline,stream_snapshot}.qnt` (`pd_conf`, `ss_conf`) against the
+// Service submit stream handler.
+#[cfg(all(test, feature = "integration-tests"))]
+mod quint_stream_conformance;
 #[cfg(all(test, feature = "integration-tests"))]
 mod shared_network_recovery_acceptance;
 
@@ -3656,7 +3667,7 @@ async fn compose_vm_driver(
             probe_runner,
             guest_network_exec,
             layout,
-            beacon,
+            beacon, Arc::new(overdrive_worker::GuestListenerBoard::new()),
         ),
         bound,
     ))
@@ -5632,7 +5643,7 @@ mod tests {
                     overdrive_core::id::NodeId::new("vm-compose-errors").expect("valid node ID"),
                     0,
                 )),
-                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
             ))
         }
 

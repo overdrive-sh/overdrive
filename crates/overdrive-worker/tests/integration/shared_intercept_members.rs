@@ -762,7 +762,7 @@ fn member_spec(alloc: &str, address: Ipv4Addr) -> AllocationSpec {
     let cid = GuestCid::new(GUEST_CID_BASE + u32::from(u16::from_be_bytes([high, low])))
         .expect("an in-range guest CID");
     let launch = LaunchToken::from_bytes([0x5a; 16]).expect("a non-zero launch token");
-    AllocationSpec {
+    AllocationSpec { declared_listeners: Vec::new(),
         alloc: AllocationId::new(alloc).expect("a valid allocation id"),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/sa/alloc/01")
             .expect("a valid SPIFFE id"),

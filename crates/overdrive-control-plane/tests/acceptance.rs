@@ -79,11 +79,18 @@ mod acceptance {
     pub mod issue_fault_store;
     mod svid_issue_failure_occurrence;
 
+    mod workload_lifecycle_startup_probe_hydration;
+
     // netns-density-295 — control-plane-owned scratch complement contract.
     mod netns_density_guest_network;
     // netns-density-295 S-ND295-65 — no optional switch gates protection, DNS,
     // or supervisor composition (source scan).
     mod required_serve_ports_source_scan;
+    pub mod hooked_driver;
+    pub mod restart_authority_world;
+    mod crash_ending_authority;
+    mod startup_stop_authority;
+    mod startup_gated_backend_eligibility;
     // single-node-dataplane-wiring step 01-03 (ADR-0061 § 1) — shared
     // `lo`-named `DataplaneConfig` helper for SimDataplane-override
     // fixtures (the `job_stop_*` acceptance tests boot `run_server`).
@@ -389,6 +396,9 @@ mod acceptance {
     // `on_alloc_terminal` (tear everything down). A genuine terminal
     // and a `StopAllocation` still stop the whole supervisor.
     mod stable_does_not_stop_probe_supervision;
+    mod terminal_hook_ownership;
+    // D9 (ADR-0261): liveness supervision begins at `Stable`.
+    mod liveness_begins_at_stable;
     // GAP-1 corrective patch — real ServiceLifecycle hydrate impls
     // (`hydrate_desired` / `hydrate_actual` join intent + observation
     // + LWW probe projection per the Phase 01 structural gap audit).
@@ -411,6 +421,8 @@ mod acceptance {
     // gate the module behind the feature (mirrors `runtime_convergence_loop`).
     #[cfg(feature = "integration-tests")]
     mod service_lifecycle_runtime_reenqueue;
+    // D14 P1 (S-54) — startup stop gate per probe mechanic.
+    mod service_lifecycle_startup_stop_gate;
     // Finding-1 runtime witness — svid-lifecycle stays enqueued across
     // cadences while an IssueSvid is mid-backoff (uses the test-only
     // `loaded_svid_lifecycle_views_for_test` accessor; same feature gate).
@@ -450,6 +462,25 @@ mod acceptance {
     // S-SHCP-WIRE-15 cover the production dispatch path from
     // handlers.rs:498 through build_service_stream end-to-end.
     mod service_submit_dispatch_wiring;
+
+    // service-allocation-readiness-and-ending D7 / D9 / D10 — pure-function obligations
+    // of the Service deploy stream (S-26 projection, S-34 derivation).
+    mod service_stream_restartable_stop_projection;
+    mod progress_deadline_derivation;
+    mod alloc_status_restart_budget_terminals;
+    mod service_stream_last_attempt_wire;
+
+    // service-allocation-readiness-and-ending D10 / D11 — the Service deploy stream's
+    // progress deadline and recorded-verdict snapshot, over one shared composition of
+    // the production handlers, reconcilers, shim and probe runner (`Sim*` at the driven
+    // ports). Composed on the reconciler convergence tick, so the `integration-tests`
+    // feature gates them like their siblings above.
+    #[cfg(feature = "integration-tests")]
+    mod service_stream_support;
+    #[cfg(feature = "integration-tests")]
+    mod service_stream_progress_deadline;
+    #[cfg(feature = "integration-tests")]
+    mod service_stream_recorded_verdict;
 
     // udp-service-support US-01 / S-01-F (ADR-0060 D1a) — RED scaffold.
     // IPv6 VIP rejected at the action-shim as an operator-visible Failed

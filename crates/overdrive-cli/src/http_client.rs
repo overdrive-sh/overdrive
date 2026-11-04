@@ -270,6 +270,10 @@ impl ApiClient {
     pub async fn submit_workload_streaming(
         &self,
         req: SubmitWorkloadRequest,
+        // SCAFFOLD: true — pinned parameter (feature service-allocation-readiness-and-ending,
+        // D10 item 7): the server's stream deadline. Until D10 lands the total request
+        // timeout stays the fixed 120 s.
+        _server_deadline: Duration,
     ) -> Result<reqwest::Response, CliError> {
         let url = self.build_url("v1/workloads")?;
         // Override the client-wide 30s `.timeout(...)` for the streaming

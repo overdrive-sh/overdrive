@@ -82,6 +82,7 @@ fn liveness_running_fact(alloc_id: &AllocationId) -> ServiceAllocFact {
     let status = ProbeStatus::Fail { last_fail_reason: "liveness refused".to_string() };
     let probe_idx = ProbeIdx::new(0);
     ServiceAllocFact {
+        stable_committed: false,
         alloc_id: alloc_id.clone(),
         state: AllocState::Running,
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
@@ -182,6 +183,7 @@ fn terminated_by_liveness(alloc_id: &AllocationId, counter: u64) -> AllocStatusR
 
 fn workload_states(row: AllocStatusRow) -> (WorkloadLifecycleState, WorkloadLifecycleState) {
     let base = |allocs: BTreeMap<AllocationId, AllocStatusRow>| WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid(WORKLOAD),
         job: Some(make_job()),
         desired_to_stop: false,

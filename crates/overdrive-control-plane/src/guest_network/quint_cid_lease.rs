@@ -538,7 +538,7 @@ fn compose(node: &Node, boot: u32) -> Composed {
             Arc::new(SimHttpProber::new()),
             Arc::clone(&clock) as Arc<dyn Clock>,
             Arc::clone(&node.obs) as Arc<dyn ObservationStore>,
-            Arc::new(SimGuestStreamDial::new()),
+            Arc::new(SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
         ));
         let vm_driver = VmDriver::new(
             Arc::new(RecordingVmm { inner: node.vmm.clone(), host: Arc::clone(&node.host) }),
@@ -558,7 +558,7 @@ fn compose(node: &Node, boot: u32) -> Composed {
                     1024,
                 ),
             },
-            intake,
+            intake, Arc::new(overdrive_worker::GuestListenerBoard::new()),
         );
         // D-21: every composition reopens the node's stores from disk
         // through the composition root's open (`StoreAdapters::open` over

@@ -176,6 +176,7 @@ fn workload_lifecycle_natural_exit_emits_typed_terminal_unit_completed() {
         .insert(aid("alloc-payments-0"), alloc_clean_exit("alloc-payments-0", "payments", "local"));
 
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
@@ -192,6 +193,7 @@ fn workload_lifecycle_natural_exit_emits_typed_terminal_unit_completed() {
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
@@ -244,6 +246,7 @@ fn workload_lifecycle_natural_exit_emits_typed_terminal_unit_failed() {
     );
 
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
@@ -260,6 +263,7 @@ fn workload_lifecycle_natural_exit_emits_typed_terminal_unit_failed() {
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
@@ -314,6 +318,7 @@ fn signal_killed_alloc_carries_none_exit_code_in_failed_terminal() {
     allocations.insert(aid("alloc-payments-0"), row);
 
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
@@ -330,6 +335,7 @@ fn signal_killed_alloc_carries_none_exit_code_in_failed_terminal() {
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
@@ -371,6 +377,7 @@ fn unreported_pre_ready_vmm_exit_finalizes_once_without_restart_or_view_change()
     let alloc = alloc_unreported_pre_ready_exit(None);
     let allocations = BTreeMap::from([(alloc.alloc_id.clone(), alloc)]);
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
@@ -440,6 +447,7 @@ fn service_kind_failed_alloc_preserves_restart_branch() {
         .insert(aid("alloc-svc-0"), alloc_crashed_with_exit("alloc-svc-0", "svc", "local", 1));
 
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("svc"),
         job: Some(make_job("svc")),
         desired_to_stop: false,
@@ -456,6 +464,7 @@ fn service_kind_failed_alloc_preserves_restart_branch() {
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("svc"),
         job: Some(make_job("svc")),
         desired_to_stop: false,

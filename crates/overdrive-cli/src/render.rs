@@ -1358,6 +1358,8 @@ pub fn format_probe_mechanic_summary(
             let host = host.as_deref().unwrap_or("0.0.0.0");
             format!("http GET http://{host}:{port}{path}")
         }
+        // SCAFFOLD: true — compile unblock; the operator-facing text is pinned by D14 item 4.
+        ProbeMechanic::GuestListeners => "guest listeners".to_owned(),
     }
 }
 
@@ -1458,21 +1460,17 @@ pub fn probes_section(
 /// `ServiceFailureReason` discriminator. The five-section shape
 /// (header / reason / last-event / reproducer / hint) gives the
 /// operator a consistent failure render.
-/// `early_exit_timing` carries `(elapsed_secs, startup_deadline_secs)`
-/// for the Slice 08 `EarlyExit` multi-line block (S-SHCP-CLI-07). It is
-/// rendered ONLY for the `EarlyExit` reason; `None` (or any non-
-/// `EarlyExit` reason) omits the `elapsed:` line. The values are
-/// supplied by the caller from the stream-side elapsed measurement +
-/// the live `startup_deadline` policy — they are NOT carried on the
-/// `EarlyExit { exit_code }` wire variant (extending that variant would
-/// bump the rkyv `AllocStatusRowEnvelope`; per the persist-inputs rule
-/// the elapsed/deadline are recomputed render-side, not persisted).
+/// `last_attempt` is the labelled detail of the synthesised progress-deadline
+/// timeout (D10 item 7, ADR-0264); it is the latest attempt-ending observation
+/// the stream saw, never the verdict.
 #[must_use]
 pub fn format_service_failed_block(
     workload_name: &str,
     reason: &overdrive_core::transition_reason::ServiceFailureReason,
     stderr_tail: Option<&str>,
-    early_exit_timing: Option<(u64, u64)>,
+    // SCAFFOLD: true — pinned parameter (feature service-allocation-readiness-and-ending,
+    // D10 item 7 / D6): the `Timeout` wording and the `last attempt` block land with D10.
+    _last_attempt: Option<&overdrive_control_plane::streaming::LastAttemptWire>,
 ) -> String {
     use overdrive_core::transition_reason::{BackoffCause, ServiceFailureReason};
     use std::fmt::Write as _;
@@ -1536,12 +1534,6 @@ pub fn format_service_failed_block(
             None => {
                 let _ = writeln!(s, "  exit_code: none (killed by signal)");
             }
-        }
-        if let Some((elapsed_secs, startup_deadline_secs)) = early_exit_timing {
-            let _ = writeln!(
-                s,
-                "  elapsed: {elapsed_secs}s (startup_deadline={startup_deadline_secs}s)"
-            );
         }
         let _ = writeln!(
             s,

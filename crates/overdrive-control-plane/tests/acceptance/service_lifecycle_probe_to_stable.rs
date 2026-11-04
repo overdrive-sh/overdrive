@@ -90,7 +90,7 @@ fn descriptor_tcp_1s(host: &str, port: u16) -> ProbeDescriptor {
 }
 
 fn vm_spec(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> AllocationSpec {
-    AllocationSpec {
+    AllocationSpec { declared_listeners: Vec::new(),
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/probe-to-stable/alloc/test")
             .expect("valid SPIFFE ID"),
@@ -140,8 +140,10 @@ fn fact_from_row_and_intent(
         ProbeMechanic::Http { host, port, path } => {
             format!("http {}:{port}{path}", host.as_deref().unwrap_or(""))
         }
+        ProbeMechanic::GuestListeners => "guest listeners".to_owned(),
     };
     ServiceAllocFact {
+        stable_committed: false,
         alloc_id: row.alloc_id.clone(),
         state: AllocState::Running,
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_millis(
@@ -218,7 +220,7 @@ async fn given_probe_runner_writes_pass_row_when_service_lifecycle_reconciles_th
         http,
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
 
     let alloc = alloc_id("alloc-probe-to-stable");

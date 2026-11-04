@@ -38,6 +38,10 @@ mod integration {
     // S-04-A that step 01-03 (dataplane wire half) scoped out.
     mod deploy;
     mod deploy_udp_walking_skeleton;
+
+    // service-allocation-readiness-and-ending D10 item 7 (S-36) — the streaming submit
+    // lane's total request timeout is the server deadline plus 30 s.
+    mod deploy_stream_request_timeout;
     mod http_client;
     mod post_http_invalid_workload_id;
     mod walking_skeleton;

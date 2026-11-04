@@ -103,7 +103,7 @@ fn start_action() -> Action {
         alloc_id: alloc_id(),
         workload_id: WorkloadId::new("writefail").expect("valid workload id"),
         node_id: NodeId::new("node-001").expect("valid node id"),
-        spec: AllocationSpec {
+        spec: AllocationSpec { declared_listeners: Vec::new(),
             alloc: alloc_id(),
             identity: SpiffeId::new("spiffe://overdrive.local/workload/writefail/alloc/0")
                 .expect("valid spiffe id"),

@@ -587,7 +587,9 @@ async fn deploy_streaming_job(
     // `JobSubmitEvent` lane) based on the discriminator persisted at
     // `IntentKey::for_workload_kind` after admission.
     let request = SubmitWorkloadRequest { spec: SubmitSpecInput::Job(spec_input) };
-    let response = client.submit_workload_streaming(request).await?;
+    let response = client
+        .submit_workload_streaming(request, overdrive_control_plane::DEFAULT_STREAMING_CAP)
+        .await?;
 
     consume_stream_job(response, endpoint, validated_job_id, submit_echo).await
 }
@@ -662,7 +664,11 @@ async fn deploy_streaming_service(
     // `streaming::build_service_stream` (typed `ServiceSubmitEvent`
     // lane per step 01-03e3) based on the persisted discriminator.
     let request = SubmitWorkloadRequest { spec: SubmitSpecInput::Service(spec_input) };
-    let response = client.submit_workload_streaming(request).await?;
+    // SCAFFOLD: true — D10 item 7: the Service lane passes
+    // `progress_deadline(&spec.startup_probes, DEFAULT_STREAMING_CAP)`.
+    let response = client
+        .submit_workload_streaming(request, overdrive_control_plane::DEFAULT_STREAMING_CAP)
+        .await?;
 
     consume_stream(response, endpoint, validated_workload_id).await
 }
@@ -686,12 +692,6 @@ async fn consume_stream(
     let mut stream = response.bytes_stream();
     let mut buf = BytesMut::new();
     let mut accepted: Option<AcceptedFields> = None;
-    // Stream-side elapsed measurement for the Slice 08 EarlyExit
-    // `elapsed:` render line (S-SHCP-CLI-07). Best-effort from the CLI's
-    // own clock — the EarlyExit wire variant carries only `exit_code`,
-    // so the elapsed/deadline are recomputed render-side per the
-    // persist-inputs rule (never persisted on the variant).
-    let stream_started = std::time::Instant::now();
 
     while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result.map_err(|e| CliError::Transport {
@@ -755,28 +755,15 @@ async fn consume_stream(
                         streaming_error: None,
                     });
                 }
-                ServiceSubmitEvent::Failed { alloc_id: _, reason, stderr_tail } => {
+                ServiceSubmitEvent::Failed { alloc_id: _, reason, stderr_tail, last_attempt } => {
                     let acc = accepted.ok_or_else(|| CliError::BodyDecode {
                         cause: "Failed before Accepted on the streaming bus".to_string(),
                     })?;
-                    // EarlyExit renders the `elapsed:` line from the
-                    // stream-side measurement + the default startup
-                    // deadline (the variant carries only `exit_code`).
-                    let early_exit_timing = matches!(
-                        reason,
-                        overdrive_core::transition_reason::ServiceFailureReason::EarlyExit { .. }
-                    )
-                    .then(|| {
-                        let deadline_secs =
-                            overdrive_reconcilers::service_lifecycle::DEFAULT_STARTUP_DEADLINE
-                                .as_secs();
-                        (stream_started.elapsed().as_secs(), deadline_secs)
-                    });
                     let summary = crate::render::format_service_failed_block(
                         &acc.workload_id,
                         &reason,
                         stderr_tail.as_deref(),
-                        early_exit_timing,
+                        last_attempt.as_ref(),
                     );
                     let next_command = format!("overdrive workload describe {}", acc.workload_id);
                     return Ok(DeployStreamingOutput {

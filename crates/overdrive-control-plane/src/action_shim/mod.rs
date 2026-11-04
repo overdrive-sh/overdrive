@@ -4997,7 +4997,7 @@ mod admission_refusal_acceptance {
     }
 
     fn spec(name: &str) -> AllocationSpec {
-        AllocationSpec {
+        AllocationSpec { declared_listeners: Vec::new(),
             alloc: alloc_id(name),
             identity: SpiffeId::new(&format!(
                 "spiffe://overdrive.local/workload/nd295/alloc/{name}"

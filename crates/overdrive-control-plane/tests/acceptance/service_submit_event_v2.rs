@@ -132,6 +132,7 @@ proptest! {
             alloc_id: alloc_id_opt.clone(),
             reason: reason.clone(),
             stderr_tail: stderr_tail.clone(),
+            last_attempt: None,
         };
         let json = serde_json::to_string(&event)
             .expect("ServiceSubmitEvent::Failed must serialize");
@@ -198,6 +199,7 @@ fn project_terminal_to_event(
             alloc_id: Some(alloc_id.to_string()),
             reason: reason.clone(),
             stderr_tail,
+            last_attempt: None,
         }),
         _ => None,
     }

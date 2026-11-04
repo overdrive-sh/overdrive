@@ -892,6 +892,7 @@ fn start_allocation_transition_enqueues_svid_lifecycle() {
     let workload_id = wl_workload("payments");
     let nodes = wl_one_node_map("local");
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: Some(wl_make_job("payments")),
         desired_to_stop: false,
@@ -908,6 +909,7 @@ fn start_allocation_transition_enqueues_svid_lifecycle() {
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: Some(wl_make_job("payments")),
         desired_to_stop: false,
@@ -949,6 +951,7 @@ fn stop_allocation_transition_enqueues_svid_lifecycle() {
         wl_alloc_running("alloc-payments-0", "payments", "local", AllocState::Running),
     );
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: Some(wl_make_job("payments")),
         desired_to_stop: true,
@@ -965,6 +968,7 @@ fn stop_allocation_transition_enqueues_svid_lifecycle() {
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: Some(wl_make_job("payments")),
         desired_to_stop: false,
@@ -1006,6 +1010,7 @@ fn finalize_failed_transition_enqueues_svid_lifecycle() {
         wl_alloc_running("alloc-payments-0", "payments", "local", AllocState::Failed),
     );
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: Some(wl_make_job("payments")),
         desired_to_stop: false,
@@ -1022,6 +1027,7 @@ fn finalize_failed_transition_enqueues_svid_lifecycle() {
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: Some(wl_make_job("payments")),
         desired_to_stop: false,
@@ -1066,6 +1072,7 @@ fn job_kind_transition_still_enqueues_svid_lifecycle() {
     let workload_id = wl_workload("batch");
     let nodes = wl_one_node_map("local");
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: Some(wl_make_job("batch")),
         desired_to_stop: false,
@@ -1082,6 +1089,7 @@ fn job_kind_transition_still_enqueues_svid_lifecycle() {
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: Some(wl_make_job("batch")),
         desired_to_stop: false,
@@ -1123,6 +1131,7 @@ fn converged_tick_emits_no_svid_enqueue() {
         wl_alloc_running("alloc-payments-0", "payments", "local", AllocState::Running),
     );
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: Some(wl_make_job("payments")),
         desired_to_stop: false,
@@ -1139,6 +1148,7 @@ fn converged_tick_emits_no_svid_enqueue() {
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id,
         job: Some(wl_make_job("payments")),
         desired_to_stop: false,

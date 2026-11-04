@@ -35,9 +35,10 @@
 //! that evidence, not invented.
 
 use std::fmt;
-use std::num::ParseIntError;
+use std::num::{NonZeroU16, ParseIntError};
 use std::str::FromStr;
 
+use crate::dataplane::backend_key::Proto;
 use crate::guest_transport::{GuestCid, LaunchToken, LaunchTokenError};
 use crate::vm::config::VsockPort;
 
@@ -218,6 +219,17 @@ pub enum BeaconMessage {
         /// The guest's encoded real exit status.
         status: i32,
     },
+    /// Sent guest → host, once per distinct `(protocol, port)` a socket of
+    /// the workload opens (D13 item 2). Wire: `LISTEN <tcp|udp> <port>`.
+    ///
+    /// SCAFFOLD: true — pinned shape (`feature-delta.md` § D13 item 2); the
+    /// text form and the strict three-field parse are DELIVER's.
+    Listen {
+        /// The L4 protocol of the opened listener.
+        protocol: Proto,
+        /// The (non-zero) port.
+        port: NonZeroU16,
+    },
     /// Sent at most once, host → guest, requesting a graceful shutdown
     /// (ADR-0082 §D4).
     Shutdown,
@@ -234,6 +246,8 @@ impl fmt::Display for BeaconMessage {
                 write!(f, "EXEC {}", serde_json::to_string(argv).map_err(|_| fmt::Error)?)
             }
             Self::Exit { status } => write!(f, "EXIT {status}"),
+            // SCAFFOLD: true
+            Self::Listen { .. } => panic!("RED scaffold: D13 LISTEN beacon line text form"),
             Self::Shutdown => f.write_str("SHUTDOWN"),
         }
     }
@@ -266,6 +280,8 @@ impl FromStr for BeaconMessage {
             "READY" => parse_ready(line, &rest),
             "EXIT" => parse_exit(line, &rest),
             "SHUTDOWN" => parse_shutdown(line, &rest),
+            // SCAFFOLD: true
+            "LISTEN" => panic!("RED scaffold: D13 LISTEN beacon line strict parse"),
             other => Err(BeaconParseError::UnknownKind {
                 kind: other.to_string(),
                 raw: line.to_string(),

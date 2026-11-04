@@ -158,6 +158,7 @@ proptest! {
                     last_exit_code: ev_exit_code,
                 },
                 stderr_tail: _,
+                last_attempt: _,
             } => {
                 prop_assert_eq!(a.as_deref(), Some(alloc_id.as_str()));
                 prop_assert_eq!(*ev_attempts, attempts);
@@ -286,6 +287,7 @@ proptest! {
                 alloc_id,
                 reason: ServiceFailureReason::Timeout { after_seconds: a },
                 stderr_tail,
+                last_attempt: _,
             } => {
                 prop_assert!(alloc_id.is_none());
                 prop_assert_eq!(*a, after_seconds);
@@ -309,6 +311,7 @@ fn closed_synth_stream_interrupted() {
             alloc_id,
             reason: ServiceFailureReason::StreamInterrupted,
             stderr_tail,
+            last_attempt: _,
         } => {
             assert!(alloc_id.is_none());
             assert!(stderr_tail.is_none());
@@ -373,6 +376,7 @@ fn tick_at(now_unix_ms: u64) -> TickContext {
 
 fn opt_out_fact(alloc_id: AllocationId, started_at_unix_ms: u64) -> ServiceAllocFact {
     ServiceAllocFact {
+        stable_committed: false,
         alloc_id,
         state: AllocState::Running,
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_millis(
@@ -403,6 +407,7 @@ fn opt_out_fact(alloc_id: AllocationId, started_at_unix_ms: u64) -> ServiceAlloc
 
 fn fact_with_probes(alloc_id: AllocationId, started_at_unix_ms: u64) -> ServiceAllocFact {
     ServiceAllocFact {
+        stable_committed: false,
         alloc_id,
         state: AllocState::Running,
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_millis(

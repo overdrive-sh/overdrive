@@ -15,3 +15,9 @@
 //! agent-acks), they will live alongside.
 
 pub mod exit_observer;
+
+#[cfg(all(test, feature = "integration-tests"))]
+mod quint_hook_ownership;
+
+#[cfg(all(test, feature = "integration-tests"))]
+mod quint_guest_report_host;

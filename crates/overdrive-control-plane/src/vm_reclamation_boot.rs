@@ -372,6 +372,7 @@ mod tests {
         // Each lifecycle evaluation reserves a distinct successor; re-driving
         // the unchanged predecessor advances above the prior reservation.
         let lifecycle_desired = WorkloadLifecycleState {
+            current_startup_probe: None,
             workload_id,
             job: Some(job),
             desired_to_stop: false,
@@ -391,6 +392,7 @@ mod tests {
             },
         };
         let lifecycle_actual = WorkloadLifecycleState {
+            current_startup_probe: None,
             job: None,
             nodes: BTreeMap::new(),
             allocations: BTreeMap::from([(alloc.clone(), reclaimed_row)]),
@@ -923,7 +925,7 @@ pub(crate) mod sim_vm_host {
                 NodeId::new("cid-lease").expect("valid node ID"),
                 0,
             )) as Arc<dyn ObservationStore>,
-            Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+            Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
         ));
         let driver = VmDriver::new(
             Arc::new(RecordingVmm { inner: vmm.clone(), host: Arc::clone(host) }),
@@ -943,7 +945,7 @@ pub(crate) mod sim_vm_host {
                     1024,
                 ),
             },
-            intake,
+            intake, Arc::new(overdrive_worker::GuestListenerBoard::new()),
         );
         let pool =
             Arc::new(GuestAddressPool::new(prefix, GATEWAY, Arc::new(SimEntropy::new(seed))));
@@ -981,7 +983,7 @@ pub(crate) mod sim_vm_host {
     /// The VM spec of one lease: the plan's transport (leased CID and launch
     /// token) over the artifacts staged under the composition's `root`.
     pub(crate) fn vm_spec(root: &Path, plan: &GuestNetworkPlan) -> AllocationSpec {
-        AllocationSpec {
+        AllocationSpec { declared_listeners: Vec::new(),
             alloc: plan.alloc().clone(),
             identity: SpiffeId::new("spiffe://overdrive.local/workload/cid-lease/alloc/x")
                 .expect("valid spiffe id"),

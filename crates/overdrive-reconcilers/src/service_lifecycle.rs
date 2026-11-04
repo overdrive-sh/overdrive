@@ -210,6 +210,10 @@ pub struct ServiceAllocFact {
     /// projections (PROBE-RUN-COUNT).
     #[doc(hidden)]
     pub probe_rows: BTreeMap<(ProbeRole, ProbeIdx), ProbeResultRow>,
+    // SCAFFOLD: true — pinned shape (B1, ADR-0265): hydrated from `row.terminal`
+    // being `Stable`; in-memory State field only.
+    /// The allocation's status row carries a committed `Stable` claim.
+    pub stable_committed: bool,
 }
 
 /// `ServiceLifecycleState` — typed projection of intent +
@@ -336,6 +340,14 @@ pub struct ServiceLifecycleView {
     /// terminate is emitted. Absent ⇒ never terminated on this key.
     #[serde(default)]
     pub liveness_last_acted_run: BTreeMap<(AllocationId, ProbeIdx), ProbeRunSeq>,
+
+    // SCAFFOLD: true — pinned shape (D8 item 1): additive CBOR field, no envelope.
+    /// The `run_seq` of the startup probe row on which this reconciler last
+    /// emitted a startup stop, keyed `(alloc, ProbeIdx::new(0))`. An input, not a
+    /// derived value; written only when a stop is emitted; absent means never
+    /// acted.
+    #[serde(default)]
+    pub startup_last_acted_run: BTreeMap<(AllocationId, ProbeIdx), ProbeRunSeq>,
 }
 
 impl ServiceLifecycleView {
@@ -751,6 +763,12 @@ fn format_mechanic_summary(mechanic: &ProbeMechanic) -> String {
         ProbeMechanic::Http { path, port, host } => host
             .as_ref()
             .map_or_else(|| format!("http {path}"), |h| format!("http {h}:{port}{path}")),
+        // SCAFFOLD: true — placeholder. The delta (D14 item 4) pins the text
+        // `guest listeners tcp:8080 udp:5353` (declared order), which needs the declared
+        // listener set; the fieldless `GuestListeners` mechanic carries none, so this
+        // signature cannot produce it. Where the listeners reach this formatter is not
+        // pinned by the design; DELIVER pins it with the S-54 hydration.
+        ProbeMechanic::GuestListeners => "guest listeners".to_owned(),
     }
 }
 
@@ -767,6 +785,18 @@ fn spec_facts_for_service(svc: &Service) -> (u32, Duration, String, bool, bool) 
         interval.checked_mul(probe.max_attempts).unwrap_or(DEFAULT_STARTUP_DEADLINE);
     let mechanic_summary = format_mechanic_summary(&probe.mechanic);
     (max_attempts, startup_deadline, mechanic_summary, probe.inferred, false)
+}
+
+/// The startup deadline of a Service's startup probes: `interval x max_attempts`
+/// of startup probe index 0, or [`DEFAULT_STARTUP_DEADLINE`] for an empty list or
+/// on overflow (D10 item 5: extracted from `spec_facts_for_service`).
+// SCAFFOLD: true — pinned shape (feature service-allocation-readiness-and-ending, D10 item 5)
+#[must_use]
+pub fn startup_deadline(
+    startup_probes: &[overdrive_core::aggregate::probe_descriptor::ProbeDescriptor],
+) -> Duration {
+    let _ = startup_probes;
+    panic!("RED scaffold: D10 startup_deadline")
 }
 
 /// Project the readiness facts uniform across every alloc.
@@ -893,6 +923,7 @@ async fn hydrate_service_alloc_facts(
             _ => None,
         };
         let fact = ServiceAllocFact {
+            stable_committed: false,
             alloc_id: row.alloc_id.clone(),
             state: row.state,
             started_at: row.started_at,
@@ -1272,6 +1303,7 @@ mod tests {
                 for veto in [false, true] {
                     for status in [None, Some(ProbeStatus::Pass), Some(ProbeStatus::Fail { last_fail_reason: "refused".into() })] {
                         let mut fact = ServiceAllocFact {
+                            stable_committed: false,
                             alloc_id: alloc.clone(), state: AllocState::Running,
                             started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
                             exit_code: None, latest_startup_probe: None,
@@ -1328,6 +1360,7 @@ mod tests {
     fn startup_window_hook_returns_the_earliest_future_window_end() {
         let alloc_id = AllocationId::new("startup-window-hook").expect("valid alloc id");
         let fact = ServiceAllocFact {
+            stable_committed: false,
             alloc_id: alloc_id.clone(),
             state: AllocState::Running,
             started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(100))),

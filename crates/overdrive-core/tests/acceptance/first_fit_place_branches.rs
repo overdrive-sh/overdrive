@@ -131,6 +131,7 @@ fn placement_actions(
 ) -> Vec<Action> {
     let wid = job.id.clone();
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: wid.clone(),
         job: Some(job.clone()),
         desired_to_stop: false,
@@ -147,6 +148,7 @@ fn placement_actions(
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: wid,
         job: Some(job),
         desired_to_stop: false,

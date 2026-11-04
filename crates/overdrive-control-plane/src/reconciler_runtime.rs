@@ -408,6 +408,26 @@ impl ReconcilerRuntime {
         self.broker.lock()
     }
 
+    /// Submit an evaluation and wake the convergence loop at once (D17,
+    /// ADR-0273): take the broker lock, insert, release it, then signal.
+    // SCAFFOLD: true — the exact shape D17 pins; DELIVER replaces the body.
+    #[allow(
+        clippy::panic,
+        clippy::missing_const_for_fn,
+        clippy::needless_pass_by_value,
+        clippy::unused_self,
+        reason = "RED scaffold pinned by D17 of service-allocation-readiness-and-ending"
+    )]
+    pub fn submit_evaluation(
+        &self,
+        eval: Evaluation,
+        now: Instant,
+        eligibility: EvaluationEligibility,
+    ) {
+        let _ = (eval, now, eligibility);
+        panic!("RED scaffold: D17 ReconcilerRuntime::submit_evaluation is not implemented");
+    }
+
     /// Borrow the broker's mutex directly (rather than the
     /// `MutexGuard`). Lets callers pass the lock by reference into a
     /// dispatch path that takes a brief lock-grab-submit-release per
@@ -1908,6 +1928,20 @@ mod probe_run_count;
 // The `probe-count` quint-connect conformance driver (main `probe_streak`).
 #[cfg(all(test, feature = "integration-tests"))]
 mod quint_probe_count;
+// The `restart_authority` quint-connect conformance driver (main `ra_conf`;
+// D5 to D8, B2, B3 of service-allocation-readiness-and-ending).
+#[cfg(all(test, feature = "integration-tests"))]
+mod quint_restart_authority;
+// D9 / B1 (service-allocation-readiness-and-ending): the production
+// composition (real `ProbeRunner` behind a `VmDriver`, `ServiceLifecycle`,
+// the action shim), its composed scenarios, and the `liveness_gate`
+// quint-connect conformance driver.
+#[cfg(all(test, feature = "integration-tests"))]
+mod liveness_gate_fixture;
+#[cfg(all(test, feature = "integration-tests"))]
+mod liveness_gate_composed;
+#[cfg(all(test, feature = "integration-tests"))]
+mod quint_liveness_gate;
 
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]

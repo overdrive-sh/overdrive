@@ -93,6 +93,8 @@
 // `rust_2024_compatibility = warn` does not block commits.
 #![allow(tail_expr_drop_order)]
 
+use std::time::Duration;
+
 use axum::body::Bytes;
 use bytes::BytesMut;
 use futures::Stream;
@@ -779,6 +781,10 @@ pub enum ServiceSubmitEvent {
         reason: crate::api::ServiceFailureReasonWire,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stderr_tail: Option<String>,
+        // SCAFFOLD: true — pinned shape (feature service-allocation-readiness-and-ending,
+        // D10 item 4): populated only by the synthesised progress-deadline timeout.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        last_attempt: Option<LastAttemptWire>,
     },
     /// Terminal — service stopped (by operator or by reconciler-
     /// observed process exit / system gc). Per ADR-0059 Q1 this is
@@ -787,6 +793,39 @@ pub enum ServiceSubmitEvent {
     /// exits with the failure-specific code). Mirrors the
     /// `JobSubmitEvent::Stopped` sibling convention.
     Stopped { alloc_id: String, by: overdrive_core::transition_reason::StoppedBy },
+}
+
+/// The latest attempt-ending observation a Service deploy stream saw, carried as
+/// labelled detail on the synthesised progress-deadline timeout (D10 item 4,
+/// ADR-0264). It is never the verdict: the restart authority's give-up stays the
+/// only authoritative `Failed { cause }`.
+// SCAFFOLD: true — pinned shape (feature service-allocation-readiness-and-ending, D10 item 4)
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub struct LastAttemptWire {
+    /// The attempt's allocation id.
+    pub alloc_id: String,
+    /// The structured cause-class of the attempt's ending.
+    pub reason: overdrive_core::transition_reason::TransitionReason,
+    /// The terminal condition the ending carried, if any.
+    pub terminal: Option<overdrive_core::transition_reason::TerminalCondition>,
+    /// Verbatim driver detail of the ending, if any.
+    pub detail: Option<String>,
+}
+
+/// The margin the Service stream's progress deadline keeps above the startup
+/// deadline (D10 item 1): 30 s, the literal.
+// SCAFFOLD: true — pinned shape (feature service-allocation-readiness-and-ending, D10 item 5)
+pub const PROGRESS_DEADLINE_MARGIN: Duration = Duration::from_secs(30);
+
+/// `max(floor, startup_deadline(startup_probes) + PROGRESS_DEADLINE_MARGIN)` (D10).
+// SCAFFOLD: true — pinned shape (feature service-allocation-readiness-and-ending, D10 item 5)
+#[must_use]
+pub fn progress_deadline(
+    startup_probes: &[overdrive_core::aggregate::probe_descriptor::ProbeDescriptor],
+    floor: Duration,
+) -> Duration {
+    let _ = (startup_probes, floor);
+    panic!("RED scaffold: D10 progress_deadline")
 }
 
 // ---------------------------------------------------------------------------
@@ -841,6 +880,7 @@ pub fn service_event_from_terminal(
             alloc_id: Some(alloc_id.to_string()),
             reason: reason.clone(),
             stderr_tail,
+            last_attempt: None,
         }),
         TerminalCondition::Stopped { by } => {
             Some(ServiceSubmitEvent::Stopped { alloc_id: alloc_id.to_string(), by: *by })
@@ -853,6 +893,7 @@ pub fn service_event_from_terminal(
                 last_exit_code,
             },
             stderr_tail,
+            last_attempt: None,
         }),
         TerminalCondition::Custom { type_name, detail } => {
             let message = render_custom_detail(detail.as_deref());
@@ -860,6 +901,7 @@ pub fn service_event_from_terminal(
                 alloc_id: Some(alloc_id.to_string()),
                 reason: ServiceFailureReason::Other { source: type_name.clone(), message },
                 stderr_tail,
+                last_attempt: None,
             })
         }
         // Job-kind natural exit terminals have no Service-kind wire
@@ -908,6 +950,7 @@ pub fn service_stream_synth_cap_timeout(after_seconds: u32) -> ServiceSubmitEven
         alloc_id: None,
         reason: overdrive_core::transition_reason::ServiceFailureReason::Timeout { after_seconds },
         stderr_tail: None,
+        last_attempt: None,
     }
 }
 
@@ -920,6 +963,7 @@ pub fn service_stream_synth_closed() -> ServiceSubmitEvent {
         alloc_id: None,
         reason: overdrive_core::transition_reason::ServiceFailureReason::StreamInterrupted,
         stderr_tail: None,
+        last_attempt: None,
     }
 }
 
@@ -989,6 +1033,9 @@ pub fn build_service_stream(
     state: AppState,
     workload_id: WorkloadId,
     accepted: ServiceSubmitEvent,
+    // SCAFFOLD: true — pinned parameter (feature service-allocation-readiness-and-ending,
+    // D10 item 6). Until D10 lands the cap timer still arms from `streaming_cap`.
+    _progress_deadline: Duration,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static {
     let bus = state.lifecycle_events.clone();
     let clock = state.clock.clone();

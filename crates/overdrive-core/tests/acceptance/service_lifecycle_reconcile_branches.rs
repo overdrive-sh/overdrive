@@ -58,6 +58,7 @@ fn fact(
     startup_deadline: Duration,
 ) -> ServiceAllocFact {
     ServiceAllocFact {
+        stable_committed: false,
         alloc_id: aid(alloc_id),
         state,
         // Per GAP-1: every fact in this branch-coverage suite represents
@@ -336,6 +337,7 @@ fn empty_probes_fact(
     started_at_unix_ms: u64,
 ) -> ServiceAllocFact {
     ServiceAllocFact {
+        stable_committed: false,
         startup_probes_empty: true,
         latest_startup_probe: None,
         ..fact(alloc_id, state, started_at_unix_ms, None, None, 30, Duration::from_secs(60))
@@ -417,94 +419,6 @@ fn empty_probes_opt_out_does_not_fire_when_state_is_not_running() {
 // && at line 284 (&& → || mutant)
 // state == Failed at line 276 (== → != mutant)
 
-/// EarlyExit fires when state == Failed, well within deadline, no Pass.
-///
-/// Kills:
-///   - line 276:27 `state == Failed` (== → !=)
-///   - line 282:50 `elapsed_ms < deadline_ms` (< → ==/>/<=)
-///   - line 283 `let no_pass = !matches!(...)` (delete `!`)
-///   - line 284 `within_deadline && no_pass` (&& → ||)
-///
-/// CONTRACT_SHAPE: bounded-change.
-#[test]
-fn early_exit_fires_when_failed_within_deadline_no_pass() {
-    let f =
-        fact("alloc-svc-1", AllocState::Failed, 1_000, Some(42), None, 30, Duration::from_secs(60));
-    let actual = one_alloc_state(f);
-    let view = ServiceLifecycleView::default();
-    // elapsed = 31_000 - 1_000 = 30_000 ms, well under 60_000 ms deadline.
-    let tick = tick_at_ms(31_000);
-
-    let r = ServiceLifecycleReconciler::new();
-    let (actions, _next_view) =
-        r.reconcile(&ServiceLifecycleState::default(), &actual, &view, &tick);
-
-    assert_eq!(actions.len(), 1, "EarlyExit must emit exactly one action; got {actions:?}");
-    match &actions[0] {
-        Action::FinalizeFailed {
-            alloc_id,
-            terminal:
-                Some(TerminalCondition::ServiceFailed {
-                    reason: ServiceFailureReason::EarlyExit { exit_code },
-                }),
-        } => {
-            assert_eq!(alloc_id.as_str(), "alloc-svc-1");
-            assert_eq!(*exit_code, Some(42), "exit_code must be propagated from fact.exit_code");
-        }
-        other => panic!("expected EarlyExit, got {other:?}"),
-    }
-}
-
-/// Boundary: at elapsed_ms == deadline_ms - 1, EarlyExit STILL fires.
-/// At elapsed_ms == deadline_ms (exactly), EarlyExit does NOT fire.
-/// This pair kills the `<` → `==`, `<` → `<=`, `<` → `>` mutants at L282.
-/// CONTRACT_SHAPE: bounded-change.
-#[test]
-fn early_exit_boundary_lt_deadline() {
-    let f1 = fact(
-        "alloc-svc-1",
-        AllocState::Failed,
-        1_000,
-        Some(7),
-        None,
-        u32::MAX, // ensure StartupProbeFailed fall-through does NOT fire (attempts == 0 < u32::MAX)
-        Duration::from_secs(10),
-    );
-    // elapsed = (10_999 - 1_000) = 9_999 < 10_000 (deadline). Fires.
-    let tick_within = tick_at_ms(10_999);
-    let r = ServiceLifecycleReconciler::new();
-    let (actions, _) = r.reconcile(
-        &ServiceLifecycleState::default(),
-        &one_alloc_state(f1.clone()),
-        &ServiceLifecycleView::default(),
-        &tick_within,
-    );
-    assert_eq!(actions.len(), 1, "elapsed = deadline-1 must fire EarlyExit; got {actions:?}");
-    assert!(matches!(
-        &actions[0],
-        Action::FinalizeFailed {
-            terminal: Some(TerminalCondition::ServiceFailed {
-                reason: ServiceFailureReason::EarlyExit { .. }
-            }),
-            ..
-        }
-    ));
-
-    // elapsed = 10_000 == deadline. NOT within (strict <). Does NOT fire EarlyExit.
-    // StartupProbeFailed also does not fire (attempts == 0 < max u32::MAX).
-    let tick_at = tick_at_ms(11_000);
-    let (actions, _) = r.reconcile(
-        &ServiceLifecycleState::default(),
-        &one_alloc_state(f1),
-        &ServiceLifecycleView::default(),
-        &tick_at,
-    );
-    assert!(
-        actions.is_empty(),
-        "elapsed == deadline must NOT fire EarlyExit (strict <); got {actions:?}"
-    );
-}
-
 /// EarlyExit does NOT fire when Failed but Pass already observed.
 /// Kills line 283 `delete !` mutant (without `!`, no_pass becomes
 /// `matches!(probe, Some(Pass))` which is FALSE here, but combined with
@@ -585,18 +499,18 @@ fn early_exit_does_not_fire_out_of_deadline_even_with_no_pass() {
 // Line 305: replace >= / && (4 mutants)
 // Line 307: delete match arm Some(Fail { last_fail_reason })
 
-/// StartupProbeFailed fires when attempts >= max, elapsed >= deadline,
-/// no Pass observed. last_fail extracted from latest_startup_probe.
+/// D7 (S-21): when all three gates hold on a live allocation the action is
+/// `StopAllocation { Stopped { StartupProbe } }`, never a `FinalizeFailed`; the
+/// allocation joins `terminal_announced`.
 ///
-/// Kills:
-///   - line 304 `delete !` on no_pass
-///   - line 305 multiple `>=` → `==/>/<` and `&&` → `||`
-///   - line 307 match arm Some(Fail) delete
+/// Kills: the action swap, each `>=` of the gate, the `&&` chain, the `!` of
+/// `no_pass`.
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-fn startup_probe_failed_fires_when_all_three_gates_met() {
-    // state is Pending so neither Stable nor EarlyExit (Failed-gated) fires.
+#[ignore = "pending DELIVER: D7 a startup-probe failure stops the allocation instead of finalising it"]
+fn startup_probe_failure_stops_the_allocation_when_all_three_gates_are_met() {
+    // state is Pending so Stable does not fire.
     let mut f = fact(
         "alloc-svc-2",
         AllocState::Pending,
@@ -621,24 +535,17 @@ fn startup_probe_failed_fires_when_all_three_gates_met() {
     // elapsed = 61_000 - 1_000 = 60_000 >= 60_000 (deadline).
     let tick = tick_at_ms(61_000);
     let r = ServiceLifecycleReconciler::new();
-    let (actions, _) = r.reconcile(&ServiceLifecycleState::default(), &actual, &view, &tick);
-    assert_eq!(actions.len(), 1, "StartupProbeFailed must fire; got {actions:?}");
+    let (actions, next_view) =
+        r.reconcile(&ServiceLifecycleState::default(), &actual, &view, &tick);
+    assert_eq!(actions.len(), 1, "the startup stop must fire; got {actions:?}");
     match &actions[0] {
-        Action::FinalizeFailed {
+        Action::StopAllocation {
             alloc_id,
-            terminal:
-                Some(TerminalCondition::ServiceFailed {
-                    reason:
-                        ServiceFailureReason::StartupProbeFailed { probe_idx, last_fail, attempts },
-                }),
-        } => {
-            assert_eq!(alloc_id.as_str(), "alloc-svc-2");
-            assert_eq!(*probe_idx, 0);
-            assert_eq!(last_fail, "tcp_refused", "last_fail must come from Fail.last_fail_reason");
-            assert_eq!(*attempts, 30u32);
-        }
-        other => panic!("expected StartupProbeFailed, got {other:?}"),
+            terminal: Some(TerminalCondition::Stopped { by: StoppedBy::StartupProbe }),
+        } => assert_eq!(alloc_id.as_str(), "alloc-svc-2"),
+        other => panic!("expected StopAllocation {{ Stopped {{ StartupProbe }} }}, got {other:?}"),
     }
+    assert!(next_view.terminal_announced.contains(&aid("alloc-svc-2")));
 }
 
 /// StartupProbeFailed does NOT fire when attempts == max - 1 (kills
@@ -895,14 +802,15 @@ fn reconcile_records_observed_for_mid_window_alloc_and_predicate_is_true() {
     );
 }
 
-/// Reconcile inserts the alloc into `terminal_announced` on a
-/// StartupProbeFailed terminal, and the resulting next_view is NOT
+/// D7: reconcile inserts the alloc into `terminal_announced` when it emits the
+/// startup stop, and the resulting next_view is NOT
 /// mid-startup-window — the runtime stops re-enqueueing the dead alloc.
 /// Also pins the dedup: a second reconcile against the SAME next_view
 /// emits zero actions (no terminal re-emission busy-loop).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-fn reconcile_terminal_failed_clears_mid_window_and_dedups() {
+#[ignore = "pending DELIVER: D7 the startup stop is the terminal decision recorded in terminal_announced"]
+fn reconcile_startup_stop_clears_mid_window_and_dedups() {
     let mut f = fact(
         "alloc-svc-8",
         AllocState::Pending,
@@ -930,7 +838,17 @@ fn reconcile_terminal_failed_clears_mid_window_and_dedups() {
     let (actions, next_view) =
         r.reconcile(&ServiceLifecycleState::default(), &actual, &view, &tick);
 
-    assert_eq!(actions.len(), 1, "StartupProbeFailed must fire once; got {actions:?}");
+    assert_eq!(actions.len(), 1, "the startup stop must fire once; got {actions:?}");
+    assert!(
+        matches!(
+            &actions[0],
+            Action::StopAllocation {
+                terminal: Some(TerminalCondition::Stopped { by: StoppedBy::StartupProbe }),
+                ..
+            }
+        ),
+        "the action is the startup stop; got {actions:?}"
+    );
     assert!(
         next_view.terminal_announced.contains(&aid("alloc-svc-8")),
         "terminal verdict must be recorded in terminal_announced"
@@ -972,6 +890,7 @@ fn pre_running_failed_alloc_is_terminal_and_not_mid_startup_window() {
     // Failed with `started_at == None` — the EarlyExit branch's
     // `let Some(started) = ... else { ... }` arm fires.
     let f = ServiceAllocFact {
+        stable_committed: false,
         started_at: None,
         ..fact(
             "alloc-svc-prefail",
@@ -1065,6 +984,9 @@ fn readiness_fact(
     success_threshold: u32,
 ) -> ServiceAllocFact {
     ServiceAllocFact {
+        // D12: eligibility reads the committed Stable; a readiness-only fixture
+        // models an allocation whose Stable is already committed.
+        stable_committed: true,
         alloc_id: aid(&format!("svc-{index}")),
         state: AllocState::Running,
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
@@ -1304,6 +1226,7 @@ fn liveness_fact(
     failure_threshold: u32,
 ) -> ServiceAllocFact {
     ServiceAllocFact {
+        stable_committed: false,
         alloc_id: aid(alloc_id),
         state,
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
@@ -1680,20 +1603,22 @@ fn readiness_branch_emits_write_when_healthy_flag_changes() {
 // tick` guard must not persist via the durable `stable_announced` set).
 // -------------------------------------------------------------------
 
-/// A Running alloc that fires `StartupProbeFailed` on the startup loop
+/// D7: a Running alloc that fires the startup stop on the startup loop
 /// (recorded in `terminal_announced`) AND has a liveness streak tripping
 /// the threshold on the SAME tick must emit ONLY the startup terminal —
 /// the liveness loop skips an alloc already given a terminal this tick.
-/// Without the guard, both `FinalizeFailed { StartupProbeFailed }` AND a
+/// Without the guard, both the startup stop AND a
 /// `StopAllocation { LivenessProbe }` land for one alloc — contradictory.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-fn startup_probe_failed_suppresses_liveness_restart_same_tick() {
+#[ignore = "pending DELIVER: D7 the startup stop replaces the startup finalisation"]
+fn startup_probe_failure_suppresses_liveness_stop_same_tick() {
     let id = "svc-dual-0";
     // Running, startup probe Fail, past deadline (StartupProbeFailed
     // fires at max_attempts=1), AND liveness probe Fail with the streak
     // about to trip threshold 3.
     let f = ServiceAllocFact {
+        stable_committed: false,
         latest_liveness_probe: Some(ProbeStatus::Fail {
             last_fail_reason: "liveness refused".to_string(),
         }),
@@ -1725,33 +1650,37 @@ fn startup_probe_failed_suppresses_liveness_restart_same_tick() {
     let (actions, next) =
         recon.reconcile(&ServiceLifecycleState::default(), &actual, &view, &tick_at_ms(61_000));
 
-    let startup_failed = actions
+    let startup_stops = actions
         .iter()
         .filter(|a| {
             matches!(
                 a,
-                Action::FinalizeFailed {
-                    terminal: Some(TerminalCondition::ServiceFailed {
-                        reason: ServiceFailureReason::StartupProbeFailed { .. },
-                    }),
+                Action::StopAllocation {
+                    terminal: Some(TerminalCondition::Stopped { by: StoppedBy::StartupProbe }),
                     ..
                 }
             )
         })
         .count();
-    assert_eq!(startup_failed, 1, "exactly one StartupProbeFailed terminal; got {actions:?}");
+    assert_eq!(startup_stops, 1, "exactly one startup stop; got {actions:?}");
 
-    let stops = actions.iter().filter(|a| matches!(a, Action::StopAllocation { .. })).count();
+    let liveness_stops = actions
+        .iter()
+        .filter(|a| {
+            matches!(
+                a,
+                Action::StopAllocation {
+                    terminal: Some(TerminalCondition::Stopped { by: StoppedBy::LivenessProbe }),
+                    ..
+                }
+            )
+        })
+        .count();
     assert_eq!(
-        stops, 0,
-        "liveness must NOT StopAllocation an alloc already given a startup terminal this tick; \
-         got {actions:?}"
+        liveness_stops, 0,
+        "liveness must NOT stop an alloc already given a startup stop this tick; got {actions:?}"
     );
-    assert_eq!(
-        actions.len(),
-        1,
-        "exactly one action total (StartupProbeFailed only); got {actions:?}"
-    );
+    assert_eq!(actions.len(), 1, "exactly one action total (the startup stop); got {actions:?}");
     assert!(next.terminal_announced.contains(&aid(id)), "alloc recorded in terminal_announced");
 }
 
@@ -1766,6 +1695,7 @@ fn startup_probe_failed_suppresses_liveness_restart_same_tick() {
 fn stable_announced_suppresses_liveness_restart_same_tick() {
     let id = "svc-stable-liveness-0";
     let f = ServiceAllocFact {
+        stable_committed: false,
         latest_liveness_probe: Some(ProbeStatus::Fail {
             last_fail_reason: "liveness refused".to_string(),
         }),
@@ -1828,6 +1758,7 @@ fn stable_announced_suppresses_liveness_restart_same_tick() {
 fn liveness_resumes_after_prior_tick_stable_announcement() {
     let id = "svc-post-stable-0";
     let f = ServiceAllocFact {
+        stable_committed: false,
         latest_liveness_probe: Some(ProbeStatus::Fail {
             last_fail_reason: "liveness refused".to_string(),
         }),

@@ -60,7 +60,7 @@ fn node_id(name: &str) -> NodeId {
 /// Minimal `AllocationSpec` for `SimDriver::start` (the payload kind is
 /// irrelevant — `SimDriver` records supervision by `DriverType`, not payload).
 fn vm_spec(name: &str) -> AllocationSpec {
-    AllocationSpec {
+    AllocationSpec { declared_listeners: Vec::new(),
         alloc: aid(name),
         identity: SpiffeId::from_str("spiffe://overdrive.local/test/vm").expect("valid SpiffeId"),
         driver: DriverPayload::Vm(VmPayload {

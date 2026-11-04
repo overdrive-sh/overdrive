@@ -170,6 +170,7 @@ fn states_for_kind(
     let allocations =
         rows.into_iter().map(|row| (row.alloc_id.clone(), row)).collect::<BTreeMap<_, _>>();
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: Some(job.clone()),
         desired_to_stop: false,
@@ -186,6 +187,7 @@ fn states_for_kind(
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id,
         job: Some(job),
         desired_to_stop: false,

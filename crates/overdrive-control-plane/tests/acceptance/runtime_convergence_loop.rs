@@ -1056,6 +1056,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     nodes.insert(local_node.id.clone(), local_node);
 
     let desired = AnyState::WorkloadLifecycle(WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: WorkloadId::new("payments").expect("valid WorkloadId"),
         job: Some(job.clone()),
         desired_to_stop: false,
@@ -1075,6 +1076,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         },
     });
     let actual = AnyState::WorkloadLifecycle(WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: WorkloadId::new("payments").expect("valid WorkloadId"),
         job: None,
         desired_to_stop: false,

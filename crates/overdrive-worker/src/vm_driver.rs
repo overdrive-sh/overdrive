@@ -1038,6 +1038,10 @@ pub struct VmDriver {
     /// session arrives through it.
     beacon: Arc<BeaconIntake>,
     beacon_state: Arc<Mutex<BeaconState>>,
+    /// The host-side board of reported guest listeners (PR-1): the beacon
+    /// reader is its writer. SCAFFOLD: true — wired by DELIVER.
+    #[allow(dead_code)]
+    guest_listener_board: Arc<crate::GuestListenerBoard>,
     live: Arc<LiveMap>,
     exit_tx: mpsc::Sender<ExitEvent>,
     exit_rx: Arc<Mutex<Option<mpsc::Receiver<ExitEvent>>>>,
@@ -1066,6 +1070,7 @@ impl VmDriver {
         guest_network_exec: Arc<GuestNetworkExecGate>,
         layout: VmHostLayout,
         beacon: BeaconIntake,
+        guest_listener_board: Arc<crate::GuestListenerBoard>,
     ) -> Self {
         let (exit_tx, exit_rx) = mpsc::channel(EXIT_CHANNEL_CAPACITY);
         let cgroup_manager = CgroupManager::new(layout.cgroup_root.clone(), fs);
@@ -1080,6 +1085,7 @@ impl VmDriver {
             layout,
             beacon: Arc::new(beacon),
             beacon_state,
+            guest_listener_board,
             live: Arc::new(Mutex::new(BTreeMap::new())),
             exit_tx,
             exit_rx: Arc::new(Mutex::new(Some(exit_rx))),
@@ -2370,7 +2376,7 @@ mod tests {
                 NodeId::new("vm-driver-unit").expect("valid node ID"),
                 0,
             )) as Arc<dyn ObservationStore>,
-            Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+            Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(crate::GuestListenerBoard::new()),
         ))
     }
 
@@ -2648,7 +2654,7 @@ mod tests {
             &layout.clone_index_dir,
         );
         let run_dir = VmRunDir::for_alloc(&layout.run_dir_root, &alloc);
-        let spec = AllocationSpec {
+        let spec = AllocationSpec { declared_listeners: Vec::new(),
             alloc,
             identity: SpiffeId::new(
                 "spiffe://overdrive.local/workload/diagnostic-totality/alloc/x",
@@ -2682,7 +2688,7 @@ mod tests {
             test_probe_runner(),
             wiring.gate(),
             layout,
-            test_beacon_intake().await,
+            test_beacon_intake().await, Arc::new(crate::GuestListenerBoard::new()),
         )
         .with_guest_console_reader(reader.clone());
         (driver, spec, reader, terminate_calls, rootfs, run_dir)
@@ -2768,7 +2774,7 @@ mod tests {
             test_probe_runner(),
             wiring.gate(),
             layout.clone(),
-            test_beacon_intake().await,
+            test_beacon_intake().await, Arc::new(crate::GuestListenerBoard::new()),
         );
         let alloc = AllocationId::new("alloc-cleanup-partitions").expect("valid allocation");
         driver.live.lock().insert(alloc.clone(), VmSupervision::Starting);

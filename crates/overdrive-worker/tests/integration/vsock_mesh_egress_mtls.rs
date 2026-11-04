@@ -415,7 +415,7 @@ fn intercept_live_spec(alloc: &AllocationId, guest: GuestAddressing) -> Allocati
     let cid = GuestCid::new(GUEST_CID_BASE + u32::from(u16::from_be_bytes([high, low])))
         .expect("an in-range guest CID");
     let launch = LaunchToken::from_bytes([0x5a; 16]).expect("a non-zero launch token");
-    AllocationSpec {
+    AllocationSpec { declared_listeners: Vec::new(),
         alloc: alloc.clone(),
         identity: client_spiffe(),
         driver: DriverPayload::Vm(VmPayload {

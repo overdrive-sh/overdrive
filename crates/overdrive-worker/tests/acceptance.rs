@@ -28,6 +28,10 @@ mod acceptance {
     // for the ProbeRunner subsystem per ADR-0054. Slices 01 / 02 / 03.
     // RED scaffolds — production bodies land in DELIVER.
     mod probe_runner_http_outcome;
+    // D14 item 3 (S-53) — the guest-listener probe task's startup rows.
+    mod guest_listener_probe_rows;
+    // D13 item 10 (S-50, S-51, S-52) — the host-side board of reported listeners.
+    mod guest_listener_board;
     // GAP-7 closure — `ProbeRunner::start_alloc` spawns per-descriptor
     // supervised tick tasks. See
     // `.context/01-03-structural-gap-audit.md` GAP-7.

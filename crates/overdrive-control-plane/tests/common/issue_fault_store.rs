@@ -14,6 +14,9 @@
 //! * `fail_gateway_status_writes` / `fail_gateway_status_reads` fail only the
 //!   gateway status row write / point read; `fail_certified_key_status_reads`
 //!   fails only the certified-key status point read;
+//! * `fail_probe_reads` fails only `list_probe_results_for_alloc`, and
+//!   `probe_reads` records every allocation whose probe rows were read (so a
+//!   test can count the probe-row reads one hydration performs);
 //! * `status_point_read_count` counts the two point reads
 //!   `GET /v1/gateway/status` can issue (nothing else, so concurrent
 //!   reconciler or interest-router reads never perturb it);
@@ -49,6 +52,8 @@ pub struct IssueFaultStore {
     pub fail_gateway_status_writes: AtomicBool,
     pub fail_gateway_status_reads: AtomicBool,
     pub fail_certified_key_status_reads: AtomicBool,
+    pub fail_probe_reads: AtomicBool,
+    probe_reads: Mutex<Vec<AllocationId>>,
     status_point_reads: AtomicUsize,
     pub gateway_status_writes: Mutex<Vec<GatewayApplicationStatusRowV1>>,
 }
@@ -64,6 +69,8 @@ impl IssueFaultStore {
             fail_gateway_status_writes: AtomicBool::new(false),
             fail_gateway_status_reads: AtomicBool::new(false),
             fail_certified_key_status_reads: AtomicBool::new(false),
+            fail_probe_reads: AtomicBool::new(false),
+            probe_reads: Mutex::new(Vec::new()),
             status_point_reads: AtomicUsize::new(0),
             gateway_status_writes: Mutex::new(Vec::new()),
         })
@@ -73,6 +80,17 @@ impl IssueFaultStore {
     #[must_use]
     pub fn status_point_read_count(&self) -> usize {
         self.status_point_reads.load(Ordering::SeqCst)
+    }
+
+    /// Every allocation whose probe rows were read, in order.
+    #[must_use]
+    pub fn probe_reads(&self) -> Vec<AllocationId> {
+        self.probe_reads.lock().expect("probe reads").clone()
+    }
+
+    /// Forget the recorded probe reads.
+    pub fn clear_probe_reads(&self) {
+        self.probe_reads.lock().expect("probe reads").clear();
     }
 
     /// Every gateway status row offered to `write`, in order.
@@ -219,6 +237,10 @@ impl ObservationStore for IssueFaultStore {
         &self,
         alloc_id: &AllocationId,
     ) -> Result<Vec<overdrive_core::observation::ProbeResultRow>, ObservationStoreError> {
+        self.probe_reads.lock().expect("probe reads").push(alloc_id.clone());
+        if self.fail_probe_reads.load(Ordering::SeqCst) {
+            return Err(fault());
+        }
         self.inner.list_probe_results_for_alloc(alloc_id).await
     }
 

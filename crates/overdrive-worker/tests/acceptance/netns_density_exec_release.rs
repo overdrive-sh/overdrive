@@ -44,7 +44,7 @@ fn probe_runner() -> Arc<ProbeRunner> {
             NodeId::new("nd295-exec-release").expect("node id"),
             0,
         )) as Arc<dyn ObservationStore>,
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
     ))
 }
 
@@ -68,7 +68,7 @@ fn layout(tmp: &TempDir) -> VmHostLayout {
 }
 
 fn spec(tmp: &TempDir, alloc: &AllocationId, argument_bytes: usize) -> AllocationSpec {
-    AllocationSpec {
+    AllocationSpec { declared_listeners: Vec::new(),
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/nd295/alloc/exec")
             .expect("SPIFFE ID"),
@@ -104,7 +104,7 @@ async fn driver(
         probe_runner(),
         wiring.gate(),
         layout,
-        beacon.intake().await,
+        beacon.intake().await, Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
     (driver, beacon, vmm)
 }

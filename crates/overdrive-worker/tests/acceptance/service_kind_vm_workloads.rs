@@ -97,7 +97,7 @@ fn allocation_spec(
     workload_addr: Option<Ipv4Addr>,
     probe_descriptors: Vec<ProbeDescriptor>,
 ) -> AllocationSpec {
-    AllocationSpec {
+    AllocationSpec { declared_listeners: Vec::new(),
         alloc: AllocationId::new(alloc).expect("valid allocation ID"),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/vm-service/alloc/test")
             .expect("valid SPIFFE ID"),
@@ -130,7 +130,7 @@ async fn shared_vm_driver() -> (VmDriver, Arc<ProbeRunner>) {
         Arc::new(SimHttpProber::new()),
         Arc::clone(&clock) as Arc<dyn Clock>,
         observation_store,
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
     ));
     let layout = VmHostLayout {
         cgroup_root: PathBuf::from("/tmp/svm-hooks-cgroup"),
@@ -160,7 +160,7 @@ async fn shared_vm_driver() -> (VmDriver, Arc<ProbeRunner>) {
         Arc::clone(&probe_runner),
         wiring.gate(),
         layout,
-        intake,
+        intake, Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
     (driver, probe_runner)
 }
@@ -198,7 +198,7 @@ fn dial_runner(
         http as Arc<dyn HttpProber>,
         clock as Arc<dyn Clock>,
         observation_store as Arc<dyn ObservationStore>,
-        dial as Arc<dyn GuestStreamDial>,
+        dial as Arc<dyn GuestStreamDial>, Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
     (runner, tcp)
 }
@@ -338,7 +338,7 @@ async fn explicit_network_probe_hosts_are_preserved_for_vm() {
         Arc::clone(&http) as Arc<dyn HttpProber>,
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::clone(&observation_store) as Arc<dyn ObservationStore>,
-        Arc::clone(&dial) as Arc<dyn GuestStreamDial>,
+        Arc::clone(&dial) as Arc<dyn GuestStreamDial>, Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
     let descriptors = vec![
         http_descriptor(Some("health.internal"), 8080, "/healthz"),

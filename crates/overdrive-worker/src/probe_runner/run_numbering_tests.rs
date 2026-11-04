@@ -146,7 +146,7 @@ fn liveness_descriptor() -> ProbeDescriptor {
 }
 
 fn vm_spec(alloc: &AllocationId) -> AllocationSpec {
-    AllocationSpec {
+    AllocationSpec { declared_listeners: Vec::new(),
         alloc: alloc.clone(),
         identity: SpiffeId::for_allocation(&WorkloadId::new("probed").expect("workload"), alloc),
         driver: DriverPayload::Vm(VmPayload {
@@ -223,7 +223,7 @@ impl Probed {
             Arc::new(SimHttpProber::new()),
             Arc::clone(&clock) as Arc<dyn Clock>,
             Arc::clone(&obs) as Arc<dyn ObservationStore>,
-            Arc::clone(&dial) as Arc<dyn GuestStreamDial>,
+            Arc::clone(&dial) as Arc<dyn GuestStreamDial>, Arc::new(crate::GuestListenerBoard::new()),
         );
         let alloc = AllocationId::new("probed-0").expect("alloc");
         let _token = runner.start_alloc(&vm_spec(&alloc));
@@ -391,7 +391,7 @@ async fn start_with(
         Arc::new(SimHttpProber::new()),
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
-        Arc::clone(&dial) as Arc<dyn GuestStreamDial>,
+        Arc::clone(&dial) as Arc<dyn GuestStreamDial>, Arc::new(crate::GuestListenerBoard::new()),
     );
     let alloc = AllocationId::new("probed-0").expect("alloc");
     let mut spec = vm_spec(&alloc);

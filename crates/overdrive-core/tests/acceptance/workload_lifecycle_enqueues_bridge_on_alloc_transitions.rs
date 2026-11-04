@@ -178,6 +178,7 @@ fn start_allocation_branch_emits_service_and_svid_enqueues() {
     let workload_id = jid("payments");
     let nodes = one_node_map("local");
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: Some(make_job("payments")),
         desired_to_stop: false,
@@ -194,6 +195,7 @@ fn start_allocation_branch_emits_service_and_svid_enqueues() {
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: Some(make_job("payments")),
         desired_to_stop: false,
@@ -240,6 +242,7 @@ fn stop_allocation_branch_emits_service_and_svid_enqueues() {
         alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Running),
     );
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: Some(make_job("payments")),
         desired_to_stop: true,
@@ -256,6 +259,7 @@ fn stop_allocation_branch_emits_service_and_svid_enqueues() {
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: Some(make_job("payments")),
         desired_to_stop: false,
@@ -302,6 +306,7 @@ fn gc_stop_branch_emits_service_and_svid_enqueues() {
         alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Running),
     );
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: None,
         desired_to_stop: false,
@@ -318,6 +323,7 @@ fn gc_stop_branch_emits_service_and_svid_enqueues() {
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: None,
         desired_to_stop: false,
@@ -366,6 +372,7 @@ fn finalize_failed_branch_emits_service_and_svid_enqueues() {
     allocations.insert(aid("alloc-payments-0"), failed_row);
 
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: Some(make_job("payments")),
         desired_to_stop: false,
@@ -382,6 +389,7 @@ fn finalize_failed_branch_emits_service_and_svid_enqueues() {
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: Some(make_job("payments")),
         desired_to_stop: false,
@@ -437,6 +445,7 @@ fn converged_tick_emits_no_lifecycle_enqueue() {
         alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Running),
     );
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: Some(make_job("payments")),
         desired_to_stop: false,
@@ -453,6 +462,7 @@ fn converged_tick_emits_no_lifecycle_enqueue() {
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id,
         job: Some(make_job("payments")),
         desired_to_stop: false,
@@ -525,6 +535,7 @@ fn release_service_vip_only_tick_emits_no_lifecycle_enqueue() {
         terminal_operator_stopped_alloc("alloc-payments-0", "payments", "local"),
     );
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: None,
         desired_to_stop: false,
@@ -541,6 +552,7 @@ fn release_service_vip_only_tick_emits_no_lifecycle_enqueue() {
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id,
         job: None,
         desired_to_stop: false,
@@ -583,6 +595,7 @@ fn job_kind_start_allocation_emits_no_service_enqueue() {
     let workload_id = jid("batch");
     let nodes = one_node_map("local");
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: Some(make_job("batch")),
         desired_to_stop: false,
@@ -599,6 +612,7 @@ fn job_kind_start_allocation_emits_no_service_enqueue() {
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: Some(make_job("batch")),
         desired_to_stop: false,

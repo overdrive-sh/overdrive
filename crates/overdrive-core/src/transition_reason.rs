@@ -409,6 +409,15 @@ pub enum StoppedBy {
     /// additive-position discipline. A fieldless tail variant adds no
     /// layout size, so existing archived rows decode unchanged.
     LivenessProbe,
+    // SCAFFOLD: true — pinned shape (feature service-allocation-readiness-and-ending, D7 item 1)
+    /// A startup-probe failure (detected by `ServiceLifecycle`) stopped
+    /// this instance; the workload's intent still stands and
+    /// `WorkloadLifecycle` restarts it under its single budget;
+    /// restartable, not an intentional stop, not a platform reclaim.
+    ///
+    /// Appended after `LivenessProbe` (rkyv discriminant `6`); fieldless,
+    /// so existing archived rows decode unchanged.
+    StartupProbe,
 }
 
 #[cfg(test)]
@@ -905,6 +914,7 @@ impl TransitionReason {
                 "stopped (platform reclaimed)".to_owned()
             }
             Self::Stopped { by: StoppedBy::LivenessProbe } => "stopped (liveness probe)".to_owned(),
+            Self::Stopped { by: StoppedBy::StartupProbe } => "stopped (startup probe)".to_owned(),
 
             // Cause-class failures
             Self::DriverInternalError { detail } => {
@@ -1034,7 +1044,8 @@ pub fn is_platform_reclaimed(row: &AllocStatusRow) -> bool {
             | StoppedBy::Reconciler
             | StoppedBy::Process
             | StoppedBy::SystemGc
-            | StoppedBy::LivenessProbe => false,
+            | StoppedBy::LivenessProbe
+            | StoppedBy::StartupProbe => false,
             StoppedBy::PlatformReclaimed => true,
         }
     }

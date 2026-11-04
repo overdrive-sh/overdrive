@@ -269,6 +269,7 @@ fn states(
 ) -> (WorkloadLifecycleState, WorkloadLifecycleState) {
     let nodes = one_node_map("local");
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid(wid),
         job: Some(make_job(wid)),
         desired_to_stop: false,
@@ -285,6 +286,7 @@ fn states(
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid(wid),
         job: Some(make_job(wid)),
         desired_to_stop: false,

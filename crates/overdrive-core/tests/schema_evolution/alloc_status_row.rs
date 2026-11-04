@@ -14,7 +14,7 @@ use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRowEnvelope, AllocStatusRowLatest, AllocStatusRowV1, LogicalTimestamp,
 };
-use overdrive_core::transition_reason::TransitionReason;
+use overdrive_core::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
 
 use super::harness::{
     assert_discriminant_offset_triangulation, assert_envelope_v_roundtrip,
@@ -91,5 +91,62 @@ fn print_fixture_and_discriminant_offset() {
         {
             println!("GOLDEN_DISCRIMINANT_OFFSET_V1 = {offset}");
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// `StoppedBy` initiators in the archived `terminal` (feature
+// `service-allocation-readiness-and-ending`, D7 and F-4; S-25). `StoppedBy` is a
+// fieldless, tail-appended enum (`LivenessProbe` is discriminant 5, `StartupProbe`
+// 6), so neither initiator mints an envelope version: the fixtures below are two NEW
+// pins beside `FIXTURE_V1`, which is not touched. Each pins an `AllocStatusRow` whose
+// `terminal` is `Stopped { by }` and which decodes through `AllocStatusRowEnvelope`
+// and `into_latest()`.
+// ---------------------------------------------------------------------------
+
+/// The canonical payload with a `Stopped { by }` terminal and the matching reason.
+fn payload_stopped_by(by: StoppedBy) -> AllocStatusRowLatest {
+    AllocStatusRowV1 {
+        state: AllocState::Terminated,
+        reason: Some(TransitionReason::Stopped { by }),
+        terminal: Some(TerminalCondition::Stopped { by }),
+        ..canonical_v1_payload()
+    }
+}
+
+/// Generated from `AllocStatusRowEnvelope::latest(payload_stopped_by(StoppedBy::LivenessProbe))`.
+const FIXTURE_V1_STOPPED_BY_LIVENESS_PROBE: &str = "616c6c6f632d746573742d30317376632d7061796d656e747363757272656e7420563120616c6c6f636174696f6e20737461747573626f756e64656420564d4d207374646572720000000000000000008d000000b0ffffff8c000000b5ffffff6e6f64652d303031040000000000000001000000000000006e6f64652d303031010000000000000004050000000000000000000000000000000000000000000000000000000000000000000000000000010000009c00000065ffffff00000000010000000000000001050000000000000000000000000000000000000000000000000000000000000000000000000000010000009200000041ffffff0000000048ffffff00000000010000000000000000f15365000000000000000000000000010a630006000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+
+/// Generated from `AllocStatusRowEnvelope::latest(payload_stopped_by(StoppedBy::StartupProbe))`.
+const FIXTURE_V1_STOPPED_BY_STARTUP_PROBE: &str = "616c6c6f632d746573742d30317376632d7061796d656e747363757272656e7420563120616c6c6f636174696f6e20737461747573626f756e64656420564d4d207374646572720000000000000000008d000000b0ffffff8c000000b5ffffff6e6f64652d303031040000000000000001000000000000006e6f64652d303031010000000000000004060000000000000000000000000000000000000000000000000000000000000000000000000000010000009c00000065ffffff00000000010000000000000001060000000000000000000000000000000000000000000000000000000000000000000000000000010000009200000041ffffff0000000048ffffff00000000010000000000000000f15365000000000000000000000000010a630006000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+
+#[test]
+fn alloc_status_row_stopped_by_liveness_probe_decodes_through_current_envelope() {
+    assert_envelope_v_roundtrip::<AllocStatusRowEnvelope>(
+        FIXTURE_V1_STOPPED_BY_LIVENESS_PROBE,
+        &payload_stopped_by(StoppedBy::LivenessProbe),
+    );
+}
+
+#[test]
+fn alloc_status_row_stopped_by_startup_probe_decodes_through_current_envelope() {
+    assert_envelope_v_roundtrip::<AllocStatusRowEnvelope>(
+        FIXTURE_V1_STOPPED_BY_STARTUP_PROBE,
+        &payload_stopped_by(StoppedBy::StartupProbe),
+    );
+}
+
+#[test]
+#[ignore = "fixture regeneration tool — run on demand when the archived StoppedBy layout changes"]
+#[allow(clippy::print_stdout, reason = "fixture regeneration output")]
+fn print_stopped_by_fixtures() {
+    for (name, by) in [
+        ("FIXTURE_V1_STOPPED_BY_LIVENESS_PROBE", StoppedBy::LivenessProbe),
+        ("FIXTURE_V1_STOPPED_BY_STARTUP_PROBE", StoppedBy::StartupProbe),
+    ] {
+        let envelope = AllocStatusRowEnvelope::latest(payload_stopped_by(by));
+        let bytes =
+            rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("archive allocation status");
+        println!("{name} = \"{}\"", hex::encode(bytes.as_ref()));
     }
 }

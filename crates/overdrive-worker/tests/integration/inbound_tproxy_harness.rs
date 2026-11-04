@@ -185,6 +185,7 @@ pub fn build_inbound_spec(
             )
         }),
         service_ports,
+        declared_listeners: Vec::new(),
     }
 }
 

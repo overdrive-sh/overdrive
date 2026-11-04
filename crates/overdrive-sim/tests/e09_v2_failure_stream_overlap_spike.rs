@@ -172,7 +172,7 @@ async fn drive(overlap: bool) {
             Arc::new(SimHttpProber::new()),
             clock.clone(),
             obs.clone(),
-            guest_dial,
+            guest_dial, Arc::new(overdrive_worker::GuestListenerBoard::new()),
         ),
     });
     let mut runtime = ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).unwrap();
@@ -442,7 +442,7 @@ async fn start_stream(
     id: overdrive_core::WorkloadId,
     accepted: ServiceSubmitEvent,
 ) -> tokio::task::JoinHandle<ServiceSubmitEvent> {
-    let stream = build_service_stream(state.clone(), id, accepted);
+    let stream = build_service_stream(state.clone(), id, accepted, state.streaming_cap);
     let mut stream = Box::pin(stream);
     let accepted = stream.next().await.unwrap().unwrap();
     assert!(matches!(

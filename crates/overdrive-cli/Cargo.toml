@@ -120,6 +120,10 @@ toml.workspace                     = true
 
 [dev-dependencies]
 axum.workspace                = true
+# `test-util`: the request-timeout probe of the streaming submit lane runs on paused
+# virtual time (`start_paused`), so a 150 s deadline plus its 30 s envelope is observed
+# without a wall-clock wait (feature service-allocation-readiness-and-ending, S-36).
+tokio = { workspace = true, features = ["test-util"] }
 axum-server.workspace         = true
 async-trait.workspace         = true
 overdrive-control-plane.path = "../overdrive-control-plane"

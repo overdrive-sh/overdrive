@@ -441,6 +441,7 @@ fn vm_job_states(
         allocations.insert(r.alloc_id.clone(), r);
     }
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: Some(vm_job(workload_id)),
         desired_to_stop: false,
@@ -457,6 +458,7 @@ fn vm_job_states(
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: Some(vm_job(workload_id)),
         desired_to_stop: false,
@@ -660,6 +662,7 @@ proptest! {
             last_fail_reason: "tcp_refused".to_string(),
         });
         let mut fact = ServiceAllocFact {
+            stable_committed: false,
             alloc_id: alloc.clone(),
             state: AllocState::Terminated,
             started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),

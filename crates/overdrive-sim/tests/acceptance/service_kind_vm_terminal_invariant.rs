@@ -51,7 +51,7 @@ use overdrive_core::traits::observation_store::{
     AllocState, LagAwareSubscription, ObservationRow, ObservationStore, ObservationWrite,
     ServiceBackendRow, SubscriptionEvent,
 };
-use overdrive_core::transition_reason::{ServiceFailureReason, TerminalCondition};
+use overdrive_core::transition_reason::TerminalCondition;
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_core::{AllocationId, SpiffeId, WorkloadId};
 use overdrive_reconcilers::service_lifecycle::{
@@ -159,6 +159,7 @@ fn fact_for(
         ),
     ]);
     ServiceAllocFact {
+        stable_committed: false,
         alloc_id: alloc_id.clone(),
         state,
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
@@ -233,6 +234,7 @@ async fn hydrate_backend(state: &mut ServiceLifecycleState, store: &SimObservati
 /// becomes eligible again.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "pending DELIVER: D5 D6 D12 a Failed row yields no ServiceLifecycle action; eligibility keys on the committed Stable"]
 async fn terminal_state_wins_and_dead_vm_backend_never_returns_to_eligibility() {
     eprintln!("service-kind-vm terminal invariant seed={SEED}");
     let node = NodeId::new("svm-025717").expect("static node ID is valid");
@@ -250,7 +252,9 @@ async fn terminal_state_wins_and_dead_vm_backend_never_returns_to_eligibility() 
     ));
     let (in_flight_actions, in_flight_view) =
         reconciler.reconcile(&in_flight, &in_flight, &ServiceLifecycleView::default(), &tick(1, 1));
-    assert!(backend_row(&in_flight_actions).backends[0].healthy);
+    // D12: a startup-probed allocation is a backend only after its own Stable
+    // is committed; a failing startup probe has no committed Stable.
+    assert!(!backend_row(&in_flight_actions).backends[0].healthy);
     assert!(
         !in_flight_actions.iter().any(|action| matches!(action, Action::FinalizeFailed { .. }))
     );
@@ -263,20 +267,19 @@ async fn terminal_state_wins_and_dead_vm_backend_never_returns_to_eligibility() 
     in_flight.allocs.get_mut(&alloc_id).expect("allocation fact").state = AllocState::Failed;
     let (terminal_actions, terminal_view) =
         reconciler.reconcile(&in_flight, &in_flight, &in_flight_view, &tick(2, 3));
-    assert!(matches!(
-        terminal_actions.iter().find(|action| matches!(action, Action::FinalizeFailed { .. })),
-        Some(Action::FinalizeFailed {
-            alloc_id: action_alloc_id,
-            terminal: Some(TerminalCondition::ServiceFailed {
-                reason: ServiceFailureReason::StartupProbeFailed { attempts: 1, .. },
-            }),
-        }) if action_alloc_id == &alloc_id
-    ));
+    // D5 + D6: a `Failed` row yields no `ServiceLifecycle` action; the crash
+    // ending is `WorkloadLifecycle`'s alone.
+    assert!(
+        !terminal_actions.iter().any(|action| matches!(
+            action,
+            Action::FinalizeFailed { .. } | Action::StopAllocation { .. }
+        )),
+        "a Failed row yields no finalisation or stop from ServiceLifecycle: {terminal_actions:?}"
+    );
     assert!(
         !backend_row(&terminal_actions).backends.iter().any(|backend| backend.healthy),
         "terminal publication must not leave an eligible backend"
     );
-    assert!(terminal_view.terminal_announced.contains(&alloc_id));
     assert!(
         !terminal_actions.iter().any(|action| matches!(action, Action::RestartAllocation { .. }))
     );
@@ -293,7 +296,11 @@ async fn terminal_state_wins_and_dead_vm_backend_never_returns_to_eligibility() 
     );
     in_flight.allocs.insert(
         successor.clone(),
-        fact_for(&successor, AllocState::Running, ProbeStatus::Pass, ProbeStatus::Pass),
+        ServiceAllocFact {
+            // D12: the successor is eligible at its own committed Stable.
+            stable_committed: true,
+            ..fact_for(&successor, AllocState::Running, ProbeStatus::Pass, ProbeStatus::Pass)
+        },
     );
     let (replacement_actions, replacement_view) =
         reconciler.reconcile(&in_flight, &in_flight, &terminal_view, &tick(3, 4));
@@ -301,7 +308,6 @@ async fn terminal_state_wins_and_dead_vm_backend_never_returns_to_eligibility() 
     assert_eq!(replacement_row.backends.len(), 1);
     assert_eq!(replacement_row.backends[0].alloc, successor_identity);
     assert!(replacement_row.backends[0].healthy);
-    assert!(replacement_view.terminal_announced.contains(&alloc_id));
     assert!(!replacement_view.terminal_announced.contains(&successor));
     assert!(
         !replacement_actions
@@ -314,7 +320,6 @@ async fn terminal_state_wins_and_dead_vm_backend_never_returns_to_eligibility() 
     let (late_actions, late_view) =
         reconciler.reconcile(&in_flight, &in_flight, &replacement_view, &tick(4, 5));
     assert!(late_actions.is_empty(), "stable fresh-successor projection is idempotent");
-    assert!(late_view.terminal_announced.contains(&alloc_id));
     assert!(!late_view.terminal_announced.contains(&successor));
     let persisted = store
         .service_backends_rows(&ServiceId::new(42).expect("service id"))
@@ -540,7 +545,7 @@ async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
         Arc::new(SimHttpProber::new()),
         clock.clone(),
         obs.clone(),
-        Arc::clone(&guest_dial) as Arc<dyn overdrive_core::guest_transport::dial::GuestStreamDial>,
+        Arc::clone(&guest_dial) as Arc<dyn overdrive_core::guest_transport::dial::GuestStreamDial>, Arc::new(overdrive_worker::GuestListenerBoard::new()),
     ));
     let driver: Arc<dyn Driver> = Arc::new(ProbedVmDriver {
         inner: SimDriver::with_clock(DriverType::Vm, clock.clone()),

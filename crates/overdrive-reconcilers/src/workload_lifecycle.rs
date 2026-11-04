@@ -668,6 +668,7 @@ async fn hydrate_workload_lifecycle_desired(
     let service_spec_digest =
         if workload_kind == WorkloadKind::Service { intent_digest } else { None };
     Ok(WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job,
         desired_to_stop,
@@ -706,6 +707,7 @@ async fn hydrate_workload_lifecycle_actual(
     let service_spec_digest =
         if workload_kind == WorkloadKind::Service { intent_digest } else { None };
     Ok(WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: None,
         desired_to_stop: false,
@@ -1308,7 +1310,7 @@ impl WorkloadLifecycle {
                             alloc_id: alloc_id.clone(),
                             workload_id: job.id.clone(),
                             node_id,
-                            spec: AllocationSpec {
+                            spec: AllocationSpec { declared_listeners: Vec::new(),
                                 alloc: alloc_id.clone(),
                                 identity,
                                 driver,
@@ -1603,7 +1605,7 @@ fn restart_allocation_action(
     };
     Action::RestartAllocation {
         alloc_id: predecessor.alloc_id.clone(),
-        spec: AllocationSpec {
+        spec: AllocationSpec { declared_listeners: Vec::new(),
             alloc: successor_alloc_id,
             identity,
             driver,
@@ -1927,6 +1929,12 @@ pub struct WorkloadLifecycleState {
     /// (D-295-R8, ADR-0134). Placement passes its `occupancy` to the
     /// scheduler.
     pub guest_attachments: GuestAttachmentObservation,
+    // SCAFFOLD: true — pinned shape (D6 item 4, D7 item 3). Populated only by
+    // `hydrate_actual`; `hydrate_desired` leaves it `None`.
+    /// Status of the latest result row for role `Startup`, probe index 0, of the
+    /// workload's current attempt only, read only when that row's state is
+    /// `Failed` or `Terminated`; `None` when there is no such row or result row.
+    pub current_startup_probe: Option<overdrive_core::observation::ProbeStatus>,
 }
 
 /// Project the operator-declared probe descriptors of a
@@ -2044,7 +2052,7 @@ pub fn allocation_spec_for_live_intent(
             rootfs: PathBuf::from(rootfs),
         }),
     };
-    Some(AllocationSpec {
+    Some(AllocationSpec { declared_listeners: Vec::new(),
         alloc: alloc.clone(),
         identity: SpiffeId::for_allocation(workload_id, alloc),
         driver,
@@ -2375,6 +2383,7 @@ mod service_vip_release_emission_tests {
         declared: bool,
     ) -> WorkloadLifecycleState {
         WorkloadLifecycleState {
+            current_startup_probe: None,
             workload_id: wid(workload_id),
             job: if declared { Some(make_job(workload_id)) } else { None },
             // A stop intent retains the spec key, so under a stop both
@@ -2480,6 +2489,7 @@ mod service_vip_release_emission_tests {
     #[test]
     fn withdrawn_service_without_digest_emits_no_release() {
         let desired = WorkloadLifecycleState {
+            current_startup_probe: None,
             workload_id: wid("payments"),
             job: None,
             desired_to_stop: false,
@@ -2839,6 +2849,7 @@ mod eligibility_tests {
             }),
         };
         let desired = WorkloadLifecycleState {
+            current_startup_probe: None,
             workload_id: workload_id.clone(),
             job: Some(job),
             desired_to_stop: false,
@@ -2855,6 +2866,7 @@ mod eligibility_tests {
             },
         };
         let actual = WorkloadLifecycleState {
+            current_startup_probe: None,
             workload_id: workload_id.clone(),
             allocations: BTreeMap::from([(alloc_id.clone(), failed_row(&workload_id, &alloc_id))]),
             ..desired.clone()
@@ -3083,6 +3095,7 @@ mod netns_density_lifecycle_fixture {
         guest_attachments: &GuestAttachmentObservation,
     ) -> (WorkloadLifecycleState, WorkloadLifecycleState) {
         let desired = WorkloadLifecycleState {
+            current_startup_probe: None,
             workload_id: wid(),
             job: (intent != Intent::Deleted).then(job),
             desired_to_stop: intent == Intent::Stopped,
@@ -3096,6 +3109,7 @@ mod netns_density_lifecycle_fixture {
             guest_attachments: guest_attachments.clone(),
         };
         let actual = WorkloadLifecycleState {
+            current_startup_probe: None,
             job: None,
             desired_to_stop: false,
             allocations: rows.into_iter().map(|row| (row.alloc_id.clone(), row)).collect(),

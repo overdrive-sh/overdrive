@@ -991,7 +991,7 @@ fn filler_action(tag: &str, index: usize) -> Action {
         alloc_id: alloc.clone(),
         workload_id: WorkloadId::new(&workload).expect("workload id"),
         node_id: NodeId::new(NODE).expect("node id"),
-        spec: AllocationSpec {
+        spec: AllocationSpec { declared_listeners: Vec::new(),
             alloc,
             identity: SpiffeId::new(&format!(
                 "spiffe://overdrive.local/workload/{workload}/alloc/{workload}-0"

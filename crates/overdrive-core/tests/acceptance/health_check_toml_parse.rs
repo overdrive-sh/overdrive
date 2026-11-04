@@ -85,7 +85,7 @@ port = {port}
                 prop_assert_eq!(host.as_ref(), None::<&String>,
                     "host omitted in TOML → None (defaulted at probe time, not parse time)");
             }
-            other @ ProbeMechanic::Tcp { .. } => prop_assert!(false, "expected Http mechanic, got {:?}", other),
+            other @ (ProbeMechanic::Tcp { .. } | ProbeMechanic::GuestListeners) => prop_assert!(false, "expected Http mechanic, got {:?}", other),
         }
         prop_assert_eq!(p.timeout_seconds, 5);
         prop_assert_eq!(p.interval_seconds, 2);
@@ -453,7 +453,7 @@ memory_bytes = 134217728
                 prop_assert_eq!(host.as_str(), "0.0.0.0");
                 prop_assert_eq!(*probe_port, port);
             }
-            other @ ProbeMechanic::Http { .. } => prop_assert!(false, "expected Tcp mechanic, got {:?}", other),
+            other @ (ProbeMechanic::Http { .. } | ProbeMechanic::GuestListeners) => prop_assert!(false, "expected Tcp mechanic, got {:?}", other),
         }
         prop_assert!(p.inferred, "inferred default carries inferred: true");
         prop_assert_eq!(p.timeout_seconds, 5);
@@ -575,7 +575,7 @@ fn tcp_type_field_is_case_insensitive() {
         assert_eq!(svc.startup_probes.len(), 1);
         match &svc.startup_probes[0].mechanic {
             ProbeMechanic::Tcp { port, .. } => assert_eq!(*port, 9000),
-            other @ ProbeMechanic::Http { .. } => {
+            other @ (ProbeMechanic::Http { .. } | ProbeMechanic::GuestListeners) => {
                 panic!("expected Tcp mechanic for casing {casing:?}, got {other:?}")
             }
         }
@@ -655,7 +655,7 @@ proptest! {
         prop_assert_eq!(p.max_attempts, max_attempts);
         match &p.mechanic {
             ProbeMechanic::Tcp { port: pp, .. } => prop_assert_eq!(*pp, port),
-            other @ ProbeMechanic::Http { .. } => prop_assert!(false, "expected Tcp, got {:?}", other),
+            other @ (ProbeMechanic::Http { .. } | ProbeMechanic::GuestListeners) => prop_assert!(false, "expected Tcp, got {:?}", other),
         }
         prop_assert!(!p.inferred);
     }

@@ -62,6 +62,7 @@ WorkloadLifecycle(
             },
             leases: {},
         },
+        current_startup_probe: None,
     },
 )
 
@@ -137,5 +138,6 @@ WorkloadLifecycle(
             },
             leases: {},
         },
+        current_startup_probe: None,
     },
 )

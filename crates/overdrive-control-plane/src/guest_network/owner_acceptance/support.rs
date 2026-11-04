@@ -415,7 +415,7 @@ impl Composition {
     /// composition.
     pub(crate) async fn intercept_live(&self, lease: &Lease) {
         self.mtls.start_shared_owner().await.expect("the shared mTLS owner starts");
-        let spec = AllocationSpec {
+        let spec = AllocationSpec { declared_listeners: Vec::new(),
             identity: SpiffeId::for_allocation(
                 &WorkloadId::new("guest-flow-owner").expect("valid workload id"),
                 &lease.alloc,

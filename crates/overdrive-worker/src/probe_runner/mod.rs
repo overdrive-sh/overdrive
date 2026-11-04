@@ -102,6 +102,10 @@ pub struct ProbeRunner {
     /// production composition passes the guest-flow owner, tests pass
     /// `SimGuestStreamDial`.
     guest_dial: Arc<dyn GuestStreamDial>,
+    /// The read-only port over reported guest listeners (D13 item 10, PR-1).
+    /// SCAFFOLD: true — consumed by the guest-listener task (D14 item 3).
+    #[allow(dead_code)]
+    guest_listener_reports: Arc<dyn overdrive_core::traits::GuestListenerReports>,
     /// Per-alloc supervisors. `BTreeMap` per
     /// `.claude/rules/development.md` § "Ordered-collection choice"
     /// — the supervisor map is drained on `stop_alloc` and iterated
@@ -122,6 +126,7 @@ impl ProbeRunner {
         clock: Arc<dyn Clock>,
         observation_store: Arc<dyn ObservationStore>,
         guest_dial: Arc<dyn GuestStreamDial>,
+        guest_listener_reports: Arc<dyn overdrive_core::traits::GuestListenerReports>,
     ) -> Self {
         Self {
             tcp_prober,
@@ -129,6 +134,7 @@ impl ProbeRunner {
             clock,
             observation_store,
             guest_dial,
+            guest_listener_reports,
             supervisors: Mutex::new(BTreeMap::new()),
         }
     }
@@ -397,6 +403,25 @@ impl ProbeRunner {
         }
     }
 
+    /// Spawn the retained liveness tasks of a supervised allocation
+    /// whose liveness supervision has not started (D9, ADR-0261).
+    ///
+    /// Idempotent (a second call spawns nothing); a no-op for an
+    /// unknown, ended or already-stopped allocation; serialised with
+    /// [`Self::stop_alloc`] by the supervisor lock.
+    // SCAFFOLD: true — the exact shape D9 item 2 pins; DELIVER replaces the body.
+    #[allow(
+        clippy::panic,
+        clippy::missing_const_for_fn,
+        clippy::needless_pass_by_ref_mut,
+        clippy::unused_self,
+        reason = "RED scaffold pinned by D9 item 2 of service-allocation-readiness-and-ending"
+    )]
+    pub fn start_liveness(&self, alloc_id: &AllocationId) {
+        let _ = alloc_id;
+        panic!("RED scaffold: D9 ProbeRunner::start_liveness is not implemented");
+    }
+
     /// Whether `role` is still supervised for `alloc_id`. Inspection
     /// surface for tests and operator diagnostics, beside
     /// [`Self::active_alloc_count`].
@@ -462,6 +487,8 @@ fn project_network_probe_target(descriptor: &mut ProbeDescriptor, spec: &Allocat
     let needs_guest_address = match &descriptor.mechanic {
         ProbeMechanic::Tcp { host, .. } => host == "0.0.0.0",
         ProbeMechanic::Http { host, .. } => host.is_none() || host.as_deref() == Some("0.0.0.0"),
+        // SCAFFOLD: true — the guest-listener task holds no dial (D14 item 3).
+        ProbeMechanic::GuestListeners => false,
     };
     if !needs_guest_address {
         return;
@@ -485,6 +512,7 @@ fn project_network_probe_target(descriptor: &mut ProbeDescriptor, spec: &Allocat
     match &mut descriptor.mechanic {
         ProbeMechanic::Tcp { host, .. } => *host = workload_addr,
         ProbeMechanic::Http { host, .. } => *host = Some(workload_addr),
+        ProbeMechanic::GuestListeners => {}
     }
 }
 
@@ -610,6 +638,10 @@ async fn probe_tick(
                         }
                     })?,
                 }
+            }
+            // SCAFFOLD: true — the guest-listener task (D14 item 3) holds no dial.
+            ProbeMechanic::GuestListeners => {
+                panic!("RED scaffold: D14 guest-listener task replaces probe_tick for GuestListeners")
             }
         };
         Ok(Some(outcome))

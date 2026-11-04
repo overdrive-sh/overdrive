@@ -55,6 +55,7 @@ pub mod gateway;
 // GH #295 D-295-R16 — `SimGuestDnsFactory` / `SimGuestDns`, the socket-free
 // doubles of the control-plane shared-gateway DNS owner port.
 pub mod guest_dns;
+pub mod guest_listener_reports;
 // GH #295 — `SimGuestStreamDial`, the scripted double of the guest-flow
 // owner's `GuestStreamDial` driving port (leg-S, VM probe runner).
 pub mod guest_network;

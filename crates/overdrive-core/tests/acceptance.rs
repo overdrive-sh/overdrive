@@ -234,6 +234,12 @@ mod acceptance {
     // can kill flipped operators and dropped match arms.
     mod service_lifecycle_reconcile_branches;
 
+    // service-allocation-readiness-and-ending (restart area): D5/D7/D8/D12 startup stop and
+    // backend eligibility on `ServiceLifecycleReconciler::reconcile`; D6/D7/B3 ceiling
+    // classification on `WorkloadLifecycle::reconcile`.
+    mod service_lifecycle_startup_stop;
+    mod workload_lifecycle_ceiling_classification;
+
     // service-health-check-probes — GAP-6 corrective patch.
     // Probe descriptors persist end-to-end through the parser →
     // wire (ServiceSpecInput) → intent (WorkloadIntent::Service /
@@ -370,4 +376,13 @@ mod acceptance {
     // netns-density-295 probe-run counting (R5-PROBE-V2) — ProbeRunSeq /
     // SameStatusRuns newtype completeness and the V1 -> V2 up-conversion.
     mod probe_run_seq;
+
+    // service-allocation-readiness-and-ending D7 item 1 (S-25) — the `StoppedBy::StartupProbe`
+    // initiator's serde and rkyv forms and its exhaustive-match arms.
+    mod stopped_by_startup_probe_format;
+    // service-allocation-readiness-and-ending D14 item 2 (S-55) — the TCP view is a
+    // filter of the declared listener set.
+    mod declared_listeners_tcp_view;
+    // D13 item 2 — the `LISTEN <tcp|udp> <port>` beacon line.
+    mod beacon_listen_wire_form;
 }

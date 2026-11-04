@@ -67,6 +67,13 @@ pub enum ProbeMechanic {
     /// HTTP only per C6. Method = GET only per US-02. 3xx → Fail
     /// per US-02 AC (no redirect-follow).
     Http { path: String, port: u16, host: Option<String> },
+    /// The platform's default startup gate for a Service: every declared
+    /// listener has been reported open by the guest (D14 item 1, ADR-0269).
+    /// Fieldless; valid only as the sole startup descriptor of a Service;
+    /// cannot be written in TOML.
+    ///
+    /// SCAFFOLD: true — pinned shape (`feature-delta.md` § D14 item 1).
+    GuestListeners,
 }
 
 impl ProbeMechanic {
@@ -101,6 +108,7 @@ impl ProbeMechanic {
                     return Err("tcp probe `port` must be in 1..=65535".to_owned());
                 }
             }
+            Self::GuestListeners => {}
         }
         Ok(())
     }

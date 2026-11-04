@@ -105,6 +105,7 @@ fn dispatch_routes_workload_lifecycle_triple_to_workload_lifecycle_view() {
     nodes.insert(local.id.clone(), local);
 
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: WorkloadId::new("test").expect("valid WorkloadId"),
         job: None,
         desired_to_stop: false,
@@ -121,6 +122,7 @@ fn dispatch_routes_workload_lifecycle_triple_to_workload_lifecycle_view() {
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: WorkloadId::new("test").expect("valid WorkloadId"),
         job: None,
         desired_to_stop: false,

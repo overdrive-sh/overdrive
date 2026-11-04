@@ -631,10 +631,14 @@ pub async fn submit_workload(
                     key.as_str().to_owned(),
                     outcome,
                 );
+                // SCAFFOLD: true — D10 item 6 passes `progress_deadline(..)`; until it
+                // lands the stream's cap stays `streaming_cap`.
+                let progress_deadline = state.streaming_cap;
                 let stream = crate::streaming::build_service_stream(
                     state.clone(),
                     workload_id.clone(),
                     accepted,
+                    progress_deadline,
                 );
                 Body::from_stream(stream)
             }

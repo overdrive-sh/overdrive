@@ -340,7 +340,7 @@ fn fixture_ids(seed: u64) -> Result<(AllocationId, WorkloadId, NodeId), String> 
 }
 
 fn vm_spec(alloc: &AllocationId, workload: &WorkloadId) -> AllocationSpec {
-    AllocationSpec {
+    AllocationSpec { declared_listeners: Vec::new(),
         alloc: alloc.clone(),
         identity: SpiffeId::for_allocation(workload, alloc),
         driver: DriverPayload::Vm(VmPayload {

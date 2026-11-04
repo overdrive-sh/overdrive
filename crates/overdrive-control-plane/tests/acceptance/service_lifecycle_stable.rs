@@ -32,7 +32,7 @@ use overdrive_core::observation::{
 };
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
 use overdrive_core::traits::observation_store::AllocState;
-use overdrive_core::transition_reason::{ServiceFailureReason, TerminalCondition};
+use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_reconcilers::service_lifecycle::{
     ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
@@ -55,6 +55,7 @@ fn alloc(id: &str) -> AllocationId {
 
 fn fact_running_with_pass(alloc_id: AllocationId, started_at_unix_ms: u64) -> ServiceAllocFact {
     ServiceAllocFact {
+        stable_committed: false,
         alloc_id,
         state: AllocState::Running,
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_millis(
@@ -91,6 +92,7 @@ fn fact_failed_within_deadline(
     exit_code: i32,
 ) -> ServiceAllocFact {
     ServiceAllocFact {
+        stable_committed: false,
         alloc_id,
         state: AllocState::Failed,
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_millis(
@@ -220,38 +222,6 @@ fn given_stable_already_announced_when_reconcile_then_emits_no_actions() {
     assert!(next_view.stable_announced.contains(&alloc_id));
 }
 
-/// S-SHCP-RECON-04 (US-08 / K1 — closes RCA-A) — alloc Failed
-/// terminal row arrives within startup_deadline AND no Pass probe
-/// result yet → reconciler emits `Action::FinalizeFailed { terminal:
-/// Some(ServiceFailed { reason: EarlyExit { exit_code } }) }`.
-/// CONTRACT_SHAPE: bounded-change.
-#[test]
-fn given_alloc_exits_within_deadline_no_pass_probe_when_reconcile_then_emits_failed_early_exit() {
-    let reconciler = ServiceLifecycleReconciler::new();
-    let alloc_id = alloc("coinflip-0");
-    let actual = state_with(vec![fact_failed_within_deadline(alloc_id.clone(), 1000, 1)]);
-    let desired = actual.clone();
-    let view = ServiceLifecycleView::default();
-    // 30ms after start — well within 60s deadline
-    let tick = tick_at(1030);
-
-    let (actions, _next_view) = reconciler.reconcile(&desired, &actual, &view, &tick);
-
-    assert_eq!(actions.len(), 1);
-    match &actions[0] {
-        Action::FinalizeFailed {
-            terminal:
-                Some(TerminalCondition::ServiceFailed {
-                    reason: ServiceFailureReason::EarlyExit { exit_code },
-                }),
-            ..
-        } => {
-            assert_eq!(*exit_code, Some(1));
-        }
-        other => panic!("expected EarlyExit ServiceFailed, got {other:?}"),
-    }
-}
-
 /// S-SHCP-RECON-05 (US-08 AC — exit after Stable is NOT EarlyExit)
 /// — alloc Failed row arrives AFTER Stable announced →
 /// reconciler does NOT emit EarlyExit; dedup applies.
@@ -273,44 +243,14 @@ fn given_alloc_exits_after_stable_when_reconcile_then_does_not_emit_early_exit()
     assert!(actions.is_empty(), "exit after Stable must NOT emit EarlyExit; got {actions:?}");
 }
 
-/// S-SHCP-RECON-06 (US-08 AC — exit 0 within deadline is still
-/// EarlyExit) — alloc exits with code 0 within startup_deadline →
-/// reconciler emits `ServiceFailed { reason: EarlyExit { exit_code: 0 } }`
-/// (Service kind expects long-lived; exit 0 is failure).
-/// CONTRACT_SHAPE: bounded-change.
-#[test]
-fn given_alloc_exits_zero_within_deadline_when_reconcile_then_emits_failed_early_exit_zero() {
-    let reconciler = ServiceLifecycleReconciler::new();
-    let alloc_id = alloc("payments-0");
-    let actual = state_with(vec![fact_failed_within_deadline(alloc_id.clone(), 1000, 0)]);
-    let desired = actual.clone();
-    let view = ServiceLifecycleView::default();
-    let tick = tick_at(1100);
-
-    let (actions, _next_view) = reconciler.reconcile(&desired, &actual, &view, &tick);
-
-    assert_eq!(actions.len(), 1);
-    match &actions[0] {
-        Action::FinalizeFailed {
-            terminal:
-                Some(TerminalCondition::ServiceFailed {
-                    reason: ServiceFailureReason::EarlyExit { exit_code },
-                }),
-            ..
-        } => {
-            assert_eq!(*exit_code, Some(0), "exit 0 within deadline is still EarlyExit");
-        }
-        other => panic!("expected EarlyExit(0) ServiceFailed, got {other:?}"),
-    }
-}
-
 /// S-SHCP-RECON-03 (US-01 / K1 sad path) — startup probe never
 /// passes within `startup_deadline` AND attempts >= max_attempts
 /// → reconciler emits `ServiceFailed { reason: StartupProbeFailed
 /// { probe_idx, last_fail, attempts } }`.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-fn given_startup_probe_exhausts_attempts_when_reconcile_then_emits_failed_startup_probe_failed() {
+#[ignore = "pending DELIVER: D7 a startup-probe failure stops the allocation instead of finalising it"]
+fn given_startup_probe_exhausts_attempts_when_reconcile_then_emits_startup_stop() {
     let reconciler = ServiceLifecycleReconciler::new();
     let alloc_id = alloc("never-binds-0");
     let mut fact = fact_running_with_pass(alloc_id.clone(), 1000);
@@ -338,18 +278,10 @@ fn given_startup_probe_exhausts_attempts_when_reconcile_then_emits_failed_startu
 
     assert_eq!(actions.len(), 1);
     match &actions[0] {
-        Action::FinalizeFailed {
-            terminal:
-                Some(TerminalCondition::ServiceFailed {
-                    reason:
-                        ServiceFailureReason::StartupProbeFailed { probe_idx, last_fail, attempts },
-                }),
-            ..
-        } => {
-            assert_eq!(*probe_idx, 0);
-            assert_eq!(last_fail, "connection refused");
-            assert_eq!(*attempts, 3);
-        }
-        other => panic!("expected StartupProbeFailed ServiceFailed, got {other:?}"),
+        Action::StopAllocation {
+            alloc_id: stopped,
+            terminal: Some(TerminalCondition::Stopped { by: StoppedBy::StartupProbe }),
+        } => assert_eq!(stopped, &alloc_id),
+        other => panic!("expected StopAllocation {{ Stopped {{ StartupProbe }} }}, got {other:?}"),
     }
 }

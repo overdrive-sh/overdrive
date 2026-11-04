@@ -420,7 +420,7 @@ async fn release_supervision_fires_on_no_prior_row_arm() {
     // after `obs.write(Running)` resolves `Ok`; this test never writes
     // that row at all, which is the whole point of `NoPriorRow`.
     let alloc = AllocationId::new("alloc-s-vm-77-noprior-0").expect("valid id");
-    let spec = overdrive_core::traits::driver::AllocationSpec {
+    let spec = overdrive_core::traits::driver::AllocationSpec { declared_listeners: Vec::new(),
         alloc: alloc.clone(),
         identity: overdrive_core::id::SpiffeId::from_str("spiffe://overdrive.local/test/wl")
             .expect("valid SpiffeId"),

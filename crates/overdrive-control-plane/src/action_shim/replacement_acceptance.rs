@@ -376,7 +376,7 @@ fn successor_spec(
     workload: &WorkloadId,
     successor: &AllocationId,
 ) -> AllocationSpec {
-    AllocationSpec {
+    AllocationSpec { declared_listeners: Vec::new(),
         alloc: successor.clone(),
         identity: SpiffeId::for_allocation(workload, successor),
         driver: payload(driver_type),

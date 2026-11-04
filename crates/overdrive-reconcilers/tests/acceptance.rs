@@ -28,4 +28,12 @@ mod acceptance {
     // netns-density-295 R5-PROBE-COUNT — ServiceLifecycle counts probe runs
     // from the row's same_status_runs and acts once per crossed run.
     mod probe_run_count;
+
+    // service-allocation-readiness-and-ending D8 item 1 / R2-2 (S-38) — CBOR evolution of the
+    // startup-stop retry memory and the removed `stable_announced` key.
+    mod startup_last_acted_run_evolution;
+
+    // service-allocation-readiness-and-ending D10 item 5 (S-34) — the startup deadline
+    // derivation extracted from `spec_facts_for_service`.
+    mod startup_deadline;
 }

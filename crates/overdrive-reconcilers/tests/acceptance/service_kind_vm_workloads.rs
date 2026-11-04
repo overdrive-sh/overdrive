@@ -54,6 +54,7 @@ fn running_fact(
     max_attempts: u32,
 ) -> ServiceAllocFact {
     ServiceAllocFact {
+        stable_committed: false,
         alloc_id,
         state: AllocState::Running,
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(10))),
@@ -451,6 +452,7 @@ fn workload_states(
     let workload_id = row.workload_id.clone();
     let alloc_id = row.alloc_id.clone();
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: workload_id.clone(),
         job: Some(service_job(&workload_id)),
         desired_to_stop: false,
@@ -467,6 +469,7 @@ fn workload_states(
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id,
         job: None,
         desired_to_stop: false,

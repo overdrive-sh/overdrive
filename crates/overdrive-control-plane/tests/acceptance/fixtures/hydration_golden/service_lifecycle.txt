@@ -79,6 +79,7 @@ ServiceLifecycle(
                         ),
                     },
                 },
+                stable_committed: false,
             },
         },
         service_dataplane: {},

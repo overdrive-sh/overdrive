@@ -154,6 +154,7 @@ fn service_state_with_terminal_alloc(
     );
 
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid(workload_id),
         job: if declared { Some(make_job(workload_id)) } else { None },
         // A stop intent retains the spec key, so a declared-but-stopped
@@ -172,6 +173,7 @@ fn service_state_with_terminal_alloc(
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid(workload_id),
         job: Some(make_job(workload_id)),
         desired_to_stop: false,
@@ -318,6 +320,7 @@ fn service_release_correlation_uses_workload_id_not_unknown() {
     );
 
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("web-api"),
         job: None,
         desired_to_stop: true,
@@ -334,6 +337,7 @@ fn service_release_correlation_uses_workload_id_not_unknown() {
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("web-api"),
         job: None,
         desired_to_stop: false,

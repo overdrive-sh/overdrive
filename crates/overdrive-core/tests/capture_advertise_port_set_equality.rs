@@ -102,6 +102,7 @@ fn advertise_port_set(svc: &Service) -> BTreeSet<NonZeroU16> {
     state.allocs = BTreeMap::from([(
         alloc.clone(),
         ServiceAllocFact {
+            stable_committed: false,
             alloc_id: alloc.clone(),
             state: AllocState::Running,
             started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(0))),

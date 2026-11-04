@@ -92,6 +92,7 @@ mod integration {
     // kernel-state lock, shared-infra scrub, chain dump, and `AllocationSpec`
     // builder all three inbound-rule scenarios drive `start_alloc` through.
     mod inbound_rule_keys_declared_port;
+    mod inbound_rules_only_for_tcp_declared_listeners;
     mod inbound_rules_per_listener;
     mod inbound_tproxy_harness;
     mod job_kind_installs_no_inbound_rule;

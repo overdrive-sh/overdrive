@@ -21,6 +21,7 @@
 // listener over the core `BeaconIo` port.
 pub mod beacon_intake;
 pub mod cgroup_manager;
+pub mod guest_listener_board;
 // transparent-mtls-host-socket (D-MTLS-14, GH #26; step 06-02, SD-1(a)) —
 // the worker's intercept-install + leg-acquire role: the IP_TRANSPARENT
 // leg-C listener, the inbound nft-TPROXY install (+ ip rule/route
@@ -49,6 +50,7 @@ pub mod vm_driver;
 
 pub use beacon_intake::{BeaconIntake, BeaconIntakeError};
 pub use cgroup_manager::{CgroupManager, CgroupPath};
+pub use guest_listener_board::GuestListenerBoard;
 pub use node_health::{NodeConfig, NodeHealthWriteError};
 pub use vm_driver::{BeaconObservation, VmDriver, VmHostLayout};
 

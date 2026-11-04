@@ -170,6 +170,7 @@ fn at_01_service_kind_projects_startup_probes_into_start_allocation_spec() {
     ];
 
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("svc"),
         job: Some(make_job("svc")),
         desired_to_stop: false,
@@ -186,6 +187,7 @@ fn at_01_service_kind_projects_startup_probes_into_start_allocation_spec() {
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("svc"),
         job: Some(make_job("svc")),
         desired_to_stop: false,
@@ -255,6 +257,7 @@ fn at_02_job_kind_yields_empty_probe_descriptors_in_start_allocation_spec() {
     let nodes = one_node_map("local");
 
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("job"),
         job: Some(make_job("job")),
         desired_to_stop: false,
@@ -274,6 +277,7 @@ fn at_02_job_kind_yields_empty_probe_descriptors_in_start_allocation_spec() {
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("job"),
         job: Some(make_job("job")),
         desired_to_stop: false,
@@ -332,6 +336,7 @@ fn at_03_restart_allocation_arm_projects_probe_descriptors_identically() {
     allocations.insert(aid("alloc-svc-0"), alloc_failed_with_budget("alloc-svc-0", "svc", "local"));
 
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("svc"),
         job: Some(make_job("svc")),
         desired_to_stop: false,
@@ -348,6 +353,7 @@ fn at_03_restart_allocation_arm_projects_probe_descriptors_identically() {
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("svc"),
         job: Some(make_job("svc")),
         desired_to_stop: false,
@@ -437,6 +443,7 @@ fn at_04_canonical_role_order_startup_readiness_liveness_is_preserved() {
     //    clones the projected vec into `spec.probe_descriptors` in the
     //    SAME canonical order.
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("svc"),
         job: Some(make_job("svc")),
         desired_to_stop: false,
@@ -453,6 +460,7 @@ fn at_04_canonical_role_order_startup_readiness_liveness_is_preserved() {
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("svc"),
         job: Some(make_job("svc")),
         desired_to_stop: false,

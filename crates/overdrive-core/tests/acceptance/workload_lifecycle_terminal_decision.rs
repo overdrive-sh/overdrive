@@ -164,6 +164,7 @@ fn workload_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceil
     );
     let nodes = one_node_map("local");
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
@@ -180,6 +181,7 @@ fn workload_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceil
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
@@ -242,6 +244,7 @@ fn workload_lifecycle_stamps_stopped_terminal_when_operator_stop_converges() {
         alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Running),
     );
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: true,
@@ -258,6 +261,7 @@ fn workload_lifecycle_stamps_stopped_terminal_when_operator_stop_converges() {
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
@@ -303,6 +307,7 @@ fn workload_lifecycle_stamps_stopped_terminal_when_operator_stop_converges() {
 fn workload_lifecycle_emits_no_terminal_for_pending_to_running() {
     let nodes = one_node_map("local");
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
@@ -319,6 +324,7 @@ fn workload_lifecycle_emits_no_terminal_for_pending_to_running() {
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
@@ -370,6 +376,7 @@ fn workload_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
     );
     let nodes = one_node_map("local");
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
@@ -386,6 +393,7 @@ fn workload_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
@@ -482,6 +490,7 @@ proptest! {
             alloc_with_state("alloc-payments-0", "payments", "local", alloc_state),
         );
         let desired = WorkloadLifecycleState {
+            current_startup_probe: None,
             workload_id: jid("payments"),
             job: Some(make_job("payments")),
             desired_to_stop,
@@ -495,6 +504,7 @@ proptest! {
             guest_attachments: GuestAttachmentObservation { occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 }, leases: BTreeMap::new() },
         };
         let actual = WorkloadLifecycleState {
+            current_startup_probe: None,
             workload_id: jid("payments"),
             job: Some(make_job("payments")),
             desired_to_stop: false,
@@ -696,6 +706,7 @@ fn states_with_actual_allocs(
 ) -> (WorkloadLifecycleState, WorkloadLifecycleState) {
     let nodes = one_node_map("local");
     let desired = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,
@@ -712,6 +723,7 @@ fn states_with_actual_allocs(
         },
     };
     let actual = WorkloadLifecycleState {
+        current_startup_probe: None,
         workload_id: jid("payments"),
         job: Some(make_job("payments")),
         desired_to_stop: false,

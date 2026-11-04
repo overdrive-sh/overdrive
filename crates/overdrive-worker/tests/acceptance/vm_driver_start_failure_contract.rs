@@ -63,7 +63,7 @@ fn probe_runner() -> Arc<ProbeRunner> {
             NodeId::new("vm-start-failure").expect("valid node ID"),
             0,
         )) as Arc<dyn ObservationStore>,
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
     ))
 }
 
@@ -114,7 +114,7 @@ fn build_layout(tmp: &TempDir) -> VmHostLayout {
 /// `GUEST_CID_BASE + cid_offset` — one launch. A restart or a duplicate
 /// request is a second launch: build a second spec for it.
 fn build_spec(alloc: &AllocationId, tmp: &TempDir, cid_offset: u32) -> AllocationSpec {
-    AllocationSpec {
+    AllocationSpec { declared_listeners: Vec::new(),
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/vm-fail/alloc/x")
             .expect("valid spiffe id"),
@@ -160,7 +160,7 @@ async fn build_driver(
         probe_runner(),
         wiring.gate(),
         layout,
-        beacon.intake().await,
+        beacon.intake().await, Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
     (driver, clock, cgroup_fs, beacon)
 }
